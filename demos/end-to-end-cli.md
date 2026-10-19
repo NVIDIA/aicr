@@ -4,10 +4,11 @@
 
 ## Setup
 
-Clean up prior state:
+Clean up prior state and set the registry owner the OCI steps push to:
 
 ```shell
-rm -rf ./bundle ./oci-refs recipe.yaml /tmp/aicr-unpacked
+rm -rf ./bundle ./oci-refs ./my-data recipe.yaml /tmp/aicr-unpacked
+GHCR_OWNER=my-github-org   # a ghcr.io owner you can push to
 ```
 
 ## Commands
@@ -48,31 +49,37 @@ aicr recipe --service eks --accelerator h100 --os ubuntu \
 
 ![data flow](images/recipe.png)
 
+The API examples below talk to a self-hosted `aicrd`. Start one first, with an
+accelerator allowlist for the allowlist example:
+
+```shell
+docker run -p 8080:8080 \
+  -e AICR_ALLOWED_ACCELERATORS=h100,gb200 \
+  ghcr.io/nvidia/aicrd:latest
+```
+
 Recipe from API (GET):
 
 ```shell
-curl -s "https://aicr-demo.dgxc.io/v1/recipe?service=eks&accelerator=gb200&intent=training" | jq .
+curl -s "http://localhost:8080/v1/recipe?service=eks&accelerator=gb200&intent=training" | jq .
 ```
 
 Recipe from API (POST with criteria body):
 
 ```shell
-curl -s -X POST "https://aicr-demo.dgxc.io/v1/recipe" \
+curl -s -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/x-yaml" \
-  -d 'kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
-metadata:
-  name: gb200-training
-spec:
+  -d 'criteria:
   service: eks
   accelerator: gb200
   intent: training' | jq .
 ```
 
-Allowed list support in self-hosted API:
+Allowlist support in self-hosted API (`l40` is not in
+`AICR_ALLOWED_ACCELERATORS`, so this returns HTTP 400 with the allowed values):
 
 ```shell
-curl -s "https://aicr-demo.dgxc.io/v1/recipe?service=eks&accelerator=l40&intent=training" | jq .
+curl -s "http://localhost:8080/v1/recipe?service=eks&accelerator=l40&intent=training" | jq .
 ```
 
 ## Snapshot
@@ -112,8 +119,8 @@ Validate Recipe:
 ```shell
 aicr validate \
   --recipe recipe.yaml \
-  --require-gpu \
-  --snapshot cm://gpu-operator/aicr-snapshot | yq .
+  --snapshot cm://gpu-operator/aicr-snapshot \
+  --no-cluster | yq .
 ```
 
 ## Bundle
@@ -132,9 +139,14 @@ aicr bundle \
 Bundle from Recipe using API:
 
 ```shell
-curl -s "https://aicr-demo.dgxc.io/v1/recipe?service=eks&accelerator=h100&intent=training" | \
-  curl -X POST "https://aicr-demo.dgxc.io/v1/bundle?deployer=argocd" \
-    -H "Content-Type: application/json" -d @- -o bundle.zip
+# Sequential rather than piped: -f stops on an HTTP error so a 4xx recipe body
+# is never posted, and each request stays individually replayable by the docs
+# gate in pkg/server/docs_examples_test.go.
+set -eu
+curl -fsS -o recipe.json \
+  "http://localhost:8080/v1/recipe?service=eks&accelerator=h100&intent=training"
+curl -fsS -X POST "http://localhost:8080/v1/bundle?deployer=argocd" \
+  -H "Content-Type: application/json" -d @recipe.json -o bundle.zip
 ```
 
 Navigate into the bundle:
@@ -174,29 +186,33 @@ Bundle as an OCI image:
 mkdir -p ./oci-refs && chmod 0700 ./oci-refs
 aicr bundle \
   --recipe recipe.yaml \
-  --output oci://ghcr.io/nvidia/aicr-bundle-example \
+  --output "oci://ghcr.io/${GHCR_OWNER}/aicr-bundle-example" \
   --deployer argocd \
   --image-refs ./oci-refs/bundle.digest
 ```
 
 `--image-refs` is OCI-output-only. Its target must have an existing real parent
 directory and be outside, and not aliased to, the planned or completed bundle.
-AICR writes the reference file with mode `0600` and replaces its directory
-entry with an anchored same-directory rename. Validation plus rename is not an
-atomic identity-conditioned operation, so do not allow concurrent mutation of
-the parent directory.
+For an ordinary target like this one, AICR writes the reference file with mode
+`0600` and replaces its directory entry with an anchored same-directory rename.
+Validation plus rename is not an atomic identity-conditioned operation, so do
+not allow concurrent mutation of the parent directory. A target on a different
+device from its directory, such as a Kubernetes Job's default
+termination-message file, is written in place instead.
 
 Review manifest:
 
 ```shell
-crane manifest "ghcr.io/nvidia/aicr-bundle-example@$(cat ./oci-refs/bundle.digest)" | jq .
+crane manifest "ghcr.io/${GHCR_OWNER}/aicr-bundle-example@$(cat ./oci-refs/bundle.digest)" | jq .
 ```
 
 ## Validate Cluster
 
+Against the bundle's `recipe.yaml`, the recipe the bundle deployed:
+
 ```shell
 aicr validate \
-  --recipe recipe.yaml \
+  --recipe ./bundle/recipe.yaml \
   --require-gpu \
   --phase all
 ```
@@ -211,15 +227,45 @@ tree -L 2 ./recipes/
 
 ## Runtime Data Support
 
-Need Teleport, add component to a custom data directory (e.g. `./my-data/`):
+Need Teleport? Add the component to a custom data directory (e.g. `./my-data/`).
+The chart coordinates are placeholders; point them at your own chart:
 
 ```shell
+mkdir -p ./my-data/overlays
+cat > ./my-data/registry.yaml <<'EOF'
+apiVersion: aicr.run/v1beta1
+kind: ComponentRegistry
+components:
+  - name: dgxc-teleport
+    displayName: DGXC Teleport
+    helm:
+      defaultRepository: https://charts.example.com
+      defaultChart: example/teleport-agent
+      defaultVersion: v1.0.0
+EOF
 yq . ./my-data/registry.yaml
 ```
 
-Override existing recipe:
+Extend the existing recipe with an overlay on top of the embedded
+`h100-eks-ubuntu-training` leaf:
 
 ```shell
+cat > ./my-data/overlays/dgxc-teleport.yaml <<'EOF'
+kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: dgxc-teleport
+spec:
+  base: h100-eks-ubuntu-training
+  criteria:
+    service: eks
+    accelerator: h100
+    os: ubuntu
+    intent: training
+  componentRefs:
+    - name: dgxc-teleport
+      type: Helm
+EOF
 yq . ./my-data/overlays/dgxc-teleport.yaml
 ```
 
@@ -235,9 +281,8 @@ aicr recipe \
   --output recipe.yaml
 ```
 
-Output shows:
-* `<N>` embedded + `<M>` external = `<N+M>` merged components
-* `dgxc-teleport` appears as Kustomize component
+Output shows `dgxc-teleport` in the logged `componentNames` (add `--debug` to
+also see `item added from external`).
 
 Now `dgxc-teleport` is included in `componentRefs` and `deploymentOrder`
 
@@ -253,7 +298,7 @@ aicr bundle \
   --recipe recipe.yaml \
   --data ./my-data \
   --deployer argocd \
-  --output oci://ghcr.io/nvidia/aicr-bundle-example \
+  --output "oci://ghcr.io/${GHCR_OWNER}/aicr-bundle-example" \
   --system-node-selector nodeGroup=system-pool \
   --accelerated-node-selector nodeGroup=customer-gpu \
   --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule \
@@ -263,7 +308,7 @@ aicr bundle \
 Unpack the image:
 
 ```shell
-skopeo copy "docker://ghcr.io/nvidia/aicr-bundle-example@$(cat ./oci-refs/external-data-bundle.digest)" oci:image-oci
+skopeo copy "docker://ghcr.io/${GHCR_OWNER}/aicr-bundle-example@$(cat ./oci-refs/external-data-bundle.digest)" oci:image-oci
 mkdir -p /tmp/aicr-unpacked
 oras pull --oci-layout "image-oci@$(cat ./oci-refs/external-data-bundle.digest)" -o /tmp/aicr-unpacked
 tree /tmp/aicr-unpacked

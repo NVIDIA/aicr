@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Dynamo Platform Helm values (v1.2.1)
+# Dynamo Platform Helm values (v1.4.2)
 # NVIDIA Dynamo inference serving platform operator.
 # Provides OpenAI-compatible endpoints, KV-cache-aware routing,
 # disaggregated prefill/decode, and SLA-driven autoscaling.
@@ -23,13 +23,17 @@ global:
   # Kubernetes-native discovery replaces etcd for AICR Dynamo workloads.
   etcd:
     install: false
-  # Dynamo 1.2 defaults the runtime event plane to NATS for distributed
-  # Kubernetes backends. Install the bundled NATS chart so workloads can use
-  # the runtime default instead of per-workload DYN_EVENT_PLANE overrides.
-  # Request/response traffic stays on Dynamo's request plane default (TCP)
-  # unless a workload explicitly sets DYN_REQUEST_PLANE.
-  nats:
-    install: true
+  # Dynamo 1.4+ defaults the request plane to TCP and the KV event plane to
+  # ZMQ, so the bundled NATS chart is no longer needed for AICR's defaults.
+  # global.nats.install is intentionally left unset (chart default: false).
+  #
+  # Upgrading a standing cluster (opting back into NATS, and the separate,
+  # more important runtime-image-vs-operator version-skew hazard): see
+  # "Upgrade Notes" > dynamo-platform in docs/user/component-catalog.md.
+  # Do not hand-edit a generated bundle's values.yaml/cluster-values.yaml --
+  # both are covered by the bundle's checksum manifest and aicr verify
+  # fails closed on any modified file; regenerate with `aicr bundle --set`
+  # instead, per that doc.
   # Disable kai-scheduler sub-chart install — managed as a separate AICR component.
   # Keep enabled: true so the Dynamo operator detects and uses the external scheduler.
   kai-scheduler:
@@ -40,17 +44,6 @@ global:
   grove:
     install: false
     enabled: true
-
-nats:
-  config:
-    jetstream:
-      fileStore:
-        pvc:
-          # Mirror the chart default so AICR can warn when no StorageClass is
-          # selected and inject --storage-class into the bundled NATS PVC.
-          enabled: true
-          size: 10Gi
-          storageClassName: ""
 
 dynamo-operator:
   # Upgrade CRDs via the platform chart (no separate dynamo-crds 1.0 chart)

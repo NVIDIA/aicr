@@ -1,0 +1,728 @@
+// Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package upgrade
+
+import (
+	"reflect"
+	"testing"
+)
+
+// Every fixture here is synthetic. ADR-021's testing strategy forbids asserting
+// a verdict for a real component: pinning one makes every registry pin bump
+// churn the suite, and "keep the tests green" then becomes pressure to weaken
+// the record rather than to fix the code.
+
+func TestStepsFor(t *testing.T) {
+	gitops := StepGroup{Deployers: []string{"argocd", "flux"}, Steps: []Step{{ID: "gitops"}}}
+	imperative := StepGroup{Deployers: []string{"helm"}, Steps: []Step{{ID: "imperative"}}}
+	remainder := StepGroup{Steps: []Step{{ID: "remainder"}}}
+	emptyList := StepGroup{Deployers: []string{}, Steps: []Step{{ID: "claims-nothing"}}}
+
+	tests := []struct {
+		name     string
+		groups   []StepGroup
+		deployer string
+		want     []string
+	}{
+		{"named group wins", []StepGroup{gitops, remainder}, "argocd", []string{"gitops"}},
+		{"second name in a group", []StepGroup{gitops, remainder}, "flux", []string{"gitops"}},
+		{"remainder covers what no group claims", []StepGroup{gitops, remainder}, "helm", []string{"remainder"}},
+		{"explicit group beats remainder order", []StepGroup{remainder, imperative}, "helm", []string{"imperative"}},
+		{"no remainder and no match yields nothing", []StepGroup{gitops}, "helm", nil},
+		{"an empty deployers list is not the remainder", []StepGroup{emptyList}, "helm", nil},
+		{"an unnamed deployer selects nothing", []StepGroup{remainder}, "", nil},
+		{"no groups at all", nil, "helm", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			for _, s := range (&Transition{StepsByDeployer: tt.groups}).StepsFor(tt.deployer) {
+				got = append(got, s.ID)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("StepsFor(...) step ids = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRequiresDeployer(t *testing.T) {
+	tests := []struct {
+		name    string
+		results []ComponentResult
+		want    bool
+	}{
+		{"nothing changed", nil, false},
+		{"safe alone", []ComponentResult{{Verdict: VerdictSafe}}, false},
+		{"unknown alone", []ComponentResult{{Verdict: VerdictUnknown}}, false},
+		{"unversioned alone", []ComponentResult{{Verdict: VerdictUnversioned}}, false},
+		{"added and removed carry no verdict", []ComponentResult{
+			{Change: ChangeAdded}, {Change: ChangeRemoved},
+		}, false},
+		{"one manual among many", []ComponentResult{
+			{Verdict: VerdictSafe}, {Verdict: VerdictManual},
+		}, true},
+		{"a blocked-only report renders no steps, so it needs no deployer", []ComponentResult{
+			{Verdict: VerdictBlocked},
+		}, false},
+		{"a blocked row whose own record describes the jump does render steps", []ComponentResult{
+			{Verdict: VerdictBlocked, Transition: &Transition{Verdict: VerdictBlocked}},
+		}, true},
+		{"a manual row beside a blocked one still renders steps", []ComponentResult{
+			{Verdict: VerdictBlocked}, {Verdict: VerdictManual},
+		}, true},
+		{"a replacement is manual too", []ComponentResult{
+			{Change: ChangeReplaced, Verdict: VerdictManual},
+		}, true},
+		// checkReplaces admits a blocked replacement and requires its step
+		// groups, and a replacement carries its guidance on Replaces rather
+		// than Transition, so keying on Transition alone let this through with
+		// no deployer and then rendered nothing.
+		{"a blocked replacement carries steps on Replaces", []ComponentResult{
+			{Change: ChangeReplaced, Verdict: VerdictBlocked, Replaces: &Replaces{Verdict: VerdictBlocked}},
+		}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := RequiresDeployer(tt.results); got != tt.want {
+				t.Errorf("RequiresDeployer() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSpanPhrase(t *testing.T) {
+	tests := []struct {
+		name string
+		span Span
+		want string
+	}{
+		{"nothing", Span{}, ""},
+		{"one patch", Span{Patches: 1}, "1 patch"},
+		{"several patches", Span{Patches: 4}, "4 patches"},
+		{"one minor", Span{Minors: 1}, "1 minor"},
+		{"eleven minors", Span{Minors: 11}, "11 minors"},
+		{"one major", Span{Majors: 1}, "1 major"},
+		{"two majors", Span{Majors: 2}, "2 majors"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := spanPhrase(tt.span); got != tt.want {
+				t.Errorf("spanPhrase(%+v) = %q, want %q", tt.span, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewReportNotes(t *testing.T) {
+	verified := &Transition{Verdict: VerdictSafe, VerifiedBy: "uat: synthetic lane"}
+	stepped := &Transition{
+		Verdict:         VerdictManual,
+		StepsByDeployer: []StepGroup{{Steps: []Step{{ID: "one"}, {ID: "two"}}}},
+	}
+
+	tests := []struct {
+		name   string
+		result ComponentResult
+		want   string
+	}{
+		{
+			name:   "added says there is nothing to do",
+			result: ComponentResult{Component: "a", Change: ChangeAdded, To: "1.0.0"},
+			want:   "new component, nothing to do",
+		},
+		{
+			name:   "removed says the component stays installed",
+			result: ComponentResult{Component: "a", Change: ChangeRemoved, From: "1.0.0"},
+			want:   "stays installed; AICR does not uninstall it",
+		},
+		{
+			name: "replaced names the outgoing component and its work",
+			result: ComponentResult{
+				Component: "b", Change: ChangeReplaced, ReplacedComponent: "a", To: "1.0.0",
+				Verdict: VerdictManual,
+				Replaces: &Replaces{
+					Component:       "a",
+					Verdict:         VerdictManual,
+					StepsByDeployer: []StepGroup{{Steps: []Step{{ID: "one"}, {ID: "two"}}}},
+				},
+			},
+			want: "replaces a, 2 steps",
+		},
+		{
+			// The verdict column reads "blocked", but a replacement has no
+			// boundary for the version rows' "stops at" phrase to name, so
+			// without this the notes read as an ordinary migration.
+			name: "a blocked replacement signals the block",
+			result: ComponentResult{
+				Component: "b", Change: ChangeReplaced, ReplacedComponent: "a", To: "1.0.0",
+				Verdict: VerdictBlocked,
+				Replaces: &Replaces{
+					Component:       "a",
+					Verdict:         VerdictBlocked,
+					StepsByDeployer: []StepGroup{{Steps: []Step{{ID: "one"}, {ID: "two"}}}},
+				},
+			},
+			want: "replaces a, not in one step, 2 steps",
+		},
+		{
+			name: "safe names its evidence",
+			result: ComponentResult{
+				Component: "a", Change: ChangeVersion, From: "1.2.0", To: "1.2.3",
+				Verdict: VerdictSafe, Transition: verified, Jump: Span{Patches: 3},
+			},
+			want: "3 patches, verified",
+		},
+		{
+			name: "safe states a claim wider than the jump",
+			result: ComponentResult{
+				Component: "a", Change: ChangeVersion, From: "1.2.0", To: "1.2.3",
+				Verdict: VerdictSafe, Transition: verified,
+				Jump: Span{Patches: 3}, Span: Span{Minors: 11},
+			},
+			want: "3 patches, verified, safe across 11 minors",
+		},
+		{
+			name: "manual counts the selected deployer's steps",
+			result: ComponentResult{
+				Component: "a", Change: ChangeVersion, From: "0.17.2", To: "0.18.1",
+				Verdict: VerdictManual, Transition: stepped, Jump: Span{Minors: 1},
+			},
+			want: "1 minor, 2 steps",
+		},
+		{
+			name: "blocked names where to stop",
+			result: ComponentResult{
+				Component: "a", Change: ChangeVersion, From: "1.0.0", To: "3.0.0",
+				Verdict: VerdictBlocked, StoppedAt: ">=2.0.0 <3.0.0",
+				Jump: Span{Majors: 2}, Breaking: true,
+			},
+			want: "2 majors, stops at >=2.0.0 <3.0.0",
+		},
+		{
+			name: "blocked with its own record counts the steps it will render",
+			result: ComponentResult{
+				Component: "a", Change: ChangeVersion, From: "3.2.0", To: "4.0.0",
+				Verdict: VerdictBlocked, StoppedAt: ">=4.0.0 <=4.0.0", Transition: stepped,
+				Jump: Span{Majors: 1}, Breaking: true,
+			},
+			want: "1 major, stops at >=4.0.0 <=4.0.0, 2 steps",
+		},
+		{
+			name: "unknown across a breaking boundary says so",
+			result: ComponentResult{
+				Component: "a", Change: ChangeVersion, From: "0.18.0", To: "0.19.0",
+				Verdict: VerdictUnknown, Jump: Span{Minors: 1}, Breaking: true,
+			},
+			want: "1 minor, no record, breaking boundary",
+		},
+		{
+			name: "unknown within a non-breaking boundary",
+			result: ComponentResult{
+				Component: "a", Change: ChangeVersion, From: "1.18.0", To: "1.19.0",
+				Verdict: VerdictUnknown, Jump: Span{Minors: 1},
+			},
+			want: "1 minor, no record",
+		},
+		{
+			name: "unknown with no record at all says to author one",
+			result: ComponentResult{
+				Component: "a", Change: ChangeVersion, From: "1.18.0", To: "1.19.0",
+				Verdict: VerdictUnknown, Reason: ReasonNoRecord, Jump: Span{Minors: 1},
+			},
+			want: "1 minor, no record",
+		},
+		{
+			// Kept apart from "no record": telling a reader to author a record
+			// for a component that has one points at the wrong gap.
+			name: "unknown with a record that no boundary falls inside says so",
+			result: ComponentResult{
+				Component: "a", Change: ChangeVersion, From: "1.18.0", To: "1.19.0",
+				Verdict: VerdictUnknown, Reason: ReasonNoBoundaryCrossed, Jump: Span{Minors: 1},
+			},
+			want: "1 minor, record exists, no boundary here",
+		},
+		{
+			// No reverse record can ever exist, so the cell says the gap
+			// cannot be closed rather than that it has not been.
+			name: "a downgrade is unassessable, not merely unassessed",
+			result: ComponentResult{
+				Component: "a", Change: ChangeVersion, From: "0.13.0", To: "0.11.0",
+				Verdict: VerdictUnknown, Reason: ReasonDowngrade,
+				Downgrade: true, Jump: Span{Minors: 2}, Breaking: true,
+			},
+			want: "downgrade, unassessable",
+		},
+		{
+			name: "unversioned is a gap in the inputs",
+			result: ComponentResult{
+				Component: "a", Change: ChangeVersion, From: "main", To: "release-1",
+				Verdict: VerdictUnversioned,
+			},
+			want: "versions are not comparable",
+		},
+		{
+			// The FROM and TO columns carry the relocation on this row, so
+			// the held version is what the cell has left to say.
+			name: "a relocation states the version that did not move",
+			result: ComponentResult{
+				Component: "a", Change: ChangeIdentity, From: "2.1.0", To: "2.1.0",
+				IdentityChanges: []IdentityChange{{Field: "namespace", From: "a-system", To: "nvidia-a-system"}},
+				Verdict:         VerdictUnknown, Reason: ReasonIdentityChanged,
+			},
+			want: "2.1.0 unchanged, no record covers a relocation",
+		},
+		{
+			name: "a relocation without a version pin still reads as a move",
+			result: ComponentResult{
+				Component: "a", Change: ChangeIdentity,
+				IdentityChanges: []IdentityChange{{Field: "namespace", From: "a-system", To: "nvidia-a-system"}},
+				Verdict:         VerdictUnknown, Reason: ReasonIdentityChanged,
+			},
+			want: "version unchanged, no record covers a relocation",
+		},
+		{
+			// A withdrawn safe verdict must not say "no record", which is
+			// false here, nor restate the width of the claim it withdrew.
+			name: "a hop that moved on both axes names the relocation, not a missing record",
+			result: ComponentResult{
+				Component: "a", Change: ChangeVersion, From: "1.4.0", To: "1.4.2",
+				IdentityChanges: []IdentityChange{{Field: "namespace", From: "a-system", To: "nvidia-a-system"}},
+				Verdict:         VerdictUnknown, Reason: ReasonIdentityChanged,
+				Jump: Span{Patches: 2}, Span: Span{Minors: 1},
+			},
+			want: "2 patches, namespace a-system -> nvidia-a-system",
+		},
+		{
+			name: "a manifest set move names what left and what arrived",
+			result: ComponentResult{
+				Component: "a", Change: ChangeVersion, From: "1.4.0", To: "1.4.2",
+				IdentityChanges: []IdentityChange{{
+					Field: "manifestFiles", From: "x.yaml,y.yaml", To: "x.yaml,z.yaml",
+					Added: []string{"z.yaml"}, Removed: []string{"y.yaml"},
+				}},
+				Verdict: VerdictUnknown, Reason: ReasonIdentityChanged,
+				Jump: Span{Patches: 2}, Span: Span{Minors: 1},
+			},
+			want: "2 patches, manifestFiles x.yaml,y.yaml -> x.yaml,z.yaml",
+		},
+		{
+			name: "a manual hop that also relocated keeps both axes in the cell",
+			result: ComponentResult{
+				Component: "a", Change: ChangeVersion, From: "0.17.2", To: "0.18.1",
+				IdentityChanges: []IdentityChange{{Field: "namespace", From: "a-system", To: "nvidia-a-system"}},
+				Verdict:         VerdictManual, Transition: stepped, Jump: Span{Minors: 1},
+			},
+			want: "1 minor, 2 steps, namespace a-system -> nvidia-a-system",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rep := NewReport([]ComponentResult{tt.result}, ReportOptions{Deployer: "helm"})
+			if len(rep.Components) != 1 {
+				t.Fatalf("NewReport produced %d rows, want 1", len(rep.Components))
+			}
+			if got := rep.Components[0].Notes; got != tt.want {
+				t.Errorf("notes = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewReportSummary(t *testing.T) {
+	results := []ComponentResult{
+		{Component: "a", Change: ChangeVersion, Verdict: VerdictSafe},
+		{Component: "b", Change: ChangeAdded},
+		{Component: "c", Change: ChangeVersion, Verdict: VerdictManual},
+		{Component: "d", Change: ChangeVersion, Verdict: VerdictUnknown, Breaking: true},
+	}
+	rep := NewReport(results, ReportOptions{From: "old", To: "new", Deployer: "flux"})
+
+	if rep.From != "old" || rep.To != "new" || rep.Deployer != "flux" {
+		t.Errorf("report labels = %q/%q/%q, want old/new/flux", rep.From, rep.To, rep.Deployer)
+	}
+	if rep.Summary.Components != 4 {
+		t.Errorf("Summary.Components = %d, want 4", rep.Summary.Components)
+	}
+	// FailsRun is the matcher's classification, not a second copy of it here:
+	// manual fails, unknown fails only across a breaking boundary.
+	if rep.Summary.Failing != 2 {
+		t.Errorf("Summary.Failing = %d, want 2", rep.Summary.Failing)
+	}
+	if !rep.FailsRun() {
+		t.Error("FailsRun() = false, want true")
+	}
+
+	clean := NewReport(results[:2], ReportOptions{})
+	if clean.FailsRun() {
+		t.Error("FailsRun() = true for a safe-and-added report, want false")
+	}
+	if (&Report{}).FailsRun() {
+		t.Error("FailsRun() = true for an empty report, want false")
+	}
+	var nilReport *Report
+	if nilReport.FailsRun() {
+		t.Error("FailsRun() = true on a nil report, want false")
+	}
+}
+
+// TestNewReportDoesNotAliasRecords proves a report survives the Set it came
+// from: every consumer holds the same record pointers under a read-only
+// contract, so a report that aliased them would hand that contract to a caller
+// who never agreed to it.
+func TestNewReportDoesNotAliasRecords(t *testing.T) {
+	tr := &Transition{
+		Verdict:         VerdictManual,
+		Summary:         "original summary",
+		StepsByDeployer: []StepGroup{{Steps: []Step{{ID: "one", Description: "original description"}}}},
+	}
+	rep := NewReport([]ComponentResult{{
+		Component: "a", Change: ChangeVersion, From: "1.0.0", To: "2.0.0",
+		Verdict: VerdictManual, Transition: tr,
+	}}, ReportOptions{Deployer: "helm"})
+
+	tr.Summary = "mutated"
+	tr.StepsByDeployer[0].Steps[0].Description = "mutated"
+
+	if got := rep.Components[0].Summary; got != "original summary" {
+		t.Errorf("report summary = %q, want the value captured at build time", got)
+	}
+	if got := rep.Components[0].Steps[0].Description; got != "original description" {
+		t.Errorf("report step description = %q, want the value captured at build time", got)
+	}
+}
+
+// TestReportBlockedRendersStepsOnlyWhenOneRecordDescribesTheJump draws the line
+// the blocked verdict actually needs: not "blocked hides steps", but "steps
+// render only where a single record describes this exact move". Composing two
+// records' instructions, or handing over instructions authored for a different
+// starting point, is what the verdict exists to prevent; withholding an
+// author's own guidance for the move they wrote it for is not.
+func TestReportBlockedRendersStepsOnlyWhenOneRecordDescribesTheJump(t *testing.T) {
+	steps := []StepGroup{{Steps: []Step{{ID: "do-this", Description: "Do this first."}}}}
+	blocked := func(from, to, summary string) Transition {
+		return Transition{
+			From: from, To: to, Verdict: VerdictBlocked,
+			Summary: summary, StepsByDeployer: steps,
+		}
+	}
+
+	tests := []struct {
+		name        string
+		set         Set
+		from, to    string
+		wantReason  Reason
+		wantSteps   int
+		wantSummary string
+	}{
+		{
+			name:        "one record covering the source renders its summary and steps",
+			set:         oneComponent(blocked("<3.0.0", ">=3.0.0 <=3.0.0", "the one record")),
+			from:        "1.5.0",
+			to:          "3.0.0",
+			wantReason:  ReasonRecorded,
+			wantSteps:   1,
+			wantSummary: "the one record",
+		},
+		{
+			name: "a block flown past renders neither",
+			set: oneComponent(
+				trans("<2.0.0", ">=2.0.0 <2.1.0", VerdictSafe, "lower"),
+				blocked(">=2.0.0 <3.0.0", ">=3.0.0 <=3.0.0", "the block"),
+			),
+			from:       "1.5.0",
+			to:         "3.0.0",
+			wantReason: ReasonRecordBlocks,
+		},
+		{
+			name: "two crossed boundaries render neither",
+			set: oneComponent(
+				trans("<2.0.0", ">=2.0.0 <2.1.0", VerdictManual, "lower"),
+				trans("<3.0.0", ">=3.0.0 <=3.0.0", VerdictManual, "upper"),
+			),
+			from:       "1.5.0",
+			to:         "3.0.0",
+			wantReason: ReasonMultipleBoundaries,
+		},
+		{
+			name:       "a record that does not cover the source renders neither",
+			set:        oneComponent(trans(">=2.0.0 <3.0.0", ">=3.0.0 <=3.0.0", VerdictManual, "elsewhere")),
+			from:       "1.5.0",
+			to:         "3.0.0",
+			wantReason: ReasonUndefinedOrigin,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results := Match(tt.set, map[string]string{"c": tt.from}, map[string]string{"c": tt.to})
+			rep := NewReport(results, ReportOptions{Deployer: "helm"})
+			if len(rep.Components) != 1 {
+				t.Fatalf("NewReport produced %d rows, want 1", len(rep.Components))
+			}
+			row := rep.Components[0]
+			if row.Verdict != VerdictBlocked {
+				t.Fatalf("verdict = %q, want %q", row.Verdict, VerdictBlocked)
+			}
+			if row.Reason != tt.wantReason {
+				t.Errorf("reason = %q, want %q", row.Reason, tt.wantReason)
+			}
+			if row.StoppedAt == "" {
+				t.Error("stoppedAt is empty; every blocked row names the boundary it stops at")
+			}
+			if len(row.Steps) != tt.wantSteps {
+				t.Errorf("steps = %d, want %d", len(row.Steps), tt.wantSteps)
+			}
+			if row.Summary != tt.wantSummary {
+				t.Errorf("summary = %q, want %q", row.Summary, tt.wantSummary)
+			}
+			if got := RequiresDeployer(results); got != (tt.wantSteps > 0) {
+				t.Errorf("RequiresDeployer() = %v, want %v", got, tt.wantSteps > 0)
+			}
+		})
+	}
+}
+
+// TestReportSourceSerializationTags pins every name the source block puts on
+// the wire, for both encoders. A struct tag is invisible to every other test
+// in this package — the table renders none of them and Go code reads the field
+// names — so a typo'd or missing tag ships silently and renames a key a
+// pipeline matches on.
+func TestReportSourceSerializationTags(t *testing.T) {
+	tests := []struct {
+		name  string
+		typ   reflect.Type
+		field string
+		json  string
+		yaml  string
+	}{
+		{"report carries source", reflect.TypeOf(Report{}), "Source", "source,omitempty", "source,omitempty"},
+		{"kubeconfig", reflect.TypeOf(ReportSource{}), "Kubeconfig", "kubeconfig,omitempty", "kubeconfig,omitempty"},
+		{"context", reflect.TypeOf(ReportSource{}), "Context", "context,omitempty", "context,omitempty"},
+		{"matched", reflect.TypeOf(ReportSource{}), "Matched", "matched", "matched"},
+		{"helm block", reflect.TypeOf(ReportSource{}), "Helm", "helm", "helm"},
+		{"argo block", reflect.TypeOf(ReportSource{}), "Argo", "argo", "argo"},
+		{"helm records", reflect.TypeOf(ReportSourceHelm{}), "Records", "records", "records"},
+		{"helm unattributed", reflect.TypeOf(ReportSourceHelm{}), "Unattributed", "unattributed", "unattributed"},
+		{"helm unreadable", reflect.TypeOf(ReportSourceHelm{}), "Unreadable", "unreadable", "unreadable"},
+		{"helm uninstalled", reflect.TypeOf(ReportSourceHelm{}), "Uninstalled", "uninstalled", "uninstalled"},
+		{
+			"helm stamped but unmatched", reflect.TypeOf(ReportSourceHelm{}), "StampedUnmatched",
+			"stampedUnmatched", "stampedUnmatched",
+		},
+		{"argo applications", reflect.TypeOf(ReportSourceArgo{}), "Applications", "applications", "applications"},
+		{"argo unattributed", reflect.TypeOf(ReportSourceArgo{}), "Unattributed", "unattributed", "unattributed"},
+		{"argo unreadable", reflect.TypeOf(ReportSourceArgo{}), "Unreadable", "unreadable", "unreadable"},
+		{"argo remote", reflect.TypeOf(ReportSourceArgo{}), "Remote", "remote", "remote"},
+		{"argo unplaced", reflect.TypeOf(ReportSourceArgo{}), "Unplaced", "unplaced", "unplaced"},
+		{"row unproven", reflect.TypeOf(ReportComponent{}), "Unproven", "unproven,omitempty", "unproven,omitempty"},
+		{"unproven source", reflect.TypeOf(ReportUnproven{}), "Source", "source", "source"},
+		{"unproven name", reflect.TypeOf(ReportUnproven{}), "Name", "name", "name"},
+		{"unproven namespace", reflect.TypeOf(ReportUnproven{}), "Namespace", "namespace,omitempty", "namespace,omitempty"},
+		{"unproven reason", reflect.TypeOf(ReportUnproven{}), "Reason", "reason", "reason"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, ok := tt.typ.FieldByName(tt.field)
+			if !ok {
+				t.Fatalf("%s has no field %s", tt.typ, tt.field)
+			}
+			if got := f.Tag.Get("json"); got != tt.json {
+				t.Errorf("%s.%s json tag = %q, want %q", tt.typ, tt.field, got, tt.json)
+			}
+			if got := f.Tag.Get("yaml"); got != tt.yaml {
+				t.Errorf("%s.%s yaml tag = %q, want %q", tt.typ, tt.field, got, tt.yaml)
+			}
+		})
+	}
+}
+
+// TestReportSourceHasNoArgoStampedCount pins the absence itself. Adding the
+// field to mirror the Helm side would produce an always-zero count that reads
+// as a mapping verified against a stamp nothing looked for.
+func TestReportSourceHasNoArgoStampedCount(t *testing.T) {
+	if _, ok := reflect.TypeOf(ReportSourceArgo{}).FieldByName("StampedUnmatched"); ok {
+		t.Error("ReportSourceArgo grew a StampedUnmatched field; an Application carries no AICR stamp to check")
+	}
+}
+
+// TestNewReportSource covers the source block's build path: absent for an
+// artifact comparison, and copied rather than aliased for a cluster read, so
+// the report keeps the ownership contract every other field in it holds.
+func TestNewReportSource(t *testing.T) {
+	if got := NewReport(nil, ReportOptions{From: "a.yaml", To: "b.yaml"}); got.Source != nil {
+		t.Errorf("an artifact comparison carries a source block: %+v", got.Source)
+	}
+
+	src := &ReportSource{
+		Kubeconfig: "/home/op/.kube/config",
+		Context:    "prod-east",
+		Matched:    2,
+		Helm: ReportSourceHelm{
+			Read: true, Records: 37, Unattributed: 2, Unreadable: 1, Uninstalled: 3, StampedUnmatched: 4,
+		},
+		Argo: ReportSourceArgo{Applications: 5, Unattributed: 6, Unreadable: 7, Remote: 8},
+	}
+	want := *src
+	rep := NewReport(nil, ReportOptions{From: "cluster", Source: src})
+	if rep.Source == nil {
+		t.Fatal("NewReport dropped the source block a cluster read supplied")
+	}
+	if rep.Source == src {
+		t.Error("NewReport aliased the caller's ReportSource instead of copying it")
+	}
+	if *rep.Source != want {
+		t.Errorf("source = %+v, want %+v", *rep.Source, want)
+	}
+
+	src.Context = "mutated"
+	src.Helm.Records = 0
+	if *rep.Source != want {
+		t.Errorf("the report's source changed with the caller's: %+v, want %+v", *rep.Source, want)
+	}
+}
+
+// TestNewReportAttachesUnproven pins that each row takes only its own
+// component's records, as a copy.
+func TestNewReportAttachesUnproven(t *testing.T) {
+	results := Match(Set{},
+		map[string]string{"alpha-operator": "", "beta-operator": "1.0.0"},
+		map[string]string{"alpha-operator": "1.1.0", "beta-operator": "1.1.0"})
+	unproven := map[string][]ReportUnproven{"alpha-operator": {
+		{Source: "argocd", Name: "teamfoo-alpha-operator", Namespace: "team-foo", Reason: "unplaced"},
+	}}
+
+	rep := NewReport(results, ReportOptions{From: "cluster", Unproven: unproven})
+	rows := map[string]ReportComponent{}
+	for _, c := range rep.Components {
+		rows[c.Component] = c
+	}
+	if got := rows["alpha-operator"].Unproven; !reflect.DeepEqual(got, unproven["alpha-operator"]) {
+		t.Errorf("alpha-operator unproven = %+v, want %+v", got, unproven["alpha-operator"])
+	}
+	if got := rows["beta-operator"].Unproven; got != nil {
+		t.Errorf("beta-operator unproven = %+v, want nil", got)
+	}
+
+	unproven["alpha-operator"][0].Name = "mutated"
+	if got := rows["alpha-operator"].Unproven[0].Name; got != "teamfoo-alpha-operator" {
+		t.Errorf("the row's unproven record changed with the caller's: %q", got)
+	}
+}
+
+// TestUnprovenPhrase pins how each record kind reads in the notes cell.
+func TestUnprovenPhrase(t *testing.T) {
+	tests := []struct {
+		name    string
+		records []ReportUnproven
+		want    string
+	}{
+		{
+			name: "unplaced application",
+			records: []ReportUnproven{
+				{Source: "argocd", Name: "teamfoo-gpu-operator", Namespace: "team-foo", Reason: "unplaced"},
+			},
+			want: "unplaced application teamfoo-gpu-operator deploying to team-foo",
+		},
+		{
+			name: "unreadable application with no destination",
+			records: []ReportUnproven{
+				{Source: "argocd", Name: "tenant-a-gpu-operator", Reason: "unreadable"},
+			},
+			want: "unreadable application tenant-a-gpu-operator",
+		},
+		{
+			name: "unreadable helm release",
+			records: []ReportUnproven{
+				{Source: "helm", Name: "gpu-operator", Namespace: "gpu-operator", Reason: "unreadable"},
+			},
+			want: "unreadable release gpu-operator in gpu-operator",
+		},
+		{
+			name:    "unknown source and no reason",
+			records: []ReportUnproven{{Source: "other", Name: "x", Namespace: "ns"}},
+			want:    "record x in ns",
+		},
+		{
+			name: "several records",
+			records: []ReportUnproven{
+				{Source: "argocd", Name: "blue-gpu-operator", Namespace: "team-blue", Reason: "unplaced"},
+				{Source: "argocd", Name: "green-gpu-operator", Reason: "unreadable"},
+			},
+			want: "unplaced application blue-gpu-operator deploying to team-blue, " +
+				"unreadable application green-gpu-operator",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := unprovenPhrase(tt.records); got != tt.want {
+				t.Errorf("unprovenPhrase() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestReportFailsRunOnUnmatchedStamps pins that a cluster read showing its own
+// name mapping broken fails a strict run with no failing row to carry it: the
+// component it lost reads as newly installed, which fails nothing.
+func TestReportFailsRunOnUnmatchedStamps(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		source *ReportSource
+		want   bool
+	}{
+		{"an artifact comparison", nil, false},
+		{"a clean cluster read", &ReportSource{Helm: ReportSourceHelm{Read: true}}, false},
+		{"stamped records matched nothing", &ReportSource{Helm: ReportSourceHelm{Read: true, StampedUnmatched: 2}}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rep := NewReport(nil, ReportOptions{From: "cluster", Source: tt.source})
+			if got := rep.FailsRun(); got != tt.want {
+				t.Errorf("FailsRun() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// The notes cell names the kind of identity move a row carries. Every field
+// other than namespace once read as an object name, so a chart swap's row said
+// "no record covers a rename"; this pins the three kinds apart.
+func TestIdentityNounNamesTheKindOfMove(t *testing.T) {
+	tests := []struct {
+		name    string
+		changes []ReportIdentityChange
+		want    string
+	}{
+		{"namespace only", []ReportIdentityChange{{Field: "namespace"}}, "a relocation"},
+		{"object names only", []ReportIdentityChange{
+			{Field: "fullnameOverride"}, {Field: "grafana.fullnameOverride"},
+		}, "a rename"},
+		{"a chart move", []ReportIdentityChange{{Field: "chart"}}, "a change of identity"},
+		{"a manifest set", []ReportIdentityChange{{Field: "manifestFiles"}}, "a change of identity"},
+		{"namespace and a rename", []ReportIdentityChange{
+			{Field: "namespace"}, {Field: "fullnameOverride"},
+		}, "a change of identity"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := identityNoun(tt.changes); got != tt.want {
+				t.Errorf("identityNoun() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: l40s-oke-training
 
@@ -32,7 +32,20 @@ spec:
   # requirement, so the recipe keeps the OKE training baseline K8s floor.
   constraints:
     - name: K8s.server.version
-      value: ">= 1.30"
+      value: ">= 1.32"
+    - name: K8s.oke-addons.nvidia-network-operator
+      value: absent
+      remediation: >-
+        Oracle's NvidiaNetworkOperator cluster add-on is present on this
+        cluster, but this recipe deploys AICR's network-operator component,
+        and two controllers would reconcile the same NicClusterPolicy. If the
+        reading is addon-deleting, a removal is already in progress, so wait
+        for it to finish. Otherwise, remove the add-on with `oci ce cluster
+        disable-addon --cluster-id <cluster-ocid> --addon-name
+        NvidiaNetworkOperator --is-remove-existing-add-on true`. Once the
+        removal finishes, recapture the snapshot with aicr snapshot
+        --oke-addons <path to `oci ce cluster list-addons --cluster-id
+        <cluster-ocid> --all --output json` dump>.
 
   componentRefs:
     # L40S-specific GPU Operator overrides (inherits valuesFile from oke-training).
@@ -50,9 +63,31 @@ spec:
 
     - name: nfd
       type: Helm
+      valuesFile: components/nfd/values-nvidia-nics.yaml
       overrides:
         topologyUpdater:
           enable: true
+
+    # RDMA fabric (RoCE over SR-IOV VFs). Every L40S OCI cluster runs RoCE;
+    # the SR-IOV VF device plugin advertises nvidia.com/mlnxnics RDMA VFs,
+    # with nv-ipam + multus attaching the VFs into workload pods. The
+    # NicClusterPolicy is supplied by the manifest (the chart's deployCR is
+    # off — the manifest is the only place the OCI VF selectors 101a/101e
+    # can be expressed). OCI nodes carry host MOFED, so there is no
+    # ofedDriver in any configuration. GPUDirect RDMA works via DMA-BUF;
+    # nvidia-peermem stays off (base default) — inert on this topology.
+    # Present in every gpuStack value: the fabric is orthogonal to GPU
+    # driver/plugin ownership. Incompatible with Oracle's opt-in
+    # NvidiaNetworkOperator add-on (two lifecycle managers, one release),
+    # which the K8s.oke-addons.nvidia-network-operator constraint rejects.
+    - name: network-operator
+      type: Helm
+      valuesFile: components/network-operator/values-oke-l40s.yaml
+      manifestFiles:
+        - components/network-operator/manifests/nic-cluster-policy-oke-l40s.yaml
+      dependencyRefs:
+        - nfd
+        - cert-manager
 
   # Validation checks for L40S on OKE training workloads.
   # Defined at the intent layer (not OS-specific) so all OS variants inherit them.

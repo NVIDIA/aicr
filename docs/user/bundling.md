@@ -1,9 +1,9 @@
 # Generating Bundles
 
 `aicr bundle` materializes a recipe into deployment-ready artifacts — one
-folder per component, each with Helm values, checksums, and a README. This
-guide covers the common bundling tasks: choosing a deployer, overriding values,
-enabling or disabling components, pinning node scheduling, producing offline
+folder per component with its Helm values, plus a root README, `checksums.txt`,
+and `bundle-info.yaml`. This guide covers the common bundling tasks: choosing a
+deployer, overriding values, enabling or disabling components, pinning node scheduling, producing offline
 bundles, and gating on component readiness.
 
 This is a task-oriented how-to. For the complete flag list and exit codes, see
@@ -23,7 +23,8 @@ re-render the same recipe for whatever pipeline you run:
 | `helmfile` | A `helmfile.yaml` release graph. |
 | `argocd` | Argo CD `Application` manifests (app-of-apps), published from a Git repo (`--repo`). |
 | `argocd-helm` | A Helm chart app-of-apps; `repoURL` defaults to the push-target registry — plain `helm install` works with no `--set repoURL` needed. Override with `--set repoURL=oci://mirror` when mirroring. Bringing your own root Application? Set `deployer.includeRootApp=false` to render children-only — see [Argo CD Deployer Options](cli-reference.md#argo-cd-deployer-options). |
-| `flux` | Flux `HelmRelease` and `Kustomization` manifests. |
+| `flux` | Flux `HelmRelease` manifests plus their source objects, and a plain Kustomize `kustomization.yaml` at the bundle root (not a Flux `Kustomization` CR). |
+| `terraform` | A Terraform root module (or child module) calling one module per component, with `depends_on` carrying the recipe's dependency graph. |
 
 ```bash
 # GitOps with Argo CD, sourced from your config repo
@@ -39,30 +40,31 @@ are frozen at v1 and gated by `TestBundleLayoutMatchesManifest`, so a path
 shown here will not disappear or be renamed without a deliberate, reviewed
 change. Automation may read these paths.
 
-Every deployer writes `checksums.txt` and `README.md` at the bundle root. Four
-of the five group components into ordered `NNN-<component>` directories; Flux
-is the exception and uses a plain `<component>` directory with shared
-`sources/`.
+Every deployer writes `bundle-info.yaml`, `checksums.txt`, `README.md` and
+`recipe.yaml` at the bundle root. Five of the six group components into
+ordered `NNN-<component>` directories; Flux is the exception and uses a plain
+`<component>` directory with shared `sources/`.
 
 ```text
-helm/                          argocd/                     flux/
-  001-cert-manager/              001-cert-manager/            cert-manager/
-    values.yaml                    application.yaml             helmrelease.yaml
-    cluster-values.yaml            values.yaml                nfd/
-    install.sh                   002-nfd/                     helmrelease.yaml
-    upstream.env                   application.yaml           sources/
-  002-nfd/                         values.yaml                  helmrepo-<host>.yaml
-    ...                          app-of-apps.yaml             gitrepo-<host>.yaml
-  deploy.sh                      checksums.txt              kustomization.yaml
-  recipe.yaml                    README.md                  checksums.txt
-  checksums.txt                                             README.md
-  README.md
+helm/                            argocd/                      flux/
+  001-cert-manager/               001-cert-manager/            cert-manager/
+    values.yaml                     application.yaml             helmrelease.yaml
+    cluster-values.yaml             values.yaml                nfd/
+    install.sh                    002-nfd/                       helmrelease.yaml
+    upstream.env                    application.yaml           sources/
+  002-nfd/                          values.yaml                  helmrepo-<host>.yaml
+    ...                           app-of-apps.yaml               gitrepo-<host>.yaml
+  deploy.sh                       bundle-info.yaml             kustomization.yaml
+  bundle-info.yaml                checksums.txt                bundle-info.yaml
+  recipe.yaml                     README.md                    checksums.txt
+  checksums.txt                   recipe.yaml                  README.md
+  README.md                                                    recipe.yaml
 ```
 
 `helmfile` shares Helm's per-component files but not its root: it writes
-`helmfile.yaml` instead of `deploy.sh`, and does not emit `recipe.yaml`. A
-recipe with dependencies also produces one `level-N.yaml` per dependency depth,
-which is derived from the recipe rather than fixed by the layout.
+`helmfile.yaml` instead of `deploy.sh`. A recipe with dependencies also
+produces one `level-N.yaml` per dependency depth, which is derived from the
+recipe rather than fixed by the layout.
 
 ```text
 helmfile/
@@ -70,6 +72,37 @@ helmfile/
   002-nfd/
   helmfile.yaml
   level-N.yaml                 one per dependency depth; absent when flat
+  recipe.yaml
+  bundle-info.yaml
+  checksums.txt
+  README.md
+```
+
+`terraform` shares Helm's per-component values and bundled charts — not its
+`install.sh` or `upstream.env`, which only the shell path reads — and adds the
+Terraform layer above them: one module call per component, with that
+component's pre, post and readiness folders chained inside the call, plus the
+single generic component module they all share. The bundle does not create a
+cluster.
+By default it is a root module that configures the `helm` provider from
+variables, so it applies against whatever cluster you point it at; with
+`--terraform-child-module` it is a child module with no provider block, for
+calling from a configuration that creates the cluster itself.
+
+```text
+terraform/
+  001-cert-manager/            values.yaml and cluster-values.yaml; Chart.yaml +
+  002-nfd/                     templates/ for a bundled chart
+  main.tf                      one module call per component; the dependency graph
+  versions.tf                  required_providers + the helm provider config
+  variables.tf                 cluster connection, wait/timeout/atomic
+  outputs.tf
+  terraform.tfvars.example     root-module form only
+  modules/component/           the shared module every call resolves to, holding
+                               the component's pre / chart / post / readiness
+                               releases chained in order
+  bundle-info.yaml
+  recipe.yaml
   checksums.txt
   README.md
 ```
@@ -80,12 +113,252 @@ helmfile/
 Two kinds of name appear in these trees, and only one is a promise:
 
 - **Fixed names are contract.** `deploy.sh`, `app-of-apps.yaml`,
-  `kustomization.yaml`, `checksums.txt`, `values.yaml`, `helmrelease.yaml`,
-  and the `NNN-<component>` convention itself.
+  `kustomization.yaml`, `main.tf` with `modules/component/`, `bundle-info.yaml`, `checksums.txt`, `values.yaml`,
+  `helmrelease.yaml`, and the `NNN-<component>` convention itself.
 - **Derived names are not.** Flux writes one `helmrepo-<host>.yaml` per chart
   repository and helmfile one `level-N.yaml` per dependency depth, so both sets
   change with the recipe. Discover them by listing the directory rather than
   hardcoding a name.
+
+`UPGRADING.md` is the one root file whose name is fixed but whose presence is
+not: a bundle from any deployer may carry it, and only does when it needs it. Test for it
+rather than assuming it. See [Upgrade guidance in the
+bundle](#upgrade-guidance-in-the-bundle).
+
+### Upgrade guidance in the bundle
+
+A new pin is sometimes one an existing installation cannot simply move to: a
+CRD is renamed, or objects have to be migrated by hand. When a component's
+pinned version falls inside the `to` range of a `manual` or `blocked`
+[transition record](../contributor/upgrade-records.md), the bundle carries that
+record in three places:
+
+- **`UPGRADING.md`** at the bundle root: the summary, the precondition, whether
+  the change can be reversed, the ordered steps, and references. Steps are
+  filtered to the `--deployer` the bundle was built with, so an Argo CD bundle
+  shows the GitOps path and a Helm bundle the imperative one.
+- **A "Before You Upgrade" table** near the top of `README.md`, naming each
+  affected component, its verdict, and the versions it applies to when you
+  upgrade from them.
+- **A warning** at the top of the `Note:` block that `aicr bundle` prints.
+
+The guidance applies only when you apply the bundle over an existing
+installation of an earlier version. A fresh install can skip it. A bundle
+knows the versions it pins but not the ones your cluster runs, so every entry
+names the `from` range it applies to rather than a verdict for your move. For
+that verdict, run [`aicr upgrade-check`](upgrading.md) against the recipe you
+deployed from.
+
+Nothing is written when no pinned version needs it, and a `safe` record never
+produces any of the three.
+
+Bundling never fails because of a transition record. Checking records is the
+job of `aicr upgrade-check` and the project's lint gate, so a version you pin
+yourself with `--data` bundles even when no record covers it. If a record
+cannot be read at all, `aicr bundle` still writes the bundle, leaves the
+guidance out, and says so in its `Note:` block; run `aicr upgrade-check` to see
+the upgrade steps instead.
+
+### Bundle info
+
+Every bundle carries a `bundle-info.yaml` at its root, written unconditionally
+by all six deployers — no flag turns it off. It answers three questions a
+bundle cannot answer for itself: which deployer built it, which `aicr` binary
+built it, and which Helm release landed in which directory.
+
+`layout.entrypoint` names the file a consumer invokes or applies —
+`deploy.sh`, `helmfile.yaml`, `app-of-apps.yaml`, `Chart.yaml`,
+`kustomization.yaml`, or `main.tf` — so automation reads one key instead of branching on
+`build.deployer`.
+
+`layout.releases` lists every Helm release the bundle installs, in deployment
+order, and that ordering is normative: there is no ordinal field, so a
+consumer reads sequence from list position rather than from a number. A
+release injected alongside a component — a `-pre` folder when it declares
+pre-install manifests, a `-post` folder when a component that also ships an
+upstream chart declares post-install manifests, or a `-readiness` folder
+under `--readiness-hooks` (none of the three tied to `--vendor-charts`) — has
+no recipe component of its own, so it names its parent in `component` while
+`name` carries its own suffixed name. One collision is deliberately left
+undefined: a recipe that declares a component whose own name ends in `-pre`,
+`-post` or `-readiness` alongside the matching base name makes `component`
+deployer-dependent for that release, so do not rely on its value there. No
+component in the shipped registry has such a name, and resolving this is a
+reserved additive change — a later release may add an explicit field
+distinguishing a primary release from an injected one.
+
+`bundle-info.yaml` deliberately carries no component *inventory*:
+`recipe.yaml` sits beside it at the bundle root and is already the source of
+truth for what the recipe resolved to. `build.settings.components` in the
+example below is not an inventory — it is the REST API's `?bundlers=` filter
+(there is no CLI flag for it), recorded because the filtered `recipe.yaml`
+alongside it is written post-filter and would otherwise be indistinguishable
+from an unfiltered bundle of a smaller recipe. It is absent unless that
+filter was used; see [Overrides that cannot take effect are
+rejected](#overrides-that-cannot-take-effect-are-rejected) for the same
+`bundlers=` filter from the override side. `bundle-info.yaml` also carries no
+timestamp — the record feeds `checksums.txt`, which is the subject of the
+bundle attestation, so a wall-clock field would make every bundle
+irreproducible.
+
+`warnings` is reserved for the non-blocking warnings `aicr bundle` prints in
+its `Note:` block. Each entry has a stable UPPER_SNAKE `code`, an optional
+`component`, and a `message` that may change. This release reads the field
+but does not write it yet: `bundle-info.yaml` is decoded strictly, and a
+release that predates the field rejects a record that carries it, so a release
+that reads it ships before one that writes it. Until then, warnings appear
+only in the `Note:` block.
+
+Below is a fully populated example, generated from the shipped serializer and
+extended with fields (`repoURL`, `provenance`, an injected `-post`/`-readiness`
+pair) that a single bundle rarely exercises all at once. Key order is
+alphabetical at every nesting level — `serializer.MarshalYAMLDeterministic`
+sorts mapping keys before writing — so the top level reads `apiVersion, build,
+kind, layout, metadata`, not a hand-arranged order. Expect the same
+alphabetical order in your own bundle.
+
+```yaml
+apiVersion: aicr.run/v1
+build:
+  deployer: argocd
+  recipe:
+    digest: sha256:d429490ec53e902e5a7f5a9b0221ab4a46f233ec70f808f1e62bbade2576e083
+    path: recipe.yaml
+    version: v0.22.0
+  settings:
+    appName: gpu-cluster
+    attested: true
+    checksums: true
+    components:
+      - cert-manager
+      - nfd
+      - network-operator
+    nodeScheduling:
+      accelerated:
+        selector:
+          nvidia.com/gpu.present: "true"
+        tolerations:
+          - effect: NoSchedule
+            key: nvidia.com/gpu
+            operator: Equal
+            value: present
+      system:
+        selector:
+          nodeGroup: system
+        tolerations:
+          - effect: NoSchedule
+            key: dedicated
+            operator: Equal
+            value: system
+    readinessHooks: true
+    repoURL: https://github.com/my-org/my-gitops-repo.git
+    serial: false
+    sharedStorageClass: shared-nfs
+    storageClass: local-nvme
+    targetRevision: main
+    vendorCharts: true
+kind: BundleInfo
+layout:
+  entrypoint: app-of-apps.yaml
+  provenance: provenance.yaml
+  releases:
+    - component: cert-manager
+      manifest: 001-cert-manager/application.yaml
+      name: cert-manager
+      namespace: cert-manager
+      path: 001-cert-manager
+    - component: nfd
+      manifest: 002-nfd/application.yaml
+      name: nfd
+      namespace: node-feature-discovery
+      path: 002-nfd
+    - component: network-operator
+      manifest: 003-network-operator/application.yaml
+      name: network-operator
+      namespace: nvidia-network-operator
+      path: 003-network-operator
+    - component: network-operator
+      manifest: 004-network-operator-post/application.yaml
+      name: network-operator-post
+      namespace: nvidia-network-operator
+      path: 004-network-operator-post
+    - component: network-operator
+      manifest: 005-network-operator-readiness/application.yaml
+      name: network-operator-readiness
+      namespace: nvidia-network-operator
+      path: 005-network-operator-readiness
+metadata:
+  version: v0.22.0
+```
+
+`build.recipe.version` and `metadata.version` can diverge: the former is the
+`aicr` binary that resolved `recipe.yaml` (stamped by the recipe builder and
+never restamped), the latter is the `aicr` binary that ran `bundle`. They read
+the same on a one-step workflow and differ whenever recipe generation and
+bundling run on different releases. `build.settings` includes only settings
+whose effect is already observable elsewhere in the bundle's own files —
+Fulcio/Rekor endpoints, certificate identity, and free-form `--set` overrides
+are excluded by construction, since `values.yaml` already carries the effect
+of the latter.
+
+That test is applied per deployer, so `repoURL`, `targetRevision` and
+`appName` appear only where the bundle shows them: all three under `argocd`,
+`repoURL` and `targetRevision` under `flux`, `appName` alone under
+`argocd-helm` (whose chart is URL-portable and takes the publish location at
+`helm install --set repoURL=...` time, which is also why `--repo` warns that
+it is ignored there), and none of the three under `helm`, `helmfile` or `terraform`. Where
+a key does not apply it is omitted entirely rather than written empty.
+
+Each deployer reports what it resolved, so the recorded value is the one the
+bundle carries — including the fallback it applies when you pass no flag. A
+`flux` bundle built without `--repo` records
+`repoURL: https://github.com/YOUR_ORG/YOUR_REPO.git`, the same placeholder
+written into `sources/gitrepo-*.yaml`, and `targetRevision: main`. That is
+deliberate: the placeholder is what ships, and a bundle that needs its repo
+URL replaced before it can be applied should say so rather than look
+unconfigured.
+
+### Generated chart versions
+
+Not every chart in a bundle comes from upstream. AICR generates one for each
+Kustomize-derived component, each manifest-only component, each injected
+`-pre` / `-post` / `-readiness` release, and — under `--vendor-charts` — as a
+wrapper around every vendored upstream chart. A generated `Chart.yaml` has to
+answer two different questions, so it answers them in separate fields:
+
+| Field | Carries | Why |
+|-------|---------|-----|
+| `version` | the AICR version that produced the bundle | The chart's content is AICR's own, so AICR's version identifies the artifact. This is the `aicr` binary that ran `bundle`, which is not necessarily the one that generated the recipe. |
+| `appVersion` | the payload version | The upstream chart pin for a Helm component, the git ref for a Kustomize one. Free-form, so a ref like `release-1.4` need not look like SemVer. |
+| `aicr.run/component-version` annotation | the payload version | The same value as `appVersion`, under a stable key to read from a live release. |
+| `aicr.run/generated-by` annotation | the AICR version | The same value as `version`. |
+
+To read the payload version back out of a cluster, the rule is: **use
+`aicr.run/component-version` when it is present, otherwise use the release's
+own chart version.** A component installed straight from its upstream chart
+carries neither annotation, and its release version already *is* the payload
+version. The annotation's presence is exactly the signal that the chart
+version describes the wrapper instead of what it wraps.
+
+So for the `gpu-operator-post` release generated alongside gpu-operator, a
+`helm list` reports chart `gpu-operator-post-0.22.0` — the AICR version — while
+its app version and `aicr.run/component-version` both read `v26.7.2`, the
+gpu-operator pin those manifests accompany.
+
+A component with no upstream pin — a manifest-only component, and the injected
+releases belonging to one — ships only AICR-authored content, so `appVersion`
+and the annotation report the AICR version too.
+
+A build that is not release-stamped (`aicr --version` reports `dev`) reports
+`0.0.0-dev`. Helm validates `version:` as SemVer 2 and refuses to load a chart
+whose version is not, so `dev` cannot be written through verbatim.
+
+The root chart `argocd-helm` renders is not one of these generated wrappers and
+carries neither annotation. Its `version:` tracks the recipe's
+`metadata.version` — the AICR build that generated the *recipe*, not the one
+that ran `bundle` — so on a two-step workflow where the two binaries differ, it
+will not match the wrappers alongside it. Only the `0.0.0-dev` substitution
+above is shared.
 
 Verify a bundle you received with `aicr verify` — see
 [Artifact verification](artifact-verification.md).
@@ -131,7 +404,9 @@ profile's owned paths are locked. The lock is enforced per surface:
   cannot assign `enabled`, so no `--profile` choice adds or removes a
   component. The lock rejects removing (or bundle-subsetting away) an
   owned component; changing which components are present is a
-  catalog/composition change.
+  catalog/composition change. A component the profile references as
+  `optional` has no presence lock: it may be removed, and its owned
+  value paths are enforced only when it ships.
 
 Change owned **value** paths by regenerating with
 `aicr recipe --profile name=value` instead; component presence is not
@@ -152,6 +427,83 @@ The `agentgateway` inference-gateway is **private by default**: with no
 RFC1918 ranges so it is not exposed to the public internet. Use the override
 above to admit specific clients (e.g. a corporate VPN). See
 [Inference Gateway Network Exposure](component-catalog.md#inference-gateway-network-exposure).
+
+### Size controllers for large clusters
+
+Some controllers' memory grows with node count. The controllers below ship
+default memory **limits** that cover clusters of about 2500 nodes, in the
+recipes each row names; a row with no recipe applies to all of them. Their
+**requests** are sized for small clusters, so a large cluster schedules them
+with far less reserved than they use. On large clusters, raise the requests so
+the scheduler reserves memory on the system nodes:
+
+| Controller | Override key | Resources path |
+|---|---|---|
+| GPU Operator | `gpuoperator` | `operator.resources` |
+| Network Operator (generic GB300) | `networkoperator` | `operator.resources` |
+| Maintenance Operator (Network Operator subchart, generic GB300) | `networkoperator` | `maintenance-operator-chart.operator.resources` |
+| Nodewright manager | `nodewright` | `controllerManager.manager.resources` |
+
+The Network Operator limit is sized for large clusters only in the generic
+GB300 recipe. Other recipes keep a lower limit (2Gi on OKE, the chart default
+elsewhere), so raise `limits.memory` together with the request there: a
+request above its limit is rejected.
+
+The generic GB300 recipe also sizes the NIC configuration daemon, a
+per-node DaemonSet whose pods each cache every `NicDevice` in the cluster, so
+each pod's memory grows with cluster size. Its resources come from the
+`networkoperator` values at `nicConfigurationOperator.configurationDaemon.resources`
+(256Mi request, 2Gi limit by default), which the recipe's `NicClusterPolicy`
+manifest reads. Set this path at bundle time:
+
+```bash
+aicr bundle --recipe recipe.yaml \
+  --set networkoperator:nicConfigurationOperator.configurationDaemon.resources.limits.memory=4Gi \
+  --output ./bundles
+```
+
+The `helm`, `helmfile`, `terraform`, `argocd`, and `argocd-helm` deployers
+render this manifest when the bundle is generated, so the install-time overrides
+below do not reach it. A `flux` bundle ships the manifest as a template, and Flux renders
+it at install time from the values in `network-operator-post/helmrelease.yaml`.
+Edit `spec.values.network-operator.nicConfigurationOperator.configurationDaemon.resources`
+there to resize the daemon without regenerating the bundle.
+
+At bundle time, scope each resources path in the table with its override key:
+
+```bash
+aicr bundle --recipe recipe.yaml \
+  --set gpuoperator:operator.resources.requests.memory=4Gi \
+  --set networkoperator:operator.resources.requests.memory=8Gi \
+  --set networkoperator:maintenance-operator-chart.operator.resources.requests.memory=8Gi \
+  --set nodewright:controllerManager.manager.resources.requests.memory=8Gi \
+  --output ./bundles
+```
+
+An `argocd-helm` bundle also takes these at install time, without
+regenerating. Each child Application merges the root chart's
+`.Values.<override key>` over the bundle's static values. Use a `.` after the
+override key instead of a `:`. Bundles generated before these limits were
+raised still carry the old, lower limits, so set each limit with its request:
+
+```bash
+helm install aicr-bundle . \
+  --set gpuoperator.operator.resources.requests.memory=4Gi \
+  --set gpuoperator.operator.resources.limits.memory=8Gi \
+  --set networkoperator.operator.resources.requests.memory=8Gi \
+  --set networkoperator.operator.resources.limits.memory=12Gi \
+  --set networkoperator.maintenance-operator-chart.operator.resources.requests.memory=8Gi \
+  --set networkoperator.maintenance-operator-chart.operator.resources.limits.memory=12Gi \
+  --set nodewright.controllerManager.manager.resources.requests.memory=8Gi \
+  --set nodewright.controllerManager.manager.resources.limits.memory=12Gi
+```
+
+When the root Application installs the chart, put these keys in its Helm
+values. Do not edit the child Applications: the root Application's self-heal
+reverts them.
+
+These overrides only change requests and limits. Free memory on the system
+nodes still decides whether the controllers fit.
 
 ## Enable or disable components
 
@@ -210,8 +562,13 @@ toggling the component).
 
 A component whose presence a configuration profile owns cannot be removed
 at all — `enabled=false` on it is rejected regardless of the rule above.
-NVSentinel is in that position on the AKS and GKE-COS families, whose
-`gpuStack` profiles name it; see
+NVSentinel is in that position on the AKS family, whose `gpuStack`
+profile names it. On the GKE-COS and OKE families the `gpuStack` profile
+references NVSentinel as optional, so `--set nv-sentinel:enabled=false`
+removes it, for example when NVSentinel is deployed outside AICR. The
+profile's `labeler.assumeDriverInstalled` value still applies whenever
+the bundle includes NVSentinel. A recipe generated by an earlier release
+still locks presence; regenerate it with `aicr recipe` first. See
 [NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms).
 
 The same rule applies to `--set-json`, `--set-file`, `--dynamic`, and
@@ -237,23 +594,88 @@ aicr bundle --recipe recipe.yaml \
   --output ./bundles
 ```
 
-## Prepare DRA nodes before applying upgraded bundles
+Most components treat the selectors as optional, but components that declare
+`requireNodeSelector` in the registry (`nvsentinel-mongodb`, `slinky-slurm`,
+`slurm-accounting-mariadb`) fail the bundle without them.
+`kube-prometheus-stack` requires `--system-node-selector` once it has a storage
+class, so following the bundle's PVC warning with `--storage-class` alone
+fails. See the selector rows in the
+[`aicr bundle` flag table](cli-reference.md#aicr-bundle).
 
-> **Upgrade requirement:** A bundle containing both `gpu-operator` and
-> `nvidia-dra-driver-gpu` now selects DRA kubelet-plugin nodes with
-> `nvidia.com/dra-kubelet-plugin=true` by default. The same applies to the
-> corresponding `-ocp` components. Before applying the first newly generated
-> bundle to an existing deployment, label every GPU node that must run the DRA
-> kubelet plugin. Applying the bundle first can reduce the DaemonSet to zero
-> eligible nodes, interrupting ComputeDomain/IMEX and any whole-GPU resources
-> advertised through DRA.
+## Prepare DRA nodes when opting in to eviction coordination
 
-### Set the label at node-pool provisioning time
+DRA eviction coordination is **opt-in**. By default a bundle containing both
+`gpu-operator` and `nvidia-dra-driver-gpu` adds no eviction node label, and the
+DRA kubelet plugin runs on every accelerated node with no extra labeling. The
+trade-off is that the plugin is not descheduled ahead of a GPU driver container
+restart; `aicr bundle` warns about this where GPU Operator manages the driver,
+and [DRA Driver Upgrade Eviction](cli-reference.md#dra-driver-upgrade-eviction)
+describes what can go wrong.
 
-Put the label in the **node pool definition** — an EKS managed nodegroup
-`labels` entry, a Karpenter `NodePool` `spec.template.metadata.labels` entry, or the equivalent for
-your provisioner — alongside the `nodeGroup=gpu-worker` label you already set
-there.
+Generate with `--dra-eviction-node-label key=value` to opt in. The rest of this
+section applies only then. The same applies to the corresponding `-ocp`
+components.
+
+Opting in also keeps `dra-node-labeler` in the bundle. It applies the
+configured `key=value` to every node GFD labels `nvidia.com/gpu.present=true`
+and never rewrites an existing value, so the node-pool labeling described below
+is only needed when the labeler is not in the bundle: because you removed it
+with `--set dra-node-labeler:enabled=false`, because a `bundlers` filter left
+it out, or on OpenShift, where it is not yet wired (NVIDIA/aicr#2828). A
+`bundlers` selection that names the labeler but omits the flag or one of its
+prerequisites is rejected rather than rendered without it. Everything below that says "labeler disabled" applies to
+those cases equally.
+
+### Choosing whether to opt in
+
+The label is how GPU Operator's Driver Manager finds the plugin: it deschedules
+the plugin by rewriting the label's value and restores it afterwards, so the
+plugin's `nodeSelector` has to match the label for the mechanism to work at all.
+That is what makes it a placement requirement, and why an unlabeled node ends up
+with no plugin rather than with an uncoordinated one.
+
+| | Not opted in (default) | Opted in |
+|---|---|---|
+| Node labeling | none needed | applied by `dra-node-labeler` from `nvidia.com/gpu.present`; every GPU node in the node pool definition only if the labeler is disabled |
+| Plugin placement | every accelerated node | only nodes carrying the label |
+| Driver restart | plugin is not descheduled first | plugin is descheduled and restored |
+| If a node is missed | n/a | that node silently runs without DRA |
+
+Opt in when GPU Operator manages the driver (`driver.enabled=true`). With the
+bundled `dra-node-labeler` the label follows GFD's `nvidia.com/gpu.present`, so
+nodes added later by autoscaling or replacement are labeled as soon as GFD sees
+them; the remaining gap is a GPU node GFD has not labeled and that does not
+already carry the configured `key=value`, which runs no kubelet plugin until
+one of the two appears. If you disable the labeler, opt in only when you can
+guarantee the label is set at provisioning time for every GPU node; otherwise
+the default is the safer choice: a plugin that always runs, with a documented
+risk at driver restarts, beats a plugin that silently does not run on some nodes.
+
+There is nothing to opt in to where the driver is provider-installed
+(`driver.enabled=false` — AKS `azure-managed`, GKE COS, OKE). GPU Operator
+deploys no driver pod and therefore no Driver Manager, so no restart can occur
+under the plugin and no warning is emitted.
+
+Also note the mechanism is best-effort under `k8s-driver-manager` v0.12: the
+configured label is paused in the same batch as other GPU operands and no wait
+covers the standalone DRA kubelet plugin, so ordering against DRA claim holders
+and completion of plugin teardown are not guaranteed. See
+[NVIDIA/k8s-driver-manager#250](https://github.com/NVIDIA/k8s-driver-manager/issues/250).
+
+> **Opt-in requirement (labeler disabled only):** if you pass
+> `--set dra-node-labeler:enabled=false`, label every GPU node that must run
+> the DRA kubelet plugin *before* applying the bundle. Applying it first can
+> reduce the DaemonSet to zero eligible nodes, interrupting ComputeDomain/IMEX
+> and any whole-GPU resources advertised through DRA. With the labeler in the
+> bundle there is nothing to pre-label; the plugin follows the labeler.
+
+### Set the label at node-pool provisioning time (labeler disabled)
+
+This subsection applies only when `dra-node-labeler` has been disabled. Put the
+label in the **node pool definition** — an EKS managed nodegroup `labels`
+entry, a Karpenter `NodePool` `spec.template.metadata.labels` entry, or the
+equivalent for your provisioner — alongside the `nodeGroup=gpu-worker` label
+you already set there.
 
 A one-off `kubectl label node` is a repair, not a configuration. It does not
 survive node replacement or recycling, cluster autoscaling adding GPU nodes, or
@@ -263,10 +685,13 @@ and silently runs without the DRA kubelet plugin, leaving the cluster
 because it is intermittent and node-dependent.
 
 Use `kubectl label` only to repair nodes that already exist, and fix the node
-pool definition in the same change so replacements inherit it:
+pool definition in the same change so replacements inherit it. Substitute the
+same `key=value` pair you passed to `--dra-eviction-node-label` — the examples
+below use the documented default:
 
 ```bash
-kubectl label node <node-name> nvidia.com/dra-kubelet-plugin=true
+NODE="my-gpu-node"  # replace with the GPU node to repair
+kubectl label node "${NODE}" nvidia.com/dra-kubelet-plugin=true
 kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true
 ```
 
@@ -300,13 +725,47 @@ still with no error. Revisit the node labels whenever you regenerate a bundle
 for an existing deployment, not only when building a new cluster.
 
 `aicr bundle` emits a non-blocking warning describing this requirement whenever
-both components are enabled. See
+both components are enabled and an eviction label is configured. The
+complementary opt-out warning fires only where GPU Operator manages the driver
+(`driver.enabled=true`). See
 [Storage Class](cli-reference.md#storage-class), where that warning is
 described alongside the other cluster-state dependency reported the same way.
 
+### Upgrading from a build that applied the label implicitly
+
+For a window on unreleased `main`, the eviction label was applied
+automatically rather than requested. Bundles generated in that window — via the
+CLI, the REST API, config, or a Go caller — received the
+`nvidia.com/dra-kubelet-plugin=true` selector and the matching Driver Manager
+environment entry without asking for them. No tagged release contains that
+behavior, so only clusters built from `main` in that interval are affected.
+
+At this head the same inputs produce the opposite result: omitting
+`--dra-eviction-node-label` removes both the selector and the Driver Manager
+entry. Regenerating and upgrading such a cluster therefore *drops* eviction
+coordination silently — the reverse of the direction described above, and the
+case the preceding subsection does not cover.
+
+Decide deliberately, and only two answers are defensible:
+
+- **Keep coordination.** Confirm the nodes still carry the label
+  (`kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true`), confirm the count
+  matches the GPU nodes you expect, then pass
+  `--dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true` explicitly on
+  every subsequent generation. Verify node labels *before* upgrading: passing
+  the flag against unlabeled nodes takes the DaemonSet to `DESIRED=0`.
+- **Accept the opt-out.** Regenerate without the flag and accept the documented
+  risks in [DRA Driver Upgrade
+  Eviction](cli-reference.md#dra-driver-upgrade-eviction). The node labels
+  become inert and can be removed at leisure.
+
+The opt-out warning `aicr bundle` prints bounds the blast radius at generation
+time, but it is not upgrade guidance: it fires on every unlabeled generation and
+cannot know the cluster previously had coordination.
+
 ### Custom label conventions and post-install checks
 
-If the cluster uses a different convention, generate the bundle with
+The flag both opts in and selects the convention: generate the bundle with
 `--dra-eviction-node-label key=value` and apply that exact pair to the nodes.
 AICR gives the full pair to the DRA node selector, but GPU Operator's Driver
 Manager receives only the label key because its eviction contract matches and
@@ -382,12 +841,16 @@ hook-injected resource (name and kind from the new
 `templates/` if you still have that bundle):
 
 ```bash
-# Include -n <ns> for namespaced kinds (same <ns> as release-namespace below).
-# Omit -n for cluster-scoped kinds (CRD, ClusterRole, NicClusterPolicy, …).
-kubectl label -n <ns> <kind>/<name> app.kubernetes.io/managed-by=Helm --overwrite
-kubectl annotate -n <ns> <kind>/<name> \
-  meta.helm.sh/release-name=<component>-post \
-  meta.helm.sh/release-namespace=<ns> --overwrite
+COMPONENT="my-component"  # replace with the component that owns the -post chart
+NAMESPACE="my-namespace"  # replace with the component's release namespace
+KIND="configmap"          # replace with the resource kind
+NAME="my-resource"        # replace with the resource name
+# Omit -n "${NAMESPACE}" from both commands for cluster-scoped kinds (CRD,
+# ClusterRole, NicClusterPolicy, …); release-namespace keeps it either way.
+kubectl label -n "${NAMESPACE}" "${KIND}/${NAME}" app.kubernetes.io/managed-by=Helm --overwrite
+kubectl annotate -n "${NAMESPACE}" "${KIND}/${NAME}" \
+  meta.helm.sh/release-name="${COMPONENT}-post" \
+  meta.helm.sh/release-namespace="${NAMESPACE}" --overwrite
 ```
 
 Prefer `kubectl delete` only for kinds where cascade is acceptable (for example
@@ -403,7 +866,7 @@ Namespace removes everything inside it.
 that ships a readiness test, run as a post-component Job so the deployer blocks
 on component-specific signals (e.g. GPU Operator `ClusterPolicy` state) that
 Helm and Argo CD cannot assess natively. Supported with `--deployer helm`,
-`argocd`, and `argocd-helm`; off by default.
+`argocd`, `argocd-helm`, and `terraform`; off by default.
 
 ```bash
 aicr bundle --recipe recipe.yaml --readiness-hooks --output ./bundles
@@ -417,6 +880,16 @@ For the default `helm` deployer, verify the bundle before installing it:
 cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh
 ```
 
+For the `terraform` deployer, verify in the step that generates the bundle,
+then let Terraform install it:
+
+```bash
+aicr verify ./bundles && terraform -chdir=bundles init && terraform -chdir=bundles apply
+```
+
+(A bundle generated with `--terraform-child-module` is applied from the
+configuration that calls it instead.)
+
 For GitOps deployers, commit/publish the manifests per your Argo CD or Flux
 workflow. Verify the bundle directory before it enters the repository or
 registry; a pull-based controller reconciles on its own schedule, so a pipeline
@@ -425,4 +898,5 @@ per-deployer gates and which of them the cluster can enforce, see
 [Gating Deployment on Verification](../integrator/supply-chain-verification.md#gating-deployment-on-verification).
 
 After deploying, confirm the cluster matches the recipe with
-[`aicr validate`](validation.md).
+[`aicr validate --recipe <bundle>/recipe.yaml`](validation.md#which-recipe-to-validate):
+the bundle's `recipe.yaml` records the component set it deployed.

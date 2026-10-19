@@ -38,12 +38,13 @@ type ValidatorResult struct {
 	// Stdout contains the standard output lines from the container.
 	Stdout []string
 
-	// Extra carries structured, low-cardinality outcome data parsed from the
-	// container's EmitExtra sentinel line (see ctrf.ExtraLinePrefix). It maps
-	// into TestResult.Extra and, unlike Stdout/TerminationMsg, survives the
-	// minimal redaction policy for allowlisted keys. Values are counts/enum
-	// codes only — never node names or IPs.
+	// Extra is the merged payload of the container's ExtraLinePrefix lines,
+	// copied into TestResult.Extra.
 	Extra map[string]string
+
+	// RuntimeProvenance is the derived-runtime evidence carrier parsed from the
+	// container's ProvenanceLinePrefix sentinel line; nil when none was emitted.
+	RuntimeProvenance *RuntimeProvenance
 
 	// Duration is the wall-clock execution time.
 	Duration time.Duration
@@ -174,18 +175,43 @@ func (b *Builder) AddResult(r *ValidatorResult) {
 		tr.Extra = make(map[string]string, len(r.Extra))
 		maps.Copy(tr.Extra, r.Extra)
 	}
+	if r.RuntimeProvenance != nil {
+		// Same defensive copy: the slices are caller-owned.
+		p := *r.RuntimeProvenance
+		p.OverriddenPaths = append([]string(nil), p.OverriddenPaths...)
+		p.InheritedPaths = append([]string(nil), p.InheritedPaths...)
+		tr.RuntimeProvenance = &p
+	}
 
 	b.tests = append(b.tests, tr)
 }
 
 // AddSkipped appends a skipped entry for a validator that was not executed.
 func (b *Builder) AddSkipped(name, phase, reason string) {
-	b.tests = append(b.tests, TestResult{
+	b.AddSkippedWithExtra(name, phase, reason, nil)
+}
+
+// AddSkippedWithExtra is AddSkipped with a structured Extra map attached.
+//
+// The human reason goes in Message, which the default (minimal) redaction
+// policy blanks unconditionally, so a reason that must reach a signed evidence
+// bundle also has to ride Extra, the only per-test channel redaction preserves,
+// and only for keys and values on pkg/evidence/redact's fail-closed allowlist.
+// Pass a low-cardinality enum code or count, never free-form text.
+func (b *Builder) AddSkippedWithExtra(name, phase, reason string, extra map[string]string) {
+	tr := TestResult{
 		Name:    name,
 		Status:  StatusSkipped,
 		Suite:   []string{phase},
 		Message: reason,
-	})
+	}
+	if len(extra) > 0 {
+		// Defensive copy for the same reason AddResult makes one: the caller
+		// keeps ownership of the map it passed in.
+		tr.Extra = make(map[string]string, len(extra))
+		maps.Copy(tr.Extra, extra)
+	}
+	b.tests = append(b.tests, tr)
 }
 
 // Build produces the final CTRF Report with computed summary.

@@ -30,7 +30,9 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/internal/allocmode"
@@ -1359,7 +1361,7 @@ func TestValidatePerfTuningEnvs(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected an error for a non-integer knob")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
@@ -1370,7 +1372,7 @@ func TestValidatePerfTuningEnvs(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected an error for a malformed duration knob")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
@@ -1381,7 +1383,7 @@ func TestValidatePerfTuningEnvs(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected an error for a malformed populate-timeout knob")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
@@ -1392,7 +1394,7 @@ func TestValidatePerfTuningEnvs(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected an error for a malformed health-timeout knob")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
@@ -1410,7 +1412,7 @@ func TestValidatePerfTuningEnvs(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected an error for a malformed cache-size knob")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
@@ -1428,7 +1430,7 @@ func TestValidatePerfTuningEnvs(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected an error for an unknown router-mode knob")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
@@ -1473,7 +1475,7 @@ func TestResolveRouterMode(t *testing.T) {
 				t.Fatalf("resolveRouterMode() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 				}
 				return
@@ -1555,6 +1557,41 @@ func TestResolveModel(t *testing.T) {
 	}
 }
 
+// TestResolveModelCacheStorageClass verifies the model-cache StorageClass
+// resolution precedence recipe > env > default (""): a per-accelerator
+// `inference-model-cache-storage-class` constraint wins over the catalog env
+// knob, the env knob wins over the compiled default, and a blank/absent
+// recipe value falls through. It also verifies the returned fromRecipe flag,
+// which checkStorageClassNodeCompatibility needs to target the right
+// remediation knob in its incompatibility error.
+func TestResolveModelCacheStorageClass(t *testing.T) {
+	scC := func(v string) recipe.Constraint {
+		return recipe.Constraint{Name: perfConstraintModelCacheStorageClass, Value: v}
+	}
+	tests := []struct {
+		name       string
+		ctx        *validators.Context
+		envVal     string
+		want       string
+		wantRecipe bool
+	}{
+		{"recipe wins over env", ctxWithPerfConstraints(scC("hyperdisk-balanced")), "standard-rwo", "hyperdisk-balanced", true},
+		{"recipe trimmed", ctxWithPerfConstraints(scC("  hyperdisk-balanced  ")), "", "hyperdisk-balanced", true},
+		{"no recipe → env", ctxWithPerfConstraints(), "gp3", "gp3", false},
+		{"blank recipe → env", ctxWithPerfConstraints(scC("   ")), "gp3", "gp3", false},
+		{"no recipe, no env → cluster default", ctxWithPerfConstraints(), "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envModelCacheStorageClass, tt.envVal)
+			got, gotRecipe := resolveModelCacheStorageClass(tt.ctx)
+			if got != tt.want || gotRecipe != tt.wantRecipe {
+				t.Errorf("resolveModelCacheStorageClass() = (%q, %v), want (%q, %v)", got, gotRecipe, tt.want, tt.wantRecipe)
+			}
+		})
+	}
+}
+
 // TestValidateModelID accepts well-formed Hugging Face model IDs and rejects
 // values with YAML/shell metacharacters that could break the Dynamo deploy YAML.
 func TestValidateModelID(t *testing.T) {
@@ -1566,7 +1603,7 @@ func TestValidateModelID(t *testing.T) {
 	for _, bad := range []string{"$(touch x)", "a:b", `a"b`, "a b", "a\nb", "", "../etc"} {
 		if err := validateModelID(bad); err == nil {
 			t.Errorf("validateModelID(%q) = nil, want ErrCodeInvalidRequest", bad)
-		} else if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		} else if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("validateModelID(%q) error code = %v, want ErrCodeInvalidRequest", bad, err)
 		}
 	}
@@ -1602,7 +1639,7 @@ func TestResolveConcurrencyPerGPU(t *testing.T) {
 				t.Fatalf("resolveConcurrencyPerGPU() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 				}
 				return
@@ -1637,7 +1674,7 @@ func TestResolveRoutingMode(t *testing.T) {
 				t.Fatalf("resolveRoutingMode() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 				}
 				return
@@ -1838,6 +1875,387 @@ func TestEnsureHFTokenSecret(t *testing.T) {
 		}
 		if _, err := client.CoreV1().Secrets(ns).Get(context.Background(), hfTokenSecretName, metav1.GetOptions{}); err == nil {
 			t.Error("stale HF token secret should be deleted when HF_TOKEN is unset")
+		}
+	})
+}
+
+const (
+	testValidatorNamespace = "aicr-validation"
+	testValidatorPod       = "aicr-validator-pod"
+	testWorkloadNamespace  = "aicr-inference-perf-test"
+)
+
+// pullSecretTestContext returns a validator context whose own pod, found
+// through HOSTNAME, references podSecrets as imagePullSecrets. objects seed
+// the fake clientset alongside that pod.
+func pullSecretTestContext(t *testing.T, podSecrets []string, objects ...runtime.Object) (*validators.Context, *fake.Clientset) {
+	t.Helper()
+	t.Setenv("HOSTNAME", testValidatorPod)
+	pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: testValidatorPod, Namespace: testValidatorNamespace}}
+	for _, name := range podSecrets {
+		pod.Spec.ImagePullSecrets = append(pod.Spec.ImagePullSecrets, v1.LocalObjectReference{Name: name})
+	}
+	client := fake.NewClientset(append(objects, pod)...)
+	return &validators.Context{Ctx: t.Context(), Clientset: client, Namespace: testValidatorNamespace}, client
+}
+
+func dockerConfigSecret(namespace, name, config string) *v1.Secret {
+	return &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Type:       v1.SecretTypeDockerConfigJson,
+		Data:       map[string][]byte{v1.DockerConfigJsonKey: []byte(config)},
+	}
+}
+
+func TestEnsureWorkloadPullSecrets(t *testing.T) {
+	tests := []struct {
+		name       string
+		podSecrets []string
+		objects    []runtime.Object
+		failRead   bool
+		want       []string
+		wantErr    bool
+	}{
+		{
+			name: "validator pod without pull secrets copies nothing",
+		},
+		{
+			name:       "copies every referenced secret",
+			podSecrets: []string{"regcred", "mirror"},
+			objects: []runtime.Object{
+				dockerConfigSecret(testValidatorNamespace, "regcred", `{"auths":{"a":{}}}`),
+				dockerConfigSecret(testValidatorNamespace, "mirror", `{"auths":{"b":{}}}`),
+			},
+			want: []string{"regcred", "mirror"},
+		},
+		{
+			name:       "skips a referenced secret that does not exist",
+			podSecrets: []string{"missing", "regcred"},
+			objects:    []runtime.Object{dockerConfigSecret(testValidatorNamespace, "regcred", `{"auths":{"a":{}}}`)},
+			want:       []string{"regcred"},
+		},
+		{
+			name:       "replaces a stale copy in a reused namespace",
+			podSecrets: []string{"regcred"},
+			objects: []runtime.Object{
+				dockerConfigSecret(testValidatorNamespace, "regcred", `{"auths":{"fresh":{}}}`),
+				dockerConfigSecret(testWorkloadNamespace, "regcred", `{"auths":{"stale":{}}}`),
+			},
+			want: []string{"regcred"},
+		},
+		{
+			name:       "a failed secret read fails closed",
+			podSecrets: []string{"regcred"},
+			objects:    []runtime.Object{dockerConfigSecret(testValidatorNamespace, "regcred", `{"auths":{"a":{}}}`)},
+			failRead:   true,
+			wantErr:    true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, client := pullSecretTestContext(t, tt.podSecrets, tt.objects...)
+			if tt.failRead {
+				client.PrependReactor("get", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, apierrors.NewInternalError(stderrors.New("boom"))
+				})
+			}
+
+			refs, err := ensureWorkloadPullSecrets(ctx, testWorkloadNamespace)
+			if tt.wantErr {
+				errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			got := make([]string, 0, len(refs))
+			for _, ref := range refs {
+				got = append(got, ref.Name)
+			}
+			if len(got) != len(tt.want) || (len(got) > 0 && !reflect.DeepEqual(got, tt.want)) {
+				t.Fatalf("references = %v, want %v", got, tt.want)
+			}
+
+			secrets, err := client.CoreV1().Secrets(testWorkloadNamespace).List(t.Context(), metav1.ListOptions{})
+			if err != nil {
+				t.Fatalf("list workload secrets: %v", err)
+			}
+			if len(secrets.Items) != len(tt.want) {
+				t.Errorf("workload namespace holds %d secrets, want %d", len(secrets.Items), len(tt.want))
+			}
+			for _, name := range tt.want {
+				src, err := client.CoreV1().Secrets(testValidatorNamespace).Get(t.Context(), name, metav1.GetOptions{})
+				if err != nil {
+					t.Fatalf("get source secret %q: %v", name, err)
+				}
+				dst, err := client.CoreV1().Secrets(testWorkloadNamespace).Get(t.Context(), name, metav1.GetOptions{})
+				if err != nil {
+					t.Fatalf("secret %q not copied into the workload namespace: %v", name, err)
+				}
+				if dst.Type != src.Type || !reflect.DeepEqual(dst.Data, src.Data) {
+					t.Errorf("copy of %q = (%s, %q), want (%s, %q)", name, dst.Type, dst.Data, src.Type, src.Data)
+				}
+			}
+		})
+	}
+}
+
+// TestInferencePodsReferenceWorkloadPullSecrets verifies that, given a
+// validator pod with image pull Secrets, the populate Job and every component
+// of both Dynamo templates reference only pull Secrets that exist in the
+// workload namespace.
+func TestInferencePodsReferenceWorkloadPullSecrets(t *testing.T) {
+	podSecrets := []string{"regcred", "mirror"}
+	ctx, client := pullSecretTestContext(t, podSecrets,
+		dockerConfigSecret(testValidatorNamespace, "regcred", `{"auths":{"a":{}}}`),
+		dockerConfigSecret(testValidatorNamespace, "mirror", `{"auths":{"b":{}}}`),
+	)
+	refs, err := ensureWorkloadPullSecrets(ctx, testWorkloadNamespace)
+	if err != nil {
+		t.Fatalf("ensureWorkloadPullSecrets() error: %v", err)
+	}
+	cfg := &inferenceWorkloadConfig{
+		runID:          "run-1",
+		namespace:      testWorkloadNamespace,
+		model:          "Qwen/Qwen3-8B",
+		routerMode:     dynRouterModeDefault,
+		gpuCount:       1,
+		modelCacheSize: defaultModelCacheSize,
+		pullSecrets:    refs,
+	}
+
+	assertResolvable := func(t *testing.T, owner string, names []string) {
+		t.Helper()
+		if !reflect.DeepEqual(names, podSecrets) {
+			t.Errorf("%s imagePullSecrets = %v, want %v", owner, names, podSecrets)
+		}
+		for _, name := range names {
+			if _, err := client.CoreV1().Secrets(testWorkloadNamespace).Get(t.Context(), name, metav1.GetOptions{}); err != nil {
+				t.Errorf("%s references pull secret %q, which is not in namespace %s: %v", owner, name, testWorkloadNamespace, err)
+			}
+		}
+	}
+
+	t.Run("populate Job", func(t *testing.T) {
+		job := buildModelCachePopulateJob("aicr-model-cache-populate-run-1", cfg)
+		names := make([]string, 0, len(job.Spec.Template.Spec.ImagePullSecrets))
+		for _, ref := range job.Spec.Template.Spec.ImagePullSecrets {
+			names = append(names, ref.Name)
+		}
+		assertResolvable(t, "populate Job", names)
+	})
+
+	for _, tmpl := range []string{"dynamo-deployment.yaml", "dynamo-deployment-gateway-epp.yaml"} {
+		t.Run(tmpl, func(t *testing.T) {
+			obj, err := parseYAMLTemplate(filepath.Join("testdata", "inference", tmpl), inferenceTemplateData(cfg))
+			if err != nil {
+				t.Fatalf("parseYAMLTemplate() error: %v", err)
+			}
+			if err = applyInferenceWorkerScheduling(obj, cfg); err != nil {
+				t.Fatalf("applyInferenceWorkerScheduling() error: %v", err)
+			}
+			components, _, err := unstructured.NestedSlice(obj.Object, "spec", "components")
+			if err != nil || len(components) == 0 {
+				t.Fatalf("read spec.components: %v (len %d)", err, len(components))
+			}
+			for _, raw := range components {
+				component, _ := raw.(map[string]any)
+				name, _ := component[keyName].(string)
+				secrets, _, err := unstructured.NestedSlice(componentPodSpec(t, obj, name), "imagePullSecrets")
+				if err != nil {
+					t.Fatalf("read %s imagePullSecrets: %v", name, err)
+				}
+				names := make([]string, 0, len(secrets))
+				for _, s := range secrets {
+					entry, _ := s.(map[string]any)
+					secretName, _ := entry[keyName].(string)
+					names = append(names, secretName)
+				}
+				assertResolvable(t, name, names)
+			}
+		})
+	}
+}
+
+// TestApplyInferenceWorkerScheduling_NoPullSecrets verifies components carry
+// no imagePullSecrets when the validator pod has none.
+func TestApplyInferenceWorkerScheduling_NoPullSecrets(t *testing.T) {
+	cfg := &inferenceWorkloadConfig{namespace: testWorkloadNamespace, model: "Qwen/Qwen3-8B", routerMode: dynRouterModeDefault, gpuCount: 1}
+	obj, err := parseYAMLTemplate(filepath.Join("testdata", "inference", "dynamo-deployment.yaml"), inferenceTemplateData(cfg))
+	if err != nil {
+		t.Fatalf("parseYAMLTemplate() error: %v", err)
+	}
+	if err := applyInferenceWorkerScheduling(obj, cfg); err != nil {
+		t.Fatalf("applyInferenceWorkerScheduling() error: %v", err)
+	}
+	for _, name := range []string{"Frontend", "VllmDecodeWorker"} {
+		if _, found, _ := unstructured.NestedSlice(componentPodSpec(t, obj, name), "imagePullSecrets"); found {
+			t.Errorf("%s carries imagePullSecrets with no validator pull secrets", name)
+		}
+	}
+}
+
+// TestEnsureNamespace covers namespace adoption: a fresh namespace is
+// created and labeled, an existing one is reused only if it carries our
+// ownership labels, and a create-race winner (AlreadyExists) is read back
+// and held to the same ownership check, including waiting out a winner
+// that's already terminating.
+func TestEnsureNamespace(t *testing.T) {
+	const ns = "aicr-inference-perf-deadbeef"
+	const component = labels.ValueInferencePerf
+
+	t.Run("creates a fresh namespace", func(t *testing.T) {
+		client := fake.NewClientset()
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		got, created, err := ensureNamespace(ctx, ns, component)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Labels[labels.ManagedBy] != labels.ValueValidator || got.Labels[labels.Component] != component {
+			t.Errorf("created namespace labels = %v, want ManagedBy/Component set", got.Labels)
+		}
+		if !created {
+			t.Error("expected created=true for a brand new namespace")
+		}
+	})
+
+	t.Run("reuses an existing namespace it owns", func(t *testing.T) {
+		owned := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, Labels: map[string]string{
+			labels.ManagedBy: labels.ValueValidator, labels.Component: component,
+		}}}
+		client := fake.NewClientset(owned)
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		got, created, err := ensureNamespace(ctx, ns, component)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Name != ns {
+			t.Errorf("got namespace %q, want %q", got.Name, ns)
+		}
+		if created {
+			t.Error("expected created=false for a reused namespace")
+		}
+	})
+
+	t.Run("refuses to adopt an existing namespace it doesn't own", func(t *testing.T) {
+		foreign := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}
+		client := fake.NewClientset(foreign)
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		if _, _, err := ensureNamespace(ctx, ns, component); errorstest.ReportedCode(err) != errors.ErrCodeConflict {
+			t.Errorf("got %v, want ErrCodeConflict", err)
+		}
+	})
+
+	t.Run("refuses to adopt an unowned create-race winner", func(t *testing.T) {
+		client := fake.NewClientset()
+		client.PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			createAction, ok := action.(k8stesting.CreateAction)
+			obj, objOK := createAction.GetObject().(*v1.Namespace)
+			if !ok || !objOK || obj.Name != ns {
+				return false, nil, nil
+			}
+			// A concurrent, unrelated caller won the race to create ns first.
+			winner := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}
+			if err := client.Tracker().Add(winner); err != nil {
+				return true, nil, err
+			}
+			return true, nil, apierrors.NewAlreadyExists(v1.Resource("namespaces"), ns)
+		})
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		if _, _, err := ensureNamespace(ctx, ns, component); errorstest.ReportedCode(err) != errors.ErrCodeConflict {
+			t.Errorf("got %v, want ErrCodeConflict", err)
+		}
+	})
+
+	t.Run("adopts an owned create-race winner without claiming to have created it", func(t *testing.T) {
+		client := fake.NewClientset()
+		client.PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			createAction, ok := action.(k8stesting.CreateAction)
+			obj, objOK := createAction.GetObject().(*v1.Namespace)
+			if !ok || !objOK || obj.Name != ns {
+				return false, nil, nil
+			}
+			// A concurrent caller using the same labels won the race.
+			winner := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, Labels: map[string]string{
+				labels.ManagedBy: labels.ValueValidator, labels.Component: component,
+			}}}
+			if err := client.Tracker().Add(winner); err != nil {
+				return true, nil, err
+			}
+			return true, nil, apierrors.NewAlreadyExists(v1.Resource("namespaces"), ns)
+		})
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		got, created, err := ensureNamespace(ctx, ns, component)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Name != ns {
+			t.Errorf("got namespace %q, want %q", got.Name, ns)
+		}
+		if created {
+			t.Error("expected created=false: a concurrent caller's Create won the race, not ours")
+		}
+	})
+
+	t.Run("waits for a terminating create-race winner then creates its own", func(t *testing.T) {
+		client := fake.NewClientset()
+		var seeded bool
+		client.PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			createAction, ok := action.(k8stesting.CreateAction)
+			obj, objOK := createAction.GetObject().(*v1.Namespace)
+			if !ok || !objOK || obj.Name != ns || seeded {
+				return false, nil, nil // seeded: the winner is gone, let the retry Create through.
+			}
+			seeded = true
+			now := metav1.Now()
+			winner := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{
+				Name: ns, DeletionTimestamp: &now, Finalizers: []string{"kubernetes"},
+			}}
+			if err := client.Tracker().Add(winner); err != nil {
+				return true, nil, err
+			}
+			return true, nil, apierrors.NewAlreadyExists(v1.Resource("namespaces"), ns)
+		})
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			_ = client.CoreV1().Namespaces().Delete(context.Background(), ns, metav1.DeleteOptions{})
+		}()
+
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		got, created, err := ensureNamespace(ctx, ns, component)
+		if err != nil {
+			t.Fatalf("expected the retry to succeed once the winner finished terminating, got: %v", err)
+		}
+		if got.DeletionTimestamp != nil {
+			t.Error("returned namespace is still terminating")
+		}
+		if !created {
+			t.Error("expected created=true: our own Create landed after the prior winner finished terminating")
+		}
+	})
+
+	t.Run("waits for a pre-existing terminating namespace then creates its own", func(t *testing.T) {
+		now := metav1.Now()
+		terminating := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{
+			Name: ns, DeletionTimestamp: &now, Finalizers: []string{"kubernetes"},
+		}}
+		client := fake.NewClientset(terminating)
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			_ = client.CoreV1().Namespaces().Delete(context.Background(), ns, metav1.DeleteOptions{})
+		}()
+
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		got, created, err := ensureNamespace(ctx, ns, component)
+		if err != nil {
+			t.Fatalf("expected creation to succeed once the terminating namespace finished deleting, got: %v", err)
+		}
+		if got.Labels[labels.ManagedBy] != labels.ValueValidator || got.Labels[labels.Component] != component {
+			t.Errorf("created namespace labels = %v, want ManagedBy/Component set", got.Labels)
+		}
+		if !created {
+			t.Error("expected created=true: our own Create landed after the pre-existing namespace finished terminating")
 		}
 	})
 }
@@ -2408,7 +2826,7 @@ func TestCountUsedGPUsByNode(t *testing.T) {
 		if err == nil {
 			t.Fatalf("countUsedGPUsByNode() = %v, want error — a list failure must not report GPUs as free", got)
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 			t.Errorf("error code = %v, want ErrCodeInternal", err)
 		}
 	})
@@ -2423,7 +2841,7 @@ func TestCountUsedGPUsByNode(t *testing.T) {
 		if err == nil {
 			t.Fatalf("countUsedGPUsByNode() = %v, want error — an ambiguous DRA lookup must not be treated as zero usage", got)
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 			t.Errorf("error code = %v, want ErrCodeInternal", err)
 		}
 	})
@@ -2467,7 +2885,7 @@ func TestCountUsedGPUsByNode(t *testing.T) {
 				if err == nil {
 					t.Fatalf("countUsedGPUsByNode() = %v, want error — a canceled scan must not report GPUs as free", got)
 				}
-				if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 					t.Errorf("error code = %v, want ErrCodeTimeout for %v", err, ctx.Err())
 				}
 			})
@@ -2506,7 +2924,7 @@ func TestCountUsedGPUsByNode(t *testing.T) {
 		if err == nil {
 			t.Fatalf("countUsedGPUsByNode() = %v, want error — a canceled scan must not report success", got)
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("error code = %v, want ErrCodeTimeout", err)
 		}
 	})
@@ -2526,7 +2944,7 @@ func TestCountUsedGPUsByNode(t *testing.T) {
 		if err == nil {
 			t.Fatalf("countUsedGPUsByNode() = %v, want error — a canceled scan with an empty List must not report success", got)
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("error code = %v, want ErrCodeTimeout", err)
 		}
 	})
@@ -2937,6 +3355,25 @@ func TestNodeGPUCount(t *testing.T) {
 	}
 }
 
+func TestInferenceResultExtra(t *testing.T) {
+	got := inferenceResultExtra(&inferenceResult{
+		throughput:      5012.345,
+		ttftP99Ms:       187.06,
+		status:          "ok",
+		gpuCount:        4,
+		gpuCountPerNode: 8,
+	})
+	want := map[string]string{
+		validators.ExtraKeyThroughputTokPerSec: "5012.3",
+		validators.ExtraKeyTTFTP99Ms:           "187.1",
+		validators.ExtraKeyGPUsBenchmarked:     "4",
+		validators.ExtraKeyGPUsPerNode:         "8",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("inferenceResultExtra() = %v, want %v", got, want)
+	}
+}
+
 func TestScaledThroughputThreshold(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -3096,7 +3533,7 @@ func TestWaitForEndpointReady_TimesOutWhenAlwaysEmpty(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected timeout error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("error code = %v, want ErrCodeTimeout (err=%v)", err, err)
 	}
 }
@@ -3321,7 +3758,7 @@ func TestRejectUnsupportedGPUTopology(t *testing.T) {
 			if err == nil {
 				t.Fatal("rejectUnsupportedGPUTopology() = nil, want fail-fast error")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 			}
 			for _, want := range tt.wantErr {

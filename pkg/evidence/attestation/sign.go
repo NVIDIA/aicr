@@ -57,9 +57,9 @@ type SignExistingOptions struct {
 	PlainHTTP   bool
 	InsecureTLS bool
 
-	// OIDCResolve configures keyless-signing token resolution, deferred
-	// until adjacent to SignStatement so Fulcio's nonce-binding window is
-	// respected.
+	// OIDCResolve selects the signing mode: the KMS key SigningKey names,
+	// or otherwise keyless, with token resolution deferred until adjacent to
+	// SignStatement so Fulcio's nonce-binding window is respected.
 	OIDCResolve bundleattest.ResolveOptions
 }
 
@@ -84,6 +84,9 @@ func SignExisting(ctx context.Context, opts SignExistingOptions) error {
 	if err := ValidateSignablePointer(opts.Pointer); err != nil {
 		return err
 	}
+	if err := validateEvidenceSigningMode(opts.OIDCResolve); err != nil {
+		return err
+	}
 	reference := opts.Pointer.Attestations[0].Bundle.OCI
 	if opts.Artifact.Digest == "" || opts.Artifact.MediaType == "" || opts.Artifact.Size <= 0 {
 		return errors.New(errors.ErrCodeInvalidRequest,
@@ -94,28 +97,25 @@ func SignExisting(ctx context.Context, opts SignExistingOptions) error {
 	if err != nil {
 		return err
 	}
+	// The pointer's recorded predicateType (from Publish) and the bundle's
+	// (read back from the same on-disk statement) must agree before an OIDC
+	// round-trip and a Fulcio cert are spent. A divergence means the
+	// signature that follows would bind a predicateType the verifier
+	// rejects on digest mismatch.
+	pointerType := opts.Pointer.Attestations[0].Bundle.PredicateType
+	if pointerType != "" && pointerType != bundle.PredicateType {
+		return errors.New(errors.ErrCodeConflict,
+			"pointer predicateType "+pointerType+" does not match the pushed bundle's statement predicateType "+
+				bundle.PredicateType+". Re-publish the bundle before signing")
+	}
 
 	artifactDigestHex := strings.TrimPrefix(opts.Artifact.Digest, "sha256:")
-	artifactStmt, err := BuildArtifactStatement(oci.TrimScheme(reference), artifactDigestHex, bundle.Predicate)
+	artifactStmt, err := BuildArtifactStatement(oci.TrimScheme(reference), artifactDigestHex, bundle.PredicateType, bundle.Predicate)
 	if err != nil {
 		return err
 	}
 
-	logOIDCResolveMode(opts.OIDCResolve)
-	resolveCtx, resolveCancel := context.WithTimeout(ctx, defaults.OIDCAuthTimeout)
-	token, tokenErr := bundleattest.ResolveOIDCToken(resolveCtx, opts.OIDCResolve)
-	resolveCancel()
-	if tokenErr != nil {
-		return tokenErr
-	}
-
-	signCtx, signCancel := context.WithTimeout(ctx, defaults.EvidenceBundleSignTimeout)
-	defer signCancel()
-	// Shared mapper keeps evidence signing in lockstep with bundle/catalog: the
-	// Rekor v2 signing-config selection (ResolveOptions.UseTUFSigningConfig) is
-	// carried through, not just the Fulcio/Rekor endpoints.
-	signRes, err := bundleattest.SignStatement(signCtx, artifactStmt,
-		bundleattest.SignOptionsFromResolve(token, opts.OIDCResolve))
+	signRes, err := signEvidenceStatement(ctx, artifactStmt, opts.OIDCResolve)
 	if err != nil {
 		return err
 	}
@@ -148,8 +148,66 @@ func SignExisting(ctx context.Context, opts SignExistingOptions) error {
 		"referrerDigest", referrer.Digest,
 		"mainArtifactDigest", opts.Artifact.Digest,
 		"recipe", bundle.RecipeName,
-		"signer", signRes.Identity)
+		"signer", opts.Pointer.Attestations[0].Signer.Identity)
 
+	return nil
+}
+
+// signEvidenceStatement signs an evidence artifact Statement in the mode opts
+// selects: with the KMS key opts.SigningKey names, or otherwise keylessly with
+// a Fulcio certificate for an OIDC token resolved here, adjacent to the sign,
+// so Fulcio's nonce-binding window is respected. Both modes map the signing
+// target through the shared bundle helpers, keeping evidence signing in
+// lockstep with bundle signing, including the Rekor v2 signing-config
+// selection (ResolveOptions.UseTUFSigningConfig).
+func signEvidenceStatement(ctx context.Context, statementJSON []byte, opts bundleattest.ResolveOptions) (*bundleattest.SignedAttestation, error) {
+	if err := validateEvidenceSigningMode(opts); err != nil {
+		return nil, err
+	}
+	if opts.SigningKey != "" {
+		signCtx, cancel := context.WithTimeout(ctx, defaults.EvidenceBundleSignTimeout)
+		defer cancel()
+		return bundleattest.SignStatementWithKey(signCtx, statementJSON, opts)
+	}
+
+	logOIDCResolveMode(opts)
+	// OIDCAuthTimeout caps interactive browser / device-code flows so a
+	// stalled user does not hold the parent (sign) context open
+	// indefinitely; pre-fetched and ambient paths complete well below this
+	// bound, so the cap only kicks in on the genuinely interactive paths
+	// that match defaults.OIDCAuthTimeout's intent.
+	resolveCtx, resolveCancel := context.WithTimeout(ctx, defaults.OIDCAuthTimeout)
+	token, err := bundleattest.ResolveOIDCToken(resolveCtx, opts)
+	resolveCancel()
+	if err != nil {
+		return nil, err
+	}
+
+	signCtx, cancel := context.WithTimeout(ctx, defaults.EvidenceBundleSignTimeout)
+	defer cancel()
+	return bundleattest.SignStatement(signCtx, statementJSON, bundleattest.SignOptionsFromResolve(token, opts))
+}
+
+// validateEvidenceSigningMode rejects a signing request no evidence signature
+// could satisfy, so callers can fail before pushing or pulling anything: a
+// signing key that names no supported KMS scheme or comes with keyless-only
+// options, or DisableTLogUpload without a signing key. A keyless signature without a transparency entry has no
+// timestamp inside its certificate's ten-minute validity window, so it could
+// never verify.
+func validateEvidenceSigningMode(opts bundleattest.ResolveOptions) error {
+	if opts.SigningKey != "" {
+		if opts.IdentityToken != "" || opts.DeviceFlow || opts.FulcioURL != "" {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				"a signing key selects KMS signing and cannot be combined with an identity token, "+
+					"the OIDC device flow, or a Fulcio URL")
+		}
+		return bundleattest.ValidateSigningKeyRef(opts.SigningKey)
+	}
+	if opts.DisableTLogUpload {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"disabling the transparency log upload requires a signing key: "+
+				"a keyless signature cannot be verified without a Rekor entry")
+	}
 	return nil
 }
 
@@ -179,16 +237,22 @@ func ValidateSignablePointer(p *Pointer) error {
 }
 
 // PointerSignerFromSignature builds the pointer's signer block from a
-// signing result, applying the same zero-Rekor rule as the emit path:
+// signing result. A key signature (non-empty KeyFingerprint) records
+// KeySignerIssuer and the key fingerprint rather than the KMS key URI, which
+// names a cloud account and is not recoverable from the signed bundle. It
+// applies the same zero-Rekor rule as the emit path:
 // SignedAttestation.RekorLogIndex uses 0 as the "no Rekor entry" sentinel
-// (e.g. --no-rekor), so this maps 0 to a nil index. A genuine Rekor index 0
-// is therefore indistinguishable from "no entry" at this boundary — an
+// (e.g. --tlog-upload=false), so this maps 0 to a nil index. A genuine Rekor
+// index 0 is therefore indistinguishable from "no entry" at this boundary — an
 // accepted limitation, since the index is informational, not the trust anchor.
 func PointerSignerFromSignature(sig *bundleattest.SignedAttestation) *PointerSigner {
 	if sig == nil {
 		return nil
 	}
 	signer := &PointerSigner{Identity: sig.Identity, Issuer: sig.Issuer}
+	if sig.KeyFingerprint != "" {
+		signer = &PointerSigner{Identity: sig.KeyFingerprint, Issuer: KeySignerIssuer}
+	}
 	if sig.RekorLogIndex > 0 {
 		idx := sig.RekorLogIndex
 		signer.RekorLogIndex = &idx

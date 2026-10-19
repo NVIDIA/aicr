@@ -18,7 +18,10 @@
 namespace: gpu-operator
 subscription:
   name: gpu-operator-certified
-  channel: v25.10
+  # v26.7 carries gpu-operator v26.7.1, certified for OCP 4.18-4.22. A minor
+  # channel rather than stable, so a cluster never crosses a release line on
+  # its own under Automatic approval.
+  channel: v26.7
   source: certified-operators
   sourceNamespace: openshift-marketplace
   installPlanApproval: Automatic

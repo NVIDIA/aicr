@@ -39,7 +39,24 @@ const (
 	// (selection, advertiser, policy-descriptor identity). Enforcement is
 	// bidirectional: v2 requires the profile block, and a profile-bearing
 	// predicate on v1 is rejected.
+	//
+	// v1 and v2 are retained only to keep already-signed evidence
+	// verifiable. PredicateTypeV3 is used for all newly produced evidence.
 	PredicateTypeV2 = "https://" + header.Domain + "/recipe-evidence/v2"
+
+	// PredicateTypeV3 is the predicateType URI for recipe evidence whose
+	// predicate.recipe.digest is computed with
+	// CanonicalizeRecipeYAMLV3, excluding metadata.version (the CLI version
+	// that generated the recipe) from the hashed bytes. Two binaries built
+	// differently for the same commit and the same recipe therefore
+	// produce the same digest.
+	//
+	// The profile block (Predicate.Profile) may be present or absent
+	// regardless of type, unlike v1/v2 where the type alone signaled
+	// profile presence. Existing v1/v2 evidence remains verifiable under
+	// its original algorithm, but must be regenerated and re-signed as v3
+	// to be recognized as current by a v3-aware digest comparison.
+	PredicateTypeV3 = "https://" + header.Domain + "/recipe-evidence/v3"
 
 	// PredicateSchemaVersion is the recipe-evidence predicate schema version.
 	PredicateSchemaVersion = "1.0.0"
@@ -126,10 +143,15 @@ func CTRFRelPath(p Phase) string {
 // Fingerprint and CriteriaMatch are pkg/fingerprint types used
 // directly so the predicate-v1 schema stays exactly aligned with what
 // fingerprint.FromMeasurements and Fingerprint.Match produce.
+//
+// AICRCommit is the git commit the aicr binary was built from. It is
+// omitted when the binary carries no valid commit stamp, so evidence from
+// an unstamped build serializes without the field.
 type Predicate struct {
 	SchemaVersion           string                  `json:"schemaVersion" yaml:"schemaVersion"`
 	AttestedAt              time.Time               `json:"attestedAt" yaml:"attestedAt"`
 	AICRVersion             string                  `json:"aicrVersion" yaml:"aicrVersion"`
+	AICRCommit              string                  `json:"aicrCommit,omitempty" yaml:"aicrCommit,omitempty"`
 	ValidatorCatalogVersion string                  `json:"validatorCatalogVersion" yaml:"validatorCatalogVersion"`
 	ValidatorImages         []ValidatorImage        `json:"validatorImages" yaml:"validatorImages"`
 	Recipe                  RecipeRef               `json:"recipe" yaml:"recipe"`
@@ -149,9 +171,10 @@ type Predicate struct {
 	Redaction *RedactionInfo `json:"redaction,omitempty" yaml:"redaction,omitempty"`
 
 	// Profile is present exactly when the attested recipe carries
-	// metadata.selectedProfile; it upgrades the statement to
-	// PredicateTypeV2. nil keeps the v1 predicate byte-identical for
-	// unprofiled recipes.
+	// metadata.selectedProfile, and nil otherwise. Under PredicateTypeV3 its
+	// presence is independent of the statement type. Under the legacy V1/V2
+	// types its presence determines the type, nil selects V1 and set
+	// selects V2.
 	Profile *ProfilePredicate `json:"profile,omitempty" yaml:"profile,omitempty"`
 }
 
@@ -189,7 +212,9 @@ type RedactionInfo struct {
 // because pushed bundles use the OCI artifact digest as the subject
 // so cosign can discover the signature via the Referrers API; the
 // recipe identity therefore needs a stable home in the signed
-// payload. Digest is sha256(canonicalize(recipe.yaml)) hex.
+// payload. Digest is sha256(canonicalize(recipe.yaml)) hex, using
+// whichever canonicalization (legacy or content-only) the enclosing
+// statement's predicateType requires. See SubjectDigestForType.
 type RecipeRef struct {
 	Name   string `json:"name" yaml:"name"`
 	Digest string `json:"digest" yaml:"digest"`
@@ -292,12 +317,21 @@ type PointerBundle struct {
 	PredicateType string `json:"predicateType" yaml:"predicateType"`
 }
 
-// PointerSigner records OIDC identity claims for the attestation
-// signer. Present only on signed bundles (see PointerAttestation.Signer
-// for the unsigned case). RekorLogIndex is nil when no Rekor entry was
-// created (e.g., signed with --no-rekor); a nil pointer distinguishes
-// that case from a legitimate Rekor index 0 — the first-ever Rekor
-// entry occupies that position.
+// KeySignerIssuer is the PointerSigner.Issuer of a bundle signed with a KMS
+// key rather than a keyless Fulcio certificate. A key signature carries no
+// OIDC issuer, so the pointer records this fixed value and identifies the
+// signer by its public key fingerprint instead.
+const KeySignerIssuer = "key"
+
+// PointerSigner records the attestation signer's identity claims. Present
+// only on signed bundles (see PointerAttestation.Signer for the unsigned
+// case). A keyless signature records the Fulcio certificate's OIDC identity
+// and issuer; a KMS key signature records Issuer KeySignerIssuer and, as
+// Identity, the key's "sha256:<hex>" fingerprint (SHA-256 of the PKIX DER
+// public key). RekorLogIndex is nil when no Rekor entry was created (e.g.,
+// signed with --tlog-upload=false); a nil pointer distinguishes that case
+// from a legitimate Rekor index 0 — the first-ever Rekor entry occupies that
+// position.
 type PointerSigner struct {
 	Identity      string `json:"identity" yaml:"identity"`
 	Issuer        string `json:"issuer" yaml:"issuer"`

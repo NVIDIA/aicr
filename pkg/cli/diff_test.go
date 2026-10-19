@@ -291,7 +291,7 @@ func TestDiffCmd_FailOnDriftStructuredFields(t *testing.T) {
 func writeStructuredSnapshot(t *testing.T, path, nodeName, pfName string) {
 	t.Helper()
 	content := `kind: Snapshot
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata: {}
 measurements:
   - type: Network
@@ -315,7 +315,7 @@ measurements:
 func writeSnapshotWithVersion(t *testing.T, path, version string) {
 	t.Helper()
 	content := `kind: Snapshot
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata: {}
 measurements:
   - type: K8s
@@ -428,7 +428,7 @@ func writeMinimalSnapshot(t *testing.T, dir, name string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
 	content := `kind: Snapshot
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata: {}
 measurements:
   - type: K8s

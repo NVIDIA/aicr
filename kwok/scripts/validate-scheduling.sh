@@ -103,13 +103,20 @@
 #   KWOK_GITEA_PASSWORD      (flux-git / argocd-git) Password for KWOK_GITEA_USER.
 #                            CI-only credential for the ephemeral in-cluster
 #                            Gitea — not a secret. Default: aicr-kwok-ci.
+#   KWOK_MIXINS              Comma-separated opt-in mixins to compose onto the
+#                            recipe's leaf overlay, for mixins no shipped
+#                            recipe composes. Default: none.
 #
 # This script:
 # 1. Generates a recipe from the cluster config
 # 2. Generates a bundle from the recipe
 # 3. Deploys the bundle to the KWOK cluster (Helm, Argo CD, or Flux per --deployer)
 # 4. Verifies all pods reach Running state (KWOK auto-transitions them)
-# 5. Reports success/failure
+# 5. Reads the installed inventory back with `aicr upgrade-check --from
+#    cluster` and requires it to agree, component for component, with the
+#    same check run against the bundle on disk (ADR-021 acceptance criterion
+#    4, issue #2531)
+# 6. Reports success/failure
 #
 # Exit codes:
 #    0  success
@@ -137,6 +144,15 @@ REPO_ROOT="$(cd "${KWOK_DIR}/.." && pwd)"
 # shellcheck source=lib/cleanup.sh
 source "${SCRIPT_DIR}/lib/cleanup.sh"
 source "${SCRIPT_DIR}/lib/sync-budget.sh"
+# aicr_deployer_for: the matrix deployer name (argocd-git, flux-oci) is a
+# {deployer, source} pair; aicr's --deployer names only the deployer. Every
+# site below that shells out to aicr reads the mapping from there.
+# shellcheck source=lib/deployer-map.sh
+source "${SCRIPT_DIR}/lib/deployer-map.sh"
+# Comparison half of the inventory read-back; kept out of this script so the
+# negative cases can be exercised against fixture reports without a cluster.
+# shellcheck source=lib/upgrade-readback.sh
+source "${SCRIPT_DIR}/lib/upgrade-readback.sh"
 
 # Colors for output
 RED='\033[0;31m'
@@ -156,6 +172,11 @@ RELEASE_NAME="${KWOK_RELEASE:-aicr-test}"
 WORK_DIR=""
 AICR_BIN=""
 KEEP_NAMESPACE=false
+# Recipe under test. Global (not just main()'s local) for the same reason
+# ARGOCD_ROOT_APP is: the EXIT trap needs to see it, and it keys the
+# diagnostic output directory so recipes can't overwrite each other's
+# capture when run-all-recipes.sh loops over several in one cluster.
+RECIPE_UNDER_TEST=""
 
 # Deployer selection (issue #843). Set by --deployer flag in main().
 # When DEPLOYER != "helm", generate_bundle pushes to OCI and deploy_bundle
@@ -258,10 +279,154 @@ resolve_flux_root_names() {
     esac
 }
 
+# Dump pod logs/describe/endpointslices for every non-system namespace before
+# cleanup() tears them down. Best-effort and namespace-agnostic (no
+# component-specific selectors) so it stays useful for any future operator
+# failure under KWOK, not just today's incident.
+#
+# Writes into /tmp/kwok-debug-artifacts/pod-logs/, the same well-known path
+# the calling GitHub Action's "Collect debug artifacts" step already
+# mkdir -p's and "Upload debug artifacts" already uploads on failure — no
+# workflow changes needed for this to reach the artifact.
+#
+# Runs from inside cleanup()'s EXIT trap, which fires before the
+# composite action's failure() steps ever execute. Without this, cleanup()'s
+# own helm-uninstall/namespace-delete below destroys the evidence first —
+# see NVIDIA/nodewright#571 for the incident that surfaced the gap.
+capture_failure_diagnostics() {
+    # Keyed on the recipe: run-all-recipes.sh loops over several recipes in
+    # one shared cluster (`make kwok-test-all` runs the whole set), each
+    # invoking this capture separately against a largely fixed namespace
+    # set. With a shared directory, a later recipe failing early — before
+    # its pods exist, or with the budget already spent — would leave
+    # zero-byte files (the `>` redirects below truncate before the command
+    # runs) on top of an earlier recipe's good capture, destroying the very
+    # evidence this function exists to preserve.
+    local out_dir="/tmp/kwok-debug-artifacts/pod-logs/${RECIPE_UNDER_TEST:-unknown-recipe}"
+    mkdir -p "$out_dir" 2>/dev/null || return 0
+
+    # Hard overall budget, not just per-call timeouts: a two-pod namespace
+    # alone could otherwise burn 30s(list) + 2*30s(logs) + 30s(endpoints) +
+    # 30s(describe) = 150s, and a slow apiserver is exactly the failure mode
+    # this runs under. Every namespace/pod iteration checks this before
+    # starting, so a stall stops the whole pass rather than one command.
+    #
+    # 30s, deliberately small: kwok-test/action.yml reserves a 240s margin,
+    # but only ~180s of that is post-gate work, and cleanup()'s own teardown
+    # below already draws on it unbounded (up to 120s for the Argo CD root
+    # Application delete, 60s per Helm uninstall across every release, plus
+    # the namespace sweep). This capture runs ahead of all of that, so its
+    # budget is not free — overrunning risks the job timeout killing
+    # teardown, `kind export logs`, AND the artifact upload, which would
+    # lose more evidence than this function captures.
+    local deadline=$(( $(date +%s) + 30 ))
+    budget_left() { (( $(date +%s) < deadline )); }
+    # Caps EVERY command to whatever's left of the overall budget, not just
+    # its own default — so a command starting near the deadline can't run
+    # past it (checked once at loop-entry is not enough: the last commands
+    # in a namespace's pass, endpointslices/describe, ran after the pod
+    # loop with no further check). Returns 124 immediately, without
+    # running anything, once the budget is gone.
+    run_capped() {
+        local default_t=$1; shift
+        local remaining=$(( deadline - $(date +%s) ))
+        (( remaining <= 0 )) && return 124
+        local cap=$default_t
+        (( remaining < cap )) && cap=$remaining
+        timeout "${cap}s" "$@"
+    }
+
+    # Preserve partial stdout in the primary artifact, while recording
+    # stderr and a non-zero status in a companion file. This keeps an empty
+    # successful response distinguishable from an API error or timeout.
+    # Always returns success: diagnostics must never interrupt teardown or
+    # replace the script's original exit code.
+    capture_to_file() {
+        local default_t=$1
+        local output_file=$2
+        shift 2
+        local stderr_file="${output_file%.*}.stderr"
+        local rc=0
+
+        run_capped "$default_t" "$@" > "$output_file" 2> "$stderr_file" || rc=$?
+        if (( rc != 0 )); then
+            printf '[diagnostic fetch FAILED or timed out, rc=%d]\n' "$rc" >> "$stderr_file" || true
+        fi
+        return 0
+    }
+
+    local system_ns="${SYSTEM_NS_PATTERN}"
+    local namespaces ns_rc=0
+    namespaces=$(run_capped 10 kubectl get ns -o jsonpath='{.items[*].metadata.name}' \
+        2>"${out_dir}/_namespace-discovery.stderr") || ns_rc=$?
+    if (( ns_rc != 0 )); then
+        echo "[namespace discovery FAILED or timed out, rc=${ns_rc}]" >> "${out_dir}/_namespace-discovery.stderr" || true
+    fi
+    namespaces=$(printf '%s' "$namespaces" | tr ' ' '\n' | grep -vE "^(${system_ns})$" || true)
+
+    for ns in $namespaces; do
+        budget_left || { log_info "Diagnostic capture budget exhausted — stopping"; break; }
+        capture_to_file 10 "${out_dir}/${ns}-pods.txt" kubectl get pods -n "$ns" -o wide
+        # run-all-recipes.sh reuses a fixed namespace (KWOK_NAMESPACE,
+        # default aicr-kwok-test) across every recipe in its loop, each
+        # invoking this script — and this capture — separately. Truncate
+        # before the pod loop so a second failing recipe in the same job
+        # doesn't append onto the first failure's log.
+        : > "${out_dir}/${ns}-logs.txt" 2>/dev/null || true
+
+        local pod_list pod_rc=0
+        pod_list=$(run_capped 10 kubectl get pods -n "$ns" -o name \
+            2>"${out_dir}/${ns}-pod-discovery.stderr") || pod_rc=$?
+        if (( pod_rc != 0 )); then
+            echo "[pod discovery FAILED or timed out, rc=${pod_rc}]" >> "${out_dir}/${ns}-pod-discovery.stderr" || true
+        fi
+
+        # Per-pod (not label-selected) so this works regardless of chart
+        # label conventions. Merge stderr into the log file with a
+        # success/failure marker per pod — an absent log line must be
+        # distinguishable from a failed/timed-out fetch (NVIDIA/nodewright#571
+        # hinges on exactly that distinction). The redirect itself is
+        # guarded with `|| true`: an unguarded `>>` failure here (e.g. the
+        # output dir vanishing mid-run) would abort cleanup() under
+        # `set -euo pipefail` before it reaches the real teardown below,
+        # AND overwrite the script's real exit code (e.g. an
+        # EXIT_ARGOCD_SYNC_TIMEOUT=50 that run-all-recipes.sh's 3-strike
+        # counter depends on) with whatever this redirect failed with.
+        local pod pod_out
+        for pod in $pod_list; do
+            budget_left || { log_info "Diagnostic capture budget exhausted — stopping"; break 2; }
+            {
+                echo "=== ${pod} ==="
+                if pod_out=$(run_capped 15 kubectl logs -n "$ns" "$pod" --all-containers --tail=1000 --prefix 2>&1); then
+                    printf '%s\n' "$pod_out"
+                else
+                    echo "[log fetch FAILED or timed out, rc=$?]"
+                    printf '%s\n' "$pod_out"
+                fi
+            } >> "${out_dir}/${ns}-logs.txt" || true
+        done
+        capture_to_file 10 "${out_dir}/${ns}-endpointslices.yaml" kubectl get endpointslices -n "$ns" -o yaml
+        capture_to_file 15 "${out_dir}/${ns}-describe.txt" kubectl describe pods -n "$ns"
+        # Namespace Events, not just the pod-scoped ones `describe pods`
+        # carries: a failed webhook call or Helm install surfaces as an
+        # Event on a non-pod object. The action's own
+        # `kubectl get events --all-namespaces` runs after this trap has
+        # already deleted the namespace, so this is the only chance to keep
+        # them.
+        capture_to_file 10 "${out_dir}/${ns}-events.txt" kubectl get events -n "$ns" --sort-by=.lastTimestamp
+    done
+}
+
 # Cleanup function
 cleanup() {
     local exit_code=$?
+    local cleanup_failed=0
     log_info "Cleaning up..."
+
+    if [[ "$exit_code" -ne 0 ]]; then
+        log_info "Non-zero exit ($exit_code) — capturing pod diagnostics before teardown..."
+        capture_failure_diagnostics
+    fi
 
     if [[ -n "$WORK_DIR" ]] && [[ -d "$WORK_DIR" ]]; then
         rm -rf "$WORK_DIR"
@@ -360,20 +525,9 @@ cleanup() {
             fi
         fi
 
-        # Uninstall all Helm releases from component namespaces (excludes
-        # argocd because we want the install-infra.sh-managed release to
-        # survive recipe-to-recipe).
-        local releases
-        releases=$(helm list -A -o json 2>/dev/null \
-            | jq -r '.[] | select(.namespace != "kube-system") | select(.namespace != "argocd") | "\(.name) \(.namespace)"' \
-            || true)
-        if [[ -n "$releases" ]]; then
-            while IFS=' ' read -r name ns; do
-                if [[ -n "$name" ]]; then
-                    log_info "Uninstalling release $name from $ns..."
-                    timeout 60s helm uninstall "$name" -n "$ns" --wait 2>/dev/null || true
-                fi
-            done <<< "$releases"
+        if ! cleanup_recipe_helm_releases; then
+            log_error "Helm release cleanup failed; this recipe cannot be treated as clean"
+            cleanup_failed=1
         fi
         # Clean up stale APIServices before namespace deletion to prevent hangs
         cleanup_stale_apiservices
@@ -425,7 +579,10 @@ cleanup() {
         done
     fi
 
-    exit $exit_code
+    if (( exit_code == 0 && cleanup_failed != 0 )); then
+        exit_code=1
+    fi
+    exit "$exit_code"
 }
 
 # Find aicr binary (goreleaser puts it in platform-specific dirs)
@@ -459,7 +616,10 @@ find_aicr_binary() {
 # Check dependencies
 check_deps() {
     local missing=()
-    local required=(kubectl helm yq jq)
+    # diff and comm are the inventory read-back's comparison (step 7).
+    # Checked here rather than there so a runner image missing one fails in
+    # the first second of the lane instead of after the deploy.
+    local required=(kubectl helm yq jq diff comm)
     # flux-git pushes the filesystem bundle to the in-cluster Gitea.
     [[ "$DEPLOYER" == "flux-git" ]] && required+=(git)
     for cmd in "${required[@]}"; do
@@ -564,21 +724,9 @@ cleanup_old_tests() {
         fi
     fi
 
-    # Find and uninstall old Helm releases from component namespaces.
-    # Skip the argocd namespace so the install-infra.sh-managed Argo CD
-    # release survives recipe-to-recipe.
-    local releases
-    releases=$(helm list -A -o json 2>/dev/null \
-        | jq -r '.[] | select(.namespace != "kube-system") | select(.namespace != "argocd") | "\(.namespace) \(.name)"' \
-        || true)
-    if [[ -n "$releases" ]]; then
-        log_info "Uninstalling old releases..."
-        echo "$releases" | while read -r ns release; do
-            if [[ -n "$release" ]]; then
-                log_info "  Uninstalling $release from $ns..."
-                helm uninstall "$release" -n "$ns" --wait 2>/dev/null || true
-            fi
-        done
+    if ! cleanup_recipe_helm_releases; then
+        log_error "Failed to clean old Helm releases; refusing to start this recipe"
+        return 1
     fi
 
     # Clean up stale APIServices left by prometheus-adapter
@@ -739,7 +887,8 @@ generate_bundle() {
 
     # Without --platform, *-slurm overlays resolve to their non-platform
     # parent and the bundle omits the slinky-slurm operator/cluster.
-    # Scoped to slurm: kubeflow/dynamo are not yet validated under KWOK.
+    # The native Nebius Dynamo leaf also needs its platform: it has no
+    # non-platform parent leaf to resolve. Other Dynamo lanes are unchanged.
     local service accelerator intent os platform
     service=$(yq eval '.spec.criteria.service // ""' "$recipe_overlay")
     accelerator=$(yq eval '.spec.criteria.accelerator // ""' "$recipe_overlay")
@@ -754,14 +903,31 @@ generate_bundle() {
     [[ -n "$accelerator" ]] && recipe_args+=(--accelerator "$accelerator")
     [[ -n "$intent" ]] && recipe_args+=(--intent "$intent")
     [[ -n "$os" ]] && recipe_args+=(--os "$os")
-    # Only forward --platform for platforms validated under KWOK. Other
-    # platforms (kubeflow, dynamo, nim) historically resolve to their
+    # Only forward --platform for explicitly covered KWOK lanes. Other
+    # platform leaves (kubeflow, dynamo, nim) historically resolve to their
     # non-platform parent here; preserve that behavior to avoid regressing
     # existing matrix lanes. Extend as additional platforms are validated.
-    if [[ "$platform" == "slurm" ]]; then
+    if [[ "$platform" == "slurm" || "$recipe" == "b300-mk8s-ubuntu-inference-dynamo" ]]; then
         recipe_args+=(--platform "$platform")
     elif [[ -n "$platform" ]]; then
         log_info "platform=$platform not yet validated under KWOK — resolving without --platform"
+    fi
+
+    # A --data overlay of the same name replaces the embedded leaf; the empty
+    # registry merges into the embedded one unchanged.
+    if [[ -n "${KWOK_MIXINS:-}" ]]; then
+        local data_dir="${WORK_DIR}/data"
+        mkdir -p "${data_dir}/overlays"
+        printf '%s\n' 'kind: ComponentRegistry' 'apiVersion: aicr.run/v1beta1' \
+            'metadata:' '  name: kwok-mixins' 'components: []' >"${data_dir}/registry.yaml"
+        if ! MIXINS="$KWOK_MIXINS" yq eval \
+                '.spec.mixins = ((.spec.mixins // []) + (strenv(MIXINS) | split(",") | map(trim) | map(select(. != ""))))' \
+                "$recipe_overlay" >"${data_dir}/overlays/${recipe}.yaml"; then
+            log_error "Failed to compose KWOK_MIXINS=${KWOK_MIXINS} onto ${recipe}"
+            return 1
+        fi
+        log_info "Composing mixins: ${KWOK_MIXINS}"
+        recipe_args+=(--data "$data_dir")
     fi
 
     # Generate resolved recipe from criteria
@@ -785,6 +951,22 @@ generate_bundle() {
     # Disable features not needed for scheduling validation:
     # - PrometheusRules and AlertManager (slow to create)
     # - Nodewright customization (creates CRs that depend on operator CRDs)
+    # - Nodewright's admission webhook: same failure mode as the
+    #   slinky-slurm-operator webhook below. The operator Deployment is a
+    #   system workload, so it carries the fake-node toleration and lands on
+    #   a KWOK node, which reports its pod Ready without ever running a
+    #   container. The webhook Service therefore has endpoints that nothing
+    #   is actually serving, and every admission call to
+    #   mutate-skyhook.nvidia.com hits its 10s deadline (failurePolicy: Fail,
+    #   and the chart hardcodes timeoutSeconds with no values knob). Any
+    #   recipe that bundles a Skyhook CR alongside the operator outside
+    #   nodewright-customizations (disabled above) would then fail to
+    #   install that CR. No recipe does today; the flag keeps a future one
+    #   from hanging on admission. `webhook.enable=false` drops the webhook wiring, so
+    #   admission is skipped; harmless under KWOK, where the handler is a
+    #   no-op defaulter and no CR is really reconciled. Do NOT carry this to
+    #   a real cluster: the chart documents the webhook as required for
+    #   production.
     # - slinky-slurm-operator webhook + cert-manager wiring: the operator's
     #   webhook validates Slurm CRs through a Service whose pod runs on a
     #   KWOK fake (Ready without container). Both certManager.enabled and
@@ -823,6 +1005,9 @@ generate_bundle() {
     if grep -qx "nodewright-customizations" <<< "$bundled_components"; then
         conditional_sets+=(--set "nodewright-customizations:enabled=false")
     fi
+    if grep -qx "nodewright-operator" <<< "$bundled_components"; then
+        conditional_sets+=(--set "nodewright:webhook.enable=false")
+    fi
     if grep -qx "slinky-slurm-operator" <<< "$bundled_components"; then
         conditional_sets+=(
             --set "slinkyslurmoperator:webhook.enabled=false"
@@ -832,6 +1017,15 @@ generate_bundle() {
     if grep -qx "slinky-slurm" <<< "$bundled_components"; then
         conditional_sets+=(
             --set "slurmcluster:controller.persistence.enabled=false"
+        )
+    fi
+    if grep -qx "nvsentinel-mongodb" <<< "$bundled_components"; then
+        # platform-connectors tolerates every taint, so one pod lands on the
+        # real Kind node, where it needs the datastore's client certificate
+        # and a reachable MongoDB; KWOK simulates both, so it never becomes
+        # ready and Flux, which waits on it, never converges.
+        conditional_sets+=(
+            --set-json 'nvsentinel:platformConnector.affinity={"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":{"nodeSelectorTerms":[{"matchExpressions":[{"key":"node-role.kubernetes.io/control-plane","operator":"DoesNotExist"}]}]}}}'
         )
     fi
     if grep -qx "dynamo-platform" <<< "$bundled_components"; then
@@ -851,6 +1045,12 @@ generate_bundle() {
     # blocking gates (CheckNVSentinelDriverLabelDetectable / #2175,
     # CheckNVSentinelRuntimeClassCoherence / #2176) unaided. Re-adding
     # the overrides would let the lanes pass without proving that.
+
+    # Resolved once for every branch, from lib/deployer-map.sh, so the
+    # matrix name -> aicr --deployer transform has a single definition that
+    # the bundle and the upgrade-check read-back both read.
+    local deployer_arg
+    deployer_arg=$(aicr_deployer_for "$DEPLOYER") || return 1
 
     local bundle_output
     case "$DEPLOYER" in
@@ -962,10 +1162,6 @@ generate_bundle() {
             fi
             local in_cluster_repo="$OCI_IN_CLUSTER_REF"
 
-            # Map our deployer-matrix name to aicr's --deployer value.
-            local deployer_arg="argocd"
-            [[ "$DEPLOYER" == "argocd-helm-oci" ]] && deployer_arg="argocd-helm"
-
             log_info "Bundling for ${deployer_arg}, pushing to ${OCI_REF}"
             if [[ "$DEPLOYER" == "argocd-helm-oci" ]]; then
                 log_info "Argo CD will pull from ${in_cluster_repo}/${recipe}:${tag} (parent App template appends .Chart.Name at helm render time)"
@@ -1038,7 +1234,7 @@ generate_bundle() {
             # (relative ./bundle output path under `--output oci://...`).
             if ! bundle_output=$(cd "${WORK_DIR}" && "$AICR_BIN" bundle \
                 --recipe "${WORK_DIR}/recipe.yaml" \
-                --deployer flux \
+                --deployer "$deployer_arg" \
                 --output "$OCI_REF" \
                 --plain-http \
                 --system-node-selector "aicr.run/node-type=system" \
@@ -1082,7 +1278,7 @@ generate_bundle() {
             # push below MUST target main.
             if ! bundle_output=$("$AICR_BIN" bundle \
                 --recipe "${WORK_DIR}/recipe.yaml" \
-                --deployer flux \
+                --deployer "$deployer_arg" \
                 --output "${WORK_DIR}/bundle" \
                 --repo "$GIT_IN_CLUSTER_URL" \
                 --system-node-selector "aicr.run/node-type=system" \
@@ -1140,7 +1336,7 @@ generate_bundle() {
             # the push below MUST target main.
             if ! bundle_output=$("$AICR_BIN" bundle \
                 --recipe "${WORK_DIR}/recipe.yaml" \
-                --deployer argocd \
+                --deployer "$deployer_arg" \
                 --output "${WORK_DIR}/bundle" \
                 --repo "$GIT_IN_CLUSTER_URL" \
                 --system-node-selector "aicr.run/node-type=system" \
@@ -1375,6 +1571,8 @@ deploy_bundle() {
             #     Ready condition indefinitely. We assert terminal state via
             #     HelmRelease conditions below instead.
             #   - timeout: 5m — matches KWOK_FLUX_SYNC_TIMEOUT budget.
+            #   - interval/retryInterval: 15s, so a first apply that races
+            #     CRD or source availability retries in seconds.
             log_info "Applying Flux OCIRepository ${FLUX_OCIREPOSITORY_NAME} (ref=${oci_tag})..."
             if ! kubectl apply -f - <<EOF
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -1383,7 +1581,7 @@ metadata:
   name: ${FLUX_OCIREPOSITORY_NAME}
   namespace: flux-system
 spec:
-  interval: 1m
+  interval: 15s
   insecure: true
   url: ${OCI_IN_CLUSTER_REF}
   ref:
@@ -1405,9 +1603,10 @@ metadata:
   name: ${FLUX_KUSTOMIZATION_NAME}
   namespace: flux-system
 spec:
-  interval: 1m
+  interval: 15s
   prune: true
   wait: false
+  retryInterval: 15s
   timeout: 5m
   sourceRef:
     kind: OCIRepository
@@ -1451,7 +1650,7 @@ metadata:
   name: ${FLUX_GITREPOSITORY_NAME}
   namespace: flux-system
 spec:
-  interval: 1m
+  interval: 15s
   url: ${GIT_IN_CLUSTER_URL}
   ref:
     branch: main
@@ -1472,9 +1671,10 @@ metadata:
   name: ${FLUX_KUSTOMIZATION_NAME}
   namespace: flux-system
 spec:
-  interval: 1m
+  interval: 15s
   prune: true
   wait: false
+  retryInterval: 15s
   timeout: 5m
   sourceRef:
     kind: GitRepository
@@ -1926,6 +2126,121 @@ verify_pods() {
     return 0
 }
 
+# Differential read-back of the installed inventory (ADR-021 acceptance
+# criterion 4, issue #2531).
+#
+# `aicr upgrade-check --from cluster` and `--from <bundle>` answer the same
+# question from two places. The artifact side reads the recipe.yaml at the
+# bundle's root, which lists exactly the releases the bundler emitted at
+# exactly the versions it pinned, so it is an oracle with no golden to
+# maintain and nothing to drift against. Any per-component divergence is by
+# construction a defect in the cluster read, most likely in the
+# per-deployer release-name mapping (pkg/inventory/read.go matchComponent),
+# which for flux is otherwise asserted only against fixtures written from
+# reading helm-controller's templates rather than from watching one run.
+#
+# Readiness is deliberately not a precondition, and KWOK never producing a
+# Ready workload therefore cannot affect this. The read needs release
+# records to exist, which is weaker and already established: helm writes
+# its storage record before any pod runs, the argocd gate has asserted the
+# root Application reached operationState.phase==Succeeded (so every child
+# Application is materialized), and the flux gate has asserted every
+# HelmRelease reached `deployed`.
+#
+# --fail-on-error=false on both sides: the question is whether the two
+# agree, not whether the upgrade is safe, and a verdict-driven non-zero
+# exit would hide the comparison behind it. A non-zero exit with that flag
+# set is therefore a real failure of the command and is treated as one.
+verify_upgrade_inventory() {
+    local deployer_arg
+    deployer_arg=$(aicr_deployer_for "$DEPLOYER") || return 1
+
+    local recipe_file="${WORK_DIR}/recipe.yaml"
+    local bundle_dir="${WORK_DIR}/bundle"
+
+    # Reports land under the directory the composite action uploads on
+    # failure, keyed by recipe and deployer so matrix cells cannot overwrite
+    # each other. Falls back to WORK_DIR when that path is not writable (a
+    # local run outside CI), which keeps the comparison running rather than
+    # failing over where its evidence goes.
+    local out_dir="${KWOK_DEBUG_ARTIFACTS_DIR:-/tmp/kwok-debug-artifacts}/upgrade-check/${RECIPE_UNDER_TEST:-unknown-recipe}-${DEPLOYER}"
+    if ! mkdir -p "$out_dir" 2>/dev/null; then
+        log_warn "Cannot write ${out_dir}; keeping upgrade-check reports in ${WORK_DIR}"
+        out_dir="$WORK_DIR"
+    fi
+
+    local installed_file="${out_dir}/installed-components.txt"
+    readback_installed_components "${bundle_dir}/recipe.yaml" "$installed_file" || return 1
+    log_info "Bundle installed $(wc -l < "$installed_file" | tr -d ' ') component(s)"
+
+    local cluster_json="${out_dir}/from-cluster.json"
+    local artifact_json="${out_dir}/from-artifact.json"
+
+    # Argo CD answers a chart version only once a sync has established it, and
+    # on KWOK some never do (see readback_unsettled_argo_components). Taken
+    # before the cluster read: an Application that settles in between is then
+    # read at a version and excuses nothing, while the reverse cannot happen.
+    local unsettled_file=""
+    case "$deployer_arg" in
+        argocd|argocd-helm)
+            local apps_json="${out_dir}/argo-applications.json"
+            if ! kubectl get applications.argoproj.io -A -o json > "$apps_json"; then
+                log_error "Could not list Argo CD Applications for the read-back"
+                return 1
+            fi
+            unsettled_file="${out_dir}/unsettled-components.txt"
+            readback_unsettled_argo_components "$apps_json" "$installed_file" "$unsettled_file" || return 1
+            ;;
+    esac
+
+    log_info "Reading the installed inventory: aicr upgrade-check --from cluster --deployer ${deployer_arg}"
+    local rc=0
+    "$AICR_BIN" upgrade-check \
+        --from cluster \
+        --to "$recipe_file" \
+        --deployer "$deployer_arg" \
+        --format json \
+        --fail-on-error=false \
+        --output "$cluster_json" || rc=$?
+    if (( rc != 0 )); then
+        log_error "aicr upgrade-check --from cluster failed (exit ${rc})"
+        return 1
+    fi
+
+    log_info "Reading the same inventory from the bundle: aicr upgrade-check --from ${bundle_dir}"
+    rc=0
+    "$AICR_BIN" upgrade-check \
+        --from "$bundle_dir" \
+        --to "$recipe_file" \
+        --deployer "$deployer_arg" \
+        --format json \
+        --fail-on-error=false \
+        --output "$artifact_json" || rc=$?
+    if (( rc != 0 )); then
+        log_error "aicr upgrade-check --from ${bundle_dir} failed (exit ${rc})"
+        return 1
+    fi
+
+    compare_upgrade_readback \
+        "$artifact_json" "$cluster_json" "$installed_file" "$out_dir" "$deployer_arg" \
+        ${unsettled_file:+"$unsettled_file"} || return 1
+
+    log_info "Inventory read-back PASSED: the cluster and the bundle agree on every component"
+
+    # What the agreement was built on, logged after the verdict it supports.
+    # Assigned before the loop so a jq that finds nothing cannot reach `set
+    # -e` through a failed test in the loop body.
+    local accounting="" summary_line
+    accounting=$(readback_source_summary "$cluster_json") || accounting=""
+    if [[ -n "$accounting" ]]; then
+        while IFS= read -r summary_line; do
+            if [[ -n "$summary_line" ]]; then
+                log_info "$summary_line"
+            fi
+        done <<< "$accounting"
+    fi
+}
+
 # Print usage to stderr and exit non-zero.
 usage() {
     cat >&2 <<'EOF'
@@ -1996,6 +2311,7 @@ main() {
     esac
 
     # Must run before cleanup trap so the trap sees the resolved root name.
+    RECIPE_UNDER_TEST="$recipe"
     resolve_argocd_root_app
     resolve_flux_root_names "$recipe"
 
@@ -2057,11 +2373,27 @@ main() {
         kubectl taint nodes "$cp_node" nfd-excluded=true:NoSchedule --overwrite
     done
 
+    # nvsentinel-mongodb ships a cert-manager Certificate, and cert-manager's
+    # webhook runs on a KWOK fake that serves nothing, so the create would
+    # time out. The webhook's namespaceSelector skips namespaces carrying
+    # this label; harmless under KWOK, where no certificate is really issued.
+    local mongodb_ns
+    mongodb_ns=$(yq eval '.componentRefs[] | select(.name == "nvsentinel-mongodb") | .namespace' \
+        "${WORK_DIR}/recipe.yaml")
+    if [[ -n "$mongodb_ns" ]]; then
+        log_info "Disabling cert-manager validation in namespace ${mongodb_ns} for KWOK"
+        kubectl create namespace "$mongodb_ns" --dry-run=client -o yaml | kubectl apply -f -
+        kubectl label namespace "$mongodb_ns" cert-manager.io/disable-validation=true --overwrite
+    fi
+
     log_debug "Step 5: Deploying bundle..."
     deploy_bundle
 
     log_debug "Step 6: Verifying pod scheduling..."
     verify_pods
+
+    log_debug "Step 7: Reading the installed inventory back..."
+    verify_upgrade_inventory
 
     log_info "=========================================="
     log_info "✓ Validation PASSED for recipe: $recipe (deployer=$DEPLOYER)"

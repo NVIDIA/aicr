@@ -80,6 +80,8 @@ spec:
                 || { echo "flux sources/ leaked" >&2; exit 1; }
               ! test -f "${WORK}/basic/kustomization.yaml" \
                 || { echo "flux root kustomization.yaml leaked" >&2; exit 1; }
+              ! test -f "${WORK}/basic/main.tf" \
+                || { echo "terraform main.tf leaked into helmfile bundle" >&2; exit 1; }
             check:
               ($error == null): true
 

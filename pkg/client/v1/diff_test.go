@@ -27,6 +27,7 @@ import (
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
@@ -68,7 +69,7 @@ func TestDiffSnapshots_Guards(t *testing.T) {
 			if err == nil {
 				t.Fatal("DiffSnapshots() error = nil, want ErrCodeInvalidRequest")
 			}
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Errorf("DiffSnapshots() error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -234,7 +235,7 @@ func TestDiffSnapshots_ContextCancellation(t *testing.T) {
 			if err == nil {
 				t.Fatalf("DiffSnapshots() error = nil, want %s", tt.wantCode)
 			}
-			if !stderrors.Is(err, aicrerrors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("error = %v, want code %s", err, tt.wantCode)
 			}
 			if !stderrors.Is(err, tt.wantCause) {
@@ -285,7 +286,7 @@ func TestDiffSnapshots_MidTraversalContextCancellation(t *testing.T) {
 			if result != nil {
 				t.Fatalf("DiffSnapshots() result = %#v, want nil after cancellation", result)
 			}
-			if !stderrors.Is(err, aicrerrors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("DiffSnapshots() error = %v, want code %s", err, tt.wantCode)
 			}
 			if !stderrors.Is(err, tt.cause) {
@@ -367,7 +368,7 @@ func TestWriteSnapshotDiffTable(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				err := aicr.WriteSnapshotDiffTable(tt.writer, tt.result)
-				if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 					t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 				}
 			})

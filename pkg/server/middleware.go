@@ -69,7 +69,7 @@ func (s *Server) withMiddleware(handler http.HandlerFunc) http.HandlerFunc {
 
 // deprecationMiddleware attaches the Deprecation, Sunset, and Link headers to
 // responses from routes marked deprecated via WithDeprecatedRoutes. See the
-// deprecation policy in RELEASING.md for what the headers mean and when a route
+// deprecation policy in RELEASE.md for what the headers mean and when a route
 // earns them.
 //
 // No route is deprecated today; the /v1/* disposition is #2112, not a decision

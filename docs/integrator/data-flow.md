@@ -42,6 +42,14 @@ Each stage transforms input data into a different format:
   projection of associated NodeSet, LoginSet, RestApi, and Accounting CRs
 - **mariadb-operator**: Official `k8s.mariadb.com/mariadbs` API conflict
   evidence (not database availability or health)
+- **oke-legacy-plugin**: OKE's legacy addon-manager `nvidia-gpu-device-plugin`
+  DaemonSet in `kube-system` (device-plugin conflict evidence: `none`,
+  `active`, or `unknown`)
+- **default-storage-class**: StorageClasses annotated as the cluster default
+  (`present`, `multiple`, `absent`, or `unknown`; no provisioner health)
+- **percona-server-mongodb**: Percona Operator for MongoDB conflict evidence
+  (`absent`, `api-detected`, `aicr-owned`, `operator-detected`,
+  `crs-detected`, or `unknown`; not database availability or health)
 - **aks-gpu-pools**: Orchestration-layer projection, not a collector —
   produced from the explicit operator-supplied pool dump passed to
   `aicr snapshot --aks-gpu-pools <file>` (per-pool `gpu-driver` install
@@ -52,6 +60,16 @@ Each stage transforms input data into a different format:
   attached to the snapshot after the parallel collectors finish (local
   mode) or merged into the snapshot the Job returns after retrieval
   (Job mode)
+- **oke-addons**: Orchestration-layer projection, not a collector —
+  produced from the explicit operator-supplied add-on dump passed to
+  `aicr snapshot --oke-addons <file>` (the control-plane state of the
+  `NvidiaGpuPlugin` and `NvidiaNetworkOperator` add-ons). Same up-front
+  validation and attach/merge flow as `aks-gpu-pools`
+- **gke-gpu-pools**: Orchestration-layer projection, not a collector.
+  Produced from the explicit operator-supplied pool dump passed to
+  `aicr snapshot --gke-gpu-pools <file>` (per-pool
+  `gpuDriverInstallationConfig.gpuDriverVersion` install modes). Same
+  up-front validation and attach/merge flow as `aks-gpu-pools`
 
 **GPU Hardware:**
 - Source: NFD/PCI enumeration via sysfs (driver-free; no `nvidia-smi`)
@@ -61,7 +79,7 @@ Each stage transforms input data into a different format:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ Snapshot (aicr.run/v1alpha2)                      │
+│ Snapshot (aicr.run/v1)                                  │
 ├─────────────────────────────────────────────────────────┤
 │ metadata:                                               │
 │   timestamp: RFC3339 string                             │
@@ -79,8 +97,13 @@ Each stage transforms input data into a different format:
 │   │                                                     │
 │   ├─ K8s                                                │
 │   │   └─ subtypes: [server, image, policy, node,        │
-│   │                 slinky-slurm, mariadb-operator,      │
-│   │                 aks-gpu-pools (with --aks-gpu-pools)]│
+│   │                 slinky-slurm, mariadb-operator,     │
+│   │                 oke-legacy-plugin,                  │
+│   │                 default-storage-class,              │
+│   │                 percona-server-mongodb,             │
+│   │                 aks-gpu-pools (--aks-gpu-pools),    │
+│   │                 oke-addons (--oke-addons),          │
+│   │                 gke-gpu-pools (--gke-gpu-pools)]    │
 │   │       ├─ data: map[string]Reading                   │
 │   │       └─ slinky-slurm.items: []ItemEntry            │
 │   │             (allowlisted resource context + data)   │
@@ -122,7 +145,7 @@ metadata:
 data:
   snapshot.yaml: |
     # Complete snapshot YAML stored as ConfigMap data
-    apiVersion: aicr.run/v1alpha2
+    apiVersion: aicr.run/v1
     kind: Snapshot
     measurements: [...]
 ```
@@ -175,14 +198,15 @@ type Reading interface {
   cancel-on-error collector is supported, but today per-collector errors
   are swallowed.)
 - Provider projections follow the opposite failure policy: the
-  `aks-gpu-pools` projection is explicit operator input, so a malformed
-  pool file ABORTS the snapshot before any collector runs
+  `aks-gpu-pools`, `oke-addons`, and `gke-gpu-pools` projections are
+  explicit operator input, so a malformed pool or add-on file ABORTS
+  the snapshot before any collector runs
   (`pkg/snapshotter/snapshot.go`) — it must never ride the
   degrade-to-warning path and masquerade as a snapshot whose reading is
   merely unavailable.
 - Each collector sets its own timeout rather than sharing a universal
   one — e.g. 10s (OS, systemd), 60s (Kubernetes), 90s (node topology),
-  5s (NFD GPU detection), up to 10m (network discovery)
+  5s (NFD GPU detection), up to 7m (network discovery)
 
 ## Stage 2: Recipe (Data Optimization)
 
@@ -258,8 +282,10 @@ When a query matches a leaf recipe with a `spec.base` reference, the builder:
 
 1. **Matches overlays by criteria.** An overlay matches when every field it
    specifies equals the query; omitted fields act as wildcards (e.g. an overlay
-   that omits `os` matches any OS). The `any` sentinel is its own value — a
-   query `any` only matches a recipe `any`.
+   that omits `os` matches any OS). A recipe value of `any` behaves like an
+   omitted field and matches every query. The reverse does not hold: a query
+   of `any` (or an omitted query field) matches only overlays that also leave
+   that field `any` or omit it.
 2. **Resolves the inheritance chain** for each match by following `spec.base`
    to the implicit `base`, producing a root-to-leaf ordering such as
    `base → eks → eks-training → gb200-eks-training → gb200-eks-ubuntu-training`.
@@ -276,8 +302,8 @@ For the resolver internals (specificity scoring, deep-merge semantics) see
 
 ### Recipe Data Structure
 
-Unprofiled recipe results retain `aicr.run/v1alpha2`. Selecting a configuration
-profile produces `aicr.run/v1alpha3` and records the selected profile and its
+Unprofiled recipe results carry `aicr.run/v1`. Selecting a configuration
+profile produces `aicr.run/v1beta2` and records the selected profile and its
 owned value paths in result metadata.
 
 ```text
@@ -289,7 +315,7 @@ owned value paths in result metadata.
 │   appliedOverlays: inheritance chain (root to leaf)     │
 │   excludedOverlays: matched-but-excluded overlays       │
 │   selectedProfile: name, value, and ownedPaths          │
-│                    (v1alpha3 only)                      │
+│                    (v1beta2 only)                       │
 │                                                         │
 │ criteria: Criteria (6 dimensions — see mapping above)   │
 │                                                         │
@@ -435,24 +461,26 @@ RecipeResult
   -> DefaultBundler (one invocation): for each component,
        GetComponentRef (name, version) + GetValuesForComponent (values map)
   -> selected deployer writes its own layout (Helm deployer shown below;
-       argocd/argocd-helm/flux/helmfile differ):
+       argocd/argocd-helm/flux/helmfile/terraform differ):
          - static values       -> <NNN-component>/values.yaml
          - dynamic/per-cluster -> <NNN-component>/cluster-values.yaml
-         - component manifests -> <NNN-component>/   (e.g. ClusterPolicy or a
-                                   CR, for components that ship one)
+         - component manifests -> (NNN+1)-<component>-post/ (a local chart
+                                   deployed after the upstream chart), or
+                                   <NNN-component>/ for a manifest-only
+                                   component
          - go:embed templates  -> per-component install.sh, and the root
                                    README.md + deploy.sh
-  -> write canonical recipe.yaml (Helm deployer only)
+  -> write canonical recipe.yaml (every deployer)
   -> finalize root checksums.txt over every regular payload file
 ```
 
 `pkg/bundler/registry` exists but is **not** used by the production path: the
 default flow constructs a single `DefaultBundler`, extracts values for every
 component in one `DefaultBundler` invocation, builds one deployer
-(helm/argocd/argocd-helm/flux/helmfile), and invokes it once. Static values land in `values.yaml`; dynamic, per-cluster values land in
+(helm/argocd/argocd-helm/flux/helmfile/terraform), and invokes it once. Static values land in `values.yaml`; dynamic, per-cluster values land in
 `cluster-values.yaml`. Every component is handled in that single invocation, not by separate
 per-component bundlers. The per-component file layout above is the **Helm**
-deployer's; argocd/argocd-helm/flux/helmfile emit their own layouts.
+deployer's; argocd/argocd-helm/flux/helmfile/terraform emit their own layouts.
 Finalization treats each deployer output as a closed-world inventory:
 `checksums.txt` lists every regular payload file, including `recipe.yaml` when
 present, and verification rejects additional files, directories, symlinks, or
@@ -467,7 +495,10 @@ Bundlers receive `RecipeResult` with component references and values maps:
 ```go
 // Get component reference and values from RecipeResult
 component := input.GetComponentRef("gpu-operator")
-values := input.GetValuesForComponent("gpu-operator")
+values, err := input.GetValuesForComponent("gpu-operator")
+if err != nil {
+    return err // gpu-operator is not in the recipe
+}
 
 // Values map contains nested configuration
 // {
@@ -516,9 +547,10 @@ Bundle artifacts + recipe (deploymentOrder, componentRefs)
       argocd-helm    — Helm-chart app-of-apps (values overridable at install)
       flux           — Flux HelmRelease manifests
       helmfile       — helmfile.yaml release graph
+      terraform      — Terraform module calls, one per component
   → closed-world root checksums.txt
   → layout:
-      helm / argocd / argocd-helm / helmfile — numbered NNN-<component>/
+      helm / argocd / argocd-helm / helmfile / terraform — numbered NNN-<component>/
         (via pkg/bundler/deployer/localformat)
       flux — unnumbered <component>/ dirs with HelmRelease CRs (no NNN- prefix)
 ```
@@ -531,7 +563,7 @@ deployer sections below.
 
 ### Deployment Order Flow
 
-Ordering follows each component's declared `dependencyRefs`, not its linear position. The flat `deploymentOrder` (one topological serialization) numbers the `NNN-<name>/` folders and drives the serial helm `deploy.sh`. The concurrent deployers derive ordering from the dependency graph so independent components roll out together, but differ in how faithfully: **argocd**, **argocd-helm**, and **helmfile** approximate it as depth **tiers** (a component waits for its whole prior tier), while **flux** projects the exact `dependencyRefs` DAG onto `dependsOn` (a component waits for only its actual dependencies). Each deployer expresses this differently:
+Ordering follows each component's declared `dependencyRefs`, not its linear position. The flat `deploymentOrder` (one topological serialization) numbers the `NNN-<name>/` folders and drives the serial helm `deploy.sh`. The concurrent deployers derive ordering from the dependency graph so independent components roll out together, but differ in how faithfully: **argocd**, **argocd-helm**, and **helmfile** approximate it as depth **tiers** (a component waits for its whole prior tier), while **flux** and **terraform** project the exact `dependencyRefs` DAG onto `dependsOn` / `depends_on` (a component waits for only its actual dependencies). Each deployer expresses this differently:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -554,7 +586,7 @@ Ordering follows each component's declared `dependencyRefs`, not its linear posi
 │         ┌────────────────┴────────────────┐             │
 │         ▼                                 ▼             │
 │  ┌────────────┐                    ┌────────────┐       │
-│  │    Helm    │                    │  Argo CD    │       │
+│  │    Helm    │                    │  Argo CD   │       │
 │  │  Deployer  │                    │  Deployer  │       │
 │  │ (default)  │                    │            │       │
 │  └──────┬─────┘                    └──────┬─────┘       │
@@ -568,7 +600,7 @@ Ordering follows each component's declared `dependencyRefs`, not its linear posi
 └─────────────────────────────────────────────────────────┘
 ```
 
-`SortComponentRefsByDeploymentOrder()` produces the flat order used for `NNN-<name>/` folder numbering (helm / argocd / argocd-helm / helmfile via localformat) and the helm `deploy.sh`. The Argo CD sync-waves are **not** taken from that linear order: they are assigned by dependency tier (`wave = tier*4 + phase`), so components that share a tier share a wave and sync together. The `1, 5, 9` values above reflect the specific `cert-manager → gpu-operator → network-operator` dependency chain (one component per tier); a recipe with independent components would place them at the same wave. See [Deployment ordering](../contributor/component.md#deployment-ordering) for the full model.
+`SortComponentRefsByDeploymentOrder()` produces the flat order used for `NNN-<name>/` folder numbering (helm / argocd / argocd-helm / helmfile / terraform via localformat) and the helm `deploy.sh`. The Argo CD sync-waves are **not** taken from that linear order: they are assigned by dependency tier (`wave = tier*4 + phase`), so components that share a tier share a wave and sync together. The `1, 5, 9` values above reflect the specific `cert-manager → gpu-operator → network-operator` dependency chain (one component per tier); a recipe with independent components would place them at the same wave. See [Deployment ordering](../contributor/component.md#deployment-ordering) for the full model.
 
 ### Deployer-Specific Output
 
@@ -610,7 +642,6 @@ bundle-output/
 │   └── application.yaml      # With sync-wave annotation
 ├── 002-gpu-operator/
 │   ├── values.yaml
-│   ├── manifests/
 │   └── application.yaml      # With sync-wave annotation
 ├── 003-network-operator/
 │   ├── values.yaml
@@ -634,7 +665,7 @@ spec:
   sources:
     # Helm chart from upstream
     - repoURL: https://helm.ngc.nvidia.com/nvidia
-      targetRevision: v26.3.3
+      targetRevision: v26.7.2
       chart: gpu-operator
       helm:
         valueFiles:
@@ -643,10 +674,8 @@ spec:
     - repoURL: <YOUR_GIT_REPO>
       targetRevision: main
       ref: values
-    # Additional manifests (if present)
-    - repoURL: <YOUR_GIT_REPO>
-      targetRevision: main
-      path: 002-gpu-operator/manifests
+  # Raw manifests are not a source here: they ship as a separate
+  # NNN-<component>-post/ Application ordered after this one.
 ```
 
 ### Deployer Data Flow
@@ -672,9 +701,9 @@ spec:
 │                                                              │
 │  4. Run deployer (argocd) → numbered NNN-<name>/ folders     │
 │     (argocd shares localformat with helm; flux does not)     │
-│     ├─ 001-cert-manager/application.yaml (wave: 1)          │
-│     ├─ 002-gpu-operator/application.yaml (wave: 5)          │
-│     └─ 003-network-operator/application.yaml (wave: 9)      │
+│     ├─ 001-cert-manager/application.yaml (wave: 1)           │
+│     ├─ 002-gpu-operator/application.yaml (wave: 5)           │
+│     ├─ 003-network-operator/application.yaml (wave: 9)       │
 │     └─ app-of-apps.yaml (bundle root, uses --repo URL)       │
 │                                                              │
 │  5. Finalize closed-world inventory                          │
@@ -690,7 +719,7 @@ spec:
 **JSON:**
 ```json
 {
-  "apiVersion": "aicr.run/v1alpha2",
+  "apiVersion": "aicr.run/v1",
   "kind": "Snapshot",
   "measurements": [...]
 }
@@ -698,21 +727,24 @@ spec:
 
 **YAML:**
 ```yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 kind: Snapshot
 measurements:
   - type: K8s
     subtypes: [...]
 ```
 
-**Table (Human-readable):**
+**Table (Human-readable):** the typed snapshot flattened into `FIELD` /
+`VALUE` rows, with each subtype's readings as one compact JSON value
+(abridged):
 ```
-TYPE    SUBTYPE      KEY                    VALUE
-K8s     image        gpu-operator           v25.3.3
-K8s     image        driver                 580.82.07
-GPU     hardware     gpu-present            true
-GPU     hardware     gpu-count              8
-GPU     hardware     model                  H100
+FIELD                                  VALUE
+-----                                  -----
+Header.APIVersion                      aicr.run/v1
+Header.Kind                            Snapshot
+Measurements.[1].Subtypes.[0].Data     {"gpu-count":8,"gpu-present":true,"model":"h100"}
+Measurements.[1].Subtypes.[0].Name     hardware
+Measurements.[1].Type                  GPU
 ```
 
 ### Serialization Pipeline
@@ -741,11 +773,14 @@ HTTP Request → Middleware Chain → Handler → Response
 
 1. Metrics Middleware (record request)
 2. Version Middleware (check API version)
-3. RequestID Middleware (add/echo request ID)
-4. Panic Recovery (catch panics)
-5. Rate Limit (100 req/s)
+3. Deprecation Middleware (Deprecation/Sunset/Link headers)
+4. RequestID Middleware (add/echo request ID)
+5. Timeout (90s request context)
 6. Logging (structured logs)
-7. Handler:
+7. Panic Recovery (catch panics)
+8. Rate Limit (100 req/s)
+9. Body Limit (8 MiB)
+10. Handler:
    ├─ Recipe/query routes
    │  ├─ Parse query parameters
    │  ├─ Build Query
@@ -796,7 +831,7 @@ X-RateLimit-Reset: 1735650000
   distinct from the in-process caches above
 
 **Bundle Templates:**
-- Location: `pkg/bundler/*/templates/*.tmpl`
+- Location: `pkg/bundler/deployer/*/templates/*.tmpl`
 - Embedded at compile time: `//go:embed templates/*.tmpl`
 - Parsed once per bundler initialization
 

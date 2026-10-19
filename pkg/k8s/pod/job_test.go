@@ -41,6 +41,7 @@ func TestWaitForJobCompletion(t *testing.T) {
 		timeout    time.Duration
 		watchEvent *batchv1.Job // if non-nil, send this as a Modify event after brief delay
 		wantErr    bool
+		wantCode   aicrerrors.ErrorCode // checked only when wantErr and non-empty
 	}{
 		{
 			name: "success via watch",
@@ -67,10 +68,13 @@ func TestWaitForJobCompletion(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "timeout",
-			job:     &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default"}},
-			timeout: 100 * time.Millisecond,
-			wantErr: true,
+			// Deliberately not canceled: pins the ErrCodeTimeout side of the
+			// timeoutCtx.Done() split, distinct from "context canceled" below.
+			name:     "timeout",
+			job:      &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default"}},
+			timeout:  100 * time.Millisecond,
+			wantErr:  true,
+			wantCode: aicrerrors.ErrCodeTimeout,
 		},
 		{
 			name: "already complete",
@@ -95,11 +99,16 @@ func TestWaitForJobCompletion(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "context cancelled",
-			job:     nil,
-			cancel:  true,
-			timeout: 5 * time.Second,
-			wantErr: true,
+			// A real, non-terminal Job so the fast-path Get succeeds and the
+			// wait reaches the timeoutCtx.Done() branch under test — a nil Job
+			// would instead fail the Get with ErrCodeInternal before ever
+			// reaching that branch, testing nothing about cancellation.
+			name:     "context canceled",
+			job:      &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default"}},
+			cancel:   true,
+			timeout:  5 * time.Second,
+			wantErr:  true,
+			wantCode: aicrerrors.ErrCodeCanceled,
 		},
 	}
 
@@ -134,6 +143,15 @@ func TestWaitForJobCompletion(t *testing.T) {
 			err := pod.WaitForJobCompletion(ctx, client, "default", "test-job", tt.timeout)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("WaitForJobCompletion() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && tt.wantCode != "" {
+				var se *aicrerrors.StructuredError
+				if !stderrors.As(err, &se) {
+					t.Fatalf("expected *errors.StructuredError, got %T", err)
+				}
+				if se.Code != tt.wantCode {
+					t.Errorf("code = %q, want %q", se.Code, tt.wantCode)
+				}
 			}
 		})
 	}

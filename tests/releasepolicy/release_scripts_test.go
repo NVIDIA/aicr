@@ -41,8 +41,8 @@ func TestReleaseScriptsStructure(t *testing.T) {
 			if err != nil {
 				t.Fatalf("stat %s: %v", relative, err)
 			}
-			if info.Mode().Perm() != 0o755 {
-				t.Errorf("mode = %o, want 755", info.Mode().Perm())
+			if mode := gitFileMode(info); mode != 0o755 {
+				t.Errorf("git mode = %o (disk %o), want 755", mode, info.Mode().Perm())
 			}
 			text := string(readFile(t, relative))
 			lines := strings.Split(text, "\n")
@@ -107,8 +107,8 @@ func TestReleaseSbomSignaturesAreAllowlisted(t *testing.T) {
 		if err != nil {
 			t.Fatalf("sbom signing command %s: %v", command, err)
 		}
-		if info.Mode().Perm() != 0o755 {
-			t.Errorf("sbom signing command %s mode = %o, want 755", command, info.Mode().Perm())
+		if mode := gitFileMode(info); mode != 0o755 {
+			t.Errorf("sbom signing command %s git mode = %o (disk %o), want 755", command, mode, info.Mode().Perm())
 		}
 	}
 	if suffix == "" {
@@ -2186,6 +2186,17 @@ wait "${timer_pid}" 2>/dev/null || true
 if [[ "${status}" -eq 143 ]]; then exit 124; fi
 exit "${status}"
 `
+
+// gitFileMode returns the mode git records for a checked-out file. Git keeps
+// only the owner execute bit (100755 or 100644) and checks files out through
+// the umask, so comparing Perm() directly fails under a umask such as 0002,
+// which yields 0775 and 0664 for the same index entries.
+func gitFileMode(info os.FileInfo) os.FileMode {
+	if info.Mode().Perm()&0o100 != 0 {
+		return 0o755
+	}
+	return 0o644
+}
 
 func repositoryPath(t *testing.T, relative string) string {
 	t.Helper()

@@ -32,7 +32,7 @@ The schema's source of truth is
 
 ```yaml
 kind: AICRConfig               # required, exactly this value
-apiVersion: aicr.run/v1alpha2  # required; v1beta1 also accepted, see below
+apiVersion: aicr.run/v1beta1   # required; the only accepted value
 metadata:
   name: gke-h100-training      # optional, identifying only
 spec:
@@ -47,11 +47,17 @@ Each `spec.*` section is optional and each command reads only its own section,
 so a file may carry just one section or any combination. A document with none
 of the five sections is rejected.
 
-`AICRConfig` is an authored file, so its `apiVersion` is yours to set. v0.21
-writes and documents `aicr.run/v1alpha2` and the loader also accepts the
-target `aicr.run/v1beta1`; empty and unknown values are rejected. v0.22 switches
-the documented value to the target and v0.23 stops accepting `aicr.run/v1alpha2`,
-so edit your config before upgrading to v0.23. The full release-by-release table
+Reading is per-command; **validation is not**. Every section present in the file
+is checked when the file loads, whichever command loaded it — so a malformed
+`spec.bundle` fails `aicr snapshot --config` too, naming the spec path that is
+wrong. Keep that in mind for a single document spanning several sections: an
+error can name a section the running command never reads.
+
+`AICRConfig` is an authored file, so its `apiVersion` is yours to set. The
+value is `aicr.run/v1beta1`, and as of v1.0.0 it is the only one accepted: the
+superseded `aicr.run/v1alpha2` was read-with-a-warning in v0.22 and is rejected
+now, as are empty and unknown values. A config still carrying it must be edited
+by hand — AICR has no conversion layer. The full release-by-release table
 is in
 [Catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility);
 the policy behind it is
@@ -85,7 +91,7 @@ by attestation and evidence push is deliberately absent — supply it via the
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: eks-h100-training
 spec:
@@ -96,10 +102,13 @@ spec:
       template: ""                   # optional Go template path
     agent:                           # in-cluster snapshot Job pod
       namespace: aicr-validation
-      image: ""                      # default: ghcr.io/nvidia/aicr:latest
+      image: ""                      # default: matches the CLI version (:latest on dev/-next builds)
       imagePullSecrets: []
-      jobName: aicr
-      serviceAccountName: aicr
+      # jobName is an optional PREFIX, not a name — the run ID is always
+      # appended. serviceAccountName is exact-if-exists: an existing
+      # ServiceAccount of exactly that name is used verbatim and the run
+      # then creates and deletes NO RBAC; otherwise it is a prefix too.
+      # Omit both to take the run-scoped defaults.
       nodeSelector:
         nodeGroup: gpu-worker
       tolerations:
@@ -128,6 +137,10 @@ spec:
     #   slurm:                       # only valid when the resolved recipe platform is slurm
     #     accounting:
     #       mode: disabled           # disabled | customer-managed | aicr-provided
+    #   gke:                         # only valid for the h100 gke-cos kubeflow training leaf
+    #     tcpxoInterfaces:           # required when that leaf ships torch-distributed-tcpxo;
+    #       - {interfaceName: eth1, network: <cluster>-gpu-nic-0}  # ordered eth1..eth8 (8 entries);
+    #                                                          # names from the cluster provisioner
     # input:
     #   snapshot: snapshot.yaml      # derive criteria from a snapshot instead
     output:
@@ -143,7 +156,7 @@ spec:
       target: ./bundles              # local dir or oci:// URI
       imageRefs: ""                  # external digest file; OCI output only
     deployment:
-      deployer: helmfile             # helm | helmfile | argocd | argocd-helm | flux | ...
+      deployer: helmfile             # helm | helmfile | argocd | argocd-helm | flux | terraform
       repo: ""
       set: []                        # value overrides, "key:path=value"
       dynamic: []
@@ -181,8 +194,12 @@ spec:
       namespace: aicr-validation
       image: ""
       imagePullSecrets: []
-      jobName: aicr
-      serviceAccountName: aicr
+      # Optional; omitted here so the defaults apply (both aicr-validate).
+      # jobName is always a prefix with the run ID appended;
+      # serviceAccountName is exact-if-exists — an existing ServiceAccount
+      # of exactly that name is used verbatim and the run creates no RBAC.
+      # validatorServiceAccountName (omitted: per-run RBAC) runs the
+      # validator Jobs as an existing, administrator-bound ServiceAccount.
       nodeSelector:
         nodeGroup: gpu-worker
       tolerations:
@@ -190,18 +207,19 @@ spec:
       requireGpu: false
     execution:
       phases: [deployment, conformance, performance]
+      skipChecks: []                 # checks this run cannot satisfy; empty = run them all
       failOnError: true              # tri-state; absent = CLI default (true)
       failFast: false
       noCluster: false
       noCleanup: false
-      timeout: 40m
+      timeout: 5m                    # aicr validate: live-capture agent Job only; inert here (input.snapshot is set)
     evidence:
       cncf:                          # CNCF AI Conformance markdown
         dir: ./evidence
         cncfSubmission: false        # requires dir
         features: []                 # empty = all features
       attestation:                   # recipe-evidence bundle (ADR-007)
-        out: evidence-result.json    # setting this enables the path
+        out: ./attestation           # directory; setting this enables the path
         bom: ""
         push: ""                     # OCI ref to push the signed bundle
         plainHTTP: false
@@ -230,6 +248,8 @@ produced from the live cluster.
 | `output.format` | string | `yaml` \| `json` \| `table` |
 | `output.template` | string | Optional Go template path |
 | `agent.*` | object | In-cluster capture Job pod: `namespace`, `image`, `imagePullSecrets`, `jobName`, `serviceAccountName`, `nodeSelector`, `tolerations`, `requireGpu`, `runtimeClassName` (mutually exclusive with `requireGpu`), `os`, `requests`, `limits`. Mirrors `spec.validate.agent` so one file pins matching placement for both |
+| `agent.jobName` | string | Optional **prefix**, never an exact name — the run ID is always appended (`<prefix>-<run-id>`). Omit it unless you need a custom prefix (default: `aicr`) |
+| `agent.serviceAccountName` | string | Optional and **exact-if-exists**, so unlike `jobName` it is not always a prefix. When a ServiceAccount of exactly this name already exists in `agent.namespace`, the pod runs as it verbatim, the run creates and deletes **no** ServiceAccount, Role, RoleBinding, ClusterRole, or ClusterRoleBinding, it leaves the namespace untouched (no create, no label change), and per-run permission isolation is waived — concurrent runs share that identity's persistent grants. When it does not exist, the value is a prefix, the run ID is appended (`<prefix>-<run-id>`), and the run owns a full run-scoped RBAC set it deletes at cleanup. Omitting the field is not the same as writing `aicr` into it: an omitted name is never probed, so the run always takes the run-scoped `aicr-<run-id>`. See [Using an existing ServiceAccount](agent-deployment.md#using-an-existing-serviceaccount-irsa-and-workload-identity) |
 | `execution.timeout` | duration string | e.g. `5m` |
 | `execution.noCleanup` | bool | Keep the capture Job after completion |
 | `execution.privileged` | bool (tri-state) | Set `false` for PSS-restricted namespaces |
@@ -246,6 +266,8 @@ exclusive** — query by criteria or derive from a snapshot, not both.
 | `criteria.nodes` | int | Target GPU node count |
 | `profile` | string | Optional configuration profile selection in `name=value` form. Empty applies the resolved declaration's default. |
 | `configuration.slurm.accounting.mode` | string | Slurm accounting ownership: `disabled` (default) \| `customer-managed` \| `aicr-provided`; mirrors `--slurm-accounting-mode`. Only valid when the resolved recipe platform is `slurm` (whether from `criteria.platform`, a snapshot, or `--platform`) — an explicit mode (even `disabled`) on any other platform is rejected with `INVALID_REQUEST` |
+| `configuration.runtimeInventory.mode` | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled` \| `disabled`; mirrors `--runtime-inventory` |
+| `configuration.gke.tcpxoInterfaces` | []object | Ordered `interfaceName`/`network` pairs (eth1–eth8) for the `torch-distributed-tcpxo` runtime; mirrors `--gke-tcpxo-interfaces` |
 | `input.snapshot` | string | Snapshot path to derive the recipe from |
 | `output.path` | string | Recipe output path |
 | `output.format` | string | `yaml` \| `json` \| `table` |
@@ -260,13 +282,13 @@ Inputs to `aicr bundle`.
 |-------|------|-------|
 | `input.recipe` | string | Recipe to bundle |
 | `output.target` | string | Local directory or `oci://` URI |
-| `output.imageRefs` | string | Optional external image-reference output file for an OCI `output.target` only. Local output is rejected. Its parent must be an existing real directory, and the target must be outside and not aliased to the planned or completed bundle. |
+| `output.imageRefs` | string | Optional external image-reference output file for an OCI `output.target` only. Local output is rejected. Its parent must be an existing real directory, and the target must be outside and not aliased to the planned or completed bundle. The target, including that it can be written, is checked before the bundle is generated. |
 | `deployment.deployer` | string | Deployer choice (same values as `--deployer`) |
 | `deployment.repo` | string | GitOps repo for repo-shaped deployers |
 | `deployment.set` / `.dynamic` | []string | Value overrides, `key:path=value` |
 | `deployment.vendorCharts` | bool | Vendor charts into the bundle |
 | `deployment.appName` | string | Argo CD parent `Application` name override (multi-bundle installs sharing a namespace) |
-| `scheduling.*` | object | `systemNodeSelector`/`Tolerations`, `acceleratedNodeSelector`/`Tolerations`, `draEvictionNodeLabel`, `workloadGate`, `workloadSelector`, `nodes`, `storageClass`, `sharedStorageClass`. Selectors are YAML maps; tolerations use the CLI's `key=value:effect` strings. `draEvictionNodeLabel` accepts one `key=value` label and defaults to `nvidia.com/dra-kubelet-plugin=true`; AICR applies it only when DRA and GPU Operator are both enabled. |
+| `scheduling.*` | object | `systemNodeSelector`/`Tolerations`, `acceleratedNodeSelector`/`Tolerations`, `draEvictionNodeLabel`, `workloadGate`, `workloadSelector`, `nodes`, `storageClass`, `sharedStorageClass`. Selectors are YAML maps; tolerations use the CLI's `key=value:effect` strings. `draEvictionNodeLabel` accepts one `key=value` label and has no default: setting it opts in to DRA eviction coordination, which AICR applies only when DRA and GPU Operator are both enabled. |
 | `attestation.enabled` | bool | Enable bundle attestation (signing); keyless OIDC by default, KMS-backed when `signingKey` is set |
 | `attestation.certificateIdentityRegexp` | string | Expected signer identity |
 | `attestation.oidcDeviceFlow` | bool | Device-code flow for headless signing |
@@ -274,13 +296,16 @@ Inputs to `aicr bundle`.
 | `attestation.signingKey` | string | KMS key reference for key-based signing (`awskms://` \| `gcpkms://` \| `azurekms://` \| `hashivault://`); empty = keyless OIDC. Mutually exclusive with the keyless-only inputs (`oidcDeviceFlow`, `fulcioURL`, `--identity-token`) |
 | `registry.insecureTLS` / `.plainHTTP` | bool | OCI transport options for push |
 
-When `output.imageRefs` is set, AICR writes the published OCI digest through a
-mode-`0600` temporary file and an anchored same-directory rename. The target
-may be absent or an existing retained regular file; directories, symlinks,
-other non-regular files, and bundle aliases are rejected. The final validation
-and rename are ordered but are not one atomic identity-conditioned filesystem
-operation, so no other process should mutate the target directory while the
-bundle command runs.
+When `output.imageRefs` is set, AICR writes the published OCI digest to it.
+The target may be absent or an existing retained regular file; directories,
+symlinks, other non-regular files, and bundle aliases are rejected. An
+ordinary target is written through a mode-`0600` temporary file and an
+anchored same-directory rename. The final validation and rename are ordered
+but are not one atomic identity-conditioned filesystem operation, so no other
+process should mutate the target directory while the bundle command runs. A
+target on a different device from its directory, such as a Kubernetes Job's
+default termination-message file, is truncated and written in place instead. See
+[`aicr bundle --image-refs`](cli-reference.md#aicr-bundle).
 
 ### spec.validate
 
@@ -289,17 +314,21 @@ Inputs to `aicr validate`.
 | Field | Type | Notes |
 |-------|------|-------|
 | `input.recipe` / `.snapshot` | string | Recipe + snapshot to validate |
-| `agent.*` | object | In-cluster validation Job pod; same fields and nil-vs-empty semantics as `spec.snapshot.agent` (minus `runtimeClassName`/`os`/`requests`/`limits`) |
+| `agent.*` | object | The **live snapshot-capture** Job pod `aicr validate` deploys when `input.snapshot` is empty; same fields and nil-vs-empty semantics as `spec.snapshot.agent` (minus `runtimeClassName`/`os`/`requests`/`limits`). Neither `jobName` nor `serviceAccountName` names the validator Jobs. The one addition, `validatorServiceAccountName`, configures the validator Jobs instead and applies with or without `input.snapshot` |
+| `agent.jobName` | string | Optional **prefix**, never an exact name — the run ID is always appended (`<prefix>-<run-id>`). Omit it to take the default (`aicr-validate`) |
+| `agent.serviceAccountName` | string | Optional and **exact-if-exists**, with the same two branches as `spec.snapshot.agent.serviceAccountName`: an existing ServiceAccount of exactly this name in `agent.namespace` is used verbatim, the run creates and deletes **no** RBAC, the capture agent leaves the namespace untouched (the validator Jobs still apply it unless `agent.validatorServiceAccountName` is set), and per-run permission isolation is waived — concurrent runs share that identity's persistent grants; when it does not exist the value is a prefix with the run ID appended (`<prefix>-<run-id>`) and the run owns a full run-scoped RBAC set. Omitting the field is not the same as writing `aicr-validate` into it: an omitted name is never probed, so the run always takes the run-scoped `aicr-validate-<run-id>`. See [Using an existing ServiceAccount](agent-deployment.md#using-an-existing-serviceaccount-irsa-and-workload-identity) |
+| `agent.validatorServiceAccountName` | string | Existing ServiceAccount in `agent.namespace` that the **validator Jobs** run as, instead of a per-run ServiceAccount bound to `cluster-admin`. For the validator Jobs the run creates and deletes no ServiceAccount or ClusterRoleBinding and does not apply the namespace; with `input.snapshot` empty, the live-capture agent still creates or labels the namespace and creates its own RBAC unless `agent.serviceAccountName` names an existing ServiceAccount. It applies with or without `input.snapshot`, and it is exact, never a prefix: a missing, unbound, or unverifiable ServiceAccount fails the run before anything is created rather than falling back to per-run RBAC. Omit it to keep per-run RBAC. Mirrors `--validator-service-account-name`. See [Running under a pre-provisioned ServiceAccount](validation.md#running-under-a-pre-provisioned-serviceaccount) |
 | `execution.phases` | []string | e.g. `[deployment, conformance, performance]` |
+| `execution.skipChecks` | []string | Checks to withhold from every phase that runs, one level below `phases`. For a caller that cannot satisfy a check the recipe declares, e.g. a lane deploying a subset of the recipe. Each named check is **reported as skipped**, not dropped, so the CTRF report and the recipe-evidence bundle still account for it. Rejected before any validation resource is created when a name matches no check, when the list would leave a requested phase with nothing to run, or when it is set alongside `evidence.cncf.dir` (that renderer omits skipped checks, so a submission would silently lose the requirement). A `cm://` recipe is read from the cluster first, so that form contacts the API server before the list is judged. Mirrors `--skip-check` |
 | `execution.failOnError` | bool (tri-state) | Absent = CLI default (`true`); explicit `false` opts out |
 | `execution.failFast` | bool (tri-state) | Stop after the first failed phase |
 | `execution.noCluster` | bool | Test mode: no cluster access, constraints evaluated inline |
 | `execution.noCleanup` | bool | Keep validation Jobs after completion |
-| `execution.timeout` | duration string | e.g. `40m` |
+| `execution.timeout` | duration string | `aicr validate`: timeout for the live snapshot-capture agent Job (`--timeout`, default `5m`); inert when `input.snapshot` is set, and validator Jobs keep their per-check timeouts. Go SDK: `Config.ValidateSettings().Timeout` carries the same value for `WithValidationTimeout`, which caps the whole `ValidateState` run (see [Go library](../integrator/go-library.md#what-validatesettings-does-and-does-not-carry)) |
 | `evidence.cncf.dir` | string | CNCF AI Conformance evidence directory (`--evidence-dir`) |
 | `evidence.cncf.cncfSubmission` | bool (tri-state) | Emit submission layout; requires `dir` |
 | `evidence.cncf.features` | []string | Empty = all features; honored only with `cncfSubmission` |
-| `evidence.attestation.out` | string | Recipe-evidence result path (v1 for unprofiled recipes, v2 for profiled ones) — setting it **enables** the attestation path |
+| `evidence.attestation.out` | string | Output directory for the recipe-evidence bundle (predicateType v3; same as `--emit-attestation`), which receives `summary-bundle/` and `pointer.yaml` — setting it **enables** the attestation path |
 | `evidence.attestation.bom` / `.push` | string | BOM input; OCI ref for the signed bundle push |
 | `evidence.attestation.plainHTTP` / `.insecureTLS` | bool (tri-state) | Push transport options |
 

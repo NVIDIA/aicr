@@ -16,7 +16,6 @@ package cli
 
 import (
 	"context"
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -27,76 +26,39 @@ import (
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
-// TestResolveCNCFAllocationPolicy exercises the #1629 policy threading for
-// --cncf-submission runs: no recipe context resolves to an empty policy
-// (standalone runs keep the evidence script's capability detection), a
-// recipe-backed run resolves the policy from the hydrated recipe, and a
-// broken recipe path fails closed instead of silently collecting without a
-// policy. The validate Action is overridden so only the resolution flow runs
-// — never the collector (which would contact a live cluster).
-func TestResolveCNCFAllocationPolicy(t *testing.T) {
+// TestValidateCmd_CNCFSubmissionRecipe covers the recipe source of a
+// --cncf-submission run. Every case fails before the collector starts, so
+// nothing reaches a cluster. An unreadable recipe fails closed, a loadable
+// one proceeds to the facade, which rejects the unknown feature, and a
+// recipe-less run ignores --data because it never reads recipe data.
+func TestValidateCmd_CNCFSubmissionRecipe(t *testing.T) {
+	validRecipe := filepath.Join(t.TempDir(), "recipe.yaml")
+	recipeYAML := "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec:\n  criteria:\n" +
+		"    service: eks\n    accelerator: h100\n    intent: training\n    os: ubuntu\n"
+	if err := os.WriteFile(validRecipe, []byte(recipeYAML), 0o600); err != nil {
+		t.Fatalf("failed to write test recipe file: %v", err)
+	}
+
 	tests := []struct {
 		name       string
-		recipeYAML string // written to a temp recipe file when non-empty
-		recipePath string // used verbatim when non-empty (overrides recipeYAML)
-		wantPolicy string
-		wantErr    bool
+		args       []string
+		errContain string
 	}{
-		{
-			name:       "no recipe context resolves empty policy",
-			wantPolicy: "",
-		},
-		{
-			name: "recipe context resolves the hydrated policy",
-			// Auto-hydrates from the embedded catalog; stock recipes default
-			// to device-plugin allocation since the #1327/#1671 flip.
-			recipeYAML: "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n    os: ubuntu\n",
-			wantPolicy: v1.GPUAllocationPolicyDevicePluginExtendedResource,
-		},
-		{
-			name:       "unreadable recipe fails closed",
-			recipePath: filepath.Join(t.TempDir(), "does-not-exist.yaml"),
-			wantErr:    true,
-		},
+		{"unreadable recipe fails closed", []string{"--recipe", filepath.Join(t.TempDir(), "does-not-exist.yaml")}, "does-not-exist.yaml"},
+		{"loaded recipe reaches the facade", []string{"--recipe", validRecipe}, "unknown feature"},
+		{"recipe-less run ignores --data", []string{"--data", filepath.Join(t.TempDir(), "missing-data-dir")}, "unknown feature"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			args := []string{"validate", "--no-cluster"}
-			recipePath := tt.recipePath
-			if tt.recipeYAML != "" {
-				recipePath = filepath.Join(t.TempDir(), "recipe.yaml")
-				if err := os.WriteFile(recipePath, []byte(tt.recipeYAML), 0o600); err != nil {
-					t.Fatalf("failed to write test recipe file: %v", err)
-				}
-			}
-			if recipePath != "" {
-				args = append(args, "--recipe", recipePath)
-			}
-
-			var gotPolicy string
-			cmd := validateCmd()
-			cmd.Action = func(ctx context.Context, c *cli.Command) error {
-				cfg, err := loadCmdConfig(ctx, c)
-				if err != nil {
-					return err
-				}
-				resolved, err := cfg.Validation().Resolve()
-				if err != nil {
-					return err
-				}
-				gotPolicy, err = resolveCNCFAllocationPolicy(ctx, c, cfg, resolved)
-				return err
-			}
-			err := cmd.Run(t.Context(), args)
-
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if !tt.wantErr && gotPolicy != tt.wantPolicy {
-				t.Errorf("policy = %q, want %q", gotPolicy, tt.wantPolicy)
+			app := &cli.Command{Name: "aicr", Commands: []*cli.Command{validateCmd()}}
+			args := append([]string{"aicr", "validate", "--cncf-submission",
+				"--evidence-dir", t.TempDir(), "--feature", "nonexistent"}, tt.args...)
+			err := app.Run(t.Context(), args)
+			if err == nil || !strings.Contains(err.Error(), tt.errContain) {
+				t.Fatalf("error = %v, want error containing %q", err, tt.errContain)
 			}
 		})
 	}
@@ -235,7 +197,7 @@ func TestValidateCmd_CNCFSubmissionFlagValidation(t *testing.T) {
 				// well-formed-but-invalid request, so assert the structured
 				// code (not just the message text) — a wrong code would map to
 				// the wrong HTTP status / exit behavior for library callers.
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
 				}
 				if tt.errContain != "" && (err == nil || !strings.Contains(err.Error(), tt.errContain)) {
@@ -250,6 +212,75 @@ func TestValidateCmd_CNCFSubmissionFlagValidation(t *testing.T) {
 // attestation (--emit-attestation / --push) alongside the offline --no-cluster
 // dry-run is rejected with ErrCodeInvalidRequest, rather than warn-and-ignored.
 // (Config-driven suppression is a separate path — see evidenceConfigForRunMode.)
+// TestValidateFlagCombinations_SkipCheckWithEvidenceDir pins the refusal that
+// keeps a withheld check out of a CNCF conformance submission.
+//
+// pkg/evidence/cncf/renderer.go drops every StatusSkipped entry before
+// grouping, so a requirement whose checks were all skipped produces no markdown
+// file and no index entry, with nothing anywhere recording the omission. That
+// was tolerable while skips were incidental; --skip-check makes them deliberate
+// and plural, and a submission that silently omits a requirement reads as
+// complete when it is not. Until the renderer records a withheld requirement
+// with its reason, the two are refused together.
+//
+// The neighboring cases are what make this a discriminating test rather than a
+// blanket rejection: either flag alone must still be accepted.
+func TestValidateFlagCombinations_SkipCheckWithEvidenceDir(t *testing.T) {
+	tests := []struct {
+		name        string
+		evidenceDir string
+		skipChecks  []string
+		wantErr     bool
+		wantSubstrs []string
+	}{
+		{
+			name:        "skip-check with evidence-dir is refused",
+			evidenceDir: "/tmp/evidence",
+			skipChecks:  []string{"dra-support"},
+			wantErr:     true,
+			wantSubstrs: []string{"--skip-check", "--evidence-dir", "omits skipped checks"},
+		},
+		{
+			name:        "evidence-dir alone is accepted",
+			evidenceDir: "/tmp/evidence",
+		},
+		{
+			name:       "skip-check alone is accepted",
+			skipChecks: []string{"dra-support"},
+		},
+		{
+			name: "neither is accepted",
+		},
+		{
+			// An empty slice is "no skips", not "skips requested": a config that
+			// carries `skipChecks: []` must not lock the caller out of the
+			// evidence path.
+			name:        "an empty skip list does not trip the refusal",
+			evidenceDir: "/tmp/evidence",
+			skipChecks:  []string{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateFlagCombinations(false, tt.evidenceDir, nil, false, false, tt.skipChecks)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateFlagCombinations() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr {
+				return
+			}
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+				t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
+			}
+			for _, want := range tt.wantSubstrs {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err.Error(), want)
+				}
+			}
+		})
+	}
+}
+
 func TestValidateCmd_NoClusterEvidenceFlags(t *testing.T) {
 	tests := []struct {
 		name string
@@ -272,7 +303,7 @@ func TestValidateCmd_NoClusterEvidenceFlags(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected error, got nil")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), "cannot be combined with --no-cluster") {
@@ -310,39 +341,39 @@ func TestValidateCmd_RecipeKindHandling(t *testing.T) {
 	}{
 		{
 			name:        "RecipeMetadata without criteria returns clear error",
-			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec: {}\n",
+			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec: {}\n",
 			wantErr:     true,
 			errContain:  "has no criteria",
 		},
 		{
 			name:        "RecipeMetadata with criteria auto-hydrates",
-			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
+			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
 			wantErr:     true,
 			errContain:  "--no-cluster requires --snapshot",
 			errAbsent:   "has no criteria",
 		},
 		{
 			name:        "RecipeMixin kind is rejected",
-			yamlContent: "kind: RecipeMixin\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec: {}\n",
+			yamlContent: "kind: RecipeMixin\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec: {}\n",
 			wantErr:     true,
 			errContain:  `kind "RecipeMixin"`,
 		},
 		{
 			name:        "unknown kind is rejected",
-			yamlContent: "kind: SomethingElse\napiVersion: aicr.run/v1alpha2\n",
+			yamlContent: "kind: SomethingElse\napiVersion: aicr.run/v1\n",
 			wantErr:     true,
 			errContain:  `kind "SomethingElse"`,
 		},
 		{
 			name:        "RecipeResult kind passes kind check",
-			yamlContent: "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\n",
+			yamlContent: "kind: RecipeResult\napiVersion: aicr.run/v1\n",
 			wantErr:     true,
 			errContain:  "--no-cluster requires --snapshot",
 			errAbsent:   "is required",
 		},
 		{
 			name:        "empty kind passes kind check",
-			yamlContent: "apiVersion: aicr.run/v1alpha2\n",
+			yamlContent: "apiVersion: aicr.run/v1\n",
 			wantErr:     true,
 			errContain:  "--no-cluster requires --snapshot",
 			errAbsent:   "is required",
@@ -407,12 +438,12 @@ func TestValidateCmd_KubeconfigSelectsValidationCluster(t *testing.T) {
 	t.Setenv("KUBECONFIG", filepath.Join(tmp, "env-default.kubeconfig"))
 
 	recipePath := filepath.Join(tmp, "recipe.yaml")
-	recipeYAML := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\nmetadata:\n  version: test\ncomponentRefs:\n  - name: gpu-operator\n    type: Helm\n    source: https://helm.ngc.nvidia.com/nvidia\n    version: v25.10.0\n    overrides:\n      devicePlugin:\n        enabled: true\n"
+	recipeYAML := "kind: RecipeResult\napiVersion: aicr.run/v1\nmetadata:\n  version: test\ncomponentRefs:\n  - name: gpu-operator\n    type: Helm\n    source: https://helm.ngc.nvidia.com/nvidia\n    version: v25.10.0\n    overrides:\n      devicePlugin:\n        enabled: true\n"
 	if err := os.WriteFile(recipePath, []byte(recipeYAML), 0o600); err != nil {
 		t.Fatalf("failed to write test recipe file: %v", err)
 	}
 	snapshotPath := filepath.Join(tmp, "snapshot.yaml")
-	if err := os.WriteFile(snapshotPath, []byte("kind: Snapshot\nmetadata:\n  version: test\nmeasurements:\n  - type: K8s\n"), 0o600); err != nil {
+	if err := os.WriteFile(snapshotPath, []byte("kind: Snapshot\napiVersion: aicr.run/v1\nmetadata:\n  version: test\nmeasurements:\n  - type: K8s\n"), 0o600); err != nil {
 		t.Fatalf("failed to write test snapshot file: %v", err)
 	}
 
@@ -430,7 +461,7 @@ func TestValidateCmd_KubeconfigSelectsValidationCluster(t *testing.T) {
 	if !strings.Contains(err.Error(), flagPath) {
 		t.Errorf("error must fail on the explicit --kubeconfig path %q, got:\n%v", flagPath, err)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
 	}
 }
@@ -465,8 +496,224 @@ func TestDeployAgentForValidation_ExplicitKubeconfigFailsFast(t *testing.T) {
 	if !strings.Contains(err.Error(), flagPath) {
 		t.Errorf("error must fail on the explicit kubeconfig path %q, got:\n%v", flagPath, err)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
+	}
+}
+
+// TestValidateAgentConfig_ToAgentConfig_ForwardsRunID covers ONLY the
+// toAgentConfig projection boundary: given a validateAgentConfig whose
+// runID field is already set, toAgentConfig must copy it onto the facade
+// AgentConfig.RunID unchanged (and set NameBase to validateNameBase rather
+// than leaving JobName/ServiceAccountName to carry the naming prefix).
+//
+// What this does NOT cover: it never runs the validateCmd Action, so it
+// says nothing about whether `aicr validate` generates exactly one RunID
+// per invocation and hands that SAME value to both the live-capture
+// snapshot agent and the validator Jobs — that single-generation invariant
+// (ADR-020 Ruling 7) is not exercised by an automated test at all; see the
+// WARNING comment on the Action's `runID := v1.GenerateRunID()` call in
+// validate.go for why, and TestParseValidateAgentConfig_ForwardsCallerRunID
+// below for the adjacent (also boundary-only) coverage on the parsing side.
+func TestValidateAgentConfig_ToAgentConfig_ForwardsRunID(t *testing.T) {
+	cfg := &validateAgentConfig{
+		namespace: "aicr-validation-test",
+		runID:     "20260821-142233-9f3a1c0b7e2d4a55",
+	}
+
+	ac := cfg.toAgentConfig()
+
+	if ac.RunID != cfg.runID {
+		t.Errorf("AgentConfig.RunID = %q, want %q (validateAgentConfig.runID)", ac.RunID, cfg.runID)
+	}
+	if ac.NameBase != validateNameBase {
+		t.Errorf("AgentConfig.NameBase = %q, want %q", ac.NameBase, validateNameBase)
+	}
+}
+
+// TestParseValidateAgentConfig_ForwardsCallerRunID covers ONLY
+// parseValidateAgentConfig's own mapping: the runID parameter it is given
+// lands unchanged on the returned validateAgentConfig.runID field.
+//
+// This test replaces cmd.Action outright (to isolate that mapping from
+// recipe/snapshot I/O without touching a cluster), so NONE of the
+// production Action code at validate.go's `runID := v1.GenerateRunID()`
+// call through the parseValidateAgentConfig call site actually runs here.
+// It cannot detect a regression in how the real Action generates or
+// threads runID — in particular it says nothing about ADR-020 Ruling 7's
+// single-generation invariant (one v1.GenerateRunID() call feeding BOTH
+// the live-capture agent and the validator Jobs). See the WARNING comment
+// on that call site in validate.go: no automated test in this package
+// enforces single-generation. The two consumer sites are NOT mutually
+// exclusive — with neither --snapshot nor --no-cluster, the live-capture
+// branch and runValidation both consume the id in one invocation. What
+// blocks the test is that exercising both requires live-cluster I/O (both
+// branches deploy Jobs) with no injectable seam in the Action to fake it.
+func TestParseValidateAgentConfig_ForwardsCallerRunID(t *testing.T) {
+	const wantRunID = "20260821-142233-9f3a1c0b7e2d4a55"
+
+	var captured *validateAgentConfig
+	cmd := validateCmd()
+	cmd.Action = func(ctx context.Context, c *cli.Command) error {
+		cfg, err := loadFacadeConfig(ctx, c)
+		if err != nil {
+			return err
+		}
+		opts, _, err := cfg.ValidateSettings()
+		if err != nil {
+			return err
+		}
+		shared := validateSharedResolved{namespace: "aicr-validation-test"}
+		captured = parseValidateAgentConfig(c, opts, shared, wantRunID)
+		return nil
+	}
+	if err := cmd.Run(t.Context(), []string{"validate", "--no-cluster"}); err != nil {
+		t.Fatalf("validate run: %v", err)
+	}
+
+	if captured.runID != wantRunID {
+		t.Errorf("validateAgentConfig.runID = %q, want %q", captured.runID, wantRunID)
+	}
+}
+
+// TestValidateCmd_NoConfigDefaultsToCleanup is the regression test for the
+// fix-round-2 security defect: a plain `aicr validate` — no --config, no
+// --no-cleanup, which is the common invocation — must clean up by default.
+//
+// Before the fix, ValidateSettings() returned only (ValidateSettings, error),
+// and its zero value (Cleanup: false, returned for both a nil Config and an
+// absent spec.validate) was trusted directly as the fallback for
+// --no-cleanup. That silently flipped the CLI's own default: a plain
+// invocation left the cluster-admin ClusterRoleBinding and validator Jobs
+// active. The Action is overridden here to isolate exactly the computation
+// that broke — loadFacadeConfig, ValidateSettings' presence bool,
+// validateCleanupFallback, then the same boolFlagOrConfig call the
+// production Action makes — without needing a live cluster to reach it.
+func TestValidateCmd_NoConfigDefaultsToCleanup(t *testing.T) {
+	var gotNoCleanup bool
+	cmd := validateCmd()
+	cmd.Action = func(ctx context.Context, c *cli.Command) error {
+		cfg, err := loadFacadeConfig(ctx, c)
+		if err != nil {
+			return err
+		}
+		opts, present, err := cfg.ValidateSettings()
+		if err != nil {
+			return err
+		}
+		cleanupFallback := validateCleanupFallback(opts, present)
+		gotNoCleanup = boolFlagOrConfig(c, "no-cleanup", !cleanupFallback)
+		return nil
+	}
+	if err := cmd.Run(t.Context(), []string{"validate"}); err != nil {
+		t.Fatalf("validate run: %v", err)
+	}
+
+	if gotNoCleanup {
+		t.Error("noCleanup = true, want false: a plain `aicr validate` " +
+			"(no --config, no --no-cleanup) must clean up by default")
+	}
+}
+
+// TestValidateCleanupFallback drives validateCleanupFallback directly for
+// both branches. present=false is also exercised indirectly by
+// TestValidateCmd_NoConfigDefaultsToCleanup through a full command run; the
+// two present=true rows here are not exercised by any other test — present's
+// whole point is to gate ONLY when spec.validate was actually evaluated, so
+// a present=true document that decided Cleanup=false must flow through
+// unmodified rather than being silently overridden by the CLI's own
+// clean-up-by-default.
+func TestValidateCleanupFallback(t *testing.T) {
+	tests := []struct {
+		name    string
+		opts    aicr.ValidateSettings
+		present bool
+		want    bool
+	}{
+		{"absent spec.validate defaults to cleanup", aicr.ValidateSettings{Cleanup: false}, false, true},
+		{"present spec.validate with cleanup true", aicr.ValidateSettings{Cleanup: true}, true, true},
+		{"present spec.validate with cleanup false", aicr.ValidateSettings{Cleanup: false}, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := validateCleanupFallback(tt.opts, tt.present); got != tt.want {
+				t.Errorf("validateCleanupFallback(%+v, present=%t) = %t, want %t",
+					tt.opts, tt.present, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestValidateCmd_DeclaredNameDefaultsNeverReachTheAgent is the validate-side
+// half of TestSnapshotCmd_DeclaredNameDefaultsNeverReachTheDeployer; see that
+// test for why an unset --service-account-name must not resolve to a name aicr
+// chose. The released v1 defaults here are "aicr-validate" for --job-name and
+// "aicr" for --service-account-name, and both stay declared for `--help` and
+// testdata/cli-surface.golden while neither is delivered as a value.
+//
+// The prefix the agent's objects actually get comes from
+// AgentConfig.NameBase (validateNameBase) instead, which is what keeps this
+// command's agent resources distinguishable from `aicr snapshot`'s.
+func TestValidateCmd_DeclaredNameDefaultsNeverReachTheAgent(t *testing.T) {
+	cmd := validateCmd()
+	if got := stringFlagValue(t, cmd, "job-name"); got != validateNameBase {
+		t.Errorf("--job-name declared default = %q, want the released %q",
+			got, validateNameBase)
+	}
+	if got := stringFlagValue(t, cmd, "service-account-name"); got != name {
+		t.Errorf("--service-account-name declared default = %q, want the released %q",
+			got, name)
+	}
+
+	capture := func(t *testing.T, args ...string) *validateAgentConfig {
+		t.Helper()
+		var captured *validateAgentConfig
+		c := validateCmd()
+		c.Action = func(ctx context.Context, cc *cli.Command) error {
+			cfg, err := loadFacadeConfig(ctx, cc)
+			if err != nil {
+				return err
+			}
+			opts, _, err := cfg.ValidateSettings()
+			if err != nil {
+				return err
+			}
+			shared := validateSharedResolved{namespace: "aicr-validation-test"}
+			captured = parseValidateAgentConfig(cc, opts, shared, "20260821-142233-9f3a1c0b7e2d4a55")
+			return nil
+		}
+		if err := c.Run(t.Context(), append([]string{"validate", "--no-cluster"}, args...)); err != nil {
+			t.Fatalf("validate run: %v", err)
+		}
+		return captured
+	}
+
+	unset := capture(t)
+	if unset.serviceAccountName != "" {
+		t.Errorf("serviceAccountName = %q for an unset flag, want empty; a "+
+			"non-empty value is probed for existence and a hit disables RBAC "+
+			"management for the whole run", unset.serviceAccountName)
+	}
+	if unset.jobName != "" {
+		t.Errorf("jobName = %q for an unset flag, want empty", unset.jobName)
+	}
+	if base := unset.toAgentConfig().NameBase; base != validateNameBase {
+		t.Errorf("AgentConfig.NameBase = %q, want %q — it is what supplies the "+
+			"prefix once the declared defaults stop being delivered",
+			base, validateNameBase)
+	}
+
+	// Guard against the vacuous pass: an operator-supplied name must survive,
+	// since that is the only route into exact-ServiceAccount mode.
+	explicit := capture(t, "--job-name", "validate-gpu-nodes",
+		"--service-account-name", "irsa-snapshotter")
+	if explicit.serviceAccountName != "irsa-snapshotter" {
+		t.Errorf("serviceAccountName = %q, want the operator's %q",
+			explicit.serviceAccountName, "irsa-snapshotter")
+	}
+	if explicit.jobName != "validate-gpu-nodes" {
+		t.Errorf("jobName = %q, want the operator's %q",
+			explicit.jobName, "validate-gpu-nodes")
 	}
 }
 
@@ -481,6 +728,7 @@ func TestClassifyIgnoredAKSGPUPools(t *testing.T) {
 		envValue      string
 		poolsPath     string
 		snapshotPath  string
+		flagName      string // empty means aks-gpu-pools
 		wantShouldLog bool
 		wantAtWarn    bool
 	}{
@@ -529,6 +777,25 @@ func TestClassifyIgnoredAKSGPUPools(t *testing.T) {
 			wantAtWarn:    true,
 		},
 		{
+			name:          "oke-addons explicit flag: warn",
+			args:          []string{"validate", "--oke-addons", "a.json", "-s", "snap.yaml"},
+			poolsPath:     "a.json",
+			snapshotPath:  "snap.yaml",
+			flagName:      "oke-addons",
+			wantShouldLog: true,
+			wantAtWarn:    true,
+		},
+		{
+			name:          "oke-addons ambient env only (AICR_OKE_ADDONS_PATH): debug",
+			args:          []string{"validate", "-s", "snap.yaml"},
+			envValue:      "a.json",
+			poolsPath:     "a.json",
+			snapshotPath:  "snap.yaml",
+			flagName:      "oke-addons",
+			wantShouldLog: true,
+			wantAtWarn:    false,
+		},
+		{
 			name: "similarly-prefixed flag is not a false positive",
 			args: []string{"validate", "--aks-gpu-pools-extra", "x", "-s", "snap.yaml"},
 			// pools path resolvable only via env in this shape.
@@ -542,7 +809,11 @@ func TestClassifyIgnoredAKSGPUPools(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			shouldLog, atWarn := classifyIgnoredAKSGPUPools(tt.args, tt.envValue, tt.poolsPath, tt.snapshotPath)
+			flagName := tt.flagName
+			if flagName == "" {
+				flagName = "aks-gpu-pools"
+			}
+			shouldLog, atWarn := classifyIgnoredProjection(tt.args, tt.envValue, tt.poolsPath, tt.snapshotPath, flagName)
 			if shouldLog != tt.wantShouldLog || atWarn != tt.wantAtWarn {
 				t.Fatalf("classify = (log=%v, warn=%v), want (log=%v, warn=%v)",
 					shouldLog, atWarn, tt.wantShouldLog, tt.wantAtWarn)

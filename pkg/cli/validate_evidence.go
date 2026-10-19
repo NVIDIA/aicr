@@ -22,7 +22,6 @@ import (
 	"github.com/urfave/cli/v3"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/config"
 )
 
 // recipeEvidenceConfig groups the inputs to `aicr validate --emit-attestation`.
@@ -44,9 +43,17 @@ type recipeEvidenceConfig struct {
 	// raw payloads. CLI-only — there is no config-file equivalent.
 	Full bool
 
-	// OIDC token resolution is deferred until adjacent to SignStatement
-	// (see attestation.Emit): Fulcio binds the token to a fresh nonce at
-	// issue, and a multi-minute validation run between resolve and sign
+	// AllowMutableValidatorTags emits despite a validator image resolving to a
+	// moving tag (see attestation.EmitOptions.AllowMutableValidatorTags).
+	// CLI-only, mirroring Full and NoSign: a config file is committed, and an
+	// opt-out of a provenance guard should be a deliberate per-invocation act
+	// rather than a setting a later run inherits silently.
+	AllowMutableValidatorTags bool
+
+	// OIDCResolve selects the signing mode (a KMS key, or keyless). OIDC
+	// token resolution is deferred until adjacent to SignStatement (see
+	// attestation.Emit): Fulcio binds the token to a fresh nonce at issue,
+	// and a multi-minute validation run between resolve and sign
 	// invalidates it.
 	OIDCResolve aicr.OIDCResolveOptions
 
@@ -56,29 +63,38 @@ type recipeEvidenceConfig struct {
 }
 
 // buildRecipeEvidenceConfig parses the --emit-attestation flag family with
-// CLI > config precedence. Returns nil when neither the flag nor
-// spec.validate.evidence.attestation.out is set, signaling the validate
-// run should not produce a recipe-evidence bundle.
-func buildRecipeEvidenceConfig(cmd *cli.Command, resolved *config.ValidateResolved) *recipeEvidenceConfig {
-	att := resolved.EvidenceAttestation
-	if att == nil {
-		att = &config.EvidenceAttestationResolved{}
-	}
-	out := stringFlagOrConfig(cmd, "emit-attestation", att.Out)
+// CLI > config precedence. att is the facade projection of
+// spec.validate.evidence.attestation (Config.EvidenceAttestationOptions);
+// its zero value is a valid "config configured nothing" input, matching what
+// that method returns for an absent section. Returns nil when neither the
+// flag nor att.OutDir is set, signaling the validate run should not produce a
+// recipe-evidence bundle.
+func buildRecipeEvidenceConfig(cmd *cli.Command, att aicr.EvidenceOptions) (*recipeEvidenceConfig, error) {
+	out := stringFlagOrConfig(cmd, "emit-attestation", att.OutDir)
 	if out == "" {
-		return nil
+		return nil, nil //nolint:nilnil // nil means the run emits no recipe-evidence bundle
+	}
+	if err := validateNoSignWithoutSigningFlags(cmd); err != nil {
+		return nil, err
+	}
+	signing, err := evidenceSigningOptionsFromFlags(cmd)
+	if err != nil {
+		return nil, err
 	}
 	return &recipeEvidenceConfig{
 		OutDir:      out,
-		BOMPath:     stringFlagOrConfig(cmd, "bom", att.BOM),
+		BOMPath:     stringFlagOrConfig(cmd, "bom", att.BOMPath),
 		Push:        stringFlagOrConfig(cmd, flagPush, att.Push),
 		PlainHTTP:   boolFlagOrConfig(cmd, flagPlainHTTP, att.PlainHTTP),
 		InsecureTLS: boolFlagOrConfig(cmd, flagInsecureTLS, att.InsecureTLS),
 		NoSign:      cmd.Bool(flagNoSign),
 		Full:        cmd.Bool(flagFull),
-		OIDCResolve: oidcResolveOptionsFromFlags(cmd),
+
+		AllowMutableValidatorTags: cmd.Bool(flagAllowMutableValidatorTags),
+
+		OIDCResolve: signing,
 		AssumeYes:   cmd.Bool(flagAssumeYes),
-	}
+	}, nil
 }
 
 // evidenceConfigForRunMode suppresses CONFIG-DRIVEN recipe-evidence emission in
@@ -103,29 +119,8 @@ func evidenceConfigForRunMode(noCluster bool, cfg *recipeEvidenceConfig) *recipe
 	return cfg
 }
 
-// oidcResolveOptionsFromFlags builds the keyless-signing OIDC resolution
-// options from the shared --identity-token / --oidc-device-flow flag pair
-// plus the GitHub Actions ambient-OIDC env vars. Shared by every command
-// that signs an evidence bundle (`validate --push`, `evidence publish`,
-// `evidence sign`) so the source-precedence wiring stays in one place.
-//
-// Evidence signing targets Rekor v2 (UseTUFSigningConfig), matching bundle and
-// catalog signing so all AICR keyless signatures land in the same log. Evidence
-// commands expose no Rekor-v1 override today, so this is unconditional; add the
-// bundle command's --rekor-url / --signing-config opt-outs here if a private
-// evidence-signing use case appears. See #1650.
-func oidcResolveOptionsFromFlags(cmd *cli.Command) aicr.OIDCResolveOptions {
-	return aicr.OIDCResolveOptions{
-		IdentityToken:       cmd.String(flagIdentityToken),
-		AmbientURL:          os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
-		AmbientToken:        os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
-		DeviceFlow:          cmd.Bool(flagOIDCDeviceFlow),
-		UseTUFSigningConfig: true,
-		PromptWriter:        os.Stderr,
-	}
-}
-
-// emitRecipeEvidence is the CLI shim over Client.EmitRecipeEvidence. The
+// emitRecipeEvidence is the CLI shim over Client.EmitRecipeEvidenceWithResult,
+// returning what was pushed so runValidation can write --image-refs. The
 // catalog load, facade→internal PhaseResult conversion, and attestation.Emit
 // orchestration now live behind the Client facade so a non-CLI caller can emit
 // recipe evidence with facade types alone. The CLI retains only the
@@ -138,7 +133,7 @@ func emitRecipeEvidence(
 	snap *aicr.Snapshot,
 	results []*aicr.PhaseResult,
 	cfg *recipeEvidenceConfig,
-) error {
+) (*aicr.EvidenceEmission, error) {
 
 	// Signing happens only when --push is set without --no-sign (see
 	// attestation.Emit). Gate the interactive keyless login behind the
@@ -148,11 +143,11 @@ func emitRecipeEvidence(
 	// flow runs.
 	if cfg.Push != "" && !cfg.NoSign {
 		if err := confirmKeylessSigningDisclosure(cfg.OIDCResolve, cfg.AssumeYes, os.Stdin, os.Stderr); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	return client.EmitRecipeEvidence(ctx, rec, snap, results, aicr.EvidenceOptions{
+	return client.EmitRecipeEvidenceWithResult(ctx, rec, snap, results, aicr.EvidenceOptions{
 		OutDir:      cfg.OutDir,
 		BOMPath:     cfg.BOMPath,
 		Push:        cfg.Push,
@@ -161,6 +156,9 @@ func emitRecipeEvidence(
 		NoSign:      cfg.NoSign,
 		Full:        cfg.Full,
 		Commit:      commit,
+
+		AllowMutableValidatorTags: cfg.AllowMutableValidatorTags,
+
 		OIDCResolve: cfg.OIDCResolve,
 	})
 }

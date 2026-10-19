@@ -16,6 +16,10 @@ lists, see the [CLI Reference](cli-reference.md).
   local Kind/KWOK cluster for a dry run). `kubectl` configured to reach it.
 - The `helm` binary on your `PATH` (the default `helm` deployer emits Helm
   commands).
+- On EKS, an AWS credential path for the EBS CSI driver. The bundle installs
+  the driver but not its credentials, and without them no volume can be
+  provisioned — see
+  [EBS CSI Driver Credentials](component-catalog.md#ebs-csi-driver-credentials).
 - About 15 minutes. No NVIDIA hardware is required to generate a recipe or a
   bundle — only the deploy and validate stages touch a real cluster.
 
@@ -57,6 +61,14 @@ valid values for each criterion (services, accelerators, operating systems,
 intents, platforms) are enumerated in the [CLI Reference](cli-reference.md) and
 the [documentation hub glossary](../README.md#glossary).
 
+**Preview coordinates.** VR200 support in v1 covers four coordinates:
+`rke2 / vr200 / ubuntu / training`, `rke2 / vr200 / ubuntu / training / kubeflow`,
+`rke2 / vr200 / ubuntu / inference`, and
+`rke2 / vr200 / ubuntu / inference / dynamo`. See
+[VR200 Preview coverage](component-catalog.md#vr200-preview-coverage) before
+choosing any of them. `k0s / h200 / ubuntu / training` is also Preview — see
+[k0s Preview coverage](component-catalog.md#k0s-preview-coverage).
+
 > Prefer to start from your live cluster instead of criteria? Capture a
 > snapshot first (`aicr snapshot --output snapshot.yaml`) and pass
 > `--snapshot snapshot.yaml` to `aicr recipe`. See
@@ -76,7 +88,8 @@ aicr query \
 ## Step 4 — Render deployment bundles
 
 The **bundler** materializes the recipe into deployment-ready artifacts — one
-folder per component, each with Helm values, checksums, and a README:
+folder per component with its Helm values, plus a root README, `checksums.txt`,
+and `bundle-info.yaml`:
 
 ```bash
 aicr bundle --recipe recipe.yaml --output ./bundles
@@ -84,7 +97,7 @@ aicr bundle --recipe recipe.yaml --output ./bundles
 
 With the default `helm` deployer, `./bundles` contains per-component folders
 and a `deploy.sh` that runs the Helm installs in dependency order. To target a
-GitOps tool instead (Argo CD, Flux, Helmfile), or to override values and
+GitOps tool or Terraform instead (Argo CD, Flux, Helmfile, Terraform), or to override values and
 scheduling, see [Generating Bundles](bundling.md).
 
 ## Step 5 — Deploy to your cluster
@@ -100,12 +113,15 @@ components come up with `kubectl get pods -A -w`.
 
 ## Step 6 — Validate the running cluster
 
-The **validator** compares the recipe against the live cluster — first the
+The **validator** compares a recipe against the live cluster — first the
 declarative constraints, then optional in-cluster phases (deployment,
-performance, conformance):
+performance, conformance). Validate against the bundle's own `recipe.yaml`:
+it records the components left after bundling — a component the bundler
+dropped is absent, and a component it enabled at bundle time is marked
+enabled. You are still in `bundles/` from Step 5:
 
 ```bash
-aicr validate --recipe recipe.yaml
+aicr validate --recipe recipe.yaml   # bundles/recipe.yaml
 ```
 
 A clean run exits 0. For the phase model, performance testing, and emitting

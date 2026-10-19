@@ -4,26 +4,25 @@ Runbook for AICR maintainers. Two surfaces:
 
 - **Releases** — cadence, tag flow, supply-chain verification.
 - **Recipe contributions** — reviewing PRs against `recipes/` paths,
-  including the forthcoming evidence-backed flow from ADR-007.
+  including the evidence-backed flow from ADR-007 (partly shipped).
 
 For end-user release verification, see
-[RELEASING.md](https://github.com/NVIDIA/aicr/blob/main/RELEASING.md).
+[RELEASE.md](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md).
 For contribution mechanics (DCO, CI, signing), see
 [CONTRIBUTING.md](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md).
 
 ## Cutting a Release
 
 The full release procedure lives in
-[RELEASING.md](https://github.com/NVIDIA/aicr/blob/main/RELEASING.md).
+[RELEASE.md](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md).
 The short form:
 
 | Step | Command | Notes |
 |------|---------|-------|
 | 1. Pre-flight | `make qualify` on `main` | Must pass. Tests + lint + e2e + scan. |
-| 2. Bump | `make bump-patch` (or `bump-minor`/`bump-rc`) | Tags HEAD and pushes the tag. To promote a pre-release to stable on the same SHA, use `make bump-promote TAG=<rc-tag>` (e.g. `TAG=v1.3.0-rc2`). |
+| 2. Bump | `make bump-patch` (or `bump-minor`/`bump-rc`) | Tags HEAD and pushes the tag. To take an RC to GA, delete the RC release and tags first; see [Promoting an RC to GA](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md#promoting-an-rc-to-ga). |
 | 3. Push | `git push origin <tag>` (done by the bump target) | Triggers the `On Tag Release` (`on-tag.yaml`) workflow. |
-| 4. Verify | `gh release view <tag>` + `cosign verify-attestation ...` | See RELEASING.md §Verification. |
-| 5. Demo | Cloud Run deploy auto-triggers on tag push | Inspect `aicrd.demo` health. |
+| 4. Verify | `gh release view <tag>` + `cosign verify-attestation ...` | See RELEASE.md §Verification. |
 
 Bi-weekly cadence; hotfix between cycles when a fix is critical.
 
@@ -89,13 +88,8 @@ re-push from a fresh shell. If the workflow ran but failed, fix on
 **Attestation verification fails for users.** Confirm the GitHub
 attestation predicate type matches `https://slsa.dev/provenance/v1`
 and that the user's `gh` is recent enough (`gh attestation verify` is
-v2.49+). RELEASING.md §Container Attestations has both `gh` and
+v2.49+). RELEASE.md §Container Attestations has both `gh` and
 `cosign` flows.
-
-**Cloud Run demo deploy fails after tag push.** Check the demo deploy
-job (`deploy.yaml`, called from `on-tag.yaml`); the most common cause is GitHub Container
-Registry (GHCR) pull
-failure during the first 60s after tag publish. Re-run the workflow.
 
 ## Release Supply-Chain Monitoring
 
@@ -436,10 +430,12 @@ Two things are deliberately out of scope, both tracked as follow-ups:
 - **Container-image OCI referrer attestations** (SBOM / OpenVEX / SLSA
   provenance, [#1982](https://github.com/NVIDIA/aicr/issues/1982)). Those live in
   ghcr.io's referrer store — a different system with a different retention and GC
-  model from GitHub Releases — and re-verifying seven images times three
-  predicate kinds would add roughly twenty registry round-trips per run,
-  multiplying operational noise against the one signal this job exists to keep
-  crisp. The images are already pulled and scanned weekly by
+  model from GitHub Releases — and re-verifying seven images times seven
+  attestations each (provenance on the index and on each of the two platform
+  manifests, plus a CycloneDX SBOM and an OpenVEX document on each of those two
+  manifests) would add roughly forty-nine registry round-trips per run,
+  multiplying operational noise
+  against the one signal this job exists to keep crisp. The images are already pulled and scanned weekly by
   `vuln-scan-images.yaml`. A registry-side sibling check must use
   `gh attestation verify --bundle-from-oci`, otherwise it reads GitHub's
   attestations API and proves nothing about the registry copy's retrievability.
@@ -463,6 +459,48 @@ the exact artifact:
   an identity or predicate mismatch is a signing-path problem, and the remediation
   is different.
 
+## Registry Chart Drift Report
+
+`Registry Drift Report` (`.github/workflows/registry-drift.yaml`) runs weekly
+(Mondays 07:00 UTC) and answers a question the weekday Renovate PR run
+deliberately does not: which of the chart pins in `recipes/registry.yaml`
+have moved upstream? Renovate's custom manager extracts every pin, but a
+`packageRules` guard disables the `registry-chart` depType for the weekday
+run, because an AICR component bump is never a version-string edit — it can
+rename a values path `nodeScheduling` writes into, move the rendered image
+set, or need an ADR-021 upgrade record, none of which a one-line bot PR
+checks. This workflow force-re-enables that depType under
+`RENOVATE_DRY_RUN=full`, so Renovate can report drift without ever pushing a
+branch or opening a PR.
+
+Each run posts a digest to Slack and the job summary, and uploads a
+`drift-report` artifact (`drift-report.json` plus the raw Renovate report)
+retained for 90 days — long enough to review weeks after the Monday post. A
+manual `workflow_dispatch` run has Slack posting off by default so it can be
+validated silently, and a same-repo PR touching the drift surface also runs
+the report against its own branch, always without posting.
+
+Renovate offers the highest version number per release line, which is not the
+same as the newest release: a registry can carry a frozen or retracted line
+numbered above the maintained one. The report therefore screens candidates by
+publish date. Helm dates come from Renovate, and OCI dates come from each chart
+manifest's `org.opencontainers.image.created` annotation. Within each update
+type, the report walks down from the highest version. A version published more
+than a day before the current pin is withheld and listed in the row's
+`predating` field. The first version that is not withheld is offered, and lower
+versions of that type are dropped. A chart whose every candidate was withheld
+is counted as `withheld` rather than behind, so a reviewer decides it
+explicitly. A version that could not be dated is still offered, as before the
+screen existed. Its row's `unscreened` field says why, and the digest counts
+such rows.
+
+On receiving the Monday digest, review it with the
+[`aicr-reviewing-component-drift`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-reviewing-component-drift/SKILL.md)
+skill: it turns "what moved" into a ranked take/hold/defer recommendation per
+component, gathering values-path, lockstep-family, BOM, CRD/upgrade-record,
+and Kubernetes-compatibility evidence. The skill only recommends — the
+registry edit, `make bom-docs`, and the PR are separate, human-initiated work.
+
 ## Reviewing Recipe Contributions
 
 A recipe PR touches `recipes/overlays/`, `recipes/mixins/`,
@@ -478,16 +516,18 @@ A recipe PR touches `recipes/overlays/`, `recipes/mixins/`,
    the hard one — maintainers cannot run a contributor's GB200 recipe
    on an H100. ADR-007 closes that gap with bundled evidence.
 
-The forthcoming evidence flow is documented below as future state.
-Until ADR-007 PR-D lands, recipe acceptance still relies on author
-attestation + maintainer judgement.
+The evidence flow below is partly shipped: the pointer gates and ingest
+run today, but evidence is not required to merge (the `recipe-evidence`
+check is warning-only), so recipe acceptance still relies on author
+attestation + maintainer judgement, informed by evidence when a pointer
+is present.
 
-## Evidence-Backed Review (Future State per ADR-007)
+## Evidence-Backed Review (ADR-007)
 
 > **Status (partially landed).** `recipes/evidence/` now exists: the
-> per-source pointer tree (`#1347` Option A / `#1401`) shipped, and two
+> per-source pointer tree (`#1347` Option A / `#1401`) shipped, and
 > signed nested pointers are committed today
-> (`h100-gke-cos-training`, `gb200-eks-ubuntu-training`), each under
+> (e.g. `h100-gke-cos-training`, `gb200-eks-ubuntu-training`), each under
 > `recipes/evidence/<recipe>/<src>/<digest>.yaml`. Two gates run on
 > `recipes/evidence/**`: the **blocking** *Evidence Pointer Contract*
 > (`tools/evidence-pointercheck`) rejects any committed pointer that lacks a
@@ -498,7 +538,8 @@ attestation + maintainer judgement.
 > recipe-evidence verify gate (signature/integrity against OCI). Cryptographic
 > trust is enforced **after merge, at ingest** (`evidence-ingest.yaml`), which
 > verifies the signature pinned to the claimed signer before any result is
-> counted (#1535). (This ingest verification is implemented but **currently fails closed** — the GP2 loader cannot yet parse the canonical `identityPattern`/`source` allowlist; tracked in [#1505](https://github.com/NVIDIA/aicr/issues/1505).) The ADR-007 `spec.maintainers` work (PR-D) is still future
+> counted (#1535). The ADR-007 `spec.maintainers` work (PR-D) and the
+> `evidence/known-failure` and `evidence/exempt` labels are still future
 > state. Treat
 > proposed-only items below as design contract, not operational guide.
 

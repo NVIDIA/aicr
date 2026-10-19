@@ -1,6 +1,8 @@
-# What is it
+# Nodewright
 
-Nodewright and nodewright-customizations are two halves of the integration. [Nodewright](https://github.com/NVIDIA/nodewright) is a Kubernetes Operator that applies [nodewright packages](https://github.com/NVIDIA/nodewright-packages) with consistent, repeatable, and tested lifecycles within a cluster. Nodewright-customizations are instances of the [Skyhook Custom Resource](https://github.com/NVIDIA/nodewright/blob/main/chart/templates/skyhook-crd.yaml) that define one or more nodewright packages to deploy. These packages were selected to provide two main functions:
+Nodewright and nodewright-customizations are two halves of the integration. [Nodewright](https://github.com/NVIDIA/nodewright) is a Kubernetes Operator that applies [nodewright packages](https://github.com/NVIDIA/nodewright-packages) with consistent, repeatable, and tested lifecycles within a cluster. Nodewright-customizations are instances of the [NodeWright Custom Resource](https://github.com/NVIDIA/nodewright/blob/main/chart/templates/nodewright-crd.yaml) (`nodewright.nvidia.com/v1alpha1`) that define one or more nodewright packages to deploy. Operator v0.18.0 renamed the kind from `Skyhook`, and AICR's manifests now declare `NodeWright`; the registry pins v0.20.0. On a cluster that predates the rename the operator mirrors each legacy Skyhook into a NodeWright of the same name and writes status only on the NodeWright, so applying these manifests adopts the mirrored object rather than creating a second one. The legacy kind is read-only from v0.18.0 on: its admission webhook rejects any spec, `pause` or `disable` change, which is why the manifests moved. See the [upstream migration guide](https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md).
+
+The registry default namespace is `nodewright`. A deployment made before that moved still runs in `skyhook`, and Helm cannot relocate a release, so pass `aicr recipe --inherit-from <prior recipe or bundle> --inherit=namespace` to keep it where it is while using the new release's chart, source, manifests and object names; the health-check assertions follow the inherited namespace. These packages were selected to provide two main functions:
 1. Optimize a node for inference or training workloads via grub, sysctl and systemd service settings.
 2. Be able to install all of the necessary software to bring a vanilla Kubernetes node to the AICR spec.
 
@@ -8,7 +10,7 @@ Nodewright and nodewright-customizations are two halves of the integration. [Nod
 
 1. [Nodewright documentation](https://github.com/NVIDIA/nodewright/blob/main/docs)
 
-# Optimizer
+## Optimizer
 
 Uses tuned to apply a sequence of profiles to optimize primarily grub and sysctl settings. Your mileage may vary depending on the particulars of the virtualization if not running baremetal.
 
@@ -24,15 +26,15 @@ configMap:
     service: eks
 ```
 
-Supported accelerators: `h100`, `gb200`
+Supported accelerators: see the generated table below.
 
 Integration notes:
   * If you provide a service it MUST exist in the [profiles service directory](https://github.com/NVIDIA/nodewright-packages/tree/main/nvidia-tuned/profiles/service)
   * If you are integrating a new service beware that even tested paths may not fully work due to limitations in that service. For example you will notice that `eks` has overrides to remove setting `kernel.sched_latency_ns` and `kernel.sched_min_granularity_ns` as these are not available on AWS kernels. They cannot fail silently as the package will test to make sure the changes asked for actually happens and error if it does not.
 
-## Secondary optimizer
+### Secondary optimizer
 
-A second, more stripped down, optimizer is available for operating systems that are mostly read only such as GKE's ContainerOptimizedOS. In this case the [nvidia-tuning-gke](https://github.com/NVIDIA/nodewright-packages/tree/main/nvidia-tuning-gke) is available to directly perform sysctl writes. Also note the change in Nodewright configuration to write to a different directory tree in order to have a writable FS and to re-apply changes every boot: [recipes/overlays/gke-cos.yaml](https://github.com/NVIDIA/aicr/blob/main/recipes/overlays/gke-cos.yaml#L69)
+A second, more stripped down, optimizer is available for operating systems that are mostly read only such as GKE's ContainerOptimizedOS. In this case the [nvidia-tuning-gke](https://github.com/NVIDIA/nodewright-packages/tree/main/nvidia-tuning-gke) is available to directly perform sysctl writes. Also note the change in Nodewright configuration to write to a different directory tree in order to have a writable FS and to re-apply changes every boot: [recipes/overlays/gke-cos.yaml](https://github.com/NVIDIA/aicr/blob/main/recipes/overlays/gke-cos.yaml#L270)
 ```
     - name: nodewright-operator
       type: Helm
@@ -47,11 +49,11 @@ A second, more stripped down, optimizer is available for operating systems that 
               reapplyOnReboot: "true"
 ```
 
-## Versioning and extension notes
+### Versioning and extension notes
 
 Both of these packages (nvidia-tuned and nvidia-tuning-gke) extend other nodewright packages (tuned and tuning) and as such could directly use those and provide the configuration via configmaps. The choice was made to go with specific versioned packages in order to provide a more clear path for upgrades and understanding differences. However, the base packages are still useful to quickly iterate on configurations without requiring new versions of the extended packages used in AICR.
 
-# Setup
+## Setup
 
 Uses a set of bash scripts to do the necessary actions to bring an ubuntu worker to the desired AICR spec.
 
@@ -61,9 +63,9 @@ See the [Tuning status](#tuning-and-setup) table below for the current service +
 
 The [version overview](https://github.com/NVIDIA/nodewright-packages/blob/main/nvidia-setup/VERSION_OVERVIEW.md) has all of the information about what each version for a service + accelerator pair will install or configure.
 
-# Manifests
+## Manifests
 
-## Tuning and Setup
+### Tuning and Setup
 
 Tuning are typically alterations to sysctl, kernel boot parameters and service drop ins to make the system better optimized for AI workloads.
 
@@ -75,40 +77,66 @@ The table below is generated from the recipes by `make tuning-docs` — **do not
 
 | Service | Accelerator  | Profile | Setup              | Tuning                  |
 |---------|--------------|---------|--------------------|-------------------------|
-| aks     | a100         | h100    | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
-| aks     | h100         | -       | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
+| aks     | a100         | h100    | nvidia-setup 0.8.0 | nvidia-tuned 0.10.0     |
+| aks     | h100         | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.10.0     |
 | bcm     | *            | h100    | nvidia-setup 0.3.0 | -                       |
 | bcm     | h100         | -       | nvidia-setup 0.3.0 | -                       |
-| eks     | a100         | h100    | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
-| eks     | gb200        | -       | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
-| eks     | gb300        | -       | -                  | -                       |
-| eks     | h100         | -       | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
-| eks     | h200         | h100    | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
+| eks     | a100         | h100    | nvidia-setup 0.8.0 | nvidia-tuned 0.10.0     |
+| eks     | gb200        | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.10.0     |
+| eks     | gb300        | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.10.0     |
+| eks     | h100         | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.10.0     |
+| eks     | h200         | h100    | nvidia-setup 0.8.0 | nvidia-tuned 0.10.0     |
 | eks     | rtx-pro-6000 | generic | -                  | nvidia-tuned 0.3.2      |
+| generic | gb300        | -       | -                  | nvidia-tuned 0.10.0     |
 | gke     | a100         | h100    | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | b200         | -       | -                  | nvidia-tuning-gke 0.1.2 |
+| gke     | gb200        | -       | -                  | nvidia-tuning-gke 0.1.2 |
+| gke     | gb300        | gb200   | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | h100         | -       | -                  | nvidia-tuning-gke 0.1.2 |
+| rke2    | vr200        | -       | -                  | nvidia-tuned 0.10.0     |
 
 {/* END AICR-TUNING */}
 
 Note: the generated table lists the packages *pinned in the manifests* and
-cannot see per-recipe value gates. The `aks` rows show `nvidia-tuned 0.3.2`,
+cannot see per-recipe value gates. The `aks` rows show `nvidia-tuned 0.10.0`,
 but AKS recipes disable it by default via `nodewright-customizations`
 `tuningEnabled: false` under the Azure-managed driver profile; see
 [AKS GPU setup](../aks-gpu-setup.md#infiniband-rdma-host-setup-nodewright)
 for the rationale and re-enable path.
 
+The `eks` rows likewise do not apply to the `os=amazonlinux` leaves
+(`*-eks-amazonlinux-inference`). Those leaves disable
+`nodewright-customizations` entirely (`enabled: false`), so no setup or tuning
+package is rendered and host setup and tuning must come from the AMI.
+
 The `tuningEnabled` gate (default `true`; only an explicit `false` disables)
 applies uniformly across the tuning manifests: on the shared `tuning.yaml` it
 omits the `nvidia-tuned` package while `nvidia-setup` keeps running, and on the
-single-package manifests (`tuning-gke.yaml`, `tuning-generic.yaml`) it
-suppresses the whole tuning Skyhook CR, since the tuning package is that CR's
-only content. No recipe sets it outside AKS today, so default renderings are
-unchanged elsewhere.
+single-package manifests (`tuning-gke.yaml`, `tuning-generic.yaml`,
+`tuning-gb300.yaml`) it suppresses the whole tuning CR, since the tuning
+package is that CR's only content. On `tuning-rke2.yaml` it does the same
+unless the RDMA package below is enabled. No recipe sets it outside AKS today,
+so default renderings are unchanged elsewhere.
 
-The tuning Skyhook CR is a normal release-managed resource (no Helm hooks), so
-flipping `tuningEnabled` from `true` to `false` retracts it on all deployers —
-under Helm/Argo (which already stripped the hooks at bundle time) and under
+`tuning-rke2.yaml` also carries an optional `rdma-netns-exclusive` package,
+gated by `rdmaNetnsExclusive` (default `false`; only an explicit `true`
+enables). It persists the host RDMA exclusive network-namespace mode
+(`ib_core netns_mode=0`) that `dranet` relies on, and the VR200 RKE2 recipes
+enable it. It lives in the tuning CR rather than its own CR so that one
+`interruptionBudget` bounds every reboot, and nodewright coalesces the two
+packages' reboots into one per node
+([#2572](https://github.com/NVIDIA/aicr/issues/2572)). The two gates are
+independent: `tuningEnabled=false` on a VR200 recipe drops `nvidia-tuned` but
+keeps the CR with the RDMA package, and the CR is suppressed only when both
+packages are off. `--set nodewrightcustomizations:rdmaNetnsExclusive=false`
+drops the RDMA package from the CR but does not restore shared mode on nodes
+that already have it: the package has no uninstall step, so that takes
+removing `/etc/modprobe.d/dranet-rdma-netns-exclusive.conf` and a reboot.
+
+The tuning CR is a normal release-managed resource (no Helm hooks), so once
+its gates leave no package to render (`tuningEnabled=false`, plus
+`rdmaNetnsExclusive` off on `tuning-rke2.yaml`) it is retracted on all
+deployers — under Helm/Argo (which already stripped the hooks at bundle time) and under
 Flux (where a hook resource would otherwise have been orphaned on the flip,
 since `before-hook-creation` never fires when the CR leaves the render).
 Ordering after the Skyhook CRD install is handled by component dependency
@@ -125,24 +153,95 @@ renders for Helm to adopt and the legacy hook-created Skyhook is left behind —
 delete it explicitly in that case (`kubectl delete skyhook tuning -n skyhook`).
 Helm/Argo clusters are unaffected (they never created it as a hook).
 
-Known limitation: the `nodewright-customizations` deployment health check
-asserts the `tuning` Skyhook CR reaches `status.status: complete` and cannot
-see value gates. When the whole CR is suppressed — `tuningEnabled: false` on a
-`tuning-gke.yaml`/`tuning-generic.yaml` recipe, or `enabled: false` anywhere —
-`aicr validate --phase deployment` fails that check on the deliberately
-untuned cluster; skip it in that configuration. (AKS is unaffected by
-`tuningEnabled: false`: its `tuning` CR still renders with the `nvidia-setup`
-packages.) A value-aware health check that tolerates the intentionally-absent
-CR is tracked in [#1844](https://github.com/NVIDIA/aicr/issues/1844).
+Readiness: the deployment validator's Go check requires every CR the recipe
+renders to be complete by name, reading `NodeWright` and falling back to the
+legacy `Skyhook` on operators older than v0.18.0, and requires every node to
+have shed the operator's runtime-required taint. The taint is read from the
+operator Deployment's `RUNTIME_REQUIRED_TAINT` env, so a `--workload-gate`
+value passed at bundle time is what the gate waits on, together with the legacy
+`skyhook.nvidia.com=runtime-required:NoSchedule` the operator still removes
+during its deprecation window. That check derives its expected names from the
+effective values, so a CR the values suppress is never waited on.
+
+Value-gated readiness: the chainsaw health check asserts a `NodeWright` CR
+reaches `status.status: complete` and cannot read effective values itself. The
+deployment validator renders those values and suppresses the assert only when
+they produce no CR at all — `tuningEnabled: false` on a
+`tuning-gke.yaml`/`tuning-generic.yaml`/`tuning-gb300.yaml` recipe (or on a
+`tuning-rke2.yaml` recipe without `rdmaNetnsExclusive`), or `enabled: false`
+anywhere — so a deliberately untuned cluster passes
+rather than failing on an intentionally absent CR
+([#1844](https://github.com/NVIDIA/aicr/issues/1844)). When a CR does render,
+completion is still required. The suppression is fail-closed: a render, read or
+discovery error propagates instead of being read as "nothing to assert". (AKS
+is unaffected by `tuningEnabled: false`: its `tuning` CR still renders with the
+`nvidia-setup` packages.)
+
+Workload-gate taint key: operator v0.18.0 changed the chart default
+`runtimeRequiredTaint` from `skyhook.nvidia.com=runtime-required:NoSchedule`
+to `nodewright.nvidia.com=runtime-required:NoSchedule`. The operator recognizes
+both through v0.20.x (tolerates, removes on completion, never double-taints)
+and drops the legacy key in v0.21.0, but auto-taints newly joined nodes with
+the configured key only. The key must have no DNS prefix and be at most 53
+characters, since it names the `nodewright.nvidia.com/autoTaint_<key>` node
+annotation; `aicr bundle` rejects any other key, which operator v0.20.0 refuses
+to start on. Node pools that
+pre-taint with the legacy key should pass
+`--workload-gate skyhook.nvidia.com=runtime-required:NoSchedule` to
+`aicr bundle` so the cluster carries a single key.
 
 See [recipes/components/nodewright-customizations/manifests](https://github.com/NVIDIA/aicr/blob/main/recipes/components/nodewright-customizations/manifests) for the specifics on packages and their configuration.
 
-## Tuning-gke
+### Rollout pacing
+
+Every reboot-carrying tuning manifest (`tuning.yaml`, `tuning-gb300.yaml`,
+`tuning-generic.yaml`, `tuning-rke2.yaml`) pins
+`spec.interruptionBudget.count: 1`, so nodewright reboots one matched node at a
+time.
+
+The budget is load-bearing, not a style preference. An omitted
+`interruptionBudget` is not "unset": the operator's
+`createLegacyDefaultCompartment` substitutes `percent: 100`, so the whole
+matched GPU fleet reboots together. Nothing confines a generated bundle to
+build time — it can be applied to a cluster already running work — so the safe
+value has to be the default.
+
+`count: 1` costs N x (reboot time) to converge, and `runtimeRequired: true`
+keeps workloads gated on the last node for the whole rollout. On an **initial
+cluster build**, before any workload has landed, that serialization buys
+nothing. Two equivalent ways to opt out of it for bringup:
+
+- Delete the `interruptionBudget` block from the rendered CR, or
+- set `percent: 100`, which reproduces the pre-budget behavior exactly (`count`
+  and `percent` are mutually exclusive — set one or the other, never both).
+
+Restore the budget before the cluster starts taking work.
+
+### GB300 host kernel granule
+
+`nvidia-gb300-performance` sizes its hugepage pools for a 64k-page ARM64 kernel
+(2M + 512M, and no 1G — a 64k granule has no PUD level). On EKS,
+`nvidia-setup-kernel` installs the pinned 64k kernel, so profile and host agree
+by construction.
+
+On `--service generic` there is no `nvidia-setup` to pin one: it dispatches on
+`<service>-<accelerator>` and ships no `generic-*` config, so a bare-metal GB300
+node takes its kernel from the host image. A **64k-granule host kernel is the
+recommended image** there.
+
+A 4k-granule kernel is not fatal. Linux rejects the invalid `hugepagesz=512M`
+clause and silently drops the `hugepages=` count paired with it, so the node
+boots and runs — it just comes up without the pool the profile intended, at
+reduced performance. `aicr bundle` emits `CheckGB300HostKernelGranule` at
+`severity: info` for that combination, so the tradeoff is visible at generation
+time rather than only in a manifest comment.
+
+### Tuning-gke
 
 A GKE + Container Optimized OS (COS) specific tuning that only sets some of the sysctl settings and does NOT require any interrupts due to being able to configure seamlessly while workloads are running.
 
 See [recipes/components/nodewright-customizations/manifests/tuning-gke.yaml](https://github.com/NVIDIA/aicr/blob/main/recipes/components/nodewright-customizations/manifests/tuning-gke.yaml)
 
-## No-op
+### No-op
 
 A no-op package may be used as a place holder until a full package suite can be tested. See [recipes/components/nodewright-customizations/manifests/no-op.yaml](https://github.com/NVIDIA/aicr/blob/main/recipes/components/nodewright-customizations/manifests/no-op.yaml)

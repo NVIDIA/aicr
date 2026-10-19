@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/validators"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -42,7 +44,8 @@ func TestDetectPlatform(t *testing.T) {
 	}{
 		{"eks", "aws://us-east-1a/i-0123456789", "eks"},
 		{"gke", "gce://my-project/us-central1-a/gke-node-1", "gke"},
-		{"unknown", "azure:///subscriptions/...", ""},
+		{"aks", "azure:///subscriptions/000/resourceGroups/rg/providers/Microsoft.Compute/virtualMachineScaleSets/aks-gpu/virtualMachines/0", "aks"},
+		{"unknown", "kind://docker/kind/kind-control-plane", ""},
 		{"empty", "", ""},
 	}
 	for _, tt := range tests {
@@ -152,7 +155,7 @@ func TestDetectPlatformListError_FailsClosed(t *testing.T) {
 			if validators.IsSkip(err) {
 				t.Fatalf("detectPlatform() = %v, want a blocking failure but got a Skip — an infra error must never masquerade as inapplicable (#2122)", err)
 			}
-			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("detectPlatform() code = %v, want %v", err, tt.wantCode)
 			}
 		})
@@ -182,7 +185,7 @@ func TestCheckPlatformAutoscalingListError_FailsClosed(t *testing.T) {
 	if strings.Contains(err.Error(), "not recognized") {
 		t.Errorf("checkPlatformAutoscaling() masqueraded infra error as unrecognized-platform skip: %v", err)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeUnauthorized, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeUnauthorized {
 		t.Errorf("checkPlatformAutoscaling() code = %v, want Unauthorized", err)
 	}
 }
@@ -241,6 +244,93 @@ func TestCheckEKSAutoscaling(t *testing.T) {
 			err := checkEKSAutoscaling(vctx)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("checkEKSAutoscaling() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestCheckAKSAutoscaling(t *testing.T) {
+	tests := []struct {
+		name    string
+		nodes   []corev1.Node
+		wantErr bool
+	}{
+		{
+			name:    "no GPU nodes",
+			nodes:   []corev1.Node{},
+			wantErr: true,
+		},
+		{
+			name: "GPU node with agent pool label",
+			nodes: []corev1.Node{{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "aks-gpu-node-1",
+					Labels: map[string]string{
+						"nvidia.com/gpu.present":           "true",
+						"node.kubernetes.io/instance-type": "Standard_ND96isr_H100_v5",
+						"kubernetes.azure.com/agentpool":   "gpuworker",
+						"topology.kubernetes.io/zone":      "1",
+					},
+				},
+				Spec: corev1.NodeSpec{ProviderID: "azure:///subscriptions/000/resourceGroups/rg/providers/Microsoft.Compute/virtualMachineScaleSets/aks-gpu/virtualMachines/0"},
+				Status: corev1.NodeStatus{Capacity: corev1.ResourceList{
+					"nvidia.com/gpu": resource.MustParse("8"),
+				}},
+			}},
+			wantErr: false,
+		},
+		{
+			name: "GPU node without agent pool label",
+			nodes: []corev1.Node{{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "aks-gpu-node-1",
+					Labels: map[string]string{
+						"nvidia.com/gpu.present": "true",
+					},
+				},
+				Spec: corev1.NodeSpec{ProviderID: "azure:///subscriptions/000/resourceGroups/rg/providers/Microsoft.Compute/virtualMachineScaleSets/aks-gpu/virtualMachines/0"},
+				Status: corev1.NodeStatus{Capacity: corev1.ResourceList{
+					"nvidia.com/gpu": resource.MustParse("8"),
+				}},
+			}},
+			wantErr: true,
+		},
+		{
+			name: "mixed GPU nodes require every agent pool label",
+			nodes: []corev1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "aks-gpu-labeled", Labels: map[string]string{
+						"nvidia.com/gpu.present": "true", "kubernetes.azure.com/agentpool": "gpuworker",
+					}},
+					Status: corev1.NodeStatus{Capacity: corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("8")}},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "aks-gpu-unlabeled", Labels: map[string]string{
+						"nvidia.com/gpu.present": "true",
+					}},
+					Status: corev1.NodeStatus{Capacity: corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("8")}},
+				},
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := k8sfake.NewClientset()
+			for i := range tt.nodes {
+				_, err := client.CoreV1().Nodes().Create(
+					context.Background(), &tt.nodes[i], metav1.CreateOptions{})
+				if err != nil {
+					t.Fatalf("failed to create node: %v", err)
+				}
+			}
+			vctx := &validators.Context{
+				Ctx:       context.Background(),
+				Clientset: client,
+			}
+			err := checkAKSAutoscaling(vctx)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("checkAKSAutoscaling() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
@@ -372,6 +462,26 @@ func TestCheckClusterAutoscaling_KarpenterNotFound_FallsBack(t *testing.T) {
 	// Should skip (platform not recognized) rather than fail with "not found"
 	if err == nil || !strings.Contains(err.Error(), "not recognized") {
 		t.Errorf("expected platform skip, got: %v", err)
+	}
+}
+
+func TestCheckClusterAutoscaling_KarpenterNotFound_FallsBackToAKS(t *testing.T) {
+	client := k8sfake.NewClientset(&corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "aks-gpu-node-1",
+			Labels: map[string]string{
+				"nvidia.com/gpu.present":         "true",
+				"kubernetes.azure.com/agentpool": "gpuworker",
+			},
+		},
+		Spec: corev1.NodeSpec{ProviderID: "azure:///subscriptions/000/resourceGroups/rg/providers/Microsoft.Compute/virtualMachineScaleSets/aks-gpu/virtualMachines/0"},
+		Status: corev1.NodeStatus{Capacity: corev1.ResourceList{
+			"nvidia.com/gpu": resource.MustParse("8"),
+		}},
+	})
+	vctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+	if err := CheckClusterAutoscaling(vctx); err != nil {
+		t.Fatalf("CheckClusterAutoscaling() unexpected AKS fallback error: %v", err)
 	}
 }
 

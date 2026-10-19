@@ -118,7 +118,7 @@ func (r *Renderer) Render(ctx context.Context, report *ctrf.Report) error {
 	for _, entry := range entries {
 		select {
 		case <-ctx.Done():
-			return errors.Wrap(errors.ErrCodeTimeout, "evidence rendering canceled", ctx.Err())
+			return errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "rendering evidence")
 		default:
 		}
 		if err := r.renderEvidence(entry); err != nil {
@@ -133,7 +133,7 @@ func (r *Renderer) Render(ctx context.Context, report *ctrf.Report) error {
 
 	select {
 	case <-ctx.Done():
-		return errors.Wrap(errors.ErrCodeTimeout, "evidence rendering canceled", ctx.Err())
+		return errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "rendering evidence")
 	default:
 	}
 	return r.renderIndex(entries, renderNow)

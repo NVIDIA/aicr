@@ -1,0 +1,187 @@
+// Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package main
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+
+	"github.com/NVIDIA/aicr/pkg/defaults"
+	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+	k8spod "github.com/NVIDIA/aicr/pkg/k8s/pod"
+	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/validators"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+func checkCRENCCLAllReduceBW(ctx *validators.Context) error {
+	constraint, found := findPerformanceConstraint(ctx, checkNameCRENCCLAllReduceBW)
+	if !found {
+		return validators.SkipWithReason(validators.SkipReasonNoConstraint, fmt.Sprintf("no %s constraint in recipe", checkNameCRENCCLAllReduceBW))
+	}
+	actual, passed, err := validateCRENcclAllReduceBw(ctx, constraint)
+	return classifyNCCLAllReduceBWResult(checkNameCRENCCLAllReduceBW, constraint, actual, passed, err)
+}
+
+func validateCRENcclAllReduceBw(
+	ctx *validators.Context,
+	constraint recipe.Constraint,
+) (actual string, passed bool, err error) {
+
+	if ctx.ValidationInput == nil {
+		return ncclSkip(skipMsgNCCLNoInput, validators.SkipReasonNoValidationInput), true, nil
+	}
+	service := ctx.ValidationInput.Criteria.Service
+	accelerator := ctx.ValidationInput.Criteria.Accelerator
+	// Before the qualification lookup, so a constraint the check cannot honor
+	// is reported rather than hidden behind a skip on an unqualified
+	// combination. It needs no cluster access, and the docs promise it fails.
+	threshold, err := creThreshold(checkNameCRENCCLAllReduceBW, constraint.Value)
+	if err != nil {
+		return "", false, err
+	}
+
+	entry, qualified := lookupCREQualification(checkNameCRENCCLAllReduceBW, service, accelerator)
+	if !qualified {
+		return ncclSkip(fmt.Sprintf("skipped - %s is not qualified on %s × %s", checkNameCRENCCLAllReduceBW, service, accelerator),
+			validators.SkipReasonUnsupportedTarget), true, nil
+	}
+
+	gpuConfig, err := determineGPUConfig(ctx, service, accelerator, ctx.NodeSelector)
+	if err != nil {
+		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to determine GPU configuration", err)
+	}
+	if len(gpuConfig.Nodes) < 2 {
+		return skipMsgNCCLFewNodes, true, nil
+	}
+
+	dyn := ctx.DynamicClient
+	if dyn == nil {
+		return "", false, aicrErrors.New(aicrErrors.ErrCodeInternal, "dynamic client is required to create a Certification")
+	}
+
+	objName, err := uniqueCREResourceName(creNCCLRunName)
+	if err != nil {
+		return "", false, err
+	}
+	// Built before anything is created, so a refused footprint returns without
+	// a Certification to clean up.
+	obj, err := buildCRECertification(ctx.Namespace, objName, gpuConfig, entry)
+	if err != nil {
+		return "", false, err
+	}
+
+	if reclaimErr := reclaimStaleCRECertifications(ctx.Ctx, dyn, ctx.Clientset, ctx.Namespace); reclaimErr != nil {
+		return "", false, reclaimErr
+	}
+
+	defer func() {
+		actual, passed, err = creNCCLCleanupResult(actual, passed, err,
+			teardownCRECertification(context.Background(), dyn, ctx.Clientset, ctx.Namespace, objName))
+	}()
+
+	if createErr := createUnstructured(ctx.Ctx, dyn, certificationGVR, ctx.Namespace, obj); createErr != nil {
+		return "", false, createErr
+	}
+
+	run, err := waitForCertificationTerminal(ctx.Ctx, dyn, ctx.Namespace, objName)
+	if err != nil {
+		return "", false, creErrorWithPartialReport(err, run)
+	}
+	if unstructuredConditionTrue(run, "Failed") {
+		// Teardown deletes the Certification, so CRE's reason is only
+		// recoverable from the error this returns.
+		return "", false, aicrErrors.New(aicrErrors.ErrCodeInternal,
+			fmt.Sprintf("CRE Certification failed: %s", creTerminalConditionSummary(run)))
+	}
+
+	workflowName, err := certificationWorkflowName(run, entry.Domain, entry.Variant)
+	if err != nil {
+		return "", false, err
+	}
+	bw, err := listMaxBusBandwidth(ctx.Ctx, dyn, ctx.Namespace, workflowName, run.GetCreationTimestamp())
+	if err != nil {
+		return "", false, err
+	}
+
+	logs, logErr := creLauncherLogs(ctx, workflowName, run.GetCreationTimestamp())
+	if logErr != nil {
+		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "CRE launcher logs required for transport assertion", logErr)
+	}
+	if err := verifyTransportFromLogs(logs, variantNET); err != nil {
+		return "", false, err
+	}
+
+	actual = strconv.FormatFloat(bw, 'f', 2, 64)
+	return actual, bw >= threshold, nil
+}
+
+// creNCCLCleanupResult folds a teardown failure into the check's result.
+//
+// A leak must not hide behind a passing bandwidth reading, nor behind a check
+// that already failed for its own reason: either way the nodes may still be
+// busy and the operator has to be told which objects survived.
+// creCleanupFailure keeps the primary error's code and its Unwrap chain, so
+// only the message grows.
+//
+// Split out of the deferred call so a test can reach the case where both the
+// check and its teardown failed.
+func creNCCLCleanupResult(actual string, passed bool, primary, delErr error) (string, bool, error) {
+	if delErr == nil {
+		return actual, passed, primary
+	}
+	return "", false, creCleanupFailure(checkNameCRENCCLAllReduceBW, primary, delErr)
+}
+
+func creLauncherLogs(ctx *validators.Context, workflowName string, createdAt metav1.Time) (string, error) {
+	listCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+	pods, err := ctx.Clientset.CoreV1().Pods(ctx.Namespace).List(listCtx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf(
+			"jobset.sigs.k8s.io/jobset-name=%s-job-workload,jobset.sigs.k8s.io/replicatedjob-name=launcher",
+			workflowName,
+		),
+	})
+	if err != nil {
+		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to list CRE launcher pods", err)
+	}
+	if len(pods.Items) == 0 {
+		return "", aicrErrors.New(aicrErrors.ErrCodeNotFound, "no CRE launcher pods found for transport assertion")
+	}
+	pod := youngestLivePodSince(pods.Items, createdAt)
+	if pod == nil {
+		return "", aicrErrors.New(aicrErrors.ErrCodeNotFound, "no live CRE launcher pods found for transport assertion")
+	}
+	return k8spod.GetPodLogs(listCtx, ctx.Clientset, ctx.Namespace, pod.Name, nodeJobName)
+}
+
+func youngestLivePodSince(pods []corev1.Pod, createdAt metav1.Time) *corev1.Pod {
+	var best *corev1.Pod
+	for i := range pods {
+		p := &pods[i]
+		if p.DeletionTimestamp != nil || p.Status.Phase == corev1.PodFailed ||
+			p.CreationTimestamp.Time.Before(createdAt.Time) {
+
+			continue
+		}
+
+		if best == nil || p.CreationTimestamp.After(best.CreationTimestamp.Time) {
+			best = p
+		}
+	}
+	return best
+}

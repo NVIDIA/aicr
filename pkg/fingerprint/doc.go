@@ -17,8 +17,8 @@
 // criteria.
 //
 // A Fingerprint records the cluster-identity dimensions used to bind
-// a snapshot to a recipe — service (eks/gke/aks/oke/kind/lke/bcm),
-// accelerator (h100/h200/gb200/b200/a100/l40/l40s/rtx-pro-6000), OS
+// a snapshot to a recipe — service (eks/gke/aks/oke/kind/lke/bcm/mk8s),
+// accelerator (h100/h200/gb200/gb300/b200/b300/a100/l40/l40s/rtx-pro-6000), OS
 // (ubuntu/rhel/cos/amazonlinux/talos/ol plus raw VERSION_ID), Kubernetes
 // server version, region, total node count, and GPU node count. Each
 // dimension records the resolved value plus an optional source string
@@ -31,11 +31,13 @@
 // bundler packages can consume the type without pulling collectors.
 //
 // Fingerprint.Match compares a Fingerprint against a recipe.Criteria
-// and returns a structured per-dimension diff with three states:
-// matched, mismatched, or unknown. "Unknown" covers criteria fields
-// the cluster cannot reveal (intent, platform); the overall
+// and returns a structured per-dimension diff with four states:
+// matched, mismatched, unknown, or not-inferable. "Unknown" covers
+// criteria fields the cluster cannot reveal (intent, platform);
+// "not-inferable" covers opt-in-only criteria values that no
+// measurement yields (the generic service). The overall
 // MatchResult.Matched flag is true so long as no dimension is
-// mismatched, leaving unknown dimensions for human review.
+// mismatched, leaving the other two states for human review.
 //
 // This package is the foundation for ADR-007 verifiable recipe test
 // evidence. The fingerprint and per-dimension diff are recorded in the

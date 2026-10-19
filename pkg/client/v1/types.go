@@ -122,25 +122,53 @@ func (s *Snapshot) Unwrap() *snapshotter.Snapshot {
 // this type — so an unplumbed field is a test failure rather than a silent
 // zero value.
 type AgentConfig struct {
-	Kubeconfig         string
-	Namespace          string
-	Image              string
-	ImagePullSecrets   []string
-	JobName            string
+	Kubeconfig       string
+	Namespace        string
+	Image            string
+	ImagePullSecrets []string
+	JobName          string
+
+	// ServiceAccountName selects the ServiceAccount the agent pod runs
+	// as. It is EXACT-IF-EXISTS, so it carries two meanings:
+	//
+	//   - A ServiceAccount of exactly this name already exists in
+	//     Namespace: it is used verbatim, and the run creates NO
+	//     ServiceAccount, Role, RoleBinding, ClusterRole or
+	//     ClusterRoleBinding — and deletes none at cleanup. The Namespace
+	//     is not created, read or relabeled either, so the caller needs no
+	//     permission on it. This is how a
+	//     ServiceAccount carrying IRSA (eks.amazonaws.com/role-arn) or
+	//     GKE Workload Identity (iam.gke.io/gcp-service-account)
+	//     annotations stays usable: both providers pin trust to the
+	//     ServiceAccount NAME, which a run-scoped name can never satisfy.
+	//     Generate the RBAC that grants it the agent's permissions with
+	//     snapshotter.WriteAgentRoleManifests (CLI:
+	//     `aicr snapshot --add-roles-to-service-account`), which writes
+	//     manifests and applies nothing, then apply them yourself.
+	//   - Otherwise: a name prefix. The run creates "<prefix>-<RunID>"
+	//     and the full run-scoped RBAC set, and deletes them at cleanup.
+	//
+	// Empty falls back to NameBase and is never probed for existence.
+	//
+	// Using an existing ServiceAccount waives per-run permission
+	// isolation: concurrent runs sharing it share its grants, and the
+	// (read-only) grants provisioned for DiscoverNetwork persist beyond any
+	// one run.
 	ServiceAccountName string
-	NodeSelector       map[string]string
-	Tolerations        []corev1.Toleration
-	Timeout            time.Duration
-	Cleanup            bool
-	Debug              bool
-	Privileged         bool
-	RequireGPU         bool
-	RuntimeClassName   string
-	TemplatePath       string
-	MaxNodesPerEntry   int
-	OS                 string
-	Requests           corev1.ResourceList
-	Limits             corev1.ResourceList
+
+	NodeSelector     map[string]string
+	Tolerations      []corev1.Toleration
+	Timeout          time.Duration
+	Cleanup          bool
+	Debug            bool
+	Privileged       bool
+	RequireGPU       bool
+	RuntimeClassName string
+	TemplatePath     string
+	MaxNodesPerEntry int
+	OS               string
+	Requests         corev1.ResourceList
+	Limits           corev1.ResourceList
 
 	// Output selects where the agent Job stages its result. A cm://namespace/name
 	// URI makes that ConfigMap the delivery vehicle — the Job writes there and
@@ -161,10 +189,11 @@ type AgentConfig struct {
 	// outside the facade; see Client.CollectSnapshot.
 	ClusterConfigPath string
 
-	// DiscoverNetwork enables the in-pod network collector's live l8k
-	// discovery. Discovery is NOT read-only — it writes
-	// nvidia.kubernetes-launch-kit.* node labels and patches NicClusterPolicy
-	// via server-side-apply, so the agent's RBAC must allow those writes.
+	// DiscoverNetwork enables the in-pod network collector's read-only l8k
+	// discovery (DiscoverReadOnly). It reads nodes, Network Operator pods,
+	// and the NicDevice objects an already-running nic-configuration-daemon
+	// publishes; it creates, patches, and deletes nothing. The agent's
+	// ClusterRole gains only configuration.net.nvidia.com nicdevices get/list.
 	DiscoverNetwork bool
 
 	// AKSGPUPoolsPath points at an operator-supplied
@@ -175,6 +204,45 @@ type AgentConfig struct {
 	// Required for AKS profile-qualified resolution from a collected
 	// snapshot; empty disables the projection.
 	AKSGPUPoolsPath string
+
+	// RunID scopes every resource this deployment creates (Job, RBAC, and
+	// the internal staging ConfigMap when Output does not name one) to a
+	// single run, so concurrent snapshot-agent runs never collide on a
+	// shared resource name. Empty lets CollectSnapshot's underlying
+	// deployment generate one; SDK and CLI callers normally leave it
+	// unset. Set it explicitly to correlate this run with an external
+	// identifier — `aicr validate` does this to give its live-capture
+	// snapshot agent and its validator Jobs the same RunID.
+	RunID string
+
+	// NameBase prefixes generated Job/ServiceAccount/RBAC names. The
+	// fallback is per name, not all-or-nothing: the Job uses JobName when
+	// set and NameBase otherwise, while the ServiceAccount, Role and
+	// RoleBinding use ServiceAccountName when set and NameBase otherwise.
+	// Setting only one of the two therefore leaves NameBase governing the
+	// other. Defaults to "aicr" when also empty.
+	//
+	// JobName is likewise an optional prefix, not a required name —
+	// RunID is appended to whichever prefix applies, so the deployed Job
+	// name is always run-scoped. ServiceAccountName is a prefix only
+	// when no ServiceAccount of that exact name exists; see its own
+	// documentation above.
+	NameBase string
+
+	// OKEAddonsPath points at an operator-supplied
+	// `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump. Same
+	// contract as AKSGPUPoolsPath: projected controller-side and merged
+	// into the snapshot as the oke-addons subtype.
+	OKEAddonsPath string
+
+	// GKEGPUPoolsPath points at an operator-supplied
+	// `gcloud container node-pools list --cluster <cluster>
+	// --format=json` dump on the machine running this client. The
+	// snapshotter projects it, controller-side and before any cluster
+	// work, into the snapshot's K8s.gke-gpu-pools.gpu-driver-installation
+	// reading. The file never enters the cluster. Empty disables the
+	// projection.
+	GKEGPUPoolsPath string
 }
 
 // Criteria is the facade-owned, semver-stable shape of a recipe-resolution
@@ -185,23 +253,23 @@ type AgentConfig struct {
 // upstream pkg/recipe.Criteria via WrapCriteria.
 //
 // Field meanings match the pkg/recipe.Criteria documentation:
-//   - Service: Kubernetes service flavor (eks/gke/aks/oke/kind/lke/bcm).
-//   - Accelerator: GPU model identifier (h100/h200/b200/gb200/a100/l40/l40s/rtx-pro-6000).
+//   - Service: Kubernetes service flavor (eks/gke/aks/oke/ocp/kind/lke/bcm/metal3/rke2/generic/k0s/mk8s).
+//   - Accelerator: GPU model identifier (h100/h200/b200/b300/gb200/gb300/a100/l40/l40s/rtx-pro-6000/vr200).
 //   - Intent: workload intent (training/inference).
 //   - OS: worker-node OS (ubuntu/rhel/cos/amazonlinux/talos/ol).
-//   - Platform: framework overlay (dynamo/kubeflow/nim/runai/slurm).
+//   - Platform: framework overlay (dynamo/kubeflow/kueue/nim/runai/slurm).
 //   - Nodes: worker-node count hint (0 = unspecified).
 //
 // Empty string is the "unspecified" sentinel for every field except Nodes,
 // where 0 plays that role. A non-empty string that the registry does not
 // recognize is rejected at resolve time with ErrCodeInvalidRequest.
 type Criteria struct {
-	Service     string
-	Accelerator string
-	Intent      string
-	OS          string
-	Platform    string
-	Nodes       int
+	Service     string `json:"service,omitempty"     yaml:"service,omitempty"`
+	Accelerator string `json:"accelerator,omitempty" yaml:"accelerator,omitempty"`
+	Intent      string `json:"intent,omitempty"      yaml:"intent,omitempty"`
+	OS          string `json:"os,omitempty"          yaml:"os,omitempty"`
+	Platform    string `json:"platform,omitempty"    yaml:"platform,omitempty"`
+	Nodes       int    `json:"nodes,omitempty"       yaml:"nodes,omitempty"`
 }
 
 // AllowLists fences which criteria values the resolve path accepts on a
@@ -301,7 +369,7 @@ type RecipeRequest struct {
 	// Platform is the workload platform overlay. Mapped to
 	// CriteriaPlatform. Supported values are defined by
 	// pkg/recipe.GetCriteriaPlatformTypes — today "", "any", "dynamo",
-	// "kubeflow", "nim".
+	// "kubeflow", "kueue", "nim", "runai", "slurm".
 	Platform string
 
 	// Profile is an optional name=value configuration profile selection.
@@ -313,10 +381,26 @@ type RecipeRequest struct {
 	// for newly resolved Slurm recipes.
 	AccountingMode string
 
+	// InheritFrom is a prior recipe file or bundle directory whose resolved
+	// identity this resolution preserves according to Inherit. Empty resolves
+	// from the registry alone. A cm:// URI is not supported yet.
+	InheritFrom string
+
+	// Inherit selects "all" or "namespace" from InheritFrom. Empty defaults
+	// to "all". An explicit selection requires InheritFrom.
+	Inherit string
+
 	// PinnedName reserves space for future pinned-recipe support.
 	// Currently rejected with ErrCodeUnavailable; set the criteria
 	// fields above instead.
 	PinnedName string
+
+	// GKETCPXOInterfaces is the ordered eth1..eth8 → VPC network mapping
+	// rendered into the torch-distributed-tcpxo ClusterTrainingRuntime, in
+	// the string form "eth1=<network>,...,eth8=<network>". Required — with
+	// no default — when the resolved recipe ships that runtime (h100 GKE
+	// kubeflow training); rejected for recipes that do not.
+	GKETCPXOInterfaces string
 
 	// PinnedVersion reserves space for future pinned-recipe support.
 	// Currently rejected with ErrCodeUnavailable.
@@ -328,13 +412,14 @@ type RecipeResolveOption func(*recipeResolveConfig)
 
 type recipeResolveConfig struct {
 	profile              string
+	inheritFrom          string
+	inheritMode          *recipe.InheritMode
 	accountingMode       *recipe.AccountingMode
 	runtimeInventoryMode *recipe.RuntimeInventoryMode
+	tcpxoInterfaces      *[]recipe.NetworkInterfaceMapping
 
-	// relaxDerived records that WithSnapshotCriteriaRelaxation was passed.
-	// Kept separate from stated because an empty stated set is meaningful
-	// (every dimension derived, all relaxable) and must not read as "option
-	// absent".
+	// relaxDerived records opt-in to snapshot-criteria relaxation.
+	// An empty stated set means every dimension was derived, not option absent.
 	relaxDerived bool
 	stated       statedDimensionSet
 
@@ -361,6 +446,36 @@ func WithProfile(profile string) RecipeResolveOption {
 	}
 }
 
+// WithInheritFrom names a prior recipe file or bundle directory whose resolved
+// namespace, chart, source, path, manifest files and pre-manifest files this
+// resolve keeps by default, so a moved registry default does not relocate or replace a
+// component that is already running. A component the prior artifact does not
+// name keeps its registry default. WithInherit narrows the fields preserved.
+// Empty resolves from the registry alone.
+//
+// The reference is read when the resolve runs: a cm:// URI, an unreadable
+// path, or a directory holding no recipe is rejected with
+// ErrCodeInvalidRequest rather than silently resolving as a first deploy.
+func WithInheritFrom(ref string) RecipeResolveOption {
+	return func(cfg *recipeResolveConfig) {
+		cfg.inheritFrom = ref
+	}
+}
+
+// WithInherit selects "all" or "namespace" from WithInheritFrom. Omitting
+// this option preserves all supported identity fields, including object names
+// from bundles. An explicit selection requires a nonempty inheritance source.
+func WithInherit(mode string) RecipeResolveOption {
+	return func(cfg *recipeResolveConfig) {
+		parsed, err := recipe.ParseInheritMode(mode)
+		if err != nil {
+			cfg.recordOptErr(err)
+			return
+		}
+		cfg.inheritMode = &parsed
+	}
+}
+
 // WithAccountingMode selects the Slurm accounting ownership model for a
 // criteria- or snapshot-based resolve call. It is valid only when the resolved
 // platform is Slurm. An empty or invalid mode is rejected when the resolve call
@@ -377,10 +492,12 @@ func WithAccountingMode(mode string) RecipeResolveOption {
 }
 
 // WithRuntimeInventoryMode selects whether the runtime AI inventory component
-// is installed by a criteria- or snapshot-based resolve call. It is valid only
-// when the resolved recipe declares that component; an empty or invalid mode is
-// rejected when the resolve call runs. Omit this option to keep the recipe's
-// own declaration.
+// is installed by a criteria- or snapshot-based resolve call. "enabled" confirms
+// the selection when the resolved recipe declares the component and grants it
+// (GKE recipes only, #2962) when the recipe neither declares nor declines it; a
+// recipe that explicitly declines the component rejects the option on any
+// service. An empty or invalid mode is rejected when the resolve call runs.
+// Omit this option to keep the recipe's own declaration.
 //
 // Unlike a bundle-time value override, the selection is recorded in the emitted
 // recipe and removes the component's health check along with the component,
@@ -393,6 +510,27 @@ func WithRuntimeInventoryMode(mode string) RecipeResolveOption {
 			return
 		}
 		cfg.runtimeInventoryMode = &parsed
+	}
+}
+
+// WithGKETCPXOInterfaces supplies the ordered eth1..eth8 → VPC network
+// mapping for a criteria- or snapshot-based resolve call, in the string form
+// "eth1=<network>,...,eth8=<network>". The value is recorded in the emitted
+// recipe (configuration.gke.tcpxoInterfaces) and rendered into the
+// torch-distributed-tcpxo ClusterTrainingRuntime's
+// networking.gke.io/interfaces annotation.
+//
+// Required — with no default — when the resolved recipe ships that runtime;
+// rejected when it does not. An empty or malformed value is rejected when
+// the resolve call runs.
+func WithGKETCPXOInterfaces(value string) RecipeResolveOption {
+	return func(cfg *recipeResolveConfig) {
+		parsed, err := recipe.ParseGKETCPXOInterfaces(value)
+		if err != nil {
+			cfg.recordOptErr(err)
+			return
+		}
+		cfg.tcpxoInterfaces = &parsed
 	}
 }
 
@@ -467,7 +605,7 @@ type RecipeResult struct {
 }
 
 // SelectedProfile is the stable facade projection of a recipe profile.
-// It is populated only for aicr.run/v1alpha3 results; an unprofiled
+// It is populated only for aicr.run/v1beta2 results; an unprofiled
 // composition leaves it nil.
 type SelectedProfile struct {
 	// Name is the declaration this selection came from, e.g. "gpuStack".
@@ -488,10 +626,11 @@ type SelectedProfile struct {
 
 	// OwnedPaths maps each locked component to its sorted dotted value
 	// paths, and is the union across every value of the declaration rather
-	// than only the selected one. Every listed component carries the
-	// synthetic "enabled" path recording that the profile owns its
-	// presence. Overriding any listed path is rejected at bundle time
-	// unless the override agrees with the selected value.
+	// than only the selected one. A listed component carries the synthetic
+	// "enabled" path when the profile owns its presence; a component the
+	// profile references as optional lists only its override paths and may
+	// be omitted from a bundle. Overriding any listed path is rejected at
+	// bundle time unless the override agrees with the selected value.
 	OwnedPaths map[string][]string
 }
 
@@ -614,8 +753,14 @@ type ComponentRef struct {
 	// Kind is the deployment kind, e.g. "Helm" or "Kustomize".
 	Kind string
 
-	// Version is the component chart/manifest version.
+	// Version is the component chart/manifest version. Empty for a
+	// Kustomize component, which pins Tag instead.
 	Version string
+
+	// Tag is the resource tag a Kustomize component is pinned to
+	// (the registry's kustomize.defaultTag). Empty for Helm
+	// components, which pin Version instead.
+	Tag string
 
 	// Source is the upstream artifact location: a Helm chart
 	// repository URL for Helm components (e.g.

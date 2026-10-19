@@ -36,7 +36,7 @@ Three equal-width cards side by side, connected by right-pointing NVIDIA Green a
 Header (dark slate): white label "1 · Binary Provenance"
 Body (white):
 - Large center icon: NVIDIA CI badge (shield with NVIDIA logo) with a small Sigstore flame overlaid in the bottom-right corner
-- Below icon: two short green pill badges stacked — "SLSA Provenance v1" and "SPDX SBOM"
+- Below icon: three short green pill badges stacked — "SLSA Provenance v1", "CycloneDX SBOM (images)" and "SPDX SBOM (binaries)"
 - Below badges: small padlock icon + short text "Signed by NVIDIA CI · Logged in Rekor"
 - Bottom caption in grey italic: "Every release binary and image is signed"
 

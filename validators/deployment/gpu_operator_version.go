@@ -35,11 +35,13 @@ func checkGPUOperatorVersion(ctx *validators.Context) error {
 	}
 
 	fmt.Printf("Detected GPU Operator version: %s\n", version)
+	emitExtraOrWarn(map[string]string{validators.ExtraKeyDetectedVersion: version})
 
 	// Find the version constraint in the recipe
 	constraintExpr, found := findDeploymentConstraint(ctx, "Deployment.gpu-operator.version")
 	if !found {
-		return validators.Skip(fmt.Sprintf("no Deployment.gpu-operator.version constraint in recipe; detected %s", version))
+		return validators.SkipWithReason(validators.SkipReasonNoConstraint,
+			fmt.Sprintf("no Deployment.gpu-operator.version constraint in recipe (detected %s)", version))
 	}
 
 	// Evaluate constraint
@@ -54,6 +56,7 @@ func checkGPUOperatorVersion(ctx *validators.Context) error {
 	}
 
 	fmt.Printf("Constraint: %s → %v\n", constraintExpr, passed)
+	emitExtraOrWarn(map[string]string{validators.ExtraKeyVersionSatisfied: validators.FormatBool(passed)})
 
 	if !passed {
 		return errors.New(errors.ErrCodeInternal,

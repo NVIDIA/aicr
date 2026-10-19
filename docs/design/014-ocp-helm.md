@@ -159,7 +159,7 @@ data := templateData{
 Because `.Values` is `{"gpu-operator-ocp-olm": {…actual config…}}` rather
 than a flat dictionary, templates must extract the component subtree first:
 
-```yaml
+```gotemplate
 {{- $v := index .Values "gpu-operator-ocp-olm" }}
 apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
@@ -300,7 +300,7 @@ operatorGroup:
 
 **OLM Subscription template** (`recipes/components/gpu-operator-ocp-olm/manifests/subscription.yaml`):
 
-```yaml
+```gotemplate
 {{- $v := index .Values "gpu-operator-ocp-olm" }}
 apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
@@ -366,7 +366,7 @@ absent from the values file.
 
 **CR template** (`recipes/components/gpu-operator-ocp/manifests/clusterpolicy.yaml`):
 
-```yaml
+```gotemplate
 {{- $v := index .Values "gpu-operator-ocp" }}
 apiVersion: nvidia.com/v1
 kind: ClusterPolicy
@@ -490,5 +490,4 @@ polls for CSV status via shell scripts (`install-direct.sh`).
 
 Rejected because it introduces a new deployer surface (`direct`)
 that the project is actively shrinking (see #899, #904).
-
 

@@ -16,6 +16,8 @@ package bom
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -23,9 +25,10 @@ import (
 
 func TestExtractImagesFromYAML(t *testing.T) {
 	tests := []struct {
-		name string
-		in   string
-		want []string
+		name   string
+		in     string
+		inFile string
+		want   []string
 	}{
 		{
 			name: "single deployment",
@@ -422,10 +425,51 @@ spec:
 				"ghcr.io/example/pinned@sha256:6c3c624b58dbbcd3c0dd82b4c53f04194d1247c6eebdaab7c610cf7d66709b3b",
 			},
 		},
+		{
+			// Some charts apply an operator CR through a post-install hook
+			// Job instead of templating it as a first-class resource. The
+			// CR is serialized as a literal block scalar inside a
+			// ConfigMap `data` value that the Job mounts and applies. The
+			// walker must recurse into that embedded document, not just
+			// the outer ConfigMap, to find each operand's `image:` mapping.
+			name:   "image mappings embedded in a ConfigMap data scalar",
+			inFile: "embedded-operator-cr-configmap.yaml",
+			want: []string{
+				"ghcr.io/example/operator/binder:v1.0.0",
+				"ghcr.io/example/operator/nodescaleadjuster:v1.0.0",
+				"ghcr.io/example/operator/scheduler:v1.0.0",
+			},
+		},
+		{
+			// A multi-line scalar that is not itself well-formed YAML (an
+			// embedded shell script, here) must not be treated as an
+			// embedded document. The walker silently gives up on it
+			// rather than erroring the whole survey.
+			name:   "multi-line non-YAML scalar in a ConfigMap is not treated as embedded YAML",
+			inFile: "entrypoint-script-configmap.yaml",
+			want:   []string{},
+		},
+		{
+			// A multi-line scalar that does happen to parse as YAML but
+			// decodes to a plain scalar (folded prose with no mapping or
+			// sequence structure) must not be recursed into either. Only
+			// content that decodes to real structure is an embedded doc.
+			name:   "multi-line prose scalar that parses as a plain YAML scalar is not recursed into",
+			inFile: "readme-configmap.yaml",
+			want:   []string{},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ExtractImagesFromYAML([]byte(tt.in))
+			in := tt.in
+			if tt.inFile != "" {
+				data, err := os.ReadFile(filepath.Join("testdata", tt.inFile))
+				if err != nil {
+					t.Fatalf("read testdata: %v", err)
+				}
+				in = string(data)
+			}
+			got, err := ExtractImagesFromYAML([]byte(in))
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

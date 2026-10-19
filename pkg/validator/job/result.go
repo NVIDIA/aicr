@@ -20,6 +20,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -28,6 +29,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -112,7 +114,7 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 		slog.Warn("failed to capture pod logs", "pod", jobPod.Name, "error", logErr)
 		// Not fatal — we still have exit code and termination message
 	} else if logs != "" {
-		result.Extra, result.Stdout = processValidatorLogs(logs)
+		result.Extra, result.RuntimeProvenance, result.Stdout = processValidatorLogs(logs)
 	}
 
 	return result
@@ -184,8 +186,9 @@ func (d *Deployer) missingPodOutcome(ctx context.Context, findErr error) (exitCo
 		// (quota or webhook rejection), and one removed externally; asserting
 		// controller deletion would name a false root cause for the other two.
 		return validatorExitFailed, boundTerminationMsg(fmt.Sprintf(
-			"validator Job did not complete within its %s deadline; no pod remains for it, so its logs are unavailable (Job condition Failed/%s: %s)",
-			enforcedDeadline(job, d.config.Entry.Timeout), cond.Reason, detail),
+			"validator Job did not complete within its %s Job deadline (check budget %s); no pod remains for it, so its logs are unavailable (Job condition Failed/%s: %s)",
+			enforcedDeadline(job, d.config.Entry.Timeout), truncateToSeconds(effectiveTimeout(d.config.Entry.Timeout)),
+			cond.Reason, detail),
 			defaults.ValidatorMaxTerminationMsgBytes)
 	}
 
@@ -226,34 +229,30 @@ func (d *Deployer) jobFailedCondition(ctx context.Context) (*batchv1.Job, batchv
 	return nil, batchv1.JobCondition{}, false
 }
 
-// processValidatorLogs turns raw pod logs into the structured Extra map and the
-// human-readable Stdout lines. Order matters and is the invariant both call
-// sites rely on: the Extra sentinel is parsed from the FULL logs BEFORE any
-// tail-truncation, so a sentinel emitted after more than ValidatorMaxStdoutLines
-// of output still survives; only then is the sentinel-stripped remainder
-// truncated and length-capped for human display.
-func processValidatorLogs(logs string) (extra map[string]string, stdout []string) {
-	cleaned, extra := parseExtraSentinels(logs)
+// processValidatorLogs turns raw pod logs into the structured Extra map, the
+// RuntimeProvenance carrier, and the human-readable Stdout lines. Order matters
+// and is the invariant both call sites rely on: the sentinels are parsed from
+// the FULL logs BEFORE any tail-truncation, so a sentinel emitted after more
+// than ValidatorMaxStdoutLines of output still survives; only then is the
+// sentinel-stripped remainder truncated and length-capped for human display.
+func processValidatorLogs(logs string) (extra map[string]string, prov *ctrf.RuntimeProvenance, stdout []string) {
+	cleaned, extra, prov := parseExtraSentinels(logs)
 	stdout = filterStdoutLines(
 		truncateLogLines(cleaned, defaults.ValidatorMaxStdoutLines),
 		defaults.ValidatorMaxStdoutLineLength,
 	)
-	return extra, stdout
+	return extra, prov, stdout
 }
 
-// parseExtraSentinels scans the raw pod logs for ctrf.ExtraLinePrefix sentinel
-// lines (the transport for a check's structured Extra map) and returns the logs
-// with every sentinel line removed plus the LAST VALID non-empty payload.
-//
-// Each sentinel is parsed as it is encountered: a malformed one is logged at
-// WARN and skipped WITHOUT discarding an earlier valid payload, so a valid
-// coverage/skip line followed by a garbled line still yields the valid map. A
-// merged/garbled line must never flip a passing check to an error — the exit
-// code, not this map, is the verdict. Returns (logs, nil) when no sentinel is
-// present, and extra is nil unless some line parsed to a non-empty object.
-func parseExtraSentinels(logs string) (cleaned string, extra map[string]string) {
-	if !strings.Contains(logs, ctrf.ExtraLinePrefix) {
-		return logs, nil
+// parseExtraSentinels returns logs with every ctrf.ExtraLinePrefix and
+// ctrf.ProvenanceLinePrefix line removed as cleaned, the valid Extra payloads
+// merged as extra (a later value wins per key), and the last valid provenance
+// record as prov. A malformed line is logged and skipped without discarding
+// earlier payloads. extra is nil unless some line parsed to a non-empty
+// object, and prov is nil unless some record carried both digests.
+func parseExtraSentinels(logs string) (cleaned string, extra map[string]string, prov *ctrf.RuntimeProvenance) {
+	if !strings.Contains(logs, ctrf.ExtraLinePrefix) && !strings.Contains(logs, ctrf.ProvenanceLinePrefix) {
+		return logs, nil, nil
 	}
 	lines := strings.Split(logs, "\n")
 	kept := make([]string, 0, len(lines))
@@ -261,15 +260,28 @@ func parseExtraSentinels(logs string) (cleaned string, extra map[string]string) 
 		if payload, ok := strings.CutPrefix(line, ctrf.ExtraLinePrefix); ok {
 			var parsed map[string]string
 			if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
+				// Logged, not returned, because the exit code is the verdict.
 				slog.Warn("failed to parse validator extra sentinel; dropping", "error", err)
 			} else if len(parsed) > 0 {
-				extra = parsed // keep the last VALID non-empty payload
+				if extra == nil {
+					extra = make(map[string]string, len(parsed))
+				}
+				maps.Copy(extra, parsed)
 			}
 			continue // transport, not human evidence — strip it
 		}
+		if payload, ok := strings.CutPrefix(line, ctrf.ProvenanceLinePrefix); ok {
+			var parsed ctrf.RuntimeProvenance
+			if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
+				slog.Warn("failed to parse validator provenance sentinel; dropping", "error", err)
+			} else if parsed.ShippedDigest != "" && parsed.DerivedDigest != "" {
+				prov = &parsed
+			}
+			continue
+		}
 		kept = append(kept, line)
 	}
-	return strings.Join(kept, "\n"), extra
+	return strings.Join(kept, "\n"), extra, prov
 }
 
 // HandleTimeout extracts whatever result is available when the orchestrator's
@@ -314,7 +326,7 @@ func (d *Deployer) HandleTimeout(ctx context.Context, waitCause error) *ctrf.Val
 	// sentinel here too: a check that emits coverage counts before hitting the
 	// timeout still yields structured evidence.
 	if logs, logErr := pod.GetPodLogs(ctx, d.config.Clientset, d.config.Namespace, jobPod.Name, ValidatorContainerName); logErr == nil && logs != "" {
-		result.Extra, result.Stdout = processValidatorLogs(logs)
+		result.Extra, result.RuntimeProvenance, result.Stdout = processValidatorLogs(logs)
 	}
 
 	if cs.State.Terminated != nil {
@@ -342,34 +354,55 @@ func effectiveTimeout(configured time.Duration) time.Duration {
 	return configured
 }
 
+// truncateToSeconds drops d's sub-second component. Both activeDeadlineSeconds
+// and AICR_CHECK_TIMEOUT (pkg/validator/v1/job_plan.go) are whole-second int64
+// values, so any duration reported alongside them must match that precision —
+// otherwise the message names a sub-second component the check was never
+// actually granted.
+func truncateToSeconds(d time.Duration) time.Duration {
+	return time.Duration(int64(d.Seconds())) * time.Second
+}
+
 // enforcedDeadline is the deadline Kubernetes actually applied, as opposed to
 // the duration the catalog asked for. The authoritative source is the live
 // Job's spec.activeDeadlineSeconds — the literal value the Job controller
 // enforced — so it is preferred whenever the Job could be read and carries it.
 //
-// The fallback re-derives it the way BuildJobPlan does, converting the catalog
-// timeout with int64(timeout.Seconds()) before assigning it to
-// ActiveDeadlineSeconds (pkg/validator/v1/job_plan.go), so any sub-second
-// component is truncated away: a 1500ms entry yields a 1s Job deadline.
-// Reporting the raw duration would name a deadline that never existed, and the
-// whole point of this message is to describe the Kubernetes state that produced
-// the failure.
+// The fallback derives the deadline v1.JobDeadlineFor(effectiveTimeout(configured))
+// would have produced, truncated to whole seconds — the same value BuildJobPlan
+// renders onto ActiveDeadlineSeconds via int64(JobDeadlineFor(timeout).Seconds()).
+// It is unreachable in practice: the only caller, missingPodOutcome, sits behind
+// an `if !ok { return -1, notFound }` guard that requires jobFailedCondition to
+// have already succeeded, so job is non-nil here only when a live Job was just
+// read with ActiveDeadlineSeconds set — both renderers in
+// pkg/validator/v1/job_plan.go always set it.
 func enforcedDeadline(job *batchv1.Job, configured time.Duration) time.Duration {
 	if job != nil && job.Spec.ActiveDeadlineSeconds != nil {
 		return time.Duration(*job.Spec.ActiveDeadlineSeconds) * time.Second
 	}
-	return time.Duration(int64(effectiveTimeout(configured).Seconds())) * time.Second
+	return truncateToSeconds(v1.JobDeadlineFor(effectiveTimeout(configured)))
 }
 
 // waitFailureMessage renders the TerminationMsg for a validator whose container
 // never terminated. Only a genuine context-deadline expiry is reported as a
-// "timeout ... within <configured>" — any other cause (infra/unavailable) is
-// surfaced verbatim so diagnosis is not misdirected to the catalog timeout
-// (see issue #1966). A nil cause is treated as a timeout for backward
-// compatibility with callers that had no error to thread through.
+// timeout — any other cause (infra/unavailable) is surfaced verbatim so
+// diagnosis is not misdirected to the catalog timeout (see issue #1966). A nil
+// cause is treated as a timeout for backward compatibility with callers that
+// had no error to thread through.
+//
+// The timeout wording names the actual clock the orchestrator waited on —
+// configured+defaults.ValidatorWaitBuffer, the window WaitForCompletion spans
+// measured from the Job's start time — not just the catalog budget: since
+// #2473 the Job's own activeDeadlineSeconds exceeds the catalog budget by
+// ValidatorJobDeadlineHeadroom, so a hung check now routinely expires this
+// orchestrator wait before the Job deadline, and reporting only the catalog
+// value would understate how long the operator actually waited.
 func waitFailureMessage(cause error, configured time.Duration) string {
 	if cause == nil || isDeadlineCause(cause) {
-		return fmt.Sprintf("timeout: validator did not complete within %s", configured)
+		checkBudget := truncateToSeconds(configured)
+		waitBuffer := truncateToSeconds(defaults.ValidatorWaitBuffer)
+		return fmt.Sprintf("timeout: validator did not complete within %s (check budget %s + orchestrator wait buffer %s)",
+			checkBudget+waitBuffer, checkBudget, waitBuffer)
 	}
 	return fmt.Sprintf("validation failed: %v", cause)
 }

@@ -19,6 +19,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/kustomize/api/hasher"
 	"sigs.k8s.io/kustomize/api/resource"
@@ -105,8 +106,6 @@ func deploymentFixture(name string, existingTolerations []any) *unstructured.Uns
 	}}
 }
 
-// TestApplyControllerTolerations covers both controller names, the two
-// mutation-failure paths, and that an unrelated Deployment is left untouched.
 // TestApplyControllerTolerations_Isolation pins that the two controllers do
 // not share a live toleration slice: mutating one Deployment's stamped
 // tolerations in place must not affect the other, or the shared
@@ -122,12 +121,15 @@ func TestApplyControllerTolerations_Isolation(t *testing.T) {
 		t.Fatalf("applyControllerTolerations(jobset) error = %v", err)
 	}
 
-	trainerTols, _, _ := unstructured.NestedSlice(trainerObj.Object, "spec", "template", "spec", "tolerations")
-	trainerTol, _ := trainerTols[0].(map[string]any)
+	// NestedSlice deep-copies (runtime.DeepCopyJSONValue), so mutating its
+	// result can never observe aliasing back into the live object or the
+	// shared global. NestedFieldNoCopy returns the same map reference
+	// podSpec["tolerations"] actually holds, which is what this guard needs
+	// to exercise to be anything but a false green.
+	trainerTol := liveToleration(t, trainerObj)
 	trainerTol["key"] = "mutated-for-trainer-only"
 
-	jobSetTols, _, _ := unstructured.NestedSlice(jobSetObj.Object, "spec", "template", "spec", "tolerations")
-	jobSetTol, _ := jobSetTols[0].(map[string]any)
+	jobSetTol := liveToleration(t, jobSetObj)
 	if _, mutated := jobSetTol["key"]; mutated {
 		t.Errorf("mutating the Trainer Deployment's toleration leaked into the JobSet Deployment: %v", jobSetTol)
 	}
@@ -136,6 +138,28 @@ func TestApplyControllerTolerations_Isolation(t *testing.T) {
 	}
 }
 
+// liveToleration returns the live (non-deep-copied) first toleration map
+// stamped onto obj, so a caller can mutate it in place to test for aliasing.
+func liveToleration(t *testing.T, obj *unstructured.Unstructured) map[string]any {
+	t.Helper()
+
+	raw, found, err := unstructured.NestedFieldNoCopy(obj.Object, "spec", "template", "spec", "tolerations")
+	if err != nil || !found {
+		t.Fatalf("tolerations not found on %q: found=%v err=%v", obj.GetName(), found, err)
+	}
+	tols, ok := raw.([]any)
+	if !ok || len(tols) == 0 {
+		t.Fatalf("tolerations on %q have unexpected shape: %v", obj.GetName(), raw)
+	}
+	tol, ok := tols[0].(map[string]any)
+	if !ok {
+		t.Fatalf("toleration[0] on %q has unexpected shape: %v", obj.GetName(), tols[0])
+	}
+	return tol
+}
+
+// TestApplyControllerTolerations covers both controller names, the two
+// mutation-failure paths, and that an unrelated Deployment is left untouched.
 func TestApplyControllerTolerations(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -357,5 +381,24 @@ spec:
 
 	if _, err := decodeTrainerObjects(resources); err == nil {
 		t.Fatal("decodeTrainerObjects() expected error for a malformed tolerations field, got nil")
+	}
+}
+
+// TestNCCLExecutionLockStaleAge_CoversSelfInstallWorstCase checks that
+// NCCLExecutionLockStaleAge stays ahead of the self-install path's own
+// worst case: the archive download, then waitForTrainerReady's CRD wait
+// and its two controller-ready waits (Trainer's own controller, then
+// JobSet's), all run before runNCCLTrainJob's first post-install lock
+// renewal. A change to any of those timeouts that closes this margin
+// should fail here, rather than let a same-run retry steal the lock from
+// an install that is still in progress.
+func TestNCCLExecutionLockStaleAge_CoversSelfInstallWorstCase(t *testing.T) {
+	worstCase := defaults.NCCLTrainerArchiveDownloadTimeout +
+		defaults.TrainerCRDEstablishedTimeout +
+		2*defaults.TrainerControllerReadyTimeout
+
+	if defaults.NCCLExecutionLockStaleAge <= worstCase {
+		t.Errorf("NCCLExecutionLockStaleAge (%s) must exceed the self-install worst case (%s)",
+			defaults.NCCLExecutionLockStaleAge, worstCase)
 	}
 }

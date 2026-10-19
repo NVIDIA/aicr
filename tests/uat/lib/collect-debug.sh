@@ -51,12 +51,23 @@
 # are hardware identifiers / driver diagnostics — no Secrets, and intentionally
 # captured for RMA (issue #1860) — but treated as sensitive like the rest.
 
+# Platform-to-workload-CRD map (platform_workload_crd,
+# platform_workload_platforms), shared with phase_conformance's coordinate
+# cross-check so the CRs captured here cannot drift from the platforms the gate
+# knows. Sourced explicitly rather than relying on the caller's source order;
+# the map file has no side effects at source time, so sourcing it twice in one
+# shell (phases.sh sources it too) is harmless.
+# shellcheck source=./platform-crd-map.sh
+source "$(dirname "${BASH_SOURCE[0]}")/platform-crd-map.sh"
+
 # Directory the bundle is written into (relative to $PWD, matching serve-logs/
 # and train-logs/); the workflow adds `cluster-debug/**` to the upload artifact.
 CLUSTER_DEBUG_DIR="${CLUSTER_DEBUG_DIR:-cluster-debug}"
 
-# Readiness-gate time-series log. phase_install appends each gate attempt's
-# `validate --phase deployment` output (timestamped) here, so the bundle carries
+# Readiness-gate time-series log. phase_readiness appends each gate attempt's
+# `validate --phase deployment` output (timestamped) here -- plus, for a failed
+# attempt, the failing validators' message and stdout (e.g. expected-resources'
+# "Failed resources:" block) from that attempt's CTRF report -- so the bundle carries
 # the actual status.status progression across the tuning-settling window — the
 # complete→in_progress flips AS THEY HAPPEN — rather than only a single snapshot
 # taken minutes later at teardown. This is the highest-value signal for the
@@ -72,14 +83,29 @@ CLUSTER_DEBUG_LOG_TAIL="${CLUSTER_DEBUG_LOG_TAIL:-2000}"
 # that fail). Other namespaces still get get/describe/events, just not every log —
 # keeps the bundle focused on the GPU/tuning stack that drives deployment-phase
 # failures. Space-separated; overridable.
-CLUSTER_DEBUG_LOG_NAMESPACES="${CLUSTER_DEBUG_LOG_NAMESPACES:-skyhook gpu-operator nvidia-dra-driver nvsentinel node-feature-discovery kai-scheduler cert-manager monitoring}"
+#
+# nvidia-network-operator (MOFED/DOCA driver-build pods) and aicr-validation (the
+# NCCL launcher/worker + check Jobs) carry the crash logs behind two failure
+# modes the operator namespaces alone cannot explain: an RDMA driver that never
+# reaches .driver-ready, and a CUJ Job that crash-loops to its deadline. Both run
+# NVIDIA/AICR workloads, not third-party tenants; heed the Privacy note above
+# before adding a namespace that runs token-bearing workloads (e.g. a served
+# model), whose logs can carry app-emitted credentials into the public artifact.
+#
+# nodewright AND skyhook for the same reason the Skyhook-CR capture below scans
+# both: the registry default is nodewright, but a cluster deployed before that
+# move still runs in skyhook and Helm cannot relocate a release. The package
+# apply Jobs live here, so a tuning Init:Error is only explainable from these
+# logs (incl. --previous) — covering one namespace leaves the other's failures
+# status-only (run 36745844287).
+CLUSTER_DEBUG_LOG_NAMESPACES="${CLUSTER_DEBUG_LOG_NAMESPACES:-nodewright skyhook gpu-operator nvidia-dra-driver nvidia-network-operator nvsentinel node-feature-discovery kai-scheduler aicr-validation cert-manager monitoring}"
 
 # Cluster-scoped custom resources most relevant to a deployment-phase failure.
 # Skyhook is first: its status.status is the non-monotonic signal the readiness
 # gate keys off of, and its full YAML carries the per-package/per-node status
 # history that explains a re-tuning race. Best-effort — a kind absent on this
 # cloud/recipe just no-ops.
-CLUSTER_DEBUG_CLUSTER_RESOURCES="${CLUSTER_DEBUG_CLUSTER_RESOURCES:-skyhooks.skyhook.nvidia.com clusterpolicies.nvidia.com nodefeatures.nfd.k8s-sigs.io resourceslices.resource.k8s.io deviceclasses.resource.k8s.io}"
+CLUSTER_DEBUG_CLUSTER_RESOURCES="${CLUSTER_DEBUG_CLUSTER_RESOURCES:-nodewrights.nodewright.nvidia.com skyhooks.skyhook.nvidia.com clusterpolicies.nvidia.com nodefeatures.nfd.k8s-sigs.io resourceslices.resource.k8s.io deviceclasses.resource.k8s.io}"
 
 # Per-command wall-clock bound. A single slow/unreachable kubectl call (stale
 # creds, an apiserver hiccup, describe over many nodes) must not consume the whole
@@ -157,15 +183,27 @@ capture_skyhook_snapshot() {
       echo "# teardown-time reading."
       echo
       echo "----- Skyhook CRs (full YAML: per-package/per-node status) -----"
+      # NodeWright first: from operator v0.18.0 it is the reconciled object and
+      # the only one carrying status, while the mirrored Skyhook stays empty.
+      # Both are dumped because either kind may be absent depending on the
+      # operator version, and `|| true` keeps a missing kind from ending the
+      # capture.
+      _cd_bounded kubectl get nodewrights.nodewright.nvidia.com -A -o yaml 2>&1 || true
       _cd_bounded kubectl get skyhooks.skyhook.nvidia.com -A -o yaml 2>&1 || true
       echo
       echo "----- node reboot fingerprint (bootID / kernel / Ready transition / taints) -----"
       _cd_node_reboot_fingerprint
       echo
-      echo "----- skyhook namespace pods (tuning package pods) -----"
-      _cd_bounded kubectl get pods -n skyhook -o wide 2>&1 || true
-      echo "----- skyhook namespace events (by time) -----"
-      _cd_bounded kubectl get events -n skyhook --sort-by=.lastTimestamp 2>&1 || true
+      # Both namespaces: the registry default is nodewright, but a cluster
+      # deployed before that move still runs in skyhook and Helm cannot
+      # relocate a release. Collecting only one would come back empty on
+      # exactly the cluster whose upgrade is being debugged.
+      for _cd_nw_ns in nodewright skyhook; do
+        echo "----- ${_cd_nw_ns} namespace pods (tuning package pods) -----"
+        _cd_bounded kubectl get pods -n "${_cd_nw_ns}" -o wide 2>&1 || true
+        echo "----- ${_cd_nw_ns} namespace events (by time) -----"
+        _cd_bounded kubectl get events -n "${_cd_nw_ns}" --sort-by=.lastTimestamp 2>&1 || true
+      done
     } | tee "${out}"
     echo "::endgroup::"
     exit 0
@@ -175,7 +213,11 @@ capture_skyhook_snapshot() {
 
 # _cd_gpu_driver_state writes a per-GPU-node census of advertised GPUs and, when
 # any GPU node advertises fewer than the cohort max (a capacity shortfall — e.g.
-# an H100 node enumerating 7 of 8 GPUs), captures DRIVER-LEVEL state on each short
+# an H100 node enumerating 7 of 8 GPUs) OR a GPU-marked node advertises none at
+# all (the driver-dead 0/total case, #1860 — invisible to a plain allocatable
+# scan because the resource key is absent, so such a node is identified instead
+# by its GPU taint/label or NVIDIA PCI presence and surfaced as 0), captures
+# DRIVER-LEVEL state on each short
 # node: nvidia-smi -L, per-GPU PCI/serial, the host NVIDIA PCI census, and dmesg
 # NVRM/Xid lines. The Kubernetes API only shows the *symptom* (allocatable count);
 # this exec-based capture — via the privileged on-node nvidia-dcgm pod — is what
@@ -202,15 +244,27 @@ _cd_gpu_driver_state() {
     local ns="${CLUSTER_DEBUG_GPU_NAMESPACE}"
     census="$(_cd_bounded kubectl get nodes -o json 2>/dev/null \
       | jq -r --arg r "${res}" '.items[]
-          | select(.status.allocatable[$r] != null)
-          | "\(.metadata.name) \(.status.allocatable[$r])"' 2>/dev/null)"
+          # A GPU node advertises the resource, OR is marked as GPU hardware by
+          # taint/label while advertising none — the #1860 driver-dead case the
+          # census must still surface (as 0), not silently drop.
+          | select(
+              (.status.allocatable[$r] != null)
+              or (.status.capacity[$r] != null)
+              or (any(.spec.taints[]?; .key == $r))
+              or (.metadata.labels["feature.node.kubernetes.io/pci-10de.present"] == "true")
+            )
+          | "\(.metadata.name) \(.status.allocatable[$r] // "0")"' 2>/dev/null)"
     # NOTE: "cohort max" is computed across ALL GPU nodes, with no per-product /
     # per-pool segmentation. Correct for UAT's homogeneous single-SKU GPU pools;
     # a heterogeneous pool (e.g. a 1-GPU utility node beside 8-GPU workers) would
     # false-flag the smaller node as short. Best-effort diagnostics, so the only
     # cost of a false positive is one extra bounded exec + a marker.
     maxc="$(printf '%s\n' "${census}" | awk '{if($2+0>m)m=$2+0}END{print m+0}')"
-    short="$(printf '%s\n' "${census}" | awk -v m="${maxc}" 'NF>=2 && $2+0 < m {print $1}')"
+    # Short = below cohort max, OR advertising 0 regardless of max. The `== 0`
+    # arm is #1860: when every GPU node is driver-dead the max is also 0, so a
+    # plain `< max` test would flag nothing; a GPU node advertising 0 is always a
+    # shortfall (it is known GPU hardware, per the census select above).
+    short="$(printf '%s\n' "${census}" | awk -v m="${maxc}" 'NF>=2 && ($2+0 < m || $2+0 == 0) {print $1}')"
 
     local captured=0
     echo "::group::Collect GPU driver state"
@@ -224,8 +278,8 @@ _cd_gpu_driver_state() {
       fi
       echo
       if [[ -n "${short}" ]]; then
-        echo "----- GPU-count SHORTFALL: node(s) below cohort max ${maxc} -----"
-        printf '%s\n' "${census}" | awk -v m="${maxc}" 'NF>=2 && $2+0 < m {print "  "$1" advertises "$2"/"m}'
+        echo "----- GPU-count SHORTFALL: node(s) below cohort max ${maxc} (or advertising none) -----"
+        printf '%s\n' "${census}" | awk -v m="${maxc}" 'NF>=2 && ($2+0 < m || $2+0 == 0) {print "  "$1" advertises "$2"/"m}'
         echo
         # shellcheck disable=SC2086 # intentional word-split of the node list
         for node in ${short}; do
@@ -263,7 +317,7 @@ _cd_gpu_driver_state() {
     if [[ -n "${short}" ]]; then
       {
         echo "GPU-count shortfall @ $(date -u +%Y-%m-%dT%H:%M:%SZ); cohort max=${maxc}"
-        printf '%s\n' "${census}" | awk -v m="${maxc}" 'NF>=2 && $2+0 < m {print $1" "$2"/"m}'
+        printf '%s\n' "${census}" | awk -v m="${maxc}" 'NF>=2 && ($2+0 < m || $2+0 == 0) {print $1" "$2"/"m}'
       } > "${CLUSTER_DEBUG_DIR}/gpu-shortfall.txt" 2>/dev/null || true
     fi
     exit 0
@@ -329,7 +383,7 @@ collect_cluster_debug() {
         report.json 2>/dev/null || echo "  (report.json unparseable)"
     fi
     # Point the reader at the two highest-value time-series artifacts if present:
-    # the readiness-gate status.status progression (written during phase_install)
+    # the readiness-gate status.status progression (written during phase_readiness)
     # and any inline skyhook-at-failure snapshot(s).
     [[ -f "${CLUSTER_DEBUG_GATE_LOG}" ]] && echo "readinessGateSeries: $(basename "${CLUSTER_DEBUG_GATE_LOG}")"
     # GPU census is always emitted below; gpu-shortfall.txt appears only when a
@@ -385,8 +439,14 @@ collect_cluster_debug() {
     _cd_section "CR ${res} (yaml)" "cr-${res%%.*}.yaml" \
       kubectl get "${res}" -A -o yaml
   done
-  # Platform workload CRs (Dynamo / Kubeflow) if the CRD exists.
-  for res in dynamographdeployments.nvidia.com trainjobs.trainer.kubeflow.org; do
+  # Platform workload CRs (Dynamo / Kubeflow / Slurm) if the CRD exists. The
+  # platform set and its CRD names come from lib/platform-crd-map.sh, the same
+  # map phase_conformance cross-checks the TestGrid coordinate against: a
+  # platform the gate knows must also have its CRs captured here, or the bundle
+  # for a failing cell of that platform arrives missing its workload state.
+  local platform
+  for platform in $(platform_workload_platforms); do
+    res="$(platform_workload_crd "${platform}")" || continue
     _cd_bounded kubectl get crd "${res}" >/dev/null 2>&1 || continue
     _cd_section "CR ${res} (yaml)" "cr-${res%%.*}.yaml" \
       kubectl get "${res}" -A -o yaml

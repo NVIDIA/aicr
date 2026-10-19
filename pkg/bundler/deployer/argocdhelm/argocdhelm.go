@@ -86,7 +86,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -98,6 +100,7 @@ import (
 	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -115,6 +118,15 @@ const (
 	profileLockTemplateName = "aicr-profile-lock"
 
 	profileLockTemplateHeader = "{{- /* AICR profile install-time ownership guard. */ -}}\n"
+)
+
+// Bundle-root file/directory names used by both the chart writer and the
+// released-layout index: fileChart is this deployer's Entrypoint, and
+// dirTemplates is where writeChartYAML's sibling per-folder templates land,
+// including each transformed folder's <name>.yaml.
+const (
+	fileChart    = "Chart.yaml"
+	dirTemplates = "templates"
 )
 
 // DefaultChartName is the Helm chart name used when ChartName is not set
@@ -271,12 +283,19 @@ type Generator struct {
 	// Forwarded to the delegated argocd.Generator. Off by default.
 	VendorCharts bool
 
+	// Puller is forwarded to the delegated argocd.Generator; see its field.
+	Puller localformat.ChartPuller
+
 	// Serial forces the delegated argocd.Generator to assign linear
 	// per-folder sync-waves (one component at a time) instead of the
 	// dependency-depth bands. Forwarded verbatim; the sync-wave annotation
 	// survives the application.yaml -> chart template transform. Off by
 	// default. Wired from --serial. See argocd.Generator.Serial.
 	Serial bool
+
+	// UpgradeNotice is upgrade.WriteNotice output, inserted verbatim before the
+	// first deployment heading of README.md. Empty adds nothing.
+	UpgradeNotice string
 }
 
 // Generate creates a Helm chart app-of-apps by:
@@ -351,6 +370,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		// parent chart level via writeStaticValuesAndBuildStubs.
 		AllowDynamicValueSplit: true,
 		VendorCharts:           g.VendorCharts,
+		Puller:                 g.Puller,
 		Serial:                 g.Serial,
 		// Forward the effective parent name so the inner generator's
 		// parent-collision check tests against THIS deployer's parent
@@ -368,7 +388,9 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 
 	if _, genErr := argocdGen.Generate(ctx, tmpDir); genErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate base Argo CD output", genErr)
+		// PropagateOrWrap keeps the delegate's code, so a chart digest
+		// mismatch reports CONFLICT here as it does under the argocd deployer.
+		return nil, errors.PropagateOrWrap(genErr, errors.ErrCodeInternal, "failed to generate base Argo CD output")
 	}
 
 	// Step 2: Create Helm chart output structure
@@ -377,6 +399,12 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 
 	output := &deployer.Output{Files: make([]string, 0)}
+	output.Entrypoint = fileChart
+	// AppName alone: this chart is URL-portable, so the repo URL and the
+	// target revision are rewritten into `.Values` directives rather than
+	// baked, and the root values.yaml writes both keys empty. The parent
+	// Application's metadata.name is the one coordinate the chart fixes.
+	output.Source = deployer.Source{AppName: cmp.Or(g.AppName, DefaultAppName)}
 
 	// Write Chart.yaml
 	chartName := g.chartName()
@@ -398,7 +426,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// path-based Argo Applications can resolve `path: NNN-<name>` against
 	// the bundle, then transform that folder's application.yaml into a
 	// Helm chart template under templates/<name>.yaml.
-	templatesDir, err := deployer.SafeJoin(outputDir, "templates")
+	templatesDir, err := deployer.SafeJoin(outputDir, dirTemplates)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to resolve templates directory", err)
 	}
@@ -478,7 +506,14 @@ func (g *Generator) writeProfileLockTemplate(templatesDir string) (string, int64
 	// allocation-policy selector paths at install time (ADR-015).
 	lockSet := g.RecipeResult.EffectiveLockSet()
 	components := make([]string, 0, len(lockSet))
-	for component := range lockSet {
+	for component, paths := range lockSet {
+		// A component the profile references as optional and the bundle
+		// omits has no Application to guard.
+		if !slices.Contains(paths, bundlercfg.ComponentEnabledKey) {
+			if ref := g.RecipeResult.GetComponentRef(component); ref == nil || !ref.IsEnabled() {
+				continue
+			}
+		}
 		components = append(components, component)
 	}
 	sort.Strings(components)
@@ -1237,6 +1272,12 @@ func (g *Generator) writeParentApplicationTemplate(templatesDir string) (string,
 // chart template under templatesDir. Output's Files/TotalSize are updated
 // in place. Extracted from Generate to keep that function under the funlen
 // threshold; the loop body is too long to inline cleanly.
+//
+// Release order is os.ReadDir's lexical sort, and it equals deployment order
+// only because the NNN- prefix is zero-padded to three digits — the same
+// bound localformat enforces when it refuses to emit more than 999 folders.
+// Widening that prefix without padding to the new width silently reorders
+// this index.
 func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templatesDir string, output *deployer.Output) error {
 	folderEntries, readErr := os.ReadDir(tmpDir)
 	if readErr != nil {
@@ -1247,7 +1288,7 @@ func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templ
 	for _, e := range folderEntries {
 		select {
 		case <-ctx.Done():
-			return errors.Wrap(errors.ErrCodeTimeout, "context cancelled", ctx.Err())
+			return errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "writing argocd-helm bundle folders")
 		default:
 		}
 		if !e.IsDir() || !isNNNFolder(e.Name()) {
@@ -1299,6 +1340,17 @@ func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templ
 		}
 		output.Files = append(output.Files, copiedFiles...)
 		output.TotalSize += copySize
+
+		output.Releases = append(output.Releases, deployer.Release{
+			Name:      folderComponent,
+			Component: parentComponent,
+			Namespace: namespaceForComponent(g.RecipeResult.ComponentRefs, parentComponent),
+			Path:      folderName,
+			// The chart declares each release as a template, not as a
+			// per-folder application.yaml — that file is stripped by
+			// copyFolderContent and transformed into templates/<name>.yaml.
+			Manifest: path.Join(dirTemplates, folderComponent+".yaml"),
+		})
 
 		// Validate the composed child name at bundle time: the rendered
 		// template prepends `.Values.deployer.namePrefix` (defaulting to
@@ -1689,6 +1741,19 @@ func findComponentByName(refs []recipe.ComponentRef, name string) bool {
 	return false
 }
 
+// namespaceForComponent returns the target namespace declared for name in the
+// recipe, or empty when the component is not declared. Injected -pre / -post
+// / -readiness folders resolve through their parent, so callers pass the
+// parent.
+func namespaceForComponent(refs []recipe.ComponentRef, name string) string {
+	for i := range refs {
+		if refs[i].Name == name {
+			return refs[i].Namespace
+		}
+	}
+	return ""
+}
+
 // copyFolderContent copies srcDir/folderName/* into outputDir/folderName/,
 // excluding any file whose basename is in skip. Used to relocate the argocd
 // deployer's NNN-folders into the argocdhelm bundle so path-based Argo
@@ -1841,7 +1906,7 @@ func convertToSingleSourceWithValues(app map[string]any, componentName, override
 }
 
 func writeChartYAML(outputDir, name, version string) (string, int64, error) {
-	chartPath, err := deployer.SafeJoin(outputDir, "Chart.yaml")
+	chartPath, err := deployer.SafeJoin(outputDir, fileChart)
 	if err != nil {
 		return "", 0, err
 	}
@@ -1878,11 +1943,30 @@ func (g *Generator) chartName() string {
 	return g.ChartName
 }
 
+// chartVersion is the version written into the bundle chart's Chart.yaml and,
+// by default, used as its Argo CD targetRevision and OCI tag.
+//
+// The explicit BundleChartVersion override is already validated as strict
+// SemVer at Generate time. The recipe-derived fallback goes through
+// NormalizeChartVersion rather than NormalizeVersionWithDefault because
+// `metadata.version` carries the AICR build version verbatim — including the
+// "dev" of an unstamped build, which Helm rejects for `version:`, making the
+// whole generated bundle chart unloadable.
+//
+// The source stays `metadata.version` — the build that generated the RECIPE —
+// deliberately, and does NOT match the per-component wrapper charts inside the
+// same bundle, which localformat stamps from the build that ran `bundle`
+// (ADR-021 Decision 7). The two differ whenever a recipe is generated once and
+// bundled later by a newer binary. This value also defaults the Argo CD
+// targetRevision and the OCI push tag, so it tracks the configuration the
+// chart encodes rather than the tool run that serialized it. The root chart
+// carries no aicr.run/generated-by annotation, so nothing reads it as the
+// wrapper-provenance signal.
 func (g *Generator) chartVersion() string {
 	if g.BundleChartVersion != "" {
 		return g.BundleChartVersion
 	}
-	return deployer.NormalizeVersionWithDefault(g.RecipeResult.Metadata.Version)
+	return deployer.NormalizeChartVersion(g.RecipeResult.Metadata.Version)
 }
 
 func (g *Generator) targetRevision() string {
@@ -1907,6 +1991,7 @@ func (g *Generator) writeReadme(outputDir string) (string, int64, error) {
 	buf.WriteString("the chart deployment as a whole. The bundle's `repoURL` defaults\n")
 	buf.WriteString("to the registry it was pushed to; override with `--set\n")
 	buf.WriteString("repoURL=oci://mirror` when deploying from a different registry.\n\n")
+	buf.WriteString(g.UpgradeNotice)
 
 	buf.WriteString("## Deploy\n\n")
 	buf.WriteString("`<your-registry>/<path>` below is the **parent namespace** you\n")

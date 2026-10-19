@@ -16,7 +16,6 @@ package cli
 
 import (
 	"context"
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -27,6 +26,8 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -76,6 +77,15 @@ func TestBuildCriteriaFromCmd(t *testing.T) {
 			validate: func(t *testing.T, c *recipe.Criteria) {
 				if c.Service != recipe.CriteriaServiceEKS {
 					t.Errorf("Service = %v, want %v", c.Service, recipe.CriteriaServiceEKS)
+				}
+			},
+		},
+		{
+			name: "Nebius B300 criteria",
+			args: []string{"cmd", "--service", "mk8s", "--accelerator", "b300"},
+			validate: func(t *testing.T, c *recipe.Criteria) {
+				if c.Service != recipe.CriteriaServiceMK8s || c.Accelerator != recipe.CriteriaAcceleratorB300 {
+					t.Errorf("criteria = %+v, want mk8s/b300", c)
 				}
 			},
 		},
@@ -659,6 +669,12 @@ func TestRecipeCmd_CommandStructure(t *testing.T) {
 		t.Error("Description should not be empty")
 	}
 
+	for _, value := range []string{"mk8s", "b300"} {
+		if !strings.Contains(cmd.Description, ", "+value+",") {
+			t.Errorf("Description missing criterion %q", value)
+		}
+	}
+
 	requiredFlags := []string{
 		"service", "accelerator", "intent", "os", "profile",
 		"nodes", "snapshot", "output", "format",
@@ -733,9 +749,9 @@ func TestRecipeCmd_UnusableSnapshotRejected(t *testing.T) {
 		name        string
 		yamlContent string
 	}{
-		{"unknown measurement type", "kind: Snapshot\nmeasurements:\n  - type: Bogus\n"},
-		{"whitespace-only measurement type", "kind: Snapshot\nmeasurements:\n  - type: \"  \"\n"},
-		{"recognized type without content", "kind: Snapshot\nmeasurements:\n  - type: K8s\n"},
+		{"unknown measurement type", "kind: Snapshot\napiVersion: aicr.run/v1\nmeasurements:\n  - type: Bogus\n"},
+		{"whitespace-only measurement type", "kind: Snapshot\napiVersion: aicr.run/v1\nmeasurements:\n  - type: \"  \"\n"},
+		{"recognized type without content", "kind: Snapshot\napiVersion: aicr.run/v1\nmeasurements:\n  - type: K8s\n"},
 	}
 
 	for _, tt := range tests {
@@ -770,7 +786,7 @@ func TestRecipeCmd_UnusableSnapshotWithOverrideProceeds(t *testing.T) {
 	dir := t.TempDir()
 	snapFile := filepath.Join(dir, "snapshot.yaml")
 	// A recognized-but-empty K8s measurement yields criteria(any) on its own.
-	if err := os.WriteFile(snapFile, []byte("kind: Snapshot\nmeasurements:\n  - type: K8s\n"), 0o600); err != nil {
+	if err := os.WriteFile(snapFile, []byte("kind: Snapshot\napiVersion: aicr.run/v1\nmeasurements:\n  - type: K8s\n"), 0o600); err != nil {
 		t.Fatalf("failed to write test snapshot file: %v", err)
 	}
 
@@ -971,7 +987,7 @@ func TestRecipeClientFromCmd_PreservesClientErrorCode(t *testing.T) {
 			ctx, cancel := tt.ctx()
 			defer cancel()
 			err := testCmd.Run(ctx, tt.args)
-			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("recipeClientFromCmd() error = %v, want code %s", err, tt.wantCode)
 			}
 		})

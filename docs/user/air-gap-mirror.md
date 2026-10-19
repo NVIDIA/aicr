@@ -4,7 +4,7 @@ Discover every container image and Helm chart a recipe needs, then mirror them
 into a private registry for air-gapped deployment. For the per-flag reference,
 see [CLI reference: aicr mirror list](cli-reference.md#aicr-mirror-list). For
 the static image inventory across all registered components, see
-[Container Image Inventory](container-images.md).
+[Container Image Inventory](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md).
 
 ## Overview
 
@@ -26,17 +26,17 @@ overlay. The output is available in four formats — two general-purpose
 > arbitrary template code from those charts.
 
 ```text
-                      ┌────────────────────-──┐
+                      ┌───────────────────────┐
   aicr recipe ───────▶│  aicr mirror list     │
   (or query params)   │  --format hauler|zarf │
-                      └──────────┬──────-─────┘
+                      └──────────┬────────────┘
                                  │
               ┌──────────────────┼──────────────────┐
               ▼                                     ▼
-     ┌────────────────┐                   ┌─────────--────────┐
+     ┌────────────────┐                   ┌───────────────────┐
      │  hauler store  │                   │  zarf package     │
      │  sync → copy   │                   │  create → mirror  │
-     └───────┬────────┘                   └────────┬──────--──┘
+     └───────┬────────┘                   └────────┬──────────┘
              │                                     │
              ▼                                     ▼
      ┌────────────────────────────────────────────────────┐
@@ -112,7 +112,7 @@ metadata:
   name: aicr-images
 spec:
   images:
-    - name: nvcr.io/nvidia/gpu-operator:v26.3.3
+    - name: nvcr.io/nvidia/gpu-operator:v26.7.2
     - name: registry.k8s.io/nfd/node-feature-discovery:v0.19.0
     # ...
 ---
@@ -123,8 +123,8 @@ metadata:
 spec:
   charts:
     - name: gpu-operator
-      repoURL: oci://ghcr.io/nvidia
-      version: v26.3.3
+      repoURL: https://helm.ngc.nvidia.com/nvidia
+      version: v26.7.2
     # ...
 ```
 
@@ -178,25 +178,31 @@ The output is a `ZarfPackageConfig`:
 
 ```yaml
 apiVersion: zarf.dev/v1alpha1
-kind: ZarfPackageConfig
-metadata:
-  name: aicr
-  description: Container images and Helm charts for AICR recipe deployment
-  version: 0.0.1
 components:
-  - name: aicr-images
-    required: true
+  - charts:
+      - name: gpu-operator
+        namespace: gpu-operator
+        repoName: gpu-operator
+        url: https://helm.ngc.nvidia.com/nvidia
+        version: v26.7.2
+      # ...
     images:
-      - nvcr.io/nvidia/gpu-operator:v26.3.3
+      - nvcr.io/nvidia/gpu-operator:v26.7.2
       - registry.k8s.io/nfd/node-feature-discovery:v0.19.0
       # ...
-    charts:
-      - name: gpu-operator
-        url: oci://ghcr.io/nvidia/gpu-operator
-        version: v26.3.3
-        namespace: gpu-operator
-      # ...
+    name: aicr-images
+    required: true
+kind: ZarfPackageConfig
+metadata:
+  description: NVIDIA AI Cluster Runtime container images and Helm charts for air-gapped deployment
+  name: aicr
 ```
+
+Keys are sorted at every level: the renderer marshals through
+`serializer.MarshalYAMLDeterministic`, so given the same discovered inventory it
+produces byte-identical output. Discovery itself is best-effort and can omit a
+component's images without failing the command — see the completeness caveat
+under [Relationship to Container Image Inventory](#relationship-to-container-image-inventory).
 
 ### 2. Create the Zarf package
 
@@ -252,7 +258,7 @@ alias from the registry (e.g., `gpuoperator` for `gpu-operator`).
 
 ## Relationship to Container Image Inventory
 
-The [Container Image Inventory](container-images.md) is a static reference
+The [Container Image Inventory](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md) is a static reference
 generated from `recipes/registry.yaml` with default values. It lists every
 image across all registered components regardless of recipe.
 
@@ -285,3 +291,60 @@ generate the deployment-specific manifest for a specific deployment.
 > destination registry so the runtime pull resolves there; the validator
 > preserves the `library/alpine:3.23.3` repository and tag. Without a registry
 > override, Slurm workers need Docker Hub egress for this check.
+
+## AICR agent and validator images
+
+`aicr mirror list` covers what the recipe's components deploy. It does not list
+the images AICR itself runs in the cluster, so mirror these separately:
+
+- The snapshot agent, `ghcr.io/nvidia/aicr`, run by `aicr snapshot` and by
+  `aicr validate` when no `--snapshot` is given.
+- The validator images under `ghcr.io/nvidia/aicr-validators/` (`deployment`,
+  `performance`, `conformance`, and `aiperf-bench` for inference performance
+  checks), run by `aicr validate`.
+
+Release builds use each image at the CLI's own version tag. Copy them into your
+registry, then point AICR at the copies:
+
+```shell
+AICR_VERSION=vX.Y.Z  # release tag; `aicr --version` prints it without the leading v
+REGISTRY=my-registry.example.com
+
+# Snapshot agent: --image takes the full reference
+aicr snapshot --image "${REGISTRY}/nvidia/aicr:${AICR_VERSION}"
+
+# Validators: the env var replaces the registry prefix of every validator image
+export AICR_VALIDATOR_IMAGE_REGISTRY="${REGISTRY}"
+aicr validate --recipe recipe.yaml \
+  --image "${REGISTRY}/nvidia/aicr:${AICR_VERSION}"
+```
+
+`AICR_VALIDATOR_IMAGE_REGISTRY` replaces the registry host and the first path
+segment, so `ghcr.io/nvidia/aicr-validators/conformance` resolves to
+`${REGISTRY}/aicr-validators/conformance`. If your mirroring tool keeps the
+source path (`${REGISTRY}/nvidia/aicr-validators/...`), set the variable to
+`${REGISTRY}/nvidia` instead. Add `--image-pull-secret` when the registry needs
+credentials. Some benchmark checks pin workload images the variable does not
+rewrite, such as the NCCL runtime image (override it with
+`AICR_NCCL_RUNTIME_IMAGE`); see [Validation](validation.md).
+
+The inference performance check also runs the Dynamo runtime images
+`nvcr.io/nvidia/ai-dynamo/vllm-runtime` and
+`nvcr.io/nvidia/ai-dynamo/dynamo-frontend`. The variable rewrites them by the
+same rule, so `nvcr.io/nvidia/ai-dynamo/vllm-runtime:<version>` resolves to
+`${REGISTRY}/ai-dynamo/vllm-runtime:<version>`. `<version>` is the
+`dynamo-platform` chart version your recipe deploys, which `aicr mirror list`
+reports. The check tags both images with that version, so an overlay or
+`--data` override of the chart moves them with it. Mirror both images to that
+path at that tag. The check copies the Secrets named by `--image-pull-secret`
+that exist in the validator namespace into its per-run namespace, so the Dynamo
+pods and the model-cache Job pull with the same credentials. A named Secret
+missing from the validator namespace is skipped with a warning in the check's
+log, and those pods then pull without it. If the check times out while one of
+those pods is still failing to pull, the error names the pod and the image it
+could not pull.
+`AICR_VALIDATOR_IMAGE_TAG` does not retag the Dynamo images, because their tag
+follows the `dynamo-platform` chart the recipe deploys, so a retag would run a
+runtime that differs from the operator. Registry redirection does not make the
+check fully offline, since its model-cache Job still downloads weights from
+Hugging Face.

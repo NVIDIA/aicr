@@ -131,8 +131,17 @@ func toMeasurement(cfg *l8kconfig.LaunchKitConfig) (*measurement.Measurement, er
 
 func buildIdentitySubtype(g l8kconfig.ClusterConfig) measurement.Subtype {
 	b := measurement.NewSubtypeBuilder(subtypeIdentity)
-	if g.Identifier != "" {
-		b = b.WithContext(identityCtxIdentifier, g.Identifier)
+	// Read-only discovery (DiscoverReadOnly) never assigns a group
+	// identifier because it never writes the machine label the identifier
+	// is derived from. Derive the same value l8k's mutating path would have
+	// assigned so the identity context is stable across both paths;
+	// GeneratedGroupIdentifier returns "" when either input is empty.
+	identifier := g.Identifier
+	if identifier == "" {
+		identifier = l8kconfig.GeneratedGroupIdentifier(g.MachineType, g.GPUType)
+	}
+	if identifier != "" {
+		b = b.WithContext(identityCtxIdentifier, identifier)
 	}
 	if g.MachineType != "" {
 		b = b.WithContext(identityCtxMachineType, g.MachineType)

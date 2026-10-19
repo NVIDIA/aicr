@@ -31,10 +31,17 @@
 // at the cursor. Release cells carry their tag in AICRVersion for DC5's
 // version-parameterized install; until DC5 lands they install from source.
 // Each cell also carries the nightly intents ELIGIBLE at its version: the
-// main cell runs every listed intent, while a release cell drops any intent
-// whose nightly-intent-min-versions floor is newer than the tag, so a release
-// that predates an intent's support never contributes a permanently-red cell.
+// main cell runs every listed intent, while a release cell skips any intent
+// whose harness-compat floor (tests/uat/compat.yaml, parsed by ParseCompat)
+// is newer than the tag, and records the skip in Cell.Skipped. Release cells
+// run a released binary against main's tests/uat/** fixtures and harness, so
+// a floor declares the oldest release those fixtures still accept.
+//
+// CheckFloors rejects over-high floors, which would silently skip a release
+// that passes. Its git evidence (which tags contain the commit that set each
+// floor) is computed by the calling workflow and handed in as data.
 //
 // The package performs no network or git I/O and holds no credentials: the
-// CLI feeds it the registry bytes and the raw `git tag` list.
+// CLI feeds it the registry and compat files, the raw `git tag` list, and
+// the per-floor tag-containment results.
 package uatbroker

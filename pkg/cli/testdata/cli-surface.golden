@@ -5,7 +5,7 @@
 # Adding a command or flag is additive: regenerate and commit in the same PR.
 # Removing or renaming a command, flag, or alias, or changing a default, is a
 # breaking change to a frozen v1 surface and owes the notice period in
-# RELEASING.md § Deprecation Policy.
+# RELEASE.md § Deprecation Policy.
 command aicr  aliases= hidden=false
 command aicr bundle  aliases= hidden=false
 command aicr diff  aliases= hidden=false
@@ -25,6 +25,7 @@ command aicr skill  aliases= hidden=false
 command aicr snapshot  aliases= hidden=false
 command aicr trust  aliases= hidden=false
 command aicr trust update  aliases= hidden=false
+command aicr upgrade-check  aliases= hidden=false
 command aicr validate  aliases= hidden=false
 command aicr verify  aliases= hidden=false
 flag    aicr  --debug  type=bool default=false required=false hidden=false env=AICR_DEBUG
@@ -37,7 +38,7 @@ flag    aicr bundle  --certificate-identity-regexp  type=string default= require
 flag    aicr bundle  --config  type=string default= required=false hidden=false env=
 flag    aicr bundle  --data  type=string default= required=false hidden=false env=
 flag    aicr bundle  --deployer,-d  type=string default= required=false hidden=false env=
-flag    aicr bundle  --dra-eviction-node-label  type=string default="nvidia.com/dra-kubelet-plugin=true" required=false hidden=false env=
+flag    aicr bundle  --dra-eviction-node-label  type=string default= required=false hidden=false env=
 flag    aicr bundle  --dynamic  type=string default= required=false hidden=false env=
 flag    aicr bundle  --flux-namespace  type=string default="flux-system" required=false hidden=false env=
 flag    aicr bundle  --flux-oci-source-name  type=string default="aicr-bundle" required=false hidden=false env=
@@ -64,6 +65,8 @@ flag    aicr bundle  --signing-key  type=string default= required=false hidden=f
 flag    aicr bundle  --storage-class  type=string default= required=false hidden=false env=
 flag    aicr bundle  --system-node-selector  type=string default= required=false hidden=false env=
 flag    aicr bundle  --system-node-toleration  type=string default= required=false hidden=false env=
+flag    aicr bundle  --terraform-child-module  type=bool default=false required=false hidden=false env=
+flag    aicr bundle  --terraform-cluster-rollover  type=bool default=false required=false hidden=false env=
 flag    aicr bundle  --tlog-upload  type=bool default=true required=false hidden=false env=
 flag    aicr bundle  --vendor-charts  type=bool default=false required=false hidden=false env=
 flag    aicr bundle  --workload-gate  type=string default= required=false hidden=false env=
@@ -78,32 +81,48 @@ flag    aicr diff  --target  type=string default= required=false hidden=false en
 flag    aicr evidence digest  --kubeconfig,-k  type=string default= required=false hidden=false env=
 flag    aicr evidence digest  --profile  type=string default= required=false hidden=false env=
 flag    aicr evidence digest  --recipe,-r  type=string default= required=true hidden=false env=
+flag    aicr evidence publish  --fulcio-url  type=string default= required=false hidden=false env=
 flag    aicr evidence publish  --identity-token  type=string default= required=false hidden=false env=COSIGN_IDENTITY_TOKEN
 flag    aicr evidence publish  --insecure-tls  type=bool default=false required=false hidden=false env=
 flag    aicr evidence publish  --no-sign  type=bool default=false required=false hidden=false env=
 flag    aicr evidence publish  --oidc-device-flow  type=bool default=false required=false hidden=false env=AICR_OIDC_DEVICE_FLOW
 flag    aicr evidence publish  --plain-http  type=bool default=false required=false hidden=false env=
 flag    aicr evidence publish  --push  type=string default= required=false hidden=false env=
+flag    aicr evidence publish  --rekor-url  type=string default= required=false hidden=false env=
+flag    aicr evidence publish  --signing-config  type=string default= required=false hidden=false env=
+flag    aicr evidence publish  --signing-key  type=string default= required=false hidden=false env=
+flag    aicr evidence publish  --tlog-upload  type=bool default=true required=false hidden=false env=
 flag    aicr evidence publish  --yes,--assume-yes  type=bool default=false required=false hidden=false env=AICR_ASSUME_YES
+flag    aicr evidence sign  --fulcio-url  type=string default= required=false hidden=false env=
 flag    aicr evidence sign  --identity-token  type=string default= required=false hidden=false env=COSIGN_IDENTITY_TOKEN
 flag    aicr evidence sign  --insecure-tls  type=bool default=false required=false hidden=false env=
 flag    aicr evidence sign  --oidc-device-flow  type=bool default=false required=false hidden=false env=AICR_OIDC_DEVICE_FLOW
 flag    aicr evidence sign  --plain-http  type=bool default=false required=false hidden=false env=
+flag    aicr evidence sign  --rekor-url  type=string default= required=false hidden=false env=
 flag    aicr evidence sign  --relocate  type=bool default=false required=false hidden=false env=
+flag    aicr evidence sign  --signing-config  type=string default= required=false hidden=false env=
+flag    aicr evidence sign  --signing-key  type=string default= required=false hidden=false env=
+flag    aicr evidence sign  --tlog-upload  type=bool default=true required=false hidden=false env=
 flag    aicr evidence sign  --yes,--assume-yes  type=bool default=false required=false hidden=false env=AICR_ASSUME_YES
 flag    aicr evidence verify  --allow-unpinned-tag  type=bool default=false required=false hidden=false env=
 flag    aicr evidence verify  --bundle  type=string default= required=false hidden=false env=
 flag    aicr evidence verify  --expected-identity-regexp  type=string default= required=false hidden=false env=
 flag    aicr evidence verify  --expected-issuer  type=string default= required=false hidden=false env=
 flag    aicr evidence verify  --format,-t  type=string default="text" required=false hidden=false env=
+flag    aicr evidence verify  --insecure-ignore-tlog  type=bool default=false required=false hidden=false env=
+flag    aicr evidence verify  --key  type=string default= required=false hidden=false env=
 flag    aicr evidence verify  --output,-o  type=string default= required=false hidden=false env=
 flag    aicr evidence verify  --registry-insecure-tls  type=bool default=false required=false hidden=false env=
 flag    aicr evidence verify  --registry-plain-http  type=bool default=false required=false hidden=false env=
+flag    aicr evidence verify  --trust-root  type=string default= required=false hidden=false env=
 flag    aicr mirror list  --accelerator,--gpu  type=string default= required=false hidden=false env=
 flag    aicr mirror list  --config  type=string default= required=false hidden=false env=
 flag    aicr mirror list  --criteria-strict  type=bool default=false required=false hidden=false env=
 flag    aicr mirror list  --data  type=string default= required=false hidden=false env=
 flag    aicr mirror list  --format,-f  type=string default="yaml" required=false hidden=false env=
+flag    aicr mirror list  --gke-tcpxo-interfaces  type=string default= required=false hidden=false env=
+flag    aicr mirror list  --inherit  type=string default="all" required=false hidden=false env=
+flag    aicr mirror list  --inherit-from  type=string default= required=false hidden=false env=
 flag    aicr mirror list  --intent  type=string default= required=false hidden=false env=
 flag    aicr mirror list  --kubeconfig,-k  type=string default= required=false hidden=false env=
 flag    aicr mirror list  --nodes  type=int default=0 required=false hidden=false env=
@@ -122,6 +141,9 @@ flag    aicr query  --config  type=string default= required=false hidden=false e
 flag    aicr query  --criteria-strict  type=bool default=false required=false hidden=false env=
 flag    aicr query  --data  type=string default= required=false hidden=false env=
 flag    aicr query  --format,-t  type=string default="yaml" required=false hidden=false env=
+flag    aicr query  --gke-tcpxo-interfaces  type=string default= required=false hidden=false env=
+flag    aicr query  --inherit  type=string default="all" required=false hidden=false env=
+flag    aicr query  --inherit-from  type=string default= required=false hidden=false env=
 flag    aicr query  --intent  type=string default= required=false hidden=false env=
 flag    aicr query  --kubeconfig,-k  type=string default= required=false hidden=false env=
 flag    aicr query  --nodes  type=int default=0 required=false hidden=false env=
@@ -138,6 +160,9 @@ flag    aicr recipe  --config  type=string default= required=false hidden=false 
 flag    aicr recipe  --criteria-strict  type=bool default=false required=false hidden=false env=
 flag    aicr recipe  --data  type=string default= required=false hidden=false env=
 flag    aicr recipe  --format,-t  type=string default="yaml" required=false hidden=false env=
+flag    aicr recipe  --gke-tcpxo-interfaces  type=string default= required=false hidden=false env=
+flag    aicr recipe  --inherit  type=string default="all" required=false hidden=false env=
+flag    aicr recipe  --inherit-from  type=string default= required=false hidden=false env=
 flag    aicr recipe  --intent  type=string default= required=false hidden=false env=
 flag    aicr recipe  --kubeconfig,-k  type=string default= required=false hidden=false env=
 flag    aicr recipe  --nodes  type=int default=0 required=false hidden=false env=
@@ -165,20 +190,23 @@ flag    aicr recipe verify-catalog  --identity-pattern  type=string default= req
 flag    aicr skill  --agent  type=string default= required=true hidden=false env=
 flag    aicr skill  --force  type=bool default=false required=false hidden=false env=
 flag    aicr skill  --stdout  type=bool default=false required=false hidden=false env=
+flag    aicr snapshot  --add-roles-to-service-account  type=string default= required=false hidden=false env=
 flag    aicr snapshot  --aks-gpu-pools  type=string default= required=false hidden=false env=AICR_AKS_GPU_POOLS_PATH
 flag    aicr snapshot  --cluster-config  type=string default= required=false hidden=false env=AICR_CLUSTER_CONFIG_PATH
 flag    aicr snapshot  --config  type=string default= required=false hidden=false env=
 flag    aicr snapshot  --discover-network  type=bool default=false required=false hidden=false env=AICR_DISCOVER_NETWORK
 flag    aicr snapshot  --format,-t  type=string default="yaml" required=false hidden=false env=
+flag    aicr snapshot  --gke-gpu-pools  type=string default= required=false hidden=false env=AICR_GKE_GPU_POOLS_PATH
 flag    aicr snapshot  --image  type=string default="ghcr.io/nvidia/aicr:latest" required=false hidden=false env=AICR_IMAGE
 flag    aicr snapshot  --image-pull-secret  type=string default= required=false hidden=false env=
 flag    aicr snapshot  --job-name  type=string default="aicr" required=false hidden=false env=
 flag    aicr snapshot  --kubeconfig,-k  type=string default= required=false hidden=false env=
 flag    aicr snapshot  --limits  type=string default= required=false hidden=false env=AICR_LIMITS
-flag    aicr snapshot  --max-nodes-per-entry  type=int default=0 required=false hidden=false env=
+flag    aicr snapshot  --max-nodes-per-entry  type=int default=0 required=false hidden=false env=AICR_MAX_NODES_PER_ENTRY
 flag    aicr snapshot  --namespace,-n  type=string default="default" required=false hidden=false env=AICR_NAMESPACE
 flag    aicr snapshot  --no-cleanup  type=bool default=false required=false hidden=false env=
 flag    aicr snapshot  --node-selector  type=string default= required=false hidden=false env=
+flag    aicr snapshot  --oke-addons  type=string default= required=false hidden=false env=AICR_OKE_ADDONS_PATH
 flag    aicr snapshot  --os  type=string default= required=false hidden=false env=AICR_OS
 flag    aicr snapshot  --output,-o  type=string default= required=false hidden=false env=
 flag    aicr snapshot  --privileged  type=bool default=true required=false hidden=false env=
@@ -190,7 +218,16 @@ flag    aicr snapshot  --template  type=string default= required=false hidden=fa
 flag    aicr snapshot  --timeout  type=duration default=5m0s required=false hidden=false env=
 flag    aicr snapshot  --toleration  type=string default= required=false hidden=false env=
 flag    aicr trust update  --emit-signing-config  type=string default= required=false hidden=false env=
+flag    aicr upgrade-check  --deployer,-d  type=string default= required=false hidden=false env=
+flag    aicr upgrade-check  --fail-on-error  type=bool default=true required=false hidden=false env=
+flag    aicr upgrade-check  --format,-t  type=string default="table" required=false hidden=false env=
+flag    aicr upgrade-check  --from,-f  type=string default= required=false hidden=false env=
+flag    aicr upgrade-check  --kubeconfig,-k  type=string default= required=false hidden=false env=
+flag    aicr upgrade-check  --output,-o  type=string default= required=false hidden=false env=
+flag    aicr upgrade-check  --scan-cluster  type=bool default=false required=false hidden=false env=
+flag    aicr upgrade-check  --to  type=string default= required=false hidden=false env=
 flag    aicr validate  --aks-gpu-pools  type=string default= required=false hidden=false env=AICR_AKS_GPU_POOLS_PATH
+flag    aicr validate  --allow-mutable-validator-tags  type=bool default=false required=false hidden=false env=
 flag    aicr validate  --bom  type=string default= required=false hidden=false env=
 flag    aicr validate  --cncf-submission  type=bool default=false required=false hidden=false env=
 flag    aicr validate  --config  type=string default= required=false hidden=false env=
@@ -200,10 +237,13 @@ flag    aicr validate  --evidence-dir  type=string default= required=false hidde
 flag    aicr validate  --fail-fast  type=bool default=false required=false hidden=false env=
 flag    aicr validate  --fail-on-error  type=bool default=true required=false hidden=false env=
 flag    aicr validate  --feature,-f  type=string default= required=false hidden=false env=
+flag    aicr validate  --fulcio-url  type=string default= required=false hidden=false env=
 flag    aicr validate  --full  type=bool default=false required=false hidden=false env=
+flag    aicr validate  --gke-gpu-pools  type=string default= required=false hidden=false env=AICR_GKE_GPU_POOLS_PATH
 flag    aicr validate  --identity-token  type=string default= required=false hidden=false env=COSIGN_IDENTITY_TOKEN
 flag    aicr validate  --image  type=string default="ghcr.io/nvidia/aicr:latest" required=false hidden=false env=AICR_VALIDATOR_IMAGE
 flag    aicr validate  --image-pull-secret  type=string default= required=false hidden=false env=
+flag    aicr validate  --image-refs  type=string default= required=false hidden=false env=
 flag    aicr validate  --insecure-tls  type=bool default=false required=false hidden=false env=
 flag    aicr validate  --job-name  type=string default="aicr-validate" required=false hidden=false env=
 flag    aicr validate  --kubeconfig,-k  type=string default= required=false hidden=false env=
@@ -213,16 +253,23 @@ flag    aicr validate  --no-cluster  type=bool default=false required=false hidd
 flag    aicr validate  --no-sign  type=bool default=false required=false hidden=false env=
 flag    aicr validate  --node-selector  type=string default= required=false hidden=false env=
 flag    aicr validate  --oidc-device-flow  type=bool default=false required=false hidden=false env=AICR_OIDC_DEVICE_FLOW
+flag    aicr validate  --oke-addons  type=string default= required=false hidden=false env=AICR_OKE_ADDONS_PATH
 flag    aicr validate  --output,-o  type=string default= required=false hidden=false env=
 flag    aicr validate  --phase  type=string default= required=false hidden=false env=
 flag    aicr validate  --plain-http  type=bool default=false required=false hidden=false env=
 flag    aicr validate  --push  type=string default= required=false hidden=false env=
 flag    aicr validate  --recipe,-r  type=string default= required=false hidden=false env=
+flag    aicr validate  --rekor-url  type=string default= required=false hidden=false env=
 flag    aicr validate  --require-gpu  type=bool default=false required=false hidden=false env=AICR_REQUIRE_GPU
 flag    aicr validate  --service-account-name  type=string default="aicr" required=false hidden=false env=
+flag    aicr validate  --signing-config  type=string default= required=false hidden=false env=
+flag    aicr validate  --signing-key  type=string default= required=false hidden=false env=
+flag    aicr validate  --skip-check  type=string default= required=false hidden=false env=
 flag    aicr validate  --snapshot,-s  type=string default= required=false hidden=false env=
 flag    aicr validate  --timeout  type=duration default=5m0s required=false hidden=false env=
+flag    aicr validate  --tlog-upload  type=bool default=true required=false hidden=false env=
 flag    aicr validate  --toleration  type=string default= required=false hidden=false env=
+flag    aicr validate  --validator-service-account-name  type=string default= required=false hidden=false env=
 flag    aicr validate  --yes,--assume-yes  type=bool default=false required=false hidden=false env=AICR_ASSUME_YES
 flag    aicr verify  --certificate-identity-regexp  type=string default= required=false hidden=false env=
 flag    aicr verify  --cli-version-constraint  type=string default= required=false hidden=false env=

@@ -332,6 +332,33 @@ func TestGenerateSkipsUnparseableAttestedAt(t *testing.T) {
 	}
 }
 
+func TestGenerateSkipsEmptySigner(t *testing.T) {
+	// A run with an empty signer issuer/identity is dropped rather than
+	// counted. canonicalSourceID collides every such run onto the same
+	// source key, so admitting one would silently merge it with any other.
+	dir := t.TempDir()
+	runDir := filepath.Join(dir, "results", "eks", "h100-ubuntu", "training", "s1", "run-1")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	meta := `{"schemaVersion":"aicr-corroboration-meta/v1",` +
+		`"coordinate":{"group":"eks","dashboard":"h100-ubuntu","tab":"training"},` +
+		`"recipe":"h100-eks-ubuntu-training",` +
+		`"signer":{"idHash":"s1","identity":"","issuer":"","class":"community","allowlisted":false},` +
+		`"runId":"run-1","attestedAt":"2026-06-20T03:14:07Z"}`
+	if err := os.WriteFile(filepath.Join(runDir, "meta.json"), []byte(meta), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Generate(context.Background(), Options{InputDir: dir, OutputDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if res.Runs != 0 || res.Recipes != 0 {
+		t.Errorf("summary = %+v, want 0 runs / 0 recipes (empty-signer run skipped)", res)
+	}
+}
+
 func TestGenerateConsensusKeyedByVerifiedIdentityNotIDHash(t *testing.T) {
 	// Anti-sybil: one verified (issuer, identity) submitted under two different
 	// IDHashes must count as ONE distinct allowlisted signer (SINGLE), never two
@@ -372,6 +399,77 @@ func TestGenerateConsensusKeyedByVerifiedIdentityNotIDHash(t *testing.T) {
 	row := findRow(t, idx, "h100-eks-ubuntu-training", "deployment", "operator-health")
 	if row.Consensus != string(StateSingle) {
 		t.Errorf("consensus = %q, want SINGLE (one identity under two idHashes is one signer, not CONFIRMED)", row.Consensus)
+	}
+}
+
+func TestGenerateSurfacesAICRCommit(t *testing.T) {
+	const (
+		issuer   = "https://token.actions.githubusercontent.com"
+		identity = "https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main"
+		recipe   = "h100-eks-ubuntu-training"
+		older    = "1111111111111111111111111111111111111111"
+		newer    = "2222222222222222222222222222222222222222"
+	)
+	dir := t.TempDir()
+	writeRun := func(runID, attestedAt, commit string) {
+		t.Helper()
+		runDir := filepath.Join(dir, "results", "eks", "h100-ubuntu", "training", "s1", runID)
+		if err := os.MkdirAll(filepath.Join(runDir, "ctrf"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		meta := fmt.Sprintf(`{"schemaVersion":"aicr-corroboration-meta/v1",`+
+			`"coordinate":{"group":"eks","dashboard":"h100-ubuntu","tab":"training"},`+
+			`"recipe":%q,`+
+			`"signer":{"idHash":"s1","identity":%q,"issuer":%q,"class":"first-party","allowlisted":true},`+
+			`"runId":%q,"aicrVersion":"main","aicrCommit":%q,"attestedAt":%q}`,
+			recipe, identity, issuer, runID, commit, attestedAt)
+		if err := os.WriteFile(filepath.Join(runDir, "meta.json"), []byte(meta), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ctrf := `{"reportFormat":"CTRF","results":{"tool":{"name":"aicr"},"summary":{},` +
+			`"tests":[{"name":"operator-health","status":"passed"}]}}`
+		if err := os.WriteFile(filepath.Join(runDir, "ctrf", "deployment.json"), []byte(ctrf), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeRun("run-1", "2026-06-20T03:14:07Z", older)
+	writeRun("run-2", "2026-06-21T03:14:07Z", newer)
+	writeRun("run-0", "2026-06-19T03:14:07Z", `"><script>x</script>`)
+
+	out := t.TempDir()
+	res, err := Generate(context.Background(), Options{InputDir: dir, OutputDir: out})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if res.Runs != 3 {
+		t.Fatalf("runs = %d, want 3 (a malformed commit drops the commit, not the run)", res.Runs)
+	}
+
+	idx := readIndex(t, filepath.Join(out, "data", "index.json"))
+	row := findRow(t, idx, recipe, "deployment", "operator-health")
+	if len(row.Signers) != 1 || row.Signers[0].AICRCommit != newer {
+		t.Errorf("latest signers = %+v, want one entry with aicrCommit %s", row.Signers, newer)
+	}
+
+	data, err := os.ReadFile(filepath.Join(out, "data", "series", recipe+".json"))
+	if err != nil {
+		t.Fatalf("read series: %v", err)
+	}
+	var s Series
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatalf("parse series: %v", err)
+	}
+	var got []string
+	for _, builds := range s.Builds {
+		for _, b := range builds {
+			got = append(got, b.AICRCommit)
+		}
+	}
+	if want := []string{newer, older, ""}; !reflect.DeepEqual(got, want) {
+		t.Errorf("series build commits = %q, want %q", got, want)
+	}
+	if strings.Contains(string(data), "script") {
+		t.Errorf("malformed commit leaked into series output:\n%s", data)
 	}
 }
 

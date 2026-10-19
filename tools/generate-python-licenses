@@ -46,8 +46,8 @@ resolved on amd64 only. Two facts make that correct:
    second architecture contributes no new attribution for a shared package.
 2. The only way a package can be present on one architecture and absent on the
    other is an environment marker. ``check_arch_markers`` below fails the run
-   if any dependency carries a marker that discriminates on machine
-   architecture, so assumption (2) is enforced rather than trusted.
+   if any dependency carries a marker that evaluates differently on the two
+   released architectures, so assumption (2) is enforced rather than trusted.
 
 Collecting on arm64 as well is not merely redundant, it is impossible with
 ``--only-binary``: ``crick`` publishes no linux/arm64 wheel (it compiles from
@@ -68,6 +68,10 @@ import sys
 import tempfile
 import zipfile
 
+# pip vendors `packaging`, and this tool already requires pip (`pip download`),
+# so marker evaluation adds no dependency to install.
+from pip._vendor.packaging.requirements import InvalidRequirement, Requirement
+
 # The interpreter the aiperf-bench builder stage uses. The resolved closure
 # depends on it: environment markers gate on python_version and wheel
 # availability varies by cpXX tag. Keep in sync with that stage's
@@ -84,8 +88,9 @@ COLLECT_TAGS = [
     "manylinux_2_28_x86_64",
 ]
 
-# Documented in the fragment so the record states its own scope.
-RELEASED_PLATFORMS = ["linux/amd64", "linux/arm64"]
+# Documented in the fragment so the record states its own scope. Each maps to
+# the `platform_machine` Linux reports there, which check_arch_markers compares.
+RELEASED_PLATFORMS = {"linux/amd64": "x86_64", "linux/arm64": "aarch64"}
 
 DEFAULT_REQUIREMENTS = pathlib.Path("validators/performance/requirements.txt")
 DEFAULT_OUTPUT = pathlib.Path("validators/performance/licenses/python-notices.md")
@@ -106,14 +111,18 @@ _LICENSE_FILE = re.compile(
     re.IGNORECASE,
 )
 
-# Matches a marker pinning a specific machine architecture, e.g.
-# `platform_machine == "aarch64"`. A marker that merely *lists* architectures
-# inclusively (greenlet, hf-xet) resolves true on both targets and is fine; it
-# is the equality against a single value that would split the closure.
-_ARCH_MARKER = re.compile(
-    r"platform_machine\s*==\s*['\"](?P<arch>[^'\"]+)['\"]", re.IGNORECASE
+# A quoted literal in a marker. `extra` ranges over the owning package's
+# Provides-Extra values, but `in` compares by substring and older metadata can
+# omit Provides-Extra, so the literals are probed as well.
+_MARKER_LITERAL = re.compile(r"['\"]([^'\"]*)['\"]")
+
+# Marker variables target_environment cannot pin: the builder's patch release
+# floats with `python:3.13-slim`, and the kernel is whatever the build host runs.
+# An architecture marker that also reads one of these could split the closure at
+# a value the synthetic environment does not model, so it is not evaluated.
+_UNPINNED_MARKER = re.compile(
+    r"\b(python_full_version|implementation_version|platform_release|platform_version)\b"
 )
-_ARCH_TARGETS = {"x86_64", "amd64", "aarch64", "arm64"}
 
 
 def normalize(name: str) -> str:
@@ -241,7 +250,58 @@ def read_metadata(wheel: pathlib.Path) -> dict | None:
             "url": url or "n/a",
             "texts": texts,
             "requires": list(msg.get_all("Requires-Dist") or []),
+            "extras": list(msg.get_all("Provides-Extra") or []),
         }
+
+
+def target_environment(machine: str) -> dict[str, str]:
+    """Return the marker environment of the aiperf-bench builder on ``machine``."""
+    full_version = f"{PYTHON_VERSION}.0"
+    return {
+        "implementation_name": "cpython",
+        "implementation_version": full_version,
+        "os_name": "posix",
+        "platform_machine": machine,
+        "platform_python_implementation": "CPython",
+        "platform_release": "",
+        "platform_system": "Linux",
+        "platform_version": "",
+        "python_full_version": full_version,
+        "python_version": PYTHON_VERSION,
+        "sys_platform": "linux",
+    }
+
+
+def splits_closure(requirement: str, extras: list[str]) -> bool:
+    """Report whether a Requires-Dist entry resolves differently per architecture.
+
+    ``extras`` are the Provides-Extra values of the package declaring it.
+
+    The marker is evaluated rather than pattern-matched. aiperf 0.13.0 declares
+    ``platform_machine == 'ARM64'`` inside a Windows-only dev extra, which names
+    an architecture but can never be true on Linux, while an inclusive marker
+    such as greenlet's resolves true on both. An unparseable requirement, or one
+    that also reads a variable target_environment cannot pin, counts as
+    splitting, so the guard fails closed.
+    """
+    if not re.search(r"platform[._]machine", requirement):
+        return False
+    try:
+        marker = Requirement(requirement).marker
+    except InvalidRequirement:
+        return True
+    if marker is None:
+        return False
+    if _UNPINNED_MARKER.search(str(marker)):
+        return True
+    for extra in {"", *extras, *_MARKER_LITERAL.findall(str(marker))}:
+        results = {
+            marker.evaluate({**target_environment(machine), "extra": extra})
+            for machine in RELEASED_PLATFORMS.values()
+        }
+        if len(results) > 1:
+            return True
+    return False
 
 
 def check_arch_markers(packages: list[dict]) -> None:
@@ -252,17 +312,12 @@ def check_arch_markers(packages: list[dict]) -> None:
     aiperf bump that introduces such a dependency must not silently produce an
     attribution record missing the other architecture's packages.
     """
-    offenders: list[str] = []
-    for pkg in packages:
-        for requirement in pkg["requires"]:
-            found = {m.group("arch").lower() for m in _ARCH_MARKER.finditer(requirement)}
-            if not found & _ARCH_TARGETS:
-                continue
-            # A marker listing BOTH released architectures resolves true on
-            # each, so it cannot split the closure.
-            if {"x86_64", "amd64"} & found and {"aarch64", "arm64"} & found:
-                continue
-            offenders.append(f"{pkg['key']}: {requirement.strip()}")
+    offenders = [
+        f"{pkg['key']}: {requirement.strip()}"
+        for pkg in packages
+        for requirement in pkg["requires"]
+        if splits_closure(requirement, pkg["extras"])
+    ]
 
     if offenders:
         print(

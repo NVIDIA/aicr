@@ -15,13 +15,13 @@
 package corroborate
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -178,19 +178,12 @@ func signerIdentityKey(s RunMetaSigner) string {
 	return s.Issuer + "\n" + s.Identity
 }
 
-// canonicalSourceID is the locally-derived storage/index key for a verified
-// signer: the FULL hex sha256(issuer\nidentity). The grid, the Sources map, and
-// the per-recipe series are all keyed by this value rather than meta.json's
-// contributor-controlled IDHash. Because GP4 computes it itself from the verified
-// (issuer, identity) pair, two distinct verified identities can never collide on
-// one key — which, if the IDHash were trusted, would let a claimed hash overwrite
-// another signer's row and silently drop it from the dashboard. The full digest
-// (not a truncated prefix) is used so the key space cannot be narrowed into a
-// birthday collision either. It is derived from the same identity pair as the
-// consensus distinct-signer key (signerIdentityKey), so display and consensus
-// stay consistent.
+// canonicalSourceID returns the full, untruncated hex digest of
+// attestation.HashIdentityPair for s's verified (issuer, identity) pair.
 func canonicalSourceID(s RunMetaSigner) string {
-	sum := sha256.Sum256([]byte(signerIdentityKey(s)))
+	// A verified (issuer, identity) pair is never empty, so
+	// HashIdentityPair's only error case cannot occur here.
+	sum, _ := attestation.HashIdentityPair(s.Issuer, s.Identity)
 	return hex.EncodeToString(sum[:])
 }
 

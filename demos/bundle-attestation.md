@@ -242,11 +242,16 @@ inventory. Mutating a listed file breaks verification:
 f=$(ls my-bundle/[0-9]*-*/values.yaml | head -1)
 echo '# tampered' >> "$f"
 aicr verify ./my-bundle
-# Expected (exact file and digests vary by recipe):
-# ✗ Checksums failed: 1 file mismatch
-#     <NNN-component>/values.yaml — sha256 mismatch (got 3f9a…, want 7b21…)
+# Expected (the file name varies by recipe):
+#   ✗ Checksum verification failed
 #   Trust level: unknown
-# Bundle verification: FAILED (non-zero exit)
+#     ↳ checksum inventory verification failed
+#
+# Details:
+#   - [INVALID_REQUEST] checksum mismatch for "001-aws-ebs-csi-driver/values.yaml"
+#
+# Bundle verification: FAILED
+# (non-zero exit)
 ```
 
 Editing `checksums.txt` to match the new hash defeats the checksum gate but
@@ -263,9 +268,11 @@ inventory before any deployment gate can pass.
 rotates its TUF roots periodically. Run `aicr trust update`.
 
 **"trust level: attested (expected: verified)"** — the bundle reaches
-`attested` but not `verified`. Common causes: the AICR binary used to build
-the bundle was not a release binary, so it carries no binary attestation.
-Build with a release binary so the chain can reach `verified`.
+`attested` but not `verified`. Common causes: the bundle was built with
+external `--data`, which caps trust at `attested` by design; or
+`attestation/aicr-attestation.sigstore.json` is missing from the bundle, so the
+chain is incomplete. A non-release binary does not produce this state:
+`aicr bundle --attest` refuses to sign without a verified binary attestation.
 
 **Browser doesn't open on a remote shell** — pass
 `--oidc-device-flow` to use device-flow OIDC, or run the

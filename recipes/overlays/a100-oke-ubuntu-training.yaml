@@ -13,7 +13,7 @@
 # limitations under the License.
 
 kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: a100-oke-ubuntu-training
 
@@ -35,7 +35,7 @@ spec:
   # A100 + OKE specific constraints (not covered by mixin)
   constraints:
     - name: K8s.server.version
-      value: ">= 1.30"
+      value: ">= 1.32"
 
   componentRefs: []
 

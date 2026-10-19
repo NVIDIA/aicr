@@ -14,7 +14,7 @@
 
 // Package deprecation implements the runtime half of the AICR deprecation
 // channel. The policy half — what counts as breaking on each of the four
-// frozen surfaces, and the notice a removal owes — lives in RELEASING.md; the
+// frozen surfaces, and the notice a removal owes — lives in RELEASE.md; the
 // user-facing register of active deprecations is docs/user/deprecations.md.
 //
 // Three of the four surfaces warn through this package:
@@ -65,7 +65,7 @@ type Notice struct {
 	// leaving the user to guess.
 	Replacement string
 
-	// RemovedIn is the AICR release that removes Subject, e.g. "v0.23".
+	// RemovedIn is the AICR release that removes Subject, e.g. "v1.0.0".
 	RemovedIn string
 
 	// Deprecated is when Subject became (or becomes) deprecated. This is the
@@ -106,11 +106,12 @@ type Recorder struct {
 // Warn emits n once per distinct Subject for the life of this Recorder.
 //
 // It routes through slog rather than writing to stderr directly, which means it
-// honors AICR_LOG_LEVEL, NO_COLOR, and TTY detection like every other AICR
-// diagnostic (see pkg/logging). The tradeoff is real and deliberate: a user who
-// has set AICR_LOG_LEVEL=error will not see deprecation warnings. Silencing
-// warnings is an explicit opt-out, and the release notes plus docs/user/
-// deprecations.md remain the channels that do not depend on log level.
+// honors the process log level, NO_COLOR, and TTY detection like every other
+// AICR diagnostic (see pkg/logging). The tradeoff is real and deliberate: aicrd
+// started with AICR_LOG_LEVEL=error will not log deprecation warnings. The aicr
+// CLI ignores AICR_LOG_LEVEL and logs at info or debug, so it always shows
+// them. Silencing warnings is an explicit opt-out, and the release notes plus
+// docs/user/deprecations.md remain the channels that do not depend on log level.
 func (r *Recorder) Warn(n Notice) {
 	if n.Subject == "" {
 		return

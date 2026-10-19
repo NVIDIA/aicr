@@ -16,7 +16,7 @@ catalog content) or overrides (for component files) the embedded equivalent.
 | Need | How `--data` helps |
 |---|---|
 | Add a non-public Kubernetes service (`service=ncp-internal`) | Drop an overlay declaring that criteria value; the criteria registry admits it. |
-| Add a proprietary platform (`platform=runai`, `platform=nvmesh`) | Same — an overlay's `spec.criteria.platform` registers the value. |
+| Add a proprietary platform (`platform=nvmesh`) | Same — an overlay's `spec.criteria.platform` registers the value. |
 | Add a future GPU SKU before AICR's next release | Add `accelerator: <name>` in an overlay; CLI / API admit it on the fly. |
 | Add an internal component (e.g., an in-house operator) | Add a component definition under `components/` and reference it in an overlay or mixin. |
 | Override an embedded chart version / values file | Drop a same-path file under your `--data` dir; external takes precedence. |
@@ -65,7 +65,7 @@ Even if your directory only adds overlays (no new components), AICR requires a
 `registry.yaml` at the root. The minimal stub is:
 
 ```yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components: []
 ```
@@ -74,7 +74,10 @@ External components in this file are merged with the embedded registry; on
 name collision, the external definition wins. An entry replaces its embedded
 counterpart **wholesale** — to override just `helm.defaultVersion`, copy the
 full embedded entry and change that one field, or the other coordinates
-(repository, chart, scheduling paths) are silently dropped.
+(repository, chart, scheduling paths) are silently dropped. If the entry sets
+`helm.defaultDigest`, update or remove it with the version: the digest names
+one chart archive, so a stale one fails every `--vendor-charts` bundle of
+that component.
 
 Overriding a component's `defaultVersion` this way takes effect for every
 embedded overlay that references the component: embedded overlays do not pin
@@ -96,23 +99,27 @@ plausible and wrong. The accepted values per kind, and the releases in which
 they change, are defined by
 [ADR-022](https://github.com/NVIDIA/aicr/blob/main/docs/design/022-artifact-maturity-and-deprecation.md).
 
-Each catalog kind has a current value and a target value:
+Each catalog kind migrated from a retired value to a target value:
 
-| Kind | Current | Target |
+| Kind | Retired | Target |
 |---|---|---|
 | `ComponentRegistry` | `aicr.run/v1alpha2` | `aicr.run/v1beta1` |
 | `RecipeMetadata`, `RecipeMixin` (ordinary) | `aicr.run/v1alpha2` | `aicr.run/v1beta1` |
 | `RecipeMetadata` (profile-bearing) | `aicr.run/v1alpha3` | `aicr.run/v1beta2` |
 | `AICRConfig` (not a catalog file; see [CLI config](../user/cli-config.md)) | `aicr.run/v1alpha2` | `aicr.run/v1beta1` |
 
+The Retired column is history as of v1.0.0: those values are rejected, not
+accepted-with-a-warning. A catalog still carrying one fails to load with an
+error naming the value and the release that withdrew it.
+
 Which binary accepts which catalog:
 
 | AICR release | Accepts | Writes and documents |
 |---|---|---|
-| v0.20 and earlier | anything — catalog headers were ungated | current |
-| v0.21 | current and target | current |
-| v0.22 | current and target | target |
-| v0.23 and later | target only | target |
+| v0.20 and earlier | anything — catalog headers were ungated | retired |
+| v0.21 | retired and target | retired |
+| v0.22 | retired and target | target |
+| v1.0.0 and later | target only | target |
 
 **v0.20 and earlier cannot tell you whether your catalog is compatible.** Those
 releases did not gate catalog headers at all: an external `registry.yaml` whose
@@ -124,9 +131,9 @@ did in v0.21 (issue
 [#1812](https://github.com/NVIDIA/aicr/issues/1812)). Treat v0.20 as unable to
 validate your catalog rather than as a compatibility floor you can rely on.
 
-Switch to the **target** value before v0.23, which stops accepting the current
-one. Catalogs are authored inputs, so this is a manual edit in your tree. AICR
-does not rewrite them, and there is no conversion layer.
+v1.0.0 and later accept the **target** value only. Catalogs are authored inputs,
+so moving one off a retired value is a manual edit in your tree. AICR does not
+rewrite them, and there is no conversion layer.
 
 Empty, unknown, or wrong-kind AICR catalog headers fail with `INVALID_REQUEST`
 naming the value observed, the values expected for that kind, and the
@@ -145,7 +152,7 @@ the direct path accepted it and hydrated silently
 ([#2421](https://github.com/NVIDIA/aicr/issues/2421)); if you author overlays
 outside a catalog tree, confirm each one carries a header. The empty-value
 tolerance that remains is for hydrated `RecipeResult` inputs only, and it
-retires in v0.23.
+retires in v1.0.0.
 
 ## Adding a criteria value
 
@@ -158,7 +165,7 @@ a valid CLI / API input.** No code change, no rebuild.
 Example overlay for an internal NCP:
 
 ```yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: RecipeMetadata
 metadata:
   name: ncp-internal-h100-training
@@ -219,7 +226,7 @@ See [Supplying a benchmark runtime for a private service](../user/validation.md#
 `registry.yaml` declares the component's identity and source:
 
 ```yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: my-internal-operator
@@ -281,6 +288,7 @@ with only pre-manifests is rejected as having no deployable primary.
 | `registry.yaml` | **Merged**: embedded + external component lists. On name collision, external wins. |
 | `validators/catalog.yaml` | **Merged**: embedded + external validator lists, by validator name. A same-named external validator replaces the embedded one; new validators are appended. |
 | Files in `components/`, `mixins/`, `overlays/` | **Replaced**: any external file at the same relative path completely replaces the embedded equivalent. No partial-content merge. |
+| Profile-only file in `overlays/` | **Extended**. An external overlay that carries only a `spec.profile` adds its values to the embedded overlay at the same path and replaces nothing else (see below). |
 
 When in doubt, `aicr --debug recipe ... --data <dir>` logs the resolved source
 (`embedded` / `external` / `merged`) for every loaded file.
@@ -300,16 +308,53 @@ When an external data directory replaces a declaring overlay, or converts a
 family to a profile, the replacement rules above interact with the profile
 mechanics:
 
+- **A profile-only file extends the declaration.** An external overlay at
+  the path of an embedded one that carries only `apiVersion`, `kind`,
+  `metadata.name` and `spec.profile` adds its values to the embedded
+  overlay's profile. Nothing else in the embedded overlay is replaced, so the
+  catalog does not fork the overlay or re-sync it on upgrade. This
+  `overlays/gke-cos.yaml` adds a `custom` value to `gpuStack`:
+
+  ```yaml
+  apiVersion: aicr.run/v1beta2
+  kind: RecipeMetadata
+  metadata:
+    name: gke-cos
+  spec:
+    profile:
+      name: gpuStack
+      values:
+        custom:
+          advertiser: external
+          componentRefs:
+            - name: gcp-driver-installer
+              overrides: {installer: {enabled: false}}
+            - name: gpu-operator
+              overrides: {devicePlugin: {enabled: false}}
+            - name: nvsentinel
+              optional: true
+              overrides: {labeler: {assumeDriverInstalled: true}}
+  ```
+
+  A patch can only add values. Catalog load fails when it redeclares an
+  embedded value, sets `default` or `description`, names a different profile,
+  or adds no values. Union totality is checked over the merged values, so
+  each added value must assign exactly the path set the embedded values
+  assign. A value that assigns other paths or leaves some out fails closed.
+  An added value must also mark each component `optional` exactly where the
+  embedded values do; the GKE-COS and OKE `gpuStack` values reference
+  `nvsentinel` with `optional: true`.
+  An overlay that also carries `spec.criteria`, `componentRefs` or any other
+  field is not a patch and follows the replacement rule below.
 - **A same-path replacement replaces the declaration too.** An external
-  `overlays/aks.yaml` completely replaces the embedded file — including its
-  `spec.profile` block. Keep the declaration in the replacement — dropping it
-  while keeping profile apiVersion `aicr.run/v1alpha3` or
-  `aicr.run/v1beta2` fails catalog validation
+  `overlays/aks.yaml` that carries more than a profile block completely
+  replaces the embedded file, including its `spec.profile` block. Keep the
+  declaration in the replacement. Dropping it while keeping profile apiVersion `aicr.run/v1beta2` fails catalog validation
   (the version⟺declaration cross-check). That guardrail protects an
   integrator *editing* a profile-track file: de-profiling one requires BOTH
   removing the declaration AND downgrading the overlay to the legacy
-  apiVersion. It does NOT protect the upgrade path — a pre-existing legacy
-  (`aicr.run/v1alpha2` or `aicr.run/v1beta1`) external `overlays/aks.yaml`, authored before the
+  apiVersion. It does NOT protect the upgrade path — a pre-existing
+  `aicr.run/v1beta1` external `overlays/aks.yaml`, authored before the
   family's conversion, already satisfies both conditions. Upgrading AICR
   with such a catalog in `--data` silently preserves the unprofiled family:
   resolution succeeds with no error, no `selectedProfile` on the recipe, and
@@ -327,7 +372,9 @@ mechanics:
   entries in `ownedPaths` are different: they are the SYNTHETIC
   component-presence locks — fragments are forbidden from assigning
   `enabled`, and the lock instead rejects removing (or bundle-subsetting
-  away) an owned component. Review those overlays when converting a family — a
+  away) an owned component. A component every value references with
+  `optional: true` carries no `enabled` entry and may be left out of a
+  bundle. Review those overlays when converting a family — a
   static assignment that used to take effect no longer does.
 - **Owned paths lock per surface.** The enforcement matrix:
   1. *`aicr bundle` static overrides* (ANY static source — `--set`,
@@ -356,7 +403,8 @@ mechanics:
      changeable by profile reselection — fragments cannot assign
      `enabled`, so no `--profile` choice adds or removes a component;
      the lock rejects removing (or bundle-subsetting away) an owned
-     component. Presence changes are catalog/composition changes.
+     component, except one referenced with `optional: true`. Presence
+     changes are catalog/composition changes.
      Reselecting a profile changes owned VALUE paths only.
 - **Selection is explicit.** Pick a value with `aicr recipe --profile
   name=value` (or `spec.recipe.profile` in `--config`); omission applies the
@@ -405,8 +453,6 @@ Sample output (truncated):
 ```text
 [cli] initializing external data provider: directory=./my-external-data
 [cli] layered data provider initialized: external_dir=./my-external-data external_files=12
-[cli] data provider set: generation=1
-[cli] external data provider initialized successfully: directory=./my-external-data
 [cli] building recipe from criteria: criteria=criteria(service=eks, accelerator=h100, intent=any, os=any)
 [cli] recipe generation completed: output=stdout components=8 overlays=2
 ```

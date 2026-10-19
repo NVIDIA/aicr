@@ -15,7 +15,8 @@
 name: Bug Report
 description: Report a bug or unexpected behavior
 title: "[Bug]: "
-labels: ["bug", "needs-triage"]
+labels: ["needs-triage"]
+type: Bug
 
 body:
   - type: checkboxes
@@ -27,7 +28,7 @@ body:
           required: true
         - label: I can reproduce this issue consistently
           required: true
-        - label: This is not a security vulnerability (use [Security Advisories](https://github.com/NVIDIA/aicr/security/advisories/new) instead)
+        - label: This is not a security vulnerability (report those to [NVIDIA PSIRT](https://www.nvidia.com/object/submit-security-vulnerability.html), not through GitHub)
           required: true
 
   - type: textarea
@@ -59,7 +60,7 @@ body:
         - CLI (aicr)
         - API server (aicrd)
         - Recipe engine / data
-        - Bundlers (gpu-operator, network-operator, etc.)
+        - Bundler and deployers (helm, argocd, flux, etc.)
         - Collectors / snapshotter
         - Validator
         - Docs / examples
@@ -110,24 +111,21 @@ body:
     id: environment
     attributes:
       label: Environment
-      placeholder: |
-        - AICR version (CLI `aicr --version`, API image tag, or commit SHA):
-        - Install method (release binary / build from source / container image):
-        - Platform (eks/gke/aks/oke/ocp/kind/lke/bcm/other):
-        - Kubernetes version:
-        - OS (ubuntu/cos/other) + version:
-        - Kernel version:
-        - GPU type (h100/h200/gb200/b200/a100/l40/l40s/rtx-pro-6000/other):
-        - Workload intent (training/inference):
+      description: |
+        Valid values — **service:** eks, gke, aks, oke, ocp, kind, lke, bcm,
+        metal3, rke2, generic, k0s, mk8s · **OS:** ubuntu, rhel, cos, amazonlinux,
+        ol, talos · **GPU:** h100, h200, gb200, gb300, b200, b300, a100, l40, l40s,
+        rtx-pro-6000, vr200 · **intent:** training, inference. Use "other" and
+        say what it is if none fit.
       value: |
         - AICR version (CLI `aicr --version`, API image tag, or commit SHA):
         - Install method (release binary / build from source / container image):
-        - Platform (eks/gke/aks/oke/ocp/kind/lke/bcm/other):
+        - Service:
         - Kubernetes version:
-        - OS (ubuntu/cos/other) + version:
+        - OS + version:
         - Kernel version:
-        - GPU type (h100/h200/gb200/b200/a100/l40/l40s/rtx-pro-6000/other):
-        - Workload intent (training/inference):
+        - GPU type:
+        - Workload intent:
     validations:
       required: true
 

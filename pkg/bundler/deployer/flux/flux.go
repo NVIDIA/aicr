@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -94,6 +95,7 @@ type ReadmeData struct {
 	Namespace      string // Flux install namespace (e.g. "flux-system")
 	BundlerVersion string
 	Components     []ComponentSummary
+	UpgradeNotice  string
 }
 
 // ComponentSummary is used in README rendering.
@@ -193,6 +195,10 @@ type Generator struct {
 	// from --serial; see config.Serial and serialDependsOn.
 	Serial bool
 
+	// UpgradeNotice is upgrade.WriteNotice output, inserted verbatim before the
+	// first deployment heading of README.md. Empty adds nothing.
+	UpgradeNotice string
+
 	// vendorRecords is populated by Generate when VendorCharts is on.
 	// Captured here so provenance.yaml can be written after component
 	// generation without re-threading the slice through every helper.
@@ -233,6 +239,45 @@ func writeTemplate(output *deployer.Output, tmpl string, data any, dir, filename
 	output.Files = append(output.Files, path)
 	output.TotalSize += size
 	return nil
+}
+
+// appendRelease records one emitted HelmRelease in the bundle's release
+// index. name is the release name (the component, or its -pre / -post
+// injection); component is always the parent component, which is what lets a
+// consumer group an injection with the release it brackets.
+func appendRelease(output *deployer.Output, name, component, namespace, dir string) {
+	output.Releases = append(output.Releases, deployer.Release{
+		Name:      name,
+		Component: component,
+		Namespace: namespace,
+		Path:      dir,
+		Manifest:  path.Join(dir, fileHelmRelease),
+	})
+}
+
+// finalizeOutputMetadata sets output.Duration and the deployment steps/notes
+// once all component resources have been written, so the notes list can
+// react to flags (DynamicValues, vendored charts) resolved during
+// generation.
+func (g *Generator) finalizeOutputMetadata(output *deployer.Output, start time.Time) {
+	output.Duration = time.Since(start)
+	output.DeploymentSteps = []string{
+		"Push this bundle to your Git repository",
+		"Create a Flux Kustomization pointing to the bundle path",
+		"Monitor reconciliation with: flux get helmreleases -A",
+	}
+	notes := []string{
+		"Ensure Flux is installed on your cluster before applying",
+	}
+	if len(g.DynamicValues) > 0 {
+		notes = append(notes,
+			"ConfigMaps with dynamic values have been generated. Edit them before applying to customize per-cluster settings.")
+	}
+	if len(g.vendorRecords) > 0 {
+		notes = append(notes,
+			"This bundle contains vendored Helm charts. No upstream registry access is required at deploy time. See provenance.yaml for chart provenance details.")
+	}
+	output.DeploymentNotes = notes
 }
 
 // Generate produces Flux manifests in the given output directory.
@@ -278,10 +323,9 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		return nil, err
 	}
 
-	// Resolve the chart puller for vendored bundles.
-	puller := g.Puller
-	if g.VendorCharts && puller == nil {
-		puller = &localformat.CLIChartPuller{}
+	puller, chartDigests, err := g.resolveVendoring(ctx, sortedRefs)
+	if err != nil {
+		return nil, err
 	}
 
 	// Collect and deduplicate sources. When vendoring, skip HelmRepository
@@ -294,6 +338,13 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	var gitSources map[string]*GitRepoSourceData
 	if g.OCISourceName == "" {
 		gitSources = collectGitSources(g.resolveRepoURL(), g.resolveTargetRevision(), ns)
+		// Reported only on this branch: OCI mode writes no GitRepository and
+		// no HelmRelease that names one, so neither coordinate reaches any
+		// file in that bundle, whatever the caller passed.
+		output.Source = deployer.Source{
+			RepoURL:        g.resolveRepoURL(),
+			TargetRevision: g.resolveTargetRevision(),
+		}
 	} else {
 		gitSources = make(map[string]*GitRepoSourceData)
 	}
@@ -343,7 +394,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled during component generation", err)
 		}
 		compResources, compErr := g.generateComponentResources(
-			ctx, ref, depsByComponent, outputDir, helmSources, gitSources, puller, output)
+			ctx, ref, depsByComponent, outputDir, helmSources, gitSources, puller, chartDigests[ref.Name], output)
 		if compErr != nil {
 			return nil, compErr
 		}
@@ -356,12 +407,14 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		outputDir, fileKustomization, "failed to write root kustomization.yaml"); err != nil {
 		return nil, err
 	}
+	output.Entrypoint = fileKustomization
 
 	// Write README.md.
 	readmeData := ReadmeData{
 		Namespace:      ns,
 		BundlerVersion: deployer.NormalizeVersionWithDefault(g.Version),
 		Components:     buildComponentSummaries(sortedRefs, g.ComponentPreManifests, g.ComponentManifests, depsByComponent),
+		UpgradeNotice:  g.UpgradeNotice,
 	}
 	if err := writeTemplate(output, readmeTemplate, readmeData,
 		outputDir, fileReadme, "failed to write README.md"); err != nil {
@@ -378,6 +431,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		}
 		output.Files = append(output.Files, provPath)
 		output.TotalSize += provSize
+		output.Provenance = localformat.ProvenanceFileName
 	}
 
 	// Add data files to output.
@@ -394,24 +448,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		}
 	}
 
-	output.Duration = time.Since(start)
-	output.DeploymentSteps = []string{
-		"Push this bundle to your Git repository",
-		"Create a Flux Kustomization pointing to the bundle path",
-		"Monitor reconciliation with: flux get helmreleases -A",
-	}
-	notes := []string{
-		"Ensure Flux is installed on your cluster before applying",
-	}
-	if len(g.DynamicValues) > 0 {
-		notes = append(notes,
-			"ConfigMaps with dynamic values have been generated. Edit them before applying to customize per-cluster settings.")
-	}
-	if len(g.vendorRecords) > 0 {
-		notes = append(notes,
-			"This bundle contains vendored Helm charts. No upstream registry access is required at deploy time. See provenance.yaml for chart provenance details.")
-	}
-	output.DeploymentNotes = notes
+	g.finalizeOutputMetadata(output, start)
 
 	slog.Debug("flux bundle generated",
 		"components", len(sortedRefs),
@@ -423,12 +460,34 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	return output, nil
 }
 
+// resolveVendoring returns the chart puller and the registry-pinned chart
+// digests for a vendored bundle. When VendorCharts is off it returns g.Puller
+// unchanged and no digests.
+func (g *Generator) resolveVendoring(
+	ctx context.Context,
+	refs []recipe.ComponentRef,
+) (localformat.ChartPuller, map[string]string, error) {
+
+	if !g.VendorCharts {
+		return g.Puller, nil, nil
+	}
+	puller := g.Puller
+	if puller == nil {
+		puller = &localformat.CLIChartPuller{}
+	}
+	digests, err := deployer.ResolveChartDigests(ctx, g.RecipeResult.DataProvider(), refs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return puller, digests, nil
+}
+
 // generateComponentResources generates all Flux resources for a single component
 // and returns the resource paths to include in the root kustomization.yaml.
 func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.ComponentRef,
 	deps map[string][]string, outputDir string,
 	helmSources map[string]*HelmRepoSourceData, gitSources map[string]*GitRepoSourceData,
-	puller localformat.ChartPuller,
+	puller localformat.ChartPuller, chartDigest string,
 	output *deployer.Output) ([]string, error) {
 
 	compDir, err := deployer.SafeJoin(outputDir, ref.Name)
@@ -458,7 +517,8 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to create pre directory %s", preName), mkErr)
 		}
-		preWroteCM, preExtra, preErr := g.generateManifestHelmChart(ref.Name, preName, ref.Namespace, preDir,
+		appendRelease(output, preName, ref.Name, ref.Namespace, preName)
+		preWroteCM, preExtra, preErr := g.generateManifestHelmChart(ref.Name, preName, ref.Namespace, preDir, ref.Version,
 			g.ComponentPreManifests[ref.Name], gitSources, primaryDependsOn, output)
 		if preErr != nil {
 			return nil, preErr
@@ -477,7 +537,7 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 		// Manifest-only Helm component: no chart or source, only manifests.
 		// Package as a local Helm chart so Flux renders the templates natively.
 		if ref.Chart == "" && ref.Source == "" && hasManifests {
-			wroteCM, extra, genErr := g.generateManifestHelmChart(ref.Name, ref.Name, ref.Namespace, compDir,
+			wroteCM, extra, genErr := g.generateManifestHelmChart(ref.Name, ref.Name, ref.Namespace, compDir, ref.Version,
 				g.ComponentManifests[ref.Name], gitSources, primaryDependsOn, output)
 			if genErr != nil {
 				return nil, genErr
@@ -487,6 +547,7 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 				resources = append(resources, filepath.Join(ref.Name, fileConfigMap))
 			}
 			resources = append(resources, extra...)
+			appendRelease(output, ref.Name, ref.Name, ref.Namespace, ref.Name)
 			return resources, nil
 		}
 
@@ -496,7 +557,7 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 		// manifests (the existing flow handles them correctly).
 		if g.VendorCharts && isVendorable(ref) {
 			wroteCM, rec, extra, vendErr := g.generateVendoredHelmComponent(
-				ctx, ref, compDir, primaryDependsOn, gitSources, puller, output)
+				ctx, ref, compDir, primaryDependsOn, gitSources, puller, chartDigest, output)
 			if vendErr != nil {
 				return nil, vendErr
 			}
@@ -506,6 +567,7 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 				resources = append(resources, filepath.Join(ref.Name, fileConfigMap))
 			}
 			resources = append(resources, extra...)
+			appendRelease(output, ref.Name, ref.Name, ref.Namespace, ref.Name)
 			slog.Info("wrote vendored chart for flux",
 				"component", ref.Name,
 				"chart", rec.Chart, "version", rec.Version, "sha256", rec.SHA256)
@@ -518,6 +580,7 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 			if wroteCM {
 				resources = append(resources, filepath.Join(ref.Name, fileConfigMap))
 			}
+			appendRelease(output, ref.Name, ref.Name, ref.Namespace, ref.Name)
 		}
 
 		// Handle mixed components (Helm + manifests).
@@ -534,9 +597,10 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 				return nil, errors.Wrap(errors.ErrCodeInternal,
 					fmt.Sprintf("failed to create post directory %s", postName), postErr)
 			}
+			appendRelease(output, postName, ref.Name, ref.Namespace, postName)
 
 			postDependsOn := []DependsOnRef{{Name: ref.Name}}
-			postWroteCM, postExtra, postGenErr := g.generateManifestHelmChart(ref.Name, postName, ref.Namespace, postDir,
+			postWroteCM, postExtra, postGenErr := g.generateManifestHelmChart(ref.Name, postName, ref.Namespace, postDir, ref.Version,
 				g.ComponentManifests[ref.Name], gitSources, postDependsOn, output)
 			if postGenErr != nil {
 				return nil, postGenErr
@@ -967,74 +1031,17 @@ func buildComponentSummaries(sortedRefs []recipe.ComponentRef, preManifests, man
 	return summaries
 }
 
-// resolveCRDOwners populates g.crdOwners from the registry in one round-trip.
-// Components missing from the registry are omitted and therefore read as
-// false, which keeps helm-controller's Skip default.
-//
-// A registry failure is fatal rather than defaulting everything to false:
-// silently treating every component as "does not own its CRDs" would quietly
-// restore the stranded-CRD behavior this flag exists to fix.
+// resolveCRDOwners records which components may replace their CRDs on upgrade,
+// so each HelmRelease can pick between CreateReplace and helm-controller's Skip
+// default. The guard is shared with the helm and helmfile deployers; see
+// deployer.ResolveCRDOwners for why a registry failure is fatal here.
 func (g *Generator) resolveCRDOwners(ctx context.Context, refs []recipe.ComponentRef) error {
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return errors.Wrap(errors.ErrCodeTimeout,
-			"context cancelled before resolving CRD upgrade policy", ctxErr)
+	owners, err := deployer.ResolveCRDOwners(ctx, g.RecipeResult.DataProvider(), refs)
+	if err != nil {
+		return err
 	}
-	registry, regErr := recipe.GetComponentRegistryFor(g.RecipeResult.DataProvider())
-	if regErr != nil {
-		return errors.PropagateOrWrap(regErr, errors.ErrCodeInternal,
-			"failed to resolve component registry for CRD upgrade policy")
-	}
-	out := make(map[string]bool, len(refs))
-	for _, ref := range refs {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return errors.Wrap(errors.ErrCodeTimeout,
-				"context cancelled while resolving CRD upgrade policy", ctxErr)
-		}
-		cfg := registry.Get(ref.Name)
-		if cfg == nil || !cfg.OwnsCRDs || !usesRegistryChart(ref, cfg) {
-			continue
-		}
-		out[ref.Name] = true
-	}
-	g.crdOwners = out
+	g.crdOwners = owners
 	return nil
-}
-
-// usesRegistryChart reports whether a ref still points at the exact chart the
-// registry pins for its component.
-//
-// ownsCRDs records the result of an audit performed against that chart: that
-// the component solely owns every CRD it ships, and ships none using a webhook
-// conversion strategy. A recipe may override source, chart, or version on the
-// componentRef, and those overrides bypass registry defaulting entirely. The
-// audit says nothing about the chart they point at, so the flag must not carry
-// over to it — replacing CRDs from an unaudited chart is exactly the
-// destructive case the opt-in design exists to avoid.
-//
-// Fails closed: any mismatch, or a component with no Helm chart, keeps
-// helm-controller's Skip default.
-func usesRegistryChart(ref recipe.ComponentRef, cfg *recipe.ComponentConfig) bool {
-	if cfg.Helm.DefaultChart == "" {
-		return false
-	}
-	return ref.Source == cfg.Helm.DefaultRepository &&
-		ref.EffectiveChart() == registryChartName(cfg.Helm.DefaultChart) &&
-		deployer.NormalizeVersion(ref.Version) == deployer.NormalizeVersion(cfg.Helm.DefaultVersion)
-}
-
-// registryChartName reduces a registry defaultChart to the form a resolved
-// ComponentRef actually carries.
-//
-// ApplyRegistryDefaults strips everything before the last "/" when defaulting
-// ref.Chart, so a registry entry like "gatekeeper/gatekeeper" resolves to
-// "gatekeeper". Comparing against the unstripped value silently fails for every
-// component whose defaultChart carries a repo-alias prefix, which is how
-// gatekeeper was enrolled in ownsCRDs and never emitted the policy.
-func registryChartName(defaultChart string) string {
-	if idx := strings.LastIndex(defaultChart, "/"); idx >= 0 {
-		return defaultChart[idx+1:]
-	}
-	return defaultChart
 }
 
 // ownsCRDs reports whether the named component may replace its CRDs on

@@ -117,11 +117,11 @@ components:
     source: https://helm.ngc.nvidia.com/nvidia
     version: v25.1.0
     values:
-      ...
+      # Fully hydrated values omitted.
 
 constraints:
   - name: min-gpu-count
-    ...
+    # Additional constraint fields omitted.
 ```
 
 Each component's `values` key is the result of calling `GetValuesForComponent`,

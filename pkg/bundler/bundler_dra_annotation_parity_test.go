@@ -79,6 +79,9 @@ func TestMake_DRAIntegration_GeneratedArtifactParity(t *testing.T) {
 			cfg := config.NewConfig(
 				config.WithDeployer(tc.deployer),
 				config.WithVersion("v1.0.0"),
+				// The eviction contract is opt-in (#2469); these parity tests
+				// assert the rendered contract, so they configure the label.
+				config.WithDRAEvictionNodeLabel(config.DefaultDRAEvictionNodeLabel()),
 			)
 			b, err := New(WithConfig(cfg))
 			if err != nil {
@@ -86,7 +89,7 @@ func TestMake_DRAIntegration_GeneratedArtifactParity(t *testing.T) {
 			}
 
 			rr := &recipe.RecipeResult{
-				APIVersion: "aicr.run/v1alpha2",
+				APIVersion: "aicr.run/v1",
 				Kind:       "Recipe",
 				Criteria: &recipe.Criteria{
 					Service:     "eks",
@@ -159,11 +162,12 @@ func TestMake_DRAIntegration_GeneratedArtifactParity(t *testing.T) {
 }
 
 // TestMake_DRAIntegration_AllDeployersCarryDerivedValues extends parity
-// coverage to all five supported deployers — Helm,
-// helmfile, Flux, Argo CD, and argocd-helm. Each deployer renders the
+// coverage to all six supported deployers: Helm, helmfile, Flux,
+// Argo CD, argocd-helm and Terraform. Each deployer renders the
 // shared componentValues map differently (values.yaml under a numbered
-// subdir for Helm/helmfile; configmap-values.yaml for Flux; embedded
-// in Application source for the Argo CD variants), so a per-path
+// subdir for Helm, helmfile and Terraform; configmap-values.yaml for
+// Flux; embedded in Application source for the Argo CD variants), so a
+// per-path
 // YAML-structure assertion isn't feasible without coupling the test
 // to each deployer's bundle layout.
 //
@@ -190,6 +194,7 @@ func TestMake_DRAIntegration_AllDeployersCarryDerivedValues(t *testing.T) {
 		{name: "flux", deployer: config.DeployerFlux},
 		{name: "argocd", deployer: config.DeployerArgoCD},
 		{name: "argocd-helm", deployer: config.DeployerArgoCDHelm},
+		{name: "terraform", deployer: config.DeployerTerraform},
 	}
 
 	for _, tc := range deployers {
@@ -197,6 +202,9 @@ func TestMake_DRAIntegration_AllDeployersCarryDerivedValues(t *testing.T) {
 			cfg := config.NewConfig(
 				config.WithDeployer(tc.deployer),
 				config.WithVersion("v1.0.0"),
+				// The eviction contract is opt-in (#2469); these parity tests
+				// assert the rendered contract, so they configure the label.
+				config.WithDRAEvictionNodeLabel(config.DefaultDRAEvictionNodeLabel()),
 			)
 			b, err := New(WithConfig(cfg))
 			if err != nil {
@@ -204,7 +212,7 @@ func TestMake_DRAIntegration_AllDeployersCarryDerivedValues(t *testing.T) {
 			}
 
 			rr := &recipe.RecipeResult{
-				APIVersion: "aicr.run/v1alpha2",
+				APIVersion: "aicr.run/v1",
 				Kind:       "Recipe",
 				Criteria: &recipe.Criteria{
 					Service:     "eks",
@@ -303,7 +311,7 @@ func TestMake_DRAChartVersionAnnotation_DisabledRecipeUnaffected(t *testing.T) {
 	}
 
 	rr := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",

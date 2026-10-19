@@ -20,7 +20,7 @@ For the coding rules every PR is graded against, see
 AICR is a **design-time tool**. Given a description of a target
 environment — cluster, accelerator, intent, OS, platform — it
 generates validated GPU-cluster configuration artifacts that an
-established deployment tool (Helm, Argo CD, Flux, Helmfile) consumes.
+established deployment tool (Helm, Argo CD, Flux, Helmfile, Terraform) consumes.
 
 | Artifact | Role | Produced by |
 |----------|------|-------------|
@@ -62,7 +62,7 @@ AICR is not a deployment engine. The boundary matters: half of all
 | Emit per-component artifacts in known formats | Orchestrate cross-component dependencies at runtime |
 
 The deployment tool that consumes AICR's output (Helm, Argo CD, Flux,
-Helmfile) owns release reconciliation and lifecycle.
+Helmfile, Terraform) owns release reconciliation and lifecycle.
 
 **On terminology.** Code under `pkg/bundler/deployer` includes things
 we call *deployers*. They are **output adapters** that serialize a
@@ -100,7 +100,9 @@ intent; the linked page has the walkthrough.
 | I want to... | Touch | Guide |
 |--------------|-------|-------|
 | Make an existing Helm or Kustomize chart available to recipes | `recipes/registry.yaml` entry | [component.md](component.md) |
-| Pin a chart version, set values, or define scheduling for a specific cluster shape | Recipe overlay in `recipes/overlays/` | [recipe.md](recipe.md) |
+| Bump a pinned chart version, and record whether the upgrade is safe | `recipes/components/<name>/upgrades.yaml` | [upgrade-records.md](upgrade-records.md) |
+| Pin a chart version | `helm.defaultVersion` (or `kustomize.defaultTag`) in `recipes/registry.yaml`; an overlay pin only as a declared Helm `version` divergence in `versionPinExemptions` (Kustomize `tag` exemptions are rejected today) | [recipe.md](recipe.md#version-pinning-is-single-source) |
+| Set values or define scheduling for a specific cluster shape | Recipe overlay in `recipes/overlays/` | [recipe.md](recipe.md) |
 | Share OS or platform fragments across overlays | Recipe mixin in `recipes/mixins/` | [recipe.md](recipe.md#mixin-composition) |
 | Capture a new dimension of cluster / OS / GPU state | New collector in `pkg/collector/<kind>/` | [collector.md](collector.md) |
 | Add a new declarative constraint operator (`>=`, tolerance, etc.) | `pkg/constraints` | [validator.md](validator.md) |
@@ -169,6 +171,8 @@ output. **They contain no business logic.** All business logic lives
 in functional packages, composed by the `pkg/client/v1` facade so
 both entry points share it. Adding business logic to `pkg/cli` or
 `pkg/server` handlers is a boundary violation and will be rejected.
+This boundary is enforced mechanically by a CI gate — see
+[architecture-gate.md](architecture-gate.md).
 
 ## Packages
 
@@ -185,14 +189,22 @@ both entry points share it. Adding business logic to `pkg/cli` or
 | `pkg/measurement` | Schema for collector output and validator input |
 | `pkg/serializer` | Deterministic YAML/JSON for evidence and bundles |
 | `pkg/config` | CLI/server config file (`--config`) loader |
+| `pkg/upgrade` | ADR-021 component upgrade transition records: schema, fail-closed loader, well-formedness rules. [upgrade-records.md](upgrade-records.md) |
+| `pkg/allocpolicy` | GPU allocation-policy descriptor (#1327) with its shared advertiser vocabulary and tuple-coherence rules (ADR-015) |
+| `pkg/health` | Per-recipe structural health across the criteria matrix (ADR-009) |
+| `pkg/tuning` | Nodewright tuning-status matrix per (service, accelerator); rendered by `make tuning-docs` |
+| `pkg/schema` | JSON Schema documents derived from the Go types of published artifacts |
 | **Collection and validation** | |
 | `pkg/collector` | Parallel system state collection. [collector.md](collector.md) |
 | `pkg/snapshotter` | Orchestrates collectors, aggregates measurements |
 | `pkg/validator` | Constraint evaluation; container-per-validator runner. [validator.md](validator.md) |
 | `pkg/fingerprint` | Cluster shape fingerprint for caching and provenance |
+| `pkg/chainsaw` | In-process Chainsaw Test executor (assert/error only) and read-only allowlist; no external chainsaw binary |
+| `pkg/chainsawgate/runner` | Chainsaw bundle evaluation and stability-window state machine for the `gate` command (`cmd/gate`) behind bundle readiness gates |
+| `pkg/inventory` | Installed component inventory from a live cluster (Helm release records, Argo CD Applications) and the advisory at-risk scan, for `aicr upgrade-check --from cluster` |
 | **Bundle generation** | |
 | `pkg/bundler` | Per-component bundle generation entry point. [component.md](component.md) |
-| `pkg/bundler/deployer` | Output adapters: `helm`, `helmfile`, `argocd`, `argocd-helm`, `flux` |
+| `pkg/bundler/deployer` | Output adapters: `helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `terraform` |
 | `pkg/bundler/validations` | Bundle-time component validation checks. [validator.md](validator.md#component-validations-bundle-time) |
 | `pkg/component` | Bundler utilities and test helpers |
 | `pkg/manifest`, `pkg/helm`, `pkg/bom` | Manifest rendering, chart inspection, BOM extraction |
@@ -201,6 +213,8 @@ both entry points share it. Adding business logic to `pkg/cli` or
 | `pkg/oci` | OCI artifact push/pull for evidence and bundles |
 | `pkg/mirror` | Air-gap mirror for charts and images |
 | `pkg/trust` | Sigstore trust root management |
+| `pkg/corroborate` | Recipe corroboration consensus over distinct verified signers; emits the interim evidence dashboard |
+| `pkg/testgrid` | Maps a recipe's canonical coordinate to the evidence dashboard (`validation.aicr.run`) |
 | **Cross-cutting** | |
 | `pkg/k8s/client` | Singleton Kubernetes clientset (in-cluster + kubeconfig) |
 | `pkg/k8s/pod` | Shared K8s Job/Pod helpers (wait, logs, ConfigMap URI parsing) |
@@ -208,6 +222,10 @@ both entry points share it. Adding business logic to `pkg/cli` or
 | `pkg/defaults` | Centralized timeouts, limits, configuration constants |
 | `pkg/logging` | Structured slog setup with TTY / `NO_COLOR` detection |
 | `pkg/header`, `pkg/version`, `pkg/diff` | API negotiation headers, build version, snapshot/recipe diff |
+| `pkg/deprecation` | Runtime deprecation warnings (CLI/loader `slog` warnings, REST `Deprecation`/`Sunset` headers); policy in [RELEASE.md](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md) |
+| `pkg/runid` | Run identifiers shared by the validator and the snapshot agent |
+| `pkg/netutil` | Small dependency-free networking helpers (CIDR checks) |
+| `pkg/uatbroker` | UAT reservation registry resolution and nightly version-matrix schedule. [uat.md](uat.md) |
 
 ## Community-Standard Deployment Targets
 
@@ -221,6 +239,7 @@ deployment tools:
 | `argocd` | Argo CD `Application` manifests with sync-waves | Argo CD GitOps |
 | `argocd-helm` | Argo CD `Application` referencing per-component Helm charts | Argo CD + upstream Helm |
 | `flux` | Flux `HelmRelease` + `Kustomization` manifests | Flux GitOps |
+| `terraform` | Terraform module: one `module` call per component, `depends_on` from the recipe graph (root or child module) | Terraform / OpenTofu |
 
 We are open to adding additional community-standard targets when
 there is demonstrated demand. We do **not** add custom or
@@ -304,10 +323,12 @@ By contributor task:
 
 - **Adding recipes, overlays, mixins, components** → [recipe.md](recipe.md)
 - **Adding a registry entry (Helm or Kustomize chart)** → [component.md](component.md)
+- **Bumping a pinned version (and writing its transition record)** → [upgrade-records.md](upgrade-records.md)
 - **Adding a CLI command** → [cli.md](cli.md)
 - **Adding an HTTP endpoint** → [api-server.md](api-server.md)
 - **Adding a snapshot collector** → [collector.md](collector.md)
 - **Adding a validator check** → [validator.md](validator.md)
+- **Understanding or fixing a facade boundary gate failure** → [architecture-gate.md](architecture-gate.md)
 - **Adding a bundle-time component validation** → [validator.md](validator.md#component-validations-bundle-time)
 - **Producing and signing recipe evidence** → [evidence-publishing.md](evidence-publishing.md)
 - **Ingesting published evidence into the source-keyed tree (GP2)** → [evidence-ingest.md](evidence-ingest.md)
@@ -324,9 +345,9 @@ By reference:
 
 - [CONTRIBUTING.md](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md) — contribution process, DCO, CI/CD, E2E testing
 - [DEVELOPMENT.md](https://github.com/NVIDIA/aicr/blob/main/DEVELOPMENT.md) — dev environment setup and Make targets
-- [RELEASING.md](https://github.com/NVIDIA/aicr/blob/main/RELEASING.md) — release process for maintainers
+- [RELEASE.md](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md) — release process for maintainers
 - [SECURITY.md](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md) — supply-chain security, attestation verification
 - [CLAUDE.md](https://github.com/NVIDIA/aicr/blob/main/.claude/CLAUDE.md) — coding rules, error wrapping, context, HTTP, logging, K8s patterns
-- [docs/design/](https://github.com/NVIDIA/aicr/tree/main/docs/design) — accepted ADRs
+- [docs/design/](https://github.com/NVIDIA/aicr/tree/main/docs/design) — architecture decision records (ADRs), accepted and proposed; each ADR's Status section says which state it is in
 - [docs/integrator/](https://github.com/NVIDIA/aicr/tree/main/docs/integrator) — embedding AICR in your platform
 - [docs/user/](https://github.com/NVIDIA/aicr/tree/main/docs/user) — end-user reference (CLI flags, API endpoints, component catalog)

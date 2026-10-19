@@ -4,7 +4,8 @@
 
 **Accepted** — 2026-07-21 (proposed 2026-07-14). Amended
 2026-07-27 to stage the service-agnostic mechanism through an AKS-first,
-GKE-second rollout.
+GKE-second rollout; amended 2026-09-08 (#2512) to intersect, rather than
+reject, a profile constraint that tightens a composed version range.
 
 Originated from an internal GKE device-plugin ownership discussion
 (2026-07-14) and
@@ -355,7 +356,9 @@ schema ahead of any user.
 
 **The fragment schema is closed.** The core roll-in permits
 `constraints` and `componentRefs` only, and each `componentRef` permits
-only `name` and `overrides`. Every other `ComponentRef` field is rejected
+only `name`, `optional`, and `overrides` (`optional` per the
+[optional component references](#amendment-optional-component-references-2026-10)
+amendment). Every other `ComponentRef` field is rejected
 at catalog load. The GKE extension admits only the already-reserved
 `advertiser` field in addition to that core shape (full field inventory in
 [#1761](https://github.com/NVIDIA/aicr/issues/1761)).
@@ -401,6 +404,15 @@ catalog-time co-match analysis is deliberately omitted** —
 criteria-subsumption analysis is complex and the runtime guard is
 complete on its own. This lets `aks` or `gke-cos` declare the profile
 once, inherited by accelerator/intent leaves.
+
+**External catalogs extend the declaration and never redeclare it.** A
+`--data` overlay at the path of the declaring overlay that carries only
+`spec.profile` adds values to that declaration when the catalog loads, so
+the composition still sees exactly one declaration and the algorithm below
+is unchanged. The patch is additive and fail-closed. It may not redeclare
+a value, set `default` or `description`, or name another profile, and union
+totality is evaluated over the merged values, so an added value must own
+the same path set as the declared ones.
 
 ### Optionality and naming
 
@@ -488,7 +500,27 @@ to the surviving composition:
    collides with a chain or mixin constraint rejects at resolution —
    constraints don't compose, the same rule `mergeMixins` already
    enforces. Values of one declaration may reuse a constraint name
-   across values (only one is ever selected). Then evaluate
+   across values (only one is ever selected).
+
+   *Amended 2026-09-08
+   ([#2512](https://github.com/NVIDIA/aicr/issues/2512)): version ranges
+   intersect.* The blanket rejection left a value gated on a feature with
+   its own Kubernetes floor — DRA on GKE requires `>= 1.35` — with nowhere
+   to state it. The chain already carries `K8s.server.version`, and raising
+   it there raises it for every value of the declaration, where a later
+   overlay can restate and lower it again. Where the composed expression
+   and the profile's are **both version ranges** — one clause of `>=`, `>`,
+   `<=`, `<` terms — resolution now replaces the composed entry with the
+   intersection of the two, and the profile may only narrow it. Three cases
+   keep failing closed: a candidate that adds no restriction is dropped
+   rather than applied; an intersection no version can satisfy is rejected;
+   and a pair with no ordering to intersect — an exact match, `!=`, a
+   node-set label predicate, or an expression carrying `||` alternatives —
+   is rejected as a collision, as are two same-direction bounds written at
+   different precisions, which `pkg/version` compares at the lower of the
+   two so that neither can be called stricter. `mergeMixins` is unchanged.
+
+   Then evaluate
    **profile-contributed constraints** fail-closed: under a
    provided snapshot, a failing profile constraint fails recipe generation
    with the constraint diagnostics — it does not exclude anything or fall
@@ -1010,6 +1042,34 @@ any check runs. This ADR therefore **amends the #1327 model**:
   accepted, so the older artifact still loads against the shrunken
   descriptor.
 
+### Amendment: optional component references (2026-10)
+
+[#2978](https://github.com/NVIDIA/aicr/issues/2978) found that a value-only
+reference also locks presence. The GKE-COS and OKE `gpuStack` profiles name
+`nvsentinel` only to set `labeler.assumeDriverInstalled`. Operators who run
+NVSentinel outside AICR therefore could not remove it from the bundle.
+
+A fragment's `componentRefs` entry may now declare `optional: true`:
+
+- The reference owns its override paths but not presence. `ownedPaths`
+  omits the synthetic `enabled` path for that component.
+- The bundle may omit the component. Its owned paths are enforced only
+  when it ships, and the argocd-helm guard is emitted only then.
+- The bundle's emitted recipe, which no longer lists the component, still
+  passes the artifact gate and can be re-bundled.
+- Recipe resolution is unchanged: the component must still be enabled in
+  the surviving composition.
+- Every value must agree on `optional` for a component, and an optional
+  reference must assign at least one override.
+- Descriptor components cannot be optional. When a profile owns
+  advertisement, the closure re-adds `enabled` for every enabled descriptor
+  component, which would silently void the marker.
+
+The artifact gate now requires each `ownedPaths` entry to be non-empty
+instead of requiring `enabled`. Older binaries reject an artifact that uses
+the marker, which fails closed. The AKS profile keeps NVSentinel's presence
+locked ([#2181](https://github.com/NVIDIA/aicr/issues/2181)).
+
 ### Artifact compatibility gate
 
 `selectedProfile` cannot ship as an additive field: recipe
@@ -1353,7 +1413,8 @@ recurrence — the shape the Problem section expects.
     declaration or drop it — external `--data` overlays inheriting the
     converted base need the same review by their owners. The same
     review covers constraint names a value reuses (the mixin collision
-    rule rejects those loudly at resolution).
+    rule rejects those loudly at resolution, except where step 5's
+    amendment intersects two version ranges).
   - **Declaration survival (step 2)**: a snapshot that excludes every
     declaring chain now fails generation instead of silently emitting
     the base configuration.
@@ -1455,6 +1516,25 @@ recurrence — the shape the Problem section expects.
    deployment-phase validation, not proven at generation. Qualifying
    installer readiness directly (DaemonSet presence, pool mode) is
    tracked as follow-up work.
+
+   *Amended 2026-09-22:* the pool-mode half of that follow-up work
+   landed for `bundle-installer` (`driver-installer`'s successor, per
+   the rename amendment above). A second, corroborating constraint on
+   `K8s.gke-gpu-pools.gpu-driver-installation` verifies each GPU pool
+   was actually created with `gpu-driver-version=disabled`, closing the
+   gap where the opt-out label alone proves only device-plugin
+   ownership, not pool-creation mode. A pool GKE still finalizes the
+   managed driver install on can carry the label while GKE's own
+   driver-installer DaemonSet stays active underneath, racing the
+   bundle's `gcp-driver-installer`. The reading is supplied by a new
+   provider pool projection (`aicr snapshot --gke-gpu-pools` /
+   `aicr validate --gke-gpu-pools`, mirroring the AKS Deferred Decision
+   3 pattern), fed by a `gcloud container node-pools list --format=json`
+   dump. `gke-default` declares no constraint on this reading. It
+   remains the zero-setup default and never requires the projection.
+   The DaemonSet-presence half of the follow-up (verifying the
+   installer's DaemonSet itself, rather than the pool's creation-time
+   intent) remains open.
 
    The `operator-selfdriver` value additionally requires the
    `gcp-driver-installer` component (values-gated chart, new public

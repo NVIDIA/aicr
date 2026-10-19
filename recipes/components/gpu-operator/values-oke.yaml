@@ -15,18 +15,14 @@
 # GPU Operator Helm values
 # OKE base configuration overrides
 #
-# OKE pre-installs NVIDIA drivers and container toolkit on GPU bare-metal
-# shapes (BM.GPU.B200, BM.GPU.H100, etc.). Disable both to avoid conflicts.
-# To use GPU Operator-managed drivers instead, provision GPU nodes without
-# the Oracle-managed GPU driver and set driver.enabled=true,
-# toolkit.enabled=true, AND dradriver:nvidiaDriverRoot=/run/nvidia/driver —
-# the Oracle GPU image bundles the driver and the container toolkit together,
-# so a node provisioned without it has neither. The DRA root must move too:
-# the OKE DRA base pins nvidiaDriverRoot: / for the host-installed driver, but
-# once gpu-operator manages the driver, Rule 2 of the bundle-time
-# driver-ownership coherence check requires nvidiaDriverRoot to equal
-# hostPaths.driverInstallDir (/run/nvidia/driver). The same check also rejects
-# a driver-only flip on a cluster whose snapshot recorded no NVIDIA driver.
+# Driver, toolkit, and device-plugin ownership is selected by the gpuStack
+# configuration profile declared on recipes/overlays/oke-ol.yaml (ADR-015):
+# oci-managed (Oracle image driver + OKE's NvidiaGpuPlugin add-on) and
+# operator-managed (bring-your-own driverless image, add-on removed; the
+# operator installs all three and the DRA root moves to /run/nvidia/driver
+# in lockstep). Those paths are
+# profile-owned and locked — select the mode at recipe generation
+# (--profile gpuStack=<value>), never with bundle-time --set overrides.
 
 # hostPaths.driverInstallDir is intentionally left at the gpu-operator base
 # default /run/nvidia/driver: it is the host path the operator-validator
@@ -41,10 +37,27 @@ cdi:
   enabled: true
   default: false
 
-# OKE pre-installs NVIDIA drivers on GPU bare-metal shapes
-driver:
-  enabled: false
+# driver.enabled / toolkit.enabled / devicePlugin.enabled are profile-owned
+# (see header) and deliberately absent here — the selected gpuStack value's
+# fragment is authoritative.
 
-# OKE pre-installs NVIDIA container toolkit
-toolkit:
-  enabled: false
+# Universal OKE bare-metal device-plugin env (independent of the gpuStack
+# value; consumed only when the operator's plugin runs):
+# - DEVICE_LIST_STRATEGY lists cdi-annotations FIRST: with cri-o + CDI on
+#   OKE bare metal, CDI device IDs must flow via pod annotations — the
+#   cdi-cri-first default routes them differently and breaks NCCL on
+#   SR-IOV clusters.
+# - MOFED_ENABLED=false: OKE nodes carry host MOFED, and k8s-device-plugin
+#   >= 0.19.0 defaults MOFED_ENABLED=true when CDI is enabled, flooding
+#   every host RDMA uverb into every GPU pod and breaking NCCL.
+# Helm REPLACES lists: an overlay overriding devicePlugin.env must restate
+# these entries.
+devicePlugin:
+  env:
+    # Restated from the base values.yaml (Helm replaces lists).
+    - name: DP_DISABLE_HEALTHCHECKS
+      value: "109"
+    - name: DEVICE_LIST_STRATEGY
+      value: cdi-annotations,cdi-cri,volume-mounts
+    - name: MOFED_ENABLED
+      value: "false"

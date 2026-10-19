@@ -1,0 +1,293 @@
+// Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package cli
+
+import (
+	"context"
+	stderrors "errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"strings"
+
+	"github.com/urfave/cli/v3"
+
+	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/serializer"
+)
+
+// upgradeCheckCmd creates the "upgrade-check" CLI command.
+func upgradeCheckCmd() *cli.Command {
+	return &cli.Command{
+		Name:     "upgrade-check",
+		Category: functionalCategoryName,
+		Usage:    "Report whether moving between two recipes or bundles is safe to apply",
+		Description: `Compare two artifacts component by component and report a verdict for
+each component whose version or identity changed, from the transition records
+this aicr release ships. That comparison is the default and it reads no
+cluster state: the two artifacts are all it looks at, and nothing is
+inspected, deployed or modified. A cm:// path is an artifact location like a
+file path, so reading or writing one does contact that cluster's API to fetch
+or store the ConfigMap.
+
+Either side may be a recipe file or a bundle directory; a bundle is read
+through the recipe.yaml at its root. Omitting --to re-resolves the --from artifact's own
+criteria against this binary's registry, which answers "am I behind, and does
+catching up hurt?" rather than "is this move safe?".
+
+Two flags do read a cluster. --from cluster takes the source side from what
+Helm and Argo CD each recorded they last applied. That answers which version
+is installed and answers nothing else: a resource somebody edited by hand
+leaves the record untouched, and reading the record will not say so. It is not
+a view of live state.
+
+--scan-cluster is an advisory pass for objects an upgrade could disturb that
+carry no deployer ownership marker. It warns and never changes the exit code.
+--from cluster implies it; pass --scan-cluster=false there to skip it.
+
+Pass the deployed bundle as --from where you have it. Object names
+(fullnameOverride, nameOverride) are compared only from a bundle, because a
+recipe records its values by reference and a cluster read recovers versions
+alone; given either, that comparison is skipped and the report says so above
+the table.
+
+Operator steps are deployer-scoped, so --deployer is required whenever any
+component carries steps. A cluster read is stricter: it requires --deployer
+whatever the records turn out to hold, because a release name encodes the
+deployer that wrote it and attribution cannot run without one. It requires
+--to as well, a cluster carrying no criteria to re-resolve.
+
+Exits non-zero on any verdict other than safe, unknown included: a
+transition nobody assessed is not a transition anyone approved. Records are
+still being authored, so most comparisons report unknown today and fail.
+The report prints in full either way; pass --fail-on-error=false to report
+without failing.
+
+Examples:
+  # The deployed bundle against a freshly generated recipe
+  aicr upgrade-check --from ./bundles-v0.16.0 --to new-recipe.yaml --deployer argocd
+
+  # Two recipes, when no bundle was kept (object names are not compared)
+  aicr upgrade-check --from old-recipe.yaml --to new-recipe.yaml --deployer argocd
+
+  # Two helm bundles
+  aicr upgrade-check --from ./bundles-v0.16.0 --to ./bundles-v0.17.0 --deployer helm
+
+  # Am I behind, and does catching up hurt?
+  aicr upgrade-check --from ./bundles-v0.16.0 --deployer helm
+
+  # What is actually installed, rather than what an artifact claims
+  aicr upgrade-check --from cluster --to new-recipe.yaml --deployer helm
+
+  # JSON for a pipeline, reporting only
+  aicr upgrade-check --from old.yaml --to new.yaml --format json --fail-on-error=false`,
+		Flags:  upgradeCheckCmdFlags(),
+		Action: runUpgradeCheckCmd,
+	}
+}
+
+// upgradeCheckCmdFlags returns the flags for the upgrade-check command.
+func upgradeCheckCmdFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.StringFlag{
+			Name:    "from",
+			Aliases: []string{"f"},
+			Usage: fmt.Sprintf("source: recipe file, bundle directory, ConfigMap URI, or the literal "+
+				"%s to read the installed inventory instead of an artifact", aicr.FromCluster),
+			Category: catInput,
+		},
+		&cli.StringFlag{
+			Name: "to",
+			Usage: fmt.Sprintf("target artifact (default: re-resolve --from's criteria against this "+
+				"binary's registry; required with --from %s)", aicr.FromCluster),
+			Category: catInput,
+		},
+		withCompletions(&cli.StringFlag{
+			Name:    "deployer",
+			Aliases: []string{"d"},
+			Usage: fmt.Sprintf("deployer the reported steps are scoped to (%s); required whenever a "+
+				"component carries steps, and always with --from %s",
+				strings.Join(config.GetDeployerTypes(), ", "), aicr.FromCluster),
+			Category: catInput,
+		}, config.GetDeployerTypes),
+		&cli.BoolFlag{
+			Name: "scan-cluster",
+			Usage: fmt.Sprintf("Also report objects an upgrade could disturb that carry no deployer "+
+				"ownership marker. Implied by --from %s; pass --scan-cluster=false there to skip the scan",
+				aicr.FromCluster),
+			Category: catInput,
+		},
+		&cli.BoolFlag{
+			Name:  "fail-on-error",
+			Value: true,
+			Usage: "Exit with non-zero status if any component needs attention (any verdict " +
+				"other than safe)",
+		},
+		outputFlag(),
+		// Table, unlike every other command's yaml: the report's payload is
+		// the operator steps, and folded YAML scalars bury a migration the
+		// reader is meant to act on. Machine consumers pass --format json,
+		// and a pipeline reads the exit code rather than the document.
+		formatFlagDefault(serializer.FormatTable),
+		kubeconfigFlag(),
+	}
+}
+
+// runUpgradeCheckCmd executes the upgrade-check command.
+func runUpgradeCheckCmd(ctx context.Context, cmd *cli.Command) error {
+	if err := validateSingleValueFlags(cmd,
+		"from", "to", "deployer", "scan-cluster", "output", "format", "kubeconfig"); err != nil {
+		return err
+	}
+
+	// A run that reads the cluster has no deadline, since its length follows
+	// the cluster's size. Every read in it is bounded.
+	if cmd.String("from") != aicr.FromCluster && !cmd.Bool("scan-cluster") {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, defaults.CLIUpgradeCheckTimeout)
+		defer cancel()
+	}
+
+	outFormat, err := parseOutputFormat(cmd)
+	if err != nil {
+		return err
+	}
+
+	req := upgradeCheckRequestFrom(cmd)
+	if req.From == "" {
+		return errors.New(errors.ErrCodeInvalidRequest, "--from is required")
+	}
+	if req.Deployer != "" {
+		// Reject a typo here rather than letting it silently select no step
+		// group, which would render a manual verdict with no steps under it.
+		if _, parseErr := config.ParseDeployerType(req.Deployer); parseErr != nil {
+			return parseErr
+		}
+	}
+
+	slog.Debug("upgrade check", slog.String("from", req.From), slog.String("to", req.To),
+		slog.String("deployer", req.Deployer), slog.Any("scanCluster", req.ScanAtRisk))
+
+	client, err := embeddedClient(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = client.Close() }()
+
+	report, err := client.UpgradeCheck(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	slog.Info("upgrade check complete",
+		slog.Int("components", report.Summary.Components),
+		slog.Int("failing", report.Summary.Failing))
+
+	if err := writeUpgradeReport(ctx, cmd, outFormat, req.Kubeconfig, report); err != nil {
+		return err
+	}
+
+	// The report is written first: informing and erroring are not
+	// alternatives, and the exit code is orthogonal to the report.
+	if cmd.Bool("fail-on-error") && report.FailsRun() {
+		if stamps := report.UnmatchedStamps(); stamps > 0 {
+			return errors.New(errors.ErrCodeConflict, fmt.Sprintf(
+				"upgrade check failed: %d component change(s) need attention, and %d AICR-stamped release(s) "+
+					"match no component under --deployer %s, so the installed inventory is incomplete; check the "+
+					"deployer, then the READ FROM CLUSTER block", report.Summary.Failing, stamps, report.Deployer))
+		}
+
+		return errors.New(errors.ErrCodeConflict, fmt.Sprintf(
+			"upgrade check failed: %d component change(s) need attention", report.Summary.Failing))
+	}
+	return nil
+}
+
+// upgradeCheckRequestFrom projects the parsed flags onto the facade request.
+//
+// --scan-cluster reaches the request only when the operator actually typed it.
+// The flag defaults to false, so a false urfave invented is indistinguishable
+// from one somebody meant, and sending it unconditionally would cancel the
+// scan --from cluster implies on every run that never mentioned it.
+func upgradeCheckRequestFrom(cmd *cli.Command) aicr.UpgradeCheckRequest {
+	req := aicr.UpgradeCheckRequest{
+		From:       cmd.String("from"),
+		To:         cmd.String("to"),
+		Deployer:   cmd.String("deployer"),
+		Kubeconfig: cmd.String("kubeconfig"),
+	}
+	if cmd.IsSet("scan-cluster") {
+		scan := cmd.Bool("scan-cluster")
+		req.ScanAtRisk = &scan
+	}
+
+	return req
+}
+
+// writeUpgradeReport serializes the report, using the package's own table
+// formatter when the output format is table. Uses a named return so Close()
+// failures on writable handles are merged with any earlier error via
+// errors.Join, so data loss on flush surfaces even when the write also failed.
+//
+// kubeconfig is propagated to ConfigMap writers so a cm:// destination lands in
+// the same cluster the cm:// artifacts were read from.
+func writeUpgradeReport(
+	ctx context.Context,
+	cmd *cli.Command,
+	outFormat serializer.Format,
+	kubeconfig string,
+	report *aicr.UpgradeReport,
+) (err error) {
+
+	output := cmd.String(flagOutput)
+
+	if outFormat == serializer.FormatTable {
+		output = strings.TrimSpace(output)
+		if strings.HasPrefix(output, serializer.ConfigMapURIScheme) {
+			return errors.New(errors.ErrCodeInvalidRequest, "table output does not support ConfigMap destinations")
+		}
+		w := cmd.Root().Writer
+		if output != "" && output != "-" && output != serializer.StdoutURI {
+			f, createErr := os.Create(output)
+			if createErr != nil {
+				return errors.Wrap(errors.ErrCodeInternal, "failed to create output file", createErr)
+			}
+			defer func() {
+				if closeErr := f.Close(); closeErr != nil {
+					err = stderrors.Join(err, errors.Wrap(errors.ErrCodeInternal, "failed to close output file", closeErr))
+				}
+			}()
+			w = f
+		}
+		return aicr.WriteUpgradeReportTable(w, report)
+	}
+
+	ser, err := serializer.NewFileWriterOrStdoutWithKubeconfig(outFormat, output, kubeconfig)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closer, ok := ser.(interface{ Close() error }); ok {
+			if closeErr := closer.Close(); closeErr != nil {
+				err = stderrors.Join(err, errors.Wrap(errors.ErrCodeInternal, "failed to close serializer", closeErr))
+			}
+		}
+	}()
+
+	return ser.Serialize(ctx, report)
+}

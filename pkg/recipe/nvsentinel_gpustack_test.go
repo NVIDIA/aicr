@@ -16,12 +16,18 @@ package recipe
 
 import (
 	"slices"
-	"sort"
 	"strings"
 	"testing"
 )
 
 const nvsentinelComponent = "nvsentinel"
+
+// nvsentinelRuntimeClassPaths are the NVSentinel values that name the NVIDIA
+// RuntimeClass, which must match gpu-operator's operator.runtimeClass.
+var nvsentinelRuntimeClassPaths = []string{
+	"metadata-collector.runtimeClassName",
+	"janitor.config.controllers.gpuReset.resetJob.runtimeClassName",
+}
 
 // TestNVSentinelConfigurationMatrix pins the exact per-platform NVSentinel
 // configuration issue #2181 specifies, resolved from the real embedded
@@ -52,8 +58,8 @@ func TestNVSentinelConfigurationMatrix(t *testing.T) {
 		// wantAssume is the expected labeler.assumeDriverInstalled;
 		// nil means the path must be left unset (chart default false).
 		wantAssume *bool
-		// wantRuntimeClass is the expected
-		// metadata-collector.runtimeClassName; "" means left unset
+		// wantRuntimeClass is the expected value of every
+		// nvsentinelRuntimeClassPaths entry; "" means left unset
 		// (chart default nvidia).
 		wantRuntimeClass string
 	}{
@@ -84,14 +90,26 @@ func TestNVSentinelConfigurationMatrix(t *testing.T) {
 			wantAssume: ptr(false),
 		},
 		{
-			name: "OKE: node image installs the driver (overlay-level, no profile)",
+			name: "OKE oci-managed: image driver + OKE's plugin, no driver pod",
 			criteria: &Criteria{
 				Service:     CriteriaServiceOKE,
 				Accelerator: CriteriaAcceleratorA100,
 				OS:          CriteriaOSOracleLinux,
 				Intent:      CriteriaIntentTraining,
 			},
+			profile:    "gpuStack=oci-managed",
 			wantAssume: ptr(true),
+		},
+		{
+			name: "OKE operator-managed: the operator's driver pod is the evidence",
+			criteria: &Criteria{
+				Service:     CriteriaServiceOKE,
+				Accelerator: CriteriaAcceleratorA100,
+				OS:          CriteriaOSOracleLinux,
+				Intent:      CriteriaIntentTraining,
+			},
+			profile:    "gpuStack=operator-managed",
+			wantAssume: ptr(false),
 		},
 		{
 			name: "Kind: nvkind host-installs the driver (overlay-level, no profile)",
@@ -153,31 +171,34 @@ func TestNVSentinelConfigurationMatrix(t *testing.T) {
 				t.Fatalf("labeler.assumeDriverInstalled = %v, want %v", assume, *tt.wantAssume)
 			}
 
-			runtimeClass, runtimeSet := nestedString(values, "metadata-collector", "runtimeClassName")
-			switch {
-			case tt.wantRuntimeClass == "" && runtimeSet:
-				t.Fatalf("metadata-collector.runtimeClassName = %q, want it left unset "+
-					"(the chart default already matches operator.runtimeClass)", runtimeClass)
-			case tt.wantRuntimeClass != "" && !runtimeSet:
-				t.Fatalf("metadata-collector.runtimeClassName is unset, want %q.\n"+
-					"  Left unset the API server rejects every metadata-collector pod with\n"+
-					"  `RuntimeClass \"nvidia\" not found`. See #2176.", tt.wantRuntimeClass)
-			case tt.wantRuntimeClass != "" && runtimeClass != tt.wantRuntimeClass:
-				t.Fatalf("metadata-collector.runtimeClassName = %q, want %q", runtimeClass, tt.wantRuntimeClass)
+			for _, path := range nvsentinelRuntimeClassPaths {
+				raw, state := profileValueAtPath(values, path)
+				runtimeClass, isString := raw.(string)
+				switch {
+				case tt.wantRuntimeClass == "" && state != PathAbsent:
+					t.Fatalf("%s = %#v, want it left unset "+
+						"(the chart default already matches operator.runtimeClass)", path, raw)
+				case tt.wantRuntimeClass != "" && !isString:
+					t.Fatalf("%s = %#v, want %q.\n"+
+						"  Left unset the API server rejects every pod that requests it with\n"+
+						"  `RuntimeClass \"nvidia\" not found`.", path, raw, tt.wantRuntimeClass)
+				case tt.wantRuntimeClass != "" && runtimeClass != tt.wantRuntimeClass:
+					t.Fatalf("%s = %q, want %q", path, runtimeClass, tt.wantRuntimeClass)
+				}
 			}
 		})
 	}
 }
 
 // TestAKSRuntimeClassNamesAgreeUnderEveryProfileValue pins the #2176
-// invariant directly: the RuntimeClass the GPU Operator creates and the one
-// metadata-collector requests must be the same string under every gpuStack
-// value.
+// invariant directly: the RuntimeClass the GPU Operator creates and the ones
+// metadata-collector and janitor's GPU reset Job request must be the same
+// string under every gpuStack value.
 //
-// Both are owned by the same profile value, so they are consistent by
-// construction rather than by convention — CheckNVSentinelRuntimeClassCoherence
-// remains defense in depth. This test asserts the property itself, so it
-// still fails if a future edit moves either path out of the profile.
+// All three are owned by the same profile value, so they are consistent by
+// construction rather than by convention; CheckNVSentinelRuntimeClassCoherence
+// backs up only the metadata-collector name. This test asserts the property
+// itself, so it still fails if a future edit moves any path out of the profile.
 func TestAKSRuntimeClassNamesAgreeUnderEveryProfileValue(t *testing.T) {
 	t.Parallel()
 
@@ -204,15 +225,17 @@ func TestAKSRuntimeClassNamesAgreeUnderEveryProfileValue(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GetValuesForComponentWithContext(nvsentinel): %v", err)
 			}
-			collectorClass, ok := nestedString(sentinelValues, "metadata-collector", "runtimeClassName")
-			if !ok {
-				t.Fatal("nvsentinel metadata-collector.runtimeClassName is unset — the comparison would be vacuous")
-			}
-
-			if operatorClass != collectorClass {
-				t.Fatalf("operator.runtimeClass = %q but metadata-collector.runtimeClassName = %q; "+
-					"the API server rejects every metadata-collector pod when they differ (#2176)",
-					operatorClass, collectorClass)
+			for _, path := range nvsentinelRuntimeClassPaths {
+				raw, _ := profileValueAtPath(sentinelValues, path)
+				sentinelClass, ok := raw.(string)
+				if !ok {
+					t.Fatalf("nvsentinel %s = %#v, want a string — the comparison would be vacuous", path, raw)
+				}
+				if operatorClass != sentinelClass {
+					t.Fatalf("operator.runtimeClass = %q but nvsentinel %s = %q; "+
+						"the API server rejects every pod that requests it when they differ",
+						operatorClass, path, sentinelClass)
+				}
 			}
 		})
 	}
@@ -276,29 +299,34 @@ func TestNVSentinelReferencedInEveryProfileValue(t *testing.T) {
 	}
 }
 
-// TestNVSentinelPresenceLockedOnProfiledFamilies pins the presence half of
-// the ownership contract.
+// TestNVSentinelPresenceOnProfiledFamilies pins the presence half of the
+// ownership contract.
 //
 // Naming a component in a profile declaration locks more than the leaf paths
-// it assigns: the declaration-wide synthetic "enabled" marker is added for
-// every referenced component, and ValidateProfileLock then rejects any output
-// where that component is absent or disabled. Configuring NVSentinel from the
-// profile therefore also makes it mandatory on AKS and GKE-COS —
-// `--set nv-sentinel:enabled=false` and an API `bundlers=` list omitting it
-// both fail closed.
+// it assigns: unless the reference is optional, the declaration-wide
+// synthetic "enabled" marker is added, and ValidateProfileLock then rejects
+// any output where that component is absent or disabled.
 //
-// That is the intended result, not a side effect: NVSentinel is required for
-// these deployments (#2181). The test exists so the contract is visible and
-// any future relaxation is a deliberate edit.
-func TestNVSentinelPresenceLockedOnProfiledFamilies(t *testing.T) {
+// AKS keeps NVSentinel mandatory (#2181), so `--set nv-sentinel:enabled=false`
+// and an API `bundlers=` list omitting it both fail closed there. The GKE-COS
+// and OKE gpuStack profiles reference it as optional (#2978), so the same
+// omission passes. Either outcome changing must be a deliberate edit.
+func TestNVSentinelPresenceOnProfiledFamilies(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		criteria *Criteria
+		name          string
+		criteria      *Criteria
+		presenceOwned bool
 	}{
-		{name: "aks default", criteria: aksCriteria()},
+		{name: "aks default", criteria: aksCriteria(), presenceOwned: true},
 		{name: "gke-cos default", criteria: gkeCriteria()},
+		{name: "oke default", criteria: &Criteria{
+			Service:     CriteriaServiceOKE,
+			Accelerator: CriteriaAcceleratorA100,
+			OS:          CriteriaOSOracleLinux,
+			Intent:      CriteriaIntentTraining,
+		}},
 	}
 
 	for _, tt := range tests {
@@ -315,9 +343,9 @@ func TestNVSentinelPresenceLockedOnProfiledFamilies(t *testing.T) {
 			if !ok {
 				t.Fatal("gpuStack does not own nvsentinel")
 			}
-			if !slices.Contains(owned, "enabled") {
-				t.Fatalf("nvsentinel ownedPaths = %v, want the synthetic presence marker %q",
-					owned, "enabled")
+			if got := slices.Contains(owned, "enabled"); got != tt.presenceOwned {
+				t.Fatalf("nvsentinel ownedPaths = %v, presence owned = %v, want %v",
+					owned, got, tt.presenceOwned)
 			}
 
 			hydrate := func() map[string]map[string]any {
@@ -352,6 +380,12 @@ func TestNVSentinelPresenceLockedOnProfiledFamilies(t *testing.T) {
 				t.Fatal("nvsentinel is not present in the resolved componentRefs")
 			}
 			lockErr := result.ValidateProfileLock(ctx, kept, hydrate(), nil)
+			if !tt.presenceOwned {
+				if lockErr != nil {
+					t.Fatalf("ValidateProfileLock() rejected omitting optional nvsentinel: %v", lockErr)
+				}
+				return
+			}
 			if lockErr == nil || !strings.Contains(lockErr.Error(), "absent or disabled") {
 				t.Fatalf("ValidateProfileLock() error = %v, want nvsentinel absent-or-disabled rejection", lockErr)
 			}
@@ -359,20 +393,12 @@ func TestNVSentinelPresenceLockedOnProfiledFamilies(t *testing.T) {
 	}
 }
 
-// TestOKENVSentinelValueIsNotProfileOwned documents an asymmetry the docs
-// must not paper over.
-//
-// OKE has no gpuStack profile, so its assumeDriverInstalled value lives on
-// the overlay's componentRefs and is NOT covered by ADR-015's generated
-// install-time profile lock — unlike the equivalent AKS and GKE-COS values.
-// The NVSentinel driver-label bundle gate still rejects bundle-time and
-// declared-dynamic changes that would recreate #2175, so the normal paths
-// are protected; a manual post-generation edit to the rendered Helm values
-// is outside that guarantee.
-//
-// Stating the asymmetry here keeps "profile-owned" from being read as a
-// uniform property of every platform that sets the value.
-func TestOKENVSentinelValueIsNotProfileOwned(t *testing.T) {
+// TestOKENVSentinelValueIsProfileOwned pins the OKE family's conversion to
+// the gpuStack profile: assumeDriverInstalled moved from the overlay's
+// componentRefs into the profile values, so OKE now receives the same
+// generated install-time profile lock as AKS and GKE-COS — the asymmetry the
+// previous version of this test documented is gone.
+func TestOKENVSentinelValueIsProfileOwned(t *testing.T) {
 	t.Parallel()
 
 	result, err := NewBuilder().BuildFromCriteriaWithProfile(t.Context(), &Criteria{
@@ -385,28 +411,35 @@ func TestOKENVSentinelValueIsNotProfileOwned(t *testing.T) {
 		t.Fatalf("BuildFromCriteriaWithProfile() error = %v", err)
 	}
 
-	// The value is present ...
+	// The value is present under the declared default ...
 	values, err := result.GetValuesForComponentWithContext(t.Context(), nvsentinelComponent)
 	if err != nil {
 		t.Fatalf("GetValuesForComponentWithContext(nvsentinel): %v", err)
 	}
 	if assume, ok := nestedBool(values, "labeler", "assumeDriverInstalled"); !ok || !assume {
-		t.Fatalf("OKE labeler.assumeDriverInstalled = %v (set: %v), want true", assume, ok)
+		t.Fatalf("OKE labeler.assumeDriverInstalled = %v (set: %v), want true under oci-managed", assume, ok)
 	}
 
-	// ... and deliberately unprofiled.
-	if result.Metadata.SelectedProfile != nil {
-		t.Fatalf("OKE resolved with a profile (%#v); if a gpuStack profile is ever added to OKE, "+
-			"move the value into it and update the docs that describe this asymmetry",
-			result.Metadata.SelectedProfile)
+	// ... and profile-owned.
+	selected := result.Metadata.SelectedProfile
+	if selected == nil || selected.Name != "gpuStack" || selected.Value != "oci-managed" {
+		t.Fatalf("selectedProfile = %#v, want gpuStack=oci-managed", selected)
 	}
-	if len(result.EffectiveLockSet()) != 0 {
-		lockedComponents := make([]string, 0, len(result.EffectiveLockSet()))
-		for component := range result.EffectiveLockSet() {
-			lockedComponents = append(lockedComponents, component)
-		}
-		sort.Strings(lockedComponents)
-		t.Fatalf("OKE has a non-empty profile lock set %v, want none", lockedComponents)
+	owned := selected.OwnedPaths[nvsentinelComponent]
+	wantOwned := []string{
+		"janitor.config.controllers.gpuReset.resetJob.hostDriverRootPath",
+		"janitor.config.controllers.gpuReset.serviceManager.name",
+		"janitor.config.controllers.gpuReset.serviceManager.spec.apps",
+		"janitor.config.controllers.gpuReset.serviceManager.spec.namespace",
+		"janitor.config.controllers.gpuReset.serviceManager.spec.restoreTimeout",
+		"janitor.config.controllers.gpuReset.serviceManager.spec.teardownTimeout",
+		"labeler.assumeDriverInstalled",
+	}
+	if !slices.Equal(owned, wantOwned) {
+		t.Fatalf("ownedPaths[nvsentinel] = %v, want %v", owned, wantOwned)
+	}
+	if len(result.EffectiveLockSet()) == 0 {
+		t.Fatal("OKE profile lock set is empty, want the gpuStack-owned paths")
 	}
 }
 

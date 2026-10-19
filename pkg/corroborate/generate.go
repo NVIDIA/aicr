@@ -33,6 +33,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/validator"
+	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 )
 
 // errSkipRun is a loadRun sentinel: the run is malformed in a way that warrants
@@ -294,6 +295,23 @@ func loadRun(metaPath string, allowlist *Allowlist) (*signerRun, error) {
 	if meta.SchemaVersion != "" && meta.SchemaVersion != RunMetaSchemaVersion {
 		slog.Warn("meta.json schema version differs within the supported major; parsing under current rules",
 			"path", metaPath, "got", meta.SchemaVersion, "want", RunMetaSchemaVersion)
+	}
+
+	// canonicalSourceID trusts that issuer and identity are non-empty.
+	// Without this gate, every run with an empty signer collides on the
+	// same source key instead of being kept apart on the dashboard.
+	if meta.Signer.Issuer == "" || meta.Signer.Identity == "" {
+		slog.Warn("skipping run: signer issuer/identity is empty",
+			"path", metaPath)
+		return nil, errSkipRun
+	}
+
+	// The commit is display metadata that becomes a GitHub link, so anything
+	// that is not a commit SHA is dropped rather than skipping the run.
+	if meta.AICRCommit != "" && !catalog.IsValidCommit(meta.AICRCommit) {
+		slog.Warn("dropping malformed meta.json aicrCommit",
+			"path", metaPath, "aicrCommit", meta.AICRCommit, "signer", meta.Signer.Identity)
+		meta.AICRCommit = ""
 	}
 
 	class := Class(meta.Signer.Class)
@@ -677,6 +695,7 @@ func computeGrid(rowKeys []rowKey, signerIDs []string, latest map[string]*signer
 				Src:         id,
 				Result:      string(res),
 				AICRVer:     run.meta.AICRVersion,
+				AICRCommit:  run.meta.AICRCommit,
 				K8sVer:      run.meta.K8sVersion,
 				When:        formatWhen(run.meta.AttestedAt),
 				Build:       run.meta.RunID,
@@ -835,6 +854,7 @@ func buildSeries(agg *recipeAgg, gridSigners map[string]struct{}, rowKeys []rowK
 			cols = append(cols, SeriesBuild{
 				ID:          run.meta.RunID,
 				AICRVer:     run.meta.AICRVersion,
+				AICRCommit:  run.meta.AICRCommit,
 				K8sVer:      run.meta.K8sVersion,
 				When:        formatWhenDate(run.meta.AttestedAt),
 				Newest:      i == 0,

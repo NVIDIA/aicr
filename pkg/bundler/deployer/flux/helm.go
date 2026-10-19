@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -29,6 +30,30 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
+
+// disableWaitAnnotation marks a recipe manifest whose controller holds the
+// resource at Ready=False for longer than helm-controller's install timeout
+// (a NicClusterPolicy stays there until OFED is built), and whose release
+// must therefore not wait on it: helm-controller remediates a timed-out
+// install only by uninstalling, which would delete the resource. A generated
+// chart holding such a manifest is released with install.disableWait and
+// upgrade.disableWait; every other generated chart keeps the wait (#2585).
+// Follows the aicr/skip-hook-validation opt-out convention.
+const disableWaitAnnotation = "aicr/disable-wait"
+
+// disableWaitPattern matches the annotation as a YAML line. Manifests are Helm
+// templates, so they are matched as text rather than parsed.
+var disableWaitPattern = regexp.MustCompile(`(?m)^\s*["']?` + regexp.QuoteMeta(disableWaitAnnotation) + `["']?:\s*["']?true["']?\s*$`)
+
+// manifestsDisableWait reports whether any manifest carries disableWaitAnnotation.
+func manifestsDisableWait(manifests map[string][]byte) bool {
+	for _, content := range manifests {
+		if disableWaitPattern.Match(content) {
+			return true
+		}
+	}
+	return false
+}
 
 // HelmReleaseData carries per-component data for the helmrelease.yaml template.
 type HelmReleaseData struct {
@@ -45,6 +70,9 @@ type HelmReleaseData struct {
 	// UpgradeCRDs emits spec.upgrade.crds: CreateReplace. Set only for
 	// components the registry marks ownsCRDs. See NVIDIA/aicr#2264.
 	UpgradeCRDs bool
+	// DisableWait emits spec.install.disableWait and spec.upgrade.disableWait.
+	// Set only for charts generated from recipe manifests. See NVIDIA/aicr#2585.
+	DisableWait bool
 }
 
 // ChartRefHelmReleaseData carries per-component data for the
@@ -62,6 +90,9 @@ type ChartRefHelmReleaseData struct {
 	// UpgradeCRDs emits spec.upgrade.crds: CreateReplace. Set only for
 	// components the registry marks ownsCRDs. See NVIDIA/aicr#2264.
 	UpgradeCRDs bool
+	// DisableWait emits spec.install.disableWait and spec.upgrade.disableWait.
+	// Set only for charts generated from recipe manifests. See NVIDIA/aicr#2585.
+	DisableWait bool
 }
 
 // ArtifactGeneratorData carries per-component data for the
@@ -200,8 +231,37 @@ func (g *Generator) generateHelmComponent(ref recipe.ComponentRef, compDir strin
 
 // ChartData carries data for generating a local Chart.yaml.
 type ChartData struct {
-	Name    string
-	Version string
+	Name string
+	// AICRVersion is the AICR build that produced the chart; it lands in
+	// `version:` and the aicr.run/generated-by annotation. Set it through
+	// deployer.NormalizeChartVersion — Helm validates `version:` as SemVer 2
+	// and rejects the "dev" an unstamped build reports.
+	AICRVersion string
+	// ComponentVersion is the free-form version of the payload the chart
+	// carries; it lands in `appVersion:` and the aicr.run/component-version
+	// annotation. See ADR-021 Decision 7 for why the two are separate.
+	ComponentVersion string
+}
+
+// chartDataFor builds the Chart.yaml stamp for a generated chart named
+// dirName that carries content pinned at payloadVersion.
+//
+// Mirrors localformat's stampFor, which does the same job for the other four
+// deployers: `version:` tracks the AICR build that generated the wrapper,
+// while appVersion and the aicr.run/component-version annotation track the
+// payload. A chart whose component has no upstream pin — a manifest-only
+// component, or a -pre / -post wrapper of one — carries only AICR-authored
+// recipe content, so AICR's version is the honest answer for both.
+func (g *Generator) chartDataFor(dirName, payloadVersion string) ChartData {
+	aicrVersion := deployer.NormalizeChartVersion(g.Version)
+	if payloadVersion == "" {
+		payloadVersion = aicrVersion
+	}
+	return ChartData{
+		Name:             dirName,
+		AICRVersion:      aicrVersion,
+		ComponentVersion: payloadVersion,
+	}
 }
 
 // generateManifestHelmChart packages manifest templates as a local Helm chart
@@ -210,7 +270,11 @@ type ChartData struct {
 // it emits an ArtifactGenerator + ExternalArtifact pair and uses spec.chartRef.
 // Returns (wroteConfigMap, extraResourcePaths, error). extraResourcePaths
 // contains the ArtifactGenerator file path when in OCI mode, nil otherwise.
-func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, compDir string,
+//
+// payloadVersion is the originating component's upstream pin, stamped into
+// the generated chart's appVersion and aicr.run/component-version. Empty for
+// a manifest-only component, which has no upstream pin — see chartDataFor.
+func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, compDir, payloadVersion string,
 	manifests map[string][]byte, gitSources map[string]*GitRepoSourceData,
 	dependsOn []DependsOnRef, output *deployer.Output) (bool, []string, error) {
 
@@ -251,7 +315,7 @@ func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, comp
 	}
 
 	// Write Chart.yaml.
-	if err := writeTemplate(output, chartTemplate, ChartData{Name: dirName, Version: "0.1.0"},
+	if err := writeTemplate(output, chartTemplate, g.chartDataFor(dirName, payloadVersion),
 		compDir, fileChart,
 		fmt.Sprintf("failed to write %s for %s", fileChart, compName)); err != nil {
 		return false, nil, err
@@ -298,8 +362,9 @@ func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, comp
 	// ArtifactGenerator extracts this chart's directory from the outer
 	// OCIRepository into an ExternalArtifact that helm-controller can
 	// consume via spec.chartRef.
+	disableWait := manifestsDisableWait(manifests)
 	if g.OCISourceName != "" {
-		extraResources, ociErr := g.writeOCIArtifactPair(dirName, namespace, dependsOn, valuesFrom, valuesYAML, compDir, output)
+		extraResources, ociErr := g.writeOCIArtifactPair(dirName, namespace, disableWait, dependsOn, valuesFrom, valuesYAML, compDir, output)
 		if ociErr != nil {
 			return false, nil, ociErr
 		}
@@ -314,6 +379,7 @@ func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, comp
 		TargetNamespace: namespace,
 		Chart:           "./" + dirName,
 		UpgradeCRDs:     g.ownsCRDs(dirName),
+		DisableWait:     disableWait,
 		SourceKind:      "GitRepository",
 		SourceName:      sName,
 		DependsOn:       dependsOn,
@@ -338,17 +404,19 @@ func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recip
 	compDir string, dependsOn []DependsOnRef,
 	gitSources map[string]*GitRepoSourceData,
 	puller localformat.ChartPuller,
+	chartDigest string,
 	output *deployer.Output) (bool, localformat.VendorRecord, []string, error) {
 
 	chartName := ref.EffectiveChart()
 
 	// Build localformat.Component for the puller.
 	lfc := localformat.Component{
-		Name:       ref.Name,
-		Repository: ref.Source,
-		ChartName:  chartName,
-		Version:    ref.Version,
-		IsOCI:      strings.HasPrefix(ref.Source, "oci://"),
+		Name:        ref.Name,
+		Repository:  ref.Source,
+		ChartName:   chartName,
+		Version:     ref.Version,
+		IsOCI:       strings.HasPrefix(ref.Source, "oci://"),
+		ChartDigest: chartDigest,
 	}
 
 	// Pull upstream chart tarball.
@@ -358,6 +426,12 @@ func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recip
 			pullErr, errors.ErrCodeInternal,
 			fmt.Sprintf("pull vendored chart for component %q", ref.Name))
 	}
+	if digestErr := localformat.VerifyChartDigest(lfc, tgz); digestErr != nil {
+		return false, localformat.VendorRecord{}, nil, digestErr
+	}
+	// provenance.yaml must name the bytes written below, not whatever the
+	// puller reported.
+	rec.SHA256 = localformat.ArchiveSHA256(tgz)
 
 	// Write charts/<tarball>.tgz.
 	chartsDir, err := deployer.SafeJoin(compDir, "charts")
@@ -383,7 +457,14 @@ func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recip
 
 	// Write wrapper Chart.yaml declaring the upstream as a dependency.
 	version := deployer.NormalizeVersionWithDefault(ref.Version)
-	wrapperYAML, err := localformat.RenderWrapperChartYAML(ref.Name, ref.Name, chartName, version)
+	wrapperYAML, err := localformat.RenderWrapperChartYAML(localformat.WrapperChartInput{
+		Name:           ref.Name,
+		Parent:         ref.Name,
+		ChartName:      chartName,
+		ChartVersion:   version,
+		AICRVersion:    g.Version,
+		PayloadVersion: ref.Version,
+	})
 	if err != nil {
 		return false, localformat.VendorRecord{}, nil, err
 	}
@@ -433,7 +514,7 @@ func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recip
 
 	// OCI mode: emit ArtifactGenerator + chartRef HelmRelease.
 	if g.OCISourceName != "" {
-		extraResources, ociErr := g.writeOCIArtifactPair(ref.Name, ref.Namespace, dependsOn, valuesFrom, valuesYAML, compDir, output)
+		extraResources, ociErr := g.writeOCIArtifactPair(ref.Name, ref.Namespace, false, dependsOn, valuesFrom, valuesYAML, compDir, output)
 		if ociErr != nil {
 			return false, localformat.VendorRecord{}, nil, ociErr
 		}
@@ -467,7 +548,7 @@ func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recip
 // for OCI mode. It returns the extra resource paths to include in
 // kustomization.yaml. Both generateManifestHelmChart and
 // generateVendoredHelmComponent delegate to this helper to avoid drift.
-func (g *Generator) writeOCIArtifactPair(name, targetNamespace string,
+func (g *Generator) writeOCIArtifactPair(name, targetNamespace string, disableWait bool,
 	dependsOn []DependsOnRef, valuesFrom []ValuesFromRef, valuesYAML string,
 	compDir string, output *deployer.Output) ([]string, error) {
 
@@ -490,6 +571,7 @@ func (g *Generator) writeOCIArtifactPair(name, targetNamespace string,
 		TargetNamespace: targetNamespace,
 		ChartRefName:    agName,
 		UpgradeCRDs:     g.ownsCRDs(name),
+		DisableWait:     disableWait,
 		DependsOn:       dependsOn,
 		ValuesFrom:      valuesFrom,
 		ValuesYAML:      valuesYAML,

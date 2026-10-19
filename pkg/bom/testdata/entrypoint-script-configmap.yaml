@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: entrypoint-script
+data:
+  entrypoint.sh: |
+    #!/bin/sh
+    set -e: broken [ yaml
+    exec image: not-a-real-image

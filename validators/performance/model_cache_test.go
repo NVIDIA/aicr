@@ -17,18 +17,20 @@ package main
 import (
 	"context"
 	stderrors "errors"
-	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/validators"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -142,17 +144,16 @@ func TestBuildModelCachePopulateJob(t *testing.T) {
 	// the offline workers fail to find their model.
 	t.Setenv(envModel, "Qwen/Qwen3-0.6B")
 	cfg := &inferenceWorkloadConfig{
-		runID:           "run-1",
-		namespace:       "ns",
-		model:           "Qwen/Qwen3-32B",
-		gpuNodeSelector: map[string]string{"kubernetes.io/hostname": "node-a"},
+		runID:            "run-1",
+		namespace:        "ns",
+		model:            "Qwen/Qwen3-32B",
+		gpuNodeSelector:  map[string]string{"kubernetes.io/hostname": "node-a"},
+		pullSecrets:      []v1.LocalObjectReference{{Name: "regcred"}},
+		dynamoRuntimeTag: testRecipeDynamoVersion,
 	}
-	pullSecrets := []v1.LocalObjectReference{{Name: "regcred"}}
-	job := buildModelCachePopulateJob("aicr-model-cache-populate-run-1", cfg, pullSecrets)
+	job := buildModelCachePopulateJob("aicr-model-cache-populate-run-1", cfg)
 
 	spec := job.Spec.Template.Spec
-	// imagePullSecrets propagate from the validator pod so a private-mirror /
-	// air-gapped cluster can pull cacheWorkerImage (parity with the AIPerf Job).
 	if len(spec.ImagePullSecrets) != 1 || spec.ImagePullSecrets[0].Name != "regcred" {
 		t.Errorf("ImagePullSecrets = %v, want [{regcred}]", spec.ImagePullSecrets)
 	}
@@ -169,8 +170,8 @@ func TestBuildModelCachePopulateJob(t *testing.T) {
 		t.Errorf("cache PVC volume missing: %v", spec.Volumes)
 	}
 	c := spec.Containers[0]
-	if c.Image != cacheWorkerImage {
-		t.Errorf("image = %q, want %q", c.Image, cacheWorkerImage)
+	if want := defaults.DynamoImageRepository + "/vllm-runtime:" + testRecipeDynamoVersion; c.Image != want {
+		t.Errorf("image = %q, want %q", c.Image, want)
 	}
 	if !strings.Contains(strings.Join(c.Command, " "), "snapshot_download") {
 		t.Errorf("command missing snapshot_download: %v", c.Command)
@@ -341,7 +342,7 @@ func TestParseModelCacheSize(t *testing.T) {
 				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 				}
 				return
@@ -449,10 +450,12 @@ func TestMachineFamily(t *testing.T) {
 	}
 }
 
-// TestCheckStorageClassNodeCompatibility verifies the rule-table lookup: a
+// TestCheckStorageClassNodeCompatibility verifies the rule-table lookup. A
 // machine family listed under a rule can only attach a StorageClass whose
-// parameters.type carries that rule's compatibleTypePrefix; every other
-// family/provisioner/type combination passes.
+// parameters.type is in that rule's compatibleTypes, or (per
+// TestCheckStorageClassNodeCompatibility_ExtraCompatibleTypes) named by
+// envModelCacheExtraCompatibleTypes. Every other family/provisioner/type
+// combination passes.
 func TestCheckStorageClassNodeCompatibility(t *testing.T) {
 	pdBalanced := &storagev1.StorageClass{
 		ObjectMeta:  metav1.ObjectMeta{Name: "standard-rwo"},
@@ -463,6 +466,14 @@ func TestCheckStorageClassNodeCompatibility(t *testing.T) {
 		ObjectMeta:  metav1.ObjectMeta{Name: "hyperdisk-balanced"},
 		Provisioner: "pd.csi.storage.gke.io",
 		Parameters:  map[string]string{"type": "hyperdisk-balanced"},
+	}
+	// hyperdisk-throughput is a real Hyperdisk type, but GKE does not support
+	// it as an attached volume on a4x. The compatibleTypes allowlist must
+	// reject it by exact name.
+	hyperdiskThroughput := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: "hyperdisk-throughput"},
+		Provisioner: "pd.csi.storage.gke.io",
+		Parameters:  map[string]string{"type": "hyperdisk-throughput"},
 	}
 	dynamicSelect := &storagev1.StorageClass{
 		ObjectMeta:  metav1.ObjectMeta{Name: "dynamic-volume"},
@@ -479,24 +490,76 @@ func TestCheckStorageClassNodeCompatibility(t *testing.T) {
 		name         string
 		instanceType string
 		sc           *storagev1.StorageClass
+		fromRecipe   bool
 		wantErr      bool
+		wantErrMsg   string // substring; empty skips the check
 	}{
-		{"a4x with Persistent Disk is rejected", "a4x-highgpu-4g", pdBalanced, true},
-		{"a4x with explicit Hyperdisk selection is fine", "a4x-highgpu-4g", hyperdiskBalanced, false},
-		{"a4x with dynamic disk-type selection is fine", "a4x-highgpu-4g", dynamicSelect, false},
-		{"non-a4x family with Persistent Disk is fine", "n2-standard-4", pdBalanced, false},
-		{"non-a4x family with dynamic disk-type selection is fine", "n2-standard-4", dynamicSelect, false},
-		{"a4x with an unrelated provisioner is fine", "a4x-highgpu-4g", otherProvisioner, false},
-		{"nil StorageClass is fine (not this function's concern)", "a4x-highgpu-4g", nil, false},
+		{"a4x with Persistent Disk is rejected", "a4x-highgpu-4g", pdBalanced, false, true, envModelCacheStorageClass},
+		{"a4x with explicit Hyperdisk selection is fine", "a4x-highgpu-4g", hyperdiskBalanced, false, false, ""},
+		{"a4x with an unsupported Hyperdisk type is rejected", "a4x-highgpu-4g", hyperdiskThroughput, false, true, envModelCacheStorageClass},
+		{"a4x with dynamic disk-type selection is fine", "a4x-highgpu-4g", dynamicSelect, false, false, ""},
+		{"non-a4x family with Persistent Disk is fine", "n2-standard-4", pdBalanced, false, false, ""},
+		{"non-a4x family with dynamic disk-type selection is fine", "n2-standard-4", dynamicSelect, false, false, ""},
+		{"a4x with an unrelated provisioner is fine", "a4x-highgpu-4g", otherProvisioner, false, false, ""},
+		{"nil StorageClass is fine (not this function's concern)", "a4x-highgpu-4g", nil, false, false, ""},
+		{
+			"recipe-sourced StorageClass points remediation at the recipe constraint, not the env var",
+			"a4x-highgpu-4g", pdBalanced, true, true, perfConstraintModelCacheStorageClass,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := checkStorageClassNodeCompatibility(tt.instanceType, tt.sc)
+			err := checkStorageClassNodeCompatibility(tt.instanceType, tt.sc, tt.fromRecipe)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
 			}
-			if tt.wantErr && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if tt.wantErr && errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+			}
+			if tt.wantErrMsg != "" && !strings.Contains(err.Error(), tt.wantErrMsg) {
+				t.Errorf("error = %v, want it to mention %q", err, tt.wantErrMsg)
+			}
+			if tt.fromRecipe && tt.wantErr && strings.Contains(err.Error(), "set "+envModelCacheStorageClass+" to") {
+				t.Errorf("error = %v, should not tell the user to set %s when the value came from a recipe constraint (that env var can't override it)", err, envModelCacheStorageClass)
+			}
+		})
+	}
+}
+
+// TestCheckStorageClassNodeCompatibility_ExtraCompatibleTypes verifies that
+// envModelCacheExtraCompatibleTypes lets an otherwise-rejected type through,
+// trims whitespace around each comma-separated entry, and leaves unrelated
+// types rejected.
+func TestCheckStorageClassNodeCompatibility_ExtraCompatibleTypes(t *testing.T) {
+	hyperdiskThroughput := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: "hyperdisk-throughput"},
+		Provisioner: "pd.csi.storage.gke.io",
+		Parameters:  map[string]string{"type": "hyperdisk-throughput"},
+	}
+	pdBalanced := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: "standard-rwo"},
+		Provisioner: "pd.csi.storage.gke.io",
+		Parameters:  map[string]string{"type": "pd-balanced"},
+	}
+
+	tests := []struct {
+		name    string
+		envVal  string
+		sc      *storagev1.StorageClass
+		wantErr bool
+	}{
+		{"unset rejects", "", hyperdiskThroughput, true},
+		{"listed type is allowed", "hyperdisk-throughput", hyperdiskThroughput, false},
+		{"listed type among several, with whitespace, is allowed", " foo , hyperdisk-throughput ,bar", hyperdiskThroughput, false},
+		{"listing an unrelated type does not allow this one", "some-other-type", hyperdiskThroughput, true},
+		{"listing the type does not allow an unrelated one", "hyperdisk-throughput", pdBalanced, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envModelCacheExtraCompatibleTypes, tt.envVal)
+			err := checkStorageClassNodeCompatibility("a4x-highgpu-4g", tt.sc, false)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
@@ -516,10 +579,11 @@ func TestEnsureModelCache(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		classes []runtime.Object
-		cfg     *inferenceWorkloadConfig
-		wantErr bool
+		name       string
+		classes    []runtime.Object
+		cfg        *inferenceWorkloadConfig
+		wantErr    bool
+		wantErrMsg string // substring; empty skips the check
 	}{
 		{
 			name: "disabled is a no-op",
@@ -540,13 +604,25 @@ func TestEnsureModelCache(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "incompatible explicit override is rejected",
+			name:    "incompatible explicit override from env is rejected, pointing at the env var",
 			classes: []runtime.Object{pdBalanced},
 			cfg: &inferenceWorkloadConfig{
 				namespace: "ns", model: "Qwen/Qwen3-8B", modelCacheSize: defaultModelCacheSize,
 				gpuNodeInstanceType: "a4x-highgpu-4g", modelCacheStorageClass: "standard-rwo",
 			},
-			wantErr: true,
+			wantErr:    true,
+			wantErrMsg: envModelCacheStorageClass,
+		},
+		{
+			name:    "incompatible explicit override from recipe is rejected, pointing at the recipe constraint",
+			classes: []runtime.Object{pdBalanced},
+			cfg: &inferenceWorkloadConfig{
+				namespace: "ns", model: "Qwen/Qwen3-8B", modelCacheSize: defaultModelCacheSize,
+				gpuNodeInstanceType: "a4x-highgpu-4g", modelCacheStorageClass: "standard-rwo",
+				modelCacheStorageClassFromRecipe: true,
+			},
+			wantErr:    true,
+			wantErrMsg: perfConstraintModelCacheStorageClass,
 		},
 	}
 	for _, tt := range tests {
@@ -557,8 +633,11 @@ func TestEnsureModelCache(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
 			}
-			if tt.wantErr && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if tt.wantErr && errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+			}
+			if tt.wantErrMsg != "" && !strings.Contains(err.Error(), tt.wantErrMsg) {
+				t.Errorf("error = %v, want it to mention %q", err, tt.wantErrMsg)
 			}
 			pvcs, _ := client.CoreV1().PersistentVolumeClaims(tt.cfg.namespace).List(context.Background(), metav1.ListOptions{})
 			if len(pvcs.Items) != 0 {
@@ -605,26 +684,121 @@ func TestEnsureModelCachePinsImplicitDefaultStorageClass(t *testing.T) {
 	}
 }
 
-// TestCacheWorkerImageMatchesTemplate guards the cacheWorkerImage constant
-// against drifting from the worker image in the Dynamo deploy template. The
-// populate Job must download with the same vLLM runtime the workers use: the
-// workers load the populated HF_HOME offline (HF_HUB_OFFLINE=1), so a layout
-// mismatch fails closed. The constant is kept in sync by comment only, so this
-// test fails loudly if a template bump isn't mirrored on the constant.
+// TestCacheWorkerImageMatchesTemplate verifies cacheWorkerImage equals the
+// VllmDecodeWorker image each Dynamo deploy template renders, with and without
+// a registry override.
 func TestCacheWorkerImageMatchesTemplate(t *testing.T) {
-	for _, path := range []string{
-		"testdata/inference/dynamo-deployment.yaml",
-		"testdata/inference/dynamo-deployment-gateway-epp.yaml",
-	} {
-		t.Run(path, func(t *testing.T) {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("read deploy template: %v", err)
-			}
-			if !strings.Contains(string(data), cacheWorkerImage) {
-				t.Errorf("cacheWorkerImage %q not found in %s; "+
-					"the populate-Job image has drifted from the worker image — update cacheWorkerImage to match", cacheWorkerImage, path)
-			}
-		})
+	for _, registry := range []string{"", "localhost:5001"} {
+		for _, tmpl := range []string{"dynamo-deployment.yaml", "dynamo-deployment-gateway-epp.yaml"} {
+			t.Run(tmpl+"/registry="+registry, func(t *testing.T) {
+				t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", registry)
+				cfg := inferenceTemplateTestConfig(defaults.DynamoRuntimeImageTag)
+				obj := renderInferenceTemplate(t, tmpl, cfg)
+				images := componentContainerImages(t, obj, "VllmDecodeWorker")
+				if got := images[mainContainerName]; got != cacheWorkerImage(cfg) {
+					t.Errorf("VllmDecodeWorker main image = %q, want cacheWorkerImage() %q", got, cacheWorkerImage(cfg))
+				}
+			})
+		}
 	}
+}
+
+// TestDynamoTemplateImagesResolved verifies every container image in both
+// Dynamo deploy templates is fully substituted, tagged with the config's
+// Dynamo runtime tag, redirected by AICR_VALIDATOR_IMAGE_REGISTRY, and not
+// retagged by AICR_VALIDATOR_IMAGE_TAG.
+func TestDynamoTemplateImagesResolved(t *testing.T) {
+	tests := []struct {
+		name       string
+		registry   string
+		tag        string
+		runtimeTag string
+		wantPrefix string
+	}{
+		{name: "no override", wantPrefix: defaults.DynamoImageRepository + "/"},
+		{name: "registry override", registry: "localhost:5001", wantPrefix: "localhost:5001/"},
+		{name: "tag override does not retag runtime images", tag: "latest", wantPrefix: defaults.DynamoImageRepository + "/"},
+		{name: "recipe chart version", runtimeTag: testRecipeDynamoVersion, wantPrefix: defaults.DynamoImageRepository + "/"},
+	}
+	for _, tt := range tests {
+		for _, tmpl := range []string{"dynamo-deployment.yaml", "dynamo-deployment-gateway-epp.yaml"} {
+			t.Run(tt.name+"/"+tmpl, func(t *testing.T) {
+				t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", tt.registry)
+				t.Setenv("AICR_VALIDATOR_IMAGE_TAG", tt.tag)
+				wantTag := tt.runtimeTag
+				if wantTag == "" {
+					wantTag = defaults.DynamoRuntimeImageTag
+				}
+				obj := renderInferenceTemplate(t, tmpl, inferenceTemplateTestConfig(wantTag))
+				components, _, err := unstructured.NestedSlice(obj.Object, "spec", "components")
+				if err != nil || len(components) == 0 {
+					t.Fatalf("read spec.components: %v (len %d)", err, len(components))
+				}
+				for _, raw := range components {
+					component, _ := raw.(map[string]any)
+					name, _ := component[keyName].(string)
+					for container, image := range componentContainerImages(t, obj, name) {
+						// A leftover placeholder ships as a literal image
+						// reference and sits in ImagePullBackOff.
+						if strings.Contains(image, "${") {
+							t.Errorf("%s/%s image %q has an unsubstituted placeholder", name, container, image)
+						}
+						if !strings.HasPrefix(image, tt.wantPrefix) {
+							t.Errorf("%s/%s image %q, want prefix %q", name, container, image, tt.wantPrefix)
+						}
+						if !strings.HasSuffix(image, ":"+wantTag) {
+							t.Errorf("%s/%s image %q, want tag %q", name, container, image, wantTag)
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+// inferenceTemplateTestConfig returns a minimal config whose Dynamo runtime
+// images are tagged runtimeTag.
+func inferenceTemplateTestConfig(runtimeTag string) *inferenceWorkloadConfig {
+	return &inferenceWorkloadConfig{
+		namespace:        "aicr-test",
+		model:            "Qwen/Qwen3-8B",
+		routerMode:       dynRouterModeDefault,
+		gpuCount:         1,
+		dynamoRuntimeTag: runtimeTag,
+	}
+}
+
+// renderInferenceTemplate renders testdata/inference/tmpl with the
+// substitutions deployInferenceWorkload applies for cfg.
+func renderInferenceTemplate(t *testing.T, tmpl string, cfg *inferenceWorkloadConfig) *unstructured.Unstructured {
+	t.Helper()
+	obj, err := parseYAMLTemplate(filepath.Join("testdata", "inference", tmpl), inferenceTemplateData(cfg))
+	if err != nil {
+		t.Fatalf("parseYAMLTemplate(%s) error: %v", tmpl, err)
+	}
+	return obj
+}
+
+// componentContainerImages returns the image of each container in component's
+// pod spec, keyed by container name. It fails t if component has no containers.
+func componentContainerImages(t *testing.T, obj *unstructured.Unstructured, component string) map[string]string {
+	t.Helper()
+	containers, _, err := unstructured.NestedSlice(componentPodSpec(t, obj, component), "containers")
+	if err != nil {
+		t.Fatalf("read %s containers: %v", component, err)
+	}
+	images := make(map[string]string, len(containers))
+	for _, raw := range containers {
+		container, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := container[keyName].(string)
+		image, _ := container["image"].(string)
+		images[name] = image
+	}
+	if len(images) == 0 {
+		t.Fatalf("component %s has no containers", component)
+	}
+	return images
 }

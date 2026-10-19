@@ -61,6 +61,9 @@
 //     records, for CI gates detecting stale evidence.
 //   - EmitRecipeEvidence / PublishEvidence — build, then sign and push, a
 //     recipe-evidence bundle.
+//   - RenderCNCFEvidence writes CNCF AI Conformance evidence markdown from a
+//     CTRF report. CollectCNCFEvidence collects behavioral submission
+//     evidence from a live cluster.
 //   - VerifyBinaryAttestation — package-level; prove an aicr binary was
 //     built by NVIDIA CI.
 //
@@ -155,11 +158,13 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler"
+	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/bundler/validations"
 	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
+	"github.com/NVIDIA/aicr/pkg/inventory"
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/recipe/ocisource"
@@ -256,6 +261,14 @@ type clientDependencies struct {
 		context.Context,
 		*snapshotter.AgentConfig,
 	) (*snapshotter.Snapshot, []byte, error)
+
+	// readInventory and scanAtRisk are the two cluster reads UpgradeCheck
+	// makes. They are seams for the reason deployAndCollect is: what the
+	// facade decides about each call, namely the deployer the release names
+	// are mapped under and that the scan looks only for the kinds the match
+	// actually crossed, is otherwise observable only from a live apiserver.
+	readInventory func(context.Context, inventory.Options) (inventory.Result, error)
+	scanAtRisk    func(context.Context, inventory.AtRiskOptions) (inventory.AtRiskResult, error)
 }
 
 func defaultClientDependencies() clientDependencies {
@@ -269,6 +282,8 @@ func defaultClientDependencies() clientDependencies {
 			return ocisource.New(ctx, embedded, config)
 		},
 		deployAndCollect: snapshotter.DeployAndCollect,
+		readInventory:    inventory.Read,
+		scanAtRisk:       inventory.ScanAtRisk,
 	}
 }
 
@@ -832,11 +847,24 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 	}
 
 	var resolveOpts []RecipeResolveOption
+	if req.InheritFrom != "" {
+		resolveOpts = append(resolveOpts, WithInheritFrom(req.InheritFrom))
+	}
+	if req.Inherit != "" {
+		resolveOpts = append(resolveOpts, WithInherit(req.Inherit))
+	}
 	if req.Profile != "" {
 		resolveOpts = append(resolveOpts, WithProfile(req.Profile))
 	}
 	if req.AccountingMode != "" {
 		resolveOpts = append(resolveOpts, WithAccountingMode(req.AccountingMode))
+	}
+	if req.GKETCPXOInterfaces != "" {
+		resolveOpts = append(resolveOpts, WithGKETCPXOInterfaces(req.GKETCPXOInterfaces))
+	}
+	resolveCfg, err := resolveRecipeConfig(resolveOpts...)
+	if err != nil {
+		return nil, err
 	}
 	internal, err := c.resolveCriteria(ctx, builder, criteria, resolveOpts...)
 	if err != nil {
@@ -850,6 +878,15 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 		return nil, err
 	}
 
+	// Applied to the resolved refs before the facade projection, so the
+	// emitted recipe, the Components view and anything bundled from them all
+	// name the namespace the prior artifact deployed into.
+	if req.InheritFrom != "" {
+		if inheritErr := c.inheritIdentity(ctx, req.InheritFrom, resolveCfg.inheritMode, builder.DataProvider(), internal); inheritErr != nil {
+			return nil, inheritErr
+		}
+	}
+
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {
 		return nil, err
@@ -860,6 +897,190 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 	// is unexported.
 	result.owner = c
 	return result, nil
+}
+
+// inheritIdentity overwrites the selected parts of resolved's component
+// identity with the ones a prior recipe or
+// bundle already deployed, so a moved registry default does not relocate or
+// replace a running component when the recipe is regenerated.
+//
+// No kubeconfig is threaded through: inheritedRecipePath rejects the only
+// artifact form that would need one.
+// dp is the provider the outer operation already captured under mu, and the
+// prior artifact loads through it directly rather than through the public
+// LoadRecipe. LoadRecipe re-runs the closed-client check, so a concurrent Close
+// that cleared c.builder after the outer call was admitted would fail this
+// nested load with "already closed" while Close itself is still waiting on that
+// same call's inflight count to drain.
+func (c *Client) inheritIdentity(
+	ctx context.Context, inheritFrom string, selection *recipe.InheritMode, dp recipe.DataProvider, resolved *recipe.RecipeResult,
+) error {
+
+	path, err := inheritedRecipePath(inheritFrom)
+	if err != nil {
+		return err
+	}
+	// Checked before loading, because the loader auto-hydrates a RecipeMetadata
+	// overlay against the CURRENT data provider. That hydration would succeed
+	// and hand back identity derived from the registry this binary ships,
+	// which are the values inheritance exists to override, so the flag would
+	// silently do the opposite of what it promises.
+	if kindErr := requireHydratedRecipe(path, inheritFrom); kindErr != nil {
+		return kindErr
+	}
+	// Empty kubeconfig is safe: inheritedRecipePath rejects cm://, the only
+	// artifact form whose load would contact a cluster.
+	priorInternal, err := recipe.LoadFromFileWithProvider(ctx, path, "", c.version, dp)
+	if err != nil {
+		// The loader already returns structured errors with the right code.
+		return err
+	}
+	// Empty is the reachable half of this guard, not nil: nothing on the load
+	// path rejects a recipe whose componentRefs list is empty, and
+	// ApplyInheritedIdentity returns immediately for one. Letting that through
+	// would re-derive every identity from the current registry while reporting
+	// success, which is the relocation this flag exists to prevent.
+	if priorInternal == nil || len(priorInternal.ComponentRefs) == 0 {
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"inherit-from %s carries no components to inherit identity from", inheritFrom))
+	}
+	if criteriaErr := checkInheritCriteria(resolved.Criteria, priorInternal.Criteria, inheritFrom); criteriaErr != nil {
+		return criteriaErr
+	}
+	mode := recipe.InheritAll
+	if selection != nil {
+		mode = *selection
+	}
+	if applyErr := recipe.ApplyInheritedIdentityWithMode(resolved.ComponentRefs, priorInternal.ComponentRefs, mode); applyErr != nil {
+		return applyErr
+	}
+	if mode == recipe.InheritAll {
+		if namesErr := c.inheritObjectNames(ctx, inheritFrom, resolved); namesErr != nil {
+			return namesErr
+		}
+	}
+	// The inherited fields land after the resolved recipe was last validated,
+	// and a prior artifact can carry a combination the current registry's
+	// shape rejects, so check again before anything is emitted or bundled.
+	// Object-name pins are written into Overrides above, so this sees them too.
+	return resolved.ValidateCoherence()
+}
+
+// checkInheritCriteria rejects a prior artifact resolved for a different
+// service, accelerator, intent or OS. Same-named components differ across
+// those, so inheriting their manifest sets and charts would import another
+// environment's deployment. A dimension either side leaves unset or "any" does
+// not count, and neither do platform and nodes, which grow a deployment rather
+// than relocate it.
+func checkInheritCriteria(resolved, prior *recipe.Criteria, inheritFrom string) error {
+	if resolved == nil || prior == nil {
+		return nil
+	}
+	for _, d := range []struct{ name, now, was string }{
+		{"service", string(resolved.Service), string(prior.Service)},
+		{"accelerator", string(resolved.Accelerator), string(prior.Accelerator)},
+		{"intent", string(resolved.Intent), string(prior.Intent)},
+		{"os", string(resolved.OS), string(prior.OS)},
+	} {
+		unset := func(v string) bool { return v == "" || v == "any" }
+		if unset(d.now) || unset(d.was) || d.now == d.was {
+			continue
+		}
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"inherit-from %s was resolved for %s %q but this recipe resolves for %q, "+
+				"so its component identity does not describe this deployment",
+			inheritFrom, d.name, d.was, d.now))
+	}
+	return nil
+}
+
+// inheritObjectNames pins the object names the prior bundle deployed with, so
+// a values-file edit that drops a fullnameOverride does not rename a running
+// release's objects on the next regenerate.
+//
+// Only a bundle can answer. A resolved recipe records valuesFile as a path
+// resolved against whichever binary reads it, so re-reading a prior recipe's
+// values would yield the values THIS binary ships — the very ones inheritance
+// is meant to override. That is reported rather than silently skipped, and it
+// is a warning rather than an error because the namespace half of the flag
+// still did its job.
+func (c *Client) inheritObjectNames(
+	ctx context.Context, inheritFrom string, resolved *recipe.RecipeResult,
+) error {
+
+	dir, isBundle := bundleDirectory(inheritFrom)
+	if !isBundle {
+		slog.Warn("inherit-from cannot pin object names from a recipe file",
+			"inheritFrom", inheritFrom,
+			"reason", "a recipe records its values by reference, so it does not state the object "+
+				"names it deployed with",
+			"remedy", "pass the bundle directory that was deployed")
+		return nil
+	}
+
+	values, err := bundleinfo.ReadReleaseValues(ctx, dir)
+	if err != nil {
+		if stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+			slog.Warn("inherit-from cannot pin object names from this bundle",
+				"inheritFrom", inheritFrom,
+				"reason", "it has no "+bundleinfo.FileName+", so it predates build-record stamping")
+			return nil
+		}
+		// A well-formed bundle whose names are not all stated where they can
+		// be read. Like the case above, and unlike an incomplete bundle, the
+		// namespace half still holds, so this warns rather than refusing.
+		if stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
+			slog.Warn("inherit-from cannot pin object names from this bundle",
+				"inheritFrom", inheritFrom, "reason", err.Error())
+			return nil
+		}
+		return err
+	}
+
+	prior, err := projectObjectNames(values)
+	if err != nil {
+		return err
+	}
+	current, err := internalObjectNames(ctx, resolved)
+	if err != nil {
+		return err
+	}
+	return recipe.ApplyInheritedObjectNames(resolved.ComponentRefs, prior, current)
+}
+
+// requireHydratedRecipe rejects an inheritance source that is not already a
+// resolved RecipeResult.
+//
+// Only the kind is read, from a bounded prefix: the document is operator-
+// supplied and the full parse belongs to the loader. An empty kind is accepted
+// because the loader still treats a headerless document as a RecipeResult.
+func requireHydratedRecipe(path, ref string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("inherit-from %s is not readable", ref), err)
+	}
+	defer f.Close() //nolint:errcheck // read-only handle
+	data, err := io.ReadAll(io.LimitReader(f, defaults.MaxRecipePOSTBytes))
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("inherit-from %s is not readable", ref), err)
+	}
+	var probe struct {
+		Kind string `yaml:"kind"`
+	}
+	if err := yaml.Unmarshal(data, &probe); err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("inherit-from %s is not valid YAML", ref), err)
+	}
+	if probe.Kind != "" && probe.Kind != recipe.RecipeResultKind {
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"inherit-from %s is a %s; it must be a resolved %s (a recipe generated by "+
+				"aicr recipe, or the recipe.yaml at a bundle root). An overlay would be "+
+				"hydrated against the current registry, producing the identity inheritance "+
+				"is meant to override", ref, probe.Kind, recipe.RecipeResultKind))
+	}
+	return nil
 }
 
 // resolveCriteria is the shared path: allowlist enforcement + build. Callers
@@ -899,6 +1120,9 @@ func recipeBuildOptions(opts ...RecipeResolveOption) (*recipeResolveConfig, []re
 	if cfg.runtimeInventoryMode != nil {
 		buildOpts = append(buildOpts, recipe.WithRuntimeInventoryMode(*cfg.runtimeInventoryMode))
 	}
+	if cfg.tcpxoInterfaces != nil {
+		buildOpts = append(buildOpts, recipe.WithGKETCPXOInterfaces(*cfg.tcpxoInterfaces))
+	}
 	return cfg, buildOpts, nil
 }
 
@@ -911,6 +1135,10 @@ func resolveRecipeConfig(opts ...RecipeResolveOption) (*recipeResolveConfig, err
 	}
 	if cfg.optErr != nil {
 		return nil, cfg.optErr
+	}
+	if cfg.inheritMode != nil && cfg.inheritFrom == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"inherit selection (--inherit / Inherit) requires --inherit-from (InheritFrom)")
 	}
 	return cfg, nil
 }
@@ -1001,6 +1229,19 @@ func (c *Client) ResolveRecipeFromCriteriaWithOptions(
 	internal, err := c.resolveCriteria(ctx, builder, toInternalCriteria(criteria), opts...)
 	if err != nil {
 		return nil, err
+	}
+	// Re-read the options for the inherit reference alone. resolveCriteria has
+	// already surfaced any option validation failure, so reading them here
+	// rather than before the resolve keeps the reported error the one the
+	// caller would have seen without this option.
+	cfg, err := resolveRecipeConfig(opts...)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.inheritFrom != "" {
+		if inheritErr := c.inheritIdentity(ctx, cfg.inheritFrom, cfg.inheritMode, builder.DataProvider(), internal); inheritErr != nil {
+			return nil, inheritErr
+		}
 	}
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {
@@ -1198,6 +1439,19 @@ func (c *Client) ResolveRecipeFromSnapshotWithOptions(
 	// unsafe AICR-provided states after the complete recipe is available.
 	if applyErr := applyMariaDBOperatorState(ctx, internal, internalSnap); applyErr != nil {
 		return nil, applyErr
+	}
+	// NVSentinel datastore prerequisites follow the same observational
+	// pattern; CheckNVSentinelDatastorePrerequisites enforces them.
+	if applyErr := applyNVSentinelDatastoreState(ctx, internal, internalSnap); applyErr != nil {
+		return nil, applyErr
+	}
+	// Last write to the refs before the facade projection, so the emitted
+	// recipe and the Components view agree on where each component lives.
+	if resolveCfg.inheritFrom != "" {
+		if inheritErr := c.inheritIdentity(
+			ctx, resolveCfg.inheritFrom, resolveCfg.inheritMode, builder.DataProvider(), internal); inheritErr != nil {
+			return nil, inheritErr
+		}
 	}
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {
@@ -1436,6 +1690,7 @@ func facadeResultFromInternal(r *recipe.RecipeResult, name string) *RecipeResult
 			Name:      c.Name,
 			Kind:      string(c.Type),
 			Version:   c.Version,
+			Tag:       c.Tag,
 			Source:    c.Source,
 			Chart:     chart,
 			Namespace: c.Namespace,
@@ -1818,13 +2073,25 @@ func resolveHelmComponentValues(
 // cluster-reading Job into an unstated namespace is not a safe default. An
 // empty one is rejected with ErrCodeInvalidRequest before any cluster access.
 //
-// cfg.Image, cfg.JobName, and cfg.ServiceAccountName are defaulted when empty,
-// to the same values the CLI's flags use — defaults.AgentName for the two names,
-// which are therefore SHARED across callers that omit them (see Concurrency),
-// and for the image the tag matching this Client's WithVersion (a Client with no
-// version, like a development build, gets :latest). Set cfg.Image explicitly to
-// pin a different agent generation or a mirrored registry. Other fields fall
-// back to the defaults documented on snapshotter.AgentConfig.
+// cfg.Image is defaulted when empty to the tag matching this Client's
+// WithVersion (a Client with no version, like a development build, gets
+// :latest). Set it explicitly to pin a different agent generation or a
+// mirrored registry.
+//
+// cfg.JobName and cfg.ServiceAccountName are optional naming PREFIXES, not
+// exact names. Leaving them empty is fine: cfg.NameBase (default
+// defaults.AgentName) supplies the prefix instead. cfg.RunID is appended to
+// whichever prefix applies, so two callers that both omit these names still
+// get distinct objects rather than shared ones — see Concurrency. Other
+// fields fall back to the defaults documented on snapshotter.AgentConfig.
+//
+// One exception to the prefix rule, because it is the point of the mode: a
+// cfg.ServiceAccountName that names a ServiceAccount already present in
+// cfg.Namespace is used VERBATIM, and this call then creates and deletes no
+// RBAC at all. That is how a caller runs the agent under an IRSA or Workload
+// Identity account, whose cloud trust is pinned to the account name and so
+// cannot survive a run-scoped rename. It waives per-run permission isolation:
+// concurrent runs sharing that account share its grants.
 //
 // # Output and delivery
 //
@@ -1883,24 +2150,23 @@ func resolveHelmComponentValues(
 //
 // # Concurrency
 //
-// Concurrent CollectSnapshot calls are safe at the Client level — each call
-// constructs an independent run and shares no in-process state.
+// Concurrent CollectSnapshot calls are safe, at the Client level and against
+// the same cluster. Each call gets its own RunID (cfg.RunID when set,
+// otherwise generated) and, from it, its own Job, ServiceAccount, Role,
+// RoleBinding, ClusterRole, ClusterRoleBinding and — when cfg.Output does not
+// name one — its own staging ConfigMap. Every object is deleted under a UID
+// precondition recorded when this run created it, so no run can delete
+// something another run owns. This replaces the earlier one-at-a-time
+// constraint (#2120).
 //
-// They are NOT safe against the same cluster. The agent deployment is
-// name-addressed and partly cluster-scoped, so two runs collide in three ways
-// regardless of what this method defaults:
+// Two effects remain shared, both by design:
 //
-//   - The Job is delete-then-created, so a second run destroys a first run's
-//     in-flight Job even when Cleanup is false.
-//   - The ServiceAccount, Role, and RoleBinding are named from
-//     cfg.ServiceAccountName in cfg.Namespace.
-//   - The ClusterRoleBinding has a FIXED name and carries the ServiceAccount as
-//     its subject, so a second run repoints it and the first run's pod loses its
-//     node-read permission mid-collection. Distinct JobName and
-//     ServiceAccountName values do not avoid this one.
-//
-// Collect against one cluster at a time. Concurrent collection needs per-run
-// ownership down in pkg/k8s/agent, tracked in #2481.
+//   - Two calls that set cfg.Output to the SAME explicit cm://namespace/name
+//     URI write to that one caller-named ConfigMap and overwrite each other.
+//     Output identifies a caller-owned destination, not a run-scoped one, so
+//     RunID does not disambiguate it.
+//   - Two calls naming the same existing cfg.ServiceAccountName run under that
+//     one identity and share its grants, since neither creates RBAC.
 func (c *Client) CollectSnapshot(ctx context.Context, cfg *AgentConfig) (*Snapshot, error) {
 	if c == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
@@ -1963,26 +2229,40 @@ func (c *Client) CollectSnapshot(ctx context.Context, cfg *AgentConfig) (*Snapsh
 	return out, nil
 }
 
-// applyAgentDefaults fills the agent fields the CLI has always supplied as flag
-// defaults and the facade did not.
+// applyAgentDefaults fills Image, the one agent field the CLI has always
+// supplied as a flag default and the facade did not.
 //
-// Image, JobName, and ServiceAccountName are copied verbatim into the Job and
-// RBAC objects and nothing under pkg/k8s/agent defaults them, so omitting any of
-// the three surfaced as a raw apiserver rejection from inside Deploy — after
-// the ServiceAccount had already been created, which with Cleanup false leaves
-// it behind (#2256). The CLI never hit it because pkg/cli/snapshot.go supplies
-// all three as flag defaults; sharing the definitions through pkg/defaults is
-// what keeps the two paths deploying the same image.
+// Image is copied verbatim into the Job's container and nothing under
+// pkg/k8s/agent defaults it, so omitting it surfaced as a raw apiserver
+// rejection from inside Deploy — after the ServiceAccount had already been
+// created, which with Cleanup false leaves it behind (#2256). The CLI never hit
+// it because pkg/cli/snapshot.go supplies it as a flag default; sharing the
+// definition through pkg/defaults is what keeps the two paths deploying the
+// same image.
 //
-// Namespace is deliberately NOT defaulted. pkg/snapshotter already rejects an
-// empty one with a coded error naming the field, and quietly deploying a
-// privileged, cluster-reading Job into "default" is a worse outcome than being
-// told to choose. The CLI defaults it because a person is watching a flag they
-// can see; an SDK caller is not.
+// JobName and ServiceAccountName are deliberately NOT defaulted, though #2256
+// originally set both to defaults.AgentName here. Under run isolation
+// (ADR-020) they are naming PREFIXES that pkg/k8s/agent already defaults from
+// Config.NameBase before appending the run ID, so filling them adds nothing —
+// and for ServiceAccountName it actively harms. That field is exact-if-exists:
+// agent.Deployer.resolveServiceAccount probes for a ServiceAccount of exactly
+// the given name and, on a hit, runs under it and manages no RBAC for the run
+// at all. Defaulting it means every SDK caller who omits it probes "aicr", so
+// on any cluster carrying a leftover "aicr" ServiceAccount from a
+// pre-ADR-020 install every run would silently enter that mode. An unset name
+// is never probed, so exact mode stays reachable only from a name the caller
+// actually chose. See CollectSnapshot's godoc, which documents both as
+// optional prefixes.
 //
-// A whitespace-only value counts as unset: it cannot be a valid Kubernetes name
-// or image reference, so treating it as a typo'd omission beats forwarding it to
-// the apiserver. This mirrors how pkg/snapshotter reads Namespace.
+// Namespace is deliberately NOT defaulted either. pkg/snapshotter already
+// rejects an empty one with a coded error naming the field, and quietly
+// deploying a privileged, cluster-reading Job into "default" is a worse outcome
+// than being told to choose. The CLI defaults it because a person is watching a
+// flag they can see; an SDK caller is not.
+//
+// A whitespace-only Image counts as unset: it cannot be a valid image
+// reference, so treating it as a typo'd omission beats forwarding it to the
+// apiserver. This mirrors how pkg/snapshotter reads Namespace.
 func applyAgentDefaults(cfg *snapshotter.AgentConfig, version string) {
 	if cfg == nil {
 		return
@@ -1990,12 +2270,144 @@ func applyAgentDefaults(cfg *snapshotter.AgentConfig, version string) {
 	if strings.TrimSpace(cfg.Image) == "" {
 		cfg.Image = defaults.AgentImageForVersion(version)
 	}
-	if strings.TrimSpace(cfg.JobName) == "" {
-		cfg.JobName = defaults.AgentName
+}
+
+// PreflightSkipChecks runs ValidateState's skip-list guard on its own, without
+// running any validation, so a caller that does cluster work of its own before
+// ValidateState can reject an unusable skip list first.
+//
+// The CLI is that caller: `aicr validate` with neither --snapshot nor
+// --no-cluster deploys a snapshot-capture agent before it has a Snapshot to
+// hand ValidateState, so without this the guard fired only after a
+// ServiceAccount, a Role and a Job existed, while the --skip-check help text
+// promised rejection "before any validation resource is created".
+//
+// Pass the same options ValidateState will get. WithValidationSkipChecks
+// supplies the list under test and WithValidationPhases the phase set it is
+// judged against; WithValidationCommit also matters, because the catalog load
+// resolves validator images against that commit. The remaining validation
+// options reach the validator but nothing on this path consults them. recipe
+// must come from a prior call on this Client, as for ValidateState. No
+// Kubernetes call is made, so it is safe on a caller with no cluster access.
+//
+// It does not replace the guard inside ValidateState, which stays for callers
+// that reach ValidateState directly. Running both is idempotent.
+//
+// Returns nil immediately when no skip list was passed, so the default path
+// pays no catalog load. The Client and recipe guards still run first, so a
+// closed Client is reported as such either way.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when the Client or recipe is nil, when recipe
+//     lacks internal state, when the Client has been Closed, or when an entry
+//     names no validator in the catalog (or would empty a requested phase).
+//   - The catalog loader's own structured code when the catalog cannot be
+//     loaded; ErrCodeInternal only when that failure carries no code.
+func (c *Client) PreflightSkipChecks(
+	ctx context.Context,
+	recipe *RecipeResult,
+	opts ...ValidateOption,
+) error {
+
+	if c == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
 	}
-	if strings.TrimSpace(cfg.ServiceAccountName) == "" {
-		cfg.ServiceAccountName = defaults.AgentName
+	if ctx == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
 	}
+	if recipe == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "nil RecipeResult")
+	}
+	if recipe.internal == nil {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"RecipeResult has no internal recipe state: call Client.ResolveRecipe to obtain a validatable RecipeResult")
+	}
+	if err := c.assertOwns(recipe); err != nil {
+		return err
+	}
+
+	c.mu.RLock()
+	if c.builder == nil {
+		c.mu.RUnlock()
+		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
+	}
+	dp := c.dp
+	clientVersion := c.version
+	c.inflight.Add(1)
+	c.mu.RUnlock()
+	defer c.inflight.Done()
+
+	// After the Client guards, not before, so a closed Client is reported as
+	// such whether or not there is a list to check: a caller must not learn
+	// that its Client is unusable only on the next call. The catalog load and
+	// the validator below are what the empty list actually skips.
+	cfg := buildValidateConfig(opts)
+	if len(cfg.skipChecks) == 0 {
+		return nil
+	}
+
+	valOpts := append(validateOptionsFromConfig(cfg),
+		validator.WithDataProvider(dp),
+		validator.WithVersion(clientVersion))
+	v := validator.New(valOpts...)
+
+	internalPhases := make([]validator.Phase, len(cfg.phases))
+	for i, p := range cfg.phases {
+		internalPhases[i] = validator.Phase(p)
+	}
+	validationInput, err := validatorv1.ToValidationInputWithContext(ctx, recipe.internal)
+	if err != nil {
+		return err
+	}
+	return v.PreflightSkipChecks(ctx, internalPhases, validationInput)
+}
+
+// PreflightValidatorServiceAccount runs ValidateState's check of the
+// ServiceAccount named by WithValidatorServiceAccountName on its own, so a
+// caller that does cluster work of its own before ValidateState can fail
+// before that work instead of after it.
+//
+// The CLI is that caller: `aicr validate` without --snapshot deploys a
+// snapshot-capture agent, and its RBAC, before it has a Snapshot to hand
+// ValidateState. A missing or unbound validator ServiceAccount would
+// otherwise surface only after that capture.
+//
+// Pass the same options ValidateState will get: WithValidatorServiceAccountName
+// supplies the ServiceAccount, and WithValidationNamespace and
+// WithValidationKubeconfig where to look for it. The check issues a Get and a
+// SubjectAccessReview and creates nothing. It returns nil without contacting
+// the cluster when no ServiceAccount is named or WithValidationNoCluster(true)
+// is set. ValidateState runs the same check itself, so running both is
+// idempotent.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when the Client is nil or has been Closed, when
+//     the kubeconfig cannot be loaded, or when the ServiceAccount sets
+//     automountServiceAccountToken: false.
+//   - ErrCodeNotFound when the ServiceAccount does not exist.
+//   - ErrCodeUnauthorized when it is not bound to cluster-admin, or when the
+//     caller's credentials are rejected or it may not read the ServiceAccount
+//     or create a SubjectAccessReview.
+//   - ErrCodeCanceled, ErrCodeTimeout, ErrCodeUnavailable or ErrCodeInternal
+//     when the check itself cannot complete.
+func (c *Client) PreflightValidatorServiceAccount(ctx context.Context, opts ...ValidateOption) error {
+	if c == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
+	}
+	if ctx == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
+	}
+
+	c.mu.RLock()
+	if c.builder == nil {
+		c.mu.RUnlock()
+		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
+	}
+	c.inflight.Add(1)
+	c.mu.RUnlock()
+	defer c.inflight.Done()
+
+	return validator.New(validateOptionsFromConfig(buildValidateConfig(opts))...).PreflightServiceAccount(ctx)
 }
 
 // ValidateState evaluates a resolved recipe against an observed cluster
@@ -2017,8 +2429,9 @@ func applyAgentDefaults(cfg *snapshotter.AgentConfig, version string) {
 // from unit tests so no Kubernetes resources are created and every
 // check reports as "skipped". WithValidationNamespace, WithValidationRunID,
 // WithValidationCleanup, WithValidationTolerations,
-// WithValidationNodeSelector, WithValidationKubeconfig, and
-// WithValidationPhases cover the production-controller knobs. The validator
+// WithValidationNodeSelector, WithValidationKubeconfig,
+// WithValidationPhases, and WithValidatorServiceAccountName cover the
+// production-controller knobs. The validator
 // catalog loads through this Client's own DataProvider, so a Client built from
 // FilesystemSource validates against that recipe source rather than the
 // package global.
@@ -2029,7 +2442,9 @@ func applyAgentDefaults(cfg *snapshotter.AgentConfig, version string) {
 //     Closed.
 //   - All validator errors propagate unwrapped — readiness-check
 //     failures surface as ErrCodeInvalidRequest, infrastructure
-//     failures as ErrCodeInternal.
+//     failures as ErrCodeInternal. With WithValidatorServiceAccountName,
+//     the ServiceAccount check fails before anything is deployed, with the
+//     codes PreflightValidatorServiceAccount documents.
 //
 // All phases run by default and produce results regardless of earlier
 // failures. Pass WithValidationFailFast(true) to stop after the first
@@ -2093,7 +2508,8 @@ func (c *Client) ValidateState(
 	// Apply a facade-level deadline only as opted into by WithValidationTimeout,
 	// mirroring MakeBundle. The default (cfg.timeout == nil) keeps the
 	// ValidationOperationTimeout cap (75m), which sits ABOVE the largest
-	// per-check Job timeout (the 65m inference-perf catalog timeout; the
+	// rendered per-check Job deadline (the 65m inference-perf catalog timeout
+	// plus the 3m30s ValidatorJobDeadlineHeadroom, i.e. 68m30s; the
 	// CheckExecutionTimeout fallback is 55m), so a single hung check fires its
 	// own per-check timeout first and surfaces as a structured check failure
 	// rather than a wrapping deadline-exceeded that loses the per-check signal —

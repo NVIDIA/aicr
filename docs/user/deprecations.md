@@ -7,7 +7,7 @@ several versions can still find out what happened.
 
 The policy behind this page — what counts as a breaking change on each surface,
 and the notice a removal owes — is in
-[`RELEASING.md`](https://github.com/NVIDIA/aicr/blob/main/RELEASING.md#deprecation-policy).
+[`RELEASE.md`](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md#deprecation-policy).
 
 ## How you will find out
 
@@ -31,17 +31,56 @@ a bug worth [filing](https://github.com/NVIDIA/aicr/issues/new/choose).
 
 ## Active
 
+### Bundle-time GPU allocation-policy overrides
+
+**Surface:** bundle value overrides ·
+**Deprecated in:** v0.17 · **Removed in:** not scheduled
+
+A static bundle-time override (`--set`, `--set-json`, `--set-file`, or a config
+file) of a key that selects the GPU allocation policy still applies, but warns.
+The keys are `devicePlugin.enabled` on `gpu-operator`(`-ocp`),
+`resources.gpus.enabled` and `gpuResourcesEnabledOverride` on
+`nvidia-dra-driver-gpu`(`-ocp`), and the `enabled` toggle of those components.
+Validators verify the allocation policy resolved from the recipe, so a
+bundle-time change is reported as recipe/cluster drift. `--dynamic` on these
+keys is already rejected. See
+[Configured GPU allocation policy](validation.md#configured-gpu-allocation-policy).
+
+No removal release is set yet, so the warning does not name one.
+
+**What to do.** Set the allocation mode in a recipe overlay instead of at
+bundle time.
+
+### Bundle-time `slinky-slurm:accounting.enabled` on legacy Slurm recipes
+
+**Surface:** bundle value overrides ·
+**Deprecated in:** v0.19 · **Removed in:** not scheduled
+
+A Slurm recipe that records no accounting mode (no
+`configuration.slurm.accounting`) predates `--slurm-accounting-mode`. Bundling
+one with a `slinky-slurm:accounting.enabled` override still works, but warns:
+the override selects only customer-managed accounting, and it is not recorded
+in recipe evidence. On a recipe that records a mode, the same override is
+rejected; see [Slurm Accounting](slinky-slurm-accounting.md).
+
+No removal release is set yet, so the warning does not name one.
+
+**What to do.** Regenerate the recipe with `--slurm-accounting-mode` (for
+example `customer-managed`) and drop the override.
+
+## Removed
+
 ### Alpha artifact `apiVersion` values
 
 **Surface:** bundle and artifact schemas ·
-**Deprecated in:** v0.22 · **Removed in:** v0.23
+**Deprecated in:** v0.22 · **Removed in:** v1.0.0
 
 Every artifact AICR generates carried an alpha `apiVersion` — `aicr.run/v1alpha2`
-for most kinds, `aicr.run/v1alpha3` for profile-bearing recipes. Those values are
-being replaced by maturity-appropriate targets, per
+for most kinds, `aicr.run/v1alpha3` for profile-bearing recipes. Those values were
+replaced by maturity-appropriate targets, per
 [ADR-022](https://github.com/NVIDIA/aicr/blob/main/docs/design/022-artifact-maturity-and-deprecation.md).
 
-| Kind | Retiring | Replacement |
+| Kind | Retired | Replacement |
 |---|---|---|
 | `Snapshot`, default `RecipeResult`, `RecipeCriteria`, `BundleProvenance` | `aicr.run/v1alpha2` | `aicr.run/v1` |
 | `AICRConfig`, catalog `RecipeMetadata`, `RecipeMixin`, `ComponentRegistry` | `aicr.run/v1alpha2` | `aicr.run/v1beta1` |
@@ -54,21 +93,44 @@ produced them. Files you authored — `AICRConfig`, and any external
 are edited by hand. AICR has no conversion layer and does not rewrite your
 catalog.
 
-**The window is v0.22 only.** v0.21 and v0.22 read both the alpha and the target
-values; v0.23 reads only the target. An archived artifact whose source cannot be
-recaptured stays readable only with a retained v0.21 or v0.22 binary. See
+**The window was v0.22 only, and it has closed.** v0.21 and v0.22 read both the
+alpha and the target values; v1.0.0 reads only the target, and rejects an alpha or
+absent `apiVersion` with a message naming the value, the expected value, and the
+release that withdrew it. An archived artifact whose source cannot be recaptured
+stays readable only with a retained v0.21 or v0.22 binary. See
 [catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility)
 for the release-by-release table.
+
+**Go importers.** The retirement also removed the exported `pkg/header`
+identifiers that named the alpha values. `pkg/header` sits outside the
+`pkg/client/v1` SDK surface the API compatibility gate covers, so this reaches
+you as a compile error rather than a recorded API break.
+
+| Removed | Replace with |
+|---|---|
+| `APIVersionV1Alpha2` | the bare segment for your track — `APIVersionV1`, `APIVersionV1Beta1`, or `APIVersionV1Beta2` |
+| `APIVersionV1Alpha3` | `APIVersionV1Beta2`; it only ever named the profile-bearing track |
+| `GroupVersion` | the full group/version for your track — `GroupVersionV1`, `GroupVersionV1Beta1`, or `GroupVersionV1Beta2` |
+| `RecipeResultGroupVersion` | `GroupVersionV1Beta2`, for the same reason |
+| `WarnDeprecatedAPIVersion` | nothing — a retired value is rejected now, not warned about. `RetirementNote` supplies the `(… was retired in v1.0.0)` clause for the rejection message |
+| `ResetAPIVersionRecorderForTest` | nothing — the warning recorder it reset is gone |
+
+The two constant families are not interchangeable: an `APIVersion*` constant is
+a bare segment (`v1beta1`), while a `GroupVersion*` constant carries the group
+as well (`aicr.run/v1beta1`). Use the Kind table above to pick your track, and
+alias the constant rather than the string it happens to equal — the tracks hold
+distinct values now, so a collapsed alias shows up as a wrong value rather than
+a latent one.
 
 ### Empty `apiVersion` on artifacts
 
 **Surface:** bundle and artifact schemas ·
 **Deprecated in:** v0.22 ·
-**Removed in:** v0.23 for `RecipeResult` inputs; **already removed in v0.21**
-for `RecipeMetadata` overlays
+**Removed in:** v1.0.0 for `Snapshot`, `RecipeCriteria`, and `RecipeResult`
+inputs; v0.21 for `RecipeMetadata` overlays
 
-Artifacts predating the `apiVersion` field load today with the field absent or
-empty. That tolerance retires alongside the alpha values — except for
+Artifacts predating the `apiVersion` field loaded with the field absent or
+empty. That tolerance retired alongside the alpha values — except for
 `RecipeMetadata`, which lost it a release early and without a warning window;
 see below.
 
@@ -76,13 +138,10 @@ One narrowing landed earlier than the rest: as of v0.21, a `RecipeMetadata`
 overlay passed directly (`aicr bundle -r overlay.yaml`,
 `aicr validate -r overlay.yaml`) must carry an `apiVersion`, because the catalog
 scanner already required one and the two paths disagreed on the same bytes
-([#2421](https://github.com/NVIDIA/aicr/issues/2421)). Hydrated `RecipeResult`
-inputs keep the tolerance until v0.23.
+([#2421](https://github.com/NVIDIA/aicr/issues/2421)). `Snapshot`,
+`RecipeCriteria`, and hydrated `RecipeResult` inputs kept the tolerance until
+v1.0.0.
 
 **What to do.** Add an `apiVersion` header to any artifact you author or retain.
-Use the target value from the table above, not the alpha one — v0.21 onward
-accepts both, and only the target survives v0.23.
-
-## Removed
-
-Nothing has completed a removal cycle yet. The first entries land in v0.23.
+Use the target value from the table above; v1.0.0 and later accept only the
+target.

@@ -527,7 +527,7 @@ func TestBodyLimitMiddleware_NilBodyIsHandled(t *testing.T) {
 }
 
 // TestDeprecationMiddleware covers the REST arm of the deprecation channel
-// (RELEASING.md). No route is deprecated in the shipped configuration yet, so
+// (RELEASE.md). No route is deprecated in the shipped configuration yet, so
 // the mechanism is exercised here against a route this test marks itself.
 func TestDeprecationMiddleware(t *testing.T) {
 	deprecated := time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC)

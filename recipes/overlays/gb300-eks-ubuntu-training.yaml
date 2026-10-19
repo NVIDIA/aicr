@@ -14,7 +14,7 @@
 
 
 kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: gb300-eks-ubuntu-training
 
@@ -42,4 +42,7 @@ spec:
 
   componentRefs: []
 
-  # Validation is inherited from gb300-eks-training (not OS-specific)
+  validation:
+    conformance:
+      checks:
+        - secure-accelerator-access

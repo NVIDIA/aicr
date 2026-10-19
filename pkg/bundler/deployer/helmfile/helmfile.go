@@ -102,12 +102,21 @@ type Generator struct {
 	// charts/<chart>-<version>.tgz adjacent to a wrapper Chart.yaml).
 	VendorCharts bool
 
+	// Puller fetches upstream chart bytes when VendorCharts is set. nil
+	// resolves to a default *CLIChartPuller; tests inject a stub here
+	// without touching package state. Ignored when VendorCharts is false.
+	Puller localformat.ChartPuller
+
 	// Serial chains every release to its immediate predecessor via needs:,
 	// forming one linear apply chain instead of the default per-component
 	// chaining (which lets independent components in a sub-helmfile apply
 	// concurrently). Off by default. Operator escape hatch wired from
 	// --serial; see config.Serial and buildHelmfile.
 	Serial bool
+
+	// UpgradeNotice is upgrade.WriteNotice output, inserted verbatim before the
+	// first deployment heading of README.md. Empty adds nothing.
+	UpgradeNotice string
 
 	// vendorRecords is populated by Generate when VendorCharts is on.
 	// Captured here so provenance.yaml can be written after component
@@ -140,19 +149,31 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Sort components by deployment order and build the localformat input.
 	sortedRefs := deployer.SortComponentRefsByDeploymentOrder(
 		g.RecipeResult.ComponentRefs, g.RecipeResult.DeploymentOrder)
-	lfComponents, namespaceByComponent := toLocalformatComponents(sortedRefs, g.ComponentValues, g.DynamicValues)
+	var chartDigests map[string]string
+	if g.VendorCharts {
+		var digestErr error
+		chartDigests, digestErr = deployer.ResolveChartDigests(ctx, g.RecipeResult.DataProvider(), sortedRefs)
+		if digestErr != nil {
+			return nil, digestErr
+		}
+	}
+	lfComponents, namespaceByComponent := toLocalformatComponents(sortedRefs, g.ComponentValues, g.DynamicValues, chartDigests)
 
 	writeResult, err := localformat.Write(ctx, localformat.Options{
 		OutputDir:              outputDir,
 		Components:             lfComponents,
+		AICRVersion:            g.Version,
 		ComponentPreManifests:  g.ComponentPreManifests,
 		ComponentPostManifests: g.ComponentPostManifests,
 		VendorCharts:           g.VendorCharts,
+		Puller:                 g.Puller,
 	})
 	if err != nil {
 		return nil, err
 	}
 	g.vendorRecords = writeResult.VendoredCharts
+	output.Entrypoint = fileHelmfile
+	output.Releases = writeResult.Releases()
 	for _, f := range writeResult.Folders {
 		for _, rel := range f.Files {
 			abs, joinErr := deployer.SafeJoin(outputDir, rel)
@@ -178,7 +199,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 
 	// README.md
-	readmePath, readmeSize, err := writeReadme(outputDir, g.Version, sortedRefs, len(g.DynamicValues) > 0, g.VendorCharts, stratified)
+	readmePath, readmeSize, err := writeReadme(outputDir, g.Version, sortedRefs, len(g.DynamicValues) > 0, g.VendorCharts, stratified, g.UpgradeNotice)
 	if err != nil {
 		return nil, err
 	}
@@ -202,6 +223,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		}
 		output.Files = append(output.Files, provPath)
 		output.TotalSize += provSize
+		output.Provenance = localformat.ProvenanceFileName
 	}
 
 	if g.IncludeChecksums {
@@ -338,6 +360,7 @@ func toLocalformatComponents(
 	refs []recipe.ComponentRef,
 	values map[string]map[string]any,
 	dynamic map[string][]string,
+	chartDigests map[string]string,
 ) ([]localformat.Component, map[string]string) {
 
 	out := make([]localformat.Component, 0, len(refs))
@@ -351,6 +374,7 @@ func toLocalformatComponents(
 			ChartName:    chartName,
 			Version:      ref.Version,
 			IsOCI:        strings.HasPrefix(ref.Source, "oci://"),
+			ChartDigest:  chartDigests[ref.Name],
 			Tag:          ref.Tag,
 			Path:         ref.Path,
 			Values:       values[ref.Name],
@@ -516,6 +540,7 @@ type readmeData struct {
 	// Issue #914.
 	HasSubHelmfiles bool
 	Components      []readmeComponent
+	UpgradeNotice   string
 }
 
 type readmeComponent struct {
@@ -525,13 +550,14 @@ type readmeComponent struct {
 }
 
 // writeReadme renders README.md from the embedded template.
-func writeReadme(outputDir, version string, refs []recipe.ComponentRef, hasDynamic, hasVendored, hasSubHelmfiles bool) (string, int64, error) {
+func writeReadme(outputDir, version string, refs []recipe.ComponentRef, hasDynamic, hasVendored, hasSubHelmfiles bool, upgradeNotice string) (string, int64, error) {
 	data := readmeData{
 		BundlerVersion:  deployer.NormalizeVersionWithDefault(version),
 		HasDynamic:      hasDynamic,
 		HasVendored:     hasVendored,
 		HasSubHelmfiles: hasSubHelmfiles,
 		Components:      make([]readmeComponent, 0, len(refs)),
+		UpgradeNotice:   upgradeNotice,
 	}
 	for _, r := range refs {
 		v := r.Version

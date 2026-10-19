@@ -25,7 +25,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Bundle layout is the last of the four surfaces ROADMAP section 1 freezes at
+// Bundle layout is the last of the four surfaces ROADMAP.md freezes at
 // v1 (issue #2113, scope items 1, 2 and 5's layout half).
 //
 // An integrator's automation reads paths out of a bundle: a GitOps pipeline
@@ -55,7 +55,7 @@ const (
 
 // layoutDeployers is every deployer the bundle CLI accepts. It is checked
 // against the OpenAPI enum, so a new deployer cannot ship unfrozen.
-var layoutDeployers = []string{"helm", "argocd", "argocd-helm", "flux", "helmfile"}
+var layoutDeployers = []string{"helm", "argocd", "argocd-helm", "flux", "helmfile", "terraform"}
 
 // TestBundleLayoutMatchesManifest asserts each deployer emits the frozen tree.
 //
@@ -263,14 +263,27 @@ func readManifest(t *testing.T, deployer string) []string {
 
 // requiredRootPaths are the root entries a manifest must contain, per deployer.
 //
-// These are structural: every bundle carries checksums.txt and README.md, and
-// each deployer has its own entry point that integrator automation invokes.
+// These are structural: every bundle carries checksums.txt, README.md and
+// recipe.yaml, and each deployer has its own entry point that integrator
+// automation invokes.
+//
+// recipe.yaml is listed for every deployer because it was helm-only until
+// #2753, and the additive direction of TestBundleLayoutMatchesManifest cannot
+// catch its loss on the others -- a regression there would read as a manifest
+// that had not been refreshed. bundle-info.yaml is listed for the same reason:
+// it arrived after the baselines were frozen (#2758).
 var requiredRootPaths = map[string][]string{
-	"helm":        {"checksums.txt", "README.md", "deploy.sh", "recipe.yaml"},
-	"argocd":      {"checksums.txt", "README.md", "app-of-apps.yaml"},
-	"argocd-helm": {"checksums.txt", "README.md", "Chart.yaml", "values.yaml"},
-	"flux":        {"checksums.txt", "README.md", "kustomization.yaml"},
-	"helmfile":    {"checksums.txt", "README.md", "helmfile.yaml"},
+	"helm":        {"checksums.txt", "README.md", "deploy.sh", "recipe.yaml", "bundle-info.yaml"},
+	"argocd":      {"checksums.txt", "README.md", "app-of-apps.yaml", "recipe.yaml", "bundle-info.yaml"},
+	"argocd-helm": {"checksums.txt", "README.md", "Chart.yaml", "values.yaml", "recipe.yaml", "bundle-info.yaml"},
+	"flux":        {"checksums.txt", "README.md", "kustomization.yaml", "recipe.yaml", "bundle-info.yaml"},
+	"helmfile":    {"checksums.txt", "README.md", "helmfile.yaml", "recipe.yaml", "bundle-info.yaml"},
+	// terraform's entry point is main.tf, but the module it calls is just as
+	// load-bearing: without modules/component/main.tf every module call in
+	// main.tf is a dangling source reference, so `terraform init` fails on a
+	// bundle that otherwise looks complete.
+	"terraform": {"checksums.txt", "README.md", "main.tf", "versions.tf",
+		"modules/component/main.tf", "recipe.yaml", "bundle-info.yaml"},
 }
 
 // TestBundleLayoutManifestsAreComplete rejects a truncated manifest.
@@ -352,7 +365,7 @@ func TestBundleLayoutManifestsAreComplete(t *testing.T) {
 // and would arrive silently with the first overlapping pair.
 //
 // Comparison is per path segment, after stripping the NNN- ordering prefix that
-// four of the five deployers use and any file extension, so it matches
+// five of the six deployers use and any file extension, so it matches
 // "002-nfd/values.yaml", "nfd/helmrelease.yaml" and "templates/nfd.yaml"
 // without matching "nfd-extras/values.yaml".
 func pathMentionsComponent(path, component string) bool {

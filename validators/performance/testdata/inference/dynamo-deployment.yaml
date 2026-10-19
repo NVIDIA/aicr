@@ -16,8 +16,8 @@
 # Deploys a vLLM aggregated backend with a small model for smoke testing.
 # Worker replicas scale to match available GPUs (1 GPU per replica).
 # Frontend-to-worker traffic uses Dynamo's request plane default (TCP). The
-# local vLLM ZMQ KV-event publisher feeds the worker runtime, which relays
-# KV-cache events onto the NATS-backed Dynamo event plane.
+# local vLLM ZMQ KV-event publisher feeds the KV router directly;
+# no NATS relay in the 1.4+ default path.
 #
 # Worker GPU wiring is MODE-DISPATCHED (capability-driven, issue #1327): on
 # nodes with usable full-GPU DRA the workers bind a DRA ResourceClaimTemplate
@@ -29,6 +29,9 @@
 # programmatically from Go (see applyInferenceWorkerScheduling in
 # inference_perf_constraint.go) so taint values with YAML-special characters
 # cannot break the template.
+#
+# Images are substituted by inferenceTemplateData, tagged with the recipe's
+# dynamo-platform chart version, and honor AICR_VALIDATOR_IMAGE_REGISTRY.
 
 apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeployment
@@ -45,7 +48,7 @@ spec:
         spec:
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
+              image: "${DYNAMO_VLLM_RUNTIME_IMAGE}"
               env:
                 - name: SERVED_MODEL_NAME
                   # Quoted so a scalar-looking model ID (e.g. a pure-numeric or
@@ -64,6 +67,8 @@ spec:
                 # to 4-77s.
                 - name: DYN_ROUTER_MODE
                   value: ${ROUTER_MODE}
+                - name: DYN_EVENT_PLANE
+                  value: zmq
                 - name: HF_TOKEN
                   valueFrom:
                     secretKeyRef:
@@ -84,7 +89,7 @@ spec:
         spec:
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
+              image: "${DYNAMO_VLLM_RUNTIME_IMAGE}"
               workingDir: /workspace/examples/backends/vllm
               # GKE's managed device plugin (the gke-default gpuStack value)
               # mounts the node's driver tree at /usr/local/nvidia via its
@@ -117,6 +122,8 @@ spec:
                 - --kv-events-config
                 - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557"}'
               env:
+                - name: DYN_EVENT_PLANE
+                  value: zmq
                 - name: HF_TOKEN
                   valueFrom:
                     secretKeyRef:

@@ -408,19 +408,19 @@ func TestConstraintEvalResult(t *testing.T) {
 func buildIsolationProvider(t *testing.T, overlayName string) DataProvider {
 	t.Helper()
 
-	registryYAML := []byte(`apiVersion: aicr.run/v1alpha2
+	registryYAML := []byte(`apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components: []
 `)
 	baseYAML := []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: base
 spec:
   componentRefs: []
 `)
 	overlayYAML := fmt.Appendf(nil, `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: %[1]s
 spec:
@@ -661,6 +661,8 @@ func TestRecipeResult_DeepCopy_DropsOwner(t *testing.T) {
 	}
 	r.Metadata.GPUDriverState = GPUDriverStateAbsent
 	r.Metadata.MariaDBOperatorState = MariaDBOperatorStateCRsDetected
+	r.Metadata.DefaultStorageClassState = DefaultStorageClassStateAbsent
+	r.Metadata.PerconaOperatorState = PerconaOperatorStateCRsDetected
 	copy := r.DeepCopy()
 	if copy.Owner() != nil {
 		t.Errorf("DeepCopy.Owner() = %v, want nil", copy.Owner())
@@ -685,5 +687,11 @@ func TestRecipeResult_DeepCopy_DropsOwner(t *testing.T) {
 	copy.Metadata.MariaDBOperatorState = MariaDBOperatorStateAbsent
 	if r.Metadata.MariaDBOperatorState != MariaDBOperatorStateCRsDetected {
 		t.Error("mutating the copy's Metadata.MariaDBOperatorState leaked into the original")
+	}
+	if copy.Metadata.DefaultStorageClassState != DefaultStorageClassStateAbsent ||
+		copy.Metadata.PerconaOperatorState != PerconaOperatorStateCRsDetected {
+
+		t.Errorf("DeepCopy dropped datastore evidence: storage=%q percona=%q",
+			copy.Metadata.DefaultStorageClassState, copy.Metadata.PerconaOperatorState)
 	}
 }

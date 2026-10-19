@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
+	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"sigs.k8s.io/yaml"
@@ -36,12 +37,31 @@ const readinessFileName = "readiness.yaml"
 
 // networkOperatorComponentName is the ref name of the Helm-deployed
 // network-operator component whose gate asserts a NicClusterPolicy CR.
-// The pinned upstream chart (26.4.1) does not template NCP even with
+// The pinned upstream chart (26.7.0) does not template NCP even with
 // deployCR=true, so overlays that do not attach one explicitly (kind,
 // Talos base) have nothing to gate on — the readiness gate must skip
 // itself in that case, or it will poll to --max-wait timeout on every
 // deploy (#2337).
 const networkOperatorComponentName = "network-operator"
+
+const (
+	networkOperatorOCPComponentName = "network-operator-ocp"
+	gpuDriverEnabledValuePath       = "driver.enabled"
+	gpuDriverRDMAEnabledValuePath   = "driver.rdma.enabled"
+)
+
+// peermemManagedOFEDPairs names the GPU/Network Operator component pairs that
+// install the legacy nvidia-peermem path and its required OFED/DOCA stack.
+// Presence in componentValues means both components survived recipe and
+// bundle-time filtering; the NCP manifest probe below separately confirms that
+// this recipe actually asks Network Operator to reconcile the fabric.
+var peermemManagedOFEDPairs = []struct {
+	gpuOperator     string
+	networkOperator string
+}{
+	{gpuOperatorComponentName, networkOperatorComponentName},
+	{"gpu-operator-ocp", networkOperatorOCPComponentName},
+}
 
 // ncpKindRE / ncpAPIVersionRE match a NicClusterPolicy top-level manifest
 // via line-anchored regexes rather than YAML unmarshalling. Attached NCP
@@ -140,6 +160,15 @@ func (b *DefaultBundler) collectComponentReadiness(
 
 	provider := recipeResult.DataProvider()
 	image := b.gateImage()
+	placement, err := gatemanifest.NewPlacement(gatemanifest.Scheduling{
+		NodeSelector: b.Config.SystemNodeSelector(),
+		Tolerations:  b.Config.SystemNodeTolerations(),
+	})
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+			"invalid system node scheduling for readiness gates (set by --system-node-selector / "+
+				"--system-node-toleration or scheduling.systemNodeSelector / scheduling.systemNodeTolerations)", err)
+	}
 
 	// The RDMA-fabric probe is only run when a network-operator ref is
 	// encountered; keep the result cached so multi-component recipes
@@ -188,7 +217,7 @@ func (b *DefaultBundler) collectComponentReadiness(
 			return nil, err
 		}
 
-		manifest, genErr := gatemanifest.Render(ref.Name, image, testYAML, b.Config.Deployer())
+		manifest, genErr := gatemanifest.Render(ref.Name, image, testYAML, b.Config.Deployer(), placement)
 		if genErr != nil {
 			return nil, genErr
 		}
@@ -196,6 +225,77 @@ func (b *DefaultBundler) collectComponentReadiness(
 	}
 
 	return result, nil
+}
+
+// warnPeermemReadinessDisabled surfaces the partial-guarantee boundary of a
+// dependencyRefs edge for the legacy nvidia-peermem route (#2499). The edge
+// orders deployment units, but without readiness gates it does not wait for
+// Network Operator to report NicClusterPolicy.status.state=ready before GPU
+// Operator starts its driver pods.
+//
+// Detection uses the final filtered component inventory and effective values,
+// so it stays silent for DMA-BUF recipes, AKS azure-managed mode
+// (driver.enabled=false), readiness-enabled bundles, and subset bundles that
+// intentionally leave either operator to an external deployment. The NCP
+// manifest probe is the same one readiness-gate emission uses, avoiding a
+// warning for kind/Talos recipes where Network Operator installs no OFED/DOCA
+// policy.
+func (b *DefaultBundler) warnPeermemReadinessDisabled(
+	ctx context.Context,
+	recipeResult *recipe.RecipeResult,
+	componentValues map[string]map[string]any,
+) error {
+
+	if b.Config == nil || b.Config.ReadinessHooks() || recipeResult == nil {
+		return nil
+	}
+
+	for _, pair := range peermemManagedOFEDPairs {
+		gpuValues, gpuPresent := componentValues[pair.gpuOperator]
+		_, networkPresent := componentValues[pair.networkOperator]
+		if !gpuPresent || !networkPresent ||
+			!componentBoolValue(gpuValues, gpuDriverEnabledValuePath) ||
+			!componentBoolValue(gpuValues, gpuDriverRDMAEnabledValuePath) {
+
+			continue
+		}
+
+		ncpPresent, err := recipeAttachesNicClusterPolicy(
+			ctx, recipeResult.DataProvider(), recipeResult.ComponentRefs)
+		if err != nil {
+			return err
+		}
+		if !ncpPresent {
+			continue
+		}
+
+		warning := fmt.Sprintf(
+			"%s installs a GPU-managed driver with %s=true and %s=true while %s installs "+
+				"OFED/DOCA, but component readiness gating is disabled. dependencyRefs only orders "+
+				"manifest submission; it does not wait for NicClusterPolicy.status.state=ready before "+
+				"deploying %s. Use --readiness-hooks with Helm, Argo CD or Terraform, or provide an equivalent "+
+				"external barrier; Flux, Helmfile, and the bundle REST API cannot request this gate "+
+				"yet (#2499).",
+			pair.gpuOperator, gpuDriverEnabledValuePath, gpuDriverRDMAEnabledValuePath,
+			pair.networkOperator, pair.gpuOperator)
+		slog.Warn(warning,
+			"gpu_operator", pair.gpuOperator,
+			"network_operator", pair.networkOperator,
+			"readiness_hooks", false)
+		b.appendWarning(warning)
+		return nil
+	}
+
+	return nil
+}
+
+func componentBoolValue(values map[string]any, valuePath string) bool {
+	value, found := component.GetValueByPath(values, valuePath)
+	if !found {
+		return false
+	}
+	enabled, ok := value.(bool)
+	return ok && enabled
 }
 
 // recipeAttachesNicClusterPolicy reports whether any component in the

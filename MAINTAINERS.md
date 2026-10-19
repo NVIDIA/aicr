@@ -4,14 +4,17 @@ This document lists the maintainers of the NVIDIA AICR project.
 
 ## Current Maintainers
 
-See https://github.com/orgs/NVIDIA/teams/aicr-maintainers
+The authoritative source is the
+[`@nvidia/aicr-maintainer`](https://github.com/orgs/NVIDIA/teams/aicr-maintainer)
+GitHub team; [GOVERNANCE.md](GOVERNANCE.md#current-maintainers) carries a readable
+snapshot of it.
 
 ## Maintainer Responsibilities
 
 Maintainers are responsible for:
 
 - Reviewing and merging pull requests
-- Triaging issues and discussions
+- Triaging issues
 - Ensuring code quality and test coverage
 - Making release decisions
 - Upholding the [Code of Conduct](CODE_OF_CONDUCT.md)
@@ -36,7 +39,7 @@ To be considered, contributors should:
 
 Maintainers who are no longer actively maintaining the project:
 
-_None yet_
+- [@cullenmcdermott](https://github.com/cullenmcdermott) — Cullen McDermott
 
 ## Governance
 

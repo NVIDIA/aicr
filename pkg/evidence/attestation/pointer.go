@@ -67,7 +67,7 @@ func BuildPointer(in PointerInputs) (*Pointer, error) {
 		Bundle: PointerBundle{
 			OCI:           in.BundleOCI,
 			Digest:        in.BundleHash,
-			PredicateType: StatementPredicateType(in.Bundle.Predicate),
+			PredicateType: resolvedPredicateType(in.Bundle),
 		},
 		Signer:     in.Signer,
 		AttestedAt: in.Bundle.Predicate.AttestedAt.UTC().Truncate(time.Second),
@@ -79,6 +79,17 @@ func BuildPointer(in PointerInputs) (*Pointer, error) {
 		Profile:       in.Bundle.Profile,
 		Attestations:  []PointerAttestation{att},
 	}, nil
+}
+
+// resolvedPredicateType returns b.PredicateType, falling back to
+// StatementPredicateType(b.Predicate) when unset. Build and loadOnDiskBundle
+// always populate PredicateType, so the fallback exists only for a caller
+// that constructs a Bundle by hand without it.
+func resolvedPredicateType(b *Bundle) string {
+	if b.PredicateType != "" {
+		return b.PredicateType
+	}
+	return StatementPredicateType(b.Predicate)
 }
 
 // ValidateBundleProfileCoherence rejects (ErrCodeInvalidRequest) a bundle
@@ -103,7 +114,7 @@ func ValidateBundleProfileCoherence(b *Bundle) error {
 	// rejects. In-repo constructors never build that shape — IdentityFor is
 	// a sha256 digest, so a profiled bundle's identity is never empty — but
 	// this is an exported entry point.
-	if err := ValidatePredicateTypeCoherence(StatementPredicateType(b.Predicate), b.Predicate); err != nil {
+	if err := ValidatePredicateTypeCoherence(resolvedPredicateType(b), b.Predicate); err != nil {
 		return err
 	}
 	switch {
@@ -114,8 +125,8 @@ func ValidateBundleProfileCoherence(b *Bundle) error {
 	case b.Profile != "" && b.Predicate.Profile == nil:
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"bundle recipe carries profile selection "+b.Profile+
-				" but the predicate has no profile block — profiled evidence requires "+
-				PredicateTypeV2+"; re-emit the bundle")
+				" but the predicate has no profile block. Profiled evidence requires "+
+				"a predicate profile block. Re-emit the bundle")
 	case b.Profile != "" && b.Predicate.Profile.Selection != b.Profile:
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"bundle recipe profile selection "+b.Profile+
@@ -173,8 +184,14 @@ func MarshalPointer(p *Pointer) ([]byte, error) {
 //
 // A pointer with no signer or no pushed digest has no committable
 // destination — only signed, pushed bundles earn a place in the tree — so
-// the hint returns guidance instead of a path.
+// the hint returns guidance instead of a path. Neither does a key-signed
+// pointer: the evidence gate admits keyless signers only.
 func PointerCopyToHint(p *Pointer) string {
+	if p != nil && len(p.Attestations) > 0 && p.Attestations[0].Signer != nil &&
+		p.Attestations[0].Signer.Issuer == KeySignerIssuer {
+
+		return "(key-signed evidence is for private use; the upstream evidence gate admits keyless signers only)"
+	}
 	suffix, err := canonicalPointerSuffix(p)
 	if err != nil {
 		return "(sign and push the bundle, then commit under recipes/evidence/<recipe>/<source>/)"

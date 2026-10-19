@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
@@ -93,7 +95,7 @@ func TestRecipeDeclaresRDMAFabric(t *testing.T) {
 		{
 			name: "marker present among several manifests",
 			manifestFiles: []string{
-				"components/network-operator/manifests/nfd-network-rule.yaml",
+				"components/network-operator/manifests/talos-namespace.yaml",
 				"components/network-operator/manifests/nic-cluster-policy-aks.yaml",
 				"components/network-operator/manifests/nvidia-peermem-reloader.yaml",
 			},
@@ -183,7 +185,7 @@ func TestVerifyRDMAFabricReady_Poll(t *testing.T) {
 			})
 			ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
 
-			err := verifyRDMAFabricReady(ctx)
+			err := verifyRDMAFabricReady(ctx, helper.AKSRdmaSharedResource)
 			if tt.wantErrSub != "" {
 				if err == nil {
 					t.Fatalf("verifyRDMAFabricReady() error = nil, want error containing %q", tt.wantErrSub)
@@ -204,13 +206,15 @@ func TestVerifyRDMAFabricReady_Poll(t *testing.T) {
 }
 
 // TestVerifyRDMAFabricReady_EagerDisclosureFloor locks the every-terminal-outcome
-// coverage contract against the mid-poll SIGKILL race: the catalog timeout feeds
-// both the Job's activeDeadlineSeconds and this poll's budget with no margin, so
-// a never-ready poll can be killed at the deadline before the terminal emit runs.
-// The eager floor must have already emitted the structured coverage — including
-// the cordoned node that narrowed the cohort — on the first observation, with
-// validated=0 (nothing is certified mid-poll). parseExtraSentinels keeps the last
-// valid sentinel, so on a clean exit the terminal emit overwrites the floor.
+// coverage contract for the case where the process is killed before reaching
+// the terminal emit: the eager floor must have already emitted the structured
+// coverage — including the cordoned node that narrowed the cohort — on the
+// first observation, with validated=0 (nothing is certified mid-poll). This
+// guards the narrower gap left once defaults.ValidatorJobDeadlineHeadroom gave
+// the Job's activeDeadlineSeconds margin over this poll's catalog-timeout-bound
+// budget (a probe call blocking past its own cancellation, not a deadline
+// race). Sentinels merge key-wise with later values winning, so on a clean
+// exit the terminal emit overwrites the floor's counts.
 func TestVerifyRDMAFabricReady_EagerDisclosureFloor(t *testing.T) {
 	t.Parallel()
 
@@ -255,7 +259,7 @@ func TestVerifyRDMAFabricReady_EagerDisclosureFloor(t *testing.T) {
 			// pollUntilStable runs the probe synchronously in this goroutine, so
 			// the injected emit is never called concurrently — no lock needed.
 			var calls []emitCall
-			err := verifyRDMAFabricReadyEmit(ctx, func(validated, total int) {
+			err := verifyRDMAFabricReadyEmit(ctx, helper.AKSRdmaSharedResource, func(validated, total int) {
 				calls = append(calls, emitCall{validated, total})
 			})
 
@@ -290,7 +294,7 @@ func TestRDMAFabricProbe_FailsClosedOnListError(t *testing.T) {
 	})
 	ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
 
-	cov, err := rdmaFabricProbeCoverage(ctx)
+	cov, err := rdmaFabricProbeCoverage(ctx, helper.AKSRdmaSharedResource)
 	if err == nil {
 		t.Fatal("expected an error when listing nodes fails, got nil (must fail closed)")
 	}
@@ -302,7 +306,7 @@ func TestRDMAFabricProbe_FailsClosedOnListError(t *testing.T) {
 	// inner error — e.g. ErrCodeTimeout from a canceled node scan — would instead
 	// propagate unchanged). Assert the propagated code, not the removed
 	// gate-context message, so the fail-closed contract is pinned to the code.
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Fatalf("expected ErrCodeInternal on plain list failure, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "failed to list nodes") {
@@ -323,7 +327,7 @@ func TestRDMAFabricProbe_FailsClosedWithoutRDMANodes(t *testing.T) {
 	)
 	ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
 
-	cov, err := rdmaFabricProbeCoverage(ctx)
+	cov, err := rdmaFabricProbeCoverage(ctx, helper.AKSRdmaSharedResource)
 	if err == nil {
 		t.Fatal("expected an error when no RDMA GPU nodes are present, got nil (must fail closed)")
 	}
@@ -352,7 +356,7 @@ func TestRDMAFabricProbe_ExcludesCordonedNonRDMAAndCPU(t *testing.T) {
 	)
 	ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
 
-	cov, err := rdmaFabricProbeCoverage(ctx)
+	cov, err := rdmaFabricProbeCoverage(ctx, helper.AKSRdmaSharedResource)
 	if err != nil {
 		t.Fatalf("rdmaFabricProbeCoverage() error = %v, want nil (only the schedulable RDMA GPU node is required to carry the fabric)", err)
 	}
@@ -373,7 +377,7 @@ func TestRDMAFabricProbe_NonUniformCountFails(t *testing.T) {
 	)
 	ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
 
-	cov, err := rdmaFabricProbeCoverage(ctx)
+	cov, err := rdmaFabricProbeCoverage(ctx, helper.AKSRdmaSharedResource)
 	if err == nil {
 		t.Fatal("expected an error on non-uniform fabric counts, got nil")
 	}
@@ -396,7 +400,7 @@ func TestRDMAFabricProbe_PassesWhenUniform(t *testing.T) {
 	)
 	ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
 
-	cov, err := rdmaFabricProbeCoverage(ctx)
+	cov, err := rdmaFabricProbeCoverage(ctx, helper.AKSRdmaSharedResource)
 	if err != nil {
 		t.Fatalf("rdmaFabricProbeCoverage() error = %v, want nil (fabric uniform on all RDMA GPU nodes)", err)
 	}

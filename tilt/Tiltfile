@@ -29,7 +29,6 @@ k8s_resource(
     'aicrd',
     port_forwards=[
         port_forward(8080, 8080, name='API'),
-        port_forward(9090, 9090, name='Metrics'),
     ],
     labels=['api'],
 )

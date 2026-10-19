@@ -47,16 +47,18 @@ const (
 	TopologyListPageSize = int64(500)
 )
 
-// Network topology collector constants. Network discovery delegates to the
-// k8s-launch-kit library, which boots a NIC-configuration daemon and pod-exec
-// probes each east-west PF — both bounded above by l8k's own internal
-// timeouts. CollectorNetworkTimeout caps the worst case as a defense in depth
-// so a hung pod exec can't outlive the snapshot.
+// Network topology collector constants. Network discovery delegates to
+// k8s-launch-kit's read-only path: a poll for an already-installed
+// nic-configuration-daemon's pods to report Ready, then a handful of List
+// calls. l8k bounds that poll at 5 minutes on its own (the collector hands it
+// a deadline-free context so that bound applies — NVIDIA/k8s-launch-kit#305),
+// so the collector's bound must sit above it with headroom for the Lists.
+// Job mode's --timeout defaults to 5 minutes; on clusters where some daemon
+// pods are not Ready, raise it above this value or the Job deadline fires
+// first.
 const (
 	// CollectorNetworkTimeout is the upper bound for the network collector.
-	// Longer than the topology timeout because l8k discovery includes
-	// DaemonSet rollout + per-node pod-exec probes.
-	CollectorNetworkTimeout = 10 * time.Minute
+	CollectorNetworkTimeout = 7 * time.Minute
 
 	// MaxClusterConfigBytes caps the size of an --cluster-config YAML file
 	// the collector will read into memory. Used as the io.LimitReader bound
@@ -68,6 +70,17 @@ const (
 	// io.LimitReader rule as MaxClusterConfigBytes; a real pool list is
 	// a few KiB.
 	MaxAKSGPUPoolsBytes = int64(1 << 20) // 1 MiB
+
+	// MaxOKEAddonsBytes caps the size of an --oke-addons JSON file
+	// (`oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`); the dump is a
+	// short per-cluster add-on list, so 1 MiB is generous.
+	MaxOKEAddonsBytes = int64(1 << 20) // 1 MiB
+
+	// MaxGKEGPUPoolsBytes caps the size of a --gke-gpu-pools JSON file
+	// (the `gcloud container node-pools list --cluster <cluster>
+	// --format=json` dump) read into memory via io.LimitReader. A real
+	// pool list is a few KiB.
+	MaxGKEGPUPoolsBytes = int64(1 << 20) // 1 MiB
 )
 
 // Handler timeouts for HTTP request processing.
@@ -141,14 +154,16 @@ const (
 	// ValidationOperationTimeout is the facade-level upper bound for
 	// Client.ValidateState when the caller's context has no deadline
 	// (controller/library callers; the CLI runs uncapped). It must exceed the
-	// LARGEST per-check Job timeout so that inner timeout fires first and the
+	// LARGEST rendered per-check Job deadline (catalog timeout plus
+	// ValidatorJobDeadlineHeadroom) so that inner timeout fires first and the
 	// run surfaces a structured per-check error rather than the wrapping
 	// context's bare deadline-exceeded. The largest is the inference-perf
 	// catalog timeout (65m, which covers the model-cache populate + cold-start
-	// benchmark phases), not CheckExecutionTimeout (55m, the fallback when no
-	// catalog timeout is set). 75m keeps margin above 65m for orchestration
-	// overhead (snapshot agent, RBAC, namespace setup, cleanup). The
-	// catalog-vs-facade relationship is asserted in
+	// benchmark phases) plus the 3m30s headroom, i.e. 68m30s — not
+	// CheckExecutionTimeout (55m, the fallback when no catalog timeout is
+	// set). 75m keeps margin above that 68m30s rendered deadline for
+	// orchestration overhead (snapshot agent, RBAC, namespace setup,
+	// cleanup). The catalog-vs-facade relationship is asserted in
 	// pkg/validator/catalog/catalog_test.go.
 	ValidationOperationTimeout = 75 * time.Minute
 
@@ -238,6 +253,11 @@ const (
 
 	// K8sCleanupTimeout is the timeout for cleanup operations.
 	K8sCleanupTimeout = 30 * time.Second
+
+	// K8sServiceAccountVerifyTimeout bounds the read-only ServiceAccount Get
+	// and SubjectAccessReview that vet an administrator-provisioned validator
+	// ServiceAccount before a run uses it.
+	K8sServiceAccountVerifyTimeout = 30 * time.Second
 
 	// DiscoveryRefreshCooldown rate-limits how often the shared cluster
 	// fetcher (pkg/chainsaw) invalidates its cached discovery data after a
@@ -352,6 +372,12 @@ const (
 	// CLISnapshotTimeout is the default timeout for snapshot operations.
 	CLISnapshotTimeout = 5 * time.Minute
 
+	// CLIUpgradeCheckTimeout bounds one `aicr upgrade-check` run that reads no
+	// cluster. Such a run performs two recipe operations, each already bounded
+	// by RecipeOperationTimeout, plus the registry's upgrade-record reads, so
+	// the ceiling is derived from the operation it repeats rather than picked.
+	CLIUpgradeCheckTimeout = 3 * RecipeOperationTimeout
+
 	// OIDCAuthTimeout is the maximum time to wait for a user to complete
 	// any interactive OIDC authentication flow — browser callback or
 	// device-code (RFC 8628). Prevents indefinite blocking if the flow is
@@ -436,12 +462,12 @@ const (
 )
 
 // GPU deployment-readiness poll configuration. The deployment-phase Go checks
-// verifyNodewrightReady (Skyhook status.status == "complete") and
+// verifyNodewrightReady (NodeWright status.status == "complete") and
 // verifyDRAKubeletPluginReady (DRA kubelet-plugin DaemonSet fully rolled out)
 // poll their signal until it is healthy *continuously* for the stability
 // window, or the timeout elapses.
 //
-// Rationale: Skyhook node tuning reboots the GPU node one or more times (the
+// Rationale: Nodewright node tuning reboots the GPU node one or more times (the
 // tuning packages carry interrupt: reboot) and re-opens status=in_progress
 // after each reboot and for each newly-joined GPU node. While a GPU node is
 // draining/rebooting/rejoining, the DRA kubelet-plugin DaemonSet also churns:
@@ -563,6 +589,14 @@ const (
 	// hung gate process shortly after its own deadline.
 	ReadinessGateHelmTimeoutBuffer = 5 * time.Minute
 
+	// ReadinessGateActiveDeadlineBuffer is added to ReadinessGateMaxWait to
+	// derive the gate Job's activeDeadlineSeconds, which bounds the Job even
+	// when its pod never schedules or never starts, so the gate's own deadline
+	// never runs. Argo CD has no other bound on the sync. It must stay below
+	// ReadinessGateHelmTimeoutBuffer so the Job, not helm --timeout, reports
+	// the failure under the Helm deployer.
+	ReadinessGateActiveDeadlineBuffer = 3 * time.Minute
+
 	// ReadinessGateBackoffLimit is the Kubernetes Job backoffLimit for the gate
 	// Job. The gate CLI handles its own retry loop internally; this limit
 	// absorbs transient pod disruption (drain, evict, OOM) by allowing the Job
@@ -574,7 +608,9 @@ const (
 const (
 	// CheckExecutionTimeout is the parent context timeout for checks running
 	// inside a K8s Job. Must be long enough for the slowest behavioral check
-	// and shorter than the catalog-level Job timeout (activeDeadlineSeconds).
+	// and shorter than the catalog's own check timeout (AICR_CHECK_TIMEOUT) —
+	// not the Job's activeDeadlineSeconds, which adds
+	// ValidatorJobDeadlineHeadroom on top of that check timeout.
 	//
 	// The ceiling is set by the cold-start inference benchmark, which runs
 	// the following phases serially under the parent ctx:
@@ -686,8 +722,26 @@ const (
 	// NCCLTrainJobTimeout is the maximum time to wait for the NCCL all-reduce TrainJob to complete.
 	NCCLTrainJobTimeout = 30 * time.Minute
 
+	// NCCLStaleNamespacePruneAge is how old a leftover aicr-nccl-perf-* namespace
+	// must be before the best-effort prune in runNCCLTrainJob deletes it. Sized
+	// well past NCCLTrainJobTimeout so a namespace still owned by an in-progress
+	// sibling variant, or a run that is simply slow, is never touched.
+	NCCLStaleNamespacePruneAge = 2 * NCCLTrainJobTimeout
+
+	// NCCLExecutionLockStaleAge is how long an unrenewed run execution lock
+	// (see claimNCCLExecutionLock) is honored before a new caller may take
+	// it over. It only needs to cover the gaps between renewals, not the
+	// full run, since a live pod protects the namespace on its own via
+	// verifyNCCLNamespaceNotLive regardless of lock staleness. Kept short
+	// so a retry after a hard kill isn't stuck waiting out
+	// NCCLStaleNamespacePruneAge instead.
+	NCCLExecutionLockStaleAge = 20 * time.Minute
+
 	// NCCLLauncherPodTimeout is the maximum time to wait for the NCCL launcher pod to be created.
-	NCCLLauncherPodTimeout = 5 * time.Minute
+	// A runtime whose launcher declares a JobSet dependsOn on the workers creates
+	// it only once every worker is Ready, so this also covers worker image pull
+	// and any runtime sshd install. Kept under NCCLExecutionLockStaleAge.
+	NCCLLauncherPodTimeout = 15 * time.Minute
 
 	// NCCLTrainerArchiveDownloadTimeout is the timeout for downloading the Kubeflow Trainer
 	// source archive from GitHub. The archive is several MB, so a longer timeout than the
@@ -701,6 +755,60 @@ const (
 	// against a separate lister that lags that strongly-consistent read — a freshness the
 	// client cannot observe. This bounds how long we let the webhook cache catch up.
 	TrainJobAdmissionRetryTimeout = 1 * time.Minute
+
+	// NCCLResourceRecreateWait bounds waitForResourceGone in createUnstructured's
+	// same-run TrainJob reclaim. A controller-serviced finalizer (Trainer v2 /
+	// JobSet ownership) can hold the delete for a while, so this gets its own
+	// bound instead of the much shorter DiagnosticTimeout used for the rest of
+	// createUnstructured's calls.
+	NCCLResourceRecreateWait = 5 * time.Minute
+
+	// CRECertificationTimeout is AICR's wait budget for a Cluster Readiness
+	// Engine Certification to reach Succeeded or Failed. The same duration is
+	// written on spec.timeoutPerJob, but that is a backstop against a job left
+	// running forever, not a deadline matched to this one: CRE starts the
+	// per-job clock when the workload is first observed running, and starts it
+	// over when a workload is replaced, while AICR's starts at creation. CRE's
+	// bound can therefore fire well after AICR gives up, which is why teardown
+	// confirms the workloads stopped rather than trusting it.
+	CRECertificationTimeout = 30 * time.Minute
+
+	// CRECertificationDeleteTimeout bounds the removal of the Certification
+	// object itself. The shorter DiagnosticTimeout would expire while the CR is
+	// still held by finalizers.
+	CRECertificationDeleteTimeout = 5 * time.Minute
+
+	// CRECertificationTeardownTimeout bounds the whole teardown: removing the
+	// Certification and then confirming the TrainJobs and GPU pods it started
+	// are gone. It must outlast CRE's own drain barrier, which waits up to five
+	// minutes for workload pods to exit and then proceeds regardless
+	// (podDrainGracePeriod in pkg/controller/pod_drain.go), plus the
+	// termination grace of the multi-node GPU pods left behind.
+	CRECertificationTeardownTimeout = 10 * time.Minute
+
+	// CREMeasurementFinalizeTimeout bounds the wait for CRE to finalize a
+	// BandwidthMeasurement or GoodputMeasurement after its Job succeeded.
+	// Certification success does not imply the measurement is final: CRE marks
+	// the Job Succeeded first and only then performs the final log read, which
+	// it retries for as long as the measurement's own measurementTimeout (5m by
+	// default, and never less than two minutes) before completing as
+	// LogsUnavailable. Sized to that retry window, because expiry here fails
+	// the check rather than falling back to the provisional results.
+	CREMeasurementFinalizeTimeout = 5 * time.Minute
+
+	// CREOrphanReclaimAge is how old an AICR-labeled Certification must be
+	// before a later run treats it as abandoned and tears it down. A validator
+	// pod killed mid-run never runs its deferred teardown, and the names carry
+	// a nonce, so the only way the GPUs come back is for a subsequent run to
+	// reclaim what it finds.
+	//
+	// The sum of every phase a live run is allowed, so nothing still in
+	// progress can reach this age. That matters because two validators can
+	// share a namespace, and a sweep that is merely "old enough" would delete
+	// a healthy concurrent run's Certification.
+	CREOrphanReclaimAge = CRECertificationTimeout +
+		CREMeasurementFinalizeTimeout +
+		CRECertificationTeardownTimeout
 )
 
 // Inference performance validation timeouts.
@@ -861,6 +969,14 @@ const (
 	// allocate the whole file into memory.
 	MaxBOMBytes int64 = 8 * 1024 * 1024 // 8 MiB
 
+	// MaxOpenVEXBytes caps the size of an OpenVEX document read from disk
+	// (the `.openvex.json` source that tools/openvex-bind projects onto a
+	// platform manifest digest). The committed document is well under
+	// 100 KiB even with per-statement impact prose; 1 MiB is generous
+	// headroom while bounding an attacker-influenced path before
+	// os.ReadFile would allocate the whole file into memory.
+	MaxOpenVEXBytes int64 = 1 * 1024 * 1024 // 1 MiB
+
 	// MaxConfigBytes caps the size of a user-supplied --config file. Real
 	// configs are well under 100 KiB; 1 MiB is generous headroom while
 	// preventing a hostile symlink (/proc, FUSE, NFS) from forcing the CLI
@@ -888,6 +1004,22 @@ const (
 	// 10 MiB matches MaxSigstoreBundleSize for parity across signed
 	// supply-chain artifacts.
 	MaxAttestationFileBytes int64 = 10 * 1024 * 1024 // 10 MiB
+
+	// MaxBundleInfoBytes caps the size of a bundle's bundle-info.yaml, on
+	// write as well as on read, so an oversize record is refused before it
+	// ships rather than on the consumer's side. The record is a build stamp
+	// plus one entry per emitted release,
+	// bounded in practice by the 999-folder NNN- prefix limit; 1 MiB is
+	// orders of magnitude above a real one and matches MaxChecksumFileBytes
+	// for parity across bundle-root metadata reads.
+	MaxBundleInfoBytes int64 = 1 * 1024 * 1024 // 1 MiB
+
+	// MaxBundleValuesBytes caps a single rendered per-release values file read
+	// back out of a bundle. The largest the shipped registry produces is the
+	// gpu-operator's, at roughly 6 KiB; 1 MiB matches MaxBundleInfoBytes for
+	// parity across bundle reads. The bound matters because the file arrives
+	// from an OCI registry or a GitOps clone alongside the record naming it.
+	MaxBundleValuesBytes int64 = 1 * 1024 * 1024 // 1 MiB
 
 	// MaxManifestFileBytes caps the size of an in-bundle manifest.json
 	// file read by the verifier. A manifest entry is ~150 bytes (path +
@@ -1035,7 +1167,7 @@ const (
 	EnvHelmRepositoryPassword = "HELM_REPOSITORY_PASSWORD"
 )
 
-// Server-side bundle-signing configuration (see docs/plans/2026-07-20-server-bundle-attestation-design.md).
+// Server-side bundle-signing configuration (see "Server-Side Signing" in docs/user/api-reference.md).
 const (
 	// EnvSigningKey selects KMS-backed (Mode A) signing. Value is a cosign
 	// KMS URI (awskms:// | gcpkms:// | azurekms:// | hashivault://).
@@ -1105,9 +1237,46 @@ const (
 
 // Validator constants.
 const (
-	// ValidatorWaitBuffer is added to the catalog timeout when waiting for Job
-	// completion. Accounts for pod scheduling, image pull, and graceful termination.
-	ValidatorWaitBuffer = 30 * time.Second
+	// ValidatorWaitBuffer is added to the catalog timeout when the orchestrator
+	// waits for Job completion. It must exceed the delay between Job creation
+	// and the validator container's first instruction, or the orchestrator
+	// abandons the wait before the check's own clean exit and reports an
+	// orchestrator timeout in place of the check's verdict.
+	ValidatorWaitBuffer = K8sPodReadyTimeout + ValidatorTerminationGracePeriod
+
+	// ValidatorJobDeadlineHeadroom is the gap between a check's own budget
+	// (AICR_CHECK_TIMEOUT) and the Job's activeDeadlineSeconds. Sized so the
+	// orchestrator is always the tighter clock: on exhaustion the check
+	// self-terminates and its pod stays Failed-but-present for log extraction,
+	// instead of the Job controller deleting it as an active pod (issue #2473).
+	ValidatorJobDeadlineHeadroom = ValidatorWaitBuffer + JobEnvelopeMargin
+
+	// ValidatorMinCompletionWait floors the orchestrator's Job-completion wait
+	// once that wait has been rebased onto the Job's observed start time. The
+	// rebase subtracts however long the create/apply response took to arrive,
+	// and the floor engages as soon as the rebased remainder drops below it —
+	// not only once that remainder goes zero or negative — since an unfloored
+	// wait that short risks reporting an orchestrator timeout before the check
+	// ran. The floor does not license outrunning the Job's own deadline:
+	// v1.OrchestratorWaitFor caps it to ValidatorPreDeadlineMargin short of
+	// that deadline while the deadline is still ahead. Once it is not, the
+	// floored wait is all that remains, and one SIGTERM-to-SIGKILL window is
+	// the shortest span in which the orchestrator can still read the terminal
+	// condition Kubernetes stamped on the Job it has already ended.
+	ValidatorMinCompletionWait = ValidatorTerminationGracePeriod
+
+	// ValidatorPreDeadlineMargin is how far short of the Job's
+	// activeDeadlineSeconds v1.OrchestratorWaitFor holds the orchestrator's
+	// Job-completion wait. That wait exists to read the check's own verdict,
+	// and the Job deadline destroys it: the Job controller deletes the
+	// still-active pod whose logs carry it (issue #2473). A wait ending at the
+	// same instant as the deadline leaves which of the two lands first to
+	// scheduling chance, so the margin is subtracted to make the ordering
+	// strict. It is a tie-breaker rather than a budget for any work, sized to
+	// exceed the resolution at which the two events can be distinguished while
+	// staying negligible against ValidatorMinCompletionWait, the shortest wait
+	// it ever trims.
+	ValidatorPreDeadlineMargin = 1 * time.Second
 
 	// ValidatorDefaultTimeout is the default per-validator timeout if not
 	// specified in the catalog. Used as fallback only.
@@ -1249,6 +1418,27 @@ const (
 	HelmValueResolutionConcurrency = 8
 )
 
+// Bundle deploy-time timeouts.
+const (
+	// BundleCRDStepTimeout bounds every helm and kubectl call in a bundle's
+	// generated apply-crds.sh: the release lookup, the registry read, and the
+	// apply. That script runs inside the deploy path, where a command that
+	// never returns hangs the whole rollout instead of failing it, since
+	// deploy.sh retries a component that exits non-zero but cannot interrupt
+	// one still running. A wedged registry and a wedged apiserver both produce
+	// that, so reads and the write are bounded alike. Matches
+	// MirrorHelmTemplateTimeout, the other per-chart helm invocation.
+	// Operators can override per-run with AICR_CRD_STEP_TIMEOUT.
+	//
+	// 30s rather than the 90s a lone helm invocation would justify, because
+	// deploy.sh multiplies it: a component that keeps failing is retried six
+	// times with backoff, so three bounded calls at 90s each can consume ~31
+	// minutes and exceed the CI job budget before the retry loop ever reports
+	// anything. A CRD read or apply that needs more than 30s is already
+	// pathological, and the override exists for the exception.
+	BundleCRDStepTimeout = 30 * time.Second
+)
+
 // Mirror discovery timeouts and defaults.
 const (
 	// MirrorHelmTemplateTimeout is the per-component timeout for helm
@@ -1264,7 +1454,7 @@ const (
 	//
 	// This is a render-safe floor, not a support floor. This constant must
 	// stay at or above the strictest kubeVersion any bundled chart declares.
-	// Do NOT lower it to match the ">= 1.25" recipe floor in
+	// Do NOT lower it to match the ">= 1.32" recipe floor in
 	// recipes/overlays/base.yaml: recipes are validated against their own
 	// constraints, while mirror discovery raises lower versions to this
 	// value solely for Helm rendering (see mirror.KubeVersionFromConstraints).
@@ -1313,6 +1503,75 @@ const HelmTemplateTimeout = 90 * time.Second
 // 100 MiB is generous — real charts are single-digit MB — while still
 // preventing a malicious or buggy chart from exhausting memory.
 const HelmTemplateOutputLimit int64 = 100 * 1024 * 1024 // 100 MiB
+
+// HelmReleaseDecodeLimit caps the decompressed size of a single Helm release
+// record. The encoded record embeds the release's full rendered manifest and
+// every hook, none of which this project reads, so the cap bounds work the
+// decoder is obliged to do rather than data it wants. Exceeding it is an
+// error: a release whose metadata cannot be read must not go silently missing
+// from an upgrade comparison, where it would render as a new component.
+//
+// 32 MiB is derived, not a round number. A record has to fit one Kubernetes
+// Secret (~1 MiB serialized, so ~768 KiB of gzipped payload once base64
+// expansion is taken out), and measured gzip ratios on real content in this
+// repo run ~7x for dense CRD YAML
+// (recipes/components/agentgateway-crds/manifests/gateway-api-crds.yaml) and
+// ~32x for the most repetitive YAML in the tree. A maximal Secret holding
+// worst-case-compressible content therefore inflates to roughly 24 MiB, which
+// this clears without letting an arbitrary ratio through.
+const HelmReleaseDecodeLimit int64 = 32 * 1024 * 1024 // 32 MiB
+
+// HelmReleaseListPageSize caps how many Helm storage records one List pulls
+// while reading the installed inventory. The owner=helm selector matches every
+// retained revision, not only the current one, and each record carries the
+// release's full rendered manifest as base64(gzip(...)) up to the ~1 MiB
+// ceiling a Secret can hold: 300 releases at Helm's default 10 retained
+// revisions would materialize gigabytes in a single response. Paging bounds
+// the peak to one page, because the reduction to the newest revision per
+// release runs per page and keeps only the winners.
+//
+// 100 holds a worst-case page (every record at the ceiling) near
+// HelmTemplateOutputLimit, the largest single buffer this project already
+// tolerates, while a realistic page of tens-of-KiB records is a few MiB and
+// the round trips stay few. Paging bounds the page, not the peak: the winning
+// revision of every release is held until the walk finishes, so the high-water
+// mark is one page plus one record per release across both drivers.
+const HelmReleaseListPageSize int64 = 100
+
+// HelmInventoryTimeout bounds the whole read of the installed inventory: a
+// paged cluster-wide List per storage driver, plus decoding the newest
+// revision of each release. Longer than CollectorTopologyTimeout, whose
+// paginated node walk it otherwise resembles, because it makes that walk twice
+// over objects that carry rendered manifests rather than node metadata.
+//
+// It is also the backstop on a server that never stops paging: the per-page
+// continue-token check refuses a token it has already been handed, but only a
+// deadline bounds one that cycles.
+const HelmInventoryTimeout = 2 * time.Minute
+
+// ArgoApplicationListPageSize caps how many Argo CD Applications one List
+// pulls while reading the installed inventory. One Application exists per
+// deployed component, not one per revision, so the object count is small; the
+// objects are not. An Application's status carries an entry for every resource
+// it manages, which for a chart the size of gpu-operator or
+// kube-prometheus-stack is hundreds of entries, so a management cluster's
+// Applications add up to tens of megabytes in a single unpaged response.
+//
+// Larger than HelmReleaseListPageSize because no Application approaches the
+// ~1 MiB ceiling that sizes the Helm page, and the reduction there that keeps
+// only the newest revision has no counterpart here: every Application is
+// retained, so paging bounds the response rather than the peak.
+const ArgoApplicationListPageSize int64 = 200
+
+// ArgoInventoryTimeout bounds the whole read of the Applications Argo CD
+// deploys: one paged cluster-wide List, plus the projection of each item.
+// Shorter than HelmInventoryTimeout, which makes two such walks over objects
+// carrying rendered manifests and decompresses one record per release.
+//
+// It is also the backstop on a server that never stops paging, for the reason
+// HelmInventoryTimeout is: the per-page continue-token check refuses a token
+// it has already been handed, but only a deadline bounds one that cycles.
+const ArgoInventoryTimeout = 60 * time.Second
 
 // Helm chart-pull timeouts for the bundle-time --vendor-charts path.
 // Sized for one chart pull from a remote Helm or OCI registry, including
@@ -1407,7 +1666,7 @@ const (
 	// tasks within a single oras.Copy invocation.
 	OCIPushConcurrency = 3
 
-	// OCIImageRefsWriteTimeout bounds final atomic image-reference output.
+	// OCIImageRefsWriteTimeout bounds the final write of an image-reference file.
 	OCIImageRefsWriteTimeout = 30 * time.Second
 
 	// OCIBundlePublishTimeout bounds the complete verify, stage, package,
@@ -1462,3 +1721,16 @@ const (
 	// MaxOCIRecipeFiles caps all materialized filesystem nodes.
 	MaxOCIRecipeFiles = 4096
 )
+
+// AtRiskListPageSize is the most objects the at-risk scan asks for in one List
+// request.
+const AtRiskListPageSize int64 = 200
+
+// AtRiskStepTimeout bounds each step of the at-risk scan, which is resolving
+// one kind or listing one page with its retries. The scan has no total budget.
+const AtRiskStepTimeout = 60 * time.Second
+
+// AtRiskExpiredContinueRetries is the most expired-continue-token 410s in a
+// row, with no page served between them, that the at-risk scan resumes from
+// before it fails the list.
+const AtRiskExpiredContinueRetries = 3

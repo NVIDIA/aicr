@@ -16,11 +16,11 @@ package verifier
 
 import (
 	"context"
-	stderrors "errors"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
 
@@ -42,7 +42,7 @@ func TestVerifierFilesystemPathsAreBounded(t *testing.T) {
 	// A real predicate, so the phase-digest pass actually reads ctrf/ files.
 	// An empty one would short-circuit before touching the filesystem and the
 	// case would vacuously pass.
-	pred, err := loadUnsignedPredicate(context.Background(), mat)
+	pred, _, err := loadUnsignedPredicate(context.Background(), mat)
 	if err != nil {
 		t.Fatalf("loadUnsignedPredicate: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestVerifierFilesystemPathsAreBounded(t *testing.T) {
 			return err
 		}},
 		{"loadUnsignedPredicate", func(ctx context.Context) error {
-			_, err := loadUnsignedPredicate(ctx, mat)
+			_, _, err := loadUnsignedPredicate(ctx, mat)
 			return err
 		}},
 		{"CheckPhaseDigestsContext", func(ctx context.Context) error {
@@ -103,7 +103,7 @@ func TestVerifierFilesystemPathsAreBounded(t *testing.T) {
 			// operator abort keep being reported as a retryable fault, which
 			// is the defect this bounding work exists to fix — a looser
 			// assertion would pass while the bug was still present.
-			if !stderrors.Is(err, errors.New(errors.ErrCodeCanceled, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeCanceled {
 				t.Errorf("abort misclassified (want ErrCodeCanceled): %v", err)
 			}
 		})

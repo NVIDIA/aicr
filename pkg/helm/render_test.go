@@ -16,7 +16,6 @@ package helm
 
 import (
 	"bytes"
-	stderrors "errors"
 	"os"
 	"strings"
 	"testing"
@@ -24,6 +23,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestWriteValuesFile(t *testing.T) {
@@ -188,7 +189,7 @@ func TestLimitedWriterOverflow(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error on overflow, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("expected ErrCodeInternal, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "exceeds size limit") {
@@ -211,5 +212,34 @@ func TestLimitedWriterSingleWriteOverflow(t *testing.T) {
 	}
 	if buf.Len() != 0 {
 		t.Errorf("buffer should be empty after rejected write, got %q", buf.String())
+	}
+}
+
+func TestSummarizeHelmError(t *testing.T) {
+	tests := []struct {
+		name   string
+		stderr string
+		want   string
+	}{
+		{"empty", "", ""},
+		{"no error line", "WARNING: something happened", ""},
+		{"single line", "Error: chart not found", "chart not found"},
+		{
+			"warning mentioning Error is skipped",
+			"WARNING: retry after Error: timeout\nError: failed to pull chart",
+			"failed to pull chart",
+		},
+		{
+			"continuation lines are kept",
+			"Error: template: x/templates/a.yaml:3:4: executing\n  nil pointer evaluating\n\nUse --debug",
+			"template: x/templates/a.yaml:3:4: executing nil pointer evaluating",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := summarizeHelmError(tt.stderr); got != tt.want {
+				t.Errorf("summarizeHelmError() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

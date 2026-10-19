@@ -20,9 +20,13 @@
 # as a guard against vacuous pass on a 0-node selector). The previous
 # check gated only on numberReady > 0, which passed on partial
 # failures; see #1222 / recipes/checks/nfd/health-check.yaml for the
-# same rationale. Container-state errors (CrashLoopBackOff,
-# ImagePullBackOff, ErrImagePull, CreateContainerConfigError) are
-# label-scoped because kube-system is a shared namespace.
+# same rationale. updatedNumberScheduled/observedGeneration additionally
+# guard against a stale rollout: a node still running the previous
+# revision's pod also reports numberReady, so that alone can't
+# distinguish it from a fully current rollout.
+# Container-state errors (CrashLoopBackOff, ImagePullBackOff,
+# ErrImagePull, CreateContainerConfigError) are label-scoped because
+# kube-system is a shared namespace.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -40,9 +44,10 @@ spec:
               metadata:
                 name: aws-efa-k8s-device-plugin
                 namespace: kube-system
-              status:
-                (desiredNumberScheduled > `0`): true
-                (numberReady == desiredNumberScheduled): true
+              ((status.desiredNumberScheduled || `0`) > `0`): true
+              ((status.numberReady || `0`) == status.desiredNumberScheduled): true
+              ((status.updatedNumberScheduled || `0`) == status.desiredNumberScheduled): true
+              ((status.observedGeneration || `0`) == metadata.generation): true
     - name: validate-all-pods-healthy
       try:
         - error:

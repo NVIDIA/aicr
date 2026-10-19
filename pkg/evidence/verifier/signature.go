@@ -31,11 +31,11 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/verify"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 	"github.com/NVIDIA/aicr/pkg/evidence/internal/boundedio"
-	"github.com/NVIDIA/aicr/pkg/trust"
 )
 
 // ErrUnsignedBundle is returned by VerifySignature when no Sigstore
@@ -45,7 +45,8 @@ var ErrUnsignedBundle = errors.New(errors.ErrCodeNotFound, "no signature attache
 
 // SignatureResult is what a successful VerifySignature returns.
 type SignatureResult struct {
-	// Signer holds OIDC claims extracted from the verifying cert.
+	// Signer holds the verified signer: the OIDC claims from the verifying
+	// cert, or the verifying key's fingerprint for a key signature.
 	Signer *SignerClaims
 
 	// Predicate is the cryptographically anchored predicate body
@@ -53,6 +54,82 @@ type SignatureResult struct {
 	// this over the unsigned statement.intoto.json when present —
 	// THIS is the value the signer attested to.
 	Predicate *attestation.Predicate
+
+	// PredicateType is the predicateType recorded alongside Predicate in
+	// the verified DSSE payload.
+	PredicateType string
+}
+
+// signerPolicy is the resolved signer half of a VerifyOptions: the trust
+// anchors, the key to verify against when Key is set, and whether a
+// transparency-log entry is required. Resolving it once, before anything is
+// pulled, lets an operator error (a bad --key or --trust-root, a conflicting
+// flag) fail the run instead of reading as a verdict on the bundle.
+type signerPolicy struct {
+	src  bundleattest.TrustedRootSource
+	tlog bundleattest.VerifyTransparencyPolicy
+
+	// key and keyFingerprint are set only in key mode.
+	key            bundleattest.VerificationIdentity
+	keyFingerprint string
+}
+
+// resolveSignerPolicy validates the signer options and resolves the trust
+// root and, in key mode, the public key. A KMS key URI makes a live
+// GetPublicKey call here.
+func resolveSignerPolicy(ctx context.Context, opts VerifyOptions) (*signerPolicy, error) {
+	if opts.IgnoreTLog && opts.Key == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"ignoring the transparency log requires a key: "+
+				"a keyless certificate cannot be verified without a trusted timestamp")
+	}
+	if opts.Key != "" && (opts.ExpectedIssuer != "" || opts.ExpectedIdentityRegexp != "") {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"the expected issuer and identity pins apply to keyless certificates; "+
+				"a key already pins the signer, so they cannot be combined with it")
+	}
+
+	p := &signerPolicy{
+		src:  bundleattest.PublicGoodTrustedRoot,
+		tlog: bundleattest.NewRequireTLogPolicy(),
+	}
+	if opts.TrustRoot != "" {
+		src, err := bundleattest.NewUnionTrustedRoot(opts.TrustRoot)
+		if err != nil {
+			return nil, err
+		}
+		p.src = src
+	}
+	if opts.IgnoreTLog {
+		p.tlog = bundleattest.NewNoTLogVerifyPolicy()
+	}
+	if opts.Key == "" {
+		return p, nil
+	}
+
+	id, err := bundleattest.NewKeyVerificationIdentity(ctx, opts.Key, p.src)
+	if err != nil {
+		return nil, err
+	}
+	fp, ok := id.(interface{ KeyFingerprint() string })
+	if !ok || fp.KeyFingerprint() == "" {
+		return nil, errors.New(errors.ErrCodeInternal, "key verification identity carries no key fingerprint")
+	}
+	p.key, p.keyFingerprint = id, fp.KeyFingerprint()
+	return p, nil
+}
+
+// identity returns the verification identity for this run: the resolved key,
+// or the keyless certificate pins over the trust root.
+func (p *signerPolicy) identity(opts VerifyOptions) (bundleattest.VerificationIdentity, error) {
+	if p.key != nil {
+		return p.key, nil
+	}
+	matcher, err := buildIdentityMatcher(opts)
+	if err != nil {
+		return nil, err
+	}
+	return bundleattest.NewKeylessVerificationIdentity(matcher, p.src), nil
 }
 
 // VerifySignature performs sigstore-go verification of the bundle's
@@ -66,6 +143,14 @@ func VerifySignature(ctx context.Context, mat *MaterializedBundle, opts VerifyOp
 	if mat == nil || mat.BundleDir == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "materialized bundle is required")
 	}
+	policy, err := resolveSignerPolicy(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return verifySignature(ctx, mat, opts, policy)
+}
+
+func verifySignature(ctx context.Context, mat *MaterializedBundle, opts VerifyOptions, policy *signerPolicy) (*SignatureResult, error) {
 	if err := ctx.Err(); err != nil {
 		// An operator abort must not be reported as a timeout: ErrCodeTimeout
 		// is the retryable/transient bucket, and a deliberate Ctrl-C is not
@@ -116,7 +201,7 @@ func VerifySignature(ctx context.Context, mat *MaterializedBundle, opts VerifyOp
 		return nil, payloadErr
 	}
 
-	subjectHex, predicate, parseStmtErr := parseStatement(stmtBytes)
+	subjectHex, predicateType, predicate, parseStmtErr := parseStatement(stmtBytes)
 	if parseStmtErr != nil {
 		return nil, parseStmtErr
 	}
@@ -134,27 +219,27 @@ func VerifySignature(ctx context.Context, mat *MaterializedBundle, opts VerifyOp
 		}
 	}
 
-	trustedMaterial, trustErr := trust.GetTrustedMaterial()
-	if trustErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load trusted root", trustErr)
+	if modeErr := checkSigningMode(sigBundle, policy.key != nil); modeErr != nil {
+		return nil, modeErr
 	}
 
-	identity, idErr := buildIdentityMatcher(opts)
+	identity, idErr := policy.identity(opts)
 	if idErr != nil {
 		return nil, idErr
 	}
+	trustedMaterial, trustErr := identity.TrustedMaterial(ctx)
+	if trustErr != nil {
+		return nil, trustErr
+	}
 
-	v, vErr := verify.NewVerifier(trustedMaterial,
-		verify.WithObserverTimestamps(1),
-		verify.WithTransparencyLog(1),
-	)
+	v, vErr := verify.NewVerifier(trustedMaterial, policy.tlog.VerifierOptions()...)
 	if vErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create sigstore verifier", vErr)
 	}
 
 	result, verifyErr := v.Verify(sigBundle, verify.NewPolicy(
 		verify.WithArtifactDigest("sha256", digestBytes),
-		verify.WithCertificateIdentity(identity),
+		identity.PolicyOption(),
 	))
 	if verifyErr != nil {
 		if isCertChainError(verifyErr.Error()) {
@@ -166,13 +251,18 @@ func VerifySignature(ctx context.Context, mat *MaterializedBundle, opts VerifyOp
 	}
 
 	claims := &SignerClaims{}
-	if result != nil && result.Signature != nil && result.Signature.Certificate != nil {
+	switch {
+	case policy.key != nil:
+		claims.Identity, claims.Issuer = policy.keyFingerprint, attestation.KeySignerIssuer
+	case result != nil && result.Signature != nil && result.Signature.Certificate != nil:
 		claims.Identity = result.Signature.Certificate.SubjectAlternativeName
 		claims.Issuer = result.Signature.Certificate.Issuer
 	}
-	if idx := rekorLogIndex(sigBundle); idx > 0 {
-		i := idx
-		claims.RekorLogIndex = &i
+	claims.RekorLogIndex = verifiedRekorLogIndex(sigBundle, opts.IgnoreTLog)
+
+	if opts.IgnoreTLog {
+		slog.Warn("signature verified without a transparency log — the signing time is unproven",
+			"identity", claims.Identity)
 	}
 
 	// Surface the no-pin footgun: without --expected-issuer or
@@ -180,15 +270,38 @@ func VerifySignature(ctx context.Context, mat *MaterializedBundle, opts VerifyOp
 	// provider passes the identity policy. The signature is still
 	// cryptographically valid, but the verifier hasn't said anything
 	// about *who* signed. Operators reviewing the report need to know
-	// that default verification accepts every signer.
-	if opts.ExpectedIssuer == "" && opts.ExpectedIdentityRegexp == "" {
+	// that default verification accepts every signer. A key is itself
+	// the pin, so key mode never warns.
+	if policy.key == nil && opts.ExpectedIssuer == "" && opts.ExpectedIdentityRegexp == "" {
 		slog.Warn("signature verified but no signer pinned — any Fulcio identity will pass",
 			"identity", claims.Identity,
 			"issuer", claims.Issuer,
 			"hint", "consider --expected-issuer / --expected-identity-regexp to fail on unexpected signers")
 	}
 
-	return &SignatureResult{Signer: claims, Predicate: predicate}, nil
+	return &SignatureResult{Signer: claims, Predicate: predicate, PredicateType: predicateType}, nil
+}
+
+// checkSigningMode fails a bundle whose signature kind does not match the
+// verification mode, naming the option that would verify it. sigstore-go
+// rejects the mismatch too, but its message does not say what to do.
+func checkSigningMode(b *bundle.Bundle, keyMode bool) error {
+	content, err := b.VerificationContent()
+	if err != nil {
+		return nil // malformed material: let sigstore-go report it
+	}
+	keySigned := content.PublicKey() != nil
+	switch {
+	case keyMode && !keySigned:
+		return errors.New(errors.ErrCodeUnauthorized,
+			"sigstore verification failed: the bundle is signed with a keyless certificate, not a key; "+
+				"verify it without --key, pinning the signer with --expected-issuer / --expected-identity-regexp")
+	case !keyMode && keySigned:
+		return errors.New(errors.ErrCodeUnauthorized,
+			"sigstore verification failed: the bundle is signed with a key, not a keyless certificate; "+
+				"verify it with --key <KMS key URI or PEM public key>")
+	}
+	return nil
 }
 
 func buildIdentityMatcher(opts VerifyOptions) (verify.CertificateIdentity, error) {
@@ -250,8 +363,8 @@ func extractStatementBytes(b *bundle.Bundle) ([]byte, error) {
 }
 
 // parseStatement extracts the subject sha256 (hex, no prefix) plus the
-// predicate body from an in-toto Statement JSON.
-func parseStatement(stmtBytes []byte) (subjectHex string, predicate *attestation.Predicate, err error) {
+// predicateType and predicate body from an in-toto Statement JSON.
+func parseStatement(stmtBytes []byte) (subjectHex, predicateType string, predicate *attestation.Predicate, err error) {
 	var stmt struct {
 		Subject []struct {
 			Digest map[string]string `json:"digest"`
@@ -260,20 +373,20 @@ func parseStatement(stmtBytes []byte) (subjectHex string, predicate *attestation
 		Predicate     attestation.Predicate `json:"predicate"`
 	}
 	if uErr := json.Unmarshal(stmtBytes, &stmt); uErr != nil {
-		return "", nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+		return "", "", nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 			"DSSE payload is not a valid in-toto Statement", uErr)
 	}
 	if len(stmt.Subject) == 0 {
-		return "", nil, errors.New(errors.ErrCodeInvalidRequest, "Statement has no subject")
+		return "", "", nil, errors.New(errors.ErrCodeInvalidRequest, "Statement has no subject")
 	}
 	subjectHex = stmt.Subject[0].Digest["sha256"]
 	if subjectHex == "" {
-		return "", nil, errors.New(errors.ErrCodeInvalidRequest, "Statement subject has no sha256 digest")
+		return "", "", nil, errors.New(errors.ErrCodeInvalidRequest, "Statement subject has no sha256 digest")
 	}
 	if cErr := attestation.ValidatePredicateTypeCoherence(stmt.PredicateType, &stmt.Predicate); cErr != nil {
-		return "", nil, cErr
+		return "", "", nil, cErr
 	}
-	return subjectHex, &stmt.Predicate, nil
+	return subjectHex, stmt.PredicateType, &stmt.Predicate, nil
 }
 
 func looksLikeJSON(b []byte) bool {
@@ -288,6 +401,32 @@ func looksLikeJSON(b []byte) bool {
 		}
 	}
 	return false
+}
+
+// verifiedRekorLogIndex returns the bundle's Rekor log index, or nil when it
+// has none or when ignoreTLog means no transparency-log entry was verified.
+func verifiedRekorLogIndex(b *bundle.Bundle, ignoreTLog bool) *int64 {
+	if ignoreTLog {
+		return nil
+	}
+	idx := rekorLogIndex(b)
+	if idx <= 0 {
+		return nil
+	}
+	return &idx
+}
+
+// comparableSignerClaim returns the pointer signer claim to cross-check against
+// the verified signer. Under ignoreTLog the transparency log was not consulted,
+// so the pointer's Rekor index is neither confirmed nor refuted and is dropped
+// from a copy; claimed itself is never modified.
+func comparableSignerClaim(claimed *attestation.PointerSigner, ignoreTLog bool) *attestation.PointerSigner {
+	if claimed == nil || !ignoreTLog || claimed.RekorLogIndex == nil {
+		return claimed
+	}
+	c := *claimed
+	c.RekorLogIndex = nil
+	return &c
 }
 
 func rekorLogIndex(b *bundle.Bundle) int64 {
@@ -324,18 +463,18 @@ func CrossCheckPointerSigner(claimed *attestation.PointerSigner, actual *SignerC
 	if claimed.Identity != "" && claimed.Identity != actual.Identity {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"signer identity mismatch: pointer claims "+claimed.Identity+
-				", cert says "+actual.Identity)
+				", signature says "+actual.Identity)
 	}
 	if claimed.Issuer != "" && claimed.Issuer != actual.Issuer {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"signer issuer mismatch: pointer claims "+claimed.Issuer+
-				", cert says "+actual.Issuer)
+				", signature says "+actual.Issuer)
 	}
 	if claimed.RekorLogIndex != nil {
 		if actual.RekorLogIndex == nil {
 			return errors.New(errors.ErrCodeInvalidRequest,
 				"pointer claims a Rekor log index but the bundle has no Rekor entry "+
-					"(was the bundle signed with --no-rekor, or is the pointer stale?)")
+					"(was the bundle signed with --tlog-upload=false, or is the pointer stale?)")
 		}
 		if *claimed.RekorLogIndex != *actual.RekorLogIndex {
 			return errors.New(errors.ErrCodeInvalidRequest,

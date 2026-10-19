@@ -15,6 +15,7 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -153,6 +154,62 @@ func TestGoInstallEmitsProxyAndChecksum(t *testing.T) {
 	}
 	if hosts[hostGoProxy] != PinVar {
 		t.Errorf("bare $VAR version = %q, want var pin", hosts[hostGoProxy])
+	}
+}
+
+// TestGoBuildEmitsProxyOnly is the counterpart to
+// TestGoInstallEmitsProxyAndChecksum: a `go build` of a tool that lives in the
+// main module's dependency graph pulls from the module proxy but verifies
+// against the committed go.sum, so it must NOT record the checksum database.
+// That asymmetry is the egress difference #2667 bought, and the egress doc is
+// generated from these records, so a regression here would silently restate a
+// sum.golang.org dependency the build no longer has.
+func TestGoBuildEmitsProxyOnly(t *testing.T) {
+	recs, _ := shellLineRecords("tools/setup-tools",
+		`GOFLAGS=-mod=readonly go build -o "${bin_dir}/${name}" "${pkg}"`)
+
+	hosts := map[string]string{} // host -> pinType
+	for _, r := range recs {
+		hosts[r.Host] = r.PinType
+	}
+	if _, ok := hosts[hostGoProxy]; !ok {
+		t.Errorf("missing %s record: `go build` still fetches modules from the proxy", hostGoProxy)
+	}
+	if _, ok := hosts[hostGoSum]; ok {
+		t.Errorf("recorded %s: a main-module build verifies against go.sum and "+
+			"never contacts the checksum database", hostGoSum)
+	}
+	if got := hosts[hostGoProxy]; got != PinDigest {
+		t.Errorf("pin type = %q, want %q (go.sum entries are cryptographic hashes)", got, PinDigest)
+	}
+}
+
+// TestRealSetupToolsEmitsModuleBuildRecord asserts against the actual
+// tools/setup-tools rather than a literal, which TestGoBuildEmitsProxyOnly
+// cannot: reword that script's `go build` into a form the regex misses
+// (`go  build`, `go -C <dir> build`) and the literal test stays green.
+//
+// The doc-freshness test used to backstop that by way of the host count, but no
+// longer does: install-nvkind.sh is now scanned too and its `go install` emits
+// proxy.golang.org as well, so losing the setup-tools record leaves the host
+// set unchanged and nothing else notices.
+func TestRealSetupToolsEmitsModuleBuildRecord(t *testing.T) {
+	inv := Collect(repoRootForTest())
+
+	var found bool
+	for _, r := range inv.Records {
+		if r.Source == filepath.Join("tools", "setup-tools") &&
+			r.Host == hostGoProxy && r.PinType == PinDigest {
+
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("no main-module `go build` record from tools/setup-tools.\n"+
+			"build_module_tool is how apidiff and go-licenses are installed without "+
+			"reaching sum.golang.org (#2667); if its command was reworded, teach "+
+			"%s to see the new form.", "shGoBuildRe")
 	}
 }
 

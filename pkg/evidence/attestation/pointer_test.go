@@ -16,7 +16,6 @@ package attestation
 
 import (
 	"context"
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +25,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 )
 
@@ -120,6 +121,17 @@ func TestPointerCopyToHint(t *testing.T) {
 	if got := PointerCopyToHint(unsigned); strings.HasPrefix(got, "recipes/evidence/") {
 		t.Errorf("unsigned hint should not be a path, got %q", got)
 	}
+
+	// The evidence gate rejects key-signed pointers, so none gets a path.
+	keySigned := *signed
+	keySigned.Attestations = []PointerAttestation{signed.Attestations[0]}
+	keySigned.Attestations[0].Signer = &PointerSigner{
+		Identity: "sha256:d93f4a5e57c66728cb33edea59e9fc0fdf246a5361a0b8c50905e497ef0e5c2b",
+		Issuer:   KeySignerIssuer,
+	}
+	if got := PointerCopyToHint(&keySigned); strings.HasPrefix(got, "recipes/evidence/") {
+		t.Errorf("key-signed hint should not be a path, got %q", got)
+	}
 }
 
 func TestRelocatePointerToCanonical(t *testing.T) {
@@ -209,7 +221,7 @@ func TestRelocatePointerToCanonical(t *testing.T) {
 		}
 		// Assert the structured code, not just non-nil, so an INTERNAL
 		// regression can't masquerade as the EEXIST conflict contract.
-		if _, err := RelocatePointerToCanonical(flat, signed()); !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+		if _, err := RelocatePointerToCanonical(flat, signed()); errorstest.ReportedCode(err) != errors.ErrCodeConflict {
 			t.Errorf("expected ErrCodeConflict when the canonical path holds different content, got %v", err)
 		}
 		// The flat source must be left in place on a refusal (no move happened).
@@ -388,8 +400,8 @@ func TestBuildPointer_ProducesSingleAttestation(t *testing.T) {
 		t.Fatalf("expected 1 attestation, got %d", len(p.Attestations))
 	}
 	att := p.Attestations[0]
-	if att.Bundle.PredicateType != PredicateTypeV1 {
-		t.Errorf("PredicateType = %q", att.Bundle.PredicateType)
+	if att.Bundle.PredicateType != PredicateTypeV3 {
+		t.Errorf("PredicateType = %q, want %q", att.Bundle.PredicateType, PredicateTypeV3)
 	}
 	if att.Bundle.OCI != "ghcr.io/foo/aicr-evidence:abc" {
 		t.Errorf("OCI mismatch: %q", att.Bundle.OCI)
@@ -541,8 +553,8 @@ func TestPointer_PrePushBundleFieldsEmpty(t *testing.T) {
 	if att.Bundle.OCI != "" || att.Bundle.Digest != "" {
 		t.Errorf("pre-push pointer should leave bundle.{oci,digest} empty; got %+v", att.Bundle)
 	}
-	if att.Bundle.PredicateType != PredicateTypeV1 {
-		t.Errorf("predicate type should be set even pre-push")
+	if att.Bundle.PredicateType != PredicateTypeV3 {
+		t.Errorf("predicate type should be set even pre-push, got %q want %q", att.Bundle.PredicateType, PredicateTypeV3)
 	}
 }
 

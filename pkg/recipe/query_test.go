@@ -239,7 +239,7 @@ func TestHydrateResult(t *testing.T) {
 	t.Run("basic result", func(t *testing.T) {
 		result := &RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: "aicr.run/v1alpha2",
+			APIVersion: "aicr.run/v1",
 			Criteria: &Criteria{
 				Service:     "eks",
 				Accelerator: "h100",
@@ -296,6 +296,7 @@ func TestHydrateResult(t *testing.T) {
 
 	t.Run("typed configuration", func(t *testing.T) {
 		result := &RecipeResult{
+			APIVersion: RecipeResultAPIVersion,
 			Configuration: &RecipeConfiguration{
 				Slurm: &SlurmConfiguration{
 					Accounting: &SlurmAccountingConfiguration{
@@ -325,7 +326,7 @@ func TestHydrateResult(t *testing.T) {
 		// Manifest-only Helm refs have no chart and must stay chartless.
 		result := &RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: "aicr.run/v1alpha2",
+			APIVersion: "aicr.run/v1",
 			ComponentRefs: []ComponentRef{
 				{
 					Name:    "source-only",
@@ -371,11 +372,13 @@ func TestHydrateResult(t *testing.T) {
 		// the OpenAPI schema so `aicr query` can select it.
 		result := &RecipeResult{
 			Kind:            "RecipeResult",
-			APIVersion:      "aicr.run/v1alpha2",
+			APIVersion:      "aicr.run/v1",
 			DeploymentOrder: []string{},
 		}
 		result.Metadata.GPUDriverState = GPUDriverStateAbsent
 		result.Metadata.MariaDBOperatorState = MariaDBOperatorStateAPIDetected
+		result.Metadata.DefaultStorageClassState = DefaultStorageClassStateMultiple
+		result.Metadata.PerconaOperatorState = PerconaOperatorStateAICROwned
 
 		hydrated, err := HydrateResult(result)
 		if err != nil {
@@ -391,9 +394,17 @@ func TestHydrateResult(t *testing.T) {
 		if got := metadata["mariaDBOperatorState"]; got != MariaDBOperatorStateAPIDetected {
 			t.Errorf("mariaDBOperatorState = %v, want %q", got, MariaDBOperatorStateAPIDetected)
 		}
+		if got := metadata["defaultStorageClassState"]; got != DefaultStorageClassStateMultiple {
+			t.Errorf("defaultStorageClassState = %v, want %q", got, DefaultStorageClassStateMultiple)
+		}
+		if got := metadata["perconaOperatorState"]; got != PerconaOperatorStateAICROwned {
+			t.Errorf("perconaOperatorState = %v, want %q", got, PerconaOperatorStateAICROwned)
+		}
 
 		result.Metadata.GPUDriverState = ""
 		result.Metadata.MariaDBOperatorState = ""
+		result.Metadata.DefaultStorageClassState = ""
+		result.Metadata.PerconaOperatorState = ""
 		hydrated, err = HydrateResult(result)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -405,16 +416,17 @@ func TestHydrateResult(t *testing.T) {
 		if _, exists := metadata["gpuDriverState"]; exists {
 			t.Errorf("gpuDriverState = %v, want absent (omitempty contract)", metadata["gpuDriverState"])
 		}
-		if _, exists := metadata["mariaDBOperatorState"]; exists {
-			t.Errorf("mariaDBOperatorState = %v, want absent (omitempty contract)",
-				metadata["mariaDBOperatorState"])
+		for _, key := range []string{"mariaDBOperatorState", "defaultStorageClassState", "perconaOperatorState"} {
+			if _, exists := metadata[key]; exists {
+				t.Errorf("%s = %v, want absent (omitempty contract)", key, metadata[key])
+			}
 		}
 	})
 
 	t.Run("excluded overlays include reasons", func(t *testing.T) {
 		result := &RecipeResult{
 			Kind:            "RecipeResult",
-			APIVersion:      "aicr.run/v1alpha2",
+			APIVersion:      "aicr.run/v1",
 			DeploymentOrder: []string{},
 		}
 		result.Metadata.ExcludedOverlays = []ExcludedOverlay{
@@ -449,7 +461,7 @@ func TestHydrateResult(t *testing.T) {
 	t.Run("nil criteria", func(t *testing.T) {
 		result := &RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: "aicr.run/v1alpha2",
+			APIVersion: "aicr.run/v1",
 		}
 
 		hydrated, err := HydrateResult(result)
@@ -464,7 +476,7 @@ func TestHydrateResult(t *testing.T) {
 	t.Run("constraints with optional fields", func(t *testing.T) {
 		result := &RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: "aicr.run/v1alpha2",
+			APIVersion: "aicr.run/v1",
 			Constraints: []Constraint{
 				{Name: "k8s", Value: ">= 1.30"},
 				{Name: "gpu-mem", Value: ">= 80", Severity: "error", Remediation: "upgrade GPU", Unit: "GB"},
@@ -505,7 +517,7 @@ func TestHydrateResult(t *testing.T) {
 	t.Run("component optional fields", func(t *testing.T) {
 		result := &RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: "aicr.run/v1alpha2",
+			APIVersion: "aicr.run/v1",
 			ComponentRefs: []ComponentRef{
 				{
 					Name:           "kustomize-app",

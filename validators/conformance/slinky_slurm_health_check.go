@@ -103,7 +103,7 @@ func CheckSlinkySlurmHealth(ctx *validators.Context) error {
 		return errors.New(errors.ErrCodeInvalidRequest, "validation is not available")
 	}
 	if !recipeHasComponent(ctx, slinkySlurmComponent) {
-		return validators.Skip("slinky-slurm component not present in recipe")
+		return validators.SkipWithReason(validators.SkipReasonComponentNotInRecipe, "slinky-slurm component not present in recipe")
 	}
 	accountingEnabled, accountingErr := slurmAccountingEnabled(ctx.ValidationInput)
 	if accountingErr != nil {
@@ -366,7 +366,7 @@ func runnableSlinkyNodeSetPods(ctx *validators.Context, namespace string) ([]cor
 		}
 	}
 	if resolved == len(pods) && kwok == resolved {
-		return nil, validators.Skip("Slinky NodeSet pods are on KWOK nodes; skipping Slurm health validation")
+		return nil, validators.SkipWithReason(validators.SkipReasonSimulatedNodes, "Slinky NodeSet pods are on KWOK nodes, so Slurm health validation is skipped")
 	}
 	return pods, nil
 }

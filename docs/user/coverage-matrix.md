@@ -22,18 +22,19 @@ This is a **different axis** from the per-recipe **Coverage** column in the reci
 | Item | Exercised by | Hardware | Cadence | Status | Notes |
 |------|--------------|----------|---------|--------|-------|
 | `bundle` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
-| `diff` | — | — | — | not-yet-covered | — |
+| `diff` | chainsaw | simulated / none | per-PR | covered | — |
 | `evidence digest` | — | — | — | not-yet-covered | — |
-| `evidence publish` | demo | docs | — | not-yet-covered | documented in demos only; no executable test yet |
+| `evidence publish` | chainsaw, demo | simulated / none | per-PR | covered | — |
 | `evidence sign` | — | — | — | not-yet-covered | — |
-| `evidence verify` | uat, demo | GPU (H100, real) | nightly | covered | — |
+| `evidence verify` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
 | `mirror list` | — | — | — | not-yet-covered | — |
-| `query` | demo | docs | — | not-yet-covered | documented in demos only; no executable test yet |
+| `query` | chainsaw, demo | simulated / none | per-PR | covered | — |
 | `recipe` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
 | `recipe list` | — | — | — | not-yet-covered | — |
 | `recipe verify-catalog` | — | — | — | not-yet-covered | — |
 | `skill` | demo | docs | — | not-yet-covered | documented in demos only; no executable test yet |
 | `snapshot` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
 | `trust update` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
+| `upgrade-check` | chainsaw | simulated / none | per-PR | covered | — |
 | `validate` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
 | `verify` | chainsaw, demo | simulated / none | per-PR | covered | — |

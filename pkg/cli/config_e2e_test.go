@@ -172,7 +172,7 @@ func tryCaptureBundleOpts(t *testing.T, args []string) (*bundleCmdOptions, error
 	var captured *bundleCmdOptions
 	cmd := bundleCmd()
 	cmd.Action = func(ctx context.Context, c *cli.Command) error {
-		cfg, err := loadCmdConfig(ctx, c)
+		cfg, err := loadFacadeConfig(ctx, c)
 		if err != nil {
 			return err
 		}
@@ -203,7 +203,7 @@ func TestBundleCmd_AllConfigSectionsResolve(t *testing.T) {
 	}
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := fmt.Sprintf(`kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   bundle:
     input:
@@ -290,11 +290,19 @@ spec:
 }
 
 // TestBundleCmd_SigningKeyFromConfig verifies the KMS --signing-key is
-// config-driven: a config-sourced spec.bundle.attestation.signingKey lands on
-// the resolved options, the CLI flag wins over the config value, and a
-// config-sourced signingKey combined with a config-sourced keyless input
-// (fulcioURL) is rejected by the mutual-exclusion guard through the resolved
-// layer (cmd.IsSet is false for both, so only resolved opts catch it). See #1566.
+// config-driven end to end: a config-sourced spec.bundle.attestation.signingKey
+// lands on the resolved options, the CLI flag wins over the config value, and a
+// config-sourced signingKey combined with a config-sourced keyless input is
+// rejected with no flag set (cmd.IsSet is false for both, so nothing at the flag
+// layer alone would see it). See #1566.
+//
+// Which layer does the rejecting differs by case, and this test deliberately
+// does not distinguish: the fulcioURL and blank-key cases now fail in
+// config.resolveSigningKey when the document loads, while oidcDeviceFlow is
+// excluded from that rule and is caught only by validateSigningKeyExclusivity on
+// the merged opts. Those two functions are covered directly by
+// TestBundleResolve_SigningKey (pkg/config) and TestValidateSigningKeyExclusivity
+// below, so a regression in either is caught there rather than here.
 func TestBundleCmd_SigningKeyFromConfig(t *testing.T) {
 	const configKey = "awskms://alias/aicr-signing"
 	const flagKey = "gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k"
@@ -308,7 +316,7 @@ func TestBundleCmd_SigningKeyFromConfig(t *testing.T) {
 		}
 		cfgPath := filepath.Join(tmp, "config.yaml")
 		cfg := fmt.Sprintf(`kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   bundle:
     input:
@@ -358,9 +366,9 @@ spec:
 	}
 
 	// Rejection cases: a config-sourced signingKey that conflicts with a
-	// config-sourced keyless input must be caught through the resolved layer
-	// (cmd.IsSet is false for both), and a blank config signingKey must fail
-	// fast rather than reaching the KMS resolver. See #1566.
+	// config-sourced keyless input must be rejected with no flag set (cmd.IsSet
+	// is false for both), and a blank config signingKey must fail fast rather
+	// than reaching the KMS resolver. See #1566.
 	rejectTests := []struct {
 		name        string
 		attestation string
@@ -396,6 +404,51 @@ spec:
 	}
 }
 
+// TestBundleCmd_OIDCDeviceFlowFlagOverridesConfigSigningKeyConflict is the
+// regression test for the eager-exclusivity review finding on
+// Config.BundleOptions: that method used to reject a document setting both
+// signingKey and oidcDeviceFlow: true BEFORE the CLI ever read
+// --oidc-device-flow, so a caller trying to correct a self-contradictory
+// config with --oidc-device-flow=false got the error anyway — the flag was
+// never given a chance to be read. The rule now lives one layer down in
+// config.resolveSigningKey, which leaves oidcDeviceFlow out for that same
+// reason; only the merged-opts validateSigningKeyExclusivity checks it, so the
+// flag wins as every other per-field override does.
+// TestBundleCmd_SigningKeyFromConfig's rejectTests above still prove the
+// config-only combination (no flag) is rejected.
+func TestBundleCmd_OIDCDeviceFlowFlagOverridesConfigSigningKeyConflict(t *testing.T) {
+	const configKey = "awskms://alias/aicr-signing"
+
+	tmp := t.TempDir()
+	recipePath := filepath.Join(tmp, "recipe.yaml")
+	if err := os.WriteFile(recipePath, []byte("kind: Recipe\n"), 0o600); err != nil {
+		t.Fatalf("write recipe: %v", err)
+	}
+	cfgPath := filepath.Join(tmp, "config.yaml")
+	cfg := fmt.Sprintf(`kind: AICRConfig
+apiVersion: aicr.run/v1beta1
+spec:
+  bundle:
+    input:
+      recipe: %s
+    attestation:
+      enabled: true
+      signingKey: %s
+      oidcDeviceFlow: true
+`, recipePath, configKey)
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	opts := captureBundleOpts(t, []string{"--config", cfgPath, "--oidc-device-flow=false"})
+	if opts.signingKey != configKey {
+		t.Errorf("signingKey = %q, want %q", opts.signingKey, configKey)
+	}
+	if opts.oidcDeviceFlow {
+		t.Error("oidcDeviceFlow = true, want false: --oidc-device-flow=false must override the config value")
+	}
+}
+
 // TestBundleCmd_FlagOverridesEverySection verifies that for each major
 // section, a CLI flag wins over the same field in --config.
 func TestBundleCmd_FlagOverridesEverySection(t *testing.T) {
@@ -410,7 +463,7 @@ func TestBundleCmd_FlagOverridesEverySection(t *testing.T) {
 	}
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := fmt.Sprintf(`kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   bundle:
     input:
@@ -501,7 +554,7 @@ func TestRecipeCmd_ConfigFillsMissingFromConfig(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   recipe:
     criteria:
@@ -535,7 +588,7 @@ func TestRecipeCmd_ConfigBadEnumRejected(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	bad := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   recipe:
     criteria:
@@ -560,7 +613,7 @@ func TestBundleCmd_ConfigBadDeployerRejected(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	bad := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   bundle:
     deployment:
@@ -591,7 +644,7 @@ func TestE2E_RecipeAndBundleShareConfig(t *testing.T) {
 	cfgPath := filepath.Join(tmp, "config.yaml")
 
 	cfg := fmt.Sprintf(`kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: e2e-shared
 spec:

@@ -16,6 +16,10 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -32,14 +36,17 @@ import (
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
 	k8spod "github.com/NVIDIA/aicr/pkg/k8s/pod"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
 	"github.com/NVIDIA/aicr/validators/internal/gkenet"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -63,7 +70,27 @@ const (
 	// ncclTrainingRuntimeName is the name of the TrainingRuntime resource.
 	// Must stay in sync with runtime.yaml.
 	ncclTrainingRuntimeName = "nccl-all-reduce-runtime"
+
+	// ncclWorkloadNamespacePrefix is the base for the per-run, per-variant
+	// benchmark namespace (see ncclRunNamespace), the same isolation pattern
+	// inferenceWorkloadNamespacePrefix uses so fixed resource names never
+	// collide across concurrent or crashed runs, and cleanup is one
+	// namespace delete instead of per-resource tracking.
+	ncclWorkloadNamespacePrefix = "aicr-nccl-perf"
 )
+
+// ncclRunNamespace derives the per-run, per-variant benchmark namespace.
+// All three catalog checks share one AICR_RUN_ID per invocation, so folding
+// the variant into the name keeps each check's namespace, and its fixed
+// resource names, unique from its siblings once they can run concurrently
+// (see pkg/validator's TODO(perf)).
+func ncclRunNamespace(variant ncclVariant) string {
+	variantLabel := string(variant)
+	if variantLabel == "" {
+		variantLabel = variantDefaultLabel
+	}
+	return fmt.Sprintf("%s-%s-%s", ncclWorkloadNamespacePrefix, variantLabel, deriveRunID())
+}
 
 // skipMsg* are the constraint-result strings returned when the NCCL check cannot
 // run. The "skipped " prefix is contractual: nccl_all_reduce_bw.go:78 dispatches
@@ -81,6 +108,61 @@ func skipMsgNCCLNoProfile(target ncclBenchmarkTarget, variant ncclVariant) strin
 		target.String(), ncclVariantDisplayName(variant))
 }
 
+// ncclBandwidthFloorFraction is the fraction of the threshold a run must reach
+// to pass.
+const ncclBandwidthFloorFraction = 0.9
+
+// ncclSkip publishes code as the skipReason and returns msg, which must be a
+// "skipped"-prefixed result string.
+func ncclSkip(msg, code string) string {
+	validators.EmitExtraOrWarn(map[string]string{validators.ExtraKeySkipReason: code})
+	return msg
+}
+
+// ncclPublishedFabric returns fabric for the NET variant on the baked-in EKS
+// template, and "" otherwise.
+func ncclPublishedFabric(variant ncclVariant, fabric ncclFabricType, customRuntime string, service recipe.CriteriaServiceType) ncclFabricType {
+	if variant != variantNET || customRuntime != "" || service != recipe.CriteriaServiceEKS {
+		return ""
+	}
+	return fabric
+}
+
+// ncclTransportCode returns the published transport code for variant.
+func ncclTransportCode(variant ncclVariant) string {
+	if variant == variantDefault {
+		return variantDefaultLabel
+	}
+	return string(variant)
+}
+
+// ncclScopeExtra returns the Extra for a run's scope and the floor it is held
+// to. fabric is omitted when empty.
+func ncclScopeExtra(variant ncclVariant, fabric ncclFabricType, threshold float64, workers, gpus int) map[string]string {
+	extra := map[string]string{
+		validators.ExtraKeyTransport:     ncclTransportCode(variant),
+		validators.ExtraKeyThresholdGbps: validators.FormatDecimal(threshold),
+		validators.ExtraKeyTolerancePct:  validators.FormatDecimal((1 - ncclBandwidthFloorFraction) * 100),
+		validators.ExtraKeyWorkerNodes:   strconv.Itoa(workers),
+		validators.ExtraKeyGPUsInvolved:  strconv.Itoa(gpus),
+	}
+	if fabric != "" {
+		extra[validators.ExtraKeyFabric] = string(fabric)
+	}
+	return extra
+}
+
+// ncclBandwidthExtra returns the Extra for bandwidth and its signed percent
+// margin over threshold. The margin is omitted when threshold is not
+// positive.
+func ncclBandwidthExtra(bandwidth, threshold float64) map[string]string {
+	extra := map[string]string{validators.ExtraKeyAchievedGbps: validators.FormatDecimal(bandwidth)}
+	if threshold > 0 {
+		extra[validators.ExtraKeyPassMargin] = validators.FormatSignedDecimal((bandwidth/threshold - 1) * 100)
+	}
+	return extra
+}
+
 // Package-level GVR definitions for Kubeflow Trainer CRDs used by both
 // applyNCCLResources and cleanupNCCLResources.
 var (
@@ -96,8 +178,9 @@ var (
 		Resource: "trainingruntimes",
 	}
 
-	// computeDomainGVR is the NVIDIA DRA driver's ComputeDomain CR, used only
-	// by the NVLS variant to provision an IMEX domain across worker nodes.
+	// computeDomainGVR is the NVIDIA DRA driver's ComputeDomain CR, used by the
+	// NVLS variant (and a recipe-supplied runtime referencing
+	// ncclIMEXClaimTemplateName) to provision an IMEX domain across worker nodes.
 	// The CR causes the DRA driver to auto-generate a ResourceClaimTemplate
 	// (name matching channel.resourceClaimTemplate.name below) that worker
 	// pods reference via resourceClaims to get /dev/nvidia-caps-imex-channels
@@ -114,7 +197,9 @@ const (
 
 	// ncclIMEXClaimTemplateName must match the resourceClaimTemplateName
 	// field in runtime-nvls.yaml templates — the DRA driver uses
-	// this name when auto-generating the RCT from the ComputeDomain CR.
+	// this name when auto-generating the RCT from the ComputeDomain CR. A
+	// recipe-supplied runtime opts into validator-managed IMEX by referencing
+	// it, so it is part of the nccl-benchmark-runtime contract.
 	ncclIMEXClaimTemplateName = "nccl-all-reduce-imex"
 )
 
@@ -134,6 +219,9 @@ const (
 	variantNET     ncclVariant = "net"
 	variantNVLS    ncclVariant = "nvls"
 )
+
+// variantDefaultLabel is the printed name of variantDefault.
+const variantDefaultLabel = "default"
 
 // ncclFabricType selects the inter-node fabric for the NET variant. Default EFA
 // preserves all existing behavior; roce (AICR_NCCL_FABRIC=roce) selects the
@@ -214,7 +302,9 @@ func templatePath(accelerator recipe.CriteriaAcceleratorType, service recipe.Cri
 	}
 	// RoCE NET templates are fabric-keyed and accelerator-agnostic: any EKS RoCE
 	// node uses testdata/roce/{service}/..., not a per-accelerator directory.
-	if fabric == fabricRoCE {
+	// Scoped to variantNET. NVLS uses NVLink/IMEX, not fabric-selected NICs, so
+	// it has no testdata/roce/{service}/runtime-nvls.yaml to redirect to.
+	if fabric == fabricRoCE && variant == variantNET {
 		return filepath.Join("testdata", string(fabricRoCE), string(service), filename)
 	}
 	return filepath.Join("testdata", string(accelerator), string(service), filename)
@@ -246,12 +336,84 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 		recipe.CriteriaServiceAny: {recipe.CriteriaAcceleratorB200, recipe.CriteriaAcceleratorGB200},
 	},
 	variantNET: {
-		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200},
-	},
-	variantNVLS: {
-		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200},
+		// GB300 EKS runs the same p6e-gb300r EFA scale-out fabric as GB200's
+		// p6e-gb200.36xlarge — see testdata/gb300/eks/runtime-net.yaml.
+		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
+		// OKE GB200 NVL72: IB east-west (rdma0-3) via the
+		// rdmaSharedDevicePlugin's nvidia.com/mlnxnics shared HCAs —
+		// see testdata/gb200/oke/runtime-net.yaml.
 		recipe.CriteriaServiceOKE: {recipe.CriteriaAcceleratorGB200},
 	},
+	variantNVLS: {
+		// GB300 EKS shares GB200's NVL72 MNNVL/IMEX topology — see
+		// testdata/gb300/eks/runtime-nvls.yaml.
+		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
+		recipe.CriteriaServiceOKE: {recipe.CriteriaAcceleratorGB200},
+		recipe.CriteriaServiceGKE: {recipe.CriteriaAcceleratorGB200},
+		// VR200 NVL72 on bare-metal RKE2: MNNVL across the IMEX domain, same
+		// shape as GB200 but with its own runtime (NGC pytorch image, distinct
+		// mpirun path) — see testdata/vr200/rke2/runtime-nvls.yaml.
+		recipe.CriteriaServiceRKE2:    {recipe.CriteriaAcceleratorVR200},
+		recipe.CriteriaServiceGeneric: {recipe.CriteriaAcceleratorGB300},
+	},
+}
+
+// resolveRuntimeImageForBakedInPath resolves the AICR_NCCL_RUNTIME_IMAGE
+// override, but only for the baked-in template path — mirroring the
+// AICR_NCCL_FABRIC gate: a recipe-supplied runtime owns its own workload
+// image end to end (issue #1751), so a malformed override must not fail
+// it. Validated up front — before any cluster discovery or TrainJob spend
+// — so a typo'd image reference fails fast rather than after minutes of
+// setup. Extracted out of validateNcclAllReduceBw to keep that function
+// under the funlen statement limit.
+func resolveRuntimeImageForBakedInPath(customRuntime string) (string, error) {
+	if customRuntime != "" {
+		return "", nil
+	}
+	return resolveNCCLRuntimeImage()
+}
+
+// runNCCLPreflights checks cluster-side prerequisites before any TrainJob
+// time is spent. Extracted out of validateNcclAllReduceBw to keep that
+// function under the funlen statement limit.
+//
+// GB200/EKS, GB200/OKE, and GB300/EKS NET preflight: before R595 that variant
+// needs GPUDirect RDMA via NVreg_GrdmaPciTopoCheckOverride=1 on the NVIDIA
+// driver (R580 is the version AICR pins); R595 removed the parameter,
+// substituting a topology requirement the preflight does not check, so there
+// it fails rather than assume (#2459). Without the flag the PCIe-attached NIC
+// (EFA on EKS, ConnectX IB on OKE) can't attach dma-buf to GPU HBM and NCCL
+// silently falls back to Socket. Preflights key off the benchmark target:
+// opting into a profile opts into that profile's environment contract,
+// preflights included. (OKE takes the default fabric env here —
+// AICR_NCCL_FABRIC's roce override is an EKS-only template concern.) Skipped
+// for a recipe-supplied runtime, which owns its own fabric end to end.
+//
+// GKE TCPXO preflight: on GKE H100, worker pods depend on GPUDirect-TCPXO
+// host artifacts (nccl-env-profile.sh + FastRak libraries) laid down by the
+// nccl-tcpxo-installer DaemonSet. On freshly provisioned nodes that DaemonSet
+// may not have finished when this check runs; without the artifacts the
+// workers never start sshd and the launcher mpirun fails with an opaque "pod
+// failed" minutes later. Fail fast with an actionable error naming the
+// unready nodes instead. Applies to both the embedded capability fixture and
+// a derived/delivered runtime (plan.source.runsGKETCPXOChecks()), never to a
+// recipe-supplied runtime.
+func runNCCLPreflights(ctx *validators.Context, gpuConfig *gpuConfiguration, target ncclBenchmarkTarget,
+	variant ncclVariant, fabric ncclFabricType, customRuntime string, plan *benchmarkRuntimePlan) error {
+
+	if customRuntime == "" && fabric == fabricEFA && graceBlackwellNetPreflightApplies(variant, target.accelerator, target.service) {
+		if pfErr := preflightGB200NetNVregFlag(ctx, gpuConfig.Nodes); pfErr != nil {
+			return pfErr
+		}
+	}
+
+	if plan.source.runsGKETCPXOChecks() && gkeTCPXOPreflightApplies(variant, target.accelerator, target.service) {
+		if pfErr := preflightGKETCPXOReady(ctx, gpuConfig.Nodes); pfErr != nil {
+			return pfErr
+		}
+	}
+
+	return nil
 }
 
 // validateNcclAllReduceBw validates NCCL All Reduce bandwidth using Kubeflow TrainJob + MPI.
@@ -267,7 +429,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// Skip unless the validation targets a supported service + accelerator combination.
 	if ctx.ValidationInput == nil {
 		slog.Info("Skipping NCCL All Reduce bandwidth validation: no validation")
-		return skipMsgNCCLNoInput, true, nil
+		return ncclSkip(skipMsgNCCLNoInput, validators.SkipReasonNoValidationInput), true, nil
 	}
 
 	service := ctx.ValidationInput.Criteria.Service
@@ -316,6 +478,11 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 		}
 	}
 
+	runtimeImage, err := resolveRuntimeImageForBakedInPath(customRuntime)
+	if err != nil {
+		return "", false, err
+	}
+
 	if profile != nil {
 		target = *profile
 		slog.Info("Recipe declares an NCCL benchmark profile — overriding criteria-derived applicability",
@@ -327,7 +494,8 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// criteria, so the compiled applicability gate (which governs only the
 	// criteria/profile → embedded-template paths) is bypassed. The supplied
 	// runtime owns its fabric wiring, so service-specific NIC discovery,
-	// preflights, and NVLS/IMEX provisioning are skipped further below.
+	// preflights, and NVLS/IMEX provisioning are skipped further below —
+	// except IMEX for a runtime that references ncclIMEXClaimTemplateName.
 	if customRuntime != "" {
 		slog.Info("Recipe supplies its own NCCL benchmark runtime — bypassing compiled applicability and service-specific fabric plumbing",
 			"criteriaService", service, "criteriaAccelerator", accelerator, "variant", string(variant))
@@ -338,9 +506,9 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 			// The profile itself is valid (resolveNCCLBenchmarkProfile fails
 			// closed on unknown pairs); it just doesn't implement this variant
 			// — e.g. gb200/eks covers net and nvls but not the default check.
-			return skipMsgNCCLNoProfile(target, variant), true, nil
+			return ncclSkip(skipMsgNCCLNoProfile(target, variant), validators.SkipReasonProfileLacksVariant), true, nil
 		}
-		return skipMsgNCCLNotImplemented, true, nil
+		return ncclSkip(skipMsgNCCLNotImplemented, validators.SkipReasonUnsupportedTarget), true, nil
 	}
 
 	// Extract threshold from constraint
@@ -363,6 +531,19 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// launcher wait times out with a diagnostic, never a false pass. Operators
 	// wanting the sized and scheduled cohorts to match exactly pass
 	// --node-selector.
+	// Decide where the benchmark runtime comes from (#2297): a recipe-supplied
+	// runtime, a runtime DERIVED from the ClusterTrainingRuntime the recipe
+	// ships, or the embedded capability fixture. For a delivered artifact this
+	// also runs the recipe -> deployed -> cluster verification and the
+	// derivation before anything is applied; the derived runtime then rides the
+	// same carrier as a recipe-supplied one, so every downstream branch that
+	// leaves a self-wired runtime's fabric alone (customRuntime != "") applies.
+	plan, err := resolveBenchmarkRuntimeSource(ctx, customRuntime, profile != nil, target.accelerator, target.service, variant, fabric)
+	if err != nil {
+		return "", false, err
+	}
+	customRuntime = plan.carrier
+
 	sizingSelector := ctx.NodeSelector
 	if customRuntime != "" && len(sizingSelector) == 0 {
 		rs, rsErr := customRuntimeNodeSelector(customRuntime)
@@ -383,6 +564,8 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to determine GPU configuration", err)
 	}
 	slog.Info("GPU Configuration", "nodes", gpuConfig.WorkerCount, ", GPUs/node", gpuConfig.GPUCountPerNode, ", total GPUs", gpuConfig.TotalGPUCount)
+	// Published before the run so a failed or cut-short run still records it.
+	validators.EmitExtraOrWarn(ncclScopeExtra(variant, ncclPublishedFabric(variant, fabric, customRuntime, target.service), threshold, gpuConfig.WorkerCount, gpuConfig.TotalGPUCount))
 
 	// NCCL all-reduce tests EW (East-West) fabric between nodes and requires at least
 	// two GPU nodes. Skip gracefully rather than fail when only one node is available.
@@ -393,34 +576,22 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	}
 
 	// Preflight cluster-side prerequisites before spending TrainJob time.
-	// On GB200/EKS the NET variant needs NVreg_GrdmaPciTopoCheckOverride=1
-	// on the NVIDIA driver; without it, EFA can't attach dma-buf to GPU HBM
-	// and NCCL silently falls back to Socket. Preflights key off the
-	// benchmark target: opting into a profile opts into that profile's
-	// environment contract, preflights included.
-	if customRuntime == "" && fabric == fabricEFA && gb200NetPreflightApplies(variant, target.accelerator, target.service) {
-		if pfErr := preflightGB200NetNVregFlag(ctx, gpuConfig.Nodes); pfErr != nil {
-			return "", false, pfErr
-		}
-	}
-
-	// On GKE H100, the worker pods depend on GPUDirect-TCPXO host artifacts
-	// (nccl-env-profile.sh + FastRak libraries) laid down by the
-	// nccl-tcpxo-installer DaemonSet. On freshly provisioned nodes that
-	// DaemonSet may not have finished when this check runs; without the
-	// artifacts the workers never start sshd and the launcher mpirun fails
-	// with an opaque "pod failed" minutes later. Fail fast with an actionable
-	// error naming the unready nodes instead.
-	if customRuntime == "" && gkeTCPXOPreflightApplies(variant, target.accelerator, target.service) {
-		if pfErr := preflightGKETCPXOReady(ctx, gpuConfig.Nodes); pfErr != nil {
-			return "", false, pfErr
-		}
+	if pfErr := runNCCLPreflights(ctx, gpuConfig, target, variant, fabric, customRuntime, plan); pfErr != nil {
+		return "", false, pfErr
 	}
 
 	// Run the NCCL all-reduce benchmark using Kubeflow TrainJob + MPI.
 	// Each platform has a per-platform TrainingRuntime with all platform-specific
 	// configuration (image, mpirun args, resources, sidecars). The TrainJob is shared.
-	logs, err := runNCCLTrainJob(ctx, gpuConfig, target.accelerator, target.service, variant, fabric, customRuntime)
+	logs, err := runNCCLTrainJob(ctx, gpuConfig, target.accelerator, target.service, variant, fabric, customRuntime, runtimeImage, plan)
+	// Publish the derived-runtime audit record (stdout for --full, and the
+	// bounded carrier that survives minimal evidence) whether or not the run
+	// succeeded: the record describes the runtime that was applied, and a
+	// failed measurement of a delivered artifact is exactly the case where
+	// knowing which templates were compared matters. plan.provenance is set
+	// only after the TrainingRuntime create succeeded, so a run that failed
+	// before or at application publishes no record.
+	emitRuntimeProvenance(plan)
 	if err != nil {
 		return "", false, err
 	}
@@ -440,6 +611,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 		emitDiagnosticBlock("launcher log (bandwidth parse failed)", tailLines(strings.TrimSpace(logs), maxDiagLogLines))
 		return logs, false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to parse bandwidth from logs", err)
 	}
+	validators.EmitExtraOrWarn(ncclBandwidthExtra(bandwidth, threshold))
 
 	// For named variants, assert the expected transport actually carried traffic.
 	// This turns the variant label into a hard guarantee — a GB200 cluster with a
@@ -456,17 +628,328 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 
 	slog.Info("Measured bandwidth", "bandwidth", bandwidth)
 
-	// Check if bandwidth meets threshold (within 10% tolerance)
-	passed := bandwidth >= (threshold * 0.9)
-	actualValue := fmt.Sprintf("%.2f GB/s", bandwidth)
+	actualValue, passed := ncclBandwidthVerdict(bandwidth, threshold, runtimeImage)
+	return actualValue, passed, nil
+}
 
-	if passed {
-		slog.Info("Bandwidth validation passed", "bandwidth", bandwidth, "threshold", threshold*0.9, "tolerance", "10%")
-	} else {
-		slog.Info("Bandwidth validation failed", "bandwidth", bandwidth, "threshold", threshold*0.9, "tolerance", "10%")
+// ncclBandwidthVerdict returns the constraint report string as actual, naming
+// runtimeImage when set, and reports in passed whether bandwidth reaches
+// ncclBandwidthFloorFraction of threshold.
+func ncclBandwidthVerdict(bandwidth, threshold float64, runtimeImage string) (actual string, passed bool) {
+	passed = bandwidth >= (threshold * ncclBandwidthFloorFraction)
+	actual = fmt.Sprintf("%.2f GB/s", bandwidth)
+	if runtimeImage != "" {
+		// The override goes in the report as well as the log.
+		actual = fmt.Sprintf("%.2f GB/s (runtime image: %s)", bandwidth, runtimeImage)
 	}
 
-	return actualValue, passed, nil
+	if passed {
+		slog.Info("Bandwidth validation passed", "bandwidth", bandwidth, "threshold", threshold*ncclBandwidthFloorFraction, "tolerance", "10%")
+	} else {
+		slog.Info("Bandwidth validation failed", "bandwidth", bandwidth, "threshold", threshold*ncclBandwidthFloorFraction, "tolerance", "10%")
+	}
+	return actual, passed
+}
+
+// verifyNCCLNamespaceNotLive fails closed if the given, already-fetched NCCL
+// namespace is not terminating and still has a non-terminal
+// (Pending/Running/Unknown) pod in it. A live pod means some other
+// execution (a genuinely concurrent run, or a rare random-suffix collision)
+// still owns this namespace, so adopting it would let this run's
+// fixed-name resources collide with a namespace another run is actively
+// using. A nil ns (doesn't exist, or just created fresh) is not an error.
+func verifyNCCLNamespaceNotLive(ctx context.Context, clientset kubernetes.Interface, ns *v1.Namespace) error {
+	if ns == nil || ns.DeletionTimestamp != nil {
+		// Doesn't exist, or already terminating from a prior cleanup;
+		// ensureNamespace creates it fresh / waits for it to fully
+		// disappear before recreating it. Either way, nothing to check yet.
+		return nil
+	}
+
+	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+	pods, err := clientset.CoreV1().Pods(ns.Name).List(listCtx, metav1.ListOptions{})
+	if err != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
+			"failed to check NCCL benchmark namespace for a live execution", err)
+	}
+	for _, pod := range pods.Items {
+		if pod.Status.Phase != v1.PodSucceeded && pod.Status.Phase != v1.PodFailed {
+			return aicrErrors.New(aicrErrors.ErrCodeConflict,
+				fmt.Sprintf("NCCL benchmark namespace %q already exists with a live pod %q from another execution; refusing to adopt it",
+					ns.Name, pod.Name))
+		}
+	}
+	return nil
+}
+
+// ncclRunLockName is the Lease that admits exactly one execution into a
+// per-run NCCL namespace at a time.
+const ncclRunLockName = "aicr-nccl-run-lock"
+
+// claimNCCLExecutionLock atomically admits exactly one execution into
+// namespace, closing the race where two callers (e.g. sharing one
+// AICR_RUN_ID) both pass verifyNCCLNamespaceNotLive before either creates a
+// pod. A stale, unrenewed lock past NCCLExecutionLockStaleAge can still be
+// taken over by a new caller.
+//
+// The returned holder ID is fresh per call, so cleanupNCCLRun can tell
+// whether it still holds the lock before deleting anything.
+func claimNCCLExecutionLock(ctx context.Context, clientset kubernetes.Interface, namespace string) (string, error) {
+	holderID := generateExecutionID()
+	now := metav1.NewMicroTime(time.Now())
+	leaseDurationSeconds := int32(defaults.NCCLExecutionLockStaleAge.Seconds())
+
+	claimCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+	leaseClient := clientset.CoordinationV1().Leases(namespace)
+
+	lease := &coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Name: ncclRunLockName, Namespace: namespace},
+		Spec: coordinationv1.LeaseSpec{
+			HolderIdentity: &holderID, LeaseDurationSeconds: &leaseDurationSeconds,
+			AcquireTime: &now, RenewTime: &now,
+		},
+	}
+	// A missing Lease is claimed by Create, which only one racing caller can win.
+	if _, err := leaseClient.Create(claimCtx, lease, metav1.CreateOptions{}); err == nil {
+		return holderID, nil
+	} else if !apierrors.IsAlreadyExists(err) {
+		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to claim NCCL benchmark execution lock", err)
+	}
+
+	existing, err := leaseClient.Get(claimCtx, ncclRunLockName, metav1.GetOptions{})
+	if err != nil {
+		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to read NCCL benchmark execution lock", err)
+	}
+	if existing.Spec.RenewTime != nil && time.Since(existing.Spec.RenewTime.Time) < defaults.NCCLExecutionLockStaleAge {
+		return "", aicrErrors.New(aicrErrors.ErrCodeConflict,
+			fmt.Sprintf("NCCL benchmark namespace %q is claimed by another execution; refusing to proceed", namespace))
+	}
+
+	existing.Spec.HolderIdentity, existing.Spec.LeaseDurationSeconds = &holderID, &leaseDurationSeconds
+	existing.Spec.AcquireTime, existing.Spec.RenewTime = &now, &now
+	// An existing Lease is claimed by Update pinned to the resourceVersion
+	// just read, so a racing takeover here also loses to a Conflict.
+	if _, err := leaseClient.Update(claimCtx, existing, metav1.UpdateOptions{}); err != nil {
+		if apierrors.IsConflict(err) {
+			return "", aicrErrors.New(aicrErrors.ErrCodeConflict,
+				fmt.Sprintf("NCCL benchmark namespace %q was claimed by a concurrent execution; refusing to proceed", namespace))
+		}
+		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to take over an abandoned NCCL benchmark execution lock", err)
+	}
+	return holderID, nil
+}
+
+// rollbackNCCLNamespace best-effort deletes namespace, pinned to uid, after
+// claimNCCLExecutionLock fails before the cleanup defer is registered.
+// Errors are only logged. This is a leak-avoidance nicety, not correctness
+// critical, since pruneStaleNCCLNamespaces reclaims an orphaned namespace on
+// a later run regardless.
+func rollbackNCCLNamespace(clientset kubernetes.Interface, namespace string, uid types.UID) {
+	delCtx, cancel := context.WithTimeout(context.Background(), defaults.DiagnosticTimeout)
+	defer cancel()
+	if err := clientset.CoreV1().Namespaces().Delete(delCtx, namespace, metav1.DeleteOptions{
+		Preconditions: &metav1.Preconditions{UID: &uid},
+	}); err != nil && !apierrors.IsNotFound(err) {
+		slog.Warn("Failed to roll back NCCL benchmark namespace after execution lock admission failed",
+			"namespace", namespace, "error", err)
+	}
+}
+
+// releaseNCCLExecutionLockIfHeldBy best-effort deletes namespace's
+// execution lock, but only if holderID is still the current holder.
+// pruneStaleNCCLNamespaces calls this when its own namespace delete fails
+// transiently, since the fence Lease it just claimed would otherwise sit
+// there until it ages past NCCLExecutionLockStaleAge, failing a same-run
+// retry closed for that long. Checking the holder first, instead of
+// deleting outright, avoids removing a legitimate claim that lands in
+// between.
+func releaseNCCLExecutionLockIfHeldBy(ctx context.Context, clientset kubernetes.Interface, namespace, holderID string) {
+	getCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+	leaseClient := clientset.CoordinationV1().Leases(namespace)
+	lease, err := leaseClient.Get(getCtx, ncclRunLockName, metav1.GetOptions{})
+	if err != nil {
+		return // Gone, or unreadable; nothing this call can safely remove.
+	}
+	if lease.Spec.HolderIdentity == nil || *lease.Spec.HolderIdentity != holderID {
+		return // Already taken over by someone else; not ours to remove.
+	}
+	if delErr := leaseClient.Delete(getCtx, ncclRunLockName, metav1.DeleteOptions{
+		Preconditions: &metav1.Preconditions{ResourceVersion: &lease.ResourceVersion},
+	}); delErr != nil && !apierrors.IsNotFound(delErr) {
+		slog.Warn("Failed to release an orphaned NCCL benchmark execution lock after a failed namespace delete",
+			"namespace", namespace, "error", delErr)
+	}
+}
+
+// generateExecutionID returns a fresh random identifier for one execution,
+// distinct from AICR_RUN_ID so two invocations sharing a run ID still get
+// different lock holder identities.
+func generateExecutionID() string {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		sum := sha256.Sum256(fmt.Appendf(nil, "%d", time.Now().UnixNano()))
+		return hex.EncodeToString(sum[:8])
+	}
+	return hex.EncodeToString(buf)
+}
+
+// ncclExecutionLockHeldBy reports whether namespace's execution lock still
+// names holderID as the current holder, renewing it as part of the same
+// call. Renewing, rather than a plain read, closes the gap where a
+// takeover could land between this check and a subsequent delete, letting
+// the stale holder's delete remove the new holder's live namespace.
+//
+// A missing lock reports false, not true, since that could equally mean a
+// replacement is about to claim it, and treating the ambiguous case as
+// authorization to proceed risks deleting or mutating that replacement's
+// live resources.
+//
+// Called both right before cleanup's delete and mid-run before mutating
+// this namespace's fixed-name resources, where the renewal also acts as a
+// heartbeat, extending the caller's own claim by another
+// NCCLExecutionLockStaleAge.
+func ncclExecutionLockHeldBy(ctx context.Context, clientset kubernetes.Interface, namespace, holderID string) (bool, error) {
+	getCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+	leaseClient := clientset.CoordinationV1().Leases(namespace)
+	lease, err := leaseClient.Get(getCtx, ncclRunLockName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to check NCCL benchmark execution lock", err)
+	}
+	if lease.Spec.HolderIdentity == nil || *lease.Spec.HolderIdentity != holderID {
+		return false, nil
+	}
+
+	now := metav1.NewMicroTime(time.Now())
+	lease.Spec.RenewTime = &now
+	// Pinned to the resourceVersion just read, so this either succeeds,
+	// proving nothing raced it, or loses to a Conflict, proving a takeover
+	// already happened.
+	if _, err := leaseClient.Update(getCtx, lease, metav1.UpdateOptions{}); err != nil {
+		if apierrors.IsConflict(err) {
+			return false, nil
+		}
+		return false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to renew NCCL benchmark execution lock before cleanup", err)
+	}
+	return true, nil
+}
+
+// pruneStaleNCCLNamespaces best-effort deletes aicr-nccl-perf-* namespaces
+// left behind by a standalone (no AICR_RUN_ID) run killed before its own
+// deferred cleanup ran. The Job path doesn't need this, since its
+// deterministic run ID lets ensureNamespace/verifyNCCLNamespaceNotLive
+// reclaim a stale namespace on the next run, but a killed standalone run
+// orphans one under a random suffix no future run will ever name again.
+//
+// Scoped server-side to labels.ManagedBy and labels.Component, so this only
+// sees namespaces this package created, decoupled from
+// ncclWorkloadNamespacePrefix staying in sync with the naming logic.
+// currentNamespace, anything too young, and anything still live are left
+// alone (see the checks below). Fire-and-forget: it deletes and moves on
+// without waiting for termination, and failures are logged and ignored,
+// since this is opportunistic cleanup a benchmark run should never fail
+// for.
+func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interface, dynamicClient dynamic.Interface, currentNamespace string) {
+	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+
+	namespaces, err := clientset.CoreV1().Namespaces().List(listCtx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s,%s=%s",
+			labels.ManagedBy, labels.ValueValidator, labels.Component, labels.ValueNCCLPerf),
+	})
+	if err != nil {
+		slog.Warn("Failed to list namespaces for stale NCCL benchmark namespace prune", "error", err)
+		return
+	}
+
+	// Feeds reapOrphanedTrainerInstall below. Only reap once no other
+	// namespace could still depend on Trainer.
+	otherNamespacesRemain := false
+	for _, ns := range namespaces.Items {
+		if err := ctx.Err(); err != nil {
+			// Canceled mid-sweep. Stop issuing more calls for the
+			// remaining namespaces instead of letting each one fail in turn.
+			return
+		}
+		if ns.Name == currentNamespace {
+			// This namespace existing at all means this run, or a peer
+			// sharing the same deterministic name, may still need
+			// Trainer. Reaping it out from under a live peer would fail
+			// that peer's in-flight TrainJob.
+			otherNamespacesRemain = true
+			continue
+		}
+		if ns.DeletionTimestamp != nil {
+			// Still terminating. Its TrainJob/TrainingRuntime CRs need the
+			// Trainer controller alive to clear their finalizers.
+			otherNamespacesRemain = true
+			continue
+		}
+		if time.Since(ns.CreationTimestamp.Time) < defaults.NCCLStaleNamespacePruneAge {
+			otherNamespacesRemain = true
+			continue
+		}
+		// An aged namespace can still belong to a live execution that has
+		// simply run long. Reuse the same occupancy check the adoption gate
+		// uses rather than deleting on age alone.
+		if liveErr := verifyNCCLNamespaceNotLive(ctx, clientset, &ns); liveErr != nil {
+			slog.Info("Skipping stale NCCL benchmark namespace prune: namespace still has a live pod",
+				"namespace", ns.Name, "reason", liveErr)
+			otherNamespacesRemain = true
+			continue
+		}
+		// A plain read here, checked then acted on moments later, would
+		// leave a gap for a legitimate claim to land in before the delete
+		// below runs. Claiming the lock atomically proves nothing currently
+		// holds it and fences off a claim landing in that gap, since a live
+		// or freshly-won lock fails this with ErrCodeConflict. The
+		// namespace delete cascades this pruner's own claim away with
+		// everything else, so it never lingers.
+		holderID, claimErr := claimNCCLExecutionLock(ctx, clientset, ns.Name)
+		if claimErr != nil {
+			if stderrors.Is(claimErr, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
+				slog.Info("Skipping stale NCCL benchmark namespace prune: namespace has a live execution lock",
+					"namespace", ns.Name)
+			} else {
+				slog.Warn("Skipping stale NCCL benchmark namespace prune: failed to claim its execution lock",
+					"namespace", ns.Name, "error", claimErr)
+			}
+			otherNamespacesRemain = true
+			continue
+		}
+
+		delCtx, delCancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+		uid := ns.UID
+		// Pinned to the UID this List observed, so a same-named namespace
+		// recreated in between is left alone rather than deleted.
+		delErr := clientset.CoreV1().Namespaces().Delete(delCtx, ns.Name, metav1.DeleteOptions{
+			Preconditions: &metav1.Preconditions{UID: &uid},
+		})
+		delCancel()
+		if delErr != nil && !apierrors.IsNotFound(delErr) {
+			slog.Warn("Failed to delete stale NCCL benchmark namespace", "namespace", ns.Name, "error", delErr)
+			// The claim above just fenced this namespace off. Left in
+			// place after a failed delete, that Lease would otherwise
+			// block a legitimate same-run retry closed until it goes
+			// stale on its own.
+			releaseNCCLExecutionLockIfHeldBy(ctx, clientset, ns.Name, holderID)
+			otherNamespacesRemain = true
+			continue
+		}
+		slog.Info("Deleted stale NCCL benchmark namespace left behind by an interrupted run",
+			"namespace", ns.Name, "age", time.Since(ns.CreationTimestamp.Time).Round(time.Minute))
+		// The delete was accepted, but its cascade still needs the Trainer
+		// controller to service the namespace's CRs' finalizers.
+		otherNamespacesRemain = true
+	}
+
+	reapOrphanedTrainerInstall(ctx, clientset, dynamicClient, otherNamespacesRemain)
 }
 
 // runNCCLTrainJob runs the NCCL all-reduce benchmark using Kubeflow TrainJob + MPI.
@@ -474,9 +957,64 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 // pod to complete, and returns the benchmark logs.
 func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType,
-	customRuntime string) (logs string, err error) {
+	customRuntime string, runtimeImage string, plan *benchmarkRuntimePlan) (logs string, err error) {
 
 	dynamicClient := ctx.DynamicClient
+
+	// Isolate this run in its own namespace, the same pattern
+	// inferenceWorkloadConfig uses (see deriveRunID/ensureNamespace). Fixed
+	// resource names only need to be unique within it, so a crashed-then-
+	// retried run reclaims its own leftovers instead of colliding. The name
+	// is deterministic, so before reusing an existing, non-terminating
+	// instance, verifyNCCLNamespaceNotLive confirms no other execution is
+	// still live under it (running on the object ensureNamespace already
+	// returned, needing no separate fetch).
+	gpuConfig.Namespace = ncclRunNamespace(variant)
+	pruneStaleNCCLNamespaces(ctx.Ctx, ctx.Clientset, dynamicClient, gpuConfig.Namespace)
+	nsObj, nsCreated, err := ensureNamespace(ctx, gpuConfig.Namespace, labels.ValueNCCLPerf)
+	if err != nil {
+		return "", aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal, "failed to create NCCL benchmark namespace")
+	}
+	if err = verifyNCCLNamespaceNotLive(ctx.Ctx, ctx.Clientset, nsObj); err != nil {
+		return "", err
+	}
+
+	// Two callers can still both pass the check above before either creates
+	// a pod. Claim exclusive ownership atomically so the loser fails
+	// closed instead of sharing the namespace.
+	holderID, err := claimNCCLExecutionLock(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace)
+	if err != nil {
+		// The cleanup defer below isn't registered yet, so a namespace this
+		// call alone just created would otherwise leak until the next run's
+		// prune sweep. Roll it back now, but only the one we created. A
+		// reused or concurrently-adopted namespace (nsCreated false) may
+		// hold another execution's leftovers worth reclaiming later, and a
+		// concurrent caller's conflicting claim means that namespace is
+		// legitimately theirs, not ours to remove.
+		if nsCreated && !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
+			rollbackNCCLNamespace(ctx.Clientset, gpuConfig.Namespace, nsObj.UID)
+		}
+		return "", err
+	}
+
+	// Pin the namespace instance ensureNamespace just created or reclaimed by
+	// UID so the deferred delete below can never remove a different
+	// namespace object that came to exist under this same name afterward
+	// (e.g. deleted and recreated by an unrelated run while this one was in
+	// flight).
+	namespaceUID := nsObj.UID
+
+	// Clean up everything this run created on every exit path, via a single
+	// defer registered before installedResources is even known (it's read
+	// by closure once cleanupNCCLRun runs). Two separate defers would
+	// instead run LIFO, tearing down the Trainer controller and its CRDs
+	// before the namespace's own TrainJob/TrainingRuntime CRs, leaving
+	// their finalizers stuck and the namespace hung in Terminating. See
+	// cleanupNCCLRun for the enforced order.
+	var installedResources []trainerResourceRef
+	defer func() {
+		err = cleanupNCCLRun(ctx.Clientset, dynamicClient, gpuConfig.Namespace, namespaceUID, holderID, installedResources, err)
+	}()
 
 	// Ensure a usable Kubeflow Trainer. Whether an incomplete installation is a
 	// failure or something to install over is decided by the recipe, not by what
@@ -485,44 +1023,68 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// installs an ephemeral fixture only when nothing is. Anything we install is
 	// ours to clean up after the test completes.
 	recipeDeclaresTrainer := validators.RecipeDeclares(ctx, kubeflowTrainerComponent)
-	installedResources, err := ensureTrainerInstalled(ctx.Ctx, dynamicClient,
-		ctx.Clientset.Discovery(), recipeDeclaresTrainer)
+	installedResources, err = ensureTrainerInstalled(ctx.Ctx, dynamicClient, ctx.Clientset,
+		ctx.Clientset.Discovery(), recipeDeclaresTrainer,
+		func() (string, error) { return resolveTrainerVersion(ctx) })
 	if err != nil {
 		return "", err
 	}
 	if len(installedResources) > 0 {
-		defer func() {
-			err = foldCleanupError(err, deleteTrainer(dynamicClient, installedResources))
-		}()
+		persistTrainerInstallManifest(ctx.Ctx, ctx.Clientset, installedResources)
 	}
 
-	// Clean up NCCL resources on every exit path. Registered after the trainer
-	// install block but before the apply: defers run LIFO, so this runs *before*
-	// the conditional deleteTrainer above — the NCCL TrainJob/TrainingRuntime CRs
-	// are deleted while their CRDs still exist, rather than relying on CRD-delete
-	// cascade GC. Registering it before applyNCCLResources still guarantees a
-	// partial-apply failure (e.g. the RoCE claim is created, then the runtime or
-	// TrainJob apply fails) doesn't leak nccl-roce-rct into the persistent, reused
-	// validation namespace. cleanupNCCLResources is NotFound-tolerant for every
-	// resource it deletes, so running it after an early failure is safe.
-	defer cleanupNCCLResources(dynamicClient, gpuConfig.Namespace)
+	// Trainer install can run long enough for the execution lock to go stale
+	// and be taken over by a same-run retry. Revalidate (and renew)
+	// ownership before mutating this namespace's fixed-name resources, so a
+	// resumed caller that's since been superseded fails closed instead of
+	// updating or recreating the new holder's resources.
+	held, err := ncclExecutionLockHeldBy(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace, holderID)
+	if err != nil {
+		return "", err
+	}
+	if !held {
+		return "", aicrErrors.New(aicrErrors.ErrCodeConflict,
+			fmt.Sprintf("NCCL benchmark execution lock for namespace %q was taken over by another execution; refusing to proceed", gpuConfig.Namespace))
+	}
+
+	// On GKE H100 the log-marker transport check is a documented no-op
+	// (NCCL_DEBUG=WARN keeps the results table retrievable, so the INFO
+	// banner never appears — see verifyTransportFromLogs). Watch the worker
+	// pods for the TCPXO wiring instead. The watch starts BEFORE resources are
+	// created so no worker pod can predate it, and its assertion runs only
+	// after the goroutine is stopped and joined. A recipe-supplied runtime
+	// owns its fabric end to end and is out of scope here.
+	var tcpxoWatch *tcpxoWorkerWatcher
+	if plan.source.runsGKETCPXOChecks() && gkeTCPXOPreflightApplies(variant, accelerator, service) {
+		tcpxoWatch = startGKETCPXOWorkerWatch(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace)
+		defer tcpxoWatch.Stop() // covers the error returns below
+	}
 
 	// Apply runtime and trainjob resources. Propagate an inner code rather than
 	// forcing ErrCodeInternal — a recipe-supplied runtime that fails to render is
 	// an ErrCodeInvalidRequest (recipe-authoring error), not an internal fault.
-	if applyErr := applyNCCLResources(ctx, dynamicClient, gpuConfig, accelerator, service, variant, fabric, customRuntime); applyErr != nil {
+	if applyErr := applyNCCLResources(ctx, dynamicClient, gpuConfig, accelerator, service, variant, fabric, customRuntime, runtimeImage, plan); applyErr != nil {
 		return "", aicrErrors.PropagateOrWrap(applyErr, aicrErrors.ErrCodeInternal, "failed to apply NCCL resources")
 	}
 
 	podHelper := &helper.PodLifecycle{
 		ClientSet: ctx.Clientset,
-		Namespace: ctx.Namespace,
+		Namespace: gpuConfig.Namespace,
 	}
 
 	// Wait for launcher pod and get logs.
-	logs, err = waitForLauncherPodAndGetLogs(ctx, podHelper)
+	logs, err = waitForLauncherPodAndGetLogs(ctx, podHelper, holderID)
 	if err != nil {
 		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get launcher logs", err)
+	}
+
+	if tcpxoWatch != nil {
+		// Join before asserting: the records are complete only once the
+		// watch goroutine has stopped consuming events.
+		tcpxoWatch.Stop()
+		if assertErr := tcpxoWatch.Assert(gpuConfig.WorkerCount); assertErr != nil {
+			return "", assertErr
+		}
 	}
 
 	return logs, nil
@@ -533,8 +1095,11 @@ type gpuConfiguration struct {
 	WorkerCount     int
 	GPUCountPerNode int
 	TotalGPUCount   int
-	Namespace       string
-	Nodes           []v1.Node
+	// Namespace is the per-run benchmark namespace. Unset by
+	// determineGPUConfig, and filled in by runNCCLTrainJob once it derives
+	// one (see ncclWorkloadNamespacePrefix).
+	Namespace string
+	Nodes     []v1.Node
 }
 
 // parseThreshold extracts the numeric threshold value from a constraint value.
@@ -572,11 +1137,12 @@ const (
 // acceleratorProductMatchers maps a recipe Criteria.Accelerator to a predicate
 // that reports whether a given nvidia.com/gpu.product label value belongs to
 // that accelerator family. Exact matches are used where GFD emits a single
-// product string (GB200, B200, L40 family, RTX Pro 6000); prefix matches cover
+// product string (GB200, GB300, B200, L40 family, RTX Pro 6000); prefix matches cover
 // accelerators with multiple concrete SKUs (H100 SXM/PCIe/NVL, H200, A100 SXM/PCIe).
 // No entry for CriteriaAcceleratorAny — "any" deliberately skips the filter.
 var acceleratorProductMatchers = map[recipe.CriteriaAcceleratorType]func(string) bool{
 	recipe.CriteriaAcceleratorGB200:      func(s string) bool { return s == "NVIDIA-GB200" },
+	recipe.CriteriaAcceleratorGB300:      func(s string) bool { return s == "NVIDIA-GB300" },
 	recipe.CriteriaAcceleratorB200:       func(s string) bool { return s == "NVIDIA-B200" },
 	recipe.CriteriaAcceleratorH100:       func(s string) bool { return strings.HasPrefix(s, "NVIDIA-H100-") },
 	recipe.CriteriaAcceleratorH200:       func(s string) bool { return strings.HasPrefix(s, "NVIDIA-H200-") },
@@ -754,7 +1320,6 @@ func determineGPUConfig(ctx *validators.Context, service recipe.CriteriaServiceT
 		WorkerCount:     len(targetNodes),
 		GPUCountPerNode: gpuCountPerNode,
 		TotalGPUCount:   totalGPUs,
-		Namespace:       ctx.Namespace,
 		Nodes:           targetNodes,
 	}, nil
 }
@@ -822,8 +1387,8 @@ func uniformGPUCountPerNode(nodes []v1.Node) (int, error) {
 // YAML files with template substitution using the dynamic client.
 // Runtime: testdata/{accelerator}/{service}/runtime[-{variant}].yaml (per-platform+variant)
 // TrainJob: testdata/trainjob.yaml (shared, just runtimeRef + numNodes)
-func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface, config *gpuConfiguration, accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType, customRuntime string) error {
-	slog.Info("Applying NCCL test resources...", "accelerator", accelerator, "service", service, "variant", string(variant), "fabric", string(fabric), "customRuntime", customRuntime != "")
+func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface, config *gpuConfiguration, accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType, customRuntime string, runtimeImage string, plan *benchmarkRuntimePlan) error {
+	slog.Info("Applying NCCL test resources...", "accelerator", accelerator, "service", service, "variant", string(variant), "fabric", string(fabric), "customRuntime", customRuntime != "", "runtimeImageOverride", runtimeImage != "")
 
 	templateData := map[string]string{
 		"NAMESPACE":          config.Namespace,
@@ -837,9 +1402,9 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 
 	var instanceType string
 
-	// For GKE, discover GPU NIC network names (cluster-specific prefixes).
-	// Skipped for a recipe-supplied runtime, which owns its own fabric wiring.
-	if customRuntime == "" && service == recipe.CriteriaServiceGKE {
+	// GKE GPU NIC discovery only applies to the TCPXO (gpu-nic-*) fabric;
+	// GB200 uses the gke-gb200-rdma Network CRs instead.
+	if customRuntime == "" && service == recipe.CriteriaServiceGKE && accelerator != recipe.CriteriaAcceleratorGB200 {
 		gpuNICs, err := gkenet.DiscoverGPUNICNetworks(ctx.Ctx, dynamicClient)
 		if err != nil {
 			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to discover GKE GPU NIC networks", err)
@@ -905,7 +1470,9 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	// as a standalone object before the runtime (it must exist when the TrainJob
 	// later creates the worker pods that reference it). Skipped for a
 	// recipe-supplied runtime: it declares any DRA claims it needs itself.
-	if customRuntime == "" && fabric == fabricRoCE {
+	// Scoped to variantNET. NVLS claims GPUs through the IMEX ComputeDomain
+	// instead, so a testdata/roce/{service}/roce-claim.yaml never exists for it.
+	if customRuntime == "" && fabric == fabricRoCE && variant == variantNET {
 		// Claim one ConnectX RoCE device per GPU via DRA (NCCL maps GPU->NIC);
 		// the per-node device pool (e.g. 8 on p6e-gb300r) is >= GPUs/node. Set
 		// here — keyed by fabric, not service — so adding a non-EKS RoCE service
@@ -925,22 +1492,55 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 		slog.Info("Applied RoCE ResourceClaimTemplate", "name", ncclRoceClaimName, "count", templateData["ROCE_DEVICE_COUNT"])
 	}
 
-	runtimeObj, err := buildNCCLRuntimeObject(customRuntime, accelerator, service, variant, fabric, config.Namespace, templateData)
+	runtimeObj, err := buildNCCLRuntimeObject(customRuntime, accelerator, service, variant, fabric, config.Namespace, templateData, plan)
 	if err != nil {
 		return err
 	}
-	if err := applyNCCLWorkerScheduling(runtimeObj, effectiveNodeSelector, effectiveTolerations); err != nil {
-		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL worker scheduling", err)
+	// Render the resolved workload image into every launcher/worker container
+	// this override governs (issue #1751). No-op when runtimeImage == "".
+	// Gated on the runtime SOURCE, not customRuntime: a recipe-supplied
+	// runtime (plan.source == runtimeSourceRecipeSupplied) owns its image end
+	// to end and must never be overridden, but both the embedded capability
+	// fixture and a derived/delivered runtime are AICR's own artifacts and
+	// must honor the override. customRuntime is non-empty on the delivered
+	// path too (it carries plan.carrier, per resolveBenchmarkRuntimeSource),
+	// so the previous customRuntime == "" gate silently skipped the override
+	// there while actualValue still reported it as applied — false
+	// qualification evidence. recipeSupplied() is nil-safe so a test
+	// exercising the baked-in path with no plan still applies the override
+	// correctly.
+	if !plan.recipeSupplied() {
+		if overrideErr := applyNCCLRuntimeImageOverride(runtimeObj, runtimeImage); overrideErr != nil {
+			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL runtime image override", overrideErr)
+		}
 	}
-	if err := createUnstructured(ctx.Ctx, dynamicClient, trainingRuntimeGVR, config.Namespace, runtimeObj); err != nil {
+	if schedErr := applyNCCLWorkerScheduling(runtimeObj, effectiveNodeSelector, effectiveTolerations); schedErr != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL worker scheduling", schedErr)
+	}
+	if err = createUnstructured(ctx.Ctx, dynamicClient, trainingRuntimeGVR, config.Namespace, runtimeObj); err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply training runtime", err)
+	}
+	// Provenance describes the object as STORED — read back after the create so
+	// admission defaulting or mutation is part of the digest — and is recorded
+	// on the plan only once the create succeeded, so a rejected or
+	// never-attempted application publishes nothing.
+	if plan.derived() {
+		stored, getErr := dynamicClient.Resource(trainingRuntimeGVR).Namespace(config.Namespace).Get(ctx.Ctx, ncclTrainingRuntimeName, metav1.GetOptions{})
+		if getErr != nil {
+			return aicrErrors.Wrap(gkenet.ReadErrorCode(getErr), "failed to read back the applied training runtime for provenance", getErr)
+		}
+		prov, provErr := finalizeRuntimeProvenance(plan, stored)
+		if provErr != nil {
+			return provErr
+		}
+		plan.provenance = prov
 	}
 	slog.Info("Applied TrainingRuntime", "service", service)
 
 	// Wait for the runtime to be visible to the Trainer admission webhook.
 	// The webhook validates that the referenced runtime exists before allowing
 	// TrainJob creation; without this wait we hit a race condition.
-	if err := waitForTrainingRuntime(ctx.Ctx, dynamicClient, config.Namespace); err != nil {
+	if err = waitForTrainingRuntime(ctx.Ctx, dynamicClient, config.Namespace); err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "TrainingRuntime not ready", err)
 	}
 
@@ -949,14 +1549,15 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	// auto-create a ResourceClaimTemplate that runtime-nvls.yaml references;
 	// without this, the NVL72 fabric is visible to NCCL but /dev/nvidia-caps-
 	// imex-channels isn't mounted into the workers and MNNVL aborts with
-	// "Cuda failure 800 'operation not permitted'". Skipped for a recipe-supplied
-	// runtime: IMEX/ComputeDomain wiring is part of the fabric contract the
-	// runtime owns, so it must declare any ComputeDomain/ResourceClaim it needs.
-	if customRuntime == "" && variant == variantNVLS {
-		if err := applyNCCLComputeDomain(ctx.Ctx, dynamicClient, config.Namespace); err != nil {
+	// "Cuda failure 800 'operation not permitted'". A recipe-supplied runtime
+	// gets the same provisioning, on any variant, only when it references
+	// ncclIMEXClaimTemplateName (plan.managesIMEX); it cannot ship its own
+	// ComputeDomain, and the per-run namespace rules out pre-creating one.
+	if (customRuntime == "" && variant == variantNVLS) || plan.managesIMEX() {
+		if err = applyNCCLComputeDomain(ctx.Ctx, dynamicClient, config.Namespace); err != nil {
 			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply ComputeDomain", err)
 		}
-		if err := waitForIMEXClaimTemplate(ctx.Ctx, dynamicClient, config.Namespace); err != nil {
+		if err = waitForIMEXClaimTemplate(ctx.Ctx, dynamicClient, config.Namespace); err != nil {
 			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "IMEX ResourceClaimTemplate not ready", err)
 		}
 	}
@@ -968,7 +1569,7 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	// rejected with "TrainingRuntime not found". applyTrainJobWithRetry retries
 	// on exactly that denial until the webhook cache catches up.
 	trainjobPath := filepath.Join("testdata", "trainjob.yaml")
-	if err := applyTrainJobWithRetry(ctx.Ctx, dynamicClient, config.Namespace, trainjobPath, templateData); err != nil {
+	if err = applyTrainJobWithRetry(ctx.Ctx, dynamicClient, config.Namespace, trainjobPath, templateData); err != nil {
 		return err
 	}
 	slog.Info("Applied TrainJob")
@@ -997,7 +1598,10 @@ func applyTrainJobWithRetry(ctx context.Context, dynamicClient dynamic.Interface
 	attempt := 0
 	for {
 		attempt++
-		createErr := createUnstructured(retryCtx, dynamicClient, trainJobGVR, namespace, obj)
+		// ctx, not retryCtx, so the reclaim wait inside createUnstructured
+		// gets its own NCCLResourceRecreateWait budget instead of retryCtx's
+		// shorter one. The retry loop itself still stays bounded below.
+		createErr := createUnstructured(ctx, dynamicClient, trainJobGVR, namespace, obj)
 		if createErr == nil {
 			if attempt > 1 {
 				slog.Info("TrainJob created after Trainer webhook cache caught up to the TrainingRuntime",
@@ -1106,8 +1710,11 @@ func applyNCCLComputeDomain(ctx context.Context, dynamicClient dynamic.Interface
 	}
 
 	// AlreadyExists: fetch the current resourceVersion and Update in place.
-	// Required because Update rejects an empty resourceVersion to prevent
-	// lost updates.
+	// Required because Update rejects an empty resourceVersion. Adopting an
+	// existing ComputeDomain here is intentional, since it's how a stale
+	// one left by a prior run (e.g. a retry reusing AICR_RUN_ID after a
+	// hard kill before cleanup ran) gets reclaimed instead of failing with
+	// AlreadyExists.
 	existing, err := client.Get(applyCtx, ncclComputeDomainName, metav1.GetOptions{})
 	if err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get existing ComputeDomain", err)
@@ -1247,15 +1854,39 @@ func effectiveWorkerScheduling(ctx *validators.Context, service recipe.CriteriaS
 }
 
 // buildNCCLRuntimeObject selects and renders the TrainingRuntime the NCCL
-// TrainJob will reference. A recipe-supplied nccl-benchmark-runtime is rendered
-// from its inline template with its identity forced to what the shared TrainJob's
-// runtimeRef expects and confined to the validator namespace (the value was
-// shape-checked as a Kubeflow TrainingRuntime at resolve time). Otherwise the
-// baked-in per-platform testdata template is read from disk.
+// TrainJob will reference. A derived runtime (#2297) is built here, at apply
+// time, from the skeleton rendered with the real templateData and the shipped
+// ClusterTrainingRuntime the plan carries — never from the plan's carrier
+// string, whose placeholders would lose their types on re-parse. A
+// recipe-supplied nccl-benchmark-runtime is rendered from its inline template
+// with its identity forced to what the shared TrainJob's runtimeRef expects and
+// confined to the validator namespace (the value was shape-checked as a
+// Kubeflow TrainingRuntime at resolve time). Otherwise the baked-in
+// per-platform testdata template is read from disk.
 func buildNCCLRuntimeObject(customRuntime string, accelerator recipe.CriteriaAcceleratorType,
 	service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType,
-	namespace string, templateData map[string]string) (*unstructured.Unstructured, error) {
+	namespace string, templateData map[string]string, plan *benchmarkRuntimePlan) (*unstructured.Unstructured, error) {
 
+	if plan.derived() {
+		// Same skeleton, same fabric pin as resolveBenchmarkRuntimeSource: the
+		// delivered runtime carries its own wiring, so only the platform matters.
+		skeletonPath := templatePath(accelerator, service, variant, fabricEFA, "runtime.yaml")
+		skeleton, err := parseYAMLTemplate(skeletonPath, templateData)
+		if err != nil {
+			return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to render benchmark runtime skeleton "+skeletonPath, err)
+		}
+		if err = checkShippedWorkerGPUCount(plan.shipped, templateData["GPU_COUNT_PER_NODE"]); err != nil {
+			return nil, err
+		}
+		obj, _, err := deriveBenchmarkRuntime(skeleton, plan.shipped)
+		if err != nil {
+			return nil, err
+		}
+		obj.SetName(ncclTrainingRuntimeName)
+		obj.SetNamespace(namespace)
+		slog.Info("Derived NCCL TrainingRuntime from the shipped runtime", "name", ncclTrainingRuntimeName, "namespace", namespace, "shipped", gkenet.TCPXORuntimeName)
+		return obj, nil
+	}
 	if customRuntime != "" {
 		obj, err := renderYAMLTemplate(customRuntime, templateData)
 		if err != nil {
@@ -1300,21 +1931,133 @@ func renderYAMLTemplate(content string, data map[string]string) (*unstructured.U
 	return obj, nil
 }
 
-// createUnstructured creates a namespaced resource from an unstructured object with a timeout.
+// createUnstructured creates obj, a namespaced resource, with a timeout. If
+// a fixed-name resource with that GVR/name already exists, it reclaims it
+// so a same-run retry after a hard kill can recover instead of failing on
+// AlreadyExists.
+//
+// TrainJob reclaims by delete-then-recreate rather than update, since
+// Kubeflow Trainer treats most of its spec as immutable and an update
+// wouldn't make the controller recreate the underlying JobSet/pods anyway,
+// which is what a stale TrainJob actually needs. Every other caller
+// (TrainingRuntime) reclaims by updating in place, like
+// applyNCCLComputeDomain does for ComputeDomain.
 func createUnstructured(ctx context.Context, dynamicClient dynamic.Interface, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) error {
 	applyCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
-	_, err := dynamicClient.Resource(gvr).Namespace(namespace).Create(applyCtx, obj, metav1.CreateOptions{})
-	if err != nil {
+
+	client := dynamicClient.Resource(gvr).Namespace(namespace)
+	if _, err := client.Create(applyCtx, obj, metav1.CreateOptions{}); err == nil {
+		return nil
+	} else if !apierrors.IsAlreadyExists(err) {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to create resource", err)
 	}
+
+	if gvr == trainJobGVR {
+		// Pin the delete to the object actually observed here, not just its
+		// name. Create's AlreadyExists above only proves something existed
+		// at that instant. Without a UID precondition, a delete-by-name in
+		// the gap since could remove a same-named TrainJob that a distinct
+		// execution created in between, rather than failing the delete.
+		stale, err := client.Get(applyCtx, obj.GetName(), metav1.GetOptions{})
+		switch {
+		case apierrors.IsNotFound(err):
+			// Already gone since the AlreadyExists above. Nothing to delete.
+		case err != nil:
+			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get stale resource for recreate", err)
+		default:
+			uid := stale.GetUID()
+			if err := client.Delete(applyCtx, obj.GetName(), metav1.DeleteOptions{
+				Preconditions: &metav1.Preconditions{UID: &uid},
+			}); err != nil && !apierrors.IsNotFound(err) {
+				return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to delete stale resource for recreate", err)
+			}
+		}
+		// Delete only stamps DeletionTimestamp while a controller-serviced
+		// finalizer (Trainer v2 / JobSet ownership) is still clearing.
+		// Recreating immediately would race it and hit AlreadyExists again,
+		// defeating the same-run retry-after-hard-kill path this exists for.
+		// A finalizer can outlast applyCtx's short DiagnosticTimeout, so the
+		// wait and the recreate that depends on it get their own bound.
+		waitCtx, waitCancel := context.WithTimeout(ctx, defaults.NCCLResourceRecreateWait)
+		defer waitCancel()
+		if err := waitForResourceGone(waitCtx, client, obj.GetName()); err != nil {
+			return aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal,
+				"failed waiting for stale resource to finish deleting before recreate")
+		}
+		obj.SetResourceVersion("")
+		if _, err := client.Create(waitCtx, obj, metav1.CreateOptions{}); err != nil {
+			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to recreate resource", err)
+		}
+		return nil
+	}
+
+	existing, err := client.Get(applyCtx, obj.GetName(), metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		// Deleted between the AlreadyExists above and this Get. Create
+		// fresh instead of failing on a race a plain Create would win.
+		if _, createErr := client.Create(applyCtx, obj, metav1.CreateOptions{}); createErr != nil {
+			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to recreate resource", createErr)
+		}
+		return nil
+	}
+	if err != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get existing resource for update", err)
+	}
+	obj.SetResourceVersion(existing.GetResourceVersion())
+	if _, err := client.Update(applyCtx, obj, metav1.UpdateOptions{}); err != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to update resource", err)
+	}
 	return nil
+}
+
+// waitForResourceGone watches a namespaced resource by name until it's
+// removed, mirroring waitForNamespaceGone for the dynamic client. Used by
+// createUnstructured to wait out a finalizer-held delete before recreating.
+func waitForResourceGone(ctx context.Context, client dynamic.ResourceInterface, name string) error {
+	watcher, err := client.Watch(ctx, metav1.ListOptions{
+		FieldSelector: "metadata.name=" + name,
+	})
+	if err != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to watch resource deletion", err)
+	}
+	defer watcher.Stop()
+
+	if _, getErr := client.Get(ctx, name, metav1.GetOptions{}); apierrors.IsNotFound(getErr) {
+		return nil
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
+				"timed out waiting for resource to be fully deleted", ctx.Err())
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
+						"timed out waiting for resource to be fully deleted", ctxErr)
+				}
+				// Watch channel closed without cancellation. Re-Get before
+				// failing, since the resource may have been deleted during
+				// the closure window (apiserver hiccup, rolling restart).
+				if _, getErr := client.Get(ctx, name, metav1.GetOptions{}); apierrors.IsNotFound(getErr) {
+					return nil
+				}
+				return aicrErrors.New(aicrErrors.ErrCodeUnavailable,
+					"resource watch channel closed before deletion observed")
+			}
+			if event.Type == watch.Deleted {
+				return nil
+			}
+		}
+	}
 }
 
 // platformWorkerScheduling returns the default nodeSelector and tolerations
 // for NCCL worker pods on the given service. instanceType is only used for EKS;
 // nodes (the accelerator-narrowed target set from resolveTargetGPUNodes) is
-// used for GKE (the gke-accelerator label) and OKE/AKS (the shared
+// used for GKE (the gke-accelerator label) and OKE/AKS/generic (the shared
 // nvidia.com/gpu.product label).
 func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType string, nodes []v1.Node) (map[string]string, []v1.Toleration, error) {
 	switch service {
@@ -1340,28 +2083,22 @@ func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType s
 			{Operator: v1.TolerationOpExists},
 			{Key: "nvidia.com/gpu", Operator: v1.TolerationOpEqual, Value: "present", Effect: v1.TaintEffectNoSchedule},
 		}, nil
-	case recipe.CriteriaServiceOKE, recipe.CriteriaServiceAKS:
-		// OKE bare-metal GB200 pools are commonly tainted and may coexist
-		// with other GPU shapes under one control plane. Tolerate the pool
-		// taint (mirroring EKS/GKE) and pin workers to the same cohort the
-		// node count was sized against by reusing the GFD gpu.product label
-		// that resolveTargetGPUNodes -> narrowByAccelerator already filtered
-		// on. On non-GFD installs no shared product label exists, so emit no
-		// selector — matching the counting path's unfiltered fallback so the
-		// two stay aligned.
-		//
-		// AKS shares this shape: GPU pools carry the nvidia.com/gpu=present:
-		// NoSchedule taint and AICR recipes deploy the GPU Operator with GFD,
-		// so gpu.product (e.g. NVIDIA-H100-80GB-HBM3) is the discriminating
-		// label. The AKS-native kubernetes.azure.com/accelerator label is not
-		// used because its value is just "nvidia" — it cannot pin the H100
-		// cohort narrowByAccelerator sized the job against.
+	case recipe.CriteriaServiceOKE, recipe.CriteriaServiceAKS, recipe.CriteriaServiceGeneric:
+		// These services share one shape: tainted GPU pools whose nodes carry
+		// GFD labels. Tolerate the pool taint and pin workers to the
+		// gpu.product label that resolveTargetGPUNodes → narrowByAccelerator
+		// already filtered on, so placement matches the cohort WorkerCount
+		// was sized against. On non-GFD installs no shared product label
+		// exists; emit no selector, matching the counting path's unfiltered
+		// fallback so the two stay aligned. (AKS's native
+		// kubernetes.azure.com/accelerator label is just "nvidia" — it
+		// cannot pin a cohort.)
 		var nodeSelector map[string]string
 		if product := commonGPUProduct(nodes); product != "" {
 			nodeSelector = map[string]string{gpuProductLabel: product}
 		}
 		return nodeSelector, []v1.Toleration{{Operator: v1.TolerationOpExists}}, nil
-	case recipe.CriteriaServiceAny, recipe.CriteriaServiceOCP, recipe.CriteriaServiceKind, recipe.CriteriaServiceLKE, recipe.CriteriaServiceBCM, recipe.CriteriaServiceMetal3:
+	case recipe.CriteriaServiceAny, recipe.CriteriaServiceOCP, recipe.CriteriaServiceKind, recipe.CriteriaServiceLKE, recipe.CriteriaServiceBCM, recipe.CriteriaServiceMetal3, recipe.CriteriaServiceRKE2, recipe.CriteriaServiceK0s, recipe.CriteriaServiceMK8s:
 		return nil, nil, nil
 	default:
 		return nil, nil, nil
@@ -1497,15 +2234,19 @@ func nestedMap(m map[string]any, keys ...string) (map[string]any, bool) {
 	return current, true
 }
 
-// waitForLauncherPodAndGetLogs waits for the launcher pod to be created and retrieves logs
-func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.PodLifecycle) (string, error) {
+// waitForLauncherPodAndGetLogs waits for the launcher pod to be created,
+// waits for it to complete, and returns its logs. Revalidates that
+// holderID still holds the namespace's execution lock right after the pod
+// goes terminal, since a live pod only protects the namespace from a
+// same-run retry while it's still running.
+func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.PodLifecycle, holderID string) (string, error) {
 	slog.Info("Waiting for launcher pod to be created...")
 
 	// Wait for launcher pod to be created (pattern: nccl-all-reduce-tj-launcher-*)
 	launcherPod, err := waitForPodByLabelSelector(
 		ctx.Ctx,
 		ctx.Clientset,
-		ctx.Namespace,
+		podHelper.Namespace,
 		fmt.Sprintf("jobset.sigs.k8s.io/jobset-name=%s,jobset.sigs.k8s.io/replicatedjob-name=launcher", ncclTrainJobName),
 		defaults.NCCLLauncherPodTimeout,
 	)
@@ -1517,6 +2258,21 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 
 	// Wait for pod to complete using helper method
 	err = podHelper.WaitForPodSuccess(ctx.Ctx, launcherPod, defaults.NCCLTrainJobTimeout)
+
+	// This wait can run past NCCLExecutionLockStaleAge with no renewal. A
+	// live pod protects this namespace from a same-run retry on its own,
+	// but that ends the moment it goes terminal. Renew right here, before
+	// the diagnostic gathering below adds more unrenewed time, so a retry
+	// can't take the lock while cleanup still has work to do.
+	held, lockErr := ncclExecutionLockHeldBy(ctx.Ctx, ctx.Clientset, podHelper.Namespace, holderID)
+	if lockErr != nil {
+		return "", lockErr
+	}
+	if !held {
+		return "", aicrErrors.New(aicrErrors.ErrCodeConflict,
+			fmt.Sprintf("NCCL benchmark execution lock for namespace %q was taken over by another execution; refusing to proceed", podHelper.Namespace))
+	}
+
 	if err != nil {
 		// Get logs even if pod failed for debugging. Surface (not discard) a
 		// log-fetch error: an empty launcher log with no explanation is exactly
@@ -1557,14 +2313,14 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 		// the pod object and survives the container GC that GetPodLogs loses to.
 		// Either way the fetchNote reason is preserved in the payload.
 		if launcherLogs == "" {
-			if term := launcherTerminationTail(ctx.Ctx, ctx.Clientset, ctx.Namespace, launcherPod.Name); term != "" {
+			if term := launcherTerminationTail(ctx.Ctx, ctx.Clientset, podHelper.Namespace, launcherPod.Name); term != "" {
 				launcherLogs = fmt.Sprintf("<%s; container termination-message tail follows>\n%s",
 					fetchNote, tailLines(term, maxDiagLogLines))
 			} else {
 				launcherLogs = fmt.Sprintf("<%s; no termination message captured>", fetchNote)
 			}
 		}
-		workerDiag := collectNCCLWorkerDiagnostics(ctx.Ctx, ctx.Clientset, ctx.Namespace)
+		workerDiag := collectNCCLWorkerDiagnostics(ctx.Ctx, ctx.Clientset, podHelper.Namespace)
 
 		// Surface the diagnostics via slog, not just the return value: every
 		// caller on this error path (runNCCLTrainJob, validateNcclAllReduceBw,
@@ -1600,7 +2356,7 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 	// rotation-proof source of truth while the streamed log remains available for
 	// transport verification and diagnostics. Empty for launchers that don't write
 	// results there (other platforms), leaving behavior unchanged.
-	term := launcherTerminationTail(ctx.Ctx, ctx.Clientset, ctx.Namespace, launcherPod.Name)
+	term := launcherTerminationTail(ctx.Ctx, ctx.Clientset, podHelper.Namespace, launcherPod.Name)
 	if term != "" {
 		slog.Info("Appending launcher termination message (rotation-proof results)", "termBytes", len(term))
 	}
@@ -1929,8 +2685,11 @@ func waitForTrainingRuntime(ctx context.Context, dynamicClient dynamic.Interface
 	}
 }
 
-// waitForPodByLabelSelector waits for a pod matching the label selector to be created.
-// Uses the Watch API for efficiency instead of polling.
+// waitForPodByLabelSelector waits for a pod matching the label selector to be
+// created. Uses the Watch API for efficiency instead of polling. Skips
+// Deleted events and pods that are already terminating or terminal, so a
+// retry that recreates the workload under the same label selector doesn't
+// return a stale pod that no longer exists.
 func waitForPodByLabelSelector(ctx context.Context, clientset kubernetes.Interface, namespace, labelSelector string, timeout time.Duration) (*v1.Pod, error) {
 	slog.Info("Watching for pod with selector", "selector", labelSelector)
 
@@ -1968,6 +2727,16 @@ func waitForPodByLabelSelector(ctx context.Context, clientset kubernetes.Interfa
 			}
 			pod, ok := event.Object.(*v1.Pod)
 			if !ok {
+				continue
+			}
+			// A Deleted event, or a pod already terminating/terminal, isn't
+			// a match. A recreated workload (e.g. a TrainJob admission
+			// retry) can fire a Deleted event for the stale pod before the
+			// replacement's Added event arrives, so keep waiting for the
+			// replacement, matching the filter newestRunnablePod uses on
+			// its re-List recovery path.
+			isTerminal := pod.Status.Phase == v1.PodFailed || pod.Status.Phase == v1.PodSucceeded
+			if event.Type == watch.Deleted || pod.DeletionTimestamp != nil || isTerminal {
 				continue
 			}
 			slog.Info("Found launcher pod", "name", pod.Name)
@@ -2075,66 +2844,153 @@ func verifyTransportFromLogs(logs string, variant ncclVariant) error {
 	}
 }
 
-// cleanupNCCLResources removes the trainjob, runtime, and (if present) the
-// ComputeDomain CR using the dynamic client. Deleting the ComputeDomain
-// cascades to its auto-generated ResourceClaimTemplate via the DRA driver;
-// NotFound on the ComputeDomain is expected for the default/NET variants
-// and is logged at debug rather than error.
-func cleanupNCCLResources(dynamicClient dynamic.Interface, namespace string) {
-	slog.Info("Cleaning up NCCL test resources...")
+// cleanupNCCLResources deletes the per-run benchmark namespace, cascading
+// away the trainjob, runtime, and (if present) the ComputeDomain and RoCE
+// ResourceClaimTemplate CRs it created, mirroring cleanupInferenceWorkload's
+// pattern. Nothing else ever shares this namespace, so there's no shared
+// state to pin deletes against.
+//
+// Unlike cleanupInferenceWorkload, a Delete failure is itself returned, not
+// just logged, so foldCleanupError can still fail an otherwise-passing
+// check on it. NotFound is tolerated.
+//
+// uid pins the delete to the exact namespace instance runNCCLTrainJob
+// created or reclaimed, so a recreated same-named namespace is left alone
+// instead of silently deleted (see the check below for why it must be
+// non-empty).
+func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid types.UID, terminationWait time.Duration) error {
+	if uid == "" {
+		// Required, not just preferred: the fake client used in tests
+		// ignores delete preconditions and would otherwise silently
+		// proceed on a caller bug that drops the UID.
+		return aicrErrors.New(aicrErrors.ErrCodeInternal,
+			fmt.Sprintf("refusing to delete NCCL benchmark namespace %q without an owning UID", namespace))
+	}
 
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.DiagnosticTimeout)
+	slog.Info("Cleaning up NCCL test resources...", "namespace", namespace)
+
+	deleteCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 	defer cancel()
 
-	// Delete trainjob. NotFound is expected and logged at debug: this runs as a
-	// deferred cleanup registered before the apply, so an early/partial-apply
-	// failure (or the install-trainer path, where deleteTrainer may already have
-	// cascade-removed the CRs) legitimately leaves no TrainJob to delete.
-	err := dynamicClient.Resource(trainJobGVR).Namespace(namespace).Delete(cleanupCtx, ncclTrainJobName, metav1.DeleteOptions{})
-	switch {
-	case err == nil:
-		slog.Info("Deleted TrainJob")
-	case apierrors.IsNotFound(err):
-		slog.Debug("TrainJob not present, skipping", "name", ncclTrainJobName)
-	default:
-		slog.Warn("failed to delete TrainJob", "error", err)
+	nsClient := clientset.CoreV1().Namespaces()
+	err := nsClient.Delete(deleteCtx, namespace, metav1.DeleteOptions{
+		Preconditions: &metav1.Preconditions{UID: &uid},
+	})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			slog.Info("NCCL benchmark namespace already gone", "namespace", namespace)
+			return nil
+		}
+		if apierrors.IsConflict(err) {
+			// UID precondition mismatch. The namespace we created is
+			// already gone and a different one holds the name, so
+			// nothing this run owns leaked.
+			slog.Info("NCCL benchmark namespace was already replaced", "namespace", namespace)
+			return nil
+		}
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
+			fmt.Sprintf("failed to delete NCCL benchmark namespace %q", namespace), err)
 	}
 
-	// Delete runtime. NotFound is expected and logged at debug (see TrainJob above).
-	err = dynamicClient.Resource(trainingRuntimeGVR).Namespace(namespace).Delete(cleanupCtx, ncclTrainingRuntimeName, metav1.DeleteOptions{})
-	switch {
-	case err == nil:
-		slog.Info("Deleted TrainingRuntime")
-	case apierrors.IsNotFound(err):
-		slog.Debug("TrainingRuntime not present, skipping", "name", ncclTrainingRuntimeName)
-	default:
-		slog.Warn("failed to delete TrainingRuntime", "error", err)
+	// terminationWait bounds how long this waits for the namespace to
+	// actually disappear before failing. Injectable so tests can exercise
+	// the timeout path without waiting out the real production bound;
+	// production callers pass defaults.InferenceNamespaceTerminationWait
+	// (see cleanupNCCLRun). A timeout here IS returned, not merely logged:
+	// the Delete call above already succeeded, but a stuck finalizer (e.g.
+	// NVLS's DRA/IMEX teardown) leaves the namespace hung in Terminating,
+	// and silently swallowing that would report a clean "Deleted" while the
+	// ComputeDomain/ResourceClaimTemplate leaks forever.
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), terminationWait)
+	defer waitCancel()
+	if err := waitForNamespaceGone(waitCtx, nsClient, namespace); err != nil {
+		return err
 	}
 
-	// Delete ComputeDomain if this was the NVLS variant. NotFound is the
-	// expected path for default/NET and is ignored here; other errors bubble
-	// up as a warning because the RCT and IMEX daemons otherwise leak.
-	err = dynamicClient.Resource(computeDomainGVR).Namespace(namespace).Delete(cleanupCtx, ncclComputeDomainName, metav1.DeleteOptions{})
-	switch {
-	case err == nil:
-		slog.Info("Deleted ComputeDomain")
-	case apierrors.IsNotFound(err):
-		slog.Debug("ComputeDomain not present (non-NVLS variant), skipping", "name", ncclComputeDomainName)
-	default:
-		slog.Warn("failed to delete ComputeDomain", "error", err, "name", ncclComputeDomainName)
+	slog.Info("Deleted NCCL benchmark namespace", "namespace", namespace)
+	return nil
+}
+
+// cleanupNCCLRun tears down everything runNCCLTrainJob created, in a fixed
+// order. It skips cleanup entirely if holderID no longer holds the
+// namespace's execution lock, since another execution has since taken it
+// over, or if that can't be confirmed either way. Otherwise it deletes the
+// per-run namespace first (cascading its TrainJob/TrainingRuntime/
+// ComputeDomain/RoCE-claim CRs), then, only on the self-install fallback
+// path, the Kubeflow Trainer installation, whose removal would otherwise
+// strand those CRs' finalizers if it ran first. Trainer teardown only runs
+// if the namespace delete succeeded.
+//
+// benchErr is the check's result so far. A cleanup failure only overrides
+// a nil benchErr, never masking a real benchmark failure (see
+// foldCleanupError).
+func cleanupNCCLRun(clientset kubernetes.Interface, dynamicClient dynamic.Interface, namespace string, uid types.UID, holderID string, installedResources []trainerResourceRef, benchErr error) error {
+	held, lockErr := ncclExecutionLockHeldBy(context.Background(), clientset, namespace, holderID)
+	if lockErr != nil {
+		// A transient read failure here (an apiserver blip, a timeout) is not
+		// proof the lock was actually taken over, but it's not proof it
+		// wasn't either. Treat it the same as a confirmed loss below rather
+		// than fail an otherwise-passing benchmark over a flaky lease read,
+		// or risk deleting a peer's live resources on a guess.
+		slog.Warn("Failed to verify the NCCL benchmark execution lock is still held; skipping cleanup",
+			"namespace", namespace, "error", lockErr)
+		return benchErr
+	}
+	if !held {
+		slog.Warn("NCCL benchmark execution lock was taken over by another execution; skipping cleanup", "namespace", namespace)
+		return benchErr
 	}
 
-	// Delete the RoCE ResourceClaimTemplate (RoCE NET variant only). The
-	// validator namespace is persistent and reused across runs, so leaving it
-	// behind makes the next RoCE run fail with AlreadyExists when
-	// applyNCCLResources re-creates it. NotFound is expected for EFA/NVLS runs.
-	err = dynamicClient.Resource(resourceClaimTemplateGVR).Namespace(namespace).Delete(cleanupCtx, ncclRoceClaimName, metav1.DeleteOptions{})
-	switch {
-	case err == nil:
-		slog.Info("Deleted RoCE ResourceClaimTemplate", "name", ncclRoceClaimName)
-	case apierrors.IsNotFound(err):
-		slog.Debug("RoCE ResourceClaimTemplate not present (non-RoCE variant), skipping", "name", ncclRoceClaimName)
-	default:
-		slog.Warn("failed to delete RoCE ResourceClaimTemplate", "error", err, "name", ncclRoceClaimName)
+	nsErr := cleanupNCCLResources(clientset, namespace, uid, defaults.InferenceNamespaceTerminationWait)
+	err := foldCleanupError(benchErr, nsErr, "NCCL benchmark succeeded but NCCL resource cleanup failed")
+	if nsErr != nil {
+		return err
 	}
+	if len(installedResources) > 0 {
+		// A concurrent run with a different AICR_RUN_ID gets its own
+		// namespace, but the two can still share this same self-installed
+		// Trainer: ensureTrainerInstalled's reuse path returns no
+		// resources for the peer, so only this run's cleanup ever sees
+		// installedResources non-empty. Deleting Trainer here regardless
+		// of that peer would fail its still-running TrainJob out from
+		// under it. On a List failure, leave Trainer installed rather
+		// than risk deleting it out from under a peer this call could
+		// not rule out.
+		othersRemain, listErr := otherNCCLNamespacesExist(context.Background(), clientset, namespace)
+		if listErr != nil {
+			slog.Warn("Failed to check for other NCCL benchmark namespaces; leaving Trainer installed for a later cleanup",
+				"namespace", namespace, "error", listErr)
+		} else if othersRemain {
+			slog.Info("Other NCCL benchmark namespaces remain; leaving the self-installed Trainer for a later cleanup",
+				"namespace", namespace)
+		} else if trainerErr := deleteTrainer(dynamicClient, installedResources); trainerErr != nil {
+			err = foldCleanupError(err, trainerErr, "NCCL benchmark succeeded but Kubeflow Trainer cleanup failed")
+		} else {
+			removeTrainerInstallManifestEntries(context.Background(), clientset, installedResources)
+		}
+	}
+	return err
+}
+
+// otherNCCLNamespacesExist reports whether any AICR-owned NCCL benchmark
+// namespace other than namespace currently exists. cleanupNCCLRun checks
+// this before eagerly deleting a self-installed Trainer, since a
+// concurrent run with a different run ID can share that same install and
+// still be using it.
+func otherNCCLNamespacesExist(ctx context.Context, clientset kubernetes.Interface, namespace string) (bool, error) {
+	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+	namespaces, err := clientset.CoreV1().Namespaces().List(listCtx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s,%s=%s",
+			labels.ManagedBy, labels.ValueValidator, labels.Component, labels.ValueNCCLPerf),
+	})
+	if err != nil {
+		return false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to list NCCL benchmark namespaces", err)
+	}
+	for _, ns := range namespaces.Items {
+		if ns.Name != namespace {
+			return true, nil
+		}
+	}
+	return false, nil
 }

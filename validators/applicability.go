@@ -34,10 +34,10 @@ import (
 // inapplicable Skip — otherwise a false-PASS lets a broken or unauthorized
 // cluster pass conformance.
 //
-// #1327 boundary: standalone validator runs carry no recipe context (empty
-// ComponentRefs; see pkg/validator/v1.ToValidationInput), so RecipeDeclares
-// returns false and capability-driven automatic selection keeps its existing
-// Skip behavior. Fail-closed fires ONLY once the recipe actually declares the
+// #1327 boundary: standalone validator runs carry no recipe context (no
+// ValidationInput, or one with no ComponentRefs), so RecipeDeclares returns
+// false and capability-driven automatic selection keeps its existing Skip
+// behavior. Fail-closed fires ONLY once the recipe actually declares the
 // dependency.
 
 // RecipeDeclares reports whether component is present AND enabled in the
@@ -125,7 +125,7 @@ func (c Capability) Require(ctx *Context, probeErr error, present bool) error {
 			if declared {
 				return errors.Wrap(errors.ErrCodeNotFound, c.AbsentMsg, probeErr)
 			}
-			return Skip(c.inapplicableReason())
+			return SkipWithReason(SkipReasonComponentNotInRecipe, c.inapplicableReason())
 		}
 		// Any non-NotFound probe error is an infrastructure failure and blocks
 		// the gate regardless of declaration — a Forbidden/timeout/transport/
@@ -139,7 +139,7 @@ func (c Capability) Require(ctx *Context, probeErr error, present bool) error {
 	if declared {
 		return errors.New(errors.ErrCodeNotFound, c.AbsentMsg)
 	}
-	return Skip(c.inapplicableReason())
+	return SkipWithReason(SkipReasonComponentNotInRecipe, c.inapplicableReason())
 }
 
 // RequireList resolves a capability-gated check that probes a LIST/collection

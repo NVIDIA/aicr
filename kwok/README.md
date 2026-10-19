@@ -7,8 +7,9 @@ KWOK (Kubernetes WithOut Kubelet) tests AICR bundles against simulated GPU clust
 Versions are pinned in `.settings.yaml`. **Docker Desktop must be running** — Kind uses it to create the local cluster.
 
 ```bash
-# Kind, lifecycle, bundle deployment, build
-brew install kind tilt-dev/tap/ctlptl helm yq goreleaser
+# Kind, ctlptl, helm, yq, goreleaser, and the rest of the toolchain
+# (then run make tools-check to confirm the .settings.yaml pins)
+make tools-setup
 ```
 
 The `kwok`/`kwokctl` binaries are not required — `make kwok-cluster` installs the KWOK controller into the cluster via `kubectl apply`.
@@ -122,8 +123,21 @@ Currently on disk:
 |---------|-------------|----------------|-------------|
 | eks | h100 | `eks/system-m7i.yaml` | `eks/p5-h100.yaml` |
 | eks | gb200 | `eks/system-m7i.yaml` | `eks/p6-gb200.yaml` |
+| eks | gb300 | `eks/system-m7i.yaml` | `eks/p6e-gb300.yaml` |
+| gke | gb300 | `gke/system-n2.yaml` | `gke/a4x-maxgpu-4g-metal.yaml` |
+| k0s | h200 | `k0s/system-generic.yaml` | `k0s/accelerated-h200.yaml` |
+| rke2 | vr200 | `rke2/system-generic.yaml` | `rke2/accelerated-vr200.yaml` |
 
-**Cluster defaults:** 2 system nodes, 4 GPU nodes (32 GPUs), Kubernetes v1.33.5, region `us-east-1`.
+**Cluster defaults:** 2 system nodes, 4 GPU nodes, region `us-east-1`. The cluster's GPU total is `4 × spec.gpu.count` of the selected GPU profile, so it varies by accelerator — read the count from the profile rather than assuming a fixed total.
+
+**Two Kubernetes versions are in play; recipe constraints are evaluated against the control plane, not the simulated nodes:**
+
+| Version | Set by | Is |
+|---------|--------|----|
+| `kindest/node:v1.37.0` | `kind_node_image` in `.settings.yaml` | the real Kind **control plane** — what `discoveryClient.ServerVersion()` reports, and therefore what `K8s.server.version` constraints are checked against |
+| `v1.33.5` | `DEFAULT_K8S_VERSION` in `kwok/scripts/apply-nodes.sh` | the **cosmetic** `kubeletVersion` stamped onto simulated nodes via `node.yaml.tmpl` |
+
+So a recipe requiring `K8s.server.version >= 1.34` is satisfied by the Kind image; the simulated `v1.33.5` is not the cluster's Kubernetes version and does not gate anything. (The two are four minor versions apart — beyond the maximum supported kubelet/API-server skew — but the policy is moot here because no kubelet runs.)
 
 ## Makefile Targets
 
@@ -156,6 +170,13 @@ the runner:
 Clusters created before a port mapping existed must be recreated
 (`kind delete cluster --name aicr-kwok-test`) to pick it up.
 
+Every lane run records one [CTRF](https://ctrf.io) test per `(recipe,
+deployer)` cell in `/tmp/kwok-debug-artifacts/kwok-results.json` (a setup
+failure before any cell runs is recorded as one `kwok/setup/<deployer>`
+entry with status `other`)
+(`KWOK_RESULTS_FILE` overrides the path); CI uploads it as
+`kwok-results-<recipe>-<deployer>-<run_id>-<attempt>` on every outcome.
+
 Lane details, sync gates, exit codes, and tuning variables are
 documented in
 [docs/contributor/tests.md](../docs/contributor/tests.md) ("KWOK
@@ -169,8 +190,8 @@ lanes).
 A recipe is auto-discovered for KWOK testing if it has `spec.criteria.service` defined. Create `recipes/overlays/your-recipe.yaml`:
 
 ```yaml
-kind: recipeMetadata
-apiVersion: aicr.run/v1alpha2
+kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
 metadata:
   name: your-recipe-name
 spec:
@@ -226,10 +247,44 @@ profiles on the next run.
 
 `.github/workflows/kwok-recipes.yaml` calls the same `run-all-recipes.sh` used by `make kwok-test-all`. CI uses a single shared Kind cluster with cleanup between recipes.
 
+Per-recipe cleanup sweeps Helm releases outside the `argocd` namespace,
+including all AICR components registered with `kube-system` as their default
+namespace. It preserves the shared `kwok-controller` and `kwok-stage-fast`
+releases, the install-infra-managed Argo CD release, and unknown Helm releases
+in `kube-system`.
+
 Manual trigger:
 ```bash
 gh workflow run kwok-recipes.yaml -f recipe=your-recipe-name
 ```
+
+### Public image cache
+
+The lanes need three images from public registries, all pinned in `.settings.yaml` under `testing_tools`:
+
+| Image | Needed by | Pin |
+|---|---|---|
+| In-cluster OCI registry | every lane | `registry_image` |
+| Gitea | the `*-git` deployers | `gitea_image` |
+| Argo CD's Redis | the `argocd-*` deployers | `argocd_redis_image` |
+
+The Redis one is not a component AICR installs. It is rendered by the Argo CD chart, so its pin is whatever `argocd_chart` resolves to and it carries no `renovate:` annotation — a bot bumping it independently would cache an image the chart never pulls. Re-derive it on a chart bump (`helm template argo/argo-cd --version <chart> | grep -oE 'image: .*redis.*'`); if it drifts, a failed Argo CD install reports the mismatch by name. The chart's other images (quay.io, ghcr.io) are left to the kubelet, neither having been observed shedding a pull.
+
+A full Tier 3 run fans out to well over a hundred concurrent jobs, and a job that pulls these itself competes with every sibling for the same per-IP quota at the registry: 127 jobs pulling at once reliably gets one or two shed, which reddens the run with nothing wrong in the repo (#2483). So CI pulls each image exactly once, in the `prime-images` job, and carries it to the matrix as a tarball in `actions/cache`. Each test job loads from that tarball, and `preload_image` then finds the image already in the host Docker cache and never contacts the registry.
+
+Each lane restores only what it needs: Gitea for `*-git`, Redis for `argocd-*`, so the other lanes skip a restore they would never use.
+
+`kwok/scripts/lib/image-cache.sh` owns both ends, so the priming job and the test jobs derive the cache key from the same code:
+
+```bash
+bash kwok/scripts/lib/image-cache.sh settings .settings.yaml   # resolve pins + keys
+bash kwok/scripts/lib/image-cache.sh save <dir> <image>        # pull once, write the tarball
+bash kwok/scripts/lib/image-cache.sh load <dir> <image>        # restore it into Docker
+```
+
+Priming is a hard gate: if an image is genuinely unreachable, the run fails there rather than in every lane. Loading is best effort — a cache miss falls back to `preload_image`'s pull, and the kubelet pull behind that, so a cold cache degrades to the old behavior instead of failing.
+
+Local runs (`make kwok-test-all`) do not use the cache; they pull through `preload_image` as before.
 
 ## Troubleshooting
 

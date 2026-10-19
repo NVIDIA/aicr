@@ -100,7 +100,7 @@ func run(args []string, output io.Writer) error {
 // rather than allocating it. os.ReadFile would allocate the whole file before
 // any size check could run.
 func readBounded(path string) ([]byte, error) {
-	file, err := os.Open(filepath.Clean(path))
+	file, err := os.Open(filepath.Clean(path)) //nolint:gosec // operator-supplied CLI argument
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeNotFound, "open AIBOM document", err)
 	}

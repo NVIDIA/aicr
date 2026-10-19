@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM nvcr.io/nvidia/distroless/static:v4.0.0@sha256:d90158b69e250d2018f32622b5c622925202ee97224a990a54b63811cb1e3d69
+FROM nvcr.io/nvidia/distroless/static:v4.1.3@sha256:e6eb65cecc405fabfdfd69f95d4e090baa696c97ab3759151f4160c97aa8ecb7
 
 # Go dependencies are resolved before the image build. BuildKit cannot receive
 # the authenticated release proxy credential without exposing it in build

@@ -38,9 +38,11 @@
 # package installation at runtime — the image is a digest-pinned busybox,
 # mirrorable for air-gapped installs like every other pinned image).
 #
-# nodeAffinity targets IB-capable nodes (labeled by the nfd-network-rule
-# manifest), the same scoping as nic-cluster-policy-aks.yaml — GPUDirect
-# RDMA is only meaningful where GPU and IB coexist.
+# nodeAffinity targets IB-capable nodes (labeled pci-15b3.present by the
+# nfd-worker rule in components/nfd/values-nvidia-nics-aks.yaml and, for one
+# release, the nfd-network-rule manifest), the same scoping as
+# nic-cluster-policy-aks.yaml: GPUDirect RDMA is only meaningful where GPU and
+# IB coexist.
 #
 # Reference: https://github.com/Azure/aks-rdma-infiniband/blob/main/configs/nvidia-peermem-reloader/ds.yaml
 # Guidance:  https://azure.github.io/aks-rdma-infiniband/configurations/gpu-drivers
@@ -86,7 +88,7 @@ spec:
       priorityClassName: system-node-critical
       containers:
         - name: nvidia-peermem-reloader
-          image: docker.io/library/busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
+          image: docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e
           command:
             - /bin/sh
             - -c

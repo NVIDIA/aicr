@@ -50,6 +50,15 @@ type Validator struct {
 	// Cleanup controls whether to delete Jobs, ConfigMaps, and RBAC after validation.
 	Cleanup bool
 
+	// ServiceAccountName, when non-empty, names an existing ServiceAccount in
+	// Namespace that validator Jobs run as verbatim. The run then creates and
+	// deletes no ServiceAccount or ClusterRoleBinding and does not apply the
+	// namespace: an administrator provisions all three, binding the
+	// ServiceAccount to cluster-admin, and the run verifies that binding
+	// before deploying anything. Empty (the default) creates a per-run
+	// ServiceAccount bound to cluster-admin and deletes both at cleanup.
+	ServiceAccountName string
+
 	// ImagePullSecrets are secret names for pulling validator images.
 	ImagePullSecrets []string
 
@@ -81,6 +90,14 @@ type Validator struct {
 	// FailFast, when true, stops validation after the first phase that reports
 	// StatusFailed. By default (false) all phases run and produce results.
 	FailFast bool
+
+	// SkipChecks names checks the caller has declared out of scope for this
+	// run: they are withheld from every requested phase and recorded in that
+	// phase's report as skipped. Empty (the default) runs every check the
+	// validation declares. See skip_checks.go for what this is for, why it is
+	// a skip list rather than an allow list, and the two guards that keep it
+	// from turning a red run green.
+	SkipChecks []string
 
 	// dataProvider supplies the recipe data files used to load the validator
 	// catalog. When nil, catalog.Load falls back to the package-global provider.

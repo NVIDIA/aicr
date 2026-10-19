@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"maps"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 
@@ -55,6 +56,13 @@ const (
 	// bundle is self-contained and air-gap deployable when combined with
 	// --vendor-charts.
 	DeployerHelmfile DeployerType = "helmfile"
+	// DeployerTerraform generates a Terraform root module (a child module
+	// with --terraform-child-module): one module call per component, with depends_on carrying the recipe's
+	// dependency graph exactly. Per-component chart directories are
+	// emitted via the shared localformat writer, so the bundle is
+	// self-contained and air-gap deployable when combined with
+	// --vendor-charts.
+	DeployerTerraform DeployerType = "terraform"
 )
 
 // allDeployerTypes is the single source of truth for supported deployer types.
@@ -64,6 +72,7 @@ var allDeployerTypes = []DeployerType{
 	DeployerArgoCDHelm,
 	DeployerFlux,
 	DeployerHelmfile,
+	DeployerTerraform,
 }
 
 // ParseDeployerType parses a string into a DeployerType.
@@ -166,6 +175,81 @@ func (l NodeLabel) Validate() error {
 			fmt.Sprintf("invalid node label value %q: %s", l.Value, strings.Join(errs, "; ")))
 	}
 	return nil
+}
+
+// ValidateNodeSelector returns an error if any entry of selector is not a valid
+// node label.
+func ValidateNodeSelector(selector map[string]string) error {
+	// Sorted keys make the reported entry deterministic.
+	for _, key := range slices.Sorted(maps.Keys(selector)) {
+		if err := (NodeLabel{Key: key, Value: selector[key]}).Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateTolerations returns an error for any toleration the API server would
+// reject, and for the Lt and Gt operators, which need a feature gate the bundle
+// cannot see.
+func ValidateTolerations(tolerations []corev1.Toleration) error {
+	for _, t := range tolerations {
+		if err := validateToleration(t); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateToleration(t corev1.Toleration) error {
+	// Rules from ValidateTolerations in k8s.io/kubernetes pkg/apis/core/validation.
+	if t.Key == "" {
+		if t.Operator != corev1.TolerationOpExists {
+			return invalidTolerationf("toleration with an empty key must use operator Exists, got %q", t.Operator)
+		}
+	} else if errs := validation.IsQualifiedName(t.Key); len(errs) > 0 {
+		return invalidTolerationf("invalid toleration key %q: %s", t.Key, strings.Join(errs, "; "))
+	}
+	if t.TolerationSeconds != nil && t.Effect != corev1.TaintEffectNoExecute {
+		return invalidTolerationf("toleration %q sets tolerationSeconds, which requires effect NoExecute, got %q", t.Key, t.Effect)
+	}
+
+	switch t.Operator {
+	case "", corev1.TolerationOpEqual:
+		if errs := validation.IsValidLabelValue(t.Value); len(errs) > 0 {
+			return invalidTolerationf("invalid toleration value for key %q: %s", t.Key, strings.Join(errs, "; "))
+		}
+	case corev1.TolerationOpExists:
+		if t.Value != "" {
+			return invalidTolerationf("toleration %q uses operator Exists, which requires an empty value, got %q", t.Key, t.Value)
+		}
+	case corev1.TolerationOpLt, corev1.TolerationOpGt:
+		return invalidTolerationf("toleration %q uses operator %s, which needs a Kubernetes feature gate AICR cannot verify", t.Key, t.Operator)
+	default:
+		return invalidTolerationf("invalid toleration operator %q for key %q", t.Operator, t.Key)
+	}
+
+	// An empty effect matches every taint effect.
+	if t.Effect == "" {
+		return nil
+	}
+	return ValidateTaintEffect(t.Effect)
+}
+
+func invalidTolerationf(format string, args ...any) error {
+	return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(format, args...))
+}
+
+// ValidateTaintEffect returns an error unless effect is NoSchedule,
+// PreferNoSchedule, or NoExecute.
+func ValidateTaintEffect(effect corev1.TaintEffect) error {
+	switch effect {
+	case corev1.TaintEffectNoSchedule, corev1.TaintEffectPreferNoSchedule, corev1.TaintEffectNoExecute:
+		return nil
+	default:
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid taint effect %q, expected %s, %s, or %s",
+			effect, corev1.TaintEffectNoSchedule, corev1.TaintEffectPreferNoSchedule, corev1.TaintEffectNoExecute))
+	}
 }
 
 // ParseNodeLabel parses and validates a single node label in key=value form.
@@ -334,14 +418,32 @@ type Config struct {
 	readinessHooks bool
 
 	// serial forces every deployer to sequence components strictly one at a
-	// time in deployment order, disabling the concurrency the argocd,
-	// argocd-helm, flux, and helmfile deployers emit by default (per-tier
-	// sync-wave bands, declared-dependency dependsOn, and intra-component
-	// needs: respectively). Off by default; opt-in via --serial. An operator
+	// time in deployment order, disabling the concurrency the other deployers
+	// emit by default: per-tier sync-wave bands for argocd and argocd-helm,
+	// dependsOn for flux, intra-component needs: for helmfile, and depends_on
+	// for terraform. Off by default; opt-in via --serial. An operator
 	// escape hatch for bisecting rollout problems or reproducing the
 	// pre-parallelism ordering. The helm deploy.sh is already serial, so the
 	// flag is a no-op for it.
 	serial bool
+
+	// terraformClusterRollover emits, in each component module of a
+	// --deployer terraform bundle, a terraform_data keyed on
+	// var.cluster_keepers plus a replace_triggered_by pointing at it, so
+	// replacing the cluster replaces every release rather than leaving state
+	// that describes objects in a cluster that no longer exists. Off by
+	// default: the keepers are the caller's statement of what identifies the
+	// cluster, and both forms require the variable.
+	terraformClusterRollover bool
+
+	// terraformChildModule emits a --deployer terraform bundle as a CHILD
+	// module — no provider configuration, no cluster-connection variables —
+	// so the calling configuration owns the provider and the bundle's module
+	// calls inherit it. The shape to use when the cluster is declared
+	// alongside the bundle: a module carrying its own provider block cannot
+	// take depends_on/count/for_each, which is exactly what a caller needs
+	// to sequence the bundle behind the cluster that hosts it.
+	terraformChildModule bool
 
 	// bundlers is a positive filter on recipe component names (the
 	// `bundlers` query parameter on POST /v1/bundle): when non-empty, only
@@ -535,6 +637,10 @@ func (c *Config) SharedStorageClass() string {
 
 // DRAEvictionNodeLabel returns the label shared by the DRA kubelet plugin
 // selector and GPU Operator Driver Manager eviction configuration.
+//
+// The zero NodeLabel means the eviction contract was not requested: AICR then
+// injects neither half and the DRA kubelet plugin carries no AICR-introduced
+// placement requirement. Configuring a label opts in (see issue #2469).
 func (c *Config) DRAEvictionNodeLabel() NodeLabel {
 	return c.draEvictionNodeLabel
 }
@@ -586,9 +692,23 @@ func (c *Config) ReadinessHooks() bool {
 // Serial reports whether deployers should sequence components strictly one at
 // a time in deployment order instead of parallelizing independent components.
 // Off by default; opt-in via --serial. Affects the argocd, argocd-helm, flux,
-// and helmfile deployers (helm is already serial).
+// helmfile, and terraform deployers (helm is already serial).
 func (c *Config) Serial() bool {
 	return c.serial
+}
+
+// TerraformClusterRollover reports whether the terraform deployer should emit
+// the cluster-rollover containment shim in each component module. Off by
+// default; opt-in via --terraform-cluster-rollover.
+func (c *Config) TerraformClusterRollover() bool {
+	return c.terraformClusterRollover
+}
+
+// TerraformChildModule reports whether the terraform deployer should emit the
+// bundle as a child module rather than a standalone root module. Off by
+// default; opt-in via --terraform-child-module.
+func (c *Config) TerraformChildModule() bool {
+	return c.terraformChildModule
 }
 
 // Bundlers returns a copy of the positive component-name filter. Empty means
@@ -602,8 +722,34 @@ func (c *Config) Bundlers() []string {
 	return result
 }
 
-// Validate checks if the Config has valid settings.
+// Validate returns an error if any setting of c is invalid, including a node
+// selector or toleration the API server would reject.
 func (c *Config) Validate() error {
+	selectors := []struct {
+		option   string
+		selector map[string]string
+	}{
+		{"WithSystemNodeSelector", c.systemNodeSelector},
+		{"WithAcceleratedNodeSelector", c.acceleratedNodeSelector},
+		{"WithWorkloadSelector", c.workloadSelector},
+	}
+	for _, s := range selectors {
+		if err := ValidateNodeSelector(s.selector); err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid "+s.option, err)
+		}
+	}
+	if err := ValidateTolerations(c.systemNodeTolerations); err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid WithSystemNodeTolerations", err)
+	}
+	if err := ValidateTolerations(c.acceleratedNodeTolerations); err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid WithAcceleratedNodeTolerations", err)
+	}
+
+	// The zero label means the DRA eviction contract was not requested, which
+	// is the default (issue #2469). Only a configured label is validated.
+	if c.draEvictionNodeLabel == (NodeLabel{}) {
+		return nil
+	}
 	return c.draEvictionNodeLabel.Validate()
 }
 
@@ -911,11 +1057,30 @@ func WithReadinessHooks(enabled bool) Option {
 
 // WithSerial forces deployers to sequence components strictly one at a time in
 // deployment order, disabling the per-tier / declared-dependency concurrency
-// the argocd, argocd-helm, flux, and helmfile deployers emit by default. Off
+// the argocd, argocd-helm, flux, helmfile, and terraform deployers emit by
+// default. Off
 // by default; opt-in via --serial. A rollback / debugging escape hatch.
 func WithSerial(enabled bool) Option {
 	return func(c *Config) {
 		c.serial = enabled
+	}
+}
+
+// WithTerraformClusterRollover enables the cluster-rollover containment shim
+// in a --deployer terraform bundle. Off by default; opt-in via
+// --terraform-cluster-rollover.
+func WithTerraformClusterRollover(enabled bool) Option {
+	return func(c *Config) {
+		c.terraformClusterRollover = enabled
+	}
+}
+
+// WithTerraformChildModule emits a --deployer terraform bundle as a child
+// module instead of a root module. Off by default; opt-in via
+// --terraform-child-module.
+func WithTerraformChildModule(enabled bool) Option {
+	return func(c *Config) {
+		c.terraformChildModule = enabled
 	}
 }
 
@@ -939,15 +1104,14 @@ func WithBundlers(names []string) Option {
 // NewConfig returns a Config with default values.
 func NewConfig(options ...Option) *Config {
 	c := &Config{
-		deployer:             DeployerHelm,
-		includeChecksums:     true,
-		includeReadme:        true,
-		valueOverrides:       make(map[string]map[string]string),
-		valueOverridesTyped:  make(map[string]map[string]any),
-		dynamicValues:        make(map[string][]string),
-		draEvictionNodeLabel: DefaultDRAEvictionNodeLabel(),
-		verbose:              false,
-		version:              "dev",
+		deployer:            DeployerHelm,
+		includeChecksums:    true,
+		includeReadme:       true,
+		valueOverrides:      make(map[string]map[string]string),
+		valueOverridesTyped: make(map[string]map[string]any),
+		dynamicValues:       make(map[string][]string),
+		verbose:             false,
+		version:             "dev",
 	}
 	for _, opt := range options {
 		opt(c)

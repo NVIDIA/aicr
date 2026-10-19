@@ -15,7 +15,8 @@
 name: Documentation Request
 description: Report a documentation issue or request new documentation
 title: "[Docs]: "
-labels: ["documentation", "needs-triage"]
+labels: ["needs-triage"]
+type: Documentation
 
 body:
   - type: checkboxes

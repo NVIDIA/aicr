@@ -44,7 +44,7 @@ DIM='\033[2m'
 NC='\033[0m' # No Color
 
 # Configuration
-aicrd_URL="${aicrd_URL:-http://localhost:8080}"
+AICRD_URL="${AICRD_URL:-http://localhost:8080}"
 OUTPUT_DIR="${OUTPUT_DIR:-$(mktemp -d)}"
 AICR_BIN="${AICR_BIN:-}"
 AICR_IMAGE="${AICR_IMAGE:-localhost:5001/aicr:local}"
@@ -55,6 +55,34 @@ FAKE_GPU_ENABLED="${FAKE_GPU_ENABLED:-false}"
 CREATED_FAKE_GPU_OPERATOR_DEPLOYMENT=false
 CREATED_FAKE_CLUSTER_POLICY=false
 CREATED_FAKE_CLUSTER_POLICY_CRD=false
+
+# Seconds to wait for the concurrent runs' self-deleted Jobs to disappear from
+# the API before the self-cleanup assertion gives up. Deletion is asynchronous,
+# so the count settles shortly after the CLI returns rather than at that instant.
+AGENT_JOB_SETTLE_TIMEOUT="${AGENT_JOB_SETTLE_TIMEOUT:-60}"
+
+# Run IDs of the snapshot-agent runs this script launched, space separated.
+# cleanup_e2e deletes only these Jobs. Every agent run carries the same
+# app.kubernetes.io/{name,component} labels, so a label-only sweep would also
+# delete -- and thereby terminate -- a concurrent snapshot run someone else
+# started against the same cluster.
+E2E_AGENT_RUN_IDS=""
+
+# extract_run_id prints the agent run ID an `aicr snapshot` invocation logged
+# ("runID=<id>" on its "snapshot agent run" line), read from the log file
+# given as $1. Prints nothing when the run failed before generating one.
+extract_run_id() {
+  grep -o 'runID=[0-9a-f-]*' "$1" | head -1 | cut -d= -f2 || true
+}
+
+# remember_agent_run_id records a run ID in E2E_AGENT_RUN_IDS so cleanup_e2e
+# can sweep that run's Job. An empty argument is ignored: a run that never
+# reported an ID created no Job for cleanup to find.
+remember_agent_run_id() {
+  if [ -n "$1" ]; then
+    E2E_AGENT_RUN_IDS="${E2E_AGENT_RUN_IDS} $1"
+  fi
+}
 
 # Test counters
 TOTAL_TESTS=0
@@ -101,6 +129,30 @@ skip() {
   local name=$1
   local reason=${2:-""}
   echo -e "${YELLOW}[SKIP]${NC} $name: $reason"
+}
+
+# run_stage invokes one suite stage and always returns 0, so a stage that
+# reports failure by returning nonzero cannot trip this script's `set -e` and
+# unwind main before cleanup_e2e runs. That unwind is the bug it guards: the
+# stages run inside the fake-GPU block create Jobs, RBAC and fixtures on a
+# cluster shared with other CI runs, and cleanup_e2e is the only thing that
+# sweeps them -- a stage's own local cleanup removes only what that stage made.
+#
+# Swallowing the status does not make the suite more forgiving. Stages report
+# their assertions through fail(), which has already counted them by the time
+# one returns; when a stage returns nonzero WITHOUT having recorded a [FAIL] --
+# an unexpected error rather than a failed assertion -- one is recorded here
+# under the stage's own name. Either way FAILED_TESTS ends up nonzero,
+# print_summary returns 1, and main exits nonzero.
+run_stage() {
+  local stage=$1
+  local before=$FAILED_TESTS
+  local rc=0
+  "$stage" || rc=$?
+  if [ "$rc" -ne 0 ] && [ "$FAILED_TESTS" -eq "$before" ]; then
+    fail "$stage" "returned ${rc} without recording a failure"
+  fi
+  return 0
 }
 
 check_command() {
@@ -166,16 +218,16 @@ check_api_health() {
   msg "=========================================="
 
   # Health endpoint
-  if curl -sf "${aicrd_URL}/health" > /dev/null 2>&1; then
+  if curl -sf "${AICRD_URL}/health" > /dev/null 2>&1; then
     pass "api/health"
   else
-    fail "api/health" "aicrd not responding at ${aicrd_URL}/health"
+    fail "api/health" "aicrd not responding at ${AICRD_URL}/health"
     warn "Is Tilt running? Try: make dev-env"
     return 1
   fi
 
   # Ready endpoint
-  if curl -sf "${aicrd_URL}/ready" > /dev/null 2>&1; then
+  if curl -sf "${AICRD_URL}/ready" > /dev/null 2>&1; then
     pass "api/ready"
   else
     fail "api/ready" "aicrd not ready"
@@ -203,11 +255,11 @@ test_api_recipe() {
 
   # Test 1: GET /v1/recipe with query params
   msg "--- Test: GET /v1/recipe ---"
-  echo -e "${DIM}  \$ curl ${aicrd_URL}/v1/recipe?service=eks&accelerator=h100&intent=training${NC}"
+  echo -e "${DIM}  \$ curl ${AICRD_URL}/v1/recipe?service=eks&accelerator=h100&intent=training${NC}"
   local get_recipe="${recipe_dir}/get.json"
   local http_code
   http_code=$(curl -s -w "%{http_code}" -o "$get_recipe" \
-    "${aicrd_URL}/v1/recipe?service=eks&accelerator=h100&intent=training")
+    "${AICRD_URL}/v1/recipe?service=eks&accelerator=h100&intent=training")
 
   if [ "$http_code" = "200" ] && [ -s "$get_recipe" ]; then
     detail "HTTP ${http_code} OK"
@@ -220,7 +272,7 @@ test_api_recipe() {
   msg "--- Test: POST /v1/recipe ---"
   local post_recipe="${recipe_dir}/post.json"
   http_code=$(curl -s -w "%{http_code}" -o "$post_recipe" \
-    -X POST "${aicrd_URL}/v1/recipe" \
+    -X POST "${AICRD_URL}/v1/recipe" \
     -H "Content-Type: application/x-yaml" \
     -d 'criteria:
   service: eks
@@ -252,11 +304,11 @@ test_api_bundle() {
 
   # Test: POST /v1/bundle (recipe -> bundle pipeline)
   msg "--- Test: POST /v1/bundle ---"
-  echo -e "${DIM}  \$ curl -X POST ${aicrd_URL}/v1/bundle?deployer=helm -d <recipe>${NC}"
+  echo -e "${DIM}  \$ curl -X POST ${AICRD_URL}/v1/bundle?deployer=helm -d <recipe>${NC}"
 
   # First get a recipe from API
   local recipe_json
-  recipe_json=$(curl -s "${aicrd_URL}/v1/recipe?service=eks&accelerator=h100&intent=training")
+  recipe_json=$(curl -s "${AICRD_URL}/v1/recipe?service=eks&accelerator=h100&intent=training")
 
   if [ -z "$recipe_json" ]; then
     fail "api/bundle/POST" "Could not get recipe from API"
@@ -267,7 +319,7 @@ test_api_bundle() {
   local bundle_zip="${bundle_dir}/bundle.zip"
   local http_code
   http_code=$(curl -s -w "%{http_code}" -o "$bundle_zip" \
-    -X POST "${aicrd_URL}/v1/bundle?deployer=helm" \
+    -X POST "${AICRD_URL}/v1/bundle?deployer=helm" \
     -H "Content-Type: application/json" \
     -d "$recipe_json")
 
@@ -352,38 +404,15 @@ setup_fake_gpu() {
   # Create namespace for snapshot tests (if it doesn't exist)
   kubectl create namespace "$SNAPSHOT_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
-  # Create RBAC for snapshot agent
-  msg "Creating RBAC for snapshot agent"
-  kubectl apply -f - << EOF
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: aicr
-  namespace: ${SNAPSHOT_NAMESPACE}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: aicr-e2e-reader
-rules:
-- apiGroups: [""]
-  resources: ["nodes", "pods", "configmaps"]
-  verbs: ["get", "list", "watch", "create", "update", "patch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: aicr-e2e-reader
-subjects:
-- kind: ServiceAccount
-  name: aicr
-  namespace: ${SNAPSHOT_NAMESPACE}
-roleRef:
-  kind: ClusterRole
-  name: aicr-e2e-reader
-  apiGroup: rbac.authorization.k8s.io
-EOF
-  pass "setup/rbac"
+  # No RBAC is pre-provisioned here. Per ADR-020 the agent creates its own
+  # run-scoped ServiceAccount, Role/RoleBinding and ClusterRole/ClusterRoleBinding
+  # ("aicr-<run-id>" / "aicr-node-reader-<run-id>") and deletes exactly those at
+  # the end of the run. The fixture this replaced pre-created a ServiceAccount
+  # named "aicr" bound to an "aicr-e2e-reader" ClusterRole granting
+  # nodes/pods/configmaps — the same access the agent now grants itself. Nothing
+  # referenced that ServiceAccount once the agent stopped using a fixed name, and
+  # its presence tripped the agent's adoption-drift warning on every run because
+  # it collided with the default name prefix.
 
   return 0
 }
@@ -412,6 +441,7 @@ test_snapshot() {
   detail "Output: cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}"
 
   echo -e "${DIM}  \$ aicr snapshot --image ${AICR_IMAGE} --namespace ${SNAPSHOT_NAMESPACE} -o cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}${NC}"
+  local snapshot_log="${OUTPUT_DIR}/snapshot-agent.log"
   local snapshot_output
   snapshot_output=$("${AICR_BIN}" snapshot \
     --image "${AICR_IMAGE}" \
@@ -420,6 +450,8 @@ test_snapshot() {
     --timeout 120s \
     --privileged \
     --node-selector kubernetes.io/os=linux 2>&1) || true
+  printf '%s\n' "$snapshot_output" > "$snapshot_log"
+  remember_agent_run_id "$(extract_run_id "$snapshot_log")"
 
   if kubectl get cm "$SNAPSHOT_CM" -n "$SNAPSHOT_NAMESPACE" > /dev/null 2>&1; then
     pass "snapshot/agent"
@@ -504,6 +536,278 @@ test_snapshot() {
     # produce a SKU stops being reported as verified GPU coverage.
     skip "snapshot/gpu-data" "No GPU SKU in snapshot (fake-gpu-operator absent or SKU unrecognized)"
   fi
+}
+
+# =============================================================================
+# Snapshot Run Isolation Tests (ADR-020, issue #2120)
+# =============================================================================
+
+# Objects snapshot_run_isolation_body creates that outlive its assertions.
+# Published as globals so cleanup_snapshot_run_isolation can remove them on
+# every exit path, including an early `return 1` from a failed assertion.
+ISOLATION_DECOY=""
+ISOLATION_RETAINED_ID=""
+
+# cleanup_snapshot_run_isolation removes the decoy ClusterRole and the
+# retained (--no-cleanup) run's objects. Safe to call when the body bailed
+# before creating either: both globals are empty then.
+cleanup_snapshot_run_isolation() {
+  if [ -n "$ISOLATION_DECOY" ]; then
+    kubectl delete clusterrole "$ISOLATION_DECOY" --ignore-not-found=true > /dev/null 2>&1 || true
+  fi
+  if [ -n "$ISOLATION_RETAINED_ID" ]; then
+    local ns="$SNAPSHOT_NAMESPACE"
+    kubectl delete job "aicr-${ISOLATION_RETAINED_ID}" -n "$ns" --ignore-not-found=true > /dev/null 2>&1 || true
+    kubectl delete sa,role,rolebinding "aicr-${ISOLATION_RETAINED_ID}" -n "$ns" --ignore-not-found=true > /dev/null 2>&1 || true
+    kubectl delete cm "aicr-agent-snapshot-${ISOLATION_RETAINED_ID}" -n "$ns" --ignore-not-found=true > /dev/null 2>&1 || true
+    kubectl delete clusterrole,clusterrolebinding "aicr-node-reader-${ISOLATION_RETAINED_ID}" --ignore-not-found=true > /dev/null 2>&1 || true
+  fi
+  ISOLATION_DECOY=""
+  ISOLATION_RETAINED_ID=""
+}
+
+# Verifies that concurrent snapshot runs own and delete only their own
+# Kubernetes resources. These checks are cluster-backed on purpose: the
+# unit tests in pkg/k8s/agent run against a fake clientset, which runs no
+# Job controller (so pod ownerReferences must be hand-seeded there) and does
+# not enforce metav1.Preconditions on delete. Only a real apiserver exercises
+# both.
+#
+# Scope note on UID preconditions: the delete-with-stale-UID race itself is
+# not reachable from outside the CLI process — the window between an object's
+# creation and the deferred Cleanup is the Job wait, and swapping a live
+# object's UID mid-run revokes the running agent's own credentials. That
+# mechanism is covered by TestCleanupPassesUIDPrecondition and
+# TestCleanupTreatsConflictAsSuccess in pkg/k8s/agent/deployer_test.go. What
+# is verified here is the ownership contract those preconditions enforce and
+# that IS externally observable: cleanup deletes only objects this run
+# created, never one that merely matches its labels or name shape.
+test_snapshot_run_isolation() {
+  local rc=0
+  snapshot_run_isolation_body || rc=$?
+  # Housekeeping must run whether the body passed or bailed early. Every
+  # `return 1` below used to skip it, leaving an aicr-labelled ClusterRole
+  # and a full set of run-scoped objects behind for later tests -- and later
+  # CI runs on the same cluster -- to trip over. The body's status is
+  # preserved so a failed assertion still fails the suite.
+  cleanup_snapshot_run_isolation
+  return "$rc"
+}
+
+snapshot_run_isolation_body() {
+  msg "=========================================="
+  msg "Testing snapshot run isolation"
+  msg "=========================================="
+
+  if [ "$FAKE_GPU_ENABLED" != "true" ]; then
+    skip "snapshot/isolation" "Fake GPU not enabled"
+    return 0
+  fi
+
+  local ns="$SNAPSHOT_NAMESPACE"
+  local decoy="aicr-node-reader-e2edecoy"
+  local rc=0
+
+  # --- Decoy: labelled like a run-owned object, but created by nobody's run ---
+  # A cleanup that swept by label or by name shape would collect this. A
+  # cleanup scoped to its own created-set must leave it alone.
+  msg "--- Test: cleanup is scoped to created objects, not to labels ---"
+  kubectl delete clusterrole "$decoy" --ignore-not-found=true > /dev/null 2>&1 || true
+  kubectl create clusterrole "$decoy" --verb=get --resource=nodes > /dev/null 2>&1 || true
+  kubectl label clusterrole "$decoy" \
+    app.kubernetes.io/name=aicr \
+    app.kubernetes.io/managed-by=aicr \
+    app.kubernetes.io/component=snapshot-agent \
+    aicr.run/run-id=e2edecoy --overwrite > /dev/null 2>&1 || true
+  ISOLATION_DECOY="$decoy"
+  local decoy_uid_before
+  decoy_uid_before=$(kubectl get clusterrole "$decoy" -o jsonpath='{.metadata.uid}' 2>/dev/null || echo "")
+
+  # --- Retained run: --no-cleanup, so its objects must outlive later runs ---
+  msg "--- Test: a retained run's resources survive concurrent runs ---"
+  local retained_log="${OUTPUT_DIR}/isolation-retained.log"
+  "${AICR_BIN}" snapshot \
+    --image "${AICR_IMAGE}" \
+    --namespace "${ns}" \
+    --no-cleanup \
+    --output "${OUTPUT_DIR}/isolation-retained.yaml" \
+    --timeout 180s \
+    --privileged \
+    --node-selector kubernetes.io/os=linux > "$retained_log" 2>&1 || rc=$?
+
+  if [ "$rc" -ne 0 ]; then
+    cat "$retained_log"
+    fail "snapshot/isolation/retained-run" "retained snapshot run failed"
+    return 1
+  fi
+
+  # Take the run ID from THIS run's own output. A label query returning
+  # `.items[0]` would happily hand back an aborted run's Job, or a concurrent
+  # snapshot someone else started -- and everything below, including the
+  # housekeeping delete, is keyed on this value.
+  local retained_id
+  retained_id=$(extract_run_id "$retained_log")
+  if [ -z "$retained_id" ]; then
+    cat "$retained_log"
+    fail "snapshot/isolation/run-id-label" "retained run printed no runID"
+    return 1
+  fi
+  ISOLATION_RETAINED_ID="$retained_id"
+  remember_agent_run_id "$retained_id"
+
+  # That Job must carry the run ID as a label, and the stable
+  # component label consumers select on across runs.
+  local retained_job_labels
+  retained_job_labels=$(kubectl get job -n "$ns" "aicr-${retained_id}" \
+    -o jsonpath='{.metadata.labels.aicr\.run/run-id}/{.metadata.labels.app\.kubernetes\.io/component}' \
+    2>/dev/null || echo "")
+  if [ "$retained_job_labels" != "${retained_id}/snapshot-agent" ]; then
+    fail "snapshot/isolation/run-id-label" \
+      "Job aicr-${retained_id} labels run-id/component = '${retained_job_labels}', want '${retained_id}/snapshot-agent'"
+    return 1
+  fi
+  detail "retained run ID: ${retained_id}"
+  pass "snapshot/isolation/run-id-label"
+
+  # Every run-owned object must carry the run ID in its name.
+  local missing=""
+  kubectl get job     -n "$ns" "aicr-${retained_id}"                      > /dev/null 2>&1 || missing="${missing} job"
+  kubectl get sa      -n "$ns" "aicr-${retained_id}"                      > /dev/null 2>&1 || missing="${missing} sa"
+  kubectl get role    -n "$ns" "aicr-${retained_id}"                      > /dev/null 2>&1 || missing="${missing} role"
+  kubectl get rolebinding -n "$ns" "aicr-${retained_id}"                  > /dev/null 2>&1 || missing="${missing} rolebinding"
+  kubectl get cm      -n "$ns" "aicr-agent-snapshot-${retained_id}"       > /dev/null 2>&1 || missing="${missing} staging-cm"
+  kubectl get clusterrole        "aicr-node-reader-${retained_id}"        > /dev/null 2>&1 || missing="${missing} clusterrole"
+  kubectl get clusterrolebinding "aicr-node-reader-${retained_id}"        > /dev/null 2>&1 || missing="${missing} clusterrolebinding"
+  if [ -n "$missing" ]; then
+    fail "snapshot/isolation/run-scoped-names" "not found under run-scoped names:${missing}"
+    return 1
+  fi
+  pass "snapshot/isolation/run-scoped-names"
+
+  # The agent's staging ConfigMap must not reuse the validator's name shape.
+  # aicr validate hands one run ID to both subsystems in one namespace, so a
+  # shared aicr-snapshot- prefix would give two owners one object.
+  if kubectl get cm -n "$ns" "aicr-snapshot-${retained_id}" > /dev/null 2>&1; then
+    fail "snapshot/isolation/staging-cm-name" "found aicr-snapshot-${retained_id}; collides with the validator's data ConfigMap"
+    return 1
+  fi
+  pass "snapshot/isolation/staging-cm-name"
+
+  # The pod must be authorized by its controlling ownerReference, not by a
+  # label — pod labels are writable by anything that can update pods.
+  msg "--- Test: pod is owned by its Job (controlling ownerReference) ---"
+  local pod job_uid owner_uid
+  pod=$(kubectl get pods -n "$ns" -l "aicr.run/run-id=${retained_id}" \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+  job_uid=$(kubectl get job -n "$ns" "aicr-${retained_id}" -o jsonpath='{.metadata.uid}' 2>/dev/null || echo "")
+  owner_uid=$(kubectl get pod -n "$ns" "$pod" \
+    -o jsonpath='{.metadata.ownerReferences[?(@.controller==true)].uid}' 2>/dev/null || echo "")
+  if [ -n "$pod" ] && [ -n "$job_uid" ] && [ "$job_uid" = "$owner_uid" ]; then
+    detail "pod ${pod} controlled by Job UID ${job_uid}"
+    pass "snapshot/isolation/pod-owned-by-job"
+  else
+    fail "snapshot/isolation/pod-owned-by-job" "pod=${pod} jobUID=${job_uid} ownerUID=${owner_uid}"
+    return 1
+  fi
+
+  # --- Two concurrent runs, with the retained run's objects still present ---
+  msg "--- Test: two concurrent runs are independent ---"
+  local log_a="${OUTPUT_DIR}/isolation-a.log"
+  local log_b="${OUTPUT_DIR}/isolation-b.log"
+  local rc_a=0 rc_b=0 pid_a pid_b
+
+  "${AICR_BIN}" snapshot --image "${AICR_IMAGE}" --namespace "${ns}" \
+    --output "${OUTPUT_DIR}/isolation-a.yaml" --timeout 180s --privileged \
+    --node-selector kubernetes.io/os=linux > "$log_a" 2>&1 &
+  pid_a=$!
+  "${AICR_BIN}" snapshot --image "${AICR_IMAGE}" --namespace "${ns}" \
+    --output "${OUTPUT_DIR}/isolation-b.yaml" --timeout 180s --privileged \
+    --node-selector kubernetes.io/os=linux > "$log_b" 2>&1 &
+  pid_b=$!
+
+  wait "$pid_a" || rc_a=$?
+  wait "$pid_b" || rc_b=$?
+
+  if [ "$rc_a" -ne 0 ] || [ "$rc_b" -ne 0 ]; then
+    echo "--- concurrent run A ---"; tail -30 "$log_a"
+    echo "--- concurrent run B ---"; tail -30 "$log_b"
+    fail "snapshot/isolation/concurrent-runs" "run A rc=${rc_a}, run B rc=${rc_b}"
+    return 1
+  fi
+
+  local id_a id_b
+  id_a=$(extract_run_id "$log_a")
+  id_b=$(extract_run_id "$log_b")
+  if [ -z "$id_a" ] || [ -z "$id_b" ] || [ "$id_a" = "$id_b" ]; then
+    fail "snapshot/isolation/concurrent-runs" "expected two distinct run IDs, got '${id_a}' and '${id_b}'"
+    return 1
+  fi
+  remember_agent_run_id "$id_a"
+  remember_agent_run_id "$id_b"
+  detail "run A: ${id_a}"
+  detail "run B: ${id_b}"
+  if [ ! -s "${OUTPUT_DIR}/isolation-a.yaml" ] || [ ! -s "${OUTPUT_DIR}/isolation-b.yaml" ]; then
+    fail "snapshot/isolation/concurrent-runs" "a concurrent run produced an empty snapshot"
+    return 1
+  fi
+  pass "snapshot/isolation/concurrent-runs"
+
+  # The retained run's objects must be untouched by both concurrent runs.
+  # Before ADR-020 this is exactly what broke: a second run's ensureJob
+  # deleted the same-named Job and its cleanup deleted the shared RBAC.
+  local destroyed=""
+  kubectl get job     -n "$ns" "aicr-${retained_id}"                > /dev/null 2>&1 || destroyed="${destroyed} job"
+  kubectl get sa      -n "$ns" "aicr-${retained_id}"                > /dev/null 2>&1 || destroyed="${destroyed} sa"
+  kubectl get role    -n "$ns" "aicr-${retained_id}"                > /dev/null 2>&1 || destroyed="${destroyed} role"
+  kubectl get rolebinding -n "$ns" "aicr-${retained_id}"            > /dev/null 2>&1 || destroyed="${destroyed} rolebinding"
+  kubectl get clusterrole        "aicr-node-reader-${retained_id}"  > /dev/null 2>&1 || destroyed="${destroyed} clusterrole"
+  kubectl get clusterrolebinding "aicr-node-reader-${retained_id}"  > /dev/null 2>&1 || destroyed="${destroyed} clusterrolebinding"
+  if [ -n "$destroyed" ]; then
+    fail "snapshot/isolation/retained-run-survives" "concurrent runs destroyed:${destroyed}"
+    return 1
+  fi
+  pass "snapshot/isolation/retained-run-survives"
+
+  # Each concurrent run must have removed its own resources: exactly the
+  # retained Job survives.
+  #
+  # Poll rather than sample once. Kubernetes deletion is asynchronous -- a Job
+  # whose delete the CLI already issued and acked stays listable while its
+  # pods terminate and its finalizers clear, so a single read can legitimately
+  # still see it and report "found 2" for a cleanup that worked. Only the
+  # timing is tolerant; the assertion below is still exact.
+  local leftover_jobs=""
+  local agent_job_selector="app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent"
+  local deadline=$((SECONDS + AGENT_JOB_SETTLE_TIMEOUT))
+  while :; do
+    leftover_jobs=$(kubectl get jobs -n "$ns" -l "$agent_job_selector" -o name 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$leftover_jobs" = "1" ]; then
+      break
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      kubectl get jobs -n "$ns" -l "$agent_job_selector" -o name || true
+      fail "snapshot/isolation/self-cleanup" \
+        "expected only the retained Job to remain after ${AGENT_JOB_SETTLE_TIMEOUT}s, found ${leftover_jobs}"
+      return 1
+    fi
+    sleep 2
+  done
+  pass "snapshot/isolation/self-cleanup"
+
+  # The decoy must have survived every run above.
+  local decoy_uid_after
+  decoy_uid_after=$(kubectl get clusterrole "$decoy" -o jsonpath='{.metadata.uid}' 2>/dev/null || echo "")
+  if [ -n "$decoy_uid_before" ] && [ "$decoy_uid_before" = "$decoy_uid_after" ]; then
+    pass "snapshot/isolation/cleanup-scoped-to-created"
+  else
+    fail "snapshot/isolation/cleanup-scoped-to-created" \
+      "aicr-labelled ClusterRole it never created was deleted or replaced (before=${decoy_uid_before} after=${decoy_uid_after})"
+    return 1
+  fi
+
+  # Housekeeping (the decoy and the retained run's objects) is the wrapper's
+  # job -- see cleanup_snapshot_run_isolation -- so it also happens on the
+  # `return 1` paths above.
 }
 
 # =============================================================================
@@ -854,7 +1158,7 @@ test_validate_deployment_checks() {
   local recipe_file="${validate_dir}/recipe-with-constraints.yaml"
   cat > "$recipe_file" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: dev
 componentRefs:
@@ -911,7 +1215,7 @@ RECIPE
   local recipe_file_fail="${validate_dir}/recipe-with-failing-constraint.yaml"
   cat > "$recipe_file_fail" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: dev
 componentRefs:
@@ -978,7 +1282,7 @@ RECIPE
   local recipe_er_fail="${validate_dir}/recipe-expected-resources-fail.yaml"
   cat > "$recipe_er_fail" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: dev
 componentRefs:
@@ -1099,7 +1403,7 @@ RECIPE
       local recipe_manual="${validate_dir}/recipe-manual-pass.yaml"
       cat > "$recipe_manual" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: dev
 componentRefs:
@@ -1157,7 +1461,7 @@ RECIPE
       local recipe_merge="${validate_dir}/recipe-manual-merge.yaml"
       cat > "$recipe_merge" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: dev
 componentRefs:
@@ -1245,7 +1549,7 @@ RECIPE
   local recipe_chainsaw="${validate_dir}/recipe-chainsaw.yaml"
   cat > "$recipe_chainsaw" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: dev
 componentRefs:
@@ -1301,7 +1605,7 @@ RECIPE
   local recipe_chainsaw_fail="${validate_dir}/recipe-chainsaw-fail.yaml"
   cat > "$recipe_chainsaw_fail" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: dev
 componentRefs:
@@ -1389,7 +1693,7 @@ test_validate_job_deployment() {
   local recipe_file="${validate_dir}/recipe.yaml"
   cat > "$recipe_file" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: dev
 componentRefs:
@@ -1778,11 +2082,11 @@ test_api_metrics() {
 
   # Test: GET /metrics (Prometheus format)
   msg "--- Test: GET /metrics ---"
-  echo -e "${DIM}  \$ curl ${aicrd_URL}/metrics${NC}"
+  echo -e "${DIM}  \$ curl ${AICRD_URL}/metrics${NC}"
 
   local metrics_output="${OUTPUT_DIR}/metrics.txt"
   local http_code
-  http_code=$(curl -s -w "%{http_code}" -o "$metrics_output" "${aicrd_URL}/metrics")
+  http_code=$(curl -s -w "%{http_code}" -o "$metrics_output" "${AICRD_URL}/metrics")
 
   if [ "$http_code" = "200" ] && [ -s "$metrics_output" ]; then
     # Verify it's Prometheus format (should contain # HELP or # TYPE)
@@ -1841,28 +2145,27 @@ test_oci_bundle() {
   fi
 
   # Test: Bundle as OCI image
-  # Note: This may fail with local HTTP registries due to HTTPS enforcement in ORAS
+  # The Tilt/kind registry at localhost:5001 is plain HTTP, so the push needs
+  # --plain-http. --insecure-tls only relaxes certificate verification on an
+  # HTTPS dial.
   msg "--- Test: Bundle as OCI image ---"
   local digest_file="${oci_dir}/.digest"
+  rm -f "$digest_file"
   local bundle_output
+  local bundle_rc=0
   bundle_output=$("${AICR_BIN}" bundle \
     --recipe "$recipe_file" \
     --output "oci://localhost:5001/aicr-e2e-bundle" \
     --deployer helm \
-    --insecure-tls \
-    --image-refs "$digest_file" 2>&1) || true
+    --plain-http \
+    --image-refs "$digest_file" 2>&1) || bundle_rc=$?
 
-  if [ -f "$digest_file" ]; then
+  if [ "$bundle_rc" -eq 0 ] && [ -s "$digest_file" ]; then
     pass "bundle/oci-push"
     msg "Bundle pushed: $(cat "$digest_file")"
-  elif echo "$bundle_output" | grep -q "http: server gave HTTP response to HTTPS client"; then
-    # Known issue with local insecure registries
-    warn "OCI push failed due to HTTP/HTTPS mismatch (expected with local registry)"
-    skip "bundle/oci-push" "Local registry requires HTTPS client config"
-  elif curl -sf http://localhost:5001/v2/aicr-e2e-bundle/tags/list 2>/dev/null | grep -q "dev\|latest"; then
-    pass "bundle/oci-push"
   else
-    fail "bundle/oci-push" "Command failed"
+    msg "${bundle_output}"
+    fail "bundle/oci-push" "OCI push to localhost:5001 failed (exit ${bundle_rc}, digest missing or empty)"
   fi
 }
 
@@ -1875,8 +2178,17 @@ cleanup_e2e() {
   msg "Cleaning up e2e resources"
   msg "=========================================="
 
-  # Clean up snapshot resources
-  kubectl delete job aicr-e2e-snapshot -n "$SNAPSHOT_NAMESPACE" --ignore-not-found=true > /dev/null 2>&1 || true
+  # Clean up snapshot resources. The Job name is run-scoped ("aicr-<run-id>"),
+  # so select by label -- but scoped to the run IDs THIS script launched.
+  # A sweep of every Job matching the agent's labels would also delete, and
+  # so terminate, a concurrent snapshot run started against the same cluster
+  # by someone else.
+  local run_id
+  for run_id in $E2E_AGENT_RUN_IDS; do
+    kubectl delete job \
+      -l "app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent,aicr.run/run-id=${run_id}" \
+      -n "$SNAPSHOT_NAMESPACE" --ignore-not-found=true > /dev/null 2>&1 || true
+  done
   kubectl delete cm "$SNAPSHOT_CM" -n "$SNAPSHOT_NAMESPACE" --ignore-not-found=true > /dev/null 2>&1 || true
 
   msg "Cleanup complete"
@@ -1910,7 +2222,7 @@ print_summary() {
 main() {
   msg "AICR E2E Tests"
   msg "Output directory: ${OUTPUT_DIR}"
-  msg "API URL: ${aicrd_URL}"
+  msg "API URL: ${AICRD_URL}"
   echo ""
 
   # Check required tools
@@ -1941,6 +2253,10 @@ main() {
   # Setup fake GPU environment and run snapshot tests
   if setup_fake_gpu; then
     test_snapshot
+    # Guarded: this stage returns its assertion status, which `set -e` would
+    # otherwise take as the script's exit status -- skipping every stage below
+    # AND cleanup_e2e, and stranding this run's resources on a shared cluster.
+    run_stage test_snapshot_run_isolation
     test_recipe_from_snapshot
     test_validate
     test_validate_deployment_checks
@@ -1960,4 +2276,9 @@ main() {
   fi
 }
 
-main "$@"
+# Run main only when executed directly; sourcing exposes the pure helpers
+# (pass, fail, run_stage, print_summary) without contacting a cluster.
+# tools/e2e-run_test.sh drives them via `make test` (test-shell target).
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  main "$@"
+fi

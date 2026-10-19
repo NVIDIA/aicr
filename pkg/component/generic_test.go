@@ -15,10 +15,16 @@
 package component
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"gopkg.in/yaml.v3"
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestEnrichConfigFromRegistry(t *testing.T) {
@@ -118,8 +124,10 @@ func TestEnrichConfigFromRegistry(t *testing.T) {
 		if len(cfg.SystemTolerationPaths) == 0 {
 			t.Error("SystemTolerationPaths should be populated")
 		}
-		if len(cfg.AcceleratedNodeSelectorPaths) == 0 {
-			t.Error("AcceleratedNodeSelectorPaths should be populated")
+		// gpu-operator has NO accelerated node selector paths by design (#2474): the
+		// chart/CRD have no daemonsets.nodeSelector, so the dead route was removed.
+		if len(cfg.AcceleratedNodeSelectorPaths) != 0 {
+			t.Error("AcceleratedNodeSelectorPaths should be empty for gpu-operator (no daemonsets.nodeSelector)")
 		}
 		if len(cfg.AcceleratedTolerationPaths) == 0 {
 			t.Error("AcceleratedTolerationPaths should be populated")
@@ -364,6 +372,111 @@ func TestGetValueOverridesForComponent(t *testing.T) {
 				if got[k] != v {
 					t.Errorf("got[%q] = %q, want %q", k, got[k], v)
 				}
+			}
+		})
+	}
+}
+
+// TestMakeBundle_SharedTolerationPathsUnion: MakeBundle writes the nfd
+// worker path, declared under both tiers, with the system and accelerated
+// tolerations, and the system-only master path with the system list (#3135).
+func TestMakeBundle_SharedTolerationPathsUnion(t *testing.T) {
+	sysTol := corev1.Toleration{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}
+	accTol := corev1.Toleration{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}
+	cfg := config.NewConfig(
+		config.WithSystemNodeTolerations([]corev1.Toleration{sysTol}),
+		config.WithAcceleratedNodeTolerations([]corev1.Toleration{accTol}),
+	)
+	b := NewBaseBundler(cfg, "test")
+	input := &recipe.RecipeResult{
+		Kind:       "RecipeResult",
+		APIVersion: recipe.RecipeResultAPIVersion,
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "nfd", Type: "Helm", Source: "https://kubernetes-sigs.github.io/node-feature-discovery/charts", Version: "v0.19.0"},
+		},
+	}
+	outputDir := t.TempDir()
+	if _, err := MakeBundle(context.Background(), b, input, outputDir, ComponentConfig{Name: "nfd"}, nil); err != nil {
+		t.Fatalf("MakeBundle() error = %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(outputDir, "nfd", "values.yaml"))
+	if err != nil {
+		t.Fatalf("read values.yaml: %v", err)
+	}
+	var values map[string]any
+	if err := yaml.Unmarshal(raw, &values); err != nil {
+		t.Fatalf("parse values.yaml: %v\n%s", err, raw)
+	}
+	sysMap := map[string]any{"key": "CriticalAddonsOnly", "operator": "Exists", "effect": "NoSchedule"}
+	accMap := map[string]any{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}
+	for path, want := range map[string][]any{
+		"worker.tolerations":          {sysMap, accMap},
+		"topologyUpdater.tolerations": {sysMap, accMap},
+		"master.tolerations":          {sysMap},
+	} {
+		got, ok := GetValueByPath(values, path)
+		if !ok {
+			t.Fatalf("%s absent from values.yaml\n%s", path, raw)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s:\n  got  = %#v\n  want = %#v", path, got, want)
+		}
+	}
+}
+
+// TestMakeBundle_NoTolerationPathsWriteTopLevel covers a config outside the
+// registry, which declares no toleration paths: each tier falls back to the
+// top-level "tolerations" key, and both tiers set together share it.
+func TestMakeBundle_NoTolerationPathsWriteTopLevel(t *testing.T) {
+	sysTol := corev1.Toleration{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}
+	accTol := corev1.Toleration{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}
+	sysMap := map[string]any{"key": "CriticalAddonsOnly", "operator": "Exists", "effect": "NoSchedule"}
+	accMap := map[string]any{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}
+
+	tests := []struct {
+		name string
+		opts []config.Option
+		want []any
+	}{
+		{"system only", []config.Option{config.WithSystemNodeTolerations([]corev1.Toleration{sysTol})}, []any{sysMap}},
+		{"accelerated only", []config.Option{config.WithAcceleratedNodeTolerations([]corev1.Toleration{accTol})}, []any{accMap}},
+		{"both tiers", []config.Option{
+			config.WithSystemNodeTolerations([]corev1.Toleration{sysTol}),
+			config.WithAcceleratedNodeTolerations([]corev1.Toleration{accTol}),
+		}, []any{sysMap, accMap}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := NewBaseBundler(config.NewConfig(tt.opts...), "test")
+			input := &recipe.RecipeResult{
+				Kind:       "RecipeResult",
+				APIVersion: recipe.RecipeResultAPIVersion,
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "custom-chart", Type: "Helm", Source: "https://charts.example.com", Version: "1.0.0"},
+				},
+			}
+			outputDir := t.TempDir()
+			cfg := ComponentConfig{Name: "custom-chart", DefaultHelmRepository: "https://charts.example.com", DefaultHelmChart: "custom-chart"}
+			res, err := MakeBundle(context.Background(), b, input, outputDir, cfg, nil)
+			if err != nil || !res.Success {
+				t.Fatalf("MakeBundle() = %+v, %v", res, err)
+			}
+
+			raw, err := os.ReadFile(filepath.Join(outputDir, "custom-chart", "values.yaml"))
+			if err != nil {
+				t.Fatalf("read values.yaml: %v", err)
+			}
+			var values map[string]any
+			if err := yaml.Unmarshal(raw, &values); err != nil {
+				t.Fatalf("parse values.yaml: %v\n%s", err, raw)
+			}
+			got, ok := GetValueByPath(values, "tolerations")
+			if !ok {
+				t.Fatalf("tolerations absent from values.yaml\n%s", raw)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("tolerations:\n  got  = %#v\n  want = %#v", got, tt.want)
 			}
 		})
 	}

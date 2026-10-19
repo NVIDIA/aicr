@@ -2,17 +2,17 @@
 
 IAM configuration for the GKE UAT pipeline (`.github/workflows/uat-gcp.yaml`), invoked through the shared dispatch surface (`uat-run.yaml`) for ad-hoc runs and via the nightly batch (`uat-nightly-batch.yaml`) on a cron.
 
-## Relationship to demo-api-server
+## Relationship to gcp-shared
 
-This config shares the `eidosx` GCP project with `infra/demo-api-server`, which
+This config shares the `eidosx` GCP project with `infra/gcp-shared`, which
 owns the foundational resources:
 
 | Resource | Owner | This Config |
 |----------|-------|-------------|
-| Workload Identity Pool (`github-actions-pool`) | demo-api-server | references (not managed) |
-| WIF Provider (`github-actions-provider`) | demo-api-server | references (not managed) |
-| Service Account (`github-actions`) | demo-api-server | data source + additive IAM |
-| GCP API enablement | demo-api-server | additive (idempotent) |
+| Workload Identity Pool (`github-actions-pool`) | gcp-shared | references (not managed) |
+| WIF Provider (`github-actions-provider`) | gcp-shared | references (not managed) |
+| Service Account (`github-actions`) | gcp-shared | data source + additive IAM |
+| GCP API enablement | gcp-shared | additive (idempotent) |
 
 This config adds **only** the IAM roles the service account needs for GKE
 cluster lifecycle management (create, connect, destroy):
@@ -24,7 +24,7 @@ cluster lifecycle management (create, connect, destroy):
 - `roles/resourcemanager.projectIamAdmin` -- Bind roles to node pool SAs
 
 All bindings use `google_project_iam_member` (additive), so they cannot conflict
-with `demo-api-server`'s bindings on the same service account.
+with `gcp-shared`'s bindings on the same service account.
 
 ## Evidence-dashboard read SA (GP5)
 
@@ -41,9 +41,11 @@ evidence-publish writer, so a Pages build can only read published evidence.
 
 The publish workflow inlines this SA email directly (matching the repo norm for
 `GCP_WIF_SERVICE_ACCOUNT`); the `EVIDENCE_READ_SERVICE_ACCOUNT` output exists so
-the value can be confirmed against what the workflow hardcodes. GP3
-(`infra/evidence-dashboard`) still owns the hardened data bucket and the
-dedicated `objectCreator` writer.
+the value can be confirmed against what the workflow hardcodes. There is no
+dedicated data bucket or `objectCreator`-only writer: GP3
+([#1403](https://github.com/NVIDIA/aicr/issues/1403)) was closed as not planned
+in favor of the existing bucket and WIF identities, with the dedicated writer
+deferred as a hardening item.
 
 ## State
 

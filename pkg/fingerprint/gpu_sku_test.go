@@ -37,6 +37,10 @@ func TestParseGPUSKU(t *testing.T) {
 		{"A100 SXM4 80GB", "NVIDIA A100-SXM4-80GB", "a100"},
 		{"A100 PCIE 40GB", "NVIDIA A100-PCIE-40GB", "a100"},
 		{"A100 80GB PCIe", "NVIDIA A100 80GB PCIe", "a100"},
+		// B300 remains distinct from GB300.
+		{"B300 bare", "NVIDIA B300", "b300"},
+		{"B300 label", "NVIDIA-B300-SXM6-AC", "b300"},
+		{"B300 longer token", "NVIDIA B3000", ""},
 		// B200 variants.
 		{"B200 bare", "NVIDIA B200", "b200"},
 		{"HGX B200", "NVIDIA HGX B200", "b200"},

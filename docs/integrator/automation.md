@@ -12,7 +12,7 @@ Typical integration workflows:
 4. **Deployment**: Apply generated configuration to cluster
 5. **Validation**: Verify deployment using test workloads
 
-**Supported CI/CD platforms**: GitHub Actions, GitLab CI, Jenkins, Argo Workflows, Tekton
+**CI/CD platforms covered**: GitHub Actions, plus a stage mapping for GitLab CI, CircleCI, and Terraform (see [Translating to other CI systems](#translating-to-other-ci-systems))
 
 ## Integration Patterns
 
@@ -37,6 +37,15 @@ jobs:
         uses: azure/k8s-set-context@v4
         with:
           kubeconfig: ${{ secrets.KUBECONFIG }}
+
+      - name: Setup aicr
+        run: |
+          # GoReleaser archives are versioned (aicr_<version>_<os>_<arch>.tar.gz),
+          # so resolve the latest tag first rather than a fixed filename.
+          VERSION=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
+          curl -sLO "https://github.com/NVIDIA/aicr/releases/download/${VERSION}/aicr_${VERSION#v}_linux_amd64.tar.gz"
+          tar -xzf "aicr_${VERSION#v}_linux_amd64.tar.gz"
+          sudo mv aicr aicr-attestation.sigstore.json /usr/local/bin/
       
       # On AKS, the gpuStack profile qualifies against the
       # K8s.aks-gpu-pools.gpu-driver reading — capture it BEFORE the
@@ -104,6 +113,15 @@ jobs:
         with:
           kubeconfig: ${{ secrets.KUBECONFIG }}
 
+      - name: Setup aicr
+        run: |
+          # GoReleaser archives are versioned (aicr_<version>_<os>_<arch>.tar.gz),
+          # so resolve the latest tag first rather than a fixed filename.
+          VERSION=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
+          curl -sLO "https://github.com/NVIDIA/aicr/releases/download/${VERSION}/aicr_${VERSION#v}_linux_amd64.tar.gz"
+          tar -xzf "aicr_${VERSION#v}_linux_amd64.tar.gz"
+          sudo mv aicr aicr-attestation.sigstore.json /usr/local/bin/
+
       # 1. Snapshot: agent Job writes cluster state to a ConfigMap.
       #    aicr snapshot waits synchronously for the Job and cleans it up,
       #    so no separate `kubectl wait` step is needed.
@@ -144,14 +162,15 @@ jobs:
 #### Translating to other CI systems
 
 The four stages above map one-to-one onto other platforms. Only the job/stage
-syntax and artifact passing differ — the `aicr` commands are identical.
+syntax and artifact passing differ — the `aicr` commands are identical, except
+that the Terraform bundle command names its deployer and form.
 
 | Stage | GitLab CI | CircleCI | Terraform |
 |-------|-----------|----------|-----------|
-| Snapshot | `script:` step running `aicr snapshot`, declare `artifacts: paths: [snapshot.yaml]` (or write to a ConfigMap to skip artifacts) | `run:` step; `persist_to_workspace` to pass output downstream | `null_resource` + `local-exec` provisioner running `aicr snapshot` |
-| Recipe | `script:` step running `aicr recipe`, `dependencies:` on the snapshot job | `run:` step after `attach_workspace` | `null_resource` + `local-exec`, `depends_on` the snapshot resource |
-| Bundle | `script:` step running `aicr bundle`, publish `bundles/` as artifacts | `run:` step, `persist_to_workspace` | `null_resource` + `local-exec` running `aicr bundle` |
-| Deploy | `script:` step running `cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh`, with `when: manual` for approval gating | `run:` step running `cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh` inside a held workflow | `local-exec` running `cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh`, gated by `terraform apply` approval |
+| Snapshot | `script:` step running `aicr snapshot`, declare `artifacts: paths: [snapshot.yaml]` (or write to a ConfigMap to skip artifacts) | `run:` step; `persist_to_workspace` to pass output downstream | a pipeline step before `terraform init` running `aicr snapshot` (not a `local-exec` provisioner: that runs at apply, after init has already resolved module sources); this needs an existing cluster, so when the same configuration creates the cluster, skip this stage and build the recipe from criteria |
+| Recipe | `script:` step running `aicr recipe`, `dependencies:` on the snapshot job | `run:` step after `attach_workspace` | the same pre-init step running `aicr recipe` |
+| Bundle | `script:` step running `aicr bundle`, publish `bundles/` as artifacts | `run:` step, `persist_to_workspace` | the same pre-init step running `aicr bundle --recipe recipe.yaml --deployer terraform --terraform-child-module --output bundles`, so `./bundles` exists when `terraform init` resolves it |
+| Deploy | `script:` step running `cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh`, with `when: manual` for approval gating | `run:` step running `cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh` inside a held workflow | run `aicr verify ./bundles` in the pre-init step, then call the bundle as a module (`module "stack" { source = "./bundles" }`) from the configuration that owns the `helm` provider, so the releases are resources in the plan `terraform apply` approves — no `local-exec`. `--terraform-child-module` is what lets the call inherit that provider and take `depends_on` |
 
 Use a container image with the CLI preinstalled (`ghcr.io/nvidia/aicr:latest`)
 for the recipe/bundle stages, and a `kubectl`-capable image for snapshot/deploy.
@@ -172,9 +191,18 @@ on:
 jobs:
   generate-and-deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # keyless signing for `aicr bundle --attest`
+    env:
+      GITOPS_REPO: my-org/my-gitops-repo
     steps:
-      - name: Checkout
+      - name: Checkout GitOps repo
         uses: actions/checkout@v4
+        with:
+          repository: ${{ env.GITOPS_REPO }}
+          path: gitops-repo
+          token: ${{ secrets.GITOPS_REPO_TOKEN }}  # write access to GITOPS_REPO
       
       - name: Setup aicr
         run: |
@@ -183,7 +211,8 @@ jobs:
           VERSION=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
           curl -sLO "https://github.com/NVIDIA/aicr/releases/download/${VERSION}/aicr_${VERSION#v}_linux_amd64.tar.gz"
           tar -xzf "aicr_${VERSION#v}_linux_amd64.tar.gz"
-          sudo mv aicr /usr/local/bin/
+          # --attest needs the binary attestation next to the binary.
+          sudo mv aicr aicr-attestation.sigstore.json /usr/local/bin/
       
       - name: Generate recipe
         run: |
@@ -199,8 +228,13 @@ jobs:
           aicr bundle \
             --recipe recipe.yaml \
             --deployer argocd \
-            --repo https://github.com/${{ github.repository }}.git \
+            --attest \
+            --repo https://github.com/${{ env.GITOPS_REPO }}.git \
             --output ./bundles
+
+      # Gate what enters the GitOps repo; Argo CD syncs whatever is committed.
+      - name: Verify bundle
+        run: aicr verify ./bundles --min-trust-level verified
       
       - name: Commit to GitOps repo
         run: |
@@ -210,10 +244,17 @@ jobs:
           cp -r bundles/* gitops-repo/
           
           cd gitops-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .
           git commit -m "Update GPU stack components"
           git push
 ```
+
+Verify the bundle directory, never the GitOps repository: verification is
+closed-world and fails on any file not listed in the bundle's `checksums.txt`.
+See [Gating Argo CD](supply-chain-verification.md#gating-argo-cd) for making
+the commit itself a binding control.
 
 **Generated Argo CD Application with multi-source:**
 ```yaml
@@ -224,14 +265,14 @@ metadata:
   name: gpu-operator
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "1"  # Deployed after cert-manager (wave 0)
+    argocd.argoproj.io/sync-wave: "<N>"  # dependency level × 4 + 1 (primary folder), so it follows cert-manager and its other dependencies
 spec:
   project: default
   sources:
     # Helm chart from upstream
     - repoURL: https://helm.ngc.nvidia.com/nvidia
       chart: gpu-operator
-      targetRevision: v26.3.3
+      targetRevision: v26.7.2
       helm:
         valueFiles:
           # Values live under the numbered bundle dir (NNN-<component>/)
@@ -252,6 +293,7 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      - ServerSideApply=true
 ```
 
 ### Pattern 4: Multi-Environment GitOps
@@ -291,7 +333,7 @@ done
 scrape_configs:
   - job_name: 'aicrd'
     static_configs:
-      - targets: ['aicrd.default.svc.cluster.local:8080']
+      - targets: ['aicrd.aicr.svc.cluster.local:80']
     metrics_path: /metrics
 ```
 
@@ -420,7 +462,7 @@ def get_recipe(params):
 # Generate recipes for multiple environments in parallel
 environments = [
     {'os': 'ubuntu', 'accelerator': 'h100', 'service': 'eks'},
-    {'os': 'ubuntu', 'accelerator': 'gb200', 'service': 'gke'},
+    {'os': 'cos', 'accelerator': 'gb200', 'service': 'gke'},
     {'os': 'cos', 'accelerator': 'h100', 'service': 'gke'},
 ]
 
@@ -496,7 +538,8 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      job-name: aicr
+      app.kubernetes.io/name: aicr
+      app.kubernetes.io/component: snapshot-agent
   policyTypes:
     - Egress
   egress:

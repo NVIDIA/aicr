@@ -14,7 +14,17 @@
 
 package attestation
 
-import "testing"
+import (
+	"encoding/hex"
+	"testing"
+)
+
+// testIssuer and testIdentity are the verified (issuer, identity) fixture
+// behind this file's golden hash values.
+const (
+	testIssuer   = "https://token.actions.githubusercontent.com"
+	testIdentity = "https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main"
+)
 
 func TestSourceSlug(t *testing.T) {
 	tests := []struct {
@@ -34,8 +44,8 @@ func TestSourceSlug(t *testing.T) {
 		},
 		{
 			name:     "first-party github actions oidc identity",
-			issuer:   "https://token.actions.githubusercontent.com",
-			identity: "https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main",
+			issuer:   testIssuer,
+			identity: testIdentity,
 			want:     "a2f01812594e54d1a14278576fda2ed0",
 		},
 		{name: "empty issuer", issuer: "", identity: "x", wantErr: true},
@@ -74,5 +84,37 @@ func TestSourceSlug_DomainSeparation(t *testing.T) {
 	}
 	if a == b {
 		t.Errorf("expected distinct slugs for ambiguous concatenation, both = %q", a)
+	}
+}
+
+func TestHashIdentityPair(t *testing.T) {
+	// This is the full, untruncated digest behind SourceSlug's own 32-char
+	// prefix. Any change here breaks every persisted evidence path and
+	// dedup key derived from it.
+	const wantGolden = "a2f01812594e54d1a14278576fda2ed0a71b32b8b2287862271baf100c561b16"
+
+	sum, err := HashIdentityPair(testIssuer, testIdentity)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := hex.EncodeToString(sum[:])
+	if got != wantGolden {
+		t.Errorf("digest = %q, want golden %q (algorithm changed?)", got, wantGolden)
+	}
+
+	// SourceSlug is exactly this digest's first SourceSlugLength hex chars.
+	slug, err := SourceSlug(testIssuer, testIdentity)
+	if err != nil {
+		t.Fatalf("SourceSlug: %v", err)
+	}
+	if slug != got[:SourceSlugLength] {
+		t.Errorf("SourceSlug = %q, want prefix of full digest %q", slug, got)
+	}
+
+	if _, err := HashIdentityPair("", testIdentity); err == nil {
+		t.Error("expected error for empty issuer")
+	}
+	if _, err := HashIdentityPair(testIssuer, ""); err == nil {
+		t.Error("expected error for empty identity")
 	}
 }

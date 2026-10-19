@@ -41,7 +41,11 @@ import (
 //	pointer.profile  == ProfileSelectionString(recipe)  (incl. absence, case)
 //	pointer.recipe   == RecipeNameFor(recipe)
 //	predicate name   == RecipeNameFor(recipe)
-//	predicate digest == canonical digest of recipe.yaml
+//	predicate digest == canonical digest of recipe.yaml, computed with the
+//	  algorithm predicateType requires (SubjectDigestForType), the legacy
+//	  algorithm for V1/V2 evidence and the content-only one for V3. This
+//	  keeps historic evidence verifying under the algorithm it was signed
+//	  with.
 //	predicate profile block == recipe's metadata.selectedProfile
 //	  (presence both ways, exact name=value selection, advertiser) and its
 //	  policyDescriptorIdentity == the recipe-scoped descriptor identity
@@ -50,7 +54,7 @@ import (
 //	  covers both the unsigned-statement and the Sigstore-verified predicate
 //	  sources, and compares like-for-like against the recipe that was
 //	  actually attested.
-func checkRecipeIdentity(recipeYAML []byte, pointer *attestation.Pointer, pred *attestation.Predicate) error {
+func checkRecipeIdentity(recipeYAML []byte, pointer *attestation.Pointer, pred *attestation.Predicate, predicateType string) error {
 	if len(recipeYAML) == 0 {
 		// The inventory pass captured nothing: the manifest carries no
 		// recipe.yaml entry. Identity cannot bind without manifest-verified
@@ -76,10 +80,12 @@ func checkRecipeIdentity(recipeYAML []byte, pointer *attestation.Pointer, pred *
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"predicate recipe name "+pred.Recipe.Name+" does not match the name derived from the bundle recipe ("+wantName+")")
 	}
-	// SubjectDigest canonicalizes the raw recipe.yaml bytes — the same
-	// input the producer digested at emit time (never a decode/re-marshal
-	// round trip, which would not be byte-stable across writers).
-	wantDigest, err := attestation.SubjectDigest(recipeYAML)
+	// SubjectDigestForType canonicalizes the raw recipe.yaml bytes with the
+	// algorithm predicateType recorded on this evidence requires. That is
+	// the same input, and the same algorithm, the producer digested at
+	// emit time (never a decode/re-marshal round trip, which would not be
+	// byte-stable across writers).
+	wantDigest, err := attestation.SubjectDigestForType(recipeYAML, predicateType)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to digest bundle recipe", err)
 	}
@@ -123,8 +129,9 @@ func checkPredicateProfileBinding(rec *recipe.RecipeResult, pred *attestation.Pr
 	case pred.Profile == nil:
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"bundle recipe carries selectedProfile "+wantSel+
-				" but the predicate has no profile block — profiled evidence requires the "+
-				attestation.PredicateTypeV2+" predicate; regenerate and re-sign it (ADR-015)")
+				" but the predicate has no profile block. Profiled evidence requires a predicate "+
+				"profile block ("+attestation.PredicateTypeV2+" or "+attestation.PredicateTypeV3+
+				"). Regenerate and re-sign it (ADR-015)")
 	}
 	if pred.Profile.Selection != wantSel {
 		return errors.New(errors.ErrCodeInvalidRequest,

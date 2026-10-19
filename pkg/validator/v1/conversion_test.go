@@ -24,7 +24,7 @@ import (
 
 func TestToValidationInput(t *testing.T) {
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: header.GroupVersion,
+		APIVersion: header.GroupVersionV1,
 		Kind:       "RecipeResult",
 		Metadata: recipe.RecipeResultMetadata{
 			Version:         "1.0.0",
@@ -105,7 +105,7 @@ func TestToValidationInputNil(t *testing.T) {
 // (not inlined at the root) for validators to find them.
 func TestToValidationInputYAMLRoundTrip(t *testing.T) {
 	rec := &recipe.RecipeResult{
-		APIVersion: header.GroupVersion,
+		APIVersion: header.GroupVersionV1,
 		Kind:       "RecipeResult",
 		Constraints: []recipe.Constraint{
 			{Name: "K8s.server.version", Value: ">= 1.32.4"},

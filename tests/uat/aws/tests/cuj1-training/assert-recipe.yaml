@@ -18,7 +18,7 @@
 # --os ubuntu --platform kubeflow` produces a valid recipe with correct criteria,
 # kubeflow-specific components, and standard GPU stack components.
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 criteria:
   service: eks
   accelerator: h100
@@ -38,6 +38,7 @@ componentRefs: ## alphabetically sorted
   - name: aws-ebs-csi-driver
   - name: aws-efa
   - name: cert-manager
+  - name: dra-node-labeler
   - name: gpu-operator
   - name: k8s-ephemeral-storage-metrics
   - name: kai-scheduler
@@ -60,6 +61,7 @@ deploymentOrder:
   - prometheus-operator-crds
   - kube-prometheus-stack
   - gpu-operator
+  - dra-node-labeler
   - k8s-ephemeral-storage-metrics
   - kai-scheduler
   - kubeflow-trainer

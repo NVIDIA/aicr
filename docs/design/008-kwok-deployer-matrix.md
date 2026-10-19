@@ -76,14 +76,19 @@ pod-Running verification.
 
 | Tier | Trigger | Deployer values |
 |---|---|---|
-| Tier 1 — generic overlays | every PR + push | `{helm, argocd-oci, argocd-helm-oci, flux-oci}` |
+| Tier 1 — generic overlays | every PR + push | `helm` on every generic overlay, plus `{argocd-oci, argocd-helm-oci, flux-oci}` on one probe overlay (`eks-training`) |
 | Tier 2 — diff-aware accelerator overlays | PR only, conditional | `helm` only (unchanged) |
 | Tier 3 — full overlay set | push to main + nightly | `{helm, argocd-oci, argocd-helm-oci, flux-oci}` |
 
 **Rationale for tier scope.** Argo CD / Flux template regressions
 surface on generic overlays (Tier 1) — that is where the issue's bug
-class lives. Full accelerator-specific GitOps coverage runs nightly
-and on push to main without inflating PR latency. Tier 2 stays
+class lives. Tier 1 runs the GitOps deployers on one probe overlay to keep
+the PR matrix small. The probe is `eks-training`, which carries more
+components than the bare `eks` base, and falls back to the first generic
+overlay when it is absent.
+Component-specific GitOps regressions outside the probe, and full
+accelerator-specific GitOps coverage, run nightly and on push to main
+without inflating PR latency. Tier 2 stays
 helm-only because its purpose is diff-aware accelerator-config
 validation; GitOps shape is orthogonal.
 

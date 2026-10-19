@@ -211,7 +211,9 @@ func TestRun_UnsignedBundleRejected(t *testing.T) {
 func verifiedBundleDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "recipe.yaml"), []byte(`criteria:
+	if err := os.WriteFile(filepath.Join(dir, "recipe.yaml"), []byte(`apiVersion: aicr.run/v1
+kind: RecipeResult
+criteria:
   service: eks
   accelerator: h100
   os: ubuntu

@@ -23,6 +23,8 @@ import (
 	"testing"
 
 	projecterrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // validBOM is the minimum shape run() must accept: CycloneDX 1.6, with
@@ -100,7 +102,7 @@ func TestRun(t *testing.T) {
 			if !strings.Contains(err.Error(), tt.wantErrFragment) {
 				t.Errorf("run() error = %v, want it to name %q", err, tt.wantErrFragment)
 			}
-			if !stderrors.Is(err, projecterrors.New(projecterrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != projecterrors.ErrCodeInvalidRequest {
 				t.Errorf("run() error code = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -112,7 +114,7 @@ func TestRunRequiresExactlyOnePath(t *testing.T) {
 
 	for _, args := range [][]string{nil, {"a", "b"}} {
 		err := run(args, &bytes.Buffer{})
-		if !stderrors.Is(err, projecterrors.New(projecterrors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != projecterrors.ErrCodeInvalidRequest {
 			t.Errorf("run(%v) error = %v, want ErrCodeInvalidRequest", args, err)
 		}
 	}

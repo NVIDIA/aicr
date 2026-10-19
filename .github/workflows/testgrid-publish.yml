@@ -31,11 +31,13 @@
 # Auth:
 #   WIF pool:  aicr-testgrid[-<env>]-github   (aicr-testgrid Terraform)
 #   SA:        aicr-testgrid[-<env>]-publish@<project>
-#   Scope:     objectCreator on gs://aicr-testgrid[-<env>]/groups/ prefix only
+#   Scope:     objectCreator on gs://nv-aicr-testgrid[-<env>]/groups/ prefix only
 #   For prod, <env> is empty (cluster_name = "aicr-testgrid", unsuffixed);
-#   for staging, <env> = "staging". This mirrors terraform/variables.tf and
-#   wif-publish.tf in the aicr-testgrid repo exactly — verify there before
-#   changing the naming logic in "Resolve GCP config" below.
+#   for staging, <env> = "staging". Buckets are named nv-<cluster> (renamed
+#   for the eidosx → nv-testgrid migration; GCS names are globally unique).
+#   This mirrors terraform/variables.tf in the testgrid repo
+#   (dgxcloud/release-automation/testgrid, aicr/terraform) — verify there
+#   before changing the naming logic in "Resolve GCP config" below.
 #
 # Configuration (GitHub repo variables — no secrets in source):
 #   vars.TESTGRID_PUBLISH_ENABLED   'true' to enable (see gate above)
@@ -70,6 +72,11 @@ on:
         options:
           - prod
           - staging
+      run_url:
+        description: "GitHub Actions run that produced the bundle, https://github.com/<owner>/<repo>/actions/runs/<id>[/attempts/<n>] (optional; shown as the build's run link)"
+        type: string
+        required: false
+        default: ""
 
 concurrency:
   # Serialize publishes for the same environment and bundle while one is in
@@ -81,7 +88,7 @@ concurrency:
 jobs:
   publish:
     name: Publish to TestGrid
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15  # Go build ~2 min + gcloud uploads ~3 min; 15 min is generous
 
     # Stay disabled until the prod WIF pool/SA exists. The workflow is always
@@ -129,14 +136,19 @@ jobs:
           else
             CLUSTER="aicr-testgrid-${TG_ENV}"
           fi
+          # Buckets were renamed for the eidosx → nv-testgrid migration:
+          # nv-aicr-testgrid[-<env>] (nv- prefix, NVIDIA-neutral — the old
+          # aicr-testgrid[-<env>] names stay in eidosx). Clusters keep their
+          # names.
+          BUCKET="nv-${CLUSTER}"
           {
             echo "cluster=${CLUSTER}"
-            echo "bucket=${CLUSTER}"
+            echo "bucket=${BUCKET}"
             echo "wif_provider=projects/${GCP_PROJECT_NUMBER}/locations/global/workloadIdentityPools/${CLUSTER}-github/providers/github-actions"
             echo "wif_sa=${CLUSTER}-publish@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
           } >> "${GITHUB_OUTPUT}"
           # Note: `environment` is fully encoded in `bucket` (bucket ==
-          # cluster == aicr-testgrid[-<env>]) and is not passed to
+          # nv-aicr-testgrid[-<env>]) and is not passed to
           # testgrid-publish separately — the tool only needs --bucket.
 
       - name: Load versions
@@ -179,6 +191,21 @@ jobs:
           fi
           echo "bundle_ref=${BUNDLE_REF}" >> "${GITHUB_OUTPUT}"
           echo "Resolved bundle: ${BUNDLE_REF}"
+
+      # Fail a malformed manual run_url before verification and GCP auth;
+      # testgrid-publish applies the same rule before writing anything.
+      - name: Validate run URL
+        env:
+          RUN_URL: ${{ inputs.run_url }}
+        run: |
+          set -euo pipefail
+          # Owner and repo need a non-dot character, so "." and ".." cannot pass.
+          seg='[A-Za-z0-9_.-]*[A-Za-z0-9_-][A-Za-z0-9_.-]*'
+          run_re="^https://github\.com/${seg}/${seg}/actions/runs/[0-9]+(/attempts/[0-9]+)?$"
+          if [[ -n "${RUN_URL}" && ! "${RUN_URL}" =~ ${run_re} ]]; then
+            echo "::error::run_url must be https://github.com/<owner>/<repo>/actions/runs/<id>[/attempts/<n>]"
+            exit 1
+          fi
 
       # Community/partner evidence must have a reviewed pointer on main. Its
       # claimed signer is escaped into an exact regexp and then cross-checked
@@ -326,9 +353,11 @@ jobs:
           BUNDLE_REF: ${{ steps.bundle.outputs.bundle_ref }}
           TG_BUCKET: ${{ steps.gcp.outputs.bucket }}
           TG_SOURCE_CLASS: ${{ steps.source.outputs.source_class }}
+          TG_RUN_URL: ${{ inputs.run_url }}
         run: |
           set -euo pipefail
           /tmp/testgrid-publish \
             --bundle "${BUNDLE_REF}" \
             --bucket "${TG_BUCKET}" \
-            --source-class "${TG_SOURCE_CLASS}"
+            --source-class "${TG_SOURCE_CLASS}" \
+            --run-url "${TG_RUN_URL}"

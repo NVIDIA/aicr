@@ -18,19 +18,22 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	stderrors "errors"
 	"flag"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -143,6 +146,143 @@ func TestGenerate_Success(t *testing.T) {
 	// Verify deployment steps.
 	if len(output.DeploymentSteps) == 0 {
 		t.Error("Generate() returned no deployment steps")
+	}
+}
+
+// TestGenerateReportsLayout asserts Generate populates output.Entrypoint and
+// output.Releases with the layout it actually wrote to outputDir, mirroring
+// the helmfile deployer's equivalent coverage (pkg/bundler/deployer/helmfile).
+// gpu-operator carries both pre- and post-manifests so the fixture exercises
+// all three appendRelease call sites (pre, primary, post) in one run.
+func TestGenerateReportsLayout(t *testing.T) {
+	// ComponentRefs declaration order, DeploymentOrder, and alphabetical
+	// component-name order are all deliberately distinct here:
+	//   - declaration (ComponentRefs order below): gpu-operator,
+	//     cert-manager, nfd
+	//   - DeploymentOrder: cert-manager, nfd, gpu-operator (the real
+	//     dependency order — nfd labels nodes before gpu-operator consumes
+	//     those labels)
+	//   - alphabetical: cert-manager, gpu-operator, nfd
+	// so the primaryOrder assertion below can only pass if Generate genuinely
+	// honors DeploymentOrder rather than sorting by name or falling back to
+	// declaration order (e.g. a dropped SortComponentRefsByDeploymentOrder
+	// call).
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+		{
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.17.2",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://charts.jetstack.io",
+		},
+		{
+			Name:      "nfd",
+			Namespace: "nfd",
+			Chart:     "node-feature-discovery",
+			Version:   "v0.16.4",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://kubernetes-sigs.github.io/node-feature-discovery-charts",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"cert-manager", "nfd", "gpu-operator"}
+
+	g := &Generator{
+		RecipeResult: recipeResult,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {"driver": map[string]any{"enabled": true}},
+			"cert-manager": {"crds": map[string]any{"enabled": true}},
+			"nfd":          {"enabled": true},
+		},
+		ComponentPreManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"quota.yaml": []byte("apiVersion: v1\nkind: ResourceQuota\nmetadata:\n  name: q\n  namespace: gpu-operator\n"),
+			},
+		},
+		ComponentManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"dcgm-exporter.yaml": []byte("apiVersion: apps/v1\nkind: DaemonSet\nmetadata:\n  name: dcgm-exporter\n"),
+			},
+		},
+		Version: testVersion,
+	}
+
+	out, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	if out.Entrypoint != fileKustomization {
+		t.Errorf("Entrypoint = %q, want %s", out.Entrypoint, fileKustomization)
+	}
+	if len(out.Releases) == 0 {
+		t.Fatal("Generate reported no releases; the bundle index would be empty")
+	}
+	for _, r := range out.Releases {
+		if r.Name == "" || r.Component == "" || r.Path == "" {
+			t.Errorf("incomplete release entry: %+v", r)
+		}
+		if _, statErr := os.Stat(filepath.Join(outputDir, r.Path)); statErr != nil {
+			t.Errorf("release %q claims path %q, which does not exist: %v", r.Name, r.Path, statErr)
+		}
+		if r.Manifest != "" {
+			if _, statErr := os.Stat(filepath.Join(outputDir, r.Manifest)); statErr != nil {
+				t.Errorf("release %q claims manifest %q, which does not exist: %v", r.Name, r.Manifest, statErr)
+			}
+		}
+	}
+
+	// Flux paths carry no NNN- prefix; the release index is the only place
+	// a consumer can learn the directory name without guessing.
+	for _, r := range out.Releases {
+		if strings.HasPrefix(r.Path, "00") {
+			t.Errorf("flux release %q reports a prefixed path %q; flux does not prefix", r.Name, r.Path)
+		}
+		if r.Manifest != path.Join(r.Path, fileHelmRelease) {
+			t.Errorf("release %q manifest = %q, want %s/%s", r.Name, r.Manifest, r.Path, fileHelmRelease)
+		}
+	}
+
+	// Releases order is normative: consumers read deployment sequence from
+	// list position, since the artifact carries no ordinal field. Extract
+	// the primary releases (Name == Component; excludes injected -pre/-post
+	// entries) and confirm their relative order matches the recipe's
+	// DeploymentOrder — a sort or reversal of out.Releases must fail this
+	// check.
+	var primaryOrder []string
+	for _, r := range out.Releases {
+		if r.Name == r.Component {
+			primaryOrder = append(primaryOrder, r.Name)
+		}
+	}
+	if !slices.Equal(primaryOrder, recipeResult.DeploymentOrder) {
+		t.Errorf("primary release order = %v, want %v (recipe DeploymentOrder)",
+			primaryOrder, recipeResult.DeploymentOrder)
+	}
+
+	// gpu-operator's -pre and -post injections must be grouped under it via
+	// Component, and land immediately before/after its primary in emission
+	// order — matching the chain Generate actually builds.
+	names := make([]string, len(out.Releases))
+	for i, r := range out.Releases {
+		names[i] = r.Name
+	}
+	wantNames := []string{"cert-manager", "nfd", "gpu-operator-pre", "gpu-operator", "gpu-operator-post"}
+	if !slices.Equal(names, wantNames) {
+		t.Errorf("release name order = %v, want %v", names, wantNames)
 	}
 }
 
@@ -1141,7 +1281,7 @@ func TestGenerate_RejectsCyclicGraph(t *testing.T) {
 // TestGenerate_DisabledDependencyNotACycle guards that graph validation runs on
 // the unfiltered ComponentRefs, not the enabled-filtered set: an enabled
 // component whose declared dependency is disabled (provided externally) must
-// NOT be mistaken for an undeclared dependency and rejected as a false cycle.
+// NOT be mistaken for an undeclared dependency and reported as missing.
 func TestGenerate_DisabledDependencyNotACycle(t *testing.T) {
 	recipeResult := &recipe.RecipeResult{}
 	recipeResult.Metadata.Version = testVersion
@@ -1355,7 +1495,78 @@ func TestBundleGolden_HelmComponents(t *testing.T) {
 	}
 }
 
+// TestGenerate_UpgradeNotice covers a non-empty notice. The README has no
+// golden, so the empty case asserts the Components table still runs straight
+// into Repository Setup.
+func TestGenerate_UpgradeNotice(t *testing.T) {
+	const notice = "## Before You Upgrade\n\nNOTICE-SENTINEL\n\n"
+	tests := []struct {
+		name   string
+		notice string
+	}{
+		{"empty", ""},
+		{"set", notice},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recipeResult := &recipe.RecipeResult{}
+			recipeResult.Metadata.Version = testVersion
+			recipeResult.ComponentRefs = []recipe.ComponentRef{
+				{
+					Name:      "cert-manager",
+					Namespace: "cert-manager",
+					Chart:     "cert-manager",
+					Version:   "v1.17.2",
+					Type:      recipe.ComponentTypeHelm,
+					Source:    "https://charts.jetstack.io",
+				},
+			}
+			recipeResult.DeploymentOrder = []string{"cert-manager"}
+			outputDir := t.TempDir()
+			g := &Generator{
+				RecipeResult:    recipeResult,
+				ComponentValues: map[string]map[string]any{"cert-manager": {}},
+				Version:         "v0.9.0",
+				UpgradeNotice:   tt.notice,
+			}
+			if _, err := g.Generate(context.Background(), outputDir); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+			readme := readFile(t, filepath.Join(outputDir, "README.md"))
+			if tt.notice == "" {
+				if strings.Contains(readme, "Before You Upgrade") {
+					t.Errorf("README rendered an upgrade notice that was not set:\n%s", readme)
+				}
+				if !strings.Contains(readme, "|\n\n## Repository Setup") {
+					t.Errorf("Components table must be followed by one blank line and Repository Setup:\n%s", readme)
+				}
+				return
+			}
+			assertUpgradeNoticePlacement(t, readme, tt.notice, "## Components", "## Repository Setup")
+		})
+	}
+}
+
 // ---------- test helpers ----------
+
+// assertUpgradeNoticePlacement checks that notice sits after afterHeading, has
+// exactly one blank line before it, and is directly followed by beforeHeading.
+func assertUpgradeNoticePlacement(t *testing.T, readme, notice, afterHeading, beforeHeading string) {
+	t.Helper()
+	idx := strings.Index(readme, notice)
+	if idx < 0 {
+		t.Fatalf("README missing upgrade notice:\n%s", readme)
+	}
+	if after := strings.Index(readme, afterHeading); after < 0 || after > idx {
+		t.Errorf("upgrade notice must follow %q:\n%s", afterHeading, readme)
+	}
+	if !strings.HasPrefix(readme[idx+len(notice):], beforeHeading) {
+		t.Errorf("upgrade notice must directly precede %q:\n%s", beforeHeading, readme)
+	}
+	if prefix := readme[:idx]; !strings.HasSuffix(prefix, "\n\n") || strings.HasSuffix(prefix, "\n\n\n") {
+		t.Errorf("want exactly one blank line before the upgrade notice:\n%s", readme)
+	}
+}
 
 func readFile(t *testing.T, path string) string {
 	t.Helper()
@@ -2092,7 +2303,7 @@ func TestGenerate_PreManifestsCollision(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected collision error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("expected ErrCodeInvalidRequest, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), `would inject "foo"-pre`) {
@@ -2144,7 +2355,7 @@ func TestGenerate_PostManifestsCollision(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected collision error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("expected ErrCodeInvalidRequest, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), `would inject "foo"-post`) {
@@ -2767,7 +2978,7 @@ func TestGenerate_StaleSourcesPathIsNotDestroyed(t *testing.T) {
 			case tt.wantErr && err == nil:
 				t.Fatal("expected Generate() to fail, got nil error")
 			case tt.wantErr:
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("expected ErrCodeInvalidRequest, got: %v", err)
 				}
 				if !strings.Contains(err.Error(), sourcesDir) {
@@ -3250,7 +3461,7 @@ func assertCRDPolicy(t *testing.T, ref recipe.ComponentRef, component, want stri
 // makes the chartRef template's UpgradeCRDs block unreachable today.
 //
 // chartRef is reached by local, vendored and manifest-backed components. Those
-// carry no registry chart coordinates, so usesRegistryChart is false for them
+// carry no registry chart coordinates, so UsesRegistryChart is false for them
 // and the policy cannot render. Asserting that directly is preferable to a
 // render test: an attempt at the render route produced a sourceRef HelmRelease
 // instead, so such a test would have passed without exercising anything, which
@@ -3292,7 +3503,7 @@ func TestUsesRegistryChartRejectsRefsWithoutCoordinates(t *testing.T) {
 		},
 		{
 			// The control: without this, every case above could pass because
-			// usesRegistryChart always returns false.
+			// UsesRegistryChart always returns false.
 			name: "fully resolved registry ref matches",
 			ref: func() recipe.ComponentRef {
 				r := recipe.ComponentRef{Name: "k8s-aibom", Type: recipe.ComponentTypeHelm}
@@ -3305,9 +3516,103 @@ func TestUsesRegistryChartRejectsRefsWithoutCoordinates(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := usesRegistryChart(tt.ref, cfg); got != tt.want {
-				t.Errorf("usesRegistryChart() = %v, want %v (chart=%q source=%q version=%q)",
+			if got := deployer.UsesRegistryChart(tt.ref, cfg); got != tt.want {
+				t.Errorf("UsesRegistryChart() = %v, want %v (chart=%q source=%q version=%q)",
 					got, tt.want, tt.ref.EffectiveChart(), tt.ref.Source, tt.ref.Version)
+			}
+		})
+	}
+}
+
+// TestGenerate_ManifestChartsDisableWait covers #2585.
+//
+// A generated chart holding a manifest annotated aicr/disable-wait is released
+// with install.disableWait and upgrade.disableWait; a generated chart without
+// one, and an upstream chart release, keep helm-controller's wait. Both the
+// GitRepository and the chartRef shapes are checked.
+func TestGenerate_ManifestChartsDisableWait(t *testing.T) {
+	ctx := context.Background()
+
+	newGenerator := func(ociSource string) *Generator {
+		recipeResult := &recipe.RecipeResult{}
+		recipeResult.Metadata.Version = testVersion
+		recipeResult.ComponentRefs = []recipe.ComponentRef{
+			{
+				Name:      "network-operator",
+				Namespace: "nvidia-network-operator",
+				Chart:     "network-operator",
+				Version:   "v25.4.0",
+				Type:      recipe.ComponentTypeHelm,
+				Source:    "https://helm.ngc.nvidia.com/nvidia",
+			},
+			{
+				Name:      "nodewright-customizations",
+				Namespace: "nodewright-system",
+				Type:      recipe.ComponentTypeHelm,
+			},
+		}
+		recipeResult.DeploymentOrder = []string{"network-operator", "nodewright-customizations"}
+		return &Generator{
+			RecipeResult: recipeResult,
+			ComponentValues: map[string]map[string]any{
+				"network-operator":          {},
+				"nodewright-customizations": {},
+			},
+			ComponentPreManifests: map[string]map[string][]byte{
+				"network-operator": {
+					"ns.yaml": []byte("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: nvidia-network-operator\n"),
+				},
+			},
+			ComponentManifests: map[string]map[string][]byte{
+				"network-operator": {
+					"ncp.yaml": []byte("apiVersion: mellanox.com/v1alpha1\nkind: NicClusterPolicy\nmetadata:\n  name: nic-cluster-policy\n  annotations:\n    aicr/disable-wait: \"true\"\n"),
+				},
+				"nodewright-customizations": {
+					"tuning.yaml": []byte("apiVersion: nodewright.nvidia.com/v1alpha1\nkind: NodeWright\nmetadata:\n  name: tuning\n"),
+				},
+			},
+			Version:       "v0.9.0",
+			RepoURL:       "https://github.com/my-org/gitops.git",
+			OCISourceName: ociSource,
+		}
+	}
+
+	disableWait := func(t *testing.T, raw, section string) (bool, bool) {
+		t.Helper()
+		var hr struct {
+			Spec map[string]any `yaml:"spec"`
+		}
+		if err := yaml.Unmarshal([]byte(raw), &hr); err != nil {
+			t.Fatalf("parse HelmRelease: %v\n%s", err, raw)
+		}
+		sec, _ := hr.Spec[section].(map[string]any)
+		v, ok := sec["disableWait"]
+		if !ok {
+			return false, false
+		}
+		b, isBool := v.(bool)
+		return b, isBool
+	}
+
+	for _, mode := range []struct{ name, oci string }{{"git", ""}, {"oci", "aicr-bundle"}} {
+		t.Run(mode.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			if _, err := newGenerator(mode.oci).Generate(ctx, outputDir); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+			raw := readFile(t, filepath.Join(outputDir, "network-operator-post", "helmrelease.yaml"))
+			for _, section := range []string{"install", "upgrade"} {
+				if got, ok := disableWait(t, raw, section); !ok || !got {
+					t.Errorf("annotated chart: spec.%s.disableWait = %v (present=%v), want true\n%s", section, got, ok, raw)
+				}
+			}
+			for _, dir := range []string{"network-operator-pre", "nodewright-customizations", "network-operator"} {
+				raw := readFile(t, filepath.Join(outputDir, dir, "helmrelease.yaml"))
+				for _, section := range []string{"install", "upgrade"} {
+					if _, ok := disableWait(t, raw, section); ok {
+						t.Errorf("%s: spec.%s.disableWait present, want absent\n%s", dir, section, raw)
+					}
+				}
 			}
 		})
 	}

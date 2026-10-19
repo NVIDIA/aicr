@@ -26,9 +26,11 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"flag"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -36,14 +38,40 @@ import (
 	"time"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"gopkg.in/yaml.v3"
+
 	"github.com/NVIDIA/aicr/pkg/bom"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/helm"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
+const crdsOnly = "CRDs only"
+
+// expectedNoImages names the Helm components whose chart legitimately renders
+// no container images, with the reason. In strict mode a Helm component that
+// renders zero images and is not listed here fails, and a listed component
+// that starts rendering images fails too, so the list cannot go stale.
+var expectedNoImages = map[string]string{
+	"agentgateway-crds":          crdsOnly,
+	"mariadb-operator-crds":      crdsOnly,
+	"prometheus-operator-crds":   crdsOnly,
+	"slinky-slurm-operator-crds": crdsOnly,
+}
+
+// renderTimeout and renderRetryBackoff are vars so tests can shrink them.
+var (
+	renderTimeout      = 90 * time.Second
+	renderRetryBackoff = 2 * time.Second
+)
+
 const (
-	defaultHelmTimeout = 90 * time.Second
+	renderAttempts = 3
+
+	// Keys labeling structured error context.
+	componentContextKey = "component"
+	pathContextKey      = "path"
+
 	// Component kinds reference the shared pkg/bom identifiers so the tool and
 	// the BOM renderer cannot drift on the string values.
 	kindHelm      = bom.TypeHelm
@@ -82,7 +110,7 @@ func main() {
 	flag.StringVar(&outDir, "out-dir", "dist/bom", "directory to write bom.cdx.json and bom.md")
 	flag.StringVar(&aicrVersion, "aicr-version", "dev", "AICR version label embedded in the BOM")
 	flag.BoolVar(&skipHelm, "skip-helm", false, "skip helm template rendering (only walk embedded manifests)")
-	flag.BoolVar(&strict, "strict", false, "fail if any component fails to render or is missing a pinned chart version")
+	flag.BoolVar(&strict, "strict", false, "fail if any component fails to render, is missing a pinned chart version, or a Helm chart renders no images and is not in expectedNoImages")
 	flag.BoolVar(&deterministic, "deterministic", false, "suppress per-run metadata (timestamps, version churn) in the Markdown output for committable artifacts")
 	flag.BoolVar(&noTitle, "no-title", false, "omit the H1 title in the Markdown output so the body can be embedded as a section of a larger document")
 	flag.Parse()
@@ -100,6 +128,8 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "load registry", err)
 	}
+
+	enableNoImagesCheck(reg.Components, strict)
 
 	if mkErr := os.MkdirAll(outDir, 0o755); mkErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "mkdir out-dir", mkErr)
@@ -237,6 +267,26 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 	return nil
 }
 
+// enableNoImagesCheck sets the zero-image check on every component.
+func enableNoImagesCheck(components []component, on bool) {
+	for i := range components {
+		components[i].checkNoImages = on
+	}
+}
+
+// noImagesIssue reports a mismatch between the number of images a Helm chart
+// rendered and the component's expectedNoImages entry, or "" when they agree.
+func noImagesIssue(name string, chartImages int) string {
+	reason, listed := expectedNoImages[name]
+	switch {
+	case chartImages == 0 && !listed:
+		return "chart rendered no images. Add it to expectedNoImages if that is intended"
+	case chartImages > 0 && listed:
+		return fmt.Sprintf("chart renders images. Remove it from expectedNoImages (listed as %q)", reason)
+	}
+	return ""
+}
+
 func indexComponentsByName(components []component) map[string]component {
 	byName := make(map[string]component, len(components))
 	for _, c := range components {
@@ -268,13 +318,47 @@ func surveyComponents(
 	return results, nil
 }
 
-// renderHelmComponent shells out to `helm template` for c. The timeout
-// context is scoped to this call so its associated timer is canceled before
-// the manifests walk begins, regardless of how many components are surveyed.
-func renderHelmComponent(ctx context.Context, repoRoot string, c component, r helm.Renderer) ([]byte, []string) {
-	ctx, cancel := context.WithTimeout(ctx, defaultHelmTimeout)
-	defer cancel()
+// renderWithRetry renders in, retrying render failures (chart pulls are
+// network calls that fail transiently) up to renderAttempts times with linear
+// backoff. Each attempt gets its own timeout, and an attempt that hit it is
+// not retried, so a hung chart costs one timeout rather than three. A failure
+// that survives every attempt is returned, so a missing chart still surfaces.
+func renderWithRetry(ctx context.Context, r helm.Renderer, in helm.ChartInput) ([]byte, error) {
+	var (
+		out []byte
+		err error
+	)
+	for attempt := 1; attempt <= renderAttempts; attempt++ {
+		var timedOut bool
+		out, timedOut, err = renderOnce(ctx, r, in)
+		// Only ErrCodeInternal (helm exited non-zero) is worth retrying. A
+		// missing helm binary or an unconfigured chart will not fix itself.
+		if err == nil || timedOut || attempt == renderAttempts ||
+			!stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
 
+			break
+		}
+		slog.Warn("chart render failed, retrying", "component", in.Name, "attempt", attempt, "error", err)
+		select {
+		case <-ctx.Done():
+			return out, err
+		case <-time.After(time.Duration(attempt) * renderRetryBackoff):
+		}
+	}
+	return out, err
+}
+
+// renderOnce runs a single render attempt and reports whether it ran out of
+// time.
+func renderOnce(ctx context.Context, r helm.Renderer, in helm.ChartInput) (out []byte, timedOut bool, err error) {
+	ctx, cancel := context.WithTimeout(ctx, renderTimeout)
+	defer cancel()
+	out, err = r.Render(ctx, in)
+	return out, ctx.Err() != nil, err
+}
+
+// renderHelmComponent shells out to `helm template` for c.
+func renderHelmComponent(ctx context.Context, repoRoot string, c component, r helm.Renderer) ([]byte, []string) {
 	var warnings []string
 
 	valuesPath := filepath.Join(repoRoot, "recipes", "components", c.Name, "values.yaml")
@@ -286,7 +370,7 @@ func renderHelmComponent(ctx context.Context, repoRoot string, c component, r he
 			valuesPath = ""
 		}
 	}
-	out, err := r.Render(ctx, helm.ChartInput{
+	out, err := renderWithRetry(ctx, r, helm.ChartInput{
 		Name:       c.Name,
 		Chart:      c.effectiveChart(),
 		Repository: c.Helm.DefaultRepository,
@@ -350,6 +434,13 @@ func surveyComponent(
 				images[i] = struct{}{}
 			}
 		}
+		// images holds only chart output here, so manifest images cannot
+		// mask a chart that rendered nothing.
+		if c.checkNoImages && len(res.Warnings) == 0 {
+			if issue := noImagesIssue(c.Name, len(images)); issue != "" {
+				res.Warnings = append(res.Warnings, issue)
+			}
+		}
 	}
 
 	manifestsDir := filepath.Join(repoRoot, "recipes", "components", c.Name, "manifests")
@@ -393,6 +484,14 @@ func surveyComponent(
 		}
 	}
 
+	closureImages, err := readWorkloadClosure(repoRoot, c.Name, pinnedVersion(c))
+	if err != nil {
+		return res, err
+	}
+	for _, i := range closureImages {
+		images[i] = struct{}{}
+	}
+
 	res.Images = make([]string, 0, len(images))
 	for i := range images {
 		res.Images = append(res.Images, i)
@@ -401,8 +500,91 @@ func surveyComponent(
 	return res, nil
 }
 
+// workloadClosure is the generated inventory of images a component pulls that
+// rendering its chart cannot reveal. NVCRE is the case it exists for: its
+// benchmark catalog is go:embed-compiled into the manager, so the chart renders
+// the controller image and nothing the benchmarks actually run.
+type workloadClosure struct {
+	SourceVersion string `yaml:"sourceVersion"`
+	Images        []struct {
+		Image  string `yaml:"image"`
+		Digest string `yaml:"digest"`
+	} `yaml:"images"`
+}
+
+// closureRequiredComponents names the components whose workload closure is
+// part of the BOM contract rather than an optional extra. For these, an absent
+// or empty inventory is a defect rather than a component that legitimately has
+// none, so it must fail the survey instead of silently narrowing the BOM.
+var closureRequiredComponents = map[string]struct{}{"nvcre": {}}
+
+// readWorkloadClosure returns the component's declared non-rendered images.
+// For a component outside closureRequiredComponents an absent file is normal.
+// Every other defect is fatal: degrading to a warning would emit a BOM that
+// looks complete while silently omitting the images a mirror has to carry.
+//
+// pinned is the component's registry version. A present closure must name it
+// in sourceVersion, because a chart bump that lands before the closure is
+// regenerated otherwise republishes the previous version's workload images
+// under the new pin — the BOM would describe a version AICR no longer ships.
+// The check is offline and runs inside the survey, so `make bom-docs` and the
+// committed-BOM test gate it without needing a workflow of its own.
+func readWorkloadClosure(repoRoot, componentName, pinned string) ([]string, error) {
+	path := filepath.Join(repoRoot, "recipes", "components", componentName, "workload-images.yaml")
+	_, required := closureRequiredComponents[componentName]
+	data, err := os.ReadFile(path) //nolint:gosec // path is derived from a registry component name under the repo root
+	if err != nil {
+		if os.IsNotExist(err) {
+			if required {
+				return nil, errors.WrapWithContext(errors.ErrCodeNotFound,
+					"workload closure is required for this component but absent; regenerate it", nil,
+					map[string]any{componentContextKey: componentName, pathContextKey: path})
+			}
+			return nil, nil
+		}
+		return nil, errors.WrapWithContext(errors.ErrCodeInternal, "read workload closure", err,
+			map[string]any{componentContextKey: componentName, pathContextKey: path})
+	}
+
+	var doc workloadClosure
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest, "parse workload closure", err,
+			map[string]any{componentContextKey: componentName, pathContextKey: path})
+	}
+	if doc.SourceVersion != pinned {
+		return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+			"workload closure sourceVersion does not match the pinned chart version; regenerate it", nil,
+			map[string]any{
+				componentContextKey: componentName,
+				pathContextKey:      path,
+				"sourceVersion":     doc.SourceVersion,
+				"pinnedVersion":     pinned,
+			})
+	}
+	if required && len(doc.Images) == 0 {
+		return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+			"workload closure is required for this component but lists no images", nil,
+			map[string]any{componentContextKey: componentName, pathContextKey: path})
+	}
+
+	out := make([]string, 0, len(doc.Images))
+	for _, i := range doc.Images {
+		if i.Image == "" {
+			return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+				"workload closure entry has no image reference", nil,
+				map[string]any{componentContextKey: componentName, pathContextKey: path})
+		}
+		ref := i.Image
+		if i.Digest != "" {
+			ref = i.Image + "@" + i.Digest
+		}
+		out = append(out, ref)
+	}
+	return out, nil
+}
+
 func wrapInvalidDescriptorSurveyError(err error, componentName, manifestPath string) error {
-	errContext := map[string]any{"component": componentName}
+	errContext := map[string]any{componentContextKey: componentName}
 	message := fmt.Sprintf(
 		"invalid structured image descriptor in component %q rendered chart",
 		componentName,

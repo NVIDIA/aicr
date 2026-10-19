@@ -133,7 +133,11 @@ env:
 jobs:
   monitor:
     name: AICR release identity + log consistency (Rekor v2)
-    runs-on: ubuntu-latest
+    # Upstream only: forks that enable Actions would otherwise run this hourly,
+    # burning minutes and going red (no checkpoint history, no release identity
+    # to monitor) and opening alert/degraded issues in the fork.
+    if: github.repository == 'nvidia/aicr'
+    runs-on: ubuntu-24.04
     # Backstop the per-pass context timeout in the tool (defaultTimeout, 45m):
     # the job is killed if a network stall somehow outlives it. Sized so the
     # tool's own 45m deadline (which classifies as operational) fires first, and
@@ -260,7 +264,7 @@ jobs:
 
       - name: Persist checkpoint
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: ${{ env.ARTIFACT_NAME }}
           # The signed checkpoint plus its two companions (<file>.scan and

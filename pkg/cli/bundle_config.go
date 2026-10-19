@@ -67,31 +67,33 @@ func stringSliceFlagOrConfig(cmd *cli.Command, flagName string, fallback []strin
 	return slices.Clone(fallback)
 }
 
-// resolveNodeSelector returns the parsed map for a CLI selector flag,
-// preferring CLI input over the supplied fallback map. Errors from
-// parsing carry ErrCodeInvalidRequest. The fallback is defensively
-// cloned even though spec accessors already clone — this is the
-// canonical entry point and should not require the caller to remember
-// who copies what.
+// resolveNodeSelector returns the selector parsed from flagName when it is
+// set, and otherwise a clone of fallback. A parse error carries
+// ErrCodeInvalidRequest and names the flag.
 func resolveNodeSelector(cmd *cli.Command, flagName string, fallback map[string]string) (map[string]string, error) {
 	if cmd.IsSet(flagName) {
 		parsed, err := snapshotter.ParseNodeSelectors(cmd.StringSlice(flagName))
 		if err != nil {
-			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("invalid --%s", flagName))
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid --%s", flagName), err)
 		}
 		if len(fallback) > 0 {
 			slog.Info("CLI flag replacing config selector", "flag", flagName)
 		}
 		return parsed, nil
 	}
+	// Spec accessors already clone. Cloning here too spares callers from
+	// tracking who copies what.
 	return maps.Clone(fallback), nil
 }
 
 // resolveDRAEvictionNodeLabel resolves the singular DRA eviction label from
-// CLI/config input and falls back to NVIDIA's documented label when neither is
-// set. Unlike general node-selector flags, exactly one key=value pair is
-// accepted because GPU Operator consumes the key as a scalar env value.
+// CLI/config input. Unlike general node-selector flags, exactly one key=value
+// pair is accepted because GPU Operator consumes the key as a scalar env value.
+//
+// When neither source sets it the zero NodeLabel is returned, which the bundler
+// reads as "eviction contract not requested" and injects neither half. Setting
+// the flag or the config field is the opt-in (see issue #2469).
 func resolveDRAEvictionNodeLabel(cmd *cli.Command, fallback *bundlercfg.NodeLabel) (bundlercfg.NodeLabel, error) {
 	const flagName = "dra-eviction-node-label"
 	if cmd.IsSet(flagName) {
@@ -109,7 +111,7 @@ func resolveDRAEvictionNodeLabel(cmd *cli.Command, fallback *bundlercfg.NodeLabe
 	if fallback != nil {
 		return *fallback, nil
 	}
-	return bundlercfg.DefaultDRAEvictionNodeLabel(), nil
+	return bundlercfg.NodeLabel{}, nil
 }
 
 // resolveTolerations returns the final tolerations slice for a flag,

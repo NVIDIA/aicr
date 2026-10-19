@@ -22,21 +22,21 @@
 {{- $cust := index .Values "nodewright-customizations" }}
 {{- /* tuningEnabled (default true) disables node tuning uniformly across the */}}
 {{- /* nodewright tuning manifests (cf. tuning.yaml). Here the tuning package */}}
-{{- /* is the CR's only package, so the gate suppresses the whole Skyhook CR. */}}
+{{- /* is the CR's only one, so the gate suppresses the whole NodeWright CR. */}}
 {{- /* Sprig-safe: only an explicit false disables (absent/true render); a */}}
 {{- /* "| default true" would swallow an explicit false under --deployer flux. */}}
 {{- if and (ne (toString (index $cust "enabled")) "false") (ne (toString (index $cust "tuningEnabled")) "false") }}
 ---
-apiVersion: skyhook.nvidia.com/v1alpha1
-kind: Skyhook
+apiVersion: nodewright.nvidia.com/v1alpha1
+kind: NodeWright
 metadata:
   annotations:
-    # No Helm hooks: this Skyhook CR is release-managed so that disabling tuning
-    # (tuningEnabled=false) actually retracts it. As a hook it would be orphaned
-    # under Flux on a true->false flip (before-hook-creation never fires once the
-    # CR leaves the render). Ordering after the Skyhook CRD is handled by the
-    # component dependency on nodewright-operator, not an intra-release hook;
-    # helm/argo already strip these hooks at bundle time.
+    # No Helm hooks: this NodeWright CR is release-managed so that disabling
+    # tuning (tuningEnabled=false) actually retracts it. As a hook it would be
+    # orphaned under Flux on a true->false flip (before-hook-creation never
+    # fires once the CR leaves the render). Ordering after the NodeWright CRD
+    # is handled by the component dependency on nodewright-operator, not an
+    # intra-release hook; helm/argo already strip these hooks at bundle time.
     aicr/skip-hook-validation: "true"
   labels:
     app.kubernetes.io/part-of: skyhook-operator

@@ -19,6 +19,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -33,15 +34,18 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
+	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocdhelm"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	bundleverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -95,14 +99,18 @@ func (d closedWorldTestDeployer) Generate(_ context.Context, outputDir string) (
 		}
 	}
 	return &deployer.Output{
-		Files:     []string{payloadPath},
-		TotalSize: int64(len(payload)),
+		Files: []string{payloadPath},
+		// Every real deployer sets Entrypoint unconditionally (helm.go's is
+		// "deploy.sh"), so bundleinfo.Write's required-field check treats an
+		// empty one as a truncated record, not a legitimate helm bundle.
+		Entrypoint: "deploy.sh",
+		TotalSize:  int64(len(payload)),
 	}, nil
 }
 
 func closedWorldRecipeResult() *recipe.RecipeResult {
 	return &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     recipe.CriteriaServiceEKS,
@@ -184,7 +192,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 	t.Run("final inventory includes and binds recipe", func(t *testing.T) {
 		dir := t.TempDir()
 		output, err := newBundler(t).runDeployer(
-			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, nil, time.Now())
+			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, nil, nil, time.Now())
 		if err != nil {
 			t.Fatalf("runDeployer() error = %v", err)
 		}
@@ -231,8 +239,8 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		b := &DefaultBundler{Config: cfg, Attester: attester}
 		_, err := b.runDeployer(
 			context.Background(), closedWorldTestDeployer{writeUnmanaged: true},
-			closedWorldRecipeResult(), t.TempDir(), nil, time.Now())
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			closedWorldRecipeResult(), t.TempDir(), nil, nil, time.Now())
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("runDeployer() error = %v, want ErrCodeInvalidRequest", err)
 		}
 		if attester.called != 0 {
@@ -250,7 +258,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		b := &DefaultBundler{Config: cfg, Attester: attester}
 		dir := t.TempDir()
 		output, err := b.runDeployer(
-			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, nil, time.Now())
+			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, nil, nil, time.Now())
 		if err != nil {
 			t.Fatalf("runDeployer() error = %v", err)
 		}
@@ -284,8 +292,8 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 	t.Run("unmanaged executable is rejected", func(t *testing.T) {
 		_, err := newBundler(t).runDeployer(
 			context.Background(), closedWorldTestDeployer{writeUnmanaged: true},
-			closedWorldRecipeResult(), t.TempDir(), nil, time.Now())
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			closedWorldRecipeResult(), t.TempDir(), nil, nil, time.Now())
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("runDeployer() error = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
@@ -294,8 +302,8 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		_, err := newBundler(t).runDeployer(
-			ctx, closedWorldTestDeployer{}, closedWorldRecipeResult(), t.TempDir(), nil, time.Now())
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+			ctx, closedWorldTestDeployer{}, closedWorldRecipeResult(), t.TempDir(), nil, nil, time.Now())
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("runDeployer() error = %v, want ErrCodeTimeout", err)
 		}
 	})
@@ -326,7 +334,7 @@ func TestAttestBundle_PropagatesCancellation(t *testing.T) {
 		cancel()
 		attester := &closedWorldTestAttester{}
 		files, err := newBundler(attester).attestBundle(ctx, dir, nil, closedWorldRecipeResult())
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Fatalf("attestBundle() error = %v, want ErrCodeTimeout", err)
 		}
 		if len(files) != 0 {
@@ -343,7 +351,7 @@ func TestAttestBundle_PropagatesCancellation(t *testing.T) {
 		}
 		files, err := newBundler(attester).attestBundle(
 			context.Background(), dir, nil, closedWorldRecipeResult())
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Fatalf("attestBundle() error = %v, want ErrCodeTimeout", err)
 		}
 		if len(files) != 0 {
@@ -364,7 +372,7 @@ func TestAttestBundle_RequiresChecksums(t *testing.T) {
 
 	files, err := b.attestBundle(
 		context.Background(), t.TempDir(), nil, closedWorldRecipeResult())
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("attestBundle() error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if len(files) != 0 {
@@ -409,7 +417,7 @@ func TestMake_ClosedWorldPrewriteGuard(t *testing.T) {
 				t.Fatalf("New() error = %v", err)
 			}
 			_, err = b.Make(context.Background(), closedWorldRecipeResult(), dir)
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("Make() error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if _, statErr := os.Stat(filepath.Join(dir, "README.md")); !stderrors.Is(statErr, os.ErrNotExist) {
@@ -428,7 +436,7 @@ func TestMake_ClosedWorldPrewriteGuard(t *testing.T) {
 			t.Fatalf("New() error = %v", err)
 		}
 		_, err = b.Make(context.Background(), closedWorldRecipeResult(), dir)
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("Make() error = %v, want ErrCodeInvalidRequest", err)
 		}
 		if _, statErr := os.Stat(filepath.Join(dir, "README.md")); statErr != nil {
@@ -448,6 +456,7 @@ func TestMake_ClosedWorldAllDeployers(t *testing.T) {
 		{name: "argocd-helm", deployer: config.DeployerArgoCDHelm, repoURL: "https://github.com/example/bundles.git"},
 		{name: "flux", deployer: config.DeployerFlux, repoURL: "https://github.com/example/bundles.git"},
 		{name: "helmfile", deployer: config.DeployerHelmfile},
+		{name: "terraform", deployer: config.DeployerTerraform},
 	}
 
 	for _, tt := range tests {
@@ -478,6 +487,96 @@ func TestMake_ClosedWorldAllDeployers(t *testing.T) {
 	}
 }
 
+// TestMake_EveryDeployerEmitsRecipe covers #2753: the recipe write used to be
+// gated on the helm deployer, so every other bundle format carried no
+// recipe and could not be fed back to anything that re-resolves one.
+//
+// The byte-identity assertion is the part that would not survive a plausible
+// "fix": writing the recipe from each deployer in turn re-marshals it per
+// deployer, and yaml.v3 walks Go map order, so two bundles built from one
+// recipe would disagree. That breaks the digest the attestation is taken over
+// rather than anything visible in a file listing.
+func TestMake_EveryDeployerEmitsRecipe(t *testing.T) {
+	tests := []struct {
+		name     string
+		deployer config.DeployerType
+		repoURL  string
+	}{
+		{name: "helm", deployer: config.DeployerHelm},
+		{name: "argocd", deployer: config.DeployerArgoCD, repoURL: "https://github.com/example/bundles.git"},
+		{name: "argocd-helm", deployer: config.DeployerArgoCDHelm, repoURL: "https://github.com/example/bundles.git"},
+		{name: "flux", deployer: config.DeployerFlux, repoURL: "https://github.com/example/bundles.git"},
+		{name: "helmfile", deployer: config.DeployerHelmfile},
+		{name: "terraform", deployer: config.DeployerTerraform},
+	}
+
+	emitted := make(map[string][]byte, len(tests))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.NewConfig(
+				config.WithDeployer(tt.deployer),
+				config.WithRepoURL(tt.repoURL),
+				config.WithIncludeChecksums(true),
+			)
+			b, err := New(WithConfig(cfg))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			dir := t.TempDir()
+			output, err := b.Make(context.Background(), closedWorldRecipeResult(), dir)
+			if err != nil {
+				t.Fatalf("Make() error = %v", err)
+			}
+
+			data, err := os.ReadFile(filepath.Join(dir, RecipeFileName))
+			if err != nil {
+				t.Fatalf("read %s: %v", RecipeFileName, err)
+			}
+			emitted[tt.name] = data
+
+			var reloaded recipe.RecipeResult
+			if unmarshalErr := yaml.Unmarshal(data, &reloaded); unmarshalErr != nil {
+				t.Errorf("emitted %s does not parse as a RecipeResult: %v", RecipeFileName, unmarshalErr)
+			}
+			if len(reloaded.ComponentRefs) == 0 {
+				t.Errorf("emitted %s carries no componentRefs", RecipeFileName)
+			}
+
+			// A recipe outside checksums.txt is outside the attestation
+			// subject, so presence on disk alone is not the guarantee.
+			opts := checksum.InventoryOptions{AllowedMetadataPaths: attestation.BundleMetadataPaths()}
+			_, inventory, _, err := checksum.ReadAndVerifyBundle(context.Background(), dir, opts)
+			if err != nil {
+				t.Fatalf("ReadAndVerifyBundle() error = %v", err)
+			}
+			if !slices.Contains(inventory.RelativeFiles(), RecipeFileName) {
+				t.Errorf("%s missing from checksum inventory %v", RecipeFileName, inventory.RelativeFiles())
+			}
+			var reported bool
+			for _, res := range output.Results {
+				if slices.Contains(res.Files, filepath.Join(dir, RecipeFileName)) {
+					reported = true
+					break
+				}
+			}
+			if !reported {
+				t.Errorf("%s missing from the reported result files", RecipeFileName)
+			}
+		})
+	}
+
+	if len(emitted) != len(tests) {
+		t.Fatalf("collected %d recipes, want %d", len(emitted), len(tests))
+	}
+	want := emitted["helm"]
+	for name, got := range emitted {
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s emitted a different %s than helm; the recipe is re-marshaled "+
+				"per deployer instead of sharing one serializer path", name, RecipeFileName)
+		}
+	}
+}
+
 func TestMake_HelmBundlePassesVerifierChecksums(t *testing.T) {
 	b, err := New(WithConfig(config.NewConfig(
 		config.WithDeployer(config.DeployerHelm),
@@ -501,6 +600,359 @@ func TestMake_HelmBundlePassesVerifierChecksums(t *testing.T) {
 	if verification.TrustLevel != bundleverifier.TrustUnverified {
 		t.Errorf("TrustLevel = %s, want %s", verification.TrustLevel, bundleverifier.TrustUnverified)
 	}
+}
+
+// TestBundleWritesBundleInfo verifies that every bundle carries
+// bundle-info.yaml, binding itself to the recipe beside it and — when
+// checksums are enabled — covered by checksums.txt like every other bundle
+// payload.
+//
+// The includeChecksums=false case is the unconditionality proof: the write
+// must not live inside the `if b.Config.IncludeChecksums()` block in
+// runDeployer. Every other case in this package builds with checksums on
+// (config.NewConfig's own default), so without this case nothing here would
+// fail if a future refactor moved the write into that block.
+func TestBundleWritesBundleInfo(t *testing.T) {
+	tests := []struct {
+		name             string
+		includeChecksums bool
+	}{
+		{name: "checksums enabled", includeChecksums: true},
+		{name: "checksums disabled", includeChecksums: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := config.NewConfig(
+				config.WithDeployer(config.DeployerHelm),
+				config.WithIncludeChecksums(tt.includeChecksums),
+			)
+			b, err := New(WithConfig(cfg))
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			recipeResult := closedWorldRecipeResult()
+			if _, makeErr := b.Make(context.Background(), recipeResult, dir); makeErr != nil {
+				t.Fatalf("Make: %v", makeErr)
+			}
+
+			info, err := bundleinfo.Read(context.Background(), dir)
+			if err != nil {
+				t.Fatalf("Read: %v", err)
+			}
+			if info.Build.Deployer != "helm" {
+				t.Errorf("deployer = %q, want helm", info.Build.Deployer)
+			}
+			if info.Layout.Entrypoint != "deploy.sh" {
+				t.Errorf("entrypoint = %q, want deploy.sh", info.Layout.Entrypoint)
+			}
+			// The fixture has exactly one component and no injected
+			// -pre/-post/-readiness folders, so the release sequence is
+			// spelled out explicitly here rather than derived from
+			// len(recipeResult.DeploymentOrder): that length is not a
+			// valid invariant in general (injected folders have no
+			// component of their own), and deriving the expectation from
+			// the same input the code under test also reads would let a
+			// regression that drops or duplicates trailing releases hit a
+			// truncated comparison and pass.
+			wantReleases := []string{"gpu-operator"}
+			if len(info.Layout.Releases) != len(wantReleases) {
+				t.Fatalf("releases = %v, want %v (length mismatch)", info.Layout.Releases, wantReleases)
+			}
+			for i, want := range wantReleases {
+				if info.Layout.Releases[i].Component != want {
+					t.Errorf("release[%d].Component = %q, want %q (deployer order must be preserved)",
+						i, info.Layout.Releases[i].Component, want)
+				}
+			}
+
+			// The record binds itself to the recipe beside it. SHA256RawContext
+			// returns RAW bytes, not hex — the repo hex-encodes with %x at the
+			// two existing call sites (checksum.go:156, inventory.go:170).
+			raw, digestErr := checksum.SHA256RawContext(context.Background(), filepath.Join(dir, "recipe.yaml"))
+			if digestErr != nil {
+				t.Fatalf("digest recipe.yaml: %v", digestErr)
+			}
+			wantDigest := fmt.Sprintf("sha256:%x", raw)
+			if info.Build.Recipe.Digest != wantDigest {
+				t.Errorf("recipe digest = %q, want %q", info.Build.Recipe.Digest, wantDigest)
+			}
+
+			if !tt.includeChecksums {
+				// Unconditionality means bundle-info.yaml must exist with
+				// no checksums.txt anywhere in the bundle at all.
+				if _, statErr := os.Stat(filepath.Join(dir, "checksums.txt")); statErr == nil {
+					t.Error("checksums.txt exists despite includeChecksums=false")
+				}
+				return
+			}
+
+			// The file is bundle content, so checksums.txt must cover it. A
+			// payload missing from the manifest is outside the attestation
+			// subject.
+			manifest, readErr := os.ReadFile(filepath.Join(dir, "checksums.txt"))
+			if readErr != nil {
+				t.Fatalf("read checksums.txt: %v", readErr)
+			}
+			if !strings.Contains(string(manifest), bundleinfo.FileName) {
+				t.Errorf("checksums.txt does not cover %s:\n%s", bundleinfo.FileName, manifest)
+			}
+		})
+	}
+}
+
+// TestBundleInfoIgnoresStaleProvenance covers the one bundle-root file that
+// does not self-heal on a rerun into the same directory.
+//
+// provenance.yaml is written only when a run vendors charts, and
+// localformat.pruneStaleFolders removes NNN-<name>/ directories and nothing
+// else. Bundle with --vendor-charts and then without, into the same output
+// directory, and the file from the first run survives into the second. A
+// record derived from the directory rather than from the run then claims
+// layout.provenance beside build.settings.vendorCharts=false, pointing a
+// consumer at a file this run neither wrote nor covered by its checksums.txt
+// — outside the bundle's own attestation subject.
+//
+// Vendoring needs upstream chart bytes, so the stale file is planted directly
+// rather than produced by a first run. Checksums are off because the exact
+// inventory finalization rejects any unexpected bundle file before the record
+// can be observed; that path fails loudly, and this one is the quiet one.
+func TestBundleInfoIgnoresStaleProvenance(t *testing.T) {
+	tests := []struct {
+		name     string
+		deployer config.DeployerType
+		repoURL  string
+	}{
+		{name: "helm", deployer: config.DeployerHelm},
+		{name: "argocd", deployer: config.DeployerArgoCD, repoURL: "https://github.com/example/bundles.git"},
+		{name: "argocd-helm", deployer: config.DeployerArgoCDHelm, repoURL: "https://github.com/example/bundles.git"},
+		{name: "flux", deployer: config.DeployerFlux, repoURL: "https://github.com/example/bundles.git"},
+		{name: "helmfile", deployer: config.DeployerHelmfile},
+		{name: "terraform", deployer: config.DeployerTerraform},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			stale := filepath.Join(dir, localformat.ProvenanceFileName)
+			if err := os.WriteFile(stale, []byte("charts: []\n"), 0600); err != nil {
+				t.Fatalf("plant stale provenance: %v", err)
+			}
+
+			b, err := New(WithConfig(config.NewConfig(
+				config.WithDeployer(tt.deployer),
+				config.WithRepoURL(tt.repoURL),
+				config.WithIncludeChecksums(false),
+				config.WithVendorCharts(false),
+			)))
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			if _, makeErr := b.Make(context.Background(), closedWorldRecipeResult(), dir); makeErr != nil {
+				t.Fatalf("Make: %v", makeErr)
+			}
+
+			info, err := bundleinfo.Read(context.Background(), dir)
+			if err != nil {
+				t.Fatalf("Read: %v", err)
+			}
+			if info.Build.Settings.VendorCharts {
+				t.Fatal("vendorCharts is true; the run this asserts against must not vendor")
+			}
+			if info.Layout.Provenance != "" {
+				t.Errorf("layout.provenance = %q for a run that vendored nothing; the record "+
+					"indexes a file left behind by an earlier run, which this run's "+
+					"checksums.txt does not cover", info.Layout.Provenance)
+			}
+		})
+	}
+}
+
+// sourceSettingsRecipeResult is a one-component recipe every deployer
+// generates from. It spells the component type as recipe.ComponentTypeHelm
+// rather than the lowercase literal closedWorldRecipeResult uses: flux
+// switches on the typed constant and rejects anything else, where the other
+// four deployers never inspect the field.
+func sourceSettingsRecipeResult() *recipe.RecipeResult {
+	rr := closedWorldRecipeResult()
+	rr.ComponentRefs[0].Type = recipe.ComponentTypeHelm
+	rr.ComponentRefs[0].Chart = "gpu-operator"
+	rr.ComponentRefs[0].Namespace = "gpu-operator"
+	return rr
+}
+
+// TestBundleInfoScopesSourceSettingsPerDeployer pins which deployers record
+// repoURL, targetRevision and appName, and with what value.
+//
+// TestSettingsKeysAreAllowlisted in pkg/bundler/bundleinfo cannot catch this:
+// all three keys are legitimate, and what is wrong is pairing one with a
+// deployer that never showed its effect. bundle-info.yaml is pushed to
+// registries and committed to GitOps repos, so an unconsumed setting
+// publishes a value the bundle itself never mentions — for argocd-helm, the
+// deployer built for OCI publication, a private GitOps URL in the only place
+// in the artifact it appears.
+//
+// The unset cases are the other half: a deployer that resolves a default when
+// the operator passes nothing bakes that default into the bundle, so the
+// record has to carry it. Recording the raw config value instead would leave
+// the key absent and tell a consumer nothing was configured, while the bundle
+// ships an unusable placeholder URL.
+//
+// Each case runs the real generator and asserts against its output rather
+// than against buildDeployer's argument lists: argocd-helm is handed RepoURL
+// and TargetRevision and shows neither, because the chart is URL-portable and
+// rewrites both into `.Values` directives. Every recorded repoURL is then
+// looked for in the emitted tree, which is what makes "already observable in
+// the bundle" an assertion instead of a claim.
+func TestBundleInfoScopesSourceSettingsPerDeployer(t *testing.T) {
+	const (
+		repoURL        = "https://github.com/my-org/private-gitops.git"
+		targetRevision = "v1.2.3"
+		appName        = "tenant-stack"
+	)
+
+	tests := []struct {
+		name               string
+		deployer           config.DeployerType
+		configure          bool
+		wantRepoURL        string
+		wantTargetRevision string
+		wantAppName        string
+	}{
+		// helm, helmfile and terraform: the generators declare none of the
+		// three fields, configured or not. Each installs from chart folders
+		// inside the bundle, so no repository coordinate is observable in
+		// anything they emit -- recording one would describe a source the
+		// bundle never names.
+		{name: "helm", deployer: config.DeployerHelm, configure: true},
+		{name: "helm unset", deployer: config.DeployerHelm},
+		{name: "helmfile", deployer: config.DeployerHelmfile, configure: true},
+		{name: "helmfile unset", deployer: config.DeployerHelmfile},
+		{name: "terraform", deployer: config.DeployerTerraform, configure: true},
+		{name: "terraform unset", deployer: config.DeployerTerraform},
+		{
+			name:               "argocd",
+			deployer:           config.DeployerArgoCD,
+			configure:          true,
+			wantRepoURL:        repoURL,
+			wantTargetRevision: targetRevision,
+			wantAppName:        appName,
+		},
+		{
+			// The deployers' own fallbacks. They are spelled out here rather
+			// than read back from the deployer so a silent change to either
+			// one has to be restated in a test.
+			name:               "argocd unset",
+			deployer:           config.DeployerArgoCD,
+			wantRepoURL:        "https://github.com/YOUR-ORG/YOUR-REPO.git",
+			wantTargetRevision: "main",
+			wantAppName:        "nvidia-stack",
+		},
+		{
+			name:        "argocd-helm",
+			deployer:    config.DeployerArgoCDHelm,
+			configure:   true,
+			wantAppName: appName,
+		},
+		{
+			name:        "argocd-helm unset",
+			deployer:    config.DeployerArgoCDHelm,
+			wantAppName: "aicr-stack",
+		},
+		{
+			name:               "flux",
+			deployer:           config.DeployerFlux,
+			configure:          true,
+			wantRepoURL:        repoURL,
+			wantTargetRevision: targetRevision,
+		},
+		{
+			name:               "flux unset",
+			deployer:           config.DeployerFlux,
+			wantRepoURL:        "https://github.com/YOUR_ORG/YOUR_REPO.git",
+			wantTargetRevision: "main",
+		},
+	}
+
+	covered := make(map[string]bool, len(tests))
+	for _, tt := range tests {
+		covered[tt.deployer.String()] = true
+		t.Run(tt.name, func(t *testing.T) {
+			opts := []config.Option{config.WithDeployer(tt.deployer)}
+			if tt.configure {
+				opts = append(opts,
+					config.WithRepoURL(repoURL),
+					config.WithTargetRevision(targetRevision),
+					config.WithAppName(appName),
+				)
+			}
+			b, err := New(WithConfig(config.NewConfig(opts...)))
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			ctx := context.Background()
+			d, err := b.buildDeployer(ctx, sourceSettingsRecipeResult(), nil, nil, "")
+			if err != nil {
+				t.Fatalf("buildDeployer: %v", err)
+			}
+			outDir := t.TempDir()
+			out, err := d.Generate(ctx, outDir)
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+
+			got := b.bundleInfoSettings(out)
+			if got.RepoURL != tt.wantRepoURL {
+				t.Errorf("repoURL = %q, want %q", got.RepoURL, tt.wantRepoURL)
+			}
+			if got.TargetRevision != tt.wantTargetRevision {
+				t.Errorf("targetRevision = %q, want %q", got.TargetRevision, tt.wantTargetRevision)
+			}
+			if got.AppName != tt.wantAppName {
+				t.Errorf("appName = %q, want %q", got.AppName, tt.wantAppName)
+			}
+			if got.RepoURL != "" && !treeContains(t, outDir, got.RepoURL) {
+				t.Errorf("recorded repoURL %q appears in no file the bundle emitted; "+
+					"a setting belongs in the record only when the bundle already shows it",
+					got.RepoURL)
+			}
+		})
+	}
+
+	// A deployer added without a case here would default to recording
+	// nothing, which is the safe direction but an undeclared one.
+	for _, name := range config.GetDeployerTypes() {
+		if !covered[name] {
+			t.Errorf("deployer %q has no case; declare which source settings its bundle shows", name)
+		}
+	}
+}
+
+// treeContains reports whether any file under root contains want.
+func treeContains(t *testing.T, root, want string) bool {
+	t.Helper()
+
+	found := false
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || found || entry.IsDir() {
+			return err
+		}
+		data, readErr := os.ReadFile(path) //nolint:gosec // test-local temp tree
+		if readErr != nil {
+			return readErr
+		}
+		if bytes.Contains(data, []byte(want)) {
+			found = true
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", root, err)
+	}
+	return found
 }
 
 func TestNew_AttestWithoutBinaryAttestation(t *testing.T) {
@@ -705,7 +1157,7 @@ func TestMake_NilConfigFailsClosed(t *testing.T) {
 	}
 
 	_, err := bundler.Make(t.Context(), recipeResult, t.TempDir())
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("Make() error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "construct the bundler with New") {
@@ -724,7 +1176,7 @@ func TestMake_InvalidConfigFailsClosed(t *testing.T) {
 	}
 
 	_, err := bundler.Make(t.Context(), recipeResult, t.TempDir())
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("Make() error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "invalid node label key") {
@@ -742,7 +1194,7 @@ func TestMake_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -924,7 +1376,7 @@ func TestMake_RecipeCoveredByChecksums(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -952,13 +1404,13 @@ func TestMake_RecipeCoveredByChecksums(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read %s: %v", checksum.ChecksumFileName, err)
 	}
-	if !strings.Contains(string(checksums), "  "+recipeFileName+"\n") {
-		t.Fatalf("%s does not cover %s:\n%s", checksum.ChecksumFileName, recipeFileName, checksums)
+	if !strings.Contains(string(checksums), "  "+RecipeFileName+"\n") {
+		t.Fatalf("%s does not cover %s:\n%s", checksum.ChecksumFileName, RecipeFileName, checksums)
 	}
 
-	recipePath := filepath.Join(bundleDir, recipeFileName)
+	recipePath := filepath.Join(bundleDir, RecipeFileName)
 	if err = os.WriteFile(recipePath, []byte("tampered: true\n"), 0600); err != nil {
-		t.Fatalf("tamper %s: %v", recipeFileName, err)
+		t.Fatalf("tamper %s: %v", RecipeFileName, err)
 	}
 
 	verifyResult, err := bundleverifier.Verify(context.Background(), bundleDir, nil)
@@ -966,10 +1418,10 @@ func TestMake_RecipeCoveredByChecksums(t *testing.T) {
 		t.Fatalf("Verify() error = %v", err)
 	}
 	if verifyResult.ChecksumsPassed {
-		t.Fatalf("Verify() passed after %s was tampered with", recipeFileName)
+		t.Fatalf("Verify() passed after %s was tampered with", RecipeFileName)
 	}
-	if !strings.Contains(strings.Join(verifyResult.Errors, "\n"), recipeFileName) {
-		t.Errorf("Verify() errors do not identify %s: %v", recipeFileName, verifyResult.Errors)
+	if !strings.Contains(strings.Join(verifyResult.Errors, "\n"), RecipeFileName) {
+		t.Errorf("Verify() errors do not identify %s: %v", RecipeFileName, verifyResult.Errors)
 	}
 }
 
@@ -983,7 +1435,7 @@ func TestMake_DisabledComponentsFiltered(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -1042,13 +1494,11 @@ func TestMake_DisabledComponentsFiltered(t *testing.T) {
 // TestMake_DisabledDependencyPruned verifies that disabling a component that
 // others depend on bundles successfully: the dangling dependency edge on the
 // dependent is pruned so the helmfile level computation does not see an
-// undeclared dependency and fail with a false circular-dependency error.
+// undeclared dependency and report it as missing.
 func TestMake_DisabledDependencyPruned(t *testing.T) {
 	// Use the helmfile deployer: it recomputes levels via
-	// ComponentRefsTopologicalLevels, the only path that inspects dependency
-	// edges at bundle time. Without the prune loop, the dangling
-	// gpu-operator → cert-manager edge would surface here as a false
-	// circular-dependency error, so this is where the regression is pinned.
+	// ComponentRefsTopologicalLevels. Without the prune loop, the
+	// gpu-operator -> cert-manager edge would be reported as missing.
 	cfg := config.NewConfig(config.WithDeployer(config.DeployerHelmfile))
 	bundler, err := New(WithConfig(cfg))
 	if err != nil {
@@ -1058,7 +1508,7 @@ func TestMake_DisabledDependencyPruned(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
 		ComponentRefs: []recipe.ComponentRef{
@@ -1087,35 +1537,90 @@ func TestMake_DisabledDependencyPruned(t *testing.T) {
 // component that does not exist in the recipe must still fail rather than have
 // the bad edge silently erased.
 func TestMake_UndeclaredDependencyErrors(t *testing.T) {
-	// Use the helmfile deployer: it recomputes levels via
-	// ComponentRefsTopologicalLevels, which is where an undeclared dependency
-	// must surface (the default helm deployer sorts by DeploymentOrder and does
-	// not validate edges at bundle time).
-	cfg := config.NewConfig(config.WithDeployer(config.DeployerHelmfile))
-	bundler, err := New(WithConfig(cfg))
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	ctx := context.Background()
-	tmpDir := t.TempDir()
+	t.Parallel()
 
-	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
-		Kind:       "Recipe",
-		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
-		ComponentRefs: []recipe.ComponentRef{
-			// cert-manager is neither declared nor disabled — it simply does not exist.
-			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia", DependencyRefs: []string{"cert-manager"}},
+	tests := []struct {
+		name        string
+		refs        []recipe.ComponentRef
+		wantMissing bool
+		wantCycle   bool
+	}{
+		{
+			name:        "missing dependency",
+			refs:        []recipe.ComponentRef{{Name: "a", DependencyRefs: []string{"phantom", "phantom"}}},
+			wantMissing: true,
 		},
-		DeploymentOrder: []string{"gpu-operator"},
+		{
+			name: "cycle and missing dependency",
+			refs: []recipe.ComponentRef{
+				{Name: "a", DependencyRefs: []string{"phantom"}},
+				{Name: "b", DependencyRefs: []string{"c"}},
+				{Name: "c", DependencyRefs: []string{"b"}},
+			},
+			wantMissing: true,
+			wantCycle:   true,
+		},
+		{
+			name: "cycle without missing dependencies",
+			refs: []recipe.ComponentRef{
+				{Name: "a", DependencyRefs: []string{"b"}},
+				{Name: "b", DependencyRefs: []string{"a"}},
+			},
+			wantCycle: true,
+		},
 	}
-
-	_, err = bundler.Make(ctx, recipeResult, tmpDir)
-	if err == nil {
-		t.Fatal("Make() with undeclared dependency expected error, got nil")
-	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
-		t.Errorf("Make() error code = %v, want ErrCodeInvalidRequest", err)
+	for _, deployerName := range config.GetDeployerTypes() {
+		t.Run(deployerName, func(t *testing.T) {
+			t.Parallel()
+			deployerType, parseErr := config.ParseDeployerType(deployerName)
+			if parseErr != nil {
+				t.Fatal(parseErr)
+			}
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					cfg := config.NewConfig(config.WithDeployer(deployerType))
+					bundler, err := New(WithConfig(cfg))
+					if err != nil {
+						t.Fatalf("New() error = %v", err)
+					}
+					refs := slices.Clone(tt.refs)
+					for i := range refs {
+						refs[i].Type = recipe.ComponentTypeHelm
+						refs[i].Source = "https://charts.example.com"
+						refs[i].Version = "1.0.0"
+					}
+					recipeResult := &recipe.RecipeResult{
+						APIVersion:      recipe.RecipeResultAPIVersion,
+						Kind:            recipe.RecipeResultKind,
+						ComponentRefs:   refs,
+						DeploymentOrder: []string{"a", "b", "c"},
+					}
+					original := recipeResult.DeepCopy()
+					outputDir := filepath.Join(t.TempDir(), "bundle")
+					_, err = bundler.Make(t.Context(), recipeResult, outputDir)
+					if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+						t.Fatalf("Make() error = %v, want ErrCodeInvalidRequest", err)
+					}
+					const missing = `component "a" depends on "phantom", which is not present in this recipe`
+					wantCount := 0
+					if tt.wantMissing {
+						wantCount = 1
+					}
+					if strings.Count(err.Error(), missing) != wantCount {
+						t.Errorf("Make() error = %v, want missing dependency reported %d times", err, wantCount)
+					}
+					if strings.Contains(err.Error(), "circular dependencies exist") != tt.wantCycle {
+						t.Errorf("Make() error = %v, want cycle reported = %v", err, tt.wantCycle)
+					}
+					if _, statErr := os.Stat(outputDir); !os.IsNotExist(statErr) {
+						t.Errorf("invalid graph created output or returned unexpected stat error: %v", statErr)
+					}
+					if !reflect.DeepEqual(recipeResult, original) {
+						t.Error("Make() mutated the caller's recipe")
+					}
+				})
+			}
+		})
 	}
 }
 
@@ -1178,7 +1683,7 @@ func TestMake_BundlersFilter(t *testing.T) {
 			}
 
 			recipeResult := &recipe.RecipeResult{
-				APIVersion: "aicr.run/v1alpha2",
+				APIVersion: "aicr.run/v1",
 				Kind:       "Recipe",
 				Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
 				ComponentRefs: []recipe.ComponentRef{
@@ -1196,7 +1701,7 @@ func TestMake_BundlersFilter(t *testing.T) {
 				if makeErr == nil {
 					t.Fatal("Make() expected error, got nil")
 				}
-				if !stderrors.Is(makeErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(makeErr) != errors.ErrCodeInvalidRequest {
 					t.Errorf("Make() error code = %v, want ErrCodeInvalidRequest", makeErr)
 				}
 				if !strings.Contains(makeErr.Error(), tt.wantErrText) {
@@ -1312,7 +1817,7 @@ func TestFilterEnabledComponents_ExcludedDriverInstallerWarning(t *testing.T) {
 			}
 
 			recipeResult := &recipe.RecipeResult{
-				APIVersion:    "aicr.run/v1alpha2",
+				APIVersion:    "aicr.run/v1",
 				Kind:          "Recipe",
 				Criteria:      &recipe.Criteria{Service: "aks", Accelerator: "h100", Intent: "inference"},
 				ComponentRefs: tt.refs,
@@ -1341,8 +1846,8 @@ func TestFilterEnabledComponents_ExcludedDriverInstallerWarning(t *testing.T) {
 
 // TestMake_BundlersFilterDependencyPruned verifies that a dependency edge
 // pointing at an enabled-but-filtered-out component is pruned exactly like a
-// disabled one: the helmfile deployer (the only path that recomputes ordering
-// from dependency edges) must not fail with a false circular-dependency error
+// disabled one: dependency validation and the helmfile level computation
+// must not report a missing dependency
 // when the depended-upon component is excluded by the bundlers filter. See #1531.
 func TestMake_BundlersFilterDependencyPruned(t *testing.T) {
 	t.Parallel()
@@ -1357,7 +1862,7 @@ func TestMake_BundlersFilterDependencyPruned(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
 		ComponentRefs: []recipe.ComponentRef{
@@ -1456,7 +1961,7 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 			}
 
 			recipeResult := &recipe.RecipeResult{
-				APIVersion: "aicr.run/v1alpha2",
+				APIVersion: "aicr.run/v1",
 				Kind:       "Recipe",
 				Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
 				ComponentRefs: []recipe.ComponentRef{
@@ -1475,7 +1980,7 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 				}
 				// Pin the structured code: both the re-enable rejection and the
 				// unparseable --set value are invalid-request errors.
-				if !stderrors.Is(makeErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(makeErr) != errors.ErrCodeInvalidRequest {
 					t.Errorf("Make() error code = %v, want ErrCodeInvalidRequest", makeErr)
 				}
 				return
@@ -1511,7 +2016,7 @@ func TestMake_SetEnabledNotLeakedToHelmValues(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
 		ComponentRefs: []recipe.ComponentRef{
@@ -1564,7 +2069,7 @@ func TestMake_WithValueOverrides(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -1615,7 +2120,7 @@ func TestMake_WithTypedValueOverrides(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -1673,7 +2178,7 @@ func TestMake_TypedOverrideWinsOverSet(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
@@ -1718,7 +2223,7 @@ func TestMake_WithNodeSelectors(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -1760,7 +2265,7 @@ func TestMake_WithTolerations(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -1794,7 +2299,7 @@ func TestMake_ContextCancellation(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -1821,7 +2326,7 @@ func TestMake_DefaultOutputDir(t *testing.T) {
 	ctx := context.Background()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -1864,7 +2369,7 @@ func TestMake_ArgoCD(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -1940,7 +2445,7 @@ func TestMake_Helmfile(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -2229,7 +2734,7 @@ func TestMake_TypedEnabledToggleRejectedBelowCLI(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
@@ -2242,6 +2747,55 @@ func TestMake_TypedEnabledToggleRejectedBelowCLI(t *testing.T) {
 	}
 	if !strings.Contains(makeErr.Error(), config.ComponentEnabledKey) || !strings.Contains(makeErr.Error(), "--set") {
 		t.Errorf("error %q must name the enabled toggle and point to --set", makeErr.Error())
+	}
+}
+
+// TestMake_TypedA4xStorageClassCreateRejected verifies the bundler rejects a
+// dynamo-platform:a4xStorageClass.create override supplied via
+// --set-json/--set-file, whether the typed path is an exact match, a parent
+// (an object override deep-merging create into chart values the same way),
+// or a child of the toggle. A typed override would write the value into
+// Helm chart values but would not affect whether the fixed a4x-compatible
+// StorageClass manifest is included in the bundle.
+func TestMake_TypedA4xStorageClassCreateRejected(t *testing.T) {
+	tests := []struct {
+		name  string
+		path  string
+		value any
+	}{
+		{name: "exact path", path: "a4xStorageClass.create", value: false},
+		{name: "parent path (whole object)", path: "a4xStorageClass", value: map[string]any{"create": false}},
+		{name: "child path", path: "a4xStorageClass.create.nested", value: "x"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.NewConfig(
+				config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+					{Component: "dynamo-platform", Path: tt.path, Value: tt.value},
+				}),
+			)
+			bundler, err := New(WithConfig(cfg))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			recipeResult := &recipe.RecipeResult{
+				APIVersion: "aicr.run/v1",
+				Kind:       "Recipe",
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "dynamo-platform", Version: "v0.1.0", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
+				},
+			}
+
+			_, makeErr := bundler.Make(context.Background(), recipeResult, t.TempDir())
+			if makeErr == nil {
+				t.Fatalf("expected error: typed path %q must be rejected as intersecting a4xStorageClass.create", tt.path)
+			}
+			if !strings.Contains(makeErr.Error(), "a4xStorageClass.create") || !strings.Contains(makeErr.Error(), "--set") {
+				t.Errorf("error %q must name the a4xStorageClass.create toggle and point to --set", makeErr.Error())
+			}
+		})
 	}
 }
 
@@ -2365,74 +2919,6 @@ func TestApplyNodeSchedulingOverrides_StorageClass(t *testing.T) {
 	}
 }
 
-func TestApplyNodeSchedulingOverrides_DynamoPlatformStorageClass(t *testing.T) {
-	const scPath = "nats.config.jetstream.fileStore.pvc.storageClassName"
-
-	registry, err := recipe.GetComponentRegistry()
-	if err != nil {
-		t.Fatalf("GetComponentRegistry() error = %v", err)
-	}
-	comp := registry.Get("dynamo-platform")
-	if comp == nil {
-		t.Fatal("registry missing dynamo-platform")
-	}
-	if !slices.Contains(comp.GetStorageClassPaths(), scPath) {
-		t.Fatalf("registry storageClassPaths for dynamo-platform = %v, want %q",
-			comp.GetStorageClassPaths(), scPath)
-	}
-
-	tests := []struct {
-		name          string
-		cfgOpts       []config.Option
-		initialValues map[string]string
-		wantValue     string
-	}{
-		{
-			name:      "global storageClass injected into bundled NATS PVC",
-			cfgOpts:   []config.Option{config.WithStorageClass("my-storage-class")},
-			wantValue: "my-storage-class",
-		},
-		{
-			name: "explicit dynamo --set wins over global --storage-class",
-			cfgOpts: []config.Option{
-				config.WithStorageClass("my-storage-class"),
-				config.WithValueOverrides(map[string]map[string]string{
-					"dynamo": {scPath: "explicit-gp2"},
-				}),
-			},
-			initialValues: map[string]string{scPath: "explicit-gp2"},
-			wantValue:     "explicit-gp2",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := config.NewConfig(tt.cfgOpts...)
-			b, err := New(WithConfig(cfg))
-			if err != nil {
-				t.Fatalf("New() error = %v", err)
-			}
-
-			values := map[string]any{}
-			if len(tt.initialValues) > 0 {
-				if applyErr := component.ApplyMapOverrides(values, tt.initialValues); applyErr != nil {
-					t.Fatalf("ApplyMapOverrides() setup error = %v", applyErr)
-				}
-			}
-
-			b.applyNodeSchedulingOverrides("dynamo-platform", values, nil, schedulingPathPolicy{})
-
-			got, ok := component.GetValueByPath(values, scPath)
-			if !ok {
-				t.Fatal("storageClassName not injected")
-			}
-			if got != tt.wantValue {
-				t.Errorf("storageClassName = %v, want %q", got, tt.wantValue)
-			}
-		})
-	}
-}
-
 // TestApplyNodeSchedulingOverrides_RespectsRecipeSetPaths verifies the
 // precedence rule that paths the user explicitly populated via the recipe
 // overlay's inline overrides or CLI --set are NOT overwritten by CLI/config
@@ -2544,6 +3030,19 @@ func TestApplyNodeSchedulingOverrides_RespectsRecipeSetPaths(t *testing.T) {
 			},
 			description: "component default values file value is overwritten by --accelerated-node-toleration",
 		},
+		{
+			name:    "repeated CLI toleration is written once",
+			initial: map[string]any{},
+			policy:  schedulingPathPolicy{},
+			cliTols: []corev1.Toleration{
+				{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpEqual, Value: "present", Effect: corev1.TaintEffectNoSchedule},
+				{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpEqual, Value: "present", Effect: corev1.TaintEffectNoSchedule},
+			},
+			wantValue: []any{
+				map[string]any{"key": "nvidia.com/gpu", "operator": "Equal", "value": "present", "effect": "NoSchedule"},
+			},
+			description: "--accelerated-node-toleration passed twice with the same value renders a single entry",
+		},
 	}
 
 	for _, tt := range tests {
@@ -2570,6 +3069,798 @@ func TestApplyNodeSchedulingOverrides_RespectsRecipeSetPaths(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestApplyNodeSchedulingOverrides_NFDWorkerGetsSystemAndAcceleratedTolerations
+// pins #3135. The registry declares nfd's worker.tolerations and
+// topologyUpdater.tolerations under BOTH the system and accelerated tiers
+// because those DaemonSets must run on every node; the rendered value must be
+// the union of both flags, not whichever pass ran last.
+func TestApplyNodeSchedulingOverrides_NFDWorkerGetsSystemAndAcceleratedTolerations(t *testing.T) {
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry() error = %v", err)
+	}
+	nfd := registry.Get("nfd")
+	if nfd == nil {
+		t.Fatalf("registry missing nfd component")
+	}
+	sharedPaths := []string{"worker.tolerations", "topologyUpdater.tolerations"}
+	for _, p := range sharedPaths {
+		if !slices.Contains(nfd.GetSystemTolerationPaths(), p) || !slices.Contains(nfd.GetAcceleratedTolerationPaths(), p) {
+			t.Fatalf("nfd %q must be declared under both system and accelerated tolerationPaths; system=%v accelerated=%v",
+				p, nfd.GetSystemTolerationPaths(), nfd.GetAcceleratedTolerationPaths())
+		}
+	}
+
+	systemTol := corev1.Toleration{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}
+	acceleratedTol := corev1.Toleration{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpEqual, Value: "present", Effect: corev1.TaintEffectNoSchedule}
+	cfg := config.NewConfig(
+		config.WithSystemNodeTolerations([]corev1.Toleration{systemTol}),
+		config.WithAcceleratedNodeTolerations([]corev1.Toleration{acceleratedTol}),
+	)
+	b, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	values := map[string]any{}
+	b.applyNodeSchedulingOverrides("nfd", values, nil, schedulingPathPolicy{})
+
+	want := []any{
+		map[string]any{"key": "CriticalAddonsOnly", "operator": "Exists", "effect": "NoSchedule"},
+		map[string]any{"key": "nvidia.com/gpu", "operator": "Equal", "value": "present", "effect": "NoSchedule"},
+	}
+	for _, p := range sharedPaths {
+		got, ok := component.GetValueByPath(values, p)
+		if !ok {
+			t.Fatalf("%s not present after injection", p)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("nfd %s must tolerate both system and accelerated taints; got accelerated only or wrong order (#3135)\n  got  = %#v\n  want = %#v", p, got, want)
+		}
+	}
+
+	// A system-only path is unaffected by the shared-path union.
+	got, ok := component.GetValueByPath(values, "master.tolerations")
+	if !ok {
+		t.Fatalf("master.tolerations not present after injection")
+	}
+	if wantMaster := want[:1]; !reflect.DeepEqual(got, wantMaster) {
+		t.Errorf("nfd master.tolerations must carry only the system toleration\n  got  = %#v\n  want = %#v", got, wantMaster)
+	}
+}
+
+// TestApplyNodeSchedulingOverrides_SharedPathUnion covers the shared-path
+// rules around the #3135 fix: keyless system entries are dropped only when an
+// accelerated list is merged in, the union is deduplicated, and opt-out /
+// append-mode / values-file-default handling matches non-shared paths.
+func TestApplyNodeSchedulingOverrides_SharedPathUnion(t *testing.T) {
+	const workerPath = "worker.tolerations"
+	const masterPath = "master.tolerations"
+	sysTol := corev1.Toleration{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}
+	accTol := corev1.Toleration{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpEqual, Value: "present", Effect: corev1.TaintEffectNoSchedule}
+	keyless := corev1.Toleration{Operator: corev1.TolerationOpExists}
+	sysMap := map[string]any{"key": "CriticalAddonsOnly", "operator": "Exists", "effect": "NoSchedule"}
+	accMap := map[string]any{"key": "nvidia.com/gpu", "operator": "Equal", "value": "present", "effect": "NoSchedule"}
+	keylessMap := map[string]any{"operator": "Exists"}
+	exampleMap := map[string]any{"key": "example.com/dedicated", "operator": "Exists", "effect": "NoSchedule"}
+
+	tests := []struct {
+		name       string
+		initial    map[string]any
+		policy     schedulingPathPolicy
+		sys        []corev1.Toleration
+		acc        []corev1.Toleration
+		wantWorker []any
+		wantMaster []any // nil = don't check
+	}{
+		{
+			name:       "flags-only overlap is written once",
+			initial:    map[string]any{},
+			sys:        []corev1.Toleration{sysTol, accTol},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{sysMap, accMap},
+			wantMaster: []any{sysMap, accMap},
+		},
+		{
+			name:       "keyless system default is not carried onto the shared path",
+			initial:    map[string]any{},
+			sys:        []corev1.Toleration{keyless},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{accMap},
+			wantMaster: []any{keylessMap},
+		},
+		{
+			name:       "keyed system entries are carried, keyless dropped",
+			initial:    map[string]any{},
+			sys:        []corev1.Toleration{keyless, sysTol},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{sysMap, accMap},
+		},
+		{
+			name:       "no accelerated list: keyless system default is written as given",
+			initial:    map[string]any{},
+			sys:        []corev1.Toleration{keyless},
+			wantWorker: []any{keylessMap},
+			wantMaster: []any{keylessMap},
+		},
+		{
+			name:       "no accelerated list: mixed system list is not narrowed",
+			initial:    map[string]any{},
+			sys:        []corev1.Toleration{keyless, sysTol},
+			wantWorker: []any{keylessMap, sysMap},
+			wantMaster: []any{keylessMap, sysMap},
+		},
+		{
+			name: "append mode keeps overlay entries and does not repeat the system one",
+			initial: map[string]any{
+				"worker": map[string]any{"tolerations": []any{sysMap, exampleMap}},
+			},
+			policy:     schedulingPathPolicy{appendMode: map[string]struct{}{workerPath: {}}},
+			sys:        []corev1.Toleration{sysTol},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{sysMap, exampleMap, accMap},
+		},
+		{
+			name: "opt-out empty list is preserved",
+			initial: map[string]any{
+				"worker": map[string]any{"tolerations": []any{}},
+			},
+			policy:     schedulingPathPolicy{optOut: map[string]struct{}{workerPath: {}}},
+			sys:        []corev1.Toleration{sysTol},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{},
+		},
+		{
+			name: "values-file default is replaced when only accelerated is set",
+			initial: map[string]any{
+				"worker": map[string]any{"tolerations": []any{keylessMap}},
+			},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{accMap},
+		},
+		{
+			name:       "system-only path never receives accelerated entries",
+			initial:    map[string]any{},
+			sys:        []corev1.Toleration{sysTol},
+			acc:        []corev1.Toleration{accTol},
+			wantWorker: []any{sysMap, accMap},
+			wantMaster: []any{sysMap},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.NewConfig(
+				config.WithSystemNodeTolerations(tt.sys),
+				config.WithAcceleratedNodeTolerations(tt.acc),
+			)
+			b, err := New(WithConfig(cfg))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			b.applyNodeSchedulingOverrides("nfd", tt.initial, nil, tt.policy)
+
+			got, ok := component.GetValueByPath(tt.initial, workerPath)
+			if !ok {
+				t.Fatalf("%s not present after injection", workerPath)
+			}
+			if !reflect.DeepEqual(got, tt.wantWorker) {
+				t.Errorf("%s:\n  got  = %#v\n  want = %#v", workerPath, got, tt.wantWorker)
+			}
+			if tt.wantMaster != nil {
+				gotMaster, ok := component.GetValueByPath(tt.initial, masterPath)
+				if !ok {
+					t.Fatalf("%s not present after injection", masterPath)
+				}
+				if !reflect.DeepEqual(gotMaster, tt.wantMaster) {
+					t.Errorf("%s:\n  got  = %#v\n  want = %#v", masterPath, gotMaster, tt.wantMaster)
+				}
+			}
+		})
+	}
+}
+
+// TestApplyNodeSchedulingOverrides_SharedPathDynamicOptOut: a --dynamic path
+// is skipped by the shared-path union too; the other shared path still gets it.
+func TestApplyNodeSchedulingOverrides_SharedPathDynamicOptOut(t *testing.T) {
+	sysTol := corev1.Toleration{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}
+	accTol := corev1.Toleration{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpEqual, Value: "present", Effect: corev1.TaintEffectNoSchedule}
+	cfg := config.NewConfig(
+		config.WithSystemNodeTolerations([]corev1.Toleration{sysTol}),
+		config.WithAcceleratedNodeTolerations([]corev1.Toleration{accTol}),
+		config.WithDynamicValues(map[string][]string{"nfd": {"worker.tolerations"}}),
+	)
+	b, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	values := map[string]any{}
+	policy := b.computeSchedulingPathPolicy(&recipe.ComponentRef{Name: "nfd"}, nil, nil)
+	for path := range b.dynamicPathSetFor("nfd", nil) {
+		policy.optOut[path] = struct{}{}
+	}
+	b.applyNodeSchedulingOverrides("nfd", values, nil, policy)
+
+	if val, ok := component.GetValueByPath(values, "worker.tolerations"); ok {
+		t.Errorf("worker.tolerations should not be baked in when declared dynamic, got: %v", val)
+	}
+	want := []any{
+		map[string]any{"key": "CriticalAddonsOnly", "operator": "Exists", "effect": "NoSchedule"},
+		map[string]any{"key": "nvidia.com/gpu", "operator": "Equal", "value": "present", "effect": "NoSchedule"},
+	}
+	got, ok := component.GetValueByPath(values, "topologyUpdater.tolerations")
+	if !ok || !reflect.DeepEqual(got, want) {
+		t.Errorf("topologyUpdater.tolerations:\n  got  = %#v\n  want = %#v", got, want)
+	}
+}
+
+// requireNodeSelectorFixtureComponent is a synthetic registry component
+// (merged in via a LayeredDataProvider, never a real catalog entry) that
+// isolates TestApplyNodeSchedulingOverrides_RequireNodeSelector from
+// whichever real components happen to opt into requireNodeSelector.
+const requireNodeSelectorFixtureComponent = "require-node-selector-fixture"
+
+// requireNodeSelectorFixtureProvider returns a DataProvider whose merged
+// registry.yaml adds requireNodeSelectorFixtureComponent on top of the
+// embedded catalog, so callers get a component with a real, addressable
+// registry entry that never drifts with the real catalog's opt-ins.
+func requireNodeSelectorFixtureProvider(t *testing.T) recipe.DataProvider {
+	t.Helper()
+
+	tmpData := t.TempDir()
+	registryYAML := []byte(`apiVersion: aicr.run/v1beta1
+kind: ComponentRegistry
+components:
+  - name: ` + requireNodeSelectorFixtureComponent + `
+    displayName: Require Node Selector Fixture
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - controller.podSpec.nodeSelector
+        requireNodeSelector: true
+`)
+	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), registryYAML, 0o600); err != nil {
+		t.Fatalf("write registry.yaml: %v", err)
+	}
+
+	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: tmpData})
+	if err != nil {
+		t.Fatalf("NewLayeredDataProvider: %v", err)
+	}
+	recipe.EvictCachedRegistry(layered)
+	t.Cleanup(func() { recipe.EvictCachedRegistry(layered) })
+	return layered
+}
+
+// requireNodeSelectorIfStorageClassSetFixtureComponent is a synthetic
+// registry component (merged in via a LayeredDataProvider, never a real
+// catalog entry) that isolates
+// TestApplyNodeSchedulingOverrides_RequireNodeSelectorIfStorageClassSet from
+// whichever real components happen to opt into
+// requireNodeSelectorIfStorageClassSet.
+const requireNodeSelectorIfStorageClassSetFixtureComponent = "require-node-selector-if-storage-class-set-fixture"
+
+// requireNodeSelectorIfStorageClassSetFixtureProvider returns a
+// DataProvider whose merged registry.yaml adds
+// requireNodeSelectorIfStorageClassSetFixtureComponent on top of the
+// embedded catalog, so callers get a component with a real, addressable
+// registry entry that never drifts with the real catalog's opt-ins.
+func requireNodeSelectorIfStorageClassSetFixtureProvider(t *testing.T) recipe.DataProvider {
+	t.Helper()
+
+	tmpData := t.TempDir()
+	registryYAML := []byte(`apiVersion: aicr.run/v1beta1
+kind: ComponentRegistry
+components:
+  - name: ` + requireNodeSelectorIfStorageClassSetFixtureComponent + `
+    displayName: Require Node Selector If Storage Class Set Fixture
+    storageClassPaths:
+      - controller.storage.storageClassName
+    sharedStorageClassPaths:
+      - controller.sharedStorage.storageClassName
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - controller.podSpec.nodeSelector
+        requireNodeSelectorIfStorageClassSet: true
+`)
+	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), registryYAML, 0o600); err != nil {
+		t.Fatalf("write registry.yaml: %v", err)
+	}
+
+	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: tmpData})
+	if err != nil {
+		t.Fatalf("NewLayeredDataProvider: %v", err)
+	}
+	recipe.EvictCachedRegistry(layered)
+	t.Cleanup(func() { recipe.EvictCachedRegistry(layered) })
+	return layered
+}
+
+// failingRegistryProvider is a recipe.DataProvider whose ReadFile always
+// errors. It exercises the registry load failure path of functions that
+// call recipe.GetComponentRegistryFor, such as validateRequiredNodeSelectors.
+type failingRegistryProvider struct{}
+
+func (failingRegistryProvider) ReadFile(_ context.Context, path string) ([]byte, error) {
+	return nil, fmt.Errorf("simulated read failure for %s", path)
+}
+
+func (failingRegistryProvider) WalkDir(_ context.Context, _ string, _ fs.WalkDirFunc) error {
+	return fmt.Errorf("simulated walk failure")
+}
+
+func (failingRegistryProvider) Source(path string) string {
+	return "failing-provider:" + path
+}
+
+// TestApplyNodeSchedulingOverrides_RequireNodeSelector covers the
+// requireNodeSelector opt-in (registry.yaml): a component can set it on
+// nodeScheduling.system/.accelerated so an unpinned pod can never silently
+// land on the wrong node class and strand a later reschedule behind a
+// zone-pinned PVC. Real opt-ins (e.g. slinky-slurm) are covered by their own
+// component-specific tests; this exercises the mechanism in isolation.
+func TestApplyNodeSchedulingOverrides_RequireNodeSelector(t *testing.T) {
+	provider := requireNodeSelectorFixtureProvider(t)
+
+	t.Run("missing selector fails closed", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorFixtureComponent, values, provider, schedulingPathPolicy{})
+		err = b.validateRequiredNodeSelectors(requireNodeSelectorFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err == nil {
+			t.Fatal("expected an error bundling the fixture component with no --system-node-selector, got nil")
+		}
+		if !strings.Contains(err.Error(), "system-node-selector") {
+			t.Errorf("error should name the missing flag, got: %v", err)
+		}
+	})
+
+	t.Run("CLI selector satisfies the requirement", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithSystemNodeSelector(map[string]string{"nodeGroup": "system-cpu"}))
+		b, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorFixtureComponent, values, provider, schedulingPathPolicy{}); err != nil {
+			t.Fatalf("unexpected error with --system-node-selector set: %v", err)
+		}
+		got, ok := component.GetValueByPath(values, "controller.podSpec.nodeSelector")
+		if !ok {
+			t.Fatal("controller.podSpec.nodeSelector not injected")
+		}
+		if !reflect.DeepEqual(got, map[string]any{"nodeGroup": "system-cpu"}) {
+			t.Errorf("controller.podSpec.nodeSelector = %#v, want {nodeGroup: system-cpu}", got)
+		}
+	})
+
+	t.Run("overlay opt-out on every declared path satisfies the requirement", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		policy := schedulingPathPolicy{optOut: map[string]struct{}{
+			"controller.podSpec.nodeSelector": {},
+		}}
+		values := map[string]any{}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorFixtureComponent, values, provider, policy)
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorFixtureComponent, values, provider, policy); err != nil {
+			t.Fatalf("unexpected error when every declared path is opted out: %v", err)
+		}
+	})
+
+	t.Run("overlay-hardcoded selector satisfies the requirement without a CLI flag", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		// Simulates a recipe overlay/default values file that already sets a
+		// real (non-empty) selector at the declared path, with no
+		// --system-node-selector flag. applyNodeSchedulingOverrides is a
+		// no-op here since the CLI selector is empty, so this exercises
+		// validateRequiredNodeSelectors reading a pre-existing value rather
+		// than one it injected.
+		values := map[string]any{
+			"controller": map[string]any{
+				"podSpec": map[string]any{
+					"nodeSelector": map[string]any{"nodeGroup": "hardcoded-pool"},
+				},
+			},
+		}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorFixtureComponent, values, provider, schedulingPathPolicy{}); err != nil {
+			t.Fatalf("unexpected error: overlay already set a non-empty selector: %v", err)
+		}
+	})
+
+	t.Run("a map[any]any override value satisfies the requirement", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		// A generic YAML/JSON decode into `any` can produce map[any]any
+		// for a nested object instead of map[string]any. An SDK caller
+		// building ComponentRef.Overrides from such a decode without
+		// normalizing key types should not have a real selector rejected
+		// as missing.
+		values := map[string]any{
+			"controller": map[string]any{
+				"podSpec": map[string]any{
+					"nodeSelector": map[any]any{"nodeGroup": "hardcoded-pool"},
+				},
+			},
+		}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorFixtureComponent, values, provider, schedulingPathPolicy{}); err != nil {
+			t.Fatalf("unexpected error: map[any]any selector should count as set: %v", err)
+		}
+	})
+
+	t.Run("components without requireNodeSelector stay a silent no-op", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{}
+		b.applyNodeSchedulingOverrides("gpu-operator", values, nil, schedulingPathPolicy{})
+		if err := b.validateRequiredNodeSelectors("gpu-operator", values, nil, schedulingPathPolicy{}); err != nil {
+			t.Fatalf("gpu-operator does not set requireNodeSelector; expected no error, got: %v", err)
+		}
+	})
+
+	// Regression for the bypass: --set-json/--set-file apply AFTER node-
+	// scheduling injection in extractComponentValues and deep-merge with
+	// "null deletes the key" semantics, so a CLI selector that satisfied
+	// injection can still be nulled back out before validation runs.
+	t.Run("a later --set-json null on the injected key is still caught", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithSystemNodeSelector(map[string]string{"nodeGroup": "system-cpu"}))
+		b, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err := component.ApplyTypedOverrides(values, map[string]any{
+			"controller.podSpec.nodeSelector": map[string]any{"nodeGroup": nil},
+		}); err != nil {
+			t.Fatalf("ApplyTypedOverrides: %v", err)
+		}
+
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorFixtureComponent, values, provider, schedulingPathPolicy{}); err == nil {
+			t.Fatal("expected an error: --set-json nulled the CLI-injected selector back to empty")
+		}
+	})
+
+	// Regression for a second bypass: --dynamic leaves a path out of the
+	// bundle entirely for an operator to supply at install time, the same
+	// unpinned state requireNodeSelector exists to reject. Without this
+	// check, a --dynamic path was merged into policy.optOut, and
+	// validateRequiredNodeSelectors treats an opted-out path as satisfied.
+	t.Run("dynamic override on a required selector path is rejected", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		dynPaths := map[string]struct{}{"controller.podSpec.nodeSelector": {}}
+		err = b.rejectDynamicRequiredNodeSelectorPaths(requireNodeSelectorFixtureComponent, provider, dynPaths)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted a requireNodeSelector path")
+		}
+		if !strings.Contains(err.Error(), "controller.podSpec.nodeSelector") {
+			t.Errorf("error should name the conflicting path, got: %v", err)
+		}
+	})
+
+	t.Run("dynamic override on an unrelated path is allowed", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		dynPaths := map[string]struct{}{"controller.podSpec.tolerations": {}}
+		if err := b.rejectDynamicRequiredNodeSelectorPaths(requireNodeSelectorFixtureComponent, provider, dynPaths); err != nil {
+			t.Fatalf("unexpected error, the dynamic path is not one of the fixture's requireNodeSelector paths, got: %v", err)
+		}
+	})
+
+	t.Run("dynamic override on an ancestor of a required selector path is rejected", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		dynPaths := map[string]struct{}{"controller.podSpec": {}}
+		err = b.rejectDynamicRequiredNodeSelectorPaths(requireNodeSelectorFixtureComponent, provider, dynPaths)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted an ancestor of a requireNodeSelector path")
+		}
+	})
+
+	t.Run("dynamic override on a descendant of a required selector path is rejected", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		dynPaths := map[string]struct{}{"controller.podSpec.nodeSelector.nodeGroup": {}}
+		err = b.rejectDynamicRequiredNodeSelectorPaths(requireNodeSelectorFixtureComponent, provider, dynPaths)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted a descendant of a requireNodeSelector path")
+		}
+	})
+
+	t.Run("extractComponentValues rejects a dynamic required selector path", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithDynamicValues(map[string][]string{
+			requireNodeSelectorFixtureComponent: {"controller.podSpec.nodeSelector"},
+		}))
+		b, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		recipeResult := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{{Name: requireNodeSelectorFixtureComponent, Type: "helm"}},
+		}
+		recipeResult.BindDataProvider(provider)
+
+		_, err = b.extractComponentValues(context.Background(), recipeResult)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted a requireNodeSelector path")
+		}
+		if !strings.Contains(err.Error(), "controller.podSpec.nodeSelector") {
+			t.Errorf("error should name the conflicting path, got: %v", err)
+		}
+	})
+
+	t.Run("extractComponentValues rejects a dynamic ancestor of a required selector path", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithDynamicValues(map[string][]string{
+			requireNodeSelectorFixtureComponent: {"controller.podSpec"},
+		}))
+		b, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		recipeResult := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{{Name: requireNodeSelectorFixtureComponent, Type: "helm"}},
+		}
+		recipeResult.BindDataProvider(provider)
+
+		_, err = b.extractComponentValues(context.Background(), recipeResult)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted an ancestor of a requireNodeSelector path")
+		}
+	})
+
+	t.Run("extractComponentValues rejects a dynamic descendant of a required selector path", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithDynamicValues(map[string][]string{
+			requireNodeSelectorFixtureComponent: {"controller.podSpec.nodeSelector.nodeGroup"},
+		}))
+		b, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		recipeResult := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{{Name: requireNodeSelectorFixtureComponent, Type: "helm"}},
+		}
+		recipeResult.BindDataProvider(provider)
+
+		_, err = b.extractComponentValues(context.Background(), recipeResult)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted a descendant of a requireNodeSelector path")
+		}
+	})
+
+	// Regression for a third gap: a registry that fails to load used to
+	// make validateRequiredNodeSelectors a silent no-op, the same as a
+	// missing component. A load failure means requireNodeSelector cannot
+	// be confirmed either way, so it must fail closed instead.
+	t.Run("registry load failure fails closed", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{}
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorFixtureComponent, values, failingRegistryProvider{}, schedulingPathPolicy{}); err == nil {
+			t.Fatal("expected an error, the component registry failed to load")
+		}
+	})
+}
+
+// TestApplyNodeSchedulingOverrides_RequireNodeSelectorIfStorageClassSet
+// covers requireNodeSelectorIfStorageClassSet (registry.yaml), the
+// conditional counterpart to requireNodeSelector for a chart, like
+// kube-prometheus-stack, whose zone-pinning PVC only exists once a storage
+// class is configured. Real opt-ins are covered by their own
+// component-specific tests; this exercises the mechanism in isolation.
+func TestApplyNodeSchedulingOverrides_RequireNodeSelectorIfStorageClassSet(t *testing.T) {
+	provider := requireNodeSelectorIfStorageClassSetFixtureProvider(t)
+
+	t.Run("no storage class configured stays a silent no-op", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{}); err != nil {
+			t.Fatalf("no storage class was configured; expected no error, got: %v", err)
+		}
+	})
+
+	t.Run("storage class configured without a selector fails closed", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithStorageClass("gp3"))
+		b, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		err = b.validateRequiredNodeSelectors(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err == nil {
+			t.Fatal("expected an error: --storage-class was set with no --system-node-selector")
+		}
+		if !strings.Contains(err.Error(), "system-node-selector") {
+			t.Errorf("error should name the missing flag, got: %v", err)
+		}
+	})
+
+	t.Run("storage class and selector both configured satisfies the requirement", func(t *testing.T) {
+		cfg := config.NewConfig(
+			config.WithStorageClass("gp3"),
+			config.WithSystemNodeSelector(map[string]string{"nodeGroup": "system-cpu"}),
+		)
+		b, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{}); err != nil {
+			t.Fatalf("unexpected error with both flags set: %v", err)
+		}
+	})
+
+	// applySharedStorageClassOverride injects --shared-storage-class into
+	// SharedStorageClassPaths, which requireNodeSelectorIfStorageClassSet
+	// evaluates to decide whether to enforce a selector.
+	t.Run("shared storage class configured without a selector fails closed", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithSharedStorageClass("efs-sc"))
+		b, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		if sharedErr := b.applySharedStorageClassOverride(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider); sharedErr != nil {
+			t.Fatalf("applySharedStorageClassOverride() error = %v", sharedErr)
+		}
+		err = b.validateRequiredNodeSelectors(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err == nil {
+			t.Fatal("expected an error: --shared-storage-class was set with no --system-node-selector")
+		}
+		if !strings.Contains(err.Error(), "system-node-selector") {
+			t.Errorf("error should name the missing flag, got: %v", err)
+		}
+	})
+
+	// A recipe overlay/default values file can set the storage class name
+	// directly, with no --storage-class flag at all. The condition reads
+	// the resolved value, not just the CLI flag, so this must still fail
+	// closed without a selector.
+	t.Run("overlay-hardcoded storage class without a selector fails closed", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{
+			"controller": map[string]any{
+				"storage": map[string]any{"storageClassName": "hardcoded-class"},
+			},
+		}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{}); err == nil {
+			t.Fatal("expected an error: an overlay-set storage class with no selector is still the unpinned hazard")
+		}
+	})
+
+	// A blank string is the value an operator gets from a --set override
+	// or overlay field left empty; it carries no storage class and must
+	// not be misread as configured.
+	t.Run("blank overlay storage class value is treated as unset", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{
+			"controller": map[string]any{
+				"storage": map[string]any{"storageClassName": "   "},
+			},
+		}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{}); err != nil {
+			t.Fatalf("a blank storage class value should not activate the requirement, got: %v", err)
+		}
+	})
+
+	// A malformed non-string value at the storage class path (e.g. a
+	// misconfigured overlay) must fail closed rather than silently
+	// skip the requirement.
+	t.Run("non-string overlay storage class value fails closed", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{
+			"controller": map[string]any{
+				"storage": map[string]any{"storageClassName": true},
+			},
+		}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{}); err == nil {
+			t.Fatal("expected an error: a non-string storage class value should still activate the requirement")
+		}
+	})
+
+	// Regression for the same --dynamic bypass covered for the
+	// unconditional flag, rejected regardless of whether a storage class
+	// is configured now, since one could be added later without
+	// rebuilding the bundle.
+	t.Run("dynamic override on a conditionally required selector path is rejected", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		dynPaths := map[string]struct{}{"controller.podSpec.nodeSelector": {}}
+		err = b.rejectDynamicRequiredNodeSelectorPaths(requireNodeSelectorIfStorageClassSetFixtureComponent, provider, dynPaths)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted a requireNodeSelectorIfStorageClassSet path")
+		}
+	})
+
+	// A --dynamic override on the storage-class path removes the value
+	// componentHasConfiguredStorageClass reads, letting an operator defer
+	// the storage class to install time and bypass the requirement
+	// entirely.
+	t.Run("dynamic override on the conditioning storage class path is rejected", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		dynPaths := map[string]struct{}{"controller.storage.storageClassName": {}}
+		err = b.rejectDynamicRequiredNodeSelectorPaths(requireNodeSelectorIfStorageClassSetFixtureComponent, provider, dynPaths)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted the storage class path that conditions requireNodeSelectorIfStorageClassSet")
+		}
+	})
 }
 
 // TestClassifySchedulingPaths covers the helper that splits scheduling
@@ -2727,7 +4018,7 @@ func TestApplyNodeSchedulingOverrides_BoundProvider(t *testing.T) {
 	const nodeSelectorPath = "scheduling.nodeSelector"
 
 	tmpDir := t.TempDir()
-	registryYAML := "apiVersion: aicr.run/v1alpha2\n" +
+	registryYAML := "apiVersion: aicr.run/v1beta1\n" +
 		"kind: ComponentRegistry\n" +
 		"components:\n" +
 		"  - name: " + uniqueComponent + "\n" +
@@ -2826,7 +4117,7 @@ func TestBundler_Make_BoundProviderEndToEnd(t *testing.T) {
 	//      in the base, so our marker passes through into the emitted bundle).
 	tmpData := t.TempDir()
 
-	registryYAML := []byte("apiVersion: aicr.run/v1alpha2\n" +
+	registryYAML := []byte("apiVersion: aicr.run/v1beta1\n" +
 		"kind: ComponentRegistry\n" +
 		"components: []\n")
 	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), registryYAML, 0o600); err != nil {
@@ -3029,76 +4320,6 @@ func TestWarnMissingStorageClassForPVCs(t *testing.T) {
 	}
 }
 
-func TestWarnMissingStorageClassForPVCs_DynamoPlatformNATS(t *testing.T) {
-	const scPath = "nats.config.jetstream.fileStore.pvc.storageClassName"
-
-	recipeResult := &recipe.RecipeResult{
-		ComponentRefs: []recipe.ComponentRef{{
-			Name:       "dynamo-platform",
-			ValuesFile: "components/dynamo-platform/values.yaml",
-		}},
-	}
-
-	tests := []struct {
-		name        string
-		setupValues func(map[string]any)
-		wantWarning bool
-	}{
-		{
-			name:        "warns when bundled NATS PVC omits storageClassName",
-			wantWarning: true,
-		},
-		{
-			name: "does not warn when bundled NATS PVC has storageClassName",
-			setupValues: func(values map[string]any) {
-				component.SetValueByPath(values, scPath, "gp3")
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			values, err := recipeResult.GetValuesForComponent("dynamo-platform")
-			if err != nil {
-				t.Fatalf("GetValuesForComponent(dynamo-platform): %v", err)
-			}
-			if tt.setupValues != nil {
-				tt.setupValues(values)
-			}
-
-			b, err := New()
-			if err != nil {
-				t.Fatalf("New() error = %v", err)
-			}
-
-			err = b.warnMissingStorageClassForPVCs(context.Background(), recipeResult, map[string]map[string]any{
-				"dynamo-platform": values,
-			})
-			if err != nil {
-				t.Fatalf("warnMissingStorageClassForPVCs() error = %v", err)
-			}
-
-			if gotWarning := len(b.warnings) > 0; gotWarning != tt.wantWarning {
-				t.Fatalf("warning present = %v, want %v; warnings = %v", gotWarning, tt.wantWarning, b.warnings)
-			}
-
-			if tt.wantWarning {
-				warning := b.warnings[0]
-				for _, want := range []string{
-					"Warning: dynamo-platform renders a PVC without storageClassName",
-					scPath,
-					"--storage-class <name>",
-					"--set dynamo-platform:" + scPath + "=<name>",
-				} {
-					if !strings.Contains(warning, want) {
-						t.Errorf("warning = %q, want substring %q", warning, want)
-					}
-				}
-			}
-		})
-	}
-}
-
 // TestAgentgatewayComponentExistsInRegistry locks agentgatewayComponentName to a
 // real registry entry. resolveAgentgatewayExposure keys into componentValues by
 // this name; if the "agentgateway" component were renamed in recipes/registry.yaml,
@@ -3219,7 +4440,7 @@ func TestResolveAgentgatewayExposure(t *testing.T) {
 				t.Fatalf("resolveAgentgatewayExposure() error = %v, wantErr %v", gotErr, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(gotErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(gotErr) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", gotErr)
 				}
 			}
@@ -3356,7 +4577,7 @@ func TestCollectComponentManifests_MissingPath(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for missing manifest path")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
 		}
 		msg := err.Error()
@@ -3372,7 +4593,7 @@ func TestCollectComponentManifests_MissingPath(t *testing.T) {
 
 	t.Run("layered provider with --data", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		minimalRegistry := "apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"
+		minimalRegistry := "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"
 		if writeErr := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(minimalRegistry), 0600); writeErr != nil {
 			t.Fatalf("write registry.yaml: %v", writeErr)
 		}
@@ -3391,7 +4612,7 @@ func TestCollectComponentManifests_MissingPath(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for missing manifest path")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
 		}
 		msg := err.Error()
@@ -3403,11 +4624,119 @@ func TestCollectComponentManifests_MissingPath(t *testing.T) {
 	})
 }
 
+func TestDynamoA4xStorageClassEnabled(t *testing.T) {
+	tests := []struct {
+		name      string
+		overrides map[string]string
+		want      bool
+		wantErr   bool
+	}{
+		{name: "unset defaults to enabled", overrides: nil, want: true},
+		{name: "explicit true", overrides: map[string]string{dynamoA4xStorageClassCreateOverridePath: "true"}, want: true},
+		{name: "explicit false", overrides: map[string]string{dynamoA4xStorageClassCreateOverridePath: "false"}, want: false},
+		{name: "non-boolean value fails closed", overrides: map[string]string{dynamoA4xStorageClassCreateOverridePath: "maybe"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := dynamoA4xStorageClassEnabled(tt.overrides)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err == nil && got != tt.want {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCollectComponentManifests_DynamoA4xStorageClassOptOut(t *testing.T) {
+	recipeResult := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:          dynamoPlatformComponentName,
+				ManifestFiles: []string{dynamoA4xStorageClassManifestPath},
+			},
+		},
+	}
+
+	t.Run("default renders the StorageClass manifest", func(t *testing.T) {
+		bundler, err := New()
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		contents, err := bundler.collectComponentManifests(context.Background(), recipeResult)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, ok := contents[dynamoPlatformComponentName][dynamoA4xStorageClassManifestPath]; !ok {
+			t.Errorf("expected %q rendered by default, got %v", dynamoA4xStorageClassManifestPath, contents)
+		}
+	})
+
+	t.Run("create=false omits the StorageClass manifest", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithValueOverrides(map[string]map[string]string{
+			dynamoPlatformComponentName: {dynamoA4xStorageClassCreateOverridePath: "false"},
+		}))
+		bundler, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		contents, err := bundler.collectComponentManifests(context.Background(), recipeResult)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, ok := contents[dynamoPlatformComponentName][dynamoA4xStorageClassManifestPath]; ok {
+			t.Errorf("expected %q to be omitted, got %v", dynamoA4xStorageClassManifestPath, contents)
+		}
+	})
+
+	t.Run("non-boolean override fails closed", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithValueOverrides(map[string]map[string]string{
+			dynamoPlatformComponentName: {dynamoA4xStorageClassCreateOverridePath: "maybe"},
+		}))
+		bundler, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		if _, err := bundler.collectComponentManifests(context.Background(), recipeResult); err == nil {
+			t.Fatal("expected error for non-boolean override")
+		} else if !strings.Contains(err.Error(), dynamoA4xStorageClassCreateOverridePath) {
+			t.Errorf("error should mention %q: %v", dynamoA4xStorageClassCreateOverridePath, err)
+		}
+	})
+}
+
+// TestExtractComponentValues_DynamoA4xStorageClassCreateNotLeakedToHelmValues
+// verifies that the bundling-time a4xStorageClass.create toggle never
+// reaches the ai-dynamo chart's rendered Helm values.
+func TestExtractComponentValues_DynamoA4xStorageClassCreateNotLeakedToHelmValues(t *testing.T) {
+	cfg := config.NewConfig(config.WithValueOverrides(map[string]map[string]string{
+		dynamoPlatformComponentName: {dynamoA4xStorageClassCreateOverridePath: "false"},
+	}))
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	recipeResult := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: dynamoPlatformComponentName, Version: "1.0.0", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia/ai-dynamo"},
+		},
+	}
+
+	values, err := bundler.extractComponentValues(context.Background(), recipeResult)
+	if err != nil {
+		t.Fatalf("extractComponentValues() error = %v", err)
+	}
+	if _, ok := values[dynamoPlatformComponentName][strings.SplitN(dynamoA4xStorageClassCreateOverridePath, ".", 2)[0]]; ok {
+		t.Errorf("a4xStorageClass leaked into Helm values: %v", values[dynamoPlatformComponentName])
+	}
+}
+
 // TestMake_Reproducible verifies that bundle generation is deterministic.
 // Running Make() twice with the same input should produce identical output.
 func TestMake_Reproducible(t *testing.T) {
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -3516,7 +4845,7 @@ func TestMake_DynamicValuesUnknownComponent(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "RecipeResult",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -3549,7 +4878,7 @@ func TestMake_DynamicValuesValidComponent(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "RecipeResult",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -3597,7 +4926,7 @@ func TestMake_DisabledComponentWithDynamic(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "RecipeResult",
 		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
 		ComponentRefs: []recipe.ComponentRef{
@@ -3627,7 +4956,7 @@ func TestMake_DisabledComponentWithDynamic(t *testing.T) {
 	if makeErr == nil {
 		t.Fatal("Make() = nil error, want the absent-component --dynamic rejection")
 	}
-	if !stderrors.Is(makeErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(makeErr) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want ErrCodeInvalidRequest", makeErr)
 	}
 	for _, want := range []string{
@@ -3659,7 +4988,7 @@ func TestMake_ArgoCDRejectsDynamic(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "RecipeResult",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "gpu-operator", Namespace: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator"},
@@ -3677,11 +5006,13 @@ func TestMake_ArgoCDRejectsDynamic(t *testing.T) {
 
 // TestMake_OCP builds a real OCP inference recipe via BuildFromCriteria,
 // bundles it with --readiness-hooks, and verifies:
-//   - Numbered folder layout: 3 OLM + 3 readiness + 3 CR = 9 directories
+//   - Numbered operator-folder layout: each OLM release and readiness gate,
+//     each operator CR, and the Network Operator CR readiness barrier
 //   - Rendered manifest content: Subscription, OperatorGroup, ClusterPolicy,
 //     and the DRA eviction contract in the ClusterPolicy driver manager
 //   - Readiness gate folders with correct gate image
-//   - Deployment ordering: OLM < readiness < CR for each operator
+//   - Deployment ordering: OLM < readiness < CR for each operator, plus
+//     network CR < network readiness < GPU CR for the peermem path
 func TestMake_OCP(t *testing.T) {
 	b := recipe.NewBuilder()
 	criteria := &recipe.Criteria{
@@ -3697,6 +5028,9 @@ func TestMake_OCP(t *testing.T) {
 	cfg := config.NewConfig(
 		config.WithReadinessHooks(true),
 		config.WithVersion(testVersion),
+		// The DRA eviction contract is opt-in (#2469); this test asserts the
+		// OCP ClusterPolicy carries it, so it configures the label.
+		config.WithDRAEvictionNodeLabel(config.DefaultDRAEvictionNodeLabel()),
 	)
 	bundler, err := New(WithConfig(cfg))
 	if err != nil {
@@ -3746,12 +5080,16 @@ func TestMake_OCP(t *testing.T) {
 		}
 	}
 
-	// Assert readiness gate directories exist (one per OLM component).
+	// Assert readiness gate directories exist (one per OLM component), plus
+	// the Network Operator CR barrier that waits for DOCA/OFED reconciliation.
 	for _, olm := range olmComponents {
 		rdnsName := olm + "-readiness"
 		if _, ok := dirByName[rdnsName]; !ok {
 			t.Errorf("missing readiness directory: %s", rdnsName)
 		}
+	}
+	if _, ok := dirByName["network-operator-ocp-readiness"]; !ok {
+		t.Error("missing readiness directory: network-operator-ocp-readiness")
 	}
 
 	// Assert ordering: OLM < readiness < CR for each operator pair.
@@ -3775,6 +5113,23 @@ func TestMake_OCP(t *testing.T) {
 		}
 		if rdnsSeq >= crSeq {
 			t.Errorf("%s-readiness (seq %d) must precede %s (seq %d)", op.olm, rdnsSeq, op.cr, crSeq)
+		}
+	}
+
+	// The direct dependency added for #2499 must put the Network Operator CR
+	// and its aggregate readiness barrier before the GPU ClusterPolicy. The
+	// latter enables driver.rdma and starts the nvidia-peermem path.
+	networkCRSeq, networkCROK := dirByName["network-operator-ocp"]
+	networkReadinessSeq, networkReadinessOK := dirByName["network-operator-ocp-readiness"]
+	gpuCRSeq, gpuCROK := dirByName["gpu-operator-ocp"]
+	if networkCROK && networkReadinessOK && gpuCROK {
+		if networkCRSeq >= networkReadinessSeq {
+			t.Errorf("network-operator-ocp (seq %d) must precede its readiness barrier (seq %d)",
+				networkCRSeq, networkReadinessSeq)
+		}
+		if networkReadinessSeq >= gpuCRSeq {
+			t.Errorf("network-operator-ocp-readiness (seq %d) must precede gpu-operator-ocp (seq %d)",
+				networkReadinessSeq, gpuCRSeq)
 		}
 	}
 
@@ -3829,8 +5184,9 @@ func TestMake_OCP(t *testing.T) {
 	// Assert readiness gate content — each readiness folder must contain the
 	// gate image reference.
 	wantImage := "ghcr.io/nvidia/aicr-gate:" + testVersion
-	for _, olm := range olmComponents {
-		rdnsDir := findNumberedDir(t, outDir, olm+"-readiness")
+	readinessComponents := append(append([]string(nil), olmComponents...), "network-operator-ocp")
+	for _, component := range readinessComponents {
+		rdnsDir := findNumberedDir(t, outDir, component+"-readiness")
 		if rdnsDir == "" {
 			continue
 		}
@@ -3843,7 +5199,30 @@ func TestMake_OCP(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("%s-readiness: gate image %q not found in templates", olm, wantImage)
+			t.Errorf("%s-readiness: gate image %q not found in templates", component, wantImage)
+		}
+	}
+
+	// The OCP Network Operator CR barrier must assert the operator's aggregate
+	// NicClusterPolicy state and carry the least-privilege read permissions
+	// synthesized by gatemanifest.Render.
+	networkReadinessDir := findNumberedDir(t, outDir, "network-operator-ocp-readiness")
+	if networkReadinessDir != "" {
+		templates := readTemplateFiles(t, networkReadinessDir)
+		var rendered strings.Builder
+		for _, content := range templates {
+			rendered.WriteString(content)
+		}
+		body := rendered.String()
+		for _, want := range []string{
+			"kind: NicClusterPolicy",
+			"state: ready",
+			"(status.state != 'ready'): true",
+			"nicclusterpolicies",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("network-operator-ocp-readiness missing %q", want)
+			}
 		}
 	}
 }
@@ -3927,7 +5306,7 @@ func TestMake_PreservesInnerErrorCode(t *testing.T) {
 
 	// "../evil" triggers deployer.IsSafePathComponent → ErrCodeInvalidRequest
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "../evil", Version: "v1.0.0", Type: "helm", Source: "https://example.com"},
@@ -3962,7 +5341,7 @@ func TestMake_PreservesTimeoutFromExtractValues(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
@@ -4002,7 +5381,7 @@ func TestExtractComponentValues_FailsClosedOnValueReadError(t *testing.T) {
 	}}}
 
 	_, err = bundler.extractComponentValues(context.Background(), recipeResult)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Fatalf("extractComponentValues() error = %v, want ErrCodeInternal", err)
 	}
 }
@@ -4036,7 +5415,7 @@ func TestComponentValidationError_PreservesStructuredCode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := componentValidationError(tt.input)
-			if !stderrors.Is(got, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(got) != tt.wantCode {
 				t.Fatalf("componentValidationError() = %v, want code %s", got, tt.wantCode)
 			}
 		})
@@ -4059,7 +5438,7 @@ func TestBundlerValueParity_WithRecipeResult(t *testing.T) {
 	//   - Overrides only             → cert-manager (inline only)
 	//   - ValuesFile + Overrides     → network-operator (hybrid merge)
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -4257,7 +5636,7 @@ func TestCreateDeployer_DeployerOptions(t *testing.T) {
 
 	t.Run("rejected for helm deployer", func(t *testing.T) {
 		b := mk(t, config.DeployerHelm, map[string]string{"namePrefix": "t-"})
-		_, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		_, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
 		if err == nil {
 			t.Fatal("expected error for deployer options with --deployer helm")
 		}
@@ -4272,7 +5651,7 @@ func TestCreateDeployer_DeployerOptions(t *testing.T) {
 
 	t.Run("unknown option key rejected", func(t *testing.T) {
 		b := mk(t, config.DeployerArgoCD, map[string]string{"bogusKey": "x"})
-		_, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		_, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
 		if err == nil {
 			t.Fatal("expected error for unknown deployer option")
 		}
@@ -4291,7 +5670,7 @@ func TestCreateDeployer_DeployerOptions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
-		_, err = b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		_, err = b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
 		if err == nil {
 			t.Fatal("expected error for typed deployer overrides")
 		}
@@ -4306,7 +5685,7 @@ func TestCreateDeployer_DeployerOptions(t *testing.T) {
 
 	t.Run("argocd generator receives options", func(t *testing.T) {
 		b := mk(t, config.DeployerArgoCD, set)
-		d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
 		if err != nil {
 			t.Fatalf("buildDeployer: %v", err)
 		}
@@ -4323,7 +5702,7 @@ func TestCreateDeployer_DeployerOptions(t *testing.T) {
 
 	t.Run("argocd-helm generator receives options", func(t *testing.T) {
 		b := mk(t, config.DeployerArgoCDHelm, set)
-		d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
 		if err != nil {
 			t.Fatalf("buildDeployer: %v", err)
 		}
@@ -4340,7 +5719,7 @@ func TestCreateDeployer_DeployerOptions(t *testing.T) {
 
 	t.Run("no options leaves zero values", func(t *testing.T) {
 		b := mk(t, config.DeployerArgoCD, nil)
-		d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
 		if err != nil {
 			t.Fatalf("buildDeployer: %v", err)
 		}
@@ -4364,7 +5743,7 @@ func TestBuildDeployer_BundleChartVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+	d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
 	if err != nil {
 		t.Fatalf("buildDeployer() error = %v", err)
 	}

@@ -41,6 +41,19 @@ REGISTRY_NAME = ctlptl-registry
 # instead of silently degrading to a stale image (see its yq-missing check).
 KIND_NODE_IMAGE ?= $(shell yq -r '.testing.kind_node_image' .settings.yaml 2>/dev/null)
 
+# ctlptl registry image (single source of truth: .settings.yaml
+# testing_tools.registry_image, an ECR Public mirror). Unset, ctlptl pulls
+# docker.io/library/registry:3 anonymously, which shared CI runners rate-limit.
+KIND_REGISTRY_IMAGE ?= $(shell yq -r '.testing_tools.registry_image' .settings.yaml 2>/dev/null)
+
+# Docker Hub pull-through mirror (single source of truth: .settings.yaml
+# build.dockerhub_mirror, an https:// URL). Image refs need the bare host.
+DOCKERHUB_MIRROR ?= $(shell yq -r '.build.dockerhub_mirror' .settings.yaml 2>/dev/null)
+DOCKERHUB_MIRROR_HOST = $(patsubst https://%,%,$(DOCKERHUB_MIRROR))
+# The same image on the Docker Hub mirror (identical index digest), the fallback
+# when ECR Public sheds an anonymous pull.
+KIND_REGISTRY_MIRROR_IMAGE = $(patsubst public.ecr.aws/docker/%,$(DOCKERHUB_MIRROR_HOST)/%,$(KIND_REGISTRY_IMAGE))
+
 # Default target
 all: help
 
@@ -81,12 +94,14 @@ generate-validator: ## Generate scaffolding for a new check or constraint valida
 # Code Formatting & Dependencies
 # =============================================================================
 
+# Deliberately does NOT run `notices`. THIRD_PARTY_NOTICES.md is generated at
+# release time (see the `release` target) and is not tracked, so regenerating it
+# here would add ~2m20s to every tidy to produce an ignored file.
 .PHONY: tidy
-tidy: ## Formats code, updates Go module dependencies, and regenerates third-party notices
+tidy: ## Formats code and updates Go module dependencies
 	@set -e; \
 	go fmt ./...; \
-	go mod tidy; \
-	$(MAKE) notices
+	go mod tidy
 
 .PHONY: fmt-check
 fmt-check: ## Checks if code is formatted (CI-friendly, no modifications)
@@ -106,12 +121,16 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse bom-pinning-check check-depproxy-kit ## Lints the entire project (Go, YAML, license headers, chart-version pins, and vendored action digests)
+lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml check-docs-shell check-docs-links bom-pinning-check check-depproxy-kit check-runner-labels check-upgrade-records check-dynamo-runtime-image ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, Dynamo runtime image tag, vendored action digests, and runner labels)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 .PHONY: check-depproxy-kit
 check-depproxy-kit: ## Verifies the vendored Go proxy action matches upstream digests
 	@./tools/check-depproxy-kit
+
+.PHONY: check-runner-labels
+check-runner-labels: ## Rejects the floating ubuntu-latest runner label under .github/
+	@./tools/check-runner-labels
 
 # Standalone target — NOT part of `make lint` because it requires Docker
 # (the validator runs in the same image renovatebot/github-action wraps).
@@ -142,6 +161,22 @@ check-agents-sync: ## Verifies AGENTS.md is in sync with .claude/CLAUDE.md
 check-docs-filenames: ## Enforces lowercase kebab-case filenames in docs/
 	@./tools/check-docs-filenames
 
+.PHONY: check-dynamo-runtime-image
+check-dynamo-runtime-image: ## Verifies the inference-perf Dynamo runtime image tag matches the dynamo-platform chart version
+	@GOFLAGS="-mod=readonly" go run ./tools/check-dynamo-runtime-image
+
+.PHONY: check-upgrade-records
+check-upgrade-records: ## Verifies ComponentUpgrades records are well-formed and cover pins moved since the merge base (ADR-021; uses AICR_UPGRADE_BASE_REF, else a fetched upstream/main or origin/main)
+	@./tools/check-upgrade-records
+
+# Deliberately NOT in `lint` or `qualify`: it re-downloads each pinned tool's
+# upstream checksums, so it needs network and is the one gate here that can go
+# red without the tree changing. Merge Gate runs it on any change to
+# .settings.yaml or a refresh script, which is where a stale pin is introduced.
+.PHONY: check-settings-checksums
+check-settings-checksums: ## Verifies .settings.yaml checksum pins match their pinned versions (needs network)
+	@./tools/check-settings-checksums
+
 .PHONY: check-docs-mdx
 check-docs-mdx: ## Checks docs/ markdown for MDX compatibility (void elements, bare braces, HTML comments, autolinks, bare <tags>)
 	@./tools/check-docs-mdx
@@ -160,6 +195,18 @@ check-docs-mdx: ## Checks docs/ markdown for MDX compatibility (void elements, b
 .PHONY: check-docs-mdx-parse
 check-docs-mdx-parse: ## Validates docs/ with the real MDX parser (requires Node; CI-blocking)
 	@./tools/check-docs-mdx-parse
+
+.PHONY: check-docs-yaml
+check-docs-yaml: ## Validates YAML-labelled code blocks throughout docs/ (requires Node; CI-blocking)
+	@./tools/check-docs-yaml
+
+.PHONY: check-docs-shell
+check-docs-shell: ## Rejects unquoted <placeholder>s that bash reads as redirection in docs/ shell blocks (requires Node; CI-blocking)
+	@./tools/check-docs-shell
+
+.PHONY: check-docs-links
+check-docs-links: ## Verifies links on Fern-published docs reach a published page or an existing repo path (CI-blocking)
+	@GOFLAGS="-mod=readonly" go run ./tools/check-docs-links
 
 .PHONY: lint-go
 lint-go: ## Lints Go files with golangci-lint and go vet
@@ -269,9 +316,18 @@ license-check: ## Check license is approved
         --ignore=github.com/cyberphone/json-canonicalization \
         --ignore=$$STDLIB_IGNORE
 
+# Ordered ahead of test-shell because a stale tool pin makes tools/api-diff exit
+# 17, which surfaces as nine unrelated-looking `want rc=16 got rc=17` shell
+# failures (#2741). This test names the stale file directly and runs in under a
+# second. Scoped to the one test: the rest of tests/architecture takes ~25s and
+# runs with the full suite below.
+.PHONY: test-tool-pins
+test-tool-pins: ## Checks go.mod is the only pin for tools built from this module
+	@GOFLAGS="-mod=readonly" go test -count=1 -run '^TestToolPinsLiveOnlyInGoMod$$' ./tests/architecture/
+
 .PHONY: test-shell
-test-shell: ## Runs shell unit tests (tools/*_test.sh; hermetic, no cluster)
-	@set -e; for t in tools/*_test.sh; do [ -e "$$t" ] || continue; echo "Running $$t..."; bash "$$t"; done
+test-shell: ## Runs shell unit tests (tools/*_test.sh, tests/uat/lib/*_test.sh, tests/uat/kind/*_test.sh; hermetic, no cluster)
+	@set -e; for t in tools/*_test.sh tests/uat/lib/*_test.sh tests/uat/kind/*_test.sh; do [ -e "$$t" ] || continue; echo "Running $$t..."; bash "$$t"; done
 
 # validators/ tests run as part of `make test` but are excluded from the
 # coverage.out this target emits: per-package coverage there runs 41-92%
@@ -296,7 +352,7 @@ test-shell: ## Runs shell unit tests (tools/*_test.sh; hermetic, no cluster)
 # the same everywhere depends on.
 # ---------------------------------------------------------------------------
 .PHONY: test
-test: test-shell ## Runs unit tests with race detector and coverage (use -short to skip integration tests)
+test: test-tool-pins test-shell ## Runs unit tests with race detector and coverage (use -short to skip integration tests)
 	@set -e; \
 	echo "Running tests with race detector..."; \
 	KUBEBUILDER_ASSETS=$$(setup-envtest use -p path 2>/dev/null || echo "") \
@@ -330,6 +386,11 @@ test-coverage: check-coverage-threshold test ## Runs tests and enforces coverage
 	fi; \
 	echo "Coverage check passed"
 
+.PHONY: update-goldens
+update-goldens: ## Regenerates golden test fixtures (catalog/coverage/render parity); review with git diff before committing
+	@GOFLAGS="-mod=readonly" AICR_UPDATE_GOLDEN=1 go test -count=1 -run 'TestCatalogParityGolden|TestCoverageGoldenMatrix' ./pkg/recipe/
+	@GOFLAGS="-mod=readonly" AICR_UPDATE_GOLDEN=1 go test -count=1 -run 'TestStockRenderParityGolden' ./pkg/bundler/
+
 .PHONY: bench
 bench: ## Runs benchmarks
 	@echo "Running benchmarks..."
@@ -353,6 +414,48 @@ mirror-e2e: build ## Tests mirror list output with Hauler and Zarf against local
 	echo "Running mirror list e2e tests..."; \
 	tools/mirror-e2e
 
+.PHONY: nvsentinel-object-monitor-e2e
+nvsentinel-object-monitor-e2e: ## Live Kind test: nvsentinel-object-monitor mixin emits a health event + node condition (#2612)
+	@set -e; \
+	echo "Running nvsentinel-object-monitor mixin e2e test..."; \
+	tests/e2e/nvsentinel-object-monitor/run.sh
+
+.PHONY: nvsentinel-slurm-drain-monitor-e2e
+nvsentinel-slurm-drain-monitor-e2e: ## Live Kind test: nvsentinel-slurm-drain-monitor mixin turns an [HC] Slurm drain into a STORE_ONLY health event (#2611)
+	@set -e; \
+	echo "Running nvsentinel-slurm-drain-monitor mixin e2e test..."; \
+	tests/e2e/nvsentinel-slurm-drain-monitor/run.sh
+
+.PHONY: nvsentinel-preflight-e2e
+nvsentinel-preflight-e2e: ## Live Kind test: nvsentinel-preflight mixin injects node checks into opted-in GPU pods (#2610)
+	@set -e; \
+	echo "Running nvsentinel-preflight mixin e2e test..."; \
+	tests/e2e/nvsentinel-preflight/run.sh
+
+.PHONY: nvsentinel-remediation-e2e
+nvsentinel-remediation-e2e: ## Live Kind test: nvsentinel-observe dry-run carries a GPU fault to a GPU-scoped reset without acting
+	@set -e; \
+	echo "Running nvsentinel-observe mixin dry-run e2e test..."; \
+	tests/e2e/nvsentinel-remediation/run.sh
+
+.PHONY: nvsentinel-slinky-drainer-e2e
+nvsentinel-slinky-drainer-e2e: ## Live Kind test: nvsentinel-slinky-drainer mixin drains a quarantined Slurm node through Slurm, not eviction (#2615)
+	@set -e; \
+	echo "Running nvsentinel-slinky-drainer mixin e2e test..."; \
+	tests/e2e/nvsentinel-slinky-drainer/run.sh
+
+.PHONY: nvsentinel-health-events-analyzer-e2e
+nvsentinel-health-events-analyzer-e2e: ## Live Kind test: nvsentinel-health-events-analyzer derives STORE_ONLY events named after the matching rule (#2618)
+	@set -e; \
+	echo "Running nvsentinel-health-events-analyzer mixin e2e test..."; \
+	tests/e2e/nvsentinel-health-events-analyzer/run.sh
+
+.PHONY: npd-nvsentinel-object-monitor-e2e
+npd-nvsentinel-object-monitor-e2e: ## Live Kind test: an NPD Node condition becomes an NVSentinel health event (#2614)
+	@set -e; \
+	echo "Running NPD -> nvsentinel-object-monitor e2e test..."; \
+	tests/e2e/npd-nvsentinel-object-monitor/run.sh
+
 .PHONY: scan
 scan: ## Scans for vulnerabilities with grype
 	@set -e; \
@@ -368,7 +471,7 @@ bundle-layout-baseline: ## Accepts the current per-deployer bundle trees as the 
 	@printf '%s\n' "Regenerating pkg/bundler/testdata/layout/manifests/ from the fixture recipe." \
 		"A removed path is a broken promise to integrator automation -- read the diff."
 # Every manifest is rendered under $$tmp first and copied over the committed
-# files only after all five deployers succeed. Writing them in place meant a
+# files only after every deployer succeeds. Writing them in place meant a
 # failure partway left a mixed old/new baseline set, which is worse than no
 # refresh: the manifests would disagree with each other and with the bundler.
 #
@@ -382,7 +485,7 @@ bundle-layout-baseline: ## Accepts the current per-deployer bundle trees as the 
 # set -e can catch.
 	@set -e; tmp=$$(mktemp -d); \
 	  trap 'rm -rf "$$tmp"' EXIT; \
-	  for d in helm argocd argocd-helm flux helmfile; do \
+	  for d in helm argocd argocd-helm flux helmfile terraform; do \
 	    GOFLAGS="-mod=readonly" go run ./cmd/aicr bundle \
 	      -r pkg/bundler/testdata/layout/recipe.yaml \
 	      --deployer "$$d" -o "$$tmp/bundle-$$d" >/dev/null; \
@@ -390,7 +493,7 @@ bundle-layout-baseline: ## Accepts the current per-deployer bundle trees as the 
 	    sed 's|^\./||' "$$tmp/raw-$$d.txt" > "$$tmp/rel-$$d.txt"; \
 	    LC_ALL=C sort "$$tmp/rel-$$d.txt" > "$$tmp/$$d.txt"; \
 	  done; \
-	  for d in helm argocd argocd-helm flux helmfile; do \
+	  for d in helm argocd argocd-helm flux helmfile terraform; do \
 	    cp "$$tmp/$$d.txt" pkg/bundler/testdata/layout/manifests/"$$d".txt; \
 	  done
 	@echo "Bundle layout manifests updated."
@@ -473,6 +576,14 @@ bom-docs: ## Regenerates the auto-generated section of $(BOM_DOC_PATH) from the 
 	   ! grep -q '<!-- END AICR-BOM -->' $(BOM_DOC_PATH); then \
 	   echo "ERROR: $(BOM_DOC_PATH) is missing AICR-BOM markers." >&2; exit 1; \
 	fi; \
+	if ! command -v yq >/dev/null 2>&1 || ! command -v helm >/dev/null 2>&1; then \
+	   echo "ERROR: yq and helm are required. Run 'make tools-setup'." >&2; exit 1; \
+	fi; \
+	WANT_HELM="$$(yq -r '.testing_tools.helm' .settings.yaml)"; \
+	HAVE_HELM="$$(helm version --template '{{.Version}}')"; \
+	if [ "$$HAVE_HELM" != "$$WANT_HELM" ]; then \
+	   echo "ERROR: helm $$WANT_HELM required (found '$$HAVE_HELM'). Rendered images differ across helm versions. Run 'make tools-setup'." >&2; exit 1; \
+	fi; \
 	TMP="$$(mktemp -d)"; \
 	trap 'rm -rf "$$TMP"' EXIT; \
 	echo "Regenerating auto-generated section of $(BOM_DOC_PATH) (helm rendering, ~30s)..."; \
@@ -481,13 +592,19 @@ bom-docs: ## Regenerates the auto-generated section of $(BOM_DOC_PATH) from the 
 	  -out-dir "$$TMP" \
 	  -aicr-version "main" \
 	  -deterministic \
-	  -no-title; \
+	  -no-title \
+	  -strict; \
 	awk -v body="$$TMP/bom.md" ' \
 	  /<!-- BEGIN AICR-BOM -->/ { print; while ((getline line < body) > 0) print line; close(body); skip = 1; next } \
 	  /<!-- END AICR-BOM -->/   { skip = 0 } \
 	  !skip                     { print } \
 	' $(BOM_DOC_PATH) > "$$TMP/merged.md"; \
 	mv "$$TMP/merged.md" $(BOM_DOC_PATH); \
+	FRESH="TestCommittedBOMVersionsMatchRegistry TestCommittedBOMVariantsMatchRecipePins"; \
+	OUT="$$(GOFLAGS="-mod=readonly" go test -count=1 -v ./tools/bom -run "^($$(echo $$FRESH | tr ' ' '|'))$$" 2>&1)" || { echo "$$OUT" >&2; exit 1; }; \
+	for t in $$FRESH; do \
+	   echo "$$OUT" | grep -q -- "--- PASS: $$t " || { echo "$$OUT" >&2; echo "ERROR: $$t did not run (renamed or removed?)." >&2; exit 1; }; \
+	done; \
 	echo "Updated $(BOM_DOC_PATH) (prose preserved, auto-generated section refreshed)"
 
 .PHONY: bom-check
@@ -569,6 +686,14 @@ bom-pinning-check: ## Verifies every Helm component in the registry has a pinned
 	  -strict \
 	  -skip-helm
 
+.PHONY: nvcre-closure
+nvcre-closure: ## Regenerates the NVCRE workload runtime closure from the registry's pinned chart version
+	@GOFLAGS="-mod=readonly" go run ./tools/nvcre-closure
+
+.PHONY: nvcre-closure-check
+nvcre-closure-check: ## Verifies the committed NVCRE workload closure matches the pinned chart version
+	@GOFLAGS="-mod=readonly" go run ./tools/nvcre-closure -check
+
 .PHONY: registry-inventory
 registry-inventory: ## Extracts the build/CI registry & package egress inventory (YAML + Markdown) from structured sources
 	@GOFLAGS="-mod=readonly" go run ./tools/registry-inventory \
@@ -578,6 +703,14 @@ registry-inventory: ## Extracts the build/CI registry & package egress inventory
 .PHONY: registry-check
 registry-check: ## Fails if a build/CI source reaches a registry host absent from tools/registry-inventory/registry-allowlist.yaml
 	@GOFLAGS="-mod=readonly" go run ./tools/registry-inventory -repo-root "$(CURDIR)" -check
+
+.PHONY: drift-report
+drift-report: ## Normalizes a Renovate dry-run report into the component drift report + Slack payload
+	@GOFLAGS="-mod=readonly" go run ./tools/drift-report \
+	  -repo-root "$(CURDIR)" \
+	  -renovate-report "$${RENOVATE_REPORT:-drift-report-raw.json}" \
+	  -out "$${DRIFT_OUT:-dist/drift-report.json}" \
+	  -slack-out "$${SLACK_OUT:-dist/slack-payload.json}"
 
 # Committed host-level egress doc. Regenerated by `make registry-docs`, checked
 # fresh by TestCommittedRegistryEgressDocFresh under `make test`.
@@ -693,7 +826,7 @@ tuning-check: ## Verifies $(TUNING_DOC_PATH) tuning-status table is up to date (
 server: ## Starts a local development server with debug logging
 	@set -e; \
 	echo "Starting local development server..."; \
-	GOFLAGS="-mod=readonly" LOG_LEVEL=debug go run cmd/aicrd/main.go
+	GOFLAGS="-mod=readonly" AICR_LOG_LEVEL=debug go run cmd/aicrd/main.go
 
 .PHONY: docs
 docs: ## Serves Go documentation on http://localhost:6060
@@ -731,13 +864,24 @@ validator-binaries: ## Builds Linux validator binaries (VALIDATOR_PHASES, VALIDA
 		./tools/build-validator-binaries
 
 .PHONY: image-validators
-image-validators: build ## Builds per-phase validator images (IMAGE_REGISTRY, IMAGE_TAG)
+image-validators: build ## Builds per-phase validator images (IMAGE_REGISTRY, IMAGE_TAG, VALIDATOR_ARCHES)
 	@set -e; \
-	arch="$$(go env GOARCH)"; \
+	arch="$(VALIDATOR_ARCHES)"; \
+	if [ -z "$${arch}" ]; then arch="$$(go env GOARCH)"; fi; \
+	arch="$$(echo "$${arch}" | tr ',' ' ')"; \
+	if [ "$$(echo $${arch} | wc -w)" -gt 1 ]; then \
+		echo "VALIDATOR_ARCHES=\"$${arch}\" names more than one architecture;" >&2; \
+		echo "each image is tagged per phase without an architecture suffix, so" >&2; \
+		echo "a second arch would overwrite the first. Build one at a time, or" >&2; \
+		echo "use validator-binaries, which does accept a list." >&2; \
+		exit 1; \
+	fi; \
+	echo "Building validator images for linux/$${arch}"; \
 	VALIDATOR_ARCHES="$${arch}" ./tools/build-validator-binaries; \
 	for phase in deployment performance conformance; do \
 		echo "Building validator image: $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG)"; \
 		docker build -f validators/$${phase}/Dockerfile \
+			--platform linux/$${arch} \
 			--build-arg TARGETARCH=$${arch} \
 			-t $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG) .; \
 		if [ -n "$(IMAGE_REGISTRY)" ] && [ "$(IMAGE_REGISTRY)" != "localhost:5005" ]; then \
@@ -747,6 +891,7 @@ image-validators: build ## Builds per-phase validator images (IMAGE_REGISTRY, IM
 	done; \
 	echo "Building validator image: $(IMAGE_REGISTRY)/aicr-validators/aiperf-bench:$(IMAGE_TAG)"; \
 	docker build -f validators/performance/aiperf-bench.Dockerfile \
+		--platform linux/$${arch} \
 		-t $(IMAGE_REGISTRY)/aicr-validators/aiperf-bench:$(IMAGE_TAG) .; \
 	if [ -n "$(IMAGE_REGISTRY)" ] && [ "$(IMAGE_REGISTRY)" != "localhost:5005" ]; then \
 		echo "Pushing: $(IMAGE_REGISTRY)/aicr-validators/aiperf-bench:$(IMAGE_TAG)"; \
@@ -773,25 +918,44 @@ check-health: ## Runs chainsaw health check directly against Kind cluster (COMPO
 	chainsaw test --test-dir "recipes/checks/$(COMPONENT)/" --test-file health-check.yaml --no-color
 
 .PHONY: check-health-all
-check-health-all: ## Runs all chainsaw health checks against Kind cluster
+# Iterates registry.yaml's healthCheck.assertFile entries, not a raw glob of
+# recipes/checks/*/: this is the set every shipped recipe actually exercises,
+# so opt-in-only checks (e.g. nvsentinel-observability) are excluded by
+# construction -- run those directly via `make check-health COMPONENT=<name>`.
+# --test-dir/--test-file are derived from each declared path rather than
+# reconstructed from a component name, so a non-conventional assertFile
+# (e.g. checks/shared/foo.yaml) is honored as declared.
+#
+# yq's exit status is captured separately from the pipeline that follows:
+# without `set -o pipefail`, a failing yq piped straight into the loop would
+# silently yield zero components and a false "All health checks passed".
+# The empty-list check below is a second guard against the same outcome.
+check-health-all: ## Runs chainsaw health checks for every registry-linked component against Kind cluster
 	@set -e; \
 	FAILED=""; \
-	for dir in recipes/checks/*/; do \
-		COMPONENT=$$(basename "$$dir"); \
-		echo "=== $$COMPONENT ==="; \
-		if chainsaw test --test-dir "$$dir" --test-file health-check.yaml --no-color; then \
-			echo "PASS: $$COMPONENT"; \
+	ASSERT_FILES=$$(yq -r '.components[].healthCheck.assertFile' recipes/registry.yaml) || { echo "Error: yq failed to read recipes/registry.yaml"; exit 1; }; \
+	PATHS=$$(printf '%s\n' "$$ASSERT_FILES" | grep -v '^null$$' | sort -u); \
+	if [ -z "$$PATHS" ]; then \
+		echo "Error: no registry-linked health checks found in recipes/registry.yaml -- refusing to report success on zero checks"; \
+		exit 1; \
+	fi; \
+	for ASSERT in $$PATHS; do \
+		dir="recipes/$$(dirname "$$ASSERT")/"; \
+		file="$$(basename "$$ASSERT")"; \
+		echo "=== $$ASSERT ==="; \
+		if chainsaw test --test-dir "$$dir" --test-file "$$file" --no-color; then \
+			echo "PASS: $$ASSERT"; \
 		else \
-			echo "FAIL: $$COMPONENT"; \
-			FAILED="$$FAILED $$COMPONENT"; \
+			echo "FAIL: $$ASSERT"; \
+			FAILED="$$FAILED $$ASSERT"; \
 		fi; \
 		echo ""; \
 	done; \
 	if [ -n "$$FAILED" ]; then \
-		echo "Failed components:$$FAILED"; \
+		echo "Failed checks:$$FAILED"; \
 		exit 1; \
 	fi; \
-	echo "All health checks passed"
+	echo "All registry-linked health checks passed"
 
 .PHONY: validate-local
 validate-local: image-validators ## Builds validator images and runs validation in Kind (RECIPE=<path>)
@@ -818,6 +982,43 @@ validate-local: image-validators ## Builds validator images and runs validation 
 		--recipe "$(RECIPE)" \
 		--phase deployment
 
+.PHONY: validate-performance
+validate-performance: ## Recipe performance phase on the current kubecontext (RECIPE= [SNAPSHOT=] [NODE_SELECTOR=])
+	@set -e; \
+	if [ -z "$(RECIPE)" ]; then \
+		echo "Usage: make validate-performance RECIPE=<path-to-recipe.yaml> [SNAPSHOT=<path>] [NODE_SELECTOR=nvidia.com/gpu.present=true]"; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$(RECIPE)" ]; then \
+		echo "Error: recipe file $(RECIPE) not found"; \
+		exit 1; \
+	fi; \
+	AICR_BIN=$$(command -v aicr 2>/dev/null || true); \
+	if [ -z "$$AICR_BIN" ]; then \
+		HOST_GOOS=$$(go env GOOS); HOST_GOARCH=$$(go env GOARCH); \
+		DIST_DIR=$$(find dist -maxdepth 1 -type d -name "aicr_$${HOST_GOOS}_$${HOST_GOARCH}*" 2>/dev/null | head -1); \
+		if [ -n "$$DIST_DIR" ] && [ -x "$$DIST_DIR/aicr" ]; then \
+			AICR_BIN="$$DIST_DIR/aicr"; \
+		fi; \
+	fi; \
+	if [ -z "$$AICR_BIN" ]; then \
+		echo "Error: aicr binary not found. Run 'make build' or put aicr on PATH."; \
+		exit 1; \
+	fi; \
+	set -- validate --recipe "$(RECIPE)" --phase performance --fail-on-error; \
+	if [ -n "$(SNAPSHOT)" ]; then \
+		if [ ! -f "$(SNAPSHOT)" ]; then \
+			echo "Error: snapshot file $(SNAPSHOT) not found"; \
+			exit 1; \
+		fi; \
+		set -- "$$@" --snapshot "$(SNAPSHOT)"; \
+	fi; \
+	if [ -n "$(NODE_SELECTOR)" ]; then \
+		set -- "$$@" --node-selector "$(NODE_SELECTOR)"; \
+	fi; \
+	echo "Running performance phase with $$AICR_BIN"; \
+	"$$AICR_BIN" "$$@"
+
 .PHONY: python-licenses
 python-licenses: ## Refreshes the committed Python license section for the aiperf-bench image (needs network)
 	@python3 tools/generate-python-licenses
@@ -826,19 +1027,22 @@ python-licenses: ## Refreshes the committed Python license section for the aiper
 notices: ## Generates THIRD_PARTY_NOTICES.md aggregating every dependency's license
 	@bash tools/generate-notices
 
-.PHONY: notices-check
-notices-check: ## Verifies THIRD_PARTY_NOTICES.md is up to date (run by the merge-gate on dependency changes)
-	@set -e; \
-	$(MAKE) notices; \
-	if ! git diff --quiet -- THIRD_PARTY_NOTICES.md; then \
-	   echo "ERROR: THIRD_PARTY_NOTICES.md is stale. Run 'make notices' and commit the change." >&2; \
-	   git --no-pager diff --stat -- THIRD_PARTY_NOTICES.md >&2; \
-	   exit 1; \
-	fi; \
-	echo "THIRD_PARTY_NOTICES.md is up to date"
-
+# `notices` is a prerequisite so the THIRD_PARTY_NOTICES.md that goreleaser
+# attaches is generated from the tag being released, not inherited from whatever
+# happened to be committed. OSRB requires the notices published with a release to
+# match that release; nothing requires the source tree to be current between
+# releases, so this is the only place the guarantee has to hold.
+#
+# .goreleaser.yaml's release.extra_files globs the file from the repo root, and
+# --clean only wipes dist/, so it survives the run.
+#
+# The file is gitignored, so regenerating it leaves the tree clean and
+# goreleaser's dirty-state validation is unaffected. That is why it must stay
+# untracked: were it tracked, a regeneration that differed from the committed
+# copy would abort the release with "git is currently in a dirty state", which
+# names neither the file nor the cause.
 .PHONY: release
-release: ## Runs the full release process with goreleaser
+release: notices ## Runs the full release process with goreleaser (regenerates THIRD_PARTY_NOTICES.md first)
 	@set -e; \
 	goreleaser release --clean --config .goreleaser.yaml --fail-fast --timeout 60m0s
 
@@ -866,10 +1070,6 @@ bump-promote: ## Promotes a pre-release to stable on the same SHA. Use TAG=v1.2.
 changelog: ## Shows changes since the last release
 	@tools/changelog
 
-.PHONY: changelog-file
-changelog-file: ## Updates CHANGELOG.md with changes since the last release
-	@tools/changelog --file
-
 .PHONY: clean
 clean: ## Cleans build artifacts (dist, coverage files, third-party notices)
 	@rm -rf ./dist ./bin ./coverage.out ./coverage.full.out ./THIRD_PARTY_NOTICES.md ./.licenses-cache
@@ -885,12 +1085,6 @@ clean-all: clean ## Deep cleans including Go module cache
 .PHONY: cleanup
 cleanup: ## Cleans up AICR Kubernetes resources (requires kubectl)
 	tools/cleanup
-
-.PHONY: demos
-demos: ## Creates demo GIFs using VHS tool (requires: brew install vhs)
-	@command -v vhs >/dev/null 2>&1 || (echo "Error: vhs is not installed. Install: brew install vhs" && exit 1)
-	vhs demos/videos/cli.tape -o demos/videos/cli.gif
-	vhs demos/videos/e2e.tape -o demos/videos/e2e.gif
 
 # =============================================================================
 # Tilt Local Development
@@ -946,6 +1140,9 @@ tilt-ci: ## Runs Tilt in CI mode (no UI, waits for resources)
 # =============================================================================
 
 .PHONY: cluster-create
+# Exported to the recipe rather than pasted into it, so a quote in a
+# DOCKERHUB_MIRROR override cannot rewrite the validation command.
+cluster-create: export DOCKERHUB_MIRROR := $(DOCKERHUB_MIRROR)
 cluster-create: ## Creates local Kind cluster with registry
 	@echo "Creating local development cluster..."
 	@if ! command -v ctlptl >/dev/null 2>&1; then \
@@ -976,8 +1173,32 @@ cluster-create: ## Creates local Kind cluster with registry
 		echo "Check the key exists and .settings.yaml is valid YAML."; \
 		exit 1; \
 	fi
-	@echo "Pinning Kind node image: $(KIND_NODE_IMAGE) (from .settings.yaml)"
-	img="$(KIND_NODE_IMAGE)" yq eval-all '(select(.kind == "Cluster") | .kindV1Alpha4Cluster.nodes[]).image = strenv(img)' $(CTLPTL_CONFIG_FILE) | ctlptl apply -f -
+	@if [ -z "$(KIND_REGISTRY_IMAGE)" ] || [ "$(KIND_REGISTRY_IMAGE)" = "null" ]; then \
+		echo "Error: could not resolve testing_tools.registry_image from .settings.yaml."; \
+		exit 1; \
+	fi
+	@# Same bash test as .github/actions/load-versions, so CI and local runs accept
+	@# exactly the same values (grep would match a multi-line value line by line).
+	@bash -c '[[ $$DOCKERHUB_MIRROR =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?$$ ]]' || { \
+		echo "Error: DOCKERHUB_MIRROR (default: .settings.yaml build.dockerhub_mirror) must be an https:// host URL with no path, got '$$DOCKERHUB_MIRROR'."; \
+		exit 1; \
+	}
+	@# kind pulls the node image only when it is not already local, so seeding it
+	@# from the Docker Hub mirror keeps the anonymous Docker Hub rate limit out
+	@# of the critical path. On a mirror miss kind pulls from Docker Hub.
+	@docker image inspect "$(KIND_NODE_IMAGE)" >/dev/null 2>&1 || \
+		{ docker pull -q "$(DOCKERHUB_MIRROR_HOST)/$(KIND_NODE_IMAGE)" && docker tag "$(DOCKERHUB_MIRROR_HOST)/$(KIND_NODE_IMAGE)" "$(KIND_NODE_IMAGE)"; } || \
+		echo "Warning: $(DOCKERHUB_MIRROR_HOST)/$(KIND_NODE_IMAGE) unavailable; kind will pull from Docker Hub"
+	@# ctlptl drops its pull's progress stream, where the daemon reports mid-pull
+	@# failures such as a refused layer download, so those surface only as a
+	@# misleading "No such image" at container create. Pulling here keeps the
+	@# real error in the log and adds the mirror as a second source.
+	@docker image inspect "$(KIND_REGISTRY_IMAGE)" >/dev/null 2>&1 || \
+		docker pull -q "$(KIND_REGISTRY_IMAGE)" || \
+		{ echo "Warning: $(KIND_REGISTRY_IMAGE) pull failed; trying $(KIND_REGISTRY_MIRROR_IMAGE)"; \
+		  docker pull -q "$(KIND_REGISTRY_MIRROR_IMAGE)" && docker tag "$(KIND_REGISTRY_MIRROR_IMAGE)" "$(KIND_REGISTRY_IMAGE)"; }
+	@echo "Pinning Kind node image: $(KIND_NODE_IMAGE), registry image: $(KIND_REGISTRY_IMAGE) (from .settings.yaml)"
+	img="$(KIND_NODE_IMAGE)" reg="$(KIND_REGISTRY_IMAGE)" yq eval-all '(select(.kind == "Cluster") | .kindV1Alpha4Cluster.nodes[]).image = strenv(img) | (select(.kind == "Registry")).image = strenv(reg)' $(CTLPTL_CONFIG_FILE) | ctlptl apply -f -
 	@echo "Waiting for nodes to be ready..."
 	@kubectl wait --for=condition=ready nodes --all --timeout=300s
 	@echo "Cluster created. Registry at localhost:$(REGISTRY_PORT)"
@@ -1264,8 +1485,7 @@ help-full: ## Displays commands grouped by category
 	@echo "\033[1m=== Build & Release ===\033[0m"
 	@echo "  make build          Build binaries for current OS/arch"
 	@echo "  make image          Build and push container image"
-	@echo "  make notices        Generate THIRD_PARTY_NOTICES.md from Go deps"
-	@echo "  make notices-check  Verify THIRD_PARTY_NOTICES.md is up to date"
+	@echo "  make notices        Generate THIRD_PARTY_NOTICES.md from Go deps (untracked; made by 'make release')"
 	@echo "  make release        Full release with goreleaser"
 	@echo "  make bump-rc        Tag RC pre-release (v1.2.3 -> v1.3.0-rc1)"
 	@echo "  make bump-promote   Promote RC to stable (TAG=v1.2.4-rc1)"
@@ -1273,7 +1493,6 @@ help-full: ## Displays commands grouped by category
 	@echo "  make bump-minor     Tag minor version (1.2.3 -> 1.3.0)"
 	@echo "  make bump-major     Tag major version (1.2.3 -> 2.0.0)"
 	@echo "  make changelog      Show changes since last release"
-	@echo "  make changelog-file Update CHANGELOG.md with unreleased changes"
 	@echo ""
 	@echo "\033[1m=== Local Development ===\033[0m"
 	@echo "  make dev-env        Create cluster and start Tilt (full setup)"
@@ -1312,7 +1531,6 @@ help-full: ## Displays commands grouped by category
 	@echo "\033[1m=== Utilities ===\033[0m"
 	@echo "  make info           Print project info"
 	@echo "  make docs           Serve Go documentation"
-	@echo "  make demos          Create demo GIFs (requires vhs)"
 	@echo "  make clean          Clean build artifacts"
 	@echo "  make clean-all      Deep clean including module cache"
 	@echo "  make cleanup        Clean up AICR Kubernetes resources"

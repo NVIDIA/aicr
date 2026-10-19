@@ -27,7 +27,6 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/mirror"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -141,7 +140,7 @@ func flagMatchesName(f cli.Flag, name string) bool {
 //nolint:gocyclo // linear option resolution
 func runMirrorListCmd(ctx context.Context, cmd *cli.Command) (err error) {
 	if validErr := validateSingleValueFlags(cmd, "recipe", "service", "accelerator",
-		"intent", "os", "platform", flagProfile, "snapshot", "config", "format", "output"); validErr != nil {
+		"intent", "os", "platform", flagProfile, flagGKETCPXOInterfaces, flagInheritFrom, flagInherit, "snapshot", "config", "format", "output"); validErr != nil {
 		return validErr
 	}
 
@@ -153,7 +152,7 @@ func runMirrorListCmd(ctx context.Context, cmd *cli.Command) (err error) {
 				format, strings.Join(mirror.SupportedFormats(), ", ")))
 	}
 
-	cfg, err := loadCmdConfig(ctx, cmd)
+	cfg, err := loadFacadeConfig(ctx, cmd)
 	if err != nil {
 		return err
 	}
@@ -229,12 +228,29 @@ func runMirrorListCmd(ctx context.Context, cmd *cli.Command) (err error) {
 //     Client and parses criteria against its per-provider registry. The
 //     caller seeds that registry via client.LoadCatalog before this call so
 //     a `--data` overlay's non-OSS criteria values validate.
-func resolveRecipeForMirror(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) (*recipe.RecipeResult, error) {
+func resolveRecipeForMirror(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, client *aicr.Client) (*recipe.RecipeResult, error) {
 	recipePath := cmd.String("recipe")
 	if recipePath != "" {
-		if cmd.IsSet(flagProfile) || aicr.WrapConfig(cfg).RecipeProfile() != "" {
+		if cmd.IsSet(flagProfile) || cfg.RecipeProfile() != "" {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"--profile/spec.recipe.profile selects during criteria resolution and cannot be combined with --recipe")
+		}
+		if cmd.IsSet(flagGKETCPXOInterfaces) {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--gke-tcpxo-interfaces applies during criteria resolution and cannot be combined with --recipe; the recipe file already records the mapping")
+		}
+		if cmd.IsSet(flagInheritFrom) || cmd.IsSet(flagInherit) {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--inherit-from/--inherit pin component identity during criteria resolution and cannot be combined with --recipe. The recipe file already records the identity it resolved to")
+		}
+		// The config-file mapping is equally a criteria-resolution input; the
+		// recipe file on disk already records its mapping. Mirror the profile
+		// guard's flag-or-config check.
+		if _, set, cfgErr := cfg.RecipeGKETCPXOInterfaces(); cfgErr != nil {
+			return nil, cfgErr
+		} else if set {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"spec.recipe.configuration.gke.tcpxoInterfaces applies during criteria resolution and cannot be combined with --recipe; the recipe file already records the mapping")
 		}
 		slog.Info("loading recipe from file", "path", recipePath)
 

@@ -1,0 +1,58 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NVIDIA Cluster Readiness Engine (NVCRE) Helm values.
+#
+# Upstream: https://github.com/NVIDIA/cluster-readiness-engine
+# Chart:    oci://ghcr.io/nvidia/cluster-readiness-engine
+#
+# Chart and controller image are public on GHCR and both pull anonymously:
+# `helm pull oci://ghcr.io/nvidia/cluster-readiness-engine --version v0.6.0`
+# succeeds with an empty registry config, so no pull secret is required.
+#
+# This file applies only when a componentRef names it explicitly as
+# `valuesFile: components/nvcre/values.yaml`. Component values are not
+# auto-discovered from the component name, so a ref that omits it renders
+# the chart defaults instead — including the ServiceMonitor and the
+# release-prefixed resource names the health check cannot match.
+#
+# Only deliberate differences from the chart defaults are set here; everything
+# else (replicas, reconcile concurrency, resources, metrics port) is left at
+# upstream values so a chart bump carries its own tuning.
+
+# Override the release-name prefix so resource names are nvcre-* rather than
+# aicr-stack-*. The health check asserts the Deployment by name, so this has to
+# stay in sync with checks/nvcre/health-check.yaml.
+fullnameOverride: nvcre
+
+manager:
+  image:
+    # Digest of the v0.6.0 multi-arch index, so the qualified bytes are the
+    # installed bytes even if the tag is repointed. The chart also exposes a
+    # `manager.image.digest` field, but that branch renders repository@digest
+    # and drops the version; the tag@digest form used here keeps v0.6.0
+    # legible in the BOM. The chart's unset-tag default falls back to
+    # .Chart.AppVersion, so hard-coding a tag severs the link that kept the
+    # controller following the chart: a defaultVersion bump must move this
+    # version and digest together, which
+    # TestNVCREValuesPinControllerImageByDigest enforces. Re-resolve with:
+    #   crane digest ghcr.io/nvidia/cluster-readiness-engine/manager:<version>
+    tag: v0.6.0@sha256:8008c6f9f7e19b317caf0f91afab06b88027c14d7dd03e4173bd49cd1f3cd27a
+
+# Chart default is true and requires prometheus-operator CRDs. NVCRE is not
+# on any shipped overlay, so keep the monitor off until a recipe that already
+# installs those CRDs opts in with --set cre:metrics.serviceMonitor.enabled=true.
+metrics:
+  serviceMonitor:
+    enabled: false

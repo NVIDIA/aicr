@@ -21,6 +21,7 @@ The following components are included in deployment order:
 {{- end }}
 {{- end }}
 
+{{ if .UpgradeNotice }}{{ .UpgradeNotice }}{{ end -}}
 ## Prerequisites
 
 - Kubernetes cluster with Argo CD installed

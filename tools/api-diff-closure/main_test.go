@@ -297,7 +297,8 @@ func TestRunReportsCurrentAliasMappings(t *testing.T) {
 		"BundleVerifyReport|github.com/NVIDIA/aicr/pkg/bundler/verifier|VerifyResult\n" +
 		"CriteriaRegistry|github.com/NVIDIA/aicr/pkg/recipe|CriteriaRegistry\n" +
 		"EvidenceVerification|github.com/NVIDIA/aicr/pkg/evidence/verifier|VerifyResult\n" +
-		"OIDCResolveOptions|github.com/NVIDIA/aicr/pkg/bundler/attestation|ResolveOptions\n"
+		"OIDCResolveOptions|github.com/NVIDIA/aicr/pkg/bundler/attestation|ResolveOptions\n" +
+		"UpgradeReport|github.com/NVIDIA/aicr/pkg/upgrade|Report\n"
 	if stdout.String() != want {
 		t.Fatalf("run() output = %q, want %q", stdout.String(), want)
 	}

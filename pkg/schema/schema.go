@@ -15,7 +15,7 @@
 // Package schema derives JSON Schema documents from the Go types that define
 // AICR's published artifacts.
 //
-// Artifact schemas are one of the four surfaces ROADMAP section 1 freezes at v1
+// Artifact schemas are one of the four surfaces ROADMAP.md freezes at v1
 // (issue #2113). Integrators need a machine-readable description of what a
 // Snapshot or RecipeResult contains, and the project needs a baseline it can
 // diff to catch a field being removed or narrowed.

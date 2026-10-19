@@ -17,15 +17,17 @@ package recipe
 import (
 	"context"
 	"encoding/json"
-	stderrors "errors"
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"gopkg.in/yaml.v3"
@@ -127,6 +129,16 @@ func TestValidateProfileDeclaration(t *testing.T) {
 			Values: map[string]ProfileValue{
 				"one": {ComponentRefs: []ProfileComponentRef{{Name: component, Overrides: overrides}}},
 				"two": {ComponentRefs: []ProfileComponentRef{{Name: component, Overrides: overrides}}},
+			},
+		}
+	}
+	withOptional := func(component string, optionalOne, optionalTwo bool, overrides map[string]any) *ProfileDeclaration {
+		return &ProfileDeclaration{
+			Name:    "mode",
+			Default: "one",
+			Values: map[string]ProfileValue{
+				"one": {ComponentRefs: []ProfileComponentRef{{Name: component, Optional: optionalOne, Overrides: overrides}}},
+				"two": {ComponentRefs: []ProfileComponentRef{{Name: component, Optional: optionalTwo, Overrides: overrides}}},
 			},
 		}
 	}
@@ -427,6 +439,34 @@ func TestValidateProfileDeclaration(t *testing.T) {
 				"gpu-operator": {"devicePlugin.enabled", "enabled"},
 			},
 		},
+		{
+			name: "optional reference owns values but not presence",
+			decl: withOptional("nvsentinel", true, true, map[string]any{
+				"labeler": map[string]any{"assumeDriverInstalled": true},
+			}),
+			wantOwned: map[string][]string{
+				"nvsentinel": {"labeler.assumeDriverInstalled"},
+			},
+		},
+		{
+			name: "mixed optionality across values rejected",
+			decl: withOptional("nvsentinel", true, false, map[string]any{
+				"labeler": map[string]any{"assumeDriverInstalled": true},
+			}),
+			wantErr: "as optional in some values but not others",
+		},
+		{
+			name:    "optional reference without overrides rejected",
+			decl:    withOptional("nvsentinel", true, true, nil),
+			wantErr: "must assign at least one override",
+		},
+		{
+			name: "optional allocation-policy component rejected",
+			decl: withOptional("nvidia-dra-driver-gpu", true, true, map[string]any{
+				"nvidiaDriverRoot": "/",
+			}),
+			wantErr: "may not be optional",
+		},
 	}
 
 	for _, tt := range tests {
@@ -478,7 +518,7 @@ func TestValidateRecipeMetadataProfileYAMLScalars(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var metadata RecipeMetadata
-			data := fmt.Sprintf(`apiVersion: aicr.run/v1alpha3
+			data := fmt.Sprintf(`apiVersion: aicr.run/v1beta2
 kind: RecipeMetadata
 metadata:
   name: scalar-test
@@ -741,6 +781,9 @@ func TestProfileResolutionGuards(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "removed by snapshot constraint filtering") {
 			t.Fatalf("BuildRecipeResultWithEvaluator() error = %v, want survival failure", err)
 		}
+		if want := "failed constraints [owner signal (expected installed, got operator)]"; !strings.Contains(err.Error(), want) {
+			t.Fatalf("BuildRecipeResultWithEvaluator() error = %v, want it to name %q", err, want)
+		}
 	})
 
 	t.Run("selected constraints fail closed", func(t *testing.T) {
@@ -972,15 +1015,25 @@ func TestProfileArtifactContract(t *testing.T) {
 			wantErr: "lexicographically sorted",
 		},
 		{
-			name: "ownership component requires synthetic enabled path",
+			name: "optional ownership omits synthetic enabled path",
 			result: &RecipeResult{
 				APIVersion: RecipeProfileAPIVersion,
 				Metadata: RecipeResultMetadata{SelectedProfile: &SelectedProfile{
 					Name: "gpuStack", Value: "driver-installed",
-					OwnedPaths: map[string][]string{"gpu-operator": {"driver.enabled"}},
+					OwnedPaths: map[string][]string{"nvsentinel": {"labeler.assumeDriverInstalled"}},
 				}},
 			},
-			wantErr: "must include synthetic path",
+		},
+		{
+			name: "empty ownership entry rejected",
+			result: &RecipeResult{
+				APIVersion: RecipeProfileAPIVersion,
+				Metadata: RecipeResultMetadata{SelectedProfile: &SelectedProfile{
+					Name: "gpuStack", Value: "driver-installed",
+					OwnedPaths: map[string][]string{"gpu-operator": {}},
+				}},
+			},
+			wantErr: "must name at least one path",
 		},
 		{
 			name: "invalid selection identity",
@@ -1092,7 +1145,11 @@ func TestProfileArtifactContract(t *testing.T) {
 }
 
 func TestDecodeRecipeResult_ProfileStrictness(t *testing.T) {
-	valid := []byte(`apiVersion: aicr.run/v1alpha3
+	// Built from the constant, not a literal. The "legacy version" case below
+	// mutates this fixture with strings.Replace(RecipeProfileAPIVersion, ...),
+	// which silently became a no-op at the N+1 emitter switch when the constant
+	// moved off the hardcoded aicr.run/v1beta2 and stopped matching.
+	valid := []byte(`apiVersion: ` + RecipeProfileAPIVersion + `
 kind: RecipeResult
 metadata:
   selectedProfile:
@@ -1209,7 +1266,7 @@ componentRefs: []
 
 func TestDecodeRecipeResult_ProfileStrictJSONExcludedOverlays(t *testing.T) {
 	const prefix = `{
-  "apiVersion": "aicr.run/v1alpha3",
+  "apiVersion": "aicr.run/v1beta2",
   "kind": "RecipeResult",
   "metadata": {
     "excludedOverlays": [`
@@ -1275,7 +1332,7 @@ func TestDecodeRecipeResult_LegacyExcludedOverlaysCompatibility(t *testing.T) {
 		{
 			name:   "YAML scalar and additive object",
 			format: serializer.FormatYAML,
-			data: []byte(`apiVersion: aicr.run/v1alpha2
+			data: []byte(`apiVersion: aicr.run/v1
 kind: RecipeResult
 metadata:
   excludedOverlays:
@@ -1289,7 +1346,7 @@ componentRefs: []
 			name:   "JSON scalar and additive object",
 			format: serializer.FormatJSON,
 			data: []byte(`{
-  "apiVersion": "aicr.run/v1alpha2",
+  "apiVersion": "aicr.run/v1",
   "kind": "RecipeResult",
   "metadata": {
     "excludedOverlays": [
@@ -1316,7 +1373,7 @@ componentRefs: []
 }
 
 func TestBuildMetadataStore_ProfileVersionMatrix(t *testing.T) {
-	base := []byte(`apiVersion: aicr.run/v1alpha2
+	base := []byte(`apiVersion: aicr.run/v1beta1
 kind: RecipeMetadata
 metadata:
   name: base
@@ -1388,7 +1445,7 @@ spec:
 		{
 			name:    "legacy version with declaration",
 			content: overlay(RecipeMetadataAPIVersion, validProfile),
-			wantErr: "expected \"aicr.run/v1alpha3\"",
+			wantErr: "expected \"aicr.run/v1beta2\"",
 		},
 		{
 			name: "profile version rejects unknown root field",
@@ -1490,7 +1547,7 @@ func TestListCatalogWithProfilesCanceled(t *testing.T) {
 	if entries != nil {
 		t.Fatalf("ListCatalogWithProfiles() entries = %#v, want nil", entries)
 	}
-	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeTimeout {
 		t.Fatalf("ListCatalogWithProfiles() error = %v, want ErrCodeTimeout", err)
 	}
 }
@@ -1625,11 +1682,135 @@ func TestValidateProfileLock(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("ValidateProfileLock() error = %v, want containing %q", err, tt.wantErr)
 			}
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("ValidateProfileLock() error code = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
 	}
+}
+
+func TestValidateProfileLockOptionalComponent(t *testing.T) {
+	ctx := t.Context()
+	declaration := testProfileDeclaration()
+	for name, assume := range map[string]bool{"driver-installed": true, "operator-managed": false} {
+		value := declaration.Values[name]
+		value.ComponentRefs = append(value.ComponentRefs, ProfileComponentRef{
+			Name:      "nvsentinel",
+			Optional:  true,
+			Overrides: map[string]any{"labeler": map[string]any{"assumeDriverInstalled": assume}},
+		})
+		declaration.Values[name] = value
+	}
+	store := testProfileStore(declaration)
+	store.Base.Spec.ComponentRefs = append(store.Base.Spec.ComponentRefs, ComponentRef{
+		Name: "nvsentinel",
+		Type: ComponentTypeHelm,
+	})
+	result, err := store.BuildRecipeResult(ctx, &Criteria{Service: CriteriaServiceAKS})
+	if err != nil {
+		t.Fatalf("BuildRecipeResult() error = %v", err)
+	}
+	got := result.Metadata.SelectedProfile.OwnedPaths["nvsentinel"]
+	if want := []string{"labeler.assumeDriverInstalled"}; !slices.Equal(got, want) {
+		t.Fatalf("ownedPaths[nvsentinel] = %v, want %v", got, want)
+	}
+
+	gpuOperator, err := result.GetValuesForComponentWithContext(ctx, "gpu-operator")
+	if err != nil {
+		t.Fatalf("GetValuesForComponentWithContext(gpu-operator) error = %v", err)
+	}
+	nvsentinel, err := result.GetValuesForComponentWithContext(ctx, "nvsentinel")
+	if err != nil {
+		t.Fatalf("GetValuesForComponentWithContext(nvsentinel) error = %v", err)
+	}
+	gpuOperatorRef := *result.GetComponentRef("gpu-operator")
+	nvsentinelRef := *result.GetComponentRef("nvsentinel")
+	disabledNVSentinel := nvsentinelRef
+	disabledNVSentinel.Overrides = map[string]any{"enabled": false}
+	divergedNVSentinel := serializer.DeepCopyAnyMap(nvsentinel)
+	divergedNVSentinel["labeler"].(map[string]any)["assumeDriverInstalled"] = false
+
+	tests := []struct {
+		name    string
+		refs    []ComponentRef
+		values  map[string]map[string]any
+		dynamic map[string][]string
+		wantErr string
+	}{
+		{
+			name: "optional component shipped with selected values",
+			refs: []ComponentRef{gpuOperatorRef, nvsentinelRef},
+			values: map[string]map[string]any{
+				"gpu-operator": serializer.DeepCopyAnyMap(gpuOperator),
+				"nvsentinel":   serializer.DeepCopyAnyMap(nvsentinel),
+			},
+		},
+		{
+			name:   "optional component absent from output",
+			refs:   []ComponentRef{gpuOperatorRef},
+			values: map[string]map[string]any{"gpu-operator": serializer.DeepCopyAnyMap(gpuOperator)},
+		},
+		{
+			name:   "optional component disabled in output",
+			refs:   []ComponentRef{gpuOperatorRef, disabledNVSentinel},
+			values: map[string]map[string]any{"gpu-operator": serializer.DeepCopyAnyMap(gpuOperator)},
+		},
+		{
+			name: "optional component shipped with diverged value",
+			refs: []ComponentRef{gpuOperatorRef, nvsentinelRef},
+			values: map[string]map[string]any{
+				"gpu-operator": serializer.DeepCopyAnyMap(gpuOperator),
+				"nvsentinel":   divergedNVSentinel,
+			},
+			wantErr: "nvsentinel.labeler.assumeDriverInstalled diverged",
+		},
+		{
+			name: "optional component shipped with intersecting dynamic path",
+			refs: []ComponentRef{gpuOperatorRef, nvsentinelRef},
+			values: map[string]map[string]any{
+				"gpu-operator": serializer.DeepCopyAnyMap(gpuOperator),
+				"nvsentinel":   serializer.DeepCopyAnyMap(nvsentinel),
+			},
+			dynamic: map[string][]string{"nvsentinel": {"labeler"}},
+			wantErr: "intersects profile-owned",
+		},
+		{
+			name:    "presence-owned component still required",
+			refs:    []ComponentRef{nvsentinelRef},
+			values:  map[string]map[string]any{"nvsentinel": serializer.DeepCopyAnyMap(nvsentinel)},
+			wantErr: `profile-owned component "gpu-operator" is absent or disabled`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := result.ValidateProfileLock(ctx, tt.refs, tt.values, tt.dynamic)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ValidateProfileLock() error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ValidateProfileLock() error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+
+	// A bundle's emitted recipe no longer carries the omitted optional
+	// component; the artifact gate and a re-bundle must still accept it.
+	t.Run("baseline without optional component", func(t *testing.T) {
+		emitted := *result
+		emitted.ComponentRefs = []ComponentRef{gpuOperatorRef}
+		if err := emitted.ValidateProfileValuesWithContext(ctx); err != nil {
+			t.Fatalf("ValidateProfileValuesWithContext() error = %v", err)
+		}
+		err := emitted.ValidateProfileLock(ctx, []ComponentRef{gpuOperatorRef},
+			map[string]map[string]any{"gpu-operator": serializer.DeepCopyAnyMap(gpuOperator)}, nil)
+		if err != nil {
+			t.Fatalf("ValidateProfileLock() error = %v", err)
+		}
+	})
 }
 
 type readCountingProvider struct {
@@ -1688,7 +1869,7 @@ func TestValidateProfileValuesWithContextCanceled(t *testing.T) {
 	cancel()
 
 	err = result.ValidateProfileValuesWithContext(ctx)
-	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeTimeout {
 		t.Fatalf("ValidateProfileValuesWithContext() error = %v, want ErrCodeTimeout", err)
 	}
 }
@@ -1794,18 +1975,20 @@ func TestValidateProfileValuesRejectsInvalidBaseline(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("ValidateProfileValuesWithContext() error = %v, want containing %q", err, tt.wantErr)
 			}
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("ValidateProfileValuesWithContext() error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
 	}
 }
 
-// TestApplyEffectiveProfileConstraints covers the two constraint outcomes of a
-// selection: a name already present in the composed recipe is rejected rather
-// than silently shadowing it, and a fresh name is appended in sorted order.
+// TestApplyEffectiveProfileConstraints covers the constraint outcomes of a
+// selection: a fresh name is appended in sorted order, a name the composition
+// already carries is intersected when both sides are version ranges (issue
+// #2512), and anything else — a widening range, an empty intersection, or a
+// predicate with no ordering — leaves the recipe's own constraint intact.
 func TestApplyEffectiveProfileConstraints(t *testing.T) {
-	newDecl := func(constraintName string) *effectiveProfileDeclaration {
+	newDecl := func(constraintName, constraintValue string) *effectiveProfileDeclaration {
 		return &effectiveProfileDeclaration{
 			Source: "test-overlay",
 			Declaration: &ProfileDeclaration{
@@ -1816,26 +1999,101 @@ func TestApplyEffectiveProfileConstraints(t *testing.T) {
 							Name:      "gpu-operator",
 							Overrides: map[string]any{"driver": map[string]any{"enabled": false}},
 						}},
-						Constraints: []Constraint{{Name: constraintName, Value: ">= 1.32"}},
+						Constraints: []Constraint{{
+							Name:        constraintName,
+							Value:       constraintValue,
+							Remediation: "create the pool on a newer cluster",
+						}},
 					},
 				},
 			},
 		}
 	}
-	newSpec := func() *RecipeMetadataSpec {
+	newSpec := func(recipeConstraint Constraint) *RecipeMetadataSpec {
 		return &RecipeMetadataSpec{
 			ComponentRefs: []ComponentRef{{Name: "gpu-operator", Type: ComponentTypeHelm}},
-			Constraints:   []Constraint{{Name: "K8s.server.version", Value: ">= 1.30"}},
+			Constraints:   []Constraint{recipeConstraint},
 		}
 	}
+	k8sFloor := func(value string) Constraint {
+		return Constraint{Name: "K8s.server.version", Value: value}
+	}
 
-	t.Run("collision with the composed recipe is rejected", func(t *testing.T) {
-		spec := newSpec()
-		_, err := applyEffectiveProfile(spec, newDecl("K8s.server.version"), "", nil)
+	t.Run("stricter version floor tightens the composed recipe", func(t *testing.T) {
+		spec := newSpec(k8sFloor(">= 1.30"))
+		if _, err := applyEffectiveProfile(spec, newDecl("K8s.server.version", ">= 1.35"), "", nil); err != nil {
+			t.Fatalf("applyEffectiveProfile() error = %v", err)
+		}
+		if len(spec.Constraints) != 1 {
+			t.Fatalf("composed constraints = %v, want one entry per name", spec.Constraints)
+		}
+		if spec.Constraints[0].Value != ">= 1.35" {
+			t.Fatalf("constraint value = %q, want %q", spec.Constraints[0].Value, ">= 1.35")
+		}
+		if spec.Constraints[0].Remediation != "create the pool on a newer cluster" {
+			t.Fatalf("remediation = %q, want the profile's own guidance", spec.Constraints[0].Remediation)
+		}
+	})
+
+	t.Run("tightening preserves the composed ceiling", func(t *testing.T) {
+		spec := newSpec(k8sFloor(">= 1.34.1 < 1.36.0"))
+		if _, err := applyEffectiveProfile(spec, newDecl("K8s.server.version", ">= 1.35"), "", nil); err != nil {
+			t.Fatalf("applyEffectiveProfile() error = %v", err)
+		}
+		if got, want := spec.Constraints[0].Value, ">= 1.35 < 1.36.0"; got != want {
+			t.Fatalf("constraint value = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("weaker version floor leaves the composed recipe alone", func(t *testing.T) {
+		spec := newSpec(k8sFloor(">= 1.34"))
+		if _, err := applyEffectiveProfile(spec, newDecl("K8s.server.version", ">= 1.30"), "", nil); err != nil {
+			t.Fatalf("applyEffectiveProfile() error = %v", err)
+		}
+		if got, want := spec.Constraints[0].Value, ">= 1.34"; got != want {
+			t.Fatalf("constraint value = %q, want the recipe's own floor %q", got, want)
+		}
+		if spec.Constraints[0].Remediation != "" {
+			t.Fatalf("remediation = %q, want the recipe's own left intact", spec.Constraints[0].Remediation)
+		}
+	})
+
+	t.Run("empty intersection is rejected", func(t *testing.T) {
+		spec := newSpec(k8sFloor("<= 1.30"))
+		_, err := applyEffectiveProfile(spec, newDecl("K8s.server.version", ">= 1.35"), "", nil)
+		if err == nil || !strings.Contains(err.Error(), "no version can satisfy") {
+			t.Fatalf("applyEffectiveProfile() error = %v, want an unsatisfiable-range rejection", err)
+		}
+		if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
+			t.Fatalf("applyEffectiveProfile() error = %v, want ErrCodeInvalidRequest", err)
+		}
+		if len(spec.Constraints) != 1 || spec.Constraints[0].Value != "<= 1.30" {
+			t.Fatalf("composed constraints = %v, want the recipe's own left intact", spec.Constraints)
+		}
+	})
+
+	t.Run("bounds at different precisions are rejected as unorderable", func(t *testing.T) {
+		spec := newSpec(k8sFloor(">= 1.34"))
+		_, err := applyEffectiveProfile(spec, newDecl("K8s.server.version", ">= 1.34.1"), "", nil)
+		if err == nil || !strings.Contains(err.Error(), "different precisions cannot be ordered") {
+			t.Fatalf("applyEffectiveProfile() error = %v, want a precision-mismatch rejection", err)
+		}
+		if strings.Contains(err.Error(), "not both version ranges") {
+			t.Fatalf("applyEffectiveProfile() error = %v, must not claim these are not version ranges", err)
+		}
+		if len(spec.Constraints) != 1 || spec.Constraints[0].Value != ">= 1.34" {
+			t.Fatalf("composed constraints = %v, want the recipe's own left intact", spec.Constraints)
+		}
+	})
+
+	t.Run("collision with no ordering is rejected", func(t *testing.T) {
+		spec := newSpec(Constraint{Name: "NodeTopology.gpu-nodes.label", Value: "gke-no-default-nvidia-gpu-device-plugin=true"})
+		_, err := applyEffectiveProfile(spec,
+			newDecl("NodeTopology.gpu-nodes.label", "!gke-no-default-nvidia-gpu-device-plugin"), "", nil)
 		if err == nil || !strings.Contains(err.Error(), "collides with the composed recipe") {
 			t.Fatalf("applyEffectiveProfile() error = %v, want collision", err)
 		}
-		if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 			t.Fatalf("applyEffectiveProfile() error = %v, want ErrCodeInvalidRequest", err)
 		}
 		if len(spec.Constraints) != 1 {
@@ -1844,8 +2102,8 @@ func TestApplyEffectiveProfileConstraints(t *testing.T) {
 	})
 
 	t.Run("distinct constraint is merged", func(t *testing.T) {
-		spec := newSpec()
-		selected, err := applyEffectiveProfile(spec, newDecl("Driver.gpu.mode"), "", nil)
+		spec := newSpec(k8sFloor(">= 1.30"))
+		selected, err := applyEffectiveProfile(spec, newDecl("Driver.gpu.mode", ">= 1.32"), "", nil)
 		if err != nil {
 			t.Fatalf("applyEffectiveProfile() error = %v", err)
 		}
@@ -1979,7 +2237,7 @@ func TestValidateProfileValuesRejectsUnsupportedArtifactScalars(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("ValidateProfileValuesWithContext() error = %v, want containing %q", err, tt.wantErr)
 			}
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("ValidateProfileValuesWithContext() error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -2064,7 +2322,7 @@ func TestValidateProfileValuesScopesArtifactValidationToOwnedPaths(t *testing.T)
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("ValidateProfileValuesWithContext() error = %v, want containing %q", err, tt.wantErr)
 			}
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("ValidateProfileValuesWithContext() error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -2120,7 +2378,7 @@ func TestValidateProfileValuesKustomizeOwnership(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("ValidateProfileValuesWithContext() error = %v, want containing %q", err, tt.wantErr)
 			}
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("ValidateProfileValuesWithContext() error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -2264,7 +2522,7 @@ func TestValidateOwnershipDisjoint(t *testing.T) {
 				t.Fatalf("ValidateOwnershipDisjoint() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if err != nil {
-				if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 					t.Fatalf("ValidateOwnershipDisjoint() error = %v, want ErrCodeInvalidRequest", err)
 				}
 				if !strings.Contains(err.Error(), tt.wantDetail) {

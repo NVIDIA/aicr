@@ -27,6 +27,8 @@ import (
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/manifest"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
@@ -359,7 +361,7 @@ func TestMetadataStore_EvaluateOverlayConstraints(t *testing.T) {
 				if err == nil {
 					t.Fatal("expected error, got nil")
 				}
-				if tt.wantErrCode != "" && !errors.Is(err, aicrerrors.New(tt.wantErrCode, "")) {
+				if tt.wantErrCode != "" && errorstest.ReportedCode(err) != tt.wantErrCode {
 					t.Fatalf("error = %v, want code %s", err, tt.wantErrCode)
 				}
 				return
@@ -401,7 +403,7 @@ func TestMetadataStore_EvaluateOverlayConstraints_WrapsUnstructuredError(t *test
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInternal {
 		t.Fatalf("expected ErrCodeInternal, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "boom") {
@@ -721,6 +723,7 @@ func TestSlurmLeavesClearInheritedPerformancePhase(t *testing.T) {
 
 	for _, name := range []string{
 		"gb200-eks-ubuntu-training-slurm",
+		"gb300-eks-ubuntu-training-slurm",
 		"h100-aks-ubuntu-training-slurm",
 		"h100-eks-ubuntu-training-slurm",
 		"h100-gke-cos-training-slurm",
@@ -756,6 +759,7 @@ func TestSlurmLeavesIncludeSharedStoragePreManifest(t *testing.T) {
 	const wantManifest = "components/slinky-slurm/manifests/shared-storage-pvcs.yaml"
 	for _, name := range []string{
 		"gb200-eks-ubuntu-training-slurm",
+		"gb300-eks-ubuntu-training-slurm",
 		"h100-aks-ubuntu-training-slurm",
 		"h100-eks-ubuntu-training-slurm",
 		"h100-gke-cos-training-slurm",
@@ -789,6 +793,7 @@ func TestSlurmLeavesIncludeEnrootPreManifest(t *testing.T) {
 	const wantManifest = "components/slinky-slurm/manifests/enroot-config.yaml"
 	for _, name := range []string{
 		"gb200-eks-ubuntu-training-slurm",
+		"gb300-eks-ubuntu-training-slurm",
 		"h100-aks-ubuntu-training-slurm",
 		"h100-eks-ubuntu-training-slurm",
 		"h100-gke-cos-training-slurm",
@@ -963,6 +968,7 @@ func TestGPUSlurmLeavesConfigureGRESAndTaskCgroup(t *testing.T) {
 		wantGPUs int
 	}{
 		{name: "gb200-eks-ubuntu-training-slurm", wantGres: "gpu:gb200:4", wantGPUs: 4},
+		{name: "gb300-eks-ubuntu-training-slurm", wantGres: "gpu:gb300:4", wantGPUs: 4},
 		{name: "h100-aks-ubuntu-training-slurm", wantGres: "gpu:h100:8", wantGPUs: 8},
 		{name: "h100-eks-ubuntu-training-slurm", wantGres: "gpu:h100:8", wantGPUs: 8},
 		{name: "h100-gke-cos-training-slurm", wantGres: "gpu:h100:8", wantGPUs: 8},
@@ -1039,11 +1045,11 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		"gang-scheduling",
 		"pod-autoscaling",
 		"cluster-autoscaling",
-		"robust-controller",
 		"secure-accelerator-access",
 		"slinky-slurm-health",
+		"slinky-slurm-gpu-access",
 	}
-	gb200ConformanceChecks := []string{
+	gbSlurmConformanceChecks := []string{
 		"platform-health",
 		"gpu-operator-health",
 		"dra-support",
@@ -1052,8 +1058,10 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		"gang-scheduling",
 		"pod-autoscaling",
 		"cluster-autoscaling",
+		"secure-accelerator-access",
 		"slinky-slurm-health",
 		"slinky-slurm-imex-channel",
+		"slinky-slurm-gpu-access",
 	}
 	kindConformanceChecks := []string{
 		"platform-health",
@@ -1072,7 +1080,9 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		name string
 		want []string
 	}{
-		{name: "gb200-eks-ubuntu-training-slurm", want: gb200ConformanceChecks},
+		{name: "gb200-eks-ubuntu-training-slurm", want: gbSlurmConformanceChecks},
+		{name: "gb200-gke-cos-training-slurm", want: gbSlurmConformanceChecks},
+		{name: "gb300-eks-ubuntu-training-slurm", want: gbSlurmConformanceChecks},
 		{name: "h100-aks-ubuntu-training-slurm", want: conformanceChecks},
 		{name: "h100-eks-ubuntu-training-slurm", want: conformanceChecks},
 		{name: "h100-gke-cos-training-slurm", want: conformanceChecks},
@@ -1099,16 +1109,42 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 	}
 }
 
-func TestGB200EKSSlurmWiresIMEXComputeDomain(t *testing.T) {
+// TestGPUSlurmLeavesWireIMEXComputeDomain covers every IMEX-capable Slurm leaf.
+// The wiring under test (SwitchType, the ComputeDomain pre-manifest, and the
+// NodeSet/ComputeDomain ResourceClaimTemplate identity match) is transposed
+// verbatim between leaves, so a new leaf that drops or typos any part of it
+// must fail here by name rather than only as an opaque golden-digest diff.
+func TestGPUSlurmLeavesWireIMEXComputeDomain(t *testing.T) {
 	ctx := context.Background()
 	store, err := loadMetadataStore(ctx)
 	if err != nil {
 		t.Fatalf("failed to load metadata store: %v", err)
 	}
 
-	leaf, ok := store.GetRecipeByName("gb200-eks-ubuntu-training-slurm")
+	tests := []struct {
+		name     string
+		wantGres string
+	}{
+		{name: "gb200-eks-ubuntu-training-slurm", wantGres: "gpu:gb200:4"},
+		{name: "gb300-eks-ubuntu-training-slurm", wantGres: "gpu:gb300:4"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertSlurmLeafWiresIMEXComputeDomain(t, ctx, store, tt.name, tt.wantGres)
+		})
+	}
+}
+
+//nolint:revive // ctx follows t, the conventional order for a t.Helper assertion.
+func assertSlurmLeafWiresIMEXComputeDomain(
+	t *testing.T, ctx context.Context, store *MetadataStore, leafName, wantGres string,
+) {
+
+	t.Helper()
+
+	leaf, ok := store.GetRecipeByName(leafName)
 	if !ok {
-		t.Fatal("overlay gb200-eks-ubuntu-training-slurm not found in store")
+		t.Fatalf("overlay %s not found in store", leafName)
 	}
 	result, err := store.BuildRecipeResult(ctx, leaf.Spec.Criteria)
 	if err != nil {
@@ -1139,15 +1175,15 @@ func TestGB200EKSSlurmWiresIMEXComputeDomain(t *testing.T) {
 		t.Errorf("slinky-slurm dependencyRefs = %v, want nvidia-dra-driver-gpu", slurm.DependencyRefs)
 	}
 
-	values, err := result.GetValuesForComponent("slinky-slurm")
+	values, err := result.GetValuesForComponentWithContext(ctx, "slinky-slurm")
 	if err != nil {
-		t.Fatalf("GetValuesForComponent(slinky-slurm) failed: %v", err)
+		t.Fatalf("GetValuesForComponentWithContext(slinky-slurm) failed: %v", err)
 	}
 	if got := valueAtPath[string](t, values, "controller", "extraConfMap", "SwitchType"); got != "switch/nvidia_imex" {
 		t.Errorf("controller.extraConfMap.SwitchType = %q, want switch/nvidia_imex", got)
 	}
-	if got := valueAtPath[string](t, values, "nodesets", "slinky", "extraConfMap", "Gres"); got != "gpu:gb200:4" {
-		t.Errorf("nodesets.slinky.extraConfMap.Gres = %q, want gpu:gb200:4", got)
+	if got := valueAtPath[string](t, values, "nodesets", "slinky", "extraConfMap", "Gres"); got != wantGres {
+		t.Errorf("nodesets.slinky.extraConfMap.Gres = %q, want %q", got, wantGres)
 	}
 
 	podClaims := valueAtPath[[]any](t, values, "nodesets", "slinky", "podSpec", "resourceClaims")
@@ -1346,7 +1382,7 @@ func TestEvaluatorFailingLeafExcludesCandidate(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected coverage error: excluding the only full-match leaf uncovers stated dimensions")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 	var se *aicrerrors.StructuredError
@@ -1428,7 +1464,7 @@ func TestMixinOSTalos_AppliesPrivilegedNamespacesAndPreManifests(t *testing.T) {
 		},
 	}
 
-	if _, err := store.mergeMixins(&spec); err != nil {
+	if _, err := store.mergeMixins(t.Context(), &spec); err != nil {
 		t.Fatalf("mergeMixins: %v", err)
 	}
 
@@ -1538,22 +1574,26 @@ func TestMixinComponentRefSafeForMerge(t *testing.T) {
 			wantOffending: "valuesFile",
 		},
 		{
-			name: "overrides set -> conflict",
+			// mixinComponentRefSafeForMerge alone no longer flags Overrides:
+			// it is validated separately by mixinOverridesSafeForMerge
+			// (registry allowlist + collision check), see
+			// TestMixinOverridesSafeForMerge.
+			name: "overrides set alone -> safe at this layer",
 			ref: ComponentRef{
 				Name:      "gpu-operator",
 				Overrides: map[string]any{"driver": map[string]any{"enabled": false}},
 			},
-			wantSafe:      false,
-			wantOffending: "overrides",
+			wantSafe: true,
 		},
 		{
-			name: "dependencyRefs set -> conflict",
+			// Additive: the merge unions and deduplicates, so a mixin can add
+			// an edge but cannot drop one the chain declared.
+			name: "dependencyRefs set -> safe",
 			ref: ComponentRef{
 				Name:           "gpu-operator",
 				DependencyRefs: []string{"cert-manager"},
 			},
-			wantSafe:      false,
-			wantOffending: "dependencyRefs",
+			wantSafe: true,
 		},
 		{
 			name:          "cleanup=true -> conflict",
@@ -1644,7 +1684,7 @@ func TestMixinConstraintFailureExcludesCandidate(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected coverage error: mixin exclusion uncovers the stated os/service/intent dimensions")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 	var se *aicrerrors.StructuredError
@@ -1805,7 +1845,7 @@ func TestMixinConstraintFailureExcludesOnlyAffectedCandidateChain(t *testing.T) 
 	if err == nil {
 		t.Fatal("expected coverage error: mixin exclusion uncovers the stated accelerator dimension")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 	var se *aicrerrors.StructuredError
@@ -1981,7 +2021,7 @@ func TestMixinConstraintFailurePreservesSharedAncestorsForSurvivingLeaf(t *testi
 	if err == nil {
 		t.Fatal("expected coverage error: mixin exclusion uncovers the stated accelerator dimension")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 	var se *aicrerrors.StructuredError
@@ -2204,7 +2244,7 @@ func TestMixinConstraintFailClosedOnInternalEvaluatorError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected fail-closed error from mixin constraint evaluation")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInternal {
 		t.Fatalf("expected ErrCodeInternal preserved from mixin evaluator error, got %v", err)
 	}
 }
@@ -2268,7 +2308,7 @@ func TestMixinConstraintFailClosedOnUnstructuredEvaluatorError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected fail-closed error from mixin constraint evaluation")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInternal {
 		t.Fatalf("expected unstructured mixin evaluator error wrapped as ErrCodeInternal, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "boom") {
@@ -2290,6 +2330,7 @@ func TestEvaluateMixinConstraintsReturnsErrorWhenConstraintCannotBeMappedToCandi
 	}
 
 	result, err := store.evaluateMixinConstraints(
+		t.Context(),
 		&RecipeMetadataSpec{
 			Constraints: []Constraint{
 				{Name: "OS.kernel", Value: ">= 6.8"},
@@ -2344,6 +2385,7 @@ func TestEvaluateMixinConstraintsRejectsIncompleteConstraint(t *testing.T) {
 			}
 
 			_, err := store.evaluateMixinConstraints(
+				t.Context(),
 				&RecipeMetadataSpec{Constraints: []Constraint{tt.constraint}},
 				func(_ Constraint) ConstraintEvalResult {
 					return ConstraintEvalResult{
@@ -2353,7 +2395,7 @@ func TestEvaluateMixinConstraintsRejectsIncompleteConstraint(t *testing.T) {
 				map[string]bool{tt.constraint.Name: true},
 				[]string{"candidate"},
 			)
-			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("error = %v, want code %s", err, aicrerrors.ErrCodeInvalidRequest)
 			}
 		})
@@ -2371,7 +2413,7 @@ func TestMalformedMixinRejected(t *testing.T) {
 		{
 			name: "mixin with forbidden base field",
 			content: `kind: RecipeMixin
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: bad-mixin
 spec:
@@ -2384,7 +2426,7 @@ spec:
 		{
 			name: "mixin with forbidden criteria field",
 			content: `kind: RecipeMixin
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: bad-mixin
 spec:
@@ -2398,7 +2440,7 @@ spec:
 		{
 			name: "mixin with forbidden validation field",
 			content: `kind: RecipeMixin
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: bad-mixin
 spec:
@@ -2660,7 +2702,7 @@ func buildProviderWithOverlays(t *testing.T, overlayFileName string) DataProvide
 	}
 
 	baseYAML := []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: base
 spec:
@@ -2668,7 +2710,7 @@ spec:
 `)
 
 	overlayYAML := fmt.Appendf(nil, `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: %s
 spec:
@@ -2689,13 +2731,13 @@ func TestLoadMetadataStore_ProfileMetadataRequiresKind(t *testing.T) {
 
 	provider := newInMemoryProvider("missing-kind", map[string][]byte{
 		"overlays/base.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: base
 spec:
   componentRefs: []
 `),
-		"overlays/profile.yaml": []byte(`apiVersion: aicr.run/v1alpha3
+		"overlays/profile.yaml": []byte(`apiVersion: aicr.run/v1beta2
 metadata:
   name: profile
 spec:
@@ -2713,7 +2755,7 @@ spec:
 	if err == nil {
 		t.Fatal("LoadMetadataStoreFor() error = nil, want missing-kind rejection")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), `expected "RecipeMetadata"`) {
@@ -2752,7 +2794,7 @@ spec: {}
 `),
 		"evidence/unrelated.yaml": []byte("signers:\n  first-party: []\n"),
 		"strict-config.yaml": []byte(`kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   recipe:
     criteriaStrict: true
@@ -2781,7 +2823,7 @@ spec:
 func TestLoadMetadataStore_AcceptsReleaseNProfileTarget(t *testing.T) {
 	provider := newInMemoryProvider("target-profile-catalog", map[string][]byte{
 		"overlays/base.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: base
 spec:
@@ -2814,7 +2856,7 @@ spec:
 
 func TestLoadMetadataStore_RejectsInvalidCatalogHeaders(t *testing.T) {
 	validBase := []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: base
 spec:
@@ -2841,7 +2883,7 @@ spec:
 		{
 			name:    "wrong AICR kind",
 			path:    "overlays/bad.yaml",
-			data:    []byte("kind: RecipeMetdata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: bad\nspec: {}\n"),
+			data:    []byte("kind: RecipeMetdata\napiVersion: aicr.run/v1\nmetadata:\n  name: bad\nspec: {}\n"),
 			wantSub: `kind "RecipeMetdata"`,
 		},
 		{
@@ -2869,7 +2911,7 @@ spec:
 			if err == nil {
 				t.Fatal("LoadMetadataStoreFor() error = nil, want header rejection")
 			}
-			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if got := aicrerrors.ExitCodeFromError(err); got != aicrerrors.ExitInvalidInput {
@@ -3464,7 +3506,7 @@ func TestBuildRecipeResult_OSRequired(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := store.BuildRecipeResult(ctx, tt.criteria)
 			if tt.wantErrCode != "" {
-				if !errors.Is(err, aicrerrors.New(tt.wantErrCode, "")) {
+				if errorstest.ReportedCode(err) != tt.wantErrCode {
 					t.Errorf("got err %v, want code %s", err, tt.wantErrCode)
 				}
 				if tt.wantInMsg != "" && (err == nil || !strings.Contains(err.Error(), tt.wantInMsg)) {
@@ -3528,7 +3570,7 @@ func TestBuildRecipeResultWithEvaluator_OSRequired(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := store.BuildRecipeResultWithEvaluator(ctx, tt.criteria, passAll)
 			if tt.wantErrCode != "" {
-				if !errors.Is(err, aicrerrors.New(tt.wantErrCode, "")) {
+				if errorstest.ReportedCode(err) != tt.wantErrCode {
 					t.Errorf("got err %v, want code %s", err, tt.wantErrCode)
 				}
 				if tt.wantInMsg != "" && (err == nil || !strings.Contains(err.Error(), tt.wantInMsg)) {
@@ -3590,7 +3632,7 @@ func TestBuildRecipeResult_CriteriaCoverage(t *testing.T) {
 		_, err := store.BuildRecipeResult(ctx, &Criteria{
 			Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100,
 			Intent: CriteriaIntentTraining, Platform: CriteriaPlatformKubeflow})
-		if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 			t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
 		}
 		// A guard-origin error can never satisfy this: only the coverage
@@ -3672,7 +3714,7 @@ func TestBuildRecipeResult_JointSufficiency(t *testing.T) {
 	}
 
 	_, err := store.BuildRecipeResult(ctx, criteria)
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "specify os") {
@@ -3775,7 +3817,7 @@ func TestBuildRecipeResultWithEvaluator_FailClosed(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error")
 			}
-			if !errors.Is(err, aicrerrors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Fatalf("expected code %s, got %v", tt.wantCode, err)
 			}
 		})
@@ -3797,7 +3839,7 @@ func TestBuildRecipeResultWithEvaluator_FailClosed(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected coverage error: stated service dimension's only coverage was constraint-excluded")
 		}
-		if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 			t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
 		}
 		var se *aicrerrors.StructuredError
@@ -3862,7 +3904,7 @@ func TestBuildRecipeResultWithEvaluator_FailClosed(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected fail-closed error: Internal cause must win over NotFound graceful exclusion")
 		}
-		if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+		if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInternal {
 			t.Fatalf("expected ErrCodeInternal (fail-closed wins over NotFound), got %v", err)
 		}
 	})
@@ -3903,7 +3945,7 @@ func TestBuildRecipeResultWithEvaluator_CoverageAfterExclusion(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected coverage error: stated platform's only coverage was constraint-excluded")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 	var se *aicrerrors.StructuredError
@@ -3927,7 +3969,7 @@ func TestLoadMetadataStore_ExternalOverlayNodesError(t *testing.T) {
 	t.Cleanup(ResetMetadataStoreForTesting)
 
 	baseYAML := []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: base
 spec:
@@ -3935,7 +3977,7 @@ spec:
 `)
 	// External overlay with criteria.nodes set — must be rejected.
 	externalYAML := []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: nodes-gated
 spec:
@@ -3960,9 +4002,7 @@ spec:
 		t.Errorf("error = %v, want it to name the overlay 'nodes-gated'", err)
 	}
 	// Verify the error code so callers can distinguish this from internal errors.
-	// Use errors.Is with a sentinel StructuredError — the project-preferred pattern
-	// per CLAUDE.md (see e.g. line 1179 in this file).
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
 }
@@ -4001,14 +4041,14 @@ func TestLoadMetadataStore_EmbeddedOverlayNodesDoesNotError(t *testing.T) {
 	t.Cleanup(ResetMetadataStoreForTesting)
 
 	baseYAML := []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: base
 spec:
   componentRefs: []
 `)
 	embeddedYAML := []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: nodes-embedded
 spec:

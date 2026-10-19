@@ -33,7 +33,7 @@ When `aicr bundle` resolves that recipe, the `os-talos` mixin:
    Namespace resource with PSA-privileged labels) via the
    `preManifestFiles` field — so the bundler emits a `-pre` folder
    at a lower sync-wave than the corresponding chart.
-3. Adds a `OS.release.ID == talos` constraint to the recipe so the
+3. Adds an `OS.release.ID == talos` constraint to the recipe so the
    bundle won't silently install on a non-Talos cluster.
 
 No operator pre-cluster setup is required. `kubectl apply -f` or an
@@ -147,4 +147,4 @@ the local-cluster test harness.
 - [Kubernetes Pod Security Admission](https://kubernetes.io/docs/concepts/security/pod-security-admission/)
 - [Talos pod-security guidance](https://www.talos.dev/v1.9/kubernetes-guides/configuration/pod-security/)
 - [AICR mixin authoring](recipe-development.md)
-- Source: [`recipes/mixins/os-talos.yaml`](../../recipes/mixins/os-talos.yaml)
+- Source: [`recipes/mixins/os-talos.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/mixins/os-talos.yaml)

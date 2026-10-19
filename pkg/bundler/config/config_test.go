@@ -15,7 +15,12 @@
 package config
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 
 	corev1 "k8s.io/api/core/v1"
 )
@@ -158,31 +163,148 @@ func TestConfigSerial(t *testing.T) {
 	}
 }
 
+// TestTerraformOptions pins the two terraform-only options: off unless set,
+// and independent of each other.
+func TestTerraformOptions(t *testing.T) {
+	tests := []struct {
+		name         string
+		cfg          *Config
+		wantChild    bool
+		wantRollover bool
+	}{
+		{"default off", NewConfig(), false, false},
+		{"child module", NewConfig(WithTerraformChildModule(true)), true, false},
+		{"cluster rollover", NewConfig(WithTerraformClusterRollover(true)), false, true},
+		{"both", NewConfig(WithTerraformChildModule(true), WithTerraformClusterRollover(true)), true, true},
+		{"explicit off", NewConfig(WithTerraformChildModule(false), WithTerraformClusterRollover(false)), false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.TerraformChildModule(); got != tt.wantChild {
+				t.Errorf("TerraformChildModule() = %v, want %v", got, tt.wantChild)
+			}
+			if got := tt.cfg.TerraformClusterRollover(); got != tt.wantRollover {
+				t.Errorf("TerraformClusterRollover() = %v, want %v", got, tt.wantRollover)
+			}
+		})
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
+	seconds := int64(30)
 	tests := []struct {
 		name    string
 		config  *Config
-		wantErr bool
+		wantErr string
 	}{
 		{
-			name:    "valid default config",
-			config:  NewConfig(),
-			wantErr: false,
+			name:   "valid default config",
+			config: NewConfig(),
+		},
+		{
+			name: "valid scheduling",
+			config: NewConfig(
+				WithSystemNodeSelector(map[string]string{"nodeGroup": "system-pool"}),
+				WithSystemNodeTolerations([]corev1.Toleration{
+					{Operator: corev1.TolerationOpExists},
+					{Key: "dedicated", Operator: corev1.TolerationOpEqual, Value: "system", Effect: corev1.TaintEffectNoSchedule},
+				}),
+				WithAcceleratedNodeSelector(map[string]string{"nvidia.com/gpu.present": "true"}),
+				WithAcceleratedNodeTolerations([]corev1.Toleration{
+					{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute, TolerationSeconds: &seconds},
+				}),
+				WithWorkloadSelector(map[string]string{"app": "training"}),
+			),
 		},
 		{
 			name: "invalid DRA eviction label",
 			config: NewConfig(WithDRAEvictionNodeLabel(NodeLabel{
 				Key: "not a label key", Value: "true",
 			})),
-			wantErr: true,
+			wantErr: "invalid node label key",
+		},
+		{
+			name:    "invalid system node selector",
+			config:  NewConfig(WithSystemNodeSelector(map[string]string{"bad key": "v"})),
+			wantErr: "WithSystemNodeSelector",
+		},
+		{
+			name:    "invalid accelerated node selector",
+			config:  NewConfig(WithAcceleratedNodeSelector(map[string]string{"k": "{{ .Values.x }}"})),
+			wantErr: "WithAcceleratedNodeSelector",
+		},
+		{
+			name:    "invalid workload selector",
+			config:  NewConfig(WithWorkloadSelector(map[string]string{"k": "a b"})),
+			wantErr: "WithWorkloadSelector",
+		},
+		{
+			name: "invalid system toleration",
+			config: NewConfig(WithSystemNodeTolerations([]corev1.Toleration{
+				{Key: "dedicated", Operator: corev1.TolerationOpExists, Value: "system"},
+			})),
+			wantErr: "WithSystemNodeTolerations",
+		},
+		{
+			name: "invalid accelerated toleration",
+			config: NewConfig(WithAcceleratedNodeTolerations([]corev1.Toleration{
+				{Operator: corev1.TolerationOpEqual, Value: "v"},
+			})),
+			wantErr: "WithAcceleratedNodeTolerations",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.config.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("Validate() error = %v, want nil", err)
+				}
+				return
+			}
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+				t.Fatalf("Validate() error = %v, want ErrCodeInvalidRequest", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Validate() error = %v, want it to contain %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidateTolerations pins the API server's toleration rules.
+func TestValidateTolerations(t *testing.T) {
+	seconds := int64(30)
+	tests := []struct {
+		name    string
+		tol     corev1.Toleration
+		wantErr bool
+	}{
+		{"tolerate all", corev1.Toleration{Operator: corev1.TolerationOpExists}, false},
+		{"keyless Exists with effect", corev1.Toleration{Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}, false},
+		{"Equal", corev1.Toleration{Key: "k", Operator: corev1.TolerationOpEqual, Value: "v", Effect: corev1.TaintEffectPreferNoSchedule}, false},
+		{"default operator is Equal", corev1.Toleration{Key: "k", Value: "v"}, false},
+		{"tolerationSeconds with NoExecute", corev1.Toleration{Key: "k", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute, TolerationSeconds: &seconds}, false},
+		{"empty key without Exists", corev1.Toleration{Operator: corev1.TolerationOpEqual, Value: "v"}, true},
+		{"empty key and operator", corev1.Toleration{Effect: corev1.TaintEffectNoSchedule}, true},
+		{"invalid key", corev1.Toleration{Key: "{{ .Values.x }}", Operator: corev1.TolerationOpExists}, true},
+		{"invalid Equal value", corev1.Toleration{Key: "k", Operator: corev1.TolerationOpEqual, Value: "a b"}, true},
+		{"Exists with a value", corev1.Toleration{Key: "k", Operator: corev1.TolerationOpExists, Value: "v"}, true},
+		{"tolerationSeconds without NoExecute", corev1.Toleration{Key: "k", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule, TolerationSeconds: &seconds}, true},
+		{"unknown operator", corev1.Toleration{Key: "k", Operator: "In"}, true},
+		{"Gt", corev1.Toleration{Key: "k", Operator: corev1.TolerationOpGt, Value: "3"}, true},
+		{"Lt", corev1.Toleration{Key: "k", Operator: corev1.TolerationOpLt, Value: "3"}, true},
+		{"unknown effect", corev1.Toleration{Key: "k", Operator: corev1.TolerationOpExists, Effect: "Sometimes"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateTolerations([]corev1.Toleration{tt.tol})
 			if (err != nil) != tt.wantErr {
-				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+				t.Fatalf("ValidateTolerations() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil && errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+				t.Errorf("ValidateTolerations() error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
 	}
@@ -220,12 +342,23 @@ func TestDRAEvictionNodeLabel(t *testing.T) {
 		})
 	}
 
-	defaultLabel := NewConfig().DRAEvictionNodeLabel()
-	if want := DefaultDRAEvictionNodeLabel(); defaultLabel != want {
-		t.Errorf("default DRA eviction label = %+v, want %+v", defaultLabel, want)
+	// The DRA eviction contract is opt-in (#2469): an unconfigured Config
+	// yields the zero label, which the bundler reads as "not requested".
+	if got := NewConfig().DRAEvictionNodeLabel(); got != (NodeLabel{}) {
+		t.Errorf("unconfigured DRA eviction label = %+v, want zero (opt-in)", got)
 	}
-	if got := NewConfig(WithDRAEvictionNodeLabel(NodeLabel{})).DRAEvictionNodeLabel(); got != defaultLabel {
-		t.Errorf("zero DRA eviction label should preserve default: got %+v, want %+v", got, defaultLabel)
+	if got := NewConfig(WithDRAEvictionNodeLabel(NodeLabel{})).DRAEvictionNodeLabel(); got != (NodeLabel{}) {
+		t.Errorf("zero DRA eviction label should stay unset: got %+v, want zero", got)
+	}
+	want := DefaultDRAEvictionNodeLabel()
+	if got := NewConfig(WithDRAEvictionNodeLabel(want)).DRAEvictionNodeLabel(); got != want {
+		t.Errorf("configured DRA eviction label = %+v, want %+v", got, want)
+	}
+	// The documented default is still what the opt-in uses when a caller asks
+	// for it by name.
+	if want.Key != defaults.DRAEvictionNodeLabelKey || want.Value != defaults.DRAEvictionNodeLabelValue {
+		t.Errorf("DefaultDRAEvictionNodeLabel() = %+v, want %s=%s",
+			want, defaults.DRAEvictionNodeLabelKey, defaults.DRAEvictionNodeLabelValue)
 	}
 }
 
@@ -1059,6 +1192,8 @@ func TestParseDeployerType(t *testing.T) {
 		{"flux uppercase", "FLUX", DeployerFlux, false},
 		{"flux mixed case", "Flux", DeployerFlux, false},
 		{"flux with spaces", "  flux  ", DeployerFlux, false},
+		{"terraform lowercase", "terraform", DeployerTerraform, false},
+		{"terraform uppercase", "TERRAFORM", DeployerTerraform, false},
 		{"helmfile lowercase", "helmfile", DeployerHelmfile, false},
 		{"helmfile uppercase", "HELMFILE", DeployerHelmfile, false},
 		{"helmfile mixed case", "Helmfile", DeployerHelmfile, false},
@@ -1084,9 +1219,10 @@ func TestParseDeployerType(t *testing.T) {
 func TestGetDeployerTypes(t *testing.T) {
 	types := GetDeployerTypes()
 
-	// Verify we get the expected types (argocd, argocd-helm, flux, helm, helmfile)
-	if len(types) != 5 {
-		t.Errorf("GetDeployerTypes() returned %d types, want 5", len(types))
+	// Verify we get the expected types (argocd, argocd-helm, flux, helm,
+	// helmfile, terraform)
+	if len(types) != 6 {
+		t.Errorf("GetDeployerTypes() returned %d types, want 6", len(types))
 	}
 
 	// Verify types are sorted alphabetically
@@ -1117,6 +1253,9 @@ func TestGetDeployerTypes(t *testing.T) {
 	if !found[string(DeployerHelmfile)] {
 		t.Error("GetDeployerTypes() missing 'helmfile'")
 	}
+	if !found[string(DeployerTerraform)] {
+		t.Error("GetDeployerTypes() missing 'terraform'")
+	}
 }
 
 func TestDeployerTypeString(t *testing.T) {
@@ -1129,6 +1268,7 @@ func TestDeployerTypeString(t *testing.T) {
 		{DeployerArgoCDHelm, "argocd-helm"},
 		{DeployerFlux, "flux"},
 		{DeployerHelmfile, "helmfile"},
+		{DeployerTerraform, "terraform"},
 	}
 
 	for _, tt := range tests {

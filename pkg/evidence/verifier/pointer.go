@@ -101,21 +101,27 @@ func validatePointer(p *attestation.Pointer) error {
 	}
 	att := p.Attestations[0]
 	switch att.Bundle.PredicateType {
-	case attestation.PredicateTypeV1, attestation.PredicateTypeV2:
+	case attestation.PredicateTypeV1, attestation.PredicateTypeV2, attestation.PredicateTypeV3:
 	default:
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"unsupported predicateType "+att.Bundle.PredicateType)
 	}
-	// Bidirectional pointer-level coherence: a profiled pointer must
-	// reference v2 evidence, and an unprofiled one must not.
-	if p.Profile != "" && att.Bundle.PredicateType != attestation.PredicateTypeV2 {
-		return errors.New(errors.ErrCodeInvalidRequest,
-			"pointer records a profile selection but references "+att.Bundle.PredicateType+
-				" evidence; profile-bearing recipes require "+attestation.PredicateTypeV2)
-	}
-	if p.Profile == "" && att.Bundle.PredicateType == attestation.PredicateTypeV2 {
-		return errors.New(errors.ErrCodeInvalidRequest,
-			"pointer references "+attestation.PredicateTypeV2+" evidence without a profile selection")
+	// Bidirectional pointer-level coherence applies to the legacy types
+	// only. A profiled V1/V2 pointer must reference v2 evidence, and an
+	// unprofiled one must not. V3's profile block presence is a content
+	// fact (see ValidatePredicateTypeCoherence), not a type-level signal,
+	// so it carries no such constraint here. checkRecipeIdentity's
+	// content-derived comparison covers it regardless of type.
+	if att.Bundle.PredicateType != attestation.PredicateTypeV3 {
+		if p.Profile != "" && att.Bundle.PredicateType != attestation.PredicateTypeV2 {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				"pointer records a profile selection but references "+att.Bundle.PredicateType+
+					" evidence; profile-bearing recipes require "+attestation.PredicateTypeV2)
+		}
+		if p.Profile == "" && att.Bundle.PredicateType == attestation.PredicateTypeV2 {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				"pointer references "+attestation.PredicateTypeV2+" evidence without a profile selection")
+		}
 	}
 	if att.Bundle.OCI != "" && !strings.HasPrefix(att.Bundle.Digest, "sha256:") {
 		return errors.New(errors.ErrCodeInvalidRequest,

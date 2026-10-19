@@ -38,28 +38,46 @@ const (
 	flagProfile             = "profile"
 	flagSlurmAccountingMode = "slurm-accounting-mode"
 	flagRuntimeInventory    = "runtime-inventory"
+	flagGKETCPXOInterfaces  = "gke-tcpxo-interfaces"
+	flagInheritFrom         = "inherit-from"
+	flagInherit             = "inherit"
 	flagNoHealth            = "no-health"
+
+	// flagAddRolesToSA switches `aicr snapshot` into a generate-and-exit
+	// invocation that WRITES the RBAC manifests granting the agent's
+	// permissions to a named ServiceAccount and applies none of them. No
+	// cluster is contacted and no snapshot is taken.
+	flagAddRolesToSA = "add-roles-to-service-account"
+
+	// flagValidatorSA names the existing ServiceAccount `aicr validate` runs
+	// its validator Jobs as, in place of per-run RBAC.
+	flagValidatorSA = "validator-service-account-name"
 )
 
 // criteriaAny is the wildcard value for any criteria dimension.
 const criteriaAny = "any"
 
-// Keyless-signing / OCI-push flag names shared by `validate`, `bundle`,
-// and `evidence publish`. Extracted so the same literal is declared once
-// (goconst flags a string repeated ≥3 times across the package) and the
-// flag wiring stays consistent across the commands that sign+push.
+// Signing, verification and OCI-push flag names shared by `validate`,
+// `bundle`, `verify` and the `evidence` publish, sign and verify commands.
+// Extracted so the same literal is declared once (goconst flags a string
+// repeated ≥3 times across the package) and the flag wiring stays consistent
+// across the commands that sign, verify and push.
 const (
-	flagIdentityToken     = "identity-token"
-	flagOIDCDeviceFlow    = "oidc-device-flow"
-	flagFulcioURL         = "fulcio-url"
-	flagRekorURL          = "rekor-url"
-	flagSigningConfig     = "signing-config"
-	flagEmitSigningConfig = "emit-signing-config"
-	flagSigningKey        = "signing-key"
-	flagTLogUpload        = "tlog-upload"
-	flagInsecureTLS       = "insecure-tls"
-	flagPlainHTTP         = "plain-http"
-	flagPush              = "push"
+	flagIdentityToken      = "identity-token"
+	flagOIDCDeviceFlow     = "oidc-device-flow"
+	flagFulcioURL          = "fulcio-url"
+	flagRekorURL           = "rekor-url"
+	flagSigningConfig      = "signing-config"
+	flagEmitSigningConfig  = "emit-signing-config"
+	flagSigningKey         = "signing-key"
+	flagTLogUpload         = "tlog-upload"
+	flagVerifyKey          = "key"
+	flagTrustRoot          = "trust-root"
+	flagInsecureIgnoreTLog = "insecure-ignore-tlog"
+	flagInsecureTLS        = "insecure-tls"
+	flagPlainHTTP          = "plain-http"
+	flagPush               = "push"
+	flagImageRefs          = "image-refs"
 	// flagNoSign pushes an unsigned evidence bundle and writes a pointer whose
 	// attestation has a nil Signer (the unsigned state — distinct from a
 	// signed-without-Rekor pointer, which has a Signer with a nil
@@ -69,6 +87,10 @@ const (
 	// flagFull ships an unredacted evidence bundle. By default the bundle is
 	// minimized (sensitive snapshot fields and CTRF logs removed).
 	flagFull = "full"
+	// flagAllowMutableValidatorTags emits evidence even when a validator image
+	// resolves to a moving tag, which emission otherwise refuses because the
+	// predicate identifies validators by tag alone (#2873).
+	flagAllowMutableValidatorTags = "allow-mutable-validator-tags"
 	// flagAssumeYes bypasses the interactive keyless-signing identity
 	// disclosure prompt (see confirmKeylessSigningDisclosure). The banner is
 	// still emitted; only the y/N pause is skipped.

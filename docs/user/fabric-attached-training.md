@@ -33,13 +33,37 @@ That single limitation decides the rest:
 
 | Fabric | Platform | Needs a sidecar? | Where the wiring goes |
 |---|---|---|---|
-| GPUDirect TCPXO | GKE, A3 Mega | yes (`tcpxo-daemon`) | a `TrainingRuntime` you author |
+| GPUDirect TCPXO | GKE, A3 Mega | yes (`tcpxo-daemon`) | the shipped `torch-distributed-tcpxo` ClusterTrainingRuntime (or a `TrainingRuntime` you author) |
 | EFA | EKS | no | your `TrainJob` |
 | InfiniBand / RDMA | AKS | no | your `TrainJob` |
 
 ## GKE GPUDirect TCPXO
 
 TCPXO needs the `tcpxo-daemon` sidecar, so the wiring cannot live in a TrainJob.
+
+**With an AICR-generated bundle (recommended).** The
+`h100-gke-cos-training-kubeflow` recipe ships a pre-wired
+`ClusterTrainingRuntime` named `torch-distributed-tcpxo`. You supply the eight
+GPU-NIC network names once, at recipe generation
+(`--gke-tcpxo-interfaces eth1=<network>,...,eth8=<network>` — see
+[the integrator page](../integrator/gke-tcpxo-networking.md#the-shipped-torch-distributed-tcpxo-runtime));
+the runtime is then on the cluster with the wiring baked in, and the TrainJob
+carries no fabric configuration at all:
+
+```yaml
+spec:
+  runtimeRef:
+    name: torch-distributed-tcpxo
+    apiGroup: trainer.kubeflow.org
+    kind: ClusterTrainingRuntime
+  trainer:
+    numNodes: 2                      # the shipped default; override freely
+    image: my-registry/my-trainer:latest
+```
+
+Everything below this point is the hand-authored path — for bundles you did
+not generate with AICR, or shapes the shipped runtime does not cover.
+
 `TrainingRuntime` is an ordinary namespaced resource: author one in your
 namespace and reference it from `runtimeRef`.
 
@@ -151,9 +175,17 @@ Two details are easy to miss because they are not in the pod spec:
 
 This is the part no example can fill in for you. The
 `networking.gke.io/interfaces` annotation must name the eight GPU NIC `Network`
-objects **as they exist on your cluster**. AICR requires only that each name
-contain `gpu-nic`; the rest is chosen by whoever provisioned it, so prefixed
-forms such as `aicr-demo2-gpu-nic-0` are common.
+objects **as they exist on your cluster**, mapped to the right guest interface.
+AICR requires that each name contain `gpu-nic` and satisfy the GKE
+Device-Network name format (lowercase letters, digits, dashes; starts with a
+letter; ends with a letter or digit; at most 41 characters); the rest is chosen
+by whoever provisioned it, so prefixed forms such as `aicr-demo2-gpu-nic-0` are
+common.
+
+The `eth1`–`eth8` assignment is a provisioning decision: take the ordered
+mapping from whoever provisioned the cluster (its `GKENetworkParamSet` or
+network configuration), not from name order. Enumerating names answers only
+"which networks exist":
 
 ```shell
 kubectl get networks.networking.gke.io \
@@ -161,11 +193,14 @@ kubectl get networks.networking.gke.io \
 ```
 
 That prints bare names, which is what the annotation takes. `-o name` would
-prefix them with `network.networking.gke.io/` — not the form to paste.
+prefix them with `network.networking.gke.io/` — not the form to paste. Do not
+infer the interface assignment from this list's order.
+
+On the shipped-runtime path above, the same mapping is what you pass to
+`--gke-tcpxo-interfaces` at recipe generation.
 
 `Network` is cluster-scoped. If your role is namespace-only you will not be able
-to list them; ask whoever provisions the cluster for the eight names, or for the
-`GKENetworkParamSet` mapping.
+to list them; ask whoever provisions the cluster for the mapping.
 
 ### Do not set `resourcesPerNode`
 
@@ -233,7 +268,8 @@ none. Check every eligible node and fail if they disagree, rather than trusting
 the first one:
 
 ```shell
-kubectl get nodes -l <your-gpu-pool-selector> \
+NODE_SELECTOR="nodeGroup=gpu-worker"  # replace with the label selector for your GPU node pool
+kubectl get nodes -l "${NODE_SELECTOR}" \
   -o custom-columns='NODE:.metadata.name,EFA:.status.allocatable.vpc\.amazonaws\.com/efa'
 ```
 
@@ -293,16 +329,19 @@ prerequisites.
 ## Verifying the fabric is in use
 
 Run a short job with `NCCL_DEBUG=INFO` and check which transport NCCL selected.
-Every runtime AICR ships sets `NCCL_DEBUG=WARN`, at which this line is
-suppressed — so grepping an ordinary run finds nothing, which is not evidence of
-socket fallback:
+The ClusterTrainingRuntimes AICR ships set `NCCL_DEBUG=WARN` or leave it unset
+(NCCL then defaults to WARN), so this line is suppressed — grepping an ordinary
+run finds nothing, which is not evidence of socket fallback:
 
 ```shell
+NAMESPACE="my-namespace"  # replace with the TrainJob's namespace
+TRAINJOB="my-trainjob"    # replace with the TrainJob's name
+
 # Select workers by label rather than guessing the generated pod name.
 # --tail=-1 is required: with a selector, kubectl defaults to the last 10 lines
 # and would omit the transport banner, which NCCL prints during init.
-kubectl logs -n <namespace> -c node --tail=-1 --prefix \
-  -l jobset.sigs.k8s.io/jobset-name=<trainjob-name>,jobset.sigs.k8s.io/replicatedjob-name=node \
+kubectl logs -n "${NAMESPACE}" -c node --tail=-1 --prefix \
+  -l "jobset.sigs.k8s.io/jobset-name=${TRAINJOB},jobset.sigs.k8s.io/replicatedjob-name=node" \
   | grep -i 'NCCL INFO.*Using network'
 ```
 

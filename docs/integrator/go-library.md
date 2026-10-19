@@ -35,15 +35,18 @@ than in yours.
 | `Example` | Quick start: client, resolve from criteria | yes |
 | `Example_errorCodes` | Matching structured error codes | yes |
 | `Example_bundleAndVerify` | Resolve → bundle → verify, hermetically | yes |
+| `Example_workflow` | Full Snapshot → Recipe → Bundle: load, derive criteria, resolve, bundle, verify | yes |
 | `Example_trustLevels` | The accepted trust levels, and their ordering trap | yes |
 | `Example_criteriaDimensions` | The coverage dimensions | yes |
 | `Example_committedConfig` | `AICRConfig` → source → catalog → criteria, in the required order | no |
 | `Example_resolveFromSnapshot` | `LoadSnapshot` plus snapshot criteria relaxation | no |
+| `ExampleClient_CriteriaFromSnapshot` | Deriving criteria from a snapshot; undetermined dimensions stay `any` | no |
 | `ExampleClient_DiffSnapshots` | In-memory drift detection between two loaded snapshots | no |
 | `ExampleClient_LoadRecipe` | Reading a previously emitted recipe | no |
 | `ExampleClient_CollectSnapshot` | Capturing cluster state via the snapshotter Job | no |
 | `ExampleClient_ValidateState` | Selecting validation phases, and `--no-cluster` mode | no |
 | `ExampleClient_RecipeDigest` | The digest a CI staleness gate compares | no |
+| `ExampleClient_MirrorInventory` | The images and charts to stage into an air-gapped registry | no |
 | `ExampleClient_VerifyEvidence` | Evidence verification and exit classes | no |
 | `ExampleClient_VerifyCatalog` / `ExampleClient_SignCatalog` | Checking and producing the catalog signature | no |
 | `ExampleClient_PublishEvidence` | Signing and pushing an evidence bundle | no |
@@ -70,7 +73,7 @@ go get github.com/NVIDIA/aicr@latest
 For reproducibility in downstream projects, pin a specific tag:
 
 ```bash
-go get github.com/NVIDIA/aicr@v0.19.0
+go get github.com/NVIDIA/aicr@v1.0.0
 ```
 
 ## Quick start
@@ -88,10 +91,9 @@ import (
 
 func main() {
 	// FilesystemSource layers an external recipe directory over the
-	// embedded recipe data. Use this in production today; OCISource
-	// is reserved but not yet implemented (NewClient returns
-	// ErrCodeUnavailable when given one — see the constructor's
-	// godoc for the current state).
+	// embedded recipe data. OCISource pulls a digest-pinned recipe
+	// catalog from an OCI registry instead; see "Recipe sources" and
+	// "Digest-pinned OCI recipe sources" below for both.
 	client, err := aicr.NewClient(
 		aicr.WithRecipeSource(
 			aicr.FilesystemSource("/etc/aicr/recipes"),
@@ -116,7 +118,7 @@ func main() {
 		OS:          "ubuntu", // REQUIRED to reach the OS-pinned kubeflow overlay; see "Recipe sources" below
 		Intent:      "training",
 		Platform:    "kubeflow",
-		// Profile:  "gpuStack=operator-managed", // only when the composition declares one (embedded adopter: AKS; values azure-managed [default] / operator-managed)
+		// Profile:  "gpuStack=operator-managed", // only when the composition declares one (e.g. AKS; values azure-managed [default] / operator-managed)
 	})
 	if err != nil {
 		log.Fatalf("resolve recipe: %v", err)
@@ -161,8 +163,10 @@ is ignored for the other two.
 understand. That gate matters more than it looks: snapshot
 deserialization is non-strict, so without it a typo'd path would decode
 into an empty `Snapshot`, derive `criteria(any)`, and silently resolve
-the generic fallback recipe with exit 0. Empty `kind` and `apiVersion`
-are tolerated for snapshots that predate those fields.
+the generic fallback recipe with exit 0. An empty `kind` is tolerated
+for snapshots that predate the field; an empty `apiVersion` is rejected
+from v1.0.0 (see
+[Deprecations](../user/deprecations.md#empty-apiversion-on-artifacts)).
 
 `Snapshot.Raw` is **not** populated by `LoadSnapshot` — only
 `CollectSnapshot` sets it. The source you loaded from is already the
@@ -173,7 +177,7 @@ its **current** contents, which for a URL or a ConfigMap (or a file
 someone rewrote) need not be what this call parsed. When byte-for-byte
 identity with the loaded snapshot matters, such as hashing what you
 validated, capture the source contents yourself and load from that
-capture instead of re-reading afterwards.
+capture instead of re-reading afterward.
 
 ### Comparing snapshots for drift
 
@@ -221,8 +225,8 @@ reported as no drift.
 // CollectSnapshot deploys a snapshotter Job to the target cluster and
 // returns the resulting Snapshot. cfg is a facade-owned struct that
 // mirrors pkg/snapshotter.AgentConfig field for field; the mirror is
-// enforced by a test, so a field added upstream cannot silently stay at
-// its zero value here.
+// enforced by TestAgentConfigMirrorsInternal, so a field added upstream
+// cannot silently stay at its zero value here.
 //
 // The returned Snapshot carries the parsed form plus Snapshot.Raw — the
 // exact bytes the agent emitted. Persist Raw rather than re-serializing
@@ -240,7 +244,18 @@ reported as no drift.
 // controller-side into the returned snapshot, and AKS profile-qualified
 // resolution from that snapshot REQUIRES the resulting
 // K8s.aks-gpu-pools.gpu-driver reading (a snapshot without it fails
-// closed).
+// closed). On OKE, OKEAddonsPath plays the same role from an
+// `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`
+// dump, merged as the K8s.oke-addons.nvidia-gpu-plugin reading. The same
+// dump supplies K8s.oke-addons.nvidia-network-operator, which OKE recipes
+// that deploy network-operator require to be absent, so resolving them from
+// a snapshot without it fails closed. On GKE, GKEGPUPoolsPath plays the same
+// role from a
+// `gcloud container node-pools list --cluster <cluster> --format=json`
+// dump, merged as the K8s.gke-gpu-pools.gpu-driver-installation reading.
+// It's required only when resolving the GKE `bundle-installer` gpuStack
+// value from a snapshot. The default `gke-default` value needs no pool
+// dump.
 // Give the Job-backed snapshot its own deadline: contexts cap the
 // configured timeouts from the parent side, so reusing the 30-second
 // resolve ctx above would override the 5-minute AgentConfig.Timeout.
@@ -250,33 +265,36 @@ snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
 	Kubeconfig: "/path/to/target-kubeconfig",
 	// Namespace is the only required field: the Job, its RBAC, and the result
 	// ConfigMap are created there, and an empty value is rejected with
-	// ErrCodeInvalidRequest before any cluster access. Image, JobName, and
-	// ServiceAccountName are defaulted when empty — the names to "aicr" and
-	// the image to the tag matching the Client's WithVersion. They are set
-	// explicitly here because pinning the agent generation is what a
-	// version-skew-sensitive or air-gapped deployment wants.
+	// ErrCodeInvalidRequest before any cluster access. Image is defaulted
+	// when empty to the tag matching the Client's WithVersion; it is pinned
+	// explicitly here because that is what a version-skew-sensitive or
+	// air-gapped deployment wants.
 	//
-	// Collect against one cluster at a time. The default names are shared, the
-	// Job is delete-then-created, and the ClusterRoleBinding has a fixed name
-	// carrying the ServiceAccount as its subject — so two concurrent runs
-	// interfere even with distinct JobName values. See CollectSnapshot's
-	// Concurrency godoc.
-	Namespace:          "aicr-snapshot",
-	Image:              "ghcr.io/nvidia/aicr:v0.19.0",
-	JobName:            "aicr-snapshot",
-	ServiceAccountName: "aicr-agent",
-	Timeout:            5 * time.Minute,
-	Cleanup:            true,
-	AKSGPUPoolsPath:    "/path/to/aks-gpu-pools.json", // AKS only
+	// JobName is an optional name prefix; leaving it unset defaults to
+	// "aicr" with a generated run ID appended, so every run gets its own
+	// uniquely named Job without the caller managing that.
+	//
+	// ServiceAccountName carries two meanings and is EXACT-IF-EXISTS. When
+	// a ServiceAccount of exactly that name already exists in Namespace it
+	// is used verbatim and the run creates NO ServiceAccount, Role,
+	// RoleBinding, ClusterRole or ClusterRoleBinding — and deletes none at
+	// cleanup. Otherwise it is a prefix and the run creates and owns the
+	// full run-scoped RBAC set. Leaving it unset, as here, keeps the
+	// run-scoped default and never probes for an existing ServiceAccount.
+	Namespace:       "aicr-snapshot",
+	Image:           "ghcr.io/nvidia/aicr:v1.0.0",
+	Timeout:         5 * time.Minute,
+	Cleanup:         true,
+	AKSGPUPoolsPath: "/path/to/aks-gpu-pools.json", // AKS only
+	OKEAddonsPath:   "/path/to/oke-addons.json",    // OKE only
+	GKEGPUPoolsPath: "/path/to/gke-gpu-pools.json", // GKE bundle-installer only
 })
 if err != nil {
 	log.Fatalf("collect snapshot: %v", err)
 }
 
-// NOTE: AgentConfig.AKSGPUPoolsPath and ResolveRecipeFromSnapshotWithProfile
-// require the release containing the AKS gpuStack adoption (PR #1967) —
-// newer than the module pin shown under Installation; update the pin to
-// that release when reproducing this example.
+// NOTE: AgentConfig.GKEGPUPoolsPath is not in v0.22.0 or earlier; pin a
+// later release when reproducing this example.
 // On AKS, resolve FROM the collected snapshot so the profile selection is
 // verified against the recorded pool modes (ResolveRecipeFromSnapshot uses
 // the declaration default, azure-managed, which requires pools reading
@@ -346,6 +364,59 @@ Valid phase values are `PhaseDeployment`, `PhaseConformance`, and
 `ErrCodeInvalidRequest` before any cluster work, so a typo cannot
 silently degrade to an empty run.
 
+#### Running the agent as an existing ServiceAccount
+
+`AgentConfig.ServiceAccountName` is **exact-if-exists**, so it carries two
+meanings depending on the cluster:
+
+- A ServiceAccount of exactly that name already exists in `Namespace`: the
+  agent pod runs as it verbatim, and `CollectSnapshot` creates **no**
+  ServiceAccount, Role, RoleBinding, ClusterRole, or ClusterRoleBinding, and
+  deletes none at cleanup. It also leaves the namespace alone: it does not
+  create, read, or relabel it, so the caller needs no permission on the
+  Namespace object.
+- Otherwise it is a name prefix and the run creates and owns the full
+  run-scoped RBAC set, named `<prefix>-<run-id>`.
+
+Leaving the field empty keeps the run-scoped default and never probes for an
+existing ServiceAccount, so a stray ServiceAccount cannot capture a run.
+
+Use the first form when the ServiceAccount must carry EKS IRSA or GKE Workload
+Identity annotations: both providers pin trust to the ServiceAccount *name*, so
+a run-scoped name can never be trusted by either. Grant it the agent's
+permissions once by writing the RBAC manifests and applying them yourself —
+the applied objects are permanent and no run cleanup removes them:
+
+```go
+// Admin step, run once. Writes manifests into a new snapshot-rbac-<runID>/
+// directory under the working directory; it contacts no cluster, applies
+// nothing, and does not verify that the ServiceAccount exists.
+res, err := snapshotter.WriteAgentRoleManifests(&snapshotter.AgentRolesConfig{
+	Namespace:          "gpu-operator",
+	ServiceAccountName: "irsa-snapshotter",
+	// DiscoverNetwork also renders the one read-only rule live network
+	// discovery needs (configuration.net.nvidia.com nicdevices get/list).
+	DiscoverNetwork: false,
+})
+if err != nil {
+	log.Fatalf("write agent role manifests: %v", err)
+}
+for _, obj := range res.Objects {
+	log.Printf("wrote %s %s to %s", obj.Kind, obj.Name, obj.Path)
+}
+// Review the files, then: kubectl apply -f <res.Dir>/
+// The annotated irsa-snapshotter ServiceAccount must already exist in the
+// namespace; pass the same name as AgentConfig.ServiceAccountName to
+// CollectSnapshot so the agent runs as it.
+```
+
+Adopting one ServiceAccount across runs waives per-run permission isolation:
+concurrent runs sharing it hold the same grants, and the grants (read-only,
+including the `DiscoverNetwork` nicdevices read) stay in place until an
+operator removes them. See
+[Agent Deployment](../user/agent-deployment.md#using-an-existing-serviceaccount-irsa-and-workload-identity)
+for the full migration path and teardown commands.
+
 ### Loading an existing recipe
 
 When a recipe has already been resolved and persisted (for example a
@@ -387,11 +458,90 @@ path (first argument) is a `cm://` ConfigMap URI.
 For unit tests that exercise the facade surface without a live
 cluster, pass `aicr.WithValidationNoCluster(true)`: every check
 reports as "skipped - no-cluster mode" and no Kubernetes resources
-are created. Other facade options
-(`WithValidationNamespace`, `WithValidationRunID`,
-`WithValidationCleanup`, `WithValidationImagePullSecrets`,
-`WithValidationTolerations`, `WithValidationNodeSelector`,
-`WithValidationKubeconfig`) cover the production-controller knobs.
+are created. The other facade options cover the production-controller knobs:
+
+- `WithValidationKubeconfig`, `WithValidationNamespace`,
+  `WithValidationRunID`, `WithValidationCleanup` — the target cluster,
+  namespace, and run identity, and whether validator Jobs, ConfigMaps, and
+  RBAC are deleted afterwards.
+- `WithValidationImagePullSecrets`, `WithValidationTolerations`,
+  `WithValidationNodeSelector` — image pulls and scheduling for the
+  validation workload pods.
+- `WithValidationPhases`, `WithValidationTimeout` — described above.
+- `WithValidationFailFast(true)` stops after the first failed phase. By
+  default every requested phase runs.
+- `WithValidationSkipChecks(names...)` withholds the named checks from every
+  phase that runs. Each is reported as skipped rather than dropped. A name
+  that matches no validator, or a list that leaves a requested phase with
+  nothing to run, is rejected before any cluster work. Not in v0.22.0 or
+  earlier.
+- `WithValidationCommit`, `WithValidationImageRegistryOverride`,
+  `WithValidationImageTagOverride` — resolve validator images against a
+  commit SHA, a mirror registry prefix, or a fixed tag. Empty values leave
+  the default resolution in place.
+- `WithValidatorServiceAccountName(name)` runs the validator Jobs as an
+  existing ServiceAccount in the validation namespace instead of a per-run
+  ServiceAccount bound to `cluster-admin`, so the caller needs no permission
+  to grant `cluster-admin`. The run creates and deletes no ServiceAccount or
+  ClusterRoleBinding and does not apply the namespace. It verifies the
+  ServiceAccount's `cluster-admin` grant with a `SubjectAccessReview` before
+  deploying anything and fails with `ErrCodeNotFound` when it is missing,
+  `ErrCodeInvalidRequest` when it disables token automount,
+  `ErrCodeUnauthorized` when it is not bound or the caller may not read it or
+  create the review, and `ErrCodeCanceled`, `ErrCodeTimeout`,
+  `ErrCodeUnavailable` or `ErrCodeInternal` when the check cannot complete.
+  Unrelated
+  to `ValidateSettings().ServiceAccountName`, which names the snapshot agent's
+  ServiceAccount. Not in v1.0.0 or earlier. See
+  [Running under a pre-provisioned ServiceAccount](../user/validation.md#running-under-a-pre-provisioned-serviceaccount).
+
+`PreflightSkipChecks(ctx, recipe, opts...)` runs only the skip-list guard
+from `ValidateState`, with no Kubernetes call, so a caller that does its own
+cluster work first can reject an unusable skip list before creating anything.
+The CLI does this before deploying a snapshot agent. Pass the same options you
+will pass to `ValidateState`; it returns nil at once when no skip list is set.
+`PreflightSkipChecks` is not in v0.22.0 or earlier.
+
+`PreflightValidatorServiceAccount(ctx, opts...)` runs only the
+`WithValidatorServiceAccountName` check from `ValidateState`: a Get and a
+`SubjectAccessReview`, creating nothing. The CLI runs it before deploying a
+snapshot agent, so a missing or unbound ServiceAccount is reported before any
+object exists. Pass the same options you will pass to `ValidateState`; it
+returns nil without contacting the cluster when no name is set or
+`WithValidationNoCluster(true)` is. Not in v1.0.0 or earlier.
+
+`MergeReports(results)` merges the per-phase CTRF reports from a
+`ValidateState` run into one `*ctrf.Report` (`pkg/validator/ctrf`) stamped
+with the Client's version, the same combined document `aicr validate` writes.
+
+### CNCF AI Conformance evidence
+
+Two methods produce CNCF AI Conformance evidence, matching
+`aicr validate --evidence-dir` and `aicr validate --cncf-submission`:
+
+- `RenderCNCFEvidence(ctx, report, dir)` writes one markdown file per
+  submission requirement, plus `index.md`, from a CTRF report such as the one
+  `MergeReports` returns. Skipped checks are omitted, so a report from a run
+  that used `WithValidationSkipChecks` is refused with
+  `ErrCodeInvalidRequest`.
+- `CollectCNCFEvidence(ctx, recipe, opts)` deploys GPU test workloads and
+  captures behavioral evidence under `opts.Dir`. It needs `bash` and
+  `kubectl` on `PATH` and runs for up to 20 minutes. `recipe` is optional.
+  When set, its GPU allocation policy selects the mechanism the DRA and
+  secure-access sections exercise, and an unresolvable policy fails the call.
+  When nil, the collector detects the mechanism from the cluster.
+  `opts.Features` restricts collection, and `CNCFEvidenceFeatures()` lists
+  the accepted names. `opts.NoCluster` reports every section as skipped without
+  touching a cluster.
+
+```go
+err := client.CollectCNCFEvidence(ctx, rec, aicr.CNCFCollectOptions{
+	Dir:      "./cncf-evidence",
+	Features: []string{"dra-support", "gang-scheduling"},
+})
+```
+
+Neither method is in v0.22.0 or earlier.
 
 ## Recipe sources
 
@@ -550,6 +700,112 @@ For a per-resolution Slurm accounting mode, use
 `aicr.WithAccountingMode("customer-managed")`. The original criteria and
 snapshot method signatures remain unchanged for source compatibility.
 
+The same two methods take `aicr.WithRuntimeInventoryMode("enabled")` or
+`("disabled")`, the SDK form of `aicr recipe --runtime-inventory`. The
+selection is recorded in the emitted recipe; an invalid mode, or one the
+resolved recipe cannot honor, is rejected when the resolve runs.
+
+h100 GKE kubeflow training recipes ship the `torch-distributed-tcpxo`
+runtime, which needs the ordered GPU-NIC network mapping. Set
+`RecipeRequest.GKETCPXOInterfaces` on `ResolveRecipe`, or pass
+`aicr.WithGKETCPXOInterfaces(value)` to the `WithOptions` methods, in the form
+`eth1=<network>,...,eth8=<network>`. It has no default: resolution fails when
+the recipe ships that runtime and the mapping is missing, and also when a
+mapping is set for a recipe that does not ship it.
+
+### Keeping a prior artifact's namespaces
+
+A component's namespace is re-derived from the registry on every resolve, so
+a registry default that moved between two AICR releases relocates a component
+that is already running. Helm cannot move a release between namespaces, so the
+bundle installs a second copy beside it. Name the prior artifact to keep its
+namespaces instead:
+
+```go
+result, err := client.ResolveRecipe(ctx, aicr.RecipeRequest{
+	Service:     "eks",
+	Accelerator: "h100",
+	Intent:      "training",
+	InheritFrom: "./bundles-v0.17.0", // or a recipe file
+	Inherit:     "namespace",
+})
+```
+
+`RecipeRequest.InheritFrom` is honored by `ResolveRecipe`;
+`aicr.WithInheritFrom(ref)` with `aicr.WithInherit("namespace")` is the
+equivalent for
+`ResolveRecipeFromCriteriaWithOptions` and
+`ResolveRecipeFromSnapshotWithOptions`. A bundle directory is read through the
+`recipe.yaml` at its root. A component the prior artifact does not name keeps
+the registry default. Omit `Inherit` / `WithInherit`, or select `"all"`, to
+preserve the prior chart, source, kustomize path and manifest sets as well as
+the namespace.
+
+A **bundle directory** carries one thing a recipe file cannot: the merged
+values each release installed with, which is where `fullnameOverride` and
+`nameOverride` live. In `"all"` mode, the resolve also pins those object names,
+writing a `ComponentRef.Overrides` entry only where the inherited name differs
+from what this binary resolves. Given a recipe file, namespaces are still
+pinned and a warning records that object names were not, because a recipe
+stores `valuesFile` as a path resolved against whichever binary reads it.
+
+The same warning, and namespaces only, applies to two kinds of bundle: one
+built before v0.22.0, which carries no `bundle-info.yaml` to locate its values,
+and a flux bundle whose HelmReleases take `--dynamic` values through
+`spec.valuesFrom`. A bundle that names files it does not contain is refused
+with `ErrCodeInvalidRequest` instead, since it is incomplete rather than merely
+unreadable.
+
+The reference is read when the resolve runs, and it fails closed rather than
+silently resolving as a first deploy: a path that does not exist, a directory
+holding no `recipe.yaml`, and a `cm://` URI (not supported yet) each return
+`ErrCodeInvalidRequest`. Nothing is read from a cluster, so no kubeconfig is
+involved.
+
+### Checking an upgrade between two artifacts
+
+`UpgradeCheck` compares two artifacts against the ADR-021 transition records in
+this Client's registry. It is the SDK form of
+[`aicr upgrade-check`](../user/cli-reference.md#aicr-upgrade-check):
+
+```go
+report, err := client.UpgradeCheck(ctx, aicr.UpgradeCheckRequest{
+	From:     "./deployed-bundle", // recipe file, bundle directory, cm:// URI, or aicr.FromCluster
+	To:       "./recipe.yaml",     // empty re-resolves From's own criteria
+	Deployer: "helm",
+})
+if err != nil {
+	log.Fatalf("upgrade check: %v", err)
+}
+if err := aicr.WriteUpgradeReportTable(os.Stdout, report); err != nil {
+	log.Fatal(err)
+}
+if report.FailsRun() {
+	os.Exit(1)
+}
+```
+
+- `From` takes a recipe file, a bundle directory (read through its
+  `recipe.yaml`), or a `cm://` URI. `aicr.FromCluster` reads the installed
+  inventory through `Kubeconfig` instead, and then requires `To`.
+- `Deployer` scopes the operator steps. It is required for a cluster read, and
+  whenever a result is `manual` or `blocked`.
+- Object names are compared only when `From` is a bundle directory, because
+  only a bundle records the merged values. `report.ObjectNamesCompared` says
+  whether they were, and `ObjectNamesSkipped` says why not.
+- `ScanAtRisk` (`*bool`) controls the advisory scan for objects the crossed
+  records name that carry no deployer ownership marker. Nil scans only on a
+  cluster read, a pointer to `true` scans for any source, and a pointer to
+  `false` suppresses it even on a cluster read.
+
+`aicr.FromCluster`, `ScanAtRisk`, and `ObjectNamesCompared`/`ObjectNamesSkipped`
+are not in v0.22.0 or earlier; pin a later release to use them.
+
+`*UpgradeReport` is a transparent alias of `pkg/upgrade.Report`. Verdicts are
+data, not errors: `WriteUpgradeReportTable` renders the table the CLI prints,
+and `FailsRun` makes the CLI's `--fail-on-error` decision. A record that cannot
+be read or is malformed fails the call rather than reporting `unknown`.
+
 ### Criteria relaxation on the snapshot path
 
 A snapshot resolve is strict by default — every criteria dimension you state
@@ -557,31 +813,26 @@ must be honored by an applied overlay, or resolution fails with
 `ErrCodeInvalidRequest` and a `details.uncovered` payload.
 
 That is right for criteria a user typed, but wrong for criteria you *derived*
-from the snapshot fingerprint. An overlay tree can be deliberately agnostic to
-a dimension (Kind's overlays state no `os`) while the fingerprint still detects
-a concrete value on the node — nothing in the recipe distinguishes it, so
-failing there rejects a legitimate query.
+from the snapshot. An overlay tree can be deliberately agnostic to a dimension
+(Kind's overlays state no `os`) while `Client.CriteriaFromSnapshot` still
+detects a concrete value on the node — nothing in the recipe distinguishes it,
+so failing there rejects a legitimate query.
 
 Pass `aicr.WithSnapshotCriteriaRelaxation` and name the dimensions **you
 received explicitly**. Anything else is treated as derived, and a coverage
 failure limited to derived dimensions is retried once with those cleared:
 
 ```go
-import (
-    aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-
-    // Deriving criteria from a snapshot has no facade-owned helper yet, so
-    // this step reaches past the stable surface — see the caveat below.
-    "github.com/NVIDIA/aicr/pkg/fingerprint" // Internal
-    "github.com/NVIDIA/aicr/pkg/recipe"      // Public (evolving)
-)
-
-criteria := fingerprint.FromMeasurements(snap.Unwrap().Measurements).
-    ToCriteria(client.CriteriaRegistry())
-criteria.Intent = recipe.CriteriaIntentTraining // the user asked for this one
+// Every dimension the snapshot could not determine comes back as the "any"
+// wildcard; nothing is guessed.
+criteria, err := client.CriteriaFromSnapshot(snap)
+if err != nil {
+    log.Fatalf("derive criteria: %v", err)
+}
+criteria.Intent = "training" // the user asked for this one
 
 result, err := client.ResolveRecipeFromSnapshotWithOptions(
-    ctx, aicr.WrapCriteria(criteria), snap,
+    ctx, criteria, snap,
     aicr.WithSnapshotCriteriaRelaxation(aicr.DimensionIntent))
 if err != nil {
     log.Fatalf("resolve: %v", err)
@@ -591,14 +842,11 @@ for _, dim := range result.RelaxedDimensions {
 }
 ```
 
-> **The fingerprint step is an escape hatch, not stable API.** `pkg/fingerprint`
-> is [Internal](public-api.md#stability-tiers) and may change without notice;
-> `pkg/recipe` is Public (evolving) and may change in a minor bump. Only the
-> `aicr.*` calls above carry the facade's compatibility guarantee. Pin the AICR
-> version and re-audit this block on upgrade, or derive criteria yourself and
-> hand the facade an `*aicr.Criteria`. If you need this without the coupling,
-> say so on [#2016](https://github.com/NVIDIA/aicr/issues/2016) — a facade-owned
-> snapshot-to-criteria helper is the obvious gap it exposes.
+Runnable version: `Example_workflow` in `pkg/client/v1/example_test.go`, which
+loads a snapshot, derives criteria from it, resolves, bundles and verifies —
+and carries an `Output:` block, so it executes on every test run rather than
+only compiling. `ExampleClient_CriteriaFromSnapshot` shows this step on its own,
+but reads a snapshot path it does not ship and so is compile-only.
 
 Relaxation is deliberately narrow. Three cases propagate the original coverage
 error rather than retrying:
@@ -639,7 +887,7 @@ once.
 The returned `*RecipeResult` carries:
 
 - `Name`, `Version`, `TranslatedAt` — stable identity
-- `Components` — `[]ComponentRef` (Name, Kind, Version, Source, Chart, Namespace)
+- `Components` — `[]ComponentRef` (Name, Kind, Version, Tag, Source, Chart, Namespace)
 - `SelectedProfile` — selected name/value and declaration-wide `OwnedPaths`;
   nil for legacy recipes
 - `RelaxedDimensions` — criteria dimensions cleared by
@@ -667,6 +915,13 @@ resolve.
 entry as `CatalogEntry.Profile`. The summary contains its name, description,
 required default, and sorted value names; it is nil when the composition is
 unprofiled.
+
+`ComputeHealth(ctx, filter)` scores the structural health (ADR-009) of every
+leaf recipe in this Client's catalog, including any external data layered over
+it, and returns a `*health.Report` (`pkg/health`). A nil `filter` scores every
+leaf; set criteria fields to narrow it. It is the computation behind the health
+columns of [`aicr recipe list`](../user/cli-reference.md#aicr-recipe-list), and
+it applies its own catalog-wide timeout rather than the resolve cap.
 
 To extract a single value from a resolved recipe, use
 `SelectFromRecipeWithContext` with a dot-path selector. It hydrates the
@@ -791,7 +1046,7 @@ func resolveCommittedConfig(ctx context.Context) (retErr error) {
 	if err != nil {
 		return err
 	}
-	opts, err := cfg.RecipeResolveOptions() // profile + accounting + runtime inventory
+	opts, err := cfg.RecipeResolveOptions() // profile + accounting + runtime inventory + GKE TCPXO interfaces
 	if err != nil {
 		return err
 	}
@@ -837,22 +1092,486 @@ derive step rather than the load step.
 | Method | Reads |
 |---|---|
 | `BundleVerifyOptions()` | `spec.verify.policy` + `spec.verify.trust` |
+| `BundleOptions()` | `spec.bundle.deployment` + `spec.bundle.scheduling` + `spec.bundle.attestation` |
+| `BundleInputOptions()` | `spec.bundle.input` + `.output` + `.registry` |
+| `ValidateSettings()` | `spec.validate.agent` + `.execution` |
+| `ValidateInputOptions()` | `spec.validate.input` + `.execution.failOnError` |
+| `EvidenceAttestationOptions()` | `spec.validate.evidence.attestation` |
+| `CNCFEvidenceOptions()` | `spec.validate.evidence.cncf` |
+| `SnapshotAgentConfig()` | `spec.snapshot.agent` + `.execution` (**not** `.output`) |
+| `SnapshotOutputOptions()` | `spec.snapshot.output` |
 | `RecipeSource()` | `spec.recipe.data` |
 | `RecipeCriteria(reg)` | `spec.recipe.criteria` |
-| `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode`, `spec.recipe.configuration.runtimeInventory.mode` |
-| `RecipeProfile()` / `RecipeAccountingMode()` / `RecipeRuntimeInventoryMode()` | the same three, raw, for callers applying their own precedence first |
+| `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode`, `spec.recipe.configuration.runtimeInventory.mode`, `spec.recipe.configuration.gke.tcpxoInterfaces` |
+| `RecipeProfile()` / `RecipeAccountingMode()` / `RecipeRuntimeInventoryMode()` / `RecipeGKETCPXOInterfaces()` | the same four, raw, for callers applying their own precedence first |
+| `RecipeOutputOptions()` | `spec.recipe.output` |
 | `SnapshotPath()` | `spec.recipe.input.snapshot` |
 | `IsCriteriaStrict()` | `spec.recipe.criteriaStrict` |
 
-`spec.bundle`, `spec.validate`, and `spec.snapshot` are not yet projected;
-`Unwrap()` reaches the raw document meanwhile. Needing it is worth reporting —
-it means a derivation is missing, and `pkg/config` carries no stability
+All five spec sections have a derivation, and every one of them has a
+destination. `SnapshotOutputOptions()` projects `spec.snapshot.output` even
+though `Client.CollectSnapshot` does not consume it, because the caller
+performing delivery does. Needing `Unwrap()` anywhere is worth reporting — it
+means a derivation is missing, and `pkg/config` carries no stability
 guarantee.
+
+### What `BundleOptions()` does and does not carry
+
+`BundleOptions()` returns 18 bundler settings (those `spec.bundle.deployment`
+and `spec.bundle.scheduling` configure, plus the two attestation flags the
+bundler itself reads) as plain fields — not a built `Config` — so you read and
+override individual settings directly, the same as `ValidateSettings()`. It
+also returns `OIDCResolve` (the four signing settings that reach the attester
+rather than the bundler):
+
+```go
+opts, err := cfg.BundleOptions()
+if err != nil {
+    return err
+}
+opts.Nodes = 32 // caller wins, visibly
+```
+
+`Config` is still on the struct, as an escape hatch: when you already have a
+fully built `*BundleConfig` from something the flat fields cannot express (a
+CLI-flag-only setting such as `Version` or `Serial`, or a config object you
+mutate in place), set it and it wins outright over the 18 bundler-config flat
+fields (`Deployer` through `AppName`) — `BundleOptions()` itself never
+populates it. `Config` does NOT override `Attester`, `OIDCResolve`,
+`BinaryAttestation`, `OutputDir` or `Timeout`: those five stay
+caller-supplied regardless of `Config`, which is why the REST `/v1/bundle`
+handler can set `Config` and `OutputDir`/`Timeout` in the same struct
+literal and have all three take effect.
+
+The six caller-side fields have their own type, `BundleInputOptions()`, not
+because they are declined but because `MakeBundle` never reads them — see the
+next section.
+
+Signing follows the same derive-don't-apply rule as everything else: a non-nil
+`Attester` wins over `OIDCResolve`, so an explicitly supplied signer is never
+silently rebuilt from config. When `Attester` is nil, `MakeBundle` also
+requires `Config.Attest()` (when `Config` is set) and `OIDCResolve.Attest` to
+agree — a hand-built `BundleOptions` that sets both and disagrees (say,
+`config.WithAttest(false)` baked into `Config` while `OIDCResolve.Attest` is
+`true`) is rejected with `ErrCodeInvalidRequest` rather than silently
+producing unsigned output that looks attested, or deriving a real signer
+whose result `Config.Attest()` then discards. `BundleOptions()` itself always
+keeps the two in agreement (`opts.Attest` and `opts.OIDCResolve.Attest` come
+from the same `spec.bundle.attestation.enabled` value), so this only matters
+for a caller who assembles `BundleOptions` by hand.
+
+A KMS key and keyless OIDC are mutually exclusive, and the rule lives where
+`spec.bundle` is converted to its typed form rather than in any one derivation:
+a whitespace-only `signingKey` is rejected (it must not be blank after
+trimming), as is `signingKey` combined with `fulcioURL`. Because that
+conversion is what validates the section, a document setting both fails at
+`LoadConfig`, for every command that loads a config rather than only the ones
+that bundle. That is the same reach a malformed `fulcioURL` has always had. The
+`SigningKey` a derivation carries is already trimmed.
+
+This conversion-time rule deliberately does NOT cover `signingKey` combined
+with `oidcDeviceFlow`. Conversion happens before the CLI's flag-over-config
+merge, so rejecting that pair there would make `--oidc-device-flow=false`
+unable to correct a document that sets both — the error would fire before that
+flag is ever read.
+
+That pair is rejected one layer later instead, by `ResolveAttester` and
+`ResolveAttesterLazy`, which is where KMS-versus-keyless is actually decided
+and which every caller reaches after applying its own precedence. The CLI
+merges flags first, so a corrected invocation never arrives there in conflict;
+an SDK caller that derives `BundleOptions()` straight from a document and calls
+`MakeBundle` without merging anything gets `ErrCodeInvalidRequest` rather than a
+bundle signed with the KMS key while its device-flow setting was ignored.
+
+The rejection is conditional on attestation being enabled. Both resolvers
+short-circuit to a no-op attester when `Attest` is false, before the check —
+nothing signs in that case, so there is no mode to conflict over, and
+`MakeBundle` returns normally.
+
+`IdentityToken` is not part of that check. A CI environment can populate it
+without the caller asking for keyless signing, so a non-empty `SigningKey`
+still takes precedence over it rather than failing.
+
+**Device flow needs a prompt writer.** `spec.bundle.attestation.oidcDeviceFlow`
+sets `OIDCResolve.DeviceFlow`, but config cannot carry an `io.Writer`, so the
+derived value leaves `PromptWriter` nil. Set one before signing or the
+verification code the user has to enter goes nowhere:
+
+```go
+opts, err := cfg.BundleOptions()
+if err != nil {
+    return err
+}
+opts.OIDCResolve.PromptWriter = os.Stderr   // or any caller-owned writer
+```
+
+```go
+opts, err := cfg.BundleOptions()       // from spec.bundle
+if err != nil {
+    return err                         // malformed spec.bundle, or mixed
+}                                      // KMS + keyless signing settings
+opts.OutputDir = "./bundles"           // caller wins, visibly
+artifact, err := client.MakeBundle(ctx, rec, opts)
+```
+
+Check that first error rather than letting the second assignment overwrite it.
+`BundleOptions()` returns a zero value alongside its error, so a swallowed
+failure bundles with defaults — no deployer, no overrides, no attestation —
+from a document that looked configured.
+
+### What `BundleInputOptions()` does and does not carry
+
+`MakeBundle` takes an already-resolved `RecipeResult` and does not push its
+own result anywhere — the caller does, after it returns. `BundleInputOptions()`
+carries the `spec.bundle` fields that describe that caller-side work instead:
+which recipe to bundle, which image-refs file to write to, where to push the
+finished bundle, and how to reach that registry:
+
+```go
+input, err := cfg.BundleInputOptions()
+if err != nil {
+    return err
+}
+rec, err := client.LoadRecipe(ctx, input.RecipePath, "")
+```
+
+| Field | Source |
+|---|---|
+| `RecipePath` | `spec.bundle.input.recipe` |
+| `ImageRefsPath` | `spec.bundle.output.imageRefs` |
+| `OutputTarget`, `OutputTargetRaw` | `spec.bundle.output.target`, parsed and raw |
+| `InsecureTLS`, `PlainHTTP` | `spec.bundle.registry.insecureTLS`, `.plainHTTP` — the document already chose the push destination in `OutputTarget`, so it is trusted to describe how to reach it too, the same reasoning `EvidenceOptions` and `SignOptions` apply to their own transport fields |
+
+None of these six reach `MakeBundle`; `BundleOptions()` carries what the
+bundler itself reads.
 
 One asymmetry worth knowing: `IgnoreTLog` has no config counterpart, so
 `BundleVerifyOptions()` always leaves it false. It weakens the trust floor by
 dropping the transparency-log requirement, and keeping it command-line-only
 means a checked-in file can never silently disable that check.
+
+### What `ValidateSettings()` does and does not carry
+
+`spec.validate` is the one section that does not map to a single destination,
+so `ValidateSettings()` carries settings from both `spec.validate.agent` and
+`spec.validate.execution` as a plain value, not an option slice, so you read
+and override individual fields directly — but not every field it carries
+reaches `Client.ValidateState`.
+Eleven do, via a matching option: namespace, image pull secrets, node
+selector, tolerations, no-cluster, cleanup, phases, skip checks, fail-fast,
+timeout, and the validator service account name
+(`ValidatorServiceAccountName`, through `WithValidatorServiceAccountName`).
+`WithValidationSkipChecks` is not in v0.22.0 or earlier and
+`WithValidatorServiceAccountName` is not in v1.0.0 or earlier, so a module
+pinned to v1.0.0 has ten and one pinned to v0.22.0 has nine. Four do not: image, job name, service account name and
+require-GPU configure the snapshot agent, and `ValidateState` has no option to
+accept them through. They ride on `ValidateSettings()`
+anyway so a caller building its own validator agent config (the CLI's
+`parseValidateAgentConfig`, in particular) can read them with its own
+flag-over-config precedence instead of reaching for `Unwrap()` — see the
+table below.
+
+```go
+opts, ok, err := cfg.ValidateSettings()
+if err != nil {
+    return err
+}
+if !ok {
+    opts.Cleanup = true // no spec.validate at all: supply a safe default
+}
+results, err := client.ValidateState(ctx, rec, snap,
+    aicr.WithValidationNamespace(opts.Namespace),
+    aicr.WithValidationImagePullSecrets(opts.ImagePullSecrets),
+    aicr.WithValidationNodeSelector(opts.NodeSelector),
+    aicr.WithValidationTolerations(opts.Tolerations),
+    aicr.WithValidationNoCluster(opts.NoCluster),
+    aicr.WithValidationCleanup(opts.Cleanup),
+    aicr.WithValidatorServiceAccountName(opts.ValidatorServiceAccountName),
+    // Phases, SkipChecks, FailFast and Timeout map the same way, through
+    // WithValidationPhases, WithValidationSkipChecks, WithValidationFailFast
+    // and WithValidationTimeout; FailFast and Timeout are pointers, so pass
+    // them only when non-nil.
+)
+```
+
+**The second return is a presence signal, not decoration — skipping it is the
+failure mode.** The zero value's `Cleanup: false` is not a safe default: it is
+the opposite of the CLI's own default (clean up). A caller that cannot
+distinguish "no `spec.validate` at all, supply your own defaults" from
+"`spec.validate` is present but silent about cleanup", and always applies the
+returned value as-is, leaves the cluster-admin `ClusterRoleBinding` and
+validator Jobs active on a plain, no-config invocation — silently, since
+nothing errors. That is why the sample above guards the default rather than
+the override: `ok` must gate what `Cleanup` becomes when the section is
+absent, not whether the caller's own choice is applied — the two look similar
+but only one avoids the leak. `ok` is `true` when the section exists at all
+(even if silent about every field) and `false` for a nil `Config`, a nil
+internal document, or a document that omits the section entirely.
+`SnapshotAgentConfig()` returns the same signal for the same reason, guarding
+`Privileged` instead of `Cleanup`; see
+[below](#what-snapshotagentconfig-does-and-does-not-carry).
+
+The rest of the section has other homes, and knowing which saves a search:
+
+| Field | Home |
+|---|---|
+| `spec.validate.agent.image`, `.jobName`, `.serviceAccountName`, `.requireGpu` | Still on `ValidateSettings()` (`Image`, `JobName`, `ServiceAccountName`, `RequireGPU`), but not passed to `ValidateState`: they configure the snapshot-capture agent, not the validator Jobs, so a `ValidateState` option here would have nothing to translate into. The CLI reads them directly to build the agent Job. `.validatorServiceAccountName` is not in this row; it reaches `ValidateState` through `WithValidatorServiceAccountName`. |
+| `spec.validate.input.recipe`, `.snapshot`, `spec.validate.execution.failOnError` | `ValidateInputOptions()`, which targets the CALLER rather than `ValidateState` — see below. |
+| `spec.validate.evidence.attestation` | `EvidenceAttestationOptions()`, which targets `EmitRecipeEvidence` rather than `ValidateState` — see below. |
+| `spec.validate.evidence.cncf` | `CNCFEvidenceOptions()`, which the caller reads to choose between `RenderCNCFEvidence` and `CollectCNCFEvidence`. See below. |
+
+One inversion worth knowing: config says `noCleanup`, the field says
+`Cleanup`. `ValidateSettings()` flips it, so `noCleanup: true` becomes
+`Cleanup: false`.
+
+### What `ValidateInputOptions()` does and does not carry
+
+`ValidateState` takes an already-resolved recipe and snapshot and reports
+check results without acting on them, so the three `spec.validate` fields a
+CALLER needs — which recipe and snapshot to validate, and whether a failed
+check should fail the caller — have no home on `ValidateSettings()`.
+`ValidateInputOptions()` carries them instead, so a caller applying its own
+flag-over-config precedence does not need `Unwrap()` to read them:
+
+```go
+input, err := cfg.ValidateInputOptions()
+if err != nil {
+    return err
+}
+rec, err := client.LoadRecipe(ctx, input.RecipePath, "")
+```
+
+| Field | Source |
+|---|---|
+| `RecipePath` | `spec.validate.input.recipe` |
+| `SnapshotPath` | `spec.validate.input.snapshot` |
+| `FailOnError` | `spec.validate.execution.failOnError` — a pointer so "config said nothing" stays distinct from an explicit `false`, letting the caller's own default apply, the same pattern the CLI's `--fail-on-error` flag uses to win over a configured value |
+
+None of these three reach `ValidateState`; `ValidateSettings()` carries what
+the validator itself accepts.
+
+### What `EvidenceAttestationOptions()` does and does not carry
+
+`spec.validate.evidence` carries two kinds of evidence. This method covers one
+of them, and the name says which, so it cannot quietly grow to imply both:
+
+```go
+opts, ok, err := cfg.EvidenceAttestationOptions()
+if err != nil {
+    return err
+}
+if ok {
+    opts.Commit = buildCommit  // caller-owned, no config counterpart
+    err = client.EmitRecipeEvidence(ctx, rec, snap, results, opts)
+}
+```
+
+**`out` is the enable gate, not a zeroing gate.** An empty `out` leaves the
+path off (`ok == false`) even when `bom`/`push`/`plainHTTP`/`insecureTLS` are
+set, matching the spec field's own contract and what the CLI does — but those
+four still populate on the returned `EvidenceOptions`; only `OutDir` stays
+empty. `out` can come from somewhere other than this document — the CLI's
+`--emit-attestation` flag can supply it while `bom`/`push` are configured —
+so zeroing the whole struct whenever `out` is empty would silently drop that
+half of the configuration on every run where `out` arrives another way. So
+`ok == false` means "config didn't enable the path," never "misconfigured"
+and never "config said nothing else" — a malformed section returns an error
+instead. That is why there is a `bool` at all: `EmitRecipeEvidence` rejects an
+empty `OutDir`, so a zero-value `EvidenceOptions` could not tell you which of
+the two happened, and it also could not carry a partially-configured section
+for a caller resolving `out` itself to finish.
+
+Five fields project: `out`, `bom`, `push`, `plainHTTP`, `insecureTLS`. The
+rest of `EvidenceOptions` stays yours, and the reasons differ:
+
+| Field | Why it is not derived |
+|---|---|
+| `Commit` | Names the running binary, not the document. It selects the validator catalog the bundle's BOM is built against. Set it after deriving. |
+| `OIDCResolve` | Excluded by the spec itself. A keyless-signing identity token is a short-lived secret and must not sit in a version-controlled file, and the signing mode it selects (a KMS `SigningKey`, private Sigstore endpoints) is set per invocation; resolve it at sign time. |
+| `NoSign`, `Full`, `AllowMutableValidatorTags` | Command-line-only, for the same reason as `IgnoreTLog` and `failOnError`. All three weaken the **artifact** — `NoSign` pushes an unsigned bundle, `Full` ships unredacted payloads, `AllowMutableValidatorTags` lets the predicate name validator images that can later resolve to different code — and a checked-in file that can silently disable signing or provenance is a supply-chain downgrade no reviewer would see in a diff. |
+
+**Why `plainHTTP` and `insecureTLS` project anyway.** They weaken a run too, so
+the rule above is not "config may never weaken anything" — stated that broadly
+it would be contradicted by two of the five fields that do project. The line is
+the *artifact* versus the *hop*.
+
+Both configure the transport to a registry the same document already names in
+`push`. A document trusted to choose the destination is trusted to describe how
+to reach it, which is why `EvidenceOptions` and `SignOptions` carry these while
+the bundler's own options do not — `MakeBundle` never reaches a registry (see
+[`spec.bundle.registry`](#what-bundleinputoptions-does-and-does-not-carry)).
+
+Neither field changes what the bundle attests or whether it is signed, and that
+is structural rather than a promise: both reach only the OCI transport, never
+the Fulcio/Rekor signing call and never predicate or redaction construction.
+
+How the subject digest is pinned differs by path, and neither path reads it back
+from the weakened hop. Emit-and-push binds the digest computed locally while
+packaging, before any push begins. Signing an already-pushed artifact
+(`aicr evidence sign`) resolves the digest at pull time instead, but the pull is
+content-addressed and the materialized digest is checked for equality against
+the value the original packaging run recorded, failing closed on mismatch.
+
+So a tampered hop can corrupt or break the transfer; it cannot make the
+signature vouch for content that was never packaged.
+
+That is narrower than "harmless". A committed `plainHTTP` or `insecureTLS` does
+weaken that hop, and it widens the threat model rather than just restating it:
+redirecting `push` needs a malicious document, whereas downgrading TLS on a
+destination the operator believes is protected only needs someone on the
+network path. It is accepted because the destination is already the document's
+call. Treat it as a reviewable transport decision, not as evidence that
+excluding `NoSign` and `Full` is arbitrary.
+
+### What `CNCFEvidenceOptions()` does and does not carry
+
+`spec.validate.evidence` carries two kinds of evidence; `CNCFEvidenceOptions()`
+covers the other one — CNCF AI Conformance markdown, gated behind
+`--evidence-dir` / `--cncf-submission` / `--feature`:
+
+```go
+cncfOpts, err := cfg.CNCFEvidenceOptions()
+if err != nil {
+    return err
+}
+evidenceDir := cncfOpts.Dir // caller applies its own flag-over-config precedence
+```
+
+Unlike `EvidenceAttestationOptions()`, it does not map onto one method's
+options. The caller applies its own flag-over-config precedence, the same way
+`SnapshotOutputOptions()` and `ValidateInputOptions()` do, then branches on
+`CNCFSubmission`. When true, it passes `Dir` and `Features` to
+`CollectCNCFEvidence` in `CNCFCollectOptions` and skips `ValidateState`. When
+false, a non-empty `Dir` goes to `RenderCNCFEvidence` after `ValidateState`.
+`CNCFEvidenceOptions()` returns the zero value (never an error) for an absent
+section, and an error only when `spec.validate` is present but malformed.
+
+### What `SnapshotAgentConfig()` does and does not carry
+
+`AgentConfig`'s fields are exported, so unlike the bundle path there is no
+options slice — derive it, then set any field directly. The returned
+`*AgentConfig` is never nil, even for a nil `Config`:
+
+```go
+agent, ok, err := cfg.SnapshotAgentConfig()
+if err != nil {
+    return err
+}
+agent.Kubeconfig = kubeconfigPath // caller-owned, no config counterpart —
+                                  // set unconditionally, not gated on ok
+if !ok {
+    agent.Privileged = true // no spec.snapshot at all: supply a safe default
+}
+snap, err := client.CollectSnapshot(ctx, agent)
+```
+
+Three mappings are transforms rather than copies, and two of them fail
+silently if you reimplement them by hand:
+
+| Field | Behavior |
+|---|---|
+| `noCleanup` → `Cleanup` | **Inverted**, same as `spec.validate` |
+| `privileged` → `Privileged` | **Defaults to true** when config says nothing. The resolved field is a pointer so unset stays distinct from an explicit `false`; treating nil as `false` drops privileges the collector needs, and it surfaces as missing data rather than an error |
+| `requests`, `limits` | Parsed from raw `name=quantity,...` strings. `Resolve()` deliberately leaves them unparsed, so a malformed value errors here instead of becoming an empty `ResourceList` |
+
+The whole `spec.snapshot.output` section is **not** projected, and that is
+deliberate. Output describes *delivery*; `AgentConfig` describes the collection
+Job.
+
+- `output.format` is applied at delivery. The Job always stages YAML in a
+  ConfigMap, so a format routed through `AgentConfig` would be silently ignored
+  (#2398).
+- `output.path` and `output.template` are **not** `AgentConfig.Output` and
+  `.TemplatePath`. Any `Output` value that is not a `cm://` URI stages to an
+  internal ConfigMap and delivery becomes yours, so projecting a file path
+  there would look configured and write nothing.
+
+Deliver with `snapshotter.DeliverSnapshot`, passing `Snapshot.Raw`.
+
+`OS` is parsed through the criteria registry rather than copied, matching what
+the CLI does with `--os`. An unparsed `Talos` would miss the agent's exact
+`talos` check and select incompatible host mounts, and an undocumented value
+errors here instead of traveling.
+
+`Kubeconfig`, `Debug`, `ClusterConfigPath`, `AKSGPUPoolsPath`,
+`OKEAddonsPath`, `GKEGPUPoolsPath`, `DiscoverNetwork`, `RunID` and `NameBase` have no config
+counterpart and stay
+zero — they are per-invocation or caller-owned.
+
+**A document with no `spec.snapshot` yields a zero value, which is not a
+working configuration** — `Privileged` is false, which the collector generally
+needs true. That is deliberate: defaults apply when the section exists and is
+silent about a field, but a document that made no snapshot decisions at all
+does not get decisions invented for it. Supply your own defaults in that case,
+as the CLI does from its flag defaults.
+
+**The second return, `ok`, is the presence signal that resolves this — skip it
+and the failure mode is silent.** `ok` is `true` when `spec.snapshot` exists at
+all (even if silent about every field) and `false` for a nil `Config`, a nil
+internal document, or a document that omits the section. A caller that always
+applies the returned `*AgentConfig` as-is, without checking `ok`, cannot tell
+"no `spec.snapshot`, supply your own defaults" from "`spec.snapshot` decided
+every field, apply them as-is" — both produce a populated, non-nil
+`*AgentConfig` — and silently drops privileges the collector needs on the
+common no-config case. `ValidateSettings()` returns the same signal for the
+same reason, guarding `Cleanup` instead of `Privileged`; see
+[above](#what-validatesettings-does-and-does-not-carry).
+
+### What `SnapshotOutputOptions()` does and does not carry
+
+`CollectSnapshot` never reads `spec.snapshot.output` — the whole section
+describes *delivery*, which `SnapshotAgentConfig()` deliberately excludes (see
+above): the Job always stages YAML in a ConfigMap, so a format routed through
+`AgentConfig` would be silently ignored (#2398). `SnapshotOutputOptions()`
+carries the three fields a caller needs AFTER `CollectSnapshot` returns, to
+write the snapshot where the document asked:
+
+```go
+out, err := cfg.SnapshotOutputOptions()
+if err != nil {
+    return err
+}
+err = snapshotter.DeliverSnapshot(ctx, snap.Raw, snapshotter.SnapshotDelivery{
+    Output:       out.Path,
+    Format:       serializer.Format(out.Format),
+    TemplatePath: out.Template,
+})
+```
+
+| Field | Source |
+|---|---|
+| `Path` | `spec.snapshot.output.path` |
+| `Format` | `spec.snapshot.output.format` (`yaml`, `json`, or `table`), validated by the loader |
+| `Template` | `spec.snapshot.output.template`, a Go template rendered instead of the structured formats; requires `Format` `yaml` |
+
+Returns the zero value — never an error — for a nil `Config`, an absent
+`spec.snapshot`, or an absent `output` block, since delivery is optional. None
+of these three reach `CollectSnapshot`; `SnapshotAgentConfig()` carries what
+the collection Job itself reads.
+
+### What `RecipeOutputOptions()` does and does not carry
+
+`ResolveRecipe` and `LoadRecipe` never see `spec.recipe.output` either, for the
+same reason `CollectSnapshot` never sees `spec.snapshot.output`: writing the
+resolved recipe is a caller decision made AFTER resolution returns, not part
+of resolving it. `RecipeOutputOptions()` carries the two fields:
+
+```go
+out := cfg.RecipeOutputOptions()
+if out.Path != "" {
+    // write rec to out.Path in out.Format, mirroring `aicr recipe --output`
+}
+```
+
+| Field | Source |
+|---|---|
+| `Path` | `spec.recipe.output.path`. Empty when unset. |
+| `Format` | `spec.recipe.output.format`. Empty when unset, leaving the caller's own default in place. |
+
+Unlike every other derivation on `Config`, `RecipeOutputOptions()` returns no
+error: the underlying accessors are nil-safe and perform no parsing, so
+nothing here can fail. A nil `Config` or an absent `spec.recipe.output` each
+yield the zero value.
 
 ## Verifying artifacts
 
@@ -942,6 +1661,15 @@ An invalid bundle is a verdict, not an error — branch on `Exit`. The
 means "we could not check this", which is different from "we checked it
 and it failed".
 
+Evidence signed with a KMS key (`OIDCResolve.SigningKey` on
+`EvidenceOptions` or `EvidencePublishOptions`) verifies with `Key`, a KMS
+URI or a PEM public-key path; `result.Signer` then reports issuer `key` and
+the key's `sha256:` fingerprint. `Key` is the signer pin, so setting it with
+`ExpectedIssuer` or `ExpectedIdentityRegexp` is an error, as is
+`IgnoreTLog` without `Key`. `TrustRoot` adds a private Sigstore root for
+evidence signed against a private Fulcio/Rekor. A bad key or trust root
+returns an error, not a verdict.
+
 Pair it with `RecipeDigest` to detect evidence that has gone stale
 against the recipe on your branch:
 
@@ -1029,7 +1757,12 @@ aicr.ValidateIdentityPattern(
 
 The producing half of the supply chain is on the facade too.
 `EmitRecipeEvidence` builds a bundle from a completed validation run;
-`PublishEvidence` signs and pushes one that already exists on disk:
+`EmitRecipeEvidenceWithResult` does the same and also returns an
+`EvidenceEmission` carrying the pushed reference and digest (the `bundle.oci`
+and `bundle.digest` values in `pointer.yaml`; both empty without `Push`), so a
+caller can hand on what was published without reading `pointer.yaml` back. It
+is not in v1.0.0 or earlier. `PublishEvidence` signs and pushes a bundle that
+already exists on disk:
 
 ```go
 err := client.PublishEvidence(ctx, aicr.EvidencePublishOptions{
@@ -1130,7 +1863,7 @@ if stderrors.As(err, &se) {
 
 ## Context handling
 
-`ResolveRecipe` (and every other context-aware facade method) honours
+`ResolveRecipe` (and every other context-aware facade method) honors
 context cancellation. Capped entry points wrap the caller's context
 with `context.WithTimeout` against their per-operation cap; the
 effective deadline is then the smaller of the caller's deadline and the
@@ -1200,10 +1933,8 @@ only its exported surface is checked by the API-diff gate on every PR. The
 it.** [Open an issue](https://github.com/NVIDIA/aicr/issues/new/choose)
 describing the capability. Reaching into an evolving subpackage works today
 and is the thing most likely to break you later, and we would rather extend
-the facade — that is how `LoadSnapshot`, `LoadConfig`, and the verification
-surface all arrived. Where this guide shows a deliberate escape hatch (the
-fingerprint step under [Criteria relaxation](#criteria-relaxation-on-the-snapshot-path)),
-it says so and explains the coupling you are accepting.
+the facade — that is how `LoadSnapshot`, `LoadConfig`,
+`Client.CriteriaFromSnapshot`, and the verification surface all arrived.
 
 **Breaking changes are detected, not merely intended.** `tools/api-diff`
 compares the facade and its transparent-alias targets against the last release
@@ -1237,16 +1968,16 @@ Versioning][semver]:
 
 Nothing in `pkg/client/v1` is removed without first being marked deprecated for
 the notice period in
-[`RELEASING.md`](https://github.com/NVIDIA/aicr/blob/main/RELEASING.md#deprecation-policy)
+[`RELEASE.md`](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md#deprecation-policy)
 — two minor releases before v1.0, and after v1.0 the next major.
 
 The marker is a standard Go `// Deprecated:` godoc paragraph on the identifier:
 
 ```go
-// ResolveRecipe returns a resolved recipe for the given criteria.
+// OldName is a hypothetical method, shown only to illustrate the marker.
 //
-// Deprecated: use [Client.Resolve] instead. ResolveRecipe is removed in v0.25.
-func (c *Client) ResolveRecipe(...) { ... }
+// Deprecated: use [Client.NewName] instead. OldName is removed in v2.0.0.
+func (c *Client) OldName(...) { ... }
 ```
 
 This is deliberately not a runtime warning. `staticcheck` reports `SA1019` for

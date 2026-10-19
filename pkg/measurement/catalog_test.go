@@ -15,11 +15,12 @@
 package measurement
 
 import (
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestValidatePath(t *testing.T) {
@@ -37,6 +38,7 @@ func TestValidatePath(t *testing.T) {
 		{name: "closed scalar key", path: "K8s.server.version"},
 		{name: "closed scalar key on node", path: "K8s.node.kubelet-version"},
 		{name: "closed scalar key on aks pools", path: "K8s.aks-gpu-pools.gpu-driver"},
+		{name: "closed scalar key on gke pools", path: "K8s.gke-gpu-pools.gpu-driver-installation"},
 		{name: "closed scalar key on gpu hardware", path: "GPU.hardware.driver-loaded"},
 		{name: "open scalar key on os release", path: "OS.release.VERSION_ID"},
 		{name: "open scalar key with dots", path: "OS.sysctl./proc/sys/kernel/osrelease"},
@@ -145,7 +147,7 @@ func TestValidatePath(t *testing.T) {
 			if err == nil {
 				t.Fatalf("ValidatePath(%q) = nil, want %s", tt.path, tt.wantErr)
 			}
-			if !stderrors.Is(err, aicrerrors.New(tt.wantErr, "")) {
+			if errorstest.ReportedCode(err) != tt.wantErr {
 				t.Errorf("ValidatePath(%q) error = %v, want code %s", tt.path, err, tt.wantErr)
 			}
 			if tt.wantMsg != "" && !strings.Contains(err.Error(), tt.wantMsg) {
@@ -166,7 +168,7 @@ func TestValidatePath_MissingCatalogEntry(t *testing.T) {
 	if err == nil {
 		t.Fatal("validatePathIn with an empty catalog = nil, want an error")
 	}
-	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInternal {
 		t.Errorf("error = %v, want code %s", err, aicrerrors.ErrCodeInternal)
 	}
 	if !strings.Contains(err.Error(), "no catalog entry") {

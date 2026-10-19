@@ -65,12 +65,34 @@ type VerifyOptions struct {
 	BundleRef string
 
 	// ExpectedIssuer pins the OIDC issuer URL recorded on the signing
-	// certificate. Empty allows any issuer.
+	// certificate. Empty allows any issuer. Keyless only: rejected with Key.
 	ExpectedIssuer string
 
 	// ExpectedIdentityRegexp pins the signer's SubjectAlternativeName
-	// via regex. Empty allows any identity.
+	// via regex. Empty allows any identity. Keyless only: rejected with Key.
 	ExpectedIdentityRegexp string
+
+	// Key verifies a bundle signed with a KMS key (`--signing-key`) instead
+	// of a keyless Fulcio certificate: a KMS key URI (awskms:// | gcpkms:// |
+	// azurekms:// | hashivault://) or a local PEM public-key file. The key is
+	// the signer pin, so a bundle signed by any other key, or keylessly,
+	// fails, and the verified signer is the key's fingerprint under issuer
+	// attestation.KeySignerIssuer. A KMS URI makes a live GetPublicKey call.
+	Key string
+
+	// TrustRoot is a path to a sigstore-go trusted_root.json for bundles
+	// signed against a private Fulcio/Rekor. ADDITIVE: unioned with AICR's
+	// public-good root, so publicly and privately signed bundles both
+	// verify. Composable with Key.
+	TrustRoot string
+
+	// IgnoreTLog skips the transparency-log and observer-timestamp
+	// requirement, so a bundle signed with `--tlog-upload=false` verifies
+	// with no transparency-log network calls. Only valid with Key: a keyless
+	// certificate cannot be verified without a trusted timestamp. INSECURE
+	// relative to the default: without a tlog entry there is no trusted
+	// proof of when the signature was made.
+	IgnoreTLog bool
 
 	// PlainHTTP forces HTTP for registry traffic (local-registry tests
 	// only).
@@ -90,8 +112,10 @@ type VerifyOptions struct {
 	AllowUnpinnedTag bool
 }
 
-// SignerClaims records the OIDC identity from the signing certificate.
-// nil on unsigned bundles.
+// SignerClaims records the verified signer: the OIDC identity and issuer
+// from a keyless signing certificate, or for a key signature the key
+// fingerprint under issuer attestation.KeySignerIssuer. nil on unsigned
+// bundles.
 type SignerClaims struct {
 	Identity      string `json:"identity" yaml:"identity"`
 	Issuer        string `json:"issuer" yaml:"issuer"`
@@ -147,14 +171,18 @@ type FailureCause struct {
 
 // VerifyResult is what Verify returns to its caller.
 type VerifyResult struct {
-	Input        InputForm              `json:"input" yaml:"input"`
-	Pointer      *attestation.Pointer   `json:"pointer,omitempty" yaml:"pointer,omitempty"`
-	Predicate    *attestation.Predicate `json:"predicate,omitempty" yaml:"predicate,omitempty"`
-	Signer       *SignerClaims          `json:"signer,omitempty" yaml:"signer,omitempty"`
-	RecipeName   string                 `json:"recipeName,omitempty" yaml:"recipeName,omitempty"`
-	BundleDigest string                 `json:"bundleDigest,omitempty" yaml:"bundleDigest,omitempty"`
-	Steps        []StepResult           `json:"steps" yaml:"steps"`
-	Exit         int                    `json:"exit" yaml:"exit"`
+	Input     InputForm              `json:"input" yaml:"input"`
+	Pointer   *attestation.Pointer   `json:"pointer,omitempty" yaml:"pointer,omitempty"`
+	Predicate *attestation.Predicate `json:"predicate,omitempty" yaml:"predicate,omitempty"`
+	// PredicateType is the predicateType recorded alongside Predicate, one
+	// of PredicateTypeV1, V2, or V3. It determines which subject-digest
+	// canonicalization algorithm was used to bind Predicate.Recipe.Digest.
+	PredicateType string        `json:"predicateType,omitempty" yaml:"predicateType,omitempty"`
+	Signer        *SignerClaims `json:"signer,omitempty" yaml:"signer,omitempty"`
+	RecipeName    string        `json:"recipeName,omitempty" yaml:"recipeName,omitempty"`
+	BundleDigest  string        `json:"bundleDigest,omitempty" yaml:"bundleDigest,omitempty"`
+	Steps         []StepResult  `json:"steps" yaml:"steps"`
+	Exit          int           `json:"exit" yaml:"exit"`
 
 	// Pending is true when the bundle is unsigned — a "pending signature"
 	// state, not a failure. An in-flight PR that committed an unsigned

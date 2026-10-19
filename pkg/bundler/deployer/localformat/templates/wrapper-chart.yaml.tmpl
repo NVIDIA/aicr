@@ -16,8 +16,11 @@ apiVersion: v2
 name: {{ .Name }}
 description: Generated wrapper chart vendoring {{ .ChartName }}@{{ .ChartVersion }} for {{ .Parent }}.
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: {{ q .AICRVersion }}
+appVersion: {{ q .ComponentVersion }}
+annotations:
+  aicr.run/component-version: {{ q .ComponentVersion }}
+  aicr.run/generated-by: {{ q .AICRVersion }}
 dependencies:
   # Empty repository tells Helm to resolve the subchart from the
   # adjacent charts/<name>-<version>.tgz file at install time. No

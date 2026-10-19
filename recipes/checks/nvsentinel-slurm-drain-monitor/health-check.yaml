@@ -1,0 +1,97 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NVSentinel Slurm Drain Monitor Health Check
+#
+# The monitor ships only on platform: slurm recipes. Their deployment
+# validation already verifies its Deployment through each Slurm leaf's
+# nvsentinel expectedResources; this file adds the read-only RBAC assertion. It
+# is not registry-linked, because the registry's nvsentinel check runs on every
+# recipe and the monitor is absent from all but the Slurm ones -- run it with
+# `make check-health COMPONENT=nvsentinel-slurm-drain-monitor` (see
+# docs/user/component-catalog.md#slurm-drain-monitor).
+#
+# TestNVSentinelSlurmDrainMonitorChartRender asserts the rendered shape
+# without a cluster but runs only on the weekly render-check schedule; the
+# assertions below are what only a live cluster can make: that the monitor
+# rolled out, and that the RBAC it runs with is still read-only.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: nvsentinel-slurm-drain-monitor-health-check
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-slurm-drain-monitor-rollout
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: slurm-drain-monitor
+                namespace: nvsentinel
+              status:
+                (availableReplicas > `0`): true
+        # Stale-rollout guards, compared against spec.replicas rather than
+        # status.replicas, which itself lags during a scale-up.
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: slurm-drain-monitor
+                namespace: nvsentinel
+              ((status.updatedReplicas || `0`) < (spec.replicas || `1`)): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: slurm-drain-monitor
+                namespace: nvsentinel
+              ((status.availableReplicas || `0`) < (spec.replicas || `1`)): true
+        # Old pods can still be ready while new ones are stuck, passing both
+        # guards above; mirrors kubectl rollout status's drain check.
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: slurm-drain-monitor
+                namespace: nvsentinel
+              ((status.replicas || `0`) > (status.updatedReplicas || `0`)): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: slurm-drain-monitor
+                namespace: nvsentinel
+              ((status.observedGeneration || `0`) < metadata.generation): true
+    - name: validate-read-only-rbac
+      try:
+        # The monitor's whole safety claim is that it cannot change cluster
+        # state. One rule, on pods, with nothing beyond get/list/watch.
+        - assert:
+            resource:
+              apiVersion: rbac.authorization.k8s.io/v1
+              kind: ClusterRole
+              metadata:
+                name: slurm-drain-monitor
+              (length(rules)): 1
+              (rules[?contains(resources, 'pods')] | length(@)): 1
+              (rules[?length(resources) != `1`] | length(@)): 0
+              (rules[?length(verbs[?@ != 'get' && @ != 'list' && @ != 'watch']) > `0`] | length(@)): 0

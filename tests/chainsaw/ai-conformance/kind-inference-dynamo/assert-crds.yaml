@@ -58,8 +58,12 @@ kind: CustomResourceDefinition
 metadata:
   name: dynamocomponentdeployments.nvidia.com
 ---
-# Skyhook
+# NodeWright
+# The reconciled kind from operator v0.18.0. The chart still ships the legacy
+# skyhooks.skyhook.nvidia.com CRD through its deprecation window, but asserting
+# the kind the operator actually writes status on is what proves the rename
+# landed.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: skyhooks.skyhook.nvidia.com
+  name: nodewrights.nodewright.nvidia.com

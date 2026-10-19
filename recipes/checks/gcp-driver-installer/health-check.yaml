@@ -21,10 +21,9 @@
 # nodewright-customizations, issue #1844) — a static assert cannot see value
 # gates and would otherwise fail on a healthy gke-default cluster.
 #
-# Ready semantics: assert numberReady == desiredNumberScheduled with a
-# desiredNumberScheduled > 0 guard (vacuous-pass protection on a 0-node
-# selector); numberUnavailable is omitempty and compares null when healthy
-# (see recipes/checks/nfd/health-check.yaml for the rationale).
+# Ready semantics: numberReady is asserted rather than numberUnavailable,
+# which is omitempty and compares null when healthy (see
+# recipes/checks/nfd/health-check.yaml for the rationale).
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -59,6 +58,12 @@ spec:
                   # so that key can never match on a deployed bundle
                   # (verified live on GKE, 2026-08-28).
                   app.kubernetes.io/part-of: aicr
-              status:
-                (desiredNumberScheduled > `0`): true
-                (numberReady == desiredNumberScheduled): true
+              # numberReady alone accepts a stale rollout. A node still
+              # running the previous revision's pod counts as ready too,
+              # so updatedNumberScheduled must also match. observedGeneration
+              # confirms status reflects the current spec, not a reconcile
+              # from before the latest update.
+              ((status.desiredNumberScheduled || `0`) > `0`): true
+              ((status.numberReady || `0`) == status.desiredNumberScheduled): true
+              ((status.updatedNumberScheduled || `0`) == status.desiredNumberScheduled): true
+              ((status.observedGeneration || `0`) == metadata.generation): true

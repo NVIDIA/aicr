@@ -52,8 +52,8 @@ type In struct {
 	BundleDir string
 
 	// Predicate is the verified predicate body (preferably from the
-	// signed DSSE payload). Supplies attestedAt, aicrVersion, recipe
-	// name, k8s version, and the bundle (manifest) digest.
+	// signed DSSE payload). Supplies attestedAt, aicrVersion, aicrCommit,
+	// recipe name, k8s version, and the bundle (manifest) digest.
 	Predicate *attestation.Predicate
 
 	// SignerIdentity and SignerIssuer are the verified OIDC claims. An
@@ -193,6 +193,7 @@ func Synthesize(ctx context.Context, in In) (*Result, error) {
 		},
 		RunID:         runID,
 		AICRVersion:   in.Predicate.AICRVersion,
+		AICRCommit:    in.Predicate.AICRCommit,
 		K8sVersion:    in.Predicate.Fingerprint.K8sVersion.Value,
 		K8sConstraint: constraintValue(view.Constraints, k8sServerVersionConstraint),
 		BundleDigest:  in.Predicate.Manifest.Digest,

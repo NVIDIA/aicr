@@ -47,7 +47,7 @@
 #     -ldflags="-s -w -extldflags '-static' -X main.version=dev" \
 #     -o dist/gate ./cmd/gate
 # ---------------------------------------------------------------------------
-FROM nvcr.io/nvidia/distroless/static:v4.0.0@sha256:d90158b69e250d2018f32622b5c622925202ee97224a990a54b63811cb1e3d69
+FROM nvcr.io/nvidia/distroless/static:v4.1.3@sha256:e6eb65cecc405fabfdfd69f95d4e090baa696c97ab3759151f4160c97aa8ecb7
 
 # Mode is carried over from the build context (go build emits 0755), so the
 # binary is executable without a chmod layer.

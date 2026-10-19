@@ -34,6 +34,7 @@ var (
 	ErrTooManyComponents = errors.New("version has more than 3 components")
 	ErrNonNumeric        = errors.New("version component is not numeric")
 	ErrNegativeComponent = errors.New("version component cannot be negative")
+	ErrNotCanonical      = errors.New("version is not in canonical form")
 )
 
 // Version represents a semantic version number with Major, Minor, and Patch components.
@@ -50,6 +51,10 @@ type Version struct {
 
 	// Extras stores additional version metadata like "-1028-aws" or "-eks-3025e55"
 	Extras string `json:"extras,omitempty" yaml:"extras,omitempty"`
+
+	// Prefixed reports whether the parsed string began with "v". Equals and
+	// Compare ignore it, but == does not.
+	Prefixed bool `json:"prefixed,omitempty" yaml:"prefixed,omitempty"`
 }
 
 // NewVersion creates a new Version with the specified major, minor, and patch values.
@@ -80,7 +85,7 @@ func (v Version) String() string {
 
 // ParseVersion parses a version string into a Version struct.
 // Supported formats: "1", "1.2", "1.2.3", "v1.2.3", "1.2.3-suffix", "1.2.3+metadata".
-// The "v" prefix is optional and stripped if present.
+// The "v" prefix is optional, stripped if present, and recorded in Prefixed.
 // Additional metadata after '-' or '+' is preserved in the Extras field.
 // Returns an error if the version string is empty, has invalid components, or has too many components.
 func ParseVersion(s string) (Version, error) {
@@ -89,9 +94,8 @@ func ParseVersion(s string) (Version, error) {
 		return Version{}, pkgerrors.Wrap(pkgerrors.ErrCodeInvalidRequest, "empty version string", ErrEmptyVersion)
 	}
 
-	// Strip 'v' prefix if present
-	s = strings.TrimPrefix(s, "v")
 	var v Version
+	s, v.Prefixed = strings.CutPrefix(s, "v")
 
 	// First, extract extras if they exist (anything after a dash or plus that comes AFTER digits)
 	// This handles cases like "1.28.0-gke.1337000" where the extras contain dots
@@ -140,6 +144,23 @@ func ParseVersion(s string) (Version, error) {
 	}
 
 	v.Precision = len(parts)
+	return v, nil
+}
+
+// ParseCanonical parses s like ParseVersion, but accepts only the form
+// Version.String() renders, with an optional "v" prefix recorded in Prefixed
+// ("1.2.3", "v1.2"). It returns an error wrapping ErrNotCanonical for a
+// pre-release or build suffix ("1.2.3-rc.1", "1.2.3+build"), leading zeros
+// ("01.2"), or a signed component ("1.+2").
+func ParseCanonical(s string) (Version, error) {
+	v, err := ParseVersion(s)
+	if err != nil {
+		return Version{}, err
+	}
+	if strings.TrimPrefix(s, "v") != v.String() {
+		return Version{}, pkgerrors.Wrap(pkgerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("non-canonical version: %q", s), ErrNotCanonical)
+	}
 	return v, nil
 }
 

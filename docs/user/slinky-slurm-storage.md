@@ -24,8 +24,15 @@ aicr bundle \
   --recipe recipe.yaml \
   --set slinkyslurm:storage.enabled=true \
   --shared-storage-class efs-sc \
+  --system-node-selector nodeGroup=system-worker \
+  --accelerated-node-selector nodeGroup=gpu-worker \
   --output bundle
 ```
+
+Every Slurm bundle needs both node selectors: `slinky-slurm` requires them in
+the component registry, so `aicr bundle` fails without them. Replace the example
+labels with your system and GPU node pool labels. See
+[`aicr bundle`](cli-reference.md#aicr-bundle).
 
 Enabling storage creates two RWX PVCs in the `slurm` namespace:
 
@@ -55,6 +62,8 @@ aicr bundle \
   --set slinkyslurm:storage.home.size=500Gi \
   --set slinkyslurm:storage.data.storageClassName=data-rwx \
   --set slinkyslurm:storage.data.size=2Ti \
+  --system-node-selector nodeGroup=system-worker \
+  --accelerated-node-selector nodeGroup=gpu-worker \
   --output bundle
 ```
 
@@ -78,7 +87,7 @@ Verify the selected class and its RWX capability before deployment.
 ## Lifecycle and deletion
 
 The generated shared PVCs carry retention annotations for every supported
-deployer. Helm, Helmfile, and Flux's Helm controller honor
+deployer. Helm, Helmfile, Terraform's `helm_release`, and Flux's Helm controller honor
 `helm.sh/resource-policy: keep` when a release is upgraded or removed. Argo CD
 treats that annotation like `Delete=false` during Application deletion; the
 explicit `argocd.argoproj.io/sync-options: Delete=false,Prune=false` annotation

@@ -39,24 +39,33 @@ import (
 // (CriteriaServiceAny, CriteriaAcceleratorAny, etc.) is the same
 // string in its typed form; CriteriaAnyValue is the bare-string
 // constant for matching logic that operates on stringified values
-// (e.g., pkg/fingerprint.matchDim's three-way comparison).
+// (e.g., pkg/fingerprint.matchDim's comparison).
 const CriteriaAnyValue = "any"
 
 // CriteriaServiceType represents the Kubernetes service/platform type for criteria.
+//
+// CriteriaServiceGeneric is self-managed Kubernetes with no distinguishing
+// distro or provisioning system; unlike CriteriaServiceAny, it is a concrete
+// service, not the wildcard. It is opt-in-only (CriteriaRegistry.IsOptInOnly):
+// a snapshot reports the provisioner it sees, never generic.
 type CriteriaServiceType string
 
 // CriteriaServiceType constants for supported Kubernetes services.
 const (
-	CriteriaServiceAny    CriteriaServiceType = "any"
-	CriteriaServiceEKS    CriteriaServiceType = "eks"
-	CriteriaServiceGKE    CriteriaServiceType = "gke"
-	CriteriaServiceAKS    CriteriaServiceType = "aks"
-	CriteriaServiceOKE    CriteriaServiceType = "oke"
-	CriteriaServiceKind   CriteriaServiceType = "kind"
-	CriteriaServiceLKE    CriteriaServiceType = "lke"
-	CriteriaServiceBCM    CriteriaServiceType = "bcm"
-	CriteriaServiceOCP    CriteriaServiceType = "ocp"
-	CriteriaServiceMetal3 CriteriaServiceType = "metal3"
+	CriteriaServiceAny     CriteriaServiceType = "any"
+	CriteriaServiceEKS     CriteriaServiceType = "eks"
+	CriteriaServiceGKE     CriteriaServiceType = "gke"
+	CriteriaServiceAKS     CriteriaServiceType = "aks"
+	CriteriaServiceOKE     CriteriaServiceType = "oke"
+	CriteriaServiceKind    CriteriaServiceType = "kind"
+	CriteriaServiceLKE     CriteriaServiceType = "lke"
+	CriteriaServiceBCM     CriteriaServiceType = "bcm"
+	CriteriaServiceOCP     CriteriaServiceType = "ocp"
+	CriteriaServiceMetal3  CriteriaServiceType = "metal3"
+	CriteriaServiceRKE2    CriteriaServiceType = "rke2"
+	CriteriaServiceGeneric CriteriaServiceType = "generic"
+	CriteriaServiceK0s     CriteriaServiceType = "k0s"
+	CriteriaServiceMK8s    CriteriaServiceType = "mk8s"
 )
 
 // ParseService parses a string into a CriteriaServiceType against this
@@ -70,8 +79,13 @@ const (
 // binary rebuild.
 func (r *CriteriaRegistry) ParseService(s string) (CriteriaServiceType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "", CriteriaAnyValue, "self-managed", "self", "vanilla":
+	case "", CriteriaAnyValue:
 		return CriteriaServiceAny, nil
+	case "generic", "self-managed", "self", "vanilla":
+		// The self-managed spellings historically normalized to the "any"
+		// wildcard; with generic as a concrete service they alias it instead,
+		// so `--service self-managed` selects generic recipes.
+		return CriteriaServiceGeneric, nil
 	case string(CriteriaServiceEKS):
 		return CriteriaServiceEKS, nil
 	case "gke":
@@ -90,6 +104,12 @@ func (r *CriteriaRegistry) ParseService(s string) (CriteriaServiceType, error) {
 		return CriteriaServiceOCP, nil
 	case "metal3":
 		return CriteriaServiceMetal3, nil
+	case "rke2":
+		return CriteriaServiceRKE2, nil
+	case "k0s":
+		return CriteriaServiceK0s, nil
+	case "mk8s":
+		return CriteriaServiceMK8s, nil
 	default:
 		if r.Has(FieldService, s) {
 			return CriteriaServiceType(normalizeCriteriaValue(s)), nil
@@ -103,7 +123,7 @@ func (r *CriteriaRegistry) ParseService(s string) (CriteriaServiceType, error) {
 // across `--data` configurations; for the union of static + registry
 // (including values contributed by `--data`), use AllCriteriaServiceTypes.
 func GetCriteriaServiceTypes() []string {
-	return []string{"aks", "bcm", "eks", "gke", "kind", "lke", "metal3", "ocp", "oke"}
+	return []string{"aks", "bcm", "eks", "generic", "gke", "k0s", "kind", "lke", "metal3", "mk8s", "ocp", "oke", "rke2"}
 }
 
 // AllServiceTypes returns the union of the static OSS list and values
@@ -123,10 +143,12 @@ const (
 	CriteriaAcceleratorGB200      CriteriaAcceleratorType = "gb200"
 	CriteriaAcceleratorGB300      CriteriaAcceleratorType = "gb300"
 	CriteriaAcceleratorB200       CriteriaAcceleratorType = "b200"
+	CriteriaAcceleratorB300       CriteriaAcceleratorType = "b300"
 	CriteriaAcceleratorA100       CriteriaAcceleratorType = "a100"
 	CriteriaAcceleratorL40        CriteriaAcceleratorType = "l40"
 	CriteriaAcceleratorL40S       CriteriaAcceleratorType = "l40s"
 	CriteriaAcceleratorRTXPro6000 CriteriaAcceleratorType = "rtx-pro-6000"
+	CriteriaAcceleratorVR200      CriteriaAcceleratorType = "vr200"
 )
 
 // ParseAccelerator parses a string into a CriteriaAcceleratorType against
@@ -146,6 +168,8 @@ func (r *CriteriaRegistry) ParseAccelerator(s string) (CriteriaAcceleratorType, 
 		return CriteriaAcceleratorGB300, nil
 	case "b200":
 		return CriteriaAcceleratorB200, nil
+	case "b300":
+		return CriteriaAcceleratorB300, nil
 	case "a100":
 		return CriteriaAcceleratorA100, nil
 	case "l40":
@@ -154,6 +178,8 @@ func (r *CriteriaRegistry) ParseAccelerator(s string) (CriteriaAcceleratorType, 
 		return CriteriaAcceleratorL40S, nil
 	case "rtx-pro-6000":
 		return CriteriaAcceleratorRTXPro6000, nil
+	case "vr200":
+		return CriteriaAcceleratorVR200, nil
 	default:
 		if r.Has(FieldAccelerator, s) {
 			return CriteriaAcceleratorType(normalizeCriteriaValue(s)), nil
@@ -166,7 +192,7 @@ func (r *CriteriaRegistry) ParseAccelerator(s string) (CriteriaAcceleratorType, 
 // types sorted alphabetically. For the union of static + registry, use
 // AllCriteriaAcceleratorTypes.
 func GetCriteriaAcceleratorTypes() []string {
-	return []string{"a100", "b200", "gb200", "gb300", "h100", "h200", "l40", "l40s", "rtx-pro-6000"}
+	return []string{"a100", "b200", "b300", "gb200", "gb300", "h100", "h200", "l40", "l40s", "rtx-pro-6000", "vr200"}
 }
 
 // AllAcceleratorTypes returns the union of the static OSS list and values
@@ -280,6 +306,7 @@ type CriteriaPlatformType string
 const (
 	CriteriaPlatformAny      CriteriaPlatformType = "any"
 	CriteriaPlatformDynamo   CriteriaPlatformType = "dynamo"
+	CriteriaPlatformKueue    CriteriaPlatformType = "kueue"
 	CriteriaPlatformKubeflow CriteriaPlatformType = "kubeflow"
 	CriteriaPlatformNIM      CriteriaPlatformType = "nim"
 	CriteriaPlatformRunai    CriteriaPlatformType = "runai"
@@ -297,6 +324,8 @@ func (r *CriteriaRegistry) ParsePlatform(s string) (CriteriaPlatformType, error)
 		return CriteriaPlatformDynamo, nil
 	case "kubeflow":
 		return CriteriaPlatformKubeflow, nil
+	case "kueue":
+		return CriteriaPlatformKueue, nil
 	case "nim":
 		return CriteriaPlatformNIM, nil
 	case "runai":
@@ -315,7 +344,7 @@ func (r *CriteriaRegistry) ParsePlatform(s string) (CriteriaPlatformType, error)
 // types sorted alphabetically. For the union of static + registry, use
 // AllCriteriaPlatformTypes.
 func GetCriteriaPlatformTypes() []string {
-	return []string{"dynamo", "kubeflow", "nim", "runai", "slurm"}
+	return []string{"dynamo", "kubeflow", "kueue", "nim", "runai", "slurm"}
 }
 
 // AllPlatformTypes returns the union of the static OSS list and values
@@ -359,10 +388,10 @@ func mergeCriteriaTypes(staticTypes, registered []string) []string {
 // Criteria represents the input parameters for recipe matching.
 // All fields are optional and default to "any" if not specified.
 type Criteria struct {
-	// Service is the Kubernetes service type (eks, gke, aks, oke, ocp, kind, lke, bcm).
+	// Service is the Kubernetes service type (eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic, k0s, mk8s).
 	Service CriteriaServiceType `json:"service,omitempty" yaml:"service,omitempty"`
 
-	// Accelerator is the GPU/accelerator type (h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000).
+	// Accelerator is the GPU/accelerator type (h100, h200, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200).
 	Accelerator CriteriaAcceleratorType `json:"accelerator,omitempty" yaml:"accelerator,omitempty"`
 
 	// Intent is the workload intent (training, inference).
@@ -371,7 +400,7 @@ type Criteria struct {
 	// OS is the worker node operating system type.
 	OS CriteriaOSType `json:"os,omitempty" yaml:"os,omitempty"`
 
-	// Platform is the platform/framework type (dynamo, kubeflow, nim, runai, slurm).
+	// Platform is the platform/framework type (dynamo, kubeflow, kueue, nim, runai, slurm).
 	Platform CriteriaPlatformType `json:"platform,omitempty" yaml:"platform,omitempty"`
 
 	// Nodes is the number of worker nodes (0 means any/unspecified).
@@ -834,15 +863,19 @@ const RecipeCriteriaKind = "RecipeCriteria"
 // constant; the track's target is header.GroupVersionV1.
 const RecipeCriteriaAPIVersion = header.StableGroupVersion
 
-func validateRecipeCriteriaHeader(kind, apiVersion string) error {
+// validateRecipeCriteriaHeader gates a RecipeCriteria document. source names
+// where the bytes came from — a path, a URL, or the request body — because the
+// same criteria can arrive from any of the three and the header is the one
+// error whose remedy depends on knowing which artifact to edit.
+func validateRecipeCriteriaHeader(source, kind, apiVersion string) error {
 	if kind != "" && kind != RecipeCriteriaKind {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid kind %q, expected %q", kind, RecipeCriteriaKind))
+			fmt.Sprintf("%s has invalid kind %q, expected %q", source, kind, RecipeCriteriaKind))
 	}
-	if apiVersion != "" && !header.IsSupportedAPIVersion(apiVersion) {
+	if !header.IsSupportedAPIVersion(apiVersion) {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid apiVersion %q for %s, expected %q or %q; regenerate the criteria with a matching aicr version",
-				apiVersion, RecipeCriteriaKind, RecipeCriteriaAPIVersion, header.GroupVersionV1))
+			fmt.Sprintf("%s has invalid apiVersion %q%s for %s, expected %q; regenerate the criteria with a matching aicr version",
+				source, apiVersion, header.RetirementNoteWithAbsent(apiVersion), RecipeCriteriaKind, header.GroupVersionV1))
 	}
 	return nil
 }
@@ -853,7 +886,7 @@ func validateRecipeCriteriaHeader(kind, apiVersion string) error {
 // Example:
 //
 //	kind: RecipeCriteria
-//	apiVersion: aicr.run/v1alpha2
+//	apiVersion: aicr.run/v1
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
 //	spec:
@@ -865,7 +898,7 @@ type RecipeCriteria struct {
 	// Kind is always "RecipeCriteria".
 	Kind string `json:"kind" yaml:"kind"`
 
-	// APIVersion is the API version (e.g., "aicr.run/v1alpha2").
+	// APIVersion is the API version (e.g., "aicr.run/v1").
 	APIVersion string `json:"apiVersion" yaml:"apiVersion"`
 
 	// Metadata contains the name and other metadata.
@@ -963,7 +996,7 @@ func validateAndConvertRawSpec(raw *rawCriteriaSpec, reg *CriteriaRegistry) (*Cr
 // Example file (YAML):
 //
 //	kind: RecipeCriteria
-//	apiVersion: aicr.run/v1alpha2
+//	apiVersion: aicr.run/v1
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
 //	spec:
@@ -977,10 +1010,9 @@ func LoadCriteriaFromFile(path string, reg *CriteriaRegistry) (*Criteria, error)
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load criteria file", err)
 	}
 
-	if err := validateRecipeCriteriaHeader(raw.Kind, raw.APIVersion); err != nil {
+	if err := validateRecipeCriteriaHeader(fmt.Sprintf("criteria file %q", path), raw.Kind, raw.APIVersion); err != nil {
 		return nil, err
 	}
-
 	return validateAndConvertRawSpec(&raw.Spec, reg)
 }
 
@@ -994,7 +1026,7 @@ func LoadCriteriaFromFile(path string, reg *CriteriaRegistry) (*Criteria, error)
 // Example file (YAML):
 //
 //	kind: RecipeCriteria
-//	apiVersion: aicr.run/v1alpha2
+//	apiVersion: aicr.run/v1
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
 //	spec:
@@ -1017,10 +1049,9 @@ func LoadCriteriaFromFileWithContext(ctx context.Context, path string, reg *Crit
 		return nil, err
 	}
 
-	if err := validateRecipeCriteriaHeader(raw.Kind, raw.APIVersion); err != nil {
+	if err := validateRecipeCriteriaHeader(fmt.Sprintf("criteria file %q", path), raw.Kind, raw.APIVersion); err != nil {
 		return nil, err
 	}
-
 	return validateAndConvertRawSpec(&raw.Spec, reg)
 }
 
@@ -1048,7 +1079,7 @@ func loadCriteriaFromHTTPWithContext(ctx context.Context, url string, reg *Crite
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "failed to deserialize criteria")
 	}
 
-	if err := validateRecipeCriteriaHeader(raw.Kind, raw.APIVersion); err != nil {
+	if err := validateRecipeCriteriaHeader(fmt.Sprintf("criteria URL %q", url), raw.Kind, raw.APIVersion); err != nil {
 		return nil, err
 	}
 
@@ -1092,7 +1123,7 @@ func criteriaBodyFormat(contentType string) (serializer.Format, bool) {
 //
 //	{
 //	  "kind": "RecipeCriteria",
-//	  "apiVersion": "aicr.run/v1alpha2",
+//	  "apiVersion": "aicr.run/v1",
 //	  "metadata": {"name": "my-criteria"},
 //	  "spec": {"service": "eks", "accelerator": "h100"}
 //	}
@@ -1131,7 +1162,7 @@ func ParseCriteriaFromBody(body io.Reader, contentType string, reg *CriteriaRegi
 		}
 	}
 
-	if err := validateRecipeCriteriaHeader(raw.Kind, raw.APIVersion); err != nil {
+	if err := validateRecipeCriteriaHeader("criteria request body", raw.Kind, raw.APIVersion); err != nil {
 		return nil, err
 	}
 

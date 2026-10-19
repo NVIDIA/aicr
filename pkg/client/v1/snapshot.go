@@ -46,8 +46,8 @@ import (
 // does not understand. That matters because snapshot deserialization is
 // non-strict — any YAML mapping would otherwise decode into a zero-value
 // Snapshot, derive criteria(any), and silently produce a fallback recipe with
-// exit 0. Empty kind and apiVersion are tolerated for snapshots that predate
-// those fields.
+// exit 0. Empty kind is tolerated for snapshots that predate the field; an
+// empty or otherwise unsupported apiVersion is rejected (ADR-022 N+2).
 //
 // # Raw is not populated
 //

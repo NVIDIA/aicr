@@ -20,11 +20,11 @@ kubectl_kind() {
 }
 
 echo "=== Snapshot Job ==="
-kubectl_kind -n default get job aicr -o yaml || true
+kubectl_kind -n default get job -l app.kubernetes.io/name=aicr -o yaml || true
 echo "=== Snapshot Pods ==="
 kubectl_kind -n default get pods -l app.kubernetes.io/name=aicr -o wide || true
 echo "=== Snapshot Job describe ==="
-kubectl_kind -n default describe job aicr || true
+kubectl_kind -n default describe job -l app.kubernetes.io/name=aicr || true
 echo "=== Snapshot Pod describe ==="
 kubectl_kind -n default describe pods -l app.kubernetes.io/name=aicr || true
 echo "=== Snapshot current logs ==="
@@ -32,4 +32,4 @@ kubectl_kind -n default logs -l app.kubernetes.io/name=aicr --all-containers --t
 echo "=== Snapshot previous logs ==="
 kubectl_kind -n default logs -l app.kubernetes.io/name=aicr --all-containers --previous --tail=200 || true
 echo "=== Snapshot ConfigMap ==="
-kubectl_kind -n default get configmap aicr-snapshot -o yaml || true
+kubectl_kind -n default get configmap -l app.kubernetes.io/name=aicr -o yaml || true

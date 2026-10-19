@@ -13,10 +13,9 @@
 // limitations under the License.
 
 // Package localformat writes the uniform numbered local-chart bundle layout.
-// Currently consumed by the helm deployer (--deployer helm). Designed to be
-// consumable by additional deployers (e.g. helmfile per #632, argocd, Flux)
-// without per-deployer changes to the writer; those integrations are not yet
-// wired in this package.
+// Consumed by the helm, helmfile, argocd, argocd-helm and terraform deployers,
+// each of which lays its own entrypoint over the folders this package writes,
+// with no per-deployer changes to the writer.
 //
 // # Layout
 //
@@ -36,6 +35,25 @@
 // a previous design branched deploy.sh on Helm/Kustomize/raw-manifest kinds,
 // which bled component-type classification into every deployer. Chart.yaml
 // presence reduces that to a single on-disk signal every deployer honors.
+//
+// # Generated chart versions
+//
+// A generated Chart.yaml answers two questions that the single version: field
+// cannot answer at once, so they are split (ADR-021 Decision 7):
+//
+//   - version: and the AnnotationGeneratedBy annotation carry the AICR build
+//     that produced the wrapper — its content is AICR's, so AICR's version is
+//     what identifies the artifact. Normalized through
+//     deployer.NormalizeChartVersion, because Helm validates the field as
+//     SemVer 2 and would reject the "dev" of an unstamped build.
+//
+//   - appVersion: and the AnnotationComponentVersion annotation carry the
+//     payload version — the upstream chart pin, or a Kustomize git ref. Left
+//     free-form so a ref like "release-1.4" need not look like SemVer.
+//
+// See stampFor for the per-folder derivation. KindUpstreamHelm folders have
+// no Chart.yaml at all; the release simply reports the upstream chart's own
+// version, which is already the payload version.
 //
 // # Classification
 //

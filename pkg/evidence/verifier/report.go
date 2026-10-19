@@ -21,6 +21,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"github.com/NVIDIA/aicr/pkg/fingerprint"
 )
 
 // RenderMarkdown produces the PR-comment-shaped summary. Signed
@@ -122,8 +123,11 @@ func writeFingerprint(b *strings.Builder, p *attestation.Predicate) {
 		return
 	}
 	verdict := "✓ all recipe criteria dimensions satisfied"
-	if !p.CriteriaMatch.Matched {
+	switch {
+	case !p.CriteriaMatch.Matched:
 		verdict = "✗ one or more criteria dimensions mismatched"
+	case hasNotInferable(p.CriteriaMatch):
+		verdict = "✓ criteria satisfied; opt-in-only dimensions recorded as not-inferable (see rows)"
 	}
 	fmt.Fprintf(b, "### Cluster fingerprint\n%s\n\n| Dimension | Outcome |\n|---|---|\n", verdict)
 	for _, d := range p.CriteriaMatch.PerDimension {
@@ -138,6 +142,15 @@ func writeFingerprint(b *strings.Builder, p *attestation.Predicate) {
 		fmt.Fprintf(b, "| %s | %s recipe=%s snapshot=%s |\n", d.Dimension, d.Match, req, got)
 	}
 	b.WriteString("\n")
+}
+
+func hasNotInferable(m fingerprint.MatchResult) bool {
+	for _, d := range m.PerDimension {
+		if d.Match == fingerprint.DimensionNotInferable {
+			return true
+		}
+	}
+	return false
 }
 
 func writePhases(b *strings.Builder, p *attestation.Predicate) {

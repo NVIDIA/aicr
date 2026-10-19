@@ -16,13 +16,14 @@ package attestation
 
 import (
 	"context"
-	stderrors "errors"
 	"io/fs"
 	"os"
 	"syscall"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // TestHasBundleMarkers_StatFaultIsNotANonBundle covers the diagnostic defect
@@ -103,7 +104,7 @@ func TestHasBundleMarkers_StatFaultIsNotANonBundle(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("err = %v, wantErr %v (%s)", err, tt.wantErr, tt.wantReason)
 			}
-			if tt.wantErr && !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if tt.wantErr && errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("expected code %s, got %v", tt.wantCode, err)
 			}
 		})

@@ -18,16 +18,21 @@ package recipe
 import (
 	"bytes"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // RecipeMetadataKind is the kind value for RecipeMetadata resources.
@@ -47,9 +52,10 @@ const RecipeResultAPIVersion = header.StableGroupVersion
 // this aliases header.AuthoringGroupVersion; the track's target is
 // header.GroupVersionV1Beta1.
 //
-// This is deliberately a separate constant from RecipeResultAPIVersion even
-// though both carry aicr.run/v1alpha2 today: ADR-022 sends the two kinds to
-// different targets, so a single shared constant could not be flipped.
+// This is deliberately a separate constant from RecipeResultAPIVersion. The two
+// carried the same aicr.run/v1alpha2 through the reader-first release, which is
+// what made a shared constant look adequate; ADR-022 sends the kinds to
+// different targets, and since the v0.22 emitter switch they differ.
 const RecipeMetadataAPIVersion = header.AuthoringGroupVersion
 
 // ConfiguredRecipeResultAPIVersion is the strict RecipeResult schema used
@@ -80,6 +86,32 @@ const (
 	MariaDBOperatorStateAPIDetected = "api-detected"
 	MariaDBOperatorStateCRsDetected = "crs-detected"
 	MariaDBOperatorStateUnknown     = "unknown"
+)
+
+// DefaultStorageClassState values recorded in
+// RecipeResult.Metadata.DefaultStorageClassState by snapshot-driven
+// resolution of a recipe containing the nvsentinel-mongodb component.
+const (
+	DefaultStorageClassStatePresent  = "present"
+	DefaultStorageClassStateMultiple = "multiple"
+	DefaultStorageClassStateAbsent   = "absent"
+	DefaultStorageClassStateUnknown  = "unknown"
+)
+
+// PerconaOperatorState values recorded in
+// RecipeResult.Metadata.PerconaOperatorState by snapshot-driven resolution
+// of a recipe containing the nvsentinel-mongodb component.
+// PerconaOperatorStateAICROwned means the only PerconaServerMongoDB found is
+// AICR's own nvsentinel/nvsentinel-mongodb; PerconaOperatorStateOperatorDetected
+// means no foreign CR exists but a Percona operator pod AICR did not install
+// runs: outside the nvsentinel namespace, or there under another Helm release.
+const (
+	PerconaOperatorStateAbsent           = "absent"
+	PerconaOperatorStateAPIDetected      = "api-detected"
+	PerconaOperatorStateAICROwned        = "aicr-owned"
+	PerconaOperatorStateOperatorDetected = "operator-detected"
+	PerconaOperatorStateCRsDetected      = "crs-detected"
+	PerconaOperatorStateUnknown          = "unknown"
 )
 
 // ComponentType represents the type of component deployment.
@@ -151,7 +183,7 @@ type ComponentRef struct {
 
 	// ManifestFiles lists manifest files to include in the component bundle.
 	// Paths are relative to the data directory.
-	// Example: ["components/network-operator/manifests/nfd-network-rule.yaml"]
+	// Example: ["components/network-operator/manifests/nic-cluster-policy-aks.yaml"]
 	ManifestFiles []string `json:"manifestFiles,omitempty" yaml:"manifestFiles,omitempty"`
 
 	// PreManifestFiles lists manifest files that must be bundled and applied
@@ -278,6 +310,248 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 	// produced this result. Hydration is performed by hydrateHealthCheckAsserts
 	// in metadata_store.go after the per-ref defaults pass, where the bound
 	// DataProvider is available. See issue #1219.
+}
+
+// ApplyInheritedIdentity overwrites each ref's deployment identity with the one
+// a prior recipe resolved for the same component, so an AICR upgrade does not
+// silently relocate or replace a running component when a registry default
+// moves. The identity is the namespace, chart, source, kustomize path and the
+// manifest and pre-manifest file sets. Version, tag, values and overrides are
+// configuration and stay as resolved. A component the prior recipe does not
+// name keeps its defaults. It is a first deploy as far as that artifact knows.
+//
+// A field the prior recipe leaves empty is not inherited, so an artifact that
+// never carried it does not blank the default, and a manifest the current
+// registry adds is not dropped. A non-empty manifest or pre-manifest file set is
+// restored whole, so an entry the registry dropped is kept.
+// A component whose deployment type differs from the prior one keeps only the
+// namespace, since no chart, source, path or manifest set carries across a Helm
+// and Kustomize flip. upgrade-check reports the type move.
+//
+// Runs after ApplyRegistryDefaults rather than inside it, because that method is
+// exported and called from four packages.
+// A prior artifact is operator-supplied input that no loader validates, and
+// this assignment lands after the current recipe has already been validated.
+// Deployers interpolate the namespace into generated install scripts, so a
+// value carrying shell metacharacters would reach a shell the operator runs,
+// and the file set and path select files to read. Every inherited value is
+// therefore checked before it is copied, and one bad value on a component the
+// current recipe also names rejects the whole artifact rather than being
+// skipped, and refs is left unmodified. A silently ignored pin is the
+// relocation this function exists to prevent. A prior component absent from
+// the current recipe is never copied, so it is not validated.
+func ApplyInheritedIdentity(refs []ComponentRef, prior []ComponentRef) error {
+	return ApplyInheritedIdentityWithMode(refs, prior, InheritAll)
+}
+
+// InheritMode selects which deployment identity fields a prior artifact supplies.
+type InheritMode string
+
+const (
+	InheritAll       InheritMode = "all"
+	InheritNamespace InheritMode = "namespace"
+)
+
+// ParseInheritMode parses an explicit inheritance selection.
+func ParseInheritMode(value string) (InheritMode, error) {
+	mode := InheritMode(value)
+	switch mode {
+	case InheritAll, InheritNamespace:
+		return mode, nil
+	default:
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid inherit mode %q: must be all or namespace", value))
+	}
+}
+
+// ApplyInheritedIdentityWithMode preserves the selected identity fields and
+// retargets health checks to inherited namespaces. Unselected fields stay as
+// resolved. An invalid inherited value leaves refs unmodified.
+func ApplyInheritedIdentityWithMode(refs []ComponentRef, prior []ComponentRef, mode InheritMode) error {
+	if _, err := ParseInheritMode(string(mode)); err != nil {
+		return err
+	}
+	if len(prior) == 0 {
+		return nil
+	}
+	// Mutated on a copy and published only on success, so a bad value on a
+	// later component leaves refs exactly as the caller passed them in.
+	work := slices.Clone(refs)
+	pinned := make(map[string]ComponentRef, len(prior))
+	for _, p := range prior {
+		if mode == InheritNamespace {
+			p = ComponentRef{Name: p.Name, Namespace: p.Namespace}
+		}
+		pinned[p.Name] = p
+	}
+	for i := range work {
+		p, ok := pinned[work[i].Name]
+		if !ok {
+			continue
+		}
+		if err := validateInheritedIdentity(p); err != nil {
+			return err
+		}
+		if p.Namespace != "" && p.Namespace != work[i].Namespace {
+			// Rebind before assigning, so a ref changes both fields or neither.
+			// Assigning first would leave the new namespace beside assertions
+			// still naming the old one on the error path, and the guard above
+			// would then skip the ref on a retry, stranding the stale YAML.
+			// The health check is static, loaded verbatim from the registry's
+			// assertFile, so its namespaces name wherever the registry currently
+			// puts the component. Leaving them behind would fail validation
+			// against a deployment this function just correctly preserved.
+			if err := rebindHealthCheckNamespace(&work[i], work[i].Namespace, p.Namespace); err != nil {
+				return err
+			}
+			work[i].Namespace = p.Namespace
+		}
+		if p.Type != "" && work[i].Type != "" && p.Type != work[i].Type {
+			continue
+		}
+		if p.Chart != "" {
+			work[i].Chart = p.Chart
+		}
+		if p.Source != "" {
+			work[i].Source = p.Source
+		}
+		if p.Path != "" {
+			work[i].Path = p.Path
+		}
+		if len(p.ManifestFiles) > 0 {
+			work[i].ManifestFiles = slices.Clone(p.ManifestFiles)
+		}
+		if len(p.PreManifestFiles) > 0 {
+			work[i].PreManifestFiles = slices.Clone(p.PreManifestFiles)
+		}
+	}
+	copy(refs, work)
+	return nil
+}
+
+// validateInheritedIdentity rejects a prior ref whose identity fields could not
+// have come from a resolved recipe.
+func validateInheritedIdentity(p ComponentRef) error {
+	bad := func(field, value, isNot, why string) error {
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"inherited %s %q for component %q is not %s: %s", field, value, p.Name, isNot, why))
+	}
+	if p.Namespace != "" {
+		// A namespace is a DNS-1123 label, not a subdomain, so no dots and 63 chars.
+		if errs := validation.IsDNS1123Label(p.Namespace); len(errs) > 0 {
+			return bad("namespace", p.Namespace, "a valid Kubernetes namespace", strings.Join(errs, "; "))
+		}
+	}
+	if p.Chart != "" {
+		// Helm's chart best practices require chart names to be DNS-1123 labels.
+		if errs := validation.IsDNS1123Label(p.Chart); len(errs) > 0 {
+			return bad("chart", p.Chart, "a valid chart name", strings.Join(errs, "; "))
+		}
+	}
+	if p.Source != "" && strings.ContainsFunc(p.Source, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+		return bad("source", p.Source, "a valid source", "contains whitespace or control characters")
+	}
+	if p.Path != "" && !filepath.IsLocal(p.Path) {
+		return bad("path", p.Path, "a valid path", "must be a relative path inside the source")
+	}
+	for _, f := range p.ManifestFiles {
+		if !filepath.IsLocal(f) {
+			return bad("manifest file", f, "a valid path", "must be a relative path inside the data root")
+		}
+	}
+	for _, f := range p.PreManifestFiles {
+		if !filepath.IsLocal(f) {
+			return bad("pre-manifest file", f, "a valid path", "must be a relative path inside the data root")
+		}
+	}
+	return nil
+}
+
+// rebindHealthCheckNamespace retargets a component's health-check assertions
+// from one namespace to another.
+//
+// Only values equal to `from` are rewritten. A check may legitimately assert
+// against a namespace the component does not live in (kube-system, a CRD's
+// owner), and rewriting every namespace it mentions would break those.
+func rebindHealthCheckNamespace(ref *ComponentRef, from, to string) error {
+	if strings.TrimSpace(ref.HealthCheckAsserts) == "" || from == "" {
+		return nil
+	}
+	// Decoded as a stream, not a single value. Nothing restricts this field to
+	// one document, and yaml.Unmarshal reads only the first: re-serializing
+	// that alone would silently drop every later assertion, leaving a check
+	// that passes without verifying what it claims to.
+	dec := yaml.NewDecoder(strings.NewReader(ref.HealthCheckAsserts))
+	var (
+		docs    []any
+		changed bool
+	)
+	for {
+		var doc any
+		err := dec.Decode(&doc)
+		if stderrors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+				"failed to parse health check for component %q while inheriting its namespace", ref.Name), err)
+		}
+		if doc == nil {
+			continue
+		}
+		if retargetNamespace(doc, from, to) {
+			changed = true
+		}
+		docs = append(docs, doc)
+	}
+	if !changed {
+		return nil
+	}
+	var out bytes.Buffer
+	for i, doc := range docs {
+		data, err := serializer.MarshalYAMLDeterministic(doc)
+		if err != nil {
+			return errors.PropagateOrWrap(err, errors.ErrCodeInternal, fmt.Sprintf(
+				"failed to serialize health check for component %q after inheriting its namespace", ref.Name))
+		}
+		if i > 0 {
+			out.WriteString("---\n")
+		}
+		out.Write(data)
+	}
+	ref.HealthCheckAsserts = out.String()
+	return nil
+}
+
+// retargetNamespace walks a decoded document rewriting every `namespace: from`
+// to `namespace: to`, and reports whether anything changed. Walking rather than
+// reaching for a fixed path because the assertion shape is chainsaw's, not
+// ours, and a path that assumed spec.steps[].try[].assert would silently miss
+// a namespace nested anywhere else.
+func retargetNamespace(node any, from, to string) bool {
+	changed := false
+	switch n := node.(type) {
+	case map[string]any:
+		for k, v := range n {
+			if k == "namespace" {
+				if s, ok := v.(string); ok && s == from {
+					n[k] = to
+					changed = true
+				}
+				continue
+			}
+			if retargetNamespace(v, from, to) {
+				changed = true
+			}
+		}
+	case []any:
+		for _, v := range n {
+			if retargetNamespace(v, from, to) {
+				changed = true
+			}
+		}
+	}
+	return changed
 }
 
 // coherenceProblem reports why a resolved ComponentRef's deployment-shape
@@ -473,7 +747,7 @@ func (ref *ComponentRef) HasExternalChart() bool {
 // EffectiveChart returns the chart name a Helm-typed ref deploys: the
 // explicit Chart, falling back to the component name when unset (a
 // source-only ref). Every ComponentRef consumer derives the chart through
-// this method — the flux, argocd, helmfile, and helm deployers, pkg/mirror,
+// this method — the flux, argocd, helmfile, helm, and terraform deployers, pkg/mirror,
 // and the facade/query/BOM projections. (localformat keeps an equivalent
 // fallback on its own Component type, which is constructed from
 // EffectiveChart-derived inputs but also serves direct callers.)
@@ -697,11 +971,16 @@ func (r *RecipeResult) ValidateCoherence() error {
 	if r == nil {
 		return nil
 	}
-	if r.APIVersion != "" && !header.IsSupportedRecipeResultAPIVersion(r.APIVersion) {
+	if !header.IsSupportedRecipeResultAPIVersion(r.APIVersion) {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("RecipeResult apiVersion %q is not supported", r.APIVersion))
+			fmt.Sprintf("RecipeResult apiVersion %q is not supported%s; expected %q or %q",
+				r.APIVersion, header.RetirementNoteWithAbsent(r.APIVersion),
+				header.GroupVersionV1, header.GroupVersionV1Beta2))
 	}
 	if err := r.validateAccountingConfiguration(); err != nil {
+		return err
+	}
+	if err := r.validateGKEConfiguration(); err != nil {
 		return err
 	}
 	var problems []string
@@ -790,7 +1069,7 @@ type RecipeMetadataHeader struct {
 	// Kind is always "RecipeMetadata".
 	Kind string `json:"kind" yaml:"kind"`
 
-	// APIVersion is the API version (e.g., "aicr.run/v1alpha2").
+	// APIVersion is the API version (e.g., "aicr.run/v1beta1").
 	APIVersion string `json:"apiVersion" yaml:"apiVersion"`
 
 	// Metadata contains the name and other metadata.
@@ -945,6 +1224,18 @@ type RecipeResultMetadata struct {
 	// accounting. Consumed by the bundle-time
 	// CheckMariaDBOperatorOwnershipCoherence validation.
 	MariaDBOperatorState string `json:"mariaDBOperatorState,omitempty" yaml:"mariaDBOperatorState,omitempty"`
+
+	// DefaultStorageClassState records the snapshot's default StorageClass
+	// evidence for a recipe containing nvsentinel-mongodb, whose volumes
+	// name no class. Consumed by the bundle-time
+	// CheckNVSentinelDatastorePrerequisites validation.
+	DefaultStorageClassState string `json:"defaultStorageClassState,omitempty" yaml:"defaultStorageClassState,omitempty"`
+
+	// PerconaOperatorState records Percona Operator for MongoDB API, CR, and
+	// operator-pod conflict evidence for a recipe containing
+	// nvsentinel-mongodb. Consumed by the bundle-time
+	// CheckNVSentinelDatastorePrerequisites validation.
+	PerconaOperatorState string `json:"perconaOperatorState,omitempty" yaml:"perconaOperatorState,omitempty"`
 }
 
 // RecipeResult represents the final merged recipe output.
@@ -1159,6 +1450,8 @@ func (r *RecipeResult) DeepCopy() *RecipeResult {
 	out.Metadata.Version = r.Metadata.Version
 	out.Metadata.GPUDriverState = r.Metadata.GPUDriverState
 	out.Metadata.MariaDBOperatorState = r.Metadata.MariaDBOperatorState
+	out.Metadata.DefaultStorageClassState = r.Metadata.DefaultStorageClassState
+	out.Metadata.PerconaOperatorState = r.Metadata.PerconaOperatorState
 	if r.Metadata.SelectedProfile != nil {
 		selected := *r.Metadata.SelectedProfile
 		selected.OwnedPaths = cloneOwnedPaths(r.Metadata.SelectedProfile.OwnedPaths)
@@ -1197,6 +1490,11 @@ func (r *RecipeResult) DeepCopy() *RecipeResult {
 		// Omitting one does not alias it, it drops it: the copy keeps the
 		// component overrides a selection applied while losing the record
 		// explaining them, and Client.AdoptRecipe always deep-copies.
+		if r.Configuration.GKE != nil {
+			out.Configuration.GKE = &GKEConfiguration{
+				TCPXOInterfaces: slices.Clone(r.Configuration.GKE.TCPXOInterfaces),
+			}
+		}
 		if r.Configuration.RuntimeInventory != nil {
 			runtimeInventory := *r.Configuration.RuntimeInventory
 			out.Configuration.RuntimeInventory = &runtimeInventory
@@ -1283,18 +1581,29 @@ func (s *RecipeMetadataSpec) Merge(other *RecipeMetadataSpec) {
 		return s.Constraints[i].Name < s.Constraints[j].Name
 	})
 
-	// Merge componentRefs - overlay fields take precedence, but inherit missing from base
-	componentMap := make(map[string]ComponentRef)
+	// Merge componentRefs - overlay fields take precedence, but inherit missing from base.
+	// Cloned on entry: s.ComponentRefs can itself alias a cached source (e.g.
+	// initBaseMergedSpec copies s.Base.Spec.ComponentRefs by struct, which
+	// doesn't deep-copy the Overrides map) -- mergeComponentRef's deepMergeMap
+	// below writes into a matching base entry's Overrides in place, so without
+	// this clone a later overlay/mixin contribution would corrupt that cache.
+	componentMap := make(map[string]ComponentRef, len(s.ComponentRefs))
 	for _, c := range s.ComponentRefs {
-		componentMap[c.Name] = c
+		componentMap[c.Name] = cloneComponentRef(c)
 	}
 	for _, overlay := range other.ComponentRefs {
 		if base, exists := componentMap[overlay.Name]; exists {
 			// Merge overlay into base - overlay takes precedence for non-empty fields
 			componentMap[overlay.Name] = mergeComponentRef(base, overlay)
 		} else {
-			// New component from overlay
-			componentMap[overlay.Name] = overlay
+			// New component from overlay. Clone it: overlay's map/slice
+			// fields (e.g. Overrides) would otherwise alias the source --
+			// for a mixin's ComponentRefs, that source is the process-wide
+			// cached *RecipeMixin (store.Mixins), so a later merge into
+			// this entry (e.g. a second mixin targeting the same
+			// now-existing component) would mutate the cached mixin
+			// definition itself.
+			componentMap[overlay.Name] = cloneComponentRef(overlay)
 		}
 	}
 	s.ComponentRefs = make([]ComponentRef, 0, len(componentMap))
@@ -1469,88 +1778,12 @@ func mergeComponentRef(base, overlay ComponentRef) ComponentRef {
 	return result
 }
 
-// ValidateDependencies validates that all dependencyRefs reference existing components.
-// Returns an error if any dependency is missing or if there are circular dependencies.
+// ValidateDependencies checks the enabled deployment graph, reporting all
+// missing dependencies and any cycle together. Declared disabled dependencies
+// are treated as provided externally; disabled components' own edges are ignored.
 func (s *RecipeMetadataSpec) ValidateDependencies() error {
-	// Build a set of known component names
-	known := make(map[string]bool)
-	for _, c := range s.ComponentRefs {
-		known[c.Name] = true
-	}
-
-	// Check all dependencyRefs point to known components
-	for _, c := range s.ComponentRefs {
-		for _, dep := range c.DependencyRefs {
-			if !known[dep] {
-				return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("component %q references unknown dependency %q", c.Name, dep))
-			}
-		}
-	}
-
-	// Check for circular dependencies
-	if err := s.detectCycles(); err != nil {
-		return errors.Wrap(errors.ErrCodeInvalidRequest, "dependency validation failed", err)
-	}
-
-	return nil
-}
-
-// detectCycles uses DFS to detect circular dependencies.
-func (s *RecipeMetadataSpec) detectCycles() error {
-	// Build adjacency list
-	deps := make(map[string][]string)
-	for _, c := range s.ComponentRefs {
-		deps[c.Name] = c.DependencyRefs
-	}
-
-	// Track visited nodes and recursion stack
-	visited := make(map[string]bool)
-	recStack := make(map[string]bool)
-	var path []string
-
-	var dfs func(node string) error
-	dfs = func(node string) error {
-		visited[node] = true
-		recStack[node] = true
-		path = append(path, node)
-
-		for _, neighbor := range deps[node] {
-			if !visited[neighbor] {
-				if err := dfs(neighbor); err != nil {
-					return err
-				}
-			} else if recStack[neighbor] {
-				// Found a cycle - build the cycle path
-				cycleStart := -1
-				for i, n := range path {
-					if n == neighbor {
-						cycleStart = i
-						break
-					}
-				}
-				// Build cycle path: copy to avoid modifying original path slice
-				cyclePath := make([]string, len(path)-cycleStart+1)
-				copy(cyclePath, path[cycleStart:])
-				cyclePath[len(cyclePath)-1] = neighbor
-				return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("circular dependency detected: %v", cyclePath))
-			}
-		}
-
-		path = path[:len(path)-1]
-		recStack[node] = false
-		return nil
-	}
-
-	// Run DFS from each unvisited node
-	for _, c := range s.ComponentRefs {
-		if !visited[c.Name] {
-			if err := dfs(c.Name); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
+	_, err := s.TopologicalLevels()
+	return err
 }
 
 // TopologicalLevels returns components grouped into dependency-depth tiers
@@ -1561,10 +1794,9 @@ func (s *RecipeMetadataSpec) detectCycles() error {
 //
 // Within each level, names are sorted alphabetically for determinism.
 //
-// Error semantics match TopologicalSort: missing or cyclic dependencies
-// surface as ErrCodeInvalidRequest with "circular dependencies exist."
-// (Same trade-off — a dependency on an undeclared component appears as
-// a cycle because its in-degree never drains to zero.)
+// Error semantics match TopologicalSort and ValidateDependencies: missing
+// dependencies are named in recipe order, one per line, alongside any cycle.
+// Both conditions return ErrCodeInvalidRequest.
 func (s *RecipeMetadataSpec) TopologicalLevels() ([][]string, error) {
 	return ComponentRefsTopologicalLevels(s.ComponentRefs)
 }
@@ -1572,32 +1804,42 @@ func (s *RecipeMetadataSpec) TopologicalLevels() ([][]string, error) {
 // buildDependencyGraph constructs the dependency graph shared by
 // TopologicalSort and ComponentRefsTopologicalLevels. It centralizes the
 // enabled-filtering and external-satisfaction semantics so the two traversals
-// (flat Kahn sort vs. level-grouped BFS) stay in lock-step — the duplication
+// (flat Kahn sort vs. level-grouped BFS) stay in lock-step - the duplication
 // this removes is exactly what caused the double-fix in #1465 (see #1466).
 //
 // Only enabled components are nodes. A dependency edge pointing at a declared-
 // but-disabled component is treated as already satisfied (the dependency is
 // assumed provided externally, e.g. a CSP-managed cert-manager) and excluded
-// from the in-degree count. An edge to an undeclared component is retained so
-// it still surfaces as a cycle/missing-dependency error. See componentSets and
-// edgeSatisfiedExternally.
+// from the in-degree count. An edge from an enabled component to an undeclared
+// component is collected once in recipe order and excluded from the graph,
+// so callers can still detect a genuine cycle and report both conditions.
 //
 // Returns the per-node in-degree, the reverse adjacency (dependency name → the
-// components that depend on it), and the number of enabled nodes. Callers
-// compare their processed count against enabledCount to detect cycles/missing
-// dependencies (a node whose in-degree never drains to zero is never emitted).
-func buildDependencyGraph(refs []ComponentRef) (inDegree map[string]int, dependents map[string][]string, enabledCount int) {
+// components that depend on it), the number of enabled nodes, and missing-edge
+// diagnostics. Callers compare their processed count against enabledCount to
+// detect cycles (a node whose in-degree never drains to zero is never emitted).
+func buildDependencyGraph(refs []ComponentRef) (inDegree map[string]int, dependents map[string][]string, enabledCount int, missing []string) {
 	declared, enabled := componentSets(refs)
 
 	inDegree = make(map[string]int, len(enabled))
 	dependents = make(map[string][]string, len(enabled))
+	seenMissing := make(map[[2]string]struct{})
 	for _, c := range refs {
 		if _, ok := enabled[c.Name]; !ok {
 			continue
 		}
 		degree := 0
 		for _, dep := range c.DependencyRefs {
-			if edgeSatisfiedExternally(dep, declared, enabled) {
+			if _, ok := declared[dep]; !ok {
+				edge := [2]string{c.Name, dep}
+				if _, seen := seenMissing[edge]; !seen {
+					seenMissing[edge] = struct{}{}
+					missing = append(missing, fmt.Sprintf(
+						"component %q depends on %q, which is not present in this recipe", c.Name, dep))
+				}
+				continue
+			}
+			if _, ok := enabled[dep]; !ok {
 				continue
 			}
 			degree++
@@ -1605,15 +1847,30 @@ func buildDependencyGraph(refs []ComponentRef) (inDegree map[string]int, depende
 		}
 		inDegree[c.Name] = degree
 	}
-	return inDegree, dependents, len(enabled)
+	return inDegree, dependents, len(enabled), missing
+}
+
+func dependencyGraphError(missing []string, hasCycle bool) error {
+	problems := slices.Clone(missing)
+	if len(missing) > 0 {
+		problems = append(problems,
+			"(a dependency provided outside the recipe must remain declared with enabled: false)")
+	}
+	if hasCycle {
+		problems = append(problems, "circular dependencies exist")
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return errors.New(errors.ErrCodeInvalidRequest, strings.Join(problems, "\n"))
 }
 
 // ComponentRefsTopologicalLevels is the free-function form of
-// RecipeMetadataSpec.TopologicalLevels — operates on a bare
+// RecipeMetadataSpec.TopologicalLevels - operates on a bare
 // []ComponentRef slice. Callers that have refs but not a full
 // RecipeMetadataSpec (e.g., the bundler post-resolution) use this.
 func ComponentRefsTopologicalLevels(refs []ComponentRef) ([][]string, error) {
-	inDegree, dependents, enabledCount := buildDependencyGraph(refs)
+	inDegree, dependents, enabledCount, missing := buildDependencyGraph(refs)
 
 	// Seed level 0: components with no incoming edges.
 	current := make([]string, 0, len(inDegree))
@@ -1643,9 +1900,8 @@ func ComponentRefsTopologicalLevels(refs []ComponentRef) ([][]string, error) {
 		current = next
 	}
 
-	if processed != enabledCount {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			"cannot determine deployment levels: circular dependencies exist")
+	if err := dependencyGraphError(missing, processed != enabledCount); err != nil {
+		return nil, err
 	}
 	return levels, nil
 }
@@ -1654,7 +1910,7 @@ func ComponentRefsTopologicalLevels(refs []ComponentRef) ([][]string, error) {
 // Components with no dependencies come first, then components that depend only
 // on already-listed components, etc.
 func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
-	inDegree, dependents, enabledCount := buildDependencyGraph(s.ComponentRefs)
+	inDegree, dependents, enabledCount, missing := buildDependencyGraph(s.ComponentRefs)
 
 	// Kahn's algorithm
 	// https://www.geeksforgeeks.org/dsa/topological-sorting-indegree-based-solution/
@@ -1682,9 +1938,8 @@ func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
 		sort.Strings(queue)
 	}
 
-	// Check if all enabled nodes were processed (no cycles)
-	if len(result) != enabledCount {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "cannot determine deployment order: circular dependencies exist")
+	if err := dependencyGraphError(missing, len(result) != enabledCount); err != nil {
+		return nil, err
 	}
 
 	return result, nil
@@ -1692,10 +1947,10 @@ func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
 
 // componentSets returns two sets over refs: every declared component name,
 // and the subset whose IsEnabled() reports true. Components disabled via
-// overrides.enabled=false are excluded from dependency ordering: they are
-// assumed to be provided externally (for example a CSP-managed cert-manager on
+// overrides.enabled=false or overrides.install=false are excluded from
+// ordering: they are assumed to be provided externally (for example a CSP-managed cert-manager on
 // OKE), so dependency edges pointing at them are treated as already satisfied
-// rather than causing a false "circular dependencies" error. This mirrors the
+// rather than being reported as missing dependencies. This mirrors the
 // bundler, which filters disabled components before generating deployment
 // artifacts. The declared set lets callers distinguish a disabled component
 // (skip the edge) from an undeclared one (still an error).
@@ -1709,17 +1964,6 @@ func componentSets(refs []ComponentRef) (declared, enabled map[string]struct{}) 
 		}
 	}
 	return declared, enabled
-}
-
-// edgeSatisfiedExternally reports whether a dependency edge pointing at dep
-// should be dropped from ordering because dep is a declared-but-disabled
-// component (assumed provided externally). Edges to enabled components are
-// real, and edges to undeclared components are retained so they still surface
-// as missing-dependency errors.
-func edgeSatisfiedExternally(dep string, declared, enabled map[string]struct{}) bool {
-	_, isDeclared := declared[dep]
-	_, isEnabled := enabled[dep]
-	return isDeclared && !isEnabled
 }
 
 // deepMergeMap copies all key-value pairs from src into dst. For keys whose

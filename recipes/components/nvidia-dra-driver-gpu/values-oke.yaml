@@ -15,8 +15,9 @@
 # NVIDIA DRA Driver GPU Helm values
 # OKE configuration overrides
 #
-# OKE pre-installs NVIDIA drivers on GPU bare-metal shapes, so the driver
-# root is `/` (host-installed) rather than `/run/nvidia/driver` (containerized).
+# The driver root follows the selected gpuStack value (see oke-ol.yaml):
+# `/` where the image supplies the driver, `/run/nvidia/driver` where the
+# GPU Operator installs it.
 # Reference: https://github.com/oracle-quickstart/oci-hpc-oke/blob/grace-blackwell/manifests/dra/values.yaml
 #
 # GPU allocation defaults are inherited from values.yaml (this file is merged
@@ -29,8 +30,9 @@
 nameOverride: nvidia-dra-driver-gpu
 fullnameOverride: nvidia-dra-driver-gpu
 
-# Host-installed driver (OKE pre-installs NVIDIA drivers)
-nvidiaDriverRoot: /
+# nvidiaDriverRoot is profile-owned (gpuStack on oke-ol.yaml): / for the
+# image-supplied driver values, /run/nvidia/driver under operator-managed
+# (TestDriverRootLockstep, issue #1087). Deliberately absent here.
 
 controller:
   priorityClassName: ""

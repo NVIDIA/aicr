@@ -365,6 +365,102 @@ func Example_bundleAndVerify() {
 	// Output: unverified
 }
 
+// Example_workflow runs the full Snapshot -> Recipe -> Bundle workflow this
+// guide documents: load a snapshot, derive criteria from it, layer the
+// caller's own intent on top, resolve a recipe, render a bundle, and verify
+// what was written.
+//
+// It runs hermetically against the embedded catalog and a checked-in
+// snapshot fixture (testdata/snapshot.yaml), with no cluster and no network
+// — which is why it can assert its output.
+//
+// Two legs of the real workflow are cluster-dependent and are therefore NOT
+// part of this runnable body: capturing the snapshot in the first place
+// (Client.CollectSnapshot, see ExampleClient_CollectSnapshot) and validating
+// the resolved recipe against observed state (Client.ValidateState, see
+// ExampleClient_ValidateState). Both need a reachable cluster and are only
+// mentioned here.
+func Example_workflow() {
+	ctx := context.Background()
+
+	client, err := aicr.NewClient(
+		aicr.WithRecipeSource(aicr.EmbeddedSource()),
+		aicr.WithVersion("v0.19.0"),
+	)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	defer func() { _ = client.Close() }()
+
+	// A snapshot already captured elsewhere (see CollectSnapshot above) and
+	// delivered to this pipeline stage as a file.
+	snap, err := client.LoadSnapshot(ctx, "testdata/snapshot.yaml", "")
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	// Every dimension the snapshot could not determine stays "any"; nothing
+	// is guessed.
+	criteria, err := client.CriteriaFromSnapshot(snap)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	// Intent is a recipe-author choice the cluster cannot reveal, so the
+	// caller states it explicitly on top of what was derived.
+	criteria.Intent = "training"
+
+	result, err := client.ResolveRecipeFromCriteria(ctx, criteria)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	outputDir, err := os.MkdirTemp("", "aicr-workflow-")
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	defer func() { _ = os.RemoveAll(outputDir) }()
+
+	artifact, err := client.MakeBundle(ctx, result, aicr.BundleOptions{
+		OutputDir: outputDir,
+	})
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	if artifact.HasErrors() {
+		log.Printf("bundle completed with %d errors", len(artifact.Errors))
+		return
+	}
+
+	verification, err := client.VerifyBundle(ctx, outputDir, aicr.BundleVerifyOptions{
+		// Empty means "max": verify against the highest level achievable.
+		MinTrustLevel: "",
+	})
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	if verification.PolicyFailure != "" {
+		log.Printf("policy: %s", verification.PolicyFailure)
+		return
+	}
+	if len(verification.Report.Errors) > 0 {
+		log.Printf("verification: %s", verification.Report.Errors[0])
+		return
+	}
+
+	fmt.Println(result.Name)
+	fmt.Println(verification.Report.TrustLevel)
+	// Output:
+	// criteria(service=eks, accelerator=h100, intent=training)
+	// unverified
+}
+
 // ExampleClient_LoadRecipe reads a recipe emitted earlier by `aicr recipe -o`,
 // instead of resolving a new one. The result is interchangeable with a
 // resolved one: bundle it, or validate it against a snapshot.

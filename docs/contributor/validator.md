@@ -7,7 +7,7 @@ contributor view for all four.
 
 | Surface | When it runs | Where it lives | Mechanism |
 |---------|-------------|----------------|-----------|
-| [**Constraint**](#constraints-declarative) (declarative) | `aicr validate` against a snapshot | Recipe overlay `validation:` block | `pkg/constraints` evaluator (in-process) |
+| [**Constraint**](#constraints-declarative) (declarative) | `aicr validate` against a snapshot | Recipe overlay top-level `constraints:` or a `validation:` phase block | `pkg/constraints` evaluator (in-process) |
 | [**Container-per-validator check**](#container-per-validator-checks) | `aicr validate` against a live cluster | `validators/<phase>/` + `recipes/validators/catalog.yaml` | One K8s Job per check |
 | [**Component validation**](#component-validations-bundle-time) (bundle-time) | `aicr bundle` | `pkg/bundler/validations/checks.go` + `registry.yaml` `validations:` | In-process Go `ValidationFunc` |
 | [**Chainsaw health check**](#chainsaw-health-checks) | Two surfaces with distinct runtimes: `make check-health` post-deploy locally (shells out to the `chainsaw` CLI installed on the developer's machine), AND `aicr validate --phase deployment` in-cluster (executes the Test format in-process via `pkg/chainsaw/inprocess.go` — no external binary in the deployment validator image) | `recipes/checks/<name>/health-check.yaml` | Chainsaw YAML (Test format on both surfaces; raw K8s YAML asserts use the chainsaw Go library inside `assertRawResources`) |
@@ -19,7 +19,8 @@ gate on the resolved recipe → surface 3.
 ## Constraints (declarative)
 
 A **constraint** is a declarative expression — `K8s.server.version >=
-1.32.4` — declared in a recipe overlay's `validation:` block and
+1.32.4` — declared in a recipe overlay's top-level `constraints:` or a
+`validation:` phase block and
 evaluated by `pkg/constraints` against a measurement from a snapshot.
 No code change is needed to add a constraint to an existing recipe;
 only to add a new **operator**.
@@ -29,12 +30,12 @@ only to add a new **operator**.
 ```yaml
 # recipes/overlays/<name>.yaml
 spec:
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.32.4"
+    - name: OS.release.ID
+      value: "ubuntu"
   validation:
-    constraints:
-      - name: K8s.server.version
-        value: ">= 1.32.4"
-      - name: OS.name
-        value: "ubuntu"
     deployment:
       checks: [operator-health, expected-resources]
     performance:
@@ -63,6 +64,37 @@ authoring error. A check that is *legitimately* not applicable at runtime
 reports its own `skip` sentinel from inside the container — it is still
 declared and still resolves to a catalog entry.
 
+**A caller may withhold a declared check, and is held to the same discipline.**
+`Validator.SkipChecks` (`pkg/validator/skip_checks.go`, reached from
+`--skip-check` / `spec.validate.execution.skipChecks`) narrows a run to the
+checks the CALLER can satisfy, which is a property of the run rather than of
+the recipe: a lane deploying a subset of the recipe, or running against
+simulated devices. `selectEntries` withholds each named check from its phase
+and records it on the phase's CTRF builder as `skipped`, so a withheld check is
+reported rather than dropped and the recipe-evidence bundle still accounts for
+it. It records the reason twice on purpose: as prose in `message`, and as the
+`SkipCheckReasonCode` (`named-in-skip-checks`) under the allowlisted
+`extra.skipReason` key. Only the second survives the default bundle, whose
+minimal redaction policy blanks every `message`. A bundle carrying WHICH check
+was withheld but not WHY would be the same "reads as complete" defect the flag's
+guards exist to prevent. The CNCF evidence renderer does
+NOT: `pkg/evidence/cncf/renderer.go` drops every skipped entry before grouping
+(pinned by `TestRenderSkippedExcluded`), so a withheld requirement would leave
+no file and no index entry. `validateFlagCombinations` refuses `--skip-check`
+together with `--evidence-dir` for that reason, rather than emitting a
+submission that reads as complete, and `Client.RenderCNCFEvidence` refuses a
+report carrying a `SkipCheckReasonCode` skip. `preflightSkipChecks` runs beside `preflightDeclaredChecks`, on the
+same fail-closed terms and at the same point: a name matching no catalog
+validator is rejected, and so is a list that would remove every declared check
+from a requested phase (that phase would report `passed` while running nothing,
+since the skipped entries keep `Summary.Tests` above zero). A known name that no
+requested phase declares is inert rather than wrong, and warns.
+
+It is a skip list and not an allow list on purpose. The two differ only on a
+check nobody has considered yet: under a skip list a newly declared check runs,
+and a caller that cannot satisfy it goes red until someone decides; under an
+allow list it would be excluded in silence.
+
 Top-level `constraints` — and any declared under
 `validation.readiness.constraints` — are evaluated as a **pre-flight
 gate** before phase checks run; other phases' `constraints` are
@@ -75,12 +107,13 @@ per-value constraints, which are verified at snapshot-based generation
 (criteria-only generation has no snapshot evaluator and defers entirely
 to the pre-flight) AND re-evaluated by the same readiness pre-flight.)
 
-**Supported operators** (`pkg/constraints/constraint.go`):
+**Supported operators** (`pkg/constraints/expr/expr.go`, re-exported
+from `pkg/constraints`):
 
 | Operator | Use | Notes |
 |----------|-----|-------|
 | `>=`, `<=`, `>`, `<` | Version / numeric comparison | Always treated as a version comparison; parsed via `pkg/version` |
-| `==`, `!=` | Explicit equality / inequality | Version compare if either side parses as version, else string |
+| `==`, `!=` | Explicit equality / inequality | Version compare if the expected value looks like a version and both sides parse; otherwise string compare |
 | *(none)* | `OperatorExact` | Case-sensitive string equality — `value: "ubuntu"` |
 
 The parser is operator-prefix-longest-first so `>=` wins over `>`.
@@ -102,19 +135,28 @@ is dispatched by exact name in `constraints.Evaluate` *before*
 (`<label-key>=<value>` / `!<label-key>`, validated with the Kubernetes
 label validators), and quantifies the predicate over the GPU-node set
 synthesized from `NodeTopology.label` readings instead of comparing a
-single reading. See `pkg/constraints/gpu_nodes.go` for its fail-closed
-rules (truncation, empty universe, malformed or ambiguous encodings).
+single reading. The label that defines the GPU-node universe is
+**service-specific** — GKE's `cloud.google.com/gke-accelerator` today
+([#2359](https://github.com/NVIDIA/aicr/issues/2359)) — resolved from
+the snapshot's `k8s.node.provider` via `fingerprint.FromMeasurements`.
+Adding a new service means adding one entry to
+`gpuNodeUniverseLabels` in `pkg/constraints/gpu_nodes.go` and covering
+it in `gpu_nodes_test.go`; the label MUST be present on GPU nodes from
+pool creation, before the GPU Operator or NFD run (the constraint form
+is pre-deployment). See `pkg/constraints/gpu_nodes.go` for its
+fail-closed rules (truncation, empty universe, malformed or ambiguous
+encodings, unknown service, service with no declared universe label).
 
 **Adding a new operator:**
 
-1. Add an `Operator` constant in `pkg/constraints/constraint.go`.
+1. Add an `Operator` constant in `pkg/constraints/expr/expr.go`.
 2. Insert it in the operator slice in `ParseConstraintExpression` —
    **longest prefix first** (e.g. `~=` before `~`).
 3. Add a `case` arm in `(*ParsedConstraint).Evaluate`. Return an
    `errors.WrapWithContext(ErrCodeInvalidRequest, ...)` for malformed
    inputs; never fall back to string compare silently.
-4. Extend the `TestParseConstraintExpression` / `TestEvaluate` table
-   in `constraint_test.go`. Both happy path and parse-error path.
+4. Extend the `TestParseConstraintExpression` / `TestParsedConstraint_Evaluate` table
+   in `pkg/constraints/expr/expr_test.go`. Both happy path and parse-error path.
 5. If the operator implies a numeric range or tolerance, the
    *interpretation* lives in the validator phase (e.g.
    `validators/performance` evaluates NCCL bandwidth with a 10%
@@ -148,6 +190,32 @@ capability-driven via the shared `validators/internal/allocmode` probe, with
 inference-perf's worker wiring mode-dispatched per chosen node — but the
 saturation-ordering rationale stands for every GPU-needing check).
 
+On MNNVL clusters `dra-support` also runs a behavioral IMEX channel subtest
+(#1649). The gate is the intersection of Ready, schedulable nodes carrying the
+`nvidia.com/gpu.clique` label and nodes with a usable
+`compute-domain.nvidia.com` ResourceSlice: no clique-labeled node means the
+subtest is not applicable (non-MNNVL nodes such as H100 still publish
+compute-domain slices, so slice presence alone cannot gate it); clique-labeled
+nodes with no usable compute-domain slice fail the check. The driver serves one
+ComputeDomain channel claim per node, so candidate nodes whose channel is
+already held by an allocated claim (a standing ComputeDomain such as Slinky
+Slurm's, or a running MNNVL workload) are excluded from the probe. When every
+candidate is occupied the check does not record not applicable (that would
+certify DRA without behavioral evidence on a ComputeDomain-only cluster);
+it instead verifies allocation and preparation from the holding claims: a
+claim that is allocated, reserved by a pod, and whose pod is Running on that
+node proves the driver allocated the channel and the kubelet prepared it. If
+no holder verifies, the check fails as inconclusive. When applicable the
+check creates a per-run ComputeDomain (`numNodes: 0`, `Single` allocation),
+waits for the driver-generated ResourceClaimTemplate, and runs a busybox probe
+pinned to the candidate nodes that consumes one channel from it. The verdict is
+the pod reaching Succeeded with exactly one channel device visible under
+`/dev/nvidia-caps-imex-channels`; the generated ResourceClaim's post-terminal
+state is recorded as best-effort evidence only, because the resource-claim
+controller releases and garbage-collects a completed pod's template-generated
+claim. It shares the per-run namespace, ownership token, and UID-guarded
+cleanup of the other GPU allocation probes.
+
 The GPU allocation checks follow an **Inspect / Verify / Select** separation
 (#1327): `allocmode.Detect` is the INSPECT step — it probes cluster facts
 (usable full-GPU DRA, usable device plugin, per-node device counts) without
@@ -160,6 +228,21 @@ applies only when the policy is `unspecified` (standalone runs without recipe
 context). A configured policy forces the mechanism at
 secure-accelerator-access, dra-support's behavioral subtest, and
 inference-perf's worker wiring and node discovery.
+
+`secure-accelerator-access` also routes on the resolved recipe before any
+probe: when `slinky-slurm` resolves, it skips with the reason recorded. The
+Slinky NodeSet reserves every GPU on a node for its `slurmd` pod and Slurm
+GRES/cgroups isolate access, so the check's Kubernetes per-pod probe could
+either never schedule or attest the wrong access path (#2724).
+
+`slinky-slurm-gpu-access` verifies that path instead (#2756). From the login pod
+it runs an `srun --gpus=1` job, which must list exactly one GPU and open exactly
+one GPU minor device, then a job with no GPU request pinned with `--nodelist` to
+the same Slurm node, which must open none. The probe shell only reports facts
+(`KEY=value` lines: node, `nvidia-smi` UUIDs, the errno of a read-only open of
+each `/dev/nvidiaN`); `parseSlurmGPUProbe` and the two evaluate functions decide.
+It never lists `/dev/nvidia*` to infer isolation: the cgroup device controller
+leaves the nodes visible and refuses `open()` with EPERM.
 
 `PhaseAll` (the string `"all"`) is the CLI / recipe wildcard;
 `ParsePhaseSelection` collapses it to nil-meaning-everything. It is
@@ -281,9 +364,8 @@ Skip. The empty-result inapplicability case is handled by the caller
 (`len(items) == 0`), keeping `Require`'s Skip path off the error branch entirely.
 
 **#1327 standalone boundary.** A standalone validator run carries no recipe
-context: `pkg/validator/v1.ToValidationInput` leaves `ComponentRefs` empty, so
-`RecipeDeclares` returns false (it is nil-safe on a nil `Context` or nil
-`ValidationInput`). On that path a clean-absent probe still `Skip`s, which
+context, so `RecipeDeclares` returns false (it is nil-safe on a nil `Context`
+or nil `ValidationInput`). On that path a clean-absent probe still `Skip`s, which
 preserves the capability-driven automatic selection that #1327 introduced.
 Fail-closed fires **only once the recipe actually declares** the dependency —
 declaration is what converts "inapplicable, so Skip" into "promised but missing,
@@ -303,19 +385,23 @@ lines** — stdout lines with a reserved prefix that a specific parser recognize
 and pulls out. Plain (non-prefixed) stdout is unaffected and flows into the CTRF
 `stdout` array as before.
 
-Two sentinels exist today, with deliberately different lifecycles:
+Three sentinels exist today, with deliberately different lifecycles:
 
 | Prefix | Emitted by | Parsed by | Payload | Kept in CTRF `stdout`? | Survives minimal redaction? |
 |--------|-----------|-----------|---------|------------------------|-----------------------------|
 | `RESULT:` + one space | any check (`fmt.Printf`) | `extractResultSummaries` (`pkg/validator/validator.go`) | free-form human text (throughput, bandwidth, TTFT…) | **yes** — line stays; trailing text is *also* echoed to the live CLI at INFO | **no** — dies with `stdout` under the default policy |
 | `##AICR-EXTRA##` + one space | `validators.EmitExtra` | `parseExtraSentinels` (`pkg/validator/job/result.go`) | one JSON object → `TestResult.Extra` (counts / enum codes) | **no** — stripped as transport, not evidence | **yes** — allowlisted keys are published (see below) |
+| `##AICR-PROVENANCE##` + one space | `validators.EmitRuntimeProvenance` | `parseExtraSentinels` (same pass) | one JSON object → `TestResult.RuntimeProvenance` (template digests + key paths) | **no** — stripped as transport | **yes** — bounded by `redact.boundRuntimeProvenance` (see "NCCL benchmark runtime provenance") |
 
-Both are parsed with `strings.CutPrefix` and both parsers are pure, unit-tested
+All are parsed with `strings.CutPrefix` and the parsers are pure, unit-tested
 functions. They are separate channels on purpose: `RESULT:` surfaces live
 metrics to a human watching a run, so it carries unbounded free-form text and is
 correctly redacted with the rest of `stdout`; `##AICR-EXTRA##` carries structured
 data that must *outlive* redaction, so it is low-cardinality, allowlisted, and
-stripped from the human evidence. Do not route structured outcome data through
+stripped from the human evidence; `##AICR-PROVENANCE##` carries the one
+structured record that is neither a count nor a code — content digests plus
+template key paths — under its own bounding rule rather than the `Extra`
+allowlist. Do not route structured outcome data through
 `RESULT:` (it would not survive publication) or human prose through
 `##AICR-EXTRA##` (it would be dropped by the allowlist or leak identifiers).
 
@@ -347,40 +433,202 @@ emit(map[string]string{"nodesValidated": "1", "nodesTotal": "2"})
 emit(map[string]string{"skipReason": "no-gpu-nodes"})
 ```
 
-**Transport.** `EmitExtra` marshals the map to one JSON line prefixed with
-`ctrf.ExtraLinePrefix` (`##AICR-EXTRA##` followed by one space) on stdout — the
-only channel that crosses the pod boundary besides the exit code and termination
-log. The orchestrator (`pkg/validator/job.ExtractResult`) parses each sentinel
-line, keeps the **last valid non-empty** payload as `TestResult.Extra`, and
-strips every sentinel line from the stored `stdout` (transport, not human
-evidence). A malformed line is non-fatal: it is logged and skipped without
-discarding an earlier valid payload — a garbled line never flips a pass to an
-error, nor clears a coverage line that preceded it. Keep the human `fmt.Printf`
-lines too; they still feed `--full` and live `aicr validate` output.
+**Transport.** `EmitExtra` writes the map to stdout as one
+`##AICR-EXTRA## <json>` line, the only channel out of the pod besides the exit
+code and termination log. Provenance travels the same way as
+`##AICR-PROVENANCE## <json>`. The orchestrator strips both from the stored
+`stdout`.
 
-**Low-cardinality + allowlist contract.** `extra` values MUST be counts or enum
-codes only (`"2"`, `"no-schedulable-gpu-nodes"`) — never node names, IPs, or hostnames.
-`pkg/evidence/redact`'s `ctrfExtraAllowlist` enforces this at the **publication
-boundary** (not just at emission, which raw prefixed stdout could bypass) with a
-fail-closed **key _and_ value** check: only the listed keys (`nodesValidated`,
-`nodesTotal`, `skipReason`) survive, and each surviving value must pass its key's
-validator — a non-negative decimal count for the `nodes*` keys, and for
-`skipReason` a **closed set** of known codes (`ctrfSkipReasons`, currently
-`no-gpu-nodes`, `no-schedulable-gpu-nodes`, `nodes-busy`). A closed set rather
-than a shape regex is deliberate: a kebab-case regex would still pass an
-arbitrary low-cardinality identifier like `customer-prod-cluster`. A value that
-is ill-shaped or unlisted (an IP under `nodesTotal`, a hostname or unminted code
-under `skipReason`) is dropped even though its key is allowed. Every other key is
-dropped too, and if nothing survives the map ships as absent (no empty
-`extra: {}`). Adding a new key (with its value validator) or a new `skipReason`
-code means adding it to that allowlist (and bumping `redact.PolicyVersion`) in
-the same change; there is no CTRF schema in `api/`, so the `pkg/validator/ctrf`
-godoc and this page are the contract.
+- `Extra` lines merge key-wise, a later value winning per key, so a check can
+  publish its scope before a run and its measurement after.
+- Provenance is last valid wins.
+- A malformed line is logged and skipped. It never discards an earlier
+  payload or changes the verdict.
+
+Keep the human-readable stdout lines too, for `--full` and live output.
+
+Keys, skip codes, and value formatters live in `validators/extra_keys.go`. A
+test there fails when a key has no redaction allowlist entry.
+
+**Low-cardinality + allowlist contract.** `extra` values MUST be low-cardinality
+(`"2"`, `"305.4"`, `"true"`, `"v25.10.1"`, `"no-schedulable-gpu-nodes"`), never
+node names, IPs, hostnames, or URLs. Redaction enforces this at publication,
+since raw stdout can forge a sentinel. It drops an unlisted key, a value that
+fails its key's shape (an IP under `nodesTotal`, `305.44` under
+`achievedGbps`), and a map left empty.
+
+| Value shape | Keys |
+|-------------|------|
+| non-negative integer count | `nodesValidated`, `nodesTotal`, `workerNodes`, `gpusInvolved`, `draReady`, `draDesired`, `nodewrightComplete`, `nodewrightExpected`, `namespacesActive`, `namespacesExpected`, `gpusBenchmarked`, `gpusPerNode` |
+| non-negative decimal, at most one fractional digit | `achievedGbps`, `thresholdGbps`, `tolerancePct`, `throughputTokPerSec`, `ttftP99Ms`, `throughputThreshold`, `ttftThresholdMs`, `scaledThreshold` |
+| signed decimal (`+1.8`, `-12.3`) | `passMargin` (percent above or below `thresholdGbps`) |
+| `true` or `false` | `nodeLocal`, `versionSatisfied` |
+| `v` plus one to three numeric parts, optional `-alpha`, `-beta`, or `-rc` suffix (`v25.3.0-rc.1`) | `detectedVersion` |
+| closed set | `skipReason` (below), `runtimeSource` (`delivered-artifact`, `recipe-supplied-runtime`, `cluster-capability`), `transport` (`default`, `net`, `nvls`), `fabric` (`efa`, `roce`), `configuredPolicy` (every GPU allocation policy), `resolvedMode` (`device-plugin-extended-resource`, `dra-resource-claim`) |
+
+Codes are closed sets rather than a shape regex, because a kebab-case regex
+would still pass an identifier like `customer-prod-cluster`. The `skipReason`
+codes are:
+
+`no-gpu-nodes`, `no-schedulable-gpu-nodes`, `nodes-busy`, `no-constraint`,
+`component-not-in-recipe`, `no-validation-input`, `unsupported-target`,
+`profile-lacks-variant`, `unsupported-service`, `unrecognized-platform`,
+`no-gpu-backed-nodeset`, `no-verifiable-nodes`, `dra-driver-not-installed`,
+`slurm-managed-gpus`, `simulated-nodes`, `named-in-skip-checks`
+
+`named-in-skip-checks` is the one code minted by a *caller* (`--skip-check`)
+rather than a check.
+
+A new key (with its value validator) or `skipReason` code goes into the
+allowlist, with a `redact.PolicyVersion` bump, in the same change that emits
+it. No CTRF schema exists in `api/`, so the `pkg/validator/ctrf` godoc and this
+page are the contract.
+
+**What each check discloses.**
+
+| Check | Keys |
+|-------|------|
+| `nccl-all-reduce-bw*` | `transport`, `workerNodes`, `gpusInvolved`, `fabric`, `achievedGbps`, `thresholdGbps`, `tolerancePct`, `passMargin` |
+| `expected-resources` | `namespacesActive`, `namespacesExpected`, `draReady`, `draDesired`, `nodewrightComplete`, `nodewrightExpected`, and the RDMA gate's `nodesValidated`, `nodesTotal` |
+| `inference-perf` | `throughputTokPerSec`, `ttftP99Ms`, `throughputThreshold`, `scaledThreshold`, `ttftThresholdMs`, `gpusBenchmarked`, `gpusPerNode` |
+| `secure-accelerator-access`, `inference-perf` | `configuredPolicy`, `resolvedMode`, `nodeLocal` |
+| `dra-support` | `configuredPolicy` |
+| `gpu-operator-version` | `detectedVersion`, `versionSatisfied` |
+| any check, on an in-pod skip | `skipReason` |
+
+- NCCL publishes `transport`, `workerNodes`, and `gpusInvolved` before the
+  benchmark runs, so a failed run still records its scope. `fabric` appears
+  only on `nccl-all-reduce-bw-net`, when `AICR_NCCL_FABRIC` selected the
+  baked-in EKS template. `tolerancePct` is the slack below `thresholdGbps`
+  that still passes.
+- `draReady` and `draDesired` come from the last observed DRA kubelet-plugin
+  DaemonSet, and are absent if none was found. `nodewrightComplete` and
+  `nodewrightExpected` are `0`/`0` when every Skyhook CR is suppressed.
+- `configuredPolicy` is published before the policy is verified, so a mismatch
+  still records it. `nodeLocal` is `true` when the mode was chosen for one node
+  rather than from cluster-wide capability.
+
+### NCCL benchmark runtime provenance
+
+`nccl-all-reduce-bw*` results carry a `runtimeSource` code saying **which
+artifact the bandwidth number describes**. Pass/fail still comes from the
+bandwidth floor; provenance is a separate, closed-set label (#2297):
+
+| `runtimeSource` | Meaning |
+|---|---|
+| `delivered-artifact` | The benchmark runtime was **derived from the `ClusterTrainingRuntime` the recipe ships** (`torch-distributed-tcpxo`, read from the live API). The number attests to the delivered wiring. |
+| `recipe-supplied-runtime` | The recipe supplied the runtime itself via `nccl-benchmark-runtime(-ref)` (#1792) and owns its wiring. |
+| `cluster-capability` | The validator's embedded fixture: proves the fabric can reach the floor, says nothing about what the recipe ships. |
+
+The class is decided from the **recipe**, never from what happens to be
+installed: a leaf is `delivered-artifact` only when its enabled
+`kubeflow-trainer` componentRef both lists the `torch-distributed-tcpxo`
+runtime manifest and records a `tcpxoInterfaces` override
+(`validators/internal/gkenet.FabricRuntimeDelivered` — a mapping without the
+artifact describes nothing, and a listed manifest without a recorded mapping,
+which generation never produces, fails closed rather than downgrading to the
+fixture). Today that is
+`h100-gke-cos-training-kubeflow` alone — the other kubeflow leaves declare the
+Trainer but ship no fabric runtime, and are `cluster-capability`. A
+recipe-supplied runtime or an `nccl-benchmark-profile` combined with a
+delivered one is rejected; the benchmark cannot have two owners of its runtime
+or of its platform.
+
+For a delivered artifact the performance validator, **before any cluster
+mutation**, verifies recipe → deployed → cluster (the recipe's recorded mapping
+must equal the deployed runtime's exactly and in order; every selected network
+must exist, as a set comparison), then derives the benchmark runtime: the
+shipped `node` PodTemplateSpec is copied **wholesale — metadata and spec** —
+and only the paths in `benchmarkOwnedNodePaths` (worker `image`, `command`,
+`args`, `resources`, `terminationMessagePolicy`, `readinessProbe`) are
+re-applied from the MPI skeleton (the skeleton's worker sets no
+`terminationMessagePolicy`, so that override clears a shipped value; its
+`readinessProbe` on sshd port 22 is what the launcher's `dependsOn` waits on),
+with volumes and mounts merged additively.
+An override-path guard
+fails the run if the derived template differs from the shipped one anywhere
+else, and a baseline precondition covers every overridden path — the shipped
+worker must set no `command`/`args` (an entrypoint would hide fabric
+activation), must declare the NCCL fabric env, must request `nvidia.com/gpu`
+— and only that — under both `resources.limits` and `resources.requests`,
+with a quantity equal to the target nodes' per-node GPU count (checked at
+apply time, where that count is known, so a deployed runtime whose GPU request
+was removed or changed is failed rather than silently repaired by the
+skeleton's), and must set no `terminationMessagePolicy` or `readinessProbe`; `image` is the one override with no precondition,
+since the benchmark binary lives only in the fixture image and the fabric
+plugin is mounted from the host.
+
+The measurement runs under the **shipped** environment. The derived worker's
+bootstrap exports the container's own `NCCL_*`/`CUDA_*`/`LD_LIBRARY_PATH` to
+the ssh sessions mpirun opens instead of re-sourcing the host
+`nccl-env-profile.sh` the capability fixture uses, and the launcher's
+`-x NCCL_*`/`-x CUDA_*`/`-x LD_LIBRARY_PATH=` tuning exports are stripped
+(`NCCL_DEBUG` is kept — log volume, not wiring). The object that is applied is
+derived at apply time from the skeleton rendered with the run's real template
+data, so placeholder types survive (`containers[].args` stay strings, which
+Trainer's structural CRD requires; `numProcPerNode` stays an integer).
+
+**Evidence carrier.** `runtimeSource` rides `Extra` and is emitted the moment
+the class is decided — before the delivered path's live verification — so a run
+that fails on a missing runtime or a mapping drift still records that it was a
+`delivered-artifact` measurement. The audit record — sha256 of the normalized
+shipped and applied worker templates, the paths at which they differ
+(benchmark overrides plus stamped scheduling), and the inventory of shipped
+paths inherited unchanged — is computed against the object as **stored** (read
+back after the create, so admission defaulting is part of the digest) and
+recorded only once the `TrainingRuntime` create succeeded, so a run that fails
+before or at application publishes no record; after that point it is published
+whether or not the measurement succeeds, twice: as a human-readable listing on stdout
+(`--full` only), and as the bounded `TestResult.RuntimeProvenance` carrier (`##AICR-PROVENANCE## `
+sentinel → `pkg/validator/job`), which **survives minimal redaction**. The
+redaction policy for that carrier (`redact.boundRuntimeProvenance`, rule
+`ctrf.tests.runtimeProvenance.bound`): both digests must be lowercase sha256
+hex or the record is dropped; paths are template *keys* only and must match
+the dotted key grammar; every **structural** segment must be a JSON field name
+reachable from core/v1 `PodTemplateSpec` (`redact.ctrfPodTemplateFields`, an
+exact set generated from `k8s.io/api` and pinned by
+`TestPodTemplateFieldsMatchAPI`) or the path is dropped, so the carrier can
+only describe the Kubernetes schema whether a non-schema key survived CRD
+pruning or the sentinel line were forged; every named-list selector (`containers[node]`,
+`volumes[x]`, `volumeMounts[x]`, `env[x]`) collapses to `[*]` unless it is an
+`env` selector naming a variable in the **exact** fabric set
+(`redact.ctrfFabricEnvNames`: the GPUDirect-TCPXO NCCL configuration the
+shipped runtime declares, plus `CUDA_VISIBLE_DEVICES` and `LD_LIBRARY_PATH`),
+which is kept because it is the evidence; a key under any **user-keyed map**
+of the PodTemplateSpec API, wherever it sits (`redact.ctrfFreeKeyMaps`:
+`labels`, `annotations`, `nodeSelector`, resource `limits`/`requests`,
+`overhead`, `matchLabels`, CSI `volumeAttributes`, flexVolume `options`,
+pod-certificate projection `userAnnotations`)
+collapses to the map unless the **whole key** is in the exact vendor set
+(`redact.ctrfVendorKeys`: `networking.gke.io/interfaces`,
+`networking.gke.io/default-interface`, `devices.gke.io/container.tcpxo-daemon`,
+`cloud.google.com/gke-accelerator`, `trainer.kubeflow.org/trainjob-ancestor-step`,
+`nvidia.com/gpu`, `nvidia.com/gpu.present`, `node.kubernetes.io/instance-type`).
+There is no prefix or domain rule anywhere in the policy: `NCCL_CUSTOMER_ACME_PROD`,
+`networking.gke.io/customer-prod` and a sidecar's
+`resources.limits.acme.internal/project-prod` are operator text and collapse
+like any other name. So `metadata.annotations.networking.gke.io/interfaces`,
+`spec.containers[*].env[NCCL_FASTRAK_IFNAME].value` and
+`spec.containers[*].resources.limits.nvidia.com/gpu` are kept while an
+operator's `spec.nodeSelector.my-org/pool` becomes `spec.nodeSelector`,
+`spec.initContainers[setup].resources.limits.acme.internal/x` becomes
+`spec.initContainers[*].resources.limits`, and
+`spec.volumes[customer-cache].secret.secretName` becomes
+`spec.volumes[*].secret.secretName`; lists are deduplicated, sorted and capped
+at 1024 entries. Adding a variable or key to the shipped runtime that the
+inventory should name means adding it to the corresponding set in the same
+change. No value — network name, node name, env value — ever appears. Separately, two deployment checks cover GKE GPUDirect-TCPXO networking:
+`gke-gpu-nic-networks` runs the census, readiness/binding, and runtime-wiring
+arms over the Network CRs; `gke-gpu-nic-topology` is gated only on the recipe
+declaring `gke-nccl-tcpxo` and reads node `nic-info` annotations to catch a
+gVNIC-displaced GPU NIC. A base `h100-gke-cos-training` recipe (TCPXO, no
+runtime) still runs the census + readiness + topology checks.
 
 **Mounted data:** `/data/snapshot/snapshot.yaml`, `/data/validation/validation.yaml`
 (override via `AICR_SNAPSHOT_PATH`, `AICR_VALIDATION_PATH`).
 
-**Environment** (set by the Job deployer from the catalog entry):
+**Environment** (set by the Job deployer; the catalog entry's `env` values are
+appended after these):
 
 | Variable | Purpose |
 |----------|---------|
@@ -390,13 +638,45 @@ godoc and this page are the contract.
 | `AICR_VALIDATOR_IMAGE_TAG` | Override the resolved tag when the binary's stamped commit has no published image (e.g. `edge` or `sha-<commit>`). See [Validator image tags](#validator-image-tags). Forwarded to inner workloads (including `aiperf-bench`). |
 | `AICR_NODE_SELECTOR` | Comma-separated `key=value`; read via `ctx.NodeSelector` |
 | `AICR_TOLERATIONS` | Comma-separated `key=value:effect`; read via `ctx.Tolerations` |
-| `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY` | When truthy, the `inference-gateway` check fails if the gateway's `LoadBalancer` Service is open to `0.0.0.0/0` — its `spec.loadBalancerSourceRanges` is empty or includes an any-source CIDR (`0.0.0.0/0` or `::/0`). Default (unset): the open exposure is recorded and warned but the check still passes. |
+
+**Forwarded from the orchestrator's shell.** These variables are read from the
+environment of the process running `aicr validate` and forwarded only to the
+listed checks (`buildEnv` in `pkg/validator/v1/job_plan_internal.go`). A
+catalog entry's `env` value for any of these names is dropped, so they cannot
+be set from the catalog or a `--data` overlay:
+
+| Variable | Forwarded to | Purpose |
+|----------|--------------|---------|
+| `HF_TOKEN` | `inference-perf` | Hugging Face token for model downloads; see [`inference-perf`](#inference-perf-model-concurrency-and-weights-cache). |
+| `AICR_INFERENCE_PERF_NO_CLEANUP` | `inference-perf` | When true (`strconv.ParseBool`), leaves the per-run namespace in place for inspection; forwarded as `1`. |
+| `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY` | `inference-gateway` | When truthy, the check fails if the gateway's `LoadBalancer` Service is open to `0.0.0.0/0` — its `spec.loadBalancerSourceRanges` is empty or includes an any-source CIDR (`0.0.0.0/0` or `::/0`). Default (unset): the open exposure is recorded and warned but the check still passes. |
+| `AICR_NCCL_FABRIC` | `nccl-all-reduce-bw-net` | NET fabric selector: `efa` (default) or `roce`. |
+| `AICR_NCCL_RUNTIME_IMAGE` | `nccl-all-reduce-bw`, `nccl-all-reduce-bw-net`, `nccl-all-reduce-bw-nvls` | Overrides the NCCL launcher/worker image baked into the per-platform TrainingRuntime templates; a malformed reference fails closed in the pod. |
 
 **RBAC.** The engine creates a per-run ServiceAccount and
 ClusterRoleBinding named `aicr-validator-<runID>`. Per-run naming
 prevents concurrent runs from clobbering each other's RBAC. External
 tooling selects by label `app.kubernetes.io/name=aicr-validator`, not
 literal name.
+
+`validator.WithServiceAccountName` (CLI `--validator-service-account-name`,
+facade `WithValidatorServiceAccountName`) replaces that with an
+administrator-provisioned ServiceAccount. The run then skips
+`ensureNamespace`, `EnsureRBAC`, `rollbackRBAC`, and `CleanupRBAC`, and
+`prepareCluster` calls `job.VerifyServiceAccount` instead: a Get, then a `SubjectAccessReview`
+for verb, group, and resource `*` at cluster scope, which a binding to
+`cluster-admin`, or any rule granting `*` for verb, group, and resource,
+satisfies. RBAC matches a requested `*` only against a literal `*`, so a role
+that lists its verbs fails the review even when it covers everything the
+validators use. It fails closed on a missing
+ServiceAccount, on one that disables token automount (the validator pod spec
+does not override it), on a denied review, and on a caller that may not
+create the review. A validator running with less than it needs can read its
+own `Forbidden` as the refusal a negative check expects, so an unverified
+identity is not run. The Job's `serviceAccountName` comes from
+`job.Config.ServiceAccountName`, defaulting to the per-run name. See
+[Running under a pre-provisioned ServiceAccount](../user/validation.md#running-under-a-pre-provisioned-serviceaccount)
+for the manifests and the caller's permissions.
 
 **Image-pull policy** is computed by `v1.ImagePullPolicy(image,
 imageTagOverride)` in `pkg/validator/v1/job_plan.go`:
@@ -422,6 +702,15 @@ them:
 2. **`AICR_VALIDATOR_IMAGE_TAG` set** — overrides step 1 for *all* catalog
    images uniformly, including the inner `aiperf-bench` runner the
    `performance` validator launches (so both must exist at that tag).
+   It does not retag the Dynamo runtime images (`vllm-runtime`,
+   `dynamo-frontend`) the inference-perf workload runs. Those take the
+   recipe's `dynamo-platform` chart version, so they match the deployed
+   operator even when an overlay or `--data` overrides the chart pin. When
+   the recipe's ref carries no version they fall back to
+   `defaults.DynamoRuntimeImageTag`, which `make check-dynamo-runtime-image`
+   holds equal to the registry's `dynamo-platform` pin. They resolve through
+   `catalog.ApplyRegistryOverride`, so `AICR_VALIDATOR_IMAGE_REGISTRY` still
+   redirects them.
 
 What CI publishes:
 
@@ -478,8 +767,17 @@ AICR_VALIDATOR_IMAGE_TAG=edge aicr validate -r recipe.yaml -s snapshot.yaml --ph
 
 # Immutable pin (reproducible) — use a published main commit, not blindly HEAD
 # (a docs-only HEAD has no image; verify with the registry check below):
-AICR_VALIDATOR_IMAGE_TAG=sha-<published-main-commit> aicr validate -r recipe.yaml -s snapshot.yaml ...
+SHA="0123456789abcdef0123456789abcdef01234567"  # replace with the full SHA of a published main commit
+AICR_VALIDATOR_IMAGE_TAG="sha-${SHA}" aicr validate -r recipe.yaml -s snapshot.yaml --phase performance
 ```
+
+**Not when emitting evidence.** `aicr validate --emit-attestation` refuses a
+mutable validator tag and fails closed, because the attestation records
+validator images by tag alone — so the `:edge` form above is rejected there
+while the `:sha-<commit>` form is accepted. See
+[Validator image provenance](evidence-publishing.md#validator-image-provenance).
+Drop the override for an evidence run, or pass
+`--allow-mutable-validator-tags` if the evidence is disposable.
 
 A bare `go build` stamps `commit: unknown`, so step 1 can't resolve a
 `:sha-<commit>` tag and the override is required. `make build` stamps the
@@ -550,7 +848,7 @@ pod, err := lc.CreatePodFromTemplate(ctx.Ctx, "testdata/probe.yaml.tmpl", subs)
 if err != nil { return errors.Wrap(...) }
 defer func() { _ = lc.CleanupPod(context.Background(), pod) }() // deferred cleanup uses fresh ctx
 
-if err := lc.WaitForPodSuccess(ctx.Ctx, pod, defaults.PodSuccessTimeout); err != nil {
+if err := lc.WaitForPodSuccess(ctx.Ctx, pod, defaults.PodWaitTimeout); err != nil {
     logs, _ := lc.GetPodLogs(context.Background(), pod)
     return errors.WrapWithContext(errors.ErrCodeInternal, "probe failed", err,
         map[string]any{"logs": logs})
@@ -631,48 +929,34 @@ tagged with its cordon state, and:
    through `validators.EmitExtra` (#1951) — see **Structured coverage
    survives redaction** below.
 
-`expected-resources`' `rdmaFabricProbeCoverage` is itself node-scoped and now
-follows this pattern too (#1952). It enumerates every GPU node via
-`helper.FindGpuNodes`, validates only the schedulable Mellanox
-RDMA-capable cohort for uniform allocatable fabric, but discloses each
-cordoned RDMA-capable node explicitly (`<node>: skipped (cordoned)`),
-counts it in `nodesTotal`, and never narrows the printed total. Because
-the probe is re-run on every poll iteration
-(`verifyRDMAFabricReady`/`pollUntilStable`), the stdout
-enumeration/`RESULT:` line is printed **exactly once at the settled
-terminal outcome** (ready or fail-closed), never per tick. The structured
-Extra is emitted twice: an **eager floor** on the first observation that
-enumerates any RDMA-candidate node (with `nodesValidated=0` — nothing is
-certified mid-poll) and again at the terminal outcome.
-`parseExtraSentinels` keeps the last valid sentinel, so the terminal emit
-wins on a clean exit; the floor exists only so a cordoned-node narrowing
-still reaches the signed bundle if the Job's `activeDeadlineSeconds`
-SIGKILLs the process at the no-margin poll budget before the terminal emit
-runs (#1952). The gate stays fail-closed: "could not observe the fabric"
-reports `0` validated and never reads as ready.
+`expected-resources`' RDMA fabric probe follows this pattern too. It validates
+only the schedulable RDMA-capable nodes, lists each cordoned one as
+`<node>: skipped (cordoned)`, and still counts it in `nodesTotal`. The probe
+re-runs on every poll but prints its enumeration and `RESULT:` line once, at
+the settled outcome.
+
+It emits Extra twice, a floor with `nodesValidated=0` on the first observation
+of an RDMA-capable node, then the terminal counts, which win because sentinels
+merge key-wise. The floor keeps a cordoned node's narrowing in the signed
+bundle if the pod is killed before the terminal emit. The gate fails closed,
+so "could not observe the fabric" reports `0` validated.
 
 Unlike `check-nvidia-smi`, the RDMA gate never *skips* — it either
 certifies the cohort or fails closed — so it mints no `skipReason`
 enum. Its coverage rides the existing `nodesValidated`/`nodesTotal`
-allowlist keys unchanged (see below), so the redaction
-`PolicyVersion` stays `v2`.
+allowlist keys unchanged (see below), so that change did not move the
+redaction `PolicyVersion`.
 
 Cluster-aggregate checks that assert on an operator's aggregate status
 (`gpu-operator-health`) remain unaffected — DaemonSet operands ignore
 cordons.
 
-**Structured coverage survives redaction.** The `RESULT:` stdout line
-is echoed to the live CLI but is stripped from a signed bundle by the
-default (`minimal`) redaction policy (`pkg/evidence/redact`), so both
-`check-nvidia-smi` and the RDMA gate ALSO emit the coverage through
-`validators.EmitExtra` as low-cardinality counts
-(`nodesValidated`/`nodesTotal`) or a closed-set `skipReason` code. Those
-keys are the only ones that clear the fail-closed `ctrfExtraAllowlist`
-(a value that structurally looks like a node name or IP is dropped even
-under an allowed key), so a signed bundle records reduced coverage —
-e.g. a cordoned RDMA node narrowing the fabric cohort — without shipping
-any operator-identifying text. Node names appear only in the redacted
-stdout enumeration, never in the Extra channel. See #1951/#1952.
+**Structured coverage survives redaction.** Minimal redaction strips the
+`RESULT:` stdout line, so `check-nvidia-smi` and the RDMA gate also
+publish coverage in `extra` as `nodesValidated`/`nodesTotal` or a
+`skipReason` code. A signed bundle still records a cordoned node
+narrowing the cohort. Node names appear only in stdout, never in
+`extra`.
 
 For *deliberate*, durable exclusion of a node from GPU service (as
 opposed to transient cordon-for-maintenance), use the GPU Operator's
@@ -693,7 +977,41 @@ silently fall back.
 Full list (defaults, semantics) is in the `validators/performance`
 package godoc. NCCL variants exposed today: `nccl-all-reduce-bw`,
 `nccl-all-reduce-bw-net`, `nccl-all-reduce-bw-nvls`. Inference:
-`inference-perf` (Dynamo + AIPerf).
+`inference-perf` (Dynamo + AIPerf). Opt-in public CRE
+checks: `nccl-cre-all-reduce-bw` and `cre-training-goodput`. Neither branches on
+service or accelerator — `creQualifiedEntries` in
+`validators/performance/cre_qualification.go` records which combinations are
+qualified and the catalog entry and node cap each was measured with, so a new
+combination is an entry there plus a measured threshold rather than a new code
+path. `nccl-cre-all-reduce-bw` is qualified on `eks` x `h100` with
+`communication/nccl-all-reduce`; `cre-training-goodput` has no qualified
+combination while the `training/nemotron5-8b` entry it drives does not run on
+the pinned CRE version, so it skips wherever it is declared. Both create the
+CR on an explicitly named set of nodes, wait with a timeout, and tear it down on
+success or failure — deleting the CR and then confirming the `TrainJob`s and
+workload pods it started are gone, since CRE's controller drops its finalizer
+without waiting for them. An unconfirmed teardown fails the check rather than
+warning, because surviving work still holds the GPUs. Teardown only runs if the
+validator pod lives to run it, so each `Certification` is stamped
+`app.kubernetes.io/managed-by=aicr-validator` and the next run reclaims any
+older than `CREOrphanReclaimAge` — the sum of every phase a live run is allowed,
+which is what keeps the sweep from deleting a concurrent validator's run. The catalog timeout
+budgets that whole serial path — Certification wait, measurement finalize, then
+teardown — because the Job's `activeDeadlineSeconds` is the catalog timeout plus
+only `ValidatorJobDeadlineHeadroom`, and a pod killed partway through teardown
+leaves the `TrainJob`s holding GPUs with nothing reporting it.
+
+A terminal Certification does not mean its measurements are readable. CRE marks
+the Job Succeeded before the final log read, and only a measurement with
+configured thresholds keeps the Workflow waiting for it — the Certifications
+AICR builds set none. Results are provisional until `Complete` is `True` with
+reason `JobSucceeded`, and a provisional sweep can stop before the largest
+message sizes, where peak bandwidth is printed. Both readers therefore wait for
+every measurement the run owns to finalize, bounded by
+`CREMeasurementFinalizeTimeout`, and fail closed on expiry. The other
+completion reasons are not weaker evidence but no evidence: `LogsUnavailable`
+completes while leaving the provisional results in place and `NoDataCollected`
+has none, and CRE declines to evaluate a threshold against either.
 
 > **Constraint-name contract.** Each NCCL variant looks up a
 > constraint with the *exact* same name as the check. A recipe
@@ -764,15 +1082,28 @@ Resolution is split across the two-stage design:
   supply a `TrainingRuntime` and nothing else — not an arbitrary resource kind.
   It is mutually exclusive with `nccl-benchmark-profile`.
 
+  The one setup step it can opt into is IMEX. The run namespace is per-run
+  (`ncclRunNamespace`), so an operator cannot pre-create a ComputeDomain or claim
+  for the runtime. `customRuntimeManagesIMEX` inspects the pod-level
+  `resourceClaims` when the plan is resolved, before any cluster mutation:
+
+  - A reference to `ncclIMEXClaimTemplateName` (`nccl-all-reduce-imex`) sets
+    `benchmarkRuntimePlan.managedIMEX`, and `applyNCCLResources` then provisions
+    the ComputeDomain on any variant, as the NVLS path does.
+  - Any other template, or any `resourceClaimName`, fails closed with
+    `ErrCodeInvalidRequest`, since it could never resolve in the per-run
+    namespace (#2569).
+
 #### `inference-perf`: model, concurrency, and weights cache
 
 The `inference-perf` check warms vLLM before measuring, so the one-time
 CUDA-graph/JIT compile cost is excluded from the reported throughput and
 p99 TTFT. Its knobs are read by the in-cluster validator from the
 `inference-perf` catalog entry's `env` (override per run with a catalog
-overlay in the `aicr validate --data <dir>` directory). Unlike `HF_TOKEN`,
-they are **not** forwarded from the orchestrator shell, so
-`export AICR_INFERENCE_PERF_…` before `aicr validate` has no effect.
+overlay in the `aicr validate --data <dir>` directory). Unlike `HF_TOKEN` and
+`AICR_INFERENCE_PERF_NO_CLEANUP`, they are **not** forwarded from the
+orchestrator shell, so exporting the knobs below before `aicr validate` has no
+effect.
 
 The **model** and **per-GPU concurrency** can also be set per accelerator in
 the recipe overlay's `performance.constraints`, symmetric with the
@@ -794,7 +1125,10 @@ validation:
 
 Resolution precedence is **recipe constraint > catalog env knob > compiled
 default** (`Qwen/Qwen3-8B` at 256/GPU). A non-positive / non-integer
-`inference-concurrency-per-gpu` fails closed with `ErrCodeInvalidRequest`.
+`inference-concurrency-per-gpu` fails closed with `ErrCodeInvalidRequest`. The
+model-weights cache's StorageClass resolves with the same precedence via the
+`inference-model-cache-storage-class` constraint (see the
+`AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS` row below).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
@@ -804,7 +1138,8 @@ default** (`Qwen/Qwen3-8B` at 256/GPU). A non-positive / non-integer
 | `AICR_INFERENCE_PERF_WORKLOAD_READY_TIMEOUT` | `10m` | Wait for the `DynamoGraphDeployment` to become ready (image pull + model load + worker health). Large models load slower — raise this **and** the catalog entry's `timeout` in tandem, or the parent deadline caps it. |
 | `AICR_INFERENCE_PERF_HEALTH_TIMEOUT` | `5m` | Wait for the endpoint to serve a real chat-completion *after* the workload reports Ready. Concurrent first-load from one RWO cache PVC can push first-serve past 5m; raise it (bounded by the catalog `timeout`). |
 | `AICR_INFERENCE_PERF_MODEL_CACHE_SIZE` | `100Gi` (on) | The PVC-backed model-weights cache is **on by default**. Set a different K8s quantity to resize, or a disable sentinel (`off`/`0`/`none`/`disabled`) to turn it off and download from HF directly. |
-| `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS` | cluster default | StorageClass for the cache PVC. On a cluster with **no default SC and no value here**, the check **fails fast** with guidance rather than leaving the PVC `Pending` until timeout. AICR-deployed EKS gets a default `gp3` SC from `aws-ebs-csi-driver`; GKE has `standard-rwo`. |
+| `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS` | cluster default | StorageClass for the cache PVC. On a cluster with **no default SC and no value here**, the check **fails fast** with guidance rather than leaving the PVC `Pending` until timeout. AICR-deployed EKS gets a default `gp3` SC from `aws-ebs-csi-driver`, and GKE Standard typically ships with `standard-rwo`, but neither default is guaranteed to attach for every node machine family (A4X/GB200 nodes reject `pd-balanced` disks and need a Hyperdisk-backed class, see [GKE GB200 Storage Prerequisites](../integrator/gke-gb200-networking.md#storage-prerequisites)). Prefer the per-accelerator `inference-model-cache-storage-class` recipe constraint over this global knob. |
+| `AICR_INFERENCE_PERF_MODEL_CACHE_EXTRA_COMPATIBLE_TYPES` | unset | Comma-separated `parameters.type` values to add to the compiled machine-family/StorageClass compatibility allowlist (`storageCompatibilityRules` in `validators/performance/model_cache.go`), for example a new Hyperdisk type a cloud provider ships before AICR's allowlist is updated to include it. Without a matching entry here, the selected StorageClass (the `inference-model-cache-storage-class` constraint, `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS`, or the cluster default when neither is set) fails closed with `ErrCodeInvalidRequest` if its type isn't allowlisted for the node's machine family, rather than binding a PVC that fails to attach at Job-run time. |
 | `AICR_INFERENCE_PERF_MODEL_CACHE_POPULATE_TIMEOUT` | `13m` | Wait for the one-time model-cache populate Job (cold image pull + first-ever Hugging Face download into the PVC). Separate from — and larger than — `AICR_INFERENCE_PERF_WORKLOAD_READY_TIMEOUT` because the populate Job pays a cold pull *and* a multi-GB download; provide the optional HF-token secret to remove anonymous-download throttling. Raise it (and the catalog `timeout`) for very large models. **Migration:** the cache-populate wait no longer honors `AICR_INFERENCE_PERF_WORKLOAD_READY_TIMEOUT` (which now bounds only the DynamoGraphDeployment readiness wait) — set this knob instead to widen the populate budget. |
 
 For gated models, or to lift Hugging Face rate limits on large downloads,
@@ -870,14 +1205,14 @@ run-to-run TTFT fluctuation (see NVIDIA/aicr#1192):
   worker's active in-flight load so a transiently-slow worker stops receiving
   its full share — mitigating the stochastic EKS H100 worker-stall / throughput
   degradation at the saturation knee (issue #1197). Frontend-to-worker
-  requests use Dynamo's request plane (Dynamo 1.2 defaults to TCP; AICR does
-  not set `DYN_REQUEST_PLANE=nats`). Workers still publish local vLLM KV-cache
-  events through their ZMQ publisher (relayed onto the NATS event plane), but
-  least-loaded routing does not consume them.
+  requests use Dynamo's request plane (Dynamo 1.4+ defaults to TCP; AICR does
+  not set `DYN_REQUEST_PLANE=nats`). Workers publish KV-cache events directly
+  over ZMQ; the KV router consumes them end-to-end with no NATS relay.
+  Least-loaded routing does not consume those events.
   The `inference-routing-mode` recipe input defaults to `dynamo-router`; set
   `gateway-epp` to validate the GAIE/EPP path through agentgateway with worker
   frontend sidecars in direct mode. The direct-mode sidecars honor EPP routing
-  headers; they do not perform the ZMQ-to-NATS KV-event relay.
+  headers; they do not relay KV events.
 - **The AIPerf load generator co-locates with the GPU workers, but that is not
   resource contention.** It is CPU-only and the GPU node has ample CPU headroom
   (measured node CPU pressure ≈ 0 across runs); co-location does not starve the
@@ -905,8 +1240,10 @@ run-to-run TTFT fluctuation (see NVIDIA/aicr#1192):
   `timed out waiting for inference endpoint to serve requests` — the *same* outer
   symptom as the (fixed) #1192 discovery panic but a different root cause. AIPerf's
   own warmup absorbs steady-state once the probe passes.
-- **Inspecting a failed run.** `AICR_INFERENCE_PERF_NO_CLEANUP=1` leaves the
-  namespace, DGD, workers, frontend, and AIPerf Job in place after the run so a
+- **Inspecting a failed run.** `AICR_INFERENCE_PERF_NO_CLEANUP=1`, exported in
+  the shell that runs `aicr validate` (it is forwarded to the pod, not read from
+  the catalog), leaves the namespace, DGD, workers, frontend, and AIPerf Job in
+  place after the run so a
   serve-wait / generate hang can be examined live (`kubectl logs` the frontend,
   ping `/v1/models` and `/v1/chat/completions`). Debug-only — delete the namespace
   manually afterward.
@@ -983,7 +1320,7 @@ components:
 | Field | Required | Notes |
 |-------|----------|-------|
 | `function` | yes | Must match a name registered in `pkg/bundler/validations/checks.go::init()` |
-| `severity` | yes | `warning` appends to report; `error` stops the bundle |
+| `severity` | yes | `error` stops the bundle; `warning` (the default for any unrecognized value) appends to the deployment notes; `info` logs only |
 | `conditions` | no | Keys are criteria fields from `pkg/recipe/criteria.go`. Empty = always runs |
 | `message` | no | Actionable detail appended to function output |
 
@@ -991,6 +1328,23 @@ Conditions are evaluated via `checkConditions(recipeResult, conditions)`.
 Keys = AND across, values within a key = OR. When a new accelerator,
 service, OS, intent, or platform is added to `pkg/recipe/criteria.go`,
 audit existing condition blocks per CLAUDE.md's enum-expansion rule.
+
+`RunValidations` (`pkg/bundler/validations/registry.go`) dispatches on the
+lowercased severity, and all three arms consume both return values of the
+check — a returned `error` is never silently dropped:
+
+| Severity | Warnings become | Errors become |
+|----------|-----------------|---------------|
+| `error` | blocking errors | blocking errors |
+| `warning` | deployment notes | blocking errors |
+| `info` | `slog.Info` only | `slog.Info` only |
+
+`info` is for an advisory that is true of a valid configuration — something the
+operator should weigh, not something they must fix — so it stays out of the
+deployment notes and surfaces only under `--debug`. Note the asymmetry: under
+`info` a returned error is logged rather than raised, so do not use `info` for
+a gate whose failure must be acted on. `warning` is the fallback for any
+unrecognized value, which keeps a typo'd severity non-silent.
 
 ### Shipping functions
 
@@ -1000,8 +1354,23 @@ audit existing condition blocks per CLAUDE.md's enum-expansion rule.
 | `CheckAcceleratedSelectorMissing` | nodewright `--accelerated-node-selector` set |
 | `CheckHostMofedWithoutNetworkOperator` | Host-mode MOFED component paired with `network-operator` |
 | `CheckWildcardAcceleratedToleration` | Accelerated-node tolerations carry no wildcard (keyless) entry — on AKS a wildcard deadlocks nodewright interrupt packages ([nodewright#296](https://github.com/NVIDIA/nodewright/issues/296)); wired at `severity: error`, skipped when the component is disabled via `--set` |
+| `CheckNodewrightRuntimeRequiredTaintKey` | The nodewright runtime-required taint key, from `--workload-gate` or the final effective values, has no DNS prefix and is at most 53 characters. The operator writes the key into the `nodewright.nvidia.com/autoTaint_<key>` annotation, and from v0.20.0 refuses to start on one that cannot form it. A `--dynamic` declaration on the path is rejected, since its install-time value is never checked. Blocking |
+| `CheckGB300HostKernelGranule` | Bare-metal GB300 (`service: generic`, `accelerator: gb300`) applies a tuned profile that sizes hugepages for a 64k-granule ARM64 host kernel. A 4k-granule host still boots — Linux rejects the `hugepagesz=512M` clause and drops its paired `hugepages=` count — so the node just runs without that pool. Advisory only (`severity: info`); skipped when the component is disabled or `tuningEnabled` resolves to false on the final effective values (recipe merge plus scalar `--set` and typed `--set-json`/`--set-file`, under the canonical name and its registry aliases). |
 | `CheckDriverOwnershipCoherence` | GPU driver-ownership coherence on the final effective values (recipe merge + `--set`/`--set-json`/`--set-file` under canonical names and registry aliases): a recipe whose snapshot observed no NVIDIA driver (`metadata.gpuDriverState: absent`) must not bundle with the preinstalled-driver assumption. When GPU Operator manages the driver, `nvidia-dra-driver-gpu.nvidiaDriverRoot` must equal `gpu-operator hostPaths.driverInstallDir`; with a preinstalled driver, the DRA root must avoid the unpopulated operator container root and may intentionally differ from `hostPaths.driverInstallDir` ([#1087](https://github.com/NVIDIA/aicr/issues/1087), [#1757](https://github.com/NVIDIA/aicr/issues/1757)). Wired at `severity: error`. |
 | `CheckMariaDBOperatorOwnershipCoherence` | MariaDB Operator installation safety for AICR-provided Slurm accounting: `metadata.mariaDBOperatorState` values `crs-detected` and `unknown` block bundling, `api-detected` or omitted evidence warns, and `absent` proceeds silently. Wired at `severity: warning` so warning results remain non-blocking while returned errors still fail the bundle. |
+| `CheckNVSentinelDatastorePrerequisites` | Cluster prerequisites of `nvsentinel-mongodb` from snapshot evidence. `metadata.defaultStorageClassState`: `absent` and `unknown` block unless `replsets.rs0.volumeSpec.pvc.storageClassName` or `--storage-class` names a class, `multiple` warns, `present` proceeds. `metadata.perconaOperatorState`: `crs-detected`, `operator-detected`, and `unknown` block, `api-detected` warns that psmdb-operator replaces the existing CRDs, `absent` and `aicr-owned` proceed. Omitted evidence warns for either field. |
+| `CheckNVSentinelRemediationPipelineCoherent` | NVSentinel's fault pipeline can work as configured: no quarantine, drain or remediation stage with the embedded `mongodbStore` or without a supported `global.datastore.provider`; each stage has the one before it (`node-drainer` needs `fault-quarantine`, `fault-remediation` needs `node-drainer`), `global.dryRun` is a boolean when `fault-remediation` is on, a live `fault-remediation` has `janitor`, `janitor` has `janitor-provider`, and `fault-remediation` has `metadata-collector`; janitor's GPU reset Job reads the driver from the root the GPU Operator populates, with a clean `driverRoot`, a RuntimeClass coherent with the enabled GPU Operator variant (none under CDI with NRI), and a service manager that waits only for operands the GPU Operator runs, in its namespace, with a custom spec's timeouts set; the GPU reset is rejected on GKE COS. With the `nvsentinel-mongodb-uri` datastore it also requires x509 auth with the `nvsentinel-mongodb-app-client` certificate and both Percona components deployed, enabled and in NVSentinel's namespace. Rejects `--dynamic` on any path it verifies. Wired at `severity: error`. |
+| `CheckNVSentinelMongoDBCoherent` | `nvsentinel-mongodb` is usable by NVSentinel: NVSentinel is deployed, TLS is `requireTLS`, sharding is off, the `$external` x509 app user has `readWrite` on `HealthEventsDatabase` and the `nvsentinelTTLIndex` role, `psmdb-operator` is deployed with `watchAllNamespaces: false` and `disableTelemetry: true`, and `crVersion` and `initImage` are at the operator image's minor. Dependencies are read from the declared component set, so a `bundlers=` subset still sees them. Rejects `--dynamic` on any path it verifies. Wired at `severity: error`. |
+| `CheckNVSentinelSlurmDrainMonitorRequiresSlinky` | NVSentinel's `slurm-drain-monitor` is not enabled without `slinky-slurm` (absent or disabled), or watching a blank namespace or one `slinky-slurm` does not deploy to: the monitor reads the `SlurmNodeStateDrain` condition off Slinky worker pods, which only `slinky-slurm`'s NodeSets create, so it would run and never see a pod. Rejects `--dynamic` on the monitor's toggle and namespace and on `slinky-slurm`'s `enabled`, even with the monitor off. Wired at `severity: error`. |
+| `CheckNVSentinelSlurmCustomDrainCoherent` | NVSentinel drains Slurm nodes through the slinky-drainer plugin: a recipe with `slinky-slurm` and a live (not dry-run) `fault-remediation` has `node-drainer.customDrain` on, while quarantine alone passes; `customDrain` is only on with a live `node-drainer`, a boolean `global.dryRun` that is false, `slinky-slurm`, the `slinky-drainer-crds` component, and the `slinky-drainer` component in NVSentinel's namespace watching the namespace `slinky-slurm` deploys to; and its values match the plugin's contract (DrainRequest kind, resource and `DrainComplete` condition, the `slinky-drain-template` template, NVSentinel's namespace, a positive whole-seconds `timeout`, and empty `userNamespaces` and `podDrainPolicies` with an empty `nodeSelector`, since a scope could leave slurmd nodes on pod eviction); and the slurmd NodeSet and every Slurm control pod in the Slurm namespace (slinky-slurm's controller, REST API, login and enabled accounting, and `slurm-accounting-mariadb` there) render non-empty node selectors (modelled on the bundler's order: `--set`, then node-selector injection unless the overlay opts out with an empty or null value, then `--set-json`), each control pod's giving some label key a different value from slurmd's, since the plugin waits for every Ready pod in that namespace on a drained node to report Slurm DRAIN. Rejects `--dynamic` on any path a rule that can still fire reads, so a monitoring-only Slurm recipe keeps its `--dynamic` paths. Wired at `severity: error`. |
+| `CheckNPDNotDuplicatingProviderNPD` | `node-problem-detector` is bundled only on an allowlist of verified platforms — never where the provider already runs its own NPD (GKE, AKS), on OpenShift (no privileged SCC binding), or on Talos (restricted namespace) |
+| `CheckGKETCPXOInterfacesCoherence` | The final resolved kubeflow-trainer `tcpxoInterfaces` value matches the mapping the recipe records in `configuration.gke.tcpxoInterfaces` |
+| `CheckNVSentinelDriverLabelDetectable` | Where the GPU Operator does not own the driver and no driver pod exists (driver ships in the node image), NVSentinel sets `labeler.assumeDriverInstalled`, so its driver-label-gated DaemonSets do not come up half-rolled-out |
+| `CheckNVSentinelRuntimeClassCoherence` | NVSentinel metadata-collector `runtimeClassName` matches the RuntimeClass the GPU Operator creates from `operator.runtimeClass`, so its pods are not rejected at admission |
+| `CheckNVSentinelTracingEndpointRequired` | NVSentinel distributed tracing is not enabled without an OTLP collector endpoint |
+| `CheckNVSentinelNicHealthMonitorRequiresMetadataCollector` | `nic-health-monitor` is not enabled without `metadata-collector` (or a `nicInclusionRegexOverride`), which would otherwise discover zero devices |
+| `CheckNVSentinelPreflightDCGMReachable` | The preflight DCGM check's hostengine address resolves to a served Service (gpu-operator present, not relocated, and `dcgm.enabled`) |
+| `CheckNVSentinelPreflightGangSchedulerRequired` | Preflight gang coordination against KAI PodGroups is not enabled while `kai-scheduler` is disabled or absent |
 
 Registered in `pkg/bundler/validations/checks.go::init()`.
 
@@ -1052,7 +1421,11 @@ Kind cluster after `aicr bundle` + `helm install`) via the
 The same assertion file now powers TWO surfaces:
 
 1. **`make check-health` / `make check-health-all`** — local Kind-cluster
-   sanity invoked manually by chart authors.
+   sanity invoked manually by chart authors. `check-health-all` sweeps
+   only registry-linked components (`registry.yaml`'s
+   `healthCheck.assertFile` entries); an opt-in-only check like
+   `nvsentinel-observability` or `nvsentinel-preflight` runs via
+   `check-health COMPONENT=<name>`.
 2. **`aicr validate --phase deployment`** — registry-declared content is
    loaded into `ComponentRef.HealthCheckAsserts` during recipe
    resolution (PR #1219) and executed by the deployment validator's
@@ -1082,7 +1455,7 @@ for resource blocks that omit one (`defaultNamespaceFetcher` in
 
 A Test that declares no `assert`/`error` operation is rejected rather
 than passing vacuously (#2040); a check that is intentionally a no-op —
-today the three `*-ocp-olm` components, whose readiness is enforced by
+today the four `*-ocp-olm` components, whose readiness is enforced by
 the bundler's `--readiness-hooks` gate instead — must say so with the
 `aicr/no-op-check: "true"` annotation on the Test.
 
@@ -1173,15 +1546,17 @@ restricted at runtime to read-only Chainsaw operations
 `apply`, `create`, `delete`, `patch`, `update`, `wait`, `command`,
 `sleep`, `podLogs`, `events`, `describe`, `get`) is rejected with
 `ErrCodeInvalidRequest`, as is an operation that sets both `assert` and
-`error`. PR #1223 will add the same enforcement at lint time so
-violations are caught before they ever reach the validator.
+`error`. PR-time enforcement shipped in #1223:
+`pkg/chainsaw.TestValidateTestReadOnly_RegistryContent` walks every
+registry-declared assert file against this allowlist under `make qualify`,
+so violations are caught before they ever reach the validator.
 
 **Value-gate awareness (#1844).** A registry assert file is static — it
 cannot see the component's effective Helm values. That is a problem for a
 manifest whose whole resource is gated behind a value: e.g.
 `--set nodewrightcustomizations:tuningEnabled=false` on a single-package
 tuning manifest (`tuning-gke.yaml` / `tuning-generic.yaml`) suppresses the
-entire `tuning` Skyhook CR, so an unconditional
+entire `tuning` Nodewright CR, so an unconditional
 `assert status.status: complete` would fail on a deliberately-untuned
 cluster. The deployment validator resolves this by rendering the
 component's manifests with the effective values
@@ -1193,8 +1568,22 @@ whenever the values keep the CR, the render still lists it and the assert
 runs, so only an intentionally-absent CR is tolerated (a CR that *should*
 deploy but is missing on the cluster still fails). The same render drives
 the Go readiness check `verifyNodewrightReady`, so both surfaces agree on
-which CRs to expect. This skip is scoped to `nodewright-customizations`;
-every other component's assert queues unconditionally.
+which CRs to expect. After the readiness probes finish, the
+`nodewright-customizations` assert is also skipped on a cluster whose operator
+predates the `NodeWright` kind the assert names. The signal is the recipe's own
+`nodewright-operator` pin (`resolveNodewrightGVR`). A pin below v0.18.0 (or no
+usable pin) with only `skyhook.nvidia.com` served takes the legacy path, where
+`verifyNodewrightReady` verifies each `Skyhook` by name, so a healthy legacy
+cluster passes without a static assert that can never match. A v0.18.0+ pin
+on a cluster that does not serve `nodewright.nvidia.com` fails closed — that
+is a broken operator install, and a stale legacy `Skyhook` must not stand in
+for the missing `NodeWright`. A discovery error also fails closed rather than
+skipping. Discovery counts a group as served only once it lists the `nodewrights`
+(or `skyhooks`) resource itself, and `verifyNodewrightReady` re-resolves that
+on every poll. A recipe that renders Nodewright CRs polls through CRD
+establishment and fails on timeout if neither group ever serves them. This
+discovery-based skip is scoped to `nodewright-customizations`. Other
+components' asserts are subject only to their own render-based suppression.
 
 The suppression must be expressed **in the recipe** — an overlay-declared
 component `overrides:` (how `tuningEnabled: false` ships as the AKS default)
@@ -1213,7 +1602,27 @@ into the validator image):
   transient bundle flag. (`aicr recipe` likewise has no value `--set`, so the
   overlay/inline override is the only channel.) `Overrides` resolved from a
   `--data` overlay *are* honored, because recipe resolution runs CLI-side and
-  bakes them into the serialized recipe before the Job receives it.
+  bakes them into the serialized recipe before the Job receives it. The one
+  bundle-time flag that *is* persisted is `--dra-eviction-node-label`: the
+  bundler writes `enabled: true` onto the `dra-node-labeler` ref in the
+  `recipe.yaml` at the bundle root, which is why post-deployment validation
+  (the UAT readiness gate and conformance run, and the documented user
+  workflows) reads that file rather than the original recipe (#2848).
+- **`--workload-gate` is the exception, honored via the cluster.** The bundler
+  writes the taint into the nodewright-operator values
+  (`controllerManager.manager.env.runtimeRequiredTaint`), which the chart
+  renders as the `RUNTIME_REQUIRED_TAINT` env on the controller-manager
+  Deployment. The Go readiness check finds that Deployment by its
+  `app.kubernetes.io/component=manager,control-plane=controller-manager`
+  labels, so neither `fullnameOverride` nor `nameOverride` matters, reads the
+  env from it
+  (`runtimeRequiredTaints`), and gates
+  on exactly that taint plus the legacy `skyhook.nvidia.com=runtime-required:NoSchedule`
+  the operator still removes during its deprecation window, so an arbitrary
+  key, value, or effect passed at bundle time is what the validator waits to
+  see cleared. When the Deployment or env is absent it falls back to the two
+  chart defaults. A list error or more than one matching Deployment fails
+  closed, and the same cardinality check fails the operator's health check.
 - **`--data`-external files referenced by path are not readable in the Job.**
   A component whose `manifestFiles` or base `valuesFile` exist only in an
   external `--data` directory cannot be read by the embedded-only validator
@@ -1222,11 +1631,36 @@ into the validator image):
   a false pass. In practice `nodewright-customizations` ships no values file
   and uses inline `overrides:`, so there is no exposure here today.
 
+**Chart-shape constants are pinned to the charts (#2629).** The Go readiness
+checks hardcode facts that upstream charts define, not AICR:
+- the `NodeWright` CR's group, version, and resource;
+- the chart's default runtime-required taint;
+- the operator controller-manager Deployment's selector labels;
+- the DRA driver's `-kubelet-plugin` DaemonSet suffix.
+
+`validators/deployment/testdata/chart_contracts.yaml` records what the pinned
+charts actually render. Under `make test`, `TestChartContractsMatchRenderInputs`
+fails when a pin in `recipes/registry.yaml`, or the values the base overlay
+resolves for one of those charts, changes without the file being re-rendered
+(leaf-overlay value overrides are not covered), and
+`TestValidatorConstantsMatchChartContracts` fails when a constant disagrees
+with the file. After such a change, regenerate it (needs helm and network):
+
+```bash
+AICR_UPDATE_GOLDEN=1 go test ./validators/deployment/ -run '^TestChartContractsMatchPinnedCharts$' -count=1
+```
+
+Then update any constant the second test reports. Without `AICR_UPDATE_GOLDEN`,
+the same test checks the committed file against the live charts; like the
+nvsentinel render tests, it is skipped under `-short`. Operator behavior the
+chart does not render, such as which of two served kinds carries status, is
+outside this check.
+
 **Running:**
 
 ```bash
 make check-health COMPONENT=gpu-operator   # one component
-make check-health-all                      # everything in recipes/checks/
+make check-health-all                      # every registry-linked component
 make validate-local RECIPE=recipe.yaml     # full pipeline in Kind
 ```
 
@@ -1257,14 +1691,18 @@ but a readiness test copied from a validator check (`assert: 5m`) is
 now capped at the gate's 2m per evaluation rather than overrunning it.
 
 The `expected-resources` catalog timeout (8m in
-`recipes/validators/catalog.yaml`) is the **outer** envelope. It must
-exceed the longest in-tree `assert` value plus headroom for
-pre-chainsaw work, chainsaw teardown, and log flush
-(`defaults.JobEnvelopeMargin`). If assert runs too close to that
-catalog deadline, the Job can SIGKILL the pod before chainsaw reports
-the failing step — operators see truncated output instead of a useful
-failure. Raise the catalog `timeout` in tandem when you need a longer
-assert budget (`TestExpectedResourcesCatalogEnvelope` guards this).
+`recipes/validators/catalog.yaml`) is the **outer** envelope for the
+check's own budget (`AICR_CHECK_TIMEOUT`). It must exceed the longest
+in-tree `assert` value plus headroom for pre-chainsaw work, chainsaw
+teardown, and log flush (`defaults.JobEnvelopeMargin`). If assert runs
+too close to that catalog deadline, the check's own context can expire
+before chainsaw reports the failing step — operators see truncated
+output instead of a useful failure. The Job's `activeDeadlineSeconds`
+(this catalog timeout plus `defaults.ValidatorJobDeadlineHeadroom`) is
+a separate, later backstop and no longer the deadline this margin
+protects against. Raise the catalog `timeout` in tandem when you need
+a longer assert budget (`TestExpectedResourcesCatalogEnvelope` guards
+this).
 
 ## Constraint evaluation algorithm
 
@@ -1285,7 +1723,7 @@ constraints, and the readiness pre-flight gate. The evaluation flow:
    value passes `looksLikeVersion` (starts with digit, has a dot,
    optional `v` prefix). Everything else is string.
 3. **Evaluate** against the snapshot measurement. Version compares
-   route through `pkg/version.Compare` (semver-aware). String
+   route through `version.Version.Compare` (semver-aware). String
    compares are case-sensitive equality.
 4. **Errors propagate, not bools.** A value declared as `>= 1.32.4`
    that fails to parse as a version returns
@@ -1309,7 +1747,7 @@ Patterns common to all four surfaces.
   `NoCluster` is true, RBAC and Jobs are skipped, all checks report
   `skipped - no-cluster mode`, but constraints still evaluate.
 - **Table-driven tests.** Required for multi-case logic per CLAUDE.md.
-  See `pkg/constraints/constraint_test.go` and
+  See `pkg/constraints/evaluate_test.go` and
   `pkg/bundler/validations/checks_test.go` for the canonical shapes.
 - **Synthetic inputs.** Component validations take a hand-built
   `RecipeResult` and `bundlerConfig`. Container checks take a

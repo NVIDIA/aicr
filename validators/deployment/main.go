@@ -22,6 +22,7 @@
 //	deployment gpu-operator-version
 //	deployment check-nvidia-smi
 //	deployment gke-gpu-nic-networks
+//	deployment gke-gpu-nic-topology
 package main
 
 import (
@@ -35,5 +36,6 @@ func main() {
 		"gpu-operator-version": checkGPUOperatorVersion,
 		"check-nvidia-smi":     checkNvidiaSMI,
 		"gke-gpu-nic-networks": checkGKEGPUNICNetworks,
+		"gke-gpu-nic-topology": checkGKEGPUNICTopology,
 	})
 }

@@ -45,6 +45,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -66,6 +67,18 @@ var appOfAppsTemplate string
 
 //go:embed templates/README.md.tmpl
 var readmeTemplate string
+
+// fileApplication is the per-folder Application manifest this deployer
+// writes inside every NNN-<name>/ directory. Named so the write site
+// (GenerateFromTemplate) and the reported deployer.Release.Manifest path
+// can't drift apart into referencing two different filenames.
+const fileApplication = "application.yaml"
+
+// fileAppOfApps is the top-level parent Application manifest this deployer
+// writes at the bundle root. Named so the write site, the reported
+// deployer.Output.Entrypoint, and the rendered deployment instructions
+// can't drift apart into referencing two different filenames.
+const fileAppOfApps = "app-of-apps.yaml"
 
 // ApplicationData contains data for rendering an Argo CD Application.
 //
@@ -108,6 +121,15 @@ type ApplicationData struct {
 	// CascadeDelete adds ResourcesFinalizer to the rendered Application.
 	// See #1628.
 	CascadeDelete bool
+
+	// ApplyOutOfSyncOnly adds ApplyOutOfSyncOnly=true to spec.syncPolicy.syncOptions.
+	// Set only for the -readiness folder's Application: paired with the Job-level
+	// Replace=true,Force=true annotation (see gatemanifest.jobMetadataAnnotations),
+	// this prevents ArgoCD from deleting/recreating the readiness-gate Job on every
+	// sync when nothing actually changed — Replace+Force alone forces a
+	// delete-and-recreate unconditionally. See #2367 and the CodeRabbit finding on
+	// PR #2408.
+	ApplyOutOfSyncOnly bool
 }
 
 // AppOfAppsData contains data for rendering the App of Apps manifest.
@@ -173,6 +195,7 @@ type ReadmeData struct {
 	RecipeVersion  string
 	BundlerVersion string
 	Components     []ApplicationData
+	UpgradeNotice  string
 	// AppName mirrors AppOfAppsData.AppName — the rendered README cites
 	// the parent Application name in its `argocd app get/sync` examples,
 	// so the value must match what app-of-apps.yaml was templated with.
@@ -261,6 +284,11 @@ type Generator struct {
 	// vendoring shape.
 	VendorCharts bool
 
+	// Puller fetches upstream chart bytes when VendorCharts is set. nil
+	// resolves to a default *CLIChartPuller; tests inject a stub here
+	// without touching package state. Ignored when VendorCharts is false.
+	Puller localformat.ChartPuller
+
 	// Serial assigns each folder a strictly increasing sync-wave equal to its
 	// linear position instead of the dependency-depth band (waveForFolder),
 	// so components deploy one at a time in deployment order. Off by default
@@ -308,6 +336,10 @@ type Generator struct {
 	// argocdhelm's inner Generator — that path relies on the multi-source
 	// shape to transform it into a Helm template with dynamic merging.
 	InlineUpstreamValues bool
+
+	// UpgradeNotice is upgrade.WriteNotice output, inserted verbatim before the
+	// first deployment heading of README.md. Empty adds nothing.
+	UpgradeNotice string
 
 	// vendorRecords is populated by Generate when VendorCharts is on.
 	// Captured here so VendorRecords() can expose it to callers
@@ -490,6 +522,15 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 	repoURL, targetRevision := resolveRepoSettings(g)
 
+	// All three are baked unconditionally below: repoURL and targetRevision
+	// into app-of-apps.yaml and every child application.yaml, appName into
+	// the parent's metadata.name.
+	output.Source = deployer.Source{
+		RepoURL:        repoURL,
+		TargetRevision: targetRevision,
+		AppName:        g.appName(),
+	}
+
 	// Sort components by deployment order; validate names early.
 	components := deployer.SortComponentRefsByDeploymentOrder(
 		g.RecipeResult.ComponentRefs,
@@ -507,14 +548,24 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// charts, the values.yaml/cluster-values.yaml split via DynamicPaths, and
 	// install-related content. This deployer adds the Argo Application file
 	// inside each folder plus the top-level app-of-apps.yaml afterwards.
-	lfComponents := g.toLocalformatComponents(components)
+	var chartDigests map[string]string
+	if g.VendorCharts {
+		var digestErr error
+		chartDigests, digestErr = deployer.ResolveChartDigests(ctx, g.RecipeResult.DataProvider(), components)
+		if digestErr != nil {
+			return nil, digestErr
+		}
+	}
+	lfComponents := g.toLocalformatComponents(components, chartDigests)
 	writeResult, lfErr := localformat.Write(ctx, localformat.Options{
 		OutputDir:              outputDir,
 		Components:             lfComponents,
+		AICRVersion:            g.Version,
 		ComponentPreManifests:  g.ComponentPreManifests,
 		ComponentPostManifests: g.ComponentPostManifests,
 		ComponentReadiness:     g.ComponentReadiness,
 		VendorCharts:           g.VendorCharts,
+		Puller:                 g.Puller,
 	})
 	if lfErr != nil {
 		// localformat.Write returns StructuredErrors; propagate as-is.
@@ -522,6 +573,12 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 	g.vendorRecords = writeResult.VendoredCharts
 	folders := writeResult.Folders
+
+	output.Entrypoint = fileAppOfApps
+	output.Releases = writeResult.Releases()
+	for i := range output.Releases {
+		output.Releases[i].Manifest = path.Join(output.Releases[i].Path, fileApplication)
+	}
 
 	if err := stripUnusedHelmFiles(outputDir, folders); err != nil {
 		return nil, err
@@ -631,7 +688,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("folder path unsafe: %s", f.Dir), joinErr)
 		}
-		appPath, appSize, genErr := deployer.GenerateFromTemplate(applicationTemplate, appData, folderDir, "application.yaml")
+		appPath, appSize, genErr := deployer.GenerateFromTemplate(applicationTemplate, appData, folderDir, fileApplication)
 		if genErr != nil {
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to generate application.yaml for %s", f.Name), genErr)
@@ -648,7 +705,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		AppName:        appName,
 		CascadeDelete:  g.CascadeDelete,
 	}
-	appOfAppsPath, appOfAppsSize, err := deployer.GenerateFromTemplate(appOfAppsTemplate, appOfAppsData, outputDir, "app-of-apps.yaml")
+	appOfAppsPath, appOfAppsSize, err := deployer.GenerateFromTemplate(appOfAppsTemplate, appOfAppsData, outputDir, fileAppOfApps)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate app-of-apps.yaml", err)
 	}
@@ -661,6 +718,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		BundlerVersion: g.Version,
 		Components:     appDataList,
 		AppName:        appName,
+		UpgradeNotice:  g.UpgradeNotice,
 	}
 	readmePath, readmeSize, err := deployer.GenerateFromTemplate(readmeTemplate, readmeData, outputDir, "README.md")
 	if err != nil {
@@ -686,6 +744,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		}
 		output.Files = append(output.Files, provPath)
 		output.TotalSize += provSize
+		output.Provenance = localformat.ProvenanceFileName
 	}
 
 	if g.IncludeChecksums {
@@ -699,7 +758,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Populate deployment steps for CLI output
 	output.DeploymentSteps = []string{
 		"Push the generated files to your GitOps repository",
-		fmt.Sprintf("kubectl apply -f %s/app-of-apps.yaml", outputDir),
+		fmt.Sprintf("kubectl apply -f %s/%s", outputDir, fileAppOfApps),
 	}
 	// Add note if repo URL needs to be updated
 	if g.RepoURL == "" {
@@ -721,7 +780,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 // inputs consumed by localformat.Write. Mirrors helm.toLocalformatComponents;
 // not lifted into a shared helper because the two callers carry slightly
 // different fields (helm uses ComponentData, argocd uses ComponentRef).
-func (g *Generator) toLocalformatComponents(refs []recipe.ComponentRef) []localformat.Component {
+func (g *Generator) toLocalformatComponents(refs []recipe.ComponentRef, chartDigests map[string]string) []localformat.Component {
 	out := make([]localformat.Component, 0, len(refs))
 	for _, ref := range refs {
 		chart := ref.EffectiveChart()
@@ -736,6 +795,7 @@ func (g *Generator) toLocalformatComponents(refs []recipe.ComponentRef) []localf
 			ChartName:    chart,
 			Version:      ref.Version,
 			IsOCI:        strings.HasPrefix(ref.Source, "oci://"),
+			ChartDigest:  chartDigests[ref.Name],
 			Tag:          ref.Tag,
 			Path:         ref.Path,
 			Values:       values,
@@ -790,11 +850,20 @@ func waveForFolder(f localformat.Folder, level int) int {
 		return base
 	case f.Parent + "-post":
 		return base + 2
-	case f.Parent + "-readiness":
-		return base + 3
-	default: // primary: Name == Parent
-		return base + 1
+	default:
+		if isReadinessFolder(f) {
+			return base + 3
+		}
+		return base + 1 // primary: Name == Parent
 	}
+}
+
+// isReadinessFolder reports whether f is the injected -readiness folder for
+// its parent component. Shared by waveForFolder (sync-wave banding) and
+// buildApplicationData (ApplyOutOfSyncOnly scoping) so the two can't
+// silently diverge on what counts as a readiness folder. See #2367.
+func isReadinessFolder(f localformat.Folder) bool {
+	return f.Name == f.Parent+"-readiness"
 }
 
 // buildApplicationData constructs ApplicationData for a single folder. The
@@ -811,12 +880,13 @@ func waveForFolder(f localformat.Folder, level int) int {
 func buildApplicationData(comp recipe.ComponentRef, f localformat.Folder, syncWave int, repoURL, targetRevision string, values map[string]any, inline bool) (ApplicationData, error) {
 	chart := comp.EffectiveChart()
 	data := ApplicationData{
-		Name:           f.Name,
-		Namespace:      comp.Namespace,
-		SyncWave:       syncWave,
-		RepoURL:        repoURL,
-		TargetRevision: targetRevision,
-		BundleDir:      f.Dir,
+		Name:               f.Name,
+		Namespace:          comp.Namespace,
+		SyncWave:           syncWave,
+		RepoURL:            repoURL,
+		TargetRevision:     targetRevision,
+		BundleDir:          f.Dir,
+		ApplyOutOfSyncOnly: isReadinessFolder(f),
 	}
 	switch f.Kind {
 	case localformat.KindLocalHelm:

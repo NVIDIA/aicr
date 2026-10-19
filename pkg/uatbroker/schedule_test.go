@@ -19,8 +19,8 @@ import (
 	"testing"
 )
 
-// namedReservations builds bare Reservation rows (name + both nightly intents,
-// no min-version gate) for the ordering tests, which assert version order only.
+// namedReservations builds bare Reservation rows (name + both nightly intents)
+// for the ordering tests, which assert version order only.
 func namedReservations(names ...string) []Reservation {
 	out := make([]Reservation, 0, len(names))
 	for _, n := range names {
@@ -101,7 +101,7 @@ func TestExpandScheduleOrdering(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ExpandSchedule(namedReservations(tt.reservations...), rawTags, tt.includeMain, tt.previousN)
+			got := ExpandSchedule(namedReservations(tt.reservations...), nil, rawTags, tt.includeMain, tt.previousN)
 			if len(got) != len(tt.want) {
 				t.Fatalf("got %d reservations, want %d", len(got), len(tt.want))
 			}
@@ -130,7 +130,7 @@ func TestExpandScheduleOrdering(t *testing.T) {
 }
 
 func TestExpandScheduleEmptyTags(t *testing.T) {
-	got := ExpandSchedule(namedReservations("aws-h100"), nil, true, 2)
+	got := ExpandSchedule(namedReservations("aws-h100"), nil, nil, true, 2)
 	if v := versionsOf(got["aws-h100"]); !reflect.DeepEqual(v, []string{"main"}) {
 		t.Errorf("empty tags = %v, want [main]", v)
 	}
@@ -138,74 +138,88 @@ func TestExpandScheduleEmptyTags(t *testing.T) {
 
 func TestExpandScheduleNegativePreviousN(t *testing.T) {
 	// A negative previousN is clamped to zero (main only).
-	got := ExpandSchedule(namedReservations("aws-h100"), []string{"v1.0.0"}, true, -3)
+	got := ExpandSchedule(namedReservations("aws-h100"), nil, []string{"v1.0.0"}, true, -3)
 	if v := versionsOf(got["aws-h100"]); !reflect.DeepEqual(v, []string{"main"}) {
 		t.Errorf("negative previousN = %v, want [main]", v)
 	}
 }
 
-// TestEligibleNightlyIntents covers the per-intent min-version gate directly:
-// main runs everything, a release below an intent's minimum drops that intent,
-// a release at or above it keeps it, and untouched intents always run.
+// azureInferenceFloor gates azure inference release cells below v0.18.0.
+var azureInferenceFloor = &Compat{Floors: []Floor{{
+	Lane: CloudAzure, Intents: []string{IntentInference}, MinRelease: "v0.18.0", Reason: "perf fix", Line: 3,
+}}}
+
+// TestEligibleNightlyIntents covers the harness-compat gate directly: main
+// runs everything, a release below an intent's floor skips that intent (and
+// records why), a release at or above it keeps it, and ungated intents always
+// run.
 func TestEligibleNightlyIntents(t *testing.T) {
-	gated := Reservation{
-		Name:                     "azure-h100",
-		NightlyIntents:           []string{IntentTraining, IntentInference},
-		NightlyIntentMinVersions: map[string]string{IntentInference: "v0.18.0"},
-	}
+	azure := Reservation{Name: "azure-h100", Cloud: CloudAzure, NightlyIntents: []string{IntentTraining, IntentInference}}
+	skippedInference := []SkippedIntent{{Intent: IntentInference, Floor: "v0.18.0", Lane: CloudAzure, Reason: "perf fix"}}
+	both := []string{IntentTraining, IntentInference}
 	tests := []struct {
-		name    string
-		res     Reservation
-		version string
-		isMain  bool
-		want    []string
+		name        string
+		res         Reservation
+		compat      *Compat
+		version     string
+		isMain      bool
+		want        []string
+		wantSkipped []SkippedIntent
 	}{
-		{"main runs every intent despite the gate", gated, "", true, []string{IntentTraining, IntentInference}},
-		{"release below the gate drops inference", gated, "v0.17.0", false, []string{IntentTraining}},
-		{"release at the gate keeps inference", gated, "v0.18.0", false, []string{IntentTraining, IntentInference}},
-		{"release above the gate keeps inference", gated, "v0.19.0", false, []string{IntentTraining, IntentInference}},
+		{"main runs every intent despite the floor", azure, azureInferenceFloor, "", true, both, nil},
+		{"release below the floor skips inference", azure, azureInferenceFloor, "v0.17.0", false, []string{IntentTraining}, skippedInference},
+		{"release at the floor keeps inference", azure, azureInferenceFloor, "v0.18.0", false, both, nil},
+		{"release above the floor keeps inference", azure, azureInferenceFloor, "v0.19.0", false, both, nil},
+		{"nil compat runs every intent", azure, nil, "v0.1.0", false, both, nil},
+		{"empty compat runs every intent", azure, &Compat{Floors: []Floor{}}, "v0.1.0", false, both, nil},
 		{
-			"no gate runs every intent",
-			Reservation{Name: "aws-h100", NightlyIntents: []string{IntentTraining, IntentInference}},
-			"v0.1.0", false, []string{IntentTraining, IntentInference},
+			"floor on another lane does not apply",
+			Reservation{Name: "aws-h100", Cloud: CloudAWS, NightlyIntents: both},
+			azureInferenceFloor, "v0.1.0", false, both, nil,
 		},
 		{
 			"absent nightly-intents defaults to training and is ungated",
-			Reservation{Name: "x"},
-			"v0.1.0", false, []string{IntentTraining},
+			Reservation{Name: "x", Cloud: CloudAzure}, azureInferenceFloor, "v0.1.0", false, []string{IntentTraining}, nil,
 		},
+		{"unparseable release version fails open", azure, azureInferenceFloor, "not-a-semver", false, both, nil},
 		{
-			"unparseable release version fails open (keeps all intents)",
-			gated, "not-a-semver", false, []string{IntentTraining, IntentInference},
+			"unparseable floor fails open",
+			azure,
+			&Compat{Floors: []Floor{{Lane: CloudAzure, Intents: []string{IntentInference}, MinRelease: "bogus"}}},
+			"v0.1.0", false, both, nil,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.res.EligibleNightlyIntents(tt.version, tt.isMain)
+			got, skipped := tt.res.EligibleNightlyIntents(tt.compat, tt.version, tt.isMain)
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("EligibleNightlyIntents(%q, main=%v) = %v, want %v", tt.version, tt.isMain, got, tt.want)
+				t.Errorf("intents(%q, main=%v) = %v, want %v", tt.version, tt.isMain, got, tt.want)
+			}
+			if !reflect.DeepEqual(skipped, tt.wantSkipped) {
+				t.Errorf("skipped(%q, main=%v) = %+v, want %+v", tt.version, tt.isMain, skipped, tt.wantSkipped)
 			}
 		})
 	}
 }
 
-// TestExpandScheduleAppliesMinVersionGate verifies the gate flows through to
-// per-cell Cell.Intents: main and the at/above release carry both intents; the
-// below-minimum release carries only training.
-func TestExpandScheduleAppliesMinVersionGate(t *testing.T) {
-	res := Reservation{
-		Name:                     "azure-h100",
-		NightlyIntents:           []string{IntentTraining, IntentInference},
-		NightlyIntentMinVersions: map[string]string{IntentInference: "v2.0.0"},
-	}
-	got := ExpandSchedule([]Reservation{res}, []string{"v1.0.0", "v2.0.0"}, true, 2)
+// TestExpandScheduleAppliesCompatFloor verifies the floor flows through to
+// per-cell Intents and Skipped: main and the at/above release carry both
+// intents; the below-floor release carries only training and names the skip.
+func TestExpandScheduleAppliesCompatFloor(t *testing.T) {
+	res := Reservation{Name: "azure-h100", Cloud: CloudAzure, NightlyIntents: []string{IntentTraining, IntentInference}}
+	compat := &Compat{Floors: []Floor{{Lane: CloudAzure, Intents: []string{IntentInference}, MinRelease: "v2.0.0", Reason: "r"}}}
+	got := ExpandSchedule([]Reservation{res}, compat, []string{"v1.0.0", "v2.0.0"}, true, 2)
 	byVersion := map[string][]string{}
+	skippedBy := map[string][]SkippedIntent{}
 	for _, c := range got["azure-h100"] {
 		key := c.AICRVersion
 		if c.IsMain {
 			key = "main"
 		}
 		byVersion[key] = c.Intents
+		if c.Skipped != nil {
+			skippedBy[key] = c.Skipped
+		}
 	}
 	want := map[string][]string{
 		"main":   {IntentTraining, IntentInference},
@@ -214,6 +228,12 @@ func TestExpandScheduleAppliesMinVersionGate(t *testing.T) {
 	}
 	if !reflect.DeepEqual(byVersion, want) {
 		t.Errorf("per-cell intents = %v, want %v", byVersion, want)
+	}
+	wantSkipped := map[string][]SkippedIntent{
+		"v1.0.0": {{Intent: IntentInference, Floor: "v2.0.0", Lane: CloudAzure, Reason: "r"}},
+	}
+	if !reflect.DeepEqual(skippedBy, wantSkipped) {
+		t.Errorf("per-cell skipped = %+v, want %+v", skippedBy, wantSkipped)
 	}
 }
 

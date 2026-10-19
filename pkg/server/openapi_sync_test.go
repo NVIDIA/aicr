@@ -20,7 +20,6 @@ import (
 	"sort"
 	"testing"
 
-	bundlerconfig "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"gopkg.in/yaml.v3"
@@ -122,8 +121,10 @@ func TestOpenAPIDRAEvictionNodeLabelContract(t *testing.T) {
 		t.Errorf("component parameter name = %v, want dra-eviction-node-label", got)
 	}
 	schema := openAPIObjectAt(t, parameter, "schema")
-	if got, want := schema["default"], bundlerconfig.DefaultDRAEvictionNodeLabel().String(); got != want {
-		t.Errorf("component parameter default = %v, want %q", got, want)
+	// The eviction contract is opt-in (issue #2469): the parameter must carry
+	// no default, so an omitted parameter injects neither half.
+	if got, ok := schema["default"]; ok {
+		t.Errorf("component parameter default = %v, want none (opt-in)", got)
 	}
 }
 
@@ -191,9 +192,16 @@ func TestOpenAPIBundleContract(t *testing.T) {
 	legacyAPIVersion := openAPIObjectAt(t, legacyOverlay, "properties", "apiVersion")
 	legacyAPIVersions := openAPISequence(t, legacyAPIVersion["enum"],
 		"LegacyBundleRecipeRequest apiVersion enum")
-	for _, value := range []string{"", "aicr.run/v1alpha2", header.GroupVersionV1} {
-		if !openAPIHasString(legacyAPIVersions, value) {
-			t.Errorf("LegacyBundleRecipeRequest apiVersion enum missing %q", value)
+	// ADR-022 N+2 (#2417) narrowed this branch to the stable target. The
+	// retired members are asserted absent, not merely unlisted: the enum is the
+	// contract clients validate against, so a re-added "" or alpha value would
+	// re-advertise a tolerance the handler no longer has.
+	if !openAPIHasString(legacyAPIVersions, header.GroupVersionV1) {
+		t.Errorf("LegacyBundleRecipeRequest apiVersion enum missing %q", header.GroupVersionV1)
+	}
+	for _, value := range []string{"", header.RetiredGroupVersionV1Alpha2, header.RetiredGroupVersionV1Alpha3} {
+		if openAPIHasString(legacyAPIVersions, value) {
+			t.Errorf("LegacyBundleRecipeRequest apiVersion enum still advertises retired %q", value)
 		}
 	}
 	legacyKind := openAPIObjectAt(t, legacyOverlay, "properties", "kind")
@@ -255,7 +263,8 @@ func TestOpenAPIBundleContract(t *testing.T) {
 		"ConfiguredRecipeResponse metadata.propertyNames.enum")
 	for _, field := range []string{
 		"version", "appliedOverlays", "excludedOverlays", "constraintWarnings",
-		"gpuDriverState", "mariaDBOperatorState", "selectedProfile",
+		"gpuDriverState", "mariaDBOperatorState", "defaultStorageClassState",
+		"perconaOperatorState", "selectedProfile",
 	} {
 		if !openAPIHasString(configuredMetadataNames, field) {
 			t.Errorf("ConfiguredRecipeResponse metadata does not allow %s", field)
@@ -300,8 +309,10 @@ func TestOpenAPIBundleContract(t *testing.T) {
 	profileMetadataNames := openAPISequence(t,
 		openAPIObjectAt(t, profileMetadata, "propertyNames")["enum"],
 		"ProfileRecipeResponse metadata.propertyNames.enum")
-	if !openAPIHasString(profileMetadataNames, "mariaDBOperatorState") {
-		t.Error("ProfileRecipeResponse metadata does not allow mariaDBOperatorState")
+	for _, field := range []string{"mariaDBOperatorState", "defaultStorageClassState", "perconaOperatorState"} {
+		if !openAPIHasString(profileMetadataNames, field) {
+			t.Errorf("ProfileRecipeResponse metadata does not allow %s", field)
+		}
 	}
 	profileConfiguration := openAPIObjectAt(t, profileClosure, "properties", "configuration")
 	if got := profileConfiguration["$ref"]; got != "#/components/schemas/ConfiguredRecipeConfiguration" {

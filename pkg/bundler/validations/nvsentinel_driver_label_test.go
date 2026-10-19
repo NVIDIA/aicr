@@ -15,12 +15,12 @@
 package validations
 
 import (
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -588,7 +588,7 @@ func TestCheckNVSentinelDriverLabelDetectable(t *testing.T) {
 				t.Fatalf("errs = %d (%v), want %d", len(errs), errs, tt.wantErrs)
 			}
 			for _, err := range errs {
-				if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 					t.Errorf("hard error code = %v, want ErrCodeInvalidRequest", err)
 				}
 			}

@@ -210,50 +210,8 @@ func (b *BundleSpec) Resolve() (*BundleResolved, error) {
 		}
 	}
 
-	if b.Scheduling != nil {
-		if b.Scheduling.Nodes < 0 {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("spec.bundle.scheduling.nodes must be >= 0, got %d", b.Scheduling.Nodes))
-		}
-		out.Nodes = b.Scheduling.Nodes
-		out.StorageClass = b.Scheduling.StorageClass
-		out.SharedStorageClass = b.Scheduling.SharedStorageClass
-
-		// maps.Clone preserves nil-vs-explicitly-empty: clone(nil) is nil,
-		// clone({}) is non-nil empty.
-		out.SystemNodeSelector = maps.Clone(b.Scheduling.SystemNodeSelector)
-		out.AcceleratedNodeSelector = maps.Clone(b.Scheduling.AcceleratedNodeSelector)
-		out.WorkloadSelector = maps.Clone(b.Scheduling.WorkloadSelector)
-		var err error
-		out.DRAEvictionNodeLabel, err = resolveDRAEvictionNodeLabel(b.Scheduling.DRAEvictionNodeLabel)
-		if err != nil {
-			return nil, err
-		}
-
-		if b.Scheduling.SystemNodeTolerations != nil {
-			tols, err := snapshotter.ParseTolerations(b.Scheduling.SystemNodeTolerations)
-			if err != nil {
-				return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-					"invalid spec.bundle.scheduling.systemNodeTolerations", err)
-			}
-			out.SystemNodeTolerations = tols
-		}
-		if b.Scheduling.AcceleratedNodeTolerations != nil {
-			tols, err := snapshotter.ParseTolerations(b.Scheduling.AcceleratedNodeTolerations)
-			if err != nil {
-				return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-					"invalid spec.bundle.scheduling.acceleratedNodeTolerations", err)
-			}
-			out.AcceleratedNodeTolerations = tols
-		}
-		if b.Scheduling.WorkloadGate != "" {
-			t, err := snapshotter.ParseTaint(b.Scheduling.WorkloadGate)
-			if err != nil {
-				return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-					"invalid spec.bundle.scheduling.workloadGate", err)
-			}
-			out.WorkloadGate = t
-		}
+	if err := resolveScheduling(b.Scheduling, out); err != nil {
+		return nil, err
 	}
 
 	if err := resolveAttestation(b.Attestation, out); err != nil {
@@ -268,11 +226,78 @@ func (b *BundleSpec) Resolve() (*BundleResolved, error) {
 	return out, nil
 }
 
+// resolveScheduling copies s onto out. It returns an error naming the offending
+// spec.bundle.scheduling key for any invalid value, including a selector or
+// toleration the API server would reject. A nil s is a no-op.
+func resolveScheduling(s *SchedulingSpec, out *BundleResolved) error {
+	if s == nil {
+		return nil
+	}
+	if s.Nodes < 0 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("spec.bundle.scheduling.nodes must be >= 0, got %d", s.Nodes))
+	}
+	out.Nodes = s.Nodes
+	out.StorageClass = s.StorageClass
+	out.SharedStorageClass = s.SharedStorageClass
+
+	selectors := []struct {
+		path     string
+		selector map[string]string
+	}{
+		{"spec.bundle.scheduling.systemNodeSelector", s.SystemNodeSelector},
+		{"spec.bundle.scheduling.acceleratedNodeSelector", s.AcceleratedNodeSelector},
+		{"spec.bundle.scheduling.workloadSelector", s.WorkloadSelector},
+	}
+	for _, sel := range selectors {
+		if err := bundlercfg.ValidateNodeSelector(sel.selector); err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid "+sel.path, err)
+		}
+	}
+
+	// maps.Clone keeps a nil selector nil and an empty one empty.
+	out.SystemNodeSelector = maps.Clone(s.SystemNodeSelector)
+	out.AcceleratedNodeSelector = maps.Clone(s.AcceleratedNodeSelector)
+	out.WorkloadSelector = maps.Clone(s.WorkloadSelector)
+	var err error
+	out.DRAEvictionNodeLabel, err = resolveDRAEvictionNodeLabel(s.DRAEvictionNodeLabel)
+	if err != nil {
+		return err
+	}
+
+	if s.SystemNodeTolerations != nil {
+		tols, err := snapshotter.ParseTolerations(s.SystemNodeTolerations)
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest,
+				"invalid spec.bundle.scheduling.systemNodeTolerations", err)
+		}
+		out.SystemNodeTolerations = tols
+	}
+	if s.AcceleratedNodeTolerations != nil {
+		tols, err := snapshotter.ParseTolerations(s.AcceleratedNodeTolerations)
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest,
+				"invalid spec.bundle.scheduling.acceleratedNodeTolerations", err)
+		}
+		out.AcceleratedNodeTolerations = tols
+	}
+	if s.WorkloadGate != "" {
+		t, err := snapshotter.ParseTaint(s.WorkloadGate)
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest,
+				"invalid spec.bundle.scheduling.workloadGate", err)
+		}
+		out.WorkloadGate = t
+	}
+	return nil
+}
+
 // resolveAttestation projects the bundle attestation spec onto the resolved
 // output. It is a no-op when a is nil (the section is optional). Signing
-// endpoints are validated at this conversion boundary so a malformed config
-// value fails here with spec-path attribution (and is caught for non-CLI
-// callers of Resolve too), rather than only later in CLI flag parsing.
+// endpoints, signing mode, and the signing key's normal form are all settled at
+// this conversion boundary so a malformed config value fails here with
+// spec-path attribution (and is caught for non-CLI callers of Resolve too),
+// rather than only later in CLI flag parsing.
 func resolveAttestation(a *AttestationSpec, out *BundleResolved) error {
 	if a == nil {
 		return nil
@@ -280,13 +305,54 @@ func resolveAttestation(a *AttestationSpec, out *BundleResolved) error {
 	if err := validateAttestationEndpoints(a); err != nil {
 		return err
 	}
+	signingKey, err := resolveSigningKey(a)
+	if err != nil {
+		return err
+	}
 	out.Attest = a.Enabled
 	out.CertIDRegexp = a.CertificateIdentityRegexp
 	out.OIDCDeviceFlow = a.OIDCDeviceFlow
 	out.FulcioURL = a.FulcioURL
 	out.RekorURL = a.RekorURL
-	out.SigningKey = a.SigningKey
+	out.SigningKey = signingKey
 	return nil
+}
+
+// resolveSigningKey returns the normalized spec.bundle.attestation.signingKey,
+// rejecting a present-but-blank value and the one keyless setting that cannot
+// coexist with it.
+//
+// Signing mode is exclusive: a KMS key or keyless OIDC, never both.
+// attestation.ResolveAttesterLazy takes the KMS branch whenever SigningKey is
+// non-empty, so a document setting both would sign with the key while its
+// fulcioURL setting did nothing — the caller believing they signed against a
+// named Fulcio.
+//
+// oidcDeviceFlow is deliberately NOT part of that rule here, unlike fulcioURL.
+// Resolve runs before the CLI's flag-over-config merge, so rejecting the pair
+// eagerly would reject a document that sets both signingKey and
+// oidcDeviceFlow: true even when the caller passes --oidc-device-flow=false
+// specifically to correct it: the error would fire before that flag is ever
+// read. It is rejected after every caller's own precedence is applied instead,
+// by attestation.checkSigningMode, so no path reaches signing with both.
+// rekorURL is not a conflict either; it has its own exclusivity rule against
+// signingConfig.
+//
+// Trimming happens here rather than at a consumer because a YAML block scalar
+// carries surrounding whitespace, and an untrimmed key fails late in the KMS
+// URI parser instead of at the boundary that produced it.
+func resolveSigningKey(a *AttestationSpec) (string, error) {
+	key := strings.TrimSpace(a.SigningKey)
+	if a.SigningKey != "" && key == "" {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			"spec.bundle.attestation.signingKey must not be blank")
+	}
+	if key != "" && a.FulcioURL != "" {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			"spec.bundle.attestation.signingKey is mutually exclusive with "+
+				"spec.bundle.attestation.fulcioURL")
+	}
+	return key, nil
 }
 
 // validateAttestationEndpoints rejects malformed private Sigstore endpoints in
@@ -337,11 +403,27 @@ type ValidateResolved struct {
 	// config did not set the field.
 	ImagePullSecrets []string
 
-	// JobName is spec.validate.agent.jobName.
+	// JobName is spec.validate.agent.jobName — an optional Job name
+	// prefix, not a required name. Empty (config unset and no
+	// --job-name) lets the CLI's own default prefix ("aicr-validate")
+	// apply instead; either way the run ID is appended, so the deployed
+	// Job name is always run-scoped.
 	JobName string
 
-	// ServiceAccountName is spec.validate.agent.serviceAccountName.
+	// ServiceAccountName is spec.validate.agent.serviceAccountName. It is
+	// exact-if-exists: when a ServiceAccount of exactly this name already
+	// exists in the namespace, the live snapshot-capture agent runs as it
+	// verbatim and creates no RBAC for the run; otherwise it is an
+	// optional name prefix with the same empty-value behavior as JobName.
+	// See pkg/snapshotter.AgentConfig.ServiceAccountName.
 	ServiceAccountName string
+
+	// ValidatorServiceAccountName is
+	// spec.validate.agent.validatorServiceAccountName: an existing,
+	// administrator-provisioned ServiceAccount the validator Jobs run as
+	// instead of a per-run one. Empty keeps per-run RBAC. See
+	// pkg/validator.Validator.ServiceAccountName.
+	ValidatorServiceAccountName string
 
 	// NodeSelector is spec.validate.agent.nodeSelector. Nil if unset;
 	// non-nil empty if `{}` was explicit.
@@ -356,6 +438,13 @@ type ValidateResolved struct {
 
 	// Phases is spec.validate.execution.phases. Nil if unset.
 	Phases []string
+
+	// SkipChecks is spec.validate.execution.skipChecks. Nil if unset. The
+	// names are not validated against the check catalog here: the catalog is
+	// resolved from the recipe at validation time, and this layer has no
+	// recipe. pkg/validator's preflight rejects an unmatched name before any
+	// cluster work, so a typo still fails closed.
+	SkipChecks []string
 
 	// FailOnError is spec.validate.execution.failOnError. Nil pointer
 	// signals "config did not set the field" so the caller can defer to
@@ -443,8 +532,12 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 		out.Image = v.Agent.Image
 		out.JobName = v.Agent.JobName
 		out.ServiceAccountName = v.Agent.ServiceAccountName
+		out.ValidatorServiceAccountName = v.Agent.ValidatorServiceAccountName
 		out.RequireGPU = v.Agent.RequireGPU
 		out.ImagePullSecrets = slices.Clone(v.Agent.ImagePullSecrets)
+		if err := bundlercfg.ValidateNodeSelector(v.Agent.NodeSelector); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid spec.validate.agent.nodeSelector", err)
+		}
 		out.NodeSelector = maps.Clone(v.Agent.NodeSelector)
 		if v.Agent.Tolerations != nil {
 			if len(v.Agent.Tolerations) == 0 {
@@ -475,6 +568,13 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 			}
 		}
 		out.Phases = slices.Clone(v.Execution.Phases)
+		for _, c := range v.Execution.SkipChecks {
+			if strings.TrimSpace(c) == "" {
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					"invalid spec.validate.execution.skipChecks entry: check names must not be empty")
+			}
+		}
+		out.SkipChecks = slices.Clone(v.Execution.SkipChecks)
 		out.NoCluster = v.Execution.NoCluster
 		out.NoCleanup = v.Execution.NoCleanup
 		if v.Execution.FailOnError != nil {
@@ -641,10 +741,19 @@ type SnapshotResolved struct {
 	// config did not set the field.
 	ImagePullSecrets []string
 
-	// JobName is spec.snapshot.agent.jobName.
+	// JobName is spec.snapshot.agent.jobName — an optional Job name
+	// prefix, not a required name. Empty (config unset and no
+	// --job-name) lets the CLI's own default prefix ("aicr") apply
+	// instead; either way the run ID is appended, so the deployed Job
+	// name is always run-scoped.
 	JobName string
 
-	// ServiceAccountName is spec.snapshot.agent.serviceAccountName.
+	// ServiceAccountName is spec.snapshot.agent.serviceAccountName. It is
+	// exact-if-exists: when a ServiceAccount of exactly this name already
+	// exists in the namespace, the agent runs as it verbatim and creates
+	// no RBAC for the run; otherwise it is an optional name prefix with
+	// the same empty-value behavior as JobName. See
+	// pkg/snapshotter.AgentConfig.ServiceAccountName.
 	ServiceAccountName string
 
 	// NodeSelector is spec.snapshot.agent.nodeSelector. Nil if unset;
@@ -718,6 +827,9 @@ func (s *SnapshotSpec) Resolve() (*SnapshotResolved, error) {
 		out.Requests = s.Agent.Requests
 		out.Limits = s.Agent.Limits
 		out.ImagePullSecrets = slices.Clone(s.Agent.ImagePullSecrets)
+		if err := bundlercfg.ValidateNodeSelector(s.Agent.NodeSelector); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid spec.snapshot.agent.nodeSelector", err)
+		}
 		out.NodeSelector = maps.Clone(s.Agent.NodeSelector)
 		if s.Agent.Tolerations != nil {
 			if len(s.Agent.Tolerations) == 0 {
@@ -866,6 +978,23 @@ func (r *RecipeSpec) ResolveRuntimeInventoryMode() (recipe.RuntimeInventoryMode,
 			"invalid spec.recipe.configuration.runtimeInventory.mode")
 	}
 	return mode, true, nil
+}
+
+// ResolveGKETCPXOInterfaces validates
+// spec.recipe.configuration.gke.tcpxoInterfaces. The bool reports whether
+// the field was explicitly present; there is no default — the mapping is
+// cluster-specific and recipe generation fails closed when a TCPXO recipe
+// omits it.
+func (r *RecipeSpec) ResolveGKETCPXOInterfaces() ([]recipe.NetworkInterfaceMapping, bool, error) {
+	if r == nil || r.Configuration == nil || r.Configuration.GKE == nil {
+		return nil, false, nil
+	}
+	mapping := r.Configuration.GKE.TCPXOInterfaces
+	if err := recipe.ValidateGKETCPXOInterfaces(mapping); err != nil {
+		return nil, false, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+			"invalid spec.recipe.configuration.gke.tcpxoInterfaces")
+	}
+	return mapping, true, nil
 }
 
 // boolPtrOrFalse dereferences a *bool, treating nil (absent in

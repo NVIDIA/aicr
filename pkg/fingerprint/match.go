@@ -20,36 +20,51 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
-// Match compares the fingerprint against a recipe's criteria and
-// returns a per-dimension diff plus an overall Matched flag.
+// Match compares the fingerprint against a recipe's criteria using the
+// embedded OSS criteria registry. See MatchWith.
+func (f *Fingerprint) Match(c *recipe.Criteria) MatchResult {
+	return f.MatchWith(c, recipe.NewCriteriaRegistry())
+}
+
+// MatchWith compares the fingerprint against a recipe's criteria and
+// returns a per-dimension diff plus an overall Matched flag. reg decides
+// which criteria values are opt-in-only; nil selects the embedded OSS
+// registry.
 //
 // Per-dimension semantics:
-//   - Recipe value is empty / "any"  → matched (recipe is generic).
+//   - Recipe value is empty / "any"  → matched (recipe is a wildcard).
 //   - Recipe value is specific, fingerprint did not capture →
 //     unknown (the fingerprint cannot prove a match, but cannot
 //     disprove one either).
 //   - Recipe value is specific, fingerprint captured the same value
 //     → matched.
+//   - Recipe value is opt-in-only (reg.IsOptInOnly), fingerprint
+//     captured a different value → not-inferable: no measurement can
+//     ever yield the recipe's value, so the captured value is recorded
+//     in FingerprintProvides without being read as a contradiction.
 //   - Recipe value is specific, fingerprint captured a different
 //     value → mismatched.
 //
-// Overall Matched is true when no dimension is mismatched. Unknown
-// dimensions surface in PerDimension for human review without
-// flipping the overall outcome.
+// Overall Matched is true when no dimension is mismatched. Unknown and
+// not-inferable dimensions surface in PerDimension for human review
+// without flipping the overall outcome.
 //
 // Criteria fields that the cluster cannot reveal — Intent and
 // Platform — are reported as unknown when the recipe declares a
-// specific value, and matched when the recipe is generic. The
+// specific value, and matched when the recipe is a wildcard. The
 // fingerprint deliberately does not attempt to fabricate them.
 //
-// A nil criteria pointer is treated as a fully-generic recipe: every
+// A nil criteria pointer is treated as a fully-wildcard recipe: every
 // dimension is matched and the overall result is matched=true.
-func (f *Fingerprint) Match(c *recipe.Criteria) MatchResult {
+func (f *Fingerprint) MatchWith(c *recipe.Criteria, reg *recipe.CriteriaRegistry) MatchResult {
 	if c == nil {
 		c = recipe.NewCriteria()
 	}
 	if f == nil {
 		f = &Fingerprint{}
+	}
+	if reg == nil {
+		reg = recipe.NewCriteriaRegistry()
 	}
 
 	// Nodes uses 0 as the "any"/"not captured" sentinel; remap to ""
@@ -63,8 +78,12 @@ func (f *Fingerprint) Match(c *recipe.Criteria) MatchResult {
 	if f.NodeCount.Value == 0 {
 		fpNodes = ""
 	}
+	service := matchDim(DimensionService, string(c.Service), f.Service.Value, !isAny(f.Service.Value))
+	if service.Match == DimensionMismatched && reg.IsOptInOnly(recipe.FieldService, string(c.Service)) {
+		service.Match = DimensionNotInferable
+	}
 	diffs := []DimensionDiff{
-		matchDim(DimensionService, string(c.Service), f.Service.Value, !isAny(f.Service.Value)),
+		service,
 		matchDim(DimensionAccelerator, string(c.Accelerator), f.Accelerator.Value, !isAny(f.Accelerator.Value)),
 		matchDim(DimensionOS, string(c.OS), f.OS.Value, !isAny(f.OS.Value)),
 		matchDim(DimensionIntent, string(c.Intent), "", false),
@@ -83,9 +102,10 @@ func (f *Fingerprint) Match(c *recipe.Criteria) MatchResult {
 	return MatchResult{Matched: matched, PerDimension: diffs}
 }
 
-// matchDim is the shared three-way comparison. fingerprintCaptured is
-// false when the fingerprint did not detect this dimension (either by
-// design — intent and platform — or by signal absence).
+// matchDim is the shared comparison. fingerprintCaptured is false when
+// the fingerprint did not detect this dimension (either by design —
+// intent and platform — or by signal absence). Opt-in-only values are
+// reclassified by the caller, which holds the registry.
 func matchDim(name DimensionName, recipeRequires, fingerprintProvides string, fingerprintCaptured bool) DimensionDiff {
 	diff := DimensionDiff{
 		Dimension:           name,

@@ -25,6 +25,11 @@
 #     defaultRepository: Helm repository URL
 #     defaultChart:      Chart name (e.g., "nvidia/gpu-operator")
 #     defaultVersion:    Default chart version if not specified in recipe
+#     defaultDigest:     Optional sha256:<hex> of the pinned chart archive (the
+#                        .tgz, for OCI charts too); --vendor-charts refuses a
+#                        pulled chart that does not match. Place it after
+#                        defaultVersion, where the Renovate annotation regex
+#                        expects the version line.
 #   kustomize:         Default Kustomize settings (for Kustomize components)
 #     defaultSource:     Git repository or OCI reference
 #     defaultPath:       Path within the repository to the kustomization
@@ -32,12 +37,16 @@
 #   testTier:          Optional override for component test tier detection
 #                      (scheduling, deploy, or gpu-aware). Used by tools/component-test/.
 #   nodeScheduling:    Paths in Helm values where node selectors/tolerations are injected
+#   upgrades:          Component upgrade transition records (ADR-021)
+#     file:              Path to a ComponentUpgrades YAML file, relative to
+#                        the data directory (e.g.,
+#                        "components/nodewright-operator/upgrades.yaml")
 #
 # Note: A component must have either 'helm' OR 'kustomize' configuration, not both.
 # Node scheduling paths define WHERE CLI flags like --system-node-selector are applied.
 # The actual values come from CLI flags, not from this file.
 #
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 
 components:
@@ -50,6 +59,7 @@ components:
     helm:
       defaultRepository: https://kubernetes-sigs.github.io/node-feature-discovery/charts
       defaultChart: node-feature-discovery
+      # renovate: datasource=helm depName=node-feature-discovery registryUrl=https://kubernetes-sigs.github.io/node-feature-discovery/charts
       defaultVersion: "0.19.0"
       defaultNamespace: node-feature-discovery
     nodeScheduling:
@@ -95,12 +105,20 @@ components:
     # mitigation used for kube-prometheus-stack does not apply.
     # See https://github.com/NVIDIA/aicr/issues/914.
     hasSelfRefCRDs: true
+    # The opt-in gpu-operator-nvidia-driver-cr mixin attaches a
+    # NVIDIADriver CR as a post-manifest. Its CRD is installed by this chart,
+    # but helmfile diffs the post release before applying the primary release
+    # on a fresh cluster. Skip live REST-mapper validation for that wrapper.
+    manifestsUseChartCRDs: true
     healthCheck:
       assertFile: checks/gpu-operator/health-check.yaml
+    upgrades:
+      file: components/gpu-operator/upgrades.yaml
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/gpu-operator
-      defaultVersion: v26.3.3
+      # renovate: datasource=helm depName=gpu-operator registryUrl=https://helm.ngc.nvidia.com/nvidia
+      defaultVersion: v26.7.2
       defaultNamespace: gpu-operator
     nodeScheduling:
       system:
@@ -109,8 +127,10 @@ components:
         tolerationPaths:
           - operator.tolerations
       accelerated:
-        nodeSelectorPaths:
-          - daemonsets.nodeSelector
+        # No nodeSelectorPaths: the gpu-operator chart and ClusterPolicy CRD have no
+        # daemonsets.nodeSelector — operands are placed by the operator's own
+        # GFD/NFD-driven deploy labels. Routing --accelerated-node-selector here was
+        # silently ignored (#2474).
         tolerationPaths:
           - daemonsets.tolerations
     validations:
@@ -145,6 +165,8 @@ components:
         severity: error
 
   - name: network-operator
+    # Bundled NFD supplies the CRD used by this chart's NodeFeatureRule template.
+    hasSelfRefCRDs: true
     displayName: network-operator
     valueOverrideKeys:
       - networkoperator
@@ -161,17 +183,29 @@ components:
     manifestsUseChartCRDs: true
     healthCheck:
       assertFile: checks/network-operator/health-check.yaml
+    upgrades:
+      file: components/network-operator/upgrades.yaml
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/network-operator
-      defaultVersion: "26.4.1"
+      # renovate: datasource=helm depName=network-operator registryUrl=https://helm.ngc.nvidia.com/nvidia
+      defaultVersion: "26.7.0"
       defaultNamespace: nvidia-network-operator
     nodeScheduling:
       system:
         nodeSelectorPaths:
           - operator.nodeSelector
+          # The maintenance-operator subchart's deployment reads its own
+          # scoped operator.* placement values; the values key is the
+          # dependency name (maintenance-operator-chart, unaliased).
+          - maintenance-operator-chart.operator.nodeSelector
+          - node-feature-discovery.master.nodeSelector
+          - node-feature-discovery.gc.nodeSelector
         tolerationPaths:
           - operator.tolerations
+          - maintenance-operator-chart.operator.tolerations
+          - node-feature-discovery.master.tolerations
+          - node-feature-discovery.gc.tolerations
 
   - name: gke-nccl-tcpxo
     displayName: gke-nccl-tcpxo
@@ -179,6 +213,22 @@ components:
       - gkenccltcpxo
     healthCheck:
       assertFile: checks/gke-nccl-tcpxo/health-check.yaml
+    helm:
+      # Manifest-only component - no external Helm chart, uses manifestFiles
+      defaultRepository: ""
+      defaultNamespace: kube-system
+
+  # DraNet DRA network driver (kubernetes-sigs/dranet) for the ConnectX-9 RDMA
+  # fabric on VR200 (Vera Rubin NVL72) RKE2 clusters. Manifest-only (vendored
+  # dranet.yaml) — evaluated as a lean alternative to the NVIDIA Network
+  # Operator. Publishes the mlx5 NICs as ResourceSlices (driver dra.net) and
+  # injects them into pods via NRI; DeviceClass mlnx-cx9.
+  - name: dranet
+    displayName: dranet
+    valueOverrideKeys:
+      - dranet
+    healthCheck:
+      assertFile: checks/dranet/health-check.yaml
     helm:
       # Manifest-only component - no external Helm chart, uses manifestFiles
       defaultRepository: ""
@@ -208,6 +258,26 @@ components:
         tolerationPaths:
           - acceleratedTolerations
 
+  # gvnic-1/rdma-0..3 are a cluster provisioning prerequisite (see
+  # docs/integrator/gke-gb200-networking.md), not created by this component;
+  # this only ships the gIB installer DaemonSet.
+  - name: gke-gb200-rdma
+    displayName: gke-gb200-rdma
+    valueOverrideKeys:
+      - gkegb200rdma
+    nodeScheduling:
+      accelerated:
+        nodeSelectorPaths:
+          - acceleratedNodeSelector
+        tolerationPaths:
+          - acceleratedTolerations
+    healthCheck:
+      assertFile: checks/gke-gb200-rdma/health-check.yaml
+    helm:
+      # Manifest-only component - no external Helm chart, uses manifestFiles
+      defaultRepository: ""
+      defaultNamespace: kube-system
+
   - name: aws-efa
     displayName: aws-efa
     valueOverrideKeys:
@@ -218,6 +288,7 @@ components:
     helm:
       defaultRepository: https://aws.github.io/eks-charts
       defaultChart: aws-efa-k8s-device-plugin
+      # renovate: datasource=helm depName=aws-efa-k8s-device-plugin registryUrl=https://aws.github.io/eks-charts
       defaultVersion: v0.5.29
       defaultNamespace: kube-system
     nodeScheduling:
@@ -236,6 +307,7 @@ components:
     helm:
       defaultRepository: https://charts.jetstack.io
       defaultChart: jetstack/cert-manager
+      # renovate: datasource=helm depName=cert-manager registryUrl=https://charts.jetstack.io
       defaultVersion: v1.20.2
       defaultNamespace: cert-manager
     nodeScheduling:
@@ -251,6 +323,38 @@ components:
           - cainjector.tolerations
           - startupapicheck.tolerations
 
+  - name: node-problem-detector
+    displayName: Node Problem Detector
+    valueOverrideKeys:
+      - npd
+      - nodeproblemdetector
+    healthCheck:
+      assertFile: checks/node-problem-detector/health-check.yaml
+    helm:
+      defaultRepository: oci://ghcr.io/deliveryhero/helm-charts
+      defaultChart: node-problem-detector
+      # renovate: datasource=docker depName=ghcr.io/deliveryhero/helm-charts/node-problem-detector
+      defaultVersion: "2.4.1"
+      defaultNamespace: node-problem-detector
+    # No nodeScheduling block on purpose. The only toleration path this chart
+    # exposes is `tolerations`, which components/node-problem-detector/
+    # values.yaml already sets to a wildcard. System-toleration injection
+    # REPLACES that value, so wiring it here would let
+    # --system-node-toleration narrow the wildcard and stop the DaemonSet
+    # scheduling onto GPU-tainted nodes -- the opposite of what it is for.
+    validations:
+      - function: CheckNPDNotDuplicatingProviderNPD
+        # Blocking: two NPD instances race to own the same Node Conditions and
+        # the loser's writes are silently overwritten -- no error anywhere,
+        # just conditions that flap.
+        #
+        # No `conditions:` block on purpose. That field can only express
+        # "run when the criteria match", so it cannot say "permit only the
+        # platforms we have checked". The allowlist lives in the function
+        # (npdQualifiedServices), which rejects unverified platforms, OpenShift
+        # and Talos with a reason specific to each.
+        severity: error
+
   - name: nodewright-operator
     displayName: nodewright
     valueOverrideKeys:
@@ -258,11 +362,28 @@ components:
       - skyhook
     healthCheck:
       assertFile: checks/nodewright-operator/health-check.yaml
+    upgrades:
+      file: components/nodewright-operator/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/nvidia/nodewright/charts
       defaultChart: nodewright
-      defaultVersion: v0.17.1
-      defaultNamespace: skyhook
+      # v0.18.0 renamed Skyhook to NodeWright and writes completion status only
+      # on the new kind; the deployment readiness gate resolves the served group
+      # by discovery rather than assuming either one (#2593). v0.19.0 then made
+      # drain wait for evicted pods to terminate rather than to be accepted, so
+      # interrupts start later and an undrainable pod holds a node in
+      # in_progress without bound. v0.19.1 raises the interrupt pod's memory to
+      # 256Mi so the agent is not OOM-killed mid-reboot on 64K-page arm64 nodes
+      # (#3101). v0.20.0 refuses to start on a runtime-required taint key with a
+      # DNS prefix or over 53 characters, and stops releasing cordons it did not
+      # place (#3207). Every boundary here carries a transition record.
+      # The legacy skyhook.nvidia.com group, taint key, and
+      # metrics remain served through v0.20.x and are removed in v0.21.0, which
+      # is not reachable until the remaining skyhook.nvidia.com references in
+      # health checks and overlays are migrated.
+      # renovate: datasource=docker depName=ghcr.io/nvidia/nodewright/charts/nodewright
+      defaultVersion: v0.20.0
+      defaultNamespace: nodewright
     nodeScheduling:
       nodeCountPaths:
         - estimatedNodeCount
@@ -274,6 +395,11 @@ components:
       accelerated:
         taintStrPaths:
           - controllerManager.manager.env.runtimeRequiredTaint
+    validations:
+      - function: CheckNodewrightRuntimeRequiredTaintKey
+        # Blocking: from v0.20.0 the operator refuses to start on such a key,
+        # and before it every NodeWright stalled once auto-taint fired.
+        severity: error
 
   - name: nodewright-customizations
     displayName: nodewright-customizations
@@ -285,7 +411,7 @@ components:
     helm:
       # Manifest-only component - no external Helm chart, uses manifestFiles
       defaultRepository: ""
-      defaultNamespace: skyhook
+      defaultNamespace: nodewright
     nodeScheduling:
       accelerated:
         nodeSelectorPaths:
@@ -323,11 +449,33 @@ components:
           which deadlocks nodewright packages that declare interrupts on first
           install (NVIDIA/nodewright#296). Pass keyed tolerations instead, e.g.
           --accelerated-node-toleration nvidia.com/gpu:NoSchedule."
+      - function: CheckGB300HostKernelGranule
+        # Advisory, not blocking: a 4k-granule host still boots and runs, it
+        # just comes up without the 512M pool the profile sizes. Bundle time
+        # has no cluster-side signal to tell the two apart.
+        severity: info
+        conditions:
+          service:
+            - generic
+          accelerator:
+            - gb300
+        message: "nvidia-gb300-performance sizes hugepages for a 64k-page ARM64
+          kernel (2M + 512M). On a 4k-granule host image the hugepagesz=512M
+          clause is rejected at boot and its paired hugepages= count is dropped
+          silently, so the node runs without that pool. Prefer a 64k host
+          kernel; see docs/integrator/components/nodewright.md."
 
   - name: nvsentinel
-    # Sole owner of its CRDs and no webhook conversion (audited, #2264).
+    # Sole owner of its CRDs and no webhook conversion (audited, #2264),
+    # except the Percona CRDs its mongodb-store subchart embeds: those belong
+    # to psmdb-operator, and apply-crds would otherwise re-apply the embedded
+    # copy over them.
     ownsCRDs: true
+    ownsCRDsExcludeSubcharts:
+      - mongodb-store
     displayName: nvsentinel
+    upgrades:
+      file: components/nvsentinel/upgrades.yaml
     valueOverrideKeys:
       - nv-sentinel
     # nvsentinel's templates create monitoring.coreos.com/v1 PodMonitor
@@ -341,7 +489,8 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/nvidia
       defaultChart: nvsentinel
-      defaultVersion: v1.20.0
+      # renovate: datasource=docker depName=ghcr.io/nvidia/nvsentinel
+      defaultVersion: v1.26.0
       defaultNamespace: nvsentinel
     nodeScheduling:
       system:
@@ -349,20 +498,142 @@ components:
           - global.systemNodeSelector
         tolerationPaths:
           - global.systemNodeTolerations
+    # Opt-in surface for the nvsentinel-observability (#2617),
+    # nvsentinel-object-monitor (#2612), nvsentinel-preflight (#2610),
+    # nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor (#2611),
+    # nvsentinel-observe, -quarantine and -remediation, and
+    # nvsentinel-slinky-drainer (#2615) and nvsentinel-health-events-analyzer
+    # (#2618) mixins: the exact leaf
+    # paths a mixin may set on this
+    # already-base-chained component. global.tracing.endpoint is
+    # deliberately absent -- it must come from outside the mixin (a leaf
+    # recipe's own override, or an operator --set), never from a mixin, so
+    # CheckNVSentinelTracingEndpointRequired always has a real value to
+    # demand. See pkg/recipe/metadata_store.go's mixinOverridesSafeForMerge
+    # for how this allowlist is enforced.
+    #
+    # preflight.initContainers is allowlisted, and the mixin restates the whole
+    # list, because the chart's default is not safe here: preflight-nccl-allreduce
+    # is injected into every GPU pod, but POD_NAME is injected only when the pod
+    # carries a gang annotation at CREATE. A non-gang pod therefore fails the
+    # check's own config load and is stuck in Init:Error on healthy hardware.
+    # defaultEnabled is the chart's only per-check switch and it lives inside the
+    # list, so owning the list is the only way to turn that check off.
+    # Restating pins chart content (images, thresholds, the DCGM address), so
+    # TestNVSentinelPreflightInitContainersMatchChart diffs the mixin's list
+    # against the chart's on every render-check run.
+    mixinSafeOverridePaths:
+      - global.auditLogging.enabled
+      - global.auditLogging.logRequestBody
+      - global.auditLogging.maxSizeMB
+      - global.auditLogging.maxBackups
+      - global.auditLogging.maxAgeDays
+      - global.auditLogging.compress
+      - global.tracing.enabled
+      - global.tracing.insecure
+      - global.kubernetesObjectMonitor.enabled
+      - kubernetes-object-monitor.policies
+      - global.preflight.enabled
+      - preflight.processingStrategy
+      - preflight.webhook.failurePolicy
+      - preflight.gangCoordination.enabled
+      - preflight.gangDiscovery.name
+      - preflight.gangDiscovery.annotationKeys
+      - preflight.gangDiscovery.podGroupGVR.group
+      - preflight.gangDiscovery.podGroupGVR.version
+      - preflight.gangDiscovery.podGroupGVR.resource
+      - preflight.gangDiscovery.minCountExpr
+      - preflight.initContainers
+      - global.nicHealthMonitor.enabled
+      - nic-health-monitor.processingStrategy
+      - global.slurmDrainMonitor.enabled
+      - slurm-drain-monitor.namespace
+      - slurm-drain-monitor.labelSelector
+      - slurm-drain-monitor.processingStrategy
+      - slurm-drain-monitor.patterns
+      - global.dryRun
+      - global.certificateRotationEnabled
+      - global.datastore.provider
+      - global.datastore.credentialsFromSecret.name
+      - global.datastore.connection.database
+      - global.datastore.tls.enabled
+      - global.datastore.auth.mechanism
+      - global.datastore.auth.clientCertSecretName
+      - global.datastore.auth.x509ApplicationUserDN
+      - global.datastore.auth.x509DgxcopsUserDN
+      - global.datastore.setupJob.image.repository
+      - global.datastore.setupJob.image.tag
+      - global.faultQuarantine.enabled
+      - global.nodeDrainer.enabled
+      - global.faultRemediation.enabled
+      - global.janitor.enabled
+      - global.janitorProvider.enabled
+      - gpu-health-monitor.processingStrategy
+      - syslog-health-monitor.processingStrategy
+      - fault-remediation.maxRemediationAttempts
+      - fault-remediation.maintenance.actions.COMPONENT_RESET.apiGroup
+      - fault-remediation.maintenance.actions.COMPONENT_RESET.version
+      - fault-remediation.maintenance.actions.COMPONENT_RESET.kind
+      - fault-remediation.maintenance.actions.COMPONENT_RESET.scope
+      - fault-remediation.maintenance.actions.COMPONENT_RESET.completeConditionType
+      - fault-remediation.maintenance.actions.COMPONENT_RESET.templateFileName
+      - fault-remediation.maintenance.actions.COMPONENT_RESET.equivalenceGroup
+      - fault-remediation.maintenance.actions.COMPONENT_RESET.impactedEntityScope
+      - fault-remediation.maintenance.actions.COMPONENT_RESET.supersedingEquivalenceGroups
+      - fault-remediation.maintenance.templates.gpureset
+      - janitor-provider.csp.generic.rebootImage
+      - node-drainer.userNamespaces
+      - node-drainer.customDrain.enabled
+      - node-drainer.customDrain.templateConfigMapName
+      - node-drainer.customDrain.templateMountPath
+      - node-drainer.customDrain.templateFileName
+      - node-drainer.customDrain.namespace
+      - node-drainer.customDrain.apiGroup
+      - node-drainer.customDrain.version
+      - node-drainer.customDrain.kind
+      - node-drainer.customDrain.resource
+      - node-drainer.customDrain.statusConditionType
+      - node-drainer.customDrain.statusConditionStatus
+      - node-drainer.customDrain.timeout
+      - global.healthEventsAnalyzer.enabled
+      - health-events-analyzer.processingStrategy
+      - health-events-analyzer.enableMultipleRemediationsRule
+      - health-events-analyzer.enableRepeatedXIDErrorOnSameGPURule
+      - health-events-analyzer.enableRepeatedXID31OnSameGPURule
+      - health-events-analyzer.enableRepeatedXID31OnDifferentGPURule
+      - health-events-analyzer.enableRepeatedXID13OnSameGPCAndTPCRule
+      - health-events-analyzer.enableRepeatedXID13OnDifferentGPCAndTPCRule
+      - health-events-analyzer.enableXIDErrorSoloNoBurstRule
+      - health-events-analyzer.enableXID74Reg0SoloNVLinkErrorRule
+      - health-events-analyzer.enableXID74Reg0ECCParityErrorRule
+      - health-events-analyzer.enableRepeatedXID74Reg0HardwareIssueRule
+      - health-events-analyzer.enableXID74Reg0SignalIntegrityErrorRule
+      - health-events-analyzer.enableXID74Reg0Bit27Or29SetRule
+      - health-events-analyzer.enableRepeatedXID74Reg2HardwareIssueRule
+      - health-events-analyzer.enableXID74Reg2Bit13SetRule
+      - health-events-analyzer.enableRepeatedXID74Reg2Bit16Or19SetRule
+      - health-events-analyzer.enableRepeatedXID74Reg2Bit17Or18SetRule
+      - health-events-analyzer.enableXID74Reg3UnexpectedErrorRule
+      - health-events-analyzer.enableXID74Reg3Bit18SetRule
+      - health-events-analyzer.enableXID74Reg4HardwareIssueRule
+      - health-events-analyzer.enableXID74Reg4ECCErrorRule
+      - health-events-analyzer.enableRepeatedNICDriverErrorRule
+      - health-events-analyzer.enableRepeatedNICDegradationRule
     validations:
       # Blocking: the NVSentinel labeler decides
       # nvsentinel.dgxc.nvidia.com/driver.installed by watching for a GPU
       # driver pod. Where the driver ships in the node image (or the host)
       # and no driver pod exists (AKS gpuStack=azure-managed, GKE COS
-      # gpuStack=gke-default, OKE, Kind), the label is never applied and
+      # gpuStack=gke-default, OKE gpuStack=oci-managed,
+      # Kind), the label is never applied and
       # metadata-collector plus both syslog-health-monitor DaemonSets sit
       # at 0 desired pods — with no error and no event, while
       # gpu-health-monitor stays healthy on the DCGM label. The chart
       # automates the remedy via labeler.assumeDriverInstalled
       # (--assume-driver-installed, NVSentinel design 018's Manual
       # Labeling Procedure). Every one of those recipes now assigns it
-      # itself — from the gpuStack profile on AKS and GKE-COS, at overlay
-      # level on OKE and Kind (#2181) — so this gate is defense in depth
+      # itself — from the gpuStack profile on AKS, GKE-COS, and OKE, at
+      # overlay level on Kind (#2181) — so this gate is defense in depth
       # rather than the primary mechanism. GKE
       # gpuStack=bundle-installer and AKS gpuStack=operator-managed
       # assign an explicit false: a driver pod exists there for the
@@ -386,6 +657,161 @@ components:
       # pods admitted. Issue #2176.
       - function: CheckNVSentinelRuntimeClassCoherence
         severity: error
+      # Blocking: the chart has no `required` guard on
+      # global.tracing.endpoint (templates/daemonset.yaml), so
+      # global.tracing.enabled=true with no endpoint renders and deploys
+      # silently — the OTel exporter fails at runtime with nothing visible
+      # to `aicr bundle`/`aicr validate`. A no-op for every recipe that
+      # doesn't set global.tracing.enabled.
+      - function: CheckNVSentinelTracingEndpointRequired
+        severity: error
+      # Blocking: the preflight DCGM check reaches the hostengine at a fixed
+      # address inside preflight.initContainers, so it is only correct while
+      # gpu-operator sits in its default namespace. The os-talos mixin
+      # relocates it, and the mismatch is invisible until a GPU pod starts in
+      # a labeled namespace. A no-op unless global.preflight.enabled is set.
+      - function: CheckNVSentinelPreflightDCGMReachable
+        severity: error
+      # Blocking: the mixin's kai-scheduler dependencyRef only orders the
+      # install, and the bundler prunes an edge to a declared-but-disabled
+      # component. Without the PodGroup CRD the preflight controller
+      # crash-loops, and failurePolicy: Ignore then admits every GPU pod
+      # unchecked. A no-op unless preflight gang discovery targets KAI.
+      - function: CheckNVSentinelPreflightGangSchedulerRequired
+        severity: error
+      # Blocking: nic-health-monitor discovers which NICs to check from the
+      # GPU-to-NIC topology metadata-collector writes to
+      # /var/lib/nvsentinel/gpu_metadata.json. Enabled without it, and
+      # without a usable nicInclusionRegexOverride -- one whose every
+      # comma-separated pattern compiles, since the monitor refuses to
+      # start otherwise -- the DaemonSet renders, deploys, and checks
+      # nothing, invisible to `aicr bundle`/`aicr validate`. A no-op for
+      # every recipe that doesn't set global.nicHealthMonitor.enabled.
+      - function: CheckNVSentinelNicHealthMonitorRequiresMetadataCollector
+        severity: error
+      # Blocking: slurm-drain-monitor watches worker pods in one namespace,
+      # and only slinky-slurm creates them there. Enabled on a recipe without
+      # slinky-slurm, or watching a namespace slinky-slurm does not deploy to,
+      # the Deployment renders, runs, and never sees a pod -- with nothing in
+      # `aicr bundle`/`aicr validate` to show it. A no-op for every recipe that
+      # doesn't set global.slurmDrainMonitor.enabled.
+      - function: CheckNVSentinelSlurmDrainMonitorRequiresSlinky
+        severity: error
+      # Blocking: a remediation pipeline whose stages, datastore, GPU reset
+      # Job or health-events-analyzer cannot work together. The rules are in
+      # the function's doc.
+      - function: CheckNVSentinelRemediationPipelineCoherent
+        severity: error
+      # Blocking: on a Slurm recipe node-drainer must drain through the
+      # slinky-drainer plugin (#2615), not pod eviction, and customDrain must
+      # match what that plugin needs. The rules are in the function's doc.
+      - function: CheckNVSentinelSlurmCustomDrainCoherent
+        severity: error
+
+  # NVSentinel's remediation datastore, added only by the nvsentinel-observe,
+  # -quarantine and -remediation mixins. Bundled apart from NVSentinel's own
+  # mongodb-store subchart so AICR sets the Percona version and steps its
+  # upgrades one minor at a time.
+  - name: psmdb-operator
+    displayName: Percona Operator for MongoDB
+    # Sole owner of the psmdb.percona.com CRDs; none uses webhook conversion.
+    ownsCRDs: true
+    valueOverrideKeys:
+      - psmdboperator
+    healthCheck:
+      assertFile: checks/psmdb-operator/health-check.yaml
+    upgrades:
+      file: components/psmdb-operator/upgrades.yaml
+    helm:
+      defaultRepository: https://percona.github.io/percona-helm-charts/
+      defaultChart: psmdb-operator
+      # renovate: datasource=helm depName=psmdb-operator registryUrl=https://percona.github.io/percona-helm-charts/
+      defaultVersion: "1.23.2"
+      defaultNamespace: nvsentinel
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - nodeSelector
+        tolerationPaths:
+          - tolerations
+
+  - name: nvsentinel-mongodb
+    displayName: NVSentinel MongoDB
+    valueOverrideKeys:
+      - nvsentinelmongodb
+    healthCheck:
+      assertFile: checks/nvsentinel-mongodb/health-check.yaml
+    helm:
+      defaultRepository: https://percona.github.io/percona-helm-charts/
+      defaultChart: psmdb-db
+      # renovate: datasource=helm depName=psmdb-db registryUrl=https://percona.github.io/percona-helm-charts/
+      defaultVersion: "1.23.3"
+      defaultNamespace: nvsentinel
+    manifestFiles:
+      - components/nvsentinel-mongodb/manifests/client-certificate.yaml
+      - components/nvsentinel-mongodb/manifests/connection.yaml
+    storageClassPaths:
+      - replsets.rs0.volumeSpec.pvc.storageClassName
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - replsets.rs0.nodeSelector
+        # Each member's PVC binds to the zone of the node it first lands
+        # on; an unpinned member on a GPU node strands its volume there.
+        requireNodeSelector: true
+        tolerationPaths:
+          - replsets.rs0.tolerations
+    validations:
+      # Blocking: a datastore NVSentinel cannot use or psmdb-operator cannot
+      # reconcile. The rules are in the function's doc.
+      - function: CheckNVSentinelMongoDBCoherent
+        severity: error
+      # Mixed-severity policy: a blocking error when the snapshot shows no
+      # default StorageClass for the classless volumes, another Percona
+      # operator or cluster whose CRDs psmdb-operator would replace, or
+      # evidence it could not read; a non-blocking warning when the recipe
+      # carries no snapshot evidence or only the psmdb.percona.com CRDs.
+      - function: CheckNVSentinelDatastorePrerequisites
+        severity: warning
+
+  # NVSentinel's slinky-drainer plugin, added only by the
+  # nvsentinel-slinky-drainer mixin. Manifest-only: upstream ships it as
+  # Kustomize, and vendoring the v1.26.0 manifests keeps its image pinned,
+  # inventoried and mirrored under every deployer. Its DrainRequest CRD is
+  # the separate slinky-drainer-crds component, which the plugin and
+  # nvsentinel declare as a dependencyRef, so the CRD is installed and
+  # waited for before either starts (ownsCRDs does not apply to a
+  # manifest-only wrapper).
+  - name: slinky-drainer-crds
+    displayName: slinky-drainer-crds
+    valueOverrideKeys:
+      - slinkydrainercrds
+    healthCheck:
+      assertFile: checks/slinky-drainer-crds/health-check.yaml
+    helm:
+      defaultRepository: ""
+      defaultNamespace: nvsentinel
+    manifestFiles:
+      - components/slinky-drainer-crds/manifests/drainrequest-crd.yaml
+
+  - name: slinky-drainer
+    displayName: slinky-drainer
+    valueOverrideKeys:
+      - slinkydrainer
+    healthCheck:
+      assertFile: checks/slinky-drainer/health-check.yaml
+    helm:
+      defaultRepository: ""
+      defaultNamespace: nvsentinel
+    manifestFiles:
+      - components/slinky-drainer/manifests/drain-template.yaml
+      - components/slinky-drainer/manifests/slinky-drainer.yaml
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - systemNodeSelector
+        tolerationPaths:
+          - systemTolerations
 
   - name: nvidia-dra-driver-gpu
     displayName: nvidia-dra-driver-gpu
@@ -396,7 +822,8 @@ components:
     helm:
       defaultRepository: oci://registry.k8s.io/dra-driver-nvidia/charts
       defaultChart: dra-driver-nvidia-gpu
-      defaultVersion: "0.4.1"
+      # renovate: datasource=docker depName=registry.k8s.io/dra-driver-nvidia/charts/dra-driver-nvidia-gpu
+      defaultVersion: "0.5.0"
       defaultNamespace: nvidia-dra-driver
     nodeScheduling:
       system:
@@ -409,6 +836,29 @@ components:
           - kubeletPlugin.nodeSelector
         tolerationPaths:
           - kubeletPlugin.tolerations
+
+  # Mirrors GFD's nvidia.com/gpu.present onto the DRA eviction label the
+  # kubelet plugin selects on, so opting in to Driver Manager eviction
+  # (--dra-eviction-node-label) no longer requires labeling GPU node pools by
+  # hand (#2676). Manifest-only. The bundler removes it from the bundle unless
+  # the eviction label is configured, and owns labelKey/labelValue. Affinity is
+  # authored on gpu.present in the manifest (hardware truth); only accelerated
+  # tolerations are injected.
+  - name: dra-node-labeler
+    displayName: dra-node-labeler
+    valueOverrideKeys:
+      - dranodelabeler
+    healthCheck:
+      assertFile: checks/dra-node-labeler/health-check.yaml
+    helm:
+      defaultRepository: ""
+      defaultNamespace: gpu-operator
+    manifestFiles:
+      - components/dra-node-labeler/manifests/dra-node-labeler.yaml
+    nodeScheduling:
+      accelerated:
+        tolerationPaths:
+          - acceleratedTolerations
 
   - name: prometheus-operator-crds
     displayName: prometheus-operator-crds
@@ -429,6 +879,7 @@ components:
     helm:
       defaultRepository: https://prometheus-community.github.io/helm-charts
       defaultChart: prometheus-community/prometheus-operator-crds
+      # renovate: datasource=helm depName=prometheus-operator-crds registryUrl=https://prometheus-community.github.io/helm-charts
       defaultVersion: 28.0.1
       defaultNamespace: monitoring
 
@@ -447,6 +898,7 @@ components:
     helm:
       defaultRepository: https://prometheus-community.github.io/helm-charts
       defaultChart: prometheus-community/kube-prometheus-stack
+      # renovate: datasource=helm depName=kube-prometheus-stack registryUrl=https://prometheus-community.github.io/helm-charts
       defaultVersion: 84.4.0
       defaultNamespace: monitoring
     nodeScheduling:
@@ -460,6 +912,18 @@ components:
           - kube-state-metrics.nodeSelector
           - prometheus-node-exporter.nodeSelector
           - thanosRuler.thanosRulerSpec.nodeSelector
+        # This chart defaults prometheus.prometheusSpec.storageSpec to
+        # emptyDir, so there is no PVC and no zone-pinning hazard until
+        # --storage-class configures one. Once it does, an unpinned
+        # prometheus pod can land on a GPU node and inherit its zone; the
+        # PVC then binds to that zone, and a later reschedule onto the
+        # correct system-node pool in a different zone gets stuck forever
+        # waiting on a PVC it can't attach to.
+        # requireNodeSelectorIfStorageClassSet fails the bundle instead of
+        # shipping this misconfiguration silently, without forcing every
+        # bundle of this near-universal base component to pass
+        # --system-node-selector when it has no PVC to strand at all.
+        requireNodeSelectorIfStorageClassSet: true
         tolerationPaths:
           - prometheus.prometheusSpec.tolerations
           - alertmanager.alertmanagerSpec.tolerations
@@ -481,6 +945,7 @@ components:
     helm:
       defaultRepository: https://prometheus-community.github.io/helm-charts
       defaultChart: prometheus-community/prometheus-adapter
+      # renovate: datasource=helm depName=prometheus-adapter registryUrl=https://prometheus-community.github.io/helm-charts
       defaultVersion: 5.3.0
       defaultNamespace: monitoring
     nodeScheduling:
@@ -500,6 +965,7 @@ components:
     helm:
       defaultRepository: https://kubernetes-sigs.github.io/aws-ebs-csi-driver
       defaultChart: aws-ebs-csi-driver/aws-ebs-csi-driver
+      # renovate: datasource=helm depName=aws-ebs-csi-driver registryUrl=https://kubernetes-sigs.github.io/aws-ebs-csi-driver
       defaultVersion: 2.59.0
       defaultNamespace: kube-system
     nodeScheduling:
@@ -524,6 +990,7 @@ components:
     helm:
       defaultRepository: https://jmcgrath207.github.io/k8s-ephemeral-storage-metrics/chart
       defaultChart: k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics
+      # renovate: datasource=helm depName=k8s-ephemeral-storage-metrics registryUrl=https://jmcgrath207.github.io/k8s-ephemeral-storage-metrics/chart
       defaultVersion: "1.19.2"
       defaultNamespace: monitoring
     nodeScheduling:
@@ -547,10 +1014,13 @@ components:
     hasSelfRefCRDs: true
     healthCheck:
       assertFile: checks/k8s-aibom/health-check.yaml
+    upgrades:
+      file: components/k8s-aibom/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/googlecloudplatform/charts
       defaultChart: k8s-aibom
-      defaultVersion: "1.3.0"
+      # renovate: datasource=docker depName=ghcr.io/googlecloudplatform/charts/k8s-aibom
+      defaultVersion: "1.5.1"
       defaultNamespace: k8s-aibom-system
     nodeScheduling:
       system:
@@ -560,6 +1030,8 @@ components:
           - tolerations
 
   - name: kai-scheduler
+    upgrades:
+      file: components/kai-scheduler/upgrades.yaml
     displayName: kai-scheduler
     valueOverrideKeys:
       - kaischeduler
@@ -576,7 +1048,8 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/kai-scheduler/kai-scheduler
       defaultChart: kai-scheduler
-      defaultVersion: v0.14.1
+      # renovate: datasource=docker depName=ghcr.io/kai-scheduler/kai-scheduler/kai-scheduler
+      defaultVersion: v0.16.9
       defaultNamespace: kai-scheduler
     nodeScheduling:
       system:
@@ -589,12 +1062,20 @@ components:
     displayName: grove
     valueOverrideKeys:
       - grove
+    # Upgrading from v0.1.0-alpha.8 (or earlier) requires a CRD migration --
+    # see "Upgrade Notes" > grove in docs/user/component-catalog.md for the
+    # full, executable steps (helm upgrade/install.sh never applies changed
+    # crds/, and alpha.8's orphaned ClusterTopology CRD shortname-collides
+    # with alpha.12's replacement). Verified live on aicr-gb300, 2026-09-02.
     healthCheck:
       assertFile: checks/grove/health-check.yaml
+    upgrades:
+      file: components/grove/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/ai-dynamo/grove
       defaultChart: grove-charts
-      defaultVersion: "v0.1.0-alpha.8"
+      # renovate: datasource=docker depName=ghcr.io/ai-dynamo/grove/grove-charts
+      defaultVersion: "v0.1.0-alpha.13"
       defaultNamespace: dynamo-system
     nodeScheduling:
       system:
@@ -604,6 +1085,8 @@ components:
           - tolerations
 
   - name: dynamo-platform
+    upgrades:
+      file: components/dynamo-platform/upgrades.yaml
     displayName: dynamo-platform
     valueOverrideKeys:
       - dynamoplatform
@@ -613,10 +1096,9 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
       defaultChart: dynamo-platform
-      defaultVersion: "1.2.1"
+      # renovate: datasource=helm depName=dynamo-platform registryUrl=https://helm.ngc.nvidia.com/nvidia/ai-dynamo
+      defaultVersion: "1.4.2"
       defaultNamespace: dynamo-system
-    storageClassPaths:
-      - nats.config.jetstream.fileStore.pvc.storageClassName
     nodeScheduling:
       system:
         nodeSelectorPaths:
@@ -636,10 +1118,18 @@ components:
     # via its templates, so agentgateway must declare this chart as a
     # DependencyRef for the DAG-stratified helmfile layout to install
     # CRDs first. Issue #914.
+    #
+    # Floor is v1.4.0, which bounded the CEL-validated string fields with
+    # `maxLength`. Earlier charts leave them unbounded and a Kubernetes 1.37
+    # apiserver rejects the CRDs ("estimated rule cost exceeds budget").
+    # The v2.2.x tags this registry once used are an older schema line that
+    # still ships unbounded fields, so they are a downgrade, not an upgrade
+    # (#1476).
     helm:
       defaultRepository: oci://cr.agentgateway.dev/charts
       defaultChart: agentgateway-crds
-      defaultVersion: v1.3.1
+      # renovate: datasource=docker depName=cr.agentgateway.dev/charts/agentgateway-crds
+      defaultVersion: v1.5.0
       defaultNamespace: agentgateway-system
 
   - name: agentgateway
@@ -651,7 +1141,10 @@ components:
     helm:
       defaultRepository: oci://cr.agentgateway.dev/charts
       defaultChart: agentgateway
-      defaultVersion: v1.3.1
+      # Keep in lockstep with agentgateway-crds above; see the version floor
+      # note there before changing this pin.
+      # renovate: datasource=docker depName=cr.agentgateway.dev/charts/agentgateway
+      defaultVersion: v1.5.0
       defaultNamespace: agentgateway-system
     nodeScheduling:
       system:
@@ -670,6 +1163,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: k8s-nim-operator
+      # renovate: datasource=helm depName=k8s-nim-operator registryUrl=https://helm.ngc.nvidia.com/nvidia
       defaultVersion: "3.1.0"
       defaultNamespace: nvidia-nim
     nodeScheduling:
@@ -685,6 +1179,8 @@ components:
       - kueue
     healthCheck:
       assertFile: checks/kueue/health-check.yaml
+    upgrades:
+      file: components/kueue/upgrades.yaml
     # Default quota CRs so a referenced kueue admits workloads out of the
     # box. Applied post-install (wave N+1) via the injected -post local
     # chart, after the main release ships the CRDs.
@@ -702,7 +1198,8 @@ components:
     helm:
       defaultRepository: oci://registry.k8s.io/kueue/charts
       defaultChart: kueue
-      defaultVersion: "0.18.2"
+      # renovate: datasource=docker depName=registry.k8s.io/kueue/charts/kueue
+      defaultVersion: "0.19.6"
       defaultNamespace: kueue-system
     nodeScheduling:
       system:
@@ -738,6 +1235,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/kubeflow/charts
       defaultChart: kubeflow-trainer
+      # renovate: datasource=docker depName=ghcr.io/kubeflow/charts/kubeflow-trainer
       defaultVersion: 2.2.0
       defaultNamespace: kubeflow
     nodeScheduling:
@@ -758,6 +1256,99 @@ components:
           - acceleratedNodeSelector
         tolerationPaths:
           - acceleratedTolerations
+    validations:
+      # Blocking: on recipes shipping torch-distributed-tcpxo (h100 GKE
+      # kubeflow training), the final resolved tcpxoInterfaces value must
+      # equal the mapping recorded in configuration.gke.tcpxoInterfaces —
+      # the recipe must not attest to one wiring while the bundle renders
+      # another. See issue #2296.
+      - function: CheckGKETCPXOInterfacesCoherence
+        severity: error
+        conditions:
+          service:
+            - gke
+          accelerator:
+            - h100
+
+  # NVIDIA Cluster Readiness Engine — GPU cluster burn-in certification
+  # controller. Named `nvcre` after the chart nameOverride, install
+  # namespace, and CRD group (nvcre.nvidia.com). Override keys include
+  # `cre` and `cluster-readiness-engine`.
+  #
+  # NVCRE orchestrates benchmarks through Kubeflow Trainer (TrainJob /
+  # TrainingRuntime); the chart does not install Trainer. A referencing
+  # recipe therefore needs two things this registry entry cannot supply:
+  #
+  #   1. kubeflow-trainer in componentRefs — via the platform-kubeflow
+  #      mixin, or a base that already carries it. dependencyRefs only
+  #      orders components that are already present; it does not add one,
+  #      and naming an absent component fails resolution outright
+  #      (ValidateDependencies: "references unknown dependency").
+  #      dependencyRefs: [kubeflow-trainer] is still required, since the
+  #      registry cannot order charts on its own.
+  #
+  #   2. valuesFile: components/nvcre/values.yaml on the componentRef.
+  #      Component values are never auto-discovered by name — a ref with
+  #      no valuesFile and no overrides resolves to an empty map. Omit it
+  #      and the chart defaults win: metrics.serviceMonitor.enabled is
+  #      true (requiring prometheus-operator-crds) and fullnameOverride
+  #      is unset, so the Deployment carries the release prefix and the
+  #      health check above cannot match it.
+  #
+  # See "Enabling NVCRE" in docs/user/component-catalog.md for a
+  # copy-pasteable overlay fragment.
+  #
+  # With that values file referenced, metrics.serviceMonitor.enabled is
+  # off. Re-enable it only when prometheus-operator-crds are already on
+  # the cluster (base.yaml or a dependencyRef).
+  #
+  # NVCRE v0.2.0 pins kubeflowTrainerVersion = "v2.2.1" and its
+  # `setup status` reports the 2.2.0 this registry defaults to as
+  # unsupported. No functional break is known between the two: the CRD
+  # delta is documentation text plus one embedded PodSpec field NVCRE does
+  # not set. Aligning the global Trainer default is tracked separately.
+  #
+  # No shipped overlay references this component (TestNVCRERegisteredWithoutOverlay).
+  - name: nvcre
+    displayName: NVIDIA Cluster Readiness Engine
+    ownsCRDs: true
+    valueOverrideKeys:
+      - nvcre
+      - cre
+      - cluster-readiness-engine
+    healthCheck:
+      assertFile: checks/nvcre/health-check.yaml
+    upgrades:
+      file: components/nvcre/upgrades.yaml
+    # Chart ships LogProfile CRDs in crds/ and LogProfile CRs in templates/.
+    # helm-diff on a fresh cluster fails ("no matches for kind LogProfile")
+    # unless disableValidation is set. Same pattern as kai-scheduler.
+    # See https://github.com/NVIDIA/aicr/issues/914.
+    hasSelfRefCRDs: true
+    helm:
+      # Chart and controller image are public on GHCR; both pull anonymously,
+      # so no pull secret is required for either.
+      defaultRepository: oci://ghcr.io/nvidia
+      defaultChart: cluster-readiness-engine
+      # renovate: datasource=docker depName=ghcr.io/nvidia/cluster-readiness-engine
+      defaultVersion: v0.6.0
+      defaultNamespace: nvcre
+    nodeScheduling:
+      # tolerationPaths only: the Deployment template has no nodeSelector
+      # block, so a system selector in values would be dropped.
+      #
+      # This path applies only when the recipe actually supplies system
+      # tolerations — applyNodeSchedulingOverrides gates it on a non-empty
+      # SystemNodeTolerations, so with no --system-toleration the chart
+      # default [{operator: Exists}] stands, which tolerates every taint.
+      #
+      # Either way this does not enforce placement: a toleration permits
+      # scheduling onto a tainted node, it does not keep the pod off one.
+      # Use manager.affinity for that (see the catalog row). Benchmarks are
+      # scheduled by CRE itself onto GPU nodes and must not inherit this.
+      system:
+        tolerationPaths:
+          - manager.tolerations
 
   - name: slinky-slurm-operator-crds
     displayName: slinky-slurm-operator-crds
@@ -766,6 +1357,8 @@ components:
       - slurmoperatorcrds
     healthCheck:
       assertFile: checks/slinky-slurm-operator-crds/health-check.yaml
+    upgrades:
+      file: components/slinky-slurm-operator-crds/upgrades.yaml
     # CRDs-only chart; slinky-slurm-operator consumes the kinds it
     # registers via its templates, so slinky-slurm-operator must
     # declare this chart as a DependencyRef for the DAG-stratified
@@ -773,7 +1366,8 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/slinkyproject/charts
       defaultChart: slurm-operator-crds
-      defaultVersion: "1.2.0"
+      # renovate: datasource=docker depName=ghcr.io/slinkyproject/charts/slurm-operator-crds
+      defaultVersion: "1.2.2"
       defaultNamespace: slinky
 
   - name: mariadb-operator-crds
@@ -782,10 +1376,13 @@ components:
       - mariadboperatorcrds
     healthCheck:
       assertFile: checks/mariadb-operator-crds/health-check.yaml
+    upgrades:
+      file: components/mariadb-operator-crds/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/mariadb-operator/charts
       defaultChart: mariadb-operator-crds
-      defaultVersion: "26.6.0"
+      # renovate: datasource=docker depName=ghcr.io/mariadb-operator/charts/mariadb-operator-crds
+      defaultVersion: "26.10.1"
       defaultNamespace: mariadb-system
 
   - name: mariadb-operator
@@ -794,10 +1391,13 @@ components:
       - mariadboperator
     healthCheck:
       assertFile: checks/mariadb-operator/health-check.yaml
+    upgrades:
+      file: components/mariadb-operator/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/mariadb-operator/charts
       defaultChart: mariadb-operator
-      defaultVersion: "26.6.0"
+      # renovate: datasource=docker depName=ghcr.io/mariadb-operator/charts/mariadb-operator
+      defaultVersion: "26.10.1"
       defaultNamespace: mariadb-system
     nodeScheduling:
       system:
@@ -823,10 +1423,13 @@ components:
       - slurmaccountingmariadb
     healthCheck:
       assertFile: checks/slurm-accounting-mariadb/health-check.yaml
+    upgrades:
+      file: components/slurm-accounting-mariadb/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/mariadb-operator/charts
       defaultChart: mariadb-cluster
-      defaultVersion: "26.6.0"
+      # renovate: datasource=docker depName=ghcr.io/mariadb-operator/charts/mariadb-cluster
+      defaultVersion: "26.10.1"
       defaultNamespace: slurm
     storageClassPaths:
       - mariadb.storage.storageClassName
@@ -834,6 +1437,14 @@ components:
       system:
         nodeSelectorPaths:
           - mariadb.nodeSelector
+        # An unpinned mariadb pod can land on a GPU node and inherit its
+        # zone; its PVC then binds to that zone, and a later reschedule onto
+        # the correct system-node pool in a different zone gets stuck
+        # forever waiting on a PVC it can't attach to. This component is
+        # deployed alongside slinky-slurm in every training-slurm leaf, so
+        # requireNodeSelector fails the bundle instead of shipping this
+        # misconfiguration silently.
+        requireNodeSelector: true
         tolerationPaths:
           - mariadb.tolerations
 
@@ -847,6 +1458,8 @@ components:
       - slurm
     healthCheck:
       assertFile: checks/slinky-slurm-operator/health-check.yaml
+    upgrades:
+      file: components/slinky-slurm-operator/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/slinkyproject/charts
       defaultChart: slurm-operator
@@ -856,7 +1469,8 @@ components:
       # `crds.enabled: false` still match the chart defaults. The values
       # file mirrors the chart defaults explicitly for documentation, but
       # an upstream default flip would otherwise pass through unnoticed.
-      defaultVersion: "1.2.0"
+      # renovate: datasource=docker depName=ghcr.io/slinkyproject/charts/slurm-operator
+      defaultVersion: "1.2.2"
       defaultNamespace: slinky
     nodeScheduling:
       system:
@@ -877,6 +1491,8 @@ components:
       - slurmcluster
     healthCheck:
       assertFile: checks/slinky-slurm/health-check.yaml
+    upgrades:
+      file: components/slinky-slurm/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/slinkyproject/charts
       defaultChart: slurm
@@ -884,7 +1500,8 @@ components:
       # component values define the `slinky` map keys, and the cross-check in
       # pkg/recipe TestComponentRegistry_SlinkySlurm_NodeSchedulingPaths
       # enforces their alignment with the scheduling paths below.
-      defaultVersion: "1.2.0"
+      # renovate: datasource=docker depName=ghcr.io/slinkyproject/charts/slurm
+      defaultVersion: "1.2.2"
       defaultNamespace: slurm
     sharedStorageClassPaths:
       - storage.home.storageClassName
@@ -896,6 +1513,13 @@ components:
           - restapi.podSpec.nodeSelector
           - loginsets.slinky.podSpec.nodeSelector
           - accounting.podSpec.nodeSelector
+        # An unpinned controller/restapi/login/accounting pod can land on a
+        # GPU node and inherit its zone; the StatefulSet's PVC then binds to
+        # that zone, and a later reschedule onto the (correct) system-node
+        # pool in a different zone gets stuck forever waiting on a PVC it
+        # can't attach to. requireNodeSelector fails the bundle instead of
+        # shipping this misconfiguration silently.
+        requireNodeSelector: true
         tolerationPaths:
           - controller.podSpec.tolerations
           - restapi.podSpec.tolerations
@@ -904,6 +1528,12 @@ components:
       accelerated:
         nodeSelectorPaths:
           - nodesets.slinky.podSpec.nodeSelector
+        # An unpinned NodeSet/worker pod can land on a system (non-GPU) node
+        # and inherit its zone; the StatefulSet's PVC then binds to that
+        # zone, and a later correction onto the accelerated pool in a
+        # different zone gets stuck the same way. requireNodeSelector fails
+        # the bundle instead of shipping this misconfiguration silently.
+        requireNodeSelector: true
         tolerationPaths:
           - nodesets.slinky.podSpec.tolerations
 
@@ -914,8 +1544,46 @@ components:
     healthCheck:
       assertFile: checks/slinky-topograph/health-check.yaml
     helm:
-      defaultRepository: https://nvidia.github.io/topograph
+      # The topograph repository moved from NVIDIA to dsx-ai-factory; GitHub
+      # redirects the repository but not its Pages site, so the old index
+      # 404s. See issue #2793.
+      defaultRepository: https://dsx-ai-factory.github.io/topograph
       defaultChart: topograph/topograph
+      # renovate: datasource=helm depName=topograph registryUrl=https://dsx-ai-factory.github.io/topograph
+      defaultVersion: "1.0.0"
+      defaultNamespace: topograph
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - nodeSelector
+          - nodeObserver.nodeSelector
+        tolerationPaths:
+          - tolerations
+          - nodeObserver.tolerations
+      accelerated:
+        nodeSelectorPaths:
+          # nodeObserver.topograph.trigger.nodeSelector is a watch filter —
+          # it narrows which node-change events trigger topology regeneration.
+          - nodeObserver.topograph.trigger.nodeSelector
+          - nodeDataBroker.nodeSelector
+        tolerationPaths:
+          - nodeDataBroker.tolerations
+
+  # Kubernetes-scoped Topograph: the k8s engine writes
+  # fabric.topograph.run/tier-N and accelerator.topograph.run/* node labels
+  # that Kueue TAS reads. Separate from slinky-topograph, which depends on
+  # slinky-slurm and writes a Slurm topology.conf instead. Chart pin shared
+  # with slinky-topograph; bump both together.
+  - name: topograph
+    displayName: topograph
+    valueOverrideKeys:
+      - topograph
+    healthCheck:
+      assertFile: checks/topograph/health-check.yaml
+    helm:
+      defaultRepository: https://dsx-ai-factory.github.io/topograph
+      defaultChart: topograph/topograph
+      # renovate: datasource=helm depName=topograph registryUrl=https://dsx-ai-factory.github.io/topograph
       defaultVersion: "1.0.0"
       defaultNamespace: topograph
     nodeScheduling:
@@ -946,6 +1614,7 @@ components:
     helm:
       defaultRepository: https://open-policy-agent.github.io/gatekeeper/charts
       defaultChart: gatekeeper/gatekeeper
+      # renovate: datasource=helm depName=gatekeeper registryUrl=https://open-policy-agent.github.io/gatekeeper/charts
       defaultVersion: 3.22.2
       defaultNamespace: gatekeeper-system
     nodeScheduling:
@@ -1079,6 +1748,7 @@ components:
     helm:
       defaultRepository: https://prometheus-community.github.io/helm-charts
       defaultChart: prometheus-community/prometheus-adapter
+      # renovate: datasource=helm depName=prometheus-adapter registryUrl=https://prometheus-community.github.io/helm-charts
       defaultVersion: 5.3.0
       defaultNamespace: monitoring
     nodeScheduling:
@@ -1101,7 +1771,8 @@ components:
     helm:
       defaultRepository: oci://registry.k8s.io/dra-driver-nvidia/charts
       defaultChart: dra-driver-nvidia-gpu
-      defaultVersion: "0.4.1"
+      # renovate: datasource=docker depName=registry.k8s.io/dra-driver-nvidia/charts/dra-driver-nvidia-gpu
+      defaultVersion: "0.5.0"
       defaultNamespace: nvidia-dra-driver
     nodeScheduling:
       system:
@@ -1128,6 +1799,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: k8s-nim-operator
+      # renovate: datasource=helm depName=k8s-nim-operator registryUrl=https://helm.ngc.nvidia.com/nvidia
       defaultVersion: "3.1.0"
       defaultNamespace: nvidia-nim
     nodeScheduling:

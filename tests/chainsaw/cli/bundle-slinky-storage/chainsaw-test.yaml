@@ -48,6 +48,8 @@ spec:
               set -e
               ${AICR_BIN} bundle \
                 --recipe "${WORK}/recipe.yaml" \
+                --system-node-selector nodeGroup=system-pool \
+                --accelerated-node-selector nodeGroup=gpu-worker \
                 --output "${WORK}/disabled"
               PRE=$(ls -d "${WORK}"/disabled/[0-9][0-9][0-9]-slinky-slurm-pre)
               test -f "${PRE}/templates/enroot-config.yaml"
@@ -73,6 +75,8 @@ spec:
               set -e
               ${AICR_BIN} bundle \
                 --recipe "${WORK}/recipe.yaml" \
+                --system-node-selector nodeGroup=system-pool \
+                --accelerated-node-selector nodeGroup=gpu-worker \
                 --set slinkyslurm:enroot.config.ENROOT_CACHE_PATH=/custom/cache \
                 --set slinkyslurm:enroot.env.NCCL_DEBUG=INFO \
                 --output "${WORK}/enroot-override"
@@ -94,6 +98,8 @@ spec:
               set +e
               output=$(${AICR_BIN} bundle \
                 --recipe "${WORK}/recipe.yaml" \
+                --system-node-selector nodeGroup=system-pool \
+                --accelerated-node-selector nodeGroup=gpu-worker \
                 --set slinkyslurm:storage.enabled=true \
                 --output "${WORK}/missing-class" 2>&1)
               rc=$?
@@ -111,6 +117,8 @@ spec:
               WORK="/tmp/chainsaw-bundle-slinky-storage"
               ${AICR_BIN} bundle \
                 --recipe "${WORK}/recipe.yaml" \
+                --system-node-selector nodeGroup=system-pool \
+                --accelerated-node-selector nodeGroup=gpu-worker \
                 --set slinkyslurm:storage.enabled=true \
                 --set-json 'slinkyslurm:loginsets.secondary={"enabled":false}' \
                 --set-json 'slinkyslurm:nodesets.secondary={"enabled":false}' \

@@ -16,6 +16,8 @@
 # Provides minimal K8s, OS, and Helm measurements so aicr validate can run
 # without a real cluster or GPU hardware. Helm data covers all components
 # in the EKS H100 training recipe with kubeflow platform.
+apiVersion: aicr.run/v1
+kind: Snapshot
 measurements:
   - type: K8s
     subtypes:

@@ -25,7 +25,64 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/yaml"
 )
+
+// Scheduling is the bundle-level node placement a gate Job's pod is built
+// from. The gate only reads API objects, so it needs a healthy node, not the
+// gated component's node; callers pass the bundle's system-node scheduling.
+type Scheduling struct {
+	NodeSelector map[string]string
+	Tolerations  []corev1.Toleration
+}
+
+// Placement is a validated, pre-rendered gate pod placement, built once per
+// bundle by NewPlacement. The zero value renders no placement fields.
+type Placement struct {
+	block string
+}
+
+// NewPlacement validates sched and renders it for the gate Job's pod spec.
+// Keyless tolerations are dropped after validation: an empty key matches every
+// taint, including the node lifecycle controller's not-ready, unreachable and
+// unschedulable taints, so a gate carrying one could bind to an unhealthy or
+// cordoned node and would lose the default eviction from unreachable nodes.
+func NewPlacement(sched Scheduling) (Placement, error) {
+	if err := sched.validate(); err != nil {
+		return Placement{}, err
+	}
+	var keyed []corev1.Toleration
+	for _, t := range sched.Tolerations {
+		if t.Key != "" {
+			keyed = append(keyed, t)
+		}
+	}
+	if len(sched.NodeSelector) == 0 && len(keyed) == 0 {
+		return Placement{}, nil
+	}
+	out, err := yaml.Marshal(struct {
+		NodeSelector map[string]string   `json:"nodeSelector,omitempty"`
+		Tolerations  []corev1.Toleration `json:"tolerations,omitempty"`
+	}{sched.NodeSelector, keyed})
+	if err != nil {
+		return Placement{}, errors.Wrap(errors.ErrCodeInternal, "readiness gate: failed to marshal scheduling", err)
+	}
+	return Placement{block: indentBlock(string(out), "      ") + "\n"}, nil
+}
+
+// validate returns an error for scheduling the API server would reject.
+func (s Scheduling) validate() error {
+	// Render executes the manifest as a Go template, and no key or value these
+	// rules admit can carry template syntax.
+	if err := config.ValidateNodeSelector(s.NodeSelector); err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "readiness gate: invalid node selector", err)
+	}
+	if err := config.ValidateTolerations(s.Tolerations); err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "readiness gate: invalid toleration", err)
+	}
+	return nil
+}
 
 // Render builds the multi-document gate chart manifest for one component. The
 // namespace is left as a {{ .Release.Namespace }} template token (resolved by
@@ -39,10 +96,13 @@ import (
 // do not overwrite each other's cluster-scoped objects. The namespaced
 // ServiceAccount, ConfigMap, and Job keep the bare component name — identical
 // names in distinct namespaces never collide.
-func Render(componentName, image string, testYAML []byte, deployer config.DeployerType) ([]byte, error) {
+//
+// placement positions the gate pod (#2590); see NewPlacement.
+func Render(componentName, image string, testYAML []byte, deployer config.DeployerType, placement Placement) ([]byte, error) {
 	if componentName == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "readiness gate: empty component name")
 	}
+	scheduling := placement.block
 
 	indented := indentBlock(string(testYAML), "    ")
 
@@ -111,11 +171,12 @@ metadata:
 %[10]s
 spec:
   backoffLimit: %[11]d
+  activeDeadlineSeconds: %[14]d
   template:
     spec:
       restartPolicy: Never
       serviceAccountName: %[1]s
-      containers:
+%[13]s      containers:
         - name: gate
           image: %[5]s
           imagePullPolicy: IfNotPresent
@@ -141,7 +202,9 @@ spec:
 		defaults.ReadinessGateMaxWait.String(),
 		jobAnnotations,
 		defaults.ReadinessGateBackoffLimit,
-		componentClusterRoleRules(componentName))
+		componentClusterRoleRules(componentName),
+		scheduling,
+		int64((defaults.ReadinessGateMaxWait + defaults.ReadinessGateActiveDeadlineBuffer).Seconds()))
 
 	return []byte(sb.String()), nil
 }
@@ -154,10 +217,10 @@ spec:
 // the emitter's RBAC surface stays statically auditable — the trade-off is
 // that a new readiness gate for a new API group must be registered here.
 func componentClusterRoleRules(componentName string) string {
-	switch componentName { //nolint:gocritic // single case today; kept as a switch per the doc-comment rationale above (future readiness gates register a new case here).
-	case "network-operator":
-		// See recipes/components/network-operator/readiness.yaml — the
-		// gate asserts on mellanox.com/v1alpha1 NicClusterPolicy.
+	switch componentName { //nolint:gocritic // one permission family today; kept as a switch so future readiness API groups remain explicitly allowlisted.
+	case "network-operator", "network-operator-ocp":
+		// See recipes/components/network-operator*/readiness.yaml — both
+		// gates assert on mellanox.com/v1alpha1 NicClusterPolicy.
 		return `  - apiGroups: ["mellanox.com"]
     resources: ["nicclusterpolicies"]
     verbs: ["get", "list", "watch"]
@@ -168,13 +231,40 @@ func componentClusterRoleRules(componentName string) string {
 
 func jobMetadataAnnotations(deployer config.DeployerType) string {
 	switch deployer {
-	case config.DeployerHelm:
+	case config.DeployerHelm, config.DeployerTerraform:
+		// Both install the gate through Helm itself, so the hook is what
+		// makes it re-assert: a Job's spec.template is immutable, and
+		// before-hook-creation is the only thing that deletes and recreates
+		// it on upgrade. Helm also blocks on hook completion as part of the
+		// release, which is what the terraform module's dependents depend on.
 		return `  annotations:
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-delete-policy: before-hook-creation`
 	case config.DeployerArgoCD, config.DeployerArgoCDHelm:
+		// The Job's spec.selector and spec.template.metadata.labels are
+		// server-generated/immutable, and the rendered manifest correctly
+		// omits them. Plain Replace=true maps to `kubectl replace`, which the
+		// API server rejects on any upgrade that changes the Job spec (e.g.
+		// an image tag bump), leaving the Application permanently
+		// OutOfSync. Force=true is ArgoCD's documented option to
+		// delete-and-recreate when a replace fails. This alone would
+		// delete-and-recreate the Job on EVERY sync, including no-op
+		// resyncs where nothing changed — see the ApplyOutOfSyncOnly=true
+		// entry this deployer adds to the readiness folder's
+		// Application-level spec.syncPolicy.syncOptions
+		// (pkg/bundler/deployer/argocd/argocd.go's buildApplicationData),
+		// which excludes already-in-sync resources from a sync operation
+		// and stops the needless rerun. The two mechanisms are
+		// complementary: Job-level Replace+Force handles genuine spec
+		// diffs (e.g. an image tag bump); Application-level
+		// ApplyOutOfSyncOnly prevents unnecessary reruns when there is no
+		// diff at all. Deliberately NOT using a Helm-style sync hook
+		// (helm.sh/hook) here: per
+		// pkg/bundler/deployer/localformat/hooks.go's stripHelmHooks doc,
+		// hook-annotated resources are excluded from ArgoCD's normal drift
+		// detection, so an image-tag-only bump could silently go undetected.
 		return `  annotations:
-    argocd.argoproj.io/sync-options: Replace=true`
+    argocd.argoproj.io/sync-options: Replace=true,Force=true`
 	case config.DeployerFlux, config.DeployerHelmfile:
 		return ""
 	default:

@@ -16,5 +16,8 @@ apiVersion: v2
 name: foo-pre
 description: Generated wrapper chart for foo local content.
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: "1.0.0"
+appVersion: "v1.0.0"
+annotations:
+  aicr.run/component-version: "v1.0.0"
+  aicr.run/generated-by: "1.0.0"

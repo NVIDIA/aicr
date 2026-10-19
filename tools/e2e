@@ -96,6 +96,43 @@ build_binary
 
 export REPO_ROOT="${ROOT}"
 
+# ci!=true drops the suites that need a CI-attested binary. Suites labelled
+# requires=docker start the registry image pinned in .settings.yaml
+# (testing_tools.registry_image). They run only when a Docker daemon answers
+# AND that image is present or can be pulled now; otherwise they are dropped
+# rather than failed, so a Docker-less or egress-less workstation still gets a
+# green `make e2e` and the skip is stated in the log. CI runners have both.
+SELECTOR='ci!=true'
+REGISTRY_IMAGE="$(sed -n "s/^  registry_image: '\(.*\)'$/\1/p" "${ROOT}/.settings.yaml")"
+# Every probe is time-bounded: a stalled daemon or a hanging pull must turn
+# into "prerequisite unavailable, skip", never a hung make e2e. `timeout` is
+# coreutils (`timeout` on CI runners, `gtimeout` from brew coreutils on macOS).
+# Without either there is no way to bound the probes, so the Docker suites are
+# skipped outright rather than probed unbounded.
+TIMEOUT_BIN=""
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_BIN=timeout
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_BIN=gtimeout
+fi
+bounded() { # <seconds> <command...>
+  "${TIMEOUT_BIN}" "$@"
+}
+if [ -z "${TIMEOUT_BIN}" ]; then
+  msg "No timeout/gtimeout on PATH to bound Docker probes (brew install coreutils); skipping requires=docker suites"
+  SELECTOR="${SELECTOR},requires!=docker"
+elif ! bounded 15 docker info >/dev/null 2>&1; then
+  msg "Docker daemon not reachable within 15s; skipping requires=docker suites"
+  SELECTOR="${SELECTOR},requires!=docker"
+elif [ -z "${REGISTRY_IMAGE}" ]; then
+  msg "testing_tools.registry_image not found in .settings.yaml; skipping requires=docker suites"
+  SELECTOR="${SELECTOR},requires!=docker"
+elif ! bounded 15 docker image inspect "${REGISTRY_IMAGE}" >/dev/null 2>&1 \
+    && ! bounded 120 docker pull -q "${REGISTRY_IMAGE}" >/dev/null 2>&1; then
+  msg "Cannot pull ${REGISTRY_IMAGE} within 120s; skipping requires=docker suites"
+  SELECTOR="${SELECTOR},requires!=docker"
+fi
+
 msg "Running chainsaw tests (CLI + bundle template tests)"
 chainsaw test \
   --no-cluster \
@@ -103,6 +140,6 @@ chainsaw test \
   --test-dir "${ROOT}/tests/chainsaw/cli/" \
   --test-dir "${ROOT}/tests/chainsaw/signing/" \
   --test-dir "${ROOT}/tests/chainsaw/bundle-templates/" \
-  --selector 'ci!=true'
+  --selector "${SELECTOR}"
 
 msg "All tests passed!"

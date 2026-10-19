@@ -19,6 +19,8 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -62,10 +64,21 @@ const (
 	defaultStorageClassAnnotationValue = "true"
 
 	// envModelCacheStorageClass sets the StorageClass for the cache PVC.
-	// Required on clusters without a default StorageClass — otherwise the PVC
+	// Required on clusters without a default StorageClass, otherwise the PVC
 	// stays Pending ("no persistent volumes available … and no storage class is
-	// set"). Unset uses the cluster's default StorageClass.
+	// set"). Unset uses the cluster's default StorageClass. A per-accelerator
+	// overlay can also set this via the `inference-model-cache-storage-class`
+	// performance constraint, which takes precedence (see
+	// resolveModelCacheStorageClass).
 	envModelCacheStorageClass = "AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS"
+
+	// envModelCacheExtraCompatibleTypes extends storageCompatibilityRules'
+	// compiled type allowlists with a comma-separated list of extra
+	// parameters.type values, without an AICR code change. Applies across
+	// every rule. Use it when a cloud provider ships a new disk type that is
+	// actually compatible with a restricted machine family before AICR's
+	// allowlist is updated to include it.
+	envModelCacheExtraCompatibleTypes = "AICR_INFERENCE_PERF_MODEL_CACHE_EXTRA_COMPATIBLE_TYPES"
 
 	// envModelCachePopulateTimeout overrides the wait bound for the one-time
 	// model-cache populate Job (default defaults.ModelCachePopulateTimeout). It is
@@ -88,22 +101,6 @@ const (
 	// with the run ID so concurrent runs don't collide).
 	modelCachePopulateJobPrefix = "aicr-model-cache-populate"
 
-	// cacheWorkerImage is the image used by the populate Job to download
-	// weights. It must carry python3 + huggingface_hub; reuse the vLLM runtime
-	// image so it is already node-cached. Keep in sync with the worker image in
-	// testdata/inference/dynamo-deployment.yaml.
-	//
-	// NOTE: this is pinned to nvcr.io and is NOT run through
-	// catalog.ResolveImage, so AICR_VALIDATOR_IMAGE_REGISTRY does not rewrite it
-	// (unlike the AIPerf image) — a registry-override consistency gap. Propagating
-	// imagePullSecrets only helps when the private creds are for nvcr.io itself.
-	// This matches the Dynamo worker image (also pinned in the template,
-	// drift-guarded by TestCacheWorkerImageMatchesTemplate). Routing this through
-	// ResolveImage for registry-override parity is tracked in #1159. Note that
-	// registry parity alone is not air-gap support: the populate Job's
-	// snapshot_download still reaches huggingface.co for the weights.
-	cacheWorkerImage = "nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1"
-
 	// Resource requests for the populate container. snapshot_download is
 	// network/IO-bound, not compute-bound, so requests stay small; they exist so
 	// the pod gets a Burstable QoS class and schedules under ResourceQuota /
@@ -120,34 +117,40 @@ const (
 	// freshly provisioned volume is group-writable by the cacheWorkerImage's
 	// non-root user. It must match that image's non-root UID/GID — if the vLLM
 	// runtime image rebuilds under a different non-root UID, the workers' RO
-	// mount would silently fail to load weights. Co-located with cacheWorkerImage
-	// so the drift surface is in one place; the worker RO mount relies on the
-	// same group ownership.
+	// mount would silently fail to load weights.
 	cacheWorkerFSGroup = int64(1000)
 )
 
+// cacheWorkerImage returns the image the model-cache populate Job runs.
+func cacheWorkerImage(config *inferenceWorkloadConfig) string {
+	// The workers' own vLLM runtime image, so the Job writes HF_HOME in the
+	// layout the offline workers read.
+	return dynamoRuntimeImage(dynamoVLLMRuntimeImageName, config.dynamoRuntimeTag)
+}
+
 // storageCompatibilityRule declares that on a given CSI provisioner, the
 // listed machine families can only attach a StorageClass whose
-// parameters.type either carries compatibleTypePrefix or exactly matches
-// autoSelectType (a driver-specific value that resolves to a compatible disk
-// per-node rather than naming one directly, e.g. GKE's "dynamic"; leave empty
+// parameters.type is in compatibleTypes, is named by
+// envModelCacheExtraCompatibleTypes, or exactly matches autoSelectType (a
+// driver-specific value that resolves to a compatible disk per-node rather
+// than naming one directly, e.g. GKE's "dynamic". Leave autoSelectType empty
 // for a provisioner with no such value). Anything else provisioned by that
 // driver is rejected at attach time. Add a rule here for any other
-// cloud/provisioner with the same shape of restriction; nothing else in this
-// file needs to change.
+// cloud/provisioner with the same shape of restriction. No other code in
+// this file needs to change.
 type storageCompatibilityRule struct {
-	provisioner          string
-	families             map[string]bool // node.kubernetes.io/instance-type family segment, e.g. "a4x" for "a4x-highgpu-4g"
-	compatibleTypePrefix string
-	autoSelectType       string
-	docsRef              string
+	provisioner     string
+	families        map[string]bool // node.kubernetes.io/instance-type family segment, e.g. "a4x" for "a4x-highgpu-4g"
+	compatibleTypes []string        // exact parameters.type values this family can attach, see docsRef
+	autoSelectType  string
+	docsRef         string
 }
 
 var storageCompatibilityRules = []storageCompatibilityRule{
 	{
-		provisioner:          "pd.csi.storage.gke.io", // GKE Persistent Disk CSI driver (also provisions Hyperdisk)
-		families:             map[string]bool{"a4x": true},
-		compatibleTypePrefix: "hyperdisk-",
+		provisioner:     "pd.csi.storage.gke.io", // GKE Persistent Disk CSI driver (also provisions Hyperdisk)
+		families:        map[string]bool{"a4x": true},
+		compatibleTypes: []string{"hyperdisk-balanced", "hyperdisk-ml", "hyperdisk-extreme"},
 		// "dynamic" auto-selects Hyperdisk vs Persistent Disk per the node's
 		// machine type (GKE 1.35.3-gke.1290000+); a4x can't attach Persistent
 		// Disk at all, so on a4x nodes it always resolves to Hyperdisk.
@@ -234,8 +237,12 @@ func machineFamily(instanceType string) string {
 // can't attach to the worker node's machine family, per
 // storageCompatibilityRules. A nil sc (not found, e.g. a typo in the
 // explicit override) is not an error here; that surfaces via the normal
-// PVC-create path instead.
-func checkStorageClassNodeCompatibility(instanceType string, sc *storagev1.StorageClass) error {
+// PVC-create path instead. fromRecipeConstraint indicates sc was selected by
+// the `inference-model-cache-storage-class` recipe constraint, see
+// resolveModelCacheStorageClass. That constraint takes precedence over
+// envModelCacheStorageClass, so the remediation must point at whichever one
+// actually controls the resolved value, since setting the other is a no-op.
+func checkStorageClassNodeCompatibility(instanceType string, sc *storagev1.StorageClass, fromRecipeConstraint bool) error {
 	if sc == nil {
 		return nil
 	}
@@ -245,17 +252,27 @@ func checkStorageClassNodeCompatibility(instanceType string, sc *storagev1.Stora
 			continue
 		}
 		typ := sc.Parameters["type"]
-		if strings.HasPrefix(typ, rule.compatibleTypePrefix) || (rule.autoSelectType != "" && typ == rule.autoSelectType) {
+		compatible := rule.compatibleTypes
+		for v := range strings.SplitSeq(os.Getenv(envModelCacheExtraCompatibleTypes), ",") {
+			if trimmed := strings.TrimSpace(v); trimmed != "" {
+				compatible = append(compatible, trimmed)
+			}
+		}
+		if slices.Contains(compatible, typ) || (rule.autoSelectType != "" && typ == rule.autoSelectType) {
 			continue
 		}
-		typeGuidance := fmt.Sprintf("parameters.type starts with %q", rule.compatibleTypePrefix)
+		typeGuidance := fmt.Sprintf("parameters.type is one of %s", strings.Join(compatible, ", "))
 		if rule.autoSelectType != "" {
 			typeGuidance += fmt.Sprintf(" (or is %q)", rule.autoSelectType)
 		}
+		fixGuidance := fmt.Sprintf("set %s to", envModelCacheStorageClass)
+		if fromRecipeConstraint {
+			fixGuidance = fmt.Sprintf("change or remove the %q recipe constraint to select", perfConstraintModelCacheStorageClass)
+		}
 		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-			"model-weights cache PVC would bind to StorageClass %q (provisioner %s), which node machine family %q can't attach; "+
-				"set %s to a StorageClass whose %s, or disable the cache with %s=off; see %s",
-			sc.Name, sc.Provisioner, family, envModelCacheStorageClass, typeGuidance, envModelCacheSize, rule.docsRef))
+			"model-weights cache PVC would bind to StorageClass %q (provisioner %s), which node machine family %q can't attach. "+
+				"%s a StorageClass whose %s, list it in %s if it is actually compatible, or disable the cache with %s=off. See %s.",
+			sc.Name, sc.Provisioner, family, fixGuidance, typeGuidance, envModelCacheExtraCompatibleTypes, envModelCacheSize, rule.docsRef))
 	}
 	return nil
 }
@@ -317,7 +334,7 @@ func ensureModelCache(ctx *validators.Context, config *inferenceWorkloadConfig) 
 			return errors.Wrap(errors.ErrCodeInternal, "failed to get StorageClass for cache pre-flight", gerr)
 		}
 	}
-	if cerr := checkStorageClassNodeCompatibility(config.gpuNodeInstanceType, resolvedSC); cerr != nil {
+	if cerr := checkStorageClassNodeCompatibility(config.gpuNodeInstanceType, resolvedSC, config.modelCacheStorageClassFromRecipe); cerr != nil {
 		return cerr
 	}
 
@@ -341,10 +358,7 @@ func ensureModelCache(ctx *validators.Context, config *inferenceWorkloadConfig) 
 	}
 
 	jobName := fmt.Sprintf("%s-%s", modelCachePopulateJobPrefix, config.runID)
-	// Propagate the validator pod's imagePullSecrets to the populate Job, same
-	// as the AIPerf Job — so a private-mirror / air-gapped cluster can pull the
-	// cacheWorkerImage. nil on a public-registry cluster (a no-op there).
-	job := buildModelCachePopulateJob(jobName, config, getOwnPullSecrets(ctx))
+	job := buildModelCachePopulateJob(jobName, config)
 	jobCtx, jobCancel := context.WithTimeout(ctx.Ctx, defaults.K8sJobCreationTimeout)
 	_, err = ctx.Clientset.BatchV1().Jobs(config.namespace).Create(jobCtx, job, metav1.CreateOptions{})
 	jobCancel()
@@ -359,6 +373,10 @@ func ensureModelCache(ctx *validators.Context, config *inferenceWorkloadConfig) 
 		return terr
 	}
 	if werr := pod.WaitForJobCompletion(ctx.Ctx, ctx.Clientset, config.namespace, jobName, populateTimeout); werr != nil {
+		if pullErr := imagePullTimeoutError(ctx.Ctx, ctx.Clientset, config.namespace,
+			batchv1.JobNameLabel+"="+jobName, werr); pullErr != nil {
+			return pullErr
+		}
 		return wrapPopulateJobError(werr, populateTimeout)
 	}
 	slog.Info("Model cache populated", "pvc", modelCachePVCName)
@@ -409,7 +427,7 @@ func buildModelCachePVC(namespace string, qty resource.Quantity, storageClass st
 // RWO PVC binds there, mounts the PVC read-write at HF_HOME, and uses the
 // optional HF token. fsGroup makes the freshly provisioned volume group-writable
 // for the image's non-root user.
-func buildModelCachePopulateJob(name string, config *inferenceWorkloadConfig, pullSecrets []v1.LocalObjectReference) *batchv1.Job {
+func buildModelCachePopulateJob(name string, config *inferenceWorkloadConfig) *batchv1.Job {
 	// BackoffLimit 0 (single attempt): snapshot_download does not resume across
 	// pods, so each Job retry restarts the multi-GB download from scratch and
 	// burns the parent context deadline (a 100Gi-class download retried 2× could
@@ -431,11 +449,11 @@ func buildModelCachePopulateJob(name string, config *inferenceWorkloadConfig, pu
 					RestartPolicy:    v1.RestartPolicyNever,
 					NodeSelector:     config.gpuNodeSelector,
 					Tolerations:      config.gpuTolerations,
-					ImagePullSecrets: pullSecrets,
+					ImagePullSecrets: config.pullSecrets,
 					SecurityContext:  &v1.PodSecurityContext{FSGroup: ptr.To(cacheWorkerFSGroup)},
 					Containers: []v1.Container{{
 						Name:  "populate",
-						Image: cacheWorkerImage,
+						Image: cacheWorkerImage(config),
 						Resources: v1.ResourceRequirements{
 							Requests: v1.ResourceList{
 								v1.ResourceCPU:    resource.MustParse(cacheJobCPURequest),

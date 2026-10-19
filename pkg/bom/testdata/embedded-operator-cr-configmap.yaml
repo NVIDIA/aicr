@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: operator-config-manifest
+data:
+  operator-config.yaml: |
+    apiVersion: example.com/v1
+    kind: Config
+    metadata:
+      name: operator-config
+    spec:
+      binder:
+        service:
+          image:
+            name: binder
+            repository: ghcr.io/example/operator
+            tag: v1.0.0
+      scheduler:
+        service:
+          image:
+            name: scheduler
+            repository: ghcr.io/example/operator
+            tag: v1.0.0
+      nodeScaleAdjuster:
+        service:
+          enabled: false
+          image:
+            name: nodescaleadjuster
+            repository: ghcr.io/example/operator
+            tag: v1.0.0

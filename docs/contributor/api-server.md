@@ -32,7 +32,7 @@ All server code lives in [`pkg/server`](https://github.com/NVIDIA/aicr/tree/main
 | `serve.go` | Entry point. Parses env allowlists, constructs `aicr.Client`, wires the recipe, query, and bundle routes, runs `Server.Run` |
 | `server.go` | `Server` struct, options, route mux, lifecycle (`Start`, `Shutdown`, `Run`) |
 | `config.go` | `config` struct and env-var overrides (`PORT`, `SHUTDOWN_TIMEOUT_SECONDS`) |
-| `middleware.go` | 8-layer middleware chain; ordering rationale lives in source comments |
+| `middleware.go` | 9-layer middleware chain; ordering rationale lives in source comments |
 | `recipe_handler.go` | `GET\|POST /v1/recipe` and `/v1/query` adapter over the profile-aware `Client` resolution methods |
 | `bundle_handler.go` | `POST /v1/bundle` adapter over `Client.AdoptRecipe` + `Client.MakeBundle` |
 | `health.go` | `GET /health` and `GET /ready` |
@@ -56,12 +56,13 @@ Order is **outermost first**:
 |---|-------|---------|
 | 1 | `metricsMiddleware` | Start timer, increment in-flight gauge, record duration and status histogram. Outermost so total latency is captured. |
 | 2 | `versionMiddleware` | Parse `Accept` for `application/vnd.nvidia.aicr.v<N>+json`; stash version in context; set `X-API-Version` response header |
-| 3 | `requestIDMiddleware` | Honor `X-Request-Id` if a valid UUID, else mint one; stash in context; echo to response header |
-| 4 | `timeoutMiddleware` | `context.WithTimeout(r.Context(), defaults.ServerHandlerTimeout)` (90s). Bounds every inner layer, including body reads inside the handler. |
-| 5 | `loggingMiddleware` | Captures status via `responseWriter`; logs request start (Debug) and completion (Debug/Warn/Error keyed on status class) |
-| 6 | `panicRecoveryMiddleware` | `defer recover()` → 500 + `panicRecoveries` counter. Inside logging so the completion line still fires. |
-| 7 | `rateLimitMiddleware` | `golang.org/x/time/rate` limiter (default 100 req/s, burst 200). Always emits `X-RateLimit-*` headers, including on the 429 branch. |
-| 8 | `bodyLimitMiddleware` | `http.MaxBytesReader(r.Body, defaults.ServerMaxBodyBytes)` (8 MiB). Innermost so a handler installing a tighter cap composes cleanly. |
+| 3 | `deprecationMiddleware` | Attaches `Deprecation`, `Sunset` and `Link` headers on routes registered via `WithDeprecatedRoutes`. No route is deprecated today. |
+| 4 | `requestIDMiddleware` | Honor `X-Request-Id` if a valid UUID, else mint one; stash in context; echo to response header |
+| 5 | `timeoutMiddleware` | `context.WithTimeout(r.Context(), defaults.ServerHandlerTimeout)` (90s). Bounds every inner layer, including body reads inside the handler. |
+| 6 | `loggingMiddleware` | Captures status via `responseWriter`; logs request start (Debug) and completion (Debug/Warn/Error keyed on status class) |
+| 7 | `panicRecoveryMiddleware` | `defer recover()` → 500 + `panicRecoveries` counter. Inside logging so the completion line still fires. |
+| 8 | `rateLimitMiddleware` | `golang.org/x/time/rate` limiter (default 100 req/s, burst 200). Always emits `X-RateLimit-*` headers, including on the 429 branch. |
+| 9 | `bodyLimitMiddleware` | `http.MaxBytesReader(r.Body, defaults.ServerMaxBodyBytes)` (8 MiB). Innermost so a handler installing a tighter cap composes cleanly. |
 
 Ordering invariants (also documented in source):
 
@@ -84,7 +85,7 @@ Every handler is an adapter. The shape, in order:
 2. **Per-handler context timeout.** `context.WithTimeout(r.Context(), defaults.RecipeHandlerTimeout)` (30s) or `BundleHandlerTimeout` (60s). All must be ≤ `ServerHandlerTimeout` (90s) or the outer middleware clamps them.
 3. **Parse input.** Query parameters via `recipe.ParseCriteriaFromRequest`; bodies via `json.NewDecoder` wrapped in `http.MaxBytesReader` for the per-endpoint cap.
 4. **Allowlist pre-check.** `validateAgainstAllowLists(h.allowLists, criteria)` runs the same projection the facade uses (`aicr.ToInternalAllowLists`) so the handler error message and facade backstop never drift.
-5. **Call the facade.** `Client.ResolveRecipeFromCriteria`, `Client.AdoptRecipe`, `Client.MakeBundle`. No business logic in the handler itself.
+5. **Call the facade.** `Client.ResolveRecipeFromCriteriaWithOptions`, `Client.AdoptRecipe`, `Client.MakeBundle`. No business logic in the handler itself.
 6. **Format the response.** `serializer.RespondJSON` for JSON; stream zip bytes directly for bundle. Set `Cache-Control: public, max-age=<RecipeCacheTTL>` on cacheable GETs.
 7. **Errors via `WriteErrorFromErr`.**
 
@@ -167,7 +168,11 @@ Environment variables read at startup:
 | Variable | Default | Source |
 |----------|---------|--------|
 | `PORT` | 8080 | `defaults.EnvServerPort` (in `config.go`) |
+| `AICR_SERVER_ADDRESS` | unset → all interfaces | `defaults.EnvServerAddress` (`parseConfig`, `os.LookupEnv`) |
 | `SHUTDOWN_TIMEOUT_SECONDS` | 30 | `defaults.EnvServerShutdownTimeoutSeconds` |
+| `AICR_ALLOW_VENDOR_CHARTS` | `false` | `allowVendorChartsFromEnv` (`strconv.ParseBool`; unparseable → off with a warning) |
+| `AICR_HELM_REPOSITORY_HOST` | unset → no credentials attached | `attachHelmBasicAuth` in `pkg/bundler/deployer/localformat/vendor.go` (read per vendor-charts request) |
+| `HELM_REPOSITORY_USERNAME` / `HELM_REPOSITORY_PASSWORD` | unset | same; sent only over HTTPS to the host named by `AICR_HELM_REPOSITORY_HOST` |
 | `AICR_ALLOWED_ACCELERATORS` | unset → unrestricted | `aicr.ParseAllowListsFromEnv` |
 | `AICR_ALLOWED_SERVICES` | unset → unrestricted | same |
 | `AICR_ALLOWED_INTENTS` | unset → unrestricted | same |
@@ -290,15 +295,16 @@ contains two contract gates:
   constants. It matches the `allOf` branches by content rather than position,
   since `allOf` is semantically unordered.
 
-  Runtime acceptance of the legacy header shapes is pinned separately by
-  `TestBundleHandler_LegacyRecipeHeaders`, which posts absent, empty, and
-  target-`apiVersion` bodies to the handler, asserts 200, and round-trips the
-  emitted `recipe.yaml` back through the file loader to prove the ingest
-  normalization holds. The spec gate alone would only be checking the spec
-  against itself. The one legacy shape that is *not* accepted, `kind: Recipe`
-  (published through v0.18.0 and removed by the v1 collapse), is pinned by
-  `TestBundleHandler_RejectsLegacyRecipeKind` so the rejection stays a decision
-  rather than becoming an accident of a later refactor.
+  Runtime handling of the legacy header shapes is pinned separately by
+  `TestBundleHandler_LegacyRecipeHeaders`. It asserts 200 for a target
+  `apiVersion` with an absent or empty `kind`, and round-trips the emitted
+  `recipe.yaml` back through the file loader to prove the ingest normalization
+  holds. It asserts 400 for an absent or empty `apiVersion`, which v1.0.0
+  retired. The spec gate alone would only be checking the spec against itself.
+  The legacy `kind: Recipe` (published through v0.18.0 and removed by the v1
+  collapse) is pinned by `TestBundleHandler_RejectsLegacyRecipeKind` so the
+  rejection stays a decision rather than becoming an accident of a later
+  refactor.
 
 Drift is a contract bug: clients conforming to the spec will reject
 inputs the server actually accepts, or generate types that reject
@@ -310,9 +316,9 @@ test strips it before comparison.
 
 ## REST Contract Gate
 
-REST is one of the four surfaces [ROADMAP](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md)
-section 1 freezes at v1. Two gates guard it, and they fail for different
-reasons.
+REST is one of the four surfaces
+[ROADMAP](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md#api-stability)
+freezes at v1. Two gates guard it, and they fail for different reasons.
 
 **`make openapi-diff`** ([`tools/openapi-diff`](https://github.com/NVIDIA/aicr/blob/main/tools/openapi-diff))
 compares `api/aicr/v1/server.yaml` against the committed snapshot
@@ -346,15 +352,16 @@ would make the diff gate report no breaking changes for anything the truncated
 file omits.
 
 The baseline is a committed snapshot rather than the previous release, unlike
-`api-diff`. The v1 collapse (#2464) is unreleased, so comparing against v0.20.0
-reports 28 breaking changes that are all one already-merged decision — the gate
-would ship pre-loaded with noise that clears itself at v0.21 and teaches
-everyone to skim it in the meantime.
+`api-diff`. When the gate was introduced the v1 collapse (#2464) was still
+unreleased, so a comparison against v0.20.0 reported 28 breaking changes that
+were all one already-merged decision — the gate would have shipped pre-loaded
+with noise and taught everyone to skim it.
 
 ## Artifact Schema Gate
 
-Artifact schemas are the second of the four surfaces ROADMAP section 1 freezes
-at v1 (issue #2113). `api/aicr/v1/schemas/*.schema.json` are JSON Schema
+Artifact schemas are the second of the four surfaces
+[ROADMAP](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md#api-stability)
+freezes at v1 (issue #2113). `api/aicr/v1/schemas/*.schema.json` are JSON Schema
 documents for `Snapshot`, `RecipeResult`, `RecipeMetadata`, `RecipeMixin` and
 `RecipeCriteria`, generated from the Go types by
 [`tools/schemagen`](https://github.com/NVIDIA/aicr/tree/main/tools/schemagen)
@@ -366,8 +373,8 @@ fails for a different reason:
 - **`TestCommittedSchemasAreFresh`** — the committed files match the current Go
   types. Without it the schemas would drift into a snapshot of whatever the
   types looked like when someone last remembered to run the generator.
-- **`TestSchemasDescribeRealArtifacts`** — the 110 committed overlays and 4
-  mixins validate against their schema. Freshness proves the schema matches the
+- **`TestSchemasDescribeRealArtifacts`** — every committed overlay and mixin
+  validates against its schema. Freshness proves the schema matches the
   *type*; this proves the type matches what is actually on disk.
 - **`TestArtifactSchemasAreCompatible`** — the generated schemas are compared to
   the frozen snapshot in `api/aicr/v1/schemas/baseline/`, failing on a removed
@@ -390,7 +397,7 @@ diff is the change under review.
 always written and a consumer may rely on it. `RecipeMetadata`, `RecipeMixin`
 and `RecipeCriteria` are authored by hand, where the encoder's behavior says
 nothing about what a human must supply — `ComponentRef.Source` is written on
-every emit but set by only 17 of the 110 committed overlays. Authored artifacts
+every emit but set by only a minority of the committed overlays. Authored artifacts
 therefore declare nothing required; marking them published a schema that
 rejected the project's own catalog.
 
@@ -414,7 +421,7 @@ anything else** rather than emitting a plausible guess.
 5. **Wire allowlists if needed.** Pass `allowLists` into the handler constructor and call `validateAgainstAllowLists` before the facade call. Do not invent a parallel allowlist path; reuse `aicr.ToInternalAllowLists`.
 6. **Tighten the body cap.** If the endpoint accepts POST bodies and 8 MiB is wrong, define a `defaults.Max<Name>POSTBytes` constant and wrap `r.Body` with `http.MaxBytesReader` inside the handler. Handle `*http.MaxBytesError` explicitly → 413.
 7. **Run the contract tests.**
-   `go test -run '^(TestOpenAPIEnumsMatchGoTypes|TestOpenAPIV1BundleRecipeContract)$' ./pkg/server/...`.
+   `go test -run '^(TestOpenAPIEnumsMatchGoTypes|TestOpenAPIBundleContract)$' ./pkg/server/...`.
    Add cases to `openapi_sync_test.go` if you introduced a new enum-bearing
    field or changed the `/v1/bundle` recipe schema.
 8. **Update [docs/user/api-reference.md](../user/api-reference.md)** in the same PR. CLAUDE.md's docs-updates-with-behavior-changes rule applies.
@@ -441,7 +448,7 @@ every response, not just 429s, so clients can back off proactively.
 
 **Panic recovery.** Wraps `rateLimit` + `bodyLimit` + handler. A panic
 becomes a 500 via `WriteError(..., ErrCodeInternal, ...)`, increments
-the `aicr_server_panic_recoveries_total` counter, and logs the full
+the `aicr_panic_recoveries_total` counter, and logs the full
 panic value at Error. The `loggingMiddleware` is outside this layer so
 the completion log still fires.
 
@@ -452,10 +459,10 @@ the allow-list in `isValidAPIVersion` (currently `v1` only), and sets
 Add `v2` by extending the map in `version.go`.
 
 **Metrics.** Prometheus collectors registered via `promauto` in
-`metrics.go`: `aicr_server_requests_total{method,path,status}`,
-`aicr_server_request_duration_seconds`, `aicr_server_requests_in_flight`,
-`aicr_server_rate_limit_rejects_total`,
-`aicr_server_panic_recoveries_total`.
+`metrics.go`: `aicr_http_requests_total{method,path,status}`,
+`aicr_http_request_duration_seconds`, `aicr_http_requests_in_flight`,
+`aicr_rate_limit_rejects_total`,
+`aicr_panic_recoveries_total`.
 
 ## Testing
 

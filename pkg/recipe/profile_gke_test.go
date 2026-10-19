@@ -16,7 +16,6 @@ package recipe
 
 import (
 	"context"
-	stderrors "errors"
 	"maps"
 	"slices"
 	"strings"
@@ -24,6 +23,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/allocpolicy"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func gkeCriteria() *Criteria {
@@ -115,6 +115,59 @@ func TestGKEGpuStackProfileResolution(t *testing.T) {
 			}
 			if !found {
 				t.Error("NodeTopology.gpu-nodes.label constraint not carried in the artifact")
+			}
+		})
+	}
+}
+
+// TestGKEBundleInstallerCarriesPoolCreationConstraint confirms only
+// bundle-installer carries the K8s.gke-gpu-pools.gpu-driver-installation
+// constraint. gke-default must resolve without a --gke-gpu-pools
+// projection, so it must not carry it.
+func TestGKEBundleInstallerCarriesPoolCreationConstraint(t *testing.T) {
+	t.Parallel()
+
+	const constraintName = "K8s.gke-gpu-pools.gpu-driver-installation"
+
+	tests := []struct {
+		name           string
+		selection      string
+		wantPresent    bool
+		wantConstraint string
+	}{
+		{
+			name:        "gke-default carries no pool-creation constraint",
+			selection:   "",
+			wantPresent: false,
+		},
+		{
+			name:           "bundle-installer requires pools created with the driver disabled",
+			selection:      "gpuStack=bundle-installer",
+			wantPresent:    true,
+			wantConstraint: "Disabled",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result, err := NewBuilder().BuildFromCriteriaWithProfile(
+				t.Context(), gkeCriteria(), tt.selection)
+			if err != nil {
+				t.Fatalf("BuildFromCriteriaWithProfile() failed: %v", err)
+			}
+			var found bool
+			var value string
+			for _, c := range result.Constraints {
+				if c.Name == constraintName {
+					found = true
+					value = c.Value
+				}
+			}
+			if found != tt.wantPresent {
+				t.Fatalf("%s present = %v, want %v", constraintName, found, tt.wantPresent)
+			}
+			if tt.wantPresent && value != tt.wantConstraint {
+				t.Errorf("%s value = %q, want %q", constraintName, value, tt.wantConstraint)
 			}
 		})
 	}
@@ -236,7 +289,7 @@ func TestGKEGpuStackClosureLockRejectsPolicyDivergence(t *testing.T) {
 			allocpolicy.ComponentDRADriver: {allocpolicy.PathDRAGPUsEnabled},
 		}
 		err := result.ValidateProfileLock(ctx, result.ComponentRefs, hydrate(t), dynamic)
-		if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if err == nil || errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Fatalf("ValidateProfileLock() error = %v, want install-time mutability rejection", err)
 		}
 	})
@@ -318,7 +371,7 @@ func TestCoherenceGateRejectsExternalWithDevicePluginEnabled(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "devicePlugin.enabled=true") {
 		t.Fatalf("PrepareAndValidateWithContext() error = %v, want dual-advertisement rejection", err)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 	}
 }
@@ -401,7 +454,7 @@ func TestCoherenceGateRejectsBundleInstallerIncoherentTuples(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tt.wantMsg) {
 				t.Fatalf("PrepareAndValidateWithContext() error = %v, want %q rejection", err, tt.wantMsg)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 			}
 		})
@@ -447,7 +500,7 @@ func TestCoherenceGateRejectsAbsentDRAGPUsEnabled(t *testing.T) {
 		t.Fatalf("PrepareAndValidateWithContext() error = %v, want absent-switch rejection at %s",
 			err, allocpolicy.PathDRAGPUsEnabled)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 	}
 }

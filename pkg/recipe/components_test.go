@@ -17,7 +17,6 @@ package recipe
 import (
 	"bytes"
 	"context"
-	stderrors "errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -25,6 +24,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -253,8 +254,11 @@ func TestComponentRegistry_NodeSchedulingPaths(t *testing.T) {
 	if len(gpuOp.GetSystemTolerationPaths()) == 0 {
 		t.Error("gpu-operator should have system toleration paths")
 	}
-	if len(gpuOp.GetAcceleratedNodeSelectorPaths()) == 0 {
-		t.Error("gpu-operator should have accelerated node selector paths")
+	// gpu-operator has NO accelerated node selector paths by design: the chart and
+	// ClusterPolicy CRD have no daemonsets.nodeSelector, so the route was removed
+	// (#2474). The operator places operands via its own GFD/NFD deploy labels.
+	if len(gpuOp.GetAcceleratedNodeSelectorPaths()) != 0 {
+		t.Error("gpu-operator should have no accelerated node selector paths (daemonsets.nodeSelector does not exist)")
 	}
 	if len(gpuOp.GetAcceleratedTolerationPaths()) == 0 {
 		t.Error("gpu-operator should have accelerated toleration paths")
@@ -395,7 +399,7 @@ func TestComponentRegistry_SlinkySlurmChartVersions(t *testing.T) {
 		t.Fatalf("failed to load component registry: %v", err)
 	}
 
-	const wantVersion = "1.2.0"
+	const wantVersion = "1.2.2"
 	for _, name := range []string{
 		"slinky-slurm-operator-crds",
 		"slinky-slurm-operator",
@@ -477,10 +481,25 @@ func TestComponentRegistry_SlinkySlurm_NodeSchedulingPaths(t *testing.T) {
 		}
 	}
 
+	// Regression guard: an unpinned controller/restapi/login/accounting pod
+	// can land on a GPU node, whose zone then pins the StatefulSet's PVC and
+	// strands a later reschedule onto the correct system-node pool. This
+	// must stay a bundle-time failure, not a silent no-op, if
+	// requireNodeSelector is ever dropped from the registry entry.
+	if !slurmCluster.RequireSystemNodeSelector() {
+		t.Error("slinky-slurm nodeScheduling.system.requireNodeSelector must stay true (see registry.yaml comment)")
+	}
+
 	gotAccelSelector := slurmCluster.GetAcceleratedNodeSelectorPaths()
 	if !slices.Contains(gotAccelSelector, "nodesets.slinky.podSpec.nodeSelector") {
 		t.Errorf("slinky-slurm accelerated node selector paths missing %q (got %v)",
 			"nodesets.slinky.podSpec.nodeSelector", gotAccelSelector)
+	}
+	// Regression guard: an unpinned NodeSet/worker pod can land on a
+	// non-GPU node and strand a later reschedule onto the accelerated pool
+	// the same way.
+	if !slurmCluster.RequireAcceleratedNodeSelector() {
+		t.Error("slinky-slurm nodeScheduling.accelerated.requireNodeSelector must stay true (see registry.yaml comment)")
 	}
 	gotAccelToleration := slurmCluster.GetAcceleratedTolerationPaths()
 	if !slices.Contains(gotAccelToleration, "nodesets.slinky.podSpec.tolerations") {
@@ -527,6 +546,51 @@ func TestComponentRegistry_SlurmAccountingMariaDB_NodeSchedulingPaths(t *testing
 	if got := mariaDB.GetSystemTolerationPaths(); !slices.Contains(got, "mariadb.tolerations") {
 		t.Errorf("slurm-accounting-mariadb system toleration paths missing %q (got %v)",
 			"mariadb.tolerations", got)
+	}
+	// Regression guard: an unpinned mariadb pod can land on a GPU node and
+	// strand a later reschedule the same way slinky-slurm's pods can. This
+	// must stay a bundle-time failure, not a silent no-op, if
+	// requireNodeSelector is ever dropped from the registry entry.
+	if !mariaDB.RequireSystemNodeSelector() {
+		t.Error("slurm-accounting-mariadb nodeScheduling.system.requireNodeSelector must stay true (see registry.yaml comment)")
+	}
+}
+
+func TestComponentRegistry_KubePrometheusStack_NodeSchedulingPaths(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("failed to load component registry: %v", err)
+	}
+
+	prom := registry.Get("kube-prometheus-stack")
+	if prom == nil {
+		t.Fatal("kube-prometheus-stack not found in registry")
+	}
+	if got := prom.GetSystemNodeSelectorPaths(); !slices.Contains(got, "prometheus.prometheusSpec.nodeSelector") {
+		t.Errorf("kube-prometheus-stack system node selector paths missing %q (got %v)",
+			"prometheus.prometheusSpec.nodeSelector", got)
+	}
+	if got := prom.GetSystemTolerationPaths(); !slices.Contains(got, "prometheus.prometheusSpec.tolerations") {
+		t.Errorf("kube-prometheus-stack system toleration paths missing %q (got %v)",
+			"prometheus.prometheusSpec.tolerations", got)
+	}
+	// Regression guard. Once --storage-class gives it a PVC, an unpinned
+	// prometheus pod can land on a GPU node and strand a later reschedule
+	// the same way slinky-slurm's pods can. This must stay a bundle-time
+	// failure, not a silent no-op, if requireNodeSelectorIfStorageClassSet
+	// is ever dropped from the registry entry. Unconditional
+	// requireNodeSelector must stay off, since the chart defaults to
+	// emptyDir, so this base component appears in nearly every bundle
+	// regardless of whether a PVC is ever in play.
+	if !prom.RequireSystemNodeSelectorIfStorageClassSet() {
+		t.Error("kube-prometheus-stack nodeScheduling.system.requireNodeSelectorIfStorageClassSet must stay true (see registry.yaml comment)")
+	}
+	if prom.RequireSystemNodeSelector() {
+		t.Error("kube-prometheus-stack nodeScheduling.system.requireNodeSelector must stay false; use requireNodeSelectorIfStorageClassSet instead")
+	}
+	if got := prom.GetStorageClassPaths(); !slices.Contains(got, "prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName") {
+		t.Errorf("kube-prometheus-stack storageClassPaths missing %q (got %v); requireNodeSelectorIfStorageClassSet has nothing to condition on",
+			"prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName", got)
 	}
 }
 
@@ -883,6 +947,147 @@ func TestComponentRegistry_Validate_EdgeCases(t *testing.T) {
 		}
 	})
 
+	t.Run("requireNodeSelector without nodeSelectorPaths is invalid", func(t *testing.T) {
+		registry := &ComponentRegistry{
+			Components: []ComponentConfig{
+				{
+					Name:        "comp1",
+					DisplayName: "Comp 1",
+					NodeScheduling: NodeSchedulingConfig{
+						System: SchedulingPaths{RequireNodeSelector: true},
+					},
+				},
+				{
+					Name:        "comp2",
+					DisplayName: "Comp 2",
+					NodeScheduling: NodeSchedulingConfig{
+						Accelerated: SchedulingPaths{RequireNodeSelector: true},
+					},
+				},
+			},
+		}
+		errs := registry.Validate()
+		wantSubstrings := []string{
+			`component "comp1": nodeScheduling.system requires a node selector but nodeSelectorPaths is empty`,
+			`component "comp2": nodeScheduling.accelerated requires a node selector but nodeSelectorPaths is empty`,
+		}
+		for _, want := range wantSubstrings {
+			found := false
+			for _, e := range errs {
+				if strings.Contains(e.Error(), want) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("expected an error containing %q, got: %v", want, errs)
+			}
+		}
+	})
+
+	t.Run("requireNodeSelector with nodeSelectorPaths is valid", func(t *testing.T) {
+		registry := &ComponentRegistry{
+			Components: []ComponentConfig{
+				{
+					Name:        "comp1",
+					DisplayName: "Comp 1",
+					NodeScheduling: NodeSchedulingConfig{
+						System: SchedulingPaths{
+							RequireNodeSelector: true,
+							NodeSelectorPaths:   []string{"controller.podSpec.nodeSelector"},
+						},
+					},
+				},
+			},
+		}
+		errs := registry.Validate()
+		if len(errs) != 0 {
+			t.Errorf("expected no validation errors, got: %v", errs)
+		}
+	})
+
+	t.Run("requireNodeSelectorIfStorageClassSet without storage class paths is invalid", func(t *testing.T) {
+		registry := &ComponentRegistry{
+			Components: []ComponentConfig{
+				{
+					Name:        "comp1",
+					DisplayName: "Comp 1",
+					NodeScheduling: NodeSchedulingConfig{
+						System: SchedulingPaths{
+							RequireNodeSelectorIfStorageClassSet: true,
+							NodeSelectorPaths:                    []string{"controller.podSpec.nodeSelector"},
+						},
+					},
+				},
+			},
+		}
+		errs := registry.Validate()
+		want := `component "comp1": nodeScheduling.system.requireNodeSelectorIfStorageClassSet is true but the component has no storageClassPaths or sharedStorageClassPaths to condition on`
+		found := false
+		for _, e := range errs {
+			if strings.Contains(e.Error(), want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected an error containing %q, got: %v", want, errs)
+		}
+	})
+
+	t.Run("requireNodeSelectorIfStorageClassSet with storage class paths is valid", func(t *testing.T) {
+		registry := &ComponentRegistry{
+			Components: []ComponentConfig{
+				{
+					Name:              "comp1",
+					DisplayName:       "Comp 1",
+					StorageClassPaths: []string{"controller.storage.storageClassName"},
+					NodeScheduling: NodeSchedulingConfig{
+						System: SchedulingPaths{
+							RequireNodeSelectorIfStorageClassSet: true,
+							NodeSelectorPaths:                    []string{"controller.podSpec.nodeSelector"},
+						},
+					},
+				},
+			},
+		}
+		errs := registry.Validate()
+		if len(errs) != 0 {
+			t.Errorf("expected no validation errors, got: %v", errs)
+		}
+	})
+
+	t.Run("requireNodeSelector and requireNodeSelectorIfStorageClassSet together is invalid", func(t *testing.T) {
+		registry := &ComponentRegistry{
+			Components: []ComponentConfig{
+				{
+					Name:              "comp1",
+					DisplayName:       "Comp 1",
+					StorageClassPaths: []string{"controller.storage.storageClassName"},
+					NodeScheduling: NodeSchedulingConfig{
+						System: SchedulingPaths{
+							RequireNodeSelector:                  true,
+							RequireNodeSelectorIfStorageClassSet: true,
+							NodeSelectorPaths:                    []string{"controller.podSpec.nodeSelector"},
+						},
+					},
+				},
+			},
+		}
+		errs := registry.Validate()
+		want := `component "comp1": nodeScheduling.system.requireNodeSelector and requireNodeSelectorIfStorageClassSet are mutually exclusive`
+		found := false
+		for _, e := range errs {
+			if strings.Contains(e.Error(), want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected an error containing %q, got: %v", want, errs)
+		}
+	})
+
 	t.Run("valid registry passes", func(t *testing.T) {
 		registry := &ComponentRegistry{
 			Components: []ComponentConfig{
@@ -1058,7 +1263,7 @@ func TestHelmConfig_DefaultNamespace(t *testing.T) {
 		{"network-operator", "nvidia-network-operator"},
 		{"cert-manager", "cert-manager"},
 		{"nvsentinel", "nvsentinel"},
-		{"nodewright-operator", "skyhook"},
+		{"nodewright-operator", "nodewright"},
 		{"kube-prometheus-stack", "monitoring"},
 	}
 
@@ -1077,7 +1282,7 @@ func TestHelmConfig_DefaultNamespace(t *testing.T) {
 
 func TestHelmConfig_DefaultNamespaceParsing(t *testing.T) {
 	yamlData := `
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: test-component
@@ -1115,7 +1320,7 @@ func TestKustomizeConfig_Parsing(t *testing.T) {
 	)
 
 	yamlData := `
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: my-kustomize-app
@@ -1176,7 +1381,7 @@ func buildProviderWithRegistry(t *testing.T, tag string) DataProvider {
 		compName = "evict-only"
 	}
 
-	registryYAML := []byte("apiVersion: aicr.run/v1alpha2\n" +
+	registryYAML := []byte("apiVersion: aicr.run/v1beta1\n" +
 		"kind: ComponentRegistry\n" +
 		"components:\n" +
 		"  - name: " + compName + "\n" +
@@ -1243,7 +1448,7 @@ func TestLoadComponentRegistry_ReleaseNHeaders(t *testing.T) {
 				if err == nil {
 					t.Fatal("GetComponentRegistryFor() error = nil, want header rejection")
 				}
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
 				}
 				return
@@ -1335,7 +1540,7 @@ func TestLoadRegistry_RejectsReservedDeployerKey(t *testing.T) {
 	}{
 		{
 			name: "component named deployer rejected",
-			registryYAML: "apiVersion: aicr.run/v1alpha2\n" +
+			registryYAML: "apiVersion: aicr.run/v1beta1\n" +
 				"kind: ComponentRegistry\n" +
 				"components:\n" +
 				"  - name: deployer\n" +
@@ -1344,7 +1549,7 @@ func TestLoadRegistry_RejectsReservedDeployerKey(t *testing.T) {
 		},
 		{
 			name: "component aliasing deployer via valueOverrideKeys rejected",
-			registryYAML: "apiVersion: aicr.run/v1alpha2\n" +
+			registryYAML: "apiVersion: aicr.run/v1beta1\n" +
 				"kind: ComponentRegistry\n" +
 				"components:\n" +
 				"  - name: my-operator\n" +
@@ -1381,7 +1586,7 @@ func TestLoadRegistry_RejectsReservedDeployerKey(t *testing.T) {
 // load time instead (same fail-closed contract as the reserved
 // deployer-key guard above).
 func TestLoadRegistry_RejectsKustomizeManifestFiles(t *testing.T) {
-	registryYAML := "apiVersion: aicr.run/v1alpha2\n" +
+	registryYAML := "apiVersion: aicr.run/v1beta1\n" +
 		"kind: ComponentRegistry\n" +
 		"components:\n" +
 		"  - name: my-kustomize-app\n" +
@@ -1410,7 +1615,7 @@ func TestLoadRegistry_RejectsKustomizeManifestFiles(t *testing.T) {
 	// mirroring the coherence-check precedent in
 	// componentref_coherence_test.go. Asserting only the message would stay
 	// green if the guard's code silently regressed to ErrCodeInternal.
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("want ErrCodeInvalidRequest, got %v", err)
 	}
 }
@@ -1451,5 +1656,235 @@ func TestComponentRegistry_ManifestFilesResolve(t *testing.T) {
 	if !slices.Equal(kueue.ManifestFiles, wantManifests) {
 		t.Errorf("kueue manifestFiles = %v, want %v (dependency-ordered quota CRs)",
 			kueue.ManifestFiles, wantManifests)
+	}
+}
+
+func TestComponentConfigUpgradesFile(t *testing.T) {
+	registryYAML := []byte("apiVersion: " + ComponentRegistryAPIVersion + "\n" +
+		"kind: " + ComponentRegistryKind + "\n" +
+		"components:\n" +
+		"  - name: nodewright-operator\n" +
+		"    displayName: NodeWright Operator\n" +
+		"    upgrades:\n" +
+		"      file: components/nodewright-operator/upgrades.yaml\n")
+
+	var registry ComponentRegistry
+	if err := yaml.Unmarshal(registryYAML, &registry); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(registry.Components) != 1 {
+		t.Fatalf("components = %d, want 1", len(registry.Components))
+	}
+	if got := registry.Components[0].Upgrades.File; got != "components/nodewright-operator/upgrades.yaml" {
+		t.Errorf("Upgrades.File = %q, want %q", got, "components/nodewright-operator/upgrades.yaml")
+	}
+}
+
+func TestComponentConfigUpgradesAbsent(t *testing.T) {
+	registryYAML := []byte("apiVersion: " + ComponentRegistryAPIVersion + "\n" +
+		"kind: " + ComponentRegistryKind + "\n" +
+		"components:\n" +
+		"  - name: nfd\n" +
+		"    displayName: Node Feature Discovery\n")
+
+	var registry ComponentRegistry
+	if err := yaml.Unmarshal(registryYAML, &registry); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got := registry.Components[0].Upgrades.File; got != "" {
+		t.Errorf("Upgrades.File = %q, want empty for a component with no upgrades key", got)
+	}
+}
+
+func TestValidateMixinSafeOverridePaths(t *testing.T) {
+	tests := []struct {
+		name    string
+		paths   []string
+		wantErr string
+	}{
+		{name: "empty allowlist is valid"},
+		{name: "well-formed unique leaf paths", paths: []string{"global.tracing.enabled", "global.auditLogging.enabled"}},
+		{name: "empty string entry", paths: []string{""}, wantErr: "not a well-formed dotted path"},
+		{name: "leading dot", paths: []string{".global.tracing.enabled"}, wantErr: "not a well-formed dotted path"},
+		{name: "trailing dot", paths: []string{"global.tracing.enabled."}, wantErr: "not a well-formed dotted path"},
+		{name: "double dot", paths: []string{"global..enabled"}, wantErr: "not a well-formed dotted path"},
+		{name: "literal duplicate", paths: []string{"global.tracing.enabled", "global.tracing.enabled"}, wantErr: "more than once"},
+		{name: "ancestor/descendant pair", paths: []string{"global.tracing", "global.tracing.enabled"}, wantErr: "one an ancestor of the other"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			comp := &ComponentConfig{Name: "test-component", MixinSafeOverridePaths: tt.paths}
+			err := validateMixinSafeOverridePaths(comp)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected no error, got: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestComponentRegistryValidate_MixinSafeOverridePaths pins the allowlist
+// rules to the EXPORTED contract, not just the loader path: a registry
+// constructed directly (SDK callers, an external --data catalog assembled in
+// Go) never goes through loadComponentRegistryFor, so Validate() is the only
+// gate it sees. The sibling test above calls the private helper and would
+// stay green even if Validate() dropped the check entirely.
+func TestComponentRegistryValidate_MixinSafeOverridePaths(t *testing.T) {
+	tests := []struct {
+		name    string
+		paths   []string
+		wantErr string
+	}{
+		{name: "well-formed allowlist passes", paths: []string{"global.tracing.enabled"}},
+		{name: "malformed path is rejected", paths: []string{"global..enabled"}, wantErr: "not a well-formed dotted path"},
+		{name: "duplicate entry is rejected", paths: []string{"global.tracing.enabled", "global.tracing.enabled"}, wantErr: "more than once"},
+		{name: "ancestor/descendant pair is rejected", paths: []string{"global.tracing", "global.tracing.enabled"}, wantErr: "one an ancestor of the other"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := &ComponentRegistry{
+				Components: []ComponentConfig{{
+					Name:                   "test-component",
+					DisplayName:            "Test Component",
+					MixinSafeOverridePaths: tt.paths,
+				}},
+			}
+			errs := registry.Validate()
+			if tt.wantErr == "" {
+				if len(errs) != 0 {
+					t.Fatalf("Validate() = %v, want no errors", errs)
+				}
+				return
+			}
+			found := false
+			for _, err := range errs {
+				if strings.Contains(err.Error(), tt.wantErr) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("Validate() = %v, want an error containing %q", errs, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestComponentRegistryValidate_OwnsCRDsExcludeSubcharts(t *testing.T) {
+	tests := []struct {
+		name     string
+		ownsCRDs bool
+		exclude  []string
+		wantErrs []string
+	}{
+		{name: "owner with bare subchart names passes", ownsCRDs: true, exclude: []string{"mongodb-store", "sub_chart.v2"}},
+		{name: "owner without exclusions passes", ownsCRDs: true},
+		{name: "exclusions without ownsCRDs are rejected", exclude: []string{"mongodb-store"}, wantErrs: []string{"set without ownsCRDs"}},
+		{name: "empty name is rejected", ownsCRDs: true, exclude: []string{""}, wantErrs: []string{`entry "" must be a bare subchart name`}},
+		{name: "path separator is rejected", ownsCRDs: true, exclude: []string{"charts/mongodb-store"}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "glob star is rejected", ownsCRDs: true, exclude: []string{"mongodb-*"}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "glob question mark is rejected", ownsCRDs: true, exclude: []string{"mongodb?store"}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "glob bracket is rejected", ownsCRDs: true, exclude: []string{"mongodb[a]"}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "space is rejected", ownsCRDs: true, exclude: []string{"mongodb store"}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "dot is rejected", ownsCRDs: true, exclude: []string{"."}, wantErrs: []string{"must be a bare subchart name"}},
+		{name: "dot-dot is rejected", ownsCRDs: true, exclude: []string{".."}, wantErrs: []string{"must be a bare subchart name"}},
+		{
+			name:     "both rules report independently",
+			exclude:  []string{"a/b"},
+			wantErrs: []string{"set without ownsCRDs", "must be a bare subchart name"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := &ComponentRegistry{
+				Components: []ComponentConfig{{
+					Name:                     "test-component",
+					DisplayName:              "Test Component",
+					OwnsCRDs:                 tt.ownsCRDs,
+					OwnsCRDsExcludeSubcharts: tt.exclude,
+				}},
+			}
+			errs := registry.Validate()
+			if len(errs) != len(tt.wantErrs) {
+				t.Fatalf("Validate() = %v, want %d error(s) containing %q", errs, len(tt.wantErrs), tt.wantErrs)
+			}
+			for i, want := range tt.wantErrs {
+				if !strings.Contains(errs[i].Error(), want) {
+					t.Errorf("Validate()[%d] = %v, want it to contain %q", i, errs[i], want)
+				}
+				if errorstest.ReportedCode(errs[i]) != errors.ErrCodeInvalidRequest {
+					t.Errorf("Validate()[%d] code = %v, want ErrCodeInvalidRequest", i, errs[i])
+				}
+			}
+		})
+	}
+}
+
+// TestLoadComponentRegistry_HelmDefaultDigest pins the load-time contract for
+// helm.defaultDigest: the SHA-256 of the pinned chart archive, written
+// sha256:<64 lowercase hex>, and only on an entry that pins both a chart and
+// a version. A malformed digest on any loaded registry, external --data
+// registries included, fails the load rather than reaching bundle time.
+func TestLoadComponentRegistry_HelmDefaultDigest(t *testing.T) {
+	const validDigest = "sha256:0d3b0d3f8f5c2b7a9e1c4d6f8a0b2c4e6f8a0b2c4d6e8f0a1b3c5d7e9f1a3b5c"
+	tests := []struct {
+		name         string
+		helm         string
+		noRepository bool
+		wantErr      string
+	}{
+		{name: "absent", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0"},
+		{name: "valid", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0\n    defaultDigest: " + validDigest},
+		{name: "missing algorithm", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0\n    defaultDigest: " + validDigest[len("sha256:"):],
+			wantErr: "sha256:<64 lowercase hex>"},
+		{name: "wrong algorithm", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0\n    defaultDigest: sha512:" + validDigest[len("sha256:"):],
+			wantErr: "sha256:<64 lowercase hex>"},
+		{name: "uppercase hex", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0\n    defaultDigest: sha256:" + strings.ToUpper(validDigest[len("sha256:"):]),
+			wantErr: "sha256:<64 lowercase hex>"},
+		{name: "short", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0\n    defaultDigest: sha256:abc",
+			wantErr: "sha256:<64 lowercase hex>"},
+		{name: "no pinned version", helm: "defaultChart: example/chart\n    defaultDigest: " + validDigest,
+			wantErr: "pins no chart version"},
+		{name: "no chart", helm: "defaultVersion: 1.0.0\n    defaultDigest: " + validDigest,
+			wantErr: "pins no chart"},
+		{name: "no repository", helm: "defaultChart: example/chart\n    defaultVersion: 1.0.0\n    defaultDigest: " + validDigest,
+			noRepository: true, wantErr: "pins no chart repository"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repository := "defaultRepository: https://charts.example.com\n    "
+			if tt.noRepository {
+				repository = ""
+			}
+			registry := fmt.Sprintf("apiVersion: aicr.run/v1beta1\nkind: %s\ncomponents:\n- name: example\n  helm:\n    %s%s\n",
+				ComponentRegistryKind, repository, tt.helm)
+			dp := newInMemoryProvider("registry-digest-"+tt.name, map[string][]byte{"registry.yaml": []byte(registry)})
+			t.Cleanup(func() { EvictCachedRegistry(dp) })
+
+			reg, err := GetComponentRegistryFor(dp)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("GetComponentRegistryFor() error = nil, want rejection containing %q", tt.wantErr)
+				}
+				errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+				if !strings.Contains(err.Error(), tt.wantErr) || !strings.Contains(err.Error(), `"example"`) {
+					t.Errorf("error = %v, want it to name the component and contain %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("GetComponentRegistryFor() error = %v", err)
+			}
+			if tt.name == "valid" && reg.Get("example").Helm.DefaultDigest != validDigest {
+				t.Errorf("DefaultDigest = %q, want %q", reg.Get("example").Helm.DefaultDigest, validDigest)
+			}
+		})
 	}
 }

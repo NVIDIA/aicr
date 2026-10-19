@@ -223,6 +223,8 @@ func TestGetRequirement(t *testing.T) {
 		{"gang-scheduling", false, "gang-scheduling.md"},
 		{"accelerator-metrics", false, "accelerator-metrics.md"},
 		{"ai-service-metrics", false, "ai-service-metrics.md"},
+		{"secure-accelerator-access", false, "secure-accelerator-access.md"},
+		{"slinky-slurm-gpu-access", false, "secure-accelerator-access.md"},
 		{"gpu-operator-health", true, ""}, // diagnostic
 		{"platform-health", true, ""},     // diagnostic
 		{"nonexistent", true, ""},
@@ -241,5 +243,40 @@ func TestGetRequirement(t *testing.T) {
 				t.Errorf("File = %q, want %q", meta.File, tt.wantFile)
 			}
 		})
+	}
+}
+
+// On a Slinky Slurm recipe secure-accelerator-access skips, and the
+// secure_accelerator_access page must come from slinky-slurm-gpu-access alone.
+func TestRenderSlurmGPUAccessFillsSecureAcceleratorAccessPage(t *testing.T) {
+	dir := t.TempDir()
+	r := New(WithOutputDir(dir))
+	report := &ctrf.Report{
+		Results: ctrf.Results{
+			Tests: []ctrf.TestResult{
+				{Name: "secure-accelerator-access", Status: "skipped"},
+				{Name: "slinky-slurm-gpu-access", Status: "passed", Duration: 4000,
+					Stdout: []string{"--- Slinky Slurm GPU access and isolation ---"}},
+			},
+		},
+	}
+	if err := r.Render(context.Background(), report); err != nil {
+		t.Fatalf("Render failed: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "secure-accelerator-access.md")) //nolint:gosec // test-controlled path
+	if err != nil {
+		t.Fatalf("secure-accelerator-access.md not rendered: %v", err)
+	}
+	for _, want := range []string{
+		"# Secure Accelerator Access (Slinky Slurm)",
+		"**Requirement:** `secure_accelerator_access`",
+		"### slinky-slurm-gpu-access",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("secure-accelerator-access.md missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(string(body), "### secure-accelerator-access") {
+		t.Errorf("skipped secure-accelerator-access must not appear on the page:\n%s", body)
 	}
 }

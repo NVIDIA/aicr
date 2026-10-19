@@ -34,6 +34,17 @@ resources:
 inferenceExtension:
   enabled: true
 
+# Must stay non-empty: the chart's default empty list binds its write role
+# (Deployments, DaemonSets, Secrets, ServiceAccounts) with a ClusterRoleBinding,
+# so a compromised controller could write those in any namespace. Scoping to the
+# one namespace AICR puts a Gateway in confines that reach. It does not confine
+# pod privileges or node placement — a DaemonSet created here still lands on
+# every node — which is admission control's job, not RBAC's. Add any namespace
+# where you place additional Gateways.
+rbac:
+  gatewayNamespaces:
+    - agentgateway-system
+
 # Source IP CIDRs allowed to reach the inference-gateway's public LoadBalancer.
 # When non-empty, these CIDRs are rendered into the generated Service's
 # spec.loadBalancerSourceRanges, which is honored by the AWS, GCP, Azure, and

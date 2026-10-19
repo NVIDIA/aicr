@@ -16,6 +16,7 @@ package attestation
 
 import (
 	"context"
+	stderrors "errors"
 	"log/slog"
 	"sort"
 	"strings"
@@ -74,11 +75,28 @@ type EmitOptions struct {
 	// loaded — the predicate's validatorImages will be omitted.
 	Catalog *catalog.ValidatorCatalog
 
+	// AllowMutableValidatorTags emits the bundle even when a validator image
+	// resolves to a moving tag. Emit otherwise fails closed, because the
+	// predicate records validator images by tag alone (ValidatorImages'
+	// Digest is empty by design) and a moving tag leaves the attestation's
+	// claim about which validators ran unverifiable once the tag advances.
+	//
+	// Set it only where the ref is known-disposable and the evidence is not:
+	// the kind UAT smoke lane runs side-loaded ko.local images, and the
+	// evidence demo publishes to a 72h ttl.sh repo. A real conformance run
+	// drops AICR_VALIDATOR_IMAGE_TAG instead. See #2873.
+	AllowMutableValidatorTags bool
+
 	// AICRVersion is stamped into the predicate and into the auto BOM's
 	// metadata.tools entry.
 	AICRVersion string
 
-	// OIDCResolve is consulted only when Push is set. Resolution is
+	// AICRCommit is the build commit stamped into the predicate. A value
+	// that is not a commit SHA (e.g. the unstamped "unknown") is omitted.
+	AICRCommit string
+
+	// OIDCResolve is consulted only when Push is set. A SigningKey selects
+	// KMS signing and no token is resolved; otherwise resolution is
 	// deferred until adjacent to SignStatement so Fulcio's nonce-binding
 	// window is respected — a long Helm-render-and-push phase between
 	// resolve and sign otherwise invalidates the token.
@@ -95,13 +113,58 @@ type EmitResult struct {
 	PushSummary *PushResult
 }
 
+// errMutableValidatorTag is the cause carried by the provenance failure. The
+// predicate identifies validators by tag alone, so a moving tag is a defect in
+// the evidence, not in the run that produced it — the validations themselves
+// succeeded.
+var errMutableValidatorTag = stderrors.New(
+	"validator image tag can be repointed after the run, leaving the attestation unverifiable")
+
+// checkValidatorTagProvenance fails closed when any validator image the
+// predicate will record resolves to a moving tag, naming every offending ref
+// so the operator can see which override to drop. With allow set the emit
+// proceeds and the refs are logged instead — the bundle still records what
+// actually ran, it just cannot be independently re-resolved later.
+func checkValidatorTagProvenance(images []ValidatorImage, allow bool) error {
+	mutable := MutableValidatorImages(images)
+	if len(mutable) == 0 {
+		return nil
+	}
+	if allow {
+		slog.Warn("emitting evidence with mutable validator image tags",
+			"images", mutable,
+			"impact", "the attestation names refs that can later resolve to different validator code")
+		return nil
+	}
+	return errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+		"refusing to emit evidence naming validator images that are not immutably pinned: "+strings.Join(mutable, ", "),
+		errMutableValidatorTag,
+		map[string]any{
+			"images": mutable,
+			// Every cause is named because the override is only the most
+			// common one. An unstamped `go build` (commit "unknown") resolves
+			// nothing and leaves the catalog's own :latest in place, and an
+			// image outside the trusted publisher prefix fails on any tag —
+			// in both cases telling the operator to unset a variable they
+			// never set would be a dead end.
+			"hint": "unset AICR_VALIDATOR_IMAGE_TAG if set, or build with a stamped commit " +
+				"(make build) so an immutable tag resolves (:vX.Y.Z or :sha-<commit>); " +
+				"an image outside " + catalog.TrustedValidatorRepoPrefix +
+				" must be pinned by digest (name@sha256:...), because no AICR workflow " +
+				"governs how another registry moves its tags; or pass " +
+				"--allow-mutable-validator-tags to override",
+		})
+}
+
 // Emit builds, optionally signs, and optionally pushes a recipe-evidence
-// bundle (predicateType v1 for unprofiled recipes, v2 when the recipe
-// carries a configuration profile), then writes the pointer file. The
+// bundle (predicateType v3, unconditionally), then writes the pointer file. The
 // pointer is written last, only when every earlier stage succeeds — a
 // push-ref validation, build, sign, or push error returns before any
 // pointer is written. When Push is absent the pointer is still written
 // (with empty bundle fields) on a successful build.
+//
+// A validator image resolving to a mutable tag fails the emit before any work
+// is done, unless AllowMutableValidatorTags is set.
 //
 // Behavior matrix:
 //
@@ -115,6 +178,14 @@ func Emit(ctx context.Context, opts EmitOptions) (*EmitResult, error) {
 		if _, err := oci.ParseOutputTarget(opts.Push); err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid push reference", err)
 		}
+	}
+
+	// Gate the validator provenance before any work, for the same reason the
+	// push ref is parsed above: a bundle that must not be published should
+	// cost nothing to reject, and must leave nothing half-written on disk.
+	validatorImages := ValidatorImagesForPredicate(opts.Catalog)
+	if err := checkValidatorTagProvenance(validatorImages, opts.AllowMutableValidatorTags); err != nil {
+		return nil, err
 	}
 
 	bomBody, err := LoadOrGenerateBOMContext(ctx, opts.BOMPath, opts.Recipe, opts.Snapshot, opts.Catalog, opts.AICRVersion)
@@ -156,8 +227,9 @@ func Emit(ctx context.Context, opts EmitOptions) (*EmitResult, error) {
 		BOM:                     BOMInputs{Body: bomBody, CycloneDXVersion: DefaultCycloneDXVersion},
 		PhaseResults:            phaseResults,
 		AICRVersion:             opts.AICRVersion,
+		AICRCommit:              opts.AICRCommit,
 		ValidatorCatalogVersion: CatalogVersion(opts.Catalog),
-		ValidatorImages:         ValidatorImagesForPredicate(opts.Catalog),
+		ValidatorImages:         validatorImages,
 		Redaction:               redaction,
 	})
 	if err != nil {
@@ -283,13 +355,19 @@ type signPushOptions struct {
 //  1. Push the bundle directory as an OCI artifact → artifactDigest.
 //  2. Build an artifact-subject Statement (subject.digest = artifactDigest)
 //     carrying the same predicate body.
-//  3. Resolve the OIDC token (deferred until here — see signPushOptions.OIDCResolve).
-//  4. Sign the Statement → Sigstore Bundle JSON.
+//  3. Sign the Statement → Sigstore Bundle JSON, with the KMS key or a
+//     keyless OIDC token resolved only now (see signEvidenceStatement).
+//  4. Write the signed bundle beside the local evidence for inspection.
 //  5. Attach the Sigstore Bundle as an OCI Referrer so cosign's
 //     /v2/<name>/referrers/<digest> discovery finds the signature.
 func signAndPush(ctx context.Context, bundle *Bundle, opts signPushOptions) (emitOutcome, error) {
 	if opts.Push == "" {
 		return emitOutcome{}, nil
+	}
+	if !opts.NoSign {
+		if err := validateEvidenceSigningMode(opts.OIDCResolve); err != nil {
+			return emitOutcome{}, err
+		}
 	}
 
 	// Resolve the push target. When the operator omits a tag, derive a
@@ -306,7 +384,7 @@ func signAndPush(ctx context.Context, bundle *Bundle, opts signPushOptions) (emi
 		SourceDir:     bundle.SummaryDir,
 		Reference:     pushRef,
 		AICRVersion:   opts.AICRVersion,
-		PredicateType: StatementPredicateType(bundle.Predicate),
+		PredicateType: bundle.PredicateType,
 		PlainHTTP:     opts.PlainHTTP,
 		InsecureTLS:   opts.InsecureTLS,
 	})
@@ -328,34 +406,14 @@ func signAndPush(ctx context.Context, bundle *Bundle, opts signPushOptions) (emi
 	artifactStmt, err := BuildArtifactStatement(
 		oci.TrimScheme(summary.Reference),
 		artifactDigestHex,
+		bundle.PredicateType,
 		bundle.Predicate,
 	)
 	if err != nil {
 		return emitOutcome{}, err
 	}
 
-	logOIDCResolveMode(opts.OIDCResolve)
-	// OIDCAuthTimeout caps interactive browser / device-code flows so a
-	// stalled user does not hold the parent (sign) context open
-	// indefinitely; pre-fetched and ambient paths complete well below this
-	// bound, so the cap only kicks in on the genuinely interactive paths
-	// that match defaults.OIDCAuthTimeout's intent.
-	resolveCtx, resolveCancel := context.WithTimeout(ctx, defaults.OIDCAuthTimeout)
-	token, tokenErr := bundleattest.ResolveOIDCToken(resolveCtx, opts.OIDCResolve)
-	resolveCancel()
-	if tokenErr != nil {
-		return emitOutcome{}, tokenErr
-	}
-
-	signCtx, signCancel := context.WithTimeout(ctx, defaults.EvidenceBundleSignTimeout)
-	defer signCancel()
-	// Map the full resolved signing target (Fulcio/Rekor endpoints plus the
-	// Rekor v2 signing-config selection) through the shared helper so evidence
-	// signing stays in lockstep with bundle/catalog signing — evidence defaults
-	// to Rekor v2 via ResolveOptions.UseTUFSigningConfig. Empty endpoint values
-	// fall back to the public-good defaults inside SignStatement.
-	signRes, err := bundleattest.SignStatement(signCtx, artifactStmt,
-		bundleattest.SignOptionsFromResolve(token, opts.OIDCResolve))
+	signRes, err := signEvidenceStatement(ctx, artifactStmt, opts.OIDCResolve)
 	if err != nil {
 		return emitOutcome{}, err
 	}
@@ -418,7 +476,7 @@ func buildPointerInputsFromOutcome(bundle *Bundle, out emitOutcome) PointerInput
 	}
 	// PointerSignerFromSignature applies the zero-Rekor rule: a
 	// SignedAttestation.RekorLogIndex of 0 is the "no Rekor entry" sentinel
-	// (e.g. --no-rekor) and maps to a nil index. nil when out.Sign is nil.
+	// (e.g. --tlog-upload=false) and maps to a nil index. nil when out.Sign is nil.
 	in.Signer = PointerSignerFromSignature(out.Sign)
 	return in
 }

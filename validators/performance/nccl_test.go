@@ -363,6 +363,9 @@ func TestAcceleratorProductMatchers(t *testing.T) {
 		{recipe.CriteriaAcceleratorGB200, "NVIDIA-GB200", true},
 		{recipe.CriteriaAcceleratorGB200, "NVIDIA-GB200-96GB", false}, // exact-match guard
 		{recipe.CriteriaAcceleratorGB200, "NVIDIA-H100-80GB-HBM3", false},
+		{recipe.CriteriaAcceleratorGB300, "NVIDIA-GB300", true},
+		{recipe.CriteriaAcceleratorGB300, "NVIDIA-GB300-288GB", false}, // exact-match guard
+		{recipe.CriteriaAcceleratorGB300, "NVIDIA-GB200", false},
 		{recipe.CriteriaAcceleratorB200, "NVIDIA-B200", true},
 		{recipe.CriteriaAcceleratorB200, "NVIDIA-GB200", false},
 		{recipe.CriteriaAcceleratorH100, "NVIDIA-H100-80GB-HBM3", true},
@@ -535,15 +538,17 @@ func TestPlatformWorkerScheduling(t *testing.T) {
 			t.Errorf("unknown service should return nil, got ns=%v tols=%v", ns, tols)
 		}
 	})
-	t.Run("any service returns nil", func(t *testing.T) {
-		ns, tols, err := platformWorkerScheduling(recipe.CriteriaServiceAny, "", nil)
-		if err != nil {
-			t.Fatalf("platformWorkerScheduling() error = %v", err)
-		}
-		if ns != nil || tols != nil {
-			t.Errorf("any service should return nil, got ns=%v tols=%v", ns, tols)
-		}
-	})
+	for _, service := range []recipe.CriteriaServiceType{recipe.CriteriaServiceAny, recipe.CriteriaServiceMK8s} {
+		t.Run(string(service)+" service returns nil", func(t *testing.T) {
+			ns, tols, err := platformWorkerScheduling(service, "", nil)
+			if err != nil {
+				t.Fatalf("platformWorkerScheduling() error = %v", err)
+			}
+			if ns != nil || tols != nil {
+				t.Errorf("%s service should return nil, got ns=%v tols=%v", service, ns, tols)
+			}
+		})
+	}
 }
 
 func TestCommonGPUProduct(t *testing.T) {
@@ -769,6 +774,18 @@ func TestTemplatePath(t *testing.T) {
 			filename:    "runtime.yaml",
 			expected:    filepath.Join("testdata", "gb200", "oke", "runtime-nvls.yaml"),
 		},
+		{
+			// NVLS uses NVLink/IMEX, not a fabric-selected NIC, so a stray
+			// AICR_NCCL_FABRIC=roce must not redirect it to testdata/roce/,
+			// which has no runtime-nvls.yaml for any service.
+			name:        "gke gb200 NVLS variant ignores roce fabric",
+			accelerator: recipe.CriteriaAcceleratorGB200,
+			service:     recipe.CriteriaServiceGKE,
+			variant:     variantNVLS,
+			fabric:      fabricRoCE,
+			filename:    "runtime.yaml",
+			expected:    filepath.Join("testdata", "gb200", "gke", "runtime-nvls.yaml"),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -914,9 +931,17 @@ func TestNVLSRuntimeYAMLReferencesIMEXClaim(t *testing.T) {
 	// creates via buildComputeDomain. If these drift, the DRA driver
 	// generates one name and the worker pods reference another, and
 	// pod admission fails with an opaque "claim not found" error.
-	paths := []string{
-		filepath.Join("testdata", "gb200", "eks", "runtime-nvls.yaml"),
-		filepath.Join("testdata", "gb200", "oke", "runtime-nvls.yaml"),
+	// Derived by globbing rather than listed, so a new accelerator/service
+	// runtime is covered the moment its template lands. An explicit list
+	// silently excludes anything added later, which is how vr200/rke2 was
+	// left uncovered when it was introduced.
+	paths, err := filepath.Glob(filepath.Join("testdata", "*", "*", "runtime-nvls.yaml"))
+	if err != nil {
+		t.Fatalf("glob runtime-nvls templates: %v", err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("no runtime-nvls.yaml templates found — the glob matched nothing, " +
+			"so this guard would pass without checking anything")
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
@@ -946,19 +971,33 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 			name:    "NET EKS GB200",
 			variant: variantNET,
 			service: recipe.CriteriaServiceEKS,
-			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
 		},
 		{
 			name:    "NVLS EKS GB200",
 			variant: variantNVLS,
 			service: recipe.CriteriaServiceEKS,
-			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
 		},
 		{
 			name:    "NVLS OKE GB200",
 			variant: variantNVLS,
 			service: recipe.CriteriaServiceOKE,
 			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+		},
+		{
+			name:    "NVLS GKE GB200",
+			variant: variantNVLS,
+			service: recipe.CriteriaServiceGKE,
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+		},
+		{
+			// This table asserts only on explicitly listed service keys, so a
+			// new matrix entry passes silently unless a case is added here.
+			name:    "NVLS RKE2 VR200",
+			variant: variantNVLS,
+			service: recipe.CriteriaServiceRKE2,
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorVR200},
 		},
 	}
 	for _, tt := range tests {
@@ -982,6 +1021,10 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 	}
 	if accels := supportedNCCLCombinations[variantDefault][recipe.CriteriaServiceAny]; len(accels) != 2 {
 		t.Errorf("variantDefault Any count = %d, want 2 (B200, GB200)", len(accels))
+	}
+	wantGKE := []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorH100}
+	if accels := supportedNCCLCombinations[variantDefault][recipe.CriteriaServiceGKE]; !reflect.DeepEqual(accels, wantGKE) {
+		t.Errorf("variantDefault GKE = %v, want %v", accels, wantGKE)
 	}
 	// AKS ND-series H100 runs the default variant over NCCL's built-in
 	// IB/verbs transport (testdata/h100/aks/runtime.yaml).

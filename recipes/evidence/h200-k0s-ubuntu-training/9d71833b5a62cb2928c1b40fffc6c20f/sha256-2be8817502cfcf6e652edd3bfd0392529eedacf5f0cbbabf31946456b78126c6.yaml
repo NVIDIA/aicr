@@ -1,0 +1,12 @@
+attestations:
+  - attestedAt: 2026-09-09T13:31:02Z
+    bundle:
+      digest: sha256:2be8817502cfcf6e652edd3bfd0392529eedacf5f0cbbabf31946456b78126c6
+      oci: ghcr.io/ramessesii2/aicr-evidence:h200-k0s-ubuntu-training-801ed70c63cc
+      predicateType: https://aicr.run/recipe-evidence/v1
+    signer:
+      identity: 54385449+ramessesii2@users.noreply.github.com
+      issuer: https://github.com/login/oauth
+      rekorLogIndex: 102847934
+recipe: h200-k0s-ubuntu-training
+schemaVersion: 1.0.0

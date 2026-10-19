@@ -58,7 +58,8 @@ The Operator Lifecycle Manager provides a declarative approach to managing opera
 - **Certified Operators**: OCP components use Red Hat-certified operator catalogs (`certified-operators`, `redhat-operators`) when available
 - **Security Context Constraints (SCC)**: Operators may require privileged access for driver installation
 - **Entitlement**: RHEL-based driver builds may require Red Hat entitlement ConfigMaps
-- **Version Alignment**: Operator channel versions must align with OpenShift Container Platform (OCP) version
+- **Version Alignment**: Operator channel versions must align with OpenShift Container Platform (OCP) version. The GPU Operator Subscription tracks the certified `v26.7` channel, which is published for OCP 4.18 through 4.22.
+- **Channel changes upgrade in place**: every AICR Subscription uses `installPlanApproval: Automatic`, so redeploying a bundle whose channel moved upgrades the running operator immediately. Moving the GPU Operator from `v25.10` to `v26.7` goes straight to v26.7.1 in one step.
 
 ### Readiness Gates
 
@@ -112,26 +113,27 @@ cat recipe.yaml
 The recipe includes OpenShift-specific component references with two-phase OLM deployment. Each operator appears as a pair — an OLM component with `manifestFiles` and a CR component with `dependencyRefs` back to the OLM component. For example, the GPU Operator entry looks like:
 
 ```yaml
-...
-spec:
-  componentRefs:
-    - name: gpu-operator-ocp-olm
-      type: Helm
-      valuesFile: components/gpu-operator-ocp-olm/values.yaml
-      manifestFiles:
-        - components/gpu-operator-ocp-olm/manifests/operatorgroup.yaml
-        - components/gpu-operator-ocp-olm/manifests/subscription.yaml
-      dependencyRefs:
-        - nfd-ocp        # waits for NFD CR to be applied
+# Earlier recipe fields omitted.
+componentRefs:
+  - name: gpu-operator-ocp-olm
+    type: Helm
+    valuesFile: components/gpu-operator-ocp-olm/values.yaml
+    manifestFiles:
+      - components/gpu-operator-ocp-olm/manifests/operatorgroup.yaml
+      - components/gpu-operator-ocp-olm/manifests/subscription.yaml
+    dependencyRefs:
+      - nfd-ocp        # waits for NFD CR to be applied
 
-    - name: gpu-operator-ocp
-      type: Helm
-      valuesFile: components/gpu-operator-ocp/values.yaml
-      manifestFiles:
-        - components/gpu-operator-ocp/manifests/clusterpolicy.yaml
-      dependencyRefs:
-        - gpu-operator-ocp-olm  # waits for OLM phase to complete
-...
+  - name: gpu-operator-ocp
+    type: Helm
+    valuesFile: components/gpu-operator-ocp/values.yaml
+    manifestFiles:
+      - components/gpu-operator-ocp/manifests/dcgm-exporter-configmap.yaml
+      - components/gpu-operator-ocp/manifests/clusterpolicy.yaml
+    dependencyRefs:
+      - gpu-operator-ocp-olm  # waits for OLM phase to complete
+      - network-operator-ocp  # NicClusterPolicy before the GPU driver stack
+# Remaining recipe fields omitted.
 ```
 
 The `dependencyRefs` create a deployment ordering chain across all operators. Each CR component depends on its OLM counterpart, and operators that require prerequisites (e.g., GPU Operator depends on NFD labels) declare cross-operator dependencies.
@@ -205,13 +207,19 @@ The deployment proceeds through the three-folder cycle per operator: OLM install
 **Manual step-by-step deployment** is also supported. Each folder can be installed independently using standard Helm:
 
 ```bash
-helm upgrade --install <release> ./<folder> --create-namespace -n <namespace>
+FOLDER="001-my-component"   # replace with a numbered folder in ocp-bundle/
+RELEASE="my-component"      # replace with the folder name minus its numeric prefix
+NAMESPACE="my-namespace"    # replace with the component's namespace
+helm upgrade --install "${RELEASE}" "./${FOLDER}" --create-namespace -n "${NAMESPACE}"
 ```
 
 For readiness gate folders, add the wait flags:
 
 ```bash
-helm upgrade --install <release> ./<readiness-folder> -n <namespace> --wait --timeout 10m
+FOLDER="002-my-component-readiness"  # replace with a readiness folder in ocp-bundle/
+RELEASE="my-component-readiness"     # replace with the folder name minus its numeric prefix
+NAMESPACE="my-namespace"             # replace with the component's namespace
+helm upgrade --install "${RELEASE}" "./${FOLDER}" -n "${NAMESPACE}" --wait --timeout 10m
 ```
 
 ### 4. Monitor Operator Readiness
@@ -221,30 +229,33 @@ After OLM subscriptions are installed, verify operator readiness by checking CSV
 **Check CSV phase:**
 
 ```bash
-oc get csv -n <operator-namespace>
+NAMESPACE="gpu-operator"  # replace with the operator's namespace
+oc get csv -n "${NAMESPACE}"
 ```
 
 **Expected Output:**
 
 ```text
 NAME                                  DISPLAY        VERSION   REPLACES   PHASE
-<operator-name>.v25.10.1              <Display>      25.10.1              Succeeded
+<operator-name>.v26.7.1               <Display>      26.7.1               Succeeded
 ```
 
 **Check operator Deployment:**
 
 ```bash
-oc get deployment -n <operator-namespace>
+NAMESPACE="gpu-operator"  # replace with the operator's namespace
+oc get deployment -n "${NAMESPACE}"
 ```
 
-The readiness gate checks both conditions — if you used `--readiness-hooks`, the bundle already waited for these before applying CRs.
+The readiness gate asserts only the first of these, the CSV phase — OLM advances a CSV to `Succeeded` only once the operator's Deployment reports available, so that one signal covers both. If you used `--readiness-hooks`, the bundle already waited on it before applying CRs.
 
 ### 5. Monitor Component Rollout
 
 After CRs are applied, monitor the operator workloads in the respective namespace:
 
 ```bash
-watch oc get pods -n <operator-namespace>
+NAMESPACE="gpu-operator"  # replace with the operator's namespace
+watch oc get pods -n "${NAMESPACE}"
 ```
 
 Pods should reach Running or Completed status. The specific set of pods depends on the operator and the CR configuration (e.g., the GPU Operator creates DaemonSets for driver, toolkit, device plugin, DCGM, and related components).
@@ -269,7 +280,10 @@ aicr snapshot --output snapshot.yaml
 
 ### 7. Validate Deployment
 
-Validate the deployed components against the recipe and snapshot:
+Validate the deployed components against the bundle's recipe (the component
+set it deployed) and the snapshot. The shell is still inside `ocp-bundle/`
+from step 3, so `recipe.yaml` here is the bundle's recipe and `snapshot.yaml`
+is the file step 6 wrote there:
 
 ```bash
 aicr validate \
@@ -285,7 +299,7 @@ The OCP overlay defines validation checks for both deployment and conformance ph
 
 OCP component values can be customized at bundle time using `--set` with the component's override key. Each component in the registry declares a `valueOverrideKeys` entry that determines the `--set` prefix. The general pattern is:
 
-```bash
+```text
 aicr bundle -r recipe.yaml \
   --set <override-key>:<value-path>=<value> \
   --readiness-hooks \
@@ -319,7 +333,7 @@ aicr recipe --service ocp --accelerator h100 --intent training --os rhel
 aicr recipe --service ocp --accelerator h100 --intent inference --os rhel
 ```
 
-Training overlays typically enable features like MIG Manager and GDRCopy for multi-node training workloads. Inference overlays use the base CR values.
+`recipes/overlays/ocp-training.yaml` declares no `componentRefs` of its own today — both training and inference resolve to the base OCP CR values.
 
 The available intents and platforms follow the same overlay inheritance pattern used by other services. Refer to `recipes/overlays/ocp-*.yaml` for the current set of supported combinations.
 
@@ -328,7 +342,10 @@ The available intents and platforms follow the same overlay inheritance pattern 
 Users who prefer plain Kubernetes manifests over Helm-based deployment can run `helm template` on any emitted folder to produce static YAML with all values resolved:
 
 ```bash
-helm template <release> ./<bundle-folder> -n <namespace> > manifests.yaml
+FOLDER="006-gpu-operator-ocp"  # replace with a numbered folder in ocp-bundle/
+RELEASE="gpu-operator-ocp"     # replace with the folder name minus its numeric prefix
+NAMESPACE="gpu-operator"       # replace with the component's namespace
+helm template "${RELEASE}" "./${FOLDER}" -n "${NAMESPACE}" > manifests.yaml
 ```
 
 This works outside of AICR with a standard Helm installation and produces manifests suitable for `oc apply -f`.
@@ -406,7 +423,7 @@ base.yaml → ocp.yaml → ocp-<intent>.yaml → ocp-<intent>-<platform>.yaml
 
 The **base OCP overlay** (`ocp.yaml`) declares the OLM/CR component pairs for all operators supported on the platform and disables base components that are either replaced by OLM equivalents or not applicable to OpenShift (e.g., components managed natively by OCP or not yet supported).
 
-**Intent overlays** (e.g., `ocp-training.yaml`) inherit from the base and apply workload-specific values overrides to operator CRs.
+**Intent overlays** (e.g., `ocp-training.yaml`) inherit from the base and can apply workload-specific values overrides to operator CRs.
 
 
 

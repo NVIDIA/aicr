@@ -1,0 +1,254 @@
+// Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package architecture
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"golang.org/x/mod/semver"
+)
+
+// kustomizeCapLiftsAt is the floor of the k8s.io/apimachinery v0.38 line, which
+// moves to sigs.k8s.io/structured-merge-diff/v7 (v0.38.0-alpha.2 already
+// requires it), the version kustomize v0.21.3 pulls in through
+// k8s.io/kube-openapi. The "-0" pre-release sorts below every other
+// pre-release, so an alpha bump counts as reaching it.
+const kustomizeCapLiftsAt = "v0.38.0-0"
+
+// TestKustomizeRenovateCapLiftsAtK8s038 ties the .github/renovate.json5 cap on
+// sigs.k8s.io/kustomize to the k8s.io/apimachinery version in go.mod, so the
+// k8s 0.38 bump cannot merge while the cap still holds kustomize back (#3273).
+func TestKustomizeRenovateCapLiftsAtK8s038(t *testing.T) {
+	root := repoRoot(t)
+
+	versions := requiredVersions(parseGoMod(t, filepath.Join(root, "go.mod")))
+	apimachinery, ok := versions["k8s.io/apimachinery"]
+	if !ok {
+		t.Fatal("go.mod has no require for k8s.io/apimachinery")
+	}
+
+	path := filepath.Join(root, ".github", "renovate.json5")
+	cfg, err := os.ReadFile(path) //nolint:gosec // repo-relative path
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+
+	if problem := kustomizeCapProblem(apimachinery, string(cfg)); problem != "" {
+		t.Error(problem)
+	}
+}
+
+func TestKustomizeCapProblem(t *testing.T) {
+	const (
+		capped = `{
+  packageRules: [
+    {
+      matchManagers: ["gomod"],
+      matchDepNames: ["sigs.k8s.io/kustomize/api", "sigs.k8s.io/kustomize/kyaml"],
+      allowedVersions: "<0.21.3",
+    },
+  ],
+}`
+		uncapped = `{
+  packageRules: [
+    {
+      groupName: "kubernetes",
+      matchPackageNames: ["k8s.io/**", "sigs.k8s.io/**"],
+    },
+  ],
+}`
+		commentOnly = `{
+  packageRules: [
+    // matchDepNames: ["sigs.k8s.io/kustomize/api"], removed with k8s 0.38.
+    {
+      groupName: "kubernetes",
+      matchPackageNames: ["k8s.io/**", "sigs.k8s.io/**"],
+    },
+  ],
+}`
+		loosened = `{
+  packageRules: [
+    {
+      matchManagers: ["gomod"],
+      matchDepNames: ["sigs.k8s.io/kustomize/api", "sigs.k8s.io/kustomize/kyaml"],
+      allowedVersions: "<0.21.4",
+    },
+  ],
+}`
+		oneModule = `{
+  packageRules: [
+    {
+      matchManagers: ["gomod"],
+      matchDepNames: ["sigs.k8s.io/kustomize/api"],
+      allowedVersions: "<0.21.3",
+    },
+    {
+      matchManagers: ["gomod"],
+      matchDepNames: ["github.com/google/cel-go"],
+      allowedVersions: "<0.32.0",
+    },
+  ],
+}`
+		overridden = `{
+  packageRules: [
+    {
+      matchManagers: ["gomod"],
+      matchDepNames: ["sigs.k8s.io/kustomize/api", "sigs.k8s.io/kustomize/kyaml"],
+      allowedVersions: "<0.21.3",
+    },
+    {
+      matchDepNames: [
+        "sigs.k8s.io/kustomize/api",
+        "sigs.k8s.io/kustomize/kyaml",
+      ],
+      allowedVersions: "<0.22.0",
+    },
+  ],
+}`
+	)
+
+	tests := []struct {
+		name         string
+		apimachinery string
+		cfg          string
+		wantProblem  string // substring; empty means no problem
+	}{
+		{"v0.37 with cap", "v0.37.1", capped, ""},
+		{"v0.37 without cap", "v0.37.1", uncapped, "Restore the cap"},
+		{"comment alone is not a cap", "v0.37.1", commentOnly, "Restore the cap"},
+		{"v0.37 with loosened cap", "v0.37.1", loosened, "exactly one rule"},
+		{"v0.37 cap on one module", "v0.37.1", oneModule, "exactly one rule"},
+		{"v0.37 with later overriding rule", "v0.37.1", overridden, "found 2"},
+		{"v0.38 with loosened cap", "v0.38.0", loosened, "Delete the"},
+		{"v0.38 with two rules", "v0.38.0", overridden, "Delete the"},
+		{"v0.37 last patch with cap", "v0.37.99", capped, ""},
+		{"exact floor with cap", "v0.38.0-0", capped, "Delete the"},
+		{"v0.38 alpha with cap", "v0.38.0-alpha.2", capped, "Delete the"},
+		{"v0.38 with cap", "v0.38.0", capped, "Delete the"},
+		{"v0.39 with cap", "v0.39.2", capped, "Delete the"},
+		{"v0.38 without cap", "v0.38.0", uncapped, ""},
+		{"invalid version", "latest", capped, "not a semantic version"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := kustomizeCapProblem(tt.apimachinery, tt.cfg)
+			if tt.wantProblem == "" {
+				if got != "" {
+					t.Errorf("unexpected problem: %s", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tt.wantProblem) {
+				t.Errorf("problem = %q, want it to contain %q", got, tt.wantProblem)
+			}
+		})
+	}
+}
+
+// kustomizeCapProblem reports what is wrong with the kustomize cap for the
+// given apimachinery version, or "" when the cap matches it.
+//
+// The two directions match rules differently, each failing closed. Below v0.38
+// exactly one rule may name kustomize and it must be the exact cap: a loosened
+// bound, or a later rule overriding it, lets Renovate propose the broken
+// v0.21.3 again, and a rule the scan no longer recognizes must fail now rather
+// than let the removal check pass later. From v0.38 on, any rule naming
+// kustomize fails, so loosening the cap cannot keep it alive.
+func kustomizeCapProblem(apimachinery, renovateCfg string) string {
+	if !semver.IsValid(apimachinery) {
+		return fmt.Sprintf("go.mod requires k8s.io/apimachinery %q, which is not a semantic version", apimachinery)
+	}
+	rules := kustomizeRules(renovateCfg)
+	unblocked := semver.Compare(apimachinery, kustomizeCapLiftsAt) >= 0
+
+	switch {
+	case unblocked && len(rules) > 0:
+		return fmt.Sprintf("go.mod requires k8s.io/apimachinery %s, from the v0.38 line that moves to "+
+			"sigs.k8s.io/structured-merge-diff/v7, the version conflict that blocked kustomize v0.21.3.\n"+
+			"Delete the sigs.k8s.io/kustomize allowedVersions rule from .github/renovate.json5 "+
+			"and this test in this PR (#3273). Left in place, the cap holds kustomize back for good.",
+			apimachinery)
+	case !unblocked && len(rules) == 0:
+		return fmt.Sprintf("go.mod requires k8s.io/apimachinery %s, which still builds against "+
+			"sigs.k8s.io/structured-merge-diff/v6, but .github/renovate.json5 has no rule naming "+
+			"sigs.k8s.io/kustomize. Without it Renovate proposes kustomize v0.21.3, which fails "+
+			"`go build` (#3246, #3271).\n"+
+			"Restore the cap, or update kustomizeRules if the rule was only reformatted.",
+			apimachinery)
+	case !unblocked && (len(rules) > 1 || !isKustomizeCap(rules[0])):
+		return fmt.Sprintf("go.mod requires k8s.io/apimachinery %s, which still builds against "+
+			"sigs.k8s.io/structured-merge-diff/v6, but .github/renovate.json5 no longer has exactly one rule "+
+			"naming sigs.k8s.io/kustomize that caps both kustomize/api and kustomize/kyaml at "+
+			`allowedVersions: "<0.21.3" for the gomod manager (found %d). A loosened or overriding rule `+
+			"lets Renovate propose v0.21.3, which fails `go build` (#3246, #3271).\n"+
+			"Restore the single exact cap, or update isKustomizeCap if the rule was only reformatted.",
+			apimachinery, len(rules))
+	}
+	return ""
+}
+
+// kustomizeRules returns the non-comment lines of each Renovate rule that names
+// a sigs.k8s.io/kustomize module. The kubernetes group matches sigs.k8s.io/**
+// by glob, so the cap is the only rule that names kustomize. A line-based scan
+// rather than a parse: this module has no JSON5 decoder, and
+// tools/drift-report/config_test.go scans renovate.json5 the same way. It
+// relies on the file's layout of one rule per brace-delimited block with the
+// braces on their own lines; any other layout fails isKustomizeCap.
+func kustomizeRules(cfg string) [][]string {
+	var lines []string
+	for line := range strings.SplitSeq(cfg, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "//") {
+			lines = append(lines, trimmed)
+		}
+	}
+	var rules [][]string
+	for i := 0; i < len(lines); i++ {
+		if !strings.Contains(lines[i], `"sigs.k8s.io/kustomize/`) {
+			continue
+		}
+		start, end := i, i
+		for start > 0 && lines[start] != "{" {
+			start--
+		}
+		for end < len(lines)-1 && !strings.HasPrefix(lines[end], "}") {
+			end++
+		}
+		rules = append(rules, lines[start:end+1])
+		i = end
+	}
+	return rules
+}
+
+// isKustomizeCap reports whether rule still caps both kustomize modules below
+// v0.21.3 for the gomod manager.
+func isKustomizeCap(rule []string) bool {
+	text := strings.Join(rule, "\n")
+	for _, want := range []string{
+		`matchManagers: ["gomod"]`,
+		`"sigs.k8s.io/kustomize/api"`,
+		`"sigs.k8s.io/kustomize/kyaml"`,
+		`allowedVersions: "<0.21.3"`,
+	} {
+		if !strings.Contains(text, want) {
+			return false
+		}
+	}
+	return true
+}

@@ -16,12 +16,13 @@ package verifier
 
 import (
 	"context"
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestReadBoundedFile_HappyPath(t *testing.T) {
@@ -53,7 +54,7 @@ func TestReadBoundedFile_RejectsOversize(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for oversized file, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 }
@@ -78,7 +79,7 @@ func TestReadBoundedFile_MissingFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 		t.Errorf("expected ErrCodeNotFound, got %v", err)
 	}
 }

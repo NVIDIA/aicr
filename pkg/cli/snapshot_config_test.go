@@ -57,7 +57,7 @@ func captureSnapshotOpts(t *testing.T, args []string) *snapshotCmdOptions {
 	var captured *snapshotCmdOptions
 	cmd := snapshotCmd()
 	cmd.Action = func(ctx context.Context, c *cli.Command) error {
-		cfg, err := loadCmdConfig(ctx, c)
+		cfg, err := loadFacadeConfig(ctx, c)
 		if err != nil {
 			return err
 		}
@@ -80,7 +80,7 @@ func runSnapshotCmdExpectErr(t *testing.T, args []string) error {
 	t.Helper()
 	cmd := snapshotCmd()
 	cmd.Action = func(ctx context.Context, c *cli.Command) error {
-		cfg, err := loadCmdConfig(ctx, c)
+		cfg, err := loadFacadeConfig(ctx, c)
 		if err != nil {
 			return err
 		}
@@ -149,7 +149,7 @@ func TestSnapshotCmd_AllConfigSectionsResolve(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:
@@ -223,7 +223,7 @@ func TestSnapshotCmd_ConfigOnly_NoCLIFlags(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:
@@ -264,7 +264,7 @@ func TestSnapshotCmd_FlagOverridesEverySection(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:
@@ -340,7 +340,7 @@ func TestSnapshotCmd_ConfigEmptyTolerationsOptOut(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:
@@ -371,7 +371,7 @@ func TestSnapshotCmd_InvalidConfig_BadTimeout(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:
@@ -397,7 +397,7 @@ func TestSnapshotCmd_InvalidConfig_BadFormat(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:
@@ -423,7 +423,7 @@ func TestSnapshotCmd_InvalidConfig_UnknownField(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     bogusKey: oops
@@ -475,7 +475,7 @@ func TestSnapshotCmd_RequireGPURuntimeClass_StillMutuallyExclusive(t *testing.T)
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:
@@ -504,7 +504,7 @@ func TestSnapshotCmd_ConfigBadResourcesRejected(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:
@@ -554,6 +554,7 @@ func TestSnapshotCmdOptions_ToAgentConfig(t *testing.T) {
 		maxNodesPerEntry:   5,
 		clusterConfigPath:  "/l8k/cluster-config.yaml",
 		aksGPUPoolsPath:    "/aks/pools.json",
+		gkeGPUPoolsPath:    "/gke/pools.json",
 		discoverNetwork:    true,
 		requests:           corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")},
 		limits:             corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("2Gi")},
@@ -589,7 +590,9 @@ func TestSnapshotCmdOptions_ToAgentConfig(t *testing.T) {
 		{"NodeSelector[k]", ac.NodeSelector["k"], "v"},
 		{"ClusterConfigPath", ac.ClusterConfigPath, "/l8k/cluster-config.yaml"},
 		{"AKSGPUPoolsPath", ac.AKSGPUPoolsPath, "/aks/pools.json"},
+		{"GKEGPUPoolsPath", ac.GKEGPUPoolsPath, "/gke/pools.json"},
 		{"DiscoverNetwork", ac.DiscoverNetwork, true},
+		{"NameBase", ac.NameBase, name},
 	}
 	for _, w := range wants {
 		if !reflect.DeepEqual(w.got, w.want) {
@@ -675,7 +678,7 @@ func TestSnapshotCmd_FormatFlagResolves(t *testing.T) {
 func TestSnapshotCmd_ConfigFormatResolves(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:
@@ -702,7 +705,7 @@ func TestSnapshotCmd_ConfigPrivilegedFalseHonored(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:
@@ -729,12 +732,91 @@ func TestSnapshotCmd_NoConfigPrivilegedDefaultsTrue(t *testing.T) {
 	}
 }
 
+// TestSnapshotCmd_NoConfigCleanupDefaultsTrue is the Cleanup sibling of
+// TestSnapshotCmd_NoConfigPrivilegedDefaultsTrue. SnapshotAgentConfig returns
+// a zero-value AgentConfig (Cleanup=false) when spec.snapshot is absent
+// entirely, which is "not a working configuration" per its own godoc — a
+// caller that used that zero value as the CLI-merge fallback without also
+// consulting the presence bool would silently default to leaving the Job and
+// RBAC behind (cluster-admin binding included) on every plain `aicr snapshot`
+// invocation. Without --no-cleanup and without --config, cleanup must still
+// default to true.
+func TestSnapshotCmd_NoConfigCleanupDefaultsTrue(t *testing.T) {
+	opts := captureSnapshotOpts(t, []string{"-o", "-"})
+	if !opts.cleanup {
+		t.Error("expected cleanup=true by default (CLI flag default)")
+	}
+}
+
+// TestSnapshotCmd_MaxNodesPerEntryEnv pins the Job-to-pod contract: the agent
+// Job passes the cap to the in-pod CLI only as AICR_MAX_NODES_PER_ENTRY (its
+// args are just `snapshot -o cm://...`), so without the env source the cap was
+// silently 0 inside the pod (#3253).
+func TestSnapshotCmd_MaxNodesPerEntryEnv(t *testing.T) {
+	const envName = "AICR_MAX_NODES_PER_ENTRY"
+	cfg := `kind: AICRConfig
+apiVersion: aicr.run/v1beta1
+spec:
+  snapshot:
+    execution:
+      maxNodesPerEntry: 2
+`
+	env := func(v string) *string { return &v }
+	tests := []struct {
+		name       string
+		env        *string // nil = unset
+		withConfig bool
+		args       []string
+		want       int
+		wantErr    bool
+	}{
+		{name: "env only", env: env("7"), want: 7},
+		{name: "flag beats env", env: env("7"), args: []string{"--max-nodes-per-entry", "3"}, want: 3},
+		{name: "env beats config", env: env("7"), withConfig: true, want: 7},
+		{name: "config when env unset", withConfig: true, want: 2},
+		{name: "empty env falls through to config", env: env(""), withConfig: true, want: 2},
+		{name: "unset defaults to unlimited", want: 0},
+		{name: "non-integer env fails", env: env("five"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envName, "")
+			if tt.env == nil {
+				if err := os.Unsetenv(envName); err != nil {
+					t.Fatalf("unset %s: %v", envName, err)
+				}
+			} else {
+				t.Setenv(envName, *tt.env)
+			}
+			args := append([]string{"-o", "-"}, tt.args...)
+			if tt.withConfig {
+				cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+				if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+					t.Fatalf("write config: %v", err)
+				}
+				args = append(args, "--config", cfgPath)
+			}
+			if tt.wantErr {
+				err := runSnapshotCmdExpectErr(t, args)
+				if err == nil || !strings.Contains(err.Error(), envName) {
+					t.Fatalf("error = %v, want a parse error naming %s", err, envName)
+				}
+				return
+			}
+			opts := captureSnapshotOpts(t, args)
+			if opts.maxNodesPerEntry != tt.want {
+				t.Errorf("maxNodesPerEntry = %d, want %d", opts.maxNodesPerEntry, tt.want)
+			}
+		})
+	}
+}
+
 // === HTTP source: snapshot section round-trips through config.Load ===
 
 // testSnapshotConfig is a canned config used by the HTTP source test;
 // declared at package scope so other tests can reuse it if needed.
 var testSnapshotConfig = `kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   snapshot:
     output:

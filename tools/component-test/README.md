@@ -166,7 +166,7 @@ make component-cleanup COMPONENT=cert-manager DELETE_CLUSTER=true
 
 ## Adding GPU-Aware Testing
 
-For components requiring GPU resources: ensure `.settings.yaml` has `component_test.nvml_mock_version`. GPU references in `values.yaml` or registry entries auto-detect; override via `TIER=gpu-aware` or set `testTier: gpu-aware` in `registry.yaml`. Customize: `GPU_PROFILE=h100 GPU_COUNT=4 make component-test ...`.
+For components requiring GPU resources: ensure `.settings.yaml` has `testing.component_test.nvml_mock_version`. GPU references in `values.yaml` or registry entries auto-detect; override via `TIER=gpu-aware` or set `testTier: gpu-aware` in `registry.yaml`. Customize: `GPU_PROFILE=h100 GPU_COUNT=4 make component-test ...`.
 
 ## Troubleshooting
 

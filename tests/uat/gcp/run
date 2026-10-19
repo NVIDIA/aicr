@@ -26,6 +26,14 @@
 
 set -euo pipefail
 
+# The GKE lane's training smoke runs on the shipped TCPXO runtime at full-node
+# shape. These defaults must be set BEFORE sourcing phases.sh: the shared file
+# initializes the same knobs with := defaults, and a later assignment would
+# never take effect (review of #2705 caught the previous ordering doing
+# exactly that).
+export TRAINJOB_RUNTIME="${TRAINJOB_RUNTIME:-torch-distributed-tcpxo}"
+export TRAINJOB_GPUS_PER_NODE="${TRAINJOB_GPUS_PER_NODE:-8}"
+
 # shellcheck source=../lib/phases.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/phases.sh"
 
@@ -51,6 +59,39 @@ if [[ -n "${CLUSTER_CONFIG:-}" ]]; then
     fi
   else
     echo "::warning::could not derive EXPECTED_GPU_NODES from ${CLUSTER_CONFIG} (file not found); readiness census degrades to stability-only mode" >&2
+  fi
+fi
+
+# The TCPXO recipe input must name this run's provisioned GPU NIC networks.
+# The pinned provisioner derives them from deployment.id as
+# "<id>-gpu-nic-<0..7>" (provider/gke/terraform/main.tf), and the workflow
+# exports DEPLOYMENT_ID job-wide after overwriting .deployment.id in the
+# cluster config to the same value. Deriving here keeps recipe generation on
+# the provisioner's own naming instead of a committed placeholder. A config
+# written for a cluster provisioned by other means should carry its real
+# mapping and run with DEPLOYMENT_ID unset.
+# GKE caps Device-type Network names at 41 characters, so a very long
+# deployment ID (daytime lane: slug + slot + 13-digit run ID) would fail
+# recipe validation here — that failure is the intended signal, not something
+# to truncate away: the provisioner owns the names and would have created the
+# same over-limit objects.
+if [[ -n "${DEPLOYMENT_ID:-}" && -n "${2:-}" && -f "${2}" ]]; then
+  recipe_criteria="$(yq -r '[.spec.recipe.criteria.service, .spec.recipe.criteria.accelerator, .spec.recipe.criteria.platform] | join("/")' "${2}")"
+  if [[ "${recipe_criteria}" == "gke/h100/kubeflow" ]]; then
+    # One deterministic path per run, rewritten per phase — no temp-file
+    # accumulation across phases or repeated local runs.
+    derived_config="/tmp/aicr-uat-tcpxo-config.${DEPLOYMENT_ID}.yaml"
+    cp "${2}" "${derived_config}"
+    yq -i 'del(.spec.recipe.configuration.gke.tcpxoInterfaces)' "${derived_config}"
+    for i in 0 1 2 3 4 5 6 7; do
+      # DEPLOYMENT_ID flows to yq through the environment (strenv), never by
+      # interpolation into the yq program — a value is data, not expression.
+      NET_NAME="${DEPLOYMENT_ID}-gpu-nic-${i}" yq -i \
+        ".spec.recipe.configuration.gke.tcpxoInterfaces += [{\"interfaceName\": \"eth$((i + 1))\", \"network\": strenv(NET_NAME)}]" \
+        "${derived_config}"
+    done
+    set -- "$1" "${derived_config}"
+    echo "TCPXO interface mapping derived from DEPLOYMENT_ID (${DEPLOYMENT_ID}-gpu-nic-0..7)"
   fi
 fi
 

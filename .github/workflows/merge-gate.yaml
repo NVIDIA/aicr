@@ -26,8 +26,24 @@
 
 name: Merge Gate
 
+# The push trigger covers what on-push.yaml does not. on-push.yaml already runs
+# the full qualification on every main push, so this workflow skips its `tests`
+# job there (see below) and contributes only its own checks: actionlint,
+# verify-licenses, verify-renovate, docs-mdx, malware-scan, CodeQL and the
+# freshness gates.
+#
+# That matters because main's ruleset is bypassable and bypassing is routine
+# here -- a direct push reports "Bypassed rule violations ... 2 of 2 required
+# status checks are expected", meaning none of these ran before the commit
+# landed. Without this trigger they would not run after it either.
+#
+# Push runs force every check-paths output true, because a merged commit has no
+# base to diff against.
 on:
   pull_request:
+    branches:
+      - main
+  push:
     branches:
       - main
   workflow_dispatch: {}
@@ -35,9 +51,17 @@ on:
 permissions:
   contents: read
 
+# Push runs key on the SHA, not the ref, and never cancel. Superseding a PR's
+# older run is the point of cancel-in-progress; superseding a merged commit's
+# run is how a broken commit goes unverified. On 2026-09-10 two merges landed 36
+# seconds apart and the first commit's On Push Qualification run was cancelled
+# while queued, so the commit that actually broke main was never tested and the
+# failure surfaced against the next commit instead. Sharing one ref-keyed group
+# across merges reproduces that; a SHA-keyed group gives every merged commit its
+# own run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
 
@@ -46,26 +70,41 @@ jobs:
   # ---------------------------------------------------------------------------
 
   check-paths:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 2
+    # Every output is forced true on push so a main run skips path filtering
+    # and exercises the whole gate. Path filtering exists to keep PR feedback
+    # cheap by diffing against the base; a push to main has no such base, and a
+    # watchdog that only re-checks the paths the merge happened to touch would
+    # miss exactly the case it is here for — a merge that is individually clean
+    # but breaks a derived artifact somewhere else in the tree.
     outputs:
-      code: ${{ steps.code.outputs.code }}
-      actions: ${{ steps.changes.outputs.actions }}
-      deps: ${{ steps.changes.outputs.deps }}
-      renovate: ${{ steps.changes.outputs.renovate }}
-      bom: ${{ steps.changes.outputs.bom }}
-      tuning: ${{ steps.changes.outputs.tuning }}
-      notices: ${{ steps.changes.outputs.notices }}
-      coverage: ${{ steps.changes.outputs.coverage }}
-      docs: ${{ steps.changes.outputs.docs }}
+      code: ${{ github.event_name == 'push' && 'true' || steps.code.outputs.code }}
+      actions: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.actions }}
+      deps: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.deps }}
+      renovate: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.renovate }}
+      settings: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.settings }}
+      bom: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.bom }}
+      nvcre: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.nvcre }}
+      tuning: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.tuning }}
+      notices: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.notices }}
+      coverage: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.coverage }}
+      docs: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.docs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
       # Detect targeted path categories (default: any match = true)
+      #
+      # Skipped on push: the outputs above already force every category true
+      # there, and running the filter anyway is not merely redundant. On a push
+      # event it diffs against github.event.before, which is all-zeros for the
+      # first push on a new branch and after history rewrites; the step then
+      # errors, failing check-paths and taking the whole gate down with it.
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
         id: changes
+        if: github.event_name != 'push'
         with:
           filters: |
             actions:
@@ -78,8 +117,9 @@ jobs:
               # defines the check itself, so a change to the gate cannot skip
               # its own gate: the Makefile recipe is the check's contract, the
               # install-go-licenses action supplies the binary it runs (that
-              # action clears GOFLAGS, without which -trimpath strips GOROOT and
-              # the check passes while inspecting zero packages), and this
+              # action pins GOFLAGS to -mod=readonly, without which an inherited
+              # -trimpath strips GOROOT and the check passes while inspecting
+              # zero packages), and this
               # workflow defines the job. The entry replaced here named
               # '.github/workflows/verify-licenses.yaml', which was deleted in
               # 3c9f6ec5 when the job moved into this workflow, so the filter
@@ -88,11 +128,11 @@ jobs:
               # The toolchain pins are watched too, because the job resolves
               # them through load-versions before running the check: .go-version
               # supplies the Go toolchain (which determines the `go list std`
-              # ignore set) and .settings.yaml supplies linting.go_licenses (the
+              # ignore set) and go.mod supplies the go-licenses require line (the
               # go-licenses build that classifies packages). Both reach the gate
               # only via that action, so all three paths must be watched or a
               # version bump silently skips the gate it changes — #814 bumped
-              # go-licenses touching only .settings.yaml, and #1204 bumped Go
+              # go-licenses touching only the pin, and #1204 bumped Go
               # touching only .go-version.
               - 'go.mod'
               - 'go.sum'
@@ -108,6 +148,15 @@ jobs:
               # Make target or its pinned image trigger the gate.
               - '.github/renovate.json5'
               - 'Makefile'
+            settings:
+              # Inputs to the checksum-freshness gate. The pins live in
+              # .settings.yaml and the refresh scripts are what re-derive them,
+              # so a change to either can leave a version pinned against a
+              # digest that describes a different artifact. The checker itself
+              # is watched so a change to it re-runs its own gate.
+              - '.settings.yaml'
+              - 'tools/update-*-checksums'
+              - 'tools/check-settings-checksums'
             bom:
               # Inputs to the committed-BOM version-freshness check. The full
               # `tests` job already runs it for code changes, but a docs-only
@@ -116,10 +165,29 @@ jobs:
               # so gate the freshness test on the doc + registry directly. The
               # generator sources are included so a generator change also
               # re-runs the check independently of the full suite.
+              #
+              # tools/bom/main.go also reads each component's manifests
+              # directory and values.yaml directly (filepath.Join(repoRoot,
+              # "recipes", "components", <name>, ...)), so both must be
+              # watched too.
               - 'docs/user/container-images.md'
               - 'recipes/registry.yaml'
+              - 'recipes/components/*/manifests/**'
+              - 'recipes/components/*/values.yaml'
               - 'tools/bom/**'
               - 'pkg/bom/**'
+            nvcre:
+              # The NVCRE wiring guard reads the "Enabling NVCRE" fragment out
+              # of the component catalog and resolves it against the real
+              # overlay, mixins and registry. The `tests` job already runs it
+              # on any code change, but the fragment itself lives in docs/, and
+              # a docs-only PR yields code=false and skips `tests` — so an edit
+              # that breaks the documented wiring would merge green. The guard
+              # test is listed too so renaming it re-runs the check rather than
+              # silently disarming this gate.
+              - 'docs/user/component-catalog.md'
+              - 'pkg/recipe/nvcre_wiring_guard_test.go'
+              - 'recipes/components/nvcre/**'
             tuning:
               # Inputs that can change the committed tuning-status table
               # WITHOUT tripping pkg/tuning's TestCompute_Structure — which runs
@@ -136,19 +204,24 @@ jobs:
               - 'pkg/tuning/**'
               - 'tools/tuning/**'
             notices:
-              # Inputs to the committed THIRD_PARTY_NOTICES.md freshness check.
+              # Inputs to the THIRD_PARTY_NOTICES.md generator health check.
+              # The file itself is NOT committed — it is generated by
+              # `make release` and uploaded as a release asset — so there is no
+              # committed copy to watch or to verify a hand edit against. What
+              # this gate protects is the generator's ability to run at all:
+              # `make release` depends on it, so a break discovered at tag time
+              # would block a release.
               # The file is the union of every redistributed dependency's license
               # across the released OS/arch matrix, so any dependency-graph
               # change can alter it. Watch the dependency manifests and the
-              # generator itself (plus the committed file, so a
-              # hand edit is re-verified). .goreleaser.yaml is included because
+              # generator itself. .goreleaser.yaml is included because
               # the generator asserts its PLATFORMS matrix matches the release
               # targets defined there — a new goos/goarch must re-run this check.
-              # Makefile is included because the `notices`/`notices-check`
-              # recipes are the generation/check contract — a change to them
-              # must not be able to skip its own gate. .settings.yaml is included
-              # because the generator's output depends on its pins: a
-              # linting.go_licenses bump can change license classification/URL
+              # Makefile is included because the `notices` recipe is the
+              # generation contract — a change to it
+              # must not be able to skip its own gate. go.mod and .settings.yaml
+              # are included because the generator's output depends on their
+              # pins: a go-licenses bump can change license classification/URL
               # derivation, and a languages.go bump changes the `go list std`
               # ignore set. This is a standalone job — the full `tests` suite
               # does NOT regenerate the file.
@@ -166,10 +239,20 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - 'tools/generate-notices'
+              - 'tools/normalize-go-license-urls'
+              - 'tools/check-fence-balance'
               - 'tools/generate-python-licenses'
               - 'validators/performance/requirements.txt'
               - 'validators/performance/licenses/**'
-              - 'THIRD_PARTY_NOTICES.md'
+              # The actions that supply this job's toolchain. install-go-licenses
+              # matters most: it exists to pin GOFLAGS, and a build that
+              # inherits -trimpath yields a go-licenses with no GOROOT. The
+              # `deps` filter watches both too, but that gates verify-licenses,
+              # which under -trimpath PASSES while inspecting zero packages —
+              # `make notices` is the one that fails closed, so it is the better
+              # canary and must not skip when its own toolchain changes.
+              - '.github/actions/install-go-licenses/**'
+              - '.github/actions/load-versions/**'
             coverage:
               # Inputs to the committed CUJ/CLI coverage-matrix freshness check.
               # The matrix is derived, so a change to ANY of its signal sources
@@ -199,26 +282,28 @@ jobs:
               - 'Makefile'
               - '.github/workflows/merge-gate.yaml'
             docs:
-              # Inputs to the parser-level MDX gate. Only the Fern-published
-              # trees matter — a change anywhere under them can introduce a
-              # construct that parses as CommonMark but aborts
-              # `fern generate --docs`.
+              # Inputs to the documentation parser gates. MDX parsing and the
+              # link check follow the Fern-published page list, while YAML
+              # fence parsing and the shell placeholder check cover Markdown
+              # files under docs/.
               #
-              # docs/index.yml is Fern's navigation manifest AND the source the
-              # checkers derive their file list from, so it is both an input and
-              # a trigger: adding a page there must run the gate over it.
+              # docs/index.yml is Fern's navigation manifest and supplies the
+              # MDX and link checkers' file list, so it is both an input and a
+              # trigger. Adding or removing a page there must run the gate.
               # docs/README.md is the published landing page — the earlier
               # per-subdirectory globs missed it entirely.
               #
-              # Everything the gate is MADE of is listed too, so a change to the
-              # gate cannot skip its own verification: the two checkers, the page
-              # enumerator, the locked parser toolchain, this workflow, and the
-              # Makefile — whose `check-docs-mdx-parse` target is what the job
-              # actually invokes, matching why the `renovate` and `notices`
-              # filters watch it.
+              # Everything the gates are MADE of is listed too, so a change to
+              # either gate cannot skip its own verification: the checkers, the
+              # page enumerator, the locked parser toolchain, this workflow, and
+              # the Makefile targets the job invokes, matching why the `renovate`
+              # and `notices` filters watch it.
               - 'docs/**'
               - 'tools/check-docs-mdx'
               - 'tools/check-docs-mdx-parse'
+              - 'tools/check-docs-yaml*'
+              - 'tools/check-docs-shell*'
+              - 'tools/check-docs-links/**'
               - 'tools/docs-published-files'
               - 'tools/mdx/**'
               - 'Makefile'
@@ -239,6 +324,7 @@ jobs:
       # '.settings.yaml', etc. still count as code.
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
         id: code
+        if: github.event_name != 'push'
         with:
           predicate-quantifier: 'every'
           filters: |
@@ -252,9 +338,15 @@ jobs:
   # Qualification (Test, Lint, CLI E2E, E2E, Security Scan)
   # ---------------------------------------------------------------------------
 
+  # Not run on push: on-push.yaml already calls this same reusable workflow on
+  # every main push (`cancel-in-progress: false`, so it completes), and running
+  # it here too would qualify each merge twice for nothing. The push trigger on
+  # this workflow exists for the checks on-push does NOT run -- actionlint,
+  # verify-licenses, verify-renovate, docs-mdx, the freshness gates -- which is
+  # what a bypassed direct push to main would otherwise skip entirely.
   tests:
     needs: [check-paths]
-    if: needs.check-paths.outputs.code == 'true'
+    if: needs.check-paths.outputs.code == 'true' && github.event_name != 'push'
     uses: ./.github/workflows/qualification.yaml
     permissions:
       actions: read
@@ -266,11 +358,11 @@ jobs:
 
   tests-skip:
     needs: [check-paths]
-    if: needs.check-paths.outputs.code != 'true'
-    runs-on: ubuntu-latest
+    if: needs.check-paths.outputs.code != 'true' || github.event_name == 'push'
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
-      - run: echo "Docs/non-code change — qualification tests not required"
+      - run: echo "Qualification not required here (docs-only change, or a push run that on-push.yaml already qualifies)"
 
   # ---------------------------------------------------------------------------
   # CodeQL (analyze)
@@ -279,7 +371,7 @@ jobs:
   analyze:
     needs: [check-paths]
     if: needs.check-paths.outputs.code == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       actions: read
@@ -295,16 +387,16 @@ jobs:
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
-      - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
+      - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d  # v4.38.3
         with:
           languages: go
       - run: go build ./...
-      - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
+      - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d  # v4.38.3
 
   analyze-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.code != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "Docs/non-code change — CodeQL analysis not required"
@@ -316,7 +408,7 @@ jobs:
   malware-scan:
     needs: [check-paths]
     if: needs.check-paths.outputs.code == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       actions: read
@@ -334,7 +426,7 @@ jobs:
   malware-scan-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.code != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "Docs/non-code change — malware scan not required"
@@ -346,7 +438,7 @@ jobs:
   actionlint:
     needs: [check-paths]
     if: needs.check-paths.outputs.actions == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -384,11 +476,15 @@ jobs:
           echo "${PWD}" >> "$GITHUB_PATH"
       - name: Run actionlint
         run: actionlint -color -shellcheck=
+      # Also runs from go-lint, but qualification skips Markdown-only changes,
+      # and .github/actions/README.md carries the runs-on examples people copy.
+      - name: Reject floating runner labels
+        run: ./tools/check-runner-labels
 
   actionlint-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.actions != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "No workflow/action changes — actionlint not required"
@@ -400,7 +496,7 @@ jobs:
   verify-licenses:
     needs: [check-paths]
     if: needs.check-paths.outputs.deps == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -430,7 +526,7 @@ jobs:
   verify-licenses-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.deps != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "No dependency changes — license check not required"
@@ -442,7 +538,7 @@ jobs:
   verify-renovate:
     needs: [check-paths]
     if: needs.check-paths.outputs.renovate == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -454,13 +550,70 @@ jobs:
   verify-renovate-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.renovate != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "No Renovate config changes — validation not required"
 
   # ---------------------------------------------------------------------------
-  # MDX docs gate — parses every Fern-published doc with the real MDX parser.
+  # .settings.yaml checksum freshness
+  #
+  # Each checksum pin is kept in step with its version pin by a
+  # tools/update-*-checksums script wired to Renovate postUpgradeTasks. A hook
+  # that runs and *fails* leaves the new version pinned against the old digest,
+  # and Renovate surfaces that only as a warning in the PR body.
+  #
+  # Whether that got caught before merge depended on which consumer read the
+  # pin: helmfile/chainsaw digests feed setup-build-tools on PR-gating jobs and
+  # fail there, but helm_diff_checksums is read solely by
+  # tests/uat/lib/phases.sh, so a stale helm-diff pin passed every PR check and
+  # would first surface in nightly UAT across every cloud. #2801 shipped that
+  # exact pair with a fully green check run.
+  #
+  # This closes it for every pinned tool at once, and for humans as well as
+  # bots — the failure mode is a property of the file, not of who edited it.
+  # ---------------------------------------------------------------------------
+
+  settings-checksums:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.settings == 'true'
+    runs-on: ubuntu-24.04
+    # Sized from the check's own worst case, not from how long it normally
+    # takes (~1 min). It runs 7 refreshers sequentially and each makes 2-3 curl
+    # calls capped at --retry-max-time 180, so a sustained github.com blip can
+    # legitimately burn ~45 minutes before every call has given up. The budget
+    # has to clear that, because a timeout is reported as `cancelled`, the gate
+    # treats `cancelled` exactly like `failure`, and the author then sees a bare
+    # Actions timeout with none of this check's own diagnostics — which is the
+    # one failure mode it cannot explain. Letting it run to completion turns
+    # that into an explicit "could not be verified" message naming the tool.
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          # The check reads the previous version pins from HEAD^ to tell a
+          # bumped-but-unrefreshed pin apart from upstream changing bytes under
+          # a pin nobody touched. On a pull_request the checked-out ref is the
+          # merge commit, whose first parent is the base tip; on a push to main
+          # it is the preceding commit. Depth 2 is the minimum that resolves it.
+          fetch-depth: 2
+      - name: Verify checksum pins match their pinned versions
+        run: make check-settings-checksums
+
+  settings-checksums-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.settings != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - run: echo "No .settings.yaml or refresh-script changes — checksum freshness not required"
+
+  # ---------------------------------------------------------------------------
+  # Docs parser gates. Parse every Fern-published doc as MDX, every YAML fence
+  # under docs/ as YAML, and every shell fence for placeholders that bash would
+  # read as redirection, then check that every link on a published page reaches
+  # a published page or an existing repository path.
   #
   # `fern check` (Fern Docs CI) does not parse MDX, and the job that does
   # (`fern generate --docs --preview`) runs in a workflow_run companion whose
@@ -473,13 +626,13 @@ jobs:
   docs-mdx:
     needs: [check-paths]
     if: needs.check-paths.outputs.docs == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         with:
           node-version: '20'
       # The bash approximation runs first: it is instant and its messages name
@@ -491,14 +644,26 @@ jobs:
         run: make check-docs-mdx
       - name: Validate docs with the real MDX parser
         run: make check-docs-mdx-parse
+      - name: Validate YAML examples in documentation
+        run: make check-docs-yaml
+      - name: Check shell examples for unquoted placeholders
+        run: make check-docs-shell
+      - uses: ./.github/actions/load-versions
+        id: versions
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: true
+      - name: Check links on published pages
+        run: make check-docs-links
 
   docs-mdx-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.docs != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
-      - run: echo "No published-docs changes — MDX parse gate not required"
+      - run: echo "No documentation changes — docs parser gates not required"
 
   # ---------------------------------------------------------------------------
   # BOM version freshness — ensures the committed container-images.md matches
@@ -508,7 +673,7 @@ jobs:
   bom-freshness:
     needs: [check-paths]
     if: needs.check-paths.outputs.bom == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -543,10 +708,55 @@ jobs:
   bom-freshness-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.bom != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "No BOM/registry changes — BOM freshness check not required"
+
+  # ---------------------------------------------------------------------------
+  # NVCRE documented-wiring guard — ensures the "Enabling NVCRE" fragment in
+  # docs/user/component-catalog.md still resolves to a working wiring, on
+  # docs-only PRs that skip the `tests` job (mirrors bom-freshness).
+  # ---------------------------------------------------------------------------
+
+  nvcre-wiring:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.nvcre == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/load-versions
+        id: versions
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: true
+      - name: Verify the documented NVCRE wiring still resolves
+        # `go test -run <name>` exits 0 with "no tests to run" if a test is
+        # renamed or removed, which would let this gate silently no-op. Assert
+        # the named test actually executed by requiring its PASS line.
+        run: |
+          set -uo pipefail
+          out=$(go test ./pkg/recipe/... -run '^TestNVCREDocumentedWiringResolves$' -v -count=1 2>&1) && rc=0 || rc=$?
+          echo "$out"
+          if [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
+          if ! grep -q "^--- PASS: TestNVCREDocumentedWiringResolves" <<<"$out"; then
+            echo "::error::TestNVCREDocumentedWiringResolves did not execute (renamed or removed?); the NVCRE wiring gate would silently pass. Update this job to run the guard."
+            exit 1
+          fi
+
+  nvcre-wiring-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.nvcre != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - run: echo "No NVCRE wiring inputs changed — wiring guard not required"
 
   # ---------------------------------------------------------------------------
   # Tuning-status doc freshness — ensures the committed tuning table in
@@ -557,7 +767,7 @@ jobs:
   tuning-freshness:
     needs: [check-paths]
     if: needs.check-paths.outputs.tuning == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -578,21 +788,27 @@ jobs:
   tuning-freshness-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.tuning != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "No tuning-status inputs changed — freshness check not required"
 
   # ---------------------------------------------------------------------------
-  # Third-party notices freshness — ensures the committed THIRD_PARTY_NOTICES.md
-  # matches the resolved dependency graph across every released OS/arch target,
-  # on PRs touching its inputs (go.mod/go.sum + the generator).
+  # Third-party notices generator health — ensures THIRD_PARTY_NOTICES.md can
+  # still be generated across every released OS/arch target, on PRs touching its
+  # inputs (go.mod/go.sum + the generator). The file is not committed; it is
+  # produced by `make release` and uploaded as a release asset. Because the
+  # release depends on this generator, a break that first surfaced at tag time
+  # would block a release, so it is exercised here on the PR that causes it.
+  # The generator fails closed — an empty `go list -deps ./cmd/...`, an
+  # uncovered linked module, a stale Python fragment, or an unbalanced code
+  # fence all abort it — so "it ran" is a meaningful assertion, not a smoke test.
   # ---------------------------------------------------------------------------
 
-  notices-freshness:
+  notices-generator:
     needs: [check-paths]
     if: needs.check-paths.outputs.notices == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -609,19 +825,26 @@ jobs:
       - uses: ./.github/actions/install-go-licenses
         with:
           version: ${{ steps.versions.outputs.go_licenses }}
-      - name: Verify committed THIRD_PARTY_NOTICES.md is up to date
-        # `make notices-check` regenerates the notices file (union across the
-        # release OS/arch matrix, so it is host-independent) and fails if the
-        # working tree differs — a stale committed file fails closed here.
-        run: make notices-check
+      - name: Verify THIRD_PARTY_NOTICES.md can be generated
+        # Regenerates the notices file (union across the release OS/arch matrix,
+        # so it is host-independent) and discards it. The output is not compared
+        # against anything: there is no committed copy, and the release builds
+        # its own. What is asserted is that the generator completes — every
+        # failure mode it guards is fatal, so a non-zero exit here is the same
+        # signal `make release` would get at tag time.
+        # The token authenticates the license-URL probes; anonymous github.com
+        # requests from runner IPs are rate-limited (tools/normalize-go-license-urls).
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: make notices
 
-  notices-freshness-skip:
+  notices-generator-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.notices != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
-      - run: echo "No dependency/generator changes — notices freshness check not required"
+      - run: echo "No dependency/generator changes — notices generator check not required"
 
   # ---------------------------------------------------------------------------
   # Coverage-matrix freshness — ensures the committed docs/user/coverage-matrix.md
@@ -634,7 +857,7 @@ jobs:
   coverage-freshness:
     needs: [check-paths]
     if: needs.check-paths.outputs.coverage == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -657,7 +880,7 @@ jobs:
   coverage-freshness-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.coverage != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - run: echo "No coverage-matrix inputs changed — freshness check not required"
@@ -682,17 +905,21 @@ jobs:
       - verify-licenses-skip
       - verify-renovate
       - verify-renovate-skip
+      - settings-checksums
+      - settings-checksums-skip
       - docs-mdx
       - docs-mdx-skip
       - bom-freshness
       - bom-freshness-skip
+      - nvcre-wiring
+      - nvcre-wiring-skip
       - tuning-freshness
       - tuning-freshness-skip
-      - notices-freshness
-      - notices-freshness-skip
+      - notices-generator
+      - notices-generator-skip
       - coverage-freshness
       - coverage-freshness-skip
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
       - name: Check gate

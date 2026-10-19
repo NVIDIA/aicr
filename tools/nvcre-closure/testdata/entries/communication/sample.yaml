@@ -1,0 +1,48 @@
+dependencies:
+- apiVersion: trainer.kubeflow.org/v1alpha1
+  kind: TrainingRuntime
+  spec:
+    template:
+      spec:
+        containers:
+        - image: example.invalid/base:v1
+          name: node
+overrides:
+# --- AWS + H100 (EFA) ---
+- when:
+    platform:
+      equals: aws
+    gpuArchitecture:
+      notIn: [gb200, gb300]
+  dependencies:
+{{ lib "deps/efa-patch.yaml" . | indent 2 }}
+  jobTemplate:
+    spec:
+      workload:
+        trainJob:
+          trainer:
+            image: example.invalid/nccl:pinned-tag
+# --- AWS + GB300 (RoCE) ---
+- when:
+    platform:
+      equals: aws
+    gpuArchitecture:
+      equals: gb300
+  jobTemplate:
+    spec:
+      workload:
+        trainJob:
+          trainer:
+            image: example.invalid/nccl:latest
+# --- GCP + H100 ---
+- when:
+    platform:
+      equals: gcp
+    gpuArchitecture:
+      equals: h100
+  jobTemplate:
+    spec:
+      workload:
+        trainJob:
+          trainer:
+            image: example.invalid/tcpxo:v2

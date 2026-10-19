@@ -13,7 +13,7 @@
 # limitations under the License.
 
 kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: gb200-eks-ubuntu-training
 
@@ -46,4 +46,7 @@ spec:
 
   componentRefs: []
 
-  # Validation is inherited from gb200-eks-training (not OS-specific)
+  validation:
+    conformance:
+      checks:
+        - secure-accelerator-access

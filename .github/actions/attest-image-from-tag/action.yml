@@ -13,7 +13,7 @@
 # limitations under the License.
 
 name: 'Resolve digest and attest image'
-description: 'Resolves an image digest from a tag and generates SBOM + provenance attestations'
+description: 'Resolves an image digest from a tag and generates CycloneDX SBOM, OpenVEX and provenance attestations'
 
 inputs:
   image_name:
@@ -104,12 +104,14 @@ runs:
         echo "image_digest=$DIGEST" >> "$GITHUB_OUTPUT"
 
     # `crane digest <ref>` returns the multi-arch *index* digest, which is the
-    # right subject for provenance and VEX but the wrong one for an SBOM: an
-    # SBOM describes exactly one root filesystem. `crane digest --platform`
-    # resolves the index to that platform's child manifest and errors out
-    # ("no child with platform ...") if the platform is absent, so a release
-    # that silently lost an architecture fails here instead of shipping two
-    # SBOMs pinned to the same subject (#1957).
+    # right subject for provenance but the wrong one for an SBOM or a VEX: both
+    # describe exactly one root filesystem, and a consumer that resolved
+    # linux/amd64 enumerates referrers on that child manifest, not on the index
+    # (#1957, #2426). `crane digest --platform` resolves the index to that
+    # platform's child manifest and errors out ("no child with platform ...")
+    # if the platform is absent, so a release that silently lost an
+    # architecture fails here instead of shipping two SBOMs pinned to the same
+    # subject.
     - name: Resolve per-platform manifest digests
       id: platforms
       shell: bash

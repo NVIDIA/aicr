@@ -15,7 +15,6 @@
 package bundler
 
 import (
-	stderrors "errors"
 	"os"
 	"slices"
 	"strings"
@@ -24,6 +23,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -357,6 +357,7 @@ func TestEmbeddedAICRProvidedAccountingContract(t *testing.T) {
 			Value:    "system",
 			Effect:   corev1.TaintEffectNoSchedule,
 		}}),
+		config.WithAcceleratedNodeSelector(map[string]string{"nvidia.com/gpu.present": "true"}),
 	)))
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -448,7 +449,7 @@ func TestMakeRejectsDisabledAccountingComponentBeforeWriting(t *testing.T) {
 	}
 	outputDir := t.TempDir()
 	_, err = b.Make(t.Context(), result, outputDir)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("Make() error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), `component "mariadb-operator" must be enabled`) {

@@ -128,6 +128,23 @@ var catalog = map[Type]typeSpec{
 			// cluster with no GPU pools; that is a runtime NotFound, not an
 			// unaddressable path.
 			"aks-gpu-pools": {scalar: closedKeys("gpu-pool-count", "gpu-pools", "gpu-driver")},
+			// oke-addons is the OKE add-on projection supplied via
+			// `aicr snapshot --oke-addons` / `aicr validate --oke-addons`
+			// (pkg/collector/k8s/okeaddons.go).
+			"oke-addons": {scalar: closedKeys("addon-count", "nvidia-gpu-plugin", "nvidia-network-operator")},
+			// gke-gpu-pools is the GKE GPU node-pool driver-installation
+			// projection supplied via `aicr snapshot --gke-gpu-pools` /
+			// `aicr validate --gke-gpu-pools` (pkg/collector/k8s/gkegpupools.go).
+			// gpu-driver-installation is absent, a runtime NotFound rather
+			// than an unaddressable path, on a cluster with no GPU pools.
+			"gke-gpu-pools": {scalar: closedKeys("gpu-pool-count", "gpu-pools", "gpu-driver-installation")},
+			// oke-legacy-plugin is in-cluster conflict evidence for OKE's legacy
+			// addon-manager-shipped device plugin (invisible to list-addons) —
+			// pkg/collector/k8s/okelegacyplugin.go. nvidia-gpu-device-plugin is
+			// the collapsed constraint reading (none/active/unknown; only "none"
+			// qualifies operator-managed); daemonset carries the uncollapsed
+			// detail (absent/unlabeled/disabled/active/unknown).
+			"oke-legacy-plugin": {scalar: closedKeys("nvidia-gpu-device-plugin", "daemonset")},
 			// Keys are container image names (pkg/collector/k8s/image.go).
 			"image": {scalar: openKeys()},
 			// Keys are discovered cluster policies (pkg/collector/k8s/policy.go).
@@ -147,6 +164,10 @@ var catalog = map[Type]typeSpec{
 			},
 			// pkg/collector/k8s/mariadb.go
 			"mariadb-operator": {scalar: closedKeys("collection-state", "api-available", "api-version")},
+			// pkg/collector/k8s/storageclass.go
+			"default-storage-class": {scalar: closedKeys("collection-state", "default-count", "default-classes")},
+			// pkg/collector/k8s/percona.go
+			"percona-server-mongodb": {scalar: closedKeys("collection-state", "api-available", "api-version")},
 		},
 	},
 

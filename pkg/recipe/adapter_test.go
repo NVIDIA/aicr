@@ -24,6 +24,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -250,6 +252,7 @@ func TestGetValuesForComponent_InlineOverrides(t *testing.T) {
 			name: "inline overrides only (no valuesFile)",
 			setupRecipe: func() *RecipeResult {
 				return &RecipeResult{
+					APIVersion: RecipeResultAPIVersion,
 					ComponentRefs: []ComponentRef{
 						{
 							Name:    "gpu-operator",
@@ -281,6 +284,7 @@ func TestGetValuesForComponent_InlineOverrides(t *testing.T) {
 				// This would load from components/gpu-operator/values.yaml
 				// and apply overrides on top
 				return &RecipeResult{
+					APIVersion: RecipeResultAPIVersion,
 					ComponentRefs: []ComponentRef{
 						{
 							Name:       "gpu-operator",
@@ -305,6 +309,7 @@ func TestGetValuesForComponent_InlineOverrides(t *testing.T) {
 			setupRecipe: func() *RecipeResult {
 				// Load from base values file without inline overrides
 				return &RecipeResult{
+					APIVersion: RecipeResultAPIVersion,
 					ComponentRefs: []ComponentRef{
 						{
 							Name:       "gpu-operator",
@@ -324,6 +329,7 @@ func TestGetValuesForComponent_InlineOverrides(t *testing.T) {
 			name: "inline overrides take precedence over valuesFile",
 			setupRecipe: func() *RecipeResult {
 				return &RecipeResult{
+					APIVersion: RecipeResultAPIVersion,
 					ComponentRefs: []ComponentRef{
 						{
 							Name:       "gpu-operator",
@@ -346,6 +352,7 @@ func TestGetValuesForComponent_InlineOverrides(t *testing.T) {
 			name: "no valuesFile and no overrides (empty)",
 			setupRecipe: func() *RecipeResult {
 				return &RecipeResult{
+					APIVersion: RecipeResultAPIVersion,
 					ComponentRefs: []ComponentRef{
 						{
 							Name:    "test-component",
@@ -426,6 +433,7 @@ func TestGetValuesForComponent_InlineOverrides(t *testing.T) {
 // merge deeply with existing values, not replace entire maps.
 func TestGetValuesForComponent_OverridesMergeDeep(t *testing.T) {
 	recipe := &RecipeResult{
+		APIVersion: RecipeResultAPIVersion,
 		ComponentRefs: []ComponentRef{
 			{
 				Name:       "gpu-operator",
@@ -527,7 +535,7 @@ func TestGetComponentValues_BareRef(t *testing.T) {
 			ValuesFile: "components/gpu-operator/values.yaml",
 			Overrides:  map[string]any{"driver": map[string]any{"version": "999.99.99"}},
 		}
-		viaResult, err := (&RecipeResult{ComponentRefs: []ComponentRef{ref}}).GetValuesForComponent("gpu-operator")
+		viaResult, err := (&RecipeResult{APIVersion: RecipeResultAPIVersion, ComponentRefs: []ComponentRef{ref}}).GetValuesForComponent("gpu-operator")
 		if err != nil {
 			t.Fatalf("GetValuesForComponent() error = %v", err)
 		}
@@ -592,7 +600,7 @@ func TestGetValuesForComponent_BuilderIntegration(t *testing.T) {
 
 func TestGetManifestContent(t *testing.T) {
 	t.Run("existing manifest", func(t *testing.T) {
-		content, err := GetManifestContent("components/network-operator/manifests/nfd-network-rule.yaml")
+		content, err := GetManifestContent("components/network-operator/manifests/talos-namespace.yaml")
 		if err != nil {
 			t.Fatalf("GetManifestContent() error = %v", err)
 		}
@@ -662,7 +670,7 @@ func TestRecipeResult_Accessors(t *testing.T) {
 
 	t.Run("GetCriteria", func(t *testing.T) {
 		c := &Criteria{Service: "eks"}
-		rr := &RecipeResult{Criteria: c}
+		rr := &RecipeResult{APIVersion: RecipeResultAPIVersion, Criteria: c}
 		if got := rr.GetCriteria(); got != c {
 			t.Errorf("RecipeResult.GetCriteria() != expected criteria")
 		}
@@ -670,6 +678,7 @@ func TestRecipeResult_Accessors(t *testing.T) {
 
 	t.Run("GetComponentRef found", func(t *testing.T) {
 		rr := &RecipeResult{
+			APIVersion: RecipeResultAPIVersion,
 			ComponentRefs: []ComponentRef{
 				{Name: "gpu-operator", Version: "v1.0"},
 				{Name: "network-operator", Version: testVersionV2},
@@ -685,7 +694,7 @@ func TestRecipeResult_Accessors(t *testing.T) {
 	})
 
 	t.Run("GetComponentRef not found", func(t *testing.T) {
-		rr := &RecipeResult{ComponentRefs: []ComponentRef{{Name: "gpu-operator"}}}
+		rr := &RecipeResult{APIVersion: RecipeResultAPIVersion, ComponentRefs: []ComponentRef{{Name: "gpu-operator"}}}
 		if got := rr.GetComponentRef("missing"); got != nil {
 			t.Errorf("expected nil, got %v", got)
 		}
@@ -738,19 +747,19 @@ func buildProviderWithValues(t *testing.T, valuesPath string, values map[string]
 		t.Fatalf("marshal values: %v", err)
 	}
 
-	registryYAML := []byte(`apiVersion: aicr.run/v1alpha2
+	registryYAML := []byte(`apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components: []
 `)
 	baseYAML := []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: base
 spec:
   componentRefs: []
 `)
 	overlayYAML := []byte(`kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: bound-values
 spec:
@@ -848,7 +857,7 @@ func TestGetManifestContentWithProvider(t *testing.T) {
 // preserving back-compat for callers that don't have a RecipeResult-bound
 // provider.
 func TestGetManifestContentWithProvider_NilFallback(t *testing.T) {
-	content, err := GetManifestContentWithProvider(nil, "components/network-operator/manifests/nfd-network-rule.yaml")
+	content, err := GetManifestContentWithProvider(nil, "components/network-operator/manifests/talos-namespace.yaml")
 	if err != nil {
 		t.Fatalf("GetManifestContentWithProvider(nil): %v", err)
 	}
@@ -868,7 +877,7 @@ func TestGetManifestContentWithProvider_NotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing manifest, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 		t.Errorf("expected ErrCodeNotFound, got %v", err)
 	}
 	if !stderrors.Is(err, fs.ErrNotExist) {
@@ -1000,7 +1009,7 @@ func TestWithResolvedValues(t *testing.T) {
 func TestWithDeclaredComponents(t *testing.T) {
 	t.Parallel()
 
-	base := &RecipeResult{ComponentRefs: []ComponentRef{{Name: "a"}}}
+	base := &RecipeResult{APIVersion: RecipeResultAPIVersion, ComponentRefs: []ComponentRef{{Name: "a"}}}
 	if base.HasDeclaredComponents() {
 		t.Error("HasDeclaredComponents() = true on a result without an attached union")
 	}

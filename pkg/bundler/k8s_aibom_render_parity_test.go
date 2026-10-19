@@ -80,7 +80,7 @@ func k8sAIBOMFixture(t *testing.T) *recipe.RecipeResult {
 	}
 
 	return &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
+		APIVersion: "aicr.run/v1",
 		Kind:       "RecipeResult",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -140,6 +140,7 @@ var k8sAIBOMDeployers = []struct {
 	{name: "argocd", deployer: config.DeployerArgoCD},
 	{name: "argocd-helm", deployer: config.DeployerArgoCDHelm},
 	{name: "flux", deployer: config.DeployerFlux},
+	{name: "terraform", deployer: config.DeployerTerraform},
 }
 
 func bundleK8sAIBOM(t *testing.T, deployer config.DeployerType) string {
@@ -241,7 +242,7 @@ func TestK8sAIBOM_AllDeployersCarrySecureDefaults(t *testing.T) {
 // collectRenderedValues walks every YAML document in a rendered bundle and
 // returns each value found under the given key, at any depth.
 //
-// Depth-agnostic on purpose: the five deployers nest component values
+// Depth-agnostic on purpose: the six deployers nest component values
 // differently (a numbered values.yaml, an Argo CD Application source, a Flux
 // HelmRelease's spec.values), and pinning the layout per deployer would make
 // this test break on every unrelated bundle-shape change while still not

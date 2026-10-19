@@ -24,7 +24,7 @@ adding or changing components.
 |---|---|---|
 | Make an existing chart or kustomization available to recipes | `recipes/registry.yaml` entry | this page |
 | Set default values for the chart | `recipes/components/<name>/values.yaml` | this page |
-| Pin a chart version for a specific cluster shape | Recipe overlay in `recipes/overlays/` | [recipe.md](recipe.md) |
+| Pin a chart version | `registry.yaml` `helm.defaultVersion`; an overlay pin only as a declared divergence in `versionPinExemptions` | [recipe.md](recipe.md#version-pinning-is-single-source) |
 | Add a bundle-time validation warning | `registry.yaml` `validations:` block | [validator.md](validator.md#component-validations-bundle-time) |
 | Add a chainsaw health check | `registry.yaml` `healthCheck.assertFile` + `recipes/checks/<name>/health-check.yaml` | [validator.md](validator.md) |
 | Adjust where node selectors land in chart values | `registry.yaml` `nodeScheduling` paths | this page |
@@ -44,7 +44,7 @@ Kustomize limitations to know up front:
 
 - `--set <key>:<path>=<value>` flows through Helm value rendering only; Kustomize components silently ignore overrides.
 - `nodeScheduling.system` / `accelerated` paths target Helm values; they do not apply to Kustomize sources.
-- The bundler runs `kustomize build` at bundle time and wraps the output as `templates/manifest.yaml` inside the standard local-format folder (see [index.md](index.md) for the classification rule).
+- The bundler runs `kustomize build` at bundle time and wraps the output as `templates/manifest.yaml` inside the standard local-format folder (see [Local Format and Bundle Classification](#local-format-and-bundle-classification) for the classification rule).
 
 ## Adding a Helm Component
 
@@ -83,6 +83,7 @@ operator:
 
 - `validations:` — bundle-time misconfiguration warnings ([validator.md](validator.md#component-validations-bundle-time))
 - `healthCheck.assertFile:` — chainsaw conformance assertions ([validator.md](validator.md))
+- `upgrades.file:` — path to a `ComponentUpgrades` transition record ([recipe.md](recipe.md#transition-records))
 - `manifestFiles:` — manifest YAMLs (paths relative to the recipes data
   root) bundled with the component whenever a recipe references it and the
   componentRef declares none; shipped in the injected `-post` local chart
@@ -131,19 +132,26 @@ One-liner per field:
 | `helm.defaultRepository` | Helm repo URL injected when an overlay leaves it empty |
 | `helm.defaultChart` | Chart name (e.g. `nvidia/gpu-operator`) |
 | `helm.defaultVersion` | Default chart version |
+| `helm.defaultDigest` | Optional `sha256:<hex>` of the pinned chart archive (the `.tgz`, for OCI charts too). `--vendor-charts` refuses a pulled chart whose bytes differ, for refs that keep the registry's source, chart and version |
 | `helm.defaultNamespace` | Install namespace |
 | `kustomize.defaultSource` | Git or OCI source URL |
 | `kustomize.defaultPath` | Subpath within the source |
 | `kustomize.defaultTag` | Git ref / OCI tag |
 | `nodeScheduling.system` | Helm value paths that receive the **control-plane** node selector / tolerations / taints |
 | `nodeScheduling.accelerated` | Helm value paths that receive the **GPU node** selector / tolerations / taints |
+| `nodeScheduling.system.requireNodeSelector`, `nodeScheduling.accelerated.requireNodeSelector` | Fail the bundle instead of silently skipping injection when the corresponding `--system-node-selector`/`--accelerated-node-selector` flag is omitted and no overlay opts the paths out (see [below](#nodeschedulingsystem-vs-accelerated)) |
+| `nodeScheduling.system.requireNodeSelectorIfStorageClassSet`, `nodeScheduling.accelerated.requireNodeSelectorIfStorageClassSet` | Conditional counterpart to `requireNodeSelector`: same enforcement, but only once a `storageClassPaths`/`sharedStorageClassPaths` path resolves to a non-empty value (see [below](#nodeschedulingsystem-vs-accelerated)) |
 | `nodeScheduling.nodeCountPaths` | Where `--nodes` is written |
 | `podScheduling.workload.workloadSelectorPaths` | Workload-pod placement |
 | `storageClassPaths` | Where `--storage-class` is written |
 | `sharedStorageClassPaths` | Where `--shared-storage-class` is written for shared filesystem PVCs |
 | `validations` | Bundle-time component check list ([validator.md](validator.md#component-validations-bundle-time)) |
 | `healthCheck.assertFile` | Chainsaw assert YAML path (relative to data dir) |
+| `upgrades.file` | Path to a `ComponentUpgrades` transition record (relative to data dir); empty means no transition records ([recipe.md](recipe.md#transition-records)) |
+| `ownsCRDs` | Audited assertion that the component solely owns every CRD its chart ships and none uses webhook conversion, so deployers may replace its CRDs on upgrade instead of leaving them at their first-install schema. Audited chart versions are pinned in `pkg/recipe/ownscrds_audit_test.go`; per-deployer behavior is in the [component catalog](../user/component-catalog.md#upgrade-uninstall-and-troubleshooting) |
+| `ownsCRDsExcludeSubcharts` | Bare subchart names whose CRDs an `ownsCRDs` component does not own. The bundle's `apply-crds.sh` otherwise collects every `crds/` directory in the chart, disabled subcharts included, and would re-apply a CRD another component owns at this chart's schema. `nvsentinel` lists `mongodb-store`, whose Percona CRDs belong to `psmdb-operator`. Valid only with `ownsCRDs` |
 | `manifestFiles` | Default manifest YAML paths bundled when the componentRef declares none (ref-declared lists take precedence). No opt-out: an empty ref-declared list is indistinguishable from absent (len == 0 → defaults filled) — to suppress the defaults, declare a replacement list. Helm components only; the loader rejects the combination with `kustomize:` |
+| `mixinSafeOverridePaths` | Exact dotted value paths (e.g. `global.tracing.enabled`) a `RecipeMixin` may set on this component via `Overrides`. Empty (the default) means the component hasn't opted into mixin overrides — a mixin introducing it fresh still has unrestricted `valuesFile`/`overrides`, but once the component is already in the chain (or has a non-empty allowlist), every mixin Overrides path is validated against this list ([recipe.md](recipe.md#mixin-composition)) |
 | `gkeCriticalPriority`, `hasSelfRefCRDs`, `manifestsUseChartCRDs` | Narrow service-specific flags (see godoc) |
 
 ## `nodeScheduling.system` vs `accelerated`
@@ -160,28 +168,82 @@ This is the field most contributors get wrong on first PR.
   `--accelerated-node-selector` and `--accelerated-node-toleration`
   values here.
 
-Concrete example from `gpu-operator`:
+Concrete example from `nvidia-dra-driver-gpu`, which routes both sides:
 
 ```yaml
 nodeScheduling:
   system:
     nodeSelectorPaths:
-      - operator.nodeSelector
-      - node-feature-discovery.master.nodeSelector
+      - controller.nodeSelector
     tolerationPaths:
-      - operator.tolerations
+      - controller.tolerations
   accelerated:
     nodeSelectorPaths:
-      - daemonsets.nodeSelector
-      - node-feature-discovery.worker.nodeSelector
+      - kubeletPlugin.nodeSelector
     tolerationPaths:
-      - daemonsets.tolerations
+      - kubeletPlugin.tolerations
 ```
+
+The controller (a Deployment) lands on management nodes; the kubelet-plugin
+DaemonSet lands on GPU nodes — each routed by its own selector/toleration
+pair.
+
+A `tolerationPaths` entry may appear under **both** tiers for a DaemonSet that
+must run on every node (`nfd` `worker.tolerations` and
+`topologyUpdater.tolerations`, `aws-ebs-csi-driver` `node.tolerations`). The
+bundler writes such a path once, with the keyed `--system-node-toleration`
+entries followed by the `--accelerated-node-toleration` entries, deduplicated;
+keyless system entries (the tolerate-all default) are left out so they never
+widen a restricted accelerated list. With no accelerated entries at all, the
+path receives the system list as given. The usual opt-out (`[]`) and append-mode (non-empty overlay list) rules still
+apply. `nodeSelectorPaths` must not be shared: a selector cannot mean "both
+node classes".
+
+`gpu-operator` is the exception worth knowing: its `accelerated` block is
+tolerations-only. Its operand DaemonSets have no chart/CRD nodeSelector
+field — the operator self-places via its GFD/NFD deploy labels — so only
+`tolerationPaths: [daemonsets.tolerations]` is routable there (#2474).
 
 Wrong column = workloads land on the wrong node class. A DaemonSet
 placed under `system` will miss GPU nodes; an operator under
 `accelerated` will refuse to schedule on a cluster with tainted GPU
 nodes only.
+
+**`requireNodeSelector`.** By default, a component with `nodeSelectorPaths`
+declared silently skips injection when its CLI flag is omitted — many valid
+clusters have no distinct node pools, so an unset selector is often
+intentional. Set `nodeScheduling.system.requireNodeSelector: true` (or the
+`accelerated` counterpart) only when landing on the wrong node class silently
+breaks the component, e.g. a StatefulSet whose PVC pins it to a node's zone
+and strands it there on a later reschedule (see `slinky-slurm` and
+`slurm-accounting-mariadb` in `registry.yaml`). An overlay can still opt a
+component's paths out of the requirement with an explicit empty
+`nodeSelector: {}` override, same as it opts out of toleration injection.
+`--dynamic` is not an equivalent escape hatch: it is rejected on a path that
+equals, contains, or is contained by a required path, since deferring any of
+those to install time is the same unpinned state the requirement exists to
+reject.
+
+**`requireNodeSelectorIfStorageClassSet`.** `requireNodeSelector`'s
+conditional counterpart, for a chart whose zone-pinning PVC only exists once
+a storage class is configured, not by default. Set
+`nodeScheduling.system.requireNodeSelectorIfStorageClassSet: true` (or the
+`accelerated` counterpart) when the component's chart defaults to ephemeral
+storage (e.g. `emptyDir`), but a non-empty value at one of its
+`storageClassPaths` or `sharedStorageClassPaths` paths can switch it to a PVC
+at bundle time; a bare bundle of such a component with no storage class
+configured stays unaffected, and `--system-node-selector`/
+`--accelerated-node-selector` is required only once that PVC is actually in
+play. The two flags are mutually exclusive on the same scheduling group, and
+`requireNodeSelectorIfStorageClassSet` requires at least one
+`storageClassPaths` or `sharedStorageClassPaths` entry to condition on;
+`ComponentRegistry.Validate` rejects a registry entry that violates either
+rule. `--dynamic` is rejected the same way as for `requireNodeSelector`,
+regardless of whether a storage class is configured yet, since one could be
+added later without rebuilding the bundle. `kube-prometheus-stack` is the
+example in `registry.yaml`. Its Prometheus StatefulSet uses `emptyDir` until
+`--storage-class` (or `--set` / an overlay override) puts a non-empty value
+at its `storageClassPaths` entry.
 
 ## `valueOverrideKeys`
 
@@ -237,13 +299,32 @@ The narrow exception is a **bundler-owned derived integration value**:
 when AICR renders both sides of a cross-chart contract and allowing either
 side to drift would produce an invalid bundle, the bundler may enforce that
 contract after ordinary overrides. The DRA/GPU Operator integration is the
-worked example: AICR merges the configured DRA eviction label into
+worked example: when opted in, AICR merges the configured DRA eviction label into
 `kubeletPlugin.nodeSelector` and writes the same label key to GPU Operator's
 `NODE_LABEL_FOR_GPU_POD_EVICTION`. This exception must remain gated on both
 components being enabled, must reject dynamic declarations that could move
 either managed path to install-time configuration, and must be covered across
 every deployer. Ordinary workload placement still uses registry paths and must
 not grow a special flag.
+
+**A bundler-owned contract that imposes cluster state must be opt-in.** The DRA
+eviction contract also illustrates the limit of the exception. Its selector is
+an exact-match `nodeSelector`, so rendering it unconditionally made a node label
+a precondition for the kubelet plugin to run at all — and an unlabeled node is
+then silently excluded, with `DESIRED=0` only when no node carries the label,
+and a successful `helm upgrade` either way. AICR does not
+own node labels, cannot verify them at bundle time, and generation is offline,
+so it cannot even warn accurately about what a given cluster carries.
+
+The rule that follows: a derived integration value may enforce consistency
+between two charts AICR renders, but when it also requires state outside those
+charts, the enforcement is opt-in. Absent the opt-in, AICR writes neither side
+and owns neither path — no injection, no override protection, no dynamic-path
+rejection. The single configuration surface that carries the state (here
+`--dra-eviction-node-label` and its config/API/Go equivalents) doubles as the
+opt-in, so there is no second boolean and no ambiguous combination. See
+[DRA Driver Upgrade Eviction](../user/cli-reference.md#dra-driver-upgrade-eviction)
+for the user-facing contract and issue #2469 for the reasoning.
 
 **Deciding where a knob belongs:**
 
@@ -271,10 +352,11 @@ is a worked example of the latter.
 ## `deploymentOrder`
 
 `RecipeResult.DeploymentOrder` is **derived**, not authored.
-`TopologicalSort` in `pkg/recipe/metadata_store.go` orders components
-by `componentRefs[].dependencyRefs` declared in the overlay. When no
-dependencies are declared, the order falls back to the order in
-which components are listed in the overlay's `componentRefs`. Express
+`TopologicalSort` in `pkg/recipe/metadata.go` orders components
+by `componentRefs[].dependencyRefs` declared in the overlay. Components
+with no dependency between them are emitted in alphabetical order
+(Kahn's algorithm over a sorted queue), not in the order they are
+listed in `componentRefs`. Express
 ordering by declaring `dependencyRefs` on the dependent component, not
 by writing a separate `deploymentOrder` block.
 
@@ -299,12 +381,12 @@ pods depend on).
 
 ## Deployers
 
-AICR ships five output adapters in
+AICR ships six output adapters in
 [`pkg/bundler/deployer/`](https://github.com/NVIDIA/aicr/tree/main/pkg/bundler/deployer):
-`helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`. Each calls
+`helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `terraform`. Each calls
 `localformat.Write()` and then layers its own orchestration files
 (`deploy.sh`, `helmfile.yaml`, Argo `Application` CRs, Flux
-`HelmRelease`s). **Components do not need to be deployer-aware** —
+`HelmRelease`s, Terraform module calls). **Components do not need to be deployer-aware** —
 the bundler renders per-deployer from one component definition.
 
 ### Deployment ordering
@@ -335,6 +417,26 @@ exactly its dependencies' terminal releases, nothing more. This is the
 most faithful and most parallel rendering — a component waits only for
 what it actually needs — and it reads naturally to flux users because
 `dependsOn` mirrors `dependencyRefs` one-for-one. See `declaredDependsOn`.
+
+**terraform — the exact DAG, on the module call.** Terraform's
+`depends_on` is a native dependency graph, so the terraform deployer
+projects the declared edges onto it the same way flux does, and the two
+deployers emit the same edge set for the same recipe. It differs in
+where the edge is attached: each component is **one module call**, and
+the edge sits on the call, so it orders everything the module contains
+rather than one resource inside it. A component's `-pre`, `-post` and
+`-readiness` folders become slots on that same module and chain inside
+it, so `depends_on = [module.gpu_operator]` covers the component's gate
+without naming it — the claim the module boundary is there to make. The
+slots are assigned by the same `-pre`/`-post`/`-readiness` suffix test
+argocd's `waveForFolder` uses. See `buildComponents` and `phaseOf`.
+
+The readiness slot hardcodes `wait` rather than reading the bundle-wide
+variable: an async component (see `deployer.ComponentOverrideFor`) may
+skip waiting on its own workloads, never on the gate that asserts it came
+up. The gate Job is a helm hook, so the release blocks on it without
+`wait_for_jobs`, and its `timeout` is the gate's own deadline plus the
+buffer `deploy.sh` adds, not `var.timeout`.
 
 **argocd / argocd-helm — tiers as sync-wave bands.** Argo CD's
 `sync-wave` is a single integer per Application. Applications sharing a
@@ -368,13 +470,14 @@ possible shell. The readiness gates already sequence it correctly.
 `aicr bundle --serial` forces every deployer to install components
 strictly one at a time in `DeploymentOrder`, an escape hatch for
 reproducing the pre-parallelism ordering or bisecting a misbehaving
-rollout. It affects the four concurrent deployers: argocd and
+rollout. It affects the five concurrent deployers: argocd and
 argocd-helm fall back to a linear sync-wave per folder, flux chains each
 `HelmRelease` `dependsOn` to the previous component instead of
-projecting the DAG, and helmfile chains every release to its predecessor
+projecting the DAG, helmfile chains every release to its predecessor
 via `needs:` (one linear apply chain) instead of only within a
-component. The helm `deploy.sh` is already serial, so the flag is a
-no-op for it. Off by default.
+component, and terraform chains every module call via `depends_on`. The
+helm `deploy.sh` is already serial, so the flag is a no-op for it. Off
+by default.
 
 See [index.md](index.md#community-standard-deployment-targets) for
 the deployer matrix.

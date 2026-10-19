@@ -86,10 +86,112 @@ letting it surface later as a performance-phase abort with no bandwidth number.
 
 **Important:** The GPU node pool must be provisioned with only the 8 GPU NIC
 networks (`gpu-nic-0` through `gpu-nic-7`). Do **not** include a gVNIC additional
-network — it takes a GPU NIC PCI slot (`0000:06:00.0`), leaving only 7/8 GPUs
+network — it takes one of the GPU NIC PCI slots, leaving only 7/8 GPUs
 available for TCPXO. This is distinct from the `--enable-gvnic` node-pool flag,
 which selects the gVNIC driver and **is** required: pass the flag, but do not add
 a ninth `--additional-node-network` entry for it.
+
+### What the deployment checks verify
+
+Beyond the name count above, two deployment-phase checks gate on the fabric
+actually being usable, not just nameable:
+
+- **`gke-gpu-nic-networks`** verifies each `gpu-nic*` Network reports
+  `Ready=True` and `ParamsReady=True` (an intact `GKENetworkParamSet` binding),
+  and requires **at least eight** to be healthy and bound. A leftover Network
+  beyond the ready eight (for example from a deleted pool) does not fail the
+  cluster. Verify a Network's state with:
+
+  ```shell
+  NETWORK="gpu-nic-0"  # replace with the gpu-nic Network to inspect
+  kubectl get network.networking.gke.io "${NETWORK}" -o jsonpath='{.status.conditions}'
+  ```
+
+- **`gke-gpu-nic-topology`** (sibling) reads each a3 GPU node's
+  `networking.gke.io/nic-info` annotation and fails on gVNIC displacement,
+  detected three ways: an interface beyond `eth0`–`eth8`, fewer than 8 of
+  `eth1`–`eth8` mapped, or — via a join with `networking.gke.io/north-interfaces`
+  — a GPU NIC interface that maps to a non-GPU-NIC Network (the uniform case:
+  one gVNIC plus seven GPU NICs present `eth0`–`eth8` on every node, invisible
+  to name/PCI alone). A node with no annotation counts as unverified; a node
+  with a present-but-unparseable annotation fails the check. When no node can
+  be verified, the check Skips and records coverage counts (nodes validated /
+  total). Verify a node's mapping with:
+
+  ```shell
+  NODE="gke-my-cluster-a3-mega-pool-1a2b3c4d-x7k2"  # replace with the GPU node name
+  kubectl get node "${NODE}" -o jsonpath='{.metadata.annotations.networking\.gke\.io/nic-info}'
+  ```
+
+## The shipped `torch-distributed-tcpxo` runtime
+
+On the `h100-gke-cos-training-kubeflow` recipe, AICR ships a pre-wired
+`ClusterTrainingRuntime` named `torch-distributed-tcpxo` (a sibling of
+`torch-distributed`, which stays as it is). It carries the annotations,
+native sidecar, volumes, `IPC_LOCK`, and the complete versioned NCCL
+configuration set — the entire wiring described in the next section — so a
+TrainJob references it by name and supplies no fabric configuration at all:
+
+```yaml
+spec:
+  runtimeRef:
+    name: torch-distributed-tcpxo
+    apiGroup: trainer.kubeflow.org
+    kind: ClusterTrainingRuntime
+```
+
+**The network names are a required recipe-generation input.** The eight names
+are cluster-specific and AICR has no cluster access at generation time, so
+they are recorded in the recipe (`configuration.gke.tcpxoInterfaces`),
+auditable and provenance-visible. Generation fails closed without them:
+
+```shell
+aicr recipe --service gke --accelerator h100 --os cos --intent training --platform kubeflow \
+  --gke-tcpxo-interfaces eth1=aicr-demo2-gpu-nic-0,eth2=aicr-demo2-gpu-nic-1,eth3=aicr-demo2-gpu-nic-2,eth4=aicr-demo2-gpu-nic-3,eth5=aicr-demo2-gpu-nic-4,eth6=aicr-demo2-gpu-nic-5,eth7=aicr-demo2-gpu-nic-6,eth8=aicr-demo2-gpu-nic-7
+```
+
+or in an AICRConfig:
+
+```yaml
+spec:
+  recipe:
+    configuration:
+      gke:
+        tcpxoInterfaces:
+          - {interfaceName: eth1, network: aicr-demo2-gpu-nic-0}
+          # ... eth2..eth8
+```
+
+The mapping is an ordered list of explicit `interfaceName` → Network pairs —
+the interface key, not the list position, binds a network to `ethN`. Take the
+mapping from whoever provisioned the cluster (its `GKENetworkParamSet` /
+provisioning configuration); enumerating Network names shows what exists but
+not which one binds each interface. The value is validated as eight unique
+interfaces mapped to eight unique networks. It cannot be changed at bundle
+time: `--set`/`--set-json`/`--set-file`/`--dynamic`
+paths intersecting `kubeflow-trainer:tcpxoInterfaces` are rejected, and the
+bundle fails if the final resolved value disagrees with what the recipe
+records. (This is ownership enforcement, not the profile lock — the lock is
+unavailable to this value, see issue #2296.) One gap remains open by design:
+editing the generated artifact *after* AICR produced it is not yet detected
+at validation time — that recipe-versus-deployed comparison is #2297's
+work, tracked separately.
+
+**Re-bundling a pre-existing recipe:** the obligation follows the
+declaration. Recipes generated before this runtime existed do not declare
+its manifest, so they bundle exactly as before — no runtime, no required
+input. Only a recipe whose kubeflow-trainer component attaches the
+`torch-distributed-tcpxo` manifest must record the mapping: generation fails
+closed without it, and a hand-edited recipe that adds the manifest without
+the configuration is rejected at bundle time. (Recipe *loading* does not
+fail closed on this shape — the metadata store's coherence check also serves
+catalog introspection paths that never deploy, so the enforcement lives at
+generation and bundling, where artifacts are produced.)
+
+**Residual limitation, stated plainly:** the runtime is an opt-in sibling —
+workloads that keep referencing `torch-distributed` get TCP as before, and
+nothing points them at the fabric runtime. Discoverability is a doc concern,
+not a behavioral one.
 
 ## Workload Pod Configuration (NRI Profile)
 
@@ -176,10 +278,14 @@ Key properties:
 - Requires NRI device injector DaemonSet deployed on GPU nodes
 
 Running a **Kubeflow TrainJob** rather than a bare Pod? A TrainJob cannot add
-the `tcpxo-daemon` sidecar, so the wiring must live in a `TrainingRuntime` — see
+the `tcpxo-daemon` sidecar, so the wiring must live in a runtime. On an
+AICR-generated bundle for this recipe family you do not author one: reference
+the shipped `torch-distributed-tcpxo` `ClusterTrainingRuntime` (see above).
+To hand-author a `TrainingRuntime` — a bundle you did not generate, or a
+shape the shipped runtime does not cover — see
 [Attaching a Training Workload to the Cluster Fabric](../user/fabric-attached-training.md).
 
-See [`demos/workloads/training/gke-nccl-test-tcpxo.yaml`](https://github.com/NVIDIA/aicr/blob/main/demos/workloads/training/gke-nccl-test-tcpxo.yaml) for a complete 2-node NCCL benchmark example. (pinned to the same coupled pair the recipe ships, plugin `v1.0.15` with daemon `v1.0.21`)
+See [`demos/workloads/training/gke-nccl-test-tcpxo.yaml`](https://github.com/NVIDIA/aicr/blob/main/demos/workloads/training/gke-nccl-test-tcpxo.yaml) for a complete 2-node NCCL benchmark example (pinned to the same coupled pair the recipe ships, plugin `v1.0.15` with daemon `v1.0.21`).
 
 ## NCCL Plugin Version Matching
 
@@ -222,6 +328,30 @@ aicr validate --recipe recipes/overlays/h100-gke-cos-training.yaml \
   --phase performance
 ```
 
+That base recipe ships TCPXO but no runtime, so it measures the validator's
+own fixture and labels the result `runtimeSource: cluster-capability`.
+
+On a recipe that ships the `torch-distributed-tcpxo` runtime
+(`h100-gke-cos-training-kubeflow`), the performance validator does not measure
+a fixture of its own. Before creating anything it verifies **recipe → deployed →
+cluster**: the recipe's recorded `configuration.gke.tcpxoInterfaces` must equal
+the mapping on the deployed `ClusterTrainingRuntime` exactly and in order, and
+every network that mapping selects must exist on the cluster. It then derives
+the benchmark runtime from the deployed one — copying the worker pod template
+wholesale (metadata and spec), re-applying only the benchmark's own worker
+`image`, `command`, `args`, `resources`, `terminationMessagePolicy`, and
+`readinessProbe`, and
+merging volumes and mounts additively, so the workers run under the shipped
+NCCL environment rather than the fixture's — and labels the result
+`runtimeSource: delivered-artifact`. A mismatch in either comparison fails the
+run rather than being recorded; a divergent deployed artifact is a finding,
+never something validation repairs.
+
+```shell
+aicr validate --recipe recipes/overlays/h100-gke-cos-training-kubeflow.yaml \
+  --phase performance
+```
+
 The validator runs the all-reduce sweep over the validator-fixed `1K`–`16G`
 message-size range and asserts the busBW floor. It deploys the
 `TrainingRuntime` (`validators/performance/testdata/h100/gke/runtime.yaml`)
@@ -244,8 +374,9 @@ returns a successful *skipped* result without measuring bandwidth. The selected
 nodes also need **free** GPU capacity (the TrainJob places a full GPU node per
 worker); if the GPUs are already occupied the workers stay Pending and the check
 times out — it does not skip. If Kubeflow Trainer is not already installed, the validator
-downloads and installs it (Trainer v2.2.0 from GitHub, then removes it
-afterward), so the validator environment needs GitHub egress.
+downloads and installs it from GitHub, then removes it afterward, so the
+validator environment needs GitHub egress. See
+[Validation](../user/validation.md) for choosing the installed release.
 
 ### Manual standalone benchmark
 
@@ -293,8 +424,13 @@ kubectl delete ns nccl-test
 If RxDM reports `Number of GPUs detected 7 is not equal to the actual number of GPUs 8`, check the GPU node pool's additional network configuration:
 
 ```shell
-gcloud container node-pools describe <pool-name> \
-  --cluster <cluster> --region <region> --project <project> \
+POOL="a3-mega-pool"       # replace with the GPU node pool name
+CLUSTER="my-cluster"      # replace with your GKE cluster name
+REGION="us-central1"      # replace with the cluster region
+PROJECT="my-gcp-project"  # replace with your GCP project ID
+
+gcloud container node-pools describe "${POOL}" \
+  --cluster "${CLUSTER}" --region "${REGION}" --project "${PROJECT}" \
   --format="yaml(networkConfig.additionalNodeNetworkConfigs)"
 ```
 
@@ -303,11 +439,12 @@ If a **gVNIC network** appears in the list, it is taking a GPU NIC PCI slot. Rem
 You can also verify the node NIC mapping:
 
 ```shell
-kubectl get node <gpu-node> \
+NODE="gke-my-cluster-a3-mega-pool-1a2b3c4d-x7k2"  # replace with the GPU node name
+kubectl get node "${NODE}" \
   -o jsonpath='{.metadata.annotations.networking\.gke\.io/nic-info}'
 ```
 
-All 8 GPU NIC PCI addresses should be mapped to `eth1`–`eth8`. If a gVNIC is present, it typically occupies PCI `0000:06:00.0`, displacing the first GPU NIC.
+All 8 GPU NIC PCI addresses should be mapped to `eth1`–`eth8`. A gVNIC additional network takes one of these GPU NIC slots, so a displaced node shows an extra interface beyond `eth0`–`eth8` or fewer than 8 of `eth1`–`eth8`. The uniform case — one gVNIC plus seven GPU NICs, so all of `eth0`–`eth8` are present — is caught by the `gke-gpu-nic-topology` check's `north-interfaces` join: the displaced interface's underlay IP maps to the gVNIC Network, not a GPU NIC Network. Verify a node's interface→Network mapping with `kubectl get node <gpu-node> -o jsonpath='{.metadata.annotations.networking\.gke\.io/north-interfaces}'`.
 
 ### RxDM detects 0/8 GPUs
 

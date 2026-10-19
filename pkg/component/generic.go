@@ -49,7 +49,7 @@ type ComponentConfig struct {
 	SystemTolerationPaths []string
 
 	// AcceleratedNodeSelectorPaths are Helm value paths for GPU node selectors.
-	// Example: ["daemonsets.nodeSelector"]
+	// Example: ["kubeletPlugin.nodeSelector"] (nvidia-dra-driver-gpu)
 	AcceleratedNodeSelectorPaths []string
 
 	// AcceleratedTolerationPaths are Helm value paths for GPU node tolerations.
@@ -254,9 +254,17 @@ func MakeBundle(ctx context.Context, b *BaseBundler, input recipe.RecipeInput, o
 		ApplyNodeSelectorOverrides(values, selectors, cfg.SystemNodeSelectorPaths...)
 	}
 
-	// Apply system tolerations
-	if tolerations := b.Config.SystemNodeTolerations(); len(tolerations) > 0 {
-		ApplyTolerationsOverrides(values, tolerations, cfg.SystemTolerationPaths...)
+	// Tolerations: a path declared under both tiers is written once with the
+	// union; every other path gets its tier's list. A tier with no declared
+	// paths writes the top-level "tolerations" key, as ApplyTolerationsOverrides
+	// does, so a config outside the registry keeps its tolerations.
+	systemTols := b.Config.SystemNodeTolerations()
+	acceleratedTols := b.Config.AcceleratedNodeTolerations()
+	systemPaths := tolerationPathsOrDefault(cfg.SystemTolerationPaths)
+	acceleratedPaths := tolerationPathsOrDefault(cfg.AcceleratedTolerationPaths)
+	shared := SharedTolerationPaths(systemPaths, acceleratedPaths)
+	if paths := pathsExcept(systemPaths, shared); len(systemTols) > 0 && len(paths) > 0 {
+		ApplyTolerationsOverrides(values, systemTols, paths...)
 	}
 
 	// Apply accelerated node selectors
@@ -264,9 +272,11 @@ func MakeBundle(ctx context.Context, b *BaseBundler, input recipe.RecipeInput, o
 		ApplyNodeSelectorOverrides(values, selectors, cfg.AcceleratedNodeSelectorPaths...)
 	}
 
-	// Apply accelerated tolerations
-	if tolerations := b.Config.AcceleratedNodeTolerations(); len(tolerations) > 0 {
-		ApplyTolerationsOverrides(values, tolerations, cfg.AcceleratedTolerationPaths...)
+	if paths := pathsExcept(acceleratedPaths, shared); len(acceleratedTols) > 0 && len(paths) > 0 {
+		ApplyTolerationsOverrides(values, acceleratedTols, paths...)
+	}
+	if sharedTols := SharedTolerations(systemTols, acceleratedTols); len(sharedTols) > 0 && len(shared) > 0 {
+		ApplyTolerationsOverrides(values, sharedTols, shared...)
 	}
 
 	// Create bundle directory structure
@@ -380,4 +390,22 @@ func getValueOverridesForComponent(b *BaseBundler, cfg ComponentConfig) map[stri
 	}
 
 	return nil
+}
+
+// pathsExcept returns paths without the members of skip, in order.
+func pathsExcept(paths, skip []string) []string {
+	if len(skip) == 0 {
+		return paths
+	}
+	skipSet := make(map[string]struct{}, len(skip))
+	for _, p := range skip {
+		skipSet[p] = struct{}{}
+	}
+	var kept []string
+	for _, p := range paths {
+		if _, ok := skipSet[p]; !ok {
+			kept = append(kept, p)
+		}
+	}
+	return kept
 }

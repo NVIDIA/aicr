@@ -30,8 +30,7 @@
 // persisted format (Recipe, Snapshot, RecipeCriteria, RecipeMixin).
 //
 // Lives in localformat (the package that owns the VendorRecord type and
-// the vendoring branch in Write) so every deployer — helm, argocd,
-// argocd-helm — can emit the same audit file without duplicating the
+// the vendoring branch in Write) so every deployer can emit the same audit file without duplicating the
 // writer or re-marshaling the record shape.
 
 package localformat
@@ -60,8 +59,9 @@ const ProvenanceFileName = "provenance.yaml"
 // bump.
 //
 // BundleProvenance is on the ADR-022 stable artifact track, so this aliases
-// header.StableGroupVersion; the track's target is header.GroupVersionV1 and
-// this Release N emitter still writes v1alpha2.
+// header.StableGroupVersion, which reached its target header.GroupVersionV1 at
+// the v0.22 emitter switch (#2416). Alias the track constant, never the string:
+// the three tracks no longer share a value.
 const (
 	ProvenanceAPIVersion = header.StableGroupVersion
 	ProvenanceKind       = "BundleProvenance"

@@ -41,7 +41,7 @@ GCS source-keyed tree (read-only)
 ```
 
 The byte-deterministic generator (no clock, no random — see
-[`tools/corroborate`](../../tools/corroborate/README.md)) makes the publish a
+[`tools/corroborate`](https://github.com/NVIDIA/aicr/blob/main/tools/corroborate/README.md)) makes the publish a
 straight deploy: there is no drift-PR for the site. The in-job determinism
 gate runs the generator twice and diffs the output, so a non-reproducible
 build fails loudly instead of shipping.
@@ -82,10 +82,10 @@ in `merge-gate.yaml`.
 ## Forward limitations
 
 - The read SA's impersonation is repository-scoped (the shared
-  `github-actions-pool` provider, owned by `infra/demo-api-server`, maps only
+  `github-actions-pool` provider, owned by `infra/gcp-shared`, maps only
   the repository attribute). It is least-privilege on the resource side
-  (`objectViewer` on one bucket); GP3's `infra/evidence-dashboard` may tighten
-  the subject condition further.
+  (`objectViewer` on one bucket). Tightening the subject condition further
+  was part of GP3 (#1403), which was closed as not planned.
 - The build passes `-allowlist recipes/evidence/allowlist.yaml` to the
   generator, re-deriving each source's class from its verified signer against
   the in-tree GP1 allowlist — defense in depth on top of the class GP2 baked

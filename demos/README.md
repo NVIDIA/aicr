@@ -1,6 +1,9 @@
 # Demos
 
-Runbooks for testing and demonstrating AICR end-to-end workflows on live clusters.
+Runbooks for testing and demonstrating AICR end-to-end workflows. Most run
+against live clusters; [query.md](query.md) and [dynamic.md](dynamic.md) need
+no cluster, and [recipe-data-architecture.md](recipe-data-architecture.md)
+needs one only for its snapshot step.
 
 ## Available Demos
 
@@ -34,7 +37,9 @@ Deployable manifests used by the demos above and by conformance evidence collect
 
 | Sample | Description |
 |--------|-------------|
-| [workloads/inference/vllm-agg.yaml](workloads/inference/vllm-agg.yaml) | Dynamo vLLM aggregated inference (DynamoGraphDeployment); pulls an ungated Hugging Face model, no credential required. **Caution:** also applies a cluster-scoped `Queue/dynamo` with `parentQueue: default-parent-queue` and zeroed quotas. Where `dynamo-platform` is installed it creates that same queue with `parentQueue: dynamo-default` and `quota: -1`, so applying this manifest silently repoints the platform's queue and rescopes every workload in it — and deleting the `dynamo-workload` namespace cannot revert a cluster-scoped object. Remove the `Queue` document from your copy of the manifest before applying on such a cluster (do not delete the live queue — it belongs to the platform). |
+| [workloads/inference/vllm-agg.yaml](workloads/inference/vllm-agg.yaml) | Dynamo vLLM aggregated inference (DynamoGraphDeployment); pulls an ungated Hugging Face model, no credential required. Submits to the KAI `dynamo` queue that `dynamo-platform` creates, so it ships no `Queue` of its own. Pins the Frontend to a `nodeGroup=cpu-worker` pool and the decode worker to `nodeGroup=gpu-worker`. |
+| [workloads/inference/chat-server.sh](workloads/inference/chat-server.sh) + [chat.html](workloads/inference/chat.html) | Browser chat UI for the `vllm-agg` frontend: port-forwards the service and serves the UI on <http://127.0.0.1:9090/chat.html> |
+| [workloads/inference/nim-chat-server.sh](workloads/inference/nim-chat-server.sh) + [nim-chat.html](workloads/inference/nim-chat.html) | The same chat UI for the `llama-3-2-1b` NIMService; set `NAMESPACE` / `SERVICE` to target another NIM |
 | [workloads/inference/nimservice-llama-3-2-1b.yaml](workloads/inference/nimservice-llama-3-2-1b.yaml) | NIM inference via the NGC model path; requires two secrets as written — `ngc-api-secret` (`authSecret`, holding `NGC_API_KEY` for model download) and `ngc-pull-secret` (`image.pullSecrets`, for the `nvcr.io` pull) |
 | [workloads/inference/nimservice-hf-nocred.yaml](workloads/inference/nimservice-hf-nocred.yaml) | NIM inference via an `hf://` model; no NGC credential required (see [NIM workload credentials](../docs/user/component-catalog.md#nim-workload-credentials)) |
 | [workloads/inference/vllm-metrics-test.yaml](workloads/inference/vllm-metrics-test.yaml) | Standalone vLLM server with a Prometheus ServiceMonitor, used for AI Service Metrics evidence collection; no credential required |

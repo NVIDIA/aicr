@@ -1,0 +1,175 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-query
+spec:
+  description: |
+    CLI-boundary coverage for `aicr query` (#1806): scalar and subtree
+    selectors, output formats, snapshot-derived criteria, and the
+    documented failure modes (selector miss, no criteria, missing flag,
+    unknown format). No cluster needed.
+    Run with: AICR_BIN=$(pwd)/dist/e2e/aicr chainsaw test --no-cluster --test-dir tests/chainsaw/cli/query
+  timeouts:
+    exec: 30s
+  steps:
+    - name: scalar-selectors
+      description: Scalar selectors print the bare value, shell-friendly.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-query"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              # criteria.service echoes an input; driver.version proves the
+              # recipe was hydrated (the value comes from component values).
+              service="$("${AICR_BIN}" query --service eks --accelerator h100 --os ubuntu \
+                --intent training --selector criteria.service)"
+              [ "${service}" = "eks" ] || { echo "criteria.service - got '${service}', want eks"; exit 1; }
+              version="$("${AICR_BIN}" query --service eks --accelerator h100 --os ubuntu \
+                --intent training --selector components.gpu-operator.values.driver.version)"
+              [ -n "${version}" ] || { echo "driver.version is empty"; exit 1; }
+              case "${version}" in
+                *:*|*\{*|*\ *) echo "driver.version is not a bare scalar - '${version}'"; exit 1 ;;
+              esac
+              echo "driver.version=${version}"
+            check:
+              ($error == null): true
+
+    - name: subtree-selector-yaml
+      description: A component subtree renders as YAML carrying the hydrated component fields.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              "${AICR_BIN}" query --service eks --accelerator h100 --os ubuntu --intent training \
+                --selector components.gpu-operator
+            check:
+              ($error == null): true
+              (parse_yaml($stdout).name): gpu-operator
+              (parse_yaml($stdout).chart): gpu-operator
+              (parse_yaml($stdout).type): Helm
+              (parse_yaml($stdout).namespace): gpu-operator
+              (contains(keys(parse_yaml($stdout).values), 'driver')): true
+
+    - name: json-format
+      description: --format json emits a JSON object for a non-scalar selector.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              "${AICR_BIN}" query --service eks --accelerator h100 --os ubuntu --intent training \
+                --selector criteria --format json
+            check:
+              ($error == null): true
+              (json_parse($stdout).service): eks
+              (json_parse($stdout).accelerator): h100
+              (json_parse($stdout).intent): training
+              (json_parse($stdout).os): ubuntu
+
+    - name: snapshot-derived-criteria
+      description: --snapshot supplies criteria the flags do not (os comes from the OS measurement).
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-query"
+              cat > "${WORK}/snapshot.yaml" << 'SNAP'
+              kind: Snapshot
+              apiVersion: aicr.run/v1
+              metadata: {}
+              measurements:
+                - type: K8s
+                  subtypes:
+                    - subtype: server
+                      data:
+                        version: v1.33.0
+                - type: OS
+                  subtypes:
+                    - subtype: release
+                      data:
+                        ID: ubuntu
+                        VERSION_ID: "24.04"
+                    - subtype: sysctl
+                      data:
+                        /proc/sys/kernel/osrelease: "6.8.0-1015-aws"
+              SNAP
+              # No --os on the command line; the value must come from the snapshot.
+              os="$("${AICR_BIN}" query --snapshot "${WORK}/snapshot.yaml" \
+                --service eks --accelerator h100 --intent training --selector criteria.os)"
+              [ "${os}" = "ubuntu" ] || { echo "criteria.os - got '${os}', want ubuntu (from snapshot)"; exit 1; }
+            check:
+              ($error == null): true
+
+    - name: selector-miss-is-not-found
+      description: A selector that matches nothing fails with NOT_FOUND (exit 3) and lists the available keys.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              "${AICR_BIN}" query --service eks --accelerator h100 --intent training \
+                --selector does.not.exist
+              echo "exit=$?"
+            check:
+              ($stdout): "exit=3\n"
+              (contains($stderr, '[NOT_FOUND] selector "does.not.exist"')): true
+              (contains($stderr, 'available keys')): true
+
+    - name: no-criteria-is-invalid-request
+      description: --selector alone is rejected with exit 2 because at least one criteria dimension is required.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              "${AICR_BIN}" query --selector criteria.service
+              echo "exit=$?"
+            check:
+              ($stdout): "exit=2\n"
+              (contains($stderr, '[INVALID_REQUEST] no criteria provided')): true
+
+    - name: missing-selector-is-usage-error
+      description: --selector is a required flag; urfave reports it as an unstructured usage error (exit 1).
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              "${AICR_BIN}" query --service eks
+              echo "exit=$?"
+            check:
+              # urfave prints the usage text to stdout before the error, so pin the tail.
+              (ends_with($stdout, `"exit=1\n"`)): true
+              (contains($stdout, 'USAGE')): true
+              (contains($stderr, 'Required flag "selector" not set')): true
+
+    - name: unknown-format-is-invalid-request
+      description: An unsupported --format value is rejected up front with exit 2.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              "${AICR_BIN}" query --service eks --selector criteria.service --format xml
+              echo "exit=$?"
+            check:
+              ($stdout): "exit=2\n"
+              (contains($stderr, '[INVALID_REQUEST] unknown output format')): true
+              (contains($stderr, '"xml"')): true
+      cleanup:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-query

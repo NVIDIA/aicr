@@ -1,0 +1,12 @@
+version: 1
+facade:
+  - pkg/client/v1
+infrastructure:
+  pkg/errors: "structured error codes and wrapping"
+constrained:
+  pkg/recipe:
+    reason: "wire types rendered by --output"
+    permanent: true
+    symbols:
+      Recipe: type
+      Recipe.Resolved: behavioral

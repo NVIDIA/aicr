@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0.0",
+  "files": [
+    {
+      "path": "bom.cdx.json",
+      "size": 1495,
+      "sha256": "sha256:089fde3689900d2f790637a54cfd8f54209677a0e5f3fdb30ec7bf59ba7ab93d",
+      "mediaType": "application/vnd.cyclonedx+json"
+    },
+    {
+      "path": "recipe.yaml",
+      "size": 307,
+      "sha256": "sha256:5aa0caf595f9c505bc15b64b60a69b4022b49138985ee2bcae5bcecb80bbf14c",
+      "mediaType": "application/yaml"
+    },
+    {
+      "path": "snapshot.yaml",
+      "size": 17,
+      "sha256": "sha256:8076987aa71d39db7f64728ccda26890a808c302ee4eff78d77bf35a01a0a465",
+      "mediaType": "application/yaml"
+    }
+  ]
+}

@@ -103,18 +103,7 @@ const (
 	// the image env var.
 	gpuAbsenceProbeScript = "if ls /dev/nvidia* 2>/dev/null; then echo 'FAIL: GPU visible without GPU allocation' && exit 1; else echo 'PASS: GPU isolated' && exit 0; fi"
 
-	// gpuExclusiveGrantProbeScript is the POSITIVE probe for the AUTHORIZED
-	// container: it must see exactly ONE usable GPU. A bare /dev/nvidia*
-	// listing would also pass for a container exposed to every GPU on the
-	// node (isolation broken) or to control devices only (/dev/nvidiactl,
-	// /dev/nvidia-uvm — no usable GPU), so the granted container counts GPUs
-	// via nvidia-smi (available in cudaTestImage) and emits the count and
-	// UUIDs to its logs as evidence. The success gate is a `case` matching
-	// the literal string "1" — fail closed: an empty or non-numeric count
-	// (e.g. a failed pipeline stage) lands in the FAIL branch instead of
-	// erroring inside a numeric `[ -ne ]` test and falling through to PASS.
-	//
-	// The prologue makes the probe advertiser-agnostic: under the GPU
+	// nvidiaUserlandPathPrologue makes the probe advertiser-agnostic: under the GPU
 	// Operator's toolkit flow, nvidia-smi and libnvidia-ml are injected at
 	// standard paths and the exports are no-ops; under GKE's managed device
 	// plugin (the gke-default gpuStack value), the driver tree is mounted
@@ -133,8 +122,20 @@ const (
 	// no nvidia-smi) rather than a shadow over image binaries — prepending
 	// a node path ahead of the image's PATH in a security probe would be
 	// the riskier ordering for no supported gain.
-	gpuExclusiveGrantProbeScript = `export PATH="${PATH:+${PATH}:}/usr/local/nvidia/bin"; ` +
-		`export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+${LD_LIBRARY_PATH}:}/usr/local/nvidia/lib64"; ` +
+	nvidiaUserlandPathPrologue = `export PATH="${PATH:+${PATH}:}/usr/local/nvidia/bin"; ` +
+		`export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+${LD_LIBRARY_PATH}:}/usr/local/nvidia/lib64"; `
+
+	// gpuExclusiveGrantProbeScript is the POSITIVE probe for the AUTHORIZED
+	// container: it must see exactly ONE usable GPU. A bare /dev/nvidia*
+	// listing would also pass for a container exposed to every GPU on the
+	// node (isolation broken) or to control devices only (/dev/nvidiactl,
+	// /dev/nvidia-uvm — no usable GPU), so the granted container counts GPUs
+	// via nvidia-smi (available in cudaTestImage) and emits the count and
+	// UUIDs to its logs as evidence. The success gate is a `case` matching
+	// the literal string "1" — fail closed: an empty or non-numeric count
+	// (e.g. a failed pipeline stage) lands in the FAIL branch instead of
+	// erroring inside a numeric `[ -ne ]` test and falling through to PASS.
+	gpuExclusiveGrantProbeScript = nvidiaUserlandPathPrologue +
 		`uuids="$(nvidia-smi --query-gpu=uuid --format=csv,noheader)" || { echo "FAIL: nvidia-smi cannot enumerate GPUs - no usable GPU granted"; exit 1; }; ` +
 		`count="$(printf '%s\n' "$uuids" | grep -c .)"; ` +
 		`echo "granted GPU count: ${count}"; echo "granted GPU UUIDs: ${uuids}"; ` +
@@ -169,6 +170,12 @@ type gpuTestRun struct {
 	podName        string
 	claimName      string
 	noAllocPodName string
+	// IMEX channel subtest names (dra-support): the per-run ComputeDomain,
+	// the ResourceClaimTemplate the DRA driver generates from it, and the
+	// probe pod that consumes one channel from that template.
+	computeDomainName string
+	claimTemplateName string
+	imexPodName       string
 
 	nsObserved     bool
 	nsUID          types.UID
@@ -217,6 +224,10 @@ func newGPUTestRun() (*gpuTestRun, error) {
 		podName:        gpuTestPodPrefix + token,
 		claimName:      gpuClaimPrefix + token,
 		noAllocPodName: noAllocProbePrefix + token,
+
+		computeDomainName: imexComputeDomainPrefix + token,
+		claimTemplateName: imexClaimTemplatePrefix + token,
+		imexPodName:       imexTestPodPrefix + token,
 	}, nil
 }
 
@@ -300,9 +311,20 @@ func createDefinitelyRejected(err error) bool {
 // whose unauthorized sibling container must not see any accelerator, plus a
 // standalone no-allocation probe pod that must not see any GPU device. Neither
 // mechanism usable is an environment failure.
+//
+// Skipped when slinky-slurm is in the recipe.
 func CheckSecureAcceleratorAccess(ctx *validators.Context) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
+	}
+
+	// Each Slinky NodeSet pod reserves the whole node's GPUs through its own
+	// Kubernetes pod spec, and Slurm allocates per job internally (GRES and
+	// cgroups). A Kubernetes-scheduled test pod here would hang Pending with
+	// no spare capacity, or pass using capacity elsewhere without exercising
+	// Slurm's own isolation.
+	if recipeHasComponent(ctx, "slinky-slurm") {
+		return validators.SkipWithReason(validators.SkipReasonSlurmManagedGPUs, "Slurm-managed GPU allocation (slinky-slurm in recipe) is not mediated by the Kubernetes scheduler. On GPU-backed Slinky recipes slinky-slurm-gpu-access verifies Slurm's GPU access and isolation path instead")
 	}
 
 	// Bound ALL work to the check-local budget so one bounded namespace
@@ -352,6 +374,7 @@ func CheckSecureAcceleratorAccess(ctx *validators.Context) error {
 	// configured policy in the artifacts.
 	recordRawTextArtifact(ctx, "GPU allocation policy", "",
 		fmt.Sprintf("configured policy: %s", policy))
+	validators.EmitExtraOrWarn(validators.GPUAllocationPolicyExtra(policy))
 	if verifyErr := verifyGPUAllocationPolicy(policy, mode); verifyErr != nil {
 		return verifyErr
 	}
@@ -360,6 +383,7 @@ func CheckSecureAcceleratorAccess(ctx *validators.Context) error {
 	case policy == validatorv1.GPUAllocationPolicyDRAResourceClaim,
 		policy == validatorv1.GPUAllocationPolicyUnspecified && mode.DRAUsable:
 		recordRawTextArtifact(ctx, "Secure access mode", "", "mode exercised: DRA (gpu.nvidia.com ResourceClaim)")
+		validators.EmitExtraOrWarn(validators.GPUAllocationResolvedExtra(true, false))
 		return runDRASecureAccessTest(ctx, dynClient, mode.APIVersion)
 	case policy == validatorv1.GPUAllocationPolicyDevicePluginExtendedResource,
 		policy == validatorv1.GPUAllocationPolicyUnspecified && mode.DevicePluginUsable:
@@ -376,6 +400,7 @@ func CheckSecureAcceleratorAccess(ctx *validators.Context) error {
 				"kubectl get deviceclasses -o yaml", mode.ExtendedResourceDetail)
 		}
 		recordRawTextArtifact(ctx, "Secure access mode", "", "mode exercised: device plugin (nvidia.com/gpu limits)")
+		validators.EmitExtraOrWarn(validators.GPUAllocationResolvedExtra(false, false))
 		return runDevicePluginSecureAccessTest(ctx, mode.DevicePluginNodes)
 	default:
 		return errors.New(errors.ErrCodeUnavailable, fmt.Sprintf(
@@ -606,29 +631,13 @@ func buildDevicePluginTestPod(run *gpuTestRun, tolerations []corev1.Toleration, 
 	if tolerations == nil {
 		tolerations = []corev1.Toleration{{Operator: corev1.TolerationOpExists}}
 	}
-	terms := make([]corev1.NodeSelectorTerm, 0, len(nodeNames))
-	for _, nodeName := range nodeNames {
-		terms = append(terms, corev1.NodeSelectorTerm{
-			MatchFields: []corev1.NodeSelectorRequirement{{
-				Key:      metav1.ObjectNameField,
-				Operator: corev1.NodeSelectorOpIn,
-				Values:   []string{nodeName},
-			}},
-		})
-	}
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      run.podName,
 			Namespace: run.namespace,
 		},
 		Spec: corev1.PodSpec{
-			Affinity: &corev1.Affinity{
-				NodeAffinity: &corev1.NodeAffinity{
-					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-						NodeSelectorTerms: terms,
-					},
-				},
-			},
+			Affinity:      nodeNameAffinity(nodeNames),
 			RestartPolicy: corev1.RestartPolicyNever,
 			Tolerations:   tolerations,
 			Containers: []corev1.Container{
@@ -1494,6 +1503,32 @@ func buildDRATestPod(run *gpuTestRun, tolerations []corev1.Toleration) *corev1.P
 					},
 				},
 				unauthorizedSiblingContainer(),
+			},
+		},
+	}
+}
+
+// nodeNameAffinity returns a REQUIRED node affinity restricting a pod to the
+// given node OBJECT names, matched via metadata.name (matchFields) rather
+// than the kubernetes.io/hostname label, which is not guaranteed to equal
+// (or even exist for) the node name. matchFields In accepts exactly one
+// value per requirement, so the node set is expressed as OR-ed single-node
+// terms. Shared by the device-plugin GPU probe and the IMEX channel probe.
+func nodeNameAffinity(nodeNames []string) *corev1.Affinity {
+	terms := make([]corev1.NodeSelectorTerm, 0, len(nodeNames))
+	for _, nodeName := range nodeNames {
+		terms = append(terms, corev1.NodeSelectorTerm{
+			MatchFields: []corev1.NodeSelectorRequirement{{
+				Key:      metav1.ObjectNameField,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{nodeName},
+			}},
+		})
+	}
+	return &corev1.Affinity{
+		NodeAffinity: &corev1.NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+				NodeSelectorTerms: terms,
 			},
 		},
 	}

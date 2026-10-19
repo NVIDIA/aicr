@@ -1,0 +1,53 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# OCP Network Operator CR readiness gate (#2499).
+#
+# The network-operator-ocp component applies a NicClusterPolicy that installs
+# DOCA/OFED. Helm considers the custom resource installed once the API server
+# accepts it, before Network Operator has necessarily finished reconciling its
+# driver operands. When --readiness-hooks is enabled, this gate is emitted
+# immediately after network-operator-ocp. The gpu-operator-ocp dependency on
+# network-operator-ocp then places this barrier before its ClusterPolicy and
+# prevents the nvidia-peermem driver path from racing OFED installation.
+#
+# Require at least one ready NicClusterPolicy, then reject any live policy whose
+# aggregate state is not ready. The positive assertion prevents an empty list
+# from passing; the negative assertion supplies the all-items semantics because
+# unnamed positive Chainsaw assertions otherwise pass when any one item matches.
+# This keeps the gate valid if a downstream values override renames the policy
+# while still failing when any managed NIC stack is not ready.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: network-operator-ocp-readiness
+spec:
+  # The gate CLI owns the outer poll loop and stability window. A single
+  # assertion pass only needs a short window to inspect the current state.
+  timeouts:
+    assert: 30s
+  steps:
+    - name: nicclusterpolicy-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: mellanox.com/v1alpha1
+              kind: NicClusterPolicy
+              status:
+                state: ready
+        - error:
+            resource:
+              apiVersion: mellanox.com/v1alpha1
+              kind: NicClusterPolicy
+              (status.state != 'ready'): true

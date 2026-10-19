@@ -90,7 +90,7 @@ func CheckRobustController(ctx *validators.Context) error {
 		return checkRobustKubeflowTrainer(ctx)
 	}
 
-	return validators.Skip("no supported AI operator found in recipe (requires dynamo-platform or kubeflow-trainer)")
+	return validators.SkipWithReason(validators.SkipReasonComponentNotInRecipe, "no supported AI operator found in recipe (requires dynamo-platform or kubeflow-trainer)")
 }
 
 // checkRobustKubeflowTrainer validates the Kubeflow Trainer operator:

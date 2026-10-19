@@ -1,7 +1,7 @@
 # Measurement Schema
 
 The `Measurement` type in `github.com/NVIDIA/aicr/pkg/measurement` is the
-on-wire shape used throughout aicr's Snapshot → Recipe → Validate → Bundle
+on-wire shape used throughout aicr's Snapshot -> Recipe -> Validate -> Bundle
 pipeline. Snapshots serialize a `[]*Measurement` to YAML/JSON; recipes and
 validators consume the same shape. This page is the schema contract — any
 external producer (cross-repo Go library, CI tool, custom collector) emitting
@@ -241,6 +241,72 @@ Both `slinky-slurm` and `mariadb-operator` remain in raw snapshots and
 including all Slinky items. Constraint evaluation consumes the raw snapshot
 before evidence packaging.
 
+## K8s default-storage-class shape
+
+`K8s.default-storage-class` records which StorageClasses carry
+`storageclass.kubernetes.io/is-default-class: "true"` (or the beta
+`storageclass.beta.kubernetes.io/is-default-class` annotation, which
+Kubernetes still honors). It does not inspect provisioners, capacity, or
+existing PVCs.
+
+```yaml
+- subtype: default-storage-class
+  data:
+    collection-state: present
+    default-count: 1
+    default-classes: gp3
+```
+
+The fields are:
+
+- `collection-state` — `present` (exactly one default), `multiple` (more than
+  one; Kubernetes binds class-less PVCs to the newest), `absent` (none), or
+  `unknown` (the StorageClass List failed).
+- `default-count` — the number of default StorageClasses. Omitted when
+  `unknown`.
+- `default-classes` — the default StorageClass names, sorted and
+  comma-joined. Omitted when there are none.
+
+## K8s percona-server-mongodb shape
+
+`K8s.percona-server-mongodb` records conflict evidence for the Percona
+Operator for MongoDB: API group `psmdb.percona.com`, resource
+`perconaservermongodbs`, Kind `PerconaServerMongoDB`, plus operator pods
+labeled `app.kubernetes.io/name` `psmdb-operator` or
+`percona-server-mongodb-operator`. AICR's own `nvsentinel-mongodb` CR and
+AICR's own operator pods (namespace `nvsentinel`, `app.kubernetes.io/instance`
+ending in `psmdb-operator`: bare under helm, helmfile and terraform,
+`<namePrefix>psmdb-operator` under Argo CD, `nvsentinel-psmdb-operator` under
+Flux) are not counted as conflicts. A foreign operator installed in
+`nvsentinel` under such a release name is read as AICR's own.
+
+```yaml
+- subtype: percona-server-mongodb
+  data:
+    collection-state: aicr-owned
+    api-available: true
+    api-version: v1
+```
+
+`collection-state` is one of:
+
+- `absent` — the API group was conclusively not found.
+- `api-detected` — the group is served but no PerconaServerMongoDB CRs exist
+  and no Percona operator pod AICR did not install runs.
+- `aicr-owned` — the only PerconaServerMongoDB is `nvsentinel/nvsentinel-mongodb`.
+- `operator-detected` — no foreign CR exists, but a Percona operator pod AICR
+  did not install runs, in any namespace.
+- `crs-detected` — a PerconaServerMongoDB other than AICR's own exists.
+- `unknown` — discovery, the CR List, or the operator pod List was
+  inconclusive.
+
+`api-available` and `api-version` follow the
+[mariadb-operator](#k8s-mariadb-operator-shape) semantics.
+
+Snapshot-driven resolution of a recipe containing `nvsentinel-mongodb` records
+both states as recipe metadata (`defaultStorageClassState`,
+`perconaOperatorState`). Neither subtype is kept in minimal evidence.
+
 ## K8s aks-gpu-pools shape
 
 `K8s.aks-gpu-pools` projects AKS GPU agent-pool driver ownership for ADR-015
@@ -299,6 +365,175 @@ fails closed rather than guessing a mode.
 The constraint path is `K8s.aks-gpu-pools.gpu-driver` in profile value
 constraints; `K8s.aks-gpu-pools.gpu-pool-count` and
 `K8s.aks-gpu-pools.gpu-pools` use the same non-item path form.
+
+## K8s oke-addons shape
+
+`K8s.oke-addons` projects the OKE `NvidiaGpuPlugin` cluster add-on's
+control-plane state for `gpuStack` profile qualification on the OKE family,
+and the `NvidiaNetworkOperator` add-on's state for the OKE recipes that
+deploy `network-operator`.
+Like `aks-gpu-pools`, it is not produced by a cluster collector: the
+projection is attached at the snapshot orchestration layer from the
+operator-supplied dump
+(`oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`)
+passed to `aicr snapshot --oke-addons` (merged
+controller-side in both agent Job mode and local mode). A missing, truncated,
+or malformed dump fails the command — a file error is never degraded into a
+"reading unavailable" measurement. A dump capturing a partial page, with
+`opc-next-page` set, fails the same way. Capturing with `--page` is not
+supported, because a final page alone looks like a complete list.
+
+```yaml
+type: K8s
+subtypes:
+  - subtype: oke-addons
+    data:
+      addon-count: 3
+      nvidia-gpu-plugin: installed
+      nvidia-network-operator: absent
+```
+
+The fields are:
+
+- `nvidia-gpu-plugin` (`string`) — the add-on's normalized control-plane
+  state: `installed` (present with lifecycle state `ACTIVE`), `absent`
+  (missing from the dump — the shape produced when the add-on is removed),
+  or, for any other lifecycle state, the state preserved verbatim, lowercased
+  with an `addon-` prefix (e.g. `addon-deleting`, `addon-needs_attention`).
+  Always emitted.
+- `nvidia-network-operator` (`string`) is the `NvidiaNetworkOperator`
+  add-on's state, normalized the same way as `nvidia-gpu-plugin`. Always
+  emitted.
+- `addon-count` (`int`) — the number of add-ons in the dump. Always emitted,
+  including `0`.
+
+Interpretation is fail-closed: `installed` and `absent` are the only values a
+declared `gpuStack` profile constraint accepts (`installed` qualifies
+`oci-managed`, `absent` qualifies `operator-managed`). The `addon-*` markers
+match no constraint, so profile-qualified resolution fails closed with the
+observed lifecycle state as the actual. When the subtype is absent (no
+`--oke-addons` dump), constraint evaluation reports the reading unavailable
+and fails closed rather than guessing an ownership mode.
+
+The OKE recipes that deploy `network-operator` (`gb200-oke-training`,
+`l40s-oke-training`, and their descendants) declare
+`K8s.oke-addons.nvidia-network-operator: absent`. Any other reading,
+including a missing one, fails snapshot-based recipe generation and the
+`aicr validate` pre-flight, because the add-on and AICR's `network-operator`
+would both reconcile the same `NicClusterPolicy`. Criteria-only generation
+evaluates no reading and only records the constraint in the recipe.
+
+The constraint paths are `K8s.oke-addons.nvidia-gpu-plugin` in profile value
+constraints and `K8s.oke-addons.nvidia-network-operator` in recipe
+constraints. `K8s.oke-addons.addon-count` uses the same non-item path form.
+
+## K8s gke-gpu-pools shape
+
+`K8s.gke-gpu-pools` projects each GKE GPU node pool's driver-installation
+mode for `gpuStack` profile qualification on the GKE family. Like
+`aks-gpu-pools` and `oke-addons`, it is not produced by a cluster collector:
+the projection is attached at the snapshot orchestration layer from the
+operator-supplied dump
+(`gcloud container node-pools list --cluster <cluster> --format=json`) passed
+to `aicr snapshot --gke-gpu-pools` (merged controller-side in both agent Job
+mode and local mode). A missing, truncated, or malformed dump fails the
+command. A file error is never degraded into a "reading unavailable"
+measurement.
+
+```yaml
+type: K8s
+subtypes:
+  - subtype: gke-gpu-pools
+    data:
+      gpu-driver-installation: Disabled
+      gpu-pool-count: 2
+      gpu-pools: gpupool1=Disabled,gpupool2=Disabled
+```
+
+The fields are:
+
+- `gpu-driver-installation` (`string`): the aggregated driver-installation
+  mode across all GPU pools (a pool with at least one entry under
+  `config.accelerators`). When every pool agrees, the shared mode is
+  emitted: `Disabled` (`gpuDriverInstallationConfig.gpuDriverVersion` is
+  `INSTALLATION_DISABLED`) or `Installed` (`DEFAULT` or `LATEST`). An
+  absent, empty, or `GPU_DRIVER_VERSION_UNSPECIFIED` value resolves against
+  the pool's own `version` and auto-provisioning flag, per GKE's
+  documented version-gated default for an omitted value, and is likewise
+  emitted as `Disabled` or `Installed` depending on which side of that
+  default the pool falls on. `NotConfigured` (config absent) or
+  `NotInstalled` (empty or unspecified) is emitted instead only when the
+  pool's `version` can't be parsed, so that resolution can't run. An
+  unrecognized `gpuDriverVersion` string is emitted as `Unknown(value)`,
+  namespaced so it can never collide with a normalized state.
+  Disagreeing accelerators within a pool, or disagreeing pools, aggregate
+  to `Mixed`. The key is **omitted entirely** when the dump contains no GPU
+  pools.
+- `gpu-pool-count` (`int`): the number of GPU pools. Always emitted,
+  including `0`.
+- `gpu-pools` (`string`): a sorted, comma-joined `name=mode` roster of the
+  GPU pools. Emitted only when at least one GPU pool exists.
+
+Interpretation is fail-closed: `Disabled` is the only value a declared
+`gpuStack` profile constraint accepts. `Installed`, `NotConfigured`,
+`NotInstalled`, `Mixed`, and `Unknown(value)` all match no constraint, so
+profile-qualified resolution fails closed with the observed value as the
+actual. Only the `bundle-installer` value declares a
+constraint on this reading. The default `gke-default` value resolves from
+the `NodeTopology.gpu-nodes.label` opt-out label alone and never requires
+this projection. When `bundle-installer` is selected and the subtype or the
+`gpu-driver-installation` key is absent (no `--gke-gpu-pools` dump, or a
+dump with no GPU pools), constraint evaluation reports the reading
+unavailable and fails closed rather than guessing a mode.
+
+The constraint path is `K8s.gke-gpu-pools.gpu-driver-installation` in
+profile value constraints. `K8s.gke-gpu-pools.gpu-pool-count` and
+`K8s.gke-gpu-pools.gpu-pools` use the same non-item path form.
+
+## K8s oke-legacy-plugin shape
+
+`K8s.oke-legacy-plugin` records in-cluster conflict evidence for OKE's
+legacy (pre-add-on) NVIDIA device plugin: the `nvidia-gpu-device-plugin`
+DaemonSet the OKE control plane ships into `kube-system` via the legacy
+Kubernetes addon-manager. Unlike `oke-addons`, this IS a cluster collector
+reading — the legacy DaemonSet is invisible to `oci ce cluster list-addons`,
+so the only way to observe it is the Kubernetes API (a read-only
+`apps/daemonsets` get in the agent's default ClusterRole).
+
+```yaml
+type: K8s
+subtypes:
+  - subtype: oke-legacy-plugin
+    data:
+      nvidia-gpu-device-plugin: none
+      daemonset: absent
+```
+
+The fields are:
+
+- `nvidia-gpu-device-plugin` (`string`) — the collapsed constraint reading:
+  `none` (the DaemonSet is absent, or carries the
+  `addonmanager.kubernetes.io/mode: Reconcile` label with
+  `desiredNumberScheduled: 0`), `active` (the labeled DaemonSet targets at
+  least one node), or `unknown` (the API could not be consulted, including
+  a snapshot taken without cluster access, or the DaemonSet is present
+  without the `Reconcile` label). Always emitted.
+- `daemonset` (`string`) — the uncollapsed detail: `absent`, `unlabeled`,
+  `disabled`, `active`, or `unknown`. Always emitted.
+
+Interpretation is fail-closed: `none` is the only value the `gpuStack`
+`operator-managed` constraint accepts — `active` means Oracle's legacy
+plugin would double-advertise `nvidia.com/gpu` alongside the GPU Operator's,
+and `unknown` means the reading cannot be trusted, which must never read as
+"not present". That covers both "could not look" (API failure or a snapshot
+taken without cluster access) and a same-named DaemonSet without the
+`Reconcile` label, whose owner cannot be established. The `oci-managed`
+value deliberately carries no constraint on this reading: when the managed
+add-on is installed it reconciles the same DaemonSet name. When the subtype
+is absent entirely (a snapshot from an older aicr), constraint evaluation
+reports the reading unavailable and fails closed.
+
+The constraint path is `K8s.oke-legacy-plugin.nvidia-gpu-device-plugin`.
 
 ## NodeTopology shape
 
@@ -383,14 +618,15 @@ a label literally named that and drops one reading. Consumers read `items` and
 fall back to `data` only for older snapshots — `topology.LabelReadings` /
 `TaintReadings` do exactly that, and `HasLosslessReadings` reports which form a
 subtype carries. Adding `items` beside `data` is additive-only, so the snapshot
-`apiVersion` is unchanged ([ADR-011](../design/011-artifact-apiversion-policy.md) §2).
+`apiVersion` is unchanged ([ADR-011](https://github.com/NVIDIA/aicr/blob/main/docs/design/011-artifact-apiversion-policy.md) §2).
 
-`data` cannot be slimmed within `v1alpha2`: binaries predating `items` read it
-directly, and ADR-011 requires its encoding and semantics to stay as published.
-That is why membership is cross-referenced rather than dropped. The next
-snapshot `apiVersion` removes `data`, at which point items become
-self-contained and `node-list-ref` is no longer emitted — the decoder keeps
-reading it for as long as `v1alpha2` snapshots are accepted.
+`data` cannot be slimmed within a published snapshot `apiVersion`: ADR-011
+requires its encoding and semantics to stay as published. That is why
+membership is cross-referenced rather than dropped. The `aicr.run/v1` snapshot
+kept `data` unchanged, so the topology collector still emits both `data` and
+`node-list-ref`, and the decoder still resolves references. Removing `data`
+would take a new snapshot `apiVersion`; items would then be self-contained and
+`node-list-ref` would no longer be needed.
 
 Minimal evidence keeps `NodeTopology.summary` and drops `taint` and `label`;
 redaction never carries `items` across the publication boundary.
@@ -449,7 +685,11 @@ subtypes:
 
 - **`identity`** — group identity and high-level facts. Strings (machineType,
   gpuType, linkType, identifier, nodeSelector) live in `context`. Numeric
-  facts (pf-count, rail-count) live in `data`.
+  facts (pf-count, rail-count) live in `data`. When the source carries no
+  `identifier` (l8k's read-only discovery never assigns one), the collector
+  derives the same value l8k's mutating path would have — from machineType
+  and gpuType — so the key is stable across both paths; it is omitted only
+  when either input is also empty.
 - **`capabilities`** — boolean cluster capabilities (sriov, rdma, ib) as
   scalar `Reading` values in `data`.
 - **`pfs`** — per-PF records as `items`. Per-PF descriptive identifiers

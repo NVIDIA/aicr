@@ -16,8 +16,10 @@
 #
 # Validates the standalone NFD deployment by checking:
 # 1. NFD Master Deployment has at least one ready replica
-# 2. NFD Worker DaemonSet has fully rolled out (desiredNumberScheduled > 0
-#    and numberReady == desiredNumberScheduled, so partial failures don't pass)
+# 2. NFD Worker DaemonSet has fully rolled out and is current
+#    (desiredNumberScheduled > 0, numberReady/updatedNumberScheduled both
+#    match it, and observedGeneration matches metadata.generation, so
+#    neither a partial nor a stale rollout passes)
 # 3. NFD GC Deployment has at least one ready replica (gc.enable: true)
 #
 # Resource names: AICR deploys the kubernetes-sigs/node-feature-discovery
@@ -60,17 +62,21 @@ spec:
               metadata:
                 name: nfd-node-feature-discovery-worker
                 namespace: node-feature-discovery
-              status:
-                # Guard against vacuous pass when 0 nodes match the
-                # DaemonSet: require at least one scheduled pod.
-                (desiredNumberScheduled > `0`): true
-                # Full rollout: every scheduled pod is ready. Combined with
-                # the guard above, this rejects partial failures. We assert on
-                # numberReady (always present in DaemonSetStatus) rather than
-                # numberUnavailable, which is `omitempty` and disappears from
-                # the status when zero — making `numberUnavailable == 0`
-                # evaluate `null == 0` (false) on a fully-healthy DaemonSet.
-                (numberReady == desiredNumberScheduled): true
+              # Guard against vacuous pass when 0 nodes match the
+              # DaemonSet: require at least one scheduled pod.
+              ((status.desiredNumberScheduled || `0`) > `0`): true
+              # Full rollout: every scheduled pod is ready. Combined with
+              # the guard above, this rejects partial failures. We assert on
+              # numberReady (always present in DaemonSetStatus) rather than
+              # numberUnavailable, which is `omitempty` and disappears from
+              # the status when zero — making `numberUnavailable == 0`
+              # evaluate `null == 0` (false) on a fully-healthy DaemonSet.
+              ((status.numberReady || `0`) == status.desiredNumberScheduled): true
+              # numberReady alone doesn't distinguish a node still on the
+              # previous revision (also Ready) from a fully current rollout;
+              # updatedNumberScheduled/observedGeneration close that gap.
+              ((status.updatedNumberScheduled || `0`) == status.desiredNumberScheduled): true
+              ((status.observedGeneration || `0`) == metadata.generation): true
     - name: validate-gc-deployment
       try:
         - assert:

@@ -24,32 +24,47 @@ import (
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
 
-// extrasOut is the destination for EmitExtra's sentinel line. It is stdout in
-// production (the pod-boundary transport the orchestrator reads back); tests
-// redirect it to capture the emitted line.
-var extrasOut io.Writer = os.Stdout
+// extrasOut is the destination for the sentinel lines. Nil means the CURRENT
+// os.Stdout (the pod-boundary transport the orchestrator reads back), resolved
+// at write time so a test that swaps os.Stdout for a pipe captures the line;
+// tests in this package set it directly instead.
+var extrasOut io.Writer
 
-// EmitExtra marshals a check's structured, low-cardinality outcome data to a
-// single JSON line prefixed with ctrf.ExtraLinePrefix and writes it to stdout.
-// The orchestrator (pkg/validator/job.ExtractResult) parses this line back into
-// ctrf.TestResult.Extra, which — unlike the free-form Stdout/Message evidence —
-// survives the default "minimal" redaction policy for allowlisted keys.
-//
-// CONTRACT: values MUST be counts or enum codes only (e.g. "2", "no-gpu-nodes"),
-// never node names, IPs, or hostnames. Anything operator-identifying belongs in
-// fmt.Printf stdout, which is redacted by default. Emitting an empty map is a
-// no-op. Key order in the JSON is not significant — the line is re-parsed
-// structurally, and only redact-allowlisted keys are published.
+func sentinelOut() io.Writer {
+	if extrasOut != nil {
+		return extrasOut
+	}
+	return os.Stdout
+}
+
+// EmitExtra writes extra to stdout as one ctrf.ExtraLinePrefix line, which the
+// orchestrator parses into ctrf.TestResult.Extra. Keys are the ExtraKey*
+// constants, and values must take the shapes documented on
+// ctrf.TestResult.Extra. Calls merge, a later value winning per key. An empty
+// extra writes nothing.
 func EmitExtra(extra map[string]string) error {
-	if len(extra) == 0 {
+	return emitSentinel(ctrf.ExtraLinePrefix, extra, len(extra) == 0, "extra")
+}
+
+// EmitRuntimeProvenance writes a derived runtime's RuntimeProvenance record as
+// a single JSON line prefixed with ctrf.ProvenanceLinePrefix. The orchestrator
+// parses it into ctrf.TestResult.RuntimeProvenance, which survives minimal
+// redaction under the bounded rules in pkg/evidence/redact (sha256 digests,
+// template KEYS only — never values). A nil record is a no-op.
+func EmitRuntimeProvenance(p *ctrf.RuntimeProvenance) error {
+	return emitSentinel(ctrf.ProvenanceLinePrefix, p, p == nil, "runtime provenance")
+}
+
+func emitSentinel(prefix string, payload any, empty bool, what string) error {
+	if empty {
 		return nil
 	}
-	data, err := json.Marshal(extra)
+	data, err := json.Marshal(payload)
 	if err != nil {
-		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to marshal validator extra", err)
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to marshal validator "+what, err)
 	}
-	if _, err := fmt.Fprintln(extrasOut, ctrf.ExtraLinePrefix+string(data)); err != nil {
-		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to write validator extra", err)
+	if _, err := fmt.Fprintln(sentinelOut(), prefix+string(data)); err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to write validator "+what, err)
 	}
 	return nil
 }

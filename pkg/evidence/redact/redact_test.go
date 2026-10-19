@@ -15,6 +15,7 @@
 package redact_test
 
 import (
+	"bytes"
 	"reflect"
 	"slices"
 	"testing"
@@ -26,6 +27,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
 
 // fullSnapshot builds a snapshot exercising every collector measurement type
@@ -33,7 +35,7 @@ import (
 func fullSnapshot() *snapshotter.Snapshot {
 	s := snapshotter.NewSnapshot()
 	s.Kind = header.KindSnapshot
-	s.APIVersion = header.GroupVersion
+	s.APIVersion = header.GroupVersionV1
 	s.Metadata = map[string]string{
 		"timestamp":   "2026-06-22T00:00:00Z",
 		"version":     "0.11.1",
@@ -440,6 +442,15 @@ func TestCTRFAllowlistsExtra(t *testing.T) {
 			want: map[string]string{"skipReason": "no-schedulable-gpu-nodes"},
 		},
 		{
+			// pkg/validator mints this for a check the CALLER withheld
+			// (--skip-check). It has to clear the allowlist or the signed
+			// bundle records WHICH check was withheld but not WHY: the
+			// message that used to carry the reason is blanked above.
+			name: "caller-declared skip code survives",
+			in:   map[string]string{"skipReason": "named-in-skip-checks"},
+			want: map[string]string{"skipReason": "named-in-skip-checks"},
+		},
+		{
 			name: "well-formed but unlisted skip code is dropped",
 			in:   map[string]string{"skipReason": "customer-prod-cluster"},
 			want: nil,
@@ -484,6 +495,174 @@ func TestCTRFAllowlistsExtra(t *testing.T) {
 			in:   map[string]string{},
 			want: nil,
 		},
+		{
+			// #2297 provenance: the closed-set runtime-source code survives
+			// minimal redaction so a reader can tell a delivered-artifact number
+			// from a cluster-capability one without --full.
+			name: "listed runtime source survives",
+			in:   map[string]string{"runtimeSource": "delivered-artifact"},
+			want: map[string]string{"runtimeSource": "delivered-artifact"},
+		},
+		{
+			name: "unlisted runtime source is dropped",
+			in:   map[string]string{"runtimeSource": "my-cluster-runtime"},
+			want: nil,
+		},
+		{
+			// Digests and paths that back a delivered-artifact claim are stdout
+			// (--full) evidence; under Extra they are unlisted keys and drop.
+			name: "runtime digests are not an Extra carrier",
+			in: map[string]string{
+				"runtimeSource":        "delivered-artifact",
+				"shippedRuntimeDigest": "cab912550bf2999744b2c685f40cd96ec010bf7e615da59847ce55090cae4bae",
+			},
+			want: map[string]string{"runtimeSource": "delivered-artifact"},
+		},
+		{
+			name: "nccl bandwidth outcome and scope survive",
+			in: map[string]string{
+				"achievedGbps": "305.4", "thresholdGbps": "300", "tolerancePct": "10",
+				"passMargin": "+1.8", "workerNodes": "2", "gpusInvolved": "16",
+				"transport": "net", "fabric": "efa",
+			},
+			want: map[string]string{
+				"achievedGbps": "305.4", "thresholdGbps": "300", "tolerancePct": "10",
+				"passMargin": "+1.8", "workerNodes": "2", "gpusInvolved": "16",
+				"transport": "net", "fabric": "efa",
+			},
+		},
+		{
+			name: "negative pass margin survives",
+			in:   map[string]string{"passMargin": "-12.3"},
+			want: map[string]string{"passMargin": "-12.3"},
+		},
+		{
+			name: "decimal finer than one place is dropped",
+			in:   map[string]string{"achievedGbps": "305.42", "ttftP99Ms": "182.3"},
+			want: map[string]string{"ttftP99Ms": "182.3"},
+		},
+		{
+			name: "unsigned or malformed margin is dropped",
+			in:   map[string]string{"passMargin": "1.8", "achievedGbps": "-1"},
+			want: nil,
+		},
+		{
+			name: "decimal exceeding the digit bound is dropped",
+			in:   map[string]string{"throughputTokPerSec": "1234567"},
+			want: nil,
+		},
+		{
+			name: "NaN and Inf measurements are dropped",
+			in:   map[string]string{"achievedGbps": "NaN", "passMargin": "+Inf"},
+			want: nil,
+		},
+		{
+			name: "unlisted transport or fabric is dropped",
+			in:   map[string]string{"transport": "socket", "fabric": "10.0.0.5"},
+			want: nil,
+		},
+		{
+			name: "readiness gate counts survive",
+			in: map[string]string{
+				"draReady": "8", "draDesired": "8", "nodewrightComplete": "3",
+				"nodewrightExpected": "3", "namespacesActive": "6", "namespacesExpected": "6",
+			},
+			want: map[string]string{
+				"draReady": "8", "draDesired": "8", "nodewrightComplete": "3",
+				"nodewrightExpected": "3", "namespacesActive": "6", "namespacesExpected": "6",
+			},
+		},
+		{
+			name: "inference metrics and scope survive",
+			in: map[string]string{
+				"throughputTokPerSec": "4120.5", "ttftP99Ms": "182.3", "throughputThreshold": "5000",
+				"ttftThresholdMs": "200", "scaledThreshold": "2500", "gpusBenchmarked": "4", "gpusPerNode": "8",
+			},
+			want: map[string]string{
+				"throughputTokPerSec": "4120.5", "ttftP99Ms": "182.3", "throughputThreshold": "5000",
+				"ttftThresholdMs": "200", "scaledThreshold": "2500", "gpusBenchmarked": "4", "gpusPerNode": "8",
+			},
+		},
+		{
+			name: "allocation policy codes survive",
+			in:   map[string]string{"configuredPolicy": "dra-resource-claim", "resolvedMode": "device-plugin-extended-resource", "nodeLocal": "true"},
+			want: map[string]string{"configuredPolicy": "dra-resource-claim", "resolvedMode": "device-plugin-extended-resource", "nodeLocal": "true"},
+		},
+		{
+			name: "unknown policy, unresolvable mode, non-boolean flag are dropped",
+			in:   map[string]string{"configuredPolicy": "my-policy", "resolvedMode": "unspecified", "nodeLocal": "yes"},
+			want: nil,
+		},
+		{
+			name: "operator version and verdict survive",
+			in:   map[string]string{"detectedVersion": "v25.3.0", "versionSatisfied": "false"},
+			want: map[string]string{"detectedVersion": "v25.3.0", "versionSatisfied": "false"},
+		},
+		{
+			name: "two-component version survives",
+			in:   map[string]string{"detectedVersion": "v25.10"},
+			want: map[string]string{"detectedVersion": "v25.10"},
+		},
+		{
+			name: "one-component version survives",
+			in:   map[string]string{"detectedVersion": "v25"},
+			want: map[string]string{"detectedVersion": "v25"},
+		},
+		{
+			name: "pre-release versions survive",
+			in:   map[string]string{"detectedVersion": "v25.3.0-rc.1", "versionSatisfied": "true"},
+			want: map[string]string{"detectedVersion": "v25.3.0-rc.1", "versionSatisfied": "true"},
+		},
+		{
+			name: "undotted pre-release survives",
+			in:   map[string]string{"detectedVersion": "v26.7-beta2"},
+			want: map[string]string{"detectedVersion": "v26.7-beta2"},
+		},
+		{
+			name: "pre-release with build metadata is dropped",
+			in:   map[string]string{"detectedVersion": "v25.3.0-rc.1+acme"},
+			want: nil,
+		},
+		{
+			name: "over-long pre-release number is dropped",
+			in:   map[string]string{"detectedVersion": "v25.3.0-rc.12345"},
+			want: nil,
+		},
+		{
+			name: "non-numeric version is dropped",
+			in:   map[string]string{"detectedVersion": "vlatest"},
+			want: nil,
+		},
+		{
+			name: "version with free-text suffix is dropped",
+			in:   map[string]string{"detectedVersion": "v25.3.0-acme-prod"},
+			want: nil,
+		},
+		{
+			name: "version with build metadata is dropped",
+			in:   map[string]string{"detectedVersion": "v25.3.0+acme"},
+			want: nil,
+		},
+		{
+			name: "unprefixed version is dropped",
+			in:   map[string]string{"detectedVersion": "25.3.0"},
+			want: nil,
+		},
+		{
+			name: "non-canonical version is dropped",
+			in:   map[string]string{"detectedVersion": "v025.03.0"},
+			want: nil,
+		},
+		{
+			name: "over-long version component is dropped",
+			in:   map[string]string{"detectedVersion": "v12345.0.0"},
+			want: nil,
+		},
+		{
+			name: "new skip codes survive",
+			in:   map[string]string{"skipReason": "component-not-in-recipe"},
+			want: map[string]string{"skipReason": "component-not-in-recipe"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -491,6 +670,24 @@ func TestCTRFAllowlistsExtra(t *testing.T) {
 			got := out.Results.Tests[0].Extra
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("redacted Extra = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCTRFKeepsEveryGPUAllocationPolicy checks that every pkg/validator/v1 GPU
+// allocation policy survives redaction as configuredPolicy.
+func TestCTRFKeepsEveryGPUAllocationPolicy(t *testing.T) {
+	for _, policy := range []string{
+		validatorv1.GPUAllocationPolicyUnspecified,
+		validatorv1.GPUAllocationPolicyDevicePluginExtendedResource,
+		validatorv1.GPUAllocationPolicyDRAResourceClaim,
+		validatorv1.GPUAllocationPolicyDRAExtendedResource,
+	} {
+		t.Run(policy, func(t *testing.T) {
+			out, _ := redact.CTRF(reportWithExtra(map[string]string{"configuredPolicy": policy}))
+			if got := out.Results.Tests[0].Extra["configuredPolicy"]; got != policy {
+				t.Errorf("configuredPolicy %q dropped by redaction (got %q)", policy, got)
 			}
 		})
 	}
@@ -616,5 +813,140 @@ func TestSnapshotDropsItemsFromAllowlistedSubtype(t *testing.T) {
 	}
 	if _, err := st.GetInt64("node-count"); err != nil {
 		t.Errorf("allowlisted key node-count did not survive redaction: %v", err)
+	}
+}
+
+func reportWithProvenance(p *ctrf.RuntimeProvenance) *ctrf.Report {
+	r := reportWithExtra(nil)
+	r.Results.Tests[0].RuntimeProvenance = p
+	return r
+}
+
+// TestCTRFBoundsRuntimeProvenance covers #2297's evidence carrier policy: the
+// record survives minimal redaction only as digests plus template KEYS, with
+// operator-authored keys collapsed and ill-formed records dropped whole.
+func TestCTRFBoundsRuntimeProvenance(t *testing.T) {
+	sha := func(c byte) string { return string(bytes.Repeat([]byte{c}, 64)) }
+	tests := []struct {
+		name string
+		in   *ctrf.RuntimeProvenance
+		want *ctrf.RuntimeProvenance
+	}{
+		{"absent stays absent", nil, nil},
+		{
+			name: "well-formed record survives with selectors collapsed, keys sorted and deduplicated",
+			in: &ctrf.RuntimeProvenance{ShippedDigest: sha('a'), DerivedDigest: sha('b'),
+				OverriddenPaths: []string{"spec.containers[node].image", "spec.containers[node].args", "spec.containers[node].args"},
+				InheritedPaths:  []string{"spec.containers[node].env[NCCL_SOCKET_IFNAME].value"}},
+			want: &ctrf.RuntimeProvenance{ShippedDigest: sha('a'), DerivedDigest: sha('b'),
+				OverriddenPaths: []string{"spec.containers[*].args", "spec.containers[*].image"},
+				InheritedPaths:  []string{"spec.containers[*].env[NCCL_SOCKET_IFNAME].value"}},
+		},
+		{
+			name: "malformed digest drops the whole record",
+			in:   &ctrf.RuntimeProvenance{ShippedDigest: "ABC", DerivedDigest: sha('b'), InheritedPaths: []string{"spec.hostNetwork"}},
+			want: nil,
+		},
+		{
+			name: "exact vendor keys kept, operator keys and list names collapsed, free text dropped",
+			in: &ctrf.RuntimeProvenance{ShippedDigest: sha('a'), DerivedDigest: sha('b'),
+				InheritedPaths: []string{
+					"metadata.annotations.networking.gke.io/interfaces",
+					"metadata.annotations.devices.gke.io/container.tcpxo-daemon",
+					"metadata.annotations.evil.gke.io/customer-x",              // subdomain is not ownership
+					"metadata.annotations.networking.gke.io/customer-prod",     // exact domain, operator local part
+					"spec.containers[node].env[NCCL_CUSTOMER_ACME_PROD].value", // allowed prefix, operator name
+					"spec.initContainers[setup].resources.limits.acme.internal/project-prod",
+					"spec.containers[node].resources.limits.nvidia.com/gpu",
+					"spec.containers[node].resources.requests.memory",
+					"spec.overhead.acme.internal/tax",
+					"spec.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution.labelSelector.matchLabels.team-x",
+					"spec.volumes[cache].csi.volumeAttributes.bucket-customer-prod",
+					"metadata.labels.team-payments-prod",
+					"spec.nodeSelector.cloud.google.com/gke-accelerator",
+					"spec.nodeSelector.my-org/private-pool-10.0.0.5",
+					"spec.nodeSelector.pool",
+					"spec.volumes[nvtcpxo-libraries].hostPath.path",
+					"spec.volumes[customer-secret-cache].secret.secretName",
+					"spec.containers[node].env[PROJECT_X_TOKEN].value",
+					"spec.containers[node].env[NCCL_FASTRAK_IFNAME].value",
+					"spec.containers[node].env[LD_LIBRARY_PATH].value",
+					"spec.containers[node].volumeMounts[customer-secret-cache].mountPath",
+					"spec.initContainers[tcpxo-daemon].image",
+					"free text with spaces",
+					"spec.containers[node].env[X].value=10.0.0.5",
+					"spec.customer-prod-cluster",             // non-schema structural segment
+					"spec.containers[node].acmeTenant.value", // camelCase but not a field
+					"acme.internal/x",                        // no schema root at all
+				}},
+			want: &ctrf.RuntimeProvenance{ShippedDigest: sha('a'), DerivedDigest: sha('b'),
+				InheritedPaths: []string{
+					"metadata.annotations",
+					"metadata.annotations.devices.gke.io/container.tcpxo-daemon",
+					"metadata.annotations.networking.gke.io/interfaces",
+					"metadata.labels",
+					"spec.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution.labelSelector.matchLabels",
+					"spec.containers[*].env[*].value",
+					"spec.containers[*].env[LD_LIBRARY_PATH].value",
+					"spec.containers[*].env[NCCL_FASTRAK_IFNAME].value",
+					"spec.containers[*].resources.limits.nvidia.com/gpu",
+					"spec.containers[*].resources.requests",
+					"spec.containers[*].volumeMounts[*].mountPath",
+					"spec.initContainers[*].image",
+					"spec.initContainers[*].resources.limits",
+					"spec.nodeSelector",
+					"spec.nodeSelector.cloud.google.com/gke-accelerator",
+					"spec.overhead",
+					"spec.volumes[*].csi.volumeAttributes",
+					"spec.volumes[*].hostPath.path",
+					"spec.volumes[*].secret.secretName",
+				}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, rules := redact.CTRF(reportWithProvenance(tt.in))
+			got := out.Results.Tests[0].RuntimeProvenance
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("bounded provenance = %+v, want %+v", got, tt.want)
+			}
+			if !slices.Contains(rules, "ctrf.tests.runtimeProvenance.bound") {
+				t.Errorf("applied rules must name the provenance bound, got %v", rules)
+			}
+		})
+	}
+}
+
+func TestCTRFRuntimeProvenancePathBounds(t *testing.T) {
+	sha := func(c byte) string { return string(bytes.Repeat([]byte{c}, 64)) }
+	// Distinct, schema-valid structural paths: pairs of real field names.
+	fields := []string{"affinity", "containers", "dnsConfig", "hostAliases", "initContainers", "os", "overhead",
+		"resourceClaims", "schedulingGates", "securityContext", "tolerations", "topologySpreadConstraints", "volumes",
+		"ephemeralContainers", "readinessGates", "imagePullSecrets", "hostname", "subdomain", "nodeName", "priority",
+		"runtimeClassName", "serviceAccountName", "schedulerName", "restartPolicy", "hostNetwork", "hostPID", "hostIPC",
+		"shareProcessNamespace", "enableServiceLinks", "preemptionPolicy", "setHostnameAsFQDN", "hostUsers", "resources", "name"}
+	many := make([]string, 0, len(fields)*len(fields))
+	for _, a := range fields {
+		for _, b := range fields {
+			many = append(many, "spec."+a+"."+b)
+		}
+	}
+	if len(many) <= 1024 {
+		t.Fatalf("control: need more than 1024 distinct paths, have %d", len(many))
+	}
+	out, _ := redact.CTRF(reportWithProvenance(&ctrf.RuntimeProvenance{
+		ShippedDigest: sha('a'), DerivedDigest: sha('b'),
+		OverriddenPaths: many,
+		InheritedPaths:  []string{"has space", "bad;char"},
+	}))
+	got := out.Results.Tests[0].RuntimeProvenance
+	if got == nil {
+		t.Fatal("well-formed digests must keep the record")
+	}
+	if len(got.OverriddenPaths) != 1024 {
+		t.Errorf("override list = %d entries, want capped at 1024", len(got.OverriddenPaths))
+	}
+	if got.InheritedPaths != nil {
+		t.Errorf("paths failing the key grammar must drop to nil, got %v", got.InheritedPaths)
 	}
 }

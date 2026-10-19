@@ -27,6 +27,8 @@ import (
 	"github.com/sigstore/sigstore/pkg/signature"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestKMSIdentityFallbackIdentity(t *testing.T) {
@@ -46,7 +48,7 @@ func TestKMSIdentityUnknownScheme(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unsupported scheme")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("want ErrCodeInvalidRequest, got %v", err)
 	}
 }
@@ -102,8 +104,34 @@ func TestKMSSignerVerifierAdapter(t *testing.T) {
 	t.Run("sign digest wraps signer error as unavailable", func(t *testing.T) {
 		a := &kmsSignerVerifier{sv: &fakeRemoteSigner{signer: stderrors.New("kms down")}, pub: &priv.PublicKey}
 		_, err := a.SignDigest(context.Background(), []byte("01234567890123456789012345678901"))
-		if !stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeUnavailable {
 			t.Errorf("want ErrCodeUnavailable, got %v", err)
 		}
 	})
+}
+
+func TestValidateSigningKeyRef(t *testing.T) {
+	tests := []struct {
+		ref     string
+		wantErr bool
+	}{
+		{"awskms:///alias/aicr-evidence", false},
+		{"GCPKMS://projects/p/locations/l/keyRings/r/cryptoKeys/k", false},
+		{"hashivault://aicr-evidence", false},
+		{"cosign.key", true},
+		{"k8s://ns/secret", true},
+		{"", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.ref, func(t *testing.T) {
+			err := ValidateSigningKeyRef(tt.ref)
+			if !tt.wantErr {
+				if err != nil {
+					t.Errorf("ValidateSigningKeyRef(%q) = %v, want nil", tt.ref, err)
+				}
+				return
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+		})
+	}
 }

@@ -78,10 +78,23 @@ on:
         type: string
         default: ''
       intent:
-        description: 'Recipe intent — selects the per-intent test config (h100-<intent>-config.yaml) and recipe criteria.'
+        description: 'Recipe intent: selects the per-intent test config (h100-<intent>[-<platform>]-config.yaml) and recipe criteria.'
         type: choice
         options: [training, inference]
         default: training
+      platform:
+        # Only run-kind forwards this. uat-aws/gcp/azure.yaml declare no
+        # platform input and build TEST_CONFIG from intent alone, so a
+        # non-empty value dispatched at a cloud reservation is INERT: that cell
+        # resolves its usual per-intent config and runs it. Nothing sets this
+        # but a manual dispatch (neither the nightly batch nor the daytime
+        # scheduler passes it), so the exposure is a hand-typed
+        # reservation/platform mismatch. actionlint rejects an empty string in
+        # a choice's options, so this is a free-form string whose allowed
+        # values the kind lane bounds in its own `Validate inputs` step.
+        description: 'Recipe platform: appends a -<platform> segment to the test-config filename. Empty selects the default per-intent config. Only the kind lane supports a non-empty value today.'
+        type: string
+        default: ''
       lifecycle:
         description: 'Cluster lifecycle. nightly: provision→CUJ→teardown. daytime-up: stable-named cluster, holds on success, tears down on failure or cancellation. daytime-down: tear down cluster.'
         type: choice
@@ -113,6 +126,20 @@ on:
         type: choice
         options: [helmfile, argocd]
         default: helmfile
+      allow_below_compat_floor:
+        description: 'Run a release below its tests/uat/compat.yaml harness-compat floor anyway (warns instead of refusing; for reproducing the incompatibility).'
+        type: boolean
+        default: false
+      nvsentinel_remediation:
+        # Composes the opt-in nvsentinel-quarantine or nvsentinel-remediation
+        # mixin onto the cell's recipe so the faultinject phase runs Stage 2
+        # (cordon) or Stages 2 and 3 (cordon, reboot, uncordon) on real
+        # hardware (#2625). The `Resolve reservation row` step bounds where it
+        # is accepted. The nightly batch never sets it.
+        description: 'NVSentinel mixin to compose so faultinject runs Stage 2 (quarantine) or 2-3 (remediation). Nightly training, helmfile, from source; gcp: quarantine only.'
+        type: choice
+        options: [none, quarantine, remediation]
+        default: none
   workflow_call:
     inputs:
       reservation:
@@ -127,6 +154,9 @@ on:
       intent:
         type: string
         default: training
+      platform:
+        type: string
+        default: ''
       lifecycle:
         type: string
         default: nightly
@@ -142,6 +172,12 @@ on:
       deployer:
         type: string
         default: helmfile
+      allow_below_compat_floor:
+        type: boolean
+        default: false
+      nvsentinel_remediation:
+        type: string
+        default: none
 
 permissions:
   contents: read
@@ -172,7 +208,7 @@ jobs:
   # (uat-broker exits NOT_FOUND), so the registry is the single source of truth.
   resolve:
     if: github.repository == 'nvidia/aicr'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       cloud: ${{ steps.row.outputs.cloud }}
       # Daytime cluster-name discovery slug (ADR-017); forwarded to the cloud
@@ -200,6 +236,62 @@ jobs:
           cache: true
           cache-dependency-path: |
             go.sum
+      - name: Build uat-broker
+        run: go build -o ./bin/uat-broker ./tools/uat-broker
+      # Harness-compat floor (#2860): a release cell runs a RELEASED aicr
+      # against main's tests/uat/**, so a release below the lane's
+      # tests/uat/compat.yaml floor is guaranteed red and would burn a GPU lease.
+      # Refuse it unless allow_below_compat_floor is set (then only warn). main
+      # (aicr_version empty) is never gated, and nightly cells never trip this:
+      # the planner already dropped them. This runs BEFORE "Resolve reservation
+      # row" on purpose: the run-<cloud> jobs are `always()`-gated on the
+      # resolved cloud output, so a refusal must fail the job before that output
+      # is written, or the pipeline would still dispatch.
+      - name: Harness-compat floor gate
+        if: inputs.aicr_version != ''
+        env:
+          RESERVATION: ${{ inputs.reservation }}
+          INTENT: ${{ inputs.intent }}
+          AICR_VERSION: ${{ inputs.aicr_version }}
+          ALLOW_BELOW_COMPAT_FLOOR: ${{ inputs.allow_below_compat_floor }}
+        run: |
+          set -euo pipefail
+          case "${ALLOW_BELOW_COMPAT_FLOOR}" in
+            true|false) ;;
+            *) echo "::error::allow_below_compat_floor must be true or false; got '${ALLOW_BELOW_COMPAT_FLOOR}'"; exit 1 ;;
+          esac
+          CLOUD=$(./bin/uat-broker reservations --name "$RESERVATION" | sed -n 's/^cloud=//p')
+          if [[ -z "$CLOUD" ]]; then
+            echo "::error::could not resolve cloud for reservation '${RESERVATION}'"; exit 1
+          fi
+          rc=0
+          out=$(./bin/uat-broker compat gate --cloud "$CLOUD" --intent "$INTENT" \
+            --version "$AICR_VERSION" 2>&1) || rc=$?
+          # Single-line + %-escape: the message is echoed into a workflow command.
+          msg=$(tr '\r\n' '  ' <<<"$out")
+          msg=${msg//'%'/'%25'}
+          if (( rc == 0 )); then
+            echo "${out}"
+            exit 0
+          fi
+          # The override applies to the below-floor refusal alone: exit 2
+          # (INVALID_REQUEST) AND the broker's below-floor message. Other exit-2
+          # failures (malformed compat file, non-semver version) share the code,
+          # so they, and any other failure, fail closed regardless.
+          below_floor=""
+          if (( rc == 2 )) && [[ "$out" == *"is below the harness-compat floor"* ]]; then
+            below_floor=1
+          fi
+          if [[ -n "$below_floor" && "${ALLOW_BELOW_COMPAT_FLOOR}" == "true" ]]; then
+            echo "::warning title=UAT release below compat floor::${msg} Proceeding because allow_below_compat_floor=true; expect this run to fail."
+            exit 0
+          fi
+          if [[ -n "$below_floor" ]]; then
+            echo "::error title=UAT release below compat floor::${msg} Refusing to dispatch; set allow_below_compat_floor=true to run it anyway."
+          else
+            echo "::error title=UAT compat gate failed::uat-broker compat gate exited ${rc}: ${msg}"
+          fi
+          exit 1
       - name: Resolve reservation row
         id: row
         env:
@@ -207,6 +299,12 @@ jobs:
           # injection through the dispatch input.
           RESERVATION: ${{ inputs.reservation }}
           SLOT: ${{ inputs.slot }}
+          PLATFORM: ${{ inputs.platform }}
+          NVSENTINEL_REMEDIATION: ${{ inputs.nvsentinel_remediation }}
+          INTENT: ${{ inputs.intent }}
+          LIFECYCLE: ${{ inputs.lifecycle }}
+          DEPLOYER: ${{ inputs.deployer }}
+          AICR_VERSION: ${{ inputs.aicr_version }}
         run: |
           set -euo pipefail
           # Only slot 0 is provisioned today (ADR-017). Reject any other value at
@@ -217,8 +315,95 @@ jobs:
           if [[ "${SLOT}" != "0" ]]; then
             echo "::error::unsupported slot '${SLOT}' (only slot 0 is enabled today)"; exit 1
           fi
-          go build -o ./bin/uat-broker ./tools/uat-broker
-          ./bin/uat-broker reservations --name "$RESERVATION" >> "$GITHUB_OUTPUT"
+          # Hold the row in a variable rather than piping it straight to
+          # GITHUB_OUTPUT: the platform gate below needs the resolved cloud,
+          # which does not exist until the broker has run, and the row must not
+          # be published until the gate has passed (see below).
+          ROW="$(./bin/uat-broker reservations --name "$RESERVATION")"
+
+          # Fail closed on a platform the resolved lane cannot serve. Only
+          # run-kind forwards `platform` to its reusable pipeline; the other
+          # run-<cloud> jobs drop it, and uat-aws/gcp/azure.yaml build
+          # TEST_CONFIG from intent alone, so such a cell would resolve its
+          # usual per-intent config, run it to completion and report SUCCESS
+          # for a recipe nobody asked for. A false green is worse than a
+          # missing file, which at least goes red.
+          #
+          # The gate lives here rather than on each run-<cloud> job so it is
+          # stated once. What stops a lane from starting anyway is the ORDER of
+          # this step, not the fact that the step exits non-zero: a rejected
+          # dispatch never reaches the publish below, so `cloud` is never set,
+          # and every run-<cloud> job's `if` compares
+          # needs.resolve.outputs.cloud against a literal name that the empty
+          # string cannot equal. Three of those jobs carry `always()`, which
+          # runs a job whose `needs` failed, so relying on the failure alone
+          # would rest on what a failed job does with its outputs. Publishing
+          # last removes the question.
+          #
+          # The `case` arms are an ALLOWLIST OF LANES that can serve a
+          # non-empty platform, not a list of rejected platform values, so a
+          # platform added later is refused everywhere except the lanes listed
+          # and a lane that gains a platform input gets an arm. WHICH values a
+          # listed lane accepts stays with that lane (uat-kind.yaml's
+          # `Validate inputs`), so the allowed set is written down once.
+          if [[ -n "${PLATFORM}" ]]; then
+            CLOUD="$(printf '%s\n' "${ROW}" | sed -n 's/^cloud=//p')"
+            case "${CLOUD}" in
+              kind) ;;
+              *)
+                echo "::error::platform='${PLATFORM}' cannot be served by the '${CLOUD:-<unresolved>}' lane (reservation '${RESERVATION}')."
+                echo "::error::Only run-kind forwards a platform to its pipeline. uat-${CLOUD:-<unresolved>}.yaml declares no"
+                echo "::error::platform input and builds TEST_CONFIG from intent alone, so this cell would run its"
+                echo "::error::default per-intent config and report success for a recipe that was not requested."
+                echo "::error::Dispatch a kind reservation, or omit platform to run this lane's default."
+                exit 1
+                ;;
+            esac
+          fi
+
+          # Fail closed on an nvsentinel_remediation the dispatched cell cannot
+          # honor, for the same publish-last reason as the platform gate. Each
+          # bound has a cause:
+          #   - training only: the inference budget has no room for the longer
+          #     faultinject step, and a serving workload left on the node would
+          #     hold node-drainer, so janitor would never reboot it.
+          #   - nightly only: quarantine leaves the node cordoned with the fault
+          #     set, which a held daytime cluster would keep.
+          #   - helmfile only: the argocd budget has no room either.
+          #   - built from source: phase_prep composes the mixin onto the leaf
+          #     overlay in this checkout, which must match the binary.
+          #   - aws/azure/gcp only, and gcp quarantine only: janitor's GPU reset
+          #     cannot run on GKE's managed driver, so the bundle refuses
+          #     nvsentinel-remediation there.
+          case "${NVSENTINEL_REMEDIATION}" in
+            none|quarantine|remediation) ;;
+            *) echo "::error::nvsentinel_remediation must be none, quarantine or remediation; got '${NVSENTINEL_REMEDIATION}'"; exit 1 ;;
+          esac
+          if [[ "${NVSENTINEL_REMEDIATION}" != "none" ]]; then
+            CLOUD="$(printf '%s\n' "${ROW}" | sed -n 's/^cloud=//p')"
+            reasons=()
+            case "${CLOUD}:${NVSENTINEL_REMEDIATION}" in
+              aws:*|azure:*|gcp:quarantine) ;;
+              *) reasons+=("cloud '${CLOUD:-<unresolved>}' does not support it (aws and azure take either step; gcp takes quarantine only)") ;;
+            esac
+            [[ "${INTENT}" == "training" ]] || reasons+=("intent must be training, got '${INTENT}'")
+            [[ "${LIFECYCLE}" == "nightly" ]] || reasons+=("lifecycle must be nightly, got '${LIFECYCLE}'")
+            [[ "${DEPLOYER}" == "helmfile" ]] || reasons+=("deployer must be helmfile, got '${DEPLOYER}'")
+            [[ -z "${AICR_VERSION}" ]] || reasons+=("aicr_version must be empty (build from source), got '${AICR_VERSION}'")
+            if (( ${#reasons[@]} > 0 )); then
+              for r in "${reasons[@]}"; do
+                echo "::error::nvsentinel_remediation=${NVSENTINEL_REMEDIATION}: ${r}"
+              done
+              exit 1
+            fi
+          fi
+
+          # Publish LAST, so no gate above it can be bypassed by a lane reading
+          # an output that was written before the check ran. The broker emits
+          # plain `key=value` lines (tools/uat-broker/main.go), never the
+          # `key<<EOF` multiline form, so re-emitting the captured text
+          # reproduces this step's outputs byte for byte.
+          printf '%s\n' "${ROW}" >> "$GITHUB_OUTPUT"
 
   # One of run-aws / run-gcp / run-azure / run-kind fires based on the resolved
   # cloud (the registry validates cloud membership, so at most one matches; the
@@ -254,6 +439,7 @@ jobs:
       skip_delete: ${{ inputs.skip_delete }}
       skip_tests: ${{ inputs.skip_tests }}
       deployer: ${{ inputs.deployer }}
+      nvsentinel_remediation: ${{ inputs.nvsentinel_remediation }}
 
   run-gcp:
     needs: resolve
@@ -285,6 +471,7 @@ jobs:
       test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}
       skip_delete: ${{ inputs.skip_delete }}
       skip_tests: ${{ inputs.skip_tests }}
+      nvsentinel_remediation: ${{ inputs.nvsentinel_remediation }}
 
   run-azure:
     needs: resolve
@@ -312,6 +499,7 @@ jobs:
       test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}
       skip_delete: ${{ inputs.skip_delete }}
       skip_tests: ${{ inputs.skip_tests }}
+      nvsentinel_remediation: ${{ inputs.nvsentinel_remediation }}
 
   # nvkind real-silicon lane (DC5 #1278). "kind" is not a cloud but a
   # self-hosted GPU-runner lane; it slots into the same dispatch model so it
@@ -334,6 +522,7 @@ jobs:
       reservation: ${{ inputs.reservation }}
       aicr_version: ${{ inputs.aicr_version }}
       intent: ${{ inputs.intent }}
+      platform: ${{ inputs.platform }}
       lifecycle: ${{ inputs.lifecycle }}
       cluster_config_path: ${{ needs.resolve.outputs.cluster_config_path }}
       test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}
@@ -353,7 +542,7 @@ jobs:
     if: >-
       inputs.deployer != 'helmfile' &&
       needs.resolve.outputs.cloud != 'aws'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Fail on unsupported (deployer, cloud) combination
         env:
@@ -382,7 +571,7 @@ jobs:
       needs.resolve.outputs.cloud != 'gcp' &&
       needs.resolve.outputs.cloud != 'azure' &&
       needs.resolve.outputs.cloud != 'kind'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Fail on unmapped cloud
         env:

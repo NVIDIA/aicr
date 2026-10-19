@@ -55,7 +55,7 @@
 #     device-request path open — the same posture as GPU-Operator-managed mode,
 #     not a regression — so full multi-tenant isolation additionally requires
 #     an admission policy restricting a /dev/null-backed mount whose destination
-#     is under /var/run/nvidia-container-devices (the pinned toolkit v1.19.1
+#     is under /var/run/nvidia-container-devices (the pinned toolkit v1.20.0
 #     accepts the volume-mount device request only when the mount SOURCE is
 #     /dev/null). secure-accelerator-access does not
 #     exercise the volume-mounts path, so a green result is not proof of
@@ -138,7 +138,7 @@ spec:
       priorityClassName: system-node-critical
       containers:
         - name: nvidia-toolkit-hardening
-          image: docker.io/library/busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
+          image: docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e
           command:
             - /bin/sh
             - -c

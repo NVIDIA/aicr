@@ -2,7 +2,9 @@
 002-nfd/values.yaml
 Chart.yaml
 README.md
+bundle-info.yaml
 checksums.txt
+recipe.yaml
 static/cert-manager.yaml
 static/nfd.yaml
 templates/aicr-stack.yaml

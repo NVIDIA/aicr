@@ -77,8 +77,13 @@ func Load(ctx context.Context, source string) (*AICRConfig, error) {
 			fmt.Sprintf("failed to parse config from %q", source), err)
 	}
 
+	// Validate is a method on the struct and cannot name the file; Load holds
+	// source. Wrapping here is what keeps "which config?" answerable, and it is
+	// where the retired WarnDeprecatedAPIVersion used to supply it. Same code,
+	// so the wrap adds context without reclassifying the failure.
 	if err := cfg.Validate(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("failed to validate config %q", source), err)
 	}
 	return cfg, nil
 }

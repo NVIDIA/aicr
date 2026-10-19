@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/NVIDIA/aicr/pkg/chainsaw"
@@ -31,6 +32,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/manifest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
 	appsv1 "k8s.io/api/apps/v1"
@@ -38,6 +40,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 )
@@ -47,8 +50,13 @@ const (
 	// gcpDriverInstallerComponent is the values-gated GKE COS driver
 	// installer (issue #1716); rendered only under gpuStack=bundle-installer.
 	gcpDriverInstallerComponent = "gcp-driver-installer"
-	draDriverComponent          = "nvidia-dra-driver-gpu"
-	networkOperatorComponent    = "network-operator"
+	// draNodeLabelerComponent is the opt-in DRA eviction-label applier (issue
+	// #2676); declared on every recipe in base.yaml but rendered only when the
+	// eviction contract is opted into, so its health check is suppressed on the
+	// default path where the bundler drops it (issue #2846).
+	draNodeLabelerComponent  = "dra-node-labeler"
+	draDriverComponent       = "nvidia-dra-driver-gpu"
+	networkOperatorComponent = "network-operator"
 
 	// draKubeletPluginSuffix is the chart-template-defined name suffix for
 	// the NVIDIA DRA driver's kubelet-plugin DaemonSet. The upstream chart
@@ -61,49 +69,59 @@ const (
 
 	nodewrightCompleteState = "complete"
 
-	// runtimeRequiredTaintKey / runtimeRequiredTaintValue identify the
-	// workload-gate taint the nodewright (skyhook) operator manages for Skyhook
-	// CRs with runtimeRequired: true (see tuning.yaml `runtimeRequired: true`).
-	//
-	// Why gate on this taint and not status.status: a GPU node joins carrying
-	// this NoSchedule taint, and the operator removes it once *all*
-	// runtime-required Skyhooks targeting that node are complete *on that node*
-	// (per-node, not per-package). Unlike status.status — an aggregate over
-	// (packages × matching nodes) that re-opens to in_progress on every package
-	// reboot and each newly-joined node — the taint is applied once and removed
-	// once as the monotone terminal step, so "taint absent" is a durable
-	// "done, won't reboot again" signal rather than a probabilistic settling
-	// heuristic (see issue #1775). Note the operator re-applies the taint across
-	// reboots only when configured with REAPPLY_ON_REBOOT/reapplyOnReboot=true
-	// (the gke-cos and bcm overlays); on those the taint flaps like the status
-	// and the stability window rides through it, so gating on the taint is never
-	// weaker than gating on the status.
-	//
-	// Values match the skyhook chart's default
-	// controllerManager.manager.env.runtimeRequiredTaint
-	// (skyhook.nvidia.com=runtime-required:NoSchedule), which AICR ships
-	// unchanged and the UAT GPU node pools pre-taint with verbatim
-	// (tests/uat/aws/cluster-config.yaml).
-	runtimeRequiredTaintKey   = "skyhook.nvidia.com"
-	runtimeRequiredTaintValue = "runtime-required"
-
-	// nicClusterPolicyManifestMarker identifies the AKS NicClusterPolicy manifest
-	// (recipes/components/network-operator/manifests/nic-cluster-policy-aks.yaml)
-	// among a network-operator ComponentRef's ManifestFiles. Its presence means
-	// the recipe stands up an RDMA fabric (MOFED + rdma-shared-device-plugin), so
-	// a GPU node not yet advertising the shared resource is "still converging",
-	// not "no fabric". OCP wires a different component (network-operator-ocp) and
-	// manifest name and so does not match; kind/talos enable network-operator
-	// without this manifest and are likewise (correctly) not gated. The shared
-	// resource name and the RDMA node label are defined in validators/helper
-	// (AKSRdmaSharedResource, PCIMellanoxPresentLabel) so this gate and the NCCL
-	// consumer cannot drift.
+	// nicClusterPolicyManifestMarker identifies a NicClusterPolicy manifest
+	// (nic-cluster-policy-aks.yaml, nic-cluster-policy-oke-{gb200,l40s}.yaml
+	// under recipes/components/network-operator/manifests/) among a
+	// network-operator ComponentRef's ManifestFiles. Its presence means the
+	// recipe stands up an RDMA fabric (an RDMA-shared or SR-IOV device plugin),
+	// so a GPU node not yet advertising the fabric resource is "still
+	// converging", not "no fabric". OCP wires a different component
+	// (network-operator-ocp) and manifest name and so does not match; kind/talos
+	// enable network-operator without this manifest and are likewise (correctly)
+	// not gated. The polled resource name is derived per recipe from the matched
+	// manifest itself (rdmaFabricResource), so the gate always waits for exactly
+	// what this recipe's fabric advertises; the RDMA node label lives in
+	// validators/helper (PCIMellanoxPresentLabel).
 	nicClusterPolicyManifestMarker = "nic-cluster-policy"
 )
 
+// The nodewright operator component and the container env carrying its
+// workload-gate taint.
+const (
+	nodewrightOperatorComponent = "nodewright-operator"
+	runtimeRequiredTaintEnv     = "RUNTIME_REQUIRED_TAINT"
+)
+
+// nodewrightControllerLabels select the operator's controller-manager
+// Deployment whatever name or nameOverride the install renders.
+var nodewrightControllerLabels = labels.Set{
+	"app.kubernetes.io/component": "manager",
+	"control-plane":               "controller-manager",
+}
+
+// nodewrightRenameVersion is the first nodewright-operator release that serves
+// nodewright.nvidia.com and writes status only there.
+const nodewrightRenameVersion = "0.18.0"
+
 var (
+	// nodewrightGVR is the CR kind nodewright-operator v0.18.0+ reconciles and
+	// writes status on; legacySkyhookGVR is the pre-rename kind, mirrored from
+	// but never written to, and removed upstream in v0.21.0.
 	nodewrightGVR = schema.GroupVersionResource{
+		Group: "nodewright.nvidia.com", Version: "v1alpha1", Resource: "nodewrights",
+	}
+	legacySkyhookGVR = schema.GroupVersionResource{
 		Group: "skyhook.nvidia.com", Version: "v1alpha1", Resource: "skyhooks",
+	}
+
+	// defaultRuntimeRequiredTaint is the chart's runtimeRequiredTaint default
+	// from v0.18.0; legacyRuntimeRequiredTaint is the pre-rename default, which
+	// the operator still removes on completion but never applies.
+	defaultRuntimeRequiredTaint = corev1.Taint{
+		Key: "nodewright.nvidia.com", Value: "runtime-required", Effect: corev1.TaintEffectNoSchedule,
+	}
+	legacyRuntimeRequiredTaint = corev1.Taint{
+		Key: "skyhook.nvidia.com", Value: "runtime-required", Effect: corev1.TaintEffectNoSchedule,
 	}
 
 	// GPU readiness poll tunables shared by verifyNodewrightReady and
@@ -194,6 +212,29 @@ func pollUntilStable(ctx *validators.Context, label string, probe func() error, 
 
 // checkExpectedResources verifies that all expected Kubernetes resources declared
 // in the validation's componentRefs exist and are healthy in the live cluster.
+//
+// The two ctx.Done() checks (expected-resources iteration, GPU readiness /
+// chainsaw dispatch) never return early: they record the stage in
+// budgetExhausted, mark every piece of unevaluated work, print the accumulated
+// failures, and fail closed (issue #2473). Unevaluated work is reported in
+// three parts, all via markUndispatched: chainsaw asserts already queued when
+// the loop broke, the health checks and expected resources carried by
+// enabledRefs entries the loop never reached, and the GPU readiness probes the
+// enabled component set selects. Anything less understates how much of the
+// cluster went unchecked.
+//
+// Once budgetExhausted is set the GPU probes are skipped rather than run.
+// Their poll loops observe ctx.Ctx, but the work ahead of the first poll is not
+// uniformly cancellation-bound — expectedNodewrightNames takes no context at
+// all, so its value resolution and manifest rendering run to completion on an
+// already-dead budget. Running the probes would delay the accumulated failure
+// report without producing a verdict. The second ctx.Done() check therefore
+// only runs on the path where the probes did execute, which is the path where
+// they can still exhaust the budget themselves on a recipe whose enabled refs
+// queued no asserts.
+//
+// Errors from gatedHealthCheckSuppressed and buildResourceFetcher are returned
+// as-is, discarding the failures collected so far.
 func checkExpectedResources(ctx *validators.Context) error {
 	if ctx.ValidationInput == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "validation is not available")
@@ -214,6 +255,18 @@ func checkExpectedResources(ctx *validators.Context) error {
 	var firstStructuredErr error
 	enabledRefs := enabledComponentRefs(ctx.ValidationInput.ComponentRefs)
 
+	// budgetExhausted names the stage that ran out of deadline, empty when the
+	// check completed its work. It is deliberately NOT an early return: the
+	// accumulated failures are the diagnosis, and returning before the
+	// reporting block below is what made issue #2473 undiagnosable.
+	var budgetExhausted string
+
+	// unreachedRefs are the enabledRefs the loop below never examined because
+	// the budget went first. Neither their health checks nor their expected
+	// resources were ever evaluated, so markUndispatched has to name them
+	// separately from chainsawAsserts or they vanish from the report entirely.
+	var unreachedRefs []recipe.ComponentRef
+
 	failures = append(failures, verifyNamespacesActive(ctx, enabledRefs)...)
 
 	// When both ExpectedResources and HealthCheckAsserts are populated on
@@ -227,32 +280,43 @@ func checkExpectedResources(ctx *validators.Context) error {
 	// readiness signal and should always run alongside the overlay-
 	// declared resource list. The transitional hydration skip in
 	// pkg/recipe (added in #1234) was reverted in lockstep.
-	for _, ref := range enabledRefs {
+	for i, ref := range enabledRefs {
 		// Honor cancellation between components so a canceled run stops
 		// before issuing more API calls — per repo CLAUDE.md "Always
 		// check ctx.Done() in long-running operations and loops".
 		select {
 		case <-ctx.Ctx.Done():
-			return errors.Wrap(errors.ErrCodeTimeout,
-				"deployment validation canceled during expected-resources iteration",
-				ctx.Ctx.Err())
+			budgetExhausted = "expected-resources iteration"
 		default:
+		}
+		if budgetExhausted != "" {
+			// This ref included: the guard trips before any of its own
+			// checks run, so it is unevaluated like the ones behind it.
+			unreachedRefs = enabledRefs[i:]
+			break
 		}
 		if ref.HealthCheckAsserts != "" {
 			// The registry-declared static assert cannot see value gates, so on a
-			// component whose effective values suppress the Skyhook CR the assert
-			// targets (e.g. tuningEnabled=false on a single-package tuning
-			// manifest) it would fail on a deliberately-untuned cluster. Skip it
-			// in that case, mirroring the render-aware Go readiness check. Only
-			// nodewright-customizations is subject to this; a render/read error
-			// propagates rather than silently skipping. See #1844.
-			suppressed, reason, suppressErr := gatedHealthCheckSuppressed(ctx.Ctx, ref)
+			// component whose effective values gate off the objects the assert
+			// targets (e.g. tuningEnabled=false on a single-package Nodewright
+			// tuning manifest) it would fail on a cluster where they are
+			// deliberately absent. Skip it in that case. gatedHealthCheckSuppressed
+			// names the components subject to this, and a render or read error
+			// propagates rather than silently skipping.
+			suppressed, reason, suppressErr := gatedHealthCheckSuppressed(ctx, ref)
 			if suppressErr != nil {
 				return suppressErr
 			}
 			if suppressed {
 				fmt.Printf("  [chainsaw] %s: skipped — %s\n", ref.Name, reason)
 			} else {
+				if ref.Name == nodewrightOperatorComponent {
+					// The health check matches by label and passes on any one
+					// available match, so require exactly one here.
+					if err := requireOneNodewrightController(ctx, ref.Namespace); err != nil {
+						failures = append(failures, fmt.Sprintf("[chainsaw] %s: %s", ref.Name, err))
+					}
+				}
 				chainsawAsserts = append(chainsawAsserts, chainsaw.ComponentAssert{
 					Name:       ref.Name,
 					AssertYAML: ref.HealthCheckAsserts,
@@ -269,29 +333,53 @@ func checkExpectedResources(ctx *validators.Context) error {
 		}
 	}
 
-	gpuFailures, gpuStructuredErr := verifyGPUReadinessSignals(ctx, enabledRefs)
-	failures = append(failures, gpuFailures...)
-	// firstStructuredErr is guaranteed nil here (the chainsaw block
-	// below is the only other producer and hasn't run yet); we can
-	// assign unconditionally. The chainsaw block downstream checks
-	// firstStructuredErr == nil before its own assignment so the GPU
-	// error wins when both produce one.
-	if gpuStructuredErr != nil {
-		firstStructuredErr = gpuStructuredErr
+	// gpuProbes is built even on the exhausted path: selection is offline (see
+	// enabledGPUReadinessProbes), and the labels are what let the report name
+	// the probes that were skipped.
+	gpuProbes := enabledGPUReadinessProbes(ctx, enabledRefs)
+	if budgetExhausted == "" {
+		gpuFailures, gpuStructuredErr := verifyGPUReadinessSignals(ctx, enabledRefs)
+		failures = append(failures, gpuFailures...)
+		// firstStructuredErr is guaranteed nil here (the chainsaw block
+		// below is the only other producer and hasn't run yet); we can
+		// assign unconditionally. The chainsaw block downstream checks
+		// firstStructuredErr == nil before its own assignment so the GPU
+		// error wins when both produce one.
+		if gpuStructuredErr != nil {
+			firstStructuredErr = gpuStructuredErr
+		}
+
+		// Re-checked after the probes rather than only before them:
+		// verifyGPUReadinessSignals can itself consume the remaining budget on
+		// a recipe whose enabled refs queued no chainsaw asserts, and letting
+		// that fall through to the healthy return is exactly the fail-open
+		// issue #2473 closed elsewhere in this function — an exhausted context
+		// with zero collected failures must still fail closed.
+		if ctx.Ctx.Err() != nil {
+			budgetExhausted = "GPU readiness / chainsaw dispatch"
+			// The probes above already ran, so only the queued asserts are
+			// still unevaluated; gpuProbes is deliberately not passed here.
+			gpuProbes = nil
+		}
 	}
 
-	if len(chainsawAsserts) > 0 {
-		// Bail out before paying chainsaw startup cost if the caller
-		// already canceled. chainsaw.Run honors ctx mid-flight too,
-		// but a short-circuit here skips fetcher construction and
-		// log noise on a doomed run.
-		select {
-		case <-ctx.Ctx.Done():
-			return errors.Wrap(errors.ErrCodeTimeout,
-				"deployment validation canceled before chainsaw dispatch",
-				ctx.Ctx.Err())
-		default:
+	if budgetExhausted != "" {
+		failures = markUndispatched(failures, chainsawAsserts, unreachedRefs, gpuProbes, budgetExhausted)
+	} else {
+		// Selecting by discovery after the readiness probes sees a group that
+		// became served during the window. A discovery error joins failures
+		// and omits the assert it blocks.
+		var dropErr error
+		chainsawAsserts, dropErr = dropDiscoverySuppressedAsserts(ctx, chainsawAsserts)
+		if dropErr != nil {
+			failures = append(failures, dropErr.Error())
+			if firstStructuredErr == nil {
+				firstStructuredErr = dropErr
+			}
 		}
+	}
+
+	if budgetExhausted == "" && len(chainsawAsserts) > 0 {
 		slog.Info("running health check assertions", "components", len(chainsawAsserts))
 		fetcher, fetcherErr := buildResourceFetcher(ctx)
 		if fetcherErr != nil {
@@ -329,12 +417,23 @@ func checkExpectedResources(ctx *validators.Context) error {
 		for _, f := range failures {
 			fmt.Printf("  %s\n", f)
 		}
-		// Prefer the first structured error (e.g.,
-		// ErrCodeInvalidRequest from a registry assert that violated
-		// the read-only allowlist) over the generic ErrCodeNotFound
-		// summary so downstream catalog/CLI surfaces classify the
-		// failure correctly. The human-readable failures list is still
-		// printed above for operator visibility.
+	}
+
+	// Fail closed BEFORE the healthy return: an unfinished run is not a passing
+	// run, and with no collected failures the old code fell through to
+	// "All deployment resources ... are healthy" (issue #2473).
+	if budgetExhausted != "" {
+		return errors.Wrap(errors.ErrCodeTimeout,
+			fmt.Sprintf("deployment validation budget exhausted during %s with %d issue(s) collected",
+				budgetExhausted, len(failures)),
+			ctx.Ctx.Err())
+	}
+
+	if len(failures) > 0 {
+		// Prefer the first structured error (e.g., ErrCodeInvalidRequest from a
+		// registry assert that violated the read-only allowlist) over the
+		// generic ErrCodeNotFound summary so downstream catalog/CLI surfaces
+		// classify the failure correctly.
 		if firstStructuredErr != nil {
 			return firstStructuredErr
 		}
@@ -357,9 +456,64 @@ func enabledComponentRefs(refs []recipe.ComponentRef) []recipe.ComponentRef {
 	return enabled
 }
 
+// markUndispatched appends a not-evaluated line for every piece of work the
+// exhausted run left undone: each assert queued but never handed to chainsaw,
+// each health check and expected resource on a component the iteration never
+// reached, and each GPU readiness probe skipped rather than run. Reporting them
+// explicitly is what stops a truncated run from reading as a mostly-healthy
+// cluster: the operator sees which components carry no verdict rather than
+// inferring their absence means "fine".
+//
+// The two kinds of work an unreached ref carries are reported independently.
+// A component can declare expectedResources without a registry health check —
+// the loop would have verified them via helper.VerifyResource all the same — so
+// gating the expectedResources lines on HealthCheckAsserts would drop part of
+// the recipe's deployment contract from a report that otherwise reads complete.
+//
+// unreached and asserts are disjoint — a ref only reaches asserts by being
+// examined, which is what unreached excludes — so no component is named twice.
+// unreached refs are not filtered through gatedHealthCheckSuppressed: that
+// render never ran for them, so whether their assert would have been suppressed
+// is unknown, and reporting "not evaluated" is the fail-closed reading.
+func markUndispatched(
+	failures []string,
+	asserts []chainsaw.ComponentAssert,
+	unreached []recipe.ComponentRef,
+	gpuProbes []gpuReadinessProbe,
+	stage string,
+) []string {
+
+	for _, a := range asserts {
+		failures = append(failures, fmt.Sprintf(
+			"[chainsaw] %s: not evaluated — budget exhausted during %s", a.Name, stage))
+	}
+	for _, ref := range unreached {
+		if ref.HealthCheckAsserts != "" {
+			failures = append(failures, fmt.Sprintf(
+				"[chainsaw] %s: not evaluated — budget exhausted during %s", ref.Name, stage))
+		}
+		for _, er := range ref.ExpectedResources {
+			failures = append(failures, fmt.Sprintf(
+				"[expectedResources] %s %s/%s (%s): not evaluated — budget exhausted during %s",
+				er.Kind, er.Namespace, er.Name, ref.Name, stage))
+		}
+	}
+	for _, p := range gpuProbes {
+		failures = append(failures, fmt.Sprintf(
+			"[gpuReadiness] %s (%s): not evaluated — budget exhausted during %s",
+			p.component, p.signal, stage))
+	}
+	return failures
+}
+
+// verifyNamespacesActive returns a failure for each distinct namespace in refs
+// that is not Active, and publishes the active and expected counts.
 func verifyNamespacesActive(ctx *validators.Context, refs []recipe.ComponentRef) []string {
 	var failures []string
 	seen := make(map[string]bool, len(refs))
+	defer func() {
+		emitExtraOrWarn(namespaceCoverageExtra(len(seen)-len(failures), len(seen)))
+	}()
 
 	for _, ref := range refs {
 		if ref.Namespace == "" || seen[ref.Namespace] {
@@ -385,12 +539,20 @@ func verifyNamespacesActive(ctx *validators.Context, refs []recipe.ComponentRef)
 	return failures
 }
 
-// verifyGPUReadinessSignals runs the two Go-resident deep checks
-// introduced by issue #611. Returns the human-readable failure strings
-// plus the first *errors.StructuredError encountered across all checks
-// so the caller can propagate the original error code (e.g.,
-// ErrCodeInternal from a discovery/RBAC failure) instead of flattening
-// it into the generic ErrCodeNotFound summary — per PR #1235 review.
+func namespaceCoverageExtra(active, expected int) map[string]string {
+	return map[string]string{
+		validators.ExtraKeyNamespacesActive:   strconv.Itoa(active),
+		validators.ExtraKeyNamespacesExpected: strconv.Itoa(expected),
+	}
+}
+
+// verifyGPUReadinessSignals runs the three Go-resident deep checks (nodewright,
+// DRA kubelet-plugin, RDMA fabric) introduced by issue #611. Returns the
+// human-readable failure strings plus the first *errors.StructuredError
+// encountered across all checks so the caller can propagate the original
+// error code (e.g., ErrCodeInternal from a discovery/RBAC failure) instead of
+// flattening it into the generic ErrCodeNotFound summary — per PR #1235
+// review.
 //
 // Migration disposition (per #1220 plan):
 //
@@ -424,19 +586,121 @@ func verifyGPUReadinessSignals(ctx *validators.Context, refs []recipe.ComponentR
 		}
 	}
 
-	if ref, ok := findEnabledComponent(refs, nodewrightCustomizationsComponent); ok {
-		capture(verifyNodewrightReady(ctx, ref))
-	}
-
-	if ref, ok := findEnabledComponent(refs, draDriverComponent); ok {
-		capture(verifyDRAKubeletPluginReady(ctx, ref.Namespace))
-	}
-
-	if ref, ok := findEnabledComponent(refs, networkOperatorComponent); ok && recipeDeclaresRDMAFabric(ref) {
-		capture(verifyRDMAFabricReady(ctx))
+	for _, err := range runGPUReadinessProbes(enabledGPUReadinessProbes(ctx, refs)) {
+		capture(err)
 	}
 
 	return failures, firstStructured
+}
+
+// runGPUReadinessProbes runs every probe concurrently and returns their results
+// indexed by probes, so callers read them back in that fixed order rather than
+// in completion order — which is what makes firstStructured precedence in
+// verifyGPUReadinessSignals independent of which probe happens to finish first.
+//
+// Plain Group, not WithContext: every probe closes over a *validators.Context
+// and reads ctx.Ctx directly (pollUntilStable), so a derived gctx would be
+// built and discarded — the same reasoning as the Skyhook-status/taint-scan
+// errgroup fan-out inside verifyNodewrightReady's own poll probe elsewhere in
+// this file. Each goroutine writes its result into its own slice index and
+// always returns nil, so one unhealthy signal never stops the others from
+// running.
+func runGPUReadinessProbes(probes []gpuReadinessProbe) []error {
+	results := make([]error, len(probes))
+	g := new(errgroup.Group)
+	for i, probe := range probes {
+		g.Go(func() error {
+			results[i] = probe.run()
+			return nil
+		})
+	}
+	// Goroutines never return an error (results are recorded per-index), so Wait
+	// only blocks until every probe completes.
+	_ = g.Wait()
+	return results
+}
+
+// gpuReadinessProbe pairs a readiness probe with the component and signal it
+// gates. The labels exist so the budget-exhausted path can report which probes
+// went unevaluated without running any of them.
+type gpuReadinessProbe struct {
+	// component is the recipe component whose enablement selected this probe.
+	component string
+	// signal names what the probe waits on, since one component can gate a
+	// signal narrower than itself (network-operator gates only the RDMA fabric).
+	signal string
+	// run is a single blocking pass of the probe; it observes ctx.Ctx through
+	// pollUntilStable and returns nil when the signal is healthy and settled.
+	run func() error
+}
+
+// enabledGPUReadinessProbes returns the GPU readiness probes the enabled
+// component set selects, in the FIXED order verifyGPUReadinessSignals reads
+// results back in — that order is what firstStructured precedence depends on.
+//
+// Selection is offline: it branches on component names and the recipe's
+// declared manifest file list, and the one client it touches (getDynamicClient,
+// below) it only constructs. No probe body runs and no request is issued, which
+// is what lets checkExpectedResources enumerate the probes it is skipping once
+// the check budget is gone.
+func enabledGPUReadinessProbes(ctx *validators.Context, refs []recipe.ComponentRef) []gpuReadinessProbe {
+	var probes []gpuReadinessProbe
+
+	if ref, ok := findEnabledComponent(refs, nodewrightCustomizationsComponent); ok {
+		// Warm ctx.DynamicClient before the fan-out: getDynamicClient writes it
+		// on the SHARED Context, which is not safe from a goroutine. Only the
+		// nodewright probe reaches it, so warming it only when that component is
+		// enabled keeps Contexts without a RESTConfig (the RDMA dispatch tests)
+		// off this path entirely. A failure here is deliberately ignored — the
+		// probe calls getDynamicClient again and surfaces the identical error,
+		// and that call returns before the write, so no race is introduced.
+		_, _ = getDynamicClient(ctx)
+		probes = append(probes, gpuReadinessProbe{
+			component: nodewrightCustomizationsComponent,
+			signal:    "Nodewright CR completion + runtime-required taint clearance",
+			run: func() error {
+				// The gate is the taint the operator is actually configured
+				// with, read from its Deployment rather than assumed, because
+				// --workload-gate is applied at bundle time and never reaches
+				// the recipe this validator is handed. A derivation failure
+				// fails the gate closed — never "skip the taint".
+				gate, gerr := runtimeRequiredTaints(ctx, refs, ref.Namespace)
+				if gerr != nil {
+					return gerr
+				}
+				return verifyNodewrightReady(ctx, ref, gate)
+			},
+		})
+	}
+
+	if ref, ok := findEnabledComponent(refs, draDriverComponent); ok {
+		probes = append(probes, gpuReadinessProbe{
+			component: draDriverComponent,
+			signal:    "DRA kubelet plugin readiness",
+			run:       func() error { return verifyDRAKubeletPluginReady(ctx, ref.Namespace) },
+		})
+	}
+
+	if ref, ok := findEnabledComponent(refs, networkOperatorComponent); ok && recipeDeclaresRDMAFabric(ref) {
+		probes = append(probes, gpuReadinessProbe{
+			component: networkOperatorComponent,
+			signal:    "RDMA fabric resource allocatable across the Mellanox cohort",
+			run: func() error {
+				// The polled resource is derived from the recipe's own
+				// NicClusterPolicy manifest (rdma/hca_shared_devices_a on AKS,
+				// nvidia.com/mlnxnics on OKE) so the gate waits for exactly what
+				// this recipe's fabric advertises. A derivation failure fails the
+				// gate closed — never "skip the fabric".
+				fabricResource, ferr := rdmaFabricResource(ctx.Ctx, ref)
+				if ferr != nil {
+					return ferr
+				}
+				return verifyRDMAFabricReady(ctx, fabricResource)
+			},
+		})
+	}
+
+	return probes
 }
 
 func findEnabledComponent(refs []recipe.ComponentRef, name string) (recipe.ComponentRef, bool) {
@@ -449,7 +713,8 @@ func findEnabledComponent(refs []recipe.ComponentRef, name string) (recipe.Compo
 }
 
 // verifyNodewrightReady checks that the specific Nodewright CR(s) this recipe
-// declares are present and have reached status.status == "complete".
+// declares are present and have reached status.status == "complete", and that
+// no node still carries any taint in gate (see runtimeRequiredTaints).
 //
 // Deployer-neutrality stance: no Helm API calls, no reads of release
 // metadata, no dependence on release-scoped labels. The set of Nodewright CRs
@@ -459,7 +724,7 @@ func findEnabledComponent(refs []recipe.ComponentRef, name string) (recipe.Compo
 // those exact names up on the cluster via the Kubernetes API. Unrelated
 // Nodewright CRs on the cluster (stale from previous deploys, or from other
 // tenants) are explicitly ignored.
-func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef) error {
+func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gate []corev1.Taint) error {
 	expectedNames, err := expectedNodewrightNames(ref)
 	if err != nil {
 		return err
@@ -482,24 +747,8 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef) err
 		// still be listed and asserted. See #1844.
 		fmt.Printf("  Nodewright: all Skyhook CRs suppressed by effective values (manifestFiles=%v); nothing to verify\n",
 			ref.ManifestFiles)
+		emitExtraOrWarn(nodewrightCoverageExtra(0, 0))
 		return nil
-	}
-
-	// Discovery-gate the CRD before attempting Get by name: CRD not
-	// registered → skip per #607; any other discovery error (RBAC, 5xx,
-	// timeout) → fail closed so a transient discovery failure cannot mask
-	// readiness.
-	gv := nodewrightGVR.GroupVersion().String()
-	_, discErr := ctx.Clientset.Discovery().ServerResourcesForGroupVersion(gv)
-	switch {
-	case discErr == nil:
-		// fall through to per-CR checks
-	case apierrors.IsNotFound(discErr):
-		fmt.Printf("  Nodewright: %s not registered, skipping\n", gv)
-		return nil
-	default:
-		return errors.Wrap(errors.ErrCodeInternal,
-			fmt.Sprintf("failed to discover %s resources (is the API server reachable and RBAC in order?)", gv), discErr)
 	}
 
 	dynClient, err := getDynamicClient(ctx)
@@ -507,12 +756,16 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef) err
 		return err
 	}
 
+	// complete is from the last status pass, or 0 if none ran.
+	complete := 0
+	defer func() { emitExtraOrWarn(nodewrightCoverageExtra(complete, len(expectedNames))) }()
+
 	// Poll two signals until both hold continuously for the stability window, or
 	// the budget elapses:
 	//
-	//  1. Every expected Skyhook CR reports status.status == "complete".
-	//  2. No node still carries the runtime-required NoSchedule taint the
-	//     operator removes as its monotone terminal step.
+	//  1. Every expected Nodewright CR reports status.status == "complete".
+	//  2. No node still carries a runtime-required taint the operator removes
+	//     as its monotone terminal step.
 	//
 	// status.status alone is non-monotonic during tuning: a reboot (or a
 	// newly-joined GPU node) re-opens it to in_progress, and — worse — it can
@@ -524,26 +777,43 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef) err
 	// done on every node. Polling rides through the reboot flaps rather than
 	// failing the deployment phase on a transient in_progress / re-taint. See
 	// pkg/defaults GPUReadiness* for sizing.
+	//
+	// CRDs that are not served yet count as not ready. The GVR is re-resolved
+	// each iteration so a group established mid-poll is picked up.
+	var gvr schema.GroupVersionResource
 	return pollUntilStable(ctx,
 		fmt.Sprintf("%d expected Nodewright(s) + runtime-required taint clearance", len(expectedNames)),
 		func() error {
-			// The Skyhook status Gets and the node-list taint scan are
-			// independent read-only calls, so fan them out (per repo CLAUDE.md
-			// "Sequential calls to N independent read-only K8s APIs → fan-out
-			// with errgroup") rather than paying both round-trips serially every
+			resolved, registered, resolveErr := resolveNodewrightGVR(ctx)
+			if resolveErr != nil {
+				return resolveErr
+			}
+			if !registered {
+				complete = 0
+				return errors.New(errors.ErrCodeNotFound,
+					fmt.Sprintf("Nodewright: neither %s nor %s serves its resource yet (recipe declared %d CR(s))",
+						nodewrightGVR.GroupVersion(), legacySkyhookGVR.GroupVersion(), len(expectedNames)))
+			}
+			gvr = resolved
+
+			// The CR status Gets and the node-list taint scan are independent
+			// read-only calls, so fan them out (per repo CLAUDE.md "Sequential
+			// calls to N independent read-only K8s APIs → fan-out with
+			// errgroup") rather than paying both round-trips serially every
 			// poll iteration.
 			var statusFailures, taintFailures []string
 			var taintErr error
 			g := new(errgroup.Group)
 			g.Go(func() error {
-				statusFailures = nodewrightStatusFailures(ctx, dynClient, expectedNames)
+				statusFailures = nodewrightStatusFailures(ctx, dynClient, gvr, expectedNames)
 				return nil
 			})
 			g.Go(func() error {
-				taintFailures, taintErr = runtimeRequiredTaintFailures(ctx)
+				taintFailures, taintErr = runtimeRequiredTaintFailures(ctx, gate)
 				return nil
 			})
 			_ = g.Wait()
+			complete = len(expectedNames) - len(statusFailures)
 
 			if taintErr != nil {
 				// A transient node-list failure (e.g. an apiserver hiccup while
@@ -563,28 +833,113 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef) err
 		},
 		func() {
 			for _, name := range expectedNames {
-				fmt.Printf("  Nodewright %s: %s (stable ≥%s)\n", name, nodewrightCompleteState, gpuReadinessStabilityWindow)
+				fmt.Printf("  Nodewright %s (%s): %s (stable ≥%s)\n",
+					name, gvr.GroupResource(), nodewrightCompleteState, gpuReadinessStabilityWindow)
 			}
-			fmt.Printf("  Nodewright runtime-required taint (%s=%s:%s): cleared from all nodes (stable ≥%s)\n",
-				runtimeRequiredTaintKey, runtimeRequiredTaintValue, corev1.TaintEffectNoSchedule, gpuReadinessStabilityWindow)
+			fmt.Printf("  Nodewright runtime-required taint (%s): cleared from all nodes (stable ≥%s)\n",
+				taintStrings(gate), gpuReadinessStabilityWindow)
 		})
 }
 
-// nodewrightStatusFailures does one pass over the expected Skyhook CRs and
+func nodewrightCoverageExtra(complete, expected int) map[string]string {
+	return map[string]string{
+		validators.ExtraKeyNodewrightComplete: strconv.Itoa(complete),
+		validators.ExtraKeyNodewrightExpected: strconv.Itoa(expected),
+	}
+}
+
+// resolveNodewrightGVR returns the Nodewright CR resource the cluster serves,
+// preferring nodewrightGVR. registered is false when neither group lists its
+// resource. It returns legacySkyhookGVR only when legacySkyhookAllowed permits
+// it, and an error otherwise. A discovery error other than NotFound is also
+// returned, so a transient failure cannot mask readiness.
+func resolveNodewrightGVR(ctx *validators.Context) (gvr schema.GroupVersionResource, registered bool, err error) {
+	served := func(candidate schema.GroupVersionResource) (bool, error) {
+		gv := candidate.GroupVersion().String()
+		// Through helper rather than DiscoveryInterface directly: the
+		// interface method issues its request with context.TODO() internally,
+		// so an unresponsive apiserver would outlive both cancellation and the
+		// readiness budget.
+		// Bounded per request so a stalled apiserver cannot hold the readiness
+		// poll past its deadline.
+		discCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.ResourceVerificationTimeout)
+		defer cancel()
+		list, discErr := helper.GroupVersionResources(discCtx, ctx.Clientset, gv)
+		switch {
+		case discErr == nil:
+			// A group/version is listed once any one of its CRDs is
+			// established, so the resource name has to be listed too.
+			for _, r := range list.APIResources {
+				if r.Name == candidate.Resource {
+					return true, nil
+				}
+			}
+			return false, nil
+		case apierrors.IsNotFound(discErr):
+			return false, nil
+		case stderrors.Is(discErr, context.Canceled), stderrors.Is(discErr, context.DeadlineExceeded):
+			return false, errors.Wrap(errors.ErrCodeTimeout,
+				fmt.Sprintf("Nodewright discovery of %s was canceled or exceeded the %s per-request limit", gv, defaults.ResourceVerificationTimeout), discErr)
+		default:
+			return false, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("Nodewright: failed to discover %s resources (is the API server reachable and RBAC in order?)", gv), discErr)
+		}
+	}
+
+	ok, err := served(nodewrightGVR)
+	if err != nil || ok {
+		return nodewrightGVR, ok, err
+	}
+	ok, err = served(legacySkyhookGVR)
+	if err != nil || !ok {
+		return schema.GroupVersionResource{}, false, err
+	}
+	// A recipe pinned at nodewrightRenameVersion or later must serve the new
+	// group, so a legacy-only cluster is a broken install or holds stale
+	// Skyhooks from a prior operator.
+	if allowed, pin := legacySkyhookAllowed(ctx); !allowed {
+		return schema.GroupVersionResource{}, false, errors.New(errors.ErrCodeNotFound,
+			fmt.Sprintf("%s is not served but the recipe pins %s %s (>= %s serves it); refusing the legacy %s fallback — check the operator install rather than a stale Skyhook",
+				nodewrightGVR.GroupVersion(), nodewrightOperatorComponent, pin, nodewrightRenameVersion, legacySkyhookGVR.GroupVersion()))
+	}
+	return legacySkyhookGVR, true, nil
+}
+
+// legacySkyhookAllowed reports whether the recipe gives a pre-rename signal
+// that permits reading the legacy Skyhook kind: a nodewright-operator ref
+// pinned below nodewrightRenameVersion. A recipe without that component, or
+// with an unparseable version, carries no signal either way and keeps the
+// fallback (there is nothing to refuse on). pin is the version string seen.
+func legacySkyhookAllowed(ctx *validators.Context) (allowed bool, pin string) {
+	if ctx.ValidationInput == nil {
+		return true, ""
+	}
+	ref, ok := findEnabledComponent(ctx.ValidationInput.ComponentRefs, nodewrightOperatorComponent)
+	if !ok || ref.Version == "" {
+		return true, ""
+	}
+	v, err := semver.NewVersion(ref.Version)
+	if err != nil {
+		return true, ref.Version
+	}
+	return v.LessThan(semver.MustParse(nodewrightRenameVersion)), ref.Version
+}
+
+// nodewrightStatusFailures does one pass over the expected Nodewright CRs and
 // returns a human-readable failure string for each that is missing, unreadable,
 // or not yet status.status == "complete". An empty slice means all are complete.
 //
 // The per-name Gets are independent read-only calls, so they fan out
 // concurrently (errgroup) and each keeps its own ResourceVerificationTimeout;
 // results are written to a fixed-index slice to preserve deterministic order.
-func nodewrightStatusFailures(ctx *validators.Context, dynClient dynamic.Interface, expectedNames []string) []string {
+func nodewrightStatusFailures(ctx *validators.Context, dynClient dynamic.Interface, gvr schema.GroupVersionResource, expectedNames []string) []string {
 	results := make([]string, len(expectedNames))
 	g, gctx := errgroup.WithContext(ctx.Ctx)
 	for i, name := range expectedNames {
 		g.Go(func() error {
 			verifyCtx, cancel := context.WithTimeout(gctx, defaults.ResourceVerificationTimeout)
 			defer cancel()
-			results[i] = nodewrightStatusFailure(verifyCtx, dynClient, name)
+			results[i] = nodewrightStatusFailure(verifyCtx, dynClient, gvr, name)
 			return nil
 		})
 	}
@@ -601,10 +956,10 @@ func nodewrightStatusFailures(ctx *validators.Context, dynClient dynamic.Interfa
 	return failures
 }
 
-// nodewrightStatusFailure checks one Skyhook CR and returns a failure string, or
-// "" when it is present and status.status == "complete".
-func nodewrightStatusFailure(verifyCtx context.Context, dynClient dynamic.Interface, name string) string {
-	sk, getErr := dynClient.Resource(nodewrightGVR).Get(verifyCtx, name, metav1.GetOptions{})
+// nodewrightStatusFailure checks one Nodewright CR and returns a failure string,
+// or "" when it is present and status.status == "complete".
+func nodewrightStatusFailure(verifyCtx context.Context, dynClient dynamic.Interface, gvr schema.GroupVersionResource, name string) string {
+	sk, getErr := dynClient.Resource(gvr).Get(verifyCtx, name, metav1.GetOptions{})
 	if getErr != nil {
 		if apierrors.IsNotFound(getErr) {
 			return fmt.Sprintf("Nodewright %s: not found (recipe declared it but the cluster has no such CR)", name)
@@ -612,13 +967,13 @@ func nodewrightStatusFailure(verifyCtx context.Context, dynClient dynamic.Interf
 		return fmt.Sprintf("Nodewright %s: failed to get: %v", name, getErr)
 	}
 	// Reject a CR that is on its way out even when it still reports complete.
-	// Nodewright uses a deletion finalizer, so an expected Skyhook can sit
+	// Nodewright uses a deletion finalizer, so an expected CR can sit
 	// Terminating for a while with status.status untouched. Accepting it would
 	// report readiness on the strength of state that is about to disappear —
 	// the same false-PASS direction the Chainsaw executor already guards
 	// against by skipping ghosts on positive assertions (#2041). The nameless
 	// assert in the component health check cannot cover this: it is satisfied
-	// by any live complete Skyhook, including a stale or unrelated one, so this
+	// by any live complete CR, including a stale or unrelated one, so this
 	// per-name check is the only gate that binds liveness to the CR the recipe
 	// actually declared.
 	if sk.GetDeletionTimestamp() != nil {
@@ -637,18 +992,153 @@ func nodewrightStatusFailure(verifyCtx context.Context, dynClient dynamic.Interf
 	return ""
 }
 
+// nodewrightController returns the operator's controller-manager Deployment in
+// namespace and whether one exists. It returns an error when the list fails or
+// more than one Deployment matches.
+func nodewrightController(ctx *validators.Context, namespace string) (appsv1.Deployment, bool, error) {
+	getCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
+	defer cancel()
+
+	list, err := ctx.Clientset.AppsV1().Deployments(namespace).List(getCtx,
+		metav1.ListOptions{LabelSelector: nodewrightControllerLabels.String()})
+	if err != nil {
+		return appsv1.Deployment{}, false, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to list nodewright controller-manager Deployments in namespace %s", namespace), err)
+	}
+	switch len(list.Items) {
+	case 0:
+		return appsv1.Deployment{}, false, nil
+	case 1:
+		return list.Items[0], true, nil
+	}
+	// Neither match can be shown to own the operator's config.
+	return appsv1.Deployment{}, false, errors.New(errors.ErrCodeConflict,
+		fmt.Sprintf("%d Deployments match %s in namespace %s, so the operator is ambiguous",
+			len(list.Items), nodewrightControllerLabels, namespace))
+}
+
+// requireOneNodewrightController returns an error unless namespace holds at
+// most one controller-manager Deployment. An empty namespace is an error, since
+// the lookup would span every namespace.
+func requireOneNodewrightController(ctx *validators.Context, namespace string) error {
+	if namespace == "" {
+		return errors.New(errors.ErrCodeInvalidRequest, "operator component has no namespace to check for a single controller")
+	}
+	_, _, err := nodewrightController(ctx, namespace)
+	return err
+}
+
+// runtimeRequiredTaints returns the workload-gate taints the deployment gate
+// waits to see cleared: the taint configured on the operator's
+// controller-manager Deployment, plus legacyRuntimeRequiredTaint. The
+// Deployment is looked up in the namespace of the nodewright-operator
+// component in refs, else in fallbackNamespace.
+//
+// It returns defaultRuntimeRequiredTaint and legacyRuntimeRequiredTaint when
+// the Deployment or its env is absent, and an error when the list fails, more
+// than one Deployment matches, or the taint is unusable.
+func runtimeRequiredTaints(ctx *validators.Context, refs []recipe.ComponentRef, fallbackNamespace string) ([]corev1.Taint, error) {
+	// The bundler writes --workload-gate into the operator's values, not the
+	// recipe, so the live Deployment is the only source.
+	namespace := fallbackNamespace
+	if opRef, ok := findEnabledComponent(refs, nodewrightOperatorComponent); ok && opRef.Namespace != "" {
+		namespace = opRef.Namespace
+	}
+	chartDefaults := func(reason string) []corev1.Taint {
+		gate := dedupeTaints(defaultRuntimeRequiredTaint, legacyRuntimeRequiredTaint)
+		fmt.Printf("  Nodewright runtime-required taint gate: %s (%s; using chart defaults)\n", taintStrings(gate), reason)
+		return gate
+	}
+
+	deploy, found, err := nodewrightController(ctx, namespace)
+	if err != nil {
+		// Fail closed so an unreadable config is not read as no taint.
+		return nil, err
+	}
+	if !found {
+		return chartDefaults(fmt.Sprintf("no Deployment matching %s in namespace %s",
+			nodewrightControllerLabels, namespace)), nil
+	}
+	deployRef := namespace + "/" + deploy.Name
+
+	for i := range deploy.Spec.Template.Spec.Containers {
+		for _, env := range deploy.Spec.Template.Spec.Containers[i].Env {
+			if env.Name != runtimeRequiredTaintEnv {
+				continue
+			}
+			if env.Value == "" {
+				// Naming the parse failure here would read as though AICR
+				// cannot understand a value the operator accepted. It cannot:
+				// the operator's own options validation requires a
+				// runtime-required taint and refuses to start without one, so
+				// an empty value means the operator is not running, not that
+				// the gate is confused.
+				detail := "is empty, and the operator refuses to start without one"
+				if env.ValueFrom != nil {
+					detail = "is sourced from valueFrom, which this gate cannot resolve; set it literally"
+				}
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("Deployment %s env %s %s", deployRef, runtimeRequiredTaintEnv, detail))
+			}
+			configured, perr := snapshotter.ParseTaint(env.Value)
+			if perr != nil {
+				return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("Deployment %s env %s=%q is not a valid taint", deployRef, runtimeRequiredTaintEnv, env.Value), perr)
+			}
+			gate := dedupeTaints(*configured, legacyRuntimeRequiredTaint)
+			fmt.Printf("  Nodewright runtime-required taint gate: %s (from Deployment %s env %s)\n",
+				taintStrings(gate), deployRef, runtimeRequiredTaintEnv)
+			return gate, nil
+		}
+	}
+	return chartDefaults("Deployment " + deployRef + " has no " + runtimeRequiredTaintEnv + " env"), nil
+}
+
+// dedupeTaints returns taints with exact duplicates (key, value, effect)
+// removed, preserving first-seen order.
+func dedupeTaints(taints ...corev1.Taint) []corev1.Taint {
+	out := make([]corev1.Taint, 0, len(taints))
+	for _, t := range taints {
+		if !isRuntimeRequiredTaint(&t, out) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// taintStrings renders taints in kubectl's key=value:effect form for gate
+// output.
+func taintStrings(taints []corev1.Taint) string {
+	parts := make([]string, 0, len(taints))
+	for _, t := range taints {
+		parts = append(parts, t.ToString())
+	}
+	return strings.Join(parts, ", ")
+}
+
 // runtimeRequiredTaintFailures lists cluster nodes and returns a failure string
-// for each that still carries the nodewright (skyhook) runtime-required
-// NoSchedule taint — the durable "tuning not yet complete on this node" signal
-// (see runtimeRequiredTaintKey). An empty slice means the taint is cleared from
-// every node (or was never applied, e.g. a Skyhook without runtimeRequired:
-// true), so this gate is a no-op when the recipe does not opt into the feature.
+// for each that still carries any taint in gate. An empty slice means the
+// taint is cleared from every node (or was never applied, e.g. a Nodewright
+// without runtimeRequired: true), so this gate is a no-op when the recipe does
+// not opt into the feature.
+//
+// Why gate on the taint and not status.status alone: a GPU node joins carrying
+// the taint, and the operator removes it once *all* runtime-required
+// Nodewrights targeting that node are complete *on that node* (per-node, not
+// per-package). Unlike status.status — an aggregate over (packages × matching
+// nodes) that re-opens to in_progress on every package reboot and each
+// newly-joined node — the taint is applied once and removed once as the
+// monotone terminal step, so "taint absent" is a durable "done, won't reboot
+// again" signal (see issue #1775). The operator re-applies it across reboots
+// only under REAPPLY_ON_REBOOT (the gke-cos and bcm overlays); there the taint
+// flaps like the status and the stability window rides through it, so gating
+// on the taint is never weaker than gating on the status.
 //
 // A List error (transient apiserver failure, RBAC gap) is returned so the
 // caller fails closed: "could not list nodes" must never be read as "taint
 // absent". The error rides through the poll's dwell reset like any other
 // unhealthy sample.
-func runtimeRequiredTaintFailures(ctx *validators.Context) ([]string, error) {
+func runtimeRequiredTaintFailures(ctx *validators.Context, gate []corev1.Taint) ([]string, error) {
 	listCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
 	defer cancel()
 
@@ -670,10 +1160,10 @@ func runtimeRequiredTaintFailures(ctx *validators.Context) ([]string, error) {
 		}
 		node := &nodes.Items[i]
 		for j := range node.Spec.Taints {
-			if isRuntimeRequiredTaint(&node.Spec.Taints[j]) {
+			if isRuntimeRequiredTaint(&node.Spec.Taints[j], gate) {
 				failures = append(failures, fmt.Sprintf(
-					"node %s: still carries the runtime-required taint %s=%s:%s (nodewright tuning not complete on this node)",
-					node.Name, runtimeRequiredTaintKey, runtimeRequiredTaintValue, corev1.TaintEffectNoSchedule))
+					"node %s: still carries the runtime-required taint %s (nodewright tuning not complete on this node)",
+					node.Name, node.Spec.Taints[j].ToString()))
 				break
 			}
 		}
@@ -681,34 +1171,79 @@ func runtimeRequiredTaintFailures(ctx *validators.Context) ([]string, error) {
 	return failures, nil
 }
 
-// isRuntimeRequiredTaint reports whether t is the nodewright (skyhook)
-// runtime-required workload-gate taint. It matches on key+value and requires the
-// NoSchedule effect so an unrelated taint that happens to share the key cannot
-// mask an in-flight tuning.
-func isRuntimeRequiredTaint(t *corev1.Taint) bool {
-	return t.Key == runtimeRequiredTaintKey &&
-		t.Value == runtimeRequiredTaintValue &&
-		t.Effect == corev1.TaintEffectNoSchedule
+// isRuntimeRequiredTaint reports whether t exactly matches (key, value and
+// effect) any taint in gate. Requiring the effect too means an unrelated taint
+// that happens to share the key cannot mask an in-flight tuning.
+func isRuntimeRequiredTaint(t *corev1.Taint, gate []corev1.Taint) bool {
+	for i := range gate {
+		if t.Key == gate[i].Key && t.Value == gate[i].Value && t.Effect == gate[i].Effect {
+			return true
+		}
+	}
+	return false
 }
 
-// gatedHealthCheckSuppressed dispatches the render-aware static-assert
-// suppression for the small set of values-gated components whose registry
-// health check targets objects the effective values may legitimately
-// suppress. Every other component's assert queues unconditionally.
-// Fail-closed throughout: a render or read error propagates so a broken
-// template is never mistaken for "nothing to assert".
-func gatedHealthCheckSuppressed(goCtx context.Context, ref recipe.ComponentRef) (bool, string, error) {
+// gatedHealthCheckSuppressed reports whether the registry health check assert
+// for ref is skipped because ref's effective values gate off the objects it
+// targets. reason says why. A render or read error is returned, so a broken
+// template is never read as nothing to assert.
+func gatedHealthCheckSuppressed(ctx *validators.Context, ref recipe.ComponentRef) (suppressed bool, reason string, err error) {
 	switch ref.Name {
 	case nodewrightCustomizationsComponent:
-		//nolint:contextcheck // pre-existing ctx-less chain (expectedNodewrightNames); threading ctx through it is tracked separately from this dispatch.
 		suppressed, err := nodewrightHealthCheckSuppressed(ref)
-		return suppressed, "effective values suppress the tuning Skyhook CR (see #1844)", err
+		return suppressed, "effective values suppress the tuning Nodewright CR", err
 	case gcpDriverInstallerComponent:
-		suppressed, err := emptyRenderHealthCheckSuppressed(goCtx, ref)
+		suppressed, err := emptyRenderHealthCheckSuppressed(ctx.Ctx, ref)
 		return suppressed, "effective values gate the component off (installer.enabled=false); it renders no objects", err
+	case draNodeLabelerComponent:
+		// dra-node-labeler is opt-in: base.yaml declares it on every recipe so the
+		// dependency graph is authored once, but the bundler keeps it only when
+		// the DRA eviction contract is opted into (--dra-eviction-node-label /
+		// scheduling.draEvictionNodeLabel). On that path it persists
+		// enabled=true onto the labeler's ref, so the recipe.yaml written into
+		// the bundle renders the labeler and this check runs (#2848). The
+		// original recipe carries the default-off gate, so validating it on
+		// the default path renders no objects; suppress exactly then instead of
+		// failing NOT_FOUND on a DaemonSet the bundle never carried (#2846) —
+		// same render-aware, fail-closed shape as gcp-driver-installer.
+		suppressed, err := emptyRenderHealthCheckSuppressed(ctx.Ctx, ref)
+		return suppressed, "effective values gate the labeler off (enabled=false): this recipe does not carry the DRA eviction opt-in, so it renders no objects; validate the bundle's recipe.yaml to check the deployed set", err
 	default:
 		return false, "", nil
 	}
+}
+
+// dropDiscoverySuppressedAsserts returns asserts without the
+// nodewright-customizations assert when the cluster serves only the legacy
+// Skyhook group. When the group cannot be resolved it also omits that assert
+// and returns the first resolution error.
+func dropDiscoverySuppressedAsserts(ctx *validators.Context, asserts []chainsaw.ComponentAssert) ([]chainsaw.ComponentAssert, error) {
+	kept := make([]chainsaw.ComponentAssert, 0, len(asserts))
+	var firstErr error
+	for _, a := range asserts {
+		if a.Name != nodewrightCustomizationsComponent {
+			kept = append(kept, a)
+			continue
+		}
+		// The assert names the NodeWright kind (nodewright-operator v0.18.0+).
+		// On a legacy-only cluster the Go readiness check verifies each
+		// Skyhook by name. A cluster serving neither group keeps the assert so
+		// its failure surfaces the missing operator.
+		gvr, registered, err := resolveNodewrightGVR(ctx)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if registered && gvr == legacySkyhookGVR {
+			fmt.Printf("  [chainsaw] %s: skipped, cluster serves only the legacy %s group and the %s readiness check covers the Skyhook CRs by name\n",
+				a.Name, legacySkyhookGVR.Group, nodewrightGVR.Group)
+			continue
+		}
+		kept = append(kept, a)
+	}
+	return kept, firstErr
 }
 
 // emptyRenderHealthCheckSuppressed reports whether the component's manifests
@@ -885,14 +1420,14 @@ func expectedNodewrightNames(ref recipe.ComponentRef) ([]string, error) {
 // These patterns make three chart-shape assumptions that hold across every
 // manifest AICR ships today (tuning, no-op, tuning-gke in
 // recipes/components/nodewright-customizations/manifests/):
-//   - "kind: Skyhook" sits at column 0.
+//   - "kind: Skyhook" (or its v0.18.0 rename "kind: NodeWright") sits at column 0.
 //   - The metadata.name of each Nodewright is a literal string (not templated)
 //     at exactly 2-space indent under a top-level "metadata:" block.
 //   - Document separators use a bare "---" on its own line.
 //
 // If those shapes change, the helper's direct unit tests fail loudly.
 var (
-	nodewrightKindRE         = regexp.MustCompile(`(?m)^kind:\s*Skyhook\s*$`)
+	nodewrightKindRE         = regexp.MustCompile(`(?m)^kind:\s*(Skyhook|NodeWright)\s*$`)
 	nodewrightDocSeparatorRE = regexp.MustCompile(`(?m)^---\s*$`)
 	nodewrightMetadataNameRE = regexp.MustCompile(`(?m)^  name:\s+(\S+)\s*$`)
 )
@@ -935,12 +1470,12 @@ func extractNodewrightNamesFromManifest(content []byte) []string {
 // deployer assumption. If the upstream chart ever renames the component,
 // this constant moves with it.
 func verifyDRAKubeletPluginReady(ctx *validators.Context, namespace string) error {
-	// Upfront structural gate (mirrors verifyNodewrightReady's CRD discovery
-	// gate): fail fast on an AMBIGUOUS suffix match. More than one DaemonSet
-	// carrying the "-kubelet-plugin" role suffix is a deterministic
-	// misconfiguration (a stale DaemonSet from a prior deploy under a different
-	// fullname, or two charts) that retrying for the full poll budget cannot
-	// resolve — so surface it immediately instead of after GPUReadinessTimeout.
+	// Upfront structural gate that fails fast on an AMBIGUOUS suffix match.
+	// More than one DaemonSet carrying the "-kubelet-plugin" role suffix is a
+	// deterministic misconfiguration (a stale DaemonSet from a prior deploy
+	// under a different fullname, or two charts) that retrying for the full
+	// poll budget cannot resolve, so surface it immediately instead of after
+	// GPUReadinessTimeout.
 	// Zero-match and not-yet-ready status stay in the polled path below: the
 	// DaemonSet's pods churn to 0/0 across a GPU-node reboot, which the dwell is
 	// there to ride through.
@@ -952,20 +1487,37 @@ func verifyDRAKubeletPluginReady(ctx *validators.Context, namespace string) erro
 		return ambiguousDRAKubeletPluginError(namespace, matches)
 	}
 
+	// last is the most recently observed DaemonSet. Nothing is published if
+	// none was found.
+	var last *appsv1.DaemonSet
+	defer func() {
+		if last != nil {
+			emitExtraOrWarn(draRolloutExtra(last.Status.NumberReady, last.Status.DesiredNumberScheduled))
+		}
+	}()
+
 	// Poll until the kubelet-plugin DaemonSet is fully rolled out continuously
 	// for the stability window, or the budget elapses. See pkg/defaults
 	// GPUReadiness* for sizing.
-	var healthyName string
 	return pollUntilStable(ctx,
 		fmt.Sprintf("DRA kubelet-plugin DaemonSet in namespace %s", namespace),
 		func() error {
-			name, probeErr := draKubeletPluginProbe(ctx, namespace)
-			healthyName = name
+			ds, probeErr := draKubeletPluginProbe(ctx, namespace)
+			if ds != nil {
+				last = ds
+			}
 			return probeErr
 		},
 		func() {
-			fmt.Printf("  DaemonSet %s/%s: healthy (stable ≥%s)\n", namespace, healthyName, gpuReadinessStabilityWindow)
+			fmt.Printf("  DaemonSet %s/%s: healthy (stable ≥%s)\n", namespace, last.Name, gpuReadinessStabilityWindow)
 		})
+}
+
+func draRolloutExtra(ready, desired int32) map[string]string {
+	return map[string]string{
+		validators.ExtraKeyDRAReady:   strconv.Itoa(int(ready)),
+		validators.ExtraKeyDRADesired: strconv.Itoa(int(desired)),
+	}
 }
 
 // listDRAKubeletPluginDaemonSets lists DaemonSets in the namespace and returns
@@ -1004,51 +1556,52 @@ func ambiguousDRAKubeletPluginError(namespace string, matches []appsv1.DaemonSet
 			len(matches), namespace, draKubeletPluginSuffix, formatNames(matchedNames)))
 }
 
-// draKubeletPluginProbe does one readiness pass: it locates the kubelet-plugin
-// DaemonSet by name suffix and reports nil (plus the DaemonSet name) when it is
-// fully rolled out, or an error describing the unhealthy/missing state. The
-// ambiguous (>1 match) case is caught fail-fast upstream in
-// verifyDRAKubeletPluginReady; the guard here only fires if a second matching
-// DaemonSet appears mid-poll.
-func draKubeletPluginProbe(ctx *validators.Context, namespace string) (string, error) {
+// draKubeletPluginProbe returns the kubelet-plugin DaemonSet in namespace and
+// a nil error if it is fully rolled out. The DaemonSet is nil unless exactly
+// one matches, and the error describes a missing, ambiguous, or unready
+// plugin.
+func draKubeletPluginProbe(ctx *validators.Context, namespace string) (*appsv1.DaemonSet, error) {
 	matches, seenNames, err := listDRAKubeletPluginDaemonSets(ctx, namespace)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	switch len(matches) {
 	case 0:
-		return "", errors.New(errors.ErrCodeNotFound,
+		return nil, errors.New(errors.ErrCodeNotFound,
 			fmt.Sprintf("no kubelet-plugin DaemonSet (name suffix %q) found in namespace %s (DaemonSets in namespace: %s)",
 				draKubeletPluginSuffix, namespace, formatNames(seenNames)))
 	case 1:
 		// proceed
 	default:
-		return "", ambiguousDRAKubeletPluginError(namespace, matches)
+		// verifyDRAKubeletPluginReady fails fast on this before polling, so it
+		// fires only if a second match appears mid-poll.
+		return nil, ambiguousDRAKubeletPluginError(namespace, matches)
 	}
 
-	ds := matches[0]
+	ds := &matches[0]
 	if ds.Status.DesiredNumberScheduled == 0 || ds.Status.NumberReady == 0 {
-		return ds.Name, errors.New(errors.ErrCodeInternal,
+		return ds, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("DaemonSet %s/%s: no ready kubelet-plugin pods scheduled (%d/%d pods ready)",
 				namespace, ds.Name, ds.Status.NumberReady, ds.Status.DesiredNumberScheduled))
 	}
 	if ds.Status.NumberReady < ds.Status.DesiredNumberScheduled {
-		return ds.Name, errors.New(errors.ErrCodeInternal,
+		return ds, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("DaemonSet %s/%s: not healthy: %d/%d pods ready",
 				namespace, ds.Name, ds.Status.NumberReady, ds.Status.DesiredNumberScheduled))
 	}
 
-	return ds.Name, nil
+	return ds, nil
 }
 
 // recipeDeclaresRDMAFabric reports whether a network-operator ComponentRef
-// stands up an RDMA fabric on this cluster — i.e. it declares the AKS
-// NicClusterPolicy manifest that creates MOFED + the rdma-shared-device-plugin
+// stands up an RDMA fabric on this cluster — i.e. it declares a
+// NicClusterPolicy manifest that creates an RDMA device plugin
 // (nicClusterPolicyManifestMarker). When true, a GPU node that does not yet
-// advertise aksRDMASharedResource is "still converging", so verifyRDMAFabricReady
-// waits for it; when false (kind's single-node nvkind, talos' namespace-only
-// ref) there is no shared fabric to gate on and the check is skipped.
+// advertise the manifest-derived fabric resource is "still converging", so
+// verifyRDMAFabricReady waits for it; when false (kind's single-node nvkind,
+// talos' namespace-only ref) there is no shared fabric to gate on and the
+// check is skipped.
 //
 // Sibling predicate: pkg/bundler/readiness.go's
 // recipeAttachesNicClusterPolicy encodes the same "does this recipe stand
@@ -1070,7 +1623,8 @@ func recipeDeclaresRDMAFabric(ref recipe.ComponentRef) bool {
 }
 
 // verifyRDMAFabricReady blocks the deployment gate until the network operator's
-// shared RDMA device (helper.AKSRdmaSharedResource) is allocatable in a uniform,
+// shared RDMA device (fabricResource, derived from the recipe's own
+// NicClusterPolicy manifest by rdmaFabricResource) is allocatable in a uniform,
 // positive count across every Mellanox RDMA-capable GPU node, held continuously for the
 // stability window.
 //
@@ -1098,19 +1652,19 @@ func recipeDeclaresRDMAFabric(ref recipe.ComponentRef) bool {
 // so it survives the default redaction policy into the signed bundle (#1951/#1952) —
 // a cordoned node narrowing the fabric cohort can no longer hide behind a
 // stdout-only line the publisher strips.
-func verifyRDMAFabricReady(ctx *validators.Context) error {
+func verifyRDMAFabricReady(ctx *validators.Context, fabricResource string) error {
 	// Production emit seam: publish the structured coverage as an EmitExtra
 	// sentinel. verifyRDMAFabricReadyEmit injects it so tests can record the eager
 	// floor and terminal disclosures without capturing the EmitExtra stdout
 	// transport (which lives in the validators package).
-	return verifyRDMAFabricReadyEmit(ctx, func(validated, total int) {
+	return verifyRDMAFabricReadyEmit(ctx, fabricResource, func(validated, total int) {
 		emitExtraOrWarn(rdmaFabricCoverageExtra(validated, total))
 	})
 }
 
 // verifyRDMAFabricReadyEmit is verifyRDMAFabricReady with the structured
 // coverage emit injected. See verifyRDMAFabricReady for the gate contract.
-func verifyRDMAFabricReadyEmit(ctx *validators.Context, emitCoverage func(validated, total int)) error {
+func verifyRDMAFabricReadyEmit(ctx *validators.Context, fabricResource string, emitCoverage func(validated, total int)) error {
 	var coverage rdmaFabricCoverage
 	// emittedEarly gates the eager disclosure floor to exactly one emit.
 	var emittedEarly bool
@@ -1120,28 +1674,31 @@ func verifyRDMAFabricReadyEmit(ctx *validators.Context, emitCoverage func(valida
 	// each tick — the settled disclosure must land exactly once, at the final
 	// outcome).
 	err := pollUntilStable(ctx,
-		fmt.Sprintf("RDMA shared-device fabric (%s) across RDMA GPU nodes", helper.AKSRdmaSharedResource),
+		fmt.Sprintf("RDMA shared-device fabric (%s) across RDMA GPU nodes", fabricResource),
 		func() error {
-			cov, probeErr := rdmaFabricProbeCoverage(ctx)
+			cov, probeErr := rdmaFabricProbeCoverage(ctx, fabricResource)
 			coverage = cov
 			// Eager disclosure floor: emit the structured coverage once, on the
 			// first observation that actually enumerated an RDMA-candidate node,
-			// so a cordoned node narrowing the cohort survives even if the Job's
-			// activeDeadlineSeconds SIGKILLs the process mid-poll before the
-			// terminal emit runs. The catalog timeout feeds both the Job deadline
-			// and this poll budget with no margin (pkg/validator/v1/job_plan.go),
-			// so an exhausted never-ready poll (every RDMA node cordoned for
-			// maintenance, or a rollout slower than the budget) can be killed at
-			// the deadline with no terminal emit. parseExtraSentinels keeps the
-			// LAST valid sentinel, so a clean exit's terminal emit wins and a
-			// deadline kill leaves this floor as the disclosure of record.
+			// so a cordoned node narrowing the cohort survives even if the
+			// process never reaches the terminal emit below. The catalog timeout
+			// bounds this poll (AICR_CHECK_TIMEOUT); the Job's
+			// activeDeadlineSeconds now adds defaults.ValidatorJobDeadlineHeadroom
+			// on top (pkg/validator/v1/job_plan.go), so an exhausted never-ready
+			// poll (every RDMA node cordoned for maintenance, or a rollout slower
+			// than the budget) has margin to unwind and reach the terminal emit
+			// before the Job's SIGKILL. Sentinels merge key-wise with later
+			// values winning, so a clean exit's terminal emit overwrites this
+			// floor's counts, and the floor is the disclosure of record only
+			// when the process is still killed before reaching it.
 			// validated=0: nothing is certified mid-poll. Only the structured
 			// Extra is emitted eagerly (not the stdout enumeration) — the Extra is
 			// the piece that survives redaction into the signed bundle (#1951/
 			// #1952), and duplicating stdout would spam divergent counts. The
-			// broader no-margin kill race predates this gate and is tracked
-			// separately; this closes only the gate's own every-terminal-outcome
-			// coverage contract.
+			// broader no-margin kill race (#2473) is now bounded generally by
+			// defaults.ValidatorJobDeadlineHeadroom; this floor remains
+			// defense-in-depth for a probe call that blocks past its own
+			// poll-budget cancellation.
 			if !emittedEarly && cov.total() > 0 {
 				emittedEarly = true
 				emitCoverage(0, cov.total())
@@ -1166,13 +1723,13 @@ func verifyRDMAFabricReadyEmit(ctx *validators.Context, emitCoverage func(valida
 	// ctrfExtraAllowlist (see pkg/evidence/redact): their semantics fit exactly —
 	// validated = schedulable RDMA nodes with uniform allocatable fabric, total =
 	// all RDMA-candidate nodes incl cordoned. No new key or skipReason enum is
-	// minted (the RDMA gate never "skips" — it fails closed), so the redaction
-	// PolicyVersion stays v2.
+	// minted (the RDMA gate never "skips" — it fails closed), so this gate did
+	// not move the redaction PolicyVersion.
 	emitCoverage(validated, coverage.total())
 
 	if err == nil {
 		fmt.Printf("  RDMA fabric (%s): allocatable (uniform) on all %d schedulable RDMA GPU node(s) (stable ≥%s)\n",
-			helper.AKSRdmaSharedResource, coverage.schedulable, gpuReadinessStabilityWindow)
+			fabricResource, coverage.schedulable, gpuReadinessStabilityWindow)
 	}
 	return err
 }
@@ -1243,13 +1800,13 @@ func rdmaFabricCoverageExtra(validated, total int) map[string]string {
 // then validates only the schedulable cohort: nodes carrying the NicClusterPolicy
 // nodeAffinity label helper.PCIMellanoxPresentLabel. It returns nil — plus the
 // coverage partition — only when every schedulable such node advertises
-// helper.AKSRdmaSharedResource in a uniform, positive count. It fails closed on a
+// fabricResource in a uniform, positive count. It fails closed on a
 // List error and when no schedulable RDMA GPU node is observed yet: "could not
 // observe the fabric" must never read as "fabric ready". The returned error rides
 // the poll's dwell reset like any other unhealthy sample; the coverage is
 // returned alongside every error so the terminal disclosure can still name the
 // cordoned nodes it saw.
-func rdmaFabricProbeCoverage(ctx *validators.Context) (rdmaFabricCoverage, error) {
+func rdmaFabricProbeCoverage(ctx *validators.Context, fabricResource string) (rdmaFabricCoverage, error) {
 	listCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
 	defer cancel()
 
@@ -1263,7 +1820,7 @@ func rdmaFabricProbeCoverage(ctx *validators.Context) (rdmaFabricCoverage, error
 			"failed to list nodes for the RDMA fabric readiness gate")
 	}
 
-	fabric := corev1.ResourceName(helper.AKSRdmaSharedResource)
+	fabric := corev1.ResourceName(fabricResource)
 	type rdmaNode struct {
 		name  string
 		count int64
@@ -1323,8 +1880,8 @@ func rdmaFabricProbeCoverage(ctx *validators.Context) (rdmaFabricCoverage, error
 	if len(notReady) > 0 {
 		return coverage, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("%s not yet allocatable on %d of %d RDMA GPU node(s): %s "+
-				"(network operator MOFED / rdma-shared-device-plugin still rolling out)",
-				helper.AKSRdmaSharedResource, len(notReady), len(cohort), formatNames(notReady)))
+				"(network operator MOFED / RDMA device plugin still rolling out)",
+				fabricResource, len(notReady), len(cohort), formatNames(notReady)))
 	}
 
 	// All present and positive: require a uniform count, matching the NCCL
@@ -1340,7 +1897,7 @@ func rdmaFabricProbeCoverage(ctx *validators.Context) (rdmaFabricCoverage, error
 	if len(skew) > 0 {
 		return coverage, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("%s allocatable count is non-uniform across %d RDMA GPU node(s) (want all == %d): %s",
-				helper.AKSRdmaSharedResource, len(cohort), want, formatNames(skew)))
+				fabricResource, len(cohort), want, formatNames(skew)))
 	}
 	return coverage, nil
 }

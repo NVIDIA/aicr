@@ -13,6 +13,8 @@ alias aicrup='curl -sfL https://get.aicr.run | bash -s -- -d ~/.local/bin'
 
 ```bash
 # 1. Clone and setup
+#    Without write access to NVIDIA/aicr, fork it on GitHub, clone your fork
+#    instead, then: git remote add upstream https://github.com/NVIDIA/aicr.git
 git clone https://github.com/NVIDIA/aicr.git && cd aicr
 make tools-setup    # Install all required tools (first-time)
 make tools-update   # Upgrade existing tools to versions in .settings.yaml
@@ -24,7 +26,7 @@ make lint           # Run linters
 make build          # Build binaries
 
 # 3. Before submitting PR
-make qualify        # Full check: test-coverage + lint + tuning-check + e2e + scan + license-check + api-diff + openapi-diff
+make qualify        # Full check: test-coverage + lint + tuning-check + coverage-check + e2e + scan + license-check + api-diff + openapi-diff
 ```
 
 ## Prerequisites
@@ -33,11 +35,11 @@ make qualify        # Full check: test-coverage + lint + tuning-check + e2e + sc
 
 | Tool | Purpose | Installation |
 |------|---------|--------------|
-| **Go 1.26+** | Language runtime | [golang.org/dl](https://golang.org/dl/) |
+| **Go 1.27+** | Language runtime (exact CI toolchain pinned in `.go-version`) | [golang.org/dl](https://golang.org/dl/) |
 | **make** | Build automation | Pre-installed on macOS; `apt install make` on Ubuntu/Debian |
 | **git** | Version control | Pre-installed on most systems |
 | **Docker** | Container builds | [docs.docker.com/get-docker](https://docs.docker.com/get-docker/) |
-| **yq** | YAML processing | Required for `make tools-setup/check`. See [github.com/mikefarah/yq](https://github.com/mikefarah/yq) |
+| **yq** | YAML processing | Installed by `make tools-setup`: the pinned version on Linux, via Homebrew on macOS. `make tools-check` needs it |
 
 ### Development Tools (installed by `make tools-setup`)
 
@@ -70,11 +72,9 @@ On Ubuntu 24.04+ and other systems using PEP 668, system-wide pip installs are b
 sudo apt-get install -y make git curl pipx
 pipx ensurepath
 pipx install yamllint
-
-# Install yq
-sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-sudo chmod +x /usr/local/bin/yq
 ```
+
+`make tools-setup` installs yq itself, at the version pinned in `.settings.yaml`, checksum-verified. It keeps a yq that is already on `PATH`, so run `make tools-update` to replace a hand-installed one.
 
 ## Development Setup
 
@@ -136,7 +136,7 @@ Edit `.settings.yaml` to update versions; changes propagate everywhere automatic
 After installing tools:
 
 ```bash
-# Format, tidy dependencies; regenerate THIRD_PARTY_NOTICES.md
+# Format code and tidy dependencies
 make tidy
 
 # Run full qualification to ensure setup is correct
@@ -218,7 +218,8 @@ make test-coverage
 ### 4. Lint Your Code
 
 ```bash
-# Run all linters (Go, YAML, license headers, agents sync, docs filename/MDX gates, chart-version pins)
+# Run all linters (Go, YAML, license headers, agents sync, docs gates, chart-version pins,
+# vendored Go proxy action digests, upgrade records, Dynamo runtime image tag)
 make lint
 
 # Or run individually for a faster loop (all of these already run as part of `make lint`)
@@ -229,11 +230,22 @@ make license      # Add/verify license headers (may modify files)
 # Docs published to Fern are parsed as MDX; both checks gate the merge
 make check-docs-mdx        # fast pattern approximation (no dependencies)
 make check-docs-mdx-parse  # real MDX parser, authoritative (needs Node 20+)
+
+# YAML-labelled code blocks throughout docs/ must contain parseable YAML
+make check-docs-yaml       # syntax only; partial YAML fragments are valid
+
+# Shell code blocks in docs/ must not use <placeholder>s that bash reads as redirection
+make check-docs-shell
 ```
 
 `check-docs-mdx-parse` warns and skips when Node is unavailable locally, but
 hard-fails in CI. See
 [Docs MDX Gate](docs/contributor/tests.md#docs-mdx-gate).
+
+`check-docs-yaml` and `check-docs-shell` have the same local-warning and
+CI-hard-fail behavior for a missing Node runtime. See
+[Docs YAML Fence Gate](docs/contributor/tests.md#docs-yaml-fence-gate) and
+[Docs Shell Placeholder Gate](docs/contributor/tests.md#docs-shell-placeholder-gate).
 
 ### 5. Run E2E Tests
 
@@ -263,7 +275,7 @@ Before submitting a PR, run everything:
 make qualify
 ```
 
-This runs: `test-coverage` → `lint` → `tuning-check` → `e2e` → `scan` → `license-check` → `api-diff` → `openapi-diff`
+This runs: `test-coverage` → `lint` → `tuning-check` → `coverage-check` → `e2e` → `scan` → `license-check` → `api-diff` → `openapi-diff`
 
 ## Local Kubernetes Development
 
@@ -315,7 +327,7 @@ make tilt-up
 The Tilt UI at http://localhost:10350 shows:
 - Build status for `aicrd`
 - Pod logs and status
-- Port forwards (API: 8080, Metrics: 9090)
+- Port forward (API and metrics: 8080)
 
 #### 3. Develop with Hot Reload
 
@@ -338,7 +350,7 @@ curl http://localhost:8080/ready
 curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks&accelerator=h100&intent=training"
 
 # View metrics
-curl http://localhost:9090/metrics
+curl http://localhost:8080/metrics
 ```
 
 #### 5. View Logs
@@ -428,8 +440,7 @@ curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks&accelerator=h100&int
 │       │                                                 │
 │       │ Port Forwards                                   │
 │       ▼                                                 │
-│  localhost:8080 (API)                                   │
-│  localhost:9090 (Metrics)                               │
+│  localhost:8080 (API and /metrics)                      │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -444,13 +455,13 @@ make kwok-e2e RECIPE=gb200-eks-training # Test single recipe
 
 Recipes with `spec.criteria.service` defined are auto-discovered. KWOK validates scheduling (node selectors, tolerations, resource requests) but not runtime behavior (no container execution or GPU functionality).
 
-For the deployer matrix (argocd / argocd-helm OCI lanes), see [Deployer Coverage Matrix](docs/contributor/tests.md#deployer-coverage-matrix).
+For the deployer matrix (Argo CD and Flux, OCI and Git source lanes), see [Deployer Coverage Matrix](docs/contributor/tests.md#deployer-coverage-matrix).
 
 | Command | Description |
 |---------|-------------|
 | `make kwok-test-all` | Test all recipes in shared cluster (serial) |
 | `make kwok-e2e RECIPE=<name>` | Full e2e: cluster, nodes, validate |
-| `make kwok-test-deployer RECIPE=<name> DEPLOYER=<name>` | Validate single recipe under a specific deployer (`helm`, `argocd-oci`, `argocd-helm-oci`) |
+| `make kwok-test-deployer RECIPE=<name> DEPLOYER=<name>` | Validate single recipe under a specific deployer (`helm`, `argocd-oci`, `argocd-helm-oci`, `argocd-git`, `flux-oci`, `flux-git`) |
 | `make kwok-test RECIPE=<name>` | Validate bundle scheduling on an existing KWOK cluster |
 | `make kwok-cluster` | Create Kind cluster with KWOK |
 | `make kwok-nodes RECIPE=<name>` | Create KWOK nodes from a recipe overlay |
@@ -466,10 +477,10 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 
 | Target | Description |
 |--------|-------------|
-| `make qualify` | Full qualification (test-coverage, lint, tuning-check, e2e, scan, license-check, api-diff, openapi-diff) |
+| `make qualify` | Full qualification (test-coverage, lint, tuning-check, coverage-check, e2e, scan, license-check, api-diff, openapi-diff) |
 | `make test` | Unit tests with race detector and coverage |
 | `make test-coverage` | Tests with coverage threshold (from `.settings.yaml` `quality.coverage_threshold`) |
-| `make lint` | Lint Go and YAML; verify license headers, agents sync, docs filename/MDX gates, and chart-version pins |
+| `make lint` | Lint Go and YAML; verify license headers, agents sync, docs gates, chart-version pins, vendored Go proxy action digests, upgrade records, and the Dynamo runtime image tag |
 | `make lint-go` | Go linting only |
 | `make lint-yaml` | YAML linting only |
 | `make e2e` | CLI end-to-end tests |
@@ -479,7 +490,7 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 | `make kwok-test-all` | Test all recipes with KWOK (serial, shared cluster) |
 | `make kwok-e2e RECIPE=<name>` | Test single recipe with KWOK (e.g., gb200-eks-training) |
 | `make check-health COMPONENT=<name>` | Run chainsaw health check directly against Kind cluster |
-| `make check-health-all` | Run all chainsaw health checks against Kind cluster |
+| `make check-health-all` | Run chainsaw health checks for every registry-linked component against Kind cluster (opt-in-only checks like `nvsentinel-observability` run via `check-health COMPONENT=<name>`) |
 | `make validate-local RECIPE=<path>` | Build validator image, load into Kind, run deployment validation |
 
 ### Build & Release
@@ -535,7 +546,8 @@ Verify a bundle with `aicr verify <dir>`. Update the trusted root cache with
 
 | Target | Description |
 |--------|-------------|
-| `make tidy` | Format, tidy dependencies; regenerate THIRD_PARTY_NOTICES.md |
+| `make tidy` | Format code and tidy dependencies |
+| `make notices` | Generate `THIRD_PARTY_NOTICES.md` (untracked; `make release` runs it) |
 | `make fmt-check` | Check code formatting (CI-friendly) |
 | `make upgrade` | Upgrade all dependencies |
 | `make generate` | Run go generate |
@@ -556,7 +568,6 @@ Verify a bundle with `aicr verify <dir>`. Update the trusted root cache with
 |--------|-------------|
 | `make info` | Print project info (version, commit, tools) |
 | `make docs` | Serve Go documentation on localhost:6060 |
-| `make demos` | Create demo GIFs (requires vhs) |
 | `make clean` | Clean build artifacts |
 | `make clean-all` | Deep clean including module cache |
 | `make cleanup` | Clean up AICR Kubernetes resources |
@@ -588,11 +599,14 @@ nvidia-uvm`). The cleanup script detects driver-managed mode (via the
 prints this guidance; the fix is to reboot the GPU nodes before reinstalling:
 
 ```bash
-kubectl cordon <gpu-node>            # each GPU node
+NODE="my-gpu-node"                 # replace with a GPU node; repeat for each one
+INSTANCE_ID="i-0123456789abcdef0"  # replace with the instance ID at the end of its .spec.providerID
+
+kubectl cordon "${NODE}"
 # reboot the instances, e.g. on EKS:
-aws ec2 reboot-instances --instance-ids <ids>
+aws ec2 reboot-instances --instance-ids "${INSTANCE_ID}"
 # wait for the nodes to report Ready, then
-kubectl uncordon <gpu-node>
+kubectl uncordon "${NODE}"
 ```
 
 ### Excluding Out-of-Band Installs from Cleanup
@@ -601,19 +615,24 @@ On shared or bring-up clusters, a registry component may be deliberately
 installed and owned outside AICR (for example, nodewright/skyhook installed
 out-of-band by the platform team, with the AICR recipe intentionally excluding
 it). Stock `tools/cleanup` would otherwise destroy such an install three ways:
-the Helm uninstall in its namespace, the CRD pattern match, and the namespace
+the Helm uninstall in its namespace, the CRD group match, and the namespace
 deletion. Fence it out of all three phases:
 
 ```bash
-tools/cleanup --exclude-ns skyhook --exclude-crd skyhook.nvidia.com
+tools/cleanup --exclude-ns skyhook --exclude-crd skyhook.nvidia.com,nodewright.nvidia.com
 ```
 
 Both flags are repeatable and accept comma-separated values. `--exclude-ns`
 protects a namespace from Helm uninstall and namespace deletion; `--exclude-crd`
-protects CRDs whose name contains the given match from deletion, applied *after*
-pattern matching so a broad pattern (`nvidia.com`) cannot pull an excluded
-group's CRDs (`skyhook.nvidia.com`) back in. Run with `--dry-run` first to
-confirm what will and will not be removed.
+protects CRDs whose name contains the given match from deletion. It is applied
+*after* group matching, so it can fence out a group AICR otherwise owns
+(`skyhook.nvidia.com`, and its v0.18.0 rename `nodewright.nvidia.com`). Run
+with `--dry-run` first to confirm what will and will not be removed.
+
+Phase 3 only deletes CRDs whose API group exactly matches a group AICR
+components install (`AICR_CRD_GROUPS` in `tools/cleanup`). An unrelated
+`*.nvidia.com` group, such as a third-party harness, is never matched and needs
+no `--exclude-crd`.
 
 ### Debugging Tests
 
@@ -646,7 +665,7 @@ make server
 make cluster-status
 
 # View Tilt logs
-tilt logs -f tilt/Tiltfile
+tilt logs -f
 
 # Reset everything
 make dev-reset
@@ -670,7 +689,8 @@ Runs chainsaw directly against the Kind cluster. Fast (~5s), validates YAML synt
 # Run health check for a single component
 make check-health COMPONENT=nvsentinel
 
-# Run all health checks
+# Run health checks for every registry-linked component
+# (opt-in-only checks are excluded; run those with check-health COMPONENT=<name>)
 make check-health-all
 
 # List available components
@@ -835,12 +855,12 @@ For detailed information on adding validation checks and constraint validators, 
 **[docs/contributor/validator.md](docs/contributor/validator.md)**
 
 This comprehensive guide covers:
-- Architecture overview (Job-based validation, test registration framework)
-- Quick start with code generator: `make generate-validator`
-- How-to guides for adding checks and constraint validators
-- Testing patterns (unit tests vs integration tests)
-- Enforcement mechanisms (automated registration validation)
-- Troubleshooting common issues
+- Declarative constraints and the constraint evaluation algorithm
+- Quick start for adding a container-per-validator check
+- The container contract and the `validators.Context` API
+- Component validations (bundle-time)
+- Chainsaw health checks
+- Testing checklist and common pitfalls
 
 ## Additional Resources
 
@@ -848,7 +868,7 @@ This comprehensive guide covers:
 - [Architecture Overview](docs/contributor/index.md) - System design and components
 - [CLI Architecture](docs/contributor/cli.md) - CLI command structure
 - [Data Architecture](docs/contributor/recipe.md) - Recipe data model
-- [Components](docs/contributor/component.md) - Creating new bundlers
+- [Components](docs/contributor/component.md) - Adding components to the registry
 
 ### External Resources
 - [Go Documentation](https://golang.org/doc/)

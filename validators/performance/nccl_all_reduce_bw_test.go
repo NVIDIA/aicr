@@ -15,11 +15,17 @@
 package main
 
 import (
+	"encoding/json"
 	stderrors "errors"
+	"maps"
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	"github.com/NVIDIA/aicr/validators"
 )
 
@@ -143,10 +149,135 @@ func TestClassifyNCCLAllReduceBWResult(t *testing.T) {
 				if validators.IsSkip(err) {
 					t.Fatalf("expected a blocking failure, got a Skip: %v", err)
 				}
-				if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+				if errorstest.ReportedCode(err) != tt.wantCode {
 					t.Fatalf("expected error code %q, got %v", tt.wantCode, err)
 				}
 			}
 		})
 	}
+}
+
+// extraFromStdout returns the Extra sentinels in out, merged as the
+// orchestrator merges them.
+func extraFromStdout(t *testing.T, out string) map[string]string {
+	t.Helper()
+	merged := map[string]string{}
+	for line := range strings.SplitSeq(out, "\n") {
+		payload, ok := strings.CutPrefix(line, ctrf.ExtraLinePrefix)
+		if !ok {
+			continue
+		}
+		var m map[string]string
+		if err := json.Unmarshal([]byte(payload), &m); err != nil {
+			t.Fatalf("malformed extra sentinel %q: %v", line, err)
+		}
+		maps.Copy(merged, m)
+	}
+	return merged
+}
+
+func TestNCCLScopeExtra(t *testing.T) {
+	tests := []struct {
+		name    string
+		variant ncclVariant
+		fabric  ncclFabricType
+		want    map[string]string
+	}{
+		{
+			name:    "nvls with no published fabric",
+			variant: variantNVLS,
+			want: map[string]string{
+				"transport": "nvls", "thresholdGbps": "300", "tolerancePct": "10",
+				"workerNodes": "2", "gpusInvolved": "16",
+			},
+		},
+		{
+			name:    "net variant on the EKS RoCE path",
+			variant: variantNET,
+			fabric:  fabricRoCE,
+			want: map[string]string{
+				"transport": "net", "fabric": "roce", "thresholdGbps": "300", "tolerancePct": "10",
+				"workerNodes": "2", "gpusInvolved": "16",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ncclScopeExtra(tt.variant, tt.fabric, 300, 2, 16)
+			if !maps.Equal(got, tt.want) {
+				t.Errorf("ncclScopeExtra() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNCCLPublishedFabric(t *testing.T) {
+	tests := []struct {
+		name          string
+		variant       ncclVariant
+		customRuntime string
+		service       recipe.CriteriaServiceType
+		want          ncclFabricType
+	}{
+		{"baked-in EKS NET template uses the selector", variantNET, "", recipe.CriteriaServiceEKS, fabricEFA},
+		{"default variant never receives the selector", variantDefault, "", recipe.CriteriaServiceEKS, ""},
+		{"nvls variant never receives the selector", variantNVLS, "", recipe.CriteriaServiceEKS, ""},
+		{"GKE template ignores the selector", variantNET, "", recipe.CriteriaServiceGKE, ""},
+		{"recipe-supplied runtime owns its fabric", variantNET, "runtime.yaml", recipe.CriteriaServiceEKS, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ncclPublishedFabric(tt.variant, fabricEFA, tt.customRuntime, tt.service); got != tt.want {
+				t.Errorf("ncclPublishedFabric() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNCCLBandwidthExtra(t *testing.T) {
+	tests := []struct {
+		name      string
+		bandwidth float64
+		threshold float64
+		want      map[string]string
+	}{
+		{"barely over the threshold", 305.44, 300, map[string]string{"achievedGbps": "305.4", "passMargin": "+1.8"}},
+		{"inside the tolerance band", 285, 300, map[string]string{"achievedGbps": "285", "passMargin": "-5"}},
+		{"far above", 850, 300, map[string]string{"achievedGbps": "850", "passMargin": "+183.3"}},
+		{"zero threshold omits the margin", 120, 0, map[string]string{"achievedGbps": "120"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ncclBandwidthExtra(tt.bandwidth, tt.threshold); !maps.Equal(got, tt.want) {
+				t.Errorf("ncclBandwidthExtra() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNCCLSkipsPublishReason(t *testing.T) {
+	t.Run("no constraint in recipe", func(t *testing.T) {
+		var err error
+		out := captureStdout(t, func() {
+			err = checkNCCLAllReduceBWVariant(&validators.Context{Ctx: t.Context()}, variantNVLS)
+		})
+		if !validators.IsSkip(err) {
+			t.Fatalf("want a Skip, got %v", err)
+		}
+		if got := extraFromStdout(t, out)["skipReason"]; got != validators.SkipReasonNoConstraint {
+			t.Errorf("skipReason = %q, want %q", got, validators.SkipReasonNoConstraint)
+		}
+	})
+	t.Run("no validation input", func(t *testing.T) {
+		var actual string
+		out := captureStdout(t, func() {
+			actual, _, _ = validateNcclAllReduceBw(&validators.Context{Ctx: t.Context()}, recipe.Constraint{}, variantNET)
+		})
+		if actual != skipMsgNCCLNoInput {
+			t.Fatalf("actual = %q, want %q", actual, skipMsgNCCLNoInput)
+		}
+		if got := extraFromStdout(t, out)["skipReason"]; got != validators.SkipReasonNoValidationInput {
+			t.Errorf("skipReason = %q, want %q", got, validators.SkipReasonNoValidationInput)
+		}
+	})
 }

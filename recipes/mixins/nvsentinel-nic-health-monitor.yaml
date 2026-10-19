@@ -1,0 +1,52 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Opt-in mixin: turns on NVSentinel's nic-health-monitor subchart, which
+# detects Mellanox ConnectX link-state faults (port down, NIC off the PCIe
+# bus) and link-counter degradation (link_downed, buffer overruns, symbol
+# errors). Off in the chart by default; the aks and oke-ol overlays
+# reference this mixin, so those two families ship it on.
+#
+# PLATFORM-SCOPED, NOT UNIVERSAL. Upstream's support matrix has one row --
+# "Mellanox/NVIDIA InfiniBand and RoCE devices only" -- so this is
+# referenced from the AKS and OKE roots only, the two families that deploy
+# network-operator/ConnectX. EKS uses aws-efa and GKE COS uses
+# gke-nccl-tcpxo; neither exposes mlx5 devices, so the monitor would run
+# and find nothing. Kind's network-operator is simulated, with no real NICs
+# behind it. See docs/user/component-catalog.md.
+#
+# STORE_ONLY, deliberately. The chart default is EXECUTE_REMEDIATION and
+# several counters (link_downed among them) treat any increment as fatal,
+# whose remediation is REPLACE_VM -- the most destructive action in the
+# pipeline. Observation only until real coverage is measured.
+#
+# metadataCollector is a hard dependency: the monitor reads
+# /var/lib/nvsentinel/gpu_metadata.json for GPU-to-NIC topology and cannot
+# discover devices without it. That pairing is enforced at bundle time by
+# CheckNVSentinelNicHealthMonitorRequiresMetadataCollector, because a
+# missing dependency renders and deploys silently.
+
+kind: RecipeMixin
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: nvsentinel-nic-health-monitor
+spec:
+  componentRefs:
+    - name: nvsentinel
+      overrides:
+        global:
+          nicHealthMonitor:
+            enabled: true
+        nic-health-monitor:
+          processingStrategy: STORE_ONLY

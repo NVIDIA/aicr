@@ -27,7 +27,9 @@ import (
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 )
 
-const sampleRecipeYAML = `criteria:
+const sampleRecipeYAML = `apiVersion: aicr.run/v1
+kind: RecipeResult
+criteria:
   service: eks
   accelerator: h100
   os: ubuntu
@@ -67,6 +69,7 @@ func samplePredicate() *attestation.Predicate {
 		SchemaVersion: attestation.PredicateSchemaVersion,
 		AttestedAt:    time.Date(2026, 6, 25, 5, 57, 23, 0, time.UTC),
 		AICRVersion:   "dev",
+		AICRCommit:    "0123456789abcdef0123456789abcdef01234567",
 		Recipe:        attestation.RecipeRef{Name: "h100-eks-ubuntu-training-kubeflow", Digest: "sha256:deadbeef"},
 		Fingerprint:   fingerprint.Fingerprint{K8sVersion: fingerprint.Dimension{Value: "1.35.5-eks-a3a0722"}},
 		Manifest:      attestation.ManifestRef{Digest: "sha256:32ee00e3b6e9", FileCount: 6},
@@ -132,6 +135,7 @@ func TestSynthesize_HappyPath(t *testing.T) {
 		"signer.class":     {string(m.Signer.Class), string(ClassFirstParty)},
 		"runId":            {m.RunID, "run-20260625T0557"},
 		"aicrVersion":      {m.AICRVersion, "dev"},
+		"aicrCommit":       {m.AICRCommit, "0123456789abcdef0123456789abcdef01234567"},
 		"k8sVersion":       {m.K8sVersion, "1.35.5-eks-a3a0722"},
 		"k8sConstraint":    {m.K8sConstraint, ">= 1.32.4"},
 		"bundleDigest":     {m.BundleDigest, "sha256:32ee00e3b6e9"},
@@ -171,12 +175,28 @@ func TestSynthesize_HappyPath(t *testing.T) {
 	}
 }
 
+func TestSynthesize_CommitlessPredicateOmitsCommit(t *testing.T) {
+	in := baseInput(t)
+	in.Predicate.AICRCommit = ""
+	res, err := Synthesize(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Synthesize: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(res.RunDir, MetaFilename))
+	if err != nil {
+		t.Fatalf("read meta.json: %v", err)
+	}
+	if strings.Contains(string(raw), `"aicrCommit"`) {
+		t.Errorf("commit-less meta.json unexpectedly carries an aicrCommit key:\n%s", raw)
+	}
+}
+
 func TestSynthesize_ProfiledRecipeSuffixedTab(t *testing.T) {
 	// A profile-bearing recipe lands under a tab suffixed with the shared
 	// lowercase profile segment, so runs from two values of one profile
 	// family occupy distinct tabs instead of overwriting each other.
 	in := baseInput(t)
-	in.BundleDir = writeBundle(t, `apiVersion: aicr.run/v1alpha3
+	in.BundleDir = writeBundle(t, `apiVersion: aicr.run/v1beta2
 kind: RecipeResult
 metadata:
   selectedProfile:
@@ -229,7 +249,9 @@ criteria:
 
 func TestSynthesize_PlatformlessTab(t *testing.T) {
 	in := baseInput(t)
-	in.BundleDir = writeBundle(t, `criteria:
+	in.BundleDir = writeBundle(t, `apiVersion: aicr.run/v1
+kind: RecipeResult
+criteria:
   service: gke
   accelerator: h100
   os: cos

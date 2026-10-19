@@ -26,7 +26,7 @@ import (
 func verifyConfig(t *testing.T, body string) string {
 	t.Helper()
 	return writeYAML(t, "aicr-config.yaml",
-		"kind: AICRConfig\napiVersion: aicr.run/v1alpha2\nspec:\n  verify:\n"+body)
+		"kind: AICRConfig\napiVersion: aicr.run/v1beta1\nspec:\n  verify:\n"+body)
 }
 
 // runVerify runs the real verify command and returns stdout plus any error

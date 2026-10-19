@@ -247,6 +247,65 @@ func TestPropagateOrWrap(t *testing.T) {
 	}
 }
 
+// TestWrapCtxErr pins the code split that distinguishes an operator abort
+// from a deadline: the same fallbackCode input must classify differently
+// depending on whether cause chains context.Canceled or
+// context.DeadlineExceeded. A test asserting only the deadline path would not
+// catch a regression that collapses both back onto one code.
+func TestWrapCtxErr(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		cause    error
+		wantCode ErrorCode
+	}{
+		{
+			name:     "canceled maps to ErrCodeCanceled regardless of fallback",
+			cause:    context.Canceled,
+			wantCode: ErrCodeCanceled,
+		},
+		{
+			name:     "wrapped canceled still maps to ErrCodeCanceled",
+			cause:    fmt.Errorf("outer: %w", context.Canceled),
+			wantCode: ErrCodeCanceled,
+		},
+		{
+			name:     "deadline exceeded falls back to the supplied code",
+			cause:    context.DeadlineExceeded,
+			wantCode: ErrCodeTimeout,
+		},
+		{
+			name:     "unrelated error falls back to the supplied code",
+			cause:    errors.New("boom"),
+			wantCode: ErrCodeTimeout,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := WrapCtxErr(tt.cause, ErrCodeTimeout, "wait ended")
+			if got.Code != tt.wantCode {
+				t.Errorf("code = %q, want %q", got.Code, tt.wantCode)
+			}
+			if !errors.Is(got, tt.cause) {
+				t.Errorf("Unwrap chain lost cause %v", tt.cause)
+			}
+		})
+	}
+}
+
+func TestWrapCtxErrWithContext(t *testing.T) {
+	t.Parallel()
+	got := WrapCtxErrWithContext(context.Canceled, ErrCodeTimeout, "wait ended",
+		map[string]any{"namespace": "default"})
+	if got.Code != ErrCodeCanceled {
+		t.Errorf("code = %q, want %q", got.Code, ErrCodeCanceled)
+	}
+	if got.Context["namespace"] != "default" {
+		t.Errorf("context = %v, want namespace=default", got.Context)
+	}
+}
+
 func TestUnwrap(t *testing.T) {
 	t.Parallel()
 	cause := errors.New("root cause")

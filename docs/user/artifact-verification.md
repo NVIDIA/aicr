@@ -28,9 +28,10 @@ AICR treats a deployment bundle as a closed-world inventory. `checksums.txt` con
 
 The artifacts above are the ones *you* produce with `aicr`. The container images
 NVIDIA publishes carry their own metadata, and all of it is retrievable from the
-registry as signed OCI referrers on the image: SLSA build provenance, an SPDX
-SBOM per platform, and an OpenVEX document recording the CVEs AICR has triaged
-as not affected. One command per kind:
+registry as signed OCI referrers on the image: SLSA build provenance on the
+multi-platform index, plus a CycloneDX SBOM and an OpenVEX document on each
+platform's own manifest digest, recording the CVEs AICR has triaged as not
+affected. One command per kind:
 
 ```shell
 # Extract under pipefail, and only write a predicate file once the whole
@@ -44,30 +45,31 @@ export IMAGE="ghcr.io/nvidia/aicr"
 export TAG=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
 export DIGEST=$(crane digest "${IMAGE}:${TAG}")
 # Resolve the platform digest from the pinned index, not from the tag: a tag
-# repointed between the two lookups would pair this SBOM with a different
-# release's index.
+# repointed between the two lookups would pair this SBOM and VEX with a
+# different release's index.
 export DIGEST_AMD64=$(crane digest --platform linux/amd64 "${IMAGE}@${DIGEST}")
 export AICR_ISSUER="https://token.actions.githubusercontent.com"
 export AICR_SIGNER="https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/${TAG}"
 
-# Build provenance (attached to the multi-platform index digest)
+# Build provenance (attached to the index digest and to each platform manifest;
+# any of the three verifies, and the index copy is the one an admission policy can reach)
 gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo NVIDIA/aicr \
   --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml \
   --source-ref "refs/tags/${TAG}" \
   --bundle-from-oci
 
-# SPDX SBOM (attached to the per-platform manifest digest)
-sbom=$(cosign verify-attestation --type spdxjson \
+# CycloneDX SBOM (attached to the per-platform manifest digest)
+sbom=$(cosign verify-attestation --type cyclonedx \
   --certificate-oidc-issuer "${AICR_ISSUER}" \
   --certificate-identity "${AICR_SIGNER}" \
   "${IMAGE}@${DIGEST_AMD64}" | jq -r '.payload' | base64 -d | jq '.predicate') \
-  && printf '%s\n' "${sbom}" > sbom.spdx.json
+  && printf '%s\n' "${sbom}" > sbom.cdx.json
 
-# OpenVEX triage document (attached to the index digest)
+# OpenVEX triage document (attached to the same per-platform manifest digest)
 openvex=$(cosign verify-attestation --type openvex \
   --certificate-oidc-issuer "${AICR_ISSUER}" \
   --certificate-identity "${AICR_SIGNER}" \
-  "${IMAGE}@${DIGEST}" | jq -r '.payload' | base64 -d | jq '.predicate') \
+  "${IMAGE}@${DIGEST_AMD64}" | jq -r '.payload' | base64 -d | jq '.predicate') \
   && printf '%s\n' "${openvex}" > aicr-openvex.json
 ```
 
@@ -78,21 +80,41 @@ referrer push had silently failed. `--source-ref` and the exact
 `--certificate-identity` bind the result to release `${TAG}` rather than to any
 NVIDIA/aicr release.
 
+The SBOM and the VEX are attested to the platform manifest, not to the index,
+because each describes exactly one root filesystem, and because a consumer that
+has resolved `linux/amd64` enumerates referrers there. Repeat both commands
+against `linux/arm64` to retrieve that platform's pair. The two documents are in
+different formats on purpose: a referrer descriptor has no name field, so
+publishing the VEX as OpenVEX rather than as a second CycloneDX document is what
+lets you tell them apart in a listing without downloading both.
+
 Pass the VEX document to your scanner so it suppresses the same findings AICR's
 own release scan suppresses, instead of re-reporting CVEs that have already been
 analyzed as unreachable:
 
 ```shell
-grype "${IMAGE}@${DIGEST}" --vex aicr-openvex.json --only-fixed --fail-on high
-trivy image --vex aicr-openvex.json "${IMAGE}@${DIGEST}"
+grype "${IMAGE}@${DIGEST_AMD64}" --vex aicr-openvex.json --only-fixed --fail-on high
+trivy image --vex aicr-openvex.json "${IMAGE}@${DIGEST_AMD64}"
 ```
 
-Each statement carries a `justification` and an `impact_statement` explaining
-why the vulnerable code is not reachable. Read those before adopting a
-suppression: the analysis is specific to how AICR invokes the affected
-component. The two `cosign verify-attestation` commands above need Cosign
-v3.0.1 or newer; `gh attestation verify` ships with the GitHub CLI and does not
-use Cosign, so it carries no such floor. For
+Each statement names one product, `pkg:oci/<image>@sha256:<platform-digest>`, so
+it binds to the manifest it was triaged against; scan the same digest you
+retrieved it from. Each also carries a `justification` and an
+`impact_statement` explaining why the vulnerable code is not reachable. Read
+those before adopting a suppression: the analysis is specific to how AICR
+invokes the affected component.
+
+An empty `statements` array is a valid result, not a failure: it means AICR has
+triaged no CVE for that image. Most released images are in that state at any
+given time; which ones is a property of the release you are verifying, so read
+the document you retrieved rather than assuming. **An empty VEX means "no
+exceptions asserted", not "no vulnerabilities."** It says what AICR has claimed, not what a scanner would
+find, so do not read one as a clean bill of health, and do not read the absence
+of a statement about a CVE as a claim that the image is unaffected by it. Every
+released image carries a document so that "no exceptions asserted" stays
+distinguishable from evidence that never reached the registry. The two `cosign verify-attestation` commands
+above need Cosign v3.0.1 or newer; `gh attestation verify` ships with the GitHub
+CLI and does not use Cosign, so it carries no such floor. For
 the full walkthrough, including the remaining release images and the signed
 binary SBOMs, see
 [Supply Chain Verification](../integrator/supply-chain-verification.md#unified-metadata-retrieval).
@@ -178,7 +200,7 @@ schemes are `awskms://`, `gcpkms://`, `azurekms://`, and `hashivault://`.
 aicr bundle -r recipe.yaml --attest \
   --signing-key gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k \
   -o ./bundles
-aicr verify ./bundles/<bundle-dir> \
+aicr verify ./bundles \
   --key gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k
 ```
 
@@ -195,7 +217,7 @@ against the local PEM file; this part makes no provider calls:
 cosign public-key --key gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k > bundle-signer.pub
 
 # Verify anywhere afterward, with no KMS access needed.
-aicr verify ./bundles/<bundle-dir> --key ./bundle-signer.pub
+aicr verify ./bundles --key ./bundle-signer.pub
 ```
 
 A local PEM key is read from disk only. The bundle's Rekor transparency-log
@@ -283,26 +305,28 @@ command verifies it against the Sigstore trusted root, recomputes every
 manifest-listed payload file's sha256 against `manifest.json`, and surfaces the predicate's fingerprint, phase
 counts, and BOM info.
 
-Bundles are **minimized by default**: the published `snapshot.yaml` keeps only
+Bundles are **minimized by default**. The published `snapshot.yaml` keeps only
 an allowlisted set of fields and the CTRF reports omit per-test stdout/message,
 keeping sensitive operational detail (node names, provider instance IDs, the
 node label/taint set, OS tuning, raw container logs) out of the published
-artifact. A small allowlisted set of structured, low-cardinality per-test
-outcome fields (the CTRF `extra` object — coverage counts and skip-reason codes,
-never node names or IPs) is *preserved* so a signed bundle still shows e.g. a
-reduced-node pass; see [Structured evidence that survives
-redaction](../contributor/validator.md#structured-evidence-that-survives-redaction).
-The predicate records the applied policy in a `redaction` block, which
-`aicr evidence verify` surfaces. Minimal bundles self-verify exactly like full
-ones — the digests cover whatever bytes shipped. Pass `--full` to
+artifact. Each test's CTRF `extra` keeps only allowlisted counts, measurements,
+thresholds, versions, allocation modes, and skip-reason codes, never node names
+or IPs, and is omitted when none remain. See [Structured evidence that survives
+redaction](../contributor/validator.md#structured-evidence-that-survives-redaction)
+for the keys. The predicate records the applied policy in a `redaction` block,
+which `aicr evidence verify` surfaces. Minimal bundles self-verify exactly like
+full ones, because the digests cover whatever bytes shipped. Pass `--full` to
 `aicr validate --emit-attestation` to publish the raw payloads instead.
 
 The positional argument is auto-detected. Prefer the committed **pointer file**,
 which pins the bundle by digest:
 
 ```shell
+RECIPE="h100-eks-ubuntu-training"                                                 # replace with the pointer's recipe segment
+SRC="0123456789abcdef0123456789abcdef"                                            # replace with the pointer's signer segment
+DIGEST="sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"  # replace with the pointer's file name, without .yaml
 # Verify a pointer a contributor committed alongside a recipe change (preferred).
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml
+aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml"
 
 # Verify a pushed OCI bundle directly, pinned by digest.
 aicr evidence verify ghcr.io/myorg/aicr-evidence@sha256:abc...
@@ -314,10 +338,51 @@ aicr evidence verify ./out/summary-bundle
 To require a specific signer, pin the OIDC issuer and identity:
 
 ```shell
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml \
+RECIPE="h100-eks-ubuntu-training"                                                 # replace with the pointer's recipe segment
+SRC="0123456789abcdef0123456789abcdef"                                            # replace with the pointer's signer segment
+DIGEST="sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"  # replace with the pointer's file name, without .yaml
+aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml" \
   --expected-issuer https://token.actions.githubusercontent.com \
   --expected-identity-regexp '^https://github\.com/myorg/myrepo/\.github/workflows/release\.yaml@refs/tags/.+$'
 ```
+
+### Key-Signed Evidence
+
+Where no OIDC identity is available, sign evidence with a KMS key: pass
+`--signing-key <kms-uri>` to `aicr validate --push`, `aicr evidence publish`, or
+`aicr evidence sign`. The same schemes as bundle signing are supported
+(`awskms://`, `gcpkms://`, `azurekms://`, `hashivault://`), and the signature
+goes to Rekor v2 by default. The pointer records `signer.issuer: key` and, as
+`signer.identity`, the key's public-key fingerprint: `sha256:` and the SHA-256
+of the PKIX DER public key. The KMS URI is never recorded, since it names a
+cloud account and cannot be recovered from the signature.
+
+Verify with `--key`, supplying the KMS URI or an exported PEM public key. The
+key is the signer pin, so `--expected-issuer` and `--expected-identity-regexp`
+are rejected alongside it, and a pointer whose `signer` block names another key
+fails the cross-check:
+
+```shell
+# Sign and push with a KMS key.
+aicr validate -r recipe.yaml -s snapshot.yaml --emit-attestation ./out \
+  --push ghcr.io/myorg/aicr-evidence --signing-key awskms:///alias/aicr-evidence
+
+# Verify the pointer against the same key, or its exported public key.
+aicr evidence verify ./out/pointer.yaml --key awskms:///alias/aicr-evidence
+cosign public-key --key awskms:///alias/aicr-evidence > evidence-signer.pub
+aicr evidence verify ./out/pointer.yaml --key ./evidence-signer.pub
+```
+
+For air-gapped signing, add `--tlog-upload=false`: no Rekor entry is written
+and the pointer carries no `rekorLogIndex`. Verify such evidence with
+`--key <public-key.pem> --insecure-ignore-tlog`; without a transparency log
+there is no trusted proof of when the signature was made. Evidence signed
+against a private Fulcio/Rekor (`--fulcio-url`, `--rekor-url`,
+`--signing-config`) verifies with `--trust-root <trusted_root.json>`.
+
+Key-signed evidence is for private use. The `Evidence Pointer Contract` gate
+rejects a committed key-signed pointer, because the signer allowlist pins
+keyless OIDC identities, not public keys.
 
 ## Per-Source Pointer Layout and the Signer Allowlist
 
@@ -347,7 +412,7 @@ signer hashes to.
 > the signature pinned to the claimed signer and cross-checks the certificate
 > before any result is counted — so a pointer that lied about its signer passes
 > the gate but fails ingest. See
-> [#1535](https://github.com/NVIDIA/aicr/issues/1535) and ADR-007. (This ingest verification is implemented but **currently fails closed** — the GP2 loader cannot yet parse the canonical `identityPattern`/`source` allowlist; tracked in [#1505](https://github.com/NVIDIA/aicr/issues/1505).)
+> [#1535](https://github.com/NVIDIA/aicr/issues/1535) and ADR-007.
 
 Consumers discover a recipe's evidence by glob —
 `recipes/evidence/<recipe>/*/*.yaml` — and aggregate across sources; nothing is
@@ -406,11 +471,14 @@ full input-detection rules and the `--allow-unpinned-tag` escape hatch.
 Both verifiers emit machine-readable JSON for pipeline gating.
 
 ```shell
+RECIPE="h100-eks-ubuntu-training"                                                 # replace with the pointer's recipe segment
+SRC="0123456789abcdef0123456789abcdef"                                            # replace with the pointer's signer segment
+DIGEST="sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"  # replace with the pointer's file name, without .yaml
 # Bundle verification as JSON.
 aicr verify ./my-bundle --format json
 
 # Evidence verification as JSON to a file.
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml --format json -o result.json
+aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml" --format json -o result.json
 ```
 
 `aicr evidence verify` exits `0` when every check passes, `2` when the
@@ -428,13 +496,20 @@ non-zero exit would otherwise propagate through the pipeline and abort the scrip
 before the `case` runs. The `|| true` keeps that exit from tripping `set -e`:
 
 ```shell
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml --format json -o result.json || true
+RECIPE="h100-eks-ubuntu-training"                                                 # replace with the pointer's recipe segment
+SRC="0123456789abcdef0123456789abcdef"                                            # replace with the pointer's signer segment
+DIGEST="sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"  # replace with the pointer's file name, without .yaml
+rm -f result.json
+aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml" --format json -o result.json || true
+if [ ! -s result.json ]; then
+  echo "verifier wrote no result — treat as a failure"; exit 1
+fi
 case "$(jq '.exit' result.json)" in
   0) echo "evidence valid" ;;
-  1) echo "validator phases failed" ;;
-  2) echo "bundle invalid" ;;
-  3) echo "no verdict reached (infrastructure fault or aborted) — do not reject" ;;
-  *) echo "unrecognized verdict — treat as a failure" ;;
+  1) echo "validator phases failed"; exit 1 ;;
+  2) echo "bundle invalid"; exit 1 ;;
+  3) echo "no verdict reached (infrastructure fault or aborted) — retry, do not reject"; exit 3 ;;
+  *) echo "unrecognized verdict — treat as a failure"; exit 1 ;;
 esac
 ```
 

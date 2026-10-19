@@ -36,11 +36,12 @@ curl -sfL https://get.aicr.run | bash -s --
 aicr recipe --service eks --accelerator h100 --os ubuntu \
   --intent training --platform kubeflow -o recipe.yaml
 
-# Render it into deployment-ready bundles (helm, argocd, flux, or helmfile)
+# Render it into deployment-ready bundles (helm, argocd, argocd-helm, flux, helmfile, or terraform)
 aicr bundle --recipe recipe.yaml --deployer argocd --output ./bundles
 
 # After deploying the bundle, validate the running cluster against the recipe
-aicr validate --recipe recipe.yaml
+# the bundle deployed (every bundle records it at its root)
+aicr validate --recipe ./bundles/recipe.yaml
 
 # Select hydrated config value (e.g., the resolved GPU driver version)
 aicr query --service eks --accelerator h100 --os ubuntu \
@@ -48,7 +49,7 @@ aicr query --service eks --accelerator h100 --os ubuntu \
   --selector components.gpu-operator.values.driver.version
 ```
 
-The contents of the `bundles/` directory depend on the chosen `--deployer`: Argo CD `Application` manifests for `argocd`, a Helm chart app-of-apps for `argocd-helm`, `HelmRelease` and `Kustomization` manifests for `flux`, `helmfile.yaml` release graph for `helmfile`, or simple Helm commands for `helm`.
+The contents of the `bundles/` directory depend on the chosen `--deployer`: Argo CD `Application` manifests for `argocd`, a Helm chart app-of-apps for `argocd-helm`, `HelmRelease` and `Kustomization` manifests for `flux`, `helmfile.yaml` release graph for `helmfile`, a Terraform module with one call per component for `terraform`, or simple Helm commands for `helm`.
 
 See the [Installation Guide](docs/user/installation.md) for manual installation, building from source, and container images.
 
@@ -60,7 +61,7 @@ See the [Installation Guide](docs/user/installation.md) for manual installation,
 | **API Server (`aicrd`)** | REST API exposing the same capabilities as the CLI. Run in-cluster for CI/CD integration or air-gapped environments. |
 | **Go Library (`github.com/NVIDIA/aicr/pkg/client/v1`)** | Stable Go SDK facade for in-process consumers — same workflow (resolve, bundle, snapshot, validate) callable from any Go program without a subprocess or REST hop. Per-Client isolation supports multi-tenant use. |
 | **Snapshot Agent** | Kubernetes Job that captures live cluster state (GPU hardware, drivers, kernel, OS, operators, K8s config) into a ConfigMap for validation against recipes. |
-| **Multi-Deployer Bundles** | Render the same recipe into Helm, Argo CD (App of Apps or Helm chart variant), Flux, or Helmfile artifacts — pick whichever fits your GitOps pipeline. |
+| **Multi-Deployer Bundles** | Render the same recipe into Helm, Argo CD (App of Apps or Helm chart variant), Flux, Helmfile, or Terraform artifacts — pick whichever fits your GitOps pipeline. |
 | **Multi-Phase Validation** | Deployment, performance (training and inference), and conformance phases — run all or one at a time. |
 | **Drift Detection** | `aicr diff` compares two snapshots to surface configuration drift between clusters or over time. |
 | **Supply Chain Security** | SLSA Build Level 3 image provenance, signed image SBOMs, image attestations (Cosign / Sigstore), and `aicr verify` for offline bundle verification. |
@@ -84,11 +85,11 @@ See the full [Component Catalog](docs/user/component-catalog.md) for every compo
 
 | Dimension | Values |
 |-----------|--------|
-| **Services** | AKS, BCM, EKS, GKE, Kind, LKE, Metal3, OCP, OKE |
-| **Accelerators** | A100, B200, GB200, GB300, H100, H200, L40, L40S, RTX PRO 6000 |
+| **Services** | AKS, BCM, EKS, generic, GKE, k0s, Kind, LKE, Metal3, MK8s, OCP, OKE, RKE2 |
+| **Accelerators** | A100, B200, B300, GB200, GB300, H100, H200, L40, L40S, RTX PRO 6000, VR200 (Preview) |
 | **Operating systems** | Amazon Linux, COS, Oracle Linux, RHEL, Talos, Ubuntu |
 | **Workload intents** | Inference, Training |
-| **Platforms** | Dynamo, Kubeflow, NIM, Run:ai, Slurm (Slinky) |
+| **Platforms** | Dynamo, Kubeflow, Kueue, NIM, Run:ai, Slurm (Slinky) |
 
 ## How It Works
 
@@ -96,7 +97,7 @@ A **recipe** is a version-locked configuration for a specific environment. You d
 
 The **bundler** materializes a recipe into deployment-ready artifacts: one folder per component, each with Helm values, checksums, and a README. The **validator** compares a recipe against a live cluster snapshot — first checking declarative constraints, then optionally running deployment, performance, and conformance phases inside the cluster.
 
-This separation means the same validated configuration works whether you deploy with Helm, Argo CD, Flux, Helmfile, or a custom pipeline.
+This separation means the same validated configuration works whether you deploy with Helm, Argo CD, Flux, Helmfile, Terraform, or a custom pipeline.
 
 ## What AI Cluster Runtime Is Not
 
@@ -130,12 +131,13 @@ For contributors:
 
 ## Resources
 
-- **[Roadmap](ROADMAP.md)** — Feature priorities and development timeline
+- **[Roadmap](ROADMAP.md)** — Focus areas, outcomes, and tracking issues
 - **[Adopters](ADOPTERS.md)** — Organizations and projects using or building on AICR
 - **[Security](SECURITY.md)** — Supply chain security, vulnerability reporting, and verification
 - **[Releases](https://github.com/NVIDIA/aicr/releases)** — Binaries, SBOMs, and attestations
-- **[Issues](https://github.com/NVIDIA/aicr/issues)** — Bugs, feature requests, and questions
-- **Slack** — Join [Kubernetes Slack](https://kubernetes.slack.com) and visit the [#aicr](https://kubernetes.slack.com/archives/C0AQMPP1BK7) channel
+- **[Support](SUPPORT.md)** — Where to ask questions, report bugs, and report vulnerabilities
+- **[Issues](https://github.com/NVIDIA/aicr/issues)** — Bugs and scoped feature requests
+- **Slack** — [#aicr](https://kubernetes.slack.com/messages/aicr) on Kubernetes Slack for questions (visit [slack.k8s.io](https://slack.k8s.io/) for a workspace invitation)
 
 ## Contributing
 

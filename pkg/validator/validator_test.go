@@ -26,6 +26,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -34,6 +36,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/validator/job"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/recipes"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -179,7 +182,7 @@ func TestPrepareClusterRejectsMissingKubeconfig(t *testing.T) {
 	if err == nil {
 		t.Fatal("prepareCluster() error = nil, want invalid request")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("prepareCluster() error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !stderrors.Is(err, fs.ErrNotExist) {
@@ -405,7 +408,7 @@ func TestPreflightDeclaredChecks(t *testing.T) {
 			if !tt.wantErr {
 				return
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 			}
 			for _, sub := range tt.wantSubstrs {
@@ -443,7 +446,7 @@ func TestPreflightDeclaredChecks_ExternalCatalogMissingCheck(t *testing.T) {
 	if err == nil {
 		t.Fatal("preflightDeclaredChecks() = nil error, want fail-closed on missing external-catalog check")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 	}
 	if !strings.Contains(err.Error(), "expected-resources") {
@@ -464,7 +467,7 @@ func TestValidatePhaseNoClusterRejectsUnmatchedCheck(t *testing.T) {
 	if err == nil {
 		t.Fatalf("ValidatePhase(--no-cluster) = %+v, nil error; want fail-closed on unmatched check", pr)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 	}
 }
@@ -481,7 +484,7 @@ func TestValidatePhasesNoClusterRejectsUnmatchedCheck(t *testing.T) {
 	if err == nil {
 		t.Fatalf("ValidatePhases(--no-cluster) = %+v, nil error; want fail-closed on unmatched check", results)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 	}
 }
@@ -522,7 +525,7 @@ func TestValidatePhaseRunsReadinessPreflight(t *testing.T) {
 	if err == nil {
 		t.Fatal("ValidatePhase() = nil error, want readiness failure")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 	}
 }
@@ -566,7 +569,7 @@ func TestValidatePhasesRunsReadinessPreflight(t *testing.T) {
 	if err == nil {
 		t.Fatal("ValidatePhases() = nil error, want readiness failure")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 	}
 	if results != nil {
@@ -607,7 +610,7 @@ func TestCheckReadinessNilSnapshotWithConstraintsFailsClosed(t *testing.T) {
 	if err == nil {
 		t.Fatal("checkReadiness() = nil, want error for declared constraints without a snapshot")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 	}
 }
@@ -724,6 +727,110 @@ func TestCheckReadinessEvaluatesReadinessPhaseConstraints(t *testing.T) {
 			// this).
 			if len(vi.Constraints) != topBefore {
 				t.Errorf("checkReadiness mutated Constraints: len %d -> %d", topBefore, len(vi.Constraints))
+			}
+		})
+	}
+}
+
+// gkeBundleInstallerConstraints returns the two constraints
+// recipes/overlays/gke-cos.yaml declares on the bundle-installer profile
+// value: the opt-out node label and the corroborating pool-creation
+// reading.
+func gkeBundleInstallerConstraints() []recipe.Constraint {
+	return []recipe.Constraint{
+		{
+			Name:        "NodeTopology.gpu-nodes.label",
+			Value:       "gke-no-default-nvidia-gpu-device-plugin=true",
+			Remediation: "label every GPU node pool at creation",
+		},
+		{
+			Name:        "K8s.gke-gpu-pools.gpu-driver-installation",
+			Value:       "Disabled",
+			Remediation: "create every GPU node pool with gpu-driver-version=disabled",
+		},
+	}
+}
+
+// gkeBundleInstallerSnapshot builds a snapshot carrying the opt-out label on
+// every GPU node and, when poolDriverMode is non-empty, a
+// K8s.gke-gpu-pools.gpu-driver-installation reading of that value. An empty
+// poolDriverMode omits the reading, the shape ProjectGKEGPUPools produces
+// when no pool dump was supplied.
+func gkeBundleInstallerSnapshot(poolDriverMode string) *snapshotter.Snapshot {
+	k8sSubtypes := []measurement.Subtype{
+		{Name: "node", Data: map[string]measurement.Reading{"provider": measurement.Str("gke")}},
+	}
+	if poolDriverMode != "" {
+		k8sSubtypes = append(k8sSubtypes, measurement.Subtype{
+			Name: "gke-gpu-pools",
+			Data: map[string]measurement.Reading{"gpu-driver-installation": measurement.Str(poolDriverMode)},
+		})
+	}
+	return &snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{
+			{Type: measurement.TypeK8s, Subtypes: k8sSubtypes},
+			{
+				Type: measurement.TypeNodeTopology,
+				Subtypes: []measurement.Subtype{
+					{
+						Name: "label",
+						Data: map[string]measurement.Reading{
+							"cloud.google.com/gke-accelerator":        measurement.Str("nvidia-h100-80gb|gpu-a"),
+							"gke-no-default-nvidia-gpu-device-plugin": measurement.Str("true|gpu-a"),
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// TestCheckReadinessGKEBundleInstallerRequiresPoolCreationEvidence proves
+// the opt-out label alone is not sufficient evidence for bundle-installer.
+// A pool GKE still finalizes its own managed driver install on can carry
+// the label while the driver-installer DaemonSet races the bundle's
+// gcp-driver-installer underneath. checkReadiness (the engine behind
+// `aicr validate`) must fail closed whenever the label is present but the
+// pool's own creation-time driver-installation reading disagrees or is
+// unavailable, and only pass when both agree.
+func TestCheckReadinessGKEBundleInstallerRequiresPoolCreationEvidence(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		poolDriverMode string
+		wantErr        bool
+		wantIn         string
+	}{
+		{
+			name:           "label present and pool created with the driver disabled passes",
+			poolDriverMode: "Disabled",
+		},
+		{
+			name:           "label present but pool still runs GKE's managed driver install fails closed",
+			poolDriverMode: "Installed",
+			wantErr:        true,
+			wantIn:         "gpu-driver-version=disabled",
+		},
+		{
+			name:           "label present but no pool dump was supplied fails closed",
+			poolDriverMode: "",
+			wantErr:        true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rec := &recipe.RecipeResult{Constraints: gkeBundleInstallerConstraints()}
+			vi := v1.ToValidationInput(rec)
+			snap := gkeBundleInstallerSnapshot(tt.poolDriverMode)
+
+			err := checkReadiness(vi, snap)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("checkReadiness() = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantIn != "" && !strings.Contains(err.Error(), tt.wantIn) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantIn)
 			}
 		})
 	}
@@ -1100,7 +1207,7 @@ func TestValidatePhasesPromotesRBACCleanupFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("ValidatePhases() error = nil, want promoted RBAC cleanup failure")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("ValidatePhases() error = %v, want ErrCodeInternal", err)
 	}
 	if len(results) == 0 {
@@ -1123,7 +1230,7 @@ func TestValidatePhasePromotesRBACCleanupFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("ValidatePhase() error = nil, want promoted RBAC cleanup failure")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("ValidatePhase() error = %v, want ErrCodeInternal", err)
 	}
 	if result == nil {
@@ -1161,7 +1268,7 @@ func TestPrepareClusterSurfacesRollbackFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("prepareCluster() error = nil, want prep + rollback failure")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("prepareCluster() error = %v, want ErrCodeInternal", err)
 	}
 	if !stderrors.Is(err, rollbackDeleteCause) {
@@ -1209,5 +1316,212 @@ func TestPrepareClusterNoRollbackWhenCleanupDisabled(t *testing.T) {
 	crbName := job.ClusterRoleBindingName(v.RunID)
 	if _, getErr := cs.RbacV1().ClusterRoleBindings().Get(context.Background(), crbName, metav1.GetOptions{}); getErr != nil {
 		t.Errorf("ClusterRoleBinding %q was removed despite cleanup=false: %v", crbName, getErr)
+	}
+}
+
+// existingServiceAccountName is the administrator-provisioned ServiceAccount
+// the exact-ServiceAccount tests run validator Jobs as.
+const existingServiceAccountName = "aicr-validator"
+
+// newFakeClusterWithServiceAccount returns a fake clientset that already holds
+// an administrator-provisioned ServiceAccount in namespace and answers every
+// SubjectAccessReview as allowed, the state a correctly provisioned cluster is
+// in before an exact-ServiceAccount run starts.
+func newFakeClusterWithServiceAccount(namespace string) *k8sfake.Clientset {
+	cs := k8sfake.NewSimpleClientset(&corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{Name: existingServiceAccountName, Namespace: namespace},
+	})
+	cs.PrependReactor("create", "subjectaccessreviews", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		review := action.(clienttesting.CreateAction).GetObject().(*authorizationv1.SubjectAccessReview)
+		review.Status.Allowed = true
+		return true, review, nil
+	})
+	return cs
+}
+
+// rbacWrites returns every write the fake recorded against a kind an
+// exact-ServiceAccount run must leave alone: the five RBAC kinds, and the
+// namespace, whose apply needs cluster-scoped permission.
+func rbacWrites(cs *k8sfake.Clientset) []string {
+	guarded := map[string]bool{
+		"serviceaccounts": true, "roles": true, "rolebindings": true,
+		"clusterroles": true, "clusterrolebindings": true, "namespaces": true,
+	}
+	var writes []string
+	for _, a := range cs.Actions() {
+		switch a.GetVerb() {
+		case "create", "update", "patch", "delete", "deletecollection":
+			if guarded[a.GetResource().Resource] {
+				writes = append(writes, a.GetVerb()+" "+a.GetResource().Resource)
+			}
+		}
+	}
+	return writes
+}
+
+// TestValidatePhasesExistingServiceAccountWritesNoRBAC is the issue #3220
+// gate: a run told to use an existing ServiceAccount deploys its validator Job
+// as that ServiceAccount and issues no RBAC or namespace write at any point,
+// setup through cleanup. The Job apply is refused after it is recorded, so the
+// run ends without waiting on a Job the fake would never complete.
+//
+// The per-run control proves the detector: the same run without the option
+// must trip it, or a detector that matches nothing would pass both.
+func TestValidatePhasesExistingServiceAccountWritesNoRBAC(t *testing.T) {
+	declared := validationWithChecks(map[Phase][]string{PhaseDeployment: {"operator-health"}})
+
+	t.Run("existing ServiceAccount", func(t *testing.T) {
+		v := New(WithRunID("existing-sa"), WithKubeconfig("in-memory"),
+			WithServiceAccountName(existingServiceAccountName))
+		cs := newFakeClusterWithServiceAccount(v.Namespace)
+		var jobApply string
+		cs.PrependReactor("patch", "jobs", func(action clienttesting.Action) (bool, runtime.Object, error) {
+			jobApply = string(action.(clienttesting.PatchAction).GetPatch())
+			return true, nil, stderrors.New("job apply recorded; stop before waiting")
+		})
+		v.kubeClientFactory = func(string) (kubernetes.Interface, error) { return cs, nil }
+
+		results, err := v.ValidatePhases(context.Background(), []Phase{PhaseDeployment}, declared, nil)
+		if err != nil {
+			t.Fatalf("ValidatePhases() error = %v", err)
+		}
+		if len(results) != 1 {
+			t.Fatalf("ValidatePhases() returned %d results, want 1", len(results))
+		}
+		if writes := rbacWrites(cs); len(writes) > 0 {
+			t.Errorf("run issued RBAC or namespace writes %v; an existing-ServiceAccount run must issue none", writes)
+		}
+		if !strings.Contains(jobApply, `"serviceAccountName":"`+existingServiceAccountName+`"`) {
+			t.Errorf("validator Job apply does not run as %q:\n%s", existingServiceAccountName, jobApply)
+		}
+		if _, getErr := cs.CoreV1().ServiceAccounts(v.Namespace).Get(context.Background(),
+			existingServiceAccountName, metav1.GetOptions{}); getErr != nil {
+			t.Errorf("the administrator's ServiceAccount is gone after the run: %v", getErr)
+		}
+	})
+
+	t.Run("per-run control", func(t *testing.T) {
+		cs := newFakeClusterClient()
+		cs.PrependReactor("patch", "jobs", func(clienttesting.Action) (bool, runtime.Object, error) {
+			return true, nil, stderrors.New("stop before waiting")
+		})
+		v := New(WithRunID("per-run"), WithKubeconfig("in-memory"))
+		v.kubeClientFactory = func(string) (kubernetes.Interface, error) { return cs, nil }
+
+		if _, err := v.ValidatePhases(context.Background(), []Phase{PhaseDeployment}, declared, nil); err != nil {
+			t.Fatalf("ValidatePhases() error = %v", err)
+		}
+		if writes := rbacWrites(cs); len(writes) == 0 {
+			t.Fatal("per-run RBAC issued no detectable writes; the detector above is inert")
+		}
+	})
+}
+
+// TestExistingServiceAccountMissingCreatesNothing pins that a named
+// ServiceAccount that does not exist fails the run before it creates anything
+// at all, through both entry points.
+func TestExistingServiceAccountMissingCreatesNothing(t *testing.T) {
+	entryPoints := map[string]func(*Validator) error{
+		"ValidatePhases": func(v *Validator) error {
+			_, err := v.ValidatePhases(context.Background(), []Phase{PhaseDeployment}, nil, nil)
+			return err
+		},
+		"ValidatePhase": func(v *Validator) error {
+			_, err := v.ValidatePhase(context.Background(), PhaseDeployment, nil, nil)
+			return err
+		},
+	}
+	for name, run := range entryPoints {
+		t.Run(name, func(t *testing.T) {
+			cs := k8sfake.NewSimpleClientset()
+			v := New(WithRunID("missing-sa"), WithKubeconfig("in-memory"),
+				WithServiceAccountName(existingServiceAccountName))
+			v.kubeClientFactory = func(string) (kubernetes.Interface, error) { return cs, nil }
+
+			err := run(v)
+			if err == nil {
+				t.Fatal("error = nil, want ErrCodeNotFound for a missing ServiceAccount")
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeNotFound)
+			for _, a := range cs.Actions() {
+				if a.GetVerb() != "get" {
+					t.Errorf("run issued %s %s before failing; want reads only", a.GetVerb(), a.GetResource().Resource)
+				}
+			}
+		})
+	}
+}
+
+// TestPrepareClusterExistingServiceAccountNoRollback pins that a preparation
+// failure after the ServiceAccount is verified revokes nothing: the run created
+// no RBAC, so a rollback could only delete objects it does not own.
+func TestPrepareClusterExistingServiceAccountNoRollback(t *testing.T) {
+	v := New(WithRunID("existing-rollback"), WithKubeconfig("in-memory"),
+		WithServiceAccountName(existingServiceAccountName))
+	cs := newFakeClusterWithServiceAccount(v.Namespace)
+	cs.PrependReactor("create", "configmaps", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, stderrors.New("configmap backend unavailable")
+	})
+	v.kubeClientFactory = func(string) (kubernetes.Interface, error) { return cs, nil }
+
+	if _, err := v.prepareCluster(context.Background(), nil, nil); err == nil {
+		t.Fatal("prepareCluster() error = nil, want ConfigMap failure")
+	}
+	if writes := rbacWrites(cs); len(writes) > 0 {
+		t.Errorf("failed preparation issued RBAC or namespace writes %v; want none", writes)
+	}
+}
+
+// TestPreflightServiceAccount covers the standalone check the CLI runs before
+// it captures a snapshot: inert without a name or a cluster, and the same
+// verification as a run otherwise.
+func TestPreflightServiceAccount(t *testing.T) {
+	tests := []struct {
+		name        string
+		opts        []Option
+		seeded      bool
+		wantClient  bool
+		wantErrCode errors.ErrorCode
+	}{
+		{name: "no name", opts: nil},
+		{name: "no-cluster", opts: []Option{WithNoCluster(true), WithServiceAccountName(existingServiceAccountName)}},
+		{
+			name:       "existing and bound",
+			opts:       []Option{WithServiceAccountName(existingServiceAccountName)},
+			seeded:     true,
+			wantClient: true,
+		},
+		{
+			name:        "missing",
+			opts:        []Option{WithServiceAccountName(existingServiceAccountName)},
+			wantClient:  true,
+			wantErrCode: errors.ErrCodeNotFound,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := New(append([]Option{WithKubeconfig("in-memory")}, tt.opts...)...)
+			cs := k8sfake.NewSimpleClientset()
+			if tt.seeded {
+				cs = newFakeClusterWithServiceAccount(v.Namespace)
+			}
+			clientBuilt := false
+			v.kubeClientFactory = func(string) (kubernetes.Interface, error) {
+				clientBuilt = true
+				return cs, nil
+			}
+
+			err := v.PreflightServiceAccount(context.Background())
+			if clientBuilt != tt.wantClient {
+				t.Errorf("client built = %v, want %v", clientBuilt, tt.wantClient)
+			}
+			if tt.wantErrCode == "" {
+				if err != nil {
+					t.Fatalf("PreflightServiceAccount() error = %v, want nil", err)
+				}
+				return
+			}
+			errorstest.WantReportedCode(t, err, tt.wantErrCode)
+		})
 	}
 }

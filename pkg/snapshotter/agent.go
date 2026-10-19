@@ -28,6 +28,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
 	k8scollector "github.com/NVIDIA/aicr/pkg/collector/k8s"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -36,9 +37,11 @@ import (
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	"github.com/NVIDIA/aicr/pkg/measurement"
+	"github.com/NVIDIA/aicr/pkg/runid"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // logWriter returns an io.Writer for streaming agent logs.
@@ -64,7 +67,33 @@ type AgentConfig struct {
 	// JobName for the agent Job
 	JobName string
 
-	// ServiceAccountName for the agent
+	// ServiceAccountName selects the ServiceAccount the agent pod runs
+	// as. It is EXACT-IF-EXISTS, so it carries two meanings resolved once
+	// per deployment:
+	//
+	//   - A ServiceAccount of exactly this name already exists in
+	//     Namespace: it is used verbatim, and the run creates NO
+	//     ServiceAccount, Role, RoleBinding, ClusterRole or
+	//     ClusterRoleBinding — and deletes none at cleanup. aicr adds and
+	//     removes no permissions on an identity it did not create, and does
+	//     not create, read or relabel the Namespace. This
+	//     is how a ServiceAccount carrying IRSA
+	//     (eks.amazonaws.com/role-arn) or GKE Workload Identity
+	//     (iam.gke.io/gcp-service-account) annotations stays usable: both
+	//     providers pin trust to the ServiceAccount NAME, which a
+	//     run-scoped name can never satisfy. Generate its RBAC manifests
+	//     with WriteAgentRoleManifests, then apply them out of band.
+	//   - Otherwise: a name prefix. The run creates "<prefix>-<RunID>"
+	//     and the full run-scoped RBAC set, and deletes them at cleanup.
+	//
+	// Empty falls back to NameBase and is never probed for existence, so
+	// a stray ServiceAccount sitting at the default base cannot silently
+	// capture the run.
+	//
+	// Using an existing ServiceAccount waives per-run permission
+	// isolation: concurrent runs sharing it share its grants, and the
+	// (read-only) grants provisioned for DiscoverNetwork persist beyond any
+	// one run.
 	ServiceAccountName string
 
 	// NodeSelector for targeting specific nodes
@@ -129,10 +158,24 @@ type AgentConfig struct {
 	// merges the aks-gpu-pools subtype into the snapshot the Job returns.
 	AKSGPUPoolsPath string
 
-	// DiscoverNetwork enables the in-pod network collector's live l8k
-	// discovery path. Discovery is NOT read-only — it writes node labels
-	// (nvidia.kubernetes-launch-kit.*) and patches NicClusterPolicy via
-	// server-side-apply. RBAC must allow those writes.
+	// OKEAddonsPath, when set, points at an operator-supplied
+	// `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump on the
+	// CALLER's filesystem. Same contract as AKSGPUPoolsPath: projected
+	// controller-side before deploying, merged into the returned
+	// snapshot as the oke-addons subtype.
+	OKEAddonsPath string
+
+	// GKEGPUPoolsPath, when set, points at an operator-supplied
+	// `gcloud container node-pools list --cluster <cluster>
+	// --format=json` dump on the CALLER's filesystem, projected
+	// controller-side before deploying and merged into the returned
+	// snapshot as the gke-gpu-pools subtype.
+	GKEGPUPoolsPath string
+
+	// DiscoverNetwork enables the in-pod network collector's read-only l8k
+	// discovery path (DiscoverReadOnly). It creates, patches, and deletes
+	// nothing; the agent's ClusterRole gains only
+	// configuration.net.nvidia.com nicdevices get/list.
 	DiscoverNetwork bool
 
 	// Requests overrides the agent container's per-resource requests.
@@ -148,49 +191,110 @@ type AgentConfig struct {
 	// that key in Limits — e.g. --require-gpu --limits nvidia.com/gpu=4
 	// keeps 4, not 1.
 	Limits corev1.ResourceList
+
+	// RunID scopes every resource this deployment creates (Job, RBAC, and
+	// the internal staging ConfigMap when Output does not name one) to a
+	// single run, so concurrent snapshot-agent runs never collide on a
+	// shared resource name. DeployAndCollect generates one with
+	// runid.Generate() when this is empty — callers normally leave it
+	// unset; setting it explicitly is for correlating this run with an
+	// external identifier (e.g. sharing one ID with a downstream
+	// validator run).
+	//
+	// DeployAndCollect never writes the generated value back here: the
+	// AgentConfig belongs to the caller, and a caller reusing one config
+	// pointer across two runs would otherwise silently become a caller
+	// pinning a duplicate RunID — the one state ADR-020 declares
+	// unsupported, which fails the second run with ErrCodeInternal on the
+	// first still-existing run-scoped object.
+	RunID string
+
+	// NameBase prefixes generated resource names (Job, ServiceAccount,
+	// Role/RoleBinding). It applies per name: JobName falls back to it
+	// when JobName is empty, and ServiceAccountName (which also names the
+	// Role and RoleBinding) falls back to it when ServiceAccountName is
+	// empty — so setting only one of the two leaves NameBase governing the
+	// other. Forwarded verbatim to pkg/k8s/agent.Config.NameBase, which
+	// defaults to "aicr" when also empty.
+	NameBase string
 }
 
 // buildAgentConfig projects snapshotter configuration onto the deployer's
 // Job configuration. Keep scheduling defaults at this projection boundary so
 // every snapshot-agent caller gets the same nil-versus-empty behavior.
-func buildAgentConfig(config *AgentConfig, agentOutput string) agent.Config {
+//
+// ownsOutput is agentConfigMapTarget's second return value, forwarded
+// verbatim: it is true only when agentOutput is the internal staging
+// ConfigMap this run owns (the caller did not name a cm:// destination), so
+// Cleanup may delete it. A caller-supplied cm:// Output is never owned.
+//
+// runID is the resolved run ID for this invocation — config.RunID when the
+// caller pinned one, otherwise the value DeployAndCollect generated. It is
+// passed in rather than read from config because DeployAndCollect must not
+// write the generated ID back into the caller's AgentConfig (see
+// AgentConfig.RunID).
+func buildAgentConfig(config *AgentConfig, runID, agentOutput string, ownsOutput bool) agent.Config {
 	return agent.Config{
-		Namespace:          config.Namespace,
-		ServiceAccountName: config.ServiceAccountName,
-		JobName:            config.JobName,
-		Image:              config.Image,
-		ImagePullSecrets:   config.ImagePullSecrets,
-		NodeSelector:       config.NodeSelector,
-		Tolerations:        effectiveAgentTolerations(config.Tolerations),
-		Output:             agentOutput,
-		Debug:              config.Debug,
-		Privileged:         config.Privileged,
-		RequireGPU:         config.RequireGPU,
-		RuntimeClassName:   config.RuntimeClassName,
-		MaxNodesPerEntry:   config.MaxNodesPerEntry,
-		OS:                 config.OS,
-		ClusterConfigPath:  config.ClusterConfigPath,
-		DiscoverNetwork:    config.DiscoverNetwork,
-		Requests:           config.Requests,
-		Limits:             config.Limits,
+		Namespace:           config.Namespace,
+		ServiceAccountName:  config.ServiceAccountName,
+		JobName:             config.JobName,
+		RunID:               runID,
+		NameBase:            config.NameBase,
+		Image:               config.Image,
+		ImagePullSecrets:    config.ImagePullSecrets,
+		NodeSelector:        config.NodeSelector,
+		Tolerations:         effectiveAgentTolerations(config.Tolerations),
+		Output:              agentOutput,
+		Debug:               config.Debug,
+		Privileged:          config.Privileged,
+		RequireGPU:          config.RequireGPU,
+		RuntimeClassName:    config.RuntimeClassName,
+		MaxNodesPerEntry:    config.MaxNodesPerEntry,
+		OS:                  config.OS,
+		ClusterConfigPath:   config.ClusterConfigPath,
+		DiscoverNetwork:     config.DiscoverNetwork,
+		Requests:            config.Requests,
+		Limits:              config.Limits,
+		OwnsOutputConfigMap: ownsOutput,
 	}
 }
 
 // deployAndWaitForResult handles the common deploy-wait-retrieve lifecycle for an agent Job.
 // It creates the deployer, deploys RBAC and the Job, streams logs, waits for completion,
 // and retrieves the snapshot data from the result ConfigMap.
-func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, config *AgentConfig, agentOutput string, deliverViaConfigMap bool) ([]byte, error) {
+//
+// ownsOutput is agentConfigMapTarget's second return value: true when
+// agentOutput is the internal staging ConfigMap this run owns, false when it
+// is a caller-supplied cm:// destination. See buildAgentConfig and
+// rewriteMergedSnapshotConfigMap for how each consumes it.
+//
+// runID is the resolved run ID for this invocation; see buildAgentConfig.
+func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, config *AgentConfig, runID, agentOutput string, ownsOutput bool) ([]byte, error) {
 	// The pool projection is pure file processing on the caller's host —
 	// project it BEFORE deploying so a bad file fails in milliseconds,
 	// not after a Job round-trip, and merge it into the returned snapshot
 	// below. It deliberately does not ride the in-pod collector path.
-	var aksGPUPools *measurement.Subtype
+	var projections []measurement.Subtype
 	if config.AKSGPUPoolsPath != "" {
 		subtype, err := k8scollector.ProjectAKSGPUPools(ctx, config.AKSGPUPoolsPath)
 		if err != nil {
 			return nil, err
 		}
-		aksGPUPools = &subtype
+		projections = append(projections, subtype)
+	}
+	if config.OKEAddonsPath != "" {
+		subtype, err := k8scollector.ProjectOKEAddons(ctx, config.OKEAddonsPath)
+		if err != nil {
+			return nil, err
+		}
+		projections = append(projections, subtype)
+	}
+	if config.GKEGPUPoolsPath != "" {
+		subtype, err := k8scollector.ProjectGKEGPUPools(ctx, config.GKEGPUPoolsPath)
+		if err != nil {
+			return nil, err
+		}
+		projections = append(projections, subtype)
 	}
 
 	// Auto-inject GPU node selector when no placement constraints are set.
@@ -198,7 +302,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 	// name the injected selector (TOCTOU: node may be cordoned after detection).
 	autoInjectedGPUSelector := maybeInjectGPUNodeSelector(ctx, clientset, config)
 
-	agentConfig := buildAgentConfig(config, agentOutput)
+	agentConfig := buildAgentConfig(config, runID, agentOutput, ownsOutput)
 
 	deployer := agent.NewDeployer(clientset, agentConfig)
 
@@ -229,8 +333,11 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		timeout = defaults.K8sJobCompletionTimeout
 	}
 
+	// Log the run-scoped Job name, not agentConfig.JobName: that field is
+	// only the user's optional prefix and is empty by default, so logging it
+	// prints job="".
 	slog.Info("waiting for Job completion",
-		slog.String("job", agentConfig.JobName),
+		slog.String("job", deployer.JobName()),
 		slog.Duration("timeout", timeout))
 
 	// Stream logs in background while waiting for Job completion.
@@ -256,7 +363,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 			if logCtx.Err() == nil {
 				slog.Warn("agent log streaming skipped: pod did not become ready",
 					slog.String("namespace", agentConfig.Namespace),
-					slog.String("job", agentConfig.JobName),
+					slog.String("job", deployer.JobName()),
 					"error", podErr)
 			}
 			return
@@ -306,10 +413,12 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to retrieve snapshot", err)
 	}
 
-	if aksGPUPools != nil {
-		snapshotData, err = mergeAKSGPUPools(snapshotData, *aksGPUPools)
-		if err != nil {
-			return nil, err
+	if len(projections) > 0 {
+		for _, projection := range projections {
+			snapshotData, err = mergeProviderProjection(snapshotData, projection)
+			if err != nil {
+				return nil, err
+			}
 		}
 		// The Job stored the PRE-merge snapshot in the result ConfigMap,
 		// and Cleanup removes Job+RBAC but never that ConfigMap. Rewrite
@@ -325,8 +434,10 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		// merged reading, so a transient Apply failure on the internal
 		// hygiene rewrite must not discard an already-captured snapshot;
 		// warn loudly instead (the orphaned ConfigMap stays pre-merge).
+		// ownsOutput is the run-owns-the-staging-ConfigMap flag, so its
+		// logical inverse is "the ConfigMap is the user's delivery vehicle".
 		if err := rewriteMergedSnapshotConfigMap(ctx, agentOutput, config.Kubeconfig,
-			snapshotData, deliverViaConfigMap); err != nil {
+			snapshotData, !ownsOutput); err != nil {
 			return nil, err
 		}
 	}
@@ -334,7 +445,8 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 	return snapshotData, nil
 }
 
-// mergeAKSGPUPools attaches the controller-side pool projection to the
+// mergeProviderProjection attaches a controller-side provider projection
+// (aks-gpu-pools, oke-addons, gke-gpu-pools) to the
 // snapshot the agent Job returned. The merge is performed on generic maps,
 // NOT through the controller's typed Snapshot struct: the agent image is
 // user-pinnable, so a newer agent may emit fields this binary's struct does
@@ -342,11 +454,11 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 // the returned snapshot and the rewritten ConfigMap. The subtype cannot
 // affect the cluster fingerprint (fingerprint dimensions read no
 // aks-gpu-pools key), so merging after the in-pod derivation is sound.
-func mergeAKSGPUPools(snapshotData []byte, subtype measurement.Subtype) ([]byte, error) {
+func mergeProviderProjection(snapshotData []byte, subtype measurement.Subtype) ([]byte, error) {
 	var doc map[string]any
 	if err := yaml.Unmarshal(snapshotData, &doc); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to parse agent snapshot for AKS GPU pools merge", err)
+			"failed to parse agent snapshot for provider projection merge", err)
 	}
 	if doc == nil {
 		// An empty or `null` document unmarshals to a nil map without
@@ -360,12 +472,12 @@ func mergeAKSGPUPools(snapshotData []byte, subtype measurement.Subtype) ([]byte,
 	subtypeYAML, err := yaml.Marshal(subtype)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to serialize AKS GPU pools subtype", err)
+			"failed to serialize provider projection subtype", err)
 	}
 	var subtypeNode map[string]any
 	if reshapeErr := yaml.Unmarshal(subtypeYAML, &subtypeNode); reshapeErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to reshape AKS GPU pools subtype", reshapeErr)
+			"failed to reshape provider projection subtype", reshapeErr)
 	}
 
 	measurements, _ := doc["measurements"].([]any)
@@ -392,7 +504,7 @@ func mergeAKSGPUPools(snapshotData []byte, subtype measurement.Subtype) ([]byte,
 	merged, err := serializer.MarshalYAMLDeterministic(doc)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to serialize snapshot after AKS GPU pools merge", err)
+			"failed to serialize snapshot after provider projection merge", err)
 	}
 	return merged, nil
 }
@@ -482,10 +594,32 @@ func DeployAndCollect(ctx context.Context, config *AgentConfig) (*Snapshot, []by
 			"Namespace is required: it is where the agent Job, its RBAC, and the result ConfigMap are created")
 	}
 
+	// Default RunID before any cluster access — and before
+	// agentConfigMapTarget below, which folds it into the internal staging
+	// ConfigMap's name — so every resource this run creates shares one
+	// scope. pkg/k8s/agent's Deploy independently rejects an empty or
+	// malformed RunID, but only as an ErrCodeInvalidRequest naming a Config
+	// field a CLI user never set — so catch the whitespace-only value that
+	// slips past this simple emptiness check here, where the message can
+	// point at the knob the caller actually controls.
+	//
+	// The resolved value stays in a local: writing it back into the
+	// caller-owned *AgentConfig would turn a caller who reuses one config
+	// pointer for a second run into a caller pinning a duplicate RunID.
+	runID := config.RunID
+	if runID == "" {
+		runID = runid.Generate()
+	}
+	if strings.TrimSpace(runID) == "" {
+		return nil, nil, errors.New(errors.ErrCodeInvalidRequest,
+			"RunID must not be all-whitespace; leave it unset to auto-generate one")
+	}
+	slog.Info("snapshot agent run", slog.String("runID", runID))
+
 	// Resolve (and validate) the Job's ConfigMap target before any cluster
 	// access: a malformed cm:// Output must not cost the caller a deployed
 	// Job and a cluster-admin binding.
-	agentOutput, deliverViaConfigMap, err := agentConfigMapTarget(config)
+	agentOutput, ownsOutput, err := agentConfigMapTarget(config, runID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -497,7 +631,7 @@ func DeployAndCollect(ctx context.Context, config *AgentConfig) (*Snapshot, []by
 		return nil, nil, err
 	}
 
-	snapshotData, err := deployAndWaitForResult(ctx, clientset, config, agentOutput, deliverViaConfigMap)
+	snapshotData, err := deployAndWaitForResult(ctx, clientset, config, runID, agentOutput, ownsOutput)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -513,21 +647,35 @@ func DeployAndCollect(ctx context.Context, config *AgentConfig) (*Snapshot, []by
 }
 
 // agentConfigMapTarget resolves where the agent Job stages its result and
-// whether that ConfigMap is the user's delivery vehicle.
+// whether this run owns that ConfigMap.
 //
 // The Job always writes to a ConfigMap. When config.Output is a cm:// URI the
-// user asked for that exact ConfigMap, so the Job targets it directly and
-// deliverViaConfigMap is true — which makes a failed AKS-pool-merge rewrite
-// fatal rather than a warning, because the bytes the user will read live
-// there. Any other Output (file, stdout, template, or unset) stages to an
-// internal ConfigMap in config.Namespace that the caller never sees.
+// user asked for that exact ConfigMap, so the Job targets it directly,
+// ownsOutput is false, and a failed provider-projection-merge rewrite is fatal rather
+// than a warning — the bytes the user will read live there, and this run
+// must never delete an artifact it does not own. Any other Output (file,
+// stdout, template, or unset) stages to an internal, run-scoped ConfigMap in
+// config.Namespace that the caller never names: ownsOutput is true, so
+// Cleanup may delete it.
+//
+// runID is the resolved run ID for this invocation (config.RunID when the
+// caller pinned one, otherwise the value DeployAndCollect generated); it is a
+// parameter rather than a config field read because DeployAndCollect never
+// writes the generated ID back into the caller's AgentConfig.
+//
+// In the owned case the returned uri is exactly
+// cm://<config.Namespace>/<agent.StagingConfigMapName(runID)>. Cleanup
+// in pkg/k8s/agent relies on both halves of that invariant rather than
+// re-parsing the URI: deleteStagingConfigMap deletes in Config.Namespace, and
+// deleteUnrecordedStagingConfigMap (the sweep for a run that failed before
+// the ConfigMap's UID was observed) looks it up by that same generated name.
 //
 // A cm:// Output is fully parsed here, not merely prefix-matched. The
 // namespace/name only has to be well-formed for the in-pod writer much later,
 // so a typo like "cm://aicr-snapshot" (no namespace) would otherwise surface
 // as a Job failure — after RBAC and the Job exist, and with Cleanup false
 // (the zero value) they stay behind. Returns ErrCodeInvalidRequest instead.
-func agentConfigMapTarget(config *AgentConfig) (uri string, deliverViaConfigMap bool, err error) {
+func agentConfigMapTarget(config *AgentConfig, runID string) (uri string, ownsOutput bool, err error) {
 	if strings.HasPrefix(config.Output, serializer.ConfigMapURIScheme) {
 		if _, _, parseErr := pod.ParseConfigMapURI(config.Output); parseErr != nil {
 			// Wrap with the same code rather than PropagateOrWrap: the inner
@@ -537,9 +685,9 @@ func agentConfigMapTarget(config *AgentConfig) (uri string, deliverViaConfigMap 
 				fmt.Sprintf("invalid ConfigMap output URI %q (expected cm://namespace/name)", config.Output),
 				parseErr)
 		}
-		return config.Output, true, nil
+		return config.Output, false, nil
 	}
-	return fmt.Sprintf("%s%s/aicr-snapshot", serializer.ConfigMapURIScheme, config.Namespace), false, nil
+	return serializer.ConfigMapURIScheme + config.Namespace + "/" + agent.StagingConfigMapName(runID), true, nil
 }
 
 // SnapshotDelivery describes where DeliverSnapshot writes captured bytes.
@@ -794,15 +942,19 @@ func ParseResourceList(spec string) (corev1.ResourceList, error) {
 	return result, nil
 }
 
-// ParseNodeSelectors parses node selector strings in format "key=value".
+// ParseNodeSelectors parses key=value selectors into a map. It returns an error
+// for a pair that is not a valid Kubernetes node label.
 func ParseNodeSelectors(selectors []string) (map[string]string, error) {
 	result := make(map[string]string)
 	for _, s := range selectors {
-		parts := strings.SplitN(s, "=", 2)
-		if len(parts) != 2 {
+		key, value, ok := strings.Cut(s, "=")
+		if !ok {
 			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format %q, expected key=value", s))
 		}
-		result[parts[0]] = parts[1]
+		if err := (bundlercfg.NodeLabel{Key: key, Value: value}).Validate(); err != nil {
+			return nil, err
+		}
+		result[key] = value
 	}
 	return result, nil
 }
@@ -826,21 +978,9 @@ func effectiveAgentTolerations(tolerations []corev1.Toleration) []corev1.Tolerat
 	return tolerations
 }
 
-func validateTaintEffect(effect corev1.TaintEffect) error {
-	switch effect {
-	case corev1.TaintEffectNoSchedule:
-		return nil
-	case corev1.TaintEffectPreferNoSchedule:
-		return nil
-	case corev1.TaintEffectNoExecute:
-		return nil
-	default:
-		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid taint effect %q, expected %s, %s, or %s", effect, corev1.TaintEffectNoSchedule, corev1.TaintEffectPreferNoSchedule, corev1.TaintEffectNoExecute))
-	}
-}
-
-// ParseTolerations parses toleration strings in format "key=value:effect" or "key:effect".
-// If no tolerations are provided, returns DefaultTolerations() which accepts all taints.
+// ParseTolerations parses key=value:effect and key:effect tolerations. It
+// returns an error for a toleration the API server would reject. Empty input
+// returns DefaultTolerations, which tolerates all taints.
 func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
 	// Return default "tolerate all" if no custom tolerations specified
 	if len(tolerations) == 0 {
@@ -855,26 +995,14 @@ func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
 		}
 
 		// Format: key=value:effect or key:effect (for exists operator)
-		var key, value, effect string
-
-		// Split by colon to get effect
 		parts := strings.Split(t, ":")
 		if len(parts) != 2 {
 			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format %q, expected key=value:effect or key:effect", t))
 		}
-		effect = parts[1]
+		effect := parts[1]
+		key, value, _ := strings.Cut(parts[0], "=")
 
-		// Parse key and value
-		if strings.Contains(parts[0], "=") {
-			kvParts := strings.SplitN(parts[0], "=", 2)
-			key = kvParts[0]
-			value = kvParts[1]
-		} else {
-			key = parts[0]
-			// No value means Exists operator
-		}
-
-		if err := validateTaintEffect(corev1.TaintEffect(effect)); err != nil {
+		if err := bundlercfg.ValidateTaintEffect(corev1.TaintEffect(effect)); err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid taint effect", err)
 		}
 
@@ -892,11 +1020,16 @@ func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
 
 		result = append(result, toleration)
 	}
+	if err := bundlercfg.ValidateTolerations(result); err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 
-// ParseTaint parses a single taint string in format "key=value:effect" or "key:effect".
-// Returns a corev1.Taint struct.
+// ParseTaint parses a single taint string in format "key=value:effect" or
+// "key:effect". The key and value must satisfy the Kubernetes taint rules
+// (qualified name, label-value syntax), so a malformed string is rejected here
+// rather than reaching the API server or the generated deploy script.
 func ParseTaint(taintStr string) (*corev1.Taint, error) {
 	if taintStr == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "taint string cannot be empty")
@@ -926,8 +1059,16 @@ func ParseTaint(taintStr string) (*corev1.Taint, error) {
 	if key == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format %q, key cannot be empty", taintStr))
 	}
+	if errs := validation.IsQualifiedName(key); len(errs) > 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid taint key %q: %s", key, strings.Join(errs, "; ")))
+	}
+	if errs := validation.IsValidLabelValue(value); len(errs) > 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid taint value %q: %s", value, strings.Join(errs, "; ")))
+	}
 
-	if err := validateTaintEffect(corev1.TaintEffect(effect)); err != nil {
+	if err := bundlercfg.ValidateTaintEffect(corev1.TaintEffect(effect)); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid taint effect", err)
 	}
 
@@ -994,7 +1135,7 @@ func rewriteMergedSnapshotConfigMap(ctx context.Context, uri, kubeconfig string,
 
 // writeSnapshotConfigMap applies snapshot bytes to a cm://namespace/name
 // destination in the requested format, replacing whatever is there. Shared by
-// DeliverSnapshot (the caller's chosen destination) and the AKS-pool merge
+// DeliverSnapshot (the caller's chosen destination) and the provider-projection merge
 // rewrite (replacing the pre-merge content the agent Job stored), which pins
 // YAML: pkg/k8s/agent reads the staging ConfigMap's snapshot.yaml key.
 //

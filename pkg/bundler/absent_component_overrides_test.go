@@ -15,12 +15,12 @@
 package bundler
 
 import (
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -266,7 +266,7 @@ func TestRejectOverridesForAbsentComponents(t *testing.T) {
 			if err == nil {
 				return
 			}
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 			}
 			for _, want := range tt.wantContains {
@@ -314,7 +314,7 @@ func TestMake_SubsetBundleKeepsNVSentinelGateEvidence(t *testing.T) {
 
 	newRecipe := func() *recipe.RecipeResult {
 		return &recipe.RecipeResult{
-			APIVersion: "aicr.run/v1alpha2",
+			APIVersion: "aicr.run/v1",
 			Kind:       "RecipeResult",
 			Criteria:   &recipe.Criteria{Service: recipe.CriteriaServiceOKE, Accelerator: "a100", Intent: "training"},
 			ComponentRefs: []recipe.ComponentRef{

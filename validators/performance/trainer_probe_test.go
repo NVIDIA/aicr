@@ -16,7 +16,6 @@ package main
 
 import (
 	"context"
-	stderrors "errors"
 	"fmt"
 	"net"
 	"strings"
@@ -24,11 +23,14 @@ import (
 	"time"
 
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
 
@@ -329,7 +331,7 @@ func TestApplyTrainerResources_RefusesForeignWebhookConfig(t *testing.T) {
 			trainerValidatingWebhookConfig, trainerValidatingWebhookName),
 	}
 
-	_, err := applyTrainerResources(context.Background(), client, newTrainerTestMapper(), objs)
+	_, err := applyTrainerResources(context.Background(), client, fake.NewClientset(), newTrainerTestMapper(), objs)
 	if err == nil {
 		t.Fatal("expected install to refuse overwriting a foreign webhook configuration")
 	}
@@ -362,7 +364,7 @@ func TestApplyTrainerResources_UpdatesOwnWebhookConfig(t *testing.T) {
 			trainerValidatingWebhookConfig, trainerValidatingWebhookName),
 	}
 
-	if _, err := applyTrainerResources(context.Background(), client, newTrainerTestMapper(), objs); err != nil {
+	if _, err := applyTrainerResources(context.Background(), client, fake.NewClientset(), newTrainerTestMapper(), objs); err != nil {
 		t.Fatalf("re-applying our own webhook configuration should succeed, got: %v", err)
 	}
 }
@@ -382,7 +384,7 @@ func TestWaitForDeploymentReady_TerminalErrorFailsFast(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected forbidden Get to fail fast, got nil")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeUnauthorized, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeUnauthorized {
 		t.Errorf("error code is not Unauthorized: %v", err)
 	}
 }
@@ -553,7 +555,7 @@ func TestIsTrainerInstalled_UnavailableAPISurfacesAsUnavailable(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeUnavailable, "")) {
+	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeUnavailable {
 		t.Errorf("error code is not Unavailable: %v", err)
 	}
 }

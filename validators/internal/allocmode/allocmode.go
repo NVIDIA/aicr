@@ -24,6 +24,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/validators/helper"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -121,7 +122,7 @@ func GVRAt(version, resource string) schema.GroupVersionResource {
 func DiscoverServedVersion(ctx context.Context, clientset kubernetes.Interface) (string, *metav1.APIResourceList, error) {
 	for _, version := range APIVersionPreference {
 		gv := apiGroupResourceK8sIO + "/" + version
-		resources, err := draGroupVersionResources(ctx, clientset, gv)
+		resources, err := helper.GroupVersionResources(ctx, clientset, gv)
 		if err == nil {
 			return version, resources, nil
 		}
@@ -138,41 +139,6 @@ func DiscoverServedVersion(ctx context.Context, clientset kubernetes.Interface) 
 		}
 	}
 	return "", nil, nil
-}
-
-// draGroupVersionResources fetches the APIResourceList for gv with the
-// caller's context. DiscoveryInterface.ServerResourcesForGroupVersion issues
-// its request with context.TODO() internally (client-go), so an unresponsive
-// apiserver could outlive the validator timeout and hang until the Job is
-// killed; issuing the same GET through the discovery REST client keeps the
-// request cancelable. Fake discovery clients in tests expose no RESTClient —
-// fall back to the interface method there (test-only, in-memory, no I/O).
-func draGroupVersionResources(ctx context.Context, clientset kubernetes.Interface, gv string) (*metav1.APIResourceList, error) {
-	disc := clientset.Discovery()
-	rc := disc.RESTClient()
-	if rc == nil {
-		// The interface method cannot carry ctx — honor it around the call
-		// so a canceled probe still aborts (fake clients are in-memory, so
-		// the call itself cannot hang).
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
-		}
-		resources, err := disc.ServerResourcesForGroupVersion(gv)
-		// Recheck AFTER the call: a cancellation racing the call (e.g. a
-		// test reactor canceling mid-request) can still let it return
-		// success — a canceled probe must report cancellation, not a result
-		// observed under a dead context.
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
-		}
-		return resources, err
-	}
-	resources := &metav1.APIResourceList{}
-	if err := rc.Get().AbsPath("/apis/" + gv).Do(ctx).Into(resources); err != nil {
-		return nil, err
-	}
-	resources.GroupVersion = gv
-	return resources, nil
 }
 
 // Mode reports which GPU allocation mechanisms are currently

@@ -26,6 +26,10 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/recipe"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -427,7 +431,7 @@ func TestCheckSecureAcceleratorAccess_NeitherUsable(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected failure when neither DRA nor device plugin is usable")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeUnavailable {
 		t.Errorf("error code = %v, want ErrCodeUnavailable", err)
 	}
 	if !strings.Contains(err.Error(), "no usable GPU allocation mechanism") {
@@ -436,6 +440,99 @@ func TestCheckSecureAcceleratorAccess_NeitherUsable(t *testing.T) {
 	// The failure must explain both sides so operators can fix the environment.
 	if !strings.Contains(err.Error(), draDriverGPU) || !strings.Contains(err.Error(), resourceNVIDIAGPU) {
 		t.Errorf("error = %v, want details for both DRA and device plugin", err)
+	}
+}
+
+// TestCheckSecureAcceleratorAccess_SkipsForSlinkySlurm verifies that
+// slinky-slurm in the recipe skips this check.
+func TestCheckSecureAcceleratorAccess_SkipsForSlinkySlurm(t *testing.T) {
+	tests := []struct {
+		name       string
+		recipe     *recipe.RecipeResult
+		expectSkip bool
+	}{
+		{
+			name: "slinky-slurm present skips",
+			recipe: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "gpu-operator"},
+					{Name: "slinky-slurm"},
+				},
+			},
+			expectSkip: true,
+		},
+		{
+			name: "disabled slinky-slurm does not skip",
+			recipe: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "gpu-operator"},
+					{
+						Name:      "slinky-slurm",
+						Overrides: map[string]any{"enabled": false},
+					},
+				},
+			},
+			expectSkip: false,
+		},
+		{
+			name: "no slinky-slurm does not skip",
+			recipe: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "gpu-operator"},
+				},
+			},
+			expectSkip: false,
+		},
+		{
+			name:       "nil recipe does not skip",
+			recipe:     nil,
+			expectSkip: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			validation := v1.ToValidationInput(tt.recipe)
+			ctx := &validators.Context{
+				Ctx:             context.Background(),
+				Clientset:       k8sfake.NewClientset(),
+				ValidationInput: validation,
+			}
+
+			err := CheckSecureAcceleratorAccess(ctx)
+
+			if tt.expectSkip {
+				if err == nil {
+					t.Fatal("expected skip error, got nil")
+				}
+				if !validators.IsSkip(err) {
+					t.Errorf("expected a skip error, got: %v", err)
+				}
+				if !strings.Contains(err.Error(), "slinky-slurm") {
+					t.Errorf("expected skip reason to mention slinky-slurm, got: %v", err)
+				}
+				wantReason := "Slurm-managed GPU allocation (slinky-slurm in recipe) is not mediated by the Kubernetes scheduler. On GPU-backed Slinky recipes slinky-slurm-gpu-access verifies Slurm's GPU access and isolation path instead"
+				if !strings.Contains(err.Error(), wantReason) {
+					t.Errorf("skip reason = %v, want containing %q", err, wantReason)
+				}
+				if strings.Contains(err.Error(), "slinky-slurm-health") {
+					t.Errorf("skip reason = %v, must not name slinky-slurm-health", err)
+				}
+				return
+			}
+
+			// Fell through the slinky-slurm gate. getDynamicClient then
+			// fails with ErrCodeInvalidRequest, not a skip.
+			if err == nil {
+				t.Fatal("expected a non-skip error, got nil")
+			}
+			if validators.IsSkip(err) {
+				t.Errorf("expected a non-skip error, got skip: %v", err)
+			}
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+			}
+		})
 	}
 }
 
@@ -461,7 +558,7 @@ func TestCheckSecureAcceleratorAccess_FailsFastWhenDeadlineTooShortForCleanup(t 
 	if err == nil {
 		t.Fatal("expected fail-fast when the deadline cannot fit the cleanup reserve")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("error code = %v, want ErrCodeTimeout", err)
 	}
 	if !strings.Contains(err.Error(), "too short to guarantee cleanup") {
@@ -1589,7 +1686,7 @@ func TestCheckSecureAcceleratorAccess_ForeignNamespaceCollision(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected failure on a foreign-namespace name collision")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeConflict {
 		t.Errorf("error code = %v, want ErrCodeConflict", err)
 	}
 	if !strings.Contains(err.Error(), "refusing to reuse or delete a foreign namespace") {
@@ -1788,7 +1885,7 @@ func TestCreatePodWhenSAReady(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected timeout when the default SA never appears")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("error code = %v, want ErrCodeTimeout", err)
 		}
 		if !strings.Contains(err.Error(), "ServiceAccount was not provisioned") {
@@ -1831,7 +1928,7 @@ func TestCreatePodWhenSAReady(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected the expired retry window to fail")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("error code = %v, want ErrCodeTimeout", err)
 		}
 		if !strings.Contains(err.Error(), "timed out waiting on namespace provisioning") {
@@ -1858,7 +1955,7 @@ func TestCreatePodWhenSAReady(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected the expired retry window to fail")
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("error code = %v, want ErrCodeTimeout", err)
 		}
 		if !strings.Contains(err.Error(), "ServiceAccount was not provisioned") {

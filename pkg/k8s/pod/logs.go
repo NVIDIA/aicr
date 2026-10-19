@@ -47,7 +47,7 @@ func StreamLogs(ctx context.Context, client kubernetes.Interface, namespace, pod
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
-			return errors.Wrap(errors.ErrCodeTimeout, "context cancelled during log streaming", ctx.Err())
+			return errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "streaming pod logs")
 		default:
 		}
 		if _, err := logWriter.Write(append(scanner.Bytes(), '\n')); err != nil {
@@ -84,7 +84,7 @@ func GetPodLogs(ctx context.Context, client kubernetes.Interface, namespace, pod
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
-			return "", errors.Wrap(errors.ErrCodeTimeout, "log collection cancelled", ctx.Err())
+			return "", errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "collecting pod logs")
 		default:
 		}
 		logBuffer.WriteString(scanner.Text())

@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
@@ -321,7 +323,7 @@ func TestCheckDRASupport_FailsWhenDriverPresentButAPIMissing(t *testing.T) {
 		t.Fatalf("error = %v, want message about in-scope driver with no served %s version (tried versions listed)",
 			err, apiGroupResourceK8sIO)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeUnavailable {
 		t.Errorf("error code = %v, want ErrCodeUnavailable", err)
 	}
 }
@@ -468,7 +470,7 @@ func TestCheckDRASupport_DiscoveryErrorFailsClosed(t *testing.T) {
 	if !strings.Contains(err.Error(), "failed to discover DRA API group-version") {
 		t.Fatalf("error = %v, want discovery failure", err)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("error code = %v, want ErrCodeInternal", err)
 	}
 }
@@ -567,7 +569,7 @@ func TestCheckDRASupport_FailsClosedOnDriverProbeError(t *testing.T) {
 	if !strings.Contains(err.Error(), "failed to list pods") {
 		t.Fatalf("error = %v, want pod list failure", err)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("error code = %v, want ErrCodeInternal", err)
 	}
 	if stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
@@ -581,7 +583,8 @@ func TestCheckDRASupport_PassesComputeDomainOnlyWithoutBehavioralAllocation(t *t
 	// validated compute-domain ResourceSlices (complete current-generation
 	// pool, untainted device, Ready schedulable node), recording the
 	// behavioral GPU allocation subtest as not applicable, and must NOT
-	// create any test pod.
+	// create any test pod. Without a clique-labeled node the IMEX channel
+	// subtest is not applicable either.
 	client := k8sfake.NewClientset(append(healthyDRADriverObjects(), testNode("node1"))...)
 	withDRAAPIDiscovery(t, client)
 	created := markPodsSucceededOnCreate(client)
@@ -601,6 +604,11 @@ func TestCheckDRASupport_PassesComputeDomainOnlyWithoutBehavioralAllocation(t *t
 	}
 	if pod := findPodByPrefix(*created, gpuTestPodPrefix); pod != nil {
 		t.Errorf("behavioral allocation pod %s created, want none (full-GPU DRA not enabled)", pod.Name)
+	}
+	// node1 carries no clique label → the IMEX channel subtest is N/A too
+	// (see dra_imex_channel_check_test.go for the MNNVL paths).
+	if pod := findPodByPrefix(*created, imexTestPodPrefix); pod != nil {
+		t.Errorf("IMEX probe pod %s created, want none (no clique-labeled node)", pod.Name)
 	}
 }
 
@@ -673,11 +681,11 @@ func TestValidateNVIDIAResourceSlices_NodeListTimeout(t *testing.T) {
 	}
 
 	version := strings.TrimPrefix(draAPIGroupVersion, apiGroupResourceK8sIO+"/")
-	err := validateNVIDIAResourceSlices(ctx, newDRAFakeDynamicClient(), version)
+	_, err := validateNVIDIAResourceSlices(ctx, newDRAFakeDynamicClient(), version)
 	if err == nil {
 		t.Fatal("expected the node list to time out")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("error = %v, want ErrCodeTimeout", err)
 	}
 	if !strings.Contains(err.Error(), "timed out reading nodes for ResourceSlice validation") {
@@ -824,7 +832,7 @@ func TestCheckDRASupport_FailsFastWhenDeadlineTooShortForCleanup(t *testing.T) {
 			if isSkipError(err) {
 				t.Fatalf("error = %v, want a hard failure, not a skip", err)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 				t.Errorf("error code = %v, want ErrCodeTimeout", err)
 			}
 			if !strings.Contains(err.Error(), "too short to guarantee cleanup") {
@@ -871,7 +879,7 @@ func TestCheckDRASupport_StandaloneProbeBoundedWithoutParentDeadline(t *testing.
 	if isSkipError(err) {
 		t.Fatalf("error = %v, want a timeout failure, not a skip", err)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("error code = %v, want ErrCodeTimeout", err)
 	}
 	if !strings.Contains(err.Error(), "presence probe did not complete") {

@@ -28,17 +28,18 @@ spec:
     # Asserted before the workload steps so a stranded CRD is named as the
     # cause rather than surfacing later as a confusing controller symptom.
     #
-    # Helm and Helmfile skip a chart's crds/ directory on upgrade, and the
-    # HelmRelease AICR generates for Flux sets no spec.upgrade.crds, so the
-    # helm-controller default of Skip applies. (Flux itself can replace CRDs
-    # via spec.upgrade.crds: CreateReplace; AICR does not generate that field
-    # for any component today — see #2264. Argo CD applies CRDs as ordinary
-    # manifests each sync and is unaffected.) A cluster can therefore run a
-    # new controller against the previous CRD schema.
+    # Helm and Helmfile both skip a chart's crds/ directory on upgrade, but
+    # only Helmfile is left without a path: AICR generates apply-crds.sh for
+    # helm, sets spec.upgrade.crds: CreateReplace on the HelmRelease it
+    # generates for Flux (ownsCRDs components, k8s-aibom included), and Argo
+    # CD applies CRDs as ordinary manifests each sync. So a cluster running a
+    # new controller against the previous CRD schema is a real state, reached
+    # on Helmfile or when a version override drops the ownsCRDs automation --
+    # which is why this is asserted rather than assumed.
     #
     # VERSION-COUPLED BY CONSTRUCTION. Assert content is static YAML; there
     # is no templating, so the expected version below is a literal tied to
-    # the chart version the registry pins for this component (1.3.0, whose
+    # the chart version the registry pins for this component (1.5.1, whose
     # CRDs serve v1alpha1 and v1beta1 with storage on v1beta1). A recipe that
     # overrides `version` on the componentRef to a chart with a different
     # storage version — 1.2.0 and earlier store v1alpha1 — will fail this
@@ -57,16 +58,30 @@ spec:
     # would satisfy an equivalent v1alpha1 assertion identically.
     #
     # The practical consequence: this catches a stranded upgrade across a
-    # storage-version boundary — the 1.2.0 to 1.3.0 move this pin just made —
-    # and does not catch a stranded upgrade within one, such as 1.0.0 to
-    # 1.2.0. That is the correct trade for a static assert; do not describe
-    # the step as proving more than it does.
+    # storage-version boundary — such as the 1.2.0 to 1.3.0 move, the last
+    # one this pin crossed — and does not catch a stranded upgrade within
+    # one, such as 1.0.0 to 1.2.0, or the 1.3.0 to 1.5.1 move this pin later
+    # made, which stayed on the v1beta1 side of that boundary. That is the
+    # correct trade for a static assert; do not describe the step as proving
+    # more than it does.
     #
     # NOTE the asymmetry with the AIBOMControllerConfig step below, which
-    # still reads aibom.k8saibom.dev/v1alpha1. That is deliberate and
-    # verified against the rendered chart: 1.3.0 moves CRD *storage* to
-    # v1beta1 while still rendering the controller config CR itself at
-    # v1alpha1, and both versions stay served. Do not "fix" the two to match.
+    # still asserts aibom.k8saibom.dev/v1alpha1. Verified against the
+    # rendered chart: 1.5.1 renders that CR at v1beta1 (1.3.0 rendered it at
+    # v1alpha1), and both CRD versions are unchanged across that jump --
+    # v1alpha1 stays served, v1beta1 stays served and storage. So the
+    # assertion still resolves, but now through v1alpha1 being served rather
+    # than by matching the object's actual rendered apiVersion.
+    #
+    # It stays at v1alpha1 because that is the version the live GKE run on
+    # 2026-09-28 actually exercised, not because v1alpha1 is the safer target.
+    # It is the riskier one: spec.conversion is unset on both charts, so
+    # v1beta1 is read straight from storage while v1alpha1 is served through
+    # the None-strategy conversion. The forward hazard follows from that --
+    # this assertion breaks the day upstream stops serving v1alpha1, which is
+    # a normal thing for an alpha version to do. Move it to v1beta1 when a GKE
+    # UAT lane re-runs the check against the moved assertion; that is a
+    # re-verification, not new evidence about conversion.
     #
     # The controller's own readiness is a separate signal and not one AICR
     # owns: upstream shipped a start-ordering race from v1.1.0 through v1.2.0

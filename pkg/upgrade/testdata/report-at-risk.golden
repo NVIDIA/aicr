@@ -1,0 +1,44 @@
+UPGRADE CHECK
+  from      cluster
+  to        ./bundles-v0.17.0
+  deployer  argocd
+
+COMPONENT      FROM    TO      VERDICT  NOTES
+---------      ----    --      -------  -----
+beta-operator  0.17.2  0.18.1  manual   1 minor, 1 step, manual across 3 minors
+
+beta-operator 0.17.2 -> 0.18.1  (manual)
+  The legacy API group is renamed. A mirror controller copies existing
+  objects.
+
+  recorded manual: the record covering 0.18.0 describes the move from 0.17.2
+  to 0.18.1. Follow the steps below, then apply
+
+  PRECONDITION
+    No object is mid-rollout and no node is mid-package.
+
+  STEPS (deployer: argocd)
+    1. rename-crs
+       In a single commit, remove the legacy manifests and add their
+       replacements.
+       Why: one commit lets the controller prune and adopt in a single sync.
+
+AT RISK (advisory)
+  Objects of the kinds the crossed transition records name that carry neither
+  Helm nor Argo CD ownership. AICR does not manage them and cannot restore
+  them; removing a CRD takes its objects with it. Advisory only: this never
+  changes the exit code.
+
+  examined       LegacyPolicy.beta.example.com (beta-operator): 4 objects
+  not installed  LegacyBinding.beta.example.com (beta-operator, gamma-operator): the cluster does not serve this kind
+
+  COMPONENT      KIND                           NAMESPACE  NAME
+  ---------      ----                           ---------  ----
+  beta-operator  LegacyPolicy.beta.example.com  tenant-a   nightly-training
+  beta-operator  LegacyPolicy.beta.example.com  tenant-b   inference-pool
+  -              PersistentVolume               -          beta-store-pv
+
+  3 objects at risk. Confirm each is expected to survive this upgrade, or back
+  it up, before applying.
+
+1 component change, 1 needs attention

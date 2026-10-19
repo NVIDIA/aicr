@@ -23,8 +23,10 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -37,7 +39,9 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
 	"github.com/NVIDIA/aicr/pkg/component"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -557,7 +561,7 @@ func TestWriteProfileLockTemplateRejectsUnownedExistingFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("writeProfileLockTemplate() accepted a user-owned template collision")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("writeProfileLockTemplate() error = %v, want ErrCodeInvalidRequest", err)
 	}
 	got, readErr := os.ReadFile(guardPath)
@@ -610,7 +614,7 @@ spec:
 	if err == nil {
 		t.Fatal("transformApplication() error = nil, want collision rejection")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "collides with a deployer-owned template") {
@@ -642,6 +646,14 @@ func TestGenerate_ChartVersion(t *testing.T) {
 			recipeVersion:      "v9.9.9",
 			bundleChartVersion: "1.2.3+build.5",
 			want:               "1.2.3+build.5",
+		},
+		{
+			// Helm rejects "dev" for Chart.yaml version:, which made every
+			// argocd-helm bundle from an unstamped build unloadable — the
+			// README's own `helm install .` failed. See ADR-021 Decision 7.
+			name:          "unstamped dev build folds to a Helm-valid version",
+			recipeVersion: defaults.DevVersion,
+			want:          defaults.DevChartVersion,
 		},
 	}
 	for _, tt := range tests {
@@ -728,7 +740,7 @@ func TestGenerate_RejectsInvalidBundleChartVersion(t *testing.T) {
 			}
 
 			_, err := g.Generate(context.Background(), outputDir)
-			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("Generate() error = %v, want ErrCodeInvalidRequest", err)
 			}
 			entries, readErr := os.ReadDir(outputDir)
@@ -1006,7 +1018,7 @@ func TestGenerate_DynamicRejectedForLocalChart(t *testing.T) {
 			if err == nil {
 				t.Fatal("Generate() error = nil, want ErrCodeInvalidRequest for --dynamic on unsupported component")
 			}
-			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("Generate() error code = %v, want ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), "nfd-ocp") || !strings.Contains(err.Error(), "--dynamic") {
@@ -1247,15 +1259,11 @@ func TestGenerate_StaleStaticPathIsNotDestroyed(t *testing.T) {
 			}
 			// Both routes must agree on the code: the same user error must not
 			// be INVALID_REQUEST for one recipe shape and INTERNAL for another.
-			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Errorf("Generate() error code = %v, want ErrCodeInvalidRequest", err)
 			}
-			// The negative direction is what actually pins writeValuesFiles to
-			// PropagateOrWrap. errors.Is walks the Unwrap chain, so the check
-			// above still passes when an outer Wrap(ErrCodeInternal, ...) buries
-			// the real code — while ExitCodeFromError reads the OUTERMOST
-			// StructuredError, so the exit code a user observes would flip from
-			// 2 to 8 with the assertion above still green.
+			// Stricter than the reported code. An Internal wrap anywhere in the
+			// chain means writeValuesFiles stopped propagating the inner code.
 			if errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
 				t.Errorf("Generate() error = %v, want no ErrCodeInternal anywhere in the chain", err)
 			}
@@ -1949,6 +1957,211 @@ func TestBundleGolden_ReadinessGate(t *testing.T) {
 	}
 }
 
+// TestGenerateReportsLayout asserts Generate populates output.Entrypoint and
+// output.Releases with the layout it actually wrote to outputDir, mirroring
+// the flux and helmfile deployers' equivalent coverage. gpu-operator carries
+// pre-manifests, post-manifests, AND a readiness gate so the fixture
+// exercises the full `-pre` / `-post` / `-readiness` suffix-strip in
+// processFolders in one run.
+//
+// ComponentRefs declaration order, DeploymentOrder, and alphabetical
+// component-name order are all deliberately distinct here:
+//   - declaration (ComponentRefs order below): gpu-operator, cert-manager, nfd
+//   - DeploymentOrder: cert-manager, nfd, gpu-operator (the real dependency
+//     order — nfd labels nodes before gpu-operator consumes those labels)
+//   - alphabetical: cert-manager, gpu-operator, nfd
+//
+// so the primaryOrder assertion below can only pass if Generate genuinely
+// honors DeploymentOrder rather than sorting by name or falling back to
+// declaration order.
+func TestGenerateReportsLayout(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+		{
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.17.2",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://charts.jetstack.io",
+		},
+		{
+			Name:      "nfd",
+			Namespace: "nfd",
+			Chart:     "node-feature-discovery",
+			Version:   "v0.16.4",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://kubernetes-sigs.github.io/node-feature-discovery-charts",
+		},
+	})
+	rr.DeploymentOrder = []string{"cert-manager", "nfd", "gpu-operator"}
+
+	g := &Generator{
+		RecipeResult: rr,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {"driver": map[string]any{"version": "580"}},
+			"cert-manager": {"crds": map[string]any{"enabled": true}},
+			"nfd":          {"enabled": true},
+		},
+		Version:        "v0.0.0-test",
+		RepoURL:        "https://github.com/example/aicr-bundles.git",
+		TargetRevision: "main",
+		ComponentPreManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"components/gpu-operator/manifests/cos-namespace.yaml": []byte(
+					"apiVersion: v1\nkind: Namespace\nmetadata:\n  name: gpu-operator\n",
+				),
+			},
+		},
+		ComponentPostManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"components/gpu-operator/manifests/dcgm-exporter.yaml": []byte(
+					"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: dcgm-config\n",
+				),
+			},
+		},
+		ComponentReadiness: map[string]map[string][]byte{
+			"gpu-operator": {
+				"readiness.yaml": readinessGateManifest(t, config.DeployerArgoCDHelm),
+			},
+		},
+	}
+
+	out, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	if out.Entrypoint != fileChart {
+		t.Errorf("Entrypoint = %q, want %s", out.Entrypoint, fileChart)
+	}
+	if len(out.Releases) == 0 {
+		t.Fatal("Generate reported no releases; the bundle index would be empty")
+	}
+	for _, r := range out.Releases {
+		if r.Name == "" || r.Component == "" || r.Path == "" || r.Namespace == "" {
+			t.Errorf("incomplete release entry: %+v", r)
+		}
+		if _, statErr := os.Stat(filepath.Join(outputDir, r.Path)); statErr != nil {
+			t.Errorf("release %q claims path %q, which does not exist: %v", r.Name, r.Path, statErr)
+		}
+		// This deployer always declares a release through a chart template
+		// (never through an orchestration script), so Manifest must never
+		// be empty.
+		if r.Manifest == "" {
+			t.Errorf("release %q has empty Manifest; argocd-helm always declares one", r.Name)
+		}
+		wantManifest := path.Join("templates", r.Name+".yaml")
+		if r.Manifest != wantManifest {
+			t.Errorf("release %q manifest = %q, want %q", r.Name, r.Manifest, wantManifest)
+		}
+		if _, statErr := os.Stat(filepath.Join(outputDir, r.Manifest)); statErr != nil {
+			t.Errorf("release %q claims manifest %q, which does not exist: %v", r.Name, r.Manifest, statErr)
+		}
+	}
+
+	// Releases order is normative: consumers read deployment sequence from
+	// list position. Extract the primary releases (Name == Component;
+	// excludes injected -pre/-post/-readiness entries) and confirm their
+	// relative order matches the recipe's DeploymentOrder — a sort or
+	// reversal of out.Releases must fail this check.
+	var primaryOrder []string
+	for _, r := range out.Releases {
+		if r.Name == r.Component {
+			primaryOrder = append(primaryOrder, r.Name)
+		}
+	}
+	if !slices.Equal(primaryOrder, rr.DeploymentOrder) {
+		t.Errorf("primary release order = %v, want %v (recipe DeploymentOrder)",
+			primaryOrder, rr.DeploymentOrder)
+	}
+
+	// gpu-operator's -pre / -post / -readiness injections must be grouped
+	// under it via Component, and land in the emission order the delegated
+	// argocd generator's NNN- prefixes actually assigned.
+	names := make([]string, len(out.Releases))
+	components := make([]string, len(out.Releases))
+	for i, r := range out.Releases {
+		names[i] = r.Name
+		components[i] = r.Component
+	}
+	wantNames := []string{"cert-manager", "nfd", "gpu-operator-pre", "gpu-operator", "gpu-operator-post", "gpu-operator-readiness"}
+	if !slices.Equal(names, wantNames) {
+		t.Errorf("release name order = %v, want %v", names, wantNames)
+	}
+	wantComponents := []string{"cert-manager", "nfd", "gpu-operator", "gpu-operator", "gpu-operator", "gpu-operator"}
+	if !slices.Equal(components, wantComponents) {
+		t.Errorf("release component order = %v, want %v", components, wantComponents)
+	}
+}
+
+// TestGenerate_ApplyOutOfSyncOnlySyncOptions is the empirical proof that
+// transformApplication's generic map[string]any YAML round-trip preserves
+// the ApplyOutOfSyncOnly=true syncOptions entry the delegated argocd.Generator
+// adds to the readiness folder's Application, and that it stays scoped to
+// only that folder's transformed Helm-chart-template output. See #2367.
+func TestGenerate_ApplyOutOfSyncOnlySyncOptions(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	})
+	rr.DeploymentOrder = []string{"gpu-operator"}
+
+	g := &Generator{
+		RecipeResult: rr,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {"driver": map[string]any{"version": "580"}},
+		},
+		Version:        "v0.0.0-test",
+		RepoURL:        "https://github.com/example/aicr-bundles.git",
+		TargetRevision: "main",
+		ComponentReadiness: map[string]map[string][]byte{
+			"gpu-operator": {
+				"readiness.yaml": readinessGateManifest(t, config.DeployerArgoCDHelm),
+			},
+		},
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	primary, err := os.ReadFile(filepath.Join(outputDir, "templates", "gpu-operator.yaml"))
+	if err != nil {
+		t.Fatalf("read primary template: %v", err)
+	}
+	if strings.Contains(string(primary), "ApplyOutOfSyncOnly") {
+		t.Errorf("primary child template must not mention ApplyOutOfSyncOnly:\n%s", primary)
+	}
+
+	readiness, err := os.ReadFile(filepath.Join(outputDir, "templates", "gpu-operator-readiness.yaml"))
+	if err != nil {
+		t.Fatalf("read readiness template: %v", err)
+	}
+	if !strings.Contains(string(readiness), "ApplyOutOfSyncOnly=true") {
+		t.Errorf("readiness child template must contain \"ApplyOutOfSyncOnly=true\":\n%s", readiness)
+	}
+}
+
 // TestHelmTemplate_RendersWithSetRepoURL is the live-render counterpart to
 // the golden tests: goldens freeze the pre-render template bytes, this
 // test verifies that running `helm template` against the generated bundle
@@ -2451,7 +2664,7 @@ func TestGenerate_InnerParentCollisionUsesEffectiveAppName(t *testing.T) {
 		// argocd generator's own default parent name is exactly
 		// "nvidia-stack".
 		dataDir := t.TempDir()
-		registryYAML := `apiVersion: aicr.run/v1alpha2
+		registryYAML := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: nvidia-stack
@@ -2691,6 +2904,7 @@ metadata:
   name: gpu-operator-readiness
 `),
 		deployer,
+		gatemanifest.Placement{},
 	)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
@@ -2863,6 +3077,49 @@ func readBundleFile(t *testing.T, outputDir, rel string) []byte {
 		t.Fatalf("read %s: %v", rel, err)
 	}
 	return data
+}
+
+// TestGenerate_UpgradeNotice covers the notice in the inline README builder,
+// which has no Components table: the notice follows the intro paragraph.
+func TestGenerate_UpgradeNotice(t *testing.T) {
+	const notice = "## Before You Upgrade\n\nNOTICE-SENTINEL\n\n"
+	tests := []struct {
+		name   string
+		notice string
+	}{
+		{"empty", ""},
+		{"set", notice},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			g := newTestHelmGenerator(t)
+			g.UpgradeNotice = tt.notice
+			if _, err := g.Generate(context.Background(), outputDir); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+			readme := string(readBundleFile(t, outputDir, "README.md"))
+			if tt.notice == "" {
+				if strings.Contains(readme, "Before You Upgrade") {
+					t.Errorf("README rendered an upgrade notice that was not set:\n%s", readme)
+				}
+				if !strings.Contains(readme, "different registry.\n\n## Deploy\n") {
+					t.Errorf("intro paragraph must be followed by one blank line and Deploy:\n%s", readme)
+				}
+				return
+			}
+			idx := strings.Index(readme, tt.notice)
+			if idx < 0 {
+				t.Fatalf("README missing upgrade notice:\n%s", readme)
+			}
+			if !strings.HasSuffix(readme[:idx], "different registry.\n\n") {
+				t.Errorf("upgrade notice must follow the intro paragraph after one blank line:\n%s", readme)
+			}
+			if !strings.HasPrefix(readme[idx+len(tt.notice):], "## Deploy\n") {
+				t.Errorf("upgrade notice must directly precede ## Deploy:\n%s", readme)
+			}
+		})
+	}
 }
 
 func TestGenerate_DeployerValuesInChart(t *testing.T) {
@@ -3135,7 +3392,7 @@ func TestGenerate_ChildNameLimits(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
-			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), tt.errSubstr) {

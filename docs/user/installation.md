@@ -71,7 +71,8 @@ sudo chmod +x /usr/local/bin/aicr
 ### Option 4: Build from Source
 
 **Requirements:**
-- Go 1.26 or higher
+- Go 1.27 or higher (the toolchain CI builds with is pinned in
+  [`.go-version`](https://github.com/NVIDIA/aicr/blob/main/.go-version))
 
 ```shell
 go install github.com/NVIDIA/aicr/cmd/aicr@latest
@@ -88,7 +89,7 @@ aicr --version
 # View available commands
 aicr --help
 
-# Test snapshot (requires GPU)
+# Test snapshot (requires access to a Kubernetes cluster; deploys the snapshot agent Job)
 aicr snapshot --format json | jq '.measurements | length'
 ```
 
@@ -103,7 +104,7 @@ Tab completion for commands and flags is installed automatically by both the Hom
 **Opt out** (install script only): set `AICR_NO_COMPLETIONS=1` before running the script:
 
 ```shell
-AICR_NO_COMPLETIONS=1 curl -sfL https://get.aicr.run | bash -s --
+curl -sfL https://get.aicr.run | AICR_NO_COMPLETIONS=1 bash -s --
 ```
 
 **Manual setup** (build from source or `go install`):
@@ -153,7 +154,8 @@ docker run -p 8080:8080 ghcr.io/nvidia/aicrd:latest
 
 ## Next Steps
 
-See [CLI Reference](cli-reference.md) for command usage
+- [End-to-End Tutorial](tutorial.md): recipe, bundle, deploy, and validate, start to finish
+- [CLI Reference](cli-reference.md): command usage
 
 ## Troubleshooting
 
@@ -199,6 +201,7 @@ sudo rm -f /usr/local/share/zsh/site-functions/_aicr
 sudo rm -f /opt/homebrew/share/zsh/site-functions/_aicr
 sudo rm -f /opt/homebrew/etc/bash_completion.d/aicr
 sudo rm -f /usr/local/etc/bash_completion.d/aicr
+sudo rm -f /usr/share/fish/vendor_completions.d/aicr.fish
 rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/aicr"
 rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_aicr"
 rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions/aicr.fish"
@@ -206,6 +209,7 @@ rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions/aicr.fish"
 
 ## Getting Help
 
-- **Documentation**: [User Documentation](index.md)
-- **Issues**: [GitHub Issues](https://github.com/NVIDIA/aicr/issues)
+- **Documentation**: [User Documentation](https://github.com/NVIDIA/aicr/blob/main/docs/user/index.md)
+- **Support**: [Where to ask questions](https://github.com/NVIDIA/aicr/blob/main/SUPPORT.md)
+- **Bugs and scoped feature requests**: [GitHub Issues](https://github.com/NVIDIA/aicr/issues)
 - **API Server**: See [Kubernetes Deployment](../integrator/kubernetes-deployment.md)

@@ -22,8 +22,9 @@ classify and narrate. Reporting is read-only (`gh run list` / `gh run view`).
 
 With --download-debug DIR it additionally fetches the `uat-<cloud>-debug-<run_id>`
 artifact for failing runs into DIR/<service>-<gpu>-<intent>-<run_id>/ and
-prints a triage digest (cluster-debug/MANIFEST.yaml + report.json failing
-checks). That is the only mode that writes anything, and only under DIR.
+prints a triage digest (cluster-debug/MANIFEST.yaml, report.json failing
+checks, and the readiness gate's last failed-validator block). That is the
+only mode that writes anything, and only under DIR.
 
 Usage: uat_report.py [--days N] [--repo OWNER/REPO] [--all-versions]
                      [--download-debug DIR] [--max-downloads N] [--run ID]
@@ -61,6 +62,24 @@ NEW_TITLE = re.compile(r"^UAT (\S+) (training|inference) @ (\S+)")
 # Pre-2026-07-21 title lacked the intent: "UAT <reservation> @ <version>[ #key]"
 OLD_TITLE = re.compile(r"^UAT (\S+) @ (\S+?)(?:\s+#\S+-(\d+))?$")
 
+# Step-name prefixes of the per-cloud workflows. Runs that predate the split
+# (#2630) have no readiness step: their "UAT - install (...)" step ran both the
+# apply and the readiness gate, so a failure there cannot be attributed to
+# either from the step name alone.
+INSTALL_STEP = "UAT - install"
+READINESS_STEP = "UAT - readiness gate"
+
+# Title of the annotation the readiness phase emits on failure; its message is
+# "<comma-separated failing validators>: <short reason>".
+READINESS_ANNOTATION_TITLE = "UAT readiness gate failed"
+
+# The per-attempt block in readiness-gate.log holding the non-passed tests'
+# name, message, and stdout (incl. "Failed resources:"). Attempts are headed by
+# "===== attempt N ...", which also ends the block.
+FAILED_VALIDATOR_BLOCK = re.compile(r"^--- failed validator output \(attempt (\d+)\) ---$")
+GATE_ATTEMPT_HEADER = "===== attempt "
+GATE_DIGEST_LINES = 30
+
 
 def gh_json(args):
     out = subprocess.run(
@@ -90,6 +109,33 @@ def run_id_of(run_url):
     return run_url.rstrip("/").rsplit("/", 1)[-1]
 
 
+def step_nature(step, job_steps):
+    """Return a classification tag for a failed install/readiness step, else None.
+
+    `job_steps` is every step name in the job; a readiness step anywhere in it
+    marks the post-#2630 layout, where install is apply-only.
+    """
+    if step.startswith(READINESS_STEP):
+        return "readiness gate: product signal"
+    if step.startswith(INSTALL_STEP):
+        if any(s.startswith(READINESS_STEP) for s in job_steps):
+            return "apply only: maybe infra"
+        return "legacy apply+readiness: ambiguous, read readiness-gate.log"
+    return None
+
+
+def readiness_annotation(repo, job_id):
+    """Return the failing-validators message the readiness phase annotated, or None."""
+    try:
+        anns = gh_json(["api", f"repos/{repo}/check-runs/{job_id}/annotations"])
+    except (subprocess.SubprocessError, json.JSONDecodeError):
+        return None
+    for ann in anns if isinstance(anns, list) else []:
+        if ann.get("title") == READINESS_ANNOTATION_TITLE:
+            return (ann.get("message") or "").strip() or None
+    return None
+
+
 def failed_steps(repo, run_url):
     run_id = run_id_of(run_url)
     try:
@@ -100,9 +146,20 @@ def failed_steps(repo, run_url):
     for job in data.get("jobs", []):
         if job.get("conclusion") != "failure":
             continue
-        steps = [
-            s["name"] for s in job.get("steps", []) if s.get("conclusion") == "failure"
-        ]
+        job_steps = [s.get("name", "") for s in job.get("steps", [])]
+        steps = []
+        for s in job.get("steps", []):
+            if s.get("conclusion") != "failure":
+                continue
+            name = s["name"]
+            nature = step_nature(name, job_steps)
+            if nature:
+                name += f" [{nature}]"
+            if name.startswith(READINESS_STEP) and job.get("databaseId"):
+                msg = readiness_annotation(repo, job["databaseId"])
+                if msg:
+                    name += f" (failing validators: {msg})"
+            steps.append(name)
         parts.append(f"{job['name']} — {', '.join(steps) or 'no failed step recorded'}")
     return "; ".join(parts) or "no failed job recorded"
 
@@ -131,6 +188,31 @@ def slug(*parts):
     """
     raw = "-".join(str(p) for p in parts).lower()
     return re.sub(r"[^a-z0-9-]+", "-", raw).strip("-") or "unknown"
+
+
+def gate_failure_block(path):
+    """Return the last attempt's failed-validator block from readiness-gate.log.
+
+    The last attempt is the one the gate gave up on, so its block names the
+    validators that never converged. Returns [] when the log predates the
+    block (#2630) or the gate never failed an attempt.
+    """
+    block, inside = [], False
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for raw in fh:
+                line = raw.rstrip("\n")
+                if FAILED_VALIDATOR_BLOCK.match(line):
+                    block, inside = [line], True
+                elif line.startswith(GATE_ATTEMPT_HEADER):
+                    inside = False
+                elif inside:
+                    block.append(line)
+    except OSError:
+        return []
+    while block and not block[-1].strip():
+        block.pop()
+    return block
 
 
 def triage_digest(dest):
@@ -167,6 +249,14 @@ def triage_digest(dest):
             )
         except (OSError, ValueError, AttributeError, TypeError):
             lines.append("  report.json present but unparseable")
+    gate_log = os.path.join(dest, "cluster-debug", "readiness-gate.log")
+    if os.path.isfile(gate_log):
+        block = gate_failure_block(gate_log)
+        if block:
+            lines.append("  readiness-gate.log, last failed attempt:")
+            lines += [f"    {ln}" for ln in block[:GATE_DIGEST_LINES]]
+            if len(block) > GATE_DIGEST_LINES:
+                lines.append(f"    ... ({len(block) - GATE_DIGEST_LINES} more lines in the file)")
     # Presence, not a full listing: which top-level artifacts the run produced
     # (is there a train-logs/? did evidence emit?) is the actionable part.
     # cluster-debug/ collapses to a count — SKILL.md's reading order says which

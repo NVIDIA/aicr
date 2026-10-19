@@ -531,6 +531,7 @@ var uncoveredSources = []string{
 	"kwok/scripts/*.sh (in-cluster registry/gitea/karpenter side-loads)",
 	"pkg/**/*.go Sigstore endpoint constants (fulcio/rekor/tuf/oidc) — see pkg/defaults/sigstore.go",
 	"GitHub workflow inline `image:` and docker/login-action registry inputs",
+	"GitHub workflow and composite-action inline `run:` bodies — the .github pass mines `uses:` refs only, so an installer invoked from a `run:` step (e.g. the `go install` of go-coverage-report in on-push-comment.yaml) reaches hosts this inventory does not record",
 	"tools/setup-tools: best-effort only — URLs built from shell vars are reported as warnings, not records",
 	"GitHub Actions per-OWNER trust: all `uses:` collapse to host `github-actions`, so a new third-party action owner is not gated (only SHA-pinning is enforced, by TestExternalActionsArePinned)",
 }

@@ -14,7 +14,10 @@
 
 package config
 
-import "github.com/NVIDIA/aicr/pkg/header"
+import (
+	"github.com/NVIDIA/aicr/pkg/header"
+	"github.com/NVIDIA/aicr/pkg/recipe"
+)
 
 // Kind is the kind value for AICRConfig documents.
 const Kind = "AICRConfig"
@@ -133,6 +136,18 @@ type RecipeConfigurationSpec struct {
 	// RuntimeInventory selects whether the runtime AI inventory component
 	// (k8s-aibom) is installed. Mirrors the --runtime-inventory flag.
 	RuntimeInventory *RuntimeInventorySpec `yaml:"runtimeInventory,omitempty" json:"runtimeInventory,omitempty"`
+
+	// GKE contains GKE-specific desired-state inputs.
+	GKE *GKEConfigurationSpec `yaml:"gke,omitempty" json:"gke,omitempty"`
+}
+
+// GKEConfigurationSpec contains GKE-specific desired-state inputs.
+type GKEConfigurationSpec struct {
+	// TCPXOInterfaces is the ordered eth1..eth8 → VPC network mapping
+	// rendered into the torch-distributed-tcpxo ClusterTrainingRuntime.
+	// Required when the resolved recipe ships that runtime. Mirrors the
+	// --gke-tcpxo-interfaces flag's value in structured form.
+	TCPXOInterfaces []recipe.NetworkInterfaceMapping `yaml:"tcpxoInterfaces,omitempty" json:"tcpxoInterfaces,omitempty"`
 }
 
 // RuntimeInventorySpec contains the runtime AI inventory selection.
@@ -330,15 +345,19 @@ type ValidateInputSpec struct {
 // validation-job pods. Empty fields use the validator's compiled-in
 // defaults; selectors/tolerations omitted entirely (nil) inherit, while an
 // explicit empty map/list (`{}` / `[]`) clears the default.
+//
+// ServiceAccountName names the snapshot-capture agent's ServiceAccount;
+// ValidatorServiceAccountName names the one validator Jobs run as.
 type ValidateAgentSpec struct {
-	Namespace          string            `yaml:"namespace,omitempty" json:"namespace,omitempty"`
-	Image              string            `yaml:"image,omitempty" json:"image,omitempty"`
-	ImagePullSecrets   []string          `yaml:"imagePullSecrets,omitempty" json:"imagePullSecrets,omitempty"`
-	JobName            string            `yaml:"jobName,omitempty" json:"jobName,omitempty"`
-	ServiceAccountName string            `yaml:"serviceAccountName,omitempty" json:"serviceAccountName,omitempty"`
-	NodeSelector       map[string]string `yaml:"nodeSelector,omitempty" json:"nodeSelector,omitempty"`
-	Tolerations        []string          `yaml:"tolerations,omitempty" json:"tolerations,omitempty"`
-	RequireGPU         bool              `yaml:"requireGpu,omitempty" json:"requireGpu,omitempty"`
+	Namespace                   string            `yaml:"namespace,omitempty" json:"namespace,omitempty"`
+	Image                       string            `yaml:"image,omitempty" json:"image,omitempty"`
+	ImagePullSecrets            []string          `yaml:"imagePullSecrets,omitempty" json:"imagePullSecrets,omitempty"`
+	JobName                     string            `yaml:"jobName,omitempty" json:"jobName,omitempty"`
+	ServiceAccountName          string            `yaml:"serviceAccountName,omitempty" json:"serviceAccountName,omitempty"`
+	ValidatorServiceAccountName string            `yaml:"validatorServiceAccountName,omitempty" json:"validatorServiceAccountName,omitempty"`
+	NodeSelector                map[string]string `yaml:"nodeSelector,omitempty" json:"nodeSelector,omitempty"`
+	Tolerations                 []string          `yaml:"tolerations,omitempty" json:"tolerations,omitempty"`
+	RequireGPU                  bool              `yaml:"requireGpu,omitempty" json:"requireGpu,omitempty"`
 }
 
 // ValidateExecutionSpec controls validation behavior independent of where
@@ -351,8 +370,22 @@ type ValidateAgentSpec struct {
 // Timeout is the wire-string form (e.g. "5m"); Resolve parses it to a
 // time.Duration with errors attributed to spec.validate.execution.timeout.
 type ValidateExecutionSpec struct {
-	Phases      []string `yaml:"phases,omitempty" json:"phases,omitempty"`
-	FailOnError *bool    `yaml:"failOnError,omitempty" json:"failOnError,omitempty"`
+	Phases []string `yaml:"phases,omitempty" json:"phases,omitempty"`
+
+	// SkipChecks names individual checks this run cannot satisfy, one level
+	// below Phases. Each named check is withheld from every phase that runs
+	// and recorded in that phase's report as skipped, so the report (and the
+	// evidence bundle rendered from it) still accounts for it.
+	//
+	// It belongs in the config rather than only on the command line because a
+	// skip is a durable, reviewable scoping decision about a lane: the reason
+	// a lane cannot satisfy a check lives beside the list, in version control,
+	// where a reviewer meets it. The validator rejects a name that matches no
+	// check, and rejects a list that would leave a requested phase with
+	// nothing to run.
+	SkipChecks []string `yaml:"skipChecks,omitempty" json:"skipChecks,omitempty"`
+
+	FailOnError *bool `yaml:"failOnError,omitempty" json:"failOnError,omitempty"`
 	// FailFast, when true, stops validation after the first failed phase.
 	// Pointer so nil means "unset; inherit CLI default (false)".
 	FailFast  *bool  `yaml:"failFast,omitempty" json:"failFast,omitempty"`

@@ -32,13 +32,14 @@ Subcommands registered in `pkg/cli/root.go` (`Commands:` slice on
 | `recipe sign-catalog` | `recipe_sign_catalog.go` | Sign the recipe catalog. |
 | `recipe verify-catalog` | `recipe_verify_catalog.go` | Verify the signed recipe catalog. |
 | `query` | `query.go` | Extract a single hydrated value from a recipe (`--selector components.gpu-operator.values.driver.version`). |
-| `bundle` | `bundle.go` | Render per-component deployment artifacts from a recipe via a chosen deployer (`helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`). |
+| `bundle` | `bundle.go` | Render per-component deployment artifacts from a recipe via a chosen deployer (`helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `terraform`). |
 | `verify` | `bundle_verify.go` | Verify a bundle's checksums, attestation signatures, and provenance chain; report the achieved trust level and enforce a `--min-trust-level` / creator / CLI-version policy. |
 | `validate` | `validate.go` | Evaluate recipe constraints against a snapshot or live cluster; optionally emit evidence. |
 | `evidence digest` | `evidence_digest.go` | Print the canonical digest of a resolved recipe (offline). |
 | `evidence sign` | `evidence_sign.go` | Sign an emitted evidence bundle. |
 | `evidence publish` | `evidence_publish.go` | Sign and push an already-emitted evidence bundle; write its pointer. |
 | `evidence verify` | `evidence_verify.go` | Verify integrity claims on an evidence bundle (offline or registry). |
+| `upgrade-check` | `upgrade_check.go` | Report whether moving between two recipes or bundles, or from what a cluster has installed (`--from cluster`), is safe to apply, with an advisory scan for live objects the upgrade could destroy (`--scan-cluster`). |
 | `diff` | `diff.go` | Compare two snapshots field-by-field, reporting added, removed, and modified readings (optionally failing on drift). |
 | `mirror` / `mirror list` | `mirror.go` | Mirror charts and images referenced by a recipe to an air-gapped registry; list what would be mirrored. |
 | `trust update` | `trust.go` | Refresh the Sigstore TUF trust root used by `verify` / `evidence verify`. |
@@ -85,14 +86,15 @@ func myCmdAction(ctx context.Context, cmd *cli.Command) error {
         return err
     }
 
-    // 2. Optional: load --config file. (nil, nil) when --config not set.
-    cfg, err := loadCmdConfig(ctx, cmd)
+    // 2. Optional: load --config file as the facade type. (nil, nil) when
+    //    --config not set.
+    cfg, err := loadFacadeConfig(ctx, cmd)
     if err != nil {
         return err
     }
 
     // 3. Build a per-command Client. Owns its own DataProvider; must Close.
-    client, err := recipeClientFromCmd(cmd, cfg)
+    client, err := recipeClientFromCmd(ctx, cmd, cfg)
     if err != nil {
         return err
     }
@@ -135,21 +137,24 @@ packages (`pkg/recipe`, `pkg/bundler`, `pkg/snapshotter`,
 | Facade method | Used by |
 |---------------|---------|
 | `NewClient(opts...)` / `Close()` | All commands. Construct with `WithRecipeSource(EmbeddedSource())` or `FilesystemSource(dir)` and `WithVersion(version)`. Each `Client` owns its own `DataProvider`. |
-| `ResolveRecipe(ctx, RecipeRequest)` | `recipe`, `query` (request can hold criteria, file path, or snapshot input) |
+| `ResolveRecipe(ctx, RecipeRequest)` | Go SDK callers (request can hold criteria, file path, or snapshot input) |
 | `ResolveRecipeFromCriteria(ctx, *Criteria)` | criteria-only fast path |
-| `ResolveRecipeFromSnapshot(ctx, *Criteria, *Snapshot)` | `validate`, `recipe --snapshot` |
+| `ResolveRecipeFromCriteriaWithOptions(ctx, *Criteria, opts...)` | `recipe`, `query`, `mirror` (criteria path) |
+| `ResolveRecipeFromSnapshot(ctx, *Criteria, *Snapshot)` | snapshot fast path (no resolve options) |
 | `ResolveRecipeFromSnapshotWithOptions(ctx, *Criteria, *Snapshot, opts...)` | `recipe --snapshot`, `query --snapshot` — with `WithSnapshotCriteriaRelaxation(stated...)` for the derived-criteria retry |
 | `LoadRecipe(ctx, path, kubeconfig)` | `bundle`, `validate`, `diff` (read a previously emitted recipe file) |
-| `BundleComponents(ctx, *RecipeResult)` | `bundle` |
+| `MakeBundle(ctx, *RecipeResult, BundleOptions)` | `bundle` |
 | `LoadSnapshot(ctx, path, kubeconfig)` | `validate`, `query`, `diff` (read a previously captured snapshot; file, URL, or `cm://` ConfigMap) |
 | `CollectSnapshot(ctx, *AgentConfig)` | `snapshot`, `validate` (Job-mode capture only; local `AICR_AGENT_MODE` collection deploys no Job and stays on `snapshotter.NodeSnapshotter`) |
 | `ValidateState(ctx, ...)` | `validate` |
 
-Construction in CLI happens via `recipeClientFromCmd(cmd, cfg)` in
-`root.go` — it reads `--data` (or `cfg.Recipe().DataDir()`), picks
-`FilesystemSource` vs `EmbeddedSource`, and threads `version` through
-to `Metadata.Version`. Callers **must** `defer client.Close()`; the
-client owns goroutines that drain on Close.
+Construction in CLI happens via `recipeClientFromCmd(ctx, cmd, cfg)` in
+`root.go` — it reads `--data` (or `cfg.RecipeSource()`, i.e.
+`spec.recipe.data`), picks `FilesystemSource` vs `EmbeddedSource`, and
+threads `version` through to `Metadata.Version`. `cfg` is the facade
+`*aicr.Config` returned by `loadFacadeConfig`; `recipeClientFromCmd` never
+holds the raw `*config.AICRConfig`. Callers **must** `defer
+client.Close()`; the client owns goroutines that drain on Close.
 
 Adding business logic in the handler — recipe resolution loops, bundle
 rendering, validator orchestration, OCI pushes — is a boundary
@@ -207,14 +212,19 @@ Flag names, category labels (`catInput`, `catOutput`, `catScheduling`,
 flags any literal repeated ≥ 3 times across the package — extract it
 there.
 
-## `--config` and `loadCmdConfig`
+## `--config` and `loadFacadeConfig`
 
 Commands that accept a config file declare `configFlag()` and call
-`loadCmdConfig(ctx, cmd)`. The loader returns `(*config.AICRConfig,
-nil)` when `--config` is set, `(nil, nil)` when it is not. Errors from
-`config.Load` are returned unchanged so their `pkg/errors` codes
-(`ErrCodeNotFound`, `ErrCodeInvalidRequest`, `ErrCodeUnavailable`)
-survive to the exit-code mapper.
+`loadFacadeConfig(ctx, cmd)`. The loader returns `(*aicr.Config, nil)`
+when `--config` is set, `(nil, nil)` when it is not — every derivation
+on a nil `*aicr.Config` is nil-safe, so callers need no branch. Errors
+from `aicr.LoadConfig` are returned unchanged so their `pkg/errors`
+codes (`ErrCodeNotFound`, `ErrCodeInvalidRequest`, `ErrCodeUnavailable`)
+survive to the exit-code mapper. A command derives options through the
+facade's `Config` methods (`ValidateSettings()`, `BundleOptions()`, …);
+reach for `cfg.Unwrap()` only when a spec field has no facade
+derivation yet, which the `pkg/client/v1` docstrings call out per
+method.
 
 Precedence is **CLI flag > config file > flag default**, implemented
 by three helpers in `root.go`:
@@ -262,6 +272,7 @@ Handlers return errors. `Execute` in `root.go` calls
 | `ErrCodeUnavailable` | 6 | Dependency unavailable |
 | `ErrCodeRateLimitExceeded` | 7 | Throttled |
 | `ErrCodeInternal` | 8 | Internal |
+| `ErrCodeCanceled` | 9 | Canceled |
 | (unstructured) | 1 | Generic |
 
 Rules:
@@ -292,7 +303,7 @@ For enum flags, declare with `withCompletions`:
 return withCompletions(&cli.StringFlag{
     Name:     "intent",
     Category: catQueryParameters,
-}, recipe.SupportedIntents)
+}, recipe.GetCriteriaIntentTypes)
 ```
 
 `completeWithAllFlags` in `root.go` reads `os.Args` directly (not
@@ -327,7 +338,7 @@ Configured in the root `Before` hook (`root.go`):
 | `--debug` / `AICR_DEBUG` | `slog` text logger at debug level, full metadata |
 | `--log-json` / `AICR_LOG_JSON` | structured JSON logger; wins over `--debug` for output format, debug level still applied |
 | neither | `pkg/logging.SetDefaultCLILogger` — human-readable, TTY-aware |
-| `AICR_LOG_LEVEL` | overrides level for the structured logger (unprefixed `LOG_LEVEL` is not honored) |
+| `AICR_LOG_LEVEL` | not read by the `aicr` CLI (level comes from `--debug`); honored only by `aicrd` (unprefixed `LOG_LEVEL` is not honored) |
 | `NO_COLOR` (de-facto) | suppresses ANSI color |
 | stderr is not a TTY | suppresses ANSI color (`pkg/logging` detects via `golang.org/x/term`) |
 
@@ -372,7 +383,7 @@ Rules:
 ## The CLI Surface Baseline
 
 The CLI is one of the four surfaces frozen at v1
-([ROADMAP §1](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md#1-defensible-api-stability)).
+([ROADMAP](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md#api-stability)).
 `pkg/cli/testdata/cli-surface.golden`
 is its committed inventory — every command, flag, alias, type, default,
 `required`/`hidden` state, and environment variable — and `TestCLISurface`
@@ -393,7 +404,7 @@ so `go test ./... -update` fails in every other package.
 **If you removed or renamed a command, flag, or alias, or changed a default,**
 the test reports it as `BREAKING` rather than telling you to regenerate. That is
 a breaking change to a frozen surface and it owes the notice period in
-[`RELEASING.md`](https://github.com/NVIDIA/aicr/blob/main/RELEASING.md#deprecation-policy): ship the deprecation
+[`RELEASE.md`](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md#deprecation-policy): ship the deprecation
 with a warning first, remove it only after the window, and add an entry to
 [`docs/user/deprecations.md`](../user/deprecations.md). Regenerate the golden
 only once the removal is actually due.

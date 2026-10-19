@@ -16,15 +16,15 @@
 Package bundler provides orchestration for generating deployment bundles from recipes.
 
 The bundler package generates deployment-ready artifacts (Helm per-component bundles,
-Argo CD applications, Flux HelmRelease manifests, helmfile release graphs, or rendered
-local manifests) from recipe configurations. Component configuration is loaded from
+Argo CD applications, Flux HelmRelease manifests, helmfile release graphs, Terraform
+modules, or rendered local manifests) from recipe configurations. Component configuration is loaded from
 the declarative component registry (recipes/registry.yaml).
 
 # Architecture
 
   - DefaultBundler: Orchestrates bundle generation; the concrete output is produced by a deployer
   - Component Registry: Declarative configuration in recipes/registry.yaml
-  - Deployers: helm (default), argocd, argocd-helm, flux, helmfile, localformat
+  - Deployers: helm (default), argocd, argocd-helm, flux, helmfile, terraform, localformat
   - result.Output: Aggregated generation results
 
 # Quick Start
@@ -51,10 +51,13 @@ slurm components. See recipes/registry.yaml for the current authoritative list.
 
 # Output Formats
 
+Every deployer writes recipe.yaml at the bundle root: the resolved recipe the
+bundle was generated from. A bundle and a recipe are therefore interchangeable
+inputs to anything that reads one.
+
 Helm (default):
   - README.md: Root deployment guide with ordered steps
   - deploy.sh: Automation script (0755)
-  - recipe.yaml: Copy of the input recipe
   - NNN-<component>/install.sh: Per-folder install script
   - NNN-<component>/values.yaml: Static Helm values
   - NNN-<component>/cluster-values.yaml: Per-cluster dynamic values
@@ -63,8 +66,8 @@ Helm (default):
 
 Argo CD:
   - app-of-apps.yaml: Parent Argo CD Application
-  - <component>/application.yaml: Argo CD Application per component
-  - <component>/values.yaml: Values for each component
+  - NNN-<component>/application.yaml: Argo CD Application per component
+  - NNN-<component>/values.yaml: Values for each component
 
 # Configuration
 

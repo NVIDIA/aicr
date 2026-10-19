@@ -62,7 +62,7 @@ type streamZipFunc func(context.Context, http.ResponseWriter, string, *result.Ou
 // the direct bundler.New + Make for the Client facade (AdoptRecipe +
 // MakeBundle). Its headers and status codes match the legacy handler;
 // error-body detail strings may differ where the facade wraps decode errors. The handler accepts
-// strict v1alpha3 profile recipes.
+// strict v1beta2 profile recipes.
 type bundleHandler struct {
 	client    *aicr.Client
 	streamZip streamZipFunc

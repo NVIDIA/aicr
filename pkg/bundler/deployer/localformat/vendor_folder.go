@@ -57,12 +57,14 @@ import (
 //
 // idx is the NNN- prefix index. ctx threads through the puller call;
 // puller is REQUIRED to be non-nil — caller picks the implementation.
+// stamp carries the two versions written into the wrapper Chart.yaml.
 func writeVendoredHelmFolder(
 	ctx context.Context,
 	outputDir, dir string,
 	idx int,
 	c Component,
 	puller ChartPuller,
+	stamp chartStamp,
 ) (Folder, VendorRecord, error) {
 
 	if puller == nil {
@@ -93,6 +95,12 @@ func writeVendoredHelmFolder(
 			fmt.Sprintf("pull vendored chart for component %q", c.Name),
 		)
 	}
+	if err = VerifyChartDigest(c, tgz); err != nil {
+		return Folder{}, VendorRecord{}, err
+	}
+	// provenance.yaml must name the bytes written below, not whatever the
+	// puller reported.
+	rec.SHA256 = ArchiveSHA256(tgz)
 
 	// 2. Write charts/<tarball>.
 	chartsDir, err := deployer.SafeJoin(folderDir, "charts")
@@ -118,7 +126,12 @@ func writeVendoredHelmFolder(
 	if subchart == "" {
 		subchart = c.Name
 	}
-	chartYAML, err := renderWrapperChartYAML(c.Name, c.Name, subchart, deployer.NormalizeVersionWithDefault(c.Version))
+	chartYAML, err := renderWrapperChartYAML(wrapperSubchart{
+		Name:         c.Name,
+		Parent:       c.Name,
+		ChartName:    subchart,
+		ChartVersion: deployer.NormalizeVersionWithDefault(c.Version),
+	}, stamp)
 	if err != nil {
 		return Folder{}, VendorRecord{}, err
 	}
@@ -145,7 +158,8 @@ func writeVendoredHelmFolder(
 		Name            string
 		Namespace       string
 		CreateNamespace bool
-	}{c.Name, c.Namespace, true}
+		OwnsCRDs        bool
+	}{c.Name, c.Namespace, true, c.OwnsCRDs}
 	if err = renderTemplateToFile(localHelmInstallTmpl, installData, folderDir, "install.sh", 0o755); err != nil {
 		return Folder{}, VendorRecord{}, err
 	}
@@ -159,6 +173,17 @@ func writeVendoredHelmFolder(
 		filepath.Join(dir, "install.sh"),
 	}
 
+	// 6. apply-crds.sh. The vendored variant reads the wrapper chart itself, so
+	// it needs no network at deploy time; `helm show crds ./` recurses into
+	// the subchart tarball written above.
+	if c.OwnsCRDs {
+		crdScript, crdErr := writeApplyCRDsScript(folderDir, dir, c, false)
+		if crdErr != nil {
+			return Folder{}, VendorRecord{}, crdErr
+		}
+		files = append(files, crdScript)
+	}
+
 	// VendorRecord carries the audit fields plus context (folder name).
 	// Force-canonicalize TarballName to the value we actually wrote
 	// under charts/ so provenance.yaml can never point at a file that
@@ -168,13 +193,14 @@ func writeVendoredHelmFolder(
 	rec.TarballName = tarball
 
 	return Folder{
-		Index:     idx,
-		Dir:       dir,
-		Kind:      KindLocalHelm,
-		Name:      c.Name,
-		Namespace: c.Namespace,
-		Parent:    c.Name,
-		Files:     files,
+		Index:       idx,
+		Dir:         dir,
+		Kind:        KindLocalHelm,
+		Name:        c.Name,
+		Namespace:   c.Namespace,
+		Parent:      c.Name,
+		Files:       files,
+		AppliesCRDs: c.OwnsCRDs,
 		// Vendored folders wrap an upstream chart that AICR does not
 		// render; the chart-owns-Namespace detection does not apply
 		// here. Default to true to match the upstream-helm path.

@@ -25,6 +25,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -460,6 +461,221 @@ func TestCheckWildcardAcceleratedToleration(t *testing.T) {
 	}
 }
 
+func TestCheckGB300HostKernelGranule(t *testing.T) {
+	genericGB300 := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "nodewright-customizations"},
+		},
+		Criteria: &recipe.Criteria{
+			Service:     recipe.CriteriaServiceGeneric,
+			Accelerator: recipe.CriteriaAcceleratorGB300,
+		},
+	}
+	conditions := map[string][]string{
+		"service":     {"generic"},
+		"accelerator": {"gb300"},
+	}
+	const wantMsg = "64k-granule ARM64 host kernel"
+
+	tests := []struct {
+		name           string
+		componentName  string
+		recipeResult   *recipe.RecipeResult
+		bundlerConfig  *config.Config
+		conditions     map[string][]string
+		wantWarnings   int
+		wantErrors     int
+		wantWarningMsg string
+	}{
+		{
+			name:           "generic gb300 warns",
+			componentName:  "nodewright-customizations",
+			recipeResult:   genericGB300,
+			bundlerConfig:  config.NewConfig(),
+			conditions:     conditions,
+			wantWarnings:   1,
+			wantErrors:     0,
+			wantWarningMsg: wantMsg,
+		},
+		{
+			name:          "eks gb300 runs nvidia-setup-kernel, no warning",
+			componentName: "nodewright-customizations",
+			recipeResult: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "nodewright-customizations"},
+				},
+				Criteria: &recipe.Criteria{
+					Service:     recipe.CriteriaServiceEKS,
+					Accelerator: recipe.CriteriaAcceleratorGB300,
+				},
+			},
+			bundlerConfig: config.NewConfig(),
+			conditions:    conditions,
+			wantWarnings:  0,
+			wantErrors:    0,
+		},
+		{
+			name:          "generic non-gb300 accelerator, no warning",
+			componentName: "nodewright-customizations",
+			recipeResult: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "nodewright-customizations"},
+				},
+				Criteria: &recipe.Criteria{
+					Service:     recipe.CriteriaServiceGeneric,
+					Accelerator: recipe.CriteriaAcceleratorH100,
+				},
+			},
+			bundlerConfig: config.NewConfig(),
+			conditions:    conditions,
+			wantWarnings:  0,
+			wantErrors:    0,
+		},
+		{
+			name:          "component not in recipe",
+			componentName: "nodewright-customizations",
+			recipeResult: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "gpu-operator"},
+				},
+				Criteria: &recipe.Criteria{
+					Service:     recipe.CriteriaServiceGeneric,
+					Accelerator: recipe.CriteriaAcceleratorGB300,
+				},
+			},
+			bundlerConfig: config.NewConfig(),
+			conditions:    conditions,
+			wantWarnings:  0,
+			wantErrors:    0,
+		},
+		{
+			name:          "component disabled via --set",
+			componentName: "nodewright-customizations",
+			recipeResult:  genericGB300,
+			bundlerConfig: config.NewConfig(
+				config.WithValueOverrides(map[string]map[string]string{
+					"nodewrightcustomizations": {"enabled": "false"},
+				}),
+			),
+			conditions:   conditions,
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			name:          "tuning gated off renders no tuned package",
+			componentName: "nodewright-customizations",
+			recipeResult:  genericGB300,
+			bundlerConfig: config.NewConfig(
+				config.WithValueOverrides(map[string]map[string]string{
+					"nodewrightcustomizations": {"tuningEnabled": "false"},
+				}),
+			),
+			conditions:   conditions,
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			// Regression: the check used to read only the scalar --set map,
+			// so a typed override suppressed the tuned package but still
+			// emitted the advisory.
+			name:          "tuning gated off via typed --set-json",
+			componentName: "nodewright-customizations",
+			recipeResult:  genericGB300,
+			bundlerConfig: config.NewConfig(config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+				{Component: "nodewrightcustomizations", Path: tuningEnabledKey, Value: false},
+			})),
+			conditions:   conditions,
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			name:          "tuning gated off via typed --set-json under the canonical name",
+			componentName: "nodewright-customizations",
+			recipeResult:  genericGB300,
+			bundlerConfig: config.NewConfig(config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+				{Component: "nodewright-customizations", Path: tuningEnabledKey, Value: false},
+			})),
+			conditions:   conditions,
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			name:          "typed --set-json tuningEnabled=true still warns",
+			componentName: "nodewright-customizations",
+			recipeResult:  genericGB300,
+			bundlerConfig: config.NewConfig(config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+				{Component: "nodewrightcustomizations", Path: tuningEnabledKey, Value: true},
+			})),
+			conditions:     conditions,
+			wantWarnings:   1,
+			wantErrors:     0,
+			wantWarningMsg: wantMsg,
+		},
+		{
+			name:          "tuning gated off via skyhook alias",
+			componentName: "nodewright-customizations",
+			recipeResult:  genericGB300,
+			bundlerConfig: config.NewConfig(
+				config.WithValueOverrides(map[string]map[string]string{
+					"skyhookcustomizations": {"tuningEnabled": "false"},
+				}),
+			),
+			conditions:   conditions,
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			name:          "tuning gated off via exact hyphenated name",
+			componentName: "nodewright-customizations",
+			recipeResult:  genericGB300,
+			bundlerConfig: config.NewConfig(
+				config.WithValueOverrides(map[string]map[string]string{
+					"nodewright-customizations": {"tuningEnabled": "false"},
+				}),
+			),
+			conditions:   conditions,
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			name:          "nil config",
+			componentName: "nodewright-customizations",
+			recipeResult:  genericGB300,
+			bundlerConfig: nil,
+			conditions:    conditions,
+			wantWarnings:  0,
+			wantErrors:    0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			warnings, errors := CheckGB300HostKernelGranule(ctx, tt.componentName, tt.recipeResult, tt.bundlerConfig, tt.conditions)
+
+			if len(warnings) != tt.wantWarnings {
+				t.Errorf("CheckGB300HostKernelGranule() warnings = %d, want %d", len(warnings), tt.wantWarnings)
+			}
+			if len(errors) != tt.wantErrors {
+				t.Errorf("CheckGB300HostKernelGranule() errors = %d, want %d", len(errors), tt.wantErrors)
+			}
+
+			if tt.wantWarningMsg != "" && len(warnings) > 0 {
+				found := false
+				for _, w := range warnings {
+					if strings.Contains(w, tt.wantWarningMsg) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("CheckGB300HostKernelGranule() warnings = %v, want to contain %q", warnings, tt.wantWarningMsg)
+				}
+			}
+		})
+	}
+}
+
 func TestCheckHostMofedWithoutNetworkOperator(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -717,6 +933,36 @@ func TestCheckConditions(t *testing.T) {
 	}
 }
 
+// TestDriverAbsentRemedy_OCP pins the OCP branch added for #2135:
+// driverAbsentRemedy must use the OCP-specific override keys
+// (gpuoperatorocp:/dradriverocp:) rather than falling through to the
+// generic gpuoperator:/dradriver: default, since those keys don't
+// resolve against an OCP recipe's registry aliases. Also asserts the
+// generic-default keys are NOT present, so a future edit that
+// accidentally reuses gpuOperatorManagedOverrideSet for OCP fails
+// loudly instead of silently.
+func TestDriverAbsentRemedy_OCP(t *testing.T) {
+	got := driverAbsentRemedy(recipe.CriteriaServiceOCP, "", false)
+
+	wantContains := []string{
+		"--set gpuoperatorocp:driver.enabled=true",
+		"--set gpuoperatorocp:toolkit.enabled=true",
+		"--set dradriverocp:nvidiaDriverRoot=/run/nvidia/driver",
+	}
+	for _, want := range wantContains {
+		if !strings.Contains(got, want) {
+			t.Errorf("driverAbsentRemedy(OCP) missing %q:\n%s", want, got)
+		}
+	}
+
+	dontWant := []string{"gpuoperator:", "dradriver:"}
+	for _, unwanted := range dontWant {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("driverAbsentRemedy(OCP) unexpectedly contains generic-default key %q:\n%s", unwanted, got)
+		}
+	}
+}
+
 // TestCheckDriverOwnershipCoherence covers the bundle-time
 // driver-ownership gate on FINAL effective values: Rule 1 (a recipe whose
 // snapshot observed no NVIDIA driver on the sampled GPU node —
@@ -782,6 +1028,7 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 		recipeResult    *recipe.RecipeResult
 		bundlerConfig   *config.Config
 		conditions      map[string][]string
+		componentName   string // defaults to "gpu-operator" when empty; set to test an OCP-alias row through the exact-match componentName entrypoint
 		wantMsgs        int
 		wantContains    []string
 		wantErrs        int
@@ -1066,6 +1313,26 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 			wantContains: []string{"nothing", "regenerate the recipe", "--set gpuoperator:driver.enabled=true"},
 		},
 		{
+			// Same Rule-2 legacy signature, but through the OCP aliases:
+			// gpu-operator-ocp/nvidia-dra-driver-gpu-ocp. Verifies the
+			// remedy names the resolved OCP component (draRef.Name, not
+			// the canonical constant) and the OCP override keys — the
+			// generic gpuoperator:/dradriver: set would hard-fail on OCP
+			// since recipes/overlays/ocp.yaml disables the canonical
+			// gpu-operator component.
+			name:          "Rule 2: OCP alias lockstep names the OCP component and OCP override keys",
+			componentName: "gpu-operator-ocp",
+			recipeResult: result("", recipe.CriteriaServiceOCP,
+				recipe.ComponentRef{Name: "gpu-operator-ocp", Overrides: driverOff()},
+				recipe.ComponentRef{Name: "nvidia-dra-driver-gpu-ocp", Overrides: rootAt("/run/nvidia/driver")}),
+			wantMsgs: 1,
+			wantContains: []string{
+				"nvidia-dra-driver-gpu-ocp",
+				"--set gpuoperatorocp:driver.enabled=true",
+				"--set dradriverocp:nvidiaDriverRoot=/run/nvidia/driver",
+			},
+		},
+		{
 			name: "Rule 2: driver off + DRA root=/ (preinstalled profile) → passes",
 			recipeResult: result("", aks,
 				gpuOpRef(driverOff()), draRef(rootAt("/"))),
@@ -1330,7 +1597,7 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 			// the key together with its chart defaults, so .Values.driver
 			// is nil at render time and the chart's unconditional field
 			// accesses (_helpers.tpl .Values.driver.manager.repository,
-			// v26.3.3) fail at install. Reject rather than default. The
+			// v26.7.0) fail at install. Reject rather than default. The
 			// reachable vector is a top-level --set-json null: the typed
 			// merge assigns it verbatim (mergeTypedValueByPath), while the
 			// recipe-side overlay merge drops nil-valued keys before the
@@ -1357,7 +1624,7 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 			// hostPaths: null is the same hazard as a null driver/toolkit
 			// section: Helm null-coalescing deletes the chart defaults and
 			// clusterpolicy.yaml's unconditional .Values.hostPaths.rootFS
-			// access fails at install (v26.3.3).
+			// access fails at install (v26.7.0).
 			name:         "--set-json hostPaths=null → rejected",
 			recipeResult: result("", aks, gpuOpRef(driverOn())),
 			bundlerConfig: config.NewConfig(config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
@@ -1586,8 +1853,12 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			componentName := tt.componentName
+			if componentName == "" {
+				componentName = "gpu-operator"
+			}
 			msgs, errs := CheckDriverOwnershipCoherence(
-				context.Background(), "gpu-operator", tt.recipeResult, tt.bundlerConfig, tt.conditions)
+				context.Background(), componentName, tt.recipeResult, tt.bundlerConfig, tt.conditions)
 			if len(errs) != tt.wantErrs {
 				t.Fatalf("hard errors = %d (%v), want %d", len(errs), errs, tt.wantErrs)
 			}
@@ -1698,7 +1969,7 @@ func TestCheckMariaDBOperatorOwnershipCoherence(t *testing.T) {
 			if len(errs) != tt.wantErrors {
 				t.Fatalf("errors = %d (%v), want %d", len(errs), errs, tt.wantErrors)
 			}
-			if tt.wantCode != "" && !stderrors.Is(errs[0], aicrerrors.New(tt.wantCode, "")) {
+			if tt.wantCode != "" && errorstest.ReportedCode(errs[0]) != tt.wantCode {
 				t.Errorf("error = %v, want code %s", errs[0], tt.wantCode)
 			}
 			combined := strings.Join(warnings, "\n")
@@ -1750,5 +2021,98 @@ func TestEffectiveComponentValues_PreservesResolverCode(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "driver-ownership coherence") {
 		t.Errorf("error %q missing coherence framing", err.Error())
+	}
+}
+
+// tcpxoCoherenceTestResult builds a fingerprint recipe (h100 GKE kubeflow
+// with the fabric component) that records the fixed introspection mapping and
+// projects it into the kubeflow-trainer overrides, as recipe generation does.
+func tcpxoCoherenceTestResult() *recipe.RecipeResult {
+	mapping := recipe.GKETCPXOIntrospectionInterfaces()
+	override := make([]any, 0, len(mapping))
+	for _, entry := range mapping {
+		override = append(override, map[string]any{
+			"interfaceName": entry.InterfaceName,
+			"network":       entry.Network,
+		})
+	}
+	return &recipe.RecipeResult{
+		Criteria: &recipe.Criteria{
+			Service:     recipe.CriteriaServiceGKE,
+			Accelerator: recipe.CriteriaAcceleratorH100,
+			Platform:    recipe.CriteriaPlatformKubeflow,
+		},
+		Configuration: &recipe.RecipeConfiguration{
+			GKE: &recipe.GKEConfiguration{TCPXOInterfaces: mapping},
+		},
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "gke-nccl-tcpxo"},
+			{Name: "kubeflow-trainer", Overrides: map[string]any{"tcpxoInterfaces": override}, ManifestFiles: []string{
+				"components/kubeflow-trainer/manifests/torch-distributed-tcpxo-cluster-training-runtime.yaml",
+			}},
+		},
+	}
+}
+
+func TestCheckGKETCPXOInterfacesCoherence(t *testing.T) {
+	t.Parallel()
+
+	nonFingerprint := tcpxoCoherenceTestResult()
+	nonFingerprint.ComponentRefs[1].ManifestFiles = nil
+	nonFingerprint.Configuration = nil
+
+	drifted := tcpxoCoherenceTestResult()
+	drifted.ComponentRefs[1].Overrides["tcpxoInterfaces"].([]any)[2].(map[string]any)["network"] = "reprovisioned-network"
+
+	overrideRemoved := tcpxoCoherenceTestResult()
+	delete(overrideRemoved.ComponentRefs[1].Overrides, "tcpxoInterfaces")
+
+	unrecorded := tcpxoCoherenceTestResult()
+	unrecorded.Configuration = nil
+
+	tests := []struct {
+		name         string
+		recipeResult *recipe.RecipeResult
+		wantErrors   int
+		wantContains string
+	}{
+		{name: "nil recipe skipped"},
+		{name: "non-fingerprint recipe skipped", recipeResult: nonFingerprint},
+		{name: "recorded and resolved agree", recipeResult: tcpxoCoherenceTestResult()},
+		{
+			name:         "valid but different resolved value blocks",
+			recipeResult: drifted,
+			wantErrors:   1,
+			wantContains: "disagrees",
+		},
+		{
+			name:         "override removed by hand blocks",
+			recipeResult: overrideRemoved,
+			wantErrors:   1,
+			wantContains: "no tcpxoInterfaces",
+		},
+		{
+			name:         "missing mapping fails closed",
+			recipeResult: unrecorded,
+			wantErrors:   1,
+			wantContains: "--gke-tcpxo-interfaces",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			warnings, errs := CheckGKETCPXOInterfacesCoherence(
+				context.Background(), "kubeflow-trainer", tt.recipeResult, nil, nil)
+			if len(warnings) != 0 {
+				t.Fatalf("warnings = %d (%v), want 0", len(warnings), warnings)
+			}
+			if len(errs) != tt.wantErrors {
+				t.Fatalf("errors = %d (%v), want %d", len(errs), errs, tt.wantErrors)
+			}
+			if tt.wantContains != "" && !strings.Contains(errs[0].Error(), tt.wantContains) {
+				t.Errorf("error %q missing %q", errs[0], tt.wantContains)
+			}
+		})
 	}
 }

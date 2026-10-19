@@ -127,18 +127,8 @@ type clusterState struct {
 // without reading kubeconfig files or contacting a live cluster.
 type kubeClientFactory func(kubeconfig string) (kubernetes.Interface, error)
 
-// prepareCluster sets up namespace, RBAC, data ConfigMaps, and informer factory.
-// The caller must close stopCh and handle cleanup deferrals.
-func (v *Validator) prepareCluster(
-	ctx context.Context,
-	validationInput *v1.ValidationInput,
-	snap *snapshotter.Snapshot,
-) (cs *clusterState, err error) {
-
-	// Use PropagateOrWrap so a coded inner error (e.g. an invalid kubeconfig
-	// classified as a deterministic config error) survives instead of being
-	// blanket-relabeled ErrCodeInternal, which would mask it as retryable.
-	var clientset kubernetes.Interface
+// kubeClient returns the Kubernetes client for this run.
+func (v *Validator) kubeClient() (clientset kubernetes.Interface, err error) {
 	kubeconfig := strings.TrimSpace(v.Kubeconfig)
 	switch {
 	case kubeconfig == "":
@@ -154,23 +144,79 @@ func (v *Validator) prepareCluster(
 		clientset, _, err = k8sclient.BuildKubeClient(kubeconfig)
 	}
 	if err != nil {
+		// Use PropagateOrWrap so a coded inner error (e.g. an invalid kubeconfig
+		// classified as a deterministic config error) survives instead of being
+		// blanket-relabeled ErrCodeInternal, which would mask it as retryable.
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to create kubernetes client")
 	}
+	return clientset, nil
+}
 
-	if nsErr := ensureNamespace(ctx, clientset, v.Namespace); nsErr != nil {
-		return nil, errors.PropagateOrWrap(nsErr, errors.ErrCodeInternal, "failed to ensure validation namespace")
+// managesRBAC reports whether this run creates, and later deletes, its own
+// ServiceAccount and cluster-admin ClusterRoleBinding.
+func (v *Validator) managesRBAC() bool {
+	return v.ServiceAccountName == ""
+}
+
+// PreflightServiceAccount verifies the administrator-provisioned
+// ServiceAccount named by ServiceAccountName exactly as a run does before
+// deploying anything, so a caller that does its own cluster work first can
+// fail before it. It issues only reads, and returns nil without contacting
+// the cluster when ServiceAccountName is empty or NoCluster is set.
+func (v *Validator) PreflightServiceAccount(ctx context.Context) error {
+	if v.managesRBAC() || v.NoCluster {
+		return nil
+	}
+	clientset, err := v.kubeClient()
+	if err != nil {
+		return err
+	}
+	return job.VerifyServiceAccount(ctx, clientset, v.Namespace, v.ServiceAccountName)
+}
+
+// prepareCluster sets up the namespace and per-run RBAC (or, with
+// ServiceAccountName, verifies the administrator-provisioned ServiceAccount
+// instead), then data ConfigMaps and the informer factory. The caller must
+// close stopCh and handle cleanup deferrals.
+func (v *Validator) prepareCluster(
+	ctx context.Context,
+	validationInput *v1.ValidationInput,
+	snap *snapshotter.Snapshot,
+) (cs *clusterState, err error) {
+
+	clientset, err := v.kubeClient()
+	if err != nil {
+		return nil, err
 	}
 
-	if rbacErr := job.EnsureRBAC(ctx, clientset, v.Namespace, v.RunID); rbacErr != nil {
-		return nil, errors.PropagateOrWrap(rbacErr, errors.ErrCodeInternal, "failed to ensure RBAC")
+	if v.managesRBAC() {
+		if nsErr := ensureNamespace(ctx, clientset, v.Namespace); nsErr != nil {
+			return nil, errors.PropagateOrWrap(nsErr, errors.ErrCodeInternal, "failed to ensure validation namespace")
+		}
+
+		if rbacErr := job.EnsureRBAC(ctx, clientset, v.Namespace, v.RunID); rbacErr != nil {
+			return nil, errors.PropagateOrWrap(rbacErr, errors.ErrCodeInternal, "failed to ensure RBAC")
+		}
+	} else {
+		// The namespace is not applied either: the administrator created it
+		// along with the ServiceAccount, and applying it needs cluster-scoped
+		// permission a caller in this mode is not expected to hold.
+		if saErr := job.VerifyServiceAccount(ctx, clientset, v.Namespace, v.ServiceAccountName); saErr != nil {
+			return nil, saErr
+		}
+		slog.Info("validator Jobs run as an existing ServiceAccount; this run creates and deletes no RBAC",
+			"serviceAccount", v.ServiceAccountName,
+			"namespace", v.Namespace,
+			"runID", v.RunID)
 	}
 
-	// Privileged RBAC (the per-run cluster-admin ClusterRoleBinding) now exists.
-	// Register an immediate rollback so any later failure in prepareCluster
-	// revokes it before returning, instead of leaking a privileged identity
-	// until manual cleanup. On the success path err is nil and the binding is
-	// retained — the caller's deferClusterCleanup owns success-path teardown, so
-	// this defer must not double-clean.
+	// Privileged RBAC (the per-run cluster-admin ClusterRoleBinding) now exists
+	// unless the run uses an existing ServiceAccount, where rollbackRBAC has
+	// nothing to revoke. Register an immediate rollback so any later failure in
+	// prepareCluster revokes it before returning, instead of leaking a
+	// privileged identity until manual cleanup. On the success path err is nil
+	// and the binding is retained — the caller's deferClusterCleanup owns
+	// success-path teardown, so this defer must not double-clean.
 	//
 	//nolint:contextcheck // rollbackRBAC uses a fresh context: parent may be canceled
 	defer func() {
@@ -208,8 +254,8 @@ func (v *Validator) prepareCluster(
 	}, nil
 }
 
-// deferClusterCleanup performs success-path teardown of RBAC and data
-// ConfigMaps. Both cleanup steps share a single deadline so a stalled apiserver
+// deferClusterCleanup performs success-path teardown of the run's per-run
+// RBAC, when it created any, and data ConfigMaps. Both cleanup steps share a single deadline so a stalled apiserver
 // cannot extend total post-run blocking time to 2 * K8sCleanupTimeout.
 //
 // RBAC is privileged (a per-run cluster-admin ClusterRoleBinding), so a failure
@@ -225,10 +271,12 @@ func (v *Validator) deferClusterCleanup(clientset kubernetes.Interface) error {
 	defer cancel()
 
 	var rbacErr error
-	if cleanupErr := job.CleanupRBAC(cleanupCtx, clientset, v.Namespace, v.RunID); cleanupErr != nil {
-		slog.Error("failed to cleanup RBAC; cluster-admin binding may be orphaned",
-			"runID", v.RunID, "namespace", v.Namespace, "error", cleanupErr)
-		rbacErr = errors.PropagateOrWrap(cleanupErr, errors.ErrCodeInternal, "failed to revoke privileged RBAC")
+	if v.managesRBAC() {
+		if cleanupErr := job.CleanupRBAC(cleanupCtx, clientset, v.Namespace, v.RunID); cleanupErr != nil {
+			slog.Error("failed to cleanup RBAC; cluster-admin binding may be orphaned",
+				"runID", v.RunID, "namespace", v.Namespace, "error", cleanupErr)
+			rbacErr = errors.PropagateOrWrap(cleanupErr, errors.ErrCodeInternal, "failed to revoke privileged RBAC")
+		}
 	}
 	if cmErr := v.cleanupDataConfigMaps(cleanupCtx, clientset); cmErr != nil {
 		slog.Warn("failed to cleanup ConfigMaps; resources may be orphaned",
@@ -245,13 +293,15 @@ func (v *Validator) deferClusterCleanup(clientset kubernetes.Interface) error {
 // returns its error, so the run fails closed regardless of this rollback's
 // outcome. Respects v.Cleanup for parity with the success-path teardown: a
 // caller that disabled cleanup has opted into managing teardown manually, so a
-// disabled-cleanup run performs no rollback and returns nil.
+// disabled-cleanup run performs no rollback and returns nil. A run using an
+// existing ServiceAccount created no RBAC, so it has none to roll back either.
 //
 // Returns the CleanupRBAC error (still logged) so the caller can fold a failed
 // revocation into the run's error and surface that cluster-admin may be
-// orphaned; returns nil when cleanup is disabled or the revocation succeeds.
+// orphaned; returns nil when there is nothing to revoke or the revocation
+// succeeds.
 func (v *Validator) rollbackRBAC(clientset kubernetes.Interface) error {
-	if !v.Cleanup {
+	if !v.Cleanup || !v.managesRBAC() {
 		return nil
 	}
 	//nolint:contextcheck // Fresh context: parent may be canceled during rollback
@@ -310,6 +360,12 @@ func (v *Validator) ValidatePhases(
 		return nil, err
 	}
 
+	// And on a skip list that would not act as its author meant, for the same
+	// reason and at the same point: before any cluster work.
+	if err = v.preflightSkipChecks(cat, phases, validationInput); err != nil {
+		return nil, err
+	}
+
 	// --no-cluster: report all as skipped, no K8s calls
 	if v.NoCluster {
 		return v.phasesSkipped(cat, phases, "skipped - no-cluster mode"), nil
@@ -359,7 +415,7 @@ func (v *Validator) runPhases(
 	for _, phase := range phases {
 		select {
 		case <-ctx.Done():
-			return results, errors.Wrap(errors.ErrCodeTimeout, "context canceled during phase iteration", ctx.Err())
+			return results, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "iterating validation phases")
 		default:
 		}
 
@@ -418,6 +474,9 @@ func (v *Validator) ValidatePhase(
 	// matching ValidatePhases: a per-phase caller must not be able to skip an
 	// unresolved required gate into a spuriously passing run (issue #2121).
 	if err = v.preflightDeclaredChecks(cat, []Phase{phase}, validationInput); err != nil {
+		return nil, err
+	}
+	if err = v.preflightSkipChecks(cat, []Phase{phase}, validationInput); err != nil {
 		return nil, err
 	}
 
@@ -511,18 +570,21 @@ func (v *Validator) runPhase(
 	start := time.Now()
 	allEntries := cat.ForPhase(phase)
 
-	// Filter catalog entries by checks declared in the validation for this phase.
-	// Returns an empty set if no checks are declared for the phase.
-	entries := v1.FilterEntriesByValidation(allEntries, phase, validationInput)
+	builder := ctrf.NewBuilder("aicr", v.Version, string(phase))
+
+	// Filter catalog entries by checks declared in the validation for this
+	// phase, then withhold the ones the caller skipped, recording each on the
+	// builder as it goes. Returns an empty set if no checks are declared.
+	entries := v.selectEntries(builder, phase, allEntries, validationInput)
 	slog.Info("running validation phase", "phase", phase,
-		"catalog", len(allEntries), "selected", len(entries))
+		"catalog", len(allEntries), "selected", len(entries),
+		"skipped", len(v.SkipChecks))
 
 	// Note: unmatched, cross-phase, and duplicate declared checks are rejected
 	// up front by preflightDeclaredChecks (in ValidatePhase/ValidatePhases)
 	// before this phase ever runs, so by here every declared check for the
-	// phase resolves to exactly one catalog entry.
-
-	builder := ctrf.NewBuilder("aicr", v.Version, string(phase))
+	// phase resolves to exactly one catalog entry. preflightSkipChecks rejects
+	// a skip list that would leave this phase with nothing to run.
 
 	// Pre-flight: validate all dependencyAffinity for required components
 	// resolve before any Job is deployed. This honors the per-validator
@@ -532,7 +594,7 @@ func (v *Validator) runPhase(
 	for _, entry := range entries {
 		select {
 		case <-ctx.Done():
-			return nil, errors.Wrap(errors.ErrCodeTimeout, "context canceled during dependencyAffinity pre-flight", ctx.Err())
+			return nil, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "running dependencyAffinity pre-flight")
 		default:
 		}
 		if err := v1.ValidateDependencyAffinity(entry.DependencyAffinity, validationInput.GetComponentRefs()); err != nil {
@@ -549,7 +611,7 @@ func (v *Validator) runPhase(
 	for _, entry := range entries {
 		select {
 		case <-ctx.Done():
-			return nil, errors.Wrap(errors.ErrCodeTimeout, "context canceled during entry evaluation", ctx.Err())
+			return nil, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "evaluating validator entries")
 		default:
 		}
 
@@ -560,6 +622,7 @@ func (v *Validator) runPhase(
 			Factory:               factory,
 			Namespace:             v.Namespace,
 			RunID:                 v.RunID,
+			ServiceAccountName:    v.ServiceAccountName,
 			Entry:                 entry,
 			CLIVersion:            v.Version,
 			CLICommit:             v.Commit,
@@ -655,6 +718,11 @@ func (v *Validator) runPhase(
 		"validators", report.Results.Summary.Tests,
 		"passed", report.Results.Summary.Passed,
 		"failed", report.Results.Summary.Failed,
+		// Printed for the same reason passed and failed are: the three
+		// together account for the validator count, and without it a phase
+		// that withheld half its checks is indistinguishable from one that ran
+		// them all.
+		"skipped", report.Results.Summary.Skipped,
 		"duration", duration)
 
 	return &PhaseResult{

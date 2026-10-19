@@ -38,54 +38,19 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/phases.sh"
 # Azure-only (no AWS/GCP sibling): how often the readiness gate refreshes the
 # federated az session. A CI federated session cannot self-refresh — the
 # GitHub OIDC assertion azure/login stores is valid ~5 MINUTES and access
-# tokens ~60-75m — so a gate that can run to READINESS_TIMEOUT_SECONDS after
-# a 20m helmfile apply outlives the token minted at the install step's login
+# tokens ~60-75m — so a gate that can run to READINESS_TIMEOUT_SECONDS (on a
+# token possibly already aged by a 20m helmfile apply) outlives its login
 # (AADSTS700024; see az_federated_relogin). 25m keeps every cached token
 # comfortably inside its lifetime with margin for a slow validate attempt.
 AZ_RELOGIN_INTERVAL_SECONDS="${AZ_RELOGIN_INTERVAL_SECONDS:-1500}" # 25 min
 
-# Refresh the federated az session mid-phase. In CI the session minted by
-# azure/login cannot self-refresh (client-credentials grant, no refresh
-# token): once its access tokens expire, kubectl/aicr calls fail with
-# AADSTS700024 and NO amount of retrying recovers — a fresh GitHub OIDC
-# assertion must be redeemed. GitHub permits minting ID tokens repeatedly, so
-# re-login in place: mint a fresh ACTIONS_ID_TOKEN, az login with it, then
-# EAGERLY warm the kubelogin audience (the AKS AAD server app) — the
-# assertion is only ~5-minute valid, so the token must be minted now, not
-# lazily when kubelogin next misses its cache. No-op outside CI (local user
-# az sessions self-refresh) and when the AZURE_* identifiers are absent.
-AKS_SERVER_APP_ID="6dae42f8-4368-4678-94ff-3960e28e3630"
-az_federated_relogin() {
-  if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" || -z "${AZURE_CLIENT_ID:-}" \
-    || -z "${AZURE_TENANT_ID:-}" || -z "${AZURE_SUBSCRIPTION_ID:-}" ]]; then
-    return 0
-  fi
-  # Explicit `|| return 1` on every step: the caller invokes this inside an
-  # `if` condition, which suspends errexit for the whole function body — a
-  # failed mint/login/warm-up would otherwise fall through to the success
-  # echo and return 0, silently advancing the caller's re-login timer.
-  local oidc_token
-  oidc_token="$(curl -fsSL --retry 3 \
-    -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-    "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://AzureADTokenExchange" | jq -r .value)" || return 1
-  if [[ -z "${oidc_token}" || "${oidc_token}" == "null" ]]; then
-    echo "federated re-login: token endpoint returned no value" >&2
-    return 1
-  fi
-  az login --service-principal \
-    --username "${AZURE_CLIENT_ID}" \
-    --tenant "${AZURE_TENANT_ID}" \
-    --federated-token "${oidc_token}" \
-    --output none || return 1
-  az account set --subscription "${AZURE_SUBSCRIPTION_ID}" --output none || return 1
-  az account get-access-token --resource "${AKS_SERVER_APP_ID}" --output none || return 1
-  echo "federated az session refreshed (ARM + AKS audiences)"
-}
+# shellcheck source=relogin.sh
+source "$(dirname "${BASH_SOURCE[0]}")/relogin.sh"
 
 # Wire the federated-session refresh into the shared hook. The readiness gate
 # calls this every CLOUD_REFRESH_INTERVAL_SECONDS (mapped from the Azure knob
 # above) and the debug phase forces it before collecting.
-# CLOUD_REFRESH_INTERVAL_SECONDS is read by phase_install in the shared lib.
+# CLOUD_REFRESH_INTERVAL_SECONDS is read by phase_readiness in the shared lib.
 # shellcheck disable=SC2034  # used in tests/uat/lib/phases.sh
 CLOUD_REFRESH_INTERVAL_SECONDS="${AZ_RELOGIN_INTERVAL_SECONDS}"
 cloud_refresh_credentials() { az_federated_relogin; }

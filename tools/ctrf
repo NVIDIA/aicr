@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# ctrf — a minimal CTRF (Common Test Report Format) emitter for the shell
+# harnesses (tests/uat/lib/phases.sh, kwok/scripts/run-all-recipes.sh).
+#
+# Source it, do not execute it:
+#
+#   # shellcheck source=tools/ctrf
+#   . "${REPO_ROOT}/tools/ctrf"
+#   ctrf_init "aicr-uat" "$(git rev-parse --short HEAD)"
+#   start="$(ctrf_now_ms)"
+#   aicr snapshot --config cfg.yaml && st=passed || st=failed
+#   ctrf_add snapshot "${st}" "$(ctrf_elapsed_ms "${start}")" "optional message"
+#   ctrf_write ./snapshot-result.json
+#
+# Field names and the spec version mirror pkg/validator/ctrf/types.go so a
+# report written here and one written by `aicr validate --output` share one
+# schema. Only the fields the shell harnesses need are emitted:
+# results.tool{name,version}, results.summary{tests,passed,failed,skipped,
+# pending,other,start,stop} and results.tests[]{name,status,duration,message}.
+#
+# Timestamps are Unix epoch milliseconds at one-second resolution (macOS date
+# has no %N), which is plenty for phases that run for seconds to minutes.
+# Requires bash 3.2+ and jq. Deliberately sets no shell options: the sourcing
+# script owns `set -euo pipefail`.
+
+CTRF_SPEC_VERSION="0.0.1"
+CTRF_TOOL_NAME=""
+CTRF_TOOL_VERSION=""
+CTRF_START_MS=""
+CTRF_TESTS="[]"
+
+# ctrf_now_ms prints the current time as epoch milliseconds.
+ctrf_now_ms() {
+    echo $(( $(date +%s) * 1000 ))
+}
+
+# ctrf_elapsed_ms <start-ms> prints the milliseconds elapsed since start-ms.
+ctrf_elapsed_ms() {
+    local start="${1:?ctrf_elapsed_ms: start-ms is required}"
+    local now
+    now="$(ctrf_now_ms)"
+    echo $(( now - start ))
+}
+
+# ctrf_init <tool-name> [tool-version] starts a new report, discarding any
+# tests recorded so far.
+ctrf_init() {
+    CTRF_TOOL_NAME="${1:?ctrf_init: tool-name is required}"
+    CTRF_TOOL_VERSION="${2:-}"
+    CTRF_START_MS="$(ctrf_now_ms)"
+    CTRF_TESTS="[]"
+}
+
+# ctrf_add <name> <status> <duration-ms> [message] records one test result.
+# status must be one of passed|failed|skipped|pending|other.
+ctrf_add() {
+    local name="${1:?ctrf_add: name is required}"
+    local status="${2:?ctrf_add: status is required}"
+    local duration="${3:?ctrf_add: duration-ms is required}"
+    local message="${4:-}"
+    if [[ -z "${CTRF_START_MS}" ]]; then
+        echo "ctrf_add: call ctrf_init first" >&2
+        return 1
+    fi
+    case "${status}" in
+        passed|failed|skipped|pending|other) ;;
+        *)
+            echo "ctrf_add: invalid status '${status}' (want passed|failed|skipped|pending|other)" >&2
+            return 1
+            ;;
+    esac
+    if [[ ! "${duration}" =~ ^[0-9]+$ ]]; then
+        echo "ctrf_add: duration must be a non-negative integer of milliseconds, got '${duration}'" >&2
+        return 1
+    fi
+    CTRF_TESTS="$(jq -cn \
+        --argjson tests "${CTRF_TESTS}" \
+        --arg name "${name}" \
+        --arg status "${status}" \
+        --argjson duration "${duration}" \
+        --arg message "${message}" \
+        '$tests + [({name: $name, status: $status, duration: $duration}
+                    + (if $message == "" then {} else {message: $message} end))]')"
+}
+
+# ctrf_write <path> writes the report, creating the parent directory. The
+# summary is derived from the recorded tests so it can never disagree with
+# them. Safe to call more than once: each call rewrites the file with every
+# test recorded since ctrf_init.
+ctrf_write() {
+    local path="${1:?ctrf_write: path is required}"
+    if [[ -z "${CTRF_START_MS}" ]]; then
+        echo "ctrf_write: call ctrf_init first" >&2
+        return 1
+    fi
+    local stop_ms timestamp
+    stop_ms="$(ctrf_now_ms)"
+    timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    mkdir -p "$(dirname "${path}")"
+    jq -n \
+        --arg reportFormat "CTRF" \
+        --arg specVersion "${CTRF_SPEC_VERSION}" \
+        --arg timestamp "${timestamp}" \
+        --arg generatedBy "${CTRF_TOOL_NAME}" \
+        --arg toolName "${CTRF_TOOL_NAME}" \
+        --arg toolVersion "${CTRF_TOOL_VERSION}" \
+        --argjson start "${CTRF_START_MS}" \
+        --argjson stop "${stop_ms}" \
+        --argjson tests "${CTRF_TESTS}" \
+        '{
+          reportFormat: $reportFormat,
+          specVersion: $specVersion,
+          timestamp: $timestamp,
+          generatedBy: $generatedBy,
+          results: {
+            tool: ({name: $toolName} + (if $toolVersion == "" then {} else {version: $toolVersion} end)),
+            summary: {
+              tests:   ($tests | length),
+              passed:  ([$tests[] | select(.status == "passed")]  | length),
+              failed:  ([$tests[] | select(.status == "failed")]  | length),
+              skipped: ([$tests[] | select(.status == "skipped")] | length),
+              pending: ([$tests[] | select(.status == "pending")] | length),
+              other:   ([$tests[] | select(.status == "other")]   | length),
+              start: $start,
+              stop: $stop
+            },
+            tests: $tests
+          }
+        }' > "${path}"
+}

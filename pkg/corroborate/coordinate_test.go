@@ -15,11 +15,13 @@
 package corroborate
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -195,6 +197,45 @@ func TestLabelFor(t *testing.T) {
 				t.Errorf("labelFor = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCanonicalSourceID(t *testing.T) {
+	s := RunMetaSigner{
+		Issuer:   "https://token.actions.githubusercontent.com",
+		Identity: "https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main",
+	}
+
+	// This is the FULL, untruncated sha256 digest. Any change here breaks
+	// every persisted dashboard Sources/series key derived from it.
+	const wantGolden = "a2f01812594e54d1a14278576fda2ed0a71b32b8b2287862271baf100c561b16"
+
+	got := canonicalSourceID(s)
+	if got != wantGolden {
+		t.Errorf("canonicalSourceID = %q, want golden %q (algorithm changed?)", got, wantGolden)
+	}
+	if len(got) != 64 {
+		t.Errorf("canonicalSourceID length = %d, want 64 (untruncated sha256 hex)", len(got))
+	}
+
+	// canonicalSourceID must be exactly the shared digest.
+	sum, err := attestation.HashIdentityPair(s.Issuer, s.Identity)
+	if err != nil {
+		t.Fatalf("HashIdentityPair: %v", err)
+	}
+	if got != hex.EncodeToString(sum[:]) {
+		t.Errorf("canonicalSourceID = %q, want shared digest %q", got, hex.EncodeToString(sum[:]))
+	}
+
+	// Determinism: same inputs -> same key.
+	if again := canonicalSourceID(s); again != got {
+		t.Errorf("canonicalSourceID not deterministic: %q != %q", got, again)
+	}
+
+	// Distinct identities must not collide.
+	other := RunMetaSigner{Issuer: s.Issuer, Identity: s.Identity + "x"}
+	if canonicalSourceID(other) == got {
+		t.Errorf("distinct identities collided on %q", got)
 	}
 }
 

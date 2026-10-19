@@ -2,17 +2,12 @@
 # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Commit the signed/relocated evidence pointers back to the branch through
-# GitHub's GraphQL `createCommitOnBranch` mutation so the commit carries
-# GitHub's web-flow signature and shows the **Verified** badge (#1551).
-#
-# Why the API instead of `git push`: GitHub auto-signs only commits it creates
-# server-side (REST contents API, GraphQL createCommitOnBranch, web editor,
-# merge button). A commit that arrives via `git push` is never signed by
-# GitHub, so the runner's client-side commit-back was always Unverified — the
-# `github-actions[bot]` identity has no GPG/SSH key on the runner to `-S` with.
-# createCommitOnBranch authors the commit as the GITHUB_TOKEN identity
-# (github-actions[bot]) and GitHub signs it → Verified.
+# Work out which evidence pointers the signing step changed and hand them to
+# gh-commit-on-branch.sh, which commits them through GitHub's GraphQL
+# `createCommitOnBranch` mutation so the commit shows the **Verified** badge
+# (#1551). That script owns the mutation, the base64 encoding, and the
+# expectedHeadOid concurrency guard; this one owns only what is specific to
+# evidence — the staging rules, the headline, and the no-op condition.
 #
 # The signing step's relocation is a delete (flat pointer) + add (nested
 # pointer) plus an in-place signer patch, so the mutation sends the FULL
@@ -37,6 +32,8 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 : "${GH_TOKEN:?GH_TOKEN is required (token authenticating gh api)}"
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required (owner/repo)}"
 : "${GITHUB_REF_NAME:?GITHUB_REF_NAME is required (branch name)}"
@@ -57,63 +54,27 @@ if git diff --cached --quiet -- recipes/evidence/; then
   exit 0
 fi
 
-additions='[]'
-deletions='[]'
+args=()
 while IFS= read -r -d '' status && IFS= read -r -d '' path; do
   case "$status" in
-    D)
-      deletions=$(jq -c --arg p "$path" '. += [{path: $p}]' <<<"$deletions")
-      ;;
-    *)
-      # A (add) or M (modify): send the full file contents, base64-encoded as
-      # the GraphQL API requires. -w0 keeps it single-line (GNU coreutils on
-      # the ubuntu runner).
-      contents=$(base64 -w0 <"$path")
-      additions=$(jq -c --arg p "$path" --arg c "$contents" \
-        '. += [{path: $p, contents: $c}]' <<<"$additions")
-      ;;
+    D) args+=(--delete "$path") ;;
+    *) args+=(--add "$path") ;;   # A (add) or M (modify)
   esac
 done < <(git diff --cached --name-status --no-renames -z -- recipes/evidence/)
 
-# expectedHeadOid pins the mutation to the branch tip we checked out; a
-# concurrent advance fails the mutation loudly (re-dispatch after pulling)
-# rather than silently racing.
-head_oid=$(git rev-parse HEAD)
 body="Signed-off-by: ${BOT_NAME} <${BOT_EMAIL}>"
 
-variables=$(jq -n \
-  --arg repo "$GITHUB_REPOSITORY" \
-  --arg branch "$GITHUB_REF_NAME" \
-  --arg oid "$head_oid" \
-  --arg headline "$HEADLINE" \
-  --arg body "$body" \
-  --argjson additions "$additions" \
-  --argjson deletions "$deletions" \
-  '{
-    input: {
-      branch: {repositoryNameWithOwner: $repo, branchName: $branch},
-      expectedHeadOid: $oid,
-      message: {headline: $headline, body: $body},
-      fileChanges: {additions: $additions, deletions: $deletions}
-    }
-  }')
-
-read -r -d '' query <<'GRAPHQL' || true
-mutation ($input: CreateCommitOnBranchInput!) {
-  createCommitOnBranch(input: $input) {
-    commit {
-      oid
-      url
-    }
-  }
-}
-GRAPHQL
-
-# Post {query, variables} to the GraphQL endpoint. `input` is an object
-# variable, so it cannot be passed via `gh api graphql -f input=...` (that
-# would send a string and fail type-checking) — build the full request body
-# and stream it in.
-commit_oid=$(jq -n --arg q "$query" --argjson v "$variables" '{query: $q, variables: $v}' \
-  | gh api graphql --input - --jq '.data.createCommitOnBranch.commit.oid')
+# Base64 encoding, request assembly, and the expectedHeadOid concurrency guard
+# all live in gh-commit-on-branch.sh, which hands file contents to jq as a path
+# (--rawfile) instead of a value (--arg). What used to live here accumulated
+# every file into one `--argjson additions` value, which breaches the 128 KiB
+# Linux cap on a single argv string once the staged pointers total more than
+# ~96 KB (#2893). It had never fired only because they are smaller than that.
+commit_oid=$("${SCRIPT_DIR}/gh-commit-on-branch.sh" \
+  --repo "$GITHUB_REPOSITORY" \
+  --branch "$GITHUB_REF_NAME" \
+  --headline "$HEADLINE" \
+  --body "$body" \
+  "${args[@]}")
 
 echo "Committed signed pointers as ${commit_oid} (GitHub-signed, Verified)."

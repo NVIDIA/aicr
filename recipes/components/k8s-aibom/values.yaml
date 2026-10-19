@@ -13,19 +13,28 @@
 # limitations under the License.
 
 # k8s-aibom Helm values
-# Optional runtime AI-workload inventory. One stock recipe selects it,
-# h100-gke-cos-inference (ADR-019 stock-adoption amendment); its only
-# descendant, h100-gke-cos-inference-dynamo, declines it.
+# Optional runtime AI-workload inventory. One stock recipe selects it by
+# default, h100-gke-cos-inference (ADR-019 stock-adoption amendment); its
+# descendant, h100-gke-cos-inference-dynamo, declines it. Any GKE recipe can
+# also receive these values via `aicr recipe --runtime-inventory enabled`
+# (#2962), so a change here is no longer scoped to that one recipe.
 #
-# The digest and defaults below were qualified as one coherent v1.3.0 artifact
-# set under ADR-019, re-pinned from v1.2.0 when upstream graduated CRD storage
-# to v1beta1. Both v1alpha1 and v1beta1 remain served, and the chart still
-# renders AIBOMControllerConfig at v1alpha1.
+# The digest and defaults below were qualified as one coherent v1.5.1 artifact
+# set under ADR-019, re-pinned from v1.3.0. Both v1alpha1 and v1beta1 remain
+# served, storage unchanged on v1beta1; the chart now renders
+# AIBOMControllerConfig at v1beta1 (v1.3.0 rendered it at v1alpha1).
+#
+# v1.5.0 added an AIBOMControllerConfig `verification` block (Sigstore/Rekor
+# model-signature verification). It is deliberately left unset: absent or
+# disabled reproduces pre-v1.5.0 behavior exactly, which is what ADR-019's
+# secure-inactive-by-default rule asks for. Enabling it is separate scope --
+# the `verified` tier additionally needs a signer-identity constraint, so
+# turning it on without one records signatures as `claimed` anyway.
 
 image:
   repository: ghcr.io/googlecloudplatform/k8s-aibom
   tag: ""
-  digest: sha256:f8e48d4edc44e6ee8e40a2ac6c5f60b190aa18d411a75702dc5798a77a039e8d
+  digest: sha256:7b02731563a5ec524ed3396a07a524b02e3f51e17c976e02e65fc680b51e8164
 
 # Make pod readiness reflect the current AIBOMControllerConfig status rather
 # than process liveness alone. Invalid current configuration must fail closed.
@@ -63,10 +72,14 @@ securityContext:
   runAsUser: 65532
   allowPrivilegeEscalation: false
 
-# Envelope measured on GKE with the qualified v1.3.0 image (#2310), at 0, 251,
-# and 1,001 workloads, each a Deployment with replicas set to zero. At 1,001
-# workloads memory reached 67-69MiB and steady-state CPU was 1-2m, both well
-# inside the requests below. Convergence completed within 10s.
+# Envelope measured on regional GKE with the qualified v1.5.1 image at 1,002
+# workloads, 1,001 of them Deployments with replicas set to zero: 48MiB working
+# set (93MiB RSS) and 1m steady-state CPU, inside the requests below. Steady-state
+# API-server load was about one request per minute, all watch reconnects; each
+# upgrade or rollback re-walks the inventory once, one status write per AIBOM.
+# Measured by upstream for #2962 with chart defaults, which differ from these
+# values only in readiness.strictConfig, a no-op while the configuration is valid:
+# https://github.com/GoogleCloudPlatform/k8s-aibom/blob/c08e9ac2fda11a339865abdf2a7339a5a34c59e2/docs/evidence/v1.5.1-gke-upgrade-rollback-apiserver.md
 resources:
   requests:
     cpu: 50m

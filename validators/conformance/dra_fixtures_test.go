@@ -44,9 +44,11 @@ func newDRAFakeDynamicClientAt(version string, objects ...runtime.Object) *dynam
 	scheme := runtime.NewScheme()
 	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
 		map[schema.GroupVersionResource]string{
-			draGVRAt(version, "deviceclasses"):  "DeviceClassList",
-			draGVRAt(version, "resourceslices"): "ResourceSliceList",
-			draGVRAt(version, "resourceclaims"): "ResourceClaimList",
+			draGVRAt(version, "deviceclasses"):          "DeviceClassList",
+			draGVRAt(version, "resourceslices"):         "ResourceSliceList",
+			draGVRAt(version, "resourceclaims"):         "ResourceClaimList",
+			draGVRAt(version, "resourceclaimtemplates"): "ResourceClaimTemplateList",
+			computeDomainGVR:                            "ComputeDomainList",
 		}, objects...)
 }
 

@@ -183,6 +183,8 @@ deploy_karpenter() {
     # Deploy via Helm with the locally-built image.
     # - imagePullPolicy=Never: image is side-loaded into kind, no registry to pull from
     # - staticCapacity=true: required by the deployment template but missing from chart defaults
+    # - capacityBuffer=false: also missing from chart defaults; the template renders
+    #   "CapacityBuffer=" without it and the controller panics parsing FEATURE_GATES
     # - extraVolumes + extraVolumeMounts: mount the instance types ConfigMap
     # - controller.env: set INSTANCE_TYPES_FILE_PATH for the KWOK provider
     # shellcheck disable=SC2086
@@ -193,6 +195,7 @@ deploy_karpenter() {
         --set imagePullPolicy=Never \
         --set logLevel=info \
         --set settings.featureGates.staticCapacity=true \
+        --set settings.featureGates.capacityBuffer=false \
         --set controller.resources.requests.cpu=500m \
         --set controller.resources.requests.memory=512Mi \
         --set controller.resources.limits.cpu=1 \

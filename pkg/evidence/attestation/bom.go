@@ -171,6 +171,27 @@ func CatalogVersion(cat *catalog.ValidatorCatalog) string {
 	return cat.Metadata.Version
 }
 
+// MutableValidatorImages returns the refs in images that do not dereference to
+// stable content, in the order given. Empty when every ref is immutable.
+//
+// This is the only identification the predicate carries for the validators
+// that ran: ValidatorImagesForPredicate leaves Digest empty (see its doc), so
+// a moving tag leaves an attestation with nothing to fall back on — its claim
+// about which validators produced the results stops being true the moment the
+// tag advances. Callers gate on this before emitting. See issue #2873.
+func MutableValidatorImages(images []ValidatorImage) []string {
+	var out []string
+	for _, img := range images {
+		if img.Image == "" {
+			continue
+		}
+		if !catalog.IsImmutableRef(img.Image) {
+			out = append(out, img.Image)
+		}
+	}
+	return out
+}
+
 // ValidatorImagesForPredicate adapts the dedup'd list to predicate form.
 // Digest stays empty: the catalog records refs by tag, and resolving to
 // digest would require a registry round-trip per image. Operators wanting

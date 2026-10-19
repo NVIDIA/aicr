@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 // Vacuity floors for the catalog-derived sweep below. They are deliberately
@@ -106,11 +107,18 @@ func TestBundleComponentsSucceedsForEveryCatalogLeaf(t *testing.T) {
 			t.Parallel()
 
 			criteria := leaf.Criteria
-			resolved, err := client.ResolveRecipeFromCriteria(t.Context(), &criteria)
+			// The h100 GKE kubeflow leaf ships torch-distributed-tcpxo and fails
+			// closed without the interface mapping; supply the fixed introspection
+			// value so the sweep covers that leaf like any other.
+			var resolveOpts []aicr.RecipeResolveOption
+			if criteria.Service == "gke" && criteria.Accelerator == "h100" && criteria.Platform == "kubeflow" {
+				resolveOpts = append(resolveOpts, aicr.WithGKETCPXOInterfaces(
+					recipe.FormatGKETCPXOInterfaces(recipe.GKETCPXOIntrospectionInterfaces())))
+			}
+			resolved, err := client.ResolveRecipeFromCriteriaWithOptions(t.Context(), &criteria, resolveOpts...)
 			if err != nil {
 				t.Fatalf("ResolveRecipeFromCriteria(%+v) error = %v", criteria, err)
 			}
-
 			components, err := client.BundleComponents(t.Context(), resolved)
 			if err != nil {
 				t.Fatalf("BundleComponents() error = %v\n"+

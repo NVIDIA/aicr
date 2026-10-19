@@ -25,11 +25,11 @@
 // Criteria: Specifies target deployment parameters
 //
 //	type Criteria struct {
-//	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, bcm, ocp, any
-//	    Accelerator CriteriaAcceleratorType // h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any
+//	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, bcm, ocp, metal3, rke2, generic, k0s, mk8s, any
+//	    Accelerator CriteriaAcceleratorType // h100, h200, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any
 //	    Intent      CriteriaIntentType      // training, inference, any
 //	    OS          CriteriaOSType          // ubuntu, rhel, cos, amazonlinux, ol, talos, any
-//	    Platform    CriteriaPlatformType    // dynamo, kubeflow, nim, runai, slurm, any
+//	    Platform    CriteriaPlatformType    // dynamo, kubeflow, kueue, nim, runai, slurm, any
 //	    Nodes       int                     // node count (0 = any)
 //	}
 //
@@ -69,17 +69,25 @@
 //   - CriteriaServiceLKE: Linode LKE
 //   - CriteriaServiceBCM: NVIDIA Base Command Manager
 //   - CriteriaServiceOCP: Red Hat OpenShift Container Platform
+//   - CriteriaServiceMetal3: Metal3 bare-metal provisioning
+//   - CriteriaServiceRKE2: Rancher Kubernetes Engine 2 (bare-metal)
+//   - CriteriaServiceGeneric: generic self-managed Kubernetes (no distinguishing distro or provisioner; opt-in-only, never inferred from a snapshot)
+//   - CriteriaServiceK0s: k0s (self-managed k0s clusters)
+//   - CriteriaServiceMK8s: Nebius Managed Service for Kubernetes
 //   - CriteriaServiceAny: Any service (wildcard)
 //
 // Accelerator types for GPU selection:
 //   - CriteriaAcceleratorH100: NVIDIA H100
 //   - CriteriaAcceleratorH200: NVIDIA H200
 //   - CriteriaAcceleratorGB200: NVIDIA GB200
+//   - CriteriaAcceleratorGB300: NVIDIA GB300
 //   - CriteriaAcceleratorB200: NVIDIA B200
+//   - CriteriaAcceleratorB300: NVIDIA B300 SXM (distinct from Grace Blackwell GB300)
 //   - CriteriaAcceleratorA100: NVIDIA A100
 //   - CriteriaAcceleratorL40: NVIDIA L40
 //   - CriteriaAcceleratorL40S: NVIDIA L40S
 //   - CriteriaAcceleratorRTXPro6000: NVIDIA RTX PRO 6000
+//   - CriteriaAcceleratorVR200: NVIDIA VR200 (Vera Rubin)
 //   - CriteriaAcceleratorAny: Any accelerator (wildcard)
 //
 // Intent types for workload optimization:
@@ -99,6 +107,7 @@
 // Platform types for workload frameworks:
 //   - CriteriaPlatformDynamo: NVIDIA Dynamo
 //   - CriteriaPlatformKubeflow: Kubeflow
+//   - CriteriaPlatformKueue: Kueue topology-aware scheduling
 //   - CriteriaPlatformNIM: NVIDIA NIM
 //   - CriteriaPlatformRunai: NVIDIA Run:ai
 //   - CriteriaPlatformSlurm: SchedMD Slinky Slurm
@@ -182,11 +191,12 @@
 // # Query Parameters (HTTP API - GET)
 //
 // The HTTP handler accepts these query parameters for GET requests:
-//   - service: eks, gke, aks, oke, kind, lke, bcm, ocp, any (default: any)
-//   - accelerator: h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any (default: any)
+//   - service: eks, gke, aks, oke, kind, lke, bcm, ocp, metal3, rke2, generic, k0s, mk8s, any (default: any)
+//   - accelerator: h100, h200, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any (default: any)
 //   - gpu: alias for accelerator (backwards compatibility)
 //   - intent: training, inference, any (default: any)
 //   - os: ubuntu, rhel, cos, amazonlinux, ol, talos, any (default: any)
+//   - platform: dynamo, kubeflow, kueue, nim, runai, slurm, any (default: any)
 //   - nodes: integer node count (default: 0 = any)
 //
 // # Criteria Files (CLI and HTTP API - POST)
@@ -199,7 +209,7 @@
 //
 //	type RecipeCriteria struct {
 //	    Kind       string    // Must be "RecipeCriteria"
-//	    APIVersion string    // Release N accepts "aicr.run/v1alpha2" or "aicr.run/v1"
+//	    APIVersion string    // "aicr.run/v1"
 //	    Metadata   struct {
 //	        Name string       // Optional descriptive name
 //	    }
@@ -209,7 +219,7 @@
 // Example criteria file (criteria.yaml):
 //
 //	kind: RecipeCriteria
-//	apiVersion: aicr.run/v1alpha2
+//	apiVersion: aicr.run/v1
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
 //	spec:
@@ -280,7 +290,7 @@
 //
 // Base structure (recipes/overlays/base.yaml):
 //
-//	apiVersion: aicr.run/v1alpha2
+//	apiVersion: aicr.run/v1beta1
 //	kind: Base
 //	metadata:
 //	  name: base
@@ -292,7 +302,7 @@
 //
 // Overlay structure (recipes/overlays/*.yaml):
 //
-//	apiVersion: aicr.run/v1alpha2
+//	apiVersion: aicr.run/v1beta1
 //	kind: Overlay
 //	metadata:
 //	  name: h100-training

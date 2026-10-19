@@ -17,7 +17,9 @@ package recipe
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -85,6 +87,9 @@ type ComponentConfig struct {
 	// HealthCheck defines custom health check configuration for this component.
 	HealthCheck HealthCheckConfig `yaml:"healthCheck,omitempty"`
 
+	// Upgrades references this component's transition records (ADR-021).
+	Upgrades UpgradesConfig `yaml:"upgrades,omitempty"`
+
 	// ManifestFiles lists manifest files (relative to the recipes data
 	// root, e.g. "components/kueue/manifests/cluster-queue.yaml") bundled
 	// with the component whenever a recipe references it and the
@@ -143,6 +148,9 @@ type ComponentConfig struct {
 	// never touches it again, and Flux's helm-controller inherits that via
 	// its `spec.upgrade.crds: Skip` default, so a chart bump whose CRDs
 	// changed otherwise runs a new controller against the previous schema.
+	// Flux, helm, and helmfile consume this through
+	// deployer.ResolveCRDOwners. Argo CD does not: it applies a chart's CRDs
+	// on every sync regardless, so it needs no opt-in and honors none.
 	//
 	// This is opt-in, and deliberately so. An audit of every Helm
 	// component in the registry found 15 ship CRDs under `crds/`, and 11
@@ -150,9 +158,9 @@ type ComponentConfig struct {
 	// gpu-operator, and network-operator all ship the NodeFeature CRDs,
 	// and nfd plus gpu-operator plus kai-scheduler all appear together in
 	// `base.yaml`. Replacing unconditionally would have two or three
-	// HelmReleases rewrite the same CRD on every reconcile, each with the
-	// schema its own chart pins. The `Skip` default is what keeps that
-	// from happening today.
+	// releases rewrite the same CRD on every reconcile or redeploy, each
+	// with the schema its own chart pins. Requiring the opt-in is what
+	// keeps that from happening.
 	//
 	// Set this only for a component that both (a) solely owns every CRD it
 	// ships — including against charts that ship CRDs through `templates/`
@@ -162,6 +170,13 @@ type ComponentConfig struct {
 	//
 	// See https://github.com/NVIDIA/aicr/issues/2264.
 	OwnsCRDs bool `yaml:"ownsCRDs,omitempty"`
+
+	// OwnsCRDsExcludeSubcharts names subcharts, by chart name, whose CRDs an
+	// OwnsCRDs component does not own. Its CRD step collects every crds/
+	// directory in the archive, disabled subcharts included, so a bundled
+	// dependency that another registry component owns would otherwise be
+	// re-applied at the parent's pinned schema. Valid only with OwnsCRDs.
+	OwnsCRDsExcludeSubcharts []string `yaml:"ownsCRDsExcludeSubcharts,omitempty"`
 
 	// ManifestsUseChartCRDs signals that the component's attached
 	// manifestFiles (wrapped by the bundler into an injected -post
@@ -183,6 +198,20 @@ type ComponentConfig struct {
 	// ClusterTrainingRuntime CR of the CRD shipped in the chart's
 	// crds/).
 	ManifestsUseChartCRDs bool `yaml:"manifestsUseChartCRDs,omitempty"`
+
+	// MixinSafeOverridePaths declares the exact dotted value paths (e.g.
+	// "global.tracing.enabled") a RecipeMixin may set on THIS component
+	// via ComponentRef.Overrides. Declared by the component owner, not the
+	// mixin author: a mixin cannot self-grant access to a component it
+	// doesn't own. Paths match exactly, never as a prefix -- list each
+	// leaf path, not an ancestor of it. Empty (the default) means the
+	// component has not opted in.
+	//
+	// Enforcement (allowlist matching, collision rules, and how an
+	// unopted-in component is treated): mixinOverridesSafeForMerge in
+	// metadata_store.go. Rationale: ADR-005's "Silent constraint override"
+	// mitigation, docs/design/005-overlay-refactoring.md.
+	MixinSafeOverridePaths []string `yaml:"mixinSafeOverridePaths,omitempty"`
 }
 
 // HealthCheckConfig defines custom health check settings for a component.
@@ -191,6 +220,14 @@ type HealthCheckConfig struct {
 	// When set, the expected-resources check uses Chainsaw CLI to evaluate assertions
 	// instead of the default auto-discovery + typed replica checks.
 	AssertFile string `yaml:"assertFile,omitempty"`
+}
+
+// UpgradesConfig references a component's ComponentUpgrades document.
+type UpgradesConfig struct {
+	// File is the path to a ComponentUpgrades YAML file, relative to the
+	// data directory (e.g. "components/nodewright-operator/upgrades.yaml").
+	// Empty means the component has no transition records.
+	File string `yaml:"file,omitempty"`
 }
 
 // HelmConfig contains default Helm chart settings for a component.
@@ -203,6 +240,13 @@ type HelmConfig struct {
 
 	// DefaultVersion is the default chart version if not specified in recipe.
 	DefaultVersion string `yaml:"defaultVersion,omitempty"`
+
+	// DefaultDigest is the SHA-256 of the chart archive that DefaultRepository,
+	// DefaultChart and DefaultVersion resolve to, written sha256:<hex>. It is
+	// the digest of the .tgz for OCI charts too, not of the OCI manifest. When
+	// set, `aicr bundle --vendor-charts` refuses a pulled chart whose bytes
+	// differ, for refs that still use this exact chart.
+	DefaultDigest string `yaml:"defaultDigest,omitempty"`
 
 	// DefaultNamespace is the Kubernetes namespace for deploying this component.
 	DefaultNamespace string `yaml:"defaultNamespace,omitempty"`
@@ -236,6 +280,23 @@ type NodeSchedulingConfig struct {
 type SchedulingPaths struct {
 	// NodeSelectorPaths are paths where node selectors are injected.
 	NodeSelectorPaths []string `yaml:"nodeSelectorPaths,omitempty"`
+
+	// RequireNodeSelector fails the bundle, instead of silently skipping
+	// injection, when NodeSelectorPaths is non-empty but no selector is
+	// available: the --system-node-selector/--accelerated-node-selector
+	// flag was omitted and no overlay opted the path out with an explicit
+	// empty value. Leave false unless landing on the wrong node class
+	// silently breaks the component (e.g. a StatefulSet whose PVC pins it
+	// to a node's zone).
+	RequireNodeSelector bool `yaml:"requireNodeSelector,omitempty"`
+
+	// RequireNodeSelectorIfStorageClassSet is RequireNodeSelector's
+	// conditional counterpart, applying only once a storage class is
+	// configured (ComponentConfig's StorageClassPaths or
+	// SharedStorageClassPaths resolve non-empty) and leaving a chart that
+	// still defaults to ephemeral storage unenforced. Mutually exclusive
+	// with RequireNodeSelector.
+	RequireNodeSelectorIfStorageClassSet bool `yaml:"requireNodeSelectorIfStorageClassSet,omitempty"`
 
 	// TolerationPaths are paths where tolerations are injected.
 	TolerationPaths []string `yaml:"tolerationPaths,omitempty"`
@@ -460,6 +521,12 @@ func loadComponentRegistryFor(provider DataProvider) (*ComponentRegistry, error)
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("registry component %q is Kustomize but declares manifestFiles; a component may declare either Kustomize (tag/path) or raw manifest files, not both — manifestFiles defaults apply only to Helm components", comp.Name))
 		}
+		if err := validateMixinSafeOverridePaths(comp); err != nil {
+			return nil, err
+		}
+		if err := validateHelmDefaultDigest(comp); err != nil {
+			return nil, err
+		}
 	}
 
 	// Build index for fast lookup
@@ -470,6 +537,74 @@ func loadComponentRegistryFor(provider DataProvider) (*ComponentRegistry, error)
 	}
 
 	return &registry, nil
+}
+
+// helmDigestPattern is the only accepted spelling of helm.defaultDigest.
+var helmDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+// validateHelmDefaultDigest rejects a malformed helm.defaultDigest, and one on
+// an entry that pins no repository, chart or version, since such a digest
+// names no single archive to verify against.
+func validateHelmDefaultDigest(comp *ComponentConfig) error {
+	digest := comp.Helm.DefaultDigest
+	if digest == "" {
+		return nil
+	}
+	if !helmDigestPattern.MatchString(digest) {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("registry component %q declares helm.defaultDigest %q; it must be sha256:<64 lowercase hex>, the SHA-256 of the chart archive", comp.Name, digest))
+	}
+	if comp.Helm.DefaultRepository == "" {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("registry component %q declares helm.defaultDigest but pins no chart repository (helm.defaultRepository)", comp.Name))
+	}
+	if comp.Helm.DefaultChart == "" {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("registry component %q declares helm.defaultDigest but pins no chart (helm.defaultChart)", comp.Name))
+	}
+	if comp.Helm.DefaultVersion == "" {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("registry component %q declares helm.defaultDigest but pins no chart version (helm.defaultVersion)", comp.Name))
+	}
+	return nil
+}
+
+// validateMixinSafeOverridePaths rejects a malformed mixinSafeOverridePaths
+// declaration at registry load time rather than letting it silently
+// misbehave the first time a mixin actually collides with it: an empty or
+// dot-malformed entry can never match a real leaf path flattened by
+// overrideLeafPaths (so it would be dead, misleading configuration); a
+// literal duplicate is always redundant; and one entry that is an ancestor
+// or descendant of another (e.g. declaring both "global.tracing" and
+// "global.tracing.enabled") is ambiguous: overrideLeafPaths matches exact
+// paths, so the ancestor entry grants access only to a mixin override that
+// stops exactly there (a scalar or list at that key -- an empty map never
+// reaches allowlist matching, rejectEmptyMapValues errors on it first) --
+// not to the whole subtree a reader would reasonably assume from seeing
+// both entries together. Rejecting the pair forces one unambiguous
+// declaration.
+func validateMixinSafeOverridePaths(comp *ComponentConfig) error {
+	seen := make(map[string]bool, len(comp.MixinSafeOverridePaths))
+	for _, p := range comp.MixinSafeOverridePaths {
+		if p == "" || strings.HasPrefix(p, ".") || strings.HasSuffix(p, ".") || strings.Contains(p, "..") {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("registry component %q declares mixinSafeOverridePaths entry %q, which is not a well-formed dotted path", comp.Name, p))
+		}
+		if seen[p] {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("registry component %q declares mixinSafeOverridePaths entry %q more than once", comp.Name, p))
+		}
+		seen[p] = true
+	}
+	for i, a := range comp.MixinSafeOverridePaths {
+		for _, b := range comp.MixinSafeOverridePaths[i+1:] {
+			if a != b && pathsIntersect(a, b) {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("registry component %q declares mixinSafeOverridePaths entries %q and %q, one an ancestor of the other -- list only exact leaf paths; declaring both is ambiguous about whether the ancestor grants the whole subtree or just an exact-match override at that key", comp.Name, a, b))
+			}
+		}
+	}
+	return nil
 }
 
 func validateComponentRegistryHeader(registry *ComponentRegistry, source string) error {
@@ -483,8 +618,9 @@ func validateComponentRegistryHeader(registry *ComponentRegistry, source string)
 	}
 	if !header.IsSupportedAuthoringAPIVersion(registry.APIVersion) {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("%s has apiVersion %q, expected %q or %q for %s; update the registry header for this aicr release",
-				source, registry.APIVersion, ComponentRegistryAPIVersion, header.GroupVersionV1Beta1, ComponentRegistryKind))
+			fmt.Sprintf("%s has apiVersion %q%s, expected %q for %s; update the registry header for this aicr release",
+				source, registry.APIVersion, header.RetirementNote(registry.APIVersion),
+				header.GroupVersionV1Beta1, ComponentRegistryKind))
 	}
 	return nil
 }
@@ -580,6 +716,59 @@ func (r *ComponentRegistry) Validate() []error {
 		}
 	}
 
+	for _, comp := range r.Components {
+		if len(comp.OwnsCRDsExcludeSubcharts) > 0 && !comp.OwnsCRDs {
+			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q: ownsCRDsExcludeSubcharts is set without ownsCRDs", comp.Name)))
+		}
+		for _, name := range comp.OwnsCRDsExcludeSubcharts {
+			if name == "" || strings.ContainsAny(name, "/*?[] ") || name == "." || name == ".." {
+				errs = append(errs, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("component %q: ownsCRDsExcludeSubcharts entry %q must be a bare subchart name", comp.Name, name)))
+			}
+		}
+	}
+
+	// requireNodeSelector (or its requireNodeSelectorIfStorageClassSet
+	// counterpart) with no paths to enforce is always a config mistake, a
+	// typo'd path list, or the flag left on after paths were removed. The
+	// two are also mutually exclusive, since a group is either
+	// unconditionally required or conditional on storage, never both.
+	for _, comp := range r.Components {
+		if comp.NodeScheduling.System.RequireNodeSelector && comp.NodeScheduling.System.RequireNodeSelectorIfStorageClassSet {
+			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q: nodeScheduling.system.requireNodeSelector and requireNodeSelectorIfStorageClassSet are mutually exclusive", comp.Name)))
+		}
+		if (comp.NodeScheduling.System.RequireNodeSelector || comp.NodeScheduling.System.RequireNodeSelectorIfStorageClassSet) &&
+			len(comp.NodeScheduling.System.NodeSelectorPaths) == 0 {
+
+			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q: nodeScheduling.system requires a node selector but nodeSelectorPaths is empty", comp.Name)))
+		}
+		if comp.NodeScheduling.System.RequireNodeSelectorIfStorageClassSet &&
+			len(comp.StorageClassPaths) == 0 && len(comp.SharedStorageClassPaths) == 0 {
+
+			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q: nodeScheduling.system.requireNodeSelectorIfStorageClassSet is true but the component has no storageClassPaths or sharedStorageClassPaths to condition on", comp.Name)))
+		}
+		if comp.NodeScheduling.Accelerated.RequireNodeSelector && comp.NodeScheduling.Accelerated.RequireNodeSelectorIfStorageClassSet {
+			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q: nodeScheduling.accelerated.requireNodeSelector and requireNodeSelectorIfStorageClassSet are mutually exclusive", comp.Name)))
+		}
+		if (comp.NodeScheduling.Accelerated.RequireNodeSelector || comp.NodeScheduling.Accelerated.RequireNodeSelectorIfStorageClassSet) &&
+			len(comp.NodeScheduling.Accelerated.NodeSelectorPaths) == 0 {
+
+			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q: nodeScheduling.accelerated requires a node selector but nodeSelectorPaths is empty", comp.Name)))
+		}
+		if comp.NodeScheduling.Accelerated.RequireNodeSelectorIfStorageClassSet &&
+			len(comp.StorageClassPaths) == 0 && len(comp.SharedStorageClassPaths) == 0 {
+
+			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q: nodeScheduling.accelerated.requireNodeSelectorIfStorageClassSet is true but the component has no storageClassPaths or sharedStorageClassPaths to condition on", comp.Name)))
+		}
+	}
+
 	// Check for mutually exclusive helm/kustomize configuration
 	for i, comp := range r.Components {
 		hasHelm := comp.Helm.DefaultRepository != "" || comp.Helm.DefaultChart != ""
@@ -587,6 +776,15 @@ func (r *ComponentRegistry) Validate() []error {
 
 		if hasHelm && hasKustomize {
 			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("component[%d] (%s): cannot have both helm and kustomize configuration", i, comp.Name)))
+		}
+	}
+
+	// Same mixinSafeOverridePaths rules loadComponentRegistryFor enforces at
+	// load time, so a registry constructed directly through the exported API
+	// is held to the identical contract rather than only the file-loaded path.
+	for i := range r.Components {
+		if err := validateMixinSafeOverridePaths(&r.Components[i]); err != nil {
+			errs = append(errs, err)
 		}
 	}
 
@@ -599,6 +797,26 @@ func (c *ComponentConfig) GetSystemNodeSelectorPaths() []string {
 		return nil
 	}
 	return c.NodeScheduling.System.NodeSelectorPaths
+}
+
+// RequireSystemNodeSelector reports whether the component requires a
+// non-empty --system-node-selector at bundle time
+// (SchedulingPaths.RequireNodeSelector).
+func (c *ComponentConfig) RequireSystemNodeSelector() bool {
+	if c == nil {
+		return false
+	}
+	return c.NodeScheduling.System.RequireNodeSelector
+}
+
+// RequireSystemNodeSelectorIfStorageClassSet reports whether the component
+// requires a non-empty --system-node-selector once a storage class is
+// configured (SchedulingPaths.RequireNodeSelectorIfStorageClassSet).
+func (c *ComponentConfig) RequireSystemNodeSelectorIfStorageClassSet() bool {
+	if c == nil {
+		return false
+	}
+	return c.NodeScheduling.System.RequireNodeSelectorIfStorageClassSet
 }
 
 // GetSystemTolerationPaths returns all system toleration paths for a component.
@@ -615,6 +833,27 @@ func (c *ComponentConfig) GetAcceleratedNodeSelectorPaths() []string {
 		return nil
 	}
 	return c.NodeScheduling.Accelerated.NodeSelectorPaths
+}
+
+// RequireAcceleratedNodeSelector reports whether the component requires a
+// non-empty --accelerated-node-selector at bundle time
+// (SchedulingPaths.RequireNodeSelector).
+func (c *ComponentConfig) RequireAcceleratedNodeSelector() bool {
+	if c == nil {
+		return false
+	}
+	return c.NodeScheduling.Accelerated.RequireNodeSelector
+}
+
+// RequireAcceleratedNodeSelectorIfStorageClassSet reports whether the
+// component requires a non-empty --accelerated-node-selector once a
+// storage class is configured
+// (SchedulingPaths.RequireNodeSelectorIfStorageClassSet).
+func (c *ComponentConfig) RequireAcceleratedNodeSelectorIfStorageClassSet() bool {
+	if c == nil {
+		return false
+	}
+	return c.NodeScheduling.Accelerated.RequireNodeSelectorIfStorageClassSet
 }
 
 // GetAcceleratedTolerationPaths returns all accelerated toleration paths for a component.

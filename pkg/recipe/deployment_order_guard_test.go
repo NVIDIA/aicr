@@ -175,12 +175,43 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				{"gpu-operator", "nvsentinel"},
 			},
 		},
+		// The two IMEX-capable Slurm leaves below carry identical dependency
+		// and ordering expectations; only the accelerator differs. The
+		// load-bearing edge in both is nvidia-dra-driver-gpu -> slinky-slurm:
+		// the IMEX ComputeDomain pre-manifest rides with slinky-slurm and
+		// consumes the DRA driver's ResourceClaimTemplate, so the driver must
+		// land first or the NodeSet pods stay Pending. Do not prune it from
+		// either case.
 		{
 			name: "gb200-eks-ubuntu-training-slurm",
 			criteria: func() *Criteria {
 				c := NewCriteria()
 				c.Service = CriteriaServiceEKS
 				c.Accelerator = CriteriaAcceleratorGB200
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformSlurm
+				return c
+			},
+			requiredDeps: map[string][]string{
+				"slinky-slurm-operator": {"cert-manager", "slinky-slurm-operator-crds"},
+				"slinky-slurm":          {"nvidia-dra-driver-gpu", "slinky-slurm-operator", "slinky-slurm-operator-crds"},
+			},
+			requiredOrdering: [][2]string{
+				{"nvidia-dra-driver-gpu", "slinky-slurm"},
+				{"cert-manager", "slinky-slurm-operator"},
+				{"slinky-slurm-operator-crds", "slinky-slurm-operator"},
+				{"slinky-slurm-operator", "slinky-slurm"},
+				{"slinky-slurm-operator-crds", "slinky-slurm"},
+				{"gpu-operator", "nvsentinel"},
+			},
+		},
+		{
+			name: "gb300-eks-ubuntu-training-slurm",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorGB300
 				c.OS = CriteriaOSUbuntu
 				c.Intent = CriteriaIntentTraining
 				c.Platform = CriteriaPlatformSlurm
@@ -346,6 +377,90 @@ func TestDeploymentOrderGuards(t *testing.T) {
 					t.Errorf("deployment order regression: %q (idx=%d) must be before %q (idx=%d); order=%v",
 						before, beforeIdx, after, afterIdx, result.DeploymentOrder)
 				}
+			}
+		})
+	}
+}
+
+// TestPeermemRecipesDeclareNetworkOperatorDependency guards the ordering half
+// of the legacy nvidia-peermem mitigation. When GPU Operator manages the driver
+// with driver.rdma.enabled=true, its driver pod needs MOFED kernel symbols from
+// Network Operator. dependencyRefs orders those deployment units; an emitted
+// readiness gate is still required to wait for NicClusterPolicy reconciliation.
+func TestPeermemRecipesDeclareNetworkOperatorDependency(t *testing.T) {
+	tests := []struct {
+		name            string
+		criteria        func() *Criteria
+		profile         string
+		gpuOperator     string
+		networkOperator string
+	}{
+		{
+			name: "aks operator-managed",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceAKS
+				c.Accelerator = CriteriaAcceleratorH100
+				c.Intent = CriteriaIntentTraining
+				return c
+			},
+			profile:         "gpuStack=operator-managed",
+			gpuOperator:     "gpu-operator",
+			networkOperator: "network-operator",
+		},
+		{
+			name: "ocp",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceOCP
+				c.Intent = CriteriaIntentTraining
+				return c
+			},
+			gpuOperator:     "gpu-operator-ocp",
+			networkOperator: "network-operator-ocp",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := t.Context()
+			result, err := NewBuilder().BuildFromCriteriaWithProfile(ctx, tt.criteria(), tt.profile)
+			if err != nil {
+				t.Fatalf("BuildFromCriteriaWithProfile failed: %v", err)
+			}
+
+			values, err := result.GetValuesForComponentWithContext(ctx, tt.gpuOperator)
+			if err != nil {
+				t.Fatalf("GetValuesForComponentWithContext(%q) failed: %v", tt.gpuOperator, err)
+			}
+			if !valueAtPath[bool](t, values, "driver", "enabled") {
+				t.Fatal("test fixture no longer exercises a GPU Operator-managed driver")
+			}
+			if !valueAtPath[bool](t, values, "driver", "rdma", "enabled") {
+				t.Fatal("test fixture no longer exercises the nvidia-peermem route")
+			}
+
+			gpuOperator := result.GetComponentRef(tt.gpuOperator)
+			if gpuOperator == nil {
+				t.Fatalf("required component %q not found", tt.gpuOperator)
+			}
+			if !slices.Contains(gpuOperator.DependencyRefs, tt.networkOperator) {
+				t.Errorf("component %q missing OFED dependency %q (got %v)",
+					tt.gpuOperator, tt.networkOperator, gpuOperator.DependencyRefs)
+			}
+
+			orderIndex := make(map[string]int, len(result.DeploymentOrder))
+			for i, name := range result.DeploymentOrder {
+				orderIndex[name] = i
+			}
+			networkIdx, networkOK := orderIndex[tt.networkOperator]
+			gpuIdx, gpuOK := orderIndex[tt.gpuOperator]
+			if !networkOK || !gpuOK {
+				t.Fatalf("required components missing from deploymentOrder: %v", result.DeploymentOrder)
+			}
+			if networkIdx >= gpuIdx {
+				t.Errorf("deployment order regression: %q (idx=%d) must be before %q (idx=%d); order=%v",
+					tt.networkOperator, networkIdx, tt.gpuOperator, gpuIdx, result.DeploymentOrder)
 			}
 		})
 	}

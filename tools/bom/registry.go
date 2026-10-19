@@ -32,6 +32,11 @@ type component struct {
 	DisplayName string  `yaml:"displayName"`
 	Helm        helmCfg `yaml:"helm,omitempty"`
 	Kustomize   kustCfg `yaml:"kustomize,omitempty"`
+
+	// checkNoImages makes the survey flag a Helm chart whose image count
+	// disagrees with expectedNoImages. Set by strict runs only, so the check
+	// never reaches the released BOM artifacts.
+	checkNoImages bool
 }
 
 type helmCfg struct {

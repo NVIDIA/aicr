@@ -35,7 +35,7 @@
 # grows a deployer facet later, tag the run there — not by forking the OCI
 # repo per deployer.
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: eks-h100-training-uat-argocd
 

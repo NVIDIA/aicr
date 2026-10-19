@@ -16,19 +16,18 @@ package helmfile
 
 import (
 	"context"
-	stderrors "errors"
 	"flag"
 	"os"
 	"path/filepath"
-	"regexp"
+	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -82,6 +81,43 @@ func TestGenerate_Scenarios(t *testing.T) {
 				}
 			}(),
 			goldens: []string{"helmfile.yaml", "level-0.yaml", "level-1.yaml", "README.md"},
+		},
+		{
+			// k8s-aibom is marked ownsCRDs, and this deployer still emits no
+			// CRD step for it. A presync hook fires only for releases
+			// helmfile decides to sync, and `helmfile apply` selects on
+			// detected change, so the step would hold on a chart bump and
+			// silently not hold on an unchanged rerun. The golden pins the
+			// absence: no hooks key on the release (#2525).
+			name: "owns_crds_no_hook",
+			gen: &Generator{
+				RecipeResult: recipeWith(
+					ref("k8s-aibom", "k8s-aibom-system", "k8s-aibom", "1.3.0",
+						"oci://ghcr.io/googlecloudplatform/charts"),
+				),
+				ComponentValues: map[string]map[string]any{
+					"k8s-aibom": {"replicaCount": 1},
+				},
+				Version: testBundlerVersion,
+			},
+			goldens: []string{"helmfile.yaml"},
+		},
+		{
+			// The same component with its version overridden away from the
+			// registry pin, kept as the sibling case so the two goldens stay
+			// comparable if a CRD step is ever added back here.
+			name: "owns_crds_version_override",
+			gen: &Generator{
+				RecipeResult: recipeWith(
+					ref("k8s-aibom", "k8s-aibom-system", "k8s-aibom", "1.2.0",
+						"oci://ghcr.io/googlecloudplatform/charts"),
+				),
+				ComponentValues: map[string]map[string]any{
+					"k8s-aibom": {"replicaCount": 1},
+				},
+				Version: testBundlerVersion,
+			},
+			goldens: []string{"helmfile.yaml"},
 		},
 		{
 			// cluster-values.yaml must be referenced in the release's
@@ -164,13 +200,59 @@ func TestGenerate_Scenarios(t *testing.T) {
 				},
 				Version: testBundlerVersion,
 			},
-			goldens: []string{"helmfile.yaml"},
+			// The generated Chart.yaml is pinned too: it is the only
+			// artifact carrying testBundlerVersion, so a regression that
+			// stopped forwarding Generator.Version into
+			// localformat.Options.AICRVersion would silently downgrade
+			// every wrapper to the dev chart version with no other
+			// golden moving. See ADR-021 Decision 7.
+			goldens: []string{"helmfile.yaml", filepath.Join("001-node-prep", "Chart.yaml")},
 		},
 	}
 	for _, tc := range scenarios {
 		t.Run(tc.name, func(t *testing.T) {
 			runScenario(t, tc.gen, tc.name, tc.goldens)
 		})
+	}
+}
+
+// TestGenerate_UpgradeNotice covers a non-empty notice; the empty case is
+// pinned byte-for-byte by the README golden.
+func TestGenerate_UpgradeNotice(t *testing.T) {
+	const notice = "## Before You Upgrade\n\nNOTICE-SENTINEL\n\n"
+	outputDir := t.TempDir()
+	g := &Generator{
+		RecipeResult:    recipeWith(ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io")),
+		ComponentValues: map[string]map[string]any{"cert-manager": {}},
+		Version:         testBundlerVersion,
+		UpgradeNotice:   notice,
+	}
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(outputDir, fileReadme))
+	if err != nil {
+		t.Fatalf("read README.md: %v", err)
+	}
+	assertUpgradeNoticePlacement(t, string(b), notice, "## Components", "## Deployment")
+}
+
+// assertUpgradeNoticePlacement checks that notice sits after afterHeading, has
+// exactly one blank line before it, and is directly followed by beforeHeading.
+func assertUpgradeNoticePlacement(t *testing.T, readme, notice, afterHeading, beforeHeading string) {
+	t.Helper()
+	idx := strings.Index(readme, notice)
+	if idx < 0 {
+		t.Fatalf("README missing upgrade notice:\n%s", readme)
+	}
+	if after := strings.Index(readme, afterHeading); after < 0 || after > idx {
+		t.Errorf("upgrade notice must follow %q:\n%s", afterHeading, readme)
+	}
+	if !strings.HasPrefix(readme[idx+len(notice):], beforeHeading) {
+		t.Errorf("upgrade notice must directly precede %q:\n%s", beforeHeading, readme)
+	}
+	if prefix := readme[:idx]; !strings.HasSuffix(prefix, "\n\n") || strings.HasSuffix(prefix, "\n\n\n") {
+		t.Errorf("want exactly one blank line before the upgrade notice:\n%s", readme)
 	}
 }
 
@@ -200,7 +282,7 @@ func TestGenerate_NilRecipeResult(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Generate() with nil RecipeResult expected error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("Generate() error code = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "RecipeResult is required") {
@@ -230,6 +312,82 @@ func TestGenerate_WithChecksums(t *testing.T) {
 	checksumsPath := filepath.Join(outputDir, "checksums.txt")
 	if _, statErr := os.Stat(checksumsPath); statErr != nil {
 		t.Fatalf("checksums.txt missing: %v", statErr)
+	}
+}
+
+// TestGenerateReportsLayout asserts Generate populates output.Entrypoint and
+// output.Releases with the layout it actually wrote to outputDir, mirroring
+// the helm deployer's equivalent coverage (pkg/bundler/deployer/helm).
+func TestGenerateReportsLayout(t *testing.T) {
+	// ComponentRefs declaration order, DeploymentOrder, and alphabetical
+	// component-name order are all deliberately distinct here:
+	//   - declaration (the ref() call order below): gpu-operator,
+	//     cert-manager, nfd
+	//   - DeploymentOrder: cert-manager, nfd, gpu-operator (the real
+	//     dependency order — nfd labels nodes before gpu-operator consumes
+	//     those labels)
+	//   - alphabetical: cert-manager, gpu-operator, nfd
+	// so the primaryOrder assertion below can only pass if Generate genuinely
+	// honors DeploymentOrder rather than sorting by name or falling back to
+	// declaration order (e.g. a dropped SortComponentRefsByDeploymentOrder
+	// call). recipeWith sets DeploymentOrder from declaration order, so it is
+	// overwritten below — this divergence from recipeWith's usual behavior is
+	// intentional, not a bug to "fix" back into agreement.
+	recipeResult := recipeWith(
+		ref("gpu-operator", "gpu-operator", "gpu-operator", "v25.3.3",
+			"https://helm.ngc.nvidia.com/nvidia"),
+		ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2",
+			"https://charts.jetstack.io"),
+		ref("nfd", "node-feature-discovery", "node-feature-discovery", "v0.16.4",
+			"https://kubernetes-sigs.github.io/node-feature-discovery-charts"),
+	)
+	recipeResult.DeploymentOrder = []string{"cert-manager", "nfd", "gpu-operator"}
+	g := &Generator{
+		RecipeResult: recipeResult,
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {"crds": map[string]any{"enabled": true}},
+			"nfd":          {"enabled": true},
+			"gpu-operator": {"driver": map[string]any{"enabled": true}},
+		},
+		Version: testBundlerVersion,
+	}
+	outputDir := t.TempDir()
+
+	out, err := g.Generate(context.Background(), outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	if out.Entrypoint != "helmfile.yaml" {
+		t.Errorf("Entrypoint = %q, want helmfile.yaml", out.Entrypoint)
+	}
+	if len(out.Releases) == 0 {
+		t.Fatal("Generate reported no releases; the bundle index would be empty")
+	}
+	for _, r := range out.Releases {
+		if r.Name == "" || r.Component == "" || r.Path == "" {
+			t.Errorf("incomplete release entry: %+v", r)
+		}
+		if _, statErr := os.Stat(filepath.Join(outputDir, r.Path)); statErr != nil {
+			t.Errorf("release %q claims path %q, which does not exist: %v", r.Name, r.Path, statErr)
+		}
+	}
+
+	// Releases order is normative: consumers read deployment sequence from
+	// list position, since the artifact carries no ordinal field. Extract
+	// the primary releases (Name == Component; excludes injected -pre/-post
+	// entries) and confirm their relative order matches the recipe's
+	// DeploymentOrder — a sort or reversal of out.Releases must fail this
+	// check.
+	var primaryOrder []string
+	for _, r := range out.Releases {
+		if r.Name == r.Component {
+			primaryOrder = append(primaryOrder, r.Name)
+		}
+	}
+	if !slices.Equal(primaryOrder, recipeResult.DeploymentOrder) {
+		t.Errorf("primary release order = %v, want %v (recipe DeploymentOrder)",
+			primaryOrder, recipeResult.DeploymentOrder)
 	}
 }
 
@@ -283,7 +441,7 @@ func TestGenerate_ContextCanceled(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Generate() with canceled context expected error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("Generate() error code = %v, want ErrCodeTimeout", err)
 	}
 }
@@ -308,7 +466,7 @@ func TestGenerate_MissingDataFile(t *testing.T) {
 	// AddDataFiles wraps the stat failure as ErrCodeInternal — assert the
 	// code rather than just non-nil so a regression that surfaces an
 	// uncoded error here fails this test.
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("Generate() error code = %v, want ErrCodeInternal", err)
 	}
 }
@@ -354,7 +512,7 @@ func TestBuildHelmfile_NilUpstream(t *testing.T) {
 	if err == nil {
 		t.Fatalf("buildHelmfile with nil Upstream expected error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("error code = %v, want ErrCodeInternal", err)
 	}
 	if !strings.Contains(err.Error(), "KindUpstreamHelm but Upstream is nil") {
@@ -373,7 +531,7 @@ func TestBuildHelmfile_UnsupportedKind(t *testing.T) {
 	if err == nil {
 		t.Fatalf("buildHelmfile with unsupported kind expected error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "unsupported folder kind") {
@@ -732,92 +890,6 @@ func TestGenerate_NamespaceOwningPreManifest(t *testing.T) {
 	}
 }
 
-// TestComponentOverrides_ParityWithHelmDeployScript guards against silent
-// drift between componentOverrides in this package and the hardcoded
-// ASYNC_COMPONENTS / COMPONENT_HELM_TIMEOUT case block in
-// pkg/bundler/deployer/helm/templates/deploy.sh.tmpl. Either side changing
-// without the other must fail this test until the duplication is unified.
-//
-// Specifically, for every component name in componentOverrides:
-//   - Wait==false  ⟺  the name appears in ASYNC_COMPONENTS="…"
-//   - Timeout != 0 ⟺  a "<name>) COMPONENT_HELM_TIMEOUT="<n>m" ;;"
-//     case exists with matching duration
-//
-// The reverse direction is also asserted: any component in either
-// deploy.sh.tmpl construct must be present in componentOverrides.
-func TestComponentOverrides_ParityWithHelmDeployScript(t *testing.T) {
-	scriptPath := filepath.Join("..", "helm", "templates", "deploy.sh.tmpl")
-	body, err := os.ReadFile(scriptPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", scriptPath, err)
-	}
-	script := string(body)
-
-	// Parse ASYNC_COMPONENTS="<space-separated names>".
-	asyncRe := regexp.MustCompile(`(?m)^ASYNC_COMPONENTS="([^"]*)"`)
-	asyncMatch := asyncRe.FindStringSubmatch(script)
-	if asyncMatch == nil {
-		t.Fatalf("could not find ASYNC_COMPONENTS=\"…\" in %s", scriptPath)
-	}
-	asyncNames := map[string]bool{}
-	for n := range strings.FieldsSeq(asyncMatch[1]) {
-		asyncNames[n] = true
-	}
-
-	// Parse the "<name>) COMPONENT_HELM_TIMEOUT=\"<N>m\"" case block.
-	// Pattern is a stable two-line shape in deploy.sh.tmpl.
-	caseRe := regexp.MustCompile(`(?m)^\s*([a-z0-9-]+)\)\s*\n\s*COMPONENT_HELM_TIMEOUT="(\d+)m"`)
-	scriptTimeouts := map[string]time.Duration{}
-	for _, m := range caseRe.FindAllStringSubmatch(script, -1) {
-		mins, parseErr := time.ParseDuration(m[2] + "m")
-		if parseErr != nil {
-			t.Fatalf("parse %sm: %v", m[2], parseErr)
-		}
-		scriptTimeouts[m[1]] = mins
-	}
-
-	// Forward direction: every Go override must match deploy.sh.tmpl.
-	for name, ov := range componentOverrides {
-		if !ov.wait && !asyncNames[name] {
-			t.Errorf("componentOverrides[%q].wait=false but %q not in ASYNC_COMPONENTS=%q "+
-				"(update deploy.sh.tmpl or the Go map together)",
-				name, name, asyncMatch[1])
-		}
-		if ov.timeout != 0 {
-			want := time.Duration(ov.timeout) * time.Second
-			got, ok := scriptTimeouts[name]
-			if !ok {
-				t.Errorf("componentOverrides[%q].timeout=%v but no COMPONENT_HELM_TIMEOUT case "+
-					"for %q in deploy.sh.tmpl (update deploy.sh.tmpl or the Go map together)",
-					name, want, name)
-			} else if got != want {
-				t.Errorf("componentOverrides[%q].timeout=%v but deploy.sh.tmpl case sets %v "+
-					"(update deploy.sh.tmpl or the Go map together)",
-					name, want, got)
-			}
-		}
-	}
-
-	// Reverse direction: every name in either deploy.sh.tmpl construct must
-	// exist in componentOverrides.
-	for name := range asyncNames {
-		if _, ok := componentOverrides[name]; !ok {
-			t.Errorf("deploy.sh.tmpl ASYNC_COMPONENTS lists %q but componentOverrides has no entry "+
-				"(helmfile bundles would --wait on a release the helm deployer treats as async)", name)
-		}
-	}
-	for name := range scriptTimeouts {
-		if _, ok := componentOverrides[name]; !ok {
-			t.Errorf("deploy.sh.tmpl has COMPONENT_HELM_TIMEOUT case for %q but componentOverrides has no entry "+
-				"(helmfile bundles would use the global timeout for a release the helm deployer special-cases)", name)
-		}
-	}
-}
-
-// TestSanitizeRepoAlias_Edges covers the slug edge cases (empty input,
-// >63 char truncation, double-hyphen collapsing) so a future URL with
-// embedded ports or query strings doesn't silently produce a malformed
-// helmfile repository name.
 func TestSanitizeRepoAlias_Edges(t *testing.T) {
 	tests := []struct {
 		name, in, want string

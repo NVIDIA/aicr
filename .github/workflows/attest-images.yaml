@@ -12,8 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Reusable workflow that generates SLSA build-provenance + SBOM attestations
-# for the released container images.
+# Reusable workflow that generates SLSA build-provenance, CycloneDX SBOM and
+# OpenVEX attestations for the released container images. The SBOM and the VEX
+# land on each platform manifest digest; provenance lands on the index digest
+# and on each platform manifest, so the evidence set is complete at whichever
+# subject a consumer queries (see .github/actions/sbom-and-attest for the
+# subject policy and for why the three provenance predicates are identical).
 #
 # Running attestation generation from a *reusable* workflow is what makes the
 # provenance SLSA Build Level 3: the attestation's builder identity becomes this
@@ -44,7 +48,7 @@ on:
 jobs:
   validate-inputs:
     name: Validate Attestation Inputs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions: {}
     outputs:
@@ -88,7 +92,7 @@ jobs:
 
   attest:
     name: Attest Images
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [validate-inputs]
     timeout-minutes: 10
     permissions:

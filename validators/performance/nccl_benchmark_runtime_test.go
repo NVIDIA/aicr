@@ -16,11 +16,12 @@ package main
 
 import (
 	"context"
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
@@ -174,7 +175,7 @@ func TestResolveNCCLBenchmarkRuntime(t *testing.T) {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 				}
 				if !strings.Contains(err.Error(), tt.wantErrSub) {
@@ -241,7 +242,7 @@ func TestValidateNcclAllReduceBwCustomRuntimeGate(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected error, got (%q, %v)", msg, passed)
 			}
-			if tt.wantErrCode && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if tt.wantErrCode && errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if tt.wantErrSub != "" && !strings.Contains(err.Error(), tt.wantErrSub) {
@@ -385,7 +386,7 @@ func TestRenderYAMLTemplate(t *testing.T) {
 func TestBuildNCCLRuntimeObjectCustom(t *testing.T) {
 	obj, err := buildNCCLRuntimeObject(validBenchmarkRuntime,
 		"customaccel", "custom-svc", variantDefault, fabricEFA,
-		"aicr-validation", map[string]string{"GPU_COUNT_PER_NODE": "8"})
+		"aicr-validation", map[string]string{"GPU_COUNT_PER_NODE": "8"}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -442,7 +443,7 @@ spec:
 	// job. No --node-selector override, so the runtime's own selector must win.
 	if err := applyNCCLResources(ctx, fakeClient, config,
 		recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceEKS, variantDefault, fabricEFA,
-		runtimeWithSelector); err != nil {
+		runtimeWithSelector, "", nil); err != nil {
 		t.Fatalf("applyNCCLResources (custom runtime) failed: %v", err)
 	}
 
@@ -458,6 +459,90 @@ spec:
 	if sel["my.io/private-gpu"] != "true" {
 		t.Errorf("runtime's own nodeSelector not preserved: %v", sel)
 	}
+}
+
+// TestApplyNCCLResourcesRuntimeImageOverride exercises the override contract
+// end to end, distinct from TestApplyNCCLResourcesCustomRuntimeEKSNoClobber
+// above, which only ever passes "" for runtimeImage.
+func TestApplyNCCLResourcesRuntimeImageOverride(t *testing.T) {
+	const ns = "aicr-validation"
+	const runtimeWithSelector = `apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainingRuntime
+metadata:
+  name: author-chose-this
+spec:
+  template:
+    spec:
+      replicatedJobs:
+        - name: node
+          template:
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: node
+                      image: example.com/nccl:latest
+`
+	// discoverEKSNodeConfig (called on the embedded-template/EKS path) requires
+	// at least one node with the instance-type label; a uniform zero EFA count
+	// (unset Allocatable) is valid and selects the TCP fallback.
+	eksNode := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "eks-node-0",
+			Labels: map[string]string{"node.kubernetes.io/instance-type": "p5.48xlarge"},
+		},
+	}
+	config := &gpuConfiguration{
+		WorkerCount: 2, GPUCountPerNode: 8, TotalGPUCount: 16, Namespace: ns,
+		Nodes: []corev1.Node{eksNode},
+	}
+
+	t.Run("embedded template: override applied to every workload container", func(t *testing.T) {
+		fakeClient := newFakeDynamicClient()
+		ctx := &validators.Context{Ctx: context.Background(), DynamicClient: fakeClient, Namespace: ns}
+
+		if err := applyNCCLResources(ctx, fakeClient, config,
+			recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceEKS, variantDefault, fabricEFA,
+			"", "example.com/qualify/nccl:cuda13", nil); err != nil {
+			t.Fatalf("applyNCCLResources (embedded, override) failed: %v", err)
+		}
+
+		got, err := fakeClient.Resource(trainingRuntimeGVR).Namespace(ns).
+			Get(context.Background(), ncclTrainingRuntimeName, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("TrainingRuntime not created: %v", err)
+		}
+		image := firstContainerImage(t, workerPodSpec(t, got))
+		if image != "example.com/qualify/nccl:cuda13" {
+			t.Errorf("worker container image = %q, want override applied", image)
+		}
+	})
+
+	t.Run("custom runtime: override ignored, runtime's own image wins", func(t *testing.T) {
+		fakeClient := newFakeDynamicClient()
+		ctx := &validators.Context{Ctx: context.Background(), DynamicClient: fakeClient, Namespace: ns}
+
+		// A non-empty runtimeImage alongside a non-empty customRuntime is
+		// exactly the delivered path (customRuntime carries plan.carrier),
+		// gated instead on plan.recipeSupplied() — this test exercises the
+		// recipe-supplied case, which must never apply the override since
+		// that runtime owns its own image.
+		if err := applyNCCLResources(ctx, fakeClient, config,
+			recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceEKS, variantDefault, fabricEFA,
+			runtimeWithSelector, "example.com/should-be-ignored:v1", &benchmarkRuntimePlan{source: runtimeSourceRecipeSupplied}); err != nil {
+			t.Fatalf("applyNCCLResources (custom runtime) failed: %v", err)
+		}
+
+		got, err := fakeClient.Resource(trainingRuntimeGVR).Namespace(ns).
+			Get(context.Background(), ncclTrainingRuntimeName, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("TrainingRuntime not created: %v", err)
+		}
+		image := firstContainerImage(t, workerPodSpec(t, got))
+		if image != "example.com/nccl:latest" {
+			t.Errorf("worker container image = %q, want runtime's own image preserved", image)
+		}
+	})
 }
 
 // workerPodSpec navigates a rendered NCCL TrainingRuntime to the "node"
@@ -485,4 +570,169 @@ func workerPodSpec(t *testing.T, obj *unstructured.Unstructured) map[string]any 
 	}
 	t.Fatalf("no %q replicatedJob in runtime", nodeJobName)
 	return nil
+}
+
+// firstContainerImage returns podSpec.containers[0].image, or "" if the shape
+// doesn't match. unstructured.NestedString cannot index into a []interface{}
+// with a string key, so callers must walk the slice manually rather than
+// passing a numeric-looking path segment like "0".
+func firstContainerImage(t *testing.T, podSpec map[string]interface{}) string {
+	t.Helper()
+	containers, found, err := unstructured.NestedSlice(podSpec, "containers")
+	if err != nil || !found || len(containers) == 0 {
+		t.Fatalf("podSpec.containers not found or empty (found=%v err=%v)", found, err)
+	}
+	c, ok := containers[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("podSpec.containers[0] is %T, want map", containers[0])
+	}
+	image, _, _ := unstructured.NestedString(c, "image")
+	return image
+}
+
+// claimRuntime returns a supplied runtime whose "node" job (or, when onLauncher
+// is set, a "launcher" job) carries the given pod-level resourceClaims block.
+func claimRuntime(claims string, onLauncher bool) string {
+	job := "node"
+	if onLauncher {
+		job = "launcher"
+	}
+	rt := `apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainingRuntime
+metadata:
+  name: supplied
+spec:
+  template:
+    spec:
+      replicatedJobs:
+        - name: ` + job + `
+          template:
+            spec:
+              template:
+                spec:
+` + claims + `
+                  containers:
+                    - name: node
+                      image: example.com/nccl:latest
+`
+	if onLauncher {
+		rt += `        - name: node
+          template:
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: node
+                      image: example.com/nccl:latest
+`
+	}
+	return rt
+}
+
+func TestCustomRuntimeManagesIMEX(t *testing.T) {
+	imexClaim := `                  resourceClaims:
+                    - name: imex-channel
+                      resourceClaimTemplateName: ` + ncclIMEXClaimTemplateName
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+		wantErr string
+	}{
+		{"empty runtime", "", false, ""},
+		{"no resourceClaims", validBenchmarkRuntime, false, ""},
+		{"validator-managed IMEX template on node job", claimRuntime(imexClaim, false), true, ""},
+		{"validator-managed IMEX template on launcher job", claimRuntime(imexClaim, true), true, ""},
+		{"other template is unsatisfiable", claimRuntime(`                  resourceClaims:
+                    - name: nic
+                      resourceClaimTemplateName: my-nics`, false), false, `ResourceClaimTemplate "my-nics"`},
+		{"named claim is unsatisfiable", claimRuntime(`                  resourceClaims:
+                    - name: imex-channel
+                      resourceClaimName: precreated-imex`, false), false, `ResourceClaim "precreated-imex"`},
+		{"malformed resourceClaims", claimRuntime(`                  resourceClaims: not-a-list`, false), false, "malformed resourceClaims"},
+		{"malformed resourceClaims entry", claimRuntime(`                  resourceClaims:
+                    - just-a-string`, false), false, "malformed resourceClaims entry"},
+		{"non-string resourceClaimTemplateName", claimRuntime(`                  resourceClaims:
+                    - name: imex-channel
+                      resourceClaimTemplateName: 123`, false), false, "malformed resourceClaimTemplateName"},
+		{"non-string resourceClaimName", claimRuntime(`                  resourceClaims:
+                    - name: imex-channel
+                      resourceClaimName: [a]`, false), false, "malformed resourceClaimName"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := customRuntimeManagesIMEX(tt.content)
+			if tt.wantErr != "" {
+				if err == nil || errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("want ErrCodeInvalidRequest containing %q, got %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("customRuntimeManagesIMEX = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestApplyNCCLResourcesCustomRuntimeIMEX pins #2569: a supplied runtime that
+// references the validator-managed IMEX template gets its ComputeDomain in the
+// per-run namespace on any variant (the observed failure was the default
+// variant), and one that does not gets none.
+func TestApplyNCCLResourcesCustomRuntimeIMEX(t *testing.T) {
+	const ns = "aicr-nccl-perf-default-abc123"
+	imexRuntime := claimRuntime(`                  resourceClaims:
+                    - name: imex-channel
+                      resourceClaimTemplateName: `+ncclIMEXClaimTemplateName, false)
+
+	tests := []struct {
+		name    string
+		runtime string
+		variant ncclVariant
+		wantCD  bool
+	}{
+		{"default variant: IMEX reference provisions ComputeDomain", imexRuntime, variantDefault, true},
+		{"default variant: no claim reference provisions nothing", validBenchmarkRuntime, variantDefault, false},
+		{"nvls variant: IMEX reference provisions ComputeDomain", imexRuntime, variantNVLS, true},
+		{"nvls variant: no claim reference provisions nothing", validBenchmarkRuntime, variantNVLS, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			managed, err := customRuntimeManagesIMEX(tt.runtime)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan := &benchmarkRuntimePlan{carrier: tt.runtime, source: runtimeSourceRecipeSupplied, managedIMEX: managed}
+			fakeClient := newFakeDynamicClient()
+			// Stand in for the DRA driver, which reconciles the ComputeDomain
+			// into this template; the wait then takes its fast path.
+			rct := &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": "resource.k8s.io/v1",
+				"kind":       "ResourceClaimTemplate",
+				"metadata":   map[string]any{"name": ncclIMEXClaimTemplateName, "namespace": ns},
+			}}
+			if _, cerr := fakeClient.Resource(resourceClaimTemplateGVR).Namespace(ns).Create(context.Background(), rct, metav1.CreateOptions{}); cerr != nil {
+				t.Fatal(cerr)
+			}
+			ctx := &validators.Context{Ctx: context.Background(), DynamicClient: fakeClient, Namespace: ns}
+			config := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 4, TotalGPUCount: 8, Namespace: ns}
+			if aerr := applyNCCLResources(ctx, fakeClient, config,
+				recipe.CriteriaAcceleratorVR200, recipe.CriteriaServiceRKE2, tt.variant, fabricEFA,
+				tt.runtime, "", plan); aerr != nil {
+				t.Fatalf("applyNCCLResources failed: %v", aerr)
+			}
+			_, err = fakeClient.Resource(computeDomainGVR).Namespace(ns).
+				Get(context.Background(), ncclComputeDomainName, metav1.GetOptions{})
+			if gotCD := err == nil; gotCD != tt.wantCD {
+				t.Errorf("ComputeDomain present = %v, want %v (get err: %v)", gotCD, tt.wantCD, err)
+			}
+			if _, terr := fakeClient.Resource(trainJobGVR).Namespace(ns).
+				Get(context.Background(), ncclTrainJobName, metav1.GetOptions{}); terr != nil {
+				t.Errorf("TrainJob not applied after IMEX provisioning: %v", terr)
+			}
+		})
+	}
 }

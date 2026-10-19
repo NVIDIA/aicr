@@ -11,9 +11,7 @@ deploy AICR validator Jobs.
 >
 > **Provenance.** This package previously lived at
 > `pkg/api/validator/v1` and was relocated under `pkg/validator/v1` so the
-> on-disk layout matches its position in the validation pipeline. Re-exported
-> aliases keep older import paths source-compatible during the transition;
-> new code should import this path directly.
+> on-disk layout matches its position in the validation pipeline.
 
 ## Package surface
 
@@ -173,7 +171,8 @@ type JobPlan struct {
     Volumes          []corev1.Volume             // snapshot + validation ConfigMaps
     VolumeMounts     []corev1.VolumeMount
     Resources        corev1.ResourceRequirements
-    Timeout          int64                       // activeDeadlineSeconds
+    CheckTimeout     int64                       // check's own budget; published as AICR_CHECK_TIMEOUT
+    JobDeadline      int64                       // activeDeadlineSeconds = CheckTimeout + ValidatorJobDeadlineHeadroom
     ServiceAccount   string
     Tolerations      []corev1.Toleration         // forwarded; orchestrator pod is tolerate-all
     ImagePullSecrets []string
@@ -207,7 +206,13 @@ for _, p := range groups[string(v1.PhaseConformance)] { /* … */ }
 
 ## Customizing a single plan
 
+Change the timeout on the catalog entry, not on the returned plan.
+`BuildJobPlan` bakes `AICR_CHECK_TIMEOUT` into `plan.Env` and derives
+`plan.JobDeadline` from the same value, so both follow from `entry.Timeout`:
+
 ```go
+entry.Timeout = 10 * time.Minute // drives AICR_CHECK_TIMEOUT and activeDeadlineSeconds
+
 plan, err := v1.BuildJobPlan(
     entry,
     runID,
@@ -222,7 +227,6 @@ if err != nil {
     return err
 }
 
-plan.Timeout = 600 // 10 minutes
 plan.Env = append(plan.Env, corev1.EnvVar{Name: "MY_VAR", Value: "x"})
 
 job := v1.RenderPlan(plan)

@@ -110,7 +110,7 @@ order:
    and artifact schemas); omit the heading entirely when it does not. One
    bullet per item: what is deprecated, the replacement, and the release that
    removes it. This is a release-blocking section, not a courtesy — see the
-   [deprecation policy](https://github.com/NVIDIA/aicr/blob/main/RELEASING.md#deprecation-policy).
+   [deprecation policy](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md#deprecation-policy).
    Every bullet here must also have an entry in `docs/user/deprecations.md`;
    if it does not, the deprecation is incomplete and the release is not ready.
 5. **Closing credits line** — `***Thanks to*** @user1, @user2, …, and

@@ -13,7 +13,7 @@ AICR uses three roles. They map directly to the project's GitHub teams and to
 
 ### Contributors
 
-Anyone who opens an issue, pull request, or discussion. Contributors follow the
+Anyone who opens an issue or pull request. Contributors follow the
 [Code of Conduct](CODE_OF_CONDUCT.md) and sign off their commits under the DCO
 (see [CONTRIBUTING.md](CONTRIBUTING.md)). No special access is required to
 contribute.
@@ -49,8 +49,8 @@ Maintainers hold cross-cutting responsibility across all areas.
 
 ## Decision-Making
 
-AICR decides by **lazy consensus**: a proposal (pull request, issue, or
-discussion) is accepted if no maintainer raises a blocking objection within a
+AICR decides by **lazy consensus**: a proposal (pull request or issue) is
+accepted if no maintainer raises a blocking objection within a
 reasonable review window — at least five business days for non-trivial changes.
 Most day-to-day changes are merged through normal code-owner review under
 [`.github/CODEOWNERS`](.github/CODEOWNERS) and the process in
@@ -107,7 +107,7 @@ onboarding process when they return to active participation.
 Amendments follow the supermajority rule above: a pull request plus approval from
 a two-thirds supermajority of non-emeritus maintainers.
 
-## Maintainers
+## Current Maintainers
 
 The current maintainers (the `@nvidia/aicr-maintainer` team), sorted by GitHub
 handle. The GitHub team is the authoritative source; this table is a convenience
@@ -116,7 +116,8 @@ snapshot.
 | GitHub | Name | Headshot |
 |---|---|---|
 | [@ArangoGutierrez](https://github.com/ArangoGutierrez) | Carlos Arango Gutierrez | <img src="https://avatars.githubusercontent.com/u/15933089?s=48&v=4" width="48" height="48" alt="ArangoGutierrez"/> |
-| [@cullenmcdermott](https://github.com/cullenmcdermott) | Cullen McDermott | <img src="https://avatars.githubusercontent.com/u/9535761?s=48&v=4" width="48" height="48" alt="cullenmcdermott"/> |
+| [@atif1996](https://github.com/atif1996) | Atif Mahmood | <img src="https://avatars.githubusercontent.com/u/10677309?s=48&v=4" width="48" height="48" alt="atif1996"/> |
+| [@ayuskauskas](https://github.com/ayuskauskas) | Alex Yuskauskas | <img src="https://avatars.githubusercontent.com/u/176436259?s=48&v=4" width="48" height="48" alt="ayuskauskas"/> |
 | [@dims](https://github.com/dims) | Davanum Srinivas | <img src="https://avatars.githubusercontent.com/u/23304?s=48&v=4" width="48" height="48" alt="dims"/> |
 | [@lalitadithya](https://github.com/lalitadithya) | Lalit Adithya V | <img src="https://avatars.githubusercontent.com/u/13063810?s=48&v=4" width="48" height="48" alt="lalitadithya"/> |
 | [@lockwobr](https://github.com/lockwobr) | Brian Lockwood | <img src="https://avatars.githubusercontent.com/u/1550334?s=48&v=4" width="48" height="48" alt="lockwobr"/> |

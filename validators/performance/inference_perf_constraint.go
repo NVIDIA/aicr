@@ -35,6 +35,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
@@ -204,16 +205,19 @@ const (
 	// recipe and abort under another. Set-but-invalid always fails closed.
 	envRouterMode = "AICR_INFERENCE_PERF_ROUTER_MODE"
 
-	// perfConstraintModel / perfConstraintConcurrency / perfConstraintRoutingMode
-	// name recipe performance.constraints entries that configure the benchmark
-	// per accelerator — symmetric with how inference-throughput / inference-ttft-p99
-	// thresholds already live in the recipe. Resolution precedence is recipe >
-	// catalog env > compiled default for model/concurrency, and recipe > compiled
-	// default for routing mode. Unlike the throughput/TTFT entries these carry
-	// bare values, not comparator expressions.
-	perfConstraintModel       = "inference-model"
-	perfConstraintConcurrency = "inference-concurrency-per-gpu"
-	perfConstraintRoutingMode = "inference-routing-mode"
+	// perfConstraintModel / perfConstraintConcurrency / perfConstraintRoutingMode /
+	// perfConstraintModelCacheStorageClass name recipe performance.constraints
+	// entries that configure the benchmark per accelerator, symmetric with how
+	// inference-throughput / inference-ttft-p99 thresholds already live in the
+	// recipe. Resolution precedence is recipe > catalog env > compiled default
+	// for model, concurrency, and model-cache-storage-class. Routing mode
+	// resolves recipe > compiled default, with no catalog env. Unlike the
+	// throughput/TTFT entries these carry bare values, not comparator
+	// expressions.
+	perfConstraintModel                  = "inference-model"
+	perfConstraintConcurrency            = "inference-concurrency-per-gpu"
+	perfConstraintRoutingMode            = "inference-routing-mode"
+	perfConstraintModelCacheStorageClass = "inference-model-cache-storage-class"
 
 	// inferenceDeploymentName is the DynamoGraphDeployment name for the benchmark
 	// workload. Passed to the template via ${DEPLOYMENT_NAME}.
@@ -405,9 +409,16 @@ type inferenceWorkloadConfig struct {
 	deployedByUs           bool   // true if we (or a prior run we own) created the workload
 	modelCacheSize         string // PVC size (e.g. "100Gi") enabling the model-weights cache; empty = disabled
 	modelCacheStorageClass string // StorageClass for the cache PVC; empty = cluster default
-	gpuNodeInstanceType    string // chosen node's node.kubernetes.io/instance-type; empty if unlabeled
-	routingMode            inferenceRoutingMode
-	routerMode             string // Dynamo frontend DYN_ROUTER_MODE (dynamo-router path only); env > default (see resolveRouterMode)
+	// modelCacheStorageClassFromRecipe is true when modelCacheStorageClass came
+	// from the `inference-model-cache-storage-class` recipe constraint, see
+	// resolveModelCacheStorageClass. That constraint takes precedence over
+	// envModelCacheStorageClass, so checkStorageClassNodeCompatibility uses
+	// this flag to target the right remediation knob in its incompatibility
+	// error.
+	modelCacheStorageClassFromRecipe bool
+	gpuNodeInstanceType              string // chosen node's node.kubernetes.io/instance-type; empty if unlabeled
+	routingMode                      inferenceRoutingMode
+	routerMode                       string // Dynamo frontend DYN_ROUTER_MODE (dynamo-router path only); env > default (see resolveRouterMode)
 
 	// gpuAllocMode is the cluster's detected GPU allocation capability
 	// (allocmode.Detect), probed once per run. Carried for evidence output
@@ -419,6 +430,14 @@ type inferenceWorkloadConfig struct {
 	// DRA node set (not from the cluster-global DRAUsable flag): DRA
 	// ResourceClaimTemplate when true, device-plugin limits otherwise.
 	draWorkerWiring bool
+
+	// pullSecrets references the image pull Secrets ensureWorkloadPullSecrets
+	// copied into namespace, for the pods created there.
+	pullSecrets []v1.LocalObjectReference
+
+	// dynamoRuntimeTag tags the Dynamo runtime images with the recipe's
+	// dynamo-platform chart version.
+	dynamoRuntimeTag string
 }
 
 // useDRAWorkerClaims reports whether worker GPUs are wired via the DRA
@@ -441,6 +460,7 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 	// Guard B: dynamo-platform must be declared in the recipe's componentRefs.
 	// Presence of a Criteria block is independent and not consulted here.
 	if !hasDynamoPlatform(ctx) {
+		validators.EmitExtraOrWarn(map[string]string{validators.ExtraKeySkipReason: validators.SkipReasonComponentNotInRecipe})
 		return &inferenceResult{status: inferenceSkipMsgNoDynamoPlatform}, nil
 	}
 
@@ -497,6 +517,7 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 	policy := ctx.ValidationInput.GetGPUAllocationPolicy()
 	fmt.Printf("--- GPU allocation policy ---\nconfigured policy: %s\n%s\n",
 		policy, mode.Summary())
+	validators.EmitExtraOrWarn(validators.GPUAllocationPolicyExtra(policy))
 	if verifyErr := allocmode.Verify(policy, mode); verifyErr != nil {
 		return nil, verifyErr
 	}
@@ -505,6 +526,7 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	validators.EmitExtraOrWarn(validators.GPUAllocationResolvedExtra(config.useDRAWorkerClaims(), true))
 	wiring := "device plugin (resources.limits nvidia.com/gpu)"
 	if config.useDRAWorkerClaims() {
 		wiring = "DRA (gpu.nvidia.com ResourceClaimTemplate)"
@@ -589,7 +611,7 @@ func hasDynamoPlatform(ctx *validators.Context) bool {
 		return false
 	}
 	for _, ref := range ctx.ValidationInput.ComponentRefs {
-		if ref.Name == "dynamo-platform" {
+		if ref.Name == dynamoPlatformComponent {
 			return true
 		}
 	}
@@ -760,22 +782,30 @@ func buildInferenceConfig(ctx *validators.Context, mode *allocmode.Mode) (*infer
 		return nil, err
 	}
 
+	dynamoRuntimeTag, err := resolveDynamoRuntimeTag(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	runID := deriveRunID()
+	modelCacheStorageClass, modelCacheStorageClassFromRecipe := resolveModelCacheStorageClass(ctx)
 	config := &inferenceWorkloadConfig{
-		runID:                  runID,
-		gpuCount:               gpuCount,
-		gpuCountPerNode:        gpuCountPerNode,
-		concurrency:            concurrencyPerGPU * gpuCount,
-		namespace:              fmt.Sprintf("%s-%s", inferenceWorkloadNamespacePrefix, runID),
-		aiperfJobName:          fmt.Sprintf("%s-%s", aiperfJobNamePrefix, runID),
-		model:                  model,
-		modelCacheSize:         cacheSize,
-		modelCacheStorageClass: strings.TrimSpace(os.Getenv(envModelCacheStorageClass)),
-		gpuNodeInstanceType:    chosen.Labels[instanceTypeLabel],
-		routingMode:            routingMode,
-		routerMode:             routerMode,
-		gpuAllocMode:           mode,
-		draWorkerWiring:        draWiring,
+		runID:                            runID,
+		gpuCount:                         gpuCount,
+		gpuCountPerNode:                  gpuCountPerNode,
+		concurrency:                      concurrencyPerGPU * gpuCount,
+		namespace:                        fmt.Sprintf("%s-%s", inferenceWorkloadNamespacePrefix, runID),
+		aiperfJobName:                    fmt.Sprintf("%s-%s", aiperfJobNamePrefix, runID),
+		model:                            model,
+		modelCacheSize:                   cacheSize,
+		modelCacheStorageClass:           modelCacheStorageClass,
+		modelCacheStorageClassFromRecipe: modelCacheStorageClassFromRecipe,
+		gpuNodeInstanceType:              chosen.Labels[instanceTypeLabel],
+		routingMode:                      routingMode,
+		routerMode:                       routerMode,
+		gpuAllocMode:                     mode,
+		draWorkerWiring:                  draWiring,
+		dynamoRuntimeTag:                 dynamoRuntimeTag,
 	}
 
 	// Pin every worker to the specific chosen node via kubernetes.io/hostname
@@ -1606,6 +1636,21 @@ func buildTolerations(node v1.Node) []v1.Toleration {
 	return tolerations
 }
 
+// inferenceTemplateData returns the ${KEY} substitutions for the
+// testdata/inference templates.
+func inferenceTemplateData(config *inferenceWorkloadConfig) map[string]string {
+	return map[string]string{
+		"NAMESPACE":                 config.namespace,
+		"MODEL":                     config.model,
+		"ROUTER_MODE":               config.routerMode,
+		"GPU_COUNT":                 strconv.Itoa(config.gpuCount),
+		"DEPLOYMENT_NAME":           inferenceDeploymentName,
+		"CLAIM_TEMPLATE_NAME":       inferenceClaimTemplateName,
+		"DYNAMO_VLLM_RUNTIME_IMAGE": dynamoRuntimeImage(dynamoVLLMRuntimeImageName, config.dynamoRuntimeTag),
+		"DYNAMO_FRONTEND_IMAGE":     dynamoRuntimeImage(dynamoFrontendImageName, config.dynamoRuntimeTag),
+	}
+}
+
 // deployInferenceWorkload deploys the DynamoGraphDeployment and any
 // routing-mode-specific Gateway API resources. Worker GPU wiring is
 // MODE-DISPATCHED (config.useDRAWorkerClaims): in DRA mode a
@@ -1617,8 +1662,8 @@ func buildTolerations(node v1.Node) []v1.Toleration {
 // deferred cleanup in the caller always runs — even if later steps fail.
 func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadConfig) error {
 	// Create namespace (idempotent).
-	if err := ensureNamespace(ctx, config.namespace); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
+	if _, _, err := ensureNamespace(ctx, config.namespace, labels.ValueInferencePerf); err != nil {
+		return err
 	}
 
 	// Mark deployed early (namespace now exists) so cleanup tears down the
@@ -1633,6 +1678,12 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 		return err
 	}
 
+	pullSecrets, err := ensureWorkloadPullSecrets(ctx, config.namespace)
+	if err != nil {
+		return err
+	}
+	config.pullSecrets = pullSecrets
+
 	// Provision the optional model-weights cache (PVC + one-time populate Job)
 	// before deploying, so workers mount a pre-populated cache and skip the
 	// Hugging Face download. No-op when the cache is disabled.
@@ -1640,14 +1691,7 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 		return err
 	}
 
-	templateData := map[string]string{
-		"NAMESPACE":           config.namespace,
-		"MODEL":               config.model,
-		"ROUTER_MODE":         config.routerMode,
-		"GPU_COUNT":           strconv.Itoa(config.gpuCount),
-		"DEPLOYMENT_NAME":     inferenceDeploymentName,
-		"CLAIM_TEMPLATE_NAME": inferenceClaimTemplateName,
-	}
+	templateData := inferenceTemplateData(config)
 
 	// DRA wiring mode: apply the ResourceClaimTemplate the worker pods bind
 	// (one claim, ExactCount=1 GPU, per worker). Device-plugin mode skips it —
@@ -1676,6 +1720,9 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 
 	// Wait for the deployment to become ready.
 	if err := waitForDynamoDeploymentReady(ctx, config); err != nil {
+		if pullErr := imagePullTimeoutError(ctx.Ctx, ctx.Clientset, config.namespace, "", err); pullErr != nil {
+			err = pullErr
+		}
 		return errors.Wrap(errors.ErrCodeInternal, "DynamoGraphDeployment not ready", err)
 	}
 
@@ -1734,10 +1781,11 @@ func applyWorkerClaimTemplate(ctx *validators.Context, config *inferenceWorkload
 }
 
 // applyInferenceWorkerScheduling injects nodeSelector, tolerations, and the
-// mode-dispatched worker GPU wiring into each v1beta1 component's podTemplate:
-// DRA resourceClaims (bound to the applied ResourceClaimTemplate) when
-// config.useDRAWorkerClaims(), device-plugin GPU limits
-// (resources.limits["nvidia.com/gpu"]) otherwise. Operating on the
+// mode-dispatched worker GPU wiring into each v1beta1 component's
+// podTemplate. Workers get DRA resourceClaims (bound to the applied
+// ResourceClaimTemplate) when config.useDRAWorkerClaims(), and device-plugin
+// GPU limits (resources.limits["nvidia.com/gpu"]) otherwise. Every component
+// also gets imagePullSecrets referencing config.pullSecrets. Operating on the
 // unstructured object (rather than text-substituting into the YAML template)
 // keeps taint values safe from YAML special characters.
 func applyInferenceWorkerScheduling(obj *unstructured.Unstructured,
@@ -1756,6 +1804,11 @@ func applyInferenceWorkerScheduling(obj *unstructured.Unstructured,
 	containerClaimRefs := []any{map[string]any{
 		keyName: "gpu",
 	}}
+
+	pullSecrets := make([]any, 0, len(config.pullSecrets))
+	for _, ref := range config.pullSecrets {
+		pullSecrets = append(pullSecrets, map[string]any{keyName: ref.Name})
+	}
 
 	for i, compRaw := range components {
 		component, ok := compRaw.(map[string]any)
@@ -1789,6 +1842,9 @@ func applyInferenceWorkerScheduling(obj *unstructured.Unstructured,
 				ns[k] = v
 			}
 			podSpec["nodeSelector"] = ns
+		}
+		if len(pullSecrets) > 0 {
+			podSpec["imagePullSecrets"] = pullSecrets
 		}
 
 		// Worker GPU wiring, mode-dispatched: DRA resourceClaims where
@@ -1989,6 +2045,79 @@ func ensureHFTokenSecret(ctx *validators.Context, namespace string) error {
 	return nil
 }
 
+// ensureWorkloadPullSecrets copies the validator pod's image pull Secrets
+// into namespace and returns references to the copies. A pod resolves
+// imagePullSecrets only in its own namespace, so pods in the per-run
+// namespace cannot use the validator namespace's Secrets to pull from an
+// authenticated mirror. A referenced Secret absent from the validator
+// namespace is skipped, as the kubelet would skip it.
+func ensureWorkloadPullSecrets(ctx *validators.Context, namespace string) ([]v1.LocalObjectReference, error) {
+	refs := getOwnPullSecrets(ctx)
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	src := ctx.Clientset.CoreV1().Secrets(ctx.Namespace)
+	dst := ctx.Clientset.CoreV1().Secrets(namespace)
+	copied := make([]v1.LocalObjectReference, 0, len(refs))
+	for _, ref := range refs {
+		ok, err := copyPullSecret(ctx.Ctx, src, dst, ref.Name, namespace)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			slog.Warn("Image pull secret referenced by the validator pod does not exist; not copying it",
+				"secret", ref.Name, "namespace", ctx.Namespace)
+			continue
+		}
+		copied = append(copied, v1.LocalObjectReference{Name: ref.Name})
+	}
+	if len(copied) > 0 {
+		slog.Info("Copied image pull secrets into the inference workload namespace",
+			"namespace", namespace, "count", len(copied))
+	}
+	return copied, nil
+}
+
+// copyPullSecret creates or updates Secret name in dst from its counterpart
+// in src, so a reused namespace does not keep stale registry credentials. It
+// reports false when the source Secret does not exist.
+func copyPullSecret(ctx context.Context, src, dst typedcorev1.SecretInterface, name, namespace string) (bool, error) {
+	opCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+
+	source, err := src.Get(opCtx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read image pull secret %q", name), err)
+	}
+	secret := &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Type:       source.Type,
+		Data:       source.Data,
+	}
+
+	existing, getErr := dst.Get(opCtx, name, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(getErr):
+		if _, err := dst.Create(opCtx, secret, metav1.CreateOptions{}); err != nil {
+			return false, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to copy image pull secret %q into namespace %q", name, namespace), err)
+		}
+	case getErr != nil:
+		return false, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to read image pull secret %q in namespace %q", name, namespace), getErr)
+	default:
+		secret.ResourceVersion = existing.ResourceVersion
+		if _, err := dst.Update(opCtx, secret, metav1.UpdateOptions{}); err != nil {
+			return false, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to update image pull secret %q in namespace %q", name, namespace), err)
+		}
+	}
+	return true, nil
+}
+
 // ensureNamespace creates a namespace if it doesn't exist, waiting for any
 // in-flight deletion to complete first. When a prior run's cleanup deleted
 // the namespace but Dynamo finalizers are still cascading through child
@@ -1996,7 +2125,17 @@ func ensureHFTokenSecret(ctx *validators.Context, namespace string) error {
 // AlreadyExists, but subsequent resource creates inside it fail with
 // "... forbidden: ... because it is being terminated". Waiting here until the
 // prior Terminating instance is fully gone avoids that race.
-func ensureNamespace(ctx *validators.Context, namespace string) error {
+//
+// The namespace is stamped with labels.ManagedBy and component so
+// pruneStaleNCCLNamespaces can scope its List server-side, instead of
+// matching a naming convention.
+//
+// The bool result reports whether this call's own Create landed, as
+// opposed to reusing or adopting a namespace that already existed, so a
+// caller rolling back on a later failure doesn't tear down one it merely
+// adopted. The namespace result carries its UID either way, for a caller
+// that needs one without a further Get.
+func ensureNamespace(ctx *validators.Context, namespace, component string) (*v1.Namespace, bool, error) {
 	nsCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.InferenceNamespaceTerminationWait)
 	defer cancel()
 
@@ -2007,24 +2146,72 @@ func ensureNamespace(ctx *validators.Context, namespace string) error {
 	case apierrors.IsNotFound(err):
 		// Namespace doesn't exist — Create below will succeed.
 	case err != nil:
-		return errors.Wrap(errors.ErrCodeInternal, "failed to check namespace", err)
+		return nil, false, errors.Wrap(errors.ErrCodeInternal, "failed to check namespace", err)
 	case existing.DeletionTimestamp != nil:
 		slog.Info("Namespace is terminating from a prior run; waiting for full deletion",
 			"namespace", namespace)
 		if waitErr := waitForNamespaceGone(nsCtx, clients, namespace); waitErr != nil {
-			return waitErr
+			return nil, false, waitErr
 		}
+	case !namespaceOwnedBy(existing, component):
+		// Don't adopt a namespace we didn't create.
+		return nil, false, errors.New(errors.ErrCodeConflict, fmt.Sprintf(
+			"namespace %q already exists without the expected %s=%s,%s=%s labels; refusing to adopt a namespace this package did not create",
+			namespace, labels.ManagedBy, labels.ValueValidator, labels.Component, component))
 	default:
-		// Already exists and is usable — nothing to do.
-		return nil
+		// Already exists, owned by us, and usable. Nothing to do.
+		return existing, false, nil
 	}
 
-	ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
-	_, err = clients.Create(nsCtx, ns, metav1.CreateOptions{})
-	if err != nil && !apierrors.IsAlreadyExists(err) {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
+	ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: namespace,
+		Labels: map[string]string{
+			labels.ManagedBy: labels.ValueValidator,
+			labels.Component: component,
+		},
+	}}
+	created, err := clients.Create(nsCtx, ns, metav1.CreateOptions{})
+	if err == nil {
+		return created, true, nil
 	}
-	return nil
+	if !apierrors.IsAlreadyExists(err) {
+		return nil, false, errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
+	}
+	// Lost a create race to a concurrent caller. Fetch the winning object
+	// rather than returning nil, so a UID-precondition caller still gets
+	// something to pin its later delete to.
+	winner, err := clients.Get(nsCtx, namespace, metav1.GetOptions{})
+	if err != nil {
+		return nil, false, errors.Wrap(errors.ErrCodeInternal, "failed to read namespace created by a concurrent caller", err)
+	}
+	if winner.DeletionTimestamp != nil {
+		// Wait for the terminating winner to fully disappear, then create
+		// ours, instead of handing back a namespace that would reject
+		// resource creation.
+		slog.Info("Namespace from a concurrent create race is terminating; waiting for full deletion",
+			"namespace", namespace)
+		if waitErr := waitForNamespaceGone(nsCtx, clients, namespace); waitErr != nil {
+			return nil, false, waitErr
+		}
+		created, createErr := clients.Create(nsCtx, ns, metav1.CreateOptions{})
+		if createErr != nil {
+			return nil, false, errors.Wrap(errors.ErrCodeInternal,
+				"failed to create namespace after a concurrent owner finished terminating", createErr)
+		}
+		return created, true, nil
+	}
+	if !namespaceOwnedBy(winner, component) {
+		return nil, false, errors.New(errors.ErrCodeConflict, fmt.Sprintf(
+			"namespace %q was created by a concurrent caller without the expected %s=%s,%s=%s labels; refusing to adopt it",
+			namespace, labels.ManagedBy, labels.ValueValidator, labels.Component, component))
+	}
+	return winner, false, nil
+}
+
+// namespaceOwnedBy reports whether ns carries the labels ensureNamespace
+// stamps on create for the given component.
+func namespaceOwnedBy(ns *v1.Namespace, component string) bool {
+	return ns.Labels[labels.ManagedBy] == labels.ValueValidator && ns.Labels[labels.Component] == component
 }
 
 // waitForNamespaceGone watches the given namespace until it is removed.
@@ -2740,6 +2927,23 @@ func resolveModel(ctx *validators.Context) string {
 	return resolveInferenceModel()
 }
 
+// resolveModelCacheStorageClass returns the StorageClass name for the
+// model-weights cache PVC with precedence recipe > catalog env > compiled
+// default, plus whether the value came from the recipe constraint (needed by
+// checkStorageClassNodeCompatibility to target the right remediation knob). A
+// per-accelerator overlay sets it via the `inference-model-cache-storage-class`
+// performance constraint. Absent, or blank, it falls back to
+// envModelCacheStorageClass, then "" (the cluster's default StorageClass,
+// resolved later by defaultStorageClass).
+func resolveModelCacheStorageClass(ctx *validators.Context) (string, bool) {
+	if c, ok := findPerformanceConstraint(ctx, perfConstraintModelCacheStorageClass); ok {
+		if v := strings.TrimSpace(c.Value); v != "" {
+			return v, true
+		}
+	}
+	return strings.TrimSpace(os.Getenv(envModelCacheStorageClass)), false
+}
+
 // resolveRoutingMode returns where routing decisions are made for the
 // benchmark workload. The default `dynamo-router` mode keeps routing in the
 // Dynamo frontend, whose strategy defaults to load-aware least-loaded routing
@@ -2748,7 +2952,7 @@ func resolveModel(ctx *validators.Context) string {
 // `gateway-epp` switches to Gateway API Inference Extension: EPP
 // performs KV-aware endpoint selection and worker frontend sidecars run in
 // direct mode so they honor EPP's routing headers. The sidecars do not relay
-// local vLLM ZMQ KV events onto NATS; that relay is handled by the worker
+// KV events; workers publish ZMQ KV events directly to the KV router.
 // runtime.
 func resolveRoutingMode(ctx *validators.Context) (inferenceRoutingMode, error) {
 	if c, ok := findPerformanceConstraint(ctx, perfConstraintRoutingMode); ok {

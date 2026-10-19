@@ -89,13 +89,21 @@ func retiredAvailableOS(s *MetadataStore, criteria *Criteria) []string {
 
 // TestJointSufficiencySubsumesRetiredGuard is the gate on issue #1782's actual
 // requirement: every query the retired guard would have rejected must still be
-// rejected. It runs over generated catalogs rather than only the embedded one,
+// rejected, EXCEPT when the only os carriers the query could reach are generic
+// in a stated dimension (e.g. a service+os overlay against a
+// service+accelerator query). Those generic carriers match via wildcard but
+// are not the recipe for the stated combination, so demanding os would turn
+// every service+accelerator query into an os query the moment a service+os
+// tier exists — the #2730 regression on eks-ubuntu/aks-ubuntu. Such pairs are
+// counted separately as expected narrowing rather than violations.
+//
+// It runs over generated catalogs rather than only the embedded one,
 // because the embedded catalog cannot produce the shape where the guard and
 // per-dimension coverage disagree — that is the whole reason #1782 exists.
 //
-// The reverse containment is deliberately NOT asserted. The new rule is
-// strictly stronger: it reads the subset from the query instead of hardcoding
-// service+accelerator, so it rejects cases the guard let through.
+// The reverse containment is deliberately NOT asserted. The new rule reads
+// the subset from the query instead of hardcoding service+accelerator, so it
+// rejects cases the guard let through.
 func TestJointSufficiencySubsumesRetiredGuard(t *testing.T) {
 	ctx := context.Background()
 
@@ -130,6 +138,7 @@ func TestJointSufficiencySubsumesRetiredGuard(t *testing.T) {
 	base.Metadata.Name = testRecipeBase
 
 	guardFired := 0
+	narrowed := 0
 	// Catalogs of three overlays drawn from the shape space. Three is enough
 	// to express the split-coverage catalog (service alone, accelerator alone,
 	// both plus an os) that the guard was written for.
@@ -153,9 +162,17 @@ func TestJointSufficiencySubsumesRetiredGuard(t *testing.T) {
 					}
 					guardFired++
 					if _, err := store.BuildRecipeResult(ctx, &query); err == nil {
-						t.Fatalf("SUBSUMPTION VIOLATED: retired guard rejected %s but resolution succeeded\n"+
-							"  catalog: %s | %s | %s",
-							query.String(), shapes[i].String(), shapes[j].String(), shapes[k].String())
+						// The narrowed rule lets this through only when every
+						// reachable os carrier is generic in a stated
+						// dimension. A jointly-carrying unapplied carrier
+						// must still reject — otherwise the #1782 guarantee
+						// is broken rather than narrowed.
+						if hasJointUnappliedOSCarrier(store, &query, matched) {
+							t.Fatalf("SUBSUMPTION VIOLATED: retired guard rejected %s but resolution succeeded\n"+
+								"  catalog: %s | %s | %s",
+								query.String(), shapes[i].String(), shapes[j].String(), shapes[k].String())
+						}
+						narrowed++
 					}
 				}
 			}
@@ -164,7 +181,45 @@ func TestJointSufficiencySubsumesRetiredGuard(t *testing.T) {
 	if guardFired == 0 {
 		t.Fatal("generated no catalog where the retired guard fires; the test proves nothing")
 	}
-	t.Logf("subsumption held: retired guard fired on %d (catalog, query) pairs, all still rejected", guardFired)
+	t.Logf("subsumption held: retired guard fired on %d (catalog, query) pairs, %d narrowed by generic carriers (#2730), rest still rejected",
+		guardFired, narrowed)
+}
+
+// hasJointUnappliedOSCarrier reports whether stating some os value for query
+// would reach an overlay that jointly carries the full probe combination and
+// is not already applied. This is the pre-narrowing second half of the
+// strict-gap rule: when it is true the narrowed rule must still reject, so a
+// success is a genuine subsumption violation rather than the intended #2730
+// narrowing for generic carriers.
+func hasJointUnappliedOSCarrier(store *MetadataStore, query *Criteria, matched []*RecipeMetadata) bool {
+	applied := make(map[string]struct{}, len(matched)+1)
+	applied[baseRecipeName] = struct{}{}
+	for _, m := range matched {
+		for _, name := range store.inheritanceChainNames(m) {
+			applied[name] = struct{}{}
+		}
+	}
+	var osDim coverageDimension
+	for _, dim := range coverageDimensions {
+		if dim.name == string(FieldOS) {
+			osDim = dim
+		}
+	}
+	for _, value := range store.dimensionValues(osDim) {
+		probe := *query
+		setCriteriaDimension(&probe, osDim.name, value)
+		for _, match := range store.FindMatchingOverlays(&probe) {
+			if !overlayJointlyCarries(match, &probe) {
+				continue
+			}
+			for _, name := range store.inheritanceChainNames(match) {
+				if _, already := applied[name]; !already {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // TestStrictGapErrorRendering pins the strict-gap message and context shape

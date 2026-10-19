@@ -1,0 +1,410 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-bundle-terraform
+spec:
+  description: |
+    Tests Terraform deployer bundle generation.
+    Covers output structure (root .tf files + modules/component/ + NNN-<name>/
+    component dirs), one module call per component, depends_on carrying the
+    recipe's dependencyRefs, the kai-scheduler async override, the
+    --terraform-child-module and --terraform-cluster-rollover variants,
+    reproducibility, and the upgrade flow (a regenerated bundle is a new
+    directory).
+
+    Asserts on the emitted artifacts only. It never runs terraform, so it
+    needs no extra binary and no cluster; `terraform validate` coverage is a
+    deliberate follow-up.
+  timeouts:
+    exec: 60s
+  # Top-level catch runs when any step fails. The first step's `rm -rf`
+  # already keeps the test idempotent across reruns, but catching here too
+  # means /tmp/chainsaw-bundle-terraform doesn't survive a partial-failure
+  # run on a shared developer or CI host.
+  catch:
+    - script:
+        content: |
+          rm -rf /tmp/chainsaw-bundle-terraform
+  steps:
+    - name: setup
+      description: Generate the recipe used by all terraform bundle tests.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-terraform"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              ${AICR_BIN} recipe --service eks --accelerator h100 --os ubuntu \
+                --intent training -o "${WORK}/recipe.yaml"
+
+    - name: basic-terraform-bundle
+      description: >
+        --deployer terraform produces a root module: the .tf files at the
+        bundle root, the shared component module they all call, and the
+        per-component NNN-<name>/ chart folders those calls point at.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-terraform"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/basic" \
+                --deployer terraform
+              # Root module files.
+              for f in main.tf variables.tf versions.tf outputs.tf \
+                       terraform.tfvars.example README.md recipe.yaml \
+                       bundle-info.yaml checksums.txt; do
+                test -f "${WORK}/basic/${f}" \
+                  || { echo "missing ${f}" >&2; exit 1; }
+              done
+              # The shared module every call resolves to. Without it every
+              # `source = "./modules/component"` in main.tf dangles and
+              # `terraform init` fails on a bundle that otherwise looks whole.
+              for f in main.tf variables.tf outputs.tf; do
+                test -f "${WORK}/basic/modules/component/${f}" \
+                  || { echo "missing modules/component/${f}" >&2; exit 1; }
+              done
+              # Per-component NNN-<name>/ folders, each with values.yaml.
+              ls -d "${WORK}"/basic/[0-9][0-9][0-9]-*/ >/dev/null 2>&1 \
+                || { echo "no NNN-<name>/ component folders found" >&2; exit 1; }
+              for dir in "${WORK}"/basic/[0-9][0-9][0-9]-*/; do
+                test -f "${dir}values.yaml" \
+                  || { echo "missing values.yaml in $(basename "$dir")" >&2; exit 1; }
+              done
+              # Artifacts from other deployers must NOT exist.
+              ! test -f "${WORK}/basic/deploy.sh" \
+                || { echo "helm deploy.sh leaked into terraform bundle" >&2; exit 1; }
+              ! test -f "${WORK}/basic/helmfile.yaml" \
+                || { echo "helmfile.yaml leaked" >&2; exit 1; }
+              ! test -f "${WORK}/basic/app-of-apps.yaml" \
+                || { echo "argocd app-of-apps leaked" >&2; exit 1; }
+              ! test -d "${WORK}/basic/sources" \
+                || { echo "flux sources/ leaked" >&2; exit 1; }
+            check:
+              ($error == null): true
+
+    - name: one-module-call-per-component
+      description: >
+        main.tf declares exactly as many module calls as there are
+        components, and each call sources the shared module and points its
+        values_files at its own folder. A component's -pre, -post and
+        -readiness folders are slots on its call, not calls of their own, so
+        the count to match is the folders minus those suffixes: a per-FOLDER
+        emitter would produce more calls than that as soon as a component
+        carries one, and that excess is the assertion that matters.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-terraform"
+              MAIN="${WORK}/basic/main.tf"
+              modules=$(grep -c '^module "' "${MAIN}")
+              dirs=$(ls -d "${WORK}"/basic/[0-9][0-9][0-9]-*/ | wc -l | tr -d ' ')
+              slots=$(ls -d "${WORK}"/basic/[0-9][0-9][0-9]-*/ \
+                | grep -cE -- '-(pre|post|readiness)/$' || true)
+              components=$((dirs - slots))
+              [ "${modules}" -eq "${components}" ] \
+                || { echo "main.tf has ${modules} module calls for ${components} components (${dirs} folders, ${slots} pre/post/readiness slots)" >&2; exit 1; }
+              [ "${modules}" -gt 0 ] \
+                || { echo "main.tf declares no module calls" >&2; exit 1; }
+              # Every call resolves to the shared module.
+              sources=$(grep -c 'source = "./modules/component"' "${MAIN}")
+              [ "${sources}" -eq "${modules}" ] \
+                || { echo "${sources} of ${modules} module calls source ./modules/component" >&2; exit 1; }
+              # Every values_files path resolves to a file that exists.
+              paths_file="${WORK}/.tf-values-paths"
+              grep -o '\${path.module}/[^"]*\.yaml' "${MAIN}" | sort -u > "${paths_file}"
+              test -s "${paths_file}" \
+                || { echo "no values_files entries in main.tf" >&2; rm -f "${paths_file}"; exit 1; }
+              # Stash to a file first: `grep | while` would push the loop into
+              # a subshell where `exit 1` only exits the subshell, letting the
+              # script return 0 despite missing files.
+              while IFS= read -r path; do
+                [ -z "${path}" ] && continue
+                file="${WORK}/basic/${path#\$\{path.module\}/}"
+                test -f "${file}" \
+                  || { echo "values_files entry ${path} resolves to no file" >&2; rm -f "${paths_file}"; exit 1; }
+              done < "${paths_file}"
+              rm -f "${paths_file}"
+            check:
+              ($error == null): true
+
+    - name: depends-on-carries-the-recipe-graph
+      description: >
+        Every dependencyRefs edge in the recipe appears as a depends_on entry
+        on the dependent's module call, and every depends_on entry names a
+        module that main.tf actually declares. The second direction is what
+        catches a dangling reference; the first is what catches a dropped
+        edge, which would let a component apply before its prerequisite.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-terraform"
+              MAIN="${WORK}/basic/main.tf"
+              # Terraform module labels replace every character outside
+              # [A-Za-z0-9_] with an underscore, one for one, and prefix a
+              # leading digit with one (moduleLabel in graph.go). The same
+              # mapping is applied to recipe component names here so the two
+              # can be compared.
+              label() { printf '%s' "$1" | tr -c 'a-zA-Z0-9_' '_' | sed 's/^\([0-9]\)/_\1/'; }
+
+              # Declared module labels.
+              grep -o '^module "[^"]*"' "${MAIN}" | sed 's/^module "//; s/"$//' \
+                | sort > "${WORK}/.tf-declared"
+
+              # Every referenced module.<label> inside a depends_on list.
+              awk '
+                /^  depends_on = \[/ {in_dep=1; next}
+                in_dep && /^  \]/      {in_dep=0; next}
+                in_dep                 {gsub(/[ ,]/, "", $0); print}
+              ' "${MAIN}" | sed 's/^module\.//' | sort -u > "${WORK}/.tf-referenced"
+
+              # Direction 1: no dangling reference.
+              missing=$(comm -13 "${WORK}/.tf-declared" "${WORK}/.tf-referenced")
+              [ -z "${missing}" ] \
+                || { echo "depends_on references undeclared modules: ${missing}" >&2; exit 1; }
+
+              # Direction 2: every recipe edge survived. yq rather than a
+              # line-oriented parser: componentRefs entries carry a
+              # healthCheckAsserts block of embedded YAML, so grepping for
+              # indented keys reads assertion text as recipe structure.
+              yq e '.componentRefs[] | select(.dependencyRefs != null)
+                    | .name as $c | .dependencyRefs[] | $c + " " + .' \
+                "${WORK}/basic/recipe.yaml" > "${WORK}/.recipe-edges"
+              test -s "${WORK}/.recipe-edges" \
+                || { echo "recipe declares no dependencyRefs; this test would prove nothing" >&2; exit 1; }
+
+              while IFS=' ' read -r child parent; do
+                [ -z "${child}" ] && continue
+                # A ref to a component the bundle filtered out is not an edge
+                # the bundle can carry; skip those rather than fail.
+                grep -qx "$(label "${parent}")" "${WORK}/.tf-declared" || continue
+                grep -qx "$(label "${child}")" "${WORK}/.tf-declared" || continue
+                # The child's own depends_on block must name the parent.
+                awk -v want="module \"$(label "${child}")\"" '
+                  index($0, want) == 1 {in_mod=1}
+                  in_mod && /^}/ {exit}
+                  in_mod {print}
+                ' "${MAIN}" | grep -q "module\.$(label "${parent}")\b" \
+                  || { echo "recipe edge ${parent} -> ${child} is missing from main.tf" >&2; exit 1; }
+              done < "${WORK}/.recipe-edges"
+              rm -f "${WORK}/.tf-declared" "${WORK}/.tf-referenced" "${WORK}/.recipe-edges"
+            check:
+              ($error == null): true
+
+    - name: kai-scheduler-async-override
+      description: >
+        kai-scheduler is marked asynchronous in the shared override table, so
+        its module call carries literal wait/timeout arguments instead of the
+        bundle-wide variables. Rendering var.wait there would let an operator
+        silently re-enable a wait that is known to time out. Skipped when the
+        recipe does not include kai-scheduler.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-terraform"
+              MAIN="${WORK}/basic/main.tf"
+              if ! grep -q '^module "kai_scheduler"' "${MAIN}"; then
+                echo "recipe has no kai-scheduler; skipping"
+                exit 0
+              fi
+              block=$(awk '
+                /^module "kai_scheduler"/ {in_mod=1}
+                in_mod {print}
+                in_mod && /^}/ {exit}
+              ' "${MAIN}")
+              printf '%s' "${block}" | grep -q 'wait    = false' \
+                || { echo "kai-scheduler call does not carry the async wait override:"; printf '%s\n' "${block}"; exit 1; } >&2
+              printf '%s' "${block}" | grep -q 'timeout = 1200' \
+                || { echo "kai-scheduler call does not carry the async timeout override:"; printf '%s\n' "${block}"; exit 1; } >&2
+            check:
+              ($error == null): true
+
+    - name: child-module-variant
+      description: >
+        --terraform-child-module drops the provider block and the connection
+        variables so the calling configuration supplies both, and drops
+        terraform.tfvars.example, which only makes sense for a root module.
+        The module calls themselves are unchanged.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-terraform"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/child" \
+                --deployer terraform --terraform-child-module
+              test -f "${WORK}/child/main.tf" \
+                || { echo "missing main.tf" >&2; exit 1; }
+              # No provider block: the caller owns it.
+              ! grep -q '^provider "helm"' "${WORK}/child/versions.tf" \
+                || { echo "child module declares its own helm provider" >&2; exit 1; }
+              # No connection variables, and no tfvars example to set them in.
+              ! grep -q 'variable "kubeconfig_path"' "${WORK}/child/variables.tf" \
+                || { echo "child module still declares kubeconfig_path" >&2; exit 1; }
+              ! test -f "${WORK}/child/terraform.tfvars.example" \
+                || { echo "child module emitted terraform.tfvars.example" >&2; exit 1; }
+              # The graph is the same one the root module emits.
+              root_mods=$(grep -c '^module "' "${WORK}/basic/main.tf")
+              child_mods=$(grep -c '^module "' "${WORK}/child/main.tf")
+              [ "${root_mods}" -eq "${child_mods}" ] \
+                || { echo "child module has ${child_mods} calls, root has ${root_mods}" >&2; exit 1; }
+            check:
+              ($error == null): true
+
+    - name: cluster-rollover-variant
+      description: >
+        --terraform-cluster-rollover ties every release to a containment shim
+        keyed on the cluster's keepers, so replacing the cluster replaces the
+        releases rather than leaving state describing objects that are gone.
+        The shim is a terraform_data, which is built in -- opting into
+        rollover must not add a provider an air-gapped operator then has to
+        mirror. Replacement stays destroy-then-create: create_before_destroy
+        is a separate lifecycle argument and this bundle does not set it.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-terraform"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/rollover" \
+                --deployer terraform --terraform-cluster-rollover
+              MOD="${WORK}/rollover/modules/component/main.tf"
+              grep -q 'resource "terraform_data" "cluster"' "${MOD}" \
+                || { echo "no containment shim in the component module" >&2; exit 1; }
+              grep -q 'triggers_replace = var.cluster_keepers' "${MOD}" \
+                || { echo "the shim is not keyed on the cluster keepers" >&2; exit 1; }
+              grep -q 'variable "cluster_keepers"' "${WORK}/rollover/variables.tf" \
+                || { echo "root module declares no cluster_keepers variable" >&2; exit 1; }
+              # Every helm_release slot in the module is tied to the shim.
+              slots=$(grep -c '^resource "helm_release"' "${MOD}")
+              tied=$(grep -c 'replace_triggered_by = \[terraform_data.cluster\]' "${MOD}")
+              [ "${slots}" -eq "${tied}" ] \
+                || { echo "${tied} of ${slots} release slots are tied to the shim" >&2; exit 1; }
+              ! grep -q 'create_before_destroy' "${MOD}" \
+                || { echo "rollover must replace destroy-then-create" >&2; exit 1; }
+              # terraform_data is built in; helm stays the only provider.
+              for f in "${WORK}/rollover/versions.tf" "${MOD}"; do
+                ! grep -q 'hashicorp/null' "${f}" \
+                  || { echo "$(basename "${f}") still requires hashicorp/null" >&2; exit 1; }
+              done
+              # Without the flag there is no shim at all.
+              ! grep -q 'terraform_data' "${WORK}/basic/modules/component/main.tf" \
+                || { echo "the shim leaked into a bundle that did not ask for it" >&2; exit 1; }
+            check:
+              ($error == null): true
+
+    - name: reproducibility
+      description: >
+        Bundling the same recipe twice produces byte-identical .tf files.
+        checksums.txt is the attestation subject, so any run-varying field in
+        the generated HCL makes every terraform bundle irreproducible.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-terraform"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/repro" \
+                --deployer terraform
+              for f in main.tf variables.tf versions.tf outputs.tf \
+                       modules/component/main.tf modules/component/variables.tf \
+                       modules/component/outputs.tf; do
+                diff -u "${WORK}/basic/${f}" "${WORK}/repro/${f}" \
+                  || { echo "${f} is not reproducible" >&2; exit 1; }
+              done
+            check:
+              ($error == null): true
+
+    - name: upgrade-is-a-fresh-bundle-copied-over
+      description: >
+        The README documents an upgrade as a bundle generated into a fresh
+        directory and copied into the working directory after the previous
+        bundle's files, listed by its checksums.txt, are removed; a bundle is
+        a closed set of files and the directory Terraform has run in holds
+        .terraform/, the lock file and the operator's tfvars. Both halves are
+        pinned here: regenerating over such a directory fails the
+        closed-world check, and the documented sequence yields byte-identical
+        .tf files, keeps every operator file, keeps a generated folder that
+        holds one, and drops a stale inventoried folder.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-terraform"
+              USED="${WORK}/used"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${USED}" \
+                --deployer terraform
+              # What a root module looks like after terraform init and a
+              # first apply with the default local backend.
+              mkdir -p "${USED}/.terraform/providers"
+              printf 'provider "registry.terraform.io/hashicorp/helm" {}\n' > "${USED}/.terraform.lock.hcl"
+              printf 'wait = true\n' > "${USED}/terraform.tfvars"
+              printf '{"version": 4}\n' > "${USED}/terraform.tfstate"
+              if ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${USED}" \
+                   --deployer terraform > "${WORK}/.regen-out" 2>&1; then
+                echo "regenerating over a bundle Terraform has run in succeeded; the README says it fails" >&2
+                exit 1
+              fi
+              grep -q 'unexpected directory' "${WORK}/.regen-out" \
+                || { echo "regeneration failed for another reason:" >&2; cat "${WORK}/.regen-out" >&2; exit 1; }
+              # The documented flow: a fresh bundle, verified, copied in
+              # after the previous bundle's inventory is removed. More
+              # operator files, which no inventory lists; a folder a
+              # previous bundle numbered differently, which its inventory
+              # does list; and an operator file inside a generated folder.
+              printf '.terraform/\n*.tfstate*\n' > "${USED}/.gitignore"
+              printf 'timeout = 600\n' > "${USED}/extra.auto.tfvars"
+              printf 'notes\n' > "${USED}/notes.md"
+              mkdir -p "${USED}/999-stale"
+              printf 'stale\n' > "${USED}/999-stale/values.yaml"
+              printf '%064d  999-stale/values.yaml\n' 0 >> "${USED}/checksums.txt"
+              first=$(ls -d "${USED}"/001-* | head -n1)
+              printf 'mine\n' > "${first}/mine.txt"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/next" \
+                --deployer terraform
+              ${AICR_BIN} verify "${WORK}/next"
+              (
+                cd "${USED}"
+                awk '{print $2}' checksums.txt | xargs rm -f
+                awk '{print $2}' checksums.txt | xargs -n1 dirname | sort -ur | xargs rmdir 2>/dev/null
+                rm -f checksums.txt
+                cp -R "${WORK}/next/." .
+              )
+              for f in main.tf variables.tf versions.tf outputs.tf \
+                       modules/component/main.tf modules/component/variables.tf; do
+                diff -u "${WORK}/basic/${f}" "${USED}/${f}" \
+                  || { echo "${f} differs between the first bundle and the copied-in regeneration" >&2; exit 1; }
+              done
+              for f in .terraform/providers .terraform.lock.hcl terraform.tfvars terraform.tfstate \
+                       .gitignore extra.auto.tfvars notes.md; do
+                [ -e "${USED}/${f}" ] || { echo "the upgrade removed ${f}, which the README says it never touches" >&2; exit 1; }
+              done
+              grep -q '^wait = true$' "${USED}/terraform.tfvars" \
+                || { echo "terraform.tfvars was overwritten by the copy" >&2; exit 1; }
+              [ ! -e "${USED}/999-stale" ] \
+                || { echo "the upgrade left a stale inventoried folder behind" >&2; exit 1; }
+              [ -f "${first}/mine.txt" ] && [ -f "${first}/values.yaml" ] \
+                || { echo "a generated folder holding an operator file was removed or not refilled" >&2; exit 1; }
+              diff -q "${USED}/checksums.txt" "${WORK}/next/checksums.txt" >/dev/null \
+                || { echo "checksums.txt was not replaced by the new bundle's" >&2; exit 1; }
+              rm -f "${WORK}/.regen-out"
+            check:
+              ($error == null): true
+
+    - name: cleanup
+      description: Remove the working directory.
+      try:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-bundle-terraform
