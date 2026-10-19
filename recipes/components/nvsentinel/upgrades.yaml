@@ -300,6 +300,19 @@ transitions:
               Run helmfile apply from a bundle generated at the new pin.
             reason: >-
               Rolls the DaemonSets and Deployments to v1.28.0.
+          - id: reset-breaker
+            description: >-
+              If the cluster ran the observe step before v1.27.0 and this
+              bundle moves it to a live step (quarantine or remediation),
+              check kubectl get cm circuit-breaker -n nvsentinel -o
+              jsonpath='{.data.status}'. If it prints TRIPPED, reset it with
+              upstream's circuit-breaker runbook
+              (docs/runbooks/circuit-breaker.md at v1.28.0), which patches
+              the ConfigMap to CLOSED and restarts fault-quarantine.
+            reason: >-
+              v1.26.0's dry run fed the breaker, and a trip it persisted
+              halts fault-quarantine at its first live start, so no fault is
+              quarantined or released until the breaker is reset.
           - id: verify
             description: >-
               If janitor runs (kubectl -n nvsentinel get deployment
@@ -332,6 +345,19 @@ transitions:
               Regenerate the bundle at the new pin and run terraform apply.
             reason: >-
               Rolls the DaemonSets and Deployments to v1.28.0.
+          - id: reset-breaker
+            description: >-
+              If the cluster ran the observe step before v1.27.0 and this
+              bundle moves it to a live step (quarantine or remediation),
+              check kubectl get cm circuit-breaker -n nvsentinel -o
+              jsonpath='{.data.status}'. If it prints TRIPPED, reset it with
+              upstream's circuit-breaker runbook
+              (docs/runbooks/circuit-breaker.md at v1.28.0), which patches
+              the ConfigMap to CLOSED and restarts fault-quarantine.
+            reason: >-
+              v1.26.0's dry run fed the breaker, and a trip it persisted
+              halts fault-quarantine at its first live start, so no fault is
+              quarantined or released until the breaker is reset.
           - id: verify
             description: >-
               If janitor runs (kubectl -n nvsentinel get deployment
@@ -350,6 +376,19 @@ transitions:
             reason: >-
               These deployers apply the chart's CRDs themselves, then roll the
               DaemonSets and Deployments to v1.28.0.
+          - id: reset-breaker
+            description: >-
+              If the cluster ran the observe step before v1.27.0 and this
+              bundle moves it to a live step (quarantine or remediation),
+              check kubectl get cm circuit-breaker -n nvsentinel -o
+              jsonpath='{.data.status}'. If it prints TRIPPED, reset it with
+              upstream's circuit-breaker runbook
+              (docs/runbooks/circuit-breaker.md at v1.28.0), which patches
+              the ConfigMap to CLOSED and restarts fault-quarantine.
+            reason: >-
+              v1.26.0's dry run fed the breaker, and a trip it persisted
+              halts fault-quarantine at its first live start, so no fault is
+              quarantined or released until the breaker is reset.
           - id: verify
             description: >-
               If janitor runs (kubectl -n nvsentinel get deployment
