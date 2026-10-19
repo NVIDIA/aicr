@@ -63,3 +63,8 @@ spec:
           repository: registry.suse.com/third-party/nvidia
           usePrecompiled: true
           version: "595"
+        # GPU Operator rejects GDRCopy with precompiled drivers and then
+        # creates no driver DaemonSet, so turn off the gdrcopy.enabled: true
+        # that components/gpu-operator/values.yaml sets.
+        gdrcopy:
+          enabled: false
