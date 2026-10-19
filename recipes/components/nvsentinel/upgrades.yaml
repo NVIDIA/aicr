@@ -258,23 +258,16 @@ transitions:
       never reaches its Job, leaving the node cordoned. It matters only where
       janitor runs, which is the nvsentinel-remediation step. On the observe
       step, the quarantine annotations v1.26.0 wrote carry no dry-run marker,
-      so the new release reads each once as a manual uncordon and cancels the faults
-      observed before the upgrade; and v1.26.0's dry run fed the circuit
-      breaker, so a trip it persisted halts fault-quarantine once the cluster
-      moves to a live step. Two defaults also move: GpuThermalMarginWatch
-      fails a GPU only after three consecutive polls below the slowdown
-      threshold, and gpu-health-monitor suppresses DCGM's two NVLink BER
-      error codes. From v1.28.0 metadata-collector, and gpu-health-monitor in
-      embedded mode, leave a node while the GPU Operator's
-      nvidia.com/gpu.deploy.client label is anything but true or absent, as
-      during a driver upgrade or MIG change, and a hung DCGM probe
-      (DCGM_PROBE_HANG) is stored rather than cordoning the node
-      (gpu-health-monitor.dcgm.probeStoreOnly, default true).
+      so the new release reads each once as a manual uncordon and cancels the
+      faults observed before the upgrade; and v1.26.0's dry run fed the
+      circuit breaker, so a trip it persisted halts fault-quarantine once the
+      cluster moves to a live step.
     precondition: >-
       Where janitor runs (kubectl -n nvsentinel get deployment janitor finds
       it, as on the nvsentinel-remediation step), no GPUReset is in progress:
-      kubectl get gpuresets.janitor.dgxc.nvidia.com shows none without a
-      Complete condition.
+      kubectl get gpuresets.janitor.dgxc.nvidia.com -o
+      jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.conditions[?(@.type=="Complete")].status}{"\n"}{end}'
+      prints True for every GPUReset.
     reversible: true
     reversibleNotes: >-
       helm rollback to the v1.26.0 revision restores the previous workloads.

@@ -23,8 +23,9 @@
 # The three steps are mutually exclusive: each sets the same toggles, so a
 # leaf composing two fails at recipe resolution. Move to
 # nvsentinel-quarantine by swapping the mixin name. Faults observed before
-# the switch are cancelled, because fault-quarantine reads their leftover
-# annotation on the uncordoned node as a manual uncordon.
+# the switch are discarded: their quarantines carry a dry-run marker, which
+# fault-quarantine removes, cancelling their events, at its first live start.
+# See docs/user/component-catalog.md#graded-remediation.
 #
 # Adds psmdb-operator and nvsentinel-mongodb, a three-member Percona MongoDB
 # that NVSentinel uses as its datastore. Needs cert-manager, a default
