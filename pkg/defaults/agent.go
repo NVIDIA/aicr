@@ -29,8 +29,8 @@ const (
 	AgentName = "aicr"
 
 	// AgentClusterRoleName prefixes the snapshot agent's run-scoped
-	// ClusterRole and ClusterRoleBinding names. Agents that predate run-scoped
-	// naming created both under this name unsuffixed.
+	// ClusterRole and ClusterRoleBinding names. Older agents used it
+	// unsuffixed.
 	AgentClusterRoleName = "aicr-node-reader"
 
 	// AgentImageRepository is the registry path of the agent image.

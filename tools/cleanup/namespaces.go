@@ -32,14 +32,12 @@ var notOwnedNamespaces = map[string]string{
 
 // runtimeNamespaces are namespaces cleanup owns that no recipe names.
 var runtimeNamespaces = []string{
-	// Nodewright's namespace from when it was named Skyhook. Clusters
-	// installed then keep the release here, since Helm cannot move one.
+	// Nodewright's former name. Older installs keep their release here
+	// because Helm cannot move a release.
 	"skyhook",
 	// Created by kai-scheduler.
 	"kai-resource-reservation",
-	// Created by the CNCF evidence collector. The gang-scheduling check's
-	// per-run namespaces are matched by
-	// defaults.GangSchedulingTestNamespacePrefix.
+	// Created by the CNCF evidence collector, without a per-run suffix.
 	"gang-scheduling-test",
 }
 

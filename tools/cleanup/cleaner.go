@@ -223,6 +223,7 @@ func (c *cleaner) driverManaged(ctx context.Context, releases []helmRelease) boo
 	if c.helm == nil {
 		return false
 	}
+	// Without the DaemonSet, fall back to the release's computed driver.enabled.
 	for _, rel := range releases {
 		if rel.Name != gpuOperatorRelease {
 			continue
@@ -239,10 +240,8 @@ func (c *cleaner) driverManaged(ctx context.Context, releases []helmRelease) boo
 	return false
 }
 
-// driverGuidance warns that a driver-managed cluster needs its GPU nodes
-// rebooted. Uninstalling gpu-operator can leave nvidia_uvm wedged mid-unload,
-// which breaks the next install until the nodes reboot. Automating the reboot
-// is cloud-specific and out of scope.
+// driverGuidance warns that the GPU nodes need a reboot before the next
+// install. The reboot is left to the operator because it is cloud-specific.
 func (c *cleaner) driverGuidance() {
 	c.log.Warn("gpu-operator manages the NVIDIA kernel driver here, so reboot the GPU nodes after cleanup and before reinstalling",
 		"reason", "nvidia_uvm can stay wedged mid-unload, and the next install fails driver validation with Init:CrashLoopBackOff",
@@ -271,8 +270,8 @@ func (c *cleaner) uninstallReleases(ctx context.Context, releases []helmRelease)
 	}
 }
 
-// deleteObject deletes one object, bounded by K8sCleanupTimeout. NotFound
-// counts as done. Other failures are logged and cleanup carries on.
+// deleteObject deletes one object with del, which it skips under --dry-run.
+// It ignores NotFound and logs any other error.
 func (c *cleaner) deleteObject(ctx context.Context, resource, namespace, name string, del func(context.Context) error) {
 	log := c.log.With("resource", resource, "name", name)
 	if namespace != "" {
@@ -354,8 +353,8 @@ func (c *cleaner) deleteNamespaces(ctx context.Context) {
 	}
 }
 
-// checkNamespaces lists the per-run namespaces conformance checks left behind.
-// A failed list is logged rather than treated as "nothing matched".
+// checkNamespaces returns the sorted per-run namespaces conformance checks
+// left behind. When the list fails it logs a warning and returns nil.
 func (c *cleaner) checkNamespaces(ctx context.Context) []string {
 	ctx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
 	defer cancel()
@@ -375,8 +374,8 @@ func (c *cleaner) checkNamespaces(ctx context.Context) []string {
 	return found
 }
 
-// deleteNamespace deletes ns without waiting. A namespace that does not exist
-// is skipped silently.
+// deleteNamespace deletes ns without waiting, and does nothing if ns does not
+// exist.
 func (c *cleaner) deleteNamespace(ctx context.Context, ns string) {
 	getCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
 	_, err := c.kube.CoreV1().Namespaces().Get(getCtx, ns, metav1.GetOptions{})
@@ -392,9 +391,8 @@ func (c *cleaner) deleteNamespace(ctx context.Context, ns string) {
 	})
 }
 
-// rescueNamespace clears finalizers on objects left in a namespace stuck
-// Terminating, which happens when a CR's finalizer points at a controller that
-// is already gone.
+// rescueNamespace clears the finalizers of objects in namespace name if it is
+// stuck Terminating, as happens when a finalizer's controller is already gone.
 func (c *cleaner) rescueNamespace(ctx context.Context, name string) {
 	getCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
 	ns, err := c.kube.CoreV1().Namespaces().Get(getCtx, name, metav1.GetOptions{})
@@ -432,9 +430,9 @@ func (c *cleaner) rescueNamespace(ctx context.Context, name string) {
 	}
 }
 
-// namespacedResources returns the preferred version of each listable,
-// patchable namespaced resource the server serves, sorted. Partial discovery
-// results are still used.
+// namespacedResources returns the sorted preferred version of each namespaced
+// resource that supports list and patch, minus finalizerRescueSkip. It uses
+// partial results when discovery fails for some groups.
 func (c *cleaner) namespacedResources() []schema.GroupVersionResource {
 	lists, err := discovery.ServerPreferredNamespacedResources(c.disc)
 	if err != nil && len(lists) == 0 {
@@ -459,17 +457,17 @@ func (c *cleaner) namespacedResources() []schema.GroupVersionResource {
 	return out
 }
 
-// isAICRClusterRBAC matches cluster RBAC from `aicr validate` and the snapshot
-// agent, current objects by label and legacy ones by name. Objects labeled
-// component=agent-rbac are spared. An operator applied them for a
-// ServiceAccount they supplied, no run owns them, and restoring them needs that
-// operator.
+// isAICRClusterRBAC reports whether obj is cluster RBAC from aicr validate or
+// the snapshot agent. It is false for objects labeled component=agent-rbac,
+// which an operator applied for their own ServiceAccount and only they can
+// restore.
 func isAICRClusterRBAC(obj metav1.Object) bool {
 	l := obj.GetLabels()
 	if l[k8slabels.Component] == k8slabels.ValueAgentRBAC {
 		return false
 	}
 	name := obj.GetName()
+	// Current objects match by label, and legacy ones by name.
 	return l[k8slabels.ManagedBy] == k8slabels.ValueAICR ||
 		l[k8slabels.Name] == vlabels.ValueValidator ||
 		strings.HasPrefix(name, vlabels.ValueValidator+"-") ||
@@ -477,15 +475,15 @@ func isAICRClusterRBAC(obj metav1.Object) bool {
 		name == defaults.AgentClusterRoleName
 }
 
-// isSnapshotAgentObject matches snapshot-agent Jobs, ServiceAccounts, Roles
-// and RoleBindings, current run-scoped objects by label and legacy ones by
-// their fixed name. The label match is deliberately not run-scoped, so it
-// also takes the objects of a run still in flight.
+// isSnapshotAgentObject reports whether obj belongs to any snapshot agent run,
+// including one still in flight. It is false for objects labeled
+// component=agent-rbac.
 func isSnapshotAgentObject(obj metav1.Object) bool {
 	l := obj.GetLabels()
 	if l[k8slabels.Component] == k8slabels.ValueAgentRBAC {
 		return false
 	}
+	// Legacy objects match by their fixed name, and current ones by label.
 	return obj.GetName() == defaults.AgentName ||
 		(l[k8slabels.Name] == k8slabels.ValueAICR && l[k8slabels.Component] == k8slabels.ValueSnapshotAgent)
 }

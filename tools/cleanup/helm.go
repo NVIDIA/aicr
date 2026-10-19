@@ -35,10 +35,10 @@ type helmClient interface {
 	values(ctx context.Context, rel helmRelease) (map[string]any, error)
 }
 
-// runFunc runs one helm command. It matches helm.Run.
+// runFunc has the signature of helm.Run.
 type runFunc func(ctx context.Context, timeout time.Duration, outputLimit int64, args ...string) ([]byte, error)
 
-// helmCLI runs helm commands through run, which is helm.Run outside tests.
+// helmCLI implements helmClient with run, which is helm.Run outside tests.
 type helmCLI struct {
 	run runFunc
 }

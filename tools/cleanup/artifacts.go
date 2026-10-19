@@ -26,8 +26,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 )
 
-// sweep deletes every object of one resource, in namespace when it is set,
-// that match selects.
+// A sweep deletes the gvr objects in namespace that match selects. An empty
+// namespace covers the whole cluster.
 type sweep struct {
 	gvr       schema.GroupVersionResource
 	namespace string
@@ -43,8 +43,6 @@ var (
 	serviceAccountGVR     = corev1.SchemeGroupVersion.WithResource("serviceaccounts")
 )
 
-// artifactSweeps covers cluster RBAC from validator and snapshot-agent runs,
-// and the snapshot agent's namespaced objects in the gpu-operator namespace.
 var artifactSweeps = []sweep{
 	{gvr: clusterRoleBindingGVR, match: isAICRClusterRBAC},
 	{gvr: clusterRoleGVR, match: isAICRClusterRBAC},

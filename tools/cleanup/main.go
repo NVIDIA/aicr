@@ -12,21 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Command cleanup removes AICR-installed resources from the current cluster so
-// a fresh install can be re-applied. It runs four phases:
+// Command cleanup removes AICR-installed resources from the cluster of the
+// current kubeconfig context, in four phases:
 //
 //  1. Helm releases in AICR component namespaces
-//  2. `aicr validate` and snapshot-agent artifacts
+//  2. aicr validate and snapshot-agent artifacts
 //  3. Custom Resource Definitions in AICR-owned API groups
 //  4. AICR component and check-created namespaces, with stuck-finalizer rescue
 //
-// The component namespaces come from the embedded recipe catalog, so a new
-// registry component is covered without editing this tool. Cluster-scoped
-// resources outside the AICR component domains are left alone.
-//
-// The snapshot-agent sweep in phase 2 matches every run, including one in
-// flight, so do not run this against a cluster with an active `aicr snapshot`
-// or `aicr validate`.
+// It leaves cluster-scoped resources outside AICR components alone. Do not run
+// it during an aicr snapshot or aicr validate run, since phase 2 also deletes
+// that run's objects.
 //
 // Usage:
 //
@@ -137,10 +133,10 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	return opts, nil
 }
 
-// csvAppender appends the comma-separated, whitespace-trimmed tokens of a flag
-// value to dst. A flag-shaped value (`--exclude-ns --yes`) is rejected, so a
-// forgotten argument cannot swallow the next flag and leave the install it was
-// meant to protect unfenced.
+// csvAppender returns a flag.Func handler that appends each non-empty, trimmed
+// comma-separated token of the value to dst. It rejects a value starting with
+// "-", which is the next flag swallowed by a missing argument, and names what
+// in the error.
 func csvAppender(dst *[]string, what string) func(string) error {
 	return func(value string) error {
 		if strings.HasPrefix(value, "-") {
@@ -193,9 +189,8 @@ func newCleaner(ctx context.Context, opts options, log *slog.Logger) (*cleaner, 
 	return c, nil
 }
 
-// currentContext names the kubeconfig context the clients were built from. It
-// is informational. The server the clients actually talk to is reported from
-// their rest.Config.
+// currentContext returns the current context of the kubeconfig the clients
+// load, for display only.
 func currentContext() string {
 	rules := clientcmd.NewDefaultClientConfigLoadingRules()
 	if path := client.ResolveKubeconfigPath(""); path != "" {
@@ -204,7 +199,8 @@ func currentContext() string {
 	return contextName(clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{}))
 }
 
-// contextName returns cfg's current context, or "unknown" when it has none.
+// contextName returns cfg's current context, or "unknown" when it has none or
+// cannot be read.
 func contextName(cfg clientcmd.ClientConfig) string {
 	raw, err := cfg.RawConfig()
 	if err != nil || raw.CurrentContext == "" {
@@ -213,7 +209,7 @@ func contextName(cfg clientcmd.ClientConfig) string {
 	return raw.CurrentContext
 }
 
-// prompt asks the operator to confirm before anything destructive runs.
+// A prompt asks the operator question and reports whether they answered yes.
 type prompt func(question string) bool
 
 func newPrompt(in io.Reader, out io.Writer) prompt {

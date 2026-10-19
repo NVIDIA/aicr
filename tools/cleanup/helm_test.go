@@ -32,14 +32,14 @@ type helmCall struct {
 	args    string
 }
 
-// recordingRun returns a runFunc that answers every call with out and err,
-// and the calls it received.
-func recordingRun(out string, err error) (runFunc, *[]helmCall) {
-	var calls []helmCall
+// recordingRun returns run, which answers every call with out and err, and
+// calls, which records each call to run.
+func recordingRun(out string, err error) (run runFunc, calls *[]helmCall) {
+	var recorded []helmCall
 	return func(_ context.Context, timeout time.Duration, _ int64, args ...string) ([]byte, error) {
-		calls = append(calls, helmCall{timeout: timeout, args: strings.Join(args, " ")})
+		recorded = append(recorded, helmCall{timeout: timeout, args: strings.Join(args, " ")})
 		return []byte(out), err
-	}, &calls
+	}, &recorded
 }
 
 func TestHelmCLIList(t *testing.T) {

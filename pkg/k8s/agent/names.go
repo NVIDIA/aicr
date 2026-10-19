@@ -129,9 +129,8 @@ type resolvedName struct {
 // resolvedNames returns every object name this Deployer builds from a
 // caller-supplied prefix, paired with its source field.
 //
-// The ClusterRole, ClusterRoleBinding and staging ConfigMap names are absent
-// because their prefixes are constants. The only caller-supplied input they
-// carry is the run ID, which validateRunID already covers.
+// It omits the ClusterRole, ClusterRoleBinding and staging ConfigMap names,
+// whose only caller-supplied input is the run ID that validateRunID checks.
 func (d *Deployer) resolvedNames() []resolvedName {
 	jobField, jobPrefix := "Config.NameBase", d.base()
 	if d.config.JobName != "" {

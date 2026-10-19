@@ -44,8 +44,8 @@ const (
 )
 
 const (
-	// ValidationNamespace is the default namespace for `aicr validate` Jobs
-	// and the snapshot agent it deploys.
+	// ValidationNamespace is the default namespace for aicr validate Jobs and
+	// the snapshot agent it deploys.
 	ValidationNamespace = "aicr-validation"
 
 	// GangSchedulingTestNamespacePrefix prefixes the per-run namespace the

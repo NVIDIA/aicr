@@ -28,15 +28,18 @@ import (
 // Binary is the helm executable Run looks up on PATH.
 const Binary = "helm"
 
-// commandFunc builds the command Run executes. It matches exec.CommandContext.
+// commandFunc has the signature of exec.CommandContext, which builds the
+// command run executes outside tests.
 type commandFunc func(ctx context.Context, name string, args ...string) *exec.Cmd
 
-// Run executes helm with args and returns its stdout. The command is bounded
-// by timeout, or by ctx's deadline when that is sooner, and fails once stdout
-// exceeds outputLimit bytes. A failed command also returns the stdout written
-// before it failed. Its error message carries helm's "Error:" stderr line and
-// its context carries the full stderr. A context that ends first reports
-// ErrCodeTimeout or ErrCodeCanceled.
+// Run runs helm with args, stopping after timeout or when ctx ends, and
+// returns its stdout. On failure it also returns the stdout written so far,
+// with an error that has code
+//   - ErrCodeInvalidRequest when args is empty
+//   - ErrCodeInternal when stdout exceeds outputLimit bytes
+//   - ErrCodeTimeout or ErrCodeCanceled when timeout or ctx ends first
+//   - ErrCodeInternal otherwise, with helm's "Error:" line in the message and
+//     the full stderr in its context
 func Run(ctx context.Context, timeout time.Duration, outputLimit int64, args ...string) ([]byte, error) {
 	return run(ctx, exec.CommandContext, nil, timeout, outputLimit, args...)
 }

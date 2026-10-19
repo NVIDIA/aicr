@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package helm runs the helm CLI with bounded time and output, and renders
-// charts with `helm template`.
+// Package helm runs the helm CLI and renders charts with helm template.
 package helm
 
 import (
@@ -78,10 +77,8 @@ func (r *CLIRenderer) Render(ctx context.Context, input ChartInput) ([]byte, err
 	return RenderChart(ctx, input)
 }
 
-// RenderChart shells out to `helm template` and returns rendered YAML.
-// OCI charts (Repository starts with "oci://") use the full URL as the
-// chart argument with no --repo flag; HTTP charts use the bare chart name
-// plus --repo. Inline values reach helm on stdin.
+// RenderChart returns the YAML helm template renders for input. It fails as
+// Run does, and with ErrCodeInvalidRequest when input.Chart is empty.
 func RenderChart(ctx context.Context, input ChartInput) ([]byte, error) {
 	return renderChart(ctx, exec.CommandContext, input)
 }
@@ -103,14 +100,16 @@ func renderChart(ctx context.Context, command commandFunc, input ChartInput) ([]
 		templateArgs(input, stdin != nil)...)
 }
 
-// templateArgs returns the `helm template` arguments for input, reading
-// values from stdin when valuesOnStdin is set.
+// templateArgs returns the helm template arguments for input. When
+// valuesOnStdin is set, they read values from stdin.
 func templateArgs(input ChartInput, valuesOnStdin bool) []string {
 	var (
 		chart    string
 		repoFlag string
 	)
 
+	// OCI charts are addressed by full URL with no --repo. HTTP charts use
+	// the bare chart name plus --repo.
 	if strings.HasPrefix(input.Repository, "oci://") {
 		chart = strings.TrimRight(input.Repository, "/") + "/" + lastPathSegment(input.Chart)
 	} else {
@@ -150,6 +149,7 @@ func templateArgs(input ChartInput, valuesOnStdin bool) []string {
 		args = append(args, "--values", input.ValuesPath)
 	}
 
+	// Later --values flags win, so inline values override ValuesPath.
 	if valuesOnStdin {
 		args = append(args, "--values", "-")
 	}

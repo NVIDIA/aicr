@@ -33,8 +33,8 @@ import (
 
 const fakeHelmEnv = "AICR_FAKE_HELM"
 
-// fakeHelm is what the re-executed test binary does in place of helm.
-// Hang wins over StdoutBytes, then EchoStdin, then Stderr.
+// fakeHelm sets how the fake helm behaves. The first field set among Hang,
+// StdoutBytes, EchoStdin and Stderr decides, and otherwise it prints Stdout.
 type fakeHelm struct {
 	Stdout      string
 	Stderr      string
@@ -43,8 +43,8 @@ type fakeHelm struct {
 	Hang        bool
 }
 
-// TestFakeHelmSubprocessHelper is the fake helm. It does nothing unless
-// fakeCommand started this process.
+// TestFakeHelmSubprocessHelper acts as the fake helm when fakeCommand starts
+// this binary, and does nothing otherwise.
 func TestFakeHelmSubprocessHelper(_ *testing.T) {
 	raw := os.Getenv(fakeHelmEnv)
 	if raw == "" {
@@ -71,23 +71,23 @@ func TestFakeHelmSubprocessHelper(_ *testing.T) {
 	os.Exit(0)
 }
 
-// fakeCommand returns a commandFunc that re-runs this test binary as a fake
-// helm behaving as f, and a function reporting the command line of every
-// call made through it.
-func fakeCommand(t *testing.T, f fakeHelm) (commandFunc, func() [][]string) {
+// fakeCommand returns command, which starts this test binary as a fake helm
+// behaving as f, and calls, which reports the command line of each call to
+// command.
+func fakeCommand(t *testing.T, f fakeHelm) (command commandFunc, calls func() [][]string) {
 	t.Helper()
 	raw, err := json.Marshal(f)
 	if err != nil {
 		t.Fatalf("encode fake helm: %v", err)
 	}
-	var calls [][]string
-	command := func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		calls = append(calls, append([]string{name}, args...))
+	var recorded [][]string
+	command = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		recorded = append(recorded, append([]string{name}, args...))
 		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestFakeHelmSubprocessHelper$")
 		cmd.Env = append(os.Environ(), fakeHelmEnv+"="+string(raw))
 		return cmd
 	}
-	return command, func() [][]string { return calls }
+	return command, func() [][]string { return recorded }
 }
 
 func TestRun(t *testing.T) {
