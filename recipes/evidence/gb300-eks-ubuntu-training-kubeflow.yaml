@@ -1,0 +1,8 @@
+attestations:
+  - attestedAt: 2026-10-19T19:06:08Z
+    bundle:
+      digest: sha256:f98709e80dd03581fc508d5ae95c3e4951f8a67f5a1741bb8ecb5afab7adf29e
+      oci: ghcr.io/yuanchen8911/aicr-evidence:gb300-eks-ubuntu-training-kubeflow-fb7a913f9f1f
+      predicateType: https://aicr.run/recipe-evidence/v3
+recipe: gb300-eks-ubuntu-training-kubeflow
+schemaVersion: 1.0.0
