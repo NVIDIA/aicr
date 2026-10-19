@@ -2293,7 +2293,9 @@ the operator moves, then upgrade CRDs first and the operator second:
    substituting each one's name and namespace. AICR's own accounting database
    (`mariadb` in namespace `slurm`) is not HA, so it needs no patch:
    ```bash
-   kubectl patch mariadb <name> -n <namespace> --type merge \
+   NAME="my-mariadb"      # replace with the HA MariaDB's name
+   NAMESPACE="databases"  # replace with its namespace
+   kubectl patch mariadb "${NAME}" -n "${NAMESPACE}" --type merge \
      -p '{"spec":{"updateStrategy":{"autoUpdateDataPlane":true}}}'
    ```
    With Argo CD or Flux, do not patch the live resource. Set
@@ -2336,26 +2338,29 @@ the operator moves, then upgrade CRDs first and the operator second:
    show this: the operator computes both against whatever StatefulSet exists,
    so they are already `True` before `26.10.1` first reconciles the resource,
    and a flag reverted at that point leaves `26.10.1` keeping the old init and
-   agent images. The waits below cannot pass on that old state. Substitute the
-   name, namespace and pod names (`<name>-0` up to `<name>-<replicas-1>`), and
-   set `3` to the replica count:
+   agent images. The waits below cannot pass on that old state. Set the name,
+   namespace and replica count, and list one pod per replica, `${NAME}-0` up to
+   `${NAME}-<replicas-1>`:
    ```bash
-   IMG=ghcr.io/mariadb-operator/mariadb-operator:26.10.1
+   NAME="my-mariadb"      # replace with the HA MariaDB's name
+   NAMESPACE="databases"  # replace with its namespace
+   REPLICAS=3             # replace with its replica count
+   IMG="ghcr.io/mariadb-operator/mariadb-operator:26.10.1"
    # The StatefulSet renders the new data plane.
-   kubectl wait sts <name> -n <namespace> --timeout=10m \
-     --for=jsonpath='{.spec.template.spec.initContainers[?(@.name=="init")].image}'=$IMG
-   kubectl wait sts <name> -n <namespace> --timeout=10m \
-     --for=jsonpath='{.spec.template.spec.containers[?(@.name=="agent")].image}'=$IMG
-   # Every pod runs it.
-   kubectl wait pod <name>-0 <name>-1 <name>-2 -n <namespace> --timeout=15m \
-     --for=jsonpath='{.status.initContainerStatuses[?(@.name=="init")].image}'=$IMG
-   kubectl wait pod <name>-0 <name>-1 <name>-2 -n <namespace> --timeout=15m \
-     --for=jsonpath='{.status.containerStatuses[?(@.name=="agent")].image}'=$IMG
+   kubectl wait sts "${NAME}" -n "${NAMESPACE}" --timeout=10m \
+     --for=jsonpath='{.spec.template.spec.initContainers[?(@.name=="init")].image}'="${IMG}"
+   kubectl wait sts "${NAME}" -n "${NAMESPACE}" --timeout=10m \
+     --for=jsonpath='{.spec.template.spec.containers[?(@.name=="agent")].image}'="${IMG}"
+   # Every pod runs it. One name per replica.
+   kubectl wait pod "${NAME}-0" "${NAME}-1" "${NAME}-2" -n "${NAMESPACE}" --timeout=15m \
+     --for=jsonpath='{.status.initContainerStatuses[?(@.name=="init")].image}'="${IMG}"
+   kubectl wait pod "${NAME}-0" "${NAME}-1" "${NAME}-2" -n "${NAMESPACE}" --timeout=15m \
+     --for=jsonpath='{.status.containerStatuses[?(@.name=="agent")].image}'="${IMG}"
    # The roll has finished.
-   kubectl wait sts <name> -n <namespace> --timeout=15m \
-     --for=jsonpath='{.status.updatedReplicas}'=3
-   kubectl wait sts <name> -n <namespace> --timeout=15m \
-     --for=jsonpath='{.status.readyReplicas}'=3
+   kubectl wait sts "${NAME}" -n "${NAMESPACE}" --timeout=15m \
+     --for=jsonpath='{.status.updatedReplicas}'="${REPLICAS}"
+   kubectl wait sts "${NAME}" -n "${NAMESPACE}" --timeout=15m \
+     --for=jsonpath='{.status.readyReplicas}'="${REPLICAS}"
    ```
    The operator writes the new images into the `MariaDB` spec before it
    renders the StatefulSet, so once the template carries them step 5 can no
@@ -2399,7 +2404,9 @@ repositories should set `spec.image`. For one a Helm release creates, print the
 manifest as rendered, before the operator filled anything in:
 
 ```bash
-helm get manifest <release> -n <namespace>
+RELEASE="my-release"       # replace with the Helm release name
+NAMESPACE="my-namespace"   # replace with its namespace
+helm get manifest "${RELEASE}" -n "${NAMESPACE}"
 ```
 
 A `kind: MariaDB` document there with no `image:` under `spec` comes up on
