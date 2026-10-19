@@ -41,10 +41,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/yuin/goldmark"
-	"github.com/yuin/goldmark/ast"
-	"github.com/yuin/goldmark/extension"
-	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/v2"
+	"github.com/yuin/goldmark/v2/ast"
+	"github.com/yuin/goldmark/v2/extension"
+	"github.com/yuin/goldmark/v2/text"
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
