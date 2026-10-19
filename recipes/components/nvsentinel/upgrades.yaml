@@ -237,3 +237,170 @@ transitions:
       diff; the rollback itself was not exercised.
     references:
       - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.26.0
+  - from: ">=1.26.0 <1.28.0"
+    to: "1.28.0"
+    verdict: manual
+    verifiedBy: >-
+      Upstream v1.27.0 and v1.28.0 release notes and commit lists, and helm
+      template of v1.26.0, v1.27.0 and v1.28.0 on
+      2026-10-19: images move to v1.28.0 with no third-party image change,
+      no values key AICR sets moved, and the only CRD change is v1.27.0's
+      status.managedServices on gpuresets.janitor.dgxc.nvidia.com, which the
+      v1.26.0 schema does not declare and does not preserve unknown fields
+      under. janitor (pkg/controller/gpureset_controller.go,
+      ensureManagedServicesRecord) re-records a missing managedServices and
+      requeues before tearing services down.
+    summary: >-
+      From v1.27.0 janitor records in GPUReset status.managedServices which GPU
+      Operator services it stopped before a reset, and restores only those.
+      The v1.26.0 GPUReset CRD does not declare the field, so the API server
+      prunes it; janitor then rewrites the record every second and the reset
+      never reaches its Job, leaving the node cordoned. It matters only where
+      janitor runs, which is the nvsentinel-remediation step. On the observe
+      step, the quarantine annotations v1.26.0 wrote carry no dry-run marker,
+      so the new release reads each once as a manual uncordon and cancels the
+      faults observed before the upgrade; and v1.26.0's dry run fed the
+      circuit breaker, so a trip it persisted halts fault-quarantine once the
+      cluster moves to a live step.
+    precondition: >-
+      Where janitor runs (kubectl -n nvsentinel get deployment janitor finds
+      it, as on the nvsentinel-remediation step), no GPUReset is in progress:
+      kubectl get gpuresets.janitor.dgxc.nvidia.com -o
+      jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.conditions[?(@.type=="Complete")].status}{"\n"}{end}'
+      prints True for every GPUReset.
+    reversible: true
+    reversibleNotes: >-
+      helm rollback to the v1.26.0 revision restores the previous workloads.
+      The newer GPUReset CRD stays applied; it only adds an optional status
+      field, which v1.26.0's janitor does not read. First remove the dry-run
+      marker from every node (kubectl annotate nodes --all
+      quarantineHealthEventDryRun-): v1.26.0 leaves it in place, so a real
+      quarantine it makes would carry the marker, and the next upgrade would
+      discard that quarantine as a dry run and leave the node cordoned with
+      no record. This rests on the CRD diff and upstream's notes; the
+      rollback itself was not exercised.
+    stepsByDeployer:
+      - deployers: [helmfile]
+        steps:
+          - id: apply-new-crds
+            description: >-
+              Apply the v1.28.0 CRDs using the CRD-apply command under
+              "Upgrade, uninstall, and troubleshooting" in
+              docs/user/component-catalog.md, with
+              CHART=oci://ghcr.io/nvidia/nvsentinel, VERSION=v1.28.0 and
+              EXCLUDE_SUBCHARTS=mongodb-store, so the Percona CRDs
+              psmdb-operator owns are left alone.
+            reason: >-
+              helmfile never updates CRDs for ownsCRDs components. Without
+              a GPUReset CRD from v1.27.0 or later, the API server prunes
+              status.managedServices and every GPU reset stalls before its
+              Job.
+          - id: apply
+            description: >-
+              Run helmfile apply from a bundle generated at the new pin.
+            reason: >-
+              Rolls the DaemonSets and Deployments to v1.28.0.
+          - id: reset-breaker
+            description: >-
+              If the cluster ran the observe step before v1.27.0 and this
+              bundle moves it to a live step (quarantine or remediation),
+              check kubectl get cm circuit-breaker -n nvsentinel -o
+              jsonpath='{.data.status}'. If it prints TRIPPED, reset it with
+              upstream's circuit-breaker runbook
+              (docs/runbooks/circuit-breaker.md at v1.28.0), which patches
+              the ConfigMap to CLOSED and restarts fault-quarantine.
+            reason: >-
+              v1.26.0's dry run fed the breaker, and a trip it persisted
+              halts fault-quarantine at its first live start, so no fault is
+              quarantined or released until the breaker is reset.
+          - id: verify
+            description: >-
+              If janitor runs (kubectl -n nvsentinel get deployment
+              janitor), kubectl get crd gpuresets.janitor.dgxc.nvidia.com -o
+              jsonpath='{.spec.versions[0].schema.openAPIV3Schema.properties.status.properties.managedServices.type}'
+              prints object. Without janitor the chart renders no GPUReset
+              CRD and there is nothing to check.
+            reason: >-
+              A rolled-out janitor says nothing about the CRD, and the stall
+              shows only when a reset runs.
+      - deployers: [terraform]
+        steps:
+          - id: apply-new-crds
+            description: >-
+              Apply the v1.28.0 CRDs using the CRD-apply command under
+              "Upgrade, uninstall, and troubleshooting" in
+              docs/user/component-catalog.md, with
+              CHART=oci://ghcr.io/nvidia/nvsentinel, VERSION=v1.28.0,
+              MANAGER=terraform-provider-helm and
+              EXCLUDE_SUBCHARTS=mongodb-store, so the Percona CRDs
+              psmdb-operator owns are left alone.
+            reason: >-
+              terraform never updates CRDs for ownsCRDs components: helm_release
+              upgrades through Helm, which never applies a changed crds/.
+              Without a GPUReset CRD from v1.27.0 or later, the API server prunes
+              status.managedServices and every GPU reset stalls before its
+              Job.
+          - id: apply
+            description: >-
+              Regenerate the bundle at the new pin and run terraform apply.
+            reason: >-
+              Rolls the DaemonSets and Deployments to v1.28.0.
+          - id: reset-breaker
+            description: >-
+              If the cluster ran the observe step before v1.27.0 and this
+              bundle moves it to a live step (quarantine or remediation),
+              check kubectl get cm circuit-breaker -n nvsentinel -o
+              jsonpath='{.data.status}'. If it prints TRIPPED, reset it with
+              upstream's circuit-breaker runbook
+              (docs/runbooks/circuit-breaker.md at v1.28.0), which patches
+              the ConfigMap to CLOSED and restarts fault-quarantine.
+            reason: >-
+              v1.26.0's dry run fed the breaker, and a trip it persisted
+              halts fault-quarantine at its first live start, so no fault is
+              quarantined or released until the breaker is reset.
+          - id: verify
+            description: >-
+              If janitor runs (kubectl -n nvsentinel get deployment
+              janitor), kubectl get crd gpuresets.janitor.dgxc.nvidia.com -o
+              jsonpath='{.spec.versions[0].schema.openAPIV3Schema.properties.status.properties.managedServices.type}'
+              prints object. Without janitor the chart renders no GPUReset
+              CRD and there is nothing to check.
+            reason: >-
+              A rolled-out janitor says nothing about the CRD, and the stall
+              shows only when a reset runs.
+      - steps:
+          - id: apply
+            description: >-
+              Re-run install.sh (helm), or commit the regenerated bundle and
+              reconcile or sync it (flux, argocd, argocd-helm).
+            reason: >-
+              These deployers apply the chart's CRDs themselves, then roll the
+              DaemonSets and Deployments to v1.28.0.
+          - id: reset-breaker
+            description: >-
+              If the cluster ran the observe step before v1.27.0 and this
+              bundle moves it to a live step (quarantine or remediation),
+              check kubectl get cm circuit-breaker -n nvsentinel -o
+              jsonpath='{.data.status}'. If it prints TRIPPED, reset it with
+              upstream's circuit-breaker runbook
+              (docs/runbooks/circuit-breaker.md at v1.28.0), which patches
+              the ConfigMap to CLOSED and restarts fault-quarantine.
+            reason: >-
+              v1.26.0's dry run fed the breaker, and a trip it persisted
+              halts fault-quarantine at its first live start, so no fault is
+              quarantined or released until the breaker is reset.
+          - id: verify
+            description: >-
+              If janitor runs (kubectl -n nvsentinel get deployment
+              janitor), kubectl get crd gpuresets.janitor.dgxc.nvidia.com -o
+              jsonpath='{.spec.versions[0].schema.openAPIV3Schema.properties.status.properties.managedServices.type}'
+              prints object. Without janitor the chart renders no GPUReset
+              CRD and there is nothing to check.
+            reason: >-
+              Confirms the deployer applied the new CRD; the stall shows only
+              when a reset runs.
+    references:
+      - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.27.0
+      - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.28.0
+      - https://github.com/NVIDIA/NVSentinel/pull/1989
+      - https://github.com/NVIDIA/NVSentinel/blob/v1.28.0/docs/configuration/fault-quarantine.md

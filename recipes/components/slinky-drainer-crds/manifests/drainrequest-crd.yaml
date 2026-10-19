@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# DrainRequest CRD, vendored verbatim from NVSentinel v1.26.0
+# DrainRequest CRD, vendored verbatim from NVSentinel v1.28.0
 # (plugins/slinky-drainer/config/crd/nvsentinel.nvidia.com_drainrequests.yaml,
-# commit a5b9e90f). node-drainer validates the REST mapping at startup and
+# commit 5b438529). node-drainer validates the REST mapping at startup and
 # exits without it, and the plugin's controller fails its cache sync, so
 # nvsentinel and slinky-drainer both depend on this component: a separate
 # release lets the deployers wait for the CRD to be Established first.

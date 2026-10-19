@@ -25,7 +25,7 @@
 # cordoned node, and fault-quarantine cordons), then for its jobs to finish,
 # then deletes the slurmd pods and marks the request DrainComplete.
 #
-# Values verified against NVSentinel chart v1.26.0
+# Values verified against NVSentinel chart v1.28.0
 # (charts/node-drainer/values.yaml customDrain, pkg/config/config.go):
 #   - with an empty customDrain.nodeSelector every node goes through the
 #     plugin, and node-drainer refuses to start unless userNamespaces and

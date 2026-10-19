@@ -13,9 +13,9 @@
 # limitations under the License.
 
 # The template node-drainer renders into a DrainRequest for each quarantined
-# node: NVSentinel v1.26.0's
+# node: NVSentinel v1.28.0's
 # plugins/slinky-drainer/config/drain-template/drain-template-configmap.yaml,
-# key drain-template.yaml, byte for byte (commit a5b9e90f).
+# key drain-template.yaml, byte for byte (commit 5b438529).
 #
 # Stored as binaryData because the template is itself a Go template, full of
 # template actions: AICR renders manifests at bundle time and most deployers then render

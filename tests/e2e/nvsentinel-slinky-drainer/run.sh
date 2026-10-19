@@ -32,7 +32,7 @@
 #                     done and deletes the request; pods outside the slurm
 #                     namespace keep running
 #
-# node-drainer v1.26.0 records a completed custom drain as AlreadyDrained in
+# node-drainer v1.28.0 records a completed custom drain as AlreadyDrained in
 # the datastore, which fault-remediation reads as drained, and leaves the node
 # labelled draining: only its eviction path relabels to drain-succeeded. So the
 # completion is asserted from node-drainer's own log, not the label.

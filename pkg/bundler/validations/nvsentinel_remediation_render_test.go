@@ -47,9 +47,9 @@ var remediationStepRender = []struct {
 		dryRun:      "true",
 		deployments: []string{"fault-quarantine", "node-drainer", "fault-remediation"},
 		images: append([]string{
-			"ghcr.io/nvidia/nvsentinel/fault-quarantine:v1.26.0",
-			"ghcr.io/nvidia/nvsentinel/node-drainer:v1.26.0",
-			"ghcr.io/nvidia/nvsentinel/fault-remediation:v1.26.0",
+			"ghcr.io/nvidia/nvsentinel/fault-quarantine:v1.28.0",
+			"ghcr.io/nvidia/nvsentinel/node-drainer:v1.28.0",
+			"ghcr.io/nvidia/nvsentinel/fault-remediation:v1.28.0",
 		}, perconaSetupImage),
 	},
 	{
@@ -57,8 +57,8 @@ var remediationStepRender = []struct {
 		dryRun:      "false",
 		deployments: []string{"fault-quarantine", "node-drainer"},
 		images: append([]string{
-			"ghcr.io/nvidia/nvsentinel/fault-quarantine:v1.26.0",
-			"ghcr.io/nvidia/nvsentinel/node-drainer:v1.26.0",
+			"ghcr.io/nvidia/nvsentinel/fault-quarantine:v1.28.0",
+			"ghcr.io/nvidia/nvsentinel/node-drainer:v1.28.0",
 		}, perconaSetupImage),
 	},
 	{
@@ -67,12 +67,12 @@ var remediationStepRender = []struct {
 		deployments: remediationDeployments,
 		maxAttempts: "3",
 		images: append([]string{
-			"ghcr.io/nvidia/nvsentinel/fault-quarantine:v1.26.0",
-			"ghcr.io/nvidia/nvsentinel/node-drainer:v1.26.0",
-			"ghcr.io/nvidia/nvsentinel/fault-remediation:v1.26.0",
-			"ghcr.io/nvidia/nvsentinel/janitor:v1.26.0",
-			"ghcr.io/nvidia/nvsentinel/janitor-provider:v1.26.0",
-			"ghcr.io/nvidia/nvsentinel/gpu-reset:v1.26.0",
+			"ghcr.io/nvidia/nvsentinel/fault-quarantine:v1.28.0",
+			"ghcr.io/nvidia/nvsentinel/node-drainer:v1.28.0",
+			"ghcr.io/nvidia/nvsentinel/fault-remediation:v1.28.0",
+			"ghcr.io/nvidia/nvsentinel/janitor:v1.28.0",
+			"ghcr.io/nvidia/nvsentinel/janitor-provider:v1.28.0",
+			"ghcr.io/nvidia/nvsentinel/gpu-reset:v1.28.0",
 		}, perconaSetupImage),
 	},
 }
@@ -101,7 +101,7 @@ var perconaImages = []string{
 // The chart passes it as an env var, which aicr mirror cannot discover.
 const genericRebootImage = "docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
 
-// chartDefaultRuleSets are fault-quarantine's rule sets at chart v1.26.0, in
+// chartDefaultRuleSets are fault-quarantine's rule sets at chart v1.28.0, in
 // evaluation order. AICR overrides none of them.
 var chartDefaultRuleSets = []string{
 	"GPU fatal error ruleset",

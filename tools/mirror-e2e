@@ -74,18 +74,18 @@ WORK=""
 # checks ~9.9 GiB each, which would exhaust an ubuntu-24.04 runner's disk and
 # blow the lane's timeout on every recipe PR. Carrying a mixin-gated image
 # through the whole transfer path is what discovery alone does not prove.
-PREFLIGHT_CONTROLLER_IMAGE="ghcr.io/nvidia/nvsentinel/preflight:v1.26.0"
+PREFLIGHT_CONTROLLER_IMAGE="ghcr.io/nvidia/nvsentinel/preflight:v1.28.0"
 PREFLIGHT_IMAGES=(
-    "ghcr.io/nvidia/nvsentinel/preflight:v1.26.0"
-    "ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag:v1.26.0"
-    "ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback:v1.26.0"
-    "ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce:v1.26.0"
+    "ghcr.io/nvidia/nvsentinel/preflight:v1.28.0"
+    "ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag:v1.28.0"
+    "ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback:v1.28.0"
+    "ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce:v1.28.0"
 )
 
 # The image the nvsentinel-object-monitor mixin pulls in (#2612). Same
 # invisibility to the static BOM, for a different reason: it lives in a
 # mixin-gated subchart rather than a mixin-gated values override.
-OBJECT_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.26.0"
+OBJECT_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.28.0"
 
 # The images the nvsentinel-nic-health-monitor mixin pulls in. The subchart
 # image is invisible to the static BOM for the same reason as the object
@@ -96,13 +96,13 @@ OBJECT_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.26.
 # for main ones, so asserting only the subchart image would let an
 # init-container regression through.
 NIC_HEALTH_MONITOR_IMAGES=(
-    "ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.26.0"
+    "ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.28.0"
     "docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
 )
 
 # The image the nvsentinel-slurm-drain-monitor mixin pulls in (#2611), from a
 # mixin-gated subchart like the object monitor's.
-SLURM_DRAIN_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/slurm-drain-monitor:v1.26.0"
+SLURM_DRAIN_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/slurm-drain-monitor:v1.28.0"
 
 # The images the nvsentinel-remediation mixin pulls in, the widest of the
 # three remediation steps. gpu-reset is not in any pod spec: janitor reads it
@@ -113,12 +113,12 @@ SLURM_DRAIN_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/slurm-drain-monitor:v1.26.0
 # cannot see, and the busybox it is pinned to already comes from the NIC
 # mixin, so listing it would prove nothing.
 REMEDIATION_IMAGES=(
-    "ghcr.io/nvidia/nvsentinel/fault-quarantine:v1.26.0"
-    "ghcr.io/nvidia/nvsentinel/node-drainer:v1.26.0"
-    "ghcr.io/nvidia/nvsentinel/fault-remediation:v1.26.0"
-    "ghcr.io/nvidia/nvsentinel/janitor:v1.26.0"
-    "ghcr.io/nvidia/nvsentinel/janitor-provider:v1.26.0"
-    "ghcr.io/nvidia/nvsentinel/gpu-reset:v1.26.0"
+    "ghcr.io/nvidia/nvsentinel/fault-quarantine:v1.28.0"
+    "ghcr.io/nvidia/nvsentinel/node-drainer:v1.28.0"
+    "ghcr.io/nvidia/nvsentinel/fault-remediation:v1.28.0"
+    "ghcr.io/nvidia/nvsentinel/janitor:v1.28.0"
+    "ghcr.io/nvidia/nvsentinel/janitor-provider:v1.28.0"
+    "ghcr.io/nvidia/nvsentinel/gpu-reset:v1.28.0"
     "docker.io/percona/percona-server-mongodb-operator:1.23.1@sha256:78c87b933e184b9af36dbb0078751862c75934c1521c33d3be4d0a38aa58dd0a"
     "docker.io/percona/percona-server-mongodb:8.0.26-11@sha256:53f89c001997627554e6afc0feb5906209ba109f4f98c62f2ca8456c214af60c"
     "docker.io/percona/mongodb_exporter:0.53.0@sha256:0214e482b2cd4b1849f9f4dcef90d328a99ba3727dd1103e7da48b42060bcec1"
@@ -129,10 +129,10 @@ REMEDIATION_IMAGES=(
 
 # The image the nvsentinel-slinky-drainer mixin pulls in (#2615), from the
 # manifest-only slinky-drainer component it adds.
-SLINKY_DRAINER_IMAGE="ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.26.0@sha256:29f8bbe52449ca0dccc34c1dba39c60c7c8a00cda00a5c5076dde9604dd27690"
+SLINKY_DRAINER_IMAGE="ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.28.0@sha256:bf6ccaf1d6c035aa5f86e70a929dc6d9a18c5c05b10104d23c69aacff35bcb14"
 
 # The image the nvsentinel-health-events-analyzer mixin pulls in (#2618).
-HEALTH_EVENTS_ANALYZER_IMAGE="ghcr.io/nvidia/nvsentinel/health-events-analyzer:v1.26.0"
+HEALTH_EVENTS_ANALYZER_IMAGE="ghcr.io/nvidia/nvsentinel/health-events-analyzer:v1.28.0"
 
 # Every mixin-gated image, asserted in all three `mirror list` formats.
 MIXIN_IMAGES=(

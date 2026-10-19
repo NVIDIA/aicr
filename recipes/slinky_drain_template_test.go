@@ -44,7 +44,7 @@ type drainTemplateEvent struct {
 	Message           string
 }
 
-// drainTemplateData has the field names of node-drainer v1.26.0's
+// drainTemplateData has the field names of node-drainer v1.28.0's
 // customdrain.TemplateData.
 type drainTemplateData struct {
 	HealthEvent *drainTemplateEvent
@@ -53,10 +53,10 @@ type drainTemplateData struct {
 }
 
 // TestSlinkyDrainTemplateParsesFaultMessages renders the drain template the
-// way node-drainer v1.26.0's customdrain.Client does (text/template with no
+// way node-drainer v1.28.0's customdrain.Client does (text/template with no
 // extra functions, then sigs.k8s.io/yaml) with the messages NVSentinel's
 // fatal-event monitors produce, and checks they reach the DrainRequest
-// unchanged. The messages are taken from NVSentinel v1.26.0's health monitors:
+// unchanged. The messages are taken from NVSentinel v1.28.0's health monitors:
 // their format strings and the kernel lines in their test data.
 func TestSlinkyDrainTemplateParsesFaultMessages(t *testing.T) {
 	_, docs := renderSlinkyDrainer(t, nil)
