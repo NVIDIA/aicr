@@ -17,7 +17,6 @@ package attestation
 import (
 	"context"
 	"encoding/json"
-	stderrors "errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,6 +25,7 @@ import (
 
 	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -426,7 +426,7 @@ func TestEmit_RejectsMutableValidatorTag(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Emit to fail closed on a mutable validator tag")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
 	// The offending ref must be named — the operator has to know which

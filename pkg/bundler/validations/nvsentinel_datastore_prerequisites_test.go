@@ -15,12 +15,12 @@
 package validations
 
 import (
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -160,7 +160,7 @@ func TestCheckNVSentinelDatastorePrerequisites(t *testing.T) {
 			errStrings := make([]string, 0, len(errs))
 			for _, err := range errs {
 				errStrings = append(errStrings, err.Error())
-				if tt.wantCode != "" && !stderrors.Is(err, aicrerrors.New(tt.wantCode, "")) {
+				if tt.wantCode != "" && errorstest.ReportedCode(err) != tt.wantCode {
 					t.Errorf("error %q does not carry code %s", err, tt.wantCode)
 				}
 			}

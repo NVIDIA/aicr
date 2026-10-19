@@ -27,6 +27,8 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -261,14 +263,14 @@ func TestVerifyNetworksExist(t *testing.T) {
 		t.Fatalf("all present, order-independent: unexpected error %v", err)
 	}
 	err := VerifyNetworksExist(deployed, discovered[:4], discovered[:4])
-	if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+	if err == nil || errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 		t.Fatalf("missing networks must be ErrCodeNotFound, got %v", err)
 	}
 	// Present-but-not-usable: all deployed networks are on the cluster (present),
 	// but only 4 are usable (Ready/bound). The not-usable branch must fire Conflict.
 	usable := []string{"c1-gpu-nic-0", "c1-gpu-nic-1", "c1-gpu-nic-2", "c1-gpu-nic-3"}
 	err = VerifyNetworksExist(deployed, usable, discovered)
-	if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+	if err == nil || errorstest.ReportedCode(err) != errors.ErrCodeConflict {
 		t.Fatalf("present-but-not-usable networks must be ErrCodeConflict, got %v", err)
 	}
 }
@@ -279,7 +281,7 @@ func TestReadDeployedTCPXORuntimeNotFound(t *testing.T) {
 		ClusterTrainingRuntimeGVR: "ClusterTrainingRuntimeList",
 	})
 	_, err := ReadDeployedTCPXORuntime(t.Context(), dyn)
-	if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+	if err == nil || errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 		t.Fatalf("absent runtime must surface as ErrCodeNotFound, got %v", err)
 	}
 	obj := ctrFixture(map[string]any{InterfacesAnnotation: annotationFor(mapping(eightNets("c1")...)), DefaultInterfaceAnnotation: "eth0"})
@@ -304,7 +306,7 @@ func TestReadDeployedTCPXORuntimeAPIError(t *testing.T) {
 		return true, nil, stderrors.New("apiserver: connection reset")
 	})
 	_, err := ReadDeployedTCPXORuntime(t.Context(), dyn)
-	if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if err == nil || errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Fatalf("apiserver fault must be ErrCodeInternal, got %v", err)
 	}
 	if stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
@@ -357,7 +359,7 @@ func TestReadDeployedTCPXORuntimeClassifiesContextFailures(t *testing.T) {
 				return true, nil, tt.err
 			})
 			_, err := ReadDeployedTCPXORuntime(context.Background(), dyn)
-			if err == nil || !stderrors.Is(err, errors.New(tt.want, "")) {
+			if err == nil || errorstest.ReportedCode(err) != tt.want {
 				t.Fatalf("want %s, got %v", tt.want, err)
 			}
 		})

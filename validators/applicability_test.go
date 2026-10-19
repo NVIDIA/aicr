@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -172,7 +174,7 @@ func TestCapabilityRequire(t *testing.T) {
 				if IsSkip(err) {
 					t.Fatalf("Require() = %v, want a blocking failure but got a Skip — infra/declared-missing must never skip (#2122)", err)
 				}
-				if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+				if errorstest.ReportedCode(err) != tt.wantCode {
 					t.Errorf("Require() code = %v, want %v", err, tt.wantCode)
 				}
 			}

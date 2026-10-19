@@ -25,6 +25,9 @@
 # programmatically from Go (see applyInferenceWorkerScheduling in
 # inference_perf_constraint.go) so taint values with YAML-special characters
 # cannot break the template.
+#
+# Images are substituted by inferenceTemplateData, tagged with the recipe's
+# dynamo-platform chart version, and honor AICR_VALIDATOR_IMAGE_REGISTRY.
 
 apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeployment
@@ -41,7 +44,7 @@ spec:
         spec:
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:1.4.2
+              image: "${DYNAMO_FRONTEND_IMAGE}"
               env:
                 - name: DYN_KV_CACHE_BLOCK_SIZE
                   value: "128"
@@ -96,7 +99,7 @@ spec:
         spec:
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.4.2
+              image: "${DYNAMO_VLLM_RUNTIME_IMAGE}"
               workingDir: /workspace/examples/backends/vllm
               # Shell wrapper appends GKE's managed-device-plugin driver-lib
               # mount (/usr/local/nvidia/lib64) to LD_LIBRARY_PATH — the
@@ -136,7 +139,7 @@ spec:
                       key: token
                       optional: true
             - name: sidecar-frontend
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.4.2
+              image: "${DYNAMO_VLLM_RUNTIME_IMAGE}"
               args:
                 - -m
                 - dynamo.frontend

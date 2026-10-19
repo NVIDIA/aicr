@@ -74,6 +74,13 @@ HelmReleases will not reconcile at deploy time. Git-based bundles
 (--output /path/to/dir) do not use ArtifactGenerator and have no additional
 prerequisites.
 
+**Flux version for the network-operator migration (git and OCI output):** the
+one-time patch in the component catalog's network-operator upgrade note sets
+spec.upgrade.serverSideApply, which exists from helm-controller v1.5.0 (Flux
+v2.8.0); helm-controller v1.4.0 (Flux v2.7) rejects it. That requirement is
+separate from the OCI prerequisites above, and the generated HelmReleases
+never set the field.
+
 **CLI flags:**
   - --flux-oci-source-name: name of the OCIRepository CR that Flux uses to
     pull the bundle (default: "aicr-bundle"). Must match the OCIRepository

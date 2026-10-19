@@ -27,6 +27,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/manifest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -225,7 +226,7 @@ func TestMaterializeSlinkySharedStorage(t *testing.T) {
 				t.Fatalf("materializeSlinkySharedStorage() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Fatalf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
 				}
 				if tt.wantErrText != "" && !strings.Contains(err.Error(), tt.wantErrText) {
@@ -323,7 +324,7 @@ func TestAppendNamedObject(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := appendNamedObject(tt.entries, tt.entry, "loginsets.slinky.login.volumeMounts")
 			if tt.wantErrText != "" {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Fatalf("error = %v, want %s", err, errors.ErrCodeInvalidRequest)
 				}
 				if !strings.Contains(err.Error(), tt.wantErrText) {
@@ -413,7 +414,7 @@ func TestApplySharedStorageClassOverrideRejectsInvalidValues(t *testing.T) {
 		map[string]any{"storage": "not-an-object"},
 		nil,
 	)
-	if !stderrors.Is(applyErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(applyErr) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("error = %v, want %s", applyErr, errors.ErrCodeInvalidRequest)
 	}
 }

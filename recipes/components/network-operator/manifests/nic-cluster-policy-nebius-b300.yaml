@@ -1,0 +1,82 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Nebius B300 active HCAs are ib4..ib11; ib0..ib3 are inactive.
+# One shared allocation exposes all eight HCAs; this is not NIC exclusivity.
+apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+metadata:
+  name: nic-cluster-policy
+  annotations:
+    # A persistent policy must survive upgrades; the post bundle orders it after CRDs.
+    aicr/skip-hook-validation: "true"
+spec:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: nebius.com/driverful
+          operator: NotIn
+          values:
+          - 'true'
+        - key: nebius.com/dranet-rdma-capable
+          operator: In
+          values:
+          - 'true'
+      - matchExpressions:
+        - key: nebius.com/driverful
+          operator: NotIn
+          values:
+          - 'true'
+        - key: feature.node.kubernetes.io/pci-15b3.present
+          operator: In
+          values:
+          - 'true'
+  ofedDriver:
+    image: nebius/nvidia-network-operator/image/doca-driver
+    repository: cr.eu-north1.nebius.cloud/marketplace
+    version: doca3.1.0-25.07-0.9.7.0-0
+    forcePrecompiled: false
+    imagePullSecrets: []
+    env:
+    - name: RESTORE_DRIVER_ON_POD_TERMINATION
+      value: 'false'
+    terminationGracePeriodSeconds: 300
+    startupProbe:
+      initialDelaySeconds: 10
+      periodSeconds: 20
+    livenessProbe:
+      initialDelaySeconds: 30
+      periodSeconds: 30
+    readinessProbe:
+      initialDelaySeconds: 10
+      periodSeconds: 30
+    upgradePolicy:
+      autoUpgrade: false
+      maxParallelUpgrades: 1
+      safeLoad: false
+      drain:
+        enable: true
+        force: true
+        deleteEmptyDir: true
+        timeoutSeconds: 300
+  rdmaSharedDevicePlugin:
+    image: k8s-rdma-shared-dev-plugin
+    repository: ghcr.io/mellanox
+    version: v1.5.2
+    imagePullSecrets: []
+    config: "{\n  \"periodicUpdateInterval\": 300,\n  \"configList\": [\n    {\n \
+      \     \"resourceName\": \"ib\",\n      \"resourcePrefix\": \"rdma\",\n     \
+      \ \"rdmaHcaMax\": 63,\n      \"selectors\": {\"ifNames\": [\"ib4\", \"ib5\"\
+      , \"ib6\", \"ib7\", \"ib8\", \"ib9\", \"ib10\", \"ib11\"]}\n    }\n  ]\n}\n"

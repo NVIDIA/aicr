@@ -16,7 +16,6 @@ package helm
 
 import (
 	"bytes"
-	stderrors "errors"
 	"os"
 	"strings"
 	"testing"
@@ -24,6 +23,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestWriteValuesFile(t *testing.T) {
@@ -188,7 +189,7 @@ func TestLimitedWriterOverflow(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error on overflow, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("expected ErrCodeInternal, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "exceeds size limit") {

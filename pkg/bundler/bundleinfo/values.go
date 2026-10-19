@@ -32,10 +32,11 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// valuesFileName and clusterValuesFileName are the two files five of the six
-// deployers write per release, layered in the order install.sh applies them
-// (`-f values.yaml -f cluster-values.yaml`). The second carries install-time
-// values and is usually empty.
+// valuesFileName is the values file six of the seven deployers write per
+// release; clusterValuesFileName is the one helm, helmfile, terraform and
+// fleet layer over it, in the order install.sh applies them (`-f values.yaml
+// -f cluster-values.yaml`). The second carries install-time values and is
+// usually empty.
 const (
 	valuesFileName        = "values.yaml"
 	clusterValuesFileName = "cluster-values.yaml"
@@ -70,10 +71,11 @@ var injectedSuffixes = []string{"-pre", "-post", "-readiness"}
 // Locations come from bundle-info.yaml's releases, so this reads paths the
 // bundle recorded about itself. That is not the deployer-layout fingerprinting
 // upgrade-check refuses to do: nothing here guesses a filename from the shape
-// of the directory. Five deployers write <path>/values.yaml with
-// cluster-values.yaml layered over it; flux inlines the same values under
-// spec.values in the HelmRelease named by <manifest>, and fleet's HelmOp mode
-// under spec.helm.values in the matching HelmOp of <manifest>.
+// of the directory. Six deployers write <path>/values.yaml, and helm,
+// helmfile, terraform and fleet layer cluster-values.yaml over it; flux
+// inlines the same values under spec.values in the HelmRelease named by
+// <manifest>, and fleet's HelmOp mode under spec.helm.values in the matching
+// HelmOp of <manifest>.
 //
 // A release with neither is rejected, not omitted. Every deployer writes one
 // or the other for every release — the local-format writers emit values.yaml

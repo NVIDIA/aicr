@@ -21,7 +21,12 @@
 # watched components into, the slurm-drain-monitor one asserts the
 # workload, its read-only RBAC and its config, and the remediation ones
 # assert each step's Deployments, --dry-run, images, the full remediation
-# action map, the quarantine rule sets and the drain mode.
+# action map, the quarantine rule sets and the drain mode, the slinky-drainer
+# one asserts node-drainer's customDrain wiring to the plugin, the
+# health-events-analyzer one asserts the workload, its datastore wiring and
+# that the mixin names every rule the chart ships, and the CRD
+# exclusion one asserts the chart still ships mongodb-store's CRDs where
+# nvsentinel's ownsCRDsExcludeSubcharts expects them.
 # All are gated on testing.Short() -- `make
 # test`/`make qualify`/every other CI job run with -short, so this is the only
 # place they execute. There is no PR-blocking trigger here on purpose: these
@@ -43,7 +48,7 @@ permissions:
 jobs:
   render-check:
     name: Render the opt-in nvsentinel mixins against the live chart
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout Code
@@ -92,6 +97,9 @@ jobs:
             TestNVSentinelRemediationChartRender
             TestNVSentinelRemediationAbsentWithoutMixin
             TestNVSentinelMongoDBChartRender
+            TestNVSentinelCRDExclusionMatchesChart
+            TestNVSentinelSlinkyDrainerChartRender
+            TestNVSentinelHealthEventsAnalyzerChartRender
           )
           pattern="^($(IFS='|'; echo "${tests[*]}"))$"
           out=$(go test ./pkg/bundler/validations/... -run "$pattern" -v -count=1 2>&1) && rc=0 || rc=$?

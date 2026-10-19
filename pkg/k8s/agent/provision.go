@@ -72,15 +72,13 @@ type ManifestOptions struct {
 	// meant to name still cannot snapshot.
 	ServiceAccountName string
 
-	// DiscoverNetwork also renders the cluster-scoped MUTATING rules that
-	// `aicr snapshot --discover-network` needs — nodes: patch,
-	// pods/exec: create, and CRD, namespace, DaemonSet and namespaced-RBAC
-	// create/delete (see discoverNetworkClusterRules).
+	// DiscoverNetwork also renders the one extra read-only rule that
+	// `aicr snapshot --discover-network` needs — configuration.net.nvidia.com
+	// nicdevices get/list (see discoverNetworkReadRules).
 	//
-	// The rendered ClusterRole carries an explicit warning header
-	// enumerating each mutating rule and the discovery step it exists for,
-	// because deciding whether to grant them is the whole reason these
-	// manifests are written out instead of applied.
+	// The rendered ClusterRole header names that rule and the discovery
+	// step it exists for, because reading what is granted is the whole
+	// reason these manifests are written out instead of applied.
 	DiscoverNetwork bool
 }
 
@@ -115,11 +113,10 @@ type Manifest struct {
 // manifests, and deleting them when the grant is no longer wanted, is the
 // operator's decision and the operator's command.
 //
-// That is deliberate. The rules being granted include, under
-// DiscoverNetwork, cluster-scoped mutating permissions (nodes: patch,
-// pods/exec: create, CRD create) that outlive any single run. An operator
-// consenting to that should be able to read exactly what they are granting
-// first, which a command that provisions on their behalf does not allow.
+// That is deliberate. The rules being granted are cluster-scoped and outlive
+// any single run. An operator consenting to that should be able to read
+// exactly what they are granting first, which a command that provisions on
+// their behalf does not allow.
 //
 // Every rule set comes from namespacedRules and clusterRules — the same
 // definitions the run-scoped ensureRole and ensureClusterRole build from —
@@ -132,8 +129,7 @@ type Manifest struct {
 //
 // Trade-off the caller must surface to the operator: a shared ServiceAccount
 // waives per-run permission isolation. Concurrent runs using it share its
-// grants, and a DiscoverNetwork grant leaves mutating cluster permissions in
-// place until the operator removes them.
+// grants, which stay in place until the operator removes them.
 func BuildServiceAccountRoleManifests(opts ManifestOptions) ([]Manifest, error) {
 	if strings.TrimSpace(opts.Namespace) == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
@@ -350,11 +346,9 @@ func roleBindingHeader(name, namespace, serviceAccount string) string {
 `, name, namespace, serviceAccount, roleFileName)
 }
 
-// clusterRoleHeader explains the cluster-scoped grant. Without
-// discoverNetwork it is entirely read-only and says so; with it, the
-// mutating rules get a rule-by-rule account of the discovery step each one
-// exists for, since that is the grant an operator most needs to read before
-// consenting to it.
+// clusterRoleHeader explains the cluster-scoped grant. The grant is
+// read-only either way; with discoverNetwork it appends the single
+// additional read rule live network discovery needs and says why it exists.
 func clusterRoleHeader(name, serviceAccount string, discoverNetwork bool) string {
 	header := fmt.Sprintf(`# aicr snapshot agent -- cluster-scoped permissions
 #
@@ -395,61 +389,22 @@ func clusterRoleHeader(name, serviceAccount string, discoverNetwork bool) string
 	if !discoverNetwork {
 		return header
 	}
-	return header + discoverNetworkHeaderSection()
+	return header + discoverNetworkReadHeaderSection()
 }
 
-// discoverNetworkHeaderSection is the warning block appended to the
-// ClusterRole manifest when DiscoverNetwork is set. Each rule is named
-// alongside the concrete discovery step that needs it, so an operator
-// reading "nodes: patch" can tell from the file why it is there.
-func discoverNetworkHeaderSection() string {
+// discoverNetworkReadHeaderSection is appended to the ClusterRole manifest
+// when DiscoverNetwork is set. It names the one extra rule and the
+// discovery step that reads through it.
+func discoverNetworkReadHeaderSection() string {
 	return `#
-# ==========================================================================
-# WARNING -- --discover-network was requested, so this ClusterRole ALSO
-# carries MUTATING, cluster-scoped rules. Read them before you apply it.
-# ==========================================================================
-#
-# Live network discovery (k8s-launch-kit) does not read topology from the
-# API. It stands up a probe DaemonSet, execs into it, and writes what it
-# learns back onto your cluster. Every mutating rule below maps to one
-# concrete step of that flow:
-#
-#   nodes: patch
-#     Writes nvidia.kubernetes-launch-kit.machine and .gpu labels onto every
-#     node discovery matches. This modifies YOUR nodes, and the labels
-#     remain after the run finishes.
-#
-#   pods/exec: create
-#     Execs into each probe pod to read NIC VPD and link metadata via the
-#     in-pod CLI. Note that pods/exec: create at cluster scope permits
-#     running commands in ANY pod in the cluster, not only the probe pods.
-#
-#   namespaces: get, create, delete
-#   apps daemonsets: get, list, watch, create, delete
-#   serviceaccounts, configmaps: get, create, delete
-#   rbac.authorization.k8s.io roles, rolebindings: get, create, delete
-#     Discovery creates the nvidia-k8s-launch-kit namespace, deploys the
-#     nic-configuration-daemon DaemonSet and its supporting RBAC into it,
-#     and deletes the namespace when it is done.
-#
-#   apiextensions.k8s.io customresourcedefinitions:
-#     get, list, create, update, patch
-#     Installs the nic-configuration-operator CRDs (NicDevice,
-#     NicClusterPolicy) when they are absent. This is a cluster-wide schema
-#     change that outlives the run.
-#
 #   configuration.net.nvidia.com nicdevices: get, list
-#     Reads the NicDevice CRs the probe daemon publishes.
-#
-#   mellanox.com nicclusterpolicies: get, patch
-#     Server-side-applies the NicConfigurationOperator section of YOUR
-#     existing NicClusterPolicy.
-#
-# These permissions last as long as the objects do -- they are NOT scoped to
-# one run. A run that lets aicr create its own ServiceAccount instead gets
-# the same rules for the lifetime of that one run and has them revoked at
-# cleanup. If you need discovery only occasionally, prefer that, or keep a
-# separate ServiceAccount used only for discovery runs.
+#     Present because --discover-network was requested. Live network
+#     discovery (k8s-launch-kit, read-only mode) reads the NicDevice objects
+#     an already-running nic-configuration-daemon publishes, plus the nodes
+#     and pods granted above. It creates, patches, and deletes nothing, and
+#     this ClusterRole grants no pods/exec, so the grant stays READ-ONLY. It
+#     requires the Network Operator's daemon to be installed; without it the
+#     NetworkTopology measurement is skipped.
 `
 }
 

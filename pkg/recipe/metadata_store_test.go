@@ -27,6 +27,8 @@ import (
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/manifest"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
@@ -359,7 +361,7 @@ func TestMetadataStore_EvaluateOverlayConstraints(t *testing.T) {
 				if err == nil {
 					t.Fatal("expected error, got nil")
 				}
-				if tt.wantErrCode != "" && !errors.Is(err, aicrerrors.New(tt.wantErrCode, "")) {
+				if tt.wantErrCode != "" && errorstest.ReportedCode(err) != tt.wantErrCode {
 					t.Fatalf("error = %v, want code %s", err, tt.wantErrCode)
 				}
 				return
@@ -401,7 +403,7 @@ func TestMetadataStore_EvaluateOverlayConstraints_WrapsUnstructuredError(t *test
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInternal {
 		t.Fatalf("expected ErrCodeInternal, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "boom") {
@@ -1380,7 +1382,7 @@ func TestEvaluatorFailingLeafExcludesCandidate(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected coverage error: excluding the only full-match leaf uncovers stated dimensions")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 	var se *aicrerrors.StructuredError
@@ -1682,7 +1684,7 @@ func TestMixinConstraintFailureExcludesCandidate(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected coverage error: mixin exclusion uncovers the stated os/service/intent dimensions")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 	var se *aicrerrors.StructuredError
@@ -1843,7 +1845,7 @@ func TestMixinConstraintFailureExcludesOnlyAffectedCandidateChain(t *testing.T) 
 	if err == nil {
 		t.Fatal("expected coverage error: mixin exclusion uncovers the stated accelerator dimension")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 	var se *aicrerrors.StructuredError
@@ -2019,7 +2021,7 @@ func TestMixinConstraintFailurePreservesSharedAncestorsForSurvivingLeaf(t *testi
 	if err == nil {
 		t.Fatal("expected coverage error: mixin exclusion uncovers the stated accelerator dimension")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 	var se *aicrerrors.StructuredError
@@ -2242,7 +2244,7 @@ func TestMixinConstraintFailClosedOnInternalEvaluatorError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected fail-closed error from mixin constraint evaluation")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInternal {
 		t.Fatalf("expected ErrCodeInternal preserved from mixin evaluator error, got %v", err)
 	}
 }
@@ -2306,7 +2308,7 @@ func TestMixinConstraintFailClosedOnUnstructuredEvaluatorError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected fail-closed error from mixin constraint evaluation")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInternal {
 		t.Fatalf("expected unstructured mixin evaluator error wrapped as ErrCodeInternal, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "boom") {
@@ -2393,7 +2395,7 @@ func TestEvaluateMixinConstraintsRejectsIncompleteConstraint(t *testing.T) {
 				map[string]bool{tt.constraint.Name: true},
 				[]string{"candidate"},
 			)
-			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("error = %v, want code %s", err, aicrerrors.ErrCodeInvalidRequest)
 			}
 		})
@@ -2753,7 +2755,7 @@ spec:
 	if err == nil {
 		t.Fatal("LoadMetadataStoreFor() error = nil, want missing-kind rejection")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), `expected "RecipeMetadata"`) {
@@ -2909,7 +2911,7 @@ spec:
 			if err == nil {
 				t.Fatal("LoadMetadataStoreFor() error = nil, want header rejection")
 			}
-			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if got := aicrerrors.ExitCodeFromError(err); got != aicrerrors.ExitInvalidInput {
@@ -3504,7 +3506,7 @@ func TestBuildRecipeResult_OSRequired(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := store.BuildRecipeResult(ctx, tt.criteria)
 			if tt.wantErrCode != "" {
-				if !errors.Is(err, aicrerrors.New(tt.wantErrCode, "")) {
+				if errorstest.ReportedCode(err) != tt.wantErrCode {
 					t.Errorf("got err %v, want code %s", err, tt.wantErrCode)
 				}
 				if tt.wantInMsg != "" && (err == nil || !strings.Contains(err.Error(), tt.wantInMsg)) {
@@ -3568,7 +3570,7 @@ func TestBuildRecipeResultWithEvaluator_OSRequired(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := store.BuildRecipeResultWithEvaluator(ctx, tt.criteria, passAll)
 			if tt.wantErrCode != "" {
-				if !errors.Is(err, aicrerrors.New(tt.wantErrCode, "")) {
+				if errorstest.ReportedCode(err) != tt.wantErrCode {
 					t.Errorf("got err %v, want code %s", err, tt.wantErrCode)
 				}
 				if tt.wantInMsg != "" && (err == nil || !strings.Contains(err.Error(), tt.wantInMsg)) {
@@ -3630,7 +3632,7 @@ func TestBuildRecipeResult_CriteriaCoverage(t *testing.T) {
 		_, err := store.BuildRecipeResult(ctx, &Criteria{
 			Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100,
 			Intent: CriteriaIntentTraining, Platform: CriteriaPlatformKubeflow})
-		if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 			t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
 		}
 		// A guard-origin error can never satisfy this: only the coverage
@@ -3712,7 +3714,7 @@ func TestBuildRecipeResult_JointSufficiency(t *testing.T) {
 	}
 
 	_, err := store.BuildRecipeResult(ctx, criteria)
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "specify os") {
@@ -3815,7 +3817,7 @@ func TestBuildRecipeResultWithEvaluator_FailClosed(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error")
 			}
-			if !errors.Is(err, aicrerrors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Fatalf("expected code %s, got %v", tt.wantCode, err)
 			}
 		})
@@ -3837,7 +3839,7 @@ func TestBuildRecipeResultWithEvaluator_FailClosed(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected coverage error: stated service dimension's only coverage was constraint-excluded")
 		}
-		if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 			t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
 		}
 		var se *aicrerrors.StructuredError
@@ -3902,7 +3904,7 @@ func TestBuildRecipeResultWithEvaluator_FailClosed(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected fail-closed error: Internal cause must win over NotFound graceful exclusion")
 		}
-		if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+		if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInternal {
 			t.Fatalf("expected ErrCodeInternal (fail-closed wins over NotFound), got %v", err)
 		}
 	})
@@ -3943,7 +3945,7 @@ func TestBuildRecipeResultWithEvaluator_CoverageAfterExclusion(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected coverage error: stated platform's only coverage was constraint-excluded")
 	}
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 	var se *aicrerrors.StructuredError
@@ -4000,9 +4002,7 @@ spec:
 		t.Errorf("error = %v, want it to name the overlay 'nodes-gated'", err)
 	}
 	// Verify the error code so callers can distinguish this from internal errors.
-	// Use errors.Is with a sentinel StructuredError — the project-preferred pattern
-	// per CLAUDE.md (see e.g. line 1179 in this file).
-	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
 }

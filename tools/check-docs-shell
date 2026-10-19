@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Reject `<placeholder>` arguments in fenced bash/sh/shell/zsh examples where
+# the shell would lex them as redirection (issue #2266). Quoted placeholders,
+# comments, and quoted heredoc bodies are inert and pass.
+#
+# The default scan covers Markdown under docs/ that git tracks or would track:
+# a new page is checked before it is added, while a gitignored local scratch
+# file cannot fail a run that CI would pass. Outside a git work tree it covers
+# every file under docs/. docs/design/ is skipped either way: ADRs are
+# point-in-time records, not maintained procedures, and are never amended after
+# acceptance. Positional arguments replace the default scan with a find over
+# each root and apply no exclusion.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CHECKER="${REPO_ROOT}/tools/mdx/check-docs-shell.mjs"
+
+# shellcheck source=tools/mdx/bootstrap.sh
+source "${REPO_ROOT}/tools/mdx/bootstrap.sh"
+ensure_docs_node_toolchain "docs shell placeholder gate"
+
+cd "${REPO_ROOT}"
+
+SEARCH_DIRS=("docs")
+DEFAULT_SCAN=1
+if [[ $# -gt 0 ]]; then
+  SEARCH_DIRS=("$@")
+  DEFAULT_SCAN=0
+fi
+
+for dir in "${SEARCH_DIRS[@]}"; do
+  if [[ ! -d "${dir}" ]]; then
+    echo "ERROR: docs scan root is not a directory: ${dir}" >&2
+    exit 2
+  fi
+done
+
+FILE_LIST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aicr-check-docs-shell.XXXXXX")" || {
+  echo "ERROR: failed to create temporary directory for docs file discovery" >&2
+  exit 1
+}
+DISCOVERED_FILES="${FILE_LIST_DIR}/discovered"
+SORTED_FILES="${FILE_LIST_DIR}/sorted"
+
+cleanup_file_list() {
+  local exit_status=$?
+
+  trap - EXIT
+  rm -f -- "${DISCOVERED_FILES}" "${SORTED_FILES}" 2>/dev/null || true
+  rmdir -- "${FILE_LIST_DIR}" 2>/dev/null || true
+  exit "${exit_status}"
+}
+trap cleanup_file_list EXIT
+
+if [[ ${DEFAULT_SCAN} -eq 1 ]] && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if ! git ls-files -z --cached --others --exclude-standard -- \
+    'docs/*.md' 'docs/*.mdx' ':(exclude)docs/design/' | tr '\0' '\n' >>"${DISCOVERED_FILES}"; then
+    echo "ERROR: failed to list Markdown files under docs/ with git ls-files" >&2
+    exit 1
+  fi
+elif [[ ${DEFAULT_SCAN} -eq 1 ]]; then
+  if ! find docs -path docs/design -prune -o -type f \( -name '*.md' -o -name '*.mdx' \) -print >>"${DISCOVERED_FILES}"; then
+    echo "ERROR: failed to enumerate Markdown files under: docs" >&2
+    exit 1
+  fi
+else
+  for dir in "${SEARCH_DIRS[@]}"; do
+    if ! find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) -print >>"${DISCOVERED_FILES}"; then
+      echo "ERROR: failed to enumerate Markdown files under: ${dir}" >&2
+      exit 1
+    fi
+  done
+fi
+
+if ! LC_ALL=C sort -u "${DISCOVERED_FILES}" >"${SORTED_FILES}"; then
+  echo "ERROR: failed to sort Markdown file list" >&2
+  exit 1
+fi
+
+FILES=()
+while IFS= read -r file; do
+  [[ -z "${file}" ]] && continue
+  # git ls-files --cached still lists a tracked file deleted from the tree.
+  [[ -f "${file}" ]] || continue
+  FILES+=("${file}")
+done <"${SORTED_FILES}"
+
+if [[ ${#FILES[@]} -eq 0 ]]; then
+  echo "ERROR: no Markdown files found (scan roots: ${SEARCH_DIRS[*]})" >&2
+  exit 1
+fi
+
+node "${CHECKER}" "${FILES[@]}"

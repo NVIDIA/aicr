@@ -106,7 +106,7 @@ components:
 | `manifestsUseChartCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` on the release carrying the attached manifests — the injected `-post` wrapper under both vendored and non-vendored layouts (manifests create CRs of CRDs the chart installs) |
 
 `HelmConfig`: `defaultRepository`, `defaultChart`, `defaultVersion`,
-`defaultNamespace`. `KustomizeConfig`: `defaultSource`, `defaultPath`,
+`defaultDigest`, `defaultNamespace`. `KustomizeConfig`: `defaultSource`, `defaultPath`,
 `defaultTag`. A component must have *either* `helm` or `kustomize`,
 not both.
 
@@ -183,11 +183,11 @@ Criteria fields (see `pkg/recipe/criteria.go` `type Criteria`):
 
 | Field | Type | Wildcard | Static OSS values |
 |---|---|---|---|
-| `service` | `CriteriaServiceType` | `any` or empty | `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `metal3`, `rke2`, `generic`, `k0s` |
-| `accelerator` | `CriteriaAcceleratorType` | `any` or empty | `h100`, `h200`, `gb200`, `gb300`, `b200`, `a100`, `l40`, `l40s`, `rtx-pro-6000`, `vr200` |
+| `service` | `CriteriaServiceType` | `any` or empty | `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `metal3`, `rke2`, `generic`, `k0s`, `mk8s` |
+| `accelerator` | `CriteriaAcceleratorType` | `any` or empty | `h100`, `h200`, `gb200`, `gb300`, `b200`, `b300`, `a100`, `l40`, `l40s`, `rtx-pro-6000`, `vr200` |
 | `intent` | `CriteriaIntentType` | `any` or empty | `training`, `inference` |
 | `os` | `CriteriaOSType` | `any` or empty | `ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos` |
-| `platform` | `CriteriaPlatformType` | `any` or empty | `dynamo`, `kubeflow`, `nim`, `runai`, `slurm` |
+| `platform` | `CriteriaPlatformType` | `any` or empty | `dynamo`, `kubeflow`, `kueue`, `nim`, `runai`, `slurm` |
 | `nodes` | int | `0` | any positive int |
 
 `--data` overlays may contribute additional values via the criteria
@@ -241,7 +241,7 @@ on a default-track version, is rejected. Profile-version metadata and recipe art
 so an unknown field cannot silently disappear.
 
 The core `ProfileValue` contract is closed to `advertiser`, `constraints`,
-`readinessConstraints`, and `componentRefs{name,overrides}`. It rejects `valuesFile`, component
+`readinessConstraints`, and `componentRefs{name,optional,overrides}`. It rejects `valuesFile`, component
 identity/deployment fields, root `overrides.enabled`, literal dotted keys,
 and nested empty maps. The `advertiser` field accepts exactly one non-empty
 value, `external` (validated against `pkg/allocpolicy`, the canonical
@@ -287,15 +287,21 @@ Resolution enforces these invariants:
 6. Stamp the result `aicr.run/v1beta2` and persist
    `metadata.selectedProfile`. Its sorted `ownedPaths` is the
    declaration-wide path union plus synthetic `enabled` for each referenced
-   component.
+   component, except a component every value references with
+   `optional: true`. An optional reference owns its override paths but not
+   presence, so the bundle may omit the component; its paths are locked
+   only when it ships. Optionality must agree across values, an optional
+   reference must assign at least one override, and #1327 descriptor
+   components cannot be optional (an advertisement-owning profile's
+   closure re-locks their presence).
 
 The shared raw-artifact gate checks version/profile coupling and hydrates
 profile-owned values. Bundle and mirror compare final candidate state with the
 hydrated recipe before creating output. Exact, ancestor, or descendant dynamic
 paths reject unconditionally; static writes reject only when the effective
 three-state observation (present bytes, absent, or blocked) diverges.
-That bundle-time rejection is the whole enforcement for `helm`, `flux`, and
-`helmfile`, whose install-time surface is closed — only the paths `--dynamic`
+That bundle-time rejection is the whole enforcement for `helm`, `flux`,
+`helmfile`, and `terraform`, whose install-time surface is closed — only the paths `--dynamic`
 declares. The `argocd-helm` deployer additionally emits a structural
 template-time guard, because it exposes component values through the parent
 chart's `.Values`, an open-ended surface the bundle-time gate cannot
@@ -335,11 +341,16 @@ spec:
   componentRefs: []   # optional
 ```
 
-Mixin files currently in the tree: `os-ubuntu`, `os-talos`,
-`platform-inference`, `platform-kubeflow`, `nvsentinel-observability`,
+Mixin files currently in the tree: `os-ubuntu`, `os-talos`, `os-amazonlinux`,
+`platform-inference`, `platform-kubeflow`, `gpu-operator-nvidia-driver-cr`,
+`nvsentinel-observability`,
 `nvsentinel-object-monitor`, `nvsentinel-nic-health-monitor`,
 `nvsentinel-preflight`, `nvsentinel-slurm-drain-monitor`, `nvsentinel-observe`,
-`nvsentinel-quarantine`, `nvsentinel-remediation`, `npd`.
+`nvsentinel-quarantine`, `nvsentinel-remediation`, `nvsentinel-slinky-drainer`,
+`nvsentinel-health-events-analyzer`, `npd`.
+
+The OS-scoped mixins (`os-ubuntu`, `os-talos`, `os-amazonlinux`) are mutually exclusive:
+an overlay composes at most one of them.
 
 **Mixin rules:**
 

@@ -56,7 +56,7 @@ network:
     #
     # Without this rule the system security group drops that connection.
     # Because addOns.vpcCni is set, the pinned actuator (EKS_IMAGE in
-    # .github/workflows/uat-aws.yaml, v0.5.1) enables VPC CNI custom
+    # .github/workflows/uat-aws.yaml, v0.5.3) enables VPC CNI custom
     # networking and writes per-zone ENIConfigs that give each pod its node
     # group's subnet and security group: MongoDB pods carry the system group,
     # and GPU-node pods take IPs from the worker subnet. From outside itself,

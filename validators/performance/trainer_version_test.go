@@ -16,7 +16,6 @@ package main
 
 import (
 	"context"
-	stderrors "errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -25,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
@@ -76,7 +76,7 @@ func TestResolveTrainerVersion(t *testing.T) {
 			t.Setenv(trainerVersionEnv, tt.env)
 			got, err := resolveTrainerVersion(tt.ctx)
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Fatalf("resolveTrainerVersion() = %q, %v; want ErrCodeInvalidRequest", got, err)
 				}
 				return
@@ -174,7 +174,7 @@ func TestCheckTrainerManifestsSupported(t *testing.T) {
 				}
 				return
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Fatalf("checkTrainerManifestsSupported() = %v, want ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), tt.wantMissing) {
@@ -213,7 +213,7 @@ func TestCheckTrainerOverlay(t *testing.T) {
 				}
 				return
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Fatalf("checkTrainerOverlay() = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -225,7 +225,7 @@ func TestDownloadTrainerArchiveNotFoundIsInvalidRequest(t *testing.T) {
 	defer srv.Close()
 
 	_, _, err := downloadAndExtractGitHubArchive(context.Background(), srv.URL)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("downloadAndExtractGitHubArchive() error = %v, want ErrCodeInvalidRequest", err)
 	}
 }

@@ -28,9 +28,11 @@ Select the mode at recipe generation; the paths it owns are locked at every
 output boundary:
 
 ```shell
+CLUSTER_ID="ocid1.cluster.oc1.iad.aaaaaaaaexample"  # replace with your OKE cluster OCID
+
 # Capture the qualification signal alongside the snapshot: the
 # NvidiaGpuPlugin add-on's control-plane state.
-oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json > addons.json
+oci ce cluster list-addons --cluster-id "${CLUSTER_ID}" --all --output json > addons.json
 aicr snapshot --oke-addons addons.json --output snapshot.yaml
 
 # Oracle-managed cluster (the default) — add-on installed and ACTIVE
@@ -40,6 +42,10 @@ aicr recipe --snapshot snapshot.yaml --intent training -o recipe.yaml
 aicr recipe --snapshot snapshot.yaml --intent training \
   --profile gpuStack=operator-managed -o recipe.yaml
 ```
+
+Always capture the dump with `--all`, never `--page`. A dump with
+`opc-next-page` set is rejected, but a final page alone looks like a
+complete list, so an add-on on an earlier page would read as `absent`.
 
 ## Default: Oracle-Managed (`oci-managed`)
 
@@ -144,6 +150,32 @@ managed add-ons alongside AICR bundles — the bundle deploys both operators
 itself, and two lifecycle managers fight over the same releases. The only
 Oracle GPU add-on compatible with AICR bundles is the device plugin
 (`NvidiaGpuPlugin`), and only under `oci-managed`.
+
+The recipes that deploy `network-operator` (`gb200-oke-training`,
+`l40s-oke-training`, and their descendants) enforce this for
+`NvidiaNetworkOperator`. They require the
+`K8s.oke-addons.nvidia-network-operator` reading from the same
+`--oke-addons` dump to be `absent`, so a cluster with the add-on fails
+snapshot-based recipe generation and the `aicr validate` pre-flight.
+Criteria-only generation evaluates no reading and only records the
+constraint, so the gate fires at the pre-flight. Remove the add-on,
+wait for the removal to finish, then recapture the snapshot. An add-on that
+is still being removed reads `addon-deleting`, which also fails the gate.
+A snapshot captured with `--oke-addons` by an earlier `aicr` has no
+`nvidia-network-operator` reading, so these recipes reject it as not found
+without printing a remediation. Recapture it with the current
+`aicr snapshot --oke-addons`.
+
+```shell
+CLUSTER_ID="ocid1.cluster.oc1.iad.aaaaaaaaexample"  # replace with your OKE cluster OCID
+
+oci ce cluster disable-addon --cluster-id "${CLUSTER_ID}" \
+  --addon-name NvidiaNetworkOperator --is-remove-existing-add-on true
+
+# After the removal finishes, recapture with a fresh add-on dump.
+oci ce cluster list-addons --cluster-id "${CLUSTER_ID}" --all --output json > addons.json
+aicr snapshot --oke-addons addons.json --output snapshot.yaml
+```
 
 ## References
 

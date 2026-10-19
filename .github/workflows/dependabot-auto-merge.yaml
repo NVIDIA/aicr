@@ -29,7 +29,7 @@ jobs:
 
   auto-merge:
     name: Auto-Merge Patch Updates
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       pull-requests: write

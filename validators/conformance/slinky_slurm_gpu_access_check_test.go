@@ -16,12 +16,13 @@ package main
 
 import (
 	"context"
-	stderrors "errors"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
@@ -104,7 +105,7 @@ func TestCheckSlinkySlurmGPUAccessRequiresContext(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := CheckSlinkySlurmGPUAccess(tt.ctx)
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -205,7 +206,7 @@ func TestCheckSlinkySlurmGPUAccessGates(t *testing.T) {
 			if tt.wantSkip != validators.IsSkip(err) {
 				t.Fatalf("IsSkip(%v) = %t, want %t", err, validators.IsSkip(err), tt.wantSkip)
 			}
-			if !tt.wantSkip && !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if !tt.wantSkip && errorstest.ReportedCode(err) != tt.wantCode {
 				t.Fatalf("error = %v, want code %s", err, tt.wantCode)
 			}
 			if len(fake.commands) != 0 {
@@ -316,7 +317,7 @@ func TestCheckSlinkySlurmGPUAccessFailsWhenUnallocatedJobOpensGPU(t *testing.T) 
 	if err == nil || !strings.Contains(err.Error(), "opened 1 GPU device node(s) without a GPU allocation: Slurm GPU isolation is broken") {
 		t.Fatalf("error = %v, want broken-isolation failure", err)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Fatalf("error = %v, want ErrCodeInternal", err)
 	}
 	if !strings.Contains(out, "Verdict:          FAIL") {
@@ -354,7 +355,7 @@ func TestCheckSlinkySlurmGPUAccessStopsWhenCanceledBetweenJobs(t *testing.T) {
 
 	var err error
 	out := captureStdout(t, func() { err = CheckSlinkySlurmGPUAccess(ctx) })
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Fatalf("error = %v, want ErrCodeTimeout", err)
 	}
 	if len(fake.commands) != 1 {

@@ -37,6 +37,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/header"
 )
 
@@ -288,7 +289,7 @@ func TestReadReleaseValuesPropagatesMissingBundleInfo(t *testing.T) {
 	if err == nil {
 		t.Fatal("want an error for a directory with no bundle-info.yaml, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 		t.Errorf("want ErrCodeNotFound, got %v", err)
 	}
 }
@@ -333,7 +334,7 @@ func TestReadReleaseValuesRejectsOversizeValues(t *testing.T) {
 	if err == nil {
 		t.Fatal("want an oversize values.yaml rejected, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("want ErrCodeInvalidRequest, got %v", err)
 	}
 }
@@ -560,7 +561,7 @@ func TestReadReleaseValuesRejectsIncompleteBundle(t *testing.T) {
 			if err == nil {
 				t.Fatalf("want an incomplete bundle rejected, got values %#v", got)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("want ErrCodeInvalidRequest, got %v", err)
 			}
 			// NotFound is reserved for a bundle predating bundle-info.yaml,
@@ -591,7 +592,7 @@ func TestReadReleaseValuesWithholdsAReleaseWithValuesFrom(t *testing.T) {
 	if err == nil {
 		t.Fatalf("want a release with valuesFrom withheld, got values %#v", got)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeUnavailable {
 		t.Errorf("want ErrCodeUnavailable, got %v", err)
 	}
 	if stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
@@ -620,7 +621,7 @@ func TestReadReleaseValuesRefusesSymlinkedReleaseDirectory(t *testing.T) {
 	if err == nil {
 		t.Fatalf("want a symlinked release directory refused, got values %#v", got)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("want ErrCodeInvalidRequest, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "directory symlink") {
@@ -637,7 +638,7 @@ func TestReadReleaseValuesRejectsMalformedWrapperChart(t *testing.T) {
 
 	if _, err := bundleinfo.ReadReleaseValues(context.Background(), dir); err == nil {
 		t.Fatal("want a malformed wrapper Chart.yaml rejected, got nil")
-	} else if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	} else if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("want ErrCodeInvalidRequest, got %v", err)
 	}
 }
@@ -683,7 +684,7 @@ func TestReadReleaseValuesRejectsMalformedYAML(t *testing.T) {
 			if err == nil {
 				t.Fatal("want malformed YAML rejected, got nil")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("want ErrCodeInvalidRequest, got %v", err)
 			}
 		})

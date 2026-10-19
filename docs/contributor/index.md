@@ -20,7 +20,7 @@ For the coding rules every PR is graded against, see
 AICR is a **design-time tool**. Given a description of a target
 environment — cluster, accelerator, intent, OS, platform — it
 generates validated GPU-cluster configuration artifacts that an
-established deployment tool (Helm, Argo CD, Flux, Helmfile) consumes.
+established deployment tool (Helm, Argo CD, Flux, Helmfile, Terraform) consumes.
 
 | Artifact | Role | Produced by |
 |----------|------|-------------|
@@ -62,7 +62,7 @@ AICR is not a deployment engine. The boundary matters: half of all
 | Emit per-component artifacts in known formats | Orchestrate cross-component dependencies at runtime |
 
 The deployment tool that consumes AICR's output (Helm, Argo CD, Flux,
-Helmfile) owns release reconciliation and lifecycle.
+Helmfile, Terraform) owns release reconciliation and lifecycle.
 
 **On terminology.** Code under `pkg/bundler/deployer` includes things
 we call *deployers*. They are **output adapters** that serialize a
@@ -204,7 +204,7 @@ This boundary is enforced mechanically by a CI gate — see
 | `pkg/inventory` | Installed component inventory from a live cluster (Helm release records, Argo CD Applications) and the advisory at-risk scan, for `aicr upgrade-check --from cluster` |
 | **Bundle generation** | |
 | `pkg/bundler` | Per-component bundle generation entry point. [component.md](component.md) |
-| `pkg/bundler/deployer` | Output adapters: `helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `fleet` |
+| `pkg/bundler/deployer` | Output adapters: `helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `terraform`, `fleet` |
 | `pkg/bundler/validations` | Bundle-time component validation checks. [validator.md](validator.md#component-validations-bundle-time) |
 | `pkg/component` | Bundler utilities and test helpers |
 | `pkg/manifest`, `pkg/helm`, `pkg/bom` | Manifest rendering, chart inspection, BOM extraction |
@@ -239,6 +239,7 @@ deployment tools:
 | `argocd` | Argo CD `Application` manifests with sync-waves | Argo CD GitOps |
 | `argocd-helm` | Argo CD `Application` referencing per-component Helm charts | Argo CD + upstream Helm |
 | `flux` | Flux `HelmRelease` + `Kustomization` manifests | Flux GitOps |
+| `terraform` | Terraform module: one `module` call per component, `depends_on` from the recipe graph (root or child module) | Terraform / OpenTofu |
 | `fleet` | Fleet `fleet.yaml` per component + `GitRepo`, or `HelmOp`s (`--fleet-mode helmop`) | Rancher Fleet GitOps |
 
 We are open to adding additional community-standard targets when

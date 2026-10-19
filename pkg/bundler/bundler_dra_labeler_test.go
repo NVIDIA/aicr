@@ -16,7 +16,6 @@ package bundler
 
 import (
 	"context"
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -25,6 +24,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -175,7 +175,7 @@ func TestFilterEnabledComponents_DRANodeLabelerGate(t *testing.T) {
 				if err == nil {
 					t.Fatalf("filterEnabledComponents() error = nil, want substring %q", tt.wantErr)
 				}
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 				}
 				if !strings.Contains(err.Error(), tt.wantErr) {

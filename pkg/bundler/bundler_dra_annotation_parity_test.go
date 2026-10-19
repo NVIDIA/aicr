@@ -165,8 +165,9 @@ func TestMake_DRAIntegration_GeneratedArtifactParity(t *testing.T) {
 // coverage to every supported deployer (allDeployerCases), including both
 // Fleet modes. Each deployer renders the
 // shared componentValues map differently (values.yaml under a numbered
-// subdir for Helm/helmfile; configmap-values.yaml for Flux; embedded
-// in Application source for the Argo CD variants), so a per-path
+// subdir for Helm, helmfile and Terraform; configmap-values.yaml for
+// Flux; embedded in Application source for the Argo CD variants), so a
+// per-path
 // YAML-structure assertion isn't feasible without coupling the test
 // to each deployer's bundle layout.
 //

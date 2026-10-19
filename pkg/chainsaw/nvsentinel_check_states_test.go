@@ -82,6 +82,7 @@ func TestNVSentinelHealthCheckClusterStates(t *testing.T) {
 		{"Deployment", "fault-remediation"},
 		{"Deployment", "janitor"},
 		{"Deployment", "janitor-provider"},
+		{"Deployment", "health-events-analyzer"},
 	}
 	// pipeline returns every remediation workload fully rolled out, except
 	// that the one named faulty gets status[field] = value (nil omits it,

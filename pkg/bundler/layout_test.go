@@ -25,7 +25,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Bundle layout is the last of the four surfaces ROADMAP section 1 freezes at
+// Bundle layout is the last of the four surfaces ROADMAP.md freezes at
 // v1 (issue #2113, scope items 1, 2 and 5's layout half).
 //
 // An integrator's automation reads paths out of a bundle: a GitOps pipeline
@@ -55,7 +55,7 @@ const (
 
 // layoutDeployers is every deployer the bundle CLI accepts. It is checked
 // against the OpenAPI enum, so a new deployer cannot ship unfrozen.
-var layoutDeployers = []string{"helm", "argocd", "argocd-helm", "flux", "helmfile", "fleet"}
+var layoutDeployers = []string{"helm", "argocd", "argocd-helm", "flux", "helmfile", "terraform", "fleet"}
 
 // layoutShape is one frozen bundle tree: a deployer rendered with the given
 // extra flags, compared against the manifest of the same name.
@@ -309,6 +309,12 @@ var requiredRootPaths = map[string][]string{
 	"helmfile":     {"checksums.txt", "README.md", "helmfile.yaml", "recipe.yaml", "bundle-info.yaml"},
 	"fleet":        {"checksums.txt", "README.md", "gitrepo.yaml", "recipe.yaml", "bundle-info.yaml"},
 	"fleet-helmop": {"checksums.txt", "README.md", "helmops.yaml", "recipe.yaml", "bundle-info.yaml"},
+	// terraform's entry point is main.tf, but the module it calls is just as
+	// load-bearing: without modules/component/main.tf every module call in
+	// main.tf is a dangling source reference, so `terraform init` fails on a
+	// bundle that otherwise looks complete.
+	"terraform": {"checksums.txt", "README.md", "main.tf", "versions.tf",
+		"modules/component/main.tf", "recipe.yaml", "bundle-info.yaml"},
 }
 
 // TestBundleLayoutManifestsAreComplete rejects a truncated manifest.

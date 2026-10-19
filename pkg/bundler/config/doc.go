@@ -36,6 +36,7 @@
 //   - DeployerFlux: Generates Flux HelmRelease manifests
 //   - DeployerHelmfile: Generates a helmfile.yaml release graph
 //   - DeployerFleet: Generates a Rancher Fleet GitRepo bundle
+//   - DeployerTerraform: Generates a Terraform root module, or a child module
 //
 // Use ParseDeployerType() to parse user input and GetDeployerTypes() for CLI help.
 //

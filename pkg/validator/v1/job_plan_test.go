@@ -15,7 +15,6 @@
 package v1
 
 import (
-	stderrors "errors"
 	"os"
 	"strings"
 	"testing"
@@ -23,6 +22,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -1237,7 +1237,7 @@ func TestBuildJobPlan_RequiredMissingReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when required component is missing")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 }
@@ -1389,7 +1389,7 @@ func TestBuildResources_FailsClosedOnInvalidQuantity(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected error for cpu=%q memory=%q, got nil", tt.cpu, tt.memory)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
 			}
 		})
@@ -1410,7 +1410,7 @@ func TestBuildJobPlan_InvalidResourcesPropagatesError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when resources contain a typo")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 }

@@ -23,6 +23,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"syscall"
 
 	"gopkg.in/yaml.v3"
@@ -63,6 +65,9 @@ func Write(ctx context.Context, dir string, info *BundleInfo) (int64, error) {
 		return 0, err
 	}
 	if err := validateRelativePaths(info); err != nil {
+		return 0, err
+	}
+	if err := validateWarnings(info); err != nil {
 		return 0, err
 	}
 
@@ -236,6 +241,9 @@ func Read(ctx context.Context, dir string) (*BundleInfo, error) {
 	if err := validateRelativePaths(&info); err != nil {
 		return nil, err
 	}
+	if err := validateWarnings(&info); err != nil {
+		return nil, err
+	}
 
 	return &info, nil
 }
@@ -284,6 +292,28 @@ func validateRequiredFields(info *BundleInfo) error {
 				return errors.New(errors.ErrCodeInvalidRequest,
 					fmt.Sprintf("%s is missing layout.releases[%d].%s", FileName, i, f.field))
 			}
+		}
+	}
+	return nil
+}
+
+// warningCodePattern is the only accepted spelling of a warning code:
+// UPPER_SNAKE, with no leading, trailing or doubled underscore.
+var warningCodePattern = regexp.MustCompile(`^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$`)
+
+// validateWarnings rejects a warning without a well-formed code or a message.
+// The code is the stable contract automation keys on, so a record that cannot
+// supply one is malformed rather than merely terse. Both Write and Read call
+// it, for the reasons validateRequiredFields gives.
+func validateWarnings(info *BundleInfo) error {
+	for i, w := range info.Warnings {
+		if !warningCodePattern.MatchString(w.Code) {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("%s declares warnings[%d].code %q, which is not an UPPER_SNAKE code", FileName, i, w.Code))
+		}
+		if strings.TrimSpace(w.Message) == "" {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("%s is missing warnings[%d].message", FileName, i))
 		}
 	}
 	return nil

@@ -41,6 +41,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/flux"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helm"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helmfile"
+	tfdeployer "github.com/NVIDIA/aicr/pkg/bundler/deployer/terraform"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	"github.com/NVIDIA/aicr/pkg/bundler/types"
 	"github.com/NVIDIA/aicr/pkg/bundler/validations"
@@ -345,6 +346,8 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	if warningErr := b.warnPeermemReadinessDisabled(ctx, recipeResult, componentValues); warningErr != nil {
 		return nil, warningErr
 	}
+	b.warnNFDNICLabelMismatch(componentValues)
+	b.warnNRIManagementAllowlist(recipeResult, componentValues)
 
 	if warningErr := b.warnMissingStorageClassForPVCs(ctx, recipeResult, componentValues); warningErr != nil {
 		return nil, warningErr
@@ -801,10 +804,13 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 	// Readiness gate emission is wired for the deployers whose ordering
 	// primitive can block on the gate Job:
 	//   - helm: deploy.sh runs the folder's install.sh with
-	//     `helm upgrade --install --wait --wait-for-jobs`.
+	//     `helm upgrade --install --wait`; the gate Job is a helm hook, and
+	//     helm blocks on hook completion as part of the release.
 	//   - argocd / argocd-helm: the gate folder inherits the next sync-wave,
 	//     and Argo CD's built-in batch/Job health blocks that wave until the
 	//     Job completes.
+	//   - terraform: the gate is the last helm_release in the component's
+	//     module call, and the provider blocks on the hook as helm does.
 	// Flux, helmfile and fleet wrap each folder in HelmRelease / needs /
 	// dependsOn semantics that need dedicated gating wiring (not yet
 	// implemented). Fail clearly rather
@@ -812,11 +818,16 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 	// readiness gate the user asked for. See #904.
 	if b.Config.ReadinessHooks() {
 		switch b.Config.Deployer() {
-		case config.DeployerHelm, config.DeployerArgoCD, config.DeployerArgoCDHelm:
-			// supported
+		case config.DeployerHelm, config.DeployerArgoCD, config.DeployerArgoCDHelm, config.DeployerTerraform:
+			// supported. terraform gates on the emitted readiness release
+			// natively: the gate arrives as one more folder in the
+			// component's chain and becomes the last helm_release in its
+			// module; the gate Job is a helm hook, so that release does not
+			// apply until the Job COMPLETES, and a dependent's depends_on
+			// on the module call waits for it.
 		case config.DeployerFlux, config.DeployerHelmfile, config.DeployerFleet:
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("--readiness-hooks is not supported with --deployer %q; supported deployers: helm, argocd, argocd-helm",
+				fmt.Sprintf("--readiness-hooks is not supported with --deployer %q; supported deployers: helm, argocd, argocd-helm, terraform",
 					b.Config.Deployer()))
 		}
 	}
@@ -1034,6 +1045,8 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			VendorCharts:           b.Config.VendorCharts(),
 			UpgradeNotice:          upgradeNotice,
 		}, nil
+	case config.DeployerTerraform:
+		return b.terraformDeployer(ctx, recipeResult, componentValues, dynamicValues, dataFiles, upgradeNotice)
 
 	default:
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
@@ -1145,7 +1158,7 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	}
 
 	// Map deployer type to result and deployment names
-	resultType, deploymentType := deployerResultNames(b.Config.Deployer())
+	resultType, deploymentType := deployerResultNames(b.Config.Deployer(), b.Config.TerraformChildModule())
 
 	// Build result
 	resultOutput := &result.Output{
@@ -1190,9 +1203,55 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	return resultOutput, nil
 }
 
+// terraformDeployer builds the terraform Generator, the one deployer that
+// collects all three manifest kinds (pre, post, readiness).
+func (b *DefaultBundler) terraformDeployer(
+	ctx context.Context,
+	recipeResult *recipe.RecipeResult,
+	componentValues map[string]map[string]any,
+	dynamicValues map[string][]string,
+	dataFiles []string,
+	upgradeNotice string,
+) (deployer.Deployer, error) {
+
+	componentPreManifests, err := b.collectComponentPreManifests(ctx, recipeResult)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to collect component pre-manifests")
+	}
+	componentPostManifests, err := b.collectComponentManifests(ctx, recipeResult)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to collect component post-manifests")
+	}
+	componentReadiness, err := b.collectComponentReadiness(ctx, recipeResult)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to collect component readiness manifests")
+	}
+	return &tfdeployer.Generator{
+		RecipeResult:           recipeResult,
+		ComponentValues:        componentValues,
+		Version:                b.Config.Version(),
+		IncludeChecksums:       false,
+		UpgradeNotice:          upgradeNotice,
+		ComponentPreManifests:  componentPreManifests,
+		ComponentPostManifests: componentPostManifests,
+		ComponentReadiness:     componentReadiness,
+		DataFiles:              dataFiles,
+		DynamicValues:          dynamicValues,
+		VendorCharts:           b.Config.VendorCharts(),
+		ClusterRollover:        b.Config.TerraformClusterRollover(),
+		ChildModule:            b.Config.TerraformChildModule(),
+		Serial:                 b.Config.Serial(),
+	}, nil
+}
+
 // deployerResultNames returns the result type and deployment type display names
 // for a given deployer type, preserving the human-readable names used in output.
-func deployerResultNames(dt config.DeployerType) (types.BundleType, string) {
+// terraformChildModule distinguishes the two forms the terraform deployer emits;
+// it is ignored for every other deployer.
+func deployerResultNames(dt config.DeployerType, terraformChildModule bool) (types.BundleType, string) {
 	switch dt {
 	case config.DeployerHelm:
 		return "helm-bundle", "Helm per-component bundle"
@@ -1206,6 +1265,11 @@ func deployerResultNames(dt config.DeployerType) (types.BundleType, string) {
 		return "helmfile-bundle", "Helmfile release graph"
 	case config.DeployerFleet:
 		return "fleet-bundle", "Rancher Fleet bundle"
+	case config.DeployerTerraform:
+		if terraformChildModule {
+			return "terraform-bundle", "Terraform child module"
+		}
+		return "terraform-bundle", "Terraform root module"
 	default:
 		return types.BundleType(dt), string(dt)
 	}
@@ -1899,7 +1963,7 @@ type schedulingPathPolicy struct {
 	// these", so CLI tolerations augment the overlay list rather than
 	// replace it (e.g. bcm.yaml's `controller.tolerations` for the
 	// BCM-master taints must coexist with the KWOK system-pool taint
-	// passed via --system-node-toleration).
+	// passed via --system-node-toleration). Appended entries are deduplicated.
 	appendMode map[string]struct{}
 }
 
@@ -2023,6 +2087,37 @@ func splitPaths(paths []string, appendMode map[string]struct{}) (appendPaths, re
 	return
 }
 
+// applyTolerationPaths writes tolerations to paths under the policy: opt-out
+// paths are skipped, append-mode paths are appended to, the rest replaced.
+func applyTolerationPaths(values map[string]any, tolerations []corev1.Toleration, paths []string, policy schedulingPathPolicy) {
+	if len(tolerations) == 0 {
+		return
+	}
+	paths = filterPaths(paths, policy.optOut)
+	if len(paths) == 0 {
+		return
+	}
+	appendPaths, replacePaths := splitPaths(paths, policy.appendMode)
+	if len(replacePaths) > 0 {
+		component.ApplyTolerationsOverrides(values, tolerations, replacePaths...)
+	}
+	if len(appendPaths) > 0 {
+		component.AppendTolerationsOverrides(values, tolerations, appendPaths...)
+	}
+}
+
+// pathSet returns paths as a set, in the shape filterPaths takes for skip.
+func pathSet(paths []string) map[string]struct{} {
+	if len(paths) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(paths))
+	for _, p := range paths {
+		set[p] = struct{}{}
+	}
+	return set
+}
+
 // applyNodeSchedulingOverrides applies node selectors and tolerations to component values.
 // Uses the component registry to determine the correct paths for each component.
 // The provider argument scopes the registry lookup to the recipe's bound DataProvider;
@@ -2032,9 +2127,10 @@ func splitPaths(paths []string, appendMode map[string]struct{}) (appendPaths, re
 // computed once at the top of extractComponentValues. opt-out paths are
 // skipped entirely; append-mode paths receive CLI tolerations appended to
 // whatever the overlay already wrote (so bcm.yaml's BCM-master tolerations
-// coexist with --system-node-toleration); other paths use REPLACE semantics
-// so the documented system → accelerated overwrite for shared paths like
-// NFD's worker.tolerations still produces "accelerated wins".
+// coexist with --system-node-toleration); other paths use REPLACE semantics.
+// A toleration path declared under both tiers (component.SharedTolerationPaths)
+// is written once with component.SharedTolerations, so NFD's worker DaemonSet
+// tolerates both system and GPU taints (#3135).
 //
 // Does not enforce requireNodeSelector: a later --set-json/--set-file
 // override can null out an injected selector, so validateRequiredNodeSelectors
@@ -2069,19 +2165,15 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 		}
 	}
 
-	// Apply system tolerations — split into append-mode (overlay had a
-	// non-empty list, e.g. bcm) and replace-mode (no overlay).
-	if tolerations := b.Config.SystemNodeTolerations(); len(tolerations) > 0 {
-		if paths := filterPaths(comp.GetSystemTolerationPaths(), policy.optOut); len(paths) > 0 {
-			appendPaths, replacePaths := splitPaths(paths, policy.appendMode)
-			if len(replacePaths) > 0 {
-				component.ApplyTolerationsOverrides(values, tolerations, replacePaths...)
-			}
-			if len(appendPaths) > 0 {
-				component.AppendTolerationsOverrides(values, tolerations, appendPaths...)
-			}
-		}
-	}
+	// Tolerations: a path declared under both tiers is written once with the
+	// union (after the accelerated pass); every other path gets its tier's list.
+	systemTols := b.Config.SystemNodeTolerations()
+	acceleratedTols := b.Config.AcceleratedNodeTolerations()
+	systemTolPaths := comp.GetSystemTolerationPaths()
+	acceleratedTolPaths := comp.GetAcceleratedTolerationPaths()
+	shared := component.SharedTolerationPaths(systemTolPaths, acceleratedTolPaths)
+	sharedSet := pathSet(shared)
+	applyTolerationPaths(values, systemTols, filterPaths(systemTolPaths, sharedSet), policy)
 
 	// Apply accelerated node selector
 	acceleratedSelector := b.Config.AcceleratedNodeSelector()
@@ -2091,18 +2183,9 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 		}
 	}
 
-	// Apply accelerated tolerations
-	if tolerations := b.Config.AcceleratedNodeTolerations(); len(tolerations) > 0 {
-		if paths := filterPaths(comp.GetAcceleratedTolerationPaths(), policy.optOut); len(paths) > 0 {
-			appendPaths, replacePaths := splitPaths(paths, policy.appendMode)
-			if len(replacePaths) > 0 {
-				component.ApplyTolerationsOverrides(values, tolerations, replacePaths...)
-			}
-			if len(appendPaths) > 0 {
-				component.AppendTolerationsOverrides(values, tolerations, appendPaths...)
-			}
-		}
-	}
+	applyTolerationPaths(values, acceleratedTols, filterPaths(acceleratedTolPaths, sharedSet), policy)
+
+	applyTolerationPaths(values, component.SharedTolerations(systemTols, acceleratedTols), shared, policy)
 
 	// Apply workload selector
 	if workloadSelector := b.Config.WorkloadSelector(); len(workloadSelector) > 0 {
@@ -3999,7 +4082,7 @@ func invalidDRAEvictionManagedValue(componentName, path, wantType string, value 
 // Injection point: called from DefaultBundler.Make AFTER
 // extractComponentValues (so the values map is populated and user
 // --set overrides have already been applied) and BEFORE buildDeployer
-// (so every deployer — Helm, helmfile, Flux, Argo CD, argocd-helm —
+// (so every deployer — Helm, helmfile, Flux, Argo CD, argocd-helm, terraform —
 // receives the same final map). Placing the call after --set means a
 // user override of this specific annotation key is intentionally NOT
 // honored; the annotation must always reflect the actual resolved

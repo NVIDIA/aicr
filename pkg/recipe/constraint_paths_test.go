@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 )
 
@@ -161,7 +163,7 @@ spec:
 			if err == nil {
 				t.Fatal("LoadMetadataStoreFor() error = nil, want the bad constraint path rejected")
 			}
-			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want code %s", err, aicrerrors.ErrCodeInvalidRequest)
 			}
 			for _, want := range []string{tt.wantFile, tt.wantLocation, tt.wantMsg} {
@@ -393,7 +395,7 @@ func TestAnnotateConstraintPathErr(t *testing.T) {
 
 		annotated := annotateConstraintPathErr(inner, "overlays/leaf.yaml", locSpecConstraints, 0)
 
-		if !stderrors.Is(annotated, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+		if errorstest.ReportedCode(annotated) != aicrerrors.ErrCodeInternal {
 			t.Errorf("annotated error = %v, want code %s preserved", annotated, aicrerrors.ErrCodeInternal)
 		}
 		if stderrors.Is(annotated, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
@@ -405,7 +407,7 @@ func TestAnnotateConstraintPathErr(t *testing.T) {
 		t.Parallel()
 
 		annotated := annotateConstraintPathErr(stderrors.New("plain"), "f.yaml", locSpecConstraints, 0)
-		if !stderrors.Is(annotated, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+		if errorstest.ReportedCode(annotated) != aicrerrors.ErrCodeInternal {
 			t.Errorf("annotated error = %v, want code %s", annotated, aicrerrors.ErrCodeInternal)
 		}
 	})

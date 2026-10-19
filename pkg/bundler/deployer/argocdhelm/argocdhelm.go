@@ -88,6 +88,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -99,6 +100,7 @@ import (
 	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -281,6 +283,9 @@ type Generator struct {
 	// Forwarded to the delegated argocd.Generator. Off by default.
 	VendorCharts bool
 
+	// Puller is forwarded to the delegated argocd.Generator; see its field.
+	Puller localformat.ChartPuller
+
 	// Serial forces the delegated argocd.Generator to assign linear
 	// per-folder sync-waves (one component at a time) instead of the
 	// dependency-depth bands. Forwarded verbatim; the sync-wave annotation
@@ -365,6 +370,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		// parent chart level via writeStaticValuesAndBuildStubs.
 		AllowDynamicValueSplit: true,
 		VendorCharts:           g.VendorCharts,
+		Puller:                 g.Puller,
 		Serial:                 g.Serial,
 		// Forward the effective parent name so the inner generator's
 		// parent-collision check tests against THIS deployer's parent
@@ -382,7 +388,9 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 
 	if _, genErr := argocdGen.Generate(ctx, tmpDir); genErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate base Argo CD output", genErr)
+		// PropagateOrWrap keeps the delegate's code, so a chart digest
+		// mismatch reports CONFLICT here as it does under the argocd deployer.
+		return nil, errors.PropagateOrWrap(genErr, errors.ErrCodeInternal, "failed to generate base Argo CD output")
 	}
 
 	// Step 2: Create Helm chart output structure
@@ -498,7 +506,14 @@ func (g *Generator) writeProfileLockTemplate(templatesDir string) (string, int64
 	// allocation-policy selector paths at install time (ADR-015).
 	lockSet := g.RecipeResult.EffectiveLockSet()
 	components := make([]string, 0, len(lockSet))
-	for component := range lockSet {
+	for component, paths := range lockSet {
+		// A component the profile references as optional and the bundle
+		// omits has no Application to guard.
+		if !slices.Contains(paths, bundlercfg.ComponentEnabledKey) {
+			if ref := g.RecipeResult.GetComponentRef(component); ref == nil || !ref.IsEnabled() {
+				continue
+			}
+		}
 		components = append(components, component)
 	}
 	sort.Strings(components)

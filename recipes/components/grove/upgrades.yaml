@@ -69,6 +69,36 @@ transitions:
             reason: >-
               AICR's generated install.sh already passes --force-conflicts on
               Helm 4.
+      - deployers: [terraform]
+        steps:
+          - id: delete-legacy-crd
+            description: >-
+              kubectl delete crd clustertopologies.grove.io
+            reason: >-
+              The new CRD reuses shortname ct, so applying it while the
+              obsolete one still exists blocks it from ever reaching
+              Established.
+          - id: apply-new-crds
+            description: >-
+              Apply the alpha.12 CRDs with the CRD-apply command under
+              "Upgrade, uninstall, and troubleshooting" in
+              docs/user/component-catalog.md, with
+              CHART=oci://ghcr.io/ai-dynamo/grove/grove-charts,
+              VERSION=v0.1.0-alpha.12 and MANAGER=terraform-provider-helm.
+            reason: >-
+              helm_release upgrades through Helm, which never applies a
+              changed crds/ directory. The command reads the CRDs from the
+              chart archive rather than filtering helm show crds output,
+              whose document separators differ between Helm 3 and 4, and
+              applies them as manager terraform-provider-helm, the manager
+              the provider installed them under, so the apply adopts that
+              fieldset.
+          - id: apply-bundle
+            description: >-
+              Regenerate the bundle at the new pin and run terraform apply.
+            reason: >-
+              The release picks the new chart up once the CRDs are
+              Established.
       - steps:
           - id: delete-legacy-crd
             description: >-
@@ -129,6 +159,28 @@ transitions:
             reason: >-
               AICR's generated install.sh already passes --force-conflicts on
               Helm 4.
+      - deployers: [terraform]
+        steps:
+          - id: apply-new-crds
+            description: >-
+              Apply the alpha.13 CRDs with the CRD-apply command under
+              "Upgrade, uninstall, and troubleshooting" in
+              docs/user/component-catalog.md, with
+              CHART=oci://ghcr.io/ai-dynamo/grove/grove-charts,
+              VERSION=v0.1.0-alpha.13 and MANAGER=terraform-provider-helm.
+            reason: >-
+              Installs the alpha.13 CRDs before the operator that writes
+              the new status field starts. The command reads the CRDs from
+              the chart archive rather than filtering helm show crds output,
+              whose document separators differ between Helm 3 and 4, and
+              applies them as manager terraform-provider-helm, the manager
+              the provider installed them under.
+          - id: apply-bundle
+            description: >-
+              Regenerate the bundle at the new pin and run terraform apply.
+            reason: >-
+              The release picks the new chart up once the CRDs are
+              Established.
       - steps:
           - id: apply-new-crds
             description: >-

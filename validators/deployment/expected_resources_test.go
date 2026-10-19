@@ -31,6 +31,7 @@ import (
 	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/chainsaw"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
@@ -1771,7 +1772,7 @@ func TestResolveNodewrightGVRHonorsCancellation(t *testing.T) {
 	if registered {
 		t.Error("registered = true, want false — a discovery that never completed cannot report a served group")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("error = %v, want ErrCodeTimeout so the phase fails closed on the budget", err)
 	}
 }
@@ -2684,7 +2685,7 @@ func TestCheckExpectedResourcesFailsClosedOnExhaustedBudget(t *testing.T) {
 	if err == nil {
 		t.Fatal("checkExpectedResources returned nil on an exhausted budget; it must fail closed")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("error = %v, want ErrCodeTimeout", err)
 	}
 	if !strings.Contains(err.Error(), "budget exhausted") {
@@ -2810,7 +2811,7 @@ func TestCheckExpectedResourcesReportsUnreachedExpectedResources(t *testing.T) {
 	if err == nil {
 		t.Fatal("checkExpectedResources returned nil on an exhausted budget; it must fail closed")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("error = %v, want ErrCodeTimeout", err)
 	}
 	if !strings.Contains(err.Error(), "5 issue(s) collected") {

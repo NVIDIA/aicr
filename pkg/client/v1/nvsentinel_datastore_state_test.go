@@ -16,10 +16,10 @@ package aicr
 
 import (
 	"context"
-	stderrors "errors"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -154,7 +154,7 @@ func TestComputeSnapshotEvidenceStateContextErrors(t *testing.T) {
 			t.Parallel()
 			_, err := computeSnapshotEvidenceState(tt.ctx, tt.snap, defaultStorageClassSubtypeName,
 				recipe.DefaultStorageClassStateUnknown, defaultStorageClassStatePriority)
-			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Fatalf("error = %v, want code %s", err, tt.wantCode)
 			}
 		})
@@ -212,7 +212,7 @@ func TestApplyNVSentinelDatastoreStatePropagatesCancellation(t *testing.T) {
 	cancel()
 	result := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{{Name: nvsentinelMongoDBComponentName}}}
 	err := applyNVSentinelDatastoreState(ctx, result, datastoreEvidenceSnapshot(nil))
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Fatalf("error = %v, want timeout", err)
 	}
 }

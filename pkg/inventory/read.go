@@ -70,6 +70,7 @@ const (
 	DeployerArgoCD     Deployer = "argocd"
 	DeployerArgoCDHelm Deployer = "argocd-helm"
 	DeployerFleet      Deployer = "fleet"
+	DeployerTerraform  Deployer = "terraform"
 )
 
 // allDeployers is every deployer this package knows a name transform for.
@@ -80,6 +81,7 @@ var allDeployers = []Deployer{
 	DeployerArgoCD,
 	DeployerArgoCDHelm,
 	DeployerFleet,
+	DeployerTerraform,
 }
 
 // Component is what the mapping layer needs to know about a registry entry.
@@ -144,8 +146,47 @@ type Result struct {
 	// no sentinel to invent.
 	Versions map[string]string
 
+	// Unproven names, per component, the records that left it unversioned.
+	// Those are the install chosen for it, when that record could not
+	// establish a version, and every unplaced Application matched to it. An
+	// unproven record passed over for an install elsewhere is not named. A
+	// component unversioned only by records that were read, such as a failed
+	// Helm release, has no entry.
+	Unproven map[string][]UnprovenRecord
+
 	// Source is what was read and what was skipped.
 	Source SourceInfo
+}
+
+// UnprovenReason is why a record placed a component without establishing its
+// version. UnprovenUnreadable is a record the reader found and could not
+// decode. UnprovenDualDriver is a Helm release with records under both
+// storage drivers, whose revisions cannot be compared, so neither driver's
+// newest is provably the release's. UnprovenUnplaced is a readable Argo CD
+// Application matched by a prefixed name whose destination is none of the
+// component's namespaces.
+type UnprovenReason string
+
+const (
+	UnprovenUnreadable UnprovenReason = "unreadable"
+	UnprovenDualDriver UnprovenReason = "dual-driver"
+	UnprovenUnplaced   UnprovenReason = "unplaced"
+)
+
+// UnprovenRecord is one record that placed a component without establishing
+// its version.
+type UnprovenRecord struct {
+	// Source is "helm" for a Helm release record or "argocd" for an Argo CD
+	// Application.
+	Source string
+
+	Name string
+
+	// Namespace is where a Helm record is stored, or an Application's
+	// destination. Empty for an unreadable Application that states none.
+	Namespace string
+
+	Reason UnprovenReason
 }
 
 // SourceInfo accounts for both readers separately. The two sets of counts are
@@ -172,8 +213,10 @@ type HelmInfo struct {
 	// attributed even to a guess.
 	Unattributed int
 
-	// Unreadable is releases matched loosely whose records could not be read,
-	// counted once per release however many revisions were unreadable.
+	// Unreadable is releases whose version was withheld, counted once per
+	// release however many revisions were unreadable. That is a release
+	// matched loosely whose records could not be read, or a dual-driver
+	// release, whose records all decode.
 	Unreadable int
 
 	// Uninstalled is releases excluded because `helm uninstall
@@ -213,6 +256,10 @@ type ArgoInfo struct {
 	// Remote is Applications matching a component that deploy to another
 	// cluster, which on an Argo CD management cluster is most of them.
 	Remote int
+
+	// Unplaced is readable Applications matched to a component by a prefixed
+	// name whose destination is none of its namespaces.
+	Unplaced int
 }
 
 // Read reads the installed inventory from the cluster opts names.
@@ -261,8 +308,8 @@ func read(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interface
 // readsHelm reports whether d installs components as Helm releases, which
 // decides the one reader a read runs.
 //
-// The two are exclusive per deployer. helm, helmfile, flux and fleet write a Helm
-// release per component and no Application. argocd and argocd-helm write an
+// The two are exclusive per deployer. helm, helmfile, terraform, flux and fleet
+// write a Helm release per component and no Application. argocd and argocd-helm write an
 // Application per component and no per-component release; argocd-helm's one
 // Helm release is the app-of-apps, which is no component. Reading the other
 // source would only let a record the deployer never wrote stand in for the
@@ -348,30 +395,39 @@ const (
 // is the reader saying it found the component and could not establish its
 // version, which is a finding rather than a gap.
 func combine(d Deployer, comps []Component, helmRead, argoRead inventoryRead) (Result, error) {
-	versions, helmCounts, err := installedVersions(d, comps, helmRead.Releases)
+	helmMapped, err := installedVersions(d, comps, helmRead.Releases)
 	if err != nil {
 		return Result{}, err
 	}
-	argoVersions, _, err := installedVersions(d, comps, argoRead.Releases)
+	argoMapped, err := installedVersions(d, comps, argoRead.Releases)
 	if err != nil {
 		return Result{}, err
 	}
-	for name, version := range argoVersions {
-		if _, answered := versions[name]; !answered {
-			versions[name] = version
+	versions, unproven := helmMapped.versions, helmMapped.unproven
+	for name, version := range argoMapped.versions {
+		if _, answered := versions[name]; answered {
+			continue
+		}
+		versions[name] = version
+		if records, ok := argoMapped.unproven[name]; ok {
+			if unproven == nil {
+				unproven = make(map[string][]UnprovenRecord)
+			}
+			unproven[name] = records
 		}
 	}
 
 	return Result{
 		Versions: versions,
+		Unproven: unproven,
 		Source: SourceInfo{
 			Helm: HelmInfo{
 				Read:             readsHelm(d),
 				Records:          helmRead.Records,
 				Unattributed:     helmRead.Unattributed,
 				Unreadable:       helmRead.Unreadable,
-				Uninstalled:      helmCounts.uninstalled,
-				StampedUnmatched: helmCounts.stampedUnmatched,
+				Uninstalled:      helmMapped.counts.uninstalled,
+				StampedUnmatched: helmMapped.counts.stampedUnmatched,
 			},
 			Argo: ArgoInfo{
 				Read:         !readsHelm(d),
@@ -379,23 +435,34 @@ func combine(d Deployer, comps []Component, helmRead, argoRead inventoryRead) (R
 				Unattributed: argoRead.Unattributed,
 				Unreadable:   argoRead.Unreadable,
 				Remote:       argoRead.Remote,
+				Unplaced:     argoMapped.counts.unplaced,
 			},
 		},
 	}, nil
 }
 
-// mappingCounts is what the mapping dropped, as opposed to what the readers
-// did. Argo records can produce neither: they carry no status and no
-// annotations. See ArgoInfo.
+// mapping is one reader's records mapped onto components.
+type mapping struct {
+	versions map[string]string
+
+	// unproven names the records behind each component this reader left
+	// unversioned.
+	unproven map[string][]UnprovenRecord
+
+	counts mappingCounts
+}
+
+// mappingCounts is what the mapping dropped or could not place, as opposed to
+// what the readers did. Only Helm records can be uninstalled or stamped, and
+// only Argo records can be unplaced.
 type mappingCounts struct {
 	uninstalled      int
 	stampedUnmatched int
+	unplaced         int
 }
 
 // installedVersions maps one reader's records onto component versions.
-func installedVersions(d Deployer, comps []Component,
-	records []installedRelease) (map[string]string, mappingCounts, error) {
-
+func installedVersions(d Deployer, comps []Component, records []installedRelease) (mapping, error) {
 	var counts mappingCounts
 	candidates := make(map[int][]installedRelease, len(comps))
 	for _, record := range records {
@@ -415,6 +482,12 @@ func installedVersions(d Deployer, comps []Component,
 		case record.Source == sourceHelm && record.Status == helmStatusUninstalled:
 			counts.uninstalled++
 		case kind == matchUnplaced:
+			// An unreadable record stays unreadable. The reader already
+			// counted it.
+			if !record.Unproven {
+				record.UnprovenReason = UnprovenUnplaced
+				counts.unplaced++
+			}
 			record.Unproven = true
 			candidates[index] = append(candidates[index], record)
 		default:
@@ -424,27 +497,76 @@ func installedVersions(d Deployer, comps []Component,
 
 	// Walked in component order rather than map order so that a cluster with
 	// two ambiguous components reports the same one every run.
-	versions := make(map[string]string, len(candidates))
+	out := mapping{versions: make(map[string]string, len(candidates)), counts: counts}
 	for i := range comps {
 		found := candidates[i]
 		if len(found) == 0 {
 			continue
 		}
-		// Present with no version, which fails the run: there is no install
+		// Present with no version, which fails the run. There is no install
 		// to choose between when none of them establishes one.
 		if allUnproven(found) {
-			versions[comps[i].Name] = ""
+			out.versions[comps[i].Name] = ""
+			out.markUnproven(comps[i].Name, found)
 
 			continue
 		}
-		record, err := resolveInstall(comps[i], found)
+		chosen, err := resolveInstall(comps[i], found)
 		if err != nil {
-			return nil, mappingCounts{}, err
+			return mapping{}, err
 		}
-		versions[comps[i].Name] = versionFor(record, comps[i])
+		version := versionFor(found[chosen], comps[i])
+		out.versions[comps[i].Name] = version
+		if named := unversionedBy(found, chosen); version == "" && len(named) > 0 {
+			out.markUnproven(comps[i].Name, named)
+		}
 	}
 
-	return versions, counts, nil
+	return out, nil
+}
+
+// unversionedBy is the records to name, in reader order, on a component the
+// install at chosen left unversioned. Those are that install when it is
+// unproven, and every unplaced Application. Any other unproven record was
+// passed over by resolveInstall and did not decide the row, so naming it would
+// blame an install the comparison never used.
+func unversionedBy(records []installedRelease, chosen int) []installedRelease {
+	var out []installedRelease
+	for i, record := range records {
+		if (i == chosen && record.Unproven) || record.UnprovenReason == UnprovenUnplaced {
+			out = append(out, record)
+		}
+	}
+
+	return out
+}
+
+// markUnproven names records as the ones that left component unversioned.
+func (m *mapping) markUnproven(component string, records []installedRelease) {
+	if m.unproven == nil {
+		m.unproven = make(map[string][]UnprovenRecord)
+	}
+	m.unproven[component] = unprovenRecords(records)
+}
+
+// unprovenRecords names records none of which could version their component,
+// in reader order.
+func unprovenRecords(records []installedRelease) []UnprovenRecord {
+	out := make([]UnprovenRecord, len(records))
+	for i, record := range records {
+		reason := record.UnprovenReason
+		if reason == "" {
+			reason = UnprovenUnreadable
+		}
+		out[i] = UnprovenRecord{
+			Source:    string(record.Source),
+			Name:      record.Name,
+			Namespace: record.Namespace,
+			Reason:    reason,
+		}
+	}
+
+	return out
 }
 
 // allUnproven reports records none of which can establish a version.
@@ -458,7 +580,8 @@ func allUnproven(records []installedRelease) bool {
 	return true
 }
 
-// resolveInstall picks the one record that is this component's install.
+// resolveInstall picks the one record that is this component's install and
+// returns its index in records.
 //
 // A release name is unique within a namespace and not across the cluster, so
 // two tenants can hold the same chart at different versions while the version
@@ -480,23 +603,23 @@ func allUnproven(records []installedRelease) bool {
 // namespace, so that shape is two installs in one namespace; repeating the
 // namespace per record would assert a conflict that does not exist and hide
 // the names that are the actual discriminator.
-func resolveInstall(c Component, records []installedRelease) (installedRelease, error) {
+func resolveInstall(c Component, records []installedRelease) (int, error) {
 	if len(records) == 1 {
-		return records[0], nil
+		return 0, nil
 	}
 
-	var expected []installedRelease
+	var expected []int
 	names := make([]string, 0, len(records))
 	seen := make(map[string]struct{}, len(records))
 	namespaces := make([]string, 0, len(records))
-	for _, record := range records {
+	for i, record := range records {
 		names = append(names, record.Name)
 		if _, duplicate := seen[record.Namespace]; !duplicate {
 			seen[record.Namespace] = struct{}{}
 			namespaces = append(namespaces, record.Namespace)
 		}
 		if slices.Contains(c.namespaces(), record.installNamespace()) {
-			expected = append(expected, record)
+			expected = append(expected, i)
 		}
 	}
 	if len(expected) == 1 {
@@ -508,7 +631,7 @@ func resolveInstall(c Component, records []installedRelease) (installedRelease, 
 	// len(records) is always above one here, so the plural never has to be
 	// conditioned; the namespaces are listed rather than counted for the same
 	// reason in reverse.
-	return installedRelease{}, errors.NewWithContext(errors.ErrCodeConflict,
+	return -1, errors.NewWithContext(errors.ErrCodeConflict,
 		fmt.Sprintf("component %q resolves to %d installs (%s) in namespaces (%s), and %d of them are in the %q "+
 			"the registry declares, so which install to compare cannot be decided here",
 			c.Name, len(records), strings.Join(names, ", "), strings.Join(namespaces, ", "),
@@ -543,10 +666,11 @@ func attributeRecord(d Deployer, comps []Component, record installedRelease) (in
 // the component-side string that matched.
 //
 // Each deployer's rule is the inverse of what that deployer writes. helm and
-// helmfile install under the component's own name
-// (localformat's install-local-helm.sh), and fleet sets helm.releaseName to
-// that same name in every fleet.yaml and HelmOp, so Fleet's agent stores the
-// release under it. Flux writes a HelmRelease with a name
+// helmfile install under the component's own name (localformat's
+// install-local-helm.sh), terraform's module sets release_name to the
+// same name with the same -pre/-post/-readiness suffixes, and fleet sets
+// helm.releaseName to that same name in every fleet.yaml and HelmOp, so
+// Fleet's agent stores the release under it. Flux writes a HelmRelease with a name
 // and a targetNamespace and never a releaseName, so helm-controller composes
 // the release name from the two. Argo CD prepends a user-settable namePrefix
 // to every child Application, which cannot be enumerated and need not end in a
@@ -556,7 +680,7 @@ func attributeRecord(d Deployer, comps []Component, record installedRelease) (in
 // being reported as that component.
 func matchComponent(d Deployer, c *Component, record installedRelease) (matchKind, string) {
 	switch d {
-	case DeployerHelm, DeployerHelmfile, DeployerFleet:
+	case DeployerHelm, DeployerHelmfile, DeployerTerraform, DeployerFleet:
 		return matchName(record.Name, c.Name, false)
 	case DeployerFlux:
 		return matchFlux(c, record)

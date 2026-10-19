@@ -91,6 +91,10 @@
 // Message and Cause are not compared; for cause-chain matching, rely
 // on Unwrap as usual.
 //
+// Tests asserting the code an error reports should use package
+// errorstest instead. errors.Is matches a code anywhere in the chain, but
+// consumers such as ExitCodeFromError read the outermost one.
+//
 // # Thread Safety
 //
 // All functions in this package are thread-safe and can be called concurrently.

@@ -19,3 +19,14 @@ const (
 	// probe Pods. busybox provides /bin/sh, grep, ls, sleep in ~2 MB.
 	ProbeImage = "busybox:1.37"
 )
+
+// DynamoImageRepository and DynamoRuntimeImageTag locate the Dynamo runtime
+// images the inference-perf validator runs. The validator tags them with the
+// recipe's dynamo-platform version and falls back to DynamoRuntimeImageTag
+// when the recipe's ref carries none. DynamoRuntimeImageTag must equal the
+// dynamo-platform chart version in recipes/registry.yaml, as enforced by
+// make check-dynamo-runtime-image.
+const (
+	DynamoImageRepository = "nvcr.io/nvidia/ai-dynamo"
+	DynamoRuntimeImageTag = "1.4.2"
+)

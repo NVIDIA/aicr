@@ -112,7 +112,7 @@ type BundleOptions struct {
 	Config *BundleConfig
 
 	// Deployer selects the bundle output format (Helm, Argo CD, Argo CD Helm
-	// chart, Flux, Helmfile, or Fleet). The zero value is DeployerType(""), which
+	// chart, Flux, Helmfile, Fleet, or Terraform). The zero value is DeployerType(""), which
 	// bundlerConfig treats as "not set" and leaves at bundler config.NewConfig's
 	// own default (Helm) — unlike every other flat field here, an empty
 	// DeployerType is not a safe pass-through: WithDeployer("") would
@@ -410,7 +410,7 @@ func (c *Client) AdoptRecipe(ctx context.Context, rec *recipe.RecipeResult) (*Re
 // in memory), MakeBundle produces the SAME complete artifact the CLI
 // bundle command emits — README, deploy.sh, per-component directories,
 // checksums — in the deployer layout selected by opts.Config.Deployer()
-// (helm, argocd, argocd-helm, flux, helmfile, fleet).
+// (helm, argocd, argocd-helm, flux, helmfile, fleet, terraform).
 //
 // # When to call
 //

@@ -62,8 +62,27 @@ spec:
                 --recipe "${WORK}/recipe.yaml" \
                 --output "${WORK}/bundle" \
                 --system-node-selector nodeGroup=system-pool \
+                --system-node-toleration CriticalAddonsOnly:NoSchedule \
                 --accelerated-node-selector nodeGroup=customer-gpu \
                 --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule
+
+    # nfd's worker.tolerations is registered under both tiers; it must carry
+    # the system AND the accelerated toleration (#3135), while the system-only
+    # master.tolerations carries just the system one.
+    - name: assert-nfd-worker-union
+      description: Verify nfd worker tolerates both the system and the accelerated taint.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-scheduling"
+              VAL=$(ls "${WORK}"/bundle/[0-9][0-9][0-9]-nfd/values.yaml 2>/dev/null | head -1)
+              [ -n "${VAL}" ] || { echo "nfd values.yaml not found" >&2; exit 1; }
+              printf 'apiVersion: helm/v1\nkind: Values\n' > "${WORK}/nfd-values.yaml"
+              sed '/^---$/d' "${VAL}" >> "${WORK}/nfd-values.yaml"
+              chainsaw assert \
+                --resource "${WORK}/nfd-values.yaml" \
+                --file ./assert-nfd-worker-union.yaml \
+                --no-color --timeout 5s
 
     # chainsaw assert requires apiVersion/kind, so we prepend a header
     # to the plain Helm values file. The assertion YAML validates that

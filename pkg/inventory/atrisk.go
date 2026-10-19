@@ -20,13 +20,13 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/metadata"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -34,12 +34,13 @@ import (
 	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 )
 
-// The markers that make an object somebody's. Helm writes the label and the
-// annotation together on everything it installs; Argo CD writes its tracking
-// id on everything it syncs.
+// Ownership markers recognized by owned.
 const (
 	helmManagedByValue        = "Helm"
 	helmReleaseNameAnnotation = "meta.helm.sh/release-name"
+	helmHookAnnotation        = "helm.sh/hook"
+	helmPreUpgradeHook        = "pre-upgrade"
+	helmPostUpgradeHook       = "post-upgrade"
 	argoTrackingIDAnnotation  = "argocd.argoproj.io/tracking-id"
 )
 
@@ -129,7 +130,7 @@ func ScanAtRisk(ctx context.Context, opts AtRiskOptions) (AtRiskResult, error) {
 	if err != nil {
 		return AtRiskResult{}, err
 	}
-	dyn, err := k8sclient.NewDynamicClientForConfig(restConfig)
+	metaClient, err := k8sclient.NewMetadataClientForConfig(restConfig)
 	if err != nil {
 		return AtRiskResult{}, err
 	}
@@ -138,12 +139,12 @@ func ScanAtRisk(ctx context.Context, opts AtRiskOptions) (AtRiskResult, error) {
 		return AtRiskResult{}, err
 	}
 
-	return scanAtRisk(ctx, dyn, mapper, groups, opts.Kinds)
+	return scanAtRisk(ctx, metaClient, mapper, groups, opts.Kinds)
 }
 
 // scanAtRisk is ScanAtRisk with the client, the mapper and the discovery the
 // mapper resolves through supplied.
-func scanAtRisk(ctx context.Context, client dynamic.Interface, mapper meta.RESTMapper,
+func scanAtRisk(ctx context.Context, client metadata.Interface, mapper meta.RESTMapper,
 	groups k8sclient.GroupResourceLister, kinds []ResourceKind) (AtRiskResult, error) {
 
 	if len(kinds) == 0 {
@@ -152,9 +153,6 @@ func scanAtRisk(ctx context.Context, client dynamic.Interface, mapper meta.RESTM
 	if err := validateKinds(kinds); err != nil {
 		return AtRiskResult{}, err
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, defaults.AtRiskScanTimeout)
-	defer cancel()
 
 	out := AtRiskResult{Kinds: make([]ScannedKind, 0, len(kinds))}
 	for _, kind := range kinds {
@@ -165,7 +163,9 @@ func scanAtRisk(ctx context.Context, client dynamic.Interface, mapper meta.RESTM
 			return AtRiskResult{}, err
 		}
 
-		gvr, served, err := resolveKind(ctx, mapper, groups, kind)
+		stepCtx, cancel := context.WithTimeout(ctx, defaults.AtRiskStepTimeout)
+		gvr, served, err := resolveKind(stepCtx, mapper, groups, kind)
+		cancel()
 		if err != nil {
 			return AtRiskResult{}, err
 		}
@@ -177,7 +177,7 @@ func scanAtRisk(ctx context.Context, client dynamic.Interface, mapper meta.RESTM
 			continue
 		}
 
-		scanned, findings, err := scanKind(ctx, client, kind, gvr)
+		scanned, findings, err := scanKind(ctx, client, kind, gvr, defaults.AtRiskStepTimeout)
 		if err != nil {
 			return AtRiskResult{}, err
 		}
@@ -250,9 +250,12 @@ func resolveKind(ctx context.Context, mapper meta.RESTMapper, groups k8sclient.G
 	return schema.GroupVersionResource{}, false, nil
 }
 
-// scanKind lists one kind cluster-wide and returns the objects nothing owns.
-func scanKind(ctx context.Context, client dynamic.Interface, kind ResourceKind,
-	gvr schema.GroupVersionResource) (ScannedKind, []AtRiskObject, error) {
+// scanKind lists kind cluster-wide and returns the objects nothing owns. Each
+// page, retries included, must arrive within pageTimeout. It fails with
+// ErrCodeUnavailable once the apiserver expires the continue token more than
+// defaults.AtRiskExpiredContinueRetries times in a row.
+func scanKind(ctx context.Context, client metadata.Interface, kind ResourceKind,
+	gvr schema.GroupVersionResource, pageTimeout time.Duration) (ScannedKind, []AtRiskObject, error) {
 
 	scanned := ScannedKind{Group: kind.Group, Kind: kind.Kind, Components: kind.Components, Present: true}
 	var findings []AtRiskObject
@@ -261,27 +264,12 @@ func scanKind(ctx context.Context, client dynamic.Interface, kind ResourceKind,
 		if err := ctxErr(ctx, atRiskSubject); err != nil {
 			return ScannedKind{}, nil, err
 		}
-		page, err := client.Resource(gvr).Namespace(metav1.NamespaceAll).List(ctx, opts)
+		page, served, err := listPage(ctx, client, kind, gvr, &opts, pageTimeout)
 		if err != nil {
-			// A CRD deleted between the mapping and this List answers the same
-			// way one that was never installed does. Only the first request
-			// can say that: a CRD does not disappear between pages, so the
-			// same error later would silently drop everything already read.
-			if opts.Continue == "" && (apierrors.IsNotFound(err) || meta.IsNoMatchError(err)) {
-				return ScannedKind{Group: kind.Group, Kind: kind.Kind, Components: kind.Components}, nil, nil
-			}
-			// Before the generic wrap below, which would report an operator's
-			// Ctrl-C as an unavailable apiserver. The per-page ctxErr catches
-			// most aborts, but one landing mid-request surfaces here instead.
-			if stderrors.Is(err, context.Canceled) || stderrors.Is(err, context.DeadlineExceeded) {
-				return ScannedKind{}, nil, abortError(err, atRiskSubject,
-					map[string]any{ctxKeyResource: gvr.Resource})
-			}
-
-			return ScannedKind{}, nil, errors.WrapWithContext(errors.ErrCodeUnavailable,
-				fmt.Sprintf("failed to list %s while scanning for resources an upgrade could disturb",
-					kindDescription(kind)),
-				err, map[string]any{ctxKeyResource: gvr.Resource})
+			return ScannedKind{}, nil, err
+		}
+		if !served {
+			return ScannedKind{Group: kind.Group, Kind: kind.Kind, Components: kind.Components}, nil, nil
 		}
 
 		for i := range page.Items {
@@ -291,9 +279,7 @@ func scanKind(ctx context.Context, client dynamic.Interface, kind ResourceKind,
 				continue
 			}
 			if item.GetName() == "" {
-				// A finding an operator cannot look up is worse than none:
-				// this is advisory output, and an unactionable line in it
-				// costs the actionable ones their credibility.
+				// An unnamed object cannot be looked up.
 				continue
 			}
 			findings = append(findings, AtRiskObject{
@@ -326,28 +312,110 @@ func scanKind(ctx context.Context, client dynamic.Interface, kind ResourceKind,
 	return scanned, findings, nil
 }
 
-// owned reports an object carrying a deployer's ownership marker.
-//
-// The check is positive, so an object with no recognized marker is at risk by
-// default. That is the correct direction here: the failure being guarded is an
-// operator's own custom resources being cascade-deleted when a CRD is removed,
-// so a marker this build does not recognize over-warns rather than
-// under-warns, and the scan is advisory either way. The reverse — a denylist
-// of markers meaning "not ours" — would let every unrecognized shape pass
-// silently, which is the failure mode with no recovery.
-//
-// Helm's label alone is not ownership. Any controller, any hand-written
-// manifest and any chart rendered by something other than Helm can carry
-// app.kubernetes.io/managed-by, while meta.helm.sh/release-name is written by
-// Helm's own install path and by nothing else.
-func owned(item *unstructured.Unstructured) bool {
+// listPage reads the page opts.Continue names, advancing opts past each
+// expired-continue 410 it follows. The page and those retries share one
+// pageTimeout. It reports false with no error when the kind's resource is
+// gone before the first page.
+func listPage(ctx context.Context, client metadata.Interface, kind ResourceKind, gvr schema.GroupVersionResource,
+	opts *metav1.ListOptions, pageTimeout time.Duration) (*metav1.PartialObjectMetadataList, bool, error) {
+
+	pageCtx, cancel := context.WithTimeout(ctx, pageTimeout)
+	defer cancel()
+	errCtx := map[string]any{ctxKeyResource: gvr.Resource}
+	// Per page rather than per list, since a long list legitimately outlives
+	// several compactions, each costing one 410.
+	expired := 0
+	for {
+		// Metadata only, though kubectl's last-applied-configuration
+		// annotation can still hold a whole object.
+		page, err := client.Resource(gvr).Namespace(metav1.NamespaceAll).List(pageCtx, *opts)
+		if err == nil {
+			return page, true, nil
+		}
+		// For an advisory scan an inconsistent list beats a failed one.
+		if fresh := expiredContinue(err); opts.Continue != "" && fresh != "" {
+			expired++
+			if expired > defaults.AtRiskExpiredContinueRetries {
+				return nil, false, errors.WrapWithContext(errors.ErrCodeUnavailable,
+					fmt.Sprintf("the apiserver expired the continue token %d times in a row while listing %s, "+
+						"so paging cannot make progress", expired, kindDescription(kind)),
+					err, errCtx)
+			}
+			if advErr := advance(opts, fresh, gvr.Resource); advErr != nil {
+				return nil, false, advErr
+			}
+
+			continue
+		}
+		// A CRD deleted between the mapping and this List answers the same
+		// way one that was never installed does. Only the first request
+		// can say that. A CRD does not disappear between pages, so the
+		// same error later would silently drop everything already read.
+		if opts.Continue == "" && (apierrors.IsNotFound(err) || meta.IsNoMatchError(err)) {
+			return nil, false, nil
+		}
+		// Before the generic wrap below, which would report an operator's
+		// Ctrl-C as an unavailable apiserver. The per-page ctxErr catches
+		// most aborts, but one landing mid-request surfaces here instead.
+		if stderrors.Is(err, context.Canceled) || stderrors.Is(err, context.DeadlineExceeded) {
+			return nil, false, abortError(err, atRiskSubject, errCtx)
+		}
+
+		return nil, false, errors.WrapWithContext(errors.ErrCodeUnavailable,
+			fmt.Sprintf("failed to list %s while scanning for resources an upgrade could disturb",
+				kindDescription(kind)),
+			err, errCtx)
+	}
+}
+
+// expiredContinue returns the token that err, a 410 for an expired continue
+// token, carries to resume the list at the latest snapshot, or "" if err is
+// not such a 410 or carries none.
+func expiredContinue(err error) string {
+	var status apierrors.APIStatus
+	if !apierrors.IsResourceExpired(err) || !stderrors.As(err, &status) {
+		return ""
+	}
+
+	return status.Status().Continue
+}
+
+// owned reports whether item carries a deployer ownership marker. The markers
+// are:
+//   - a non-blank argocd.argoproj.io/tracking-id annotation
+//   - the app.kubernetes.io/managed-by=Helm label with a non-blank
+//     meta.helm.sh/release-name annotation
+//   - the app.kubernetes.io/managed-by=Helm label with a helm.sh/hook
+//     annotation naming a pre-upgrade or post-upgrade phase
+func owned(item metav1.Object) bool {
+	// An allowlist, since over-warning costs a line of output and
+	// under-warning costs an object a CRD removal deletes for good.
 	annotations := item.GetAnnotations()
 	if strings.TrimSpace(annotations[argoTrackingIDAnnotation]) != "" {
 		return true
 	}
+	// Anything can write the label, but only Helm writes the release name. A
+	// hook gets no release name, only its chart's helm.sh/hook annotation, and
+	// an upgrade re-creates only pre-upgrade and post-upgrade hooks.
+	if item.GetLabels()[labels.ManagedBy] != helmManagedByValue {
+		return false
+	}
 
-	return item.GetLabels()[labels.ManagedBy] == helmManagedByValue &&
-		strings.TrimSpace(annotations[helmReleaseNameAnnotation]) != ""
+	return strings.TrimSpace(annotations[helmReleaseNameAnnotation]) != "" ||
+		upgradeHook(annotations[helmHookAnnotation])
+}
+
+// upgradeHook reports whether a helm.sh/hook value names a phase helm upgrade
+// runs. It splits, trims and lowercases the phases as Helm does.
+func upgradeHook(value string) bool {
+	for _, phase := range strings.Split(value, ",") {
+		switch strings.ToLower(strings.TrimSpace(phase)) {
+		case helmPreUpgradeHook, helmPostUpgradeHook:
+			return true
+		}
+	}
+
+	return false
 }
 
 // kindDescription names a kind the way an operator writes it into a kubectl

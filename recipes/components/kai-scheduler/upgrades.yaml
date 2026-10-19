@@ -1,0 +1,53 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: kai-scheduler
+transitions:
+  - from: ">=0.16.9 <0.17.1"
+    to: "=0.17.1"
+    verdict: manual
+    summary: >-
+      0.17.1 replaces the global.fips boolean with global.fipsMode (on/off).
+      The 0.17.0 chart also removes the admission.certSecretName and
+      queuecontroller.certSecretName values; the operator uses fixed TLS secret
+      names. Existing values must be reconciled with these chart changes.
+    precondition: >-
+      This guidance covers the AICR 0.16.9 baseline and 0.17.0, assessed against
+      the 0.17.0 and 0.17.1 release changes. Earlier sources are not assessed.
+    stepsByDeployer:
+      - steps:
+          - id: migrate-values
+            description: >-
+              Export the installed values and custom resources. If global.fips
+              is set, replace it with global.fipsMode set to the quoted string
+              "on" or "off". Remove admission.certSecretName and
+              queuecontroller.certSecretName overrides; check that certificate
+              provisioning uses kai-admission-webhook-tls-secret and
+              queue-webhook-tls-secret.
+            reason: >-
+              Keeping removed keys does not configure the new chart and can
+              silently lose the intended FIPS or certificate configuration.
+          - id: reconcile-and-verify
+            description: >-
+              Apply the generated bundle through the selected deployer, then
+              verify webhook readiness and scheduling of representative queued
+              and gang workloads before resuming normal submissions.
+            reason: >-
+              Controller readiness alone does not verify existing queue and
+              workload configuration across the chart migration.
+    references:
+      - https://github.com/kai-scheduler/KAI-Scheduler/releases/tag/v0.17.0
+      - https://github.com/kai-scheduler/KAI-Scheduler/releases/tag/v0.17.1

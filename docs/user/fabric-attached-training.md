@@ -268,7 +268,8 @@ none. Check every eligible node and fail if they disagree, rather than trusting
 the first one:
 
 ```shell
-kubectl get nodes -l <your-gpu-pool-selector> \
+NODE_SELECTOR="nodeGroup=gpu-worker"  # replace with the label selector for your GPU node pool
+kubectl get nodes -l "${NODE_SELECTOR}" \
   -o custom-columns='NODE:.metadata.name,EFA:.status.allocatable.vpc\.amazonaws\.com/efa'
 ```
 
@@ -333,11 +334,14 @@ The ClusterTrainingRuntimes AICR ships set `NCCL_DEBUG=WARN` or leave it unset
 run finds nothing, which is not evidence of socket fallback:
 
 ```shell
+NAMESPACE="my-namespace"  # replace with the TrainJob's namespace
+TRAINJOB="my-trainjob"    # replace with the TrainJob's name
+
 # Select workers by label rather than guessing the generated pod name.
 # --tail=-1 is required: with a selector, kubectl defaults to the last 10 lines
 # and would omit the transport banner, which NCCL prints during init.
-kubectl logs -n <namespace> -c node --tail=-1 --prefix \
-  -l jobset.sigs.k8s.io/jobset-name=<trainjob-name>,jobset.sigs.k8s.io/replicatedjob-name=node \
+kubectl logs -n "${NAMESPACE}" -c node --tail=-1 --prefix \
+  -l "jobset.sigs.k8s.io/jobset-name=${TRAINJOB},jobset.sigs.k8s.io/replicatedjob-name=node" \
   | grep -i 'NCCL INFO.*Using network'
 ```
 

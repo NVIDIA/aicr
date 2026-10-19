@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
@@ -122,7 +124,7 @@ func TestCheckGKEGPUNICNetworks(t *testing.T) {
 			if validators.IsSkip(err) {
 				t.Fatalf("expected a failure, got a Skip: %v", err)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 				t.Errorf("expected ErrCodeNotFound, got: %v", err)
 			}
 			if !strings.Contains(err.Error(), tt.wantInMsg) {
@@ -262,7 +264,7 @@ func TestCheckGKEGPUNICNetworksApplicability(t *testing.T) {
 			if validators.IsSkip(err) {
 				t.Fatalf("an RBAC denial must not skip: %v", err)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeUnauthorized, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeUnauthorized {
 				t.Errorf("expected ErrCodeUnauthorized, got: %v", err)
 			}
 		})
@@ -301,7 +303,7 @@ func TestCheckGKEGPUNICNetworksApplicability(t *testing.T) {
 				if validators.IsSkip(err) {
 					t.Fatalf("a %s must not skip: %v", ie.name, err)
 				}
-				if !stderrors.Is(err, errors.New(ie.wantCode, "")) {
+				if errorstest.ReportedCode(err) != ie.wantCode {
 					t.Errorf("expected %s, got: %v", ie.wantCode, err)
 				}
 			})
@@ -325,7 +327,7 @@ func TestCheckGKEGPUNICNetworksApplicability(t *testing.T) {
 		if err == nil || validators.IsSkip(err) {
 			t.Fatalf("expected a failure, got: %v", err)
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 			t.Errorf("expected ErrCodeNotFound, got: %v", err)
 		}
 		// Must name the prerequisite, not just "failed to read".

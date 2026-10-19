@@ -3,7 +3,7 @@
 NVIDIA AI Cluster Runtime (AICR) generates validated, reproducible
 configuration artifacts for GPU-accelerated Kubernetes clusters.
 Given a description of your environment — cloud, accelerator, OS,
-intent — AICR emits the Helm, Argo CD, Flux, Helmfile, or Fleet artifacts
+intent — AICR emits the Helm, Argo CD, Flux, Helmfile, Terraform, or Fleet artifacts
 your deployment tool consumes. The output is hardware-aware,
 version-locked, and backed by SLSA Build Level 3 image provenance.
 
@@ -46,7 +46,7 @@ For pipelines and platforms that call AICR programmatically or host
 | Add or modify recipe metadata | [Recipe Development](integrator/recipe-development.md) |
 | Verify artifacts (SLSA, SBOM, attestations) | [Supply Chain Verification](integrator/supply-chain-verification.md) |
 | Ship custom validators via `--data` | [Validator Extension](integrator/validator-extension.md) |
-| Cloud-specific GPU setup | [AKS](integrator/aks-gpu-setup.md), [GKE](integrator/gke-gpu-setup.md), [OKE](integrator/oke-gpu-setup.md), [EKS networking](integrator/eks-dynamo-networking.md), [GKE TCPXO networking](integrator/gke-tcpxo-networking.md), [GKE GB200 networking](integrator/gke-gb200-networking.md), [GKE A4X Max networking](integrator/gke-a4x-max-networking.md), [Talos](integrator/talos-integration.md) |
+| Platform-specific GPU setup | [AKS](integrator/aks-gpu-setup.md), [GKE](integrator/gke-gpu-setup.md), [OKE](integrator/oke-gpu-setup.md), [Nebius B300](integrator/nebius-b300.md), [EKS networking](integrator/eks-dynamo-networking.md), [GKE TCPXO networking](integrator/gke-tcpxo-networking.md), [GKE GB200 networking](integrator/gke-gb200-networking.md), [GKE A4X Max networking](integrator/gke-a4x-max-networking.md), [Talos](integrator/talos-integration.md), [OpenShift](integrator/openshift.md), [RKE2 VR200](integrator/rke2-vr200-setup.md), [k0s H200](integrator/k0s-h200-setup.md) |
 
 ### Contributor Guide
 
@@ -95,7 +95,7 @@ Reference for the terms used across the docs site.
 | **Mixin** | A composable fragment (`kind: RecipeMixin`) under `recipes/mixins/` carrying only `constraints` and `componentRefs`, referenced via `spec.mixins`. |
 | **Bundle** | Deployment artifacts emitted by `aicr bundle`: Helm values, manifests, install scripts, checksums. |
 | **Bundler** | The single, registry-driven generator (`pkg/bundler`) that turns each recipe component into bundle inputs (values, manifests) from its `recipes/registry.yaml` entry. There is no per-component bundler code. |
-| **Deployer** | An output adapter that serializes a bundle in a tool-specific format: `helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `fleet`. |
+| **Deployer** | An output adapter that serializes a bundle in a tool-specific format: `helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `terraform`, `fleet`. |
 | **Component** | A deployable software package (e.g., GPU Operator, Network Operator). Lives in `recipes/registry.yaml`. |
 | **ComponentRef** | A reference to a component inside a recipe — version, source, values file, dependencies. |
 | **Constraint** | A declarative validation rule on a recipe (e.g., `K8s.server.version >= 1.32.4`). |

@@ -74,6 +74,15 @@ func WithCleanup(cleanup bool) Option {
 	}
 }
 
+// WithServiceAccountName runs validator Jobs as an existing,
+// administrator-provisioned ServiceAccount instead of a per-run one. See
+// Validator.ServiceAccountName. Default: empty (per-run RBAC).
+func WithServiceAccountName(name string) Option {
+	return func(v *Validator) {
+		v.ServiceAccountName = name
+	}
+}
+
 // WithImagePullSecrets sets image pull secrets for validator Jobs.
 func WithImagePullSecrets(secrets []string) Option {
 	return func(v *Validator) {

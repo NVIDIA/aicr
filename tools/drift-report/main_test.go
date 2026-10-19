@@ -65,7 +65,8 @@ func TestRunCreatesOutputDirectories(t *testing.T) {
 	out := filepath.Join(dir, "nested", "drift-report.json")
 	slackOut := filepath.Join(dir, "nested2", "slack-payload.json")
 
-	if err := run(testRepoRoot(t), reportPath, out, slackOut, Meta{}); err != nil {
+	reg := &fakeRegistry{}
+	if err := run(testRepoRoot(t), reportPath, out, slackOut, Meta{}, reg.published); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -94,6 +95,9 @@ func TestRunCreatesOutputDirectories(t *testing.T) {
 	}
 	if len(report.Current) != 1 {
 		t.Errorf("len(Current) = %d, want 1 (nvsentinel)", len(report.Current))
+	}
+	if len(reg.asked) != 0 {
+		t.Errorf("asked the registry for %v; a current pin needs no publish date", reg.asked)
 	}
 
 	slackData, err := os.ReadFile(slackOut) //nolint:gosec // test-controlled path

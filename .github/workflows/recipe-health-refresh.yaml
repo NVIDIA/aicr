@@ -49,7 +49,7 @@ permissions:
 jobs:
   refresh:
     name: Regenerate recipe-health matrix and open PR on drift
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     # Elevated above the workflow-global `contents: read`: this job needs
     # `contents: write` to push the refresh branch and `pull-requests: write`

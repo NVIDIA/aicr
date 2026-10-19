@@ -15,10 +15,11 @@
 package cli
 
 import (
-	stderrors "errors"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/evidence/verifier"
 )
 
@@ -91,7 +92,7 @@ func TestVerdictError_ProcessExitMatrix(t *testing.T) {
 				}
 				return
 			}
-			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(err) != tt.wantCode {
 				t.Errorf("code = %v, want %s", err, tt.wantCode)
 			}
 		})

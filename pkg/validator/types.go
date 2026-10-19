@@ -50,6 +50,15 @@ type Validator struct {
 	// Cleanup controls whether to delete Jobs, ConfigMaps, and RBAC after validation.
 	Cleanup bool
 
+	// ServiceAccountName, when non-empty, names an existing ServiceAccount in
+	// Namespace that validator Jobs run as verbatim. The run then creates and
+	// deletes no ServiceAccount or ClusterRoleBinding and does not apply the
+	// namespace: an administrator provisions all three, binding the
+	// ServiceAccount to cluster-admin, and the run verifies that binding
+	// before deploying anything. Empty (the default) creates a per-run
+	// ServiceAccount bound to cluster-admin and deletes both at cleanup.
+	ServiceAccountName string
+
 	// ImagePullSecrets are secret names for pulling validator images.
 	ImagePullSecrets []string
 

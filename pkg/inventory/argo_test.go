@@ -42,6 +42,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // The fixtures below are the deployer's golden Applications
@@ -1428,7 +1429,7 @@ func TestArgoApplicationsReadsOnlyThisCluster(t *testing.T) {
 				if err == nil {
 					t.Fatalf("argoApplications() = %+v, want an error", got)
 				}
-				if !stderrors.Is(err, errors.New(tt.wantErrCode, "")) {
+				if errorstest.ReportedCode(err) != tt.wantErrCode {
 					t.Errorf("error = %v, want %s", err, tt.wantErrCode)
 				}
 				for _, want := range tt.wantErrContains {
@@ -1514,7 +1515,7 @@ func TestArgoApplicationsClassifiesAClusterSecretDenial(t *testing.T) {
 		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "secrets"}, "", stderrors.New("denied"))
 	})
 	_, err := argoApplications(t.Context(), client, newScope("cert-manager"))
-	if !stderrors.Is(err, errors.New(errors.ErrCodeUnauthorized, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeUnauthorized {
 		t.Fatalf("error = %v, want %s", err, errors.ErrCodeUnauthorized)
 	}
 	if !strings.Contains(err.Error(), "list secrets") {

@@ -16,13 +16,14 @@ package attestation
 
 import (
 	"context"
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestBundleMetadataPaths(t *testing.T) {
@@ -96,7 +97,7 @@ func TestComputeFileDigestContext_Cancelled(t *testing.T) {
 	cancel()
 
 	_, err := ComputeFileDigestContext(ctx, path)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("ComputeFileDigestContext() error = %v, want ErrCodeTimeout", err)
 	}
 }

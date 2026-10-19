@@ -22,7 +22,7 @@
 // one resolved kubeconfig, since a second authentication path could land on a
 // different context and an inventory assembled from two clusters is a
 // confident wrong answer, then reads the one source the named deployer
-// writes. Helm's release records for helm, helmfile, flux and fleet: one paged List
+// writes. Helm's release records for helm, helmfile, terraform, flux and fleet: one paged List
 // per storage driver, reduced to the newest revision of each release, decoded
 // from the stored payload. Argo CD's Applications for argocd and argocd-helm:
 // one paged List of the CRD. Both project onto one shape.
@@ -53,8 +53,8 @@
 // The rule is that a record which cannot affect the comparison cannot fail it
 // either.
 //
-// A component's name is not the name the cluster stores it under. Only helm
-// and helmfile install under the component's own name; Flux composes
+// A component's name is not the name the cluster stores it under. Only helm,
+// helmfile and terraform install under the component's own name; Flux composes
 // "<targetNamespace>-<name>", Argo CD prepends a user-settable prefix, and the
 // bundle writer's injected folders append a phase. So matching is loose, and
 // what a record's tier buys is not inclusion but strictness:
@@ -92,7 +92,7 @@
 // nothing on the record tells them apart.
 //
 // Each deployer's rule inverts what that deployer writes: the component's own
-// name for helm, helmfile and fleet, "<namespace>-<name>" for flux, and for Argo CD a
+// name for helm, helmfile, terraform and fleet, "<namespace>-<name>" for flux, and for Argo CD a
 // raw suffix — its namePrefix is user-settable and need not end in a
 // separator, so it cannot be enumerated — anchored by requiring the
 // Application's destination namespace to be the component's. An injected
@@ -170,8 +170,9 @@
 //
 // Helm's CLI and SDK both read release records from the Kubernetes API. This
 // package reads the same records directly, which buys three things. One
-// authentication path, since the at-risk scan needs a dynamic client anyway
-// and a second path through the helm binary could resolve a different context.
+// authentication path, since the Argo CD reader and the at-risk scan read the
+// cluster through client-go anyway and a second path through the helm binary
+// could resolve a different context.
 // One paged List per storage driver instead of the N+1 subprocesses
 // `helm list` plus `helm get metadata` per release would cost. And no
 // dependency on helm.sh/helm/v4, whose linked module graph adds 38
@@ -200,10 +201,18 @@
 //
 // ScanAtRisk is advisory and asks what an upgrade might destroy rather than
 // what is installed. Given the group/kind pairs the crossed transition records
-// name, it resolves each through a RESTMapper and lists it cluster-wide,
-// reporting every object carrying neither Helm ownership (the managed-by label
-// together with a release-name annotation, because the label alone is written
-// by anything) nor Argo CD's tracking id.
+// name, it resolves each through a RESTMapper and requests only its metadata,
+// cluster-wide. A list whose continue token expires resumes from the
+// apiserver's latest state, so objects changed in between may be missed or
+// included. A token that keeps expiring with no page served fails the scan.
+//
+// It reports every object carrying none of these ownership markers:
+//   - a nonblank argocd.argoproj.io/tracking-id annotation
+//   - the app.kubernetes.io/managed-by=Helm label with a nonblank
+//     meta.helm.sh/release-name annotation
+//   - the app.kubernetes.io/managed-by=Helm label with a helm.sh/hook
+//     annotation naming a pre-upgrade or post-upgrade phase, the only hooks
+//     an upgrade re-creates
 //
 // The check is positive, so an unrecognized object is at risk by default. The
 // failure it guards is an operator's own custom resources being

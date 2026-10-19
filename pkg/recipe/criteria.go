@@ -65,6 +65,7 @@ const (
 	CriteriaServiceRKE2    CriteriaServiceType = "rke2"
 	CriteriaServiceGeneric CriteriaServiceType = "generic"
 	CriteriaServiceK0s     CriteriaServiceType = "k0s"
+	CriteriaServiceMK8s    CriteriaServiceType = "mk8s"
 )
 
 // ParseService parses a string into a CriteriaServiceType against this
@@ -107,6 +108,8 @@ func (r *CriteriaRegistry) ParseService(s string) (CriteriaServiceType, error) {
 		return CriteriaServiceRKE2, nil
 	case "k0s":
 		return CriteriaServiceK0s, nil
+	case "mk8s":
+		return CriteriaServiceMK8s, nil
 	default:
 		if r.Has(FieldService, s) {
 			return CriteriaServiceType(normalizeCriteriaValue(s)), nil
@@ -120,7 +123,7 @@ func (r *CriteriaRegistry) ParseService(s string) (CriteriaServiceType, error) {
 // across `--data` configurations; for the union of static + registry
 // (including values contributed by `--data`), use AllCriteriaServiceTypes.
 func GetCriteriaServiceTypes() []string {
-	return []string{"aks", "bcm", "eks", "generic", "gke", "k0s", "kind", "lke", "metal3", "ocp", "oke", "rke2"}
+	return []string{"aks", "bcm", "eks", "generic", "gke", "k0s", "kind", "lke", "metal3", "mk8s", "ocp", "oke", "rke2"}
 }
 
 // AllServiceTypes returns the union of the static OSS list and values
@@ -140,6 +143,7 @@ const (
 	CriteriaAcceleratorGB200      CriteriaAcceleratorType = "gb200"
 	CriteriaAcceleratorGB300      CriteriaAcceleratorType = "gb300"
 	CriteriaAcceleratorB200       CriteriaAcceleratorType = "b200"
+	CriteriaAcceleratorB300       CriteriaAcceleratorType = "b300"
 	CriteriaAcceleratorA100       CriteriaAcceleratorType = "a100"
 	CriteriaAcceleratorL40        CriteriaAcceleratorType = "l40"
 	CriteriaAcceleratorL40S       CriteriaAcceleratorType = "l40s"
@@ -164,6 +168,8 @@ func (r *CriteriaRegistry) ParseAccelerator(s string) (CriteriaAcceleratorType, 
 		return CriteriaAcceleratorGB300, nil
 	case "b200":
 		return CriteriaAcceleratorB200, nil
+	case "b300":
+		return CriteriaAcceleratorB300, nil
 	case "a100":
 		return CriteriaAcceleratorA100, nil
 	case "l40":
@@ -186,7 +192,7 @@ func (r *CriteriaRegistry) ParseAccelerator(s string) (CriteriaAcceleratorType, 
 // types sorted alphabetically. For the union of static + registry, use
 // AllCriteriaAcceleratorTypes.
 func GetCriteriaAcceleratorTypes() []string {
-	return []string{"a100", "b200", "gb200", "gb300", "h100", "h200", "l40", "l40s", "rtx-pro-6000", "vr200"}
+	return []string{"a100", "b200", "b300", "gb200", "gb300", "h100", "h200", "l40", "l40s", "rtx-pro-6000", "vr200"}
 }
 
 // AllAcceleratorTypes returns the union of the static OSS list and values
@@ -300,6 +306,7 @@ type CriteriaPlatformType string
 const (
 	CriteriaPlatformAny      CriteriaPlatformType = "any"
 	CriteriaPlatformDynamo   CriteriaPlatformType = "dynamo"
+	CriteriaPlatformKueue    CriteriaPlatformType = "kueue"
 	CriteriaPlatformKubeflow CriteriaPlatformType = "kubeflow"
 	CriteriaPlatformNIM      CriteriaPlatformType = "nim"
 	CriteriaPlatformRunai    CriteriaPlatformType = "runai"
@@ -317,6 +324,8 @@ func (r *CriteriaRegistry) ParsePlatform(s string) (CriteriaPlatformType, error)
 		return CriteriaPlatformDynamo, nil
 	case "kubeflow":
 		return CriteriaPlatformKubeflow, nil
+	case "kueue":
+		return CriteriaPlatformKueue, nil
 	case "nim":
 		return CriteriaPlatformNIM, nil
 	case "runai":
@@ -335,7 +344,7 @@ func (r *CriteriaRegistry) ParsePlatform(s string) (CriteriaPlatformType, error)
 // types sorted alphabetically. For the union of static + registry, use
 // AllCriteriaPlatformTypes.
 func GetCriteriaPlatformTypes() []string {
-	return []string{"dynamo", "kubeflow", "nim", "runai", "slurm"}
+	return []string{"dynamo", "kubeflow", "kueue", "nim", "runai", "slurm"}
 }
 
 // AllPlatformTypes returns the union of the static OSS list and values
@@ -379,10 +388,10 @@ func mergeCriteriaTypes(staticTypes, registered []string) []string {
 // Criteria represents the input parameters for recipe matching.
 // All fields are optional and default to "any" if not specified.
 type Criteria struct {
-	// Service is the Kubernetes service type (eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic, k0s).
+	// Service is the Kubernetes service type (eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic, k0s, mk8s).
 	Service CriteriaServiceType `json:"service,omitempty" yaml:"service,omitempty"`
 
-	// Accelerator is the GPU/accelerator type (h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200).
+	// Accelerator is the GPU/accelerator type (h100, h200, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200).
 	Accelerator CriteriaAcceleratorType `json:"accelerator,omitempty" yaml:"accelerator,omitempty"`
 
 	// Intent is the workload intent (training, inference).
@@ -391,7 +400,7 @@ type Criteria struct {
 	// OS is the worker node operating system type.
 	OS CriteriaOSType `json:"os,omitempty" yaml:"os,omitempty"`
 
-	// Platform is the platform/framework type (dynamo, kubeflow, nim, runai, slurm).
+	// Platform is the platform/framework type (dynamo, kubeflow, kueue, nim, runai, slurm).
 	Platform CriteriaPlatformType `json:"platform,omitempty" yaml:"platform,omitempty"`
 
 	// Nodes is the number of worker nodes (0 means any/unspecified).

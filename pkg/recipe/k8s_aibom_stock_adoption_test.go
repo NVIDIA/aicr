@@ -16,11 +16,12 @@ package recipe_test
 
 import (
 	"context"
-	stderrors "errors"
 	"slices"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -138,7 +139,7 @@ func TestK8sAIBOMStockAdoption(t *testing.T) {
 				if err == nil {
 					t.Fatal("BuildFromCriteria() error = nil, want rejection: a recipe-level decline must not be overridable from the command line")
 				}
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("BuildFromCriteria() error = %v, want ErrCodeInvalidRequest", err)
 				}
 				return
@@ -288,7 +289,7 @@ func TestGKECriteriaAcceptOptIn(t *testing.T) {
 				if err == nil {
 					t.Fatal("BuildFromCriteria() error = nil, want rejection: a recipe-level decline must not be overridable")
 				}
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("BuildFromCriteria() error = %v, want ErrCodeInvalidRequest", err)
 				}
 				return
@@ -410,7 +411,7 @@ func TestEveryGKEDynamoRecipeRejectsTheOptIn(t *testing.T) {
 				t.Fatalf("opt-in accepted on a GKE dynamo recipe; enabled components = %v, "+
 					"want rejection (this overlay needs the k8s-aibom install:false decline)", got)
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})

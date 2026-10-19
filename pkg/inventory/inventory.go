@@ -80,6 +80,10 @@ type installedRelease struct {
 	// unversioned, which fails the run, rather than as absent, which reads as
 	// newly installed and does not.
 	Unproven bool
+
+	// UnprovenReason is why Unproven is set, and empty for a record that
+	// could not be read.
+	UnprovenReason UnprovenReason
 }
 
 // The storage resources the readers list, as they appear in a GVR, an RBAC
@@ -90,8 +94,9 @@ const (
 )
 
 // installNamespace is where r's workload runs: the release's own target when
-// the payload states one, else where the record is stored, which for the helm
-// and helmfile deployers and for an Argo CD destination is the same place.
+// the payload states one, else where the record is stored, which for the helm,
+// helmfile and terraform deployers and for an Argo CD destination is the same
+// place.
 func (r installedRelease) installNamespace() string {
 	if r.TargetNamespace != "" {
 		return r.TargetNamespace
@@ -107,8 +112,10 @@ func (r installedRelease) installNamespace() string {
 // can be made about it. Unreadable is a release, not a record: one that some
 // component's name matched only loosely and that could not then be read. It
 // may be a foreign workload drawn in by a shared token, or a real component
-// whose storage is damaged, and this package cannot tell which. Summing them
-// would merge "we know nothing about this" with "we could not read this".
+// whose storage is damaged, and this package cannot tell which. The Helm
+// reader also counts there a release withheld for having records under both
+// storage drivers, whose records all decode. Summing the two would merge "we
+// know nothing about this" with "we could not read this".
 //
 // Neither counts the ordinary case of a record that names something perfectly
 // well and matches no component. Those are the overwhelming majority of a real
@@ -148,15 +155,12 @@ func compareInstallOrder(nameA, namespaceA, nameB, namespaceB string) int {
 	return strings.Compare(namespaceA, namespaceB)
 }
 
-// advance moves the cursor to the next page, refusing a continue token the
-// server has already handed back.
-//
-// Without that refusal the loop is unbounded: a proxy or aggregation layer
-// that echoes a stale token turns one cluster-wide read into an open request
-// flood against the apiserver. Each caller's deadline is the backstop for a
-// server that cycles through several tokens rather than repeating one; this
-// catches the repeat immediately, before thousands of requests have been
-// issued.
+// advance moves opts to the page next names. It returns ErrCodeInternal if
+// next repeats the token opts already holds, which would otherwise page
+// forever, as a proxy echoing back the token it was sent does. An expired
+// token is the apiserver's to reject, with a 410. A server cycling through
+// several tokens is bounded only by the caller's deadline, and the at-risk
+// scan has none.
 func advance(opts *metav1.ListOptions, next, resource string) error {
 	if next == opts.Continue {
 		return errors.NewWithContext(errors.ErrCodeInternal,

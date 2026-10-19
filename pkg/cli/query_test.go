@@ -16,7 +16,6 @@ package cli
 
 import (
 	"bytes"
-	stderrors "errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,6 +26,8 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
@@ -250,7 +251,7 @@ spec:
 			args = append(args, tt.extraArgs...)
 			err := parent.Run(t.Context(), args)
 			if tt.wantErrCode != "" {
-				if !stderrors.Is(err, errors.New(tt.wantErrCode, "")) {
+				if errorstest.ReportedCode(err) != tt.wantErrCode {
 					t.Fatalf("query error = %v, want code %s", err, tt.wantErrCode)
 				}
 				return
@@ -331,7 +332,7 @@ func TestRecipeAndQueryCommandsRejectInvalidRuntimeInventoryMode(t *testing.T) {
 			// match alone would accept an unrelated error carrying similar
 			// wording. The message check stays to distinguish which
 			// invalid-request this is.
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("command error = %v, want ErrCodeInvalidRequest", err)
 			}
 			if !strings.Contains(err.Error(), "invalid runtime inventory mode") {
@@ -360,7 +361,7 @@ func TestRecipeCommandRejectsRuntimeInventoryWithoutComponent(t *testing.T) {
 			"the component; if these criteria now declare k8s-aibom, pick criteria that " +
 			"do not rather than relaxing this assertion")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("command error = %v, want ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "requires the recipe to declare component") {

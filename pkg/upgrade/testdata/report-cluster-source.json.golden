@@ -5,7 +5,7 @@
   "source": {
     "kubeconfig": "/home/op/.kube/config",
     "context": "prod-east",
-    "matched": 2,
+    "matched": 3,
     "helm": {
       "read": true,
       "records": 37,
@@ -19,7 +19,8 @@
       "applications": 5,
       "unattributed": 6,
       "unreadable": 7,
-      "remote": 8
+      "remote": 8,
+      "unplaced": 9
     }
   },
   "objectNamesCompared": false,
@@ -53,11 +54,31 @@
       "breaking": false,
       "downgrade": false,
       "failsRun": true
+    },
+    {
+      "component": "theta-operator",
+      "change": "version",
+      "to": "2.0.0",
+      "verdict": "unversioned",
+      "notes": "versions are not comparable, unplaced application teamfoo-theta-operator deploying to team-foo",
+      "unproven": [
+        {
+          "source": "argocd",
+          "name": "teamfoo-theta-operator",
+          "namespace": "team-foo",
+          "reason": "unplaced"
+        }
+      ],
+      "reason": "not-comparable",
+      "explanation": "version \"\" is not comparable to \"2.0.0\"; pin a semver version on both sides",
+      "breaking": false,
+      "downgrade": false,
+      "failsRun": true
     }
   ],
   "summary": {
-    "components": 2,
-    "failing": 1
+    "components": 3,
+    "failing": 2
   },
   "atRisk": {
     "scanned": true,

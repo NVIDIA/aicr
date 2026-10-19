@@ -15,10 +15,11 @@
 package measurement
 
 import (
-	stderrors "errors"
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestParsePath(t *testing.T) {
@@ -326,7 +327,7 @@ func TestSystemDUnitNameTypoIsNotCaught(t *testing.T) {
 	// as "reading absent from this snapshot", and it is the code that makes
 	// this residual a graceful exclusion rather than a hard failure.
 	_, err = p.Extract(systemDCollectorMeasurements())
-	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeNotFound, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeNotFound {
 		t.Fatalf("Extract() error = %v, want code %s for a mistyped unit name",
 			err, aicrerrors.ErrCodeNotFound)
 	}
@@ -481,7 +482,7 @@ func TestPath_ExtractValue(t *testing.T) {
 				if err == nil {
 					t.Fatalf("expected %s, got nil; result=%q", tt.wantCode, result)
 				}
-				if !stderrors.Is(err, aicrerrors.New(tt.wantCode, "")) {
+				if errorstest.ReportedCode(err) != tt.wantCode {
 					t.Errorf("error = %v, want code %s", err, tt.wantCode)
 				}
 				return
@@ -752,7 +753,7 @@ func TestPath_ExtractValue_ItemSelector(t *testing.T) {
 				if err == nil {
 					t.Fatalf("expected %s, got nil; result=%q", tt.wantCode, got)
 				}
-				if !stderrors.Is(err, aicrerrors.New(tt.wantCode, "")) {
+				if errorstest.ReportedCode(err) != tt.wantCode {
 					t.Errorf("error = %v, want code %s", err, tt.wantCode)
 				}
 				return
@@ -908,7 +909,7 @@ func TestPath_ExtractValue_PredicateAmbiguous(t *testing.T) {
 	// that a zero-match predicate returns. Only NotFound is the resolver's
 	// graceful-exclusion signal, so an ambiguous predicate silently degrading
 	// to NotFound would be a real fault this assertion would otherwise miss.
-	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeConflict, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeConflict {
 		t.Errorf("error = %v, want code %s", err, aicrerrors.ErrCodeConflict)
 	}
 }

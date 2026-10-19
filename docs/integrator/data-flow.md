@@ -45,6 +45,11 @@ Each stage transforms input data into a different format:
 - **oke-legacy-plugin**: OKE's legacy addon-manager `nvidia-gpu-device-plugin`
   DaemonSet in `kube-system` (device-plugin conflict evidence: `none`,
   `active`, or `unknown`)
+- **default-storage-class**: StorageClasses annotated as the cluster default
+  (`present`, `multiple`, `absent`, or `unknown`; no provisioner health)
+- **percona-server-mongodb**: Percona Operator for MongoDB conflict evidence
+  (`absent`, `api-detected`, `aicr-owned`, `operator-detected`,
+  `crs-detected`, or `unknown`; not database availability or health)
 - **aks-gpu-pools**: Orchestration-layer projection, not a collector —
   produced from the explicit operator-supplied pool dump passed to
   `aicr snapshot --aks-gpu-pools <file>` (per-pool `gpu-driver` install
@@ -57,9 +62,9 @@ Each stage transforms input data into a different format:
   (Job mode)
 - **oke-addons**: Orchestration-layer projection, not a collector —
   produced from the explicit operator-supplied add-on dump passed to
-  `aicr snapshot --oke-addons <file>` (the `NvidiaGpuPlugin` add-on's
-  control-plane state). Same up-front validation and attach/merge flow
-  as `aks-gpu-pools`
+  `aicr snapshot --oke-addons <file>` (the control-plane state of the
+  `NvidiaGpuPlugin` and `NvidiaNetworkOperator` add-ons). Same up-front
+  validation and attach/merge flow as `aks-gpu-pools`
 - **gke-gpu-pools**: Orchestration-layer projection, not a collector.
   Produced from the explicit operator-supplied pool dump passed to
   `aicr snapshot --gke-gpu-pools <file>` (per-pool
@@ -94,6 +99,8 @@ Each stage transforms input data into a different format:
 │   │   └─ subtypes: [server, image, policy, node,        │
 │   │                 slinky-slurm, mariadb-operator,     │
 │   │                 oke-legacy-plugin,                  │
+│   │                 default-storage-class,              │
+│   │                 percona-server-mongodb,             │
 │   │                 aks-gpu-pools (--aks-gpu-pools),    │
 │   │                 oke-addons (--oke-addons),          │
 │   │                 gke-gpu-pools (--gke-gpu-pools)]    │
@@ -199,7 +206,7 @@ type Reading interface {
   merely unavailable.
 - Each collector sets its own timeout rather than sharing a universal
   one — e.g. 10s (OS, systemd), 60s (Kubernetes), 90s (node topology),
-  5s (NFD GPU detection), up to 10m (network discovery)
+  5s (NFD GPU detection), up to 7m (network discovery)
 
 ## Stage 2: Recipe (Data Optimization)
 
@@ -454,7 +461,7 @@ RecipeResult
   -> DefaultBundler (one invocation): for each component,
        GetComponentRef (name, version) + GetValuesForComponent (values map)
   -> selected deployer writes its own layout (Helm deployer shown below;
-       argocd/argocd-helm/flux/helmfile differ):
+       argocd/argocd-helm/flux/helmfile/terraform differ):
          - static values       -> <NNN-component>/values.yaml
          - dynamic/per-cluster -> <NNN-component>/cluster-values.yaml
          - component manifests -> (NNN+1)-<component>-post/ (a local chart
@@ -463,17 +470,17 @@ RecipeResult
                                    component
          - go:embed templates  -> per-component install.sh, and the root
                                    README.md + deploy.sh
-  -> write canonical recipe.yaml (Helm deployer only)
+  -> write canonical recipe.yaml (every deployer)
   -> finalize root checksums.txt over every regular payload file
 ```
 
 `pkg/bundler/registry` exists but is **not** used by the production path: the
 default flow constructs a single `DefaultBundler`, extracts values for every
 component in one `DefaultBundler` invocation, builds one deployer
-(helm/argocd/argocd-helm/flux/helmfile/fleet), and invokes it once. Static values land in `values.yaml`; dynamic, per-cluster values land in
+(helm/argocd/argocd-helm/flux/helmfile/terraform/fleet), and invokes it once. Static values land in `values.yaml`; dynamic, per-cluster values land in
 `cluster-values.yaml`. Every component is handled in that single invocation, not by separate
 per-component bundlers. The per-component file layout above is the **Helm**
-deployer's; argocd/argocd-helm/flux/helmfile/fleet emit their own layouts.
+deployer's; argocd/argocd-helm/flux/helmfile/terraform/fleet emit their own layouts.
 Finalization treats each deployer output as a closed-world inventory:
 `checksums.txt` lists every regular payload file, including `recipe.yaml` when
 present, and verification rejects additional files, directories, symlinks, or
@@ -540,9 +547,10 @@ Bundle artifacts + recipe (deploymentOrder, componentRefs)
       argocd-helm    — Helm-chart app-of-apps (values overridable at install)
       flux           — Flux HelmRelease manifests
       helmfile       — helmfile.yaml release graph
+      terraform      — Terraform module calls, one per component
   → closed-world root checksums.txt
   → layout:
-      helm / argocd / argocd-helm / helmfile — numbered NNN-<component>/
+      helm / argocd / argocd-helm / helmfile / terraform — numbered NNN-<component>/
         (via pkg/bundler/deployer/localformat)
       flux — unnumbered <component>/ dirs with HelmRelease CRs (no NNN- prefix)
 ```
@@ -555,7 +563,7 @@ deployer sections below.
 
 ### Deployment Order Flow
 
-Ordering follows each component's declared `dependencyRefs`, not its linear position. The flat `deploymentOrder` (one topological serialization) numbers the `NNN-<name>/` folders and drives the serial helm `deploy.sh`. The concurrent deployers derive ordering from the dependency graph so independent components roll out together, but differ in how faithfully: **argocd**, **argocd-helm**, and **helmfile** approximate it as depth **tiers** (a component waits for its whole prior tier), while **flux** projects the exact `dependencyRefs` DAG onto `dependsOn` (a component waits for only its actual dependencies). Each deployer expresses this differently:
+Ordering follows each component's declared `dependencyRefs`, not its linear position. The flat `deploymentOrder` (one topological serialization) numbers the `NNN-<name>/` folders and drives the serial helm `deploy.sh`. The concurrent deployers derive ordering from the dependency graph so independent components roll out together, but differ in how faithfully: **argocd**, **argocd-helm**, and **helmfile** approximate it as depth **tiers** (a component waits for its whole prior tier), while **flux** and **terraform** project the exact `dependencyRefs` DAG onto `dependsOn` / `depends_on` (a component waits for only its actual dependencies). Each deployer expresses this differently:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -592,7 +600,7 @@ Ordering follows each component's declared `dependencyRefs`, not its linear posi
 └─────────────────────────────────────────────────────────┘
 ```
 
-`SortComponentRefsByDeploymentOrder()` produces the flat order used for `NNN-<name>/` folder numbering (helm / argocd / argocd-helm / helmfile via localformat) and the helm `deploy.sh`. The Argo CD sync-waves are **not** taken from that linear order: they are assigned by dependency tier (`wave = tier*4 + phase`), so components that share a tier share a wave and sync together. The `1, 5, 9` values above reflect the specific `cert-manager → gpu-operator → network-operator` dependency chain (one component per tier); a recipe with independent components would place them at the same wave. See [Deployment ordering](../contributor/component.md#deployment-ordering) for the full model.
+`SortComponentRefsByDeploymentOrder()` produces the flat order used for `NNN-<name>/` folder numbering (helm / argocd / argocd-helm / helmfile / terraform via localformat) and the helm `deploy.sh`. The Argo CD sync-waves are **not** taken from that linear order: they are assigned by dependency tier (`wave = tier*4 + phase`), so components that share a tier share a wave and sync together. The `1, 5, 9` values above reflect the specific `cert-manager → gpu-operator → network-operator` dependency chain (one component per tier); a recipe with independent components would place them at the same wave. See [Deployment ordering](../contributor/component.md#deployment-ordering) for the full model.
 
 ### Deployer-Specific Output
 
@@ -657,7 +665,7 @@ spec:
   sources:
     # Helm chart from upstream
     - repoURL: https://helm.ngc.nvidia.com/nvidia
-      targetRevision: v26.7.1
+      targetRevision: v26.7.2
       chart: gpu-operator
       helm:
         valueFiles:

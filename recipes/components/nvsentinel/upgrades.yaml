@@ -55,7 +55,7 @@ transitions:
       The v1.25.0 CRDs stay applied; their changes are cosmetic, so v1.22.0
       runs against them unchanged. This rests on the CRD diff and on the
       v1.22.0 bundle running no NVSentinel datastore (the remediation steps
-      first ship with v1.25.0); the rollback itself was not exercised.
+      first ship with the v1.26.0 pin); the rollback itself was not exercised.
     stepsByDeployer:
       - deployers: [helmfile, fleet]
         steps:
@@ -104,6 +104,62 @@ transitions:
               (helmfile), or push the regenerated bundle (fleet GitRepo
               mode) or apply the regenerated helmops.yaml (fleet HelmOp
               mode) and let Fleet reconcile it.
+            reason: >-
+              Rolls the DaemonSets and Deployments to v1.25.0.
+          - id: verify
+            description: >-
+              kubectl -n nvsentinel rollout status daemonset/metadata-collector,
+              then check every collector pod's logs for "Metrics endpoint
+              stopped": kubectl -n nvsentinel logs -l
+              app.kubernetes.io/name=metadata-collector --prefix --tail=-1.
+            reason: >-
+              A rolled-out DaemonSet alone does not prove the metrics endpoint
+              bound, and logs of the DaemonSet name show only one pod.
+      - deployers: [terraform]
+        steps:
+          - id: check-host-port
+            description: >-
+              On every GPU node (kubectl get nodes -l
+              nvidia.com/gpu.present=true), check for a listener on port 2112,
+              for example kubectl debug node/<gpu-node> -it
+              --image=busybox:1.38.0 -- netstat -ltn. If any node has one, set
+              nv-sentinel:metadata-collector.metrics.port to a port free on
+              every GPU node, or
+              nv-sentinel:metadata-collector.metrics.enabled=false, and
+              regenerate the bundle.
+            reason: >-
+              The collector keeps running when the bind fails, so a
+              collision costs that node's metrics without failing any health
+              check, and a clean node says nothing about the others.
+          - id: drop-preflight-rate-limits
+            description: >-
+              If the recipe or a --set sets preflight.qps or preflight.burst,
+              remove it. v1.24.0 removed client-side rate limiting from the
+              preflight controller with no replacement; to limit its API
+              load, use API Priority and Fairness on the API server.
+            reason: >-
+              The chart no longer reads either value, so an override renders
+              and silently stops throttling. Upstream removed the limit
+              because preflight sits on the pod admission path, where
+              throttling pushed gang admission past the webhook timeout.
+          - id: apply-new-crds
+            description: >-
+              Apply the v1.25.0 CRDs using the CRD-apply command under
+              "Upgrade, uninstall, and troubleshooting" in
+              docs/user/component-catalog.md, with
+              CHART=oci://ghcr.io/nvidia/nvsentinel, VERSION=v1.25.0,
+              MANAGER=terraform-provider-helm and
+              EXCLUDE_SUBCHARTS=mongodb-store, so the Percona CRDs
+              psmdb-operator owns are left alone.
+            reason: >-
+              terraform never updates CRDs for ownsCRDs components: helm_release
+              upgrades through Helm, which never applies a changed crds/. The
+              v1.25.0 changes are cosmetic (a description and a vr shortName
+              on ValidationRequest), so skipping this leaves the v1.22.0
+              schema text in place rather than breaking anything.
+          - id: apply
+            description: >-
+              Regenerate the bundle at the new pin and run terraform apply.
             reason: >-
               Rolls the DaemonSets and Deployments to v1.25.0.
           - id: verify

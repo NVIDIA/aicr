@@ -21,10 +21,12 @@
 //
 //   - ClusterConfigPath: parse a pre-existing cluster-config.yaml file (no
 //     cluster contact). Air-gap / CI / reproducible-input friendly.
-//   - DiscoverNetwork: call l8k's live Discover() against the cluster
-//     pointed at by KubeconfigPath, mutating cluster state (writes
-//     nvidia.kubernetes-launch-kit.* labels and patches NicClusterPolicy
-//     via server-side-apply).
+//   - DiscoverNetwork: call l8k's DiscoverReadOnly() against the cluster
+//     pointed at by KubeconfigPath. It lists nodes, the Network Operator's
+//     nic-configuration-daemon pods, and the NicDevice objects that daemon
+//     already publishes; it creates, patches, and deletes nothing. aicr
+//     never grants pods/exec, so a daemon node whose NicDevice cannot be
+//     verified fails the collector rather than being probed.
 //
 // Both modes go through the same in-package toMeasurement translator,
 // which enforces the current single-group constraint.
@@ -33,20 +35,56 @@ package network
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
 	stdos "os"
+	"sync"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/go-logr/logr"
-	l8kconfig "github.com/nvidia/k8s-launch-kit/pkg/config"
 	l8kkubeclient "github.com/nvidia/k8s-launch-kit/pkg/kubeclient"
 	l8kdisc "github.com/nvidia/k8s-launch-kit/pkg/networkoperatorplugin/discovery"
+	l8kui "github.com/nvidia/k8s-launch-kit/pkg/ui"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 )
+
+// Seams for the live-discovery path so its error mapping can be exercised
+// without a cluster. Production values are the l8k entry points.
+var (
+	newL8kClient     = l8kkubeclient.New
+	discoverReadOnly = l8kdisc.DiscoverReadOnly
+)
+
+// ctrlLogOnce guards the process-wide controller-runtime logger install.
+// l8k's discovery package logs through controller-runtime's global logger;
+// without one, controller-runtime prints a one-time "log.SetLogger(...) was
+// never called" warning to stderr and drops l8k's structured output.
+var ctrlLogOnce sync.Once
+
+func installControllerRuntimeLogger() {
+	ctrlLogOnce.Do(func() {
+		ctrllog.SetLogger(logr.FromSlogHandler(slog.Default().Handler()))
+	})
+}
+
+// slogOutput forwards l8k's user-facing messages (for example "Excluding N
+// ready daemon node(s)…") to aicr's slog stream. Everything the embedded
+// silent Output handles (progress, headers, sections) stays silent.
+type slogOutput struct{ l8kui.Output }
+
+func (slogOutput) Info(format string, args ...any) { slog.Info("l8k: " + fmt.Sprintf(format, args...)) }
+func (slogOutput) Warning(format string, args ...any) {
+	slog.Warn("l8k: " + fmt.Sprintf(format, args...))
+}
+func (slogOutput) Error(format string, args ...any) {
+	slog.Error("l8k: " + fmt.Sprintf(format, args...))
+}
 
 // Collector ingests an l8k cluster-config (from disk or live discovery)
 // and emits the corresponding NetworkTopology Measurement.
@@ -64,8 +102,11 @@ type Collector struct {
 	// translates the result. No cluster contact.
 	ClusterConfigPath string
 
-	// DiscoverNetwork enables live discovery via l8k. Discovery is NOT
-	// read-only — it writes labels and patches NicClusterPolicy.
+	// DiscoverNetwork enables read-only live discovery via l8k's
+	// DiscoverReadOnly. It requires the Network Operator's
+	// nic-configuration-daemon to already be running; when it is not,
+	// Collect returns ErrCodeNotFound and the snapshotter skips the
+	// NetworkTopology measurement.
 	DiscoverNetwork bool
 
 	// KubeconfigPath overrides the kubeconfig used by the live-discovery
@@ -188,44 +229,50 @@ func (c *Collector) collectFromFile() (*measurement.Measurement, error) {
 }
 
 func (c *Collector) collectViaDiscovery(ctx context.Context) (*measurement.Measurement, error) {
-	slog.Info("collecting network topology via l8k discovery")
+	slog.Info("collecting network topology via l8k read-only discovery")
 
-	kc, restCfg, err := l8kkubeclient.New(client.ResolveKubeconfigPath(c.KubeconfigPath))
+	// The REST config is deliberately discarded. Passing it as
+	// WithReadOnlyRESTConfig would let l8k fall back to pods/exec on a
+	// Ready daemon node that has not published a NicDevice; aicr grants no
+	// exec and fails closed instead, and l8k's error names the node.
+	kc, _, err := newL8kClient(client.ResolveKubeconfigPath(c.KubeconfigPath))
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeUnavailable, "l8k discovery client init failed", err)
 	}
+	installControllerRuntimeLogger()
 
-	// l8k's discovery sub-package requires a LaunchKitConfig as a
-	// positional arg — it reads the daemon image triple
-	// (Repository / ComponentVersion / ImagePullSecrets) from it to
-	// bootstrap the nic-configuration daemon and writes the discovered
-	// per-group topology back into the same struct. The embedded default
-	// ships with l8k's recommended Network Operator release line baked
-	// in (currently 26.4); aicr doesn't pin a release at snapshot time
-	// — that decision happens later in the recipe/deploy path.
-	cfg, err := l8kconfig.DefaultLaunchKitConfig()
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "l8k default config load failed", err)
+	// l8k bounds its wait for nic-configuration-daemon pods with its own
+	// 5-minute timer only when the context carries no deadline; with a
+	// deadline it polls until that deadline and then has nothing left for
+	// the inventory calls, so any daemon pod that is not Ready fails the
+	// whole discovery (NVIDIA/k8s-launch-kit#305). Hand l8k a context with
+	// no deadline so its own bound applies, and keep cancellation wired so
+	// CollectorNetworkTimeout — which must exceed that 5-minute wait — still
+	// aborts the call.
+	discCtx, cancelDisc := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelDisc()
+	defer context.AfterFunc(ctx, cancelDisc)()
+	discCtx = l8kui.WithOutput(discCtx, slogOutput{Output: l8kui.NewSilent()})
+
+	cfg, err := discoverReadOnly(discCtx, kc)
+	if err != nil && ctx.Err() != nil {
+		// The parent expired or was canceled while l8k was running; report
+		// that rather than whatever l8k surfaced on the canceled context.
+		err = ctx.Err()
 	}
-
-	// Route l8k's controller-runtime log lines through aicr's slog so
-	// the discovery summary, preset matching, and per-PF debug output
-	// appear on the same stream as the rest of the snapshotter. Without
-	// this, controller-runtime would emit a one-time "log.SetLogger(...)
-	// was never called" warning to stderr and drop l8k's structured
-	// output.
-	cfg, err = l8kdisc.Discover(ctx, kc, restCfg, cfg,
-		l8kdisc.WithLogger(logr.FromSlogHandler(slog.Default().Handler())))
 	if err != nil {
-		// Surface deadline/cancel as ErrCodeTimeout so the 10-minute
-		// CollectorNetworkTimeout (or a parent cancellation) isn't
-		// reported as a cluster-availability problem. Only wrap
-		// non-context errors as Unavailable.
 		switch {
+		case stderrors.Is(err, l8kdisc.ErrNotInstalled):
+			return nil, errors.Wrap(errors.ErrCodeNotFound,
+				"network operator NIC configuration daemon not found; NetworkTopology skipped", err)
+		case apierrors.IsForbidden(err):
+			return nil, errors.Wrap(errors.ErrCodeUnauthorized,
+				"l8k read-only discovery denied by RBAC", err)
 		case stderrors.Is(err, context.DeadlineExceeded), stderrors.Is(err, context.Canceled):
-			return nil, errors.Wrap(errors.ErrCodeTimeout, "l8k discovery cancelled or timed out", err)
+			return nil, errors.WrapCtxErr(err, errors.ErrCodeTimeout,
+				"l8k read-only discovery cancelled or timed out")
 		}
-		return nil, errors.Wrap(errors.ErrCodeUnavailable, "l8k discovery failed", err)
+		return nil, errors.Wrap(errors.ErrCodeUnavailable, "l8k read-only discovery failed", err)
 	}
 
 	m, err := toMeasurement(cfg)

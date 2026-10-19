@@ -36,6 +36,60 @@
 # shellcheck disable=SC2034  # consumed by sourcing scripts
 readonly SYSTEM_NS_PATTERN="default|kube-node-lease|kube-public|kube-system|kwok-system|local-path-storage|argocd|aicr-registry|flux-system"
 
+cleanup_recipe_helm_releases() {
+    local release_json releases kube_system_names failed=0
+
+    if ! kube_system_names=$(yq -r \
+        '.components[] | select(.helm.defaultNamespace == "kube-system") | .name' \
+        "${REPO_ROOT}/recipes/registry.yaml"); then
+        echo "[ERROR] Failed to read kube-system Helm components from the registry" >&2
+        return 1
+    fi
+    if [[ -z "${kube_system_names}" ]]; then
+        echo "[ERROR] Registry contains no kube-system Helm components" >&2
+        return 1
+    fi
+    if ! release_json=$(helm list -A -o json); then
+        echo "[ERROR] Failed to list Helm releases during KWOK cleanup" >&2
+        return 1
+    fi
+
+    if ! releases=$(jq -r '
+        if type != "array" then error("Helm release list is not an array")
+        elif any(.[]; ((.name | type) != "string") or ((.namespace | type) != "string")) then
+            error("Helm release is missing its name or namespace")
+        else
+            .[] | select(.namespace != "argocd") | [.namespace, .name] | @tsv
+        end
+    ' <<<"$release_json"); then
+        echo "[ERROR] Failed to parse Helm releases during KWOK cleanup" >&2
+        return 1
+    fi
+
+    while IFS=$'\t' read -r namespace release; do
+        [[ -n "$release" ]] || continue
+
+        if [[ "$namespace" == "kube-system" ]]; then
+            grep -Fxq "$release" <<<"${kube_system_names}" || continue
+        fi
+
+        echo "[INFO] Uninstalling Helm release $release from $namespace..."
+        local wait_option=--wait=hookOnly
+        if [[ "$namespace" == "kube-system" ]]; then
+            wait_option=--wait
+        fi
+        # --ignore-not-found: under the Flux deployers the Kustomization's
+        # prune cascade can uninstall a release between the list above and
+        # this call, which is the clean state, not a failure.
+        if ! timeout 60s helm uninstall "$release" -n "$namespace" "$wait_option" --ignore-not-found; then
+            echo "[ERROR] Failed to uninstall Helm release $release from $namespace" >&2
+            failed=1
+        fi
+    done <<<"$releases"
+
+    return "$failed"
+}
+
 # ensure_kwok_context_loose checks that the kubectl context is a known
 # KWOK Kind cluster name. Cheap check, no node lookup. Use this from
 # cold-start paths where kwok nodes may not exist yet (e.g. run-all-

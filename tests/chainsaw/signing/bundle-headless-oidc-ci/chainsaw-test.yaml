@@ -33,8 +33,10 @@ spec:
     the cli-e2e action where ambient OIDC credentials are available to seed
     the explicit-token tests. Use --selector 'requires!=attested-binary'
     to skip locally.
+  # Above the CLI's own Sigstore signing budget (defaults.SigstoreSignTimeout,
+  # 2m), so a Rekor retry finishes inside the step instead of tripping it.
   timeouts:
-    exec: 60s
+    exec: 150s
   steps:
     - name: setup
       description: Generate recipe shared by all OIDC variants.

@@ -37,6 +37,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // createTestBundle creates a minimal bundle directory with checksums generated
@@ -204,7 +205,7 @@ func TestVerify_IgnoreTLogRequiresKey(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := Verify(context.Background(), dir, tt.opts)
 			if tt.wantErr {
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Fatalf("Verify() error = %v, want ErrCodeInvalidRequest", err)
 				}
 				return
@@ -224,7 +225,7 @@ func TestVerify_IgnoreTLogRequiresKey(t *testing.T) {
 	t.Run("guard precedes NotFound for a missing directory", func(t *testing.T) {
 		_, err := Verify(context.Background(), filepath.Join(t.TempDir(), "does-not-exist"),
 			&VerifyOptions{IgnoreTLog: true})
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Fatalf("Verify() error = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
@@ -314,7 +315,7 @@ func TestExtractToolVersionContext_CancellationPropagates(t *testing.T) {
 	if version != "" {
 		t.Errorf("extractToolVersionContext() version = %q, want empty", version)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Fatalf("extractToolVersionContext() error = %v, want ErrCodeTimeout", err)
 	}
 }
@@ -472,7 +473,7 @@ func TestReadBoundedFile_RejectsFIFOWithoutBlocking(t *testing.T) {
 
 	select {
 	case err := <-result:
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("readBoundedFile(FIFO) error = %v, want ErrCodeInvalidRequest", err)
 		}
 	case <-time.After(time.Second):
@@ -497,7 +498,7 @@ func TestReadBoundedFile_RejectsSymlink(t *testing.T) {
 	}
 
 	_, err := readBoundedFile(link)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("readBoundedFile(symlink) error = %v, want ErrCodeInvalidRequest", err)
 	}
 }
@@ -516,7 +517,7 @@ func TestVerifyBinaryAttestation_ReadCancellationIsBounded(t *testing.T) {
 
 	select {
 	case err := <-result:
-		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("VerifyBinaryAttestation() error = %v, want ErrCodeTimeout", err)
 		}
 	case <-time.After(time.Second):
@@ -739,7 +740,7 @@ func TestVerifyChecksumStep_ContextCancelled(t *testing.T) {
 
 	result := &VerifyResult{}
 	snapshot, done, err := verifyChecksumStep(ctx, dir, result)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Fatalf("verifyChecksumStep() error = %v, want ErrCodeTimeout", err)
 	}
 	if snapshot != nil {
@@ -762,7 +763,7 @@ func TestVerifyChecksumStep_PropagatesStagingFailure(t *testing.T) {
 		if mkdirErr := os.Mkdir(tempRoot, 0700); mkdirErr != nil {
 			t.Fatalf("restore TMPDIR for coverage flush: %v", mkdirErr)
 		}
-		if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 			t.Fatalf("verifyChecksumStep() error = %v, want ErrCodeInternal", err)
 		}
 		if snapshot != nil {
@@ -931,7 +932,7 @@ func TestVerify_CleanupFailure(t *testing.T) {
 	if result != nil {
 		t.Errorf("Verify() result = %#v, want nil after cleanup failure", result)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Fatalf("Verify() error = %v, want ErrCodeInternal", err)
 	}
 	if !stderrors.Is(err, cleanupFailure) {
@@ -975,7 +976,7 @@ func TestVerifyChecksumStep_MissingInventoryCleanupFailure(t *testing.T) {
 	if snapshot != nil || done {
 		t.Errorf("verifyChecksumStep() = (%#v, %v), want nil, false", snapshot, done)
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Fatalf("verifyChecksumStep() error = %v, want ErrCodeInternal", err)
 	}
 	if stderrors.Is(err, cleanupFailure) {
@@ -1075,7 +1076,7 @@ func TestVerifySigstoreBundle_ContextCancelled(t *testing.T) {
 	cancel()
 
 	_, err := verifySigstoreBundle(ctx, "unused", make([]byte, 32), attestation.PublicGoodTrustedRoot)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Fatalf("verifySigstoreBundle() error = %v, want ErrCodeTimeout", err)
 	}
 }
@@ -1100,7 +1101,7 @@ func TestVerify_ContextCancelled(t *testing.T) {
 	if err == nil {
 		t.Fatal("Verify() with cancelled context should return error")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Errorf("Verify() error = %v, want ErrCodeTimeout", err)
 	}
 }
@@ -1387,7 +1388,7 @@ func TestVerify_TrustRootOption_LoaderFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a hard error for a missing --trust-root file, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("want ErrCodeInvalidRequest, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "trust root file") {
@@ -1460,7 +1461,7 @@ func TestNewUnionTrustedRoot_LoaderErrorPropagates(t *testing.T) {
 	if src != nil {
 		t.Error("expected nil source on loader failure, got non-nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 }
@@ -1595,7 +1596,7 @@ func TestVerifyBinaryStep_PropagatesTimeout(t *testing.T) {
 
 	result := &VerifyResult{ChecksumsPassed: true, BundleAttested: true}
 	done, err := verifyBinaryStep(ctx, dir, bundleAttestPath, TrustedRepositoryPattern, result)
-	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 		t.Fatalf("verifyBinaryStep() error = %v, want ErrCodeTimeout", err)
 	}
 	if done {

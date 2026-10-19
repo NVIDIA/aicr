@@ -1475,3 +1475,28 @@ func TestCheckNVregOnNodeStallWithoutMountEventStaysTimeout(t *testing.T) {
 		})
 	}
 }
+
+// A stale mount-failure event must not be reported once the pod has moved on
+// to something else: #3144's scenario is the mount retry succeeding after the
+// driver loads, then the probe stalling on an unrelated image-pull rate
+// limit. The old FailedMount event must not be read as a still-missing driver.
+func TestCheckNVregOnNodeStaleMountFailureStaysTimeout(t *testing.T) {
+	now := time.Now()
+	mountFailure := nvregProbeEvent(nvregStalledPodName, "FailedMount", nvregTypeCheckMessage)
+	mountFailure.LastTimestamp = metav1.NewTime(now)
+
+	imagePullFailure := nvregProbeEvent(nvregStalledPodName, "Failed",
+		`Failed to pull image "busybox": toomanyrequests: You have reached your pull rate limit`)
+	imagePullFailure.Name = "e2" // distinct from mountFailure's "e1"
+	imagePullFailure.LastTimestamp = metav1.NewTime(now.Add(time.Minute))
+
+	err := runStalledNVregProbe(t, mountFailure, imagePullFailure)
+
+	requireErrCode(t, err, aicrErrors.ErrCodeTimeout)
+	if strings.Contains(err.Error(), "driver is not loaded") {
+		t.Errorf("stale mount failure misreported as driver-absent: %v", err)
+	}
+	if !aicrErrors.IsTransient(err) {
+		t.Error("a plain wait timeout must stay transient")
+	}
+}

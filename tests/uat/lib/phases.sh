@@ -113,7 +113,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/platform-crd-map.sh"
 # Lives alongside this file in tests/uat/lib/.
 # shellcheck source=./cuj-dispatch.sh
 source "$(dirname "${BASH_SOURCE[0]}")/cuj-dispatch.sh"
-source "$(dirname "${BASH_SOURCE[0]}")/sxid-fault-inject.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/fault-inject.sh"
 
 # Train-job knobs (overridable for local reproduction or future inference variant).
 TRAINJOB_NAMESPACE="${TRAINJOB_NAMESPACE:-kubeflow}"
@@ -435,6 +435,90 @@ inject_push_target() {
   echo "evidence push target: $(yq '.spec.validate.evidence.attestation.push' "${config}")"
 }
 
+# Bundle override every composed run carries; see uat_compose_nvsentinel_mixin.
+UAT_NVSENTINEL_BREAKER_OFF="nvsentinel:fault-quarantine.circuitBreaker.enabled=false"
+
+# uat_compose_nvsentinel_mixin re-resolves recipe.yaml with the opt-in
+# NVSentinel mixin named by UAT_NVSENTINEL_MIXIN composed onto its leaf
+# overlay, so the faultinject phase can run Stage 2 (nvsentinel-quarantine) or
+# Stages 2 and 3 (nvsentinel-remediation) on real hardware (#2625). Unset is a
+# no-op: no shipped recipe composes either mixin. nvsentinel-remediation brings
+# nvsentinel-health-events-analyzer with it, because the bundle fails live
+# remediation without the analyzer.
+#
+# The leaf is replaced through a --data overlay of the same name, the way the
+# KWOK lane composes KWOK_MIXINS; the empty registry merges into the embedded
+# one unchanged. The overlay is read from this checkout, so the aicr binary
+# must be built from the same tree: uat-run.yaml refuses the knob with a
+# released aicr_version. Bundle and validate need no --data, because these
+# mixins reference only embedded components.
+uat_compose_nvsentinel_mixin() {
+  local mixin="${UAT_NVSENTINEL_MIXIN:-}" want mixins
+  case "${mixin}" in
+    "") return 0 ;;
+    nvsentinel-quarantine) want=quarantine mixins="${mixin}" ;;
+    nvsentinel-remediation) want=remediation mixins="${mixin},nvsentinel-health-events-analyzer" ;;
+    *)
+      echo "::error::UAT_NVSENTINEL_MIXIN='${mixin}' is not nvsentinel-quarantine or nvsentinel-remediation" >&2
+      return 1
+      ;;
+  esac
+
+  local leaf overlay data_dir="uat-data"
+  leaf="$(yq -r '.metadata.appliedOverlays[-1] // ""' recipe.yaml)"
+  overlay="$(dirname "${BASH_SOURCE[0]}")/../../../recipes/overlays/${leaf}.yaml"
+  if [[ -z "${leaf}" || ! -f "${overlay}" ]]; then
+    echo "::error::cannot compose ${mixin}: leaf overlay '${leaf}' not found at ${overlay}" >&2
+    return 1
+  fi
+
+  rm -rf "${data_dir}"
+  mkdir -p "${data_dir}/overlays"
+  printf '%s\n' 'kind: ComponentRegistry' 'apiVersion: aicr.run/v1beta1' \
+    'metadata:' '  name: uat-nvsentinel-mixin' 'components: []' > "${data_dir}/registry.yaml"
+  MIXINS="${mixins}" yq '.spec.mixins = ((.spec.mixins // []) + (strenv(MIXINS) | split(",")))' \
+    "${overlay}" > "${data_dir}/overlays/${leaf}.yaml"
+
+  echo "composing ${mixins} onto ${leaf}"
+  "${AICR_BIN}" recipe --config "${config}" --data "${data_dir}"
+  test -f recipe.yaml
+
+  # Fail closed if the mixin did not land: a run asked to prove Stage 2 or 3
+  # must not report green after silently running Stage 1 only.
+  local got
+  got="$(uat_nvsentinel_remediation_mode recipe.yaml)"
+  if [[ "${got}" != "${want}" ]]; then
+    echo "::error::recipe composed with ${mixin} deploys NVSentinel remediation step '${got}', want '${want}'" >&2
+    return 1
+  fi
+
+  # The UAT cells run two GPU nodes, where the chart-default breaker
+  # (percentage: 50) trips on the first cordon and then halts every event,
+  # so Stage 3 would never see the node uncordoned. The KWOK e2e for these
+  # mixins disables it for the same reason. Appended to the config's set list
+  # because a --set flag would replace that list rather than extend it.
+  yq -i ".spec.bundle.deployment.set += [\"${UAT_NVSENTINEL_BREAKER_OFF}\"]" "${config}"
+}
+
+# uat_assert_nvsentinel_breaker_disabled fails prep when a composed run's
+# bundle does not carry the breaker override, so Stage 3 cannot fail late as
+# "never uncordoned" after a full remediation run. A no-op when
+# UAT_NVSENTINEL_MIXIN is unset.
+uat_assert_nvsentinel_breaker_disabled() {
+  [[ -n "${UAT_NVSENTINEL_MIXIN:-}" ]] || return 0
+  local dir got
+  dir="$(find bundle -maxdepth 1 -type d -name '*-nvsentinel' -print -quit)"
+  if [[ -z "${dir}" || ! -f "${dir}/values.yaml" ]]; then
+    echo "::error::bundle has no nvsentinel values.yaml to check the circuit-breaker override against" >&2
+    return 1
+  fi
+  got="$(yq '.["fault-quarantine"].circuitBreaker.enabled' "${dir}/values.yaml")"
+  if [[ "${got}" != "false" ]]; then
+    echo "::error::bundle's nvsentinel values set fault-quarantine.circuitBreaker.enabled=${got}, want false" >&2
+    return 1
+  fi
+}
+
 phase_prep() {
   # Capture cluster state on snapshot failure so the post-mortem has
   # actual pod scheduling / image pull / event data instead of just the
@@ -492,6 +576,7 @@ phase_prep() {
   echo "::group::Generate recipe"
   "${AICR_BIN}" recipe --config "${config}"
   test -f recipe.yaml
+  uat_compose_nvsentinel_mixin
   echo "::endgroup::"
 
   echo "::group::Validate (dry-run, --no-cluster)"
@@ -599,6 +684,7 @@ phase_prep() {
     ls -la bundle >&2 || true
     exit 1
   }
+  uat_assert_nvsentinel_breaker_disabled
   echo "::endgroup::"
 }
 
@@ -1888,7 +1974,7 @@ uat_main() {
 
   if [[ -z "${phase}" || -z "${config}" ]]; then
     echo "Usage: $0 <phase> <test-config.yaml>" >&2
-    echo "Phases: prep | install | readiness | conformance | train | serve | verify | sxidfault | debug | all" >&2
+    echo "Phases: prep | install | readiness | conformance | train | serve | verify | faultinject | debug | all" >&2
     exit 2
   fi
 
@@ -1908,7 +1994,7 @@ uat_main() {
     train)       phase_train ;;
     serve)       phase_serve ;;
     verify)      phase_verify ;;
-    sxidfault)   phase_sxid_fault_inject ;;
+    faultinject) phase_fault_inject ;;
     debug)
       # Refresh cloud credentials first (no-op on AWS/GCP; Azure redeems a fresh
       # federated session). A failure that surfaces after a long phase can leave a
@@ -1952,7 +2038,7 @@ uat_main() {
       ;;
     *)
       echo "unknown phase: ${phase}" >&2
-      echo "Phases: prep | install | readiness | conformance | train | serve | verify | sxidfault | debug | all" >&2
+      echo "Phases: prep | install | readiness | conformance | train | serve | verify | faultinject | debug | all" >&2
       exit 2
       ;;
   esac

@@ -16,7 +16,7 @@
 # (RQ2 / #1284).
 #
 # Structurally a clone of bom-refresh.yaml (weekly schedule + workflow_dispatch,
-# read-only GITHUB_TOKEN, ubuntu-latest, timeout-minutes) with one deliberate
+# read-only GITHUB_TOKEN, ubuntu-24.04, timeout-minutes) with one deliberate
 # divergence: it never opens a PR and never edits a doc. Instead it runs
 # tools/testgrid-link-check, which reads the committed dashboard presence
 # manifest (pkg/testgrid/presence.yaml — the coordinates RQ1 deep-links) and
@@ -51,7 +51,7 @@ permissions:
 jobs:
   check:
     name: Verify recipe-health Evidence deep-links against the live dashboard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout Code

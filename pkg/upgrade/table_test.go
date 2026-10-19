@@ -25,6 +25,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // The report is compared byte for byte against a committed golden rather than
@@ -319,8 +321,8 @@ func identityReport(t *testing.T) *Report {
 func clusterSourceReport(t *testing.T) *Report {
 	t.Helper()
 	results := Match(syntheticSet(),
-		map[string]string{"alpha-operator": "1.2.0", "lambda-operator": "1.1.0"},
-		map[string]string{"alpha-operator": "1.2.3", "lambda-operator": "1.2.0"})
+		map[string]string{"alpha-operator": "1.2.0", "lambda-operator": "1.1.0", "theta-operator": ""},
+		map[string]string{"alpha-operator": "1.2.3", "lambda-operator": "1.2.0", "theta-operator": "2.0.0"})
 	return NewReport(results, ReportOptions{
 		From:     "cluster",
 		To:       "./bundles-v0.17.0",
@@ -328,12 +330,17 @@ func clusterSourceReport(t *testing.T) *Report {
 		Source: &ReportSource{
 			Kubeconfig: "/home/op/.kube/config",
 			Context:    "prod-east",
-			Matched:    2,
+			Matched:    3,
 			Helm: ReportSourceHelm{
 				Read: true, Records: 37, Unattributed: 2, Unreadable: 1, Uninstalled: 3, StampedUnmatched: 0,
 			},
-			Argo: ReportSourceArgo{Read: true, Applications: 5, Unattributed: 6, Unreadable: 7, Remote: 8},
+			Argo: ReportSourceArgo{
+				Read: true, Applications: 5, Unattributed: 6, Unreadable: 7, Remote: 8, Unplaced: 9,
+			},
 		},
+		Unproven: map[string][]ReportUnproven{"theta-operator": {
+			{Source: "argocd", Name: "teamfoo-theta-operator", Namespace: "team-foo", Reason: "unplaced"},
+		}},
 		AtRisk: &AtRiskReport{
 			Scanned: true,
 			Kinds: []AtRiskKind{
@@ -680,7 +687,7 @@ func TestWriteTableRejectsMalformedCalls(t *testing.T) {
 			if err == nil {
 				t.Fatal("WriteTable accepted a malformed call, want ErrCodeInvalidRequest")
 			}
-			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 			}
 		})
@@ -695,7 +702,7 @@ func TestWriteTablePropagatesWriteFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("WriteTable on a failing writer returned nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("error = %v, want ErrCodeInternal", err)
 	}
 }
@@ -724,7 +731,7 @@ func TestWriteAtRiskRowsPropagatesWriteFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("writeAtRiskRows on a failing writer returned nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("error = %v, want ErrCodeInternal", err)
 	}
 }
@@ -1003,7 +1010,7 @@ func TestWriteTableSourceCountsAreNotInterchangeable(t *testing.T) {
 		{
 			name:   "argo",
 			prefix: "  argo ",
-			want:   []string{"5 applications", "6 unattributed", "7 unreadable"},
+			want:   []string{"5 applications", "6 unattributed", "7 unreadable", "8 remote", "9 unplaced"},
 			reject: []string{"storage record", "uninstalled"},
 		},
 	}

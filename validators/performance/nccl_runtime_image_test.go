@@ -16,7 +16,6 @@ package main
 
 import (
 	_ "crypto/sha256" // register SHA-256 with crypto.Hash so digest validation in the "digest reference accepted" case below doesn't depend on some other file in this package importing it first.
-	stderrors "errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -25,6 +24,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 )
@@ -61,7 +62,7 @@ func TestResolveNCCLRuntimeImage(t *testing.T) {
 				if err == nil {
 					t.Fatalf("resolveNCCLRuntimeImage() = %q, nil; want error", got)
 				}
-				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 					t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
 				}
 				return
@@ -153,7 +154,7 @@ func TestApplyNCCLRuntimeImageOverride_MissingReplicatedJobs(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing replicatedJobs")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("error = %v, want ErrCodeInternal", err)
 	}
 }
@@ -181,7 +182,7 @@ spec:
 	if err == nil {
 		t.Fatal("expected error when no workload containers match")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
 		t.Errorf("error = %v, want ErrCodeInternal", err)
 	}
 }

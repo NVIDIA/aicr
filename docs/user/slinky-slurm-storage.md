@@ -87,7 +87,7 @@ Verify the selected class and its RWX capability before deployment.
 ## Lifecycle and deletion
 
 The generated shared PVCs carry retention annotations for every supported
-deployer. Helm, Helmfile, and Flux's Helm controller honor
+deployer. Helm, Helmfile, Terraform's `helm_release`, and Flux's Helm controller honor
 `helm.sh/resource-policy: keep` when a release is upgraded or removed. Argo CD
 treats that annotation like `Delete=false` during Application deletion; the
 explicit `argocd.argoproj.io/sync-options: Delete=false,Prune=false` annotation

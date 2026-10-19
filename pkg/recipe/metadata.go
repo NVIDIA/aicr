@@ -183,7 +183,7 @@ type ComponentRef struct {
 
 	// ManifestFiles lists manifest files to include in the component bundle.
 	// Paths are relative to the data directory.
-	// Example: ["components/network-operator/manifests/nfd-network-rule.yaml"]
+	// Example: ["components/network-operator/manifests/nic-cluster-policy-aks.yaml"]
 	ManifestFiles []string `json:"manifestFiles,omitempty" yaml:"manifestFiles,omitempty"`
 
 	// PreManifestFiles lists manifest files that must be bundled and applied
@@ -747,7 +747,7 @@ func (ref *ComponentRef) HasExternalChart() bool {
 // EffectiveChart returns the chart name a Helm-typed ref deploys: the
 // explicit Chart, falling back to the component name when unset (a
 // source-only ref). Every ComponentRef consumer derives the chart through
-// this method — the flux, argocd, helmfile, and helm deployers, pkg/mirror,
+// this method — the flux, argocd, helmfile, helm, and terraform deployers, pkg/mirror,
 // and the facade/query/BOM projections. (localformat keeps an equivalent
 // fallback on its own Component type, which is constructed from
 // EffectiveChart-derived inputs but also serves direct callers.)

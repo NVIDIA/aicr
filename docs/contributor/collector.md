@@ -21,13 +21,16 @@ collector.
 > `NetworkTopology` measurement is emitted). It activates only when one of
 > the two options is supplied. The two are not mutually exclusive — when both
 > are set, `ClusterConfigPath` takes precedence. In `ClusterConfigPath` mode it
-> parses a pre-existing `cluster-config.yaml` with no cluster contact and is
-> read-only. But its `DiscoverNetwork` mode — enabled by `--discover-network`
-> — calls k8s-launch-kit's live `Discover()`, which **mutates cluster state**:
-> it writes `nvidia.kubernetes-launch-kit.*` node labels and patches
-> `NicClusterPolicy` via server-side apply. This is the one collector path
-> that is *not* read-only; use `--discover-network` only against clusters
-> where that mutation is acceptable.
+> parses a pre-existing `cluster-config.yaml` with no cluster contact. Its
+> `DiscoverNetwork` mode — enabled by `--discover-network` — calls
+> k8s-launch-kit's `DiscoverReadOnly()`, which lists nodes, the Network
+> Operator's `nic-configuration-daemon` pods, and the `NicDevice` objects that
+> daemon publishes; it creates, patches, and deletes nothing. The collector
+> never passes a REST config, so l8k's `pods/exec` fallback is unreachable and
+> a daemon node without a `NicDevice` fails the collector instead. Without a
+> running daemon it returns `NOT_FOUND` and the measurement is skipped. The
+> two l8k entry points are package-level seams (`newL8kClient`,
+> `discoverReadOnly`) so the error mapping is unit-tested without a cluster.
 
 This page is for contributors adding a new collector. End-user
 snapshot semantics live in
@@ -47,7 +50,7 @@ Each subdirectory is one collector; one collector emits one
 | OS | `pkg/collector/os` | `TypeOS` | Subtypes for `release` (`/etc/os-release`), `grub`, `kmod`, `sysctl`. |
 | SystemD | `pkg/collector/systemd` | `TypeSystemD` | D-Bus probe of configured services. Routes to Talos via factory when `os: talos`. |
 | Topology | `pkg/collector/topology` | `TypeNodeTopology` | Cluster-wide taints and labels across all nodes, in two encodings — lossless `Items` plus the legacy folded `Data` map — see [Cross-cutting topology collector](#cross-cutting-topology-collector). |
-| Network | `pkg/collector/network` | `TypeNetworkTopology` | Ingests an l8k cluster-config (from disk via `ClusterConfigPath`, or live via `DiscoverNetwork`). **Inactive by default** — emits no measurement unless one option is set. `DiscoverNetwork` mutates cluster state (see exception note above). |
+| Network | `pkg/collector/network` | `TypeNetworkTopology` | Ingests an l8k cluster-config (from disk via `ClusterConfigPath`, or live via `DiscoverNetwork`). **Inactive by default** — emits no measurement unless one option is set. `DiscoverNetwork` is read-only and requires a running Network Operator daemon (see note above). |
 | Talos | `pkg/collector/talos` | `TypeSystemD`, `TypeOS` | OS-specific override pair: a single shared config so one Node API fetch serves both collectors. |
 | File (helper) | `pkg/collector/file` | — | Not a registered collector. A reusable parser for delimited key=value config files (used by the OS subcollectors). |
 
@@ -157,7 +160,7 @@ host-local collector. Three collectors override:
 |-----------|----------|-------|-----------|
 | Kubernetes | `defaults.CollectorK8sTimeout` | 60s | API server round trips, in-cluster auth setup. |
 | Topology | `defaults.CollectorTopologyTimeout` | 90s | Cluster-wide node pagination on large fleets. |
-| Network | `defaults.CollectorNetworkTimeout` | 10m | Upper bound (defense in depth) on the network collector, which delegates to live discovery with its own per-step timeouts. |
+| Network | `defaults.CollectorNetworkTimeout` | 7m | Upper bound (defense in depth) on the network collector, which delegates to live discovery with its own per-step timeouts. |
 
 Use the parent deadline if it is sooner — the GPU collector shows the
 pattern (`time.Until(deadline) < timeout`). Long-lived watches do not
@@ -261,12 +264,9 @@ only — drain and return). Anything in this column is a review block:
 If your check requires mutation to know the answer, the answer
 belongs in `pkg/validator`, not `pkg/collector`.
 
-The one sanctioned exception is the network collector's `DiscoverNetwork`
-mode (see the exception note at the top of this page): it delegates to
-k8s-launch-kit's live `Discover()`, which patches node labels and
-`NicClusterPolicy`. That mutation is gated behind the explicit
-`--discover-network` opt-in and lives outside AICR's own code; do not treat
-it as license to add mutating calls to any other collector.
+No collector performs mutating calls, including the network collector's
+`DiscoverNetwork` mode (see the note at the top of this page), which uses
+k8s-launch-kit's read-only entry point precisely so that this rule holds.
 
 ## Concurrency Rules
 
@@ -374,7 +374,8 @@ split:
   ([`aksgpupools.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/collector/k8s/aksgpupools.go),
   AgentPool `gpuProfile.driver`), `oke-addons`
   ([`okeaddons.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/collector/k8s/okeaddons.go),
-  the `NvidiaGpuPlugin` add-on's lifecycle state), and `gke-gpu-pools`
+  the lifecycle state of the `NvidiaGpuPlugin` and `NvidiaNetworkOperator`
+  add-ons), and `gke-gpu-pools`
   ([`gkegpupools.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/collector/k8s/gkegpupools.go),
   node-pool `gpuDriverInstallationConfig`). Do not widen an existing
   provider's subtype or invent a cross-provider pools schema.
@@ -409,7 +410,7 @@ marker list in `aksgpupools.go`.
 |------|-----|
 | Constraint evaluation | `validator.WithNoCluster(true)` — see [Test Isolation in CLAUDE.md](https://github.com/NVIDIA/aicr/blob/main/.claude/CLAUDE.md#test-isolation) |
 | K8s collector unit tests | `k8s.io/client-go/kubernetes/fake` — inject via collector option |
-| GPU / OS host tooling | Inject a `commandRunner` or `HardwareDetector` (the GPU collector shows the pattern) |
+| GPU host detection | Inject a fake `HardwareDetector` via `gpu.WithHardwareDetector` (see `pkg/collector/gpu`) |
 | Timeout handling | `ctx, cancel := context.WithCancel(...); cancel(); _, err := c.Collect(ctx)` — assert wrapped `ErrCodeTimeout` |
 | Table-driven cases | Required by CLAUDE.md when ≥ 2 input shapes — one case per shape, named |
 

@@ -347,15 +347,19 @@ type ValidateInputSpec struct {
 // validation-job pods. Empty fields use the validator's compiled-in
 // defaults; selectors/tolerations omitted entirely (nil) inherit, while an
 // explicit empty map/list (`{}` / `[]`) clears the default.
+//
+// ServiceAccountName names the snapshot-capture agent's ServiceAccount;
+// ValidatorServiceAccountName names the one validator Jobs run as.
 type ValidateAgentSpec struct {
-	Namespace          string            `yaml:"namespace,omitempty" json:"namespace,omitempty"`
-	Image              string            `yaml:"image,omitempty" json:"image,omitempty"`
-	ImagePullSecrets   []string          `yaml:"imagePullSecrets,omitempty" json:"imagePullSecrets,omitempty"`
-	JobName            string            `yaml:"jobName,omitempty" json:"jobName,omitempty"`
-	ServiceAccountName string            `yaml:"serviceAccountName,omitempty" json:"serviceAccountName,omitempty"`
-	NodeSelector       map[string]string `yaml:"nodeSelector,omitempty" json:"nodeSelector,omitempty"`
-	Tolerations        []string          `yaml:"tolerations,omitempty" json:"tolerations,omitempty"`
-	RequireGPU         bool              `yaml:"requireGpu,omitempty" json:"requireGpu,omitempty"`
+	Namespace                   string            `yaml:"namespace,omitempty" json:"namespace,omitempty"`
+	Image                       string            `yaml:"image,omitempty" json:"image,omitempty"`
+	ImagePullSecrets            []string          `yaml:"imagePullSecrets,omitempty" json:"imagePullSecrets,omitempty"`
+	JobName                     string            `yaml:"jobName,omitempty" json:"jobName,omitempty"`
+	ServiceAccountName          string            `yaml:"serviceAccountName,omitempty" json:"serviceAccountName,omitempty"`
+	ValidatorServiceAccountName string            `yaml:"validatorServiceAccountName,omitempty" json:"validatorServiceAccountName,omitempty"`
+	NodeSelector                map[string]string `yaml:"nodeSelector,omitempty" json:"nodeSelector,omitempty"`
+	Tolerations                 []string          `yaml:"tolerations,omitempty" json:"tolerations,omitempty"`
+	RequireGPU                  bool              `yaml:"requireGpu,omitempty" json:"requireGpu,omitempty"`
 }
 
 // ValidateExecutionSpec controls validation behavior independent of where

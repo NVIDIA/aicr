@@ -591,6 +591,42 @@ func TestBundleResolve_InvalidValues(t *testing.T) {
 			wantSub: "spec.bundle.scheduling.acceleratedNodeTolerations",
 		},
 		{
+			name: "system toleration the API server rejects",
+			spec: &config.BundleSpec{
+				Scheduling: &config.SchedulingSpec{
+					SystemNodeTolerations: []string{"bad key=v:NoSchedule"},
+				},
+			},
+			wantSub: "spec.bundle.scheduling.systemNodeTolerations",
+		},
+		{
+			name: "invalid system node selector",
+			spec: &config.BundleSpec{
+				Scheduling: &config.SchedulingSpec{
+					SystemNodeSelector: map[string]string{"bad key": "v"},
+				},
+			},
+			wantSub: "spec.bundle.scheduling.systemNodeSelector",
+		},
+		{
+			name: "invalid accelerated node selector",
+			spec: &config.BundleSpec{
+				Scheduling: &config.SchedulingSpec{
+					AcceleratedNodeSelector: map[string]string{"nvidia.com/gpu.present": "not valid"},
+				},
+			},
+			wantSub: "spec.bundle.scheduling.acceleratedNodeSelector",
+		},
+		{
+			name: "invalid workload selector",
+			spec: &config.BundleSpec{
+				Scheduling: &config.SchedulingSpec{
+					WorkloadSelector: map[string]string{"k": "{{ .Values.x }}"},
+				},
+			},
+			wantSub: "spec.bundle.scheduling.workloadSelector",
+		},
+		{
 			name: "invalid workload gate",
 			spec: &config.BundleSpec{
 				Scheduling: &config.SchedulingSpec{WorkloadGate: "no-effect"},
@@ -728,6 +764,8 @@ func TestValidateResolve_AllFieldsPopulated(t *testing.T) {
 			NodeSelector:       map[string]string{"k": "v"},
 			Tolerations:        []string{"foo=bar:NoSchedule"},
 			RequireGPU:         true,
+
+			ValidatorServiceAccountName: "validator-sa",
 		},
 		Execution: &config.ValidateExecutionSpec{
 			Phases:      []string{"deployment", "conformance"},
@@ -746,7 +784,7 @@ func TestValidateResolve_AllFieldsPopulated(t *testing.T) {
 		t.Errorf("input mismatch: %+v", got)
 	}
 	if got.Namespace != "ns" || got.Image != "img:1" || got.JobName != "j" ||
-		got.ServiceAccountName != "sa" || !got.RequireGPU {
+		got.ServiceAccountName != "sa" || got.ValidatorServiceAccountName != "validator-sa" || !got.RequireGPU {
 
 		t.Errorf("agent mismatch: %+v", got)
 	}
@@ -835,6 +873,14 @@ func TestValidateResolve_InvalidToleration(t *testing.T) {
 	_, err := v.Resolve()
 	if err == nil || !strings.Contains(err.Error(), "spec.validate.agent.tolerations") {
 		t.Fatalf("expected tolerations error, got %v", err)
+	}
+}
+
+func TestValidateResolve_InvalidNodeSelector(t *testing.T) {
+	v := &config.ValidateSpec{Agent: &config.ValidateAgentSpec{NodeSelector: map[string]string{"bad key": "v"}}}
+	_, err := v.Resolve()
+	if err == nil || !strings.Contains(err.Error(), "spec.validate.agent.nodeSelector") {
+		t.Fatalf("expected nodeSelector error, got %v", err)
 	}
 }
 
@@ -1009,6 +1055,11 @@ func TestSnapshotResolve_InvalidInput(t *testing.T) {
 			name:    "invalid toleration",
 			in:      &config.SnapshotSpec{Agent: &config.SnapshotAgentSpec{Tolerations: []string{"::"}}},
 			wantSub: "spec.snapshot.agent.tolerations",
+		},
+		{
+			name:    "invalid node selector",
+			in:      &config.SnapshotSpec{Agent: &config.SnapshotAgentSpec{NodeSelector: map[string]string{"bad key": "v"}}},
+			wantSub: "spec.snapshot.agent.nodeSelector",
 		},
 	}
 	for _, tt := range tests {

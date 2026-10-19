@@ -15,11 +15,12 @@
 package measurement
 
 import (
-	stderrors "errors"
 	"strings"
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestValidatePath(t *testing.T) {
@@ -146,7 +147,7 @@ func TestValidatePath(t *testing.T) {
 			if err == nil {
 				t.Fatalf("ValidatePath(%q) = nil, want %s", tt.path, tt.wantErr)
 			}
-			if !stderrors.Is(err, aicrerrors.New(tt.wantErr, "")) {
+			if errorstest.ReportedCode(err) != tt.wantErr {
 				t.Errorf("ValidatePath(%q) error = %v, want code %s", tt.path, err, tt.wantErr)
 			}
 			if tt.wantMsg != "" && !strings.Contains(err.Error(), tt.wantMsg) {
@@ -167,7 +168,7 @@ func TestValidatePath_MissingCatalogEntry(t *testing.T) {
 	if err == nil {
 		t.Fatal("validatePathIn with an empty catalog = nil, want an error")
 	}
-	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInternal, "")) {
+	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInternal {
 		t.Errorf("error = %v, want code %s", err, aicrerrors.ErrCodeInternal)
 	}
 	if !strings.Contains(err.Error(), "no catalog entry") {

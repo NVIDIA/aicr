@@ -35,20 +35,27 @@ func SlackPayload(r Report) ([]byte, error) {
 		date = date[:i]
 	}
 
+	needsReview := r.Summary.Behind > 0 || r.Summary.Unresolved > 0 || r.Summary.Withheld > 0
+
 	var b strings.Builder
-	if r.Summary.Behind == 0 && r.Summary.Unresolved == 0 {
+	if !needsReview {
 		fmt.Fprintf(&b, "AICR component drift - %s: all %d pins current", date, r.Summary.Tracked)
 	} else {
-		// Tracked counts pins; Behind and Unresolved count chart rows (the
-		// OpenShift twins share a row), so label them distinctly rather than
-		// implying all three share a unit.
-		fmt.Fprintf(&b, "AICR component drift - %s (%d pins, %d charts behind, %d charts unresolved)",
-			date, r.Summary.Tracked, r.Summary.Behind, r.Summary.Unresolved)
+		// Tracked counts pins; the rest count chart rows (the OpenShift twins
+		// share a row), so label them distinctly rather than implying all of
+		// them share a unit.
+		fmt.Fprintf(&b, "AICR component drift - %s (%d pins, %d charts behind, %d charts unresolved, %d charts withheld)",
+			date, r.Summary.Tracked, r.Summary.Behind, r.Summary.Unresolved, r.Summary.Withheld)
+		// Normally zero; when a registry refuses the date lookups, these rows
+		// are back to offering Renovate's highest version unchecked.
+		if r.Summary.Unscreened > 0 {
+			fmt.Fprintf(&b, "; %d charts unscreened", r.Summary.Unscreened)
+		}
 	}
 	if r.RunURL != "" {
 		fmt.Fprintf(&b, "\n<%s|report artifact>", r.RunURL)
 	}
-	if r.Summary.Behind > 0 || r.Summary.Unresolved > 0 {
+	if needsReview {
 		fmt.Fprint(&b, "\nReview with /aicr-reviewing-component-drift (Codex: $aicr-reviewing-component-drift)")
 	}
 

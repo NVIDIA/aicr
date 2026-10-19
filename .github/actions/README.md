@@ -127,8 +127,13 @@ centralized here so no caller can silently drop either contract.
 **When to use**: When you need version values in workflow steps
 **Outputs**: the Go version (from `.go-version`), plus one output per exposed
 `.settings.yaml` pin (tool versions, chart versions, image references, and
-quality thresholds; not every settings key is exposed) — see
+quality thresholds; not every settings key is exposed), and the Docker Hub
+pull-through mirror from `build.dockerhub_mirror` as both `dockerhub_mirror`
+(URL) and `dockerhub_mirror_host` — see
 [`load-versions/action.yml`](load-versions/action.yml) for the authoritative set.
+**Failure**: fails the calling job when `build.dockerhub_mirror` is missing or is
+not an `https://` host URL without a path, rather than letting mirror consumers
+fall back to anonymous Docker Hub pulls.
 
 **Example**:
 ```yaml
@@ -402,7 +407,7 @@ Pull requests run the same `qualification.yaml` through `merge-gate.yaml`.
 ```yaml
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
@@ -432,7 +437,7 @@ jobs:
 ```yaml
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:

@@ -149,6 +149,20 @@ func TestCollectPerconaServerMongoDB_StateMatrix(t *testing.T) {
 			want:      map[string]any{perconaKeyCollectionState: perconaStateAPIDetected},
 		},
 		{
+			name:      "AICR's own operator pod under an Argo CD namePrefix is not foreign",
+			discovery: served(),
+			crs:       []*unstructured.Unstructured{newPerconaServerMongoDB(perconaAICRNamespace, perconaAICRName)},
+			pods:      []runtime.Object{newPerconaOperatorPod(perconaAICRNamespace, "psmdb-operator", "tenant-a-psmdb-operator")},
+			want:      map[string]any{perconaKeyCollectionState: perconaStateAICROwned},
+		},
+		{
+			name:      "operator release that only starts with psmdb-operator is foreign",
+			discovery: served(),
+			crs:       []*unstructured.Unstructured{newPerconaServerMongoDB(perconaAICRNamespace, perconaAICRName)},
+			pods:      []runtime.Object{newPerconaOperatorPod(perconaAICRNamespace, "psmdb-operator", "psmdb-operator-legacy")},
+			want:      map[string]any{perconaKeyCollectionState: perconaStateOperatorDetected},
+		},
+		{
 			name:      "foreign operator in AICR's namespace is operator detected",
 			discovery: served(),
 			crs:       []*unstructured.Unstructured{newPerconaServerMongoDB(perconaAICRNamespace, perconaAICRName)},

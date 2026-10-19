@@ -24,6 +24,8 @@ import (
 	"time"
 
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
 
@@ -367,7 +369,7 @@ func TestNormalizeInventoryHashError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := normalizeInventoryHashError(tt.ctx(t), helperTimeout)
-			if !stderrors.Is(got, apperrors.New(tt.wantCode, "")) {
+			if errorstest.ReportedCode(got) != tt.wantCode {
 				t.Fatalf("normalizeInventoryHashError() = %v, want code %s", got, tt.wantCode)
 			}
 			if tt.wantSame && got.Error() != helperTimeout.Error() {

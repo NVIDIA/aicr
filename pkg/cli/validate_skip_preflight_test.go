@@ -15,7 +15,6 @@
 package cli
 
 import (
-	stderrors "errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +25,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/header"
 )
 
@@ -224,7 +225,7 @@ func TestValidateCmd_UnknownSkipCheckIsInvalidRequest(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
 	}
 	if !strings.Contains(err.Error(), "matches no validator in the catalog") {
