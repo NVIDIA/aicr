@@ -544,6 +544,21 @@
       allowedVersions: "<0.21.3",
     },
 
+    // ---- goldmark is capped below v2 ----
+    // goldmark v2 is an API rewrite (goldmark.New, extension.GFM,
+    // text.NewReader and the ast.Link/AutoLink fields all changed), and
+    // Renovate's major bump only rewrites import paths, so #3310 did not
+    // compile. goldmark is used only by tools/check-docs-links, a CI docs tool
+    // outside the shipped binaries. Like the cel-go cap, grype still scans the
+    // v1 pin in go.mod.
+    //
+    // Lift this together with porting tools/check-docs-links to v2, not before.
+    {
+      matchManagers: ["gomod"],
+      matchDepNames: ["github.com/yuin/goldmark"],
+      allowedVersions: "<2.0.0",
+    },
+
     // ---- Registry chart pins are extracted, never PR'd ----
     {
       // Report-only. Each run relies on exactly one config-level guard here:
