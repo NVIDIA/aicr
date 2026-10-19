@@ -22,17 +22,13 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// TestPrecompiledDriverExcludesGDRCopy asserts that no resolved recipe turns
-// on both driver.usePrecompiled and gdrcopy.enabled in gpu-operator's merged
-// values. GPU Operator rejects the pair ("GDRCopy is not supported along with
-// pre-compiled NVIDIA drivers") and returns before creating the driver
-// DaemonSet, so no GPU node gets a driver. gdrcopy.enabled: true comes from
-// components/gpu-operator/values.yaml rather than from the overlay that turns
-// on precompiled drivers, which is why the check reads merged values.
-//
-// An overlay whose criteria leave intent unset is also resolved once per
-// intent: rke2-sles composes with rke2-training and rke2-inference at query
-// time, and no single overlay holds those combinations.
+// TestPrecompiledDriverExcludesGDRCopy asserts that no resolved recipe enables
+// both driver.usePrecompiled and gdrcopy.enabled in gpu-operator's merged
+// values. It reads merged values because gdrcopy.enabled comes from
+// components/gpu-operator/values.yaml, not from the overlay that turns on
+// precompiled drivers, and it resolves each intent an overlay leaves unset
+// because rke2-sles composes with rke2-training and rke2-inference at query
+// time.
 func TestPrecompiledDriverExcludesGDRCopy(t *testing.T) {
 	ctx := context.Background()
 	store, err := loadMetadataStore(ctx)
@@ -58,12 +54,16 @@ func TestPrecompiledDriverExcludesGDRCopy(t *testing.T) {
 			}
 		}
 
+		// Set by the overlay's own query, which runs first and serially.
+		ownPrecompiled := false
 		for _, q := range queries {
 			t.Run(name+"/"+q.criteria.String(), func(t *testing.T) {
 				result, err := store.BuildRecipeResult(ctx, &q.criteria)
 				// An intent added above may name a combination the catalog
-				// does not offer; the overlay's own criteria must resolve.
-				if q.synthesized && stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				// does not offer, unless the overlay itself uses precompiled
+				// drivers: its intents are the combinations this test exists
+				// to check, so they must resolve.
+				if q.synthesized && !ownPrecompiled && stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
 					t.Skipf("catalog offers no such combination: %v", err)
 				}
 				if err != nil {
@@ -79,6 +79,9 @@ func TestPrecompiledDriverExcludesGDRCopy(t *testing.T) {
 				}
 				if !boolAtPath(values, false, "driver", "usePrecompiled") {
 					return
+				}
+				if !q.synthesized {
+					ownPrecompiled = true
 				}
 				precompiled++
 				if boolAtPath(values, false, "gdrcopy", "enabled") {
