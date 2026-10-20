@@ -98,7 +98,7 @@ The table below is generated from the recipes by `make tuning-docs` — **do not
 {/* END AICR-TUNING */}
 
 Note: the generated table lists the packages *pinned in the manifests* and
-cannot see per-recipe value gates. The `aks` rows show `nvidia-tuned 0.10.0`,
+cannot see per-recipe value gates. The `aks` rows show `nvidia-tuned 0.10.1`,
 but AKS recipes disable it by default via `nodewright-customizations`
 `tuningEnabled: false` under the Azure-managed driver profile; see
 [AKS GPU setup](../aks-gpu-setup.md#infiniband-rdma-host-setup-nodewright)
