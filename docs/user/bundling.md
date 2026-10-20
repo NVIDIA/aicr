@@ -896,6 +896,12 @@ Helm and Argo CD cannot assess natively. Supported with `--deployer helm`,
 aicr bundle --recipe recipe.yaml --readiness-hooks --output ./bundles
 ```
 
+The gate Job takes its node selector and tolerations from the component's own
+system scheduling values at install time, so `--set`, `--dynamic` and
+`--system-node-*` place it alongside the component. Keyless tolerations are
+not applied to the gate. See
+[Readiness Gates](cli-reference.md#readiness-gates) for each deployer.
+
 ## Deploy the bundle
 
 For the default `helm` deployer, verify the bundle before installing it:

@@ -42,6 +42,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -53,22 +54,6 @@ var update = flag.Bool("update", false, "update golden files")
 // live-render tests spawn — generous for a local render, short enough that a
 // wedged helm cannot stall the suite.
 const helmTemplateTimeout = 30 * time.Second
-
-// requireHelm gates the live-render tests on a helm binary. In CI (the
-// standard CI=true environment variable set by GitHub Actions) a missing
-// helm is a hard failure: the go-test action installs the version pinned
-// in .settings.yaml, so an absent binary means the pipeline silently
-// stopped exercising the live-render coverage. Locally the tests keep
-// skipping so dev environments without helm are not broken.
-func requireHelm(t *testing.T) {
-	t.Helper()
-	if _, err := exec.LookPath("helm"); err != nil {
-		if os.Getenv("CI") != "" {
-			t.Fatal("helm is required in CI but not on PATH; the go-test action must install the pinned version from .settings.yaml (testing_tools.helm)")
-		}
-		t.Skip("helm not available; skipping live-render test")
-	}
-}
 
 func newRecipeResult(version string, refs []recipe.ComponentRef) *recipe.RecipeResult {
 	r := &recipe.RecipeResult{
@@ -291,7 +276,7 @@ func TestGenerate_ProfileLockTemplate(t *testing.T) {
 	})
 
 	t.Run("profiled guard rejects structural intersections", func(t *testing.T) {
-		requireHelm(t)
+		helmtest.RequireBinary(t)
 
 		outputDir := t.TempDir()
 		result := newRecipeResult("v1.0.0", []recipe.ComponentRef{{
@@ -445,7 +430,7 @@ func TestGenerate_ProfileLockTemplate(t *testing.T) {
 		// like declared ones — the string assertions above prove the paths
 		// are named, this proves the rejection actually fires.
 		t.Run("closure path rejects install-time override", func(t *testing.T) {
-			requireHelm(t)
+			helmtest.RequireBinary(t)
 
 			tests := []struct {
 				name      string
@@ -2177,7 +2162,7 @@ func TestGenerate_ApplyOutOfSyncOnlySyncOptions(t *testing.T) {
 // Skipped when helm is not on PATH so unit-test environments without
 // helm aren't broken by it.
 func TestHelmTemplate_RendersWithSetRepoURL(t *testing.T) {
-	requireHelm(t)
+	helmtest.RequireBinary(t)
 
 	outputDir := t.TempDir()
 	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
@@ -2321,7 +2306,7 @@ func TestHelmTemplate_RendersWithSetRepoURL(t *testing.T) {
 // installation from ChartMuseum / GitHub Pages-style repos is the
 // supported use case. See PR #1051's Codex P2 review.
 func TestHelmTemplate_RendersWithHelmRepoRepoURL(t *testing.T) {
-	requireHelm(t)
+	helmtest.RequireBinary(t)
 
 	ctx := context.Background()
 	outputDir := t.TempDir()
@@ -2417,7 +2402,7 @@ func TestHelmTemplate_RendersWithHelmRepoRepoURL(t *testing.T) {
 // `<namespace>/<chart>:<targetRevision>` resolves against the actual
 // published artifact instead of the literal `aicr-bundle`.
 func TestGenerate_CustomChartName(t *testing.T) {
-	requireHelm(t)
+	helmtest.RequireBinary(t)
 
 	const customName = "my-custom-bundle"
 	outputDir := t.TempDir()
@@ -2501,7 +2486,7 @@ func TestGenerate_CustomChartName(t *testing.T) {
 // Application's metadata.name was the literal "aicr-stack" and the
 // second bundle silently overwrote the first.
 func TestHelmTemplate_AppNameOverride(t *testing.T) {
-	requireHelm(t)
+	helmtest.RequireBinary(t)
 
 	tests := []struct {
 		name              string
@@ -2734,7 +2719,7 @@ components:
 // (`gpu-operator`) is also asserted to confirm its `repoURL` stays as
 // the upstream Helm chart registry (not templated from .Values.repoURL).
 func TestHelmTemplate_MixedComponentPreChildResolvesFromOCI(t *testing.T) {
-	requireHelm(t)
+	helmtest.RequireBinary(t)
 
 	outputDir := t.TempDir()
 	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
@@ -2861,7 +2846,7 @@ func TestHelmTemplate_MixedComponentPreChildResolvesFromOCI(t *testing.T) {
 // is the safety net that prevents users from accidentally publishing a
 // chart whose Application would point at an empty URL.
 func TestHelmTemplate_FailsWithoutRepoURL(t *testing.T) {
-	requireHelm(t)
+	helmtest.RequireBinary(t)
 
 	outputDir := t.TempDir()
 	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
@@ -3204,7 +3189,7 @@ func TestGenerate_DeployerDefaults_NoOptions(t *testing.T) {
 // metadata.name as `t-gpu-operator`, and project / destinationServer
 // overrides must land on the child spec. Skipped when helm is not on PATH.
 func TestHelmTemplate_DeployerNamePrefixOverride(t *testing.T) {
-	requireHelm(t)
+	helmtest.RequireBinary(t)
 
 	outputDir := t.TempDir()
 	g := newTestHelmGenerator(t)
@@ -3277,7 +3262,7 @@ func TestHelmTemplate_DeployerNamePrefixOverride(t *testing.T) {
 // fails the values schema loudly instead of rendering as truthy.
 // Skipped when helm is not on PATH.
 func TestHelmTemplate_IncludeRootAppToggle(t *testing.T) {
-	requireHelm(t)
+	helmtest.RequireBinary(t)
 
 	outputDir := t.TempDir()
 	g := newTestHelmGenerator(t)
@@ -3428,7 +3413,7 @@ func TestGenerate_NamePrefixValidatedUpfront(t *testing.T) {
 // parent Application. The guard block prepended to every child template
 // must fail the render. Skipped when helm is not on PATH.
 func TestHelmTemplate_ChildNameGuards(t *testing.T) {
-	requireHelm(t)
+	helmtest.RequireBinary(t)
 
 	outputDir := t.TempDir()
 	g := newTestHelmGenerator(t)
@@ -3563,7 +3548,7 @@ func TestValuesSchemaPatterns(t *testing.T) {
 // asserting each equals an explicit wantValid — merely asserting the gates
 // agree would let a case where both wrongly accept a bad value pass.
 func TestValidationContractParity(t *testing.T) {
-	requireHelm(t)
+	helmtest.RequireBinary(t)
 
 	outputDir := t.TempDir()
 	g := newTestHelmGenerator(t)

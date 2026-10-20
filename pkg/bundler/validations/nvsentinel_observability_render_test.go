@@ -20,14 +20,13 @@ import (
 	stderrors "errors"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"testing"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
 	aicrhelm "github.com/NVIDIA/aicr/pkg/helm"
+	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
@@ -50,22 +49,6 @@ const nvsentinelObservabilityTestEndpoint = "otel-collector.example:4317"
 // bitnamilegacy default here, so this string also guards the override:
 // dropping it renders the chart value and fails rather than shipping.
 const nvsentinelAuditInitImage = "docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
-
-// requireHelmForObservabilityRender gates this file's live-render test on a
-// helm binary, matching pkg/bundler/deployer/argocdhelm's requireHelm: a
-// missing binary is a hard CI failure (the go-test action installs the
-// pinned version from .settings.yaml, so an absent binary means the
-// pipeline silently stopped exercising this coverage), but skips locally so
-// dev environments without helm are not broken.
-func requireHelmForObservabilityRender(t *testing.T) {
-	t.Helper()
-	if _, err := exec.LookPath("helm"); err != nil {
-		if os.Getenv("CI") != "" {
-			t.Fatal("helm is required in CI but not on PATH; the go-test action must install the pinned version from .settings.yaml (testing_tools.helm)")
-		}
-		t.Skip("helm not available; skipping live-render test")
-	}
-}
 
 // k8sVolumeMountSpec mirrors the subset of a Kubernetes container spec this
 // test needs: the audit-logging mount shape, plus the image and env the
@@ -316,7 +299,7 @@ func TestNVSentinelObservabilityChartRender(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live chart-render integration test in short mode")
 	}
-	requireHelmForObservabilityRender(t)
+	helmtest.RequireBinary(t)
 
 	registry, err := recipe.GetComponentRegistry()
 	if err != nil {

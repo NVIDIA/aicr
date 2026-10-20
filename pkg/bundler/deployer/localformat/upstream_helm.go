@@ -114,7 +114,7 @@ func writeUpstreamHelmFolder(outputDir, dir string, idx int, c Component) (Folde
 			fmt.Sprintf("create folder %s", dir), err)
 	}
 
-	if err = writeValueFiles(folderDir, c); err != nil {
+	if err = writeValueFiles(folderDir, c, true); err != nil {
 		return Folder{}, err
 	}
 

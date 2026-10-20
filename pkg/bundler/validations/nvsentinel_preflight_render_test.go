@@ -27,6 +27,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	aicrhelm "github.com/NVIDIA/aicr/pkg/helm"
+	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
@@ -259,7 +260,7 @@ func TestNVSentinelPreflightChartRender(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live chart-render integration test in short mode")
 	}
-	requireHelmForObservabilityRender(t)
+	helmtest.RequireBinary(t)
 
 	registry, err := recipe.GetComponentRegistry()
 	if err != nil {
@@ -287,7 +288,7 @@ func TestNVSentinelPreflightAbsentWithoutMixin(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live chart-render integration test in short mode")
 	}
-	requireHelmForObservabilityRender(t)
+	helmtest.RequireBinary(t)
 
 	rendered := renderNVSentinelForPreflight(t, nvsentinelPreflightResolvedValues(t, false))
 
@@ -538,7 +539,7 @@ func TestNVSentinelPreflightInitContainersMatchChart(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live chart-render integration test in short mode")
 	}
-	requireHelmForObservabilityRender(t)
+	helmtest.RequireBinary(t)
 
 	withMixin := nvsentinelPreflightResolvedValues(t, true)
 

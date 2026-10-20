@@ -20,6 +20,8 @@ package gatemanifest
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
@@ -29,19 +31,22 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// Scheduling is the bundle-level node placement a gate Job's pod is built
-// from. The gate only reads API objects, so it needs a healthy node, not the
-// gated component's node; callers pass the bundle's system-node scheduling.
+// Scheduling is the bundle's system-node placement, used for a gate whose
+// component declares no scheduling paths.
 type Scheduling struct {
 	NodeSelector map[string]string
 	Tolerations  []corev1.Toleration
 }
 
-// Placement is a validated, pre-rendered gate pod placement, built once per
-// bundle by NewPlacement. The zero value renders no placement fields.
+// Placement is a validated gate pod placement built by NewPlacement or
+// FromValues. The zero value renders no placement fields.
 type Placement struct {
-	block string
+	nodeSelector string
+	tolerations  string
 }
+
+// podSpecIndent is the column of the gate Job's pod spec fields.
+const podSpecIndent = 6
 
 // NewPlacement validates sched and renders it for the gate Job's pod spec.
 // Keyless tolerations are dropped after validation: an empty key matches every
@@ -58,17 +63,97 @@ func NewPlacement(sched Scheduling) (Placement, error) {
 			keyed = append(keyed, t)
 		}
 	}
-	if len(sched.NodeSelector) == 0 && len(keyed) == 0 {
-		return Placement{}, nil
+	var p Placement
+	var err error
+	if len(sched.NodeSelector) > 0 {
+		if p.nodeSelector, err = literalField("nodeSelector", sched.NodeSelector); err != nil {
+			return Placement{}, err
+		}
 	}
-	out, err := yaml.Marshal(struct {
-		NodeSelector map[string]string   `json:"nodeSelector,omitempty"`
-		Tolerations  []corev1.Toleration `json:"tolerations,omitempty"`
-	}{sched.NodeSelector, keyed})
+	if len(keyed) > 0 {
+		if p.tolerations, err = literalField("tolerations", keyed); err != nil {
+			return Placement{}, err
+		}
+	}
+	return p, nil
+}
+
+func literalField(name string, v any) (string, error) {
+	out, err := yaml.Marshal(map[string]any{name: v})
 	if err != nil {
-		return Placement{}, errors.Wrap(errors.ErrCodeInternal, "readiness gate: failed to marshal scheduling", err)
+		return "", errors.Wrap(errors.ErrCodeInternal, "readiness gate: failed to marshal scheduling", err)
 	}
-	return Placement{block: indentBlock(string(out), "      ") + "\n"}, nil
+	return indentBlock(string(out), strings.Repeat(" ", podSpecIndent)) + "\n", nil
+}
+
+// ValuesPaths names the dot-notation paths in the gated component's values
+// that hold its own node selector and tolerations.
+type ValuesPaths struct {
+	NodeSelector string
+	Tolerations  string
+}
+
+// valuesPathRE matches the values paths that are safe to embed in the
+// generated template.
+var valuesPathRE = regexp.MustCompile(`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$`)
+
+// FromValues returns p with each field that has a non-empty path in paths
+// read from the component's values when Helm installs the gate chart.
+// Tolerations with an empty key are skipped, as in NewPlacement. A field
+// with an empty path keeps p's placement. FromValues returns an
+// ErrCodeInvalidRequest error if a path does not match valuesPathRE.
+func (p Placement) FromValues(paths ValuesPaths) (Placement, error) {
+	if paths.NodeSelector != "" {
+		lookup, err := valuesLookup(paths.NodeSelector)
+		if err != nil {
+			return Placement{}, err
+		}
+		p.nodeSelector = valuesField("nodeSelector", paths.NodeSelector,
+			`{{- with `+lookup+` }}{{ dict "nodeSelector" . | toYaml | nindent `+strconv.Itoa(podSpecIndent)+` }}{{- end }}`)
+	}
+	if paths.Tolerations != "" {
+		lookup, err := valuesLookup(paths.Tolerations)
+		if err != nil {
+			return Placement{}, err
+		}
+		// Install-time values never pass through NewPlacement, so the
+		// template drops keyless tolerations itself.
+		p.tolerations = valuesField("tolerations", paths.Tolerations,
+			`{{- $gateTolerations := list }}`+
+				`{{- range `+lookup+` | default list }}{{- if .key }}{{- $gateTolerations = append $gateTolerations . }}{{- end }}{{- end }}`+
+				`{{- with $gateTolerations }}{{ dict "tolerations" . | toYaml | nindent `+strconv.Itoa(podSpecIndent)+` }}{{- end }}`)
+	}
+	return p, nil
+}
+
+// valuesField returns a pod spec line that Helm renders as the named field,
+// or as nothing when the value is empty.
+func valuesField(name, path, action string) string {
+	// The YAML comment survives the bundle-time YAML round-trip, and the
+	// backtick escape keeps the bundle-time render from executing the action.
+	return fmt.Sprintf("%s# %s from %s {{`%s`}}\n",
+		strings.Repeat(" ", podSpecIndent), name, path, action)
+}
+
+// valuesLookup returns a Helm expression for the value at path. If path is
+// absent, the expression reads it under the chart name, where a vendored
+// parent nests its values. valuesLookup returns an ErrCodeInvalidRequest
+// error if path does not match valuesPathRE.
+func valuesLookup(path string) (string, error) {
+	if !valuesPathRE.MatchString(path) {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("readiness gate: invalid values path %q", path))
+	}
+	segments := strings.Split(path, ".")
+	keys := make([]string, len(segments))
+	for i, s := range segments {
+		keys[i] = strconv.Quote(s)
+	}
+	digKeys := strings.Join(keys, " ")
+	// dig rejects Helm's Values type, so it walks .Values.AsMap. The
+	// bundle-time render fills in the chart name.
+	nested := "(dig `}}{{ .Chart.Name | quote }}{{` " + digKeys + " nil .Values.AsMap)"
+	return "(dig " + digKeys + " " + nested + " .Values.AsMap)", nil
 }
 
 // validate returns an error for scheduling the API server would reject.
@@ -97,12 +182,12 @@ func (s Scheduling) validate() error {
 // ServiceAccount, ConfigMap, and Job keep the bare component name — identical
 // names in distinct namespaces never collide.
 //
-// placement positions the gate pod (#2590); see NewPlacement.
+// placement sets the gate pod's node selector and tolerations.
 func Render(componentName, image string, testYAML []byte, deployer config.DeployerType, placement Placement) ([]byte, error) {
 	if componentName == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "readiness gate: empty component name")
 	}
-	scheduling := placement.block
+	scheduling := placement.nodeSelector + placement.tolerations
 
 	indented := indentBlock(string(testYAML), "    ")
 

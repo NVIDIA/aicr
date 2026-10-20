@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
 	"github.com/NVIDIA/aicr/pkg/manifest"
 	"gopkg.in/yaml.v3"
 )
@@ -246,12 +247,7 @@ func TestNVIDIADriverCRMixinIsOptInManifestOnly(t *testing.T) {
 }
 
 func TestNVIDIADriverCRManifestHelmRenderWithoutDaemonsets(t *testing.T) {
-	if _, err := exec.LookPath("helm"); err != nil {
-		if os.Getenv("CI") != "" {
-			t.Fatal("helm is required in CI but not on PATH")
-		}
-		t.Skip("helm not available; skipping Helm-semantics render test")
-	}
+	helmtest.RequireBinary(t)
 
 	ctx, store := objectMonitorStore(t)
 	body, err := store.provider.ReadFile(ctx, nvidiaDriverCRManifest)

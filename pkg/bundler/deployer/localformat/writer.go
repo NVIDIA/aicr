@@ -226,7 +226,10 @@ const (
 // Both pre- and post-phase share this path so naming, render input,
 // error handling, and writeLocalHelmFolder invocation stay in one
 // place.
-func (opts *Options) injectAuxiliaryFolder(idx int, c Component, phase injectionPhase) (*Folder, error) {
+//
+// parentDir is the component's primary folder, whose cluster-values.yaml
+// a readiness folder layers. It must be non-empty for phaseReadiness.
+func (opts *Options) injectAuxiliaryFolder(idx int, c Component, phase injectionPhase, parentDir string) (*Folder, error) {
 	var manifests map[string][]byte
 	switch phase {
 	case phasePre:
@@ -262,11 +265,19 @@ func (opts *Options) injectAuxiliaryFolder(idx int, c Component, phase injection
 	//
 	// This is keyed on the PHASE, not on the deployer: localformat still
 	// knows nothing about which deployer is consuming it.
+	clusterValuesFrom := ""
+	if phase == phaseReadiness {
+		if parentDir == "" {
+			return nil, errors.New(errors.ErrCodeInternal,
+				fmt.Sprintf("readiness folder for %q has no parent folder", c.Name))
+		}
+		clusterValuesFrom = "../" + parentDir + "/cluster-values.yaml"
+	}
 	f, err := writeLocalHelmFolder(
 		opts.OutputDir, auxDir, idx, c,
 		manifests, renderInputFor(c),
 		auxName, c.Name, true, stampFor(c, opts.AICRVersion),
-		phase == phaseReadiness,
+		phase == phaseReadiness, clusterValuesFrom,
 	)
 	if err != nil {
 		return nil, err
@@ -449,7 +460,7 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 		// pods schedule. Runs regardless of vendored/non-vendored mode
 		// and regardless of primary kind (upstream-helm, local-helm, or
 		// kustomize).
-		if pf, err := opts.injectAuxiliaryFolder(idx, c, phasePre); err != nil {
+		if pf, err := opts.injectAuxiliaryFolder(idx, c, phasePre, ""); err != nil {
 			return WriteResult{}, err
 		} else if pf != nil {
 			folders = append(folders, *pf)
@@ -486,7 +497,7 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 			// Post-injection: recipe-side manifests as a tracked -post
 			// release installed after the vendored subchart, so manifests
 			// referencing the chart's CRDs apply once those CRDs exist.
-			if pf, err := opts.injectAuxiliaryFolder(idx, c, phasePost); err != nil {
+			if pf, err := opts.injectAuxiliaryFolder(idx, c, phasePost, dir); err != nil {
 				return WriteResult{}, err
 			} else if pf != nil {
 				folders = append(folders, *pf)
@@ -499,7 +510,7 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 			// Readiness gate applies to vendored components too — emit it
 			// after the wrapped chart (and any -post release) so the gate
 			// Job runs once the vendored release has installed.
-			if rf, err := opts.injectAuxiliaryFolder(idx, c, phaseReadiness); err != nil {
+			if rf, err := opts.injectAuxiliaryFolder(idx, c, phaseReadiness, dir); err != nil {
 				return WriteResult{}, err
 			} else if rf != nil {
 				folders = append(folders, *rf)
@@ -529,7 +540,7 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 			// apply post-install (after helm has registered the chart's CRDs).
 			// The "mixed" concept lives only here at the bundle layer — no recipe
 			// metadata involved.
-			if pf, err := opts.injectAuxiliaryFolder(idx, c, phasePost); err != nil {
+			if pf, err := opts.injectAuxiliaryFolder(idx, c, phasePost, dir); err != nil {
 				return WriteResult{}, err
 			} else if pf != nil {
 				folders = append(folders, *pf)
@@ -582,7 +593,7 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 			f, err := writeLocalHelmFolder(opts.OutputDir, dir, idx, c,
 				manifests, renderInputFor(c),
 				c.Name, c.Name, true, stampFor(c, opts.AICRVersion),
-				false)
+				false, "")
 			if err != nil {
 				return WriteResult{}, err
 			}
@@ -594,7 +605,7 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 		// Readiness gate (non-vendored path): emit after the primary (and
 		// any -post folder) so the gate Job runs once the component's
 		// release has installed. Applies to every component kind.
-		if rf, err := opts.injectAuxiliaryFolder(idx, c, phaseReadiness); err != nil {
+		if rf, err := opts.injectAuxiliaryFolder(idx, c, phaseReadiness, dir); err != nil {
 			return WriteResult{}, err
 		} else if rf != nil {
 			folders = append(folders, *rf)
@@ -654,13 +665,20 @@ func classify(c Component, manifests map[string][]byte) FolderKind {
 // both per-folder writers (upstream-helm and local-helm) perform this
 // identical dance; keeping it in one place preserves the single-source-of-
 // truth guarantee around dynamic-values semantics.
-func writeValueFiles(folderDir string, c Component) error {
+//
+// If ownDynamic is false, cluster-values.yaml is written empty and values.yaml
+// still omits the dynamic paths.
+func writeValueFiles(folderDir string, c Component, ownDynamic bool) error {
 	split := splitDynamicPaths(c.Values, c.DynamicPaths)
 	if _, _, err := deployer.WriteValuesFile(split.static, folderDir, "values.yaml"); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("write values.yaml for %s", c.Name), err)
 	}
-	if _, _, err := deployer.WriteValuesFile(split.dynamic, folderDir, "cluster-values.yaml"); err != nil {
+	dynamic := split.dynamic
+	if !ownDynamic {
+		dynamic = nil
+	}
+	if _, _, err := deployer.WriteValuesFile(dynamic, folderDir, "cluster-values.yaml"); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("write cluster-values.yaml for %s", c.Name), err)
 	}
