@@ -54,7 +54,7 @@ linting:
   # ubuntu runners. tools/setup-tools handles local dev on other platforms.
   oasdiff_sha256_linux_amd64: '43a4e328e2d13ba1552d760aa68d2485c75c5621f309f6ff64ae895188345247'
   # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
-  golangci_lint: 'v2.14.0'
+  golangci_lint: 'v2.15.0'
   # renovate: datasource=pypi depName=yamllint depType=linting
   yamllint: '1.38.0'
   # renovate: datasource=github-releases depName=google/addlicense depType=linting
