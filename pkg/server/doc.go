@@ -53,8 +53,10 @@
 // POST/GET /v1/recipe — resolve a Recipe from criteria. GET takes the criteria
 // as query parameters. POST takes a strict envelope ({criteria, profile}) and
 // requires Content-Type: application/json or application/x-yaml; unknown
-// fields and unsupported media types are rejected. slurmAccountingMode is a
-// query parameter on both methods, not an envelope field.
+// fields and unsupported media types are rejected. slurmAccountingMode and
+// requireEvidence are query parameters on both methods, not envelope fields.
+// requireEvidence rejects a resolved recipe with no committed evidence
+// pointer. AICR_REQUIRE_EVIDENCE enables that check for the process.
 //
 // POST/GET /v1/query — resolve a hydrated value from a recipe by JSON-path
 // selector. GET takes criteria + selector via query string; POST takes a

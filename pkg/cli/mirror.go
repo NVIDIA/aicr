@@ -96,7 +96,7 @@ func mirrorListFlags() []cli.Flag {
 	// output flag.
 	filtered := make([]cli.Flag, 0, len(flags))
 	for _, f := range flags {
-		if flagMatchesName(f, flagFormat) || flagMatchesName(f, flagOutput) {
+		if flagMatchesName(f, flagFormat) || flagMatchesName(f, flagOutput) || flagMatchesName(f, flagRequireEvidence) {
 			continue
 		}
 		filtered = append(filtered, f)

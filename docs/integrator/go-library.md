@@ -1107,6 +1107,13 @@ derive step rather than the load step.
 | `RecipeOutputOptions()` | `spec.recipe.output` |
 | `SnapshotPath()` | `spec.recipe.input.snapshot` |
 | `IsCriteriaStrict()` | `spec.recipe.criteriaStrict` |
+| `IsRequireEvidence()` | `spec.recipe.requireEvidence` |
+
+`IsRequireEvidence()` is a read, like `IsCriteriaStrict()`. It does not change
+resolution. After `ResolveRecipe`, call `PublishedEvidenceRequired` to combine
+that field with a flag and `AICR_REQUIRE_EVIDENCE`, then
+`Client.RequirePublishedEvidence` when it reports true. `ResolveRecipe` itself
+does not apply the check, so bundle, mirror, and upgrade stay unaffected.
 
 All five spec sections have a derivation, and every one of them has a
 destination. `SnapshotOutputOptions()` projects `spec.snapshot.output` even

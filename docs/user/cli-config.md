@@ -81,7 +81,7 @@ default. Several booleans are tri-state for the same reason: absent means
 "inherit the CLI default", an explicit `false` is an opt-out
 (`spec.validate.execution.failOnError`, `failFast`,
 `spec.snapshot.execution.privileged`, `spec.recipe.criteriaStrict`,
-`spec.validate.evidence.*`).
+`spec.recipe.requireEvidence`, `spec.validate.evidence.*`).
 
 **Secrets are never part of the schema.** The cosign OIDC identity token used
 by attestation and evidence push is deliberately absent — supply it via the
@@ -148,6 +148,7 @@ spec:
       format: yaml                   # yaml | json | table
     data: ""                         # optional data-overlay dir/archive
     criteriaStrict: false            # reject criteria outside the embedded catalog
+    requireEvidence: false           # reject a resolved recipe with no committed pointer
 
   bundle:
     input:
@@ -273,6 +274,7 @@ exclusive** — query by criteria or derive from a snapshot, not both.
 | `output.format` | string | `yaml` \| `json` \| `table` |
 | `data` | string | Data-overlay directory/archive (same as `--data`) |
 | `criteriaStrict` | bool (tri-state) | Reject criteria values outside the embedded catalog; mirrors `--criteria-strict` / `AICR_CRITERIA_STRICT` (any of the three enables it) |
+| `requireEvidence` | bool (tri-state) | Reject a resolved recipe with no committed evidence pointer; mirrors `--require-evidence` / `AICR_REQUIRE_EVIDENCE` (any of the three enables it). A false value does not turn off an environment value that is already on. Applies to `aicr recipe` and `aicr query` |
 
 ### spec.bundle
 

@@ -118,3 +118,12 @@ func (r *RecipeSpec) IsCriteriaStrict() bool {
 	}
 	return *r.CriteriaStrict
 }
+
+// IsRequireEvidence returns spec.recipe.requireEvidence flattened to a
+// plain bool (false when unset). Mirrors the --require-evidence CLI flag.
+func (r *RecipeSpec) IsRequireEvidence() bool {
+	if r == nil || r.RequireEvidence == nil {
+		return false
+	}
+	return *r.RequireEvidence
+}

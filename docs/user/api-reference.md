@@ -132,6 +132,7 @@ Generate an optimized configuration recipe based on environment parameters.
 | `profile` | string | | Configuration profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed`). Omit to take the declaration's default. See [Profile and Slurm-accounting endpoints](#profile-and-slurm-accounting-endpoints). |
 | `slurmAccountingMode` | string | disabled | Slurm accounting database ownership: `disabled`, `customer-managed`, `aicr-provided`. Valid only with `platform=slurm`. |
 | `gkeTcpxoInterfaces` | string | | Ordered `eth1=<network>,...,eth8=<network>` GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime. Required when the resolved recipe ships that runtime (`service=gke`, `accelerator=h100`, `platform=kubeflow`). |
+| `requireEvidence` | string | | When `1`, `true`, `yes`, or `on`, reject the resolved recipe unless a committed evidence pointer exists for its id, including the selected profile value. The check is offline presence only. A pointer on a base id does not cover a profiled resolve, and a leaf that is not the embedded catalog recipe fails. `0`, `false`, `no`, and `off` leave the request unchanged. Any other value is `400`. `AICR_REQUIRE_EVIDENCE` enables the same check for the process when this parameter is absent or false. Send it as a query parameter on `GET` and `POST`. It is not a body field. |
 
 > **`service=rke2` and `accelerator=vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. See the published validation evidence at [validation.aicr.run](https://validation.aicr.run/) for current coverage.
 
@@ -227,6 +228,7 @@ curl -s -X POST "http://localhost:8080/v1/recipe" \
 - `400 Bad Request` - No criteria provided: at least one of `service`, `accelerator`, `intent`, `os`, `platform`, or `nodes` must be non-zero. An empty request returns `"no criteria provided: specify at least one of service, accelerator, intent, os, platform, nodes"`. This guard applies to `GET /v1/recipe`, `POST /v1/recipe`, `GET /v1/query`, and `POST /v1/query`.
 - `400 Bad Request` - Invalid criteria format, missing required fields, or invalid enum values
 - `400 Bad Request` - A stated criteria dimension is not honored by any applicable recipe overlay (uncovered dimension). This applies to `GET /v1/recipe`, `POST /v1/recipe`, `GET /v1/query`, and `POST /v1/query`: every dimension you state (`service`, `accelerator`, `intent`, `os`, `platform`) must be matched by at least one applied overlay, or the request fails instead of silently returning a recipe that ignores it. `nodes` is exempt — it is advisory and never required to be covered. The response's `details.uncovered` array names the offending dimension(s), the requested value, and any `validCompletions` (additional criteria that would make the request coverable). Snapshot-driven resolution (CLI `--snapshot` / Go SDK) may additionally attach `excludedOverlays` and `constraintWarnings` to the error; the HTTP API resolves from criteria only and never emits those two fields.
+- `404 Not Found` - `requireEvidence` is set (or `AICR_REQUIRE_EVIDENCE` is on) and the resolved recipe has no committed evidence pointer. The message names the resolved recipe id and links to [Recipe Health](recipe-health.md). This applies to `GET`, `HEAD`, and `POST` on `/v1/recipe`, and to `/v1/query` before selector lookup, so a missing pointer is not reported as a missing selector.
 - `405 Method Not Allowed` - Only GET, HEAD, and POST are supported; the response carries `Allow: GET, HEAD, POST`
 
 **Uncovered-Dimension Error Example:**
@@ -337,6 +339,7 @@ All GET /v1/recipe parameters are supported, plus:
 - `400 Bad Request` - No criteria provided: at least one criteria dimension (`service`, `accelerator`, `intent`, `os`, `platform`, or `nodes`) must be non-zero. Returns `"no criteria provided: specify at least one of service, accelerator, intent, os, platform, nodes"`. See the [POST /v1/recipe error responses](#post-v1recipe) entry for full details.
 - `400 Bad Request` - Omitting `selector` returns `INVALID_REQUEST`. An explicitly empty `selector=` remains valid and returns the entire hydrated recipe.
 - `400 Bad Request` - A stated criteria dimension not honored by any applicable overlay (uncovered dimension) — same `details.uncovered` shape as described in the [POST /v1/recipe error responses](#post-v1recipe) above.
+- `404 Not Found` - Selector path not found, or `requireEvidence` rejected the resolved recipe. A missing pointer is returned before selector lookup. See the [POST /v1/recipe error responses](#post-v1recipe).
 
 **Examples:**
 
