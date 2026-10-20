@@ -1516,6 +1516,10 @@ const HelmTemplateTimeout = 90 * time.Second
 // preventing a malicious or buggy chart from exhausting memory.
 const HelmTemplateOutputLimit int64 = 100 * 1024 * 1024 // 100 MiB
 
+// HelmStderrLimit caps the stderr pkg/helm.Run keeps from one helm command.
+// Run keeps the last bytes, where helm prints its Error: line.
+const HelmStderrLimit = 64 * 1024 // 64 KiB
+
 // HelmReleaseDecodeLimit caps the decompressed size of a single Helm release
 // record. The encoded record embeds the release's full rendered manifest and
 // every hook, none of which this project reads, so the cap bounds work the

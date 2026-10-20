@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -39,7 +40,7 @@ type commandFunc func(ctx context.Context, name string, args ...string) *exec.Cm
 //   - ErrCodeInternal when stdout exceeds outputLimit bytes
 //   - ErrCodeTimeout or ErrCodeCanceled when timeout or ctx ends first
 //   - ErrCodeInternal otherwise, with helm's "Error:" line in the message and
-//     the full stderr in its context
+//     the last defaults.HelmStderrLimit bytes of stderr in its context
 func Run(ctx context.Context, timeout time.Duration, outputLimit int64, args ...string) ([]byte, error) {
 	return run(ctx, exec.CommandContext, nil, timeout, outputLimit, args...)
 }
@@ -53,12 +54,13 @@ func run(ctx context.Context, command commandFunc, stdin io.Reader, timeout time
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	var stdoutBuf, stderr bytes.Buffer
+	var stdoutBuf bytes.Buffer
 	stdout := &limitedWriter{w: &stdoutBuf, limit: outputLimit}
+	stderr := &tailBuffer{limit: defaults.HelmStderrLimit}
 	cmd := command(ctx, Binary, args...)
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
-	cmd.Stderr = &stderr
+	cmd.Stderr = stderr
 
 	err := cmd.Run()
 	if err == nil {
@@ -71,11 +73,27 @@ func run(ctx context.Context, command commandFunc, stdin io.Reader, timeout time
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return stdoutBuf.Bytes(), errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, name+" did not finish")
 	}
-	detail := strings.TrimSpace(stderr.String())
+	detail := strings.TrimSpace(string(stderr.buf))
 	msg := name + " failed"
 	if summary := summarizeHelmError(detail); summary != "" {
 		msg += ": " + summary
 	}
 	return stdoutBuf.Bytes(), errors.WrapWithContext(errors.ErrCodeInternal, msg, err,
 		map[string]any{"args": strings.Join(args, " "), "stderr": detail})
+}
+
+// tailBuffer keeps the last limit bytes written to it. Write never fails,
+// because a failed write closes the pipe and kills a helm that is only
+// verbose.
+type tailBuffer struct {
+	buf   []byte
+	limit int
+}
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	t.buf = append(t.buf, p...)
+	if excess := len(t.buf) - t.limit; excess > 0 {
+		t.buf = t.buf[:copy(t.buf, t.buf[excess:])]
+	}
+	return len(p), nil
 }

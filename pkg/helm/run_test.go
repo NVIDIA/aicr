@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
@@ -36,11 +37,12 @@ const fakeHelmEnv = "AICR_FAKE_HELM"
 // fakeHelm sets how the fake helm behaves. The first field set among Hang,
 // StdoutBytes, EchoStdin and Stderr decides, and otherwise it prints Stdout.
 type fakeHelm struct {
-	Stdout      string
-	Stderr      string
-	StdoutBytes int64
-	EchoStdin   bool
-	Hang        bool
+	Stdout        string
+	Stderr        string
+	StderrPadding int // lines written to stderr before Stderr
+	StdoutBytes   int64
+	EchoStdin     bool
+	Hang          bool
 }
 
 // TestFakeHelmSubprocessHelper acts as the fake helm when fakeCommand starts
@@ -63,6 +65,9 @@ func TestFakeHelmSubprocessHelper(_ *testing.T) {
 	case f.EchoStdin:
 		_, _ = io.Copy(os.Stdout, os.Stdin)
 	case f.Stderr != "":
+		for range f.StderrPadding {
+			fmt.Fprintln(os.Stderr, "WARNING: padding")
+		}
 		fmt.Fprintln(os.Stderr, f.Stderr)
 		os.Exit(1)
 	default:
@@ -172,6 +177,52 @@ func TestRunFailureCarriesStderr(t *testing.T) {
 	}
 	if se.Context["stderr"] != "Error: boom" || se.Context["args"] != "get values x" {
 		t.Errorf("error context = %v, want stderr and args", se.Context)
+	}
+}
+
+func TestRunBoundsStderr(t *testing.T) {
+	command, _ := fakeCommand(t, fakeHelm{StderrPadding: 10_000, Stderr: "Error: boom"})
+
+	_, err := run(t.Context(), command, nil, time.Minute, 1024, "list")
+	var se *errors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("run() error = %v, want a StructuredError", err)
+	}
+	if !strings.Contains(err.Error(), "helm list failed: boom") {
+		t.Errorf("run() error = %v, want the trailing Error: line summarized", err)
+	}
+	stderr, _ := se.Context["stderr"].(string)
+	if len(stderr) > defaults.HelmStderrLimit {
+		t.Errorf("stderr context is %d bytes, want at most %d", len(stderr), defaults.HelmStderrLimit)
+	}
+	if !strings.HasSuffix(stderr, "Error: boom") {
+		t.Errorf("stderr context ends %q, want it to keep the Error: line", stderr[max(0, len(stderr)-40):])
+	}
+}
+
+func TestTailBuffer(t *testing.T) {
+	tests := []struct {
+		name   string
+		writes []string
+		want   string
+	}{
+		{"under the limit", []string{"ab", "cd"}, "abcd"},
+		{"at the limit", []string{"abcde"}, "abcde"},
+		{"one write over", []string{"abcdefg"}, "cdefg"},
+		{"spans writes", []string{"abc", "def", "gh"}, "defgh"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := &tailBuffer{limit: 5}
+			for _, w := range tt.writes {
+				if n, err := b.Write([]byte(w)); n != len(w) || err != nil {
+					t.Fatalf("Write(%q) = %d, %v, want %d, nil", w, n, err, len(w))
+				}
+			}
+			if got := string(b.buf); got != tt.want {
+				t.Errorf("buffer = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
