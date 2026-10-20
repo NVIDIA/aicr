@@ -80,13 +80,13 @@ Two gaps block a safe split today:
 - In-place migration of installed components between bundles. When a
   class change moves a component on a cluster with a deployed split, the
   supported path is **redeployment** from the newly generated set, not a
-  live handoff of the release from one owner to the other. Redeploying
+  live handoff of the release from one bundle's owner to another's. Redeploying
   core components can disrupt running workloads, so the operator
   schedules it. `split.yaml` records the class map so the change stays
   auditable. Keeping a deployed split across an AICR upgrade that
   reclassifies a component — `aicr recipe --inherit-from` reading the
   prior set's class map, as it already keeps namespaces — is follow-up
-  work, gated as described under the registry class rules.
+  work, gated as described under "Component class in the registry".
 - OCI output for split generation. Multi-artifact naming and
   partial-publish recovery are undefined; `--split` with OCI output is
   rejected in v1.
@@ -126,8 +126,8 @@ the ops Prometheus components in `monitoring`.
 This is why collision detection is not needed for the case that motivated
 the design: with a single resolution there is no representation in which two
 bundles hold the same component with different arguments. If two classes
-both need a component, one class owns it and the other depends on it across
-the bundle boundary.
+both need a component, the earlier class owns it and the later class depends
+on it across the bundle boundary.
 
 The partition is **atomic**: `--split` always generates the complete bundle
 set, never a single class in isolation. Partial generation would let two
@@ -202,7 +202,7 @@ decides borderline cases:
 |---|---|---|
 | `core` | **Platform-independent GPU execution:** a plain GPU pod can be scheduled and run correctly, including the accelerator fabric the hardware requires. Includes everything those components need to install and become ready, declared in `dependencyRefs` (including the storage driver for persistent volumes). | Without it, does a plain GPU pod (no workload platform) still run correctly? If not, it is `core`. |
 | `ops` | **Operational services:** scheduling, node health, observability, policy, inventory, and certification. An `ops` service may use GPUs and may be a prerequisite of a workload platform. | Not required by a plain GPU pod, and not a workload platform. |
-| `workload` | **Workload platforms and their supporting components:** the training, inference, and batch frameworks workloads are built on, and components that exist only to serve them. | Present because of what users run, typically selected through the `platform` criteria axis. |
+| `workload` | **Workload platforms and their supporting components:** the training, inference, and batch frameworks that workloads are built on, and components that exist only to serve them. | Present because of what users run, typically selected through the `platform` criteria axis. |
 
 "Run correctly" includes the fabric: without the accelerator's RDMA or
 EFA fabric, multi-node NCCL falls back to TCP at a fraction of its
@@ -227,10 +227,12 @@ prerequisite rule in the `core` definition:
   EBS addon is installed instead. Keeping the driver in `core` keeps
   `core` self-contained when those mixins are composed. The edge is
   declared like any other: the datastore mixins apply to every service, so
-  an EKS-only mixin composed with them adds `nvsentinel-mongodb` →
+  an EKS-only mixin, composed after them, adds `nvsentinel-mongodb` →
   `aws-ebs-csi-driver`. With the managed addon, the driver stays declared
   with `enabled: false`, and the bundler treats the edge as satisfied
-  outside the recipe. Partition validation checks the edge at bundle time.
+  outside the recipe. No catalog recipe composes these mixins, so the
+  resolved-graph guard does not see the edge; partition validation checks
+  it at bundle time.
 
 Representative assignments under these definitions:
 
@@ -245,7 +247,8 @@ Representative assignments under these definitions:
   `k8s-aibom`, and `nvcre`.
 - `workload`: `kubeflow-trainer`, `dynamo-platform`, `grove`,
   `k8s-nim-operator`, `agentgateway`, `kueue`, `topograph`, and the Slurm
-  set (Slinky, MariaDB, and the ADR-016 accounting components).
+  set (Slinky, including `slinky-drainer` and its CRDs, MariaDB, and the
+  ADR-016 accounting components).
 
 **`kai-scheduler` is `ops`.** A plain GPU pod runs on the default
 scheduler, and `kai-scheduler` is not a workload platform, so the
@@ -265,7 +268,8 @@ mechanically; placing future boundary components follows the class
 definitions above.
 
 `recipes/registry.yaml` is authoritative for every component's class, and
-`docs/user/component-catalog.md` documents the full assignment. This ADR
+`docs/user/component-catalog.md` will document the full assignment
+(Implementation Plan step 2). This ADR
 defines the rules and exceptions; it is not the per-component record.
 
 **`class` is not a criteria axis.** Criteria (`service`, `accelerator`,
@@ -311,17 +315,18 @@ prerequisites to converge (in Argo CD, `syncPolicy.retry` — automated
 sync alone does not reattempt a failed sync of the same revision, and
 self-heal only repairs live drift, so it is a complement, not a
 substitute). Separate app-of-apps with no enforced ordering is a
-supported operating model **given such a retry policy**; note
-this describes externally managed deployments — v1's own generated
-output rejects the Argo/Flux deployers until their class-derived
-identities land (see the support matrix). The v1 bridge for such models:
+supported operating model **given such a retry policy**. This describes
+externally managed deployments: v1's own generated output rejects every
+non-Helm deployer until its class-derived identities land (see the
+support matrix). The v1 bridge for such models:
 operators consume the Helm-local bundle set with their own per-class
-Application/Kustomization wrappers; AICR-generated Argo/Flux split output
+Application/Kustomization wrappers; AICR-generated non-Helm split output
 is the deferred follow-up.
 
 Retry also has limits: it covers prerequisites whose absence makes
 reconciliation *fail* (such as missing CRDs); **fail-open prerequisites**
-— ops resources that apply successfully despite a missing non-CRD
+— later-class resources (`ops` or `workload`) that apply successfully
+despite a missing non-CRD
 dependency — are not verified in v1, nor is cross-bundle version
 compatibility; a live set-identity or preflight protocol remains
 deferred.
@@ -470,7 +475,7 @@ aicr bundle --recipe recipe.yaml --split --output ./bundles
   before `ValidateProfileLock`, so rendering a class through today's
   pipeline would fail whenever another class holds a profile-locked
   component. Validating the union first preserves ADR-015 for profiled
-  recipes (all AKS and GKE recipes) without weakening the lock.
+  recipes (all AKS, GKE, and OKE recipes) without weakening the lock.
 - Dependency edges cut by the partition use the existing
   satisfied-externally semantics (the same path used when a declared
   component is disabled).
@@ -610,7 +615,7 @@ operator-managed concern (see Non-Goals).
 
 ### Deployer identities
 
-Two sub-bundles deployed to one cluster must not collide on deployer-level
+Sub-bundles deployed to one cluster must not collide on deployer-level
 identities. The rule: **sub-bundle root identities derive from the class** —
 for example, the Argo CD parent Applications `<app-name>-core`,
 `<app-name>-ops`, and `<app-name>-workload`.
@@ -640,6 +645,8 @@ combination returns a clear error, never degraded output:
 | `argocd` (local) | Rejected | Follow-up: parent Application `<app-name>-<class>` |
 | `argocd-helm` (local) | Rejected | Follow-up: same parent-Application rule |
 | `flux` (local) | Rejected | Follow-up: per-class root Kustomization |
+| `fleet` (local) | Rejected | Follow-up: per-class root GitRepo or HelmOp |
+| `terraform` (local) | Rejected | Follow-up: per-class root module |
 | Any deployer + OCI output | Rejected | Follow-up: multi-artifact naming + partial-publish recovery undefined |
 
 Enabling a rejected deployer is incremental follow-up work: wire its
@@ -750,9 +757,9 @@ if standalone class artifacts are ever pursued.
   the CPU-only rule gives GPU-aware operational services a home other
   than `core`.
 - **`apps` as the name of the third class.** Rejected in favor of
-  `workload`: `apps` suggests the user's own applications and collides
-  with Argo CD vocabulary (`<app-name>-apps` parent Applications inside
-  app-of-apps).
+  `workload`: `apps` suggests the user's own applications, and a parent
+  Application named `<app-name>-apps` is easily confused with an Argo CD
+  app-of-apps root.
 - **Per-class emission.** Rejected: emitting a single class lets two
   generation calls disagree about which bundle owns a component —
   reintroducing across calls the collision that single resolution
