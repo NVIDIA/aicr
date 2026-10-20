@@ -45,6 +45,8 @@ spec:
     - name: grove
       type: Helm
       valuesFile: components/grove/values.yaml
+      dependencyRefs:
+        - prometheus-operator-crds
 
     # Storage prerequisite: dynamo-platform's NATS JetStream StatefulSet
     # requests a PVC, and RKE2 ships no StorageClass (see the rke2 root's

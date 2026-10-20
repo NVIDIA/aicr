@@ -87,11 +87,13 @@ controller:
     # deliberately omitted — sites should add them in a leaf valuesFile.
     SelectType: "select/cons_tres"
     ScronParameters: "enable"
-  # /metrics endpoint on; ServiceMonitor stays at chart default (off)
-  # so the chart doesn't render a prometheus-operator CR on clusters
-  # without it.
+  # The chart renders no ServiceMonitor: these values pass into the
+  # Controller CR, and the slurm-operator creates the ServiceMonitor at
+  # runtime, retrying until the monitoring CRDs exist.
   metrics:
     enabled: true
+    serviceMonitor:
+      enabled: true
 
 restapi:
   replicas: 1

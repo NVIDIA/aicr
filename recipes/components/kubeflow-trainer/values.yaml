@@ -45,13 +45,6 @@ manager:
     name: ""
     annotations: {}
 
-  # Prometheus metrics
-  metrics:
-    enabled: true
-    # ServiceMonitor for Prometheus Operator
-    serviceMonitor:
-      enabled: true
-
   # Security context for pods
   podSecurityContext:
     runAsNonRoot: true
@@ -77,6 +70,8 @@ jobset:
   # Install the JobSet dependency managed by Kubeflow Trainer
   # Set to false if a JobSet controller/webhook is already installed in the cluster
   install: true
+  prometheus:
+    enable: true
 
 # Webhook configuration for TrainJob validation
 webhook:

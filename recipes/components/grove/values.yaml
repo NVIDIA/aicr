@@ -17,4 +17,6 @@
 # Installed as a standalone AICR component so the Dynamo operator can
 # reference it via global.grove.enabled: true / install: false.
 
-# No custom overrides required — chart defaults are sufficient.
+metrics:
+  serviceMonitor:
+    enabled: true

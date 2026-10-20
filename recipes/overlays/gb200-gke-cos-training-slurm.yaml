@@ -96,6 +96,7 @@ spec:
       valuesFile: components/mariadb-operator/values.yaml
       dependencyRefs:
         - mariadb-operator-crds
+        - prometheus-operator-crds
 
     - name: slurm-accounting-mariadb
       type: Helm
