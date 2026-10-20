@@ -57,6 +57,8 @@ func TestCompute_Structure(t *testing.T) {
 		{"gke", "gb200", "-", "", "nvidia-tuning-gke"},
 		{"gke", "gb300", "gb200", "", "nvidia-tuning-gke"},
 		{"gke", "h100", "-", "", "nvidia-tuning-gke"},
+		// rke2-sles pins no accelerator, so it takes the generic profile.
+		{"rke2", "*", "generic", "", "nvidia-tuned"},
 		// VR200 runs its native rke2 tuning (nvidia-tuned's rke2 service,
 		// added in nodewright-packages 0.9.0), so the profile column is
 		// not-applicable: the override accelerator matches the criteria

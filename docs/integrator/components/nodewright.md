@@ -86,13 +86,14 @@ The table below is generated from the recipes by `make tuning-docs` — **do not
 | eks     | gb300        | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.10.1     |
 | eks     | h100         | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.10.1     |
 | eks     | h200         | h100    | nvidia-setup 0.8.0 | nvidia-tuned 0.10.1     |
-| eks     | rtx-pro-6000 | generic | -                  | nvidia-tuned 0.3.2      |
+| eks     | rtx-pro-6000 | generic | -                  | nvidia-tuned 0.10.1     |
 | generic | gb300        | -       | -                  | nvidia-tuned 0.10.1     |
 | gke     | a100         | h100    | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | b200         | -       | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | gb200        | -       | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | gb300        | gb200   | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | h100         | -       | -                  | nvidia-tuning-gke 0.1.2 |
+| rke2    | *            | generic | -                  | nvidia-tuned 0.10.1     |
 | rke2    | vr200        | -       | -                  | nvidia-tuned 0.10.1     |
 
 {/* END AICR-TUNING */}
