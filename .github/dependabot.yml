@@ -70,7 +70,10 @@ updates:
         patterns:
           - "github/codeql-action*"
       # One PR per action across every directory above, rather than one per
-      # directory. A dependency joins the first group it matches, so this one
-      # stays after codeql-action.
+      # directory. Group order alone did not keep codeql-action out of this
+      # group (#3327 and #3328 bumped init and analyze separately), so it is
+      # excluded explicitly.
       actions:
         group-by: dependency-name
+        exclude-patterns:
+          - "github/codeql-action*"
