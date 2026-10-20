@@ -373,7 +373,7 @@ To keep the boundary fixed, a standing guard test validates the
 raw overlay/mixin YAML — and fails on any edge to a later class, in the
 spirit of the existing deployment-order guard tests. Prerequisites are
 declared as edges, including the storage a core component's volumes
-need, so the direction rule never depends on review.
+need.
 
 Two opt-in NVSentinel mixins declare edges from `core` to later classes:
 `nvsentinel-preflight` (`nvsentinel` → `kai-scheduler`) and
