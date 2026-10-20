@@ -61,6 +61,7 @@ func run(ctx context.Context, command commandFunc, stdin io.Reader, timeout time
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	cmd.WaitDelay = defaults.HelmWaitDelay
 
 	err := cmd.Run()
 	if err == nil {

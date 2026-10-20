@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -34,8 +35,9 @@ import (
 
 const fakeHelmEnv = "AICR_FAKE_HELM"
 
-// fakeHelm sets how the fake helm behaves. The first field set among Hang,
-// StdoutBytes, EchoStdin and Stderr decides, and otherwise it prints Stdout.
+// fakeHelm sets how the fake helm behaves. The first field set among Orphan,
+// Hang, StdoutBytes, EchoStdin and Stderr decides, and otherwise it prints
+// Stdout.
 type fakeHelm struct {
 	Stdout        string
 	Stderr        string
@@ -43,6 +45,9 @@ type fakeHelm struct {
 	StdoutBytes   int64
 	EchoStdin     bool
 	Hang          bool
+	// Orphan starts a hanging child that inherits stdout and stderr, prints
+	// its PID, then hangs if Hang is set and exits otherwise.
+	Orphan bool
 }
 
 // TestFakeHelmSubprocessHelper acts as the fake helm when fakeCommand starts
@@ -58,6 +63,18 @@ func TestFakeHelmSubprocessHelper(_ *testing.T) {
 		os.Exit(2)
 	}
 	switch {
+	case f.Orphan:
+		child := exec.Command(os.Args[0], "-test.run=^TestFakeHelmSubprocessHelper$")
+		child.Env = append(os.Environ(), fakeHelmEnv+`={"Hang":true}`)
+		child.Stdout, child.Stderr = os.Stdout, os.Stderr
+		if err := child.Start(); err != nil {
+			fmt.Fprintln(os.Stderr, "start child:", err)
+			os.Exit(2)
+		}
+		fmt.Fprintln(os.Stdout, child.Process.Pid)
+		if f.Hang {
+			time.Sleep(time.Minute)
+		}
 	case f.Hang:
 		time.Sleep(time.Minute)
 	case f.StdoutBytes > 0:
@@ -266,6 +283,40 @@ func TestRunDeadContext(t *testing.T) {
 
 			_, err := run(tt.ctx(t), command, nil, tt.timeout, 1024, "list")
 			errorstest.WantReportedCode(t, err, tt.wantCode)
+		})
+	}
+}
+
+func TestRunBoundsInheritedPipes(t *testing.T) {
+	tests := []struct {
+		name     string
+		hang     bool
+		timeout  time.Duration
+		wantCode errors.ErrorCode
+	}{
+		{"helm exits", false, time.Minute, errors.ErrCodeInternal},
+		{"helm killed at timeout", true, time.Second, errors.ErrCodeTimeout},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			command, _ := fakeCommand(t, fakeHelm{Orphan: true, Hang: tt.hang})
+
+			start := time.Now()
+			out, err := run(t.Context(), command, nil, tt.timeout, 1024, "list")
+			elapsed := time.Since(start)
+
+			pid, perr := strconv.Atoi(strings.TrimSpace(string(out)))
+			if perr != nil {
+				t.Fatalf("run() stdout = %q, want the child's PID", out)
+			}
+			if p, ferr := os.FindProcess(pid); ferr == nil {
+				_ = p.Kill()
+			}
+			errorstest.WantReportedCode(t, err, tt.wantCode)
+			// The child hangs for a minute, so only WaitDelay returns run sooner.
+			if elapsed > 30*time.Second {
+				t.Errorf("run() took %s, want it bounded by defaults.HelmWaitDelay", elapsed)
+			}
 		})
 	}
 }

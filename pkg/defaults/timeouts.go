@@ -1519,6 +1519,11 @@ const HelmTemplateOutputLimit int64 = 100 * 1024 * 1024 // 100 MiB
 // HelmStderrLimit caps the stderr pkg/helm.Run keeps from one helm command.
 const HelmStderrLimit = 64 * 1024 // 64 KiB
 
+// HelmWaitDelay bounds how long a helm command's output pipes stay open
+// after the command exits or is killed. A descendant that inherits a pipe
+// would otherwise hold it open, and the caller with it, indefinitely.
+const HelmWaitDelay = 2 * time.Second
+
 // HelmReleaseDecodeLimit caps the decompressed size of a single Helm release
 // record. The encoded record embeds the release's full rendered manifest and
 // every hook, none of which this project reads, so the cap bounds work the
