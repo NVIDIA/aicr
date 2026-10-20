@@ -181,10 +181,11 @@ Each entry in `recipes/registry.yaml` gains an optional `class` field:
   operator's change and is applied by redeployment.
 - The default applies uniformly to **external registry entries** too: an
   external `registry.yaml` entry replaces the embedded entry wholesale, so
-  a replacement for an `ops` component that omits `class` lands in `core`.
-  A replacement that intends `ops` must restate it; registry merging emits
-  a merge-time warning when an external entry replaces an embedded `ops`
-  component without declaring `class`.
+  a replacement for a non-`core` (`ops` or `workload`) component that
+  omits `class` lands in `core`. A replacement that intends a non-`core`
+  class must restate it; registry merging emits a merge-time warning when
+  an external entry replaces an embedded non-`core` component without
+  declaring `class`.
 - External entries carry `class` like embedded ones, so an internal or
   third-party catalog can classify its own components into the existing
   classes **without any public change**. Only a brand-new class *name*
@@ -207,18 +208,26 @@ decides borderline cases:
 EFA fabric, multi-node NCCL falls back to TCP at a fraction of its
 bandwidth, regardless of which platform runs on top.
 
-Two named exceptions place components in `core` that the definition
+One named exception places a component in `core` that the definition
 alone would not:
 
 - **`nvsentinel`.** A GPU pod runs without it, but its remediation
   cordons, drains, and reboots GPU nodes, which makes it part of keeping
-  the GPU runtime healthy, and it must be tested on GPU clusters. Its
-  datastore (`nvsentinel-mongodb`, `psmdb-operator`) comes with it.
-- **Storage drivers that core needs**, such as `aws-ebs-csi-driver`. The
-  NVSentinel datastore requests persistent volumes, which on EKS cannot be
-  provisioned without the bundled EBS driver. This dependency is implicit
-  — it does not appear in `dependencyRefs` — so it is found by review,
-  not by the direction guard.
+  the GPU runtime healthy, and it must be tested on GPU clusters.
+
+The rest of the NVSentinel set follows from that exception and the
+implicit-prerequisite rule in the `core` definition:
+
+- **Its datastore** (`nvsentinel-mongodb`, `psmdb-operator`), which the
+  opt-in `nvsentinel-observe`, `nvsentinel-quarantine`, and
+  `nvsentinel-remediation` mixins add.
+- **The storage driver those volumes need,** such as
+  `aws-ebs-csi-driver`. The datastore requests persistent volumes, which
+  on EKS are provisioned by the bundled EBS driver unless the EKS-managed
+  EBS addon is installed instead. Keeping the driver in `core` keeps
+  `core` self-contained when those mixins are composed. The dependency is
+  implicit — it does not appear in `dependencyRefs` — so it is found by
+  review, not by the direction guard.
 
 Representative assignments under these definitions:
 
@@ -247,10 +256,12 @@ resolution. The recipe count, the overlay files, and the resolved
 `RecipeResult` are identical whether or not `--split` is ever used, so the
 split adds surface linearly per class (bundle output and partition checks),
 not multiplicatively per recipe × class. The blast radius of introducing
-the field is correspondingly small: with `core` as the default, existing
-registry entries need no edits beyond the handful classified as `ops`, and
-generation without `--split` remains byte-identical relative to the
-post-prerequisite catalog baseline.
+the field is correspondingly small. Authoring cost is one `class` line on
+each embedded registry entry, which the explicit-class rule requires.
+Compatibility is separate: external registries that omit `class` keep
+working through the `core` default, and generation without `--split`
+remains byte-identical relative to the post-prerequisite catalog
+baseline.
 
 ### Class dependency direction
 
@@ -297,8 +308,8 @@ deferred.
 
 The existing catalog violates the rule, and fixing it is a prerequisite.
 `gpu-operator` (`core`) declares `dependencyRefs` on
-`kube-prometheus-stack` (`ops`) in 35 declarations, including base,
-**across overlays and mixins**. The edge exists to guarantee the
+`kube-prometheus-stack` (`ops`) in 35 declarations **across overlays**,
+including base. The edge exists to guarantee the
 ServiceMonitor CRDs exist before its monitors are applied, and
 `kube-prometheus-stack` installs no CRDs itself (`crds.enabled: false`);
 the CRDs come from `prometheus-operator-crds`. Because `dependencyRefs`
@@ -651,9 +662,9 @@ bundles/
 ```
 
 Edges that cross a class boundary point to an earlier class and are
-treated as satisfied externally while rendering the later class:
-`kube-prometheus-stack` → `prometheus-operator-crds` (`ops` → `core`) and
-`kubeflow-trainer` → `gpu-operator` (`workload` → `core`). The complete
+treated as satisfied externally while rendering the later class — for
+example, `kube-prometheus-stack` → `prometheus-operator-crds` (`ops` →
+`core`) and `kubeflow-trainer` → `gpu-operator` (`workload` → `core`). The complete
 edges remain auditable in the set-root `recipe.yaml`. The runtime owner
 deploys `core/`, then the operations owner deploys `ops/`, then the
 platform owner deploys `workload/`.
@@ -769,9 +780,10 @@ if standalone class artifacts are ever pursued.
   PR that changes affected recipes' emitted `recipe.yaml` and checksums
   once.
 - A split set installs in class order: `core`, then `ops`, then
-  `workload`. Using a workload platform requires `ops`; for example,
-  Dynamo depends on `kai-scheduler`. `core` alone remains a complete
-  install.
+  `workload`, for whichever classes are present. Workload platforms
+  install after `ops`, and some require it; for example, Dynamo depends
+  on `kai-scheduler`. Others, such as Kubeflow Trainer, depend only on
+  `core`. `core` alone remains a complete install.
 - Single-bundle users see no artifact or output change; `--split` is
   strictly opt-in, and non-split output stays byte-identical from the
   post-prerequisite baseline onward. (One new diagnostic applies to all
