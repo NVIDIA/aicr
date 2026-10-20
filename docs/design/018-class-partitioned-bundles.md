@@ -244,6 +244,23 @@ Representative assignments under these definitions:
   `k8s-nim-operator`, `agentgateway`, `kueue`, `topograph`, and the Slurm
   set (Slinky, MariaDB, and the ADR-016 accounting components).
 
+**`kai-scheduler` is `ops`.** A plain GPU pod runs on the default
+scheduler, and `kai-scheduler` is not a workload platform, so the
+definitions place it in `ops`. Two consequences follow, and they are
+accepted:
+
+- The operations owner carries a GPU-aware scheduler, which must be
+  tested on GPU clusters. `ops` is not limited to GPU-free components.
+- `dynamo-platform` depends on `kai-scheduler`, so a Dynamo deployment
+  requires `ops`.
+
+Classification cascades along dependency edges: because a component may
+depend only on its own or an earlier class, classifying one component can
+force its dependents into later classes or its dependencies into earlier
+ones. The resolved-graph guard catches a violating assignment
+mechanically; placing future boundary components follows the class
+definitions above.
+
 `recipes/registry.yaml` is authoritative for every component's class, and
 `docs/user/component-catalog.md` documents the full assignment. This ADR
 defines the rules and exceptions; it is not the per-component record.
@@ -675,21 +692,6 @@ earlier class is likewise an operator decision that `split.yaml` makes
 auditable but v1 does not mechanically verify.
 
 ## Open Questions
-
-**`ops` ownership of `kai-scheduler`.** `ops` is no longer limited to
-GPU-free components, and `kai-scheduler` is a GPU-aware scheduler that
-`dynamo-platform` depends on. Placing it in `ops` means the operations
-owner carries a GPU-dependent scheduler, and every Dynamo deployment
-requires `ops`. This is to be confirmed with the first consumer, whose
-operations stack has so far been verified on CPU-only clusters, before
-the registry classification lands.
-
-Classification also cascades along dependency edges: because a component
-may depend only on its own or an earlier class, classifying one component
-can force its dependents into later classes or its dependencies into
-earlier ones. The resolved-graph guard catches a violating assignment
-mechanically; deciding which placement is *right* for future boundary
-components is applied through the class definitions above.
 
 **Component required-ness under standalone class artifacts.**
 [#2181](https://github.com/NVIDIA/aicr/issues/2181) as implemented adds no
