@@ -720,29 +720,22 @@ auditable but v1 does not mechanically verify.
 
 ## Open Questions
 
-**Required components in standalone class artifacts.**
-[#2181](https://github.com/NVIDIA/aicr/issues/2181) as implemented adds no
-presence-requirement property to `registry.yaml`: it configures NVSentinel from the
-existing ADR-015 `gpuStack` profile, which pins that component's presence
-through the profile's existing synthetic presence marker. Consistent with
-the alternative rejected below, reselection still never adds or removes a
-component: NVSentinel is referenced by every value of the declaration. There
-is no `requirePresence` field and no registry-level skippability to
-coordinate the `class` field against.
+None blocks v1. One question is deferred with standalone class artifacts
+(see Non-Goals).
 
-This ADR's v1 is unaffected, because it validates the complete resolved
-recipe before partitioning and partitions only for rendering. A component
-omitted from one class directory is still present in the verified bundle
-set — absent from a directory, not absent from the generated set — so
-profile-locked presence and the `class` cut do not interact.
+**Required components in standalone class artifacts.** v1 validates the
+complete resolved recipe before partitioning and partitions only for
+rendering. A component omitted from one class directory is still present
+in the generated set, so profile-locked presence (ADR-015, as #2181 uses
+it for NVSentinel through the `gpuStack` profile) and the `class` cut do
+not interact. There is no `requirePresence` field to coordinate `class`
+against.
 
-The two axes would meet only if a future revision emitted a class artifact
-as a **standalone** deployable rather than one member of a co-deployed set.
-Such an artifact would have to prove that every profile-required component
-it omits is supplied by a compatible sibling bundle — today's whole-union
-validation gives that for free, and a standalone artifact would not. That
-proof obligation, not a registry property, is the thing to design against
-if standalone class artifacts are ever pursued.
+A standalone class artifact would lose that guarantee. It would have to
+prove that every profile-required component it omits is supplied by a
+compatible sibling bundle. That proof obligation, not a registry
+property, is what to design against if standalone class artifacts are
+ever pursued.
 
 ## Alternatives Considered
 
