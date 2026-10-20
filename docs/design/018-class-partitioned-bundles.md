@@ -306,22 +306,28 @@ models exist where no ordering between bundles can be enforced at all. In
 the DGXC Runtime, for example, the runtime and operations stacks deploy as
 separate Argo CD app-of-apps with no enforceable ordering between them.
 The class install order therefore binds only the sequential Helm
-`deploy.sh` path. In an externally managed, reconciliation-based model,
-each class converges independently and cut edges are not enforced — but
-convergence is not free: a sync that races a missing prerequisite (such
-as CRDs) fails rather than waits, so the operating model must configure a
-**failed-sync retry policy** with a retry window long enough for
-prerequisites to converge (in Argo CD, `syncPolicy.retry` — automated
-sync alone does not reattempt a failed sync of the same revision, and
-self-heal only repairs live drift, so it is a complement, not a
-substitute). Separate app-of-apps with no enforced ordering is a
-supported operating model **given such a retry policy**. This describes
-externally managed deployments: v1's own generated output rejects every
-non-Helm deployer until its class-derived identities land (see the
-support matrix). The v1 bridge for such models:
-operators consume the Helm-local bundle set with their own per-class
-Application/Kustomization wrappers; AICR-generated non-Helm split output
-is the deferred follow-up.
+`deploy.sh` path.
+
+In an externally managed, reconciliation-based model, each class converges
+independently and cut edges are not enforced. Convergence is not free:
+
+- A sync that races a missing prerequisite (such as CRDs) fails rather
+  than waits.
+- The operating model must therefore configure a **failed-sync retry
+  policy** with a window long enough for prerequisites to converge. In
+  Argo CD that is `syncPolicy.retry`.
+- Automated sync alone does not reattempt a failed sync of the same
+  revision, and self-heal only repairs live drift, so they complement
+  retry rather than replace it.
+- Separate app-of-apps with no enforced ordering is a supported operating
+  model **given such a retry policy**.
+
+This describes externally managed deployments: v1's own generated output
+rejects every non-Helm deployer until its class-derived identities land
+(see the support matrix). The v1 bridge is for operators to consume the
+Helm-local bundle set with their own per-class Application or
+Kustomization wrappers. AICR-generated non-Helm split output is the
+deferred follow-up.
 
 Retry also has limits: it covers prerequisites whose absence makes
 reconciliation *fail* (such as missing CRDs); **fail-open prerequisites**
@@ -360,8 +366,9 @@ component (`nvsentinel` already declares that direct edge; see
 while the ops Prometheus *scrapes* those monitors at runtime, an
 ops-consumes-core flow with no install edge at all. If ops is absent,
 core runs fully; its metrics are simply not collected yet. A runtime flow
-can also run toward a later class: `dynamo-platform`'s planner reads
-metrics from the `ops` Prometheus, which needs no install edge but does
+can also run toward a later class: metrics flow from the `ops`
+Prometheus to the `workload` planner in `dynamo-platform`, which needs no
+install edge but does
 mean planner-driven autoscaling has no metrics source until `ops` is
 installed.
 
@@ -384,9 +391,12 @@ Two opt-in NVSentinel mixins declare edges from `core` to later classes:
 `nvsentinel-preflight` (`nvsentinel` → `kai-scheduler`) and
 `nvsentinel-slinky-drainer` (`nvsentinel` → `slinky-drainer` and its
 CRDs). They are composed only onto operators' own leaf overlays, so no
-catalog recipe carries them and the guard does not see them. Recipes that
-compose either mixin cannot use `--split` in v1; partition validation
-rejects the edge at bundle time. Pulling a scheduler or Slurm into
+catalog recipe carries them and the guard does not see them. Under the
+embedded classification, recipes that compose either mixin cannot use
+`--split` in v1: partition validation rejects the edge at bundle time.
+The check is on the edge, not the mixin name, so an external registry
+that places both ends in compatible classes (for example `kai-scheduler`
+in `core`) removes the rejection. Pulling a scheduler or Slurm into
 `core` to accommodate them would undo the narrow `core` definition.
 
 ### Configurable classes
@@ -487,11 +497,17 @@ aicr bundle --recipe recipe.yaml --split --output ./bundles
 
 Before writing any output, `--split` rejects:
 
-- a component assigned to an unknown class (assignment is total and
-  single-valued by construction: one registry field with a default);
+- a component assigned to an unknown class (for registered components,
+  assignment is total and single-valued by construction: one registry
+  field with a default);
+- a component with no registry entry, such as a fully specified Helm ref
+  in a hand-authored recipe. `--split` asks the operator to register it,
+  for example through a `--data` registry entry that declares its
+  `class`. Ordinary bundling keeps its existing behavior for such refs;
 - any dependency edge to a later class in the resolved recipe (which also
-  excludes class-level cycles), including the two opt-in NVSentinel
-  mixins described under Class dependency direction;
+  excludes class-level cycles), including, under the embedded
+  classification, the edges of the two opt-in NVSentinel mixins described
+  under Class dependency direction;
 - an OCP recipe (`criteria.service: ocp`). OCP split is out of v1 scope
   (see Non-Goals) and is rejected explicitly rather than relying on the
   all-disabled rule below;
@@ -584,10 +600,12 @@ extension of existing behavior. Failure-path tests are specified with
 the implementation.
 
 `split.yaml` is **audit metadata only**: it records the set's
-`recipeDigest` — computed over the emitted set-root `recipe.yaml`, using
-the same canonicalization as `evidence/attestation.SubjectDigest` — the
-class of every component, and the class ordering contract (core, then
-ops, then workload). `recipeDigest` plus the class map identify the **resolved recipe and
+`recipeDigest`, the class of every component, and the class ordering
+contract (core, then ops, then workload). `recipeDigest` is computed over
+the emitted set-root `recipe.yaml` with
+`evidence/attestation.SubjectDigestV3`, the canonicalization new recipe
+evidence uses (it excludes `metadata.version`), so it matches the subject
+of current recipe evidence. `recipeDigest` plus the class map identify the **resolved recipe and
 its partition**, not the rendered payload: bundle-time inputs (`--set`,
 typed overrides, scheduling settings) land in the extracted component
 values, not in `recipe.yaml`, so two invocations can share a
@@ -702,9 +720,9 @@ auditable but v1 does not mechanically verify.
 
 ## Open Questions
 
-**Component required-ness under standalone class artifacts.**
+**Required components in standalone class artifacts.**
 [#2181](https://github.com/NVIDIA/aicr/issues/2181) as implemented adds no
-required-ness property to `registry.yaml`: it configures NVSentinel from the
+presence-requirement property to `registry.yaml`: it configures NVSentinel from the
 existing ADR-015 `gpuStack` profile, which pins that component's presence
 through the profile's existing synthetic presence marker. Consistent with
 the alternative rejected below, reselection still never adds or removes a
@@ -715,7 +733,7 @@ coordinate the `class` field against.
 This ADR's v1 is unaffected, because it validates the complete resolved
 recipe before partitioning and partitions only for rendering. A component
 omitted from one class directory is still present in the verified bundle
-set — absent from a directory, not absent from the deployment — so
+set — absent from a directory, not absent from the generated set — so
 profile-locked presence and the `class` cut do not interact.
 
 The two axes would meet only if a future revision emitted a class artifact
@@ -768,8 +786,9 @@ if standalone class artifacts are ever pursued.
   recipe would still always yield the same partition, so the cross-call
   collision does not arise. The reasons to wait are elsewhere:
   - class would become part of resolution — merged through overlays and
-    mixins and recorded in `recipe.yaml` to stay auditable — undoing the
-    "class is not a criteria axis" simplicity; and
+    mixins — and part of the serialized `recipe.yaml` schema, to stay
+    auditable. It would still not be a criteria axis, but it would no
+    longer be a label read only at bundle time; and
   - no consumer needs it yet: the closest candidate, OCP's monitoring
     stack, already uses separate `-ocp` component variants, which can
     carry their own registry class.
@@ -797,9 +816,11 @@ if standalone class artifacts are ever pursued.
   `core`. `core` alone remains a complete install.
 - Classes separate ownership, not runtime coupling: a component may still
   rely on another class at runtime, as Dynamo does on `kai-scheduler`.
-  Compatibility is verified only within one generated set, so owners
-  coordinate version changes through that set rather than upgrading
-  their class independently.
+  Generation validates the complete configuration of one set together,
+  against catalog constraints and component checks; it does not establish
+  runtime compatibility in general, and nothing checks a class upgraded
+  on its own. Owners coordinate version changes through a newly generated
+  set rather than upgrading their class independently.
 - Single-bundle users see no artifact or output change; `--split` is
   strictly opt-in, and non-split output stays byte-identical from the
   post-prerequisite baseline onward. (One new diagnostic applies to all
