@@ -146,6 +146,15 @@ jobs:
             kubectl -n nvsentinel logs statefulset/nvsentinel-mongodb-rs0 -c "$c" --previous --tail=200
             kubectl -n nvsentinel logs statefulset/nvsentinel-mongodb-rs0 -c "$c" --tail=100
           done
+          # The container entrypoint captures `mongod --version` in a pipeline
+          # under set -e and pipefail, so a failing mongod exits 1 with no
+          # output. Run it from the node's image cache, which keys a tag@digest
+          # reference by digest alone.
+          img=$(kubectl -n nvsentinel get pod nvsentinel-mongodb-rs0-0 \
+            -o jsonpath='{.spec.containers[?(@.name=="mongod")].image}')
+          docker exec "${cluster}-control-plane" ctr -n k8s.io run --rm --user 1001 \
+            "${img%%:*}@${img##*@}" mongod-version-probe mongod --version
+          echo "mongod --version exit code: $?"
           kubectl -n nvsentinel get events --sort-by=.lastTimestamp
           # The Kind node shares the runner's kernel, so a container killed by a
           # signal or the OOM killer is logged here.
