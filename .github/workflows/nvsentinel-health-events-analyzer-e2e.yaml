@@ -138,7 +138,18 @@ jobs:
           done
           kubectl -n nvsentinel logs daemonset/platform-connectors --tail=200
           kubectl -n nvsentinel logs deployment/psmdb-operator --tail=200
-          kubectl -n nvsentinel logs statefulset/nvsentinel-mongodb-rs0 -c mongod --tail=100
+          kubectl -n nvsentinel get perconaservermongodb nvsentinel-mongodb -o yaml
+          kubectl -n nvsentinel describe pod -l app.kubernetes.io/instance=nvsentinel-mongodb
+          # Per container: --all-containers with --previous stops at the first
+          # container that never restarted.
+          for c in mongod mongodb-exporter; do
+            kubectl -n nvsentinel logs statefulset/nvsentinel-mongodb-rs0 -c "$c" --previous --tail=200
+            kubectl -n nvsentinel logs statefulset/nvsentinel-mongodb-rs0 -c "$c" --tail=100
+          done
+          kubectl -n nvsentinel get events --sort-by=.lastTimestamp
+          # The Kind node shares the runner's kernel, so a container killed by a
+          # signal or the OOM killer is logged here.
+          sudo dmesg -T | tail -n 200
 
       - name: Delete Kind cluster
         if: ${{ always() }}
