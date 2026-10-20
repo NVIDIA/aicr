@@ -20,6 +20,11 @@
 # Fields:
 #   name:              Component identifier used in recipes (e.g., "gpu-operator")
 #   displayName:       Human-readable name for templates and output
+#   class:             Bundle class (ADR-018): core, ops, or workload, ordered
+#                      core < ops < workload. A component may depend only on
+#                      its own class or an earlier one. Every entry here
+#                      declares it; an external registry entry that omits it
+#                      is core.
 #   valueOverrideKeys: Alternative keys for --set flag (e.g., --set gpuoperator:key=value)
 #   helm:              Default Helm chart settings (for Helm components)
 #     defaultRepository: Helm repository URL
@@ -52,6 +57,7 @@ kind: ComponentRegistry
 components:
   - name: nfd
     displayName: Node Feature Discovery
+    class: core
     valueOverrideKeys:
       - nfd
     healthCheck:
@@ -87,6 +93,7 @@ components:
 
   - name: gpu-operator
     displayName: gpu-operator
+    class: core
     valueOverrideKeys:
       - gpuoperator
     # Default chart sets priorityClassName: system-node-critical on the
@@ -168,6 +175,7 @@ components:
     # Bundled NFD supplies the CRD used by this chart's NodeFeatureRule template.
     hasSelfRefCRDs: true
     displayName: network-operator
+    class: core
     valueOverrideKeys:
       - networkoperator
     # Overlays attach NicClusterPolicy CRs (mellanox.com API group) as
@@ -209,6 +217,7 @@ components:
 
   - name: gke-nccl-tcpxo
     displayName: gke-nccl-tcpxo
+    class: core
     valueOverrideKeys:
       - gkenccltcpxo
     healthCheck:
@@ -225,6 +234,7 @@ components:
   # injects them into pods via NRI; DeviceClass mlnx-cx9.
   - name: dranet
     displayName: dranet
+    class: core
     valueOverrideKeys:
       - dranet
     healthCheck:
@@ -243,6 +253,7 @@ components:
   # tolerations flow through.
   - name: gcp-driver-installer
     displayName: gcp-driver-installer
+    class: core
     valueOverrideKeys:
       - gcpdriverinstaller
     healthCheck:
@@ -263,6 +274,7 @@ components:
   # this only ships the gIB installer DaemonSet.
   - name: gke-gb200-rdma
     displayName: gke-gb200-rdma
+    class: core
     valueOverrideKeys:
       - gkegb200rdma
     nodeScheduling:
@@ -280,6 +292,7 @@ components:
 
   - name: aws-efa
     displayName: aws-efa
+    class: core
     valueOverrideKeys:
       - awsefa
       - efa
@@ -300,6 +313,7 @@ components:
 
   - name: cert-manager
     displayName: cert-manager
+    class: core
     valueOverrideKeys:
       - certmanager
     healthCheck:
@@ -325,6 +339,7 @@ components:
 
   - name: node-problem-detector
     displayName: Node Problem Detector
+    class: ops
     valueOverrideKeys:
       - npd
       - nodeproblemdetector
@@ -357,6 +372,7 @@ components:
 
   - name: nodewright-operator
     displayName: nodewright
+    class: core
     valueOverrideKeys:
       - nodewright
       - skyhook
@@ -403,6 +419,7 @@ components:
 
   - name: nodewright-customizations
     displayName: nodewright-customizations
+    class: core
     valueOverrideKeys:
       - nodewrightcustomizations
       - skyhookcustomizations
@@ -474,6 +491,7 @@ components:
     ownsCRDsExcludeSubcharts:
       - mongodb-store
     displayName: nvsentinel
+    class: core
     upgrades:
       file: components/nvsentinel/upgrades.yaml
     valueOverrideKeys:
@@ -724,6 +742,7 @@ components:
   # upgrades one minor at a time.
   - name: psmdb-operator
     displayName: Percona Operator for MongoDB
+    class: core
     # Sole owner of the psmdb.percona.com CRDs; none uses webhook conversion.
     ownsCRDs: true
     valueOverrideKeys:
@@ -747,6 +766,7 @@ components:
 
   - name: nvsentinel-mongodb
     displayName: NVSentinel MongoDB
+    class: core
     valueOverrideKeys:
       - nvsentinelmongodb
     healthCheck:
@@ -794,6 +814,7 @@ components:
   # manifest-only wrapper).
   - name: slinky-drainer-crds
     displayName: slinky-drainer-crds
+    class: workload
     valueOverrideKeys:
       - slinkydrainercrds
     healthCheck:
@@ -806,6 +827,7 @@ components:
 
   - name: slinky-drainer
     displayName: slinky-drainer
+    class: workload
     valueOverrideKeys:
       - slinkydrainer
     healthCheck:
@@ -825,6 +847,7 @@ components:
 
   - name: nvidia-dra-driver-gpu
     displayName: nvidia-dra-driver-gpu
+    class: core
     valueOverrideKeys:
       - dradriver
     healthCheck:
@@ -856,6 +879,7 @@ components:
   # tolerations are injected.
   - name: dra-node-labeler
     displayName: dra-node-labeler
+    class: core
     valueOverrideKeys:
       - dranodelabeler
     healthCheck:
@@ -872,6 +896,7 @@ components:
 
   - name: prometheus-operator-crds
     displayName: prometheus-operator-crds
+    class: core
     valueOverrideKeys:
       - prometheusoperatorcrds
     healthCheck:
@@ -895,6 +920,7 @@ components:
 
   - name: kube-prometheus-stack
     displayName: kube-prometheus-stack
+    class: ops
     valueOverrideKeys:
       - prometheus
       - kubeprometheusstack
@@ -948,6 +974,7 @@ components:
 
   - name: prometheus-adapter
     displayName: prometheus-adapter
+    class: ops
     valueOverrideKeys:
       - prometheusadapter
     healthCheck:
@@ -967,6 +994,7 @@ components:
 
   - name: aws-ebs-csi-driver
     displayName: aws-ebs-csi-driver
+    class: core
     valueOverrideKeys:
       - ebscsidriver
       - awsebscsidriver
@@ -993,6 +1021,7 @@ components:
 
   - name: k8s-ephemeral-storage-metrics
     displayName: k8s-ephemeral-storage-metrics
+    class: ops
     valueOverrideKeys:
       - k8sephemeralstoragemetrics
     healthCheck:
@@ -1014,6 +1043,7 @@ components:
     # Sole owner of its CRDs and no webhook conversion (audited, #2264).
     ownsCRDs: true
     displayName: k8s-aibom
+    class: ops
     valueOverrideKeys:
       - k8saibom
       - aibom
@@ -1043,6 +1073,7 @@ components:
     upgrades:
       file: components/kai-scheduler/upgrades.yaml
     displayName: kai-scheduler
+    class: ops
     valueOverrideKeys:
       - kaischeduler
     # kai-scheduler ships Queue (scheduling.run.ai/v2) and SchedulingShard
@@ -1070,6 +1101,7 @@ components:
 
   - name: grove
     displayName: grove
+    class: workload
     valueOverrideKeys:
       - grove
     # Upgrading from v0.1.0-alpha.8 (or earlier) requires a CRD migration --
@@ -1098,6 +1130,7 @@ components:
     upgrades:
       file: components/dynamo-platform/upgrades.yaml
     displayName: dynamo-platform
+    class: workload
     valueOverrideKeys:
       - dynamoplatform
       - dynamo
@@ -1120,6 +1153,7 @@ components:
 
   - name: agentgateway-crds
     displayName: agentgateway-crds
+    class: workload
     valueOverrideKeys:
       - agentgatewaycrds
     healthCheck:
@@ -1144,6 +1178,7 @@ components:
 
   - name: agentgateway
     displayName: agentgateway
+    class: workload
     valueOverrideKeys:
       - agentgateway
     healthCheck:
@@ -1165,6 +1200,7 @@ components:
 
   - name: k8s-nim-operator
     displayName: k8s-nim-operator
+    class: workload
     valueOverrideKeys:
       - nimoperator
       - nim
@@ -1185,6 +1221,7 @@ components:
 
   - name: kueue
     displayName: kueue
+    class: workload
     valueOverrideKeys:
       - kueue
     healthCheck:
@@ -1220,6 +1257,7 @@ components:
 
   - name: kubeflow-trainer
     displayName: kubeflow-trainer
+    class: workload
     valueOverrideKeys:
       - kubeflowtrainer
       - trainer
@@ -1321,6 +1359,7 @@ components:
   # No shipped overlay references this component (TestNVCRERegisteredWithoutOverlay).
   - name: nvcre
     displayName: NVIDIA Cluster Readiness Engine
+    class: ops
     ownsCRDs: true
     valueOverrideKeys:
       - nvcre
@@ -1362,6 +1401,7 @@ components:
 
   - name: slinky-slurm-operator-crds
     displayName: slinky-slurm-operator-crds
+    class: workload
     valueOverrideKeys:
       - slinkyslurmoperatorcrds
       - slurmoperatorcrds
@@ -1382,6 +1422,7 @@ components:
 
   - name: mariadb-operator-crds
     displayName: MariaDB Operator CRDs
+    class: workload
     valueOverrideKeys:
       - mariadboperatorcrds
     healthCheck:
@@ -1397,6 +1438,7 @@ components:
 
   - name: mariadb-operator
     displayName: MariaDB Operator
+    class: workload
     valueOverrideKeys:
       - mariadboperator
     healthCheck:
@@ -1429,6 +1471,7 @@ components:
 
   - name: slurm-accounting-mariadb
     displayName: Slurm Accounting MariaDB
+    class: workload
     valueOverrideKeys:
       - slurmaccountingmariadb
     healthCheck:
@@ -1460,6 +1503,7 @@ components:
 
   - name: slinky-slurm-operator
     displayName: slinky-slurm-operator
+    class: workload
     # Short alias `slurm` routes to the operator; the cluster chart
     # (slinky-slurm below) uses the distinct alias `slurmcluster`.
     valueOverrideKeys:
@@ -1493,6 +1537,7 @@ components:
 
   - name: slinky-slurm
     displayName: slinky-slurm
+    class: workload
     # Cluster instance chart; declared inline per slurm leaf overlay so
     # each leaf can carry its own GPU/GRES tuning (mirrors the
     # dynamo-platform pattern in inference-dynamo leaves).
@@ -1549,6 +1594,7 @@ components:
 
   - name: slinky-topograph
     displayName: slinky-topograph
+    class: workload
     valueOverrideKeys:
       - slinkytopograph
     healthCheck:
@@ -1586,6 +1632,7 @@ components:
   # with slinky-topograph; bump both together.
   - name: topograph
     displayName: topograph
+    class: workload
     valueOverrideKeys:
       - topograph
     healthCheck:
@@ -1617,6 +1664,7 @@ components:
     # Sole owner of its CRDs and no webhook conversion (audited, #2264).
     ownsCRDs: true
     displayName: Gatekeeper
+    class: ops
     valueOverrideKeys:
       - gatekeeper
     healthCheck:
@@ -1656,6 +1704,7 @@ components:
 
   - name: gpu-operator-ocp-olm
     displayName: GPU Operator OCP (OLM)
+    class: core
     valueOverrideKeys:
       - gpuoperatorocpolm
     healthCheck:
@@ -1666,6 +1715,7 @@ components:
 
   - name: gpu-operator-ocp
     displayName: GPU Operator OCP (CR)
+    class: core
     valueOverrideKeys:
       - gpuoperatorocp
     healthCheck:
@@ -1685,6 +1735,7 @@ components:
         severity: error
   - name: network-operator-ocp-olm
     displayName: Network Operator OCP (OLM)
+    class: core
     valueOverrideKeys:
       - networkoperatorocpolm
     healthCheck:
@@ -1695,6 +1746,7 @@ components:
 
   - name: network-operator-ocp
     displayName: Network Operator OCP (CR)
+    class: core
     valueOverrideKeys:
       - networkoperatorocp
     healthCheck:
@@ -1705,6 +1757,7 @@ components:
 
   - name: nfd-ocp-olm
     displayName: Node Feature Discovery OCP (OLM)
+    class: core
     valueOverrideKeys:
       - nfdocpolm
     healthCheck:
@@ -1715,6 +1768,7 @@ components:
 
   - name: nfd-ocp
     displayName: Node Feature Discovery OCP (CR)
+    class: core
     healthCheck:
       assertFile: checks/nfd-ocp/health-check.yaml
     valueOverrideKeys:
@@ -1725,6 +1779,7 @@ components:
 
   - name: cert-manager-ocp-olm
     displayName: cert-manager OCP (OLM)
+    class: core
     valueOverrideKeys:
       - certmanagerocpolm
     healthCheck:
@@ -1735,6 +1790,7 @@ components:
 
   - name: cert-manager-ocp
     displayName: cert-manager OCP (CR)
+    class: core
     valueOverrideKeys:
       - certmanagerocp
     healthCheck:
@@ -1751,6 +1807,7 @@ components:
 
   - name: prometheus-adapter-ocp
     displayName: Prometheus Adapter OCP
+    class: ops
     valueOverrideKeys:
       - prometheusadapterocp
     healthCheck:
@@ -1770,6 +1827,7 @@ components:
 
   - name: nvidia-dra-driver-gpu-ocp
     displayName: nvidia-dra-driver-gpu OCP
+    class: core
     valueOverrideKeys:
       - dradriverocp
     healthCheck:
@@ -1798,6 +1856,7 @@ components:
 
   - name: k8s-nim-operator-ocp
     displayName: k8s-nim-operator OCP
+    class: workload
     valueOverrideKeys:
       - nimoperatorocp
       - nimocp

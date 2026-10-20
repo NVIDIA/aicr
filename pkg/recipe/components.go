@@ -48,6 +48,39 @@ type ComponentRegistry struct {
 	byName map[string]*ComponentConfig
 }
 
+// ComponentClass is the bundle class a registry component belongs to
+// (ADR-018). The classes are totally ordered core < ops < workload, the
+// order of ComponentClasses: a component may depend only on components of
+// its own class or an earlier one, a split set installs the classes in that
+// order, and core alone is a complete install. The zero value means core, so
+// a registry that predates the field loads unchanged; the embedded registry
+// declares the class on every entry.
+type ComponentClass string
+
+const (
+	// ComponentClassCore is platform-independent GPU execution: what a plain
+	// GPU pod needs to be scheduled and run correctly, including the
+	// accelerator fabric, and the prerequisites those components declare.
+	ComponentClassCore ComponentClass = "core"
+	// ComponentClassOps is operational services: scheduling, node health,
+	// observability, policy, inventory, and certification.
+	ComponentClassOps ComponentClass = "ops"
+	// ComponentClassWorkload is workload platforms and the components that
+	// exist only to serve them.
+	ComponentClassWorkload ComponentClass = "workload"
+)
+
+// ComponentClasses lists every class in install order. It is the single
+// source of the class ordering.
+var ComponentClasses = []ComponentClass{ComponentClassCore, ComponentClassOps, ComponentClassWorkload}
+
+// Rank is the class's position in ComponentClasses; a lower rank installs
+// first. The second result is false for a name that is not a class.
+func (c ComponentClass) Rank() (int, bool) {
+	i := slices.Index(ComponentClasses, c)
+	return i, i >= 0
+}
+
 // ComponentConfig defines the bundler configuration for a component.
 // This replaces the per-component Go packages with declarative YAML.
 type ComponentConfig struct {
@@ -56,6 +89,10 @@ type ComponentConfig struct {
 
 	// DisplayName is the human-readable name used in templates and output.
 	DisplayName string `yaml:"displayName"`
+
+	// Class is the component's bundle class; read it through GetClass, which
+	// applies the core default.
+	Class ComponentClass `yaml:"class,omitempty"`
 
 	// ValueOverrideKeys are alternative keys for --set flag matching.
 	// Example: ["gpuoperator"] allows --set gpuoperator:key=value
@@ -527,6 +564,9 @@ func loadComponentRegistryFor(provider DataProvider) (*ComponentRegistry, error)
 		if err := validateHelmDefaultDigest(comp); err != nil {
 			return nil, err
 		}
+		if err := validateComponentClass(comp); err != nil {
+			return nil, err
+		}
 	}
 
 	// Build index for fast lookup
@@ -537,6 +577,19 @@ func loadComponentRegistryFor(provider DataProvider) (*ComponentRegistry, error)
 	}
 
 	return &registry, nil
+}
+
+// validateComponentClass rejects a class name outside ComponentClasses. An
+// absent class is the core default and passes.
+func validateComponentClass(comp *ComponentConfig) error {
+	if comp.Class == "" {
+		return nil
+	}
+	if _, ok := comp.Class.Rank(); !ok {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("registry component %q declares class %q; it must be one of %v", comp.Name, comp.Class, ComponentClasses))
+	}
+	return nil
 }
 
 // helmDigestPattern is the only accepted spelling of helm.defaultDigest.
@@ -911,6 +964,15 @@ func (c *ComponentConfig) GetValidations() []ComponentValidationConfig {
 		return nil
 	}
 	return c.Validations
+}
+
+// GetClass returns the component's bundle class, ComponentClassCore when the
+// registry entry declares none.
+func (c *ComponentConfig) GetClass() ComponentClass {
+	if c == nil || c.Class == "" {
+		return ComponentClassCore
+	}
+	return c.Class
 }
 
 // GetType returns the component deployment type based on which config is present.

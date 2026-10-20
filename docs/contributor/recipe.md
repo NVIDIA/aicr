@@ -90,6 +90,7 @@ components:
 |---|---|---|---|
 | `name` | string | yes | Component identifier (matches `componentRefs[].name` in overlays) |
 | `displayName` | string | yes | Human label used in CLI output and bundle templates |
+| `class` | `ComponentClass` | embedded: yes | Bundle class (ADR-018): `core`, `ops`, or `workload`, ordered `core` < `ops` < `workload`. A component may depend only on its own class or an earlier one; `pkg/recipe.TestClassDependencyDirectionGuard` resolves every catalog leaf and fails on an edge to a later class. Every embedded entry declares it (`TestEmbeddedRegistryDeclaresClass`); an external `--data` entry that omits it is `core`. Ordinary bundling never reads it; `--split` (ADR-018) partitions by it. |
 | `valueOverrideKeys` | []string | no | Alt keys for `--set <key>:path=value` (e.g., `gpuoperator`) |
 | `helm` | `HelmConfig` | one of helm/kustomize | Chart defaults (see below) |
 | `kustomize` | `KustomizeConfig` | one of helm/kustomize | Kustomization defaults (see below) |
@@ -104,6 +105,18 @@ components:
 | `gkeCriticalPriority` | bool | no | Synthesize ResourceQuota on GKE so `system-*-critical` pods admit |
 | `hasSelfRefCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` (chart ships CRD + CR in same release) |
 | `manifestsUseChartCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` on the release carrying the attached manifests — the injected `-post` wrapper under both vendored and non-vendored layouts (manifests create CRs of CRDs the chart installs) |
+
+**Class direction and prerequisites.** Because `kube-prometheus-stack` is
+`ops` and installs no CRDs (`crds.enabled: false`), a `core` or `workload`
+component that only needs the `monitoring.coreos.com` CRDs for its
+ServiceMonitor or PodMonitor declares `dependencyRefs` on
+`prometheus-operator-crds`, not on `kube-prometheus-stack`. A component that
+reads Prometheus at runtime (Dynamo's planner, for example) needs no install
+edge. Prerequisites a component has beyond its chart, such as the storage
+driver its persistent volumes need, are declared as `dependencyRefs` too,
+through a service-specific mixin when the dependency exists on one service
+only (see `nvsentinel-datastore-eks` under
+[Mixin Composition](#mixin-composition)).
 
 `HelmConfig`: `defaultRepository`, `defaultChart`, `defaultVersion`,
 `defaultDigest`, `defaultNamespace`. `KustomizeConfig`: `defaultSource`, `defaultPath`,

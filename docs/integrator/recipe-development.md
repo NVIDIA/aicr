@@ -182,6 +182,8 @@ When authoring a recipe targeting Talos (`criteria.os: talos`), append the `os-t
 
 **`nvsentinel-event-exporter`** turns on NVSentinel's Event Exporter, composed beside a remediation step because it reads the datastore the step adds. It sets `global.eventExporter.enabled`, the OIDC Secret name, certificate checks and the export filter through the same `mixinSafeOverridePaths` allowlist, and no overlay composes it: the sink endpoint, the OIDC client and the cluster's metadata are per deployment, so they come from `--set` on the bundle command. `CheckNVSentinelEventExporterCoherent` fails the bundle while any of them is missing or still the chart's placeholder. See [component catalog](../user/component-catalog.md#health-event-export) for the Secret to create before deploying and the delivery guarantees.
 
+**`nvsentinel-datastore-eks`** declares the storage edge of NVSentinel's datastore on EKS. An EKS leaf that composes a remediation step lists it after the step (`spec.mixins: [nvsentinel-observe, nvsentinel-datastore-eks]`); it adds `aws-ebs-csi-driver` to `nvsentinel-mongodb`'s `dependencyRefs`, so the driver that provisions the datastore's volumes deploys first. It contributes only `dependencyRefs` to an already-chained component, which `mixinComponentRefSafeForMerge` allows; listed before the step it would introduce `nvsentinel-mongodb` itself, and the step's `type` for that component then fails resolution as an identity conflict. On a cluster that uses the EKS-managed EBS addon, `aws-ebs-csi-driver` stays declared with `enabled: false` and the edge counts as satisfied outside the recipe. See [component catalog](../user/component-catalog.md#graded-remediation).
+
 **Cross-cutting overlays with wildcard criteria** apply across one criteria dimension without being referenced via `spec.base` or listed in `spec.mixins`. The resolver can return multiple independent maximal-leaf overlays for a single query, so a `service: any` overlay is picked up alongside the service-specific maximal leaf and its inheritance chain:
 
 ```yaml
@@ -399,6 +401,19 @@ componentRefs:
 ```
 
 A component must have either `helm` OR `kustomize` configuration, not both.
+
+#### Component classes
+
+Every registry entry declares a `class`: `core`, `ops`, or `workload`
+([ADR-018](https://github.com/NVIDIA/aicr/blob/main/docs/design/018-class-partitioned-bundles.md)). The classes are
+ordered `core` < `ops` < `workload`, and a component's `dependencyRefs` may
+name only components of its own class or an earlier one; a catalog test
+resolves every leaf and fails on an edge to a later class. The class is not
+part of a recipe and never appears in `recipe.yaml`: ordinary bundling
+ignores it, and `--split` partitions a bundle by it. Monitoring CRD
+dependencies go to `prometheus-operator-crds`, which is `core`, not to
+`kube-prometheus-stack`, which is `ops`. The full assignment is in the
+[component catalog](../user/component-catalog.md#components).
 
 > **`patches` is not supported.** The `componentRefs[].patches` field is not
 > applied by any deployer. An enabled ref that sets `patches` is rejected at

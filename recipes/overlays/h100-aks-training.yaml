@@ -60,7 +60,7 @@ spec:
       dependencyRefs:
         - nfd
         - cert-manager
-        - kube-prometheus-stack
+        - prometheus-operator-crds
         - nodewright-customizations
 
     # Same tuning manifest as EKS: nvidia-setup 0.8.0 supports service: aks
