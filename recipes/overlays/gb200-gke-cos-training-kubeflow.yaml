@@ -48,7 +48,7 @@ spec:
         - components/kubeflow-trainer/manifests/torch-distributed-rdma-cluster-training-runtime.yaml
       dependencyRefs:
         - cert-manager
-        - kube-prometheus-stack
+        - prometheus-operator-crds
         - gpu-operator
         - prometheus-operator-crds
 
