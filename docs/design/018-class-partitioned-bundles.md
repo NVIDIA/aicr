@@ -786,6 +786,11 @@ if standalone class artifacts are ever pursued.
   install after `ops`, and some require it; for example, Dynamo depends
   on `kai-scheduler`. Others, such as Kubeflow Trainer, depend only on
   `core`. `core` alone remains a complete install.
+- Classes separate ownership, not runtime coupling: a component may still
+  rely on another class at runtime, as Dynamo does on `kai-scheduler`.
+  Compatibility is verified only within one generated set, so owners
+  coordinate version changes through that set rather than upgrading
+  their class independently.
 - Single-bundle users see no artifact or output change; `--split` is
   strictly opt-in, and non-split output stays byte-identical from the
   post-prerequisite baseline onward. (One new diagnostic applies to all
