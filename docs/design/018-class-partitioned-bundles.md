@@ -200,7 +200,7 @@ decides borderline cases:
 
 | Class | Definition | Test |
 |---|---|---|
-| `core` | **Platform-independent GPU execution:** a plain GPU pod can be scheduled and run correctly, including the accelerator fabric the hardware requires. Includes everything those components need to install and become ready, whether declared in `dependencyRefs` or implicit (such as storage for persistent volumes). | Without it, does a plain GPU pod (no workload platform) still run correctly? If not, it is `core`. |
+| `core` | **Platform-independent GPU execution:** a plain GPU pod can be scheduled and run correctly, including the accelerator fabric the hardware requires. Includes everything those components need to install and become ready, declared in `dependencyRefs` (including the storage driver for persistent volumes). | Without it, does a plain GPU pod (no workload platform) still run correctly? If not, it is `core`. |
 | `ops` | **Operational services:** scheduling, node health, observability, policy, inventory, and certification. An `ops` service may use GPUs and may be a prerequisite of a workload platform. | Not required by a plain GPU pod, and not a workload platform. |
 | `workload` | **Workload platforms and their supporting components:** the training, inference, and batch frameworks workloads are built on, and components that exist only to serve them. | Present because of what users run, typically selected through the `platform` criteria axis. |
 
@@ -216,7 +216,7 @@ alone would not:
   the GPU runtime healthy, and it must be tested on GPU clusters.
 
 The rest of the NVSentinel set follows from that exception and the
-implicit-prerequisite rule in the `core` definition:
+prerequisite rule in the `core` definition:
 
 - **Its datastore** (`nvsentinel-mongodb`, `psmdb-operator`), which the
   opt-in `nvsentinel-observe`, `nvsentinel-quarantine`, and
@@ -225,9 +225,12 @@ implicit-prerequisite rule in the `core` definition:
   `aws-ebs-csi-driver`. The datastore requests persistent volumes, which
   on EKS are provisioned by the bundled EBS driver unless the EKS-managed
   EBS addon is installed instead. Keeping the driver in `core` keeps
-  `core` self-contained when those mixins are composed. The dependency is
-  implicit — it does not appear in `dependencyRefs` — so it is found by
-  review, not by the direction guard.
+  `core` self-contained when those mixins are composed. The edge is
+  declared like any other: the datastore mixins apply to every service, so
+  an EKS-only mixin composed with them adds `nvsentinel-mongodb` →
+  `aws-ebs-csi-driver`. With the managed addon, the driver stays declared
+  with `enabled: false`, and the bundler treats the edge as satisfied
+  outside the recipe. Partition validation checks the edge at bundle time.
 
 Representative assignments under these definitions:
 
@@ -368,10 +371,9 @@ ordinary output.
 To keep the boundary fixed, a standing guard test validates the
 **effective dependency graph of every resolved catalog recipe** — not the
 raw overlay/mixin YAML — and fails on any edge to a later class, in the
-spirit of the existing deployment-order guard tests. The guard sees only
-declared edges; implicit prerequisites, such as the storage a core
-component's volumes need, are covered by the class definitions and
-review.
+spirit of the existing deployment-order guard tests. Prerequisites are
+declared as edges, including the storage a core component's volumes
+need, so the direction rule never depends on review.
 
 Two opt-in NVSentinel mixins declare edges from `core` to later classes:
 `nvsentinel-preflight` (`nvsentinel` → `kai-scheduler`) and
@@ -807,8 +809,9 @@ if standalone class artifacts are ever pursued.
 
 1. Catalog prerequisite: repoint all `core` and `workload`
    `kube-prometheus-stack` dependency declarations (overlays and mixins)
-   to `prometheus-operator-crds`; add the resolved-graph
-   dependency-direction guard test. After this lands, a targeted
+   to `prometheus-operator-crds`; add the EKS-only mixin that declares
+   the NVSentinel datastore's `aws-ebs-csi-driver` edge; add the
+   resolved-graph dependency-direction guard test. After this lands, a targeted
    non-split parity regression test pins that the class field and split
    plumbing leave ordinary output byte-identical.
 2. Registry: the ordered `class` field (`core`, `ops`, `workload`),
