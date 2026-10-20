@@ -93,10 +93,7 @@ spec:
                 || { echo "FAIL: labeler values key='${KEY}' value='${VAL}'" >&2; exit 1; }
               grep -q 'LABEL_KEY="example.com/dra-ready"' "${MANIFEST}" && grep -q 'LABEL_VALUE="enabled"' "${MANIFEST}" \
                 || { echo "FAIL: labeler script does not carry the configured pair" >&2; exit 1; }
-              # Hardware truth, not the accelerated node selector.
-              grep -q 'key: nvidia.com/gpu.present' "${MANIFEST}" \
-                || { echo "FAIL: labeler affinity is not keyed on nvidia.com/gpu.present" >&2; exit 1; }
-              # Accelerated tolerations are injected; a nodeSelector is not.
+              # Accelerated tolerations are injected.
               grep -q 'key: nvidia.com/gpu$' "${MANIFEST}" \
                 || { echo "FAIL: accelerated toleration not injected into the labeler" >&2; exit 1; }
               # Labeler sits after gpu-operator (GFD) and before the DRA driver in deployment order.

@@ -15,12 +15,23 @@
 package bundler
 
 import (
+	"bytes"
 	"context"
+	stderrors "errors"
+	"io"
 	"os"
+	"path"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
+
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -48,6 +59,7 @@ func testDRANodeLabelerRecipeResult() *recipe.RecipeResult {
 	}
 	rr.ComponentRefs = append(rr.ComponentRefs, recipe.ComponentRef{
 		Name:           draNodeLabelerComponentName,
+		Namespace:      "gpu-operator",
 		Type:           recipe.ComponentTypeHelm,
 		Source:         "",
 		ValuesFile:     "components/dra-node-labeler/values.yaml",
@@ -516,4 +528,166 @@ func TestMake_DRANodeLabelerRecipePersistsGate(t *testing.T) {
 			t.Errorf("%s carries %s without the eviction flag: %+v", RecipeFileName, draNodeLabelerComponentName, ref)
 		}
 	})
+}
+
+// TestDRANodeLabelerManifest_SecuritySurface compares the labeler's RBAC,
+// placement and readiness marker as whole structures, so a widened verb, an
+// extra binding subject, a moved affinity key or a drifted marker path fails.
+func TestDRANodeLabelerManifest_SecuritySurface(t *testing.T) {
+	objs := renderDRALabelerObjects(t, config.DefaultDRAEvictionNodeLabel())
+
+	wantKinds := map[string]int{"ServiceAccount": 1, "ClusterRole": 1, "ClusterRoleBinding": 1, "DaemonSet": 1}
+	if !reflect.DeepEqual(objs.kinds, wantKinds) {
+		t.Errorf("rendered kinds = %v, want %v", objs.kinds, wantKinds)
+	}
+	sa, role, binding, ds := objs.serviceAccount, objs.clusterRole, objs.binding, objs.daemonSet
+	if ds.Namespace == "" {
+		t.Fatal("labeler DaemonSet has no namespace")
+	}
+	if sa.Name != draNodeLabelerComponentName || sa.Namespace != ds.Namespace {
+		t.Errorf("ServiceAccount = %s/%s, want %s/%s", sa.Namespace, sa.Name, ds.Namespace, draNodeLabelerComponentName)
+	}
+
+	// Read and patch Node objects, nothing else.
+	wantRules := []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"nodes"}, Verbs: []string{"get", "list", "patch"}}}
+	if role.Name != draNodeLabelerComponentName || !reflect.DeepEqual(role.Rules, wantRules) {
+		t.Errorf("ClusterRole %q rules = %+v, want %q rules %+v", role.Name, role.Rules, draNodeLabelerComponentName, wantRules)
+	}
+	wantRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: role.Name}
+	wantSubjects := []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: sa.Name, Namespace: sa.Namespace}}
+	if binding.RoleRef != wantRef || !reflect.DeepEqual(binding.Subjects, wantSubjects) {
+		t.Errorf("ClusterRoleBinding roleRef %+v subjects %+v, want %+v %+v", binding.RoleRef, binding.Subjects, wantRef, wantSubjects)
+	}
+	spec := ds.Spec.Template.Spec
+	if spec.ServiceAccountName != sa.Name {
+		t.Errorf("DaemonSet serviceAccountName = %q, want the bound %q", spec.ServiceAccountName, sa.Name)
+	}
+
+	// Placement is hardware truth, so one required term on GFD's gpu.present
+	// and no nodeSelector.
+	wantTerms := []corev1.NodeSelectorTerm{{MatchExpressions: []corev1.NodeSelectorRequirement{{
+		Key: "nvidia.com/gpu.present", Operator: corev1.NodeSelectorOpIn, Values: []string{"true"},
+	}}}}
+	var gotTerms []corev1.NodeSelectorTerm
+	if a := spec.Affinity; a != nil && a.NodeAffinity != nil && a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		gotTerms = a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+	}
+	if !reflect.DeepEqual(gotTerms, wantTerms) {
+		t.Errorf("required node affinity = %+v, want %+v", gotTerms, wantTerms)
+	}
+	if len(spec.NodeSelector) != 0 {
+		t.Errorf("labeler carries a nodeSelector %v", spec.NodeSelector)
+	}
+
+	// The probe's marker is the script's READY env, on a writable emptyDir
+	// because the root filesystem is read-only.
+	if len(spec.Containers) != 1 {
+		t.Fatalf("labeler DaemonSet has %d containers, want 1", len(spec.Containers))
+	}
+	c := spec.Containers[0]
+	if sc := c.SecurityContext; sc == nil || sc.ReadOnlyRootFilesystem == nil || !*sc.ReadOnlyRootFilesystem {
+		t.Errorf("labeler root filesystem is not read-only: %+v", c.SecurityContext)
+	}
+	probe := c.ReadinessProbe
+	if probe == nil || probe.Exec == nil || len(probe.Exec.Command) != 3 ||
+		probe.Exec.Command[0] != "test" || probe.Exec.Command[1] != "-f" {
+
+		t.Fatalf("labeler readiness probe = %+v, want test -f <marker>", probe)
+	}
+	marker := probe.Exec.Command[2]
+	var ready []string
+	for _, e := range c.Env {
+		if e.Name == "READY" {
+			ready = append(ready, e.Value)
+		}
+	}
+	if !reflect.DeepEqual(ready, []string{marker}) {
+		t.Errorf("READY env = %q, want the probe's marker %q", ready, marker)
+	}
+	var mounts []corev1.VolumeMount
+	for _, m := range c.VolumeMounts {
+		if m.MountPath == path.Dir(marker) {
+			mounts = append(mounts, m)
+		}
+	}
+	if len(mounts) != 1 || mounts[0].ReadOnly {
+		t.Fatalf("mounts at %s = %+v, want one writable mount", path.Dir(marker), mounts)
+	}
+	emptyDir := false
+	for _, v := range spec.Volumes {
+		if v.Name == mounts[0].Name {
+			emptyDir = v.EmptyDir != nil
+		}
+	}
+	if !emptyDir {
+		t.Errorf("volume %q at %s is not an emptyDir", mounts[0].Name, path.Dir(marker))
+	}
+}
+
+// draLabelerObjects is the rendered labeler manifest, decoded. kinds counts
+// every document by kind, including kinds the typed fields do not hold.
+type draLabelerObjects struct {
+	kinds          map[string]int
+	serviceAccount *corev1.ServiceAccount
+	clusterRole    *rbacv1.ClusterRole
+	binding        *rbacv1.ClusterRoleBinding
+	daemonSet      *appsv1.DaemonSet
+}
+
+// renderDRALabelerObjects bundles the labeler recipe opted in to label and
+// decodes the rendered manifest.
+func renderDRALabelerObjects(t *testing.T, label config.NodeLabel) draLabelerObjects {
+	t.Helper()
+	b, err := New(WithConfig(config.NewConfig(config.WithDRAEvictionNodeLabel(label))))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	outputDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), draBundleMakeTimeout)
+	defer cancel()
+	if _, err = b.Make(ctx, testDRANodeLabelerRecipeResult(), outputDir); err != nil {
+		t.Fatalf("Make() error = %v", err)
+	}
+	data := readBundleValues(t, outputDir, filepath.Join("002-"+draNodeLabelerComponentName, "templates", "dra-node-labeler.yaml"))
+
+	objs := draLabelerObjects{kinds: map[string]int{}}
+	dec := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(data), 4096)
+	for {
+		var doc map[string]any
+		if err = dec.Decode(&doc); err != nil {
+			if stderrors.Is(err, io.EOF) {
+				break
+			}
+			t.Fatalf("decode labeler manifest: %v", err)
+		}
+		if doc == nil {
+			continue
+		}
+		kind, _ := doc["kind"].(string)
+		objs.kinds[kind]++
+		var into any
+		switch kind {
+		case "ServiceAccount":
+			objs.serviceAccount = &corev1.ServiceAccount{}
+			into = objs.serviceAccount
+		case "ClusterRole":
+			objs.clusterRole = &rbacv1.ClusterRole{}
+			into = objs.clusterRole
+		case "ClusterRoleBinding":
+			objs.binding = &rbacv1.ClusterRoleBinding{}
+			into = objs.binding
+		case "DaemonSet":
+			objs.daemonSet = &appsv1.DaemonSet{}
+			into = objs.daemonSet
+		default:
+			continue
+		}
+		if err = runtime.DefaultUnstructuredConverter.FromUnstructured(doc, into); err != nil {
+			t.Fatalf("convert %s: %v", kind, err)
+		}
+	}
+	if objs.serviceAccount == nil || objs.clusterRole == nil || objs.binding == nil || objs.daemonSet == nil {
+		t.Fatalf("labeler manifest lacks a ServiceAccount, ClusterRole, ClusterRoleBinding or DaemonSet:\n%s", data)
+	}
+	return objs
 }
