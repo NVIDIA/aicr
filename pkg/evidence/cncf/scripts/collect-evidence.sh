@@ -986,7 +986,7 @@ spec:
     - operator: Exists
   containers:
     - name: blocker
-      image: nvidia/cuda:12.9.0-base-ubuntu24.04
+      image: docker.io/nvidia/cuda:12.9.0-base-ubuntu24.04
       command: ["sleep", "infinity"]
       securityContext:
         allowPrivilegeEscalation: false
@@ -1377,7 +1377,7 @@ spec:
       resourceClaimName: isolated-gpu
   containers:
     - name: gpu-test
-      image: nvidia/cuda:12.9.0-base-ubuntu24.04
+      image: docker.io/nvidia/cuda:12.9.0-base-ubuntu24.04
       command:
         - bash
         - -c
@@ -1512,7 +1512,7 @@ spec:
     - operator: Exists
   containers:
     - name: authorized
-      image: nvidia/cuda:12.9.0-base-ubuntu24.04
+      image: docker.io/nvidia/cuda:12.9.0-base-ubuntu24.04
       command:
         - bash
         - -c
@@ -1536,7 +1536,7 @@ spec:
         limits:
           nvidia.com/gpu: 1
     - name: unauthorized
-      image: nvidia/cuda:12.9.0-base-ubuntu24.04
+      image: docker.io/nvidia/cuda:12.9.0-base-ubuntu24.04
       command:
         - bash
         - -c
