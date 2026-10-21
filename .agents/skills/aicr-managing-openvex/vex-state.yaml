@@ -87,27 +87,30 @@ deferred_verifications:
       above returned `[]`. A failure on that release is the finding to triage,
       not something a later release discharges.
 
-  - id: libexpat1-vex-applies-at-release
-    opened: 2026-10-19
-    document_version: 21
+  - id: pillow-vex-applies-at-release
+    opened: 2026-10-21
+    document_version: 22
     why_deferred: >-
-      Version 21 adds five not_affected statements for libexpat1
-      2.8.3-1~deb13u1 on aiperf-bench. Local evidence is grype 0.118.0 against
-      the v1.1.0-rc1 image index (sha256:a8356af2...) built at e898b8d58, per
-      platform, plus a local run of openvex-guard.sh and tools/openvex-bind on a
-      stand-in digest. The re-cut v1.1.0-rc1 rebuilds that image at a new head,
-      and only a release scans both architectures and signs the projection.
+      Version 22 adds seven not_affected statements for pillow 12.3.0 on
+      aiperf-bench (GHSAs published 2026-10-20, fixed only in pillow 13.0.0,
+      which aiperf 0.13.0's pillow~=12.3.0 pin excludes). Local evidence is
+      grype 0.118.0 against the v1.1.1 aiperf-bench index
+      (sha256:925c7877...) built at 018213b9b, per platform, plus a local run
+      of openvex-guard.sh and tools/openvex-bind on a stand-in digest. The
+      re-cut release rebuilds that image at a new head, and only a release
+      scans both architectures and signs the projection.
     check: >-
-      The release run for the re-cut v1.1.0-rc1 (the first on-tag.yaml run
-      after 39266148817 for that tag) passes "Image Vuln Scan
-      (aiperf-bench/amd64)" and "(aiperf-bench/arm64)", passes "Verify OpenVEX
-      document", and publishes an OpenVEX attestation on both aiperf-bench
-      platform manifests listing CVE-2026-66046, CVE-2026-76956,
-      CVE-2026-76957, CVE-2026-77214 and CVE-2026-93990, with every product
-      ending in that manifest's digest.
+      The first on-tag.yaml run after 39566008194 whose tag commit carries
+      .openvex.json version 22 passes "Image Vuln Scan (aiperf-bench/amd64)"
+      and "(aiperf-bench/arm64)", passes "Verify OpenVEX document", and
+      publishes an OpenVEX attestation on both aiperf-bench platform manifests
+      listing GHSA-58r4-6rv3-gfh8, GHSA-8g5g-8vmr-9782, GHSA-pchr-8j38-3x4p,
+      GHSA-c6hw-5grf-ff96, GHSA-65qm-jvmh-6pqg, GHSA-p4wg-p73j-c528 and
+      GHSA-q45j-58j2-45rg, with every product ending in that manifest's
+      digest.
     how: |
       for p in amd64 arm64; do
-        d=$(crane digest --platform linux/$p ghcr.io/nvidia/aicr-validators/aiperf-bench:v1.1.0-rc1)
+        d=$(crane digest --platform linux/$p ghcr.io/nvidia/aicr-validators/aiperf-bench:<tag>)
         cosign verify-attestation --type openvex \
           --certificate-oidc-issuer https://token.actions.githubusercontent.com \
           --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.*' \
@@ -117,28 +120,11 @@ deferred_verifications:
       done
     resolves_when: >-
       that specific release run has been inspected AND both aiperf-bench scan
-      legs passed, the guard passed, and the command above listed the five
+      legs passed, the guard passed, and the command above listed the seven
       names on both platforms with digest-bound products. A failure on that run
       is the finding to triage.
 
-known_negatives:
-  - id: no-ngc-distroless-python-with-fixed-libexpat1
-    checked: 2026-10-19
-    result: >-
-      No NGC distroless python base carries the fixed libexpat1
-      2.9.0-1~deb13u1. The 3.12, 3.13 and 3.14 series all end at v4.1.7;
-      3.13-v4.1.7 was built 2026-10-11, its index digest is still
-      sha256:fb9e31d8..., and grype 0.118.0 reports libexpat1 2.8.3-1~deb13u1
-      on it for linux/amd64 and linux/arm64. The vendor's own CycloneDX VEX on
-      that base marks the libexpat1 CVEs exploitable or in_triage, so it offers
-      nothing to inherit. The five libexpat1 statements in version 21 exist
-      only because of this negative.
-    invalidated_by: >-
-      a 3.13 tag past v4.1.7 on nvcr.io/nvidia/distroless/python, or the
-      3.13-v4.1.7 tag moving to a new digest. Scan it per platform; if it
-      carries libexpat1 2.9.0-1~deb13u1 or later, bump the FROM pin in
-      validators/performance/aiperf-bench.Dockerfile and delete the five
-      libexpat1 statements in the same change
+known_negatives: []
 
 deliberate_exclusions:
   - id: arm64-aiperf-bench-is-never-scanned

@@ -298,9 +298,12 @@ whether it is unreadable or carries an unrecognised banner.
 
 **Driver not loaded** is a fourth outcome, reached before any file is read: when
 `/proc/driver/nvidia` does not exist on a target node, the kubelet refuses the
-probe pod's hostPath mount and the preflight names that node as driver-absent
-instead of reporting a bare timeout or sending you to set the flag. There is no
-parameter to set until a driver is loaded. Finish the driver rollout (GPU
+probe pod's hostPath mount. If the preflight reads the kubelet's
+`hostPath type check failed` event and it is still the probe pod's latest
+event, it names that node as driver-absent instead of sending you to set the
+flag. Otherwise (the events cannot be read, none matches, or a later event
+for the pod has superseded it) it returns the original wait timeout. There
+is no parameter to set until a driver is loaded. Finish the driver rollout (GPU
 Operator `nvidia-driver` DaemonSet Ready, or a node image that ships the driver
 on OKE `oci-managed`) and re-run. The kubelet leaves the pod in
 `ContainerCreating`, so this surfaces after the probe's wait (up to two

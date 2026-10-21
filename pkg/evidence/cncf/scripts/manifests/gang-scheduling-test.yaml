@@ -80,7 +80,7 @@ spec:
     - operator: Exists
   containers:
     - name: worker
-      image: nvidia/cuda:12.9.0-base-ubuntu24.04
+      image: docker.io/nvidia/cuda:12.9.0-base-ubuntu24.04
       command: ["bash", "-c", "nvidia-smi && echo 'Gang worker 0 completed successfully'"]
       securityContext:
         allowPrivilegeEscalation: false
@@ -122,7 +122,7 @@ spec:
     - operator: Exists
   containers:
     - name: worker
-      image: nvidia/cuda:12.9.0-base-ubuntu24.04
+      image: docker.io/nvidia/cuda:12.9.0-base-ubuntu24.04
       command: ["bash", "-c", "nvidia-smi && echo 'Gang worker 1 completed successfully'"]
       securityContext:
         allowPrivilegeEscalation: false

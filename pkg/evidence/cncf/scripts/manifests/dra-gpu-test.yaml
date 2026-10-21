@@ -52,7 +52,7 @@ spec:
       resourceClaimName: gpu-claim
   containers:
     - name: gpu-test
-      image: nvidia/cuda:12.9.0-base-ubuntu24.04
+      image: docker.io/nvidia/cuda:12.9.0-base-ubuntu24.04
       command: ["bash", "-c", "ls /dev/nvidia* && echo 'DRA GPU allocation successful'"]
       securityContext:
         allowPrivilegeEscalation: false

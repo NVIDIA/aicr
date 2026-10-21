@@ -16,8 +16,10 @@ package defaults
 
 const (
 	// ProbeImage is the multi-arch (amd64+arm64) toolbox used by validator
-	// probe Pods. busybox provides /bin/sh, grep, ls, sleep in ~2 MB.
-	ProbeImage = "busybox:1.37"
+	// probe Pods. busybox provides /bin/sh, grep, ls, sleep in ~2 MB. The
+	// name is fully qualified because CRI-O in enforcing short-name mode
+	// (OKE) rejects a bare name that more than one search registry serves.
+	ProbeImage = "docker.io/library/busybox:1.37"
 )
 
 // DynamoImageRepository and DynamoRuntimeImageTag locate the Dynamo runtime
