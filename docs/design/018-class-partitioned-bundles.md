@@ -201,7 +201,7 @@ decides borderline cases:
 | Class | Definition | Test |
 |---|---|---|
 | `core` | **Platform-independent GPU execution:** a plain GPU pod can be scheduled and run correctly, including the accelerator fabric the hardware requires. Includes everything those components need to install and become ready, declared in `dependencyRefs` (including the storage driver for persistent volumes). | Without it, does a plain GPU pod (no workload platform) still run correctly? If not, it is `core`. |
-| `ops` | **Operational services:** scheduling, node health, observability, policy, inventory, and certification. An `ops` service may use GPUs and may be a prerequisite of a workload platform. | Not required by a plain GPU pod, and not a workload platform. |
+| `ops` | **Operational services:** scheduling, node health, observability, policy, and inventory. An `ops` service may use GPUs and may be a prerequisite of a workload platform. | Not required by a plain GPU pod, and not a workload platform. |
 | `workload` | **Workload platforms and their supporting components:** the training, inference, and batch frameworks that workloads are built on, and components that exist only to serve them. | Present because of what users run, typically selected through the `platform` criteria axis. |
 
 "Run correctly" includes the fabric: without the accelerator's RDMA or
@@ -244,11 +244,13 @@ Representative assignments under these definitions:
   NVSentinel set.
 - `ops`: `kai-scheduler`, `kube-prometheus-stack`, `prometheus-adapter`,
   `k8s-ephemeral-storage-metrics`, `node-problem-detector`, `gatekeeper`,
-  `k8s-aibom`, and `nvcre`.
+  and `k8s-aibom`.
 - `workload`: `kubeflow-trainer`, `dynamo-platform`, `grove`,
-  `k8s-nim-operator`, `agentgateway`, `kueue`, `topograph`, and the Slurm
-  set (Slinky, including `slinky-drainer` and its CRDs, MariaDB, and the
-  ADR-016 accounting components).
+  `k8s-nim-operator`, `agentgateway`, `kueue`, `topograph`, `nvcre`, and
+  the Slurm set (Slinky, including `slinky-drainer` and its CRDs, MariaDB,
+  and the ADR-016 accounting components). `nvcre` is a certification
+  controller, but it runs its workloads through Kubeflow Trainer and must
+  depend on it, so the direction rule places it in `workload`.
 
 **`kai-scheduler` is `ops`.** A plain GPU pod runs on the default
 scheduler, and `kai-scheduler` is not a workload platform, so the
