@@ -74,7 +74,10 @@ concurrency:
 jobs:
   test:
     name: NVSentinel Log Collector E2E
-    runs-on: ubuntu-24.04
+    # mongod 8.0 before 8.0.35 exits at startup on the ubuntu-24.04 image's
+    # 7.0 kernel (https://jira.mongodb.org/browse/SERVER-131779). Return to
+    # ubuntu-24.04 once the Percona MongoDB pin is 8.0.35 or newer.
+    runs-on: ubuntu-22.04
     # The script's bounded waits sum to ~70 minutes worst case (node Ready 2,
     # cert-manager 10, Percona datastore 15, nvsentinel rollout 15, event
     # delivery 3, collection 15, reset request 5, proto fetch 1, port-forward
