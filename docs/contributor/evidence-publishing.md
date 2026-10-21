@@ -296,6 +296,22 @@ See the header of `recipes/evidence/allowlist.yaml` and
 [artifact verification](../user/artifact-verification.md) for the anti-sybil
 rules; maintainer review of this entry is the trust gate.
 
+> **Regenerate the embedded pointer index.** The binary embeds pointer
+> presence in `pkg/evidence/index/pointers.yaml` (recipe id, source slug,
+> signer class). `TestPointersYAMLMatchesTree` fails when a new recipe
+> directory or signer slug lands under `recipes/evidence/` and that file was
+> not updated. The sign workflow does not regenerate it. After the signed
+> pointer and the allowlist entry are both on the branch:
+>
+> ```shell
+> AICR_UPDATE_EVIDENCE_INDEX=1 go test ./pkg/evidence/index/ -run TestPointersYAMLMatchesTree -count=1
+> go test ./pkg/evidence/index/ -run TestPointersYAMLMatchesTree -count=1
+> ```
+>
+> The first command rewrites `pointers.yaml` and fails on purpose, so the
+> next run embeds the new file. Commit `pointers.yaml` with the evidence
+> change.
+
 Only keyless signers count. Evidence signed with a KMS key
 (`--signing-key`) records `signer.issuer: key`, and the contract gate rejects
 it however the allowlist reads, because the allowlist pins OIDC identities and

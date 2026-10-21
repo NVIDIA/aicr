@@ -102,6 +102,14 @@ func recipeCmdFlags() []cli.Flag {
 	Also honored via AICR_CRITERIA_STRICT=1.`,
 			Category: catQueryParameters,
 		},
+		&cli.BoolFlag{
+			Name: flagRequireEvidence,
+			Usage: `Fail when the resolved recipe has no committed evidence pointer.
+	The check is offline presence for the resolved recipe id, including the selected profile value. It does not verify a signature or fetch a bundle.
+	A pointer on a base id does not cover a profiled resolve. Resolving with external data (--data or spec.recipe.data) fails, even when the leaf overlay is still the embedded one.
+	Also honored via AICR_REQUIRE_EVIDENCE=1 or spec.recipe.requireEvidence: true in --config.`,
+			Category: catQueryParameters,
+		},
 		&cli.StringFlag{
 			Name: flagInheritFrom,
 			Usage: `Path to a prior recipe file, or to a bundle directory, whose resolved namespace, chart, source, path, manifest files and pre-manifest files this recipe keeps.
@@ -233,6 +241,9 @@ Override snapshot-detected criteria:
 			result, err := buildRecipeFromCmdWithConfig(ctx, cmd, cfg, client)
 			if err != nil {
 				return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "error building recipe")
+			}
+			if err = requirePublishedEvidence(ctx, cmd, cfg, client, result); err != nil {
+				return err
 			}
 
 			// Operate on the upstream pkg/recipe.RecipeResult for the remainder

@@ -58,7 +58,13 @@ var criteriaQueryParameters = map[string]struct{}{
 	keyProfile:                        {},
 	slurmAccountingModeQueryParameter: {},
 	gkeTCPXOInterfacesQueryParameter:  {},
+	requireEvidenceQueryParameter:     {},
 }
+
+// requireEvidenceQueryParameter opts a /v1/recipe or /v1/query request into
+// the committed-pointer check. Default off. AICR_REQUIRE_EVIDENCE enables it
+// for the process when the parameter is absent or false.
+const requireEvidenceQueryParameter = "requireEvidence"
 
 // recipeHandler backs /v1/recipe and /v1/query with an aicr.Client.
 //
@@ -227,6 +233,10 @@ func (h *recipeHandler) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resolved := result.Resolved()
+	if err = h.ensurePublishedEvidence(ctx, r, result); err != nil {
+		WriteErrorFromErr(w, r, err, "Recipe has no published evidence", nil)
+		return
+	}
 
 	// Set caching headers
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(recipeCacheTTL.Seconds())))
@@ -421,6 +431,10 @@ func (h *recipeHandler) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resolved := rec.Resolved()
+	if err = h.ensurePublishedEvidence(ctx, r, rec); err != nil {
+		WriteErrorFromErr(w, r, err, "Recipe has no published evidence", nil)
+		return
+	}
 
 	// Hydrate + select through the facade, then shape the response here.
 	// The legacy projection keeps the resolved result's bound DataProvider,
@@ -485,6 +499,33 @@ func singleQueryValue(r *http.Request, key string) (string, error) {
 	return values[0], nil
 }
 
+// ensurePublishedEvidence rejects a resolved recipe that has no committed
+// evidence pointer. It is a no-op unless the request or AICR_REQUIRE_EVIDENCE
+// opts in, so the default path does not list the catalog again.
+func (h *recipeHandler) ensurePublishedEvidence(ctx context.Context, r *http.Request, result *aicr.RecipeResult) error {
+	required, err := evidenceRequiredFromRequest(r)
+	if err != nil || !required {
+		return err
+	}
+	if h == nil || h.client == nil {
+		return aicrerrors.New(aicrerrors.ErrCodeInternal, "recipe handler client is missing")
+	}
+	return h.client.RequirePublishedEvidence(ctx, result)
+}
+
+// evidenceRequiredFromRequest reports whether this call opts into the
+// committed-pointer check. A truthy requireEvidence query value enables it.
+// An absent or false value leaves the process environment in charge, so an
+// explicit false does not turn off AICR_REQUIRE_EVIDENCE. Any other spelling
+// is rejected.
+func evidenceRequiredFromRequest(r *http.Request) (bool, error) {
+	raw, err := singleQueryValue(r, requireEvidenceQueryParameter)
+	if err != nil {
+		return false, err
+	}
+	return aicr.PublishedEvidenceRequired(raw, false)
+}
+
 // resolvePOSTProfileSelection applies the ADR-015 transport rules shared by
 // the recipe and query POST endpoints: a profile may arrive in the query
 // string, in the strict body envelope, or in both when the values agree.
@@ -497,6 +538,7 @@ func resolvePOSTProfileSelection(
 		keyProfile:                        {},
 		slurmAccountingModeQueryParameter: {},
 		gkeTCPXOInterfacesQueryParameter:  {},
+		requireEvidenceQueryParameter:     {},
 	}); err != nil {
 		return "", err
 	}

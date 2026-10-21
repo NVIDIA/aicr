@@ -36,6 +36,7 @@ const (
 	flagOS                  = "os"
 	flagPlatform            = "platform"
 	flagProfile             = "profile"
+	flagRequireEvidence     = "require-evidence"
 	flagSlurmAccountingMode = "slurm-accounting-mode"
 	flagRuntimeInventory    = "runtime-inventory"
 	flagGKETCPXOInterfaces  = "gke-tcpxo-interfaces"

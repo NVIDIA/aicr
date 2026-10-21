@@ -93,6 +93,30 @@ func TestRecipeSpec_IsCriteriaStrict(t *testing.T) {
 	}
 }
 
+func TestRecipeSpec_IsRequireEvidence(t *testing.T) {
+	tru, fls := true, false
+	tests := []struct {
+		name string
+		ptr  *bool
+		want bool
+	}{
+		{"nil pointer absent in YAML", nil, false},
+		{"explicit false", &fls, false},
+		{"explicit true", &tru, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &config.RecipeSpec{RequireEvidence: tt.ptr}
+			if got := r.IsRequireEvidence(); got != tt.want {
+				t.Errorf("IsRequireEvidence() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+	if got := (*config.RecipeSpec)(nil).IsRequireEvidence(); got {
+		t.Errorf("nil RecipeSpec IsRequireEvidence = %v, want false", got)
+	}
+}
+
 func TestAccessors_PopulatedReturnsValues(t *testing.T) {
 	cfg := &config.AICRConfig{
 		Spec: config.Spec{

@@ -1,0 +1,106 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Generated from recipes/evidence. Do not edit. Regenerate with
+# AICR_UPDATE_EVIDENCE_INDEX=1 go test ./pkg/evidence/index/ -run TestPointersYAMLMatchesTree -count=1
+schemaVersion: 1
+recipes:
+  - id: b300-mk8s-ubuntu-inference-dynamo
+    sources:
+      - slug: 45d8f16e5893804eca45b900bd037446
+        class: community
+  - id: gb200-eks-ubuntu-training
+    sources:
+      - slug: 7c4c0edc8c765a95a0f3afdb3bbb8e91
+        class: community
+  - id: gb200-gke-cos-inference-dynamo-gpustack-bundle-installer
+    sources:
+      - slug: 2e85f8702c6214cafcc0ed714d928720
+        class: community
+  - id: gb200-gke-cos-inference-gpustack-bundle-installer
+    sources:
+      - slug: 2e85f8702c6214cafcc0ed714d928720
+        class: community
+  - id: gb200-gke-cos-training-gpustack-bundle-installer
+    sources:
+      - slug: 2e85f8702c6214cafcc0ed714d928720
+        class: community
+  - id: gb200-gke-cos-training-kubeflow-gpustack-bundle-installer
+    sources:
+      - slug: 2e85f8702c6214cafcc0ed714d928720
+        class: community
+  - id: gb200-gke-cos-training-slurm-gpustack-bundle-installer
+    sources:
+      - slug: 2e85f8702c6214cafcc0ed714d928720
+        class: community
+  - id: gb300-eks-ubuntu-inference-dynamo
+    sources:
+      - slug: 5bf9e82f0e90a11528ac85f4bcb866c8
+        class: community
+  - id: gb300-eks-ubuntu-training-kubeflow
+    sources:
+      - slug: 5bf9e82f0e90a11528ac85f4bcb866c8
+        class: community
+  - id: gb300-generic-ubuntu-training
+    sources:
+      - slug: 728b071aed7124418b1fa9c7f0521e24
+        class: community
+  - id: h100-aks-ubuntu-inference-dynamo
+    sources:
+      - slug: 5bf9e82f0e90a11528ac85f4bcb866c8
+        class: community
+  - id: h100-aks-ubuntu-inference-dynamo-gpustack-azure-managed
+    sources:
+      - slug: 5bf9e82f0e90a11528ac85f4bcb866c8
+        class: community
+  - id: h100-aks-ubuntu-training
+    sources:
+      - slug: 5bf9e82f0e90a11528ac85f4bcb866c8
+        class: community
+  - id: h100-aks-ubuntu-training-kubeflow
+    sources:
+      - slug: 5bf9e82f0e90a11528ac85f4bcb866c8
+        class: community
+  - id: h100-aks-ubuntu-training-kubeflow-gpustack-azure-managed
+    sources:
+      - slug: 5bf9e82f0e90a11528ac85f4bcb866c8
+        class: community
+  - id: h100-gke-cos-training
+    sources:
+      - slug: 7c4c0edc8c765a95a0f3afdb3bbb8e91
+        class: community
+  - id: h100-gke-cos-training-kubeflow-gpustack-gke-default
+    sources:
+      - slug: 1d70c50bfd60eaaf472544f2a3cf2b8b
+        class: community
+  - id: h200-k0s-ubuntu-training
+    sources:
+      - slug: 9d71833b5a62cb2928c1b40fffc6c20f
+        class: community
+  - id: rtx-pro-6000-eks-ubuntu-inference-dynamo
+    sources:
+      - slug: 5bf9e82f0e90a11528ac85f4bcb866c8
+        class: community
+  - id: vr200-rke2-ubuntu-inference-dynamo
+    sources:
+      - slug: 5bf9e82f0e90a11528ac85f4bcb866c8
+        class: community
+  - id: vr200-rke2-ubuntu-training
+    sources:
+      - slug: 5bf9e82f0e90a11528ac85f4bcb866c8
+        class: community
+  - id: vr200-rke2-ubuntu-training-kubeflow
+    sources:
+      - slug: 5bf9e82f0e90a11528ac85f4bcb866c8
+        class: community
