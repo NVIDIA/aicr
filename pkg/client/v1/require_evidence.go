@@ -45,17 +45,33 @@ func PublishedEvidenceRequired(raw string, requested bool) (bool, error) {
 // RequirePublishedEvidence rejects result when the resolved leaf has no
 // committed evidence pointer. It reads the embedded pointer index only: no
 // signature check and no registry fetch. A pointer on the unprofiled id does
-// not cover a profiled resolve, and a leaf whose catalog source is not the
-// embedded catalog fails even when that id has a pointer.
+// not cover a profiled resolve.
+//
+// A client whose recipe source is not the embedded catalog fails before the
+// leaf is inspected. FilesystemSource (--data or spec.recipe.data) and
+// OCISource can change a parent overlay, a values file, or the component
+// registry while the leaf overlay stays embedded, and a committed pointer
+// does not attest that composition. The leaf-source check remains for an
+// embedded client whose catalog entry is not the embedded recipe.
 //
 // ResolveRecipe does not call this. Bundle, mirror, and upgrade stay
-// unaffected unless their caller invokes it. Call LoadCatalog first; a
-// catalog error is returned as-is.
+// unaffected unless their caller invokes it. Call LoadCatalog first when the
+// source is embedded; a catalog error is returned as-is. source is fixed at
+// construction, so reading it does not take c.mu.
 func (c *Client) RequirePublishedEvidence(ctx context.Context, result *RecipeResult) error {
 	if result == nil || result.Resolved() == nil {
 		return errors.New(errors.ErrCodeInternal, "resolved recipe is missing")
 	}
+	if c == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
+	}
+	if err := c.assertOpen(); err != nil {
+		return err
+	}
 	resolved := result.Resolved()
+	if c.source.kind != sourceKindEmbedded {
+		return evidenceindex.ExternalSource(resolved)
+	}
 	entries, err := c.ListCatalog(ctx, nil)
 	if err != nil {
 		return err

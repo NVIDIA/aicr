@@ -1112,8 +1112,12 @@ derive step rather than the load step.
 `IsRequireEvidence()` is a read, like `IsCriteriaStrict()`. It does not change
 resolution. After `ResolveRecipe`, call `PublishedEvidenceRequired` to combine
 that field with a flag and `AICR_REQUIRE_EVIDENCE`, then
-`Client.RequirePublishedEvidence` when it reports true. `ResolveRecipe` itself
-does not apply the check, so bundle, mirror, and upgrade stay unaffected.
+`Client.RequirePublishedEvidence` when it reports true. That call rejects a
+Client whose recipe source is not `EmbeddedSource()`, including
+`FilesystemSource` from `--data` or `spec.recipe.data`, before it checks the
+leaf. A committed pointer attests the embedded catalog only. `ResolveRecipe`
+itself does not apply the check, so bundle, mirror, and upgrade stay
+unaffected.
 
 All five spec sections have a derivation, and every one of them has a
 destination. `SnapshotOutputOptions()` projects `spec.snapshot.output` even

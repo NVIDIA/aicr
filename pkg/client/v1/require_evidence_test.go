@@ -15,6 +15,9 @@
 package aicr_test
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
@@ -74,5 +77,29 @@ func TestRequirePublishedEvidenceNilClient(t *testing.T) {
 	err := (*aicr.Client)(nil).RequirePublishedEvidence(t.Context(), result)
 	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("code = %v, err = %v", errorstest.ReportedCode(err), err)
+	}
+}
+
+func TestRequirePublishedEvidenceRejectsExternalSource(t *testing.T) {
+	dir := t.TempDir()
+	registry := "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"
+	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte(registry), 0o600); err != nil {
+		t.Fatalf("write registry: %v", err)
+	}
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(dir)))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	result := aicr.WrapResolved(&recipe.RecipeResult{Criteria: &recipe.Criteria{
+		Accelerator: "gb200", Service: "eks", OS: "ubuntu", Intent: "training",
+	}})
+	err = client.RequirePublishedEvidence(t.Context(), result)
+	if errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
+		t.Fatalf("code = %v, err = %v", errorstest.ReportedCode(err), err)
+	}
+	if !strings.Contains(err.Error(), "resolved with an external data source") {
+		t.Fatalf("error = %v, want the external-source reason", err)
 	}
 }

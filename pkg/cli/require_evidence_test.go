@@ -29,6 +29,7 @@ import (
 )
 
 func TestRequireEvidenceAcceptsOnlyPublishedPointers(t *testing.T) {
+	t.Setenv(evidenceindex.EnvVar, "")
 	configOn := writeRequireEvidenceConfig(t, true)
 	configOff := writeRequireEvidenceConfig(t, false)
 	externalLeaf := writeExternalEvidenceCatalog(t, true)
@@ -93,11 +94,13 @@ func TestRequireEvidenceAcceptsOnlyPublishedPointers(t *testing.T) {
 			name:     "external leaf fails even when the id has a pointer",
 			args:     []string{"recipe", "--require-evidence", "--data", externalLeaf, "--service", "eks", "--accelerator", "gb200", "--os", "ubuntu", "--intent", "training"},
 			wantCode: errors.ErrCodeNotFound,
-			wantText: "resolved leaf is not the embedded catalog recipe",
+			wantText: "resolved with an external data source",
 		},
 		{
-			name: "unrelated external overlay leaves the embedded leaf",
-			args: []string{"recipe", "--require-evidence", "--data", unrelated, "--service", "eks", "--accelerator", "gb200", "--os", "ubuntu", "--intent", "training"},
+			name:     "external data fails when the leaf stays embedded",
+			args:     []string{"recipe", "--require-evidence", "--data", unrelated, "--service", "eks", "--accelerator", "gb200", "--os", "ubuntu", "--intent", "training"},
+			wantCode: errors.ErrCodeNotFound,
+			wantText: "resolved with an external data source",
 		},
 	}
 
@@ -157,7 +160,8 @@ func writeRequireEvidenceConfig(t *testing.T, enabled bool) string {
 // writeExternalEvidenceCatalog writes a --data catalog. matching adds a leaf
 // that bases gb200-eks-ubuntu-training with the same criteria, so resolution
 // selects that external overlay. Otherwise the overlay cannot match that
-// request and the embedded leaf remains.
+// request and the embedded leaf remains. Both shapes use an external source,
+// so --require-evidence rejects them.
 func writeExternalEvidenceCatalog(t *testing.T, matching bool) string {
 	t.Helper()
 	dir := t.TempDir()

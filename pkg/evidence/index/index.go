@@ -111,13 +111,28 @@ func LeafSource(applied []string, entries []CatalogSource) string {
 	return ""
 }
 
+// ExternalSource rejects result because it was resolved against a recipe
+// source other than the embedded catalog. A committed pointer attests that
+// catalog only, so FilesystemSource and OCISource fail even when the leaf
+// overlay is still the embedded one. That covers a --data directory that
+// replaces a parent overlay, a values file, or registry.yaml.
+func ExternalSource(result *recipe.RecipeResult) error {
+	if result == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "resolved recipe is required")
+	}
+	return missingEvidence(attestation.RecipeNameFor(result), "resolved with an external data source")
+}
+
 // Check rejects a resolved recipe that has no committed evidence pointer.
 //
 // The recipe id is attestation.RecipeNameFor, so a profiled resolve carries
 // the selected value and a pointer on the unprofiled id does not cover it.
 // leafSource must be recipe.CatalogSourceEmbedded. A leaf loaded from --data
 // fails even when its id matches a committed pointer, because that pointer
-// attests the embedded recipe. The check reads the embedded index only.
+// attests the embedded recipe. Callers that can see the client source call
+// ExternalSource first: Check only sees the leaf overlay, and a --data
+// change to anything else still reports an embedded leaf. The check reads
+// the embedded index only.
 func Check(result *recipe.RecipeResult, leafSource string) error {
 	if result == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "resolved recipe is required")

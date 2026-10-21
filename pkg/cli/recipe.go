@@ -106,7 +106,7 @@ func recipeCmdFlags() []cli.Flag {
 			Name: flagRequireEvidence,
 			Usage: `Fail when the resolved recipe has no committed evidence pointer.
 	The check is offline presence for the resolved recipe id, including the selected profile value. It does not verify a signature or fetch a bundle.
-	A pointer on a base id does not cover a profiled resolve, and a resolved leaf that is not the embedded catalog recipe fails.
+	A pointer on a base id does not cover a profiled resolve. Resolving with external data (--data or spec.recipe.data) fails, even when the leaf overlay is still the embedded one.
 	Also honored via AICR_REQUIRE_EVIDENCE=1 or spec.recipe.requireEvidence: true in --config.`,
 			Category: catQueryParameters,
 		},

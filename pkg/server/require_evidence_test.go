@@ -25,6 +25,7 @@ import (
 )
 
 func TestRequireEvidenceQueryParameter(t *testing.T) {
+	t.Setenv(evidenceindex.EnvVar, "")
 	h := newTestHandler(t, nil)
 
 	const unattested = "service=eks&accelerator=h100&os=ubuntu&intent=training"

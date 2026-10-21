@@ -146,6 +146,22 @@ func TestCheckNilRecipe(t *testing.T) {
 	}
 }
 
+func TestExternalSource(t *testing.T) {
+	result := &recipe.RecipeResult{Criteria: &recipe.Criteria{
+		Accelerator: "gb200", Service: "eks", OS: "ubuntu", Intent: "training",
+	}}
+	err := ExternalSource(result)
+	if errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
+		t.Fatalf("ExternalSource code = %v, err = %v", errorstest.ReportedCode(err), err)
+	}
+	if !strings.Contains(err.Error(), "resolved with an external data source") || !strings.Contains(err.Error(), HealthDocURL) {
+		t.Fatalf("ExternalSource = %v, want the external-source reason and the recipe-health link", err)
+	}
+	if errorstest.ReportedCode(ExternalSource(nil)) != errors.ErrCodeInvalidRequest {
+		t.Fatal("ExternalSource(nil) did not return invalid request")
+	}
+}
+
 func TestParseToggleAndEnv(t *testing.T) {
 	t.Setenv(EnvVar, "")
 	if EnabledFromEnv() {
