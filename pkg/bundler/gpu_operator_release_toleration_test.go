@@ -67,7 +67,7 @@ func TestGPUOperatorTolerationsWithoutAcceleratedInput(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	outputDir := t.TempDir()
-	if _, err := b.Make(ctx, rr, outputDir); err != nil {
+	if _, err = b.Make(ctx, rr, outputDir); err != nil {
 		t.Fatalf("Make: %v", err)
 	}
 
