@@ -915,7 +915,9 @@ tagged with its cordon state, and:
    on every exit path (skip, failure, and success), not only the
    success path, so a pass *or* a failure on reduced scope is visible.
    `check-nvidia-smi` appends the breakdown:
-   `(passed <n>, failed <n>, skipped <n>: busy <n>, cordoned <n>)`.
+   `(passed <n>, failed <n>, skipped <n>: busy <n>, cordoned <n>)`,
+   with `busy-probe error <n>` between `busy` and `cordoned` when the
+   busy-probe errored on any node.
    `<validated>` is the count actually confirmed working, not the
    schedulable count: it is `0` on the paths that verify nothing and
    the successful-node count on the failure path (a partial pass is not

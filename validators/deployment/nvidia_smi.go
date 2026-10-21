@@ -154,11 +154,7 @@ func (c gpuNodeCoverage) skipped() int {
 // and skipped counts, and the skips broken down by cause. nodesValidated is
 // the passed count, so it is 0 on the paths that exit before verifying any
 // node. The busy-probe error count appears only when nonzero. The "RESULT: "
-// prefix is the validator runtime's own convention
-// (pkg/validator/validator.go resultSummaryPrefix) for echoing a stdout line
-// into live CLI output at INFO level, not just the CTRF report's Stdout array
-// — without it this line is only visible after the run, in the (possibly
-// redacted) report.
+// prefix is resultSummaryPrefix in pkg/validator/validator.go.
 func (c gpuNodeCoverage) coverageLine() string {
 	if c.total == 0 {
 		return "RESULT: nodesValidated: 0/0"
@@ -289,8 +285,8 @@ func runNvidiaSMICheck(ctx *validators.Context, verifyNode func(nodeName string)
 
 	if len(freeNodes) == 0 {
 		printLines(coverage.coverageLine())
+		emitExtraOrWarn(coverage.coverageExtra())
 		if len(coverage.busy) > 0 {
-			emitExtraOrWarn(coverage.coverageExtra())
 			// No node is free and at least one was CONFIRMED occupied. Without a
 			// host-driver floor this is a legitimate scope-narrowing Skip. With a
 			// declared floor, occupancy is not a reason to leave the gate
