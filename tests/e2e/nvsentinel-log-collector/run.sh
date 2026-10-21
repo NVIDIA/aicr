@@ -233,6 +233,45 @@ install_component() {
     err "$(basename "$1") install failed"
 }
 
+# render_nvsentinel_bundle renders the bundle's nvsentinel chart with the
+# values its install.sh passes. It runs in a subshell, so upstream.env's
+# variables do not leak.
+render_nvsentinel_bundle() (
+  cd "${BUNDLE_DIR}" || exit 1
+  # shellcheck source=/dev/null
+  . ./upstream.env
+  # shellcheck disable=SC2153 # CHART, REPO and VERSION come from upstream.env.
+  helm template nvsentinel "${CHART}" ${REPO:+--repo "${REPO}"} --version "${VERSION}" -n nvsentinel \
+    -f values.yaml -f cluster-values.yaml
+)
+
+# preload_file_server_images pulls the file server's images on the host, with
+# retries, and imports them into the node: anonymous registry pulls from inside
+# Kind on shared CI runners are throttled into ImagePullBackOff. The images come
+# from the bundle's own render, so they track the chart pin. Not kind load:
+# with Docker's containerd image store it exports an index whose other
+# platforms have no layers, which its --all-platforms import rejects.
+preload_file_server_images() {
+  local images image attempt arch
+  arch=$(docker version -f '{{.Server.Arch}}') || err "could not read the Docker host architecture"
+  images=$(render_nvsentinel_bundle |
+    yq -N "select(.kind == \"Deployment\" and .metadata.name == \"${FILE_SERVER}\") |
+      .spec.template.spec | (.initContainers // []) + .containers | .[].image" | sort -u) ||
+    err "could not render the file server's images from the bundle"
+  [[ -n "${images}" ]] || err "the bundle renders no ${FILE_SERVER} Deployment"
+  for image in ${images}; do
+    for attempt in 1 2 3; do
+      docker pull -q --platform "linux/${arch}" "${image}" >/dev/null && break
+      ((attempt < 3)) || err "could not pull ${image}"
+      sleep $((attempt * 10))
+    done
+    docker save "${image}" |
+      docker exec -i "${NODE}" ctr -n k8s.io images import --platform "linux/${arch}" --digests \
+        --snapshotter=overlayfs - >/dev/null || err "could not import ${image} into ${NODE}"
+  done
+  msg "Preloaded the file server's images: $(tr '\n' ' ' <<<"${images}")"
+}
+
 install_bundle() {
   msg "Installing cert-manager, prometheus-operator-crds, the Percona datastore and nvsentinel from the bundle..."
   local dir d deadline remaining
@@ -259,6 +298,7 @@ install_bundle() {
   kc -n nvsentinel wait --for=condition=Ready certificate/nvsentinel-mongodb-app-client \
     --timeout="${remaining}s" || err "nvsentinel's MongoDB client certificate was never issued"
 
+  preload_file_server_images
   install_component "${BUNDLE_DIR}"
 
   deadline=$((SECONDS + NVSENTINEL_WAIT_SECONDS))
@@ -274,10 +314,13 @@ publish_proto() {
   local version
   version=$(yq '.components[] | select(.name == "nvsentinel") | .helm.defaultVersion' "${ROOT}/recipes/registry.yaml")
   [[ -n "${version}" && "${version}" != "null" ]] || err "could not read nvsentinel's defaultVersion"
-  curl -fsSL --connect-timeout 10 --max-time 60 \
-    "https://raw.githubusercontent.com/NVIDIA/NVSentinel/${version}/data-models/protobufs/health_event.proto" |
-    awk '/protoc_gen_crd\/proto\/crd.proto/ {next} /^\/\/ HealthEventResource is the root type/ {exit} {print}' \
-      >"${WORK}/health_event.proto" || err "failed to fetch health_event.proto at ${version}"
+  # Download before trimming: awk exits at the marker, and a curl still writing
+  # into the closed pipe fails with "(23) Failed writing body".
+  curl -fsSL --connect-timeout 10 --max-time 60 -o "${WORK}/health_event.proto.raw" \
+    "https://raw.githubusercontent.com/NVIDIA/NVSentinel/${version}/data-models/protobufs/health_event.proto" ||
+    err "failed to fetch health_event.proto at ${version}"
+  awk '/protoc_gen_crd\/proto\/crd.proto/ {next} /^\/\/ HealthEventResource is the root type/ {exit} {print}' \
+    "${WORK}/health_event.proto.raw" >"${WORK}/health_event.proto"
   grep -q "rpc HealthEventOccurredV1" "${WORK}/health_event.proto" ||
     err "health_event.proto at ${version} has no HealthEventOccurredV1 -- the platform-connector API moved"
   kc -n nvsentinel create configmap e2e-health-event-proto \

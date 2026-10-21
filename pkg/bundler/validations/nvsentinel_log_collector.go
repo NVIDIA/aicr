@@ -42,6 +42,7 @@ const (
 	fileServerNamePath              = "incluster-file-server.fullnameOverride"
 	fileServerPortPath              = "incluster-file-server.service.port"
 	logCollectorMixinName           = "nvsentinel-log-collector"
+	logCollectorFileServerName      = "nvsentinel-incluster-file-server"
 	gpuOperatorDriverEnabledPath    = "driver.enabled"
 	gpuOperatorDriverInstallDirPath = "hostPaths.driverInstallDir"
 	logCollectorDefaultOperatorNS   = "gpu-operator"
@@ -61,10 +62,11 @@ const (
 //     skips it in dry run, so it never captures. A logCollector.enabled that
 //     is not a boolean is rejected too: the chart also renders it into
 //     fault-remediation's --enable-log-collector flag, which parses strictly;
-//   - the file server's name is not pinned by fullnameOverride, so its
+//   - the file server's name is not the mixin's fullnameOverride: unset, its
 //     Service follows the Helm release name, which differs by deployer (Flux
-//     names the release <namespace>-<name>), or the upload URL is not that
-//     Service;
+//     names the release <namespace>-<name>); renamed, the nvsentinel health
+//     check, which asserts the rollout by that name, passes a failed one. Or
+//     the upload URL is not that Service;
 //   - the collector cannot reach nvidia-bug-report. It runs the script in the
 //     GPU Operator's driver container, which it looks up in the single
 //     namespace gpuOperatorNamespaces names, or from GKE's managed driver
@@ -74,7 +76,7 @@ const (
 // The Job template renders logCollector.env after the variables it sets from
 // uploadURL and gpuOperatorNamespaces, so an env.UPLOAD_URL_BASE or
 // env.GPU_OPERATOR_NAMESPACE entry replaces them; the rules read the entry when
-// one is set.
+// one is set, and an empty namespace as the collector's gpu-operator fallback.
 //
 // The collector's MOCK_MODE uploads a synthetic report without a driver,
 // which the Kind e2e uses, so it skips the last rule. The collector enters it
@@ -156,11 +158,12 @@ func CheckNVSentinelLogCollectorCoherent(ctx context.Context, componentName stri
 
 	if fileServer {
 		name, _, _ := resolvedStringValue(values, fileServerNamePath)
-		if name == "" {
+		switch name {
+		case "":
 			fail("%s is unset, so the file server's Service is named after the Helm release, which differs by "+
 				"deployer (Flux names it <namespace>-<name>), and %s cannot name it -- compose the %s mixin, which "+
 				"pins it", fileServerNamePath, logCollectorUploadURLPath, logCollectorMixinName)
-		} else {
+		case logCollectorFileServerName:
 			host := fmt.Sprintf("%s.%s.svc.cluster.local", name, componentNamespace(recipeResult, componentName))
 			// A null or 80 port is the chart's default, which the URL may omit.
 			if port, ok := component.GetValueByPath(values, fileServerPortPath); ok && port != nil && fmt.Sprint(port) != "80" {
@@ -176,6 +179,10 @@ func CheckNVSentinelLogCollectorCoherent(ctx context.Context, componentName stri
 				fail("%s is %q, not the in-cluster file server's Service, so collections upload elsewhere and "+
 					"the file server holds nothing -- set it to %q", urlPath, got, want)
 			}
+		default:
+			fail("%s is %q, but the nvsentinel health check asserts the file server's rollout as %q, so a failed "+
+				"rollout passes validation -- leave it at %q, as the %s mixin sets it", fileServerNamePath, name,
+				logCollectorFileServerName, logCollectorFileServerName, logCollectorMixinName)
 		}
 	}
 
@@ -252,9 +259,9 @@ func logCollectorDriverViolations(ctx context.Context, recipeResult *recipe.Reci
 	nsPath, namespace := logCollectorNamespacesPath, logCollectorDefaultOperatorNS
 	ns, set, valid := resolvedStringValue(values, logCollectorNamespacesPath)
 	if env, ok := logCollectorEnvValue(values, logCollectorEnvNamespacePath); ok {
-		// The chart defaults only gpuOperatorNamespaces, so an empty entry
-		// reaches the collector as an empty namespace.
-		nsPath, namespace, set, valid = logCollectorEnvNamespacePath, env, false, true
+		// The entry replaces gpuOperatorNamespaces outright, so an empty one
+		// takes the collector's own fallback rather than that value.
+		nsPath, ns, set, valid = logCollectorEnvNamespacePath, env, true, true
 	}
 	if !valid {
 		// The chart quotes whatever it is given, so a list renders as the
