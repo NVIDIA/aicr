@@ -3,8 +3,8 @@
   "@id": "https://github.com/NVIDIA/aicr/.openvex.json",
   "author": "NVIDIA AICR maintainers",
   "role": "document creator",
-  "timestamp": "2026-10-19T00:00:00Z",
-  "version": 21,
+  "timestamp": "2026-10-21T00:00:00Z",
+  "version": 22,
   "tooling": "manual curation (.agents/skills/aicr-managing-openvex)",
   "statements": [
     {
@@ -121,6 +121,167 @@
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
       "impact_statement": "The trigger is the process parsing attacker-supplied UTF-16 XML with the vulnerable library. The copy flagged here is never loaded, and the expat that is loaded (CPython's bundled 2.8.5) is the release that fixed it. The flagged binary package is Debian libexpat1 2.8.3-1~deb13u1, which provides /usr/lib/<triplet>/libexpat.so.1 and libexpatw.so.1 and enters only through the runtime base nvcr.io/nvidia/distroless/python:3.13-v4.1.7@sha256:fb9e31d8c186ea58c191817c97d945c98f2c39989e7a0643b6384738c1034140: scanning that base alone with grype 0.118.0 (the scan-action pin), --only-fixed -c .grype.yaml, reproduces exactly the five libexpat1 HIGH rows on linux/amd64 and linux/arm64, so no AICR-authored layer contributes them. Nothing in the image loads that library. Reading the dynamic section of every ELF file in the aiperf-bench image built at e898b8d58 (index sha256:a8356af256e7530d0534559c65945f790cc2385aaff8789cffd6d0be4f8c5e6e; 717 ELF files on linux/amd64, 713 on linux/arm64) finds no DT_NEEDED entry for libexpat.so.1 or libexpatw.so.1; apart from the library itself the only reference is /etc/ld.so.cache, and no Python source under /opt/venv or /usr/local/lib/python3.13 opens it through ctypes. CPython does not use the system library for XML: lib-dynload/pyexpat.cpython-313-<triplet>.so is built on CPython's bundled expat (pyexpat.EXPAT_VERSION is expat_2.8.5) and its only DT_NEEDED entries are libc.so.6 (plus ld-linux-aarch64.so.1 on arm64), and _elementtree reaches expat only through pyexpat's C-API capsule. A native linux/arm64 run of that image which imported all 1004 aiperf modules and then parsed a document with xml.etree.ElementTree had pyexpat mapped and no libexpat.so.1 in /proc/self/maps. The only XML importer on that import graph is matplotlib 3.11.2's font_manager, which imports plistlib at module load and calls plistlib.loads only from _get_macos_fonts when sys.platform is darwin; aiperf 0.13.0 itself imports none of xml, pyexpat, plistlib or xmlrpc. AICR runs the image only as `aiperf profile --model <text-LLM> --url <endpoint> --endpoint-type chat ...` from buildAIPerfJob in validators/performance/inference_perf_constraint.go, against a cluster-internal http://<svc>.<ns>.svc:<port> endpoint built by resolveFrontendEndpoint / resolveGatewayEndpoint, and exchanges JSON and server-sent events with it, not XML. No bump remediates: Debian fixes at 2.9.0-1~deb13u1, and 3.13-v4.1.7 (built 2026-10-11, digest unchanged on 2026-10-19) is the newest NGC distroless python 3.13 tag and still carries 2.8.3-1~deb13u1 on both architectures; the 3.12 and 3.14 series also end at v4.1.7. So this is a VEX case rather than a base-image bump until NGC rebuilds on the fixed trixie package."
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-58r4-6rv3-gfh8",
+        "description": "pillow out-of-bounds write in the native morphology helper (_imagingmorph.c) when ImageMorph.MorphOp.apply() receives a zero-width image (CVE-2026-112397, CWE-787, High). Fixed only in pillow 13.0.0: aiperf 0.13.0, the newest release, pins pillow~=12.3.0, and 12.3.0 is the last 12.x release."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The vulnerable code runs only through PIL.ImageMorph (MorphOp.apply, match, get_on_pixels); `grep -rn ImageMorph` over the aiperf 0.13.0 wheel (1005 Python files) returns zero hits, so aiperf never calls it on any code path. AICR runs the image only as `aiperf profile --model <text-LLM> --url <endpoint> --endpoint-type chat ...` from buildAIPerfJob in validators/performance/inference_perf_constraint.go (aiperf_entrypoint.py prepends `profile` and adds no flag), and that argv sets no --image-*, --video-*, --input-file, --public-dataset, --search-recipe or --auto-plot flag. aiperf 0.13.0 opens images with pillow in exactly four places, and that invocation reaches none of them: dataset/generator/image.py (ImageGenerator returns from __init__ unless ImageConfig.images_enabled(), and the synthetic composer adds images to a turn only when dataset.images is set, which _build_images in config/flags/_converter_dataset.py leaves unset without --image-* flags); dataset/utils.py open_image and dataset/loader/base_hf_dataset.py, used only by file-backed and Hugging Face dataset loaders; and DatasetManager._convert_media_urls_to_inline, which runs only for endpoints whose plugins.yaml metadata sets requires_inline_media (image_retrieval, not chat). Plot rendering is off: resolve_auto_plot in config/flags/_converter_optionals.py returns False with no --auto-plot flag and no --search-recipe."
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-8g5g-8vmr-9782",
+        "description": "pillow heap buffer overflow in ImagingJpegDecode when JpegImageFile.draft() requests scaled output for a lossless (SOF3) JPEG (CVE-2026-112403, CWE-122, Critical). Fixed only in pillow 13.0.0: aiperf 0.13.0, the newest release, pins pillow~=12.3.0, and 12.3.0 is the last 12.x release."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The overflow needs a JPEG opened with Image.open() and then scaled through JpegImageFile.draft(), which Image.thumbnail() calls; `grep -rnE '\\.thumbnail\\(|\\.draft\\('` over the aiperf 0.13.0 wheel returns zero hits, so even aiperf's image paths never request a scaled decode, and aiperf's own JPEG handling in dataset/utils.py encode_image is the encoder (Image.save), not the decoder. AICR runs the image only as `aiperf profile --model <text-LLM> --url <endpoint> --endpoint-type chat ...` from buildAIPerfJob in validators/performance/inference_perf_constraint.go (aiperf_entrypoint.py prepends `profile` and adds no flag), and that argv sets no --image-*, --video-*, --input-file, --public-dataset, --search-recipe or --auto-plot flag. aiperf 0.13.0 opens images with pillow in exactly four places, and that invocation reaches none of them: dataset/generator/image.py (ImageGenerator returns from __init__ unless ImageConfig.images_enabled(), and the synthetic composer adds images to a turn only when dataset.images is set, which _build_images in config/flags/_converter_dataset.py leaves unset without --image-* flags); dataset/utils.py open_image and dataset/loader/base_hf_dataset.py, used only by file-backed and Hugging Face dataset loaders; and DatasetManager._convert_media_urls_to_inline, which runs only for endpoints whose plugins.yaml metadata sets requires_inline_media (image_retrieval, not chat). Plot rendering is off: resolve_auto_plot in config/flags/_converter_optionals.py returns False with no --auto-plot flag and no --search-recipe."
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-pchr-8j38-3x4p",
+        "description": "pillow TIFF encoder heap out-of-bounds read when an image carrying a ColorMap tag is saved back to TIFF with mismatched plane sizes (CVE-2026-112896, CWE-125, High). Fixed only in pillow 13.0.0: aiperf 0.13.0, the newest release, pins pillow~=12.3.0, and 12.3.0 is the last 12.x release."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The read happens in the TIFF encoder, reached only by Image.save() to TIFF of an image loaded from an attacker-supplied TIFF. aiperf saves images only as PNG or JPEG (dataset/utils.py encode_image, with formats from the ImageFormat enum in common/enums/enums.py), and `grep -rni tiff` over the aiperf 0.13.0 Python sources returns zero hits. AICR runs the image only as `aiperf profile --model <text-LLM> --url <endpoint> --endpoint-type chat ...` from buildAIPerfJob in validators/performance/inference_perf_constraint.go (aiperf_entrypoint.py prepends `profile` and adds no flag), and that argv sets no --image-*, --video-*, --input-file, --public-dataset, --search-recipe or --auto-plot flag. aiperf 0.13.0 opens images with pillow in exactly four places, and that invocation reaches none of them: dataset/generator/image.py (ImageGenerator returns from __init__ unless ImageConfig.images_enabled(), and the synthetic composer adds images to a turn only when dataset.images is set, which _build_images in config/flags/_converter_dataset.py leaves unset without --image-* flags); dataset/utils.py open_image and dataset/loader/base_hf_dataset.py, used only by file-backed and Hugging Face dataset loaders; and DatasetManager._convert_media_urls_to_inline, which runs only for endpoints whose plugins.yaml metadata sets requires_inline_media (image_retrieval, not chat). Plot rendering is off: resolve_auto_plot in config/flags/_converter_optionals.py returns False with no --auto-plot flag and no --search-recipe."
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-c6hw-5grf-ff96",
+        "description": "pillow out-of-bounds read in TiffDecode.c tile and RGBA paths copies heap memory into the decoded pixels of a malformed compressed TIFF (CVE-2026-112404, CWE-125/CWE-126, High). Fixed only in pillow 13.0.0: aiperf 0.13.0, the newest release, pins pillow~=12.3.0, and 12.3.0 is the last 12.x release."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The read happens only while pillow opens and loads a crafted TIFF. `grep -rni tiff` over the aiperf 0.13.0 Python sources returns zero hits, and no Image.open() call is on the AICR execute path. AICR runs the image only as `aiperf profile --model <text-LLM> --url <endpoint> --endpoint-type chat ...` from buildAIPerfJob in validators/performance/inference_perf_constraint.go (aiperf_entrypoint.py prepends `profile` and adds no flag), and that argv sets no --image-*, --video-*, --input-file, --public-dataset, --search-recipe or --auto-plot flag. aiperf 0.13.0 opens images with pillow in exactly four places, and that invocation reaches none of them: dataset/generator/image.py (ImageGenerator returns from __init__ unless ImageConfig.images_enabled(), and the synthetic composer adds images to a turn only when dataset.images is set, which _build_images in config/flags/_converter_dataset.py leaves unset without --image-* flags); dataset/utils.py open_image and dataset/loader/base_hf_dataset.py, used only by file-backed and Hugging Face dataset loaders; and DatasetManager._convert_media_urls_to_inline, which runs only for endpoints whose plugins.yaml metadata sets requires_inline_media (image_retrieval, not chat). Plot rendering is off: resolve_auto_plot in config/flags/_converter_optionals.py returns False with no --auto-plot flag and no --search-recipe."
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-65qm-jvmh-6pqg",
+        "description": "pillow GIF seek keeps the rejected frame size after DecompressionBombError, so continued use of the image object allocates gigabytes (CVE-2026-112400, CWE-400, High). Fixed only in pillow 13.0.0: aiperf 0.13.0, the newest release, pins pillow~=12.3.0, and 12.3.0 is the last 12.x release."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The trigger is an application that opens an animated GIF, catches DecompressionBombError while seeking to a later frame, and keeps using the image. aiperf 0.13.0 has zero hits for `grep -rnE 'DecompressionBombError|ImageSequence|n_frames|is_animated|\\.seek\\('`; its only GIF references are MIME-type tables in endpoints/openai_image_edit.py and exporters/mlflow_data_exporter.py, neither of which calls pillow. AICR runs the image only as `aiperf profile --model <text-LLM> --url <endpoint> --endpoint-type chat ...` from buildAIPerfJob in validators/performance/inference_perf_constraint.go (aiperf_entrypoint.py prepends `profile` and adds no flag), and that argv sets no --image-*, --video-*, --input-file, --public-dataset, --search-recipe or --auto-plot flag. aiperf 0.13.0 opens images with pillow in exactly four places, and that invocation reaches none of them: dataset/generator/image.py (ImageGenerator returns from __init__ unless ImageConfig.images_enabled(), and the synthetic composer adds images to a turn only when dataset.images is set, which _build_images in config/flags/_converter_dataset.py leaves unset without --image-* flags); dataset/utils.py open_image and dataset/loader/base_hf_dataset.py, used only by file-backed and Hugging Face dataset loaders; and DatasetManager._convert_media_urls_to_inline, which runs only for endpoints whose plugins.yaml metadata sets requires_inline_media (image_retrieval, not chat). Plot rendering is off: resolve_auto_plot in config/flags/_converter_optionals.py returns False with no --auto-plot flag and no --search-recipe."
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-p4wg-p73j-c528",
+        "description": "pillow unbounded recursion in PdfParser on a cyclic page tree or a long /Prev trailer chain when appending to an existing PDF; incomplete fix for CVE-2026-42310 (CVE-2026-112895, CWE-674, High). Fixed only in pillow 13.0.0: aiperf 0.13.0, the newest release, pins pillow~=12.3.0, and 12.3.0 is the last 12.x release."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "PdfParser parses an existing file only for Image.save(..., format=\"PDF\", append=True), or when used directly; Image.open() has no PDF decoder. `grep -rnE 'PdfParser|PdfImagePlugin|\\.pdf\\b|append=True'` over the aiperf 0.13.0 Python sources returns zero hits, and aiperf saves only PNG and JPEG. AICR runs the image only as `aiperf profile --model <text-LLM> --url <endpoint> --endpoint-type chat ...` from buildAIPerfJob in validators/performance/inference_perf_constraint.go (aiperf_entrypoint.py prepends `profile` and adds no flag), and that argv sets no --image-*, --video-*, --input-file, --public-dataset, --search-recipe or --auto-plot flag. aiperf 0.13.0 opens images with pillow in exactly four places, and that invocation reaches none of them: dataset/generator/image.py (ImageGenerator returns from __init__ unless ImageConfig.images_enabled(), and the synthetic composer adds images to a turn only when dataset.images is set, which _build_images in config/flags/_converter_dataset.py leaves unset without --image-* flags); dataset/utils.py open_image and dataset/loader/base_hf_dataset.py, used only by file-backed and Hugging Face dataset loaders; and DatasetManager._convert_media_urls_to_inline, which runs only for endpoints whose plugins.yaml metadata sets requires_inline_media (image_retrieval, not chat). Plot rendering is off: resolve_auto_plot in config/flags/_converter_optionals.py returns False with no --auto-plot flag and no --search-recipe."
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-q45j-58j2-45rg",
+        "description": "pillow TiffDecode returns uninitialized heap memory as pixels for a TIFF with short JPEG-compressed strips (CVE-2026-112897, CWE-908, High). Fixed only in pillow 13.0.0: aiperf 0.13.0, the newest release, pins pillow~=12.3.0, and 12.3.0 is the last 12.x release."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The leak happens only while pillow opens and loads a crafted TIFF, and is observable only through pixels derived from it. `grep -rni tiff` over the aiperf 0.13.0 Python sources returns zero hits, and no Image.open() call is on the AICR execute path. AICR runs the image only as `aiperf profile --model <text-LLM> --url <endpoint> --endpoint-type chat ...` from buildAIPerfJob in validators/performance/inference_perf_constraint.go (aiperf_entrypoint.py prepends `profile` and adds no flag), and that argv sets no --image-*, --video-*, --input-file, --public-dataset, --search-recipe or --auto-plot flag. aiperf 0.13.0 opens images with pillow in exactly four places, and that invocation reaches none of them: dataset/generator/image.py (ImageGenerator returns from __init__ unless ImageConfig.images_enabled(), and the synthetic composer adds images to a turn only when dataset.images is set, which _build_images in config/flags/_converter_dataset.py leaves unset without --image-* flags); dataset/utils.py open_image and dataset/loader/base_hf_dataset.py, used only by file-backed and Hugging Face dataset loaders; and DatasetManager._convert_media_urls_to_inline, which runs only for endpoints whose plugins.yaml metadata sets requires_inline_media (image_retrieval, not chat). Plot rendering is off: resolve_auto_plot in config/flags/_converter_optionals.py returns False with no --auto-plot flag and no --search-recipe."
     }
   ]
 }
