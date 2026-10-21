@@ -1,0 +1,76 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Turns on NVSentinel's log collector and the in-cluster file server it uploads
+# to, together: the collector has nowhere to upload without the server, and the
+# server has nothing to hold without the collector (#2619). See
+# docs/user/component-catalog.md#diagnostics-capture.
+#
+# Before fault-remediation acts on any action other than NONE, it runs a
+# privileged Job on the faulty node that captures an nvidia-bug-report and
+# uploads it, then remediates once the Job finishes, fails or times out; a Job
+# that fails or times out does not block the repair. The collector is skipped
+# in dry run, so compose this mixin beside nvsentinel-remediation.
+# CheckNVSentinelLogCollectorCoherent rejects it without live remediation, with
+# only one of the two settings on, with an upload URL that is not this file
+# server, and on a platform where the collector cannot reach the driver: it
+# runs nvidia-bug-report in the GPU Operator's driver container, or from GKE's
+# managed driver install.
+#
+# The file server's volume is registered in nvsentinel's storageClassPaths, so
+# --storage-class reaches it; without it the claim takes the cluster default.
+#
+# No shipped recipe composes this mixin (TestNoShippedRecipeAdoptsLogCollector).
+
+kind: RecipeMixin
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: nvsentinel-log-collector
+spec:
+  componentRefs:
+    - name: nvsentinel
+      overrides:
+        global:
+          inclusterFileServer:
+            enabled: true
+        fault-remediation:
+          logCollector:
+            enabled: true
+            # The file server's Service, named by fullnameOverride below.
+            uploadURL: "http://nvsentinel-incluster-file-server.nvsentinel.svc.cluster.local/upload"
+            # Off: must-gather collects from every node in the cluster, not the
+            # faulty one, so on a large cluster one fault becomes a cluster-wide
+            # collection that also outlasts the timeout below.
+            enableGpuOperatorMustGather: false
+            # Remediation waits for the collector up to this long. The chart
+            # sizes it for an nvidia-bug-report alone.
+            timeout: "10m"
+        incluster-file-server:
+          # The Service name otherwise follows the Helm release name, which
+          # differs by deployer (Flux names the release <namespace>-<name>), and
+          # uploadURL names this Service.
+          fullnameOverride: nvsentinel-incluster-file-server
+          persistence:
+            # Upstream estimates 5-50 MB per collection, so 50Gi holds at least
+            # a thousand of the largest within one retention window.
+            size: 50Gi
+          logCleanup:
+            enabled: true
+            # Long enough to reach a fault from the previous week, short enough
+            # that the volume does not fill between cleanups.
+            retentionDays: 7
+            # Hourly rather than the chart's daily: each cycle also refreshes
+            # fileserver_disk_space_free_bytes, which would otherwise be up to
+            # a day stale, and an expired file goes within the hour.
+            sleepInterval: 3600

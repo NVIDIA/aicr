@@ -423,7 +423,7 @@ AICR ships NVSentinel in the upstream chart's **monitoring-only** configuration:
 
 Also off: `healthEventsAnalyzer`, `lifecycleManager`, `cspHealthMonitor`, `kubernetesObjectMonitor`, `nvcreCertificationMonitor`, `nicHealthMonitor`, `slurmDrainMonitor`, `preflight`, `eventExporter`, `inclusterFileServer`, `k8sdatastoreCrds`. Verified against chart `v1.28.0`, the version pinned in `recipes/registry.yaml`.
 
-Two entries above are turned back on by AICR's shipped recipes: `nicHealthMonitor` on AKS and OKE (see [NIC and fabric fault detection](#nic-and-fabric-fault-detection)), and `slurmDrainMonitor` on every `platform: slurm` recipe (see [Slurm Drain Monitor](#slurm-drain-monitor)). The remediation components are turned on only by the opt-in [remediation steps](#graded-remediation), which bring their own datastore rather than `mongodbStore`, `healthEventsAnalyzer` only by the opt-in [analyzer mixin](#health-events-analyzer), and `eventExporter` only by the opt-in [event exporter mixin](#health-event-export).
+Two entries above are turned back on by AICR's shipped recipes: `nicHealthMonitor` on AKS and OKE (see [NIC and fabric fault detection](#nic-and-fabric-fault-detection)), and `slurmDrainMonitor` on every `platform: slurm` recipe (see [Slurm Drain Monitor](#slurm-drain-monitor)). The remediation components are turned on only by the opt-in [remediation steps](#graded-remediation), which bring their own datastore rather than `mongodbStore`, `healthEventsAnalyzer` only by the opt-in [analyzer mixin](#health-events-analyzer), `eventExporter` only by the opt-in [event exporter mixin](#health-event-export), and `inclusterFileServer` only by the opt-in [log collector mixin](#diagnostics-capture).
 
 **The practical effect.** A stock AICR bundle surfaces GPU faults; it does not act on them. A node that needs a reboot is reported, not rebooted, and an operator intervenes. That is deliberate: `janitor` can reboot or terminate nodes, and enabling it without the operator having chosen to is not a safe default.
 
@@ -1060,6 +1060,51 @@ The name is `event-exporter.oidcSecretName` (the mixin sets `event-exporter-oidc
 **Resources and privileges.** One replica on a system node, requesting 500m and 512Mi and limited to 1 CPU and 1Gi. With a MongoDB datastore the chart runs it as root (`runAsUser: 0`). It holds no Kubernetes RBAC of its own; it reads the datastore with the remediation step's x509 client certificate and makes outbound HTTP calls only.
 
 **Deployment validation.** The registry's `nvsentinel` check asserts that the `event-exporter` Deployment is fully rolled out wherever it renders, and passes where it does not. To stop exporting, regenerate the bundle without the mixin and redeploy; events already delivered stay at the sink.
+
+### Diagnostics Capture
+
+When NVSentinel resets a GPU or reboots a node, the evidence of what went wrong goes with it. The opt-in `nvsentinel-log-collector` mixin captures it first: before `fault-remediation` acts on any action other than `NONE`, it runs a Job on the faulty node that collects an `nvidia-bug-report` and uploads it to an in-cluster file server. Compose it beside the [remediation step](#graded-remediation) and the [health events analyzer](#health-events-analyzer), which live remediation requires; no shipped recipe composes it.
+
+```yaml
+# your-leaf-overlay.yaml
+spec:
+  mixins:
+    - nvsentinel-remediation
+    - nvsentinel-health-events-analyzer
+    - nvsentinel-log-collector
+```
+
+The mixin turns on two settings together, because neither is useful alone: `fault-remediation.logCollector.enabled`, the collector, and `global.inclusterFileServer.enabled`, the nginx file server that stores and serves what it collects.
+
+**Order and timing.** `fault-remediation` waits for the collection Job before it creates the repair, so each repair is delayed by the collection, up to the mixin's `logCollector.timeout` of 10 minutes. A Job that fails or times out does not block the repair: `fault-remediation` records the failure and remediates, and a timed-out Job is left running. A Job that cannot be created at all does block it, and `fault-remediation` retries the event. The collector is skipped in dry run, so the `nvsentinel-observe` step collects nothing, and `nvsentinel-quarantine` does not run `fault-remediation` at all. It is also skipped once a node reaches the repair cap (`fault-remediation.maxRemediationAttempts: 3`): `fault-remediation` gives up on the event before collecting, so a fault that keeps firing on a capped node does not start a new collection each time.
+
+**Supported platforms.** The collector runs `nvidia-bug-report.sh` inside the GPU Operator's driver container on the node, which it finds by label in the one namespace `logCollector.gpuOperatorNamespaces` names (`gpu-operator`; despite the name, it takes a single namespace), or, on GKE COS, from the managed driver install at `/home/kubernetes/bin/nvidia`. It therefore works where the GPU Operator installs the driver (EKS, BCM, LKE, generic, most RKE2 and k0s leaves, and AKS and OKE with `gpuStack=operator-managed`). The collector can also read GKE COS's managed install, but the remediation step it needs is not supported on GKE COS (see [Graded Remediation](#graded-remediation)), so the mixin cannot be used there today. Where the node image carries the driver and the GPU Operator runs no driver container (AKS and OKE at their default `gpuStack`, Kind, the VR200 RKE2 and H200 k0s leaves), every collection would fail, so the bundle does. Custom cluster domains are not supported: the upload URL names `svc.cluster.local`, as the datastore's does.
+
+**Where bundles land and how to retrieve them.** Each collection is stored on the file server's volume under `/upload/<node>/<timestamp>/`, as `nvidia-bug-report-<node>-<timestamp>.log.gz`. The server lists directories, so browse and download through a port-forward:
+
+```shell
+kubectl -n nvsentinel port-forward svc/nvsentinel-incluster-file-server 8081:80
+# in another terminal; replace the node and timestamp
+curl -s http://localhost:8081/upload/
+curl -sO http://localhost:8081/upload/gpu-node-1/20261015-101500/nvidia-bug-report-gpu-node-1-20261015-101500.log.gz
+```
+
+**Retention and sizing.** A cleanup container runs `find -type f -mtime +7 -delete` (`incluster-file-server.logCleanup.retentionDays: 7`) at start and then every hour (`sleepInterval: 3600`, where the chart's default is daily), so a report is deleted within an hour of being at least eight full days old: `find` counts whole days, so `retentionDays: N` keeps a report for N+1. Only files are deleted; the emptied `<node>/<timestamp>/` directories stay. Upstream estimates 5–50 MB per collection, so the 50Gi volume (`persistence.size`) holds at least a thousand of the largest within one retention window. The cleanup container exports `fileserver_disk_space_free_bytes` on the file server's `cleanup-metrics` port (9002), refreshed each cycle; alert on it if collections are frequent.
+
+**Storage.** The file server claims one `ReadWriteOnce` volume. Its `storageClassName` is registered in `nvsentinel`'s `storageClassPaths`, so `--storage-class` sets it; without the flag the claim takes the cluster's default StorageClass, `aicr bundle` warns, and on a cluster with none the claim stays `Pending` and the file server never starts. AICR provisions no storage.
+
+**What is not collected.** GPU Operator must-gather is set explicitly off (`enableGpuOperatorMustGather: false`): it collects from every node in the cluster, not the faulty one, so on a large cluster one fault becomes a cluster-wide collection that also outlasts the timeout. The GCP and AWS SOS reports stay at the chart default, off.
+
+**Privileges and exposure.**
+
+- The collection Job is privileged and mounts the node's root filesystem read-write at `/host`.
+- Its service account, `log-collector-job`, is bound to a ClusterRole that can list pods and namespaces and create `pods/exec` in every namespace, which it needs to run the bug report in the driver container. That is a cluster-wide exec grant.
+- An `nvidia-bug-report` contains system configuration. The file server speaks plain HTTP inside the cluster and accepts `PUT` and `DELETE` on `/upload/` from any pod that can reach its Service, with no size limit. RBAC does not govern HTTP to a Service, and the chart's own NetworkPolicy excludes the file server, so restricting who can read or delete reports takes a NetworkPolicy you supply.
+- The file server image is `docker.io/bitnamilegacy/nginx`, from Bitnami's frozen archive, which receives no patches; it is scanned with the other mixin images (see [Container Images](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md)).
+
+**Bundle-time gates.** `CheckNVSentinelLogCollectorCoherent` blocks a bundle with only one of the two settings on; with the collector on but `fault-remediation` off, in dry run, or with a `dryRun` that is not a boolean; without the file server's name pinned by `incluster-file-server.fullnameOverride` (the Service name otherwise follows the Helm release name, which Flux sets to `<namespace>-<name>`), or with an `uploadURL` that is not that Service; and on a platform where the collector cannot reach the driver, as above. It also rejects `--dynamic` on any path it verifies. The collector's `MOCK_MODE` (exactly `true`), which uploads a synthetic report without a driver, skips the platform rule; AICR's Kind e2e uses it.
+
+**Health check.** The `nvsentinel` health check fails when the `nvsentinel-incluster-file-server` Deployment renders without a complete rollout, and passes where it is absent. It does not prove a collection succeeds; the Kind e2e (`tests/e2e/nvsentinel-log-collector/`) drives one fault through live remediation and checks the uploaded report and that the repair was requested after it. A collection Job that fails leaves its Failed pods in the `nvsentinel` namespace for an hour (`ttlSecondsAfterFinished: 3600`, up to seven pods at the default retry limit), and the health check's failed-pod rule reports them until then.
 
 ## NVSentinel on Provider-Installed-Driver Platforms
 

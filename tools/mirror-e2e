@@ -29,8 +29,8 @@
 #    nvsentinel-object-monitor, nvsentinel-preflight,
 #    nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor,
 #    nvsentinel-remediation, nvsentinel-slinky-drainer,
-#    nvsentinel-health-events-analyzer and nvsentinel-event-exporter
-#    mixins composed, so their mixin-gated images are
+#    nvsentinel-health-events-analyzer, nvsentinel-event-exporter and
+#    nvsentinel-log-collector mixins composed, so their mixin-gated images are
 #    asserted in every manifest format and the three small controller images
 #    (object monitor, preflight, slurm drain monitor) are carried through the
 #    transfer
@@ -134,6 +134,16 @@ SLINKY_DRAINER_IMAGE="ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.28.0@sha256:bf
 
 # The image the nvsentinel-health-events-analyzer mixin pulls in (#2618).
 HEALTH_EVENTS_ANALYZER_IMAGE="ghcr.io/nvidia/nvsentinel/health-events-analyzer:v1.28.0"
+# The images the nvsentinel-log-collector mixin pulls in (#2619): the collector
+# Job's, named only inside fault-remediation's ConfigMap, and the in-cluster
+# file server's.
+LOG_COLLECTOR_IMAGES=(
+    "ghcr.io/nvidia/nvsentinel/log-collector:v1.28.0"
+    "ghcr.io/nvidia/nvsentinel/file-server-cleanup:v1.28.0"
+    "docker.io/bitnamilegacy/nginx:1.27.2-debian-12-r2"
+    "public.ecr.aws/docker/library/busybox:1.37.0"
+    "quay.io/martinhelmich/prometheus-nginxlog-exporter:v1.10.0"
+)
 
 # The image the nvsentinel-event-exporter mixin pulls in (#2621).
 EVENT_EXPORTER_IMAGE="ghcr.io/nvidia/nvsentinel/event-exporter:v1.28.0"
@@ -148,6 +158,7 @@ MIXIN_IMAGES=(
     "${SLINKY_DRAINER_IMAGE}"
     "${HEALTH_EVENTS_ANALYZER_IMAGE}"
     "${EVENT_EXPORTER_IMAGE}"
+    "${LOG_COLLECTOR_IMAGES[@]}"
 )
 
 # The subset carried through the Hauler sync, Zarf package and registry
@@ -242,7 +253,7 @@ ensure_cluster() {
 }
 
 generate_recipe() {
-    msg "Generating recipe (with the nvsentinel-object-monitor, nvsentinel-preflight, nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor, nvsentinel-remediation, nvsentinel-slinky-drainer, nvsentinel-health-events-analyzer and nvsentinel-event-exporter mixins composed)..."
+    msg "Generating recipe (with the nvsentinel-object-monitor, nvsentinel-preflight, nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor, nvsentinel-remediation, nvsentinel-slinky-drainer, nvsentinel-health-events-analyzer, nvsentinel-event-exporter and nvsentinel-log-collector mixins composed)..."
     # No --os: the Kind overlay tree is OS-agnostic, and a stated OS that no
     # Kind overlay distinguishes fails criteria coverage (issue #1542).
     #
@@ -250,8 +261,8 @@ generate_recipe() {
     # the nvsentinel-object-monitor, nvsentinel-preflight,
     # nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor,
     # nvsentinel-remediation, nvsentinel-slinky-drainer,
-    # nvsentinel-health-events-analyzer and nvsentinel-event-exporter
-    # mixins, so every mixin-gated image is
+    # nvsentinel-health-events-analyzer, nvsentinel-event-exporter and
+    # nvsentinel-log-collector mixins, so every mixin-gated image is
     # discovered by `mirror list` and asserted in the generated Hauler and Zarf
     # manifests.
     # Only the three small controller images are carried through the sync,
@@ -284,8 +295,10 @@ REGISTRY_EOF
     # because this lane never bundles: CheckNVSentinelSlurmDrainMonitorRequiresSlinky,
     # CheckNVSentinelSlurmCustomDrainCoherent and
     # CheckNVSentinelEventExporterCoherent would reject them at `aicr bundle`,
-    # but `mirror list` runs no bundle gates.
-    yq '.spec.mixins = ["nvsentinel-object-monitor", "nvsentinel-preflight", "nvsentinel-nic-health-monitor", "nvsentinel-slurm-drain-monitor", "nvsentinel-remediation", "nvsentinel-slinky-drainer", "nvsentinel-health-events-analyzer", "nvsentinel-event-exporter"]' \
+    # but `mirror list` runs no bundle gates. The same holds for
+    # nvsentinel-log-collector on Kind, whose driver CheckNVSentinelLogCollectorCoherent
+    # cannot reach.
+    yq '.spec.mixins = ["nvsentinel-object-monitor", "nvsentinel-preflight", "nvsentinel-nic-health-monitor", "nvsentinel-slurm-drain-monitor", "nvsentinel-remediation", "nvsentinel-slinky-drainer", "nvsentinel-health-events-analyzer", "nvsentinel-event-exporter", "nvsentinel-log-collector"]' \
         "${ROOT}/recipes/overlays/h100-kind-training.yaml" \
         > "${data_dir}/overlays/h100-kind-training.yaml"
 
@@ -333,6 +346,9 @@ REGISTRY_EOF
     fi
     if ! grep -q "eventExporter" "${WORK}/recipe.yaml"; then
         err "nvsentinel-event-exporter mixin did not apply -- the recipe carries no eventExporter override"
+    fi
+    if ! grep -q "inclusterFileServer" "${WORK}/recipe.yaml"; then
+        err "nvsentinel-log-collector mixin did not apply -- the recipe carries no inclusterFileServer override"
     fi
     msg "Recipe generated at ${WORK}/recipe.yaml"
 }
