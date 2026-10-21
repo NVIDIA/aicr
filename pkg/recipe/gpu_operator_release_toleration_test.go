@@ -22,12 +22,11 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
-// Every leaf that resolves gpu-operator must keep the base overlay's
-// daemonsets.tolerations entry for NVSentinel's release taint, or opt out with
-// an explicit empty list. Overlay lists replace on inheritance, so a leaf that
-// sets its own daemonsets.tolerations drops the entry silently; without it the
-// operand pods already running on a released node are misscheduled and the
-// GPU Operator upgrade controller refuses every driver upgrade (#3357).
+// TestGPUOperatorLeavesTolerateNVSentinelReleaseTaint requires every leaf that
+// resolves gpu-operator to carry the base overlay's daemonsets.tolerations entry
+// for NVSentinel's release taint (Exists/NoSchedule), or to opt out with an
+// explicit empty list, which only kind leaves may do. Overlay lists replace on
+// inheritance, so a leaf that sets its own list drops the entry silently (#3357).
 func TestGPUOperatorLeavesTolerateNVSentinelReleaseTaint(t *testing.T) {
 	const key = "nvsentinel.dgxc.nvidia.com/external-remediation"
 	const path = "daemonsets.tolerations"
@@ -65,13 +64,13 @@ func TestGPUOperatorLeavesTolerateNVSentinelReleaseTaint(t *testing.T) {
 		}
 		found := false
 		for _, item := range list {
-			if m, ok := item.(map[string]any); ok && m["key"] == key {
+			if m, ok := item.(map[string]any); ok && m["key"] == key && m["operator"] == "Exists" && m["effect"] == "NoSchedule" {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("%s sets its own %s and drops the %s toleration; restate it or opt out with []", leaf.Entry.Name, path, key)
+			t.Errorf("%s sets its own %s without the %s Exists/NoSchedule toleration; restate it or opt out with []", leaf.Entry.Name, path, key)
 		}
 	}
 	if len(guarded) < 20 {
