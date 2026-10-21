@@ -90,7 +90,7 @@ components:
 |---|---|---|---|
 | `name` | string | yes | Component identifier (matches `componentRefs[].name` in overlays) |
 | `displayName` | string | yes | Human label used in CLI output and bundle templates |
-| `class` | `ComponentClass` | embedded: yes | Bundle class (ADR-018): `core`, `ops`, or `workload`, ordered `core` < `ops` < `workload`. A component may depend only on its own class or an earlier one; `pkg/recipe.TestClassDependencyDirectionGuard` resolves every catalog leaf and fails on an edge to a later class. Every embedded entry declares it (`TestEmbeddedRegistryDeclaresClass`); an external `--data` entry that omits it is `core`. Bundling does not read it today; the planned `--split` (ADR-018, #3158) will partition by it. |
+| `class` | `ComponentClass` | embedded: yes | Bundle class (ADR-018): `core`, `ops`, or `workload`, ordered `core` < `ops` < `workload`. A component may depend only on its own class or an earlier one; `pkg/recipe.TestClassDependencyDirectionGuard` resolves every catalog leaf and fails on an edge to a later class. Every embedded entry declares it (`TestEmbeddedRegistryDeclaresClass`), and the Class column of `docs/user/component-catalog.md` must match (`TestComponentCatalogClassColumnMatchesRegistry`), so reclassifying a component is a registry edit plus its catalog row. An external `--data` entry that omits it is `core`. Bundling does not read it today; the planned `--split` (ADR-018, #3158) will partition by it. |
 | `valueOverrideKeys` | []string | no | Alt keys for `--set <key>:path=value` (e.g., `gpuoperator`) |
 | `helm` | `HelmConfig` | one of helm/kustomize | Chart defaults (see below) |
 | `kustomize` | `KustomizeConfig` | one of helm/kustomize | Kustomization defaults (see below) |
