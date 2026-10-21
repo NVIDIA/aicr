@@ -1996,6 +1996,8 @@ NFD (Node Feature Discovery) workers must run on **all nodes** (GPU, CPU, and sy
 
 > **Note:** When no `--accelerated-node-toleration` is specified, a default toleration (`operator: Exists`) is applied to both GPU DaemonSets and NFD workers, allowing them to run on nodes with any taint.
 
+> **gpu-operator operands also tolerate NVSentinel's release taint.** The `base` overlay sets `daemonsets.tolerations` to `nvsentinel.dgxc.nvidia.com/external-remediation:NoSchedule` on the gpu-operator componentRef, so that path is in append mode: your `--accelerated-node-toleration` entries are added after it rather than replacing it. Without it, operand pods already running on a node NVSentinel has handed to external remediation become misscheduled, and the GPU Operator upgrade controller refuses every driver upgrade while one such pod exists. A leaf that sets `daemonsets.tolerations` itself (for example `kind`'s `[]`) replaces it.
+
 > **Shared toleration paths:** a value path the registry declares under both the system and accelerated tiers (NFD `worker` and `topologyUpdater`, aws-ebs-csi-driver `node`) receives the deduplicated union of the keyed `--system-node-toleration` entries followed by all `--accelerated-node-toleration` entries. Keyless system tolerations — the tolerate-all default when the flag is unset, and an explicit `*` — are left out of that union so a system tolerate-all never widens an accelerated list you restricted on purpose. With no accelerated tolerations at all (possible through the Go SDK or a config file; the CLI defaults the flag), these paths receive the system list as given. To tolerate everything on these DaemonSets, pass the wildcard on the accelerated flag.
 
 **Example:**

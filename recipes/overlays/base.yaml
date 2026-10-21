@@ -47,6 +47,18 @@ spec:
         - nfd
         - cert-manager
         - prometheus-operator-crds
+      overrides:
+        daemonsets:
+          # Not in values.yaml: the bundler replaces this path with
+          # --accelerated-node-toleration unless an overlay sets it, and then
+          # appends the flag's list instead. NVSentinel's janitor taints a node
+          # it hands to an external system with this key (NoSchedule); an
+          # operand that does not tolerate it is misscheduled there, and the
+          # upgrade controller refuses every driver upgrade while one is (#3357).
+          tolerations:
+            - key: nvsentinel.dgxc.nvidia.com/external-remediation
+              operator: Exists
+              effect: NoSchedule
 
     - name: nvsentinel
       type: Helm
