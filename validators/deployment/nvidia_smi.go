@@ -51,6 +51,12 @@ const (
 	skipReasonNoSchedulableGPUNodes = validators.SkipReasonNoSchedulableGPUNodes // GPU nodes exist but all cordoned/unschedulable
 	skipReasonNodesBusy             = validators.SkipReasonNodesBusy             // schedulable GPU nodes exist but are busy with workloads
 
+	// skipCause* label a single node's SKIPPED line and its bucket in the
+	// RESULT line.
+	skipCauseBusy       = "busy"
+	skipCauseProbeError = "busy-probe error"
+	skipCauseCordoned   = "cordoned"
+
 	// gpuDriverVersionConstraint is the deployment-phase constraint name recipes
 	// use to declare a host-driver floor (issue #1995). Platforms with
 	// host-managed drivers (e.g. GKE A4X Max requiring R580.95.05+) cannot be
@@ -60,7 +66,7 @@ const (
 	// behave as a floor; a bare version is exact string match. Absent from the
 	// recipe, the check keeps its original banner-presence behavior and does
 	// not invent a floor. When the constraint is set but no node can be
-	// measured (no GPU nodes, all cordoned, or busy), the check fails closed
+	// measured (no GPU nodes, all cordoned, or all busy), the check fails closed
 	// instead of Skip — a declared gate must not PASS unenforced.
 	gpuDriverVersionConstraint = "Deployment.gpu-driver.version"
 )
@@ -78,16 +84,21 @@ const (
 var nvidiaSMIDriverVersionRE = regexp.MustCompile(
 	`(?i)(?:driver|kmd)[ \t]+version:[ \t]*([0-9]+(?:\.[0-9]+){0,2})`)
 
-// gpuNodeCoverage partitions check-nvidia-smi's discovered GPU nodes into the
-// schedulable cohort actually validated and the cordoned cohort skipped. It
-// exists so the disclosure text is a pure, independently testable function of
-// the partition rather than interleaved fmt.Printf calls — and so every exit
-// path (not just the success path) prints the same coverage line. See
-// docs/contributor/validator.md and issue #1668.
+// gpuNodeCoverage records check-nvidia-smi's per-node outcome across every
+// discovered GPU node. Cordoned nodes are skipped before the busy-probe, busy
+// nodes (and nodes whose busy-probe errored) are skipped after it, and the
+// remaining schedulable nodes are verified and either pass or fail. The
+// disclosure text is a pure function of these buckets so every exit path
+// prints the same summary. See docs/contributor/validator.md and issues #1668
+// and #3361.
 type gpuNodeCoverage struct {
 	total       int
 	schedulable []v1.Node
 	cordoned    []string
+	busy        []string
+	probeErrors []string
+	passed      int
+	failed      int
 }
 
 // partitionGpuNodes splits allNodes into schedulable and cordoned buckets.
@@ -109,38 +120,70 @@ func partitionGpuNodes(ctx context.Context, allNodes []helper.GpuNode) (gpuNodeC
 	return c, nil
 }
 
-// enumerationLines renders the discovered-node listing: total/schedulable/
-// cordoned counts, each schedulable node by name, and each cordoned node
-// explicitly marked "skipped (cordoned)" rather than omitted from the count.
+// enumerationLines renders the discovered-node header and a SKIPPED line for
+// each cordoned node. Each schedulable node gets its own line once its
+// outcome is known.
 func (c gpuNodeCoverage) enumerationLines() []string {
 	if c.total == 0 {
 		return []string{"Found 0 GPU node(s)."}
 	}
-	lines := make([]string, 0, 1+len(c.schedulable)+len(c.cordoned))
+	lines := make([]string, 0, 1+len(c.cordoned))
 	lines = append(lines, fmt.Sprintf("Found %d GPU node(s), %d schedulable, %d cordoned:",
 		c.total, len(c.schedulable), len(c.cordoned)))
-	for _, node := range c.schedulable {
-		lines = append(lines, fmt.Sprintf("  %s", node.Name))
-	}
 	for _, name := range c.cordoned {
-		lines = append(lines, fmt.Sprintf("  %s: skipped (cordoned)", name))
+		lines = append(lines, nodeSkippedLine(name, skipCauseCordoned))
 	}
 	return lines
 }
 
-// coverageLine renders the nodesValidated disclosure for however many
-// schedulable nodes were actually validated when the check exits — 0 when it
-// exits before attempting any (all-cordoned skip, busy skip). The "RESULT: "
-// prefix is the validator runtime's own convention (pkg/validator/validator.go
-// resultSummaryPrefix) for echoing a stdout line into live CLI output at INFO
-// level, not just the CTRF report's Stdout array — without it this line is
-// only visible after the run, in the (possibly redacted) report.
-func (c gpuNodeCoverage) coverageLine(validated int) string {
-	if len(c.cordoned) == 0 {
-		return fmt.Sprintf("RESULT: nodesValidated: %d/%d", validated, c.total)
+func nodePassedLine(name string) string { return fmt.Sprintf("  %s: PASSED", name) }
+
+func nodeFailedLine(name string, err error) string {
+	return fmt.Sprintf("  %s: FAILED (%v)", name, err)
+}
+
+func nodeSkippedLine(name, cause string) string {
+	return fmt.Sprintf("  %s: SKIPPED (%s)", name, cause)
+}
+
+func (c gpuNodeCoverage) skipped() int {
+	return len(c.cordoned) + len(c.busy) + len(c.probeErrors)
+}
+
+// coverageLine renders the nodesValidated disclosure with the passed, failed,
+// and skipped counts, and the skips broken down by cause. nodesValidated is
+// the passed count, so it is 0 on the paths that exit before verifying any
+// node. The busy-probe error count appears only when nonzero. The "RESULT: "
+// prefix is the validator runtime's own convention
+// (pkg/validator/validator.go resultSummaryPrefix) for echoing a stdout line
+// into live CLI output at INFO level, not just the CTRF report's Stdout array
+// — without it this line is only visible after the run, in the (possibly
+// redacted) report.
+func (c gpuNodeCoverage) coverageLine() string {
+	if c.total == 0 {
+		return "RESULT: nodesValidated: 0/0"
 	}
-	return fmt.Sprintf("RESULT: nodesValidated: %d/%d (%d cordoned, skipped)",
-		validated, c.total, len(c.cordoned))
+	causes := fmt.Sprintf("%s %d", skipCauseBusy, len(c.busy))
+	if len(c.probeErrors) > 0 {
+		causes += fmt.Sprintf(", %s %d", skipCauseProbeError, len(c.probeErrors))
+	}
+	causes += fmt.Sprintf(", %s %d", skipCauseCordoned, len(c.cordoned))
+	return fmt.Sprintf("RESULT: nodesValidated: %d/%d (passed %d, failed %d, skipped %d: %s)",
+		c.passed, c.total, c.passed, c.failed, c.skipped(), causes)
+}
+
+// coverageExtra builds the structured coverage disclosure. nodesValidated is
+// the passed count; nodesFailed and nodesSkipped account for the rest of
+// nodesTotal, all from the same node snapshot. Unlike the RESULT stdout line
+// it survives minimal redaction. Values are counts only — never node names or
+// IPs.
+func (c gpuNodeCoverage) coverageExtra() map[string]string {
+	return map[string]string{
+		validators.ExtraKeyNodesValidated: strconv.Itoa(c.passed),
+		validators.ExtraKeyNodesTotal:     strconv.Itoa(c.total),
+		validators.ExtraKeyNodesFailed:    strconv.Itoa(c.failed),
+		validators.ExtraKeyNodesSkipped:   strconv.Itoa(c.skipped()),
+	}
 }
 
 func printLines(lines ...string) {
@@ -150,12 +193,20 @@ func printLines(lines ...string) {
 }
 
 // checkNvidiaSMI verifies that nvidia-smi works correctly on every schedulable
-// GPU node. Cordoned GPU nodes narrow the verified scope, so they are
-// reported explicitly (never silently dropped from the node count) and the
-// evidence records how many of the cluster's GPU nodes were actually
-// verified, on every exit path — see docs/contributor/validator.md and issue
-// #1668.
+// GPU node that is not busy with an existing workload. Cordoned and busy GPU
+// nodes narrow the verified scope, so each is reported as SKIPPED (never
+// silently dropped from the node count), and the evidence records how many of
+// the cluster's GPU nodes passed, failed, and were skipped, on every exit
+// path — see docs/contributor/validator.md and issues #1668 and #3361.
 func checkNvidiaSMI(ctx *validators.Context) error {
+	return runNvidiaSMICheck(ctx, func(nodeName string) error {
+		return verifySingleGPUNode(ctx, nodeName)
+	})
+}
+
+// runNvidiaSMICheck is checkNvidiaSMI with per-node verification injected, so
+// the outcome logic is testable without a pod lifecycle.
+func runNvidiaSMICheck(ctx *validators.Context, verifyNode func(nodeName string) error) error {
 	allNodes, err := helper.FindGpuNodes(ctx.Ctx, ctx.Clientset)
 	if err != nil {
 		return err
@@ -168,7 +219,7 @@ func checkNvidiaSMI(ctx *validators.Context) error {
 	printLines(coverage.enumerationLines()...)
 
 	if len(allNodes) == 0 {
-		printLines(coverage.coverageLine(0))
+		printLines(coverage.coverageLine())
 		// #2122 applicability gate. gpu-operator supplies the GPU nodes this check
 		// verifies. When the recipe DECLARES it, zero GPU nodes is a
 		// declared-but-absent prerequisite — fail closed so a GPU-less cluster
@@ -192,7 +243,8 @@ func checkNvidiaSMI(ctx *validators.Context) error {
 
 	gpuNodes := coverage.schedulable
 	if len(gpuNodes) == 0 {
-		printLines(coverage.coverageLine(0))
+		printLines(coverage.coverageLine())
+		emitExtraOrWarn(coverage.coverageExtra())
 		// #2122 KEEP: this is a genuine scope-narrowing Skip, not a masqueraded
 		// absence. The GPU-node prerequisite IS satisfied (GPU nodes exist); they
 		// are merely administratively cordoned (Spec.Unschedulable) — an
@@ -209,106 +261,92 @@ func checkNvidiaSMI(ctx *validators.Context) error {
 		return validators.Skip(reason)
 	}
 
-	// Check if any nodes are busy.
-	// A probe error is treated as busy (fail-safe: don't run on a node we can't
-	// clear), but tracked separately from CONFIRMED occupancy so an all-errors
-	// outcome is not signed as "nodes-busy" — and, per #2122, is not skipped at
-	// all. firstProbeErr preserves the probe's error class for the fail-closed
-	// path below.
-	var busyNodes []string
+	// Probe each schedulable node for GPU occupancy; only free nodes are
+	// verified. A probe error is treated as busy (fail-safe: don't run on a
+	// node we can't clear), but tracked separately from CONFIRMED occupancy so
+	// an all-errors outcome is not signed as "nodes-busy" — and, per #2122, is
+	// not skipped at all. firstProbeErr preserves the probe's error class for
+	// the fail-closed path below.
+	var freeNodes []string
 	var firstProbeErr error
-	confirmedBusy := false
 	for _, node := range gpuNodes {
 		busy, busyErr := helper.IsNodeGpuBusy(ctx.Ctx, ctx.Clientset, node.Name)
-		if busyErr != nil {
+		switch {
+		case busyErr != nil:
 			slog.Warn("error checking busy status, treating as busy", "node", node.Name, "error", busyErr)
-			busyNodes = append(busyNodes, node.Name)
+			coverage.probeErrors = append(coverage.probeErrors, node.Name)
+			printLines(nodeSkippedLine(node.Name, skipCauseProbeError))
 			if firstProbeErr == nil {
 				firstProbeErr = busyErr
 			}
-			continue
-		}
-		if busy {
-			busyNodes = append(busyNodes, node.Name)
-			confirmedBusy = true
+		case busy:
+			coverage.busy = append(coverage.busy, node.Name)
+			printLines(nodeSkippedLine(node.Name, skipCauseBusy))
+		default:
+			freeNodes = append(freeNodes, node.Name)
 		}
 	}
 
-	if len(busyNodes) > 0 {
-		printLines(coverage.coverageLine(0))
-		if confirmedBusy {
-			// At least one node was CONFIRMED occupied. Without a host-driver
-			// floor this is a legitimate scope-narrowing Skip. With a declared
-			// floor, occupancy is not a reason to leave the gate unevaluated
-			// (#1995): Skip is non-blocking, so a below-floor cluster would PASS.
-			reason := fmt.Sprintf("GPU nodes busy with existing workloads: %v", busyNodes)
+	if len(freeNodes) == 0 {
+		printLines(coverage.coverageLine())
+		if len(coverage.busy) > 0 {
+			emitExtraOrWarn(coverage.coverageExtra())
+			// No node is free and at least one was CONFIRMED occupied. Without a
+			// host-driver floor this is a legitimate scope-narrowing Skip. With a
+			// declared floor, occupancy is not a reason to leave the gate
+			// unevaluated (#1995): Skip is non-blocking, so a below-floor cluster
+			// would PASS.
+			reason := fmt.Sprintf("GPU nodes busy with existing workloads: %v",
+				append(append([]string{}, coverage.busy...), coverage.probeErrors...))
 			if err := failClosedIfUnmeasurableGPUDriverFloor(ctx, reason); err != nil {
 				return err
 			}
 			emitExtraOrWarn(nvidiaSMISkipExtra(skipReasonNodesBusy))
 			return validators.Skip(reason)
 		}
-		// #2122 fail-closed: every "busy" node was actually a busy-probe ERROR —
-		// the probe proved occupancy on no node. An infra error (RBAC denial,
-		// timeout, transport failure) masquerading as a busy Skip would let an
-		// unreadable cluster PASS conformance. Block the gate and preserve the
-		// probe's error class instead of flattening it to a Skip.
+		// #2122 fail-closed: the busy-probe errored on every schedulable node, so
+		// it proved occupancy on none. An infra error (RBAC denial, timeout,
+		// transport failure) masquerading as a busy Skip would let an unreadable
+		// cluster PASS conformance. Block the gate and preserve the probe's error
+		// class instead of flattening it to a Skip.
 		return errors.PropagateOrWrap(firstProbeErr, errors.ErrCodeInternal,
 			"could not determine GPU node occupancy — the busy-probe failed on all schedulable GPU nodes")
 	}
 
-	fmt.Printf("All %d GPU node(s) available. Verifying...\n", len(gpuNodes))
+	fmt.Printf("Verifying %d available GPU node(s)...\n", len(freeNodes))
 
-	// Verify each GPU node
-	results := make(map[string]error)
-	for _, node := range gpuNodes {
-		slog.Info("verifying node", "node", node.Name)
-		if verifyErr := verifySingleGPUNode(ctx, node.Name); verifyErr != nil {
-			results[node.Name] = verifyErr
-			fmt.Printf("  %s: FAILED (%v)\n", node.Name, verifyErr)
-		} else {
-			results[node.Name] = nil
-			fmt.Printf("  %s: OK\n", node.Name)
-		}
-	}
-
-	// Report results
 	var failedNodes []string
-	validated := 0
-	for nodeName, nodeErr := range results {
-		if nodeErr != nil {
-			failedNodes = append(failedNodes, fmt.Sprintf("%s (%v)", nodeName, nodeErr))
+	for _, nodeName := range freeNodes {
+		slog.Info("verifying node", "node", nodeName)
+		if verifyErr := verifyNode(nodeName); verifyErr != nil {
+			coverage.failed++
+			failedNodes = append(failedNodes, fmt.Sprintf("%s (%v)", nodeName, verifyErr))
+			printLines(nodeFailedLine(nodeName, verifyErr))
 			continue
 		}
-		validated++
+		coverage.passed++
+		printLines(nodePassedLine(nodeName))
 	}
 
 	// Emit the structured coverage disclosure (survives minimal redaction)
 	// alongside the human RESULT line, on BOTH the pass and fail paths, so a
-	// signed bundle records how many of the cluster's GPU nodes were verified.
-	emitExtraOrWarn(nvidiaSMICoverageExtra(validated, coverage.total))
+	// signed bundle records partial coverage, not only the passed count.
+	printLines(coverage.coverageLine())
+	emitExtraOrWarn(coverage.coverageExtra())
 
 	if len(failedNodes) > 0 {
-		printLines(coverage.coverageLine(validated))
 		return errors.New(errors.ErrCodeInternal,
-			fmt.Sprintf("GPU verification failed on %d/%d nodes: %v",
-				len(failedNodes), len(gpuNodes), failedNodes))
+			fmt.Sprintf("GPU verification failed on %d/%d verified nodes: %v",
+				len(failedNodes), len(freeNodes), failedNodes))
 	}
 
-	printLines(coverage.coverageLine(validated))
-	fmt.Printf("Successfully verified GPU on all %d schedulable node(s)\n", len(gpuNodes))
+	if skipped := coverage.skipped(); skipped > 0 {
+		fmt.Printf("Verified GPU on %d of %d GPU node(s); %d skipped\n",
+			coverage.passed, coverage.total, skipped)
+		return nil
+	}
+	fmt.Printf("Successfully verified GPU on all %d GPU node(s)\n", coverage.passed)
 	return nil
-}
-
-// nvidiaSMICoverageExtra builds the structured coverage disclosure: how many GPU
-// nodes passed verification (validated) out of the total present incl. cordoned
-// (from the same node snapshot). Unlike the RESULT stdout line it survives
-// minimal redaction. Values are counts only — never node names or IPs.
-func nvidiaSMICoverageExtra(validated, total int) map[string]string {
-	return map[string]string{
-		"nodesValidated": strconv.Itoa(validated),
-		"nodesTotal":     strconv.Itoa(total),
-	}
 }
 
 // nvidiaSMISkipExtra builds the structured skip disclosure carrying only the
@@ -319,7 +357,7 @@ func nvidiaSMISkipExtra(reason string) map[string]string {
 
 // failClosedIfUnmeasurableGPUDriverFloor returns a blocking error when the
 // recipe declares Deployment.gpu-driver.version but check-nvidia-smi cannot
-// run per-node verification (no GPU nodes, all cordoned, or busy). Skip on
+// run per-node verification (no GPU nodes, all cordoned, or all busy). Skip on
 // those paths is non-blocking; a declared floor that cannot be measured must
 // not PASS (#1995). No constraint keeps the existing Skip.
 func failClosedIfUnmeasurableGPUDriverFloor(ctx *validators.Context, reason string) error {
@@ -495,7 +533,7 @@ func driverVersionFieldTerminated(podLogs string, end int) bool {
 // in the recipe is a no-op — the check must not invent a floor. A constraint
 // with an unreadable banner fails closed: a host-driver floor that cannot be
 // measured must not PASS. Enumeration paths that would Skip (no GPU nodes,
-// all cordoned, busy) use failClosedIfUnmeasurableGPUDriverFloor for the
+// all cordoned, all busy) use failClosedIfUnmeasurableGPUDriverFloor for the
 // same contract before per-node verification runs.
 func enforceGPUDriverVersionFloor(ctx *validators.Context, podLogs, nodeName string) error {
 	constraintExpr, found := findDeploymentConstraint(ctx, gpuDriverVersionConstraint)

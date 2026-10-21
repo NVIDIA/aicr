@@ -71,7 +71,8 @@ const (
 	//   - v5 added the bandwidth, readiness, inference, allocation-policy, and
 	//     operator-version keys, and the in-pod skipReason codes.
 	//   - v6 narrowed the fabric extra's closed set to efa.
-	PolicyVersion = "v6"
+	//   - v7 added the nodesFailed and nodesSkipped coverage counts.
+	PolicyVersion = "v7"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata
@@ -273,7 +274,9 @@ var ctrfRuntimeSources = []string{
 // docs/contributor/validator.md.
 var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
 	"nodesValidated": ctrfCountValue.MatchString, // count of nodes a coverage check actually verified
-	"nodesTotal":     ctrfCountValue.MatchString, // count of candidate nodes (validated + skipped/cordoned)
+	"nodesTotal":     ctrfCountValue.MatchString, // count of candidate nodes (validated + failed + skipped)
+	"nodesFailed":    ctrfCountValue.MatchString, // count of nodes a coverage check verified and found failing
+	"nodesSkipped":   ctrfCountValue.MatchString, // count of nodes a coverage check skipped (busy, cordoned)
 	"skipReason":     closedSet(ctrfSkipReasons...),
 	// NCCL benchmark runtime provenance, which artifact the bandwidth number
 	// describes. The template digests and path diff backing the claim are

@@ -459,7 +459,7 @@ fails its key's shape (an IP under `nodesTotal`, `305.44` under
 
 | Value shape | Keys |
 |-------------|------|
-| non-negative integer count | `nodesValidated`, `nodesTotal`, `workerNodes`, `gpusInvolved`, `draReady`, `draDesired`, `nodewrightComplete`, `nodewrightExpected`, `namespacesActive`, `namespacesExpected`, `gpusBenchmarked`, `gpusPerNode` |
+| non-negative integer count | `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped`, `workerNodes`, `gpusInvolved`, `draReady`, `draDesired`, `nodewrightComplete`, `nodewrightExpected`, `namespacesActive`, `namespacesExpected`, `gpusBenchmarked`, `gpusPerNode` |
 | non-negative decimal, at most one fractional digit | `achievedGbps`, `thresholdGbps`, `tolerancePct`, `throughputTokPerSec`, `ttftP99Ms`, `throughputThreshold`, `ttftThresholdMs`, `scaledThreshold` |
 | signed decimal (`+1.8`, `-12.3`) | `passMargin` (percent above or below `thresholdGbps`) |
 | `true` or `false` | `nodeLocal`, `versionSatisfied` |
@@ -496,6 +496,7 @@ page are the contract.
 | `secure-accelerator-access`, `inference-perf` | `configuredPolicy`, `resolvedMode`, `nodeLocal` |
 | `dra-support` | `configuredPolicy` |
 | `gpu-operator-version` | `detectedVersion`, `versionSatisfied` |
+| `check-nvidia-smi` | `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped` |
 | any check, on an in-pod skip | `skipReason` |
 
 - NCCL publishes `transport`, `workerNodes`, and `gpusInvolved` before the
@@ -906,20 +907,19 @@ tagged with its cordon state, and:
    past it. A future check with a different tradeoff should say so
    explicitly rather than assume cordons are unconditionally
    unschedulable.
-2. Report cordoned nodes explicitly in the check's stdout evidence
-   (`<node>: skipped (cordoned)`), never omit them from the node count.
+2. Report cordoned nodes explicitly in the check's stdout evidence,
+   never omit them from the node count. `check-nvidia-smi` prints one
+   line per node: `<node>: PASSED`, `<node>: FAILED (<reason>)`, or
+   `<node>: SKIPPED (<cause>)`.
 3. Print a coverage line (`RESULT: nodesValidated: <validated>/<total>`)
    on every exit path (skip, failure, and success), not only the
    success path, so a pass *or* a failure on reduced scope is visible.
+   `check-nvidia-smi` appends the breakdown:
+   `(passed <n>, failed <n>, skipped <n>: busy <n>, cordoned <n>)`.
    `<validated>` is the count actually confirmed working, not the
-   schedulable count: it is `0` on the all-cordoned and busy-skip
-   paths (nothing was attempted yet) and the successful-node count on
-   the failure path (a partial pass is not conflated with a full one).
-   Exception: when the recipe declares `Deployment.gpu-driver.version`,
-   those same all-cordoned and busy paths (and the no-GPU-nodes path)
-   fail closed instead of Skip — a declared host-driver floor that
-   cannot be measured must not PASS (#1995). Skip remains only when
-   the floor constraint is absent.
+   schedulable count: it is `0` on the paths that verify nothing and
+   the successful-node count on the failure path (a partial pass is not
+   conflated with a full one).
    The `RESULT:` prefix is `pkg/validator/validator.go`'s
    `resultSummaryPrefix` convention: the validator runtime echoes the
    trailing text of any such stdout line into live CLI output via
@@ -934,6 +934,26 @@ tagged with its cordon state, and:
    verifies by default. That is why the same counts are ALSO emitted
    through `validators.EmitExtra` (#1951) — see **Structured coverage
    survives redaction** below.
+
+`check-nvidia-smi` also skips a schedulable node that is busy, meaning
+a running pod there already requests `nvidia.com/gpu`. The check does
+not place its own GPU pod beside an existing workload. A busy node is
+skipped per node, not for the whole check (#3361).
+
+- Every free schedulable node is verified.
+- Any verified node failing fails the check.
+- At least one node passing, with none failing, passes the check, with
+  the busy nodes disclosed as skipped.
+- When no node is free, the check skips with `nodes-busy`.
+- When the busy-probe errored on every schedulable node, the check
+  fails closed instead (#2122). A probe error on one node, while
+  another is free, skips that node as `busy-probe error`.
+
+When the recipe declares `Deployment.gpu-driver.version`, the paths
+that verify nothing (no GPU nodes, all cordoned, all busy) fail closed
+instead of Skip. A declared host-driver floor that cannot be measured
+must not PASS (#1995). Skip remains only when the floor constraint is
+absent.
 
 `expected-resources`' RDMA fabric probe follows this pattern too. It validates
 only the schedulable RDMA-capable nodes, lists each cordoned one as
@@ -961,8 +981,9 @@ cordons.
 **Structured coverage survives redaction.** Minimal redaction strips the
 `RESULT:` stdout line, so `check-nvidia-smi` and the RDMA gate also
 publish coverage in `extra` as `nodesValidated`/`nodesTotal` or a
-`skipReason` code. A signed bundle still records a cordoned node
-narrowing the cohort. Node names appear only in stdout, never in
+`skipReason` code. `check-nvidia-smi` adds `nodesFailed` and
+`nodesSkipped`, so a signed bundle records a pass on a partly busy or
+cordoned cluster as partial coverage. Node names appear only in stdout, never in
 `extra`.
 
 For *deliberate*, durable exclusion of a node from GPU service (as
