@@ -64,7 +64,7 @@ func TestGPUOperatorLeavesTolerateNVSentinelReleaseTaint(t *testing.T) {
 		}
 		found := false
 		for _, item := range list {
-			if m, ok := item.(map[string]any); ok && m["key"] == key && m["operator"] == "Exists" && m["effect"] == "NoSchedule" {
+			if m, ok := item.(map[string]any); ok && m["key"] == key && m["operator"] == "Exists" && (m["effect"] == nil || m["effect"] == "NoSchedule") {
 				found = true
 				break
 			}
