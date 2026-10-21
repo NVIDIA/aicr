@@ -63,7 +63,7 @@ const (
 	// accelerator fabric, and the prerequisites those components declare.
 	ComponentClassCore ComponentClass = "core"
 	// ComponentClassOps is operational services: scheduling, node health,
-	// observability, policy, inventory, and certification.
+	// observability, policy, and inventory.
 	ComponentClassOps ComponentClass = "ops"
 	// ComponentClassWorkload is workload platforms and the components that
 	// exist only to serve them.
