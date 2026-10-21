@@ -22,6 +22,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Defaults
 REPO="NVIDIA/aicr"
 BINARY="aicr"
+ATTESTATION="${BINARY}-attestation.sigstore.json"
 DEFAULT_DIR="/usr/local/bin"
 TAG=""
 INSTALL_DIR=""
@@ -47,6 +48,9 @@ Behavior:
   - Detects OS (darwin/linux) and arch (amd64/arm64).
   - Downloads aicr_<version>_<os>_<arch>.tar.gz and aicr_checksums.txt.
   - Verifies the SHA-256 checksum before installing.
+  - Installs the matching attestation when included in the archive.
+  - Optionally verifies provenance with cosign v3.0.4 or newer.
+  - Removes an old attestation if the archive does not include one.
   - On macOS, removes the com.apple.quarantine attribute if Gatekeeper set it.
   - Uses sudo automatically when the install directory is not user-writable.
 
@@ -198,6 +202,48 @@ BIN_SRC="${TMP_DIR}/${BINARY}"
 [[ -f "$BIN_SRC" ]] || err "Expected binary '${BINARY}' not found in archive"
 chmod 0755 "$BIN_SRC"
 
+# Compare numeric version components without requiring GNU sort on macOS.
+version_gte() {
+  local -a current minimum
+  local i
+  IFS=. read -r -a current <<< "${1#v}"
+  IFS=. read -r -a minimum <<< "${2#v}"
+  for i in 0 1 2; do
+    if (( 10#${current[i]} > 10#${minimum[i]} )); then
+      return 0
+    elif (( 10#${current[i]} < 10#${minimum[i]} )); then
+      return 1
+    fi
+  done
+  return 0
+}
+
+# Match the regular installer's optional provenance check and warning policy.
+ATTEST_SRC="${TMP_DIR}/${ATTESTATION}"
+COSIGN_MIN_VERSION=v3.0.4
+if [[ -f "$ATTEST_SRC" ]]; then
+  if command -v cosign >/dev/null 2>&1; then
+    COSIGN_VERSION=$(cosign version 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1) || true
+    if [[ -n "$COSIGN_VERSION" ]] && ! version_gte "$COSIGN_VERSION" "$COSIGN_MIN_VERSION"; then
+      log_warning "Installed cosign version ($COSIGN_VERSION) is older than the minimum required ($COSIGN_MIN_VERSION); skipping provenance verification"
+    else
+      log_info "Verifying provenance attestation (Sigstore cosign)…"
+      if cosign verify-blob-attestation \
+        --bundle "$ATTEST_SRC" \
+        --type https://slsa.dev/provenance/v1 \
+        --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+        --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.github/workflows/on-tag\.yaml@refs/tags/.*' \
+        "$BIN_SRC"; then
+        log_success "Provenance verified — binary built by NVIDIA/aicr CI"
+      else
+        log_warning "Attestation verification failed — cannot confirm binary provenance"
+      fi
+    fi
+  else
+    log_warning "cosign not found — skipping provenance verification"
+  fi
+fi
+
 # Determine sudo
 SUDO=""
 if [[ ! -d "$INSTALL_DIR" ]]; then
@@ -220,6 +266,12 @@ fi
 TARGET="${INSTALL_DIR}/${BINARY}"
 log_info "Installing to ${TARGET}…"
 $SUDO install -m 0755 "$BIN_SRC" "$TARGET"
+if [[ -f "$ATTEST_SRC" ]]; then
+  $SUDO install -m 0644 "$ATTEST_SRC" "${INSTALL_DIR}/${ATTESTATION}"
+else
+  $SUDO rm -f "${INSTALL_DIR}/${ATTESTATION}"
+  log_warning "Archive does not contain ${ATTESTATION}; any old attestation was removed. ${BINARY} bundle --attest requires a release with an attestation."
+fi
 
 # macOS: strip Gatekeeper quarantine if present
 if [[ "$OS" == "darwin" ]] && command -v xattr >/dev/null 2>&1; then

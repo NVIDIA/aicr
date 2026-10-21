@@ -124,24 +124,7 @@ deferred_verifications:
       names on both platforms with digest-bound products. A failure on that run
       is the finding to triage.
 
-known_negatives:
-  - id: no-ngc-distroless-python-with-fixed-libexpat1
-    checked: 2026-10-19
-    result: >-
-      No NGC distroless python base carries the fixed libexpat1
-      2.9.0-1~deb13u1. The 3.12, 3.13 and 3.14 series all end at v4.1.7;
-      3.13-v4.1.7 was built 2026-10-11, its index digest is still
-      sha256:fb9e31d8..., and grype 0.118.0 reports libexpat1 2.8.3-1~deb13u1
-      on it for linux/amd64 and linux/arm64. The vendor's own CycloneDX VEX on
-      that base marks the libexpat1 CVEs exploitable or in_triage, so it offers
-      nothing to inherit. The five libexpat1 statements in version 21 exist
-      only because of this negative.
-    invalidated_by: >-
-      a 3.13 tag past v4.1.7 on nvcr.io/nvidia/distroless/python, or the
-      3.13-v4.1.7 tag moving to a new digest. Scan it per platform; if it
-      carries libexpat1 2.9.0-1~deb13u1 or later, bump the FROM pin in
-      validators/performance/aiperf-bench.Dockerfile and delete the five
-      libexpat1 statements in the same change
+known_negatives: []
 
 deliberate_exclusions:
   - id: arm64-aiperf-bench-is-never-scanned
