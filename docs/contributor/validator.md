@@ -491,7 +491,7 @@ page are the contract.
 | `nccl-all-reduce-bw*` | `runtimeSource`, `transport`, `workerNodes`, `gpusInvolved`, `fabric`, `achievedGbps`, `thresholdGbps`, `tolerancePct`, `passMargin` |
 | `check-nvidia-smi` | `nodesValidated`, `nodesTotal` |
 | `gke-gpu-nic-topology` | `nodesValidated`, `nodesTotal` |
-| `expected-resources` | `namespacesActive`, `namespacesExpected`, `draReady`, `draDesired`, `nodewrightComplete`, `nodewrightExpected`, and the RDMA gate's `nodesValidated`, `nodesTotal` |
+| `expected-resources` | `namespacesActive`, `namespacesExpected`, `draReady`, `draDesired`, `nodewrightComplete`, `nodewrightExpected`, and the RDMA gate's `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped` |
 | `inference-perf` | `throughputTokPerSec`, `ttftP99Ms`, `throughputThreshold`, `scaledThreshold`, `ttftThresholdMs`, `gpusBenchmarked`, `gpusPerNode` |
 | `secure-accelerator-access`, `inference-perf` | `configuredPolicy`, `resolvedMode`, `nodeLocal` |
 | `dra-support` | `configuredPolicy` |
@@ -958,24 +958,30 @@ instead of Skip. A declared host-driver floor that cannot be measured
 must not PASS (#1995). Skip remains only when the floor constraint is
 absent.
 
-`expected-resources`' RDMA fabric probe follows this pattern too. It validates
-only the schedulable RDMA-capable nodes, lists each cordoned one as
-`<node>: skipped (cordoned)`, and still counts it in `nodesTotal`. The probe
-re-runs on every poll but prints its enumeration and `RESULT:` line once, at
-the settled outcome.
+`expected-resources`' RDMA fabric probe follows this pattern too, with
+the same output shape as `check-nvidia-smi`. It validates only the
+schedulable RDMA-capable nodes, lists each cordoned one as
+`<node>: SKIPPED (cordoned)`, and still counts it in `nodesTotal`. Its
+RESULT breakdown has `cordoned` as the only skip cause. The probe re-runs
+on every poll but prints its enumeration and `RESULT:` line once, at the
+settled outcome.
 
-Once a probe observes at least one RDMA-capable node, it emits a floor with
-`nodesValidated=0`, then the terminal counts, which win because sentinels merge
-key-wise. If it never observes one, only the terminal counts are emitted. The
-floor keeps a cordoned node's narrowing in the signed bundle if the pod is
-killed before the terminal emit. The gate fails closed, so "could not observe
-the fabric" reports `0` validated.
+The gate certifies the schedulable cohort as a unit, not node by node.
+
+- When it certifies, every schedulable node counts as passed.
+- When it fails closed, every schedulable node counts as failed, and
+  `nodesValidated` is `0`. "Could not observe the fabric" therefore
+  never reads as a pass.
+
+It emits Extra twice. The first is a floor on the first observation of
+an RDMA-capable node, with nothing passed or failed. The second is the
+terminal counts, which win because sentinels merge key-wise. The floor
+keeps a cordoned node's narrowing in the signed bundle if the pod is
+killed before the terminal emit.
 
 Unlike `check-nvidia-smi`, the RDMA gate never *skips* — it either
 certifies the cohort or fails closed — so it mints no `skipReason`
-enum. Its coverage rides the existing `nodesValidated`/`nodesTotal`
-allowlist keys unchanged (see below), so that change did not move the
-redaction `PolicyVersion`.
+enum.
 
 Cluster-aggregate checks that assert on an operator's aggregate status
 (`gpu-operator-health`) remain unaffected — DaemonSet operands ignore
@@ -983,11 +989,11 @@ cordons.
 
 **Structured coverage survives redaction.** Minimal redaction strips the
 `RESULT:` stdout line, so `check-nvidia-smi` and the RDMA gate also
-publish coverage in `extra` as `nodesValidated`/`nodesTotal` or a
-`skipReason` code. `check-nvidia-smi` adds `nodesFailed` and
-`nodesSkipped`, so a signed bundle records a pass on a partly busy or
-cordoned cluster as partial coverage. Node names appear only in stdout, never in
-`extra`.
+publish coverage in `extra` as `nodesValidated`, `nodesTotal`,
+`nodesFailed`, and `nodesSkipped`, and `check-nvidia-smi` adds a
+`skipReason` code when it skips. A signed bundle records a pass on a
+partly busy or cordoned cluster as partial coverage. Node names appear
+only in stdout, never in `extra`.
 
 For *deliberate*, durable exclusion of a node from GPU service (as
 opposed to transient cordon-for-maintenance), use the GPU Operator's
