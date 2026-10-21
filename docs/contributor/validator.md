@@ -938,9 +938,10 @@ tagged with its cordon state, and:
    survives redaction** below.
 
 `check-nvidia-smi` also skips a schedulable node that is busy, meaning
-a running pod there already requests `nvidia.com/gpu`. The check does
-not place its own GPU pod beside an existing workload. A busy node is
-skipped per node, not for the whole check (#3361).
+a pod there that has not finished (Pending or Running) already
+requests `nvidia.com/gpu`. The check does not place its own GPU pod
+beside an existing workload. A busy node is skipped per node, not for
+the whole check (#3361).
 
 - Every free schedulable node is verified.
 - Any verified node failing fails the check.

@@ -811,9 +811,8 @@ func TestCheckNvidiaSMI_BusyProbeAllErrorsFailClosed(t *testing.T) {
 	}, nil, nil)
 
 	// Force the busy-probe's pod List to fail on every node. helper.IsNodeGpuBusy
-	// returns (busy=true, err); the loop records it as a probe error, never as
-	// CONFIRMED occupancy, so confirmedBusy stays false and the all-errors branch
-	// fires.
+	// returns (busy=true, err); the loop records it in probeErrors, never as
+	// CONFIRMED occupancy, so with no free node the all-errors branch fires.
 	ctx.Clientset.(*k8sfake.Clientset).PrependReactor("list", "pods",
 		func(clienttesting.Action) (bool, runtime.Object, error) {
 			return true, nil, apierrors.NewForbidden(

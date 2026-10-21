@@ -276,7 +276,7 @@ var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
 	"nodesValidated": ctrfCountValue.MatchString, // count of nodes a coverage check actually verified
 	"nodesTotal":     ctrfCountValue.MatchString, // count of candidate nodes (validated + failed + skipped)
 	"nodesFailed":    ctrfCountValue.MatchString, // count of nodes a coverage check verified and found failing
-	"nodesSkipped":   ctrfCountValue.MatchString, // count of nodes a coverage check skipped (busy, cordoned)
+	"nodesSkipped":   ctrfCountValue.MatchString, // count of nodes a coverage check skipped (busy, busy-probe error, cordoned)
 	"skipReason":     closedSet(ctrfSkipReasons...),
 	// NCCL benchmark runtime provenance, which artifact the bandwidth number
 	// describes. The template digests and path diff backing the claim are
