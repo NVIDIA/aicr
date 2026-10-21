@@ -136,12 +136,12 @@ SLINKY_DRAINER_IMAGE="ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.28.0@sha256:bf
 HEALTH_EVENTS_ANALYZER_IMAGE="ghcr.io/nvidia/nvsentinel/health-events-analyzer:v1.28.0"
 # The images the nvsentinel-log-collector mixin pulls in (#2619): the collector
 # Job's, named only inside fault-remediation's ConfigMap, and the in-cluster
-# file server's.
+# file server's. Its init container's busybox is left out: the mixin pins the
+# one the NIC mixin already brings, so listing it would prove nothing.
 LOG_COLLECTOR_IMAGES=(
     "ghcr.io/nvidia/nvsentinel/log-collector:v1.28.0"
     "ghcr.io/nvidia/nvsentinel/file-server-cleanup:v1.28.0"
     "docker.io/bitnamilegacy/nginx:1.27.2-debian-12-r2"
-    "public.ecr.aws/docker/library/busybox:1.37.0"
     "quay.io/martinhelmich/prometheus-nginxlog-exporter:v1.10.0"
 )
 

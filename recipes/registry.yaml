@@ -625,6 +625,8 @@ components:
       - fault-remediation.logCollector.enableGpuOperatorMustGather
       - fault-remediation.logCollector.timeout
       - incluster-file-server.fullnameOverride
+      - incluster-file-server.initImage.repository
+      - incluster-file-server.initImage.tag
       - incluster-file-server.persistence.size
       - incluster-file-server.logCleanup.enabled
       - incluster-file-server.logCleanup.retentionDays

@@ -61,6 +61,13 @@ spec:
           # differs by deployer (Flux names the release <namespace>-<name>), and
           # uploadURL names this Service.
           fullnameOverride: nvsentinel-incluster-file-server
+          # The chart's public.ecr.aws busybox caps anonymous pulls by data per
+          # IP, which shared clusters and CI runners exhaust. This is the
+          # busybox nvsentinel-remediation pins for the reboot Job, already
+          # scanned and mirrored.
+          initImage:
+            repository: docker.io/library/busybox
+            tag: "1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
           persistence:
             # Upstream estimates 5-50 MB per collection, so 50Gi holds at least
             # a thousand of the largest within one retention window.

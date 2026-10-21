@@ -26,7 +26,8 @@ import (
 const logCollectorMixin = "nvsentinel-log-collector"
 
 // logCollectorChartImages follow nvsentinel's chart version; the file server's
-// third-party images are pinned by the chart's own values instead.
+// third-party images are pinned by the chart's own values, except the init
+// container's busybox, which the mixin pins.
 var (
 	logCollectorChartImages = []string{
 		"ghcr.io/nvidia/nvsentinel/log-collector",
@@ -34,7 +35,7 @@ var (
 	}
 	logCollectorThirdPartyImages = []struct{ image, tag string }{
 		{"docker.io/bitnamilegacy/nginx", "1.27.2-debian-12-r2"},
-		{"public.ecr.aws/docker/library/busybox", "1.37.0"},
+		{"docker.io/library/busybox", "1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"},
 		{"quay.io/martinhelmich/prometheus-nginxlog-exporter", "v1.10.0"},
 	}
 )
@@ -85,6 +86,10 @@ func TestMixinNVSentinelLogCollector_Composes(t *testing.T) {
 			persistence, _ := server["persistence"].(map[string]any)
 			if !maps.Equal(persistence, map[string]any{"size": "50Gi"}) {
 				t.Errorf("incluster-file-server.persistence = %v, want exactly {size: 50Gi}", persistence)
+			}
+			initImage, _ := server["initImage"].(map[string]any)
+			if want := map[string]any{"repository": "docker.io/library/busybox", "tag": "1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"}; !maps.Equal(initImage, want) {
+				t.Errorf("incluster-file-server.initImage = %v, want exactly %v", initImage, want)
 			}
 			cleanup, _ := server["logCleanup"].(map[string]any)
 			if want := map[string]any{"enabled": true, "retentionDays": 7, "sleepInterval": 3600}; !maps.Equal(cleanup, want) {
