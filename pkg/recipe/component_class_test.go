@@ -17,6 +17,9 @@ package recipe
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"testing"
 
@@ -126,6 +129,53 @@ func TestEmbeddedRegistryDeclaresClass(t *testing.T) {
 		if comp.Class == "" {
 			t.Errorf("registry component %q declares no class; every embedded entry must set class to one of %v", comp.Name, ComponentClasses)
 		}
+	}
+}
+
+// catalogClassRow matches one row of the Components table in
+// docs/user/component-catalog.md: a bold component name, then a code-span
+// class. The table is the only place the class is documented per component.
+var catalogClassRow = regexp.MustCompile("(?m)^\\| \\*\\*([\\w-]+)\\*\\* \\| `(\\w+)` \\|")
+
+// TestComponentCatalogClassColumnMatchesRegistry keeps the Class column of
+// the component catalog an exact projection of the registry, so changing a
+// component's class is a one-line registry edit that this test then points
+// at the doc row to update. No code reads the doc; nothing else catches drift.
+func TestComponentCatalogClassColumnMatchesRegistry(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry: %v", err)
+	}
+	docPath := filepath.Join("..", "..", "docs", "user", "component-catalog.md")
+	data, err := os.ReadFile(docPath) //nolint:gosec // fixed in-repo doc path
+	if err != nil {
+		t.Fatalf("read %s: %v", docPath, err)
+	}
+
+	documented := map[string]ComponentClass{}
+	for _, m := range catalogClassRow.FindAllStringSubmatch(string(data), -1) {
+		if _, dup := documented[m[1]]; dup {
+			t.Errorf("%s lists component %q twice", docPath, m[1])
+		}
+		documented[m[1]] = ComponentClass(m[2])
+	}
+	if len(documented) == 0 {
+		t.Fatalf("no component rows parsed from %s; the table format changed or the Class column moved", docPath)
+	}
+
+	for _, comp := range registry.Components {
+		got, ok := documented[comp.Name]
+		if !ok {
+			t.Errorf("registry component %q has no row in %s", comp.Name, docPath)
+			continue
+		}
+		if got != comp.GetClass() {
+			t.Errorf("%s documents %q as %q; the registry says %q", docPath, comp.Name, got, comp.GetClass())
+		}
+		delete(documented, comp.Name)
+	}
+	for name := range documented {
+		t.Errorf("%s has a Components row for %q, which is not in the registry", docPath, name)
 	}
 }
 
