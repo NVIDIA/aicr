@@ -141,6 +141,8 @@ jobs:
           kubectl get pods -A
           kubectl get node -o yaml
           kubectl -n nvsentinel get pvc,statefulset,deployment,job,perconaservermongodb,certificate
+          kubectl -n nvsentinel get events --sort-by=.lastTimestamp
+          kubectl -n nvsentinel describe pods --selector='!job-name'
           kubectl get gpuresets.janitor.dgxc.nvidia.com -A -o yaml
           kubectl -n nvsentinel logs -l app=log-collector --tail=200
           for d in fault-quarantine node-drainer fault-remediation janitor nvsentinel-incluster-file-server; do

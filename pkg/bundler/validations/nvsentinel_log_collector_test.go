@@ -97,6 +97,7 @@ func TestCheckNVSentinelLogCollectorCoherent(t *testing.T) {
 		wantEnabledType    = "not a boolean, and fault-remediation parses it strictly"
 		wantOperatorNSType = "not a string, so the collector searches a namespace that does not exist"
 		wantUnnamed        = "incluster-file-server.fullnameOverride is unset"
+		wantRenamed        = "the nvsentinel health check asserts the file server's rollout"
 		wantDynamic        = "--dynamic"
 		wantDynamicCause   = "decides whether NVSentinel's log collector runs"
 	)
@@ -198,13 +199,25 @@ func TestCheckNVSentinelLogCollectorCoherent(t *testing.T) {
 			want: []string{wantUnnamed},
 		},
 		{
-			name: "upload URL naming a file server other than the pinned one",
+			name: "file server renamed without the upload URL",
 			recipeResult: func() *recipe.RecipeResult {
 				r := mixin(operator)
 				r.ComponentRefs[0].Overrides["incluster-file-server"] = map[string]any{"fullnameOverride": "diagnostics"}
 				return r
 			}(),
-			want: []string{wantUploadURL},
+			want: []string{wantRenamed},
+		},
+		{
+			// The health check asserts the rollout by the mixin's name, so a
+			// consistent rename would let a failed rollout pass validation.
+			name: "file server renamed with a matching upload URL",
+			recipeResult: func() *recipe.RecipeResult {
+				r := recipeOf(withServer(remediation()),
+					with(collector(), "uploadURL", "http://diagnostics.nvsentinel.svc.cluster.local/upload"), operator)
+				r.ComponentRefs[0].Overrides["incluster-file-server"] = map[string]any{"fullnameOverride": "diagnostics"}
+				return r
+			}(),
+			want: []string{wantRenamed},
 		},
 		{
 			name:          "file server name dynamic with the mixin",
@@ -284,16 +297,23 @@ func TestCheckNVSentinelLogCollectorCoherent(t *testing.T) {
 			want: []string{`env.GPU_OPERATOR_NAMESPACE is "elsewhere"`},
 		},
 		{
-			name: "env GPU_OPERATOR_NAMESPACE empty, which the chart does not default",
+			// The collector falls back to gpu-operator on an empty namespace.
+			name: "env GPU_OPERATOR_NAMESPACE empty",
 			recipeResult: recipeOf(withServer(remediation()),
 				with(collector(), "env", map[string]any{"GPU_OPERATOR_NAMESPACE": ""}), operator),
-			want: []string{wantOperatorNS},
 		},
 		{
 			name: "env GPU_OPERATOR_NAMESPACE null",
 			recipeResult: recipeOf(withServer(remediation()),
 				with(collector(), "env", map[string]any{"GPU_OPERATOR_NAMESPACE": nil}), operator),
-			want: []string{wantOperatorNS},
+		},
+		{
+			name: "env GPU_OPERATOR_NAMESPACE empty over gpuOperatorNamespaces naming another namespace",
+			recipeResult: recipeOf(withServer(remediation()),
+				with(with(collector(), "gpuOperatorNamespaces", "nvidia-gpu-operator"), "env",
+					map[string]any{"GPU_OPERATOR_NAMESPACE": ""}),
+				recipe.ComponentRef{Name: "gpu-operator", Namespace: "nvidia-gpu-operator"}),
+			want: []string{`env.GPU_OPERATOR_NAMESPACE is "gpu-operator"`},
 		},
 		{
 			name: "env UPLOAD_URL_BASE naming the file server over another uploadURL",
