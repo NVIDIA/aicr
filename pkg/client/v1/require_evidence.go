@@ -54,9 +54,11 @@ func PublishedEvidenceRequired(raw string, requested bool) (bool, error) {
 // does not attest that composition. The leaf-source check remains for an
 // embedded client whose catalog entry is not the embedded recipe.
 //
-// An embedded client also rejects a result it did not resolve: a result from
-// an external-source client can keep an embedded leaf name while its
-// composition came from that client's data.
+// An embedded client also rejects a result it does not own, such as one from
+// another client or from WrapResolved: a result from an external-source client
+// can keep an embedded leaf name while its composition came from that
+// client's data. Ownership is the owner stamp, so a result passed in through
+// LoadRecipe or AdoptRecipe is owned and is checked as-is.
 //
 // ResolveRecipe does not call this. Bundle, mirror, and upgrade stay
 // unaffected unless their caller invokes it. Call LoadCatalog first when the
