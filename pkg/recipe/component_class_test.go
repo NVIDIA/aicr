@@ -162,36 +162,68 @@ func TestClassDependencyDirectionGuard(t *testing.T) {
 			if !slices.Contains(result.Metadata.AppliedOverlays, name) {
 				t.Fatalf("%s: criteria resolved to %v, which does not include it", name, result.Metadata.AppliedOverlays)
 			}
-			for _, ref := range result.ComponentRefs {
-				if !ref.IsEnabled() {
-					continue
-				}
-				from := registry.Get(ref.Name)
-				if from == nil {
-					t.Fatalf("%s: component %q has no registry entry", name, ref.Name)
-				}
-				fromRank, _ := from.GetClass().Rank()
-				for _, depName := range ref.DependencyRefs {
-					dep := result.GetComponentRef(depName)
-					if dep == nil || !dep.IsEnabled() {
-						// A declared-but-disabled dependency is satisfied
-						// outside the recipe; a missing one fails resolution.
-						continue
-					}
-					to := registry.Get(depName)
-					if to == nil {
-						t.Fatalf("%s: dependency %q has no registry entry", name, depName)
-					}
-					toRank, _ := to.GetClass().Rank()
-					if toRank > fromRank {
-						t.Errorf("%s: %s (%s) depends on %s (%s); a component may depend only on its own class or an earlier one (ADR-018)",
-							name, ref.Name, from.GetClass(), depName, to.GetClass())
-					}
-				}
-			}
+			assertClassDirection(t, registry, result, name)
 		})
 	}
 	if leaves == 0 {
 		t.Fatal("no leaf overlays found; the guard checked nothing")
+	}
+
+	// NVCRE is on no shipped overlay, so the leaves above never carry it.
+	// Its documented opt-in (component-catalog.md, "Enabling NVCRE") adds
+	// the componentRef with a dependency on kubeflow-trainer to a Kubeflow
+	// leaf; that composition must satisfy the direction rule too.
+	t.Run("nvcre opt-in on a kubeflow leaf", func(t *testing.T) {
+		const leaf = "h100-eks-ubuntu-training-kubeflow"
+		overlay, ok := store.Overlays[leaf]
+		if !ok {
+			t.Fatalf("%s not in the catalog", leaf)
+		}
+		overlay.Spec.ComponentRefs = append(overlay.Spec.ComponentRefs, ComponentRef{
+			Name: "nvcre", Type: ComponentTypeHelm,
+			ValuesFile:     "components/nvcre/values.yaml",
+			DependencyRefs: []string{"kubeflow-trainer"},
+		})
+		result, err := store.BuildRecipeResult(ctx, overlay.Spec.Criteria)
+		if err != nil {
+			t.Fatalf("resolve %s with nvcre: %v", leaf, err)
+		}
+		if result.GetComponentRef("nvcre") == nil {
+			t.Fatalf("%s: nvcre missing from the resolved recipe", leaf)
+		}
+		assertClassDirection(t, registry, result, leaf+"+nvcre")
+	})
+}
+
+// assertClassDirection fails on any dependency edge from an enabled
+// component in result to a component of a later class.
+func assertClassDirection(t *testing.T, registry *ComponentRegistry, result *RecipeResult, name string) {
+	t.Helper()
+	for _, ref := range result.ComponentRefs {
+		if !ref.IsEnabled() {
+			continue
+		}
+		from := registry.Get(ref.Name)
+		if from == nil {
+			t.Fatalf("%s: component %q has no registry entry", name, ref.Name)
+		}
+		fromRank, _ := from.GetClass().Rank()
+		for _, depName := range ref.DependencyRefs {
+			dep := result.GetComponentRef(depName)
+			if dep == nil || !dep.IsEnabled() {
+				// A declared-but-disabled dependency is satisfied
+				// outside the recipe; a missing one fails resolution.
+				continue
+			}
+			to := registry.Get(depName)
+			if to == nil {
+				t.Fatalf("%s: dependency %q has no registry entry", name, depName)
+			}
+			toRank, _ := to.GetClass().Rank()
+			if toRank > fromRank {
+				t.Errorf("%s: %s (%s) depends on %s (%s); a component may depend only on its own class or an earlier one (ADR-018)",
+					name, ref.Name, from.GetClass(), depName, to.GetClass())
+			}
+		}
 	}
 }

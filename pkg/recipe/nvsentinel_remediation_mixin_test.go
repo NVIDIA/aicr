@@ -652,8 +652,12 @@ func TestMixinNVSentinelDatastoreEKS(t *testing.T) {
 		}
 		overlay := store.Overlays[otherLeaf]
 		overlay.Spec.Mixins = append(overlay.Spec.Mixins, observeMixin, storageMixin)
-		if _, err := store.BuildRecipeResult(ctx, overlay.Spec.Criteria); err == nil {
+		_, err := store.BuildRecipeResult(ctx, overlay.Spec.Criteria)
+		if err == nil {
 			t.Fatalf("resolving %s with %s composed succeeded; the aws-ebs-csi-driver edge dangles there", otherLeaf, storageMixin)
+		}
+		if !strings.Contains(err.Error(), "aws-ebs-csi-driver") {
+			t.Fatalf("error = %v, want the dangling aws-ebs-csi-driver dependency named", err)
 		}
 	})
 }
