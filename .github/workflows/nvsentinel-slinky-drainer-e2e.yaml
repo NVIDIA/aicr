@@ -71,7 +71,10 @@ concurrency:
 jobs:
   test:
     name: NVSentinel Slinky Drainer E2E
-    runs-on: ubuntu-24.04
+    # mongod 8.0 before 8.0.35 exits at startup on the ubuntu-24.04 image's
+    # 7.0 kernel (https://jira.mongodb.org/browse/SERVER-131779). Return to
+    # ubuntu-24.04 once the Percona MongoDB pin is 8.0.35 or newer.
+    runs-on: ubuntu-22.04
     # The script's bounded waits sum to ~84 minutes worst case (node Ready 2,
     # worker 3, cert-manager 10, Percona datastore 15, the CRD release 10,
     # plugin and nvsentinel rollout 15, event delivery 3, pipeline 6 polls of 4

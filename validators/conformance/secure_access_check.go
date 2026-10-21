@@ -73,7 +73,7 @@ const (
 	allocationModeExactCount = "ExactCount"
 
 	// cudaTestImage runs the in-container GPU visibility verification.
-	cudaTestImage = "nvidia/cuda:12.9.0-base-ubuntu24.04"
+	cudaTestImage = "docker.io/nvidia/cuda:12.9.0-base-ubuntu24.04"
 	// bashShell is the shell binary used by cudaTestImage containers.
 	bashShell = "bash"
 

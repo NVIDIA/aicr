@@ -217,13 +217,9 @@ recipes definition](recipe-development.md#preview-recipes):
   matches the constraint; but an independently upgraded / downgraded /
   older-bundle cluster can pass the `gpu-operator` gate while still running
   the previous 0.4.1 default, which crash-loops on VR200's NVML arch value.
-- **Upstream `nodewright-packages` defects** affect settings the recipe
-  configures but cannot enforce (containerd `LimitSTACK` drop-in targets an
-  inactive unit on stock RKE2; the `vr200` `[bootloader]` stanza requests
-  `hugepagesz=1G hugepages=2` against a 64k-page kernel that has no 1 GiB
-  pool; `configure_bootloader.sh` duplicates TuneD's native
-  `$tuned_params` hook). Tracked upstream at NVIDIA/nodewright-packages#134
-  / #135 / #136.
+- **`configure_bootloader.sh` duplicates TuneD's native `$tuned_params`
+  hook**, an upstream `nodewright-packages` defect the recipe cannot work
+  around. Tracked upstream at NVIDIA/nodewright-packages#136.
 
 ## Related Issues
 
