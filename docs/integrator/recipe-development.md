@@ -404,15 +404,22 @@ A component must have either `helm` OR `kustomize` configuration, not both.
 
 #### Component classes
 
-Every registry entry declares a `class`: `core`, `ops`, or `workload`
-([ADR-018](https://github.com/NVIDIA/aicr/blob/main/docs/design/018-class-partitioned-bundles.md)). The classes are
-ordered `core` < `ops` < `workload`, and a component's `dependencyRefs` may
-name only components of its own class or an earlier one; a catalog test
-resolves every leaf and fails on an edge to a later class. The class is not
-part of a recipe and never appears in `recipe.yaml`: ordinary bundling
-ignores it, and `--split` partitions a bundle by it. Monitoring CRD
-dependencies go to `prometheus-operator-crds`, which is `core`, not to
-`kube-prometheus-stack`, which is `ops`. The full assignment is in the
+Every embedded registry entry declares a `class`: `core`, `ops`, or
+`workload`
+([ADR-018](https://github.com/NVIDIA/aicr/blob/main/docs/design/018-class-partitioned-bundles.md)).
+An entry in an external `--data` registry may omit it and is `core`.
+
+- The classes are ordered `core` < `ops` < `workload`.
+- A component's `dependencyRefs` may name only components of its own class
+  or an earlier one. A catalog test resolves every leaf and fails on an edge
+  to a later class.
+- Monitoring CRD dependencies go to `prometheus-operator-crds` (`core`), not
+  to `kube-prometheus-stack` (`ops`).
+
+The class is not part of a recipe and never appears in `recipe.yaml`.
+Bundling ignores it today; the planned `aicr bundle --split`
+([#3158](https://github.com/NVIDIA/aicr/issues/3158)) will partition a
+bundle by it. The full assignment is in the
 [component catalog](../user/component-catalog.md#components).
 
 > **`patches` is not supported.** The `componentRefs[].patches` field is not
