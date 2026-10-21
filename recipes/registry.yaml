@@ -1359,7 +1359,7 @@ components:
   # No shipped overlay references this component (TestNVCRERegisteredWithoutOverlay).
   - name: nvcre
     displayName: NVIDIA Cluster Readiness Engine
-    class: ops
+    class: workload
     ownsCRDs: true
     valueOverrideKeys:
       - nvcre
