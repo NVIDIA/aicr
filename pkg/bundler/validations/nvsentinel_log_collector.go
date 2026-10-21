@@ -35,6 +35,8 @@ const (
 	logCollectorUploadURLPath       = "fault-remediation.logCollector.uploadURL"
 	logCollectorNamespacesPath      = "fault-remediation.logCollector.gpuOperatorNamespaces"
 	logCollectorMockModePath        = "fault-remediation.logCollector.env.MOCK_MODE"
+	logCollectorEnvUploadURLPath    = "fault-remediation.logCollector.env.UPLOAD_URL_BASE"
+	logCollectorEnvNamespacePath    = "fault-remediation.logCollector.env.GPU_OPERATOR_NAMESPACE"
 	fileServerPath                  = "global.inclusterFileServer"
 	fileServerEnabledPath           = "global.inclusterFileServer.enabled"
 	fileServerNamePath              = "incluster-file-server.fullnameOverride"
@@ -69,6 +71,11 @@ const (
 //     install, so a recipe whose node image carries the driver otherwise (AKS,
 //     OKE, Kind) fails every collection.
 //
+// The Job template renders logCollector.env after the variables it sets from
+// uploadURL and gpuOperatorNamespaces, so an env.UPLOAD_URL_BASE or
+// env.GPU_OPERATOR_NAMESPACE entry replaces them; the rules read the entry when
+// one is set.
+//
 // The collector's MOCK_MODE uploads a synthetic report without a driver,
 // which the Kind e2e uses, so it skips the last rule. The collector enters it
 // only on the exact string "true", so that is all this reads as mock.
@@ -97,8 +104,8 @@ func CheckNVSentinelLogCollectorCoherent(ctx context.Context, componentName stri
 	collectorRaw, _ := component.GetValueByPath(values, logCollectorEnabledPath)
 	collector := helmTruthy(collectorRaw)
 	fileServer := nvsentinelSubchartRenders(values, "inclusterFileServer")
-	mockRaw, mockSet := component.GetValueByPath(values, logCollectorMockModePath)
-	mock := mockSet && fmt.Sprint(mockRaw) == "true"
+	mockMode, _ := logCollectorEnvValue(values, logCollectorMockModePath)
+	mock := mockMode == "true"
 	gpuOp := enabledGPUOperator(recipeResult, bundlerConfig)
 
 	if msgs := logCollectorDynamicViolations(bundlerConfig, componentName, sentinelKeys, collector, fileServer, mock,
@@ -160,10 +167,14 @@ func CheckNVSentinelLogCollectorCoherent(ctx context.Context, componentName stri
 				host += ":" + fmt.Sprint(port)
 			}
 			want := "http://" + host + "/upload"
-			got, _, valid := resolvedStringValue(values, logCollectorUploadURLPath)
+			urlPath := logCollectorUploadURLPath
+			got, _, valid := resolvedStringValue(values, urlPath)
+			if env, ok := logCollectorEnvValue(values, logCollectorEnvUploadURLPath); ok {
+				urlPath, got, valid = logCollectorEnvUploadURLPath, env, true
+			}
 			if !valid || strings.Replace(strings.TrimSuffix(got, "/"), ".svc.cluster.local:80/", ".svc.cluster.local/", 1) != want {
 				fail("%s is %q, not the in-cluster file server's Service, so collections upload elsewhere and "+
-					"the file server holds nothing -- set it to %q", logCollectorUploadURLPath, got, want)
+					"the file server holds nothing -- set it to %q", urlPath, got, want)
 			}
 		}
 	}
@@ -238,8 +249,13 @@ func logCollectorDriverViolations(ctx context.Context, recipeResult *recipe.Reci
 			"container", gpuOp.name, gpuOperatorDriverEnabledPath))
 	}
 
-	namespace := logCollectorDefaultOperatorNS
+	nsPath, namespace := logCollectorNamespacesPath, logCollectorDefaultOperatorNS
 	ns, set, valid := resolvedStringValue(values, logCollectorNamespacesPath)
+	if env, ok := logCollectorEnvValue(values, logCollectorEnvNamespacePath); ok {
+		// The chart defaults only gpuOperatorNamespaces, so an empty entry
+		// reaches the collector as an empty namespace.
+		nsPath, namespace, set, valid = logCollectorEnvNamespacePath, env, false, true
+	}
 	if !valid {
 		// The chart quotes whatever it is given, so a list renders as the
 		// literal "[gpu-operator]" and names no namespace.
@@ -256,9 +272,23 @@ func logCollectorDriverViolations(ctx context.Context, recipeResult *recipe.Reci
 		return []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("component %q: %s deploys to namespace %q, but %s is %q, the one namespace the collector "+
 				"searches for the driver container, so every collection fails -- set it to %q",
-				componentName, gpuOp.name, gpuOp.namespace, logCollectorNamespacesPath, namespace, gpuOp.namespace))}
+				componentName, gpuOp.name, gpuOp.namespace, nsPath, namespace, gpuOp.namespace))}
 	}
 	return nil
+}
+
+// logCollectorEnvValue returns the logCollector.env entry at envPath as the
+// Job template renders it: any scalar is quoted into a string, and null into
+// the empty string.
+func logCollectorEnvValue(values map[string]any, envPath string) (string, bool) {
+	raw, ok := component.GetValueByPath(values, envPath)
+	if !ok {
+		return "", false
+	}
+	if raw == nil {
+		return "", true
+	}
+	return fmt.Sprint(raw), true
 }
 
 // logCollectorDynamicViolations returns a violation for each --dynamic path a
