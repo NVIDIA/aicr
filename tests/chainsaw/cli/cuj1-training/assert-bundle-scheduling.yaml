@@ -36,7 +36,11 @@ daemonsets:
   # regression guard: the route must stay gone (chainsaw asserts are subset-match,
   # so without this the assert would still pass if the dead route were re-added)
   (nodeSelector == null): true
+  # base overlay entry first (#3357), then the --accelerated-node-toleration list
   tolerations:
+    - key: nvsentinel.dgxc.nvidia.com/external-remediation
+      operator: Exists
+      effect: NoSchedule
     - key: nvidia.com/gpu
       value: present
       effect: NoSchedule
