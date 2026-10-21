@@ -67,6 +67,7 @@ func init() {
 	registerCheck("CheckNVSentinelSlurmDrainMonitorRequiresSlinky", CheckNVSentinelSlurmDrainMonitorRequiresSlinky)
 	registerCheck("CheckNVSentinelRemediationPipelineCoherent", CheckNVSentinelRemediationPipelineCoherent)
 	registerCheck("CheckNVSentinelSlurmCustomDrainCoherent", CheckNVSentinelSlurmCustomDrainCoherent)
+	registerCheck("CheckNVSentinelLogCollectorCoherent", CheckNVSentinelLogCollectorCoherent)
 	registerCheck("CheckNVSentinelMongoDBCoherent", CheckNVSentinelMongoDBCoherent)
 	registerCheck("CheckNVSentinelDatastorePrerequisites", CheckNVSentinelDatastorePrerequisites)
 }

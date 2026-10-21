@@ -501,9 +501,9 @@ components:
     # Opt-in surface for the nvsentinel-observability (#2617),
     # nvsentinel-object-monitor (#2612), nvsentinel-preflight (#2610),
     # nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor (#2611),
-    # nvsentinel-observe, -quarantine and -remediation, and
-    # nvsentinel-slinky-drainer (#2615) and nvsentinel-health-events-analyzer
-    # (#2618) mixins: the exact leaf
+    # nvsentinel-observe, -quarantine and -remediation,
+    # nvsentinel-slinky-drainer (#2615), nvsentinel-health-events-analyzer
+    # (#2618) and nvsentinel-log-collector (#2619) mixins: the exact leaf
     # paths a mixin may set on this
     # already-base-chained component. global.tracing.endpoint is
     # deliberately absent -- it must come from outside the mixin (a leaf
@@ -619,6 +619,20 @@ components:
       - health-events-analyzer.enableXID74Reg4ECCErrorRule
       - health-events-analyzer.enableRepeatedNICDriverErrorRule
       - health-events-analyzer.enableRepeatedNICDegradationRule
+      - global.inclusterFileServer.enabled
+      - fault-remediation.logCollector.enabled
+      - fault-remediation.logCollector.uploadURL
+      - fault-remediation.logCollector.enableGpuOperatorMustGather
+      - fault-remediation.logCollector.timeout
+      - incluster-file-server.fullnameOverride
+      - incluster-file-server.persistence.size
+      - incluster-file-server.logCleanup.enabled
+      - incluster-file-server.logCleanup.retentionDays
+      - incluster-file-server.logCleanup.sleepInterval
+    # The in-cluster file server's ReadWriteOnce volume, which the
+    # nvsentinel-log-collector mixin turns on (#2619).
+    storageClassPaths:
+      - incluster-file-server.persistence.storageClassName
     validations:
       # Blocking: the NVSentinel labeler decides
       # nvsentinel.dgxc.nvidia.com/driver.installed by watching for a GPU
@@ -706,6 +720,12 @@ components:
       # slinky-drainer plugin (#2615), not pod eviction, and customDrain must
       # match what that plugin needs. The rules are in the function's doc.
       - function: CheckNVSentinelSlurmCustomDrainCoherent
+        severity: error
+      # Blocking: a log collector that cannot capture or upload anything --
+      # without the file server, without live remediation, uploading
+      # elsewhere, or where it cannot reach the driver (#2619). The rules are
+      # in the function's doc.
+      - function: CheckNVSentinelLogCollectorCoherent
         severity: error
 
   # NVSentinel's remediation datastore, added only by the nvsentinel-observe,
