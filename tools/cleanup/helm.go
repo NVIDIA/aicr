@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"maps"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
@@ -77,16 +78,24 @@ type helmCLI struct {
 }
 
 func (h helmCLI) list(ctx context.Context) ([]helmRelease, error) {
-	out, err := h.run(ctx, defaults.K8sCleanupTimeout, defaults.ClusterCleanupHelmOutputLimit,
-		"list", "--all-namespaces", "--output", "json")
-	if err != nil {
-		return nil, err
-	}
+	const size = defaults.ClusterCleanupHelmListPageSize
 	var releases []helmRelease
-	if err := json.Unmarshal(out, &releases); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "decode helm list output", err)
+	for offset := 0; ; offset += size {
+		out, err := h.run(ctx, defaults.K8sCleanupTimeout, defaults.ClusterCleanupHelmOutputLimit,
+			"list", "--all-namespaces", "--output", "json",
+			"--max", strconv.Itoa(size), "--offset", strconv.Itoa(offset))
+		if err != nil {
+			return nil, err
+		}
+		var page []helmRelease
+		if err := json.Unmarshal(out, &page); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "decode helm list output", err)
+		}
+		releases = append(releases, page...)
+		if len(page) < size {
+			return releases, nil
+		}
 	}
-	return releases, nil
 }
 
 func (h helmCLI) uninstall(ctx context.Context, rel helmRelease) error {
