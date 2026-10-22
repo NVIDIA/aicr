@@ -50,3 +50,6 @@ serviceAccount:
 # provider) set nodeDataBroker.enabled: false in their overrides.
 nodeObserver: {}
 nodeDataBroker: {}
+
+serviceMonitor:
+  enabled: true

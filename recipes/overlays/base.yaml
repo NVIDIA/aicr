@@ -29,11 +29,15 @@ spec:
       type: Helm
       source: https://kubernetes-sigs.github.io/node-feature-discovery/charts
       valuesFile: components/nfd/values.yaml
+      dependencyRefs:
+        - prometheus-operator-crds
 
     - name: cert-manager
       type: Helm
       source: https://charts.jetstack.io
       valuesFile: components/cert-manager/values.yaml
+      dependencyRefs:
+        - prometheus-operator-crds
 
     - name: gpu-operator
       type: Helm

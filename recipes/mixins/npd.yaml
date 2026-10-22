@@ -33,3 +33,5 @@ spec:
     - name: node-problem-detector
       type: Helm
       valuesFile: components/node-problem-detector/values.yaml
+      dependencyRefs:
+        - prometheus-operator-crds

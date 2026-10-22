@@ -46,6 +46,8 @@ spec:
     - name: topograph
       type: Helm
       valuesFile: components/topograph/values.yaml
+      dependencyRefs:
+        - prometheus-operator-crds
       overrides:
         provider:
           name: dra
@@ -62,6 +64,7 @@ spec:
       valuesFile: components/kueue/values.yaml
       dependencyRefs:
         - topograph
+        - prometheus-operator-crds
       manifestFiles:
         - components/kueue/manifests/topology-accelerator.yaml
         - components/kueue/manifests/tas-flavor.yaml

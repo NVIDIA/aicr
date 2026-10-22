@@ -47,6 +47,7 @@ spec:
         - cert-manager
         - kube-prometheus-stack
         - gpu-operator
+        - prometheus-operator-crds
 
   validation:
     conformance:

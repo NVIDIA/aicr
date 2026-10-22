@@ -22,7 +22,13 @@ image:
   repository: public.ecr.aws/ebs-csi-driver/aws-ebs-csi-driver
   pullPolicy: IfNotPresent
 
+# forceEnable skips the chart's monitoring.coreos.com capability check, which
+# otherwise drops the ServiceMonitors without error when the API is not
+# visible at render time.
 controller:
+  enableMetrics: true
+  serviceMonitor:
+    forceEnable: true
   replicaCount: 2
   resources:
     requests:
@@ -36,6 +42,9 @@ controller:
     automountServiceAccountToken: true
 
 node:
+  enableMetrics: true
+  serviceMonitor:
+    forceEnable: true
   tolerateAllTaints: true
   resources:
     requests:

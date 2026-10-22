@@ -40,6 +40,8 @@ spec:
       type: Helm
       source: oci://ghcr.io/ai-dynamo/grove
       valuesFile: components/grove/values.yaml
+      dependencyRefs:
+        - prometheus-operator-crds
 
     - name: dynamo-platform
       type: Helm

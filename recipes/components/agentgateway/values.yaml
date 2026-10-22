@@ -29,6 +29,9 @@ resources:
     cpu: 500m
     memory: 256Mi
 
+monitoring:
+  enabled: true
+
 # Enable Gateway API Inference Extension support in the agentgateway controller.
 # Required for routing to InferencePool backends.
 inferenceExtension:
