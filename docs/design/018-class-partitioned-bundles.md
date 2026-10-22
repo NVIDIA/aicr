@@ -312,7 +312,9 @@ needed. This keeps the deployment contract simple and gives partition
 validation a crisp rule to enforce. The **ordering contract** is: install
 `core`, then `ops`; tear down in reverse, `ops` before `core`, because
 removing `core` first pulls the GPU runtime and its CRDs out from under
-`ops` releases. `core` alone is always a complete install. The rule and
+`ops` releases. A namespace or CRD group that classes share, such as
+`monitoring`, is removed only by the last class that uses it. `core`
+alone is always a complete install. The rule and
 the contract are stated for N ordered classes, so a future class slots in
 without changing them.
 
@@ -726,7 +728,12 @@ example, `kube-prometheus-stack` → `prometheus-operator-crds` and
 edges remain auditable in the set-root `recipe.yaml`. The runtime owner
 (NVIDIA, for an NCP tenant data plane) deploys `core/`; then the
 control-plane owner (the partner or customer) deploys `ops/`. Teardown is
-the reverse, `ops/` before `core/`; each class README states both.
+the reverse, `ops/` before `core/`. Each class README states both, and
+names, from the set's class map, the namespaces and CRD groups its class
+shares with another class and says to keep them: here `ops/` leaves
+`monitoring` in place, because `core`'s `prometheus-operator-crds`
+release lives there too, and only the last class using a namespace
+deletes it.
 
 The v1 scripts do not preflight cross-class prerequisites; they assume
 the operator followed the class ordering contract. Of the pre-flight
@@ -735,11 +742,15 @@ one that needs the class map. It is rendered per class, so a CRD group
 installed by an earlier class (for example `monitoring.coreos.com`, from
 `core`'s `prometheus-operator-crds`) is expected when `ops/deploy.sh`
 runs, not reported as an orphan with a delete hint. Today the template
-attributes that group to `kube-prometheus-stack`, which installs no CRDs;
-the per-class scan re-keys it to `prometheus-operator-crds` so the class
-map can exclude it. Taking a *newer* set's later class against an older deployed
-earlier class is an operator decision that `split.yaml` makes auditable
-but v1 does not mechanically verify.
+attributes that group to `kube-prometheus-stack`, which installs no CRDs,
+so the per-class scan keys its group table by the component that ships
+the CRDs, `prometheus-operator-crds`. That keying applies to per-class
+scripts only: the group list is emitted in deployment order, so re-keying
+the ordinary `deploy.sh` would reorder it in every non-split bundle and
+break the byte-identity promise. Ordinary bundles keep today's keying;
+correcting it there is a separate change. Taking a *newer* set's later
+class against an older deployed earlier class is an operator decision
+that `split.yaml` makes auditable but v1 does not mechanically verify.
 
 ## Open Questions
 
@@ -832,8 +843,10 @@ ever pursued.
   `recipe.yaml` and checksums once.
 - A split set installs in class order, `core` then `ops`, and is torn
   down in reverse. Each class `deploy.sh` and README carries that
-  contract, and the orphaned-CRD scan is scoped per class so an earlier
-  class's CRDs are not reported as orphans. `core` alone remains a
+  contract, the orphaned-CRD scan is scoped per class so an earlier
+  class's CRDs are not reported as orphans, and each class README names
+  the shared namespaces and CRD groups its teardown must leave in place.
+  Ordinary bundles' scripts are unchanged. `core` alone remains a
   complete install.
 - Classes separate ownership, not runtime coupling: a component may still
   rely on another class at runtime, as the `ops` Prometheus does on the
@@ -871,9 +884,12 @@ ever pursued.
 3. Bundler: `--split` flag (CLI, SDK, REST) with the
    plan/validate-once/render-subsets pipeline, per-class directories
    (each class `deploy.sh` rendered from the set's class map, so its
-   orphaned-CRD scan omits CRD groups an earlier class installs, with the
-   scan's group table keyed by the component that ships the CRDs, and
-   each class README stating the install and teardown order),
+   orphaned-CRD scan omits CRD groups an earlier class installs, with a
+   per-class group table keyed by the component that ships the CRDs
+   while ordinary `deploy.sh` keeps today's table; and each class README
+   stating the install and teardown order and naming, from the class
+   map, the namespaces and CRD groups shared with another class that its
+   teardown must keep),
    set-level `recipe.yaml`/`split.yaml` (with `recipeDigest`)/
    `checksums.txt`/attestation, create-only staged atomic publication at
    the functional API boundary (net-new for local output; includes the
