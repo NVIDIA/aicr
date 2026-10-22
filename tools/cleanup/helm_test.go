@@ -124,7 +124,7 @@ func TestOwnedReleaseNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ownedReleaseNames() error = %v", err)
 	}
-	for _, name := range []string{"gpu-operator", "gpu-operator-pre", "gpu-operator-post", "gpu-operator-readiness", "skyhook-operator"} {
+	for _, name := range []string{"gpu-operator", "gpu-operator-pre", "gpu-operator-post", "gpu-operator-readiness", "skyhook-operator", "dynamo-crds", "rdma-netns-exclusive"} {
 		if !got[name] {
 			t.Errorf("ownedReleaseNames() is missing %q", name)
 		}

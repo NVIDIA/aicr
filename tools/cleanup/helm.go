@@ -37,6 +37,8 @@ type helmRelease struct {
 var legacyComponents = map[string]string{
 	"skyhook-operator":       "nodewright-operator's former name",
 	"skyhook-customizations": "nodewright-customizations' former name",
+	"dynamo-crds":            "Dynamo's CRD chart, installed into dynamo-system until dynamo-platform took over its CRDs",
+	"rdma-netns-exclusive":   "Nodewright RDMA package, installed into skyhook or nodewright until nodewright-customizations absorbed it",
 }
 
 // ownedReleaseNames returns every Helm release name a bundle can install for
