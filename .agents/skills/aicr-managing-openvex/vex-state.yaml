@@ -87,43 +87,6 @@ deferred_verifications:
       above returned `[]`. A failure on that release is the finding to triage,
       not something a later release discharges.
 
-  - id: pillow-vex-applies-at-release
-    opened: 2026-10-21
-    document_version: 22
-    why_deferred: >-
-      Version 22 adds seven not_affected statements for pillow 12.3.0 on
-      aiperf-bench (GHSAs published 2026-10-20, fixed only in pillow 13.0.0,
-      which aiperf 0.13.0's pillow~=12.3.0 pin excludes). Local evidence is
-      grype 0.118.0 against the v1.1.1 aiperf-bench index
-      (sha256:925c7877...) built at 018213b9b, per platform, plus a local run
-      of openvex-guard.sh and tools/openvex-bind on a stand-in digest. The
-      re-cut release rebuilds that image at a new head, and only a release
-      scans both architectures and signs the projection.
-    check: >-
-      The first on-tag.yaml run after 39566008194 whose tag commit carries
-      .openvex.json version 22 passes "Image Vuln Scan (aiperf-bench/amd64)"
-      and "(aiperf-bench/arm64)", passes "Verify OpenVEX document", and
-      publishes an OpenVEX attestation on both aiperf-bench platform manifests
-      listing GHSA-58r4-6rv3-gfh8, GHSA-8g5g-8vmr-9782, GHSA-pchr-8j38-3x4p,
-      GHSA-c6hw-5grf-ff96, GHSA-65qm-jvmh-6pqg, GHSA-p4wg-p73j-c528 and
-      GHSA-q45j-58j2-45rg, with every product ending in that manifest's
-      digest.
-    how: |
-      for p in amd64 arm64; do
-        d=$(crane digest --platform linux/$p ghcr.io/nvidia/aicr-validators/aiperf-bench:<tag>)
-        cosign verify-attestation --type openvex \
-          --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-          --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.*' \
-          "ghcr.io/nvidia/aicr-validators/aiperf-bench@${d}" \
-          | jq -rs '.[0].payload | @base64d | fromjson
-                    | [.predicate.statements[] | {n: .vulnerability.name, p: [.products[]["@id"]]}]'
-      done
-    resolves_when: >-
-      that specific release run has been inspected AND both aiperf-bench scan
-      legs passed, the guard passed, and the command above listed the seven
-      names on both platforms with digest-bound products. A failure on that run
-      is the finding to triage.
-
 known_negatives: []
 
 deliberate_exclusions:
@@ -153,45 +116,15 @@ deliberate_exclusions:
       release even though the weekly scan never sees it. The `invalidated_by`
       above still stands for vuln-scan-images.yaml, which remains amd64-only.
 
-  - id: nvsentinel-image-cves-are-a-pin-bump
-    decided: 2026-09-17
-    rechecked: 2026-10-08
-    decision: >-
-      HIGH+ findings on the nvsentinel images get no VEX statement. AICR does
-      not build them -- the scan matrix pins each to nvsentinel's registry
-      defaultVersion -- so the fix is a pin bump, and a statement would be a
-      reachability claim about third-party binaries this repo has no source
-      to support. That holds with no clean successor to bump to as well: the
-      fix then belongs upstream, as a rebuild, not here as a statement.
-      Current instance: every Go image at v1.26.0 is built on go1.27.0 with
-      golang.org/x/net v0.59.0 and carries GO-2026-6603/6605/6607/6608/6610/
-      6611/6612/6613 (2 critical and up to 10 high rows per image), fixed in
-      go1.27.2 and x/net v0.60.0; gpu-reset carries CVE-2026-84782 (High) on
-      libssl3t64 and openssl 3.0.13-0ubuntu3.15, fixed in 3.0.13-0ubuntu3.16.
-    evidence_2026_10_15: >-
-      grype 0.118.0 (the scan-action pin), `--only-fixed -c .grype.yaml`,
-      linux/amd64. v1.27.0, the newest tag, is not a clean successor:
-      fault-quarantine still reports 2 critical / 10 high on stdlib go1.27.0
-      and x/net v0.59.0, and gpu-reset 2 high on openssl
-      3.0.13-0ubuntu3.15. Only those two were scanned at v1.27.0, so a bump
-      must scan all fourteen.
-    invalidated_by: >-
-      an nvsentinel release built on go1.27.2+ and golang.org/x/net v0.60.0+
-      whose gpu-reset image carries openssl 3.0.13-0ubuntu3.16+ (then advance
-      defaultVersion in recipes/registry.yaml and the scan-matrix tags
-      together, after scanning every image), or AICR starting to build these
-      images, which would make their reachability provable from source
-
   - id: percona-image-cves-are-a-digest-bump
     decided: 2026-10-15
     decision: >-
       HIGH+ findings on the six Percona images in the scan matrix
       (percona-server-mongodb-operator, percona-server-mongodb,
       mongodb_exporter, percona-backup-mongodb, fluentbit, pmm-client) get no
-      VEX statement, for the reason that applies to nvsentinel: AICR pins them
-      by digest for the remediation mixins' datastore (psmdb-operator,
-      nvsentinel-mongodb) but does not build them, so the fix is a digest bump
-      to a cleaner upstream build. Scale at weekly run 38690982469:
+      VEX statement. AICR pins them by digest for the remediation mixins'
+      datastore (psmdb-operator, nvsentinel-mongodb) but does not build them,
+      so the fix is a digest bump to a cleaner upstream build. Scale at weekly run 38690982469:
       percona-server-mongodb 26 critical / 235 high, pmm-client 26 / 130,
       percona-backup-mongodb 6 / 108, percona-server-mongodb-operator 4 / 25,
       mongodb_exporter 2 / 21, fluentbit 1 / 17.

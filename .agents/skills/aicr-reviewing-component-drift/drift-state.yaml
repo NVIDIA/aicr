@@ -111,3 +111,21 @@ reviews:
       Chart is tracked but the device-plugin image is in Renovate ignoreDeps and
       must be coordinated with EKS add-on releases.
     revisit_when: a matching EKS add-on release is confirmed
+  - component: k8s-aibom
+    from: "1.5.1"
+    to: "1.6.1"
+    candidates:
+      - minor 1.6.0   # from upstream release + maintainer email, not a drift report
+      - minor 1.6.1   # released 2026-10-21; the version upstream's GKE evidence covers
+    recommends: "1.6.1"
+    verdict: take
+    reviewed: 2026-10-22
+    reason: >-
+      Values paths intact, CRDs additive (nested discovery.workloadKinds),
+      no new images, RBAC read-only growth. ADR-019 requires requalifying the
+      set together, so the PR is gated on Glen's GKE evidence doc and
+      attestation verification. New manual transition >=1.3.0 <1.6.0 needed;
+      1.6.0 flags 1.3.0-era CRDs as SchemaPredatesController.
+    revisit_when: >-
+      evidence doc for 1.6.0 lands; the Dynamo decline lift and k8s-aibom-crds
+      adoption are separate decisions, not part of this bump

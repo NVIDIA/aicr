@@ -358,6 +358,16 @@ func (c *Config) IsCriteriaStrict() bool {
 	return c.internal.Recipe().IsCriteriaStrict()
 }
 
+// IsRequireEvidence reports spec.recipe.requireEvidence, which rejects a
+// resolved recipe that has no committed evidence pointer. The caller applies
+// it after resolution. It does not change catalog matching.
+func (c *Config) IsRequireEvidence() bool {
+	if c == nil || c.internal == nil {
+		return false
+	}
+	return c.internal.Recipe().IsRequireEvidence()
+}
+
 // BundleOptions derives Client.MakeBundle options from spec.bundle, as plain
 // fields rather than a built *BundleConfig — so a caller (the CLI in
 // particular) can read and override individual settings with its own flag

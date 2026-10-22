@@ -93,6 +93,8 @@ func TestStability_RecipeResolution(t *testing.T) {
 	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria) (*aicr.RecipeResult, error)]((*aicr.Client).ResolveRecipeFromCriteria)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria, string) (*aicr.RecipeResult, error)]((*aicr.Client).ResolveRecipeFromCriteriaWithProfile)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria, ...aicr.RecipeResolveOption) (*aicr.RecipeResult, error)]((*aicr.Client).ResolveRecipeFromCriteriaWithOptions)
+	requireSignature[func(string, bool) (bool, error)](aicr.PublishedEvidenceRequired)
+	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult) error]((*aicr.Client).RequirePublishedEvidence)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria, *aicr.Snapshot) (*aicr.RecipeResult, error)]((*aicr.Client).ResolveRecipeFromSnapshot)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria, *aicr.Snapshot, string) (*aicr.RecipeResult, error)]((*aicr.Client).ResolveRecipeFromSnapshotWithProfile)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria, *aicr.Snapshot, ...aicr.RecipeResolveOption) (*aicr.RecipeResult, error)]((*aicr.Client).ResolveRecipeFromSnapshotWithOptions)
@@ -692,6 +694,7 @@ func TestStability_Config(t *testing.T) {
 	requireSignature[func(*aicr.Config) ([]aicr.RecipeResolveOption, error)]((*aicr.Config).RecipeResolveOptions)
 	requireSignature[func(*aicr.Config) string]((*aicr.Config).SnapshotPath)
 	requireSignature[func(*aicr.Config) bool]((*aicr.Config).IsCriteriaStrict)
+	requireSignature[func(*aicr.Config) bool]((*aicr.Config).IsRequireEvidence)
 }
 
 // TestStability_Query pins the package-level query selector, in both its

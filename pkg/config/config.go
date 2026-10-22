@@ -126,6 +126,12 @@ type RecipeSpec struct {
 	// distinguish nil (absent in YAML/JSON) from &false (explicit
 	// opt-out); the resolved layer flattens to plain bool.
 	CriteriaStrict *bool `yaml:"criteriaStrict,omitempty" json:"criteriaStrict,omitempty"`
+
+	// RequireEvidence, when true, rejects a resolved recipe that has no
+	// committed evidence pointer. Mirrors the --require-evidence CLI flag
+	// and AICR_REQUIRE_EVIDENCE; any of the three enabling it is sufficient.
+	// Pointer so the spec can distinguish nil (absent) from &false.
+	RequireEvidence *bool `yaml:"requireEvidence,omitempty" json:"requireEvidence,omitempty"`
 }
 
 // RecipeConfigurationSpec contains typed desired-state inputs that do not

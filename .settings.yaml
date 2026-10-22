@@ -34,7 +34,7 @@ linting:
   # followed immediately by `key: 'value'`, so any comment between them silently
   # drops this pin from Renovate's scan (#2657).
   # renovate: datasource=github-releases depName=oasdiff/oasdiff depType=linting
-  oasdiff: 'v1.33.0'
+  oasdiff: 'v1.34.0'
   # Refreshed automatically by tools/update-oasdiff-checksums via Renovate
   # postUpgradeTasks whenever the version above is bumped. Same reasoning as the
   # oras pin in security_tools: the checksums.txt served beside the tarball
@@ -52,7 +52,7 @@ linting:
   #
   # linux/amd64 only: this feeds the setup-build-tools action, which runs on
   # ubuntu runners. tools/setup-tools handles local dev on other platforms.
-  oasdiff_sha256_linux_amd64: '43a4e328e2d13ba1552d760aa68d2485c75c5621f309f6ff64ae895188345247'
+  oasdiff_sha256_linux_amd64: '7c88e09fd500b231af2819eb21f6fdfc7bcdfe2741d2c1937c59e7b72c8a575a'
   # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
   golangci_lint: 'v2.15.0'
   # renovate: datasource=pypi depName=yamllint depType=linting
@@ -108,7 +108,7 @@ security_tools:
   # followed immediately by `key: 'value'`, so any comment between them silently
   # drops this pin from Renovate's scan.
   # renovate: datasource=github-releases depName=oras-project/oras depType=security_tools
-  oras: '1.3.4'
+  oras: '1.3.5'
   # Refreshed automatically by tools/update-oras-checksums via Renovate
   # postUpgradeTasks whenever the version above is bumped. Pinning the digest
   # here — rather than trusting the checksums.txt served beside the tarball —
@@ -124,7 +124,7 @@ security_tools:
   #
   # linux/amd64 only: this pin feeds the setup-build-tools action, which runs on
   # ubuntu runners. tools/setup-tools handles local dev on other platforms.
-  oras_sha256_linux_amd64: 'f27adb935022d94df8dc77719c322dda592c78a0d57a6f7dcdd8d900b248c454'
+  oras_sha256_linux_amd64: 'f48a73ea6d026a862c3919fc773da9a8c86fc259c2c737d5baed3b8b9614ad22'
 
 # E2E Testing Tools
 testing_tools:
@@ -210,7 +210,7 @@ testing_tools:
   # Run with USE_SSL=1: sigstore's awskms signer hardcodes https://, so the e2e
   # serves TLS with a mkcert cert (see mkcert below).
   # renovate: datasource=docker depName=ministackorg/ministack depType=testing_tools
-  ministack_image: 'ministackorg/ministack:1.5.28'
+  ministack_image: 'ministackorg/ministack:1.5.29'
   # OpenBAO: the Linux Foundation Apache-2.0 fork of HashiCorp Vault, used by the
   # Vault KMS e2e to exercise the hashivault:// signing/verification path against
   # a real Transit secrets engine. API-identical to Vault; the sigstore hashivault
