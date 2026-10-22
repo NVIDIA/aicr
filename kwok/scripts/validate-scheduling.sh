@@ -1023,7 +1023,9 @@ generate_bundle() {
     # cluster's metadata to the bundle command, which
     # CheckNVSentinelEventExporterCoherent requires. KWOK simulates the pod, so
     # placeholders reach no endpoint.
-    if [[ ",${KWOK_MIXINS:-}," == *,nvsentinel-event-exporter,* ]]; then
+    # Whitespace stripped, as the yq composition above trims each entry.
+    local kwok_mixins="${KWOK_MIXINS:-}"
+    if [[ ",${kwok_mixins//[[:space:]]/}," == *,nvsentinel-event-exporter,* ]]; then
         conditional_sets+=(
             --set "nvsentinel:event-exporter.exporter.sink.endpoint=https://events.kwok.invalid/v1/events"
             --set "nvsentinel:event-exporter.exporter.oidc.tokenUrl=https://idp.kwok.invalid/oauth2/token"

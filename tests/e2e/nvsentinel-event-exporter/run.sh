@@ -517,7 +517,10 @@ test_delivery_and_filter() {
   fi
 
   local state
-  state=$(sink_state)
+  if ! state=$(sink_state); then
+    fail "sink readable" "the mock token endpoint and sink could not be read"
+    return
+  fi
   if jq -e '.tokens >= 1 and (.rejected | length) == 0' <<<"${state}" >/dev/null; then
     pass "token taken with the Secret's client secret; every post carried that bearer token"
   else
@@ -538,7 +541,7 @@ test_delivery_and_filter() {
 
 test_resume_after_restart() {
   local tokens
-  tokens=$(mongo_eval "print(hdb.ResumeTokens.countDocuments({clientName: 'event-exporter'}))")
+  tokens=$(mongo_eval "print(hdb.ResumeTokens.countDocuments({clientName: 'event-exporter'}))") || tokens=""
   if [[ "${tokens}" =~ ^[0-9]+$ ]] && ((tokens >= 1)); then
     pass "resume token stored in HealthEventsDatabase.ResumeTokens for event-exporter"
   else
@@ -553,7 +556,7 @@ test_resume_after_restart() {
     { fail "export resumes after a restart" "the exporter did not stop"; return; }
   send_event ee-while-down "$(health_event EeWhileDown false true RESTART_VM)"
   local stored
-  stored=$(mongo_eval "print(hdb.HealthEvents.countDocuments({'healthevent.checkname': 'EeWhileDown'}))")
+  stored=$(mongo_eval "print(hdb.HealthEvents.countDocuments({'healthevent.checkname': 'EeWhileDown'}))") || stored=""
   [[ "${stored}" =~ ^[1-9][0-9]*$ ]] ||
     { fail "export resumes after a restart" "EeWhileDown was not stored while the exporter was down ('${stored}')"; return; }
   kc -n nvsentinel scale "deployment/${EXPORTER}" --replicas=1 >/dev/null
