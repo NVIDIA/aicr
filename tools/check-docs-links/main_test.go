@@ -75,13 +75,15 @@ func TestClassify(t *testing.T) {
 		{"github directory with trailing slash", "https://github.com/NVIDIA/aicr/blob/main/pkg/widget/", kindGitHub, ""},
 		{"github mixed-case owner and repo", "https://github.com/nvidia/AICR/blob/main/pkg/widget/widget.go", kindGitHub, ""},
 		{"github www over http", "http://www.github.com/NVIDIA/aicr/blob/main/pkg/widget/widget.go", kindGitHub, ""},
-		{"github repository root", "https://github.com/NVIDIA/aicr/blob/main", kindGitHub, ""},
+		{"github repository root", "https://github.com/NVIDIA/aicr/blob/main", kindGitHub, "does not name a repository path"},
+		{"github repository root with slash", "https://github.com/NVIDIA/aicr/blob/main/#readme", kindGitHub, "does not name a repository path"},
 		{"github unpublished doc", "https://github.com/NVIDIA/aicr/blob/main/docs/design/001-adr.md", kindGitHub, ""},
 		{
 			"unpublished page", "../design/001-adr.md", kindRelative,
 			"resolves to docs/design/001-adr.md, which docs/index.yml does not publish",
 		},
 		{"missing page", "../READM.md", kindRelative, "resolves to docs/READM.md, which does not exist"},
+		{"path through a file", "guide.md/child.md", kindRelative, "resolves to docs/user/guide.md/child.md, which does not exist"},
 		{"directory", "../", kindRelative, "resolves to docs, which docs/index.yml does not publish"},
 		{"escapes the root", "../../../x.md", kindRelative, "resolves to ../x.md, which does not exist"},
 		{
@@ -101,9 +103,30 @@ func TestClassify(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			kind, reason := s.classify(page, tt.url)
+			kind, reason, err := s.classify(page, tt.url)
+			if err != nil {
+				t.Fatalf("classify(%q) error = %v", tt.url, err)
+			}
 			if kind != tt.wantKind || reason != tt.wantReason {
 				t.Errorf("classify(%q) = (%v, %q), want (%v, %q)", tt.url, kind, reason, tt.wantKind, tt.wantReason)
+			}
+		})
+	}
+}
+
+func TestClassifyStatError(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{"docs/user/guide.md": ""})
+	if err := os.Symlink("loop", filepath.Join(root, "docs", "user", "loop")); err != nil {
+		t.Fatal(err)
+	}
+	s := site{root: root, published: map[string]bool{"docs/user/guide.md": true}}
+
+	for _, url := range []string{"loop", "https://github.com/NVIDIA/aicr/blob/main/docs/user/loop"} {
+		t.Run(url, func(t *testing.T) {
+			_, reason, err := s.classify("docs/user/guide.md", url)
+			if err == nil || !strings.Contains(err.Error(), "stat docs/user/loop") {
+				t.Errorf("classify(%q) = (%q, %v), want a stat error", url, reason, err)
 			}
 		})
 	}
@@ -220,6 +243,7 @@ func TestRun(t *testing.T) {
 		name           string
 		guide          string
 		extra          map[string]string
+		symlinks       map[string]string
 		wantViolations int
 		wantOut        []string
 		wantErr        string
@@ -255,6 +279,12 @@ func TestRun(t *testing.T) {
 			wantErr: "no relative links were found on any published page",
 		},
 		{
+			name:     "an unreadable link target fails to run",
+			guide:    "[Home](../README.md) and [loop](loop)\n",
+			symlinks: map[string]string{"docs/user/loop": "loop"},
+			wantErr:  "check link loop on docs/user/guide.md:1",
+		},
+		{
 			name:    "a missing nav fails to run",
 			guide:   "[Home](../README.md)\n",
 			extra:   map[string]string{"docs/index.yml": ""},
@@ -267,6 +297,11 @@ func TestRun(t *testing.T) {
 			writeTree(t, root, base)
 			writeTree(t, root, map[string]string{"docs/user/guide.md": tt.guide})
 			writeTree(t, root, tt.extra)
+			for name, target := range tt.symlinks {
+				if err := os.Symlink(target, filepath.Join(root, filepath.FromSlash(name))); err != nil {
+					t.Fatal(err)
+				}
+			}
 
 			var out bytes.Buffer
 			violations, err := run(context.Background(), root, &out)
