@@ -139,7 +139,7 @@ func (c *cleaner) run(ctx context.Context, confirm prompt) error {
 	if c.opts.keepNamespaces {
 		c.log.Info("skipping namespace deletion", "flag", "--keep-namespaces")
 	} else {
-		c.deleteNamespaces(ctx)
+		c.deleteNamespaces(ctx, releases)
 	}
 	if err := ctx.Err(); err != nil {
 		return errors.WrapCtxErr(err, errors.ErrCodeTimeout, "cleanup interrupted")
@@ -320,19 +320,31 @@ func (c *cleaner) deleteCRDs(ctx context.Context) {
 	}
 }
 
-func (c *cleaner) deleteNamespaces(ctx context.Context) {
+// deleteNamespaces keeps a namespace holding any of releases that AICR does
+// not own, since deleting the namespace also deletes the release record and
+// leaves the release's cluster-scoped objects with no way to uninstall them.
+func (c *cleaner) deleteNamespaces(ctx context.Context, releases []helmRelease) {
 	c.log.Info("phase 4: deleting AICR component and check namespaces")
 	for _, ns := range slices.Sorted(maps.Keys(notOwnedNamespaces)) {
 		c.log.Info("skipping namespace AICR does not own", "namespace", ns, "reason", notOwnedNamespaces[ns])
 	}
+	foreign := map[string][]string{}
+	for _, rel := range releases {
+		if !c.releaseNames[rel.Name] {
+			foreign[rel.Namespace] = append(foreign[rel.Namespace], rel.Name)
+		}
+	}
 
 	var targets []string
 	for _, ns := range slices.Concat(c.namespaces, c.checkNamespaces(ctx)) {
-		if c.excludedNS(ns) {
+		switch {
+		case c.excludedNS(ns):
 			c.log.Info("skipping excluded namespace", "namespace", ns)
-			continue
+		case len(foreign[ns]) > 0:
+			c.log.Info("keeping namespace that holds helm releases AICR does not own", "namespace", ns, "releases", foreign[ns])
+		default:
+			targets = append(targets, ns)
 		}
-		targets = append(targets, ns)
 	}
 	for _, ns := range targets {
 		if ctx.Err() != nil {

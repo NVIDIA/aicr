@@ -187,6 +187,7 @@ func clusterObjects() []runtime.Object {
 	return []runtime.Object{
 		namespace("skyhook"),
 		namespace("gpu-operator"),
+		namespace("nodewright"),
 		namespace("gang-scheduling-test"),
 		namespace("gang-scheduling-test-abc12"),
 		namespace("default"),
@@ -209,7 +210,7 @@ func clusterReleases() []helmRelease {
 	return []helmRelease{
 		{Name: "nodewright", Namespace: "skyhook"},
 		{Name: "gpu-operator", Namespace: "gpu-operator"},
-		{Name: "team-app", Namespace: "gpu-operator"},
+		{Name: "team-app", Namespace: "nodewright"},
 		{Name: "unrelated", Namespace: "default"},
 	}
 }
@@ -239,7 +240,7 @@ func TestRunFencesExcludedInstalls(t *testing.T) {
 	if want := []string{"gpu-operator/gpu-operator"}; !slices.Equal(f.helm.uninstalled, want) {
 		t.Errorf("uninstalled = %q, want %q", f.helm.uninstalled, want)
 	}
-	for _, ns := range []string{"skyhook", "default"} {
+	for _, ns := range []string{"skyhook", "nodewright", "default"} {
 		if !f.namespaceExists(t, ns) {
 			t.Errorf("namespace %s was deleted", ns)
 		}
@@ -255,9 +256,10 @@ func TestRunFencesExcludedInstalls(t *testing.T) {
 	}
 	f.wantOutput(t,
 		`msg="skipping helm release in excluded namespace" release=nodewright namespace=skyhook`,
-		`msg="skipping helm release AICR does not own" release=team-app namespace=gpu-operator`,
+		`msg="skipping helm release AICR does not own" release=team-app namespace=nodewright`,
 		`msg="skipping excluded CRD" name=skyhooks.skyhook.nvidia.com`,
 		`msg="skipping excluded namespace" namespace=skyhook`,
+		`msg="keeping namespace that holds helm releases AICR does not own" namespace=nodewright releases=[team-app]`,
 		`msg="skipping namespace AICR does not own" namespace=kube-system`,
 		`msg="AICR cleanup complete"`,
 	)
@@ -446,7 +448,7 @@ func TestCheckNamespacesListFailureIsReported(t *testing.T) {
 		return true, nil, apierrors.NewServiceUnavailable("apiserver down")
 	})
 
-	f.cleaner(options{assumeYes: true}).deleteNamespaces(context.Background())
+	f.cleaner(options{assumeYes: true}).deleteNamespaces(context.Background(), nil)
 
 	f.wantOutput(t, "could not list namespaces, so per-run check namespaces were not swept", "prefix=gang-scheduling-test-")
 	if f.namespaceExists(t, "gpu-operator") {
@@ -465,7 +467,7 @@ func TestFinalizerRescue(t *testing.T) {
 		return true, nil, nil
 	})
 
-	f.cleaner(options{assumeYes: true, excludeNS: []string{"skyhook"}}).deleteNamespaces(context.Background())
+	f.cleaner(options{assumeYes: true, excludeNS: []string{"skyhook"}}).deleteNamespaces(context.Background(), nil)
 
 	finalizers := func(ns, name string) []string {
 		obj, err := f.dyn.Resource(configMapGVR).Namespace(ns).Get(context.Background(), name, metav1.GetOptions{})
