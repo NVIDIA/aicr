@@ -30,6 +30,9 @@ products:
         path: ../docs/index.yml
         slug: latest
         availability: stable
+      - display-name: v1.1.2
+        path: versions/v1.1.2.yml
+        slug: v1.1.2
       - display-name: v1.1.1
         path: versions/v1.1.1.yml
         slug: v1.1.1

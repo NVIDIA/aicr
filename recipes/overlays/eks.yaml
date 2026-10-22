@@ -39,6 +39,8 @@ spec:
       type: Helm
       source: https://kubernetes-sigs.github.io/aws-ebs-csi-driver
       valuesFile: components/aws-ebs-csi-driver/values.yaml
+      dependencyRefs:
+        - prometheus-operator-crds
 
     # Enable Prometheus persistent storage for EKS (requires EBS CSI driver)
     - name: kube-prometheus-stack

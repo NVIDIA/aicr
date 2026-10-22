@@ -44,6 +44,7 @@ componentRefs: ## alphabetically sorted
   - name: gcp-driver-installer
   - name: gpu-operator
   - name: grove
+  - name: k8s-aibom
   - name: k8s-ephemeral-storage-metrics
   - name: kai-scheduler
   - name: kube-prometheus-stack
@@ -56,18 +57,18 @@ componentRefs: ## alphabetically sorted
   - name: prometheus-operator-crds
 deploymentOrder:
   - agentgateway-crds
-  - cert-manager
-  - agentgateway
   - gcp-driver-installer
-  - grove
-  - nfd
   - nodewright-operator
   - nodewright-customizations
   - prometheus-operator-crds
+  - cert-manager
+  - agentgateway
+  - grove
   - kube-prometheus-stack
+  - k8s-ephemeral-storage-metrics
+  - nfd
   - gpu-operator
   - dra-node-labeler
-  - k8s-ephemeral-storage-metrics
   - kai-scheduler
   - dynamo-platform
   - nvidia-dra-driver-gpu

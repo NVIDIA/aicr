@@ -32,6 +32,12 @@ const runtimeInventoryComponentName = "k8s-aibom"
 // component by opt-in and one that declares it hydrate identically.
 const runtimeInventoryValuesFile = "components/k8s-aibom/values.yaml"
 
+// runtimeInventoryCRDProviders are the registry components that install CRDs
+// for workload kinds k8s-aibom watches. A granted ref must deploy after
+// whichever of them the recipe enables; a recipe that declares the component
+// carries the same edge in its overlay.
+var runtimeInventoryCRDProviders = []string{"dynamo-platform", "k8s-nim-operator"}
+
 // RuntimeInventoryMode is the generation-time selection for the runtime AI
 // inventory component.
 //
@@ -104,6 +110,8 @@ func (r *RecipeResult) RuntimeInventoryMode() (RuntimeInventoryMode, bool) {
 // grantRuntimeInventoryComponent adds the component to a recipe that does not
 // declare it, mirroring what h100-gke-cos-inference declares by hand: name,
 // type, and the shared values file, with everything else from the registry.
+// It also orders the component after any runtimeInventoryCRDProviders the
+// recipe enables, as the Dynamo overlay does for its inherited ref.
 //
 // Only reached for GKE recipes that neither declare nor decline the component
 // (#2962). The registry is the single source for chart, repository and
@@ -120,10 +128,18 @@ func grantRuntimeInventoryComponent(result *RecipeResult) error {
 				runtimeInventoryComponentName))
 	}
 
+	var deps []string
+	for _, name := range runtimeInventoryCRDProviders {
+		if ref := result.GetComponentRef(name); ref != nil && ref.IsEnabled() {
+			deps = append(deps, name)
+		}
+	}
+
 	result.ComponentRefs = append(result.ComponentRefs, ComponentRef{
-		Name:       runtimeInventoryComponentName,
-		Type:       ComponentTypeHelm,
-		ValuesFile: runtimeInventoryValuesFile,
+		Name:           runtimeInventoryComponentName,
+		Type:           ComponentTypeHelm,
+		ValuesFile:     runtimeInventoryValuesFile,
+		DependencyRefs: deps,
 	})
 
 	// The package-level pass rather than ref.ApplyRegistryDefaults: only this
@@ -193,10 +209,10 @@ func applyRuntimeInventoryMode(result *RecipeResult, mode RuntimeInventoryMode) 
 	// uses to decline, so the write clobbers the overlay's decision and the
 	// post-write check below would only read back what it just wrote.
 	//
-	// h100-gke-cos-inference-dynamo is the case that matters. It declines the
-	// inherited component deliberately, because k8s-aibom alongside grove and
-	// dynamo-platform is a combination nothing has qualified. Re-enabling it
-	// from the command line must not silently produce that stack.
+	// A recipe that declines the component has decided it must not ship there,
+	// typically because the surrounding stack is unqualified with it.
+	// Re-enabling it from the command line must not silently produce that
+	// stack.
 	//
 	// Mirrors the bundle-time guard in filterEnabledComponents, which already
 	// rejects the equivalent `--set k8s-aibom:enabled=true`. The two paths

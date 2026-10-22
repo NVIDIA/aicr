@@ -35,3 +35,4 @@ spec:
       dependencyRefs:
         - agentgateway-crds
         - cert-manager
+        - prometheus-operator-crds

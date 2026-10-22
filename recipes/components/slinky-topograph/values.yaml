@@ -87,3 +87,6 @@ nodeObserver:
 # sub-chart). Enabled by default; leaves that don't need it set
 # nodeDataBroker.enabled: false in their overlay overrides.
 nodeDataBroker: {}
+
+serviceMonitor:
+  enabled: true

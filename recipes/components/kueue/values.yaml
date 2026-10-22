@@ -24,6 +24,8 @@ controllerManager:
   tolerations:
     - operator: Exists
 
+enablePrometheus: true
+
 # Pinned copy of the chart 0.19.6 default controllerManagerConfigYaml with
 # ONE deliberate change: integrations.frameworks is trimmed to the
 # frameworks AICR manages (batch/job, JobSet, TrainJob). The chart default

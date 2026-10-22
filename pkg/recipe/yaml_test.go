@@ -34,6 +34,7 @@
 package recipe
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"path/filepath"
@@ -880,6 +881,8 @@ func TestMonitoringCREmittersHaveDirectPrometheusOperatorCRDsEdge(t *testing.T) 
 		"kube-prometheus-stack",
 		"nvsentinel",
 		"k8s-ephemeral-storage-metrics",
+		"cert-manager",
+		"nfd",
 	}
 
 	content, err := GetEmbeddedFS().ReadFile(baseYAMLFile)
@@ -912,6 +915,63 @@ func TestMonitoringCREmittersHaveDirectPrometheusOperatorCRDsEdge(t *testing.T) 
 				"as a DIRECT dependencyRef in %s. A transitive path is not enough — see issue #928. "+
 				"Current dependencyRefs: %v", name, required, baseYAMLFile, comp.DependencyRefs)
 		})
+	}
+}
+
+// TestResolvedLeavesMonitoringCREmittersHaveDirectEdge checks the same rule on
+// every resolved leaf, so an overlay or mixin that enables an emitter cannot
+// omit the edge. A leaf without prometheus-operator-crds is skipped: its
+// emitters must ship with their monitors off, which the bundle render checks.
+// slinky-slurm is not listed: its chart renders no monitor, and the operator
+// creates it at runtime.
+func TestResolvedLeavesMonitoringCREmittersHaveDirectEdge(t *testing.T) {
+	emitters := []string{
+		"kube-prometheus-stack",
+		"nvsentinel",
+		"k8s-ephemeral-storage-metrics",
+		"cert-manager",
+		"nfd",
+		"aws-ebs-csi-driver",
+		"grove",
+		"agentgateway",
+		"kueue",
+		"kubeflow-trainer",
+		"node-problem-detector",
+		"mariadb-operator",
+		"topograph",
+		"slinky-topograph",
+	}
+	const required = "prometheus-operator-crds"
+
+	leaves, err := ResolveLeaves(context.Background(), ResolveLeavesOptions{})
+	if err != nil {
+		t.Fatalf("ResolveLeaves: %v", err)
+	}
+
+	checked := 0
+	for _, leaf := range leaves {
+		if leaf.Err != nil || leaf.Result == nil {
+			continue
+		}
+		crds := leaf.Result.GetComponentRef(required)
+		if crds == nil || !crds.IsEnabled() {
+			continue
+		}
+		checked++
+		for _, name := range emitters {
+			comp := leaf.Result.GetComponentRef(name)
+			if comp == nil || !comp.IsEnabled() {
+				continue
+			}
+			if !slices.Contains(comp.DependencyRefs, required) {
+				t.Errorf("leaf %s: component %q emits monitoring.coreos.com/v1 CRs but does not declare %q "+
+					"as a DIRECT dependencyRef. Current dependencyRefs: %v",
+					leaf.Entry.Name, name, required, comp.DependencyRefs)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no resolved leaf enables prometheus-operator-crds")
 	}
 }
 

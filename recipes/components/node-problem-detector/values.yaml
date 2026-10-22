@@ -22,6 +22,13 @@ fullnameOverride: node-problem-detector
 tolerations:
   - operator: Exists
 
+# Both flags are needed: serviceMonitor.enabled alone renders a ServiceMonitor
+# with no metrics Service behind it.
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+
 # settings.log_monitors is left at the chart default: it already loads
 # kernel-monitor.json and readonly-monitor.json, which publish the three
 # conditions the KOM policies consume. Verified against the pinned image

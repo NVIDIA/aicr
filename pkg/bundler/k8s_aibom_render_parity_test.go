@@ -36,10 +36,9 @@ import (
 )
 
 // One stock recipe declares k8s-aibom, h100-gke-cos-inference, under ADR-019's
-// stock-adoption amendment. That recipe is not a leaf — h100-gke-cos-inference-dynamo
-// bases on it and declines the component — and the stock render golden covers
-// leaves only, so no golden pins this component's rendered bytes and no KWOK
-// deployer lane exercises it per deployer.
+// stock-adoption amendment, and its leaf h100-gke-cos-inference-dynamo inherits
+// it. The stock render golden pins the component's bytes for that leaf under
+// the helm deployer only, and no KWOK deployer lane exercises it per deployer.
 //
 // These tests cover the per-deployer render: they build the same
 // single-component recipe an adopter would, from the live registry entry rather
@@ -47,8 +46,8 @@ import (
 // instead of silently diverging from them.
 //
 // They deliberately do not assert the stock-adoption contract — that the target
-// recipe enables the component, the Dynamo descendant declines it, and the
-// generation-time opt-out works. A synthetic single-component fixture cannot
+// recipe and its Dynamo descendant enable the component, the descendant orders
+// it after dynamo-platform, and the generation-time opt-out works. A synthetic single-component fixture cannot
 // see any of that, so flipping the target ref to `install: false` would leave
 // every assertion here green. That contract is pinned separately by
 // TestK8sAIBOMStockAdoption in pkg/recipe.

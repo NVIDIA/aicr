@@ -33,11 +33,11 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **nvidia-dra-driver-gpu** | Dynamic Resource Allocation (DRA) driver. Advertises devices via the Kubernetes `resource.k8s.io` API (`v1` on 1.34+, `v1beta1`/`v1beta2` on 1.32/1.33) — ComputeDomain/IMEX channels for MNNVL platforms, and optionally whole GPUs. Stock recipes disable whole-GPU DRA advertisement (`resources.gpus.enabled: false`) — the device plugin is the production default whole-GPU advertiser, and DRA whole-GPU allocation is an experimental recipe-level opt-in ([#1327](https://github.com/NVIDIA/aicr/issues/1327)). Whole-GPU DRA and the GPU Operator device plugin (`nvidia.com/gpu`) are mutually exclusive per node: recipe-backed validation rejects a configuration that enables both (at policy-resolution time — skipping validation bypasses the check), because the two allocators keep independent ledgers and concurrent advertisement can double-allocate the same physical GPUs (see the guidance in `recipes/components/nvidia-dra-driver-gpu/values.yaml`). See [AKS GPU Setup](../integrator/aks-gpu-setup.md#dynamic-resource-allocation-dra) for details. CLI alias: `dradriver`. | [NVIDIA DRA Driver](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu) |
 | **dra-node-labeler** | Applies the DRA eviction node label (`--dra-eviction-node-label`) to every node GFD reports as `nvidia.com/gpu.present=true`, so the DRA kubelet plugin's node selector and GPU Operator's Driver Manager eviction hook need no node-pool labeling. Write-once: an existing value, including the Driver Manager's `paused-for-driver-upgrade`, is never rewritten. Present in the bundle only when the eviction label is configured. | — |
 | **prometheus-operator-crds** | Custom Resource Definitions for the prometheus-operator (`Alertmanager`, `AlertmanagerConfig`, `PodMonitor`, `Probe`, `Prometheus`, `PrometheusRule`, `ServiceMonitor`, `ThanosRuler`). Shipped as a separate release so the CRDs land before any chart that creates monitoring CRs; this breaks the helm-diff self-reference that otherwise blocks `helmfile apply` on a fresh cluster. | [prometheus-operator-crds](https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-operator-crds) |
-| **kube-prometheus-stack** | Cluster monitoring: Prometheus, Grafana, Alertmanager, and node exporters. Provides GPU and cluster metrics collection and dashboards. CRDs are installed by the sibling `prometheus-operator-crds` release (this chart runs with `crds.enabled: false`). | [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts) |
+| **kube-prometheus-stack** | Cluster monitoring: Prometheus, Grafana, Alertmanager, and node exporters. Provides GPU and cluster metrics collection and dashboards. CRDs are installed by the sibling `prometheus-operator-crds` release (this chart runs with `crds.enabled: false`). Prometheus selects every ServiceMonitor and PodMonitor in every namespace, with no `release` label required. Most components whose charts offer a monitor ship it enabled (NVCRE keeps its ServiceMonitor off because it is on no shipped overlay), and each one that renders its monitor at install declares a dependency on `prometheus-operator-crds`. | [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts) |
 | **prometheus-adapter** | Exposes custom metrics from Prometheus to the Kubernetes metrics API. Enables HPA scaling based on GPU utilization and other custom metrics. | [prometheus-adapter](https://github.com/kubernetes-sigs/prometheus-adapter) |
 | **aws-ebs-csi-driver** | CSI driver for Amazon EBS volumes. Provides persistent storage for workloads on EKS. EKS-specific. **Cluster-wide default StorageClass:** AICR enables `defaultStorageClass.enabled`, so this component provisions a **cluster-default** gp3 StorageClass (`ebs-csi-default-sc`) on **every** EKS cluster that includes it — not just inference recipes; training overlays inherit it too. EKS ships no default SC of its own, so this makes dynamic provisioning (e.g. the inference-perf model cache) work without naming a class. **The driver still needs AWS credentials, which AICR does not configure** — see [EBS CSI Driver Credentials](#ebs-csi-driver-credentials). Two consequences to note: (1) if the cluster already has a default SC, Kubernetes treats multiple defaults as ambiguous — unset the other; (2) a PVC that previously failed-fast on "no default SC" will now silently bind gp3, which can mask a misconfiguration. | [AWS EBS CSI Driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) |
 | **k8s-ephemeral-storage-metrics** | Exports ephemeral storage usage metrics per pod. Useful for monitoring scratch space consumption on GPU nodes. | [k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) |
-| **k8s-aibom** | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Ships by default in one stock recipe, `h100-gke-cos-inference`; available by opt-in on any other GKE recipe with `aicr recipe --runtime-inventory enabled`, except the GKE Dynamo recipes (`h100-gke-cos-inference-dynamo`, `b200-gke-cos-inference-dynamo`, `gb200-gke-cos-inference-dynamo`, and `gb300-gke-cos-inference-dynamo`), which decline it. Decline it with `aicr recipe --runtime-inventory disabled`. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
+| **k8s-aibom** | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Ships by default in two stock recipes, `h100-gke-cos-inference` and its Dynamo descendant `h100-gke-cos-inference-dynamo`; available by opt-in on any other GKE recipe with `aicr recipe --runtime-inventory enabled`, including the `b200`, `gb200`, and `gb300` GKE Dynamo recipes. On the two recipes that ship it by default, decline it with `aicr recipe --runtime-inventory disabled`. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
 | **kai-scheduler** | Gang scheduler with hierarchical queues and topology-aware placement; works with device-plugin (`nvidia.com/gpu`) and DRA GPU allocation alike. Ensures distributed training jobs land on nodes with optimal interconnect topology. AICR pins `defaultQueue.createDefaultQueue: true`, so the chart creates the `default-parent-queue`/`default-queue` hierarchy on install. The `gang-scheduling` conformance check submits its synthetic test PodGroup to `default-queue` by name, so that queue is a hard dependency of validation, not an optional extra. Note the chart creates the queues only on first install and annotates them `helm.sh/resource-policy: keep` — a `helm upgrade` will not recreate them if they are deleted, so restore them manually (or reinstall the release) if that happens. Workloads are not restricted to this queue: Dynamo submits to its own `dynamo`/`dynamo-default` hierarchy, which its chart creates via post-install and post-upgrade hooks. | [KAI Scheduler](https://github.com/kai-scheduler/KAI-Scheduler) |
 | **grove** | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. Upgrading from `v0.1.0-alpha.8` (or earlier) requires a CRD migration step — see [Upgrade Notes](#grove-v010-alpha8-or-earlier-to-v010-alpha12) below. Upgrading from `v0.1.0-alpha.12` requires a CRD apply — see [Upgrade Notes](#grove-v010-alpha12-to-v010-alpha13) below. | [Grove](https://github.com/ai-dynamo/grove) |
 | **dynamo-platform** | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with KV-cache-aware routing, Dynamo request-plane traffic, a ZMQ-based KV-cache event plane, and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
@@ -1249,9 +1249,10 @@ AICR enforces and surfaces inference-gateway exposure in two places:
 ## k8s-aibom Runtime Inventory
 
 AICR qualifies k8s-aibom v1.6.1 as an optional Helm component. It is not in
-the base or a mixin. It ships by default in one stock recipe,
+the base or a mixin. It ships by default in two stock recipes:
 `h100-gke-cos-inference`, under [ADR-019](https://github.com/NVIDIA/aicr/blob/main/docs/design/019-k8s-aibom-runtime-inventory.md)'s
-stock-adoption amendment.
+stock-adoption amendment, and `h100-gke-cos-inference-dynamo`, which inherits
+it from that recipe.
 
 `aicr recipe --runtime-inventory <mode>` selects the component at generation
 time and records the choice in the emitted recipe as
@@ -1274,24 +1275,43 @@ aicr recipe --service gke --accelerator a100 --os cos --intent training \
 The grant adds the same componentRef `h100-gke-cos-inference` declares by
 hand — name, type, and `valuesFile: components/k8s-aibom/values.yaml` — with
 chart, repository, and version filled in from the registry, so a granted
-recipe and a declaring one render the same artifact. It is scoped to `gke`
+recipe and a declaring one render the same artifact. When the recipe enables
+`dynamo-platform` or `k8s-nim-operator`, the granted ref also depends on it,
+for the ordering reason below. It is scoped to `gke`
 because that is the footprint qualified for the widened adoption; the same
 flag against a non-GKE recipe that does not already declare the component is
 rejected exactly as it always has been.
 
-Every GKE Dynamo recipe — `h100-gke-cos-inference-dynamo` (which inherits
-the component from `h100-gke-cos-inference`), `b200-gke-cos-inference-dynamo`,
-`gb200-gke-cos-inference-dynamo`, and `gb300-gke-cos-inference-dynamo` —
-declares the component with
-`install: false`. This is a deliberate decline, not an omission: k8s-aibom
-alongside `grove` and `dynamo-platform` is a combination AICR has not adopted.
-Upstream has since run the pairing for v1.6.1 (see the evidence below);
-lifting the decline is a separate change. The decline outranks the opt-in
-flag rather than the other way around:
+The GKE Dynamo recipes carry it as well. `h100-gke-cos-inference-dynamo`
+inherits it from `h100-gke-cos-inference`, so it ships there by default;
+`b200-gke-cos-inference-dynamo`, `gb200-gke-cos-inference-dynamo`, and
+`gb300-gke-cos-inference-dynamo` receive it through the opt-in. The pairing
+with `grove` and `dynamo-platform` rests on upstream's v1.6.1 run, with the
+topology caveats noted in the evidence below.
+
+On the GKE Dynamo recipes, by default or by opt-in, k8s-aibom deploys after
+`dynamo-platform`. The
+controller discovers the workload kinds it watches when it starts, so started
+before the `DynamoGraphDeployment` CRDs exist it would not inventory graphs
+until it restarted. Upstream's run reached the same state by restarting the
+controller after installing Dynamo; AICR gets it from the deployment order.
+
+The order covers a fresh install. If k8s-aibom was already running when
+`dynamo-platform` was first installed, for example on a cluster moving from
+`h100-gke-cos-inference` to its Dynamo variant, Helm does not restart the
+controller, so restart it once after `dynamo-platform` is ready:
+
+```bash
+kubectl rollout restart deployment/k8s-aibom -n k8s-aibom-system
+```
+
+A recipe that declines the component with `install: false` outranks the
+opt-in flag rather than the other way around. No stock recipe declines it,
+but a custom overlay can:
 
 ```console
 $ aicr recipe --service gke --accelerator h100 --os cos --intent inference \
-    --platform dynamo --runtime-inventory enabled
+    --data ./my-recipes --runtime-inventory enabled
 [INVALID_REQUEST] component "k8s-aibom" is disabled by the recipe and cannot
 be re-enabled with --runtime-inventory enabled; remove the override in the
 recipe or select a recipe that enables it
@@ -1308,6 +1328,10 @@ spec:
     - name: k8s-aibom
       type: Helm
       valuesFile: components/k8s-aibom/values.yaml
+      # Only when the recipe also carries an operator whose CRDs k8s-aibom
+      # watches; naming a component the recipe lacks fails resolution.
+      dependencyRefs:
+        - dynamo-platform
 ```
 
 A broad criteria overlay affects every matching recipe. In particular,
@@ -1513,12 +1537,17 @@ matching the object's actual rendered version. Moving the assertion to
 identically to serving the rendered version directly; until that evidence
 lands from a GKE UAT lane, the assertion stays at `v1alpha1`.
 
-**Declining the component.** `h100-gke-cos-inference` installs `k8s-aibom` by
-default. Decline it at generation time:
+**Declining the component.** `h100-gke-cos-inference` and
+`h100-gke-cos-inference-dynamo` install `k8s-aibom` by default. Decline it at
+generation time:
 
 ```bash
 aicr recipe --service gke --accelerator h100 --os cos --intent inference \
   --runtime-inventory disabled -o recipe.yaml
+
+# The Dynamo recipe, which inherits the component:
+aicr recipe --service gke --accelerator h100 --os cos --intent inference \
+  --platform dynamo --runtime-inventory disabled -o recipe.yaml
 ```
 
 The same flag works for a recipe that adds the component through a custom

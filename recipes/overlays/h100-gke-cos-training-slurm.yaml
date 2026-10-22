@@ -97,6 +97,7 @@ spec:
       valuesFile: components/mariadb-operator/values.yaml
       dependencyRefs:
         - mariadb-operator-crds
+        - prometheus-operator-crds
 
     - name: slurm-accounting-mariadb
       type: Helm
@@ -123,6 +124,7 @@ spec:
         - slinky-slurm-operator
         - slinky-slurm-operator-crds
         - slinky-slurm
+        - prometheus-operator-crds
       overrides:
         provider:
           name: gcp

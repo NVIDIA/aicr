@@ -260,13 +260,14 @@ install_component() {
 }
 
 install_bundle() {
-  msg "Installing cert-manager, prometheus-operator-crds, the Percona datastore, slinky-drainer-crds, slinky-drainer and nvsentinel from the bundle..."
+  msg "Installing prometheus-operator-crds, cert-manager, the Percona datastore, slinky-drainer-crds, slinky-drainer and nvsentinel from the bundle..."
   local dir d deadline remaining
   # The namespace slinky-slurm would create; the plugin and the drain monitor
   # watch it.
   kc create namespace "${SLURM_NAMESPACE}" --dry-run=client -o yaml | kc apply -f - >/dev/null
 
-  for dir in "${CERT_MANAGER_DIR}" "${CRDS_DIR}"; do
+  # CRDs first: cert-manager's chart renders a ServiceMonitor.
+  for dir in "${CRDS_DIR}" "${CERT_MANAGER_DIR}"; do
     install_component "${dir}"
   done
   deadline=$((SECONDS + CERT_MANAGER_WAIT_SECONDS))
