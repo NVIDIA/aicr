@@ -126,6 +126,7 @@ paths:
         - $ref: "#/components/parameters/ProfileSelection"
         - $ref: "#/components/parameters/SlurmAccountingMode"
         - $ref: "#/components/parameters/GKETCPXOInterfaces"
+        - $ref: "#/components/parameters/RequireEvidence"
       responses:
         '200':
           description: Headers for the response GET would return
@@ -142,6 +143,11 @@ paths:
               $ref: '#/components/headers/RequestIdResponse'
         '400':
           description: Invalid criteria, profile selection, or query parameter (headers only)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
+        '404':
+          description: Resolved recipe has no committed evidence pointer (headers only)
           headers:
             X-Request-Id:
               $ref: '#/components/headers/RequestIdResponse'
@@ -191,6 +197,7 @@ paths:
         - $ref: "#/components/parameters/ProfileSelection"
         - $ref: "#/components/parameters/SlurmAccountingMode"
         - $ref: "#/components/parameters/GKETCPXOInterfaces"
+        - $ref: "#/components/parameters/RequireEvidence"
       responses:
         "200":
           description: Resolved legacy, profile-bearing, or accounting-configured recipe
@@ -211,6 +218,15 @@ paths:
                 $ref: "#/components/schemas/RecipeResponse"
         "400":
           description: Invalid criteria, profile selection, or query parameter
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resolved recipe has no committed evidence pointer
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestIdResponse"
@@ -270,6 +286,7 @@ paths:
         - $ref: "#/components/parameters/ProfileSelection"
         - $ref: "#/components/parameters/SlurmAccountingMode"
         - $ref: "#/components/parameters/GKETCPXOInterfaces"
+        - $ref: "#/components/parameters/RequireEvidence"
       requestBody:
         required: true
         content:
@@ -308,6 +325,15 @@ paths:
                 $ref: "#/components/schemas/Error"
         "413":
           description: Request body exceeds the maximum allowed size
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resolved recipe has no committed evidence pointer
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestIdResponse"
@@ -378,6 +404,7 @@ paths:
         - $ref: "#/components/parameters/ProfileSelection"
         - $ref: "#/components/parameters/SlurmAccountingMode"
         - $ref: "#/components/parameters/GKETCPXOInterfaces"
+        - $ref: "#/components/parameters/RequireEvidence"
         - $ref: "#/components/parameters/Selector"
       responses:
         '200':
@@ -399,7 +426,7 @@ paths:
             X-Request-Id:
               $ref: '#/components/headers/RequestIdResponse'
         '404':
-          description: Selector path not found (headers only)
+          description: Selector path not found, or the resolved recipe has no committed evidence pointer (headers only)
           headers:
             X-Request-Id:
               $ref: '#/components/headers/RequestIdResponse'
@@ -447,6 +474,7 @@ paths:
         - $ref: "#/components/parameters/ProfileSelection"
         - $ref: "#/components/parameters/SlurmAccountingMode"
         - $ref: "#/components/parameters/GKETCPXOInterfaces"
+        - $ref: "#/components/parameters/RequireEvidence"
         - $ref: "#/components/parameters/Selector"
       responses:
         "200":
@@ -476,7 +504,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "404":
-          description: Selector path not found
+          description: Selector path not found, or the resolved recipe has no committed evidence pointer
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestIdResponse"
@@ -536,6 +564,7 @@ paths:
         - $ref: "#/components/parameters/ProfileSelection"
         - $ref: "#/components/parameters/SlurmAccountingMode"
         - $ref: "#/components/parameters/GKETCPXOInterfaces"
+        - $ref: "#/components/parameters/RequireEvidence"
       requestBody:
         required: true
         content:
@@ -582,7 +611,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "404":
-          description: Selector path not found
+          description: Selector path not found, or the resolved recipe has no committed evidence pointer
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestIdResponse"
@@ -1014,6 +1043,21 @@ components:
         torch-distributed-tcpxo runtime, as eth1=<network>,...,eth8=<network>.
         Required when the resolved recipe ships that runtime (service=gke,
         accelerator=h100, platform=kubeflow).
+      schema:
+        type: string
+    RequireEvidence:
+      name: requireEvidence
+      in: query
+      required: false
+      description: >
+        When 1, true, yes, or on, reject the resolved recipe unless a
+        committed evidence pointer exists for its id, including the selected
+        profile value. The check is offline presence only. A pointer on a
+        base id does not cover a profiled resolve, and a leaf that is not
+        the embedded catalog recipe fails. 0, false, no, and off leave the
+        request unchanged. Any other value is rejected. AICR_REQUIRE_EVIDENCE
+        enables the same check for the process when this parameter is absent
+        or false.
       schema:
         type: string
     Selector:

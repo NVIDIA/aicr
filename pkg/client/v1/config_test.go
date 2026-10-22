@@ -56,6 +56,7 @@ spec:
     data: /etc/aicr/recipes
     profile: gpuStack=operator-managed
     criteriaStrict: true
+    requireEvidence: true
     criteria:
       service: eks
       accelerator: h100
@@ -155,6 +156,9 @@ func TestLoadConfig_DerivesRecipeInputs(t *testing.T) {
 	if !cfg.IsCriteriaStrict() {
 		t.Error("IsCriteriaStrict = false, want true")
 	}
+	if !cfg.IsRequireEvidence() {
+		t.Error("IsRequireEvidence = false, want true")
+	}
 
 	criteria, err := cfg.RecipeCriteria(nil)
 	if err != nil {
@@ -203,6 +207,9 @@ func TestConfig_NilSafe(t *testing.T) {
 	}
 	if cfg.IsCriteriaStrict() {
 		t.Error("IsCriteriaStrict = true, want false")
+	}
+	if cfg.IsRequireEvidence() {
+		t.Error("IsRequireEvidence = true, want false")
 	}
 	if _, ok := cfg.RecipeSource(); ok {
 		t.Error("RecipeSource reported set on a nil Config")

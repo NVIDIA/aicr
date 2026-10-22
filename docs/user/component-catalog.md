@@ -1933,7 +1933,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: main
-          image: busybox:1.37
+          image: docker.io/library/busybox:1.37
           command: ["sleep", "30"]
           resources:
             requests:

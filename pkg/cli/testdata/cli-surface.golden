@@ -152,6 +152,7 @@ flag    aicr query  --nodes  type=int default=0 required=false hidden=false env=
 flag    aicr query  --os  type=string default= required=false hidden=false env=
 flag    aicr query  --platform  type=string default= required=false hidden=false env=
 flag    aicr query  --profile  type=string default= required=false hidden=false env=
+flag    aicr query  --require-evidence  type=bool default=false required=false hidden=false env=
 flag    aicr query  --runtime-inventory  type=string default= required=false hidden=false env=
 flag    aicr query  --selector  type=string default= required=true hidden=false env=
 flag    aicr query  --service  type=string default= required=false hidden=false env=
@@ -172,6 +173,7 @@ flag    aicr recipe  --os  type=string default= required=false hidden=false env=
 flag    aicr recipe  --output,-o  type=string default= required=false hidden=false env=
 flag    aicr recipe  --platform  type=string default= required=false hidden=false env=
 flag    aicr recipe  --profile  type=string default= required=false hidden=false env=
+flag    aicr recipe  --require-evidence  type=bool default=false required=false hidden=false env=
 flag    aicr recipe  --runtime-inventory  type=string default= required=false hidden=false env=
 flag    aicr recipe  --service  type=string default= required=false hidden=false env=
 flag    aicr recipe  --slurm-accounting-mode  type=string default= required=false hidden=false env=

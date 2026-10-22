@@ -132,8 +132,8 @@ spec:
     {{- if $tuning }}
     nvidia-tuned:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
-      version: "0.10.0"
-      containerSHA: sha256:124f3bdedbb651125cec1bf20d3e2f7fcbbe10588c44f36d8e5680b38b9ef8f6
+      version: "0.10.1"
+      containerSHA: sha256:b13d5e2bf426545b6bc0cb63575a43222644b3f0174e9bb56eba62ebb2bb1cf4
       # Required by the rke2 service: the accelerator's [bootloader] stanza is
       # written during config and none of it is live until the node reboots.
       interrupt:

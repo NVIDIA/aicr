@@ -129,6 +129,9 @@ Use in shell scripts:
 			if err != nil {
 				return err
 			}
+			if err = requirePublishedEvidence(ctx, cmd, cfg, client, result); err != nil {
+				return err
+			}
 
 			// Hydrate + select through the facade so the CLI, the REST
 			// query handler, and out-of-tree SDK callers all run the same

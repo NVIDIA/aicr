@@ -26,6 +26,9 @@
 //
 //   - ResolveRecipe / ResolveRecipeFromCriteria / ResolveRecipeFromSnapshot
 //     and LoadRecipe — produce or load a *RecipeResult.
+//   - RequirePublishedEvidence — reject a resolved recipe that has no
+//     committed evidence pointer. Callers decide whether to invoke it;
+//     ResolveRecipe does not.
 //   - BundleComponents — resolve Helm values and stitched manifests for
 //     each component in a *RecipeResult.
 //   - CollectSnapshot — deploy the snapshotter Job and retrieve a *Snapshot.
