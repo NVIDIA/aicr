@@ -640,16 +640,17 @@ Some namespaces are kept without any flag:
   skips that release, and phase 4 keeps its namespace so the release can still
   be removed with `helm uninstall`.
 - `openshift-nfd` and `cert-manager-operator`, unless phase 1 finds an AICR
-  release in them. On OpenShift the platform team often installs these
-  operators through OperatorHub. The list is `sharedNamespaces` in
-  `tools/cleanup/namespaces.go`.
+  release in them that is not in `uninstalled` status. On OpenShift the
+  platform team often installs these operators through OperatorHub. The list
+  is `sharedNamespaces` in `tools/cleanup/namespaces.go`.
 - Every phase 4 namespace, when helm is not installed or `helm list` fails. Without the
   release list, cleanup cannot tell which namespaces hold releases it would
   orphan.
 
 `--keep-namespaces` keeps `aicr-validation` too, but still deletes what
 `aicr validate` left there: the validator Jobs and ConfigMaps, and the snapshot
-agent's Job, ServiceAccount, Role and RoleBinding.
+agent's Job, ServiceAccount, Role and RoleBinding. The snapshot agent's
+staging ConfigMap (`aicr-agent-snapshot-<runID>`) is left in place.
 
 ### Debugging Tests
 
