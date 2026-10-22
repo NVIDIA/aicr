@@ -96,8 +96,8 @@ Two gaps block a safe split today:
   rejected in v1.
 - Split generation for OCP recipes. OCP recipes disable the base
   monitoring stack and add `-ocp` variants that use OpenShift's built-in
-  monitoring, and OCP split has not been designed or qualified. `--split` rejects OCP
-  recipes explicitly (see Partition validation).
+  monitoring, and OCP split has not been designed or qualified. `--split`
+  rejects OCP recipes explicitly (see Partition validation).
 - Reassigning a component's class per recipe shape in v1. Class is
   registry-only and stable; per-shape reassignment is possible follow-up
   work (see Configurable classes).
@@ -207,7 +207,7 @@ decides borderline cases:
 
 | Class | Definition | Test |
 |---|---|---|
-| `core` | **Platform-independent GPU execution:** a plain GPU pod can be scheduled and run correctly, including the accelerator fabric the hardware requires. Includes the prerequisites those components need to install and become ready, declared in `dependencyRefs`, under the prerequisite rule below. | Without it, does a plain GPU pod (no scheduler, no workload platform) still run correctly? If not, it is `core`. |
+| `core` | **Platform-independent GPU execution:** a plain GPU pod can be scheduled and run correctly, including the accelerator fabric the hardware requires. Includes the prerequisites those components need to install and become ready, declared in `dependencyRefs`, under the prerequisite rule below. | Without it, does a plain GPU pod (default Kubernetes scheduler, no workload platform) still run correctly? If not, it is `core`. |
 | `ops` | **Everything the GPU runtime does not need:** operational services (scheduling, node health, observability, policy, inventory) and workload platforms (the training, inference, and batch frameworks that workloads are built on, with the components that exist only to serve them). An `ops` component may use GPUs and may depend on `core`. | Not required by a plain GPU pod. |
 
 "Run correctly" includes the fabric: without the accelerator's RDMA or
@@ -629,9 +629,9 @@ in the extracted component values, not in `recipe.yaml`, so two
 invocations can share a `recipeDigest` yet render different class
 directories. The rendered payload is identified by the digest of the
 root `checksums.txt` — which remains the bundle attestation's in-toto
-subject, exactly as today; the split changes neither contract. The `split.yaml` schema, defined with the
-implementation, restates this scope note alongside the `recipeDigest`
-field.
+subject, exactly as today; the split changes neither contract. The
+`split.yaml` schema, defined with the implementation, restates this scope
+note alongside the `recipeDigest` field.
 
 Because class lives only in the registry, the same `recipeDigest` can
 partition differently after a registry classification change. The
