@@ -1486,11 +1486,8 @@ var MirrorExtraAPIVersions = []string{
 	// v1beta1 shipped in K8s 1.32, v1 went GA in K8s 1.34.
 	"resource.k8s.io/v1",
 	"resource.k8s.io/v1beta1",
-	// Prometheus Operator monitors, which prometheus-operator-crds installs
-	// before any component that renders them. kubeflow-trainer's JobSet
-	// subchart fails the render without ServiceMonitor; the check matches
-	// the full group/version/kind string, so the group/version alone is
-	// not enough.
+	// Prometheus Operator monitors. Charts gate them on the full
+	// group/version/kind string, so the group/version alone is not enough.
 	"monitoring.coreos.com/v1/ServiceMonitor",
 	"monitoring.coreos.com/v1/PodMonitor",
 }
