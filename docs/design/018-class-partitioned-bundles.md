@@ -2,8 +2,8 @@
 
 ## Status
 
-**Proposed** — 2026-08-11; classification revised 2026-10-20 (three
-classes: `core`, `ops`, `workload`).
+**Proposed** — 2026-08-11; class definitions revised 2026-10-22 (`core`
+narrowed to what GPU execution needs; `ops` is everything else).
 
 Builds on the resolved-recipe invariants from
 [ADR-015](015-recipe-configuration-profiles.md) (profile locks, strict
@@ -18,14 +18,17 @@ GPU runtime, networking, scheduling, and observability — deploys as a single
 unit with a single deployment order.
 
 Operators increasingly want to split that unit. The runtime core (components
-whose absence prevents GPU workloads from being scheduled or run), the
-operational services (scheduling, observability, administration), and the
-workload platforms (training, inference, and batch frameworks) have
-different owners, different change-approval processes, and different
-release cadences. The need for co-existing bundles has surfaced in several
-contexts; the first concrete consumer needs a runtime bundle and an ops
-bundle that co-exist in the same cluster and are deployed and operated by
-different owners.
+whose absence prevents GPU workloads from being scheduled or run) and the
+rest of the stack (scheduling, observability, administration, and the
+training, inference, and batch platforms) have different owners,
+different change-approval processes, and different release cadences. The
+need for co-existing bundles has surfaced in several contexts. The first
+concrete consumer is the NVIDIA Cloud Partner (NCP) deployment model: a
+cluster has a tenant data plane that NVIDIA provisions and manages, and a
+control plane that the partner or customer manages. NVIDIA deploys the GPU
+runtime; the partner deploys the operational services and workload
+platforms on top of it. The two bundles co-exist in the same cluster and
+are deployed and operated by different owners.
 
 The naive approach — author two recipes, or resolve the same recipe twice
 with different filters — reintroduces the exact failure the split must
@@ -45,8 +48,8 @@ Two gaps block a safe split today:
 
 ## Goals
 
-- Classify every registry component into a named class, with `core`,
-  `ops`, and `workload` as the initial classes.
+- Classify every registry component into a named class, with `core` and
+  `ops` as the initial classes.
 - Generate one atomic **bundle set** — one separately deployable
   sub-bundle (rendered as a class directory) per class, subject to
   cross-class ordering prerequisites — from a **single resolved recipe**,
@@ -104,8 +107,11 @@ Two gaps block a safe split today:
   scattered checks (for example gpu-operator vs gpu-operator-ocp,
   [#1685](https://github.com/NVIDIA/aicr/issues/1685))
   would benefit from one, but that is a separate follow-up.
-- More than three shipped classes. The mechanism is N-ary by design, but
-  this ADR ships `core`, `ops`, and `workload` only.
+- More than two shipped classes. The mechanism is N-ary by design, but
+  this ADR ships `core` and `ops` only. A third class, for example to
+  give workload platforms an owner separate from operational services,
+  is added in code when a consumer has that owner (see Alternatives
+  Considered).
 
 ## Decision
 
@@ -149,8 +155,8 @@ Each entry in `recipes/registry.yaml` gains an optional `class` field:
   # Additional component fields omitted.
 ```
 
-- Allowed values are the known class names; the initial set is `core`,
-  `ops`, and `workload`, in that order. The class set is a **closed,
+- Allowed values are the known class names; the initial set is `core`
+  and `ops`, in that order. The class set is a **closed,
   ordered enumeration in Go**, not registry-defined strings: an
   unenumerated class cannot be pre-validated against the catalog, so new
   classes are added only in code, at a release — cheap to extend, without
@@ -181,7 +187,7 @@ Each entry in `recipes/registry.yaml` gains an optional `class` field:
   operator's change and is applied by redeployment.
 - The default applies uniformly to **external registry entries** too: an
   external `registry.yaml` entry replaces the embedded entry wholesale, so
-  a replacement for a non-`core` (`ops` or `workload`) component that
+  a replacement for an `ops` component that
   omits `class` lands in `core`. A replacement that intends a non-`core`
   class must restate it; registry merging emits a merge-time warning when
   an external entry replaces an embedded non-`core` component without
@@ -200,13 +206,21 @@ decides borderline cases:
 
 | Class | Definition | Test |
 |---|---|---|
-| `core` | **Platform-independent GPU execution:** a plain GPU pod can be scheduled and run correctly, including the accelerator fabric the hardware requires. Includes everything those components need to install and become ready, declared in `dependencyRefs` (including the storage driver for persistent volumes). | Without it, does a plain GPU pod (no workload platform) still run correctly? If not, it is `core`. |
-| `ops` | **Operational services:** scheduling, node health, observability, policy, and inventory. An `ops` service may use GPUs and may be a prerequisite of a workload platform. | Not required by a plain GPU pod, and not a workload platform. |
-| `workload` | **Workload platforms and their supporting components:** the training, inference, and batch frameworks that workloads are built on, and components that exist only to serve them. | Present because of what users run, typically selected through the `platform` criteria axis. |
+| `core` | **Platform-independent GPU execution:** a plain GPU pod can be scheduled and run correctly, including the accelerator fabric the hardware requires. Includes the prerequisites those components need to install and become ready, declared in `dependencyRefs`, under the prerequisite rule below. | Without it, does a plain GPU pod (no scheduler, no workload platform) still run correctly? If not, it is `core`. |
+| `ops` | **Everything the GPU runtime does not need:** operational services (scheduling, node health, observability, policy, inventory) and workload platforms (the training, inference, and batch frameworks that workloads are built on, with the components that exist only to serve them). An `ops` component may use GPUs and may depend on `core`. | Not required by a plain GPU pod. |
 
 "Run correctly" includes the fabric: without the accelerator's RDMA or
 EFA fabric, multi-node NCCL falls back to TCP at a fraction of its
 bandwidth, regardless of which platform runs on top.
+
+**Prerequisite rule.** A prerequisite joins `core` only when it is itself
+platform-independent GPU execution, or the storage a `core` component's
+persistent volumes need. A `core` component's dependency on a scheduler,
+a drainer, or a workload platform does not pull that component into
+`core`: under `--split` such an edge is rejected instead (see Class
+dependency direction). This is what separates the NVSentinel datastore
+and its EBS driver below, which are `core`, from the `nvsentinel-preflight`
+and `nvsentinel-slinky-drainer` edges, which are not.
 
 One named exception places a component in `core` that the definition
 alone would not:
@@ -216,7 +230,7 @@ alone would not:
   the GPU runtime healthy, and it must be tested on GPU clusters.
 
 The rest of the NVSentinel set follows from that exception and the
-prerequisite rule in the `core` definition:
+prerequisite rule:
 
 - **Its datastore** (`nvsentinel-mongodb`, `psmdb-operator`), which the
   opt-in `nvsentinel-observe`, `nvsentinel-quarantine`, and
@@ -244,23 +258,17 @@ Representative assignments under these definitions:
   NVSentinel set.
 - `ops`: `kai-scheduler`, `kube-prometheus-stack`, `prometheus-adapter`,
   `k8s-ephemeral-storage-metrics`, `node-problem-detector`, `gatekeeper`,
-  and `k8s-aibom`.
-- `workload`: `kubeflow-trainer`, `dynamo-platform`, `grove`,
+  `k8s-aibom`, `kubeflow-trainer`, `dynamo-platform`, `grove`,
   `k8s-nim-operator`, `agentgateway`, `kueue`, `topograph`, `nvcre`, and
   the Slurm set (Slinky, including `slinky-drainer` and its CRDs, MariaDB,
-  and the ADR-016 accounting components). `nvcre` is a certification
-  controller, but it runs its workloads through Kubeflow Trainer and must
-  depend on it, so the direction rule places it in `workload`.
+  and the ADR-016 accounting components).
 
-**`kai-scheduler` is `ops`.** A plain GPU pod runs on the default
-scheduler, and `kai-scheduler` is not a workload platform, so the
-definitions place it in `ops`. Two consequences follow, and they are
-accepted:
-
-- The operations owner carries a GPU-aware scheduler, which must be
-  tested on GPU clusters. `ops` is not limited to GPU-free components.
-- `dynamo-platform` depends on `kai-scheduler`, so a Dynamo deployment
-  requires `ops`.
+`ops` is not limited to GPU-free components. `kai-scheduler` is a
+GPU-aware scheduler, and the workload platforms run GPU workloads; a plain
+GPU pod needs none of them, so they are `ops`, and the `ops` owner tests
+them on GPU clusters. Dependencies among them, such as `dynamo-platform`
+→ `kai-scheduler` and `nvcre` → `kubeflow-trainer`, stay inside `ops` and
+are ordered by the existing component-level dependency validation.
 
 Classification cascades along dependency edges: because a component may
 depend only on its own or an earlier class, classifying one component can
@@ -270,7 +278,7 @@ mechanically; placing future boundary components follows the class
 definitions above.
 
 `recipes/registry.yaml` is authoritative for every component's class, and
-`docs/user/component-catalog.md` will document the full assignment
+`docs/user/component-catalog.md` documents the full assignment
 (Implementation Plan step 2). This ADR
 defines the rules and exceptions; it is not the per-component record.
 
@@ -291,16 +299,19 @@ baseline.
 
 ### Class dependency direction
 
-Classes are totally ordered: **`core` < `ops` < `workload`**. A component
-may depend only on components of its own class or an earlier one: `ops`
-may depend on `core`, `workload` may depend on `ops` and `core`, and
-`core` depends on nothing outside `core`. Same-class dependencies are
-governed by the existing component-level cycle validation. Because the
-order is total, rejecting every edge to a later class also makes the
-class-level graph acyclic; no separate cycle check is needed. This keeps
-the deployment contract simple (install `core`, then `ops`, then
-`workload`) and gives partition validation a crisp rule to enforce. `core`
-alone is always a complete install.
+Classes are totally ordered: **`core` < `ops`**. A component may depend
+only on components of its own class or an earlier one: `ops` may depend
+on `core`, and `core` depends on nothing outside `core`. Same-class
+dependencies are governed by the existing component-level cycle
+validation. Because the order is total, rejecting every edge to a later
+class also makes the class-level graph acyclic; no separate cycle check is
+needed. This keeps the deployment contract simple and gives partition
+validation a crisp rule to enforce. The **ordering contract** is: install
+`core`, then `ops`; tear down in reverse, `ops` before `core`, because
+removing `core` first pulls the GPU runtime and its CRDs out from under
+`ops` releases. `core` alone is always a complete install. The rule and
+the contract are stated for N ordered classes, so a future class slots in
+without changing them.
 
 Direction is the floor, not the goal: classification should also
 **minimize cross-class edges** in the first place, because operating
@@ -333,15 +344,14 @@ deferred follow-up.
 
 Retry also has limits: it covers prerequisites whose absence makes
 reconciliation *fail* (such as missing CRDs); **fail-open prerequisites**
-— later-class resources (`ops` or `workload`) that apply successfully
-despite a missing non-CRD
-dependency — are not verified in v1, nor is cross-bundle version
+— `ops` resources that apply successfully despite a missing non-CRD
+`core` dependency — are not verified in v1, nor is cross-bundle version
 compatibility; a live set-identity or preflight protocol remains
 deferred.
 
 The existing catalog violates the rule, and fixing it is a prerequisite.
 `gpu-operator` (`core`) declares `dependencyRefs` on
-`kube-prometheus-stack` (`ops`) in 35 declarations **across overlays**,
+`kube-prometheus-stack` (`ops`) in 36 declarations **across overlays**,
 including base. The edge exists to guarantee the
 ServiceMonitor CRDs exist before its monitors are applied, and
 `kube-prometheus-stack` installs no CRDs itself (`crds.enabled: false`);
@@ -353,10 +363,10 @@ cluster API surface needed by every class; keeping shared CRD packages in
 `core` is the general pattern.
 
 `dynamo-platform` (12 declarations) and `kubeflow-trainer` (6, including
-`recipes/mixins/platform-kubeflow.yaml`) declare the same edge. As
-`workload` components they may depend on `ops`, but they too need only
-the CRDs, so the prerequisite repoints all 53 declarations; it verifies
-each edge's actual purpose before repointing it.
+`recipes/mixins/platform-kubeflow.yaml`) declare the same edge. As `ops`
+components they may depend on `kube-prometheus-stack`, but they too need
+only the CRDs, so the prerequisite repoints all 54 declarations; it
+verifies each edge's actual purpose before repointing it.
 
 Dependency edges are **install-time requirements only**; runtime data
 flows need no edge and naturally run in the allowed direction. The
@@ -367,12 +377,9 @@ component (`nvsentinel` already declares that direct edge; see
 [#928](https://github.com/NVIDIA/aicr/issues/928)) —
 while the ops Prometheus *scrapes* those monitors at runtime, an
 ops-consumes-core flow with no install edge at all. If ops is absent,
-core runs fully; its metrics are simply not collected yet. A runtime flow
-can also run toward a later class: metrics flow from the `ops`
-Prometheus to the `workload` planner in `dynamo-platform`, which needs no
-install edge but does
-mean planner-driven autoscaling has no metrics source until `ops` is
-installed.
+core runs fully; its metrics are simply not collected yet. Runtime flows
+within `ops`, such as metrics from Prometheus to the `dynamo-platform`
+planner, likewise need no install edge.
 
 The repoint prerequisite changes ordinary bundles **once**, independent of
 `--split`: `dependencyRefs` serialize into each affected recipe's emitted
@@ -389,7 +396,7 @@ spirit of the existing deployment-order guard tests. Prerequisites are
 declared as edges, including the storage a core component's volumes
 need.
 
-Two opt-in NVSentinel mixins declare edges from `core` to later classes:
+Two opt-in NVSentinel mixins declare edges from `core` to `ops`:
 `nvsentinel-preflight` (`nvsentinel` → `kai-scheduler`) and
 `nvsentinel-slinky-drainer` (`nvsentinel` → `slinky-drainer` and its
 CRDs). They are composed only onto operators' own leaf overlays, so no
@@ -398,8 +405,10 @@ embedded classification, recipes that compose either mixin cannot use
 `--split` in v1: partition validation rejects the edge at bundle time.
 The check is on the edge, not the mixin name, so an external registry
 that places both ends in compatible classes (for example `kai-scheduler`
-in `core`) removes the rejection. Pulling a scheduler or Slurm into
-`core` to accommodate them would undo the narrow `core` definition.
+in `core`) removes the rejection. The prerequisite rule (see Class
+definitions) is why the shipped registry does not: pulling a scheduler or
+Slurm into `core` to accommodate them would undo the narrow `core`
+definition.
 
 ### Configurable classes
 
@@ -429,16 +438,19 @@ per-component assignment is configurable and everything else is fixed:
 - **Class names are closed.** A new name requires extending the Go enum.
   User-defined names would also need a user-declared ordering between
   classes, because the only ordering contract today is `core`, then
-  `ops`, then `workload`. That is follow-up work once a consumer needs a
-  class AICR does not ship.
+  `ops`. That is follow-up work once a consumer needs a class AICR does
+  not ship.
 
 The dependency graph bounds how far any reassignment can go. Because a
 component may depend only on its own or an earlier class, moving a
 component to a later class forces every component in an earlier class
 that depends on it, directly or transitively, to move too; moving one to
 an earlier class likewise pulls in its dependencies. A component at the
-edge of the graph, such as `kube-prometheus-stack`, can move without
-forcing anything else. Moving `gpu-operator` out of `core` would drag
+edge of the graph, such as `kube-prometheus-stack`, can move into `core`
+without forcing anything else, because its only dependency,
+`prometheus-operator-crds`, is already there; moving it later would drag
+`prometheus-adapter` and `k8s-ephemeral-storage-metrics` with it. Moving
+`gpu-operator` out of `core` would drag
 `nvsentinel` and the rest of the GPU stack with it, leaving a `core` too
 small to mean "runtime". Reassignment is practical at narrow points in the
 graph — the shipped cuts are such points, the `core`/`ops` cut made
@@ -466,9 +478,10 @@ aicr bundle --recipe recipe.yaml --split --output ./bundles
 - `--split` takes no class arguments: it renders every class with
   **declared components** in the resolved recipe, one directory per
   class. A known class with no declared components is **skipped** (no
-  directory) — distinct from the rejected all-disabled case below. A
-  recipe with no workload platform, for example, produces only `core/`
-  and `ops/`. The flag is not hardcoded to a fixed set of classes: adding
+  directory) — distinct from the rejected all-disabled case below. Every
+  catalog recipe declares both shipped classes, so the rule matters for
+  external registries and future classes. The flag is not hardcoded to a
+  fixed set of classes: adding
   a future class changes the output layout of recipes that declare such
   components, and nothing else. A
   class-subset selector is deliberately absent: emitting less
@@ -603,7 +616,7 @@ the implementation.
 
 `split.yaml` is **audit metadata only**: it records the set's
 `recipeDigest`, the class of every component, and the class ordering
-contract (core, then ops, then workload). `recipeDigest` is computed over
+contract (core, then ops). `recipeDigest` is computed over
 the emitted set-root `recipe.yaml` with
 `evidence/attestation.SubjectDigestV3`, the canonicalization new recipe
 evidence uses (it excludes `metadata.version`), so it matches the subject
@@ -637,8 +650,8 @@ operator-managed concern (see Non-Goals).
 
 Sub-bundles deployed to one cluster must not collide on deployer-level
 identities. The rule: **sub-bundle root identities derive from the class** —
-for example, the Argo CD parent Applications `<app-name>-core`,
-`<app-name>-ops`, and `<app-name>-workload`.
+for example, the Argo CD parent Applications `<app-name>-core` and
+`<app-name>-ops`.
 
 Component-level identities need one guard beyond unique component names:
 *synthetic* release names. The Helm writer injects `<name>-pre` /
@@ -660,7 +673,7 @@ combination returns a clear error, never degraded output:
 
 | Deployer / output | v1 `--split` | Class-derived root identity |
 |---|---|---|
-| `helm` (local) | Supported | Set directory layout (`core/`, `ops/`, `workload/`); full-set emitted-identity validation before rendering |
+| `helm` (local) | Supported | Set directory layout (`core/`, `ops/`); full-set emitted-identity validation before rendering |
 | `helmfile` (local) | Rejected | Follow-up: per-class root helmfile |
 | `argocd` (local) | Rejected | Follow-up: parent Application `<app-name>-<class>` |
 | `argocd-helm` (local) | Rejected | Follow-up: same parent-Application rule |
@@ -677,9 +690,9 @@ class-derived root identity, add it to the matrix, and lift the rejection.
 An EKS H100 training recipe with the Kubeflow platform resolves, as today,
 to one `RecipeResult` with components including `cert-manager`, `nfd`,
 `nodewright-operator`, `prometheus-operator-crds`, `gpu-operator`,
-`aws-efa`, `aws-ebs-csi-driver`, `nvsentinel` (class `core`);
-`kai-scheduler`, `kube-prometheus-stack`, `k8s-ephemeral-storage-metrics`
-(class `ops`); and `kubeflow-trainer` (class `workload`).
+`aws-efa`, `aws-ebs-csi-driver`, `nvsentinel` (class `core`); and
+`kai-scheduler`, `kube-prometheus-stack`, `k8s-ephemeral-storage-metrics`,
+`kubeflow-trainer` (class `ops`).
 
 ```shell
 aicr bundle --recipe recipe.yaml --split --output ./bundles
@@ -692,33 +705,36 @@ bundles/
 ├── recipe.yaml                 # the full resolved recipe (set-level)
 ├── split.yaml                  # audit: recipeDigest + class of every
 │                               # component + ordering contract
-│                               # (core → ops → workload)
+│                               # (core → ops)
 ├── checksums.txt               # covers the whole set
 ├── core/
 │   ├── deploy.sh               # cert-manager, nfd, prometheus-operator-crds,
 │   │                           # gpu-operator, aws-efa, nvsentinel, ...
 │   └── <component folders>
-├── ops/
-│   ├── deploy.sh               # deploy after core; installs kai-scheduler,
-│   │                           # kube-prometheus-stack, ...
-│   └── <component folders>
-└── workload/
-    ├── deploy.sh               # deploy after ops; installs kubeflow-trainer
+└── ops/
+    ├── deploy.sh               # deploy after core; installs kai-scheduler,
+    │                           # kube-prometheus-stack, kubeflow-trainer, ...
     └── <component folders>
 ```
 
 Edges that cross a class boundary point to an earlier class and are
 treated as satisfied externally while rendering the later class — for
-example, `kube-prometheus-stack` → `prometheus-operator-crds` (`ops` →
-`core`) and `kubeflow-trainer` → `gpu-operator` (`workload` → `core`). The complete
+example, `kube-prometheus-stack` → `prometheus-operator-crds` and
+`kubeflow-trainer` → `gpu-operator` (both `ops` → `core`). The complete
 edges remain auditable in the set-root `recipe.yaml`. The runtime owner
-deploys `core/`, then the operations owner deploys `ops/`, then the
-platform owner deploys `workload/`.
-The v1 scripts do not query the cluster to preflight cross-class
-prerequisites; they assume the operator followed the class ordering
-contract. Taking a *newer* set's later class against an older deployed
-earlier class is likewise an operator decision that `split.yaml` makes
-auditable but v1 does not mechanically verify.
+(NVIDIA, for an NCP tenant data plane) deploys `core/`; then the
+control-plane owner (the partner or customer) deploys `ops/`. Teardown is
+the reverse, `ops/` before `core/`; each class README states both.
+
+The v1 scripts do not preflight cross-class prerequisites; they assume
+the operator followed the class ordering contract. The one cluster query
+`deploy.sh` already makes, the orphaned-CRD scan, is rendered per class
+from the set's class map: a CRD group installed by an earlier class (for
+example `monitoring.coreos.com`, from `core`'s `prometheus-operator-crds`)
+is expected when `ops/deploy.sh` runs, not reported as an orphan with a
+delete hint. Taking a *newer* set's later class against an older deployed
+earlier class is an operator decision that `split.yaml` makes auditable
+but v1 does not mechanically verify.
 
 ## Open Questions
 
@@ -761,18 +777,23 @@ ever pursued.
   classes; override-induced cases are enforced at bundle time) before
   any user runs `bundle`. The class field makes the partition a
   reviewed, stable contract maintained once by component authors.
-- **Two classes, with `ops` limited to GPU-free components.** Rejected.
-  With only `core` and a CPU-only `ops`, every component that touches
-  GPUs must be `core`, including schedulers and workload platforms that a
-  plain GPU pod does not need. `core` becomes nearly the whole catalog,
-  larger and more churn-prone than "runtime core" suggests. Defining
-  `core` by necessity and adding `workload` keeps `core` small; dropping
-  the CPU-only rule gives GPU-aware operational services a home other
-  than `core`.
-- **`apps` as the name of the third class.** Rejected in favor of
-  `workload`: `apps` suggests the user's own applications, and a parent
-  Application named `<app-name>-apps` is easily confused with an Argo CD
-  app-of-apps root.
+- **`ops` limited to GPU-free components.** Rejected. With a CPU-only
+  `ops`, every component that touches GPUs must be `core`, including
+  schedulers and workload platforms that a plain GPU pod does not need.
+  `core` becomes nearly the whole catalog, larger and more churn-prone
+  than "runtime core" suggests. Defining `core` by necessity and letting
+  `ops` carry GPU-aware components keeps `core` small.
+- **Three classes: `core`, `ops`, `workload`.** Considered in the
+  2026-10 revision and withdrawn. Separating operational services from
+  workload platforms expresses a third owner, and the first consumer has
+  two: NVIDIA for the tenant data plane and the partner for the control
+  plane. A class with no owner adds a boundary to validate, a directory
+  to deploy, and borderline decisions (a GPU-aware scheduler, a
+  certification controller that runs through Kubeflow Trainer) without
+  anyone to deploy it separately. The class set is a closed ordered enum,
+  so a `workload` class is added in code when a consumer has that owner;
+  with two classes nothing in the design assumes there will never be
+  three.
 - **Per-class emission.** Rejected: emitting a single class lets two
   generation calls disagree about which bundle owns a component —
   reintroducing across calls the collision that single resolution
@@ -799,19 +820,19 @@ ever pursued.
   fails CI on a new dependency to a later class instead of letting it
   break split deployments.
 - All existing `kube-prometheus-stack` dependency declarations from
-  `core` and `workload` components (see Class dependency direction for
-  the per-component counts) are repointed to `prometheus-operator-crds`
-  before the split can ship — a mechanical but catalog-wide prerequisite
-  PR that changes affected recipes' emitted `recipe.yaml` and checksums
-  once.
-- A split set installs in class order: `core`, then `ops`, then
-  `workload`, for whichever classes are present. Workload platforms
-  install after `ops`, and some require it; for example, Dynamo depends
-  on `kai-scheduler`. Others, such as Kubeflow Trainer, depend only on
-  `core`. `core` alone remains a complete install.
+  `gpu-operator`, `dynamo-platform`, and `kubeflow-trainer` (see Class
+  dependency direction for the per-component counts) are repointed to
+  `prometheus-operator-crds` before the split can ship — a mechanical but
+  catalog-wide prerequisite PR that changes affected recipes' emitted
+  `recipe.yaml` and checksums once.
+- A split set installs in class order, `core` then `ops`, and is torn
+  down in reverse. Each class `deploy.sh` and README carries that
+  contract, and the orphaned-CRD scan is scoped per class so an earlier
+  class's CRDs are not reported as orphans. `core` alone remains a
+  complete install.
 - Classes separate ownership, not runtime coupling: a component may still
-  rely on another class at runtime, as Dynamo does on `kai-scheduler`.
-  Generation validates the complete configuration of one set together,
+  rely on another class at runtime, as the `ops` Prometheus does on the
+  monitors `core` components install. Generation validates the complete configuration of one set together,
   against catalog constraints and component checks; it does not establish
   runtime compatibility in general, and nothing checks a class upgraded
   on its own. Owners coordinate version changes through a newly generated
@@ -830,19 +851,22 @@ ever pursued.
 
 ## Implementation Plan
 
-1. Catalog prerequisite: repoint all `core` and `workload`
-   `kube-prometheus-stack` dependency declarations (overlays and mixins)
-   to `prometheus-operator-crds`; add the EKS-only mixin that declares
+1. Catalog prerequisite: repoint all `gpu-operator`, `dynamo-platform`,
+   and `kubeflow-trainer` `kube-prometheus-stack` dependency declarations
+   (overlays and mixins) to `prometheus-operator-crds`; add the EKS-only mixin that declares
    the NVSentinel datastore's `aws-ebs-csi-driver` edge; add the
    resolved-graph dependency-direction guard test. After this lands, a targeted
    non-split parity regression test pins that the class field and split
    plumbing leave ordinary output byte-identical.
-2. Registry: the ordered `class` field (`core`, `ops`, `workload`),
+2. Registry: the ordered `class` field (`core`, `ops`),
    validation of known class names, an explicit class on every embedded
    entry (enforced by CI), and the initial classification per the class
    definitions, documented in `docs/user/component-catalog.md`.
 3. Bundler: `--split` flag (CLI, SDK, REST) with the
-   plan/validate-once/render-subsets pipeline, per-class directories,
+   plan/validate-once/render-subsets pipeline, per-class directories
+   (each class `deploy.sh` rendered from the set's class map, so its
+   orphaned-CRD scan omits CRD groups an earlier class installs, and each
+   class README stating the install and teardown order),
    set-level `recipe.yaml`/`split.yaml` (with `recipeDigest`)/
    `checksums.txt`/attestation, create-only staged atomic publication at
    the functional API boundary (net-new for local output; includes the

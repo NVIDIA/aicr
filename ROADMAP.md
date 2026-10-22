@@ -22,7 +22,7 @@ under the [maturity](#maturity) rules below.
 | Focus area | Outcome | Tracking |
 |---|---|---|
 | [Run more GPU systems with proven configurations](#run-more-gpu-systems-with-proven-configurations) | More GPU environments have reusable configurations with a clearly stated qualification depth | [#3153](https://github.com/NVIDIA/aicr/issues/3153) |
-| [Let teams deploy their parts of the stack](#let-teams-deploy-their-parts-of-the-stack) | Separate owners of the `core`, `ops`, and `workload` classes deploy into one cluster from the same verified configuration | [#3156](https://github.com/NVIDIA/aicr/issues/3156) |
+| [Let teams deploy their parts of the stack](#let-teams-deploy-their-parts-of-the-stack) | Separate owners of the `core` and `ops` classes deploy into one cluster from the same verified configuration | [#3156](https://github.com/NVIDIA/aicr/issues/3156) |
 | [Know whether a cluster is ready for workloads](#know-whether-a-cluster-is-ready-for-workloads) | Users can tell whether a cluster is ready for a workload and see the evidence behind that answer | [#1041](https://github.com/NVIDIA/aicr/issues/1041) |
 | [Recover unhealthy nodes safely](#recover-unhealthy-nodes-safely) | Operators respond to faults with retained evidence and a clear owner for every action | [#2623](https://github.com/NVIDIA/aicr/issues/2623) |
 | [Change components without disrupting workloads](#change-components-without-disrupting-workloads) | Users change components with qualified transition guidance and trustworthy artifacts | [#3154](https://github.com/NVIDIA/aicr/issues/3154) |
@@ -61,7 +61,7 @@ test cadence.
 
 ### Let teams deploy their parts of the stack
 
-Produce coordinated class bundles (`core`, `ops`, `workload`) from one resolved
+Produce coordinated class bundles (`core`, `ops`) from one resolved
 recipe. Keep ownership unique, preserve dependency order, and verify the
 complete set before any team deploys its part.
 
@@ -69,18 +69,18 @@ complete set before any team deploys its part.
 **Guides:** [ADR-018](docs/design/018-class-partitioned-bundles.md),
 [bundling](docs/user/bundling.md).
 
-- **Class boundaries.** Define three ordered classes, agreed with the first
-  consumer, where a component depends only on its own class or an earlier one,
-  and guard the catalog so it stays that way.
+- **Class boundaries.** Define two ordered classes matching the first
+  consumer's two owners, where a component depends only on its own class or an
+  earlier one, and guard the catalog so it stays that way.
 - **Verified bundle set.** Validate the complete recipe before partitioning it,
   give every component and release exactly one owner, and publish the set
   atomically under checksums that cover all of it.
-- **Qualified co-deployment.** Prove that `core`, `ops`, and `workload` deploy
+- **Qualified co-deployment.** Prove that `core` and `ops` deploy
   in order, including negative ownership, ordering, and tamper cases, and that
   non-split bundles behave as before.
 
 **Boundaries:** This outcome covers Helm-local output and a same-generation
-set only. Classes beyond `core`, `ops`, and `workload`, GitOps split output,
+set only. Classes beyond `core` and `ops`, GitOps split output,
 OCI publication, independent class artifacts, and mixed-generation
 compatibility are outside it.
 
