@@ -14,7 +14,7 @@
 
 // Command check-docs-links verifies that every link on a page Fern publishes
 // reaches something a reader can open. It exits 1 when a link does not, and 2
-// when the published pages cannot be loaded.
+// when the published pages or a link target cannot be read.
 //
 // The published pages are the paths in docs/index.yml, Fern's navigation
 // manifest. A relative link must resolve to one of them, because Fern renders
@@ -30,8 +30,10 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/url"
 	"os"
@@ -40,6 +42,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
@@ -90,15 +93,21 @@ type site struct {
 }
 
 // exists reports whether repoPath names a file or directory inside the root.
-func (s site) exists(repoPath string) bool {
-	if repoPath == "" {
-		return true
-	}
+// A path through a file fails with ENOTDIR and counts as missing. Any other
+// stat failure is returned, so it is not reported as a broken link.
+func (s site) exists(repoPath string) (bool, error) {
 	if !filepath.IsLocal(filepath.FromSlash(repoPath)) {
-		return false
+		return false, nil
 	}
 	_, err := os.Stat(filepath.Join(s.root, filepath.FromSlash(repoPath)))
-	return err == nil
+	switch {
+	case err == nil:
+		return true, nil
+	case stderrors.Is(err, fs.ErrNotExist), stderrors.Is(err, syscall.ENOTDIR):
+		return false, nil
+	default:
+		return false, errors.Wrap(errors.ErrCodeInternal, "stat "+repoPath, err)
+	}
 }
 
 // run checks every published page under root, writes one line per unreachable
@@ -128,7 +137,11 @@ func run(ctx context.Context, root string, out io.Writer) (int, error) {
 			return 0, errors.Wrap(errors.ErrCodeNotFound, navPath+" references "+page+", which cannot be read", err)
 		}
 		for _, l := range extractLinks(md, src) {
-			kind, reason := s.classify(page, l.url)
+			kind, reason, err := s.classify(page, l.url)
+			if err != nil {
+				return 0, errors.Wrap(errors.ErrCodeInternal,
+					fmt.Sprintf("check link %s on %s:%d", l.url, page, l.line), err)
+			}
 			switch kind {
 			case kindRelative:
 				relative++
@@ -227,16 +240,24 @@ var (
 )
 
 // classify reports how rawURL on page is checked and, when it reaches nothing
-// a reader can open, why. An empty reason means the link resolves.
-func (s site) classify(page, rawURL string) (linkKind, string) {
+// a reader can open, why. An empty reason means the link resolves. An error
+// means a target could not be checked.
+func (s site) classify(page, rawURL string) (linkKind, string, error) {
 	if repoPath, reason, ok := githubMainPath(rawURL); ok {
-		if reason == "" && !s.exists(repoPath) {
+		if reason != "" {
+			return kindGitHub, reason, nil
+		}
+		found, err := s.exists(repoPath)
+		if err != nil {
+			return kindGitHub, "", err
+		}
+		if !found {
 			reason = fmt.Sprintf("names %s, which does not exist in the repository", repoPath)
 		}
-		return kindGitHub, reason
+		return kindGitHub, reason, nil
 	}
 	if schemePattern.MatchString(rawURL) || strings.HasPrefix(rawURL, "//") {
-		return kindIgnored, ""
+		return kindIgnored, "", nil
 	}
 
 	target := rawURL
@@ -244,24 +265,27 @@ func (s site) classify(page, rawURL string) (linkKind, string) {
 		target = target[:i]
 	}
 	if target == "" {
-		return kindIgnored, ""
+		return kindIgnored, "", nil
 	}
 	if strings.HasPrefix(target, "/") {
-		return kindRelative, "a root-relative link cannot be resolved offline. Link to the page by relative path"
+		return kindRelative, "a root-relative link cannot be resolved offline. Link to the page by relative path", nil
 	}
 	decoded, err := url.PathUnescape(target)
 	if err != nil {
-		return kindRelative, "malformed percent-encoding"
+		return kindRelative, "malformed percent-encoding", nil
 	}
 	resolved := path.Join(path.Dir(page), decoded)
-	switch {
-	case s.published[resolved]:
-		return kindRelative, ""
-	case s.exists(resolved):
-		return kindRelative, fmt.Sprintf("resolves to %s, which %s does not publish", resolved, navPath)
-	default:
-		return kindRelative, fmt.Sprintf("resolves to %s, which does not exist", resolved)
+	if s.published[resolved] {
+		return kindRelative, "", nil
 	}
+	found, err := s.exists(resolved)
+	if err != nil {
+		return kindRelative, "", err
+	}
+	if found {
+		return kindRelative, fmt.Sprintf("resolves to %s, which %s does not publish", resolved, navPath), nil
+	}
+	return kindRelative, fmt.Sprintf("resolves to %s, which does not exist", resolved), nil
 }
 
 // githubMainPath reports whether rawURL is a blob/main URL into this
@@ -284,7 +308,10 @@ func githubMainPath(rawURL string) (repoPath, reason string, ok bool) {
 		return rest, "malformed percent-encoding", true
 	}
 	repoPath = strings.TrimSuffix(strings.TrimPrefix(decoded, "/"), "/")
-	if repoPath != "" && path.Clean(repoPath) != repoPath {
+	if repoPath == "" {
+		return repoPath, "does not name a repository path", true
+	}
+	if path.Clean(repoPath) != repoPath {
 		return repoPath, fmt.Sprintf("names %s, which is not a canonical repository path", repoPath), true
 	}
 	return repoPath, "", true
