@@ -119,5 +119,16 @@ func TestOwnedNamespaces(t *testing.T) {
 				t.Errorf("runtime namespace %q is not cleaned up", ns)
 			}
 		}
+		for ns, reason := range sharedNamespaces {
+			if reason == "" {
+				t.Errorf("sharedNamespaces[%q] has no reason", ns)
+			}
+			if catalog[ns] == "" {
+				t.Errorf("sharedNamespaces lists %q, which no recipe names", ns)
+			}
+			if !owned[ns] {
+				t.Errorf("shared namespace %q is not cleaned up", ns)
+			}
+		}
 	})
 }

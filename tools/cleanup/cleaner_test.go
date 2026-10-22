@@ -456,6 +456,41 @@ func TestCheckNamespacesListFailureIsReported(t *testing.T) {
 	}
 }
 
+func TestDeleteNamespacesSharedNamespaces(t *testing.T) {
+	const shared = "openshift-nfd"
+	tests := []struct {
+		name       string
+		releases   []helmRelease
+		wantKept   bool
+		wantOutput string
+	}{
+		{"aicr release found", []helmRelease{{Name: "nfd-ocp-olm", Namespace: shared}}, false,
+			`msg=deleting resource=namespaces name=` + shared},
+		{"no release found", nil, true,
+			`msg="keeping shared namespace with no AICR helm release found" namespace=` + shared},
+		{"aicr release elsewhere", []helmRelease{{Name: "nfd-ocp-olm", Namespace: "gpu-operator"}}, true,
+			`msg="keeping shared namespace with no AICR helm release found" namespace=` + shared},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFixture([]runtime.Object{namespace(shared), namespace("gpu-operator")})
+			c := f.cleaner(options{assumeYes: true})
+			c.namespaces = []string{"gpu-operator", shared}
+			c.releaseNames = map[string]bool{"nfd-ocp-olm": true}
+
+			c.deleteNamespaces(context.Background(), tt.releases)
+
+			if got := f.namespaceExists(t, shared); got != tt.wantKept {
+				t.Errorf("namespace %s kept = %v, want %v", shared, got, tt.wantKept)
+			}
+			if f.namespaceExists(t, "gpu-operator") {
+				t.Error("namespace gpu-operator was not deleted")
+			}
+			f.wantOutput(t, tt.wantOutput)
+		})
+	}
+}
+
 func TestFinalizerRescue(t *testing.T) {
 	f := newFixture(
 		[]runtime.Object{terminatingNamespace("nodewright"), terminatingNamespace("skyhook")},

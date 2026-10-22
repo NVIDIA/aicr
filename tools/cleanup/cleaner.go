@@ -323,14 +323,18 @@ func (c *cleaner) deleteCRDs(ctx context.Context) {
 // deleteNamespaces keeps a namespace holding any of releases that AICR does
 // not own, since deleting the namespace also deletes the release record and
 // leaves the release's cluster-scoped objects with no way to uninstall them.
+// It keeps a sharedNamespaces entry unless releases has an AICR release there.
 func (c *cleaner) deleteNamespaces(ctx context.Context, releases []helmRelease) {
 	c.log.Info("phase 4: deleting AICR component and check namespaces")
 	for _, ns := range slices.Sorted(maps.Keys(notOwnedNamespaces)) {
 		c.log.Info("skipping namespace AICR does not own", "namespace", ns, "reason", notOwnedNamespaces[ns])
 	}
 	foreign := map[string][]string{}
+	installed := map[string]bool{}
 	for _, rel := range releases {
-		if !c.releaseNames[rel.Name] {
+		if c.releaseNames[rel.Name] {
+			installed[rel.Namespace] = true
+		} else {
 			foreign[rel.Namespace] = append(foreign[rel.Namespace], rel.Name)
 		}
 	}
@@ -342,6 +346,8 @@ func (c *cleaner) deleteNamespaces(ctx context.Context, releases []helmRelease) 
 			c.log.Info("skipping excluded namespace", "namespace", ns)
 		case len(foreign[ns]) > 0:
 			c.log.Info("keeping namespace that holds helm releases AICR does not own", "namespace", ns, "releases", foreign[ns])
+		case sharedNamespaces[ns] != "" && !installed[ns]:
+			c.log.Info("keeping shared namespace with no AICR helm release found", "namespace", ns, "reason", sharedNamespaces[ns])
 		default:
 			targets = append(targets, ns)
 		}

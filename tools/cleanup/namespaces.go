@@ -44,6 +44,13 @@ var runtimeNamespaces = map[string]string{
 	"gang-scheduling-test":     "created by the CNCF evidence collector, without a per-run suffix",
 }
 
+// sharedNamespaces maps owned namespaces that phase 4 deletes only when phase 1
+// finds an AICR Helm release in them to the reason.
+var sharedNamespaces = map[string]string{
+	"openshift-nfd":         "OpenShift NFD Operator namespace, often installed by the platform team through OperatorHub, and GPU Operator depends on NFD",
+	"cert-manager-operator": "OpenShift cert-manager Operator namespace, often installed by the platform team through OperatorHub",
+}
+
 // ownedNamespaces returns the sorted namespaces any recipe in the embedded
 // catalog can deploy a component into, plus runtimeNamespaces, minus
 // notOwnedNamespaces.
