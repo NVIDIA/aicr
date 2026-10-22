@@ -880,6 +880,8 @@ func TestMonitoringCREmittersHaveDirectPrometheusOperatorCRDsEdge(t *testing.T) 
 		"kube-prometheus-stack",
 		"nvsentinel",
 		"k8s-ephemeral-storage-metrics",
+		"cert-manager",
+		"nfd",
 	}
 
 	content, err := GetEmbeddedFS().ReadFile(baseYAMLFile)
