@@ -33,12 +33,9 @@ const runtimeInventoryComponentName = "k8s-aibom"
 const runtimeInventoryValuesFile = "components/k8s-aibom/values.yaml"
 
 // runtimeInventoryCRDProviders are the registry components that install CRDs
-// for workload kinds k8s-aibom watches: DynamoGraphDeployment and
-// DynamoComponentDeployment from dynamo-platform, NIMService from
-// k8s-nim-operator. The controller discovers those kinds when it starts, so a
-// granted ref is ordered after whichever of them the recipe enables; started
-// first, it would not watch them until it restarts. A recipe that declares the
-// component carries the same edge in its overlay.
+// for workload kinds k8s-aibom watches. A granted ref must deploy after
+// whichever of them the recipe enables; a recipe that declares the component
+// carries the same edge in its overlay.
 var runtimeInventoryCRDProviders = []string{"dynamo-platform", "k8s-nim-operator"}
 
 // RuntimeInventoryMode is the generation-time selection for the runtime AI

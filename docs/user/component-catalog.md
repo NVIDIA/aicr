@@ -1296,6 +1296,15 @@ before the `DynamoGraphDeployment` CRDs exist it would not inventory graphs
 until it restarted. Upstream's run reached the same state by restarting the
 controller after installing Dynamo; AICR gets it from the deployment order.
 
+The order covers a fresh install. If k8s-aibom was already running when
+`dynamo-platform` was first installed, for example on a cluster moving from
+`h100-gke-cos-inference` to its Dynamo variant, Helm does not restart the
+controller, so restart it once after `dynamo-platform` is ready:
+
+```bash
+kubectl rollout restart deployment/k8s-aibom -n k8s-aibom-system
+```
+
 A recipe that declines the component with `install: false` outranks the
 opt-in flag rather than the other way around. No stock recipe declines it,
 but a custom overlay can:
