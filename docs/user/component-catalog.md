@@ -1727,18 +1727,20 @@ done
 Four details are load-bearing, and each obvious alternative loses something:
 
 - **Server-side apply under the field manager that installed the CRDs, not
-  `kubectl replace` or a bare `kubectl apply --server-side`.** `kubectl
-  replace` does update an existing CRD, because kubectl copies the live
-  `metadata.resourceVersion` into the manifest before sending it, but it
-  overwrites the whole object: anything another manager set on the CRD after
-  install, such as a GitOps label, is discarded. Server-side apply keeps a
-  field another manager set unless the chart's CRD sets that same field, in
-  which case `--force-conflicts` takes it over. What the apply removes depends
-  on where the new chart dropped something:
+  `kubectl replace` or a `kubectl apply --server-side` under kubectl's own
+  default manager.** `kubectl replace` does update an existing CRD, because
+  kubectl copies the live `metadata.resourceVersion` into the manifest before
+  sending it, but it overwrites the whole object: anything another manager
+  set on the CRD after install, such as a GitOps label, is discarded.
+  Server-side apply keeps a field another manager set unless the chart's CRD
+  sets that same field, in which case `--force-conflicts` takes it over. What
+  the apply removes depends on where the new chart dropped something:
   - **Inside `spec.versions`**, which holds every version's schema, a dropped
-    version or schema property disappears under any field manager, a bare
-    `kubectl` apply included: the list is atomic, so `--force-conflicts`
-    replaces it whole. The exception is a version still listed in the CRD's
+    version or schema property disappears under any field manager once the
+    apply succeeds: the list is atomic, so a forced apply replaces it whole.
+    Without `--force-conflicts`, an apply under any manager other than the
+    list's owner fails with a conflict on `.spec.versions` and changes
+    nothing. The exception is a version still listed in the CRD's
     `status.storedVersions`. The API server rejects that apply and the
     command stops, until a storage migration removes the version from the
     list.
@@ -1748,15 +1750,16 @@ Four details are load-bearing, and each obvious alternative loses something:
     Another owner, even one that set the same value, keeps the field in
     place, and `--force-conflicts` does not change that. Helm 4 installs
     CRDs through Apply, as manager `helm`, so `MANAGER="helm"` removes such a
-    field where a bare apply would leave it. Helm 3 and
-    `terraform-provider-helm` (measured on a kind cluster with provider
-    3.3.0) install with an Update operation, which server-side apply tracks
-    as a separate owner even under the same manager name, so after either a
-    field the original install set stays behind whatever `MANAGER` says. A
-    field that an earlier run of this command added is owned through Apply
-    and is removed normally, as long as every run uses the same `MANAGER`. If
-    the chart's release notes depend on a removal, check the field's owners
-    with `--show-managed-fields` and delete it by hand if it remains.
+    field where a forced apply under the default manager would leave it.
+    Helm 3 and `terraform-provider-helm` (measured on a kind cluster with
+    provider 3.3.0) install with an Update operation, which server-side apply
+    tracks as a separate owner even under the same manager name, so after
+    either a field the original install set stays behind whatever `MANAGER`
+    says. A field that an earlier run of this command added is owned through
+    Apply and is removed normally, as long as every run uses the same
+    `MANAGER`. If the chart's release notes depend on a removal, check the
+    field's owners with `--show-managed-fields` and delete it by hand if it
+    remains.
 
   `--force-conflicts` is required because other managers may hold individual
   fields. On a CRD using `spec.conversion.strategy: Webhook`, a chart that

@@ -104,7 +104,10 @@ func TestCatalogCRDUpgradeCommand(t *testing.T) {
 		apply string
 		// needsApply marks a case whose expectation holds only when helm
 		// installed the CRD through an Apply operation, as Helm 4 does.
-		needsApply     bool
+		needsApply bool
+		// wantConflict marks a case whose apply must fail on a field
+		// conflict and leave the installed CRD unchanged.
+		wantConflict   bool
 		wantShortNames bool
 		wantLabel      bool
 	}{
@@ -153,6 +156,14 @@ func TestCatalogCRDUpgradeCommand(t *testing.T) {
 			apply:          `kubectl apply --server-side --force-conflicts -f "${crd}"`,
 			wantShortNames: true,
 			wantLabel:      true,
+		},
+		{
+			name:         "control: apply without forcing conflicts on helm's spec.versions",
+			install:      installHelm,
+			manager:      "helm",
+			apply:        `kubectl apply --server-side -f "${crd}"`,
+			needsApply:   true,
+			wantConflict: true,
 		},
 	}
 
@@ -203,7 +214,17 @@ func TestCatalogCRDUpgradeCommand(t *testing.T) {
 			if tt.apply != "" {
 				script = replaceOnce(t, script, catalogApplyLine, tt.apply)
 			}
-			if out, err := cluster.bash(t, script); err != nil {
+			out, err := cluster.bash(t, script)
+			if tt.wantConflict {
+				if err == nil || !strings.Contains(out, "conflict") {
+					t.Fatalf("want the apply to fail on a conflict, got err=%v\n%s", err, out)
+				}
+				if got := getCRDState(t, cluster.client, crd); !slices.Equal(got.versions, installed.versions) {
+					t.Errorf("spec.versions = %v after a failed apply, want unchanged %v", got.versions, installed.versions)
+				}
+				return
+			}
+			if err != nil {
 				t.Fatalf("catalog block failed: %v\n%s", err, out)
 			}
 
