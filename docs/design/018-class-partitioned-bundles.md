@@ -22,13 +22,14 @@ whose absence prevents GPU workloads from being scheduled or run) and the
 rest of the stack (scheduling, observability, administration, and the
 training, inference, and batch platforms) have different owners,
 different change-approval processes, and different release cadences. The
-need for co-existing bundles has surfaced in several contexts. The first
-concrete consumer is the NVIDIA Cloud Partner (NCP) deployment model: a
-cluster has a tenant data plane that NVIDIA provisions and manages, and a
-control plane that the partner or customer manages. NVIDIA deploys the GPU
-runtime; the partner deploys the operational services and workload
-platforms on top of it. The two bundles co-exist in the same cluster and
-are deployed and operated by different owners.
+need for co-existing bundles has surfaced in several contexts.
+
+The first concrete consumer is the NVIDIA Cloud Partner (NCP) deployment
+model. A cluster has a tenant data plane that NVIDIA provisions and
+manages, and a control plane that the partner or customer manages. NVIDIA
+deploys the GPU runtime; the partner deploys the operational services and
+workload platforms on top of it. The two bundles co-exist in the same
+cluster and are deployed and operated by different owners.
 
 The naive approach — author two recipes, or resolve the same recipe twice
 with different filters — reintroduces the exact failure the split must
@@ -93,9 +94,9 @@ Two gaps block a safe split today:
 - OCI output for split generation. Multi-artifact naming and
   partial-publish recovery are undefined; `--split` with OCI output is
   rejected in v1.
-- Split generation for OCP recipes. OCP recipes replace the base
-  monitoring stack with `-ocp` variants and disable the base components,
-  and OCP split has not been designed or qualified. `--split` rejects OCP
+- Split generation for OCP recipes. OCP recipes disable the base
+  monitoring stack and add `-ocp` variants that use OpenShift's built-in
+  monitoring, and OCP split has not been designed or qualified. `--split` rejects OCP
   recipes explicitly (see Partition validation).
 - Reassigning a component's class per recipe shape in v1. Class is
   registry-only and stable; per-shape reassignment is possible follow-up
@@ -187,9 +188,9 @@ Each entry in `recipes/registry.yaml` gains an optional `class` field:
   operator's change and is applied by redeployment.
 - The default applies uniformly to **external registry entries** too: an
   external `registry.yaml` entry replaces the embedded entry wholesale, so
-  a replacement for an `ops` component that
-  omits `class` lands in `core`. A replacement that intends a non-`core`
-  class must restate it; registry merging emits a merge-time warning when
+  a replacement for an `ops` component that omits `class` lands in
+  `core`. A replacement that intends a non-`core` class must restate it;
+  registry merging emits a merge-time warning when
   an external entry replaces an embedded non-`core` component without
   declaring `class`.
 - External entries carry `class` like embedded ones, so an internal or
@@ -213,21 +214,22 @@ decides borderline cases:
 EFA fabric, multi-node NCCL falls back to TCP at a fraction of its
 bandwidth, regardless of which platform runs on top.
 
-**Prerequisite rule.** A prerequisite joins `core` only when it is itself
-platform-independent GPU execution, or the storage a `core` component's
-persistent volumes need. A `core` component's dependency on a scheduler,
-a drainer, or a workload platform does not pull that component into
-`core`: under `--split` such an edge is rejected instead (see Class
-dependency direction). This is what separates the NVSentinel datastore
-and its EBS driver below, which are `core`, from the `nvsentinel-preflight`
-and `nvsentinel-slinky-drainer` edges, which are not.
+**Prerequisite rule.** A `core` component's install-time prerequisites,
+declared in `dependencyRefs`, join `core` with it: CRD packages,
+certificate issuance, its datastore, and the storage its persistent
+volumes need. The exceptions are a scheduler, a drainer, and a workload
+platform. Such an edge does not pull that component into `core`; under
+`--split` it is rejected instead (see Class dependency direction). This
+is what separates the NVSentinel datastore and its EBS driver below,
+which are `core`, from the `nvsentinel-preflight` and
+`nvsentinel-slinky-drainer` edges, which are not.
 
 One named exception places a component in `core` that the definition
 alone would not:
 
 - **`nvsentinel`.** A GPU pod runs without it, but its remediation
   cordons, drains, and reboots GPU nodes, which makes it part of keeping
-  the GPU runtime healthy, and it must be tested on GPU clusters.
+  the GPU runtime healthy.
 
 The rest of the NVSentinel set follows from that exception and the
 prerequisite rule:
@@ -245,8 +247,8 @@ prerequisite rule:
   `aws-ebs-csi-driver`. With the managed addon, the driver stays declared
   with `enabled: false`, and the bundler treats the edge as satisfied
   outside the recipe. No catalog recipe composes these mixins, so the
-  resolved-graph guard does not see the edge; partition validation checks
-  it at bundle time.
+  resolved-graph guard does not see the edge; the bundler evaluates it at
+  bundle time, satisfied externally when the driver is disabled.
 
 Representative assignments under these definitions:
 
@@ -267,8 +269,9 @@ Representative assignments under these definitions:
 GPU-aware scheduler, and the workload platforms run GPU workloads; a plain
 GPU pod needs none of them, so they are `ops`, and the `ops` owner tests
 them on GPU clusters. Dependencies among them, such as `dynamo-platform`
-→ `kai-scheduler` and `nvcre` → `kubeflow-trainer`, stay inside `ops` and
-are ordered by the existing component-level dependency validation.
+→ `kai-scheduler` in the catalog and `nvcre` → `kubeflow-trainer` when an
+operator enables `nvcre` (see the component catalog), stay inside `ops`
+and are ordered by the existing component-level dependency validation.
 
 Classification cascades along dependency edges: because a component may
 depend only on its own or an earlier class, classifying one component can
@@ -279,8 +282,8 @@ definitions above.
 
 `recipes/registry.yaml` is authoritative for every component's class, and
 `docs/user/component-catalog.md` documents the full assignment
-(Implementation Plan step 2). This ADR
-defines the rules and exceptions; it is not the per-component record.
+(Implementation Plan step 2). This ADR defines the rules and exceptions;
+it is not the per-component record.
 
 **`class` is not a criteria axis.** Criteria (`service`, `accelerator`,
 `intent`, `os`, `platform`) drive overlay matching, and every new axis
@@ -343,10 +346,10 @@ Kustomization wrappers. AICR-generated non-Helm split output is the
 deferred follow-up.
 
 Retry also has limits: it covers prerequisites whose absence makes
-reconciliation *fail* (such as missing CRDs); **fail-open prerequisites**
-— `ops` resources that apply successfully despite a missing non-CRD
-`core` dependency — are not verified in v1, nor is cross-bundle version
-compatibility; a live set-identity or preflight protocol remains
+reconciliation *fail*, such as missing CRDs. **Fail-open prerequisites**,
+`ops` resources that apply successfully despite a missing non-CRD `core`
+dependency, are not verified in v1, and neither is cross-bundle version
+compatibility. A live set-identity or preflight protocol remains
 deferred.
 
 The existing catalog violates the rule, and fixing it is a prerequisite.
@@ -406,9 +409,9 @@ embedded classification, recipes that compose either mixin cannot use
 The check is on the edge, not the mixin name, so an external registry
 that places both ends in compatible classes (for example `kai-scheduler`
 in `core`) removes the rejection. The prerequisite rule (see Class
-definitions) is why the shipped registry does not: pulling a scheduler or
-Slurm into `core` to accommodate them would undo the narrow `core`
-definition.
+definitions) is why the shipped registry keeps both ends where they are:
+pulling a scheduler or Slurm into `core` to accommodate them would undo
+the narrow `core` definition.
 
 ### Configurable classes
 
@@ -422,8 +425,8 @@ per-component assignment is configurable and everything else is fixed:
   supported way to change the shipped defaults, and it needs no public
   change. A `--data` catalog never runs through AICR's CI, but partition
   validation runs on the resolved recipe at every `--split`, so a custom
-  cut gets the same direction, cycle, cohesion, and all-disabled checks
-  as the embedded one.
+  cut gets the same direction (which also rules out class-level cycles),
+  cohesion, and all-disabled checks as the embedded one.
 - **Per-invocation cuts are rejected.** A bundle-time flag or
   caller-supplied list that changes class would let two invocations
   against the same catalog place one component in different bundles —
@@ -448,13 +451,12 @@ that depends on it, directly or transitively, to move too; moving one to
 an earlier class likewise pulls in its dependencies. A component at the
 edge of the graph, such as `kube-prometheus-stack`, can move into `core`
 without forcing anything else, because its only dependency,
-`prometheus-operator-crds`, is already there; moving it later would drag
-`prometheus-adapter` and `k8s-ephemeral-storage-metrics` with it. Moving
+`prometheus-operator-crds`, is already there. Moving
 `gpu-operator` out of `core` would drag
 `nvsentinel` and the rest of the GPU stack with it, leaving a `core` too
 small to mean "runtime". Reassignment is practical at narrow points in the
-graph — the shipped cuts are such points, the `core`/`ops` cut made
-narrow by the `prometheus-operator-crds` repoint — not at its foundation.
+graph — the shipped `core`/`ops` cut is such a point, made narrow by the
+`prometheus-operator-crds` repoint — not at its foundation.
 
 That narrowness suggests deriving classes instead of declaring them:
 label one component at the cut and let every dependent inherit its class.
@@ -620,14 +622,14 @@ contract (core, then ops). `recipeDigest` is computed over
 the emitted set-root `recipe.yaml` with
 `evidence/attestation.SubjectDigestV3`, the canonicalization new recipe
 evidence uses (it excludes `metadata.version`), so it matches the subject
-of current recipe evidence. `recipeDigest` plus the class map identify the **resolved recipe and
-its partition**, not the rendered payload: bundle-time inputs (`--set`,
-typed overrides, scheduling settings) land in the extracted component
-values, not in `recipe.yaml`, so two invocations can share a
-`recipeDigest` yet render different class directories. The rendered
-payload is identified by the digest of the root `checksums.txt` — which remains the
-bundle attestation's in-toto subject, exactly as today; the split changes
-neither contract. The `split.yaml` schema, defined with the
+of current recipe evidence. `recipeDigest` plus the class map identify
+the **resolved recipe and its partition**, not the rendered payload:
+bundle-time inputs (`--set`, typed overrides, scheduling settings) land
+in the extracted component values, not in `recipe.yaml`, so two
+invocations can share a `recipeDigest` yet render different class
+directories. The rendered payload is identified by the digest of the
+root `checksums.txt` — which remains the bundle attestation's in-toto
+subject, exactly as today; the split changes neither contract. The `split.yaml` schema, defined with the
 implementation, restates this scope note alongside the `recipeDigest`
 field.
 
@@ -660,9 +662,9 @@ complete component list, so per-class rendering could miss a collision
 split across classes (one class's injected wrapper vs another class's
 component name — reachable with external component registries). Emitted
 identity validation therefore runs against the **full set** before
-subsets are rendered, consistent with the validate-once pipeline: Helm
-identities are validated as (target namespace, release name) **pairs** —
-namespaces may span classes and need not be unique — while generated
+subsets are rendered, consistent with the validate-once pipeline. Helm
+identities are validated as (target namespace, release name) **pairs**,
+since namespaces may span classes and need not be unique. Generated
 folder names and reserved synthetic suffixes stay globally checked. This
 validation covers **deployer-level identities only**; collisions between
 rendered Kubernetes objects are pre-existing single-bundle behavior,
@@ -727,12 +729,15 @@ control-plane owner (the partner or customer) deploys `ops/`. Teardown is
 the reverse, `ops/` before `core/`; each class README states both.
 
 The v1 scripts do not preflight cross-class prerequisites; they assume
-the operator followed the class ordering contract. The one cluster query
-`deploy.sh` already makes, the orphaned-CRD scan, is rendered per class
-from the set's class map: a CRD group installed by an earlier class (for
-example `monitoring.coreos.com`, from `core`'s `prometheus-operator-crds`)
-is expected when `ops/deploy.sh` runs, not reported as an orphan with a
-delete hint. Taking a *newer* set's later class against an older deployed
+the operator followed the class ordering contract. Of the pre-flight
+cluster checks `deploy.sh` already makes, the orphaned-CRD scan is the
+one that needs the class map. It is rendered per class, so a CRD group
+installed by an earlier class (for example `monitoring.coreos.com`, from
+`core`'s `prometheus-operator-crds`) is expected when `ops/deploy.sh`
+runs, not reported as an orphan with a delete hint. Today the template
+attributes that group to `kube-prometheus-stack`, which installs no CRDs;
+the per-class scan re-keys it to `prometheus-operator-crds` so the class
+map can exclude it. Taking a *newer* set's later class against an older deployed
 earlier class is an operator decision that `split.yaml` makes auditable
 but v1 does not mechanically verify.
 
@@ -832,8 +837,9 @@ ever pursued.
   complete install.
 - Classes separate ownership, not runtime coupling: a component may still
   rely on another class at runtime, as the `ops` Prometheus does on the
-  monitors `core` components install. Generation validates the complete configuration of one set together,
-  against catalog constraints and component checks; it does not establish
+  monitors `core` components install. Generation validates the complete
+  configuration of one set together, against catalog constraints and
+  component checks; it does not establish
   runtime compatibility in general, and nothing checks a class upgraded
   on its own. Owners coordinate version changes through a newly generated
   set rather than upgrading their class independently.
@@ -853,11 +859,11 @@ ever pursued.
 
 1. Catalog prerequisite: repoint all `gpu-operator`, `dynamo-platform`,
    and `kubeflow-trainer` `kube-prometheus-stack` dependency declarations
-   (overlays and mixins) to `prometheus-operator-crds`; add the EKS-only mixin that declares
-   the NVSentinel datastore's `aws-ebs-csi-driver` edge; add the
-   resolved-graph dependency-direction guard test. After this lands, a targeted
-   non-split parity regression test pins that the class field and split
-   plumbing leave ordinary output byte-identical.
+   (overlays and mixins) to `prometheus-operator-crds`; add the EKS-only
+   mixin that declares the NVSentinel datastore's `aws-ebs-csi-driver`
+   edge; add the resolved-graph dependency-direction guard test. After
+   this lands, a targeted non-split parity regression test pins that the
+   class field and split plumbing leave ordinary output byte-identical.
 2. Registry: the ordered `class` field (`core`, `ops`),
    validation of known class names, an explicit class on every embedded
    entry (enforced by CI), and the initial classification per the class
@@ -865,8 +871,9 @@ ever pursued.
 3. Bundler: `--split` flag (CLI, SDK, REST) with the
    plan/validate-once/render-subsets pipeline, per-class directories
    (each class `deploy.sh` rendered from the set's class map, so its
-   orphaned-CRD scan omits CRD groups an earlier class installs, and each
-   class README stating the install and teardown order),
+   orphaned-CRD scan omits CRD groups an earlier class installs, with the
+   scan's group table keyed by the component that ships the CRDs, and
+   each class README stating the install and teardown order),
    set-level `recipe.yaml`/`split.yaml` (with `recipeDigest`)/
    `checksums.txt`/attestation, create-only staged atomic publication at
    the functional API boundary (net-new for local output; includes the
