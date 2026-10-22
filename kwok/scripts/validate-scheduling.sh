@@ -1019,6 +1019,20 @@ generate_bundle() {
             --set "slurmcluster:controller.persistence.enabled=false"
         )
     fi
+    # The event exporter mixin leaves the sink, the OIDC client and the
+    # cluster's metadata to the bundle command, which
+    # CheckNVSentinelEventExporterCoherent requires. KWOK simulates the pod, so
+    # placeholders reach no endpoint.
+    if [[ ",${KWOK_MIXINS:-}," == *,nvsentinel-event-exporter,* ]]; then
+        conditional_sets+=(
+            --set "nvsentinel:event-exporter.exporter.sink.endpoint=https://events.kwok.invalid/v1/events"
+            --set "nvsentinel:event-exporter.exporter.oidc.tokenUrl=https://idp.kwok.invalid/oauth2/token"
+            --set "nvsentinel:event-exporter.exporter.oidc.clientId=nvsentinel"
+            --set "nvsentinel:event-exporter.exporter.oidc.scope=events:write"
+            --set "nvsentinel:event-exporter.exporter.metadata.cluster=kwok"
+            --set "nvsentinel:event-exporter.exporter.metadata.environment=ci"
+        )
+    fi
     if grep -qx "nvsentinel-mongodb" <<< "$bundled_components"; then
         # platform-connectors tolerates every taint, so one pod lands on the
         # real Kind node, where it needs the datastore's client certificate
