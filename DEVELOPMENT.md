@@ -634,6 +634,19 @@ components install (`aicrCRDGroups` in `tools/cleanup/cleaner.go`). An unrelated
 `*.nvidia.com` group, such as a third-party harness, is never matched and needs
 no `--exclude-crd`.
 
+Some namespaces are kept without any flag:
+
+- A namespace holding a Helm release whose name no AICR bundle installs. Phase 1
+  skips that release, and phase 4 keeps its namespace so the release can still
+  be removed with `helm uninstall`.
+- `openshift-nfd` and `cert-manager-operator`, unless phase 1 finds an AICR
+  release in them. On OpenShift the platform team often installs these
+  operators through OperatorHub. The list is `sharedNamespaces` in
+  `tools/cleanup/namespaces.go`.
+
+`--keep-namespaces` keeps `aicr-validation` too, but still deletes the Jobs and
+ConfigMaps `aicr validate` left there.
+
 ### Debugging Tests
 
 ```bash
