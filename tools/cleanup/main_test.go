@@ -41,6 +41,7 @@ func TestParseOptions(t *testing.T) {
 	}{
 		{"no flags", nil, options{}, false},
 		{"single-dash flags", []string{"-dry-run", "-yes"}, options{dryRun: true, assumeYes: true}, false},
+		{"short flags", []string{"-n", "-y"}, options{dryRun: true, assumeYes: true}, false},
 		{"long flags", []string{"--dry-run", "--yes", "--keep-crds", "--keep-namespaces"},
 			options{dryRun: true, assumeYes: true, keepCRDs: true, keepNamespaces: true}, false},
 		{"repeated and comma-separated exclusions",
