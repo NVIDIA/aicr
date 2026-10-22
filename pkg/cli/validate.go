@@ -707,7 +707,7 @@ func validateCmdFlags() []cli.Flag {
 			Aliases:  []string{"n"},
 			Usage:    "Kubernetes namespace for snapshot agent and validation Jobs",
 			Sources:  cli.EnvVars("AICR_NAMESPACE"),
-			Value:    "aicr-validation",
+			Value:    defaults.ValidationNamespace,
 			Category: catDeployment,
 		},
 		&cli.StringFlag{

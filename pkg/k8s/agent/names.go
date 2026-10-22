@@ -27,10 +27,6 @@ import (
 // caller does not set Config.NameBase.
 const defaultNameBase = "aicr"
 
-// staticClusterRoleName is the un-scoped ClusterRole/ClusterRoleBinding
-// name used only as the prefix input to nameWithRunID.
-const staticClusterRoleName = "aicr-node-reader"
-
 // staticStagingConfigMapName is the un-scoped staging ConfigMap name used
 // only as the prefix input to nameWithRunID.
 //
@@ -133,11 +129,8 @@ type resolvedName struct {
 // resolvedNames returns every object name this Deployer builds from a
 // caller-supplied prefix, paired with its source field.
 //
-// The ClusterRole/ClusterRoleBinding and staging ConfigMap names are
-// deliberately absent: their prefixes are package constants
-// (staticClusterRoleName, staticStagingConfigMapName), so the only
-// caller-supplied input they carry is the run ID, which validateRunID
-// already covers.
+// It omits the ClusterRole, ClusterRoleBinding and staging ConfigMap names,
+// whose only caller-supplied input is the run ID that validateRunID checks.
 func (d *Deployer) resolvedNames() []resolvedName {
 	jobField, jobPrefix := "Config.NameBase", d.base()
 	if d.config.JobName != "" {
@@ -248,7 +241,7 @@ func (d *Deployer) roleName() string {
 // clusterRoleName returns the run-scoped name for the agent ClusterRole and
 // ClusterRoleBinding.
 func (d *Deployer) clusterRoleName() string {
-	return nameWithRunID(staticClusterRoleName, d.config.RunID)
+	return nameWithRunID(defaults.AgentClusterRoleName, d.config.RunID)
 }
 
 // StagingConfigMapName returns the run-scoped name of the internal staging

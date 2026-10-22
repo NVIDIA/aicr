@@ -1,0 +1,537 @@
+// Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package main
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"maps"
+	"slices"
+	"strings"
+	"time"
+
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
+
+	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/k8s"
+	k8slabels "github.com/NVIDIA/aicr/pkg/k8s/labels"
+	vlabels "github.com/NVIDIA/aicr/pkg/validator/labels"
+)
+
+// aicrCRDGroups are the CRD API groups owned by AICR components. A CRD matches
+// only when its group is exactly one of these, never by suffix. Other vendors
+// also publish *.nvidia.com groups, and deleting a CRD cascades to every CR of
+// that kind. Groups an operator applies at runtime from its image, rather than
+// shipping in its chart, are listed too.
+var aicrCRDGroups = map[string]bool{
+	"nfd.k8s-sigs.io":                 true,
+	"nvidia.com":                      true,
+	"resource.nvidia.com":             true,
+	"maintenance.nvidia.com":          true,
+	"nv-ipam.nvidia.com":              true,
+	"configuration.net.nvidia.com":    true,
+	"nvcre.nvidia.com":                true,
+	"mellanox.com":                    true,
+	"cert-manager.io":                 true,
+	"acme.cert-manager.io":            true,
+	"skyhook.nvidia.com":              true,
+	"nodewright.nvidia.com":           true,
+	"nvsentinel.nvidia.com":           true,
+	"preflight.nvsentinel.nvidia.com": true,
+	"nvsentinel.dgxc.nvidia.com":      true,
+	"healthevents.dgxc.nvidia.com":    true,
+	"janitor.dgxc.nvidia.com":         true,
+	"monitoring.coreos.com":           true,
+	"scheduling.run.ai":               true,
+	"kai.scheduler":                   true,
+	"grove.io":                        true,
+	"scheduler.grove.io":              true,
+	"agentgateway.dev":                true,
+	"apps.nvidia.com":                 true,
+	"kueue.x-k8s.io":                  true,
+	"jobset.x-k8s.io":                 true,
+	"trainer.kubeflow.org":            true,
+	"slinky.slurm.net":                true,
+}
+
+const (
+	driverDaemonSetName = "nvidia-driver-daemonset"
+	gpuOperatorRelease  = "gpu-operator"
+)
+
+var crdGVR = schema.GroupVersionResource{
+	Group:    "apiextensions.k8s.io",
+	Version:  "v1",
+	Resource: "customresourcedefinitions",
+}
+
+// finalizerRescueSkip are namespaced resources that never block namespace
+// deletion.
+var finalizerRescueSkip = map[schema.GroupResource]bool{
+	{Resource: "events"}:                                    true,
+	{Group: "events.k8s.io", Resource: "events"}:            true,
+	{Resource: "pods"}:                                      true,
+	{Resource: "endpoints"}:                                 true,
+	{Group: "discovery.k8s.io", Resource: "endpointslices"}: true,
+}
+
+type cleaner struct {
+	opts          options
+	log           *slog.Logger
+	kubeContext   string
+	server        string
+	kube          kubernetes.Interface
+	disc          discovery.DiscoveryInterface
+	dyn           dynamic.Interface
+	helm          helmClient // nil when helm is not installed
+	namespaces    []string   // sorted
+	releaseNames  map[string]bool
+	namespaceWait time.Duration
+}
+
+func (c *cleaner) run(ctx context.Context, confirm prompt) error {
+	c.log.Info("target cluster", "context", c.kubeContext, "server", c.server)
+	c.reportExclusions()
+
+	releases, releasesKnown := c.listReleases(ctx)
+	driverManaged := c.driverManaged(ctx, releases)
+	if driverManaged {
+		c.driverGuidance()
+	}
+
+	question := fmt.Sprintf("Remove AICR resources from context %q (server %s)?", c.kubeContext, c.server)
+	if !c.opts.assumeYes && !c.opts.dryRun && !confirm(ctx, question) {
+		if err := ctx.Err(); err != nil {
+			return errors.WrapCtxErr(err, errors.ErrCodeTimeout, "cleanup interrupted at the confirmation prompt")
+		}
+		c.log.Info("cleanup aborted")
+		return nil
+	}
+
+	c.uninstallReleases(ctx, releases)
+	c.removeValidatorArtifacts(ctx)
+	if c.opts.keepCRDs {
+		c.log.Info("skipping CRD deletion", "flag", "--keep-crds")
+	} else {
+		c.deleteCRDs(ctx)
+	}
+	switch {
+	case c.opts.keepNamespaces:
+		c.log.Info("skipping namespace deletion", "flag", "--keep-namespaces")
+	case !releasesKnown:
+		c.log.Warn("skipping namespace deletion, since deleting a namespace with no helm release list could orphan releases in it")
+	default:
+		c.deleteNamespaces(ctx, releases)
+	}
+	if err := ctx.Err(); err != nil {
+		return errors.WrapCtxErr(err, errors.ErrCodeTimeout, "cleanup interrupted")
+	}
+
+	c.log.Info("AICR cleanup complete")
+	if !c.opts.dryRun {
+		c.log.Info("confirm no AICR remnants remain", "check", "kubectl get ns && helm ls -A")
+	}
+	if driverManaged {
+		c.driverGuidance()
+	}
+	return nil
+}
+
+// reportExclusions logs the fences and warns on a half-fenced install.
+// Protecting only the namespace still lets CRD deletion cascade to the
+// install's CRs, and protecting only the CRDs still deletes the namespace.
+func (c *cleaner) reportExclusions() {
+	ns, crd := len(c.opts.excludeNS) > 0, len(c.opts.excludeCRD) > 0
+	if ns {
+		c.log.Info("excluding namespaces from helm uninstall and namespace deletion", "namespaces", c.opts.excludeNS)
+	}
+	if crd {
+		c.log.Info("excluding CRDs", "matching", c.opts.excludeCRD)
+	}
+	if ns && !crd {
+		c.log.Warn("--exclude-ns given without --exclude-crd, so the install's CRDs and CRs are still deleted")
+	}
+	if crd && !ns {
+		c.log.Warn("--exclude-crd given without --exclude-ns, so the install's releases and namespace are still deleted")
+	}
+}
+
+func (c *cleaner) excludedNS(ns string) bool {
+	return slices.Contains(c.opts.excludeNS, ns)
+}
+
+// excludedCRD matches by substring, so an owned group such as nvidia.com can
+// still be fenced out per install.
+func (c *cleaner) excludedCRD(name string) bool {
+	return slices.ContainsFunc(c.opts.excludeCRD, func(pat string) bool {
+		return strings.Contains(name, pat)
+	})
+}
+
+func (c *cleaner) owned(ns string) bool {
+	_, found := slices.BinarySearch(c.namespaces, ns)
+	return found
+}
+
+// listReleases reports false when helm is not installed or the listing failed,
+// so the caller cannot tell which namespaces hold releases.
+func (c *cleaner) listReleases(ctx context.Context) ([]helmRelease, bool) {
+	if c.helm == nil {
+		c.log.Warn("helm is not installed, skipping helm uninstall")
+		return nil, false
+	}
+	releases, err := c.helm.list(ctx)
+	if err != nil {
+		c.log.Warn("could not list helm releases, skipping helm uninstall", "error", err)
+		return nil, false
+	}
+	return releases, true
+}
+
+// driverManaged reports whether gpu-operator installs the NVIDIA kernel driver
+// on this cluster. The nvidia-driver-daemonset is the primary signal, found by
+// name in any namespace because Talos recipes move the operator. The release's
+// computed driver.enabled value is the fallback. Detection is read-only, runs
+// under --dry-run, and fails open.
+func (c *cleaner) driverManaged(ctx context.Context, releases []helmRelease) bool {
+	ctx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+	defer cancel()
+
+	list, err := c.kube.AppsV1().DaemonSets(metav1.NamespaceAll).List(ctx, metav1.ListOptions{
+		FieldSelector: fields.OneTermEqualSelector("metadata.name", driverDaemonSetName).String(),
+	})
+	if err != nil {
+		c.log.Debug("could not list DaemonSets for driver detection", "error", err)
+	} else if slices.ContainsFunc(list.Items, func(ds appsv1.DaemonSet) bool { return ds.Name == driverDaemonSetName }) {
+		return true
+	}
+	if c.helm == nil {
+		return false
+	}
+	// Without the DaemonSet, fall back to the release's computed driver.enabled.
+	for _, rel := range releases {
+		if rel.Name != gpuOperatorRelease {
+			continue
+		}
+		values, err := c.helm.values(ctx, rel)
+		if err != nil {
+			c.log.Debug("could not read gpu-operator values for driver detection", "error", err)
+			return false
+		}
+		driver, _ := values["driver"].(map[string]any)
+		enabled, _ := driver["enabled"].(bool)
+		return enabled
+	}
+	return false
+}
+
+// driverGuidance warns that the GPU nodes need a reboot before the next
+// install. The reboot is left to the operator because it is cloud-specific.
+func (c *cleaner) driverGuidance() {
+	c.log.Warn("gpu-operator manages the NVIDIA kernel driver here, so reboot the GPU nodes after cleanup and before reinstalling",
+		"reason", "nvidia_uvm can stay wedged mid-unload, and the next install fails driver validation with Init:CrashLoopBackOff",
+		"steps", "kubectl cordon each GPU node, reboot its instance, kubectl uncordon it once Ready")
+}
+
+func (c *cleaner) uninstallReleases(ctx context.Context, releases []helmRelease) {
+	c.log.Info("phase 1: uninstalling AICR helm releases in AICR namespaces")
+	for _, rel := range releases {
+		if ctx.Err() != nil {
+			return
+		}
+		log := c.log.With("release", rel.Name, "namespace", rel.Namespace)
+		switch {
+		case c.excludedNS(rel.Namespace):
+			log.Info("skipping helm release in excluded namespace")
+		case !c.owned(rel.Namespace):
+		case !c.releaseNames[rel.Name]:
+			log.Info("skipping helm release AICR does not own")
+		default:
+			log.Info("uninstalling helm release")
+			if c.opts.dryRun {
+				continue
+			}
+			if err := c.helm.uninstall(ctx, rel); err != nil {
+				log.Warn("helm uninstall failed", "error", err)
+			}
+		}
+	}
+}
+
+// deleteObject deletes one object with del, which it skips under --dry-run.
+// It ignores NotFound and logs any other error.
+func (c *cleaner) deleteObject(ctx context.Context, resource, namespace, name string, del func(context.Context) error) {
+	log := c.log.With("resource", resource, "name", name)
+	if namespace != "" {
+		log = log.With("namespace", namespace)
+	}
+	log.Info("deleting")
+	if c.opts.dryRun {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+	defer cancel()
+	if err := k8s.IgnoreNotFound(del(ctx)); err != nil {
+		log.Warn("delete failed", "error", err)
+	}
+}
+
+func (c *cleaner) deleteCRDs(ctx context.Context) {
+	c.log.Info("phase 3: deleting AICR component CRDs")
+	listCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+	list, err := c.dyn.Resource(crdGVR).List(listCtx, metav1.ListOptions{})
+	cancel()
+	if err != nil {
+		c.log.Warn("could not list CRDs, skipping CRD deletion", "error", err)
+		return
+	}
+	for _, crd := range list.Items {
+		if ctx.Err() != nil {
+			return
+		}
+		group, _, _ := unstructured.NestedString(crd.Object, "spec", "group")
+		if !aicrCRDGroups[group] {
+			continue
+		}
+		name := crd.GetName()
+		if c.excludedCRD(name) {
+			c.log.Info("skipping excluded CRD", "name", name)
+			continue
+		}
+		c.deleteObject(ctx, crdGVR.Resource, "", name, func(ctx context.Context) error {
+			return c.dyn.Resource(crdGVR).Delete(ctx, name, metav1.DeleteOptions{})
+		})
+	}
+}
+
+// deleteNamespaces keeps a namespace holding any of releases that AICR does
+// not own, since deleting the namespace also deletes the release record and
+// leaves the release's cluster-scoped objects with no way to uninstall them.
+// It keeps a sharedNamespaces entry unless releases has an AICR release there
+// that is not uninstalled, since a release history kept by helm uninstall
+// --keep-history says nothing about who owns the namespace now.
+func (c *cleaner) deleteNamespaces(ctx context.Context, releases []helmRelease) {
+	c.log.Info("phase 4: deleting AICR component and check namespaces")
+	for _, ns := range slices.Sorted(maps.Keys(notOwnedNamespaces)) {
+		c.log.Info("skipping namespace AICR does not own", "namespace", ns, "reason", notOwnedNamespaces[ns])
+	}
+	foreign := map[string][]string{}
+	installed := map[string]bool{}
+	for _, rel := range releases {
+		if c.releaseNames[rel.Name] {
+			if rel.Status != helmStatusUninstalled {
+				installed[rel.Namespace] = true
+			}
+		} else {
+			foreign[rel.Namespace] = append(foreign[rel.Namespace], rel.Name)
+		}
+	}
+
+	var targets []string
+	for _, ns := range slices.Concat(c.namespaces, c.checkNamespaces(ctx)) {
+		switch {
+		case c.excludedNS(ns):
+			c.log.Info("skipping excluded namespace", "namespace", ns)
+		case len(foreign[ns]) > 0:
+			c.log.Info("keeping namespace that holds helm releases AICR does not own", "namespace", ns, "releases", foreign[ns])
+		case sharedNamespaces[ns] != "" && !installed[ns]:
+			c.log.Info("keeping shared namespace with no AICR helm release found", "namespace", ns, "reason", sharedNamespaces[ns])
+		default:
+			targets = append(targets, ns)
+		}
+	}
+	for _, ns := range targets {
+		if ctx.Err() != nil {
+			return
+		}
+		c.deleteNamespace(ctx, ns)
+	}
+	if c.opts.dryRun {
+		return
+	}
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(c.namespaceWait):
+	}
+	for _, ns := range targets {
+		if ctx.Err() != nil {
+			return
+		}
+		c.rescueNamespace(ctx, ns)
+	}
+}
+
+// checkNamespaces returns the sorted per-run namespaces conformance checks
+// left behind. When the list fails it logs a warning and returns nil.
+func (c *cleaner) checkNamespaces(ctx context.Context) []string {
+	ctx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+	defer cancel()
+	list, err := c.kube.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		c.log.Warn("could not list namespaces, so per-run check namespaces were not swept. Re-run cleanup once the API server is reachable",
+			"prefix", defaults.GangSchedulingTestNamespacePrefix, "error", err)
+		return nil
+	}
+	var found []string
+	for _, ns := range list.Items {
+		if strings.HasPrefix(ns.Name, defaults.GangSchedulingTestNamespacePrefix) {
+			found = append(found, ns.Name)
+		}
+	}
+	slices.Sort(found)
+	return found
+}
+
+// deleteNamespace deletes ns without waiting, and does nothing if ns does not
+// exist.
+func (c *cleaner) deleteNamespace(ctx context.Context, ns string) {
+	getCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+	_, err := c.kube.CoreV1().Namespaces().Get(getCtx, ns, metav1.GetOptions{})
+	cancel()
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			c.log.Warn("could not read namespace", "namespace", ns, "error", err)
+		}
+		return
+	}
+	c.deleteObject(ctx, "namespaces", "", ns, func(ctx context.Context) error {
+		return c.kube.CoreV1().Namespaces().Delete(ctx, ns, metav1.DeleteOptions{})
+	})
+}
+
+// rescueNamespace clears the finalizers of objects in namespace name if it is
+// stuck Terminating, as happens when a finalizer's controller is already gone.
+func (c *cleaner) rescueNamespace(ctx context.Context, name string) {
+	getCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+	ns, err := c.kube.CoreV1().Namespaces().Get(getCtx, name, metav1.GetOptions{})
+	cancel()
+	if err != nil || ns.Status.Phase != corev1.NamespaceTerminating {
+		return
+	}
+	c.log.Warn("namespace stuck terminating, clearing finalizers", "namespace", name)
+	clearFinalizers := []byte(`{"metadata":{"finalizers":[]}}`)
+	for _, gvr := range c.namespacedResources() {
+		if ctx.Err() != nil {
+			return
+		}
+		listCtx, listCancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+		list, err := c.dyn.Resource(gvr).Namespace(name).List(listCtx, metav1.ListOptions{})
+		listCancel()
+		if err != nil {
+			c.log.Debug("could not list objects for finalizer rescue", "resource", gvr.Resource, "namespace", name, "error", err)
+			continue
+		}
+		for _, obj := range list.Items {
+			if len(obj.GetFinalizers()) == 0 {
+				continue
+			}
+			log := c.log.With("resource", gvr.Resource, "name", obj.GetName(), "namespace", name)
+			patchCtx, patchCancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+			_, err := c.dyn.Resource(gvr).Namespace(name).Patch(patchCtx, obj.GetName(), types.MergePatchType, clearFinalizers, metav1.PatchOptions{})
+			patchCancel()
+			if err != nil {
+				log.Warn("could not clear finalizers", "error", err)
+				continue
+			}
+			log.Info("cleared finalizers")
+		}
+	}
+}
+
+// namespacedResources returns the sorted preferred version of each namespaced
+// resource that supports list and patch, minus finalizerRescueSkip. It uses
+// partial results when discovery fails for some groups.
+func (c *cleaner) namespacedResources() []schema.GroupVersionResource {
+	lists, err := discovery.ServerPreferredNamespacedResources(c.disc)
+	if err != nil && len(lists) == 0 {
+		c.log.Warn("API discovery failed, cannot clear finalizers", "error", err)
+		return nil
+	}
+	lists = discovery.FilteredBy(discovery.SupportsAllVerbs{Verbs: []string{"list", "patch"}}, lists)
+	gvrs, err := discovery.GroupVersionResources(lists)
+	if err != nil {
+		c.log.Warn("API discovery returned an unparsable group version, cannot clear finalizers", "error", err)
+		return nil
+	}
+	var out []schema.GroupVersionResource
+	for gvr := range gvrs {
+		if !finalizerRescueSkip[gvr.GroupResource()] {
+			out = append(out, gvr)
+		}
+	}
+	slices.SortFunc(out, func(a, b schema.GroupVersionResource) int {
+		return strings.Compare(a.String(), b.String())
+	})
+	return out
+}
+
+// isAICRClusterRBAC reports whether obj is cluster RBAC from aicr validate or
+// the snapshot agent. It is false for objects labeled component=agent-rbac,
+// which an operator applied for their own ServiceAccount and only they can
+// restore.
+func isAICRClusterRBAC(obj metav1.Object) bool {
+	l := obj.GetLabels()
+	if l[k8slabels.Component] == k8slabels.ValueAgentRBAC {
+		return false
+	}
+	name := obj.GetName()
+	// Current objects match by label, and legacy ones by name.
+	return l[k8slabels.ManagedBy] == k8slabels.ValueAICR ||
+		l[k8slabels.Name] == vlabels.ValueValidator ||
+		strings.HasPrefix(name, vlabels.ValueValidator+"-") ||
+		name == defaults.AgentName ||
+		name == defaults.AgentClusterRoleName
+}
+
+// isValidationRunObject reports whether obj was created by an aicr validate
+// run.
+func isValidationRunObject(obj metav1.Object) bool {
+	l := obj.GetLabels()
+	return l[k8slabels.Name] == k8slabels.ValueAICR && l[k8slabels.Component] == vlabels.ValueValidation
+}
+
+// isSnapshotAgentObject reports whether obj belongs to any snapshot agent run,
+// including one still in flight. It is false for objects labeled
+// component=agent-rbac.
+func isSnapshotAgentObject(obj metav1.Object) bool {
+	l := obj.GetLabels()
+	if l[k8slabels.Component] == k8slabels.ValueAgentRBAC {
+		return false
+	}
+	// Legacy objects match by their fixed name, and current ones by label.
+	return obj.GetName() == defaults.AgentName || isSnapshotAgentRunObject(obj)
+}
+
+// isSnapshotAgentRunObject reports whether obj carries the labels a snapshot
+// agent run stamps on what it creates. It never matches by name, so an
+// unlabeled ServiceAccount an administrator provisioned is not matched.
+func isSnapshotAgentRunObject(obj metav1.Object) bool {
+	l := obj.GetLabels()
+	return l[k8slabels.Name] == k8slabels.ValueAICR && l[k8slabels.Component] == k8slabels.ValueSnapshotAgent
+}

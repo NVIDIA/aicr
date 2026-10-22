@@ -28,6 +28,11 @@ const (
 	// Both share it: the ServiceAccount exists only to run this Job.
 	AgentName = "aicr"
 
+	// AgentClusterRoleName prefixes the snapshot agent's run-scoped
+	// ClusterRole and ClusterRoleBinding names. Older agents used it
+	// unsuffixed.
+	AgentClusterRoleName = "aicr-node-reader"
+
 	// AgentImageRepository is the registry path of the agent image.
 	AgentImageRepository = "ghcr.io/nvidia/aicr"
 

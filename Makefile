@@ -1087,8 +1087,8 @@ clean-all: clean ## Deep cleans including Go module cache
 	@echo "Deep clean completed"
 
 .PHONY: cleanup
-cleanup: ## Cleans up AICR Kubernetes resources (requires kubectl)
-	tools/cleanup
+cleanup: ## Cleans up AICR Kubernetes resources (requires a kubeconfig and helm)
+	GOFLAGS="-mod=readonly" go run ./tools/cleanup
 
 # =============================================================================
 # Tilt Local Development
