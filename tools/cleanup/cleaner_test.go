@@ -214,7 +214,7 @@ func clusterReleases() []helmRelease {
 	}
 }
 
-func confirmed(string) bool { return true }
+func confirmed(context.Context, string) bool { return true }
 
 func mutations(actions []k8stesting.Action) []string {
 	var out []string
@@ -293,7 +293,7 @@ func TestRunDeclinedMutatesNothing(t *testing.T) {
 	f := newFixture(clusterObjects(), clusterCRDs()...)
 	f.helm.releases = clusterReleases()
 
-	declined := func(string) bool { return false }
+	declined := func(context.Context, string) bool { return false }
 	if err := f.cleaner(options{}).run(context.Background(), declined); err != nil {
 		t.Fatalf("run() error = %v", err)
 	}
@@ -302,6 +302,23 @@ func TestRunDeclinedMutatesNothing(t *testing.T) {
 		t.Errorf("declined run mutated the cluster: %q", got)
 	}
 	f.wantOutput(t, `msg="cleanup aborted"`)
+}
+
+func TestRunCanceledAtPromptMutatesNothing(t *testing.T) {
+	f := newFixture(clusterObjects(), clusterCRDs()...)
+	f.helm.releases = clusterReleases()
+	ctx, cancel := context.WithCancel(context.Background())
+	interrupted := func(context.Context, string) bool {
+		cancel()
+		return false
+	}
+
+	err := f.cleaner(options{}).run(ctx, interrupted)
+
+	errorstest.WantReportedCode(t, err, errors.ErrCodeCanceled)
+	if got := slices.Concat(mutations(f.kube.Actions()), mutations(f.dyn.Actions()), f.helm.uninstalled); len(got) > 0 {
+		t.Errorf("interrupted run mutated the cluster: %q", got)
+	}
 }
 
 func TestRunKeepFlags(t *testing.T) {

@@ -24,6 +24,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
@@ -157,12 +158,35 @@ func TestPrompt(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(strings.TrimSpace(tt.input), func(t *testing.T) {
 			var out bytes.Buffer
-			if got := newPrompt(strings.NewReader(tt.input), &out)("Proceed?"); got != tt.want {
+			if got := newPrompt(strings.NewReader(tt.input), &out)(context.Background(), "Proceed?"); got != tt.want {
 				t.Errorf("prompt(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 			if out.String() != "Proceed? (y/N): " {
 				t.Errorf("prompt wrote %q", out.String())
 			}
 		})
+	}
+}
+
+func TestPromptReturnsWhenCanceled(t *testing.T) {
+	in, w := io.Pipe()
+	t.Cleanup(func() { w.Close() })
+	ctx, cancel := context.WithCancel(context.Background())
+	var out bytes.Buffer
+	ask := newPrompt(in, &out)
+	answered := make(chan bool, 1)
+	go func() { answered <- ask(ctx, "Proceed?") }()
+
+	cancel()
+	select {
+	case got := <-answered:
+		if got {
+			t.Error("canceled prompt answered yes")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("prompt did not return after its context was canceled")
+	}
+	if out.String() != "Proceed? (y/N): \n" {
+		t.Errorf("prompt wrote %q", out.String())
 	}
 }

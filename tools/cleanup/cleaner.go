@@ -124,7 +124,10 @@ func (c *cleaner) run(ctx context.Context, confirm prompt) error {
 	}
 
 	question := fmt.Sprintf("Remove AICR resources from context %q (server %s)?", c.kubeContext, c.server)
-	if !c.opts.assumeYes && !c.opts.dryRun && !confirm(question) {
+	if !c.opts.assumeYes && !c.opts.dryRun && !confirm(ctx, question) {
+		if err := ctx.Err(); err != nil {
+			return errors.WrapCtxErr(err, errors.ErrCodeTimeout, "cleanup interrupted at the confirmation prompt")
+		}
 		c.log.Info("cleanup aborted")
 		return nil
 	}

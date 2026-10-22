@@ -217,14 +217,27 @@ func contextName(cfg clientcmd.ClientConfig) string {
 }
 
 // A prompt asks the operator question and reports whether they answered yes.
-type prompt func(question string) bool
+// It reports false once ctx is done.
+type prompt func(ctx context.Context, question string) bool
 
 func newPrompt(in io.Reader, out io.Writer) prompt {
 	reader := bufio.NewReader(in)
-	return func(question string) bool {
+	return func(ctx context.Context, question string) bool {
 		fmt.Fprintf(out, "%s (y/N): ", question)
-		answer, _ := reader.ReadString('\n')
-		answer = strings.TrimSpace(answer)
-		return answer == "y" || answer == "Y"
+		// A read from in cannot be canceled, so on ctx done the goroutine
+		// stays blocked until the process exits.
+		answers := make(chan string, 1)
+		go func() {
+			answer, _ := reader.ReadString('\n')
+			answers <- answer
+		}()
+		select {
+		case <-ctx.Done():
+			fmt.Fprintln(out)
+			return false
+		case answer := <-answers:
+			answer = strings.TrimSpace(answer)
+			return answer == "y" || answer == "Y"
+		}
 	}
 }
