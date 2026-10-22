@@ -93,7 +93,8 @@ func TestHelmCLIListPages(t *testing.T) {
 }
 
 func listArgs(offset int) string {
-	return fmt.Sprintf("list --all-namespaces --output json --max %d --offset %d", defaults.ClusterCleanupHelmListPageSize, offset)
+	return fmt.Sprintf("list --all-namespaces --output json --deployed --failed --pending --superseded --uninstalling --uninstalled --max %d --offset %d",
+		defaults.ClusterCleanupHelmListPageSize, offset)
 }
 
 func TestHelmCLIValues(t *testing.T) {

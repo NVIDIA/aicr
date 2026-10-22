@@ -83,6 +83,9 @@ func (h helmCLI) list(ctx context.Context) ([]helmRelease, error) {
 	for offset := 0; ; offset += size {
 		out, err := h.run(ctx, defaults.K8sCleanupTimeout, defaults.ClusterCleanupHelmOutputLimit,
 			"list", "--all-namespaces", "--output", "json",
+			// Helm 3 lists only deployed and failed releases by default, and
+			// Helm 4 rejects Helm 3's --all.
+			"--deployed", "--failed", "--pending", "--superseded", "--uninstalling", "--uninstalled",
 			"--max", strconv.Itoa(size), "--offset", strconv.Itoa(offset))
 		if err != nil {
 			return nil, err
