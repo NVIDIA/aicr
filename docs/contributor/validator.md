@@ -489,7 +489,8 @@ page are the contract.
 | Check | Keys |
 |-------|------|
 | `nccl-all-reduce-bw*` | `runtimeSource`, `transport`, `workerNodes`, `gpusInvolved`, `fabric`, `achievedGbps`, `thresholdGbps`, `tolerancePct`, `passMargin` |
-| `check-nvidia-smi`, `gke-gpu-nic-topology` | `nodesValidated`, `nodesTotal` |
+| `check-nvidia-smi` | `nodesValidated`, `nodesTotal` |
+| `gke-gpu-nic-topology` | `nodesValidated`, `nodesTotal` |
 | `expected-resources` | `namespacesActive`, `namespacesExpected`, `draReady`, `draDesired`, `nodewrightComplete`, `nodewrightExpected`, and the RDMA gate's `nodesValidated`, `nodesTotal` |
 | `inference-perf` | `throughputTokPerSec`, `ttftP99Ms`, `throughputThreshold`, `scaledThreshold`, `ttftThresholdMs`, `gpusBenchmarked`, `gpusPerNode` |
 | `secure-accelerator-access`, `inference-perf` | `configuredPolicy`, `resolvedMode`, `nodeLocal` |
@@ -502,6 +503,12 @@ page are the contract.
   only on `nccl-all-reduce-bw-net`, when `AICR_NCCL_FABRIC` selected the
   baked-in EKS template. `tolerancePct` is the slack below `thresholdGbps`
   that still passes.
+- `check-nvidia-smi` publishes `nodesValidated` and `nodesTotal` only after
+  per-node verification runs, on pass or fail. An exit before that (no GPU
+  nodes, all cordoned, or busy) publishes neither.
+- `gke-gpu-nic-topology` publishes `nodesValidated` and `nodesTotal` on every
+  exit once the node list succeeds, including an empty list and a
+  `no-verifiable-nodes` skip. A failed node list publishes neither.
 - `draReady` and `draDesired` come from the last observed DRA kubelet-plugin
   DaemonSet, and are absent if none was found. `nodewrightComplete` and
   `nodewrightExpected` are `0`/`0` when every Skyhook CR is suppressed.
