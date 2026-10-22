@@ -62,16 +62,6 @@ spec:
         - gpu-operator
         - kai-scheduler
 
-    # Decline the runtime inventory, matching every other GKE Dynamo recipe. Since #2962, AICR
-    # grants k8s-aibom to any GKE recipe that does not mention it when --runtime-inventory is
-    # enabled, and only this explicit decline makes it reject the opt-in instead. k8s-aibom
-    # alongside grove and dynamo-platform is a combination nothing has qualified, and that is a
-    # property of the pairing rather than of the accelerator.
-    - name: k8s-aibom
-      type: Helm
-      overrides:
-        install: false
-
   validation:
     deployment:
       checks:
