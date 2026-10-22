@@ -3223,8 +3223,10 @@ func TestRecipeResultNormalizeKindNilReceiver(t *testing.T) {
 }
 
 // TestGB200GKEIncludesRDMA: gke+gb200+cos must resolve to the GB200 GKE
-// leaf (not gke-cos + gb200-any) and keep gke-gb200-rdma plus the
-// dma-buf kernel-module ConfigMap.
+// leaf (not gke-cos + gb200-any), keep gke-gb200-rdma, and omit the
+// operator-managed driver kernel-module ConfigMap (on GKE COS, driver.enabled
+// is false across all gpuStack profiles and GKE A4X does not set
+// NVreg_GrdmaPciTopoCheckOverride=1).
 func TestGB200GKEIncludesRDMA(t *testing.T) {
 	builder := NewBuilder()
 	if builder == nil {
@@ -3265,14 +3267,15 @@ func TestGB200GKEIncludesRDMA(t *testing.T) {
 		if gpuOp == nil {
 			t.Fatalf("gpu-operator missing from resolved gke/gb200/cos/%s recipe", leaf.label)
 		}
-		km, ok := gpuOp.Overrides["driver"].(map[string]any)
-		if !ok {
-			t.Errorf("gpu-operator.driver override missing for gke/gb200/cos/%s", leaf.label)
-			continue
+		for _, pm := range gpuOp.PreManifestFiles {
+			if pm == "components/gpu-operator/manifests/kernel-module-params.yaml" {
+				t.Errorf("unexpected preManifestFile %q on gke/gb200/cos/%s", pm, leaf.label)
+			}
 		}
-		cfg, ok := km["kernelModuleConfig"].(map[string]any)
-		if !ok || cfg["name"] != "nvidia-kernel-module-params" {
-			t.Errorf("kernelModuleConfig.name = %v, want nvidia-kernel-module-params for gke/gb200/cos/%s", km["kernelModuleConfig"], leaf.label)
+		if km, ok := gpuOp.Overrides["driver"].(map[string]any); ok {
+			if _, hasCfg := km["kernelModuleConfig"]; hasCfg {
+				t.Errorf("unexpected driver.kernelModuleConfig = %v on gke/gb200/cos/%s", km["kernelModuleConfig"], leaf.label)
+			}
 		}
 		checkPresent := performanceCheckPresent(result.Validation, "nccl-all-reduce-bw-nvls")
 		floor, floorFound := findPerformanceConstraint(result.Validation, "nccl-all-reduce-bw-nvls")
