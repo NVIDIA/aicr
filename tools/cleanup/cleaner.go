@@ -497,6 +497,13 @@ func isAICRClusterRBAC(obj metav1.Object) bool {
 		name == defaults.AgentClusterRoleName
 }
 
+// isValidationRunObject reports whether obj was created by an aicr validate
+// run.
+func isValidationRunObject(obj metav1.Object) bool {
+	l := obj.GetLabels()
+	return l[k8slabels.Name] == k8slabels.ValueAICR && l[k8slabels.Component] == vlabels.ValueValidation
+}
+
 // isSnapshotAgentObject reports whether obj belongs to any snapshot agent run,
 // including one still in flight. It is false for objects labeled
 // component=agent-rbac.

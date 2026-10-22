@@ -40,6 +40,7 @@ var (
 	roleBindingGVR        = rbacv1.SchemeGroupVersion.WithResource("rolebindings")
 	roleGVR               = rbacv1.SchemeGroupVersion.WithResource("roles")
 	jobGVR                = batchv1.SchemeGroupVersion.WithResource("jobs")
+	configMapGVR          = corev1.SchemeGroupVersion.WithResource("configmaps")
 	serviceAccountGVR     = corev1.SchemeGroupVersion.WithResource("serviceaccounts")
 )
 
@@ -50,6 +51,13 @@ var artifactSweeps = []sweep{
 	{gvr: serviceAccountGVR, namespace: defaults.GPUOperatorNamespace, match: isSnapshotAgentObject},
 	{gvr: roleGVR, namespace: defaults.GPUOperatorNamespace, match: isSnapshotAgentObject},
 	{gvr: roleBindingGVR, namespace: defaults.GPUOperatorNamespace, match: isSnapshotAgentObject},
+}
+
+// validationRunSweeps reclaim aicr validate leftovers when
+// defaults.ValidationNamespace itself is kept.
+var validationRunSweeps = []sweep{
+	{gvr: jobGVR, namespace: defaults.ValidationNamespace, match: isValidationRunObject},
+	{gvr: configMapGVR, namespace: defaults.ValidationNamespace, match: isValidationRunObject},
 }
 
 func (c *cleaner) removeValidatorArtifacts(ctx context.Context) {
@@ -64,7 +72,14 @@ func (c *cleaner) removeValidatorArtifacts(ctx context.Context) {
 	case c.excludedNS(defaults.ValidationNamespace):
 		c.log.Info("skipping excluded namespace", "namespace", defaults.ValidationNamespace)
 	case c.opts.keepNamespaces:
-		c.log.Info("skipping namespace deletion", "namespace", defaults.ValidationNamespace, "flag", "--keep-namespaces")
+		c.log.Info("skipping namespace deletion, removing its aicr validate objects",
+			"namespace", defaults.ValidationNamespace, "flag", "--keep-namespaces")
+		for _, s := range validationRunSweeps {
+			if ctx.Err() != nil {
+				return
+			}
+			c.runSweep(ctx, s)
+		}
 	default:
 		c.deleteNamespace(ctx, defaults.ValidationNamespace)
 	}

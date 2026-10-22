@@ -43,7 +43,6 @@ import (
 )
 
 var (
-	configMapGVR     = corev1.SchemeGroupVersion.WithResource("configmaps")
 	testNamespaces   = []string{"gang-scheduling-test", "gpu-operator", "nodewright", "skyhook"}
 	testReleaseNames = map[string]bool{"gpu-operator": true, "nodewright": true, "unrelated": true}
 )
@@ -644,6 +643,40 @@ func TestRemoveValidatorArtifacts(t *testing.T) {
 	}
 }
 
+func TestRemoveValidatorArtifactsKeepNamespacesSweepsValidationRuns(t *testing.T) {
+	const ns = defaults.ValidationNamespace
+	run := map[string]string{k8slabels.Name: k8slabels.ValueAICR, k8slabels.Component: vlabels.ValueValidation}
+	job := func(name string, labels map[string]string) *unstructured.Unstructured {
+		u := &unstructured.Unstructured{}
+		u.SetAPIVersion("batch/v1")
+		u.SetKind("Job")
+		u.SetNamespace(ns)
+		u.SetName(name)
+		u.SetLabels(labels)
+		return u
+	}
+	runConfigMap := configMap(ns, "aicr-ctrf-run1")
+	runConfigMap.SetLabels(run)
+	f := newFixture([]runtime.Object{namespace(ns)},
+		job("aicr-run1", run), job("team-job", nil), runConfigMap, configMap(ns, "team-config"))
+
+	f.cleaner(options{assumeYes: true, keepNamespaces: true}).removeValidatorArtifacts(context.Background())
+
+	var deleted []string
+	for _, a := range slices.Concat(f.dyn.Actions(), f.kube.Actions()) {
+		if d, ok := a.(k8stesting.DeleteAction); ok && d.GetNamespace() == ns {
+			deleted = append(deleted, d.GetResource().Resource+"/"+d.GetName())
+		}
+	}
+	slices.Sort(deleted)
+	if want := []string{"configmaps/aicr-ctrf-run1", "jobs/aicr-run1"}; !slices.Equal(deleted, want) {
+		t.Errorf("deleted in %s = %q, want %q", ns, deleted, want)
+	}
+	if !f.namespaceExists(t, ns) {
+		t.Errorf("namespace %s was deleted", ns)
+	}
+}
+
 func TestRemoveValidatorArtifactsProtectsValidationNamespace(t *testing.T) {
 	tests := []struct {
 		name string
@@ -653,7 +686,7 @@ func TestRemoveValidatorArtifactsProtectsValidationNamespace(t *testing.T) {
 		{"excluded", options{excludeNS: []string{defaults.ValidationNamespace}},
 			`msg="skipping excluded namespace" namespace=` + defaults.ValidationNamespace},
 		{"keep namespaces", options{keepNamespaces: true},
-			`msg="skipping namespace deletion" namespace=` + defaults.ValidationNamespace + ` flag=--keep-namespaces`},
+			`msg="skipping namespace deletion, removing its aicr validate objects" namespace=` + defaults.ValidationNamespace + ` flag=--keep-namespaces`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
