@@ -30,7 +30,12 @@ import (
 type helmRelease struct {
 	Name      string `json:"name"`
 	Namespace string `json:"namespace"`
+	Status    string `json:"status"`
 }
+
+// helmStatusUninstalled is the status helm reports for a release removed with
+// helm uninstall --keep-history.
+const helmStatusUninstalled = "uninstalled"
 
 // legacyComponents maps component names no longer in the registry, whose
 // releases older installs still carry, to the reason.

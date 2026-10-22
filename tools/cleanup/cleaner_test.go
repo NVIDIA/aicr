@@ -482,8 +482,10 @@ func TestDeleteNamespacesSharedNamespaces(t *testing.T) {
 		wantKept   bool
 		wantOutput string
 	}{
-		{"aicr release found", []helmRelease{{Name: "nfd-ocp-olm", Namespace: shared}}, false,
+		{"aicr release found", []helmRelease{{Name: "nfd-ocp-olm", Namespace: shared, Status: "deployed"}}, false,
 			`msg=deleting resource=namespaces name=` + shared},
+		{"aicr release uninstalled with kept history", []helmRelease{{Name: "nfd-ocp-olm", Namespace: shared, Status: helmStatusUninstalled}}, true,
+			`msg="keeping shared namespace with no AICR helm release found" namespace=` + shared},
 		{"no release found", nil, true,
 			`msg="keeping shared namespace with no AICR helm release found" namespace=` + shared},
 		{"aicr release elsewhere", []helmRelease{{Name: "nfd-ocp-olm", Namespace: "gpu-operator"}}, true,

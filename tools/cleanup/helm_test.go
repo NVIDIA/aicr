@@ -50,7 +50,7 @@ func TestHelmCLIList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list() error = %v", err)
 	}
-	want := []helmRelease{{Name: "gpu-operator", Namespace: "gpu-operator"}, {Name: "nodewright", Namespace: "nodewright"}}
+	want := []helmRelease{{Name: "gpu-operator", Namespace: "gpu-operator", Status: "deployed"}, {Name: "nodewright", Namespace: "nodewright"}}
 	if !slices.Equal(got, want) {
 		t.Errorf("list() = %v, want %v", got, want)
 	}
