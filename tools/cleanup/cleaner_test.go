@@ -666,11 +666,14 @@ func TestRemoveValidatorArtifacts(t *testing.T) {
 
 func TestRemoveValidatorArtifactsKeepNamespacesSweepsValidationRuns(t *testing.T) {
 	const ns = defaults.ValidationNamespace
+	const rbac = "rbac.authorization.k8s.io/v1"
 	run := map[string]string{k8slabels.Name: k8slabels.ValueAICR, k8slabels.Component: vlabels.ValueValidation}
-	job := func(name string, labels map[string]string) *unstructured.Unstructured {
+	agent := map[string]string{k8slabels.Name: k8slabels.ValueAICR, k8slabels.Component: k8slabels.ValueSnapshotAgent}
+	operatorRBAC := map[string]string{k8slabels.Name: k8slabels.ValueAICR, k8slabels.Component: k8slabels.ValueAgentRBAC}
+	object := func(apiVersion, kind, name string, labels map[string]string) *unstructured.Unstructured {
 		u := &unstructured.Unstructured{}
-		u.SetAPIVersion("batch/v1")
-		u.SetKind("Job")
+		u.SetAPIVersion(apiVersion)
+		u.SetKind(kind)
 		u.SetNamespace(ns)
 		u.SetName(name)
 		u.SetLabels(labels)
@@ -679,7 +682,17 @@ func TestRemoveValidatorArtifactsKeepNamespacesSweepsValidationRuns(t *testing.T
 	runConfigMap := configMap(ns, "aicr-ctrf-run1")
 	runConfigMap.SetLabels(run)
 	f := newFixture([]runtime.Object{namespace(ns)},
-		job("aicr-run1", run), job("team-job", nil), runConfigMap, configMap(ns, "team-config"))
+		object("batch/v1", "Job", "aicr-run1", run),
+		object("batch/v1", "Job", "team-job", nil),
+		runConfigMap,
+		configMap(ns, "team-config"),
+		object("batch/v1", "Job", "aicr-validate-run1", agent),
+		object("v1", "ServiceAccount", "aicr-validate-run1", agent),
+		object(rbac, "Role", "aicr-validate-run1", agent),
+		object(rbac, "RoleBinding", "aicr-validate-run1", agent),
+		object("v1", "ServiceAccount", defaults.AgentName, nil),
+		object(rbac, "RoleBinding", "aicr-operator-sa", operatorRBAC),
+	)
 
 	f.cleaner(options{assumeYes: true, keepNamespaces: true}).removeValidatorArtifacts(context.Background())
 
@@ -690,7 +703,15 @@ func TestRemoveValidatorArtifactsKeepNamespacesSweepsValidationRuns(t *testing.T
 		}
 	}
 	slices.Sort(deleted)
-	if want := []string{"configmaps/aicr-ctrf-run1", "jobs/aicr-run1"}; !slices.Equal(deleted, want) {
+	want := []string{
+		"configmaps/aicr-ctrf-run1",
+		"jobs/aicr-run1",
+		"jobs/aicr-validate-run1",
+		"rolebindings/aicr-validate-run1",
+		"roles/aicr-validate-run1",
+		"serviceaccounts/aicr-validate-run1",
+	}
+	if !slices.Equal(deleted, want) {
 		t.Errorf("deleted in %s = %q, want %q", ns, deleted, want)
 	}
 	if !f.namespaceExists(t, ns) {

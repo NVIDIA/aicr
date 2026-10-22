@@ -647,8 +647,9 @@ Some namespaces are kept without any flag:
   release list, cleanup cannot tell which namespaces hold releases it would
   orphan.
 
-`--keep-namespaces` keeps `aicr-validation` too, but still deletes the Jobs and
-ConfigMaps `aicr validate` left there.
+`--keep-namespaces` keeps `aicr-validation` too, but still deletes what
+`aicr validate` left there: the validator Jobs and ConfigMaps, and the snapshot
+agent's Job, ServiceAccount, Role and RoleBinding.
 
 ### Debugging Tests
 

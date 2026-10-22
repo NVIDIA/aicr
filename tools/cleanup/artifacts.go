@@ -58,6 +58,10 @@ var artifactSweeps = []sweep{
 var validationRunSweeps = []sweep{
 	{gvr: jobGVR, namespace: defaults.ValidationNamespace, match: isValidationRunObject},
 	{gvr: configMapGVR, namespace: defaults.ValidationNamespace, match: isValidationRunObject},
+	{gvr: jobGVR, namespace: defaults.ValidationNamespace, match: isSnapshotAgentRunObject},
+	{gvr: serviceAccountGVR, namespace: defaults.ValidationNamespace, match: isSnapshotAgentRunObject},
+	{gvr: roleGVR, namespace: defaults.ValidationNamespace, match: isSnapshotAgentRunObject},
+	{gvr: roleBindingGVR, namespace: defaults.ValidationNamespace, match: isSnapshotAgentRunObject},
 }
 
 func (c *cleaner) removeValidatorArtifacts(ctx context.Context) {

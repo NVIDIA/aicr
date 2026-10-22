@@ -525,6 +525,13 @@ func isSnapshotAgentObject(obj metav1.Object) bool {
 		return false
 	}
 	// Legacy objects match by their fixed name, and current ones by label.
-	return obj.GetName() == defaults.AgentName ||
-		(l[k8slabels.Name] == k8slabels.ValueAICR && l[k8slabels.Component] == k8slabels.ValueSnapshotAgent)
+	return obj.GetName() == defaults.AgentName || isSnapshotAgentRunObject(obj)
+}
+
+// isSnapshotAgentRunObject reports whether obj carries the labels a snapshot
+// agent run stamps on what it creates. It never matches by name, so an
+// unlabeled ServiceAccount an administrator provisioned is not matched.
+func isSnapshotAgentRunObject(obj metav1.Object) bool {
+	l := obj.GetLabels()
+	return l[k8slabels.Name] == k8slabels.ValueAICR && l[k8slabels.Component] == k8slabels.ValueSnapshotAgent
 }
