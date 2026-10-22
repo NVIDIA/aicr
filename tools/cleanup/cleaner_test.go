@@ -345,11 +345,13 @@ func TestRunWithoutHelm(t *testing.T) {
 	if err := c.run(context.Background(), nil); err != nil {
 		t.Fatalf("run() error = %v", err)
 	}
-	if f.namespaceExists(t, "gpu-operator") {
-		t.Error("namespace deletion did not run without helm")
+	if !f.namespaceExists(t, "gpu-operator") {
+		t.Error("namespace deletion ran without helm")
 	}
-	f.wantOutput(t, `level=WARN msg="helm is not installed, skipping helm uninstall"`)
+	f.wantOutput(t, `level=WARN msg="helm is not installed, skipping helm uninstall"`, skipNamespacesNoReleases)
 }
+
+const skipNamespacesNoReleases = `level=WARN msg="skipping namespace deletion, since deleting a namespace with no helm release list could orphan releases in it"`
 
 func TestRunHelmListFailure(t *testing.T) {
 	f := newFixture(clusterObjects())
@@ -358,10 +360,10 @@ func TestRunHelmListFailure(t *testing.T) {
 	if err := f.cleaner(options{assumeYes: true}).run(context.Background(), nil); err != nil {
 		t.Fatalf("run() error = %v", err)
 	}
-	if f.namespaceExists(t, "gpu-operator") {
-		t.Error("namespace deletion did not run after a helm list failure")
+	if !f.namespaceExists(t, "gpu-operator") {
+		t.Error("namespace deletion ran after a helm list failure")
 	}
-	f.wantOutput(t, `level=WARN msg="could not list helm releases, skipping helm uninstall"`)
+	f.wantOutput(t, `level=WARN msg="could not list helm releases, skipping helm uninstall"`, skipNamespacesNoReleases)
 }
 
 func TestRunCanceled(t *testing.T) {

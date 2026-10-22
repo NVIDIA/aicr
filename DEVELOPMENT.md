@@ -643,6 +643,9 @@ Some namespaces are kept without any flag:
   release in them. On OpenShift the platform team often installs these
   operators through OperatorHub. The list is `sharedNamespaces` in
   `tools/cleanup/namespaces.go`.
+- Every namespace, when helm is not installed or `helm list` fails. Without the
+  release list, cleanup cannot tell which namespaces hold releases it would
+  orphan.
 
 `--keep-namespaces` keeps `aicr-validation` too, but still deletes the Jobs and
 ConfigMaps `aicr validate` left there.

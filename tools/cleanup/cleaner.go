@@ -117,7 +117,7 @@ func (c *cleaner) run(ctx context.Context, confirm prompt) error {
 	c.log.Info("target cluster", "context", c.kubeContext, "server", c.server)
 	c.reportExclusions()
 
-	releases := c.listReleases(ctx)
+	releases, releasesKnown := c.listReleases(ctx)
 	driverManaged := c.driverManaged(ctx, releases)
 	if driverManaged {
 		c.driverGuidance()
@@ -139,9 +139,12 @@ func (c *cleaner) run(ctx context.Context, confirm prompt) error {
 	} else {
 		c.deleteCRDs(ctx)
 	}
-	if c.opts.keepNamespaces {
+	switch {
+	case c.opts.keepNamespaces:
 		c.log.Info("skipping namespace deletion", "flag", "--keep-namespaces")
-	} else {
+	case !releasesKnown:
+		c.log.Warn("skipping namespace deletion, since deleting a namespace with no helm release list could orphan releases in it")
+	default:
 		c.deleteNamespaces(ctx, releases)
 	}
 	if err := ctx.Err(); err != nil {
@@ -194,17 +197,19 @@ func (c *cleaner) owned(ns string) bool {
 	return found
 }
 
-func (c *cleaner) listReleases(ctx context.Context) []helmRelease {
+// listReleases reports false when helm is not installed or the listing failed,
+// so the caller cannot tell which namespaces hold releases.
+func (c *cleaner) listReleases(ctx context.Context) ([]helmRelease, bool) {
 	if c.helm == nil {
 		c.log.Warn("helm is not installed, skipping helm uninstall")
-		return nil
+		return nil, false
 	}
 	releases, err := c.helm.list(ctx)
 	if err != nil {
 		c.log.Warn("could not list helm releases, skipping helm uninstall", "error", err)
-		return nil
+		return nil, false
 	}
-	return releases
+	return releases, true
 }
 
 // driverManaged reports whether gpu-operator installs the NVIDIA kernel driver
