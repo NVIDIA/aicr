@@ -266,10 +266,6 @@ const (
 	// one helm list or helm get values call.
 	ClusterCleanupHelmOutputLimit int64 = 16 << 20
 
-	// ClusterCleanupHelmListPageSize is the --max tools/cleanup passes to each
-	// helm list call, which otherwise returns at most 256 releases.
-	ClusterCleanupHelmListPageSize = 256
-
 	// K8sServiceAccountVerifyTimeout bounds the read-only ServiceAccount Get
 	// and SubjectAccessReview that vet an administrator-provisioned validator
 	// ServiceAccount before a run uses it.

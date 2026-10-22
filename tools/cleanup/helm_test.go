@@ -16,9 +16,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	stderrors "errors"
-	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -56,45 +54,13 @@ func TestHelmCLIList(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Errorf("list() = %v, want %v", got, want)
 	}
-	if want := []helmCall{{defaults.K8sCleanupTimeout, listArgs(0)}}; !slices.Equal(*calls, want) {
-		t.Errorf("helm calls = %v, want %v", *calls, want)
+	wantCalls := []helmCall{{
+		defaults.K8sCleanupTimeout,
+		"list --all-namespaces --output json --deployed --failed --pending --superseded --uninstalling --uninstalled --max 0",
+	}}
+	if !slices.Equal(*calls, wantCalls) {
+		t.Errorf("helm calls = %v, want %v", *calls, wantCalls)
 	}
-}
-
-func TestHelmCLIListPages(t *testing.T) {
-	const size = defaults.ClusterCleanupHelmListPageSize
-	full := make([]helmRelease, size)
-	for i := range full {
-		full[i] = helmRelease{Name: fmt.Sprintf("release-%03d", i), Namespace: "team"}
-	}
-	last := []helmRelease{{Name: "gpu-operator", Namespace: "gpu-operator"}}
-	pages := [][]helmRelease{full, last}
-
-	var calls []helmCall
-	run := func(_ context.Context, timeout time.Duration, _ int64, args ...string) ([]byte, error) {
-		calls = append(calls, helmCall{timeout: timeout, args: strings.Join(args, " ")})
-		if len(calls) > len(pages) {
-			t.Fatalf("helm list called %d times, want %d", len(calls), len(pages))
-		}
-		return json.Marshal(pages[len(calls)-1])
-	}
-
-	got, err := helmCLI{run: run}.list(context.Background())
-	if err != nil {
-		t.Fatalf("list() error = %v", err)
-	}
-	if want := slices.Concat(full, last); !slices.Equal(got, want) {
-		t.Errorf("list() returned %d releases, want %d", len(got), len(want))
-	}
-	want := []helmCall{{defaults.K8sCleanupTimeout, listArgs(0)}, {defaults.K8sCleanupTimeout, listArgs(size)}}
-	if !slices.Equal(calls, want) {
-		t.Errorf("helm calls = %v, want %v", calls, want)
-	}
-}
-
-func listArgs(offset int) string {
-	return fmt.Sprintf("list --all-namespaces --output json --deployed --failed --pending --superseded --uninstalling --uninstalled --max %d --offset %d",
-		defaults.ClusterCleanupHelmListPageSize, offset)
 }
 
 func TestHelmCLIValues(t *testing.T) {

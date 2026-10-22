@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"maps"
 	"slices"
-	"strconv"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
@@ -78,27 +77,23 @@ type helmCLI struct {
 }
 
 func (h helmCLI) list(ctx context.Context) ([]helmRelease, error) {
-	const size = defaults.ClusterCleanupHelmListPageSize
-	var releases []helmRelease
-	for offset := 0; ; offset += size {
-		out, err := h.run(ctx, defaults.K8sCleanupTimeout, defaults.ClusterCleanupHelmOutputLimit,
-			"list", "--all-namespaces", "--output", "json",
-			// Helm 3 lists only deployed and failed releases by default, and
-			// Helm 4 rejects Helm 3's --all.
-			"--deployed", "--failed", "--pending", "--superseded", "--uninstalling", "--uninstalled",
-			"--max", strconv.Itoa(size), "--offset", strconv.Itoa(offset))
-		if err != nil {
-			return nil, err
-		}
-		var page []helmRelease
-		if err := json.Unmarshal(out, &page); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal, "decode helm list output", err)
-		}
-		releases = append(releases, page...)
-		if len(page) < size {
-			return releases, nil
-		}
+	out, err := h.run(ctx, defaults.K8sCleanupTimeout, defaults.ClusterCleanupHelmOutputLimit,
+		"list", "--all-namespaces", "--output", "json",
+		// Helm 3 lists only deployed and failed releases by default, and
+		// Helm 4 rejects Helm 3's --all.
+		"--deployed", "--failed", "--pending", "--superseded", "--uninstalling", "--uninstalled",
+		// helm list returns at most 256 releases by default and 0 lifts the
+		// cap. Paging with --offset is unsafe, since helm sorts by name only
+		// and releases sharing a name can swap between calls.
+		"--max", "0")
+	if err != nil {
+		return nil, err
 	}
+	var releases []helmRelease
+	if err := json.Unmarshal(out, &releases); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "decode helm list output", err)
+	}
+	return releases, nil
 }
 
 func (h helmCLI) uninstall(ctx context.Context, rel helmRelease) error {
