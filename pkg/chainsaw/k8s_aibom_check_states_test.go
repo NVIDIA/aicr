@@ -75,7 +75,7 @@ func TestK8sAIBOMHealthCheckClusterStates(t *testing.T) {
 		readyGeneration    int64
 		readyStatus        string
 		// CRD inputs. Empty storage version means the qualified default
-		// (v1beta1, matching the pinned 1.3.0 chart), so existing cases
+		// (v1beta1, matching every pinned chart since 1.3.0), so existing cases
 		// describe a correctly-applied CRD set without restating it.
 		aibomCRDStorage  string
 		configCRDStorage string
@@ -209,8 +209,8 @@ func TestK8sAIBOMHealthCheckClusterStates(t *testing.T) {
 			wantOutput: "AIBOMControllerConfig",
 		},
 		{
-			// The stranded-CRD case the check exists for: the registry now
-			// pins 1.3.0, but this cluster still carries CRDs from 1.2.0 or
+			// The stranded-CRD case the check exists for: the registry pins
+			// 1.3.0 or later, but this cluster still carries CRDs from 1.2.0 or
 			// earlier, which serve only v1alpha1 and store it. Nothing else
 			// in this check notices, because the controller runs fine against
 			// a served version.
@@ -276,12 +276,12 @@ func TestK8sAIBOMHealthCheckClusterStates(t *testing.T) {
 			// chart actually ships, so a "stranded" case models a real
 			// pre-upgrade cluster rather than an invented hybrid:
 			//
-			//   v1beta1 storage -> chart 1.3.0: serves v1alpha1 and v1beta1,
-			//                      storage on v1beta1 (the current pin)
+			//   v1beta1 storage -> chart 1.3.0 onward: serves v1alpha1 and
+			//                      v1beta1, storage on v1beta1 (the current pin)
 			//   v1alpha1 storage -> chart 1.2.0 and earlier: serves only
 			//                       v1alpha1, storage on it
 			//
-			// The non-storage version staying served on 1.3.0 is why a
+			// The non-storage version staying served from 1.3.0 on is why a
 			// stranded CRD does not break the controller, and why the
 			// storage-version assertion is the only thing that sees it.
 			addCRD := func(name, storageVersion string) {
