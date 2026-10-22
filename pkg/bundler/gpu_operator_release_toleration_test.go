@@ -28,10 +28,8 @@ import (
 )
 
 // TestGPUOperatorTolerationsWithoutAcceleratedInput renders a stock leaf with
-// no accelerated tolerations supplied (the Go SDK's nil, which bypasses the
-// CLI's tolerate-all default) and requires the gpu-operator operands to still
-// tolerate nvidia.com/gpu. The base overlay's daemonsets.tolerations list
-// displaces the chart default, so it has to restate it (#3357).
+// nil accelerated tolerations and requires the gpu-operator operands to still
+// tolerate nvidia.com/gpu alongside the NVSentinel release taint (#3357).
 func TestGPUOperatorTolerationsWithoutAcceleratedInput(t *testing.T) {
 	ctx := context.Background()
 	leaves, err := recipe.ResolveLeaves(ctx, recipe.ResolveLeavesOptions{
@@ -90,13 +88,14 @@ func TestGPUOperatorTolerationsWithoutAcceleratedInput(t *testing.T) {
 	var gpu, release bool
 	for _, tol := range values.Daemonsets.Tolerations {
 		switch {
-		case tol.Key == "nvidia.com/gpu" && tol.Operator == corev1.TolerationOpExists:
+		case tol.Operator != corev1.TolerationOpExists || tol.Effect != corev1.TaintEffectNoSchedule:
+		case tol.Key == "nvidia.com/gpu":
 			gpu = true
 		case tol.Key == "nvsentinel.dgxc.nvidia.com/external-remediation":
 			release = true
 		}
 	}
 	if !gpu || !release {
-		t.Fatalf("daemonsets.tolerations = %+v; want nvidia.com/gpu (Exists) and the NVSentinel release key", values.Daemonsets.Tolerations)
+		t.Fatalf("daemonsets.tolerations = %+v; want nvidia.com/gpu and the NVSentinel release key, both Exists/NoSchedule", values.Daemonsets.Tolerations)
 	}
 }
