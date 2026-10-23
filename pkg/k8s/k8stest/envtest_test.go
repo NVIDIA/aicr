@@ -64,7 +64,9 @@ func TestStartPackageServesAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("clientset: %v", err)
 	}
-	if _, err = client.Discovery().ServerVersion(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err = client.Discovery().ServerVersionWithContext(ctx); err != nil {
 		t.Fatalf("server version: %v", err)
 	}
 }
