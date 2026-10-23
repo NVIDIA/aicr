@@ -752,8 +752,10 @@ func (c *Client) criteriaRegistry(
 // manifests with no error.
 //
 // A nil owner means the RecipeResult did not come from a Client (e.g.,
-// WrapResolved or a struct literal). Such a result is queryable only, so
-// the check rejects nil owner as well.
+// WrapResolved or a struct literal). The bundle, validate, preflight, and
+// evidence methods reject such a result, so the check rejects nil owner as
+// well; MirrorInventory does not call this and accepts an unowned result
+// by design.
 //
 // The error embeds %p of both pointers; in controller logs that lets an
 // operator distinguish "wrong Client" from "no Client at all" without
@@ -894,10 +896,10 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 	if err != nil {
 		return nil, err
 	}
-	// Stamp the owning Client so every method that consumes the result
-	// can reject cross-client misuse. Pointer identity is the token —
-	// unforgeable from outside this package because RecipeResult.owner
-	// is unexported.
+	// Stamp the owning Client so the bundle, validate, preflight, and
+	// evidence methods can reject cross-client misuse. Pointer identity
+	// is the token — unforgeable from outside this package because
+	// RecipeResult.owner is unexported.
 	result.owner = c
 	return result, nil
 }
