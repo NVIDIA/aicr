@@ -897,9 +897,9 @@ aicr bundle --recipe recipe.yaml --readiness-hooks --output ./bundles
 ```
 
 The gate Job takes its node selector and tolerations from the component's own
-system scheduling values at install time, so `--set`, `--dynamic` and
-`--system-node-*` place it alongside the component. Keyless tolerations are
-not applied to the gate. See
+system scheduling values at install time, so `--set` and `--system-node-*`
+place it alongside the component, as does `--dynamic` under `helm` and
+`argocd-helm`. Keyless tolerations are not applied to the gate. See
 [Readiness Gates](cli-reference.md#readiness-gates) for each deployer.
 
 ## Deploy the bundle
