@@ -12,646 +12,75 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# TEMPORARY DIAGNOSTIC for #3249 -- never merged. Replaces the weekly scan on
+# this branch only, so it can be dispatched with --ref. Scans the two NCCL
+# preflight images through the docker daemon (what scan-action does today)
+# and straight from the registry, sampling memory/disk inline so the numbers
+# survive the runner being killed.
 name: Weekly Image Vulnerability Scan
 
 on:
-  schedule:
-    # Weekly on Thursday at 6:00 AM UTC. Every run reports the full HIGH+
-    # set, carried-over findings included -- an open vulnerability keeps
-    # being reported until it is fixed or VEX-suppressed.
-    - cron: '0 6 * * 4'
-  workflow_dispatch:
-    inputs:
-      notify_slack:
-        description: 'Post results to Slack (scheduled runs always post; manual runs skip by default)'
-        type: boolean
-        default: false
+  workflow_dispatch: {}
 
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: true
-
-env:
-  VALIDATOR_IMAGE_PREFIX: ghcr.io/nvidia/aicr-validators
-  VALIDATOR_PHASES: "deployment performance conformance aiperf-bench"
-  GATE_IMAGE: ghcr.io/nvidia/aicr-gate
-  SCAN_TAG: scan-${{ github.sha }}
-
 jobs:
-
-  # =============================================================================
-  # Build Ko Images (aicr, aicrd)
-  # =============================================================================
-
-  build-ko:
-    name: Build Ko Images
-    if: github.repository == 'nvidia/aicr'
+  diagnose:
+    name: Diagnose (${{ matrix.name }}, ${{ matrix.source }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: read
-      packages: write
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Load versions
-        id: versions
-        uses: ./.github/actions/load-versions
-
-      - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version: ${{ steps.versions.outputs.go }}
-          cache: true
-
-      - name: Setup build tools
-        uses: ./.github/actions/setup-build-tools
-        with:
-          install_ko: 'true'
-          ko_version: ${{ steps.versions.outputs.ko }}
-
-      - name: Authenticate to registry
-        uses: ./.github/actions/ghcr-login
-
-      - name: Build and push aicr
-        env:
-          KO_DOCKER_REPO: ghcr.io/nvidia/aicr
-        run: |
-          set -euo pipefail
-          ko build ./cmd/aicr \
-            --bare \
-            --platform=linux/amd64,linux/arm64 \
-            --image-label="org.opencontainers.image.revision=${{ github.sha }}" \
-            --tags="${SCAN_TAG}"
-
-      - name: Build and push aicrd
-        env:
-          KO_DOCKER_REPO: ghcr.io/nvidia/aicrd
-          # Base image inherited from .ko.yaml (nvcr.io/nvidia/distroless/static),
-          # same as the aicr build above.
-        run: |
-          set -euo pipefail
-          ko build ./cmd/aicrd \
-            --bare \
-            --platform=linux/amd64,linux/arm64 \
-            --image-label="org.opencontainers.image.revision=${{ github.sha }}" \
-            --tags="${SCAN_TAG}"
-
-  # =============================================================================
-  # Build Docker Validator Images
-  # =============================================================================
-
-  build-docker:
-    name: Docker Validator (${{ matrix.phase }}/${{ matrix.arch }})
-    if: github.repository == 'nvidia/aicr'
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      packages: write
     strategy:
       fail-fast: false
       matrix:
-        phase: [deployment, performance, conformance, aiperf-bench]
-        arch: [amd64, arm64]
-        include:
-          - arch: amd64
-            runner: ubuntu-24.04
-            platform: linux/amd64
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-            platform: linux/arm64
-          - phase: aiperf-bench
-            dockerfile: validators/performance/aiperf-bench.Dockerfile
-            image_title: aicr-aiperf-bench
+        name: [preflight-nccl-loopback, preflight-nccl-allreduce]
+        source: [docker, registry]
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003  # v4.4.0
-
-      - name: Authenticate to registry
-        uses: ./.github/actions/ghcr-login
-
-      - name: Load versions
-        id: versions
-        uses: ./.github/actions/load-versions
-
-      - name: Setup Go
-        if: matrix.phase != 'aiperf-bench'
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version: ${{ steps.versions.outputs.go }}
-          cache: true
-
-      - name: Build validator binary
-        if: matrix.phase != 'aiperf-bench'
-        shell: bash
-        env:
-          VALIDATOR_ARCHES: ${{ matrix.arch }}
-          VALIDATOR_PHASES: ${{ matrix.phase }}
-        run: ./tools/build-validator-binaries
-
-      - name: Build and push
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
-        with:
-          context: .
-          file: ${{ matrix.dockerfile || format('validators/{0}/Dockerfile', matrix.phase) }}
-          platforms: ${{ matrix.platform }}
-          push: true
-          tags: ${{ env.VALIDATOR_IMAGE_PREFIX }}/${{ matrix.phase }}:${{ env.SCAN_TAG }}-${{ matrix.arch }}
-          provenance: false
-          # aiperf-bench builds without the layer cache on purpose (#2086).
-          # Its requirements.txt is deliberately unpinned so each rebuild
-          # resolves patched transitive versions, but `pip install` is opaque
-          # to BuildKit: neither the base image nor the COPY'd requirements.txt
-          # changes between releases, so a cache hit replays the old closure
-          # verbatim. Without this the weekly scan reports on a stale closure
-          # that a freshly built image would not contain. The Go validators
-          # have no resolution step, so they keep the cache.
-          cache-from: ${{ matrix.phase != 'aiperf-bench' && 'type=gha' || '' }}
-          cache-to: ${{ matrix.phase != 'aiperf-bench' && 'type=gha,mode=max' || '' }}
-          labels: |
-            org.opencontainers.image.title=${{ matrix.image_title || format('aicr-validator-{0}', matrix.phase) }}
-            org.opencontainers.image.revision=${{ github.sha }}
-
-  # =============================================================================
-  # Build Gate Image (aicr-gate)
-  # =============================================================================
-  # The in-cluster readiness gate image (cmd/gate/Dockerfile) is published only
-  # on release tags by on-tag.yaml, so without this it is never vuln-scanned and
-  # never refreshed on main. Mirror on-tag's runner-side compilation so the
-  # scanned image matches what ships.
-
-  build-gate:
-    name: Docker Gate (${{ matrix.arch }})
-    if: github.repository == 'nvidia/aicr'
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      # packages: write — pushes the per-arch aicr-gate image to GHCR so the
-      # manifest + scan jobs can pull it (mirrors build-docker/build-ko).
-      packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [amd64, arm64]
-        include:
-          - arch: amd64
-            runner: ubuntu-24.04
-            platform: linux/amd64
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-            platform: linux/arm64
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003  # v4.4.0
-
-      - name: Authenticate to registry
-        uses: ./.github/actions/ghcr-login
-
-      - name: Load versions
-        id: versions
-        uses: ./.github/actions/load-versions
-
-      - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version: ${{ steps.versions.outputs.go }}
-          cache: true
-
-      - name: Build gate binary
-        shell: bash
-        env:
-          TARGET_ARCH: ${{ matrix.arch }}
-          VERSION: ${{ env.SCAN_TAG }}
-        run: |
-          set -euo pipefail
-          CGO_ENABLED=0 GOOS=linux GOARCH="${TARGET_ARCH}" GOFLAGS="-mod=readonly" \
-            go build -trimpath \
-            -ldflags="-s -w -extldflags '-static' -X main.version=${VERSION}" \
-            -o dist/gate ./cmd/gate
-          file dist/gate
-
-      - name: Build and push
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
-        with:
-          context: .
-          file: cmd/gate/Dockerfile
-          platforms: ${{ matrix.platform }}
-          push: true
-          tags: ${{ env.GATE_IMAGE }}:${{ env.SCAN_TAG }}-${{ matrix.arch }}
-          provenance: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          labels: |
-            org.opencontainers.image.title=aicr-gate
-            org.opencontainers.image.revision=${{ github.sha }}
-
-  # =============================================================================
-  # Docker Manifest: Combine per-arch images into multi-arch manifests
-  # =============================================================================
-
-  docker-manifest:
-    name: Docker Manifest
-    runs-on: ubuntu-24.04
-    needs: [build-docker, build-gate]
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Authenticate to registry
-        uses: ./.github/actions/ghcr-login
-
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003  # v4.4.0
-
-      - name: Create multi-arch manifests
-        run: |
-          set -euo pipefail
-          for phase in ${VALIDATOR_PHASES}; do
-            IMAGE="${VALIDATOR_IMAGE_PREFIX}/${phase}"
-            docker buildx imagetools create \
-              -t "${IMAGE}:${SCAN_TAG}" \
-              "${IMAGE}:${SCAN_TAG}-amd64" \
-              "${IMAGE}:${SCAN_TAG}-arm64"
-          done
-          docker buildx imagetools create \
-            -t "${GATE_IMAGE}:${SCAN_TAG}" \
-            "${GATE_IMAGE}:${SCAN_TAG}-amd64" \
-            "${GATE_IMAGE}:${SCAN_TAG}-arm64"
-
-  # =============================================================================
-  # Scan: Vulnerability scan all images
-  # =============================================================================
-
-  scan:
-    name: Scan (${{ matrix.image }})
-    runs-on: ubuntu-24.04
-    needs: [build-ko, docker-manifest]
-    # 30, not 15: the two NVSentinel NCCL check images are ~9.9 GiB compressed
-    # each, so the pull and extraction alone outlast the budget the small
-    # AICR-built images need. Matrix jobs get their own runner, so the larger
-    # budget costs nothing for the images that finish in two minutes.
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      packages: read
-    strategy:
-      fail-fast: false
-      matrix:
-        image:
-          - ghcr.io/nvidia/aicr
-          - ghcr.io/nvidia/aicrd
-          - ghcr.io/nvidia/aicr-validators/deployment
-          - ghcr.io/nvidia/aicr-validators/performance
-          - ghcr.io/nvidia/aicr-validators/conformance
-          - ghcr.io/nvidia/aicr-validators/aiperf-bench
-          - ghcr.io/nvidia/aicr-gate
-          # AICR does not build the images below. They ship only with the
-          # opt-in nvsentinel-object-monitor (#2612), nvsentinel-preflight
-          # (#2610), nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor
-          # (#2611), remediation, nvsentinel-slinky-drainer (#2615) and
-          # nvsentinel-health-events-analyzer (#2618) mixins, and no other job
-          # scans a mixin-gated image, so nothing else would surface a CVE in
-          # them.
-          # Because they are not built by this workflow they carry their
-          # upstream tag rather than SCAN_TAG -- see the overrides below.
-          - ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
-          - ghcr.io/nvidia/nvsentinel/preflight
-          - ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag
-          - ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback
-          - ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce
-          - ghcr.io/nvidia/nvsentinel/nic-health-monitor
-          - ghcr.io/nvidia/nvsentinel/slurm-drain-monitor
-          - ghcr.io/nvidia/nvsentinel/fault-quarantine
-          - ghcr.io/nvidia/nvsentinel/node-drainer
-          - ghcr.io/nvidia/nvsentinel/fault-remediation
-          - ghcr.io/nvidia/nvsentinel/janitor
-          - ghcr.io/nvidia/nvsentinel/janitor-provider
-          - ghcr.io/nvidia/nvsentinel/gpu-reset
-          - ghcr.io/nvidia/nvsentinel/slinky-drainer
-          - ghcr.io/nvidia/nvsentinel/health-events-analyzer
-          # Percona, from the remediation mixins' separately bundled datastore
-          # (psmdb-operator, nvsentinel-mongodb). Pinned by AICR, by digest.
-          - docker.io/percona/percona-server-mongodb-operator
-          - docker.io/percona/percona-server-mongodb
-          - docker.io/percona/mongodb_exporter
-          - docker.io/percona/percona-backup-mongodb
-          - docker.io/percona/fluentbit
-          - docker.io/percona/pmm-client
-          # Third-party, pinned by AICR rather than the chart:
-          # global.initContainerImage, used by chown/permission init
-          # containers in the nic-health-monitor and audit-logging paths,
-          # and janitor-provider's generic reboot Job image. AICR overrides
-          # the chart's defaults for both -- the first in
-          # recipes/components/nvsentinel/values.yaml, the second
-          # (janitor-provider.csp.generic.rebootImage) in
-          # recipes/mixins/nvsentinel-remediation.yaml -- so what is scanned
-          # here is the override; keep them in step.
-          - docker.io/library/busybox
-        include:
-          # Keep in lockstep with nvsentinel's defaultVersion in
-          # recipes/registry.yaml; TestObjectMonitorImagePinnedEverywhere,
-          # TestPreflightImagesPinnedEverywhere,
-          # TestNICHealthMonitorImagePinnedEverywhere,
-          # TestSlurmDrainMonitorImagePinnedEverywhere,
-          # TestRemediationImagesPinnedEverywhere,
-          # TestSlinkyDrainerImagePinnedEverywhere and
-          # TestHealthEventsAnalyzerImagePinnedEverywhere fail if these drift
-          # apart.
-          - image: ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
-            tag: v1.28.0
-          - image: ghcr.io/nvidia/nvsentinel/preflight
-            tag: v1.28.0
-          - image: ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag
-            tag: v1.28.0
-          - image: ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback
-            tag: v1.28.0
-          - image: ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce
-            tag: v1.28.0
-          - image: ghcr.io/nvidia/nvsentinel/nic-health-monitor
-            tag: v1.28.0
-          - image: ghcr.io/nvidia/nvsentinel/slurm-drain-monitor
-            tag: v1.28.0
-          - image: ghcr.io/nvidia/nvsentinel/fault-quarantine
-            tag: v1.28.0
-          - image: ghcr.io/nvidia/nvsentinel/node-drainer
-            tag: v1.28.0
-          - image: ghcr.io/nvidia/nvsentinel/fault-remediation
-            tag: v1.28.0
-          - image: ghcr.io/nvidia/nvsentinel/janitor
-            tag: v1.28.0
-          - image: ghcr.io/nvidia/nvsentinel/janitor-provider
-            tag: v1.28.0
-          - image: ghcr.io/nvidia/nvsentinel/gpu-reset
-            tag: v1.28.0
-          # Pinned by digest in recipes/components/slinky-drainer/manifests.
-          - image: ghcr.io/nvidia/nvsentinel/slinky-drainer
-            tag: v1.28.0@sha256:bf6ccaf1d6c035aa5f86e70a929dc6d9a18c5c05b10104d23c69aacff35bcb14
-          - image: ghcr.io/nvidia/nvsentinel/health-events-analyzer
-            tag: v1.28.0
-          # AICR's own pins in recipes/components/{psmdb-operator,nvsentinel-mongodb};
-          # TestRemediationImagesPinnedEverywhere fails if these drift apart.
-          - image: docker.io/percona/percona-server-mongodb-operator
-            tag: 1.23.1@sha256:78c87b933e184b9af36dbb0078751862c75934c1521c33d3be4d0a38aa58dd0a
-          - image: docker.io/percona/percona-server-mongodb
-            tag: 8.0.32-14@sha256:5ba5f240d2dc98bc6236ab1d79c0862c4b62dba9d98cd0ffdf716c30473d2d11
-          - image: docker.io/percona/mongodb_exporter
-            tag: 0.54.0@sha256:934e9db87e85e0fa63654e73c3504845993a254e898783ca905e65a68848b5a4
-          - image: docker.io/percona/percona-backup-mongodb
-            tag: 2.15.0@sha256:12dcba7f1b55e00eb1b49dac51427d942c221b826d621d6bfad926a9d959a7c5
-          - image: docker.io/percona/fluentbit
-            tag: 5.1.2-1@sha256:4926d7d003ca09c826a3dea5d9ccd0ba158296880471bcec82ef38f95617b913
-          - image: docker.io/percona/pmm-client
-            tag: 3.9.1@sha256:298e731652e2be172a2505596edaee1e0c014609035347599048f62efae78e5b
-          # Versioned independently of the nvsentinel chart -- this comes from
-          # AICR's values override, not the chart's appVersion, so it does
-          # not move with defaultVersion. Digest-pinned, so the tag is only
-          # there to read; grype resolves the digest.
-          - image: docker.io/library/busybox
-            tag: 1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Authenticate to registry
-        uses: ./.github/actions/ghcr-login
-
-      # Only for images this workflow does not build. An ubuntu-24.04 runner
-      # ships with roughly 21 GiB free, and grype extracts the image before
-      # scanning it, so a ~9.9 GiB compressed NCCL check image does not fit
-      # without this. matrix.tag is the marker for "upstream image".
       - name: Free disk space for large upstream images
-        if: ${{ matrix.tag != '' }}
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
           docker system prune -f
           df -h /
+          free -m
+          nproc
+          docker info --format 'driver={{.Driver}} images={{json .DriverStatus}}'
 
-      - name: Scan container image
-        id: scan
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2
-        with:
-          # matrix.tag is set only for images this workflow does not build,
-          # which carry their upstream version instead of SCAN_TAG.
-          image: '${{ matrix.image }}:${{ matrix.tag || env.SCAN_TAG }}'
-          severity-cutoff: 'high'
-          output-format: json
-          only-fixed: true
-          fail-build: false
-          config: .grype.yaml
-          # OpenVEX statements with per-CVE reachability evidence for
-          # aiperf-bench suppressions. Grype applies statements only to
-          # products whose PURL matches, so this is a no-op for the other
-          # images in the matrix.
-          vex: .openvex.json
+      - name: Install grype (same version scan-action uses)
+        id: grype
+        uses: anchore/scan-action/download-grype@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2
 
-      - name: Extract severity counts and IDs
-        shell: bash
+      - name: Scan with resource sampling
         env:
-          IMAGE: ${{ matrix.image }}
+          GRYPE: ${{ steps.grype.outputs.cmd }}
+          IMAGE: ghcr.io/nvidia/nvsentinel/${{ matrix.name }}:v1.28.0
+          SOURCE: ${{ matrix.source }}
         run: |
-          set -euo pipefail
-          JSON_FILE="${{ steps.scan.outputs.json }}"
-          SHORT_NAME="${IMAGE##*/}"
-          mkdir -p scan-results
-          OUT="scan-results/${SHORT_NAME}.txt"
-
-          if [[ ! -f "${JSON_FILE}" ]]; then
-            echo "${SHORT_NAME}: scan output missing" > "${OUT}"
-            exit 0
-          fi
-
-          # Severity counts from non-suppressed matches.
-          CRITICAL=$(jq '[.matches[] | select(.vulnerability.severity == "Critical")] | length' "${JSON_FILE}")
-          HIGH=$(jq '[.matches[] | select(.vulnerability.severity == "High")] | length' "${JSON_FILE}")
-          MEDIUM=$(jq '[.matches[] | select(.vulnerability.severity == "Medium")] | length' "${JSON_FILE}")
-          LOW=$(jq '[.matches[] | select(.vulnerability.severity == "Low")] | length' "${JSON_FILE}")
-          NEGLIGIBLE=$(jq '[.matches[] | select(.vulnerability.severity == "Negligible")] | length' "${JSON_FILE}")
-          # ignoredMatches conflates grype's internal filters with VEX
-          # suppressions, so report VEX hits separately to make it
-          # obvious when a statement actually applied.
-          VEX_APPLIED=$(jq '[.ignoredMatches[]? | select((.appliedIgnoreRules // []) | any(.namespace == "vex"))] | length' "${JSON_FILE}")
-
-          # HIGH+ identifiers for triage. Emits primary ID (often a GHSA)
-          # plus any related CVE aliases so reviewers can cross-reference
-          # NVD without re-running the scan.
-          HIGH_IDS=$(jq -r '
-            [ .matches[]
-              | select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical")
-              | (.artifact.name + " " + .vulnerability.id
-                 + ( (.relatedVulnerabilities // [] | map(.id) | join(","))
-                     | if . == "" then "" else " (" + . + ")" end )) ]
-            | join(", ")' "${JSON_FILE}")
-
-          {
-            echo "${SHORT_NAME}: ${CRITICAL} critical, ${HIGH} high, ${MEDIUM} medium, ${LOW} low, ${NEGLIGIBLE} negligible (${VEX_APPLIED} VEX-suppressed)"
-            if [[ "${CRITICAL}" -gt 0 || "${HIGH}" -gt 0 ]]; then
-              echo "  HIGH+: ${HIGH_IDS}"
-            fi
-          } > "${OUT}"
-          cat "${OUT}"
-
-      - name: Upload scan result
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        with:
-          name: scan-${{ strategy.job-index }}
-          path: scan-results/
-          retention-days: 1
-
-  # =============================================================================
-  # Notify: Post scan results to Slack (only on critical/high findings)
-  # =============================================================================
-
-  notify:
-    name: Slack Notification
-    runs-on: ubuntu-24.04
-    needs: [scan]
-    if: always() && needs.scan.result != 'cancelled'
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - name: Download all scan results
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
-        with:
-          pattern: scan-*
-          merge-multiple: true
-          path: scan-results
-
-      - name: Post to Slack
-        env:
-          SLACK_SERVICE: ${{ secrets.SLACK_SERVICE }}
-          # Scheduled runs always post; manual runs post only when the
-          # notify_slack input is set. The message is echoed to the logs
-          # either way, so manual runs can validate findings without Slack.
-          POST_SLACK: ${{ github.event_name == 'schedule' || inputs.notify_slack }}
-          SHA: ${{ github.sha }}
-          SERVER: ${{ github.server_url }}
-          REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          SHORT_SHA="${SHA:0:7}"
-          TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M')
-          RUN_URL="${SERVER}/${REPO}/actions/runs/${RUN_ID}"
-
-          # Aggregate critical and high counts across all images
-          TOTAL_CRITICAL=0
-          TOTAL_HIGH=0
-          RESULTS=""
-          for f in scan-results/*.txt; do
-            [[ -f "$f" ]] || continue
-            # First line: summary counts. Subsequent lines (when present):
-            # HIGH+ CVE/GHSA IDs for triage. Both flow into the Slack message.
-            HEADER=$(head -1 "$f")
-            BODY=$(cat "$f")
-            RESULTS="${RESULTS}\\n• ${BODY//$'\n'/\\n  }"
-            # Parse counts from the header line only so trailing ID lines
-            # never contaminate the totals.
-            C=$(echo "${HEADER}" | grep -oP '\d+(?= critical)' || echo 0)
-            H=$(echo "${HEADER}" | grep -oP '\d+(?= high)' || echo 0)
-            TOTAL_CRITICAL=$((TOTAL_CRITICAL + C))
-            TOTAL_HIGH=$((TOTAL_HIGH + H))
-          done
-
-          # Only notify when critical or high vulnerabilities are found
-          if [[ "${TOTAL_CRITICAL}" -eq 0 && "${TOTAL_HIGH}" -eq 0 ]]; then
-            echo "No critical or high vulnerabilities found, skipping Slack notification"
-            echo -e "Vulnerability Scan: ${TIMESTAMP} (${SHORT_SHA})${RESULTS}"
-            exit 0
-          fi
-
-          MESSAGE="Vulnerability Scan: ${TIMESTAMP} (${SHORT_SHA})${RESULTS}\\n<${RUN_URL}|View run>"
-
-          # Always echo the message so the run logs carry the findings,
-          # then post to Slack only when enabled for this trigger.
-          echo -e "${MESSAGE}"
-
-          if [[ "${POST_SLACK}" != "true" ]]; then
-            echo "Slack notification disabled for this run (POST_SLACK=${POST_SLACK}); skipping post"
-          elif [[ -n "${SLACK_SERVICE}" ]]; then
-            curl -sSf -X POST \
-              -H 'Content-type: application/json' \
-              --data "{\"text\":\"${MESSAGE}\"}" \
-              "https://hooks.slack.com/services/${SLACK_SERVICE}"
-          else
-            echo "SLACK_SERVICE not set, skipping notification"
-          fi
-
-  # =============================================================================
-  # Cleanup: Delete all scan-* images from GHCR (always runs)
-  # =============================================================================
-
-  cleanup:
-    name: Cleanup Scan Images
-    runs-on: ubuntu-24.04
-    needs: [notify]
-    if: always()
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Delete scan images
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-
-          # All image paths to clean up (org-level packages)
-          IMAGES=(
-            "nvidia/aicr"
-            "nvidia/aicrd"
-            "nvidia/aicr-validators/deployment"
-            "nvidia/aicr-validators/performance"
-            "nvidia/aicr-validators/conformance"
-            "nvidia/aicr-validators/aiperf-bench"
-            "nvidia/aicr-gate"
-          )
-
-          for IMAGE in "${IMAGES[@]}"; do
-            # URL-encode the package name (slashes become %2F)
-            PKG_NAME=$(echo "${IMAGE}" | sed 's|/|%2F|g')
-
-            echo "Cleaning ${IMAGE}..."
-
-            # List versions matching the scan tag
-            VERSIONS=$(gh api \
-              "orgs/NVIDIA/packages/container/${PKG_NAME}/versions?per_page=100" \
-              --jq ".[] | select(.metadata.container.tags | any(startswith(\"${SCAN_TAG}\"))) | .id" \
-              2>/dev/null || true)
-
-            for VID in ${VERSIONS}; do
-              echo "  Deleting version ${VID}"
-              gh api \
-                --method DELETE \
-                "orgs/NVIDIA/packages/container/${PKG_NAME}/versions/${VID}" \
-                2>/dev/null || true
+          set -uo pipefail
+          sudo dmesg -w | grep --line-buffered -iE 'oom|killed process|out of memory|no space' \
+            | sed -u 's/^/[dmesg] /' &
+          (
+            while :; do
+              read -r _ _ used _ _ _ avail < <(free -m | awk '/^Mem:/')
+              swap=$(free -m | awk '/^Swap:/{print $3"/"$2}')
+              disk=$(df -BG --output=avail / | tail -1 | tr -d ' ')
+              grss=$(ps -o rss= -C grype | awk '{s+=$1} END{printf "%d", s/1024}')
+              drss=$(ps -o rss= -C dockerd,containerd | awk '{s+=$1} END{printf "%d", s/1024}')
+              echo "[mon $(date -u +%T)] mem_used=${used}M avail=${avail}M swap=${swap}M disk_avail=${disk} grype_rss=${grss}M docker_rss=${drss}M"
+              sleep 15
             done
-          done
+          ) &
+          src="${IMAGE}"
+          [[ "${SOURCE}" == registry ]] && src="registry:${IMAGE}"
+          /usr/bin/time -v "${GRYPE}" -v -o json --file out.json --only-fixed \
+            --vex .openvex.json -c .grype.yaml "${src}"
+          echo "grype exit=$?"
+          jq '{matches: (.matches|length), highPlus: ([.matches[] | select(.vulnerability.severity=="High" or .vulnerability.severity=="Critical")] | length)}' out.json || true
+          df -h /
+          free -m
