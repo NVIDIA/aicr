@@ -49,11 +49,15 @@
 #                       on the runner (no actuator) instead of a cloud cluster.
 #                       Its lease is the single self-hosted GPU runner. Scope is
 #                       honestly H100 x1, single-GPU — whatever the runner has.
-#   reservation-id      the cloud capacity-reservation identifier; GCP uses
-#                       the fully-qualified resource path (matches the value
-#                       embedded in cluster-config-path verbatim); OPTIONAL —
+#   reservation-id      the cloud capacity-reservation identifier. GCP uses
+#                       the fully-qualified resource path. OPTIONAL, and
 #                       omitted for quota-backed capacity (azure), where
-#                       subscription quota, not a reservation, backs the nodes
+#                       subscription quota, not a reservation, backs the nodes.
+#                       It must equal every reservation target in
+#                       cluster-config-path, and a row without one must point
+#                       at a config with no target. The actuator places nodes
+#                       from the cluster-config, so change both together.
+#                       TestCommittedClusterConfigsMatchRegistry enforces it.
 #   accelerator         GPU accelerator family on the reservation
 #   gpu-count           GPUs per reserved node (forward-looking metadata)
 #   cluster-config-path the github.com/mchmarny/cluster Cluster config the
