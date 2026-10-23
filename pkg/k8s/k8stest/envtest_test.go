@@ -54,6 +54,31 @@ func TestShellEnvAuthenticatesAsUser(t *testing.T) {
 	}
 }
 
+// TestShellEnvLinksRelativeKubectl covers a relative KUBEBUILDER_ASSETS, which
+// envtest keeps relative in KubectlPath.
+func TestShellEnvLinksRelativeKubectl(t *testing.T) {
+	env, cfg := Start(t)
+	abs, err := filepath.Abs(env.ControlPlane.KubectlPath)
+	if err != nil {
+		t.Fatalf("absolute kubectl path: %v", err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	rel, err := filepath.Rel(wd, abs)
+	if err != nil {
+		t.Fatalf("relative kubectl path: %v", err)
+	}
+	env.ControlPlane.KubectlPath = rel
+
+	shell := ShellEnv(t, env, cfg, envtest.User{Name: "relative"})
+	link := filepath.Join(filepath.Dir(shellValue(t, shell, "KUBECONFIG")), "bin", "kubectl")
+	if _, err = os.Stat(link); err != nil {
+		t.Errorf("kubectl link does not resolve: %v", err)
+	}
+}
+
 func TestStartPackageServesAPI(t *testing.T) {
 	cfg, stop := StartPackage()
 	if cfg == nil {

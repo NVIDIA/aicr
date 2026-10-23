@@ -91,6 +91,10 @@ func ShellEnv(t testing.TB, env *envtest.Environment, cfg *rest.Config, user env
 	if kubectl == "" {
 		t.Fatal("envtest did not resolve a kubectl binary")
 	}
+	kubectl, err = filepath.Abs(kubectl)
+	if err != nil {
+		t.Fatalf("resolve kubectl path: %v", err)
+	}
 	bin := filepath.Join(dir, "bin")
 	if err = os.Mkdir(bin, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
