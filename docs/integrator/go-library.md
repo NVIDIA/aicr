@@ -989,9 +989,9 @@ byte-identical YAML.
 `WrapResolved` turns a `*pkg/recipe.RecipeResult` — typically one taken from
 `RecipeResult.Resolved()` and then projected by the caller — back into a
 facade `*RecipeResult` that `SelectFromRecipeWithContext` accepts. The result
-is queryable only: it carries no owning `Client`, so `MakeBundle`,
-`BundleComponents`, and `ValidateState` reject it. Use `Client.AdoptRecipe`
-when you need a bundle-able result.
+is queryable only: it carries no owning `Client`, so every `Client` method that
+consumes a result (bundle, validate, preflight, and evidence) rejects it. Use
+`Client.AdoptRecipe` when you need a bundle-able result.
 
 `AdoptRecipe` canonicalizes the artifact `Kind` on the copy it returns: an
 absent, empty, or legacy `Recipe` kind is stamped as `RecipeResult`, and any
@@ -1115,7 +1115,10 @@ that field with a flag and `AICR_REQUIRE_EVIDENCE`, then
 `Client.RequirePublishedEvidence` when it reports true. That call rejects a
 Client whose recipe source is not `EmbeddedSource()`, including
 `FilesystemSource` from `--data` or `spec.recipe.data`, before it checks the
-leaf. A committed pointer attests the embedded catalog only. `ResolveRecipe`
+leaf. A committed pointer attests the embedded catalog only. It also rejects
+a result the Client does not own, such as one from another Client or from
+`WrapResolved`; a result from `LoadRecipe` or `AdoptRecipe` is owned and is
+checked as-is. `ResolveRecipe`
 itself does not apply the check, so bundle, mirror, and upgrade stay
 unaffected.
 

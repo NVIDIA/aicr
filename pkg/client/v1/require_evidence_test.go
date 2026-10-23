@@ -103,3 +103,47 @@ func TestRequirePublishedEvidenceRejectsExternalSource(t *testing.T) {
 		t.Fatalf("error = %v, want the external-source reason", err)
 	}
 }
+
+func TestRequirePublishedEvidenceRejectsForeignResult(t *testing.T) {
+	newClient := func(t *testing.T) *aicr.Client {
+		t.Helper()
+		client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
+		t.Cleanup(func() { _ = client.Close() })
+		return client
+	}
+	owner := newClient(t)
+	other := newClient(t)
+
+	criteria := aicr.Criteria{Service: "eks", Accelerator: "gb200", OS: "ubuntu", Intent: "training"}
+	result, err := owner.ResolveRecipeFromCriteria(t.Context(), &criteria)
+	if err != nil {
+		t.Fatalf("ResolveRecipeFromCriteria: %v", err)
+	}
+	unowned := aicr.WrapResolved(result.Resolved())
+
+	tests := []struct {
+		name     string
+		client   *aicr.Client
+		result   *aicr.RecipeResult
+		wantCode errors.ErrorCode
+	}{
+		{name: "owning client accepts its evidenced result", client: owner, result: result},
+		{name: "another client rejects the result", client: other, result: result, wantCode: errors.ErrCodeInvalidRequest},
+		{name: "a result built outside ResolveRecipe is rejected", client: owner, result: unowned, wantCode: errors.ErrCodeInvalidRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.client.RequirePublishedEvidence(t.Context(), tt.result)
+			if tt.wantCode == "" {
+				if err != nil {
+					t.Fatalf("RequirePublishedEvidence: %v", err)
+				}
+				return
+			}
+			errorstest.WantReportedCode(t, err, tt.wantCode)
+		})
+	}
+}
