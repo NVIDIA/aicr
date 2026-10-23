@@ -313,7 +313,7 @@ validation a crisp rule to enforce. The **ordering contract** is: install
 `core`, then `ops`; tear down in reverse, `ops` before `core`, because
 removing `core` first pulls the GPU runtime and its CRDs out from under
 `ops` releases. A namespace or CRD group that classes share, such as
-`monitoring`, is removed only by the last class that uses it. `core`
+`monitoring`, is removed only by the earliest class that uses it, which is torn down last. `core`
 alone is always a complete install. The rule and
 the contract are stated for N ordered classes, so a future class slots in
 without changing them.
@@ -730,9 +730,9 @@ edges remain auditable in the set-root `recipe.yaml`. The runtime owner
 control-plane owner (the partner or customer) deploys `ops/`. Teardown is
 the reverse, `ops/` before `core/`. Each class README states both, and
 names, from the set's class map, the namespaces and CRD groups its class
-shares with another class and says to keep them: here `ops/` leaves
+shares with an earlier class and says to keep them: here `ops/` leaves
 `monitoring` in place, because `core`'s `prometheus-operator-crds`
-release lives there too, and only the last class using a namespace
+release lives there too, and only the earliest class using a namespace
 deletes it.
 
 The v1 scripts do not preflight cross-class prerequisites; they assume
@@ -845,7 +845,8 @@ ever pursued.
   down in reverse. Each class `deploy.sh` and README carries that
   contract, the orphaned-CRD scan is scoped per class so an earlier
   class's CRDs are not reported as orphans, and each class README names
-  the shared namespaces and CRD groups its teardown must leave in place.
+  the namespaces and CRD groups it shares with an earlier class, which its
+  teardown must leave in place.
   Ordinary bundles' scripts are unchanged. `core` alone remains a
   complete install.
 - Classes separate ownership, not runtime coupling: a component may still
@@ -888,7 +889,7 @@ ever pursued.
    per-class group table keyed by the component that ships the CRDs
    while ordinary `deploy.sh` keeps today's table; and each class README
    stating the install and teardown order and naming, from the class
-   map, the namespaces and CRD groups shared with another class that its
+   map, the namespaces and CRD groups shared with an earlier class that its
    teardown must keep),
    set-level `recipe.yaml`/`split.yaml` (with `recipeDigest`)/
    `checksums.txt`/attestation, create-only staged atomic publication at
