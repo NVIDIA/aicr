@@ -28,7 +28,7 @@ module "agentgateway" {
   post_chart             = "${path.module}/003-agentgateway-post"
   post_chart_digest      = "sha256:7cbeb524d5da6e47e0857accdaef78588c6162b1e3ab2c5bfb068caf2ebac73a"
   readiness_chart        = "${path.module}/004-agentgateway-readiness"
-  readiness_chart_digest = "sha256:fc91fa5b08c215dea3e4cae21ed4e0ea69ddd3b08b8f043116b52fe6ffd9385f"
+  readiness_chart_digest = "sha256:bd37142d845120e3beffe6ec1512af52a76982e7142fef6debc84f37cada37cd"
 
   atomic  = var.atomic
   wait    = var.wait

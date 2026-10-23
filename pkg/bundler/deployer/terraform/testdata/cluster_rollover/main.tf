@@ -24,7 +24,7 @@ module "cert_manager" {
   ]
 
   readiness_chart        = "${path.module}/002-cert-manager-readiness"
-  readiness_chart_digest = "sha256:f5afa792b82ec6b7c784745411a3b9b79f74acf0bd96dcc2561e91a64063d5aa"
+  readiness_chart_digest = "sha256:72c0dc52610e983c59ac512614fb40fa55f85e755e063b207d2c7f0d2bb216d5"
 
   atomic          = var.atomic
   wait            = var.wait

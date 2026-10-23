@@ -155,11 +155,12 @@ func writeVendoredHelmFolder(
 	// do not declare a Namespace by recipe convention, so --create-namespace
 	// is safe.
 	installData := struct {
-		Name            string
-		Namespace       string
-		CreateNamespace bool
-		OwnsCRDs        bool
-	}{c.Name, c.Namespace, true, c.OwnsCRDs}
+		Name              string
+		Namespace         string
+		CreateNamespace   bool
+		OwnsCRDs          bool
+		ClusterValuesFile string
+	}{c.Name, c.Namespace, true, c.OwnsCRDs, ""}
 	if err = renderTemplateToFile(localHelmInstallTmpl, installData, folderDir, "install.sh", 0o755); err != nil {
 		return Folder{}, VendorRecord{}, err
 	}

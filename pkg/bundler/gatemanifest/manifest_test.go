@@ -306,6 +306,80 @@ func TestNewPlacement_RejectsInvalidScheduling(t *testing.T) {
 	}
 }
 
+// TestFromValues checks that each field with a path renders as a Helm action
+// on a YAML comment line, that the manifest still decodes as YAML, and that a
+// field without a path keeps the bundle placement.
+func TestFromValues(t *testing.T) {
+	bundle, err := NewPlacement(Scheduling{
+		NodeSelector: map[string]string{"role": "system"},
+		Tolerations:  []corev1.Toleration{{Key: "dedicated", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}},
+	})
+	if err != nil {
+		t.Fatalf("NewPlacement: %v", err)
+	}
+	const (
+		selectorComment   = "      # nodeSelector from operator.nodeSelector {{`{{- $gateSelector :="
+		tolerationComment = "      # tolerations from operator.tolerations {{`{{- $gateTolerations := list }}"
+		bundleSelector    = "      nodeSelector:\n        role: system\n"
+		bundleToleration  = "      tolerations:\n      - effect: NoSchedule\n        key: dedicated\n"
+	)
+	tests := []struct {
+		name     string
+		paths    ValuesPaths
+		want     []string
+		dontWant []string
+	}{
+		{"no paths keeps bundle placement", ValuesPaths{}, []string{bundleSelector, bundleToleration}, []string{".Values"}},
+		{"both from values", ValuesPaths{NodeSelector: "operator.nodeSelector", Tolerations: "operator.tolerations"},
+			[]string{selectorComment, tolerationComment, `{{- if .key }}`}, []string{bundleSelector, bundleToleration}},
+		{"selector only from values", ValuesPaths{NodeSelector: "operator.nodeSelector"},
+			[]string{selectorComment, bundleToleration}, []string{bundleSelector, tolerationComment}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := bundle.FromValues(tt.paths)
+			if err != nil {
+				t.Fatalf("FromValues: %v", err)
+			}
+			manifest, err := Render("gpu-operator", "img:tag", []byte(validReadinessTestYAML), config.DeployerHelm, p)
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			got := string(manifest)
+			for _, w := range tt.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("manifest missing %q:\n%s", w, got)
+				}
+			}
+			for _, w := range tt.dontWant {
+				if strings.Contains(got, w) {
+					t.Errorf("manifest must not contain %q:\n%s", w, got)
+				}
+			}
+			resolved := strings.ReplaceAll(got, "{{ .Release.Namespace }}", "gpu-operator")
+			for _, doc := range strings.Split(resolved, "\n---\n") {
+				var obj map[string]any
+				if err := yaml.Unmarshal([]byte(doc), &obj); err != nil {
+					t.Fatalf("manifest document is not YAML before Helm renders it: %v\n%s", err, doc)
+				}
+			}
+		})
+	}
+}
+
+func TestFromValues_RejectsUnsafePath(t *testing.T) {
+	for _, path := range []string{".", "a..b", "a.b.", "a b", "a`b", `a"b`, "a{{b}}", "a\nb"} {
+		t.Run(path, func(t *testing.T) {
+			for _, paths := range []ValuesPaths{{NodeSelector: path}, {Tolerations: path}} {
+				_, err := Placement{}.FromValues(paths)
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+					t.Fatalf("FromValues(%+v) error = %v, want ErrCodeInvalidRequest", paths, err)
+				}
+			}
+		})
+	}
+}
+
 // TestRender_NetworkOperator pins the component-specific mellanox.com rule
 // that componentClusterRoleRules injects only for Network Operator gates.
 func TestRender_NetworkOperator(t *testing.T) {

@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -64,7 +65,7 @@ func TestNVSentinelHealthEventsAnalyzerChartRender(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live chart-render integration test in short mode")
 	}
-	requireHelmForObservabilityRender(t)
+	helmtest.RequireBinary(t)
 
 	store, err := recipe.LoadMetadataStoreFor(context.Background(), nil)
 	if err != nil {

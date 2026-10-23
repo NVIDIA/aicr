@@ -37,5 +37,5 @@ fi
 
 {{ end }}helm upgrade --install ${FORCE_CONFLICTS_FLAG} {{ .Name | shq }} ./ \
   --namespace {{ .Namespace | shq }}{{ if .CreateNamespace }} --create-namespace{{ end }} \
-  -f values.yaml -f cluster-values.yaml \
+  -f values.yaml -f {{ with .ClusterValuesFile }}{{ . | shq }}{{ else }}cluster-values.yaml{{ end }} \
   ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${HELM_CONN[@]+"${HELM_CONN[@]}"} ${HELM_DEBUG_FLAG:-}
