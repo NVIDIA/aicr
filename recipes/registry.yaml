@@ -729,6 +729,13 @@ components:
       # in the function's doc.
       - function: CheckNVSentinelLogCollectorCoherent
         severity: error
+      # Mixed-severity policy, as CheckNVSentinelDatastorePrerequisites: a
+      # blocking error when the snapshot shows no default StorageClass for
+      # the file server's classless volume, or evidence it could not read,
+      # and no class is named; a non-blocking warning when the recipe carries
+      # no snapshot evidence or the cluster has more than one default.
+      - function: CheckNVSentinelFileServerStorageClass
+        severity: warning
 
   # NVSentinel's remediation datastore, added only by the nvsentinel-observe,
   # -quarantine and -remediation mixins. Bundled apart from NVSentinel's own

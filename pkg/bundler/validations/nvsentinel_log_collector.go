@@ -71,7 +71,7 @@ const (
 //     GPU Operator's driver container, which it looks up in the single
 //     namespace gpuOperatorNamespaces names, or from GKE's managed driver
 //     install, so a recipe whose node image carries the driver otherwise (AKS,
-//     OKE, Kind) fails every collection.
+//     OKE, Kind, EKS on Amazon Linux) fails every collection.
 //
 // The Job template renders logCollector.env after the variables it sets from
 // uploadURL and gpuOperatorNamespaces, so an env.UPLOAD_URL_BASE or
@@ -315,4 +315,63 @@ func logCollectorDynamicViolations(bundlerConfig *config.Config, componentName s
 			[]string{gpuOperatorDriverEnabledPath, gpuOperatorDriverInstallDirPath}, reason)...)
 	}
 	return msgs
+}
+
+// fileServerStorageClassPath names the file server's StorageClass; it is in
+// nvsentinel's storageClassPaths, so --storage-class reaches it.
+const fileServerStorageClassPath = "incluster-file-server.persistence.storageClassName"
+
+// fileServerClaim is the file server's classless report volume.
+var fileServerClaim = storageClassClaim{
+	path:        fileServerStorageClassPath,
+	overrideKey: "nv-sentinel",
+	volumes:     "the file server's volume",
+	pending: "the file server's volume, which names no StorageClass, would stay Pending, the file server " +
+		"would not start, and every bug report upload would fail",
+	purpose: "NVSentinel file server storage",
+}
+
+// CheckNVSentinelFileServerStorageClass applies the snapshot's default
+// StorageClass evidence to the in-cluster file server's report volume, the
+// rule CheckNVSentinelDatastorePrerequisites applies to the datastore's: a
+// blocking error when the snapshot found no default StorageClass or could not
+// tell, unless --storage-class or incluster-file-server.persistence.storageClassName
+// names one; a warning when the recipe carries no evidence or the cluster has
+// more than one default. A no-op unless the file server renders with
+// persistence on. It is registered apart from CheckNVSentinelLogCollectorCoherent
+// because its warnings must stay non-blocking, which that gate's severity
+// does not allow.
+func CheckNVSentinelFileServerStorageClass(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+	ref := recipeResult.GetComponentRef(componentName)
+	if ref == nil {
+		return nil, nil
+	}
+	keys := componentOverrideKeys(componentName, recipeResult.DataProvider())
+	if componentDisabled(ref, bundlerConfig, keys) {
+		return nil, nil
+	}
+	values, err := effectiveComponentValues(ctx, recipeResult, bundlerConfig, componentName, keys, fileServerClaim.purpose)
+	if err != nil {
+		return nil, []error{err}
+	}
+	if !nvsentinelSubchartRenders(values, "inclusterFileServer") {
+		return nil, nil
+	}
+	// The chart renders the claim only under persistence.enabled, which
+	// defaults to true.
+	if enabled, set := component.GetValueByPath(values, "incluster-file-server.persistence.enabled"); set && !helmTruthy(enabled) {
+		return nil, nil
+	}
+	warning, findingErr := storageClassFinding(ctx, componentName, recipeResult, bundlerConfig, keys, fileServerClaim)
+	var warnings []string
+	if warning != "" {
+		warnings = append(warnings, warning)
+	}
+	if findingErr != nil {
+		return warnings, []error{findingErr}
+	}
+	return warnings, nil
 }

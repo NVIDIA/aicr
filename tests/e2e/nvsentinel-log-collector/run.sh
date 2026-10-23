@@ -250,9 +250,13 @@ render_nvsentinel_bundle() (
 # Kind on shared CI runners are throttled into ImagePullBackOff. The images come
 # from the bundle's own render, so they track the chart pin. Not kind load:
 # with Docker's containerd image store it exports an index whose other
-# platforms have no layers, which its --all-platforms import rejects.
+# platforms have no layers, which its --all-platforms import rejects. docker
+# save does not record a digest-pinned image's name, so each image is saved
+# under a temporary local tag, which classic (manifest.json) and OCI
+# (index.json) archives both carry and the import keeps, then named as the
+# kubelet requests it and checked through CRI.
 preload_file_server_images() {
-  local images image attempt arch
+  local images image attempt arch staged index=0 repo tag digest
   arch=$(docker version -f '{{.Server.Arch}}') || err "could not read the Docker host architecture"
   images=$(render_nvsentinel_bundle |
     yq -N "select(.kind == \"Deployment\" and .metadata.name == \"${FILE_SERVER}\") |
@@ -265,17 +269,54 @@ preload_file_server_images() {
       ((attempt < 3)) || err "could not pull ${image}"
       sleep $((attempt * 10))
     done
-    docker save "${image}" |
-      docker exec -i "${NODE}" ctr -n k8s.io images import --platform "linux/${arch}" --digests \
+    index=$((index + 1))
+    # Unique per run, so concurrent local runs cannot remove each other's tag.
+    staged="localhost/aicr-e2e-preload:${CLUSTER_NAME}-$$-${index}"
+    docker tag "${image}" "${staged}" || err "could not tag ${image} for import"
+    docker save "${staged}" |
+      docker exec -i "${NODE}" ctr -n k8s.io images import --platform "linux/${arch}" \
         --snapshotter=overlayfs - >/dev/null || err "could not import ${image} into ${NODE}"
+    docker rmi "${staged}" >/dev/null 2>&1 || true
+    digest=""
+    [[ "${image}" == *@* ]] && digest="${image#*@}"
+    repo=$(normalize_repo "${image%@*}")
+    tag="${repo##*/}"
+    if [[ "${tag}" == *:* ]]; then
+      tag="${tag##*:}"
+      repo="${repo%:*}"
+    else
+      tag=latest
+    fi
+    docker exec "${NODE}" ctr -n k8s.io images tag --force "${staged}" "${repo}:${tag}" >/dev/null ||
+      err "could not name ${image} in ${NODE}"
+    if [[ -n "${digest}" ]]; then
+      docker exec "${NODE}" ctr -n k8s.io images tag --force "${staged}" "${repo}@${digest}" >/dev/null ||
+        err "could not name ${image} in ${NODE}"
+    fi
+    docker exec "${NODE}" ctr -n k8s.io images rm "${staged}" >/dev/null 2>&1 || true
+    docker exec "${NODE}" crictl inspecti "${image}" >/dev/null 2>&1 ||
+      err "${image} was imported into ${NODE} but the kubelet cannot see it under that name"
   done
   msg "Preloaded the file server's images: $(tr '\n' ' ' <<<"${images}")"
 }
 
+# normalize_repo prefixes a Docker Hub reference with docker.io/ (and
+# library/ for an official image), as the kubelet resolves it.
+normalize_repo() {
+  local ref="$1" first="${1%%/*}"
+  if [[ "${ref}" != */* ]]; then
+    ref="docker.io/library/${ref}"
+  elif [[ "${first}" != *.* && "${first}" != *:* && "${first}" != localhost ]]; then
+    ref="docker.io/${ref}"
+  fi
+  echo "${ref}"
+}
+
 install_bundle() {
-  msg "Installing cert-manager, prometheus-operator-crds, the Percona datastore and nvsentinel from the bundle..."
+  msg "Installing prometheus-operator-crds, cert-manager, the Percona datastore and nvsentinel from the bundle..."
   local dir d deadline remaining
-  for dir in "${CERT_MANAGER_DIR}" "${CRDS_DIR}"; do
+  # CRDs first: cert-manager's chart renders a ServiceMonitor.
+  for dir in "${CRDS_DIR}" "${CERT_MANAGER_DIR}"; do
     install_component "${dir}"
   done
   deadline=$((SECONDS + CERT_MANAGER_WAIT_SECONDS))
@@ -387,16 +428,20 @@ collector_jobs() {
   local json
   json=$(kc -n nvsentinel get jobs -l app=log-collector -o json) || return 1
   jq -c '[.items[] | {name: .metadata.name, node: .spec.template.spec.nodeName,
-    succeeded: (.status.succeeded // 0), failed: (.status.failed // 0), completion: .status.completionTime}]' <<<"${json}"
+    succeeded: (.status.succeeded // 0), failed: (.status.failed // 0), completion: .status.completionTime,
+    complete: any(.status.conditions[]?; .type == "Complete" and .status == "True"),
+    done: any(.status.conditions[]?; (.type == "Complete" or .type == "Failed") and .status == "True")}]' <<<"${json}"
 }
 
-# wait_for_job_done polls until a collector Job has succeeded or failed, then
-# prints that Job.
+# wait_for_job_done polls until a collector Job is Complete or Failed, then
+# prints that Job. It waits on the Job's condition rather than its pod counts:
+# a failed first pod is retried (backoffLimit defaults to 6), and
+# completionTime is set only once the Job is Complete.
 wait_for_job_done() {
   local elapsed=0 jobs
   while [[ "${elapsed}" -lt "$((PIPELINE_WAIT_SECONDS + COLLECTOR_WAIT_SECONDS))" ]]; do
-    if jobs=$(collector_jobs) && jq -e 'any(.[]; .succeeded > 0 or .failed > 0)' <<<"${jobs}" >/dev/null; then
-      jq -c 'first(.[] | select(.succeeded > 0 or .failed > 0))' <<<"${jobs}"
+    if jobs=$(collector_jobs) && jq -e 'any(.[]; .done)' <<<"${jobs}" >/dev/null; then
+      jq -c 'first(.[] | select(.done))' <<<"${jobs}"
       return 0
     fi
     sleep 5
@@ -470,7 +515,7 @@ test_fault_is_collected_before_remediation() {
   else
     fail "collector Job ran on the faulty node" "got ${job}"
   fi
-  if jq -e '.succeeded > 0' <<<"${job}" >/dev/null; then
+  if jq -e '.complete' <<<"${job}" >/dev/null; then
     pass "collector Job completed"
   else
     fail "collector Job completed" "it failed: ${job}; logs: $(kc -n nvsentinel logs "job/$(jq -r .name <<<"${job}")" --tail=30 2>&1 || true)"

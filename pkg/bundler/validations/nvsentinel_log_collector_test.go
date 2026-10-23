@@ -497,3 +497,103 @@ func TestCheckNVSentinelLogCollectorCoherentNilRecipe(t *testing.T) {
 		t.Errorf("no nvsentinel: got %v %v, want nothing", w, e)
 	}
 }
+
+// TestCheckNVSentinelFileServerStorageClass covers the file server's
+// StorageClass rule, the datastore's applied to the report volume: a remedy
+// that names a class for the datastore alone must not pass it.
+func TestCheckNVSentinelFileServerStorageClass(t *testing.T) {
+	t.Parallel()
+
+	fileServer := func(extra map[string]any) map[string]any {
+		fs := map[string]any{"persistence": map[string]any{"size": "50Gi"}}
+		for k, v := range extra {
+			fs[k] = v
+		}
+		return map[string]any{
+			"global":                map[string]any{"inclusterFileServer": map[string]any{"enabled": true}},
+			"incluster-file-server": fs,
+		}
+	}
+	result := func(storage string, overrides map[string]any) *recipe.RecipeResult {
+		r := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{
+			{Name: nvsentinelComponent, Overrides: overrides},
+			{Name: "nvsentinel-mongodb", Overrides: map[string]any{"replsets": map[string]any{"rs0": map[string]any{
+				"volumeSpec": map[string]any{"pvc": map[string]any{"storageClassName": "fast"}}}}}},
+		}}
+		r.Metadata.DefaultStorageClassState = storage
+		return r
+	}
+	set := func(path, value string) *config.Config {
+		return config.NewConfig(config.WithValueOverrides(map[string]map[string]string{"nv-sentinel": {path: value}}))
+	}
+	storageThenTyped := func(path string, value any) *config.Config {
+		return config.NewConfig(config.WithStorageClass("fast"), config.WithValueOverridesTypedPaths(
+			[]config.TypedComponentPath{{Component: "nv-sentinel", Path: path, Value: value}}))
+	}
+	absent := recipe.DefaultStorageClassStateAbsent
+
+	tests := []struct {
+		name         string
+		rr           *recipe.RecipeResult
+		cfg          *config.Config
+		wantWarnings []string
+		wantErrs     []string
+	}{
+		{name: "nil recipe"},
+		{name: "file server off", rr: result(absent, map[string]any{
+			"global": map[string]any{"inclusterFileServer": map[string]any{"enabled": false}}})},
+		{name: "persistence off renders no claim", rr: result(absent, fileServer(map[string]any{
+			"persistence": map[string]any{"enabled": false}}))},
+		{name: "nvsentinel disabled", rr: result(absent, fileServer(nil)), cfg: set("enabled", "false")},
+		{name: "default StorageClass present", rr: result(recipe.DefaultStorageClassStatePresent, fileServer(nil))},
+		{name: "no evidence warns", rr: result("", fileServer(nil)),
+			wantWarnings: []string{"no metadata.defaultStorageClassState"}},
+		{name: "several defaults warn", rr: result(recipe.DefaultStorageClassStateMultiple, fileServer(nil)),
+			wantWarnings: []string{"--set nv-sentinel:" + fileServerStorageClassPath}},
+		{name: "no default, datastore class named only → blocked", rr: result(absent, fileServer(nil)),
+			wantErrs: []string{"every bug report upload would fail"}},
+		{name: "inconclusive evidence → blocked", rr: result(recipe.DefaultStorageClassStateUnknown, fileServer(nil)),
+			wantErrs: []string{"the file server's volume cannot be shown to bind"}},
+		{name: "no default, --storage-class names one", rr: result(absent, fileServer(nil)),
+			cfg: config.NewConfig(config.WithStorageClass("fast"))},
+		{name: "no default, --set names one", rr: result(absent, fileServer(nil)),
+			cfg: set(fileServerStorageClassPath, "fast")},
+		{name: "no default, values name one", rr: result(absent, fileServer(map[string]any{
+			"persistence": map[string]any{"storageClassName": "fast"}}))},
+		{name: "no default, --storage-class overridden by an empty --set → blocked", rr: result(absent, fileServer(nil)),
+			cfg: config.NewConfig(config.WithStorageClass("fast"), config.WithValueOverrides(map[string]map[string]string{
+				"nv-sentinel": {fileServerStorageClassPath: ""}})),
+			wantErrs: []string{"found no default StorageClass"}},
+		// --set-json runs after --storage-class is injected, so it can still
+		// clear the class.
+		{name: "--storage-class then --set-json empty class → blocked", rr: result(absent, fileServer(nil)),
+			cfg: storageThenTyped(fileServerStorageClassPath, ""), wantErrs: []string{"found no default StorageClass"}},
+		{name: "--storage-class then --set-json null class → blocked", rr: result(absent, fileServer(nil)),
+			cfg: storageThenTyped(fileServerStorageClassPath, nil), wantErrs: []string{"found no default StorageClass"}},
+		{name: "--storage-class then --set-json parent with an empty class → blocked", rr: result(absent, fileServer(nil)),
+			cfg:      storageThenTyped("incluster-file-server.persistence", map[string]any{"storageClassName": ""}),
+			wantErrs: []string{"found no default StorageClass"}},
+		{name: "--storage-class then --set-json null parent → blocked", rr: result(absent, fileServer(nil)),
+			cfg: storageThenTyped("incluster-file-server.persistence", nil), wantErrs: []string{"found no default StorageClass"}},
+		{name: "--storage-class then --set-json parent without the key merges → passes", rr: result(absent, fileServer(nil)),
+			cfg: storageThenTyped("incluster-file-server.persistence", map[string]any{"size": "10Gi"})},
+		{name: "unrecognized evidence → blocked", rr: result("bogus", fileServer(nil)),
+			wantErrs: []string{`defaultStorageClassState="bogus"`}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := tt.cfg
+			if cfg == nil {
+				cfg = config.NewConfig()
+			}
+			warnings, errs := CheckNVSentinelFileServerStorageClass(t.Context(), nvsentinelComponent, tt.rr, cfg, nil)
+			assertDatastoreFindings(t, "warning", warnings, tt.wantWarnings)
+			errStrings := make([]string, 0, len(errs))
+			for _, err := range errs {
+				errStrings = append(errStrings, err.Error())
+			}
+			assertDatastoreFindings(t, "error", errStrings, tt.wantErrs)
+		})
+	}
+}

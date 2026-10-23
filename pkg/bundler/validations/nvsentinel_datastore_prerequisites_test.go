@@ -46,6 +46,10 @@ func TestCheckNVSentinelDatastorePrerequisites(t *testing.T) {
 		}))
 	}
 	present, absentPercona := recipe.DefaultStorageClassStatePresent, recipe.PerconaOperatorStateAbsent
+	storageThenTyped := func(path string, value any) *config.Config {
+		return config.NewConfig(config.WithStorageClass("fast"), config.WithValueOverridesTypedPaths(
+			[]config.TypedComponentPath{{Component: "nvsentinelmongodb", Path: path, Value: value}}))
+	}
 
 	tests := []struct {
 		name         string
@@ -100,6 +104,17 @@ func TestCheckNVSentinelDatastorePrerequisites(t *testing.T) {
 			})),
 			wantErrs: []string{"found no default StorageClass"},
 		},
+		// --set-json runs after --storage-class is injected, so it can still
+		// clear the class.
+		{name: "--storage-class then --set-json empty class", rr: result(recipe.DefaultStorageClassStateAbsent, absentPercona, nil),
+			cfg: storageThenTyped(nvsentinelMongoDBStorageClassPath, ""), wantErrs: []string{"found no default StorageClass"}},
+		{name: "--storage-class then --set-json null class", rr: result(recipe.DefaultStorageClassStateAbsent, absentPercona, nil),
+			cfg: storageThenTyped(nvsentinelMongoDBStorageClassPath, nil), wantErrs: []string{"found no default StorageClass"}},
+		{name: "--storage-class then --set-json parent with an empty class", rr: result(recipe.DefaultStorageClassStateAbsent, absentPercona, nil),
+			cfg:      storageThenTyped("replsets.rs0.volumeSpec.pvc", map[string]any{"storageClassName": ""}),
+			wantErrs: []string{"found no default StorageClass"}},
+		{name: "--storage-class then --set-json parent without the key merges", rr: result(recipe.DefaultStorageClassStateAbsent, absentPercona, nil),
+			cfg: storageThenTyped("replsets.rs0.volumeSpec.pvc", map[string]any{"accessModes": []any{"ReadWriteOnce"}})},
 		{
 			name:     "empty recipe StorageClass does not waive",
 			rr:       result(recipe.DefaultStorageClassStateAbsent, absentPercona, emptyClass),
