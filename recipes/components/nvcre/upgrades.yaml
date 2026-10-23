@@ -180,3 +180,128 @@ transitions:
       - https://github.com/NVIDIA/cluster-readiness-engine/pull/412
       - https://github.com/NVIDIA/cluster-readiness-engine/pull/413
       - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#enabling-nvcre
+  - from: ">=0.6.0 <0.8.2"
+    to: "0.8.2"
+    verdict: manual
+    verifiedBy: >-
+      CRD schema diff (helm show crds oci://ghcr.io/nvidia/cluster-readiness-engine
+      --version v0.6.0 vs --version v0.8.2): 826 lines added, 32 removed, and
+      every removed line is description prose. All seven CRDs are present in
+      both charts with a single v1alpha1 version, served and storage, and no
+      conversion webhook, so no stored object needs conversion. A walk of the
+      schema property paths shows 83 added and none removed. The two new
+      x-kubernetes-validations rules (blocks 63 to 65, rules 87 to 89) both
+      constrain the new Certification env field, which may not use valueFrom
+      or name a PET_* or OMPI_MCA_* variable that Kubeflow Trainer owns; the
+      lines using oldSelf stay at 46, so no transition rule is added or
+      removed. Chart values diff (helm show values, same two versions) is
+      purely additive: manager.namespaceAccessTimeout,
+      manager.workloadCreationDeadline, and an rbac block with scope and
+      runNamespaces; no key AICR sets in recipes/components/nvcre/values.yaml
+      changed meaning. The rendered chart gains a nvcre-run-role ClusterRole
+      and a nvcre-run-rolebinding ClusterRoleBinding (24 to 25 ClusterRoles, 2
+      to 3 ClusterRoleBindings); the four LogProfiles keep their names. A
+      second diff from v0.7.0, a release AICR never shipped, shows 55 schema
+      paths added and none removed. Supply chain at the new pin: chart
+      sha256:75458557b0ff2610c7eea01e0b315ae0355cc6b2baa816756a2dba0c0c2387a4
+      and controller index
+      sha256:c5de16ddb95bd923c6b04d04d7ff9754a7d7b83d18fa400baa33e7ae72fc593d
+      each carry a cosign signature and SLSA v1.0 provenance verifying against
+      the release workflow identity at refs/tags/v0.8.2. The workload closure
+      re-derived at v0.8.2 resolves to the same three images at the same
+      digests and the same Megatron-LM fetch as v0.6.0. The v0.8.x release
+      notes carry no changelog, so the behavior changes in the summary come
+      from the merged pull requests in references. No upgrade of a live v0.6.0
+      install was run; NVCRE is on no overlay or mixin, so no UAT lane or KWOK
+      run exercises this boundary.
+    summary: >-
+      Nothing breaks at admission, but the new fields only take effect once the
+      CRDs are updated. An apiserver still serving the v0.6.0 schema prunes
+      every new field without an error, so a Certification that sets
+      startupStallTimeoutSeconds, rdmaDeviceAccess, dcgmHost, or env behaves as
+      if it had not. Because NVCRE is an ownsCRDs component, a deployer that
+      leaves the v0.6.0 CRDs in place finishes the upgrade deployed, Ready, and
+      not actually upgraded. Two behavior changes live in the controller
+      rather than the schema. A Job whose workload create the API server keeps
+      rejecting now fails with WorkloadCreationError after
+      manager.workloadCreationDeadline, ten minutes by default, where earlier
+      releases retried for as long as the Job existed unless timeoutPerJob was
+      set. And the controller's writes to namespaced resources moved from
+      nvcre-manager-role into nvcre-run-role, bound cluster-wide while
+      rbac.scope is cluster, the default in v0.8.x. Upstream makes namespaced
+      the default in the next minor release, after which a Workflow in a
+      namespace with no RoleBinding waits with NamespacePermissionsMissing, so
+      pin rbac.scope explicitly in your own values as AICR's does. NCCL
+      bandwidth measured on v0.6.0 or v0.7.0 is not a baseline for v0.8.2,
+      because upstream stopped forcing NVLS in the NCCL environment.
+    reversible: true
+    reversibleNotes: >-
+      The new fields are optional, so downgrading the controller to v0.6.0
+      leaves the v0.8.2 CRDs in place harmlessly; values already written to
+      them are ignored by the older controller.
+    affectedResources:
+      - group: nvcre.nvidia.com
+        kinds:
+          - Certification
+          - Job
+          - Workflow
+          - WorkloadRun
+          - BandwidthMeasurement
+          - LogProfile
+    stepsByDeployer:
+      - deployers: [helmfile, terraform, fleet]
+        steps:
+          - id: apply-new-crds
+            description: >-
+              Before upgrading the release, apply the v0.8.2 CRDs directly
+              using the CRD-apply command under "Upgrade, uninstall, and
+              troubleshooting" in docs/user/component-catalog.md, with
+              CHART=oci://ghcr.io/nvidia/cluster-readiness-engine,
+              VERSION=v0.8.2 and MANAGER=helm under helmfile,
+              MANAGER=terraform-provider-helm under terraform, and under
+              fleet the manager that section's managed-fields check reports
+              for the installed CRDs, against every downstream cluster the
+              bundle targets.
+            reason: >-
+              helmfile, terraform and fleet have no automated CRD-update path
+              for ownsCRDs components (Fleet's Helm upgrade skips crds/).
+              Skipping this leaves the v0.6.0 CRDs in place, so the controller
+              advances while the new fields are pruned on write and the
+              upgrade is reported successful.
+          - id: verify-new-fields-landed
+            description: >-
+              Confirm the new schema is present: kubectl get crd
+              certifications.nvcre.nvidia.com -o yaml, and expect dcgmHost in
+              the output. Its absence means an older schema is still
+              installed.
+            reason: >-
+              Neither release status nor controller health distinguishes the
+              two states, and the version and storage flags are identical in
+              every release, so the presence of a v0.8.2-only field is the
+              only signal.
+      - steps:
+          - id: verify-new-fields-landed
+            description: >-
+              After the deployer's own CRD update (flux's spec.upgrade.crds
+              CreateReplace, helm's generated apply-crds.sh, or Argo CD
+              applying the chart's crds/ as ordinary manifests on sync),
+              confirm the new schema landed: kubectl get crd
+              certifications.nvcre.nvidia.com -o yaml, and expect dcgmHost in
+              the output.
+            reason: >-
+              Every deployer here has a CRD path, but each is conditional on
+              configuration that a recipe can switch off, and the failure is
+              silent when it does: the release reports deployed and the
+              controller reports Ready while the apiserver prunes the new
+              fields.
+    references:
+      - https://github.com/NVIDIA/cluster-readiness-engine/releases/tag/v0.8.2
+      - https://github.com/NVIDIA/cluster-readiness-engine/releases/tag/v0.8.0
+      - https://github.com/NVIDIA/cluster-readiness-engine/releases/tag/v0.7.0
+      - https://github.com/NVIDIA/cluster-readiness-engine/pull/487
+      - https://github.com/NVIDIA/cluster-readiness-engine/pull/489
+      - https://github.com/NVIDIA/cluster-readiness-engine/pull/490
+      - https://github.com/NVIDIA/cluster-readiness-engine/pull/502
+      - https://github.com/NVIDIA/cluster-readiness-engine/pull/503
+      - https://github.com/NVIDIA/cluster-readiness-engine/pull/515
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#enabling-nvcre
