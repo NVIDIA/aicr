@@ -19,10 +19,12 @@ import (
 	"sort"
 	"strings"
 
-	"k8s.io/apimachinery/pkg/api/validate/content"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/NVIDIA/aicr/pkg/collector/topology"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/measurement"
@@ -30,25 +32,22 @@ import (
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
-// GPUNodesLabelConstraintName is the node-set constraint form from issue
-// #1755 (declared in the GKE overlays' readiness constraints; ADR-015's
-// GKE gpuStack profile consumes it — #1761). Unlike scalar
-// constraint paths, it does not name a reading the snapshot carries
-// directly; the evaluator synthesizes the GPU-node set from the snapshot's
-// NodeTopology.label readings and quantifies the value predicate over it.
+// GPUNodesLabelConstraintName names the node-set constraint form, which the
+// gke-cos overlay's ADR-015 gpuStack profiles declare. Unlike a scalar
+// constraint path, it names no reading in the snapshot. Its value is a
+// Kubernetes label selector, such as "key=value", "!key", or
+// "key in (a,b),other", and it passes when every GPU node matches it. GPU
+// nodes are identified from NodeTopology.label readings by a label that
+// depends on the service and on whether Evaluate or EvaluateReadiness is
+// called.
 //
-// Value grammar (distinct from the scalar operator grammar):
-//
-//	key=value  every GPU node carries label key with exactly this value
-//	           (an empty value — "key=" — is valid; Kubernetes permits it)
-//	!key       no GPU node carries label key (any value)
-//
-// Both directions fail closed: on truncated node lists (snapshots taken
-// with --max-nodes-per-entry), on an empty GPU-node universe, and on a
-// value that parses as neither form.
+// Evaluation fails closed on:
+//   - an empty selector
+//   - a truncated node list, from a snapshot taken with --max-nodes-per-entry
+//   - an empty GPU-node universe
 //
 // The literal lives in pkg/measurement so the constraint-path catalog can
-// accept it as a virtual path (issue #1783) without importing this package.
+// accept it as a virtual path without importing this package.
 const GPUNodesLabelConstraintName = measurement.PathGPUNodesLabel
 
 // gpuNodeUniverseLabels defines the pre-Operator, pre-NFD GPU-node universe
@@ -61,11 +60,25 @@ const GPUNodesLabelConstraintName = measurement.PathGPUNodesLabel
 // current consumer of NodeTopology.gpu-nodes.label — AKS routes through the
 // --aks-gpu-pools snapshot projection, OKE's disablement path is not yet
 // settled (NKX-9804), and EKS has no consumer — so their entries are added by
-// the profile PR that first needs one. Missing entries fail closed at
-// evaluation with a service-named diagnostic (issue #2359), never a silent
-// vacuous pass.
-var gpuNodeUniverseLabels = map[recipe.CriteriaServiceType]string{
-	recipe.CriteriaServiceGKE: "cloud.google.com/gke-accelerator",
+// the profile PR that first needs one. A service with no entry fails closed
+// at generation with an error naming the service.
+var gpuNodeUniverseLabels = map[recipe.CriteriaServiceType]*labels.Requirement{
+	recipe.CriteriaServiceGKE: mustRequirement("cloud.google.com/gke-accelerator", selection.Exists),
+}
+
+// readinessGPUNodeUniverse is the readiness universe for a service that is
+// missing from gpuNodeUniverseLabels or unresolvable from the snapshot. A GPU
+// node the GPU Operator has not labeled yet is outside it.
+var readinessGPUNodeUniverse = mustRequirement(defaults.GPUPresentNodeLabelKey, selection.Equals, "true")
+
+// mustRequirement is labels.NewRequirement for package-level literals. It
+// panics if the key, operator, or values are invalid.
+func mustRequirement(key string, op selection.Operator, vals ...string) *labels.Requirement {
+	r, err := labels.NewRequirement(key, op, vals)
+	if err != nil {
+		panic(err)
+	}
+	return r
 }
 
 // maxReportedNodes caps the node names named in a failure message.
@@ -92,146 +105,151 @@ type labelNodeSet struct {
 // evaluateGPUNodesLabel evaluates the node-set constraint form against the
 // snapshot's NodeTopology.label readings. See GPUNodesLabelConstraintName
 // for the grammar and fail-closed semantics.
-func evaluateGPUNodesLabel(value string, snap *snapshotter.Snapshot) EvalResult {
-	key, want, negated, err := parseGPUNodesLabelValue(value)
+func evaluateGPUNodesLabel(value string, snap *snapshotter.Snapshot, phase evalPhase) EvalResult {
+	selector, err := parseGPUNodesLabelValue(value)
 	if err != nil {
 		return EvalResult{Error: err}
 	}
 
-	labels := findLabelSubtype(snap)
-	if labels == nil {
+	labelSubtype := findLabelSubtype(snap)
+	if labelSubtype == nil {
 		return EvalResult{Error: errors.New(errors.ErrCodeNotFound,
 			"snapshot carries no NodeTopology label readings — re-capture with a current aicr build and verify the snapshot agent can list nodes")}
 	}
 
-	// The universe label is service-specific: the property that makes it usable
-	// pre-deployment (present at pool creation, before the GPU Operator or NFD
-	// run) is a per-provider fact. Resolve service from the same source the
-	// recipe layer uses — k8s.node.provider via fingerprint — and fail closed
-	// with a service-named diagnostic when the mapping is missing, rather than
-	// masquerading as an empty snapshot (issue #2359).
-	//
 	// Ordering is load-bearing: the resolution runs AFTER findLabelSubtype so
 	// snapshots that carry no label subtype at all keep their existing
 	// ErrCodeNotFound diagnostic (nil snapshot, no NodeTopology, no label
 	// subtype) — the ordering pkg/recipe's fail-closed handling relies on.
-	universeLabel, err := gpuNodeUniverseLabelFor(snap)
+	universeReq, err := gpuNodeUniverseFor(snap, phase)
 	if err != nil {
 		return EvalResult{Error: err}
 	}
 
-	universeEntries, err := decodeLabelEntries(labels, universeLabel)
+	universeEntries, err := decodeLabelEntries(labelSubtype, universeReq.Key())
 	if err != nil {
 		return EvalResult{Error: err}
 	}
 	universe := make(map[string]bool)
 	for _, e := range universeEntries {
+		if !universeReq.Matches(labels.Set{universeReq.Key(): e.value}) {
+			continue
+		}
 		for _, n := range e.nodes {
 			universe[n] = true
 		}
 	}
 	if len(universe) == 0 {
-		// An empty universe must fail closed, never satisfy either predicate
-		// vacuously (#1755 acceptance requirement 2).
-		return EvalResult{Error: errors.NewWithContext(errors.ErrCodeNotFound,
-			fmt.Sprintf("GPU-node universe is empty: snapshot has no %q label readings — "+
-				"the constraint cannot be evaluated on a cluster without identifiable GPU nodes", universeLabel),
-			map[string]any{ctxConstraint: GPUNodesLabelConstraintName})}
+		// Every selector passes vacuously on an empty universe.
+		msg := fmt.Sprintf("GPU-node universe is empty. No node in the snapshot carries %s, so the "+
+			"constraint cannot be evaluated on a cluster without identifiable GPU nodes", universeReq)
+		if universeReq == readinessGPUNodeUniverse {
+			msg += ". The GPU Operator sets this label once it is running, " +
+				"so capture the snapshot after the bundle is deployed"
+		}
+		return EvalResult{Error: errors.NewWithContext(errors.ErrCodeNotFound, msg,
+			map[string]any{ctxConstraint: GPUNodesLabelConstraintName, "universe": universeReq.String()})}
 	}
 
-	targetEntries, err := decodeLabelEntries(labels, key)
-	if err != nil {
-		return EvalResult{Error: err}
+	reqs, _ := selector.Requirements()
+	nodeLabels := make(map[string]labels.Set, len(universe))
+	for _, r := range reqs {
+		entries, err := decodeLabelEntries(labelSubtype, r.Key())
+		if err != nil {
+			return EvalResult{Error: err}
+		}
+		for _, e := range entries {
+			for _, n := range e.nodes {
+				if !universe[n] {
+					continue
+				}
+				if nodeLabels[n] == nil {
+					nodeLabels[n] = labels.Set{}
+				}
+				nodeLabels[n][r.Key()] = e.value
+			}
+		}
 	}
 
-	if negated {
-		return evaluateNoGPUNodeHasKey(key, universe, targetEntries)
+	var failing []string
+	for n := range universe {
+		if !selector.Matches(nodeLabels[n]) {
+			failing = append(failing, n)
+		}
 	}
-	return evaluateEveryGPUNodeHasValue(key, want, universe, targetEntries)
+	if len(failing) == 0 {
+		return EvalResult{
+			Passed: true,
+			Actual: fmt.Sprintf("all %d GPU node(s) match %s", len(universe), selector),
+		}
+	}
+	sort.Strings(failing)
+	return EvalResult{
+		Actual: fmt.Sprintf("%d of %d GPU node(s) do not match %s: %s",
+			len(failing), len(universe), selector, summarizeNodes(failing)),
+	}
 }
 
-// gpuNodeUniverseLabelFor resolves the GPU-node universe label for the
-// snapshot's service. The service comes from fingerprint.FromMeasurements
-// (sourced from k8s.node.provider), so the constraint form and the recipe
-// layer see the same service identity.
+// gpuNodeUniverseFor returns the GPU-node universe for snap's service in
+// phase:
 //
-// Two fail-closed shapes, both distinct from the "empty universe" diagnostic
-// the caller emits when the label is defined but no node carries it:
-//
-//   - Service unknown from the snapshot: the snapshot lacks a resolvable
-//     k8s.node.provider. The constraint form needs a known service to pick
-//     its universe label, so this is fatal for evaluation. Points the
-//     operator at the provider capture, not at the constraint.
-//   - Service known but no mapping declared: this constraint form is not
-//     supported on that service today. Names the service and points at the
-//     table so a future profile adding an entry has a single site to edit.
-func gpuNodeUniverseLabelFor(snap *snapshotter.Snapshot) (string, error) {
+//   - A service in gpuNodeUniverseLabels gets its entry in every phase.
+//   - Any other service gets readinessGPUNodeUniverse at readiness.
+//   - At generation, any other service gets an ErrCodeNotFound error naming
+//     the service, or the missing k8s.node.provider when snap resolves none.
+func gpuNodeUniverseFor(snap *snapshotter.Snapshot, phase evalPhase) (*labels.Requirement, error) {
+	// The recipe layer resolves the service the same way, so both agree on it.
 	fp := fingerprint.FromMeasurements(snap.Measurements)
 	service := recipe.CriteriaServiceType(fp.Service.Value)
+	if u, ok := gpuNodeUniverseLabels[service]; ok {
+		return u, nil
+	}
+	if phase == phaseReadiness {
+		return readinessGPUNodeUniverse, nil
+	}
 	if service == "" {
-		return "", errors.NewWithContext(errors.ErrCodeNotFound,
-			"snapshot has no resolvable k8s.node.provider — the NodeTopology.gpu-nodes.label "+
+		return nil, errors.NewWithContext(errors.ErrCodeNotFound,
+			"snapshot has no resolvable k8s.node.provider. The NodeTopology.gpu-nodes.label "+
 				"constraint form needs a known service to select its pre-deployment GPU-node "+
-				"universe label; re-capture the snapshot with a current aicr build",
+				"universe label at recipe generation. Re-capture the snapshot with a current aicr build, "+
+				"or declare the constraint under validation.readiness.constraints",
 			map[string]any{ctxConstraint: GPUNodesLabelConstraintName})
 	}
-	label, ok := gpuNodeUniverseLabels[service]
-	if !ok {
-		return "", errors.NewWithContext(errors.ErrCodeNotFound,
-			fmt.Sprintf("no pre-deployment GPU-node universe label is declared for service %q — "+
-				"the NodeTopology.gpu-nodes.label constraint form is not supported on this service; "+
-				"add an entry to gpuNodeUniverseLabels in pkg/constraints/gpu_nodes.go (issue #2359)",
-				service),
-			map[string]any{ctxConstraint: GPUNodesLabelConstraintName, "service": string(service)})
-	}
-	return label, nil
+	return nil, errors.NewWithContext(errors.ErrCodeNotFound,
+		fmt.Sprintf("no pre-deployment GPU-node universe label is declared for service %q, so the "+
+			"NodeTopology.gpu-nodes.label constraint form cannot be evaluated at recipe generation. "+
+			"Declare it under validation.readiness.constraints, where GPU nodes are identified by %s, "+
+			"or add an entry to gpuNodeUniverseLabels in pkg/constraints/gpu_nodes.go",
+			service, readinessGPUNodeUniverse),
+		map[string]any{ctxConstraint: GPUNodesLabelConstraintName, "service": string(service)})
 }
 
-// ValidateGPUNodesLabelValue checks a node-set constraint value against the
-// grammar documented on GPUNodesLabelConstraintName ("key=value" or "!key"),
-// snapshot-free. It exists for hermetic structural checks (the recipe-health
-// constraints_wellformed dimension) that must mirror Evaluate's dispatch:
-// the node-set form is deliberately NOT valid under the scalar
-// ParseConstraintExpression grammar, so grading it with the scalar parser
-// would fail every recipe carrying a well-formed node-set constraint.
+// ValidateGPUNodesLabelValue returns an ErrCodeInvalidRequest error if raw is
+// not a valid node-set constraint value. It needs no snapshot. Use it instead
+// of ParseConstraintExpression, whose scalar grammar rejects every node-set
+// value.
 func ValidateGPUNodesLabelValue(raw string) error {
-	_, _, _, err := parseGPUNodesLabelValue(raw) //nolint:dogsled // validation-only wrapper; the parsed fields are the evaluator's concern
+	_, err := parseGPUNodesLabelValue(raw)
 	return err
 }
 
-// parseGPUNodesLabelValue parses the node-set value grammar: "key=value"
-// (positive) or "!key" (negated). Anything else is rejected — in particular
-// the scalar operator grammar (">= x", "!= x") is not valid here. Keys and
-// values are validated with Kubernetes's own label validators: a key no
-// node can legally carry (e.g. a double slash) would otherwise make the
-// negated predicate pass vacuously — the fail-open direction.
-func parseGPUNodesLabelValue(raw string) (key, want string, negated bool, err error) {
-	v := strings.TrimSpace(raw)
-	if after, ok := strings.CutPrefix(v, "!"); ok {
-		key = strings.TrimSpace(after)
-		if errs := content.IsLabelKey(key); len(errs) > 0 {
-			return "", "", false, errors.NewWithContext(errors.ErrCodeInvalidRequest,
-				"invalid node-set constraint value: negated form is \"!<label-key>\" with a valid label key and no value",
-				map[string]any{ctxValue: raw, "key_errors": strings.Join(errs, "; ")})
-		}
-		return key, "", true, nil
-	}
-	// "key=" (empty value) is deliberately valid: Kubernetes permits empty
-	// label values and the collector encodes them ("|<nodes>"; the
-	// disambiguated map key "<key>." cannot collide with a real label key,
-	// which may not end in a dot).
-	key, want, ok := strings.Cut(v, "=")
-	if !ok {
-		return "", "", false, errors.NewWithContext(errors.ErrCodeInvalidRequest,
-			"invalid node-set constraint value: expected \"<label-key>=<value>\" or \"!<label-key>\"",
+// parseGPUNodesLabelValue parses raw as a Kubernetes label selector. It
+// rejects an empty selector and any key or value that is not a valid label.
+func parseGPUNodesLabelValue(raw string) (labels.Selector, error) {
+	// labels.Parse validates keys, so a key no node can carry cannot make a
+	// negative requirement pass vacuously.
+	selector, err := labels.Parse(raw)
+	if err != nil {
+		return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+			"invalid node-set constraint value: expected a Kubernetes label selector", err,
 			map[string]any{ctxValue: raw})
 	}
-	if errs := append(content.IsLabelKey(key), content.IsLabelValue(want)...); len(errs) > 0 {
-		return "", "", false, errors.NewWithContext(errors.ErrCodeInvalidRequest,
-			"invalid node-set constraint value: label key or value is not valid",
-			map[string]any{ctxValue: raw, "errors": strings.Join(errs, "; ")})
+	if selector.Empty() {
+		return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			"invalid node-set constraint value: the label selector is empty and would match every node",
+			map[string]any{ctxValue: raw})
 	}
-	return key, want, false, nil
+	return selector, nil
 }
 
 // findLabelSubtype returns the NodeTopology label subtype, or nil when the
@@ -304,8 +322,7 @@ func decodeLabelEntriesFromItems(labels *measurement.Subtype, key string) ([]lab
 
 	// A node carries exactly one value of a given label key, so the entries
 	// must partition their nodes. Overlap means the snapshot records no real
-	// cluster, and accepting it lets one node satisfy key=a and key=b at once
-	// because evaluateEveryGPUNodeHasValue skips the non-matching entry.
+	// cluster, and the node would get whichever value was read last.
 	// Mirrors the folded encoding's guard in decodeLabelEntriesFromData.
 	//
 	// Compared on value, not mere reappearance: a node repeated under the same
@@ -478,67 +495,6 @@ func validNodeNames(nodes []string) bool {
 // malformed (ok=false).
 func cutLabelEncoding(raw string) (value, nodes string, ok bool) {
 	return strings.Cut(raw, "|")
-}
-
-// evaluateEveryGPUNodeHasValue passes when every node in the GPU universe
-// carries the target label with exactly the wanted value. A node carrying a
-// different value, or not carrying the label at all, fails.
-func evaluateEveryGPUNodeHasValue(key, want string, universe map[string]bool, entries []labelNodeSet) EvalResult {
-	matched := make(map[string]bool)
-	for _, e := range entries {
-		if e.value != want {
-			continue
-		}
-		for _, n := range e.nodes {
-			matched[n] = true
-		}
-	}
-
-	var missing []string
-	for n := range universe {
-		if !matched[n] {
-			missing = append(missing, n)
-		}
-	}
-	if len(missing) == 0 {
-		return EvalResult{
-			Passed: true,
-			Actual: fmt.Sprintf("all %d GPU node(s) carry %s=%s", len(universe), key, want),
-		}
-	}
-	sort.Strings(missing)
-	return EvalResult{
-		Actual: fmt.Sprintf("%d of %d GPU node(s) missing %s=%s: %s",
-			len(missing), len(universe), key, want, summarizeNodes(missing)),
-	}
-}
-
-// evaluateNoGPUNodeHasKey passes when no node in the GPU universe carries
-// the target label key with any value.
-func evaluateNoGPUNodeHasKey(key string, universe map[string]bool, entries []labelNodeSet) EvalResult {
-	offenders := make(map[string]bool)
-	for _, e := range entries {
-		for _, n := range e.nodes {
-			if universe[n] {
-				offenders[n] = true
-			}
-		}
-	}
-	if len(offenders) == 0 {
-		return EvalResult{
-			Passed: true,
-			Actual: fmt.Sprintf("none of %d GPU node(s) carry label %s", len(universe), key),
-		}
-	}
-	names := make([]string, 0, len(offenders))
-	for n := range offenders {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	return EvalResult{
-		Actual: fmt.Sprintf("%d of %d GPU node(s) carry label %s: %s",
-			len(names), len(universe), key, summarizeNodes(names)),
-	}
 }
 
 // summarizeNodes renders a sorted node list capped at maxReportedNodes.

@@ -45,4 +45,8 @@ const (
 	// DRAEvictionNodeLabelValue is the default value nodes must carry for the
 	// DRA kubelet plugin and Driver Manager eviction contract.
 	DRAEvictionNodeLabelValue = "true"
+
+	// GPUPresentNodeLabelKey is the node label the GPU Operator sets to "true"
+	// on every node where NFD detects an NVIDIA GPU.
+	GPUPresentNodeLabelKey = "nvidia.com/gpu.present"
 )

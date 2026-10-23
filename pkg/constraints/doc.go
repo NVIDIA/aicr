@@ -21,21 +21,23 @@
 // string match). The IsVersionComparison flag selects semver-aware
 // ordering via pkg/version; without it comparisons use lexical ordering.
 //
-// Two entry points are exposed:
+// Three entry points are exposed:
 //
 //   - Parse(expr) returns a ParsedConstraint that callers can evaluate
 //     against arbitrary values.
-//   - Evaluate(c, snap) walks the snapshot, extracts the named measurement
-//     reading, and reports a Result describing whether the constraint
-//     passed and why.
+//   - Evaluate(c, snap) reports whether c holds against snap at recipe
+//     generation, in an EvalResult that also says why.
+//   - EvaluateReadiness(c, snap) is Evaluate for the validate readiness
+//     pre-flight, which runs after deployment.
 //
 // One constraint name carries a non-scalar form: the node-set constraint
 // GPUNodesLabelConstraintName ("NodeTopology.gpu-nodes.label", issue #1755)
 // quantifies a label predicate over the snapshot's GPU-node set instead of
-// comparing a single reading. Its value grammar is "key=value" (every GPU
-// node carries the label) or "!key" (no GPU node carries the key); it is
-// dispatched by exact name before the scalar path and fails closed on
-// truncated node lists and on an empty GPU-node universe.
+// comparing a single reading. Its value is a Kubernetes label selector that
+// every GPU node must match. It fails closed on an empty selector, truncated
+// node lists, and an empty GPU-node universe. On a service with no
+// pre-deployment universe label, EvaluateReadiness identifies GPU nodes by
+// nvidia.com/gpu.present=true and Evaluate fails closed.
 //
 // Evaluation is deliberately side-effect free and never performs network
 // or cluster I/O; consumers (pkg/validator, pkg/recipe) supply the

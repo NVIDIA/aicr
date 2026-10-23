@@ -686,12 +686,20 @@ not a measurement type.
 `NodeTopology.gpu-nodes.label`
 ([#1755](https://github.com/NVIDIA/aicr/issues/1755)). No snapshot producer
 emits a `gpu-nodes` subtype; the evaluator synthesizes the GPU-node set from
-the snapshot's `NodeTopology.label` readings (nodes carrying
-`cloud.google.com/gke-accelerator`) and quantifies a label predicate over it.
-Its value grammar is also not the operator grammar:
+the snapshot's `NodeTopology.label` readings and quantifies a label predicate
+over it. On GKE, GPU nodes carry `cloud.google.com/gke-accelerator` from pool
+creation, so the form works at recipe generation and readiness. Elsewhere,
+including bare metal and `--data` services, it fails closed at generation and
+works only in `validation.readiness.constraints`, where GPU nodes are those
+the GPU Operator labels `nvidia.com/gpu.present=true`. Capture the readiness
+snapshot after the GPU Operator is running, because GPU nodes it has not
+labeled are not checked.
+Its value is not the operator grammar but a Kubernetes label selector, the
+syntax of `kubectl get nodes -l`, and every GPU node must match it.
 `<label-key>=<value>` asserts every GPU node carries the label with exactly
-that value, and `!<label-key>` asserts no GPU node carries the key. Both
-directions fail closed on a truncated node list (a snapshot captured with
+that value, `!<label-key>` asserts no GPU node carries the key, and forms such
+as `key!=value`, `key in (a,b)`, a bare `key`, and comma-joined requirements
+work the same way. Evaluation fails closed on a truncated node list (a snapshot captured with
 `--max-nodes-per-entry` whose cap actually truncated a participating
 reading), on an empty GPU-node universe, and on malformed or ambiguous
 label readings (an encoding collision between a disambiguated entry and a
