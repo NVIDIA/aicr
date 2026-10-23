@@ -28,7 +28,7 @@ import (
 )
 
 func TestComponentClass_Rank(t *testing.T) {
-	want := []ComponentClass{ComponentClassCore, ComponentClassOps, ComponentClassWorkload}
+	want := []ComponentClass{ComponentClassCore, ComponentClassOps}
 	if !slices.Equal(ComponentClasses, want) {
 		t.Fatalf("ComponentClasses = %v, want %v", ComponentClasses, want)
 	}
@@ -38,7 +38,7 @@ func TestComponentClass_Rank(t *testing.T) {
 			t.Errorf("%s.Rank() = (%d, %v), want (%d, true)", class, rank, ok, i)
 		}
 	}
-	for _, class := range []ComponentClass{"", "apps", "Core"} {
+	for _, class := range []ComponentClass{"", "apps", "workload", "Core"} {
 		if _, ok := class.Rank(); ok {
 			t.Errorf("%q.Rank() ok = true, want false", class)
 		}
@@ -54,7 +54,6 @@ func TestComponentConfig_GetClass(t *testing.T) {
 		{"unset defaults to core", "", ComponentClassCore},
 		{"core", ComponentClassCore, ComponentClassCore},
 		{"ops", ComponentClassOps, ComponentClassOps},
-		{"workload", ComponentClassWorkload, ComponentClassWorkload},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -80,7 +79,7 @@ func TestLoadComponentRegistry_Class(t *testing.T) {
 		{name: "absent", want: ComponentClassCore},
 		{name: "core", class: "core", want: ComponentClassCore},
 		{name: "ops", class: "ops", want: ComponentClassOps},
-		{name: "workload", class: "workload", want: ComponentClassWorkload},
+		{name: "withdrawn class", class: "workload", wantErr: true},
 		{name: "unknown", class: "apps", wantErr: true},
 		{name: "wrong case", class: "Ops", wantErr: true},
 	}
