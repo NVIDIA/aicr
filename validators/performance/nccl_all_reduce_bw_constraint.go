@@ -230,7 +230,7 @@ const variantDefaultLabel = "default"
 // accelerator: the RoCE NET template is shared across EKS RoCE nodes
 // (testdata/roce/{service}/...), not per-accelerator. Snapshot-based fabric
 // auto-detection (so this env knob becomes an override, not the selector) is
-// tracked in NVIDIA/aicr#1413.
+// not implemented yet.
 type ncclFabricType string
 
 const (
@@ -1474,7 +1474,7 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	// instead, so a testdata/roce/{service}/roce-claim.yaml never exists for it.
 	if customRuntime == "" && fabric == fabricRoCE && variant == variantNET {
 		// Claim one ConnectX RoCE device per GPU via DRA (NCCL maps GPU->NIC);
-		// the per-node device pool (e.g. 8 on p6e-gb300r) is >= GPUs/node. Set
+		// the per-node device pool is >= GPUs/node. Set
 		// here — keyed by fabric, not service — so adding a non-EKS RoCE service
 		// to roceNETSupportedServices still renders ${ROCE_DEVICE_COUNT}.
 		templateData["ROCE_DEVICE_COUNT"] = strconv.Itoa(config.GPUCountPerNode)
