@@ -95,8 +95,8 @@ whose fabric matches its hardware, or, for a private service whose fabric
 matches no embedded template, by
 [supplying its own benchmark runtime](#supplying-a-benchmark-runtime-for-a-private-service).
 
-On EKS, the `-net` check defaults to the AWS EFA fabric. On a ConnectX **RoCE** cluster
-(e.g. DGXC GB300 `p6e-gb300r`), set `AICR_NCCL_FABRIC=roce` in the `aicr
+On EKS, the `-net` check defaults to the AWS EFA fabric. On a ConnectX **RoCE** cluster,
+set `AICR_NCCL_FABRIC=roce` in the `aicr
 validate` environment to run the NET test over NCCL's built-in IB/verbs
 transport across `roce.networking.k8s.aws` DRA devices instead. The value is
 scoped to the `-net` check only; unset (or `efa`) leaves every existing recipe
@@ -104,8 +104,7 @@ on the EFA path unchanged, and any other value is rejected. The RoCE runtime
 image installs `openssh-server` at startup, so the GPU nodes need apt egress;
 on an air-gapped cluster the RoCE NET test cannot bootstrap. This env override is
 interim — snapshot-based fabric auto-detection (and removing the runtime
-package install once a CUDA-13 image ships sshd) is tracked in
-[NVIDIA/aicr#1413](https://github.com/NVIDIA/aicr/issues/1413).
+package install once a CUDA-13 image ships sshd) is planned.
 
 **Overriding the NCCL workload image with `AICR_NCCL_RUNTIME_IMAGE`.** Each
 embedded `nccl-all-reduce-bw` / `-net` / `-nvls` template pins a specific

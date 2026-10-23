@@ -22,7 +22,7 @@ overrides:
         trainJob:
           trainer:
             image: example.invalid/nccl:pinned-tag
-# --- AWS + GB300 (RoCE) ---
+# --- AWS + GB300 ---
 - when:
     platform:
       equals: aws

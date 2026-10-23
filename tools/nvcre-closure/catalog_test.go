@@ -78,7 +78,7 @@ func TestResolveEntryExcludesOtherPlatformPaths(t *testing.T) {
 			notWant: []string{"example.invalid/nccl:latest", "example.invalid/tcpxo:v2"},
 		},
 		{
-			name:    "gb300 takes the RoCE path and does reach the latest tag",
+			name:    "gb300 takes its own path and does reach the latest tag",
 			arch:    "gb300",
 			want:    []string{"example.invalid/base:v1", "example.invalid/nccl:latest"},
 			notWant: []string{"example.invalid/nccl:pinned-tag", "example.invalid/efa-sidecar:v4"},

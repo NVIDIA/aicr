@@ -236,7 +236,7 @@ ADR-019 analogue — k8s-aibom observes workloads, while NVCRE creates them.
   relocatable.** The catalog is `go:embed`-compiled into the manager, so its
   contents never appear in rendered chart output and AICR's mirror discovery —
   which extracts images from rendered YAML — cannot see them. Catalog entries
-  carry tag-only images, including a `:latest` pin in the AWS GB300 RoCE
+  carry tag-only images, including a `:latest` pin in one platform-specific
   runtime patch, and the training entry clones Megatron-LM at pod start. Every
   image, fetched source, and runtime download reachable from a supported
   `Certification` category and platform path must be discoverable, pinned by

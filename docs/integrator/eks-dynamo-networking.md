@@ -33,7 +33,7 @@ co-location; see that section. The Frontend↔Worker rules below apply only
 when Frontend and Worker sit in different security groups, described by
 role rather than by fixed node-group name:
 
-**Confirmed on a live Dynamo 1.4.1 EKS deployment (`aicr-gb300`, 2026-09-01)
+**Confirmed on a live Dynamo 1.4.1 EKS deployment (2026-09-01)
 and against upstream runtime source (`lib/runtime/src/pipeline/network/manager.rs`,
 `distributed.rs`).** The 1.4.2 chart pins the same `grove`/`kai-scheduler`
 dependency versions as 1.4.1, so this is not expected to change in 1.4.2.
