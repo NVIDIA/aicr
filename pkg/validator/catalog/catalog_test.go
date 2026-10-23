@@ -1252,28 +1252,6 @@ func TestEmbeddedCatalog_InferenceGatewayEntryExists(t *testing.T) {
 	t.Fatalf("no embedded catalog entry named %q (AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY forwarding would silently no-op)", v1.InferenceGatewayCheckName)
 }
 
-// TestEmbeddedCatalog_NCCLAllReduceBWNetEntryExists locks the embedded catalog
-// entry name to v1.NCCLAllReduceBWNetCheckName, which scopes AICR_NCCL_FABRIC
-// forwarding (see buildEnv in pkg/validator/v1). Without this, renaming the
-// "nccl-all-reduce-bw-net" catalog entry would silently disable RoCE-fabric
-// forwarding — the in-Job validator would never see the env and default to EFA
-// — with no other test failing.
-func TestEmbeddedCatalog_NCCLAllReduceBWNetEntryExists(t *testing.T) {
-	cat, err := LoadWithDataProvider(context.Background(), nil, "v0.0.0-next", "")
-	if err != nil {
-		t.Fatalf("Load failed: %v", err)
-	}
-	for _, v := range cat.Validators {
-		if v.Name == v1.NCCLAllReduceBWNetCheckName {
-			if v.Phase != "performance" {
-				t.Errorf("%q phase = %q, want performance", v1.NCCLAllReduceBWNetCheckName, v.Phase)
-			}
-			return
-		}
-	}
-	t.Fatalf("no embedded catalog entry named %q (AICR_NCCL_FABRIC forwarding would silently no-op)", v1.NCCLAllReduceBWNetCheckName)
-}
-
 // TestEmbeddedCatalog_NCCLEntriesExist locks the embedded catalog entry names
 // for all three NCCL all-reduce checks (default, NET, NVLS) to the
 // v1.NCCLAllReduceBW*CheckName constants that scope AICR_NCCL_RUNTIME_IMAGE

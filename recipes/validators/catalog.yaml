@@ -64,7 +64,8 @@ validators:
   - name: check-nvidia-smi
     phase: deployment
     description: >-
-      Verify nvidia-smi on schedulable GPU nodes; enforce
+      Verify nvidia-smi on schedulable GPU nodes that are not busy (busy
+      and cordoned nodes are skipped per node); enforce
       Deployment.gpu-driver.version when set (unmeasurable floor blocks)
     image: ghcr.io/nvidia/aicr-validators/deployment:latest
     timeout: 10m
@@ -305,7 +306,7 @@ validators:
     env: []
   - name: nccl-all-reduce-bw-net
     phase: performance
-    description: "Verify NCCL All Reduce Bus Bandwidth on the NET transport (EFA on EKS; ConnectX RoCE via AICR_NCCL_FABRIC=roce)"
+    description: "Verify NCCL All Reduce Bus Bandwidth on the NET transport (EFA on EKS)"
     image: ghcr.io/nvidia/aicr-validators/performance:latest
     timeout: 30m
     args: ["nccl-all-reduce-bw-net"]

@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -486,6 +487,7 @@ func (g *Generator) generateRootREADME(ctx context.Context, components []Compone
 		BundlerVersion:   g.Version,
 		Components:       components,
 		ReleasesReversed: reverseReleases(folders),
+		ReadinessGates:   slices.ContainsFunc(folders, localformat.Folder.IsReadiness),
 		Criteria:         criteriaLines,
 		Constraints:      g.RecipeResult.Constraints,
 		UpgradeNotice:    g.UpgradeNotice,
@@ -534,6 +536,7 @@ type readmeTemplateData struct {
 	BundlerVersion   string
 	Components       []ComponentData
 	ReleasesReversed []releaseRef
+	ReadinessGates   bool
 	Criteria         []string
 	Constraints      []recipe.Constraint
 	UpgradeNotice    string

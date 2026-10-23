@@ -47,7 +47,7 @@ module "gpu_operator" {
   ]
 
   readiness_chart        = "${path.module}/003-gpu-operator-readiness"
-  readiness_chart_digest = "sha256:5d35975b156c99e44e91e2b507c8810eff262b7c7cd24e926d32aeb85aa5df3f"
+  readiness_chart_digest = "sha256:fbc41f1f6d59aa48535cf8336a50141ae0dde4c988d134f219aa1f0489bfd330"
 
   atomic  = var.atomic
   wait    = var.wait

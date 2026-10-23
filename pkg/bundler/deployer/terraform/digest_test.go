@@ -89,3 +89,33 @@ func TestChartDigests(t *testing.T) {
 		t.Errorf("a changed template left the digest unchanged: %s", got[base.Dir])
 	}
 }
+
+// TestChartDigests_ReadinessValues checks that a readiness folder's values.yaml
+// moves its digest and its cluster-values.yaml does not.
+func TestChartDigests_ReadinessValues(t *testing.T) {
+	root := t.TempDir()
+	gate := func(dir, values, clusterValues string) localformat.Folder {
+		f := writeFolder(t, root, dir, map[string]string{
+			"Chart.yaml":          "apiVersion: v2\nname: x-readiness\nversion: 1.0.0\n",
+			"templates/gate.yaml": "kind: Job\n",
+			"values.yaml":         values,
+			"cluster-values.yaml": clusterValues,
+		})
+		f.Name, f.Parent = "x-readiness", "x"
+		return f
+	}
+	base := gate("002-x-readiness", "a: 1\n", "")
+	moved := gate("003-x-readiness", "a: 2\n", "")
+	cluster := gate("004-x-readiness", "a: 1\n", "b: 1\n")
+
+	got, err := chartDigests(root, []localformat.Folder{base, moved, cluster})
+	if err != nil {
+		t.Fatalf("chartDigests: %v", err)
+	}
+	if got[base.Dir] == got[moved.Dir] {
+		t.Error("a changed readiness values.yaml left the digest unchanged")
+	}
+	if got[base.Dir] != got[cluster.Dir] {
+		t.Error("a readiness cluster-values.yaml moved the digest")
+	}
+}

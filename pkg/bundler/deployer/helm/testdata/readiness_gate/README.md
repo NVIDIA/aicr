@@ -69,6 +69,10 @@ vim NNN-<component-name>/values.yaml
 vim NNN-<component-name>/cluster-values.yaml
 ```
 
+A `NNN-<component-name>-readiness` folder has no dynamic values of its own.
+Its `install.sh` layers the component folder's `cluster-values.yaml`, so a
+value filled there also places the readiness gate.
+
 ## Upgrade
 
 Re-run the per-component install.sh to upgrade an already-installed release:

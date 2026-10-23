@@ -24,7 +24,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/validators"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -37,6 +36,8 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
+
+	"github.com/NVIDIA/aicr/validators"
 )
 
 // ncclGVRListKinds maps every GVR applyNCCLResources touches to a fake list
@@ -52,76 +53,6 @@ var ncclGVRListKinds = map[schema.GroupVersionResource]string{
 func newFakeDynamicClient() dynamic.Interface {
 	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
 		runtime.NewScheme(), ncclGVRListKinds)
-}
-
-// roceClaimCount walks the RoCE ResourceClaimTemplate to the templated device
-// count (spec.spec.devices.requests[0].exactly.count). Fails the test on any
-// shape mismatch so a future template restructure is caught here.
-func roceClaimCount(t *testing.T, claim *unstructured.Unstructured) int64 {
-	t.Helper()
-	requests, found, err := unstructured.NestedSlice(claim.Object, "spec", "spec", "devices", "requests")
-	if err != nil || !found || len(requests) == 0 {
-		t.Fatalf("claim has no devices.requests (found=%v err=%v)", found, err)
-	}
-	req0, ok := requests[0].(map[string]any)
-	if !ok {
-		t.Fatalf("requests[0] is %T, want map", requests[0])
-	}
-	exactly, ok := req0["exactly"].(map[string]any)
-	if !ok {
-		t.Fatalf("requests[0].exactly is %T, want map", req0["exactly"])
-	}
-	count, ok := exactly["count"].(int64)
-	if !ok {
-		t.Fatalf("requests[0].exactly.count is %T, want int64", exactly["count"])
-	}
-	return count
-}
-
-// TestNCCLFabricEnvNameLocked pins the validator-pod (reading) end of the fabric
-// env name. The orchestrator (forwarding) end in pkg/validator/v1 defines the
-// same literal independently; a fat-finger in either redeclaration would silently
-// no-op RoCE forwarding (the pod would never see the value and default to EFA).
-// Both ends pin to this canonical string so a typo fails its own package's test.
-func TestNCCLFabricEnvNameLocked(t *testing.T) {
-	if ncclFabricEnv != "AICR_NCCL_FABRIC" {
-		t.Errorf("ncclFabricEnv = %q, want AICR_NCCL_FABRIC (keep in sync with pkg/validator/v1)", ncclFabricEnv)
-	}
-}
-
-// TestCreateOrUpdateFromTemplate_RoCEClaimIdempotent is the regression guard for
-// the create-or-update fix: applying the RoCE ResourceClaimTemplate twice (as a
-// reused, persistent validation namespace would) must not fail with
-// AlreadyExists on the second apply, and the second apply must reflect the new
-// templated device count rather than erroring out.
-func TestCreateOrUpdateFromTemplate_RoCEClaimIdempotent(t *testing.T) {
-	const ns = "aicr-validation"
-	claimPath := filepath.Join("testdata", "roce", "eks", "roce-claim.yaml")
-
-	fakeClient := newFakeDynamicClient()
-	ctx := &validators.Context{Ctx: context.Background(), DynamicClient: fakeClient}
-
-	// First apply: claim does not exist → plain create.
-	if err := createOrUpdateFromTemplate(ctx, resourceClaimTemplateGVR, ns, claimPath,
-		map[string]string{"NAMESPACE": ns, "ROCE_DEVICE_COUNT": "8"}, nil); err != nil {
-		t.Fatalf("first apply (create) failed: %v", err)
-	}
-
-	// Second apply with a different count: claim already exists → must
-	// create-or-update (Get + Update), NOT fail with AlreadyExists.
-	if err := createOrUpdateFromTemplate(ctx, resourceClaimTemplateGVR, ns, claimPath,
-		map[string]string{"NAMESPACE": ns, "ROCE_DEVICE_COUNT": "4"}, nil); err != nil {
-		t.Fatalf("second apply (update) failed — create-or-update regressed to plain create: %v", err)
-	}
-
-	got, err := fakeClient.Resource(resourceClaimTemplateGVR).Namespace(ns).
-		Get(context.Background(), ncclRoceClaimName, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("claim not found after idempotent re-apply: %v", err)
-	}
-	if c := roceClaimCount(t, got); c != 4 {
-		t.Errorf("device count = %d after second apply, want 4 (update did not take effect)", c)
-	}
 }
 
 // testNamespaceUID is the owning UID used across cleanupNCCLResources tests
@@ -160,7 +91,7 @@ func TestCleanupNCCLResources_ToleratesMissing(t *testing.T) {
 
 // TestCleanupNCCLResources_DeletesNamespace verifies the happy path. The
 // per-run namespace this run created is deleted, cascading away everything
-// created in it (TrainJob, TrainingRuntime, ComputeDomain, RoCE claim) via
+// created in it (TrainJob, TrainingRuntime, ComputeDomain) via
 // ordinary Kubernetes namespace garbage collection, with no per-resource
 // tracking required since nothing else ever shares this namespace.
 func TestCleanupNCCLResources_DeletesNamespace(t *testing.T) {
@@ -377,5 +308,37 @@ func TestWaitForNamespaceGone_TimesOutWhenNeverDeleted(t *testing.T) {
 	}
 	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeTimeout {
 		t.Errorf("got %v, want an ErrCodeTimeout-wrapped wait failure", err)
+	}
+}
+
+// TestCreateOrUpdateFromTemplate_Idempotent covers the AlreadyExists branch:
+// a re-apply must Get + Update the existing object, not fail.
+func TestCreateOrUpdateFromTemplate_Idempotent(t *testing.T) {
+	const ns = "aicr-validation"
+	const name = "test-claim"
+	claimPath := filepath.Join("testdata", "inference", "resource-claim-template.yaml")
+	data := map[string]string{"CLAIM_API_VERSION": "v1", "CLAIM_TEMPLATE_NAME": name, "NAMESPACE": ns}
+
+	fakeClient := newFakeDynamicClient()
+	ctx := &validators.Context{Ctx: context.Background(), DynamicClient: fakeClient}
+
+	if err := createOrUpdateFromTemplate(ctx, resourceClaimTemplateGVR, ns, claimPath, data, nil); err != nil {
+		t.Fatalf("first apply (create) failed: %v", err)
+	}
+	relabel := func(u *unstructured.Unstructured) error {
+		u.SetLabels(map[string]string{"apply": "second"})
+		return nil
+	}
+	if err := createOrUpdateFromTemplate(ctx, resourceClaimTemplateGVR, ns, claimPath, data, relabel); err != nil {
+		t.Fatalf("second apply (update) failed: %v", err)
+	}
+
+	got, err := fakeClient.Resource(resourceClaimTemplateGVR).Namespace(ns).
+		Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("object not found after re-apply: %v", err)
+	}
+	if got.GetLabels()["apply"] != "second" {
+		t.Errorf("labels = %v after second apply, want apply=second (update did not take effect)", got.GetLabels())
 	}
 }

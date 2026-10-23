@@ -27,6 +27,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -41,7 +42,7 @@ func TestNVSentinelCRDExclusionMatchesChart(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live chart-pull integration test in short mode")
 	}
-	requireHelmForObservabilityRender(t)
+	helmtest.RequireBinary(t)
 
 	registry, err := recipe.GetComponentRegistry()
 	if err != nil {

@@ -47,7 +47,7 @@ module "kai_scheduler" {
   ]
 
   readiness_chart        = "${path.module}/003-kai-scheduler-readiness"
-  readiness_chart_digest = "sha256:7d0cc35c6ee0f829e4dce887e5fb7daa56d16d7b62a56dada5b940f274d847fe"
+  readiness_chart_digest = "sha256:32965bf53531f851e26d1a4e5672b3f3fd249ff4dd76f0654ea89a9cee0a67da"
 
   # Asynchronous: helm --wait times out on this component's custom-resource
   # readiness even though its pods start. Ordering still holds; readiness does not.

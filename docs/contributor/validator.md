@@ -459,12 +459,12 @@ fails its key's shape (an IP under `nodesTotal`, `305.44` under
 
 | Value shape | Keys |
 |-------------|------|
-| non-negative integer count | `nodesValidated`, `nodesTotal`, `workerNodes`, `gpusInvolved`, `draReady`, `draDesired`, `nodewrightComplete`, `nodewrightExpected`, `namespacesActive`, `namespacesExpected`, `gpusBenchmarked`, `gpusPerNode` |
+| non-negative integer count | `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped`, `workerNodes`, `gpusInvolved`, `draReady`, `draDesired`, `nodewrightComplete`, `nodewrightExpected`, `namespacesActive`, `namespacesExpected`, `gpusBenchmarked`, `gpusPerNode` |
 | non-negative decimal, at most one fractional digit | `achievedGbps`, `thresholdGbps`, `tolerancePct`, `throughputTokPerSec`, `ttftP99Ms`, `throughputThreshold`, `ttftThresholdMs`, `scaledThreshold` |
 | signed decimal (`+1.8`, `-12.3`) | `passMargin` (percent above or below `thresholdGbps`) |
 | `true` or `false` | `nodeLocal`, `versionSatisfied` |
 | `v` plus one to three numeric parts, optional `-alpha`, `-beta`, or `-rc` suffix (`v25.3.0-rc.1`) | `detectedVersion` |
-| closed set | `skipReason` (below), `runtimeSource` (`delivered-artifact`, `recipe-supplied-runtime`, `cluster-capability`), `transport` (`default`, `net`, `nvls`), `fabric` (`efa`, `roce`), `configuredPolicy` (every GPU allocation policy), `resolvedMode` (`device-plugin-extended-resource`, `dra-resource-claim`) |
+| closed set | `skipReason` (below), `runtimeSource` (`delivered-artifact`, `recipe-supplied-runtime`, `cluster-capability`), `transport` (`default`, `net`, `nvls`), `fabric` (`efa`), `configuredPolicy` (every GPU allocation policy), `resolvedMode` (`device-plugin-extended-resource`, `dra-resource-claim`) |
 
 Codes are closed sets rather than a shape regex, because a kebab-case regex
 would still pass an identifier like `customer-prod-cluster`. The `skipReason`
@@ -489,23 +489,23 @@ page are the contract.
 | Check | Keys |
 |-------|------|
 | `nccl-all-reduce-bw*` | `runtimeSource`, `transport`, `workerNodes`, `gpusInvolved`, `fabric`, `achievedGbps`, `thresholdGbps`, `tolerancePct`, `passMargin` |
-| `check-nvidia-smi` | `nodesValidated`, `nodesTotal` |
 | `gke-gpu-nic-topology` | `nodesValidated`, `nodesTotal` |
-| `expected-resources` | `namespacesActive`, `namespacesExpected`, `draReady`, `draDesired`, `nodewrightComplete`, `nodewrightExpected`, and the RDMA gate's `nodesValidated`, `nodesTotal` |
+| `expected-resources` | `namespacesActive`, `namespacesExpected`, `draReady`, `draDesired`, `nodewrightComplete`, `nodewrightExpected`, and the RDMA gate's `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped` |
 | `inference-perf` | `throughputTokPerSec`, `ttftP99Ms`, `throughputThreshold`, `scaledThreshold`, `ttftThresholdMs`, `gpusBenchmarked`, `gpusPerNode` |
 | `secure-accelerator-access`, `inference-perf` | `configuredPolicy`, `resolvedMode`, `nodeLocal` |
 | `dra-support` | `configuredPolicy` |
 | `gpu-operator-version` | `detectedVersion`, `versionSatisfied` |
+| `check-nvidia-smi` | `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped` |
 | any check, on an in-pod skip | `skipReason` |
 
 - NCCL publishes `transport`, `workerNodes`, and `gpusInvolved` before the
   benchmark runs, so a failed run still records its scope. `fabric` appears
-  only on `nccl-all-reduce-bw-net`, when `AICR_NCCL_FABRIC` selected the
-  baked-in EKS template. `tolerancePct` is the slack below `thresholdGbps`
-  that still passes.
-- `check-nvidia-smi` publishes `nodesValidated` and `nodesTotal` only after
-  per-node verification runs, on pass or fail. An exit before that (no GPU
-  nodes, all cordoned, or busy) publishes neither.
+  only on `nccl-all-reduce-bw-net`, when it runs the baked-in EKS template.
+  `tolerancePct` is the slack below `thresholdGbps` that still passes.
+- `check-nvidia-smi` publishes all four counts on every exit once the GPU
+  node list succeeds: no GPU nodes (all `0`), all cordoned, no free node,
+  after verification, and when the deadline stops it early. Nodes it never
+  reached are in no count, so the counts can sum to less than `nodesTotal`.
 - `gke-gpu-nic-topology` publishes `nodesValidated` and `nodesTotal` on every
   exit once the node list succeeds, including an empty list and a
   `no-verifiable-nodes` skip. A failed node list publishes neither.
@@ -658,7 +658,6 @@ be set from the catalog or a `--data` overlay:
 | `HF_TOKEN` | `inference-perf` | Hugging Face token for model downloads; see [`inference-perf`](#inference-perf-model-concurrency-and-weights-cache). |
 | `AICR_INFERENCE_PERF_NO_CLEANUP` | `inference-perf` | When true (`strconv.ParseBool`), leaves the per-run namespace in place for inspection; forwarded as `1`. |
 | `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY` | `inference-gateway` | When truthy, the check fails if the gateway's `LoadBalancer` Service is open to `0.0.0.0/0` — its `spec.loadBalancerSourceRanges` is empty or includes an any-source CIDR (`0.0.0.0/0` or `::/0`). Default (unset): the open exposure is recorded and warned but the check still passes. |
-| `AICR_NCCL_FABRIC` | `nccl-all-reduce-bw-net` | NET fabric selector: `efa` (default) or `roce`. |
 | `AICR_NCCL_RUNTIME_IMAGE` | `nccl-all-reduce-bw`, `nccl-all-reduce-bw-net`, `nccl-all-reduce-bw-nvls` | Overrides the NCCL launcher/worker image baked into the per-platform TrainingRuntime templates; a malformed reference fails closed in the pod. |
 
 **RBAC.** The engine creates a per-run ServiceAccount and
@@ -908,20 +907,21 @@ tagged with its cordon state, and:
    past it. A future check with a different tradeoff should say so
    explicitly rather than assume cordons are unconditionally
    unschedulable.
-2. Report cordoned nodes explicitly in the check's stdout evidence
-   (`<node>: skipped (cordoned)`), never omit them from the node count.
+2. Report cordoned nodes explicitly in the check's stdout evidence,
+   never omit them from the node count. `check-nvidia-smi` prints one
+   line per node: `<node>: PASSED`, `<node>: FAILED (<reason>)`, or
+   `<node>: SKIPPED (<cause>)`.
 3. Print a coverage line (`RESULT: nodesValidated: <validated>/<total>`)
    on every exit path (skip, failure, and success), not only the
    success path, so a pass *or* a failure on reduced scope is visible.
+   `check-nvidia-smi` appends the breakdown:
+   `(passed <n>, failed <n>, skipped <n>: busy <n>, cordoned <n>)`,
+   with `busy-probe error <n>` between `busy` and `cordoned` when the
+   busy-probe errored on any node.
    `<validated>` is the count actually confirmed working, not the
-   schedulable count: it is `0` on the all-cordoned and busy-skip
-   paths (nothing was attempted yet) and the successful-node count on
-   the failure path (a partial pass is not conflated with a full one).
-   Exception: when the recipe declares `Deployment.gpu-driver.version`,
-   those same all-cordoned and busy paths (and the no-GPU-nodes path)
-   fail closed instead of Skip — a declared host-driver floor that
-   cannot be measured must not PASS (#1995). Skip remains only when
-   the floor constraint is absent.
+   schedulable count: it is `0` on the paths that verify nothing and
+   the successful-node count on the failure path (a partial pass is not
+   conflated with a full one).
    The `RESULT:` prefix is `pkg/validator/validator.go`'s
    `resultSummaryPrefix` convention: the validator runtime echoes the
    trailing text of any such stdout line into live CLI output via
@@ -937,24 +937,57 @@ tagged with its cordon state, and:
    through `validators.EmitExtra` (#1951) — see **Structured coverage
    survives redaction** below.
 
-`expected-resources`' RDMA fabric probe follows this pattern too. It validates
-only the schedulable RDMA-capable nodes, lists each cordoned one as
-`<node>: skipped (cordoned)`, and still counts it in `nodesTotal`. The probe
-re-runs on every poll but prints its enumeration and `RESULT:` line once, at
-the settled outcome.
+`check-nvidia-smi` also skips a schedulable node that is busy, meaning
+a pod there that has not finished (Pending or Running) already
+requests `nvidia.com/gpu`. The check does not place its own GPU pod
+beside an existing workload. A busy node is skipped per node, not for
+the whole check (#3361).
 
-Once a probe observes at least one RDMA-capable node, it emits a floor with
-`nodesValidated=0`, then the terminal counts, which win because sentinels merge
-key-wise. If it never observes one, only the terminal counts are emitted. The
-floor keeps a cordoned node's narrowing in the signed bundle if the pod is
-killed before the terminal emit. The gate fails closed, so "could not observe
-the fabric" reports `0` validated.
+- Every free schedulable node is verified.
+- Any verified node failing fails the check.
+- At least one node passing, with none failing, passes the check, with
+  the busy nodes disclosed as skipped.
+- When no node is free, the check skips with `nodes-busy`.
+- When the busy-probe errored on every schedulable node, the check
+  fails closed instead (#2122). A probe error on one node, while
+  another is free, skips that node as `busy-probe error`.
+- Each node is probed immediately before it is verified. A job that
+  claims a node's GPUs while earlier nodes are being verified makes that
+  node `SKIPPED (busy)`, not `FAILED`.
+- When the check's deadline expires, it stops with a timeout error.
+  Nodes it never reached, or was verifying when the deadline hit, are
+  not counted as failed.
+
+When the recipe declares `Deployment.gpu-driver.version`, the paths
+that verify nothing (no GPU nodes, all cordoned, all busy) fail closed
+instead of Skip. A declared host-driver floor that cannot be measured
+must not PASS (#1995). Skip remains only when the floor constraint is
+absent.
+
+`expected-resources`' RDMA fabric probe follows this pattern too, with
+the same output shape as `check-nvidia-smi`. It validates only the
+schedulable RDMA-capable nodes, lists each cordoned one as
+`<node>: SKIPPED (cordoned)`, and still counts it in `nodesTotal`. Its
+RESULT breakdown has `cordoned` as the only skip cause. The probe re-runs
+on every poll but prints its enumeration and `RESULT:` line once, at the
+settled outcome.
+
+The gate certifies the schedulable cohort as a unit, not node by node.
+
+- When it certifies, every schedulable node counts as passed.
+- When it fails closed, every schedulable node counts as failed, and
+  `nodesValidated` is `0`. "Could not observe the fabric" therefore
+  never reads as a pass.
+
+It emits Extra twice. The first is a floor on the first observation of
+an RDMA-capable node, with nothing passed or failed. The second is the
+terminal counts, which win because sentinels merge key-wise. The floor
+keeps a cordoned node's narrowing in the signed bundle if the pod is
+killed before the terminal emit.
 
 Unlike `check-nvidia-smi`, the RDMA gate never *skips* — it either
 certifies the cohort or fails closed — so it mints no `skipReason`
-enum. Its coverage rides the existing `nodesValidated`/`nodesTotal`
-allowlist keys unchanged (see below), so that change did not move the
-redaction `PolicyVersion`.
+enum.
 
 Cluster-aggregate checks that assert on an operator's aggregate status
 (`gpu-operator-health`) remain unaffected — DaemonSet operands ignore
@@ -962,10 +995,11 @@ cordons.
 
 **Structured coverage survives redaction.** Minimal redaction strips the
 `RESULT:` stdout line, so `check-nvidia-smi` and the RDMA gate also
-publish coverage in `extra` as `nodesValidated`/`nodesTotal` or a
-`skipReason` code. A signed bundle still records a cordoned node
-narrowing the cohort. Node names appear only in stdout, never in
-`extra`.
+publish coverage in `extra` as `nodesValidated`, `nodesTotal`,
+`nodesFailed`, and `nodesSkipped`, and `check-nvidia-smi` adds a
+`skipReason` code when it skips. A signed bundle records a pass on a
+partly busy or cordoned cluster as partial coverage. Node names appear
+only in stdout, never in `extra`.
 
 For *deliberate*, durable exclusion of a node from GPU service (as
 opposed to transient cordon-for-maintenance), use the GPU Operator's
@@ -1078,8 +1112,8 @@ Resolution is split across the two-stage design:
   `validateNcclAllReduceBw` bypasses the `ncclCombinationSupported` applicability
   gate entirely (applicability is granted by the recipe's explicit opt-in, keyed
   on its own criteria) and `applyNCCLResources` skips every service-specific step
-  — EFA/TCPXO/RDMA discovery, the GB200-NVreg / GKE-TCPXO preflights, RoCE claim
-  application, and NVLS/IMEX provisioning — because the supplied runtime owns its
+  — EFA/TCPXO/RDMA discovery, the GB200-NVreg / GKE-TCPXO preflights, and
+  NVLS/IMEX provisioning — because the supplied runtime owns its
   fabric wiring. Transport verification still runs (the `-net` / `-nvls` markers
   are transport-internal and fabric-agnostic), so a runtime paired with a named
   variant must still prove its transport rather than pass on bandwidth alone; the

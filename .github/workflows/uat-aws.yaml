@@ -80,6 +80,10 @@ on:
         description: 'none | quarantine | remediation: the NVSentinel mixin prep composes so faultinject runs Stage 2 or Stages 2-3 (#2625). Bounded by uat-run.yaml.'
         type: string
         default: none
+    secrets:
+      AWS_GB300_INSTANCE_TYPE:
+        description: 'GPU instance type for cluster configs that carry the gb300 placeholder.'
+        required: false
 
 permissions:
   contents: read
@@ -192,7 +196,7 @@ jobs:
       # image, kubectl and kubelogin bumps, VEX statements).
       #
       # Carried forward from v0.5.1: GPU-conditional worker taints (non-GPU
-      # worker pools stay untainted) + native GB300 (p6e-gb300/p6e-gb300r) EFA
+      # worker pools stay untainted) + native GB300 EFA
       # layout, on top of the node-group taint schema introduced in v0.4.27
       # (GPU pool carries skyhook.nvidia.com=runtime-required:NoSchedule until
       # NodeWrite finishes tuning + reboot). Earlier v0.4.x pins predate taint
@@ -213,7 +217,7 @@ jobs:
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
       # Target platform(s) for the main-cell image builds (snapshot-agent + the
       # validators). h100 GPU workers (p5.48xlarge) are amd64; Grace-Blackwell
-      # GPU workers (p6e-gb200.36xlarge, p6e-gb300r.36xlarge) are Grace/arm64,
+      # GPU workers (p6e-gb200.36xlarge and the GB300 instance) are Grace/arm64,
       # and the agent + GPU-scheduled validators are pinned to that pool — so an
       # amd64-only image cannot start there. Those accelerators therefore build
       # a multi-arch (amd64+arm64) manifest: amd64 still covers the m7i system
@@ -248,6 +252,25 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+
+      # The GB300 instance type is not published, so its cluster config carries
+      # a placeholder and the value comes from a secret, which also keeps it
+      # masked where the config is printed below. Runs before every step that
+      # reads the config, teardown included.
+      - name: Resolve GPU instance type
+        env:
+          GPU_INSTANCE_TYPE: ${{ secrets.AWS_GB300_INSTANCE_TYPE }}
+          PLACEHOLDER: gb300-instance-type-from-secret
+        run: |
+          set -euo pipefail
+          grep -qF "${PLACEHOLDER}" "${CLUSTER_CONFIG}" || exit 0
+          if [[ -z "${GPU_INSTANCE_TYPE}" ]]; then
+            echo "::error::${CLUSTER_CONFIG} needs the AWS_GB300_INSTANCE_TYPE secret"; exit 1
+          fi
+          yq -i '(.. | select(tag == "!!map" and .instanceType == strenv(PLACEHOLDER)) | .instanceType) = strenv(GPU_INSTANCE_TYPE)' "${CLUSTER_CONFIG}"
+          if grep -qF "${PLACEHOLDER}" "${CLUSTER_CONFIG}"; then
+            echo "::error::placeholder still present in ${CLUSTER_CONFIG}"; exit 1
+          fi
 
       # Fail closed on an unrecognized intent/lifecycle before any provisioning:
       # workflow_dispatch constrains these to a choice, but workflow_call passes
@@ -715,7 +738,7 @@ jobs:
       # snapshot is stamped by the code under test, not a stale release. Built
       # for BUILD_PLATFORMS: amd64 for h100 (p5.48xlarge), amd64+arm64 for the
       # Grace-Blackwell parts (the snapshot agent is pinned to the arm64
-      # p6e-gb200 / p6e-gb300r GPU pool). ko
+      # p6e-gb200 / GB300 GPU pool). ko
       # cross-compiles Go natively — no QEMU — and emits a manifest list at the
       # single tag, so the kubelet pulls the node's arch. Lives in the
       # aicr-validators namespace (not the release ghcr.io/nvidia/aicr repo);
@@ -994,6 +1017,30 @@ jobs:
       # phase_fault_inject records the Stage 1-3 outcome as CTRF
       # (faultinject-result.json, #2625). Upload it on every outcome once the
       # step ran, mirroring the snapshot-result.json upload above.
+      # Masking covers logs, not artifacts: node labels in snapshot.yaml and
+      # cluster-debug/ carry the GB300 instance type verbatim. Replace it in
+      # every file before upload. No-op when the secret is unset.
+      - name: Redact instance type from artifacts
+        if: always()
+        shell: bash
+        env:
+          GPU_INSTANCE_TYPE: ${{ secrets.AWS_GB300_INSTANCE_TYPE }}
+        run: |
+          set -euo pipefail
+          [[ -n "${GPU_INSTANCE_TYPE}" ]] || exit 0
+          family="${GPU_INSTANCE_TYPE%%.*}"
+          # Uploaded paths only: the cluster config holds the real value and
+          # teardown still needs it.
+          files=$(grep -rlF -e "${GPU_INSTANCE_TYPE}" -e "${family}" \
+            faultinject-result.json snapshot.yaml snapshot-result.json \
+            recipe.yaml dry-run.json report.json evidence-result.json \
+            evidence train-logs serve-logs cluster-debug 2>/dev/null || true)
+          [[ -n "${files}" ]] || exit 0
+          while IFS= read -r f; do
+            FAMILY="${family}" perl -pi -e \
+              's/\Q$ENV{GPU_INSTANCE_TYPE}\E/REDACTED-INSTANCE-TYPE/g; s/\Q$ENV{FAMILY}\E/REDACTED-INSTANCE-FAMILY/g' "${f}"
+          done <<< "${files}"
+
       - name: Upload faultinject result
         if: always() && steps.faultinject.outcome != 'skipped'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
@@ -1069,6 +1116,30 @@ jobs:
           AICR_BIN: ${{ github.workspace }}/aicr
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/aws/run debug "${TEST_CONFIG}" || true
+
+      # Masking covers logs, not artifacts: node labels in snapshot.yaml and
+      # cluster-debug/ carry the GB300 instance type verbatim. Replace it in
+      # every file before upload. No-op when the secret is unset.
+      - name: Redact instance type from debug bundle
+        if: failure() && steps.prep.outcome != 'skipped'
+        shell: bash
+        env:
+          GPU_INSTANCE_TYPE: ${{ secrets.AWS_GB300_INSTANCE_TYPE }}
+        run: |
+          set -euo pipefail
+          [[ -n "${GPU_INSTANCE_TYPE}" ]] || exit 0
+          family="${GPU_INSTANCE_TYPE%%.*}"
+          # Uploaded paths only: the cluster config holds the real value and
+          # teardown still needs it.
+          files=$(grep -rlF -e "${GPU_INSTANCE_TYPE}" -e "${family}" \
+            faultinject-result.json snapshot.yaml snapshot-result.json \
+            recipe.yaml dry-run.json report.json evidence-result.json \
+            evidence train-logs serve-logs cluster-debug 2>/dev/null || true)
+          [[ -n "${files}" ]] || exit 0
+          while IFS= read -r f; do
+            FAMILY="${family}" perl -pi -e \
+              's/\Q$ENV{GPU_INSTANCE_TYPE}\E/REDACTED-INSTANCE-TYPE/g; s/\Q$ENV{FAMILY}\E/REDACTED-INSTANCE-FAMILY/g' "${f}"
+          done <<< "${files}"
 
       - name: Upload failure debug
         if: failure() && steps.prep.outcome != 'skipped'

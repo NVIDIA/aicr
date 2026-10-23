@@ -23,7 +23,7 @@ transitions:
     to: "=26.7.1"
     verdict: safe
     verifiedBy: >-
-      Live Helm upgrade on an EKS GB300 cluster (2x p6e-gb300r.36xlarge,
+      Live Helm upgrade on an EKS GB300 cluster (2 GPU nodes,
       k8s 1.35.6), 2026-09-28: v26.7.0 to v26.7.1 with DRA driver 0.5.0;
       ClusterPolicy ready, all operand DaemonSets on the new images, driver
       reloaded cleanly on both nodes. Upstream v26.7.1 release notes.
@@ -45,7 +45,7 @@ transitions:
     to: "=26.7.2"
     verdict: safe
     verifiedBy: >-
-      Live Helm upgrade on an EKS GB300 cluster (2x p6e-gb300r.36xlarge,
+      Live Helm upgrade on an EKS GB300 cluster (2 GPU nodes,
       k8s 1.35.6), 2026-10-13: v26.7.1 to v26.7.2 with DRA driver 0.5.0.
       Both nodes went from upgrade-required straight to pod-restart-required,
       the driver manager kept the loaded driver and the driver container did

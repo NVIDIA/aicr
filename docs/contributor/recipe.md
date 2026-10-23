@@ -454,8 +454,9 @@ verified node; when the constraint is absent the check keeps its
 banner-presence behavior and does not invent a floor (#1995).
 When the constraint is set but the host driver cannot be measured —
 unreadable nvidia-smi banner, no GPU nodes, all GPU nodes cordoned, or
-GPU nodes busy with workloads — the check fails closed rather than
-Skip. Skip on those paths is preserved only when no floor is
+all schedulable GPU nodes busy with workloads — the check fails closed
+rather than Skip. Busy nodes skipped beside a verified node do not fail
+the floor; they are disclosed as skipped, like cordoned nodes. Skip on those paths is preserved only when no floor is
 configured. The value must carry a comparison operator (`>=`, `>`,
 `<=`, `<`) to behave as a floor; a bare version is exact string match,
 so a newer driver would fail. The constraint name is an exact match;

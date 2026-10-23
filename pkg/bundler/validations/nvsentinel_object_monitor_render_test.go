@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	aicrhelm "github.com/NVIDIA/aicr/pkg/helm"
+	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -164,7 +165,7 @@ func TestNVSentinelObjectMonitorChartRender(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live chart-render integration test in short mode")
 	}
-	requireHelmForObservabilityRender(t)
+	helmtest.RequireBinary(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), nvsentinelObservabilityChartTimeout)
 	defer cancel()

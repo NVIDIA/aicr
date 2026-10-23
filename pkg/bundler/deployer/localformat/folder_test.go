@@ -66,3 +66,23 @@ func TestWriteResultReleases(t *testing.T) {
 		}
 	}
 }
+
+func TestFolderIsReadiness(t *testing.T) {
+	tests := []struct {
+		name   string
+		folder localformat.Folder
+		want   bool
+	}{
+		{"readiness", localformat.Folder{Name: "gpu-operator-readiness", Parent: "gpu-operator"}, true},
+		{"primary", localformat.Folder{Name: "gpu-operator", Parent: "gpu-operator"}, false},
+		{"post", localformat.Folder{Name: "gpu-operator-post", Parent: "gpu-operator"}, false},
+		{"other parent", localformat.Folder{Name: "nfd-readiness", Parent: "gpu-operator"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.folder.IsReadiness(); got != tt.want {
+				t.Errorf("IsReadiness() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

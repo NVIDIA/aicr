@@ -68,7 +68,7 @@ spec:
       # version) and docs/contributor/inference-perf-fluctuation.md, which
       # recommends gating sub-knee with a generous TTFT ceiling.
       #
-      # Measured 2026-08-25 on a GB300 EKS cluster (2x p6e-gb300r.36xlarge,
+      # Measured 2026-08-25 on a GB300 EKS cluster (2 GPU nodes,
       # Qwen/Qwen3-8B, 4 GPU workers, dynamo-router/least-loaded), showing
       # what the knee costs:
       #

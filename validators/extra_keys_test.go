@@ -36,6 +36,8 @@ import (
 var extraKeySamples = map[string]string{
 	ExtraKeyNodesValidated:      "1",
 	ExtraKeyNodesTotal:          "2",
+	ExtraKeyNodesFailed:         "0",
+	ExtraKeyNodesSkipped:        "1",
 	ExtraKeySkipReason:          SkipReasonNoConstraint,
 	ExtraKeyRuntimeSource:       "delivered-artifact",
 	ExtraKeyAchievedGbps:        FormatDecimal(305.44),
@@ -45,7 +47,7 @@ var extraKeySamples = map[string]string{
 	ExtraKeyWorkerNodes:         "2",
 	ExtraKeyGPUsInvolved:        "16",
 	ExtraKeyTransport:           "nvls",
-	ExtraKeyFabric:              "roce",
+	ExtraKeyFabric:              "efa",
 	ExtraKeyDRAReady:            "8",
 	ExtraKeyDRADesired:          "8",
 	ExtraKeyNodewrightComplete:  "3",
