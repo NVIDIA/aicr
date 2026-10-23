@@ -756,6 +756,19 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 		}
 		return r
 	}
+	if !anyFromCovers(u, src) {
+		// Each branch below tells the operator to upgrade to its stop first,
+		// and that hop starts here, where no record describes an upgrade from;
+		// checked on its own, it lands back on this route, so the advice only
+		// defers the answer. The test is any record, crossed or not, because
+		// that is what keeps this route's "no record describes an upgrade
+		// starting from" true.
+		r.Verdict = VerdictBlocked
+		r.Reason = ReasonUndefinedOrigin
+		r.StoppedAt = crossed[0].tr.To
+		r.Explanation = undefinedOriginExplanation(u, r, crossed, src)
+		return r
+	}
 	if blocking, ok := lowestBlocked(crossed); ok {
 		// A block reached from somewhere its author did not describe, or
 		// alongside other boundaries, stops the jump regardless: an authored
@@ -783,9 +796,9 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 		// whether the assessment reaches the target.
 		// crossings orders by floor, so crossed[0] is the boundary that has to
 		// own the origin while top is the one that has to reach the target.
-		// Both must hold: skipping the origin check let a jump from a version
-		// no record assessed come back safe purely because it crossed two
-		// boundaries instead of one.
+		// Both must hold: skipping the origin check let a jump come back safe
+		// on a lowest boundary written for some other starting point, purely
+		// because it crossed two boundaries instead of one.
 		if top, ok := everySafeCrossing(crossed); ok && fromCovers(crossed[0].tr, src) {
 			if _, past := beyondCeiling(top.tr, tgt); !past {
 				r.Verdict = VerdictSafe
@@ -813,20 +826,19 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 		r.Reason = ReasonMultipleBoundaries
 		r.StoppedAt = crossed[0].tr.To
 		r.Explanation = fmt.Sprintf(
-			"crosses %d recorded boundaries (%s); no single record describes the whole jump. "+
-				"Upgrade to %s first, then re-run this check",
-			len(crossed), strings.Join(floorNames(crossed), ", "), crossed[0].floor.ver)
+			"%s; no single record describes the whole jump. Upgrade to %s first, then re-run this check",
+			crossingPhrase(crossed), crossed[0].floor.ver)
 		return r
 	}
 
-	// Nothing describes an upgrade from where the operator actually is. The
-	// tool is opt-in, so it errs toward safety rather than lending a verdict
-	// authored for a starting point this jump never had.
-	only := crossed[0]
+	// The one record in the way was written for a different starting point,
+	// and the record that covers this one is not in the way. The tool is
+	// opt-in, so it errs toward safety rather than lending a verdict authored
+	// for a starting point this jump never had.
 	r.Verdict = VerdictBlocked
 	r.Reason = ReasonUndefinedOrigin
-	r.StoppedAt = only.tr.To
-	r.Explanation = undefinedOriginExplanation(u, r, only, src)
+	r.StoppedAt = crossed[0].tr.To
+	r.Explanation = undefinedOriginExplanation(u, r, crossed, src)
 	return r
 }
 
@@ -977,6 +989,20 @@ func fromCovers(t *Transition, src *semver.Version) bool {
 	return b.contains(src)
 }
 
+// anyFromCovers reports whether any of the component's records, crossed or
+// not, was authored for this starting point.
+func anyFromCovers(u *ComponentUpgrades, src *semver.Version) bool {
+	if u == nil {
+		return false
+	}
+	for i := range u.Transitions {
+		if fromCovers(&u.Transitions[i], src) {
+			return true
+		}
+	}
+	return false
+}
+
 // lowestBlocked returns the lowest-floor crossed transition an author marked
 // blocked. crossings is already ordered by floor, so the first match is it.
 func lowestBlocked(crossed []crossing) (crossing, bool) {
@@ -1007,6 +1033,16 @@ func floorNames(crossed []crossing) []string {
 		names[i] = c.floor.ver.String()
 	}
 	return names
+}
+
+// crossingPhrase names the boundaries a jump crosses, as the clause the
+// multiple-boundaries and undefined-origin explanations open with.
+func crossingPhrase(crossed []crossing) string {
+	if len(crossed) == 1 {
+		return "crosses the boundary at " + crossed[0].floor.ver.String()
+	}
+	return fmt.Sprintf("crosses %d recorded boundaries (%s)",
+		len(crossed), strings.Join(floorNames(crossed), ", "))
 }
 
 // unmatched classifies a jump that crosses no recorded boundary.
@@ -1113,9 +1149,8 @@ func recordedExplanation(r ComponentResult, c crossing) string {
 	}
 }
 
-func undefinedOriginExplanation(u *ComponentUpgrades, r ComponentResult, c crossing, src *semver.Version) string {
-	s := fmt.Sprintf("crosses the boundary at %s, but no record describes an upgrade starting from %s",
-		c.floor.ver, r.From)
+func undefinedOriginExplanation(u *ComponentUpgrades, r ComponentResult, crossed []crossing, src *semver.Version) string {
+	s := fmt.Sprintf("%s, but no record describes an upgrade starting from %s", crossingPhrase(crossed), r.From)
 	if origin := earliestOrigin(u); origin != nil && src.Compare(origin) < 0 {
 		return fmt.Sprintf("%s; the earliest recorded starting point is %s. "+
 			"Upgrade to a recorded version first, then re-run this check", s, origin)
