@@ -53,7 +53,9 @@ spec:
   # collector reads `.items[0]`, which sorts to the kind control-plane node.
   # Accuracy is still the right default for a file people read to learn what
   # the hardware looks like.
-  instanceType: p6e-gb300.36xlarge
+  # Synthetic: AWS publishes no instance type for this node, and nothing
+  # selects on the node.kubernetes.io/instance-type label it feeds.
+  instanceType: eks-gb300-simulated
   arch: arm64  # Grace CPU is ARM-based
   osImage: Ubuntu 24.04
 
