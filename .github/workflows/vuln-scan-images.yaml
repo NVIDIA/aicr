@@ -332,10 +332,10 @@ jobs:
           # AICR does not build the images below. They ship only with the
           # opt-in nvsentinel-object-monitor (#2612), nvsentinel-preflight
           # (#2610), nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor
-          # (#2611), remediation, nvsentinel-slinky-drainer (#2615) and
-          # nvsentinel-health-events-analyzer (#2618) mixins, and no other job
-          # scans a mixin-gated image, so nothing else would surface a CVE in
-          # them.
+          # (#2611), remediation, nvsentinel-slinky-drainer (#2615),
+          # nvsentinel-health-events-analyzer (#2618) and nvsentinel-log-collector
+          # (#2619) mixins, and no other job scans a mixin-gated image, so nothing
+          # else would surface a CVE in them.
           # Because they are not built by this workflow they carry their
           # upstream tag rather than SCAN_TAG -- see the overrides below.
           - ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
@@ -353,6 +353,14 @@ jobs:
           - ghcr.io/nvidia/nvsentinel/gpu-reset
           - ghcr.io/nvidia/nvsentinel/slinky-drainer
           - ghcr.io/nvidia/nvsentinel/health-events-analyzer
+          - ghcr.io/nvidia/nvsentinel/log-collector
+          - ghcr.io/nvidia/nvsentinel/file-server-cleanup
+          # The nvsentinel-log-collector mixin's file server, at the nvsentinel
+          # chart's own pins; its init container's busybox is the AICR pin
+          # below. bitnamilegacy is Bitnami's frozen archive and is never
+          # patched, so expect findings here.
+          - docker.io/bitnamilegacy/nginx
+          - quay.io/martinhelmich/prometheus-nginxlog-exporter
           # Percona, from the remediation mixins' separately bundled datastore
           # (psmdb-operator, nvsentinel-mongodb). Pinned by AICR, by digest.
           - docker.io/percona/percona-server-mongodb-operator
@@ -364,11 +372,14 @@ jobs:
           # Third-party, pinned by AICR rather than the chart:
           # global.initContainerImage, used by chown/permission init
           # containers in the nic-health-monitor and audit-logging paths,
-          # and janitor-provider's generic reboot Job image. AICR overrides
-          # the chart's defaults for both -- the first in
+          # janitor-provider's generic reboot Job image, and the in-cluster
+          # file server's init container. AICR overrides the chart's defaults
+          # for all three -- the first in
           # recipes/components/nvsentinel/values.yaml, the second
           # (janitor-provider.csp.generic.rebootImage) in
-          # recipes/mixins/nvsentinel-remediation.yaml -- so what is scanned
+          # recipes/mixins/nvsentinel-remediation.yaml, the third
+          # (incluster-file-server.initImage) in
+          # recipes/mixins/nvsentinel-log-collector.yaml -- so what is scanned
           # here is the override; keep them in step.
           - docker.io/library/busybox
         include:
@@ -378,9 +389,9 @@ jobs:
           # TestNICHealthMonitorImagePinnedEverywhere,
           # TestSlurmDrainMonitorImagePinnedEverywhere,
           # TestRemediationImagesPinnedEverywhere,
-          # TestSlinkyDrainerImagePinnedEverywhere and
-          # TestHealthEventsAnalyzerImagePinnedEverywhere fail if these drift
-          # apart.
+          # TestSlinkyDrainerImagePinnedEverywhere,
+          # TestHealthEventsAnalyzerImagePinnedEverywhere and
+          # TestLogCollectorImagesPinnedEverywhere fail if these drift apart.
           - image: ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
             tag: v1.28.0
           - image: ghcr.io/nvidia/nvsentinel/preflight
@@ -412,6 +423,18 @@ jobs:
             tag: v1.28.0@sha256:bf6ccaf1d6c035aa5f86e70a929dc6d9a18c5c05b10104d23c69aacff35bcb14
           - image: ghcr.io/nvidia/nvsentinel/health-events-analyzer
             tag: v1.28.0
+          - image: ghcr.io/nvidia/nvsentinel/log-collector
+            tag: v1.28.0
+          - image: ghcr.io/nvidia/nvsentinel/file-server-cleanup
+            tag: v1.28.0
+          # The nvsentinel chart's own pins for the file server's third-party
+          # images. The weekly TestNVSentinelLogCollectorChartRender fails if a
+          # chart bump moves them; TestLogCollectorImagesPinnedEverywhere then
+          # keeps this list, the mirror lane and the docs on the new tags.
+          - image: docker.io/bitnamilegacy/nginx
+            tag: 1.27.2-debian-12-r2
+          - image: quay.io/martinhelmich/prometheus-nginxlog-exporter
+            tag: v1.10.0
           # AICR's own pins in recipes/components/{psmdb-operator,nvsentinel-mongodb};
           # TestRemediationImagesPinnedEverywhere fails if these drift apart.
           - image: docker.io/percona/percona-server-mongodb-operator

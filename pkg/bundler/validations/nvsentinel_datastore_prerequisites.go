@@ -17,8 +17,10 @@ package validations
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"github.com/NVIDIA/aicr/pkg/component"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -67,20 +69,51 @@ func CheckNVSentinelDatastorePrerequisites(ctx context.Context, componentName st
 	return warnings, errs
 }
 
+// nvsentinelMongoDBClaim is nvsentinel-mongodb's classless volumes.
+var nvsentinelMongoDBClaim = storageClassClaim{
+	path:        nvsentinelMongoDBStorageClassPath,
+	overrideKey: "nvsentinelmongodb",
+	volumes:     "its volumes",
+	pending:     "its three volumes, which name no StorageClass, would stay Pending and NVSentinel would not start",
+	purpose:     "NVSentinel datastore prerequisites",
+}
+
 func nvsentinelStorageClassFinding(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, keys []string) (string, error) {
+	return storageClassFinding(ctx, componentName, recipeResult, bundlerConfig, keys, nvsentinelMongoDBClaim)
+}
+
+// storageClassClaim is a volume claim that names no StorageClass unless the
+// bundle does, so whether it binds depends on the cluster's default.
+type storageClassClaim struct {
+	// path is the values path that names the claim's StorageClass, and
+	// overrideKey the --set key of the component that owns it.
+	path        string
+	overrideKey string
+	// volumes names the claim as a sentence subject, and pending what a
+	// Pending claim stops.
+	volumes string
+	pending string
+	purpose string
+}
+
+// storageClassFinding applies the snapshot's metadata.defaultStorageClassState
+// to claim: a warning with no evidence or more than one default, an error when
+// the snapshot found none or could not tell, unless the bundle names a class
+// for the claim.
+func storageClassFinding(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, keys []string, claim storageClassClaim) (string, error) {
 	state := recipeResult.Metadata.DefaultStorageClassState
 	switch state {
 	case recipe.DefaultStorageClassStatePresent:
 		return "", nil
 	case "":
 		return fmt.Sprintf("%s: no metadata.defaultStorageClassState snapshot evidence was recorded, so the "+
-			"default StorageClass its volumes need was not evaluated. Regenerate the recipe from a current "+
-			"snapshot to verify the target cluster before deployment", componentName), nil
+			"default StorageClass for %s was not evaluated. Regenerate the recipe from a current "+
+			"snapshot to verify the target cluster before deployment", componentName, claim.volumes), nil
 	case recipe.DefaultStorageClassStateMultiple:
-		return fmt.Sprintf("%s: the snapshot found more than one default StorageClass; Kubernetes binds its "+
-			"volumes to the newest one. Leave a single StorageClass annotated "+
+		return fmt.Sprintf("%s: the snapshot found more than one default StorageClass; Kubernetes binds "+
+			"%s to the newest one. Leave a single StorageClass annotated "+
 			"storageclass.kubernetes.io/is-default-class=true, or set "+
-			"--set nvsentinelmongodb:%s=<class>", componentName, nvsentinelMongoDBStorageClassPath), nil
+			"--set %s:%s=<class>", componentName, claim.volumes, claim.overrideKey, claim.path), nil
 	case recipe.DefaultStorageClassStateAbsent, recipe.DefaultStorageClassStateUnknown:
 	default:
 		return "", aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf(
@@ -88,7 +121,7 @@ func nvsentinelStorageClassFinding(ctx context.Context, componentName string, re
 				"AICR version before bundling", componentName, state))
 	}
 
-	named, err := nvsentinelMongoDBNamesStorageClass(ctx, recipeResult, bundlerConfig, componentName, keys)
+	named, err := bundleNamesStorageClass(ctx, recipeResult, bundlerConfig, componentName, keys, claim)
 	if err != nil {
 		return "", err
 	}
@@ -98,37 +131,72 @@ func nvsentinelStorageClassFinding(ctx context.Context, componentName string, re
 
 	if state == recipe.DefaultStorageClassStateAbsent {
 		return "", aicrerrors.New(aicrerrors.ErrCodeConflict, fmt.Sprintf(
-			"%s: the snapshot found no default StorageClass, so its three volumes, which name no "+
-				"StorageClass, would stay Pending and NVSentinel would not start. Annotate a StorageClass "+
+			"%s: the snapshot found no default StorageClass, so %s. Annotate a StorageClass "+
 				"with storageclass.kubernetes.io/is-default-class=true and regenerate the recipe from a "+
-				"fresh snapshot, or name one with --storage-class <class> or --set nvsentinelmongodb:%s=<class>",
-			componentName, nvsentinelMongoDBStorageClassPath))
+				"fresh snapshot, or name one with --storage-class <class> or --set %s:%s=<class>",
+			componentName, claim.pending, claim.overrideKey, claim.path))
 	}
 	return "", aicrerrors.New(aicrerrors.ErrCodeConflict, fmt.Sprintf(
-		"%s: default StorageClass evidence is inconclusive, so its volumes cannot be shown to bind. "+
+		"%s: default StorageClass evidence is inconclusive, so %s cannot be shown to bind. "+
 			"Capture a fresh snapshot with permission to list storageclasses (storage.k8s.io), or name a "+
-			"StorageClass with --storage-class <class> or --set nvsentinelmongodb:%s=<class>",
-		componentName, nvsentinelMongoDBStorageClassPath))
+			"StorageClass with --storage-class <class> or --set %s:%s=<class>",
+		componentName, claim.volumes, claim.overrideKey, claim.path))
 }
 
-// nvsentinelMongoDBNamesStorageClass reports whether the bundle names a
-// StorageClass for the volumes: through the effective values, or through
-// bundle --storage-class, which the bundler injects into the registry's
-// storageClassPaths unless a scalar --set names the path explicitly.
-func nvsentinelMongoDBNamesStorageClass(ctx context.Context, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, componentName string, keys []string) (bool, error) {
-	if bundlerConfig != nil && bundlerConfig.StorageClass() != "" {
-		explicit := mergeOverridesAcrossKeys(bundlerConfig.ValueOverrides(), keys)
-		if _, set := explicit[nvsentinelMongoDBStorageClassPath]; !set {
-			return true, nil
+// bundleNamesStorageClass reports whether the bundle names a StorageClass
+// for claim. It models the bundler's order: recipe values, then --set, then
+// --storage-class injected into the component's registry storageClassPaths
+// unless --set names the path, then --set-json/--set-file, which can still
+// clear the class (an empty or null value, or a parent object without it).
+func bundleNamesStorageClass(ctx context.Context, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, componentName string, keys []string, claim storageClassClaim) (bool, error) {
+	values, err := recipeResult.GetValuesForComponentWithContext(ctx, componentName)
+	if err != nil {
+		return false, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("cannot verify %s for component %q: failed to resolve its values", claim.purpose, componentName))
+	}
+	if bundlerConfig == nil {
+		class, ok, _ := resolvedStringValue(values, claim.path)
+		return ok && class != "", nil
+	}
+
+	explicit := mergeOverridesAcrossKeys(bundlerConfig.ValueOverrides(), keys)
+	delete(explicit, config.ComponentEnabledKey)
+	if len(explicit) > 0 {
+		if applyErr := component.ApplyMapOverrides(values, explicit); applyErr != nil {
+			return false, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
+				fmt.Sprintf("cannot verify %s for component %q: failed to apply --set overrides", claim.purpose,
+					componentName), applyErr)
 		}
 	}
-	values, err := effectiveComponentValues(ctx, recipeResult, bundlerConfig, componentName, keys,
-		"NVSentinel datastore prerequisites")
-	if err != nil {
-		return false, err
+	if class := bundlerConfig.StorageClass(); class != "" {
+		if _, set := explicit[claim.path]; !set && storageClassPathRegistered(recipeResult, componentName, claim.path) {
+			// The bundler logs and skips a path it cannot write, so a
+			// failure here leaves the class unnamed, as it does there.
+			_ = component.ApplyMapOverrides(values, map[string]string{claim.path: class})
+		}
 	}
-	class, ok, _ := resolvedStringValue(values, nvsentinelMongoDBStorageClassPath)
+	typed := mergeOverridesAcrossKeys(bundlerConfig.ValueOverridesTyped(), keys)
+	delete(typed, config.ComponentEnabledKey)
+	if len(typed) > 0 {
+		if applyErr := component.ApplyTypedOverrides(values, typed); applyErr != nil {
+			return false, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
+				fmt.Sprintf("cannot verify %s for component %q: failed to apply --set-json/--set-file overrides",
+					claim.purpose, componentName), applyErr)
+		}
+	}
+	class, ok, _ := resolvedStringValue(values, claim.path)
 	return ok && class != "", nil
+}
+
+// storageClassPathRegistered reports whether path is one of the component's
+// registry storageClassPaths, the only paths --storage-class reaches.
+func storageClassPathRegistered(recipeResult *recipe.RecipeResult, componentName, path string) bool {
+	registry, err := recipe.GetComponentRegistryFor(recipeResult.DataProvider())
+	if err != nil {
+		return false
+	}
+	comp := registry.Get(componentName)
+	return comp != nil && slices.Contains(comp.GetStorageClassPaths(), path)
 }
 
 func nvsentinelPerconaFinding(componentName, state string) (string, error) {
