@@ -52,17 +52,19 @@ func isBundledChart(f localformat.Folder) bool {
 // cluster-values.yaml, which values_files already tracks, in path order, as
 // its folder-relative path and its bytes, each NUL-terminated. Relative to
 // the folder so that renumbering, which already changes the chart path, does
-// not also move the digest.
+// not also move the digest. A readiness folder's values.yaml is also hashed,
+// since its templates read it and no values_files tracks it.
 func chartDigests(outputDir string, folders []localformat.Folder) (map[string]string, error) {
 	out := make(map[string]string, len(folders))
 	for _, f := range folders {
 		if !isBundledChart(f) {
 			continue
 		}
+		readiness := phaseOf(f) == phaseReadiness
 		rels := make([]string, 0, len(f.Files))
 		for _, rel := range f.Files {
 			base := filepath.Base(rel)
-			if base == fileValues || base == fileClusterValues {
+			if base == fileClusterValues || (base == fileValues && !readiness) {
 				continue
 			}
 			rels = append(rels, filepath.ToSlash(rel))

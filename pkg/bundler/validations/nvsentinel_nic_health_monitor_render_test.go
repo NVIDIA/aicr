@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	aicrhelm "github.com/NVIDIA/aicr/pkg/helm"
+	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -166,7 +167,7 @@ func TestNVSentinelNICDriverChecksChartRender(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live chart-render integration test in short mode")
 	}
-	requireHelmForObservabilityRender(t)
+	helmtest.RequireBinary(t)
 
 	store, err := recipe.LoadMetadataStoreFor(context.Background(), nil)
 	if err != nil {
@@ -225,7 +226,7 @@ func TestNVSentinelNICHealthMonitorChartRender(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live chart-render integration test in short mode")
 	}
-	requireHelmForObservabilityRender(t)
+	helmtest.RequireBinary(t)
 
 	store, err := recipe.LoadMetadataStoreFor(context.Background(), nil)
 	if err != nil {

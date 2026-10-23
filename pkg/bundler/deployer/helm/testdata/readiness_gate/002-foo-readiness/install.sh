@@ -197,5 +197,5 @@ fi
 
 helm upgrade --install ${FORCE_CONFLICTS_FLAG} 'foo-readiness' ./ \
   --namespace 'foo' --create-namespace \
-  -f values.yaml -f cluster-values.yaml \
+  -f values.yaml -f '../001-foo/cluster-values.yaml' \
   ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${HELM_CONN[@]+"${HELM_CONN[@]}"} ${HELM_DEBUG_FLAG:-}

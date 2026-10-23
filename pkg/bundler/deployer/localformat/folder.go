@@ -86,6 +86,12 @@ type Folder struct {
 	AppliesCRDs bool
 }
 
+// IsReadiness reports whether f is the readiness gate folder injected for its
+// parent component.
+func (f Folder) IsReadiness() bool {
+	return f.Name == f.Parent+"-"+string(phaseReadiness)
+}
+
 // Releases maps the written folders to deployer.Release entries, preserving
 // folder order (which is deployment order). Manifest is left empty; deployers
 // that add a per-folder declaration file set it afterwards.

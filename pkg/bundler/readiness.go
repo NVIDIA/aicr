@@ -213,11 +213,15 @@ func (b *DefaultBundler) collectComponentReadiness(
 				fmt.Sprintf("failed to load readiness gate %s for component %s", path, ref.Name))
 		}
 
-		if err := validateReadinessTestYAML(ref.Name, testYAML); err != nil {
+		if err = validateReadinessTestYAML(ref.Name, testYAML); err != nil {
 			return nil, err
 		}
 
-		manifest, genErr := gatemanifest.Render(ref.Name, image, testYAML, b.Config.Deployer(), placement)
+		gatePlacement, err := componentGatePlacement(provider, ref.Name, placement)
+		if err != nil {
+			return nil, err
+		}
+		manifest, genErr := gatemanifest.Render(ref.Name, image, testYAML, b.Config.Deployer(), gatePlacement)
 		if genErr != nil {
 			return nil, genErr
 		}
@@ -225,6 +229,35 @@ func (b *DefaultBundler) collectComponentReadiness(
 	}
 
 	return result, nil
+}
+
+// componentGatePlacement returns bundle with each field the component's
+// registry entry declares a primary system scheduling path for read from the
+// component's values at install time. It returns bundle unchanged for a
+// component not in the registry.
+func componentGatePlacement(provider recipe.DataProvider, componentName string, bundle gatemanifest.Placement) (gatemanifest.Placement, error) {
+	registry, err := recipe.GetComponentRegistryFor(provider)
+	if err != nil {
+		return gatemanifest.Placement{}, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			fmt.Sprintf("failed to load component registry for readiness gate %s", componentName))
+	}
+	comp := registry.Get(componentName)
+	if comp == nil {
+		return bundle, nil
+	}
+	var paths gatemanifest.ValuesPaths
+	if p := comp.GetSystemNodeSelectorPaths(); len(p) > 0 {
+		paths.NodeSelector = p[0]
+	}
+	if p := comp.GetSystemTolerationPaths(); len(p) > 0 {
+		paths.Tolerations = p[0]
+	}
+	placement, err := bundle.FromValues(paths)
+	if err != nil {
+		return gatemanifest.Placement{}, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid registry scheduling path for readiness gate %s", componentName))
+	}
+	return placement, nil
 }
 
 // warnPeermemReadinessDisabled surfaces the partial-guarantee boundary of a

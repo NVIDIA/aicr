@@ -12,9 +12,33 @@ has_tools git
 # Version calculation helpers
 # ==============================================================================
 
-# Get current version from latest git tag
-current_version() {
-  git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0"
+# Latest version tag reachable from HEAD, pre-releases included (e.g.
+# v1.3.0-rc2). --match restricts candidates to tags that look like versions,
+# so non-version tags (nightly, deploy-20240101, ...) are never selected.
+latest_tag() {
+  git describe --tags --abbrev=0 --match='v[0-9]*' 2>/dev/null || echo "v0.0.0"
+}
+
+# Latest stable tag reachable from HEAD. Any tag with a pre-release suffix
+# (-rc1, -beta1, ...) contains a hyphen and is skipped, the same rule
+# tools/changelog applies when it picks the last release.
+latest_stable_tag() {
+  git describe --tags --abbrev=0 --match='v[0-9]*' --exclude='*-*' 2>/dev/null || echo "v0.0.0"
+}
+
+# The version a bump type counts from.
+#
+# major, minor, and patch count from the latest STABLE tag. A leftover RC of
+# the next version (v1.3.0-rc2 after v1.2.3) must not move the result: counting
+# from the RC would turn `minor` into v1.4.0 and `patch` into v1.3.1.
+#
+# rc counts from the latest tag of any kind, because it has to see the RC it is
+# incrementing (v1.3.0-rc1 -> v1.3.0-rc2).
+base_version() {
+  case "$1" in
+    rc) latest_tag ;;
+    *)  latest_stable_tag ;;
+  esac
 }
 
 # Parse semver into components. Sets: MAJOR, MINOR, PATCH, PRERELEASE
@@ -38,7 +62,7 @@ parse_version() {
 compute_next_version() {
   local bump_type=$1
   local cur
-  cur=$(current_version)
+  cur=$(base_version "$bump_type")
   parse_version "$cur"
 
   case "$bump_type" in
@@ -109,7 +133,7 @@ cmd_tag() {
   check_pushed
 
   local cur new_version
-  cur=$(current_version)
+  cur=$(base_version "$bump_type")
   new_version=$(compute_next_version "$bump_type")
 
   check_tag_available "$new_version"
@@ -167,6 +191,10 @@ Commands:
   patch              Tag patch bump   (v1.2.3 → v1.2.4)
   rc                 Tag RC bump      (v1.2.3 → v1.3.0-rc1, then -rc2, …)
   promote <rc-tag>   Promote a pre-release tag to stable on the same SHA
+
+major, minor, and patch count from the latest stable tag, so a leftover
+pre-release tag such as v1.3.0-rc2 does not change their result. rc counts from
+the latest tag of any kind, so it increments an existing RC.
 
 Changelog:
   Use 'tools/changelog' (or 'make changelog') to preview changes since the

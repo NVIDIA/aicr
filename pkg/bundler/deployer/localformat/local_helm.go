@@ -98,12 +98,16 @@ var (
 //
 // stamp carries the two versions written into the generated Chart.yaml.
 //
+// If clusterValuesFrom is non-empty, install.sh layers that folder-relative
+// file in place of the folder's own cluster-values.yaml, which is written
+// empty.
+//
 // Returns the Folder manifest with Files listed in deterministic order.
 func writeLocalHelmFolder(
 	outputDir, dir string, idx int, c Component,
 	manifests map[string][]byte, renderInput manifest.RenderInput,
 	name, parent string, createNamespace bool, stamp chartStamp,
-	keepHookAnnotations bool,
+	keepHookAnnotations bool, clusterValuesFrom string,
 ) (Folder, error) {
 
 	folderDir, err := deployer.SafeJoin(outputDir, dir)
@@ -138,7 +142,7 @@ func writeLocalHelmFolder(
 	}
 
 	// values.yaml + cluster-values.yaml
-	if err = writeValueFiles(folderDir, c); err != nil {
+	if err = writeValueFiles(folderDir, c, clusterValuesFrom == ""); err != nil {
 		return Folder{}, err
 	}
 
@@ -235,11 +239,12 @@ func writeLocalHelmFolder(
 	// vendored primary shares this template but renders it from
 	// writeVendoredHelmFolder.
 	installData := struct {
-		Name            string
-		Namespace       string
-		CreateNamespace bool
-		OwnsCRDs        bool
-	}{name, c.Namespace, effectiveCreateNamespace, false}
+		Name              string
+		Namespace         string
+		CreateNamespace   bool
+		OwnsCRDs          bool
+		ClusterValuesFile string
+	}{name, c.Namespace, effectiveCreateNamespace, false, clusterValuesFrom}
 	if err = renderTemplateToFile(localHelmInstallTmpl, installData, folderDir, "install.sh", 0o755); err != nil {
 		return Folder{}, err
 	}

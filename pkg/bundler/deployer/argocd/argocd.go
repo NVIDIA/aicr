@@ -851,19 +851,11 @@ func waveForFolder(f localformat.Folder, level int) int {
 	case f.Parent + "-post":
 		return base + 2
 	default:
-		if isReadinessFolder(f) {
+		if f.IsReadiness() {
 			return base + 3
 		}
 		return base + 1 // primary: Name == Parent
 	}
-}
-
-// isReadinessFolder reports whether f is the injected -readiness folder for
-// its parent component. Shared by waveForFolder (sync-wave banding) and
-// buildApplicationData (ApplyOutOfSyncOnly scoping) so the two can't
-// silently diverge on what counts as a readiness folder. See #2367.
-func isReadinessFolder(f localformat.Folder) bool {
-	return f.Name == f.Parent+"-readiness"
 }
 
 // buildApplicationData constructs ApplicationData for a single folder. The
@@ -886,7 +878,7 @@ func buildApplicationData(comp recipe.ComponentRef, f localformat.Folder, syncWa
 		RepoURL:            repoURL,
 		TargetRevision:     targetRevision,
 		BundleDir:          f.Dir,
-		ApplyOutOfSyncOnly: isReadinessFolder(f),
+		ApplyOutOfSyncOnly: f.IsReadiness(),
 	}
 	switch f.Kind {
 	case localformat.KindLocalHelm:

@@ -86,10 +86,20 @@ func (s *MetadataStore) resolveProfileDeclaration(overlays []*RecipeMetadata) (*
 	return nil, nil //nolint:nilnil // unreachable defensive fallback for an empty map
 }
 
+// ensureProfileDeclarationSurvived fails when snapshot constraint filtering
+// removed the overlay that declared the profile.
+//
+// uncovered carries the dimension attribution from uncoveredDimensionDetails
+// and is attached next to excludedOverlays because pkg/client/v1 reads both
+// keys off the SAME error node: an exclusion list without a dimension list
+// reads as "excluded, but nothing was left uncovered". This error and the
+// criteria-coverage post-condition can both be true of one resolve, and only
+// the first to return is seen, so both carry it.
 func ensureProfileDeclarationSurvived(
 	before, after *effectiveProfileDeclaration,
 	excluded []ExcludedOverlay,
 	warnings []ConstraintWarning,
+	uncovered []map[string]any,
 ) error {
 
 	if before == nil {
@@ -107,13 +117,17 @@ func ensureProfileDeclarationSurvived(
 		sort.Strings(failed)
 		msg += fmt.Sprintf(", failed constraints [%s]", strings.Join(failed, ", "))
 	}
+	ctx := map[string]any{
+		"excludedOverlays":   excluded,
+		"constraintWarnings": warnings,
+	}
+	if len(uncovered) > 0 {
+		ctx["uncovered"] = uncovered
+	}
 	return errors.NewWithContext(
 		errors.ErrCodeInvalidRequest,
 		msg,
-		map[string]any{
-			"excludedOverlays":   excluded,
-			"constraintWarnings": warnings,
-		},
+		ctx,
 	)
 }
 
