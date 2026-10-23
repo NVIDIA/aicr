@@ -594,9 +594,9 @@ type RecipeResult struct {
 	internal *recipe.RecipeResult
 
 	// owner identifies the Client that produced this RecipeResult.
-	// Set by Client.ResolveRecipe; checked by BundleComponents and
-	// ValidateState to reject cross-client misuse — passing a
-	// RecipeResult produced by Client A to Client B's bundle/validate
+	// Set by every Client method that returns a RecipeResult; checked by
+	// every Client method that consumes one to reject cross-client
+	// misuse — passing a RecipeResult produced by Client A to Client B's
 	// methods would silently mix A's component refs with B's
 	// DataProvider reads, producing the wrong Helm values or
 	// supplemental manifests without an error. Pointer identity is
