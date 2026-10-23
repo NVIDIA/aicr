@@ -24,6 +24,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	aicrhelm "github.com/NVIDIA/aicr/pkg/helm"
+	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -228,7 +229,7 @@ func TestNVSentinelRemediationChartRender(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live chart-render integration test in short mode")
 	}
-	requireHelmForObservabilityRender(t)
+	helmtest.RequireBinary(t)
 
 	store, err := recipe.LoadMetadataStoreFor(context.Background(), nil)
 	if err != nil {
@@ -347,7 +348,7 @@ func TestNVSentinelMongoDBChartRender(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live chart-render integration test in short mode")
 	}
-	requireHelmForObservabilityRender(t)
+	helmtest.RequireBinary(t)
 
 	op := renderRegistryComponent(t, "psmdb-operator")
 	dep, ok := renderedDocument(op, "Deployment", "release-psmdb-operator")
@@ -526,7 +527,7 @@ func TestNVSentinelRemediationAbsentWithoutMixin(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live chart-render integration test in short mode")
 	}
-	requireHelmForObservabilityRender(t)
+	helmtest.RequireBinary(t)
 
 	store, err := recipe.LoadMetadataStoreFor(context.Background(), nil)
 	if err != nil {

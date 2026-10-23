@@ -153,20 +153,23 @@ func TestCollectComponentReadiness(t *testing.T) {
 		}
 	})
 
-	// #2590: on a cluster whose every node is tainted, a gate without the
-	// bundle's system tolerations is unschedulable and never reports. The
-	// keyless tolerate-all default is not carried: it would also tolerate
-	// not-ready, unreachable and cordoned nodes.
-	t.Run("system node scheduling reaches the gate Job", func(t *testing.T) {
-		b, err := New(WithConfig(config.NewConfig(
-			config.WithReadinessHooks(true),
-			config.WithDeployer(config.DeployerArgoCDHelm),
-			config.WithSystemNodeSelector(map[string]string{"node.dgxc.nvidia.com/dedicated": "system-workload"}),
-			config.WithSystemNodeTolerations([]corev1.Toleration{
-				{Operator: corev1.TolerationOpExists},
-				{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
-			}),
-		)))
+	systemScheduling := []config.Option{
+		config.WithReadinessHooks(true),
+		config.WithDeployer(config.DeployerArgoCDHelm),
+		config.WithSystemNodeSelector(map[string]string{"node.dgxc.nvidia.com/dedicated": "system-workload"}),
+		config.WithSystemNodeTolerations([]corev1.Toleration{
+			{Operator: corev1.TolerationOpExists},
+			{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
+		}),
+	}
+	// literalSystemPlacement omits systemScheduling's keyless toleration.
+	literalSystemPlacement := []string{
+		"      nodeSelector:\n        node.dgxc.nvidia.com/dedicated: system-workload\n",
+		"      tolerations:\n      - effect: NoSchedule\n        key: CriticalAddonsOnly\n        operator: Exists\n      containers:\n",
+	}
+
+	t.Run("component scheduling paths place the gate from values", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig(systemScheduling...)))
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -176,12 +179,41 @@ func TestCollectComponentReadiness(t *testing.T) {
 		}
 		body := string(got["gpu-operator"][readinessManifestKey])
 		for _, want := range []string{
-			"      nodeSelector:\n        node.dgxc.nvidia.com/dedicated: system-workload\n",
-			"      tolerations:\n      - effect: NoSchedule\n        key: CriticalAddonsOnly\n        operator: Exists\n      containers:\n",
+			"      # nodeSelector from operator.nodeSelector {{`",
+			"      # tolerations from operator.tolerations {{`",
 		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("gate manifest missing %q:\n%s", want, body)
 			}
+		}
+		for _, literal := range literalSystemPlacement {
+			if strings.Contains(body, literal) {
+				t.Errorf("gate manifest carries bundle-level placement %q:\n%s", literal, body)
+			}
+		}
+	})
+
+	t.Run("bundle system scheduling places a gate whose component declares none", func(t *testing.T) {
+		olm := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{{Name: "gpu-operator-ocp-olm", Namespace: "nvidia-gpu-operator"}},
+		}
+		olm.BindDataProvider(recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ""))
+		b, err := New(WithConfig(config.NewConfig(systemScheduling...)))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		got, err := b.collectComponentReadiness(context.Background(), olm)
+		if err != nil {
+			t.Fatalf("collectComponentReadiness: %v", err)
+		}
+		body := string(got["gpu-operator-ocp-olm"][readinessManifestKey])
+		for _, want := range literalSystemPlacement {
+			if !strings.Contains(body, want) {
+				t.Errorf("gate manifest missing %q:\n%s", want, body)
+			}
+		}
+		if strings.Contains(body, ".Values") {
+			t.Errorf("gate manifest must not read values for a component without scheduling paths:\n%s", body)
 		}
 	})
 

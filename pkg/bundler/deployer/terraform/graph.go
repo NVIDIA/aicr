@@ -58,13 +58,14 @@ const (
 // reserves "-readiness" outright and rejects a component whose name would
 // collide with an injected "-pre"/"-post" sibling.
 func phaseOf(f localformat.Folder) phase {
+	if f.IsReadiness() {
+		return phaseReadiness
+	}
 	switch f.Name {
 	case f.Parent + "-pre":
 		return phasePre
 	case f.Parent + "-post":
 		return phasePost
-	case f.Parent + "-readiness":
-		return phaseReadiness
 	default:
 		return phasePrimary
 	}
@@ -210,11 +211,9 @@ func dedupeSorted(in []string) []string {
 // "something to fill in here", so it is listed only when there is. Matches the
 // helmfile deployer.
 //
-// The pre/post/readiness folders take no values at all. localformat hands each
-// auxiliary chart a copy of the parent's values, but their templates are
-// already rendered and reference nothing from .Values — and Terraform, unlike
-// helm, records the file contents in state, so wiring them up would diff the
-// gate every time the component's values changed.
+// The pre/post/readiness folders take no values_files. Helm reads each one's
+// own values.yaml, a copy of the parent's static values, which only the
+// readiness gate's placement uses.
 func valuesFilesFor(f localformat.Folder, dynamicPaths []string) []string {
 	files := []string{f.Dir + "/" + fileValues}
 	if len(dynamicPaths) > 0 {
