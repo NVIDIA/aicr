@@ -62,6 +62,8 @@ jobs:
       - name: Checkout frozen version content
         run: |
           set -eo pipefail
+          # No registered versions is valid: only "Latest" is published.
+          shopt -s nullglob
           for version_file in fern/versions/v*.yml; do
             [ -f "$version_file" ] || continue
             version=$(basename "$version_file" .yml)
