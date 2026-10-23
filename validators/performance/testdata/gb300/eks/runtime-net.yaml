@@ -14,7 +14,7 @@
 
 # NCCL all-reduce TrainingRuntime for GB300 on EKS, NET-transport variant.
 #
-# Identical to the GB200/EKS NET template: GB300's p6e-gb300r.36xlarge
+# Identical to the GB200/EKS NET template: the GB300 EKS instance
 # presents the same AWS-recommended single-EFA-per-node layout on the same
 # Grace ARM64 PCI topology as GB200's p6e-gb200.36xlarge, so the aws-ofi-nccl
 # plugin and image below are unchanged. Forces NCCL to route traffic over the
@@ -33,7 +33,7 @@
 # to Socket. The NET check's preflight reads /proc/driver/nvidia/params
 # and fails loudly if the override is missing.
 #
-# Measured on GB300 (2x p6e-gb300r.36xlarge, 8 GPUs, NCCL 2.27.7, 16 GiB
+# Measured on GB300 (2 GPU nodes, 8 GPUs, NCCL 2.27.7, 16 GiB
 # message): 45.44 GB/s busbw — see recipes/overlays/gb300-eks-training.yaml
 # for the floor this feeds.
 apiVersion: trainer.kubeflow.org/v1alpha1

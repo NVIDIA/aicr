@@ -184,7 +184,7 @@ reservations:
   # so the cluster config pins the backend region with stateLocation and the
   # actuator is pinned to a release that reads it (#3162, see the note there).
   #
-  # gpu-count is 4 because a p6e-gb300r.36xlarge carries 4 B300
+  # gpu-count is 4 because each GB300 EKS GPU node carries 4 B300
   # (describe-instance-types: GpuInfo B300 x 4, arm64, EFA-capable). The
   # reservation holds 18 of them, so it is exactly one NVL72 rack
   # (18 x 4 = 72 GPUs). The capacity ordering doc lists 16; that is the stale

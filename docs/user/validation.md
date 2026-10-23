@@ -83,7 +83,7 @@ is installed on the cluster.
 | Check | Transport | Default applicability (from recipe criteria) |
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE (GPUDirect TCPXO), H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
-| `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`; built-in IB/verbs on OKE) | GB200 + EKS, GB200 + OKE, and GB300 + EKS. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the benchmark on the default fabric — see [Grace Blackwell NET preflight](#grace-blackwell-net-preflight-gpudirect-rdma-prerequisites). |
+| `nccl-all-reduce-bw-net` | NET (EFA on EKS; built-in IB/verbs on OKE) | GB200 + EKS, GB200 + OKE, and GB300 + EKS. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the benchmark — see [Grace Blackwell NET preflight](#grace-blackwell-net-preflight-gpudirect-rdma-prerequisites). |
 | `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, GB200 + OKE, GB200 + GKE (A4X GPUDirect-RDMA/gIB carries the IMEX/NVLink fabric traffic; gIB is the transport driver, not the NCCL algorithm), GB300 (EKS, generic), and VR200 + RKE2. Asserts the NVLS communicator actually initialized. Catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE), or gIB/RDMA initialization failure (GKE), when the IMEX domain is misconfigured. |
 
 The applicability column is the *default*, derived from the recipe's
@@ -93,17 +93,6 @@ benchmarks explicitly — either by
 whose fabric matches its hardware, or, for a private service whose fabric
 matches no embedded template, by
 [supplying its own benchmark runtime](#supplying-a-benchmark-runtime-for-a-private-service).
-
-On EKS, the `-net` check defaults to the AWS EFA fabric. On a ConnectX **RoCE** cluster,
-set `AICR_NCCL_FABRIC=roce` in the `aicr
-validate` environment to run the NET test over NCCL's built-in IB/verbs
-transport across `roce.networking.k8s.aws` DRA devices instead. The value is
-scoped to the `-net` check only; unset (or `efa`) leaves every existing recipe
-on the EFA path unchanged, and any other value is rejected. The RoCE runtime
-image installs `openssh-server` at startup, so the GPU nodes need apt egress;
-on an air-gapped cluster the RoCE NET test cannot bootstrap. This env override is
-interim — snapshot-based fabric auto-detection (and removing the runtime
-package install once a CUDA-13 image ships sshd) is planned.
 
 **Overriding the NCCL workload image with `AICR_NCCL_RUNTIME_IMAGE`.** Each
 embedded `nccl-all-reduce-bw` / `-net` / `-nvls` template pins a specific
@@ -163,7 +152,7 @@ GB200/OKE training recipes follow the same pattern and enable `-net` and
 On OKE, `-net` exercises the NVL72 rack's InfiniBand east-west fabric
 (`rdma0-3`, advertised as `nvidia.com/mlnxnics` by the recipe's
 `rdmaSharedDevicePlugin` NicClusterPolicy) over NCCL's built-in IB/verbs
-transport — no EFA or RoCE plumbing is involved. Both variants were validated
+transport — no EFA plumbing is involved. Both variants were validated
 end to end on a `BM.GPU.GB200.4` NVL72 rack.
 
 ```bash
@@ -243,11 +232,7 @@ catches that on its own — it fails on a `Using network Socket` banner rather
 than reporting a figure — so the preflight exists to fail fast, naming the
 driver, instead of after a full benchmark run.
 
-The preflight runs on the default fabric only: EFA on EKS, built-in IB/verbs on
-OKE. `AICR_NCCL_FABRIC=roce` is EKS-only: there it selects a different template
-and skips the preflight, so the benchmark runs ungated. On OKE the RoCE
-combination is unsupported, so carrying the variable over makes the declared
-`-net` check skip entirely rather than run.
+The preflight covers both NET fabrics: EFA on EKS and built-in IB/verbs on OKE.
 
 **Before R595** — which includes `580.173.02`, the version AICR pins — the
 driver must be loaded with `NVreg_GrdmaPciTopoCheckOverride=1`. Without it the
