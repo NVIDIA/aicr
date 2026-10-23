@@ -595,9 +595,10 @@ type RecipeResult struct {
 
 	// owner identifies the Client that produced this RecipeResult.
 	// Set by every Client method that returns a RecipeResult; checked by
-	// every Client method that consumes one to reject cross-client
-	// misuse — passing a RecipeResult produced by Client A to Client B's
-	// methods would silently mix A's component refs with B's
+	// the bundle, validate, preflight, and evidence methods to reject
+	// cross-client misuse, while MirrorInventory accepts an unowned result
+	// by design — passing a RecipeResult produced by Client A to Client B's
+	// checking methods would silently mix A's component refs with B's
 	// DataProvider reads, producing the wrong Helm values or
 	// supplemental manifests without an error. Pointer identity is
 	// the token: zero-cost, naturally unique, and unforgeable from
