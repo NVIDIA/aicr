@@ -28,6 +28,8 @@ import (
 const (
 	ExtraKeyNodesValidated = "nodesValidated"
 	ExtraKeyNodesTotal     = "nodesTotal"
+	ExtraKeyNodesFailed    = "nodesFailed"
+	ExtraKeyNodesSkipped   = "nodesSkipped"
 	ExtraKeySkipReason     = "skipReason"
 	ExtraKeyRuntimeSource  = "runtimeSource"
 
