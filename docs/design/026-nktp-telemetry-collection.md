@@ -24,13 +24,13 @@ exactly that. Consumers keep today's endpoint.
 
 ### AICR's telemetry today
 
-Every stock recipe installs `prometheus-operator-crds` and
-`kube-prometheus-stack` in the `monitoring` namespace. `kube-prometheus-stack`
-runs a Prometheus server, Grafana, Alertmanager, `kube-state-metrics`, and
-`node-exporter`, and collects metrics only. Its defaults are for evaluation: the
-Prometheus server on `emptyDir`, Grafana with the password `admin`, and
-Alertmanager with no receiver. Five platform overlays give the Prometheus server
-a 50Gi volume.
+Every stock recipe except `ocp` and `b300-mk8s-ubuntu-inference-dynamo`
+installs `prometheus-operator-crds` and `kube-prometheus-stack` in the
+`monitoring` namespace. `kube-prometheus-stack` runs a Prometheus server,
+Grafana, Alertmanager, `kube-state-metrics`, and `node-exporter`, and collects
+metrics only. Its defaults are for evaluation: the Prometheus server on
+`emptyDir`, Grafana with the password `admin`, and Alertmanager with no
+receiver. Five platform overlays give the Prometheus server a 50Gi volume.
 
 Its Prometheus server serves two roles, which this decision separates:
 
@@ -57,7 +57,7 @@ collectors, each an `OpenTelemetryCollector` resource.
 |---|---|
 | `gateway_metrics`, `gateway_logs`, `gateway_traces` | Per-signal export to the backend. Autoscaled. |
 | `daemonset` | One per node: container and host logs, host metrics, node-local scraping, OTLP ingest. |
-| `large_target_metrics` | Scrapes endpoints that belong to no node, such as `kube-state-metrics`. |
+| `large_target_metrics` | Scrapes endpoints that belong to no node, such as the `kube-state-metrics` Deployments. |
 | `cluster_events` | Kubernetes events, once per cluster. |
 | `watchdog` | Receives the collectors' own telemetry on a separate path. |
 
@@ -111,9 +111,10 @@ namespace, and Service (`kube-prometheus-prometheus.monitoring:9090`), so the
 adapter, the Dynamo planner, and the validators are unchanged. It runs only the
 prometheus-operator and one Prometheus server. There is no Grafana,
 Alertmanager, `node-exporter`, `kube-state-metrics`, rule, or default
-ServiceMonitor. It stores hours of data on `emptyDir`, with no persistent
-volume, because its consumers rely on recent data. It stays in production; an
-owner may replace it under the contract in Decision 3.
+ServiceMonitor. It stores hours of data, capped by time and size, on a
+size-limited `emptyDir`, with no persistent volume, because its consumers rely
+on recent data. It stays in production; an owner may replace it under the
+contract in Decision 3.
 
 **Why the two roles are separate.** Pointing the consumers at `otel-lgtm` ties
 HPA and conformance to an evaluation backend and to NKTP's pipeline, and forces
@@ -143,11 +144,11 @@ selects every monitor in exactly those namespaces, whatever their labels, keeps
 only the declared series, and loads no rules, probes, or scrape configurations.
 Those paths cannot be overridden. A declared source that is absent or disabled
 fails the bundle, as does a pattern that does not compile. With
-`kube-prometheus-stack` disabled nothing is injected, and consumers use the
-platform's Prometheus, as `prometheus-adapter-ocp` does with OpenShift's Thanos
-Querier. Adding a consumer is a registry change only; overlays carry no
-telemetry configuration. Validators and evidence collection query only declared
-series, or query the observability backend.
+`kube-prometheus-stack` disabled nothing is injected or checked, and consumers
+use the platform's Prometheus, as `prometheus-adapter-ocp` does with
+OpenShift's Thanos Querier. Adding a consumer is a registry change only;
+overlays carry no telemetry configuration. Validators and evidence collection
+query only declared series, or query the observability backend.
 
 **Replacing the runtime Prometheus server.** An owner who points consumers at
 their own backend must provide:
@@ -162,7 +163,8 @@ their own backend must provide:
 - network reachability from every consumer.
 
 The Prometheus CRD marks scrape classes, which carry the series filter, as
-experimental. Their behavior is pinned with `prometheus-operator-crds`.
+experimental. Their behavior is pinned by the operator in
+`kube-prometheus-stack` and by `prometheus-operator-crds`, qualified together.
 
 ### 4. Upstream Ownership Boundary
 
@@ -198,19 +200,19 @@ that meet it.
   enables NKTP's bundled metrics-server where the platform ships no such API.
 - The node collector needs the `privileged` Pod Security level, which its
   namespace carries.
-- Nothing inside the release is sequenced. The collector resources are
-  created at the same time as the operator; its webhooks admit them even
-  before the operator is running, and the operator builds the collectors once
-  it starts. A deployer can report the release ready before any collector
-  exists, as `helm install --wait` does, so AICR's health check, not the
-  deployer, confirms the pipeline is up.
+- Nothing inside the release is sequenced. The collector resources are created
+  at the same time as the operator; its webhooks fail open and admit them even
+  before the operator is running, and the operator builds the collectors once it
+  starts. A deployer can report the release ready before any collector exists,
+  as `helm install --wait` does, so AICR's health check, not the deployer,
+  confirms the pipeline is up.
 
 **CRDs.**
 
 - NKTP is the sole owner of the `opentelemetry.io` CRDs. AICR replaces them
-  on upgrade wherever the deployer supports a CRD step, and the step never
-  applies the monitoring CRDs bundled inside NKTP's chart, which belong to
-  `prometheus-operator-crds`.
+  on upgrade wherever the deployer supports a CRD step, and neither the step
+  nor the release applies the monitoring CRDs bundled inside NKTP's chart,
+  which belong to `prometheus-operator-crds`.
 - Uninstall keeps the CRDs but deletes every collector, through a
   `pre-delete` hook on the deployers that run Helm hooks. That hook's Job has
   no toleration setting, so uninstall is qualified on a fully tainted cluster.
@@ -288,7 +290,7 @@ On an existing cluster the change is an in-place upgrade of
 
 **Positive.**
 
-- Every stock recipe collects logs, events, and OTLP traces as well as
+- Every recipe with NKTP collects logs, events, and OTLP traces as well as
   metrics, through one pinned, mirrored, health-checked pipeline.
 - Host metrics reach GPU nodes.
 - Collection scales per node by construction, and through the autoscalers on
@@ -302,7 +304,7 @@ On an existing cluster the change is an in-place upgrade of
   - no alert evaluation.
 - `--storage-class` no longer reaches telemetry. It still applies to
   `nvsentinel-mongodb` and `slurm-accounting-mariadb`.
-- Every stock recipe collects every container's logs, the node journal, and
+- Every recipe with NKTP collects every container's logs, the node journal, and
   host auth and audit logs, with no namespace filter.
 - NKTP requests several times the resources of today's stack, including a
   share on every GPU node.
@@ -381,7 +383,8 @@ scale stay unaddressed.
 - Every stock recipe that enables `kube-prometheus-stack` injects exactly the
   declared namespaces and series, identically through the CLI, the API server,
   and the SDK. The others inject nothing.
-- The runtime Prometheus server stores only declared series.
+- The runtime Prometheus server stores only declared series, within its time
+  and size caps.
 - The adapter serves both metrics APIs, and `pod-autoscaling` and
   `cluster-autoscaling` pass.
 - The Dynamo planner's SLA queries return data on an inference-dynamo
