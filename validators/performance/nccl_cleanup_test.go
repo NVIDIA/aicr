@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	stderrors "errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -34,6 +36,8 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
+
+	"github.com/NVIDIA/aicr/validators"
 )
 
 // ncclGVRListKinds maps every GVR applyNCCLResources touches to a fake list
@@ -304,5 +308,37 @@ func TestWaitForNamespaceGone_TimesOutWhenNeverDeleted(t *testing.T) {
 	}
 	if errorstest.ReportedCode(err) != aicrErrors.ErrCodeTimeout {
 		t.Errorf("got %v, want an ErrCodeTimeout-wrapped wait failure", err)
+	}
+}
+
+// TestCreateOrUpdateFromTemplate_Idempotent covers the AlreadyExists branch:
+// a re-apply must Get + Update the existing object, not fail.
+func TestCreateOrUpdateFromTemplate_Idempotent(t *testing.T) {
+	const ns = "aicr-validation"
+	const name = "test-claim"
+	claimPath := filepath.Join("testdata", "inference", "resource-claim-template.yaml")
+	data := map[string]string{"CLAIM_API_VERSION": "v1", "CLAIM_TEMPLATE_NAME": name, "NAMESPACE": ns}
+
+	fakeClient := newFakeDynamicClient()
+	ctx := &validators.Context{Ctx: context.Background(), DynamicClient: fakeClient}
+
+	if err := createOrUpdateFromTemplate(ctx, resourceClaimTemplateGVR, ns, claimPath, data, nil); err != nil {
+		t.Fatalf("first apply (create) failed: %v", err)
+	}
+	relabel := func(u *unstructured.Unstructured) error {
+		u.SetLabels(map[string]string{"apply": "second"})
+		return nil
+	}
+	if err := createOrUpdateFromTemplate(ctx, resourceClaimTemplateGVR, ns, claimPath, data, relabel); err != nil {
+		t.Fatalf("second apply (update) failed: %v", err)
+	}
+
+	got, err := fakeClient.Resource(resourceClaimTemplateGVR).Namespace(ns).
+		Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("object not found after re-apply: %v", err)
+	}
+	if got.GetLabels()["apply"] != "second" {
+		t.Errorf("labels = %v after second apply, want apply=second (update did not take effect)", got.GetLabels())
 	}
 }

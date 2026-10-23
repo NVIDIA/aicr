@@ -70,7 +70,8 @@ const (
 	//   - v4 added the named-in-skip-checks skipReason code.
 	//   - v5 added the bandwidth, readiness, inference, allocation-policy, and
 	//     operator-version keys, and the in-pod skipReason codes.
-	PolicyVersion = "v5"
+	//   - v6 narrowed the fabric extra's closed set to efa.
+	PolicyVersion = "v6"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata

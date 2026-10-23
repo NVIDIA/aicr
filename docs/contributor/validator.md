@@ -500,8 +500,8 @@ page are the contract.
 
 - NCCL publishes `transport`, `workerNodes`, and `gpusInvolved` before the
   benchmark runs, so a failed run still records its scope. `fabric` appears
-  only on `nccl-all-reduce-bw-net`, when it runs the baked-in EKS template. `tolerancePct` is the slack below `thresholdGbps`
-  that still passes.
+  only on `nccl-all-reduce-bw-net`, when it runs the baked-in EKS template.
+  `tolerancePct` is the slack below `thresholdGbps` that still passes.
 - `check-nvidia-smi` publishes `nodesValidated` and `nodesTotal` only after
   per-node verification runs, on pass or fail. An exit before that (no GPU
   nodes, all cordoned, or busy) publishes neither.
