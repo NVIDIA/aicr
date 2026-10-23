@@ -113,13 +113,6 @@ func resolveNCCLBenchmarkProfile(ctx *validators.Context) (*ncclBenchmarkTarget,
 // present in the compiled matrix so the wiring guarantee enforced by
 // TestSupportedNCCLCombinationsHaveRuntimeTemplates — advertised tuple ⇒
 // parseable runtime template — extends to every profile a recipe can name.
-//
-// Note: RoCE NET applicability is service-keyed and accelerator-agnostic
-// (roceNETSupportedServices), so a service present only there — with no
-// accelerator-keyed matrix tuple — could not be named by any profile. Every
-// RoCE service today also has matrix tuples; TestRoCEServicesHaveMatrixTuples
-// guards that invariant, and extending this check to consult
-// roceNETSupportedServices is the fix if a RoCE-only service is ever added.
 func benchmarkProfileKnown(target ncclBenchmarkTarget) bool {
 	for _, byService := range supportedNCCLCombinations {
 		if slices.Contains(byService[target.service], target.accelerator) {
@@ -151,16 +144,7 @@ func knownBenchmarkProfiles() []string {
 }
 
 // ncclCombinationSupported reports whether the target (accelerator, service)
-// pair implements the given variant on the given fabric. RoCE NET support is
-// fabric-keyed and accelerator-agnostic (roceNETSupportedServices); every
-// other combination is keyed through the per-variant compiled matrix.
-func ncclCombinationSupported(variant ncclVariant, fabric ncclFabricType, target ncclBenchmarkTarget) bool {
-	if fabric == fabricRoCE && variant == variantNET {
-		// RoCE NET is fabric-keyed and accelerator-agnostic — supported on any
-		// service with a testdata/roce/{service} template. Only NET has a RoCE
-		// path; NVLS (NVLink/IMEX) is fabric-independent and uses the normal
-		// accelerator-keyed combinations below.
-		return roceNETSupportedServices[target.service]
-	}
+// pair implements the given variant in the per-variant compiled matrix.
+func ncclCombinationSupported(variant ncclVariant, target ncclBenchmarkTarget) bool {
 	return slices.Contains(supportedNCCLCombinations[variant][target.service], target.accelerator)
 }

@@ -141,7 +141,7 @@ func TestGraceBlackwellNetPreflightApplies(t *testing.T) {
 }
 
 // realNVRMBanner is the verbatim /proc/driver/nvidia/version file captured on
-// 2026-09-07 from a p6e-gb300r.36xlarge node (Open Kernel Module, aarch64).
+// 2026-09-07 from a GB300 EKS node (Open Kernel Module, aarch64).
 // Recorded rather than invented: the real banner says "Open Kernel Module for
 // aarch64" and carries a "Release Build (dvs-builder@...)" segment, neither of
 // which a plausible-looking hand-written fixture would have included.

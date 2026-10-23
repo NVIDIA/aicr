@@ -112,7 +112,7 @@ func shippedTCPXORuntime(m []recipe.NetworkInterfaceMapping) *unstructured.Unstr
 
 func loadGKESkeleton(t *testing.T) *unstructured.Unstructured {
 	t.Helper()
-	skel, err := parseYAMLTemplate(templatePath(recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE, variantDefault, fabricEFA, "runtime.yaml"), nil)
+	skel, err := parseYAMLTemplate(templatePath(recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE, variantDefault, "runtime.yaml"), nil)
 	if err != nil {
 		t.Fatalf("load skeleton: %v", err)
 	}
@@ -388,7 +388,7 @@ func TestResolveBenchmarkRuntimeSource(t *testing.T) {
 		}
 	}
 	resolve := func(ctx *validators.Context, carrier string) (*benchmarkRuntimePlan, error) {
-		return resolveBenchmarkRuntimeSource(ctx, carrier, false, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE, variantDefault, fabricEFA)
+		return resolveBenchmarkRuntimeSource(ctx, carrier, false, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE, variantDefault)
 	}
 
 	t.Run("no delivered runtime -> cluster-capability, empty carrier", func(t *testing.T) {
@@ -429,7 +429,7 @@ func TestResolveBenchmarkRuntimeSource(t *testing.T) {
 	})
 	t.Run("benchmark profile + delivered runtime is rejected", func(t *testing.T) {
 		_, err := resolveBenchmarkRuntimeSource(newCtx(tcpxoRefs(m)), "", true,
-			recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE, variantDefault, fabricEFA)
+			recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE, variantDefault)
 		if err == nil || errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest || !strings.Contains(err.Error(), perfConstraintNCCLBenchmarkProfile) {
 			t.Fatalf("want ErrCodeInvalidRequest profile exclusivity, got %v", err)
 		}
@@ -454,17 +454,6 @@ func TestResolveBenchmarkRuntimeSource(t *testing.T) {
 		_, err := resolve(newCtx(tcpxoRefs(m), objs...), "")
 		if err == nil || errorstest.ReportedCode(err) != errors.ErrCodeNotFound || !strings.Contains(err.Error(), "do not exist on this cluster") {
 			t.Fatalf("want deployed-vs-cluster NotFound, got %v", err)
-		}
-	})
-	t.Run("delivered derivation ignores the validator's own fabric env", func(t *testing.T) {
-		// AICR_NCCL_FABRIC describes the embedded fixture's fabric; a delivered
-		// runtime carries its own wiring, so a RoCE override must not redirect
-		// the skeleton lookup to a template tree that does not exist for GKE.
-		objs := append([]runtime.Object{shippedTCPXORuntime(m)}, nets...)
-		plan, err := resolveBenchmarkRuntimeSource(newCtx(tcpxoRefs(m), objs...), "", false,
-			recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE, variantDefault, fabricRoCE)
-		if err != nil || plan.source != runtimeSourceDelivered {
-			t.Fatalf("fabric env must not affect a delivered derivation: plan=%+v err=%v", plan, err)
 		}
 	})
 	t.Run("delivered, deployed, consistent -> derived carrier", func(t *testing.T) {
@@ -517,7 +506,7 @@ func deliveredPlan(t *testing.T) *benchmarkRuntimePlan {
 		ValidationInput: validatorv1.ToValidationInput(&recipe.RecipeResult{
 			Criteria:      &recipe.Criteria{Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorH100},
 			ComponentRefs: tcpxoRefs(m)})}
-	plan, err := resolveBenchmarkRuntimeSource(ctx, "", false, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE, variantDefault, fabricEFA)
+	plan, err := resolveBenchmarkRuntimeSource(ctx, "", false, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE, variantDefault)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -569,7 +558,7 @@ func containerArgs(t *testing.T, obj *unstructured.Unstructured, job string) []s
 func TestDerivedRuntimeBuiltAtApplyTimeKeepsTypes(t *testing.T) {
 	plan := deliveredPlan(t)
 	obj, err := buildNCCLRuntimeObject(plan.carrier, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE,
-		variantDefault, fabricRoCE, "aicr-validation", derivedTemplateData, plan)
+		variantDefault, "aicr-validation", derivedTemplateData, plan)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -602,7 +591,7 @@ func TestDerivedRuntimeBuiltAtApplyTimeKeepsTypes(t *testing.T) {
 func TestDerivedRuntimeMeasuresShippedEnv(t *testing.T) {
 	plan := deliveredPlan(t)
 	obj, err := buildNCCLRuntimeObject(plan.carrier, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE,
-		variantDefault, fabricEFA, "ns", derivedTemplateData, plan)
+		variantDefault, "ns", derivedTemplateData, plan)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,7 +616,7 @@ func TestDerivedRuntimeMeasuresShippedEnv(t *testing.T) {
 	}
 	// The capability fixture is untouched: its launcher still carries its tuning.
 	fixture, err := buildNCCLRuntimeObject("", recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE,
-		variantDefault, fabricEFA, "ns", derivedTemplateData, nil)
+		variantDefault, "ns", derivedTemplateData, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -642,7 +631,7 @@ func TestDerivedRuntimeMeasuresShippedEnv(t *testing.T) {
 func TestFinalizeRuntimeProvenanceDescribesAppliedObject(t *testing.T) {
 	plan := deliveredPlan(t)
 	obj, err := buildNCCLRuntimeObject(plan.carrier, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE,
-		variantDefault, fabricEFA, "ns", derivedTemplateData, plan)
+		variantDefault, "ns", derivedTemplateData, plan)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -707,7 +696,7 @@ func TestRuntimeSourceEmittedBeforeDeliveredVerification(t *testing.T) {
 		ValidationInput: validatorv1.ToValidationInput(&recipe.RecipeResult{ComponentRefs: tcpxoRefs(m)})}
 	var err error
 	out := captureStdout(t, func() {
-		_, err = resolveBenchmarkRuntimeSource(ctx, "", false, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE, variantDefault, fabricEFA)
+		_, err = resolveBenchmarkRuntimeSource(ctx, "", false, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE, variantDefault)
 	})
 	if err == nil || errorstest.ReportedCode(err) != errors.ErrCodeNotFound {
 		t.Fatalf("control: want NotFound from the delivered verification, got %v", err)
@@ -755,7 +744,7 @@ func TestProvenanceRecordedOnlyAfterRuntimeApplied(t *testing.T) {
 		plan := deliveredPlan(t)
 		ctx := &validators.Context{Ctx: t.Context(), DynamicClient: client, Namespace: ns}
 		err := applyNCCLResources(ctx, client, config, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE,
-			variantDefault, fabricEFA, plan.carrier, "", plan)
+			variantDefault, plan.carrier, "", plan)
 		return plan, err
 	}
 	t.Run("create rejected -> no provenance", func(t *testing.T) {
@@ -793,7 +782,7 @@ func TestApplyNCCLResourcesPinsLauncher(t *testing.T) {
 		client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), ncclGVRListKinds)
 		ctx := &validators.Context{Ctx: t.Context(), DynamicClient: client, Namespace: ns}
 		if err := applyNCCLResources(ctx, client, config, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE,
-			variantDefault, fabricEFA, customRuntime, "", plan); err != nil {
+			variantDefault, customRuntime, "", plan); err != nil {
 			t.Fatal(err)
 		}
 		stored, err := client.Resource(trainingRuntimeGVR).Namespace(ns).Get(t.Context(), ncclTrainingRuntimeName, metav1.GetOptions{})
@@ -861,12 +850,12 @@ func TestDerivedRuntimeRejectsShippedGPUCountMismatch(t *testing.T) {
 	}
 	data["GPU_COUNT_PER_NODE"] = "4" // fixture ships nvidia.com/gpu: "8"
 	_, err := buildNCCLRuntimeObject(plan.carrier, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE,
-		variantDefault, fabricEFA, "ns", data, plan)
+		variantDefault, "ns", data, plan)
 	if err == nil || errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest || !strings.Contains(err.Error(), "carry 4 GPUs") {
 		t.Fatalf("want InvalidRequest GPU-count mismatch, got %v", err)
 	}
 	if _, err := buildNCCLRuntimeObject(plan.carrier, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE,
-		variantDefault, fabricEFA, "ns", derivedTemplateData, plan); err != nil {
+		variantDefault, "ns", derivedTemplateData, plan); err != nil {
 		t.Fatalf("control: matching count must derive: %v", err)
 	}
 }

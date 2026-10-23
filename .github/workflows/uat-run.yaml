@@ -440,6 +440,8 @@ jobs:
       skip_tests: ${{ inputs.skip_tests }}
       deployer: ${{ inputs.deployer }}
       nvsentinel_remediation: ${{ inputs.nvsentinel_remediation }}
+    secrets:
+      AWS_GB300_INSTANCE_TYPE: ${{ secrets.AWS_GB300_INSTANCE_TYPE }}
 
   run-gcp:
     needs: resolve
