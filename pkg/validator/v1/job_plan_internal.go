@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -390,7 +391,7 @@ func preferCPUNodeAffinity() *corev1.Affinity {
 					Preference: corev1.NodeSelectorTerm{
 						MatchExpressions: []corev1.NodeSelectorRequirement{
 							{
-								Key:      "nvidia.com/gpu.present",
+								Key:      defaults.GPUPresentNodeLabelKey,
 								Operator: corev1.NodeSelectorOpDoesNotExist,
 							},
 						},

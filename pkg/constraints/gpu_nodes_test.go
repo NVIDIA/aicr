@@ -32,7 +32,10 @@ import (
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
-const optOutLabel = "gke-no-default-nvidia-gpu-device-plugin"
+const (
+	optOutLabel = "gke-no-default-nvidia-gpu-device-plugin"
+	mofed       = "network.nvidia.com/operator.mofed.wait"
+)
 
 // providerMeasurement builds the K8s "node" subtype the fingerprint reads to
 // resolve service. Every helper in this file includes it because the
@@ -81,10 +84,20 @@ func topologySnapshotFor(provider string, labels map[string]string) *snapshotter
 	}
 }
 
-// TestEvaluateGPUNodesLabel pins the node-set constraint form's semantics
-// (issue #1755): every-node and no-node predicates over the GPU universe
-// derived from cloud.google.com/gke-accelerator readings, failing closed on
-// truncation, empty universes, and malformed values — in both directions.
+// losslessTopologySnapshotFor is topologySnapshotFor in the lossless item
+// encoding. Keys must be plain label keys, not the disambiguated
+// "<key>.<value>" shape.
+func losslessTopologySnapshotFor(provider string, labels map[string]string) *snapshotter.Snapshot {
+	items := make([]labelItem, 0, len(labels))
+	for k, v := range labels {
+		value, nodes, _ := strings.Cut(v, "|")
+		items = append(items, labelItem{k, value, nodes})
+	}
+	return itemsSnapshotFor(provider, items...)
+}
+
+// TestEvaluateGPUNodesLabel tests the node-set constraint form on GKE
+// snapshots, including its fail-closed cases.
 func TestEvaluateGPUNodesLabel(t *testing.T) {
 	t.Parallel()
 
@@ -95,6 +108,7 @@ func TestEvaluateGPUNodesLabel(t *testing.T) {
 		name       string
 		value      string
 		labels     map[string]string
+		lossless   bool // encode labels as items instead of legacy Data
 		wantPassed bool
 		wantCode   errors.ErrorCode // "" means no error expected
 		wantActual string           // substring match; "" skips the check
@@ -117,7 +131,7 @@ func TestEvaluateGPUNodesLabel(t *testing.T) {
 				optOutLabel:                        "true|gpu-a,gpu-c",
 			},
 			wantPassed: false,
-			wantActual: "1 of 3 GPU node(s) missing " + optOutLabel + "=true: gpu-b",
+			wantActual: "1 of 3 GPU node(s) do not match " + optOutLabel + "=true: gpu-b",
 		},
 		{
 			name:  "positive fails when the label is absent entirely",
@@ -126,7 +140,7 @@ func TestEvaluateGPUNodesLabel(t *testing.T) {
 				"cloud.google.com/gke-accelerator": "nvidia-h100-80gb|gpu-a",
 			},
 			wantPassed: false,
-			wantActual: "1 of 1 GPU node(s) missing",
+			wantActual: "1 of 1 GPU node(s) do not match",
 		},
 		{
 			name:  "positive fails on mixed values via disambiguated keys",
@@ -165,8 +179,9 @@ func TestEvaluateGPUNodesLabel(t *testing.T) {
 			labels: map[string]string{
 				"cloud.google.com/gke-accelerator": "nvidia-h100-80gb|gpu-a,gpu-b",
 			},
+			lossless:   true,
 			wantPassed: true,
-			wantActual: "none of 2 GPU node(s)",
+			wantActual: "all 2 GPU node(s) match " + negated,
 		},
 		{
 			name:  "negated fails when a GPU node carries the key",
@@ -175,8 +190,9 @@ func TestEvaluateGPUNodesLabel(t *testing.T) {
 				"cloud.google.com/gke-accelerator": "nvidia-h100-80gb|gpu-a,gpu-b",
 				optOutLabel:                        "true|gpu-b",
 			},
+			lossless:   true,
 			wantPassed: false,
-			wantActual: "1 of 2 GPU node(s) carry label " + optOutLabel + ": gpu-b",
+			wantActual: "1 of 2 GPU node(s) do not match " + negated + ": gpu-b",
 		},
 		{
 			name:  "negated ignores the key on non-GPU nodes",
@@ -185,7 +201,90 @@ func TestEvaluateGPUNodesLabel(t *testing.T) {
 				"cloud.google.com/gke-accelerator": "nvidia-h100-80gb|gpu-a",
 				optOutLabel:                        "true|system-b",
 			},
+			lossless:   true,
 			wantPassed: true,
+		},
+		{
+			name:  "not-equals passes when GPU nodes lack the value or the key",
+			value: optOutLabel + "!=true",
+			labels: map[string]string{
+				"cloud.google.com/gke-accelerator": "nvidia-h100-80gb|gpu-a,gpu-b",
+				optOutLabel:                        "false|gpu-a",
+			},
+			lossless:   true,
+			wantPassed: true,
+		},
+		{
+			name:  "notin fails when a GPU node carries a listed value",
+			value: optOutLabel + " notin (true)",
+			labels: map[string]string{
+				"cloud.google.com/gke-accelerator": "nvidia-h100-80gb|gpu-a,gpu-b",
+				optOutLabel:                        "true|gpu-b",
+			},
+			lossless:   true,
+			wantPassed: false,
+			wantActual: "gpu-b",
+		},
+		{
+			name:  "in passes when every GPU node carries a listed value",
+			value: optOutLabel + " in (a,b)",
+			labels: map[string]string{
+				"cloud.google.com/gke-accelerator": "nvidia-h100-80gb|gpu-a,gpu-b",
+				optOutLabel + ".a":                 "a|gpu-a",
+				optOutLabel + ".b":                 "b|gpu-b",
+			},
+			wantPassed: true,
+		},
+		{
+			name:  "bare key fails when a GPU node lacks the key",
+			value: optOutLabel,
+			labels: map[string]string{
+				"cloud.google.com/gke-accelerator": "nvidia-h100-80gb|gpu-a,gpu-b",
+				optOutLabel:                        "false|gpu-a",
+			},
+			wantPassed: false,
+			wantActual: "1 of 2 GPU node(s) do not match " + optOutLabel + ": gpu-b",
+		},
+		{
+			name:  "greater-than compares integer label values",
+			value: "nvidia.com/gpu.count>4",
+			labels: map[string]string{
+				"cloud.google.com/gke-accelerator": "nvidia-h100-80gb|gpu-a,gpu-b",
+				"nvidia.com/gpu.count.8":           "8|gpu-a",
+				"nvidia.com/gpu.count.4":           "4|gpu-b",
+			},
+			wantPassed: false,
+			wantActual: "gpu-b",
+		},
+		{
+			name:  "comma-joined requirements must all hold",
+			value: positive + "," + mofed + "=false",
+			labels: map[string]string{
+				"cloud.google.com/gke-accelerator": "nvidia-h100-80gb|gpu-a,gpu-b",
+				optOutLabel:                        "true|gpu-a,gpu-b",
+				mofed:                              "false|gpu-a",
+			},
+			wantPassed: false,
+			wantActual: "gpu-b",
+		},
+		{
+			name:  "negated passes on a Data-only snapshot when no GPU node carries the key",
+			value: negated,
+			labels: map[string]string{
+				"cloud.google.com/gke-accelerator": "nvidia-h100-80gb|gpu-a,gpu-b",
+			},
+			wantPassed: true,
+		},
+		{
+			name:  "not-equals in a joined selector fails on a Data-only snapshot",
+			value: positive + "," + mofed + "!=true",
+			labels: map[string]string{
+				"cloud.google.com/gke-accelerator": "nvidia-h100-80gb|gpu-a,gpu-b",
+				optOutLabel:                        "true|gpu-a,gpu-b",
+				mofed:                              "true|gpu-b",
+			},
+			wantPassed: false,
+			wantActual: "gpu-b",
 		},
 		{
 			name:  "empty GPU universe fails closed for the positive form",
@@ -232,7 +331,7 @@ func TestEvaluateGPUNodesLabel(t *testing.T) {
 		},
 		{
 			name:  "disambiguated prefix from a different label key is not misattributed",
-			value: negated,
+			value: optOutLabel,
 			labels: map[string]string{
 				"cloud.google.com/gke-accelerator": "nvidia-h100-80gb|gpu-a",
 				// A distinct label key that happens to extend the target key
@@ -240,7 +339,8 @@ func TestEvaluateGPUNodesLabel(t *testing.T) {
 				// suffix ("mode"), so it must not count as the target label.
 				optOutLabel + ".mode": "on|gpu-a",
 			},
-			wantPassed: true,
+			wantPassed: false,
+			wantActual: "gpu-a",
 		},
 		{
 			name:  "single dotted-shape entry without the plain key is ambiguous",
@@ -409,7 +509,7 @@ func TestEvaluateGPUNodesLabel(t *testing.T) {
 				optOutLabel + ".c.d": "c.d|gpu-b",
 			},
 			wantPassed: false,
-			wantActual: "1 of 2 GPU node(s) missing " + optOutLabel + "=a.b: gpu-b",
+			wantActual: "1 of 2 GPU node(s) do not match " + optOutLabel + "=a.b: gpu-b",
 		},
 		{
 			name:  "truncated entry of a different dotted key is skipped, not an error",
@@ -443,8 +543,8 @@ func TestEvaluateGPUNodesLabel(t *testing.T) {
 			wantCode: errors.ErrCodeInvalidRequest,
 		},
 		{
-			name:     "bare key without value is rejected",
-			value:    optOutLabel,
+			name:     "empty selector is rejected",
+			value:    "",
 			labels:   map[string]string{"cloud.google.com/gke-accelerator": "nvidia-h100-80gb|gpu-a"},
 			wantCode: errors.ErrCodeInvalidRequest,
 		},
@@ -495,7 +595,11 @@ func TestEvaluateGPUNodesLabel(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			c := recipe.Constraint{Name: GPUNodesLabelConstraintName, Value: tt.value}
-			result := Evaluate(c, topologySnapshot(tt.labels))
+			snap := topologySnapshot(tt.labels)
+			if tt.lossless {
+				snap = losslessTopologySnapshotFor("gke", tt.labels)
+			}
+			result := Evaluate(c, snap)
 
 			if tt.wantCode != "" {
 				if result.Error == nil {
@@ -649,6 +753,239 @@ func TestEvaluateGPUNodesLabelPerService(t *testing.T) {
 				t.Errorf("error message = %q, want substring %q", result.Error.Error(), tt.wantMessage)
 			}
 		})
+	}
+}
+
+// TestEvaluateReadinessGPUNodesLabelUniverse tests which GPU-node universe
+// EvaluateReadiness uses for mapped, unmapped, and unresolvable services.
+func TestEvaluateReadinessGPUNodesLabelUniverse(t *testing.T) {
+	t.Parallel()
+
+	const (
+		present  = "nvidia.com/gpu.present"
+		mofedSet = mofed + "=false"
+	)
+
+	tests := []struct {
+		name        string
+		value       string
+		provider    string
+		labels      map[string]string
+		lossless    bool // encode labels as items instead of legacy Data
+		wantPassed  bool
+		wantCode    errors.ErrorCode // "" means no error expected
+		wantActual  string           // substring match, "" skips the check
+		wantMessage string           // substring match on the error message, "" skips the check
+	}{
+		{
+			name:     "unknown service passes when every GPU node carries the label",
+			value:    mofedSet,
+			provider: "",
+			labels: map[string]string{
+				present: "true|gpu-a,gpu-b",
+				mofed:   "false|gpu-a,gpu-b,cpu-a",
+			},
+			wantPassed: true,
+			wantActual: "all 2 GPU node(s)",
+		},
+		{
+			name:     "unmapped service fails naming the GPU node still waiting",
+			value:    mofedSet,
+			provider: "eks",
+			labels: map[string]string{
+				present:          "true|gpu-a,gpu-b",
+				mofed + ".false": "false|gpu-a",
+				mofed + ".true":  "true|gpu-b",
+			},
+			wantPassed: false,
+			wantActual: "1 of 2 GPU node(s) do not match " + mofedSet + ": gpu-b",
+		},
+		{
+			name:     "unmapped service fails when a GPU node lacks the label",
+			value:    mofedSet,
+			provider: "oke",
+			labels: map[string]string{
+				present: "true|gpu-a,gpu-b",
+				mofed:   "false|gpu-a",
+			},
+			wantPassed: false,
+			wantActual: "gpu-b",
+		},
+		{
+			name:     "negated form passes when no GPU node carries the key",
+			value:    "!" + optOutLabel,
+			provider: "",
+			labels: map[string]string{
+				present:     "true|gpu-a",
+				optOutLabel: "true|cpu-a",
+			},
+			lossless:   true,
+			wantPassed: true,
+			wantActual: "all 1 GPU node(s) match !" + optOutLabel,
+		},
+		{
+			name:     "nodes labeled gpu.present=false are outside the universe",
+			value:    mofedSet,
+			provider: "",
+			labels: map[string]string{
+				present + ".true":  "true|gpu-a",
+				present + ".false": "false|cpu-a",
+				mofed:              "false|gpu-a",
+			},
+			wantPassed: true,
+			wantActual: "all 1 GPU node(s)",
+		},
+		{
+			name:     "no gpu.present label fails closed and points at deployment",
+			value:    mofedSet,
+			provider: "",
+			labels: map[string]string{
+				mofed: "false|gpu-a",
+			},
+			wantCode:    errors.ErrCodeNotFound,
+			wantMessage: "capture the snapshot after the bundle is deployed",
+		},
+		{
+			name:     "only gpu.present=false fails closed as an empty universe",
+			value:    "!" + optOutLabel,
+			provider: "eks",
+			labels: map[string]string{
+				present: "false|cpu-a",
+			},
+			wantCode:    errors.ErrCodeNotFound,
+			wantMessage: "GPU-node universe is empty",
+		},
+		{
+			name:     "truncated gpu.present reading fails closed",
+			value:    mofedSet,
+			provider: "",
+			labels: map[string]string{
+				present: "true|gpu-a (+3 more)",
+				mofed:   "false|gpu-a",
+			},
+			wantCode: errors.ErrCodeInvalidRequest,
+		},
+		{
+			// gpu-b carries gke-accelerator but not gpu.present, so only
+			// GKE's own universe counts it as a GPU node.
+			name:     "mapped service keeps its universe label",
+			value:    optOutLabel + "=true",
+			provider: "gke",
+			labels: map[string]string{
+				"cloud.google.com/gke-accelerator": "nvidia-h100-80gb|gpu-a,gpu-b",
+				present:                            "true|gpu-a",
+				optOutLabel:                        "true|gpu-a",
+			},
+			wantPassed: false,
+			wantActual: "1 of 2 GPU node(s) do not match " + optOutLabel + "=true: gpu-b",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := recipe.Constraint{Name: GPUNodesLabelConstraintName, Value: tt.value}
+			snap := topologySnapshotFor(tt.provider, tt.labels)
+			if tt.lossless {
+				snap = losslessTopologySnapshotFor(tt.provider, tt.labels)
+			}
+			result := EvaluateReadiness(c, snap)
+
+			if tt.wantCode != "" {
+				if result.Error == nil {
+					t.Fatalf("expected error with code %s, got none (passed=%v, actual=%q)",
+						tt.wantCode, result.Passed, result.Actual)
+				}
+				if errorstest.ReportedCode(result.Error) != tt.wantCode {
+					t.Fatalf("error code = %v, want %s", result.Error, tt.wantCode)
+				}
+				if tt.wantMessage != "" && !strings.Contains(result.Error.Error(), tt.wantMessage) {
+					t.Errorf("error message = %q, want substring %q", result.Error.Error(), tt.wantMessage)
+				}
+				return
+			}
+			if result.Error != nil {
+				t.Fatalf("unexpected error: %v", result.Error)
+			}
+			if result.Passed != tt.wantPassed {
+				t.Errorf("Passed = %v, want %v (actual=%q)", result.Passed, tt.wantPassed, result.Actual)
+			}
+			if tt.wantActual != "" && !strings.Contains(result.Actual, tt.wantActual) {
+				t.Errorf("Actual = %q, want substring %q", result.Actual, tt.wantActual)
+			}
+		})
+	}
+}
+
+// TestGPUNodesLabelUniverseFallbackIsReadinessOnly tests that Evaluate fails
+// closed on snapshots that EvaluateReadiness evaluates.
+func TestGPUNodesLabelUniverseFallbackIsReadinessOnly(t *testing.T) {
+	t.Parallel()
+
+	labels := map[string]string{
+		"nvidia.com/gpu.present": "true|gpu-a,gpu-b",
+		optOutLabel:              "true|gpu-a,gpu-b",
+	}
+	c := recipe.Constraint{Name: GPUNodesLabelConstraintName, Value: optOutLabel + "=true"}
+
+	for _, provider := range []string{"", "eks", "aks"} {
+		t.Run("provider="+provider, func(t *testing.T) {
+			t.Parallel()
+			snap := topologySnapshotFor(provider, labels)
+
+			gen := Evaluate(c, snap)
+			if gen.Error == nil {
+				t.Fatalf("Evaluate: expected fail-closed error, got passed=%v actual=%q", gen.Passed, gen.Actual)
+			}
+			if errorstest.ReportedCode(gen.Error) != errors.ErrCodeNotFound {
+				t.Fatalf("Evaluate error code = %v, want %s", gen.Error, errors.ErrCodeNotFound)
+			}
+			if !strings.Contains(gen.Error.Error(), "validation.readiness.constraints") {
+				t.Errorf("Evaluate error = %q, want it to point at validation.readiness.constraints", gen.Error.Error())
+			}
+
+			ready := EvaluateReadiness(c, snap)
+			if ready.Error != nil {
+				t.Fatalf("EvaluateReadiness: unexpected error: %v", ready.Error)
+			}
+			if !ready.Passed {
+				t.Errorf("EvaluateReadiness: Passed = false, want true (actual=%q)", ready.Actual)
+			}
+		})
+	}
+}
+
+// TestEvaluateReadinessGPUNodesLabelRoundTripsCollectorEncoding tests
+// EvaluateReadiness on topology.Collector output for nodes with mixed
+// gpu.present values, which the collector reports as one reading per value.
+func TestEvaluateReadinessGPUNodesLabelRoundTripsCollectorEncoding(t *testing.T) {
+	t.Parallel()
+
+	node := func(name string, labels map[string]string) *corev1.Node {
+		return &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels}}
+	}
+	c := &topology.Collector{
+		ClientSet: fake.NewClientset(
+			node("gpu-a", map[string]string{"nvidia.com/gpu.present": "true", mofed: "false"}),
+			node("gpu-b", map[string]string{"nvidia.com/gpu.present": "true", mofed: "true"}),
+			node("cpu-a", map[string]string{"nvidia.com/gpu.present": "false", mofed: "true"}),
+		),
+	}
+	m, err := c.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("Collect() failed: %v", err)
+	}
+	snap := &snapshotter.Snapshot{Measurements: []*measurement.Measurement{providerMeasurement(""), m}}
+
+	result := EvaluateReadiness(recipe.Constraint{Name: GPUNodesLabelConstraintName, Value: mofed + "=false"}, snap)
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if result.Passed {
+		t.Fatal("Passed = true, want false: gpu-b still waits for MOFED")
+	}
+	if want := "1 of 2 GPU node(s) do not match " + mofed + "=false: gpu-b"; !strings.Contains(result.Actual, want) {
+		t.Errorf("Actual = %q, want substring %q", result.Actual, want)
 	}
 }
 
@@ -940,6 +1277,10 @@ func TestGPUNodesLabelLegacyDataSnapshotStillEvaluates(t *testing.T) {
 type labelItem struct{ key, value, nodes string }
 
 func itemsSnapshot(items ...labelItem) *snapshotter.Snapshot {
+	return itemsSnapshotFor("gke", items...)
+}
+
+func itemsSnapshotFor(provider string, items ...labelItem) *snapshotter.Snapshot {
 	entries := make([]measurement.ItemEntry, 0, len(items))
 	for _, it := range items {
 		names := strings.Split(it.nodes, ",")
@@ -954,7 +1295,7 @@ func itemsSnapshot(items ...labelItem) *snapshotter.Snapshot {
 	}
 	return &snapshotter.Snapshot{
 		Measurements: []*measurement.Measurement{
-			providerMeasurement("gke"),
+			providerMeasurement(provider),
 			{
 				Type:     measurement.TypeNodeTopology,
 				Subtypes: []measurement.Subtype{{Name: "label", Items: entries}},
@@ -963,11 +1304,8 @@ func itemsSnapshot(items ...labelItem) *snapshotter.Snapshot {
 	}
 }
 
-// TestGPUNodesLabelRejectsNonPartitionedItems pins that entries for one label
-// key must partition their nodes. Without it a node listed under both "true"
-// and "false" passes "=true": evaluateEveryGPUNodeHasValue skips the entry
-// whose value does not match, so the contradiction never reaches the tally and
-// a readiness gate returns PASS on a cluster that cannot exist.
+// TestGPUNodesLabelRejectsNonPartitionedItems tests that evaluation fails
+// closed when one node is listed under two values of the same label key.
 func TestGPUNodesLabelRejectsNonPartitionedItems(t *testing.T) {
 	t.Parallel()
 
