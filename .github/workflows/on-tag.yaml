@@ -242,6 +242,51 @@ jobs:
         with:
           mode: enforced
 
+      # Stable tags only: pin the tag GoReleaser releases, and start the release
+      # notes at the previous STABLE tag.
+      #
+      # Current tag (#3289). GoReleaser reads it from GORELEASER_CURRENT_TAG and,
+      # when that is unset, takes the first line of
+      # `git tag --points-at HEAD --sort -version:refname`. After
+      # `make bump-promote` the GA tag and its RC tag point at the same commit,
+      # and git version-sorts v1.3.0-rc2 ahead of v1.3.0, so an unpinned GA run
+      # would be built, versioned, and published as the RC. Pin it to the tag
+      # that triggered this run. The `detect` job has already required it to be
+      # valid SemVer. This is written first so no early exit below can skip it.
+      #
+      # Previous tag. GoReleaser picks it with
+      # `git describe --tags --abbrev=0 tags/<tag>^`, which counts pre-release
+      # tags. With an RC of this version still on the remote, the RC on an
+      # earlier commit becomes the base of the `changelog.use: github` compare
+      # and the GA notes list only the changes since that RC.
+      # GORELEASER_PREVIOUS_TAG overrides that lookup. The exclusion matches
+      # tools/changelog, which also skips pre-release tags (any tag with a
+      # hyphen).
+      #
+      # Pre-releases are left alone: an RC's notes still cover the changes since
+      # the previous tag of any kind, so rc2 lists what landed after rc1.
+      #
+      # GITHUB_ENV is inherited by the steps of the composite action below,
+      # which is where `make release` runs goreleaser.
+      - name: Pin the release tag and the previous stable tag
+        if: needs.detect.outputs.is_prerelease == 'false'
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          echo "GORELEASER_CURRENT_TAG=${TAG}" >> "${GITHUB_ENV}"
+          if ! previous="$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' "refs/tags/${TAG}^")"; then
+            echo "::notice::no stable tag precedes ${TAG}; leaving the previous tag to GoReleaser"
+            exit 0
+          fi
+          if [[ ! "${previous}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::previous stable tag is not a plain SemVer tag: ${previous}"
+            exit 1
+          fi
+          echo "GORELEASER_PREVIOUS_TAG=${previous}" >> "${GITHUB_ENV}"
+          echo "Releasing ${TAG}; release notes start at ${previous}"
+
       - name: Build and Release
         id: release
         uses: ./.github/actions/go-build-release

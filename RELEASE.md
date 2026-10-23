@@ -210,9 +210,12 @@ make bump-minor       # v1.2.3 → v1.3.0
 
 `make bump-*` checks for a clean, pushed tree, computes the next version from
 the latest **local** tag, tags `HEAD`, and pushes the tag, which starts the
-release pipeline. No commits are created. `make changelog` previews the changes
-since the last stable tag; the changelog is generated for the GitHub release
-and not committed.
+release pipeline. No commits are created. `make bump-major`, `bump-minor`, and
+`bump-patch` count from the latest **stable** tag, so a leftover RC of the next
+version does not change the result; `bump-rc` counts from the latest tag of any
+kind so that it can increment an existing RC. `make changelog` previews the
+changes since the last stable tag; the changelog is generated for the GitHub
+release and not committed.
 
 ### Release Candidates
 
@@ -236,46 +239,47 @@ Slack notifications fire for both pre-releases and stable releases.
 
 ### Promoting an RC to GA
 
-Delete every RC of the version, on GitHub and locally, before tagging GA. Two
-things go wrong otherwise:
-
-- **Incomplete release notes.** GoReleaser picks the previous tag with
-  `git describe` on the parent of the GA commit, so an RC tag on an earlier
-  commit becomes the previous tag and the GA notes list only the changes since
-  that RC. `make bump-promote` leaves the RC tags in place, so it is not used
-  until [#3289](https://github.com/NVIDIA/aicr/issues/3289) is fixed.
-- **Wrong version.** `make bump-*` reads the latest local tag, so a leftover
-  `v1.3.0-rc2` makes `make bump-minor` produce `v1.4.0`.
+Promote the RC that was validated. The RC tag must exist locally and
+`origin/main` must be current, so fetch first:
 
 ```bash
-VERSION=v1.3.0
-RC="${VERSION}-rc2"
-
-# Delete the RC release and its tag on GitHub
-gh release delete "${RC}" --repo NVIDIA/aicr --cleanup-tag --yes
-
-# Update the local clone and delete the local tag
-git checkout main
-git pull --all
-git tag -d "${RC}"
-
-# Both must print nothing; delete any earlier RC of this version the same way
-git ls-remote --tags origin "${VERSION}-rc*"
-git tag -l "${VERSION}-rc*"
-
-make bump-minor       # v1.2.3 → v1.3.0 (bump-major for a new major)
+git fetch origin --tags
+make bump-promote TAG=v1.3.0-rc2     # tags v1.3.0 on the RC's commit and pushes it
 ```
 
+`make bump-promote` tags the RC's own commit, so GA ships exactly what the RC
+validated. Anything merged to `main` after the RC waits for the next release.
+The commit must be reachable from `origin/main`; otherwise the target refuses.
 The GA tag runs the full pipeline and rebuilds from source; it does not reuse
-the RC's images, which stay on GHCR. `make bump-minor` tags `HEAD`, so anything
-merged after the RC ships in GA without RC validation. To ship exactly the
-validated commit, save `SHA=$(git rev-list -n1 "${RC}")` before deleting the RC,
-then tag it directly instead of running `make bump-minor`:
+the RC's images, which stay on GHCR.
+
+Leave the RC releases and tags in place. They are history, and nothing has to
+be deleted before tagging GA:
+
+- **Release tag.** After `make bump-promote` the GA tag and its RC tag point at
+  the same commit, and git version-sorts `v1.3.0-rc2` ahead of `v1.3.0`. Left
+  alone, GoReleaser would take the RC as the tag being released and build the
+  GA run as that RC. For a stable tag, the release workflow sets
+  `GORELEASER_CURRENT_TAG` to the tag that triggered the run, so GA is always
+  released as GA.
+- **Release notes.** For a stable tag, the release workflow sets
+  `GORELEASER_PREVIOUS_TAG` to the latest stable tag before the GA commit, so
+  the GA notes always cover everything since the previous stable release. They
+  do not start at an RC, whether GA is tagged on the RC's commit or on a later
+  one. RC notes are unchanged: they cover the changes since the previous tag of
+  any kind, so `rc2` lists what landed after `rc1`.
+- **Version.** `make bump-major`, `bump-minor`, and `bump-patch` ignore RC tags,
+  so a leftover `v1.3.0-rc2` does not turn `make bump-minor` into `v1.4.0`.
+
+To ship `HEAD` instead of the RC's commit, for example because a fix landed
+after the RC, tag it as an ordinary release:
 
 ```bash
-git tag -a "${VERSION}" "${SHA}" -m "Release ${VERSION}"
-git push origin "${VERSION}"
+make bump-minor       # v1.2.3 → v1.3.0, even with v1.3.0-rc2 present (bump-major for a new major)
 ```
+
+That release includes everything merged after the RC, so it ships without RC
+validation of those changes.
 
 ### Re-run Existing Release
 
@@ -520,8 +524,9 @@ fi
 | Tests fail during release | Fix on `main`, cut new tag |
 | Lint errors | Run `make lint` locally before releasing |
 | Image push failure | Check GHCR permissions |
-| GA release notes list only changes since an RC | An RC tag of that version was still on the remote; see [Promoting an RC to GA](#promoting-an-rc-to-ga) |
-| `make bump-minor` skips a version | A deleted RC tag is still in the local clone; `git tag -d` it |
+| GA release notes list only changes since an RC | The `Pin the release tag and the previous stable tag` step in the `build-ko` job should have set `GORELEASER_PREVIOUS_TAG`; check that it ran. It is skipped for pre-releases, and sets no previous tag when no earlier stable tag exists. See [Promoting an RC to GA](#promoting-an-rc-to-ga) |
+| A GA run builds or publishes as its RC (RC version in the artifacts, or a conflict with the existing RC release) | The same step should have set `GORELEASER_CURRENT_TAG` to the GA tag; check its log. Without it, GoReleaser picks the RC when both tags are on one commit |
+| `make bump-major`, `bump-minor`, or `bump-patch` computes an unexpected version | They count from the latest stable tag reachable from `HEAD` in your local clone. Run `git fetch origin --tags`, then `git describe --tags --abbrev=0 --match='v[0-9]*' --exclude='*-*'` to see the base |
 | Promotion partially completed | Re-run failed jobs for the same workflow run; do not repoint aliases manually |
 | Version alias conflict | Stop and verify the existing digest; the workflow intentionally refuses overwrite |
 | Draft identity or asset check fails | Inspect the exact-tag draft; correct the name/tag or remove only verified stale assets, then re-run failed jobs |
