@@ -1647,7 +1647,7 @@ func recipeDeclaresRDMAFabric(ref recipe.ComponentRef) bool {
 // Cordoned RDMA-capable nodes: like check-nvidia-smi (#1668/#1936), a cordoned
 // Mellanox RDMA GPU node is excluded from the *validated* cohort (the NCCL
 // workload will not land on it) but is NOT silently dropped. It is enumerated via
-// helper.FindGpuNodes, disclosed explicitly as "skipped (cordoned)" in stdout,
+// helper.FindGpuNodes, disclosed explicitly as "SKIPPED (cordoned)" in stdout,
 // counted in nodesTotal, and the coverage is emitted through validators.EmitExtra
 // so it survives the default redaction policy into the signed bundle (#1951/#1952) —
 // a cordoned node narrowing the fabric cohort can no longer hide behind a
@@ -1657,14 +1657,12 @@ func verifyRDMAFabricReady(ctx *validators.Context, fabricResource string) error
 	// sentinel. verifyRDMAFabricReadyEmit injects it so tests can record the eager
 	// floor and terminal disclosures without capturing the EmitExtra stdout
 	// transport (which lives in the validators package).
-	return verifyRDMAFabricReadyEmit(ctx, fabricResource, func(validated, total int) {
-		emitExtraOrWarn(rdmaFabricCoverageExtra(validated, total))
-	})
+	return verifyRDMAFabricReadyEmit(ctx, fabricResource, emitExtraOrWarn)
 }
 
 // verifyRDMAFabricReadyEmit is verifyRDMAFabricReady with the structured
 // coverage emit injected. See verifyRDMAFabricReady for the gate contract.
-func verifyRDMAFabricReadyEmit(ctx *validators.Context, fabricResource string, emitCoverage func(validated, total int)) error {
+func verifyRDMAFabricReadyEmit(ctx *validators.Context, fabricResource string, emitCoverage func(extra map[string]string)) error {
 	var coverage rdmaFabricCoverage
 	// emittedEarly gates the eager disclosure floor to exactly one emit.
 	var emittedEarly bool
@@ -1691,7 +1689,7 @@ func verifyRDMAFabricReadyEmit(ctx *validators.Context, fabricResource string, e
 			// values winning, so a clean exit's terminal emit overwrites this
 			// floor's counts, and the floor is the disclosure of record only
 			// when the process is still killed before reaching it.
-			// validated=0: nothing is certified mid-poll. Only the structured
+			// passed=0 and failed=0: nothing is certified or rejected mid-poll. Only the structured
 			// Extra is emitted eagerly (not the stdout enumeration) — the Extra is
 			// the piece that survives redaction into the signed bundle (#1951/
 			// #1952), and duplicating stdout would spam divergent counts. The
@@ -1701,7 +1699,7 @@ func verifyRDMAFabricReadyEmit(ctx *validators.Context, fabricResource string, e
 			// poll-budget cancellation.
 			if !emittedEarly && cov.total() > 0 {
 				emittedEarly = true
-				emitCoverage(0, cov.total())
+				emitCoverage(cov.coverageExtra(0, 0))
 			}
 			return probeErr
 		},
@@ -1709,23 +1707,19 @@ func verifyRDMAFabricReadyEmit(ctx *validators.Context, fabricResource string, e
 
 	// Single terminal disclosure — printed/emitted exactly once after the poll
 	// settles, on BOTH the ready and the fail-closed path, reflecting the final
-	// observation. validated is the schedulable cohort size only when the gate
-	// certified it uniform+ready; a fail-closed exit (transient List error, no
-	// cohort observed, partial rollout, skew, or timeout) reports 0 validated so
-	// a narrowed-scope failure is never conflated with a full pass.
-	validated := 0
+	// observation. The gate certifies the schedulable cohort as a unit: it all
+	// passes when the gate certified it uniform+ready, and it all counts as
+	// failed on a fail-closed exit (transient List error, no cohort observed,
+	// partial rollout, skew, or timeout), so a narrowed-scope failure is never
+	// conflated with a full pass. The gate never "skips", so it mints no
+	// skipReason; its only skipped nodes are cordoned ones.
+	passed, failed := 0, coverage.schedulable
 	if err == nil {
-		validated = coverage.schedulable
+		passed, failed = coverage.schedulable, 0
 	}
 	printLines(coverage.enumerationLines()...)
-	printLines(coverage.coverageLine(validated))
-	// nodesValidated/nodesTotal are reused verbatim from the existing
-	// ctrfExtraAllowlist (see pkg/evidence/redact): their semantics fit exactly —
-	// validated = schedulable RDMA nodes with uniform allocatable fabric, total =
-	// all RDMA-candidate nodes incl cordoned. No new key or skipReason enum is
-	// minted (the RDMA gate never "skips" — it fails closed), so this gate did
-	// not move the redaction PolicyVersion.
-	emitCoverage(validated, coverage.total())
+	printLines(coverage.coverageLine(passed, failed))
+	emitCoverage(coverage.coverageExtra(passed, failed))
 
 	if err == nil {
 		fmt.Printf("  RDMA fabric (%s): allocatable (uniform) on all %d schedulable RDMA GPU node(s) (stable ≥%s)\n",
@@ -1750,7 +1744,7 @@ type rdmaFabricCoverage struct {
 func (c rdmaFabricCoverage) total() int { return c.schedulable + len(c.cordoned) }
 
 // enumerationLines renders the RDMA-candidate listing: the total/schedulable/
-// cordoned counts, and each cordoned node explicitly marked "skipped (cordoned)"
+// cordoned counts, and each cordoned node explicitly marked SKIPPED (cordoned)
 // rather than omitted from the total. Node names appear ONLY here (stdout),
 // never in the structured Extra.
 func (c rdmaFabricCoverage) enumerationLines() []string {
@@ -1763,34 +1757,33 @@ func (c rdmaFabricCoverage) enumerationLines() []string {
 		"Found %d Mellanox RDMA-capable GPU node(s), %d schedulable, %d cordoned:",
 		total, c.schedulable, len(c.cordoned)))
 	for _, name := range c.cordoned {
-		lines = append(lines, fmt.Sprintf("  %s: skipped (cordoned)", name))
+		lines = append(lines, nodeSkippedLine(name, skipCauseCordoned))
 	}
 	return lines
 }
 
-// coverageLine renders the nodesValidated disclosure for the RDMA gate. The
-// "RESULT: " prefix is the validator runtime's convention (pkg/validator/
-// validator.go resultSummaryPrefix) for echoing a stdout line into live CLI
-// output; it is not guaranteed to survive redaction, which is why the same
-// counts are also emitted structurally via EmitExtra.
-func (c rdmaFabricCoverage) coverageLine(validated int) string {
-	if len(c.cordoned) == 0 {
-		return fmt.Sprintf("RESULT: nodesValidated: %d/%d", validated, c.total())
+// coverageLine renders the nodesValidated disclosure for the RDMA gate in
+// check-nvidia-smi's shape, with cordoned as the only skip cause. The
+// "RESULT: " prefix is resultSummaryPrefix in pkg/validator/validator.go.
+func (c rdmaFabricCoverage) coverageLine(passed, failed int) string {
+	if c.total() == 0 {
+		return "RESULT: nodesValidated: 0/0"
 	}
-	return fmt.Sprintf("RESULT: nodesValidated: %d/%d (%d cordoned, skipped)",
-		validated, c.total(), len(c.cordoned))
+	return fmt.Sprintf("RESULT: nodesValidated: %d/%d (passed %d, failed %d, skipped %d: %s %d)",
+		passed, c.total(), passed, failed, len(c.cordoned), skipCauseCordoned, len(c.cordoned))
 }
 
-// rdmaFabricCoverageExtra builds the structured coverage disclosure carried
-// through the redaction boundary: how many schedulable RDMA nodes the gate
-// certified (validated) out of every RDMA-candidate node incl. cordoned (total).
-// Values are counts only — never node names or IPs (those live in the stdout
-// enumeration lines). The keys mirror check-nvidia-smi's coverage Extra and the
-// existing ctrfExtraAllowlist entries.
-func rdmaFabricCoverageExtra(validated, total int) map[string]string {
+// coverageExtra builds the structured coverage disclosure carried through the
+// redaction boundary, with the same keys as check-nvidia-smi: nodesValidated
+// is the passed count, and nodesFailed and nodesSkipped (cordoned) account for
+// the rest of nodesTotal. Values are counts only — never node names or IPs
+// (those live in the stdout enumeration lines).
+func (c rdmaFabricCoverage) coverageExtra(passed, failed int) map[string]string {
 	return map[string]string{
-		"nodesValidated": strconv.Itoa(validated),
-		"nodesTotal":     strconv.Itoa(total),
+		validators.ExtraKeyNodesValidated: strconv.Itoa(passed),
+		validators.ExtraKeyNodesTotal:     strconv.Itoa(c.total()),
+		validators.ExtraKeyNodesFailed:    strconv.Itoa(failed),
+		validators.ExtraKeyNodesSkipped:   strconv.Itoa(len(c.cordoned)),
 	}
 }
 
