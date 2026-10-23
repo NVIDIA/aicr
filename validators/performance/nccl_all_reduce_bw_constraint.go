@@ -119,13 +119,13 @@ func ncclSkip(msg, code string) string {
 	return msg
 }
 
-// ncclPublishedFabric returns fabric for the NET variant on the baked-in EKS
+// ncclPublishedFabric returns EFA for the NET variant on the baked-in EKS
 // template, and "" otherwise.
-func ncclPublishedFabric(variant ncclVariant, fabric ncclFabricType, customRuntime string, service recipe.CriteriaServiceType) ncclFabricType {
+func ncclPublishedFabric(variant ncclVariant, customRuntime string, service recipe.CriteriaServiceType) ncclFabricType {
 	if variant != variantNET || customRuntime != "" || service != recipe.CriteriaServiceEKS {
 		return ""
 	}
-	return fabric
+	return fabricEFA
 }
 
 // ncclTransportCode returns the published transport code for variant.
@@ -223,57 +223,11 @@ const (
 // variantDefaultLabel is the printed name of variantDefault.
 const variantDefaultLabel = "default"
 
-// ncclFabricType selects the inter-node fabric for the NET variant. Default EFA
-// preserves all existing behavior; roce (AICR_NCCL_FABRIC=roce) selects the
-// ConnectX RoCE NET path — NCCL's built-in IB/verbs transport over
-// roce.networking.k8s.aws DRA devices. Fabric is keyed independently of the
-// accelerator: the RoCE NET template is shared across EKS RoCE nodes
-// (testdata/roce/{service}/...), not per-accelerator. Snapshot-based fabric
-// auto-detection (so this env knob becomes an override, not the selector) is
-// not implemented yet.
+// ncclFabricType names the inter-node fabric the NET variant measures. It is
+// published as the evidence "fabric" extra for the baked-in EKS template.
 type ncclFabricType string
 
-const (
-	fabricEFA  ncclFabricType = "efa"
-	fabricRoCE ncclFabricType = "roce"
-	// ncclFabricEnv is the validator-pod (reading) end of the fabric selector.
-	// The orchestrator (forwarding) end defines the same literal as ncclFabricEnv
-	// in pkg/validator/v1/job_plan_internal.go — keep the two in sync. The pod
-	// binary is a separate package and does not import the orchestrator package,
-	// matching how the other forwarded validator envs are split.
-	ncclFabricEnv = "AICR_NCCL_FABRIC"
-
-	// ncclRoceClaimName is the RoCE DRA ResourceClaimTemplate name. Must match
-	// metadata.name in testdata/roce/{service}/roce-claim.yaml; used by cleanup
-	// to delete the claim (the validator namespace is persistent/reused).
-	ncclRoceClaimName = "nccl-roce-rct"
-)
-
-// roceNETSupportedServices lists services with a testdata/roce/{service} NET
-// template. RoCE NET is accelerator-agnostic, so support is keyed by service.
-var roceNETSupportedServices = map[recipe.CriteriaServiceType]bool{
-	recipe.CriteriaServiceEKS: true,
-}
-
-// ncclFabric returns the configured NET fabric (default EFA when unset). Read
-// from the validator pod's environment, forwarded by the CLI/orchestrator
-// (buildEnv). A non-empty but unrecognized value (e.g. a typo "roc") is
-// rejected rather than silently falling back to EFA, so an operator who
-// intended RoCE never passes the EFA validator by accident.
-func ncclFabric() (ncclFabricType, error) {
-	v := strings.TrimSpace(os.Getenv(ncclFabricEnv))
-	switch {
-	case v == "":
-		return fabricEFA, nil
-	case strings.EqualFold(v, string(fabricEFA)):
-		return fabricEFA, nil
-	case strings.EqualFold(v, string(fabricRoCE)):
-		return fabricRoCE, nil
-	default:
-		return "", aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("unsupported %s=%q (expected %q or %q)", ncclFabricEnv, v, fabricEFA, fabricRoCE))
-	}
-}
+const fabricEFA ncclFabricType = "efa"
 
 // Transport markers emitted by NCCL when NCCL_DEBUG=INFO. Used by
 // verifyTransportFromLogs to assert the intended fabric actually carried
@@ -294,18 +248,11 @@ var (
 //
 //	variantDefault → testdata/{accelerator}/{service}/{filename}
 //	other variants → testdata/{accelerator}/{service}/{stem}-{variant}{ext}
-func templatePath(accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType, filename string) string {
+func templatePath(accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, filename string) string {
 	if variant != variantDefault {
 		ext := filepath.Ext(filename)
 		stem := strings.TrimSuffix(filename, ext)
 		filename = stem + "-" + string(variant) + ext
-	}
-	// RoCE NET templates are fabric-keyed and accelerator-agnostic: any EKS RoCE
-	// node uses testdata/roce/{service}/..., not a per-accelerator directory.
-	// Scoped to variantNET. NVLS uses NVLink/IMEX, not fabric-selected NICs, so
-	// it has no testdata/roce/{service}/runtime-nvls.yaml to redirect to.
-	if fabric == fabricRoCE && variant == variantNET {
-		return filepath.Join("testdata", string(fabricRoCE), string(service), filename)
 	}
 	return filepath.Join("testdata", string(accelerator), string(service), filename)
 }
@@ -359,12 +306,11 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 }
 
 // resolveRuntimeImageForBakedInPath resolves the AICR_NCCL_RUNTIME_IMAGE
-// override, but only for the baked-in template path — mirroring the
-// AICR_NCCL_FABRIC gate: a recipe-supplied runtime owns its own workload
-// image end to end (issue #1751), so a malformed override must not fail
-// it. Validated up front — before any cluster discovery or TrainJob spend
-// — so a typo'd image reference fails fast rather than after minutes of
-// setup. Extracted out of validateNcclAllReduceBw to keep that function
+// override, but only for the baked-in template path: a recipe-supplied
+// runtime owns its own workload image end to end (issue #1751), so a
+// malformed override must not fail it. Validated up front — before any
+// cluster discovery or TrainJob spend — so a typo'd image reference fails
+// fast rather than after minutes of setup. Extracted out of validateNcclAllReduceBw to keep that function
 // under the funlen statement limit.
 func resolveRuntimeImageForBakedInPath(customRuntime string) (string, error) {
 	if customRuntime != "" {
@@ -385,9 +331,8 @@ func resolveRuntimeImageForBakedInPath(customRuntime string) (string, error) {
 // (EFA on EKS, ConnectX IB on OKE) can't attach dma-buf to GPU HBM and NCCL
 // silently falls back to Socket. Preflights key off the benchmark target:
 // opting into a profile opts into that profile's environment contract,
-// preflights included. (OKE takes the default fabric env here —
-// AICR_NCCL_FABRIC's roce override is an EKS-only template concern.) Skipped
-// for a recipe-supplied runtime, which owns its own fabric end to end.
+// preflights included. Skipped for a recipe-supplied runtime, which owns its
+// own fabric end to end.
 //
 // GKE TCPXO preflight: on GKE H100, worker pods depend on GPUDirect-TCPXO
 // host artifacts (nccl-env-profile.sh + FastRak libraries) laid down by the
@@ -399,9 +344,9 @@ func resolveRuntimeImageForBakedInPath(customRuntime string) (string, error) {
 // a derived/delivered runtime (plan.source.runsGKETCPXOChecks()), never to a
 // recipe-supplied runtime.
 func runNCCLPreflights(ctx *validators.Context, gpuConfig *gpuConfiguration, target ncclBenchmarkTarget,
-	variant ncclVariant, fabric ncclFabricType, customRuntime string, plan *benchmarkRuntimePlan) error {
+	variant ncclVariant, customRuntime string, plan *benchmarkRuntimePlan) error {
 
-	if customRuntime == "" && fabric == fabricEFA && graceBlackwellNetPreflightApplies(variant, target.accelerator, target.service) {
+	if customRuntime == "" && graceBlackwellNetPreflightApplies(variant, target.accelerator, target.service) {
 		if pfErr := preflightGB200NetNVregFlag(ctx, gpuConfig.Nodes); pfErr != nil {
 			return pfErr
 		}
@@ -464,20 +409,6 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 				perfConstraintNCCLBenchmarkRuntime, perfConstraintNCCLBenchmarkRuntimeRef, perfConstraintNCCLBenchmarkProfile))
 	}
 
-	// Fabric selection (AICR_NCCL_FABRIC) governs only the baked-in template path
-	// — EFA vs ConnectX-RoCE NIC wiring and the transport-variant template. A
-	// recipe-supplied runtime owns its own fabric end to end, so a malformed
-	// AICR_NCCL_FABRIC must not fail it; validate the env only when no custom
-	// runtime is in play. The default is inconsequential on the custom path
-	// (every fabric-dependent branch below is gated on customRuntime == "").
-	fabric := fabricEFA
-	if customRuntime == "" {
-		fabric, err = ncclFabric()
-		if err != nil {
-			return "", false, err
-		}
-	}
-
 	runtimeImage, err := resolveRuntimeImageForBakedInPath(customRuntime)
 	if err != nil {
 		return "", false, err
@@ -499,9 +430,9 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	if customRuntime != "" {
 		slog.Info("Recipe supplies its own NCCL benchmark runtime — bypassing compiled applicability and service-specific fabric plumbing",
 			"criteriaService", service, "criteriaAccelerator", accelerator, "variant", string(variant))
-	} else if !ncclCombinationSupported(variant, fabric, target) {
+	} else if !ncclCombinationSupported(variant, target) {
 		slog.Info("Skipping NCCL All Reduce bandwidth validation: unsupported variant/service/accelerator combination",
-			"variant", string(variant), "target", target.String(), "fromProfile", target.fromProfile, "fabric", string(fabric))
+			"variant", string(variant), "target", target.String(), "fromProfile", target.fromProfile)
 		if target.fromProfile {
 			// The profile itself is valid (resolveNCCLBenchmarkProfile fails
 			// closed on unknown pairs); it just doesn't implement this variant
@@ -538,7 +469,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// derivation before anything is applied; the derived runtime then rides the
 	// same carrier as a recipe-supplied one, so every downstream branch that
 	// leaves a self-wired runtime's fabric alone (customRuntime != "") applies.
-	plan, err := resolveBenchmarkRuntimeSource(ctx, customRuntime, profile != nil, target.accelerator, target.service, variant, fabric)
+	plan, err := resolveBenchmarkRuntimeSource(ctx, customRuntime, profile != nil, target.accelerator, target.service, variant)
 	if err != nil {
 		return "", false, err
 	}
@@ -565,7 +496,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	}
 	slog.Info("GPU Configuration", "nodes", gpuConfig.WorkerCount, ", GPUs/node", gpuConfig.GPUCountPerNode, ", total GPUs", gpuConfig.TotalGPUCount)
 	// Published before the run so a failed or cut-short run still records it.
-	validators.EmitExtraOrWarn(ncclScopeExtra(variant, ncclPublishedFabric(variant, fabric, customRuntime, target.service), threshold, gpuConfig.WorkerCount, gpuConfig.TotalGPUCount))
+	validators.EmitExtraOrWarn(ncclScopeExtra(variant, ncclPublishedFabric(variant, customRuntime, target.service), threshold, gpuConfig.WorkerCount, gpuConfig.TotalGPUCount))
 
 	// NCCL all-reduce tests EW (East-West) fabric between nodes and requires at least
 	// two GPU nodes. Skip gracefully rather than fail when only one node is available.
@@ -576,14 +507,14 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	}
 
 	// Preflight cluster-side prerequisites before spending TrainJob time.
-	if pfErr := runNCCLPreflights(ctx, gpuConfig, target, variant, fabric, customRuntime, plan); pfErr != nil {
+	if pfErr := runNCCLPreflights(ctx, gpuConfig, target, variant, customRuntime, plan); pfErr != nil {
 		return "", false, pfErr
 	}
 
 	// Run the NCCL all-reduce benchmark using Kubeflow TrainJob + MPI.
 	// Each platform has a per-platform TrainingRuntime with all platform-specific
 	// configuration (image, mpirun args, resources, sidecars). The TrainJob is shared.
-	logs, err := runNCCLTrainJob(ctx, gpuConfig, target.accelerator, target.service, variant, fabric, customRuntime, runtimeImage, plan)
+	logs, err := runNCCLTrainJob(ctx, gpuConfig, target.accelerator, target.service, variant, customRuntime, runtimeImage, plan)
 	// Publish the derived-runtime audit record (stdout for --full, and the
 	// bounded carrier that survives minimal evidence) whether or not the run
 	// succeeded: the record describes the runtime that was applied, and a
@@ -956,7 +887,7 @@ func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interfac
 // It applies the per-platform TrainingRuntime and shared TrainJob, waits for the launcher
 // pod to complete, and returns the benchmark logs.
 func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
-	accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType,
+	accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant,
 	customRuntime string, runtimeImage string, plan *benchmarkRuntimePlan) (logs string, err error) {
 
 	dynamicClient := ctx.DynamicClient
@@ -1063,7 +994,7 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// Apply runtime and trainjob resources. Propagate an inner code rather than
 	// forcing ErrCodeInternal — a recipe-supplied runtime that fails to render is
 	// an ErrCodeInvalidRequest (recipe-authoring error), not an internal fault.
-	if applyErr := applyNCCLResources(ctx, dynamicClient, gpuConfig, accelerator, service, variant, fabric, customRuntime, runtimeImage, plan); applyErr != nil {
+	if applyErr := applyNCCLResources(ctx, dynamicClient, gpuConfig, accelerator, service, variant, customRuntime, runtimeImage, plan); applyErr != nil {
 		return "", aicrErrors.PropagateOrWrap(applyErr, aicrErrors.ErrCodeInternal, "failed to apply NCCL resources")
 	}
 
@@ -1387,8 +1318,8 @@ func uniformGPUCountPerNode(nodes []v1.Node) (int, error) {
 // YAML files with template substitution using the dynamic client.
 // Runtime: testdata/{accelerator}/{service}/runtime[-{variant}].yaml (per-platform+variant)
 // TrainJob: testdata/trainjob.yaml (shared, just runtimeRef + numNodes)
-func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface, config *gpuConfiguration, accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType, customRuntime string, runtimeImage string, plan *benchmarkRuntimePlan) error {
-	slog.Info("Applying NCCL test resources...", "accelerator", accelerator, "service", service, "variant", string(variant), "fabric", string(fabric), "customRuntime", customRuntime != "", "runtimeImageOverride", runtimeImage != "")
+func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface, config *gpuConfiguration, accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, customRuntime string, runtimeImage string, plan *benchmarkRuntimePlan) error {
+	slog.Info("Applying NCCL test resources...", "accelerator", accelerator, "service", service, "variant", string(variant), "customRuntime", customRuntime != "", "runtimeImageOverride", runtimeImage != "")
 
 	templateData := map[string]string{
 		"NAMESPACE":          config.Namespace,
@@ -1429,21 +1360,16 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 			return err
 		}
 		instanceType = it
-		// EFA resource wiring is fabric-specific; the RoCE path claims NICs via a
-		// DRA ResourceClaimTemplate below (keyed by fabric, not service) and
-		// leaves these EFA template vars unset.
-		if fabric != fabricRoCE {
-			// Indentation matches the resource block position in runtime.yaml.
-			const efaIndent = "                      "
-			templateData["EFA_RESOURCE_LIMITS"] = buildEFAResourceLine(efaCount, efaIndent)
-			templateData["EFA_RESOURCE_REQUESTS"] = buildEFAResourceLine(efaCount, efaIndent)
-			if efaCount == 0 {
-				templateData["MAX_MESSAGE_SIZE"] = maxMessageSizeTCP
-				slog.Warn("No EFA adapters found — NCCL will use TCP (reduced bandwidth)",
-					"instanceType", instanceType, "maxMessageSize", maxMessageSizeTCP)
-			} else {
-				slog.Info("Discovered EKS node configuration", "instanceType", instanceType, "efaCount", efaCount)
-			}
+		// Indentation matches the resource block position in runtime.yaml.
+		const efaIndent = "                      "
+		templateData["EFA_RESOURCE_LIMITS"] = buildEFAResourceLine(efaCount, efaIndent)
+		templateData["EFA_RESOURCE_REQUESTS"] = buildEFAResourceLine(efaCount, efaIndent)
+		if efaCount == 0 {
+			templateData["MAX_MESSAGE_SIZE"] = maxMessageSizeTCP
+			slog.Warn("No EFA adapters found — NCCL will use TCP (reduced bandwidth)",
+				"instanceType", instanceType, "maxMessageSize", maxMessageSizeTCP)
+		} else {
+			slog.Info("Discovered EKS node configuration", "instanceType", instanceType, "efaCount", efaCount)
 		}
 	}
 
@@ -1465,34 +1391,7 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 		return err
 	}
 
-	// RoCE NET: the worker pod references a RoCE DRA ResourceClaimTemplate
-	// (nccl-roce-rct). parseYAMLTemplate is single-document, so apply the claim
-	// as a standalone object before the runtime (it must exist when the TrainJob
-	// later creates the worker pods that reference it). Skipped for a
-	// recipe-supplied runtime: it declares any DRA claims it needs itself.
-	// Scoped to variantNET. NVLS claims GPUs through the IMEX ComputeDomain
-	// instead, so a testdata/roce/{service}/roce-claim.yaml never exists for it.
-	if customRuntime == "" && fabric == fabricRoCE && variant == variantNET {
-		// Claim one ConnectX RoCE device per GPU via DRA (NCCL maps GPU->NIC);
-		// the per-node device pool is >= GPUs/node. Set
-		// here — keyed by fabric, not service — so adding a non-EKS RoCE service
-		// to roceNETSupportedServices still renders ${ROCE_DEVICE_COUNT}.
-		templateData["ROCE_DEVICE_COUNT"] = strconv.Itoa(config.GPUCountPerNode)
-		slog.Info("RoCE NET: claiming RoCE DRA devices", "count", config.GPUCountPerNode)
-
-		// Create-or-update (not plain Create) so a stale claim left by a prior
-		// run that was hard-killed before its deferred cleanup ran is reclaimed
-		// rather than failing the apply with AlreadyExists. The RoCE NET path
-		// legitimately still deploys a DRA ResourceClaimTemplate (per-GPU NIC
-		// claims via the shared resourceClaimTemplateGVR in dra_gvr.go).
-		claimPath := filepath.Join("testdata", string(fabricRoCE), string(service), "roce-claim.yaml")
-		if cerr := createOrUpdateFromTemplate(ctx, resourceClaimTemplateGVR, config.Namespace, claimPath, templateData, nil); cerr != nil {
-			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply RoCE ResourceClaimTemplate", cerr)
-		}
-		slog.Info("Applied RoCE ResourceClaimTemplate", "name", ncclRoceClaimName, "count", templateData["ROCE_DEVICE_COUNT"])
-	}
-
-	runtimeObj, err := buildNCCLRuntimeObject(customRuntime, accelerator, service, variant, fabric, config.Namespace, templateData, plan)
+	runtimeObj, err := buildNCCLRuntimeObject(customRuntime, accelerator, service, variant, config.Namespace, templateData, plan)
 	if err != nil {
 		return err
 	}
@@ -1864,13 +1763,13 @@ func effectiveWorkerScheduling(ctx *validators.Context, service recipe.CriteriaS
 // Kubeflow TrainingRuntime at resolve time). Otherwise the baked-in
 // per-platform testdata template is read from disk.
 func buildNCCLRuntimeObject(customRuntime string, accelerator recipe.CriteriaAcceleratorType,
-	service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType,
+	service recipe.CriteriaServiceType, variant ncclVariant,
 	namespace string, templateData map[string]string, plan *benchmarkRuntimePlan) (*unstructured.Unstructured, error) {
 
 	if plan.derived() {
-		// Same skeleton, same fabric pin as resolveBenchmarkRuntimeSource: the
-		// delivered runtime carries its own wiring, so only the platform matters.
-		skeletonPath := templatePath(accelerator, service, variant, fabricEFA, "runtime.yaml")
+		// Same skeleton as resolveBenchmarkRuntimeSource: the delivered runtime
+		// carries its own wiring, so only the platform matters.
+		skeletonPath := templatePath(accelerator, service, variant, "runtime.yaml")
 		skeleton, err := parseYAMLTemplate(skeletonPath, templateData)
 		if err != nil {
 			return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to render benchmark runtime skeleton "+skeletonPath, err)
@@ -1898,7 +1797,7 @@ func buildNCCLRuntimeObject(customRuntime string, accelerator recipe.CriteriaAcc
 		return obj, nil
 	}
 
-	obj, err := parseYAMLTemplate(templatePath(accelerator, service, variant, fabric, "runtime.yaml"), templateData)
+	obj, err := parseYAMLTemplate(templatePath(accelerator, service, variant, "runtime.yaml"), templateData)
 	if err != nil {
 		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to parse training runtime template", err)
 	}
@@ -2914,8 +2813,8 @@ func verifyTransportFromLogs(logs string, variant ncclVariant) error {
 }
 
 // cleanupNCCLResources deletes the per-run benchmark namespace, cascading
-// away the trainjob, runtime, and (if present) the ComputeDomain and RoCE
-// ResourceClaimTemplate CRs it created, mirroring cleanupInferenceWorkload's
+// away the trainjob, runtime, and (if present) the ComputeDomain CR it
+// created, mirroring cleanupInferenceWorkload's
 // pattern. Nothing else ever shares this namespace, so there's no shared
 // state to pin deletes against.
 //
@@ -2985,7 +2884,7 @@ func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid 
 // namespace's execution lock, since another execution has since taken it
 // over, or if that can't be confirmed either way. Otherwise it deletes the
 // per-run namespace first (cascading its TrainJob/TrainingRuntime/
-// ComputeDomain/RoCE-claim CRs), then, only on the self-install fallback
+// ComputeDomain CRs), then, only on the self-install fallback
 // path, the Kubeflow Trainer installation, whose removal would otherwise
 // strand those CRs' finalizers if it ran first. Trainer teardown only runs
 // if the namespace delete succeeded.

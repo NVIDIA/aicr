@@ -129,8 +129,7 @@ type derivedRuntimeProvenance struct {
 // never inferred from a live object, so a stray runtime cannot change who owns
 // the evidence.
 func resolveBenchmarkRuntimeSource(ctx *validators.Context, customRuntime string, profiled bool,
-	accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant,
-	fabric ncclFabricType) (*benchmarkRuntimePlan, error) {
+	accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant) (*benchmarkRuntimePlan, error) {
 
 	var refs []recipe.ComponentRef
 	if ctx.ValidationInput != nil {
@@ -179,17 +178,10 @@ func resolveBenchmarkRuntimeSource(ctx *validators.Context, customRuntime string
 	if err != nil {
 		return nil, err
 	}
-	// The skeleton is the platform's own MPI benchmark template. The fabric
-	// argument selects between per-fabric template trees (the RoCE tree lives
-	// under testdata/roce/); a DELIVERED runtime already carries its fabric
-	// wiring from the shipped object, so the only thing the skeleton must match
-	// is the platform — never the AICR_NCCL_FABRIC environment, which describes
-	// the validator's own fixture and has no bearing on what the recipe ships.
-	// Pinning the platform default here keeps an operator-set fabric override
-	// from redirecting a delivered derivation to a template tree that does not
-	// exist for this platform.
-	_ = fabric
-	skeletonPath := templatePath(accelerator, service, variant, fabricEFA, "runtime.yaml")
+	// The skeleton is the platform's own MPI benchmark template. A DELIVERED
+	// runtime already carries its fabric wiring from the shipped object, so the
+	// only thing the skeleton must match is the platform.
+	skeletonPath := templatePath(accelerator, service, variant, "runtime.yaml")
 	skeleton, err := parseYAMLTemplate(skeletonPath, nil)
 	if err != nil {
 		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to load benchmark runtime skeleton "+skeletonPath, err)

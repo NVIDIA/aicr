@@ -287,7 +287,7 @@ var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
 	"workerNodes":   ctrfCountValue.MatchString,
 	"gpusInvolved":  ctrfCountValue.MatchString,
 	"transport":     closedSet("default", "net", "nvls"),
-	"fabric":        closedSet("efa", "roce"),
+	"fabric":        closedSet("efa"),
 
 	// Deployment readiness.
 	"draReady":           ctrfCountValue.MatchString,

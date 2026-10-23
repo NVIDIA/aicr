@@ -146,42 +146,35 @@ func TestNCCLCombinationSupported(t *testing.T) {
 	tests := []struct {
 		name    string
 		variant ncclVariant
-		fabric  ncclFabricType
 		target  ncclBenchmarkTarget
 		want    bool
 	}{
-		{"default H100 EKS", variantDefault, fabricEFA, target(recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceEKS), true},
-		{"default H200 EKS", variantDefault, fabricEFA, target(recipe.CriteriaAcceleratorH200, recipe.CriteriaServiceEKS), true},
-		{"default H100 GKE", variantDefault, fabricEFA, target(recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE), true},
-		{"default GB200 GKE not covered", variantDefault, fabricEFA, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceGKE), false},
-		{"default H100 AKS", variantDefault, fabricEFA, target(recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceAKS), true},
-		{"default B200 any", variantDefault, fabricEFA, target(recipe.CriteriaAcceleratorB200, recipe.CriteriaServiceAny), true},
-		{"default GB200 EKS not covered", variantDefault, fabricEFA, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceEKS), false},
-		{"NET GB200 EKS", variantNET, fabricEFA, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceEKS), true},
-		{"NET GB200 OKE (IB via rdmaSharedDevicePlugin)", variantNET, fabricEFA, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceOKE), true},
-		{"NVLS GB200 EKS", variantNVLS, fabricEFA, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceEKS), true},
-		{"NVLS GB200 OKE", variantNVLS, fabricEFA, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceOKE), true},
-		{"NVLS GB200 GKE", variantNVLS, fabricEFA, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceGKE), true},
-		{"NVLS VR200 RKE2", variantNVLS, fabricEFA, target(recipe.CriteriaAcceleratorVR200, recipe.CriteriaServiceRKE2), true},
+		{"default H100 EKS", variantDefault, target(recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceEKS), true},
+		{"default H200 EKS", variantDefault, target(recipe.CriteriaAcceleratorH200, recipe.CriteriaServiceEKS), true},
+		{"default H100 GKE", variantDefault, target(recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE), true},
+		{"default GB200 GKE not covered", variantDefault, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceGKE), false},
+		{"default H100 AKS", variantDefault, target(recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceAKS), true},
+		{"default B200 any", variantDefault, target(recipe.CriteriaAcceleratorB200, recipe.CriteriaServiceAny), true},
+		{"default GB200 EKS not covered", variantDefault, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceEKS), false},
+		{"NET GB200 EKS", variantNET, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceEKS), true},
+		{"NET GB200 OKE (IB via rdmaSharedDevicePlugin)", variantNET, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceOKE), true},
+		{"NVLS GB200 EKS", variantNVLS, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceEKS), true},
+		{"NVLS GB200 OKE", variantNVLS, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceOKE), true},
+		{"NVLS GB200 GKE", variantNVLS, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceGKE), true},
+		{"NVLS VR200 RKE2", variantNVLS, target(recipe.CriteriaAcceleratorVR200, recipe.CriteriaServiceRKE2), true},
 		// VR200 is NVLS-only: the default variant has no rke2 entry, so the
 		// generic nccl-all-reduce-bw check would report skipped, not fail.
-		{"default VR200 RKE2 not covered", variantDefault, fabricEFA, target(recipe.CriteriaAcceleratorVR200, recipe.CriteriaServiceRKE2), false},
-		{"NET GB300 EKS", variantNET, fabricEFA, target(recipe.CriteriaAcceleratorGB300, recipe.CriteriaServiceEKS), true},
-		{"NVLS GB300 EKS", variantNVLS, fabricEFA, target(recipe.CriteriaAcceleratorGB300, recipe.CriteriaServiceEKS), true},
-		{"unknown service", variantNVLS, fabricEFA, target(recipe.CriteriaAcceleratorGB200, "custom-svc"), false},
-		{"unknown accelerator", variantNET, fabricEFA, target("unknown-accel", recipe.CriteriaServiceEKS), false},
-		// RoCE NET is service-keyed and accelerator-agnostic.
-		{"RoCE NET EKS any accelerator", variantNET, fabricRoCE, target("unknown-accel", recipe.CriteriaServiceEKS), true},
-		{"RoCE NET GKE not covered", variantNET, fabricRoCE, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceGKE), false},
-		// RoCE only reroutes NET; NVLS keeps the accelerator-keyed matrix.
-		{"RoCE NVLS falls back to matrix", variantNVLS, fabricRoCE, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceEKS), true},
-		{"RoCE NVLS unknown accelerator", variantNVLS, fabricRoCE, target("unknown-accel", recipe.CriteriaServiceEKS), false},
+		{"default VR200 RKE2 not covered", variantDefault, target(recipe.CriteriaAcceleratorVR200, recipe.CriteriaServiceRKE2), false},
+		{"NET GB300 EKS", variantNET, target(recipe.CriteriaAcceleratorGB300, recipe.CriteriaServiceEKS), true},
+		{"NVLS GB300 EKS", variantNVLS, target(recipe.CriteriaAcceleratorGB300, recipe.CriteriaServiceEKS), true},
+		{"unknown service", variantNVLS, target(recipe.CriteriaAcceleratorGB200, "custom-svc"), false},
+		{"unknown accelerator", variantNET, target("unknown-accel", recipe.CriteriaServiceEKS), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ncclCombinationSupported(tt.variant, tt.fabric, tt.target); got != tt.want {
-				t.Errorf("ncclCombinationSupported(%s, %s, %s) = %v, want %v",
-					tt.variant, tt.fabric, tt.target.String(), got, tt.want)
+			if got := ncclCombinationSupported(tt.variant, tt.target); got != tt.want {
+				t.Errorf("ncclCombinationSupported(%s, %s) = %v, want %v",
+					tt.variant, tt.target.String(), got, tt.want)
 			}
 		})
 	}
@@ -211,35 +204,12 @@ func TestKnownBenchmarkProfiles(t *testing.T) {
 	}
 }
 
-// TestRoCEServicesHaveMatrixTuples guards the profile-validation assumption
-// documented on benchmarkProfileKnown: every RoCE NET service must also carry
-// at least one accelerator-keyed tuple in supportedNCCLCombinations, or no
-// nccl-benchmark-profile value could name it. When this fails, extend
-// benchmarkProfileKnown to consult roceNETSupportedServices as part of adding
-// the RoCE-only service.
-func TestRoCEServicesHaveMatrixTuples(t *testing.T) {
-	for service := range roceNETSupportedServices {
-		found := false
-		for _, byService := range supportedNCCLCombinations {
-			if len(byService[service]) > 0 {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("RoCE NET service %q has no accelerator-keyed tuple in supportedNCCLCombinations — no benchmark profile can name it (see benchmarkProfileKnown doc comment)", service)
-		}
-	}
-}
-
 // TestValidateNcclAllReduceBwProfileGate exercises validateNcclAllReduceBw up
 // to (and just past) the applicability gate without a cluster: skip paths
 // return before any client access, and gate passage is detected via the
 // threshold-parse error that immediately follows the gate (cases with an
 // intentionally malformed "not-a-number" threshold).
 func TestValidateNcclAllReduceBwProfileGate(t *testing.T) {
-	t.Setenv(ncclFabricEnv, "") // isolate from ambient AICR_NCCL_FABRIC
-
 	thresholdC := func(name, v string) recipe.Constraint { return recipe.Constraint{Name: name, Value: v} }
 
 	tests := []struct {
@@ -354,8 +324,6 @@ func TestValidateNcclAllReduceBwProfileGate(t *testing.T) {
 //     single worker — observable as the "requires at least 2 GPU nodes" skip,
 //     which a criteria-derived non-EKS service would not produce.
 func TestValidateNcclAllReduceBwProfileClusterPath(t *testing.T) {
-	t.Setenv(ncclFabricEnv, "") // isolate from ambient AICR_NCCL_FABRIC
-
 	node := func(name, instanceType string) *corev1.Node {
 		return &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
