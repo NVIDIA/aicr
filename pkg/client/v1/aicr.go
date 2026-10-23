@@ -763,7 +763,7 @@ func (c *Client) assertOwns(r *RecipeResult) error {
 		return nil
 	}
 	return errors.NewWithContext(errors.ErrCodeInvalidRequest,
-		"RecipeResult was produced by a different Client (or constructed outside ResolveRecipe); cross-client bundle/validate is not permitted",
+		"RecipeResult was produced by a different Client (or constructed outside ResolveRecipe); cross-client use is not permitted",
 		map[string]any{
 			"expectedOwner": fmt.Sprintf("%p", c),
 			"actualOwner":   fmt.Sprintf("%p", r.owner),

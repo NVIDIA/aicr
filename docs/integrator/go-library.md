@@ -989,10 +989,9 @@ byte-identical YAML.
 `WrapResolved` turns a `*pkg/recipe.RecipeResult` — typically one taken from
 `RecipeResult.Resolved()` and then projected by the caller — back into a
 facade `*RecipeResult` that `SelectFromRecipeWithContext` accepts. The result
-is queryable only: it carries no owning `Client`, so `MakeBundle`,
-`BundleComponents`, `ValidateState`, and `RequirePublishedEvidence` reject it.
-Use `Client.AdoptRecipe`
-when you need a bundle-able result.
+is queryable only: it carries no owning `Client`, so every `Client` method that
+consumes a result (bundle, validate, preflight, and evidence) rejects it. Use
+`Client.AdoptRecipe` when you need a bundle-able result.
 
 `AdoptRecipe` canonicalizes the artifact `Kind` on the copy it returns: an
 absent, empty, or legacy `Recipe` kind is stamped as `RecipeResult`, and any
