@@ -170,7 +170,8 @@ func (c gpuNodeCoverage) coverageLine() string {
 
 // coverageExtra builds the structured coverage disclosure. nodesValidated is
 // the passed count; nodesFailed and nodesSkipped account for the rest of
-// nodesTotal, all from the same node snapshot. Unlike the RESULT stdout line
+// nodesTotal, all from the same node snapshot, except nodes an expired
+// deadline kept the check from reaching. Unlike the RESULT stdout line
 // it survives minimal redaction. Values are counts only — never node names or
 // IPs.
 func (c gpuNodeCoverage) coverageExtra() map[string]string {
@@ -180,6 +181,18 @@ func (c gpuNodeCoverage) coverageExtra() map[string]string {
 		validators.ExtraKeyNodesFailed:    strconv.Itoa(c.failed),
 		validators.ExtraKeyNodesSkipped:   strconv.Itoa(c.skipped()),
 	}
+}
+
+// stopOnDeadContext publishes the coverage reached so far and returns a
+// timeout (or cancellation) error. Nodes not yet reached are in no bucket, so
+// passed, failed, and skipped can sum to less than total; they are never
+// counted as failed.
+func (c gpuNodeCoverage) stopOnDeadContext(ctx context.Context) error {
+	printLines(c.coverageLine())
+	emitExtraOrWarn(c.coverageExtra())
+	return errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout,
+		fmt.Sprintf("check-nvidia-smi stopped before reaching every GPU node (%d passed, %d failed, %d skipped of %d)",
+			c.passed, c.failed, c.skipped(), c.total))
 }
 
 func printLines(lines ...string) {
@@ -216,6 +229,7 @@ func runNvidiaSMICheck(ctx *validators.Context, verifyNode func(nodeName string)
 
 	if len(allNodes) == 0 {
 		printLines(coverage.coverageLine())
+		emitExtraOrWarn(coverage.coverageExtra())
 		// #2122 applicability gate. gpu-operator supplies the GPU nodes this check
 		// verifies. When the recipe DECLARES it, zero GPU nodes is a
 		// declared-but-absent prerequisite — fail closed so a GPU-less cluster
@@ -257,15 +271,22 @@ func runNvidiaSMICheck(ctx *validators.Context, verifyNode func(nodeName string)
 		return validators.Skip(reason)
 	}
 
-	// Probe each schedulable node for GPU occupancy; only free nodes are
-	// verified. A probe error is treated as busy (fail-safe: don't run on a
-	// node we can't clear), but tracked separately from CONFIRMED occupancy so
-	// an all-errors outcome is not signed as "nodes-busy" — and, per #2122, is
-	// not skipped at all. firstProbeErr preserves the probe's error class for
-	// the fail-closed path below.
-	var freeNodes []string
+	// Probe each schedulable node for GPU occupancy immediately before
+	// verifying it, so a job that claims a node's GPUs while earlier nodes are
+	// verified skips that node instead of failing it. A probe error is treated
+	// as busy (fail-safe: don't run on a node we can't clear), but tracked
+	// separately from CONFIRMED occupancy so an all-errors outcome is not
+	// signed as "nodes-busy" — and, per #2122, is not skipped at all.
+	// firstProbeErr preserves the probe's error class for that fail-closed
+	// path.
+	fmt.Printf("Verifying %d schedulable GPU node(s)...\n", len(gpuNodes))
+
+	var failedNodes []string
 	var firstProbeErr error
 	for _, node := range gpuNodes {
+		if ctx.Ctx.Err() != nil {
+			return coverage.stopOnDeadContext(ctx.Ctx)
+		}
 		busy, busyErr := helper.IsNodeGpuBusy(ctx.Ctx, ctx.Clientset, node.Name)
 		switch {
 		case busyErr != nil:
@@ -275,53 +296,26 @@ func runNvidiaSMICheck(ctx *validators.Context, verifyNode func(nodeName string)
 			if firstProbeErr == nil {
 				firstProbeErr = busyErr
 			}
+			continue
 		case busy:
 			coverage.busy = append(coverage.busy, node.Name)
 			printLines(nodeSkippedLine(node.Name, skipCauseBusy))
-		default:
-			freeNodes = append(freeNodes, node.Name)
+			continue
 		}
-	}
 
-	if len(freeNodes) == 0 {
-		printLines(coverage.coverageLine())
-		emitExtraOrWarn(coverage.coverageExtra())
-		if len(coverage.busy) > 0 {
-			// No node is free and at least one was CONFIRMED occupied. Without a
-			// host-driver floor this is a legitimate scope-narrowing Skip. With a
-			// declared floor, occupancy is not a reason to leave the gate
-			// unevaluated (#1995): Skip is non-blocking, so a below-floor cluster
-			// would PASS.
-			reason := fmt.Sprintf("GPU nodes busy with existing workloads: %v",
-				append(append([]string{}, coverage.busy...), coverage.probeErrors...))
-			if err := failClosedIfUnmeasurableGPUDriverFloor(ctx, reason); err != nil {
-				return err
+		slog.Info("verifying node", "node", node.Name)
+		if verifyErr := verifyNode(node.Name); verifyErr != nil {
+			if ctx.Ctx.Err() != nil {
+				// The deadline interrupted this node; it was not found failing.
+				return coverage.stopOnDeadContext(ctx.Ctx)
 			}
-			emitExtraOrWarn(nvidiaSMISkipExtra(skipReasonNodesBusy))
-			return validators.Skip(reason)
-		}
-		// #2122 fail-closed: the busy-probe errored on every schedulable node, so
-		// it proved occupancy on none. An infra error (RBAC denial, timeout,
-		// transport failure) masquerading as a busy Skip would let an unreadable
-		// cluster PASS conformance. Block the gate and preserve the probe's error
-		// class instead of flattening it to a Skip.
-		return errors.PropagateOrWrap(firstProbeErr, errors.ErrCodeInternal,
-			"could not determine GPU node occupancy — the busy-probe failed on all schedulable GPU nodes")
-	}
-
-	fmt.Printf("Verifying %d available GPU node(s)...\n", len(freeNodes))
-
-	var failedNodes []string
-	for _, nodeName := range freeNodes {
-		slog.Info("verifying node", "node", nodeName)
-		if verifyErr := verifyNode(nodeName); verifyErr != nil {
 			coverage.failed++
-			failedNodes = append(failedNodes, fmt.Sprintf("%s (%v)", nodeName, verifyErr))
-			printLines(nodeFailedLine(nodeName, verifyErr))
+			failedNodes = append(failedNodes, fmt.Sprintf("%s (%v)", node.Name, verifyErr))
+			printLines(nodeFailedLine(node.Name, verifyErr))
 			continue
 		}
 		coverage.passed++
-		printLines(nodePassedLine(nodeName))
+		printLines(nodePassedLine(node.Name))
 	}
 
 	// Emit the structured coverage disclosure (survives minimal redaction)
@@ -330,10 +324,14 @@ func runNvidiaSMICheck(ctx *validators.Context, verifyNode func(nodeName string)
 	printLines(coverage.coverageLine())
 	emitExtraOrWarn(coverage.coverageExtra())
 
+	if coverage.passed+coverage.failed == 0 {
+		return noFreeGPUNodeOutcome(ctx, coverage, firstProbeErr)
+	}
+
 	if len(failedNodes) > 0 {
 		return errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("GPU verification failed on %d/%d verified nodes: %v",
-				len(failedNodes), len(freeNodes), failedNodes))
+				len(failedNodes), coverage.passed+coverage.failed, failedNodes))
 	}
 
 	if skipped := coverage.skipped(); skipped > 0 {
@@ -343,6 +341,32 @@ func runNvidiaSMICheck(ctx *validators.Context, verifyNode func(nodeName string)
 	}
 	fmt.Printf("Successfully verified GPU on all %d GPU node(s)\n", coverage.passed)
 	return nil
+}
+
+// noFreeGPUNodeOutcome decides the result when the busy-probe left no node to
+// verify. The caller has already published coverage.
+func noFreeGPUNodeOutcome(ctx *validators.Context, coverage gpuNodeCoverage, firstProbeErr error) error {
+	if len(coverage.busy) > 0 {
+		// No node is free and at least one was CONFIRMED occupied. Without a
+		// host-driver floor this is a legitimate scope-narrowing Skip. With a
+		// declared floor, occupancy is not a reason to leave the gate
+		// unevaluated (#1995): Skip is non-blocking, so a below-floor cluster
+		// would PASS.
+		reason := fmt.Sprintf("GPU nodes busy with existing workloads: %v",
+			append(append([]string{}, coverage.busy...), coverage.probeErrors...))
+		if err := failClosedIfUnmeasurableGPUDriverFloor(ctx, reason); err != nil {
+			return err
+		}
+		emitExtraOrWarn(nvidiaSMISkipExtra(skipReasonNodesBusy))
+		return validators.Skip(reason)
+	}
+	// #2122 fail-closed: the busy-probe errored on every schedulable node, so
+	// it proved occupancy on none. An infra error (RBAC denial, timeout,
+	// transport failure) masquerading as a busy Skip would let an unreadable
+	// cluster PASS conformance. Block the gate and preserve the probe's error
+	// class instead of flattening it to a Skip.
+	return errors.PropagateOrWrap(firstProbeErr, errors.ErrCodeInternal,
+		"could not determine GPU node occupancy — the busy-probe failed on all schedulable GPU nodes")
 }
 
 // nvidiaSMISkipExtra builds the structured skip disclosure carrying only the

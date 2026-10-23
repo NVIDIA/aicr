@@ -273,7 +273,7 @@ var ctrfRuntimeSources = []string{
 // failing its validator, is dropped. Keep the keys mirrored in
 // docs/contributor/validator.md.
 var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
-	"nodesValidated": ctrfCountValue.MatchString, // count of nodes a coverage check actually verified
+	"nodesValidated": ctrfCountValue.MatchString, // count of nodes a coverage check verified and found passing
 	"nodesTotal":     ctrfCountValue.MatchString, // count of candidate nodes (validated + failed + skipped)
 	"nodesFailed":    ctrfCountValue.MatchString, // count of nodes a coverage check verified and found failing
 	"nodesSkipped":   ctrfCountValue.MatchString, // count of nodes a coverage check skipped (busy, busy-probe error, cordoned)

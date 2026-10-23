@@ -502,9 +502,10 @@ page are the contract.
   benchmark runs, so a failed run still records its scope. `fabric` appears
   only on `nccl-all-reduce-bw-net`, when it runs the baked-in EKS template.
   `tolerancePct` is the slack below `thresholdGbps` that still passes.
-- `check-nvidia-smi` publishes `nodesValidated` and `nodesTotal` only after
-  per-node verification runs, on pass or fail. An exit before that (no GPU
-  nodes, all cordoned, or busy) publishes neither.
+- `check-nvidia-smi` publishes all four counts on every exit once the GPU
+  node list succeeds: no GPU nodes (all `0`), all cordoned, no free node,
+  after verification, and when the deadline stops it early. Nodes it never
+  reached are in no count, so the counts can sum to less than `nodesTotal`.
 - `gke-gpu-nic-topology` publishes `nodesValidated` and `nodesTotal` on every
   exit once the node list succeeds, including an empty list and a
   `no-verifiable-nodes` skip. A failed node list publishes neither.
@@ -950,6 +951,12 @@ the whole check (#3361).
 - When the busy-probe errored on every schedulable node, the check
   fails closed instead (#2122). A probe error on one node, while
   another is free, skips that node as `busy-probe error`.
+- Each node is probed immediately before it is verified. A job that
+  claims a node's GPUs while earlier nodes are being verified makes that
+  node `SKIPPED (busy)`, not `FAILED`.
+- When the check's deadline expires, it stops with a timeout error.
+  Nodes it never reached, or was verifying when the deadline hit, are
+  not counted as failed.
 
 When the recipe declares `Deployment.gpu-driver.version`, the paths
 that verify nothing (no GPU nodes, all cordoned, all busy) fail closed

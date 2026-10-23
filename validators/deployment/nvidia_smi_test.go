@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
@@ -1030,27 +1031,53 @@ func TestRunNvidiaSMICheck_BusyAndProbeErrorNoFreeNodeSkips(t *testing.T) {
 }
 
 // TestRunNvidiaSMICheck_CoverageExtra proves the structured counts reach the
-// CTRF extra on the partly-busy pass path and on the #2122 all-probe-error
-// fail-closed path, where minimal redaction strips the RESULT stdout line.
+// CTRF extra on every exit once GPU nodes are listed — partly busy, all busy,
+// all cordoned, and the #2122 all-probe-error fail-closed path — where minimal
+// redaction strips the RESULT stdout line.
 // Not parallel: captureExtras swaps os.Stdout.
 func TestRunNvidiaSMICheck_CoverageExtra(t *testing.T) {
 	forbidden := func(clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, "", nil)
 	}
+	freeAndBusy := []runtime.Object{gpuNode("free-1", 8, -1), gpuNode("busy-1", 8, -1)}
 
 	tests := []struct {
-		name    string
-		reactor clienttesting.ReactionFunc
-		wantErr bool
-		want    map[string]string
+		name     string
+		nodes    []runtime.Object
+		reactor  clienttesting.ReactionFunc
+		wantSkip bool
+		wantErr  bool
+		want     map[string]string
 	}{
 		{
 			name:    "one free one busy",
+			nodes:   freeAndBusy,
 			reactor: gpuBusyOnNodesReactor("busy-1"),
 			want:    map[string]string{"nodesValidated": "1", "nodesTotal": "2", "nodesFailed": "0", "nodesSkipped": "1"},
 		},
 		{
+			name:     "every node busy",
+			nodes:    []runtime.Object{gpuNode("busy-1", 8, -1), gpuNode("busy-2", 8, -1)},
+			reactor:  gpuBusyOnNodesReactor("busy-1", "busy-2"),
+			wantSkip: true,
+			want:     map[string]string{"nodesValidated": "0", "nodesTotal": "2", "nodesFailed": "0", "nodesSkipped": "2"},
+		},
+		{
+			name:     "no GPU nodes",
+			reactor:  gpuBusyOnNodesReactor(),
+			wantSkip: true,
+			want:     map[string]string{"nodesValidated": "0", "nodesTotal": "0", "nodesFailed": "0", "nodesSkipped": "0", "skipReason": skipReasonNoGPUNodes},
+		},
+		{
+			name:     "every node cordoned",
+			nodes:    []runtime.Object{cordon(gpuNode("cordoned-1", 8, -1)), cordon(gpuNode("cordoned-2", 8, -1))},
+			reactor:  gpuBusyOnNodesReactor(),
+			wantSkip: true,
+			want:     map[string]string{"nodesValidated": "0", "nodesTotal": "2", "nodesFailed": "0", "nodesSkipped": "2"},
+		},
+		{
 			name:    "busy-probe errors on every node",
+			nodes:   freeAndBusy,
 			reactor: forbidden,
 			wantErr: true,
 			want:    map[string]string{"nodesValidated": "0", "nodesTotal": "2", "nodesFailed": "0", "nodesSkipped": "2"},
@@ -1058,18 +1085,128 @@ func TestRunNvidiaSMICheck_CoverageExtra(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := newDeploymentTestContext(t, []runtime.Object{
-				gpuNode("free-1", 8, -1), gpuNode("busy-1", 8, -1),
-			}, nil, nil)
+			ctx := newDeploymentTestContext(t, tt.nodes, nil, nil)
 			ctx.Clientset.(*k8sfake.Clientset).PrependReactor("list", "pods", tt.reactor)
 
 			extra, err := captureExtras(t, func() error {
 				return runNvidiaSMICheck(ctx, func(string) error { return nil })
 			})
-			if (err != nil) != tt.wantErr {
+			if got := validators.IsSkip(err); got != tt.wantSkip {
+				t.Fatalf("runNvidiaSMICheck() IsSkip = %v (err=%v), want %v", got, err, tt.wantSkip)
+			}
+			if !tt.wantSkip && (err != nil) != tt.wantErr {
 				t.Fatalf("runNvidiaSMICheck() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			assertExtraSubset(t, extra, tt.want)
 		})
 	}
+}
+
+// TestRunNvidiaSMICheck_PerNodeLines pins each node's outcome line in stdout,
+// the only place node names appear.
+// Not parallel: captureStdout swaps os.Stdout.
+func TestRunNvidiaSMICheck_PerNodeLines(t *testing.T) {
+	ctx := newDeploymentTestContext(t, []runtime.Object{
+		gpuNode("busy-1", 8, -1), gpuNode("free-1", 8, -1), gpuNode("bad-1", 8, -1), gpuNode("unreadable-1", 8, -1),
+	}, nil, nil)
+	busy := gpuBusyOnNodesReactor("busy-1")
+	ctx.Clientset.(*k8sfake.Clientset).PrependReactor("list", "pods",
+		func(action clienttesting.Action) (bool, runtime.Object, error) {
+			list, ok := action.(clienttesting.ListAction)
+			if !ok {
+				return false, nil, nil
+			}
+			if node, _ := list.GetListRestrictions().Fields.RequiresExactMatch("spec.nodeName"); node == "unreadable-1" {
+				return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, "", nil)
+			}
+			return busy(action)
+		})
+
+	out, err := captureStdout(t, func() error {
+		return runNvidiaSMICheck(ctx, func(nodeName string) error {
+			if nodeName == "bad-1" {
+				return errors.New(errors.ErrCodeInternal, "nvidia-smi exited 1")
+			}
+			return nil
+		})
+	})
+	if err == nil {
+		t.Fatal("runNvidiaSMICheck() = nil, want the bad-1 failure")
+	}
+	for _, want := range []string{
+		"  busy-1: SKIPPED (busy)",
+		"  free-1: PASSED",
+		"  bad-1: FAILED (",
+		"  unreadable-1: SKIPPED (busy-probe error)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestRunNvidiaSMICheck_BusyBeforeItsTurnIsSkipped proves a node is probed
+// immediately before it is verified: a job that claims a node's GPUs while an
+// earlier node is verified makes it SKIPPED (busy), not FAILED.
+func TestRunNvidiaSMICheck_BusyBeforeItsTurnIsSkipped(t *testing.T) {
+	t.Parallel()
+
+	ctx := newDeploymentTestContext(t, []runtime.Object{
+		gpuNode("gpu-1", 8, -1), gpuNode("gpu-2", 8, -1),
+	}, nil, nil)
+	var verified []string
+	busyAfterFirst := gpuBusyOnNodesReactor("gpu-2")
+	free := gpuBusyOnNodesReactor()
+	ctx.Clientset.(*k8sfake.Clientset).PrependReactor("list", "pods",
+		func(action clienttesting.Action) (bool, runtime.Object, error) {
+			if len(verified) > 0 {
+				return busyAfterFirst(action)
+			}
+			return free(action)
+		})
+
+	err := runNvidiaSMICheck(ctx, func(nodeName string) error {
+		verified = append(verified, nodeName)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("runNvidiaSMICheck() error = %v, want pass on gpu-1 with gpu-2 skipped", err)
+	}
+	if strings.Join(verified, ",") != "gpu-1" {
+		t.Errorf("verified nodes = %v, want [gpu-1] (gpu-2 became busy before its turn)", verified)
+	}
+}
+
+// TestRunNvidiaSMICheck_DeadContextStopsWithoutCountingFailed proves an
+// expired deadline stops the check with a timeout-class error and leaves the
+// interrupted and unreached nodes out of nodesFailed.
+// Not parallel: captureExtras swaps os.Stdout.
+func TestRunNvidiaSMICheck_DeadContextStopsWithoutCountingFailed(t *testing.T) {
+	ctx := newDeploymentTestContext(t, []runtime.Object{
+		gpuNode("gpu-1", 8, -1), gpuNode("gpu-2", 8, -1), gpuNode("gpu-3", 8, -1),
+	}, nil, nil)
+	ctx.Clientset.(*k8sfake.Clientset).PrependReactor("list", "pods", gpuBusyOnNodesReactor())
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx.Ctx = runCtx
+
+	var verified []string
+	extra, err := captureExtras(t, func() error {
+		return runNvidiaSMICheck(ctx, func(nodeName string) error {
+			verified = append(verified, nodeName)
+			if nodeName == "gpu-2" {
+				cancel()
+				return errors.Wrap(errors.ErrCodeInternal, "pod wait interrupted", runCtx.Err())
+			}
+			return nil
+		})
+	})
+
+	errorstest.WantReportedCode(t, err, errors.ErrCodeCanceled)
+	if strings.Join(verified, ",") != "gpu-1,gpu-2" {
+		t.Errorf("verified nodes = %v, want [gpu-1 gpu-2] (gpu-3 never reached)", verified)
+	}
+	assertExtraSubset(t, extra, map[string]string{
+		"nodesValidated": "1", "nodesTotal": "3", "nodesFailed": "0", "nodesSkipped": "0",
+	})
 }
