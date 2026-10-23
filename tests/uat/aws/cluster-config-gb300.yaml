@@ -140,7 +140,9 @@ compute:
           dedicated: system-workload
       workers:
         - name: gpu-worker
-          instanceType: p6e-gb300r.36xlarge
+          # Placeholder: the GB300 instance type is not published, so
+          # uat-aws.yaml substitutes it from the AWS_GB300_INSTANCE_TYPE secret.
+          instanceType: gb300-instance-type-from-secret
           architecture: arm64               # GB300 = Grace/arm64 (arm64 Ubuntu EKS AMI)
           # Pin the worker AMI. Absent imageId the actuator resolves
           # data.aws_ami.ubuntu_eks (most_recent Canonical ubuntu-eks/k8s_1.35
@@ -153,10 +155,10 @@ compute:
           # region-specific). Re-resolve when eks.version bumps.
           imageId: ami-0d0c7846ffa203702
           gpuType: gb300
-          # REQUIRED, same trap as GB200: auto-derivation breaks on the
-          # "p6e-gb300r.*" name — the actuator keys its accelerator map on "p6e"
-          # but split(".")[0] yields "p6e-gb300r", so it falls through to the
-          # generic-GPU EFA branch and emits an invalid launch template
+          # REQUIRED, same trap as GB200: auto-derivation breaks on this
+          # instance type's name — the actuator keys its accelerator map on
+          # "p6e" but split(".")[0] yields the full family name, so it falls
+          # through to the generic-GPU EFA branch and emits an invalid launch template
           # (device_index=1 on a 1-device network card) → CreateAutoScalingGroup
           # ValidationError. The explicit value selects the correct branch.
           accelerator: gb300
@@ -167,7 +169,7 @@ compute:
             desired: 2
             reservation:
               preference: capacity-reservations-only
-              # Verified against EC2 from this tenancy: p6e-gb300r.36xlarge in
+              # Verified against EC2 from this tenancy: the GB300 instance in
               # us-east-2a, matching the worker/pod subnet pin above, state
               # active, InstanceMatchCriteria targeted, TotalInstanceCount 18
               # (not the 16 the capacity ordering doc lists). The post-lease

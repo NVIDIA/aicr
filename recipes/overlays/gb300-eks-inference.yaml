@@ -27,7 +27,7 @@ spec:
     accelerator: gb300
     intent: inference
 
-  # Targets p6e-gb300r.36xlarge (GB300 NVL72, 4 GPUs per node, Grace ARM64
+  # Targets the GB300 EKS instance (GB300 NVL72, 4 GPUs per node, Grace ARM64
   # host) on the EFA scale-out fabric.
   #
   # Verified on the reference cluster: each GPU node presents 2x Amazon ENA

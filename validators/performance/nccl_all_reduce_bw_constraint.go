@@ -336,7 +336,7 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 		recipe.CriteriaServiceAny: {recipe.CriteriaAcceleratorB200, recipe.CriteriaAcceleratorGB200},
 	},
 	variantNET: {
-		// GB300 EKS runs the same p6e-gb300r EFA scale-out fabric as GB200's
+		// GB300 EKS runs the same EFA scale-out fabric as GB200's
 		// p6e-gb200.36xlarge — see testdata/gb300/eks/runtime-net.yaml.
 		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
 		// OKE GB200 NVL72: IB east-west (rdma0-3) via the

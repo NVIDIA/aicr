@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# EKS Accelerated Node Profile: p6e-gb300r.36xlarge (GB300 NVL72)
+# EKS Accelerated Node Profile: GB300 NVL72
 #
 # NVIDIA GB300 Grace Blackwell Ultra node as the gb300 EKS overlays target it:
 # - 4x NVIDIA GB300 GPUs per Kubernetes node
@@ -53,13 +53,13 @@ spec:
   # collector reads `.items[0]`, which sorts to the kind control-plane node.
   # Accuracy is still the right default for a file people read to learn what
   # the hardware looks like.
-  instanceType: p6e-gb300r.36xlarge
+  instanceType: p6e-gb300.36xlarge
   arch: arm64  # Grace CPU is ARM-based
   osImage: Ubuntu 24.04
 
   # Resource capacity
   #
-  # AWS publishes no p6e-gb300r.36xlarge specification, so these are estimates,
+  # AWS publishes no specification for this instance, so these are estimates,
   # not datasheet values, and they are derived two different ways:
   #   cpu 144     -- 2x72 Grace cores, the NVL72 compute-tray figure. Matches no
   #                  sibling (p5-h100 is 192, p6-gb200 is 288); do not "correct"
