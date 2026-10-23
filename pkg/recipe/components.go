@@ -49,8 +49,8 @@ type ComponentRegistry struct {
 }
 
 // ComponentClass is the bundle class a registry component belongs to
-// (ADR-018). The classes are totally ordered core < ops < workload, the
-// order of ComponentClasses: a component may depend only on components of
+// (ADR-018). The classes are totally ordered core < ops, the order of
+// ComponentClasses: a component may depend only on components of
 // its own class or an earlier one, a split set installs the classes in that
 // order, and core alone is a complete install. The zero value means core, so
 // a registry that predates the field loads unchanged; the embedded registry
@@ -62,17 +62,16 @@ const (
 	// GPU pod needs to be scheduled and run correctly, including the
 	// accelerator fabric, and the prerequisites those components declare.
 	ComponentClassCore ComponentClass = "core"
-	// ComponentClassOps is operational services: scheduling, node health,
-	// observability, policy, and inventory.
+	// ComponentClassOps is everything the GPU runtime does not need:
+	// operational services (scheduling, node health, observability, policy,
+	// inventory) and workload platforms with the components that exist only
+	// to serve them.
 	ComponentClassOps ComponentClass = "ops"
-	// ComponentClassWorkload is workload platforms and the components that
-	// exist only to serve them.
-	ComponentClassWorkload ComponentClass = "workload"
 )
 
 // ComponentClasses lists every class in install order. It is the single
 // source of the class ordering.
-var ComponentClasses = []ComponentClass{ComponentClassCore, ComponentClassOps, ComponentClassWorkload}
+var ComponentClasses = []ComponentClass{ComponentClassCore, ComponentClassOps}
 
 // Rank is the class's position in ComponentClasses; a lower rank installs
 // first. The second result is false for a name that is not a class.

@@ -402,12 +402,13 @@ A component must have either `helm` OR `kustomize` configuration, not both.
 
 #### Component classes
 
-Every embedded registry entry declares a `class`: `core`, `ops`, or
-`workload`
+Every embedded registry entry declares a `class`, `core` or `ops`
 ([ADR-018](https://github.com/NVIDIA/aicr/blob/main/docs/design/018-class-partitioned-bundles.md)).
 An entry in an external `--data` registry may omit it and is `core`.
 
-- The classes are ordered `core` < `ops` < `workload`.
+- The classes are ordered `core` < `ops`. `core` is what a plain GPU pod
+  needs to run correctly, with its fabric and install prerequisites; `ops` is
+  everything else, workload platforms included.
 - A component's `dependencyRefs` may name only components of its own class
   or an earlier one. A catalog test resolves every leaf and fails on an edge
   to a later class.

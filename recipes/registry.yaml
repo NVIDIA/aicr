@@ -20,11 +20,10 @@
 # Fields:
 #   name:              Component identifier used in recipes (e.g., "gpu-operator")
 #   displayName:       Human-readable name for templates and output
-#   class:             Bundle class (ADR-018): core, ops, or workload, ordered
-#                      core < ops < workload. A component may depend only on
-#                      its own class or an earlier one. Every entry here
-#                      declares it; an external registry entry that omits it
-#                      is core.
+#   class:             Bundle class (ADR-018): core or ops, ordered core < ops.
+#                      A component may depend only on its own class or an
+#                      earlier one. Every entry here declares it; an external
+#                      registry entry that omits it is core.
 #   valueOverrideKeys: Alternative keys for --set flag (e.g., --set gpuoperator:key=value)
 #   helm:              Default Helm chart settings (for Helm components)
 #     defaultRepository: Helm repository URL
@@ -804,7 +803,7 @@ components:
   # manifest-only wrapper).
   - name: slinky-drainer-crds
     displayName: slinky-drainer-crds
-    class: workload
+    class: ops
     valueOverrideKeys:
       - slinkydrainercrds
     healthCheck:
@@ -817,7 +816,7 @@ components:
 
   - name: slinky-drainer
     displayName: slinky-drainer
-    class: workload
+    class: ops
     valueOverrideKeys:
       - slinkydrainer
     healthCheck:
@@ -1091,7 +1090,7 @@ components:
 
   - name: grove
     displayName: grove
-    class: workload
+    class: ops
     valueOverrideKeys:
       - grove
     # Upgrading from v0.1.0-alpha.8 (or earlier) requires a CRD migration --
@@ -1120,7 +1119,7 @@ components:
     upgrades:
       file: components/dynamo-platform/upgrades.yaml
     displayName: dynamo-platform
-    class: workload
+    class: ops
     valueOverrideKeys:
       - dynamoplatform
       - dynamo
@@ -1143,7 +1142,7 @@ components:
 
   - name: agentgateway-crds
     displayName: agentgateway-crds
-    class: workload
+    class: ops
     valueOverrideKeys:
       - agentgatewaycrds
     healthCheck:
@@ -1168,7 +1167,7 @@ components:
 
   - name: agentgateway
     displayName: agentgateway
-    class: workload
+    class: ops
     valueOverrideKeys:
       - agentgateway
     healthCheck:
@@ -1190,7 +1189,7 @@ components:
 
   - name: k8s-nim-operator
     displayName: k8s-nim-operator
-    class: workload
+    class: ops
     valueOverrideKeys:
       - nimoperator
       - nim
@@ -1211,7 +1210,7 @@ components:
 
   - name: kueue
     displayName: kueue
-    class: workload
+    class: ops
     valueOverrideKeys:
       - kueue
     healthCheck:
@@ -1247,7 +1246,7 @@ components:
 
   - name: kubeflow-trainer
     displayName: kubeflow-trainer
-    class: workload
+    class: ops
     valueOverrideKeys:
       - kubeflowtrainer
       - trainer
@@ -1349,7 +1348,7 @@ components:
   # No shipped overlay references this component (TestNVCRERegisteredWithoutOverlay).
   - name: nvcre
     displayName: NVIDIA Cluster Readiness Engine
-    class: workload
+    class: ops
     ownsCRDs: true
     valueOverrideKeys:
       - nvcre
@@ -1391,7 +1390,7 @@ components:
 
   - name: slinky-slurm-operator-crds
     displayName: slinky-slurm-operator-crds
-    class: workload
+    class: ops
     valueOverrideKeys:
       - slinkyslurmoperatorcrds
       - slurmoperatorcrds
@@ -1412,7 +1411,7 @@ components:
 
   - name: mariadb-operator-crds
     displayName: MariaDB Operator CRDs
-    class: workload
+    class: ops
     valueOverrideKeys:
       - mariadboperatorcrds
     healthCheck:
@@ -1428,7 +1427,7 @@ components:
 
   - name: mariadb-operator
     displayName: MariaDB Operator
-    class: workload
+    class: ops
     valueOverrideKeys:
       - mariadboperator
     healthCheck:
@@ -1461,7 +1460,7 @@ components:
 
   - name: slurm-accounting-mariadb
     displayName: Slurm Accounting MariaDB
-    class: workload
+    class: ops
     valueOverrideKeys:
       - slurmaccountingmariadb
     healthCheck:
@@ -1493,7 +1492,7 @@ components:
 
   - name: slinky-slurm-operator
     displayName: slinky-slurm-operator
-    class: workload
+    class: ops
     # Short alias `slurm` routes to the operator; the cluster chart
     # (slinky-slurm below) uses the distinct alias `slurmcluster`.
     valueOverrideKeys:
@@ -1527,7 +1526,7 @@ components:
 
   - name: slinky-slurm
     displayName: slinky-slurm
-    class: workload
+    class: ops
     # Cluster instance chart; declared inline per slurm leaf overlay so
     # each leaf can carry its own GPU/GRES tuning (mirrors the
     # dynamo-platform pattern in inference-dynamo leaves).
@@ -1584,7 +1583,7 @@ components:
 
   - name: slinky-topograph
     displayName: slinky-topograph
-    class: workload
+    class: ops
     valueOverrideKeys:
       - slinkytopograph
     healthCheck:
@@ -1622,7 +1621,7 @@ components:
   # with slinky-topograph; bump both together.
   - name: topograph
     displayName: topograph
-    class: workload
+    class: ops
     valueOverrideKeys:
       - topograph
     healthCheck:
@@ -1846,7 +1845,7 @@ components:
 
   - name: k8s-nim-operator-ocp
     displayName: k8s-nim-operator OCP
-    class: workload
+    class: ops
     valueOverrideKeys:
       - nimoperatorocp
       - nimocp
