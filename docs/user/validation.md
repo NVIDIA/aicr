@@ -535,7 +535,9 @@ two nodes, and for `cre-training-goodput` on `eks` x `h100`,
 because it has no calibrated threshold to judge against.
 
 The goodput figure depends on the step count, because startup time counts
-against it: 0.5835 on two nodes and 0.5973 on one over 50 steps, measured on a
+against it. The step count comes from the NVCRE catalog entry, so a figure
+belongs to the CRE version that produced it: 0.5723 on two nodes with the
+pinned v0.8.2 (462.05 TFLOPS per GPU), and 0.5835 on v0.6.0, both measured on a
 NodeWright-tuned cluster. Both are single measurements, so set the constraint
 as a floor below the value your cluster reaches, not at it. Run it on nodes
 that completed NodeWright tuning: on a cluster that had not, with the distro
