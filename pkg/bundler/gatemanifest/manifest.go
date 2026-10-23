@@ -104,15 +104,20 @@ var valuesPathRE = regexp.MustCompile(`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$`)
 // ErrCodeInvalidRequest error if a path does not match valuesPathRE.
 func (p Placement) FromValues(paths ValuesPaths) (Placement, error) {
 	if paths.NodeSelector != "" {
-		lookup, err := valuesLookup(paths.NodeSelector)
+		top, nested, err := valuesLookup(paths.NodeSelector)
 		if err != nil {
 			return Placement{}, err
 		}
+		// Helm does not merge the chart-name nesting into the top-level
+		// path, so the template merges the two maps itself.
 		p.nodeSelector = valuesField("nodeSelector", paths.NodeSelector,
-			`{{- with `+lookup+` }}{{ dict "nodeSelector" . | toYaml | nindent `+strconv.Itoa(podSpecIndent)+` }}{{- end }}`)
+			`{{- $gateSelector := `+top+` }}{{- $gateNestedSelector := `+nested+` }}`+
+				`{{- if and (kindIs "map" $gateSelector) (kindIs "map" $gateNestedSelector) }}{{- $gateSelector = mergeOverwrite (deepCopy $gateSelector) $gateNestedSelector }}`+
+				`{{- else if $gateNestedSelector }}{{- $gateSelector = $gateNestedSelector }}{{- end }}`+
+				`{{- with $gateSelector }}{{ dict "nodeSelector" . | toYaml | nindent `+strconv.Itoa(podSpecIndent)+` }}{{- end }}`)
 	}
 	if paths.Tolerations != "" {
-		lookup, err := valuesLookup(paths.Tolerations)
+		top, nested, err := valuesLookup(paths.Tolerations)
 		if err != nil {
 			return Placement{}, err
 		}
@@ -120,7 +125,7 @@ func (p Placement) FromValues(paths ValuesPaths) (Placement, error) {
 		// template drops keyless tolerations itself.
 		p.tolerations = valuesField("tolerations", paths.Tolerations,
 			`{{- $gateTolerations := list }}`+
-				`{{- range `+lookup+` | default list }}{{- if .key }}{{- $gateTolerations = append $gateTolerations . }}{{- end }}{{- end }}`+
+				`{{- range `+nested+` | default `+top+` | default list }}{{- if .key }}{{- $gateTolerations = append $gateTolerations . }}{{- end }}{{- end }}`+
 				`{{- with $gateTolerations }}{{ dict "tolerations" . | toYaml | nindent `+strconv.Itoa(podSpecIndent)+` }}{{- end }}`)
 	}
 	return p, nil
@@ -135,13 +140,13 @@ func valuesField(name, path, action string) string {
 		strings.Repeat(" ", podSpecIndent), name, path, action)
 }
 
-// valuesLookup returns a Helm expression for the value at path. If path is
-// absent, the expression reads it under the chart name, where a vendored
-// parent nests its values. valuesLookup returns an ErrCodeInvalidRequest
-// error if path does not match valuesPathRE.
-func valuesLookup(path string) (string, error) {
+// valuesLookup returns Helm expressions for the value at path and for the
+// same path under the chart name, where a vendored parent nests its values.
+// valuesLookup returns an ErrCodeInvalidRequest error if path does not match
+// valuesPathRE.
+func valuesLookup(path string) (top, nested string, err error) {
 	if !valuesPathRE.MatchString(path) {
-		return "", errors.New(errors.ErrCodeInvalidRequest,
+		return "", "", errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("readiness gate: invalid values path %q", path))
 	}
 	segments := strings.Split(path, ".")
@@ -152,8 +157,8 @@ func valuesLookup(path string) (string, error) {
 	digKeys := strings.Join(keys, " ")
 	// dig rejects Helm's Values type, so it walks .Values.AsMap. The
 	// bundle-time render fills in the chart name.
-	nested := "(dig `}}{{ .Chart.Name | quote }}{{` " + digKeys + " nil .Values.AsMap)"
-	return "(dig " + digKeys + " " + nested + " .Values.AsMap)", nil
+	return "(dig " + digKeys + " nil .Values.AsMap)",
+		"(dig `}}{{ .Chart.Name | quote }}{{` " + digKeys + " nil .Values.AsMap)", nil
 }
 
 // validate returns an error for scheduling the API server would reject.

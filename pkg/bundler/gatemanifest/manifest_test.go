@@ -318,7 +318,7 @@ func TestFromValues(t *testing.T) {
 		t.Fatalf("NewPlacement: %v", err)
 	}
 	const (
-		selectorComment   = "      # nodeSelector from operator.nodeSelector {{`{{- with"
+		selectorComment   = "      # nodeSelector from operator.nodeSelector {{`{{- $gateSelector :="
 		tolerationComment = "      # tolerations from operator.tolerations {{`{{- $gateTolerations := list }}"
 		bundleSelector    = "      nodeSelector:\n        role: system\n"
 		bundleToleration  = "      tolerations:\n      - effect: NoSchedule\n        key: dedicated\n"

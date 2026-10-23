@@ -62,12 +62,17 @@ func TestReadinessGate_PlacementFromInstallTimeValues(t *testing.T) {
         value: system
         effect: NoSchedule
 `
+	nestedTolerations := "gpu-operator:\n  operator:" + strings.ReplaceAll(filledTolerations, "\n", "\n  ")
+	const nestedRole = "gpu-operator:\n  operator:\n    nodeSelector:\n      role: system\n"
 	selector := map[string]string{"role": "system"}
+	dynamicTolerations := []string{"operator.tolerations"}
+	dynamicRole := []string{"operator.nodeSelector.role"}
 
 	tests := []struct {
 		name            string
 		vendor          bool
 		values          map[string]any
+		dynamicPaths    []string
 		clusterValues   string
 		wantSelector    map[string]string
 		wantTolerations []corev1.Toleration
@@ -75,6 +80,7 @@ func TestReadinessGate_PlacementFromInstallTimeValues(t *testing.T) {
 		{
 			name:            "set selector and filled dynamic toleration",
 			values:          map[string]any{"operator": map[string]any{"nodeSelector": map[string]any{"role": "system"}}},
+			dynamicPaths:    dynamicTolerations,
 			clusterValues:   "operator:" + filledTolerations,
 			wantSelector:    selector,
 			wantTolerations: []corev1.Toleration{keyed},
@@ -83,18 +89,46 @@ func TestReadinessGate_PlacementFromInstallTimeValues(t *testing.T) {
 			name:            "vendored parent nests its cluster values under the chart name",
 			vendor:          true,
 			values:          map[string]any{"operator": map[string]any{"nodeSelector": map[string]any{"role": "system"}}},
-			clusterValues:   "gpu-operator:\n  operator:" + strings.ReplaceAll(filledTolerations, "\n", "\n  "),
+			dynamicPaths:    dynamicTolerations,
+			clusterValues:   nestedTolerations,
 			wantSelector:    selector,
+			wantTolerations: []corev1.Toleration{keyed},
+		},
+		{
+			name:          "vendored sub-key dynamic selector leaves an empty top-level map",
+			vendor:        true,
+			values:        map[string]any{"operator": map[string]any{"nodeSelector": map[string]any{"role": "system"}}},
+			dynamicPaths:  dynamicRole,
+			clusterValues: nestedRole,
+			wantSelector:  selector,
+		},
+		{
+			name:          "vendored sub-key dynamic selector keeps static sibling keys",
+			vendor:        true,
+			values:        map[string]any{"operator": map[string]any{"nodeSelector": map[string]any{"role": "system", "tier": "infra"}}},
+			dynamicPaths:  dynamicRole,
+			clusterValues: nestedRole,
+			wantSelector:  map[string]string{"role": "system", "tier": "infra"},
+		},
+		{
+			name:   "vendored nested tolerations win over static tolerations",
+			vendor: true,
+			values: map[string]any{"operator": map[string]any{"tolerations": []any{
+				map[string]any{"key": "other", "operator": "Exists", "effect": "NoSchedule"},
+			}}},
+			clusterValues:   nestedTolerations,
 			wantTolerations: []corev1.Toleration{keyed},
 		},
 		{
 			name:          "dynamic toleration left unfilled",
 			values:        map[string]any{"operator": map[string]any{"nodeSelector": map[string]any{"role": "system"}}},
+			dynamicPaths:  dynamicTolerations,
 			clusterValues: "operator:\n  tolerations: \"\"\n",
 			wantSelector:  selector,
 		},
 		{
-			name: "no placement values",
+			name:         "no placement values",
+			dynamicPaths: dynamicTolerations,
 		},
 	}
 	for _, tt := range tests {
@@ -121,7 +155,7 @@ func TestReadinessGate_PlacementFromInstallTimeValues(t *testing.T) {
 					ChartName:    "gpu-operator",
 					Version:      "v26.7.2",
 					Values:       tt.values,
-					DynamicPaths: []string{"operator.tolerations"},
+					DynamicPaths: tt.dynamicPaths,
 				}},
 				ComponentReadiness: map[string]map[string][]byte{"gpu-operator": {"readiness.yaml": gate}},
 				VendorCharts:       tt.vendor,
