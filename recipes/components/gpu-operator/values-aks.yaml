@@ -47,7 +47,7 @@ nfd:
 # and coordinated, not where its modules execute. Keep useHostMofed false
 # so the GPU Operator driver container builds nvidia_peermem against the
 # containerized MOFED stack; true can cause an ib_core symbol mismatch
-# (modprobe nvidia-peermem: Invalid argument, observed on aicr-test1).
+# (modprobe nvidia-peermem: Invalid argument, observed on AKS).
 # This stays false regardless of driver ownership mode: with
 # driver.enabled=false it is inert, but the correct value prevents a
 # future ownership-mode change from reviving the bug.

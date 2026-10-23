@@ -20,9 +20,9 @@
 # separately by applyNCCLResources.
 #
 # Differences from the EFA NET runtime:
-#   - Image: nvcr.io/nvidia/pytorch (CUDA 13, sm_103-capable; ships nccl-tests
+#   - Image: nvcr.io/nvidia/pytorch (CUDA 13; ships nccl-tests
 #     _mpi binaries + NCCL built with IB/verbs). The EFA hpc-cloud image is
-#     CUDA 12 and EFA-only — wrong fabric and wrong CUDA for Blackwell Ultra.
+#     CUDA 12 and EFA-only, so it fits neither requirement.
 #   - Transport: NCCL built-in IB/verbs over the ConnectX RoCE devices
 #     (NCCL_IB_HCA=rocep, the AWS RoCE kernel naming), NCCL_NET_PLUGIN=none to
 #     bypass the bundled aws-ofi-nccl (EFA/Libfabric) plugin, no FI_PROVIDER.
