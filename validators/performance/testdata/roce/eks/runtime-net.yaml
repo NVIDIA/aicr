@@ -15,9 +15,9 @@
 # NCCL All-Reduce NET TrainingRuntime — AWS ConnectX RoCE fabric.
 #
 # Fabric-keyed (AICR_NCCL_FABRIC=roce), accelerator-agnostic: any EKS RoCE node
-# (ConnectX VFs surfaced as roce.networking.k8s.aws DRA devices, e.g. the DGXC
-# GB300 p6e-gb300r clusters) rather than a per-accelerator template. The RoCE
-# DRA claim (nccl-roce-rct) is applied separately by applyNCCLResources.
+# (ConnectX VFs surfaced as roce.networking.k8s.aws DRA devices) rather than a
+# per-accelerator template. The RoCE DRA claim (nccl-roce-rct) is applied
+# separately by applyNCCLResources.
 #
 # Differences from the EFA NET runtime:
 #   - Image: nvcr.io/nvidia/pytorch (CUDA 13, sm_103-capable; ships nccl-tests
@@ -32,8 +32,8 @@
 #     UCC team-create and the UCX PML segfault during MPI_Init on this image;
 #     MPI is only the launcher/bootstrap, NCCL carries the collective data.
 #
-# Verified end-to-end on aicr-gb300 (8 GPUs, 2x p6e-gb300r): NCCL IB over 8
-# rocep* RoCE devices (GPUDirect RDMA), ~387 GB/s peak busbw. See NVIDIA/aicr#1413.
+# Verified end-to-end on a two-node ConnectX RoCE EKS cluster: NCCL IB over the
+# rocep* RoCE devices (GPUDirect RDMA).
 apiVersion: trainer.kubeflow.org/v1alpha1
 kind: TrainingRuntime
 metadata:
@@ -180,8 +180,8 @@ spec:
                   # ConnectionAttempts is only a backstop.
                   # Requires the GPU nodes to have apt egress; on an air-gapped /
                   # no-egress cluster the worker install never finishes and this
-                  # validator fails (tracked for removal once a CUDA-13 image ships
-                  # sshd — see NVIDIA/aicr#1413).
+                  # validator fails (to be removed once a CUDA-13 image ships
+                  # sshd).
                   - -o StrictHostKeyChecking=no -o ConnectionAttempts=60
                   # HPC-X UCC/HCOLL collective components segfault in MPI_Init
                   # team-create on this image; disable them (NCCL does the

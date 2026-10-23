@@ -44,7 +44,7 @@ spec:
   #
   # Fabric selection is not modelled in the recipe criteria today — this
   # overlay targets EFA because that is what the reference cluster presents
-  # and what public AICR builds for (#1410).
+  # and what public AICR builds for.
   #
   # Specific constraints for GB300 on EKS inference workloads.
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
