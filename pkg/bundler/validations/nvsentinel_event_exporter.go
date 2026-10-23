@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"slices"
 	"strings"
@@ -51,6 +52,7 @@ const (
 	eventExporterPlaceholderDomain    = "example.com"
 	eventExporterPlaceholderDomainOrg = "example.org"
 	eventExporterPlaceholderDomainNet = "example.net"
+	eventExporterPlaceholderTLD       = "example"
 )
 
 // CheckNVSentinelEventExporterCoherent blocks a bundle in which NVSentinel's
@@ -59,8 +61,10 @@ const (
 // cleanly and then retries into nothing. It fails when:
 //
 //   - sink.endpoint or oidc.tokenUrl is not an http or https URL with a
-//     host, or names an example.com, .org or .net host, as the chart's
-//     placeholders do;
+//     host, names an example.com, .org or .net host, as the chart's
+//     placeholders do, or a host under the reserved .example TLD, or uses
+//     plain http to a host outside the cluster, which would send the client
+//     credentials and bearer token unencrypted;
 //   - oidc.clientId, oidc.scope, metadata.cluster or metadata.environment is
 //     not set by AICR's values, so the chart's placeholder would apply
 //     (metadata.cluster may not be the chart's "my-cluster" either);
@@ -134,15 +138,16 @@ func CheckNVSentinelEventExporterCoherent(ctx context.Context, componentName str
 
 	for _, path := range []string{eventExporterSinkSkipVerifyPath, eventExporterOIDCSkipVerifyPath} {
 		if raw, present := component.GetValueByPath(values, path); present && raw != false {
-			fail("%s is %v; it must be false: health events and the OIDC client credentials leave the cluster, "+
-				"so the endpoint's certificate must be verified", path, raw)
+			fail("%s is %#v; it must be the boolean false: health events and the OIDC client credentials leave "+
+				"the cluster, so the endpoint's certificate must be verified", path, raw)
 		}
 	}
 
-	secret, _, _ := resolvedStringValue(values, eventExporterSecretNamePath)
-	if problems := validation.IsDNS1123Subdomain(secret); len(problems) > 0 {
-		fail("%s is %q, not a valid Secret name (%s) -- the Deployment mounts it and does not start without it",
-			eventExporterSecretNamePath, secret, strings.Join(problems, "; "))
+	if secret, ok := eventExporterString(values, eventExporterSecretNamePath, true, fail); ok {
+		if problems := validation.IsDNS1123Subdomain(secret); len(problems) > 0 {
+			fail("%s is %q, not a valid Secret name (%s) -- the Deployment mounts it and does not start without it",
+				eventExporterSecretNamePath, secret, strings.Join(problems, "; "))
+		}
 	}
 
 	return nil, errs
@@ -223,14 +228,33 @@ func eventExporterURLProblem(v string) string {
 		return "not a URL"
 	case u.Scheme != "http" && u.Scheme != "https":
 		return "not an http or https URL"
-	case u.Hostname() == "":
+	}
+	// A fully qualified name may end in a dot; it names the same host.
+	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	if host == "" {
 		return "a URL with no host"
 	}
-	host := strings.ToLower(u.Hostname())
-	for _, domain := range []string{eventExporterPlaceholderDomain, eventExporterPlaceholderDomainOrg, eventExporterPlaceholderDomainNet} {
+	for _, domain := range []string{eventExporterPlaceholderDomain, eventExporterPlaceholderDomainOrg,
+		eventExporterPlaceholderDomainNet, eventExporterPlaceholderTLD} {
 		if host == domain || strings.HasSuffix(host, "."+domain) {
 			return "a placeholder host, like the chart's own"
 		}
 	}
+	if u.Scheme == "http" && !eventExporterClusterLocalHost(host) {
+		return "plain http to a host outside the cluster, which would send the client credentials and bearer " +
+			"token unencrypted -- use https"
+	}
 	return ""
+}
+
+// eventExporterClusterLocalHost reports whether host resolves inside the
+// cluster: a single-label Service name, <service>.<namespace>.svc, or the
+// fully qualified svc.cluster.local form. An IP literal is never treated as
+// one, since it can be any address; a colon marks IPv6, including the zoned
+// form net.ParseIP rejects, and never appears in a DNS name.
+func eventExporterClusterLocalHost(host string) bool {
+	if strings.Contains(host, ":") || net.ParseIP(host) != nil {
+		return false
+	}
+	return !strings.Contains(host, ".") || strings.HasSuffix(host, ".svc") || strings.HasSuffix(host, ".svc.cluster.local")
 }

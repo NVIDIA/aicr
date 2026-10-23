@@ -195,7 +195,7 @@ test_gate_and_bundle() {
   expect_refusal "gate refuses the exporter without a sink" "sink.endpoint is not set" "${deployment[@]}"
   expect_refusal "gate refuses the chart's placeholder sink" "a placeholder host" "${deployment[@]}" \
     --set "${p}.sink.endpoint=https://events.example.com/api/v1/events"
-  expect_refusal "gate refuses an unchecked sink certificate" "it must be false" "${deployment[@]}" \
+  expect_refusal "gate refuses an unchecked sink certificate" "it must be the boolean false" "${deployment[@]}" \
     --set "${p}.sink.endpoint=${MOCK_URL}/events" --set "${p}.sink.insecureSkipVerify=true"
 
   bundle_to deploy "${deployment[@]}" --set "${p}.sink.endpoint=${MOCK_URL}/events" ||

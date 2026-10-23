@@ -91,8 +91,9 @@ func TestCheckNVSentinelEventExporterCoherent(t *testing.T) {
 		wantTOML        = "unescaped"
 		wantBareKey     = "as a bare key"
 		wantCluster     = "the chart's placeholder \"my-cluster\""
-		wantSkipVerify  = "it must be false"
+		wantSkipVerify  = "it must be the boolean false"
 		wantSecret      = "not a valid Secret name"
+		wantCleartext   = "plain http to a host outside the cluster"
 		wantDynamic     = "--dynamic"
 	)
 
@@ -122,6 +123,44 @@ func TestCheckNVSentinelEventExporterCoherent(t *testing.T) {
 		{name: "sink endpoint without a host",
 			recipe: recipeOf(set(exporter(), "https:///events", "exporter", "sink", "endpoint")),
 			want:   []string{wantNoHost}},
+		{name: "sink endpoint under the reserved .example TLD",
+			recipe: recipeOf(set(exporter(), "https://events.corp.example/v1/events", "exporter", "sink", "endpoint")),
+			want:   []string{wantPlaceholder}},
+		{name: "token URL on the bare example host",
+			recipe: recipeOf(set(exporter(), "https://example/oauth2/token", "exporter", "oidc", "tokenUrl")),
+			want:   []string{wantPlaceholder}},
+		{name: "plain http token URL outside the cluster",
+			recipe: recipeOf(set(exporter(), "http://idp.corp.com/oauth2/token", "exporter", "oidc", "tokenUrl")),
+			want:   []string{wantCleartext}},
+		{name: "placeholder host with a trailing dot",
+			recipe: recipeOf(set(exporter(), "https://events.corp.example./events", "exporter", "sink", "endpoint")),
+			want:   []string{wantPlaceholder}},
+		{name: "chart placeholder with a trailing dot",
+			recipe: recipeOf(set(exporter(), "https://auth.example.com./oauth2/token", "exporter", "oidc", "tokenUrl")),
+			want:   []string{wantPlaceholder}},
+		{name: "plain http to a public IPv6 literal",
+			recipe: recipeOf(set(exporter(), "http://[2606:4700:4700::1111]/token", "exporter", "oidc", "tokenUrl")),
+			want:   []string{wantCleartext}},
+		{name: "plain http to an IPv6 literal with a zone",
+			recipe: recipeOf(set(exporter(), "http://[2606:4700:4700::1111%25eth0]/token", "exporter", "oidc", "tokenUrl")),
+			want:   []string{wantCleartext}},
+		{name: "plain http to a link-local IPv6 literal with a zone",
+			recipe: recipeOf(set(exporter(), "http://[fe80::1%25en0]:8080/events", "exporter", "sink", "endpoint")),
+			want:   []string{wantCleartext}},
+		{name: "plain http to an IPv4 literal",
+			recipe: recipeOf(set(exporter(), "http://203.0.113.7:8080/events", "exporter", "sink", "endpoint")),
+			want:   []string{wantCleartext}},
+		{name: "https to an IPv6 literal",
+			recipe: recipeOf(set(exporter(), "https://[2606:4700:4700::1111]/token", "exporter", "oidc", "tokenUrl"))},
+		{name: "plain http at the svc.cluster.local name with a trailing dot",
+			recipe: recipeOf(set(exporter(), "http://collector.observability.svc.cluster.local./events", "exporter", "sink", "endpoint"))},
+		{name: "host that is only a trailing dot",
+			recipe: recipeOf(set(exporter(), "https://./events", "exporter", "sink", "endpoint")),
+			want:   []string{wantNoHost}},
+		{name: "plain http sink at a single-label Service name",
+			recipe: recipeOf(set(exporter(), "http://collector:8080/events", "exporter", "sink", "endpoint"))},
+		{name: "plain http token URL at the svc.cluster.local name",
+			recipe: recipeOf(set(exporter(), "http://ee-mock.ee-mock.svc.cluster.local:8080/token", "exporter", "oidc", "tokenUrl"))},
 		{name: "token URL the chart's placeholder",
 			recipe: recipeOf(set(exporter(), "https://auth.example.com/oauth2/token", "exporter", "oidc", "tokenUrl")),
 			want:   []string{wantPlaceholder}},
@@ -167,11 +206,14 @@ func TestCheckNVSentinelEventExporterCoherent(t *testing.T) {
 			want: []string{wantSkipVerify}},
 		{name: "OIDC certificate check as a string",
 			recipe: recipeOf(set(exporter(), "false", "exporter", "oidc", "insecureSkipVerify")),
-			want:   []string{wantSkipVerify}},
+			want:   []string{`insecureSkipVerify is "false"; ` + wantSkipVerify}},
 		{name: "secret name invalid", recipe: recipeOf(set(exporter(), "Event_Exporter", "oidcSecretName")),
 			want: []string{wantSecret}},
 		{name: "secret name left to the chart", recipe: recipeOf(unset(exporter(), "oidcSecretName")),
-			want: []string{wantSecret}},
+			want: []string{"oidcSecretName " + wantNotSet}},
+		{name: "secret name from --set parsed as a number", recipe: recipeOf(exporter()),
+			cfg:  sets(map[string]string{eventExporterSecretNamePath: "12345"}),
+			want: []string{"oidcSecretName is 12345, " + wantNotString}},
 		{name: "no per-deployment values", recipe: func() *recipe.RecipeResult {
 			e := exporter()
 			x := section(e, "exporter")
