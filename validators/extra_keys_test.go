@@ -45,7 +45,7 @@ var extraKeySamples = map[string]string{
 	ExtraKeyWorkerNodes:         "2",
 	ExtraKeyGPUsInvolved:        "16",
 	ExtraKeyTransport:           "nvls",
-	ExtraKeyFabric:              "roce",
+	ExtraKeyFabric:              "efa",
 	ExtraKeyDRAReady:            "8",
 	ExtraKeyDRADesired:          "8",
 	ExtraKeyNodewrightComplete:  "3",

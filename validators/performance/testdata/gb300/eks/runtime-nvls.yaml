@@ -14,7 +14,7 @@
 
 # NCCL all-reduce TrainingRuntime for GB300 on EKS, NVLS-transport variant.
 #
-# Identical to the GB200/EKS NVLS template: GB300's p6e-gb300r.36xlarge is
+# Identical to the GB200/EKS NVLS template: the GB300 EKS instance is
 # the same NVL72 UltraServer shape and IMEX domain as GB200's
 # p6e-gb200.36xlarge, so the image and MPI wiring below are unchanged.
 # Validates Multi-Node NVLink (MNNVL / NVLS — NVLink SHARP) across an NVL72
@@ -37,7 +37,7 @@
 # resource.nvidia.com/v1beta1 ComputeDomain CRD present. Without it the
 # validator's CR creation fails up front with a clear NotFound error.
 #
-# Measured on GB300 (2x p6e-gb300r.36xlarge, 8 GPUs, NCCL 2.27.7, 16 GiB
+# Measured on GB300 (2 GPU nodes, 8 GPUs, NCCL 2.27.7, 16 GiB
 # message): 843.06 GB/s busbw — see recipes/overlays/gb300-eks-training.yaml
 # for the floor this feeds.
 apiVersion: trainer.kubeflow.org/v1alpha1

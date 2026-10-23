@@ -27,7 +27,7 @@ spec:
     accelerator: gb300
     intent: training
 
-  # Targets p6e-gb300r.36xlarge (GB300 NVL72, 4 GPUs per node, Grace ARM64
+  # Targets the GB300 EKS instance (GB300 NVL72, 4 GPUs per node, Grace ARM64
   # host) on the EFA scale-out fabric.
   #
   # Verified on the reference cluster: each GPU node presents 2x Amazon ENA
@@ -138,7 +138,7 @@ spec:
       # actually carried traffic, so a silent fallback to Socket or NET does
       # not masquerade as a pass.
       #
-      # Measured on GB300 (2x p6e-gb300r.36xlarge, 8 GPUs, NCCL 2.27.7,
+      # Measured on GB300 (2 GPU nodes, 8 GPUs, NCCL 2.27.7,
       # 16 GiB message): net 44.04 GB/s, nvls 841.17 GB/s. Both land at ~88%
       # of their respective line rates (a single 400 Gb/s EFA device; 18
       # NVLink-5 links at 53.125 GB/s = ~956 GB/s per GPU).

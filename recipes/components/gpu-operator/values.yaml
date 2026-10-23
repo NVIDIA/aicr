@@ -157,7 +157,7 @@ driver:
   # drops NVreg_GrdmaPciTopoCheckOverride (the R580-era escape hatch) and
   # substitutes a topology check: EFA must sit in an IOMMU group, or GPU and
   # EFA must share a root port. p6e-gb200/gb300 satisfies neither — measured
-  # on p6e-gb300r.36xlarge, where EFA (0000:97:00.0) has no iommu_group and
+  # on a GB300 EKS node, where EFA (0000:97:00.0) has no iommu_group and
   # sits under pci0000:84 while the GPU (0000:9d:00.0) is in group 0 under
   # pci0000:98.
   #

@@ -468,7 +468,7 @@ fails its key's shape (an IP under `nodesTotal`, `305.44` under
 | signed decimal (`+1.8`, `-12.3`) | `passMargin` (percent above or below `thresholdGbps`) |
 | `true` or `false` | `nodeLocal`, `versionSatisfied` |
 | `v` plus one to three numeric parts, optional `-alpha`, `-beta`, or `-rc` suffix (`v25.3.0-rc.1`) | `detectedVersion` |
-| closed set | `skipReason` (below), `runtimeSource` (`delivered-artifact`, `recipe-supplied-runtime`, `cluster-capability`), `transport` (`default`, `net`, `nvls`), `fabric` (`efa`, `roce`), `configuredPolicy` (every GPU allocation policy), `resolvedMode` (`device-plugin-extended-resource`, `dra-resource-claim`) |
+| closed set | `skipReason` (below), `runtimeSource` (`delivered-artifact`, `recipe-supplied-runtime`, `cluster-capability`), `transport` (`default`, `net`, `nvls`), `fabric` (`efa`), `configuredPolicy` (every GPU allocation policy), `resolvedMode` (`device-plugin-extended-resource`, `dra-resource-claim`) |
 
 Codes are closed sets rather than a shape regex, because a kebab-case regex
 would still pass an identifier like `customer-prod-cluster`. The `skipReason`
@@ -504,9 +504,8 @@ page are the contract.
 
 - NCCL publishes `transport`, `workerNodes`, and `gpusInvolved` before the
   benchmark runs, so a failed run still records its scope. `fabric` appears
-  only on `nccl-all-reduce-bw-net`, when `AICR_NCCL_FABRIC` selected the
-  baked-in EKS template. `tolerancePct` is the slack below `thresholdGbps`
-  that still passes.
+  only on `nccl-all-reduce-bw-net`, when it runs the baked-in EKS template.
+  `tolerancePct` is the slack below `thresholdGbps` that still passes.
 - `check-nvidia-smi` publishes `nodesValidated` and `nodesTotal` only after
   per-node verification runs, on pass or fail. An exit before that (no GPU
   nodes, all cordoned, or busy) publishes neither.
@@ -662,7 +661,6 @@ be set from the catalog or a `--data` overlay:
 | `HF_TOKEN` | `inference-perf` | Hugging Face token for model downloads; see [`inference-perf`](#inference-perf-model-concurrency-and-weights-cache). |
 | `AICR_INFERENCE_PERF_NO_CLEANUP` | `inference-perf` | When true (`strconv.ParseBool`), leaves the per-run namespace in place for inspection; forwarded as `1`. |
 | `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY` | `inference-gateway` | When truthy, the check fails if the gateway's `LoadBalancer` Service is open to `0.0.0.0/0` — its `spec.loadBalancerSourceRanges` is empty or includes an any-source CIDR (`0.0.0.0/0` or `::/0`). Default (unset): the open exposure is recorded and warned but the check still passes. |
-| `AICR_NCCL_FABRIC` | `nccl-all-reduce-bw-net` | NET fabric selector: `efa` (default) or `roce`. |
 | `AICR_NCCL_RUNTIME_IMAGE` | `nccl-all-reduce-bw`, `nccl-all-reduce-bw-net`, `nccl-all-reduce-bw-nvls` | Overrides the NCCL launcher/worker image baked into the per-platform TrainingRuntime templates; a malformed reference fails closed in the pod. |
 
 **RBAC.** The engine creates a per-run ServiceAccount and
@@ -1082,8 +1080,8 @@ Resolution is split across the two-stage design:
   `validateNcclAllReduceBw` bypasses the `ncclCombinationSupported` applicability
   gate entirely (applicability is granted by the recipe's explicit opt-in, keyed
   on its own criteria) and `applyNCCLResources` skips every service-specific step
-  — EFA/TCPXO/RDMA discovery, the GB200-NVreg / GKE-TCPXO preflights, RoCE claim
-  application, and NVLS/IMEX provisioning — because the supplied runtime owns its
+  — EFA/TCPXO/RDMA discovery, the GB200-NVreg / GKE-TCPXO preflights, and
+  NVLS/IMEX provisioning — because the supplied runtime owns its
   fabric wiring. Transport verification still runs (the `-net` / `-nvls` markers
   are transport-internal and fabric-agnostic), so a runtime paired with a named
   variant must still prove its transport rather than pass on bandwidth alone; the

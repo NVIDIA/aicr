@@ -53,13 +53,6 @@ const (
 
 	requireScopedInferenceGatewayEnv = "AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY"
 
-	// NCCLAllReduceBWNetCheckName is the catalog name of the NCCL all-reduce NET
-	// check. Used to scope AICR_NCCL_FABRIC forwarding to that validator only.
-	// Exported (like InferencePerfCheckName / InferenceGatewayCheckName) so the
-	// catalog package can lock the embedded entry name against it — a rename
-	// would otherwise silently no-op RoCE forwarding with no test failing.
-	NCCLAllReduceBWNetCheckName = "nccl-all-reduce-bw-net"
-
 	// CRENCCLAllReduceBWCheckName is the catalog name of the CRE-driven NCCL
 	// all-reduce check (Certification). Overlays opt in by listing this check and
 	// a same-named performance constraint. No embedded overlay enables it, and
@@ -73,23 +66,14 @@ const (
 	// varies per combination.
 	CRETrainingGoodputCheckName = "cre-training-goodput"
 
-	// ncclFabricEnv selects the NET fabric (efa default | roce). Forwarded to
-	// the NET check pod so the in-Job validator can observe it. This is the
-	// orchestrator (forwarding) end; the validator-pod (reading) end defines the
-	// same literal as ncclFabricEnv in
-	// validators/performance/nccl_all_reduce_bw_constraint.go — keep the two in
-	// sync. The split mirrors the other forwarded validator envs (HF_TOKEN,
-	// AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY, AICR_INFERENCE_PERF_NO_CLEANUP): the
-	// pod binary is a separate package that does not import this one.
-	ncclFabricEnv = "AICR_NCCL_FABRIC"
-
-	// NCCLAllReduceBWCheckName / NCCLAllReduceBWNvlsCheckName are the catalog
-	// names of the default and NVLS NCCL all-reduce checks, exported alongside
-	// NCCLAllReduceBWNetCheckName so ncclRuntimeImageEnv can scope forwarding to
-	// all three NCCL variants. A rename of any entry would otherwise silently
-	// no-op image-override forwarding to that variant with no test failing —
-	// see TestEmbeddedCatalog_NCCLEntriesExist.
+	// NCCLAllReduceBWCheckName / NCCLAllReduceBWNetCheckName /
+	// NCCLAllReduceBWNvlsCheckName are the catalog names of the default, NET,
+	// and NVLS NCCL all-reduce checks, exported so ncclRuntimeImageEnv can scope
+	// forwarding to all three NCCL variants. A rename of any entry would
+	// otherwise silently no-op image-override forwarding to that variant with no
+	// test failing — see TestEmbeddedCatalog_NCCLEntriesExist.
 	NCCLAllReduceBWCheckName     = "nccl-all-reduce-bw"
+	NCCLAllReduceBWNetCheckName  = "nccl-all-reduce-bw-net"
 	NCCLAllReduceBWNvlsCheckName = "nccl-all-reduce-bw-nvls"
 
 	// ncclRuntimeImageEnv overrides the NCCL launcher/worker workload image
@@ -206,21 +190,13 @@ func buildEnv(
 		env = append(env, corev1.EnvVar{Name: requireScopedInferenceGatewayEnv, Value: v})
 	}
 
-	// Forward the NCCL fabric selector to the nccl-all-reduce-bw-net check pod.
-	// The NET test runs inside the Job, so it can't observe the CLI environment
-	// unless forwarded here. Unset (default) leaves the check on EFA; scoped to
-	// the NET check so unrelated validator pods don't carry it.
-	if v, ok := os.LookupEnv(ncclFabricEnv); ok && v != "" && entry.Name == NCCLAllReduceBWNetCheckName {
-		env = append(env, corev1.EnvVar{Name: ncclFabricEnv, Value: v})
-	}
-
 	// Forward the NCCL workload-image override to all three NCCL all-reduce
 	// check pods (default, NET, NVLS). Each check runs inside its own Job, so
 	// it can't observe the CLI process environment unless forwarded here.
 	// Unset (default) leaves every check on its compiled-in per-platform
 	// image; scoped to the NCCL checks so unrelated validator pods don't carry
 	// it. Malformed references are rejected pod-side (fail closed), not here —
-	// the orchestrator forwards the raw value verbatim, matching ncclFabricEnv.
+	// the orchestrator forwards the raw value verbatim.
 	ncclRuntimeImageEnvVal, ncclRuntimeImageEnvOK := os.LookupEnv(ncclRuntimeImageEnv)
 	ncclRuntimeImageApplies := entry.Name == NCCLAllReduceBWCheckName || entry.Name == NCCLAllReduceBWNetCheckName || entry.Name == NCCLAllReduceBWNvlsCheckName
 	if ncclRuntimeImageEnvOK && ncclRuntimeImageEnvVal != "" && ncclRuntimeImageApplies {
@@ -247,7 +223,7 @@ func buildEnv(
 	// forwarded value (k8s takes the last duplicate), breaking that trust
 	// boundary.
 	for _, e := range entry.Env {
-		if e.Name == hfTokenEnvVar || e.Name == requireScopedInferenceGatewayEnv || e.Name == inferencePerfNoCleanupEnv || e.Name == ncclFabricEnv || e.Name == ncclRuntimeImageEnv {
+		if e.Name == hfTokenEnvVar || e.Name == requireScopedInferenceGatewayEnv || e.Name == inferencePerfNoCleanupEnv || e.Name == ncclRuntimeImageEnv {
 			continue
 		}
 		env = append(env, corev1.EnvVar{Name: e.Name, Value: e.Value})

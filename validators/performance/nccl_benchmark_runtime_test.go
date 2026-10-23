@@ -197,8 +197,6 @@ func TestResolveNCCLBenchmarkRuntime(t *testing.T) {
 // rejected together, and a malformed runtime fails closed before any cluster
 // access.
 func TestValidateNcclAllReduceBwCustomRuntimeGate(t *testing.T) {
-	t.Setenv(ncclFabricEnv, "") // isolate from ambient AICR_NCCL_FABRIC
-
 	thresholdC := func(name, v string) recipe.Constraint { return recipe.Constraint{Name: name, Value: v} }
 
 	tests := []struct {
@@ -252,28 +250,6 @@ func TestValidateNcclAllReduceBwCustomRuntimeGate(t *testing.T) {
 	}
 }
 
-// TestValidateNcclAllReduceBwCustomRuntimeIgnoresFabric proves a recipe-supplied
-// runtime is not gated on AICR_NCCL_FABRIC: a malformed fabric env (which fails
-// the baked-in path at ncclFabric) must not abort a custom runtime, which owns
-// its own fabric. The check reaches threshold parsing instead of erroring on
-// the env.
-func TestValidateNcclAllReduceBwCustomRuntimeIgnoresFabric(t *testing.T) {
-	t.Setenv(ncclFabricEnv, "not-a-real-fabric")
-
-	threshold := recipe.Constraint{Name: checkNameNCCLAllReduceBW, Value: "not-a-number"}
-	ctx := ctxWithCriteriaAndPerfConstraints("custom-svc", "customaccel",
-		threshold, runtimeConstraint(validBenchmarkRuntime))
-
-	_, _, err := validateNcclAllReduceBw(ctx, threshold, variantDefault)
-	if err == nil {
-		t.Fatal("expected an error")
-	}
-	// Must reach threshold parsing (past the fabric env), not fail on the fabric.
-	if !strings.Contains(err.Error(), "invalid threshold") {
-		t.Errorf("custom runtime should ignore AICR_NCCL_FABRIC; got %v", err)
-	}
-}
-
 // TestValidateNcclAllReduceBwCustomRuntimeSizesByRuntimeSelector proves the
 // worker cohort is sized against the SAME nodes the runtime's own nodeSelector
 // will place workers on: two GPU nodes, a runtime that pins workers to pool=a
@@ -281,8 +257,6 @@ func TestValidateNcclAllReduceBwCustomRuntimeIgnoresFabric(t *testing.T) {
 // runtime-selector-aware sizing, WorkerCount would be 2 and the check would
 // proceed to deploy against nodes the runtime then excludes.
 func TestValidateNcclAllReduceBwCustomRuntimeSizesByRuntimeSelector(t *testing.T) {
-	t.Setenv(ncclFabricEnv, "")
-
 	node := func(name, pool string) *corev1.Node {
 		return &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
@@ -335,8 +309,6 @@ spec:
 // applicability gate: a bare private criteria pair would have skipped earlier
 // with "requires Service + Accelerator to be implemented".
 func TestValidateNcclAllReduceBwCustomRuntimeClusterPath(t *testing.T) {
-	t.Setenv(ncclFabricEnv, "") // isolate from ambient AICR_NCCL_FABRIC
-
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   "gpu-node-a",
@@ -385,7 +357,7 @@ func TestRenderYAMLTemplate(t *testing.T) {
 // metadata.name), and generic ${VAR} placeholders are substituted.
 func TestBuildNCCLRuntimeObjectCustom(t *testing.T) {
 	obj, err := buildNCCLRuntimeObject(validBenchmarkRuntime,
-		"customaccel", "custom-svc", variantDefault, fabricEFA,
+		"customaccel", "custom-svc", variantDefault,
 		"aicr-validation", map[string]string{"GPU_COUNT_PER_NODE": "8"}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -442,7 +414,7 @@ spec:
 	// service=eks would, before the fix, stamp {instance-type: ""} onto the node
 	// job. No --node-selector override, so the runtime's own selector must win.
 	if err := applyNCCLResources(ctx, fakeClient, config,
-		recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceEKS, variantDefault, fabricEFA,
+		recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceEKS, variantDefault,
 		runtimeWithSelector, "", nil); err != nil {
 		t.Fatalf("applyNCCLResources (custom runtime) failed: %v", err)
 	}
@@ -502,7 +474,7 @@ spec:
 		ctx := &validators.Context{Ctx: context.Background(), DynamicClient: fakeClient, Namespace: ns}
 
 		if err := applyNCCLResources(ctx, fakeClient, config,
-			recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceEKS, variantDefault, fabricEFA,
+			recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceEKS, variantDefault,
 			"", "example.com/qualify/nccl:cuda13", nil); err != nil {
 			t.Fatalf("applyNCCLResources (embedded, override) failed: %v", err)
 		}
@@ -528,7 +500,7 @@ spec:
 		// recipe-supplied case, which must never apply the override since
 		// that runtime owns its own image.
 		if err := applyNCCLResources(ctx, fakeClient, config,
-			recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceEKS, variantDefault, fabricEFA,
+			recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceEKS, variantDefault,
 			runtimeWithSelector, "example.com/should-be-ignored:v1", &benchmarkRuntimePlan{source: runtimeSourceRecipeSupplied}); err != nil {
 			t.Fatalf("applyNCCLResources (custom runtime) failed: %v", err)
 		}
@@ -720,7 +692,7 @@ func TestApplyNCCLResourcesCustomRuntimeIMEX(t *testing.T) {
 			ctx := &validators.Context{Ctx: context.Background(), DynamicClient: fakeClient, Namespace: ns}
 			config := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 4, TotalGPUCount: 8, Namespace: ns}
 			if aerr := applyNCCLResources(ctx, fakeClient, config,
-				recipe.CriteriaAcceleratorVR200, recipe.CriteriaServiceRKE2, tt.variant, fabricEFA,
+				recipe.CriteriaAcceleratorVR200, recipe.CriteriaServiceRKE2, tt.variant,
 				tt.runtime, "", plan); aerr != nil {
 				t.Fatalf("applyNCCLResources failed: %v", aerr)
 			}
