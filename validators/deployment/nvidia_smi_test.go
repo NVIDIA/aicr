@@ -1210,3 +1210,42 @@ func TestRunNvidiaSMICheck_DeadContextStopsWithoutCountingFailed(t *testing.T) {
 		"nodesValidated": "1", "nodesTotal": "3", "nodesFailed": "0", "nodesSkipped": "0",
 	})
 }
+
+// A busy probe interrupted by the deadline stops the check as a dead context,
+// not as a probe-error skip that would let an earlier pass stand.
+func TestRunNvidiaSMICheck_DeadContextDuringProbeStopsWithoutSkipping(t *testing.T) {
+	ctx := newDeploymentTestContext(t, []runtime.Object{
+		gpuNode("gpu-1", 8, -1), gpuNode("gpu-2", 8, -1),
+	}, nil, nil)
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx.Ctx = runCtx
+	ctx.Clientset.(*k8sfake.Clientset).PrependReactor("list", "pods",
+		func(action clienttesting.Action) (bool, runtime.Object, error) {
+			list, ok := action.(clienttesting.ListAction)
+			if !ok {
+				return false, nil, nil
+			}
+			if node, _ := list.GetListRestrictions().Fields.RequiresExactMatch("spec.nodeName"); node == "gpu-2" {
+				cancel()
+				return true, nil, runCtx.Err()
+			}
+			return true, &v1.PodList{}, nil
+		})
+
+	var verified []string
+	extra, err := captureExtras(t, func() error {
+		return runNvidiaSMICheck(ctx, func(nodeName string) error {
+			verified = append(verified, nodeName)
+			return nil
+		})
+	})
+
+	errorstest.WantReportedCode(t, err, errors.ErrCodeCanceled)
+	if strings.Join(verified, ",") != "gpu-1" {
+		t.Errorf("verified nodes = %v, want [gpu-1]", verified)
+	}
+	assertExtraSubset(t, extra, map[string]string{
+		"nodesValidated": "1", "nodesTotal": "2", "nodesFailed": "0", "nodesSkipped": "0",
+	})
+}

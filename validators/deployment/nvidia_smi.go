@@ -290,6 +290,10 @@ func runNvidiaSMICheck(ctx *validators.Context, verifyNode func(nodeName string)
 		busy, busyErr := helper.IsNodeGpuBusy(ctx.Ctx, ctx.Clientset, node.Name)
 		switch {
 		case busyErr != nil:
+			if ctx.Ctx.Err() != nil {
+				// The deadline interrupted the probe; the node was not found busy.
+				return coverage.stopOnDeadContext(ctx.Ctx)
+			}
 			slog.Warn("error checking busy status, treating as busy", "node", node.Name, "error", busyErr)
 			coverage.probeErrors = append(coverage.probeErrors, node.Name)
 			printLines(nodeSkippedLine(node.Name, skipCauseProbeError))
