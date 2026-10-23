@@ -28,9 +28,11 @@ fullnameOverride: kube-prometheus
 # Prometheus configuration
 prometheus:
   prometheusSpec:
-    # Discover ServiceMonitors across all namespaces (e.g., dcgm-exporter in nvidia-gpu-operator)
+    # Discover ServiceMonitors and PodMonitors across all namespaces.
     serviceMonitorSelectorNilUsesHelmValues: false
     serviceMonitorNamespaceSelector: {}
+    podMonitorSelectorNilUsesHelmValues: false
+    podMonitorNamespaceSelector: {}
 
     # Resource configuration
     resources:

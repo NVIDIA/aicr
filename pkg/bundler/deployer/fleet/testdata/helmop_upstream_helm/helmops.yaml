@@ -36,7 +36,7 @@ spec:
   helm:
     releaseName: k8s-aibom
     repo: oci://ghcr.io/googlecloudplatform/charts/k8s-aibom
-    version: 1.5.1
+    version: 1.6.1
     values:
       replicaCount: 1
     disablePreProcess: true

@@ -37,7 +37,7 @@ import (
 )
 
 const (
-	gangTestNSPrefix = "gang-scheduling-test-"
+	gangTestNSPrefix = defaults.GangSchedulingTestNamespacePrefix
 	gangTestPrefix   = "gang-test-"
 	gangPodPrefix    = "gang-worker-"
 	gangGroupPrefix  = "gang-group-"

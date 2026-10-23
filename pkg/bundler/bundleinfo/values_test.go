@@ -886,3 +886,11 @@ func TestReadReleaseValuesHonorsContext(t *testing.T) {
 		t.Fatal("want a canceled context to fail the read, got nil")
 	}
 }
+
+func TestComponentReleaseNames(t *testing.T) {
+	got := bundleinfo.ComponentReleaseNames("gpu-operator")
+	want := []string{"gpu-operator", "gpu-operator-pre", "gpu-operator-post", "gpu-operator-readiness"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ComponentReleaseNames() = %q, want %q", got, want)
+	}
+}

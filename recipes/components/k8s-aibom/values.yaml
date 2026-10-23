@@ -13,16 +13,22 @@
 # limitations under the License.
 
 # k8s-aibom Helm values
-# Optional runtime AI-workload inventory. One stock recipe selects it by
-# default, h100-gke-cos-inference (ADR-019 stock-adoption amendment); its
-# descendant, h100-gke-cos-inference-dynamo, declines it. Any GKE recipe can
-# also receive these values via `aicr recipe --runtime-inventory enabled`
-# (#2962), so a change here is no longer scoped to that one recipe.
+# Optional runtime AI-workload inventory. Two stock recipes select it by
+# default: h100-gke-cos-inference (ADR-019 stock-adoption amendment) and its
+# descendant h100-gke-cos-inference-dynamo, which inherits it. Any GKE recipe
+# can also receive these values via `aicr recipe --runtime-inventory enabled`
+# (#2962), so a change here is not scoped to those two recipes.
 #
-# The digest and defaults below were qualified as one coherent v1.5.1 artifact
-# set under ADR-019, re-pinned from v1.3.0. Both v1alpha1 and v1beta1 remain
-# served, storage unchanged on v1beta1; the chart now renders
-# AIBOMControllerConfig at v1beta1 (v1.3.0 rendered it at v1alpha1).
+# The digest and defaults below were qualified as one coherent v1.6.1 artifact
+# set under ADR-019, re-pinned from v1.5.1 (and from v1.3.0 before that). Both
+# v1alpha1 and v1beta1 remain served, storage unchanged on v1beta1; the chart
+# renders AIBOMControllerConfig at v1beta1 (v1.3.0 rendered it at v1alpha1).
+#
+# v1.6.0 added `discovery.workloadKinds`, an allowlist of workload kinds. It is
+# deliberately left unset, which means every kind the controller knows. An
+# unknown entry is a config error, which readiness.strictConfig turns into an
+# unready pod, and a non-empty list deletes the AIBOMs of every kind it omits.
+# `metrics.enabled` stays at the chart default (off): no Service is rendered.
 #
 # v1.5.0 added an AIBOMControllerConfig `verification` block (Sigstore/Rekor
 # model-signature verification). It is deliberately left unset: absent or
@@ -34,7 +40,7 @@
 image:
   repository: ghcr.io/googlecloudplatform/k8s-aibom
   tag: ""
-  digest: sha256:7b02731563a5ec524ed3396a07a524b02e3f51e17c976e02e65fc680b51e8164
+  digest: sha256:eca8ce634fda750b7d8f82ecf1ae4e350ea59c19a9ead07022f05ab5531eec0d
 
 # Make pod readiness reflect the current AIBOMControllerConfig status rather
 # than process liveness alone. Invalid current configuration must fail closed.
@@ -72,7 +78,7 @@ securityContext:
   runAsUser: 65532
   allowPrivilegeEscalation: false
 
-# Envelope measured on regional GKE with the qualified v1.5.1 image at 1,002
+# Envelope measured on regional GKE with the v1.5.1 image at 1,002
 # workloads, 1,001 of them Deployments with replicas set to zero: 48MiB working
 # set (93MiB RSS) and 1m steady-state CPU, inside the requests below. Steady-state
 # API-server load was about one request per minute, all watch reconnects; each
@@ -80,6 +86,15 @@ securityContext:
 # Measured by upstream for #2962 with chart defaults, which differ from these
 # values only in readiness.strictConfig, a no-op while the configuration is valid:
 # https://github.com/GoogleCloudPlatform/k8s-aibom/blob/c08e9ac2fda11a339865abdf2a7339a5a34c59e2/docs/evidence/v1.5.1-gke-upgrade-rollback-apiserver.md
+#
+# The qualified v1.6.1 image was measured by upstream on GKE with these values
+# plus metrics.enabled=true to read the counters, the DynamoGraphDeployment and
+# DynamoComponentDeployment watches on, and two graphs whose pods stay Pending:
+# 28-34MiB working set (61MiB RSS), 2.2m CPU, and 3.9 API requests per minute.
+# 11 of the 59 requests in the 15-minute window were status writes, re-enqueued
+# by the Dynamo operator updating graph status while the pods could not
+# schedule:
+# https://github.com/GoogleCloudPlatform/k8s-aibom/blob/d2b5b683d58ee9e71cc95bd4d7272676c4b54d11/docs/evidence/v1.6.1-gke-adr019-dynamo.md
 resources:
   requests:
     cpu: 50m

@@ -34,7 +34,7 @@ linting:
   # followed immediately by `key: 'value'`, so any comment between them silently
   # drops this pin from Renovate's scan (#2657).
   # renovate: datasource=github-releases depName=oasdiff/oasdiff depType=linting
-  oasdiff: 'v1.33.0'
+  oasdiff: 'v1.34.0'
   # Refreshed automatically by tools/update-oasdiff-checksums via Renovate
   # postUpgradeTasks whenever the version above is bumped. Same reasoning as the
   # oras pin in security_tools: the checksums.txt served beside the tarball
@@ -52,7 +52,7 @@ linting:
   #
   # linux/amd64 only: this feeds the setup-build-tools action, which runs on
   # ubuntu runners. tools/setup-tools handles local dev on other platforms.
-  oasdiff_sha256_linux_amd64: '43a4e328e2d13ba1552d760aa68d2485c75c5621f309f6ff64ae895188345247'
+  oasdiff_sha256_linux_amd64: '7c88e09fd500b231af2819eb21f6fdfc7bcdfe2741d2c1937c59e7b72c8a575a'
   # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
   golangci_lint: 'v2.15.0'
   # renovate: datasource=pypi depName=yamllint depType=linting
@@ -84,11 +84,11 @@ linting:
 # Security Tools
 security_tools:
   # renovate: datasource=github-releases depName=anchore/grype depType=security_tools
-  grype: 'v0.120.1'
+  grype: 'v0.121.0'
   # renovate: datasource=github-releases depName=sigstore/cosign depType=security_tools
   cosign: 'v3.1.3'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
-  syft: 'v1.54.1'
+  syft: 'v1.55.0'
   # Attaches the aiperf-bench third-party source archive as an OCI 1.1 referrer
   # (tools/generate-aiperf-source). Cosign cannot attach arbitrary artifacts, so
   # this is a separate dependency from the signing/attestation path.
@@ -108,7 +108,7 @@ security_tools:
   # followed immediately by `key: 'value'`, so any comment between them silently
   # drops this pin from Renovate's scan.
   # renovate: datasource=github-releases depName=oras-project/oras depType=security_tools
-  oras: '1.3.4'
+  oras: '1.3.5'
   # Refreshed automatically by tools/update-oras-checksums via Renovate
   # postUpgradeTasks whenever the version above is bumped. Pinning the digest
   # here — rather than trusting the checksums.txt served beside the tarball —
@@ -124,7 +124,7 @@ security_tools:
   #
   # linux/amd64 only: this pin feeds the setup-build-tools action, which runs on
   # ubuntu runners. tools/setup-tools handles local dev on other platforms.
-  oras_sha256_linux_amd64: 'f27adb935022d94df8dc77719c322dda592c78a0d57a6f7dcdd8d900b248c454'
+  oras_sha256_linux_amd64: 'f48a73ea6d026a862c3919fc773da9a8c86fc259c2c737d5baed3b8b9614ad22'
 
 # E2E Testing Tools
 testing_tools:
@@ -299,6 +299,20 @@ testing:
   # renovate: datasource=docker depName=kindest/node depType=testing
   h100_kind_node_image: 'kindest/node:v1.37.0'
 
+  # Kind node image published by Mokka (NVIDIA/k8s-test-infra) with the nvidia
+  # containerd runtime handler registered and CDI enabled. A stock kindest/node
+  # carries only runc and test-handler, so every GPU Operator operand, which
+  # sets runtimeClassName: nvidia, fails with "no runtime for nvidia is
+  # configured". Used only by the GPU-free gpu-operator lane; the nvkind lanes
+  # on real silicon keep h100_kind_node_image above.
+  #
+  # Pinned by digest: Mokka publishes no version tag for this image, only a
+  # floating `latest`, so the digest is the only reproducible reference and a
+  # bare tag would silently change the lane's cluster under it. Upstream
+  # issue: the node image should carry release tags like the chart does.
+  # renovate: datasource=docker depName=ghcr.io/nvidia/mokka-kind-node depType=testing
+  mokka_kind_node_image: 'ghcr.io/nvidia/mokka-kind-node:latest@sha256:6e92b27038b253fb37e28aad34b0eb0acc41900a2e0ab21b44c0d523fc961a1c'
+
   # GPU CI runtime pins consumed through .github/actions/load-versions.
   # renovate: datasource=helm depName=gpu-operator depType=testing
   gpu_operator_chart_version: 'v26.7.2'
@@ -311,8 +325,56 @@ testing:
   # Component test harness configuration
   # Used by tools/component-test/ scripts to validate individual components
   component_test:
-    nvml_mock_version: '0.1.0'
+    # Mokka (NVIDIA/k8s-test-infra) publishes the chart and the image at
+    # DIFFERENT paths. They are pinned separately because conflating them is
+    # what broke the Helm path: setup-gpu-mock.sh built its chart reference as
+    # "oci://$nvml_mock_image", which resolves to an image repository, not a
+    # chart, so `helm install` failed with "could not load config with
+    # mediatype application/vnd.cncf.helm.config.v1+json" on every run. The
+    # error was discarded and the script fell through to its manifest
+    # fallback, so the Helm path had never once succeeded.
+    #
+    # COUPLED to the bundle overrides in
+    # .github/workflows/gpu-operator-mokka-test.yaml ("Generate the Kind
+    # recipe and bundle it for Mokka"). Measured on 0.4.0-rc2: the mock driver
+    # tree is readable at BOTH /var/lib/nvml-mock/driver and
+    # /run/nvidia/driver, so the overrides' explicit driver root still
+    # resolves. Mokka main has since moved to bind-mounting onto
+    # /run/nvidia/driver only and dropped the NVIDIA_DRIVER_ROOT overrides from
+    # its own GPU Operator guide (k8s-test-infra e8e49aeb). Advancing this pin
+    # past that change means revisiting the overrides: the three
+    # NVIDIA_DRIVER_ROOT entries become unnecessary and should be removed
+    # rather than repointed.
+    nvml_mock_chart: 'ghcr.io/nvidia/k8s-test-infra/chart/nvml-mock'
+    nvml_mock_chart_version: '0.4.0-rc2'
+    # The chart and the image are installed by DIGEST; the two version keys
+    # are the human labels for the release each digest came from and resolve
+    # nothing while a digest is set. Upstream has re-pushed a chart version
+    # tag under a new digest before (0.3.0, recorded in
+    # tests/uat/kind/setup-gpu-sim.sh), so a tag alone would let the lane's
+    # cluster change with no diff here. The image digest is the multi-arch OCI
+    # image INDEX (linux/amd64 and linux/arm64), valid on CI runners and arm64
+    # developer machines alike. To re-resolve after a pin bump:
+    #   helm show chart oci://<nvml_mock_chart> --version <v>   (the Digest: line)
+    #   regctl manifest digest <nvml_mock_image>:<v>            (the index digest)
+    nvml_mock_chart_digest: 'sha256:341389c379afea8dfe53e7af46ad8199a6588d3629d2005985ccbdcde35511ce'
     nvml_mock_image: 'ghcr.io/nvidia/nvml-mock'
+    nvml_mock_image_digest: 'sha256:95457da0db0718cbbc6bf6b02e14dbc9b88f9d1eba5b85562bcaeccff2a98d34'
+    # The chart's image.tag defaults to the FLOATING `latest`, so pinning the
+    # chart alone does not pin what runs. Measured 2026-09-22: `latest` was
+    # rebuilt mid-session (sha256:00c8e31a -> sha256:9bfbbb69) and the new
+    # build needs a privileged container with Bidirectional mount propagation
+    # that chart 0.3.0 does not grant, so the node agent failed its bind mount
+    # with "operation not permitted" and never became Ready. Both ends are
+    # pinned here for that reason.
+    #
+    # Tested combinations, to READY:
+    #   chart 0.3.0     + image 0.3.0      CrashLoopBackOff (image ships no node-agent)
+    #   chart 0.3.0     + image 0.4.0-rc1  works
+    #   chart 0.4.0-rc2 + image 0.4.0-rc2  works  <- used here, matched pair
+    # There is currently no stable-release pair that works, which is why a
+    # release candidate is pinned for this test-only dependency.
+    nvml_mock_version: '0.4.0-rc2'
     default_gpu_profile: 'a100'
     default_gpu_count: 8
     cluster_name: 'aicr-component-test'

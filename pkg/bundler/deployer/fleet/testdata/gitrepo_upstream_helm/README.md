@@ -18,7 +18,7 @@ bundle and starts only after it is `Ready`.
 | Bundle | Release | Namespace | Version |
 |--------|---------|-----------|---------|
 | aicr-cert-manager | cert-manager | cert-manager | v1.17.2 |
-| aicr-k8s-aibom | k8s-aibom | k8s-aibom-system | 1.5.1 |
+| aicr-k8s-aibom | k8s-aibom | k8s-aibom-system | 1.6.1 |
 
 ## Deployment
 

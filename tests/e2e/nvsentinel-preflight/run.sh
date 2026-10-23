@@ -230,13 +230,15 @@ await_workload_exists() {
 }
 
 install_stack() {
-  msg "Installing cert-manager, prometheus-operator-crds, kai-scheduler and nvsentinel from the bundle..."
+  msg "Installing prometheus-operator-crds, cert-manager, kai-scheduler and nvsentinel from the bundle..."
 
-  # cert-manager first and waited on: the preflight chart creates Certificate
-  # and Issuer CRs, and its webhook is unusable until ca-injector has filled
-  # in the caBundle. kai-scheduler next: the preflight controller validates the
-  # PodGroup CRD at startup and fails closed, which is exactly why the mixin
-  # declares kai-scheduler as a dependencyRef.
+  # prometheus-operator-crds first: cert-manager's chart renders a
+  # ServiceMonitor. cert-manager next and waited on: the preflight chart
+  # creates Certificate and Issuer CRs, and its webhook is unusable until
+  # ca-injector has filled in the caBundle. kai-scheduler next: the preflight
+  # controller validates the PodGroup CRD at startup and fails closed, which is
+  # exactly why the mixin declares kai-scheduler as a dependencyRef.
+  install_component "${CRDS_DIR}" prometheus-operator-crds
   install_component "${CERT_MANAGER_DIR}" cert-manager
   for d in cert-manager cert-manager-webhook cert-manager-cainjector; do
     await_workload_exists deployment "${d}" cert-manager
@@ -244,7 +246,6 @@ install_stack() {
       err "cert-manager component ${d} never became Ready"
   done
 
-  install_component "${CRDS_DIR}" prometheus-operator-crds
   install_component "${KAI_DIR}" kai-scheduler
   kubectl --context "${KUBE_CONTEXT}" wait --for=condition=Established \
     crd/podgroups.scheduling.run.ai --timeout=180s ||

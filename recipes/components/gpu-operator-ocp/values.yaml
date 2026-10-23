@@ -142,7 +142,8 @@ migManager:
 sandboxWorkloads:
   enabled: false
 
-# OCP-only: not present in the Helm chart values.
+# OCP-only: the Helm chart has this key but defaults it to false, and the
+# Helm-based gpu-operator component leaves it off.
 nodeStatusExporter:
   enabled: true
 

@@ -1020,7 +1020,7 @@ components:
       defaultRepository: oci://ghcr.io/googlecloudplatform/charts
       defaultChart: k8s-aibom
       # renovate: datasource=docker depName=ghcr.io/googlecloudplatform/charts/k8s-aibom
-      defaultVersion: "1.5.1"
+      defaultVersion: "1.6.1"
       defaultNamespace: k8s-aibom-system
     nodeScheduling:
       system:
@@ -1066,7 +1066,7 @@ components:
     # see "Upgrade Notes" > grove in docs/user/component-catalog.md for the
     # full, executable steps (helm upgrade/install.sh never applies changed
     # crds/, and alpha.8's orphaned ClusterTopology CRD shortname-collides
-    # with alpha.12's replacement). Verified live on aicr-gb300, 2026-09-02.
+    # with alpha.12's replacement). Verified live on EKS, 2026-09-02.
     healthCheck:
       assertFile: checks/grove/health-check.yaml
     upgrades:

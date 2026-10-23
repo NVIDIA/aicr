@@ -18,6 +18,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // runtimeInventoryTestResult is a minimal recipe that declares the runtime
@@ -202,6 +206,58 @@ func TestApplyRuntimeInventoryGrantsOnGKE(t *testing.T) {
 	mode, recorded := result.RuntimeInventoryMode()
 	if !recorded || mode != RuntimeInventoryEnabled {
 		t.Errorf("selection not recorded: mode=%q recorded=%v", mode, recorded)
+	}
+}
+
+// A granted ref deploys after every enabled component that installs CRDs it
+// watches, because the controller discovers those kinds only when it starts.
+// It names no component the recipe does not enable: an absent dependency fails
+// resolution, and ordering after a disabled one orders after nothing.
+func TestGrantedRuntimeInventoryOrdersAfterCRDProviders(t *testing.T) {
+	t.Parallel()
+
+	gpuOperator := ComponentRef{Name: "gpu-operator", Type: ComponentTypeHelm}
+	tests := []struct {
+		name     string
+		refs     []ComponentRef
+		wantDeps []string
+	}{
+		{name: "no provider", refs: []ComponentRef{gpuOperator}},
+		{
+			name: "enabled dynamo-platform",
+			refs: []ComponentRef{gpuOperator,
+				{Name: "dynamo-platform", Type: ComponentTypeHelm}},
+			wantDeps: []string{"dynamo-platform"},
+		},
+		{
+			name: "both providers enabled",
+			refs: []ComponentRef{gpuOperator,
+				{Name: "k8s-nim-operator", Type: ComponentTypeHelm},
+				{Name: "dynamo-platform", Type: ComponentTypeHelm}},
+			wantDeps: []string{"dynamo-platform", "k8s-nim-operator"},
+		},
+		{
+			name: "declined dynamo-platform",
+			refs: []ComponentRef{gpuOperator,
+				{Name: "dynamo-platform", Type: ComponentTypeHelm,
+					Overrides: map[string]any{"install": false}}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := &RecipeResult{
+				Criteria:      &Criteria{Service: CriteriaServiceGKE},
+				ComponentRefs: tt.refs,
+			}
+			if err := applyRuntimeInventoryMode(result, RuntimeInventoryEnabled); err != nil {
+				t.Fatalf("applyRuntimeInventoryMode: %v", err)
+			}
+			got := result.GetComponentRef(runtimeInventoryComponentName).DependencyRefs
+			if !slices.Equal(got, tt.wantDeps) {
+				t.Errorf("granted dependencyRefs = %v, want %v", got, tt.wantDeps)
+			}
+		})
 	}
 }
 
@@ -468,9 +524,10 @@ func TestApplyRuntimeInventoryDoesNotGrantOffGKE(t *testing.T) {
 	}
 }
 
-// An explicit decline outranks the opt-in. h100-gke-cos-inference-dynamo
-// declines because k8s-aibom alongside grove and dynamo-platform is a
-// combination nothing has qualified; widening adoption does not qualify it.
+// An explicit decline outranks the opt-in. No stock recipe declines the
+// component, so the guard is covered on synthetic recipes: this one for an
+// `install: false` decline, TestApplyRuntimeInventoryRejectsIncoherentEnable
+// for `enabled: false`.
 func TestApplyRuntimeInventoryRespectsDeclineOnGKE(t *testing.T) {
 	result := &RecipeResult{
 		Criteria: &Criteria{Service: CriteriaServiceGKE},
@@ -479,8 +536,12 @@ func TestApplyRuntimeInventoryRespectsDeclineOnGKE(t *testing.T) {
 			Overrides: map[string]any{"install": false},
 		}},
 	}
-	if err := applyRuntimeInventoryMode(result, RuntimeInventoryEnabled); err == nil {
+	err := applyRuntimeInventoryMode(result, RuntimeInventoryEnabled)
+	if err == nil {
 		t.Fatal("want rejection of enable-over-decline, got nil")
+	}
+	if got := errorstest.ReportedCode(err); got != errors.ErrCodeInvalidRequest {
+		t.Errorf("reported code = %q, want %q", got, errors.ErrCodeInvalidRequest)
 	}
 	if result.GetComponentRef("k8s-aibom").IsEnabled() {
 		t.Error("declined component was re-enabled")

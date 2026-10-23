@@ -43,6 +43,16 @@ const (
 	ValidatorClientBurst = 100
 )
 
+const (
+	// ValidationNamespace is the default namespace for aicr validate Jobs and
+	// the snapshot agent it deploys.
+	ValidationNamespace = "aicr-validation"
+
+	// GangSchedulingTestNamespacePrefix prefixes the per-run namespace the
+	// gang-scheduling conformance check creates.
+	GangSchedulingTestNamespacePrefix = "gang-scheduling-test-"
+)
+
 // K8sAccessReviewConcurrency bounds how many Self/SubjectAccessReview
 // requests a pre-flight permission gate keeps in flight at once.
 //

@@ -103,7 +103,7 @@ func checkReadiness(validationInput *v1.ValidationInput, snap *snapshotter.Snaps
 // New creates a new Validator with the provided options.
 func New(opts ...Option) *Validator {
 	v := &Validator{
-		Namespace:   "aicr-validation",
+		Namespace:   defaults.ValidationNamespace,
 		RunID:       v1.GenerateRunID(),
 		Cleanup:     true,
 		Tolerations: []corev1.Toleration{{Operator: corev1.TolerationOpExists}},

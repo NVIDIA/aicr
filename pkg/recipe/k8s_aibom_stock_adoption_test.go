@@ -19,9 +19,6 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -30,16 +27,16 @@ const (
 	stockAdoptionVersion   = "k8s-aibom-stock-adoption-test"
 )
 
-// TestK8sAIBOMStockAdoption pins the stock-adoption contract from ADR-019's
-// amendment: exactly one stock recipe installs k8s-aibom, its only descendant
-// declines it, and the generation-time flag declines it too.
+// TestK8sAIBOMStockAdoption pins the stock-adoption contract: the target stock
+// recipe installs k8s-aibom, its Dynamo descendant inherits it enabled (the
+// pairing was qualified against k8s-aibom v1.6.1), and the generation-time
+// flag declines it.
 //
 // Why this test rather than the parity goldens: both goldens key on *leaf*
 // recipes, and `h100-gke-cos-inference` is not a leaf — `-dynamo` bases on it.
-// So the target recipe of this whole amendment has no golden coverage, and the
-// only golden that moves is the collateral one on the descendant. Without this
-// test, flipping the target ref to `install: false` would leave every existing
-// test green while silently un-shipping the component.
+// So the target recipe has no golden coverage of its own. Without this test,
+// flipping the target ref to `install: false` would leave every existing test
+// green while silently un-shipping the component.
 //
 // DeploymentOrder is asserted alongside IsEnabled because the order is what
 // bundlers walk. A ref that is declared-but-declined must be absent from it,
@@ -55,13 +52,14 @@ func TestK8sAIBOMStockAdoption(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		criteria *recipe.Criteria
-		opts     []recipe.BuildOption
-		// wantErr means the build must be rejected outright.
-		wantErr      bool
+		name         string
+		criteria     *recipe.Criteria
+		opts         []recipe.BuildOption
 		wantDeclared bool
 		wantEnabled  bool
+		// wantAfter names a component k8s-aibom must follow in
+		// DeploymentOrder because it installs CRDs the controller watches.
+		wantAfter string
 		// wantRecorded and wantMode are asserted separately, against
 		// RuntimeInventoryMode()'s two return values. Comparing the mode
 		// alone would collapse two distinct states into "": no configuration
@@ -83,14 +81,15 @@ func TestK8sAIBOMStockAdoption(t *testing.T) {
 			wantEnabled:  true,
 		},
 		{
-			name: "dynamo descendant declares but declines it",
+			name: "dynamo descendant inherits and enables it",
 			criteria: func() *recipe.Criteria {
 				c := target()
 				c.Platform = recipe.CriteriaPlatformDynamo
 				return c
 			}(),
 			wantDeclared: true,
-			wantEnabled:  false,
+			wantEnabled:  true,
+			wantAfter:    "dynamo-platform",
 		},
 		{
 			name:         "generation-time opt-out declines it on the target",
@@ -102,21 +101,34 @@ func TestK8sAIBOMStockAdoption(t *testing.T) {
 			wantMode:     recipe.RuntimeInventoryDisabled,
 		},
 		{
-			// Regression: --runtime-inventory enabled must not override a
-			// recipe that deliberately declines the component. The write path
-			// uses the same `install` key an overlay declines with, so without
-			// a pre-write guard the override clobbers the decline and the
-			// post-write check reads back only what it just wrote. That
-			// silently produced k8s-aibom alongside grove and dynamo-platform,
-			// a combination nothing has qualified.
-			name: "enabling on the declining descendant is rejected",
+			// The enable-over-decline guard itself is pinned on a synthetic
+			// recipe by TestApplyRuntimeInventoryRespectsDeclineOnGKE, since no
+			// stock recipe declines the component any more.
+			name: "enabling on the dynamo descendant confirms it",
 			criteria: func() *recipe.Criteria {
 				c := target()
 				c.Platform = recipe.CriteriaPlatformDynamo
 				return c
 			}(),
-			opts:    []recipe.BuildOption{recipe.WithRuntimeInventoryMode(recipe.RuntimeInventoryEnabled)},
-			wantErr: true,
+			opts:         []recipe.BuildOption{recipe.WithRuntimeInventoryMode(recipe.RuntimeInventoryEnabled)},
+			wantDeclared: true,
+			wantEnabled:  true,
+			wantAfter:    "dynamo-platform",
+			wantRecorded: true,
+			wantMode:     recipe.RuntimeInventoryEnabled,
+		},
+		{
+			name: "generation-time opt-out declines it on the dynamo descendant",
+			criteria: func() *recipe.Criteria {
+				c := target()
+				c.Platform = recipe.CriteriaPlatformDynamo
+				return c
+			}(),
+			opts:         []recipe.BuildOption{recipe.WithRuntimeInventoryMode(recipe.RuntimeInventoryDisabled)},
+			wantDeclared: true,
+			wantEnabled:  false,
+			wantRecorded: true,
+			wantMode:     recipe.RuntimeInventoryDisabled,
 		},
 		{
 			name: "a sibling stock recipe does not declare it at all",
@@ -135,15 +147,6 @@ func TestK8sAIBOMStockAdoption(t *testing.T) {
 			builder := recipe.NewBuilder(recipe.WithVersion(stockAdoptionVersion))
 
 			result, err := builder.BuildFromCriteria(context.Background(), tt.criteria, tt.opts...)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatal("BuildFromCriteria() error = nil, want rejection: a recipe-level decline must not be overridable from the command line")
-				}
-				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
-					t.Errorf("BuildFromCriteria() error = %v, want ErrCodeInvalidRequest", err)
-				}
-				return
-			}
 			if err != nil {
 				t.Fatalf("BuildFromCriteria() error = %v", err)
 			}
@@ -185,11 +188,36 @@ func TestK8sAIBOMStockAdoption(t *testing.T) {
 			if got := ref.IsEnabled(); got != tt.wantEnabled {
 				t.Errorf("IsEnabled() = %v, want %v", got, tt.wantEnabled)
 			}
+			// The dynamo overlay's ref is ordering-only, so the values file
+			// must still come from the declaring recipe; losing it would ship
+			// chart defaults instead of AICR's secure values.
+			if ref.ValuesFile != "components/k8s-aibom/values.yaml" {
+				t.Errorf("valuesFile = %q, want components/k8s-aibom/values.yaml", ref.ValuesFile)
+			}
 			if got := slices.Contains(result.DeploymentOrder, stockAdoptionComponent); got != tt.wantEnabled {
 				t.Errorf("in DeploymentOrder = %v, want %v: enabled state and emission disagree",
 					got, tt.wantEnabled)
 			}
+			if tt.wantAfter != "" {
+				assertDeploysAfter(t, result.DeploymentOrder, stockAdoptionComponent, tt.wantAfter)
+			}
 		})
+	}
+}
+
+// assertDeploysAfter fails unless component follows provider in order. The
+// k8s-aibom controller discovers the kinds it watches when it starts, so
+// deploying it before the component that installs their CRDs leaves those
+// kinds unwatched until the controller restarts.
+func assertDeploysAfter(t *testing.T, order []string, component, provider string) {
+	t.Helper()
+	ci, pi := slices.Index(order, component), slices.Index(order, provider)
+	if ci < 0 || pi < 0 {
+		t.Fatalf("deploymentOrder %v is missing %q or %q", order, component, provider)
+	}
+	if ci < pi {
+		t.Errorf("%s deploys at %d, before %s at %d; it must follow the component that installs the CRDs it watches",
+			component, ci, provider, pi)
 	}
 }
 
@@ -201,7 +229,7 @@ func TestK8sAIBOMStockAdoption(t *testing.T) {
 // runtimeinventory_test.go.
 //
 // What this test does pin: that no stock GKE recipe declares k8s-aibom by
-// default beyond the one that already does, and that the grant is not wired
+// default beyond the ones that already do, and that the grant is not wired
 // into ordinary resolution through some path other than
 // applyRuntimeInventoryMode. The h100/inference and h100/training rows are
 // intentionally omitted here because TestK8sAIBOMStockAdoption in this file
@@ -221,6 +249,12 @@ func TestGKECriteriaUnchangedWithoutOptIn(t *testing.T) {
 		{"b200 inference does not gain it", &recipe.Criteria{
 			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorB200,
 			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentInference}, false},
+		// Only h100's dynamo recipe inherits the component; the other GKE
+		// dynamo recipes take it by opt-in alone.
+		{"b200 inference on dynamo does not gain it", &recipe.Criteria{
+			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorB200,
+			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentInference,
+			Platform: recipe.CriteriaPlatformDynamo}, false},
 	}
 
 	for _, tt := range cases {
@@ -240,8 +274,7 @@ func TestGKECriteriaUnchangedWithoutOptIn(t *testing.T) {
 }
 
 // GKE criteria accept the opt-in regardless of workload shape -- that is the
-// #2962 contract: one mechanism, no per-recipe special cases. The dynamo
-// platform is the deliberate exception and must still be rejected.
+// #2962 contract: one mechanism, no per-recipe special cases.
 func TestGKECriteriaAcceptOptIn(t *testing.T) {
 	optIn := []recipe.BuildOption{
 		recipe.WithRuntimeInventoryMode(recipe.RuntimeInventoryEnabled),
@@ -250,11 +283,10 @@ func TestGKECriteriaAcceptOptIn(t *testing.T) {
 	cases := []struct {
 		name     string
 		criteria *recipe.Criteria
-		wantErr  bool
 	}{
 		{"training", &recipe.Criteria{
 			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorH100,
-			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentTraining}, false},
+			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentTraining}},
 		// a100, not h100: h100-gke-cos-training-kubeflow additionally requires
 		// --gke-tcpxo-interfaces (torch-distributed-tcpxo), a build gate
 		// unrelated to k8s-aibom. a100-gke-cos-training-kubeflow carries no
@@ -263,37 +295,28 @@ func TestGKECriteriaAcceptOptIn(t *testing.T) {
 		{"training on kubeflow", &recipe.Criteria{
 			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorA100,
 			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentTraining,
-			Platform: recipe.CriteriaPlatformKubeflow}, false},
+			Platform: recipe.CriteriaPlatformKubeflow}},
 		{"training on slurm", &recipe.Criteria{
 			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorH100,
 			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentTraining,
-			Platform: recipe.CriteriaPlatformSlurm}, false},
+			Platform: recipe.CriteriaPlatformSlurm}},
 		{"a100 training", &recipe.Criteria{
 			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorA100,
-			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentTraining}, false},
-		// Declines the component because k8s-aibom alongside grove and
-		// dynamo-platform is unqualified. Widening adoption does not qualify it.
-		// Every GKE dynamo accelerator is covered structurally by
-		// TestEveryGKEDynamoRecipeRejectsTheOptIn below.
-		{"dynamo still declines", &recipe.Criteria{
-			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorH100,
+			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentTraining}},
+		// b200, not h100: h100-gke-cos-inference-dynamo already enables the
+		// component by inheritance, so only a dynamo recipe that does not
+		// declare it exercises the grant. Every GKE dynamo accelerator is
+		// covered structurally by TestEveryGKEDynamoRecipeAcceptsTheOptIn.
+		{"b200 inference on dynamo", &recipe.Criteria{
+			Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorB200,
 			OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentInference,
-			Platform: recipe.CriteriaPlatformDynamo}, true},
+			Platform: recipe.CriteriaPlatformDynamo}},
 	}
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			builder := recipe.NewBuilder(recipe.WithVersion(stockAdoptionVersion))
 			result, err := builder.BuildFromCriteria(context.Background(), tt.criteria, optIn...)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatal("BuildFromCriteria() error = nil, want rejection: a recipe-level decline must not be overridable")
-				}
-				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
-					t.Errorf("BuildFromCriteria() error = %v, want ErrCodeInvalidRequest", err)
-				}
-				return
-			}
 			if err != nil {
 				t.Fatalf("BuildFromCriteria() error = %v, want the opt-in accepted", err)
 			}
@@ -355,18 +378,18 @@ func TestGrantedRefCarriesSameHealthCheckAsDeclaring(t *testing.T) {
 	}
 }
 
-// The decline is a property of the k8s-aibom + grove + dynamo-platform
-// pairing, not of any one accelerator, so it has to hold on every GKE dynamo
-// recipe. Written as a sweep over accelerators rather than a fixed list
-// because the h100-only version of this test passed while b200 and gb200
-// silently assembled the trio the h100 overlay refuses.
+// The k8s-aibom + grove + dynamo-platform pairing was qualified as a pairing,
+// not per accelerator, so every GKE dynamo recipe must accept the opt-in and
+// none may carry a leftover decline. Written as a sweep over accelerators
+// rather than a fixed list because an earlier h100-only version passed while
+// b200 and gb200 behaved differently from h100.
 //
 // Each accelerator is first resolved WITHOUT the opt-in. That is what makes
 // the sweep self-maintaining: an accelerator with no GKE dynamo recipe is
 // skipped rather than asserted about, and a newly added one is picked up with
 // no edit here. Only recipes that actually carry both grove and
-// dynamo-platform are held to the rejection.
-func TestEveryGKEDynamoRecipeRejectsTheOptIn(t *testing.T) {
+// dynamo-platform are held to the contract.
+func TestEveryGKEDynamoRecipeAcceptsTheOptIn(t *testing.T) {
 	accelerators := []recipe.CriteriaAcceleratorType{
 		recipe.CriteriaAcceleratorH100, recipe.CriteriaAcceleratorH200,
 		recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300,
@@ -391,29 +414,31 @@ func TestEveryGKEDynamoRecipeRejectsTheOptIn(t *testing.T) {
 			continue // no GKE dynamo recipe for this accelerator
 		}
 		if base.GetComponentRef("grove") == nil || base.GetComponentRef("dynamo-platform") == nil {
-			continue // not the unqualified pairing
+			continue // not the dynamo pairing
 		}
 		covered = append(covered, string(acc))
 
 		t.Run(string(acc), func(t *testing.T) {
+			if ref := base.GetComponentRef("k8s-aibom"); ref != nil {
+				if !ref.IsEnabled() {
+					t.Fatal("k8s-aibom is declared but declined on a GKE dynamo recipe; " +
+						"the pairing is qualified, so the overlay's decline is stale")
+				}
+				assertDeploysAfter(t, base.DeploymentOrder, "k8s-aibom", "dynamo-platform")
+			}
+
 			result, err := recipe.NewBuilder(recipe.WithVersion(stockAdoptionVersion)).
 				BuildFromCriteria(context.Background(), criteria(),
 					recipe.WithRuntimeInventoryMode(recipe.RuntimeInventoryEnabled))
-			if err == nil {
-				// Name the component set, because the failure people need to
-				// see is the trio being assembled, not merely a missing error.
-				var got []string
-				for _, n := range []string{"k8s-aibom", "grove", "dynamo-platform"} {
-					if ref := result.GetComponentRef(n); ref != nil && ref.IsEnabled() {
-						got = append(got, n)
-					}
+			if err != nil {
+				t.Fatalf("BuildFromCriteria() error = %v, want the opt-in accepted", err)
+			}
+			for _, n := range []string{"k8s-aibom", "grove", "dynamo-platform"} {
+				if ref := result.GetComponentRef(n); ref == nil || !ref.IsEnabled() {
+					t.Errorf("%s is not enabled after the opt-in", n)
 				}
-				t.Fatalf("opt-in accepted on a GKE dynamo recipe; enabled components = %v, "+
-					"want rejection (this overlay needs the k8s-aibom install:false decline)", got)
 			}
-			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
-				t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
-			}
+			assertDeploysAfter(t, result.DeploymentOrder, "k8s-aibom", "dynamo-platform")
 		})
 	}
 

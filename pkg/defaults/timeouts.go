@@ -254,6 +254,18 @@ const (
 	// K8sCleanupTimeout is the timeout for cleanup operations.
 	K8sCleanupTimeout = 30 * time.Second
 
+	// ClusterCleanupHelmUninstallTimeout bounds one helm uninstall --wait
+	// issued by tools/cleanup.
+	ClusterCleanupHelmUninstallTimeout = 2 * time.Minute
+
+	// ClusterCleanupNamespaceDeleteWait is how long tools/cleanup waits for
+	// deleted namespaces before clearing finalizers in any still Terminating.
+	ClusterCleanupNamespaceDeleteWait = 10 * time.Second
+
+	// ClusterCleanupHelmOutputLimit caps the stdout tools/cleanup reads from
+	// one helm list or helm get values call.
+	ClusterCleanupHelmOutputLimit int64 = 16 << 20
+
 	// K8sServiceAccountVerifyTimeout bounds the read-only ServiceAccount Get
 	// and SubjectAccessReview that vet an administrator-provisioned validator
 	// ServiceAccount before a run uses it.
@@ -1486,6 +1498,10 @@ var MirrorExtraAPIVersions = []string{
 	// v1beta1 shipped in K8s 1.32, v1 went GA in K8s 1.34.
 	"resource.k8s.io/v1",
 	"resource.k8s.io/v1beta1",
+	// Prometheus Operator monitors. Charts gate them on the full
+	// group/version/kind string, so the group/version alone is not enough.
+	"monitoring.coreos.com/v1/ServiceMonitor",
+	"monitoring.coreos.com/v1/PodMonitor",
 }
 
 // Shared Helm template rendering timeout. Used as the default deadline
@@ -1503,6 +1519,14 @@ const HelmTemplateTimeout = 90 * time.Second
 // 100 MiB is generous — real charts are single-digit MB — while still
 // preventing a malicious or buggy chart from exhausting memory.
 const HelmTemplateOutputLimit int64 = 100 * 1024 * 1024 // 100 MiB
+
+// HelmStderrLimit caps the stderr pkg/helm.Run keeps from one helm command.
+const HelmStderrLimit = 64 * 1024 // 64 KiB
+
+// HelmWaitDelay bounds how long a helm command's output pipes stay open
+// after the command exits or is killed. A descendant that inherits a pipe
+// would otherwise hold it open, and the caller with it, indefinitely.
+const HelmWaitDelay = 2 * time.Second
 
 // HelmReleaseDecodeLimit caps the decompressed size of a single Helm release
 // record. The encoded record embeds the release's full rendered manifest and

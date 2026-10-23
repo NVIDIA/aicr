@@ -42,9 +42,7 @@ spec:
   # interface is therefore the correct and maximal EFA configuration here,
   # not an under-provisioned one.
   #
-  # Fabric selection is not modelled in the recipe criteria today — this
-  # overlay targets EFA because that is what the reference cluster presents
-  # and what public AICR builds for (#1410).
+  # This overlay targets EFA, the GB300 EKS fabric.
   #
   # Specific constraints for GB300 on EKS inference workloads.
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}

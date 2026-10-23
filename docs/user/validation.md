@@ -94,8 +94,8 @@ whose fabric matches its hardware, or, for a private service whose fabric
 matches no embedded template, by
 [supplying its own benchmark runtime](#supplying-a-benchmark-runtime-for-a-private-service).
 
-On EKS, the `-net` check defaults to the AWS EFA fabric. On a ConnectX **RoCE** cluster
-(e.g. DGXC GB300 `p6e-gb300r`), set `AICR_NCCL_FABRIC=roce` in the `aicr
+On EKS, the `-net` check defaults to the AWS EFA fabric. On a ConnectX **RoCE** cluster,
+set `AICR_NCCL_FABRIC=roce` in the `aicr
 validate` environment to run the NET test over NCCL's built-in IB/verbs
 transport across `roce.networking.k8s.aws` DRA devices instead. The value is
 scoped to the `-net` check only; unset (or `efa`) leaves every existing recipe
@@ -103,8 +103,7 @@ on the EFA path unchanged, and any other value is rejected. The RoCE runtime
 image installs `openssh-server` at startup, so the GPU nodes need apt egress;
 on an air-gapped cluster the RoCE NET test cannot bootstrap. This env override is
 interim — snapshot-based fabric auto-detection (and removing the runtime
-package install once a CUDA-13 image ships sshd) is tracked in
-[NVIDIA/aicr#1413](https://github.com/NVIDIA/aicr/issues/1413).
+package install once a CUDA-13 image ships sshd) is planned.
 
 **Overriding the NCCL workload image with `AICR_NCCL_RUNTIME_IMAGE`.** Each
 embedded `nccl-all-reduce-bw` / `-net` / `-nvls` template pins a specific
@@ -1087,11 +1086,12 @@ The bundle is **minimized by default**. `snapshot.yaml` keeps only an
 allowlisted set of fields (dropping node names, provider instance IDs, the
 node label/taint set, OS tuning, loaded modules, and systemd config) and the
 CTRF reports omit per-test stdout/message. Each test's CTRF `extra` keeps only
-allowlisted counts, measurements, thresholds, versions, allocation modes, and
-skip-reason codes, never node names or IPs, and is omitted when none remain.
-The signed predicate records the applied policy in a `redaction` block, and the
-bundle self-verifies exactly like a full one. Pass `--full` to publish the raw
-payloads instead.
+allowlisted counts, measurements, thresholds, versions, allocation modes,
+transport, fabric, and runtime-source codes, the `nodeLocal` and
+`versionSatisfied` booleans, and skip-reason codes, never node names or IPs, and
+is omitted when none remain. The signed predicate records the applied policy in
+a `redaction` block, and the bundle self-verifies exactly like a full one. Pass
+`--full` to publish the raw payloads instead.
 
 Commit `pointer.yaml` to its per-source path
 `recipes/evidence/<recipe>/<src>/<digest>.yaml` — the emit output prints

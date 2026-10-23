@@ -59,6 +59,17 @@ const (
 // saw them.
 var injectedSuffixes = []string{"-pre", "-post", "-readiness"}
 
+// ComponentReleaseNames returns the Helm release names a bundle can install
+// for component, its own and each one injected around it.
+func ComponentReleaseNames(component string) []string {
+	names := make([]string, 0, len(injectedSuffixes)+1)
+	names = append(names, component)
+	for _, suffix := range injectedSuffixes {
+		names = append(names, component+suffix)
+	}
+	return names
+}
+
 // ReadReleaseValues returns the merged Helm values each release in dir was
 // built with, keyed by component name.
 //

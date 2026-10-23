@@ -49,7 +49,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
 | grove | helm | grove-charts | v0.1.0-alpha.13 | 1 |
-| k8s-aibom | helm | k8s-aibom | 1.5.1 | 1 |
+| k8s-aibom | helm | k8s-aibom | 1.6.1 | 1 |
 | k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
 | k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.0 | 1 |
@@ -204,7 +204,7 @@ _No images extracted._
 
 ### k8s-aibom
 
-- `ghcr.io/googlecloudplatform/k8s-aibom@sha256:7b02731563a5ec524ed3396a07a524b02e3f51e17c976e02e65fc680b51e8164`
+- `ghcr.io/googlecloudplatform/k8s-aibom@sha256:eca8ce634fda750b7d8f82ecf1ae4e350ea59c19a9ead07022f05ab5531eec0d`
 
 ### k8s-ephemeral-storage-metrics
 
@@ -345,9 +345,9 @@ _No images extracted._
 ### nvsentinel-mongodb
 
 - `docker.io/percona/fluentbit:5.1.2-1@sha256:4926d7d003ca09c826a3dea5d9ccd0ba158296880471bcec82ef38f95617b913`
-- `docker.io/percona/mongodb_exporter:0.53.0@sha256:0214e482b2cd4b1849f9f4dcef90d328a99ba3727dd1103e7da48b42060bcec1`
+- `docker.io/percona/mongodb_exporter:0.54.0@sha256:934e9db87e85e0fa63654e73c3504845993a254e898783ca905e65a68848b5a4`
 - `docker.io/percona/percona-backup-mongodb:2.15.0@sha256:12dcba7f1b55e00eb1b49dac51427d942c221b826d621d6bfad926a9d959a7c5`
-- `docker.io/percona/percona-server-mongodb:8.0.26-11@sha256:53f89c001997627554e6afc0feb5906209ba109f4f98c62f2ca8456c214af60c`
+- `docker.io/percona/percona-server-mongodb:8.0.32-14@sha256:5ba5f240d2dc98bc6236ab1d79c0862c4b62dba9d98cd0ffdf716c30473d2d11`
 - `docker.io/percona/pmm-client:3.9.1@sha256:298e731652e2be172a2505596edaee1e0c014609035347599048f62efae78e5b`
 
 ### prometheus-adapter

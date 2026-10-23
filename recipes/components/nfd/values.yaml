@@ -105,3 +105,6 @@ topologyUpdater:
 # GC enabled for cleanup of stale NodeFeature/NodeResourceTopology CRs
 gc:
   enable: true
+
+prometheus:
+  enable: true

@@ -488,7 +488,9 @@ page are the contract.
 
 | Check | Keys |
 |-------|------|
-| `nccl-all-reduce-bw*` | `transport`, `workerNodes`, `gpusInvolved`, `fabric`, `achievedGbps`, `thresholdGbps`, `tolerancePct`, `passMargin` |
+| `nccl-all-reduce-bw*` | `runtimeSource`, `transport`, `workerNodes`, `gpusInvolved`, `fabric`, `achievedGbps`, `thresholdGbps`, `tolerancePct`, `passMargin` |
+| `check-nvidia-smi` | `nodesValidated`, `nodesTotal` |
+| `gke-gpu-nic-topology` | `nodesValidated`, `nodesTotal` |
 | `expected-resources` | `namespacesActive`, `namespacesExpected`, `draReady`, `draDesired`, `nodewrightComplete`, `nodewrightExpected`, and the RDMA gate's `nodesValidated`, `nodesTotal` |
 | `inference-perf` | `throughputTokPerSec`, `ttftP99Ms`, `throughputThreshold`, `scaledThreshold`, `ttftThresholdMs`, `gpusBenchmarked`, `gpusPerNode` |
 | `secure-accelerator-access`, `inference-perf` | `configuredPolicy`, `resolvedMode`, `nodeLocal` |
@@ -501,6 +503,12 @@ page are the contract.
   only on `nccl-all-reduce-bw-net`, when `AICR_NCCL_FABRIC` selected the
   baked-in EKS template. `tolerancePct` is the slack below `thresholdGbps`
   that still passes.
+- `check-nvidia-smi` publishes `nodesValidated` and `nodesTotal` only after
+  per-node verification runs, on pass or fail. An exit before that (no GPU
+  nodes, all cordoned, or busy) publishes neither.
+- `gke-gpu-nic-topology` publishes `nodesValidated` and `nodesTotal` on every
+  exit once the node list succeeds, including an empty list and a
+  `no-verifiable-nodes` skip. A failed node list publishes neither.
 - `draReady` and `draDesired` come from the last observed DRA kubelet-plugin
   DaemonSet, and are absent if none was found. `nodewrightComplete` and
   `nodewrightExpected` are `0`/`0` when every Skyhook CR is suppressed.
@@ -935,11 +943,12 @@ only the schedulable RDMA-capable nodes, lists each cordoned one as
 re-runs on every poll but prints its enumeration and `RESULT:` line once, at
 the settled outcome.
 
-It emits Extra twice, a floor with `nodesValidated=0` on the first observation
-of an RDMA-capable node, then the terminal counts, which win because sentinels
-merge key-wise. The floor keeps a cordoned node's narrowing in the signed
-bundle if the pod is killed before the terminal emit. The gate fails closed,
-so "could not observe the fabric" reports `0` validated.
+Once a probe observes at least one RDMA-capable node, it emits a floor with
+`nodesValidated=0`, then the terminal counts, which win because sentinels merge
+key-wise. If it never observes one, only the terminal counts are emitted. The
+floor keeps a cordoned node's narrowing in the signed bundle if the pod is
+killed before the terminal emit. The gate fails closed, so "could not observe
+the fabric" reports `0` validated.
 
 Unlike `check-nvidia-smi`, the RDMA gate never *skips* — it either
 certifies the cohort or fails closed — so it mints no `skipReason`

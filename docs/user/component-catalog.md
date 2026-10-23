@@ -33,11 +33,11 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **nvidia-dra-driver-gpu** | Dynamic Resource Allocation (DRA) driver. Advertises devices via the Kubernetes `resource.k8s.io` API (`v1` on 1.34+, `v1beta1`/`v1beta2` on 1.32/1.33) — ComputeDomain/IMEX channels for MNNVL platforms, and optionally whole GPUs. Stock recipes disable whole-GPU DRA advertisement (`resources.gpus.enabled: false`) — the device plugin is the production default whole-GPU advertiser, and DRA whole-GPU allocation is an experimental recipe-level opt-in ([#1327](https://github.com/NVIDIA/aicr/issues/1327)). Whole-GPU DRA and the GPU Operator device plugin (`nvidia.com/gpu`) are mutually exclusive per node: recipe-backed validation rejects a configuration that enables both (at policy-resolution time — skipping validation bypasses the check), because the two allocators keep independent ledgers and concurrent advertisement can double-allocate the same physical GPUs (see the guidance in `recipes/components/nvidia-dra-driver-gpu/values.yaml`). See [AKS GPU Setup](../integrator/aks-gpu-setup.md#dynamic-resource-allocation-dra) for details. CLI alias: `dradriver`. | [NVIDIA DRA Driver](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu) |
 | **dra-node-labeler** | Applies the DRA eviction node label (`--dra-eviction-node-label`) to every node GFD reports as `nvidia.com/gpu.present=true`, so the DRA kubelet plugin's node selector and GPU Operator's Driver Manager eviction hook need no node-pool labeling. Write-once: an existing value, including the Driver Manager's `paused-for-driver-upgrade`, is never rewritten. Present in the bundle only when the eviction label is configured. | — |
 | **prometheus-operator-crds** | Custom Resource Definitions for the prometheus-operator (`Alertmanager`, `AlertmanagerConfig`, `PodMonitor`, `Probe`, `Prometheus`, `PrometheusRule`, `ServiceMonitor`, `ThanosRuler`). Shipped as a separate release so the CRDs land before any chart that creates monitoring CRs; this breaks the helm-diff self-reference that otherwise blocks `helmfile apply` on a fresh cluster. | [prometheus-operator-crds](https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-operator-crds) |
-| **kube-prometheus-stack** | Cluster monitoring: Prometheus, Grafana, Alertmanager, and node exporters. Provides GPU and cluster metrics collection and dashboards. CRDs are installed by the sibling `prometheus-operator-crds` release (this chart runs with `crds.enabled: false`). | [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts) |
+| **kube-prometheus-stack** | Cluster monitoring: Prometheus, Grafana, Alertmanager, and node exporters. Provides GPU and cluster metrics collection and dashboards. CRDs are installed by the sibling `prometheus-operator-crds` release (this chart runs with `crds.enabled: false`). Prometheus selects every ServiceMonitor and PodMonitor in every namespace, with no `release` label required. Most components whose charts offer a monitor ship it enabled (NVCRE keeps its ServiceMonitor off because it is on no shipped overlay), and each one that renders its monitor at install declares a dependency on `prometheus-operator-crds`. | [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts) |
 | **prometheus-adapter** | Exposes custom metrics from Prometheus to the Kubernetes metrics API. Enables HPA scaling based on GPU utilization and other custom metrics. | [prometheus-adapter](https://github.com/kubernetes-sigs/prometheus-adapter) |
 | **aws-ebs-csi-driver** | CSI driver for Amazon EBS volumes. Provides persistent storage for workloads on EKS. EKS-specific. **Cluster-wide default StorageClass:** AICR enables `defaultStorageClass.enabled`, so this component provisions a **cluster-default** gp3 StorageClass (`ebs-csi-default-sc`) on **every** EKS cluster that includes it — not just inference recipes; training overlays inherit it too. EKS ships no default SC of its own, so this makes dynamic provisioning (e.g. the inference-perf model cache) work without naming a class. **The driver still needs AWS credentials, which AICR does not configure** — see [EBS CSI Driver Credentials](#ebs-csi-driver-credentials). Two consequences to note: (1) if the cluster already has a default SC, Kubernetes treats multiple defaults as ambiguous — unset the other; (2) a PVC that previously failed-fast on "no default SC" will now silently bind gp3, which can mask a misconfiguration. | [AWS EBS CSI Driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) |
 | **k8s-ephemeral-storage-metrics** | Exports ephemeral storage usage metrics per pod. Useful for monitoring scratch space consumption on GPU nodes. | [k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) |
-| **k8s-aibom** | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Ships by default in one stock recipe, `h100-gke-cos-inference`; available by opt-in on any other GKE recipe with `aicr recipe --runtime-inventory enabled`, except the GKE Dynamo recipes (`h100-gke-cos-inference-dynamo`, `b200-gke-cos-inference-dynamo`, `gb200-gke-cos-inference-dynamo`, and `gb300-gke-cos-inference-dynamo`), which decline it. Decline it with `aicr recipe --runtime-inventory disabled`. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
+| **k8s-aibom** | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Ships by default in two stock recipes, `h100-gke-cos-inference` and its Dynamo descendant `h100-gke-cos-inference-dynamo`; available by opt-in on any other GKE recipe with `aicr recipe --runtime-inventory enabled`, including the `b200`, `gb200`, and `gb300` GKE Dynamo recipes. On the two recipes that ship it by default, decline it with `aicr recipe --runtime-inventory disabled`. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
 | **kai-scheduler** | Gang scheduler with hierarchical queues and topology-aware placement; works with device-plugin (`nvidia.com/gpu`) and DRA GPU allocation alike. Ensures distributed training jobs land on nodes with optimal interconnect topology. AICR pins `defaultQueue.createDefaultQueue: true`, so the chart creates the `default-parent-queue`/`default-queue` hierarchy on install. The `gang-scheduling` conformance check submits its synthetic test PodGroup to `default-queue` by name, so that queue is a hard dependency of validation, not an optional extra. Note the chart creates the queues only on first install and annotates them `helm.sh/resource-policy: keep` — a `helm upgrade` will not recreate them if they are deleted, so restore them manually (or reinstall the release) if that happens. Workloads are not restricted to this queue: Dynamo submits to its own `dynamo`/`dynamo-default` hierarchy, which its chart creates via post-install and post-upgrade hooks. | [KAI Scheduler](https://github.com/kai-scheduler/KAI-Scheduler) |
 | **grove** | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. Upgrading from `v0.1.0-alpha.8` (or earlier) requires a CRD migration step — see [Upgrade Notes](#grove-v010-alpha8-or-earlier-to-v010-alpha12) below. Upgrading from `v0.1.0-alpha.12` requires a CRD apply — see [Upgrade Notes](#grove-v010-alpha12-to-v010-alpha13) below. | [Grove](https://github.com/ai-dynamo/grove) |
 | **dynamo-platform** | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with KV-cache-aware routing, Dynamo request-plane traffic, a ZMQ-based KV-cache event plane, and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
@@ -889,7 +889,7 @@ node-drainer:
 **Datastore.** The steps leave the chart's embedded `mongodbStore` off. Instead they add two components and point NVSentinel at them as an external MongoDB (`global.datastore.*`) with x509 client authentication, so AICR, not NVSentinel's chart, pins the Percona version and steps its upgrades.
 
 - `psmdb-operator` is the Percona Operator for MongoDB (chart `psmdb-operator` 1.23.2, operator 1.23.1, a patch release above the 1.23.0 that NVSentinel's own embedded copy runs) in the `nvsentinel` namespace. It watches only that namespace, through a Role rather than a ClusterRole, runs with telemetry disabled, and is the sole owner of the four `psmdb.percona.com` CRDs.
-- `nvsentinel-mongodb` (chart `psmdb-db` 1.23.3, MongoDB 8.0.26) is replica set `rs0`: three members, each requesting 1 CPU and 1.5Gi (limits 1.5 CPU and 2Gi) and an 8Gi volume. Hostname anti-affinity is preferred, not required, so members may share a node on a small cluster. TLS is `requireTLS`, and the operator creates NVSentinel's `$external` x509 user with `readWrite` on `HealthEventsDatabase` and the custom role `nvsentinelTTLIndex`, which grants only `collMod` on that database so NVSentinel's setup Job can change an existing TTL index. Sharding, backup, log collection and PMM are off, though their images are still pinned. After the chart it applies NVSentinel's client certificate, `nvsentinel-mongodb-app-client`, issued by the operator-created Issuer `nvsentinel-mongodb-psmdb-issuer`, and `nvsentinel-mongodb-uri`, a Secret whose `MONGODB_URI` carries no credentials.
+- `nvsentinel-mongodb` (chart `psmdb-db` 1.23.3, MongoDB 8.0.32) is replica set `rs0`: three members, each requesting 1 CPU and 1.5Gi (limits 1.5 CPU and 2Gi) and an 8Gi volume. Hostname anti-affinity is preferred, not required, so members may share a node on a small cluster. TLS is `requireTLS`, and the operator creates NVSentinel's `$external` x509 user with `readWrite` on `HealthEventsDatabase` and the custom role `nvsentinelTTLIndex`, which grants only `collMod` on that database so NVSentinel's setup Job can change an existing TTL index. Sharding, backup, log collection and PMM are off, though their images are still pinned. After the chart it applies NVSentinel's client certificate, `nvsentinel-mongodb-app-client`, issued by the operator-created Issuer `nvsentinel-mongodb-psmdb-issuer`, and `nvsentinel-mongodb-uri`, a Secret whose `MONGODB_URI` carries no credentials.
 
 NVSentinel's setup Job, `<release>-external-mongodb-setup-<ttl>-<hash>`, runs the Percona `mongod` image as NVSentinel's x509 user to create the collections, indexes and TTLs; Kubernetes deletes it 24 hours after it finishes. From v1.26.0 it is an ordinary resource of the release rather than a Helm hook, so it starts alongside the pipeline pods, and on first install a pipeline pod may restart once before the Job has created the `HealthEvents` collection. It fails if MongoDB is not ready within 10 minutes (`activeDeadlineSeconds: 600`). Re-running a Helm-based deploy does not rerun a failed Job, because its spec is unchanged, so delete it first: `kubectl -n nvsentinel delete job -l app.kubernetes.io/component=mongodb-init`. Under Argo CD the Job is a synced resource that NVSentinel marks `Replace=true`, so a sync recreates a failed Job, and once Kubernetes deletes a finished Job, self-heal recreates it and the setup runs again; it is idempotent. Every Percona image is multi-arch, so the datastore runs on arm64 system nodes too.
 
@@ -1248,10 +1248,11 @@ AICR enforces and surfaces inference-gateway exposure in two places:
 
 ## k8s-aibom Runtime Inventory
 
-AICR qualifies k8s-aibom v1.5.1 as an optional Helm component. It is not in
-the base or a mixin. It ships by default in one stock recipe,
+AICR qualifies k8s-aibom v1.6.1 as an optional Helm component. It is not in
+the base or a mixin. It ships by default in two stock recipes:
 `h100-gke-cos-inference`, under [ADR-019](https://github.com/NVIDIA/aicr/blob/main/docs/design/019-k8s-aibom-runtime-inventory.md)'s
-stock-adoption amendment.
+stock-adoption amendment, and `h100-gke-cos-inference-dynamo`, which inherits
+it from that recipe.
 
 `aicr recipe --runtime-inventory <mode>` selects the component at generation
 time and records the choice in the emitted recipe as
@@ -1274,23 +1275,43 @@ aicr recipe --service gke --accelerator a100 --os cos --intent training \
 The grant adds the same componentRef `h100-gke-cos-inference` declares by
 hand — name, type, and `valuesFile: components/k8s-aibom/values.yaml` — with
 chart, repository, and version filled in from the registry, so a granted
-recipe and a declaring one render the same artifact. It is scoped to `gke`
+recipe and a declaring one render the same artifact. When the recipe enables
+`dynamo-platform` or `k8s-nim-operator`, the granted ref also depends on it,
+for the ordering reason below. It is scoped to `gke`
 because that is the footprint qualified for the widened adoption; the same
 flag against a non-GKE recipe that does not already declare the component is
 rejected exactly as it always has been.
 
-Every GKE Dynamo recipe — `h100-gke-cos-inference-dynamo` (which inherits
-the component from `h100-gke-cos-inference`), `b200-gke-cos-inference-dynamo`,
-`gb200-gke-cos-inference-dynamo`, and `gb300-gke-cos-inference-dynamo` —
-declares the component with
-`install: false`. This is a deliberate decline, not an omission: k8s-aibom
-alongside `grove` and `dynamo-platform` is a combination nothing has
-qualified. The decline outranks the opt-in flag rather than the other way
-around:
+The GKE Dynamo recipes carry it as well. `h100-gke-cos-inference-dynamo`
+inherits it from `h100-gke-cos-inference`, so it ships there by default;
+`b200-gke-cos-inference-dynamo`, `gb200-gke-cos-inference-dynamo`, and
+`gb300-gke-cos-inference-dynamo` receive it through the opt-in. The pairing
+with `grove` and `dynamo-platform` rests on upstream's v1.6.1 run, with the
+topology caveats noted in the evidence below.
+
+On the GKE Dynamo recipes, by default or by opt-in, k8s-aibom deploys after
+`dynamo-platform`. The
+controller discovers the workload kinds it watches when it starts, so started
+before the `DynamoGraphDeployment` CRDs exist it would not inventory graphs
+until it restarted. Upstream's run reached the same state by restarting the
+controller after installing Dynamo; AICR gets it from the deployment order.
+
+The order covers a fresh install. If k8s-aibom was already running when
+`dynamo-platform` was first installed, for example on a cluster moving from
+`h100-gke-cos-inference` to its Dynamo variant, Helm does not restart the
+controller, so restart it once after `dynamo-platform` is ready:
+
+```bash
+kubectl rollout restart deployment/k8s-aibom -n k8s-aibom-system
+```
+
+A recipe that declines the component with `install: false` outranks the
+opt-in flag rather than the other way around. No stock recipe declines it,
+but a custom overlay can:
 
 ```console
 $ aicr recipe --service gke --accelerator h100 --os cos --intent inference \
-    --platform dynamo --runtime-inventory enabled
+    --data ./my-recipes --runtime-inventory enabled
 [INVALID_REQUEST] component "k8s-aibom" is disabled by the recipe and cannot
 be re-enabled with --runtime-inventory enabled; remove the override in the
 recipe or select a recipe that enables it
@@ -1307,6 +1328,10 @@ spec:
     - name: k8s-aibom
       type: Helm
       valuesFile: components/k8s-aibom/values.yaml
+      # Only when the recipe also carries an operator whose CRDs k8s-aibom
+      # watches; naming a component the recipe lacks fails resolution.
+      dependencyRefs:
+        - dynamo-platform
 ```
 
 A broad criteria overlay affects every matching recipe. In particular,
@@ -1319,19 +1344,28 @@ and criteria composition.
 Decline it at generation time with `aicr recipe --runtime-inventory disabled`,
 described below.
 
-The qualified artifacts are source tag `v1.5.1` at commit
-`7193c15191a3acb7201e601dc618ad588e3e3851`, OCI chart
-`oci://ghcr.io/googlecloudplatform/charts/k8s-aibom:1.5.1`, and the controller
-image pinned by digest in the component values
-(`sha256:7b02731563a5ec524ed3396a07a524b02e3f51e17c976e02e65fc680b51e8164`).
-This pin also carries the v1.4.0 and v1.5.0 releases: the source delta over
-v1.5.0 is exactly two fixes — ownership-based pod-to-workload attribution
-across all four workload kinds, and rejecting webhook credentials sent over
-cleartext — rebuilt on a current Go toolchain. v1.3.0 remains the
+The qualified artifacts are source tag `v1.6.1` at commit
+`2ab2de980c62d299b6649c26779650c56a29dcac`, OCI chart
+`oci://ghcr.io/googlecloudplatform/charts/k8s-aibom:1.6.1` at
+`sha256:e56839c1097bf20176d9a4d8484991acbb0b23b01de8e622d5006c843cc02a77`,
+and the controller image pinned by digest in the component values
+(`sha256:eca8ce634fda750b7d8f82ecf1ae4e350ea59c19a9ead07022f05ab5531eec0d`).
+v1.6.1 is v1.6.0 plus fixes to the `kubectl aibom` plugin and to one evidence
+locator, with the same CRDs and RBAC. The v1.6 line inventories
+`DynamoGraphDeployment`, `DynamoComponentDeployment`, `NIMService`,
+`LeaderWorkerSet`, `DisaggregatedSet` and `CronJob` workloads, and rolls a
+workload owned by another tracked kind into its owner's AIBOM instead of
+reporting it separately. Its ClusterRole gains read-only access to those kinds
+and to the Grove kinds the Dynamo roll-up walks. Those kinds are discovered
+when the controller starts: a kind whose CRD is absent is skipped, not an
+error, and a CRD installed later is not watched until the controller restarts.
+The companion `k8s-aibom-crds` chart that the v1.6
+releases also publish is not used: AICR keeps the main chart's `crds/`
+directory and its own CRD handling. v1.3.0 remains the
 API-graduation release: both `v1alpha1` and `v1beta1` are served and CRD
-storage is on `v1beta1`, a configuration unchanged through v1.5.1. What did
+storage is on `v1beta1`, a configuration unchanged through v1.6.1. What did
 change: the chart's own rendered `AIBOMControllerConfig` resource moved from
-`v1alpha1` (v1.3.0) to `v1beta1` (v1.5.1); both versions stay served
+`v1alpha1` (v1.3.0) to `v1beta1` (v1.5.1 onward); both versions stay served
 throughout, so this is a template change, not an API break — see
 [Health and readiness](#health-and-readiness) below for what that means for
 the health check's own assertion. Upstream states Kubernetes support as a
@@ -1367,6 +1401,40 @@ from v1.5.1 to v1.3.0 reached Ready in 17-19s with the CRDs in either state;
 with the v1.5.1 CRDs left in place, every AIBOM kept its input and BOM hashes
 across the round trip.
 
+The v1.5.1 → v1.6.1 transition is verified by CRD schema diff and a rendered
+chart diff: one additive field nested under the controller config
+(`spec.discovery.workloadKinds`), served and storage configuration unchanged,
+and only read-only ClusterRole additions. Upstream then ran it on GKE with
+AICR's values, at AICR's request
+([evidence](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/d2b5b683d58ee9e71cc95bd4d7272676c4b54d11/docs/evidence/v1.6.1-gke-adr019-dynamo.md)):
+
+- **Upgrade and rollback.** `helm upgrade` from v1.5.1 with the v1.5.1 CRDs
+  left in place deployed in 24s with the controller Ready and not `Degraded`.
+  `helm rollback` to v1.5.1 with the v1.6.1 CRDs left in place reached Ready in
+  18s. Each AIBOM regenerates once in each direction.
+- **Dynamo.** With dynamo-platform 1.4.2 (the version AICR pins, whose
+  `DynamoGraphDeployment` storage is still `v1alpha1` behind a conversion
+  webhook), one multinode graph produced exactly one AIBOM, owned by the
+  graph, with its Grove `PodCliqueSet`, cliques and pods rolled up into it.
+  The run used the chart's bundled Grove and etcd on CPU-only nodes, not
+  AICR's standalone `grove` component or GPU topology.
+- **Dynamo operator down.** With the operator scaled to zero, the API server
+  kept serving `DynamoGraphDeployment` lists and watches from its cache, so
+  existing AIBOMs stayed correct and new Deployments were still inventoried.
+  The controller reported nothing: no `Degraded` condition and no event. Graph
+  writes are refused while the webhook is down, so there is no change to miss.
+- **Cost.** With the Dynamo watches on, two graphs whose pods could not
+  schedule, and `metrics.enabled=true` to read the counters: 3.9 API requests
+  per minute, 2.2m CPU and 28-34MiB working set.
+  11 of the 59 requests in the 15-minute window were status writes, re-enqueued
+  by the Dynamo operator updating graph status while the pods stayed Pending.
+
+The upgrade record for this transition makes the CRD step unconditional on
+`helmfile`, `terraform` and `fleet`, because the v1.6.1 controller reports `Degraded=True` with reason
+`SchemaPredatesController` against CRDs still left over from v1.3.0. A jump
+from v1.3.0 straight to v1.6.1 crosses both records, so `aicr upgrade-check`
+tells it to stop at v1.5.1 first.
+
 One thing is deliberately **not** covered. The health check's
 `AIBOMControllerConfig` assertion still targets `v1alpha1` rather than the
 `v1beta1` the chart now renders (see [Health and readiness](#health-and-readiness)).
@@ -1388,30 +1456,39 @@ run a new controller against the previous schema while the older version stays
 served and the controller keeps working.
 
 **That assertion only catches a missed CRD step when the transition actually
-moves the storage version.** Both v1.3.0 and v1.5.1 store `v1beta1`, so a
-cluster stranded on the v1.3.0 CRDs after a v1.5.1 bump passes the check while
-missing the new schema — measured on GKE, such a cluster reports the release
-deployed, the controller `1/1` Ready on the v1.5.1 image, and `storedVersions`
-`v1beta1` on both CRDs. To confirm the v1.5.1 CRDs specifically, look for the
-field they add rather than the storage version:
+moves the storage version.** v1.3.0, v1.5.1 and v1.6.1 all store `v1beta1`, so
+a cluster stranded on older CRDs after a bump passes the check while missing
+the new schema — measured on GKE after a v1.5.1 bump, such a cluster reports
+the release deployed, the controller `1/1` Ready on the new image, and
+`storedVersions` `v1beta1` on both CRDs. To confirm the v1.6.1 CRDs
+specifically, look for the field they add rather than the storage version:
 
 ```bash
 kubectl get crd aibomcontrollerconfigs.aibom.k8saibom.dev \
-  -o jsonpath='{.spec.versions[?(@.name=="v1beta1")].schema.openAPIV3Schema.properties.spec.properties.verification.type}'
-# expect: object   (empty means the v1.3.0 schema is still in place)
+  -o jsonpath='{.spec.versions[?(@.name=="v1beta1")].schema.openAPIV3Schema.properties.spec.properties.discovery.properties.workloadKinds.type}'
+# expect: array   (empty means an older schema is still in place)
 ```
+
+From v1.6.0 the controller also reports a stale schema itself, but only for
+top-level fields: `AIBOMControllerConfig/default` carries `Degraded=True` with
+reason `SchemaPredatesController` while `spec.verification` (added in v1.5.0)
+is missing, and stays Ready. It does not detect the nested `workloadKinds`, so
+the command above remains the check for v1.6.1.
 
 `k8s-aibom` is marked `ownsCRDs` in the registry, so most deployers update its
 CRDs for you: Flux through `spec.upgrade.crds: CreateReplace`, `helm` through
 the generated `apply-crds.sh`, and Argo CD by applying them as ordinary
 manifests each sync. `helmfile`, `terraform` and `fleet` have no equivalent automation — see
 [Upgrade, uninstall, and troubleshooting](#upgrade-uninstall-and-troubleshooting)
-for the manual step. Whether a given bump needs that step depends on whether
-the upgrade uses anything the new schema adds: a v1.3.0 to v1.5.1 bump on
-default values upgrades cleanly on `helmfile`, `terraform` and `fleet` against the old CRDs, but the
-same bump setting `config.verification` aborts the release with
+for the manual step. Whether a given bump needs that step is answered per
+transition by the upgrade record. A v1.3.0 to v1.5.1 bump on default values
+upgrades cleanly on `helmfile`, `terraform` and `fleet` against the old CRDs,
+but the same bump setting `config.verification` aborts the release with
 `.spec.verification: field not declared in schema` after the Deployment has
-already advanced. When in doubt, apply the CRDs first; it is never harmful.
+already advanced. The v1.5.1 to v1.6.1 bump needs the step unconditionally:
+on CRDs still from v1.3.0 the new controller reports `Degraded`, and setting
+`config.discovery.workloadKinds` needs the v1.6.1 schema. When in doubt, apply
+the CRDs first; it is never harmful.
 
 **That automation is tied to the registry-pinned coordinates, not to the
 component.** `ownsCRDs` records an audit of one specific chart, so Flux and
@@ -1445,13 +1522,13 @@ a storage version. Charts 1.0.0, 1.1.0, and 1.2.0 all declare `v1alpha1` as
 storage. So the check catches a stranded upgrade that crosses a
 storage-version boundary, such as the 1.2.0 to 1.3.0 move — the last one this
 pin crossed — and does not catch a stranded upgrade within one, such as 1.0.0
-to 1.2.0, or the 1.3.0 to 1.5.1 move this pin later made, which stayed on the
-`v1beta1` side of that boundary.
+to 1.2.0, or the 1.3.0 to 1.5.1 and 1.5.1 to 1.6.1 moves this pin later made,
+which stayed on the `v1beta1` side of that boundary.
 
 **The `AIBOMControllerConfig` assertion is deliberately asymmetric with the
 CRD one above.** The controller-configuration check asserts
 `apiVersion: aibom.k8saibom.dev/v1alpha1` on `AIBOMControllerConfig/default`,
-even though the pinned v1.5.1 chart itself renders that object at `v1beta1`
+even though the pinned v1.6.1 chart itself renders that object at `v1beta1`
 (v1.3.0 rendered it at `v1alpha1`; see [qualified artifacts](#k8s-aibom-runtime-inventory)
 above). That is not stale: `v1alpha1` remains served, so the assertion still
 resolves — but now through the API server's conversion path rather than by
@@ -1460,12 +1537,17 @@ matching the object's actual rendered version. Moving the assertion to
 identically to serving the rendered version directly; until that evidence
 lands from a GKE UAT lane, the assertion stays at `v1alpha1`.
 
-**Declining the component.** `h100-gke-cos-inference` installs `k8s-aibom` by
-default. Decline it at generation time:
+**Declining the component.** `h100-gke-cos-inference` and
+`h100-gke-cos-inference-dynamo` install `k8s-aibom` by default. Decline it at
+generation time:
 
 ```bash
 aicr recipe --service gke --accelerator h100 --os cos --intent inference \
   --runtime-inventory disabled -o recipe.yaml
+
+# The Dynamo recipe, which inherits the component:
+aicr recipe --service gke --accelerator h100 --os cos --intent inference \
+  --platform dynamo --runtime-inventory disabled -o recipe.yaml
 ```
 
 The same flag works for a recipe that adds the component through a custom
@@ -1506,7 +1588,7 @@ The same selection is available in an `AICRConfig` document as
 
 Assert content is static YAML with no templating, so the expected storage version is
 a literal tied to the registry's pinned chart, currently `v1beta1` for chart
-1.5.1. Charts 1.2.0 and earlier declare only `v1alpha1`. A recipe that sets
+1.6.1. Charts 1.2.0 and earlier declare only `v1alpha1`. A recipe that sets
 `version` on the `k8s-aibom` componentRef to a chart with a different storage
 version will therefore fail this step even though the cluster is correct. Such
 a recipe must supply matching inline `healthCheckAsserts` on the componentRef,
@@ -1529,7 +1611,10 @@ RuntimeDefault seccomp, no privilege escalation, and no Linux capabilities.
 
 The namespace label limits which workloads produce AIBOMs, not informer read
 scope. The controller still reads workload and pod specifications
-cluster-wide—including image references, arguments, and inline environment
+cluster-wide, and from v1.6 also `CronJob`, `DynamoGraphDeployment`,
+`DynamoComponentDeployment`, `NIMService`, `LeaderWorkerSet`,
+`DisaggregatedSet` and Grove objects wherever their CRDs exist—including
+image references, arguments, and inline environment
 values—into memory. With the default empty sink list that data does not leave
 the cluster, but cluster-wide visibility remains part of the privacy boundary.
 The controller is not read-only: its bounded RBAC permits writes to its own
@@ -1581,15 +1666,14 @@ them do it for you:
 set -euo pipefail
 
 CHART="oci://ghcr.io/googlecloudplatform/charts/k8s-aibom"
-VERSION="1.5.1"   # replace with the version you are upgrading to
+VERSION="1.6.1"   # replace with the version you are upgrading to
 # The classic Helm repository the chart is served from. Leave it empty for an
 # oci:// CHART. For psmdb-operator:
 # REPO="https://percona.github.io/percona-helm-charts/"
 REPO=""
-# The field manager that installed the CRDs, so this apply adopts its fieldset:
-# "helm" under the helm and helmfile deployers (both run the helm CLI), and
-# "terraform-provider-helm" under terraform, where the provider installs the
-# release. Check with:
+# The field manager that installed the CRDs: "helm" under the helm and
+# helmfile deployers (both run the helm CLI), and "terraform-provider-helm"
+# under terraform, where the provider installs the release. Check with:
 #   kubectl get crd <name> --show-managed-fields -o jsonpath='{.metadata.managedFields[*].manager}'
 MANAGER="helm"
 # The component's ownsCRDsExcludeSubcharts, space-separated. For nvsentinel:
@@ -1627,8 +1711,8 @@ if [ ${#crds[@]} -eq 0 ]; then
   exit 1
 fi
 
-# One kubectl call per CRD file, server-side applied under Helm's own field
-# manager so a field or spec.versions entry the new chart removes is pruned.
+# One kubectl call per CRD file, server-side applied under the installer's
+# field manager. The notes below say which removed fields this prunes.
 for crd in "${crds[@]}"; do
   grep -q '[^[:space:]]' "${crd}" || continue
   if ! kubectl apply --server-side --force-conflicts --field-manager="${MANAGER}" -f "${crd}"; then
@@ -1640,27 +1724,48 @@ for crd in "${crds[@]}"; do
 done
 ```
 
-Four details are load-bearing, and the obvious shorter forms fail on them:
+Four details are load-bearing, and each obvious alternative loses something:
 
 - **Server-side apply under the field manager that installed the CRDs, not
-  `kubectl replace` or a bare `kubectl apply --server-side`.** A chart's raw CRD manifest carries no
-  `metadata.resourceVersion`, and Kubernetes rejects an update without one, so
-  `replace` fails on exactly the upgrade this command exists for — verified on
-  a live cluster, the API returns `Conflict`. A bare `apply --server-side`
-  fails differently: it deletes a field the manifest omits only when the
-  applying manager owns it, and Helm owns these CRDs, so a schema field or
-  `spec.versions` entry the new chart *removes* would survive under the
-  default `kubectl` manager. Applying as `--field-manager=helm` adopts Helm's
-  fieldset instead, so the removal actually takes; verified on a live cluster
-  against both Helm 3 (manager `helm`, operation Update) and Helm 4 (manager
-  `helm`, operation Apply). Under `terraform` the provider, not the helm CLI,
-  installs the CRDs, as manager `terraform-provider-helm` (measured on a kind
-  cluster with provider 3.3.0), so `MANAGER` must be that name there: applying
-  as `helm` against those CRDs would leave a removed field in place, still
-  owned by the provider. `--force-conflicts` is required because other
-  managers may hold individual fields, including a `caBundle` a webhook
-  injects at runtime — which is why `ownsCRDs` requires that no CRD use
-  `spec.conversion.strategy: Webhook`.
+  `kubectl replace` or a `kubectl apply --server-side` under kubectl's own
+  default manager.** `kubectl replace` does update an existing CRD, because
+  kubectl copies the live `metadata.resourceVersion` into the manifest before
+  sending it, but it overwrites the whole object: anything another manager
+  set on the CRD after install, such as a GitOps label, is discarded.
+  Server-side apply keeps a field another manager set unless the chart's CRD
+  sets that same field, in which case `--force-conflicts` takes it over. What
+  the apply removes depends on where the new chart dropped something:
+  - **Inside `spec.versions`**, which holds every version's schema, a dropped
+    version or schema property disappears under any field manager once the
+    apply succeeds: the list is atomic, so a forced apply replaces it whole.
+    Without `--force-conflicts`, an apply under any manager other than the
+    list's owner fails with a conflict on `.spec.versions` and changes
+    nothing. The exception is a version still listed in the CRD's
+    `status.storedVersions`. The API server rejects that apply and the
+    command stops, until a storage migration removes the version from the
+    list.
+  - **Outside `spec.versions`**, such as `spec.names.shortNames` or an
+    annotation, a dropped field disappears only when the applying manager
+    owns it through an Apply operation and no other manager owns it too.
+    Another owner, even one that set the same value, keeps the field in
+    place, and `--force-conflicts` does not change that. Helm 4 installs
+    CRDs through Apply, as manager `helm`, so `MANAGER="helm"` removes such a
+    field where a forced apply under the default manager would leave it.
+    Helm 3 and `terraform-provider-helm` (measured on a kind cluster with
+    provider 3.3.0) install with an Update operation, which server-side apply
+    tracks as a separate owner even under the same manager name, so after
+    either a field the original install set stays behind whatever `MANAGER`
+    says. A field that an earlier run of this command added is owned through
+    Apply and is removed normally, as long as every run uses the same
+    `MANAGER`. If the chart's release notes depend on a removal, check the
+    field's owners with `--show-managed-fields` and delete it by hand if it
+    remains.
+
+  `--force-conflicts` is required because other managers may hold individual
+  fields. On a CRD using `spec.conversion.strategy: Webhook`, a chart that
+  sets `caBundle`, even to a placeholder, would overwrite the one injected at
+  runtime, and a replace discards it whatever the chart sets. That is why
+  `ownsCRDs` requires that no CRD use webhook conversion.
 - **Read the CRDs from the chart archive, not from `helm show crds`.** That
   command's output shape differs by major version: Helm 4 prepends `---` before
   every CRD, Helm 3 prepends one only for `show all` and emits nothing between
@@ -1718,9 +1823,9 @@ each with the schema its own chart pins. Requiring the opt-in is what
 prevents that, so it stays opt-in.
 
 A component qualifies only if it solely owns every CRD it ships and ships none
-using `spec.conversion.strategy: Webhook`, since `--force-conflicts` reclaims
-a `caBundle` injected at runtime. `kubeflow-trainer` is excluded for that
-second reason.
+using `spec.conversion.strategy: Webhook`, since forcing or replacing the CRD
+can overwrite a `caBundle` injected at runtime. `kubeflow-trainer` is
+excluded for that second reason.
 Currently `gatekeeper`, `k8s-aibom`, `nvcre`, `nvsentinel`, and
 `psmdb-operator` qualify; the audited chart version for each is pinned in
 `pkg/recipe/ownscrds_audit_test.go`, so bumping a pin without re-auditing fails
