@@ -86,6 +86,7 @@ jobs:
       settings: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.settings }}
       bom: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.bom }}
       nvcre: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.nvcre }}
+      crdcmd: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.crdcmd }}
       tuning: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.tuning }}
       notices: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.notices }}
       coverage: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.coverage }}
@@ -188,6 +189,16 @@ jobs:
               - 'docs/user/component-catalog.md'
               - 'pkg/recipe/nvcre_wiring_guard_test.go'
               - 'recipes/components/nvcre/**'
+            crdcmd:
+              # TestCatalogCRDUpgradeCommand runs the manual CRD-upgrade block
+              # in the component catalog against an API server. The `tests`
+              # job runs it on any code change, but a docs-only PR editing
+              # the block skips `tests`, so it is gated here on the doc. The
+              # test is listed so renaming it re-runs the check, and this
+              # workflow so a change to the job cannot skip it.
+              - 'docs/user/component-catalog.md'
+              - 'pkg/bundler/deployer/localformat/catalog_crd_command_test.go'
+              - '.github/workflows/merge-gate.yaml'
             tuning:
               # Inputs that can change the committed tuning-status table
               # WITHOUT tripping pkg/tuning's TestCompute_Structure — which runs
@@ -759,6 +770,60 @@ jobs:
       - run: echo "No NVCRE wiring inputs changed — wiring guard not required"
 
   # ---------------------------------------------------------------------------
+  # Documented CRD-upgrade command: runs the bash block in
+  # docs/user/component-catalog.md against envtest after a real helm install,
+  # on docs-only PRs that skip the `tests` job (mirrors nvcre-wiring).
+  # ---------------------------------------------------------------------------
+
+  catalog-crd-command:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.crdcmd == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/load-versions
+        id: versions
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: true
+      # The runner image bundles Helm 3; the test needs the pinned Helm 4 and
+      # fails rather than skips in CI without it or without envtest.
+      - uses: ./.github/actions/setup-build-tools
+        with:
+          install_helm: 'true'
+          helm_version: ${{ steps.versions.outputs.helm }}
+          install_setup_envtest: 'true'
+          setup_envtest_version: ${{ steps.versions.outputs.setup_envtest }}
+          setup_envtest_sha256: ${{ steps.versions.outputs.setup_envtest_sha256_linux_amd64 }}
+      - name: Run the documented CRD-upgrade command against an API server
+        # Requires the PASS line for the same reason nvcre-wiring does: a
+        # renamed test makes `go test -run` exit 0 having run nothing.
+        run: |
+          set -uo pipefail
+          assets=$(setup-envtest use --print path) || exit 1
+          out=$(KUBEBUILDER_ASSETS="$assets" go test ./pkg/bundler/deployer/localformat/ -run '^TestCatalogCRDUpgradeCommand$' -v -count=1 2>&1) && rc=0 || rc=$?
+          echo "$out"
+          if [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
+          if ! grep -q "^--- PASS: TestCatalogCRDUpgradeCommand" <<<"$out"; then
+            echo "::error::TestCatalogCRDUpgradeCommand did not execute (renamed or removed?); the catalog CRD command gate would silently pass. Update this job to run it."
+            exit 1
+          fi
+
+  catalog-crd-command-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.crdcmd != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - run: echo "No catalog CRD command inputs changed, so the check is not required"
+
+  # ---------------------------------------------------------------------------
   # Tuning-status doc freshness — ensures the committed tuning table in
   # docs/integrator/components/nodewright.md matches the recipe catalog and the
   # nodewright package pins, on PRs touching its inputs (mirrors bom-freshness).
@@ -913,6 +978,8 @@ jobs:
       - bom-freshness-skip
       - nvcre-wiring
       - nvcre-wiring-skip
+      - catalog-crd-command
+      - catalog-crd-command-skip
       - tuning-freshness
       - tuning-freshness-skip
       - notices-generator

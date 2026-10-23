@@ -100,9 +100,14 @@ bash install.sh
 > otherwise run the new controller against the old schema. Folders that also
 > contain an `apply-crds.sh` have `install.sh` run it first. It pulls the
 > pinned chart once, reads the CRDs out of that archive, and server-side
-> applies each one under `--field-manager=helm`, so a field the new chart
-> removes actually disappears; a plain server-side apply under the default
-> `kubectl` manager would leave fields Helm still owns in place. Only
+> applies each one under `--field-manager=helm`. A version or schema property
+> the new chart removes disappears; a field removed outside `spec.versions`
+> disappears only if `helm` is its sole owner through a server-side apply.
+> A Helm 4 install and an earlier run of this step both claim fields that
+> way, but any other manager claiming the same field keeps it, and a Helm 3
+> install's claim counts as a separate owner. See
+> [Upgrade, uninstall, and troubleshooting](https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#upgrade-uninstall-and-troubleshooting)
+> for the exceptions. Only
 > components audited as the sole owner of every CRD they ship get this, and
 > only while the ref matches the registry's pinned source, chart, and version.
 > Those folders need `kubectl` and `timeout` (GNU coreutils) on `$PATH` in
