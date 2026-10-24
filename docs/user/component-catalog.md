@@ -421,7 +421,7 @@ AICR ships NVSentinel in the upstream chart's **monitoring-only** configuration:
 
 Also off: `healthEventsAnalyzer`, `lifecycleManager`, `cspHealthMonitor`, `kubernetesObjectMonitor`, `nvcreCertificationMonitor`, `nicHealthMonitor`, `slurmDrainMonitor`, `preflight`, `eventExporter`, `inclusterFileServer`, `k8sdatastoreCrds`. Verified against chart `v1.28.0`, the version pinned in `recipes/registry.yaml`.
 
-Two entries above are turned back on by AICR's shipped recipes: `nicHealthMonitor` on AKS and OKE (see [NIC and fabric fault detection](#nic-and-fabric-fault-detection)), and `slurmDrainMonitor` on every `platform: slurm` recipe (see [Slurm Drain Monitor](#slurm-drain-monitor)). The remediation components are turned on only by the opt-in [remediation steps](#graded-remediation), which bring their own datastore rather than `mongodbStore`, and `healthEventsAnalyzer` only by the opt-in [analyzer mixin](#health-events-analyzer).
+Two entries above are turned back on by AICR's shipped recipes: `nicHealthMonitor` on AKS and OKE (see [NIC and fabric fault detection](#nic-and-fabric-fault-detection)), and `slurmDrainMonitor` on every `platform: slurm` recipe (see [Slurm Drain Monitor](#slurm-drain-monitor)). The remediation components are turned on only by the opt-in [remediation steps](#graded-remediation), which bring their own datastore rather than `mongodbStore`, `healthEventsAnalyzer` only by the opt-in [analyzer mixin](#health-events-analyzer), and `eventExporter` only by the opt-in [event exporter mixin](#health-event-export).
 
 **The practical effect.** A stock AICR bundle surfaces GPU faults; it does not act on them. A node that needs a reboot is reported, not rebooted, and an operator intervenes. That is deliberate: `janitor` can reboot or terminate nodes, and enabling it without the operator having chosen to is not a safe default.
 
@@ -962,7 +962,7 @@ AICR leaves `tls.certManagementPolicy` at Percona's default, `auto`, so the oper
 
 **What is qualified.** The render tests pin the resolved action map, each step's `--dry-run`, the Deployments it renders and the images it pulls, a KWOK lane bundles and deploys each step onto an EKS leaf with the helm deployer, and the remediation step with Argo CD and Flux too, and a Kind e2e (`tests/e2e/nvsentinel-remediation/`) drives synthetic faults through the observe step's dry-run pipeline. `fault-remediation` returns on dry-run before it selects a repair kind, so no log names `GPUReset`; the e2e instead asserts what only the GPU-scoped mapping does, rejecting a `COMPONENT_RESET` event that carries no GPU UUID. Outside Slurm, nothing in CI runs the quarantine or remediation step live: the only CI job that cordons and drains a node is the [Slurm drain e2e](#slurm-drain-through-slinky), which runs the quarantine step with the `nvsentinel-slinky-drainer` mixin, and no CI job resets a GPU or reboots a node. Treat both steps as qualified up to the decision, not the execution, and trial them on a cluster you can afford to have cordoned and rebooted.
 
-**NVSentinel is included by default, not universally required.** `recipes/overlays/base.yaml` includes it unconditionally, so every recipe carries it unless something later removes it, and ADR-018 classifies it as `core` rather than `ops` on the rule that `ops` must be GPU-free and verifiable on CPU-only clusters. Two things can still remove it: an overlay that overrides `enabled` (the OCP overlay does), and a bundle-time exclusion on a platform whose presence is not profile-locked (EKS, and GKE-COS and OKE, whose profiles reference it as optional). Only the AKS `gpuStack` profile makes its presence mandatory — see [NVSentinel presence on the profiled families](#nvsentinel-on-provider-installed-driver-platforms) below.
+**NVSentinel is included by default, not universally required.** `recipes/overlays/base.yaml` includes it unconditionally, so every recipe carries it unless something later removes it, and ADR-018 classifies it as `core` as a named exception: a GPU pod runs without it, but its remediation cordons, drains, and reboots GPU nodes, which makes it part of keeping the GPU runtime healthy. Two things can still remove it: an overlay that overrides `enabled` (the OCP overlay does), and a bundle-time exclusion on a platform whose presence is not profile-locked (EKS, and GKE-COS and OKE, whose profiles reference it as optional). Only the AKS `gpuStack` profile makes its presence mandatory — see [NVSentinel presence on the profiled families](#nvsentinel-on-provider-installed-driver-platforms) below.
 
 **The per-platform values AICR sets are platform-correctness values, not remediation policy.** `labeler.assumeDriverInstalled`, the RuntimeClass names (`metadata-collector.runtimeClassName` and janitor's reset Job) and the reset Job's driver root describe facts about the target cluster that the chart cannot infer — who installs the driver, where it lives, and what the RuntimeClass is named. The next section gives the per-platform values, when an explicit value is needed, and what each failure looks like when it is missing. Which components run is a different matter and stays upstream's call.
 
@@ -1010,6 +1010,54 @@ kubectl get node "${NODE}" -o json | \
 **Resources and privileges.** One replica on a system node, requesting and limited to 1 CPU and 1Gi. With a MongoDB datastore the chart runs it as root (`runAsUser: 0`), and it has a namespaced Role to read and write its own `resume-control` ConfigMap. It publishes through the platform-connector socket; the chart admits its service account for events about any node. For each unhealthy event the analyzer receives, it runs one datastore query per enabled rule whose `when` condition matches the event. `MultipleRemediations` has no `when`, so it queries on every event, and the datastore load grows with the event rate.
 
 **Deployment validation.** The registry's `nvsentinel` check asserts that the `health-events-analyzer` Deployment is fully rolled out wherever it renders, and passes where it does not.
+
+### Health Event Export
+
+NVSentinel's Event Exporter sends health events off the cluster: it watches the datastore and posts each event to an HTTP endpoint you run as a [CloudEvent](https://cloudevents.io/) (`type: com.nvidia.nvsentinel.health.v1`, `source: nvsentinel://<cluster>/healthevents`), authenticated with an OAuth 2.0 client-credentials token from your identity provider. Use it for a view across clusters, long-term failure-trend storage, or a feed into ticketing. The `nvsentinel-event-exporter` mixin enables it, and no shipped recipe composes it, because the sink, the identity provider and the cluster's identity are yours. It reads the datastore, so compose it with a [remediation step](#graded-remediation):
+
+```yaml
+# your-leaf-overlay.yaml
+spec:
+  mixins:
+    - nvsentinel-observe
+    - nvsentinel-event-exporter
+```
+
+**Per-deployment values come from the bundle command.** `CheckNVSentinelEventExporterCoherent` fails the bundle until each is set. The `.example` hosts below are placeholders, which the gate rejects:
+
+```shell
+aicr bundle -r recipe.yaml -o ./bundle \
+  --set nv-sentinel:event-exporter.exporter.sink.endpoint=https://events.corp.example/v1/events \
+  --set nv-sentinel:event-exporter.exporter.oidc.tokenUrl=https://idp.corp.example/oauth2/token \
+  --set nv-sentinel:event-exporter.exporter.oidc.clientId=nvsentinel-exporter \
+  --set nv-sentinel:event-exporter.exporter.oidc.scope=events:write \
+  --set nv-sentinel:event-exporter.exporter.metadata.cluster=gpu-train-1 \
+  --set nv-sentinel:event-exporter.exporter.metadata.environment=production
+```
+
+Any other `event-exporter.exporter.metadata.<key>`, such as `region`, is added to every event. A value `--set` would read as a number or boolean, such as an all-digit client ID, goes through `--set-json` as a quoted string instead.
+
+**Create the client secret before deploying.** The chart mounts the OIDC client secret from a Secret it does not create, and the exporter does not start without it:
+
+```shell
+kubectl create namespace nvsentinel --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n nvsentinel create secret generic event-exporter-oidc-secret \
+  --from-literal=oidc-client-secret="${OIDC_CLIENT_SECRET}"
+```
+
+The name is `event-exporter.oidcSecretName` (the mixin sets `event-exporter-oidc-secret`) and the key is always `oidc-client-secret`. The exporter sends the client ID and secret to `tokenUrl` with HTTP Basic authentication, requests `grant_type=client_credentials` with the configured scope, and sends the returned token as `Authorization: Bearer` on each event.
+
+**What is exported.** The mixin sets the filter `event.recommendedAction != 'NONE' || event.isHealthy == true`: every event that recommends an action, and every recovery. It drops unhealthy events that recommend no action, which are most of the stream. `TestNVSentinelEventExporterFilter` pins that choice. The expression is CEL over the event's fields (`agent`, `checkName`, `componentClass`, `errorCode` as a list, `isFatal`, `isHealthy`, `recommendedAction`, `nodeName`, `metadata`, `message`); to export everything to a data lake and filter there, pass `--set-json 'nv-sentinel:event-exporter.exporter.filter.expression=""'` at bundle time (`--set` rejects an empty value). A filter that fails to evaluate exports the event and counts `health_events_exporter_filter_errors_total`. The mixin owns the filter path, so setting it in a leaf overlay is rejected as a collision.
+
+**Delivery is at-least-once.** The exporter stores its resume token in the datastore, in `HealthEventsDatabase`'s `ResumeTokens` collection beside the other NVSentinel components' (client name `event-exporter`), and continues from it after a restart, so an event can arrive twice. The CloudEvent `id` is generated per publish, so a redelivery after a restart carries a new one. Deduplicate on a hash of the CloudEvent `source` and the whole `data.healthEvent` object instead, which a redelivery repeats exactly: a subset of its fields is not unique, since a monitor stamps one `generatedTimestamp` on every event of a polling batch, so faults on two GPUs of one node differ only in `entitiesImpacted`, and keying on fewer fields would drop one of them. Whenever it starts without a resume token, as on first start, it backfills up to 30 days of stored events (at most a million, at 1000 a second), so a new sink receives recent history. Ten workers publish in parallel; a failed publish is retried with exponential backoff from one second, which ends once the next delay would exceed the five-minute cap: about nine attempts over roughly nine minutes. (The chart's comment says about 30 minutes; the cap stops it sooner.) If it still fails, the exporter exits and Kubernetes restarts it from its last resume token, so a sink outage stalls export and restarts the pod rather than losing events.
+
+**Events leave the cluster.** They carry node names, error codes and the metadata above. The mixin sets `insecureSkipVerify: false` for the sink and the token endpoint, and the gate rejects turning either check off. Over plain `http` the client secret and the bearer token cross the network unencrypted, so the gate accepts `http` only for a host inside the cluster and requires `https` everywhere else.
+
+**Bundle-time gates.** `CheckNVSentinelEventExporterCoherent` blocks a bundle whose `sink.endpoint` or `oidc.tokenUrl` is not an `http` or `https` URL with a host, names an `example.com`, `.org` or `.net` host as the chart's placeholders do, or a host under the reserved `.example` TLD, or uses plain `http` to a host outside the cluster (anything but a single-label name, `*.svc` or `*.svc.cluster.local`); that does not set `oidc.clientId`, `oidc.scope`, `metadata.cluster` (or leaves it at the chart's `my-cluster`) or `metadata.environment`; with a double quote, backslash or control character other than tab in any of those or another metadata value, or a metadata key that is not a TOML bare key, which the chart writes into its config unescaped; with either `insecureSkipVerify` not `false`; or with an invalid `oidcSecretName`. With the exporter on, it also rejects `--dynamic` on any `event-exporter` value. `CheckNVSentinelRemediationPipelineCoherent` applies the remediation steps' datastore rules. Neither gate can confirm that the Secret exists or that the sink and identity provider accept the credentials: a missing Secret keeps the pod from starting, and a rejected token or sink shows in the exporter's log and its retry metrics.
+
+**Resources and privileges.** One replica on a system node, requesting 500m and 512Mi and limited to 1 CPU and 1Gi. With a MongoDB datastore the chart runs it as root (`runAsUser: 0`). It holds no Kubernetes RBAC of its own; it reads the datastore with the remediation step's x509 client certificate and makes outbound HTTP calls only.
+
+**Deployment validation.** The registry's `nvsentinel` check asserts that the `event-exporter` Deployment is fully rolled out wherever it renders, and passes where it does not. To stop exporting, regenerate the bundle without the mixin and redeploy; events already delivered stay at the sink.
 
 ## NVSentinel on Provider-Installed-Driver Platforms
 

@@ -15,9 +15,12 @@
 package snapshotter
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
+	"regexp"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/collector"
@@ -131,6 +134,47 @@ func TestNodeSnapshotter_Measure(t *testing.T) {
 			t.Errorf("expected 4 measurements (from working collectors), got %d", len(snap.Measurements))
 		}
 	})
+}
+
+// The agent's Info log is the only signal `kubectl logs` gives an operator
+// about which collector a hung snapshot is stuck in, so every collector that
+// returns must say so at Info — including an inactive one returning no
+// measurement — and a failed one must not claim completion.
+func TestNodeSnapshotter_LogsCollectorCompletion(t *testing.T) {
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+
+	snapshotter := &NodeSnapshotter{
+		Version:    "1.0.0",
+		Factory:    &mockFactory{osError: fmt.Errorf("os error"), networkInactive: true},
+		Serializer: &mockSerializer{},
+	}
+	if err := snapshotter.Measure(context.Background()); err != nil {
+		t.Fatalf("Measure() error = %v, want nil", err)
+	}
+
+	tests := []struct {
+		collector string
+		completed bool
+	}{
+		{"k8s", true},
+		{"systemd", true},
+		{"os", false},
+		{"gpu", true},
+		{"topology", true},
+		{"network", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.collector, func(t *testing.T) {
+			line := regexp.MustCompile(`level=INFO msg="collector completed" collector=` + tt.collector + ` duration=`)
+			if got := line.MatchString(logs.String()); got != tt.completed {
+				t.Errorf("completion line for %q present = %v, want %v. Logs:\n%s",
+					tt.collector, got, tt.completed, logs.String())
+			}
+		})
+	}
 }
 
 func TestNodeSnapshotter_PopulatesFingerprint(t *testing.T) {
@@ -349,6 +393,8 @@ type mockFactory struct {
 	osMeasurement       *measurement.Measurement
 	topologyMeasurement *measurement.Measurement
 	networkMeasurement  *measurement.Measurement
+
+	networkInactive bool
 }
 
 func (m *mockFactory) CreateKubernetesCollector() collector.Collector {
@@ -378,17 +424,21 @@ func (m *mockFactory) CreateNodeTopologyCollector() collector.Collector {
 
 func (m *mockFactory) CreateNetworkCollector() collector.Collector {
 	m.networkCalled = true
-	return &mockCollector{err: m.networkError, result: m.networkMeasurement}
+	return &mockCollector{err: m.networkError, result: m.networkMeasurement, inactive: m.networkInactive}
 }
 
 type mockCollector struct {
-	err    error
-	result *measurement.Measurement
+	err      error
+	result   *measurement.Measurement
+	inactive bool
 }
 
 func (m *mockCollector) Collect(ctx context.Context) (*measurement.Measurement, error) {
 	if m.err != nil {
 		return nil, m.err
+	}
+	if m.inactive {
+		return nil, nil //nolint:nilnil // mirrors the collector.Collector inactive contract
 	}
 	if m.result != nil {
 		return m.result, nil
@@ -594,6 +644,7 @@ func TestParseOSEnv(t *testing.T) {
 		{name: "talos", env: "talos", want: "talos"},
 		{name: "ubuntu passthrough", env: "ubuntu", want: "ubuntu"},
 		{name: "sles passthrough", env: "sles", want: "sles"},
+		{name: "rocky passthrough", env: "rocky", want: "rocky"},
 		{name: "uppercase normalized", env: "Talos", want: "talos"},
 		{name: "whitespace trimmed", env: "  talos  ", want: "talos"},
 		{name: "invalid value drops to default", env: "talsoo", want: ""},

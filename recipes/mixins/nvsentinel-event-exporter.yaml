@@ -1,0 +1,62 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Turns on NVSentinel's Event Exporter, which watches the datastore and posts
+# each health event to an external HTTP endpoint as a CloudEvent, with an
+# OIDC client-credentials token. Delivery is at-least-once: the receiver must
+# tolerate duplicates. See docs/user/component-catalog.md#health-event-export.
+#
+# Needs the datastore, so compose it with nvsentinel-observe, -quarantine or
+# -remediation. No overlay composes it: the sink, the identity provider and
+# the cluster's identity are per deployment, so they come from the bundle
+# command:
+#
+#   --set nv-sentinel:event-exporter.exporter.sink.endpoint=<https URL>
+#   --set nv-sentinel:event-exporter.exporter.oidc.tokenUrl=<https URL>
+#   --set nv-sentinel:event-exporter.exporter.oidc.clientId=<client>
+#   --set nv-sentinel:event-exporter.exporter.oidc.scope=<scope>
+#   --set nv-sentinel:event-exporter.exporter.metadata.cluster=<cluster>
+#   --set nv-sentinel:event-exporter.exporter.metadata.environment=<environment>
+#
+# The client secret is not a value: create the Secret named by oidcSecretName,
+# with key oidc-client-secret, in the nvsentinel namespace before deploying.
+# CheckNVSentinelEventExporterCoherent rejects a bundle missing any of these
+# values, and CheckNVSentinelRemediationPipelineCoherent one without a
+# datastore.
+
+kind: RecipeMixin
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: nvsentinel-event-exporter
+spec:
+  componentRefs:
+    - name: nvsentinel
+      overrides:
+        global:
+          eventExporter:
+            enabled: true
+        event-exporter:
+          # The Secret the operator creates before deploying; the chart only
+          # mounts it.
+          oidcSecretName: event-exporter-oidc-secret
+          exporter:
+            sink:
+              insecureSkipVerify: false
+            oidc:
+              insecureSkipVerify: false
+            # Actionable faults and recoveries. Drops unhealthy events that
+            # recommend no action, which are most of the stream; recoveries
+            # also recommend NONE, so they are kept by isHealthy.
+            filter:
+              expression: "event.recommendedAction != 'NONE' || event.isHealthy == true"

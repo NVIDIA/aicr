@@ -38,8 +38,50 @@ var (
 	sysctlNetPrefix = "/proc/sys/net"
 )
 
+// blockingSysctls are /proc/sys entries, relative to sysctlRoot, that are
+// skipped without being opened. Their kernel read handler waits on every CPU,
+// patches kernel code, or takes a sleeping lock whose holder can itself wait
+// on other CPUs, CPU hotplug, code patching, or device I/O. On an unhealthy
+// node read(2) then blocks out of reach of ctx, usually uninterruptibly, and
+// the agent can never exit (#3247). Audited against Linux 5.15, 6.1, and 6.17
+// outside net/. Locks held only to copy a value cannot wedge, so their entries
+// (the utsname strings such as kernel/osrelease, plus
+// kernel/sched_rr_timeslice_ms and kernel/kexec_load_limit_*) are still read.
+var blockingSysctls = map[string]struct{}{
+	"abi/cp15_barrier":                       {}, // insn_emulation_mutex (arm64, 6.1+)
+	"abi/setend":                             {}, // insn_emulation_mutex (arm64, 6.1+)
+	"abi/swp":                                {}, // insn_emulation_mutex (arm64, 6.1+)
+	"debug/kprobes-optimization":             {}, // kprobe_sysctl_mutex; re-optimizes every kprobe
+	"dev/cdrom/info":                         {}, // cdrom_mutex
+	"dev/mac_hid/mouse_button_emulation":     {}, // mac_hid_emumouse_mutex
+	"kernel/bpf_stats_enabled":               {}, // bpf_stats_enabled_mutex
+	"kernel/ftrace_enabled":                  {}, // ftrace_lock
+	"kernel/latencytop":                      {}, // enables schedstats when set
+	"kernel/nmi_watchdog":                    {}, // watchdog_mutex
+	"kernel/sched_itmt_enabled":              {}, // itmt_update_mutex (x86, before 6.14)
+	"kernel/sched_rt_period_us":              {}, // sched_domains_mutex; rebuilds sched domains
+	"kernel/sched_rt_runtime_us":             {}, // sched_domains_mutex; rebuilds sched domains
+	"kernel/sched_util_clamp_max":            {}, // uclamp_mutex
+	"kernel/sched_util_clamp_min":            {}, // uclamp_mutex
+	"kernel/sched_util_clamp_min_rt_default": {}, // uclamp_mutex
+	"kernel/shm_rmid_forced":                 {}, // shm ids rwsem; destroys orphaned segments when set
+	"kernel/soft_watchdog":                   {}, // watchdog_mutex
+	"kernel/stack_tracer_enabled":            {}, // stack_sysctl_mutex
+	"kernel/timer_migration":                 {}, // timer_keys_mutex
+	"kernel/tracepoint_printk":               {}, // tracepoint_printk_mutex
+	"kernel/user_events_max":                 {}, // event_mutex
+	"kernel/watchdog":                        {}, // watchdog_mutex
+	"kernel/watchdog_cpumask":                {}, // watchdog_mutex
+	"kernel/watchdog_thresh":                 {}, // watchdog_mutex
+	"vm/mem_profiling":                       {}, // static_key_mutex
+	"vm/numa_stat":                           {}, // vm_numa_stat_lock
+	"vm/percpu_pagelist_high_fraction":       {}, // pcp_batch_high_lock
+	"vm/stat_refresh":                        {}, // schedule_on_each_cpu
+}
+
 // collectSysctl gathers sysctl configurations from /proc/sys, excluding /proc/sys/net
-// and returns them as a subtype with file paths as keys and their contents as values.
+// and blockingSysctls, and returns them as a subtype with file paths as keys and their
+// contents as values.
 func (c *Collector) collectSysctl(ctx context.Context) (*measurement.Subtype, error) {
 	params := make(map[string]measurement.Reading)
 
@@ -78,6 +120,10 @@ func (c *Collector) collectSysctl(ctx context.Context) (*measurement.Subtype, er
 
 		// Exclude network parameters
 		if strings.HasPrefix(path, sysctlNetPrefix) {
+			return nil
+		}
+
+		if _, blocking := blockingSysctls[strings.TrimPrefix(path, sysctlRoot+"/")]; blocking {
 			return nil
 		}
 
