@@ -1,0 +1,159 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: gb300-nvke-ubuntu-training
+
+spec:
+  # Bare-metal GB300 NVL trays on NVKE (Supermicro ARS-121GL-NB3-LCC-FG001,
+  # four ConnectX-8 SuperNIC rails on an Ethernet/RoCE east-west fabric, a
+  # BlueField-3 for north-south). Same component shape as
+  # gb300-generic-ubuntu-training except for the fabric: the host keeps the
+  # inbox mlx5_core (OVN-Kubernetes runs on it via the BlueField-3), so the
+  # Network Operator ships no ofedDriver and GPUDirect RDMA is DMA-BUF only,
+  # and RDMA is shared-HCA RoCE with per-rail macvlan attachments rather than
+  # InfiniBand (docs/integrator/nvke-gb300-setup.md).
+  base: nvke
+
+  criteria:
+    service: nvke
+    accelerator: gb300
+    os: ubuntu
+    intent: training
+
+  mixins:
+    - os-ubuntu
+
+  constraints:
+    # Restated from nvke: snapshot resolution checks a leaf's own constraints.
+    # Keeps the GA DRA API (resource.k8s.io/v1, Kubernetes 1.34+) available
+    # for the NVLS/IMEX performance check.
+    - name: K8s.server.version
+      value: ">= 1.34"
+
+  componentRefs:
+    # GPUDirect RDMA runs over DMA-BUF: no driver.rdma/nvidia-peermem (no
+    # build exists for the 64k-page Grace kernel) and no NVreg
+    # kernel-module-params ConfigMap (a GB200-on-EFA requirement only).
+    - name: gpu-operator
+      type: Helm
+      # rdma-modules first: its NodeWright taint-gates the GPU nodes until
+      # rdma_ucm is loaded, which only works if the CR precedes the operators.
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - kube-prometheus-stack
+        - nodewright-customizations
+        - rdma-modules
+      overrides:
+        gdrcopy:
+          enabled: true
+        driver:
+          enabled: true
+        toolkit:
+          enabled: true
+        devicePlugin:
+          enabled: true
+          # Helm replaces lists: the first two entries restate the component
+          # base values.yaml; this override exists to pin MOFED_ENABLED off.
+          # The fabric's device plugin owns RDMA injection; an omitted key is
+          # inferred true when GDS enablement loads nvidia_fs.
+          env:
+            - name: DP_DISABLE_HEALTHCHECKS
+              value: "109"
+            - name: DEVICE_LIST_STRATEGY
+              value: cdi-cri,cdi-annotations,volume-mounts
+            - name: MOFED_ENABLED
+              value: "false"
+
+    # GB300 node tuning: nvidia-tuned alone, as on gb300-generic. nvidia-setup
+    # dispatches on `<service>-<accelerator>` and ships no `nvke-*` config, and
+    # the NVKE image already provides the -nvidia-64k kernel the gb300 profile
+    # sizes its hugepage pools for (see the tuning-gb300.yaml header).
+    #
+    # service is deliberately omitted: nvidia-tuned ships no `nvke` service
+    # profile and exits non-zero on a service directory it does not have, so
+    # the node lands on the unlayered nvidia-gb300-multiNodeTraining profile.
+    - name: nodewright-customizations
+      type: Helm
+      manifestFiles:
+        - components/nodewright-customizations/manifests/tuning-gb300.yaml
+      overrides:
+        accelerator: gb300
+        intent: multiNodeTraining
+      dependencyRefs:
+        - nodewright-operator
+
+    - name: nfd
+      type: Helm
+      valuesFile: components/nfd/values-nvidia-nics.yaml
+      overrides:
+        topologyUpdater:
+          enable: true
+
+    # RoCE east-west fabric on the inbox driver: shared-HCA RDMA, one pooled
+    # rdma/rdma_shared_resource_rail_<n> per ConnectX-8 rail, no ofedDriver
+    # and no nicConfigurationOperator (NIC firmware is a host prerequisite on
+    # NVKE, and the CX-8 firmware exposes one VF per PF, which rules out
+    # SR-IOV). NicClusterPolicy is manifest-supplied (chart deployCR off); the
+    # per-rail IPPools and MacvlanNetworks follow in macvlan-rdma-networks.
+    - name: network-operator
+      type: Helm
+      valuesFile: components/network-operator/values-nvke-gb300.yaml
+      manifestFiles:
+        - components/network-operator/manifests/nic-cluster-policy-nvke-gb300.yaml
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - rdma-modules
+
+    - name: macvlan-rdma-networks
+      type: Helm
+      manifestFiles:
+        - components/macvlan-rdma-networks/manifests/nvke-gb300.yaml
+      dependencyRefs:
+        - network-operator
+
+    # rdma_ucm is not loaded by the NVKE GB300 image and no operator loads it
+    # without OFED; without /dev/infiniband/rdma_cm the rdma-shared device
+    # plugin advertises nothing and the deployment gate never sees the rail
+    # resources. RoCE variant: no ib_ipoib, no control-plane exclusion (the
+    # tenant's control plane can be its only GPU tray). Ordered before
+    # network-operator and gpu-operator through their dependencyRefs.
+    - name: rdma-modules
+      type: Helm
+      manifestFiles:
+        - components/rdma-modules/manifests/rdma-ulp-roce.yaml
+      dependencyRefs:
+        - nodewright-operator
+
+  # Deployment checks come from the gb300-any criteria-wildcard overlay.
+  validation:
+    performance:
+      checks:
+        - nccl-all-reduce-bw-nvls
+      constraints:
+        # Threshold copied from gb300-generic-ubuntu-training (895 GB/s
+        # busbw baseline at the 16 GiB message size, 4 GPUs per node) until
+        # an NVKE GB300 baseline is measured.
+        - name: nccl-all-reduce-bw-nvls
+          value: ">= 823"
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics

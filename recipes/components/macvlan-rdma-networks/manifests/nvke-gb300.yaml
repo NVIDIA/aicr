@@ -1,0 +1,223 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# RoCE rails for GB300 NVKE: per rail one nv-ipam IPPool and one
+# MacvlanNetwork over the rail's ConnectX-8 PF, as k8s-launch-kit generates
+# for `--deployment-type rdma_shared --fabric ethernet --multirail` on this
+# topology. The RDMA resource itself (rdma/rdma_shared_resource_rail_<n>)
+# comes from the NicClusterPolicy's rdmaSharedDevicePlugin; the macvlan
+# attachment gives the pod the rail netdev and IP that RoCE needs for its
+# GIDs.
+#
+# Rail layout (Supermicro ARS-121GL-NB3-LCC-FG001, kernel predictable names):
+#   rail 0  0000:03:00.0  enp3s0f0np0     mlx5_0
+#   rail 1  0002:03:00.0  enP2p3s0f0np0   mlx5_2
+#   rail 2  0010:03:00.0  enP16p3s0f0np0  mlx5_4
+#   rail 3  0012:03:00.0  enP18p3s0f0np0  mlx5_6
+# MacvlanNetwork.master is a netdev name, so this file is specific to that
+# tray's naming; override with --set macvlanrdmanetworks:... or a copy of
+# this file for a different board.
+#
+# Subnets sit in 10.255.0.0/16, not the k8s-launch-kit default 192.168.0.0/22
+# per rail: the NVKE OVN-Kubernetes pod network is 192.168.0.0/16 and the
+# host routes it via ovn-k8s-mp0. mtu 0 inherits the PF's MTU (the macvlan
+# CNI rejects a child MTU above the master's; the PFs come up at 1500 until
+# the host sets jumbo frames).
+#
+# Node selection is pci-15b3.present, the same cohort as the NicClusterPolicy.
+#
+# Its own component, not a network-operator manifestFile: the nv-ipam CRDs
+# are created by the operator while it reconciles a NicClusterPolicy with
+# nvIpam, and Helm validates every document of a release before applying
+# any, so IPPools in the NicClusterPolicy's release can never apply.
+# Spelled out per rail: the manifest renderer has no range/list functions.
+{{- $mv := index .Values "macvlan-rdma-networks" }}
+{{- if ne (toString (index $mv "enabled")) "false" }}
+---
+apiVersion: nv-ipam.nvidia.com/v1alpha1
+kind: IPPool
+metadata:
+  name: nv-ipam-pool-rail-0
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  subnet: 10.255.0.0/22
+  perNodeBlockSize: 10
+  gateway: 10.255.0.1
+  nodeSelector:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: feature.node.kubernetes.io/pci-15b3.present
+            operator: In
+            values:
+              - "true"
+---
+apiVersion: mellanox.com/v1alpha1
+kind: MacvlanNetwork
+metadata:
+  name: macvlan-network-rail-0
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  networkNamespace: default
+  master: enp3s0f0np0
+  mode: bridge
+  mtu: 0
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "nv-ipam-pool-rail-0"
+    }
+---
+apiVersion: nv-ipam.nvidia.com/v1alpha1
+kind: IPPool
+metadata:
+  name: nv-ipam-pool-rail-1
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  subnet: 10.255.4.0/22
+  perNodeBlockSize: 10
+  gateway: 10.255.4.1
+  nodeSelector:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: feature.node.kubernetes.io/pci-15b3.present
+            operator: In
+            values:
+              - "true"
+---
+apiVersion: mellanox.com/v1alpha1
+kind: MacvlanNetwork
+metadata:
+  name: macvlan-network-rail-1
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  networkNamespace: default
+  master: enP2p3s0f0np0
+  mode: bridge
+  mtu: 0
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "nv-ipam-pool-rail-1"
+    }
+---
+apiVersion: nv-ipam.nvidia.com/v1alpha1
+kind: IPPool
+metadata:
+  name: nv-ipam-pool-rail-2
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  subnet: 10.255.8.0/22
+  perNodeBlockSize: 10
+  gateway: 10.255.8.1
+  nodeSelector:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: feature.node.kubernetes.io/pci-15b3.present
+            operator: In
+            values:
+              - "true"
+---
+apiVersion: mellanox.com/v1alpha1
+kind: MacvlanNetwork
+metadata:
+  name: macvlan-network-rail-2
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  networkNamespace: default
+  master: enP16p3s0f0np0
+  mode: bridge
+  mtu: 0
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "nv-ipam-pool-rail-2"
+    }
+---
+apiVersion: nv-ipam.nvidia.com/v1alpha1
+kind: IPPool
+metadata:
+  name: nv-ipam-pool-rail-3
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  subnet: 10.255.12.0/22
+  perNodeBlockSize: 10
+  gateway: 10.255.12.1
+  nodeSelector:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: feature.node.kubernetes.io/pci-15b3.present
+            operator: In
+            values:
+              - "true"
+---
+apiVersion: mellanox.com/v1alpha1
+kind: MacvlanNetwork
+metadata:
+  name: macvlan-network-rail-3
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  networkNamespace: default
+  master: enP18p3s0f0np0
+  mode: bridge
+  mtu: 0
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "nv-ipam-pool-rail-3"
+    }
+{{- end }}

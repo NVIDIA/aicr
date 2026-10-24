@@ -531,7 +531,7 @@ node shape the resolved recipe targets. See
 
 > **`--service k0s` is Preview**, covering the single `k0s / h200 / ubuntu / training` coordinate. See [k0s H200 Setup](../integrator/k0s-h200-setup.md) for its prerequisites and known gaps.
 
-> **`--service nvke` is Preview**, covering the single `nvke / gb200 / ubuntu / training` coordinate. See [NVKE GB200 Setup](../integrator/nvke-gb200-setup.md) for its prerequisites and known gaps.
+> **`--service nvke` is Preview**, covering the `nvke / gb200 / ubuntu / training` and `nvke / gb300 / ubuntu / training` coordinates. See [NVKE GB200 Setup](../integrator/nvke-gb200-setup.md) and [NVKE GB300 Setup](../integrator/nvke-gb300-setup.md) for their prerequisites and known gaps.
 
 **Examples:**
 ```shell
