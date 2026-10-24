@@ -332,8 +332,9 @@ jobs:
           # AICR does not build the images below. They ship only with the
           # opt-in nvsentinel-object-monitor (#2612), nvsentinel-preflight
           # (#2610), nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor
-          # (#2611), remediation, nvsentinel-slinky-drainer (#2615) and
-          # nvsentinel-health-events-analyzer (#2618) mixins, and no other job
+          # (#2611), remediation, nvsentinel-slinky-drainer (#2615),
+          # nvsentinel-health-events-analyzer (#2618) and
+          # nvsentinel-event-exporter (#2621) mixins, and no other job
           # scans a mixin-gated image, so nothing else would surface a CVE in
           # them.
           # Because they are not built by this workflow they carry their
@@ -353,6 +354,7 @@ jobs:
           - ghcr.io/nvidia/nvsentinel/gpu-reset
           - ghcr.io/nvidia/nvsentinel/slinky-drainer
           - ghcr.io/nvidia/nvsentinel/health-events-analyzer
+          - ghcr.io/nvidia/nvsentinel/event-exporter
           # Percona, from the remediation mixins' separately bundled datastore
           # (psmdb-operator, nvsentinel-mongodb). Pinned by AICR, by digest.
           - docker.io/percona/percona-server-mongodb-operator
@@ -378,8 +380,9 @@ jobs:
           # TestNICHealthMonitorImagePinnedEverywhere,
           # TestSlurmDrainMonitorImagePinnedEverywhere,
           # TestRemediationImagesPinnedEverywhere,
-          # TestSlinkyDrainerImagePinnedEverywhere and
-          # TestHealthEventsAnalyzerImagePinnedEverywhere fail if these drift
+          # TestSlinkyDrainerImagePinnedEverywhere,
+          # TestHealthEventsAnalyzerImagePinnedEverywhere and
+          # TestEventExporterImagePinnedEverywhere fail if these drift
           # apart.
           - image: ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
             tag: v1.28.0
@@ -411,6 +414,8 @@ jobs:
           - image: ghcr.io/nvidia/nvsentinel/slinky-drainer
             tag: v1.28.0@sha256:bf6ccaf1d6c035aa5f86e70a929dc6d9a18c5c05b10104d23c69aacff35bcb14
           - image: ghcr.io/nvidia/nvsentinel/health-events-analyzer
+            tag: v1.28.0
+          - image: ghcr.io/nvidia/nvsentinel/event-exporter
             tag: v1.28.0
           # AICR's own pins in recipes/components/{psmdb-operator,nvsentinel-mongodb};
           # TestRemediationImagesPinnedEverywhere fails if these drift apart.
