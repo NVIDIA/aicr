@@ -37,6 +37,12 @@ daemonsets:
   # so without this the assert would still pass if the dead route were re-added)
   (nodeSelector == null): true
   tolerations:
+    - key: nvsentinel.dgxc.nvidia.com/external-remediation
+      operator: Exists
+      effect: NoSchedule
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
     - key: nvidia.com/gpu
       value: present
       effect: NoSchedule
