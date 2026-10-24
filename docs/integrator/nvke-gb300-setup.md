@@ -21,6 +21,25 @@ the control-plane label caveat, and the BlueField-3 VF cap on pod count.
 - Kubernetes 1.34 or newer (DRA `resource.k8s.io/v1` for ComputeDomains).
 - Nodes carry `providerID: nico://<uuid>`, which `aicr snapshot` maps to
   `service: nvke`.
+- The tenant arrives with an AICR GPU stack already installed by NVKE
+  (CAPNICo): Helm releases `cert-manager`, `nfd`, `nodewright-operator`,
+  `nodewright-customizations`, `prometheus-operator-crds`, `gpu-operator` and
+  `nvidia-dra-driver-gpu`, under AICR's release names and namespaces, with
+  tolerate-all tolerations and a nodewright workload selector of
+  `workload-type=training`. This recipe upgrades those releases in place and
+  adds the fabric components; pass `--workload-selector workload-type=training`
+  at bundle time so the tuning selector keeps matching, and do not rename or
+  re-namespace the releases. The deployer's "orphaned CRDs from previous
+  deployment" warning is expected here: the CRDs belong to the releases the
+  bundle adopts.
+- Multus is **not** on the node image (the only
+  NetworkAttachmentDefinition is OVN-Kubernetes' own `ovn-primary`), unlike
+  NVKE GB200. The NicClusterPolicy therefore deploys multus and the reference
+  CNI plugins through `secondaryNetwork`. If a later image ships multus, drop
+  that block rather than run two.
+- No StorageClass. The bundle needs none (NVSentinel runs the observe-only
+  profile and kube-prometheus-stack falls back to `emptyDir`), but enabling
+  NVSentinel remediation, which claims three 8Gi PVCs, needs one first.
 - The node image has no DOCA-OFED: `mlx5_core`, `mlx5_ib`, `ib_core` and
   `ib_uverbs` load from the kernel tree and userspace is Ubuntu's
   `libibverbs1`. The recipe runs on that inbox stack and never installs
@@ -53,6 +72,8 @@ the control-plane label caveat, and the BlueField-3 VF cap on pod count.
 aicr bundle --recipe recipe.yaml \
   --accelerated-node-selector feature.node.kubernetes.io/pci-15b3.present=true \
   --accelerated-node-toleration node-role.kubernetes.io/control-plane=:NoSchedule \
+  --system-node-toleration node-role.kubernetes.io/control-plane=:NoSchedule \
+  --workload-selector workload-type=training \
   --output bundle
 ```
 
@@ -101,8 +122,8 @@ spec:
 
 This is the shape k8s-launch-kit generates for
 `--deployment-type rdma_shared --fabric ethernet --multirail` on this
-topology, minus its `secondaryNetwork.multus`/`cniPlugins` (preinstalled on
-NVKE), its `nfd.enabled: true` (the recipe's own NFD labels the nodes), and
+topology, including its `secondaryNetwork.multus`/`cniPlugins` (the image has
+no multus), minus its `nfd.enabled: true` (the recipe's own NFD labels the nodes), and
 its `NicConfigurationTemplate` (NIC firmware is a host prerequisite on NVKE;
 the trays reject operator-driven firmware resets). `MacvlanNetwork.master`
 names the PF netdev, so the manifest is specific to the reference tray's
@@ -147,14 +168,14 @@ Record the measured peak in qualification evidence before re-flooring.
 
 ## Known gaps
 
-- The reference tray already ran a GPU Operator (driver 580.173.02), NFD and
-  the NVIDIA DRA driver before this recipe existed. Who installs the GPU
-  stack on an NVKE tenant, the platform or the operator, decides whether this
-  recipe's `gpu-operator`, `nfd` and `nvidia-dra-driver-gpu` components take
-  over an existing install or must be disabled; not yet confirmed.
-- Multus is assumed preinstalled, as on NVKE GB200; not yet confirmed on a
-  GB300 tenant. If absent, the macvlan attachments need `secondaryNetwork`
-  enabled in the NicClusterPolicy.
+- The preinstalled GPU stack on the reference tenant was AICR GPU Operator
+  v26.7.1 (driver 580.173.02), nodewright v0.19.0, NFD 0.19.0, cert-manager
+  v1.20.2, prometheus-operator-crds 28.0.1 and DRA driver 0.5.0. Whether NVKE
+  keeps those pins in step with this recipe, or expects the recipe to carry
+  them, is not yet agreed; the in-place upgrade has been exercised on one
+  tenant only.
+- Whether multus will arrive in a later NVKE GB300 image (as on GB200) or
+  stays the recipe's to deploy is an open question for the provider.
 - The inbox-driver and missing-`rdma_ucm` findings come from one node on one
   image build (`nke-node-non-fde-ubuntu-24.04.5-arm64`, checked 2026-10-23).
   A later NVKE image may load the module or ship DOCA-OFED; either makes

@@ -28,9 +28,8 @@
 # nv-ipam and the rdma-shared-device-plugin DaemonSet.
 #
 # nvIpam and secondaryNetwork are off in the chart because the post-install
-# NicClusterPolicy manifest carries nvIpam (deployCR off so that manifest is
-# authoritative). No multus or cniPlugins anywhere: NVKE preinstalls multus
-# and the reference CNI plugins on every node. The chart's NFD stays off: the
+# NicClusterPolicy manifest carries nvIpam, multus and the CNI plugins
+# (deployCR off so that manifest is authoritative). The chart's NFD stays off: the
 # standalone nfd component labels Mellanox nodes pci-15b3.present through
 # components/nfd/values-nvidia-nics.yaml.
 deployCR: false

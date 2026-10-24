@@ -18,9 +18,10 @@
 # rdma_ucm, which the device plugin needs for /dev/infiniband/rdma_cm, comes
 # from the rdma-modules component.
 # No nicConfigurationOperator: NIC firmware is a host prerequisite on NVKE.
-# No secondaryNetwork.multus or cniPlugins: NVKE preinstalls multus and the
-# reference CNI plugins, and a second multus would rewrite the host's multus
-# config.
+# secondaryNetwork carries multus and the reference CNI plugins: unlike the
+# NVKE GB200 image, the GB300 reference tenant has no multus (its only
+# NetworkAttachmentDefinition is OVN-Kubernetes' own), so without them the
+# macvlan-rdma-networks attachments are never executed.
 #
 # nvIpam serves the per-rail macvlan networks of the macvlan-rdma-networks
 # component. rdmaSharedDevicePlugin exposes one pooled resource per rail
@@ -69,6 +70,15 @@ spec:
     repository: nvcr.io/nvidia/mellanox
     version: network-operator-v26.7.0
     enableWebhook: false
+  secondaryNetwork:
+    cniPlugins:
+      image: plugins
+      repository: nvcr.io/nvidia/mellanox
+      version: network-operator-v26.7.0
+    multus:
+      image: multus-cni
+      repository: nvcr.io/nvidia/mellanox
+      version: network-operator-v26.7.0
   deploymentTolerations:
     - key: CriticalAddonsOnly
       operator: Exists
