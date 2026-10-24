@@ -19,7 +19,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **56**
+- Components: **57**
 - Unique images: **140**
 - Distinct registries: **12**
 
@@ -57,6 +57,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 4 |
 | kueue | helm | kueue | 0.19.3 | 1 |
+| macvlan-rdma-networks | manifest | — | — | 0 |
 | mariadb-operator | helm | mariadb-operator | 26.6.0 | 1 |
 | mariadb-operator-crds | helm | mariadb-operator-crds | 26.6.0 | 0 |
 | network-operator | helm | nvidia/network-operator | 26.7.0 | 15 |
@@ -256,6 +257,10 @@ _No images extracted._
 ### kueue
 
 - `registry.k8s.io/kueue/kueue:v0.19.3`
+
+### macvlan-rdma-networks
+
+_No images extracted._
 
 ### mariadb-operator
 

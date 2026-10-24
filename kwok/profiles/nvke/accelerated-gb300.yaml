@@ -11,11 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# NVKE GB300 NVL tray: 4 GB300 per tray, Grace arm64, Ubuntu 24.04. CPU and
-# memory are carried over from the NVKE GB200 tray profile (same Grace board
-# class) pending an observed node; nothing schedules against them at this
-# magnitude. GPU memory is the GB300 288GB HBM3e part. Driver matches the
-# gpu-operator component default.
+# NVKE GB300 tray as observed on Firmus firmus-tenant8 (Supermicro
+# ARS-121GL-NB3-LCC-FG001): 4 GB300 per tray, 144 Grace arm64 cores, Ubuntu
+# 24.04, driver 580.173.02 (matches the gpu-operator component default).
+# Memory is carried over from the NVKE GB200 tray profile pending an observed
+# allocatable; nothing schedules against it at this magnitude.
 apiVersion: aicr.run/v1beta1
 kind: KWOKNodeProfile
 metadata:
@@ -31,7 +31,7 @@ spec:
   osImage: Ubuntu 24.04
 
   resources:
-    cpu: "143"
+    cpu: "144"
     memory: 938Gi
     storage: 800Gi
 
