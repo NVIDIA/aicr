@@ -1,0 +1,145 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Runtime Kind test for the nvsentinel-event-exporter mixin.
+#
+# Checks the bundle gate refuses the exporter without a usable sink, installs
+# the observe step with the exporter via the bundle's own install.sh beside an
+# in-cluster mock OAuth token endpoint and CloudEvents sink, sends synthetic
+# health events into platform-connectors, and asserts what reaches the sink:
+# a client-credentials token taken with the Secret's client secret, the
+# mixin's filter, the CloudEvent shape and metadata, resume tokens in the
+# datastore's database, and delivery after a restart. Not wired into
+# `make qualify`: it needs a Kind cluster.
+#
+# Path filter kept narrow for the same reason as nvsentinel-preflight-e2e.yaml.
+
+name: NVSentinel Event Exporter E2E
+
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - 'recipes/mixins/nvsentinel-observe.yaml'
+      - 'recipes/mixins/nvsentinel-event-exporter.yaml'
+      - 'recipes/registry.yaml'
+      - 'recipes/components/nvsentinel/**'
+      - 'recipes/components/nvsentinel-mongodb/**'
+      - 'recipes/components/psmdb-operator/**'
+      # The tested overlay inherits kind.yaml, which inherits base.yaml, and
+      # base.yaml is where nvsentinel enters the chain at all.
+      - 'recipes/overlays/h100-kind-training.yaml'
+      - 'recipes/overlays/kind.yaml'
+      - 'recipes/overlays/base.yaml'
+      - 'recipes/components/cert-manager/**'
+      - 'recipes/components/prometheus-operator-crds/**'
+      - 'pkg/bundler/validations/nvsentinel_event_exporter.go'
+      - 'tests/e2e/nvsentinel-event-exporter/**'
+      - 'pkg/bundler/deployer/localformat/templates/**'
+      # run.sh sources tools/common and is invoked through a make target.
+      - 'tools/common'
+      - 'Makefile'
+      - '.github/workflows/nvsentinel-event-exporter-e2e.yaml'
+      - '.github/actions/setup-build-tools/**'
+      - '.github/actions/prep-kind-runner/**'
+      - '.github/actions/load-versions/**'
+      - '.settings.yaml'
+  pull_request:
+    branches: [main]
+    paths: *paths
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: NVSentinel Event Exporter E2E
+    # mongod 8.0 before 8.0.35 exits at startup on the ubuntu-24.04 image's
+    # 7.0 kernel (https://jira.mongodb.org/browse/SERVER-131779). Return to
+    # ubuntu-24.04 once the Percona MongoDB pin is 8.0.35 or newer.
+    runs-on: ubuntu-22.04
+    # The script's bounded waits sum to ~92 minutes worst case (node Ready 2,
+    # mock 5, cert-manager 10, Percona datastore 15, nvsentinel rollout 15,
+    # event pods 12, event delivery 12, filter settle 1, stop and restart 10,
+    # proto fetch 1), before kind create, go build and the installs. A healthy
+    # run takes a fraction of that.
+    timeout-minutes: 110
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Prep Kind runner
+        uses: ./.github/actions/prep-kind-runner
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      # run.sh's has_tools gate also needs jq and curl, which the runner image
+      # already ships; installing only some of the rest fails the lane before
+      # it exercises anything.
+      - name: Install Kind, kubectl, Helm and yq
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_kind: 'true'
+          kind_version: '${{ steps.versions.outputs.kind }}'
+          install_kubectl: 'true'
+          kubectl_version: '${{ steps.versions.outputs.kubectl }}'
+          install_helm: 'true'
+          helm_version: '${{ steps.versions.outputs.helm }}'
+          install_yq: 'true'
+          yq_version: '${{ steps.versions.outputs.yq }}'
+
+      # KEEP_CLUSTER so the cluster survives for the diagnostics below; the
+      # script's own EXIT trap would otherwise delete it before they run.
+      - name: Run nvsentinel-event-exporter e2e
+        env:
+          KEEP_CLUSTER: 'true'
+        run: make nvsentinel-event-exporter-e2e
+
+      # run.sh writes its kubeconfig inside a mktemp dir and removes that dir on
+      # exit, so re-export before querying anything. cancelled() because a job
+      # timeout cancels rather than fails.
+      - name: Collect diagnostics on failure
+        if: ${{ failure() || cancelled() }}
+        run: |
+          set +e
+          cluster=aicr-nvsentinel-ee-e2e
+          export KUBECONFIG="${RUNNER_TEMP}/ee-diag.kubeconfig"
+          kind export kubeconfig --name "$cluster" --kubeconfig "$KUBECONFIG" || exit 0
+          kubectl get pods -A
+          kubectl -n nvsentinel get events --sort-by=.lastTimestamp
+          kubectl -n nvsentinel get pvc,statefulset,deployment,perconaservermongodb,certificate
+          kubectl -n nvsentinel describe pods -l app.kubernetes.io/name=event-exporter
+          kubectl -n nvsentinel logs deployment/event-exporter --tail=200
+          kubectl -n ee-mock logs deployment/ee-mock --tail=100
+          kubectl -n nvsentinel logs daemonset/platform-connectors --tail=200
+          kubectl -n nvsentinel logs statefulset/nvsentinel-mongodb-rs0 -c mongod --tail=100
+
+      - name: Delete Kind cluster
+        if: ${{ always() }}
+        run: kind delete cluster --name aicr-nvsentinel-ee-e2e || true

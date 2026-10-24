@@ -30,8 +30,8 @@
 //   - security settings (selinux, apparmor)
 //
 // 2. sysctl - Kernel runtime parameters:
-//   - All parameters from /proc/sys tree
-//   - Network settings (tcp, udp, ip)
+//   - Parameters from the /proc/sys tree, except /proc/sys/net and entries
+//     whose read can block in the kernel
 //   - Memory management (vm)
 //   - Filesystem settings (fs)
 //   - Kernel core settings

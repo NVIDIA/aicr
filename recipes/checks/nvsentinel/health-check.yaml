@@ -233,10 +233,12 @@ spec:
     - name: validate-remediation-pipeline-rolled-out
       try:
         # The remediation workloads the nvsentinel-observe, -quarantine and
-        # -remediation mixins turn on, and the health-events-analyzer the
-        # nvsentinel-health-events-analyzer mixin adds; their datastore is
-        # checked by nvsentinel-mongodb's own health check. Negative form, as
-        # above: off in every shipped recipe, so each op passes on a 404 and
+        # -remediation mixins turn on, the health-events-analyzer the
+        # nvsentinel-health-events-analyzer mixin adds, and the
+        # event-exporter the nvsentinel-event-exporter mixin adds; their
+        # datastore is checked by nvsentinel-mongodb's own health check.
+        # Negative form, as above: off in every shipped recipe, so each op
+        # passes on a 404 and
         # fails only when the workload renders without a complete rollout.
         # The status counters are omitempty, hence the `|| 0`.
         # updatedReplicas catches pods still on the previous revision, and
@@ -432,6 +434,38 @@ spec:
               kind: Deployment
               metadata:
                 name: health-events-analyzer
+                namespace: nvsentinel
+              ((status.observedGeneration || `0`) < metadata.generation): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: event-exporter
+                namespace: nvsentinel
+              ((status.readyReplicas || `0`) < spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: event-exporter
+                namespace: nvsentinel
+              ((status.updatedReplicas || `0`) < spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: event-exporter
+                namespace: nvsentinel
+              ((status.replicas || `0`) > spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: event-exporter
                 namespace: nvsentinel
               ((status.observedGeneration || `0`) < metadata.generation): true
     - name: validate-all-pods-healthy

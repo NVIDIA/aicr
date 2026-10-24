@@ -117,7 +117,7 @@ spec:
         - dedicated=gpu-workload:NoSchedule
       requireGpu: false
       runtimeClassName: ""           # mutually exclusive with requireGpu
-      os: ""                         # ubuntu | rhel | cos | amazonlinux | ol | talos | sles
+      os: ""                         # ubuntu | rhel | cos | amazonlinux | ol | talos | sles | rocky
       requests: ""                   # "cpu=500m,memory=1Gi"
       limits: ""
     execution:

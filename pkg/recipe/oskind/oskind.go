@@ -37,13 +37,14 @@ const (
 	OracleLinux = "ol"
 	Talos       = "talos"
 	SLES        = "sles"
+	Rocky       = "rocky"
 )
 
 // All returns every supported OS value (excluding `Any`) sorted
 // alphabetically. Used by the recipe package's GetCriteriaOSTypes and
 // any caller that needs to enumerate concrete OS choices.
 func All() []string {
-	return []string{AmazonLinux, COS, OracleLinux, RHEL, SLES, Talos, Ubuntu}
+	return []string{AmazonLinux, COS, OracleLinux, RHEL, Rocky, SLES, Talos, Ubuntu}
 }
 
 // IsKnown reports whether s is one of the supported OS values, including
@@ -52,7 +53,7 @@ func All() []string {
 // recipe.ParseCriteriaOSType.
 func IsKnown(s string) bool {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case Any, Ubuntu, RHEL, COS, AmazonLinux, OracleLinux, Talos, SLES:
+	case Any, Ubuntu, RHEL, COS, AmazonLinux, OracleLinux, Talos, SLES, Rocky:
 		return true
 	default:
 		return false

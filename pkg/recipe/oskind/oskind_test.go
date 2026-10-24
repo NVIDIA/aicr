@@ -21,7 +21,7 @@ import (
 
 func TestAll_SortedAndComplete(t *testing.T) {
 	got := All()
-	want := []string{AmazonLinux, COS, OracleLinux, RHEL, SLES, Talos, Ubuntu}
+	want := []string{AmazonLinux, COS, OracleLinux, RHEL, Rocky, SLES, Talos, Ubuntu}
 	if len(got) != len(want) {
 		t.Fatalf("All() returned %d values, want %d", len(got), len(want))
 	}
@@ -53,6 +53,8 @@ func TestIsKnown(t *testing.T) {
 		{"talos with whitespace", "  talos  ", true},
 		{"sles", "sles", true},
 		{"SLES uppercase", "SLES", true},
+		{"rocky", "rocky", true},
+		{"Rocky uppercase", "Rocky", true},
 		{"empty", "", false},
 		{"alias al2 not recognized", "al2", false},
 		{"unknown", "windows", false},
