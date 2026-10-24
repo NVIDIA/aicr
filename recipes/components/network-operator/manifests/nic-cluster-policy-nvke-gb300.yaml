@@ -11,10 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# NicClusterPolicy for GB300 NVKE — RoCE on the inbox driver, shared HCA.
+# NicClusterPolicy for GB300 NVKE — RoCE on vendor-installed host DOCA-OFED,
+# shared HCA.
 #
-# No ofedDriver: the host's inbox mlx5_core carries OVN-Kubernetes on the
-# BlueField-3, so it must never be replaced (see values-nvke-gb300.yaml).
+# No ofedDriver: DOCA-OFED is a host prerequisite, and the host's mlx5_core
+# carries OVN-Kubernetes on the BlueField-3, so it must never be replaced
+# (see values-nvke-gb300.yaml).
 # No nicConfigurationOperator: NIC firmware is a host prerequisite on NVKE.
 # No secondaryNetwork.multus or cniPlugins: NVKE preinstalls multus and the
 # reference CNI plugins, and a second multus would rewrite the host's multus

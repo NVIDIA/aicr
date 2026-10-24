@@ -2409,7 +2409,7 @@ gb300-nvke-ubuntu-training:
   011-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
   011-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
-  011-network-operator-post/templates/nic-cluster-policy-nvke-gb300.yaml: 07709e498d90963b09d54e9a5303b9b9f64daf5730caeef229adc5389b978fef
+  011-network-operator-post/templates/nic-cluster-policy-nvke-gb300.yaml: ae7375d7331ec85de25f02d4f6a20788ceb7a1dc1df1d471afa80622238e914e
   011-network-operator-post/values.yaml: f4f86a8650429b79283247cdaf95aadfd0d4ba5a9ce8546ace51f331c871ffdb
   012-macvlan-rdma-networks/Chart.yaml: 429458d9210e64f5fd7697c4f0516fa905184e828062a34306fd5e70776c3295
   012-macvlan-rdma-networks/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -2432,7 +2432,7 @@ gb300-nvke-ubuntu-training:
   README.md: 7310b0ba2fc15bd590bad45fe7709ed341ccf5168dbc46d73418acf3a9ddd3ae
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: ae836b34fdb33e0b3aaf6de15a8442f888586d0a418db9765925f4b904483068
-  checksums.txt: 8154a359e3014266fded5f1fbe4eb86665ed90b796b949d1ac819ad406be8a7e
+  checksums.txt: 50645cdbdc668433803541b2b8b5f3893f2891b1a17c770bbf92913ebeb0176d
   deploy.sh: 3b70ea0d61b1836eb9caf0ece0baae4636e4dbaa31316e10eb39a11aacd0637b
   recipe.yaml: 98ede0a0b8591803de249b8569e9057f7e00c6b413790db9914711c07a14df68
 h100-aks-ubuntu-inference-dynamo:
