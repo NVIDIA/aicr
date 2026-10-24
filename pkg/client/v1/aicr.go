@@ -745,15 +745,15 @@ func (c *Client) criteriaRegistry(
 }
 
 // assertOwns rejects RecipeResults that were not produced by this Client.
-// The owner field is stamped in ResolveRecipe with the producing Client's
-// pointer identity; passing result A to client B silently mixed A's
-// component refs with B's DataProvider reads before this check existed,
-// producing wrong Helm values or supplemental manifests with no error.
+// Every Client method that returns a RecipeResult stamps the owner field
+// with the producing Client's pointer identity; passing result A to
+// client B silently mixed A's component refs with B's DataProvider reads
+// before this check existed, producing wrong Helm values or supplemental
+// manifests with no error.
 //
-// A nil owner means the caller bypassed ResolveRecipe (e.g., constructed
-// the RecipeResult directly). That's a programmer error too — the
-// internal field requires the facade to populate it, and the only public
-// path is ResolveRecipe — so the check rejects nil owner as well.
+// A nil owner means the RecipeResult did not come from a Client (e.g.,
+// WrapResolved or a struct literal). Such a result is queryable only, so
+// the check rejects nil owner as well.
 //
 // The error embeds %p of both pointers; in controller logs that lets an
 // operator distinguish "wrong Client" from "no Client at all" without
@@ -763,7 +763,7 @@ func (c *Client) assertOwns(r *RecipeResult) error {
 		return nil
 	}
 	return errors.NewWithContext(errors.ErrCodeInvalidRequest,
-		"RecipeResult was produced by a different Client (or constructed outside ResolveRecipe); cross-client bundle/validate is not permitted",
+		"RecipeResult was produced by a different Client (or constructed outside ResolveRecipe); cross-client use is not permitted",
 		map[string]any{
 			"expectedOwner": fmt.Sprintf("%p", c),
 			"actualOwner":   fmt.Sprintf("%p", r.owner),
@@ -894,8 +894,8 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 	if err != nil {
 		return nil, err
 	}
-	// Stamp the owning Client so BundleComponents / ValidateState can
-	// reject cross-client misuse. Pointer identity is the token —
+	// Stamp the owning Client so every method that consumes the result
+	// can reject cross-client misuse. Pointer identity is the token —
 	// unforgeable from outside this package because RecipeResult.owner
 	// is unexported.
 	result.owner = c

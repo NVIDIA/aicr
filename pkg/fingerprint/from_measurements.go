@@ -485,6 +485,8 @@ func normalizeOSID(id string) string {
 		return oskind.Talos
 	case oskind.SLES:
 		return oskind.SLES
+	case oskind.Rocky:
+		return oskind.Rocky
 	default:
 		return ""
 	}
