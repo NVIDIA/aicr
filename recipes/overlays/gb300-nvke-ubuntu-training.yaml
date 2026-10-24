@@ -20,11 +20,11 @@ spec:
   # Bare-metal GB300 NVL trays on NVKE (Supermicro ARS-121GL-NB3-LCC-FG001,
   # four ConnectX-8 SuperNIC rails on an Ethernet/RoCE east-west fabric, a
   # BlueField-3 for north-south). Same component shape as
-  # gb300-generic-ubuntu-training except for the fabric: the Network Operator
-  # ships no ofedDriver, because DOCA-OFED is a host prerequisite the vendor
-  # installs and OVN-Kubernetes on the BlueField-3 is bound to the host
-  # driver, and RDMA is shared-HCA RoCE with per-rail macvlan attachments
-  # rather than InfiniBand (docs/integrator/nvke-gb300-setup.md).
+  # gb300-generic-ubuntu-training except for the fabric: the host keeps the
+  # inbox mlx5_core (OVN-Kubernetes runs on it via the BlueField-3), so the
+  # Network Operator ships no ofedDriver and GPUDirect RDMA is DMA-BUF only,
+  # and RDMA is shared-HCA RoCE with per-rail macvlan attachments rather than
+  # InfiniBand (docs/integrator/nvke-gb300-setup.md).
   base: nvke
 
   criteria:
@@ -49,11 +49,14 @@ spec:
     # kernel-module-params ConfigMap (a GB200-on-EFA requirement only).
     - name: gpu-operator
       type: Helm
+      # rdma-modules first: its NodeWright taint-gates the GPU nodes until
+      # rdma_ucm is loaded, which only works if the CR precedes the operators.
       dependencyRefs:
         - nfd
         - cert-manager
         - kube-prometheus-stack
         - nodewright-customizations
+        - rdma-modules
       overrides:
         gdrcopy:
           enabled: true
@@ -100,7 +103,7 @@ spec:
         topologyUpdater:
           enable: true
 
-    # RoCE east-west fabric on host DOCA-OFED: shared-HCA RDMA, one pooled
+    # RoCE east-west fabric on the inbox driver: shared-HCA RDMA, one pooled
     # rdma/rdma_shared_resource_rail_<n> per ConnectX-8 rail, no ofedDriver
     # and no nicConfigurationOperator (NIC firmware is a host prerequisite on
     # NVKE, and the CX-8 firmware exposes one VF per PF, which rules out
@@ -114,6 +117,7 @@ spec:
       dependencyRefs:
         - nfd
         - cert-manager
+        - rdma-modules
 
     - name: macvlan-rdma-networks
       type: Helm
@@ -121,6 +125,19 @@ spec:
         - components/macvlan-rdma-networks/manifests/nvke-gb300.yaml
       dependencyRefs:
         - network-operator
+
+    # rdma_ucm is not loaded by the NVKE GB300 image and no operator loads it
+    # without OFED; without /dev/infiniband/rdma_cm the rdma-shared device
+    # plugin advertises nothing and the deployment gate never sees the rail
+    # resources. RoCE variant: no ib_ipoib, no control-plane exclusion (the
+    # tenant's control plane can be its only GPU tray). Ordered before
+    # network-operator and gpu-operator through their dependencyRefs.
+    - name: rdma-modules
+      type: Helm
+      manifestFiles:
+        - components/rdma-modules/manifests/rdma-ulp-roce.yaml
+      dependencyRefs:
+        - nodewright-operator
 
   # Deployment checks come from the gb300-any criteria-wildcard overlay.
   validation:

@@ -10,8 +10,9 @@ east-west fabric and a BlueField-3 for north-south.
 It is the bare-metal `gb300-generic-ubuntu-training` component shape (GPU
 Operator with an operator-installed driver, nvidia-tuned GB300 tuning through
 nodewright, NFD, Network Operator with shared-HCA RDMA) with the fabric
-changed: no `ofedDriver` (DOCA-OFED is vendor-installed on the host), and
-RoCE over per-rail macvlan attachments instead of InfiniBand. The NVKE platform prerequisites are the same as for GB200; see
+changed: no `ofedDriver` (the host keeps its inbox driver), RoCE over
+per-rail macvlan attachments instead of InfiniBand, and the `rdma-modules`
+NodeWright from the GB200 leaf in its RoCE form. The NVKE platform prerequisites are the same as for GB200; see
 [NVKE GB200 Setup](nvke-gb200-setup.md) for the `nico://` providerID mapping,
 the control-plane label caveat, and the BlueField-3 VF cap on pod count.
 
@@ -20,14 +21,18 @@ the control-plane label caveat, and the BlueField-3 VF cap on pod count.
 - Kubernetes 1.34 or newer (DRA `resource.k8s.io/v1` for ComputeDomains).
 - Nodes carry `providerID: nico://<uuid>`, which `aicr snapshot` maps to
   `service: nvke`.
-- DOCA-OFED is installed on the node image by the NVKE vendor. The recipe
-  never installs or upgrades it (see below). Confirm with `ofed_info -s` on a
-  node before deploying: the reference tray at discovery time had the inbox
-  `mlx5_core` only, and this recipe assumes the vendor image has since moved
-  to DOCA-OFED.
+- The node image has no DOCA-OFED: `mlx5_core`, `mlx5_ib`, `ib_core` and
+  `ib_uverbs` load from the kernel tree and userspace is Ubuntu's
+  `libibverbs1`. The recipe runs on that inbox stack and never installs
+  OFED (see below). An image that ships DOCA-OFED also works.
+- `rdma_ucm` is not loaded by the image (`/dev/infiniband/rdma_cm` is
+  missing) and nothing loads it without OFED; the recipe's `rdma-modules`
+  component does (see below). A modules-load.d entry for it in the image
+  makes that component a no-op.
 - The primary CNI is OVN-Kubernetes on the BlueField-3 (`15b3:a2dc`, in
-  zero-trust host-restricted mode), bound to the host's `mlx5_core`. The OVN
-  pod network is `192.168.0.0/16`; the recipe's rail subnets stay out of it.
+  zero-trust host-restricted mode), bound to the host's inbox `mlx5_core`.
+  The OVN pod network is `192.168.0.0/16`; the recipe's rail subnets stay
+  out of it.
 - East-west fabric: four ConnectX-8 rails per tray (`mlx5_0`, `mlx5_2`,
   `mlx5_4`, `mlx5_6` at `0000/0002/0010/0012:03:00.0`; each NIC's second plane
   is the `.1` function and is not a separate rail), Ethernet link type, 400G.
@@ -51,22 +56,16 @@ aicr bundle --recipe recipe.yaml \
   --output bundle
 ```
 
-## DOCA-OFED is a host prerequisite
+## Never install DOCA-OFED on these nodes
 
-The Network Operator in this recipe ships **no `ofedDriver`**. DOCA-OFED comes
-with the vendor's node image, as host MOFED does on OKE, and the recipe treats
-it the way it treats the kernel: present before AICR runs, upgraded by the
-vendor. Two reasons the recipe must not install it itself:
-
-- OVN-Kubernetes rides on the host's `mlx5_core` through the BlueField-3. A
-  DOCA driver container unloads `mlx5_core` to replace it, and the node's
-  primary address disappears with it; a reboot restores the host driver and
-  the operator applies the container driver again. This was observed on
-  Firmus GB300 clusters with recipes that carried an `ofedDriver` block.
-- A tenant whose only node is the control plane cannot be drained for a
-  driver rollout.
-
-Do not add an `ofedDriver` back for NVKE, and do not combine this recipe with
+The Network Operator in this recipe ships **no `ofedDriver`**. The host runs
+the inbox `mlx5_core` and OVN-Kubernetes rides on it through the BlueField-3.
+A DOCA driver container unloads `mlx5_core` to replace it, and the node's
+primary address disappears with it; a reboot restores the inbox driver and
+the operator applies the DOCA driver again. This was observed on Firmus GB300
+clusters with recipes that carried an `ofedDriver` block. A tenant whose only
+node is the control plane also cannot be drained for a driver rollout. Do not
+add an `ofedDriver` back for NVKE, and do not combine this recipe with
 another Network Operator installation.
 
 GPUDirect RDMA runs over DMA-BUF: the recipe sets no `driver.rdma` value
@@ -109,6 +108,23 @@ the trays reject operator-driven firmware resets). `MacvlanNetwork.master`
 names the PF netdev, so the manifest is specific to the reference tray's
 kernel interface names; a different board needs a copy with its own names.
 
+## rdma-modules and node tainting
+
+`rdma-modules` is a manifest-only component carrying one `NodeWright` CR that
+loads `rdma_ucm` and `ib_umad` and writes
+`/etc/modules-load.d/aicr-rdma-ulp.conf` on every `pci-15b3.present` node.
+This is the RoCE form of the GB200 leaf's manifest: no `ib_ipoib`, since
+pods get a macvlan netdev rather than an IPoIB one, and no control-plane
+exclusion, since on an NVKE GB300 tenant the control plane can be the only
+GPU tray. Without it the rdma-shared device plugin finds no
+`/dev/infiniband/rdma_cm`, advertises no rail resource, and the deployment
+gate's expected-resources check never passes. The package has no interrupt
+(no cordon, drain or reboot). `runtimeRequired: true` with
+`autoTaintNewNodes` lets nodewright taint GPU nodes until the modules are
+loaded. Disable the taint with `--set rdmamodules:autoTaintNewNodes=false`,
+or the whole component with `--set rdmamodules:enabled=false` on images that
+already load `rdma_ucm`.
+
 Why not SR-IOV like the NVKE GB200 leaf: `l8k discover` defaults this tray to
 SR-IOV with `numVfs: 8`, but the firmware exposes one VF per PF and nothing in
 the recipe may rewrite firmware. Raise `NUM_OF_VFS` on the host first if you
@@ -139,11 +155,10 @@ Record the measured peak in qualification evidence before re-flooring.
 - Multus is assumed preinstalled, as on NVKE GB200; not yet confirmed on a
   GB300 tenant. If absent, the macvlan attachments need `secondaryNetwork`
   enabled in the NicClusterPolicy.
-- The vendor-installed DOCA-OFED version is not pinned or checked by the
-  recipe; the discovery-time image still had the inbox driver. If a GB300
-  host turns out to lack DOCA-OFED and `rdma_ucm`, the GB200 leaf's
-  `rdma-modules` component is the fallback for the module, not an OFED
-  install.
+- The inbox-driver and missing-`rdma_ucm` findings come from one node on one
+  image build (`nke-node-non-fde-ubuntu-24.04.5-arm64`, checked 2026-10-23).
+  A later NVKE image may load the module or ship DOCA-OFED; either makes
+  `rdma-modules` a no-op rather than a conflict.
 - No NCCL evidence on an NVKE GB300 cluster yet; the east-west rails on the
   reference tray are not linked up.
 - No published evidence yet.

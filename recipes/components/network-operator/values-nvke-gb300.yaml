@@ -13,13 +13,13 @@
 # limitations under the License.
 # network-operator Helm values for GB300 NVKE RoCE (shared HCA).
 #
-# NO ofedDriver: DOCA-OFED is a host prerequisite the NVKE vendor installs in
-# the node image, as on OKE. The recipe must not install it either way:
-# OVN-Kubernetes (the primary CNI, on BlueField-3) is bound to the host's
-# mlx5_core, so a DOCA driver container replacing that module takes the node's
-# primary address with it (observed on Firmus GB300 with recipes that carried
-# an ofedDriver), and a one-node tenant cannot be drained for a driver
-# rollout at all.
+# NO ofedDriver, and unlike OKE not because of host MOFED: NVKE hosts run the
+# inbox mlx5_core from the -nvidia-64k kernel (no DOCA-OFED on the image) and
+# OVN-Kubernetes (the primary CNI, on BlueField-3) is bound to it, so a DOCA
+# driver container unloading that module takes the node's primary address
+# with it (observed on Firmus GB300 with recipes that carried an ofedDriver);
+# a one-node tenant also cannot be drained for a driver rollout. The recipe
+# works unchanged on an image that ships DOCA-OFED.
 #
 # Shared HCA, not SR-IOV: the ConnectX-8 firmware on these trays exposes one
 # VF per PF (sriov_totalvfs 1) and NIC firmware is a host prerequisite on NVKE,
