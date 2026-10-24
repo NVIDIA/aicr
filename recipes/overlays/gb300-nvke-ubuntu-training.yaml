@@ -21,10 +21,10 @@ spec:
   # four ConnectX-8 SuperNIC rails on an Ethernet/RoCE east-west fabric, a
   # BlueField-3 for north-south). Same component shape as
   # gb300-generic-ubuntu-training except for the fabric: the Network Operator
-  # ships no ofedDriver, because the host runs the inbox mlx5_core (no
-  # DOCA-OFED on the image) and OVN-Kubernetes on the BlueField-3 is bound to
-  # it, and RDMA is shared-HCA RoCE with per-rail macvlan attachments rather
-  # than InfiniBand (docs/integrator/nvke-gb300-setup.md).
+  # ships no ofedDriver, because DOCA-OFED is a host prerequisite the vendor
+  # installs and OVN-Kubernetes on the BlueField-3 is bound to the host
+  # driver, and RDMA is shared-HCA RoCE with per-rail macvlan attachments
+  # rather than InfiniBand (docs/integrator/nvke-gb300-setup.md).
   base: nvke
 
   criteria:
@@ -100,7 +100,7 @@ spec:
         topologyUpdater:
           enable: true
 
-    # RoCE east-west fabric on the inbox driver: shared-HCA RDMA, one pooled
+    # RoCE east-west fabric on host DOCA-OFED: shared-HCA RDMA, one pooled
     # rdma/rdma_shared_resource_rail_<n> per ConnectX-8 rail, no ofedDriver
     # and no nicConfigurationOperator (NIC firmware is a host prerequisite on
     # NVKE, and the CX-8 firmware exposes one VF per PF, which rules out
