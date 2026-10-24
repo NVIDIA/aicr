@@ -17,12 +17,14 @@ metadata:
   name: gb300-nvke-ubuntu-training
 
 spec:
-  # Bare-metal GB300 NVL trays on NVKE. Same component shape as
-  # gb300-generic-ubuntu-training (shared-HCA RDMA, nvidia-tuned only) except
-  # that the Network Operator ships no ofedDriver: the host image already
-  # carries the Mellanox driver stack and OVN-Kubernetes (the primary CNI, on
-  # BlueField-3) is bound to it, so a DOCA driver container replacing it takes
-  # the node's primary address with it (docs/integrator/nvke-gb300-setup.md).
+  # Bare-metal GB300 NVL trays on NVKE (Supermicro ARS-121GL-NB3-LCC-FG001,
+  # four ConnectX-8 SuperNIC rails on an Ethernet/RoCE east-west fabric, a
+  # BlueField-3 for north-south). Same component shape as
+  # gb300-generic-ubuntu-training except for the fabric: the Network Operator
+  # ships no ofedDriver, because the host runs the inbox mlx5_core (no
+  # DOCA-OFED on the image) and OVN-Kubernetes on the BlueField-3 is bound to
+  # it, and RDMA is shared-HCA RoCE with per-rail macvlan attachments rather
+  # than InfiniBand (docs/integrator/nvke-gb300-setup.md).
   base: nvke
 
   criteria:
@@ -98,10 +100,12 @@ spec:
         topologyUpdater:
           enable: true
 
-    # InfiniBand east-west fabric on the host driver: shared-HCA RDMA
-    # (rdmaSharedDevicePlugin, pooled rdma/ib over the ConnectX PFs), no
-    # ofedDriver and no nicConfigurationOperator (NIC firmware is a host
-    # prerequisite on NVKE; the trays reject operator-driven firmware resets).
+    # RoCE east-west fabric on the inbox driver: shared-HCA RDMA, one pooled
+    # rdma/rdma_shared_resource_rail_<n> per ConnectX-8 rail, no ofedDriver
+    # and no nicConfigurationOperator (NIC firmware is a host prerequisite on
+    # NVKE, and the CX-8 firmware exposes one VF per PF, which rules out
+    # SR-IOV). NicClusterPolicy is manifest-supplied (chart deployCR off); the
+    # per-rail IPPools and MacvlanNetworks follow in macvlan-rdma-networks.
     - name: network-operator
       type: Helm
       valuesFile: components/network-operator/values-nvke-gb300.yaml
@@ -110,6 +114,13 @@ spec:
       dependencyRefs:
         - nfd
         - cert-manager
+
+    - name: macvlan-rdma-networks
+      type: Helm
+      manifestFiles:
+        - components/macvlan-rdma-networks/manifests/nvke-gb300.yaml
+      dependencyRefs:
+        - network-operator
 
   # Deployment checks come from the gb300-any criteria-wildcard overlay.
   validation:

@@ -1,44 +1,108 @@
 # NVKE GB300 Setup
 
 The `gb300-nvke-ubuntu-training` recipe targets NVKE (NVIDIA Kubernetes Engine,
-formerly NKE): bare-metal GB300 NVL trays provisioned by Forge/NICo, running
+formerly NKE): bare-metal GB300 trays provisioned by Forge/NICo, running
 Ubuntu 24.04 with NVIDIA's `-nvidia-64k` kernel. It is a Preview coordinate.
+The reference tray is a Supermicro `ARS-121GL-NB3-LCC-FG001` (Firmus CBR01):
+4x GB300, 144 Grace cores, two dual ConnectX-8 SuperNIC mezzanines for the
+east-west fabric and a BlueField-3 for north-south.
 
 It is the bare-metal `gb300-generic-ubuntu-training` component shape (GPU
 Operator with an operator-installed driver, nvidia-tuned GB300 tuning through
-nodewright, NFD, Network Operator with shared-HCA RDMA) with one difference:
-the Network Operator ships **no `ofedDriver`**, because the Mellanox driver
-stack is already on the host. The NVKE platform prerequisites are the same as
-for GB200; see [NVKE GB200 Setup](nvke-gb200-setup.md) for the `nico://`
-providerID mapping, the control-plane label caveat, the BlueField-3 VF cap on
-pod count, and the fabric P_Key full-membership requirement.
+nodewright, NFD, Network Operator with shared-HCA RDMA) with the fabric
+changed: no `ofedDriver`, and RoCE over per-rail macvlan attachments instead
+of InfiniBand. The NVKE platform prerequisites are the same as for GB200; see
+[NVKE GB200 Setup](nvke-gb200-setup.md) for the `nico://` providerID mapping,
+the control-plane label caveat, and the BlueField-3 VF cap on pod count.
+
+## Cluster prerequisites
+
+- Kubernetes 1.34 or newer (DRA `resource.k8s.io/v1` for ComputeDomains).
+- Nodes carry `providerID: nico://<uuid>`, which `aicr snapshot` maps to
+  `service: nvke`.
+- The primary CNI is OVN-Kubernetes on the BlueField-3 (`15b3:a2dc`, in
+  zero-trust host-restricted mode), bound to the host's inbox `mlx5_core`. The
+  OVN pod network is `192.168.0.0/16`; the recipe's rail subnets stay out of
+  it.
+- East-west fabric: four ConnectX-8 rails per tray (`mlx5_0`, `mlx5_2`,
+  `mlx5_4`, `mlx5_6` at `0000/0002/0010/0012:03:00.0`; each NIC's second plane
+  is the `.1` function and is not a separate rail), Ethernet link type, 400G.
+  The rails must be linked up with the host PF MTU set as the fabric expects;
+  on the reference tray they came up with no carrier and MTU 1500, which blocks
+  any data-plane validation until the switch side is configured.
+- ConnectX-8 firmware exposes one VF per PF (`sriov_totalvfs` 1). The recipe
+  therefore uses shared-HCA RDMA; see below before trying SR-IOV.
+- Whether the fabric is Spectrum-X is a switch-side fact the recipe cannot
+  detect. If it is, the Network Operator needs the Spectrum-X profile
+  (`l8k generate --spectrum-x RA2.x`), which this recipe does not carry.
+- On a tenant whose only node is a tainted control plane that is also the
+  GPU node, pass the control-plane toleration at bundle time so the GPU
+  Operator and nodewright agree with the fabric DaemonSets, which tolerate it
+  already:
+
+```bash
+aicr bundle --recipe recipe.yaml \
+  --accelerated-node-selector feature.node.kubernetes.io/pci-15b3.present=true \
+  --accelerated-node-toleration node-role.kubernetes.io/control-plane=:NoSchedule \
+  --output bundle
+```
 
 ## Never install DOCA-OFED on these nodes
 
-The host runs the Mellanox driver that OVN-Kubernetes (the primary CNI, on
-BlueField-3) is bound to. A DOCA driver container unloads `mlx5_core` to
-replace it, and the node's primary address disappears with it; a reboot
-restores the host driver and the operator applies the DOCA driver again. This
-was observed on Firmus GB300 clusters with recipes that carried an
+DOCA-OFED is not on the NVKE image: `mlx5_core` and `ib_core` load from the
+kernel tree, and userspace is Ubuntu's `libibverbs1` only. OVN-Kubernetes
+rides on that driver through the BlueField-3. A DOCA driver container unloads
+`mlx5_core` to replace it, and the node's primary address disappears with it;
+a reboot restores the inbox driver and the operator applies the DOCA driver
+again. This was observed on Firmus GB300 clusters with recipes that carried an
 `ofedDriver` block. Do not add one back for NVKE, and do not combine this
 recipe with another Network Operator installation.
 
 GPUDirect RDMA runs over DMA-BUF: the recipe sets no `driver.rdma` value
 (no `nvidia-peermem`, which has no build for the 64k-page Grace kernel).
 
-## Shared-HCA InfiniBand
+## Shared-HCA RoCE with per-rail macvlan
 
-The NicClusterPolicy carries only `rdmaSharedDevicePlugin`, which pools the
-InfiniBand ConnectX PFs (device IDs `1021` ConnectX-7 and `1023` ConnectX-8;
-the BlueField-3 is excluded) into one `rdma/ib` node resource, up to 64
-allocations per node. There is no IPoIB, no nv-ipam and no SR-IOV. The
-`nicConfigurationOperator` of the generic GB300 recipe is left out: NIC
-firmware (IB link type, SR-IOV settings) is a host prerequisite on NVKE, whose
-trays reject operator-driven firmware resets.
+The Network Operator chart deploys only the operator. The NicClusterPolicy
+carries `nvIpam` and `rdmaSharedDevicePlugin`, which exposes one pooled
+resource per rail, `rdma/rdma_shared_resource_rail_0` to `_3`, each selected
+by the rail's PCI address (`deviceID 1023`, link type `ether`; the BlueField-3
+is excluded). The `macvlan-rdma-networks` component (manifest-only, ordered
+after `network-operator` because the nv-ipam CRDs appear only once the
+NicClusterPolicy is reconciled) supplies per rail one nv-ipam `IPPool`
+(`10.255.<4n>.0/22`) and one `MacvlanNetwork` in bridge mode over the rail's
+PF netdev, with `mtu: 0` so the attachment inherits the PF's MTU. The
+NetworkAttachmentDefinitions land in `default`. A pod takes one RDMA
+allocation and one attachment per rail:
 
-The plugin's DaemonSet is pinned to `pci-15b3.present` nodes that are not
-control-plane nodes, because on NVKE the control plane also carries a
-BlueField-3 and therefore the label, without any IB rail.
+```yaml
+metadata:
+  annotations:
+    k8s.v1.cni.cncf.io/networks: default/macvlan-network-rail-0,default/macvlan-network-rail-1,default/macvlan-network-rail-2,default/macvlan-network-rail-3
+spec:
+  containers:
+    - resources:
+        limits:
+          rdma/rdma_shared_resource_rail_0: 1
+          rdma/rdma_shared_resource_rail_1: 1
+          rdma/rdma_shared_resource_rail_2: 1
+          rdma/rdma_shared_resource_rail_3: 1
+```
+
+This is the shape k8s-launch-kit generates for
+`--deployment-type rdma_shared --fabric ethernet --multirail` on this
+topology, minus its `secondaryNetwork.multus`/`cniPlugins` (preinstalled on
+NVKE), its `nfd.enabled: true` (the recipe's own NFD labels the nodes), and
+its `NicConfigurationTemplate` (NIC firmware is a host prerequisite on NVKE;
+the trays reject operator-driven firmware resets). `MacvlanNetwork.master`
+names the PF netdev, so the manifest is specific to the reference tray's
+kernel interface names; a different board needs a copy with its own names.
+
+Why not SR-IOV like the NVKE GB200 leaf: `l8k discover` defaults this tray to
+SR-IOV with `numVfs: 8`, but the firmware exposes one VF per PF and nothing in
+the recipe may rewrite firmware. Raise `NUM_OF_VFS` on the host first if you
+need VFs; then the GB200 leaf's `sriov-ib-networks` component is the model,
+with `linkType: ETH` and `SriovNetwork` in place of `SriovIBNetwork`.
 
 ## Generate and validate
 
@@ -56,11 +120,18 @@ Record the measured peak in qualification evidence before re-flooring.
 
 ## Known gaps
 
-- No NCCL evidence on an NVKE GB300 cluster yet; the performance floor is
-  inherited, not measured.
-- If the host image does not load `rdma_ucm` (the GB200 NVKE image did not),
-  the `rdma-modules` component from the GB200 recipe can be added to this leaf;
-  it is not wired in until a GB300 host reports the gap.
+- The reference tray already ran a GPU Operator (driver 580.173.02), NFD and
+  the NVIDIA DRA driver before this recipe existed. Who installs the GPU
+  stack on an NVKE tenant, the platform or the operator, decides whether this
+  recipe's `gpu-operator`, `nfd` and `nvidia-dra-driver-gpu` components take
+  over an existing install or must be disabled; not yet confirmed.
+- Multus is assumed preinstalled, as on NVKE GB200; not yet confirmed on a
+  GB300 tenant. If absent, the macvlan attachments need `secondaryNetwork`
+  enabled in the NicClusterPolicy.
+- Whether the image loads `rdma_ucm`: the GB200 NVKE image did not, and the
+  GB200 leaf's `rdma-modules` component can be added here if a GB300 host
+  reports the same gap.
+- No NCCL evidence on an NVKE GB300 cluster yet; the east-west rails on the
+  reference tray are not linked up.
 - No published evidence yet.
-- The KWOK profile models scheduling only; CPU and memory are carried over
-  from the GB200 tray profile.
+- The KWOK profile models scheduling only.

@@ -11,20 +11,25 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# network-operator Helm values for GB300 NVKE InfiniBand (shared HCA).
+# network-operator Helm values for GB300 NVKE RoCE (shared HCA).
 #
-# NO ofedDriver: NVKE hosts ship the Mellanox driver stack in the image and
+# NO ofedDriver, and unlike OKE not because of host MOFED: NVKE hosts run the
+# inbox mlx5_core from the -nvidia-64k kernel (no DOCA-OFED on the image) and
 # OVN-Kubernetes (the primary CNI, on BlueField-3) is bound to it, so a DOCA
-# driver container unloading mlx5_core takes the node's primary address with
-# it. Driver and NIC firmware are host prerequisites
-# (docs/integrator/nvke-gb300-setup.md), so the nicConfigurationOperator and
-# the Maintenance Operator it needs are not deployed either; this keeps the
-# Network Operator to the rdma-shared-device-plugin DaemonSet.
+# driver container unloading that module takes the node's primary address
+# with it. Observed on Firmus GB300 with recipes that carried an ofedDriver.
 #
-# nvIpam and secondaryNetwork are off: the fabric is shared-HCA (no IPoIB
-# addresses to assign) and NVKE preinstalls multus and the reference CNI
-# plugins on every node. The chart's NFD stays off: the standalone nfd
-# component labels Mellanox nodes pci-15b3.present through
+# Shared HCA, not SR-IOV: the ConnectX-8 firmware on these trays exposes one
+# VF per PF (sriov_totalvfs 1) and NIC firmware is a host prerequisite on NVKE,
+# so no nicConfigurationOperator (and no Maintenance Operator, which only it
+# needs) and no SR-IOV Network Operator. This keeps the Network Operator to
+# nv-ipam and the rdma-shared-device-plugin DaemonSet.
+#
+# nvIpam and secondaryNetwork are off in the chart because the post-install
+# NicClusterPolicy manifest carries nvIpam (deployCR off so that manifest is
+# authoritative). No multus or cniPlugins anywhere: NVKE preinstalls multus
+# and the reference CNI plugins on every node. The chart's NFD stays off: the
+# standalone nfd component labels Mellanox nodes pci-15b3.present through
 # components/nfd/values-nvidia-nics.yaml.
 deployCR: false
 nvIpam:
