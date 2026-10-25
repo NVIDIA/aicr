@@ -21,9 +21,11 @@
 # record has not examined and does not vouch for.
 #
 # The transitions chain rather than overlap. A jump from v1.3.0 straight to
-# v1.6.1 crosses both boundaries, and pkg/upgrade blocks any jump that crosses
-# two records at the lower one, so that operator is told to stop at v1.5.1
-# first whatever the second record's from says.
+# v1.6.1 crosses both manual boundaries, and pkg/upgrade blocks any jump that
+# crosses two records with steps at the lower one, so that operator is told to
+# stop at v1.5.1 first whatever the second record's from says. A safe record
+# composes: crossing one beside a single manual record lends that record's
+# verdict and steps.
 #
 # The first two verdicts are manual rather than safe, and stay there even
 # though a live cluster has exercised each transition. safe must not carry
@@ -200,8 +202,9 @@ transitions:
       new image, no Service (metrics stays off), and ClusterRole additions
       that are all get/list/watch, or get/list for the grove.io kinds, plus
       get on the /openapi/v3 nonResourceURL. The schema-skew check in the
-      1.6.x controller (internal/controller/schema_skew.go) compares only
-      top-level spec fields against the served schema; the Degraded claim
+      1.6.0 and 1.6.1 controllers (internal/controller/schema_skew.go)
+      compares only top-level spec fields against the served schema (1.6.2
+      also compares nested ones); the Degraded claim
       for CRDs left over from 1.3.0 is read from that source, since the run
       below started from the 1.5.1 CRDs. Upstream then ran the
       transition on GKE on 2026-10-21 with AICR's values (evidence in
@@ -284,7 +287,9 @@ transitions:
               kubectl get aibomcontrollerconfig default -o yaml and confirm
               status.conditions reports Ready=True at the object's current
               observedGeneration, and no Degraded=True condition with reason
-              SchemaPredatesController.
+              SchemaPredatesController. If that condition is present, the
+              CRDs were not updated: apply them as in apply-new-crds, then
+              kubectl -n k8s-aibom-system rollout restart deployment/k8s-aibom.
             reason: >-
               SchemaPredatesController never fails readiness, so a stale
               schema leaves the controller Ready and the AICR health check
@@ -341,7 +346,9 @@ transitions:
     summary: >-
       Patch release on the 1.6.1 CRDs and RBAC. The controller now reports
       Degraded=True while a watched kind's conversion webhook is down, such as
-      the Dynamo operator's, and its schema-skew check covers nested fields.
+      the Dynamo operator's, and its schema-skew check covers nested fields,
+      so a cluster that skipped the 1.6.1 CRD step now shows
+      SchemaPredatesController.
     reversible: true
     reversibleNotes: >-
       helm rollback to 1.6.1 was measured on Kind: Ready in 11s, not Degraded,

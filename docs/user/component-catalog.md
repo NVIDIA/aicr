@@ -1485,7 +1485,7 @@ AICR's values, at AICR's request
 The upgrade record for this transition makes the CRD step unconditional on
 `helmfile`, `terraform` and `fleet`, because the v1.6 controller reports `Degraded=True` with reason
 `SchemaPredatesController` against CRDs still left over from v1.3.0. A jump
-from v1.3.0 straight to v1.6.x crosses more than one record, so `aicr upgrade-check`
+from v1.3.0 straight to v1.6.x crosses both `manual` records, so `aicr upgrade-check`
 tells it to stop at v1.5.1 first.
 
 v1.6.2 ships v1.6.1's CRDs unchanged, and its chart rendered with AICR's
@@ -1497,7 +1497,8 @@ record. AICR ran both on Kind (Kubernetes v1.37.0) with AICR's values:
 
 - **From v1.6.1.** `helm upgrade` took 16s; the controller came back Ready and
   not `Degraded`, the fixture AIBOM kept its input and BOM hashes, and the
-  health check passed. `helm rollback` to v1.6.1 took 11s with the same result.
+  health check passed. `helm rollback` to v1.6.1 took 11s; the controller came
+  back Ready and not `Degraded`, and the AIBOM kept its hashes.
 - **From v1.5.1, CRDs applied first.** The upgrade took 17s, Ready and not
   `Degraded`. `helm rollback` to v1.5.1 with the v1.6.2 CRDs left in place
   took 13s and regenerated the AIBOM back to its v1.5.1 input hash.
