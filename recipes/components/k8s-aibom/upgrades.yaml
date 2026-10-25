@@ -13,8 +13,8 @@
 # limitations under the License.
 
 # k8s-aibom entered the registry pinned at v1.3.0 (see "k8s-aibom Runtime
-# Inventory" in docs/user/component-catalog.md), then moved to v1.5.1 and
-# v1.6.1. The lowest from starts at v1.3.0 rather than reaching for a wider
+# Inventory" in docs/user/component-catalog.md), then moved to v1.5.1, v1.6.1
+# and v1.6.2. The lowest from starts at v1.3.0 rather than reaching for a wider
 # floor: charts v1.0.0 through v1.2.0 all declared v1alpha1 as the storage
 # version, so a jump from one of them crosses the v1alpha1-to-v1beta1 storage
 # boundary the v1.2.0-to-v1.3.0 move already made, a different mechanism this
@@ -25,14 +25,21 @@
 # two records at the lower one, so that operator is told to stop at v1.5.1
 # first whatever the second record's from says.
 #
-# Both verdicts are manual rather than safe, and stay there even though a live
-# cluster has exercised each transition. safe must not carry steps, and both
-# transitions have real ones on the deployers that never update CRDs: across
-# 1.5.1, enabling config.verification aborts the release; across 1.6.1, CRDs
-# still left over from 1.3.0 leave the controller Degraded, and
+# The first two verdicts are manual rather than safe, and stay there even
+# though a live cluster has exercised each transition. safe must not carry
+# steps, and both transitions have real ones on the deployers that never update
+# CRDs: across 1.5.1, enabling config.verification aborts the release; across
+# 1.6.1, CRDs still left over from 1.3.0 leave the controller Degraded, and
 # config.discovery.workloadKinds needs the new schema. Evidence does not
 # retire either, because both failures are properties of the cluster's CRDs
 # and configuration, not of how well the upgrade has been tested.
+#
+# v1.6.2 ships v1.6.1's CRDs byte for byte, so it is not a new boundary for
+# them. The 1.6.1 record's ceiling reaches 1.6.2 for that reason: every AICR
+# v1.x release so far pins 1.5.1, so moving off one is a 1.5.1 to 1.6.2 jump,
+# and it has to land on that record's steps rather than stop at a version no
+# release pinned. The safe record after it covers only a cluster
+# already on 1.6.1.
 apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades
 component: k8s-aibom
@@ -180,7 +187,7 @@ transitions:
       - https://github.com/GoogleCloudPlatform/k8s-aibom/blob/main/docs/compatibility.md
       - https://github.com/GoogleCloudPlatform/k8s-aibom/blob/c08e9ac2fda11a339865abdf2a7339a5a34c59e2/docs/evidence/v1.5.1-gke-upgrade-rollback-apiserver.md
   - from: ">=1.5.1 <1.6.1"
-    to: "1.6.1"
+    to: ">=1.6.1 <=1.6.2"
     verdict: manual
     verifiedBy: >-
       CRD schema diff (helm show crds
@@ -203,23 +210,38 @@ transitions:
       SchemaPredatesController condition; the forced CRD apply afterwards
       changed nothing for the running controller; helm rollback to 1.5.1
       with the 1.6.1 CRDs left in place reached Ready in 18s, and the one
-      AIBOM regenerated once in each direction.
+      AIBOM regenerated once in each direction. The ceiling reaches 1.6.2
+      because its CRDs are byte-identical to 1.6.1's (helm show crds diff)
+      and its rendered chart with AICR's values differs only in version
+      labels and the image digest. AICR ran 1.5.1 to 1.6.2 on Kind
+      (Kubernetes v1.37.0) on 2026-10-25 with AICR's values: with the 1.5.1
+      CRDs left in place the upgrade deployed in 16s with the pod Ready and
+      the k8s-aibom health check passing, and AIBOMControllerConfig reported
+      Degraded=True (SchemaPredatesController) naming discovery.workloadKinds,
+      which applying the 1.6.2 CRDs and restarting cleared; with the 1.6.2
+      CRDs applied first it deployed in 17s, Ready and not Degraded, the
+      health check passed, and helm rollback to 1.5.1 with those CRDs left in
+      place reached Ready in 13s with the fixture AIBOM back on its 1.5.1
+      input hash.
     summary: >-
       On helmfile, terraform and fleet, CRDs left over from 1.3.0 make the
-      1.6.1 controller report Degraded=True (SchemaPredatesController), and
-      config.discovery.workloadKinds needs the 1.6.1 schema, which nothing
-      checks. On every deployer, ownership roll-up deletes the AIBOMs of
-      workloads owned by another tracked kind (a LeaderWorkerSet's
+      1.6 controller report Degraded=True (SchemaPredatesController), and
+      config.discovery.workloadKinds needs the 1.6 schema; 1.6.2 also reports
+      that condition on CRDs left over from 1.5.1, which 1.6.1 does not
+      detect. The condition never fails readiness. On every deployer,
+      ownership roll-up deletes the AIBOMs of workloads owned by another
+      tracked kind (a LeaderWorkerSet's
       StatefulSets, a CronJob's Jobs, the Dynamo and NIM chains) and reports
       them in the owner's AIBOM, so anything reading those AIBOMs by name
       must move to the owner's.
     reversible: true
     reversibleNotes: >-
-      helm rollback to 1.5.1 with the 1.6.1 CRDs left in place was measured
-      on GKE: Ready in 18s, and the one Deployment-backed AIBOM regenerated
-      back to its 1.5.1 input hash. Leave the newer CRDs in place; 1.5.1 runs
-      on them. What 1.5.1 does with AIBOMs that 1.6.1 rolled up or created
-      for kinds 1.5.1 does not know was not measured.
+      helm rollback to 1.5.1 with the newer CRDs left in place was measured
+      from 1.6.1 on GKE (Ready in 18s) and from 1.6.2 on Kind (Ready in 13s),
+      and in both the one Deployment-backed AIBOM regenerated back to its
+      1.5.1 input hash. Leave the newer CRDs in place; 1.5.1 runs on them.
+      What 1.5.1 does with AIBOMs that 1.6.x rolled up or created for kinds
+      1.5.1 does not know was not measured.
     affectedResources:
       - group: aibom.k8saibom.dev
         kinds:
@@ -229,11 +251,12 @@ transitions:
         steps:
           - id: apply-new-crds
             description: >-
-              Before upgrading the release, apply the v1.6.1 CRDs directly
-              using the CRD-apply command under "Upgrade, uninstall, and
-              troubleshooting" in docs/user/component-catalog.md, with
+              Before upgrading the release, apply the target version's CRDs
+              directly using the CRD-apply command under "Upgrade, uninstall,
+              and troubleshooting" in docs/user/component-catalog.md, with
               CHART=oci://ghcr.io/googlecloudplatform/charts/k8s-aibom,
-              VERSION=1.6.1 and MANAGER=helm under helmfile,
+              VERSION set to the version you are upgrading to (1.6.1 and
+              1.6.2 ship identical CRDs), and MANAGER=helm under helmfile,
               MANAGER=terraform-provider-helm under terraform, and under
               fleet the manager that section's managed-fields check reports
               for the installed CRDs.
@@ -241,12 +264,12 @@ transitions:
               helmfile, terraform and fleet never update ownsCRDs CRDs for
               you. Unlike the 1.5.1 transition this is not conditional on
               config.verification: a cluster that took that transition with
-              default values may still serve the 1.3.0 schema, and the 1.6.1
+              default values may still serve the 1.3.0 schema, and the 1.6
               controller reports Degraded against it until the CRDs move.
           - id: verify-crd-update
             description: >-
               After the manual apply, confirm the new schema landed by
-              looking for the field the v1.6.1 CRDs add: kubectl get crd
+              looking for the field the v1.6 CRDs add: kubectl get crd
               aibomcontrollerconfigs.aibom.k8saibom.dev -o
               jsonpath='{.spec.versions[?(@.name=="v1beta1")].schema.openAPIV3Schema.properties.spec.properties.discovery.properties.workloadKinds.type}'
               and expect "array". An empty result means an older schema is
@@ -297,7 +320,33 @@ transitions:
     references:
       - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#k8s-aibom-runtime-inventory
       - https://github.com/GoogleCloudPlatform/k8s-aibom/releases/tag/v1.6.1
-      - https://github.com/GoogleCloudPlatform/k8s-aibom/blob/v1.6.1/CHANGELOG.md
-      - https://github.com/GoogleCloudPlatform/k8s-aibom/blob/v1.6.1/docs/migration-v1beta1.md
-      - https://github.com/GoogleCloudPlatform/k8s-aibom/blob/v1.6.1/charts/k8s-aibom-crds/README.md
+      - https://github.com/GoogleCloudPlatform/k8s-aibom/releases/tag/v1.6.2
+      - https://github.com/GoogleCloudPlatform/k8s-aibom/blob/v1.6.2/CHANGELOG.md
+      - https://github.com/GoogleCloudPlatform/k8s-aibom/blob/v1.6.2/docs/migration-v1beta1.md
+      - https://github.com/GoogleCloudPlatform/k8s-aibom/blob/v1.6.2/charts/k8s-aibom-crds/README.md
       - https://github.com/GoogleCloudPlatform/k8s-aibom/blob/d2b5b683d58ee9e71cc95bd4d7272676c4b54d11/docs/evidence/v1.6.1-gke-adr019-dynamo.md
+  - from: ">=1.6.1 <1.6.2"
+    to: "=1.6.2"
+    verdict: safe
+    verifiedBy: >-
+      helm show crds oci://ghcr.io/googlecloudplatform/charts/k8s-aibom
+      --version 1.6.1 vs --version 1.6.2: identical. Rendered chart diff with
+      AICR's values: version labels and the image digest only, no RBAC
+      change. Upstream v1.6.2 release note: the CRDs, RBAC and document shape
+      are those of 1.6.0. AICR ran it on Kind (Kubernetes v1.37.0) on
+      2026-10-25 with AICR's values: helm upgrade from 1.6.1 took 16s, the
+      controller came back Ready and not Degraded, the fixture AIBOM kept its
+      input and BOM hashes, and the k8s-aibom health check passed before and
+      after.
+    summary: >-
+      Patch release on the 1.6.1 CRDs and RBAC. The controller now reports
+      Degraded=True while a watched kind's conversion webhook is down, such as
+      the Dynamo operator's, and its schema-skew check covers nested fields.
+    reversible: true
+    reversibleNotes: >-
+      helm rollback to 1.6.1 was measured on Kind: Ready in 11s, not Degraded,
+      and the fixture AIBOM kept its input and BOM hashes. The CRDs do not
+      change, so there is nothing to restore.
+    references:
+      - https://github.com/GoogleCloudPlatform/k8s-aibom/releases/tag/v1.6.2
+      - https://github.com/GoogleCloudPlatform/k8s-aibom/blob/v1.6.2/CHANGELOG.md

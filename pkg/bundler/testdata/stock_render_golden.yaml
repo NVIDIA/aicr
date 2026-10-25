@@ -3240,8 +3240,8 @@ h100-gke-cos-inference-dynamo:
   018-k8s-aibom/apply-crds.sh: 21de72cf9bae5f4dd1ca67621d19ac078bc16d3ad60bf277180ae3a099000735
   018-k8s-aibom/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-k8s-aibom/install.sh: 5bb4f714bfa465141feee2ea7f8b42f1de5c5c68564d76d2edb5f4c3286eaabc
-  018-k8s-aibom/upstream.env: 1f6b42a8dc010c8dc402e6eb6bfd2bbb6192d6fdfb8be05066c7ecd502307b95
-  018-k8s-aibom/values.yaml: 8772e53518265bdbfe78718110a46fdf7b5b7f56d585d0b6af4d16c278123cc2
+  018-k8s-aibom/upstream.env: 32fbd362adb79bb4c61162304a6302e4ed4501b02475b33f92bffc35325eadea
+  018-k8s-aibom/values.yaml: 8f9e016df3d11c04f621550dea080916320d2fe845749929b01c70801c04f782
   019-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   019-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
@@ -3255,12 +3255,12 @@ h100-gke-cos-inference-dynamo:
   021-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   021-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   021-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: dc03f24e4da764c666885800598dbe639a737ef5275a185421092aff0c00f3eb
-  UPGRADING.md: 77bb62a0b6671e00cb7b64fa970572ef8e3a758d762cc8f8fb54eadfb5a32069
-  bundle-info.yaml: 6636b4ccfff497ebe0808d277be40135768335590da7b6146c4c3896b42d4ab4
-  checksums.txt: de6351980e9805e41fd43bff31488038bfc7cf2a9a7b694fa8913e2d69522fec
+  README.md: 4117a076afe9904f4e66b120a6f4da0d0f36aeeba32b8606b31cfd586bc09f1f
+  UPGRADING.md: c3ad3d3f95b3754dc8d85cde3c35a4a2717bd643f8d3cb7add47f6d327b7de95
+  bundle-info.yaml: 45756dfd84044289cb6004310022e7826c57ac3ba0708c301b6aa07c7d669909
+  checksums.txt: 872f4ef209c3a7d72e2f5a31896120a6d305257b8fec5aa13732085573fcb7b5
   deploy.sh: 34d9d6c33e26fe690cb388ba01ea383b3444fa18c63e525c83f143f5c41f613e
-  recipe.yaml: a9f5679fd676a5ee6226beda8827c430592ed4ffeb77b5072a8c5a6112658841
+  recipe.yaml: c34c9943385cb4f1ca0daf3244a27474590d42536f4ef90dbee3cb9dd09a9336
 h100-gke-cos-training-kubeflow:
   001-gcp-driver-installer/Chart.yaml: b0476226ebbc9a7738c4e5c2828ce5a73dbd371f3fa7cf1139c5fe9b2e825c02
   001-gcp-driver-installer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26

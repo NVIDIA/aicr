@@ -1825,7 +1825,7 @@ func TestBundleGolden_OwnsCRDs(t *testing.T) {
 	outDir := t.TempDir()
 	g := &Generator{
 		RecipeResult: singleComponentRecipe(
-			"k8s-aibom", "k8s-aibom-system", "k8s-aibom", "1.6.1",
+			"k8s-aibom", "k8s-aibom-system", "k8s-aibom", "1.6.2",
 			"oci://ghcr.io/googlecloudplatform/charts"),
 		ComponentValues: map[string]map[string]any{
 			"k8s-aibom": {"replicaCount": 1},

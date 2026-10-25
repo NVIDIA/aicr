@@ -49,7 +49,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
 | grove | helm | grove-charts | v0.1.0-alpha.13 | 1 |
-| k8s-aibom | helm | k8s-aibom | 1.6.1 | 1 |
+| k8s-aibom | helm | k8s-aibom | 1.6.2 | 1 |
 | k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
 | k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.0 | 1 |
@@ -204,7 +204,7 @@ _No images extracted._
 
 ### k8s-aibom
 
-- `ghcr.io/googlecloudplatform/k8s-aibom@sha256:eca8ce634fda750b7d8f82ecf1ae4e350ea59c19a9ead07022f05ab5531eec0d`
+- `ghcr.io/googlecloudplatform/k8s-aibom@sha256:5353a40010c093d31e7c8b7dc099ed54d19bc79b76f4ba71963fb44c5db7a2f3`
 
 ### k8s-ephemeral-storage-metrics
 

@@ -1030,7 +1030,7 @@ components:
       defaultRepository: oci://ghcr.io/googlecloudplatform/charts
       defaultChart: k8s-aibom
       # renovate: datasource=docker depName=ghcr.io/googlecloudplatform/charts/k8s-aibom
-      defaultVersion: "1.6.1"
+      defaultVersion: "1.6.2"
       defaultNamespace: k8s-aibom-system
     nodeScheduling:
       system:
