@@ -344,11 +344,7 @@ transitions:
       input and BOM hashes, and the k8s-aibom health check passed before and
       after.
     summary: >-
-      Patch release on the 1.6.1 CRDs and RBAC. The controller now reports
-      Degraded=True while a watched kind's conversion webhook is down, such as
-      the Dynamo operator's, and its schema-skew check covers nested fields,
-      so a cluster that skipped the 1.6.1 CRD step now shows
-      SchemaPredatesController.
+      Patch release on the 1.6.1 CRDs and RBAC.
     reversible: true
     reversibleNotes: >-
       helm rollback to 1.6.1 was measured on Kind: Ready in 11s, not Degraded,
