@@ -687,6 +687,7 @@ paths:
         - $ref: "#/components/parameters/BundleNodes"
         - $ref: "#/components/parameters/VendorCharts"
         - $ref: "#/components/parameters/Serial"
+        - $ref: "#/components/parameters/Split"
         - $ref: "#/components/parameters/AppName"
         - $ref: "#/components/parameters/Attest"
       requestBody:
@@ -1229,6 +1230,19 @@ components:
       in: query
       required: false
       description: Sequence components strictly in deployment order.
+      schema:
+        type: boolean
+        default: false
+    Split:
+      name: split
+      in: query
+      required: false
+      description: >-
+        Return a bundle set partitioned by registry class (ADR-018): one
+        directory per class (core, then ops) under a set root holding
+        recipe.yaml, split.yaml, bundle-info.yaml, checksums.txt and, with
+        attest, the attestation. Helm deployer only; cannot be combined
+        with bundlers.
       schema:
         type: boolean
         default: false

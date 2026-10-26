@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/NVIDIA/aicr/pkg/bundler"
@@ -268,9 +269,17 @@ func (h *bundleHandler) handleBundles(w http.ResponseWriter, r *http.Request) {
 	// boundary explicitly. The outer ServerHandlerTimeout middleware is
 	// now sized ≥ BundleHandlerTimeout so this 60s deadline runs to
 	// completion instead of being silently clamped.
+	// A split set is published create-only into an absent path, so it is
+	// rendered as a child of the private temp directory; an ordinary bundle
+	// keeps writing into the temp directory itself.
+	outputDir := tempDir
+	if bundleConfig.Split() {
+		outputDir = filepath.Join(tempDir, "bundle")
+	}
+
 	bundleOpts := aicr.BundleOptions{
 		Config:    bundleConfig,
-		OutputDir: tempDir,
+		OutputDir: outputDir,
 		Timeout:   defaults.BundleHandlerTimeout,
 	}
 
@@ -331,7 +340,7 @@ func (h *bundleHandler) handleBundles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.writeZipResponse(ctx, w, r, tempDir, output)
+	h.writeZipResponse(ctx, w, r, outputDir, output)
 }
 
 // vendorChartsRejected fails-fast on vendor-charts=true when the server has

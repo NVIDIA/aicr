@@ -1162,12 +1162,33 @@ opts.Nodes = 32 // caller wins, visibly
 fully built `*BundleConfig` from something the flat fields cannot express (a
 CLI-flag-only setting such as `Version` or `Serial`, or a config object you
 mutate in place), set it and it wins outright over the 18 bundler-config flat
-fields (`Deployer` through `AppName`) — `BundleOptions()` itself never
-populates it. `Config` does NOT override `Attester`, `OIDCResolve`,
+fields (`Deployer` through `AppName`) and over `Split`, which follows them
+and is caller-set only: no config file setting derives it. `BundleOptions()`
+leaves `Config` and `Split` unset. `Config` does NOT override `Attester`, `OIDCResolve`,
 `BinaryAttestation`, `OutputDir` or `Timeout`: those five stay
 caller-supplied regardless of `Config`, which is why the REST `/v1/bundle`
 handler can set `Config` and `OutputDir`/`Timeout` in the same struct
 literal and have all three take effect.
+
+To generate a class-partitioned bundle set ([ADR-018](https://github.com/NVIDIA/aicr/blob/main/docs/design/018-class-partitioned-bundles.md)),
+set `Split` and give `OutputDir` a path that does not exist yet; the set is
+published there atomically, and the helm deployer is the only one supported:
+
+```go
+opts, err := cfg.BundleOptions()
+if err != nil {
+    return err
+}
+opts.Split = true
+opts.OutputDir = filepath.Join(workDir, "bundles") // must not exist yet
+out, err := client.MakeBundle(ctx, rec, opts)
+```
+
+`out.OutputDir` is the set root with `recipe.yaml`, `split.yaml`,
+`bundle-info.yaml` and `checksums.txt`; `out.Deployment.Steps` holds three
+commands per class in `classOrder` (`cd <set>/<class>`, `chmod +x deploy.sh`,
+`./deploy.sh`). See [Split a bundle by class](../user/bundling.md#split-a-bundle-by-class)
+for the layout, ordering contract and rejections.
 
 The six caller-side fields have their own type, `BundleInputOptions()`, not
 because they are declined but because `MakeBundle` never reads them — see the
