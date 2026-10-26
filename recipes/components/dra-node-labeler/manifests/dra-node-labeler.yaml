@@ -145,7 +145,6 @@ spec:
             - |
               LABEL_KEY={{ $vals.labelKey | quote }}
               LABEL_VALUE={{ $vals.labelValue | quote }}
-              READY=/var/run/dra-node-labeler/labeled
 
               # Retry in place instead of exiting: a container restart would be the
               # only retry and the health check treats restarts as failure. The pod
@@ -178,6 +177,9 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            # The marker the readiness probe tests for, on the state emptyDir.
+            - name: READY
+              value: /var/run/dra-node-labeler/labeled
           # Ready means "this node carries the key", not "the shell started": kubelet
           # marks a probe-less container Ready immediately, which let the health
           # check pass while kubectl was still blocked.
