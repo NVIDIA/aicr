@@ -68,19 +68,30 @@ func TestDRANodeLabelerScript_ReadyOnlyOnceLabeled(t *testing.T) {
 	if _, err = client.RbacV1().ClusterRoles().Create(ctx, objs.clusterRole, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("create ClusterRole: %v", err)
 	}
+	getOnly := objs.clusterRole.DeepCopy()
+	getOnly.Name += "-get-only"
+	for i := range getOnly.Rules {
+		getOnly.Rules[i].Verbs = []string{"get"}
+	}
+	if _, err = client.RbacV1().ClusterRoles().Create(ctx, getOnly, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create get-only ClusterRole: %v", err)
+	}
 
 	tests := []struct {
 		name   string
 		labels map[string]string
-		// bindAfterDenial withholds the binding until the script has been
-		// denied once, so the marker can be checked while node API access is
-		// denied.
-		bindAfterDenial bool
-		want            string
+		// deniedVerb, when set, withholds the rendered role's binding until
+		// the API server has refused that verb on nodes, so the marker can be
+		// checked while it is refused. "get" binds nothing. "patch" binds a
+		// get-only role, so the script reads the node and is refused the
+		// label write.
+		deniedVerb string
+		want       string
 	}{
 		{name: "labels a node without the key", want: label.Value},
 		{name: "keeps another writer's value", labels: map[string]string{label.Key: "false"}, want: "false"},
-		{name: "stays unready while node API access is denied", bindAfterDenial: true, want: label.Value},
+		{name: "stays unready while node API access is denied", deniedVerb: "get", want: label.Value},
+		{name: "stays unready while the label write is denied", deniedVerb: "patch", want: label.Value},
 	}
 	for i, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -102,23 +113,33 @@ func TestDRANodeLabelerScript_ReadyOnlyOnceLabeled(t *testing.T) {
 					binding.Subjects[j].Namespace = namespace
 				}
 			}
-			bind := func() {
+			bind := func(b *rbacv1.ClusterRoleBinding) {
 				t.Helper()
-				if _, err := client.RbacV1().ClusterRoleBindings().Create(ctx, binding, metav1.CreateOptions{}); err != nil {
-					t.Fatalf("create ClusterRoleBinding: %v", err)
+				if _, err := client.RbacV1().ClusterRoleBindings().Create(ctx, b, metav1.CreateOptions{}); err != nil {
+					t.Fatalf("create ClusterRoleBinding %s: %v", b.Name, err)
 				}
 			}
-			if !tt.bindAfterDenial {
-				bind()
+			switch tt.deniedVerb {
+			case "":
+				bind(binding)
+			case "patch":
+				readOnly := binding.DeepCopy()
+				readOnly.Name += "-get-only"
+				readOnly.RoleRef.Name = getOnly.Name
+				bind(readOnly)
 			}
 
 			run := startDRALabeler(t, env, cfg, objs.daemonSet, namespace, nodeName)
-			if tt.bindAfterDenial {
-				run.waitFor(t, "a denied attempt", func() bool { return strings.Contains(run.output(), "retrying") })
+			if tt.deniedVerb != "" {
+				denial := fmt.Sprintf("cannot %s resource \"nodes\"", tt.deniedVerb)
+				run.waitFor(t, "a denied "+tt.deniedVerb, func() bool {
+					out := run.output()
+					return strings.Contains(out, denial) && (strings.Contains(out, "retrying") || run.markerExists())
+				})
 				if run.markerExists() {
-					t.Fatalf("readiness marker written while node API access was denied; output:\n%s", run.output())
+					t.Fatalf("readiness marker written while %s on nodes was denied; output:\n%s", tt.deniedVerb, run.output())
 				}
-				bind()
+				bind(binding)
 			}
 			run.waitFor(t, "the readiness marker", run.markerExists)
 
