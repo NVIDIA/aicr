@@ -139,7 +139,7 @@ logcollector:
   enabled: false
   image:
     repository: docker.io/percona/fluentbit
-    tag: "5.1.2-1@sha256:4926d7d003ca09c826a3dea5d9ccd0ba158296880471bcec82ef38f95617b913"
+    tag: "5.1.4-1@sha256:037b5ea087dffd844f619c61f4d211a32bec73dae0971143795579db1a3a6992"
 pmm:
   enabled: false
   image:
