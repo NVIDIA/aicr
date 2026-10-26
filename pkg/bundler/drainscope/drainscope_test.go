@@ -15,10 +15,12 @@
 package drainscope
 
 import (
+	"context"
 	"reflect"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -121,7 +123,7 @@ func TestApply(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			before := component.DeepCopyMap(tt.values)
-			err := Apply(tt.values, []string{"cert-manager"})
+			err := Apply(t.Context(), tt.values, []string{"cert-manager"})
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Apply error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -203,7 +205,7 @@ func TestValidSystemNamespacesMessages(t *testing.T) {
 		{"^.{1,63}$|^.*a.{12}$", "too complex to validate"},
 	}
 	for _, tt := range tests {
-		_, err := ValidSystemNamespaces(tt.raw)
+		_, err := ValidSystemNamespaces(t.Context(), tt.raw)
 		if err == nil || !strings.Contains(err.Error(), tt.want) {
 			t.Errorf("ValidSystemNamespaces(%#v) = %v, want an error containing %q", tt.raw, err, tt.want)
 		}
@@ -226,7 +228,7 @@ func TestModes(t *testing.T) {
 func TestValidSystemNamespacesAcceptsNarrowPatterns(t *testing.T) {
 	for _, p := range []string{"^(team-infra)$", "^team-.*$", "infra", "^q0-drain$", "drain", "probe", "-", "[0-9]",
 		"^(q|z9)$", "^[a-z]", "[a-z]", "^.{2,}$", "^[a-z0-9]{1,62}$", "\\B"} {
-		if _, err := ValidSystemNamespaces(p); err != nil {
+		if _, err := ValidSystemNamespaces(t.Context(), p); err != nil {
 			t.Errorf("ValidSystemNamespaces(%q) = %v, want accepted", p, err)
 		}
 	}
@@ -237,11 +239,11 @@ func TestApplyIsIdempotent(t *testing.T) {
 		"global":       map[string]any{"nodeDrainer": map[string]any{"enabled": true}},
 		"node-drainer": map[string]any{"systemNamespaces": "^(team-infra)$"},
 	}
-	if err := Apply(values, []string{"cert-manager"}); err != nil {
+	if err := Apply(t.Context(), values, []string{"cert-manager"}); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	once := values[NodeDrainerKey].(map[string]any)["systemNamespaces"]
-	if err := Apply(values, []string{"cert-manager"}); err != nil {
+	if err := Apply(t.Context(), values, []string{"cert-manager"}); err != nil {
 		t.Fatalf("Apply again: %v", err)
 	}
 	if twice := values[NodeDrainerKey].(map[string]any)["systemNamespaces"]; twice != once {
@@ -256,7 +258,7 @@ func TestApplyIsIdempotent(t *testing.T) {
 func TestMatchesEveryNamespace(t *testing.T) {
 	for _, p := range []string{".*", "^.*$", "", "(?:)", "^(team-infra)$|", "a*", ".", "^.", ".$", "[a-z0-9]",
 		"^[a-z0-9-]+$", "(?i)[A-Z0-9]", "^.{1,63}$", "\\b", "^", "$", "\\w", "^(?:[a-m]|[n-z]|[0-9])"} {
-		if universal, decided := matchesEveryNamespace(p); !universal || !decided {
+		if universal, decided, _ := matchesEveryNamespace(t.Context(), p); !universal || !decided {
 			t.Errorf("matchesEveryNamespace(%q) = %v, %v, want true, true", p, universal, decided)
 		}
 	}
@@ -282,7 +284,7 @@ func TestMatchesEveryNamespaceAgreesWithRegexp(t *testing.T) {
 	gen("")
 	for _, p := range []string{".*", "^(q|z9)$", "drain", "[a-z]", "^[a-z0-9]", "\\b", "\\B", "^.{2,}$", "[^-]",
 		"[a-z0-9]$|^-", "(?i)Q|[^q]", "^[0-4]|^[5-9]|^[a-z]"} {
-		if universal, decided := matchesEveryNamespace(p); !universal || !decided {
+		if universal, decided, _ := matchesEveryNamespace(t.Context(), p); !universal || !decided {
 			continue
 		}
 		re := regexp.MustCompile(p)
@@ -293,4 +295,35 @@ func TestMatchesEveryNamespaceAgreesWithRegexp(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestValidSystemNamespacesBoundsWork covers patterns whose search would
+// otherwise run for tens of seconds: they must fail closed, and fast.
+func TestValidSystemNamespacesBoundsWork(t *testing.T) {
+	for _, p := range []string{
+		"^.{1,63}$|^.*a.{12}$|" + strings.Repeat("a?", 300) + "x",
+		strings.Repeat("(?:abc|def)", 3000),
+	} {
+		start := time.Now()
+		_, err := ValidSystemNamespaces(t.Context(), p)
+		if err == nil || !strings.Contains(err.Error(), "too complex to validate") {
+			t.Errorf("ValidSystemNamespaces(%.40q...) = %v, want too complex to validate", p, err)
+		}
+		if elapsed := time.Since(start); elapsed > 10*time.Second {
+			t.Errorf("ValidSystemNamespaces(%.40q...) took %v", p, elapsed)
+		}
+	}
+}
+
+func TestValidSystemNamespacesHonorsContext(t *testing.T) {
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := ValidSystemNamespaces(canceled, ".*")
+	errorstest.WantReportedCode(t, err, errors.ErrCodeCanceled)
+
+	expired, cancelExpired := context.WithTimeout(t.Context(), time.Millisecond)
+	defer cancelExpired()
+	<-expired.Done()
+	_, err = ValidSystemNamespaces(expired, "^.{1,63}$|^.*a.{12}$")
+	errorstest.WantReportedCode(t, err, errors.ErrCodeTimeout)
 }

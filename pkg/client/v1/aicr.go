@@ -1946,7 +1946,7 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 		return nil, err
 	}
 	if sentinel, ok := helmValues[drainscope.ComponentName]; ok {
-		if err := bundler.ApplyNVSentinelDrainScope(sentinel, r.internal); err != nil {
+		if err := bundler.ApplyNVSentinelDrainScope(ctx, sentinel, r.internal); err != nil {
 			return nil, err
 		}
 	}

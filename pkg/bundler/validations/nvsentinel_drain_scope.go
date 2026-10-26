@@ -131,14 +131,14 @@ func CheckNVSentinelDrainScopeCoherent(ctx context.Context, componentName string
 		return nil, []error{aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal,
 			"read the emitted NVSentinel values")}
 	}
-	errs := drainScopeCoverageViolations(componentName, recipeResult, emitted)
+	errs := drainScopeCoverageViolations(ctx, componentName, recipeResult, emitted)
 	errs = append(errs, drainEntryViolations(componentName, emitted)...)
-	return nil, append(errs, drainScopeViolations(componentName, values)...)
+	return nil, append(errs, drainScopeViolations(ctx, componentName, values)...)
 }
 
 // drainScopeCoverageViolations checks the emitted systemNamespaces protects
 // every namespace the recipe declares.
-func drainScopeCoverageViolations(componentName string, recipeResult *recipe.RecipeResult, emitted map[string]any) []error {
+func drainScopeCoverageViolations(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, emitted map[string]any) []error {
 	raw, ok := component.GetValueByPath(emitted, drainscope.SystemNamespacesPath)
 	pattern, isString := raw.(string)
 	if !ok || !isString || pattern == "" {
@@ -149,7 +149,10 @@ func drainScopeCoverageViolations(componentName string, recipeResult *recipe.Rec
 	}
 	// The operator's pattern was checked alone; merged with the generated one
 	// the two can still match every namespace.
-	if _, err := drainscope.ValidSystemNamespaces(pattern); err != nil {
+	if _, err := drainscope.ValidSystemNamespaces(ctx, pattern); err != nil {
+		if ctx.Err() != nil {
+			return []error{err}
+		}
 		return []error{aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("component %q: emitted %s, the generated pattern with any operator pattern merged in",
 				componentName, drainscope.SystemNamespacesPath), err)}
@@ -177,7 +180,7 @@ func drainScopeCoverageViolations(componentName string, recipeResult *recipe.Rec
 			"would evict them", componentName, drainscope.SystemNamespacesPath, pattern, missing))}
 }
 
-func drainScopeViolations(componentName string, values map[string]any) []error {
+func drainScopeViolations(ctx context.Context, componentName string, values map[string]any) []error {
 	var errs []error
 	fail := drainFailer(componentName, &errs)
 
@@ -209,7 +212,9 @@ func drainScopeViolations(componentName string, values map[string]any) []error {
 	errs = append(errs, partialDrainViolations(componentName, values)...)
 
 	if raw, ok := component.GetValueByPath(values, drainscope.SystemNamespacesPath); ok {
-		if _, err := drainscope.ValidSystemNamespaces(raw); err != nil {
+		if _, err := drainscope.ValidSystemNamespaces(ctx, raw); err != nil && ctx.Err() != nil {
+			errs = append(errs, err)
+		} else if err != nil {
 			errs = append(errs, aicrerrors.WrapWithContext(aicrerrors.ErrCodeInvalidRequest,
 				fmt.Sprintf("component %q: invalid %s", componentName, drainscope.SystemNamespacesPath),
 				err, map[string]any{logKeyComponent: componentName}))

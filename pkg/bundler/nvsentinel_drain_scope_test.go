@@ -80,7 +80,7 @@ func TestNVSentinelDrainScope_ProtectsEveryLeafNamespace(t *testing.T) {
 				t.Fatalf("GetValuesForComponent: %v", err)
 			}
 			values["global"] = drainerOn()
-			if applyErr := ApplyNVSentinelDrainScope(values, leaf.Result); applyErr != nil {
+			if applyErr := ApplyNVSentinelDrainScope(ctx, values, leaf.Result); applyErr != nil {
 				t.Fatalf("ApplyNVSentinelDrainScope: %v", applyErr)
 			}
 			re := renderedSystemNamespaces(t, values)
@@ -133,7 +133,7 @@ func TestNVSentinelDrainScope_ProtectsEveryRegistryNamespace(t *testing.T) {
 		refs = append(refs, recipe.ComponentRef{Name: c.Name})
 	}
 	values := map[string]any{"global": drainerOn()}
-	if err := ApplyNVSentinelDrainScope(values, &recipe.RecipeResult{ComponentRefs: refs}); err != nil {
+	if err := ApplyNVSentinelDrainScope(t.Context(), values, &recipe.RecipeResult{ComponentRefs: refs}); err != nil {
 		t.Fatalf("ApplyNVSentinelDrainScope: %v", err)
 	}
 	re := renderedSystemNamespaces(t, values)

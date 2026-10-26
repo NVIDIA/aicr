@@ -241,7 +241,7 @@ func TestNVSentinelRemediationChartRender(t *testing.T) {
 		t.Run(step.mixin, func(t *testing.T) {
 			values := nvsentinelRenderedValues(t, store, step.mixin)
 			// The bundler adds the drain scope after recipe values resolve.
-			if err := drainscope.Apply(values, drainScopeRenderNamespaces); err != nil {
+			if err := drainscope.Apply(t.Context(), values, drainScopeRenderNamespaces); err != nil {
 				t.Fatalf("drainscope.Apply: %v", err)
 			}
 			out := renderNVSentinel(t, values)

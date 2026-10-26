@@ -25,6 +25,7 @@
 package drainscope
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"regexp/syntax"
@@ -149,7 +150,7 @@ func RecipeNamespaces(recipeResult *recipe.RecipeResult) ([]string, error) {
 // every namespace in DefaultMode unless the recipe sets it or
 // podDrainPolicies, or a custom drain owns every node. It does nothing when
 // node-drainer does not render. A null userNamespaces counts as unset.
-func Apply(values map[string]any, namespaces []string) error {
+func Apply(ctx context.Context, values map[string]any, namespaces []string) error {
 	if !NodeDrainerRenders(values) {
 		return nil
 	}
@@ -160,7 +161,7 @@ func Apply(values map[string]any, namespaces []string) error {
 
 	pattern := SystemNamespacesPattern(namespaces)
 	if raw, present := drainer["systemNamespaces"]; present {
-		existing, validErr := ValidSystemNamespaces(raw)
+		existing, validErr := ValidSystemNamespaces(ctx, raw)
 		if validErr != nil {
 			return validErr
 		}
@@ -188,7 +189,7 @@ func Apply(values map[string]any, namespaces []string) error {
 
 // ValidSystemNamespaces returns raw as a pattern node-drainer can use, or why
 // it cannot.
-func ValidSystemNamespaces(raw any) (string, error) {
+func ValidSystemNamespaces(ctx context.Context, raw any) (string, error) {
 	s, ok := raw.(string)
 	if !ok {
 		return "", errors.New(errors.ErrCodeInvalidRequest,
@@ -205,7 +206,10 @@ func ValidSystemNamespaces(raw any) (string, error) {
 			fmt.Sprintf("%s %q is not a valid regular expression, so node-drainer would fail to start",
 				SystemNamespacesPath, s), err)
 	}
-	universal, decided := matchesEveryNamespace(s)
+	universal, decided, err := matchesEveryNamespace(ctx, s)
+	if err != nil {
+		return "", err
+	}
 	if !decided {
 		return "", errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("%s %q is too complex to validate: AICR cannot show that it leaves any namespace to "+
@@ -221,28 +225,42 @@ func ValidSystemNamespaces(raw any) (string, error) {
 }
 
 // Namespace names are DNS-1123 labels: at most 63 of a-z, 0-9 and '-',
-// starting and ending with a letter or digit.
+// starting and ending with a letter or digit. maxSearchWork caps the
+// instructions the search examines in total and maxProgramInsts the work of
+// any one state, so its cost has a fixed bound whatever the pattern.
 const (
 	maxNamespaceLen = 63
 	namespaceRunes  = "abcdefghijklmnopqrstuvwxyz0123456789-"
 	maxSearchStates = 1 << 16
+	maxSearchWork   = 1 << 22
+	maxProgramInsts = 1 << 14
 )
+
+// namespaceSearch walks a compiled pattern's program as node-drainer's
+// unanchored regexp.MatchString would run it, counting the instructions it
+// examines against maxSearchWork.
+type namespaceSearch struct {
+	prog *syntax.Prog
+	work int
+}
 
 // matchesEveryNamespace reports whether node-drainer's unanchored
 // regexp.MatchString with pattern would match every valid namespace name.
 // It walks pattern's program and the namespace syntax together, looking for
 // a name no match is found in. decided is false when the search outgrows
-// maxSearchStates, or pattern does not compile, before it can tell.
-func matchesEveryNamespace(pattern string) (universal, decided bool) {
+// maxSearchStates, maxSearchWork or maxProgramInsts, or pattern does not
+// compile, before it can tell; err is set only when ctx ends first.
+func matchesEveryNamespace(ctx context.Context, pattern string) (universal, decided bool, err error) {
 	parsed, err := syntax.Parse(pattern, syntax.Perl)
 	if err != nil {
-		return false, false
+		return false, false, nil
 	}
 	prog, err := syntax.Compile(parsed.Simplify())
-	if err != nil || prog.Start < 0 || prog.Start >= len(prog.Inst) {
-		return false, false
+	if err != nil || prog.Start < 0 || prog.Start >= len(prog.Inst) || len(prog.Inst) > maxProgramInsts {
+		return false, false, nil
 	}
 	start := uint32(prog.Start) //nolint:gosec // bounded by len(prog.Inst) above
+	search := &namespaceSearch{prog: prog}
 
 	type state struct {
 		pcs    []uint32
@@ -263,8 +281,12 @@ func matchesEveryNamespace(pattern string) (universal, decided bool) {
 	queue := []state{{prev: -1}}
 	seen := map[string]bool{key(queue[0]): true}
 	for len(queue) > 0 {
-		if len(seen) > maxSearchStates {
-			return false, false
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return false, false, errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout,
+				"validating "+SystemNamespacesPath+" did not finish")
+		}
+		if len(seen) > maxSearchStates || search.work > maxSearchWork {
+			return false, false, nil
 		}
 		cur := queue[0]
 		queue = queue[1:]
@@ -272,8 +294,8 @@ func matchesEveryNamespace(pattern string) (universal, decided bool) {
 		threads := append(slices.Clone(cur.pcs), start)
 
 		if cur.length > 0 && !cur.hyphen {
-			if _, matched := closure(prog, threads, cur.prev, -1); !matched {
-				return false, true
+			if _, matched := search.closure(threads, cur.prev, -1); !matched {
+				return false, true, nil
 			}
 		}
 		if cur.length == maxNamespaceLen {
@@ -283,24 +305,24 @@ func matchesEveryNamespace(pattern string) (universal, decided bool) {
 			if r == '-' && cur.length == 0 {
 				continue
 			}
-			runes, matched := closure(prog, threads, cur.prev, r)
+			runes, matched := search.closure(threads, cur.prev, r)
 			if matched {
 				continue
 			}
-			next := state{pcs: step(prog, runes, r), prev: wordClass(r), length: cur.length + 1, hyphen: r == '-'}
+			next := state{pcs: search.step(runes, r), prev: wordClass(r), length: cur.length + 1, hyphen: r == '-'}
 			if k := key(next); !seen[k] {
 				seen[k] = true
 				queue = append(queue, next)
 			}
 		}
 	}
-	return true, true
+	return true, true, nil
 }
 
 // closure follows the empty-width instructions reachable from pcs at the
 // position between prev and next (-1 for the start or end of the input),
 // returning the rune instructions it reaches and whether it reaches a match.
-func closure(prog *syntax.Prog, pcs []uint32, prev, next rune) ([]uint32, bool) {
+func (s *namespaceSearch) closure(pcs []uint32, prev, next rune) ([]uint32, bool) {
 	context := syntax.EmptyOpContext(prev, next)
 	visited := map[uint32]bool{}
 	var runes []uint32
@@ -313,7 +335,8 @@ func closure(prog *syntax.Prog, pcs []uint32, prev, next rune) ([]uint32, bool) 
 			continue
 		}
 		visited[pc] = true
-		inst := &prog.Inst[pc]
+		s.work++
+		inst := &s.prog.Inst[pc]
 		switch inst.Op {
 		case syntax.InstAlt, syntax.InstAltMatch:
 			stack = append(stack, inst.Out, inst.Arg)
@@ -335,10 +358,11 @@ func closure(prog *syntax.Prog, pcs []uint32, prev, next rune) ([]uint32, bool) 
 
 // step returns the sorted, distinct successors of the rune instructions in
 // pcs that consume r.
-func step(prog *syntax.Prog, pcs []uint32, r rune) []uint32 {
+func (s *namespaceSearch) step(pcs []uint32, r rune) []uint32 {
 	var out []uint32
 	for _, pc := range pcs {
-		inst := &prog.Inst[pc]
+		s.work++
+		inst := &s.prog.Inst[pc]
 		consumes := inst.Op == syntax.InstRuneAny ||
 			(inst.Op == syntax.InstRuneAnyNotNL && r != '\n') ||
 			((inst.Op == syntax.InstRune || inst.Op == syntax.InstRune1) && inst.MatchRune(r))

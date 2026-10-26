@@ -1433,7 +1433,7 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 		// After every override, so an operator's own systemNamespaces is
 		// kept alongside the generated one rather than replacing it.
 		if ref.Name == drainscope.ComponentName {
-			if drainErr := ApplyNVSentinelDrainScope(values, recipeResult); drainErr != nil {
+			if drainErr := ApplyNVSentinelDrainScope(ctx, values, recipeResult); drainErr != nil {
 				return nil, drainErr
 			}
 		}

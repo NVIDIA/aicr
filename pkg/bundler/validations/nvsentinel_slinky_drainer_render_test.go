@@ -56,7 +56,7 @@ func TestNVSentinelSlinkyDrainerChartRender(t *testing.T) {
 	values := nvsentinelRenderedValues(t, store, "nvsentinel-quarantine", slinkyDrainerMixinName)
 	// The bundler's drain scope step runs on these values too; it must not
 	// bring back a userNamespaces entry.
-	if err := drainscope.Apply(values, drainScopeRenderNamespaces); err != nil {
+	if err := drainscope.Apply(t.Context(), values, drainScopeRenderNamespaces); err != nil {
 		t.Fatalf("drainscope.Apply: %v", err)
 	}
 	out := renderNVSentinel(t, values)

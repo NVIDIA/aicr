@@ -15,6 +15,7 @@
 package bundler
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
@@ -25,7 +26,7 @@ import (
 
 // ApplyNVSentinelDrainScope runs drainscope.Apply on the nvsentinel values
 // with the recipe's declared namespaces.
-func ApplyNVSentinelDrainScope(values map[string]any, recipeResult *recipe.RecipeResult) error {
+func ApplyNVSentinelDrainScope(ctx context.Context, values map[string]any, recipeResult *recipe.RecipeResult) error {
 	// Checked first so a recipe without node-drainer never fails on a
 	// component that has no namespace.
 	if !drainscope.NodeDrainerRenders(values) {
@@ -35,7 +36,7 @@ func ApplyNVSentinelDrainScope(values map[string]any, recipeResult *recipe.Recip
 	if err != nil {
 		return err
 	}
-	if err := drainscope.Apply(values, namespaces); err != nil {
+	if err := drainscope.Apply(ctx, values, namespaces); err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
 			"failed to set NVSentinel node-drainer drain scope")
 	}

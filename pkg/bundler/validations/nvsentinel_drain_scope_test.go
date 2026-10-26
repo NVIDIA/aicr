@@ -22,6 +22,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
 	"github.com/NVIDIA/aicr/pkg/component"
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -59,7 +61,7 @@ func TestCheckNVSentinelDrainScopeCoherent(t *testing.T) {
 		if apply {
 			// An invalid pattern fails Apply before it writes anything;
 			// those rows then exercise the gate on the raw values.
-			_ = drainscope.Apply(values, []string{"nvsentinel", "cert-manager"})
+			_ = drainscope.Apply(t.Context(), values, []string{"nvsentinel", "cert-manager"})
 		}
 		return result.WithResolvedValues(map[string]map[string]any{nvsentinelComponent: values})
 	}
@@ -360,10 +362,10 @@ func TestNVSentinelRemediationStepsPassDrainScopeGate(t *testing.T) {
 			if !drainscope.NodeDrainerRenders(values) {
 				t.Fatalf("%s does not enable node-drainer", mixin)
 			}
-			if err := drainscope.Apply(values, nil); err != nil {
+			if err := drainscope.Apply(t.Context(), values, nil); err != nil {
 				t.Fatalf("drainscope.Apply: %v", err)
 			}
-			if errs := drainScopeViolations(nvsentinelComponent, values); len(errs) > 0 {
+			if errs := drainScopeViolations(t.Context(), nvsentinelComponent, values); len(errs) > 0 {
 				t.Errorf("%s fails the drain scope gate: %v", mixin, errs)
 			}
 			if errs := drainEntryViolations(nvsentinelComponent, values); len(errs) > 0 {
@@ -381,12 +383,32 @@ func TestDrainScopeCoverageRejectsUniversalMergedPattern(t *testing.T) {
 		"global":       map[string]any{"nodeDrainer": map[string]any{"enabled": true}},
 		"node-drainer": map[string]any{"systemNamespaces": "[^x]|xx"},
 	}
-	if err := drainscope.Apply(values, []string{"x"}); err != nil {
+	if err := drainscope.Apply(t.Context(), values, []string{"x"}); err != nil {
 		t.Fatalf("drainscope.Apply accepted nothing it should: %v", err)
 	}
 	recipeResult := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{{Name: "app", Namespace: "x"}}}
-	errs := drainScopeCoverageViolations(nvsentinelComponent, recipeResult, values)
+	errs := drainScopeCoverageViolations(t.Context(), nvsentinelComponent, recipeResult, values)
 	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "matches every namespace") {
 		t.Errorf("drainScopeCoverageViolations = %v, want one error naming a pattern that matches every namespace", errs)
 	}
+}
+
+// TestDrainScopeCoverageHonorsContext checks a canceled bundle request stops
+// the pattern search and reports the cancellation, not an invalid request.
+func TestDrainScopeCoverageHonorsContext(t *testing.T) {
+	values := map[string]any{
+		"global":       map[string]any{"nodeDrainer": map[string]any{"enabled": true}},
+		"node-drainer": map[string]any{"systemNamespaces": "^(team-infra)$"},
+	}
+	if err := drainscope.Apply(t.Context(), values, []string{"x"}); err != nil {
+		t.Fatalf("drainscope.Apply: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	recipeResult := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{{Name: "app", Namespace: "x"}}}
+	errs := drainScopeCoverageViolations(ctx, nvsentinelComponent, recipeResult, values)
+	if len(errs) != 1 {
+		t.Fatalf("drainScopeCoverageViolations = %v, want one error", errs)
+	}
+	errorstest.WantReportedCode(t, errs[0], aicrerrors.ErrCodeCanceled)
 }
