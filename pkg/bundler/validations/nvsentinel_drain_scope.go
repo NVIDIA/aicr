@@ -62,14 +62,16 @@ var drainScopeDynamicPaths = []string{
 //
 //   - the emitted systemNamespaces does not protect every namespace the
 //     recipe declares and the chart's own list, as when a caller hands out
-//     values without the bundler's drain scope step;
+//     values without the bundler's drain scope step, or, with the operator's
+//     pattern merged in, matches every namespace;
 //   - systemNamespaces is set but empty, not a string, not a valid regular
 //     expression, or matches every namespace, which leaves nothing to drain;
 //   - no userNamespaces entry, podDrainPolicies entry or custom drain covers
 //     the node, so node-drainer marks it drained at once; userNamespaces is
 //     unset, so the chart's unbounded AllowCompletion applies; or
 //     userNamespaces has no "*" entry, so pods in an unlisted namespace are
-//     never drained;
+//     never drained, or has an entry a "*" entry overrides with a stronger
+//     mode, so that entry never takes effect;
 //   - a userNamespaces or podDrainPolicies entry has no name or a mode
 //     node-drainer does not know, which it silently never drains; a
 //     userNamespaces name is not a valid namespace glob, which fails every
@@ -144,6 +146,13 @@ func drainScopeCoverageViolations(componentName string, recipeResult *recipe.Rec
 			fmt.Sprintf("component %q: the emitted values carry no generated %s, so node-drainer would protect "+
 				"only the chart's %d namespaces -- the values were not produced by the bundler's drain scope step",
 				componentName, drainscope.SystemNamespacesPath, len(drainscope.ChartSystemNamespaces())))}
+	}
+	// The operator's pattern was checked alone; merged with the generated one
+	// the two can still match every namespace.
+	if _, err := drainscope.ValidSystemNamespaces(pattern); err != nil {
+		return []error{aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: emitted %s, the generated pattern with any operator pattern merged in",
+				componentName, drainscope.SystemNamespacesPath), err)}
 	}
 	re, err := regexp.Compile(pattern)
 	if err != nil {
@@ -304,12 +313,8 @@ func drainEntryViolations(componentName string, values map[string]any) []error {
 			"keep one, and set %s: [] to use the policies", drainscope.UserNamespacesPath,
 			drainscope.PodDrainPoliciesPath, drainscope.UserNamespacesPath)
 	}
-	if counts[drainscope.UserNamespacesPath] > 0 && counts[drainscope.PodDrainPoliciesPath] == 0 &&
-		!hasCatchAllNamespace(values) {
-
-		fail("%s has no \"*\" entry, so node-drainer never drains pods in a namespace it does not list and "+
-			"repair acts under them -- add {name: \"*\", mode: %s} after the specific entries",
-			drainscope.UserNamespacesPath, drainscope.DefaultMode)
+	if counts[drainscope.UserNamespacesPath] > 0 && counts[drainscope.PodDrainPoliciesPath] == 0 {
+		catchAllViolations(values, fail)
 	}
 	if user, _ := component.GetValueByPath(values, drainscope.UserNamespacesPath); user == nil && total == 0 {
 		fail("%s is unset, so the chart's AllowCompletion applies and a drain waits on a pod with no time limit "+
@@ -322,16 +327,52 @@ func drainEntryViolations(componentName string, values map[string]any) []error {
 	return errs
 }
 
-// hasCatchAllNamespace reports whether a userNamespaces entry is named "*".
-func hasCatchAllNamespace(values map[string]any) bool {
+// modeStrength orders drain modes the way node-drainer resolves a namespace
+// that several userNamespaces entries match: it collects the namespace under
+// every matching entry's mode, then acts on Immediate before
+// DeleteAfterTimeout before AllowCompletion, whatever the entries' order
+// (node-drainer/pkg/evaluator/evaluator.go, NVSentinel v1.28.0).
+func modeStrength(mode string) int {
+	return map[string]int{
+		drainscope.ModeAllowCompletion:    1,
+		drainscope.ModeDeleteAfterTimeout: 2,
+		drainscope.ModeImmediate:          3,
+	}[mode]
+}
+
+// catchAllViolations requires a "*" userNamespaces entry, without which an
+// unlisted namespace is never drained, and rejects an entry the "*" entry
+// overrides with a stronger mode, which never takes effect.
+func catchAllViolations(values map[string]any, fail func(format string, args ...any)) {
 	raw, _ := component.GetValueByPath(values, drainscope.UserNamespacesPath)
 	entries, _ := raw.([]any)
+	catchAll := ""
 	for _, entry := range entries {
-		if fields, ok := entry.(map[string]any); ok && fields["name"] == "*" {
-			return true
+		fields, _ := entry.(map[string]any)
+		if mode, _ := fields["mode"].(string); fields["name"] == "*" && modeStrength(mode) > modeStrength(catchAll) {
+			catchAll = mode
 		}
 	}
-	return false
+	if catchAll == "" {
+		fail("%s has no \"*\" entry, so node-drainer never drains pods in a namespace it does not list and "+
+			"repair acts under them -- add one, with a mode no stronger than any entry it must not override: "+
+			"a namespace several entries match is drained in the strongest of their modes (%s, then %s, then %s)",
+			drainscope.UserNamespacesPath, drainscope.ModeImmediate, drainscope.ModeDeleteAfterTimeout,
+			drainscope.ModeAllowCompletion)
+		return
+	}
+	for i, entry := range entries {
+		fields, _ := entry.(map[string]any)
+		name, _ := fields["name"].(string)
+		mode, _ := fields["mode"].(string)
+		if name == "*" || modeStrength(mode) == 0 || modeStrength(mode) >= modeStrength(catchAll) {
+			continue
+		}
+		fail("%s[%d] gives %q %s, which never takes effect: the \"*\" entry's %s also matches it, and node-drainer "+
+			"drains a namespace several entries match in the strongest of their modes, whatever their order -- "+
+			"to give %q a weaker mode than the rest, use %s instead, where the first matching policy wins",
+			drainscope.UserNamespacesPath, i, name, mode, catchAll, name, drainscope.PodDrainPoliciesPath)
+	}
 }
 
 // podDrainPolicyViolations checks a podDrainPolicies entry's namespace glob

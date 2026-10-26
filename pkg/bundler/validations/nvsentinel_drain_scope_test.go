@@ -196,8 +196,22 @@ func TestCheckNVSentinelDrainScopeCoherent(t *testing.T) {
 			wantBlocked:  "must be a string"},
 		{name: "userNamespaces with known modes → passes",
 			recipeResult: sentinel(true, set("userNamespaces", []any{
+				map[string]any{"name": "inference", "mode": "Immediate"},
+				map[string]any{"name": "training-*", "mode": "DeleteAfterTimeout"},
+				map[string]any{"name": "*", "mode": "DeleteAfterTimeout"},
+			}))},
+		// node-drainer drains a namespace several entries match in the
+		// strongest mode, so the catch-all defeats the weaker entry.
+		{name: "entry weaker than the \"*\" entry → blocked",
+			recipeResult: sentinel(true, set("userNamespaces", []any{
 				map[string]any{"name": "training-*", "mode": "AllowCompletion"},
 				map[string]any{"name": "*", "mode": "DeleteAfterTimeout"},
+			})),
+			wantBlocked: `userNamespaces[0] gives "training-*" AllowCompletion, which never takes effect`},
+		{name: "AllowCompletion entries under an AllowCompletion \"*\" → passes",
+			recipeResult: sentinel(true, set("userNamespaces", []any{
+				map[string]any{"name": "training-*", "mode": "AllowCompletion"},
+				map[string]any{"name": "*", "mode": "AllowCompletion"},
 			}))},
 		{name: "userNamespaces empty under a custom drain owning every node → passes",
 			recipeResult: sentinel(true, func(nd, _ map[string]any) {
@@ -356,5 +370,23 @@ func TestNVSentinelRemediationStepsPassDrainScopeGate(t *testing.T) {
 				t.Errorf("%s fails the drain entry checks: %v", mixin, errs)
 			}
 		})
+	}
+}
+
+// TestDrainScopeCoverageRejectsUniversalMergedPattern covers an operator
+// pattern that is narrow alone but, merged with the generated one, matches
+// every namespace: "[^x]|xx" misses only "x", which the recipe protects.
+func TestDrainScopeCoverageRejectsUniversalMergedPattern(t *testing.T) {
+	values := map[string]any{
+		"global":       map[string]any{"nodeDrainer": map[string]any{"enabled": true}},
+		"node-drainer": map[string]any{"systemNamespaces": "[^x]|xx"},
+	}
+	if err := drainscope.Apply(values, []string{"x"}); err != nil {
+		t.Fatalf("drainscope.Apply accepted nothing it should: %v", err)
+	}
+	recipeResult := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{{Name: "app", Namespace: "x"}}}
+	errs := drainScopeCoverageViolations(nvsentinelComponent, recipeResult, values)
+	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "matches every namespace") {
+		t.Errorf("drainScopeCoverageViolations = %v, want one error naming a pattern that matches every namespace", errs)
 	}
 }
