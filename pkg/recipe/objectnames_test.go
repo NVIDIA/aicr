@@ -221,7 +221,7 @@ func TestApplyInheritedObjectNames(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			refs := []ComponentRef{{Name: "c", Type: ComponentTypeHelm}}
-			err := ApplyInheritedObjectNames(refs, tt.prior, tt.current)
+			_, err := ApplyInheritedObjectNames(refs, tt.prior, tt.current)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("ApplyInheritedObjectNames() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -248,7 +248,7 @@ func TestApplyInheritedObjectNamesKeepsExistingOverrides(t *testing.T) {
 	prior := map[string]map[string]string{"c": {"grafana.fullnameOverride": "legacy-grafana"}}
 	current := map[string]map[string]string{"c": {}}
 
-	if err := ApplyInheritedObjectNames(refs, prior, current); err != nil {
+	if _, err := ApplyInheritedObjectNames(refs, prior, current); err != nil {
 		t.Fatalf("ApplyInheritedObjectNames() failed: %v", err)
 	}
 	want := map[string]any{
@@ -272,7 +272,7 @@ func TestApplyInheritedObjectNamesRejectsAConflictingOverride(t *testing.T) {
 	prior := map[string]map[string]string{"c": {"grafana.fullnameOverride": "legacy-grafana"}}
 	current := map[string]map[string]string{"c": {}}
 
-	err := ApplyInheritedObjectNames(refs, prior, current)
+	_, err := ApplyInheritedObjectNames(refs, prior, current)
 	if err == nil {
 		t.Fatal("want a conflicting non-map override rejected, got nil")
 	}
@@ -349,7 +349,7 @@ func TestApplyInheritedObjectNamesIsAllOrNothing(t *testing.T) {
 	}
 	current := map[string]map[string]string{"a": {}, "b": {}}
 
-	if err := ApplyInheritedObjectNames(refs, prior, current); err == nil {
+	if _, err := ApplyInheritedObjectNames(refs, prior, current); err == nil {
 		t.Fatal("want the colliding pin rejected, got nil")
 	}
 	if refs[0].Overrides != nil {
@@ -374,7 +374,7 @@ func TestApplyInheritedObjectNamesRejectsWholeArtifact(t *testing.T) {
 	}
 	current := map[string]map[string]string{"good": {}, "bad": {}}
 
-	err := ApplyInheritedObjectNames(refs, prior, current)
+	_, err := ApplyInheritedObjectNames(refs, prior, current)
 	if err == nil {
 		t.Fatal("want an error for an invalid inherited name, got nil")
 	}
@@ -386,5 +386,277 @@ func TestApplyInheritedObjectNamesRejectsWholeArtifact(t *testing.T) {
 			t.Errorf("%s was mutated despite the artifact being rejected: %#v",
 				refs[i].Name, refs[i].Overrides)
 		}
+	}
+}
+
+// kpsHealthCheck is a kube-prometheus-stack-shaped check. A rebind must leave
+// these names alone:
+//
+//   - the Test's own name,
+//   - a step name,
+//   - a CRD whose plural equals the fullname,
+//   - a longer word sharing the prefix, and
+//   - an unrelated object.
+const kpsHealthCheck = `apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: kps-health-check
+spec:
+  steps:
+    - name: kps-operator-ready
+      try:
+        - assert:
+            resource:
+              kind: Deployment
+              metadata:
+                name: kps-operator
+                namespace: monitoring
+        - assert:
+            resource:
+              kind: Prometheus
+              metadata:
+                name: kps-prometheus
+              spec:
+                secrets:
+                  - name: kps-prometheus-tls
+        - assert:
+            resource:
+              kind: Deployment
+              metadata:
+                name: kps-grafana
+        - assert:
+            resource:
+              kind: CustomResourceDefinition
+              metadata:
+                name: kps.monitoring.coreos.com
+        - assert:
+            resource:
+              kind: Deployment
+              metadata:
+                name: kpsx-operator
+        - assert:
+            resource:
+              kind: DaemonSet
+              metadata:
+                name: kube-proxy
+                namespace: kube-system
+`
+
+// TestApplyInheritedObjectNamesRebindsHealthCheck verifies that a health check
+// follows a pinned fullname.
+func TestApplyInheritedObjectNamesRebindsHealthCheck(t *testing.T) {
+	refs := []ComponentRef{{Name: "c", Type: ComponentTypeHelm, HealthCheckAsserts: kpsHealthCheck}}
+	prior := map[string]map[string]string{"c": {
+		"fullnameOverride":         "kube-prometheus",
+		"grafana.fullnameOverride": "legacy-grafana",
+	}}
+	current := map[string]map[string]string{"c": {
+		"fullnameOverride":         "kps",
+		"grafana.fullnameOverride": "kps-grafana",
+	}}
+
+	pins, err := ApplyInheritedObjectNames(refs, prior, current)
+	if err != nil {
+		t.Fatalf("ApplyInheritedObjectNames() failed: %v", err)
+	}
+	got := refs[0].HealthCheckAsserts
+	for _, want := range []string{
+		"name: kube-prometheus-operator",
+		"name: kube-prometheus-prometheus",
+		"name: kube-prometheus-prometheus-tls",
+		"name: legacy-grafana",
+		"name: kps-health-check",
+		"name: kps-operator-ready",
+		"name: kps.monitoring.coreos.com",
+		"name: kpsx-operator",
+		"name: kube-proxy",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("health check is missing %q:\n%s", want, got)
+		}
+	}
+	for _, stale := range []string{"name: kps-operator\n", "name: kps-prometheus\n", "name: kps-grafana\n"} {
+		if strings.Contains(got, stale) {
+			t.Errorf("health check still asserts %q:\n%s", stale, got)
+		}
+	}
+	for _, pin := range pins {
+		if pin.HealthCheckMayBeStale {
+			t.Errorf("pin %s reported a stale health check after it was rebound", pin.Path)
+		}
+	}
+}
+
+// TestApplyInheritedObjectNamesReportsWhatItCannotRebind verifies that a pin
+// that cannot be rebound leaves the health check unchanged and is returned
+// with HealthCheckMayBeStale set.
+func TestApplyInheritedObjectNamesReportsWhatItCannotRebind(t *testing.T) {
+	tests := []struct {
+		name    string
+		prior   map[string]string
+		current map[string]string
+		check   string
+		want    []ObjectNamePin
+	}{
+		{
+			name:    "a dropped fullname",
+			prior:   map[string]string{"fullnameOverride": "kps"},
+			current: map[string]string{},
+			check:   kpsHealthCheck,
+			want: []ObjectNamePin{{Component: "c", Path: "fullnameOverride", Inherited: "kps",
+				HealthCheckMayBeStale: true}},
+		},
+		{
+			name:    "a newly added fullname",
+			prior:   map[string]string{},
+			current: map[string]string{"fullnameOverride": "kps"},
+			check:   kpsHealthCheck,
+			want: []ObjectNamePin{{Component: "c", Path: "fullnameOverride", Current: "kps",
+				HealthCheckMayBeStale: true}},
+		},
+		{
+			name:    "a nameOverride",
+			prior:   map[string]string{"nameOverride": "legacy"},
+			current: map[string]string{"nameOverride": "kps"},
+			check:   kpsHealthCheck,
+			want: []ObjectNamePin{{Component: "c", Path: "nameOverride", Current: "kps", Inherited: "legacy",
+				HealthCheckMayBeStale: true}},
+		},
+		{
+			name: "two subcharts the current values name alike",
+			prior: map[string]string{
+				"a.fullnameOverride": "legacy-a",
+				"b.fullnameOverride": "legacy-b",
+			},
+			current: map[string]string{
+				"a.fullnameOverride": "kps",
+				"b.fullnameOverride": "kps",
+			},
+			check: kpsHealthCheck,
+			want: []ObjectNamePin{
+				{Component: "c", Path: "a.fullnameOverride", Current: "kps", Inherited: "legacy-a",
+					HealthCheckMayBeStale: true},
+				{Component: "c", Path: "b.fullnameOverride", Current: "kps", Inherited: "legacy-b",
+					HealthCheckMayBeStale: true},
+			},
+		},
+		{
+			name:    "a component with no health check",
+			prior:   map[string]string{"fullnameOverride": "kps"},
+			current: map[string]string{},
+			want:    []ObjectNamePin{{Component: "c", Path: "fullnameOverride", Inherited: "kps"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			refs := []ComponentRef{{Name: "c", Type: ComponentTypeHelm, HealthCheckAsserts: tt.check}}
+			pins, err := ApplyInheritedObjectNames(refs,
+				map[string]map[string]string{"c": tt.prior}, map[string]map[string]string{"c": tt.current})
+			if err != nil {
+				t.Fatalf("ApplyInheritedObjectNames() failed: %v", err)
+			}
+			if refs[0].HealthCheckAsserts != tt.check {
+				t.Errorf("health check was rewritten:\n%s", refs[0].HealthCheckAsserts)
+			}
+			if !reflect.DeepEqual(pins, tt.want) {
+				t.Errorf("pins = %#v, want %#v", pins, tt.want)
+			}
+		})
+	}
+}
+
+// TestApplyInheritedObjectNamesLeavesRefIntactOnRebindFailure verifies that an
+// unparseable health check rejects the artifact and leaves the ref's overrides
+// unwritten.
+func TestApplyInheritedObjectNamesLeavesRefIntactOnRebindFailure(t *testing.T) {
+	const unparseable = "spec:\n  steps:\n   - bad\n  indent: [oops\n"
+	refs := []ComponentRef{{Name: "c", Type: ComponentTypeHelm, HealthCheckAsserts: unparseable}}
+	prior := map[string]map[string]string{"c": {"fullnameOverride": "legacy"}}
+	current := map[string]map[string]string{"c": {"fullnameOverride": "kps"}}
+
+	_, err := ApplyInheritedObjectNames(refs, prior, current)
+	if err == nil {
+		t.Fatal("want a parse failure, got nil")
+	}
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+		t.Errorf("want ErrCodeInvalidRequest, got %v", err)
+	}
+	if refs[0].Overrides != nil {
+		t.Errorf("overrides were written despite the rejection: %#v", refs[0].Overrides)
+	}
+	if refs[0].HealthCheckAsserts != unparseable {
+		t.Errorf("health check was modified: %q", refs[0].HealthCheckAsserts)
+	}
+}
+
+func TestFindObjectNameReferences(t *testing.T) {
+	pin := ObjectNamePin{Component: "kps", Path: "fullnameOverride", Current: "kube-prometheus", Inherited: "legacy"}
+	refs := []ComponentRef{
+		{Name: "kps", HealthCheckAsserts: "spec:\n  name: kube-prometheus-operator\n"},
+		{Name: "adapter", HealthCheckAsserts: "spec:\n  name: prometheus-adapter\n"},
+		{Name: "dashboards", HealthCheckAsserts: "spec:\n  url: http://kube-prometheus-prometheus:9090\n"},
+	}
+	values := map[string]map[string]any{
+		"kps": {
+			"fullnameOverride": "kube-prometheus",
+			"grafana":          map[string]any{"datasource": "kube-prometheus-prometheus.monitoring.svc"},
+		},
+		"adapter": {
+			"prometheus": map[string]any{"url": "http://kube-prometheus-prometheus", "port": 9090},
+			"rules": map[string]any{"custom": []any{
+				map[string]any{"seriesQuery": "DCGM_FI_DEV_GPU_UTIL"},
+				map[string]any{"target": "kube-prometheus"},
+			}},
+			"unrelated": "kube-prometheusx",
+			"image":     map[string]any{"repository": "quay.io/prometheus/kube-prometheus", "tag": "kube-prometheus"},
+			"sidecar":   map[string]any{"image": "kube-prometheus:v1"},
+			"rbac": map[string]any{
+				"namespace":         "kube-prometheus",
+				"watchNamespaces":   []any{"kube-prometheus-system"},
+				"releaseNamespace":  "kube-prometheus",
+				"namespaceSelector": "kube-prometheus",
+			},
+		},
+	}
+
+	got := FindObjectNameReferences([]ObjectNamePin{pin, {Component: "kps", Path: "nameOverride", Inherited: "x"}},
+		refs, values)
+	want := []ObjectNameReference{
+		{Pin: pin, Component: "kps", Location: "grafana.datasource"},
+		{Pin: pin, Component: "adapter", Location: "prometheus.url"},
+		{Pin: pin, Component: "adapter", Location: "rbac.namespaceSelector"},
+		{Pin: pin, Component: "adapter", Location: "rules.custom[1].target"},
+		{Pin: pin, Component: "dashboards", Location: HealthCheckLocation},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("FindObjectNameReferences() =\n%#v\nwant\n%#v", got, want)
+	}
+}
+
+func TestNameTokenPattern(t *testing.T) {
+	tests := []struct {
+		s    string
+		want bool
+	}{
+		{"x", true},
+		{"x-operator", true},
+		{"x.svc", true},
+		{"http://x:9090", true},
+		{"--target=x", true},
+		{"xx x", true},
+		{"xy", false},
+		{"a-x", false},
+		{"svc.x", false},
+		{"x9", false},
+		{"", false},
+	}
+	token := nameTokenPattern("x")
+	for _, tt := range tests {
+		if got := token.MatchString(tt.s); got != tt.want {
+			t.Errorf("nameTokenPattern(%q).MatchString(%q) = %v, want %v", "x", tt.s, got, tt.want)
+		}
+	}
+	if nameTokenPattern("a.b").MatchString("axb") {
+		t.Error(`nameTokenPattern("a.b") treated the dot as a wildcard`)
 	}
 }

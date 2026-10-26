@@ -1046,11 +1046,52 @@ func (c *Client) inheritObjectNames(
 	if err != nil {
 		return err
 	}
-	current, err := internalObjectNames(ctx, resolved)
+	// Read before pinning, so references are found under the current names.
+	currentValues, err := internalMergedValues(ctx, resolved)
 	if err != nil {
 		return err
 	}
-	return recipe.ApplyInheritedObjectNames(resolved.ComponentRefs, prior, current)
+	current, err := objectNamesOf(currentValues)
+	if err != nil {
+		return err
+	}
+	pins, err := recipe.ApplyInheritedObjectNames(resolved.ComponentRefs, prior, current)
+	if err != nil {
+		return err
+	}
+	warnUnreboundObjectNames(inheritFrom, pins,
+		recipe.FindObjectNameReferences(pins, resolved.ComponentRefs, currentValues))
+	return nil
+}
+
+// warnUnreboundObjectNames logs a warning for each of pins with
+// HealthCheckMayBeStale set and for each of refs.
+func warnUnreboundObjectNames(inheritFrom string, pins []recipe.ObjectNamePin, refs []recipe.ObjectNameReference) {
+	for _, pin := range pins {
+		if !pin.HealthCheckMayBeStale {
+			continue
+		}
+		slog.Warn("inherit-from pinned an object name its health check may not assert",
+			"inheritFrom", inheritFrom,
+			"component", pin.Component,
+			"field", pin.Path,
+			"inherited", pin.Inherited,
+			"current", pin.Current,
+			"reason", "only a fullnameOverride both artifacts state can be rebound, because an unset "+
+				"side takes a name the chart derives from the release",
+			"remedy", "check the component's health check against the deployed object names")
+	}
+	for _, ref := range refs {
+		slog.Warn("inherit-from pinned an object name that another setting may still address by its current name",
+			"inheritFrom", inheritFrom,
+			"component", ref.Pin.Component,
+			"field", ref.Pin.Path,
+			"inherited", ref.Pin.Inherited,
+			"current", ref.Pin.Current,
+			"referencedBy", ref.Component,
+			"location", ref.Location,
+			"remedy", "override the reference to the inherited name if it addresses this object")
+	}
 }
 
 // requireHydratedRecipe rejects an inheritance source that is not already a

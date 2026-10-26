@@ -647,10 +647,20 @@ func internalObjectNames(
 	ctx context.Context, internal *recipe.RecipeResult,
 ) (map[string]map[string]string, error) {
 
-	if internal == nil {
-		return map[string]map[string]string{}, nil
+	values, err := internalMergedValues(ctx, internal)
+	if err != nil {
+		return nil, err
 	}
-	names := make(map[string]map[string]string, len(internal.ComponentRefs))
+	return objectNamesOf(values)
+}
+
+// internalMergedValues returns the merged values of each of internal's
+// components, keyed by component name.
+func internalMergedValues(ctx context.Context, internal *recipe.RecipeResult) (map[string]map[string]any, error) {
+	if internal == nil {
+		return map[string]map[string]any{}, nil
+	}
+	values := make(map[string]map[string]any, len(internal.ComponentRefs))
 	for i := range internal.ComponentRefs {
 		component := internal.ComponentRefs[i].Name
 		merged, err := internal.GetValuesForComponentWithContext(ctx, component)
@@ -658,6 +668,16 @@ func internalObjectNames(
 			// The adapter already returns structured errors with the right code.
 			return nil, err
 		}
+		values[component] = merged
+	}
+	return values, nil
+}
+
+// objectNamesOf returns the object names set in each component's values, keyed
+// by component name.
+func objectNamesOf(values map[string]map[string]any) (map[string]map[string]string, error) {
+	names := make(map[string]map[string]string, len(values))
+	for component, merged := range values {
 		pinned, err := recipe.ObjectNameValues(merged)
 		if err != nil {
 			return nil, err
