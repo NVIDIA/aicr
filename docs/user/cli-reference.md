@@ -3234,6 +3234,8 @@ The deploy script installs components in the order specified by `deploymentOrder
 
 Unknown flags are rejected with an error to catch typos (e.g., `--bes-effort` or `--retires N`).
 
+In a bundle set generated with `--split`, each class directory has its own `deploy.sh` with the same flags and behavior. Its header names the class and the install order (`core`, then `ops`; tear down in reverse), and its orphaned-CRD preflight is keyed by the component that ships each CRD group, so CRDs an earlier class installed (for example `monitoring.coreos.com` from `prometheus-operator-crds`) are not reported as orphans when a later class deploys. The script does not check that the earlier classes are installed. See [Split a bundle by class](bundling.md#split-a-bundle-by-class).
+
 > **Note on install completion vs. workload readiness.** By default, `deploy.sh` waits on Helm chart readiness where AICR uses `helm --wait`. Some components are intentionally installed without Helm chart-level waiting, and the script does not wait for bundle-level workload readiness such as Nodewright node tuning, GPU operator operand rollout (driver, toolkit, device-plugin DaemonSets), or NVIDIA DRA kubelet plugin registration. Those continue asynchronously after the script exits. When `--best-effort` is used, the script may also finish with non-fatal component failures; check warning lines and logs before treating the install/apply pass as fully successful. `--no-wait` only skips the Helm chart-level wait where AICR uses it; it does not affect bundle-level convergence.
 
 ##### Cluster connection environment
@@ -3563,7 +3565,9 @@ aicr mirror list --recipe recipe.yaml --set gpuoperator:driver.enabled=false
 
 Verify the complete closed-world inventory and attestation chain of a bundle.
 `aicr verify .` is the full verification command when run from the bundle
-root. It rejects any additional file or directory, symlink, or other
+root. For a bundle set generated with `--split`, run it at the set root,
+where `checksums.txt` and the attestation cover every class directory; a
+class directory on its own has no inventory to verify. It rejects any additional file or directory, symlink, or other
 non-regular filesystem object, except the three exact inventory metadata
 paths. By default verification is offline and makes no network calls. The one
 exception is `--key` with a KMS URI, which reaches the KMS provider to fetch

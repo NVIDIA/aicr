@@ -423,9 +423,10 @@ An entry in an external `--data` registry may omit it and is `core`.
   to `kube-prometheus-stack` (`ops`).
 
 The class is not part of a recipe and never appears in `recipe.yaml`.
-Bundling ignores it today; the planned `--split` flag
-([#3158](https://github.com/NVIDIA/aicr/issues/3158)) will partition a
-bundle by it. The full assignment is in the
+Ordinary bundling ignores it; `aicr bundle --split` partitions the bundle
+by it, one directory per class under a set root, as described in
+[Split a bundle by class](../user/bundling.md#split-a-bundle-by-class).
+The full assignment is in the
 [component catalog](../user/component-catalog.md#components).
 
 ### Kueue topology-aware scheduling

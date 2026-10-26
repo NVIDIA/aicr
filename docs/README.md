@@ -94,6 +94,7 @@ Reference for the terms used across the docs site.
 | **Overlay** | A recipe metadata file (`kind: RecipeMetadata`) under `recipes/overlays/` matched by criteria. Composes via single-parent inheritance (`spec.base`). |
 | **Mixin** | A composable fragment (`kind: RecipeMixin`) under `recipes/mixins/` carrying only `constraints` and `componentRefs`, referenced via `spec.mixins`. |
 | **Bundle** | Deployment artifacts emitted by `aicr bundle`: Helm values, manifests, install scripts, checksums. |
+| **Bundle set** | The output of `aicr bundle --split`: one helm bundle directory per registry class (`core`, then `ops`) under a root that holds the full `recipe.yaml`, `split.yaml`, `checksums.txt` and the attestation for the whole set (ADR-018). |
 | **Bundler** | The single, registry-driven generator (`pkg/bundler`) that turns each recipe component into bundle inputs (values, manifests) from its `recipes/registry.yaml` entry. There is no per-component bundler code. |
 | **Deployer** | An output adapter that serializes a bundle in a tool-specific format: `helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `terraform`, `fleet`. |
 | **Component** | A deployable software package (e.g., GPU Operator, Network Operator). Lives in `recipes/registry.yaml`. |

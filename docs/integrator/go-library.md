@@ -1162,7 +1162,8 @@ opts.Nodes = 32 // caller wins, visibly
 fully built `*BundleConfig` from something the flat fields cannot express (a
 CLI-flag-only setting such as `Version` or `Serial`, or a config object you
 mutate in place), set it and it wins outright over the 18 bundler-config flat
-fields (`Deployer` through `AppName`) — `BundleOptions()` itself never
+fields (`Deployer` through `AppName`) and over `Split`, the caller-set
+flag for a class-partitioned bundle set that no config file setting derives — `BundleOptions()` itself never
 populates it. `Config` does NOT override `Attester`, `OIDCResolve`,
 `BinaryAttestation`, `OutputDir` or `Timeout`: those five stay
 caller-supplied regardless of `Config`, which is why the REST `/v1/bundle`

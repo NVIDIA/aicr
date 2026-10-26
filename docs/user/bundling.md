@@ -46,6 +46,12 @@ Every deployer writes `bundle-info.yaml`, `checksums.txt`, `README.md` and
 ordered `NNN-<component>` directories; Flux is the exception and uses a plain
 `<component>` directory with shared `sources/`.
 
+A bundle set produced by `--split` (helm deployer only) has a different
+root: `recipe.yaml`, `split.yaml` and `checksums.txt`, with one
+`<class>/` directory per class that is itself a helm bundle tree as shown
+below, minus `bundle-info.yaml` and `checksums.txt`. See
+[Split a bundle by class](#split-a-bundle-by-class).
+
 ```text
 helm/                            argocd/                      flux/
   001-cert-manager/               001-cert-manager/            cert-manager/
