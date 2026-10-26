@@ -578,6 +578,15 @@ OCI sources use credentials from the standard Docker configuration
 (`~/.docker/config.json` or `$DOCKER_CONFIG`) and may invoke the configured
 credential helper for the selected registry host.
 
+A registry that issues bearer tokens must serve its token endpoint (the
+`realm` in its `WWW-Authenticate` challenge) from the registry's own host or
+from a host that resolves to a public address. A realm on a different host
+that is, or resolves to, a loopback, link-local, private, unspecified, or
+carrier-grade NAT (`100.64.0.0/10`) address is refused, and authentication
+fails with a `bearer realm host ... resolves to ...` error. The check belongs
+to the ORAS client AICR uses for every registry call, so OCI bundle push and
+evidence fetch follow the same rule.
+
 Use `NewClientContext` so caller cancellation and tighter deadlines
 propagate through registry authentication, download, extraction, and catalog
 validation:
