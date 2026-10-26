@@ -525,15 +525,42 @@ percentage (`>= 50`) can never be satisfied.
 | Check | What it measures | Qualified combinations |
 |---|---|---|
 | `nccl-cre-all-reduce-bw` | Bus bandwidth from a CRE `Certification` `BandwidthMeasurement`; AICR still asserts the transport from launcher logs | `eks` x `h100` |
-| `cre-training-goodput` | Runtime goodput from a CRE `Certification` `GoodputMeasurement` | none at present |
+| `cre-training-goodput` | Runtime goodput from a CRE `Certification` `GoodputMeasurement` | `eks` x `h100` |
 
 The catalog entry each check drives, and the node footprint it runs on, come
 from the qualification record rather than the check: for
 `nccl-cre-all-reduce-bw` on `eks` x `h100`, `communication/nccl-all-reduce` on
-two nodes. A combination with no entry skips, because it has no calibrated
-threshold to judge against. `cre-training-goodput` skips everywhere today — the
-`training/nemotron5-8b` entry it drives does not run on the CRE version the
-registry pins, so declaring the check reports a skip rather than a verdict.
+two nodes, and for `cre-training-goodput` on `eks` x `h100`,
+`training/nemotron5-8b` on two nodes. A combination that no entry records as
+qualified skips with an unsupported-target reason.
+
+#### Relation to the TrainJob check
+
+On `eks` x `h100`, `nccl-cre-all-reduce-bw`
+reads 1.65 GB/s (0.34%) higher than `nccl-all-reduce-bw` on the same two nodes:
+six back-to-back pairs on NVCRE v0.8.2 gave 486.76 to 489.01 GB/s for the
+TrainJob check and 489.63 to 490.03 GB/s for the CRE check, with a per-pair
+offset of 0.92 to 3.14 GB/s. Both ran over `Using network Libfabric`; the CRE
+check asserts that from its launcher log, and the TrainJob check's default
+template logs at `NCCL_DEBUG=WARN` so it cannot show it. The two checks apply
+a constraint differently: the TrainJob check passes at 90% of the value, and
+the CRE check passes only at the value itself. The same number in both
+constraints therefore leaves a band between 90% and 100% of it where the
+TrainJob check passes and the CRE check fails. To get the same verdict from
+both, write the CRE constraint as 0.9 times the TrainJob one; `>= 270` is
+equivalent to a TrainJob `>= 300`, to within the 1.65 GB/s offset. This was
+measured on one cluster, and no run landed near the boundary, so it does not
+show that the two verdicts agree at it.
+
+The goodput figure depends on the step count, because startup time counts
+against it. The step count comes from the NVCRE catalog entry, so a figure
+belongs to the CRE version that produced it: 0.5723 on two nodes with the
+pinned v0.8.2 (462.05 TFLOPS per GPU), and 0.5835 on v0.6.0, both measured on a
+NodeWright-tuned cluster. Both are single measurements, so set the constraint
+as a floor below the value your cluster reaches, not at it. Run it on nodes
+that completed NodeWright tuning: on a cluster that had not, with the distro
+EFA driver, no hugepages, and an 8 MB memlock limit, a two-node run hung in NCCL
+initialization. Which of those differences causes it was not isolated.
 
 **Reclaiming an interrupted run.** Both checks delete their `Certification` and
 confirm its `TrainJob`s and workload pods are gone, but a validator pod killed
