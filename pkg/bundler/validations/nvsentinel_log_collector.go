@@ -333,14 +333,14 @@ var fileServerClaim = storageClassClaim{
 
 // CheckNVSentinelFileServerStorageClass applies the snapshot's default
 // StorageClass evidence to the in-cluster file server's report volume, the
-// rule CheckNVSentinelDatastorePrerequisites applies to the datastore's: a
-// blocking error when the snapshot found no default StorageClass or could not
-// tell, unless --storage-class or incluster-file-server.persistence.storageClassName
-// names one; a warning when the recipe carries no evidence or the cluster has
-// more than one default. A no-op unless the file server renders with
-// persistence on. It is registered apart from CheckNVSentinelLogCollectorCoherent
-// because its warnings must stay non-blocking, which that gate's severity
-// does not allow.
+// rule CheckNVSentinelDatastorePrerequisites applies to the datastore's.
+// Unless --storage-class or incluster-file-server.persistence.storageClassName
+// names a class, it is a blocking error when the snapshot found no default
+// StorageClass or could not tell, and a warning when the recipe carries no
+// evidence or the cluster has more than one default. A no-op unless the file
+// server renders with persistence on. It is registered apart from
+// CheckNVSentinelLogCollectorCoherent because its warnings must stay
+// non-blocking, which that gate's severity does not allow.
 func CheckNVSentinelFileServerStorageClass(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
 	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
 		return nil, nil

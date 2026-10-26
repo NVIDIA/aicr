@@ -579,6 +579,12 @@ func TestCheckNVSentinelFileServerStorageClass(t *testing.T) {
 			cfg: storageThenTyped("incluster-file-server.persistence", map[string]any{"size": "10Gi"})},
 		{name: "unrecognized evidence → blocked", rr: result("bogus", fileServer(nil)),
 			wantErrs: []string{`defaultStorageClassState="bogus"`}},
+		{name: "no evidence, --storage-class names one → silent", rr: result("", fileServer(nil)),
+			cfg: config.NewConfig(config.WithStorageClass("fast"))},
+		{name: "several defaults, --set names one → silent", rr: result(recipe.DefaultStorageClassStateMultiple, fileServer(nil)),
+			cfg: set(fileServerStorageClassPath, "fast")},
+		{name: "unrecognized evidence with a class named → blocked", rr: result("bogus", fileServer(nil)),
+			cfg: config.NewConfig(config.WithStorageClass("fast")), wantErrs: []string{`defaultStorageClassState="bogus"`}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

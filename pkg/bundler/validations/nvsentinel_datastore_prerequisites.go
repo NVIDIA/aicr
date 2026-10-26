@@ -32,9 +32,9 @@ const nvsentinelMongoDBStorageClassPath = "replsets.rs0.volumeSpec.pvc.storageCl
 // classless volumes, and no other Percona Operator for MongoDB whose CRDs
 // psmdb-operator would replace. A non-empty
 // replsets.rs0.volumeSpec.pvc.storageClassName or bundle --storage-class
-// waives the StorageClass requirement. Empty metadata means the recipe was
-// not resolved from a snapshot carrying this evidence and produces
-// non-blocking warnings.
+// waives the StorageClass requirement and its warnings. Empty metadata means
+// the recipe was not resolved from a snapshot carrying this evidence and
+// produces non-blocking warnings.
 func CheckNVSentinelDatastorePrerequisites(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
 	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
 		return nil, nil
@@ -97,24 +97,17 @@ type storageClassClaim struct {
 }
 
 // storageClassFinding applies the snapshot's metadata.defaultStorageClassState
-// to claim: a warning with no evidence or more than one default, an error when
-// the snapshot found none or could not tell, unless the bundle names a class
-// for the claim.
+// to claim. A bundle that names a class for the claim has no finding;
+// otherwise no evidence or more than one default warns, and none or
+// inconclusive evidence is an error. An unrecognized state is an error either
+// way.
 func storageClassFinding(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, keys []string, claim storageClassClaim) (string, error) {
 	state := recipeResult.Metadata.DefaultStorageClassState
 	switch state {
 	case recipe.DefaultStorageClassStatePresent:
 		return "", nil
-	case "":
-		return fmt.Sprintf("%s: no metadata.defaultStorageClassState snapshot evidence was recorded, so the "+
-			"default StorageClass for %s was not evaluated. Regenerate the recipe from a current "+
-			"snapshot to verify the target cluster before deployment", componentName, claim.volumes), nil
-	case recipe.DefaultStorageClassStateMultiple:
-		return fmt.Sprintf("%s: the snapshot found more than one default StorageClass; Kubernetes binds "+
-			"%s to the newest one. Leave a single StorageClass annotated "+
-			"storageclass.kubernetes.io/is-default-class=true, or set "+
-			"--set %s:%s=<class>", componentName, claim.volumes, claim.overrideKey, claim.path), nil
-	case recipe.DefaultStorageClassStateAbsent, recipe.DefaultStorageClassStateUnknown:
+	case "", recipe.DefaultStorageClassStateMultiple, recipe.DefaultStorageClassStateAbsent,
+		recipe.DefaultStorageClassStateUnknown:
 	default:
 		return "", aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf(
 			"%s: metadata.defaultStorageClassState=%q is not recognized. Regenerate the recipe with this "+
@@ -129,7 +122,17 @@ func storageClassFinding(ctx context.Context, componentName string, recipeResult
 		return "", nil
 	}
 
-	if state == recipe.DefaultStorageClassStateAbsent {
+	switch state {
+	case "":
+		return fmt.Sprintf("%s: no metadata.defaultStorageClassState snapshot evidence was recorded, so the "+
+			"default StorageClass for %s was not evaluated. Regenerate the recipe from a current "+
+			"snapshot to verify the target cluster before deployment", componentName, claim.volumes), nil
+	case recipe.DefaultStorageClassStateMultiple:
+		return fmt.Sprintf("%s: the snapshot found more than one default StorageClass; Kubernetes binds "+
+			"%s to the newest one. Leave a single StorageClass annotated "+
+			"storageclass.kubernetes.io/is-default-class=true, or set "+
+			"--set %s:%s=<class>", componentName, claim.volumes, claim.overrideKey, claim.path), nil
+	case recipe.DefaultStorageClassStateAbsent:
 		return "", aicrerrors.New(aicrerrors.ErrCodeConflict, fmt.Sprintf(
 			"%s: the snapshot found no default StorageClass, so %s. Annotate a StorageClass "+
 				"with storageclass.kubernetes.io/is-default-class=true and regenerate the recipe from a "+

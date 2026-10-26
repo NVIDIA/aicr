@@ -90,6 +90,16 @@ func TestCheckNVSentinelDatastorePrerequisites(t *testing.T) {
 			wantCode: aicrerrors.ErrCodeConflict,
 		},
 		{name: "recipe-named StorageClass waives absent", rr: result(recipe.DefaultStorageClassStateAbsent, absentPercona, namedClass)},
+		{name: "--storage-class silences missing evidence", rr: result("", absentPercona, nil),
+			cfg: config.NewConfig(config.WithStorageClass("fast"))},
+		{name: "recipe-named StorageClass silences multiple defaults",
+			rr: result(recipe.DefaultStorageClassStateMultiple, absentPercona, namedClass)},
+		{
+			name:     "a named StorageClass does not waive an unrecognized state",
+			rr:       result("bogus", absentPercona, namedClass),
+			wantErrs: []string{`defaultStorageClassState="bogus"`},
+			wantCode: aicrerrors.ErrCodeInvalidRequest,
+		},
 		{name: "--set StorageClass waives unknown", rr: result(recipe.DefaultStorageClassStateUnknown, absentPercona, nil), cfg: setClass("fast")},
 		{
 			name: "--storage-class waives absent",
