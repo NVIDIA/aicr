@@ -144,4 +144,4 @@ pmm:
   enabled: false
   image:
     repository: docker.io/percona/pmm-client
-    tag: "3.9.1@sha256:298e731652e2be172a2505596edaee1e0c014609035347599048f62efae78e5b"
+    tag: "3.10.0@sha256:b407188b183bc61ab202914f2128f171dd2d0cd411396a05bb92f3e73348a416"
