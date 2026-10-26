@@ -836,6 +836,78 @@ func TestCheckReadinessGKEBundleInstallerRequiresPoolCreationEvidence(t *testing
 	}
 }
 
+// TestCheckReadinessGPUNodesLabelOnServiceWithoutUniverseLabel tests
+// checkReadiness on a bare-metal snapshot, which resolves no service, against
+// a readiness constraint that every GPU node has MOFED loaded.
+func TestCheckReadinessGPUNodesLabelOnServiceWithoutUniverseLabel(t *testing.T) {
+	t.Parallel()
+
+	const mofed = "network.nvidia.com/operator.mofed.wait"
+	snapshotWith := func(labels map[string]string) *snapshotter.Snapshot {
+		data := make(map[string]measurement.Reading, len(labels))
+		for k, v := range labels {
+			data[k] = measurement.Str(v)
+		}
+		return &snapshotter.Snapshot{
+			Measurements: []*measurement.Measurement{
+				{Type: measurement.TypeNodeTopology, Subtypes: []measurement.Subtype{{Name: "label", Data: data}}},
+			},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		labels  map[string]string
+		wantErr bool
+		wantIn  string
+	}{
+		{
+			name: "every GPU node has MOFED loaded",
+			labels: map[string]string{
+				"nvidia.com/gpu.present": "true|gpu-a,gpu-b",
+				mofed:                    "false|gpu-a,gpu-b",
+			},
+		},
+		{
+			name: "one GPU node still waits for MOFED",
+			labels: map[string]string{
+				"nvidia.com/gpu.present": "true|gpu-a,gpu-b",
+				mofed + ".false":         "false|gpu-a",
+				mofed + ".true":          "true|gpu-b",
+			},
+			wantErr: true,
+			wantIn:  "gpu-b",
+		},
+		{
+			name: "snapshot captured before the GPU Operator labeled any node",
+			labels: map[string]string{
+				mofed: "false|gpu-a,gpu-b",
+			},
+			wantErr: true,
+			wantIn:  "readiness check could not evaluate",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rec := &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Readiness: &recipe.ValidationPhase{Constraints: []recipe.Constraint{
+						{Name: "NodeTopology.gpu-nodes.label", Value: mofed + "=false"},
+					}},
+				},
+			}
+			err := checkReadiness(v1.ToValidationInput(rec), snapshotWith(tt.labels))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("checkReadiness() = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantIn != "" && !strings.Contains(err.Error(), tt.wantIn) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantIn)
+			}
+		})
+	}
+}
+
 func TestPhaseOrder(t *testing.T) {
 	// performance runs last: its benchmark saturates all node GPUs and releases
 	// DRA claims asynchronously, which would otherwise starve conformance's

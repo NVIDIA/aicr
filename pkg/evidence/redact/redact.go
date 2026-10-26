@@ -49,6 +49,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -478,7 +479,7 @@ var ctrfVendorKeys = map[string]struct{}{
 	"cloud.google.com/gke-accelerator":            {},
 	"trainer.kubeflow.org/trainjob-ancestor-step": {},
 	"nvidia.com/gpu":                              {}, // the worker's GPU request — the count the measurement ran on
-	"nvidia.com/gpu.present":                      {},
+	defaults.GPUPresentNodeLabelKey:               {},
 	"node.kubernetes.io/instance-type":            {},
 }
 

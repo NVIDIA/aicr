@@ -131,21 +131,25 @@ parse errors as `ErrCodeInvalidRequest`, fail-closed.
 **One name bypasses the scalar flow entirely:** the node-set form
 `NodeTopology.gpu-nodes.label` ([#1755](https://github.com/NVIDIA/aicr/issues/1755))
 is dispatched by exact name in `constraints.Evaluate` *before*
-`ParseConstraintPath`, uses its own value grammar
-(`<label-key>=<value>` / `!<label-key>`, validated with the Kubernetes
-label validators), and quantifies the predicate over the GPU-node set
-synthesized from `NodeTopology.label` readings instead of comparing a
-single reading. The label that defines the GPU-node universe is
+`ParseConstraintPath`, takes a Kubernetes label selector as its value
+(parsed by `labels.Parse`), and requires every node in the GPU-node set
+synthesized from `NodeTopology.label` readings to match it, instead of
+comparing a single reading. The label that defines the GPU-node universe is
 **service-specific** — GKE's `cloud.google.com/gke-accelerator` today
 ([#2359](https://github.com/NVIDIA/aicr/issues/2359)) — resolved from
 the snapshot's `k8s.node.provider` via `fingerprint.FromMeasurements`.
 Adding a new service means adding one entry to
 `gpuNodeUniverseLabels` in `pkg/constraints/gpu_nodes.go` and covering
 it in `gpu_nodes_test.go`; the label MUST be present on GPU nodes from
-pool creation, before the GPU Operator or NFD run (the constraint form
-is pre-deployment). See `pkg/constraints/gpu_nodes.go` for its
-fail-closed rules (truncation, empty universe, malformed or ambiguous
-encodings, unknown service, service with no declared universe label).
+pool creation, before the GPU Operator or NFD run, so recipe generation
+can evaluate the form.
+
+The readiness pre-flight calls `constraints.EvaluateReadiness`. On a
+service with no entry, or none resolvable (bare metal, `--data`
+services), it identifies GPU nodes by `nvidia.com/gpu.present=true`,
+where generation fails closed. See `pkg/constraints/gpu_nodes.go` for
+the fail-closed rules (truncation, empty universe, malformed or
+ambiguous encodings, and an unknown or unmapped service at generation).
 
 **Adding a new operator:**
 
