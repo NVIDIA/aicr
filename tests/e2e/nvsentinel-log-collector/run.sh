@@ -467,18 +467,23 @@ wait_for_reset() {
   return 1
 }
 
-# file_server_get fetches path $1 from the file server through a port-forward,
-# the retrieval the component catalog documents.
+# start_file_server_forward opens the port-forward the component catalog
+# documents for retrieving reports. Call it in the parent shell: started inside
+# $(...), PORT_FORWARD_PID would never reach cleanup.
+start_file_server_forward() {
+  [[ -n "${PORT_FORWARD_PID}" ]] && return 0
+  kc -n nvsentinel port-forward "svc/${FILE_SERVER}" 18080:80 >"${WORK}/port-forward.log" 2>&1 &
+  PORT_FORWARD_PID=$!
+  local i
+  for ((i = 0; i < 30; i++)); do
+    curl -fsS --max-time 5 "http://127.0.0.1:18080/healthz" >/dev/null 2>&1 && return 0
+    sleep 1
+  done
+}
+
+# file_server_get fetches path $1 through the forward start_file_server_forward
+# opened.
 file_server_get() {
-  if [[ -z "${PORT_FORWARD_PID}" ]]; then
-    kc -n nvsentinel port-forward "svc/${FILE_SERVER}" 18080:80 >"${WORK}/port-forward.log" 2>&1 &
-    PORT_FORWARD_PID=$!
-    local i
-    for ((i = 0; i < 30; i++)); do
-      curl -fsS --max-time 5 "http://127.0.0.1:18080/healthz" >/dev/null 2>&1 && break
-      sleep 1
-    done
-  fi
   curl -fsS --max-time 30 "http://127.0.0.1:18080$1"
 }
 
@@ -523,6 +528,7 @@ test_fault_is_collected_before_remediation() {
   fi
 
   local listing report page
+  start_file_server_forward
   # The listing also links ../, so match the collector's timestamp directory.
   # Each page is captured before grep so grep -q cannot cut curl off mid-write.
   if listing=$(file_server_get "/upload/${NODE}/") &&

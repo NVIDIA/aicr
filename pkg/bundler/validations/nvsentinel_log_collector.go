@@ -71,7 +71,8 @@ const (
 //     GPU Operator's driver container, which it looks up in the single
 //     namespace gpuOperatorNamespaces names, or from GKE's managed driver
 //     install, so a recipe whose node image carries the driver otherwise (AKS,
-//     OKE, Kind, EKS on Amazon Linux) fails every collection.
+//     OKE, Kind, EKS on Amazon Linux, the VR200 RKE2 and H200 k0s leaves)
+//     fails every collection.
 //
 // The Job template renders logCollector.env after the variables it sets from
 // uploadURL and gpuOperatorNamespaces, so an env.UPLOAD_URL_BASE or
@@ -227,8 +228,8 @@ func logCollectorDriverViolations(ctx context.Context, recipeResult *recipe.Reci
 		return []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("component %q: %s is on but %s, so every collection fails and no bug report is captured. "+
 				"The collector runs nvidia-bug-report in the GPU Operator's driver container, or from GKE's "+
-				"managed driver install -- let the GPU Operator install the driver (on AKS and OKE, "+
-				"--profile gpuStack=operator-managed), or do not compose %s", componentName,
+				"managed driver install -- let the GPU Operator install the driver (on AKS and OKE, regenerate the "+
+				"recipe with aicr recipe --profile gpuStack=operator-managed), or do not compose %s", componentName,
 				logCollectorEnabledPath, why, logCollectorMixinName))}
 	}
 	if gpuOp == nil {

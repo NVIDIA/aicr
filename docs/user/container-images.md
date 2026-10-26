@@ -464,7 +464,7 @@ Air-gapped OpenShift deployments must separately mirror the relevant Red Hat cer
 
 The trade-off is intentional. Pinning an image gives reproducibility; deferring to the upstream chart lets security patches flow without an AICR release. The split is policy, not oversight — see the [supply chain epic](https://github.com/NVIDIA/aicr/issues/739) for how each component's policy is being made explicit.
 
-**Opt-in values enabled by a leaf override or mixin are a fourth gap.** A handful of images only appear once a component's *values*, not just its enablement, are overridden outside the shared `recipes/components/<name>/values.yaml` this BOM renders (`tools/bom/main.go`'s `renderHelmComponent` resolves each component against only its base values file, so it cannot see leaf or mixin overrides). Eight known cases, none counted in the `nvsentinel` row's image count above. Six set a `global.*` toggle:
+**Opt-in values enabled by a leaf override or mixin are a fourth gap.** A handful of images only appear once a component's *values*, not just its enablement, are overridden outside the shared `recipes/components/<name>/values.yaml` this BOM renders (`tools/bom/main.go`'s `renderHelmComponent` resolves each component against only its base values file, so it cannot see leaf or mixin overrides). Nine known cases, none counted in the `nvsentinel` row's image count above. Seven set a `global.*` toggle:
 
 - The [`nvsentinel-observability` mixin](component-catalog.md#audit-logging-and-tracing) sets `global.auditLogging.enabled: true`, which conditionally adds a `fix-audit-log-permissions` init container (`docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e`) to the `platform-connectors` DaemonSet and `labeler` Deployment. The chart's own default for this init container is `docker.io/bitnamilegacy/os-shell:12-debian-12-r30`, which sits in Bitnami's frozen archive and will never be patched; AICR overrides `global.initContainerImage` in `recipes/components/nvsentinel/values.yaml` to the same digest-pinned busybox it already ships in the `network-operator` and `gpu-operator` manifests.
 - The [`nvsentinel-object-monitor` mixin](component-catalog.md#kubernetes-object-monitor) sets `global.kubernetesObjectMonitor.enabled`, turning on the chart's `kubernetes-object-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.28.0`. That image is in AICR's weekly image scan despite not being built here, since nothing else would surface a CVE in it.
@@ -476,7 +476,7 @@ The trade-off is intentional. Pinning an image gives reproducibility; deferring 
 
 A recipe composing any of these mixins **with `nvsentinel` still enabled** adds that mixin's images to what it deploys and mirrors; `aicr bundle`/`aicr mirror` on such a recipe surfaces them even though this static BOM cannot. A chain that disables `nvsentinel` (the OCP overlay, for example) can compose a mixin and ship none of them.
 
-The `nvsentinel-preflight` mixin (see [Preflight Checks](component-catalog.md#preflight-checks)) is the seventh case. Setting `global.preflight.enabled: true` on `nvsentinel` adds four images, all from `ghcr.io/nvidia/nvsentinel/` at the chart's own version and therefore already covered by the NVIDIA mirroring path — but none of them appear in the `nvsentinel` row above:
+The `nvsentinel-preflight` mixin (see [Preflight Checks](component-catalog.md#preflight-checks)) is the eighth case. Setting `global.preflight.enabled: true` on `nvsentinel` adds four images, all from `ghcr.io/nvidia/nvsentinel/` at the chart's own version and therefore already covered by the NVIDIA mirroring path — but none of them appear in the `nvsentinel` row above:
 
 | Image | Role |
 |---|---|
@@ -487,7 +487,7 @@ The `nvsentinel-preflight` mixin (see [Preflight Checks](component-catalog.md#pr
 
 `TestNVSentinelPreflightChartRender` pins all four against the rendered chart, so a bump that changes a repository fails there rather than silently diverging from this table.
 
-The three remediation mixins (see [Graded Remediation](component-catalog.md#graded-remediation)) are the eighth case. They turn on NVSentinel's remediation subcharts, so they add images rather than values. `nvsentinel-remediation`, the widest step, pulls all seven below; `nvsentinel-observe` pulls all but `janitor`, `janitor-provider`, `gpu-reset` and the reboot Job's busybox, and `nvsentinel-quarantine` additionally drops `fault-remediation`.
+The three remediation mixins (see [Graded Remediation](component-catalog.md#graded-remediation)) are the ninth case. They turn on NVSentinel's remediation subcharts, so they add images rather than values. `nvsentinel-remediation`, the widest step, pulls all seven below; `nvsentinel-observe` pulls all but `janitor`, `janitor-provider`, `gpu-reset` and the reboot Job's busybox, and `nvsentinel-quarantine` additionally drops `fault-remediation`.
 
 | Image | Role |
 |---|---|
