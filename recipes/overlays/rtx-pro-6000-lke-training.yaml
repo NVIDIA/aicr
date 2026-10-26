@@ -40,7 +40,7 @@ spec:
       dependencyRefs:
         - nfd
         - cert-manager
-        - kube-prometheus-stack
+        - prometheus-operator-crds
 
     - name: nfd
       type: Helm

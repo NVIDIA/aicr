@@ -397,7 +397,7 @@ _No images extracted._
 
 ### slurm-accounting-mariadb
 
-- `mariadb:11.8.8@sha256:24e76fcec8c003a0362d0dd53f4806e7e79458d7fdeaf47437760e19496f5a9c`
+- `mariadb:11.8.9@sha256:f16d7a344413e519dff518f27bdb221388f84b0d274c97c4fb5f2cb0dc1b34fa`
 
 ### topograph
 

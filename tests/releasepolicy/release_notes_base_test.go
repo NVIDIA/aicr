@@ -33,20 +33,22 @@ const notesBaseStepName = "Pin the release tag and the previous stable tag"
 // local git commands, so a hang means a broken fixture, not a slow machine.
 const notesBaseStepTimeout = 30 * time.Second
 
-// notesBaseGoReleaserDefault is the lookup GoReleaser v2.18.3 performs when
-// GORELEASER_PREVIOUS_TAG is unset (previousTagSha in internal/pipe/git). The
-// fixtures assert it picks a pre-release, so a fixture that stops reproducing
-// the bug fails loudly instead of letting the fix pass vacuously.
+// notesBaseGoReleaserDefault is the lookup GoReleaser v2.18.3 through v2.19.0
+// performs when GORELEASER_PREVIOUS_TAG is unset (previousTagSha in
+// internal/pipe/git). The fixtures assert it picks a pre-release, so a fixture
+// that stops reproducing the bug fails loudly instead of letting the fix pass
+// vacuously.
 func notesBaseGoReleaserDefault(t *testing.T, dir, tag string) string {
 	t.Helper()
 	return notesBaseGit(t, dir, "describe", "--tags", "--abbrev=0", "tags/"+tag+"^")
 }
 
-// notesBaseGoReleaserCurrentDefault is the lookup GoReleaser v2.18.3 performs
-// for the current tag when GORELEASER_CURRENT_TAG is unset and no
-// git.prerelease_suffix is configured (getTag in internal/pipe/git): the first
-// line of `git tag --points-at HEAD --sort -version:refname`. git version-sorts
-// an RC ahead of its own GA, so with both tags on one commit this names the RC.
+// notesBaseGoReleaserCurrentDefault is the lookup GoReleaser v2.18.3 through
+// v2.19.0 performs for the current tag when GORELEASER_CURRENT_TAG is unset and
+// no git.prerelease_suffix is configured (getTag in internal/pipe/git): the
+// first line of `git tag --points-at HEAD --sort -version:refname`. git
+// version-sorts an RC ahead of its own GA, so with both tags on one commit this
+// names the RC.
 func notesBaseGoReleaserCurrentDefault(t *testing.T, dir string) string {
 	t.Helper()
 	out := notesBaseGit(t, dir, "tag", "--points-at", "HEAD", "--sort", "-version:refname")
