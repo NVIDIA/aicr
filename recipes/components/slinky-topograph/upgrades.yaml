@@ -1,0 +1,42 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The floor starts at 1.0.0, the first release whose chart this record has
+# compared; 0.x charts predate the engine-keyed values layout and are not
+# vouched for. The chart is shared with the sibling topograph component
+# (slinky-topograph and topograph); keep the two records in step.
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: slinky-topograph
+transitions:
+  - from: ">=1.0.0 <1.1.0"
+    to: "1.1.0"
+    verdict: safe
+    verifiedBy: >-
+      Chart diff (helm pull of topograph 1.0.0 vs 1.1.0 from
+      https://helm.ngc.nvidia.com/nvidia/topograph): values.yaml changes are
+      additive (optional config.nodeMetadata, test-pod resources) and the
+      default image.repository moves to nvcr.io/nvidia/topograph/topograph,
+      which has the v1.1.0 image; the only template changes are an optional
+      nodeMetadata block in the ConfigMap, NOTES.txt text and test-pod
+      resources. No CRDs, no renamed or removed values, and no change to the
+      Deployment names AICR's health checks assert on. helm template renders
+      with AICR's values. Upstream release notes v1.1.0 list no breaking
+      changes. Not exercised by a UAT or KWOK run.
+    summary: >-
+      Chart 1.1.0 changes the default image registry from ghcr.io to
+      nvcr.io/nvidia/topograph/topograph and adds optional values; nothing
+      the recipe sets is renamed or removed.
+    references:
+      - https://github.com/dsx-ai-factory/topograph/releases/tag/v1.1.0

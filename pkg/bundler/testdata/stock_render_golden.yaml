@@ -3232,7 +3232,7 @@ h100-eks-ubuntu-training-kueue:
   014-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   015-topograph/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-topograph/install.sh: 2ab1aeb37b8817016ee8e38f5796fdade8d27102dfad2088aeca71caed7b4078
-  015-topograph/upstream.env: 1b99e05b70b8b6b7dd457a99b2e29f9eec8b6244d1854aed0c416ea19a3e62af
+  015-topograph/upstream.env: dda993ee795d95551c98e5e1f97587c6cf1e2c5a722f61fb90726a097788cfba
   015-topograph/values.yaml: 7cf4177fe92eec9bcf9dc28f3631e1fb14975308a90fe50a054594421f1a40d4
   016-kueue/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-kueue/install.sh: f9b3dda99c56562959f10bfafa00b1013b70529aeabecb2a8bc9ed9cbe38e7d8
@@ -3246,12 +3246,12 @@ h100-eks-ubuntu-training-kueue:
   017-kueue-post/templates/tas-flavor.yaml: 96016a5899b403b6fc980013e7deee18f51c4ae820be6c840ba18cd17d7ce3ed
   017-kueue-post/templates/topology-tiers-3.yaml: b5bb53f7c4dcbedb14332f5309913fe5252db2756081ddbea64d2148be4331d7
   017-kueue-post/values.yaml: 9ae0af1abd28154ef1efc514bd20ee1daf35cfccbfaa0c6d97e08092b211d6fc
-  README.md: 130c99e46edc75b5195105fb3b02013cf1d4270d0d1a2876c1844bdc22971d1e
+  README.md: 4dc1cb23948698bbdc92ca87fa3119d20acfa6bc154cc2f904fff7cfa3661791
   UPGRADING.md: 178b6ec387fb25c26d40fee666377c54227cb33d1b37c5b01b783607172ad725
-  bundle-info.yaml: 3b509c84c28ac03da583ed8ad4eb8d7a1c9386405c07cb9718bd4a4f3f64d25e
-  checksums.txt: bb7bb210611e35c0632f395770750f2e7cd3b7b94368daaf4b0ed034d9e4884d
+  bundle-info.yaml: 826cb1515504c3b0b0f07d42e2ad711bf090f4ed25de3c5d02801f1aad385e17
+  checksums.txt: faa840e5e40339d4b83da1cdd47f11c0fdfb083bcc308238345ee872373ad149
   deploy.sh: be46432db13f4a3fc337d6271516f97efaad65cc61f7e21a3af308e3d56d3735
-  recipe.yaml: 0e5e8b959923d792692fad6688119636b2bbae78f1608ccbfe80bc4aade279a0
+  recipe.yaml: fd59198f02a096215265016f1e1010d89f1c8dc4670387481373ab5dea6902bc
 h100-eks-ubuntu-training-slurm:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -3786,7 +3786,7 @@ h100-gke-cos-training-kueue:
   015-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   016-topograph/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-topograph/install.sh: 2ab1aeb37b8817016ee8e38f5796fdade8d27102dfad2088aeca71caed7b4078
-  016-topograph/upstream.env: 1b99e05b70b8b6b7dd457a99b2e29f9eec8b6244d1854aed0c416ea19a3e62af
+  016-topograph/upstream.env: dda993ee795d95551c98e5e1f97587c6cf1e2c5a722f61fb90726a097788cfba
   016-topograph/values.yaml: 4ae7173f67ffcc6b760e12ecac3e6487d055c935863415ae6bfd9aab7e265c49
   017-kueue/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-kueue/install.sh: f9b3dda99c56562959f10bfafa00b1013b70529aeabecb2a8bc9ed9cbe38e7d8
@@ -3800,12 +3800,12 @@ h100-gke-cos-training-kueue:
   018-kueue-post/templates/tas-flavor.yaml: 96016a5899b403b6fc980013e7deee18f51c4ae820be6c840ba18cd17d7ce3ed
   018-kueue-post/templates/topology-tiers-3.yaml: b5bb53f7c4dcbedb14332f5309913fe5252db2756081ddbea64d2148be4331d7
   018-kueue-post/values.yaml: 9ae0af1abd28154ef1efc514bd20ee1daf35cfccbfaa0c6d97e08092b211d6fc
-  README.md: 7cd8d89214fa0449ea48f4c83a09cb90e606ac13695cbcca97d8eacf2b07f720
+  README.md: bca313006a7a014dd2fd05b89c2adf489b2240a72c5d68b3e626e7123617f41c
   UPGRADING.md: 178b6ec387fb25c26d40fee666377c54227cb33d1b37c5b01b783607172ad725
-  bundle-info.yaml: 25313780ec185fe023a59d42844aacf03a2f86a539bad6ca4d949ebd6b3a7b26
-  checksums.txt: 82eaf70de60eeb2ea32ce65c2d8e8ba5c15dd492d23cafa95714d00efa31ad22
+  bundle-info.yaml: 2a5539b04d6018801a744fb2874696eb0d63013d0f00076030bbd0d8cfdd23f7
+  checksums.txt: 927639eae50639f34167ee5358da038a91765b5d00986986eb89d7368e84203e
   deploy.sh: 70e0b277ed17dfc69744f487905b679d1f9f3820bf647248e87f2e0e95493f8a
-  recipe.yaml: 1fdc46cc3da08e1b4008635c774eb29575ff0b1b182899bc67b3d7b8c0e931d4
+  recipe.yaml: b7ceedc234ee2a331637a042a793fd1787fcf751b818f62743d7b87c926b6757
 h100-gke-cos-training-slurm:
   001-gcp-driver-installer/Chart.yaml: b0476226ebbc9a7738c4e5c2828ce5a73dbd371f3fa7cf1139c5fe9b2e825c02
   001-gcp-driver-installer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -3891,14 +3891,14 @@ h100-gke-cos-training-slurm:
   019-slinky-slurm/values.yaml: b273c36baa0dae120350cb527e8aafb531d0ab5416d95d5dcaee1ac8216c32f7
   020-slinky-topograph/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-slinky-topograph/install.sh: 19c15d32f7578504e561768affa18c21390db951c791a33998fd2bab58a881d8
-  020-slinky-topograph/upstream.env: 1b99e05b70b8b6b7dd457a99b2e29f9eec8b6244d1854aed0c416ea19a3e62af
+  020-slinky-topograph/upstream.env: dda993ee795d95551c98e5e1f97587c6cf1e2c5a722f61fb90726a097788cfba
   020-slinky-topograph/values.yaml: f11e2c423e180afd7141528eabed1ea9f0c1a81839f9b8218e194b7a61726bdb
-  README.md: 1d1262551cbc7c43a838e1c38ec7d0355271922c856159f14a61e565a9e48d68
+  README.md: 2b032932610b978737c2c2dd5a92ac3b59afa37ede7c632e7cf79f3aa6df9e20
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
-  bundle-info.yaml: 60397da2da0b84219d0a68b98dab2de63dde99c096b2deb13d37c94da9b84333
-  checksums.txt: 1b5f3e6b64120a13133b39e0c4a6a2e84e8c8ffd9d69b1c835dc9e232c06c1ce
+  bundle-info.yaml: dd5aa9fa191468ce03a2f2df2d3f5dd9f74d5b59992702c4cac668a3288326f4
+  checksums.txt: 8a4975390a8661cf488e04cef06d92db904b6d4a72f19a2561a3db708478065c
   deploy.sh: 3c91727718e2f0d106a7dd220171cdb28fda16113de7394a668c62fa9388a197
-  recipe.yaml: 8f89a5bb9c4569dbedcc908a73421e76e65182247fcbb35671fb8b254523072a
+  recipe.yaml: fbe3d3a58e519556f5e038d3e94c6bcb322346e1af8989c88600808d4813268f
 h100-kind-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
@@ -4099,7 +4099,7 @@ h100-kind-training-kueue:
   012-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   013-topograph/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-topograph/install.sh: 2ab1aeb37b8817016ee8e38f5796fdade8d27102dfad2088aeca71caed7b4078
-  013-topograph/upstream.env: 1b99e05b70b8b6b7dd457a99b2e29f9eec8b6244d1854aed0c416ea19a3e62af
+  013-topograph/upstream.env: dda993ee795d95551c98e5e1f97587c6cf1e2c5a722f61fb90726a097788cfba
   013-topograph/values.yaml: 5e203737fb65ae9f990eac5d02402f685d4093f08bb58e9feb3d18b68561d525
   014-kueue/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-kueue/install.sh: f9b3dda99c56562959f10bfafa00b1013b70529aeabecb2a8bc9ed9cbe38e7d8
@@ -4113,12 +4113,12 @@ h100-kind-training-kueue:
   015-kueue-post/templates/tas-flavor.yaml: 96016a5899b403b6fc980013e7deee18f51c4ae820be6c840ba18cd17d7ce3ed
   015-kueue-post/templates/topology-accelerator.yaml: 1ca4ffa711704422d5ec1796cac645bfc0e10d0b1538e2d48c22013300609ea9
   015-kueue-post/values.yaml: 9ae0af1abd28154ef1efc514bd20ee1daf35cfccbfaa0c6d97e08092b211d6fc
-  README.md: 6ab609c3922d982fb61f06d395c1802c1d9d357fd6216cd15762a026d10050ac
+  README.md: 33784d181ca97b704f13b253bf47fe29b7bdefe92163fc6fd8e6b062c383c977
   UPGRADING.md: 2c69c04891da4e9cd89362f5d89f599c8af9d0706c56b3becbc5c541c7020a65
-  bundle-info.yaml: b66cfe216a490f96e88d6f82bea3ef740eee380479c93a039172d39c44187737
-  checksums.txt: 70b3b3be37461a4f536a862d5ffbc38a21bb2d85a2ade9c01dfc8b2a12fc1b3e
+  bundle-info.yaml: 6e4198900b46abdc902e0c36fd968a8c1f6ca7795c939a2e16000195dab663c8
+  checksums.txt: b5df29f8930af18f1c1175e299840924ee960aefd5a8f23035358a46fbb9d70a
   deploy.sh: 706a8d58c6b713b9376215029a49a213fc943bdecab7cd7d4ea7d7ef2d86e692
-  recipe.yaml: e36d604f1ef084b40f3ac1ac701b0693163eaa00c30fde7a5438f6c8927cf9da
+  recipe.yaml: 308d7b9d282155d2e7268a780a7893a06cda671fba0f32f15436283c557779c6
 h100-kind-training-slurm:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -4188,14 +4188,14 @@ h100-kind-training-slurm:
   016-slinky-slurm/values.yaml: 94842abdc07807198d923ad297e064c8eb036b81afcf80a02e954e8a8550f8ec
   017-slinky-topograph/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-slinky-topograph/install.sh: 19c15d32f7578504e561768affa18c21390db951c791a33998fd2bab58a881d8
-  017-slinky-topograph/upstream.env: 1b99e05b70b8b6b7dd457a99b2e29f9eec8b6244d1854aed0c416ea19a3e62af
+  017-slinky-topograph/upstream.env: dda993ee795d95551c98e5e1f97587c6cf1e2c5a722f61fb90726a097788cfba
   017-slinky-topograph/values.yaml: c9015074818102d8727cfd38e96941c5c285175852fa71f81182c4323f751e05
-  README.md: e655334174d2d4d29faaa04e0ff401e2b29b89daf1747410b3c75fd392eea5be
+  README.md: 72530a4f406a3002aba2cd10b04d2d98c8d7a720718931c1c452922c2281d32b
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
-  bundle-info.yaml: e06c19fde36aa3de233ee91b2c3a53bbcf52a0e3497e817bbba588ae811a87cd
-  checksums.txt: a532f11c2bf057c39f352889ac56059fd2e08f8fcc03ff70d11e639dc436e279
+  bundle-info.yaml: 8faa0bc5e8e89ba5c884a957787568999bceaa5df23e37b2ada0bb8c966d3a03
+  checksums.txt: ce91366064b2d3f982caee612fa4b806e5ca998bdb88acd476086c8c874fcd5c
   deploy.sh: cd7ccfe96441d0d0a17d9b7ef13f18e2938613e70854fc367a7bd8e64039019c
-  recipe.yaml: 291286b1c7c6a090b24a33d37121f5f7955912a25a04962c0b32abbf0a028721
+  recipe.yaml: a25ab925d4a28cf51f82836a4778e5410c210cdf1f4d5b41199aba7d23b0579f
 h200-any:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
