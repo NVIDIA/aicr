@@ -370,7 +370,7 @@ Reservations are data, not code. To onboard a new reserved pool, add a row to `i
   test-config-dir: tests/uat/aws/tests
 ```
 
-The row's `reservation-id` must equal every reservation its `cluster-config-path` targets, meaning each worker's `capacity.reservation.target` on AWS and each `nodeConfig.capacityReservations` entry on GCP. A row without a `reservation-id` must point at a cluster-config that targets none. The broker leases by the registry, but the actuator places nodes from the cluster-config, so swapping a reservation means editing both files. `TestCommittedClusterConfigsMatchRegistry` in `pkg/uatbroker` fails the PR when they disagree.
+The row's `reservation-id` must equal every reservation its `cluster-config-path` targets, meaning each worker's `capacity.reservation.target` on AWS and each `nodeConfig.capacityReservations` entry on GCP. A row without a `reservation-id` must point at a cluster-config that targets none. The lease is keyed on the row's `name`, and provisioning and the AWS capacity check read the reservation from the cluster-config, so nothing at run time reads `reservation-id`. Swapping a reservation means editing both files. `TestCommittedClusterConfigsMatchRegistry` in `pkg/uatbroker` fails the PR when they disagree.
 
 No broker, workflow, or Go change is needed — the nightly batch enumerates rows from the registry, and `uat-run.yaml` resolves them. The unit of sequencing is the *reservation*, so a new GPU type in an existing cloud simply runs in parallel with the others on its own lease. (Provisioning is per *cloud*: the same `uat-aws.yaml` pipeline provisions any AWS accelerator from the row's `cluster-config-path`; you do not add a per-accelerator workflow.)
 
