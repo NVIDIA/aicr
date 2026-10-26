@@ -200,6 +200,7 @@ func TestValidSystemNamespacesMessages(t *testing.T) {
 		{"^(team-infra)$|", "matches every namespace"},
 		{"^[a-z0-9]", "matches every namespace"},
 		{3, "must be a string"},
+		{"^(" + strings.Repeat("a|", 5000) + "b)$", "longer than the 8192 AICR validates"},
 		// The first alternative matches every namespace; the second outgrows
 		// the search, which must fail closed rather than accept.
 		{"^.{1,63}$|^.*a.{12}$", "too complex to validate"},
@@ -302,7 +303,7 @@ func TestMatchesEveryNamespaceAgreesWithRegexp(t *testing.T) {
 func TestValidSystemNamespacesBoundsWork(t *testing.T) {
 	for _, p := range []string{
 		"^.{1,63}$|^.*a.{12}$|" + strings.Repeat("a?", 300) + "x",
-		strings.Repeat("(?:abc|def)", 3000),
+		strings.Repeat("[a-z]{1000}", 20), // short, but compiles past maxProgramInsts
 	} {
 		start := time.Now()
 		_, err := ValidSystemNamespaces(t.Context(), p)

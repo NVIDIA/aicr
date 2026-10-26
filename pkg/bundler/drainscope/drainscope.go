@@ -201,6 +201,11 @@ func ValidSystemNamespaces(ctx context.Context, raw any) (string, error) {
 				"evict kube-system, cert-manager and NVSentinel itself -- set a pattern naming only the extra "+
 				"namespaces to protect", SystemNamespacesPath))
 	}
+	if len(s) > maxPatternLen {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("%s is %d bytes, longer than the %d AICR validates -- use a simpler pattern, such as an "+
+				"anchored list of the namespaces to protect", SystemNamespacesPath, len(s), maxPatternLen))
+	}
 	if _, err := regexp.Compile(s); err != nil {
 		return "", errors.Wrap(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("%s %q is not a valid regular expression, so node-drainer would fail to start",
@@ -225,10 +230,13 @@ func ValidSystemNamespaces(ctx context.Context, raw any) (string, error) {
 }
 
 // Namespace names are DNS-1123 labels: at most 63 of a-z, 0-9 and '-',
-// starting and ending with a letter or digit. maxSearchWork caps the
+// starting and ending with a letter or digit. maxPatternLen bounds the
+// compile work before any check runs; the pattern the bundle generates from
+// every registry component is about 1 KiB. maxSearchWork caps the
 // instructions the search examines in total and maxProgramInsts the work of
 // any one state, so its cost has a fixed bound whatever the pattern.
 const (
+	maxPatternLen   = 8 << 10
 	maxNamespaceLen = 63
 	namespaceRunes  = "abcdefghijklmnopqrstuvwxyz0123456789-"
 	maxSearchStates = 1 << 16
