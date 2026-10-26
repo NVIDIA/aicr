@@ -42,8 +42,6 @@ import (
 )
 
 const (
-	// draLabelerScriptTimeout bounds one labeler run. The script sleeps 5s
-	// between attempts, so a case that waits out a denied attempt needs two.
 	draLabelerScriptTimeout = 60 * time.Second
 	draLabelerPollInterval  = 100 * time.Millisecond
 	draLabelerKillDelay     = 5 * time.Second
