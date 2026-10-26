@@ -34,7 +34,7 @@ linting:
   # followed immediately by `key: 'value'`, so any comment between them silently
   # drops this pin from Renovate's scan (#2657).
   # renovate: datasource=github-releases depName=oasdiff/oasdiff depType=linting
-  oasdiff: 'v1.34.0'
+  oasdiff: 'v1.34.1'
   # Refreshed automatically by tools/update-oasdiff-checksums via Renovate
   # postUpgradeTasks whenever the version above is bumped. Same reasoning as the
   # oras pin in security_tools: the checksums.txt served beside the tarball
@@ -52,7 +52,7 @@ linting:
   #
   # linux/amd64 only: this feeds the setup-build-tools action, which runs on
   # ubuntu runners. tools/setup-tools handles local dev on other platforms.
-  oasdiff_sha256_linux_amd64: '7c88e09fd500b231af2819eb21f6fdfc7bcdfe2741d2c1937c59e7b72c8a575a'
+  oasdiff_sha256_linux_amd64: '75775f65b0adebd26a8e013af51a799342dfdc6262d89efa9e3b7bdf89657d90'
   # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
   golangci_lint: 'v2.15.0'
   # renovate: datasource=pypi depName=yamllint depType=linting
