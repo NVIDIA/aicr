@@ -52,7 +52,6 @@ spec:
         - cert-manager
         - prometheus-operator-crds
         - gpu-operator
-        - prometheus-operator-crds
 
   validation:
     conformance:
