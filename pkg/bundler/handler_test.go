@@ -789,3 +789,14 @@ func TestParseBundleConfig_AppName(t *testing.T) {
 		})
 	}
 }
+
+func TestSupportedBundleQueryParametersIncludesEveryParsedParameter(t *testing.T) {
+	t.Parallel()
+	// A parameter parseQueryParams reads must also pass the server's strict
+	// allowlist, or the REST surface rejects it before parsing.
+	for _, name := range []string{bundleQuerySplit, bundleQuerySerial, bundleQueryVendorCharts, bundleQueryBundlers} {
+		if _, ok := SupportedBundleQueryParameters()[name]; !ok {
+			t.Errorf("SupportedBundleQueryParameters() lacks %q", name)
+		}
+	}
+}

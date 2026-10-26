@@ -29,6 +29,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helm"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -228,10 +229,23 @@ func planSplit(declared []recipe.ComponentRef, enabled *recipe.RecipeResult) (*s
 // between one class's injected -pre/-post/-readiness release and another
 // class's component. Identities are (namespace, release) pairs, since a
 // namespace may span classes.
-func (b *DefaultBundler) validateSplitHelmIdentities(ctx context.Context, enabled *recipe.RecipeResult) error {
-	pre, err := b.collectComponentPreManifests(ctx, enabled)
+func (b *DefaultBundler) validateSplitHelmIdentities(ctx context.Context, enabled *recipe.RecipeResult, componentValues map[string]map[string]any) error {
+	rawPre, err := b.collectComponentPreManifests(ctx, enabled)
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to collect component pre-manifests")
+	}
+	// Count only the -pre releases the writer emits: a pre-manifest that
+	// renders no object injects no folder.
+	lfComponents := make([]localformat.Component, 0, len(enabled.ComponentRefs))
+	for _, ref := range enabled.ComponentRefs {
+		lfComponents = append(lfComponents, localformat.Component{
+			Name: ref.Name, Namespace: ref.Namespace, ChartName: ref.EffectiveChart(),
+			Version: ref.Version, Values: componentValues[ref.Name],
+		})
+	}
+	pre, err := localformat.FilterEmptyPreManifests(ctx, lfComponents, rawPre)
+	if err != nil {
+		return err
 	}
 	post, err := b.collectComponentManifests(ctx, enabled)
 	if err != nil {
@@ -359,7 +373,6 @@ func (b *DefaultBundler) makeSplit(
 	componentValues map[string]map[string]any,
 	dir string,
 	upgradeNotes []upgrade.BundleNote,
-	upgradeNotice string,
 	start time.Time,
 ) (retOut *result.Output, retErr error) {
 
@@ -371,15 +384,42 @@ func (b *DefaultBundler) makeSplit(
 	if err != nil {
 		return nil, err
 	}
-	if identityErr := b.validateSplitHelmIdentities(ctx, enabled); identityErr != nil {
+	if identityErr := b.validateSplitHelmIdentities(ctx, enabled, componentValues); identityErr != nil {
 		return nil, identityErr
 	}
+
+	// Reserve the destination with an atomic create-only mkdir, so a second
+	// attempt started after the absence check is rejected here rather than
+	// racing the final rename. A failure before publication removes the
+	// reservation again (rmdir, never a recursive delete, so content someone
+	// else put there is left alone).
+	if mkErr := os.Mkdir(dest, 0o755); mkErr != nil {
+		if stderrors.Is(mkErr, os.ErrExist) {
+			return nil, errors.Wrap(errors.ErrCodeConflict, fmt.Sprintf(
+				"--split publishes a new bundle set and does not replace an existing path: %s already exists", dest), mkErr)
+		}
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to reserve the bundle set destination", mkErr)
+	}
+	published := false
+	defer func() {
+		if published {
+			return
+		}
+		if rmErr := os.Remove(dest); rmErr != nil && !stderrors.Is(rmErr, os.ErrNotExist) {
+			retErr = stderrors.Join(retErr, errors.Wrap(errors.ErrCodeInternal,
+				"failed to release the bundle set destination", rmErr))
+		}
+	}()
 
 	stage, err := os.MkdirTemp(parent, splitStagePrefix+filepath.Base(dest)+"-")
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create the bundle set staging directory", err)
 	}
-	published := false
+	// MkdirTemp creates 0700; the published root gets the mode an ordinary
+	// bundle directory has, so another owner can traverse the set.
+	if chmodErr := os.Chmod(stage, 0o755); chmodErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to set the bundle set staging directory mode", chmodErr)
+	}
 	defer func() {
 		if published {
 			return
@@ -398,6 +438,17 @@ func (b *DefaultBundler) makeSplit(
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to copy external data files")
 	}
 
+	// Class READMEs sit one level below the set root, where the upgrade
+	// guide is written, so their notice links ../UPGRADING.md.
+	classNotice := ""
+	if len(upgradeNotes) > 0 {
+		var sb strings.Builder
+		if noticeErr := upgrade.WriteNoticeAt(&sb, upgradeNotes, string(b.Config.Deployer()), "../"+upgrade.GuideFile); noticeErr != nil {
+			return nil, noticeErr
+		}
+		classNotice = sb.String()
+	}
+
 	output := &deployer.Output{Files: make([]string, 0)}
 	var steps, notes []string
 	for _, plan := range partition.classes {
@@ -410,7 +461,7 @@ func (b *DefaultBundler) makeSplit(
 				subsetValues[ref.Name] = v
 			}
 		}
-		d, buildErr := b.buildDeployer(ctx, &subset, subsetValues, nil, upgradeNotice)
+		d, buildErr := b.buildDeployer(ctx, &subset, subsetValues, nil, classNotice)
 		if buildErr != nil {
 			return nil, buildErr
 		}
@@ -467,7 +518,7 @@ func (b *DefaultBundler) makeSplit(
 	if sumErr := checksum.WriteChecksums(ctx, stage, output); sumErr != nil {
 		return nil, errors.PropagateOrWrap(sumErr, errors.ErrCodeInternal, "failed to finalize bundle set checksums")
 	}
-	if _, attestErr := b.attestBundle(ctx, stage, dataFiles, enabled); attestErr != nil {
+	if _, attestErr := b.attestBundleAt(ctx, stage, dest, dataFiles, enabled); attestErr != nil {
 		return nil, attestErr
 	}
 	verifyOpts := checksum.InventoryOptions{AllowedMetadataPaths: attestation.BundleMetadataPaths()}
@@ -476,9 +527,17 @@ func (b *DefaultBundler) makeSplit(
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed final bundle set inventory verification")
 	}
 
-	// One atomic move publishes the verified set. A destination that appeared
-	// meanwhile makes the rename fail, and the deferred cleanup removes the
-	// stage; the published set, whoever wrote it, is left alone.
+	// Publish: release the empty reservation and move the verified set into
+	// its place. rename(2) never replaces a populated directory (ENOTEMPTY),
+	// and macOS refuses even an empty one, so a destination that something
+	// else filled meanwhile fails here, with the stage removed and that
+	// content untouched. On Linux the only directory the rename can replace
+	// is another attempt's empty reservation, whose owner then fails its own
+	// release step; at most one attempt publishes.
+	if rmErr := os.Remove(dest); rmErr != nil && !stderrors.Is(rmErr, os.ErrNotExist) {
+		return nil, errors.Wrap(errors.ErrCodeConflict,
+			fmt.Sprintf("failed to publish the bundle set to %s (the reserved destination was replaced)", dest), rmErr)
+	}
 	if renameErr := os.Rename(stage, dest); renameErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeConflict,
 			fmt.Sprintf("failed to publish the bundle set to %s (the destination must be absent)", dest), renameErr)

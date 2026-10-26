@@ -75,6 +75,7 @@ var supportedBundleQueryParameters = map[string]struct{}{
 	bundleQueryRepo:                      {},
 	bundleQuerySerial:                    {},
 	bundleQuerySet:                       {},
+	bundleQuerySplit:                     {},
 	bundleQuerySystemNodeSelector:        {},
 	bundleQuerySystemNodeToleration:      {},
 	bundleQueryVendorCharts:              {},

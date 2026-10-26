@@ -449,7 +449,7 @@ func TestValidateSplitHelmIdentities(t *testing.T) {
 	t.Run("clean set passes", func(t *testing.T) {
 		t.Parallel()
 		rr := splitTestRecipe()
-		if err := b.validateSplitHelmIdentities(t.Context(), rr); err != nil {
+		if err := b.validateSplitHelmIdentities(t.Context(), rr, nil); err != nil {
 			t.Fatalf("validateSplitHelmIdentities() error = %v", err)
 		}
 	})
@@ -465,7 +465,7 @@ func TestValidateSplitHelmIdentities(t *testing.T) {
 			Name: "gpu-operator-post", Namespace: "gpu-operator", Version: "1.0.0", Type: "helm",
 			Source: "https://charts.example.com", Chart: "shim",
 		})
-		err := b.validateSplitHelmIdentities(t.Context(), rr)
+		err := b.validateSplitHelmIdentities(t.Context(), rr, nil)
 		if err == nil {
 			t.Fatal("validateSplitHelmIdentities() = nil, want the release collision")
 		}
@@ -482,9 +482,139 @@ func TestValidateSplitHelmIdentities(t *testing.T) {
 			Name: "probe-readiness", Namespace: "probe", Version: "1.0.0", Type: "helm",
 			Source: "https://charts.example.com", Chart: "probe",
 		})
-		err := b.validateSplitHelmIdentities(t.Context(), rr)
+		err := b.validateSplitHelmIdentities(t.Context(), rr, nil)
 		if err == nil || !strings.Contains(err.Error(), "reserved") {
 			t.Fatalf("validateSplitHelmIdentities() error = %v, want the reserved suffix rejected", err)
 		}
 	})
+}
+
+// TestMake_SplitUpgradeNoticeLinksSetRootGuide pins that a class README's
+// upgrade notice links the guide written at the set root, one level up.
+func TestMake_SplitUpgradeNoticeLinksSetRootGuide(t *testing.T) {
+	t.Parallel()
+	rr := splitTestRecipe()
+	// nodewright-operator v0.20.0 is the target of a manual transition record
+	// (from <0.18.0), so the bundle carries upgrade notes and UPGRADING.md.
+	rr.ComponentRefs = append(rr.ComponentRefs, recipe.ComponentRef{
+		Name: "nodewright-operator", Namespace: "nodewright", Version: "v0.20.0", Type: "helm",
+		Source: "oci://ghcr.io/nvidia/nodewright/charts", Chart: "nodewright",
+	})
+	rr.DeploymentOrder = append(rr.DeploymentOrder, "nodewright-operator")
+	dest := filepath.Join(t.TempDir(), "set")
+	if _, err := newSplitBundler(t).Make(t.Context(), rr, dest); err != nil {
+		t.Fatalf("Make() error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "UPGRADING.md")); err != nil {
+		t.Fatalf("set root has no UPGRADING.md: %v", err)
+	}
+	for _, class := range []string{"core", "ops"} {
+		readme, err := os.ReadFile(filepath.Join(dest, class, "README.md"))
+		if err != nil {
+			t.Fatalf("read %s README: %v", class, err)
+		}
+		if !strings.Contains(string(readme), "](../UPGRADING.md)") {
+			t.Errorf("%s README does not link ../UPGRADING.md", class)
+		}
+		if strings.Contains(string(readme), "](UPGRADING.md)") {
+			t.Errorf("%s README links UPGRADING.md inside the class directory, which does not exist", class)
+		}
+		if _, err := os.Stat(filepath.Join(dest, class, "UPGRADING.md")); err == nil {
+			t.Errorf("%s class carries its own UPGRADING.md; the guide belongs to the set root", class)
+		}
+	}
+}
+
+// TestMake_SplitPublishedRootIsTraversable pins the set root's mode: the
+// stage is created private by MkdirTemp, and the published root must be
+// readable like an ordinary bundle directory.
+func TestMake_SplitPublishedRootIsTraversable(t *testing.T) {
+	t.Parallel()
+	dest := filepath.Join(t.TempDir(), "set")
+	if _, err := newSplitBundler(t).Make(t.Context(), splitTestRecipe(), dest); err != nil {
+		t.Fatalf("Make() error = %v", err)
+	}
+	info, err := os.Stat(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm&0o055 != 0o055 {
+		t.Errorf("set root mode = %o, want group and others able to traverse it", perm)
+	}
+}
+
+// recordingAttester captures the subject it was asked to sign and can
+// tamper with the destination before returning, to drive the rename path.
+type recordingAttester struct {
+	subject *attestation.AttestSubject
+	tamper  func()
+}
+
+func (a *recordingAttester) Attest(_ context.Context, subject attestation.AttestSubject) ([]byte, error) {
+	a.subject = &subject
+	if a.tamper != nil {
+		a.tamper()
+	}
+	return []byte(`{"stub":true}`), nil
+}
+func (a *recordingAttester) Identity() string    { return "test" }
+func (a *recordingAttester) HasRekorEntry() bool { return false }
+
+func TestMake_SplitAttestationNamesPublishedPath(t *testing.T) {
+	t.Parallel()
+	dest := filepath.Join(t.TempDir(), "set")
+	att := &recordingAttester{}
+	b, err := New(
+		WithConfig(config.NewConfig(config.WithSplit(true), config.WithAttest(true))),
+		WithAttester(att),
+		WithVerifiedBinaryAttestation([]byte("stub")),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if _, err := b.Make(t.Context(), splitTestRecipe(), dest); err != nil {
+		t.Fatalf("Make() error = %v", err)
+	}
+	if att.subject == nil {
+		t.Fatal("attester was not called")
+	}
+	if att.subject.Metadata.OutputDir != dest {
+		t.Errorf("attestation outputDir = %q, want the published path %q", att.subject.Metadata.OutputDir, dest)
+	}
+}
+
+// TestMake_SplitLoserLeavesPublishedSetAlone drives the rename path: the
+// reservation is replaced by a populated directory before publication, so
+// the rename must fail with a conflict, leave that content untouched, and
+// remove the stage.
+func TestMake_SplitLoserLeavesPublishedSetAlone(t *testing.T) {
+	t.Parallel()
+	parent := t.TempDir()
+	dest := filepath.Join(parent, "set")
+	marker := filepath.Join(dest, "winner.txt")
+	att := &recordingAttester{tamper: func() {
+		_ = os.Remove(dest)
+		_ = os.MkdirAll(dest, 0o755)
+		_ = os.WriteFile(marker, []byte("published by someone else"), 0o600)
+	}}
+	b, err := New(
+		WithConfig(config.NewConfig(config.WithSplit(true), config.WithAttest(true))),
+		WithAttester(att),
+		WithVerifiedBinaryAttestation([]byte("stub")),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	_, err = b.Make(t.Context(), splitTestRecipe(), dest)
+	if err == nil {
+		t.Fatal("Make() = nil error, want a publication conflict")
+	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeConflict)
+	if data, readErr := os.ReadFile(marker); readErr != nil || string(data) != "published by someone else" {
+		t.Errorf("the other party's set was altered: %v %q", readErr, data)
+	}
+	if entries, _ := os.ReadDir(dest); len(entries) != 1 {
+		t.Errorf("destination has %d entries, want only the other party's file", len(entries))
+	}
+	assertNoStageLeft(t, parent)
 }

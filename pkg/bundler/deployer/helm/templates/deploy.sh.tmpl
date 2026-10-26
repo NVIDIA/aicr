@@ -24,10 +24,10 @@ set -euo pipefail
 #   --retries N    Retry failed helm/kubectl operations N times with backoff (default: 5, 0 = fail-fast)
 #
 {{- if .Split }}
-#
 # Class {{ .Split.Class }} of an AICR bundle set (ADR-018). Install the classes in
 # order ({{ range $i, $c := .Split.ClassOrder }}{{ if $i }}, then {{ end }}{{ $c }}{{ end }}) and tear them down in reverse; see README.md in this
-# directory for what this class shares with an earlier class and must keep.
+# directory for what an earlier class installed that this class must keep.
+#
 {{- end }}
 # This script is optional — each component subdirectory has its own install.sh
 # with a single baked-in `helm upgrade --install` command. For detailed behavior

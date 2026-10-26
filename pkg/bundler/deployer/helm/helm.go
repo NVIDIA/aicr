@@ -560,10 +560,11 @@ type readmeTemplateData struct {
 
 // SplitContext describes the class directory a bundle set renders this
 // output as (ADR-018). ClassOrder is every class the set contains, in
-// install order; teardown is the reverse. SharedNamespaces and
-// SharedCRDGroups name what this class shares with an earlier class, which
-// its teardown must leave in place because the earliest class using them
-// removes them, and it is torn down last.
+// install order; teardown is the reverse. SharedNamespaces are the
+// namespaces this class uses that an earlier class also uses;
+// SharedCRDGroups are the CRD groups earlier classes install. Teardown of
+// this class leaves both in place: the earliest class using them removes
+// them, and it is torn down last.
 type SplitContext struct {
 	Class            string
 	ClassOrder       []string
