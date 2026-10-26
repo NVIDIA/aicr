@@ -1320,6 +1320,29 @@ the base or a mixin. It ships by default in two stock recipes:
 stock-adoption amendment, and `h100-gke-cos-inference-dynamo`, which inherits
 it from that recipe.
 
+**Installing it does not produce AIBOMs.** The controller writes an AIBOM only
+for workloads in a namespace that carries the opt-in label, and AICR never
+labels a namespace for you. It still reads workload specifications
+cluster-wide from the moment it is installed, and each AIBOM, which records the
+models, frameworks and images a workload runs, is stored inline in etcd; read
+[Security, privacy, and retention](#security-privacy-and-retention) before
+choosing namespaces. To opt in a namespace your AI workloads run in, such as
+the one a `DynamoGraphDeployment` or `NIMService` is created in:
+
+```shell
+NAMESPACE="my-inference"  # replace with a namespace your AI workloads run in
+kubectl label namespace "${NAMESPACE}" aibom.k8saibom.dev/enabled=true
+kubectl get aiboms.aibom.k8saibom.dev -n "${NAMESPACE}"
+```
+
+AIBOMs appear as the controller reconciles the namespace's workloads. A
+workload that matches no AI workload signal gets no AIBOM, by design, so an
+empty list on its own does not mean the controller is broken. If the namespace is
+declared in Git or by an infrastructure-as-code tool, add the label to that
+manifest instead, so a re-created namespace keeps it. A
+`DynamoGraphDeployment` that never gets an AIBOM usually means the controller
+started before the Dynamo CRDs existed; see the restart note below.
+
 `aicr recipe --runtime-inventory <mode>` selects the component at generation
 time and records the choice in the emitted recipe as
 `configuration.runtimeInventory.mode`:
@@ -1444,6 +1467,9 @@ which is linked rather than restated here so it cannot drift out of date on
 our side. That link deliberately tracks `main`: the point is the current
 policy, not a snapshot of it, which is the opposite of how this page cites
 qualified artifacts.
+
+Other distributions that ship k8s-aibom are listed in upstream's
+[ADOPTERS.md](https://github.com/GoogleCloudPlatform/k8s-aibom/blob/main/ADOPTERS.md).
 
 AICR observed the dedicated integration test (`make k8s-aibom-test`) passing
 against v1.3.0 on its Kind 1.36.1 node image at initial qualification; that is
