@@ -2406,7 +2406,7 @@ gb300-nvke-ubuntu-training:
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 7ffe32c2e799396b13d0fefc870cdab28e82e363681d0d5301c09d3d98c3ffdd
-  010-gpu-operator/values.yaml: 89fb6f12706977dd780dc3759965f493545fa4dc3389825da30c509ab61ebbd2
+  010-gpu-operator/values.yaml: a30e9b39a69f6b5148dd0bc770a690962198055a008bc58cb59878e501fc63a6
   011-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   011-kai-scheduler/upstream.env: 28796b9c560ab50439fa444585d161dfdb838c82420680a85a0e6eeef3fb7af0
@@ -2436,10 +2436,10 @@ gb300-nvke-ubuntu-training:
   016-nvsentinel/values.yaml: 2d7d0fb3d9a11c0250b6564e2e6b9d7695fc460efb3bdbe8b1dbb91e80264915
   README.md: 931b0b5480a6c616d26b57d80f4d8543e932340b18985f72b92c852074f7c737
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
-  bundle-info.yaml: e789c1ef2b9aadd68ba9dfe76a094a2512d23858593d4361694e2f9471ca4747
-  checksums.txt: 83f3ce3f85e86a49444bca92aafe1d1a717fdfab753356e0a2adce05088b310f
+  bundle-info.yaml: 0a9942040ad5fc013564d6164e033c48b0cfde394ba9f911c7484a6ea4107032
+  checksums.txt: 684af6a85d965180a1d9f0a6bbae99b670951a3f4844d5a5e649f86f01bf517e
   deploy.sh: 162043e2df91851209d46bfbff6e935394b00417dd15005652f701a7c813caca
-  recipe.yaml: c50cfd1745152e3bd9ecfdec8445e7f8662cd6ccd85ab4e6d0f689563488bb44
+  recipe.yaml: d8ac27728ea9edc642f35953fa8db6bea66debef6da6be4c4fdf670b2de55c56
 h100-aks-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f

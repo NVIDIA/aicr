@@ -152,6 +152,31 @@ the recipe may rewrite firmware. Raise `NUM_OF_VFS` on the host first if you
 need VFs; then the GB200 leaf's `sriov-ib-networks` component is the model,
 with `linkType: ETH` and `SriovNetwork` in place of `SriovIBNetwork`.
 
+## Container toolkit configuration
+
+The recipe sets two environment variables on the GPU Operator's container toolkit,
+the same two the GB200 NVKE recipe sets.
+
+`RUNTIME_CONFIG_SOURCE=file` makes the toolkit read `/etc/containerd/config.toml`
+directly. NVKE's image ships containerd 2.3.0 with a version 3 configuration, and
+the toolkit's default source, `containerd config dump`, reports the migrated version
+4 on 2.3. A version 4 NVIDIA drop-in imported by the version 3 root stops containerd
+from starting (85 restarts on the GB200 reference tenant before the fix). Reading the
+file keeps the drop-in at the host's version. The same toolkit defect took down AKS
+nodes with a version 2 root (NVIDIA/aicr#1688).
+
+`ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED=false` makes the toolkit
+refuse `NVIDIA_VISIBLE_DEVICES` from unprivileged containers. A GPU reaches a
+workload only through a `nvidia.com/gpu` request or a DRA claim; an unprivileged pod
+that selects the `nvidia` RuntimeClass and sets `NVIDIA_VISIBLE_DEVICES=all` sees
+none. Pods that need a GPU must therefore either request one or run with
+`securityContext.privileged: true`; privileged management pods (the GPU Operator
+operands, NVSentinel's metadata-collector) keep the env-var path because the toolkit
+always honors it for privileged containers. `ACCEPT_NVIDIA_VISIBLE_DEVICES_AS_VOLUME_MOUNTS`
+stays at its default of `false`: the device plugin injects over `cdi-cri`, so the
+volume-mount device list is never produced and accepting it would only add a
+`hostPath`-gated request path.
+
 ## Generate and validate
 
 ```bash
