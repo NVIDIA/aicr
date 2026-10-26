@@ -296,12 +296,12 @@ The findings above are v0.1.0. Rechecked at the pin AICR ships:
 
 | Artifact | Digest |
 |---|---|
-| Chart `v0.6.0` | `sha256:af20cf1d7827a35e60a539ef9f7fc8445e0def61f345e8bdb030afc76f01f6cf` |
-| Image index `manager:v0.6.0` | `sha256:8008c6f9f7e19b317caf0f91afab06b88027c14d7dd03e4173bd49cd1f3cd27a` |
+| Chart `v0.8.2` | `sha256:75458557b0ff2610c7eea01e0b315ae0355cc6b2baa816756a2dba0c0c2387a4` |
+| Image index `manager:v0.8.2` | `sha256:c5de16ddb95bd923c6b04d04d7ff9754a7d7b83d18fa400baa33e7ae72fc593d` |
 
 Both carry a cosign signature and a SLSA v1.0 provenance attestation, and both
 verify against certificate identity
-`https://github.com/NVIDIA/cluster-readiness-engine/.github/workflows/attest.yml@refs/tags/v0.6.0`
+`https://github.com/NVIDIA/cluster-readiness-engine/.github/workflows/attest.yml@refs/tags/v0.8.2`
 at the GitHub Actions OIDC issuer. The chart attestations bind the chart digest
 — confirmed by running `cosign tree` against the digest rather than the tag.
 Anonymous `helm pull` succeeds with an empty registry config, so no pull secret
@@ -379,11 +379,11 @@ not available to stock recipes yet.
 
 1. ~~Upstream: add build provenance to the controller image, attributable to
    the release workflow and meeting a stated SLSA build level.~~ Closed at
-   v0.2.0 and still verifying at the current v0.6.0 pin — SLSA v1.0 provenance
+   v0.2.0 and still verifying at the current v0.8.2 pin — SLSA v1.0 provenance
    verifies against the release workflow identity.
 2. Upstream: publish a chart SBOM. ~~Sign the Helm chart and publish chart
    provenance.~~ Signature and SLSA v1.0 provenance have been present since
-   v0.2.0 and bind the chart digest; the **SBOM** is still absent at v0.6.0,
+   v0.2.0 and bind the chart digest; the **SBOM** is still absent at v0.8.2,
    because the CycloneDX attestation covers the image's per-platform children
    only. Open, so item 6 is not yet reached.
 3. Upstream: add a run-level cap on the node footprint, so a `Certification`
