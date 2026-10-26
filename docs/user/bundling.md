@@ -204,6 +204,16 @@ built it, and which Helm release landed in which directory.
 `kustomization.yaml`, `main.tf`, `gitrepo.yaml`, or `helmops.yaml` — so automation reads one key instead of branching on
 `build.deployer`.
 
+In a bundle set generated with `--split`, the root `bundle-info.yaml`
+describes the whole set: `layout.entrypoint` is the first class's script
+(`core/deploy.sh`), and it installs only the releases whose `path` starts
+with that class directory. Every other release's `path` starts with a later
+class directory, whose own `deploy.sh` installs it; `split.yaml` lists the
+classes in install order. A consumer can recognize a set from
+`bundle-info.yaml` alone by an entrypoint below the root and release paths
+under more than one class directory. An explicit set marker in the record
+is deferred to a readers-first schema change (ADR-022).
+
 `layout.releases` lists every Helm release the bundle installs, in deployment
 order, and that ordering is normative: there is no ordinal field, so a
 consumer reads sequence from list position rather than from a number. A
@@ -1002,13 +1012,17 @@ each class's own `deploy.sh` in the order `split.yaml` lists under
 `classOrder`. A set contains a directory only for classes that have an
 enabled component, so read the order from the file rather than assuming
 both `core/` and `ops/` exist (see
-[Split a bundle by class](#split-a-bundle-by-class)):
+[Split a bundle by class](#split-a-bundle-by-class)). The snippet needs
+`yq` v4 (mikefarah) and stops with a non-zero exit when the class list
+cannot be read or a class fails:
 
 ```bash
-cd bundles && aicr verify . \
-  && for class in $(yq eval '.classOrder[]' split.yaml); do
-       (cd "$class" && chmod +x deploy.sh && ./deploy.sh) || break
-     done
+cd bundles && aicr verify . || exit 1
+classes=$(yq eval '.classOrder[]' split.yaml) && [ -n "$classes" ] \
+  || { echo "cannot read classOrder from split.yaml" >&2; exit 1; }
+for class in $classes; do
+  (cd "$class" && chmod +x deploy.sh && ./deploy.sh) || exit 1
+done
 ```
 
 For the `terraform` deployer, verify in the step that generates the bundle,

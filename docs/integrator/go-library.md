@@ -1185,8 +1185,9 @@ out, err := client.MakeBundle(ctx, rec, opts)
 ```
 
 `out.OutputDir` is the set root with `recipe.yaml`, `split.yaml`,
-`bundle-info.yaml` and `checksums.txt`; `out.Deployment.Steps` lists `core/deploy.sh` then
-`ops/deploy.sh`. See [Split a bundle by class](../user/bundling.md#split-a-bundle-by-class)
+`bundle-info.yaml` and `checksums.txt`; `out.Deployment.Steps` holds three
+commands per class in `classOrder` (`cd <set>/<class>`, `chmod +x deploy.sh`,
+`./deploy.sh`). See [Split a bundle by class](../user/bundling.md#split-a-bundle-by-class)
 for the layout, ordering contract and rejections.
 
 The six caller-side fields have their own type, `BundleInputOptions()`, not

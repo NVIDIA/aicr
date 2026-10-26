@@ -103,7 +103,10 @@ type BundleArtifact = *result.Output
 // Attest and Attester together.
 type BundleOptions struct {
 	// Config carries an already-built bundler configuration and, when
-	// non-nil, wins over the 18 flat fields below (Deployer through AppName).
+	// non-nil, wins over the 18 flat fields below (Deployer through AppName)
+	// and over Split: a split set then needs config.WithSplit on the Config,
+	// and MakeBundle rejects Split=true with a Config that lacks it rather
+	// than silently producing an ordinary bundle.
 	// It does NOT override Attester, OIDCResolve, BinaryAttestation,
 	// OutputDir or Timeout — see "Two ways to supply the bundler
 	// configuration" above. When both Config and every flat field are unset,
@@ -187,11 +190,14 @@ type BundleOptions struct {
 
 	// Split renders a class-partitioned bundle set (ADR-018): one directory
 	// per registry class with enabled components, under a set root holding
-	// recipe.yaml, split.yaml, checksums.txt and the attestation. Requires an
-	// absent OutputDir whose parent exists; the set is published there with
-	// one atomic move. Supported only with the helm deployer. Off by default.
-	// Unlike the flat fields above, no config file setting derives it: it is
-	// set by the caller (the CLI flag, the REST query parameter, or SDK code).
+	// recipe.yaml, split.yaml, bundle-info.yaml, checksums.txt and, with
+	// Attest, the attestation. Requires an absent OutputDir whose parent
+	// exists; the set is published there with one atomic move. Supported only
+	// with the helm deployer. Off by default. Unlike the flat fields above, no
+	// config file setting derives it: SDK callers set it here, while the CLI
+	// and REST surfaces carry it through config.WithSplit on Config. A non-nil
+	// Config supersedes this field; MakeBundle rejects Split=true when that
+	// Config does not carry it.
 	Split bool
 
 	// Attester signs bundle content. When nil, MakeBundle derives one from
@@ -516,6 +522,14 @@ func (c *Client) MakeBundle(ctx context.Context, recipe *RecipeResult, opts Bund
 	}
 
 	cfg := opts.bundlerConfig()
+	// Config supersedes the flat fields, Split included. A caller who sets
+	// both and disagrees would otherwise get an ordinary bundle with none
+	// of the split checks and no error.
+	if opts.Config != nil && opts.Split && !cfg.Split() {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"BundleOptions.Split=true is superseded by BundleOptions.Config, which does not enable split; "+
+				"build the Config with config.WithSplit(true) or leave Config unset")
+	}
 
 	bundlerOpts := []bundler.Option{bundler.WithConfig(cfg)}
 	// Attester wins when supplied; otherwise derive one from OIDCResolve. The

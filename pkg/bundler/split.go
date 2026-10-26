@@ -418,17 +418,6 @@ func (b *DefaultBundler) makeSplit(
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to copy external data files")
 	}
 
-	// Class READMEs sit one level below the set root, where the upgrade
-	// guide is written, so their notice links ../UPGRADING.md.
-	classNotice := ""
-	if len(upgradeNotes) > 0 {
-		var sb strings.Builder
-		if noticeErr := upgrade.WriteNoticeAt(&sb, upgradeNotes, string(b.Config.Deployer()), "../"+upgrade.GuideFile); noticeErr != nil {
-			return nil, noticeErr
-		}
-		classNotice = sb.String()
-	}
-
 	output := &deployer.Output{Files: make([]string, 0)}
 	// infoOut feeds the set-root bundle-info.yaml: the first class's deploy.sh
 	// is the entrypoint and every release path is prefixed with its class
@@ -445,6 +434,12 @@ func (b *DefaultBundler) makeSplit(
 			if v, ok := componentValues[ref.Name]; ok {
 				subsetValues[ref.Name] = v
 			}
+		}
+		// Each class README carries only the notes for its own components,
+		// linking the guide one level up at the set root.
+		classNotice, noticeErr := classUpgradeNotice(upgradeNotes, plan.refs, string(b.Config.Deployer()))
+		if noticeErr != nil {
+			return nil, noticeErr
 		}
 		d, buildErr := b.buildDeployer(ctx, &subset, subsetValues, nil, classNotice)
 		if buildErr != nil {
@@ -645,4 +640,28 @@ func renameCheckThenMove(oldpath, newpath string) error {
 		return err
 	}
 	return os.Rename(oldpath, newpath)
+}
+
+// classUpgradeNotice renders the "Before You Upgrade" notice for one class
+// from the notes that concern its components, with the guide linked at the
+// set root. It returns "" when none of the class's components has a note.
+func classUpgradeNotice(notes []upgrade.BundleNote, refs []recipe.ComponentRef, deployer string) (string, error) {
+	inClass := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		inClass[ref.Name] = struct{}{}
+	}
+	var classNotes []upgrade.BundleNote
+	for _, n := range notes {
+		if _, ok := inClass[n.Component]; ok {
+			classNotes = append(classNotes, n)
+		}
+	}
+	if len(classNotes) == 0 {
+		return "", nil
+	}
+	var sb strings.Builder
+	if err := upgrade.WriteNoticeAt(&sb, classNotes, deployer, "../"+upgrade.GuideFile); err != nil {
+		return "", err
+	}
+	return sb.String(), nil
 }

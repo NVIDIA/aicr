@@ -43,7 +43,8 @@ The following constraints must be satisfied:
 
 This directory is the `{{ .Split.Class }}` class of an AICR bundle set
 (ADR-018). The set root holds the full `recipe.yaml`, `split.yaml`,
-`checksums.txt` and the attestation; verify the set there before deploying
+`bundle-info.yaml`, `checksums.txt` and, when generated with `--attest`,
+the attestation; verify the set there before deploying
 a class, and keep the set intact: a class directory copied out of it has no
 provenance of its own.
 

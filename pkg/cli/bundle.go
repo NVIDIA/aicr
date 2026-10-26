@@ -1081,7 +1081,8 @@ Package with explicit tag (overrides CLI version):
 				Usage: `Generate a bundle set partitioned by registry class (ADR-018) instead
 	of one bundle: one directory per class with enabled components (core,
 	then ops), under a set root holding the full recipe.yaml, split.yaml,
-	checksums.txt and the attestation. Install the classes in order and tear
+	bundle-info.yaml, checksums.txt and, with --attest, the attestation.
+	Install the classes in order and tear
 	them down in reverse. The complete recipe is validated once before the
 	partition is rendered, and the set is published with one atomic move to
 	--output, which must not exist yet. Supported only with --deployer helm

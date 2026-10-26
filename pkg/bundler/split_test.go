@@ -543,7 +543,7 @@ func TestMake_SplitUpgradeNoticeLinksSetRootGuide(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s README: %v", class, err)
 		}
-		if !strings.Contains(string(readme), "](../UPGRADING.md)") {
+		if class == "core" && !strings.Contains(string(readme), "](../UPGRADING.md)") {
 			t.Errorf("%s README does not link ../UPGRADING.md", class)
 		}
 		if strings.Contains(string(readme), "](UPGRADING.md)") {
@@ -552,6 +552,15 @@ func TestMake_SplitUpgradeNoticeLinksSetRootGuide(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dest, class, "UPGRADING.md")); err == nil {
 			t.Errorf("%s class carries its own UPGRADING.md; the guide belongs to the set root", class)
 		}
+	}
+	// Only the class that owns the noted component carries the notice.
+	coreReadme, _ := os.ReadFile(filepath.Join(dest, "core", "README.md"))
+	opsReadme, _ := os.ReadFile(filepath.Join(dest, "ops", "README.md"))
+	if !strings.Contains(string(coreReadme), "nodewright-operator") || !strings.Contains(string(coreReadme), "Before You Upgrade") {
+		t.Errorf("core README lacks the nodewright-operator upgrade notice")
+	}
+	if strings.Contains(string(opsReadme), "Before You Upgrade") {
+		t.Errorf("ops README carries an upgrade notice although none of its components has a note")
 	}
 }
 

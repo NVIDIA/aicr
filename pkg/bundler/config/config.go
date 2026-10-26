@@ -507,7 +507,8 @@ type Config struct {
 
 	// split renders one bundle set partitioned by registry class (ADR-018):
 	// a directory per class with enabled components, under a set root that
-	// holds recipe.yaml, split.yaml, checksums.txt and the attestation. Off
+	// holds recipe.yaml, split.yaml, bundle-info.yaml, checksums.txt and,
+	// with Attest, the attestation. Off
 	// by default; the ordinary single bundle is unchanged.
 	split bool
 }
@@ -1222,7 +1223,8 @@ func WithBundlers(names []string) Option {
 
 // WithSplit renders the bundle as a class-partitioned set (ADR-018): one
 // directory per class with enabled components, under a set root carrying
-// recipe.yaml, split.yaml, checksums.txt and the attestation. Off by
+// recipe.yaml, split.yaml, bundle-info.yaml, checksums.txt and, with
+// Attest, the attestation. Off by
 // default. Validate rejects it with any deployer other than helm, with
 // checksums disabled, or together with WithBundlers.
 func WithSplit(enabled bool) Option {

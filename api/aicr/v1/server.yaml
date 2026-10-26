@@ -1240,8 +1240,9 @@ components:
       description: >-
         Return a bundle set partitioned by registry class (ADR-018): one
         directory per class (core, then ops) under a set root holding
-        recipe.yaml, split.yaml, checksums.txt and the attestation. Helm
-        deployer only; cannot be combined with bundlers.
+        recipe.yaml, split.yaml, bundle-info.yaml, checksums.txt and, with
+        attest, the attestation. Helm deployer only; cannot be combined
+        with bundlers.
       schema:
         type: boolean
         default: false
