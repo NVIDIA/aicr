@@ -145,10 +145,13 @@ only the declared series, and loads no rules, probes, or scrape configurations.
 Those paths cannot be overridden. A declared source that is absent or disabled
 fails the bundle, as does a pattern that does not compile. With
 `kube-prometheus-stack` disabled nothing is injected or checked, and consumers
-use the platform's Prometheus, as `prometheus-adapter-ocp` does with
-OpenShift's Thanos Querier. Adding a consumer is a registry change only;
-overlays carry no telemetry configuration. Validators and evidence collection
-query only declared series, or query the observability backend.
+use the platform's Prometheus, as `prometheus-adapter-ocp` does with OpenShift's
+Thanos Querier. Adding a consumer is a registry change only; overlays carry no
+telemetry configuration. Validators query only declared series. CNCF evidence is
+collected on a stock bundle and queries `otel-lgtm`, where each target's `up`
+series replaces Prometheus's target list as evidence of discovery. `otel-lgtm`'s
+evaluation posture does not affect the evidence, which shows that metrics are
+discovered and collected, not that the backend is fit for production.
 
 **Replacing the runtime Prometheus server.** An owner who points consumers at
 their own backend must provide:
@@ -214,8 +217,10 @@ that meet it.
   nor the release applies the monitoring CRDs bundled inside NKTP's chart,
   which belong to `prometheus-operator-crds`.
 - Uninstall keeps the CRDs but deletes every collector, through a
-  `pre-delete` hook on the deployers that run Helm hooks. That hook's Job has
-  no toleration setting, so uninstall is qualified on a fully tainted cluster.
+  `pre-delete` hook on the deployers that run Helm hooks. That hook's Job takes
+  no tolerations, so where it cannot schedule, the documented uninstall deletes
+  the collectors while the operator still runs, then removes the release
+  without hooks.
 
 **Scheduling and resources.**
 
@@ -223,8 +228,9 @@ that meet it.
   its operator are system-class.
 - The node collector, `node-exporter`, and the `kube-state-metrics`
   DaemonSet reach every node.
-- Collectors keep NKTP's priority class with `preemptionPolicy: Never`, so
-  adopting NKTP never evicts a running workload.
+- Collectors keep NKTP's priority class, with AICR setting its
+  `preemptionPolicy` to `Never`, so adopting NKTP never evicts a running
+  workload.
 - Each stock platform's system pool must fit NKTP's central workloads, and
   qualification shows that it does.
 - AICR does not override collector resources. NKTP tunes each collector's
@@ -373,8 +379,8 @@ scale stay unaddressed.
 - The `opentelemetry.io` CRDs upgrade across a chart bump on every deployer
   with a CRD step.
 - Dependency order is exercised on the KWOK deployer matrix and on UAT.
-- Uninstall and rollback are exercised on every deployer, including on a
-  fully tainted cluster.
+- Uninstall and rollback are exercised on every deployer, including
+  uninstall without hooks on a fully tainted cluster.
 - Upgrading from an earlier NKTP release to the candidate keeps telemetry
   flowing.
 
@@ -389,6 +395,14 @@ scale stay unaddressed.
   `cluster-autoscaling` pass.
 - The Dynamo planner's SLA queries return data on an inference-dynamo
   recipe.
+
+**Conformance.**
+
+- The `accelerator-metrics` and `ai-service-metrics` validators pass unchanged.
+- CNCF evidence regenerates for accelerator metrics, and for AI service metrics
+  on Dynamo, NIM, and the trainer.
+- The Chainsaw monitoring assertions match the reduced stack and NKTP, and pass
+  in the GPU CI lanes.
 
 **Operational safety.**
 
