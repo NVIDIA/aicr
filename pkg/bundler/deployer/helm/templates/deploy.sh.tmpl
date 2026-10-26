@@ -23,6 +23,12 @@ set -euo pipefail
 #   --best-effort  Continue past individual component failures (log warnings)
 #   --retries N    Retry failed helm/kubectl operations N times with backoff (default: 5, 0 = fail-fast)
 #
+{{- if .Split }}
+#
+# Class {{ .Split.Class }} of an AICR bundle set (ADR-018). Install the classes in
+# order ({{ range $i, $c := .Split.ClassOrder }}{{ if $i }}, then {{ end }}{{ $c }}{{ end }}) and tear them down in reverse; see README.md in this
+# directory for what this class shares with an earlier class and must keep.
+{{- end }}
 # This script is optional — each component subdirectory has its own install.sh
 # with a single baked-in `helm upgrade --install` command. For detailed behavior
 # docs (CRD ordering, async components, error handling), see the AICR CLI Reference:
@@ -289,7 +295,7 @@ ORPHANED_CRD_GROUPS=""
 {{- if eq .Name "kai-scheduler" }} ORPHANED_CRD_GROUPS="${ORPHANED_CRD_GROUPS} kai.scheduler scheduling.run.ai"{{ end }}
 {{- if eq .Name "gpu-operator" }} ORPHANED_CRD_GROUPS="${ORPHANED_CRD_GROUPS} nvidia.com nfd.k8s-sigs.io"{{ end }}
 {{- if eq .Name "dynamo-platform" }} ORPHANED_CRD_GROUPS="${ORPHANED_CRD_GROUPS} grove.io scheduler.grove.io"{{ end }}
-{{- if eq .Name "kube-prometheus-stack" }} ORPHANED_CRD_GROUPS="${ORPHANED_CRD_GROUPS} monitoring.coreos.com"{{ end }}
+{{- if eq .Name $.MonitoringCRDsOwner }} ORPHANED_CRD_GROUPS="${ORPHANED_CRD_GROUPS} monitoring.coreos.com"{{ end }}
 {{- if eq .Name "k8s-nim-operator" }} ORPHANED_CRD_GROUPS="${ORPHANED_CRD_GROUPS} apps.nvidia.com"{{ end }}
 {{- if eq .Name "kubeflow-trainer" }} ORPHANED_CRD_GROUPS="${ORPHANED_CRD_GROUPS} trainer.kubeflow.org jobset.x-k8s.io"{{ end }}
 {{- end }}

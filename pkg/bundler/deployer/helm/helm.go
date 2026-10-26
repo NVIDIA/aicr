@@ -144,6 +144,14 @@ type Generator struct {
 	// first deployment heading of README.md. Empty adds nothing.
 	UpgradeNotice string
 
+	// Split, when set, renders this output as one class directory of an
+	// ADR-018 bundle set: deploy.sh keys its orphaned-CRD scan by the
+	// component that ships the CRDs, and README.md states the class install
+	// and teardown order and the namespaces and CRD groups shared with an
+	// earlier class. nil renders an ordinary bundle, byte-identical to before
+	// the field existed.
+	Split *SplitContext
+
 	// vendorRecords is populated by Generate when VendorCharts is on.
 	// Captured here so generateProvenanceFile can write provenance.yaml
 	// without re-threading the slice through every helper call. The
@@ -491,6 +499,7 @@ func (g *Generator) generateRootREADME(ctx context.Context, components []Compone
 		Criteria:         criteriaLines,
 		Constraints:      g.RecipeResult.Constraints,
 		UpgradeNotice:    g.UpgradeNotice,
+		Split:            g.Split,
 	}
 
 	readmePath, readmeSize, err := deployer.GenerateFromTemplate(readmeTemplate, data, outputDir, "README.md")
@@ -508,13 +517,19 @@ func (g *Generator) generateDeployScript(ctx context.Context, components []Compo
 	}
 
 	data := deployTemplateData{
-		BundlerVersion: g.Version,
-		Components:     components,
+		BundlerVersion:      g.Version,
+		Components:          components,
+		Split:               g.Split,
+		MonitoringCRDsOwner: "kube-prometheus-stack",
 		// Helm cannot wait indefinitely on the readiness gate Job, so derive
 		// its --timeout from the gate's own deadline (max-wait) plus a buffer.
 		// Keeping this a derived value — rather than a second hand-tuned knob —
 		// guarantees helm --timeout > gate --max-wait can never silently drift.
 		ReadinessHelmTimeout: (defaults.ReadinessGateMaxWait + defaults.ReadinessGateHelmTimeoutBuffer).String(),
+	}
+
+	if g.Split != nil {
+		data.MonitoringCRDsOwner = "prometheus-operator-crds"
 	}
 
 	deployPath, deploySize, err := deployer.GenerateFromTemplate(deployScriptTemplate, data, outputDir, fileDeployScript)
@@ -540,6 +555,42 @@ type readmeTemplateData struct {
 	Criteria         []string
 	Constraints      []recipe.Constraint
 	UpgradeNotice    string
+	Split            *SplitContext
+}
+
+// SplitContext describes the class directory a bundle set renders this
+// output as (ADR-018). ClassOrder is every class the set contains, in
+// install order; teardown is the reverse. SharedNamespaces and
+// SharedCRDGroups name what this class shares with an earlier class, which
+// its teardown must leave in place because the earliest class using them
+// removes them, and it is torn down last.
+type SplitContext struct {
+	Class            string
+	ClassOrder       []string
+	SharedNamespaces []string
+	SharedCRDGroups  []string
+}
+
+// crdGroupsByComponent is the CRD group table deploy.sh's orphaned-CRD
+// scan uses, keyed by the component that ships the CRDs. The ordinary
+// deploy.sh keeps its historical literal list (which attributes
+// monitoring.coreos.com to kube-prometheus-stack) so non-split bundles stay
+// byte-identical; a class directory keys that group by
+// prometheus-operator-crds, the component that installs it, so an earlier
+// class's CRDs are not reported as orphans when a later class deploys.
+var crdGroupsByComponent = map[string][]string{
+	"kai-scheduler":            {"kai.scheduler", "scheduling.run.ai"},
+	"gpu-operator":             {"nvidia.com", "nfd.k8s-sigs.io"},
+	"dynamo-platform":          {"grove.io", "scheduler.grove.io"},
+	"prometheus-operator-crds": {"monitoring.coreos.com"},
+	"k8s-nim-operator":         {"apps.nvidia.com"},
+	"kubeflow-trainer":         {"trainer.kubeflow.org", "jobset.x-k8s.io"},
+}
+
+// CRDGroupsInstalledBy returns the CRD groups the named component installs,
+// per the table deploy.sh scans in a class directory, in a fixed order.
+func CRDGroupsInstalledBy(component string) []string {
+	return slices.Clone(crdGroupsByComponent[component])
 }
 
 // releaseRef pairs a helm release name with its target namespace. The
@@ -573,4 +624,11 @@ type deployTemplateData struct {
 	// defaults.ReadinessGateHelmTimeoutBuffer (Go duration string, e.g.
 	// "1h35m0s"). See #904.
 	ReadinessHelmTimeout string
+	// Split is set for a class directory of a bundle set; nil otherwise.
+	Split *SplitContext
+	// MonitoringCRDsOwner is the component name the orphaned-CRD scan keys
+	// the monitoring.coreos.com group on: kube-prometheus-stack in an
+	// ordinary bundle (the historical table), prometheus-operator-crds in a
+	// class directory, since that is the component that ships the CRDs.
+	MonitoringCRDsOwner string
 }
