@@ -36,7 +36,7 @@ transitions:
     summary: >-
       The mariadb-cluster chart renders the same MariaDB apart from its chart
       label, but AICR now pins the accounting server image by digest
-      (mariadb:11.8.8@sha256:...), so the rendered MariaDB's spec.image
+      (mariadb:11.8.9@sha256:...), so the rendered MariaDB's spec.image
       string changes and the operator
       restarts the accounting database pod once; slurmdbd loses its database
       for the length of that restart. The MariaDB resource has to move after
