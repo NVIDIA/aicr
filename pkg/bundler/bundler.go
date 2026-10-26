@@ -388,6 +388,13 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 		return nil, err
 	}
 
+	// A class-partitioned set (ADR-018) branches here: every gate above ran
+	// once on the complete component set, and the partition is rendered
+	// into private staging and published atomically.
+	if b.Config.Split() {
+		return b.makeSplit(ctx, profileBaseline.ComponentRefs, recipeResult, componentValues, dir, upgradeNotes, upgradeNotice, start)
+	}
+
 	// No filesystem output is created until the final candidate has passed the
 	// profile state and mutability invariant above.
 	if dir == "" {

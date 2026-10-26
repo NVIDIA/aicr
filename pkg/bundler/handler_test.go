@@ -293,6 +293,44 @@ func TestParseBundleConfig_Serial(t *testing.T) {
 	}
 }
 
+func TestParseBundleConfig_Split(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		target  string
+		want    bool
+		wantErr bool
+	}{
+		{"absent defaults to false", "/v1/bundle", false, false},
+		{"split=true", "/v1/bundle?split=true", true, false},
+		{"split=false", "/v1/bundle?split=false", false, false},
+		{"non-boolean rejected", "/v1/bundle?split=maybe", false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg, err := ParseBundleConfig(httptest.NewRequest("POST", tt.target, nil))
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("ParseBundleConfig() expected error, got nil")
+				}
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseBundleConfig() error = %v", err)
+			}
+			if got := cfg.Split(); got != tt.want {
+				t.Errorf("Split() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSupportedBundleQueryParametersReturnsDefensiveCopy(t *testing.T) {
 	t.Parallel()
 

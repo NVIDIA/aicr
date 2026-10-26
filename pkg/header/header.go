@@ -219,6 +219,7 @@ const (
 	KindRecipe       Kind = "Recipe"
 	KindRecipeResult Kind = "RecipeResult"
 	KindBundleInfo   Kind = "BundleInfo"
+	KindBundleSplit  Kind = "BundleSplit"
 )
 
 // String returns the string representation of the Kind.
