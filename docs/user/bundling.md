@@ -998,13 +998,17 @@ cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh
 ```
 
 For a bundle set generated with `--split`, verify at the set root, then run
-each class's own `deploy.sh` in class order (see
+each class's own `deploy.sh` in the order `split.yaml` lists under
+`classOrder`. A set contains a directory only for classes that have an
+enabled component, so read the order from the file rather than assuming
+both `core/` and `ops/` exist (see
 [Split a bundle by class](#split-a-bundle-by-class)):
 
 ```bash
 cd bundles && aicr verify . \
-  && (cd core && chmod +x deploy.sh && ./deploy.sh) \
-  && (cd ops && chmod +x deploy.sh && ./deploy.sh)
+  && for class in $(yq eval '.classOrder[]' split.yaml); do
+       (cd "$class" && chmod +x deploy.sh && ./deploy.sh) || break
+     done
 ```
 
 For the `terraform` deployer, verify in the step that generates the bundle,
