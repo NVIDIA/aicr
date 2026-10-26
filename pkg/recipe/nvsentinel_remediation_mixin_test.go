@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -131,7 +132,18 @@ func TestMixinNVSentinelRemediationSteps_Compose(t *testing.T) {
 					t.Errorf("%s overrides = %v, want only processingStrategy", monitor, section)
 				}
 			}
-			wantKeys := []string{"global", "gpu-health-monitor", "syslog-health-monitor"}
+			// Drain timing is the same in every step, so the dry run
+			// rehearses the live drain; the bundler adds the drain scope.
+			wantDrainer := map[string]any{
+				"deleteAfterTimeoutMinutes": 300,
+				"evictionTimeoutInSeconds":  "60",
+				"drainGPUPods":              false,
+				"partialDrainEnabled":       false,
+			}
+			if got := nvsentinel.Overrides["node-drainer"]; !reflect.DeepEqual(got, wantDrainer) {
+				t.Errorf("node-drainer overrides = %v, want %v", got, wantDrainer)
+			}
+			wantKeys := []string{"global", "gpu-health-monitor", "node-drainer", "syslog-health-monitor"}
 			if slices.Contains(step.enables, "faultRemediation") {
 				wantKeys = append(wantKeys, "fault-remediation")
 				assertComponentResetIsGPUReset(t, step.mixin, nvsentinel.Overrides)

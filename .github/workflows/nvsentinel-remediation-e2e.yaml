@@ -44,6 +44,9 @@ on:
       - 'recipes/components/cert-manager/**'
       - 'recipes/components/prometheus-operator-crds/**'
       - 'tests/e2e/nvsentinel-remediation/**'
+      - 'pkg/bundler/drainscope/**'
+      - 'pkg/bundler/nvsentinel_drain_scope.go'
+      - 'pkg/bundler/validations/nvsentinel_drain_scope.go'
       - 'pkg/bundler/deployer/localformat/templates/**'
       # run.sh sources tools/common and is invoked through a make target.
       - 'tools/common'

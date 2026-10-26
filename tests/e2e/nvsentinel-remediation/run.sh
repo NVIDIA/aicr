@@ -31,12 +31,9 @@
 # both, so the second assertion fails if the mapping is lost.
 #
 # TEST-ONLY SETTINGS, passed as --set on the bundle:
-#   node-drainer.systemNamespaces  replaced with a list that includes cert-manager
-#       and local-path-storage.
-#       In its chart-default AllowCompletion mode node-drainer evicts nothing
-#       and waits for every non-DaemonSet pod outside systemNamespaces to
-#       finish, so the drain would never end and fault-remediation would
-#       never see the event. Kind has one node and both of those run on it.
+#   node-drainer.systemNamespaces  adds local-path-storage, Kind's
+#       provisioner; in observe's dry run its pod would otherwise hold the
+#       drain forever.
 #   fault-quarantine.circuitBreaker.enabled=false  the breaker trips once half
 #       the GPU nodes are quarantined, which on a one-node cluster is the first
 #       event.
@@ -68,7 +65,7 @@ KUBE_CONTEXT="kind-${CLUSTER_NAME}"
 NODE="${CLUSTER_NAME}-control-plane"
 
 GRPCURL_IMAGE="docker.io/fullstorydev/grpcurl:v1.9.3@sha256:085e183ca334eb4e81ca81ee12cbb2b2737505d1d77f5e33dabc5d066593d998"
-DRAIN_SYSTEM_NAMESPACES='^(nvsentinel|kube-system|cert-manager|local-path-storage)$'
+DRAIN_EXTRA_NAMESPACES='^(local-path-storage)$'
 GPU_UUID="GPU-00000000-0000-0000-0000-00000000e2e0"
 # Quarantine, drain and the dry-run remediation each react to a change stream,
 # so the whole hop takes seconds; the margin covers a cold informer cache.
@@ -143,7 +140,7 @@ REGISTRY_EOF
     --data "${data_dir}" --output "${WORK}/recipe.yaml" ||
     err "recipe generation failed"
   "${AICR_BIN}" bundle -r "${WORK}/recipe.yaml" -o "${WORK}/bundle" \
-    --set "nvsentinel:node-drainer.systemNamespaces=${DRAIN_SYSTEM_NAMESPACES}" \
+    --set "nvsentinel:node-drainer.systemNamespaces=${DRAIN_EXTRA_NAMESPACES}" \
     --set "nvsentinel:fault-quarantine.circuitBreaker.enabled=false" \
     --set "nvsentinelmongodb:unsafeFlags.replsetSize=true" \
     --set "nvsentinelmongodb:replsets.rs0.size=1" \
@@ -174,8 +171,30 @@ REGISTRY_EOF
     err "bundle's nvsentinel values do not enable fault-remediation -- composition regressed"
   [[ "$(yq '.["fault-remediation"].maintenance.actions.COMPONENT_RESET.kind' "${values}")" == "GPUReset" ]] ||
     err "bundle's COMPONENT_RESET does not map to GPUReset"
-  [[ "$(yq '.["node-drainer"].systemNamespaces' "${values}")" == "${DRAIN_SYSTEM_NAMESPACES}" ]] ||
-    err "the test-only systemNamespaces override did not reach the bundle"
+  assert_drain_scope "${values}"
+}
+
+# assert_drain_scope checks the drain scope the bundler generated: every
+# namespace this recipe deploys into is protected, the test-only pattern is
+# kept beside it rather than replacing it, and the step's timing and mode
+# reached the values.
+assert_drain_scope() {
+  local values="$1" scope generated ns
+  scope=$(yq '.["node-drainer"].systemNamespaces' "${values}")
+  [[ "${scope}" == *"|(?:${DRAIN_EXTRA_NAMESPACES})" ]] ||
+    err "systemNamespaces ${scope} dropped the test-only pattern ${DRAIN_EXTRA_NAMESPACES}"
+  generated="${scope%%|(?:*}"
+  generated="${generated#^(}"
+  generated="|${generated%)\$}|"
+  for ns in cert-manager nvsentinel kube-system monitoring; do
+    [[ "${generated}" == *"|${ns}|"* ]] || err "systemNamespaces ${scope} does not protect ${ns}"
+  done
+  [[ "$(yq '.["node-drainer"].userNamespaces | length' "${values}")" == "1" &&
+    "$(yq '.["node-drainer"].userNamespaces[0].name' "${values}")" == "*" &&
+    "$(yq '.["node-drainer"].userNamespaces[0].mode' "${values}")" == "DeleteAfterTimeout" ]] ||
+    err "node-drainer.userNamespaces is not [{name: \"*\", mode: DeleteAfterTimeout}]"
+  [[ "$(yq '.["node-drainer"].deleteAfterTimeoutMinutes' "${values}")" == "300" ]] ||
+    err "node-drainer.deleteAfterTimeoutMinutes is not the step's 300"
 }
 
 ensure_cluster() {

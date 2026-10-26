@@ -162,6 +162,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler"
 	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
+	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
 	"github.com/NVIDIA/aicr/pkg/bundler/validations"
 	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -1943,6 +1944,11 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 	helmValues, err := resolveHelmComponentValues(ctx, r)
 	if err != nil {
 		return nil, err
+	}
+	if sentinel, ok := helmValues[drainscope.ComponentName]; ok {
+		if err := bundler.ApplyNVSentinelDrainScope(sentinel, r.internal); err != nil {
+			return nil, err
+		}
 	}
 	pinned := r.internal.WithResolvedValues(helmValues)
 	if err := bundler.ValidateAccountingValues(pinned, helmValues); err != nil {
