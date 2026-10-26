@@ -392,11 +392,6 @@ func (b *DefaultBundler) makeSplit(
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create the bundle set staging directory", err)
 	}
-	// MkdirTemp creates 0700; the published root gets the mode an ordinary
-	// bundle directory has, so another owner can traverse the set.
-	if chmodErr := os.Chmod(stage, 0o755); chmodErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to set the bundle set staging directory mode", chmodErr)
-	}
 	published := false
 	defer func() {
 		if published {
@@ -407,6 +402,11 @@ func (b *DefaultBundler) makeSplit(
 				"failed to remove the bundle set staging directory", rmErr))
 		}
 	}()
+	// MkdirTemp creates 0700; the published root gets the mode an ordinary
+	// bundle directory has, so another owner can traverse the set.
+	if chmodErr := os.Chmod(stage, 0o755); chmodErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to set the bundle set staging directory mode", chmodErr)
+	}
 	if rootErr := checksum.ValidateOutputRoot(ctx, stage); rootErr != nil {
 		return nil, rootErr
 	}

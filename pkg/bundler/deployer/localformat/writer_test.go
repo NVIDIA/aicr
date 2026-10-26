@@ -1254,3 +1254,44 @@ func assertGolden(t *testing.T, outDir, goldenDir, relPath string) {
 		t.Errorf("%s differs from golden:\n--- got ---\n%s\n--- want ---\n%s", relPath, got, want)
 	}
 }
+
+// TestFilterEmptyPreManifests pins the exported filter the ADR-018 whole-set
+// identity check uses: a pre-manifest that renders an object is kept, one
+// that renders nothing is dropped, and a canceled context is reported.
+func TestFilterEmptyPreManifests(t *testing.T) {
+	t.Parallel()
+	comp := localformat.Component{Name: "foo", Namespace: "foo-ns", ChartName: "foo", Version: "1.0.0"}
+	withObject := map[string]map[string][]byte{"foo": {"ns.yaml": []byte("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: foo-ns\n")}}
+	empty := map[string]map[string][]byte{"foo": {"empty.yaml": []byte("# nothing rendered\n---\n")}}
+
+	tests := []struct {
+		name    string
+		pre     map[string]map[string][]byte
+		wantKey bool
+	}{
+		{"manifest rendering an object is kept", withObject, true},
+		{"manifest rendering no object is dropped", empty, false},
+		{"no pre-manifests", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := localformat.FilterEmptyPreManifests(t.Context(), []localformat.Component{comp}, tt.pre)
+			if err != nil {
+				t.Fatalf("FilterEmptyPreManifests() error = %v", err)
+			}
+			if _, ok := got["foo"]; ok != tt.wantKey {
+				t.Errorf("foo kept = %v, want %v (got %v)", ok, tt.wantKey, got)
+			}
+		})
+	}
+
+	t.Run("canceled context is reported", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if _, err := localformat.FilterEmptyPreManifests(ctx, []localformat.Component{comp}, withObject); err == nil {
+			t.Fatal("FilterEmptyPreManifests() = nil error with a canceled context")
+		}
+	})
+}
