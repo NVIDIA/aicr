@@ -83,6 +83,17 @@ the NVIDIA drop-in at the host's configuration version without changing the
 node image or migrating its root configuration. The same toolkit defect took
 down AKS nodes with a version 2 root (NVIDIA/aicr#1688).
 
+The toolkit also refuses `NVIDIA_VISIBLE_DEVICES` from unprivileged containers
+(`ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED=false`). GPUs reach a
+workload only through a `nvidia.com/gpu` request or a DRA claim; an unprivileged
+pod that selects the `nvidia` RuntimeClass and sets `NVIDIA_VISIBLE_DEVICES=all`
+sees none. Privileged management pods (the GPU Operator operands, NVSentinel's
+metadata-collector) keep the env-var path, because the toolkit always honors it for
+privileged containers. Unlike the AKS and OpenShift recipes, this one leaves
+`ACCEPT_NVIDIA_VISIBLE_DEVICES_AS_VOLUME_MOUNTS` at its default of `false`: the
+device plugin injects over `cdi-cri` here, so the volume-mount device list is never
+produced, and accepting it would only add a `hostPath`-gated request path.
+
 ## SR-IOV InfiniBand
 
 The Network Operator chart enables the SR-IOV Network Operator and the

@@ -75,6 +75,16 @@ spec:
           env:
             - name: RUNTIME_CONFIG_SOURCE
               value: file
+            # Only a GPU allocation (device plugin or DRA) or a privileged
+            # management pod may reach the GPUs. Without this an unprivileged
+            # pod naming the nvidia RuntimeClass gets every GPU on the node
+            # from NVIDIA_VISIBLE_DEVICES=all, which every CUDA image sets.
+            # ACCEPT_NVIDIA_VISIBLE_DEVICES_AS_VOLUME_MOUNTS stays at its
+            # default (false): the device plugin injects over cdi-cri here, and
+            # the volume-mount list is a hostPath-gated request path this
+            # recipe has no use for.
+            - name: ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED
+              value: "false"
         devicePlugin:
           enabled: true
           # Helm replaces lists: the first two entries restate the component
