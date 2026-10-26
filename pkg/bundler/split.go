@@ -388,29 +388,6 @@ func (b *DefaultBundler) makeSplit(
 		return nil, identityErr
 	}
 
-	// Reserve the destination with an atomic create-only mkdir, so a second
-	// attempt started after the absence check is rejected here rather than
-	// racing the final rename. A failure before publication removes the
-	// reservation again (rmdir, never a recursive delete, so content someone
-	// else put there is left alone).
-	if mkErr := os.Mkdir(dest, 0o755); mkErr != nil {
-		if stderrors.Is(mkErr, os.ErrExist) {
-			return nil, errors.Wrap(errors.ErrCodeConflict, fmt.Sprintf(
-				"--split publishes a new bundle set and does not replace an existing path: %s already exists", dest), mkErr)
-		}
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to reserve the bundle set destination", mkErr)
-	}
-	published := false
-	defer func() {
-		if published {
-			return
-		}
-		if rmErr := os.Remove(dest); rmErr != nil && !stderrors.Is(rmErr, os.ErrNotExist) {
-			retErr = stderrors.Join(retErr, errors.Wrap(errors.ErrCodeInternal,
-				"failed to release the bundle set destination", rmErr))
-		}
-	}()
-
 	stage, err := os.MkdirTemp(parent, splitStagePrefix+filepath.Base(dest)+"-")
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create the bundle set staging directory", err)
@@ -420,6 +397,7 @@ func (b *DefaultBundler) makeSplit(
 	if chmodErr := os.Chmod(stage, 0o755); chmodErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to set the bundle set staging directory mode", chmodErr)
 	}
+	published := false
 	defer func() {
 		if published {
 			return
@@ -527,18 +505,11 @@ func (b *DefaultBundler) makeSplit(
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed final bundle set inventory verification")
 	}
 
-	// Publish: release the empty reservation and move the verified set into
-	// its place. rename(2) never replaces a populated directory (ENOTEMPTY),
-	// and macOS refuses even an empty one, so a destination that something
-	// else filled meanwhile fails here, with the stage removed and that
-	// content untouched. On Linux the only directory the rename can replace
-	// is another attempt's empty reservation, whose owner then fails its own
-	// release step; at most one attempt publishes.
-	if rmErr := os.Remove(dest); rmErr != nil && !stderrors.Is(rmErr, os.ErrNotExist) {
-		return nil, errors.Wrap(errors.ErrCodeConflict,
-			fmt.Sprintf("failed to publish the bundle set to %s (the reserved destination was replaced)", dest), rmErr)
-	}
-	if renameErr := os.Rename(stage, dest); renameErr != nil {
+	// Publish with one no-replace rename: the destination stays absent until
+	// this syscall, and anything created there meanwhile, even an empty
+	// directory, makes it fail. The stage is then removed and that content is
+	// left untouched, so concurrent attempts have at most one winner.
+	if renameErr := renameNoReplace(stage, dest); renameErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeConflict,
 			fmt.Sprintf("failed to publish the bundle set to %s (the destination must be absent)", dest), renameErr)
 	}

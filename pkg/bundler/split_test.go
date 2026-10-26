@@ -583,19 +583,31 @@ func TestMake_SplitAttestationNamesPublishedPath(t *testing.T) {
 	}
 }
 
-// TestMake_SplitLoserLeavesPublishedSetAlone drives the rename path: the
-// reservation is replaced by a populated directory before publication, so
-// the rename must fail with a conflict, leave that content untouched, and
-// remove the stage.
+// TestMake_SplitLoserLeavesPublishedSetAlone drives the publish path: the
+// destination appears after the absence check and before the final
+// rename, once as an empty directory (the race a plain rename would win by
+// replacing it) and once populated. Both must fail with a conflict, leave
+// the destination exactly as found, and remove the stage.
 func TestMake_SplitLoserLeavesPublishedSetAlone(t *testing.T) {
 	t.Parallel()
+	for _, populated := range []bool{false, true} {
+		t.Run(map[bool]string{false: "empty directory", true: "populated directory"}[populated], func(t *testing.T) {
+			t.Parallel()
+			runSplitLoserCase(t, populated)
+		})
+	}
+}
+
+func runSplitLoserCase(t *testing.T, populated bool) {
+	t.Helper()
 	parent := t.TempDir()
 	dest := filepath.Join(parent, "set")
 	marker := filepath.Join(dest, "winner.txt")
 	att := &recordingAttester{tamper: func() {
-		_ = os.Remove(dest)
 		_ = os.MkdirAll(dest, 0o755)
-		_ = os.WriteFile(marker, []byte("published by someone else"), 0o600)
+		if populated {
+			_ = os.WriteFile(marker, []byte("published by someone else"), 0o600)
+		}
 	}}
 	b, err := New(
 		WithConfig(config.NewConfig(config.WithSplit(true), config.WithAttest(true))),
@@ -610,11 +622,19 @@ func TestMake_SplitLoserLeavesPublishedSetAlone(t *testing.T) {
 		t.Fatal("Make() = nil error, want a publication conflict")
 	}
 	errorstest.WantReportedCode(t, err, errors.ErrCodeConflict)
-	if data, readErr := os.ReadFile(marker); readErr != nil || string(data) != "published by someone else" {
-		t.Errorf("the other party's set was altered: %v %q", readErr, data)
+	entries, readErr := os.ReadDir(dest)
+	if readErr != nil {
+		t.Fatalf("the other party's directory is gone: %v", readErr)
 	}
-	if entries, _ := os.ReadDir(dest); len(entries) != 1 {
-		t.Errorf("destination has %d entries, want only the other party's file", len(entries))
+	wantEntries := 0
+	if populated {
+		wantEntries = 1
+		if data, err := os.ReadFile(marker); err != nil || string(data) != "published by someone else" {
+			t.Errorf("the other party's set was altered: %v %q", err, data)
+		}
+	}
+	if len(entries) != wantEntries {
+		t.Errorf("destination has %d entries, want %d (the other party's content only)", len(entries), wantEntries)
 	}
 	assertNoStageLeft(t, parent)
 }
