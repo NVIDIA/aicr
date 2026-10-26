@@ -67,6 +67,14 @@ spec:
             name: nvidia-kernel-module-params
         toolkit:
           enabled: true
+          # NVKE ships containerd 2.3 with a version 3 config.toml. The
+          # toolkit's default config source is `containerd config dump`, which
+          # on 2.3 reports the migrated version 4, so the drop-in it writes is
+          # rejected by the version 3 root and containerd crash-loops (same
+          # defect as #1688 on AKS, where the root is version 2).
+          env:
+            - name: RUNTIME_CONFIG_SOURCE
+              value: file
         devicePlugin:
           enabled: true
           # Helm replaces lists: the first two entries restate the component

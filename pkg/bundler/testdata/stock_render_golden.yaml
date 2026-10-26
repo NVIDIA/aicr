@@ -1529,11 +1529,11 @@ gb200-nvke-ubuntu-training:
   009-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   009-gpu-operator-pre/templates/kernel-module-params.yaml: ef2f300e9393272ff00cb149ad86889f4874510f7768b5bc29dcb5458d6dbe86
-  009-gpu-operator-pre/values.yaml: d3bd107509af6e441ac395cc32d5350a5da247c9f5d0eca6de22901e4eaab48c
+  009-gpu-operator-pre/values.yaml: ec7fa2921f80975636ee6cd30719349125a0e36bb7d2b539eddce868d952973c
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 7ffe32c2e799396b13d0fefc870cdab28e82e363681d0d5301c09d3d98c3ffdd
-  010-gpu-operator/values.yaml: d3bd107509af6e441ac395cc32d5350a5da247c9f5d0eca6de22901e4eaab48c
+  010-gpu-operator/values.yaml: ec7fa2921f80975636ee6cd30719349125a0e36bb7d2b539eddce868d952973c
   011-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   011-kai-scheduler/upstream.env: 28796b9c560ab50439fa444585d161dfdb838c82420680a85a0e6eeef3fb7af0
@@ -1563,10 +1563,10 @@ gb200-nvke-ubuntu-training:
   016-sriov-ib-networks/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   README.md: ed5dcff397d780ef3f37a3d55055f2d89dbf0170fdce55cd83030ecd2236d5e2
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
-  bundle-info.yaml: 1e9e1f0cac27afb0b2509fad49cff0fb54f894aeed3af351941ff14b0d7349e0
-  checksums.txt: f4600b698757ab1868ce36dea96fc306bc18abdd5b8c0ff59c13a5a1b83ffda0
+  bundle-info.yaml: f3c0526243b482667e6f8f8d89f1f739ffe656fb554b9504bbcde627b88c2bb7
+  checksums.txt: d1fa181656eab020dc687fcf066de850ef28f4bcf73c6aa19c7659a9c806f36e
   deploy.sh: 6b1ca68f57b4def8a85283654c51c54dbaf71c4969ecca1720e71893fb47d81a
-  recipe.yaml: 1aad7da619d4194f781359a2cced5c8cba89ed57e6c6818017c0c1d754d0856f
+  recipe.yaml: 3289bc305c089cea83cc5f62857d99ee70f3cc979ffe9de080accb6bffe071db
 gb200-oke-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f

@@ -71,6 +71,18 @@ sets no `driver.rdma` value (no `nvidia-peermem`, which has no build for the
 `kernel-module-params` ConfigMap, which the `nccl-all-reduce-bw-net` preflight
 requires.
 
+## Containerd configuration
+
+The recipe sets `gpu-operator.toolkit.env.RUNTIME_CONFIG_SOURCE=file` so the
+NVIDIA toolkit reads `/etc/containerd/config.toml` directly. NVKE v0.22.0's
+qualified Ubuntu image ships containerd 2.3.0 with a version 3 configuration.
+The default command source reads `containerd config dump`, which migrates the
+effective configuration to version 4. A version 4 NVIDIA drop-in imported by
+the version 3 root prevents containerd from starting. Reading the file keeps
+the NVIDIA drop-in at the host's configuration version without changing the
+node image or migrating its root configuration. The same toolkit defect took
+down AKS nodes with a version 2 root (NVIDIA/aicr#1688).
+
 ## SR-IOV InfiniBand
 
 The Network Operator chart enables the SR-IOV Network Operator and the
