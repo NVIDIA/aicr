@@ -484,7 +484,7 @@ func TestGenerate_HelmOpRejectionWritesNothing(t *testing.T) {
 func TestGenerate_CRDOwnersNamed(t *testing.T) {
 	g := &Generator{
 		RecipeResult: recipeWith(
-			ref("k8s-aibom", "k8s-aibom-system", "k8s-aibom", "1.6.1", "oci://ghcr.io/googlecloudplatform/charts"),
+			ref("k8s-aibom", "k8s-aibom-system", "k8s-aibom", "1.6.2", "oci://ghcr.io/googlecloudplatform/charts"),
 		),
 		Version: testBundlerVersion,
 	}

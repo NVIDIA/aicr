@@ -578,6 +578,18 @@ OCI sources use credentials from the standard Docker configuration
 (`~/.docker/config.json` or `$DOCKER_CONFIG`) and may invoke the configured
 credential helper for the selected registry host.
 
+A registry that issues bearer tokens names its token endpoint in the `realm`
+of its `WWW-Authenticate` challenge. Every realm must use `https`, or `http`
+only when the registry itself was contacted over `http`. A realm on the
+registry's own host skips the address check that follows. A realm on a
+different host is refused when that host is an IP literal, or resolves through
+DNS to any address, that is loopback, link-local, private, unspecified, or
+carrier-grade NAT (`100.64.0.0/10`); a failed DNS lookup is allowed. A refused realm fails authentication with an error naming
+the host and the address class: `is a ... address` for an IP literal and
+`resolves to ...` for a DNS result. The same check applies to the ORAS clients
+behind OCI recipe sources, OCI bundle pushes, and evidence fetches; chart
+vendoring pulls through Helm and does not use it.
+
 Use `NewClientContext` so caller cancellation and tighter deadlines
 propagate through registry authentication, download, extraction, and catalog
 validation:

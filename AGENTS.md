@@ -248,8 +248,8 @@ slog.Error("operation failed", "error", err, "component", "gpu-collector")
 
 | Task | Location | Key Points |
 |------|----------|------------|
-| New Helm component | `recipes/registry.yaml` | Add entry with name, displayName, helm settings, nodeScheduling |
-| New Kustomize component | `recipes/registry.yaml` | Add entry with name, displayName, kustomize settings |
+| New Helm component | `recipes/registry.yaml` | Add entry with name, displayName, class, helm settings, nodeScheduling; add its row to `docs/user/component-catalog.md` |
+| New Kustomize component | `recipes/registry.yaml` | Add entry with name, displayName, class, kustomize settings; add its row to `docs/user/component-catalog.md` |
 | Component values | `recipes/components/<name>/` | Create values.yaml with Helm chart configuration |
 | New collector | `pkg/collector/<type>/` | Implement `Collector` interface, add to factory |
 | New API endpoint | `pkg/server/` | Handler (thin adapter over `pkg/client/v1`) + middleware chain + OpenAPI spec update |
@@ -261,6 +261,7 @@ slog.Error("operation failed", "error", err, "component", "gpu-collector")
 # recipes/registry.yaml
 - name: my-operator
   displayName: My Operator
+  class: ops  # core or ops (ADR-018); required for every embedded entry
   valueOverrideKeys: [myoperator]
   helm:
     defaultRepository: https://charts.example.com
@@ -276,6 +277,7 @@ slog.Error("operation failed", "error", err, "component", "gpu-collector")
 # recipes/registry.yaml
 - name: my-kustomize-app
   displayName: My Kustomize App
+  class: ops  # core or ops (ADR-018); required for every embedded entry
   valueOverrideKeys: [mykustomize]
   kustomize:
     defaultSource: https://github.com/example/my-app
@@ -284,6 +286,8 @@ slog.Error("operation failed", "error", err, "component", "gpu-collector")
 ```
 
 **Note:** A component must have either `helm` OR `kustomize` configuration, not both.
+
+**Note:** Every embedded registry entry declares `class` (`core` or `ops`, ADR-018) and has a row with that class in `docs/user/component-catalog.md`; `TestEmbeddedRegistryDeclaresClass` and `TestComponentCatalogClassColumnMatchesRegistry` fail `make qualify` otherwise. `core` is what a plain GPU pod needs to run, with its fabric and install prerequisites; `ops` is everything else, workload platforms included.
 
 **Note:** A Helm chart that renders no container images (a CRD-only chart) also needs an entry in `expectedNoImages` in `tools/bom/main.go`, or `make bom-docs` and the scheduled BOM refresh fail. No PR-time check renders charts, so run `make bom-docs` to catch it.
 

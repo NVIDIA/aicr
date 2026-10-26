@@ -55,7 +55,7 @@ spec:
       dependencyRefs:
         - grove
         - cert-manager
-        - kube-prometheus-stack
+        - prometheus-operator-crds
         - gpu-operator
         - kai-scheduler
 
