@@ -370,6 +370,8 @@ Reservations are data, not code. To onboard a new reserved pool, add a row to `i
   test-config-dir: tests/uat/aws/tests
 ```
 
+The row's `reservation-id` must equal every reservation its `cluster-config-path` targets, meaning each worker's `capacity.reservation.target` on AWS and each `nodeConfig.capacityReservations` entry on GCP. A row without a `reservation-id` must point at a cluster-config that targets none. The lease is keyed on the row's `name`, and provisioning and the AWS capacity check read the reservation from the cluster-config, so nothing at run time reads `reservation-id`. Swapping a reservation means editing both files. `TestCommittedClusterConfigsMatchRegistry` in `pkg/uatbroker` fails the PR when they disagree.
+
 No broker, workflow, or Go change is needed — the nightly batch enumerates rows from the registry, and `uat-run.yaml` resolves them. The unit of sequencing is the *reservation*, so a new GPU type in an existing cloud simply runs in parallel with the others on its own lease. (Provisioning is per *cloud*: the same `uat-aws.yaml` pipeline provisions any AWS accelerator from the row's `cluster-config-path`; you do not add a per-accelerator workflow.)
 
 Onboarding a new *cloud* (rather than a new pool in an existing cloud) is a code change on top of the row: a `run-<cloud>` job in `uat-run.yaml`, a `uat-<cloud>.yaml` pipeline, and account federation under `infra/uat-<cloud>-account/`. During bring-up, set `nightly-intents: []` (explicit empty list — absent defaults to `[training]`) so the reservation is manually dispatchable via `uat-run.yaml` but skipped by the nightly batch; flip it once the pipeline has green runs.
