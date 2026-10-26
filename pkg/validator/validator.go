@@ -75,7 +75,7 @@ func checkReadiness(validationInput *v1.ValidationInput, snap *snapshotter.Snaps
 	slog.Info("readiness pre-flight", "constraints", len(cs))
 
 	for _, c := range cs {
-		result := constraints.Evaluate(c, snap)
+		result := constraints.EvaluateReadiness(c, snap)
 		if result.Error != nil {
 			// Deliberately flattens the evaluator's code (incl. the
 			// ErrCodeNotFound gpu_nodes.go returns for empty-universe /

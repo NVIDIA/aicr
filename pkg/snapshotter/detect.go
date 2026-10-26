@@ -23,16 +23,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-const (
-	// gpuPresentLabelKey is the NFD/GFD node label that marks a GPU-capable
-	// node. The auto-injected node selector and the operator-facing remediation
-	// hints all reference this key, so they cannot drift.
-	gpuPresentLabelKey = "nvidia.com/gpu.present"
-
-	// gpuNodeLabelPrefix matches any NFD/GFD GPU node label (gpu.present,
-	// gpu.product, ...) when scanning collected topology for GPU-capable nodes.
-	gpuNodeLabelPrefix = "nvidia.com/gpu."
-)
+// gpuNodeLabelPrefix matches the NVIDIA GPU node labels (gpu.present,
+// gpu.product, ...) when scanning collected topology for GPU-capable nodes.
+const gpuNodeLabelPrefix = "nvidia.com/gpu."
 
 // maybeInjectGPUNodeSelector auto-targets GPU nodes when no explicit placement
 // constraints are set. It is a no-op when any of the following is true:
@@ -58,7 +51,7 @@ func maybeInjectGPUNodeSelector(ctx context.Context, clientset k8sclient.Interfa
 	defer cancel()
 
 	nodeList, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{
-		LabelSelector: gpuPresentLabelKey + "=true",
+		LabelSelector: defaults.GPUPresentNodeLabelKey + "=true",
 		Limit:         1,
 	})
 	if err != nil {
@@ -71,9 +64,9 @@ func maybeInjectGPUNodeSelector(ctx context.Context, clientset k8sclient.Interfa
 		return false
 	}
 
-	config.NodeSelector = map[string]string{gpuPresentLabelKey: "true"}
+	config.NodeSelector = map[string]string{defaults.GPUPresentNodeLabelKey: "true"}
 	slog.Info("auto-targeting GPU nodes",
-		slog.String("selector", "nvidia.com/gpu.present=true"),
+		slog.String("selector", defaults.GPUPresentNodeLabelKey+"=true"),
 		slog.String("hint", "pass --node-selector to override"))
 	return true
 }

@@ -37,7 +37,7 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				return c
 			},
 			requiredDeps: map[string][]string{
-				"gpu-operator": {"cert-manager", "kube-prometheus-stack", "nodewright-customizations"},
+				"gpu-operator": {"cert-manager", "prometheus-operator-crds", "nodewright-customizations"},
 			},
 			requiredOrdering: [][2]string{
 				{"nodewright-customizations", "gpu-operator"},
@@ -54,7 +54,7 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				return c
 			},
 			requiredDeps: map[string][]string{
-				"gpu-operator": {"cert-manager", "kube-prometheus-stack", "nodewright-customizations"},
+				"gpu-operator": {"cert-manager", "prometheus-operator-crds", "nodewright-customizations"},
 			},
 			requiredOrdering: [][2]string{
 				{"nodewright-customizations", "gpu-operator"},
@@ -73,7 +73,7 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				return c
 			},
 			requiredDeps: map[string][]string{
-				"dynamo-platform": {"grove", "cert-manager", "kube-prometheus-stack", "gpu-operator", "kai-scheduler"},
+				"dynamo-platform": {"grove", "cert-manager", "prometheus-operator-crds", "gpu-operator", "kai-scheduler"},
 			},
 			requiredOrdering: [][2]string{
 				{"gpu-operator", "dynamo-platform"},
@@ -93,7 +93,7 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				return c
 			},
 			requiredDeps: map[string][]string{
-				"dynamo-platform": {"grove", "cert-manager", "kube-prometheus-stack", "gpu-operator", "kai-scheduler"},
+				"dynamo-platform": {"grove", "cert-manager", "prometheus-operator-crds", "gpu-operator", "kai-scheduler"},
 			},
 			requiredOrdering: [][2]string{
 				{"gpu-operator", "dynamo-platform"},
@@ -113,7 +113,7 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				return c
 			},
 			requiredDeps: map[string][]string{
-				"kubeflow-trainer": {"cert-manager", "kube-prometheus-stack", "gpu-operator"},
+				"kubeflow-trainer": {"cert-manager", "prometheus-operator-crds", "gpu-operator"},
 			},
 			requiredOrdering: [][2]string{
 				{"gpu-operator", "kubeflow-trainer"},
@@ -132,7 +132,7 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				return c
 			},
 			requiredDeps: map[string][]string{
-				"kubeflow-trainer": {"cert-manager", "kube-prometheus-stack", "gpu-operator"},
+				"kubeflow-trainer": {"cert-manager", "prometheus-operator-crds", "gpu-operator"},
 			},
 			requiredOrdering: [][2]string{
 				{"gpu-operator", "kubeflow-trainer"},
@@ -150,7 +150,7 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				return c
 			},
 			requiredDeps: map[string][]string{
-				"dynamo-platform": {"grove", "cert-manager", "kube-prometheus-stack", "kai-scheduler"},
+				"dynamo-platform": {"grove", "cert-manager", "prometheus-operator-crds", "kai-scheduler"},
 			},
 			requiredOrdering: [][2]string{
 				{"kai-scheduler", "dynamo-platform"},
@@ -168,7 +168,7 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				return c
 			},
 			requiredDeps: map[string][]string{
-				"kubeflow-trainer": {"cert-manager", "kube-prometheus-stack", "gpu-operator"},
+				"kubeflow-trainer": {"cert-manager", "prometheus-operator-crds", "gpu-operator"},
 			},
 			requiredOrdering: [][2]string{
 				{"gpu-operator", "kubeflow-trainer"},

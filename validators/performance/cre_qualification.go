@@ -37,21 +37,23 @@ type creCombination struct {
 // threshold in the recipe, never a new code path.
 //
 // nccl-cre-all-reduce-bw is qualified on eks x h100. It was re-measured on the
-// CRE version the registry pins, v0.6.0, on 2026-10-09 against 2x p5.48xlarge:
-// 489.51 GB/s bus bandwidth, against 489.80 GB/s at the original 2026-09-02
-// qualification on v0.1.0.
+// CRE version the registry pins, v0.8.2, on 2026-10-23 against 2x p5.48xlarge
+// on a NodeWright-tuned cluster: 489.70 GB/s bus bandwidth, against 489.33 GB/s
+// from the TrainJob nccl-all-reduce-bw check on the same nodes and 489.80 GB/s
+// at the original 2026-09-02 qualification on v0.1.0.
 //
-// cre-training-goodput carries no qualified combination. It measured 0.7671 on
-// eks x h100 on CRE v0.1.0, but the nemotron5-8b catalog entry it drives does
-// not run on v0.6.0: every rank exits in GPTModel.__init__ because the entry
-// passes --attention-backend flash without clearing NVTE_FUSED_ATTN, which its
-// base image sets to 1 and megatron-core rejects. The entry installs
-// megatron-core at pod start from an unpinned revision, so that assertion
-// arrived without a change on either side. Reproduced on 2026-10-09 from a
-// hand-written Certification, which puts it upstream of AICR's driver. An empty
-// map reports the check unqualified, so it skips instead of failing a healthy
-// cluster for a broken workload, and the qualification returns by fixing the
-// entry rather than by changing code here.
+// cre-training-goodput is qualified on eks x h100 with training/nemotron5-8b,
+// measured on the same v0.8.2 run: goodput 0.5723, 462.05 TFLOPS per GPU, 0.914
+// s average step time, no lost work; 0.5835 on v0.6.0 with the catalog at
+// bfd321046 (NVCRE#487); 0.7671 on CRE v0.1.0. The step count comes from the
+// NVCRE catalog entry, and startup time counts against goodput, so a figure is
+// tied to the CRE version that produced it. These are single measurements, so
+// a recipe constraint is a floor below them rather than a calibrated threshold.
+// Catalogs before bfd321046 do not run this entry: every rank exits in
+// GPTModel.__init__ because it passed --attention-backend flash with
+// NVTE_FUSED_ATTN already set by the base image.
+// A combination with no entry reports the check unqualified, so it skips rather
+// than failing a healthy cluster.
 var creQualifiedEntries = map[string]map[creCombination]creCatalogEntry{
 	checkNameCRENCCLAllReduceBW: {
 		{Service: recipe.CriteriaServiceEKS, Accelerator: recipe.CriteriaAcceleratorH100}: {
@@ -60,7 +62,13 @@ var creQualifiedEntries = map[string]map[creCombination]creCatalogEntry{
 			MaxNodes: 2,
 		},
 	},
-	checkNameCRETrainingGoodput: {},
+	checkNameCRETrainingGoodput: {
+		{Service: recipe.CriteriaServiceEKS, Accelerator: recipe.CriteriaAcceleratorH100}: {
+			Domain:   creTrainingDomain,
+			Variant:  creTrainingVariant,
+			MaxNodes: 2,
+		},
+	},
 }
 
 // creThreshold parses a CRE check's constraint and refuses one the check cannot
