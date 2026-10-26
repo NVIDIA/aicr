@@ -34,9 +34,9 @@ import (
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 )
 
-// captureExtras returns the merged Extra that fn writes to stdout, and fn's
-// error. Callers must not be parallel, because it swaps the global os.Stdout.
-func captureExtras(t *testing.T, fn func() error) (map[string]string, error) {
+// captureStdout returns what fn writes to stdout, and fn's error. Callers must
+// not be parallel, because it swaps the global os.Stdout.
+func captureStdout(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
 	orig := os.Stdout
 	r, w, err := os.Pipe()
@@ -52,10 +52,17 @@ func captureExtras(t *testing.T, fn func() error) (map[string]string, error) {
 	runErr := fn()
 	_ = w.Close()
 	os.Stdout = orig
-	out := <-done
+	return string(<-done), runErr
+}
+
+// captureExtras returns the merged Extra that fn writes to stdout, and fn's
+// error. Callers must not be parallel, because it swaps the global os.Stdout.
+func captureExtras(t *testing.T, fn func() error) (map[string]string, error) {
+	t.Helper()
+	out, runErr := captureStdout(t, fn)
 
 	extra := map[string]string{}
-	for _, line := range strings.Split(string(out), "\n") {
+	for _, line := range strings.Split(out, "\n") {
 		payload, ok := strings.CutPrefix(line, ctrf.ExtraLinePrefix)
 		if !ok {
 			continue

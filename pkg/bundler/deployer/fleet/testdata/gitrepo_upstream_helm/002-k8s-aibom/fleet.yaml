@@ -6,7 +6,7 @@ labels:
 helm:
   releaseName: k8s-aibom
   repo: oci://ghcr.io/googlecloudplatform/charts/k8s-aibom
-  version: 1.6.1
+  version: 1.6.2
   valuesFiles:
     - values.yaml
     - cluster-values.yaml

@@ -19,7 +19,8 @@
 # carries nvsentinel-health-events-analyzer, which
 # CheckNVSentinelRemediationPipelineCoherent requires beside live remediation.
 # It also composes quarantine with nvsentinel-slinky-drainer onto the EKS Slurm
-# leaf, which adds the plugin and switches node-drainer to customDrain.
+# leaf, which adds the plugin and switches node-drainer to customDrain, and
+# the event exporter onto the observe step.
 
 name: KWOK NVSentinel Remediation
 
@@ -112,6 +113,9 @@ jobs:
           - mixin: nvsentinel-quarantine,nvsentinel-slinky-drainer
             deployer: helm
             recipe: h100-eks-ubuntu-training-slurm
+          # The event exporter (#2621), which reads the datastore a step adds.
+          - mixin: nvsentinel-observe,nvsentinel-event-exporter
+            deployer: helm
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1

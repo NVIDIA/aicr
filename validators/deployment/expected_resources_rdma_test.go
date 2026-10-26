@@ -218,31 +218,31 @@ func TestVerifyRDMAFabricReady_Poll(t *testing.T) {
 func TestVerifyRDMAFabricReady_EagerDisclosureFloor(t *testing.T) {
 	t.Parallel()
 
-	type emitCall struct{ validated, total int }
+	type emitCall struct{ validated, total, failed, skipped string }
 
 	tests := []struct {
-		name          string
-		schedRDMA     int64 // allocatable fabric on the schedulable node (-1 => absent)
-		wantErr       bool
-		wantTerminalV int // validated on the terminal (settled) emit
+		name         string
+		schedRDMA    int64 // allocatable fabric on the schedulable node (-1 => absent)
+		wantErr      bool
+		wantTerminal emitCall // the terminal (settled) emit
 	}{
 		{
 			// The schedulable node's fabric never appears → the gate never
 			// certifies and times out. The eager floor must still have disclosed
 			// the 2-node total (incl. the cordoned node) so a deadline kill leaves
 			// the coverage in the logs instead of nothing.
-			name:          "never ready fails closed but floor disclosed the cordoned total",
-			schedRDMA:     -1,
-			wantErr:       true,
-			wantTerminalV: 0,
+			name:         "never ready fails closed but floor disclosed the cordoned total",
+			schedRDMA:    -1,
+			wantErr:      true,
+			wantTerminal: emitCall{validated: "0", total: "2", failed: "1", skipped: "1"},
 		},
 		{
 			// Fabric present+uniform → the gate certifies. The eager floor emits
 			// validated=0 first; the terminal emit reflects the certified cohort.
-			name:          "ready certifies after floor",
-			schedRDMA:     1000,
-			wantErr:       false,
-			wantTerminalV: 1,
+			name:         "ready certifies after floor",
+			schedRDMA:    1000,
+			wantErr:      false,
+			wantTerminal: emitCall{validated: "1", total: "2", failed: "0", skipped: "1"},
 		},
 	}
 
@@ -259,8 +259,11 @@ func TestVerifyRDMAFabricReady_EagerDisclosureFloor(t *testing.T) {
 			// pollUntilStable runs the probe synchronously in this goroutine, so
 			// the injected emit is never called concurrently — no lock needed.
 			var calls []emitCall
-			err := verifyRDMAFabricReadyEmit(ctx, helper.AKSRdmaSharedResource, func(validated, total int) {
-				calls = append(calls, emitCall{validated, total})
+			err := verifyRDMAFabricReadyEmit(ctx, helper.AKSRdmaSharedResource, func(extra map[string]string) {
+				calls = append(calls, emitCall{
+					validated: extra["nodesValidated"], total: extra["nodesTotal"],
+					failed: extra["nodesFailed"], skipped: extra["nodesSkipped"],
+				})
 			})
 
 			if (err != nil) != tt.wantErr {
@@ -269,14 +272,14 @@ func TestVerifyRDMAFabricReady_EagerDisclosureFloor(t *testing.T) {
 			if len(calls) < 2 {
 				t.Fatalf("expected an eager floor emit AND a terminal emit, got %d: %+v", len(calls), calls)
 			}
-			// The FIRST emit is the eager floor: validated=0 (nothing certified
-			// mid-poll) and total=2 (the schedulable node + the disclosed cordoned
+			// The FIRST emit is the eager floor: nothing passed or failed
+			// mid-poll, and total=2 (the schedulable node + the disclosed cordoned
 			// node). This is the sentinel a deadline SIGKILL would leave behind.
-			if want := (emitCall{validated: 0, total: 2}); calls[0] != want {
+			if want := (emitCall{validated: "0", total: "2", failed: "0", skipped: "1"}); calls[0] != want {
 				t.Errorf("eager floor emit = %+v, want %+v (cordoned node disclosed before the terminal emit)", calls[0], want)
 			}
 			// The terminal emit reflects the settled outcome.
-			if want := (emitCall{validated: tt.wantTerminalV, total: 2}); calls[len(calls)-1] != want {
+			if want := tt.wantTerminal; calls[len(calls)-1] != want {
 				t.Errorf("terminal emit = %+v, want %+v", calls[len(calls)-1], want)
 			}
 		})

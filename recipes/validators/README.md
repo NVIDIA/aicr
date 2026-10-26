@@ -40,7 +40,7 @@ Applied by `catalog.Load` (`pkg/validator/catalog/catalog.go`) in order:
 | `operator-health` | Verify GPU operator pods are running and healthy | 2m |
 | `expected-resources` | Verify expected Kubernetes resources exist and are healthy (runs ExpectedResources + Chainsaw assert paths side-by-side) | 8m |
 | `gpu-operator-version` | Validate GPU Operator version against recipe constraints | 2m |
-| `check-nvidia-smi` | Verify nvidia-smi works on all schedulable GPU nodes (cordoned nodes are disclosed, not silently skipped) | 10m |
+| `check-nvidia-smi` | Verify nvidia-smi works on every schedulable GPU node that is not busy (busy and cordoned nodes are reported as skipped, per node) | 10m |
 | `gke-gpu-nic-networks` | Verify the GKE cluster has the GPU NIC networks GPUDirect TCPXO requires, and that each is Ready with an intact GKENetworkParamSet binding (skipped unless the recipe declares `gke-nccl-tcpxo`) | 2m |
 | `gke-gpu-nic-topology` | Verify each a3 GPU node maps all 8 GPU NIC PCI slots to eth1..eth8 with no gVNIC displacement (skipped unless the recipe declares `gke-nccl-tcpxo`) | 2m |
 
@@ -52,8 +52,8 @@ Applied by `catalog.Load` (`pkg/validator/catalog/catalog.go`) in order:
 | `nccl-all-reduce-bw-net` | Verify NCCL All Reduce Bus Bandwidth on the NET transport (EFA on EKS) | 30m |
 | `nccl-all-reduce-bw-nvls` | Verify NCCL All Reduce Bus Bandwidth on the NVLS transport (MNNVL across an NVL72 IMEX domain) | 30m |
 | `inference-perf` | Verify inference throughput and TTFT p99 meet thresholds using AIPerf | 65m |
-| `nccl-cre-all-reduce-bw` | NCCL bus bandwidth via a CRE `Certification` (opt-in). Qualified on EKS H100 — live UAT 2026-10-09 on the pinned CRE v0.6.0, 2× p5.48xlarge: 489.51 GB/s vs `>= 300`. | 50m |
-| `cre-training-goodput` | Training goodput via a CRE `Certification` (opt-in). No qualified combination: the `training/nemotron5-8b` entry does not run on the pinned CRE v0.6.0, so the check skips. | 50m |
+| `nccl-cre-all-reduce-bw` | NCCL bus bandwidth via a CRE `Certification` (opt-in). Qualified on EKS H100 — live UAT 2026-10-23 on the pinned CRE v0.8.2, 2× p5.48xlarge: 489.70 GB/s vs `>= 300`. | 50m |
+| `cre-training-goodput` | Training goodput via a CRE `Certification` (opt-in). Qualified on EKS H100 — live UAT 2026-10-23 on the pinned CRE v0.8.2 and a NodeWright-tuned cluster, 2× p5.48xlarge: goodput 0.5723, 462.05 TFLOPS per GPU. | 50m |
 
 The TrainJob-path NCCL checks (`nccl-all-reduce-bw`, `-net`, `-nvls`) derive
 applicability from the recipe's `criteria` by default;

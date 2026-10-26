@@ -90,6 +90,7 @@ components:
 |---|---|---|---|
 | `name` | string | yes | Component identifier (matches `componentRefs[].name` in overlays) |
 | `displayName` | string | yes | Human label used in CLI output and bundle templates |
+| `class` | `ComponentClass` | embedded: yes | Bundle class (ADR-018): `core` or `ops`, ordered `core` < `ops`. A component may depend only on its own class or an earlier one; `pkg/recipe.TestClassDependencyDirectionGuard` resolves every catalog leaf and fails on an edge to a later class. Every embedded entry declares it (`TestEmbeddedRegistryDeclaresClass`), and the Class column of `docs/user/component-catalog.md` must match (`TestComponentCatalogClassColumnMatchesRegistry`), so reclassifying a component is a registry edit plus its catalog row. An external `--data` entry that omits it is `core`. Bundling does not read it today; the planned `--split` (ADR-018, #3158) will partition by it. |
 | `valueOverrideKeys` | []string | no | Alt keys for `--set <key>:path=value` (e.g., `gpuoperator`) |
 | `helm` | `HelmConfig` | one of helm/kustomize | Chart defaults (see below) |
 | `kustomize` | `KustomizeConfig` | one of helm/kustomize | Kustomization defaults (see below) |
@@ -104,6 +105,18 @@ components:
 | `gkeCriticalPriority` | bool | no | Synthesize ResourceQuota on GKE so `system-*-critical` pods admit |
 | `hasSelfRefCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` (chart ships CRD + CR in same release) |
 | `manifestsUseChartCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` on the release carrying the attached manifests — the injected `-post` wrapper under both vendored and non-vendored layouts (manifests create CRs of CRDs the chart installs) |
+
+**Class direction and prerequisites.** Because `kube-prometheus-stack` is
+`ops` and installs no CRDs (`crds.enabled: false`), a `core` component that
+only needs the `monitoring.coreos.com` CRDs for its
+ServiceMonitor or PodMonitor declares `dependencyRefs` on
+`prometheus-operator-crds`, not on `kube-prometheus-stack`. A component that
+reads Prometheus at runtime (Dynamo's planner, for example) needs no install
+edge. Prerequisites a component has beyond its chart, such as the storage
+driver its persistent volumes need, are declared as `dependencyRefs` too,
+through a service-specific mixin when the dependency exists on one service
+only (see `nvsentinel-datastore-eks` under
+[Mixin Composition](#mixin-composition)).
 
 `HelmConfig`: `defaultRepository`, `defaultChart`, `defaultVersion`,
 `defaultDigest`, `defaultNamespace`. `KustomizeConfig`: `defaultSource`, `defaultPath`,
@@ -186,7 +199,7 @@ Criteria fields (see `pkg/recipe/criteria.go` `type Criteria`):
 | `service` | `CriteriaServiceType` | `any` or empty | `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `metal3`, `rke2`, `generic`, `k0s`, `mk8s` |
 | `accelerator` | `CriteriaAcceleratorType` | `any` or empty | `h100`, `h200`, `gb200`, `gb300`, `b200`, `b300`, `a100`, `l40`, `l40s`, `rtx-pro-6000`, `vr200` |
 | `intent` | `CriteriaIntentType` | `any` or empty | `training`, `inference` |
-| `os` | `CriteriaOSType` | `any` or empty | `ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`, `sles` |
+| `os` | `CriteriaOSType` | `any` or empty | `ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`, `sles`, `rocky` |
 | `platform` | `CriteriaPlatformType` | `any` or empty | `dynamo`, `kubeflow`, `kueue`, `nim`, `runai`, `slurm` |
 | `nodes` | int | `0` | any positive int |
 
@@ -347,7 +360,7 @@ Mixin files currently in the tree: `os-ubuntu`, `os-talos`, `os-amazonlinux`, `o
 `nvsentinel-object-monitor`, `nvsentinel-nic-health-monitor`,
 `nvsentinel-preflight`, `nvsentinel-slurm-drain-monitor`, `nvsentinel-observe`,
 `nvsentinel-quarantine`, `nvsentinel-remediation`, `nvsentinel-slinky-drainer`,
-`nvsentinel-health-events-analyzer`, `npd`.
+`nvsentinel-health-events-analyzer`, `nvsentinel-event-exporter`, `nvsentinel-datastore-eks`, `npd`.
 
 The OS-scoped mixins (`os-ubuntu`, `os-talos`, `os-amazonlinux`, `os-sles`) are
 mutually exclusive:
@@ -454,8 +467,9 @@ verified node; when the constraint is absent the check keeps its
 banner-presence behavior and does not invent a floor (#1995).
 When the constraint is set but the host driver cannot be measured —
 unreadable nvidia-smi banner, no GPU nodes, all GPU nodes cordoned, or
-GPU nodes busy with workloads — the check fails closed rather than
-Skip. Skip on those paths is preserved only when no floor is
+all schedulable GPU nodes busy with workloads — the check fails closed
+rather than Skip. Busy nodes skipped beside a verified node do not fail
+the floor; they are disclosed as skipped, like cordoned nodes. Skip on those paths is preserved only when no floor is
 configured. The value must carry a comparison operator (`>=`, `>`,
 `<=`, `<`) to behave as a floor; a bare version is exact string match,
 so a newer driver would fail. The constraint name is an exact match;

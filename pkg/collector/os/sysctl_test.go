@@ -724,10 +724,10 @@ func TestSysctlCollector_FilterPatterns(t *testing.T) {
 
 	// Create files including one that matches the filter pattern
 	files := map[string]string{
-		"kernel/hostname": "testhost",
-		"dev/cdrom/info":  "CD-ROM information",
-		"dev/cdrom/debug": "0",
-		"vm/swappiness":   "60",
+		"kernel/hostname":     "testhost",
+		"dev/cdrom/autoclose": "1",
+		"dev/cdrom/debug":     "0",
+		"vm/swappiness":       "60",
 	}
 
 	for relPath, content := range files {

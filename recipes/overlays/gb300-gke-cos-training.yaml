@@ -48,7 +48,7 @@ spec:
       dependencyRefs:
         - nfd
         - cert-manager
-        - kube-prometheus-stack
+        - prometheus-operator-crds
         - nodewright-customizations
 
     # Grace (arm64) partition-gpus image:

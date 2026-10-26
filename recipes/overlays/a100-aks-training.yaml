@@ -42,7 +42,7 @@ spec:
       dependencyRefs:
         - nfd
         - cert-manager
-        - kube-prometheus-stack
+        - prometheus-operator-crds
         - nodewright-customizations
 
     # A100 reuses the h100 nodewright tuning profile (tuning.yaml), mirroring

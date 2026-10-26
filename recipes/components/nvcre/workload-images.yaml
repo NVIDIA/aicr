@@ -48,5 +48,5 @@ platform: aws
 runtimeFetches:
   - ref: core_v0.15.2
     url: https://github.com/NVIDIA/Megatron-LM.git
-sourceCommit: 5d0cea50f59e3866b5b4491683c26ebee334cfae
-sourceVersion: v0.6.0
+sourceCommit: df01e52c57c4b71017a2433b0cc50375c79cb69c
+sourceVersion: v0.8.2

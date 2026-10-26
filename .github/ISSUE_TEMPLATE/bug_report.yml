@@ -114,7 +114,7 @@ body:
       description: |
         Valid values — **service:** eks, gke, aks, oke, ocp, kind, lke, bcm,
         metal3, rke2, generic, k0s, mk8s · **OS:** ubuntu, rhel, cos, amazonlinux,
-        ol, talos, sles · **GPU:** h100, h200, gb200, gb300, b200, b300, a100, l40, l40s,
+        ol, talos, sles, rocky · **GPU:** h100, h200, gb200, gb300, b200, b300, a100, l40, l40s,
         rtx-pro-6000, vr200 · **intent:** training, inference. Use "other" and
         say what it is if none fit.
       value: |

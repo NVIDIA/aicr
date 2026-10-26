@@ -30,7 +30,7 @@ Each stage transforms input data into a different format:
 **OS Configuration:**
 - **grub**: `/proc/cmdline` - Boot parameters
 - **kmod**: `/proc/modules` - Loaded kernel modules
-- **sysctl**: `/proc/sys/**/*` - Kernel runtime parameters
+- **sysctl**: `/proc/sys/**/*` - Kernel runtime parameters, except `/proc/sys/net` and entries whose read can block in the kernel (for example `vm/stat_refresh` and `kernel/ftrace_enabled`)
 - **release**: `/etc/os-release` - OS identification
 
 **Kubernetes Cluster:**

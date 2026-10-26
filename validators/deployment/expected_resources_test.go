@@ -2364,16 +2364,16 @@ func nodewrightWithStatus(name, status string) *unstructured.Unstructured {
 
 // TestRDMAFabricCoverage_Disclosure exercises the headline behavior of #1952 as a
 // pure function of the partition: a cordoned Mellanox RDMA node must be listed
-// "skipped (cordoned)", counted in nodesTotal, and never omitted — the same
+// SKIPPED (cordoned), counted in nodesTotal, and never omitted — the same
 // spuriously-narrowed-pass guard check-nvidia-smi got in #1668/#1936, applied to
-// the RDMA fabric gate. It also pins the two zero-cordoned/zero-total phrasings.
+// the RDMA fabric gate. The RESULT line uses check-nvidia-smi's breakdown shape.
 func TestRDMAFabricCoverage_Disclosure(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name             string
 		cov              rdmaFabricCoverage
-		validated        int
+		passed, failed   int
 		wantTotal        int
 		wantEnumeration  []string
 		wantCoverageLine string
@@ -2381,38 +2381,37 @@ func TestRDMAFabricCoverage_Disclosure(t *testing.T) {
 		{
 			name:      "cordoned RDMA node is disclosed and counted",
 			cov:       rdmaFabricCoverage{schedulable: 1, cordoned: []string{"rdma-drain-0"}},
-			validated: 1,
+			passed:    1,
 			wantTotal: 2,
 			wantEnumeration: []string{
 				"Found 2 Mellanox RDMA-capable GPU node(s), 1 schedulable, 1 cordoned:",
-				"  rdma-drain-0: skipped (cordoned)",
+				"  rdma-drain-0: SKIPPED (cordoned)",
 			},
-			wantCoverageLine: "RESULT: nodesValidated: 1/2 (1 cordoned, skipped)",
+			wantCoverageLine: "RESULT: nodesValidated: 1/2 (passed 1, failed 0, skipped 1: cordoned 1)",
 		},
 		{
-			name:      "fail-closed exit reports zero validated but still counts cordoned",
+			name:      "fail-closed exit fails the cohort but still counts cordoned",
 			cov:       rdmaFabricCoverage{schedulable: 2, cordoned: []string{"rdma-drain-0", "rdma-drain-1"}},
-			validated: 0,
+			failed:    2,
 			wantTotal: 4,
 			wantEnumeration: []string{
 				"Found 4 Mellanox RDMA-capable GPU node(s), 2 schedulable, 2 cordoned:",
-				"  rdma-drain-0: skipped (cordoned)",
-				"  rdma-drain-1: skipped (cordoned)",
+				"  rdma-drain-0: SKIPPED (cordoned)",
+				"  rdma-drain-1: SKIPPED (cordoned)",
 			},
-			wantCoverageLine: "RESULT: nodesValidated: 0/4 (2 cordoned, skipped)",
+			wantCoverageLine: "RESULT: nodesValidated: 0/4 (passed 0, failed 2, skipped 2: cordoned 2)",
 		},
 		{
-			name:             "no cordoned nodes omits the parenthetical",
+			name:             "no cordoned nodes",
 			cov:              rdmaFabricCoverage{schedulable: 3},
-			validated:        3,
+			passed:           3,
 			wantTotal:        3,
 			wantEnumeration:  []string{"Found 3 Mellanox RDMA-capable GPU node(s), 3 schedulable, 0 cordoned:"},
-			wantCoverageLine: "RESULT: nodesValidated: 3/3",
+			wantCoverageLine: "RESULT: nodesValidated: 3/3 (passed 3, failed 0, skipped 0: cordoned 0)",
 		},
 		{
 			name:             "zero total nodes gets a plain sentence",
 			cov:              rdmaFabricCoverage{},
-			validated:        0,
 			wantTotal:        0,
 			wantEnumeration:  []string{"Found 0 Mellanox RDMA-capable GPU node(s)."},
 			wantCoverageLine: "RESULT: nodesValidated: 0/0",
@@ -2434,42 +2433,43 @@ func TestRDMAFabricCoverage_Disclosure(t *testing.T) {
 					t.Errorf("enumerationLines()[%d] = %q, want %q", i, gotEnum[i], want)
 				}
 			}
-			if got := tt.cov.coverageLine(tt.validated); got != tt.wantCoverageLine {
-				t.Errorf("coverageLine(%d) = %q, want %q", tt.validated, got, tt.wantCoverageLine)
+			if got := tt.cov.coverageLine(tt.passed, tt.failed); got != tt.wantCoverageLine {
+				t.Errorf("coverageLine(%d, %d) = %q, want %q", tt.passed, tt.failed, got, tt.wantCoverageLine)
 			}
 		})
 	}
 }
 
 // TestRDMAFabricCoverageExtra proves the structured coverage disclosure carries
-// exactly the two allowlisted count keys (nodesValidated/nodesTotal) as decimal
-// strings and nothing else — no node names or IPs leak into the Extra channel.
+// exactly the four allowlisted count keys as decimal strings and nothing else —
+// no node names or IPs leak into the Extra channel.
 func TestRDMAFabricCoverageExtra(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name          string
-		validated     int
-		total         int
-		wantValidated string
-		wantTotal     string
+		name           string
+		cov            rdmaFabricCoverage
+		passed, failed int
+		want           map[string]string
 	}{
-		{"full cohort, one cordoned excluded", 1, 2, "1", "2"},
-		{"uniform cohort no cordoned", 2, 2, "2", "2"},
-		{"fail-closed zero validated", 0, 3, "0", "3"},
+		{"full cohort, one cordoned excluded", rdmaFabricCoverage{schedulable: 1, cordoned: []string{"c"}}, 1, 0,
+			map[string]string{"nodesValidated": "1", "nodesTotal": "2", "nodesFailed": "0", "nodesSkipped": "1"}},
+		{"uniform cohort no cordoned", rdmaFabricCoverage{schedulable: 2}, 2, 0,
+			map[string]string{"nodesValidated": "2", "nodesTotal": "2", "nodesFailed": "0", "nodesSkipped": "0"}},
+		{"fail-closed cohort", rdmaFabricCoverage{schedulable: 3}, 0, 3,
+			map[string]string{"nodesValidated": "0", "nodesTotal": "3", "nodesFailed": "3", "nodesSkipped": "0"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			extra := rdmaFabricCoverageExtra(tt.validated, tt.total)
-			if extra["nodesValidated"] != tt.wantValidated {
-				t.Errorf("nodesValidated = %q, want %q", extra["nodesValidated"], tt.wantValidated)
+			extra := tt.cov.coverageExtra(tt.passed, tt.failed)
+			if len(extra) != len(tt.want) {
+				t.Fatalf("coverageExtra() = %v, want %v", extra, tt.want)
 			}
-			if extra["nodesTotal"] != tt.wantTotal {
-				t.Errorf("nodesTotal = %q, want %q", extra["nodesTotal"], tt.wantTotal)
-			}
-			if len(extra) != 2 {
-				t.Errorf("coverage extra must carry exactly the two count keys, got %v", extra)
+			for k, v := range tt.want {
+				if extra[k] != v {
+					t.Errorf("coverageExtra()[%q] = %q, want %q", k, extra[k], v)
+				}
 			}
 		})
 	}
