@@ -531,10 +531,12 @@ The catalog entry each check drives, and the node footprint it runs on, come
 from the qualification record rather than the check: for
 `nccl-cre-all-reduce-bw` on `eks` x `h100`, `communication/nccl-all-reduce` on
 two nodes, and for `cre-training-goodput` on `eks` x `h100`,
-`training/nemotron5-8b` on two nodes. A combination with no entry skips,
-because it has no calibrated threshold to judge against.
+`training/nemotron5-8b` on two nodes. A combination that no entry records as
+qualified skips with an unsupported-target reason.
 
-**Relation to the TrainJob check.** On `eks` x `h100`, `nccl-cre-all-reduce-bw`
+#### Relation to the TrainJob check
+
+On `eks` x `h100`, `nccl-cre-all-reduce-bw`
 reads 1.65 GB/s (0.34%) higher than `nccl-all-reduce-bw` on the same two nodes:
 six back-to-back pairs on NVCRE v0.8.2 gave 486.76 to 489.01 GB/s for the
 TrainJob check and 489.63 to 490.03 GB/s for the CRE check, with a per-pair

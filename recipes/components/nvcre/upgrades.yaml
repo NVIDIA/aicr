@@ -222,8 +222,9 @@ transitions:
       if it had not. Because NVCRE is an ownsCRDs component, a deployer that
       leaves the v0.6.0 CRDs in place finishes the upgrade deployed, Ready, and
       not actually upgraded. Two behavior changes live in the controller
-      rather than the schema. A Job whose workload create the API server keeps
-      rejecting now fails with WorkloadCreationError after
+      rather than the schema. A Job whose workload create is persistently
+      rejected by an admission webhook, admission policy, or exhausted
+      ResourceQuota now fails with WorkloadCreationError after
       manager.workloadCreationDeadline, ten minutes by default, where earlier
       releases retried for as long as the Job existed unless timeoutPerJob was
       set. And the controller's writes to namespaced resources moved from
