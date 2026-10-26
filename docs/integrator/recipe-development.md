@@ -402,6 +402,11 @@ componentRefs:
 
 A component must have either `helm` OR `kustomize` configuration, not both.
 
+> **`patches` is not supported.** The `componentRefs[].patches` field is not
+> applied by any deployer. An enabled ref that sets `patches` is rejected at
+> recipe resolution (rather than silently producing an unpatched bundle), so do
+> not use it. See [#1588](https://github.com/NVIDIA/aicr/issues/1588).
+
 #### Component classes
 
 Every embedded registry entry declares a `class`, `core` or `ops`
@@ -422,11 +427,6 @@ Bundling ignores it today; the planned `--split` flag
 ([#3158](https://github.com/NVIDIA/aicr/issues/3158)) will partition a
 bundle by it. The full assignment is in the
 [component catalog](../user/component-catalog.md#components).
-
-> **`patches` is not supported.** The `componentRefs[].patches` field is not
-> applied by any deployer. An enabled ref that sets `patches` is rejected at
-> recipe resolution (rather than silently producing an unpatched bundle), so do
-> not use it. See [#1588](https://github.com/NVIDIA/aicr/issues/1588).
 
 ### Kueue topology-aware scheduling
 
