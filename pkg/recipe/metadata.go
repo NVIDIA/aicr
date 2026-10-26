@@ -513,12 +513,21 @@ func rewriteHealthCheck(component, asserts, inheriting string, rewrite func(doc 
 	if !changed {
 		return asserts, nil
 	}
+	out, err := encodeHealthCheck(docs)
+	if err != nil {
+		return "", errors.PropagateOrWrap(err, errors.ErrCodeInternal, fmt.Sprintf(
+			"failed to serialize health check for component %q after inheriting %s", component, inheriting))
+	}
+	return out, nil
+}
+
+// encodeHealthCheck serializes docs as one YAML stream.
+func encodeHealthCheck(docs []any) (string, error) {
 	var out bytes.Buffer
 	for i, doc := range docs {
 		data, err := serializer.MarshalYAMLDeterministic(doc)
 		if err != nil {
-			return "", errors.PropagateOrWrap(err, errors.ErrCodeInternal, fmt.Sprintf(
-				"failed to serialize health check for component %q after inheriting %s", component, inheriting))
+			return "", err
 		}
 		if i > 0 {
 			out.WriteString("---\n")
