@@ -90,6 +90,10 @@ type bundleCmdOptions struct {
 	// components. Off by default (parallel). An escape hatch for operators.
 	serial bool
 
+	// split renders a class-partitioned bundle set (ADR-018) instead of one
+	// bundle. Off by default; helm deployer and local output only.
+	split bool
+
 	// terraformClusterRollover emits the cluster-rollover containment shim
 	// in a --deployer terraform bundle. Off by default. See
 	// config.WithTerraformClusterRollover for why it is not the default.
@@ -213,6 +217,7 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 		vendorCharts:              boolFlagOrConfig(cmd, "vendor-charts", bundleOpts.VendorCharts),
 		readinessHooks:            cmd.Bool("readiness-hooks"),
 		serial:                    cmd.Bool("serial"),
+		split:                     cmd.Bool("split"),
 		terraformClusterRollover:  cmd.Bool("terraform-cluster-rollover"),
 		terraformChildModule:      cmd.Bool("terraform-child-module"),
 		certificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", bundleOpts.CertIDRegexp),
@@ -341,6 +346,13 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 	// ExternalArtifact pairs instead of placeholder GitRepository references.
 	if opts.deployer == config.DeployerFlux && opts.ociRef != nil {
 		opts.ociSourceName = cmd.String("flux-oci-source-name")
+	}
+
+	// A split set is a directory tree published create-only; OCI output is
+	// outside the ADR-018 v1 support matrix.
+	if opts.split && opts.ociRef != nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"--split does not support OCI output in this release; use a local --output directory that does not exist yet")
 	}
 
 	// Flux namespace applies to all Flux deployer output (Git and OCI).
@@ -1061,6 +1073,18 @@ Package with explicit tag (overrides CLI version):
 				Category: catDeployment,
 			},
 			&cli.BoolFlag{
+				Name: "split",
+				Usage: `Generate a bundle set partitioned by registry class (ADR-018) instead
+	of one bundle: one directory per class with enabled components (core,
+	then ops), under a set root holding the full recipe.yaml, split.yaml,
+	checksums.txt and the attestation. Install the classes in order and tear
+	them down in reverse. The complete recipe is validated once before the
+	partition is rendered, and the set is published with one atomic move to
+	--output, which must not exist yet. Supported only with --deployer helm
+	and a local output directory; off by default.`,
+				Category: catDeployment,
+			},
+			&cli.BoolFlag{
 				Name: "terraform-cluster-rollover",
 				Usage: `Emit a containment shim in each component module so replacing the
 	cluster replaces every release, instead of leaving state that describes
@@ -1416,6 +1440,7 @@ func runBundleCmdWithDependencies(
 		config.WithVendorCharts(opts.vendorCharts),
 		config.WithReadinessHooks(opts.readinessHooks),
 		config.WithSerial(opts.serial),
+		config.WithSplit(opts.split),
 		config.WithTerraformClusterRollover(opts.terraformClusterRollover),
 		config.WithTerraformChildModule(opts.terraformChildModule),
 		config.WithOCISourceName(opts.ociSourceName),

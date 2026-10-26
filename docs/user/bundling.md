@@ -902,6 +902,79 @@ place it alongside the component, as does `--dynamic` under `helm` and
 `argocd-helm`. Keyless tolerations are not applied to the gate. See
 [Readiness Gates](cli-reference.md#readiness-gates) for each deployer.
 
+## Split a bundle by class
+
+`--split` renders one bundle set partitioned by the registry `class` of each
+component ([ADR-018](https://github.com/NVIDIA/aicr/blob/main/docs/design/018-class-partitioned-bundles.md)).
+The classes are ordered `core` < `ops`: `core` is what a plain GPU pod needs
+to run correctly, with its fabric and install prerequisites; `ops` is
+everything else, workload platforms included. The [component
+catalog](component-catalog.md#components) lists every component's class.
+Two owners can deploy the two classes separately, for example NVIDIA
+deploying `core/` on a tenant data plane and the partner deploying `ops/`.
+
+```bash
+aicr bundle --recipe recipe.yaml --split --output ./bundles
+```
+
+The complete recipe is validated once, exactly as without `--split`, and
+only then is the partition rendered: one directory per class that has an
+enabled component, under a set root that is the verification unit.
+
+```text
+bundles/
+├── recipe.yaml        # the full resolved recipe
+├── split.yaml         # audit: recipeDigest, class order, class of every component
+├── checksums.txt      # covers the whole set
+├── core/              # deploy.sh, README.md, NNN-<component>/ ...
+└── ops/               # deploy after core
+```
+
+**Deploy and tear down in class order.** Install `core`, then `ops`; tear
+down `ops` before `core`. Each class directory is an ordinary Helm
+per-component bundle with its own `deploy.sh`, which does not check that
+the earlier classes are installed. A class's README names the namespaces
+and CRD groups it shares with an earlier class, which its teardown must
+leave in place; the earliest class that uses them removes them, and it is
+torn down last. A dependency on a component in an earlier class is
+satisfied outside the class directory, the same way a disabled component's
+edge is.
+
+**Verify the set, not a class.** The root `checksums.txt` and, with
+`--attest`, the attestation cover the whole set. Run `aicr verify` at the
+set root and keep the set intact: a class directory copied out of it has no
+provenance of its own. `split.yaml` is audit metadata, never a trust root,
+and nothing reads it at deploy time. Its `recipeDigest` identifies the
+resolved recipe and, with the class map, the partition; bundle-time
+overrides land in the class directories, not in `recipe.yaml`, so two sets
+can share a `recipeDigest` and differ in their payload, which
+`checksums.txt` identifies.
+
+**Publication is create-only and atomic.** `--output` must name a path that
+does not exist yet, under a parent that does. The set renders and verifies
+in a private sibling of the destination and is published with one atomic
+move, so a failure leaves no partial set behind and an existing path is
+never replaced.
+
+**What is rejected.** `--split` fails before writing anything when:
+
+- the deployer is not `helm`, the output is an OCI reference, checksums are
+  disabled, or a component filter (`bundlers`) is set;
+- the recipe targets OCP (`service: ocp`);
+- a component has no registry entry, such as a fully specified ref in a
+  hand-authored recipe; register it, for example through a `--data` registry
+  entry that declares its `class`;
+- a dependency points from an earlier class to a later one, including the
+  opt-in `nvsentinel-preflight` and `nvsentinel-slinky-drainer` mixins under
+  the shipped classification;
+- every component of a declared class is disabled, by the recipe or by
+  `--set <component>:enabled=false`;
+- two components would emit the same Helm release name in the same
+  namespace, counting the injected `-pre`, `-post` and `-readiness`
+  releases across the whole set.
+
+Without `--split` nothing changes: one bundle, every enabled component.
+
 ## Deploy the bundle
 
 For the default `helm` deployer, verify the bundle before installing it:

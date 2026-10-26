@@ -64,6 +64,7 @@ flag    aicr bundle  --set-json  type=string default= required=false hidden=fals
 flag    aicr bundle  --shared-storage-class  type=string default= required=false hidden=false env=
 flag    aicr bundle  --signing-config  type=string default= required=false hidden=false env=AICR_SIGNING_CONFIG
 flag    aicr bundle  --signing-key  type=string default= required=false hidden=false env=
+flag    aicr bundle  --split  type=bool default=false required=false hidden=false env=
 flag    aicr bundle  --storage-class  type=string default= required=false hidden=false env=
 flag    aicr bundle  --system-node-selector  type=string default= required=false hidden=false env=
 flag    aicr bundle  --system-node-toleration  type=string default= required=false hidden=false env=

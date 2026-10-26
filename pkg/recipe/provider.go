@@ -708,6 +708,21 @@ func mergeRegistries(embedded, external *ComponentRegistry) *ComponentRegistry {
 		"embedded_count", len(embedded.Components),
 		"external_count", len(external.Components))
 
+	// An external entry replaces the embedded one wholesale, so a replacement
+	// that omits class lands in core even when the embedded component is
+	// not. Under --split that moves the component between bundles (ADR-018),
+	// so say so where the replacement happens.
+	embeddedClass := make(map[string]ComponentClass, len(embedded.Components))
+	for _, c := range embedded.Components {
+		embeddedClass[c.Name] = c.GetClass()
+	}
+	for _, c := range external.Components {
+		if was, found := embeddedClass[c.Name]; found && c.Class == "" && was != ComponentClassCore {
+			slog.Warn("external registry entry replaces an embedded component without declaring class; it defaults to core",
+				"component", c.Name, "embeddedClass", was, "effectiveClass", ComponentClassCore)
+		}
+	}
+
 	return &ComponentRegistry{
 		APIVersion: embedded.APIVersion,
 		Kind:       embedded.Kind,

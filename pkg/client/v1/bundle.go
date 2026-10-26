@@ -179,6 +179,13 @@ type BundleOptions struct {
 	// artifact is air-gap deployable. Off (false) by default.
 	VendorCharts bool
 
+	// Split renders a class-partitioned bundle set (ADR-018): one directory
+	// per registry class with enabled components, under a set root holding
+	// recipe.yaml, split.yaml, checksums.txt and the attestation. Requires an
+	// absent OutputDir whose parent exists; the set is published there with
+	// one atomic move. Supported only with the helm deployer. Off by default.
+	Split bool
+
 	// AppName overrides the parent Argo Application's metadata.name for the
 	// argocd and argocd-helm deployers, or names the GitRepo and prefixes
 	// every bundle and HelmOp for fleet, where it must be a DNS-1123 label.
@@ -266,6 +273,7 @@ func (o BundleOptions) bundlerConfig() *BundleConfig {
 		config.WithStorageClass(o.StorageClass),
 		config.WithSharedStorageClass(o.SharedStorageClass),
 		config.WithVendorCharts(o.VendorCharts),
+		config.WithSplit(o.Split),
 		config.WithAppName(o.AppName),
 		config.WithAttest(o.Attest),
 		config.WithCertificateIdentityRegexp(o.CertIDRegexp),
