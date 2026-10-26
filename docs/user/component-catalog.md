@@ -990,7 +990,7 @@ aicr bundle -r recipe.yaml -o ./bundles \
 | `drainGPUPods` | `false` | A drain empties the whole node, not only its GPU pods. |
 | `partialDrainEnabled` | `false` | Same: no drain is scoped to the faulted GPU. |
 
-**Bundle-time gate.** `CheckNVSentinelDrainScopeCoherent` checks the values the bundle emits: that the generated scope protects every namespace the recipe declares, that the drain entries cover the node and are ones `node-drainer` can load, and that the timing is within the bounds above. It also rejects `--dynamic` on the drain paths. The full rule list is in the [validator reference](../contributor/validator.md). Every component the recipe declares must have a namespace, either in the recipe or as its registry `defaultNamespace`; the bundle fails otherwise, since that component could not be protected.
+**Bundle-time gate.** `CheckNVSentinelDrainScopeCoherent` checks the values the bundle emits: that the generated scope protects every namespace the recipe declares, that the drain entries cover the node and are ones `node-drainer` can load, and that the timing is in range: `deleteAfterTimeoutMinutes` a whole number from 10 to 1440, and `evictionTimeoutInSeconds` whole seconds from 30 to 3600. It also rejects `--dynamic` on the drain paths. The full rule list is in the [validator reference](../contributor/validator.md). Every component the recipe declares must have a namespace, either in the recipe or as its registry `defaultNamespace`; the bundle fails otherwise, since that component could not be protected.
 
 ### Health Events Analyzer
 
