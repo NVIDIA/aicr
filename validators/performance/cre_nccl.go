@@ -17,7 +17,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -126,8 +125,21 @@ func validateCRENcclAllReduceBw(
 		return "", false, err
 	}
 
-	actual = strconv.FormatFloat(bw, 'f', 2, 64)
-	return actual, bw >= threshold, nil
+	actual, passed = creNCCLVerdict(bw, threshold)
+	return actual, passed, nil
+}
+
+// creNCCLVerdict judges bw with the verdict the TrainJob check uses, so one
+// recipe threshold means the same under both backends, and publishes the same
+// result extras so the two compare directly. The CRE check differs from the
+// TrainJob one only in asserting the transport before this point.
+func creNCCLVerdict(bw, threshold float64) (actual string, passed bool) {
+	validators.EmitExtraOrWarn(map[string]string{
+		validators.ExtraKeyThresholdGbps: validators.FormatDecimal(threshold),
+		validators.ExtraKeyTolerancePct:  validators.FormatDecimal((1 - ncclBandwidthFloorFraction) * 100),
+	})
+	validators.EmitExtraOrWarn(ncclBandwidthExtra(bw, threshold))
+	return ncclBandwidthVerdict(bw, threshold, "")
 }
 
 // creNCCLCleanupResult folds a teardown failure into the check's result.

@@ -285,3 +285,33 @@ func TestMeasurementBelongsToRun(t *testing.T) {
 		t.Fatal("stale measurement must not match")
 	}
 }
+
+// One threshold has to mean the same under both backends: the CRE verdict is
+// the TrainJob verdict, so the floor sits at ncclBandwidthFloorFraction of the
+// recipe value and nothing below it passes.
+func TestCRENCCLVerdictMatchesTrainJob(t *testing.T) {
+	tests := []struct {
+		name      string
+		bandwidth float64
+		threshold float64
+		want      bool
+	}{
+		{"at threshold", 300, 300, true},
+		{"inside the floor band", 285, 300, true},
+		{"exactly at the floor", 270, 300, true},
+		{"just below the floor", 269.99, 300, false},
+		{"zero bandwidth", 0, 300, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			creActual, creOK := creNCCLVerdict(tt.bandwidth, tt.threshold)
+			tjActual, tjOK := ncclBandwidthVerdict(tt.bandwidth, tt.threshold, "")
+			if creOK != tt.want {
+				t.Errorf("CRE verdict for %.2f against %.2f = %v, want %v", tt.bandwidth, tt.threshold, creOK, tt.want)
+			}
+			if creOK != tjOK || creActual != tjActual {
+				t.Errorf("CRE verdict (%q, %v) differs from TrainJob (%q, %v)", creActual, creOK, tjActual, tjOK)
+			}
+		})
+	}
+}

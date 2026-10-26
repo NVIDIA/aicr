@@ -181,6 +181,18 @@ are not.
 An AICR check that omits any of these can strand GPU capacity indefinitely,
 which is why they are stated here rather than left to each caller.
 
+### 7. One threshold means the same under either backend
+
+A recipe constraint is a statement about the cluster, not about the tool that
+measured it. `nccl-cre-all-reduce-bw` therefore judges bandwidth with the same
+verdict as `nccl-all-reduce-bw`: it passes at the same fraction of the constraint
+value (`ncclBandwidthFloorFraction`, 0.9) and publishes the same result extras.
+The one demand that differs is the transport assertion, which only the CRE check
+can make, because the default TrainJob template logs at `NCCL_DEBUG=WARN`. A
+constraint is still calibrated per service and accelerator; this decision makes
+the number portable between backends, not between hardware. The goodput check
+has no TrainJob counterpart and passes at the value itself.
+
 ## Adoption Gates
 
 These gates bound **stock-overlay adoption**, not registry-only admission.

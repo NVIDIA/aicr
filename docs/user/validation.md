@@ -519,8 +519,10 @@ validation:
 
 Both constraints are floors. The checks compare the measured value with `>=`
 and refuse any other operator rather than evaluating it as a floor anyway, so a
-constraint they cannot honor fails before any GPU work starts. Note the goodput
-units: the measurement is a ratio between 0 and 1, so a constraint written as a
+constraint they cannot honor fails before any GPU work starts. The bandwidth
+check applies the constraint the way `nccl-all-reduce-bw` does: it passes at 90%
+of the value, so the same `>= 300` means the same under either backend. The
+goodput check passes at the value itself. Note the goodput units: the measurement is a ratio between 0 and 1, so a constraint written as a
 percentage (`>= 50`) can never be satisfied.
 
 | Check | What it measures | Qualified combinations |
@@ -543,15 +545,15 @@ six back-to-back pairs on NVCRE v0.8.2 gave 486.76 to 489.01 GB/s for the
 TrainJob check and 489.63 to 490.03 GB/s for the CRE check, with a per-pair
 offset of 0.92 to 3.14 GB/s. Both ran over `Using network Libfabric`; the CRE
 check asserts that from its launcher log, and the TrainJob check's default
-template logs at `NCCL_DEBUG=WARN` so it cannot show it. The two checks apply
-a constraint differently: the TrainJob check passes at 90% of the value, and
-the CRE check passes only at the value itself. The same number in both
-constraints therefore leaves a band between 90% and 100% of it where the
-TrainJob check passes and the CRE check fails. To get the same verdict from
-both, write the CRE constraint as 0.9 times the TrainJob one; `>= 270` is
-equivalent to a TrainJob `>= 300`, to within the 1.65 GB/s offset. This was
-measured on one cluster, and no run landed near the boundary, so it does not
-show that the two verdicts agree at it.
+template logs at `NCCL_DEBUG=WARN` so it cannot show it. That is the one
+difference in what the two checks demand: the CRE check fails a run that fell
+back to Socket, and the TrainJob check does not look. Both pass at 90% of the
+constraint value, so a recipe can carry the same `>= 300` for either backend
+and the verdicts differ only by the 1.65 GB/s offset. The CRE check applied the value without the 10% allowance
+before this was aligned; a CRE constraint that had been written as 0.9 times
+the TrainJob value to compensate should be reset to the TrainJob value. The
+offset was measured on one cluster, and no run landed near the boundary, so it
+does not show that the two verdicts agree at it.
 
 The goodput figure depends on the step count, because startup time counts
 against it. The step count comes from the NVCRE catalog entry, so a figure
