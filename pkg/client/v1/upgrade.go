@@ -651,7 +651,7 @@ func internalObjectNames(
 	if err != nil {
 		return nil, err
 	}
-	return objectNamesOf(values)
+	return projectObjectNames(values)
 }
 
 // internalMergedValues returns the merged values of each of internal's
@@ -671,20 +671,6 @@ func internalMergedValues(ctx context.Context, internal *recipe.RecipeResult) (m
 		values[component] = merged
 	}
 	return values, nil
-}
-
-// objectNamesOf returns the object names set in each component's values, keyed
-// by component name.
-func objectNamesOf(values map[string]map[string]any) (map[string]map[string]string, error) {
-	names := make(map[string]map[string]string, len(values))
-	for component, merged := range values {
-		pinned, err := recipe.ObjectNameValues(merged)
-		if err != nil {
-			return nil, err
-		}
-		names[component] = pinned
-	}
-	return names, nil
 }
 
 // projectObjectNames narrows merged values to the keys that name objects.

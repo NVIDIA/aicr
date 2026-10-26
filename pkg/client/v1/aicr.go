@@ -1051,7 +1051,7 @@ func (c *Client) inheritObjectNames(
 	if err != nil {
 		return err
 	}
-	current, err := objectNamesOf(currentValues)
+	current, err := projectObjectNames(currentValues)
 	if err != nil {
 		return err
 	}
