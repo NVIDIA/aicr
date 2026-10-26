@@ -983,10 +983,21 @@ Without `--split` nothing changes: one bundle, every enabled component.
 
 ## Deploy the bundle
 
-For the default `helm` deployer, verify the bundle before installing it:
+For the default `helm` deployer and an ordinary bundle, verify the bundle
+before installing it:
 
 ```bash
 cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh
+```
+
+For a bundle set generated with `--split`, verify at the set root, then run
+each class's own `deploy.sh` in class order (see
+[Split a bundle by class](#split-a-bundle-by-class)):
+
+```bash
+cd bundles && aicr verify . \
+  && (cd core && chmod +x deploy.sh && ./deploy.sh) \
+  && (cd ops && chmod +x deploy.sh && ./deploy.sh)
 ```
 
 For the `terraform` deployer, verify in the step that generates the bundle,

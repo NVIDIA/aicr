@@ -179,18 +179,20 @@ type BundleOptions struct {
 	// artifact is air-gap deployable. Off (false) by default.
 	VendorCharts bool
 
-	// Split renders a class-partitioned bundle set (ADR-018): one directory
-	// per registry class with enabled components, under a set root holding
-	// recipe.yaml, split.yaml, checksums.txt and the attestation. Requires an
-	// absent OutputDir whose parent exists; the set is published there with
-	// one atomic move. Supported only with the helm deployer. Off by default.
-	Split bool
-
 	// AppName overrides the parent Argo Application's metadata.name for the
 	// argocd and argocd-helm deployers, or names the GitRepo and prefixes
 	// every bundle and HelmOp for fleet, where it must be a DNS-1123 label.
 	// Empty means each deployer applies its own default. See #1011.
 	AppName string
+
+	// Split renders a class-partitioned bundle set (ADR-018): one directory
+	// per registry class with enabled components, under a set root holding
+	// recipe.yaml, split.yaml, checksums.txt and the attestation. Requires an
+	// absent OutputDir whose parent exists; the set is published there with
+	// one atomic move. Supported only with the helm deployer. Off by default.
+	// Unlike the flat fields above, no config file setting derives it: it is
+	// set by the caller (the CLI flag, the REST query parameter, or SDK code).
+	Split bool
 
 	// Attester signs bundle content. When nil, MakeBundle derives one from
 	// OIDCResolve; when both are unset, the no-op attester applies (matching
