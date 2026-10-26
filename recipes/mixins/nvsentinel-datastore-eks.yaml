@@ -1,0 +1,43 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Declares the storage edge of NVSentinel's datastore on EKS. Opt-in, and only
+# for an EKS leaf that composes nvsentinel-observe, nvsentinel-quarantine or
+# nvsentinel-remediation: no shipped recipe composes it. See
+# docs/user/component-catalog.md#graded-remediation.
+#
+# nvsentinel-mongodb requests three persistent volumes, which on EKS are
+# provisioned by the aws-ebs-csi-driver component the eks overlay declares.
+# The datastore mixins apply to every service, so they cannot name an
+# EKS-only component; this mixin adds the edge for EKS, so the driver
+# deploys before the datastore (ADR-018 declares prerequisites, storage
+# included, as dependencyRefs). With the EKS-managed EBS addon instead,
+# aws-ebs-csi-driver stays declared with enabled: false and the edge counts
+# as satisfied outside the recipe.
+#
+# List it AFTER the datastore mixin (spec.mixins: [nvsentinel-observe,
+# nvsentinel-datastore-eks]). Listed first, it would introduce
+# nvsentinel-mongodb with nothing but dependencyRefs, and the datastore
+# mixin's own type and valuesFile for that component then fail resolution
+# as an identity conflict with an already-chained component.
+
+kind: RecipeMixin
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: nvsentinel-datastore-eks
+spec:
+  componentRefs:
+    - name: nvsentinel-mongodb
+      dependencyRefs:
+        - aws-ebs-csi-driver

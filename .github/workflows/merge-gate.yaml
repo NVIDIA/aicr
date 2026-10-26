@@ -87,6 +87,7 @@ jobs:
       bom: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.bom }}
       nvcre: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.nvcre }}
       crdcmd: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.crdcmd }}
+      classcol: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.classcol }}
       tuning: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.tuning }}
       notices: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.notices }}
       coverage: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.coverage }}
@@ -198,6 +199,17 @@ jobs:
               # workflow so a change to the job cannot skip it.
               - 'docs/user/component-catalog.md'
               - 'pkg/bundler/deployer/localformat/catalog_crd_command_test.go'
+              - '.github/workflows/merge-gate.yaml'
+            classcol:
+              # TestComponentCatalogClassColumnMatchesRegistry keeps the Class
+              # column of the component catalog equal to the registry. The
+              # `tests` job runs it on any code change (a registry edit is
+              # code), but a docs-only PR editing a Class cell skips `tests`,
+              # so it is gated here on the doc. The test is listed so renaming
+              # it re-runs the check, and this workflow so a change to the job
+              # cannot skip it.
+              - 'docs/user/component-catalog.md'
+              - 'pkg/recipe/component_class_test.go'
               - '.github/workflows/merge-gate.yaml'
             tuning:
               # Inputs that can change the committed tuning-status table
@@ -398,11 +410,11 @@ jobs:
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
-      - uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee  # v4.39.0
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370  # v4.39.1
         with:
           languages: go
       - run: go build ./...
-      - uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee  # v4.39.0
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370  # v4.39.1
 
   analyze-skip:
     needs: [check-paths]
@@ -824,6 +836,50 @@ jobs:
       - run: echo "No catalog CRD command inputs changed, so the check is not required"
 
   # ---------------------------------------------------------------------------
+  # Catalog Class column: keeps docs/user/component-catalog.md equal to the
+  # registry's class assignments on docs-only PRs that skip the `tests` job
+  # (mirrors nvcre-wiring).
+  # ---------------------------------------------------------------------------
+
+  catalog-class-column:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.classcol == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/load-versions
+        id: versions
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: true
+      - name: Verify the catalog Class column matches the registry
+        # Requires the PASS line for the same reason nvcre-wiring does: a
+        # renamed test makes `go test -run` exit 0 having run nothing.
+        run: |
+          set -uo pipefail
+          out=$(go test ./pkg/recipe/ -run '^TestComponentCatalogClassColumnMatchesRegistry$' -v -count=1 2>&1) && rc=0 || rc=$?
+          echo "$out"
+          if [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
+          if ! grep -q "^--- PASS: TestComponentCatalogClassColumnMatchesRegistry" <<<"$out"; then
+            echo "::error::TestComponentCatalogClassColumnMatchesRegistry did not execute (renamed or removed?); the catalog Class column gate would silently pass. Update this job to run it."
+            exit 1
+          fi
+
+  catalog-class-column-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.classcol != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - run: echo "No catalog Class column inputs changed, so the check is not required"
+
+  # ---------------------------------------------------------------------------
   # Tuning-status doc freshness — ensures the committed tuning table in
   # docs/integrator/components/nodewright.md matches the recipe catalog and the
   # nodewright package pins, on PRs touching its inputs (mirrors bom-freshness).
@@ -980,6 +1036,8 @@ jobs:
       - nvcre-wiring-skip
       - catalog-crd-command
       - catalog-crd-command-skip
+      - catalog-class-column
+      - catalog-class-column-skip
       - tuning-freshness
       - tuning-freshness-skip
       - notices-generator

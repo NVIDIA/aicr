@@ -39,7 +39,7 @@ spec:
     #
     # VERSION-COUPLED BY CONSTRUCTION. Assert content is static YAML; there
     # is no templating, so the expected version below is a literal tied to
-    # the chart version the registry pins for this component (1.6.1, whose
+    # the chart version the registry pins for this component (1.6.2, whose
     # CRDs serve v1alpha1 and v1beta1 with storage on v1beta1). A recipe that
     # overrides `version` on the componentRef to a chart with a different
     # storage version — 1.2.0 and earlier store v1alpha1 — will fail this
@@ -67,7 +67,7 @@ spec:
     #
     # NOTE the asymmetry with the AIBOMControllerConfig step below, which
     # still asserts aibom.k8saibom.dev/v1alpha1. Verified against the
-    # rendered chart: 1.5.1 and 1.6.1 render that CR at v1beta1 (1.3.0
+    # rendered chart: 1.5.1 through 1.6.2 render that CR at v1beta1 (1.3.0
     # rendered it at v1alpha1), and both CRD versions are unchanged since --
     # v1alpha1 stays served, v1beta1 stays served and storage. So the
     # assertion still resolves, but now through v1alpha1 being served rather

@@ -580,3 +580,84 @@ func TestRemediationRebootImageIsInitContainerImage(t *testing.T) {
 		t.Errorf("%s has no remediation table row for %s -- the reboot image must stay documented", docs, image)
 	}
 }
+
+// TestMixinNVSentinelDatastoreEKS pins the storage edge ADR-018 declares for
+// the datastore on EKS: composed after a datastore step, the mixin adds
+// nvsentinel-mongodb -> aws-ebs-csi-driver on every EKS leaf, so the driver
+// deploys first. Composed before the step it fails loudly, because it would
+// introduce nvsentinel-mongodb and the step's own type for that component
+// then conflicts; on a service that declares no aws-ebs-csi-driver the edge
+// dangles and resolution rejects it.
+func TestMixinNVSentinelDatastoreEKS(t *testing.T) {
+	const storageMixin = "nvsentinel-datastore-eks"
+	ctx := context.Background()
+	store, err := buildMetadataStore(ctx, defaultEmbeddedProvider)
+	if err != nil {
+		t.Fatalf("buildMetadataStore: %v", err)
+	}
+	if _, ok := store.Mixins[storageMixin]; !ok {
+		t.Fatalf("%s mixin not present; check recipes/mixins/%s.yaml", storageMixin, storageMixin)
+	}
+
+	eksLeaves, otherLeaf := 0, ""
+	for name, overlay := range store.Overlays {
+		if overlay.Spec.Criteria == nil {
+			continue
+		}
+		if overlay.Spec.Criteria.Service != CriteriaServiceEKS {
+			if otherLeaf == "" {
+				otherLeaf = name
+			}
+			continue
+		}
+		eksLeaves++
+		overlay.Spec.Mixins = append(overlay.Spec.Mixins, observeMixin, storageMixin)
+		t.Run(name, func(t *testing.T) {
+			result, err := store.BuildRecipeResult(ctx, overlay.Spec.Criteria)
+			if err != nil {
+				t.Fatalf("resolving %s with %s and %s composed: %v", name, observeMixin, storageMixin, err)
+			}
+			mongodb := result.GetComponentRef("nvsentinel-mongodb")
+			if mongodb == nil {
+				t.Fatalf("%s: nvsentinel-mongodb missing from the resolved recipe", name)
+			}
+			if !slices.Contains(mongodb.DependencyRefs, "aws-ebs-csi-driver") {
+				t.Fatalf("%s: nvsentinel-mongodb dependencyRefs = %v, want aws-ebs-csi-driver", name, mongodb.DependencyRefs)
+			}
+			driver := slices.Index(result.DeploymentOrder, "aws-ebs-csi-driver")
+			datastore := slices.Index(result.DeploymentOrder, "nvsentinel-mongodb")
+			if driver < 0 || datastore < 0 || driver > datastore {
+				t.Errorf("%s: deploymentOrder = %v, want aws-ebs-csi-driver before nvsentinel-mongodb", name, result.DeploymentOrder)
+			}
+		})
+	}
+	if eksLeaves == 0 {
+		t.Fatal("no EKS leaf overlays found; the mixin was never composed")
+	}
+
+	t.Run("before the datastore step", func(t *testing.T) {
+		spec := remediationLeaf(storageMixin, observeMixin)
+		_, err := store.mergeMixins(ctx, &spec)
+		if err == nil {
+			t.Fatal("composing the storage mixin before the datastore step succeeded; it must be listed after")
+		}
+		if !strings.Contains(err.Error(), "identity/sourcing field") {
+			t.Fatalf("error = %v, want an identity-field conflict on nvsentinel-mongodb", err)
+		}
+	})
+
+	t.Run("without aws-ebs-csi-driver", func(t *testing.T) {
+		if otherLeaf == "" {
+			t.Skip("no non-EKS leaf in the catalog")
+		}
+		overlay := store.Overlays[otherLeaf]
+		overlay.Spec.Mixins = append(overlay.Spec.Mixins, observeMixin, storageMixin)
+		_, err := store.BuildRecipeResult(ctx, overlay.Spec.Criteria)
+		if err == nil {
+			t.Fatalf("resolving %s with %s composed succeeded; the aws-ebs-csi-driver edge dangles there", otherLeaf, storageMixin)
+		}
+		if !strings.Contains(err.Error(), "aws-ebs-csi-driver") {
+			t.Fatalf("error = %v, want the dangling aws-ebs-csi-driver dependency named", err)
+		}
+	})
+}
