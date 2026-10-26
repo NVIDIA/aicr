@@ -10,7 +10,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 
 ## Components
 
-Every component has a bundle class, `core` or `ops` ([ADR-018](https://github.com/NVIDIA/aicr/blob/main/docs/design/018-class-partitioned-bundles.md)). `core` is platform-independent GPU execution: what a plain GPU pod needs to be scheduled and run correctly, with the accelerator fabric and the install prerequisites those components declare. `ops` is everything the GPU runtime does not need: operational services and workload platforms, GPUs allowed. The classes are ordered `core` < `ops`, and a component depends only on its own class or an earlier one. `recipes/registry.yaml` is authoritative; this table documents it. The class never appears in a recipe or changes an ordinary bundle.
+Every component has a bundle class, `core` or `ops` ([ADR-018](https://github.com/NVIDIA/aicr/blob/main/docs/design/018-class-partitioned-bundles.md)). `core` is platform-independent GPU execution: what a plain GPU pod needs to be scheduled and run correctly, with the accelerator fabric and the install prerequisites those components declare. `ops` is everything the GPU runtime does not need: operational services and workload platforms, GPUs allowed. The classes are ordered `core` < `ops`, and a component depends only on its own class or an earlier one. `recipes/registry.yaml` is authoritative; this table documents it. The class never appears in a recipe or changes an ordinary bundle; `aicr bundle --split` partitions a bundle by it (see [Split a bundle by class](bundling.md#split-a-bundle-by-class)).
 
 | Component | Class | Description | Source |
 |-----------|-------|-------------|--------|

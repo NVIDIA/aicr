@@ -23,9 +23,11 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
+	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helm"
@@ -428,6 +430,11 @@ func (b *DefaultBundler) makeSplit(
 	}
 
 	output := &deployer.Output{Files: make([]string, 0)}
+	// infoOut feeds the set-root bundle-info.yaml: the first class's deploy.sh
+	// is the entrypoint and every release path is prefixed with its class
+	// directory, so readers that locate values through bundle-info.yaml
+	// (upgrade-check, recipe --inherit-from) work on a set like on a bundle.
+	infoOut := &deployer.Output{}
 	var steps, notes []string
 	for _, plan := range partition.classes {
 		subset := *enabled
@@ -458,6 +465,16 @@ func (b *DefaultBundler) makeSplit(
 		}
 		output.Files = append(output.Files, classOut.Files...)
 		output.TotalSize += classOut.TotalSize
+		if infoOut.Entrypoint == "" {
+			infoOut.Entrypoint = filepath.ToSlash(filepath.Join(string(plan.class), classOut.Entrypoint))
+		}
+		for _, r := range classOut.Releases {
+			r.Path = filepath.ToSlash(filepath.Join(string(plan.class), r.Path))
+			if r.Manifest != "" {
+				r.Manifest = filepath.ToSlash(filepath.Join(string(plan.class), r.Manifest))
+			}
+			infoOut.Releases = append(infoOut.Releases, r)
+		}
 		steps = append(steps,
 			fmt.Sprintf("cd %s", filepath.Join(dest, string(plan.class))),
 			"chmod +x deploy.sh",
@@ -490,6 +507,18 @@ func (b *DefaultBundler) makeSplit(
 	output.Files = append(output.Files, filepath.Join(stage, SplitFileName))
 	output.TotalSize += splitSize
 
+	rawDigest, digestErr := checksum.SHA256RawContext(ctx, recipePath)
+	if digestErr != nil {
+		return nil, errors.PropagateOrWrap(digestErr, errors.ErrCodeInternal, "failed to digest recipe for bundle info")
+	}
+	info := b.buildBundleInfo(enabled, infoOut, fmt.Sprintf("sha256:%x", rawDigest))
+	infoSize, infoErr := bundleinfo.Write(ctx, stage, info)
+	if infoErr != nil {
+		return nil, errors.PropagateOrWrap(infoErr, errors.ErrCodeInternal, "failed to write bundle info")
+	}
+	output.Files = append(output.Files, filepath.Join(stage, bundleinfo.FileName))
+	output.TotalSize += infoSize
+
 	if addErr := output.AddDataFiles(stage, dataFiles); addErr != nil {
 		return nil, addErr
 	}
@@ -510,8 +539,12 @@ func (b *DefaultBundler) makeSplit(
 	// directory, makes it fail. The stage is then removed and that content is
 	// left untouched, so concurrent attempts have at most one winner.
 	if renameErr := renameNoReplace(stage, dest); renameErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeConflict,
-			fmt.Sprintf("failed to publish the bundle set to %s (the destination must be absent)", dest), renameErr)
+		if destinationTaken(renameErr) {
+			return nil, errors.Wrap(errors.ErrCodeConflict,
+				fmt.Sprintf("failed to publish the bundle set to %s (the destination must be absent)", dest), renameErr)
+		}
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to publish the bundle set to %s", dest), renameErr)
 	}
 	published = true
 
@@ -588,4 +621,28 @@ func writeSplitFile(stage, recipePath string, p *splitPartition) (int64, error) 
 		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to write split.yaml", err)
 	}
 	return int64(len(data)), nil
+}
+
+// destinationTaken reports whether a publish rename failed because something
+// already occupies the destination, the one failure that is a conflict rather
+// than an internal error.
+func destinationTaken(err error) bool {
+	return stderrors.Is(err, os.ErrExist) ||
+		stderrors.Is(err, syscall.EEXIST) ||
+		stderrors.Is(err, syscall.ENOTEMPTY) ||
+		stderrors.Is(err, syscall.EISDIR)
+}
+
+// renameCheckThenMove is the two-step fallback for filesystems without a
+// no-replace rename: it refuses an existing destination, then renames. The
+// check and the move are separate syscalls, so an empty directory created
+// between them could be replaced; it runs only where the single-syscall form
+// is unavailable.
+func renameCheckThenMove(oldpath, newpath string) error {
+	if _, err := os.Lstat(newpath); err == nil {
+		return os.ErrExist
+	} else if !stderrors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return os.Rename(oldpath, newpath)
 }

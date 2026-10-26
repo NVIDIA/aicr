@@ -51,8 +51,9 @@ Install the classes in order: {{ range $i, $c := .Split.ClassOrder }}{{ if $i }}
 Tear them down in reverse. A class's `deploy.sh` does not check that the
 earlier classes are installed.
 {{ if or .Split.SharedNamespaces .Split.SharedCRDGroups }}
-When uninstalling this class, keep what an earlier class installed or
-shares with it; the earliest class that uses a namespace or CRD group
+When uninstalling this class, keep the namespaces it shares with an
+earlier class and the CRD groups an earlier class installs (those
+`deploy.sh` tracks); the earliest class that uses a namespace or CRD group
 removes it, and it is torn down last:
 
 {{ range .Split.SharedNamespaces }}- namespace `{{ . }}`

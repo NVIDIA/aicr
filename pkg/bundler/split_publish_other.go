@@ -16,20 +16,9 @@
 
 package bundler
 
-import (
-	stderrors "errors"
-	"os"
-)
-
-// renameNoReplace moves oldpath to newpath, refusing an existing newpath.
-// Without a no-replace rename on this platform the check and the move are
-// two steps, so an empty directory created in between could be replaced;
-// aicr ships for linux and darwin, which have the single-syscall form.
+// renameNoReplace has no single-syscall no-replace form on this platform;
+// aicr ships for linux and darwin, which do. The fallback checks and then
+// moves in two steps.
 func renameNoReplace(oldpath, newpath string) error {
-	if _, err := os.Lstat(newpath); err == nil {
-		return os.ErrExist
-	} else if !stderrors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return os.Rename(oldpath, newpath)
+	return renameCheckThenMove(oldpath, newpath)
 }

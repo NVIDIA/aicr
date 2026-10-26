@@ -1163,8 +1163,8 @@ fully built `*BundleConfig` from something the flat fields cannot express (a
 CLI-flag-only setting such as `Version` or `Serial`, or a config object you
 mutate in place), set it and it wins outright over the 18 bundler-config flat
 fields (`Deployer` through `AppName`) and over `Split`, which follows them
-and is caller-set only: no config file setting derives it — `BundleOptions()` itself never
-populates any of them. `Config` does NOT override `Attester`, `OIDCResolve`,
+and is caller-set only: no config file setting derives it. `BundleOptions()`
+leaves `Config` and `Split` unset. `Config` does NOT override `Attester`, `OIDCResolve`,
 `BinaryAttestation`, `OutputDir` or `Timeout`: those five stay
 caller-supplied regardless of `Config`, which is why the REST `/v1/bundle`
 handler can set `Config` and `OutputDir`/`Timeout` in the same struct
@@ -1184,8 +1184,8 @@ opts.OutputDir = filepath.Join(workDir, "bundles") // must not exist yet
 out, err := client.MakeBundle(ctx, rec, opts)
 ```
 
-`out.OutputDir` is the set root with `recipe.yaml`, `split.yaml` and
-`checksums.txt`; `out.Deployment.Steps` lists `core/deploy.sh` then
+`out.OutputDir` is the set root with `recipe.yaml`, `split.yaml`,
+`bundle-info.yaml` and `checksums.txt`; `out.Deployment.Steps` lists `core/deploy.sh` then
 `ops/deploy.sh`. See [Split a bundle by class](../user/bundling.md#split-a-bundle-by-class)
 for the layout, ordering contract and rejections.
 

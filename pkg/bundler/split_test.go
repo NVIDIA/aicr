@@ -22,10 +22,12 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
+	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/evidence/canonical"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"sigs.k8s.io/yaml"
 )
@@ -95,14 +97,14 @@ func TestMake_SplitRendersVerifiedSet(t *testing.T) {
 	}
 	assertNoStageLeft(t, parent)
 
-	// Set root: recipe.yaml, split.yaml, checksums.txt; no deploy.sh or
-	// bundle-info.yaml, which belong to a single bundle.
-	for _, want := range []string{RecipeFileName, SplitFileName, checksum.ChecksumFileName} {
+	// Set root: recipe.yaml, split.yaml, bundle-info.yaml, checksums.txt; no
+	// deploy.sh or README.md, which belong to a class.
+	for _, want := range []string{RecipeFileName, SplitFileName, bundleinfo.FileName, checksum.ChecksumFileName} {
 		if _, statErr := os.Stat(filepath.Join(dest, want)); statErr != nil {
 			t.Errorf("set root missing %s: %v", want, statErr)
 		}
 	}
-	for _, absent := range []string{"deploy.sh", "README.md", "bundle-info.yaml"} {
+	for _, absent := range []string{"deploy.sh", "README.md"} {
 		if _, statErr := os.Stat(filepath.Join(dest, absent)); statErr == nil {
 			t.Errorf("set root unexpectedly has %s", absent)
 		}
@@ -160,6 +162,34 @@ func TestMake_SplitRendersVerifiedSet(t *testing.T) {
 	}
 	if len(split.Components) != len(wantClasses) {
 		t.Errorf("components = %v, want exactly %d entries", split.Components, len(wantClasses))
+	}
+	recipeBytes, _ := os.ReadFile(filepath.Join(dest, RecipeFileName))
+	if wantDigest, _ := canonical.SubjectDigestV3(recipeBytes); split.RecipeDigest != "sha256:"+wantDigest {
+		t.Errorf("recipeDigest = %s, want sha256:%s (SubjectDigestV3 of the set-root recipe.yaml)", split.RecipeDigest, wantDigest)
+	}
+
+	// bundle-info.yaml at the set root points into the class directories, so
+	// readers that locate release values through it work on a set.
+	info, infoErr := bundleinfo.Read(t.Context(), dest)
+	if infoErr != nil {
+		t.Fatalf("read set-root bundle-info.yaml: %v", infoErr)
+	}
+	if info.Layout.Entrypoint != "core/deploy.sh" {
+		t.Errorf("bundle-info entrypoint = %q, want core/deploy.sh", info.Layout.Entrypoint)
+	}
+	if len(info.Layout.Releases) != 4 {
+		t.Errorf("bundle-info releases = %d, want 4", len(info.Layout.Releases))
+	}
+	for _, r := range info.Layout.Releases {
+		if !strings.HasPrefix(r.Path, "core/") && !strings.HasPrefix(r.Path, "ops/") {
+			t.Errorf("bundle-info release %s path %q is not under a class directory", r.Name, r.Path)
+		}
+		if _, statErr := os.Stat(filepath.Join(dest, r.Path, "values.yaml")); statErr != nil {
+			t.Errorf("bundle-info release %s path %q has no values.yaml: %v", r.Name, r.Path, statErr)
+		}
+	}
+	if values, valErr := bundleinfo.ReadReleaseValues(t.Context(), dest); valErr != nil || len(values) == 0 {
+		t.Errorf("ReadReleaseValues on the set root = %d values, %v", len(values), valErr)
 	}
 
 	// The ops class names what it shares with core and keys its CRD scan by

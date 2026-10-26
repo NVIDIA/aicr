@@ -1982,6 +1982,16 @@ func TestParseBundleCmdOptions_Split(t *testing.T) {
 		}
 	})
 
+	t.Run("rejected without an explicit --output", func(t *testing.T) {
+		opts, err := tryCaptureBundleOpts(t, []string{"--recipe", recipePath, "--split"})
+		if err == nil {
+			t.Fatalf("expected --split without --output to be rejected, got opts=%+v", opts)
+		}
+		if !strings.Contains(err.Error(), "explicit --output") {
+			t.Errorf("error should ask for an explicit --output, got: %v", err)
+		}
+	})
+
 	t.Run("rejected with OCI output", func(t *testing.T) {
 		opts, err := tryCaptureBundleOpts(t, []string{"--recipe", recipePath, "--output", "oci://registry.example.com/aicr/bundle", "--split"})
 		if err == nil {

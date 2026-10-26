@@ -47,9 +47,12 @@ ordered `NNN-<component>` directories; Flux is the exception and uses a plain
 `<component>` directory with shared `sources/`.
 
 A bundle set produced by `--split` (helm deployer only) has a different
-root: `recipe.yaml`, `split.yaml` and `checksums.txt`, with one
-`<class>/` directory per class that is itself a helm bundle tree as shown
-below, minus `bundle-info.yaml` and `checksums.txt`. See
+root: `recipe.yaml`, `split.yaml`, `bundle-info.yaml` and `checksums.txt`,
+with one `<class>/` directory per class that is itself a helm bundle tree
+as shown below, minus `bundle-info.yaml` and `checksums.txt`. The root
+`bundle-info.yaml` lists every release with its class-prefixed path, so
+`aicr upgrade-check --from <set>` and `aicr recipe --inherit-from <set>`
+read a set like a bundle. See
 [Split a bundle by class](#split-a-bundle-by-class).
 
 ```text
@@ -931,6 +934,7 @@ enabled component, under a set root that is the verification unit.
 bundles/
 ├── recipe.yaml        # the full resolved recipe
 ├── split.yaml         # audit: recipeDigest, class order, class of every component
+├── bundle-info.yaml   # build record; release paths are class-prefixed
 ├── checksums.txt      # covers the whole set
 ├── core/              # deploy.sh, README.md, NNN-<component>/ ...
 └── ops/               # deploy after core
@@ -940,9 +944,10 @@ bundles/
 down `ops` before `core`. Each class directory is an ordinary Helm
 per-component bundle with its own `deploy.sh`, which does not check that
 the earlier classes are installed. A class's README names the namespaces
-and CRD groups it shares with an earlier class, which its teardown must
-leave in place; the earliest class that uses them removes them, and it is
-torn down last. A dependency on a component in an earlier class is
+it shares with an earlier class and the CRD groups an earlier class
+installs, as far as `deploy.sh`'s CRD table knows them; its teardown must
+leave those in place, because the earliest class that uses them removes
+them, and it is torn down last. A dependency on a component in an earlier class is
 satisfied outside the class directory, the same way a disabled component's
 edge is.
 
@@ -964,8 +969,10 @@ never replaced.
 
 **What is rejected.** `--split` fails before writing anything when:
 
-- the deployer is not `helm`, the output is an OCI reference, checksums are
-  disabled, or a component filter (`bundlers`) is set;
+- the deployer is not `helm` (`helmfile`, `argocd`, `argocd-helm`, `flux`,
+  `fleet` and `terraform` are all rejected in this release), the output is
+  an OCI reference, `--output` is not given, checksums are disabled, or a
+  component filter (`bundlers`) is set;
 - the recipe targets OCP (`service: ocp`);
 - a component has no registry entry, such as a fully specified ref in a
   hand-authored recipe; register it, for example through a `--data` registry

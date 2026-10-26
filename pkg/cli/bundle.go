@@ -350,6 +350,10 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 
 	// A split set is a directory tree published create-only; OCI output is
 	// outside the ADR-018 v1 support matrix.
+	if opts.split && !cmd.IsSet("output") && bundleInput.OutputTarget == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"--split requires an explicit --output path for the bundle set, one that does not exist yet")
+	}
 	if opts.split && opts.ociRef != nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"--split does not support OCI output in this release; use a local --output directory that does not exist yet")

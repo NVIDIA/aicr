@@ -16,11 +16,21 @@
 
 package bundler
 
-import "golang.org/x/sys/unix"
+import (
+	stderrors "errors"
+
+	"golang.org/x/sys/unix"
+)
 
 // renameNoReplace moves oldpath to newpath and fails if newpath exists, in
 // one syscall: renameat2 with RENAME_NOREPLACE. A plain rename(2) would
-// replace an empty directory that appeared after the caller's check.
+// replace an empty directory that appeared after the caller's check. A
+// filesystem that does not implement the flag (EINVAL, ENOSYS, ENOTSUP)
+// gets the two-step fallback.
 func renameNoReplace(oldpath, newpath string) error {
-	return unix.Renameat2(unix.AT_FDCWD, oldpath, unix.AT_FDCWD, newpath, unix.RENAME_NOREPLACE)
+	err := unix.Renameat2(unix.AT_FDCWD, oldpath, unix.AT_FDCWD, newpath, unix.RENAME_NOREPLACE)
+	if stderrors.Is(err, unix.EINVAL) || stderrors.Is(err, unix.ENOSYS) || stderrors.Is(err, unix.ENOTSUP) || stderrors.Is(err, unix.EOPNOTSUPP) {
+		return renameCheckThenMove(oldpath, newpath)
+	}
+	return err
 }

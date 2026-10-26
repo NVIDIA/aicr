@@ -16,11 +16,20 @@
 
 package bundler
 
-import "golang.org/x/sys/unix"
+import (
+	stderrors "errors"
+
+	"golang.org/x/sys/unix"
+)
 
 // renameNoReplace moves oldpath to newpath and fails if newpath exists, in
 // one syscall: renamex_np with RENAME_EXCL. A plain rename(2) would replace
-// an empty directory that appeared after the caller's check.
+// an empty directory that appeared after the caller's check. A volume that
+// does not support the flag (ENOTSUP, EINVAL) gets the two-step fallback.
 func renameNoReplace(oldpath, newpath string) error {
-	return unix.RenamexNp(oldpath, newpath, unix.RENAME_EXCL)
+	err := unix.RenamexNp(oldpath, newpath, unix.RENAME_EXCL)
+	if stderrors.Is(err, unix.ENOTSUP) || stderrors.Is(err, unix.EINVAL) || stderrors.Is(err, unix.EOPNOTSUPP) {
+		return renameCheckThenMove(oldpath, newpath)
+	}
+	return err
 }
