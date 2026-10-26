@@ -73,13 +73,14 @@ func TestDRANodeLabelerScript_ReadyOnlyOnceLabeled(t *testing.T) {
 		name   string
 		labels map[string]string
 		// bindAfterDenial withholds the binding until the script has been
-		// denied once, so the marker can be checked while labeling is failing.
+		// denied once, so the marker can be checked while node API access is
+		// denied.
 		bindAfterDenial bool
 		want            string
 	}{
 		{name: "labels a node without the key", want: label.Value},
 		{name: "keeps another writer's value", labels: map[string]string{label.Key: "false"}, want: "false"},
-		{name: "stays unready while the label cannot be written", bindAfterDenial: true, want: label.Value},
+		{name: "stays unready while node API access is denied", bindAfterDenial: true, want: label.Value},
 	}
 	for i, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -115,7 +116,7 @@ func TestDRANodeLabelerScript_ReadyOnlyOnceLabeled(t *testing.T) {
 			if tt.bindAfterDenial {
 				run.waitFor(t, "a denied attempt", func() bool { return strings.Contains(run.output(), "retrying") })
 				if run.markerExists() {
-					t.Fatalf("readiness marker written while the label could not be written; output:\n%s", run.output())
+					t.Fatalf("readiness marker written while node API access was denied; output:\n%s", run.output())
 				}
 				bind()
 			}
