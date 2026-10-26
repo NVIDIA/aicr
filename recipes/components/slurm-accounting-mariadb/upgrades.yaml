@@ -60,11 +60,11 @@ transitions:
               re-run this component's install.sh (helm) or helmfile apply
               (helmfile).
             reason: >-
-              Renders spec.image with the digest-pinned 11.8.8 image, and the
+              Renders spec.image with the digest-pinned 11.8.9 image, and the
               operator rolls the pod for any spec.image change. From 26.6.0
               only the image reference changes; a database first reconciled by
               operator 26.3.0 also moves from
-              docker-registry1.mariadb.com/library/mariadb:11.8.5 to the 11.8.8
+              docker-registry1.mariadb.com/library/mariadb:11.8.5 to the 11.8.9
               patch release.
           - id: await-accounting-restart
             description: >-
@@ -92,11 +92,11 @@ transitions:
             reason: >-
               This release depends on both in the bundle's module graph, so
               terraform upgrades it only once the operator release is ready.
-              It renders spec.image with the digest-pinned 11.8.8 image, and
+              It renders spec.image with the digest-pinned 11.8.9 image, and
               the operator rolls the pod for any spec.image change. From
               26.6.0 only the image reference changes; a database first
               reconciled by operator 26.3.0 also moves from
-              docker-registry1.mariadb.com/library/mariadb:11.8.5 to the 11.8.8
+              docker-registry1.mariadb.com/library/mariadb:11.8.5 to the 11.8.9
               patch release.
           - id: await-accounting-restart
             description: >-
@@ -121,11 +121,11 @@ transitions:
               mariadb-operator-crds and mariadb-operator releases reach
               26.10.1.
             reason: >-
-              Renders spec.image with the digest-pinned 11.8.8 image, and the
+              Renders spec.image with the digest-pinned 11.8.9 image, and the
               operator rolls the pod for any spec.image change. From 26.6.0
               only the image reference changes; a database first reconciled by
               operator 26.3.0 also moves from
-              docker-registry1.mariadb.com/library/mariadb:11.8.5 to the 11.8.8
+              docker-registry1.mariadb.com/library/mariadb:11.8.5 to the 11.8.9
               patch release.
           - id: await-accounting-restart
             description: >-

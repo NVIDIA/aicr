@@ -2605,9 +2605,9 @@ the operator moves, then upgrade CRDs first and the operator second:
    desired configuration, commit it, and sync, only after step 4 passes.
 
 `26.10.0` also changes the operator's default server image to
-`mariadb:12.3.3`, and `26.10.1` keeps it. AICR pins `mariadb:11.8.8` by tag
+`mariadb:12.3.3`, and `26.10.1` keeps it. AICR pins `mariadb:11.8.9` by tag
 and index digest in `recipes/components/slurm-accounting-mariadb/values.yaml`,
-so a cluster bundled from this recipe stays on `11.8.8`; the pin also puts the
+so a cluster bundled from this recipe stays on `11.8.9`; the pin also puts the
 server image into the rendered `MariaDB` resource, where the BOM records it.
 Where the accounting database already runs, the first bundle that carries the
 digest changes that resource's `spec.image` string, so the operator restarts the
@@ -2618,6 +2618,16 @@ pulled. A database first reconciled by operator `26.3.0`, which AICR never
 shipped, was given that release's default,
 `docker-registry1.mariadb.com/library/mariadb:11.8.5`, so it also moves registry
 and patch version.
+
+AICR v1.1.0 through v1.1.2 pinned `mariadb:11.8.8`. Moving from one of those
+releases to a bundle that pins `11.8.9` changes the rendered `spec.image` while
+the chart stays at `26.10.1`, so the operator recreates `mariadb-0` and, with one
+replica, the accounting database is unavailable until the new pod is Ready.
+`aicr upgrade-check` does not report this, because no chart version moves. It
+applies only to `aicr-provided` accounting, the one mode that installs this
+component. Plan the upgrade for a quiet window, and after the apply run the
+`await-accounting-restart` wait from this component's upgrade record
+(`recipes/components/slurm-accounting-mariadb/upgrades.yaml`).
 
 Existing `MariaDB` resources keep their image. The operator writes its default
 into `spec.image` the first time it reconciles a resource, so every resource it
