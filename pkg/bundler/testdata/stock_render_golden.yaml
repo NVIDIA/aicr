@@ -5512,7 +5512,7 @@ vr200-rke2-ubuntu-inference-dynamo:
   005-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   005-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-nodewright-customizations/install.sh: 17a57ee11c5b776ba3866f91d1c5233b709e728df358d8e467b2856dc687e80f
-  005-nodewright-customizations/templates/tuning-rke2.yaml: df8d222254247b7845ac4fd9fad614c5ef6afb7f7fdcb7bf08a08e9086a0651d
+  005-nodewright-customizations/templates/tuning-rke2.yaml: 3a348e056938470434e49b7707dbb050bea231f4780a519183f41ee3a5b9b925
   005-nodewright-customizations/values.yaml: dee8ff46c4da7faebf53dd0b38619b565b97e599daa01a3a19c3a3dc6d0d79d6
   006-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-prometheus-operator-crds/install.sh: 4c10c479d2d735c3024bf809520a4efb7f97904cda4fe211f9374189ea3292d4
@@ -5575,7 +5575,7 @@ vr200-rke2-ubuntu-inference-dynamo:
   README.md: 75d104843050c111e381add3c78e38f74b67a87b0884c1346649c3e055f2bb09
   UPGRADING.md: c13181818215d70ba0546fcd97b33316362bbd728bedc1cebb5c720afa4fb1e5
   bundle-info.yaml: 8fc031e56cd9bc1ef5905a82c02d7f462ba7bad02806e0cd1b9b666ee214de3e
-  checksums.txt: ca4b733b1455c54e10f6c603de89627080f42b908e0f1b90b9f6dc94f4d9fa26
+  checksums.txt: d2b958f2f14831c4fa1f709d5dfe00350d35835b859d33e78e91a8d4cde47698
   deploy.sh: 841a92636bb0a65da6fa0162b67084f68f362fa0e41837b1c57e6560c10a7a63
   recipe.yaml: 84798c36b7547892e3e26ed156387947af68b7a2e48e9cf4ed95e937f764a29e
 vr200-rke2-ubuntu-training-kubeflow:
@@ -5591,7 +5591,7 @@ vr200-rke2-ubuntu-training-kubeflow:
   003-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   003-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-customizations/install.sh: 17a57ee11c5b776ba3866f91d1c5233b709e728df358d8e467b2856dc687e80f
-  003-nodewright-customizations/templates/tuning-rke2.yaml: e083b8bf62b50c66a389b10e39c5548e2fea5dee83ff12a5148a39ba551570b6
+  003-nodewright-customizations/templates/tuning-rke2.yaml: 236fa1472cbb5b7236fc8850c654b3b3e66c9ac2d3c837d6860fa23f88d58f44
   003-nodewright-customizations/values.yaml: 393a1b3cc65393331da510cea3c0f89d22e173a62babcd4b7f33c6d9d4c15937
   004-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-prometheus-operator-crds/install.sh: 4c10c479d2d735c3024bf809520a4efb7f97904cda4fe211f9374189ea3292d4
@@ -5646,6 +5646,6 @@ vr200-rke2-ubuntu-training-kubeflow:
   README.md: 2a629792c3454bba0dd7bea9cfd0ab5d1bdae7504c5e4a609e6cc7e2689e40b9
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: c6a68f8ba0aebc27e19861620946ad1a6de73c7770ea09259078bdcd6e6a1dda
-  checksums.txt: 0f9dd49240d6a6383fe303cfd7933b067edfae11225991cf7a20aea02334f199
+  checksums.txt: 4c18a658a4488fb2da3a9e664ee58f693319a9b4130b531ceb14aa415b7e6011
   deploy.sh: 50736743f1a6091c2dcb82baedfed99d4ae2f5bfe3325f7e7ab89995353f81bd
   recipe.yaml: f957a8820daeff3b8559452f246d67d9269980230727b510db1e631119548d30

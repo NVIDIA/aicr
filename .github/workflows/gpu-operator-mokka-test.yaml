@@ -55,43 +55,16 @@
 name: GPU Operator on Mokka (GPU-free)
 
 on:
-  pull_request:
-    branches:
-      - main
-    paths:
-      # The overlays `aicr recipe --service kind --accelerator h100
-      # --intent training` applies (metadata.appliedOverlays), and the
-      # components the lane deploys from the bundle.
-      - 'recipes/overlays/base.yaml'
-      - 'recipes/overlays/monitoring-hpa.yaml'
-      - 'recipes/overlays/h100-any.yaml'
-      - 'recipes/overlays/kind.yaml'
-      - 'recipes/overlays/h100-kind-training.yaml'
-      - 'recipes/components/prometheus-operator-crds/**'
-      - 'recipes/components/nfd/**'
-      - 'recipes/components/gpu-operator/**'
-      - 'recipes/components/nvidia-dra-driver-gpu/**'
-      - 'recipes/registry.yaml'
-      - 'recipes/data.go'
-      - 'pkg/recipe/**'
-      - 'pkg/bundler/**'
-      - 'pkg/client/**'
-      - 'pkg/cli/**'
-      - 'cmd/aicr/**'
-      - 'go.mod'
-      - 'go.sum'
-      - '.go-version'
-      - '.settings.yaml'
-      - '.github/actions/load-versions/**'
-      - '.github/actions/setup-build-tools/**'
-      - '.github/workflows/gpu-operator-mokka-test.yaml'
-      - '!**.md'
-      - '!**.mdx'
+  # Paused: the pull_request and schedule triggers are off until gpu-operator
+  # ships NVIDIA/gpu-operator#2959 (on release-26.7, not in v26.7.2). Since
+  # v26.7.1 every operand's toolkit-validation init container waits for a
+  # loaded nvidia kernel module, which nvml-mock 0.4.x cannot present, so every
+  # run timed out in "Wait for the GPU stack to converge" (#3442).
+  # Restore both triggers, path filter included, by reverting the commit that
+  # added this note, in the PR that moves gpu-operator past #2959. That PR also
+  # needs nvml-mock >= 0.5.0 with nri.deviceInjectionMode=cdi and the operand
+  # opt-in annotation described in the issue.
   workflow_dispatch: {}
-  schedule:
-    # Daily, so drift in the upstream chart or the Mokka image surfaces here
-    # rather than on the leased hardware lanes.
-    - cron: '30 3 * * *'
 
 permissions:
   contents: read
