@@ -978,9 +978,14 @@ func ValidatePromQLSeriesPattern(pattern string) error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("series pattern %q contains a Helm template delimiter", pattern))
 	}
-	if _, err := regexp.Compile(pattern); err != nil {
-		return errors.Wrap(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("series pattern %q is not valid RE2", pattern), err)
+	// The union wraps each pattern as (?:p). An unterminated \Q compiles alone
+	// but quotes that closing paren, and a stray ) can escape the group, so
+	// both forms must compile.
+	for _, form := range []string{pattern, "(?:" + pattern + ")"} {
+		if _, err := regexp.Compile(form); err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("series pattern %q is not valid RE2", pattern), err)
+		}
 	}
 	return nil
 }

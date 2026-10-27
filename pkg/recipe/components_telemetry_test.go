@@ -121,6 +121,7 @@ func TestValidatePromQLSeriesPattern(t *testing.T) {
 		{pattern: "dynamo_frontend_(requests_started|requests)_total"},
 		{pattern: " ", wantErr: "series pattern is empty"},
 		{pattern: "foo_(bar", wantErr: "is not valid RE2"},
+		{pattern: `dcgm\Q_x`, wantErr: "is not valid RE2"},
 		{pattern: "foo}}", wantErr: "Helm template delimiter"},
 	}
 	for _, tt := range tests {

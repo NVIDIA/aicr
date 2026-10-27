@@ -581,8 +581,12 @@ A component that queries the runtime Prometheus server declares what it reads in
 - name: my-prometheus
   telemetry:
     promqlServer:                    # value paths the bundler owns
-      namespaceSelectorPaths: [prometheus.prometheusSpec.serviceMonitorNamespaceSelector]
-      monitorSelectorPaths: [prometheus.prometheusSpec.serviceMonitorSelector]
+      namespaceSelectorPaths:        # one path per monitor kind
+        - prometheus.prometheusSpec.serviceMonitorNamespaceSelector
+        - prometheus.prometheusSpec.podMonitorNamespaceSelector
+      monitorSelectorPaths:
+        - prometheus.prometheusSpec.serviceMonitorSelector
+        - prometheus.prometheusSpec.podMonitorSelector
       scrapeClassesPath: prometheus.prometheusSpec.scrapeClasses
 ```
 
