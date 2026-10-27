@@ -1936,18 +1936,26 @@ external sink.
 This applies to components the registry marks `ownsCRDs`, listed at the end of
 this section.
 
-**CRDs are applied for you on every deployer except `helmfile`, `terraform` and
-`fleet`.** A chart ships its CRDs under `crds/`. Helm installs that directory
-on first install and never touches it again on upgrade, so a chart bump whose
-CRDs changed would leave the previous schema in place and the API server would
-silently prune the new controller's writes to added fields.
+**CRDs are applied for you on `helm`, `flux` and Argo CD, and on `helm` and
+`flux` only while the recipe keeps the registry-pinned chart.** A chart ships
+its CRDs under `crds/`. Helm installs that directory on first install and never
+touches it again on upgrade, so a chart bump whose CRDs changed would leave the
+previous schema in place and the API server would silently prune the new
+controller's writes to added fields.
 
-Every other deployer closes that on its own, by a different route; see the
-deployer table below. `helm` bundles carry an `apply-crds.sh` in the
-component's folder, run automatically before the upgrade; `flux` and Argo CD
-apply the CRDs through their own controllers. `helmfile`, `terraform` and
-`fleet` have no automated equivalent: the manual command below is always required for their
-`ownsCRDs` components.
+Each of those deployers closes that by a different route, shown in the deployer
+table below. `helm` bundles carry an `apply-crds.sh` in the component's folder,
+run automatically before the upgrade. `flux` and Argo CD apply the CRDs through
+their own controllers. `helmfile`, `terraform` and `fleet` have no automated
+equivalent, so the manual command below is always required for their `ownsCRDs`
+components.
+
+`ownsCRDs` records an audit of one chart, so `helm` and `flux` act only while
+the componentRef resolves to the registry's `source`, `chart` and `version`. A
+recipe that overrides any of them upgrades the controller with no CRD update on
+those two deployers. Audit the chart it points at, then run the manual command.
+Argo CD applies whatever CRDs the rendered chart contains, so an override does
+not change it.
 
 When you run the command below depends on your deployer, because only some of
 them do it for you:
@@ -1958,10 +1966,11 @@ them do it for you:
   the `terraform apply` of the regenerated bundle. Under `fleet`, run it
   against every downstream cluster the bundle targets before applying the
   regenerated bundle.
-- **`helm`: only** when you are upgrading outside a generated bundle, or when
-  the bundle's `apply-crds.sh` failed and you are reproducing it by hand.
-- **`flux`, `argocd`, `argocd-helm`: not needed.** Their controllers apply the
-  CRDs themselves.
+- **`helm`: only** when you are upgrading outside a generated bundle, when the
+  bundle's `apply-crds.sh` failed and you are reproducing it by hand, or when
+  the recipe overrides the registry-pinned chart.
+- **`flux`: only** when the recipe overrides the registry-pinned chart.
+- **`argocd`, `argocd-helm`: not needed.** Argo CD applies the CRDs itself.
 
 Set `CHART` and `VERSION` to the component's chart and the version you are
 upgrading to. The values shown are k8s-aibom's.
@@ -2094,10 +2103,10 @@ Which deployers need that step differs, so check yours:
 
 | Deployer | CRD behavior on upgrade | Manual step needed |
 |---|---|---|
-| `helm` | `helm upgrade` skips `crds/`, so the bundle emits `apply-crds.sh` for components the registry marks `ownsCRDs` and `install.sh` runs it first | Only for components without `ownsCRDs` |
+| `helm` | `helm upgrade` skips `crds/`, so the bundle emits `apply-crds.sh` for components the registry marks `ownsCRDs` and `install.sh` runs it first | Only for components without `ownsCRDs`, or with an overridden chart |
 | `helmfile` | Upgrades through Helm, so it skips `crds/` too; no automation exists, because a `presync` hook fires only for releases `helmfile apply` decides to sync, so it would hold on a chart bump and silently not hold on an unchanged rerun | Assume yes — see note below |
 | `terraform` | Upgrades through Helm (`helm_release`), so it skips `crds/` too; the bundle emits no CRD step, because the provider has no CRD-upgrade option and a `local-exec` step would run outside the plan; run the manual command with `MANAGER=terraform-provider-helm`, the manager the provider installed the CRDs under | Assume yes — see note below |
-| `flux` | The generated `HelmRelease` sets `spec.upgrade.crds: CreateReplace` for components the registry marks `ownsCRDs`, and leaves the helm-controller `Skip` default in place for the rest | Only for components without `ownsCRDs` |
+| `flux` | The generated `HelmRelease` sets `spec.upgrade.crds: CreateReplace` for components the registry marks `ownsCRDs`, and leaves the helm-controller `Skip` default in place for the rest | Only for components without `ownsCRDs`, or with an overridden chart |
 | `argocd`, `argocd-helm` | Argo CD renders the chart with CRDs included and applies them as ordinary manifests each sync | No |
 | `fleet` | Fleet's agent upgrades through Helm, so it skips `crds/` too, and a Fleet bundle cannot run `apply-crds.sh`; the bundle README and deployment notes name the `ownsCRDs` components instead; run the manual command with `MANAGER` set to the manager the managed-fields check reports for the installed CRDs | Assume yes — see note below |
 
