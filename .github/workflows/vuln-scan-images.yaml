@@ -314,9 +314,10 @@ jobs:
     # (NVIDIA self-hosted, 61 GiB) holds it in RAM.
     runs-on: ${{ matrix.large && 'linux-amd64-cpu16' || 'ubuntu-24.04' }}
     needs: [build-ko, docker-manifest]
-    # 30, not 15: the NCCL check images take about ten minutes to fetch and
-    # catalog. Matrix jobs get their own runner, so the larger budget costs
-    # nothing for the images that finish in two.
+    # 30, not 15: the NCCL check images take about five minutes on cpu16 but
+    # ten or more wherever they get less memory, and a slow registry pull
+    # adds to either. Matrix jobs get their own runner, so the larger budget
+    # costs nothing for the images that finish in two.
     timeout-minutes: 30
     permissions:
       contents: read
@@ -483,9 +484,12 @@ jobs:
           mkdir -p scan-results
           OUT="scan-results/${SHORT_NAME}.txt"
 
+          # grype killed by a signal can leave the scan step green with no
+          # output. Fail the leg so the summary reports it as incomplete
+          # instead of counting the image as clean.
           if [[ ! -f "${JSON_FILE}" ]]; then
-            echo "${SHORT_NAME}: scan output missing" > "${OUT}"
-            exit 0
+            echo "::error::${SHORT_NAME}: scan output missing"
+            exit 1
           fi
 
           # Severity counts from non-suppressed matches.
@@ -526,7 +530,7 @@ jobs:
           retention-days: 1
 
   # =============================================================================
-  # Notify: Post scan results to Slack (only on critical/high findings)
+  # Notify: Post scan results to Slack (on critical/high findings or incomplete scans)
   # =============================================================================
 
   notify:
@@ -598,12 +602,13 @@ jobs:
             "repos/${REPO}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs?per_page=100" \
             --jq '.jobs[]
               | select(.name | startswith("Scan ("))
-              | select(.conclusion != "success")
+              | select(.conclusion != "success" and .conclusion != "skipped")
               | "\(.name | ltrimstr("Scan (") | rtrimstr(")") | split("/") | last): scan did not complete (\(.conclusion))"'); then
             INCOMPLETE="scan completion status unavailable (jobs API lookup failed)"
           fi
-          # A failed build or manifest job skips the whole scan matrix, so
-          # no per-image job exists for the lookup above to find.
+          # A failed build or manifest job skips the whole scan matrix. No
+          # leg is skipped on its own, so the lookup above leaves skipped
+          # jobs out and this reports the matrix once.
           if [[ "${SCAN_RESULT}" == "skipped" ]]; then
             INCOMPLETE="${INCOMPLETE}"$'\n'"no image was scanned: an image build or manifest job failed"
           fi
