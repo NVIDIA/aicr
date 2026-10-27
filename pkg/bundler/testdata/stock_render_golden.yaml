@@ -1523,7 +1523,7 @@ gb200-nvke-ubuntu-training:
   008-rdma-modules/Chart.yaml: 3bc76958add2f2cb30621de5fd77a5a282f1ff50e01a12abb5b9791be266d428
   008-rdma-modules/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-rdma-modules/install.sh: 949b915690561a3ad8240ddd528622c3d01bf2ea3fe2c5d5fb5f0dd10e86e4ea
-  008-rdma-modules/templates/rdma-ulp.yaml: c50bb1b0b8256ef7887ce3bfeb767a8e88fbed6a85bc439bfb49fd38b3cff2a3
+  008-rdma-modules/templates/rdma-ulp.yaml: 6eb15c0a59f93f741bfb1a895398d7888da25968ec1b508bc4ff563f9c8c44f9
   008-rdma-modules/values.yaml: db77cadff69bf611dac908b82f55cde39d93826732afa6ead32924d78f361be3
   009-gpu-operator-pre/Chart.yaml: 99c1631dd612ba140df89fd235197a0b7c858017201d25ec686c48f2a20ae4f4
   009-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -1563,10 +1563,10 @@ gb200-nvke-ubuntu-training:
   016-sriov-ib-networks/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   README.md: ed5dcff397d780ef3f37a3d55055f2d89dbf0170fdce55cd83030ecd2236d5e2
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
-  bundle-info.yaml: c583e1add31482fecc49620fac62503980592a9d9ac87761376231ccbb6b707b
-  checksums.txt: 8fedde07c5663c3f550db49f85f4dec0a3c3924a1b1b72c59a46243622004d1c
+  bundle-info.yaml: 8c83fa40dce2dd32ad4d18fe360d8053c777b8396f3e54ef8444f5fad8734193
+  checksums.txt: 76821bc0b4e395a19aeab1dc41dd626bf82ff877e242a3be277ba8329bbcc58f
   deploy.sh: 6b1ca68f57b4def8a85283654c51c54dbaf71c4969ecca1720e71893fb47d81a
-  recipe.yaml: 539be1ebe64fb528c6cc93d0b8d065efbf4b017584bef0d49b95fd89d0e9d472
+  recipe.yaml: 40a73bbc8af44a08c991c27470cc9c327e2569677318fd8f8d56f73040cec41f
 gb200-oke-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f

@@ -106,7 +106,7 @@ spec:
           enable: true
 
     # InfiniBand east-west fabric: four ConnectX-7 rails per tray, each exposed
-    # as 8 IB VFs (nvidia.com/sriov_resource_rail_<n>) with an IPoIB address
+    # as 16 IB VFs (nvidia.com/sriov_resource_rail_<n>) with an IPoIB address
     # from nv-ipam, on the inbox driver. NicClusterPolicy is manifest-supplied
     # (chart deployCR off); the per-rail SR-IOV objects follow in
     # sriov-ib-networks.

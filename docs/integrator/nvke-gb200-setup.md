@@ -148,8 +148,10 @@ subchart's CRDs only on a fresh install, and validates the rendered
 
 A shared-HCA variant (`rdmaSharedDevicePlugin`, one pooled `nvidia.com/mlnxnics`
 resource over the PFs, no IPoIB) was qualified first on the same cluster and
-passed the deployment and conformance phases; it lives in this recipe's
-history before the SR-IOV switch for anyone who needs a VF-free fallback.
+passed the deployment and conformance phases. It is not selectable from this
+recipe; it survives only in the history of
+[NVIDIA/aicr#3295](https://github.com/NVIDIA/aicr/pull/3295) before the SR-IOV
+switch.
 
 ## rdma-modules and node tainting
 
@@ -162,20 +164,21 @@ stay tainted). The package has no interrupt (no cordon, drain or reboot).
 `runtimeRequired: true` with `autoTaintNewNodes` lets nodewright taint GPU
 nodes until the modules are loaded, so the SR-IOV config daemon and GPU
 workloads never start against an empty `/dev/infiniband` or VFs without
-IPoIB netdevs. Pass the accelerated
-node selector and toleration at bundle time so the CR, the NicClusterPolicy
-DaemonSets and GPU Operator agree on the cohort:
+IPoIB netdevs. The CR selects `feature.node.kubernetes.io/pci-15b3.present=true`
+by default, the cohort the NicClusterPolicy pins its DaemonSets to.
+`--accelerated-node-selector` and `--accelerated-node-toleration` reach only
+this component: the NicClusterPolicy keeps its fixed affinity and GPU Operator
+selects nodes by its own labels, so a different selector must still cover every
+node the fabric DaemonSets land on, or those nodes never get the modules and are
+never gated.
 
-```bash
-aicr bundle --recipe recipe.yaml \
-  --accelerated-node-selector feature.node.kubernetes.io/pci-15b3.present=true \
-  --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule \
-  --output bundle
-```
-
-Disable the taint with `--set rdmamodules:autoTaintNewNodes=false`, or the
-whole component with `--set rdmamodules:enabled=false` on images that already
-load all three modules.
+Disable the taint with `--set rdmamodules:autoTaintNewNodes=false`. On images
+that already load all three modules, disable the component in the recipe rather
+than at bundle time: set `overrides.enabled: false` on the `rdma-modules`
+componentRef in `recipe.yaml` (or in a `--data` overlay), which drops it from
+the bundle and from the deployment phase's expected resources alike. A
+bundle-time `--set rdmamodules:enabled=false` is not persisted, so
+`aicr validate` would still assert the CR.
 
 ## Generate and validate
 
@@ -184,8 +187,12 @@ aicr snapshot --node-selector kubernetes.io/hostname='<gpu-node>' --privileged \
   --output snapshot.yaml
 aicr recipe --snapshot snapshot.yaml --intent training --output recipe.yaml
 aicr bundle --recipe recipe.yaml --output bundle
+./bundle/deploy.sh
 aicr validate --recipe bundle/recipe.yaml
 ```
+
+`aicr validate` runs the deployment and conformance phases against the live
+cluster, so the bundle must be deployed before it.
 
 Performance thresholds are copied from the GB200 OKE recipe until an NVKE
 baseline is measured. The `nccl-benchmark-profile` constraint still names the

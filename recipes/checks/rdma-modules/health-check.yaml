@@ -17,9 +17,8 @@
 # Asserts the rdma-modules NodeWright CR reports status.status "complete", i.e.
 # rdma_ucm, ib_umad and ib_ipoib are loaded on every matching node. Named, unlike the
 # nodewright-customizations check: this component renders exactly one CR.
-# Suppressed by the deployment validator when the component's values render
-# no CR (`--set rdmamodules:enabled=false`), same mechanism as
-# nodewright-customizations (nodewrightHealthCheckSuppressed).
+# No value gate: a recipe that disables the component drops this assert with
+# it, and a bundle-time `--set` never reaches the validator.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:

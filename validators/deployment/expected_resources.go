@@ -703,12 +703,7 @@ func enabledGPUReadinessProbes(ctx *validators.Context, refs []recipe.ComponentR
 				if ferr != nil {
 					return ferr
 				}
-				for _, fabricResource := range fabricResources {
-					if err := verifyRDMAFabricReady(ctx, fabricResource); err != nil {
-						return err
-					}
-				}
-				return nil
+				return verifyRDMAFabricReady(ctx, fabricResources)
 			},
 		})
 	}
@@ -1635,11 +1630,13 @@ func recipeDeclaresRDMAFabric(ref recipe.ComponentRef) bool {
 	return false
 }
 
-// verifyRDMAFabricReady blocks the deployment gate until one fabric resource
-// (fabricResource, derived from the recipe's own NicClusterPolicy and
-// SriovNetworkNodePolicy manifests by rdmaFabricResources) is allocatable in a uniform,
-// positive count across every Mellanox RDMA-capable GPU node, held continuously for the
-// stability window.
+// verifyRDMAFabricReady blocks the deployment gate until every resource in
+// fabricResources (derived from the recipe's own NicClusterPolicy and
+// SriovNetworkNodePolicy manifests by rdmaFabricResources) is allocatable in a
+// uniform, positive count across every Mellanox RDMA-capable GPU node, all of
+// them held continuously through one stability window. One window for the set
+// rather than one per resource: a per-resource sequence spends N windows of the
+// check budget on N rails and stops watching a rail once it has passed.
 //
 // Why span the whole RDMA cohort rather than one node: NCCL all-reduce and any
 // other all-to-all fabric test participate every node together, so a single node
@@ -1665,17 +1662,18 @@ func recipeDeclaresRDMAFabric(ref recipe.ComponentRef) bool {
 // so it survives the default redaction policy into the signed bundle (#1951/#1952) —
 // a cordoned node narrowing the fabric cohort can no longer hide behind a
 // stdout-only line the publisher strips.
-func verifyRDMAFabricReady(ctx *validators.Context, fabricResource string) error {
+func verifyRDMAFabricReady(ctx *validators.Context, fabricResources []string) error {
 	// Production emit seam: publish the structured coverage as an EmitExtra
 	// sentinel. verifyRDMAFabricReadyEmit injects it so tests can record the eager
 	// floor and terminal disclosures without capturing the EmitExtra stdout
 	// transport (which lives in the validators package).
-	return verifyRDMAFabricReadyEmit(ctx, fabricResource, emitExtraOrWarn)
+	return verifyRDMAFabricReadyEmit(ctx, fabricResources, emitExtraOrWarn)
 }
 
 // verifyRDMAFabricReadyEmit is verifyRDMAFabricReady with the structured
 // coverage emit injected. See verifyRDMAFabricReady for the gate contract.
-func verifyRDMAFabricReadyEmit(ctx *validators.Context, fabricResource string, emitCoverage func(extra map[string]string)) error {
+func verifyRDMAFabricReadyEmit(ctx *validators.Context, fabricResources []string, emitCoverage func(extra map[string]string)) error {
+	fabricLabel := strings.Join(fabricResources, ", ")
 	var coverage rdmaFabricCoverage
 	// emittedEarly gates the eager disclosure floor to exactly one emit.
 	var emittedEarly bool
@@ -1685,9 +1683,9 @@ func verifyRDMAFabricReadyEmit(ctx *validators.Context, fabricResource string, e
 	// each tick — the settled disclosure must land exactly once, at the final
 	// outcome).
 	err := pollUntilStable(ctx,
-		fmt.Sprintf("RDMA shared-device fabric (%s) across RDMA GPU nodes", fabricResource),
+		fmt.Sprintf("RDMA fabric (%s) across RDMA GPU nodes", fabricLabel),
 		func() error {
-			cov, probeErr := rdmaFabricProbeCoverage(ctx, fabricResource)
+			cov, probeErr := rdmaFabricProbeCoverage(ctx, fabricResources)
 			coverage = cov
 			// Eager disclosure floor: emit the structured coverage once, on the
 			// first observation that actually enumerated an RDMA-candidate node,
@@ -1736,7 +1734,7 @@ func verifyRDMAFabricReadyEmit(ctx *validators.Context, fabricResource string, e
 
 	if err == nil {
 		fmt.Printf("  RDMA fabric (%s): allocatable (uniform) on all %d schedulable RDMA GPU node(s) (stable ≥%s)\n",
-			fabricResource, coverage.schedulable, gpuReadinessStabilityWindow)
+			fabricLabel, coverage.schedulable, gpuReadinessStabilityWindow)
 	}
 	return err
 }
@@ -1805,14 +1803,14 @@ func (c rdmaFabricCoverage) coverageExtra(passed, failed int) map[string]string 
 // FindSchedulableGpuNodes) so cordoned RDMA nodes stay VISIBLE in the coverage,
 // then validates only the schedulable cohort: nodes carrying the NicClusterPolicy
 // nodeAffinity label helper.PCIMellanoxPresentLabel. It returns nil — plus the
-// coverage partition — only when every schedulable such node advertises
-// fabricResource in a uniform, positive count. It fails closed on a
+// coverage partition — only when every schedulable such node advertises every
+// entry of fabricResources in a uniform, positive count. It fails closed on a
 // List error and when no schedulable RDMA GPU node is observed yet: "could not
 // observe the fabric" must never read as "fabric ready". The returned error rides
 // the poll's dwell reset like any other unhealthy sample; the coverage is
 // returned alongside every error so the terminal disclosure can still name the
 // cordoned nodes it saw.
-func rdmaFabricProbeCoverage(ctx *validators.Context, fabricResource string) (rdmaFabricCoverage, error) {
+func rdmaFabricProbeCoverage(ctx *validators.Context, fabricResources []string) (rdmaFabricCoverage, error) {
 	listCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
 	defer cancel()
 
@@ -1826,10 +1824,9 @@ func rdmaFabricProbeCoverage(ctx *validators.Context, fabricResource string) (rd
 			"failed to list nodes for the RDMA fabric readiness gate")
 	}
 
-	fabric := corev1.ResourceName(fabricResource)
 	type rdmaNode struct {
-		name  string
-		count int64
+		name   string
+		counts []int64 // allocatable per fabricResources index; 0 when absent
 	}
 	var cohort []rdmaNode
 	var coverage rdmaFabricCoverage
@@ -1861,11 +1858,13 @@ func rdmaFabricProbeCoverage(ctx *validators.Context, fabricResource string) (rd
 			coverage.cordoned = append(coverage.cordoned, node.Name)
 			continue
 		}
-		var count int64
-		if q, ok := node.Status.Allocatable[fabric]; ok {
-			count = q.Value()
+		counts := make([]int64, len(fabricResources))
+		for ri, fabricResource := range fabricResources {
+			if q, ok := node.Status.Allocatable[corev1.ResourceName(fabricResource)]; ok {
+				counts[ri] = q.Value()
+			}
 		}
-		cohort = append(cohort, rdmaNode{name: node.Name, count: count})
+		cohort = append(cohort, rdmaNode{name: node.Name, counts: counts})
 	}
 	coverage.schedulable = len(cohort)
 
@@ -1875,35 +1874,38 @@ func rdmaFabricProbeCoverage(ctx *validators.Context, fabricResource string) (rd
 				helper.PCIMellanoxPresentLabel))
 	}
 
-	// Not-ready nodes: the fabric resource is absent or zero — MOFED /
-	// rdma-shared-device-plugin has not finished rolling out on that node.
-	var notReady []string
-	for _, n := range cohort {
-		if n.count <= 0 {
-			notReady = append(notReady, n.name)
+	for ri, fabricResource := range fabricResources {
+		// Not-ready nodes: the fabric resource is absent or zero — MOFED /
+		// the RDMA device plugin has not finished rolling out on that node.
+		var notReady []string
+		for _, n := range cohort {
+			if n.counts[ri] <= 0 {
+				notReady = append(notReady, n.name)
+			}
 		}
-	}
-	if len(notReady) > 0 {
-		return coverage, errors.New(errors.ErrCodeInternal,
-			fmt.Sprintf("%s not yet allocatable on %d of %d RDMA GPU node(s): %s "+
-				"(network operator MOFED / RDMA device plugin still rolling out)",
-				fabricResource, len(notReady), len(cohort), formatNames(notReady)))
-	}
+		if len(notReady) > 0 {
+			return coverage, errors.New(errors.ErrCodeInternal,
+				fmt.Sprintf("%s not yet allocatable on %d of %d RDMA GPU node(s): %s "+
+					"(network operator MOFED / RDMA device plugin still rolling out)",
+					fabricResource, len(notReady), len(cohort), formatNames(notReady)))
+		}
 
-	// All present and positive: require a uniform count, matching the NCCL
-	// consumer's uniformFabricResourceCount. A skew (e.g. 1000 vs 500) means the
-	// fabric is still settling and the NCCL check would reject it as non-uniform.
-	want := cohort[0].count
-	var skew []string
-	for _, n := range cohort {
-		if n.count != want {
-			skew = append(skew, fmt.Sprintf("%s=%d", n.name, n.count))
+		// All present and positive: require a uniform count, matching the NCCL
+		// consumer's uniformFabricResourceCount. A skew (e.g. 1000 vs 500) means
+		// the fabric is still settling and the NCCL check would reject it as
+		// non-uniform.
+		want := cohort[0].counts[ri]
+		var skew []string
+		for _, n := range cohort {
+			if n.counts[ri] != want {
+				skew = append(skew, fmt.Sprintf("%s=%d", n.name, n.counts[ri]))
+			}
 		}
-	}
-	if len(skew) > 0 {
-		return coverage, errors.New(errors.ErrCodeInternal,
-			fmt.Sprintf("%s allocatable count is non-uniform across %d RDMA GPU node(s) (want all == %d): %s",
-				fabricResource, len(cohort), want, formatNames(skew)))
+		if len(skew) > 0 {
+			return coverage, errors.New(errors.ErrCodeInternal,
+				fmt.Sprintf("%s allocatable count is non-uniform across %d RDMA GPU node(s) (want all == %d): %s",
+					fabricResource, len(cohort), want, formatNames(skew)))
+		}
 	}
 	return coverage, nil
 }

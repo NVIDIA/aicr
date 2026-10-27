@@ -24,8 +24,10 @@
 # The modules load live, so the package has no interrupt and the CR no
 # interruptionBudget; runtimeRequired still taint-gates GPU nodes until they
 # are present so the SR-IOV config daemon and workloads do not start against
-# an incomplete /dev/infiniband. Host images that ship rdma-core or this conf
-# make the package a no-op.
+# an incomplete /dev/infiniband. The checks also require a umad device node:
+# ib_umad loaded on a host whose HCAs have not registered yet would otherwise
+# clear the taint before /dev/infiniband is complete. Host images that ship
+# rdma-core or this conf make the package a no-op.
 #
 # Minimal templating - only tolerations/nodeSelectors are dynamic for CLI flag support.
 {{- $rdma := index .Values "rdma-modules" }}
@@ -103,6 +105,7 @@ spec:
           grep -q '^ib_umad ' /proc/modules
           grep -q '^ib_ipoib ' /proc/modules
           test -c /dev/infiniband/rdma_cm
+          ls /dev/infiniband/umad* > /dev/null
         config.sh: |-
           #!/bin/bash
           set -euo pipefail
@@ -120,4 +123,5 @@ spec:
           grep -q '^ib_umad ' /proc/modules
           grep -q '^ib_ipoib ' /proc/modules
           test -c /dev/infiniband/rdma_cm
+          ls /dev/infiniband/umad* > /dev/null
 {{- end }}

@@ -418,9 +418,9 @@ components:
         # and before it every NodeWright stalled once auto-taint fired.
         severity: error
 
-  # Loads kernel modules the host image leaves out (rdma_ucm, ib_umad, ib_ipoib on NVKE) through a
-  # non-interrupting NodeWright CR. Manifest-only; requires nodewright-operator
-  # as a componentRef dependency.
+  # Loads kernel modules the host image leaves out (rdma_ucm, ib_umad,
+  # ib_ipoib on NVKE) through a non-interrupting NodeWright CR. Manifest-only;
+  # requires nodewright-operator as a componentRef dependency.
   - name: rdma-modules
     displayName: rdma-modules
     class: core

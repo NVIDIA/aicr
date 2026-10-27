@@ -459,7 +459,7 @@ A Preview coordinate promises that:
 - `aicr bundle` generates deployable artifacts for it.
 - It passes the repository's static and render gates. KWOK coverage runs on
   every merge to `main` as advisory validation, not a gate.
-- Evidence has been published at [validation.aicr.run](https://validation.aicr.run/); freshness may lag recipe iteration, so consult each coordinate's row in the table below for its evidence status.
+- Evidence has been published at [validation.aicr.run](https://validation.aicr.run/), or the coordinate's row in the table below marks it pending and says where it will land. Freshness may lag recipe iteration, so consult the row for its evidence status.
 
 A Preview coordinate deliberately does **not** promise broader coverage.
 Per the [VR200 Preview epic (#2326)](https://github.com/NVIDIA/aicr/issues/2326),
@@ -476,7 +476,7 @@ land later; none is implied by Preview alone.
 | `rke2 / vr200 / ubuntu / inference` | [RKE2 VR200 Setup](rke2-vr200-setup.md) | [validation.aicr.run/#/rke2/vr200-ubuntu/inference](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference) |
 | `rke2 / vr200 / ubuntu / inference / dynamo` | [RKE2 VR200 Setup](rke2-vr200-setup.md) | [validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo) |
 | `k0s / h200 / ubuntu / training` | [k0s H200 Setup](k0s-h200-setup.md) | [validation.aicr.run/#/k0s/h200-ubuntu/training](https://validation.aicr.run/#/k0s/h200-ubuntu/training) |
-| `nvke / gb200 / ubuntu / training` | [NVKE GB200 Setup](nvke-gb200-setup.md) | not yet published |
+| `nvke / gb200 / ubuntu / training` | [NVKE GB200 Setup](nvke-gb200-setup.md) | pending: published after merge from the `main` validator images ([#3295](https://github.com/NVIDIA/aicr/pull/3295)) |
 
 The platform-neutral `inference` row is the base the Dynamo leaf inherits from; it exists so that resolving `rke2/vr200/ubuntu/inference` **without** `--platform` resolves to the VR200-safe overlay rather than falling through to the generic `rke2-inference` base.
 
