@@ -1414,6 +1414,9 @@ func runBundleCmdWithDependencies(
 	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class", "shared-storage-class", "dra-eviction-node-label", "app-name", flagFulcioURL, flagRekorURL, flagSigningKey); err != nil {
 		return err
 	}
+	if err := validateSingleValueFlags(cmd, argoCDFlags...); err != nil {
+		return err
+	}
 
 	cfg, err := loadFacadeConfig(ctx, cmd)
 	if err != nil {
