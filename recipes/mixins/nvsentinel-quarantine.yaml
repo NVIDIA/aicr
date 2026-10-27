@@ -13,14 +13,13 @@
 # limitations under the License.
 
 # Opt-in mixin, step 2 of 3 of NVSentinel remediation: a node that reports a
-# fatal fault is cordoned, then node-drainer waits for its user pods
-# (non-DaemonSet, outside the chart's systemNamespaces) to finish. Nothing is
-# evicted: the chart default is AllowCompletion, so a node running
-# long-lived pods stays cordoned in state "draining" until they exit or an
-# operator runs kubectl uncordon; node-drainer.userNamespaces sets a
-# different mode per namespace. The node is not repaired; it stays cordoned
-# until a healthy event clears it or an operator does. No shipped recipe
-# composes it. See docs/user/component-catalog.md#graded-remediation.
+# fatal fault is cordoned, then node-drainer drains it: pods in the namespaces
+# the recipe deploys into are never evicted, and every other non-DaemonSet pod
+# is given deleteAfterTimeoutMinutes from the fault to finish, then
+# force-deleted. node-drainer.userNamespaces sets a different mode per
+# namespace. The node is not repaired; it stays cordoned until a healthy event
+# clears it or an operator does. No shipped recipe composes it. See
+# docs/user/component-catalog.md#graded-remediation.
 #
 # fault-remediation is deliberately off: without janitor nothing acts on the
 # repair requests it creates, yet it labels each node remediation-succeeded
@@ -47,6 +46,14 @@ spec:
           processingStrategy: EXECUTE_REMEDIATION
         syslog-health-monitor:
           processingStrategy: EXECUTE_REMEDIATION
+        # Same drain timing in all three steps; evictionTimeoutInSeconds
+        # restates the chart default so a chart bump cannot move it. See
+        # docs/user/component-catalog.md#drain-scope-and-timing.
+        node-drainer:
+          deleteAfterTimeoutMinutes: 300
+          evictionTimeoutInSeconds: "60"
+          drainGPUPods: false
+          partialDrainEnabled: false
         global:
           dryRun: false
           # NVSentinel's datastore is the separately bundled Percona cluster

@@ -3418,7 +3418,7 @@ h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
   019-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   019-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  019-nvsentinel/values.yaml: 26a877937ad15a70d9131c0ee1db7fc2adcc46a63f8ac43fdef0dd64f0d07c52
+  019-nvsentinel/values.yaml: 6bad3666efc50bd6c223bf28255beb1ce58c107c950eed82c03c761d9eb1cb0b
   020-slinky-slurm-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-slinky-slurm-operator-crds/install.sh: b763afb19a730721e43f3a5be956d4ff183eb0623c8e3c168544ad26e8fbb46f
   020-slinky-slurm-operator-crds/upstream.env: 4d0a2be7546b7bf8bc9469de1609fdaca2af94c51f77882e050878f5820e2b88
@@ -3438,12 +3438,12 @@ h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
   023-slinky-slurm/values.yaml: 24b4418eae1e7dec15ae641661f5a21b925dd268b28304b18ad7639269e288a2
   README.md: 54a36d9e0cba9a7ccef3eed58dadd3585a760cb7fcacb94ee41429fc69d4a4d5
   UPGRADING.md: f5f610cd1eff4c73f8be44c89f0a6855c57891df0e94e08b8ba9c2342cadd9de
-  bundle-info.yaml: 2f8fb596125584204c60018986cd7441fd72295632cc19753c1c7eea6f375dc6
-  checksums.txt: 12f276d0d2d37f95cabd22694cf8402d1a4e4220ce0e83bf3eee16c75a82171d
+  bundle-info.yaml: 8f5c51675ecb577108582e722c487d3a6c41ed32e98d44e1e0d37de95ed9fc3d
+  checksums.txt: 70cc638a67453549ac836b82c950e0f3ed76ddb2c4570bd323e2a45515a9b38e
   data/overlays/stock-render-opt-in.yaml: 328e7217055d4c00c950d690a1579830a95456e9953214a1ec0803416edaaaf3
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: 03dc63942cd1283225f2d20f0651f318bbf346b29f376876204c849a1af150ea
-  recipe.yaml: adee9070d34899a545188ab3ad92dd1c8547e87bd8c74f65e0748067bf018b8f
+  recipe.yaml: 768b5b3fdfe8e6164a955da750cbd75fec6e4c3265153a6b866e97604b21c6e1
 h100-eks-ubuntu-training-slurm+slurm-accounting-aicr-provided:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
