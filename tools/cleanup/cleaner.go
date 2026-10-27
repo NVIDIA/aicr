@@ -37,6 +37,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/inventory"
 	"github.com/NVIDIA/aicr/pkg/k8s"
 	k8slabels "github.com/NVIDIA/aicr/pkg/k8s/labels"
 	vlabels "github.com/NVIDIA/aicr/pkg/validator/labels"
@@ -109,15 +110,22 @@ type cleaner struct {
 	dyn           dynamic.Interface
 	helm          helmClient // nil when helm is not installed
 	namespaces    []string   // sorted
-	releaseNames  map[string]bool
+	owners        ownership
+	readReleases  releaseReader // nil skips the inventory read
+	components    []inventory.Component
+	bundle        *bundleScope // nil without --bundle
 	namespaceWait time.Duration
 }
 
 func (c *cleaner) run(ctx context.Context, confirm prompt) error {
 	c.log.Info("target cluster", "context", c.kubeContext, "server", c.server)
 	c.reportExclusions()
+	c.reportBundle()
 
 	releases, releasesKnown := c.listReleases(ctx)
+	if releasesKnown {
+		c.readInstalled(ctx)
+	}
 	driverManaged := c.driverManaged(ctx, releases)
 	if driverManaged {
 		c.driverGuidance()
@@ -264,12 +272,15 @@ func (c *cleaner) uninstallReleases(ctx context.Context, releases []helmRelease)
 			return
 		}
 		log := c.log.With("release", rel.Name, "namespace", rel.Namespace)
+		owned, managedBy := c.owners.owns(rel)
 		switch {
 		case c.excludedNS(rel.Namespace):
 			log.Info("skipping helm release in excluded namespace")
 		case !c.owned(rel.Namespace):
-		case !c.releaseNames[rel.Name]:
+		case !owned:
 			log.Info("skipping helm release AICR does not own")
+		case managedBy != "":
+			log.Warn("skipping helm release a controller manages", "reason", managedBy)
 		default:
 			log.Info("uninstalling helm release")
 			if c.opts.dryRun {
@@ -328,36 +339,53 @@ func (c *cleaner) deleteCRDs(ctx context.Context) {
 	}
 }
 
-// deleteNamespaces keeps a namespace holding any of releases that AICR does
-// not own, since deleting the namespace also deletes the release record and
-// leaves the release's cluster-scoped objects with no way to uninstall them.
-// It keeps a sharedNamespaces entry unless releases has an AICR release there
-// that is not uninstalled, since a release history kept by helm uninstall
-// --keep-history says nothing about who owns the namespace now.
+// deleteNamespaces deletes the owned and per-run check namespaces, skipping
+// excluded ones. It keeps:
+//   - a namespace holding any of releases that AICR does not own, since
+//     deleting it deletes the release record and leaves the release's
+//     cluster-scoped objects with no way to uninstall them
+//   - a namespace holding an AICR release a controller manages, which would
+//     recreate what was deleted
+//   - a sharedNamespaces entry, unless releases has an AICR release there
+//     that is not uninstalled
+//
+// Under --bundle it skips the check namespaces.
 func (c *cleaner) deleteNamespaces(ctx context.Context, releases []helmRelease) {
 	c.log.Info("phase 4: deleting AICR component and check namespaces")
 	for _, ns := range slices.Sorted(maps.Keys(notOwnedNamespaces)) {
 		c.log.Info("skipping namespace AICR does not own", "namespace", ns, "reason", notOwnedNamespaces[ns])
 	}
 	foreign := map[string][]string{}
+	managed := map[string][]string{}
 	installed := map[string]bool{}
 	for _, rel := range releases {
-		if c.releaseNames[rel.Name] {
-			if rel.Status != helmStatusUninstalled {
-				installed[rel.Namespace] = true
-			}
-		} else {
+		owned, managedBy := c.owners.owns(rel)
+		switch {
+		case !owned:
 			foreign[rel.Namespace] = append(foreign[rel.Namespace], rel.Name)
+		case managedBy != "":
+			managed[rel.Namespace] = append(managed[rel.Namespace], rel.Name)
+		// A history kept by helm uninstall --keep-history says nothing about
+		// who owns the namespace now.
+		case rel.Status != helmStatusUninstalled:
+			installed[rel.Namespace] = true
 		}
 	}
 
+	candidates := c.namespaces
+	// No bundle installs a check namespace.
+	if c.bundle == nil {
+		candidates = slices.Concat(candidates, c.checkNamespaces(ctx))
+	}
 	var targets []string
-	for _, ns := range slices.Concat(c.namespaces, c.checkNamespaces(ctx)) {
+	for _, ns := range candidates {
 		switch {
 		case c.excludedNS(ns):
 			c.log.Info("skipping excluded namespace", "namespace", ns)
 		case len(foreign[ns]) > 0:
 			c.log.Info("keeping namespace that holds helm releases AICR does not own", "namespace", ns, "releases", foreign[ns])
+		case len(managed[ns]) > 0:
+			c.log.Info("keeping namespace that holds helm releases a controller manages", "namespace", ns, "releases", managed[ns])
 		case sharedNamespaces[ns] != "" && !installed[ns]:
 			c.log.Info("keeping shared namespace with no AICR helm release found", "namespace", ns, "reason", sharedNamespaces[ns])
 		default:

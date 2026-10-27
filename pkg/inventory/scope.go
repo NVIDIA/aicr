@@ -73,6 +73,11 @@ const (
 type scope struct {
 	components map[string]struct{}
 	confident  map[string]struct{}
+
+	// anyName treats every out-of-scope name as possible, so its record is
+	// decoded and skipped if unreadable. It costs a decode of every release
+	// in the cluster.
+	anyName bool
 }
 
 // newScope builds a scope from component names, confident in each bare name
@@ -206,6 +211,9 @@ func (s scope) covers(name string) confidence {
 		if tokenRun || strings.HasSuffix(name, component) || endsWithInjectedFolder(name, component) {
 			best = possible
 		}
+	}
+	if best == outOfScope && s.anyName {
+		return possible
 	}
 
 	return best

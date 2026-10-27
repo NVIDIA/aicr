@@ -636,9 +636,13 @@ no `--exclude-crd`.
 
 Some namespaces are kept without any flag:
 
-- A namespace holding a Helm release whose name no AICR bundle installs. Phase 1
+- A namespace holding a Helm release AICR does not own (see below). Phase 1
   skips that release, and phase 4 keeps its namespace so the release can still
   be removed with `helm uninstall`.
+- A namespace holding an AICR release that Flux's helm-controller manages.
+  Phase 1 skips it, because helm-controller reinstalls a release removed
+  behind its back. Delete the `HelmRelease` in `flux-system` instead, which
+  uninstalls it.
 - `openshift-nfd` and `cert-manager-operator`, unless phase 1 finds an AICR
   release in them that is not in `uninstalled` status. On OpenShift the
   platform team often installs these operators through OperatorHub. The list
@@ -651,6 +655,39 @@ Some namespaces are kept without any flag:
 `aicr validate` left there: the validator Jobs and ConfigMaps, and the snapshot
 agent's Job, ServiceAccount, Role and RoleBinding. The snapshot agent's
 staging ConfigMap (`aicr-agent-snapshot-<runID>`) is left in place.
+
+### How Cleanup Decides Which Releases AICR Owns
+
+Phase 1 uninstalls a Helm release only when AICR owns it. Without `--bundle`,
+a release is owned when any of these recognizes it:
+
+- The installed-component inventory (`pkg/inventory`), read once per naming
+  scheme. Helm, helmfile, Terraform and Fleet releases carry the component
+  name. Flux releases are named `<targetNamespace>-<component>` and are
+  recognized but left to helm-controller. Argo CD Applications are not Helm
+  releases, so cleanup only warns that Argo CD re-syncs what it removes.
+  Delete the Applications or their parent Application first.
+- The AICR stamp (`aicr.run/generated-by`) on a Helm release, for
+  releases no component name matches, such as an injected manifest folder.
+- The registry's release names, plus the few retired components in
+  `legacyComponents` (`tools/cleanup/helm.go`), which predate the stamp. This
+  is also the fallback when an inventory read fails.
+
+### Limiting Cleanup to One Bundle
+
+```bash
+go run ./tools/cleanup --bundle ./bundles --dry-run
+```
+
+`--bundle` reads the release index in the bundle's `bundle-info.yaml`
+(`layout.releases`). Phase 1 uninstalls only those releases, matched by name
+and namespace. Phase 4 deletes only the namespaces those releases install
+into, so namespaces no bundle names, such as `gang-scheduling-test`, are left
+alone. A bundle with no
+`bundle-info.yaml` predates the index, so cleanup warns and falls back to
+the behavior described above. An Argo CD bundle installs Applications, not
+Helm releases, so phase 1 uninstalls nothing and cleanup warns to delete the
+Applications first. CRD deletion in phase 3 is unchanged by `--bundle`.
 
 ### Debugging Tests
 

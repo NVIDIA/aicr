@@ -20,6 +20,12 @@
 //  3. Custom Resource Definitions in AICR-owned API groups
 //  4. AICR component and check-created namespaces, with stuck-finalizer rescue
 //
+// A release is AICR's when pkg/inventory attributes it to a component under
+// any deployer's naming, when it carries the AICR stamp, or when a bundle
+// writes its name for a registry or legacyComponents component. With
+// --bundle, phases 1 and 4 cover only what that bundle's bundle-info.yaml
+// records.
+//
 // It leaves cluster-scoped resources outside AICR components alone. Do not run
 // it during an aicr snapshot or aicr validate run, since phase 2 also deletes
 // that run's objects.
@@ -31,6 +37,7 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	stderrors "errors"
 	"flag"
@@ -49,8 +56,10 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/helm"
+	"github.com/NVIDIA/aicr/pkg/inventory"
 	"github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/logging"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 const usageHeader = `Usage: go run ./tools/cleanup [flags]
@@ -60,6 +69,11 @@ Exclusions fence out installs AICR does not own, for example nodewright
 installed out-of-band:
 
   go run ./tools/cleanup --exclude-ns skyhook --exclude-crd skyhook.nvidia.com,nodewright.nvidia.com
+
+--bundle limits helm uninstall and namespace deletion to what one bundle
+installed, for example on a cluster shared with another tenant's bundle:
+
+  go run ./tools/cleanup --bundle ./bundles
 
 Flags:
 `
@@ -71,6 +85,7 @@ type options struct {
 	keepNamespaces bool
 	excludeNS      []string
 	excludeCRD     []string
+	bundleDir      string
 }
 
 func main() {
@@ -122,6 +137,14 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 		csvAppender(&opts.excludeNS, "a namespace"))
 	fs.Func("exclude-crd", "protect CRDs whose name contains this match from deletion (repeatable, comma-separated)",
 		csvAppender(&opts.excludeCRD, "a match"))
+	fs.Func("bundle", "limit helm uninstall and namespace deletion to the releases and namespaces this bundle directory's bundle-info.yaml records",
+		func(value string) error {
+			if value == "" || strings.HasPrefix(value, "-") {
+				return errors.New(errors.ErrCodeInvalidRequest, "requires a bundle directory argument, got "+value)
+			}
+			opts.bundleDir = value
+			return nil
+		})
 
 	if err := fs.Parse(args); err != nil {
 		if stderrors.Is(err, flag.ErrHelp) {
@@ -170,50 +193,83 @@ func newCleaner(ctx context.Context, opts options, log *slog.Logger) (*cleaner, 
 	if err != nil {
 		return nil, err
 	}
-	releaseNames, err := ownedReleaseNames()
+	registry, err := recipe.GetComponentRegistry()
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeInternal, "load component registry", err)
 	}
 
 	if opts.dryRun {
 		log = log.With("dryRun", true)
 	}
+	kubeconfig, kubeContext := kubeTarget()
 	c := &cleaner{
 		opts:          opts,
 		log:           log,
-		kubeContext:   currentContext(),
+		kubeContext:   cmp.Or(kubeContext, "unknown"),
 		server:        restConfig.Host,
 		kube:          kube,
 		disc:          bounded.Discovery(),
 		dyn:           dyn,
 		namespaces:    namespaces,
-		releaseNames:  releaseNames,
+		owners:        ownership{names: ownedReleaseNames(registry)},
+		readReleases:  inventory.ReadReleases,
+		components:    inventoryComponents(registry),
 		namespaceWait: defaults.ClusterCleanupNamespaceDeleteWait,
 	}
+	if opts.bundleDir != "" {
+		b, found, bundleErr := loadBundle(ctx, opts.bundleDir)
+		if bundleErr != nil {
+			return nil, bundleErr
+		}
+		if found {
+			c.bundle, c.namespaces, c.owners, c.readReleases = &b, b.namespaces, b.owners, nil
+		} else {
+			log.Warn("the bundle has no bundle-info.yaml, so it predates the release index and cleanup falls back to every release and namespace the catalog names",
+				"bundle", opts.bundleDir)
+		}
+	}
 	if _, err := exec.LookPath(helm.Binary); err == nil {
-		c.helm = helmCLI{run: helm.Run}
+		// Pinned because helm otherwise resolves its own target, for example
+		// from HELM_KUBECONTEXT. With neither flag, helm falls back to the
+		// same in-cluster config or KUBECONFIG merge the clients use.
+		c.helm = helmCLI{run: helm.Run, kubeArgs: helmKubeArgs(kubeconfig, kubeContext)}
 	}
 	return c, nil
 }
 
-// currentContext returns the current context of the kubeconfig the clients
-// load, for display only.
-func currentContext() string {
+// kubeTarget returns the kubeconfig file and current context the clients
+// load. path is empty for a multi-file KUBECONFIG or in-cluster config, and
+// kubeContext is empty when none can be read.
+func kubeTarget() (path, kubeContext string) {
 	rules := clientcmd.NewDefaultClientConfigLoadingRules()
-	if path := client.ResolveKubeconfigPath(""); path != "" {
+	path = client.ResolveKubeconfigPath("")
+	if path != "" {
 		rules.ExplicitPath = path
 	}
-	return contextName(clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{}))
+	return path, contextName(clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{}))
 }
 
-// contextName returns cfg's current context, or "unknown" when it has none or
-// cannot be read.
+// contextName returns cfg's current context, or "" when it has none or cannot
+// be read.
 func contextName(cfg clientcmd.ClientConfig) string {
 	raw, err := cfg.RawConfig()
-	if err != nil || raw.CurrentContext == "" {
-		return "unknown"
+	if err != nil {
+		return ""
 	}
 	return raw.CurrentContext
+}
+
+// helmKubeArgs returns the helm flags selecting kubeconfig and kubeContext,
+// omitting each that is empty.
+func helmKubeArgs(kubeconfig, kubeContext string) []string {
+	var args []string
+	if kubeconfig != "" {
+		args = append(args, "--kubeconfig", kubeconfig)
+	}
+	if kubeContext != "" {
+		args = append(args, "--kube-context", kubeContext)
+	}
+	return args
 }
 
 // A prompt asks the operator question and reports whether they answered yes.

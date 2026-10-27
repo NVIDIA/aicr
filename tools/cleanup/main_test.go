@@ -51,6 +51,9 @@ func TestParseOptions(t *testing.T) {
 		{"padded tokens are trimmed and empties dropped",
 			[]string{"--exclude-ns", " skyhook , gpu-operator ,,", "--exclude-crd=skyhook.nvidia.com, nodewright.nvidia.com"},
 			options{excludeNS: []string{"skyhook", "gpu-operator"}, excludeCRD: []string{"skyhook.nvidia.com", "nodewright.nvidia.com"}}, false},
+		{"bundle directory", []string{"--bundle", "./bundles"}, options{bundleDir: "./bundles"}, false},
+		{"flag-shaped bundle argument", []string{"--bundle", "--yes"}, options{}, true},
+		{"empty bundle argument", []string{"--bundle="}, options{}, true},
 		{"missing exclusion argument", []string{"--exclude-ns"}, options{}, true},
 		{"flag-shaped exclusion argument", []string{"--exclude-ns", "--yes"}, options{}, true},
 		{"flag-shaped crd argument", []string{"--exclude-crd", "-yes"}, options{}, true},
@@ -68,7 +71,8 @@ func TestParseOptions(t *testing.T) {
 				t.Fatalf("parseOptions(%q) error = %v", tt.args, err)
 			}
 			if got.dryRun != tt.want.dryRun || got.assumeYes != tt.want.assumeYes ||
-				got.keepCRDs != tt.want.keepCRDs || got.keepNamespaces != tt.want.keepNamespaces {
+				got.keepCRDs != tt.want.keepCRDs || got.keepNamespaces != tt.want.keepNamespaces ||
+				got.bundleDir != tt.want.bundleDir {
 
 				t.Errorf("parseOptions(%q) flags = %+v, want %+v", tt.args, got, tt.want)
 			}
@@ -130,8 +134,8 @@ func TestContextName(t *testing.T) {
 		want string
 	}{
 		{"current context set", clientcmd.NewDefaultClientConfig(clientcmdapi.Config{CurrentContext: "staging"}, nil), "staging"},
-		{"no current context", clientcmd.NewDefaultClientConfig(clientcmdapi.Config{}, nil), "unknown"},
-		{"kubeconfig fails to load", unreadableConfig{}, "unknown"},
+		{"no current context", clientcmd.NewDefaultClientConfig(clientcmdapi.Config{}, nil), ""},
+		{"kubeconfig fails to load", unreadableConfig{}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

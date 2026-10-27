@@ -112,6 +112,29 @@ func TestScopeCoversPrefersTheStrongerTier(t *testing.T) {
 	}
 }
 
+// TestScopeCoversAnyName pins that the widened scope reads every named record
+// as possible and never raises one to confident.
+func TestScopeCoversAnyName(t *testing.T) {
+	within := newScope("gpu-operator")
+	within.anyName = true
+
+	tests := []struct {
+		record string
+		want   confidence
+	}{
+		{"gpu-operator", confident},
+		{"tenant-a-gpu-operator", possible},
+		{"someone-elses-app", possible},
+	}
+	for _, tt := range tests {
+		t.Run(tt.record, func(t *testing.T) {
+			if got := within.covers(tt.record); got != tt.want {
+				t.Errorf("covers(%q) = %v, want %v", tt.record, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNewScope(t *testing.T) {
 	tests := []struct {
 		name       string

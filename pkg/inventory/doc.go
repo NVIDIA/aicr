@@ -33,6 +33,11 @@
 // cannot be read, a release held by both storage drivers, and a loosely
 // matched Application deploying outside the component's namespaces.
 //
+// ReadReleases reads the same source with the same naming but stops before the
+// version table. It returns every record attributed to each component, plus
+// the AICR-stamped Helm records that match none, for a caller that acts on the
+// records themselves, such as one removing what AICR installed.
+//
 // ScanAtRisk is the other half, and it answers a different question about the
 // same cluster. See "The at-risk scan" below.
 //
