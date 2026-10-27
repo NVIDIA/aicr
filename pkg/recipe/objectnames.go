@@ -16,6 +16,7 @@ package recipe
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -107,9 +108,23 @@ func collectObjectNames(values map[string]any, prefix []string, depth int, out m
 	return nil
 }
 
+// ObjectNamePin is an object name ApplyInheritedObjectNames held at the value a
+// prior bundle deployed with. Current and Inherited are the values the current
+// resolve and the prior bundle set at Path. An empty one means that side sets
+// no override, so the chart derives the name from the release.
+type ObjectNamePin struct {
+	Component string
+	Path      string
+	Current   string
+	Inherited string
+	// HealthCheckMayBeStale reports whether the component's health check may
+	// still assert the current names, because the pin could not retarget it.
+	HealthCheckMayBeStale bool
+}
+
 // ApplyInheritedObjectNames pins each ref's object names back to the ones a
 // prior bundle deployed with, so regenerating a recipe on an AICR upgrade does
-// not rename the objects a running release owns.
+// not rename the objects a running release owns, and returns the pins it wrote.
 //
 // It is a separate entry point from ApplyInheritedIdentity because object
 // names are not on the ref: they live in the merged values, which only a
@@ -135,17 +150,27 @@ func collectObjectNames(values map[string]any, prefix []string, depth int, out m
 // and deployers interpolate them into generated install scripts — but the
 // deciding reason is the same as the namespace path's: a silently ignored pin
 // is the rename this exists to prevent.
-func ApplyInheritedObjectNames(refs []ComponentRef, prior, current map[string]map[string]string) error {
+//
+// It also retargets the component's health check from each fullnameOverride
+// pin's Current name to its Inherited name. When the component has a health
+// check, a pin is returned with HealthCheckMayBeStale set if:
+//
+//   - it is not a fullnameOverride pin,
+//   - its Current or Inherited is empty,
+//   - another pin of the component shares its Current but not its Inherited, or
+//   - the check names an object that embeds its Current after a hyphen, as
+//     prometheus-kube-prometheus-prometheus embeds kube-prometheus.
+func ApplyInheritedObjectNames(refs []ComponentRef, prior, current map[string]map[string]string) ([]ObjectNamePin, error) {
 	if len(prior) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Collected before anything is written so a rejected artifact leaves every
 	// ref untouched, rather than half-pinned at whichever component failed.
 	type pin struct {
 		ref   int
-		path  string
 		value any
+		ObjectNamePin
 	}
 	var pins []pin
 
@@ -161,18 +186,22 @@ func ApplyInheritedObjectNames(refs []ComponentRef, prior, current map[string]ma
 			if was == currentNames[path] {
 				continue
 			}
+			p := pin{ref: i, ObjectNamePin: ObjectNamePin{
+				Component: ref.Name, Path: path, Current: currentNames[path], Inherited: was,
+			}}
 			if !pinned {
-				pins = append(pins, pin{ref: i, path: path, value: nil})
+				pins = append(pins, p)
 				continue
 			}
 			// A rendered object name is a DNS-1123 subdomain: unlike a
 			// namespace it may carry dots, because charts suffix it.
 			if errs := validation.IsDNS1123Subdomain(was); len(errs) > 0 {
-				return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+				return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 					"inherited object name %q at %s for component %q is not a valid Kubernetes "+
 						"object name: %s", was, path, ref.Name, strings.Join(errs, "; ")))
 			}
-			pins = append(pins, pin{ref: i, path: path, value: was})
+			p.value = was
+			pins = append(pins, p)
 		}
 	}
 
@@ -180,6 +209,8 @@ func ApplyInheritedObjectNames(refs []ComponentRef, prior, current map[string]ma
 	// conflict found while writing leaves every ref as it was too — not just a
 	// rejected name found while collecting.
 	staged := make(map[int]map[string]any)
+	renames := make(map[int]map[string]string)
+	ambiguous := make(map[int]map[string]bool)
 	for _, p := range pins {
 		overrides, ok := staged[p.ref]
 		if !ok {
@@ -189,14 +220,238 @@ func ApplyInheritedObjectNames(refs []ComponentRef, prior, current map[string]ma
 			}
 			staged[p.ref] = overrides
 		}
-		if err := setOverridePath(overrides, refs[p.ref].Name, p.path, p.value); err != nil {
-			return err
+		if err := setOverridePath(overrides, refs[p.ref].Name, p.Path, p.value); err != nil {
+			return nil, err
 		}
+		if !rebindable(p.ObjectNamePin) {
+			continue
+		}
+		if renames[p.ref] == nil {
+			renames[p.ref] = make(map[string]string)
+			ambiguous[p.ref] = make(map[string]bool)
+		}
+		// Pins sharing a current name but inheriting different ones leave no
+		// way to tell whose objects an assertion means, so neither is rebound.
+		if to, seen := renames[p.ref][p.Current]; seen && to != p.Inherited {
+			ambiguous[p.ref][p.Current] = true
+		}
+		renames[p.ref][p.Current] = p.Inherited
+	}
+
+	checks := make(map[int]string, len(renames))
+	embedded := make(map[int]map[string]bool, len(renames))
+	for i, byName := range renames {
+		for name := range ambiguous[i] {
+			delete(byName, name)
+		}
+		if len(byName) == 0 {
+			continue
+		}
+		embedded[i] = make(map[string]bool)
+		// The check is static YAML naming objects as the current values do, so
+		// left alone it would fail against the deployment the pin preserved.
+		rebound, err := rewriteHealthCheck(refs[i].Name, refs[i].HealthCheckAsserts, "its object names",
+			func(doc any) bool { return retargetObjectNames(doc, byName, embedded[i]) })
+		if err != nil {
+			return nil, err
+		}
+		checks[i] = rebound
+	}
+
+	out := make([]ObjectNamePin, 0, len(pins))
+	for _, p := range pins {
+		_, rebound := renames[p.ref][p.Current]
+		rebound = rebound && rebindable(p.ObjectNamePin) && !embedded[p.ref][p.Current]
+		p.HealthCheckMayBeStale = !rebound && strings.TrimSpace(refs[p.ref].HealthCheckAsserts) != ""
+		out = append(out, p.ObjectNamePin)
 	}
 	for i, overrides := range staged {
 		refs[i].Overrides = overrides
 	}
-	return nil
+	for i, asserts := range checks {
+		refs[i].HealthCheckAsserts = asserts
+	}
+	return out, nil
+}
+
+// rebindable reports whether p is a fullnameOverride pin with both names set.
+func rebindable(p ObjectNamePin) bool {
+	// Only fullnameOverride prefixes the names a chart renders. An unset side
+	// takes a name derived from the release, which values do not state.
+	return strings.HasSuffix("."+p.Path, ".fullnameOverride") && p.Current != "" && p.Inherited != ""
+}
+
+// retargetObjectNames applies renames to every name key under a resource key in
+// node, and reports whether any changed. Each key of renames that a name still
+// holds after a hyphen once renamed is added to embedded.
+func retargetObjectNames(node any, renames map[string]string, embedded map[string]bool) bool {
+	// The Test's and its steps' names sit outside any resource. A name in a
+	// resource's spec is how one rendered object refers to another, such as a
+	// secretKeyRef naming the chart's Secret.
+	return walkStrings(node, healthCheckDepth, func(path []string, s string) (string, bool) {
+		last := len(path) - 1
+		if path[last] != "name" || !slices.Contains(path[:last], "resource") {
+			return "", false
+		}
+		from := renamePrefix(s, renames)
+		rest := s[len(from):]
+		// A chart that prefixes the fullname, as prometheus-operator does with
+		// its StatefulSets, cannot be retargeted from values alone.
+		for name := range renames {
+			if strings.Contains(rest+"-", "-"+name+"-") {
+				embedded[name] = true
+			}
+		}
+		if from == "" {
+			return "", false
+		}
+		return renames[from] + rest, true
+	})
+}
+
+// renamePrefix returns the longest key in renames that name equals or
+// continues after a hyphen, or "" if none does.
+func renamePrefix(name string, renames map[string]string) string {
+	// A dot does not continue a name, or a CRD's <plural>.<group> would match a
+	// fullname equal to its plural. The longest key wins, so <parent>-<sub> is
+	// not renamed as <parent>.
+	best := ""
+	for from := range renames {
+		if len(from) <= len(best) {
+			continue
+		}
+		if name == from || strings.HasPrefix(name, from+"-") {
+			best = from
+		}
+	}
+	return best
+}
+
+// ObjectNameReference is a place that may address a pinned object by its
+// Current name. Inheritance does not rewrite it, because a name embedded in a
+// URL or a flag cannot be told apart from a coincidental substring.
+type ObjectNameReference struct {
+	Pin       ObjectNamePin
+	Component string
+	// Location is a value path in Component's merged values, or HealthCheckLocation.
+	Location string
+}
+
+// HealthCheckLocation is the ObjectNameReference.Location of a component's
+// health-check assertions.
+const HealthCheckLocation = "healthCheck"
+
+// FindObjectNameReferences returns each place in values, and in every health
+// check but the pin's own component's, holding a pin's Current name as a token.
+// values holds each component's merged values from before the pins were
+// written, keyed by component. Special cases are:
+//
+//   - a pin with an empty Current is skipped,
+//   - a value under an object-name, image, or namespace key is not a
+//     reference,
+//   - a token followed by a letter or digit is a different word, so
+//     gpu-operator does not match gpu-operators but kube-prometheus matches
+//     http://kube-prometheus-prometheus:9090, and
+//   - a coincidental match elsewhere is reported too, so each result is a
+//     possible reference.
+func FindObjectNameReferences(pins []ObjectNamePin, refs []ComponentRef, values map[string]map[string]any) []ObjectNameReference {
+	var out []ObjectNameReference
+	for _, pin := range pins {
+		if pin.Current == "" {
+			continue
+		}
+		token := nameTokenPattern(pin.Current)
+		for i := range refs {
+			ref := &refs[i]
+			for _, path := range nameReferencePaths(values[ref.Name], maxObjectNameDepth, token) {
+				out = append(out, ObjectNameReference{Pin: pin, Component: ref.Name, Location: path})
+			}
+			if ref.Name != pin.Component && healthCheckReferences(ref.HealthCheckAsserts, token) {
+				out = append(out, ObjectNameReference{Pin: pin, Component: ref.Name, Location: HealthCheckLocation})
+			}
+		}
+	}
+	return out
+}
+
+// nameTokenPattern returns a pattern matching name where it is not preceded by
+// a lowercase letter, digit, dot, or hyphen, nor followed by a lowercase letter
+// or digit.
+func nameTokenPattern(name string) *regexp.Regexp {
+	return regexp.MustCompile(`(?:^|[^a-z0-9.-])` + regexp.QuoteMeta(name) + `(?:$|[^a-z0-9])`)
+}
+
+// nameReferencePaths returns the sorted paths of the strings under node that
+// match token, excluding values under a nonReferenceKey.
+func nameReferencePaths(node any, maxDepth int, token *regexp.Regexp) []string {
+	var paths []string
+	walkStrings(node, maxDepth, func(path []string, s string) (string, bool) {
+		if !nonReferenceKey(path) && token.MatchString(s) {
+			paths = append(paths, joinValuePath(path))
+		}
+		return "", false
+	})
+	sort.Strings(paths)
+	return paths
+}
+
+// imageKeys are the keys whose values locate a container image.
+var imageKeys = map[string]bool{
+	"image":      true,
+	"repository": true,
+	"registry":   true,
+	"tag":        true,
+	"digest":     true,
+}
+
+// nonReferenceKey reports whether the key holding the string at path, or the
+// list holding it, cannot address an object by its name. That is an
+// objectNameKeys key, which names the object itself, an imageKeys key, or a
+// namespace key.
+func nonReferenceKey(path []string) bool {
+	key := ""
+	for i := len(path) - 1; i >= 0; i-- {
+		if !strings.HasPrefix(path[i], "[") {
+			key = path[i]
+			break
+		}
+	}
+	return objectNameKeys[key] || imageKeys[key] ||
+		key == "namespace" || key == "namespaces" ||
+		strings.HasSuffix(key, "Namespace") || strings.HasSuffix(key, "Namespaces")
+}
+
+// joinValuePath joins path with dots, attaching each "[i]" segment to the key
+// before it.
+func joinValuePath(path []string) string {
+	var b strings.Builder
+	for i, segment := range path {
+		if i > 0 && !strings.HasPrefix(segment, "[") {
+			b.WriteByte('.')
+		}
+		b.WriteString(segment)
+	}
+	return b.String()
+}
+
+// healthCheckReferences reports whether any string in asserts matches token. It
+// reports false when asserts cannot be parsed.
+func healthCheckReferences(asserts string, token *regexp.Regexp) bool {
+	if strings.TrimSpace(asserts) == "" {
+		return false
+	}
+	docs, err := decodeHealthCheck(asserts)
+	if err != nil {
+		// The parse failure is reported elsewhere. This only decides whether
+		// to warn.
+		return false
+	}
+	for _, doc := range docs {
+		if len(nameReferencePaths(doc, healthCheckDepth, token)) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // unionPaths lists every value path either side states, sorted so the pins a

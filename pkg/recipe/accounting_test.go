@@ -129,6 +129,37 @@ func TestApplyBuildConfigAccountingUsesResolvedNamespace(t *testing.T) {
 	}
 }
 
+func TestApplyBuildConfigAccountingKeepsLaterHealthCheckDocuments(t *testing.T) {
+	t.Parallel()
+
+	const second = "apiVersion: chainsaw.kyverno.io/v1alpha1\nkind: Test\nmetadata:\n  name: second\nspec:\n  steps: []\n"
+	result := accountingTestResult()
+	ref := result.GetComponentRef(slinkySlurmComponentName)
+	ref.HealthCheckAsserts += "---\n" + second
+	mode := AccountingModeCustomerManaged
+	if err := applyBuildConfig(result, &buildConfig{accountingMode: &mode}); err != nil {
+		t.Fatalf("applyBuildConfig() error = %v", err)
+	}
+
+	docs, err := decodeHealthCheck(ref.HealthCheckAsserts)
+	if err != nil {
+		t.Fatalf("decode rewritten health check: %v", err)
+	}
+	if len(docs) != 2 {
+		t.Fatalf("health check has %d documents, want 2:\n%s", len(docs), ref.HealthCheckAsserts)
+	}
+	steps := func(doc any) []any {
+		s, _ := doc.(map[string]any)["spec"].(map[string]any)["steps"].([]any)
+		return s
+	}
+	if got := len(steps(docs[0])); got != 1 {
+		t.Errorf("first document has %d steps, want the accounting step", got)
+	}
+	if name := docs[1].(map[string]any)["metadata"].(map[string]any)["name"]; name != "second" || len(steps(docs[1])) != 0 {
+		t.Errorf("second document changed: %#v", docs[1])
+	}
+}
+
 func TestApplyBuildConfigRejectsProfileAccountingOwnershipOverlap(t *testing.T) {
 	t.Parallel()
 
