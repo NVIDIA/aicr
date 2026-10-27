@@ -451,14 +451,16 @@ scheduling-shape failures.
 
 ### Tuning the Sync Deadline
 
-Five environment variables shape how long the GitOps lanes wait
-before declaring a sync timeout. Argo CD and Flux pairs are
+Seven environment variables shape how long the GitOps lanes wait
+on a sync. Argo CD and Flux pairs are
 independent.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `KWOK_ARGOCD_SYNC_TIMEOUT` | `480` s | Deadline for all child Argo CD Applications to reach `Synced+Healthy` |
 | `KWOK_ARGOCD_ROOT_GRACE` | `30` s | Grace period for the root Application before deadline counting starts |
+| `KWOK_ARGOCD_READBACK_SETTLE_TIMEOUT` | `180` s | How long the inventory read-back waits for every installed Application outside the unsettled allowlist to finish its first sync, bounded by `KWOK_SYNC_DEADLINE_EPOCH`. One still syncing is read as unversioned and fails the read-back |
+| `KWOK_ARGOCD_READBACK_SETTLE_INTERVAL` | `5` s | Spacing between the read-back's re-checks |
 | `KWOK_FLUX_SYNC_TIMEOUT` | `500` s | Deadline for source fetch (OCIRepository or GitRepository) + Kustomization apply + HelmReleases `Ready=True` + ArtifactGenerators Ready |
 | `KWOK_FLUX_ROOT_GRACE` | `30` s | Grace period for the outer Kustomization before deadline counting starts |
 | `KWOK_SYNC_DEADLINE_EPOCH` | unset | Absolute epoch deadline for sync-gate work (CI only). When set, each gate budget becomes min(default, deadline − now); below a 120 s floor the gate fails fast with exit 50 so chainsaw's catch-block diagnostics always print before GitHub's job timeout |

@@ -23,6 +23,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
 	aicrhelm "github.com/NVIDIA/aicr/pkg/helm"
 	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -213,9 +214,9 @@ func renderedDocumentMatching(rendered, kind string, name *regexp.Regexp) (strin
 // TestNVSentinelRemediationChartRender renders the pinned chart with each
 // remediation step composed and asserts what reaches the cluster: which
 // pipeline Deployments render, that each runs with the step's --dry-run, the
-// fault-quarantine rule sets and node-drainer mode the steps take from the
-// chart, fault-remediation's action map, janitor-provider's reboot image, and
-// every image the step pulls.
+// fault-quarantine rule sets the steps take from the chart, node-drainer's
+// drain scope and timing, fault-remediation's action map, janitor-provider's
+// reboot image, and every image the step pulls.
 //
 // The values test pins the map AICR sets; this one pins what the chart builds
 // from it and from its own defaults, so a chart bump that renamed a key,
@@ -238,7 +239,12 @@ func TestNVSentinelRemediationChartRender(t *testing.T) {
 
 	for _, step := range remediationStepRender {
 		t.Run(step.mixin, func(t *testing.T) {
-			out := renderNVSentinel(t, nvsentinelRenderedValues(t, store, step.mixin))
+			values := nvsentinelRenderedValues(t, store, step.mixin)
+			// The bundler adds the drain scope after recipe values resolve.
+			if err := drainscope.Apply(t.Context(), values, drainScopeRenderNamespaces); err != nil {
+				t.Fatalf("drainscope.Apply: %v", err)
+			}
+			out := renderNVSentinel(t, values)
 
 			for _, name := range remediationDeployments {
 				doc, found := renderedDocument(out, "Deployment", name)
@@ -434,6 +440,12 @@ func assertRenderedRuleSets(t *testing.T, rendered string) {
 	}
 }
 
+// drainScopeRenderNamespaces stands in for a recipe's namespaces; the
+// bundler tests cover generating them from real recipes.
+var drainScopeRenderNamespaces = []string{"cert-manager", "nvidia-network-operator"}
+
+// assertRenderedDrainMode checks node-drainer's rendered config carries the
+// drain scope and timing AICR sets, under the keys node-drainer reads.
 func assertRenderedDrainMode(t *testing.T, rendered string) {
 	t.Helper()
 	cm, ok := renderedDocument(rendered, "ConfigMap", "node-drainer")
@@ -445,8 +457,19 @@ func assertRenderedDrainMode(t *testing.T, rendered string) {
 	for _, m := range matches {
 		got = append(got, m[1]+"="+m[2])
 	}
-	if strings.Count(cm, "[[userNamespaces]]") != 1 || len(got) != 1 || got[0] != "*=AllowCompletion" {
-		t.Errorf("node-drainer userNamespaces = %q, want only *=AllowCompletion; the documented drain (wait for pods to finish, never evict) no longer holds", got)
+	if strings.Count(cm, "[[userNamespaces]]") != 1 || len(got) != 1 || got[0] != "*="+drainscope.DefaultMode {
+		t.Errorf("node-drainer userNamespaces = %q, want only *=%s", got, drainscope.DefaultMode)
+	}
+	for _, line := range []string{
+		`systemNamespaces = "` + drainscope.SystemNamespacesPattern(drainScopeRenderNamespaces) + `"`,
+		"deleteAfterTimeoutMinutes = 300",
+		`evictionTimeoutInSeconds = "60"`,
+		"drainGPUPods = false",
+		"partialDrainEnabled = false",
+	} {
+		if !strings.Contains(cm, line) {
+			t.Errorf("node-drainer config does not carry %s:\n%s", line, cm)
+		}
 	}
 }
 
@@ -547,5 +570,39 @@ func TestNVSentinelRemediationAbsentWithoutMixin(t *testing.T) {
 		if strings.Contains(out, image) {
 			t.Errorf("%s rendered without a remediation mixin", image)
 		}
+	}
+}
+
+// TestNVSentinelChartSystemNamespacesDefault renders node-drainer with the
+// chart's own systemNamespaces and requires drainscope.ChartSystemNamespaces
+// to name the same namespaces, so a chart bump that protects another one is
+// not silently dropped by the generated pattern.
+//
+// Pulls the chart over the network, so -short skips it.
+func TestNVSentinelChartSystemNamespacesDefault(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping live chart-render integration test in short mode")
+	}
+	helmtest.RequireBinary(t)
+
+	store, err := recipe.LoadMetadataStoreFor(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("LoadMetadataStoreFor: %v", err)
+	}
+	cm, ok := renderedDocument(renderNVSentinel(t, nvsentinelRenderedValues(t, store, "nvsentinel-quarantine")),
+		"ConfigMap", "node-drainer")
+	if !ok {
+		t.Fatal("node-drainer ConfigMap not rendered")
+	}
+	m := regexp.MustCompile(`systemNamespaces = "\^\(([^)]*)\)\$"`).FindStringSubmatch(cm)
+	if m == nil {
+		t.Fatalf("node-drainer config has no anchored systemNamespaces:\n%s", cm)
+	}
+	got := strings.Split(m[1], "|")
+	want := drainscope.ChartSystemNamespaces()
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("chart systemNamespaces = %v, drainscope.ChartSystemNamespaces = %v", got, want)
 	}
 }

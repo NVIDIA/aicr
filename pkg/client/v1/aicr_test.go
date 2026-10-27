@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -32,6 +33,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	yamlv3 "gopkg.in/yaml.v3"
 	"sigs.k8s.io/yaml"
 )
 
@@ -3033,6 +3035,112 @@ func TestResolveRecipe_InheritFromObjectNames(t *testing.T) {
 			t.Errorf("overrides restate an unchanged object name: %#v", ref.Overrides)
 		}
 	})
+}
+
+// TestResolveRecipe_InheritFromObjectNamesRebindsHealthCheck verifies that a
+// pinned fullname is carried into the component's health check.
+func TestResolveRecipe_InheritFromObjectNamesRebindsHealthCheck(t *testing.T) {
+	t.Parallel()
+
+	client := inheritTestClient(t)
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatalf("baseline ResolveRecipe: %v", err)
+	}
+
+	// Chosen from a live resolve so a registry edit cannot leave the test
+	// without a component whose check names its fullname.
+	var pinned, fullname, namespace, baselineCheck string
+	for _, c := range baseline.Components {
+		ref := baseline.Resolved().GetComponentRef(c.Name)
+		values, valuesErr := baseline.Resolved().GetValuesForComponentWithContext(t.Context(), c.Name)
+		if valuesErr != nil {
+			t.Fatalf("resolve current values for %s: %v", c.Name, valuesErr)
+		}
+		names, nameErr := recipe.ObjectNameValues(values)
+		if nameErr != nil {
+			t.Fatalf("project current names for %s: %v", c.Name, nameErr)
+		}
+		f := names["fullnameOverride"]
+		if f != "" && ref.Namespace != "" && assertsResourceNamed(t, ref.HealthCheckAsserts, f) {
+			pinned, fullname, namespace, baselineCheck = c.Name, f, ref.Namespace, ref.HealthCheckAsserts
+			break
+		}
+	}
+	if pinned == "" {
+		t.Fatal("setup: no component sets a fullnameOverride its health check names")
+	}
+
+	const legacyName = "legacy-object-name"
+	dir := priorBundle(t, filepath.Join(t.TempDir(), "bundle"),
+		map[string]string{pinned: namespace},
+		map[string]map[string]any{pinned: {"fullnameOverride": legacyName}})
+
+	result, err := client.ResolveRecipe(t.Context(), inheritTestRequest(dir))
+	if err != nil {
+		t.Fatalf("ResolveRecipe: %v", err)
+	}
+	ref := result.Resolved().GetComponentRef(pinned)
+	if ref == nil {
+		t.Fatalf("%s is missing from the resolved recipe", pinned)
+	}
+	if ref.HealthCheckAsserts == baselineCheck {
+		t.Fatalf("%s health check still names %q after pinning %q", pinned, fullname, legacyName)
+	}
+	if !assertsResourceNamed(t, ref.HealthCheckAsserts, legacyName) {
+		t.Errorf("%s health check asserts no resource named for the inherited %q:\n%s",
+			pinned, legacyName, ref.HealthCheckAsserts)
+	}
+	if assertsResourceNamed(t, ref.HealthCheckAsserts, fullname) {
+		t.Errorf("%s health check still asserts a resource named for %q:\n%s",
+			pinned, fullname, ref.HealthCheckAsserts)
+	}
+}
+
+// assertsResourceNamed reports whether any asserted resource in asserts has a
+// metadata.name equal to fullname or extending it after a hyphen.
+func assertsResourceNamed(t *testing.T, asserts, fullname string) bool {
+	t.Helper()
+	dec := yamlv3.NewDecoder(strings.NewReader(asserts))
+	var walk func(node any) bool
+	walk = func(node any) bool {
+		switch n := node.(type) {
+		case map[string]any:
+			if resource, ok := n["resource"].(map[string]any); ok {
+				if metadata, ok := resource["metadata"].(map[string]any); ok {
+					name, _ := metadata["name"].(string)
+					if name == fullname || strings.HasPrefix(name, fullname+"-") {
+						return true
+					}
+				}
+			}
+			for _, v := range n {
+				if walk(v) {
+					return true
+				}
+			}
+		case []any:
+			for _, v := range n {
+				if walk(v) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	for {
+		var doc any
+		err := dec.Decode(&doc)
+		if errors.Is(err, io.EOF) {
+			return false
+		}
+		if err != nil {
+			t.Fatalf("decode health check: %v", err)
+		}
+		if walk(doc) {
+			return true
+		}
+	}
 }
 
 // TestResolveRecipe_InheritFromIncompleteBundle covers a flux bundle whose

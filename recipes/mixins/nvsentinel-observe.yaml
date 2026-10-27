@@ -16,9 +16,10 @@
 # pipeline in dry-run. Fault events are stored and walked through
 # quarantine, drain and remediation; each stage logs what it would have done
 # and still labels and annotates the node, but nothing is cordoned, evicted
-# or repaired. As when live, the drain stage waits for the node's user pods
-# to finish, so it never completes while long-lived pods run. No shipped
-# recipe composes it. See docs/user/component-catalog.md#graded-remediation.
+# or repaired. The drain stage waits for the node's user pods to exit: its
+# force-delete after the drain timeout is a dry run too. No shipped recipe
+# composes it. See
+# docs/user/component-catalog.md#graded-remediation.
 #
 # The three steps are mutually exclusive: each sets the same toggles, so a
 # leaf composing two fails at recipe resolution. Move to
@@ -49,6 +50,12 @@ spec:
           processingStrategy: EXECUTE_REMEDIATION
         syslog-health-monitor:
           processingStrategy: EXECUTE_REMEDIATION
+        # Same drain timing as nvsentinel-quarantine.
+        node-drainer:
+          deleteAfterTimeoutMinutes: 300
+          evictionTimeoutInSeconds: "60"
+          drainGPUPods: false
+          partialDrainEnabled: false
         global:
           dryRun: true
           # NVSentinel's datastore is the separately bundled Percona cluster

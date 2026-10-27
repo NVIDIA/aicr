@@ -61,11 +61,13 @@ components:
       - nfd
     healthCheck:
       assertFile: checks/nfd/health-check.yaml
+    upgrades:
+      file: components/nfd/upgrades.yaml
     helm:
       defaultRepository: https://kubernetes-sigs.github.io/node-feature-discovery/charts
       defaultChart: node-feature-discovery
       # renovate: datasource=helm depName=node-feature-discovery registryUrl=https://kubernetes-sigs.github.io/node-feature-discovery/charts
-      defaultVersion: "0.19.0"
+      defaultVersion: "0.20.1"
       defaultNamespace: node-feature-discovery
     nodeScheduling:
       system:
@@ -601,6 +603,10 @@ components:
       - fault-remediation.maintenance.templates.gpureset
       - janitor-provider.csp.generic.rebootImage
       - node-drainer.userNamespaces
+      - node-drainer.deleteAfterTimeoutMinutes
+      - node-drainer.evictionTimeoutInSeconds
+      - node-drainer.drainGPUPods
+      - node-drainer.partialDrainEnabled
       - node-drainer.customDrain.enabled
       - node-drainer.customDrain.templateConfigMapName
       - node-drainer.customDrain.templateMountPath
@@ -764,6 +770,10 @@ components:
       # no snapshot evidence or the cluster has more than one default.
       - function: CheckNVSentinelFileServerStorageClass
         severity: warning
+      # Blocking: node-drainer's drain scope and timing (#2626). The rules are
+      # in the function's doc.
+      - function: CheckNVSentinelDrainScopeCoherent
+        severity: error
 
   # NVSentinel's remediation datastore, added only by the nvsentinel-observe,
   # -quarantine and -remediation mixins. Bundled apart from NVSentinel's own
@@ -1624,18 +1634,18 @@ components:
   - name: slinky-topograph
     displayName: slinky-topograph
     class: ops
+    upgrades:
+      file: components/slinky-topograph/upgrades.yaml
     valueOverrideKeys:
       - slinkytopograph
     healthCheck:
       assertFile: checks/slinky-topograph/health-check.yaml
     helm:
-      # The topograph repository moved from NVIDIA to dsx-ai-factory; GitHub
-      # redirects the repository but not its Pages site, so the old index
-      # 404s. See issue #2793.
-      defaultRepository: https://dsx-ai-factory.github.io/topograph
+      # Topograph charts are published to NGC, not GitHub Pages (issue #2793).
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia/topograph
       defaultChart: topograph/topograph
-      # renovate: datasource=helm depName=topograph registryUrl=https://dsx-ai-factory.github.io/topograph
-      defaultVersion: "1.0.0"
+      # renovate: datasource=helm depName=topograph registryUrl=https://helm.ngc.nvidia.com/nvidia/topograph
+      defaultVersion: "1.1.0"
       defaultNamespace: topograph
     nodeScheduling:
       system:
@@ -1662,15 +1672,17 @@ components:
   - name: topograph
     displayName: topograph
     class: ops
+    upgrades:
+      file: components/topograph/upgrades.yaml
     valueOverrideKeys:
       - topograph
     healthCheck:
       assertFile: checks/topograph/health-check.yaml
     helm:
-      defaultRepository: https://dsx-ai-factory.github.io/topograph
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia/topograph
       defaultChart: topograph/topograph
-      # renovate: datasource=helm depName=topograph registryUrl=https://dsx-ai-factory.github.io/topograph
-      defaultVersion: "1.0.0"
+      # renovate: datasource=helm depName=topograph registryUrl=https://helm.ngc.nvidia.com/nvidia/topograph
+      defaultVersion: "1.1.0"
       defaultNamespace: topograph
     nodeScheduling:
       system:

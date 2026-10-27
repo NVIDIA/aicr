@@ -162,6 +162,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler"
 	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
+	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
 	"github.com/NVIDIA/aicr/pkg/bundler/validations"
 	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -1046,11 +1047,53 @@ func (c *Client) inheritObjectNames(
 	if err != nil {
 		return err
 	}
-	current, err := internalObjectNames(ctx, resolved)
+	// Read before pinning, so references are found under the current names.
+	currentValues, err := internalMergedValues(ctx, resolved)
 	if err != nil {
 		return err
 	}
-	return recipe.ApplyInheritedObjectNames(resolved.ComponentRefs, prior, current)
+	current, err := projectObjectNames(currentValues)
+	if err != nil {
+		return err
+	}
+	pins, err := recipe.ApplyInheritedObjectNames(resolved.ComponentRefs, prior, current)
+	if err != nil {
+		return err
+	}
+	warnUnreboundObjectNames(inheritFrom, pins,
+		recipe.FindObjectNameReferences(pins, resolved.ComponentRefs, currentValues))
+	return nil
+}
+
+// warnUnreboundObjectNames logs a warning for each of pins with
+// HealthCheckMayBeStale set and for each of refs.
+func warnUnreboundObjectNames(inheritFrom string, pins []recipe.ObjectNamePin, refs []recipe.ObjectNameReference) {
+	for _, pin := range pins {
+		if !pin.HealthCheckMayBeStale {
+			continue
+		}
+		slog.Warn("inherit-from pinned an object name its health check may not assert",
+			"inheritFrom", inheritFrom,
+			"component", pin.Component,
+			"field", pin.Path,
+			"inherited", pin.Inherited,
+			"current", pin.Current,
+			"reason", "a check is rebound only for a fullnameOverride both artifacts state, only where an "+
+				"object name begins with it, and only when no other pin moves the same current name to a "+
+				"different inherited one. An unset side takes a name the chart derives from the release",
+			"remedy", "check the component's health check against the deployed object names")
+	}
+	for _, ref := range refs {
+		slog.Warn("inherit-from pinned an object name that another setting may still address by its current name",
+			"inheritFrom", inheritFrom,
+			"component", ref.Pin.Component,
+			"field", ref.Pin.Path,
+			"inherited", ref.Pin.Inherited,
+			"current", ref.Pin.Current,
+			"referencedBy", ref.Component,
+			"location", ref.Location,
+			"remedy", "override the reference to the inherited name if it addresses this object")
+	}
 }
 
 // requireHydratedRecipe rejects an inheritance source that is not already a
@@ -1901,6 +1944,11 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 	helmValues, err := resolveHelmComponentValues(ctx, r)
 	if err != nil {
 		return nil, err
+	}
+	if sentinel, ok := helmValues[drainscope.ComponentName]; ok {
+		if err := bundler.ApplyNVSentinelDrainScope(ctx, sentinel, r.internal); err != nil {
+			return nil, err
+		}
 	}
 	pinned := r.internal.WithResolvedValues(helmValues)
 	if err := bundler.ValidateAccountingValues(pinned, helmValues); err != nil {

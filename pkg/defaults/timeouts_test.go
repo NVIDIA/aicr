@@ -30,6 +30,7 @@ func TestTimeoutConstants(t *testing.T) {
 		{"CollectorTimeout", CollectorTimeout, 5 * time.Second, 30 * time.Second},
 		{"CollectorK8sTimeout", CollectorK8sTimeout, 30 * time.Second, 120 * time.Second},
 		{"NFDDetectionTimeout", NFDDetectionTimeout, 1 * time.Second, 15 * time.Second},
+		{"HostReadTimeout", HostReadTimeout, 100 * time.Millisecond, 5 * time.Second},
 		{"CollectorTopologyTimeout", CollectorTopologyTimeout, 60 * time.Second, 180 * time.Second},
 
 		// Handler timeouts
@@ -49,6 +50,7 @@ func TestTimeoutConstants(t *testing.T) {
 		{"K8sJobCreationTimeout", K8sJobCreationTimeout, 10 * time.Second, 60 * time.Second},
 		{"K8sPodReadyTimeout", K8sPodReadyTimeout, 1 * time.Minute, 3 * time.Minute},
 		{"K8sJobCompletionTimeout", K8sJobCompletionTimeout, 1 * time.Minute, 10 * time.Minute},
+		{"AgentExitGracePeriod", AgentExitGracePeriod, 10 * time.Second, 2 * time.Minute},
 		{"K8sCleanupTimeout", K8sCleanupTimeout, 10 * time.Second, 60 * time.Second},
 		{"ClusterCleanupHelmUninstallTimeout", ClusterCleanupHelmUninstallTimeout, 1 * time.Minute, 5 * time.Minute},
 		{"ClusterCleanupNamespaceDeleteWait", ClusterCleanupNamespaceDeleteWait, 5 * time.Second, 60 * time.Second},
@@ -313,6 +315,29 @@ func TestValidatorTimeoutRelationships(t *testing.T) {
 	// Max stdout lines must be positive.
 	if ValidatorMaxStdoutLines <= 0 {
 		t.Errorf("ValidatorMaxStdoutLines (%d) should be positive", ValidatorMaxStdoutLines)
+	}
+}
+
+func TestHostReadBudgetFitsCollectorTimeout(t *testing.T) {
+	if MaxStalledHostReads < 1 {
+		t.Fatalf("MaxStalledHostReads (%d) must be at least 1", MaxStalledHostReads)
+	}
+	// The sysctl sweep can stall MaxStalledHostReads times, and the grub and
+	// kmod subtypes once each. All of it must fit inside the OS collector's
+	// own deadline, or a wedged node loses every OS subtype instead of one.
+	worstCase := HostReadTimeout * time.Duration(MaxStalledHostReads+2)
+	if worstCase >= CollectorTimeout {
+		t.Errorf("HostReadTimeout (%v) x (MaxStalledHostReads (%d) + 2) = %v must be less than CollectorTimeout (%v)",
+			HostReadTimeout, MaxStalledHostReads, worstCase, CollectorTimeout)
+	}
+}
+
+func TestAgentExitGracePeriodLessThanJobCompletion(t *testing.T) {
+	// The grace only shortens a wait that would otherwise run to the Job
+	// timeout. A grace at or above it would never fire.
+	if AgentExitGracePeriod >= K8sJobCompletionTimeout {
+		t.Errorf("AgentExitGracePeriod (%v) must be less than K8sJobCompletionTimeout (%v)",
+			AgentExitGracePeriod, K8sJobCompletionTimeout)
 	}
 }
 

@@ -89,8 +89,9 @@ func (b *DefaultBundler) warnNFDNICLabelMismatch(componentValues map[string]map[
 	b.appendWarning(warning)
 }
 
-// nfdStripsFeature mirrors nfd-worker v0.19.0's noPublishFeatures match: a
-// pattern ending in "*" matches by prefix, any other pattern exactly.
+// nfdStripsFeature mirrors the noPublishFeatures match of the nfd-worker that
+// recipes/registry.yaml pins: a pattern ending in "*" matches by prefix, any
+// other pattern exactly.
 func nfdStripsFeature(nfdValues map[string]any, feature string) bool {
 	patterns, _ := component.GetValueByPath(nfdValues, nfdNoPublishFeaturesValuePath)
 	list, _ := patterns.([]any)

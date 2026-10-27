@@ -140,7 +140,7 @@ gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
 
 **Where it is accepted.** `uat-run.yaml`'s `resolve` job refuses the input before anything is provisioned unless every bound below holds. `tests/uat/lib/platform-gate_test.sh` covers each one.
 
-- **`intent=training`.** The `faultinject` step grows to 15 minutes with quarantine and 30 with remediation, and only the training budget has room. A serving workload left on the node would also hold `node-drainer`, so janitor would never reboot it.
+- **`intent=training`.** The `faultinject` step grows to 15 minutes with quarantine and 30 with remediation, and only the training budget has room. A serving workload left on the node would also hold `node-drainer` for up to its `deleteAfterTimeoutMinutes` (set by the remediation step mixins), past the budget, so janitor would not reboot it in time.
 - **`lifecycle=nightly`.** Quarantine leaves the node cordoned with the fault set, because a syslog fault clears only on a reboot. A held daytime cluster would keep that node out of service.
 - **`deployer=helmfile`.** The Argo CD budget has no room either.
 - **Built from source (`aicr_version` empty).** The leaf overlay is read from the checkout, so it must match the binary.

@@ -62,7 +62,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | network-operator | helm | nvidia/network-operator | 26.7.0 | 14 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
-| nfd | helm | node-feature-discovery | 0.19.0 | 1 |
+| nfd | helm | node-feature-discovery | 0.20.1 | 1 |
 | nfd-ocp | manifest | — | — | 0 |
 | nfd-ocp-olm | manifest | — | — | 0 |
 | node-problem-detector | helm | node-problem-detector | 2.4.1 | 1 |
@@ -82,9 +82,9 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | slinky-slurm | helm | slurm | 1.2.2 | 5 |
 | slinky-slurm-operator | helm | slurm-operator | 1.2.2 | 2 |
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.2 | 0 |
-| slinky-topograph | helm | topograph/topograph | 1.0.0 | 1 |
+| slinky-topograph | helm | topograph/topograph | 1.1.0 | 1 |
 | slurm-accounting-mariadb | helm | mariadb-cluster | 26.10.1 | 1 |
-| topograph | helm | topograph/topograph | 1.0.0 | 1 |
+| topograph | helm | topograph/topograph | 1.1.0 | 1 |
 
 ## Version variants
 
@@ -290,7 +290,7 @@ _No images extracted._
 
 ### nfd
 
-- `registry.k8s.io/nfd/node-feature-discovery:v0.19.0`
+- `registry.k8s.io/nfd/node-feature-discovery:v0.20.1`
 
 ### nfd-ocp
 
@@ -393,7 +393,7 @@ _No images extracted._
 
 ### slinky-topograph
 
-- `ghcr.io/nvidia/topograph:v1.0.0`
+- `nvcr.io/nvidia/topograph/topograph:v1.1.0`
 
 ### slurm-accounting-mariadb
 
@@ -401,7 +401,7 @@ _No images extracted._
 
 ### topograph
 
-- `ghcr.io/nvidia/topograph:v1.0.0`
+- `nvcr.io/nvidia/topograph/topograph:v1.1.0`
 
 ### dynamo-platform@1.5.0 (variant)
 
