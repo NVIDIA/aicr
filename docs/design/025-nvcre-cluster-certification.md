@@ -194,7 +194,8 @@ recipe. Gates not yet met on the reviewed pin are recorded in
 [Status](#status-against-v010) and tracked in
 [Follow-Up Decisions](#follow-up-decisions); none of them blocks the
 registry-only implementation. The full set must pass before the stock-adoption
-amendment.
+amendment, except the node-cap, run-deadline, and cleanup bullets that AICR's own
+limits meet; see [Amendment: AICR's limits](#amendment-aicrs-limits).
 
 The category structure follows
 [ADR-019](019-k8s-aibom-runtime-inventory.md), which set the
@@ -288,7 +289,8 @@ pull for both chart and image.
 Four gates are unmet on this pin. None blocks registry-only admission; all are
 tracked in [Follow-Up Decisions](#follow-up-decisions). Gaps 1 and 2 must close
 before the stock-adoption amendment. Gaps 3 and 4 are met by AICR's own limits
-(see [Amendment: AICR's limits](#amendment-aicrs-limits)) and do not.
+(see [Amendment: AICR's limits](#amendment-aicrs-limits)) and do not block
+stock adoption.
 
 Supply chain — upstream release-workflow changes, not AICR work:
 
@@ -372,12 +374,12 @@ enforced in the validator and none depending on a future NVCRE release:
 | Wait for a terminal state | 30 minutes from creation, expiry reported as a failure; the same value is written to `spec.timeoutPerJob` as a backstop | `defaults.CRECertificationTimeout` |
 | Measurement finalization | 5 minutes after the job succeeds; expiry fails the check rather than falling back to provisional results | `defaults.CREMeasurementFinalizeTimeout` |
 | Teardown | 10 minutes to delete the `Certification` and confirm its `TrainJob`s and GPU pods are gone; an unconfirmed teardown fails the check | `defaults.CRECertificationTeardownTimeout` |
-| Orphans | A `Certification` labeled `app.kubernetes.io/managed-by=aicr-validator` and older than the sum of the three bounds above (45 minutes) is reclaimed by the next CRE check in the same namespace | `defaults.CREOrphanReclaimAge` |
+| Orphans | A `Certification` labeled `app.kubernetes.io/managed-by=aicr-validator` and older than the sum of the three bounds above (45 minutes) is reclaimed by the next CRE check in the same namespace that reaches the reclaim step: one with a constraint, a qualified combination, and enough nodes | `defaults.CREOrphanReclaimAge` |
 
 These satisfy the first two *Benchmark execution safety* bullets for a check
 that observes them. A validator pod that is killed never runs its teardown, so
 for that case the cleanup bullet rests on the orphan reclaim alone, which needs
-a later CRE check in the same namespace. The gate attaches to the check, not to the pin: a new
+a later CRE check in the same namespace that gets as far as the reclaim step. The gate attaches to the check, not to the pin: a new
 opt-in validator that omits a limit does not meet it. Upstream bounds remain
 welcome and stay tracked as follow-ups 3 and 4, but they are no longer
 conditions for the stock-adoption amendment.
@@ -410,7 +412,7 @@ open gaps are named concretely with verifiable close conditions.
 **Negative.** AICR carries a component whose pin does not yet pass every gate.
 Two of the four gaps are mitigated only by caller discipline (Decision 6), so
 an opt-in validator that ignores it can strand GPU capacity — a risk that
-exists until upstream bounds `nodesPerJob` and adds a run deadline. Since the
+exists until upstream adds a run-level node-footprint cap and a run deadline. Since the
 amendment, those two no longer block stock adoption, because AICR's own limits
 satisfy the gate; the chart SBOM, the runtime closure (follow-up 5), and the
 gates still unassessed do, so the PoC's measured value is not yet available to
