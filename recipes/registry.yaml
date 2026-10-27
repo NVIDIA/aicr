@@ -204,15 +204,17 @@ components:
       system:
         nodeSelectorPaths:
           - operator.nodeSelector
-          # The maintenance-operator subchart's deployment reads its own
-          # scoped operator.* placement values; the values key is the
-          # dependency name (maintenance-operator-chart, unaliased).
+          # The maintenance-operator and sriov-network-operator subchart
+          # deployments read their own scoped operator.* placement values;
+          # the values key is the dependency name.
           - maintenance-operator-chart.operator.nodeSelector
+          - sriov-network-operator.operator.nodeSelector
           - node-feature-discovery.master.nodeSelector
           - node-feature-discovery.gc.nodeSelector
         tolerationPaths:
           - operator.tolerations
           - maintenance-operator-chart.operator.tolerations
+          - sriov-network-operator.operator.tolerations
           - node-feature-discovery.master.tolerations
           - node-feature-discovery.gc.tolerations
 
