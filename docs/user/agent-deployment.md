@@ -180,6 +180,8 @@ On an unhealthy node a kernel read can block in uninterruptible sleep. The agent
 
 `aicr snapshot` detects this. Once the agent has written its snapshot, the CLI gives the Job 30 seconds to complete. If the Job has not completed by then, or the Job wait reaches `--timeout`, the CLI returns the snapshot with a warning that names the pod and node, and exits 0 instead of failing with a timeout. Scripts that treat a snapshot timeout as a signal to retry should also watch for that warning.
 
+The 30-second path needs `list` and `watch` on the output ConfigMap.
+
 The CLI only accepts a snapshot stamped with the current run's ID. A snapshot an earlier run left at a `cm://` destination is never returned in its place. The agent records the run ID on the ConfigMap as the `aicr.run/run-id` annotation. An agent image older than the CLI does not stamp it, so recovery then works only with the default internal ConfigMap, not with a `cm://` destination you name.
 
 The pod stays `Running`, or `Terminating` after cleanup deletes its Job, until the node recovers or is rebooted. Investigate the node named in the warning.
@@ -747,6 +749,7 @@ first group is required in both ServiceAccount modes:
 | `pods/log` | `get` | namespace | Streaming the agent's output back to your terminal |
 | `configmaps` | `get`, `list` | namespace | Reading the snapshot the agent staged |
 | `configmaps` | `delete` | namespace | Only when aicr owns the output ConfigMap (i.e. you did not pass your own `cm://` URI) |
+| `configmaps` | `list`, `watch` | output ConfigMap's namespace | Not checked by the gate. Recovering the snapshot when the agent pod cannot exit (see [When the agent pod cannot exit](#when-the-agent-pod-cannot-exit)) |
 
 `serviceaccounts: get` is not optional. Without it the run cannot tell whether
 `--service-account-name` names an existing ServiceAccount or is a prefix, and
