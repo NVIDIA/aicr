@@ -186,7 +186,9 @@ which is why they are stated here rather than left to each caller.
 A recipe constraint is a statement about the cluster, not about the tool that
 measured it. `nccl-cre-all-reduce-bw` therefore judges bandwidth with the same
 verdict as `nccl-all-reduce-bw`: it passes at the same fraction of the constraint
-value (`ncclBandwidthFloorFraction`, 0.9) and publishes the same result extras.
+value (`ncclBandwidthFloorFraction`, 0.9) and publishes `achievedGbps`,
+`thresholdGbps`, `tolerancePct`, and `passMargin`, even when the transport
+assertion then fails the run.
 The one demand that differs is the transport assertion, which only the CRE check
 can make, because the default TrainJob template logs at `NCCL_DEBUG=WARN`. A
 constraint is still calibrated per service and accelerator; this decision makes

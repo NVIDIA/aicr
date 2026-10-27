@@ -117,6 +117,8 @@ func validateCRENcclAllReduceBw(
 		return "", false, err
 	}
 
+	emitCREBandwidthExtras(bw, threshold)
+
 	logs, logErr := creLauncherLogs(ctx, workflowName, run.GetCreationTimestamp())
 	if logErr != nil {
 		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "CRE launcher logs required for transport assertion", logErr)
@@ -130,16 +132,17 @@ func validateCRENcclAllReduceBw(
 }
 
 // creNCCLVerdict judges bw with the verdict the TrainJob check uses, so one
-// recipe threshold means the same under both backends, and publishes the same
-// result extras so the two compare directly. The CRE check differs from the
-// TrainJob one only in asserting the transport before this point.
+// recipe threshold means the same under both backends.
 func creNCCLVerdict(bw, threshold float64) (actual string, passed bool) {
-	validators.EmitExtraOrWarn(map[string]string{
-		validators.ExtraKeyThresholdGbps: validators.FormatDecimal(threshold),
-		validators.ExtraKeyTolerancePct:  validators.FormatDecimal((1 - ncclBandwidthFloorFraction) * 100),
-	})
-	validators.EmitExtraOrWarn(ncclBandwidthExtra(bw, threshold))
 	return ncclBandwidthVerdict(bw, threshold, "")
+}
+
+// emitCREBandwidthExtras publishes the result extras the TrainJob check
+// publishes for bandwidth. It runs before the transport assertion, so a run
+// that falls back to Socket still records what it measured against what.
+func emitCREBandwidthExtras(bw, threshold float64) {
+	validators.EmitExtraOrWarn(ncclThresholdExtra(threshold))
+	validators.EmitExtraOrWarn(ncclBandwidthExtra(bw, threshold))
 }
 
 // creNCCLCleanupResult folds a teardown failure into the check's result.

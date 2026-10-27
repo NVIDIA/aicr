@@ -16,6 +16,7 @@ package main
 
 import (
 	stderrors "errors"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -313,5 +314,21 @@ func TestCRENCCLVerdictMatchesTrainJob(t *testing.T) {
 				t.Errorf("CRE verdict (%q, %v) differs from TrainJob (%q, %v)", creActual, creOK, tjActual, tjOK)
 			}
 		})
+	}
+}
+
+// The extras are half of what one threshold meaning the same under both
+// backends asks for, so a refactor that drops or renames one has to fail here.
+func TestEmitCREBandwidthExtras(t *testing.T) {
+	out := captureStdout(t, func() { emitCREBandwidthExtras(270, 300) })
+	got := extraFromStdout(t, out)
+	want := map[string]string{
+		validators.ExtraKeyAchievedGbps:  "270",
+		validators.ExtraKeyThresholdGbps: "300",
+		validators.ExtraKeyTolerancePct:  "10",
+		validators.ExtraKeyPassMargin:    "-10",
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("extras = %v, want %v", got, want)
 	}
 }

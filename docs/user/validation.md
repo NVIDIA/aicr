@@ -549,11 +549,14 @@ template logs at `NCCL_DEBUG=WARN` so it cannot show it. That is the one
 difference in what the two checks demand: the CRE check fails a run that fell
 back to Socket, and the TrainJob check does not look. Both pass at 90% of the
 constraint value, so a recipe can carry the same `>= 300` for either backend
-and the verdicts differ only by the 1.65 GB/s offset. The CRE check applied the value without the 10% allowance
-before this was aligned; a CRE constraint that had been written as 0.9 times
-the TrainJob value to compensate should be reset to the TrainJob value. The
-offset was measured on one cluster, and no run landed near the boundary, so it
-does not show that the two verdicts agree at it.
+and both use the same floor. The two measured bandwidths differ by 0.92 to
+3.14 GB/s per pair (1.65 GB/s on average), so a cluster that lands near the
+floor can still pass one check and fail the other. The CRE check applied the
+value without the 10% allowance before this was aligned; a CRE constraint that
+had been written as 0.9 times the TrainJob value to compensate should be reset
+to the TrainJob value. The offset was measured on one cluster, and no run
+landed near the boundary, so it does not show that the two verdicts agree at
+it.
 
 The goodput figure depends on the step count, because startup time counts
 against it. The step count comes from the NVCRE catalog entry, so a figure
