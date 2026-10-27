@@ -1984,6 +1984,167 @@ func TestBundleGolden_ReadinessGate(t *testing.T) {
 	}
 }
 
+// TestBundleGolden_SyncRetry freezes spec.syncPolicy.retry on every kind of
+// child Application — pre, primary, post, and readiness gate — and pins the
+// parent app-of-apps as unchanged. See #3264.
+//
+//	go test ./pkg/bundler/deployer/argocd/... -run TestBundleGolden -args -update
+func TestBundleGolden_SyncRetry(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"gpu-operator"}
+
+	g := &Generator{
+		RecipeResult: recipeResult,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {"driver": map[string]any{"version": "580"}},
+		},
+		Version:        "v0.0.0-golden",
+		RepoURL:        "https://github.com/example/aicr-bundles.git",
+		TargetRevision: "main",
+		ComponentPreManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"components/gpu-operator/manifests/namespace.yaml": []byte("apiVersion: v1\n" +
+					"kind: Namespace\n" +
+					"metadata:\n" +
+					"  name: gpu-operator\n"),
+			},
+		},
+		ComponentPostManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"dcgm-exporter.yaml": []byte("apiVersion: v1\n" +
+					"kind: ConfigMap\n" +
+					"metadata:\n" +
+					"  name: dcgm-exporter-config\n" +
+					"  namespace: {{ .Release.Namespace }}\n"),
+			},
+		},
+		ComponentReadiness: map[string]map[string][]byte{
+			"gpu-operator": {
+				"readiness.yaml": readinessGateManifest(t, config.DeployerArgoCD),
+			},
+		},
+		SyncRetry: &config.SyncRetry{
+			Limit:              20,
+			BackoffDuration:    "30s",
+			BackoffFactor:      2,
+			BackoffMaxDuration: "5m",
+		},
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	for _, rel := range []string{
+		"001-gpu-operator-pre/application.yaml",
+		"002-gpu-operator/application.yaml",
+		"003-gpu-operator-post/application.yaml",
+		"004-gpu-operator-readiness/application.yaml",
+		"app-of-apps.yaml",
+	} {
+		assertGolden(t, outputDir, "testdata/sync_retry", rel)
+	}
+}
+
+// TestGenerate_SyncRetryShape covers the retry fields the golden does not:
+// limit-only output omits backoff, a partial backoff renders only the set
+// fields, an explicit limit of 0 still renders (it disables retries, unlike
+// an absent retry), and nil renders nothing.
+func TestGenerate_SyncRetryShape(t *testing.T) {
+	tests := []struct {
+		name     string
+		retry    *config.SyncRetry
+		contains []string
+		absent   []string
+	}{
+		{
+			name:   "nil leaves retry out",
+			retry:  nil,
+			absent: []string{"retry:"},
+		},
+		{
+			name:     "limit only",
+			retry:    &config.SyncRetry{Limit: 10},
+			contains: []string{"    retry:\n      limit: 10\n    syncOptions:"},
+			absent:   []string{"backoff:"},
+		},
+		{
+			name:     "explicit zero limit",
+			retry:    &config.SyncRetry{Limit: 0},
+			contains: []string{"    retry:\n      limit: 0\n    syncOptions:"},
+		},
+		{
+			name:     "partial backoff",
+			retry:    &config.SyncRetry{Limit: 3, BackoffFactor: 3},
+			contains: []string{"      backoff:\n        factor: 3\n    syncOptions:"},
+			absent:   []string{"duration:", "maxDuration:"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			recipeResult := &recipe.RecipeResult{}
+			recipeResult.Metadata.Version = testVersion
+			recipeResult.ComponentRefs = []recipe.ComponentRef{{
+				Name: "gpu-operator", Namespace: "gpu-operator", Chart: "gpu-operator",
+				Version: "v25.3.3", Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia",
+			}}
+			recipeResult.DeploymentOrder = []string{"gpu-operator"}
+			g := &Generator{
+				RecipeResult:    recipeResult,
+				ComponentValues: map[string]map[string]any{"gpu-operator": {}},
+				Version:         "v0.0.0-test",
+				SyncRetry:       tt.retry,
+			}
+			if _, err := g.Generate(context.Background(), outputDir); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+			raw, err := os.ReadFile(filepath.Join(outputDir, "001-gpu-operator", "application.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := string(raw)
+			for _, want := range tt.contains {
+				if !strings.Contains(got, want) {
+					t.Errorf("application.yaml missing %q\ngot:\n%s", want, got)
+				}
+			}
+			for _, unwanted := range tt.absent {
+				if strings.Contains(got, unwanted) {
+					t.Errorf("application.yaml contains %q\ngot:\n%s", unwanted, got)
+				}
+			}
+		})
+	}
+}
+
+// TestGenerate_RejectsInvalidSyncRetry is the library-boundary check for a
+// caller that bypasses the bundler's validation.
+func TestGenerate_RejectsInvalidSyncRetry(t *testing.T) {
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	g := &Generator{
+		RecipeResult: recipeResult,
+		SyncRetry:    &config.SyncRetry{Limit: -1},
+	}
+	_, err := g.Generate(context.Background(), t.TempDir())
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+}
+
 // TestReadinessGateSyncWaveOrdering asserts the core ArgoCD gating invariant:
 // the readiness gate Application carries a strictly higher sync-wave than its
 // component's primary Application, so Argo CD applies — and blocks on — the

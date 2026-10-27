@@ -33,6 +33,14 @@ flag    aicr  --log-json  type=bool default=false required=false hidden=false en
 flag    aicr bundle  --accelerated-node-selector  type=string default= required=false hidden=false env=
 flag    aicr bundle  --accelerated-node-toleration  type=string default= required=false hidden=false env=
 flag    aicr bundle  --app-name  type=string default= required=false hidden=false env=
+flag    aicr bundle  --argocd-cascade-delete  type=bool default=false required=false hidden=false env=
+flag    aicr bundle  --argocd-destination-server  type=string default= required=false hidden=false env=
+flag    aicr bundle  --argocd-name-prefix  type=string default= required=false hidden=false env=
+flag    aicr bundle  --argocd-project  type=string default= required=false hidden=false env=
+flag    aicr bundle  --argocd-sync-retry-backoff-duration  type=string default= required=false hidden=false env=
+flag    aicr bundle  --argocd-sync-retry-backoff-factor  type=int default=0 required=false hidden=false env=
+flag    aicr bundle  --argocd-sync-retry-backoff-max-duration  type=string default= required=false hidden=false env=
+flag    aicr bundle  --argocd-sync-retry-limit  type=int default=0 required=false hidden=false env=
 flag    aicr bundle  --attest  type=bool default=false required=false hidden=false env=
 flag    aicr bundle  --certificate-identity-regexp  type=string default= required=false hidden=false env=
 flag    aicr bundle  --config  type=string default= required=false hidden=false env=

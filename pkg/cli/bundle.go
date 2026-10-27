@@ -178,6 +178,10 @@ type bundleCmdOptions struct {
 	// argocd-helm, "nvidia-stack" for argocd). See #1011.
 	appName string
 
+	// argoCD is the --argocd-* flags layered over
+	// spec.bundle.deployment.argocd. See #3264.
+	argoCD config.ArgoCDSettings
+
 	// verifiedBundleSource is the private immutable snapshot captured before
 	// the generated bundle is published into the caller-visible output path.
 	// It is runtime state, not a parsed command option, and remains owned by
@@ -423,6 +427,17 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 		}
 	}
 
+	// Reject the --argocd-* flags on other deployers, for the same reason as
+	// the flux and terraform flags above.
+	if opts.deployer != config.DeployerArgoCD && opts.deployer != config.DeployerArgoCDHelm {
+		for _, name := range argoCDFlags {
+			if cmd.IsSet(name) {
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("--%s is only valid with --deployer argocd or --deployer argocd-helm", name))
+			}
+		}
+	}
+
 	// --app-name applies to argocd-helm, argocd, and fleet only. Reject on
 	// other deployers so a user passing it on --deployer helm/flux gets a
 	// clear error instead of silent acceptance with no effect.
@@ -457,6 +472,7 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 	if opts.valueOverrides, err = resolveComponentPaths(cmd, "set", bundleOpts.ValueOverrides, config.ParseValueOverrides); err != nil {
 		return nil, err
 	}
+	opts.valueOverrides, opts.argoCD = resolveArgoCDSettings(cmd, opts.valueOverrides, bundleOpts.ArgoCD)
 	if opts.valueOverridesTyped, err = resolveTypedOverrides(cmd); err != nil {
 		return nil, err
 	}
@@ -926,9 +942,8 @@ Package with explicit tag (overrides CLI version):
 	(format: component:path.to.field=value, e.g., --set gpuoperator:gds.enabled=true).
 	Use the special 'enabled' key to include/exclude components at bundle time
 	(e.g., --set awsebscsidriver:enabled=false to skip aws-ebs-csi-driver).
-	Use the reserved 'deployer' prefix with --deployer argocd/argocd-helm to
-	set Argo Application options: namePrefix, destinationServer, project,
-	cascadeDelete (e.g., --set deployer:namePrefix=tenant-a-).
+	The reserved 'deployer' prefix (e.g., --set deployer:namePrefix=tenant-a-)
+	is deprecated; use the --argocd-* flags instead.
 	--set is scalar-only; use --set-json / --set-file for list or object values.`,
 				Category: catDeployment,
 			},
@@ -1142,6 +1157,60 @@ Package with explicit tag (overrides CLI version):
 					"which references charts instead of embedding them (no ~1MiB Bundle limit) but " +
 					"cannot deploy local charts (raw manifests).",
 				Value:    config.FleetModeGitRepo,
+				Category: catDeployment,
+			},
+			&cli.StringFlag{
+				Name: flagArgoCDNamePrefix,
+				Usage: "Prefix prepended to every child Application name, for multi-tenant installs " +
+					"sharing an Argo CD namespace (--deployer argocd or argocd-helm only; the parent " +
+					"is named by --app-name). May also be supplied via spec.bundle.deployment.argocd.namePrefix in --config.",
+				Category: catDeployment,
+			},
+			&cli.StringFlag{
+				Name: flagArgoCDDestinationServer,
+				Usage: "Cluster API URL child Applications deploy to (default https://kubernetes.default.svc; " +
+					"--deployer argocd or argocd-helm only). The parent stays on the Argo CD cluster. " +
+					"May also be supplied via spec.bundle.deployment.argocd.destinationServer in --config.",
+				Category: catDeployment,
+			},
+			&cli.StringFlag{
+				Name: flagArgoCDProject,
+				Usage: "Argo CD project for child Applications (default \"default\"; --deployer argocd or " +
+					"argocd-helm only). The parent stays in \"default\". " +
+					"May also be supplied via spec.bundle.deployment.argocd.project in --config.",
+				Category: catDeployment,
+			},
+			&cli.BoolFlag{
+				Name: flagArgoCDCascadeDelete,
+				Usage: "Add Argo CD's resources finalizer to the parent and every child Application, so " +
+					"deleting the parent removes the managed resources (--deployer argocd or argocd-helm only). " +
+					"May also be supplied via spec.bundle.deployment.argocd.cascadeDelete in --config.",
+				Category: catDeployment,
+			},
+			&cli.IntFlag{
+				Name: flagArgoCDSyncRetryLimit,
+				Usage: "Set spec.syncPolicy.retry.limit on every child Application: how many times Argo CD " +
+					"retries a failed sync (--deployer argocd or argocd-helm only). Unset leaves retry to " +
+					"Argo CD's auto-sync default; 0 disables retries. " +
+					"May also be supplied via spec.bundle.deployment.argocd.syncRetry.limit in --config.",
+				Category: catDeployment,
+			},
+			&cli.StringFlag{
+				Name: flagArgoCDSyncRetryBackoffDuration,
+				Usage: "Delay before the first sync retry, as a duration (e.g. 30s). " +
+					"Requires a sync retry limit, from --" + flagArgoCDSyncRetryLimit + " or --config.",
+				Category: catDeployment,
+			},
+			&cli.IntFlag{
+				Name: flagArgoCDSyncRetryBackoffFactor,
+				Usage: "Multiplier applied to the retry delay after each failed sync (>= 1). " +
+					"Requires a sync retry limit, from --" + flagArgoCDSyncRetryLimit + " or --config.",
+				Category: catDeployment,
+			},
+			&cli.StringFlag{
+				Name: flagArgoCDSyncRetryBackoffMaxDuration,
+				Usage: "Upper bound on the delay between sync retries, as a duration (e.g. 5m). " +
+					"Requires a sync retry limit, from --" + flagArgoCDSyncRetryLimit + " or --config.",
 				Category: catDeployment,
 			},
 			&cli.BoolFlag{
@@ -1456,6 +1525,7 @@ func runBundleCmdWithDependencies(
 		config.WithBundleChartVersion(opts.bundleChartVersion),
 		config.WithOCIParentNamespace(opts.ociParentNamespace),
 		config.WithAppName(opts.appName),
+		config.WithArgoCDSettings(opts.argoCD),
 	)
 
 	// Gate the interactive keyless-signing login behind an identity-disclosure

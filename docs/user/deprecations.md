@@ -19,6 +19,7 @@ a runtime warning, because the most useful moment to be told differs by surface:
 |---|---|---|
 | CLI | A warning on stderr naming the replacement and the removal release | At run time |
 | REST | A `Deprecation` header ([RFC 9745](https://www.rfc-editor.org/rfc/rfc9745.html)) with the deprecation date, a `Sunset` header ([RFC 8594](https://www.rfc-editor.org/rfc/rfc8594.html)) with the removal date, a `Link` with `rel="deprecation"`, and `deprecated: true` on the operation in the OpenAPI spec | On every response |
+| REST, one parameter value | A `Link` with `rel="deprecation"` pointing at the entry on this page; `Deprecation` and `Sunset` once their dates are set. The operation and parameter stay undeprecated in the OpenAPI spec, whose parameter description names the deprecated value. See [RELEASE.md](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md#a-deprecated-parameter-value-not-a-deprecated-operation) | On responses to requests that use the value |
 | Go SDK | A `// Deprecated:` godoc marker, which `staticcheck` reports as `SA1019` | At **build** time |
 | Bundles and artifacts | A loader warning naming the file and the release that stops reading it | When the artifact is read |
 
@@ -67,6 +68,42 @@ No removal release is set yet, so the warning does not name one.
 
 **What to do.** Regenerate the recipe with `--slurm-accounting-mode` (for
 example `customer-managed`) and drop the override.
+
+### Argo CD options as `deployer:` value overrides
+
+**Surface:** CLI, REST, config file ·
+**Deprecated in:** v1.2 · **Removed in:** not scheduled (v2.0.0 at the earliest)
+
+The four Argo CD bundle options were set with a reserved `deployer` prefix on
+the value-override flag: `--set deployer:<key>=<value>`, `set=deployer:<key>=<value>`
+on `POST /v1/bundle`, or a `deployer:<key>=<value>` entry in
+`spec.bundle.deployment.set`. Each now has a dedicated setting:
+
+| Deprecated | CLI flag | Config field (`spec.bundle.deployment.argocd`) | REST parameter |
+|---|---|---|---|
+| `deployer:namePrefix` | `--argocd-name-prefix` | `namePrefix` | `argocd-name-prefix` |
+| `deployer:destinationServer` | `--argocd-destination-server` | `destinationServer` | `argocd-destination-server` |
+| `deployer:project` | `--argocd-project` | `project` | `argocd-project` |
+| `deployer:cascadeDelete` | `--argocd-cascade-delete` | `cascadeDelete` | `argocd-cascade-delete` |
+
+The `deployer:` spelling still works and produces the same bundle. Bundling
+warns once per key, whether the entry came from the CLI, a config file or the
+Go SDK, and a REST request that uses it gets a
+`Link` response header with `rel="deprecation"` pointing here. Only the
+`deployer:` spelling is deprecated: the bundle operation and the `set`
+parameter are not. Giving the same setting both ways in one source is
+rejected. A Go SDK caller passing `deployer:` entries in
+`BundleOptions.ValueOverrides` gets the same warning; use
+`BundleOptions.ArgoCD` instead.
+
+The argocd-helm install-time values are unaffected:
+`helm install --set deployer.namePrefix=...` (a dot, not a colon) is a chart
+value, not this bundle-time option.
+
+No removal release is set yet, so the warning does not name one.
+
+**What to do.** Replace each `deployer:<key>` entry with the setting in the
+table, then confirm the bundle is unchanged.
 
 ## Removed
 

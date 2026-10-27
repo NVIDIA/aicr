@@ -96,7 +96,7 @@ constrained:
       presentation-layer input parsing, not resolution. Second,
       pkg/client/v1.BundleOptions.Config (aliased as BundleConfig) is a
       documented escape hatch: see the "Two ways to supply the bundler
-      configuration" comment in pkg/client/v1/bundle.go. The facade's 18 flat
+      configuration" comment in pkg/client/v1/bundle.go. The facade's 19 flat
       BundleOptions fields cover everything spec.bundle can express, but the
       CLI has flags with no spec.bundle counterpart (Version, TargetRevision,
       ReadinessHooks, Serial, Flux/OCI naming, typed value overrides), so it
@@ -106,12 +106,20 @@ constrained:
       CLI-only flag with no spec.bundle equivalent, or giving up flag-string
       parsing symmetry between the CLI and the config-driven path -- neither
       is a resolution gap; both are tradeoffs already reasoned through when
-      BundleOptions was designed.
+      BundleOptions was designed. The Argo CD settings (#3264) follow the same
+      two uses: the CLI builds an ArgoCDSettings from its --argocd-* flags,
+      layers it over the config file's with LayerArgoCDSettings (flag-over-
+      config precedence, kept out of pkg/cli because it spans both spellings),
+      and passes it with WithArgoCDSettings; the REST handler reads
+      Config.LegacyDeployerNotice only to attach the per-request deprecation
+      headers, which is response presentation.
     permanent: true
     symbols:
+      ArgoCDSettings: type
       ComponentEnabledKey: const
       ComponentPath: type
       Config: type
+      Config.LegacyDeployerNotice: behavioral
       Config.Split: behavioral
       Config.VendorCharts: behavioral
       DefaultFleetNamespace: const
@@ -128,6 +136,7 @@ constrained:
       FleetModeGitRepo: const
       FleetModeHelmOp: const
       GetDeployerTypes: behavioral
+      LayerArgoCDSettings: behavioral
       NewConfig: behavioral
       ParseFleetMode: behavioral
       NodeLabel: type
@@ -145,6 +154,7 @@ constrained:
       WithAcceleratedNodeSelector: behavioral
       WithAcceleratedNodeTolerations: behavioral
       WithAppName: behavioral
+      WithArgoCDSettings: behavioral
       WithAttest: behavioral
       WithBundleChartName: behavioral
       WithBundleChartVersion: behavioral

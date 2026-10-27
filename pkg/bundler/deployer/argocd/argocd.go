@@ -122,6 +122,9 @@ type ApplicationData struct {
 	// See #1628.
 	CascadeDelete bool
 
+	// SyncRetry renders spec.syncPolicy.retry; nil omits it. See #3264.
+	SyncRetry *bundlercfg.SyncRetry
+
 	// ApplyOutOfSyncOnly adds ApplyOutOfSyncOnly=true to spec.syncPolicy.syncOptions.
 	// Set only for the -readiness folder's Application: paired with the Job-level
 	// Replace=true,Force=true annotation (see gatemanifest.jobMetadataAnnotations),
@@ -324,6 +327,12 @@ type Generator struct {
 	// Application. Baked at bundle time. See #1628.
 	CascadeDelete bool
 
+	// SyncRetry sets spec.syncPolicy.retry on every child Application,
+	// including the pre/post-manifest and readiness folders; the parent is
+	// unchanged. Nil leaves retry out, so Argo CD applies its auto-sync
+	// default. Baked at bundle time. See #3264.
+	SyncRetry *bundlercfg.SyncRetry
+
 	// InlineUpstreamValues replaces the multi-source $values pattern for
 	// KindUpstreamHelm Applications with a single source whose helm.valuesObject
 	// is inlined from ComponentValues. Required when RepoURL is OCI because
@@ -495,6 +504,9 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	if err := bundlercfg.ValidateProject(g.Project); err != nil {
 		return nil, err
 	}
+	if err := g.SyncRetry.Validate(); err != nil {
+		return nil, err
+	}
 
 	// Reject DynamicValues at the library boundary unless the caller
 	// explicitly opts in. The strip-pass below removes cluster-values.yaml
@@ -660,7 +672,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		appData.Name = g.NamePrefix + appData.Name
 		if err := bundlercfg.ValidateAppName(appData.Name); err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("deployer namePrefix produces invalid child Application name %q", appData.Name), err)
+				fmt.Sprintf("Argo CD name prefix produces invalid child Application name %q", appData.Name), err)
 		}
 		// Argo CD derives the Helm release name from the Application name
 		// for Helm-rendered children, so a composed name over Helm's cap
@@ -670,17 +682,18 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		// Reject at bundle time instead.
 		if len(appData.Name) > HelmReleaseNameMaxLen {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("deployer namePrefix produces child Application name %q (%d chars); child Application names are capped at %d characters because Argo CD derives the Helm release name from the Application name for Helm-rendered children", appData.Name, len(appData.Name), HelmReleaseNameMaxLen))
+				fmt.Sprintf("Argo CD name prefix produces child Application name %q (%d chars); child Application names are capped at %d characters because Argo CD derives the Helm release name from the Application name for Helm-rendered children", appData.Name, len(appData.Name), HelmReleaseNameMaxLen))
 		}
 		// A child that composes to the parent's name would overwrite the
 		// parent Application CR in the argocd namespace.
 		if appData.Name == appName {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("child Application name %q collides with the parent Application name; choose a different --app-name or deployer namePrefix", appData.Name))
+				fmt.Sprintf("child Application name %q collides with the parent Application name; choose a different --app-name or --argocd-name-prefix", appData.Name))
 		}
 		appData.DestinationServer = g.destinationServer()
 		appData.Project = g.project()
 		appData.CascadeDelete = g.CascadeDelete
+		appData.SyncRetry = g.SyncRetry
 		appDataList = append(appDataList, appData)
 
 		folderDir, joinErr := deployer.SafeJoin(outputDir, f.Dir)

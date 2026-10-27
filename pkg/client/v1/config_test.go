@@ -910,6 +910,10 @@ spec:
       repo: https://git.example.com/gitops
       appName: bundle-app
       vendorCharts: true
+      argocd:
+        project: gpu-infra
+        syncRetry:
+          limit: 20
     scheduling:
       systemNodeSelector:
         tier: system
@@ -959,6 +963,11 @@ func TestConfig_BundleOptions_FoldsValues(t *testing.T) {
 	}
 	if !got.VendorCharts {
 		t.Error("VendorCharts = false, want true")
+	}
+	if got.ArgoCD.Project == nil || *got.ArgoCD.Project != "gpu-infra" ||
+		got.ArgoCD.SyncRetryLimit == nil || *got.ArgoCD.SyncRetryLimit != 20 {
+
+		t.Errorf("ArgoCD = %+v, want Project gpu-infra and SyncRetryLimit 20", got.ArgoCD)
 	}
 }
 

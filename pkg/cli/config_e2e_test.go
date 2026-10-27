@@ -219,6 +219,10 @@ spec:
         - alloy:clusterName=base
       dynamic:
         - alloy:clusterName
+      argocd:
+        project: gpu-infra
+        syncRetry:
+          limit: 10
     scheduling:
       systemNodeSelector:
         role: system
@@ -264,6 +268,8 @@ spec:
 		{"deployer", opts.deployer, config.DeployerArgoCD},
 		{"valueOverrides count", len(opts.valueOverrides), 2},
 		{"dynamicValues count", len(opts.dynamicValues), 1},
+		{"argoCD project", derefOr(opts.argoCD.Project, ""), "gpu-infra"},
+		{"argoCD syncRetryLimit", derefOr(opts.argoCD.SyncRetryLimit, -1), int64(10)},
 		{"systemNodeSelector role", opts.systemNodeSelector["role"], "system"},
 		{"systemNodeSelector tier", opts.systemNodeSelector["tier"], "control"},
 		{"acceleratedNodeSelector nodeGroup", opts.acceleratedNodeSelector["nodeGroup"], "gpu-nodes"},

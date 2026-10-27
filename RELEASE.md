@@ -115,9 +115,31 @@ the user who read neither.
    | Go SDK | A `// Deprecated:` godoc marker, which `staticcheck` surfaces to consumers automatically |
    | Bundle + schemas | The loader accepts the deprecated shape and warns, naming the file and the release that stops reading it |
 
-The CLI and REST arms have unit coverage in `pkg/deprecation` and `pkg/server`
-but have never carried a real deprecation: no REST route is marked deprecated
-and no CLI flag or subcommand is deprecated. The loader arm ran end to end in
+#### A deprecated parameter value, not a deprecated operation
+
+The REST row above describes a deprecated operation. When only one value or
+spelling of a parameter is deprecated, and the operation and the parameter
+itself remain supported, the notice is scoped to that value:
+
+- The operation is not marked `deprecated: true`, and neither is the parameter.
+  Its description in `api/aicr/v1/server.yaml` names the deprecated value and
+  its replacement.
+- Only responses to requests that use the deprecated value carry the headers.
+  The `Link` points at the value's own entry on `docs/user/deprecations.md`
+  (`deprecation.Notice.Anchor`), not the top of the page.
+- `Deprecation` is sent only when the notice records a deprecation date, and
+  `Sunset` only once a removal date is committed. Neither header admits a
+  placeholder, so a notice with no dates sends the `Link` alone.
+- The CLI warning omits the removal release while none is scheduled, as the
+  existing `docs/user/deprecations.md` entries do.
+
+The first deprecation to use this form is the `deployer:<key>` value override
+on `set` ([#3264](https://github.com/NVIDIA/aicr/issues/3264)).
+
+The CLI and REST arms have unit coverage in `pkg/deprecation` and `pkg/server`.
+They first carried a real deprecation with the `deployer:<key>` value override
+above; no REST route is marked deprecated and no CLI flag or subcommand is
+deprecated. The loader arm ran end to end in
 the ADR-022 alpha migration (warn in v0.22,
 [#2416](https://github.com/NVIDIA/aicr/issues/2416); reject in v1.0.0,
 [#2417](https://github.com/NVIDIA/aicr/issues/2417)). Treat the first change

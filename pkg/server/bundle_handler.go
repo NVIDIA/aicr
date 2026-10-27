@@ -33,6 +33,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/deprecation"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -187,6 +188,7 @@ func (h *bundleHandler) handleBundles(w http.ResponseWriter, r *http.Request) {
 		WriteErrorFromErr(w, r, err, "Invalid query parameters", nil)
 		return
 	}
+	markLegacyDeployerOverrides(w, bundleConfig)
 
 	if h.vendorChartsRejected(w, r, bundleConfig) {
 		return
@@ -341,6 +343,18 @@ func (h *bundleHandler) handleBundles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeZipResponse(ctx, w, r, outputDir, output)
+}
+
+// markLegacyDeployerOverrides attaches the deprecation response headers when
+// the request uses the deprecated set=deployer:<key> spelling. Only that
+// spelling is deprecated, not the operation or the set parameter, so the
+// headers are conditional rather than a route-wide DeprecatedRoutes entry.
+// Set before any body is written; the request may still fail validation, and
+// the client should learn of the replacement either way.
+func markLegacyDeployerOverrides(w http.ResponseWriter, cfg *bundlercfg.Config) {
+	if notice, ok := cfg.LegacyDeployerNotice(); ok {
+		deprecation.SetHTTPHeaders(w.Header(), notice)
+	}
 }
 
 // vendorChartsRejected fails-fast on vendor-charts=true when the server has

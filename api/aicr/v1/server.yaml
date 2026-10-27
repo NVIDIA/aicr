@@ -689,6 +689,14 @@ paths:
         - $ref: "#/components/parameters/Serial"
         - $ref: "#/components/parameters/Split"
         - $ref: "#/components/parameters/AppName"
+        - $ref: "#/components/parameters/ArgoCDNamePrefix"
+        - $ref: "#/components/parameters/ArgoCDDestinationServer"
+        - $ref: "#/components/parameters/ArgoCDProject"
+        - $ref: "#/components/parameters/ArgoCDCascadeDelete"
+        - $ref: "#/components/parameters/ArgoCDSyncRetryLimit"
+        - $ref: "#/components/parameters/ArgoCDSyncRetryBackoffDuration"
+        - $ref: "#/components/parameters/ArgoCDSyncRetryBackoffFactor"
+        - $ref: "#/components/parameters/ArgoCDSyncRetryBackoffMaxDuration"
         - $ref: "#/components/parameters/Attest"
       requestBody:
         required: true
@@ -1082,7 +1090,12 @@ components:
       description: >-
         Repeatable component:path=value override. Rejected with HTTP 400
         when the component is absent from the generated bundle (scalar
-        enabled=false exempt on a declared component).
+        enabled=false exempt on a declared component). The reserved
+        deployer:<key> spelling (namePrefix, destinationServer, project,
+        cascadeDelete) is deprecated in favor of the argocd-* parameters; it
+        still works, and a request that uses it gets a Link response header
+        with rel="deprecation" pointing at the migration entry. Supplying the
+        same setting both ways is rejected with HTTP 400.
       schema:
         type: array
         items:
@@ -1257,6 +1270,84 @@ components:
         type: string
         pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'
         maxLength: 253
+    ArgoCDNamePrefix:
+      name: argocd-name-prefix
+      in: query
+      required: false
+      description: >-
+        Prefix prepended to every child Application name (argocd,
+        argocd-helm). The parent is named by app-name.
+      schema:
+        type: string
+        pattern: '^[a-z0-9][a-z0-9-]*$'
+    ArgoCDDestinationServer:
+      name: argocd-destination-server
+      in: query
+      required: false
+      description: >-
+        Cluster API URL child Applications deploy to (argocd, argocd-helm;
+        default https://kubernetes.default.svc). The parent stays on the
+        Argo CD cluster.
+      schema:
+        type: string
+        format: uri
+    ArgoCDProject:
+      name: argocd-project
+      in: query
+      required: false
+      description: >-
+        Argo CD project for child Applications (argocd, argocd-helm; default
+        "default"). The parent stays in "default".
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 253
+    ArgoCDCascadeDelete:
+      name: argocd-cascade-delete
+      in: query
+      required: false
+      description: >-
+        Add Argo CD's resources finalizer to the parent and every child
+        Application (argocd, argocd-helm).
+      schema:
+        type: boolean
+    ArgoCDSyncRetryLimit:
+      name: argocd-sync-retry-limit
+      in: query
+      required: false
+      description: >-
+        spec.syncPolicy.retry.limit on every child Application (argocd,
+        argocd-helm). Omit to leave retry to Argo CD's auto-sync default; 0
+        disables retries. Required by the backoff parameters.
+      schema:
+        type: integer
+        format: int64
+        minimum: 0
+    ArgoCDSyncRetryBackoffDuration:
+      name: argocd-sync-retry-backoff-duration
+      in: query
+      required: false
+      description: Delay before the first sync retry, as a Go duration.
+      schema:
+        type: string
+      example: 30s
+    ArgoCDSyncRetryBackoffFactor:
+      name: argocd-sync-retry-backoff-factor
+      in: query
+      required: false
+      description: Multiplier applied to the retry delay after each failed sync.
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    ArgoCDSyncRetryBackoffMaxDuration:
+      name: argocd-sync-retry-backoff-max-duration
+      in: query
+      required: false
+      description: Upper bound on the delay between sync retries, as a Go duration.
+      schema:
+        type: string
+      example: 5m
     Attest:
       name: attest
       in: query

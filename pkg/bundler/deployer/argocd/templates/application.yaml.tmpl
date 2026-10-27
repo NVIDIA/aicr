@@ -43,6 +43,22 @@ spec:
     automated:
       prune: true
       selfHeal: true
+{{- with .SyncRetry }}
+    retry:
+      limit: {{ .Limit }}
+{{- if .HasBackoff }}
+      backoff:
+{{- if .BackoffDuration }}
+        duration: {{ printf "%q" .BackoffDuration }}
+{{- end }}
+{{- if .BackoffFactor }}
+        factor: {{ .BackoffFactor }}
+{{- end }}
+{{- if .BackoffMaxDuration }}
+        maxDuration: {{ printf "%q" .BackoffMaxDuration }}
+{{- end }}
+{{- end }}
+{{- end }}
     syncOptions:
       - CreateNamespace=true
       # ServerSideApply: enabled uniformly across all generated

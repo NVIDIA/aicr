@@ -45,6 +45,14 @@ const (
 	bundleQueryAcceleratedNodeSelector   = "accelerated-node-selector"
 	bundleQueryAcceleratedNodeToleration = "accelerated-node-toleration"
 	bundleQueryAppName                   = "app-name"
+	bundleQueryArgoCDCascadeDelete       = "argocd-cascade-delete"
+	bundleQueryArgoCDDestinationServer   = "argocd-destination-server"
+	bundleQueryArgoCDNamePrefix          = "argocd-name-prefix"
+	bundleQueryArgoCDProject             = "argocd-project"
+	bundleQueryArgoCDSyncRetryLimit      = "argocd-sync-retry-limit"
+	bundleQueryArgoCDBackoffDuration     = "argocd-sync-retry-backoff-duration"
+	bundleQueryArgoCDBackoffFactor       = "argocd-sync-retry-backoff-factor"
+	bundleQueryArgoCDBackoffMaxDuration  = "argocd-sync-retry-backoff-max-duration"
 	bundleQueryBundlers                  = "bundlers"
 	bundleQueryDeployer                  = "deployer"
 	bundleQueryDRAEvictionNodeLabel      = "dra-eviction-node-label"
@@ -67,6 +75,14 @@ var supportedBundleQueryParameters = map[string]struct{}{
 	bundleQueryAcceleratedNodeSelector:   {},
 	bundleQueryAcceleratedNodeToleration: {},
 	bundleQueryAppName:                   {},
+	bundleQueryArgoCDCascadeDelete:       {},
+	bundleQueryArgoCDDestinationServer:   {},
+	bundleQueryArgoCDNamePrefix:          {},
+	bundleQueryArgoCDProject:             {},
+	bundleQueryArgoCDSyncRetryLimit:      {},
+	bundleQueryArgoCDBackoffDuration:     {},
+	bundleQueryArgoCDBackoffFactor:       {},
+	bundleQueryArgoCDBackoffMaxDuration:  {},
 	bundleQueryBundlers:                  {},
 	bundleQueryDeployer:                  {},
 	bundleQueryDRAEvictionNodeLabel:      {},
@@ -102,6 +118,9 @@ func ParseBundleConfig(r *http.Request) (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	if params.argoCD, err = parseArgoCDQueryParams(r.URL.Query(), params.deployer); err != nil {
+		return nil, err
+	}
 	return bundleConfigFromParams(params), nil
 }
 
@@ -125,6 +144,7 @@ func bundleConfigFromParams(params *bundleParams) *config.Config {
 		config.WithSerial(params.serial),
 		config.WithSplit(params.split),
 		config.WithAppName(params.appName),
+		config.WithArgoCDSettings(params.argoCD),
 		config.WithBundlers(params.bundlers),
 	)
 }
@@ -342,6 +362,7 @@ type bundleParams struct {
 	serial                     bool
 	split                      bool
 	appName                    string
+	argoCD                     config.ArgoCDSettings
 	bundlers                   []string
 }
 
@@ -519,4 +540,66 @@ func parseBoolQuery(query url.Values, name string) (value, set bool, err error) 
 			name+" must be a boolean (true/false)", parseErr)
 	}
 	return b, true, nil
+}
+
+// parseArgoCDQueryParams parses the argocd-* query parameters, the REST
+// counterpart of the --argocd-* CLI flags. An absent parameter stays nil.
+// Rejected on other deployers, like app-name, so a typo on a helm request
+// fails loudly. Value validation happens at bundle time, together with any
+// deprecated set=deployer:<key> entries.
+func parseArgoCDQueryParams(query url.Values, deployer config.DeployerType) (config.ArgoCDSettings, error) {
+	var s config.ArgoCDSettings
+	names := []string{
+		bundleQueryArgoCDCascadeDelete, bundleQueryArgoCDDestinationServer,
+		bundleQueryArgoCDNamePrefix, bundleQueryArgoCDProject,
+		bundleQueryArgoCDSyncRetryLimit, bundleQueryArgoCDBackoffDuration,
+		bundleQueryArgoCDBackoffFactor, bundleQueryArgoCDBackoffMaxDuration,
+	}
+	if deployer != config.DeployerArgoCD && deployer != config.DeployerArgoCDHelm {
+		for _, name := range names {
+			if query.Has(name) {
+				return s, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+					name+" is only valid with deployer=argocd or deployer=argocd-helm")
+			}
+		}
+		return s, nil
+	}
+
+	str := func(name string) *string {
+		if !query.Has(name) {
+			return nil
+		}
+		v := query.Get(name)
+		return &v
+	}
+	i64 := func(name string) (*int64, error) {
+		if !query.Has(name) {
+			return nil, nil //nolint:nilnil // absent parameter: unset, not an error
+		}
+		v, err := strconv.ParseInt(query.Get(name), 10, 64)
+		if err != nil {
+			return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, name+" must be an integer", err)
+		}
+		return &v, nil
+	}
+
+	s.NamePrefix = str(bundleQueryArgoCDNamePrefix)
+	s.DestinationServer = str(bundleQueryArgoCDDestinationServer)
+	s.Project = str(bundleQueryArgoCDProject)
+	cascade, cascadeSet, err := parseBoolQuery(query, bundleQueryArgoCDCascadeDelete)
+	if err != nil {
+		return s, err
+	}
+	if cascadeSet {
+		s.CascadeDelete = &cascade
+	}
+	if s.SyncRetryLimit, err = i64(bundleQueryArgoCDSyncRetryLimit); err != nil {
+		return s, err
+	}
+	if s.SyncRetryBackoffFactor, err = i64(bundleQueryArgoCDBackoffFactor); err != nil {
+		return s, err
+	}
+	s.SyncRetryBackoffDuration = str(bundleQueryArgoCDBackoffDuration)
+	s.SyncRetryBackoffMaxDuration = str(bundleQueryArgoCDBackoffMaxDuration)
+	return s, nil
 }

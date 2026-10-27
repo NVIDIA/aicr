@@ -44,6 +44,7 @@ import (
 	bundleverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/deprecation"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -5681,8 +5682,8 @@ func TestCreateDeployer_DeployerOptions(t *testing.T) {
 		if !stderrors.As(err, &se) || se.Code != errors.ErrCodeInvalidRequest {
 			t.Fatalf("want ErrCodeInvalidRequest, got %v", err)
 		}
-		if !strings.Contains(err.Error(), "--set") {
-			t.Errorf("error should point at --set deployer:<key>=<value>, got %v", err)
+		if !strings.Contains(err.Error(), "--argocd-*") {
+			t.Errorf("error should point at the --argocd-* settings, got %v", err)
 		}
 	})
 
@@ -5730,8 +5731,112 @@ func TestCreateDeployer_DeployerOptions(t *testing.T) {
 		if !ok {
 			t.Fatalf("want *argocd.Generator, got %T", d)
 		}
-		if g.NamePrefix != "" || g.DestinationServer != "" || g.Project != "" || g.CascadeDelete {
+		if g.NamePrefix != "" || g.DestinationServer != "" || g.Project != "" || g.CascadeDelete || g.SyncRetry != nil {
 			t.Errorf("expected zero-value options, got %+v", g)
+		}
+	})
+}
+
+// TestCreateDeployer_ArgoCDSettings covers the dedicated settings at the
+// bundler, which every surface reaches: they wire into
+// both Argo generators, a setting also given as a deprecated deployer:<key>
+// is rejected, other deployers reject them, and only the deprecated spelling
+// warns. See #3264.
+func TestCreateDeployer_ArgoCDSettings(t *testing.T) {
+	limit, factor := int64(20), int64(2)
+	project := "tenant-a"
+	settings := config.ArgoCDSettings{
+		Project:                     &project,
+		SyncRetryLimit:              &limit,
+		SyncRetryBackoffDuration:    &[]string{"30s"}[0],
+		SyncRetryBackoffFactor:      &factor,
+		SyncRetryBackoffMaxDuration: &[]string{"5m"}[0],
+	}
+	wantRetry := &config.SyncRetry{Limit: 20, BackoffDuration: "30s", BackoffFactor: 2, BackoffMaxDuration: "5m"}
+	mk := func(t *testing.T, dep config.DeployerType, legacy map[string]string, s config.ArgoCDSettings) *DefaultBundler {
+		t.Helper()
+		b, err := New(WithConfig(config.NewConfig(
+			config.WithDeployer(dep),
+			config.WithValueOverrides(map[string]map[string]string{config.DeployerOverrideKey: legacy}),
+			config.WithArgoCDSettings(s),
+		)))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		return b
+	}
+	rr := &recipe.RecipeResult{}
+
+	t.Run("argocd generator receives settings", func(t *testing.T) {
+		d, err := mk(t, config.DeployerArgoCD, nil, settings).
+			buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
+		if err != nil {
+			t.Fatalf("buildDeployer: %v", err)
+		}
+		g, ok := d.(*argocd.Generator)
+		if !ok {
+			t.Fatalf("want *argocd.Generator, got %T", d)
+		}
+		if g.Project != "tenant-a" || !reflect.DeepEqual(g.SyncRetry, wantRetry) {
+			t.Errorf("settings not wired: project=%q retry=%+v", g.Project, g.SyncRetry)
+		}
+	})
+
+	t.Run("argocd-helm generator receives settings", func(t *testing.T) {
+		d, err := mk(t, config.DeployerArgoCDHelm, nil, settings).
+			buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
+		if err != nil {
+			t.Fatalf("buildDeployer: %v", err)
+		}
+		g, ok := d.(*argocdhelm.Generator)
+		if !ok {
+			t.Fatalf("want *argocdhelm.Generator, got %T", d)
+		}
+		if g.Project != "tenant-a" || !reflect.DeepEqual(g.SyncRetry, wantRetry) {
+			t.Errorf("settings not wired: project=%q retry=%+v", g.Project, g.SyncRetry)
+		}
+	})
+
+	t.Run("both spellings rejected", func(t *testing.T) {
+		_, err := mk(t, config.DeployerArgoCD, map[string]string{"project": "other"}, settings).
+			buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
+		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+		if !strings.Contains(err.Error(), "set twice") {
+			t.Errorf("error = %v, want the duplicate-spelling rejection", err)
+		}
+	})
+
+	t.Run("rejected for helm deployer", func(t *testing.T) {
+		_, err := mk(t, config.DeployerHelm, nil, settings).
+			buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
+		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+		if !strings.Contains(err.Error(), "Argo CD settings are only supported") {
+			t.Errorf("error = %v, want it to name the Argo CD settings", err)
+		}
+	})
+
+	t.Run("deprecated spelling warns, dedicated does not", func(t *testing.T) {
+		var got []string
+		prev := warnDeprecated
+		warnDeprecated = func(n deprecation.Notice) { got = append(got, n.Message()) }
+		t.Cleanup(func() { warnDeprecated = prev })
+
+		if _, err := mk(t, config.DeployerArgoCD, nil, settings).
+			buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, ""); err != nil {
+			t.Fatalf("buildDeployer: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("dedicated settings warned: %v", got)
+		}
+
+		if _, err := mk(t, config.DeployerArgoCD, map[string]string{"destinationServer": "https://edge.example.com:6443"}, config.ArgoCDSettings{}).
+			buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, ""); err != nil {
+			t.Fatalf("buildDeployer: %v", err)
+		}
+		if len(got) != 1 || !strings.Contains(got[0], "--set deployer:destinationServer is deprecated") ||
+			!strings.Contains(got[0], "--argocd-destination-server") {
+
+			t.Errorf("deprecated spelling warnings = %v, want one naming its replacement", got)
 		}
 	})
 }

@@ -165,6 +165,17 @@ spec:
       dynamic: []
       vendorCharts: false
       appName: ""                    # argocd parent Application name override
+      # argocd:                      # argocd / argocd-helm only (rejected with helmfile above); omitted key = unset
+      #   namePrefix: tenant-a-      # child Application name prefix
+      #   destinationServer: https://prod.example.com:6443  # child destination; default in-cluster
+      #   project: gpu-infra         # child project; default "default"
+      #   cascadeDelete: true        # finalizer on parent and children
+      #   syncRetry:                 # spec.syncPolicy.retry on every child
+      #     limit: 20                # required when backoff is set; 0 disables retries
+      #     backoff:                 # omitted fields keep Argo CD's defaults
+      #       duration: 30s
+      #       factor: 2
+      #       maxDuration: 5m
     scheduling:
       systemNodeSelector: {}
       systemNodeTolerations: []
@@ -289,9 +300,10 @@ Inputs to `aicr bundle`.
 | `output.imageRefs` | string | Optional external image-reference output file for an OCI `output.target` only. Local output is rejected. Its parent must be an existing real directory, and the target must be outside and not aliased to the planned or completed bundle. The target, including that it can be written, is checked before the bundle is generated. |
 | `deployment.deployer` | string | Deployer choice (same values as `--deployer`) |
 | `deployment.repo` | string | GitOps repo for repo-shaped deployers |
-| `deployment.set` / `.dynamic` | []string | Value overrides, `key:path=value` |
+| `deployment.set` / `.dynamic` | []string | Value overrides, `key:path=value`. The `deployer:<key>` spelling is deprecated in favor of `deployment.argocd`; see [Deprecations](deprecations.md#argo-cd-options-as-deployer-value-overrides) |
 | `deployment.vendorCharts` | bool | Vendor charts into the bundle |
 | `deployment.appName` | string | Argo CD parent `Application` name override (multi-bundle installs sharing a namespace) |
+| `deployment.argocd` | object | Argo CD bundle settings for `argocd` and `argocd-helm`: `namePrefix`, `destinationServer`, `project`, `cascadeDelete`, and `syncRetry` (`limit`, `backoff.duration`, `backoff.factor`, `backoff.maxDuration`). Each mirrors an `--argocd-*` flag, which overrides it field by field. Setting a field that a `deployer:<key>` entry in `deployment.set` also sets is rejected. See [Argo CD Deployer Options](cli-reference.md#argo-cd-deployer-options) |
 | `scheduling.*` | object | `systemNodeSelector`/`Tolerations`, `acceleratedNodeSelector`/`Tolerations`, `draEvictionNodeLabel`, `workloadGate`, `workloadSelector`, `nodes`, `storageClass`, `sharedStorageClass`. Selectors are YAML maps; tolerations use the CLI's `key=value:effect` strings. `draEvictionNodeLabel` accepts one `key=value` label and has no default: setting it opts in to DRA eviction coordination, which AICR applies only when DRA and GPU Operator are both enabled. |
 | `attestation.enabled` | bool | Enable bundle attestation (signing); keyless OIDC by default, KMS-backed when `signingKey` is set |
 | `attestation.certificateIdentityRegexp` | string | Expected signer identity |

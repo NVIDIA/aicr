@@ -66,7 +66,14 @@ type Notice struct {
 	Replacement string
 
 	// RemovedIn is the AICR release that removes Subject, e.g. "v1.0.0".
+	// Empty when no removal release is scheduled; the warning then names
+	// none rather than guessing.
 	RemovedIn string
+
+	// Anchor is the fragment of Subject's entry in DocsURL, so the warning
+	// and the Link header land on the entry rather than the top of the page.
+	// Empty links to the page itself.
+	Anchor string
 
 	// Deprecated is when Subject became (or becomes) deprecated. This is the
 	// value of the RFC 9745 Deprecation header and is distinct from Sunset:
@@ -85,11 +92,22 @@ type Notice struct {
 // Message renders the notice as a single line of user-facing text.
 func (n Notice) Message() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s is deprecated and will be removed in %s", n.Subject, n.RemovedIn)
+	fmt.Fprintf(&b, "%s is deprecated", n.Subject)
+	if n.RemovedIn != "" {
+		fmt.Fprintf(&b, " and will be removed in %s", n.RemovedIn)
+	}
 	if n.Replacement != "" {
 		fmt.Fprintf(&b, "; use %s instead", n.Replacement)
 	}
 	return b.String()
+}
+
+// URL is the docs entry for n: DocsURL plus Anchor when one is set.
+func (n Notice) URL() string {
+	if n.Anchor == "" {
+		return DocsURL
+	}
+	return DocsURL + "#" + n.Anchor
 }
 
 // Recorder emits each distinct Notice at most once. Callers that warn from a
@@ -129,11 +147,11 @@ func (r *Recorder) Warn(n Notice) {
 		return
 	}
 
-	attrs := []any{
-		"subject", n.Subject,
-		"removedIn", n.RemovedIn,
-		"details", DocsURL,
+	attrs := []any{"subject", n.Subject}
+	if n.RemovedIn != "" {
+		attrs = append(attrs, "removedIn", n.RemovedIn)
 	}
+	attrs = append(attrs, "details", n.URL())
 	if n.Replacement != "" {
 		attrs = append(attrs, "replacement", n.Replacement)
 	}
@@ -179,5 +197,5 @@ func SetHTTPHeaders(h http.Header, n Notice) {
 	}
 	// Add, not Set: Link is a multi-valued header, and clobbering a Link a
 	// handler set for its own reasons would be a silent regression.
-	h.Add("Link", fmt.Sprintf("<%s>; rel=\"deprecation\"", DocsURL))
+	h.Add("Link", fmt.Sprintf("<%s>; rel=\"deprecation\"", n.URL()))
 }
