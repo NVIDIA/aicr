@@ -2179,20 +2179,22 @@ wait_for_argo_readback_settled() {
     fi
     timeout=$((10#$timeout))
     interval=$((10#$interval))
-    if [[ -n "${KWOK_SYNC_DEADLINE_EPOCH:-}" ]]; then
-        local remaining=$(( KWOK_SYNC_DEADLINE_EPOCH - $(date +%s) ))
-        if (( remaining < timeout )); then
-            timeout=$(( remaining > 0 ? remaining : 0 ))
-        fi
+    local start
+    start=$(date +%s)
+    local end=$(( start + timeout ))
+    if [[ -n "${KWOK_SYNC_DEADLINE_EPOCH:-}" ]] && (( KWOK_SYNC_DEADLINE_EPOCH < end )); then
+        end=$(( KWOK_SYNC_DEADLINE_EPOCH > start ? KWOK_SYNC_DEADLINE_EPOCH : start ))
     fi
 
-    local waited=0 pending
+    local now waited remaining pending
     while :; do
         if ! kubectl get applications.argoproj.io -A -o json > "$apps_json"; then
             log_error "Could not list Argo CD Applications for the read-back"
             return 1
         fi
         readback_pending_argo_components "$apps_json" "$installed_file" "$pending_file" || return 1
+        now=$(date +%s)
+        waited=$(( now - start ))
         if [[ ! -s "$pending_file" ]]; then
             if (( waited > 0 )); then
                 log_info "Argo CD Applications reached a first sync after ${waited}s"
@@ -2201,13 +2203,13 @@ wait_for_argo_readback_settled() {
         fi
 
         pending=$(paste -sd ' ' "$pending_file")
-        if (( waited >= timeout )); then
+        remaining=$(( end - now ))
+        if (( remaining <= 0 )); then
             log_warn "Argo CD Applications still on their first sync after ${waited}s, so the read-back reads them as unversioned: ${pending}"
             return 0
         fi
-        log_info "Waiting for a first Argo CD sync before the read-back (${waited}/${timeout}s): ${pending}"
-        sleep "$interval"
-        waited=$((waited + interval))
+        log_info "Waiting for a first Argo CD sync before the read-back (${waited}/$(( end - start ))s): ${pending}"
+        sleep $(( remaining < interval ? remaining : interval ))
     done
 }
 
