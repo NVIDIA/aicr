@@ -3225,7 +3225,7 @@ h100-eks-ubuntu-training-kubeflow+nktp:
   014-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   014-nktp/upstream.env: 618af7e3bb229c70c7332a444ce158f70e84c2863946365da97440731cb8c163
-  014-nktp/values.yaml: dff7e1eaa6fbc0ef6e5852712f44d6ce5e464fc86c877e782fb8cb762a087d74
+  014-nktp/values.yaml: 027752041ac8d22ff9cabc97218240fae21f97d9f72424b2dfcdc964bdd594cd
   015-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   015-nvidia-dra-driver-gpu/upstream.env: 2b81f487848614f9b0167e48f2f8c65a057048f4c1e7b99b34a1ddc899c90ff0
@@ -3242,7 +3242,7 @@ h100-eks-ubuntu-training-kubeflow+nktp:
   README.md: dacb878ca60fa303f91697a480765cf4b857680b94842592bf85828b778f47f2
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 367761b880cd742f10f22142a56d5926f7f75e31e69aaf7f562c9bd0a94a968b
-  checksums.txt: 887f0b5d88ccaa82595869a22279d4f941bf03c687fa88ac9a7db9fb9e2034e6
+  checksums.txt: 03cb4b63dbbe2668981a89c5e6cb199c8751a875739a06b10e00105f0fb21dc9
   data/overlays/stock-render-opt-in.yaml: 28518490ca46ac3ecf1b7cb220cfc55c3c4d3e3f595446b6aab9894f15f80557
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: 60bc9db84b4c9ccbacf807ab424ce27099463dbbfbca83aa07db4cf4c69bca0a

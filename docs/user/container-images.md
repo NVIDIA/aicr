@@ -20,7 +20,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 - Components: **57**
-- Unique images: **147**
+- Unique images: **148**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -306,14 +306,14 @@ _No images extracted._
 
 ### nktp
 
-- `docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e`
-- `ghcr.io/open-telemetry/opentelemetry-operator/opentelemetry-operator:0.161.0@sha256:76ac4fa40512b60f85ff236c60c075ca3407858efe72e22d2e96a9cf1bc82dc2`
-- `ghcr.io/open-telemetry/opentelemetry-operator/target-allocator:0.161.0@sha256:cf45770c658cf392618717043d9a478a8a9f97d3d5f79a31db54e85abc438718`
-- `grafana/otel-lgtm:0.32.0@sha256:d6b20e35890ef2f91d13944805939acdaf1e5d3ffbf9f9aed08586312826c815`
-- `otel/opentelemetry-collector-k8s:0.162.0@sha256:ed6862e1506e11c08a0ec4cc7e1395eb5cf10e3acf2c2ba3846edc1b6b3916d6`
-- `quay.io/prometheus/node-exporter:v1.12.1@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0`
-- `rancher/kubectl@sha256:090bef429ed1bdb10ebd4e82ac6b1b4695276e3a15cfeef6fa2772daed6deb89`
-- `registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.20.0@sha256:42cfe3723a5f058171c627537fb57a3ea0f26e4380fa18555a95cb1a1b4cfc5b`
+- `busybox:latest`
+- `ghcr.io/open-telemetry/opentelemetry-operator/opentelemetry-operator:0.161.0`
+- `ghcr.io/open-telemetry/opentelemetry-operator/target-allocator:0.161.0`
+- `grafana/otel-lgtm:0.32.0`
+- `otel/opentelemetry-collector-k8s:0.162.0`
+- `quay.io/prometheus/node-exporter:v1.12.1`
+- `rancher/kubectl:v1.34.1`
+- `registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.20.0`
 
 ### node-problem-detector
 
