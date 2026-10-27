@@ -182,7 +182,7 @@ On an unhealthy node a kernel read can block in uninterruptible sleep. The agent
 
 The 30-second path needs `list` and `watch` on the output ConfigMap.
 
-The CLI only accepts a snapshot stamped with the current run's ID. A snapshot an earlier run left at a `cm://` destination is never returned in its place. The agent records the run ID on the ConfigMap as the `aicr.run/run-id` annotation. An agent image older than the CLI does not stamp it, so recovery then works only with the default internal ConfigMap, not with a `cm://` destination you name.
+The agent records the run ID on the ConfigMap as the `aicr.run/run-id` annotation, and the CLI rejects a snapshot stamped with any other run's ID. A `cm://` destination you name must hold a snapshot stamped with the current run's ID, so a snapshot an earlier run left there is never returned in its place. An agent image older than the CLI does not stamp the snapshot. The CLI accepts an unstamped snapshot only from its default internal ConfigMap, so recovery with an older agent does not work with a `cm://` destination you name.
 
 The pod stays `Running`, or `Terminating` after cleanup deletes its Job, until the node recovers or is rebooted. Investigate the node named in the warning.
 
