@@ -415,7 +415,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		if !logsStreamed.Load() {
 			dumpAgentLogs(ctx, deployer)
 		}
-		warnAgentDidNotExit(ctx, deployer, agentConfig.Namespace)
+		warnJobCompletionUnobserved(ctx, deployer, agentConfig.Namespace)
 	} else {
 		slog.Info("job completed successfully")
 
@@ -556,16 +556,16 @@ func dumpAgentLogs(ctx context.Context, deployer *agent.Deployer) {
 	}
 }
 
-// warnAgentDidNotExit logs that the snapshot is returned without its Job
-// completing, naming the agent's pod and node.
-func warnAgentDidNotExit(ctx context.Context, deployer *agent.Deployer, namespace string) {
+// warnJobCompletionUnobserved logs that the snapshot is returned without its
+// Job's completion being observed, naming the agent's pod and node.
+func warnJobCompletionUnobserved(ctx context.Context, deployer *agent.Deployer, namespace string) {
 	podName, nodeName, err := deployer.PodPlacement(ctx)
 	if err != nil {
-		slog.Debug("cannot locate the agent pod for the exit warning", "error", err)
+		slog.Debug("cannot locate the agent pod for the completion warning", "error", err)
 	}
-	slog.Warn("the agent wrote its snapshot but its pod did not exit; returning the snapshot without Job completion. "+
-		"A host read on the node is likely stuck in uninterruptible sleep, so the node needs attention, "+
-		"and the pod cannot terminate until the node recovers or reboots. "+
+	slog.Warn("returning the agent's snapshot without observing its Job complete. "+
+		"If the pod is still running, a host read on the node is likely stuck in uninterruptible sleep, "+
+		"so the node needs attention, and the pod cannot terminate until the node recovers or reboots. "+
 		"The agent's logs name the path that stalled",
 		slog.String("namespace", namespace),
 		slog.String("job", deployer.JobName()),
