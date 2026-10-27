@@ -349,7 +349,7 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	if warningErr := b.warnPeermemReadinessDisabled(ctx, recipeResult, componentValues); warningErr != nil {
 		return nil, warningErr
 	}
-	if nicErr := b.checkNFDNICLabelMismatch(componentValues); nicErr != nil {
+	if nicErr := b.checkNFDNICLabelMismatch(componentValues, dynamicValues); nicErr != nil {
 		return nil, nicErr
 	}
 	b.warnNRIManagementAllowlist(recipeResult, componentValues)

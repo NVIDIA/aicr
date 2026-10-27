@@ -38,8 +38,8 @@ const (
 		"network-operator, include its rule in a worker.config.sources.custom override, or publish " +
 		"pci.device again by removing it from worker.config.core.noPublishFeatures."
 	wantNFDNICWarningA = "Warning: " + wantNFDNICErrorA + " This is a warning, not an error, because " +
-		"nfd sets worker.extraArgs, worker.config.sources.pci or a labelsTemplate rule, which this check " +
-		"does not evaluate."
+		"nfd sets worker.extraArgs, worker.config.sources.pci, a labelsTemplate rule or a --dynamic label " +
+		"input, which this check does not evaluate."
 	wantNFDNICWarningB = "Warning: nfd labels NVIDIA NIC nodes feature.node.kubernetes.io/pci-15b3.present " +
 		"(worker.config.sources.custom), but network-operator is not in this bundle. The GPU Operator " +
 		"validator waits on those nodes for the network-operator MOFED driver when the GPU Operator " +
@@ -82,6 +82,7 @@ func TestCheckNFDNICLabelMismatch(t *testing.T) {
 		criteria recipe.Criteria
 		mutate   []func(map[string]map[string]any)
 		bundlers []string
+		dynamic  []string
 		want     string
 		wantErr  string
 	}{
@@ -116,6 +117,27 @@ func TestCheckNFDNICLabelMismatch(t *testing.T) {
 			mutate: []func(map[string]map[string]any){addNetOp,
 				setNFD("worker.config.core.noPublishFeatures", []any{"*"})},
 			wantErr: wantNFDNICErrorA,
+		},
+		{
+			name:     "A warns: --dynamic sources.custom",
+			criteria: nfdNICTestEKS,
+			mutate:   []func(map[string]map[string]any){addNetOp},
+			dynamic:  []string{"worker.config.sources.custom"},
+			want:     wantNFDNICWarningA,
+		},
+		{
+			name:     "A warns: --dynamic parent of noPublishFeatures",
+			criteria: nfdNICTestEKS,
+			mutate:   []func(map[string]map[string]any){addNetOp},
+			dynamic:  []string{"worker.config"},
+			want:     wantNFDNICWarningA,
+		},
+		{
+			name:     "A errors: --dynamic outside the label inputs",
+			criteria: nfdNICTestEKS,
+			mutate:   []func(map[string]map[string]any){addNetOp},
+			dynamic:  []string{"worker.config.sources.cpu"},
+			wantErr:  wantNFDNICErrorA,
 		},
 		{
 			name:     "A warns: worker.extraArgs set",
@@ -252,7 +274,7 @@ func TestCheckNFDNICLabelMismatch(t *testing.T) {
 				m(values)
 			}
 
-			err = b.checkNFDNICLabelMismatch(values)
+			err = b.checkNFDNICLabelMismatch(values, map[string][]string{"nfd": tt.dynamic})
 			if tt.wantErr != "" {
 				errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 				if got := errorMessage(err); got != tt.wantErr {
@@ -316,6 +338,15 @@ func TestMakeNFDNICLabelMismatch(t *testing.T) {
 			criteria: nfdNICTestEKS,
 			edit:     addNetOp,
 			wantErr:  wantNFDNICErrorA,
+		},
+		{
+			name:     "A: overlay adds network-operator, --dynamic nfd extraArgs",
+			criteria: nfdNICTestEKS,
+			edit:     addNetOp,
+			options: []config.Option{
+				config.WithDynamicValues(map[string][]string{"nfd": {"worker.extraArgs"}}),
+			},
+			want: wantNFDNICWarningA,
 		},
 		{
 			name:     "B: --set networkoperator:enabled=false",

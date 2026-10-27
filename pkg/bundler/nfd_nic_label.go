@@ -53,8 +53,9 @@ const (
 // sources.custom labels. worker.extraArgs (nfd-worker -options can replace
 // the config), the built-in pci label source (deviceLabelFields [vendor]
 // emits pci-15b3.present) and labelsTemplate rules are not replayed, so when
-// any is set a missing rule is a warning instead of an error.
-func (b *DefaultBundler) checkNFDNICLabelMismatch(componentValues map[string]map[string]any) error {
+// any is set a missing rule is a warning instead of an error. So is an nfd
+// --dynamic path covering a label input, whose value is set at install time.
+func (b *DefaultBundler) checkNFDNICLabelMismatch(componentValues map[string]map[string]any, dynamicValues map[string][]string) error {
 	if b.Config == nil {
 		return nil
 	}
@@ -78,11 +79,13 @@ func (b *DefaultBundler) checkNFDNICLabelMismatch(componentValues map[string]map
 				"include its rule in a %[6]s override, or publish %[3]s again by removing it from %[4]s.",
 			networkOperatorComponentName, nfdComponentName, nfdPCIDeviceFeature,
 			nfdNoPublishFeaturesValuePath, nfdMellanoxNICLabel, nfdCustomSourcesValuePath)
-		if normalized && !nfdHasUnreplayedLabelInputs(nfdValues) {
+		evaluable := normalized && !nfdHasUnreplayedLabelInputs(nfdValues) &&
+			!nfdHasDynamicLabelInput(dynamicValues[nfdComponentName])
+		if evaluable {
 			return errors.New(errors.ErrCodeInvalidRequest, msg)
 		}
-		warning = msg + fmt.Sprintf(" This is a warning, not an error, because %s sets %s, %s or a "+
-			"labelsTemplate rule, which this check does not evaluate.",
+		warning = msg + fmt.Sprintf(" This is a warning, not an error, because %s sets %s, %s, a "+
+			"labelsTemplate rule or a --dynamic label input, which this check does not evaluate.",
 			nfdComponentName, nfdWorkerExtraArgsValuePath, nfdPCISourceValuePath)
 	case !networkOperator && hasRule && len(b.Config.Bundlers()) == 0:
 		warning = fmt.Sprintf(
@@ -182,6 +185,25 @@ func nfdHasUnreplayedLabelInputs(nfdValues map[string]any) bool {
 		}
 		if tmpl, _ := rule["labelsTemplate"].(string); strings.TrimSpace(tmpl) != "" {
 			return true
+		}
+	}
+	return false
+}
+
+// nfdHasDynamicLabelInput reports whether a --dynamic nfd path covers, or lies
+// under, a values path the label check reads.
+func nfdHasDynamicLabelInput(dynamicPaths []string) bool {
+	inputs := []string{
+		nfdNoPublishFeaturesValuePath, nfdCustomSourcesValuePath,
+		nfdWorkerExtraArgsValuePath, nfdPCISourceValuePath,
+	}
+	for _, d := range dynamicPaths {
+		for _, in := range inputs {
+			covers := d == in || strings.HasPrefix(in, d+".") ||
+				strings.HasPrefix(d, in+".") || strings.HasPrefix(d, in+"[")
+			if covers {
+				return true
+			}
 		}
 	}
 	return false
