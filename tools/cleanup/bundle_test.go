@@ -79,9 +79,9 @@ func TestLoadBundle(t *testing.T) {
 		t.Run(tt.deployer, func(t *testing.T) {
 			dir := writeBundle(t, tt.deployer, bundleReleases()...)
 
-			got, found, err := loadBundle(context.Background(), dir)
-			if err != nil || !found {
-				t.Fatalf("loadBundle() = found %v, error %v", found, err)
+			got, err := loadBundle(context.Background(), dir)
+			if err != nil {
+				t.Fatalf("loadBundle() error = %v", err)
 			}
 			if got.deployer != inventory.Deployer(tt.deployer) {
 				t.Errorf("deployer = %q, want %q", got.deployer, tt.deployer)
@@ -99,13 +99,6 @@ func TestLoadBundle(t *testing.T) {
 	}
 }
 
-func TestLoadBundleWithoutBundleInfo(t *testing.T) {
-	_, found, err := loadBundle(context.Background(), t.TempDir())
-	if err != nil || found {
-		t.Errorf("loadBundle() = found %v, error %v, want a fallback to the catalog", found, err)
-	}
-}
-
 func TestLoadBundleRejectsUnreadableBundles(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "bundle-info.yaml")
 	if err := os.WriteFile(file, []byte("kind: BundleInfo\n"), 0o600); err != nil {
@@ -115,6 +108,11 @@ func TestLoadBundleRejectsUnreadableBundles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(malformed, bundleinfo.FileName), []byte("kind: Recipe\n"), 0o600); err != nil {
 		t.Fatalf("write bundle info: %v", err)
 	}
+	// Only a split set's root holds bundle-info.yaml, not its class directories.
+	splitClass := filepath.Join(writeBundle(t, "helm", bundleReleases()...), "ops")
+	if err := os.Mkdir(splitClass, 0o700); err != nil {
+		t.Fatalf("create class directory: %v", err)
+	}
 	tests := []struct {
 		name string
 		dir  string
@@ -122,13 +120,12 @@ func TestLoadBundleRejectsUnreadableBundles(t *testing.T) {
 		{"missing directory", filepath.Join(t.TempDir(), "typo")},
 		{"a file", file},
 		{"malformed bundle-info.yaml", malformed},
+		{"no bundle-info.yaml", t.TempDir()},
+		{"split class directory", splitClass},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, found, err := loadBundle(context.Background(), tt.dir)
-			if found {
-				t.Error("loadBundle() found a bundle")
-			}
+			_, err := loadBundle(context.Background(), tt.dir)
 			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 		})
 	}
@@ -140,9 +137,9 @@ func TestLoadBundleRejectsUnreadableBundles(t *testing.T) {
 func TestRunWithBundle(t *testing.T) {
 	f := newFixture(clusterObjects(), clusterCRDs()...)
 	f.helm.releases = clusterReleases()
-	b, found, err := loadBundle(context.Background(), writeBundle(t, "helm", bundleReleases()...))
-	if err != nil || !found {
-		t.Fatalf("loadBundle() = found %v, error %v", found, err)
+	b, err := loadBundle(context.Background(), writeBundle(t, "helm", bundleReleases()...))
+	if err != nil {
+		t.Fatalf("loadBundle() error = %v", err)
 	}
 	c := f.cleaner(options{assumeYes: true})
 	c.bundle, c.namespaces, c.owners = &b, b.namespaces, b.owners
@@ -168,9 +165,9 @@ func TestRunWithBundle(t *testing.T) {
 
 func TestRunWithArgoCDBundleWarns(t *testing.T) {
 	f := newFixture(nil)
-	b, found, err := loadBundle(context.Background(), writeBundle(t, "argocd", bundleReleases()...))
-	if err != nil || !found {
-		t.Fatalf("loadBundle() = found %v, error %v", found, err)
+	b, err := loadBundle(context.Background(), writeBundle(t, "argocd", bundleReleases()...))
+	if err != nil {
+		t.Fatalf("loadBundle() error = %v", err)
 	}
 	c := f.cleaner(options{dryRun: true})
 	c.bundle, c.namespaces, c.owners = &b, b.namespaces, b.owners

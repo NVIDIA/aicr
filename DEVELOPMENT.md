@@ -683,9 +683,9 @@ go run ./tools/cleanup --bundle ./bundles --dry-run
 (`layout.releases`). Phase 1 uninstalls only those releases, matched by name
 and namespace. Phase 4 deletes only the namespaces those releases install
 into, so namespaces no bundle names, such as `gang-scheduling-test`, are left
-alone. A bundle with no
-`bundle-info.yaml` predates the index, so cleanup warns and falls back to
-the behavior described above. An Argo CD bundle installs Applications, not
+alone. A directory with no `bundle-info.yaml` is an error, so pass the root
+of a `--split` bundle set, not one of its class directories. For a bundle
+that predates the index, omit `--bundle`. An Argo CD bundle installs Applications, not
 Helm releases, so phase 1 uninstalls nothing and cleanup warns to delete the
 Applications first. CRD deletion in phase 3 is unchanged by `--bundle`.
 

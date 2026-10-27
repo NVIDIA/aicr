@@ -218,16 +218,11 @@ func newCleaner(ctx context.Context, opts options, log *slog.Logger) (*cleaner, 
 		namespaceWait: defaults.ClusterCleanupNamespaceDeleteWait,
 	}
 	if opts.bundleDir != "" {
-		b, found, bundleErr := loadBundle(ctx, opts.bundleDir)
+		b, bundleErr := loadBundle(ctx, opts.bundleDir)
 		if bundleErr != nil {
 			return nil, bundleErr
 		}
-		if found {
-			c.bundle, c.namespaces, c.owners, c.readReleases = &b, b.namespaces, b.owners, nil
-		} else {
-			log.Warn("the bundle has no bundle-info.yaml, so it predates the release index and cleanup falls back to every release and namespace the catalog names",
-				"bundle", opts.bundleDir)
-		}
+		c.bundle, c.namespaces, c.owners, c.readReleases = &b, b.namespaces, b.owners, nil
 	}
 	if _, err := exec.LookPath(helm.Binary); err == nil {
 		// Pinned because helm otherwise resolves its own target, for example

@@ -38,26 +38,28 @@ type bundleScope struct {
 }
 
 // loadBundle reads what the bundle in dir installed from its bundle-info.yaml.
-// found is false when the bundle has none, meaning it predates the release
-// index. A missing dir or a file is an error, so a mistyped path cannot widen
-// cleanup to the whole catalog.
-func loadBundle(ctx context.Context, dir string) (b bundleScope, found bool, err error) {
+// A missing dir, a file, or a directory with no bundle-info.yaml is an error,
+// so a mistyped path or a --split class directory cannot widen cleanup to the
+// whole catalog.
+func loadBundle(ctx context.Context, dir string) (bundleScope, error) {
 	stat, err := os.Stat(dir)
 	if err != nil {
-		return bundleScope{}, false, errors.Wrap(errors.ErrCodeInvalidRequest, "cannot read bundle directory "+dir, err)
+		return bundleScope{}, errors.Wrap(errors.ErrCodeInvalidRequest, "cannot read bundle directory "+dir, err)
 	}
 	if !stat.IsDir() {
-		return bundleScope{}, false, errors.New(errors.ErrCodeInvalidRequest, "--bundle "+dir+" is not a directory")
+		return bundleScope{}, errors.New(errors.ErrCodeInvalidRequest, "--bundle "+dir+" is not a directory")
 	}
 	info, err := bundleinfo.Read(ctx, dir)
 	if stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
-		return bundleScope{}, false, nil
+		return bundleScope{}, errors.Wrap(errors.ErrCodeInvalidRequest,
+			"--bundle "+dir+" has no "+bundleinfo.FileName+". Pass the bundle root, which holds it, "+
+				"or omit --bundle for a bundle that predates the release index", err)
 	}
 	if err != nil {
-		return bundleScope{}, false, err
+		return bundleScope{}, err
 	}
 
-	b = bundleScope{dir: dir, deployer: inventory.Deployer(info.Build.Deployer)}
+	b := bundleScope{dir: dir, deployer: inventory.Deployer(info.Build.Deployer)}
 	managedBy := ""
 	if b.deployer == inventory.DeployerFlux {
 		managedBy = fluxManaged
@@ -72,7 +74,7 @@ func loadBundle(ctx context.Context, dir string) (b bundleScope, found bool, err
 		}
 	}
 	b.namespaces = slices.Sorted(maps.Keys(namespaces))
-	return b, true, nil
+	return b, nil
 }
 
 // reportBundle logs the narrowing --bundle applies.
