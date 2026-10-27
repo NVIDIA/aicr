@@ -420,10 +420,13 @@ open gaps are named concretely with verifiable close conditions.
 Two of the four gaps are mitigated only by caller discipline (Decision 6), so
 an opt-in validator that ignores it can strand GPU capacity — a risk that
 exists until upstream adds a run-level node-footprint cap, a run deadline, and a
-deletion that confirms child workloads stopped. Since the amendment, those two no longer block stock adoption, because AICR's own limits
-satisfy the gate; the chart SBOM, the runtime closure (follow-up 5), and the
-gates still unassessed do, so the PoC's measured value is not yet available to
-stock recipes.
+deletion that confirms child workloads stopped. A validator that observes
+Decision 6 can still strand it when its pod is killed, until a later CRE check
+in the same namespace reclaims the orphan. Since the amendment, the node cap,
+run deadline, and cleanup bullets no longer block stock adoption for a
+validator that observes them, because AICR's own limits satisfy the gate; the
+chart SBOM, the runtime closure (follow-up 5), and the gates still unassessed
+do, so the PoC's measured value is not yet available to stock recipes.
 
 ## Follow-Up Decisions
 
