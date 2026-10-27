@@ -1,0 +1,116 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: nfd
+transitions:
+  # from starts at 0.19.0, the release AICR pinned before 0.20.1 and the only
+  # origin assessed. 0.18.x has its own action-required items at 0.19.0 that
+  # this record does not cover, so an operator below 0.19.0 matches no from
+  # range and is told to move up to a recorded version first.
+  #
+  # Between 0.19.0 and 0.20.1 the worker-side sources AICR's values and tests
+  # depend on (source/, pkg/nfd-worker, pkg/apis) are unchanged, the chart's
+  # CRD changes are description-only, and the new chart keys
+  # (topologyUpdater.updateStrategy, gc.securityContext) default to the
+  # previous behavior or a faster rollout.
+  #
+  # verdict is manual even though a default install needs nothing: a verdict
+  # cannot depend on values, and a cluster whose nfd override sets
+  # topologyUpdater.rbac.create=false crash-loops its 0.20.x topology-updater
+  # pods without the step below. AICR never sets that override.
+  #
+  # Exercised: a live Helm upgrade on kind (Kubernetes v1.37.0, one
+  # control-plane and one worker node), 2026-10-23, chart 0.19.0 to 0.20.1 and
+  # helm rollback to 0.19.0 with the nfd values of an eks/h100/training/ubuntu
+  # helm bundle. nfd-master, nfd-worker and nfd-gc rolled with no restarts and
+  # the 102 NFD node labels were identical after both. The topology updater
+  # was not part of that run; its RBAC change rests on the upstream v0.20.0
+  # release notes (Action Required 1).
+  - from: ">=0.19.0 <0.20.1"
+    to: "0.20.1"
+    verdict: manual
+    summary: >-
+      0.20.0 moves nfd-topology-updater to server-side apply, so its
+      ClusterRole needs create and patch on noderesourcetopologies instead of
+      get and update. The chart ships that rule, so chart-managed RBAC (AICR's
+      default) needs nothing; RBAC managed outside the chart without patch
+      crash-loops every 0.20.x topology-updater pod on its first
+      NodeResourceTopology update.
+    precondition: >-
+      Know who manages the topology-updater RBAC. The steps that change it
+      apply only when your nfd override sets topologyUpdater.rbac.create=false
+      (check the bundle's nfd values.yaml and any --set nfd: flags). Without
+      that override the chart manages the rule and those steps do not apply.
+    reversible: true
+    reversibleNotes: >-
+      Rolling back to 0.19.0 works while the topology-updater rule still
+      grants get and update: a chart rollback re-applies the 0.19.0 rule, and
+      a rule you manage keeps them until narrow-nrt-rbac.
+    stepsByDeployer:
+      - deployers: [helm, helmfile, terraform]
+        steps:
+          - id: widen-nrt-rbac
+            description: >-
+              Only with topologyUpdater.rbac.create=false: before upgrading,
+              add create and patch to the noderesourcetopologies
+              (topology.node.k8s.io) rule of the ClusterRole bound to the
+              topology-updater service account, keeping get and update.
+            reason: >-
+              0.20.x pods write NodeResourceTopology with server-side apply
+              and crash-loop without patch. 0.19.0 pods still running during
+              the DaemonSet rollout, or after a rollback, need get and update.
+          - id: upgrade-nfd
+            description: >-
+              Re-run install.sh (helm), helmfile apply (helmfile), or
+              terraform apply on the regenerated bundle (terraform).
+            reason: >-
+              Moves nfd to 0.20.1.
+          - id: narrow-nrt-rbac
+            description: >-
+              Only if you ran widen-nrt-rbac: once every topology-updater pod
+              runs 0.20.x and you no longer need a rollback path, drop get and
+              update from that rule.
+            reason: >-
+              0.20.x needs only create and patch, which is all the chart's own
+              rule grants.
+      - steps:
+          - id: widen-nrt-rbac
+            description: >-
+              Only with topologyUpdater.rbac.create=false: before the nfd
+              release moves to 0.20.1, add create and patch to the
+              noderesourcetopologies (topology.node.k8s.io) rule of the
+              ClusterRole bound to the topology-updater service account,
+              keeping get and update.
+            reason: >-
+              0.20.x pods write NodeResourceTopology with server-side apply
+              and crash-loop without patch. 0.19.0 pods still running during
+              the DaemonSet rollout, or after a rollback, need get and update.
+          - id: sync-nfd
+            description: >-
+              Sync or reconcile the nfd release.
+            reason: >-
+              Moves nfd to 0.20.1.
+          - id: narrow-nrt-rbac
+            description: >-
+              Only if you ran widen-nrt-rbac: once every topology-updater pod
+              runs 0.20.x and you no longer need a rollback path, drop get and
+              update from that rule.
+            reason: >-
+              0.20.x needs only create and patch, which is all the chart's own
+              rule grants.
+    references:
+      - https://github.com/kubernetes-sigs/node-feature-discovery/releases/tag/v0.20.0
+      - https://github.com/kubernetes-sigs/node-feature-discovery/releases/tag/v0.20.1

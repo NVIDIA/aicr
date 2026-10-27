@@ -20,7 +20,6 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/serializer"
 	"gopkg.in/yaml.v3"
 )
 
@@ -349,10 +348,21 @@ func appendSlurmAccountingHealthCheck(result *RecipeResult) error {
 			"enabled Slurm accounting requires a namespace for slinky-slurm")
 	}
 
-	var check map[string]any
-	if err := yaml.Unmarshal([]byte(ref.HealthCheckAsserts), &check); err != nil {
+	docs, err := decodeHealthCheck(ref.HealthCheckAsserts)
+	if err != nil {
 		return errors.Wrap(errors.ErrCodeInvalidRequest,
 			"failed to parse slinky-slurm health check for accounting specialization", err)
+	}
+	if len(docs) == 0 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"slinky-slurm health check has no documents")
+	}
+	// The step joins the first document, which is the Test. Later documents
+	// are kept as they are.
+	check, ok := docs[0].(map[string]any)
+	if !ok {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"slinky-slurm health check has no object spec")
 	}
 	spec, ok := check["spec"].(map[string]any)
 	if !ok {
@@ -367,17 +377,17 @@ func appendSlurmAccountingHealthCheck(result *RecipeResult) error {
 	var accountingStep map[string]any
 	stepData := fmt.Sprintf(slurmAccountingHealthStepTemplate,
 		ref.Name+"-accounting", ref.Namespace)
-	if err := yaml.Unmarshal([]byte(stepData), &accountingStep); err != nil {
+	if err = yaml.Unmarshal([]byte(stepData), &accountingStep); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal,
 			"failed to parse built-in Slurm accounting health check", err)
 	}
 	spec["steps"] = append(steps, accountingStep)
-	data, err := serializer.MarshalYAMLDeterministic(check)
+	data, err := encodeHealthCheck(docs)
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal,
 			"failed to serialize Slurm accounting health check")
 	}
-	ref.HealthCheckAsserts = string(data)
+	ref.HealthCheckAsserts = data
 	return nil
 }
 
