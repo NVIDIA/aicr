@@ -641,8 +641,8 @@ Some namespaces are kept without any flag:
   be removed with `helm uninstall`.
 - A namespace holding an AICR release that Flux's helm-controller manages.
   Phase 1 skips it, because helm-controller reinstalls a release removed
-  behind its back. Delete the `HelmRelease` in `flux-system` instead, which
-  uninstalls it.
+  behind its back. Delete the `HelmRelease` in the Flux namespace
+  (`flux-system` by default) instead, which uninstalls it.
 - `openshift-nfd` and `cert-manager-operator`, unless phase 1 finds an AICR
   release in them that is not in `uninstalled` status. On OpenShift the
   platform team often installs these operators through OperatorHub. The list
