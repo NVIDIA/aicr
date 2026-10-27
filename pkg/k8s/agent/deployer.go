@@ -160,9 +160,14 @@ func (d *Deployer) GetRunSnapshot(ctx context.Context) ([]byte, error) {
 
 // WaitForSnapshotWritten blocks until the output ConfigMap holds a snapshot
 // GetRunSnapshot would accept. It needs list and watch on ConfigMaps in the
-// output namespace, and returns ErrCodeTimeout when ctx ends or
-// ErrCodeUnavailable when the ConfigMap cannot be listed or watched. An error
-// means no snapshot was seen, not that the run failed.
+// output namespace.
+//
+// Errors:
+//   - ctx's deadline passes: ErrCodeTimeout
+//   - ctx is canceled: ErrCodeCanceled
+//   - the ConfigMap cannot be listed or watched: ErrCodeUnavailable
+//
+// An error means no snapshot was seen, not that the run failed.
 func (d *Deployer) WaitForSnapshotWritten(ctx context.Context) error {
 	return d.waitForSnapshotWritten(ctx)
 }

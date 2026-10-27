@@ -155,8 +155,8 @@ func (d *Deployer) waitForSnapshotWritten(ctx context.Context) error {
 
 // consumeSnapshotWatch reads watcher until an event carries a snapshot
 // snapshotWrittenByRun accepts, which reports written, or the stream closes or
-// errors, which reports neither written nor err. It returns ErrCodeTimeout when
-// ctx ends.
+// errors, which reports neither written nor err. When ctx ends, err is
+// ErrCodeTimeout, or ErrCodeCanceled if ctx was canceled.
 func (d *Deployer) consumeSnapshotWatch(ctx context.Context, watcher watch.Interface) (written bool, err error) {
 	for {
 		select {

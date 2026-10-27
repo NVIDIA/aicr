@@ -16,6 +16,7 @@ package agent
 
 import (
 	"context"
+	stderrors "errors"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
@@ -168,6 +170,95 @@ func TestWaitForSnapshotWritten(t *testing.T) {
 		err := writtenTestDeployer(clientset, false).WaitForSnapshotWritten(ctx)
 		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeTimeout)
 	})
+
+	t.Run("a deleted snapshot or non-ConfigMap event is not a write", func(t *testing.T) {
+		clientset := fake.NewClientset()
+		w := watch.NewFake()
+		clientset.PrependWatchReactor("configmaps", k8stesting.DefaultWatchReactor(w, nil))
+		go func() {
+			w.Delete(snapshotConfigMap(writtenTestRunID, true))
+			w.Add(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: writtenTestCM, Namespace: writtenTestNS}})
+		}()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		defer cancel()
+		err := writtenTestDeployer(clientset, false).WaitForSnapshotWritten(ctx)
+		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeTimeout)
+	})
+
+	t.Run("ctx ending during the re-list backoff reports a timeout", func(t *testing.T) {
+		snapshotWatchResumeBackoff = time.Hour
+		t.Cleanup(func() { snapshotWatchResumeBackoff = time.Millisecond })
+		clientset := fake.NewClientset()
+		clientset.PrependWatchReactor("configmaps", func(k8stesting.Action) (bool, watch.Interface, error) {
+			w := watch.NewFake()
+			w.Stop()
+			return true, w, nil
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		err := writtenTestDeployer(clientset, false).WaitForSnapshotWritten(ctx)
+		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeTimeout)
+	})
+}
+
+func TestWaitForSnapshotWritten_Errors(t *testing.T) {
+	apiErr := stderrors.New("apiserver unavailable")
+	failList := func(c *fake.Clientset) {
+		c.PrependReactor("list", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apiErr
+		})
+	}
+	failWatch := func(c *fake.Clientset) {
+		c.PrependWatchReactor("configmaps", func(k8stesting.Action) (bool, watch.Interface, error) {
+			return true, nil, apiErr
+		})
+	}
+	expired := func() (context.Context, context.CancelFunc) {
+		return context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	}
+	canceled := func() (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		return ctx, cancel
+	}
+	live := func() (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.Background(), jobWatchTimeout)
+	}
+
+	tests := []struct {
+		name   string
+		output string
+		fail   func(*fake.Clientset)
+		ctx    func() (context.Context, context.CancelFunc)
+		want   aicrerrors.ErrorCode
+	}{
+		{"malformed output URI", "not-a-cm-uri", nil, live, aicrerrors.ErrCodeInvalidRequest},
+		{"list fails", "", failList, live, aicrerrors.ErrCodeUnavailable},
+		{"list fails after the deadline", "", failList, expired, aicrerrors.ErrCodeTimeout},
+		{"list fails after cancel", "", failList, canceled, aicrerrors.ErrCodeCanceled},
+		{"watch fails", "", failWatch, live, aicrerrors.ErrCodeUnavailable},
+		{"watch fails after the deadline", "", failWatch, expired, aicrerrors.ErrCodeTimeout},
+		{"watch fails after cancel", "", failWatch, canceled, aicrerrors.ErrCodeCanceled},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clientset := fake.NewClientset()
+			if tt.fail != nil {
+				tt.fail(clientset)
+			}
+			d := writtenTestDeployer(clientset, false)
+			if tt.output != "" {
+				d.config.Output = tt.output
+			}
+
+			ctx, cancel := tt.ctx()
+			defer cancel()
+			err := d.WaitForSnapshotWritten(ctx)
+			errorstest.WantReportedCode(t, err, tt.want)
+		})
+	}
 }
 
 func TestPodPlacement(t *testing.T) {
