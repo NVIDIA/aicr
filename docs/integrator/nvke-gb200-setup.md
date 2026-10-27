@@ -154,9 +154,26 @@ before the CRD exists. `deploy.sh` retries the release until it does. With
 Argo CD or Terraform, build with `--readiness-hooks`: the `network-operator`
 readiness gate waits for the NicClusterPolicy to reach `ready`, which the
 operator reports only after its nv-ipam state, CRDs included, is applied, so
-the pools follow it. Flux does not support readiness hooks; a first install
-that fails on the missing CRD needs a `flux reconcile` once the operator is
-up. The `sriov-ib-networks` health check asserts the CRD is Established, so
+the pools follow it. Helmfile cannot take `--readiness-hooks` and its bundle
+has no CRD wait, so install it in two stages:
+
+```bash
+cd bundle
+helmfile -l 'name!=sriov-ib-networks' apply
+kubectl wait --for=condition=Established crd/ippools.nv-ipam.nvidia.com --timeout=10m
+helmfile -l name=sriov-ib-networks apply
+```
+
+Flux does not support readiness hooks either. If `sriov-ib-networks`
+exhausts its install retries on the missing CRD, wait for the CRD to be
+Established, then reset the release:
+
+```bash
+kubectl wait --for=condition=Established crd/ippools.nv-ipam.nvidia.com --timeout=10m
+flux reconcile helmrelease sriov-ib-networks -n flux-system --reset
+```
+
+The `sriov-ib-networks` health check asserts the CRD is Established, so
 `aicr validate` records that it landed. Measured on a reference tenant after
 a full teardown: the CRD appeared five seconds after the NicClusterPolicy
 and the policy was `ready` four seconds later; the gate held
@@ -212,7 +229,7 @@ aicr snapshot --node-selector kubernetes.io/hostname='<gpu-node>' --privileged \
 aicr recipe --snapshot snapshot.yaml --intent training --output recipe.yaml
 aicr bundle --recipe recipe.yaml --readiness-hooks --output bundle
 ./bundle/deploy.sh
-aicr validate --recipe bundle/recipe.yaml
+aicr validate --recipe bundle/recipe.yaml --phase deployment --phase conformance
 ```
 
 `aicr validate` runs the deployment and conformance phases against the live
