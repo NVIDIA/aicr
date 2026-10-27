@@ -2103,7 +2103,7 @@ Which deployers need that step differs, so check yours:
 
 | Deployer | CRD behavior on upgrade | Manual step needed |
 |---|---|---|
-| `helm` | `helm upgrade` skips `crds/`, so the bundle emits `apply-crds.sh` for components the registry marks `ownsCRDs` and `install.sh` runs it first | Only for components without `ownsCRDs`, or with an overridden chart |
+| `helm` | `helm upgrade` skips `crds/`, so the bundle emits `apply-crds.sh` for components the registry marks `ownsCRDs` and `install.sh` runs it first | Only outside a generated bundle, after a failed `apply-crds.sh`, for components without `ownsCRDs`, or with an overridden chart |
 | `helmfile` | Upgrades through Helm, so it skips `crds/` too; no automation exists, because a `presync` hook fires only for releases `helmfile apply` decides to sync, so it would hold on a chart bump and silently not hold on an unchanged rerun | Assume yes — see note below |
 | `terraform` | Upgrades through Helm (`helm_release`), so it skips `crds/` too; the bundle emits no CRD step, because the provider has no CRD-upgrade option and a `local-exec` step would run outside the plan; run the manual command with `MANAGER=terraform-provider-helm`, the manager the provider installed the CRDs under | Assume yes — see note below |
 | `flux` | The generated `HelmRelease` sets `spec.upgrade.crds: CreateReplace` for components the registry marks `ownsCRDs`, and leaves the helm-controller `Skip` default in place for the rest | Only for components without `ownsCRDs`, or with an overridden chart |
