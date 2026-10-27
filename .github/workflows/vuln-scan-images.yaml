@@ -563,6 +563,7 @@ jobs:
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
+          SCAN_RESULT: ${{ needs.scan.result }}
         run: |
           set -euo pipefail
           SHORT_SHA="${SHA:0:7}"
@@ -590,13 +591,22 @@ jobs:
 
           # A leg that dies before its upload step leaves no artifact, so
           # the loop above cannot see it. Ask the API which scan jobs in this
-          # attempt did not succeed and report each one as incomplete.
-          INCOMPLETE=$(gh api --paginate \
+          # attempt did not succeed and report each one as incomplete. A
+          # failed lookup is reported too, rather than ending the step before
+          # the findings above are posted.
+          if ! INCOMPLETE=$(gh api --paginate \
             "repos/${REPO}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs?per_page=100" \
             --jq '.jobs[]
               | select(.name | startswith("Scan ("))
               | select(.conclusion != "success")
-              | "\(.name | ltrimstr("Scan (") | rtrimstr(")") | split("/") | last): scan did not complete (\(.conclusion))"')
+              | "\(.name | ltrimstr("Scan (") | rtrimstr(")") | split("/") | last): scan did not complete (\(.conclusion))"'); then
+            INCOMPLETE="scan completion status unavailable (jobs API lookup failed)"
+          fi
+          # A failed build or manifest job skips the whole scan matrix, so
+          # no per-image job exists for the lookup above to find.
+          if [[ "${SCAN_RESULT}" == "skipped" ]]; then
+            INCOMPLETE="${INCOMPLETE}"$'\n'"no image was scanned: an image build or manifest job failed"
+          fi
           INCOMPLETE_COUNT=0
           while IFS= read -r line; do
             [[ -n "${line}" ]] || continue
