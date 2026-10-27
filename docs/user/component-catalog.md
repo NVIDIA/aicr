@@ -39,6 +39,7 @@ Every component has a bundle class, `core` or `ops` ([ADR-018](https://github.co
 | **prometheus-operator-crds** | `core` | Custom Resource Definitions for the prometheus-operator (`Alertmanager`, `AlertmanagerConfig`, `PodMonitor`, `Probe`, `Prometheus`, `PrometheusRule`, `ServiceMonitor`, `ThanosRuler`). Shipped as a separate release so the CRDs land before any chart that creates monitoring CRs; this breaks the helm-diff self-reference that otherwise blocks `helmfile apply` on a fresh cluster. | [prometheus-operator-crds](https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-operator-crds) |
 | **kube-prometheus-stack** | `ops` | Cluster monitoring: Prometheus, Grafana, Alertmanager, and node exporters. Provides GPU and cluster metrics collection and dashboards. CRDs are installed by the sibling `prometheus-operator-crds` release (this chart runs with `crds.enabled: false`). Prometheus selects every ServiceMonitor and PodMonitor in every namespace, with no `release` label required. Most components whose charts offer a monitor ship it enabled (NVCRE keeps its ServiceMonitor off because it is on no shipped overlay), and each one that renders its monitor at install declares a dependency on `prometheus-operator-crds`. | [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts) |
 | **prometheus-adapter** | `ops` | Exposes custom metrics from Prometheus to the Kubernetes metrics API. Enables HPA scaling based on GPU utilization and other custom metrics. | [prometheus-adapter](https://github.com/kubernetes-sigs/prometheus-adapter) |
+| **nktp** | `ops` | NKTP, the NVKE Telemetry Pipeline: an OpenTelemetry Operator and a fixed topology of collectors that gather metrics, logs, events, and traces, with bundled `kube-state-metrics` and `node-exporter`. Its default backend, `otel-lgtm`, is for evaluation only. Available, but no stock recipe selects it yet ([ADR-026](https://github.com/NVIDIA/aicr/blob/main/docs/design/026-nktp-telemetry-collection.md)). See [NKTP Telemetry Pipeline](#nktp-telemetry-pipeline). | [NKTP](https://github.com/dsx-ai-factory/nvke/tree/main/nktp/deploy/charts/nktp) |
 | **aws-ebs-csi-driver** | `core` | CSI driver for Amazon EBS volumes. Provides persistent storage for workloads on EKS. EKS-specific. **Cluster-wide default StorageClass:** AICR enables `defaultStorageClass.enabled`, so this component provisions a **cluster-default** gp3 StorageClass (`ebs-csi-default-sc`) on **every** EKS cluster that includes it — not just inference recipes; training overlays inherit it too. EKS ships no default SC of its own, so this makes dynamic provisioning (e.g. the inference-perf model cache) work without naming a class. **The driver still needs AWS credentials, which AICR does not configure** — see [EBS CSI Driver Credentials](#ebs-csi-driver-credentials). Two consequences to note: (1) if the cluster already has a default SC, Kubernetes treats multiple defaults as ambiguous — unset the other; (2) a PVC that previously failed-fast on "no default SC" will now silently bind gp3, which can mask a misconfiguration. | [AWS EBS CSI Driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) |
 | **k8s-ephemeral-storage-metrics** | `ops` | Exports ephemeral storage usage metrics per pod. Useful for monitoring scratch space consumption on GPU nodes. | [k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) |
 | **k8s-aibom** | `ops` | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Ships by default in two stock recipes, `h100-gke-cos-inference` and its Dynamo descendant `h100-gke-cos-inference-dynamo`; available by opt-in on any other GKE recipe with `aicr recipe --runtime-inventory enabled`, including the `b200`, `gb200`, and `gb300` GKE Dynamo recipes. On the two recipes that ship it by default, decline it with `aicr recipe --runtime-inventory disabled`. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
@@ -2018,11 +2019,14 @@ A component qualifies only if it solely owns every CRD it ships and ships none
 using `spec.conversion.strategy: Webhook`, since forcing or replacing the CRD
 can overwrite a `caBundle` injected at runtime. `kubeflow-trainer` is
 excluded for that second reason.
-Currently `gatekeeper`, `k8s-aibom`, `nvcre`, `nvsentinel`, and
+Currently `gatekeeper`, `k8s-aibom`, `nktp`, `nvcre`, `nvsentinel`, and
 `psmdb-operator` qualify; the audited chart version for each is pinned in
 `pkg/recipe/ownscrds_audit_test.go`, so bumping a pin without re-auditing fails
 CI. `nvsentinel` excludes the Percona CRDs its `mongodb-store` subchart embeds
-(`ownsCRDsExcludeSubcharts`), since `psmdb-operator` owns them.
+(`ownsCRDsExcludeSubcharts`), since `psmdb-operator` owns them. `nktp` excludes
+its `prometheus-crds` subchart, whose monitoring CRDs `prometheus-operator-crds`
+owns, and its `opentelemetry-operator` subchart, whose `conf/crds/` holds Helm
+templates rather than manifests.
 
 Uninstall in this order. Removing the component from the overlay and applying a
 regenerated bundle does **not** remove the previously installed release: the
@@ -2116,6 +2120,53 @@ inventory, verify the namespace label and the workload kind. A truncated BOM
 with no sink is expected once its canonical document exceeds the inline
 threshold; configure retention and credentials explicitly before enabling an
 external sink.
+
+## NKTP Telemetry Pipeline
+
+`nktp` installs NKTP, the NVKE Telemetry Pipeline, in the `nktp` namespace
+([ADR-026](https://github.com/NVIDIA/aicr/blob/main/docs/design/026-nktp-telemetry-collection.md)).
+No stock recipe selects it yet. An overlay that adds it lists `cert-manager`,
+`prometheus-operator-crds`, and `kube-prometheus-stack` in its
+`dependencyRefs`, and turns off `kube-prometheus-stack`'s `node-exporter`,
+since both bind host port 9100. On a cluster that enforces Pod Security, label
+the namespace `privileged` for the node collector.
+
+Its bundled backend, `otel-lgtm`, is for evaluation only: one pod with every
+signal on `emptyDir`, anonymous Grafana Admin, and no alerting. NKTP collects
+logs from every container, the node journal, and host and API server audit
+logs, and masks only the credentials it recognizes, so access control belongs
+to the backend. For production, disable `otel-lgtm` and set all five backend
+exporter endpoints, plus each exporter's `tls` block, since they default to
+plaintext:
+
+```shell
+BACKEND="<host:port>"   # your OTLP gRPC endpoint
+aicr bundle -r recipe.yaml \
+  --set nktp:otel-lgtm.enabled=false \
+  --set "nktp:gateway_metrics.otelcol.config.exporters.otlp.endpoint=${BACKEND}" \
+  --set "nktp:gateway_logs.otelcol.config.exporters.otlp.endpoint=${BACKEND}" \
+  --set "nktp:gateway_traces.otelcol.config.exporters.otlp.endpoint=${BACKEND}" \
+  --set "nktp:watchdog.otelcol.config.exporters.otlp.endpoint=${BACKEND}" \
+  --set "nktp:watchdog.sidecar.otelcol.config.exporters.otlp.endpoint=${BACKEND}" \
+  -o ./bundle
+```
+
+The bundle fails if `otel-lgtm` is disabled and any of the five is unset.
+
+NKTP owns the `opentelemetry.io` CRDs and replaces them on upgrade (see
+[Upgrade, uninstall, and troubleshooting](#upgrade-uninstall-and-troubleshooting)).
+The `monitoring.coreos.com` CRDs its chart bundles belong to
+`prometheus-operator-crds`, and no deployer applies them from NKTP.
+
+Uninstall keeps the CRDs and deletes the collectors through a `pre-delete`
+hook whose Job takes no tolerations. Where it cannot schedule, or the deployer
+runs no Helm hooks, delete the collectors while the operator still runs, then
+uninstall without hooks:
+
+```shell
+kubectl delete opentelemetrycollectors.opentelemetry.io -n nktp --all --wait --timeout=5m
+helm uninstall nktp -n nktp --no-hooks
+```
 
 ## Adding Components
 

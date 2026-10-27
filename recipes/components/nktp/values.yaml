@@ -1,0 +1,87 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NKTP (NVKE Telemetry Pipeline) Helm values, ADR-026. Collector resources are
+# NKTP's to tune and are not overridden here.
+#
+# Each image is the one chart 0.1.1-rc.3 renders, pinned by digest (ADR-006).
+# Re-resolve every digest on a chart bump, or a stale tag here silently pins
+# the old image.
+
+# Collectors schedule ahead of workloads but never evict a running pod. The
+# field is immutable: changing it on an installed cluster means deleting the
+# class.
+priorityClass:
+  preemptionPolicy: Never
+
+otelcol_image:
+  tag: "0.162.0@sha256:ed6862e1506e11c08a0ec4cc7e1395eb5cf10e3acf2c2ba3846edc1b6b3916d6"
+
+targetallocator_image:
+  tag: "0.161.0@sha256:cf45770c658cf392618717043d9a478a8a9f97d3d5f79a31db54e85abc438718"
+
+# Evaluation only: one pod with every signal on emptyDir, anonymous Grafana
+# Admin, running as root, no alerting. CheckNKTPExportersHaveBackend requires
+# all five backend exporter endpoints to be set when this is disabled.
+otel-lgtm:
+  enabled: true
+  image:
+    tag: "0.32.0@sha256:d6b20e35890ef2f91d13944805939acdaf1e5d3ffbf9f9aed08586312826c815"
+
+kube-state-metrics:
+  image:
+    tag: "v2.20.0@sha256:42cfe3723a5f058171c627537fb57a3ea0f26e4380fa18555a95cb1a1b4cfc5b"
+
+opentelemetry-kube-stack:
+  crds:
+    # prometheus-operator-crds owns the monitoring.coreos.com CRDs. Left on,
+    # Argo CD would reapply this chart's copies on every sync and Flux would
+    # replace them.
+    installPrometheus: false
+  opentelemetry-operator:
+    manager:
+      # The operator's NetworkPolicy allows egress only to the API server's
+      # endpoint IPs, but the operator dials the Service ClusterIP, so on EKS
+      # with VPC CNI network policy it crash-looped. Off by default since
+      # operator 0.160; pinned so a chart bump cannot re-enable it.
+      featureGatesMap:
+        operator.networkpolicy: false
+      image:
+        tag: "0.161.0@sha256:76ac4fa40512b60f85ff236c60c075ca3407858efe72e22d2e96a9cf1bc82dc2"
+    # Rendered only as `helm test` pods; the chart default is busybox:latest.
+    testFramework:
+      image:
+        repository: docker.io/library/busybox
+        tag: "1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
+  # The pre-delete hook Job takes no tolerations or nodeSelector; the
+  # component catalog documents the uninstall for when it cannot schedule.
+  # The chart pulls by digest alone when one is set.
+  cleanupJob:
+    image:
+      digest: sha256:090bef429ed1bdb10ebd4e82ac6b1b4695276e3a15cfeef6fa2772daed6deb89
+
+# Binds host port 9100 on every node. The chart default tolerates only
+# NoSchedule taints, which misses GPU nodes with NoExecute taints.
+node-exporter:
+  image:
+    digest: sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
+  tolerations:
+    - operator: Exists
+
+# NKTP's autoscalers need a resource metrics API; an overlay enables this
+# only on a platform that ships none, and inherits the digest pinned here.
+metrics-server:
+  enabled: false
+  image:
+    tag: "v0.8.1@sha256:b2d2efaf5ac3b366ed0f839d2412a2c4279d4fc2a2a733f12c52133faed36c41"

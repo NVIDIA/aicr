@@ -31,14 +31,18 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
-// TestNVSentinelCRDExclusionMatchesChart pins ownsCRDsExcludeSubcharts to the
-// pinned nvsentinel chart's layout. apply-crds.sh skips CRDs under
-// charts/<name>/ or a packaged charts/<name>-<version>.tgz; an upstream rename
+// TestCRDExclusionsMatchChart pins every component's ownsCRDsExcludeSubcharts
+// to its pinned chart's layout. apply-crds.sh skips CRDs under charts/<name>/
+// or a packaged charts/<name>-<version>.tgz, at any depth; an upstream rename
 // or restructure of the subchart would turn the exclusion into a silent no-op
-// and re-apply psmdb-operator's CRDs at nvsentinel's embedded schema.
+// and re-apply CRDs another component owns at this chart's schema.
 //
-// Pulls the chart over the network, so -short skips it.
-func TestNVSentinelCRDExclusionMatchesChart(t *testing.T) {
+// It also requires every file the step still collects to be a plain
+// manifest: the step's */crds/* glob also matches Helm template directories,
+// which kubectl cannot apply.
+//
+// Pulls each chart over the network, so -short skips it.
+func TestCRDExclusionsMatchChart(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live chart-pull integration test in short mode")
 	}
@@ -48,22 +52,30 @@ func TestNVSentinelCRDExclusionMatchesChart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetComponentRegistry: %v", err)
 	}
-	comp := registry.Get("nvsentinel")
-	if comp == nil {
-		t.Fatal("nvsentinel not found in component registry")
+	var excluding []*recipe.ComponentConfig
+	for _, name := range registry.Names() {
+		if comp := registry.Get(name); comp != nil && len(comp.OwnsCRDsExcludeSubcharts) > 0 {
+			excluding = append(excluding, comp)
+		}
 	}
-	if len(comp.OwnsCRDsExcludeSubcharts) == 0 {
-		t.Fatal("nvsentinel declares no ownsCRDsExcludeSubcharts; this test would prove nothing")
+	if len(excluding) == 0 {
+		t.Fatal("no component declares ownsCRDsExcludeSubcharts; this test would prove nothing")
 	}
 
-	archive := pullRegistryChart(t, comp)
-	for _, sub := range comp.OwnsCRDsExcludeSubcharts {
-		t.Run(sub, func(t *testing.T) {
-			crds := excludedSubchartCRDs(t, archive, sub)
-			if len(crds) == 0 {
-				t.Errorf("pinned %s %s carries no crds/ under charts/%s/ (unpacked or packaged); "+
-					"the ownsCRDsExcludeSubcharts entry no longer matches anything",
-					comp.Helm.DefaultChart, comp.Helm.DefaultVersion, sub)
+	for _, comp := range excluding {
+		t.Run(comp.Name, func(t *testing.T) {
+			archive := pullRegistryChart(t, comp)
+			for _, sub := range comp.OwnsCRDsExcludeSubcharts {
+				if crds := excludedSubchartCRDs(t, archive, sub); len(crds) == 0 {
+					t.Errorf("pinned %s %s carries no crds/ under charts/%s/ (unpacked or packaged); "+
+						"the ownsCRDsExcludeSubcharts entry no longer matches anything",
+						comp.Helm.DefaultChart, comp.Helm.DefaultVersion, sub)
+				}
+			}
+			for _, name := range templatedCollectedCRDs(t, archive, comp.OwnsCRDsExcludeSubcharts) {
+				t.Errorf("pinned %s %s: apply-crds.sh would collect %s, a Helm template; "+
+					"exclude its subchart with ownsCRDsExcludeSubcharts",
+					comp.Helm.DefaultChart, comp.Helm.DefaultVersion, name)
 			}
 		})
 	}
@@ -98,12 +110,12 @@ func pullRegistryChart(t *testing.T, comp *recipe.ComponentConfig) string {
 }
 
 // excludedSubchartCRDs lists the crds/ files apply-crds.sh would skip for sub:
-// those under <chart>/charts/<sub>/, and those inside a packaged
-// <chart>/charts/<sub>-<version>.tgz.
+// those under a charts/<sub>/ directory at any depth, and those inside a
+// packaged charts/<sub>-<version>.tgz.
 func excludedSubchartCRDs(t *testing.T, archive, sub string) []string {
 	t.Helper()
-	unpacked := regexp.MustCompile(`^[^/]+/charts/` + regexp.QuoteMeta(sub) + `/(.*/)?crds/[^/]+$`)
-	packaged := regexp.MustCompile(`^[^/]+/charts/` + regexp.QuoteMeta(sub) + `-[0-9][^/]*\.tgz$`)
+	unpacked := regexp.MustCompile(`^(.*/)?charts/` + regexp.QuoteMeta(sub) + `/(.*/)?crds/[^/]+$`)
+	packaged := regexp.MustCompile(`^(.*/)?charts/` + regexp.QuoteMeta(sub) + `-[0-9][^/]*\.tgz$`)
 	nestedCRD := regexp.MustCompile(`(^|/)crds/[^/]+$`)
 
 	var found []string
@@ -121,6 +133,39 @@ func excludedSubchartCRDs(t *testing.T, archive, sub string) []string {
 	})
 	return found
 }
+
+// templatedCollectedCRDs lists the files apply-crds.sh would still collect
+// from an unpacked chart archive, any */crds/*.yaml or .yml outside the
+// excluded subcharts, that carry a Helm template action.
+func templatedCollectedCRDs(t *testing.T, archive string, exclude []string) []string {
+	t.Helper()
+	collected := regexp.MustCompile(`(^|/)crds/(.*/)?[^/]+\.ya?ml$`)
+	var found []string
+	walkTarGz(t, archive, func(name string, r io.Reader) {
+		if !collected.MatchString(name) {
+			return
+		}
+		for _, sub := range exclude {
+			if strings.Contains("/"+name, "/charts/"+sub+"/") {
+				return
+			}
+		}
+		content, err := io.ReadAll(io.LimitReader(r, maxCRDFileBytes+1))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if len(content) > maxCRDFileBytes {
+			t.Fatalf("%s exceeds %d bytes", name, maxCRDFileBytes)
+		}
+		if strings.Contains(string(content), "{{") {
+			found = append(found, name)
+		}
+	})
+	return found
+}
+
+// maxCRDFileBytes bounds one CRD file read from a pulled chart.
+const maxCRDFileBytes = 16 << 20
 
 func walkTarGz(t *testing.T, path string, fn func(name string, r io.Reader)) {
 	t.Helper()
