@@ -1634,9 +1634,7 @@ func recipeDeclaresRDMAFabric(ref recipe.ComponentRef) bool {
 // fabricResources (derived from the recipe's own NicClusterPolicy and
 // SriovNetworkNodePolicy manifests by rdmaFabricResources) is allocatable in a
 // uniform, positive count across every Mellanox RDMA-capable GPU node, all of
-// them held continuously through one stability window. One window for the set
-// rather than one per resource: a per-resource sequence spends N windows of the
-// check budget on N rails and stops watching a rail once it has passed.
+// them held continuously through one stability window.
 //
 // Why span the whole RDMA cohort rather than one node: NCCL all-reduce and any
 // other all-to-all fabric test participate every node together, so a single node

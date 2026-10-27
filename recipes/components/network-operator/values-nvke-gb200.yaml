@@ -14,8 +14,7 @@
 
 # network-operator Helm values for GB200 NVKE InfiniBand (SR-IOV).
 #
-# NO ofedDriver, and unlike OKE not because of host MOFED: NVKE hosts run the
-# inbox mlx5_core from the -nvidia-64k kernel and OVN-Kubernetes (the primary
+# No ofedDriver: NVKE hosts run the inbox mlx5_core from the -nvidia-64k kernel and OVN-Kubernetes (the primary
 # CNI, on BlueField-3) is bound to it, so a DOCA driver container unloading
 # that module takes the node's primary address with it. The SR-IOV operator
 # creates the IB VFs on that inbox driver through sysfs.
@@ -34,8 +33,7 @@
 #
 # nvIpam and secondaryNetwork are off in the chart because the post-install
 # NicClusterPolicy manifest carries nvIpam (deployCR off so that manifest is
-# authoritative). No multus or cniPlugins anywhere: NVKE preinstalls multus
-# and the reference CNI plugins on every node.
+# authoritative).
 deployCR: false
 nvIpam:
   enabled: false

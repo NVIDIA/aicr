@@ -18,9 +18,8 @@
 # config daemon has created the VFs each SriovNetworkNodePolicy asks for and
 # the node is back in service. Unnamed, like the NicClusterPolicy readiness
 # gate: one state per selected node, and all of them must have converged.
-# The first step asserts the nv-ipam IPPool CRD is Established: the operator
-# creates it while reconciling the NicClusterPolicy, and the pools in this
-# component cannot have applied without it.
+# The first step asserts the nv-ipam IPPool CRD is Established, without which
+# the pools cannot have applied.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:

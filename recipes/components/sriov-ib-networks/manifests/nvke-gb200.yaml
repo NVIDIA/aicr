@@ -16,12 +16,9 @@
 # SriovNetworkNodePolicy and one SriovIBNetwork, as k8s-launch-kit generates
 # for `--deployment-type sriov --fabric infiniband` on this topology.
 #
-# Rail layout is from the reference tray's NetworkTopology snapshot (one
-# ConnectX-7 PF per PCI segment; mlx5_2 is the BlueField-3 and is not a rail):
-#   rail 0  0000:03:00.0  mlx5_0
-#   rail 1  0002:03:00.0  mlx5_1
-#   rail 2  0010:03:00.0  mlx5_3
-#   rail 3  0012:03:00.0  mlx5_4
+# Rail rootDevices are from the reference tray's NetworkTopology snapshot, one
+# ConnectX-7 PF per PCI segment (rails 0-3 are mlx5_0, mlx5_1, mlx5_3, mlx5_4;
+# mlx5_2 is the BlueField-3 and is not a rail).
 # numVfs 16 is the CX-7 firmware's NUM_OF_VFS on these trays (k8s-launch-kit
 # proposes 8) and cannot exceed it: the network-operator values disable the
 # config daemon's mellanox plugin, so nothing in the cluster changes firmware

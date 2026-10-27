@@ -19,10 +19,8 @@ metadata:
 
 spec:
   # Bare-metal GB200 NVL trays on NVKE: nothing GPU- or fabric-related is
-  # pre-installed. The host keeps the inbox mlx5_core (OVN-Kubernetes runs on
-  # it via BlueField-3), so the Network Operator ships no ofedDriver and
-  # GPUDirect RDMA is DMA-BUF only. Not chained under gb200-oke-training: that
-  # chain assumes an OCI-managed driver and OKE add-ons.
+  # pre-installed. Not chained under gb200-oke-training: that chain assumes an
+  # OCI-managed driver and OKE add-ons.
   base: nvke
 
   criteria:

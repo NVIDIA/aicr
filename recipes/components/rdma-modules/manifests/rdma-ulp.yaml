@@ -14,9 +14,8 @@
 
 # Loads the in-tree RDMA ULP modules rdma_ucm (pulls in rdma_cm), ib_umad and
 # ib_ipoib on Mellanox-NIC nodes and persists them via modules-load.d. Needed
-# where the RDMA stack is the inbox kernel driver with no OFED: nothing else
-# loads them (the GPU Operator only sets nvidia module parameters, the Network
-# Operator only loads modules through ofedDriver). ib_ipoib creates the IPoIB
+# where the RDMA stack is the inbox kernel driver: no operator loads them
+# without ofedDriver. ib_ipoib creates the IPoIB
 # netdevs that SR-IOV IB VFs (deviceType netdevice) and the ib-sriov CNI
 # operate on; rdma_ucm and ib_umad create the /dev/infiniband/rdma_cm and umad
 # nodes RDMA device plugins pass through to pods. This is rdma-core's

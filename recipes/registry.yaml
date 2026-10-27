@@ -441,9 +441,8 @@ components:
 
   # Per-rail SR-IOV InfiniBand objects (nv-ipam IPPool, SriovNetworkNodePolicy,
   # SriovIBNetwork) for the Network Operator's sriov-network-operator subchart.
-  # Manifest-only; requires network-operator as a componentRef dependency and
-  # is separate from it because the IPPool CRD is created by the operator
-  # while it reconciles the NicClusterPolicy, after that release is validated.
+  # Manifest-only; requires network-operator as a componentRef dependency
+  # (why it is separate: see its manifest header).
   - name: sriov-ib-networks
     displayName: sriov-ib-networks
     class: core

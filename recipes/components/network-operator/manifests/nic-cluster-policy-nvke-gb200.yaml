@@ -14,8 +14,7 @@
 
 # NicClusterPolicy for GB200 NVKE — SR-IOV InfiniBand.
 #
-# No ofedDriver: the host's inbox mlx5_core carries OVN-Kubernetes on the
-# BlueField-3, so it must never be replaced (see values-nvke-gb200.yaml).
+# No ofedDriver: see values-nvke-gb200.yaml.
 #
 # Only nvIpam here. The four ConnectX-7 IB rails are exposed as VFs by the
 # sriov-ib-networks component, whose SriovIBNetworks reference the nv-ipam

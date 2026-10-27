@@ -79,13 +79,9 @@ type sriovNetworkNodePolicyDoc struct {
 
 // rdmaFabricResources derives the extended-resource names the recipe's fabric
 // actually advertises, by rendering the relevant manifests with each
-// component's effective values and reading the resource declarations:
-//   - the device-plugin config embedded in ncpRef's NicClusterPolicy spec
-//     (rdmaSharedDevicePlugin on AKS "rdma/hca_shared_devices_a" and OKE GB200
-//     "nvidia.com/mlnxnics"; sriovDevicePlugin on OKE L40S "nvidia.com/mlnxnics");
-//   - every SriovNetworkNodePolicy any component in refs attaches (NVKE GB200,
-//     one resource per IB rail), which the NicClusterPolicy does not mention
-//     because the SR-IOV Network Operator owns that device plugin.
+// component's effective values and reading the resource declarations: the
+// device-plugin config in ncpRef's NicClusterPolicy, plus every
+// SriovNetworkNodePolicy any component in refs attaches.
 //
 // Deriving the resources from the manifests — instead of hardcoding a
 // per-provider constant — keeps verifyRDMAFabricReady polling for exactly what
