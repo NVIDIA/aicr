@@ -691,6 +691,36 @@ Applications first. `--bundle` does not limit phase 3, which still deletes
 CRDs in AICR's API groups cluster-wide, and with them every custom resource
 of those kinds. On a cluster shared with another tenant, add `--keep-crds`.
 
+### Workloads That Outlive Their Operator
+
+A user workload can hold objects of an AICR CRD in a namespace AICR does not
+own, for example a `DynamoGraphDeployment` or Grove `PodClique` in a serving
+namespace. Phase 1 uninstalls the operator that serves the CRD's conversion
+webhook and removes its finalizers, so deleting the CRD in phase 3 would hang:
+
+- the instances keep finalizers nothing will remove, so the CRD stays
+  `Terminating` and the next install of that operator fails on it;
+- every list of the kind fails on the dead webhook, so an AICR namespace that
+  phase 4 deletes stays `Terminating` with `NamespaceDeletionContentFailure`,
+  even when it is empty.
+
+Phase 3 therefore sets a webhook-converted CRD's conversion strategy to `None`
+before deleting it. After a short wait, for each CRD still `Terminating`, it
+clears the finalizers of the instances its deletion has already marked, except
+in `--exclude-ns` namespaces. Those objects are already being deleted with the
+CRD.
+
+`--keep-crds` changes neither, since a kept CRD must keep its webhook for the
+reinstalled operator. Instead, cleanup warns about each kept CRD whose webhook
+Service is gone: deleting any namespace hangs until its operator is
+reinstalled. Reinstall the operator before deleting namespaces, or run with
+`--keep-namespaces` as well.
+
+Cleanup ends by checking once more for CRDs and namespaces it deleted that are
+still `Terminating`. It names each one, with the namespace's deletion-failure
+condition, and finishes with "AICR cleanup finished with resources still
+terminating" instead of "AICR cleanup complete". Its exit status stays 0.
+
 ### Debugging Tests
 
 ```bash
