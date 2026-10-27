@@ -24,15 +24,20 @@ transitions:
     to: "1.1.0"
     verdict: safe
     verifiedBy: >-
-      Chart diff (helm pull of topograph 1.0.0 vs 1.1.0 from
-      https://helm.ngc.nvidia.com/nvidia/topograph): values.yaml changes are
-      additive (optional config.nodeMetadata, test-pod resources) and the
-      default image.repository moves to nvcr.io/nvidia/topograph/topograph,
-      which has the v1.1.0 image; the only template changes are an optional
-      nodeMetadata block in the ConfigMap, NOTES.txt text and test-pod
-      resources. No CRDs, no renamed or removed values, and no change to the
-      Deployment names AICR's health checks assert on. helm template renders
-      with AICR's values. Upstream release notes v1.1.0 list no breaking
+      Rendered diff (helm template of topograph 1.0.0 vs 1.1.0 from
+      https://helm.ngc.nvidia.com/nvidia/topograph, with this component's
+      values.yaml and provider.name aws, gcp and dra): the ClusterRole and
+      ClusterRoleBinding rules and the CPU and memory requests and limits of
+      the Deployment, node-observer and node-data-broker are identical, so the
+      v1.1.0 release-note items on ClusterRole gating and observer and broker
+      CPU defaults do not change what AICR renders. The only differences are
+      the container image (the default image.repository moves to
+      nvcr.io/nvidia/topograph/topograph:v1.1.0), the checksum/config pod
+      annotation (so pods roll on upgrade), and helm test pods (resources,
+      automountServiceAccountToken: false). Values changes are additive
+      (optional config.nodeMetadata, test-pod resources). No CRDs, no renamed
+      or removed values, and no change to the Deployment names AICR's health
+      checks assert on. Upstream release notes v1.1.0 list no breaking
       changes. Not exercised by a UAT or KWOK run.
     summary: >-
       Chart 1.1.0 changes the default image registry from ghcr.io to
