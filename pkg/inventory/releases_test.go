@@ -27,9 +27,11 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
@@ -240,7 +242,7 @@ func TestReadReleasesRefusesBeforeContactingAnyCluster(t *testing.T) {
 func TestReadReleasesErrors(t *testing.T) {
 	failingList := fake.NewSimpleClientset()
 	failingList.PrependReactor("list", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, errors.New(errors.ErrCodeUnavailable, "apiserver unavailable")
+		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "secrets"}, "", stderrors.New("denied"))
 	})
 	tests := []struct {
 		name  string
@@ -249,14 +251,12 @@ func TestReadReleasesErrors(t *testing.T) {
 		want  errors.ErrorCode
 	}{
 		{"invalid request", fake.NewSimpleClientset(), Options{Components: []Component{fixtureGPUOperator}}, errors.ErrCodeInvalidRequest},
-		{"failed list", failingList, Options{Deployer: DeployerHelm, Components: []Component{fixtureGPUOperator}}, errors.ErrCodeUnavailable},
+		{"forbidden list", failingList, Options{Deployer: DeployerHelm, Components: []Component{fixtureGPUOperator}}, errors.ErrCodeUnauthorized},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := readReleases(context.Background(), tt.typed, nil, tt.opts)
-			if !stderrors.Is(err, errors.New(tt.want, "")) {
-				t.Errorf("readReleases() error = %v, want %s", err, tt.want)
-			}
+			errorstest.WantReportedCode(t, err, tt.want)
 		})
 	}
 }
