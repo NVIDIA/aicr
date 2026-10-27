@@ -84,6 +84,11 @@ const (
 	gpuOperatorRelease  = "gpu-operator"
 )
 
+// disableConversionPatch drops a CRD's conversion webhook. The webhook field
+// must be cleared, since the API server rejects it unless the strategy is
+// Webhook.
+var disableConversionPatch = []byte(`{"spec":{"conversion":{"strategy":"None","webhook":null}}}`)
+
 var crdGVR = schema.GroupVersionResource{
 	Group:    "apiextensions.k8s.io",
 	Version:  "v1",
@@ -301,21 +306,24 @@ func (c *cleaner) uninstallReleases(ctx context.Context, releases []helmRelease)
 }
 
 // deleteObject deletes one object with del, which it skips under --dry-run.
-// It ignores NotFound and logs any other error.
-func (c *cleaner) deleteObject(ctx context.Context, resource, namespace, name string, del func(context.Context) error) {
+// It ignores NotFound and logs any other error. It reports whether the object
+// was deleted or already gone, which is false under --dry-run.
+func (c *cleaner) deleteObject(ctx context.Context, resource, namespace, name string, del func(context.Context) error) bool {
 	log := c.log.With("resource", resource, "name", name)
 	if namespace != "" {
 		log = log.With("namespace", namespace)
 	}
 	log.Info("deleting")
 	if c.opts.dryRun {
-		return
+		return false
 	}
 	ctx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
 	defer cancel()
 	if err := k8s.IgnoreNotFound(del(ctx)); err != nil {
 		log.Warn("delete failed", "error", err)
+		return false
 	}
+	return true
 }
 
 // deleteCRDs deletes the CRDs in AICR-owned groups. Phase 1 has already
@@ -350,10 +358,17 @@ func (c *cleaner) deleteCRDs(ctx context.Context) []string {
 			c.log.Info("skipping excluded CRD", "name", name)
 			continue
 		}
-		c.disableConversionWebhook(ctx, &crd)
-		c.deleteObject(ctx, crdGVR.Resource, "", name, func(ctx context.Context) error {
+		disabled := c.disableConversionWebhook(ctx, &crd)
+		ok := c.deleteObject(ctx, crdGVR.Resource, "", name, func(ctx context.Context) error {
 			return c.dyn.Resource(crdGVR).Delete(ctx, name, metav1.DeleteOptions{})
 		})
+		if !ok {
+			if disabled {
+				c.log.Warn("CRD left with its conversion webhook disabled after its delete failed. Re-run cleanup, or reinstall its operator with the CRD replaced",
+					"name", name)
+			}
+			continue
+		}
 		deleted = append(deleted, name)
 	}
 	if c.opts.dryRun || len(deleted) == 0 {
@@ -395,19 +410,25 @@ func (c *cleaner) warnDeadConversionWebhooks(ctx context.Context) {
 		if !aicrCRDGroups[group] || strategy != "Webhook" {
 			continue
 		}
-		svc, _, _ := unstructured.NestedStringMap(crd.Object, "spec", "conversion", "webhook", "clientConfig", "service")
-		if svc["name"] == "" || svc["namespace"] == "" {
+		// Read the fields one by one: the API server defaults the integer port,
+		// which NestedStringMap rejects.
+		svcName, _, _ := unstructured.NestedString(crd.Object, "spec", "conversion", "webhook", "clientConfig", "service", "name")
+		svcNS, _, _ := unstructured.NestedString(crd.Object, "spec", "conversion", "webhook", "clientConfig", "service", "namespace")
+		if svcName == "" || svcNS == "" {
 			continue
 		}
 		getCtx, getCancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
-		_, err := c.kube.CoreV1().Services(svc["namespace"]).Get(getCtx, svc["name"], metav1.GetOptions{})
+		_, err := c.kube.CoreV1().Services(svcNS).Get(getCtx, svcName, metav1.GetOptions{})
 		getCancel()
 		if !apierrors.IsNotFound(err) {
 			continue
 		}
-		c.log.Warn("kept CRD converts through a webhook whose Service is gone, so deleting any namespace hangs until its operator is reinstalled. "+
-			"Reinstall the operator before deleting namespaces, or keep them with --keep-namespaces",
-			"name", crd.GetName(), "service", svc["namespace"]+"/"+svc["name"])
+		advice := "Reinstall the operator before deleting namespaces, or keep them with --keep-namespaces"
+		if c.opts.keepNamespaces {
+			advice = "Reinstall the operator before deleting any namespace"
+		}
+		c.log.Warn("kept CRD converts through a webhook whose Service is gone, so deleting any namespace hangs until its operator is reinstalled. "+advice,
+			"name", crd.GetName(), "service", svcNS+"/"+svcName)
 	}
 }
 
@@ -425,20 +446,36 @@ func (c *cleaner) reportStillTerminating(ctx context.Context, crds, namespaces [
 	}
 	stuck := false
 	for _, name := range crds {
+		if ctx.Err() != nil {
+			return false
+		}
 		getCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
 		_, err := c.dyn.Resource(crdGVR).Get(getCtx, name, metav1.GetOptions{})
 		cancel()
-		if err == nil {
+		switch {
+		case apierrors.IsNotFound(err):
+		case err != nil:
+			stuck = true
+			c.log.Warn("could not confirm the CRD is gone", "name", name, "error", err)
+		default:
 			stuck = true
 			c.log.Warn("CRD still terminating, so reinstalling its operator fails until it is gone. "+
 				"Check its instances for finalizers", "name", name)
 		}
 	}
 	for _, name := range namespaces {
+		if ctx.Err() != nil {
+			return false
+		}
 		getCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
 		ns, err := c.kube.CoreV1().Namespaces().Get(getCtx, name, metav1.GetOptions{})
 		cancel()
+		if apierrors.IsNotFound(err) {
+			continue
+		}
 		if err != nil {
+			stuck = true
+			c.log.Warn("could not confirm the namespace is gone", "namespace", name, "error", err)
 			continue
 		}
 		stuck = true
@@ -457,23 +494,25 @@ func (c *cleaner) reportStillTerminating(ctx context.Context, crds, namespaces [
 // disableConversionWebhook sets a webhook-converted CRD's conversion strategy
 // to None, so its objects can still be listed once the webhook's operator is
 // gone. It is called only on CRDs about to be deleted, since a kept CRD would
-// keep serving unconverted objects after the operator is reinstalled.
-func (c *cleaner) disableConversionWebhook(ctx context.Context, crd *unstructured.Unstructured) {
+// keep serving unconverted objects after the operator is reinstalled. It
+// reports whether it disabled the webhook, which is false under --dry-run.
+func (c *cleaner) disableConversionWebhook(ctx context.Context, crd *unstructured.Unstructured) bool {
 	strategy, _, _ := unstructured.NestedString(crd.Object, "spec", "conversion", "strategy")
 	if strategy != "Webhook" {
-		return
+		return false
 	}
 	log := c.log.With("name", crd.GetName())
 	log.Info("disabling conversion webhook before deleting CRD")
 	if c.opts.dryRun {
-		return
+		return false
 	}
-	patch := []byte(`{"spec":{"conversion":{"strategy":"None","webhook":null}}}`)
 	patchCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
 	defer cancel()
-	if _, err := c.dyn.Resource(crdGVR).Patch(patchCtx, crd.GetName(), types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+	if _, err := c.dyn.Resource(crdGVR).Patch(patchCtx, crd.GetName(), types.MergePatchType, disableConversionPatch, metav1.PatchOptions{}); err != nil {
 		log.Warn("could not disable conversion webhook, so listing this kind may fail until the CRD is gone", "error", err)
+		return false
 	}
+	return true
 }
 
 // rescueCRDInstances clears the finalizers of the instances of CRD name that

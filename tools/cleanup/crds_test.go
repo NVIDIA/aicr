@@ -16,11 +16,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -44,7 +46,7 @@ func webhookCRD(name, group, plural string) *unstructured.Unstructured {
 		},
 		"conversion": map[string]any{
 			"strategy": "Webhook",
-			"webhook":  map[string]any{"clientConfig": map[string]any{"service": map[string]any{"name": "op", "namespace": "dynamo-system"}}},
+			"webhook":  map[string]any{"clientConfig": map[string]any{"service": map[string]any{"name": "op", "namespace": "dynamo-system", "path": "/convert", "port": int64(443)}}},
 		},
 	}
 	return u
@@ -128,8 +130,13 @@ func TestDeleteCRDsDisablesConversionWebhook(t *testing.T) {
 			}
 			var patchedBeforeDelete bool
 			for _, a := range f.dyn.Actions() {
-				if a.GetVerb() == "patch" && a.GetResource() == crdGVR {
-					patchedBeforeDelete = true
+				if p, ok := a.(k8stesting.PatchAction); ok && p.GetResource() == crdGVR {
+					if p.GetName() == "dynamographdeployments.nvidia.com" {
+						patchedBeforeDelete = true
+					}
+					if got := string(p.GetPatch()); got != string(disableConversionPatch) {
+						t.Errorf("patch body = %s, want %s", got, disableConversionPatch)
+					}
 				}
 				if d, ok := a.(k8stesting.DeleteAction); ok && d.GetName() == "dynamographdeployments.nvidia.com" && !patchedBeforeDelete {
 					t.Error("dynamographdeployments.nvidia.com was deleted before its conversion webhook was disabled")
@@ -314,4 +321,32 @@ func TestRunReportsStuckNamespaceInsteadOfComplete(t *testing.T) {
 	if strings.Contains(f.out.String(), `msg="AICR cleanup complete"`) {
 		t.Errorf("run reported complete with a namespace left\noutput:\n%s", f.out.String())
 	}
+}
+
+func TestDeleteCRDsFailedDeleteIsNotReported(t *testing.T) {
+	f := crdFixture(webhookCRD("dynamographdeployments.nvidia.com", "nvidia.com", "dynamographdeployments"))
+	f.dyn.PrependReactor("delete", crdGVR.Resource, func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewInternalError(errors.New("etcd unavailable"))
+	})
+
+	if got := f.cleaner(options{assumeYes: true}).deleteCRDs(context.Background()); len(got) != 0 {
+		t.Errorf("deleteCRDs() = %q, want no CRDs reported deleted", got)
+	}
+	f.wantOutput(t, `msg="CRD left with its conversion webhook disabled after its delete failed. `+
+		`Re-run cleanup, or reinstall its operator with the CRD replaced" name=dynamographdeployments.nvidia.com`)
+	if strings.Contains(f.out.String(), "stuck terminating") {
+		t.Errorf("rescued a CRD that was never deleted\noutput:\n%s", f.out.String())
+	}
+}
+
+func TestReportStillTerminatingGetErrorIsNotGone(t *testing.T) {
+	f := crdFixture()
+	f.kube.PrependReactor("get", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewServiceUnavailable("apiserver restarting")
+	})
+
+	if !f.cleaner(options{assumeYes: true}).reportStillTerminating(context.Background(), nil, []string{"monitoring"}) {
+		t.Error("reportStillTerminating() = false, want a Get error counted as not confirmed gone")
+	}
+	f.wantOutput(t, `msg="could not confirm the namespace is gone" namespace=monitoring`)
 }
