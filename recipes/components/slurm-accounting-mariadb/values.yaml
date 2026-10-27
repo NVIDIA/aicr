@@ -27,7 +27,7 @@ mariadb:
   # pin. Keep the tag: the operator picks the server's entrypoint script by
   # the version in the tag, and a digest-only reference falls back to its
   # default version, 12.3.
-  image: mariadb:11.8.9@sha256:f16d7a344413e519dff518f27bdb221388f84b0d274c97c4fb5f2cb0dc1b34fa
+  image: mariadb:11.8.9@sha256:6a4b3c20cffebc8b2d9248924f6a63285176c15a532b8e4840b8804e1c2c0443
   rootPasswordSecretKeyRef:
     name: mariadb-root-password
     key: root
