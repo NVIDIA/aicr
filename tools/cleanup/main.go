@@ -72,9 +72,11 @@ installed out-of-band:
   go run ./tools/cleanup --exclude-ns skyhook --exclude-crd skyhook.nvidia.com,nodewright.nvidia.com
 
 --bundle limits helm uninstall and namespace deletion to what one bundle
-installed, for example on a cluster shared with another tenant's bundle:
+installed, for example on a cluster shared with another tenant's bundle.
+CRDs in AICR's API groups are still deleted cluster-wide, along with the
+other tenant's custom resources, unless --keep-crds is set:
 
-  go run ./tools/cleanup --bundle ./bundles
+  go run ./tools/cleanup --bundle ./bundles --keep-crds
 
 Flags:
 `

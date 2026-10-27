@@ -687,7 +687,9 @@ alone. A directory with no `bundle-info.yaml` is an error, so pass the root
 of a `--split` bundle set, not one of its class directories. For a bundle
 that predates the index, omit `--bundle`. An Argo CD bundle installs Applications, not
 Helm releases, so phase 1 uninstalls nothing and cleanup warns to delete the
-Applications first. CRD deletion in phase 3 is unchanged by `--bundle`.
+Applications first. `--bundle` does not limit phase 3, which still deletes
+CRDs in AICR's API groups cluster-wide, and with them every custom resource
+of those kinds. On a cluster shared with another tenant, add `--keep-crds`.
 
 ### Debugging Tests
 
