@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -474,53 +475,85 @@ func validateInheritedIdentity(p ComponentRef) error {
 // against a namespace the component does not live in (kube-system, a CRD's
 // owner), and rewriting every namespace it mentions would break those.
 func rebindHealthCheckNamespace(ref *ComponentRef, from, to string) error {
-	if strings.TrimSpace(ref.HealthCheckAsserts) == "" || from == "" {
+	if from == "" {
 		return nil
+	}
+	rebound, err := rewriteHealthCheck(ref.Name, ref.HealthCheckAsserts, "its namespace", func(doc any) bool {
+		return retargetNamespace(doc, from, to)
+	})
+	if err != nil {
+		return err
+	}
+	ref.HealthCheckAsserts = rebound
+	return nil
+}
+
+// rewriteHealthCheck returns asserts with rewrite applied to each document, or
+// asserts itself when rewrite reports no change. inheriting describes what
+// component is inheriting, for error messages.
+func rewriteHealthCheck(component, asserts, inheriting string, rewrite func(doc any) bool) (string, error) {
+	if strings.TrimSpace(asserts) == "" {
+		return asserts, nil
 	}
 	// Decoded as a stream, not a single value. Nothing restricts this field to
 	// one document, and yaml.Unmarshal reads only the first: re-serializing
 	// that alone would silently drop every later assertion, leaving a check
 	// that passes without verifying what it claims to.
-	dec := yaml.NewDecoder(strings.NewReader(ref.HealthCheckAsserts))
-	var (
-		docs    []any
-		changed bool
-	)
-	for {
-		var doc any
-		err := dec.Decode(&doc)
-		if stderrors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-				"failed to parse health check for component %q while inheriting its namespace", ref.Name), err)
-		}
-		if doc == nil {
-			continue
-		}
-		if retargetNamespace(doc, from, to) {
+	docs, err := decodeHealthCheck(asserts)
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"failed to parse health check for component %q while inheriting %s", component, inheriting), err)
+	}
+	changed := false
+	for _, doc := range docs {
+		if rewrite(doc) {
 			changed = true
 		}
-		docs = append(docs, doc)
 	}
 	if !changed {
-		return nil
+		return asserts, nil
 	}
+	out, err := encodeHealthCheck(docs)
+	if err != nil {
+		return "", errors.PropagateOrWrap(err, errors.ErrCodeInternal, fmt.Sprintf(
+			"failed to serialize health check for component %q after inheriting %s", component, inheriting))
+	}
+	return out, nil
+}
+
+// encodeHealthCheck serializes docs as one YAML stream.
+func encodeHealthCheck(docs []any) (string, error) {
 	var out bytes.Buffer
 	for i, doc := range docs {
 		data, err := serializer.MarshalYAMLDeterministic(doc)
 		if err != nil {
-			return errors.PropagateOrWrap(err, errors.ErrCodeInternal, fmt.Sprintf(
-				"failed to serialize health check for component %q after inheriting its namespace", ref.Name))
+			return "", err
 		}
 		if i > 0 {
 			out.WriteString("---\n")
 		}
 		out.Write(data)
 	}
-	ref.HealthCheckAsserts = out.String()
-	return nil
+	return out.String(), nil
+}
+
+// decodeHealthCheck decodes each non-empty document in asserts.
+func decodeHealthCheck(asserts string) ([]any, error) {
+	dec := yaml.NewDecoder(strings.NewReader(asserts))
+	var docs []any
+	for {
+		var doc any
+		err := dec.Decode(&doc)
+		if stderrors.Is(err, io.EOF) {
+			return docs, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if doc != nil {
+			docs = append(docs, doc)
+		}
+	}
 }
 
 // retargetNamespace walks a decoded document rewriting every `namespace: from`
@@ -529,29 +562,53 @@ func rebindHealthCheckNamespace(ref *ComponentRef, from, to string) error {
 // ours, and a path that assumed spec.steps[].try[].assert would silently miss
 // a namespace nested anywhere else.
 func retargetNamespace(node any, from, to string) bool {
-	changed := false
-	switch n := node.(type) {
-	case map[string]any:
-		for k, v := range n {
-			if k == "namespace" {
-				if s, ok := v.(string); ok && s == from {
-					n[k] = to
+	return walkStrings(node, healthCheckDepth, func(path []string, s string) (string, bool) {
+		return to, path[len(path)-1] == "namespace" && s == from
+	})
+}
+
+// healthCheckDepth leaves a health-check walk unbounded, which is safe because
+// yaml.v3 rejects an alias that contains itself.
+const healthCheckDepth = math.MaxInt
+
+// walkStrings calls visit with the path to each string under node, replaces the
+// string when visit reports true, and reports whether any was replaced. A list
+// element's path segment is "[i]". A container deeper than maxDepth segments is
+// not walked.
+func walkStrings(node any, maxDepth int, visit func(path []string, s string) (string, bool)) bool {
+	var walk func(node any, path []string) bool
+	walk = func(node any, path []string) bool {
+		if len(path) > maxDepth {
+			return false
+		}
+		changed := false
+		step := func(segment string, v any, set func(string)) {
+			// Cloned so sibling paths never share a backing array.
+			child := append(slices.Clone(path), segment)
+			if s, isString := v.(string); isString {
+				if replacement, replace := visit(child, s); replace {
+					set(replacement)
 					changed = true
 				}
-				continue
+				return
 			}
-			if retargetNamespace(v, from, to) {
+			if walk(v, child) {
 				changed = true
 			}
 		}
-	case []any:
-		for _, v := range n {
-			if retargetNamespace(v, from, to) {
-				changed = true
+		switch n := node.(type) {
+		case map[string]any:
+			for k, v := range n {
+				step(k, v, func(s string) { n[k] = s })
+			}
+		case []any:
+			for i, v := range n {
+				step(fmt.Sprintf("[%d]", i), v, func(s string) { n[i] = s })
 			}
 		}
+		return changed
 	}
-	return changed
+	return walk(node, nil)
 }
 
 // coherenceProblem reports why a resolved ComponentRef's deployment-shape
