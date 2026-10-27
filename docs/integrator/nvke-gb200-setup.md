@@ -155,21 +155,25 @@ Argo CD or Terraform, build with `--readiness-hooks`: the `network-operator`
 readiness gate waits for the NicClusterPolicy to reach `ready`, which the
 operator reports only after its nv-ipam state, CRDs included, is applied, so
 the pools follow it. Helmfile cannot take `--readiness-hooks` and its bundle
-has no CRD wait, so install it in two stages:
+has no CRD wait, so install it in two stages. `kubectl wait` fails at once on
+an object that does not exist yet, so wait for the CRD to be created before
+waiting for it to be Established (`--for=create` needs kubectl 1.31 or later):
 
 ```bash
 cd bundle
 helmfile -l 'name!=sriov-ib-networks' apply
-kubectl wait --for=condition=Established crd/ippools.nv-ipam.nvidia.com --timeout=10m
+kubectl wait --for=create crd/ippools.nv-ipam.nvidia.com --timeout=10m
+kubectl wait --for=condition=Established crd/ippools.nv-ipam.nvidia.com --timeout=2m
 helmfile -l name=sriov-ib-networks apply
 ```
 
 Flux does not support readiness hooks either. If `sriov-ib-networks`
 exhausts its install retries on the missing CRD, wait for the CRD to be
-Established, then reset the release:
+created and Established, then reset the release:
 
 ```bash
-kubectl wait --for=condition=Established crd/ippools.nv-ipam.nvidia.com --timeout=10m
+kubectl wait --for=create crd/ippools.nv-ipam.nvidia.com --timeout=10m
+kubectl wait --for=condition=Established crd/ippools.nv-ipam.nvidia.com --timeout=2m
 flux reconcile helmrelease sriov-ib-networks -n flux-system --reset
 ```
 
@@ -184,8 +188,19 @@ every `SriovNetworkNodeState` to return to `Succeeded` before uninstalling
 `network-operator`: removing the policies makes the config daemon request a
 drain through the Maintenance Operator, and uninstalling the operators while
 that drain is in flight orphans the `NodeMaintenance`, which leaves the node
-cordoned with nothing left to release it. Delete the stale
-`nodemaintenances.maintenance.nvidia.com` object to uncordon.
+cordoned with nothing left to release it. The Maintenance Operator's
+controller is what removes the `maintenance.nvidia.com/finalizer` from a
+`NodeMaintenance` and uncordons its node, so with the operator gone either
+reinstall `network-operator` and let it finish the cleanup, or recover by hand:
+
+```bash
+kubectl get nodemaintenances.maintenance.nvidia.com -A
+kubectl delete nodemaintenance '<name>' -n '<namespace>' --wait=false
+# Only if the object stays pending on its finalizer:
+kubectl patch nodemaintenance '<name>' -n '<namespace>' --type=merge \
+  -p '{"metadata":{"finalizers":null}}'
+kubectl uncordon '<node>'
+```
 
 A shared-HCA variant (`rdmaSharedDevicePlugin`, one pooled `nvidia.com/mlnxnics`
 resource over the PFs, no IPoIB) was qualified first on the same cluster and
