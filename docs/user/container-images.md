@@ -82,9 +82,9 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | slinky-slurm | helm | slurm | 1.2.2 | 5 |
 | slinky-slurm-operator | helm | slurm-operator | 1.2.2 | 2 |
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.2 | 0 |
-| slinky-topograph | helm | topograph/topograph | 1.0.0 | 1 |
+| slinky-topograph | helm | topograph/topograph | 1.1.0 | 1 |
 | slurm-accounting-mariadb | helm | mariadb-cluster | 26.10.1 | 1 |
-| topograph | helm | topograph/topograph | 1.0.0 | 1 |
+| topograph | helm | topograph/topograph | 1.1.0 | 1 |
 
 ## Version variants
 
@@ -393,7 +393,7 @@ _No images extracted._
 
 ### slinky-topograph
 
-- `ghcr.io/nvidia/topograph:v1.0.0`
+- `nvcr.io/nvidia/topograph/topograph:v1.1.0`
 
 ### slurm-accounting-mariadb
 
@@ -401,7 +401,7 @@ _No images extracted._
 
 ### topograph
 
-- `ghcr.io/nvidia/topograph:v1.0.0`
+- `nvcr.io/nvidia/topograph/topograph:v1.1.0`
 
 ### dynamo-platform@1.5.0 (variant)
 

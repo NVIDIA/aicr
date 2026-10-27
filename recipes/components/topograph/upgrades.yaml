@@ -1,0 +1,60 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The floor starts at 1.0.0, the first release whose chart this record has
+# compared; 0.x charts predate the engine-keyed values layout and are not
+# vouched for. The chart is shared with the sibling topograph component
+# (slinky-topograph and topograph); keep the two records in step.
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: topograph
+transitions:
+  - from: ">=1.0.0 <1.1.0"
+    to: "1.1.0"
+    verdict: safe
+    verifiedBy: >-
+      Rendered diff (helm template of topograph 1.0.0 from the GitHub Pages
+      repo https://dsx-ai-factory.github.io/topograph, the chart AICR shipped
+      (topograph-1.0.0.tgz, sha256 67c75092...), vs 1.1.0 from
+      https://helm.ngc.nvidia.com/nvidia/topograph, with this component's
+      values.yaml and the overlay overrides: provider.name aws, gcp and dra,
+      k8s and slinky engines). NGC's 1.0.0 is a different package and is not
+      the baseline. Chart defaults AICR does not override change: the k8s
+      engine ClusterRole drops pods list and apps/daemonsets get and merges
+      the node rules into one get,list,patch rule; the slinky engine
+      ClusterRole narrows nodes to list only and drops daemonsets get; the
+      node-observer CPU limit goes 400m to 1000m; the node-data-broker
+      DaemonSet CPU request and limit go 100m to 200m where the broker is
+      enabled (EKS and GKE leaves). The RBAC narrowing removes nothing AICR's
+      engine and provider combinations use: upstream v1.1.0 k8s engine uses
+      only nodes get, list, patch, and the non-dynamic slinky engine uses
+      pods list, nodes list and configmaps (node patch only under
+      useDynamicNodes, which AICR does not set); the daemonsets get path
+      serves only the nvidia-smi accelerator source, which AICR does not use.
+      Other differences are the container image (the default image.repository
+      moves to nvcr.io/nvidia/topograph/topograph:v1.1.0), the checksum/config
+      pod annotation (so pods roll on upgrade), and helm test pods (resources,
+      automountServiceAccountToken: false). Values changes are additive
+      (optional config.nodeMetadata, test-pod resources). No CRDs, no renamed
+      or removed values, and no change to the Deployment names AICR's health
+      checks assert on. Upstream release notes v1.1.0 list no breaking
+      changes. Not exercised by a UAT or KWOK run.
+    summary: >-
+      Chart 1.1.0 changes the default image registry from ghcr.io to
+      nvcr.io/nvidia/topograph/topograph, narrows the chart's default
+      ClusterRole, and raises default CPU (node-observer limit 400m to 1000m;
+      the node-data-broker requests 100m more CPU per GPU node on EKS and
+      GKE). Nothing the recipe sets is renamed or removed.
+    references:
+      - https://github.com/dsx-ai-factory/topograph/releases/tag/v1.1.0

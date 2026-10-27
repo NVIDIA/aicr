@@ -1634,18 +1634,18 @@ components:
   - name: slinky-topograph
     displayName: slinky-topograph
     class: ops
+    upgrades:
+      file: components/slinky-topograph/upgrades.yaml
     valueOverrideKeys:
       - slinkytopograph
     healthCheck:
       assertFile: checks/slinky-topograph/health-check.yaml
     helm:
-      # The topograph repository moved from NVIDIA to dsx-ai-factory; GitHub
-      # redirects the repository but not its Pages site, so the old index
-      # 404s. See issue #2793.
-      defaultRepository: https://dsx-ai-factory.github.io/topograph
+      # Topograph charts are published to NGC, not GitHub Pages (issue #2793).
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia/topograph
       defaultChart: topograph/topograph
-      # renovate: datasource=helm depName=topograph registryUrl=https://dsx-ai-factory.github.io/topograph
-      defaultVersion: "1.0.0"
+      # renovate: datasource=helm depName=topograph registryUrl=https://helm.ngc.nvidia.com/nvidia/topograph
+      defaultVersion: "1.1.0"
       defaultNamespace: topograph
     nodeScheduling:
       system:
@@ -1672,15 +1672,17 @@ components:
   - name: topograph
     displayName: topograph
     class: ops
+    upgrades:
+      file: components/topograph/upgrades.yaml
     valueOverrideKeys:
       - topograph
     healthCheck:
       assertFile: checks/topograph/health-check.yaml
     helm:
-      defaultRepository: https://dsx-ai-factory.github.io/topograph
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia/topograph
       defaultChart: topograph/topograph
-      # renovate: datasource=helm depName=topograph registryUrl=https://dsx-ai-factory.github.io/topograph
-      defaultVersion: "1.0.0"
+      # renovate: datasource=helm depName=topograph registryUrl=https://helm.ngc.nvidia.com/nvidia/topograph
+      defaultVersion: "1.1.0"
       defaultNamespace: topograph
     nodeScheduling:
       system:
