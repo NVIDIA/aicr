@@ -366,7 +366,8 @@ jobs:
           # bound has a cause:
           #   - training only: the inference budget has no room for the longer
           #     faultinject step, and a serving workload left on the node would
-          #     hold node-drainer, so janitor would never reboot it.
+          #     hold node-drainer for up to its deleteAfterTimeoutMinutes, past
+          #     the budget, so janitor would not reboot it in time.
           #   - nightly only: quarantine leaves the node cordoned with the fault
           #     set, which a held daytime cluster would keep.
           #   - helmfile only: the argocd budget has no room either.

@@ -603,6 +603,10 @@ components:
       - fault-remediation.maintenance.templates.gpureset
       - janitor-provider.csp.generic.rebootImage
       - node-drainer.userNamespaces
+      - node-drainer.deleteAfterTimeoutMinutes
+      - node-drainer.evictionTimeoutInSeconds
+      - node-drainer.drainGPUPods
+      - node-drainer.partialDrainEnabled
       - node-drainer.customDrain.enabled
       - node-drainer.customDrain.templateConfigMapName
       - node-drainer.customDrain.templateMountPath
@@ -766,6 +770,10 @@ components:
       # no snapshot evidence or the cluster has more than one default.
       - function: CheckNVSentinelFileServerStorageClass
         severity: warning
+      # Blocking: node-drainer's drain scope and timing (#2626). The rules are
+      # in the function's doc.
+      - function: CheckNVSentinelDrainScopeCoherent
+        severity: error
 
   # NVSentinel's remediation datastore, added only by the nvsentinel-observe,
   # -quarantine and -remediation mixins. Bundled apart from NVSentinel's own

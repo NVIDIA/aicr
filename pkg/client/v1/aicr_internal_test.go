@@ -19,6 +19,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -2135,5 +2136,90 @@ func TestResolveRecipeInheritFromRestoresRegistryIdentity(t *testing.T) {
 	}
 	if !slices.Equal(ref.PreManifestFiles, []string{"components/prior/pre.yaml"}) {
 		t.Errorf("PreManifestFiles = %v, want the inherited set", ref.PreManifestFiles)
+	}
+}
+
+// TestBundleComponents_NVSentinelDrainScope keeps the SDK's values in step
+// with DefaultBundler.Make: with node-drainer on, the nvsentinel values carry
+// the generated drain scope, and the drain scope gate runs on them.
+func TestBundleComponents_NVSentinelDrainScope(t *testing.T) {
+	t.Parallel()
+
+	sentinel := func(drainer bool, nodeDrainer map[string]any) map[string]any {
+		nd := map[string]any{
+			"deleteAfterTimeoutMinutes": 300, "evictionTimeoutInSeconds": "60",
+			"drainGPUPods": false, "partialDrainEnabled": false,
+		}
+		maps.Copy(nd, nodeDrainer)
+		return map[string]any{
+			"global": map[string]any{
+				"faultQuarantine": map[string]any{"enabled": true},
+				"nodeDrainer":     map[string]any{"enabled": drainer},
+				"datastore":       map[string]any{"provider": "postgresql"},
+			},
+			"node-drainer": nd,
+		}
+	}
+	tests := []struct {
+		name     string
+		values   map[string]any
+		want     []string
+		wantNot  []string
+		wantCode aicrerrors.ErrorCode
+	}{
+		{name: "node-drainer on gets the generated scope and mode",
+			values: sentinel(true, nil), want: []string{"cert-manager", "DeleteAfterTimeout"}},
+		{name: "node-drainer off is left alone",
+			values: sentinel(false, nil), wantNot: []string{"systemNamespaces", "DeleteAfterTimeout"}},
+		{name: "an operator pattern in the recipe is kept beside the generated one",
+			values: sentinel(true, map[string]any{"systemNamespaces": "^(team-infra)$"}),
+			want:   []string{"cert-manager", "|(?:^(team-infra)$)"}},
+		{name: "an operator pattern that does not compile fails",
+			values: sentinel(true, map[string]any{"systemNamespaces": "^("}), wantCode: aicrerrors.ErrCodeInvalidRequest},
+		{name: "both drain lists set fails the gate",
+			values: sentinel(true, map[string]any{
+				"userNamespaces":   []any{map[string]any{"name": "*", "mode": "DeleteAfterTimeout"}},
+				"podDrainPolicies": []any{map[string]any{"name": "w", "podSelector": "role=w", "mode": "Immediate"}},
+			}),
+			wantCode: aicrerrors.ErrCodeInvalidRequest},
+	}
+	client := newClientForBundleTest(t)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := newRecipeResultForBundleTest(client,
+				[]recipe.ComponentRef{
+					{Name: "cert-manager", Namespace: "cert-manager", Type: recipe.ComponentTypeHelm},
+					{Name: "nvsentinel", Namespace: "nvsentinel", Type: recipe.ComponentTypeHelm, Overrides: tt.values},
+				},
+				[]ComponentRef{{Name: "cert-manager", Kind: "Helm"}, {Name: "nvsentinel", Kind: "Helm"}},
+			)
+			bundles, err := client.BundleComponents(context.Background(), r)
+			if tt.wantCode != "" {
+				errorstest.WantReportedCode(t, err, tt.wantCode)
+				return
+			}
+			if err != nil {
+				t.Fatalf("BundleComponents: %v", err)
+			}
+			for _, b := range bundles {
+				if b.Component.Name != "nvsentinel" {
+					continue
+				}
+				values := string(b.HelmValues)
+				for _, want := range tt.want {
+					if !strings.Contains(values, want) {
+						t.Errorf("nvsentinel values lack %q:\n%s", want, values)
+					}
+				}
+				for _, not := range tt.wantNot {
+					if strings.Contains(values, not) {
+						t.Errorf("nvsentinel values carry %q with node-drainer off:\n%s", not, values)
+					}
+				}
+				return
+			}
+			t.Fatal("no nvsentinel bundle")
+		})
 	}
 }
