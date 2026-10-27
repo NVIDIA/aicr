@@ -16,11 +16,18 @@ package inventory
 
 import (
 	"context"
+	"encoding/json"
 	stderrors "errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
@@ -251,6 +258,67 @@ func TestReadReleasesErrors(t *testing.T) {
 				t.Errorf("readReleases() error = %v, want %s", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestReadReleasesFromKubeconfig(t *testing.T) {
+	secret := helmSecret("nvidia-gpu-operator", "gpu-operator", 1, "deployed",
+		releasePayload(t, "gpu-operator", "nvidia-gpu-operator", "deployed", "gpu-operator", "v25.3.3", 1))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		var list any
+		switch r.URL.Path {
+		case "/api/v1/secrets":
+			list = &corev1.SecretList{
+				TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "SecretList"},
+				Items:    []corev1.Secret{*secret},
+			}
+		case "/api/v1/configmaps":
+			list = &corev1.ConfigMapList{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMapList"}}
+		default:
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewEncoder(w).Encode(list); err != nil {
+			t.Errorf("encode %s: %v", r.URL.Path, err)
+		}
+	}))
+	defer server.Close()
+
+	kubeconfig := filepath.Join(t.TempDir(), "kubeconfig")
+	if err := os.WriteFile(kubeconfig, []byte(`apiVersion: v1
+kind: Config
+clusters:
+- name: fake
+  cluster:
+    server: `+server.URL+`
+users:
+- name: fake
+  user: {}
+contexts:
+- name: fake
+  context:
+    cluster: fake
+    user: fake
+current-context: fake
+`), 0o600); err != nil {
+		t.Fatalf("write kubeconfig: %v", err)
+	}
+
+	got, err := ReadReleases(context.Background(), Options{
+		Kubeconfig: kubeconfig,
+		Deployer:   DeployerHelm,
+		Components: []Component{fixtureGPUOperator},
+	})
+	if err != nil {
+		t.Fatalf("ReadReleases() error = %v", err)
+	}
+	want := Releases{Components: map[string][]Record{"gpu-operator": {{
+		Source: "helm", Name: "gpu-operator", Namespace: "nvidia-gpu-operator",
+		InstallNamespace: "nvidia-gpu-operator", Status: "deployed",
+	}}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ReadReleases() = %+v, want %+v", got, want)
 	}
 }
 
