@@ -412,8 +412,8 @@ open gaps are named concretely with verifiable close conditions.
 **Negative.** AICR carries a component whose pin does not yet pass every gate.
 Two of the four gaps are mitigated only by caller discipline (Decision 6), so
 an opt-in validator that ignores it can strand GPU capacity — a risk that
-exists until upstream adds a run-level node-footprint cap and a run deadline. Since the
-amendment, those two no longer block stock adoption, because AICR's own limits
+exists until upstream adds a run-level node-footprint cap, a run deadline, and a
+deletion that confirms child workloads stopped. Since the amendment, those two no longer block stock adoption, because AICR's own limits
 satisfy the gate; the chart SBOM, the runtime closure (follow-up 5), and the
 gates still unassessed do, so the PoC's measured value is not yet available to
 stock recipes.
