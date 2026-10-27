@@ -64,7 +64,8 @@ const fluxManaged = "Flux's helm-controller manages it, so delete its HelmReleas
 type releaseReader func(context.Context, inventory.Options) (inventory.Releases, error)
 
 // inventoryDeployers lists one deployer per distinct release naming. helm
-// covers helmfile, terraform and fleet, and argocd covers argocd-helm.
+// covers helmfile, terraform and fleet, and argocd covers argocd-helm. helm
+// is read before flux, so its match decides a release both namings claim.
 var inventoryDeployers = []inventory.Deployer{inventory.DeployerHelm, inventory.DeployerFlux, inventory.DeployerArgoCD}
 
 // readInstalled adds to c.owners every Helm release the inventory attributes
@@ -92,7 +93,13 @@ func (c *cleaner) readInstalled(ctx context.Context) {
 					applications = append(applications, rec.Name)
 					continue
 				}
-				c.owners.set(recordKey(rec), managedBy(d, rec))
+				key := recordKey(rec)
+				// A component with no namespace has the same release name
+				// under the helm and flux namings.
+				if _, claimed := c.owners.releases[key]; claimed && d == inventory.DeployerFlux {
+					continue
+				}
+				c.owners.set(key, managedBy(d, rec))
 			}
 		}
 		stamped = append(stamped, got.Stamped...)

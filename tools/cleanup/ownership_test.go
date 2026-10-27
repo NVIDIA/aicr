@@ -199,6 +199,35 @@ func TestRunWithInventory(t *testing.T) {
 	)
 }
 
+// TestRunUninstallsLegacyReleaseBothNamingsClaim drives a helm install of a
+// legacy component, which has no namespace and so the same release name under
+// the flux naming, through phases 1 and 4.
+func TestRunUninstallsLegacyReleaseBothNamingsClaim(t *testing.T) {
+	f := newFixture(clusterObjects(), clusterCRDs()...)
+	f.helm.releases = []helmRelease{{Name: "skyhook-operator", Namespace: "skyhook"}}
+	rec := helmRecord("skyhook-operator", "skyhook")
+	inv := &fakeInventory{results: map[inventory.Deployer]inventory.Releases{
+		inventory.DeployerHelm: {Components: map[string][]inventory.Record{"skyhook-operator": {rec}}},
+		inventory.DeployerFlux: {Components: map[string][]inventory.Record{"skyhook-operator": {rec}}},
+	}}
+	c := f.cleaner(options{assumeYes: true})
+	c.readReleases = inv.read
+
+	if err := c.run(context.Background(), nil); err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+
+	if want := []string{"skyhook/skyhook-operator"}; !slices.Equal(f.helm.uninstalled, want) {
+		t.Errorf("uninstalled = %q, want %q", f.helm.uninstalled, want)
+	}
+	if f.namespaceExists(t, "skyhook") {
+		t.Error("namespace skyhook was not deleted")
+	}
+	if strings.Contains(f.out.String(), "skipping helm release a controller manages") {
+		t.Errorf("a plain helm release was left to a controller\noutput:\n%s", f.out.String())
+	}
+}
+
 func TestRunSkipsInventoryWithoutReleaseList(t *testing.T) {
 	f := newFixture([]runtime.Object{namespace("gpu-operator")})
 	inv := clusterInventory()
