@@ -265,10 +265,7 @@ type TelemetryConfig struct {
 type PromQLConsumerConfig struct {
 	// MonitorsFrom names components whose namespaces, as resolved in the
 	// recipe, hold the ServiceMonitors and PodMonitors exposing Series. Those
-	// monitors must not set spec.scrapeClass: the series filter is the
-	// server's default scrape class and the server defines no other. The
-	// bundler cannot check this, because operators create some monitors at
-	// run time.
+	// monitors must not set spec.scrapeClass.
 	MonitorsFrom []string `yaml:"monitorsFrom,omitempty"`
 
 	// Series are RE2 patterns matched against the whole metric name as
