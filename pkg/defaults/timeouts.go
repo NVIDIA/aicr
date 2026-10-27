@@ -35,6 +35,15 @@ const (
 	// PCI enumeration and kernel module listing are fast local operations
 	// reading from sysfs/procfs, so a short timeout is sufficient.
 	NFDDetectionTimeout = 5 * time.Second
+
+	// HostReadTimeout is how long the OS collector waits on one procfs read
+	// before skipping the file. A healthy read returns in microseconds.
+	HostReadTimeout = 1 * time.Second
+
+	// MaxStalledHostReads is how many procfs reads the sysctl sweep abandons
+	// before skipping the rest of the subtype. Each abandoned read holds an OS
+	// thread until the kernel returns.
+	MaxStalledHostReads = 3
 )
 
 // Node topology collector constants.
@@ -250,6 +259,12 @@ const (
 
 	// K8sJobCompletionTimeout is the default timeout for job completion.
 	K8sJobCompletionTimeout = 5 * time.Minute
+
+	// AgentExitGracePeriod is how long the snapshot CLI waits for the agent
+	// Job to complete after the agent writes this run's snapshot. Past it, the
+	// CLI returns the snapshot with a warning. A healthy Job completes within
+	// seconds of the write.
+	AgentExitGracePeriod = 30 * time.Second
 
 	// K8sCleanupTimeout is the timeout for cleanup operations.
 	K8sCleanupTimeout = 30 * time.Second

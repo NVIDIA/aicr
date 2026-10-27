@@ -147,7 +147,31 @@ func (d *Deployer) WaitForCompletion(ctx context.Context, timeout time.Duration)
 // GetSnapshot retrieves the snapshot data from the ConfigMap created by the agent.
 // Returns the snapshot YAML content.
 func (d *Deployer) GetSnapshot(ctx context.Context) ([]byte, error) {
-	return d.getSnapshotFromConfigMap(ctx)
+	return d.getSnapshotFromConfigMap(ctx, false)
+}
+
+// GetRunSnapshot is like GetSnapshot but returns only a snapshot this run's
+// agent wrote, so it is safe to call before the Job completes. It returns
+// ErrCodeNotFound when the output ConfigMap carries another run's ID, or
+// carries none and is a caller-named cm:// destination.
+func (d *Deployer) GetRunSnapshot(ctx context.Context) ([]byte, error) {
+	return d.getSnapshotFromConfigMap(ctx, true)
+}
+
+// WaitForSnapshotWritten blocks until the output ConfigMap holds a snapshot
+// GetRunSnapshot would accept. It needs list and watch on ConfigMaps in the
+// output namespace, and returns ErrCodeTimeout when ctx ends or
+// ErrCodeUnavailable when the ConfigMap cannot be listed or watched. An error
+// means no snapshot was seen, not that the run failed.
+func (d *Deployer) WaitForSnapshotWritten(ctx context.Context) error {
+	return d.waitForSnapshotWritten(ctx)
+}
+
+// PodPlacement returns the name of this run's agent pod and the node it is
+// scheduled on, or ErrCodeNotFound if no live pod exists. nodeName is empty
+// for a pod not yet scheduled.
+func (d *Deployer) PodPlacement(ctx context.Context) (podName, nodeName string, err error) {
+	return d.findPodPlacement(ctx)
 }
 
 // Cleanup removes exactly the objects this Deployer created: the Job, the

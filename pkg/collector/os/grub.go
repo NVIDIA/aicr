@@ -47,7 +47,7 @@ func (c *Collector) collectGRUB(ctx context.Context) (*measurement.Subtype, erro
 		file.WithKVDelimiter(fileKVDelGrub),
 	)
 
-	params, err := parser.GetMap(filePathGrub)
+	params, err := readHostFile(ctx, filePathGrub, parser.GetMap)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read GRUB params from %s", filePathGrub), err)
 	}

@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
@@ -28,6 +29,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/watch"
 )
 
 // waitForJobCompletion waits for the Job to complete successfully or fail.
@@ -35,8 +37,34 @@ func (d *Deployer) waitForJobCompletion(ctx context.Context, timeout time.Durati
 	return pod.WaitForJobCompletion(ctx, d.clientset, d.config.Namespace, d.jobName(), timeout)
 }
 
-// getSnapshotFromConfigMap retrieves the snapshot data from ConfigMap.
-func (d *Deployer) getSnapshotFromConfigMap(ctx context.Context) ([]byte, error) {
+// snapshotDataKey is the ConfigMap data key the in-pod agent writes its YAML
+// snapshot under.
+const snapshotDataKey = "snapshot.yaml"
+
+// snapshotWatchResumeBackoff is the pause before waitForSnapshotWritten
+// re-lists after a watch ends. It is a variable so tests can shorten it.
+var snapshotWatchResumeBackoff = defaults.K8sJobWatchResumeBackoff
+
+// snapshotWrittenByRun reports whether cm holds a snapshot this run's agent
+// wrote. A ConfigMap with snapshot data is accepted when:
+//   - its run ID stamp equals a non-empty Config.RunID
+//   - it is unstamped, from an agent image that predates the stamp, and is the
+//     run-owned staging ConfigMap, since a caller-named destination may hold
+//     an earlier run's snapshot
+func (d *Deployer) snapshotWrittenByRun(cm *corev1.ConfigMap) bool {
+	if _, ok := cm.Data[snapshotDataKey]; !ok {
+		return false
+	}
+	if stamp, stamped := cm.Annotations[labels.RunID]; stamped {
+		return d.config.RunID != "" && stamp == d.config.RunID
+	}
+	return d.config.OwnsOutputConfigMap
+}
+
+// getSnapshotFromConfigMap retrieves the snapshot data from ConfigMap. When
+// requireThisRun is set, a ConfigMap snapshotWrittenByRun rejects is reported
+// as ErrCodeNotFound.
+func (d *Deployer) getSnapshotFromConfigMap(ctx context.Context, requireThisRun bool) ([]byte, error) {
 	// Parse ConfigMap name from output URI
 	namespace, name, err := pod.ParseConfigMapURI(d.config.Output)
 	if err != nil {
@@ -47,6 +75,12 @@ func (d *Deployer) getSnapshotFromConfigMap(ctx context.Context) ([]byte, error)
 	cm, err := d.clientset.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf("failed to get ConfigMap %s/%s", namespace, name), err)
+	}
+
+	if requireThisRun && !d.snapshotWrittenByRun(cm) {
+		return nil, errors.NewWithContext(errors.ErrCodeNotFound,
+			fmt.Sprintf("ConfigMap %s/%s does not hold a snapshot written by this run", namespace, name),
+			map[string]any{attrRunID: d.config.RunID, "stamp": cm.Annotations[labels.RunID]})
 	}
 
 	// The staging ConfigMap is written by the in-pod agent, not this
@@ -60,12 +94,87 @@ func (d *Deployer) getSnapshotFromConfigMap(ctx context.Context) ([]byte, error)
 	}
 
 	// Extract snapshot data
-	snapshot, ok := cm.Data["snapshot.yaml"]
+	snapshot, ok := cm.Data[snapshotDataKey]
 	if !ok {
-		return nil, errors.New(errors.ErrCodeNotFound, fmt.Sprintf("ConfigMap %s/%s does not contain 'snapshot.yaml' key", namespace, name))
+		return nil, errors.New(errors.ErrCodeNotFound, fmt.Sprintf("ConfigMap %s/%s does not contain '%s' key", namespace, name, snapshotDataKey))
 	}
 
 	return []byte(snapshot), nil
+}
+
+// waitForSnapshotWritten implements WaitForSnapshotWritten.
+func (d *Deployer) waitForSnapshotWritten(ctx context.Context) error {
+	namespace, name, err := pod.ParseConfigMapURI(d.config.Output)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to parse ConfigMap URI", err)
+	}
+	cms := d.clientset.CoreV1().ConfigMaps(namespace)
+	selector := "metadata.name=" + name
+
+	// Watching from the List's ResourceVersion, and re-listing whenever the
+	// watch ends, means no write is missed across a reconnect.
+	for {
+		list, err := cms.List(ctx, metav1.ListOptions{FieldSelector: selector})
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "waiting for snapshot ConfigMap")
+			}
+			return errors.Wrap(errors.ErrCodeUnavailable,
+				fmt.Sprintf("failed to list ConfigMap %s/%s", namespace, name), err)
+		}
+		for i := range list.Items {
+			if d.snapshotWrittenByRun(&list.Items[i]) {
+				return nil
+			}
+		}
+
+		watcher, err := cms.Watch(ctx, metav1.ListOptions{
+			FieldSelector:   selector,
+			ResourceVersion: list.ResourceVersion,
+		})
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "waiting for snapshot ConfigMap")
+			}
+			return errors.Wrap(errors.ErrCodeUnavailable,
+				fmt.Sprintf("failed to watch ConfigMap %s/%s", namespace, name), err)
+		}
+		written, err := d.consumeSnapshotWatch(ctx, watcher)
+		watcher.Stop()
+		if err != nil || written {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "waiting for snapshot ConfigMap")
+		case <-time.After(snapshotWatchResumeBackoff):
+		}
+	}
+}
+
+// consumeSnapshotWatch reads watcher until an event carries a snapshot
+// snapshotWrittenByRun accepts, which reports written, or the stream closes or
+// errors, which reports neither written nor err. It returns ErrCodeTimeout when
+// ctx ends.
+func (d *Deployer) consumeSnapshotWatch(ctx context.Context, watcher watch.Interface) (written bool, err error) {
+	for {
+		select {
+		case <-ctx.Done():
+			return false, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "waiting for snapshot ConfigMap")
+		case event, ok := <-watcher.ResultChan():
+			if !ok || event.Type == watch.Error {
+				return false, nil
+			}
+			cm, isCM := event.Object.(*corev1.ConfigMap)
+			if !isCM || event.Type == watch.Deleted {
+				continue
+			}
+			if d.snapshotWrittenByRun(cm) {
+				return true, nil
+			}
+		}
+	}
 }
 
 // deleteStagingConfigMap deletes the staging ConfigMap in d.config.Namespace
@@ -87,7 +196,7 @@ func (d *Deployer) deleteStagingConfigMap(ctx context.Context, name string, uid 
 //
 // The sweep needs evidence that cannot come from the object it deletes. The
 // staging ConfigMap is written by the in-pod agent through pkg/serializer's
-// ConfigMapWriter, which stamps neither aicr.run/run-id nor the
+// ConfigMapWriter, which stamps neither an aicr.run/run-id label nor the
 // aicr.run/invocation-id that authorizes every other cleanup delete — and
 // cannot be made to, because the agent image may be a different aicr version
 // than this controller, so a controller requiring that label would fail closed
@@ -151,7 +260,7 @@ func (d *Deployer) stillHoldsJob(ctx context.Context, job createdObject) bool {
 // That re-check is app.kubernetes.io/name only. The staging ConfigMap is
 // written by pkg/serializer's ConfigMapWriter from inside the pod, which
 // stamps name/component/version and — unlike objectLabels() — no
-// aicr.run/run-id, no managed-by and no aicr.run/invocation-id, so
+// aicr.run/run-id label, no managed-by and no aicr.run/invocation-id, so
 // createdByThisInvocation() does not apply to it and the Job gate above is
 // what carries the ownership proof. The check still rules out an unrelated
 // ConfigMap parked at this name, and component is deliberately not required:
@@ -277,18 +386,30 @@ func ownedByJob(pod *corev1.Pod, jobUID types.UID) bool {
 // Skips pods that are being deleted or have already failed so an
 // orphaned pod from a prior run is not selected.
 func (d *Deployer) findPodName(ctx context.Context) (string, error) {
+	name, _, err := d.findPodPlacement(ctx)
+	return name, err
+}
+
+// findPodPlacement is findPodName plus the node the chosen pod is scheduled
+// on.
+func (d *Deployer) findPodPlacement(ctx context.Context) (podName, nodeName string, err error) {
 	pods, err := d.clientset.CoreV1().Pods(d.config.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: d.podLabelSelector(),
 	})
 	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to list Pods", err)
+		return "", "", errors.Wrap(errors.ErrCodeInternal, "failed to list Pods", err)
 	}
 
 	name := pickLivePod(pods.Items, d.jobUID())
 	if name == "" {
-		return "", errors.New(errors.ErrCodeNotFound, fmt.Sprintf("no Pods found for Job %s", d.jobName()))
+		return "", "", errors.New(errors.ErrCodeNotFound, fmt.Sprintf("no Pods found for Job %s", d.jobName()))
 	}
-	return name, nil
+	for i := range pods.Items {
+		if pods.Items[i].Name == name {
+			return name, pods.Items[i].Spec.NodeName, nil
+		}
+	}
+	return name, "", nil
 }
 
 // pickLivePod returns the name of the youngest pod that is neither being
