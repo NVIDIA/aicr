@@ -299,22 +299,8 @@ func TestCollector_StalledSingleFileReadSkipsOnlyItsSubtype(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tmpRoot := t.TempDir()
-			fifos := plantFIFOs(t, tmpRoot, "stalled")
-			plantFiles(t, tmpRoot, map[string]string{
-				"cmdline":           "BOOT_IMAGE=/vmlinuz quiet",
-				"modules":           "nvidia 1 0 - Live 0x0",
-				"sys/vm/swappiness": "60",
-			})
-
-			originalGrub, originalKMod := filePathGrub, filePathKMod
-			filePathGrub = filepath.Join(tmpRoot, "cmdline")
-			filePathKMod = filepath.Join(tmpRoot, "modules")
-			*tt.path = fifos[0]
-			t.Cleanup(func() { filePathGrub, filePathKMod = originalGrub, originalKMod })
-			withSysctlRoot(t, filepath.Join(tmpRoot, "sys"))
+			stallSingleFileRead(t, tt.path)
 			withHostReadTimeout(t, stalledReadTimeout)
-			t.Cleanup(func() { releaseFIFOs(fifos) })
 
 			m, err := (&Collector{}).Collect(context.Background())
 			if err != nil {
@@ -334,24 +320,99 @@ func TestCollector_StalledSingleFileReadSkipsOnlyItsSubtype(t *testing.T) {
 	}
 }
 
-// TestReadHostFile_ContextEndsWhileStalled checks that ctx ending during a
-// parked read returns a transient error, not a skipped-read stall.
-func TestReadHostFile_ContextEndsWhileStalled(t *testing.T) {
-	fifos := plantFIFOs(t, t.TempDir(), "stalled")
-	withHostReadTimeout(t, time.Hour)
+// TestCollector_ContextEndsDuringSingleFileReadFails checks that ctx ending
+// while a grub or kmod read is parked fails the OS measurement from that
+// subtype, without first logging it as skipped.
+func TestCollector_ContextEndsDuringSingleFileReadFails(t *testing.T) {
+	tests := []struct {
+		name string
+		path *string
+	}{
+		{"grub", &filePathGrub},
+		{"kmod", &filePathKMod},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stallSingleFileRead(t, tt.path)
+			withHostReadTimeout(t, time.Hour)
+			logs := captureWarnings(t)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			time.AfterFunc(stalledReadTimeout, cancel)
+
+			m, err := (&Collector{}).Collect(ctx)
+			if err == nil {
+				t.Fatalf("Collect() = %v, want an error once ctx is canceled", m)
+			}
+			if !stderrors.Is(err, context.Canceled) {
+				t.Errorf("Collect() error = %v, want it to wrap context.Canceled", err)
+			}
+			if skipped := "failed to collect " + tt.name; strings.Contains(logs.String(), skipped) {
+				t.Errorf("logs contain %q, want the cancel reported only as an error:\n%s", skipped, logs)
+			}
+		})
+	}
+}
+
+// stallSingleFileRead points the grub and kmod paths at plain files under a
+// temporary root, then points path at a FIFO whose read never returns.
+func stallSingleFileRead(t *testing.T, path *string) {
+	t.Helper()
+	tmpRoot := t.TempDir()
+	fifos := plantFIFOs(t, tmpRoot, "stalled")
+	plantFiles(t, tmpRoot, map[string]string{
+		"cmdline":           "BOOT_IMAGE=/vmlinuz quiet",
+		"modules":           "nvidia 1 0 - Live 0x0",
+		"sys/vm/swappiness": "60",
+	})
+
+	originalGrub, originalKMod := filePathGrub, filePathKMod
+	filePathGrub = filepath.Join(tmpRoot, "cmdline")
+	filePathKMod = filepath.Join(tmpRoot, "modules")
+	*path = fifos[0]
+	t.Cleanup(func() { filePathGrub, filePathKMod = originalGrub, originalKMod })
+	withSysctlRoot(t, filepath.Join(tmpRoot, "sys"))
 	t.Cleanup(func() { releaseFIFOs(fifos) })
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), stalledReadTimeout)
-	defer cancel()
+// TestReadHostFile_ContextEndsWhileStalled checks that ctx ending during a
+// parked read, by deadline or cancel, returns a transient error, not a
+// skipped-read stall.
+func TestReadHostFile_ContextEndsWhileStalled(t *testing.T) {
+	tests := []struct {
+		name string
+		ctx  func() (context.Context, context.CancelFunc)
+		want error
+	}{
+		{"deadline", func() (context.Context, context.CancelFunc) {
+			return context.WithTimeout(context.Background(), stalledReadTimeout)
+		}, context.DeadlineExceeded},
+		{"cancel", func() (context.Context, context.CancelFunc) {
+			ctx, cancel := context.WithCancel(context.Background())
+			time.AfterFunc(stalledReadTimeout, cancel)
+			return ctx, cancel
+		}, context.Canceled},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fifos := plantFIFOs(t, t.TempDir(), "stalled")
+			withHostReadTimeout(t, time.Hour)
+			t.Cleanup(func() { releaseFIFOs(fifos) })
 
-	_, err := readHostFile(ctx, fifos[0], os.ReadFile)
-	if !errors.IsTransient(err) {
-		t.Fatalf("readHostFile() error = %v, want a transient timeout", err)
-	}
-	if isHostReadStalled(err) {
-		t.Errorf("a context deadline must not be reported as a stalled read: %v", err)
-	}
-	if !stderrors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("readHostFile() error = %v, want it to wrap context.DeadlineExceeded", err)
+			ctx, cancel := tt.ctx()
+			defer cancel()
+
+			_, err := readHostFile(ctx, fifos[0], os.ReadFile)
+			if !errors.IsTransient(err) {
+				t.Fatalf("readHostFile() error = %v, want a transient timeout", err)
+			}
+			if isHostReadStalled(err) {
+				t.Errorf("an ended context must not be reported as a stalled read: %v", err)
+			}
+			if !stderrors.Is(err, tt.want) {
+				t.Errorf("readHostFile() error = %v, want it to wrap %v", err, tt.want)
+			}
+		})
 	}
 }

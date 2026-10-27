@@ -61,8 +61,10 @@ func readHostFile[T any](ctx context.Context, path string, read func(string) (T,
 	case r := <-done:
 		return r.val, r.err
 	case <-ctx.Done():
-		return zero, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout,
-			fmt.Sprintf("reading %s", path))
+		// ErrCodeTimeout even on cancel, because the OS collector fails only on
+		// a transient error and skips the subtype on any other.
+		return zero, errors.Wrap(errors.ErrCodeTimeout,
+			fmt.Sprintf("reading %s", path), ctx.Err())
 	case <-timer.C:
 		slog.Warn("host read did not return, skipping it; the node may need attention, and the agent pod may be unable to exit",
 			slog.String("path", path),
