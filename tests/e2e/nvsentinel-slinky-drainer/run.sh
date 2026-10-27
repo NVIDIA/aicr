@@ -318,10 +318,13 @@ publish_proto() {
   local version
   version=$(yq '.components[] | select(.name == "nvsentinel") | .helm.defaultVersion' "${ROOT}/recipes/registry.yaml")
   [[ -n "${version}" && "${version}" != "null" ]] || err "could not read nvsentinel's defaultVersion"
-  curl -fsSL --connect-timeout 10 --max-time 60 \
-    "https://raw.githubusercontent.com/NVIDIA/NVSentinel/${version}/data-models/protobufs/health_event.proto" |
-    awk '/protoc_gen_crd\/proto\/crd.proto/ {next} /^\/\/ HealthEventResource is the root type/ {exit} {print}' \
-      >"${WORK}/health_event.proto" || err "failed to fetch health_event.proto at ${version}"
+  # Download before trimming: awk exits at the marker, and a curl still writing
+  # into the closed pipe fails with "(23) Failed writing body".
+  curl -fsSL --connect-timeout 10 --max-time 60 -o "${WORK}/health_event.proto.raw" \
+    "https://raw.githubusercontent.com/NVIDIA/NVSentinel/${version}/data-models/protobufs/health_event.proto" ||
+    err "failed to fetch health_event.proto at ${version}"
+  awk '/protoc_gen_crd\/proto\/crd.proto/ {next} /^\/\/ HealthEventResource is the root type/ {exit} {print}' \
+    "${WORK}/health_event.proto.raw" >"${WORK}/health_event.proto"
   grep -q "rpc HealthEventOccurredV1" "${WORK}/health_event.proto" ||
     err "health_event.proto at ${version} has no HealthEventOccurredV1 -- the platform-connector API moved"
   kc -n nvsentinel create configmap e2e-health-event-proto \

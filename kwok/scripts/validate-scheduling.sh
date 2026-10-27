@@ -1059,6 +1059,15 @@ generate_bundle() {
             --set "dynamoplatform:nats.config.jetstream.fileStore.enabled=false"
         )
     fi
+    # The nvsentinel-log-collector mixin's in-cluster file server claims a
+    # ReadWriteOnce volume that KWOK's fake nodes cannot bind, so its pod stays
+    # Pending; run it on emptyDir, as the Slurm and Dynamo stores above do.
+    if yq eval '.componentRefs[] | select(.name == "nvsentinel") | .overrides.global.inclusterFileServer.enabled' \
+            "${WORK_DIR}/recipe.yaml" 2>/dev/null | grep -qx true; then
+        conditional_sets+=(
+            --set "nvsentinel:incluster-file-server.persistence.enabled=false"
+        )
+    fi
 
     # No NVSentinel --set remedies here. The recipes assign
     # labeler.assumeDriverInstalled and, on AKS,

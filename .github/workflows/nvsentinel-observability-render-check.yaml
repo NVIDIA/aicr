@@ -26,7 +26,8 @@
 # health-events-analyzer one asserts the workload, its datastore wiring and
 # that the mixin names every rule the chart ships, the event-exporter one
 # asserts the workload, its OIDC Secret and datastore wiring and its config,
-# and the CRD
+# the log-collector one asserts the collector Job, the file server it uploads
+# to and that server's volume and images, and the CRD
 # exclusion one asserts the chart still ships mongodb-store's CRDs where
 # nvsentinel's ownsCRDsExcludeSubcharts expects them.
 # All are gated on testing.Short() -- `make
@@ -103,6 +104,7 @@ jobs:
             TestNVSentinelSlinkyDrainerChartRender
             TestNVSentinelHealthEventsAnalyzerChartRender
             TestNVSentinelEventExporterChartRender
+            TestNVSentinelLogCollectorChartRender
           )
           pattern="^($(IFS='|'; echo "${tests[*]}"))$"
           out=$(go test ./pkg/bundler/validations/... -run "$pattern" -v -count=1 2>&1) && rc=0 || rc=$?
