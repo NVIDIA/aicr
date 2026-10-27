@@ -1077,8 +1077,9 @@ func warnUnreboundObjectNames(inheritFrom string, pins []recipe.ObjectNamePin, r
 			"field", pin.Path,
 			"inherited", pin.Inherited,
 			"current", pin.Current,
-			"reason", "a check is rebound only where an object name begins with a fullnameOverride "+
-				"both artifacts state, because an unset side takes a name the chart derives from the release",
+			"reason", "a check is rebound only for a fullnameOverride both artifacts state, only where an "+
+				"object name begins with it, and only when no other pin moves the same current name to a "+
+				"different inherited one. An unset side takes a name the chart derives from the release",
 			"remedy", "check the component's health check against the deployed object names")
 	}
 	for _, ref := range refs {
