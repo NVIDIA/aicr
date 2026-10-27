@@ -3,7 +3,8 @@
 ## Status
 
 **Proposed** — 2026-09-02. Amended 2026-10-26: AICR's own run limits satisfy
-the execution-safety gates, so upstream bounds no longer gate stock adoption;
+the node-cap, run-deadline, and cleanup bullets of the execution-safety gate, so
+upstream bounds no longer gate stock adoption;
 see [Amendment: AICR's limits](#amendment-aicrs-limits).
 
 Reviews upstream
@@ -232,7 +233,9 @@ ADR-019 analogue — k8s-aibom observes workloads, while NVCRE creates them.
   own limits, not by an upstream bound; see
   [Amendment: AICR's limits](#amendment-aicrs-limits).
 - Documented `TrainJob` cleanup on completion, failure, and cancellation. Met
-  the same way: the caller confirms the workloads stopped.
+  the same way while the validator pod lives: the caller confirms the workloads
+  stopped. A killed pod is covered only by the orphan reclaim, which needs a
+  later CRE check in the same namespace and an orphan at least 45 minutes old.
 - A bounded termination condition for adaptive fault isolation's bisection,
   in both total runs and wall-clock.
 - The controller creates no workload without an explicit `Certification`,
@@ -283,8 +286,9 @@ setting `manager.image.tag` to `v0.1.0@sha256:ed1e5928…`; and anonymous public
 pull for both chart and image.
 
 Four gates are unmet on this pin. None blocks registry-only admission; all are
-tracked in [Follow-Up Decisions](#follow-up-decisions) and must close before
-the stock-adoption amendment.
+tracked in [Follow-Up Decisions](#follow-up-decisions). Gaps 1 and 2 must close
+before the stock-adoption amendment. Gaps 3 and 4 are met by AICR's own limits
+(see [Amendment: AICR's limits](#amendment-aicrs-limits)) and do not.
 
 Supply chain — upstream release-workflow changes, not AICR work:
 
@@ -368,10 +372,12 @@ enforced in the validator and none depending on a future NVCRE release:
 | Wait for a terminal state | 30 minutes from creation, expiry reported as a failure; the same value is written to `spec.timeoutPerJob` as a backstop | `defaults.CRECertificationTimeout` |
 | Measurement finalization | 5 minutes after the job succeeds; expiry fails the check rather than falling back to provisional results | `defaults.CREMeasurementFinalizeTimeout` |
 | Teardown | 10 minutes to delete the `Certification` and confirm its `TrainJob`s and GPU pods are gone; an unconfirmed teardown fails the check | `defaults.CRECertificationTeardownTimeout` |
-| Orphans | A `Certification` labeled `app.kubernetes.io/managed-by=aicr-validator` and older than the sum of the three bounds above is reclaimed by the next run | `defaults.CREOrphanReclaimAge` |
+| Orphans | A `Certification` labeled `app.kubernetes.io/managed-by=aicr-validator` and older than the sum of the three bounds above (45 minutes) is reclaimed by the next CRE check in the same namespace | `defaults.CREOrphanReclaimAge` |
 
 These satisfy the first two *Benchmark execution safety* bullets for a check
-that observes them. The gate attaches to the check, not to the pin: a new
+that observes them. A validator pod that is killed never runs its teardown, so
+for that case the cleanup bullet rests on the orphan reclaim alone, which needs
+a later CRE check in the same namespace. The gate attaches to the check, not to the pin: a new
 opt-in validator that omits a limit does not meet it. Upstream bounds remain
 welcome and stay tracked as follow-ups 3 and 4, but they are no longer
 conditions for the stock-adoption amendment.
@@ -406,8 +412,9 @@ Two of the four gaps are mitigated only by caller discipline (Decision 6), so
 an opt-in validator that ignores it can strand GPU capacity — a risk that
 exists until upstream bounds `nodesPerJob` and adds a run deadline. Since the
 amendment, those two no longer block stock adoption, because AICR's own limits
-satisfy the gate; the chart SBOM and the gates still unassessed do, so the
-PoC's measured value is not yet available to stock recipes.
+satisfy the gate; the chart SBOM, the runtime closure (follow-up 5), and the
+gates still unassessed do, so the PoC's measured value is not yet available to
+stock recipes.
 
 ## Follow-Up Decisions
 
