@@ -1846,9 +1846,23 @@ CRDs underneath it.
    helm uninstall k8s-aibom -n k8s-aibom-system
    ```
 
-   For Argo CD, delete the owning `Application`. For Flux, delete the
-   `HelmRelease`. Under Terraform, `terraform apply` of the regenerated bundle
-   already removed it.
+   For Flux, delete the `HelmRelease`. Under Terraform, `terraform apply` of
+   the regenerated bundle already removed it.
+
+   For Argo CD, deleting the child `Application` is not an uninstall. AICR sets
+   no `resources-finalizer.argocd.argoproj.io` finalizer by default, so the
+   controller keeps running, and the parent app-of-apps recreates a child it
+   still declares. Add the finalizer to the child, then apply the regenerated
+   bundle from step 1. Bundles built with `--set deployer:cascadeDelete=true`
+   already carry it. The parent prunes the child, and Argo CD deletes
+   everything the child rendered except its CRDs, which a cascading delete
+   never removes.
+
+   ```bash
+   APP="k8s-aibom"  # the child Application, its namePrefix plus the component name
+   kubectl -n argocd patch application "${APP}" --type=merge \
+     -p '{"metadata":{"finalizers":["resources-finalizer.argocd.argoproj.io"]}}'
+   ```
 
    For Fleet, do not `helm uninstall` the release. Fleet still declares it and
    reinstalls it on the next reconcile. Remove it from Fleet instead, and leave
