@@ -232,7 +232,10 @@ ADR-019 analogue — k8s-aibom observes workloads, while NVCRE creates them.
 
 - A stated maximum node count and run deadline per certification. Met by AICR's
   own limits, not by an upstream bound; see
-  [Amendment: AICR's limits](#amendment-aicrs-limits).
+  [Amendment: AICR's limits](#amendment-aicrs-limits). The deadline is the
+  validator's in-process wait, so it holds while the validator pod lives: a
+  killed pod is bounded only by CRE's `spec.timeoutPerJob`, whose clock restarts
+  when a workload is replaced (gap 4), and by the orphan reclaim below.
 - Documented `TrainJob` cleanup on completion, failure, and cancellation. Met
   the same way while the validator pod lives: the caller confirms the workloads
   stopped. A killed pod is covered only by the orphan reclaim, which needs a
@@ -372,15 +375,19 @@ enforced in the validator and none depending on a future NVCRE release:
 |---|---|---|
 | Node footprint | An explicit `target.nodeNames` list, capped at the node count each combination was qualified at (two on `eks` × `h100`); an empty list is refused | `creQualifiedEntries`, `buildCRECertification` |
 | Wait for a terminal state | 30 minutes from creation, expiry reported as a failure; the same value is written to `spec.timeoutPerJob` as a backstop | `defaults.CRECertificationTimeout` |
-| Measurement finalization | 5 minutes after the job succeeds; expiry fails the check rather than falling back to provisional results | `defaults.CREMeasurementFinalizeTimeout` |
+| Measurement finalization | 5 minutes after the `Certification`'s terminal state is observed; expiry fails the check rather than falling back to provisional results | `defaults.CREMeasurementFinalizeTimeout` |
 | Teardown | 10 minutes to delete the `Certification` and confirm its `TrainJob`s and GPU pods are gone; an unconfirmed teardown fails the check | `defaults.CRECertificationTeardownTimeout` |
 | Orphans | A `Certification` labeled `app.kubernetes.io/managed-by=aicr-validator` and older than the sum of the three bounds above (45 minutes) is reclaimed by the next CRE check in the same namespace that reaches the reclaim step: one with a constraint, a qualified combination, and enough nodes | `defaults.CREOrphanReclaimAge` |
 
 These satisfy the first two *Benchmark execution safety* bullets for a check
-that observes them. A validator pod that is killed never runs its teardown, so
-for that case the cleanup bullet rests on the orphan reclaim alone, which needs
-a later CRE check in the same namespace that gets as far as the reclaim step. The gate attaches to the check, not to the pin: a new
-opt-in validator that omits a limit does not meet it. Upstream bounds remain
+that observes them, while its validator pod lives. A pod that is killed never
+runs its wait or its teardown, so for that case the run deadline falls back to
+CRE's `spec.timeoutPerJob` (whose clock restarts when a workload is replaced)
+and the cleanup bullet rests on the orphan reclaim alone, which needs a later
+CRE check in the same namespace that gets as far as the reclaim step.
+
+The gate attaches to the check, not to the pin: a new opt-in validator that
+omits a limit does not meet it. Upstream bounds remain
 welcome and stay tracked as follow-ups 3 and 4, but they are no longer
 conditions for the stock-adoption amendment.
 
