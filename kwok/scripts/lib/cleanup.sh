@@ -38,10 +38,10 @@ readonly SYSTEM_NS_PATTERN="default|kube-node-lease|kube-public|kube-system|kwok
 
 # sriov_subchart_enabled reports whether a Helm release enables the
 # network-operator chart's sriov-network-operator subchart. A values read
-# failure counts as not enabled, so the uninstall keeps its hooks.
+# failure or timeout counts as not enabled, so the uninstall keeps its hooks.
 sriov_subchart_enabled() {
     local release=$1 namespace=$2 enabled
-    enabled=$(helm get values "$release" -n "$namespace" -o json 2>/dev/null |
+    enabled=$(timeout 30s helm get values "$release" -n "$namespace" -o json 2>/dev/null |
         jq -r '.sriovNetworkOperator.enabled // false' 2>/dev/null) || return 1
     [[ "$enabled" == "true" ]]
 }
