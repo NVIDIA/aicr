@@ -35,8 +35,10 @@
 #
 # TEST-ONLY SETTINGS, passed as --set on the bundle, as in
 # tests/e2e/nvsentinel-remediation:
-#   node-drainer.systemNamespaces  includes cert-manager and local-path-storage,
-#       so the AllowCompletion drain on Kind's one node finishes.
+#   node-drainer.systemNamespaces  adds local-path-storage, Kind's own
+#       provisioner, so the drain on Kind's one node finishes. In the observe
+#       step's dry run the force-delete deletes nothing, so its pod would
+#       otherwise hold the drain forever.
 #   fault-quarantine.circuitBreaker.enabled=false  on one node the first
 #       quarantine would trip it.
 #   nvsentinel-mongodb at one member with smaller requests, and the analyzer
@@ -66,7 +68,7 @@ KUBE_CONTEXT="kind-${CLUSTER_NAME}"
 NODE="${CLUSTER_NAME}-control-plane"
 
 GRPCURL_IMAGE="docker.io/fullstorydev/grpcurl:v1.9.3@sha256:085e183ca334eb4e81ca81ee12cbb2b2737505d1d77f5e33dabc5d066593d998"
-DRAIN_SYSTEM_NAMESPACES='^(nvsentinel|kube-system|cert-manager|local-path-storage)$'
+DRAIN_EXTRA_NAMESPACES='^(local-path-storage)$'
 GPU_UUID="GPU-00000000-0000-0000-0000-00000000e2e1"
 MONGODB_POD="nvsentinel-mongodb-rs0-0"
 # MultipleRemediations fires at five remediated events on a node. A few more
@@ -146,7 +148,7 @@ REGISTRY_EOF
     --data "${data_dir}" --output "${WORK}/recipe.yaml" ||
     err "recipe generation failed"
   "${AICR_BIN}" bundle -r "${WORK}/recipe.yaml" -o "${WORK}/bundle" \
-    --set "nvsentinel:node-drainer.systemNamespaces=${DRAIN_SYSTEM_NAMESPACES}" \
+    --set "nvsentinel:node-drainer.systemNamespaces=${DRAIN_EXTRA_NAMESPACES}" \
     --set "nvsentinel:fault-quarantine.circuitBreaker.enabled=false" \
     --set "nvsentinel:health-events-analyzer.resources.requests.cpu=250m" \
     --set "nvsentinelmongodb:unsafeFlags.replsetSize=true" \
