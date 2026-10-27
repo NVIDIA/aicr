@@ -21,6 +21,8 @@ import (
 	"flag"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -51,6 +53,9 @@ func TestParseOptions(t *testing.T) {
 		{"padded tokens are trimmed and empties dropped",
 			[]string{"--exclude-ns", " skyhook , gpu-operator ,,", "--exclude-crd=skyhook.nvidia.com, nodewright.nvidia.com"},
 			options{excludeNS: []string{"skyhook", "gpu-operator"}, excludeCRD: []string{"skyhook.nvidia.com", "nodewright.nvidia.com"}}, false},
+		{"bundle directory", []string{"--bundle", "./bundles"}, options{bundleDir: "./bundles"}, false},
+		{"flag-shaped bundle argument", []string{"--bundle", "--yes"}, options{}, true},
+		{"empty bundle argument", []string{"--bundle="}, options{}, true},
 		{"missing exclusion argument", []string{"--exclude-ns"}, options{}, true},
 		{"flag-shaped exclusion argument", []string{"--exclude-ns", "--yes"}, options{}, true},
 		{"flag-shaped crd argument", []string{"--exclude-crd", "-yes"}, options{}, true},
@@ -68,7 +73,8 @@ func TestParseOptions(t *testing.T) {
 				t.Fatalf("parseOptions(%q) error = %v", tt.args, err)
 			}
 			if got.dryRun != tt.want.dryRun || got.assumeYes != tt.want.assumeYes ||
-				got.keepCRDs != tt.want.keepCRDs || got.keepNamespaces != tt.want.keepNamespaces {
+				got.keepCRDs != tt.want.keepCRDs || got.keepNamespaces != tt.want.keepNamespaces ||
+				got.bundleDir != tt.want.bundleDir {
 
 				t.Errorf("parseOptions(%q) flags = %+v, want %+v", tt.args, got, tt.want)
 			}
@@ -130,8 +136,8 @@ func TestContextName(t *testing.T) {
 		want string
 	}{
 		{"current context set", clientcmd.NewDefaultClientConfig(clientcmdapi.Config{CurrentContext: "staging"}, nil), "staging"},
-		{"no current context", clientcmd.NewDefaultClientConfig(clientcmdapi.Config{}, nil), "unknown"},
-		{"kubeconfig fails to load", unreadableConfig{}, "unknown"},
+		{"no current context", clientcmd.NewDefaultClientConfig(clientcmdapi.Config{}, nil), ""},
+		{"kubeconfig fails to load", unreadableConfig{}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -139,6 +145,75 @@ func TestContextName(t *testing.T) {
 				t.Errorf("contextName() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// writeKubeconfig writes a kubeconfig to path whose context, cluster and user
+// are all named name.
+func writeKubeconfig(t *testing.T, path, name string) {
+	t.Helper()
+	cfg := clientcmdapi.Config{
+		Clusters:       map[string]*clientcmdapi.Cluster{name: {Server: "https://" + name + ".example:6443"}},
+		AuthInfos:      map[string]*clientcmdapi.AuthInfo{name: {Token: name + "-token"}},
+		Contexts:       map[string]*clientcmdapi.Context{name: {Cluster: name, AuthInfo: name}},
+		CurrentContext: name,
+	}
+	if err := clientcmd.WriteToFile(cfg, path); err != nil {
+		t.Fatalf("write kubeconfig %s: %v", path, err)
+	}
+}
+
+func TestKubeTarget(t *testing.T) {
+	dir := t.TempDir()
+	first, second := filepath.Join(dir, "first"), filepath.Join(dir, "second")
+	writeKubeconfig(t, first, "first")
+	writeKubeconfig(t, second, "second")
+	sep := string(filepath.ListSeparator)
+
+	tests := []struct {
+		name        string
+		env         string
+		wantPath    string
+		wantMerged  []string
+		wantContext string
+	}{
+		{"single file", first, first, nil, "first"},
+		{"multi-file KUBECONFIG with leading whitespace", " " + first + sep + second, "", []string{first, second}, "first"},
+		{"in-cluster", "", "", nil, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("KUBECONFIG", tt.env)
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+
+			path, merged, kubeContext := kubeTarget()
+			if path != tt.wantPath || !slices.Equal(merged, tt.wantMerged) || kubeContext != tt.wantContext {
+				t.Errorf("kubeTarget() = %q, %q, %q, want %q, %q, %q",
+					path, merged, kubeContext, tt.wantPath, tt.wantMerged, tt.wantContext)
+			}
+		})
+	}
+}
+
+func TestExportHelmTarget(t *testing.T) {
+	t.Setenv("KUBECONFIG", " /a:/b")
+	t.Setenv(helmAPIServerEnv, "https://other-cluster:6443")
+	if err := exportHelmTarget(nil); err != nil {
+		t.Fatalf("exportHelmTarget(nil) error = %v", err)
+	}
+	if got := os.Getenv("KUBECONFIG"); got != " /a:/b" {
+		t.Errorf("exportHelmTarget(nil) changed KUBECONFIG to %q", got)
+	}
+	if got, set := os.LookupEnv(helmAPIServerEnv); set {
+		t.Errorf("exportHelmTarget(nil) left %s = %q", helmAPIServerEnv, got)
+	}
+	if err := exportHelmTarget([]string{"/a", "/b"}); err != nil {
+		t.Fatalf("exportHelmTarget() error = %v", err)
+	}
+	if got, want := os.Getenv("KUBECONFIG"), "/a"+string(filepath.ListSeparator)+"/b"; got != want {
+		t.Errorf("KUBECONFIG = %q, want %q", got, want)
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 	stderrors "errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -496,6 +497,53 @@ func TestBuildKubeClient_MultiFileKUBECONFIGWhitespace(t *testing.T) {
 			// else means an entry was mangled and silently dropped.
 			if config.Host != "https://first.example:6443" {
 				t.Errorf("config.Host = %q, want the first file's server — an entry was dropped from the merge", config.Host)
+			}
+		})
+	}
+}
+
+func TestKubeconfigLoadingRules(t *testing.T) {
+	dir := t.TempDir()
+	first := writeKubeconfig(t, dir, "first", "first", "https://first.example:6443")
+	second := writeKubeconfig(t, dir, "second", "second", "https://second.example:6443")
+	sep := string(os.PathListSeparator)
+
+	tests := []struct {
+		name           string
+		kubeconfig     string
+		env            string
+		wantNil        bool
+		wantExplicit   string
+		wantPrecedence []string
+	}{
+		{name: "explicit path", kubeconfig: " " + first + " ", wantExplicit: first},
+		{name: "single-file KUBECONFIG", env: first, wantExplicit: first},
+		{name: "multi-file KUBECONFIG with whitespace", env: " " + first + sep + " " + second + " ",
+			wantPrecedence: []string{first, second}},
+		{name: "in-cluster", wantNil: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("KUBECONFIG", tt.env)
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+
+			rules := KubeconfigLoadingRules(tt.kubeconfig)
+			if tt.wantNil {
+				if rules != nil {
+					t.Fatalf("KubeconfigLoadingRules() = %+v, want nil", rules)
+				}
+				return
+			}
+			if rules == nil {
+				t.Fatal("KubeconfigLoadingRules() = nil, want loading rules")
+			}
+			if rules.ExplicitPath != tt.wantExplicit {
+				t.Errorf("ExplicitPath = %q, want %q", rules.ExplicitPath, tt.wantExplicit)
+			}
+			if tt.wantPrecedence != nil && !slices.Equal(rules.Precedence, tt.wantPrecedence) {
+				t.Errorf("Precedence = %q, want %q", rules.Precedence, tt.wantPrecedence)
 			}
 		})
 	}
