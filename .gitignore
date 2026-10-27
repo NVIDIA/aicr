@@ -203,3 +203,4 @@ tools/mdx/.aicr-install-lock/
 # causes it rather than at tag time.
 /THIRD_PARTY_NOTICES.md
 /performance
+/validators/*/performance

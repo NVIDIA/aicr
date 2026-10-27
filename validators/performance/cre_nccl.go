@@ -17,7 +17,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -118,6 +117,8 @@ func validateCRENcclAllReduceBw(
 		return "", false, err
 	}
 
+	emitCREBandwidthExtras(bw, threshold)
+
 	logs, logErr := creLauncherLogs(ctx, workflowName, run.GetCreationTimestamp())
 	if logErr != nil {
 		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "CRE launcher logs required for transport assertion", logErr)
@@ -126,8 +127,22 @@ func validateCRENcclAllReduceBw(
 		return "", false, err
 	}
 
-	actual = strconv.FormatFloat(bw, 'f', 2, 64)
-	return actual, bw >= threshold, nil
+	actual, passed = creNCCLVerdict(bw, threshold)
+	return actual, passed, nil
+}
+
+// creNCCLVerdict judges bw with the verdict the TrainJob check uses, so one
+// recipe threshold means the same under both backends.
+func creNCCLVerdict(bw, threshold float64) (actual string, passed bool) {
+	return ncclBandwidthVerdict(bw, threshold, "")
+}
+
+// emitCREBandwidthExtras publishes the result extras the TrainJob check
+// publishes for bandwidth. It runs before the transport assertion, so a run
+// that falls back to Socket still records what it measured against what.
+func emitCREBandwidthExtras(bw, threshold float64) {
+	validators.EmitExtraOrWarn(ncclThresholdExtra(threshold))
+	validators.EmitExtraOrWarn(ncclBandwidthExtra(bw, threshold))
 }
 
 // creNCCLCleanupResult folds a teardown failure into the check's result.
