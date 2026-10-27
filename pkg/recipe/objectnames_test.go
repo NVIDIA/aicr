@@ -25,11 +25,13 @@
 package recipe
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
@@ -562,6 +564,52 @@ func TestApplyInheritedObjectNamesReportsWhatItCannotRebind(t *testing.T) {
 				t.Errorf("pins = %#v, want %#v", pins, tt.want)
 			}
 		})
+	}
+}
+
+// TestApplyInheritedObjectNamesFlagsAnEmbeddedFullname verifies, against the
+// shipped kube-prometheus-stack check, that a pin is reported stale when its
+// check still names an object whose fullname a rebind cannot reach.
+func TestApplyInheritedObjectNamesFlagsAnEmbeddedFullname(t *testing.T) {
+	provider := NewEmbeddedDataProvider(GetEmbeddedFS(), "")
+	registry, err := GetComponentRegistryFor(provider)
+	if err != nil {
+		t.Fatalf("failed to load component registry: %v", err)
+	}
+	kps := registry.Get("kube-prometheus-stack")
+	if kps == nil {
+		t.Fatal("registry has no kube-prometheus-stack component")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.FileReadTimeout)
+	defer cancel()
+	check, err := provider.ReadFile(ctx, kps.HealthCheck.AssertFile)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", kps.HealthCheck.AssertFile, err)
+	}
+
+	refs := []ComponentRef{{Name: kps.Name, Type: ComponentTypeHelm, HealthCheckAsserts: string(check)}}
+	prior := map[string]map[string]string{kps.Name: {"fullnameOverride": "legacy-kps"}}
+	current := map[string]map[string]string{kps.Name: {"fullnameOverride": "kube-prometheus"}}
+
+	pins, err := ApplyInheritedObjectNames(refs, prior, current)
+	if err != nil {
+		t.Fatalf("ApplyInheritedObjectNames() failed: %v", err)
+	}
+	want := []ObjectNamePin{{Component: kps.Name, Path: "fullnameOverride", Current: "kube-prometheus",
+		Inherited: "legacy-kps", HealthCheckMayBeStale: true}}
+	if !reflect.DeepEqual(pins, want) {
+		t.Errorf("pins = %#v, want %#v", pins, want)
+	}
+	got := refs[0].HealthCheckAsserts
+	for _, want := range []string{
+		"name: legacy-kps-operator",
+		"name: legacy-kps-prometheus",
+		"name: prometheus-kube-prometheus-prometheus",
+		"name: alertmanager-kube-prometheus-alertmanager",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("health check is missing %q:\n%s", want, got)
+		}
 	}
 }
 

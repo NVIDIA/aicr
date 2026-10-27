@@ -156,8 +156,10 @@ type ObjectNamePin struct {
 // check, a pin is returned with HealthCheckMayBeStale set if:
 //
 //   - it is not a fullnameOverride pin,
-//   - its Current or Inherited is empty, or
-//   - another pin of the component shares its Current but not its Inherited.
+//   - its Current or Inherited is empty,
+//   - another pin of the component shares its Current but not its Inherited, or
+//   - the check names an object that embeds its Current after a hyphen, as
+//     prometheus-kube-prometheus-prometheus embeds kube-prometheus.
 func ApplyInheritedObjectNames(refs []ComponentRef, prior, current map[string]map[string]string) ([]ObjectNamePin, error) {
 	if len(prior) == 0 {
 		return nil, nil
@@ -237,6 +239,7 @@ func ApplyInheritedObjectNames(refs []ComponentRef, prior, current map[string]ma
 	}
 
 	checks := make(map[int]string, len(renames))
+	embedded := make(map[int]map[string]bool, len(renames))
 	for i, byName := range renames {
 		for name := range ambiguous[i] {
 			delete(byName, name)
@@ -244,10 +247,11 @@ func ApplyInheritedObjectNames(refs []ComponentRef, prior, current map[string]ma
 		if len(byName) == 0 {
 			continue
 		}
+		embedded[i] = make(map[string]bool)
 		// The check is static YAML naming objects as the current values do, so
 		// left alone it would fail against the deployment the pin preserved.
 		rebound, err := rewriteHealthCheck(refs[i].Name, refs[i].HealthCheckAsserts, "its object names",
-			func(doc any) bool { return retargetObjectNames(doc, byName) })
+			func(doc any) bool { return retargetObjectNames(doc, byName, embedded[i]) })
 		if err != nil {
 			return nil, err
 		}
@@ -257,7 +261,7 @@ func ApplyInheritedObjectNames(refs []ComponentRef, prior, current map[string]ma
 	out := make([]ObjectNamePin, 0, len(pins))
 	for _, p := range pins {
 		_, rebound := renames[p.ref][p.Current]
-		rebound = rebound && rebindable(p.ObjectNamePin)
+		rebound = rebound && rebindable(p.ObjectNamePin) && !embedded[p.ref][p.Current]
 		p.HealthCheckMayBeStale = !rebound && strings.TrimSpace(refs[p.ref].HealthCheckAsserts) != ""
 		out = append(out, p.ObjectNamePin)
 	}
@@ -278,8 +282,9 @@ func rebindable(p ObjectNamePin) bool {
 }
 
 // retargetObjectNames applies renames to every name key under a resource key in
-// node, and reports whether any changed.
-func retargetObjectNames(node any, renames map[string]string) bool {
+// node, and reports whether any changed. Each key of renames that a name still
+// holds after a hyphen once renamed is added to embedded.
+func retargetObjectNames(node any, renames map[string]string, embedded map[string]bool) bool {
 	// The Test's and its steps' names sit outside any resource. A name in a
 	// resource's spec is how one rendered object refers to another, such as a
 	// secretKeyRef naming the chart's Secret.
@@ -288,14 +293,25 @@ func retargetObjectNames(node any, renames map[string]string) bool {
 		if path[last] != "name" || !slices.Contains(path[:last], "resource") {
 			return "", false
 		}
-		return renameObject(s, renames)
+		from := renamePrefix(s, renames)
+		rest := s[len(from):]
+		// A chart that prefixes the fullname, as prometheus-operator does with
+		// its StatefulSets, cannot be retargeted from values alone.
+		for name := range renames {
+			if strings.Contains(rest+"-", "-"+name+"-") {
+				embedded[name] = true
+			}
+		}
+		if from == "" {
+			return "", false
+		}
+		return renames[from] + rest, true
 	})
 }
 
-// renameObject returns name with its longest matching key in renames replaced
-// by that key's value, and reports whether any key matched. A key matches when
-// name equals it or continues it after a hyphen.
-func renameObject(name string, renames map[string]string) (string, bool) {
+// renamePrefix returns the longest key in renames that name equals or
+// continues after a hyphen, or "" if none does.
+func renamePrefix(name string, renames map[string]string) string {
 	// A dot does not continue a name, or a CRD's <plural>.<group> would match a
 	// fullname equal to its plural. The longest key wins, so <parent>-<sub> is
 	// not renamed as <parent>.
@@ -308,10 +324,7 @@ func renameObject(name string, renames map[string]string) (string, bool) {
 			best = from
 		}
 	}
-	if best == "" {
-		return "", false
-	}
-	return renames[best] + name[len(best):], true
+	return best
 }
 
 // ObjectNameReference is a place that may address a pinned object by its
