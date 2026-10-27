@@ -44,7 +44,9 @@
 # Its own component, not a network-operator manifestFile: the nv-ipam CRDs
 # are created by the operator while it reconciles a NicClusterPolicy with
 # nvIpam, and Helm validates every document of a release before applying
-# any, so IPPools in the NicClusterPolicy's release can never apply. The
+# any, so IPPools in the NicClusterPolicy's release can never apply; the
+# nv-ipam-crds component ships that CRD ahead of this release so the pools
+# do not race the operator's first reconcile. The
 # SR-IOV CRDs come from the chart's sriov-network-operator subchart on
 # install; Helm does not add them when the subchart is enabled on an
 # existing release (apply charts/sriov-network-operator/crds first).

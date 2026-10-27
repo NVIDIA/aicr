@@ -3,6 +3,8 @@
 The `gb200-nvke-ubuntu-training` recipe targets NVKE (NVIDIA Kubernetes Engine,
 formerly NKE): bare-metal GB200 NVL trays provisioned by Forge/NICo, running
 Ubuntu 24.04 with NVIDIA's `-nvidia-64k` kernel. It is a Preview coordinate.
+`gb200-nvke-ubuntu-training-kubeflow` (`--platform kubeflow`) is the same leaf
+plus Kubeflow Trainer through the `platform-kubeflow` mixin.
 
 ## Cluster prerequisites
 
@@ -60,7 +62,7 @@ The Network Operator in this recipe ships **no `ofedDriver`**. The host runs
 the inbox `mlx5_core` and OVN-Kubernetes rides on it. A DOCA driver container
 unloads `mlx5_core` to replace it, and the node's primary address disappears
 with it; a reboot restores the inbox driver and the operator applies the
-DOCA driver again. This was observed on YTL GB200 and Firmus GB300 clusters
+DOCA driver again. This was observed on NVKE GB200 and bare-metal GB300 clusters
 with recipes that carried an `ofedDriver` block. Do not add one back for NVKE,
 and do not combine this recipe with another Network Operator installation.
 
@@ -90,17 +92,19 @@ pod that selects the `nvidia` RuntimeClass and sets `NVIDIA_VISIBLE_DEVICES=all`
 sees none. Privileged management pods (the GPU Operator operands, NVSentinel's
 metadata-collector) keep the env-var path, because the toolkit always honors it for
 privileged containers. Unlike the AKS and OpenShift recipes, this one leaves
-`ACCEPT_NVIDIA_VISIBLE_DEVICES_AS_VOLUME_MOUNTS` at its default of `false`: the
-device plugin injects over `cdi-cri` here, so the volume-mount device list is never
-produced, and accepting it would only add a `hostPath`-gated request path.
+`ACCEPT_NVIDIA_VISIBLE_DEVICES_AS_VOLUME_MOUNTS` at its default of `false`:
+`DEVICE_LIST_STRATEGY` still emits the volume-mount device list beside CDI, but
+the toolkit ignores it while the flag is `false`, and CDI is what injects
+devices here.
 
 ## SR-IOV InfiniBand
 
 The Network Operator chart enables the SR-IOV Network Operator and the
 Maintenance Operator (external drainer, one node at a time). The
-NicClusterPolicy carries only `nvIpam`. Per rail, the `sriov-ib-networks`
-component (manifest-only, ordered after `network-operator` because the
-nv-ipam CRDs appear only once the NicClusterPolicy is reconciled) supplies
+NicClusterPolicy carries only `nvIpam`. The `nv-ipam-crds` component ships
+the IPPool CRD, which the operator otherwise creates only once it reconciles
+the NicClusterPolicy. Per rail, the `sriov-ib-networks` component
+(manifest-only, ordered after `network-operator` and `nv-ipam-crds`) supplies
 one nv-ipam `IPPool`
 (`192.168.<4n>.0/22`), one `SriovNetworkNodePolicy` (`linkType: IB`,
 `isRdma: true`, `deviceType: netdevice`, `numVfs: 16`, selected by the rail's

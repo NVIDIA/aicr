@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# NVKE GB200 NVL tray as observed on ytl-dev2-dh1-vmaas-nke-poc-r3: 4 GB200
+# NVKE GB200 NVL tray as observed on a reference NVKE tenant: 4 GB200
 # per tray (PCI 10de:2941), Grace arm64, Ubuntu 24.04, allocatable cpu 143
 # and ~938Gi. Driver matches the gpu-operator component default.
 apiVersion: aicr.run/v1beta1

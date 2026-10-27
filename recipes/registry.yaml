@@ -439,11 +439,28 @@ components:
         tolerationPaths:
           - acceleratedTolerations
 
+  # The nv-ipam IPPool CRD, vendored from the pinned Network Operator release:
+  # the operator creates it only while reconciling the NicClusterPolicy, so a
+  # release carrying IPPools orders after this one instead of racing it.
+  # Manifest-only.
+  - name: nv-ipam-crds
+    displayName: nv-ipam-crds
+    class: core
+    valueOverrideKeys:
+      - nvipamcrds
+    healthCheck:
+      assertFile: checks/nv-ipam-crds/health-check.yaml
+    helm:
+      defaultRepository: ""
+      defaultNamespace: nvidia-network-operator
+    manifestFiles:
+      - components/nv-ipam-crds/manifests/ippools-crd.yaml
+
   # Per-rail SR-IOV InfiniBand objects (nv-ipam IPPool, SriovNetworkNodePolicy,
   # SriovIBNetwork) for the Network Operator's sriov-network-operator subchart.
-  # Manifest-only; requires network-operator as a componentRef dependency and
-  # is separate from it because the nv-ipam CRDs exist only after the
-  # NicClusterPolicy is reconciled.
+  # Manifest-only; requires network-operator and nv-ipam-crds as componentRef
+  # dependencies and is separate from network-operator because the IPPool CRD
+  # does not exist when the NicClusterPolicy's release is validated.
   - name: sriov-ib-networks
     displayName: sriov-ib-networks
     class: core

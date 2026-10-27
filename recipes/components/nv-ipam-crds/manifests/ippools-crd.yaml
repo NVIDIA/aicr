@@ -1,0 +1,267 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# IPPool CRD, vendored verbatim from NVIDIA Network Operator v26.7.0
+# (manifests/state-nv-ipam-cni/005-nv-ipam.nvidia.com_ippools.yaml), the
+# release the network-operator component pins. The operator creates this CRD
+# only while reconciling a NicClusterPolicy with nvIpam, and Helm validates
+# every document of a release before applying any, so a release that carries
+# IPPools (sriov-ib-networks) can only follow a release that carries the CRD.
+# The operator keeps reconciling the CRD afterwards; resource-policy keep
+# leaves it in place when this release is removed, since the pools and the
+# operator's own copy outlive the release.
+#
+# aicr/skip-hook-validation: "true"
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    helm.sh/resource-policy: keep
+    controller-gen.kubebuilder.io/version: v0.16.5
+  name: ippools.nv-ipam.nvidia.com
+spec:
+  group: nv-ipam.nvidia.com
+  names:
+    kind: IPPool
+    listKind: IPPoolList
+    plural: ippools
+    singular: ippool
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.subnet
+      name: Subnet
+      type: string
+    - jsonPath: .spec.gateway
+      name: Gateway
+      type: string
+    - jsonPath: .spec.perNodeBlockSize
+      name: Block Size
+      type: integer
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: IPPool contains configuration for IPAM controller
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: IPPoolSpec contains configuration for IP pool
+            properties:
+              defaultGateway:
+                description: if true, add gateway as default gateway in the routes
+                  list
+                type: boolean
+              exclusions:
+                description: contains reserved IP addresses that should not be allocated
+                  by nv-ipam
+                items:
+                  description: |-
+                    ExcludeRange contains range of IP addresses to exclude from allocation
+                    startIP and endIP are part of the ExcludeRange
+                  properties:
+                    endIP:
+                      type: string
+                    startIP:
+                      type: string
+                  required:
+                  - endIP
+                  - startIP
+                  type: object
+                type: array
+              gateway:
+                description: gateway for the pool
+                type: string
+              nodeSelector:
+                description: selector for nodes, if empty match all nodes
+                properties:
+                  nodeSelectorTerms:
+                    description: Required. A list of node selector terms. The terms
+                      are ORed.
+                    items:
+                      description: |-
+                        A null or empty node selector term matches no objects. The requirements of
+                        them are ANDed.
+                        The TopologySelectorTerm type implements a subset of the NodeSelectorTerm.
+                      properties:
+                        matchExpressions:
+                          description: A list of node selector requirements by node's
+                            labels.
+                          items:
+                            description: |-
+                              A node selector requirement is a selector that contains values, a key, and an operator
+                              that relates the key and values.
+                            properties:
+                              key:
+                                description: The label key that the selector applies
+                                  to.
+                                type: string
+                              operator:
+                                description: |-
+                                  Represents a key's relationship to a set of values.
+                                  Valid operators are In, NotIn, Exists, DoesNotExist. Gt, and Lt.
+                                type: string
+                              values:
+                                description: |-
+                                  An array of string values. If the operator is In or NotIn,
+                                  the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                  the values array must be empty. If the operator is Gt or Lt, the values
+                                  array must have a single element, which will be interpreted as an integer.
+                                  This array is replaced during a strategic merge patch.
+                                items:
+                                  type: string
+                                type: array
+                                x-kubernetes-list-type: atomic
+                            required:
+                            - key
+                            - operator
+                            type: object
+                          type: array
+                          x-kubernetes-list-type: atomic
+                        matchFields:
+                          description: A list of node selector requirements by node's
+                            fields.
+                          items:
+                            description: |-
+                              A node selector requirement is a selector that contains values, a key, and an operator
+                              that relates the key and values.
+                            properties:
+                              key:
+                                description: The label key that the selector applies
+                                  to.
+                                type: string
+                              operator:
+                                description: |-
+                                  Represents a key's relationship to a set of values.
+                                  Valid operators are In, NotIn, Exists, DoesNotExist. Gt, and Lt.
+                                type: string
+                              values:
+                                description: |-
+                                  An array of string values. If the operator is In or NotIn,
+                                  the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                  the values array must be empty. If the operator is Gt or Lt, the values
+                                  array must have a single element, which will be interpreted as an integer.
+                                  This array is replaced during a strategic merge patch.
+                                items:
+                                  type: string
+                                type: array
+                                x-kubernetes-list-type: atomic
+                            required:
+                            - key
+                            - operator
+                            type: object
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    type: array
+                    x-kubernetes-list-type: atomic
+                required:
+                - nodeSelectorTerms
+                type: object
+                x-kubernetes-map-type: atomic
+              perNodeBlockSize:
+                description: |-
+                  amount of IPs to allocate for each node,
+                  must be less than amount of available IPs in the subnet
+                type: integer
+              perNodeExclusions:
+                description: contains reserved indexes of IPs that should not be allocated
+                  by nv-ipam
+                items:
+                  description: |-
+                    ExcludeIndexRange contains range of indexes of IPs to exclude from allocation
+                    startIndex and endIndex are part of the ExcludeIndexRange
+                  properties:
+                    endIndex:
+                      format: int32
+                      minimum: 0
+                      type: integer
+                    startIndex:
+                      format: int32
+                      minimum: 0
+                      type: integer
+                  required:
+                  - endIndex
+                  - startIndex
+                  type: object
+                  x-kubernetes-validations:
+                  - message: endIndex must be greater than or equal to startIndex
+                    rule: self.endIndex >= self.startIndex
+                type: array
+              routes:
+                description: static routes list using the gateway specified in the
+                  spec.
+                items:
+                  description: Route contains static route parameters
+                  properties:
+                    dst:
+                      description: The destination of the route, in CIDR notation
+                      type: string
+                  required:
+                  - dst
+                  type: object
+                type: array
+              subnet:
+                description: subnet of the pool
+                type: string
+            required:
+            - perNodeBlockSize
+            - subnet
+            type: object
+          status:
+            description: IPPoolStatus contains the IP ranges allocated to nodes
+            properties:
+              allocations:
+                description: IP allocations for Nodes
+                items:
+                  description: Allocation contains IP Allocation for a specific Node
+                  properties:
+                    endIP:
+                      type: string
+                    nodeName:
+                      type: string
+                    startIP:
+                      type: string
+                  required:
+                  - endIP
+                  - nodeName
+                  - startIP
+                  type: object
+                type: array
+            required:
+            - allocations
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

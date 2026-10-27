@@ -1,0 +1,46 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: gb200-nvke-ubuntu-training-kubeflow
+
+spec:
+  # Inherits from gb200-nvke-ubuntu-training (GB200 + NVKE + Ubuntu + training
+  # settings) and adds Kubeflow Trainer for distributed training with TrainJob.
+  base: gb200-nvke-ubuntu-training
+
+  criteria:
+    service: nvke
+    accelerator: gb200
+    os: ubuntu
+    intent: training
+    platform: kubeflow
+
+  mixins:
+    - os-ubuntu
+    - platform-kubeflow
+
+  constraints:
+    # Restated from nvke: snapshot resolution checks a leaf's own constraints.
+    - name: K8s.server.version
+      value: ">= 1.34"
+
+  componentRefs: []
+
+  validation:
+    conformance:
+      checks:
+        - robust-controller

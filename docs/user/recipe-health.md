@@ -44,8 +44,8 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 {/* BEGIN AICR-HEALTH */}
 ## Summary
 
-- Recipes: **71**
-- Pass: **71** · Warn: **0** · Fail: **0** · Unknown: **0**
+- Recipes: **72**
+- Pass: **72** · Warn: **0** · Fail: **0** · Unknown: **0**
 
 ## Recipes
 
@@ -111,7 +111,7 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 | rtx-pro-6000-lke-ubuntu-inference | lke | rtx-pro-6000 | ubuntu | inference | — | pass | R:0 D:4 P:0 C:9 | pending |
 | rtx-pro-6000-lke-ubuntu-training-kubeflow | lke | rtx-pro-6000 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
 | b300-mk8s-ubuntu-inference-dynamo | mk8s | b300 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:3 | pending |
-| gb200-nvke-ubuntu-training | nvke | gb200 | ubuntu | training | — | pass | R:0 D:4 P:2 C:5 | pending |
+| gb200-nvke-ubuntu-training-kubeflow | nvke | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:6 | pending |
 | ocp-inference-nim | ocp | — | — | inference | nim | pass | R:0 D:3 P:0 C:11 | pending |
 | ocp-training | ocp | — | — | training | — | pass | R:0 D:3 P:0 C:1 | pending |
 | a100-oke-ubuntu-training-kubeflow | oke | a100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
@@ -119,6 +119,7 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 | gb200-oke-ubuntu-training-kubeflow | oke | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:10 | pending |
 | l40s-oke-inference | oke | l40s | ol | inference | — | pass | R:0 D:4 P:0 C:9 | pending |
 | l40s-oke-training-kubeflow | oke | l40s | ol | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
+| rke2-sles | rke2 | — | sles | — | — | pass | R:0 D:0 P:0 C:4 | pending |
 | vr200-rke2-ubuntu-inference-dynamo | rke2 | vr200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:0 C:10 | [rke2/vr200-ubuntu/inference-dynamo](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo) |
 | vr200-rke2-ubuntu-training | rke2 | vr200 | ubuntu | training | — | pass | R:0 D:4 P:1 C:8 | [rke2/vr200-ubuntu/training](https://validation.aicr.run/#/rke2/vr200-ubuntu/training) |
 | vr200-rke2-ubuntu-training-kubeflow | rke2 | vr200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:9 | [rke2/vr200-ubuntu/training-kubeflow](https://validation.aicr.run/#/rke2/vr200-ubuntu/training-kubeflow) |

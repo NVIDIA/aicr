@@ -19,7 +19,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **56**
+- Components: **57**
 - Unique images: **140**
 - Distinct registries: **12**
 
@@ -68,6 +68,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | node-problem-detector | helm | node-problem-detector | 2.4.1 | 1 |
 | nodewright-customizations | manifest | — | — | 6 |
 | nodewright-operator | helm | nodewright | v0.20.0 | 2 |
+| nv-ipam-crds | manifest | — | — | 0 |
 | nvcre | helm | cluster-readiness-engine | v0.8.2 | 4 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
 | nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
@@ -320,6 +321,10 @@ _No images extracted._
 
 - `docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95`
 - `ghcr.io/nvidia/nodewright/operator:v0.20.0@sha256:5ddfc211d3de8861c5c1721c61139f65e0a733c35bad4b31960dd8fe44d545a9`
+
+### nv-ipam-crds
+
+_No images extracted._
 
 ### nvcre
 
