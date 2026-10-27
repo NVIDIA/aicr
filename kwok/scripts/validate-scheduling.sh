@@ -72,6 +72,15 @@
 #                            this grace window indicates `kubectl apply` /
 #                            `helm install` silently produced no Application
 #                            resource. Default: 30.
+#   KWOK_ARGOCD_READBACK_SETTLE_TIMEOUT
+#                            Seconds the inventory read-back waits for every
+#                            installed Argo CD Application outside the
+#                            unsettled allowlist to finish its first sync,
+#                            bounded by KWOK_SYNC_DEADLINE_EPOCH. An
+#                            Application still syncing is then read as
+#                            unversioned and fails the read-back. Default: 180.
+#   KWOK_ARGOCD_READBACK_SETTLE_INTERVAL
+#                            Seconds between those re-checks. Default: 5.
 #   KWOK_FLUX_SYNC_TIMEOUT   Seconds to wait for the outer Kustomization +
 #                            all HelmReleases to reach a terminal state
 #                            before failing. Default: 500.
@@ -2142,6 +2151,66 @@ verify_pods() {
     return 0
 }
 
+# wait_for_argo_readback_settled <installed-file> <applications-json-out> <pending-file>
+#
+# Re-lists Argo CD Applications into <applications-json-out> until no
+# installed component outside READBACK_UNSETTLED_ALLOWLIST is still working
+# toward its first deployed version, waiting up to
+# KWOK_ARGOCD_READBACK_SETTLE_TIMEOUT seconds at
+# KWOK_ARGOCD_READBACK_SETTLE_INTERVAL spacing, and never past
+# KWOK_SYNC_DEADLINE_EPOCH. The sync gate passes once every child Application
+# exists, while a large chart such as kube-prometheus-stack can still be
+# applying its first sync. A component still pending at the deadline is left
+# for the comparison to report as unversioned, so the wait alone never fails
+# the lane. Returns 1 when the Applications cannot be listed or a tunable is
+# malformed.
+wait_for_argo_readback_settled() {
+    local installed_file="$1" apps_json="$2" pending_file="$3"
+    local timeout="${KWOK_ARGOCD_READBACK_SETTLE_TIMEOUT:-180}"
+    local interval="${KWOK_ARGOCD_READBACK_SETTLE_INTERVAL:-5}"
+
+    if ! [[ "$timeout" =~ ^[0-9]+$ ]]; then
+        log_error "KWOK_ARGOCD_READBACK_SETTLE_TIMEOUT must be a non-negative integer (got: '${timeout}')"
+        return 1
+    fi
+    if ! [[ "$interval" =~ ^[0-9]+$ ]] || (( 10#$interval < 1 )); then
+        log_error "KWOK_ARGOCD_READBACK_SETTLE_INTERVAL must be a positive integer (got: '${interval}')"
+        return 1
+    fi
+    timeout=$((10#$timeout))
+    interval=$((10#$interval))
+    if [[ -n "${KWOK_SYNC_DEADLINE_EPOCH:-}" ]]; then
+        local remaining=$(( KWOK_SYNC_DEADLINE_EPOCH - $(date +%s) ))
+        if (( remaining < timeout )); then
+            timeout=$(( remaining > 0 ? remaining : 0 ))
+        fi
+    fi
+
+    local waited=0 pending
+    while :; do
+        if ! kubectl get applications.argoproj.io -A -o json > "$apps_json"; then
+            log_error "Could not list Argo CD Applications for the read-back"
+            return 1
+        fi
+        readback_pending_argo_components "$apps_json" "$installed_file" "$pending_file" || return 1
+        if [[ ! -s "$pending_file" ]]; then
+            if (( waited > 0 )); then
+                log_info "Argo CD Applications reached a first sync after ${waited}s"
+            fi
+            return 0
+        fi
+
+        pending=$(paste -sd ' ' "$pending_file")
+        if (( waited >= timeout )); then
+            log_warn "Argo CD Applications still on their first sync after ${waited}s, so the read-back reads them as unversioned: ${pending}"
+            return 0
+        fi
+        log_info "Waiting for a first Argo CD sync before the read-back (${waited}/${timeout}s): ${pending}"
+        sleep "$interval"
+        waited=$((waited + interval))
+    done
+}
+
 # Differential read-back of the installed inventory (ADR-021 acceptance
 # criterion 4, issue #2531).
 #
@@ -2200,10 +2269,8 @@ verify_upgrade_inventory() {
     case "$deployer_arg" in
         argocd|argocd-helm)
             local apps_json="${out_dir}/argo-applications.json"
-            if ! kubectl get applications.argoproj.io -A -o json > "$apps_json"; then
-                log_error "Could not list Argo CD Applications for the read-back"
-                return 1
-            fi
+            wait_for_argo_readback_settled "$installed_file" "$apps_json" \
+                "${out_dir}/pending-components.txt" || return 1
             unsettled_file="${out_dir}/unsettled-components.txt"
             readback_unsettled_argo_components "$apps_json" "$installed_file" "$unsettled_file" || return 1
             ;;

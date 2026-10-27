@@ -213,8 +213,40 @@ readback_unsettled_argo_components() {
         return 1
     fi
 
-    local unsettled
-    if ! unsettled=$(jq -r '
+    local unversioned
+    unversioned=$(readback_unversioned_installed_argo_components "${apps_json}" "${installed_file}") || return 1
+    comm -12 <(sed '/^$/d' <<< "${unversioned}") \
+        <(tr ' ' '\n' <<< "${READBACK_UNSETTLED_ALLOWLIST}" | sort -u) > "${out_file}"
+}
+
+# readback_pending_argo_components <applications-json> <installed-file> <out-file>
+#
+# Writes the installed components whose Argo CD Application has established
+# no deployed version and which READBACK_UNSETTLED_ALLOWLIST does not excuse.
+# Each one would fail the comparison as unversioned, so an empty list is the
+# point at which the read-back can be taken. Same inputs and failure modes as
+# readback_unsettled_argo_components.
+readback_pending_argo_components() {
+    local apps_json="${1:-}" installed_file="${2:-}" out_file="${3:-}"
+    if [[ ! -s "${apps_json}" || ! -f "${installed_file}" || -z "${out_file}" ]]; then
+        echo "[ERROR] readback_pending_argo_components: <applications-json> <installed-file> <out-file> are required" >&2
+        return 1
+    fi
+
+    local unversioned
+    unversioned=$(readback_unversioned_installed_argo_components "${apps_json}" "${installed_file}") || return 1
+    comm -23 <(sed '/^$/d' <<< "${unversioned}") \
+        <(tr ' ' '\n' <<< "${READBACK_UNSETTLED_ALLOWLIST}" | sort -u) > "${out_file}"
+}
+
+# readback_unversioned_installed_argo_components <applications-json> <installed-file>
+#
+# Prints, sorted, the installed components whose Argo CD Application is not
+# Synced and has no completed sync in status.history. Returns 1 when the dump
+# is not an Application list.
+readback_unversioned_installed_argo_components() {
+    local apps_json="$1" installed_file="$2" unversioned
+    if ! unversioned=$(jq -r '
             if (.items | type) != "array" then error("not an Application list") else . end
             | .items[]
             | select((.status.sync.status // "") != "Synced"
@@ -223,8 +255,7 @@ readback_unsettled_argo_components() {
         echo "[ERROR] Could not read Argo CD Applications from ${apps_json}" >&2
         return 1
     fi
-    comm -12 "${installed_file}" <(sort -u <<< "${unsettled}" | sed '/^$/d') \
-        | comm -12 - <(tr ' ' '\n' <<< "${READBACK_UNSETTLED_ALLOWLIST}" | sort -u) > "${out_file}"
+    comm -12 "${installed_file}" <(sort -u <<< "${unversioned}" | sed '/^$/d')
 }
 
 # compare_upgrade_readback <artifact-report> <cluster-report> <installed-file> <out-dir> <deployer> [<unsettled-file>]
