@@ -82,9 +82,9 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | slinky-slurm | helm | slurm | 1.2.2 | 5 |
 | slinky-slurm-operator | helm | slurm-operator | 1.2.2 | 2 |
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.2 | 0 |
-| slinky-topograph | helm | topograph/topograph | 1.0.0 | 1 |
+| slinky-topograph | helm | topograph/topograph | 1.1.0 | 1 |
 | slurm-accounting-mariadb | helm | mariadb-cluster | 26.10.1 | 1 |
-| topograph | helm | topograph/topograph | 1.0.0 | 1 |
+| topograph | helm | topograph/topograph | 1.1.0 | 1 |
 
 ## Version variants
 
@@ -308,7 +308,7 @@ _No images extracted._
 
 - `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.3.0@sha256:f17c951d60b519d097c20a3d9f49668f043a996adb31b9bb4db24a112a8f60a2`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.8.0@sha256:1551abdd54476f6bddce863d383903a0a76f8a91bb4daa53c4f3c9490b980dae`
-- `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.10.1@sha256:b13d5e2bf426545b6bc0cb63575a43222644b3f0174e9bb56eba62ebb2bb1cf4`
+- `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.11.0@sha256:38e56b645a6e3234904e813c81b80dd79db3ba87721609eb6b6f452672b8a40a`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke:0.1.2@sha256:6671d49f006afdbeefd8858f1fa1216f7748205bc42edab3340210a2cc459a81`
 - `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1`
 - `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1@sha256:5414b06e52c090d0842704f2580798064362d771f12421ccc8888186b5f5a3cf`
@@ -393,7 +393,7 @@ _No images extracted._
 
 ### slinky-topograph
 
-- `ghcr.io/nvidia/topograph:v1.0.0`
+- `nvcr.io/nvidia/topograph/topograph:v1.1.0`
 
 ### slurm-accounting-mariadb
 
@@ -401,7 +401,7 @@ _No images extracted._
 
 ### topograph
 
-- `ghcr.io/nvidia/topograph:v1.0.0`
+- `nvcr.io/nvidia/topograph/topograph:v1.1.0`
 
 ### dynamo-platform@1.5.0 (variant)
 

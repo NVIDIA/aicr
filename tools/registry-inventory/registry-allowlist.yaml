@@ -40,7 +40,6 @@ hosts:
   - cr.agentgateway.dev              # agentgateway OCI Helm charts
   - docker.gitea.com                 # gitea image (KWOK flux/argocd git lanes)
   - docker.io                        # kindest/node, busybox, golang, python, openbao, ministack, ...
-  - dsx-ai-factory.github.io         # topograph Helm repo (moved from nvidia.github.io, #2793)
   # Argo CD's Redis (KWOK argocd-* lanes). Not new egress: the Argo CD chart has
   # always pulled this in-cluster, but as a rendered chart image it sat outside
   # this gate's scope. #2501 pins it in .settings.yaml so it can be cached, which

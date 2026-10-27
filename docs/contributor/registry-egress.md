@@ -10,7 +10,7 @@ the browsable companion to the CODEOWNER-gated allowlist that gates these hosts 
 pulls are inventoried separately in the BOM (docs/user/container-images.md); the full
 per-record inventory (image refs, pins, provenance) is produced by `make registry-inventory`.
 
-## Distinct hosts (29)
+## Distinct hosts (28)
 
 | Host | Package types | Directions |
 |---|---|---|
@@ -21,7 +21,6 @@ per-record inventory (image refs, pins, provenance) is produced by `make registr
 | `dl.k8s.io` | binary-release | pull |
 | `docker.gitea.com` | container-image | pull |
 | `docker.io` | container-image | pull |
-| `dsx-ai-factory.github.io` | helm-chart-http | pull |
 | `ecr-public.aws.com` | container-image | pull |
 | `get.helm.sh` | binary-release | pull |
 | `ghcr.io` | container-image, oci-helm-chart | pull, push |

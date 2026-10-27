@@ -89,8 +89,8 @@ spec:
     # sysctls), the baseline for a coordinate that pins no accelerator.
     # tuned 1.4.0 (nvidia-tuned 0.10.1+) is the first release that installs
     # on SLES. No service is set: service=rke2 enables nvidia-tuned's
-    # bootloader step, which supports only Debian-family GRUB, and the
-    # generic profile carries no [bootloader] settings to apply.
+    # bootloader step, and the generic profile carries no [bootloader]
+    # settings to apply.
     # tuning-generic.yaml selects nodes only through
     # --accelerated-node-selector. RKE2 server (etcd) nodes are cluster
     # nodes, so without that flag they are tuned and rebooted too.
