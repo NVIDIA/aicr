@@ -157,7 +157,18 @@ operator reports only after its nv-ipam state, CRDs included, is applied, so
 the pools follow it. Flux does not support readiness hooks; a first install
 that fails on the missing CRD needs a `flux reconcile` once the operator is
 up. The `sriov-ib-networks` health check asserts the CRD is Established, so
-`aicr validate` records that it landed.
+`aicr validate` records that it landed. Measured on a reference tenant after
+a full teardown: the CRD appeared five seconds after the NicClusterPolicy
+and the policy was `ready` four seconds later; the gate held
+`sriov-ib-networks` until then.
+
+When tearing the fabric down, uninstall `sriov-ib-networks` and wait for
+every `SriovNetworkNodeState` to return to `Succeeded` before uninstalling
+`network-operator`: removing the policies makes the config daemon request a
+drain through the Maintenance Operator, and uninstalling the operators while
+that drain is in flight orphans the `NodeMaintenance`, which leaves the node
+cordoned with nothing left to release it. Delete the stale
+`nodemaintenances.maintenance.nvidia.com` object to uncordon.
 
 A shared-HCA variant (`rdmaSharedDevicePlugin`, one pooled `nvidia.com/mlnxnics`
 resource over the PFs, no IPoIB) was qualified first on the same cluster and
