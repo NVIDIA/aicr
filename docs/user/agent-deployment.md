@@ -174,6 +174,18 @@ kubectl logs -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/co
 kubectl describe job -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent
 ```
 
+### When the agent pod cannot exit
+
+On an unhealthy node a kernel read can block in uninterruptible sleep. The agent stops waiting on that read after 1 second, leaves the entry out of the snapshot, and logs a warning naming the path. The stuck kernel thread still keeps the pod from being reaped, so its Job never completes.
+
+`aicr snapshot` detects this. Once the agent has written its snapshot, the CLI gives the Job 30 seconds to complete. If the Job has not completed by then, or the Job wait reaches `--timeout`, the CLI returns the snapshot with a warning that names the pod and node, and exits 0 instead of failing with a timeout. Scripts that treat a snapshot timeout as a signal to retry should also watch for that warning.
+
+The 30-second path needs `list` and `watch` on the output ConfigMap.
+
+The agent records the run ID on the ConfigMap as the `aicr.run/run-id` annotation, and the CLI rejects a snapshot stamped with any other run's ID. A `cm://` destination you name must hold a snapshot stamped with the current run's ID, so a snapshot an earlier run left there is never returned in its place. An agent image older than the CLI does not stamp the snapshot. The CLI accepts an unstamped snapshot only from its default internal ConfigMap, so recovery with an older agent does not work with a `cm://` destination you name.
+
+The pod stays `Running`, or `Terminating` after cleanup deletes its Job, until the node recovers or is rebooted. Investigate the node named in the warning.
+
 ## GPU Node Auto-Targeting
 
 The agent Job tolerates all taints, so without a selector it can land on a
@@ -737,6 +749,7 @@ first group is required in both ServiceAccount modes:
 | `pods/log` | `get` | namespace | Streaming the agent's output back to your terminal |
 | `configmaps` | `get`, `list` | namespace | Reading the snapshot the agent staged |
 | `configmaps` | `delete` | namespace | Only when aicr owns the output ConfigMap (i.e. you did not pass your own `cm://` URI) |
+| `configmaps` | `list`, `watch` | output ConfigMap's namespace | Not checked by the gate. Recovering the snapshot when the agent pod cannot exit (see [When the agent pod cannot exit](#when-the-agent-pod-cannot-exit)) |
 
 `serviceaccounts: get` is not optional. Without it the run cannot tell whether
 `--service-account-name` names an existing ServiceAccount or is a prefix, and

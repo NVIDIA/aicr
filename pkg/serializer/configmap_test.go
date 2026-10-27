@@ -16,11 +16,13 @@ package serializer
 
 import (
 	stderrors "errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 )
 
@@ -193,6 +195,29 @@ func TestNewConfigMapWriter_PreservesFormatCoercion(t *testing.T) {
 	}
 	if writer.kubeconfig != "" {
 		t.Errorf("kubeconfig = %q, want empty (default discovery)", writer.kubeconfig)
+	}
+}
+
+func TestConfigMapWriterApplyConfigurationRunID(t *testing.T) {
+	tests := []struct {
+		name            string
+		runID           string
+		wantAnnotations map[string]string
+	}{
+		{"stamped", "20260821-142233-9f3a1c0b7e2d4a55", map[string]string{labels.RunID: "20260821-142233-9f3a1c0b7e2d4a55"}},
+		{"unstamped", "", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := NewConfigMapWriter("ns", "snap", FormatYAML).WithRunID(tt.runID)
+			cfg := w.applyConfiguration("Snapshot", "v1", map[string]string{"snapshot.yaml": "x"})
+			if !maps.Equal(cfg.Annotations, tt.wantAnnotations) {
+				t.Errorf("annotations = %v, want %v", cfg.Annotations, tt.wantAnnotations)
+			}
+			if _, isLabel := cfg.Labels[labels.RunID]; isLabel {
+				t.Errorf("run ID must not be a label, got labels %v", cfg.Labels)
+			}
+		})
 	}
 }
 

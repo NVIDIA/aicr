@@ -294,6 +294,36 @@ readback_unsettled_argo_components "${WORK}/absent.json" "${WORK}/installed-argo
     "${WORK}/found.txt" 2>/dev/null
 check_rc "missing-dump-fails" 1 "$?"
 
+# readback_pending_argo_components: what the read-back still waits on. The
+# complement of the unsettled scan within the installed, unversioned set.
+readback_pending_argo_components "${WORK}/apps.json" "${WORK}/installed-argo.txt" "${WORK}/pending.txt"
+check_rc "pending-scan-rc-zero" 0 "$?"
+check_eq "installed-unversioned-apps-outside-the-allowlist-are-pending" "gpu-operator-2" \
+    "$(cat "${WORK}/pending.txt")"
+
+cat > "${WORK}/apps-settled.json" <<'JSON'
+{"items": [
+  {"metadata": {"name": "kai-scheduler"},
+   "status": {"sync": {"status": "OutOfSync"}}},
+  {"metadata": {"name": "gpu-operator"},
+   "status": {"sync": {"status": "OutOfSync"}, "history": [{"id": 1}]}},
+  {"metadata": {"name": "gpu-operator-2"},
+   "status": {"sync": {"status": "Synced"}}},
+  {"metadata": {"name": "nfd"},
+   "status": {"sync": {"status": "Synced"}}}
+]}
+JSON
+readback_pending_argo_components "${WORK}/apps-settled.json" "${WORK}/installed-argo.txt" "${WORK}/pending.txt"
+check_rc "settled-pending-scan-rc-zero" 0 "$?"
+check_eq "nothing-pending-once-only-allowlisted-apps-are-unversioned" "" "$(cat "${WORK}/pending.txt")"
+
+readback_pending_argo_components "${WORK}/not-a-list.json" "${WORK}/installed-argo.txt" \
+    "${WORK}/pending.txt" 2>/dev/null
+check_rc "pending-non-list-dump-fails" 1 "$?"
+readback_pending_argo_components "${WORK}/absent.json" "${WORK}/installed-argo.txt" \
+    "${WORK}/pending.txt" 2>/dev/null
+check_rc "pending-missing-dump-fails" 1 "$?"
+
 if ((fails > 0)); then
     echo "upgrade-readback_test.sh: ${fails} failure(s)"
     exit 1
