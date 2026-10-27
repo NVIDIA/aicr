@@ -19,8 +19,8 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **54**
-- Unique images: **139**
+- Components: **56**
+- Unique images: **140**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -59,7 +59,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kueue | helm | kueue | 0.19.6 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.10.1 | 1 |
 | mariadb-operator-crds | helm | mariadb-operator-crds | 26.10.1 | 0 |
-| network-operator | helm | nvidia/network-operator | 26.7.0 | 14 |
+| network-operator | helm | nvidia/network-operator | 26.7.0 | 15 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
 | nfd | helm | node-feature-discovery | 0.20.1 | 1 |
@@ -77,6 +77,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
 | psmdb-operator | helm | psmdb-operator | 1.23.2 | 1 |
+| rdma-modules | manifest | — | — | 1 |
 | slinky-drainer | manifest | — | — | 1 |
 | slinky-drainer-crds | manifest | — | — | 0 |
 | slinky-slurm | helm | slurm | 1.2.2 | 5 |
@@ -84,6 +85,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.2 | 0 |
 | slinky-topograph | helm | topograph/topograph | 1.1.0 | 1 |
 | slurm-accounting-mariadb | helm | mariadb-cluster | 26.10.1 | 1 |
+| sriov-ib-networks | manifest | — | — | 0 |
 | topograph | helm | topograph/topograph | 1.1.0 | 1 |
 
 ## Version variants
@@ -96,7 +98,7 @@ from the component's registry default above.
 | dynamo-platform | 1.5.0 | b300-mk8s-ubuntu-inference-dynamo | 1 |
 | kai-scheduler | v0.17.1 | b300-mk8s-ubuntu-inference-dynamo | 12 |
 | kube-prometheus-stack | 83.7.0 | aks | 8 |
-| network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 14 |
+| network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 15 |
 
 ## Images by component
 
@@ -279,6 +281,7 @@ _No images extracted._
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.7.0`
+- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam:network-operator-v26.7.0`
 
 ### network-operator-ocp
 
@@ -366,6 +369,10 @@ _No images extracted._
 
 - `docker.io/percona/percona-server-mongodb-operator:1.23.1@sha256:78c87b933e184b9af36dbb0078751862c75934c1521c33d3be4d0a38aa58dd0a`
 
+### rdma-modules
+
+- `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1@sha256:5414b06e52c090d0842704f2580798064362d771f12421ccc8888186b5f5a3cf`
+
 ### slinky-drainer
 
 - `ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.28.0@sha256:bf6ccaf1d6c035aa5f86e70a929dc6d9a18c5c05b10104d23c69aacff35bcb14`
@@ -398,6 +405,10 @@ _No images extracted._
 ### slurm-accounting-mariadb
 
 - `mariadb:11.8.9@sha256:6a4b3c20cffebc8b2d9248924f6a63285176c15a532b8e4840b8804e1c2c0443`
+
+### sriov-ib-networks
+
+_No images extracted._
 
 ### topograph
 
@@ -449,6 +460,7 @@ _No images extracted._
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.7.0`
+- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam:network-operator-v26.7.0`
 
 <!-- END AICR-BOM -->
 

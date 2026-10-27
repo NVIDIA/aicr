@@ -95,6 +95,8 @@ navigation:
         path: integrator/nebius-b300.md
       - page: k0s H200 Setup
         path: integrator/k0s-h200-setup.md
+      - page: NVKE GB200 Setup
+        path: integrator/nvke-gb200-setup.md
       - page: EKS Dynamo Networking
         path: integrator/eks-dynamo-networking.md
       - page: GKE TCPXO Networking

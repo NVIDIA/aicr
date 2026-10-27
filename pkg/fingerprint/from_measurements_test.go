@@ -359,6 +359,10 @@ func TestFromMeasurements_ServiceDetection(t *testing.T) {
 		{"lke", "lke"},
 		{"linode", "lke"},
 		{"linode://58291", "lke"},
+		{"nvke", "nvke"},
+		{"nico", "nvke"},
+		{"nico://0c6f2a4e-6d0e-4a1b-9f3c-2b7d8e9f0a11", "nvke"},
+		{"nke", "nke"},
 		{"kind", "kind"},
 		{"", ""},
 	}

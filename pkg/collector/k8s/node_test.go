@@ -239,6 +239,11 @@ func TestParseProvider(t *testing.T) {
 			want:       "lke",
 		},
 		{
+			name:       "NVKE Forge/NICo",
+			providerID: "nico://0c6f2a4e-6d0e-4a1b-9f3c-2b7d8e9f0a11",
+			want:       "nvke",
+		},
+		{
 			name:       "unknown format",
 			providerID: "custom-provider://some-id",
 			want:       "custom-provider",
