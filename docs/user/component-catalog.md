@@ -133,7 +133,7 @@ The trade-off is that, among the features nfd-worker publishes, cluster-side `No
 
 - **Your own NodeFeatureRules:** publish the features they read again, for example `--set-json 'nfd:worker.config.core.noPublishFeatures=["kernel.config","kernel.enabledmodule"]'` keeps everything except the two largest keys.
 - **Your own nfd-worker rules:** `worker.config.sources.custom` is a list, and a list override replaces it. Include the NIC rule from the values file above when you set it on a recipe that ships network-operator.
-- **Custom overlays that add network-operator:** select `components/nfd/values-nvidia-nics.yaml` (`values-nvidia-nics-aks.yaml` on AKS) as nfd's `valuesFile` in the same overlay, include its rule in a `worker.config.sources.custom` override, or publish `pci.*` again; with none of these, nothing labels the NIC nodes once nfd-worker restarts. `aicr bundle` warns in both directions: network-operator without the rule, and the rule without network-operator, for example after `--set networkoperator:enabled=false` without `--set-json 'nfd:worker.config.sources.custom=[]'`.
+- **Custom overlays that add network-operator:** select `components/nfd/values-nvidia-nics.yaml` (`values-nvidia-nics-aks.yaml` on AKS) as nfd's `valuesFile` in the same overlay, include its rule in a `worker.config.sources.custom` override, or publish `pci.*` again; with none of these, nothing labels the NIC nodes once nfd-worker restarts. `aicr bundle` rejects a bundle that ships network-operator without the rule. It only warns when nfd sets `worker.extraArgs` or a `labelsTemplate` rule, because the check does not evaluate either. The reverse case, the rule without network-operator, is a warning, for example after `--set networkoperator:enabled=false` without `--set-json 'nfd:worker.config.sources.custom=[]'`. See the [upgrade note](#nfd-and-network-operator-custom-overlays-must-select-the-nic-rule).
 - **k8s-nim-operator `nfd.nodeFeatureRules.deviceID`:** reads `pci.device`, so it labels nothing unless `pci.*` is published again.
 - **Upgrading a running cluster:** the label stays on every node during the upgrade, whatever order the deployer applies components in, because this release keeps the cluster-side rules. Until a node's nfd-worker restarts, the old rule labels the node; the worker's first write after the restart drops `pci.device` and adds the label in the same update. Earlier bundles shipped the AKS `nfd-network-rule` manifest as a Helm hook that Flux deleted and recreated on every `network-operator-post` upgrade; that is gone (see the `network-operator` upgrade note below), and a Flux cluster coming from such a bundle follows that note.
 
@@ -2247,6 +2247,20 @@ kubectl get configmap dcgm-exporter -n gpu-operator \
   -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}'
 # Expected: gpu-operator
 ```
+
+### `nfd` and `network-operator`: custom overlays must select the NIC rule
+
+Since v1.1.0, nfd-worker no longer publishes raw `pci.*` features, so network-operator's `NodeFeatureRule` can no longer set `feature.node.kubernetes.io/pci-15b3.present`. An nfd-worker rule sets the label instead. Every upstream overlay that ships network-operator selects it.
+
+**Who is affected:** anyone who maintains their own overlay, or a downstream overlay repository, that adds network-operator. If the overlay does not select the rule, the NIC nodes lose the label once nfd-worker restarts. The NicClusterPolicy operands (DOCA/OFED driver, RDMA and SR-IOV device plugins) are then removed from those nodes.
+
+**What to do when you bump AICR:** in the overlay that adds network-operator, do one of the following:
+
+- Select `components/nfd/values-nvidia-nics.yaml` (`values-nvidia-nics-aks.yaml` on AKS) as nfd's `valuesFile`.
+- Include its rule in your own `worker.config.sources.custom` override. A list override replaces the list, so the rule must be in it.
+- Publish `pci.*` again through `worker.config.core.noPublishFeatures`.
+
+`aicr bundle` fails when none of these holds. If nfd sets `worker.extraArgs` or a `labelsTemplate` rule, the bundle only warns, because the check does not evaluate either; confirm by hand that the NIC nodes keep the label. See [NFD Feature Publishing](#nfd-feature-publishing) for the full background.
 
 ### `network-operator`, `network-operator-ocp` and `nfd-ocp`: fabric CRs are no longer Helm hooks (Flux only)
 

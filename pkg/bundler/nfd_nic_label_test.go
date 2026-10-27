@@ -15,17 +15,20 @@
 package bundler
 
 import (
+	stderrors "errors"
 	"slices"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/component"
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	corev1 "k8s.io/api/core/v1"
 )
 
 const (
-	wantNFDNICWarningA = "Warning: network-operator is in this bundle, but nfd strips pci.device " +
+	wantNFDNICErrorA = "network-operator is in this bundle, but nfd strips pci.device " +
 		"(worker.config.core.noPublishFeatures) and has no nfd-worker rule labelling " +
 		"feature.node.kubernetes.io/pci-15b3.present (worker.config.sources.custom). " +
 		"network-operator's NodeFeatureRule reads pci.device, so after nfd-worker restarts nothing " +
@@ -33,6 +36,8 @@ const (
 		"operands) leave them. Select components/nfd/values-nvidia-nics.yaml " +
 		"(values-nvidia-nics-aks.yaml on AKS) as the nfd valuesFile in the overlay that adds " +
 		"network-operator, or include its rule in a worker.config.sources.custom override."
+	wantNFDNICWarningA = "Warning: " + wantNFDNICErrorA + " This is a warning, not an error, because " +
+		"nfd sets worker.extraArgs or a labelsTemplate rule, which this check does not evaluate."
 	wantNFDNICWarningB = "Warning: nfd labels NVIDIA NIC nodes feature.node.kubernetes.io/pci-15b3.present " +
 		"(worker.config.sources.custom), but network-operator is not in this bundle. The GPU Operator " +
 		"validator waits on those nodes for the network-operator MOFED driver when the GPU Operator " +
@@ -57,7 +62,7 @@ var (
 	}
 )
 
-func TestWarnNFDNICLabelMismatch(t *testing.T) {
+func TestCheckNFDNICLabelMismatch(t *testing.T) {
 	addNetOp := func(values map[string]map[string]any) {
 		values[networkOperatorComponentName] = map[string]any{}
 	}
@@ -76,6 +81,7 @@ func TestWarnNFDNICLabelMismatch(t *testing.T) {
 		mutate   []func(map[string]map[string]any)
 		bundlers []string
 		want     string
+		wantErr  string
 	}{
 		{
 			name:     "eks without network-operator",
@@ -93,21 +99,47 @@ func TestWarnNFDNICLabelMismatch(t *testing.T) {
 			name:     "A: network-operator added on base nfd values",
 			criteria: nfdNICTestEKS,
 			mutate:   []func(map[string]map[string]any){addNetOp},
-			want:     wantNFDNICWarningA,
+			wantErr:  wantNFDNICErrorA,
 		},
 		{
 			name:     "A: exact pci.device strip",
 			criteria: nfdNICTestEKS,
 			mutate: []func(map[string]map[string]any){addNetOp,
 				setNFD("worker.config.core.noPublishFeatures", []any{"pci.device"})},
-			want: wantNFDNICWarningA,
+			wantErr: wantNFDNICErrorA,
 		},
 		{
 			name:     "A: wildcard strip",
 			criteria: nfdNICTestEKS,
 			mutate: []func(map[string]map[string]any){addNetOp,
 				setNFD("worker.config.core.noPublishFeatures", []any{"*"})},
+			wantErr: wantNFDNICErrorA,
+		},
+		{
+			name:     "A warns: worker.extraArgs set",
+			criteria: nfdNICTestEKS,
+			mutate: []func(map[string]map[string]any){addNetOp,
+				setNFD("worker.extraArgs", []any{`-options={"core":{"noPublishFeatures":[]}}`})},
 			want: wantNFDNICWarningA,
+		},
+		{
+			name:     "A warns: labelsTemplate rule",
+			criteria: nfdNICTestEKS,
+			mutate: []func(map[string]map[string]any){addNetOp,
+				setNFD("worker.config.sources.custom", []any{
+					map[string]any{
+						"name":           "templated",
+						"labelsTemplate": "{{ range .pci.device }}pci-{{ .vendor }}.present=true\n{{ end }}",
+					},
+				})},
+			want: wantNFDNICWarningA,
+		},
+		{
+			name:     "A errors: empty worker.extraArgs",
+			criteria: nfdNICTestEKS,
+			mutate: []func(map[string]map[string]any){addNetOp,
+				setNFD("worker.extraArgs", []any{})},
+			wantErr: wantNFDNICErrorA,
 		},
 		{
 			name:     "A silent: pci republished",
@@ -185,7 +217,15 @@ func TestWarnNFDNICLabelMismatch(t *testing.T) {
 				m(values)
 			}
 
-			b.warnNFDNICLabelMismatch(values)
+			err = b.checkNFDNICLabelMismatch(values)
+			if tt.wantErr != "" {
+				errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+				if got := errorMessage(err); got != tt.wantErr {
+					t.Errorf("error message = %q\nwant            %q", got, tt.wantErr)
+				}
+			} else if err != nil {
+				t.Fatalf("checkNFDNICLabelMismatch() error = %v", err)
+			}
 
 			var want []string
 			if tt.want != "" {
@@ -198,11 +238,11 @@ func TestWarnNFDNICLabelMismatch(t *testing.T) {
 	}
 }
 
-// TestMakeNFDNICLabelMismatchSurfacesWarning drives both directions through
-// Make: the user-facing paths are an overlay that adds network-operator to a
-// recipe on base nfd values, and the AKS --set networkoperator:enabled=false
-// opt-out without the matching nfd override.
-func TestMakeNFDNICLabelMismatchSurfacesWarning(t *testing.T) {
+// TestMakeNFDNICLabelMismatch drives both directions through Make: the
+// user-facing paths are an overlay that adds network-operator to a recipe on
+// base nfd values, and the AKS --set networkoperator:enabled=false opt-out
+// without the matching nfd override.
+func TestMakeNFDNICLabelMismatch(t *testing.T) {
 	addNetOp := func(t *testing.T, result *recipe.RecipeResult) {
 		t.Helper()
 		donorCriteria := nfdNICTestGeneric
@@ -234,12 +274,13 @@ func TestMakeNFDNICLabelMismatchSurfacesWarning(t *testing.T) {
 		edit     func(*testing.T, *recipe.RecipeResult)
 		options  []config.Option
 		want     string
+		wantErr  string
 	}{
 		{
 			name:     "A: overlay adds network-operator",
 			criteria: nfdNICTestEKS,
 			edit:     addNetOp,
-			want:     wantNFDNICWarningA,
+			wantErr:  wantNFDNICErrorA,
 		},
 		{
 			name:     "B: --set networkoperator:enabled=false",
@@ -276,6 +317,13 @@ func TestMakeNFDNICLabelMismatchSurfacesWarning(t *testing.T) {
 			}
 
 			output, err := b.Make(t.Context(), result, t.TempDir())
+			if tt.wantErr != "" {
+				errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+				if got := errorMessage(err); got != tt.wantErr {
+					t.Errorf("error message = %q\nwant            %q", got, tt.wantErr)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("Make() error = %v", err)
 			}
@@ -287,4 +335,16 @@ func TestMakeNFDNICLabelMismatchSurfacesWarning(t *testing.T) {
 			}
 		})
 	}
+}
+
+// errorMessage returns the outermost StructuredError's Message, or err.Error()
+// for any other error, so tests compare the text without a wrapped cause.
+func errorMessage(err error) string {
+	if se, ok := stderrors.AsType[*errors.StructuredError](err); ok {
+		return se.Message
+	}
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
