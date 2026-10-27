@@ -24,6 +24,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/k8s/agent"
 	"github.com/NVIDIA/aicr/pkg/k8s/labels"
+	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -145,9 +146,31 @@ func TestAwaitAgentResult(t *testing.T) {
 			wantReads: 1,
 		},
 		{
+			name: "job wait errors with this run's snapshot written",
+			waiter: &fakeAgentWaiter{
+				completion: returnAfter(0, errors.New(errors.ErrCodeInternal, "watch stream error")),
+				written:    blockUntilDone,
+				snapshot:   snap,
+			},
+			exitGrace:     time.Hour,
+			wantRecovered: true,
+			wantReads:     1,
+		},
+		{
+			name: "job wait errors with no snapshot from this run",
+			waiter: &fakeAgentWaiter{
+				completion:  returnAfter(0, errors.New(errors.ErrCodeUnavailable, "Job re-list failed")),
+				written:     blockUntilDone,
+				snapshotErr: notFound,
+			},
+			exitGrace: time.Hour,
+			wantCode:  errors.ErrCodeUnavailable,
+			wantReads: 1,
+		},
+		{
 			name: "job fails",
 			waiter: &fakeAgentWaiter{
-				completion: returnAfter(0, errors.New(errors.ErrCodeInternal, "job failed")),
+				completion: returnAfter(0, errors.Wrap(errors.ErrCodeInternal, "job failed", pod.ErrJobFailed)),
 				written:    blockUntilDone,
 				snapshot:   snap,
 			},

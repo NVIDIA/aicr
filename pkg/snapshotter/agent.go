@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -469,9 +470,10 @@ type agentWaiter interface {
 //   - the Job completes: all results are zero, and the caller reads the
 //     snapshot itself
 //   - the Job has not completed exitGrace after this run's snapshot is
-//     written, or the wait times out with this run's snapshot present:
-//     snapshot holds it and recovered is true
-//   - the wait times out with no snapshot from this run: err is the timeout
+//     written, or the wait ends in any other error with this run's snapshot
+//     present: snapshot holds it and recovered is true
+//   - the wait ends in an error with no snapshot from this run: err is that
+//     error
 //   - the Job fails, or ctx is canceled: err is that error, never recovered
 func awaitAgentResult(ctx context.Context, d agentWaiter, timeout, exitGrace time.Duration) (snapshot []byte, recovered bool, err error) {
 	// A pod with a thread in uninterruptible sleep cannot be reaped after the
@@ -515,13 +517,15 @@ func awaitAgentResult(ctx context.Context, d agentWaiter, timeout, exitGrace tim
 			if waitErr == nil {
 				return nil, false, nil
 			}
-			if !errors.IsTransient(waitErr) {
+			if ctx.Err() != nil || stderrors.Is(waitErr, pod.ErrJobFailed) ||
+				stderrors.Is(waitErr, errors.New(errors.ErrCodeCanceled, "")) {
+
 				return nil, false, waitErr
 			}
 			data, getErr := d.GetRunSnapshot(ctx)
 			if getErr != nil {
-				slog.Debug("no snapshot from this run to recover after the Job wait timed out",
-					"error", getErr)
+				slog.Debug("no snapshot from this run to recover after the Job wait ended",
+					"error", getErr, "waitError", waitErr)
 				return nil, false, waitErr
 			}
 			return data, true, nil
@@ -675,10 +679,10 @@ func getKubeClient(kubeconfig string) (k8sclient.Interface, error) {
 //
 // A host read stuck in the kernel can leave the agent's pod unreapable after
 // it writes its snapshot. If this run's snapshot is written and the Job has not
-// completed defaults.AgentExitGracePeriod later, or the Job wait times out,
-// the snapshot is returned with a warning instead of a timeout error. A
-// snapshot an earlier run left at a caller-named cm:// destination is never
-// returned.
+// completed defaults.AgentExitGracePeriod later, or the Job wait ends in an
+// error other than Job failure or cancellation, the snapshot is returned with
+// a warning instead of that error. A snapshot an earlier run left at a
+// caller-named cm:// destination is never returned.
 //
 // # Fail-before-mutate
 //
