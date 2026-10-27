@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -52,6 +53,7 @@ const (
 	bundleQueryRepo                      = "repo"
 	bundleQuerySerial                    = "serial"
 	bundleQuerySet                       = "set"
+	bundleQuerySplit                     = "split"
 	bundleQuerySystemNodeSelector        = "system-node-selector"
 	bundleQuerySystemNodeToleration      = "system-node-toleration"
 	bundleQueryVendorCharts              = "vendor-charts"
@@ -73,6 +75,7 @@ var supportedBundleQueryParameters = map[string]struct{}{
 	bundleQueryRepo:                      {},
 	bundleQuerySerial:                    {},
 	bundleQuerySet:                       {},
+	bundleQuerySplit:                     {},
 	bundleQuerySystemNodeSelector:        {},
 	bundleQuerySystemNodeToleration:      {},
 	bundleQueryVendorCharts:              {},
@@ -120,6 +123,7 @@ func bundleConfigFromParams(params *bundleParams) *config.Config {
 		config.WithRepoURL(params.repoURL),
 		config.WithVendorCharts(params.vendorCharts),
 		config.WithSerial(params.serial),
+		config.WithSplit(params.split),
 		config.WithAppName(params.appName),
 		config.WithBundlers(params.bundlers),
 	)
@@ -336,6 +340,7 @@ type bundleParams struct {
 	repoURL                    string
 	vendorCharts               bool
 	serial                     bool
+	split                      bool
 	appName                    string
 	bundlers                   []string
 }
@@ -433,24 +438,26 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 	}
 
 	// Parse vendor-charts (opt-in air-gap vendoring)
-	if v := query.Get(bundleQueryVendorCharts); v != "" {
-		b, parseErr := strconv.ParseBool(v)
-		if parseErr != nil {
-			return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
-				"vendor-charts must be a boolean (true/false)", parseErr)
-		}
-		params.vendorCharts = b
+	if v, set, parseErr := parseBoolQuery(query, bundleQueryVendorCharts); parseErr != nil {
+		return nil, parseErr
+	} else if set {
+		params.vendorCharts = v
 	}
 
 	// Parse serial (deploy components one at a time instead of parallelizing
 	// independent ones; the API counterpart of the --serial CLI flag).
-	if v := query.Get(bundleQuerySerial); v != "" {
-		b, parseErr := strconv.ParseBool(v)
-		if parseErr != nil {
-			return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
-				"serial must be a boolean (true/false)", parseErr)
-		}
-		params.serial = b
+	if v, set, parseErr := parseBoolQuery(query, bundleQuerySerial); parseErr != nil {
+		return nil, parseErr
+	} else if set {
+		params.serial = v
+	}
+
+	// Parse split (class-partitioned bundle set, ADR-018; the API counterpart
+	// of the --split CLI flag).
+	if v, set, parseErr := parseBoolQuery(query, bundleQuerySplit); parseErr != nil {
+		return nil, parseErr
+	} else if set {
+		params.split = v
 	}
 
 	// Parse app-name (parent Argo Application name for argocd / argocd-helm;
@@ -496,4 +503,20 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 	}
 
 	return params, nil
+}
+
+// parseBoolQuery reads the named boolean query parameter. set is false when
+// the parameter is absent; a value that is not a boolean is
+// ErrCodeInvalidRequest.
+func parseBoolQuery(query url.Values, name string) (value, set bool, err error) {
+	v := query.Get(name)
+	if v == "" {
+		return false, false, nil
+	}
+	b, parseErr := strconv.ParseBool(v)
+	if parseErr != nil {
+		return false, false, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
+			name+" must be a boolean (true/false)", parseErr)
+	}
+	return b, true, nil
 }

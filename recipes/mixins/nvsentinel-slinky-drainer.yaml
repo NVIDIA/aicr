@@ -17,9 +17,10 @@
 # nvsentinel-quarantine or nvsentinel-remediation: no shipped recipe composes
 # it. See docs/user/component-catalog.md#slurm-drain-through-slinky.
 #
-# Without it, node-drainer on a Slurm node waits for the slurmd pod to finish
-# (AllowCompletion), which it never does, so the node stays in draining and
-# remediation never runs; a mode that evicts instead kills running jobs. With
+# Without it, node-drainer skips the slurmd pod, whose namespace the bundle
+# protects from eviction like every namespace the recipe deploys into, so
+# the node counts as drained while its Slurm jobs run and remediation would
+# act under them; evicting slurmd instead kills those jobs. With
 # it, node-drainer creates a DrainRequest per quarantined node and the
 # slinky-drainer plugin waits for Slurm to drain the node (Slinky drains a
 # cordoned node, and fault-quarantine cordons), then for its jobs to finish,

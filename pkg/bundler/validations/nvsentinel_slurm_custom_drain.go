@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
 	"github.com/NVIDIA/aicr/pkg/component"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -37,14 +38,14 @@ const (
 	slinkyDrainerEnabledPath           = "enabled"
 	slinkyDrainerSlinkyNamespacePath   = "slinkyNamespace"
 	nodeDrainerCustomDrainPath         = "node-drainer.customDrain"
-	nodeDrainerCustomDrainEnabledPath  = "node-drainer.customDrain.enabled"
-	nodeDrainerCustomDrainSelectorPath = "node-drainer.customDrain.nodeSelector"
+	nodeDrainerCustomDrainEnabledPath  = drainscope.CustomDrainEnabledPath
+	nodeDrainerCustomDrainSelectorPath = drainscope.CustomDrainNodeSelectorPath
 	nodeDrainerCustomDrainNSPath       = "node-drainer.customDrain.namespace"
 	nodeDrainerCustomDrainMountPath    = "node-drainer.customDrain.templateMountPath"
 	nodeDrainerCustomDrainTimeoutPath  = "node-drainer.customDrain.timeout"
 	nodeDrainerCustomDrainStatusPath   = "node-drainer.customDrain.statusConditionStatus"
-	nodeDrainerUserNamespacesPath      = "node-drainer.userNamespaces"
-	nodeDrainerPodDrainPoliciesPath    = "node-drainer.podDrainPolicies"
+	nodeDrainerUserNamespacesPath      = drainscope.UserNamespacesPath
+	nodeDrainerPodDrainPoliciesPath    = drainscope.PodDrainPoliciesPath
 	slinkyDrainerMixinName             = "nvsentinel-slinky-drainer"
 	slinkySlurmAccountingEnabledPath   = "accounting.enabled"
 	slinkySlurmWorkerSelectorPath      = "nodesets.slinky.podSpec.nodeSelector"
@@ -77,9 +78,10 @@ var slinkyDrainerCustomDrainContract = []struct{ path, want string }{
 
 // CheckNVSentinelSlurmCustomDrainCoherent blocks a bundle in which NVSentinel's
 // node-drainer would mishandle a Slurm node. On a Slinky cluster draining must
-// go through Slurm: node-drainer's chart-default AllowCompletion waits for the
-// slurmd pod, which never exits, so the node stays in draining and remediation
-// never runs, and a mode that evicts kills running jobs instead. The
+// go through Slurm: the bundle protects the slurmd pod's namespace from
+// eviction, as it does every namespace the recipe deploys into, so
+// node-drainer skips slurmd and reports the node drained while its jobs run,
+// and remediation then acts under them; evicting slurmd kills them instead. The
 // nvsentinel-slinky-drainer mixin routes the drain through the slinky-drainer
 // plugin with node-drainer's customDrain. This gate fails when:
 //
@@ -167,8 +169,8 @@ func CheckNVSentinelSlurmCustomDrainCoherent(ctx context.Context, componentName 
 
 	if !customDrain {
 		if slinkyDeployed && liveRemediation {
-			fail("fault-remediation runs on a recipe with %s, but %s is off: a Slurm node would never finish "+
-				"draining (the slurmd pod never exits), so it is never repaired, or would have its jobs evicted -- "+
+			fail("fault-remediation runs on a recipe with %s, but %s is off: node-drainer skips the slurmd pod, "+
+				"so a Slurm node would be repaired under its running jobs, or would have them evicted -- "+
 				"compose the %s mixin", slinkySlurmComponent, nodeDrainerCustomDrainEnabledPath, slinkyDrainerMixinName)
 		}
 		return nil, errs

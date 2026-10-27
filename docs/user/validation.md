@@ -62,6 +62,7 @@ a component the bundler enabled at bundle time is not checked.
 - Effectively cluster-admin for the identity running `aicr validate`. Each run creates a ServiceAccount for its validator Jobs and binds it to the built-in `cluster-admin` ClusterRole through a per-run `aicr-validator-<run-id>` ClusterRoleBinding, and Kubernetes RBAC only lets you bind a role whose permissions you already hold. The run deletes the binding at cleanup; `--no-cleanup` leaves it active until you delete it yourself. AICR creates its own `aicr-validation` namespace on first run. To run without that grant, have an administrator provision the ServiceAccount instead; see [Running under a pre-provisioned ServiceAccount](#running-under-a-pre-provisioned-serviceaccount).
 - **AKS profiled recipes**: the readiness pre-flight re-evaluates the recipe's profile constraint (`K8s.aks-gpu-pools.gpu-driver`), so the snapshot must carry that reading — capture it with `aicr snapshot --aks-gpu-pools <az dump>`, or pass the same flag to `aicr validate` when it captures live. A snapshot without the reading fails readiness closed (exit 2).
 - **GKE recipes**: the readiness pre-flight re-evaluates the recipe's `gpuStack` profile constraint over the GPU-node set (nodes carrying `cloud.google.com/gke-accelerator`): the default `gke-default` value requires that **no** GPU node carries the opt-out label `gke-no-default-nvidia-gpu-device-plugin` (GKE's managed plugin stays the `nvidia.com/gpu` advertiser), while `bundle-installer` requires every GPU node to carry `gke-no-default-nvidia-gpu-device-plugin=true` (so the GPU Operator's plugin is the sole advertiser). The check fails closed (exit 2) on labels contradicting the selected value, mixed labels, malformed or ambiguous label readings, a snapshot with no identifiable GPU nodes, and when `--max-nodes-per-entry` actually truncated a participating label reading (a truncated node list cannot prove set membership — regenerate with no cap set, from the flag, `AICR_MAX_NODES_PER_ENTRY`, or `spec.snapshot.execution.maxNodesPerEntry`; a cap larger than the node count truncates nothing and validates normally). `gke-default` needs no provider projection flag. Its constraint reads node labels the standard snapshot already carries. `bundle-installer` additionally re-evaluates `K8s.gke-gpu-pools.gpu-driver-installation`, corroborating that every GPU pool was actually created with `gpu-driver-version=disabled`. That reading requires a snapshot captured with `--gke-gpu-pools <gcloud dump>` (or passed to `aicr validate --gke-gpu-pools`), and without it is unavailable, so the value fails closed. See [GKE GPU Setup](../integrator/gke-gpu-setup.md#gpu-device-plugin-ownership) for the full setup and the qualification matrix.
+- **`NodeTopology.gpu-nodes.label` readiness constraints outside GKE** (including bare metal and `--data` services): GPU nodes are those the GPU Operator labels `nvidia.com/gpu.present=true`, so capture the snapshot after it is running. A snapshot with no such node fails readiness closed (exit 2), and GPU nodes it has not labeled are not checked.
 
 ## Training performance validation
 
@@ -525,15 +526,42 @@ percentage (`>= 50`) can never be satisfied.
 | Check | What it measures | Qualified combinations |
 |---|---|---|
 | `nccl-cre-all-reduce-bw` | Bus bandwidth from a CRE `Certification` `BandwidthMeasurement`; AICR still asserts the transport from launcher logs | `eks` x `h100` |
-| `cre-training-goodput` | Runtime goodput from a CRE `Certification` `GoodputMeasurement` | none at present |
+| `cre-training-goodput` | Runtime goodput from a CRE `Certification` `GoodputMeasurement` | `eks` x `h100` |
 
 The catalog entry each check drives, and the node footprint it runs on, come
 from the qualification record rather than the check: for
 `nccl-cre-all-reduce-bw` on `eks` x `h100`, `communication/nccl-all-reduce` on
-two nodes. A combination with no entry skips, because it has no calibrated
-threshold to judge against. `cre-training-goodput` skips everywhere today — the
-`training/nemotron5-8b` entry it drives does not run on the CRE version the
-registry pins, so declaring the check reports a skip rather than a verdict.
+two nodes, and for `cre-training-goodput` on `eks` x `h100`,
+`training/nemotron5-8b` on two nodes. A combination that no entry records as
+qualified skips with an unsupported-target reason.
+
+#### Relation to the TrainJob check
+
+On `eks` x `h100`, `nccl-cre-all-reduce-bw`
+reads 1.65 GB/s (0.34%) higher than `nccl-all-reduce-bw` on the same two nodes:
+six back-to-back pairs on NVCRE v0.8.2 gave 486.76 to 489.01 GB/s for the
+TrainJob check and 489.63 to 490.03 GB/s for the CRE check, with a per-pair
+offset of 0.92 to 3.14 GB/s. Both ran over `Using network Libfabric`; the CRE
+check asserts that from its launcher log, and the TrainJob check's default
+template logs at `NCCL_DEBUG=WARN` so it cannot show it. The two checks apply
+a constraint differently: the TrainJob check passes at 90% of the value, and
+the CRE check passes only at the value itself. The same number in both
+constraints therefore leaves a band between 90% and 100% of it where the
+TrainJob check passes and the CRE check fails. To get the same verdict from
+both, write the CRE constraint as 0.9 times the TrainJob one; `>= 270` is
+equivalent to a TrainJob `>= 300`, to within the 1.65 GB/s offset. This was
+measured on one cluster, and no run landed near the boundary, so it does not
+show that the two verdicts agree at it.
+
+The goodput figure depends on the step count, because startup time counts
+against it. The step count comes from the NVCRE catalog entry, so a figure
+belongs to the CRE version that produced it: 0.5723 on two nodes with the
+pinned v0.8.2 (462.05 TFLOPS per GPU), and 0.5835 on v0.6.0, both measured on a
+NodeWright-tuned cluster. Both are single measurements, so set the constraint
+as a floor below the value your cluster reaches, not at it. Run it on nodes
+that completed NodeWright tuning: on a cluster that had not, with the distro
+EFA driver, no hugepages, and an 8 MB memlock limit, a two-node run hung in NCCL
+initialization. Which of those differences causes it was not isolated.
 
 **Reclaiming an interrupted run.** Both checks delete their `Certification` and
 confirm its `TrainJob`s and workload pods are gone, but a validator pod killed

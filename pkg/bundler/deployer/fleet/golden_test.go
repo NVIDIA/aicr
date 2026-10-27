@@ -50,7 +50,7 @@ func TestGenerate_Scenarios(t *testing.T) {
 			gen: &Generator{
 				RecipeResult: recipeWith(
 					ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io"),
-					ref("k8s-aibom", "k8s-aibom-system", "k8s-aibom", "1.6.1", "oci://ghcr.io/googlecloudplatform/charts"),
+					ref("k8s-aibom", "k8s-aibom-system", "k8s-aibom", "1.6.2", "oci://ghcr.io/googlecloudplatform/charts"),
 				),
 				ComponentValues: map[string]map[string]any{
 					"cert-manager": {"crds": map[string]any{"enabled": true}},
@@ -167,7 +167,7 @@ func TestGenerate_Scenarios(t *testing.T) {
 			gen: &Generator{
 				RecipeResult: recipeWith(
 					ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io"),
-					ref("k8s-aibom", "k8s-aibom-system", "k8s-aibom", "1.6.1", "oci://ghcr.io/googlecloudplatform/charts"),
+					ref("k8s-aibom", "k8s-aibom-system", "k8s-aibom", "1.6.2", "oci://ghcr.io/googlecloudplatform/charts"),
 				),
 				ComponentValues: map[string]map[string]any{
 					"cert-manager": {"crds": map[string]any{"enabled": true}},

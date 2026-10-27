@@ -42,6 +42,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helm"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helmfile"
 	tfdeployer "github.com/NVIDIA/aicr/pkg/bundler/deployer/terraform"
+	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	"github.com/NVIDIA/aicr/pkg/bundler/types"
 	"github.com/NVIDIA/aicr/pkg/bundler/validations"
@@ -315,8 +316,10 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 		return nil, policyErr
 	}
 
-	// Extract values for each component from the recipe
-	componentValues, err := b.extractComponentValues(ctx, recipeResult)
+	// The declared union lets the NVSentinel drain scope cover components this
+	// bundle filters out.
+	componentValues, err := b.extractComponentValues(ctx,
+		recipeResult.WithDeclaredComponents(profileBaseline.ComponentRefs))
 	if err != nil {
 		if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
 			return nil, err
@@ -386,6 +389,13 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	upgradeNotes, upgradeNotice, err := b.selectUpgradeNotes(ctx, recipeResult)
 	if err != nil {
 		return nil, err
+	}
+
+	// A class-partitioned set (ADR-018) branches here: every gate above ran
+	// once on the complete component set, and the partition is rendered
+	// into private staging and published atomically.
+	if b.Config.Split() {
+		return b.makeSplit(ctx, profileBaseline.ComponentRefs, recipeResult, componentValues, dir, upgradeNotes, start)
 	}
 
 	// No filesystem output is created until the final candidate has passed the
@@ -1418,6 +1428,14 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 		// already been applied; see validateRequiredNodeSelectors.
 		if err := b.validateRequiredNodeSelectors(ref.Name, values, provider, policy); err != nil {
 			return nil, err
+		}
+
+		// After every override, so an operator's own systemNamespaces is
+		// kept alongside the generated one rather than replacing it.
+		if ref.Name == drainscope.ComponentName {
+			if drainErr := ApplyNVSentinelDrainScope(ctx, values, recipeResult); drainErr != nil {
+				return nil, drainErr
+			}
 		}
 
 		if ref.Name == slinkySlurmComponentName {
@@ -2838,7 +2856,16 @@ func (b *DefaultBundler) copyDataFiles(dir string, provider recipe.DataProvider)
 // dataFiles is the list of external data file paths (relative to bundle dir) to include
 // in resolvedDependencies. Returns the list of attestation files added, or nil if skipped.
 func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles []string, recipeResult *recipe.RecipeResult) ([]string, error) {
+	return b.attestBundleAt(ctx, dir, dir, dataFiles, recipeResult)
+}
+
+// attestBundleAt attests the bundle under dir while recording publishedDir
+// as the statement's output directory. A bundle set is attested in its
+// staging directory before one atomic move to publishedDir, and the signed
+// provenance must name the path the set lives at, not the transient stage.
+func (b *DefaultBundler) attestBundleAt(ctx context.Context, dir, publishedDir string, dataFiles []string, recipeResult *recipe.RecipeResult) ([]string, error) {
 	dir = filepath.Clean(dir)
+	publishedDir = filepath.Clean(publishedDir)
 	if b.Attester == nil || b.Config == nil || !b.Config.Attest() {
 		return nil, nil
 	}
@@ -2861,7 +2888,7 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 	// Build attestation subject with full SLSA metadata
 	metadata := attestation.StatementMetadata{
 		ToolVersion:   b.Config.Version(),
-		OutputDir:     dir,
+		OutputDir:     publishedDir,
 		Deterministic: b.Config.Deterministic(),
 	}
 

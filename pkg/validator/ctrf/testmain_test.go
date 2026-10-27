@@ -24,7 +24,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"sigs.k8s.io/controller-runtime/pkg/envtest"
+
+	"github.com/NVIDIA/aicr/pkg/k8s/k8stest"
 )
 
 // testClientset is a real Kubernetes clientset backed by envtest.
@@ -34,26 +35,20 @@ var testClientset kubernetes.Interface
 var nsCounter atomic.Int64
 
 func TestMain(m *testing.M) {
-	env := &envtest.Environment{}
-
-	cfg, err := env.Start()
-	if err != nil {
-		// envtest not available (no kubebuilder binaries) — run unit tests only.
-		// Integration tests that use testClientset will skip via requireEnvtest().
-		fmt.Fprintf(os.Stderr, "envtest not available, integration tests will be skipped: %v\n", err)
-		os.Exit(m.Run())
-	}
-
-	testClientset, err = kubernetes.NewForConfig(cfg)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "creating clientset: %v\n", err)
-		_ = env.Stop()
-		os.Exit(1)
+	cfg, stop := k8stest.StartPackage()
+	if cfg != nil {
+		var err error
+		testClientset, err = kubernetes.NewForConfig(cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "creating clientset: %v\n", err)
+			stop()
+			os.Exit(1)
+		}
 	}
 
 	code := m.Run()
 
-	_ = env.Stop()
+	stop()
 	os.Exit(code)
 }
 

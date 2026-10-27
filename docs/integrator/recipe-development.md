@@ -174,11 +174,17 @@ When authoring a recipe targeting Talos (`criteria.os: talos`), append the `os-t
 
 **`npd`** installs the upstream `node-problem-detector` DaemonSet, whose Node Conditions the `nvsentinel-object-monitor` policies read. Unlike the four mixins above it contributes a brand-new component name rather than composing overrides onto `nvsentinel`, so it needs no `mixinSafeOverridePaths` entry — a mixin may always carry a full `componentRefs` entry for a component no overlay in the chain declares. It is supported only on EKS, Kind and RKE2 — the platforms verified to run no NPD of their own. `CheckNPDNotDuplicatingProviderNPD` fails the bundle on every other platform, including GKE and AKS (which run their own), OKE, OpenShift, Talos and anything unverified. See [component catalog](../user/component-catalog.md#node-problem-detector) for which platforms need it and why the policies ship `STORE_ONLY`.
 
-**`nvsentinel-observe`, `nvsentinel-quarantine` and `nvsentinel-remediation`** are the three steps of NVSentinel remediation, adopted one at a time (`spec.mixins: [nvsentinel-observe]`, then swap the name). They set `global.*` toggles and pin `processingStrategy: EXECUTE_REMEDIATION` on the GPU and syslog monitors; observe and remediation also carry the `COMPONENT_RESET` → `GPUReset` action map, and remediation adds the pinned reboot Job image and a three-attempt repair cap, all through the same `mixinSafeOverridePaths` allowlist; every pair sets a shared path, so composing two is a collision error, which is what makes them mutually exclusive. Mixin override keys may not contain a dot, so the GPU-reset template key is `gpureset` rather than upstream's `gpureset-template.yaml`. No step sets a `node-drainer` mode, so the chart's wait-for-completion drain applies, except where `nvsentinel-slinky-drainer` is composed alongside. Like `npd`, each step also carries full `componentRefs` for two components no overlay declares, `psmdb-operator` and `nvsentinel-mongodb`, and wires NVSentinel's `global.datastore.*` to them in place of the chart's embedded `mongodbStore`. A bundle composing a step therefore needs `--system-node-selector`, which `nvsentinel-mongodb` requires. The GPU reset Job's driver root and RuntimeClass are platform facts, set by the platform overlays rather than the mixin. See [component catalog](../user/component-catalog.md#graded-remediation) for what each step does, how to choose a drain mode, and its prerequisites.
+**`nvsentinel-observe`, `nvsentinel-quarantine` and `nvsentinel-remediation`** are the three steps of NVSentinel remediation, adopted one at a time (`spec.mixins: [nvsentinel-observe]`, then swap the name). They set `global.*` toggles and pin `processingStrategy: EXECUTE_REMEDIATION` on the GPU and syslog monitors; observe and remediation also carry the `COMPONENT_RESET` → `GPUReset` action map, and remediation adds the pinned reboot Job image and a three-attempt repair cap, all through the same `mixinSafeOverridePaths` allowlist; every pair sets a shared path, so composing two is a collision error, which is what makes them mutually exclusive. Mixin override keys may not contain a dot, so the GPU-reset template key is `gpureset` rather than upstream's `gpureset-template.yaml`. Each step also sets the same `node-drainer` timing (`deleteAfterTimeoutMinutes`, `evictionTimeoutInSeconds`, `drainGPUPods`, `partialDrainEnabled`). It cannot set the drain mode or the protected namespaces: `userNamespaces` would collide with `nvsentinel-slinky-drainer`, and the namespaces depend on the recipe. So whenever `node-drainer` renders, `aicr bundle` (and `Client.BundleComponents`) generates `systemNamespaces` from the namespaces of every component the recipe declares, and defaults `userNamespaces` to `DeleteAfterTimeout` unless the recipe sets it, sets `podDrainPolicies` (then it is emptied, as the chart requires), or a custom drain owns every node (`pkg/bundler/drainscope`). Like `npd`, each step also carries full `componentRefs` for two components no overlay declares, `psmdb-operator` and `nvsentinel-mongodb`, and wires NVSentinel's `global.datastore.*` to them in place of the chart's embedded `mongodbStore`. A bundle composing a step therefore needs `--system-node-selector`, which `nvsentinel-mongodb` requires. The GPU reset Job's driver root and RuntimeClass are platform facts, set by the platform overlays rather than the mixin. See [component catalog](../user/component-catalog.md#graded-remediation) for what each step does and its prerequisites, and [Drain Scope and Timing](../user/component-catalog.md#drain-scope-and-timing) for the protected namespaces and how to choose a drain mode.
 
 **`nvsentinel-slinky-drainer`** drains quarantined Slurm nodes through Slurm. It composes on a `platform: slurm` leaf alongside `nvsentinel-quarantine` or `nvsentinel-remediation` (`spec.mixins: [nvsentinel-quarantine, nvsentinel-slinky-drainer]`), never with `nvsentinel-observe`. It turns on `node-drainer.customDrain` and empties `node-drainer.userNamespaces` through `nvsentinel`'s `mixinSafeOverridePaths`, adds `dependencyRefs` entries so the plugin's CRD and template exist before NVSentinel starts, and carries full `componentRefs` entries for `slinky-drainer-crds` and `slinky-drainer` (which depends on the CRD component), manifest-only components no overlay declares. `CheckNVSentinelSlurmCustomDrainCoherent` fails the bundle on any other combination, including a Slurm leaf with `nvsentinel-remediation` but without this mixin. See [component catalog](../user/component-catalog.md#slurm-drain-through-slinky).
 
 **`nvsentinel-health-events-analyzer`** turns on NVSentinel's health events analyzer, composed beside a remediation step (`spec.mixins: [nvsentinel-remediation, nvsentinel-health-events-analyzer]`) because it reads the datastore the step adds. It sets `global.healthEventsAnalyzer.enabled`, `processingStrategy: STORE_ONLY` and every rule toggle the chart ships through the same `mixinSafeOverridePaths` allowlist, and sets no path a step sets, so it composes with any of them. `CheckNVSentinelRemediationPipelineCoherent` fails the bundle when the analyzer has no datastore, and when `fault-remediation` runs live without it or with its `MultipleRemediations` rule off. See [component catalog](../user/component-catalog.md#health-events-analyzer) for the rules, where derived events are visible, and why its node conditions need clearing by hand.
+
+**`nvsentinel-event-exporter`** turns on NVSentinel's Event Exporter, composed beside a remediation step because it reads the datastore the step adds. It sets `global.eventExporter.enabled`, the OIDC Secret name, certificate checks and the export filter through the same `mixinSafeOverridePaths` allowlist, and no overlay composes it: the sink endpoint, the OIDC client and the cluster's metadata are per deployment, so they come from `--set` on the bundle command. `CheckNVSentinelEventExporterCoherent` fails the bundle while any of them is missing or still the chart's placeholder. See [component catalog](../user/component-catalog.md#health-event-export) for the Secret to create before deploying and the delivery guarantees.
+
+**`nvsentinel-datastore-eks`** declares the storage edge of NVSentinel's datastore on EKS. An EKS leaf that composes a remediation step lists it after the step (`spec.mixins: [nvsentinel-observe, nvsentinel-datastore-eks]`); it adds `aws-ebs-csi-driver` to `nvsentinel-mongodb`'s `dependencyRefs`, so the driver that provisions the datastore's volumes deploys first. It contributes only `dependencyRefs` to an already-chained component, which `mixinComponentRefSafeForMerge` allows; listed before the step it would introduce `nvsentinel-mongodb` itself, and the step's `type` for that component then fails resolution as an identity conflict. On a cluster that uses the EKS-managed EBS addon, `aws-ebs-csi-driver` stays declared with `enabled: false` and the edge counts as satisfied outside the recipe. See [component catalog](../user/component-catalog.md#graded-remediation).
+
+**`nvsentinel-log-collector`** captures a faulty node's diagnostics before NVSentinel repairs it, composed beside the remediation step and the health events analyzer that live remediation requires (`spec.mixins: [nvsentinel-remediation, nvsentinel-health-events-analyzer, nvsentinel-log-collector]`), because only live `fault-remediation` runs the collector. It turns on `fault-remediation.logCollector` and `global.inclusterFileServer` together, pins the file server's name and the upload URL that names it, sets must-gather explicitly off and the volume size and cleanup cycle deliberately, all through `nvsentinel`'s `mixinSafeOverridePaths`; it sets no path a step sets. The file server's claim is in `nvsentinel`'s `storageClassPaths`, so `--storage-class` reaches it. `CheckNVSentinelLogCollectorCoherent` fails the bundle without live remediation, with only one of the two settings on, and on a platform where the collector cannot reach the driver (AKS and OKE at their default `gpuStack`, Kind, the EKS `os=amazonlinux` leaves, and the VR200 RKE2 and H200 k0s leaves). See [component catalog](../user/component-catalog.md#diagnostics-capture) for where bundles land, how to retrieve them, and the privileges involved.
 
 **Cross-cutting overlays with wildcard criteria** apply across one criteria dimension without being referenced via `spec.base` or listed in `spec.mixins`. The resolver can return multiple independent maximal-leaf overlays for a single query, so a `service: any` overlay is picked up alongside the service-specific maximal leaf and its inheritance chain:
 
@@ -402,6 +408,28 @@ A component must have either `helm` OR `kustomize` configuration, not both.
 > applied by any deployer. An enabled ref that sets `patches` is rejected at
 > recipe resolution (rather than silently producing an unpatched bundle), so do
 > not use it. See [#1588](https://github.com/NVIDIA/aicr/issues/1588).
+
+#### Component classes
+
+Every embedded registry entry declares a `class`, `core` or `ops`
+([ADR-018](https://github.com/NVIDIA/aicr/blob/main/docs/design/018-class-partitioned-bundles.md)).
+An entry in an external `--data` registry may omit it and is `core`.
+
+- The classes are ordered `core` < `ops`. `core` is what a plain GPU pod
+  needs to run correctly, with its fabric and install prerequisites; `ops` is
+  everything else, workload platforms included.
+- A component's `dependencyRefs` may name only components of its own class
+  or an earlier one. A catalog test resolves every leaf and fails on an edge
+  to a later class.
+- Monitoring CRD dependencies go to `prometheus-operator-crds` (`core`), not
+  to `kube-prometheus-stack` (`ops`).
+
+The class is not part of a recipe and never appears in `recipe.yaml`.
+Ordinary bundling ignores it; `aicr bundle --split` partitions the bundle
+by it, one directory per class under a set root, as described in
+[Split a bundle by class](../user/bundling.md#split-a-bundle-by-class).
+The full assignment is in the
+[component catalog](../user/component-catalog.md#components).
 
 ### Kueue topology-aware scheduling
 
@@ -686,12 +714,20 @@ not a measurement type.
 `NodeTopology.gpu-nodes.label`
 ([#1755](https://github.com/NVIDIA/aicr/issues/1755)). No snapshot producer
 emits a `gpu-nodes` subtype; the evaluator synthesizes the GPU-node set from
-the snapshot's `NodeTopology.label` readings (nodes carrying
-`cloud.google.com/gke-accelerator`) and quantifies a label predicate over it.
-Its value grammar is also not the operator grammar:
+the snapshot's `NodeTopology.label` readings and quantifies a label predicate
+over it. On GKE, GPU nodes carry `cloud.google.com/gke-accelerator` from pool
+creation, so the form works at recipe generation and readiness. Elsewhere,
+including bare metal and `--data` services, it fails closed at generation and
+works only in `validation.readiness.constraints`, where GPU nodes are those
+the GPU Operator labels `nvidia.com/gpu.present=true`. Capture the readiness
+snapshot after the GPU Operator is running, because GPU nodes it has not
+labeled are not checked.
+Its value is not the operator grammar but a Kubernetes label selector, the
+syntax of `kubectl get nodes -l`, and every GPU node must match it.
 `<label-key>=<value>` asserts every GPU node carries the label with exactly
-that value, and `!<label-key>` asserts no GPU node carries the key. Both
-directions fail closed on a truncated node list (a snapshot captured with
+that value, `!<label-key>` asserts no GPU node carries the key, and forms such
+as `key!=value`, `key in (a,b)`, a bare `key`, and comma-joined requirements
+work the same way. Evaluation fails closed on a truncated node list (a snapshot captured with
 `--max-nodes-per-entry` whose cap actually truncated a participating
 reading), on an empty GPU-node universe, and on malformed or ambiguous
 label readings (an encoding collision between a disambiguated entry and a

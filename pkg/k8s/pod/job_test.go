@@ -42,6 +42,7 @@ func TestWaitForJobCompletion(t *testing.T) {
 		watchEvent *batchv1.Job // if non-nil, send this as a Modify event after brief delay
 		wantErr    bool
 		wantCode   aicrerrors.ErrorCode // checked only when wantErr and non-empty
+		wantFailed bool
 	}{
 		{
 			name: "success via watch",
@@ -64,8 +65,9 @@ func TestWaitForJobCompletion(t *testing.T) {
 					{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: "BackoffLimitExceeded"},
 				}},
 			},
-			timeout: 5 * time.Second,
-			wantErr: true,
+			timeout:    5 * time.Second,
+			wantErr:    true,
+			wantFailed: true,
 		},
 		{
 			// Deliberately not canceled: pins the ErrCodeTimeout side of the
@@ -95,8 +97,9 @@ func TestWaitForJobCompletion(t *testing.T) {
 					{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: "BackoffLimitExceeded"},
 				}},
 			},
-			timeout: 1 * time.Second,
-			wantErr: true,
+			timeout:    1 * time.Second,
+			wantErr:    true,
+			wantFailed: true,
 		},
 		{
 			// A real, non-terminal Job so the fast-path Get succeeds and the
@@ -152,6 +155,9 @@ func TestWaitForJobCompletion(t *testing.T) {
 				if se.Code != tt.wantCode {
 					t.Errorf("code = %q, want %q", se.Code, tt.wantCode)
 				}
+			}
+			if got := stderrors.Is(err, pod.ErrJobFailed); got != tt.wantFailed {
+				t.Errorf("errors.Is(err, ErrJobFailed) = %v, want %v (err %v)", got, tt.wantFailed, err)
 			}
 		})
 	}

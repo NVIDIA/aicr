@@ -161,6 +161,20 @@ func renderInputFor(c Component) manifest.RenderInput {
 	}
 }
 
+// FilterEmptyPreManifests returns the pre-manifests Write would inject a
+// <name>-pre folder for: those that render at least one object for their
+// component. Callers that must know the emitted release set before writing
+// (the ADR-018 whole-set identity check) use it so they count the same
+// -pre releases the writer emits.
+func FilterEmptyPreManifests(
+	ctx context.Context,
+	components []Component,
+	preManifests map[string]map[string][]byte,
+) (map[string]map[string][]byte, error) {
+
+	return filterEmptyPreManifests(ctx, components, preManifests)
+}
+
 func filterEmptyPreManifests(
 	ctx context.Context,
 	components []Component,

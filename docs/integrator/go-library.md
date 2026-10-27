@@ -578,6 +578,18 @@ OCI sources use credentials from the standard Docker configuration
 (`~/.docker/config.json` or `$DOCKER_CONFIG`) and may invoke the configured
 credential helper for the selected registry host.
 
+A registry that issues bearer tokens names its token endpoint in the `realm`
+of its `WWW-Authenticate` challenge. Every realm must use `https`, or `http`
+only when the registry itself was contacted over `http`. A realm on the
+registry's own host skips the address check that follows. A realm on a
+different host is refused when that host is an IP literal, or resolves through
+DNS to any address, that is loopback, link-local, private, unspecified, or
+carrier-grade NAT (`100.64.0.0/10`); a failed DNS lookup is allowed. A refused realm fails authentication with an error naming
+the host and the address class: `is a ... address` for an IP literal and
+`resolves to ...` for a DNS result. The same check applies to the ORAS clients
+behind OCI recipe sources, OCI bundle pushes, and evidence fetches; chart
+vendoring pulls through Helm and does not use it.
+
 Use `NewClientContext` so caller cancellation and tighter deadlines
 propagate through registry authentication, download, extraction, and catalog
 validation:
@@ -989,8 +1001,8 @@ byte-identical YAML.
 `WrapResolved` turns a `*pkg/recipe.RecipeResult` — typically one taken from
 `RecipeResult.Resolved()` and then projected by the caller — back into a
 facade `*RecipeResult` that `SelectFromRecipeWithContext` accepts. The result
-is queryable only: it carries no owning `Client`, so every `Client` method that
-consumes a result (bundle, validate, preflight, and evidence) rejects it. Use
+is not owned by any `Client`: the bundle, validate, preflight, and evidence
+methods reject it, and `Client.MirrorInventory` accepts it by design. Use
 `Client.AdoptRecipe` when you need a bundle-able result.
 
 `AdoptRecipe` canonicalizes the artifact `Kind` on the copy it returns: an
@@ -1150,12 +1162,33 @@ opts.Nodes = 32 // caller wins, visibly
 fully built `*BundleConfig` from something the flat fields cannot express (a
 CLI-flag-only setting such as `Version` or `Serial`, or a config object you
 mutate in place), set it and it wins outright over the 18 bundler-config flat
-fields (`Deployer` through `AppName`) — `BundleOptions()` itself never
-populates it. `Config` does NOT override `Attester`, `OIDCResolve`,
+fields (`Deployer` through `AppName`) and over `Split`, which follows them
+and is caller-set only: no config file setting derives it. `BundleOptions()`
+leaves `Config` and `Split` unset. `Config` does NOT override `Attester`, `OIDCResolve`,
 `BinaryAttestation`, `OutputDir` or `Timeout`: those five stay
 caller-supplied regardless of `Config`, which is why the REST `/v1/bundle`
 handler can set `Config` and `OutputDir`/`Timeout` in the same struct
 literal and have all three take effect.
+
+To generate a class-partitioned bundle set ([ADR-018](https://github.com/NVIDIA/aicr/blob/main/docs/design/018-class-partitioned-bundles.md)),
+set `Split` and give `OutputDir` a path that does not exist yet; the set is
+published there atomically, and the helm deployer is the only one supported:
+
+```go
+opts, err := cfg.BundleOptions()
+if err != nil {
+    return err
+}
+opts.Split = true
+opts.OutputDir = filepath.Join(workDir, "bundles") // must not exist yet
+out, err := client.MakeBundle(ctx, rec, opts)
+```
+
+`out.OutputDir` is the set root with `recipe.yaml`, `split.yaml`,
+`bundle-info.yaml` and `checksums.txt`; `out.Deployment.Steps` holds three
+commands per class in `classOrder` (`cd <set>/<class>`, `chmod +x deploy.sh`,
+`./deploy.sh`). See [Split a bundle by class](../user/bundling.md#split-a-bundle-by-class)
+for the layout, ordering contract and rejections.
 
 The six caller-side fields have their own type, `BundleInputOptions()`, not
 because they are declined but because `MakeBundle` never reads them — see the

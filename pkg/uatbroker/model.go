@@ -64,10 +64,11 @@ type Reservation struct {
 	// uniformity even though the nvkind lane provisions no cloud cluster.
 	Slug  string `yaml:"slug"`
 	Cloud string `yaml:"cloud"`
-	// ReservationID is the cloud capacity-reservation identifier (GCP uses the
-	// fully-qualified resource path). OPTIONAL: quota-backed reservations
-	// (e.g. Azure subscription quota) have no reservation identifier and omit
-	// it — the Name is still the lease key either way.
+	// ReservationID is the cloud capacity-reservation identifier, the
+	// fully-qualified resource path on GCP. It is empty for quota-backed
+	// capacity such as Azure subscription quota.
+	// [Registry.CheckClusterConfigReservations] verifies it matches every
+	// reservation target in ClusterConfigPath.
 	ReservationID     string `yaml:"reservation-id"`
 	Accelerator       string `yaml:"accelerator"`
 	GPUCount          int    `yaml:"gpu-count"`

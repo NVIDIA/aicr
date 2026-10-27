@@ -420,6 +420,28 @@ func TestCheckNVSentinelRemediationPipelineCoherent(t *testing.T) {
 			want: []string{wantNotDeployed, wantNotDeployed},
 		},
 		{
+			name:         "event exporter on the observe step",
+			recipeResult: sentinel(with(observe(), "eventExporter", on)),
+		},
+		{
+			name:         "event exporter with no datastore",
+			recipeResult: sentinel(map[string]any{"eventExporter": on}),
+			want:         []string{wantDatastore},
+		},
+		{
+			name: "event exporter on the Percona datastore without its components",
+			recipeResult: bare(map[string]any{
+				"datastore": percona(), "eventExporter": on,
+			}),
+			want: []string{wantNotDeployed, wantNotDeployed},
+		},
+		{
+			name:          "dynamic event exporter toggle guards the datastore",
+			recipeResult:  sentinel(map[string]any{}),
+			bundlerConfig: dynamic("global.eventExporter.enabled", "global.datastore.provider"),
+			want:          []string{wantDynamic, wantDynamic},
+		},
+		{
 			name:         "analyzer beside the embedded MongoDB",
 			recipeResult: sentinel(map[string]any{"healthEventsAnalyzer": on, "mongodbStore": on}),
 			want:         []string{wantEmbedded},

@@ -1532,3 +1532,34 @@ func TestValidateFleetName(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigValidate_Split(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		opts    []Option
+		wantErr string
+	}{
+		{name: "split with defaults", opts: []Option{WithSplit(true)}},
+		{name: "split off ignores the matrix", opts: []Option{WithDeployer(DeployerFlux), WithIncludeChecksums(false), WithBundlers([]string{"nfd"})}},
+		{name: "split with a non-helm deployer", opts: []Option{WithSplit(true), WithDeployer(DeployerArgoCD)}, wantErr: "only the helm deployer"},
+		{name: "split without checksums", opts: []Option{WithSplit(true), WithIncludeChecksums(false)}, wantErr: "requires checksums"},
+		{name: "split with a component filter", opts: []Option{WithSplit(true), WithBundlers([]string{"nfd"})}, wantErr: "component filter"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := NewConfig(tt.opts...)
+			err := cfg.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate() error = %v, want it to mention %q", err, tt.wantErr)
+			}
+		})
+	}
+}

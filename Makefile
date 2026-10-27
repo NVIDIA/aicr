@@ -450,6 +450,18 @@ nvsentinel-health-events-analyzer-e2e: ## Live Kind test: nvsentinel-health-even
 	echo "Running nvsentinel-health-events-analyzer mixin e2e test..."; \
 	tests/e2e/nvsentinel-health-events-analyzer/run.sh
 
+.PHONY: nvsentinel-event-exporter-e2e
+nvsentinel-event-exporter-e2e: ## Live Kind test: nvsentinel-event-exporter delivers filtered CloudEvents with an OIDC token to a mock sink (#2621)
+	@set -e; \
+	echo "Running nvsentinel-event-exporter mixin e2e test..."; \
+	tests/e2e/nvsentinel-event-exporter/run.sh
+
+.PHONY: nvsentinel-log-collector-e2e
+nvsentinel-log-collector-e2e: ## Live Kind test: nvsentinel-log-collector captures a node's diagnostics into the in-cluster file server before remediation (#2619)
+	@set -e; \
+	echo "Running nvsentinel-log-collector mixin e2e test..."; \
+	tests/e2e/nvsentinel-log-collector/run.sh
+
 .PHONY: npd-nvsentinel-object-monitor-e2e
 npd-nvsentinel-object-monitor-e2e: ## Live Kind test: an NPD Node condition becomes an NVSentinel health event (#2614)
 	@set -e; \

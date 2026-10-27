@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -508,5 +509,24 @@ func assertInvalidRequest(t *testing.T, err error) {
 	}
 	if se.Code != aicrerrors.ErrCodeInvalidRequest {
 		t.Errorf("expected ErrCodeInvalidRequest, got %s", se.Code)
+	}
+}
+
+// TestMakeBundle_RejectsSplitSupersededByConfig pins the Config precedence for
+// Split: a non-nil Config without config.WithSplit supersedes Split=true, and
+// MakeBundle rejects the disagreement instead of producing an ordinary
+// bundle with none of the split checks.
+func TestMakeBundle_RejectsSplitSupersededByConfig(t *testing.T) {
+	t.Parallel()
+	client, rec := resolveEmbeddedTrainingRecipe(t)
+
+	_, err := client.MakeBundle(t.Context(), rec, aicr.BundleOptions{
+		Config:    config.NewConfig(config.WithVersion("v-test")),
+		Split:     true,
+		OutputDir: filepath.Join(t.TempDir(), "set"),
+	})
+	assertInvalidRequest(t, err)
+	if err == nil || !strings.Contains(err.Error(), "config.WithSplit") {
+		t.Fatalf("error = %v, want it to name config.WithSplit", err)
 	}
 }

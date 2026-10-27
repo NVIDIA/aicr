@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
@@ -61,9 +63,81 @@ const (
 	stockRenderBudget = 5 * time.Minute
 )
 
-// renderGolden maps each leaf overlay name to its rendered files: bundle
-// relative path to SHA-256 of the file's contents.
+// renderGolden maps each leaf overlay or opt-in fixture name to its rendered
+// files, keyed by bundle-relative path with the SHA-256 of the file's contents
+// as the value.
 type renderGolden map[string]map[string]string
+
+// stockRenderOptIn renders one leaf a second time with a recipe-time or
+// bundle-time opt-in applied. Its digests land in the golden under name,
+// beside the leaf's default-path entry.
+type stockRenderOptIn struct {
+	name string
+	leaf string
+	// overlay and build re-resolve the leaf with these additions. Nil for both
+	// reuses the leaf's stock resolution.
+	overlay *overlayAddition
+	build   []recipe.BuildOption
+	opts    []config.Option
+	// covers names the opt-in components this fixture exists for. The fixture
+	// fails unless each of them renders, so a catalog change that drops a
+	// prerequisite cannot turn it into a silent copy of the leaf.
+	covers []string
+}
+
+// overlayAddition is a user-authored overlay that inherits a stock leaf and
+// adds mixins and componentRefs to it.
+type overlayAddition struct {
+	mixins        []string
+	componentRefs []recipe.ComponentRef
+}
+
+// stockRenderOptIns lists the opt-in renders the golden digests. Stock leaves
+// pin only the default path, so a component that only a user overlay, a recipe
+// option, or a bundle flag selects renders nothing in them and needs an entry
+// here to be covered.
+var stockRenderOptIns = []stockRenderOptIn{
+	{
+		name:   "h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label",
+		leaf:   "h100-eks-ubuntu-training-kubeflow",
+		opts:   []config.Option{config.WithDRAEvictionNodeLabel(config.DefaultDRAEvictionNodeLabel())},
+		covers: []string{draNodeLabelerComponentName},
+	},
+	{
+		name:   "h100-eks-ubuntu-training-slurm+slurm-accounting-aicr-provided",
+		leaf:   "h100-eks-ubuntu-training-slurm",
+		build:  []recipe.BuildOption{recipe.WithAccountingMode(recipe.AccountingModeAICRProvided)},
+		covers: []string{"mariadb-operator-crds", "mariadb-operator", "slurm-accounting-mariadb"},
+	},
+	{
+		name: "h100-eks-ubuntu-training-kubeflow+user-overlay-components",
+		leaf: "h100-eks-ubuntu-training-kubeflow",
+		overlay: &overlayAddition{
+			mixins: []string{"npd"},
+			componentRefs: []recipe.ComponentRef{
+				{
+					Name:           "nvcre",
+					Type:           recipe.ComponentTypeHelm,
+					ValuesFile:     "components/nvcre/values.yaml",
+					DependencyRefs: []string{"kubeflow-trainer"},
+				},
+				{Name: "gatekeeper", Type: recipe.ComponentTypeHelm},
+			},
+		},
+		covers: []string{"node-problem-detector", "nvcre", "gatekeeper"},
+	},
+	{
+		name: "h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer",
+		leaf: "h100-eks-ubuntu-training-slurm",
+		overlay: &overlayAddition{
+			mixins: []string{"nvsentinel-quarantine", "nvsentinel-slinky-drainer"},
+		},
+		// slinky-drainer rejects a slurmd selector that no label key separates
+		// from the Slurm control pods' system selector.
+		opts:   []config.Option{config.WithAcceleratedNodeSelector(map[string]string{"nodeGroup": "gpu"})},
+		covers: []string{"nvsentinel-mongodb", "psmdb-operator", "slinky-drainer-crds", "slinky-drainer"},
+	},
+}
 
 // TestStockRenderParityGolden pins the rendered bundle bytes of every leaf
 // recipe in the embedded catalog, one digest per rendered file.
@@ -81,6 +155,14 @@ type renderGolden map[string]map[string]string
 // path changing under every leaf that renders it, while a values change shows
 // up under the leaves that select that component (#2810). Paths keep their
 // install-order prefix because a reordering is a real bundle change.
+//
+// Stock leaves pin only the default render path. A component that only a user
+// overlay selects, such as nvcre, or that is gated behind a recipe option,
+// such as the Slurm accounting MariaDB stack behind --slurm-accounting-mode,
+// or behind a bundle flag, such as dra-node-labeler behind
+// --dra-eviction-node-label, renders nothing in any of them and is covered
+// only through an entry in stockRenderOptIns. The test fails when a registry
+// component renders in no entry at all.
 //
 // Hermetic: the helm deployer emits values and manifests that reference the
 // upstream chart by coordinates. Chart bytes are only fetched on the
@@ -105,7 +187,8 @@ func TestStockRenderParityGolden(t *testing.T) {
 		t.Fatal("catalog resolved zero leaves; a golden over an empty set proves nothing")
 	}
 
-	got := make(renderGolden, len(leaves))
+	got := make(renderGolden, len(leaves)+len(stockRenderOptIns))
+	resolved := make(map[string]recipe.ResolvedLeaf, len(leaves))
 	for _, leaf := range leaves {
 		name := leaf.Entry.Name
 		if leaf.Err != nil {
@@ -114,6 +197,7 @@ func TestStockRenderParityGolden(t *testing.T) {
 			t.Errorf("leaf %q failed to resolve: %v", name, leaf.Err)
 			continue
 		}
+		resolved[name] = leaf
 		files, renderErr := renderLeafFileDigests(ctx, t, leaf.Result)
 		if renderErr != nil {
 			t.Errorf("leaf %q failed to render: %v", name, renderErr)
@@ -121,6 +205,41 @@ func TestStockRenderParityGolden(t *testing.T) {
 			continue
 		}
 		got[name] = files
+	}
+
+	for _, fx := range stockRenderOptIns {
+		leaf, ok := resolved[fx.leaf]
+		if !ok {
+			t.Errorf("opt-in fixture %q: leaf %q did not resolve (renamed or removed?)", fx.name, fx.leaf)
+			continue
+		}
+		rr := leaf.Result
+		if fx.overlay != nil || fx.build != nil {
+			var resolveErr error
+			rr, resolveErr = resolveOptInLeaf(ctx, t, leaf.Entry, fx)
+			if resolveErr != nil {
+				t.Errorf("opt-in fixture %q failed to resolve: %v", fx.name, resolveErr)
+				got[fx.name] = renderErrorLeaf()
+				continue
+			}
+		}
+		files, renderErr := renderLeafFileDigests(ctx, t, rr, fx.opts...)
+		if renderErr != nil {
+			t.Errorf("opt-in fixture %q failed to render: %v", fx.name, renderErr)
+			got[fx.name] = renderErrorLeaf()
+			continue
+		}
+		for _, component := range fx.covers {
+			if !rendersComponent(files, component) {
+				t.Errorf("opt-in fixture %q does not render %s, a component it exists to cover", fx.name, component)
+			}
+		}
+		got[fx.name] = files
+	}
+
+	if missing := unrenderedRegistryComponents(t, got); len(missing) > 0 {
+		t.Errorf("registry components rendered by no leaf or opt-in fixture: %v. "+
+			"Add a stockRenderOptIns entry that selects them.", missing)
 	}
 
 	if os.Getenv("AICR_UPDATE_GOLDEN") == "1" {
@@ -145,9 +264,9 @@ func TestStockRenderParityGolden(t *testing.T) {
 	for _, d := range diffRenderGolden(want, got) {
 		switch d.Kind {
 		case driftLeafAdded:
-			t.Errorf("leaf %q is not in the golden (new overlay?) — regenerate deliberately", d.Leaf)
+			t.Errorf("leaf %q is not in the golden (new overlay or opt-in fixture?). Regenerate deliberately.", d.Leaf)
 		case driftLeafRemoved:
-			t.Errorf("golden leaf %q is no longer produced (overlay removed?) — regenerate deliberately", d.Leaf)
+			t.Errorf("golden leaf %q is no longer produced (overlay or opt-in fixture removed?). Regenerate deliberately.", d.Leaf)
 		case driftRenderState:
 			state := "renderable"
 			if isRenderErrorLeaf(got[d.Leaf]) {
@@ -251,11 +370,12 @@ func isRenderErrorLeaf(files map[string]string) bool {
 // values, applied identically to every leaf. Several components' bundle
 // contracts require them, and supplying them is what lets the golden cover the
 // injection paths rather than only the components that need no input. Their
-// exact values are irrelevant; that they never vary is what matters.
-func renderLeafFileDigests(ctx context.Context, t *testing.T, rr *recipe.RecipeResult) (map[string]string, error) {
+// exact values are irrelevant. That they never vary is what matters. extra is
+// applied after them and carries an opt-in fixture's flags.
+func renderLeafFileDigests(ctx context.Context, t *testing.T, rr *recipe.RecipeResult, extra ...config.Option) (map[string]string, error) {
 	t.Helper()
 
-	cfg := config.NewConfig(
+	opts := []config.Option{
 		config.WithDeployer(config.DeployerHelm),
 		config.WithVersion(stockRenderVersion),
 		// Suppresses wall-clock timestamps and derives attestation
@@ -273,18 +393,142 @@ func renderLeafFileDigests(ctx context.Context, t *testing.T, rr *recipe.RecipeR
 		config.WithStorageClass("aicr-parity-rwo"),
 		config.WithSharedStorageClass("aicr-parity-rwx"),
 		config.WithEstimatedNodeCount(3),
-	)
+	}
 
-	b, err := New(WithConfig(cfg))
+	b, err := New(WithConfig(config.NewConfig(append(opts, extra...)...)))
 	if err != nil {
-		return nil, fmt.Errorf("new bundler: %w", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "new bundler")
 	}
 
 	outputDir := t.TempDir()
 	if _, err := b.Make(ctx, rr, outputDir); err != nil {
-		return nil, fmt.Errorf("make: %w", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "make")
 	}
 	return digestTreeFiles(outputDir)
+}
+
+// optInOverlayName names the overlay an overlayAddition writes into its own
+// data directory.
+const optInOverlayName = "stock-render-opt-in"
+
+// resolveOptInLeaf resolves one catalog leaf again, the same way the stock
+// pass does, with fx's overlay additions and build options applied.
+func resolveOptInLeaf(ctx context.Context, t *testing.T, entry recipe.CatalogEntry, fx stockRenderOptIn) (*recipe.RecipeResult, error) {
+	t.Helper()
+	opts := recipe.ResolveLeavesOptions{
+		Version: stockRenderVersion,
+		Filter:  entry.Criteria,
+	}
+	if fx.build != nil {
+		opts.BuildOptionsForCriteria = func(*recipe.Criteria) []recipe.BuildOption {
+			return fx.build
+		}
+	}
+	name := entry.Name
+	if fx.overlay != nil {
+		opts.Provider = fx.overlay.dataProvider(t, entry)
+		name = optInOverlayName
+	}
+	leaves, err := recipe.ResolveLeaves(ctx, opts)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "resolve leaves")
+	}
+	for _, leaf := range leaves {
+		if leaf.Entry.Name == name {
+			return leaf.Result, leaf.Err
+		}
+	}
+	return nil, errors.New(errors.ErrCodeNotFound,
+		fmt.Sprintf("leaf %q not found under the criteria of %q", name, entry.Name))
+}
+
+// dataProvider layers an overlay that inherits leaf and carries a's additions
+// over the embedded catalog, the way `aicr recipe --data` layers a
+// user-authored overlay. The overlay takes over as the leaf for leaf's
+// criteria, and leaf's own file is read unchanged.
+func (a *overlayAddition) dataProvider(t *testing.T, leaf recipe.CatalogEntry) recipe.DataProvider {
+	t.Helper()
+	overlay := recipe.RecipeMetadata{
+		Spec: recipe.RecipeMetadataSpec{
+			Base:          leaf.Name,
+			Criteria:      leaf.Criteria,
+			Mixins:        a.mixins,
+			ComponentRefs: a.componentRefs,
+		},
+	}
+	overlay.Kind = recipe.RecipeMetadataKind
+	overlay.APIVersion = recipe.RecipeMetadataAPIVersion
+	overlay.Metadata.Name = optInOverlayName
+	// The layered provider requires a registry file. An empty one leaves the
+	// embedded registry as is.
+	registry := recipe.ComponentRegistry{
+		APIVersion: recipe.ComponentRegistryAPIVersion,
+		Kind:       recipe.ComponentRegistryKind,
+	}
+
+	dir := t.TempDir()
+	writeYAMLFile(t, filepath.Join(dir, recipe.RegistryFileName), &registry)
+	if err := os.Mkdir(filepath.Join(dir, "overlays"), 0o700); err != nil {
+		t.Fatalf("create overlays dir: %v", err)
+	}
+	writeYAMLFile(t, filepath.Join(dir, "overlays", optInOverlayName+".yaml"), &overlay)
+	provider, err := recipe.NewLayeredDataProvider(
+		recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ""),
+		recipe.LayeredProviderConfig{ExternalDir: dir},
+	)
+	if err != nil {
+		t.Fatalf("layer opt-in overlay: %v", err)
+	}
+	t.Cleanup(func() { recipe.EvictCachedRegistry(provider) })
+	return provider
+}
+
+func writeYAMLFile(t *testing.T, path string, v any) {
+	t.Helper()
+	raw, err := yaml.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal %s: %v", path, err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// unrenderedRegistryComponents returns the registry components that render in
+// no entry of got.
+func unrenderedRegistryComponents(t *testing.T, got renderGolden) []string {
+	t.Helper()
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("load component registry: %v", err)
+	}
+	var missing []string
+	for _, name := range registry.Names() {
+		rendered := false
+		for _, files := range got {
+			if rendersComponent(files, name) {
+				rendered = true
+				break
+			}
+		}
+		if !rendered {
+			missing = append(missing, name)
+		}
+	}
+	slices.Sort(missing)
+	return missing
+}
+
+// rendersComponent reports whether any rendered path sits under the
+// install-order directory of the named component ("NNN-<name>/").
+func rendersComponent(files map[string]string, name string) bool {
+	for p := range files {
+		dir, _, _ := strings.Cut(p, "/")
+		if _, component, ok := strings.Cut(dir, "-"); ok && component == name {
+			return true
+		}
+	}
+	return false
 }
 
 // digestTreeFiles hashes every file under root, keyed by slash-separated
@@ -315,7 +559,7 @@ func digestTreeFiles(root string) (map[string]string, error) {
 		return nil, err
 	}
 	if len(files) == 0 {
-		return nil, fmt.Errorf("bundle tree at %s is empty", root)
+		return nil, errors.New(errors.ErrCodeInternal, fmt.Sprintf("bundle tree at %s is empty", root))
 	}
 	return files, nil
 }
@@ -331,10 +575,38 @@ func writeStockRenderGolden(t *testing.T, got renderGolden) {
 		"#\n" +
 		"# One entry per leaf overlay, mapping each file in its fully rendered\n" +
 		"# helm-deployer bundle tree (relative path, install-order prefix kept) to\n" +
-		"# the sha256 of that file's contents. A leaf that failed to render is\n" +
-		"# recorded as the single entry `render-error: render-error`.\n")
+		"# the sha256 of that file's contents. Entries named <leaf>+<opt-in> render\n" +
+		"# that leaf again with a recipe-time or bundle-time opt-in applied. A leaf\n" +
+		"# that failed to render is recorded as the single entry\n" +
+		"# `render-error: render-error`.\n")
 	if err := os.WriteFile(stockRenderGoldenPath, append(header, raw...), 0o600); err != nil {
 		t.Fatalf("write golden: %v", err)
+	}
+}
+
+func TestRendersComponent(t *testing.T) {
+	files := map[string]string{
+		"014-nvidia-dra-driver-gpu/values.yaml": "aa",
+		"013-kubeflow-trainer-post/install.sh":  "bb",
+		"recipe.yaml":                           "cc",
+	}
+	tests := []struct {
+		name      string
+		component string
+		want      bool
+	}{
+		{"exact component directory", "nvidia-dra-driver-gpu", true},
+		{"post directory is its own component", "kubeflow-trainer-post", true},
+		{"prefix of a rendered name does not match", "nvidia-dra-driver", false},
+		{"parent of a post directory does not match", "kubeflow-trainer", false},
+		{"absent component", "dra-node-labeler", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := rendersComponent(files, tt.component); got != tt.want {
+				t.Errorf("rendersComponent(%q) = %v, want %v", tt.component, got, tt.want)
+			}
+		})
 	}
 }
 

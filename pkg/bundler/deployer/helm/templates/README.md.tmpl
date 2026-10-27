@@ -39,7 +39,28 @@ The following constraints must be satisfied:
 {{ end }}
 {{ end }}
 
-{{ if .UpgradeNotice }}{{ .UpgradeNotice }}{{ end -}}
+{{ if .Split }}## Bundle Set
+
+This directory is the `{{ .Split.Class }}` class of an AICR bundle set
+(ADR-018). The set root holds the full `recipe.yaml`, `split.yaml`,
+`bundle-info.yaml`, `checksums.txt` and, when generated with `--attest`,
+the attestation; verify the set there before deploying
+a class, and keep the set intact: a class directory copied out of it has no
+provenance of its own.
+
+Install the classes in order: {{ range $i, $c := .Split.ClassOrder }}{{ if $i }}, then {{ end }}`{{ $c }}`{{ end }}.
+Tear them down in reverse. A class's `deploy.sh` does not check that the
+earlier classes are installed.
+{{ if or .Split.SharedNamespaces .Split.SharedCRDGroups }}
+When uninstalling this class, keep the namespaces it shares with an
+earlier class and the CRD groups an earlier class installs (those
+`deploy.sh` tracks); the earliest class that uses a namespace or CRD group
+removes it, and it is torn down last:
+
+{{ range .Split.SharedNamespaces }}- namespace `{{ . }}`
+{{ end -}}{{ range .Split.SharedCRDGroups }}- CRD group `{{ . }}`
+{{ end }}{{ end }}
+{{ end -}}{{ if .UpgradeNotice }}{{ .UpgradeNotice }}{{ end -}}
 ## Quick Start
 
 Run the included deployment script:

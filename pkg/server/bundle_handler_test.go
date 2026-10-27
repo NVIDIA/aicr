@@ -1102,3 +1102,42 @@ func TestBundleHandler_RejectsLegacyRecipeKind(t *testing.T) {
 		t.Errorf("rejection does not name the expected kind; body: %s", rec.Body.String())
 	}
 }
+
+// TestBundleHandler_SplitReturnsSetZip exercises ?split=true through the
+// strict query gate and the handler: the response is a zip rooted at the
+// bundle set, with split.yaml and class directories and no root deploy.sh.
+func TestBundleHandler_SplitReturnsSetZip(t *testing.T) {
+	h := newTestBundleHandler(t)
+	req := httptest.NewRequest(http.MethodPost, "/v1/bundle?split=true", bytes.NewReader(resolveEmbeddedBundleBody(t)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleBundles(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/zip" {
+		t.Fatalf("Content-Type = %q, want application/zip", ct)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
+	if err != nil {
+		t.Fatalf("open bundle zip: %v", err)
+	}
+	names := make(map[string]bool, len(zr.File))
+	hasCore, hasOps := false, false
+	for _, f := range zr.File {
+		names[f.Name] = true
+		hasCore = hasCore || strings.HasPrefix(f.Name, "core/")
+		hasOps = hasOps || strings.HasPrefix(f.Name, "ops/")
+	}
+	for _, want := range []string{"split.yaml", "recipe.yaml", "checksums.txt"} {
+		if !names[want] {
+			t.Errorf("zip lacks %s at the set root", want)
+		}
+	}
+	if !hasCore || !hasOps {
+		t.Errorf("zip lacks class directories: core=%v ops=%v", hasCore, hasOps)
+	}
+	if names["deploy.sh"] {
+		t.Errorf("zip has a root deploy.sh; a set has one per class")
+	}
+}

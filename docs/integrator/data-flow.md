@@ -30,8 +30,10 @@ Each stage transforms input data into a different format:
 **OS Configuration:**
 - **grub**: `/proc/cmdline` - Boot parameters
 - **kmod**: `/proc/modules` - Loaded kernel modules
-- **sysctl**: `/proc/sys/**/*` - Kernel runtime parameters
+- **sysctl**: `/proc/sys/**/*` - Kernel runtime parameters, except `/proc/sys/net` and entries whose read does real work in the kernel or takes a lock for a value nobody tunes (for example `vm/stat_refresh` and `kernel/ftrace_enabled`)
 - **release**: `/etc/os-release` - OS identification
+
+Each `/proc` read (sysctl, `/proc/cmdline`, `/proc/modules`) is abandoned if it does not return within 1 second, and the agent logs a warning naming the path. The entry is left out of the snapshot. After 3 abandoned sysctl reads the whole `sysctl` subtype is skipped, so a node where every read wedges does not leak one thread per entry.
 
 **Kubernetes Cluster:**
 - Source: Kubernetes API via `client-go`

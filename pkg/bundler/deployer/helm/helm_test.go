@@ -1825,7 +1825,7 @@ func TestBundleGolden_OwnsCRDs(t *testing.T) {
 	outDir := t.TempDir()
 	g := &Generator{
 		RecipeResult: singleComponentRecipe(
-			"k8s-aibom", "k8s-aibom-system", "k8s-aibom", "1.6.1",
+			"k8s-aibom", "k8s-aibom-system", "k8s-aibom", "1.6.2",
 			"oci://ghcr.io/googlecloudplatform/charts"),
 		ComponentValues: map[string]map[string]any{
 			"k8s-aibom": {"replicaCount": 1},
@@ -2332,5 +2332,112 @@ func TestGenerate_ApplyCRDsExcludeSubcharts(t *testing.T) {
 				t.Errorf("EXCLUDE_SUBCHARTS assignments = %q, want exactly [%q]", got, tt.wantLine)
 			}
 		})
+	}
+}
+
+// TestGenerate_SplitContextShapesClassDirectory pins what a class directory
+// of a bundle set carries beyond an ordinary bundle: deploy.sh keys its
+// orphaned-CRD scan on the component that ships the monitoring CRDs and
+// states the class order, and README.md names what the class shares with
+// an earlier class. A nil Split keeps the historical keying.
+func TestGenerate_SplitContextShapesClassDirectory(t *testing.T) {
+	t.Parallel()
+	newRecipe := func() *recipe.RecipeResult {
+		return &recipe.RecipeResult{
+			Kind:       "RecipeResult",
+			APIVersion: "aicr.run/v1",
+			Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
+			ComponentRefs: []recipe.ComponentRef{
+				{Name: "prometheus-operator-crds", Namespace: "monitoring", Chart: "prometheus-operator-crds", Version: "24.0.1", Source: "https://prometheus-community.github.io/helm-charts"},
+				{Name: "kube-prometheus-stack", Namespace: "monitoring", Chart: "kube-prometheus-stack", Version: "81.1.1", Source: "https://prometheus-community.github.io/helm-charts"},
+			},
+			DeploymentOrder: []string{"prometheus-operator-crds", "kube-prometheus-stack"},
+		}
+	}
+	const monitoringScan = `ORPHANED_CRD_GROUPS="${ORPHANED_CRD_GROUPS} monitoring.coreos.com"`
+
+	t.Run("ordinary bundle keys the scan on kube-prometheus-stack", func(t *testing.T) {
+		t.Parallel()
+		outDir := t.TempDir()
+		g := &Generator{RecipeResult: newRecipe(), ComponentValues: map[string]map[string]any{}, Version: "test"}
+		if _, err := g.Generate(t.Context(), outDir); err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+		deploy, _ := os.ReadFile(filepath.Join(outDir, "deploy.sh"))
+		if !strings.Contains(string(deploy), monitoringScan) {
+			t.Errorf("deploy.sh lacks the monitoring scan")
+		}
+		if strings.Contains(string(deploy), "AICR bundle set") {
+			t.Errorf("ordinary deploy.sh carries the bundle set header")
+		}
+		readme, _ := os.ReadFile(filepath.Join(outDir, "README.md"))
+		if strings.Contains(string(readme), "## Bundle Set") {
+			t.Errorf("ordinary README carries the Bundle Set section")
+		}
+	})
+
+	t.Run("ops class without the CRD shipper does not scan its group", func(t *testing.T) {
+		t.Parallel()
+		outDir := t.TempDir()
+		rr := newRecipe()
+		rr.ComponentRefs = rr.ComponentRefs[1:]
+		rr.DeploymentOrder = rr.DeploymentOrder[1:]
+		g := &Generator{RecipeResult: rr, ComponentValues: map[string]map[string]any{}, Version: "test",
+			Split: &SplitContext{Class: "ops", ClassOrder: []string{"core", "ops"},
+				SharedNamespaces: []string{"monitoring"}, SharedCRDGroups: []string{"monitoring.coreos.com"}}}
+		if _, err := g.Generate(t.Context(), outDir); err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+		deploy, _ := os.ReadFile(filepath.Join(outDir, "deploy.sh"))
+		if strings.Contains(string(deploy), monitoringScan) {
+			t.Errorf("ops deploy.sh scans monitoring.coreos.com although core ships it")
+		}
+		if !strings.Contains(string(deploy), "Class ops of an AICR bundle set") ||
+			!strings.Contains(string(deploy), "order (core, then ops)") {
+
+			t.Errorf("ops deploy.sh lacks the class header:\n%s", deploy)
+		}
+		readme, _ := os.ReadFile(filepath.Join(outDir, "README.md"))
+		for _, want := range []string{"## Bundle Set", "`ops` class", "`core`, then `ops`", "- namespace `monitoring`", "- CRD group `monitoring.coreos.com`"} {
+			if !strings.Contains(string(readme), want) {
+				t.Errorf("ops README missing %q", want)
+			}
+		}
+	})
+
+	t.Run("core class with the CRD shipper scans its group", func(t *testing.T) {
+		t.Parallel()
+		outDir := t.TempDir()
+		rr := newRecipe()
+		rr.ComponentRefs = rr.ComponentRefs[:1]
+		rr.DeploymentOrder = rr.DeploymentOrder[:1]
+		g := &Generator{RecipeResult: rr, ComponentValues: map[string]map[string]any{}, Version: "test",
+			Split: &SplitContext{Class: "core", ClassOrder: []string{"core", "ops"}}}
+		if _, err := g.Generate(t.Context(), outDir); err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+		deploy, _ := os.ReadFile(filepath.Join(outDir, "deploy.sh"))
+		if !strings.Contains(string(deploy), monitoringScan) {
+			t.Errorf("core deploy.sh does not scan monitoring.coreos.com, which prometheus-operator-crds ships")
+		}
+		readme, _ := os.ReadFile(filepath.Join(outDir, "README.md"))
+		if strings.Contains(string(readme), "When uninstalling this class, keep") {
+			t.Errorf("core README lists shared resources although nothing precedes it")
+		}
+	})
+}
+
+func TestCRDGroupsInstalledBy(t *testing.T) {
+	t.Parallel()
+	if got := CRDGroupsInstalledBy("prometheus-operator-crds"); len(got) != 1 || got[0] != "monitoring.coreos.com" {
+		t.Errorf("CRDGroupsInstalledBy(prometheus-operator-crds) = %v", got)
+	}
+	if got := CRDGroupsInstalledBy("kube-prometheus-stack"); len(got) != 0 {
+		t.Errorf("CRDGroupsInstalledBy(kube-prometheus-stack) = %v, want none: it installs no CRDs", got)
+	}
+	got := CRDGroupsInstalledBy("gpu-operator")
+	got[0] = "mutated"
+	if again := CRDGroupsInstalledBy("gpu-operator"); again[0] == "mutated" {
+		t.Errorf("CRDGroupsInstalledBy returns the shared slice")
 	}
 }

@@ -238,6 +238,9 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 					slog.String("error", err.Error()))
 				return nil
 			}
+			slog.Info("collector completed",
+				slog.String("collector", name),
+				slog.Duration("duration", time.Since(collectorStart)))
 			if m == nil {
 				// Inactive collector (e.g. the network collector when
 				// neither --cluster-config nor --discover-network was

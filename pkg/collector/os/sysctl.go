@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/collector/file"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 )
@@ -38,13 +39,51 @@ var (
 	sysctlNetPrefix = "/proc/sys/net"
 )
 
+// blockingSysctls are /proc/sys entries, relative to sysctlRoot, that are
+// skipped without being opened. Audited against Linux 5.15, 6.1, and 6.17
+// outside net/.
+//
+// An entry is listed when its read either:
+//   - does real work, such as waiting on every CPU, rebuilding scheduler
+//     domains, re-optimizing kprobes, or destroying shm segments
+//   - takes a sleeping lock whose holder can wait on other CPUs, CPU hotplug,
+//     code patching, or device I/O, for a value nobody tunes
+//
+// Every other read is bounded by readHostFile.
+var blockingSysctls = map[string]struct{}{
+	"abi/cp15_barrier":                   {}, // insn_emulation_mutex (arm64, 6.1+)
+	"abi/setend":                         {}, // insn_emulation_mutex (arm64, 6.1+)
+	"abi/swp":                            {}, // insn_emulation_mutex (arm64, 6.1+)
+	"debug/kprobes-optimization":         {}, // kprobe_sysctl_mutex; re-optimizes every kprobe
+	"dev/cdrom/info":                     {}, // cdrom_mutex
+	"dev/mac_hid/mouse_button_emulation": {}, // mac_hid_emumouse_mutex
+	"kernel/ftrace_enabled":              {}, // ftrace_lock
+	"kernel/latencytop":                  {}, // enables schedstats when set
+	"kernel/sched_itmt_enabled":          {}, // itmt_update_mutex (x86, before 6.14)
+	"kernel/sched_rt_period_us":          {}, // sched_domains_mutex; rebuilds sched domains
+	"kernel/sched_rt_runtime_us":         {}, // sched_domains_mutex; rebuilds sched domains
+	"kernel/shm_rmid_forced":             {}, // shm ids rwsem; destroys orphaned segments when set
+	"kernel/stack_tracer_enabled":        {}, // stack_sysctl_mutex
+	"kernel/tracepoint_printk":           {}, // tracepoint_printk_mutex
+	"kernel/user_events_max":             {}, // event_mutex
+	"vm/mem_profiling":                   {}, // static_key_mutex
+	"vm/percpu_pagelist_high_fraction":   {}, // pcp_batch_high_lock
+	"vm/stat_refresh":                    {}, // schedule_on_each_cpu
+}
+
 // collectSysctl gathers sysctl configurations from /proc/sys, excluding /proc/sys/net
-// and returns them as a subtype with file paths as keys and their contents as values.
+// and blockingSysctls, and returns them as a subtype with file paths as keys and their
+// contents as values.
+//
+// A stalled read is skipped. After defaults.MaxStalledHostReads stalls,
+// collectSysctl returns an ErrCodeUnavailable error.
 func (c *Collector) collectSysctl(ctx context.Context) (*measurement.Subtype, error) {
 	params := make(map[string]measurement.Reading)
 
 	// Create parser for reading file contents
 	parser := file.NewParser()
+
+	var stalled []string
 
 	err := filepath.WalkDir(sysctlRoot, func(path string, d fs.DirEntry, err error) error {
 		// Check if context is canceled — fail loud so a timed-out walk is never
@@ -81,9 +120,24 @@ func (c *Collector) collectSysctl(ctx context.Context) (*measurement.Subtype, er
 			return nil
 		}
 
-		// Read file content using parser
-		lines, err := parser.GetLines(path)
+		if _, blocking := blockingSysctls[strings.TrimPrefix(path, sysctlRoot+"/")]; blocking {
+			return nil
+		}
+
+		lines, err := readHostFile(ctx, path, parser.GetLines)
 		if err != nil {
+			if errors.IsTransient(err) {
+				return err
+			}
+			if isHostReadStalled(err) {
+				stalled = append(stalled, path)
+				if len(stalled) >= defaults.MaxStalledHostReads {
+					return errors.NewWithContext(errors.ErrCodeUnavailable,
+						fmt.Sprintf("abandoning sysctl collection after %d reads did not return: %s",
+							len(stalled), strings.Join(stalled, ", ")),
+						map[string]any{"paths": stalled})
+				}
+			}
 			// Skip files we can't read (some proc files are write-only or restricted)
 			return nil
 		}

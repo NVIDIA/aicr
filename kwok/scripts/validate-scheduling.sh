@@ -72,6 +72,15 @@
 #                            this grace window indicates `kubectl apply` /
 #                            `helm install` silently produced no Application
 #                            resource. Default: 30.
+#   KWOK_ARGOCD_READBACK_SETTLE_TIMEOUT
+#                            Seconds the inventory read-back waits for every
+#                            installed Argo CD Application outside the
+#                            unsettled allowlist to finish its first sync,
+#                            bounded by KWOK_SYNC_DEADLINE_EPOCH. An
+#                            Application still syncing is then read as
+#                            unversioned and fails the read-back. Default: 180.
+#   KWOK_ARGOCD_READBACK_SETTLE_INTERVAL
+#                            Seconds between those re-checks. Default: 5.
 #   KWOK_FLUX_SYNC_TIMEOUT   Seconds to wait for the outer Kustomization +
 #                            all HelmReleases to reach a terminal state
 #                            before failing. Default: 500.
@@ -1019,6 +1028,22 @@ generate_bundle() {
             --set "slurmcluster:controller.persistence.enabled=false"
         )
     fi
+    # The event exporter mixin leaves the sink, the OIDC client and the
+    # cluster's metadata to the bundle command, which
+    # CheckNVSentinelEventExporterCoherent requires. KWOK simulates the pod, so
+    # placeholders reach no endpoint.
+    # Whitespace stripped, as the yq composition above trims each entry.
+    local kwok_mixins="${KWOK_MIXINS:-}"
+    if [[ ",${kwok_mixins//[[:space:]]/}," == *,nvsentinel-event-exporter,* ]]; then
+        conditional_sets+=(
+            --set "nvsentinel:event-exporter.exporter.sink.endpoint=https://events.kwok.invalid/v1/events"
+            --set "nvsentinel:event-exporter.exporter.oidc.tokenUrl=https://idp.kwok.invalid/oauth2/token"
+            --set "nvsentinel:event-exporter.exporter.oidc.clientId=nvsentinel"
+            --set "nvsentinel:event-exporter.exporter.oidc.scope=events:write"
+            --set "nvsentinel:event-exporter.exporter.metadata.cluster=kwok"
+            --set "nvsentinel:event-exporter.exporter.metadata.environment=ci"
+        )
+    fi
     if grep -qx "nvsentinel-mongodb" <<< "$bundled_components"; then
         # platform-connectors tolerates every taint, so one pod lands on the
         # real Kind node, where it needs the datastore's client certificate
@@ -1032,6 +1057,15 @@ generate_bundle() {
         conditional_sets+=(
             --set "dynamoplatform:etcd.persistence.enabled=false"
             --set "dynamoplatform:nats.config.jetstream.fileStore.enabled=false"
+        )
+    fi
+    # The nvsentinel-log-collector mixin's in-cluster file server claims a
+    # ReadWriteOnce volume that KWOK's fake nodes cannot bind, so its pod stays
+    # Pending; run it on emptyDir, as the Slurm and Dynamo stores above do.
+    if yq eval '.componentRefs[] | select(.name == "nvsentinel") | .overrides.global.inclusterFileServer.enabled' \
+            "${WORK_DIR}/recipe.yaml" 2>/dev/null | grep -qx true; then
+        conditional_sets+=(
+            --set "nvsentinel:incluster-file-server.persistence.enabled=false"
         )
     fi
 
@@ -2126,6 +2160,68 @@ verify_pods() {
     return 0
 }
 
+# wait_for_argo_readback_settled <installed-file> <applications-json-out> <pending-file>
+#
+# Re-lists Argo CD Applications into <applications-json-out> until no
+# installed component outside READBACK_UNSETTLED_ALLOWLIST is still working
+# toward its first deployed version, waiting up to
+# KWOK_ARGOCD_READBACK_SETTLE_TIMEOUT seconds at
+# KWOK_ARGOCD_READBACK_SETTLE_INTERVAL spacing, and never past
+# KWOK_SYNC_DEADLINE_EPOCH. The sync gate passes once every child Application
+# exists, while a large chart such as kube-prometheus-stack can still be
+# applying its first sync. A component still pending at the deadline is left
+# for the comparison to report as unversioned, so the wait alone never fails
+# the lane. Returns 1 when the Applications cannot be listed or a tunable is
+# malformed.
+wait_for_argo_readback_settled() {
+    local installed_file="$1" apps_json="$2" pending_file="$3"
+    local timeout="${KWOK_ARGOCD_READBACK_SETTLE_TIMEOUT:-180}"
+    local interval="${KWOK_ARGOCD_READBACK_SETTLE_INTERVAL:-5}"
+
+    if ! [[ "$timeout" =~ ^[0-9]+$ ]]; then
+        log_error "KWOK_ARGOCD_READBACK_SETTLE_TIMEOUT must be a non-negative integer (got: '${timeout}')"
+        return 1
+    fi
+    if ! [[ "$interval" =~ ^[0-9]+$ ]] || (( 10#$interval < 1 )); then
+        log_error "KWOK_ARGOCD_READBACK_SETTLE_INTERVAL must be a positive integer (got: '${interval}')"
+        return 1
+    fi
+    timeout=$((10#$timeout))
+    interval=$((10#$interval))
+    local start
+    start=$(date +%s)
+    local end=$(( start + timeout ))
+    if [[ -n "${KWOK_SYNC_DEADLINE_EPOCH:-}" ]] && (( KWOK_SYNC_DEADLINE_EPOCH < end )); then
+        end=$(( KWOK_SYNC_DEADLINE_EPOCH > start ? KWOK_SYNC_DEADLINE_EPOCH : start ))
+    fi
+
+    local now waited remaining pending
+    while :; do
+        if ! kubectl get applications.argoproj.io -A -o json > "$apps_json"; then
+            log_error "Could not list Argo CD Applications for the read-back"
+            return 1
+        fi
+        readback_pending_argo_components "$apps_json" "$installed_file" "$pending_file" || return 1
+        now=$(date +%s)
+        waited=$(( now - start ))
+        if [[ ! -s "$pending_file" ]]; then
+            if (( waited > 0 )); then
+                log_info "Argo CD Applications reached a first sync after ${waited}s"
+            fi
+            return 0
+        fi
+
+        pending=$(paste -sd ' ' "$pending_file")
+        remaining=$(( end - now ))
+        if (( remaining <= 0 )); then
+            log_warn "Argo CD Applications still on their first sync after ${waited}s, so the read-back reads them as unversioned: ${pending}"
+            return 0
+        fi
+        log_info "Waiting for a first Argo CD sync before the read-back (${waited}/$(( end - start ))s): ${pending}"
+        sleep $(( remaining < interval ? remaining : interval ))
+    done
+}
+
 # Differential read-back of the installed inventory (ADR-021 acceptance
 # criterion 4, issue #2531).
 #
@@ -2184,10 +2280,8 @@ verify_upgrade_inventory() {
     case "$deployer_arg" in
         argocd|argocd-helm)
             local apps_json="${out_dir}/argo-applications.json"
-            if ! kubectl get applications.argoproj.io -A -o json > "$apps_json"; then
-                log_error "Could not list Argo CD Applications for the read-back"
-                return 1
-            fi
+            wait_for_argo_readback_settled "$installed_file" "$apps_json" \
+                "${out_dir}/pending-components.txt" || return 1
             unsettled_file="${out_dir}/unsettled-components.txt"
             readback_unsettled_argo_components "$apps_json" "$installed_file" "$unsettled_file" || return 1
             ;;

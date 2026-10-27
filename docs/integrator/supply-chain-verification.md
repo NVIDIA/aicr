@@ -749,7 +749,11 @@ the bundle) and `attestation/aicr-attestation.sigstore.json` (the binary
 provenance chain).
 
 Bundle verification is closed-world: `checksums.txt` defines the regular
-payload, and any unlisted or non-regular entry fails verification. See
+payload, and any unlisted or non-regular entry fails verification. A bundle
+set generated with `--split` is one such closed world at its root: its
+`checksums.txt` and attestation cover every class directory, and a class
+directory copied out of the set carries no standalone provenance (see
+[Split a bundle by class](../user/bundling.md#split-a-bundle-by-class)). See
 [Artifact Verification](../user/artifact-verification.md#what-can-be-verified)
 for the exact metadata exceptions, ordering rules, publication guarantees, and
 legacy-bundle behavior.

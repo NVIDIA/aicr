@@ -189,6 +189,13 @@ func writeGuideSection(ew *errWriter, n BundleNote, deployer string) {
 // GuideFile. It ends in a blank line so the heading that follows it stays
 // separated. No notes writes nothing.
 func WriteNotice(w io.Writer, notes []BundleNote, deployer string) error {
+	return WriteNoticeAt(w, notes, deployer, GuideFile)
+}
+
+// WriteNoticeAt is WriteNotice with the guide linked at guidePath, relative
+// to the README that carries the notice. A class directory of a bundle set
+// links the guide at the set root as ../UPGRADING.md.
+func WriteNoticeAt(w io.Writer, notes []BundleNote, deployer, guidePath string) error {
 	if err := checkRenderCall(w, deployer); err != nil {
 		return err
 	}
@@ -200,7 +207,7 @@ func WriteNotice(w io.Writer, notes []BundleNote, deployer string) error {
 	ew.println("## Before You Upgrade")
 	ew.println("")
 	ew.println("Upgrading an existing installation? The components below need action before")
-	ew.printf("this bundle is applied over them. [%s](%s) has the steps\n", GuideFile, GuideFile)
+	ew.printf("this bundle is applied over them. [%s](%s) has the steps\n", GuideFile, guidePath)
 	ew.printf("for the `%s` deployer. A fresh install can skip this.\n", mdInline(deployer))
 	ew.println("")
 	ew.println("| Component | Verdict | Applies when upgrading from |")

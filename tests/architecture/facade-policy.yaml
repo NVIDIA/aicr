@@ -112,6 +112,7 @@ constrained:
       ComponentEnabledKey: const
       ComponentPath: type
       Config: type
+      Config.Split: behavioral
       Config.VendorCharts: behavioral
       DefaultFleetNamespace: const
       DefaultFluxNamespace: const
@@ -161,6 +162,7 @@ constrained:
       WithRepoURL: behavioral
       WithSerial: behavioral
       WithSharedStorageClass: behavioral
+      WithSplit: behavioral
       WithStorageClass: behavioral
       WithSystemNodeSelector: behavioral
       WithSystemNodeTolerations: behavioral

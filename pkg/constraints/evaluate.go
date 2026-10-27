@@ -34,15 +34,37 @@ type EvalResult struct {
 	Error error
 }
 
+// evalPhase is the stage at which a constraint is evaluated, recipe
+// generation or the validate readiness pre-flight.
+type evalPhase int
+
+const (
+	phaseGeneration evalPhase = iota
+	phaseReadiness
+)
+
 // Evaluate evaluates a single constraint against a snapshot.
 // Used by the recipe package to filter overlays based on constraint
 // evaluation during snapshot-based recipe generation.
 func Evaluate(constraint recipe.Constraint, snap *snapshotter.Snapshot) EvalResult {
+	return evaluate(constraint, snap, phaseGeneration)
+}
+
+// EvaluateReadiness is Evaluate for the validate readiness pre-flight, which
+// runs after deployment. It differs only for GPUNodesLabelConstraintName on a
+// service with no pre-deployment GPU-node universe label, where it identifies
+// GPU nodes by the GPU Operator's nvidia.com/gpu.present=true instead of
+// failing closed.
+func EvaluateReadiness(constraint recipe.Constraint, snap *snapshotter.Snapshot) EvalResult {
+	return evaluate(constraint, snap, phaseReadiness)
+}
+
+func evaluate(constraint recipe.Constraint, snap *snapshotter.Snapshot, phase evalPhase) EvalResult {
 	// The node-set form dispatches by exact name before the scalar path: its
-	// value grammar (key=value / !key) is not the operator grammar, and its
-	// name is a virtual path no snapshot producer emits directly.
+	// value is a label selector, not the operator grammar, and its name is a
+	// virtual path no snapshot producer emits directly.
 	if constraint.Name == GPUNodesLabelConstraintName {
-		return evaluateGPUNodesLabel(constraint.Value, snap)
+		return evaluateGPUNodesLabel(constraint.Value, snap, phase)
 	}
 
 	result := EvalResult{}

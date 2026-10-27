@@ -33,6 +33,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
+
+	"github.com/NVIDIA/aicr/pkg/k8s/k8stest"
 )
 
 const (
@@ -313,50 +315,18 @@ type crdCluster struct {
 // helm state isolated from the developer's.
 func startCRDCluster(t *testing.T) *crdCluster {
 	t.Helper()
-	env := &envtest.Environment{}
-	cfg, err := env.Start()
-	if err != nil {
-		if os.Getenv("CI") != "" {
-			t.Fatalf("envtest is required in CI: %v", err)
-		}
-		t.Skipf("envtest not available (set KUBEBUILDER_ASSETS): %v", err)
-	}
-	t.Cleanup(func() { _ = env.Stop() })
+	env, cfg := k8stest.Start(t)
 
 	client, err := dynamic.NewForConfig(cfg)
 	if err != nil {
 		t.Fatalf("dynamic client: %v", err)
 	}
-	user, err := env.AddUser(envtest.User{Name: "crd-upgrader", Groups: []string{"system:masters"}}, cfg)
-	if err != nil {
-		t.Fatalf("add envtest user: %v", err)
-	}
-	kc, err := user.KubeConfig()
-	if err != nil {
-		t.Fatalf("kubeconfig: %v", err)
-	}
-	dir := t.TempDir()
-	kubeconfig := filepath.Join(dir, "kubeconfig")
-	writeFile(t, kubeconfig, string(kc))
-
-	kubectl := env.ControlPlane.KubectlPath
-	if kubectl == "" {
-		t.Fatal("envtest did not resolve a kubectl binary")
-	}
-	bin := filepath.Join(dir, "bin")
-	if err := os.Mkdir(bin, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.Symlink(kubectl, filepath.Join(bin, "kubectl")); err != nil {
-		t.Fatalf("link kubectl: %v", err)
-	}
+	shell := k8stest.ShellEnv(t, env, cfg, envtest.User{Name: "crd-upgrader", Groups: []string{"system:masters"}})
 
 	return &crdCluster{
 		client:  client,
-		kubectl: kubectl,
-		env: append(os.Environ(),
-			"KUBECONFIG="+kubeconfig,
-			"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
+		kubectl: env.ControlPlane.KubectlPath,
+		env: append(append(os.Environ(), shell...),
 			"TMPDIR="+t.TempDir(),
 			"HELM_CACHE_HOME="+t.TempDir(),
 			"HELM_CONFIG_HOME="+t.TempDir(),

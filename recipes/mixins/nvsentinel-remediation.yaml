@@ -13,8 +13,8 @@
 # limitations under the License.
 
 # Opt-in mixin, step 3 of 3 of NVSentinel remediation: after cordon and
-# drain, the node is repaired. The drain evicts nothing, as in
-# nvsentinel-quarantine, so repair waits for the node's user pods to finish.
+# drain, the node is repaired. The drain is the one nvsentinel-quarantine
+# runs, so repair waits for the node's user pods up to the drain timeout.
 # A recoverable GPU fault (COMPONENT_RESET) resets that GPU in place;
 # RESTART_VM and RESTART_BM reboot the node through a privileged Job running
 # `chroot /host reboot` (janitor-provider's generic provider, whose image
@@ -45,6 +45,12 @@ spec:
           processingStrategy: EXECUTE_REMEDIATION
         syslog-health-monitor:
           processingStrategy: EXECUTE_REMEDIATION
+        # Same drain timing as nvsentinel-quarantine.
+        node-drainer:
+          deleteAfterTimeoutMinutes: 300
+          evictionTimeoutInSeconds: "60"
+          drainGPUPods: false
+          partialDrainEnabled: false
         global:
           dryRun: false
           # NVSentinel's datastore is the separately bundled Percona cluster

@@ -20,6 +20,10 @@
 # Fields:
 #   name:              Component identifier used in recipes (e.g., "gpu-operator")
 #   displayName:       Human-readable name for templates and output
+#   class:             Bundle class (ADR-018): core or ops, ordered core < ops.
+#                      A component may depend only on its own class or an
+#                      earlier one. Every entry here declares it; an external
+#                      registry entry that omits it is core.
 #   valueOverrideKeys: Alternative keys for --set flag (e.g., --set gpuoperator:key=value)
 #   helm:              Default Helm chart settings (for Helm components)
 #     defaultRepository: Helm repository URL
@@ -52,15 +56,18 @@ kind: ComponentRegistry
 components:
   - name: nfd
     displayName: Node Feature Discovery
+    class: core
     valueOverrideKeys:
       - nfd
     healthCheck:
       assertFile: checks/nfd/health-check.yaml
+    upgrades:
+      file: components/nfd/upgrades.yaml
     helm:
       defaultRepository: https://kubernetes-sigs.github.io/node-feature-discovery/charts
       defaultChart: node-feature-discovery
       # renovate: datasource=helm depName=node-feature-discovery registryUrl=https://kubernetes-sigs.github.io/node-feature-discovery/charts
-      defaultVersion: "0.19.0"
+      defaultVersion: "0.20.1"
       defaultNamespace: node-feature-discovery
     nodeScheduling:
       system:
@@ -87,6 +94,7 @@ components:
 
   - name: gpu-operator
     displayName: gpu-operator
+    class: core
     valueOverrideKeys:
       - gpuoperator
     # Default chart sets priorityClassName: system-node-critical on the
@@ -168,6 +176,7 @@ components:
     # Bundled NFD supplies the CRD used by this chart's NodeFeatureRule template.
     hasSelfRefCRDs: true
     displayName: network-operator
+    class: core
     valueOverrideKeys:
       - networkoperator
     # Overlays attach NicClusterPolicy CRs (mellanox.com API group) as
@@ -209,6 +218,7 @@ components:
 
   - name: gke-nccl-tcpxo
     displayName: gke-nccl-tcpxo
+    class: core
     valueOverrideKeys:
       - gkenccltcpxo
     healthCheck:
@@ -225,6 +235,7 @@ components:
   # injects them into pods via NRI; DeviceClass mlnx-cx9.
   - name: dranet
     displayName: dranet
+    class: core
     valueOverrideKeys:
       - dranet
     healthCheck:
@@ -243,6 +254,7 @@ components:
   # tolerations flow through.
   - name: gcp-driver-installer
     displayName: gcp-driver-installer
+    class: core
     valueOverrideKeys:
       - gcpdriverinstaller
     healthCheck:
@@ -263,6 +275,7 @@ components:
   # this only ships the gIB installer DaemonSet.
   - name: gke-gb200-rdma
     displayName: gke-gb200-rdma
+    class: core
     valueOverrideKeys:
       - gkegb200rdma
     nodeScheduling:
@@ -280,6 +293,7 @@ components:
 
   - name: aws-efa
     displayName: aws-efa
+    class: core
     valueOverrideKeys:
       - awsefa
       - efa
@@ -300,6 +314,7 @@ components:
 
   - name: cert-manager
     displayName: cert-manager
+    class: core
     valueOverrideKeys:
       - certmanager
     healthCheck:
@@ -325,6 +340,7 @@ components:
 
   - name: node-problem-detector
     displayName: Node Problem Detector
+    class: ops
     valueOverrideKeys:
       - npd
       - nodeproblemdetector
@@ -357,6 +373,7 @@ components:
 
   - name: nodewright-operator
     displayName: nodewright
+    class: core
     valueOverrideKeys:
       - nodewright
       - skyhook
@@ -403,6 +420,7 @@ components:
 
   - name: nodewright-customizations
     displayName: nodewright-customizations
+    class: core
     valueOverrideKeys:
       - nodewrightcustomizations
       - skyhookcustomizations
@@ -474,6 +492,7 @@ components:
     ownsCRDsExcludeSubcharts:
       - mongodb-store
     displayName: nvsentinel
+    class: core
     upgrades:
       file: components/nvsentinel/upgrades.yaml
     valueOverrideKeys:
@@ -501,9 +520,10 @@ components:
     # Opt-in surface for the nvsentinel-observability (#2617),
     # nvsentinel-object-monitor (#2612), nvsentinel-preflight (#2610),
     # nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor (#2611),
-    # nvsentinel-observe, -quarantine and -remediation, and
-    # nvsentinel-slinky-drainer (#2615) and nvsentinel-health-events-analyzer
-    # (#2618) mixins: the exact leaf
+    # nvsentinel-observe, -quarantine and -remediation,
+    # nvsentinel-slinky-drainer (#2615), nvsentinel-health-events-analyzer
+    # (#2618), nvsentinel-event-exporter (#2621) and nvsentinel-log-collector
+    # (#2619) mixins: the exact leaf
     # paths a mixin may set on this
     # already-base-chained component. global.tracing.endpoint is
     # deliberately absent -- it must come from outside the mixin (a leaf
@@ -583,6 +603,10 @@ components:
       - fault-remediation.maintenance.templates.gpureset
       - janitor-provider.csp.generic.rebootImage
       - node-drainer.userNamespaces
+      - node-drainer.deleteAfterTimeoutMinutes
+      - node-drainer.evictionTimeoutInSeconds
+      - node-drainer.drainGPUPods
+      - node-drainer.partialDrainEnabled
       - node-drainer.customDrain.enabled
       - node-drainer.customDrain.templateConfigMapName
       - node-drainer.customDrain.templateMountPath
@@ -619,6 +643,27 @@ components:
       - health-events-analyzer.enableXID74Reg4ECCErrorRule
       - health-events-analyzer.enableRepeatedNICDriverErrorRule
       - health-events-analyzer.enableRepeatedNICDegradationRule
+      - global.eventExporter.enabled
+      - event-exporter.oidcSecretName
+      - event-exporter.exporter.sink.insecureSkipVerify
+      - event-exporter.exporter.oidc.insecureSkipVerify
+      - event-exporter.exporter.filter.expression
+      - global.inclusterFileServer.enabled
+      - fault-remediation.logCollector.enabled
+      - fault-remediation.logCollector.uploadURL
+      - fault-remediation.logCollector.enableGpuOperatorMustGather
+      - fault-remediation.logCollector.timeout
+      - incluster-file-server.fullnameOverride
+      - incluster-file-server.initImage.repository
+      - incluster-file-server.initImage.tag
+      - incluster-file-server.persistence.size
+      - incluster-file-server.logCleanup.enabled
+      - incluster-file-server.logCleanup.retentionDays
+      - incluster-file-server.logCleanup.sleepInterval
+    # The in-cluster file server's ReadWriteOnce volume, which the
+    # nvsentinel-log-collector mixin turns on (#2619).
+    storageClassPaths:
+      - incluster-file-server.persistence.storageClassName
     validations:
       # Blocking: the NVSentinel labeler decides
       # nvsentinel.dgxc.nvidia.com/driver.installed by watching for a GPU
@@ -707,6 +752,28 @@ components:
       # match what that plugin needs. The rules are in the function's doc.
       - function: CheckNVSentinelSlurmCustomDrainCoherent
         severity: error
+      # Blocking: the Event Exporter posts every health event to a sink and
+      # identity provider only the operator knows, so it cannot work from the
+      # chart's placeholders (#2621). The rules are in the function's doc.
+      - function: CheckNVSentinelEventExporterCoherent
+        severity: error
+      # Blocking: a log collector that cannot capture or upload anything --
+      # without the file server, without live remediation, uploading
+      # elsewhere, or where it cannot reach the driver (#2619). The rules are
+      # in the function's doc.
+      - function: CheckNVSentinelLogCollectorCoherent
+        severity: error
+      # Mixed-severity policy, as CheckNVSentinelDatastorePrerequisites: a
+      # blocking error when the snapshot shows no default StorageClass for
+      # the file server's classless volume, or evidence it could not read,
+      # and no class is named; a non-blocking warning when the recipe carries
+      # no snapshot evidence or the cluster has more than one default.
+      - function: CheckNVSentinelFileServerStorageClass
+        severity: warning
+      # Blocking: node-drainer's drain scope and timing (#2626). The rules are
+      # in the function's doc.
+      - function: CheckNVSentinelDrainScopeCoherent
+        severity: error
 
   # NVSentinel's remediation datastore, added only by the nvsentinel-observe,
   # -quarantine and -remediation mixins. Bundled apart from NVSentinel's own
@@ -714,6 +781,7 @@ components:
   # upgrades one minor at a time.
   - name: psmdb-operator
     displayName: Percona Operator for MongoDB
+    class: core
     # Sole owner of the psmdb.percona.com CRDs; none uses webhook conversion.
     ownsCRDs: true
     valueOverrideKeys:
@@ -737,6 +805,7 @@ components:
 
   - name: nvsentinel-mongodb
     displayName: NVSentinel MongoDB
+    class: core
     valueOverrideKeys:
       - nvsentinelmongodb
     healthCheck:
@@ -784,6 +853,7 @@ components:
   # manifest-only wrapper).
   - name: slinky-drainer-crds
     displayName: slinky-drainer-crds
+    class: ops
     valueOverrideKeys:
       - slinkydrainercrds
     healthCheck:
@@ -796,6 +866,7 @@ components:
 
   - name: slinky-drainer
     displayName: slinky-drainer
+    class: ops
     valueOverrideKeys:
       - slinkydrainer
     healthCheck:
@@ -815,6 +886,7 @@ components:
 
   - name: nvidia-dra-driver-gpu
     displayName: nvidia-dra-driver-gpu
+    class: core
     valueOverrideKeys:
       - dradriver
     healthCheck:
@@ -846,6 +918,7 @@ components:
   # tolerations are injected.
   - name: dra-node-labeler
     displayName: dra-node-labeler
+    class: core
     valueOverrideKeys:
       - dranodelabeler
     healthCheck:
@@ -862,6 +935,7 @@ components:
 
   - name: prometheus-operator-crds
     displayName: prometheus-operator-crds
+    class: core
     valueOverrideKeys:
       - prometheusoperatorcrds
     healthCheck:
@@ -885,6 +959,7 @@ components:
 
   - name: kube-prometheus-stack
     displayName: kube-prometheus-stack
+    class: ops
     valueOverrideKeys:
       - prometheus
       - kubeprometheusstack
@@ -938,6 +1013,7 @@ components:
 
   - name: prometheus-adapter
     displayName: prometheus-adapter
+    class: ops
     valueOverrideKeys:
       - prometheusadapter
     healthCheck:
@@ -957,6 +1033,7 @@ components:
 
   - name: aws-ebs-csi-driver
     displayName: aws-ebs-csi-driver
+    class: core
     valueOverrideKeys:
       - ebscsidriver
       - awsebscsidriver
@@ -983,6 +1060,7 @@ components:
 
   - name: k8s-ephemeral-storage-metrics
     displayName: k8s-ephemeral-storage-metrics
+    class: ops
     valueOverrideKeys:
       - k8sephemeralstoragemetrics
     healthCheck:
@@ -1004,6 +1082,7 @@ components:
     # Sole owner of its CRDs and no webhook conversion (audited, #2264).
     ownsCRDs: true
     displayName: k8s-aibom
+    class: ops
     valueOverrideKeys:
       - k8saibom
       - aibom
@@ -1020,7 +1099,7 @@ components:
       defaultRepository: oci://ghcr.io/googlecloudplatform/charts
       defaultChart: k8s-aibom
       # renovate: datasource=docker depName=ghcr.io/googlecloudplatform/charts/k8s-aibom
-      defaultVersion: "1.6.1"
+      defaultVersion: "1.6.2"
       defaultNamespace: k8s-aibom-system
     nodeScheduling:
       system:
@@ -1033,6 +1112,7 @@ components:
     upgrades:
       file: components/kai-scheduler/upgrades.yaml
     displayName: kai-scheduler
+    class: ops
     valueOverrideKeys:
       - kaischeduler
     # kai-scheduler ships Queue (scheduling.run.ai/v2) and SchedulingShard
@@ -1060,6 +1140,7 @@ components:
 
   - name: grove
     displayName: grove
+    class: ops
     valueOverrideKeys:
       - grove
     # Upgrading from v0.1.0-alpha.8 (or earlier) requires a CRD migration --
@@ -1088,6 +1169,7 @@ components:
     upgrades:
       file: components/dynamo-platform/upgrades.yaml
     displayName: dynamo-platform
+    class: ops
     valueOverrideKeys:
       - dynamoplatform
       - dynamo
@@ -1110,6 +1192,7 @@ components:
 
   - name: agentgateway-crds
     displayName: agentgateway-crds
+    class: ops
     valueOverrideKeys:
       - agentgatewaycrds
     healthCheck:
@@ -1134,6 +1217,7 @@ components:
 
   - name: agentgateway
     displayName: agentgateway
+    class: ops
     valueOverrideKeys:
       - agentgateway
     healthCheck:
@@ -1155,6 +1239,7 @@ components:
 
   - name: k8s-nim-operator
     displayName: k8s-nim-operator
+    class: ops
     valueOverrideKeys:
       - nimoperator
       - nim
@@ -1175,6 +1260,7 @@ components:
 
   - name: kueue
     displayName: kueue
+    class: ops
     valueOverrideKeys:
       - kueue
     healthCheck:
@@ -1210,6 +1296,7 @@ components:
 
   - name: kubeflow-trainer
     displayName: kubeflow-trainer
+    class: ops
     valueOverrideKeys:
       - kubeflowtrainer
       - trainer
@@ -1311,6 +1398,7 @@ components:
   # No shipped overlay references this component (TestNVCRERegisteredWithoutOverlay).
   - name: nvcre
     displayName: NVIDIA Cluster Readiness Engine
+    class: ops
     ownsCRDs: true
     valueOverrideKeys:
       - nvcre
@@ -1331,7 +1419,7 @@ components:
       defaultRepository: oci://ghcr.io/nvidia
       defaultChart: cluster-readiness-engine
       # renovate: datasource=docker depName=ghcr.io/nvidia/cluster-readiness-engine
-      defaultVersion: v0.6.0
+      defaultVersion: v0.8.2
       defaultNamespace: nvcre
     nodeScheduling:
       # tolerationPaths only: the Deployment template has no nodeSelector
@@ -1352,6 +1440,7 @@ components:
 
   - name: slinky-slurm-operator-crds
     displayName: slinky-slurm-operator-crds
+    class: ops
     valueOverrideKeys:
       - slinkyslurmoperatorcrds
       - slurmoperatorcrds
@@ -1372,6 +1461,7 @@ components:
 
   - name: mariadb-operator-crds
     displayName: MariaDB Operator CRDs
+    class: ops
     valueOverrideKeys:
       - mariadboperatorcrds
     healthCheck:
@@ -1387,6 +1477,7 @@ components:
 
   - name: mariadb-operator
     displayName: MariaDB Operator
+    class: ops
     valueOverrideKeys:
       - mariadboperator
     healthCheck:
@@ -1419,6 +1510,7 @@ components:
 
   - name: slurm-accounting-mariadb
     displayName: Slurm Accounting MariaDB
+    class: ops
     valueOverrideKeys:
       - slurmaccountingmariadb
     healthCheck:
@@ -1450,6 +1542,7 @@ components:
 
   - name: slinky-slurm-operator
     displayName: slinky-slurm-operator
+    class: ops
     # Short alias `slurm` routes to the operator; the cluster chart
     # (slinky-slurm below) uses the distinct alias `slurmcluster`.
     valueOverrideKeys:
@@ -1483,6 +1576,7 @@ components:
 
   - name: slinky-slurm
     displayName: slinky-slurm
+    class: ops
     # Cluster instance chart; declared inline per slurm leaf overlay so
     # each leaf can carry its own GPU/GRES tuning (mirrors the
     # dynamo-platform pattern in inference-dynamo leaves).
@@ -1539,18 +1633,19 @@ components:
 
   - name: slinky-topograph
     displayName: slinky-topograph
+    class: ops
+    upgrades:
+      file: components/slinky-topograph/upgrades.yaml
     valueOverrideKeys:
       - slinkytopograph
     healthCheck:
       assertFile: checks/slinky-topograph/health-check.yaml
     helm:
-      # The topograph repository moved from NVIDIA to dsx-ai-factory; GitHub
-      # redirects the repository but not its Pages site, so the old index
-      # 404s. See issue #2793.
-      defaultRepository: https://dsx-ai-factory.github.io/topograph
+      # Topograph charts are published to NGC, not GitHub Pages (issue #2793).
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia/topograph
       defaultChart: topograph/topograph
-      # renovate: datasource=helm depName=topograph registryUrl=https://dsx-ai-factory.github.io/topograph
-      defaultVersion: "1.0.0"
+      # renovate: datasource=helm depName=topograph registryUrl=https://helm.ngc.nvidia.com/nvidia/topograph
+      defaultVersion: "1.1.0"
       defaultNamespace: topograph
     nodeScheduling:
       system:
@@ -1576,15 +1671,18 @@ components:
   # with slinky-topograph; bump both together.
   - name: topograph
     displayName: topograph
+    class: ops
+    upgrades:
+      file: components/topograph/upgrades.yaml
     valueOverrideKeys:
       - topograph
     healthCheck:
       assertFile: checks/topograph/health-check.yaml
     helm:
-      defaultRepository: https://dsx-ai-factory.github.io/topograph
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia/topograph
       defaultChart: topograph/topograph
-      # renovate: datasource=helm depName=topograph registryUrl=https://dsx-ai-factory.github.io/topograph
-      defaultVersion: "1.0.0"
+      # renovate: datasource=helm depName=topograph registryUrl=https://helm.ngc.nvidia.com/nvidia/topograph
+      defaultVersion: "1.1.0"
       defaultNamespace: topograph
     nodeScheduling:
       system:
@@ -1607,6 +1705,7 @@ components:
     # Sole owner of its CRDs and no webhook conversion (audited, #2264).
     ownsCRDs: true
     displayName: Gatekeeper
+    class: ops
     valueOverrideKeys:
       - gatekeeper
     healthCheck:
@@ -1646,6 +1745,7 @@ components:
 
   - name: gpu-operator-ocp-olm
     displayName: GPU Operator OCP (OLM)
+    class: core
     valueOverrideKeys:
       - gpuoperatorocpolm
     healthCheck:
@@ -1656,6 +1756,7 @@ components:
 
   - name: gpu-operator-ocp
     displayName: GPU Operator OCP (CR)
+    class: core
     valueOverrideKeys:
       - gpuoperatorocp
     healthCheck:
@@ -1675,6 +1776,7 @@ components:
         severity: error
   - name: network-operator-ocp-olm
     displayName: Network Operator OCP (OLM)
+    class: core
     valueOverrideKeys:
       - networkoperatorocpolm
     healthCheck:
@@ -1685,6 +1787,7 @@ components:
 
   - name: network-operator-ocp
     displayName: Network Operator OCP (CR)
+    class: core
     valueOverrideKeys:
       - networkoperatorocp
     healthCheck:
@@ -1695,6 +1798,7 @@ components:
 
   - name: nfd-ocp-olm
     displayName: Node Feature Discovery OCP (OLM)
+    class: core
     valueOverrideKeys:
       - nfdocpolm
     healthCheck:
@@ -1705,6 +1809,7 @@ components:
 
   - name: nfd-ocp
     displayName: Node Feature Discovery OCP (CR)
+    class: core
     healthCheck:
       assertFile: checks/nfd-ocp/health-check.yaml
     valueOverrideKeys:
@@ -1715,6 +1820,7 @@ components:
 
   - name: cert-manager-ocp-olm
     displayName: cert-manager OCP (OLM)
+    class: core
     valueOverrideKeys:
       - certmanagerocpolm
     healthCheck:
@@ -1725,6 +1831,7 @@ components:
 
   - name: cert-manager-ocp
     displayName: cert-manager OCP (CR)
+    class: core
     valueOverrideKeys:
       - certmanagerocp
     healthCheck:
@@ -1741,6 +1848,7 @@ components:
 
   - name: prometheus-adapter-ocp
     displayName: Prometheus Adapter OCP
+    class: ops
     valueOverrideKeys:
       - prometheusadapterocp
     healthCheck:
@@ -1760,6 +1868,7 @@ components:
 
   - name: nvidia-dra-driver-gpu-ocp
     displayName: nvidia-dra-driver-gpu OCP
+    class: core
     valueOverrideKeys:
       - dradriverocp
     healthCheck:
@@ -1788,6 +1897,7 @@ components:
 
   - name: k8s-nim-operator-ocp
     displayName: k8s-nim-operator OCP
+    class: ops
     valueOverrideKeys:
       - nimoperatorocp
       - nimocp

@@ -38,7 +38,8 @@ func (c *Collector) collectKMod(ctx context.Context) (*measurement.Subtype, erro
 
 	parser := file.NewParser()
 
-	lines, err := parser.GetLines(filePathKMod)
+	// /proc/modules takes module_mutex, so its read can block like a sysctl's.
+	lines, err := readHostFile(ctx, filePathKMod, parser.GetLines)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read kernel modules from %s", filePathKMod), err)
 	}

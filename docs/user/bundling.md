@@ -46,6 +46,15 @@ Every deployer writes `bundle-info.yaml`, `checksums.txt`, `README.md` and
 ordered `NNN-<component>` directories; Flux is the exception and uses a plain
 `<component>` directory with shared `sources/`.
 
+A bundle set produced by `--split` (helm deployer only) has a different
+root: `recipe.yaml`, `split.yaml`, `bundle-info.yaml` and `checksums.txt`,
+with one `<class>/` directory per class that is itself a helm bundle tree
+as shown below, minus `bundle-info.yaml` and `checksums.txt`. The root
+`bundle-info.yaml` lists every release with its class-prefixed path, so
+`aicr upgrade-check --from <set>` and `aicr recipe --inherit-from <set>`
+read a set like a bundle. See
+[Split a bundle by class](#split-a-bundle-by-class).
+
 ```text
 helm/                            argocd/                      flux/
   001-cert-manager/               001-cert-manager/            cert-manager/
@@ -194,6 +203,16 @@ built it, and which Helm release landed in which directory.
 `deploy.sh`, `helmfile.yaml`, `app-of-apps.yaml`, `Chart.yaml`,
 `kustomization.yaml`, `main.tf`, `gitrepo.yaml`, or `helmops.yaml` — so automation reads one key instead of branching on
 `build.deployer`.
+
+In a bundle set generated with `--split`, the root `bundle-info.yaml`
+describes the whole set: `layout.entrypoint` is the first class's script
+(`core/deploy.sh`), and it installs only the releases whose `path` starts
+with that class directory. Every other release's `path` starts with a later
+class directory, whose own `deploy.sh` installs it; `split.yaml` lists the
+classes in install order. A consumer can recognize a set from
+`bundle-info.yaml` alone by an entrypoint below the root and release paths
+under more than one class directory. An explicit set marker in the record
+is deferred to a readers-first schema change (ADR-022).
 
 `layout.releases` lists every Helm release the bundle installs, in deployment
 order, and that ordering is normative: there is no ordinal field, so a
@@ -902,12 +921,108 @@ place it alongside the component, as does `--dynamic` under `helm` and
 `argocd-helm`. Keyless tolerations are not applied to the gate. See
 [Readiness Gates](cli-reference.md#readiness-gates) for each deployer.
 
+## Split a bundle by class
+
+`--split` renders one bundle set partitioned by the registry `class` of each
+component ([ADR-018](https://github.com/NVIDIA/aicr/blob/main/docs/design/018-class-partitioned-bundles.md)).
+The classes are ordered `core` < `ops`: `core` is what a plain GPU pod needs
+to run correctly, with its fabric and install prerequisites; `ops` is
+everything else, workload platforms included. The [component
+catalog](component-catalog.md#components) lists every component's class.
+Two owners can deploy the two classes separately, for example NVIDIA
+deploying `core/` on a tenant data plane and the partner deploying `ops/`.
+
+```bash
+aicr bundle --recipe recipe.yaml --split --output ./bundles
+```
+
+The complete recipe is validated once, exactly as without `--split`, and
+only then is the partition rendered: one directory per class that has an
+enabled component, under a set root that is the verification unit.
+
+```text
+bundles/
+├── recipe.yaml        # the full resolved recipe
+├── split.yaml         # audit: recipeDigest, class order, class of every component
+├── bundle-info.yaml   # build record; release paths are class-prefixed
+├── checksums.txt      # covers the whole set
+├── core/              # deploy.sh, README.md, NNN-<component>/ ...
+└── ops/               # deploy after core
+```
+
+**Deploy and tear down in class order.** Install `core`, then `ops`; tear
+down `ops` before `core`. Each class directory is an ordinary Helm
+per-component bundle with its own `deploy.sh`, which does not check that
+the earlier classes are installed. A class's README names the namespaces
+it shares with an earlier class and the CRD groups an earlier class
+installs, as far as `deploy.sh`'s CRD table knows them; its teardown must
+leave those in place, because the earliest class that uses them removes
+them, and it is torn down last. A dependency on a component in an earlier class is
+satisfied outside the class directory, the same way a disabled component's
+edge is.
+
+**Verify the set, not a class.** The root `checksums.txt` and, with
+`--attest`, the attestation cover the whole set. Run `aicr verify` at the
+set root and keep the set intact: a class directory copied out of it has no
+provenance of its own. `split.yaml` is audit metadata, never a trust root,
+and nothing reads it at deploy time. Its `recipeDigest` identifies the
+resolved recipe and, with the class map, the partition; bundle-time
+overrides land in the class directories, not in `recipe.yaml`, so two sets
+can share a `recipeDigest` and differ in their payload, which
+`checksums.txt` identifies.
+
+**Publication is create-only and atomic.** `--output` must name a path that
+does not exist yet, under a parent that does. The set renders and verifies
+in a private sibling of the destination and is published with one atomic
+move, so a failure leaves no partial set behind and an existing path is
+never replaced.
+
+**What is rejected.** `--split` fails before writing anything when:
+
+- the deployer is not `helm` (`helmfile`, `argocd`, `argocd-helm`, `flux`,
+  `fleet` and `terraform` are all rejected in this release), the output is
+  an OCI reference, `--output` is not given, checksums are disabled, or a
+  component filter (`bundlers`) is set;
+- the recipe targets OCP (`service: ocp`);
+- a component has no registry entry, such as a fully specified ref in a
+  hand-authored recipe; register it, for example through a `--data` registry
+  entry that declares its `class`;
+- a dependency points from an earlier class to a later one, including the
+  opt-in `nvsentinel-preflight` and `nvsentinel-slinky-drainer` mixins under
+  the shipped classification;
+- every component of a declared class is disabled, by the recipe or by
+  `--set <component>:enabled=false`;
+- two components would emit the same Helm release name in the same
+  namespace, counting the injected `-pre`, `-post` and `-readiness`
+  releases across the whole set.
+
+Without `--split` nothing changes: one bundle, every enabled component.
+
 ## Deploy the bundle
 
-For the default `helm` deployer, verify the bundle before installing it:
+For the default `helm` deployer and an ordinary bundle, verify the bundle
+before installing it:
 
 ```bash
 cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh
+```
+
+For a bundle set generated with `--split`, verify at the set root, then run
+each class's own `deploy.sh` in the order `split.yaml` lists under
+`classOrder`. A set contains a directory only for classes that have an
+enabled component, so read the order from the file rather than assuming
+both `core/` and `ops/` exist (see
+[Split a bundle by class](#split-a-bundle-by-class)). The snippet needs
+`yq` v4 (mikefarah) and stops with a non-zero exit when the class list
+cannot be read or a class fails:
+
+```bash
+cd bundles && aicr verify . || exit 1
+classes=$(yq eval '.classOrder[]' split.yaml) && [ -n "$classes" ] \
+  || { echo "cannot read classOrder from split.yaml" >&2; exit 1; }
+for class in $classes; do
+  (cd "$class" && chmod +x deploy.sh && ./deploy.sh) || exit 1
+done
 ```
 
 For the `terraform` deployer, verify in the step that generates the bundle,

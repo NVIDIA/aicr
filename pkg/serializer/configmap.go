@@ -24,6 +24,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/k8s/client"
+	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	accorev1 "k8s.io/client-go/applyconfigurations/core/v1"
 )
@@ -39,6 +40,7 @@ type ConfigMapWriter struct {
 	name       string
 	kubeconfig string
 	format     Format
+	runID      string
 }
 
 // NewConfigMapWriter creates a new ConfigMapWriter that writes to the specified
@@ -67,11 +69,20 @@ func NewConfigMapWriterWithKubeconfig(namespace, name, kubeconfig string, format
 	}
 }
 
+// WithRunID sets the run ID Serialize records in the labels.RunID annotation,
+// and returns w. An empty runID records none, and clears one an earlier write
+// recorded.
+func (w *ConfigMapWriter) WithRunID(runID string) *ConfigMapWriter {
+	w.runID = runID
+	return w
+}
+
 // Serialize writes the snapshot data to a ConfigMap.
 // The ConfigMap will have:
 // - data.snapshot.{yaml|json}: The serialized snapshot content
 // - data.format: The format used (yaml or json)
 // - data.timestamp: ISO 8601 timestamp of when the snapshot was created
+// - the labels.RunID annotation, when WithRunID set one
 func (w *ConfigMapWriter) Serialize(ctx context.Context, snapshot any) error {
 	// Create context with timeout for Kubernetes API operations
 	// Use longer timeout to accommodate rate limiter after heavy API usage
@@ -164,14 +175,7 @@ func (w *ConfigMapWriter) Serialize(ctx context.Context, snapshot any) error {
 		"timestamp": snapshotTimestamp,
 	}
 
-	// Build ConfigMap apply configuration for Server-Side Apply
-	configMap := accorev1.ConfigMap(w.name, w.namespace).
-		WithLabels(map[string]string{
-			"app.kubernetes.io/name":      "aicr",
-			"app.kubernetes.io/component": snapshotKind,
-			"app.kubernetes.io/version":   snapshotVersion,
-		}).
-		WithData(configMapData)
+	configMap := w.applyConfiguration(snapshotKind, snapshotVersion, configMapData)
 
 	// Use Server-Side Apply for atomic create-or-update operation
 	// This eliminates race conditions from the previous Get-then-Update pattern
@@ -194,6 +198,25 @@ func (w *ConfigMapWriter) Serialize(ctx context.Context, snapshot any) error {
 	}
 
 	return nil
+}
+
+// applyConfiguration builds the server-side apply configuration Serialize
+// sends.
+func (w *ConfigMapWriter) applyConfiguration(kind, version string, data map[string]string) *accorev1.ConfigMapApplyConfiguration {
+	configMap := accorev1.ConfigMap(w.name, w.namespace).
+		WithLabels(map[string]string{
+			"app.kubernetes.io/name":      "aicr",
+			"app.kubernetes.io/component": kind,
+			"app.kubernetes.io/version":   version,
+		}).
+		WithData(data)
+	// An annotation, not a label, so no run-scoped cleanup selector can match a
+	// caller-named ConfigMap. Server-side apply drops a field this manager no
+	// longer sends, so an unstamped write also clears an earlier run's stamp.
+	if w.runID != "" {
+		configMap = configMap.WithAnnotations(map[string]string{labels.RunID: w.runID})
+	}
+	return configMap
 }
 
 // Close is a no-op for ConfigMapWriter as there are no resources to release.
