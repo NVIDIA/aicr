@@ -119,19 +119,15 @@ spec:
         - cert-manager
         - rdma-modules
 
-    # The IPPool CRD ahead of the pools: the operator creates it only while
-    # reconciling the NicClusterPolicy, after the pools' release would already
-    # have been validated and applied.
-    - name: nv-ipam-crds
-      type: Helm
-
+    # The IPPool CRD exists only once the operator has reconciled the
+    # NicClusterPolicy: the network-operator readiness gate (--readiness-hooks)
+    # holds this release until then, and deploy.sh retries it otherwise.
     - name: sriov-ib-networks
       type: Helm
       manifestFiles:
         - components/sriov-ib-networks/manifests/nvke-gb200.yaml
       dependencyRefs:
         - network-operator
-        - nv-ipam-crds
 
     # rdma_ucm, ib_umad and ib_ipoib are not loaded by the NVKE image and no
     # operator loads them without OFED; without ib_ipoib the IB VFs have no

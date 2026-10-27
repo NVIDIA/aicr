@@ -101,10 +101,8 @@ devices here.
 
 The Network Operator chart enables the SR-IOV Network Operator and the
 Maintenance Operator (external drainer, one node at a time). The
-NicClusterPolicy carries only `nvIpam`. The `nv-ipam-crds` component ships
-the IPPool CRD, which the operator otherwise creates only once it reconciles
-the NicClusterPolicy. Per rail, the `sriov-ib-networks` component
-(manifest-only, ordered after `network-operator` and `nv-ipam-crds`) supplies
+NicClusterPolicy carries only `nvIpam`. Per rail, the `sriov-ib-networks`
+component (manifest-only, ordered after `network-operator`) supplies
 one nv-ipam `IPPool`
 (`192.168.<4n>.0/22`), one `SriovNetworkNodePolicy` (`linkType: IB`,
 `isRdma: true`, `deviceType: netdevice`, `numVfs: 16`, selected by the rail's
@@ -150,6 +148,17 @@ needs `charts/sriov-network-operator/crds` applied first: Helm installs a
 subchart's CRDs only on a fresh install, and validates the rendered
 `SriovOperatorConfig` before the chart's own CRD-upgrade hook runs.
 
+The IPPool CRD is created by the operator while it reconciles the
+NicClusterPolicy, not by the chart, so `sriov-ib-networks` can be applied
+before the CRD exists. `deploy.sh` retries the release until it does. With
+Argo CD or Terraform, build with `--readiness-hooks`: the `network-operator`
+readiness gate waits for the NicClusterPolicy to reach `ready`, which the
+operator reports only after its nv-ipam state, CRDs included, is applied, so
+the pools follow it. Flux does not support readiness hooks; a first install
+that fails on the missing CRD needs a `flux reconcile` once the operator is
+up. The `sriov-ib-networks` health check asserts the CRD is Established, so
+`aicr validate` records that it landed.
+
 A shared-HCA variant (`rdmaSharedDevicePlugin`, one pooled `nvidia.com/mlnxnics`
 resource over the PFs, no IPoIB) was qualified first on the same cluster and
 passed the deployment and conformance phases. It is not selectable from this
@@ -190,7 +199,7 @@ bundle-time `--set rdmamodules:enabled=false` is not persisted, so
 aicr snapshot --node-selector kubernetes.io/hostname='<gpu-node>' --privileged \
   --output snapshot.yaml
 aicr recipe --snapshot snapshot.yaml --intent training --output recipe.yaml
-aicr bundle --recipe recipe.yaml --output bundle
+aicr bundle --recipe recipe.yaml --readiness-hooks --output bundle
 ./bundle/deploy.sh
 aicr validate --recipe bundle/recipe.yaml
 ```
