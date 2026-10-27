@@ -99,8 +99,7 @@ carries `nvIpam` and `rdmaSharedDevicePlugin`, which exposes one pooled
 resource per rail, `rdma/rdma_shared_resource_rail_0` to `_3`, each selected
 by the rail's PCI address (`deviceID 1023`, link type `ether`; the BlueField-3
 is excluded). The `macvlan-rdma-networks` component (manifest-only, ordered
-after `network-operator` because the nv-ipam CRDs appear only once the
-NicClusterPolicy is reconciled) supplies per rail one nv-ipam `IPPool`
+after `network-operator`) supplies per rail one nv-ipam `IPPool`
 (`10.255.<4n>.0/22`) and one `MacvlanNetwork` in bridge mode over the rail's
 PF netdev, with `mtu: 0` so the attachment inherits the PF's MTU. The
 NetworkAttachmentDefinitions land in `default`. A pod takes one RDMA
@@ -128,6 +127,17 @@ its `NicConfigurationTemplate` (NIC firmware is a host prerequisite on NVKE;
 the trays reject operator-driven firmware resets). `MacvlanNetwork.master`
 names the PF netdev, so the manifest is specific to the reference tray's
 kernel interface names; a different board needs a copy with its own names.
+
+The IPPool CRD is created by the operator while it reconciles the
+NicClusterPolicy, not by the chart, so `macvlan-rdma-networks` can be applied
+before the CRD exists. `deploy.sh` retries the release until it does. With
+Argo CD or Terraform, build with `--readiness-hooks`: the `network-operator`
+readiness gate waits for the NicClusterPolicy to reach `ready`, which the
+operator reports only after its nv-ipam state, CRDs included, is applied, so
+the pools follow it. Flux does not support readiness hooks; a first install
+that fails on the missing CRD needs a `flux reconcile` once the operator is
+up. The `macvlan-rdma-networks` health check asserts the CRD is Established,
+so `aicr validate` records that it landed.
 
 ## rdma-modules and node tainting
 
@@ -183,7 +193,7 @@ volume-mount device list is never produced and accepting it would only add a
 aicr snapshot --node-selector kubernetes.io/hostname='<gpu-node>' --privileged \
   --output snapshot.yaml
 aicr recipe --snapshot snapshot.yaml --intent training --output recipe.yaml
-aicr bundle --recipe recipe.yaml --output bundle
+aicr bundle --recipe recipe.yaml --readiness-hooks --output bundle
 aicr validate --recipe bundle/recipe.yaml
 ```
 

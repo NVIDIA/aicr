@@ -54,7 +54,7 @@ spec:
       dependencyRefs:
         - nfd
         - cert-manager
-        - kube-prometheus-stack
+        - prometheus-operator-crds
         - nodewright-customizations
         - rdma-modules
       overrides:
@@ -137,6 +137,9 @@ spec:
         - cert-manager
         - rdma-modules
 
+    # The IPPool CRD exists only once the operator has reconciled the
+    # NicClusterPolicy: the network-operator readiness gate (--readiness-hooks)
+    # holds this release until then, and deploy.sh retries it otherwise.
     - name: macvlan-rdma-networks
       type: Helm
       manifestFiles:
