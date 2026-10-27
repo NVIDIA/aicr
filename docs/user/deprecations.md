@@ -71,7 +71,7 @@ example `customer-managed`) and drop the override.
 
 ### Argo CD options as `deployer:` value overrides
 
-**Surface:** CLI, REST, config file ·
+**Surface:** CLI, REST, config file, Go SDK ·
 **Deprecated in:** v1.2 · **Removed in:** not scheduled (v2.0.0 at the earliest)
 
 The four Argo CD bundle options were set with a reserved `deployer` prefix on

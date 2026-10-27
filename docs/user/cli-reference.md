@@ -1970,8 +1970,9 @@ spec:
 # Drive the bundle entirely from a config file
 aicr bundle --config bundle.yaml
 
-# Override the deployer for a one-off run
-aicr bundle --config bundle.yaml --deployer helm
+# Override the deployer for a one-off run (the argocd block above needs
+# an Argo CD deployer; with --deployer helm it is rejected)
+aicr bundle --config bundle.yaml --deployer argocd-helm
 ```
 
 CLI flags always override values loaded from `--config`. For slice/map flags (`--set`, `--dynamic`, `--system-node-selector`, etc.), CLI presence replaces the config's value rather than appending. Override events are logged at INFO so users can see which input won.
