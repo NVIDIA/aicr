@@ -20,6 +20,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -249,13 +250,16 @@ func TestWarnDeadConversionWebhooks(t *testing.T) {
 
 func TestReportStillTerminating(t *testing.T) {
 	stuckNS := terminatingNamespace("monitoring")
+	stuckNS.DeletionTimestamp = &metav1.Time{Time: time.Now()}
 	stuckNS.Status.Conditions = []corev1.NamespaceCondition{
 		{Type: corev1.NamespaceDeletionContentFailure, Status: corev1.ConditionTrue, Message: "failed to list nvidia.com/v1beta1"},
 		{Type: corev1.NamespaceContentRemaining, Status: corev1.ConditionFalse},
 	}
 	f := crdFixture(webhookCRD("podcliques.grove.io", "grove.io", "podcliques"))
-	if _, err := f.kube.CoreV1().Namespaces().Create(context.Background(), stuckNS, metav1.CreateOptions{}); err != nil {
-		t.Fatalf("create namespace: %v", err)
+	for _, ns := range []*corev1.Namespace{stuckNS, {ObjectMeta: metav1.ObjectMeta{Name: "refused"}}} {
+		if _, err := f.kube.CoreV1().Namespaces().Create(context.Background(), ns, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("create namespace %s: %v", ns.Name, err)
+		}
 	}
 
 	tests := []struct {
@@ -274,6 +278,15 @@ func TestReportStillTerminating(t *testing.T) {
 			wantOutput: []string{
 				`msg="CRD still terminating, so reinstalling its operator fails until it is gone. Check its instances for finalizers" name=podcliques.grove.io`,
 				`msg="namespace still terminating" namespace=monitoring check="kubectl get ns monitoring -o yaml" condition=NamespaceDeletionContentFailure message="failed to list nvidia.com/v1beta1"`,
+			},
+		},
+		{
+			name:      "namespace whose delete was refused",
+			opts:      options{assumeYes: true},
+			nss:       []string{"refused"},
+			wantStuck: true,
+			wantOutput: []string{
+				`msg="namespace was not deleted, see the delete failure above" namespace=refused`,
 			},
 		},
 		{
@@ -305,9 +318,17 @@ func TestReportStillTerminating(t *testing.T) {
 
 func TestRunReportsStuckNamespaceInsteadOfComplete(t *testing.T) {
 	f := newFixture([]runtime.Object{namespace("gpu-operator")})
-	// The namespace controller cannot finish, so the namespace stays.
-	f.kube.PrependReactor("delete", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, nil
+	// The namespace controller cannot finish, so the namespace stays marked
+	// for deletion.
+	f.kube.PrependReactor("delete", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		name := action.(k8stesting.DeleteAction).GetName()
+		obj, err := f.kube.Tracker().Get(corev1.SchemeGroupVersion.WithResource("namespaces"), "", name)
+		if err != nil {
+			return true, nil, err
+		}
+		ns := obj.(*corev1.Namespace)
+		ns.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+		return true, nil, f.kube.Tracker().Update(corev1.SchemeGroupVersion.WithResource("namespaces"), ns, "")
 	})
 
 	if err := f.cleaner(options{assumeYes: true, keepCRDs: true}).run(context.Background(), confirmed); err != nil {

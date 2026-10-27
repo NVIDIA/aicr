@@ -433,8 +433,10 @@ func (c *cleaner) warnDeadConversionWebhooks(ctx context.Context) {
 }
 
 // reportStillTerminating waits once more, then warns about each CRD and
-// namespace this run deleted that still exists, naming a namespace's deletion
-// failure condition when it has one. It reports whether any remain.
+// namespace this run tried to delete that still exists, naming a namespace's
+// deletion failure condition when it has one. A namespace with no deletion
+// timestamp was never deleted, for example because RBAC or admission refused
+// the delete, and is reported as such. It reports whether any remain.
 func (c *cleaner) reportStillTerminating(ctx context.Context, crds, namespaces []string) bool {
 	if c.opts.dryRun || len(crds)+len(namespaces) == 0 {
 		return false
@@ -479,6 +481,10 @@ func (c *cleaner) reportStillTerminating(ctx context.Context, crds, namespaces [
 			continue
 		}
 		stuck = true
+		if ns.DeletionTimestamp == nil {
+			c.log.Warn("namespace was not deleted, see the delete failure above", "namespace", name)
+			continue
+		}
 		args := []any{"namespace", name, "check", "kubectl get ns " + name + " -o yaml"}
 		for _, cond := range ns.Status.Conditions {
 			if cond.Status == corev1.ConditionTrue && strings.HasPrefix(string(cond.Type), "NamespaceDeletion") {
@@ -605,7 +611,8 @@ func crdListGVR(crd *unstructured.Unstructured) (schema.GroupVersionResource, bo
 //     that is not uninstalled
 //
 // Under --bundle it skips the check namespaces. It returns the namespaces it
-// deleted, or nil under --dry-run.
+// tried to delete, including any whose delete was refused, or nil under
+// --dry-run.
 func (c *cleaner) deleteNamespaces(ctx context.Context, releases []helmRelease) []string {
 	c.log.Info("phase 4: deleting AICR component and check namespaces")
 	for _, ns := range slices.Sorted(maps.Keys(notOwnedNamespaces)) {

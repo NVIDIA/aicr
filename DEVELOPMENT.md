@@ -719,7 +719,9 @@ reinstalled. Reinstall the operator before deleting namespaces, or run with
 Cleanup ends by checking once more for CRDs and namespaces it deleted that are
 still `Terminating`. It names each one, with the namespace's deletion-failure
 condition, and finishes with "AICR cleanup finished with resources still
-terminating" instead of "AICR cleanup complete". Its exit status stays 0.
+terminating" instead of "AICR cleanup complete". A namespace whose delete was
+refused, for example by RBAC or admission, is reported as not deleted rather
+than as `Terminating`. Its exit status stays 0.
 
 ### Debugging Tests
 
