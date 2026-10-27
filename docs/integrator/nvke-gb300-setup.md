@@ -137,7 +137,16 @@ operator reports only after its nv-ipam state, CRDs included, is applied, so
 the pools follow it. Flux does not support readiness hooks; a first install
 that fails on the missing CRD needs a `flux reconcile` once the operator is
 up. The `macvlan-rdma-networks` health check asserts the CRD is Established,
-so `aicr validate` records that it landed.
+so `aicr validate` records that it landed. On the GB200 reference tenant the
+CRD appeared five seconds after the NicClusterPolicy and the policy was
+`ready` four seconds later; the gate held the pools until then.
+
+When tearing the fabric down, uninstall `macvlan-rdma-networks` and let the
+operator settle before uninstalling `network-operator`: uninstalling the
+operators while the Maintenance Operator still has a drain in flight orphans
+the `NodeMaintenance`, which leaves the node cordoned with nothing left to
+release it. Delete the stale `nodemaintenances.maintenance.nvidia.com`
+object to uncordon.
 
 ## rdma-modules and node tainting
 
