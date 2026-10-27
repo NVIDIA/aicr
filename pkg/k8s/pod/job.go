@@ -16,6 +16,7 @@ package pod
 
 import (
 	"context"
+	stderrors "errors"
 	"log/slog"
 	"time"
 
@@ -331,6 +332,11 @@ func WaitForJobTerminal(ctx context.Context, client kubernetes.Interface, namesp
 	}
 }
 
+// ErrJobFailed is in the chain of the error WaitForJobCompletion returns for a
+// Job whose Failed condition is true, so errors.Is tells it apart from a
+// failure to observe the Job.
+var ErrJobFailed = stderrors.New("job condition Failed=True")
+
 // isJobTerminal reports whether a Job has a terminal condition set
 // (Complete=True or Failed=True). Unlike checkJobStatus this does not
 // distinguish between Complete and Failed.
@@ -354,7 +360,7 @@ func checkJobStatus(job *batchv1.Job) (bool, error) {
 			return true, nil
 		}
 		if condition.Type == batchv1.JobFailed && condition.Status == corev1.ConditionTrue {
-			return true, errors.NewWithContext(errors.ErrCodeInternal, "job failed", map[string]any{
+			return true, errors.WrapWithContext(errors.ErrCodeInternal, "job failed", ErrJobFailed, map[string]any{
 				keyNamespace: job.Namespace,
 				keyName:      job.Name,
 				keyReason:    condition.Reason,
