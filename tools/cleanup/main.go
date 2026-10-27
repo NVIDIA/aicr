@@ -47,6 +47,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -201,7 +202,7 @@ func newCleaner(ctx context.Context, opts options, log *slog.Logger) (*cleaner, 
 	if opts.dryRun {
 		log = log.With("dryRun", true)
 	}
-	kubeconfig, kubeContext := kubeTarget()
+	kubeconfig, mergedKubeconfig, kubeContext := kubeTarget()
 	c := &cleaner{
 		opts:          opts,
 		log:           log,
@@ -233,20 +234,39 @@ func newCleaner(ctx context.Context, opts options, log *slog.Logger) (*cleaner, 
 		// from HELM_KUBECONTEXT. With neither flag, helm falls back to the
 		// same in-cluster config or KUBECONFIG merge the clients use.
 		c.helm = helmCLI{run: helm.Run, kubeArgs: helmKubeArgs(kubeconfig, kubeContext)}
+		// helm splits KUBECONFIG without trimming its entries, so it could
+		// merge different files than the clients.
+		if err := exportKubeconfig(mergedKubeconfig); err != nil {
+			return nil, err
+		}
 	}
 	return c, nil
 }
 
-// kubeTarget returns the kubeconfig file and current context the clients
-// load. path is empty for a multi-file KUBECONFIG or in-cluster config, and
-// kubeContext is empty when none can be read.
-func kubeTarget() (path, kubeContext string) {
-	rules := clientcmd.NewDefaultClientConfigLoadingRules()
-	path = client.ResolveKubeconfigPath("")
-	if path != "" {
-		rules.ExplicitPath = path
+// kubeTarget returns the kubeconfig the clients load and its current context.
+// It sets path for a single file and merged for a multi-file KUBECONFIG, and
+// neither for in-cluster config. kubeContext is empty when none can be read.
+func kubeTarget() (path string, merged []string, kubeContext string) {
+	rules := client.KubeconfigLoadingRules("")
+	if rules == nil {
+		return "", nil, ""
 	}
-	return path, contextName(clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{}))
+	if rules.ExplicitPath == "" {
+		merged = rules.Precedence
+	}
+	return rules.ExplicitPath, merged, contextName(clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{}))
+}
+
+// exportKubeconfig sets this process's KUBECONFIG to the files merged lists,
+// and leaves it unchanged when merged is empty.
+func exportKubeconfig(merged []string) error {
+	if len(merged) == 0 {
+		return nil
+	}
+	if err := os.Setenv("KUBECONFIG", strings.Join(merged, string(filepath.ListSeparator))); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "set KUBECONFIG for helm", err)
+	}
+	return nil
 }
 
 // contextName returns cfg's current context, or "" when it has none or cannot

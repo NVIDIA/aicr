@@ -21,6 +21,8 @@ import (
 	"flag"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -143,6 +145,71 @@ func TestContextName(t *testing.T) {
 				t.Errorf("contextName() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// writeKubeconfig writes a kubeconfig to path whose context, cluster and user
+// are all named name.
+func writeKubeconfig(t *testing.T, path, name string) {
+	t.Helper()
+	cfg := clientcmdapi.Config{
+		Clusters:       map[string]*clientcmdapi.Cluster{name: {Server: "https://" + name + ".example:6443"}},
+		AuthInfos:      map[string]*clientcmdapi.AuthInfo{name: {Token: name + "-token"}},
+		Contexts:       map[string]*clientcmdapi.Context{name: {Cluster: name, AuthInfo: name}},
+		CurrentContext: name,
+	}
+	if err := clientcmd.WriteToFile(cfg, path); err != nil {
+		t.Fatalf("write kubeconfig %s: %v", path, err)
+	}
+}
+
+func TestKubeTarget(t *testing.T) {
+	dir := t.TempDir()
+	first, second := filepath.Join(dir, "first"), filepath.Join(dir, "second")
+	writeKubeconfig(t, first, "first")
+	writeKubeconfig(t, second, "second")
+	sep := string(filepath.ListSeparator)
+
+	tests := []struct {
+		name        string
+		env         string
+		wantPath    string
+		wantMerged  []string
+		wantContext string
+	}{
+		{"single file", first, first, nil, "first"},
+		{"multi-file KUBECONFIG with leading whitespace", " " + first + sep + second, "", []string{first, second}, "first"},
+		{"in-cluster", "", "", nil, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("KUBECONFIG", tt.env)
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+
+			path, merged, kubeContext := kubeTarget()
+			if path != tt.wantPath || !slices.Equal(merged, tt.wantMerged) || kubeContext != tt.wantContext {
+				t.Errorf("kubeTarget() = %q, %q, %q, want %q, %q, %q",
+					path, merged, kubeContext, tt.wantPath, tt.wantMerged, tt.wantContext)
+			}
+		})
+	}
+}
+
+func TestExportKubeconfig(t *testing.T) {
+	t.Setenv("KUBECONFIG", " /a:/b")
+	if err := exportKubeconfig(nil); err != nil {
+		t.Fatalf("exportKubeconfig(nil) error = %v", err)
+	}
+	if got := os.Getenv("KUBECONFIG"); got != " /a:/b" {
+		t.Errorf("exportKubeconfig(nil) changed KUBECONFIG to %q", got)
+	}
+	if err := exportKubeconfig([]string{"/a", "/b"}); err != nil {
+		t.Fatalf("exportKubeconfig() error = %v", err)
+	}
+	if got, want := os.Getenv("KUBECONFIG"), "/a"+string(filepath.ListSeparator)+"/b"; got != want {
+		t.Errorf("KUBECONFIG = %q, want %q", got, want)
 	}
 }
 

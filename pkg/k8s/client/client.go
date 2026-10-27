@@ -173,6 +173,30 @@ func kubeconfigPrecedence(value string) []string {
 	return out
 }
 
+// mergedLoadingRules returns clientcmd's default loading rules that merge the
+// trimmed, non-empty entries of the KUBECONFIG value merged.
+func mergedLoadingRules(merged string) *clientcmd.ClientConfigLoadingRules {
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	rules.Precedence = kubeconfigPrecedence(merged)
+	return rules
+}
+
+// KubeconfigLoadingRules returns the loading rules BuildKubeClient loads
+// kubeconfig with, or nil for in-cluster config. For a single file it sets
+// ExplicitPath, and for a multi-file KUBECONFIG it sets Precedence to the
+// trimmed, non-empty entries.
+func KubeconfigLoadingRules(kubeconfig string) *clientcmd.ClientConfigLoadingRules {
+	if path := ResolveKubeconfigPath(kubeconfig); path != "" {
+		rules := clientcmd.NewDefaultClientConfigLoadingRules()
+		rules.ExplicitPath = path
+		return rules
+	}
+	if merged := multiPathKubeconfigEnv(); merged != "" {
+		return mergedLoadingRules(merged)
+	}
+	return nil
+}
+
 // GetKubeClient returns a singleton Kubernetes client, creating it on first call.
 // Subsequent calls return the cached client for connection reuse and reduced overhead.
 // This prevents connection exhaustion and reduces load on the Kubernetes API server.
@@ -250,10 +274,8 @@ func BuildKubeClient(kubeconfig string) (*kubernetes.Clientset, *rest.Config, er
 		// os.Getenv read, so the files clientcmd merges are exactly the ones
 		// this package classified — see kubeconfigPrecedence for the silent
 		// wrong-cluster failure that divergence causes.
-		loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-		loadingRules.Precedence = kubeconfigPrecedence(merged)
 		config, err = clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-			loadingRules,
+			mergedLoadingRules(merged),
 			&clientcmd.ConfigOverrides{},
 		).ClientConfig()
 		if err != nil {
