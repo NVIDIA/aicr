@@ -1398,7 +1398,7 @@ unrecognized value, which keeps a typo'd severity non-silent.
 | Function | Checks |
 |----------|--------|
 | `CheckWorkloadSelectorMissing` | nodewright `--workload-selector` set when conditions match |
-| `CheckAcceleratedSelectorMissing` | nodewright `--accelerated-node-selector` set |
+| `CheckAcceleratedSelectorMissing` | nodewright `--accelerated-node-selector` set; wired at `severity: error` for `service: oke` + `accelerator: gb300`, whose tuning CR reboots every node it matches and makes CRI-O wait for Multus, and skipped when the component is disabled via `--set` |
 | `CheckHostMofedWithoutNetworkOperator` | Host-mode MOFED component paired with `network-operator` |
 | `CheckWildcardAcceleratedToleration` | Accelerated-node tolerations carry no wildcard (keyless) entry — on AKS a wildcard deadlocks nodewright interrupt packages ([nodewright#296](https://github.com/NVIDIA/nodewright/issues/296)); wired at `severity: error`, skipped when the component is disabled via `--set` |
 | `CheckNodewrightRuntimeRequiredTaintKey` | The nodewright runtime-required taint key, from `--workload-gate` or the final effective values, has no DNS prefix and is at most 53 characters. The operator writes the key into the `nodewright.nvidia.com/autoTaint_<key>` annotation, and from v0.20.0 refuses to start on one that cannot form it. A `--dynamic` declaration on the path is rejected, since its install-time value is never checked. Blocking |

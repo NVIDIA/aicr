@@ -416,8 +416,8 @@ observed lifecycle state as the actual. When the subtype is absent (no
 and fails closed rather than guessing an ownership mode.
 
 The OKE recipes that deploy `network-operator` (`gb200-oke-training`,
-`l40s-oke-training`, and their descendants) declare
-`K8s.oke-addons.nvidia-network-operator: absent`. Any other reading,
+`l40s-oke-training`, their descendants, and `gb300-oke-ubuntu-training`)
+declare `K8s.oke-addons.nvidia-network-operator: absent`. Any other reading,
 including a missing one, fails snapshot-based recipe generation and the
 `aicr validate` pre-flight, because the add-on and AICR's `network-operator`
 would both reconcile the same `NicClusterPolicy`. Criteria-only generation

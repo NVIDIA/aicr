@@ -2931,6 +2931,8 @@ Warning: nodewright-customizations is enabled but --accelerated-node-selector is
 Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes.
 ```
 
+   On OKE GB300 recipes the missing selector is an error and no bundle is produced, because their tuning CR reboots every node it matches and makes CRI-O wait for Multus.
+
 **Viewing Validation Warnings:**
 
 Validation warnings are displayed in the bundle output after successful generation:

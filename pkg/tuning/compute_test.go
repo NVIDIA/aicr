@@ -57,6 +57,9 @@ func TestCompute_Structure(t *testing.T) {
 		{"gke", "gb200", "-", "", "nvidia-tuning-gke"},
 		{"gke", "gb300", "gb200", "", "nvidia-tuning-gke"},
 		{"gke", "h100", "-", "", "nvidia-tuning-gke"},
+		// OKE GB300 is tuned-only, like bare metal: nvidia-setup ships no oke-*
+		// config, so the kernel and DOCA come from the host image.
+		{"oke", "gb300", "-", "", "nvidia-tuned"},
 		// rke2-sles pins no accelerator, so it takes the generic profile.
 		{"rke2", "*", "generic", "", "nvidia-tuned"},
 		// VR200 runs its native rke2 tuning (nvidia-tuned's rke2 service,

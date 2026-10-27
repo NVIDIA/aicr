@@ -1,0 +1,87 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NicClusterPolicy for GB300 OKE (OCI) RoCE.
+#
+# The network-operator Helm chart installs the operator + CRD but does not template
+# a NicClusterPolicy CR (values-oke-gb300.yaml sets deployCR: false). This manifest
+# creates it so the operator reconciles the RoCE fabric stack.
+#
+# OCI specifics: NO ofedDriver — GB300 nodes carry host DOCA. One sriovDevicePlugin
+# resource, nvidia.com/mlnxnics, selecting the OCI ConnectX VF device IDs (101a,
+# 101e); vendor 15b3 = Mellanox. Multus attaches the allocated VF into workload
+# pods. No nv-ipam: the VFs take addresses from OCI's IPv6 SLAAC fabric.
+#
+# Workloads attach the VF with the host-device CNI (shipped in cniPlugins), not
+# sriov-cni. OCI GB300 NICs run in switchdev mode, and the host image's
+# oci-hpc-network-device-names 3.x gives the VF representors the rdmaN names;
+# sriov-cni resolves the representor instead of the uplink ("failed to find vf
+# 0") and does not support switchdev
+# (https://github.com/k8snetworkplumbingwg/sriov-cni/issues/247). For the same
+# reason the selector below matches VF PCI functions and never interface names:
+# representors are not PCI functions, and the rdmaN names have already changed
+# meaning once.
+apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+metadata:
+  name: nic-cluster-policy
+  annotations:
+    # Deliberately NOT a Helm hook: this CR is long-lived cluster networking
+    # and must be updated in place — hook-delete-policy would delete the live
+    # policy on every upgrade, tearing down the Multus and SR-IOV pods before
+    # the replacement reconciles. CRD-before-CR ordering is provided by the
+    # bundler's post-bundle sequencing (this manifest ships in the
+    # network-operator-post bundle, after the operator's CRDs).
+    aicr/skip-hook-validation: "true"
+    # Flux does not wait for this CR: the operator holds it at Ready=False
+    # until its DaemonSets run on every GPU node, which waits on each node's
+    # tuning reboot, past helm-controller's timeout (NVIDIA/aicr#2585).
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  secondaryNetwork:
+    cniPlugins:
+      image: plugins
+      repository: ghcr.io/k8snetworkplumbingwg
+      version: v1.6.2-update.1
+    multus:
+      image: multus-cni
+      repository: ghcr.io/k8snetworkplumbingwg
+      version: v4.2.1
+  sriovDevicePlugin:
+    image: sriov-network-device-plugin
+    repository: ghcr.io/k8snetworkplumbingwg
+    version: v3.9.0
+    config: |
+      {
+        "resourceList": [
+          {
+            "resourcePrefix": "nvidia.com",
+            "resourceName": "mlnxnics",
+            "selectors": {"isRdma":true,"vendors":["15b3"],"devices":["101a","101e"]}
+          }
+        ]
+      }
+  deploymentTolerations:
+    - key: CriticalAddonsOnly
+      operator: Exists
+  # Tolerate every taint, as CNI DaemonSets do. tuning-oke-gb300.yaml makes
+  # CRI-O wait for Multus, so a GPU node Multus cannot reach stays NotReady:
+  # Multus must land under any runtime-required key --workload-gate
+  # configures, and under node.kubernetes.io/not-ready when the CRI-O
+  # drop-in lands on a joining node before Multus is bound there.
+  tolerations:
+    - operator: Exists

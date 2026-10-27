@@ -1,0 +1,144 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: gb300-oke-ubuntu-training
+
+spec:
+  # Inherits from oke-ol-training recipe (OKE + training settings). Ubuntu
+  # only, with no Oracle Linux intent layer: no OL GB300 image has been
+  # qualified, and nvidia-tuned's OCI profile is validated on Ubuntu 24.04.
+  base: oke-ol-training
+
+  criteria:
+    service: oke
+    accelerator: gb300
+    os: ubuntu
+    intent: training
+
+  # Targets BM.GPU.GB300.4 (GB300 NVL72, 4 GPUs per node, Grace ARM64 host)
+  # on a bring-your-own Ubuntu image with the NvidiaGpuPlugin add-on removed,
+  # so generate with --profile gpuStack=operator-managed. East-west is RoCE
+  # over ConnectX SR-IOV VFs attached through Multus.
+  #
+  # The os-ubuntu mixin is NOT used: a mixin cannot override a constraint
+  # name, and this leaf raises its kernel floor from 6.8 to 6.17, the
+  # 64k-page arm64 kernel line of the GB300 node image it was qualified on. Version comparison
+  # ignores the ABI suffix, so the floor is the 6.17 line, not a specific
+  # 6.17.0-NNNN build. Constraint names use fully qualified measurement
+  # paths: {type}.{subtype}.{key}
+  constraints:
+    # GB300 NVL72 IMEX channels are provisioned through DRA ComputeDomains,
+    # which require the GA resource.k8s.io/v1 API (Kubernetes 1.34+).
+    - name: K8s.server.version
+      value: ">= 1.34"
+    - name: OS.release.ID
+      value: ubuntu
+    - name: OS.release.VERSION_ID
+      value: "24.04"
+    - name: OS.sysctl./proc/sys/kernel/osrelease
+      value: ">= 6.17"
+    - name: K8s.oke-addons.nvidia-network-operator
+      value: absent
+      remediation: >-
+        Oracle's NvidiaNetworkOperator cluster add-on is present on this
+        cluster, but this recipe deploys AICR's network-operator component,
+        and two controllers would reconcile the same NicClusterPolicy. If the
+        reading is addon-deleting, a removal is already in progress, so wait
+        for it to finish. Otherwise, remove the add-on with `oci ce cluster
+        disable-addon --cluster-id <cluster-ocid> --addon-name
+        NvidiaNetworkOperator --is-remove-existing-add-on true`. Once the
+        removal finishes, recapture the snapshot with aicr snapshot
+        --oke-addons <path to `oci ce cluster list-addons --cluster-id
+        <cluster-ocid> --all --output json` dump>.
+
+  componentRefs:
+    # GB300-specific GPU Operator overrides (inherits valuesFile from
+    # oke-ol-training). GPUDirect RDMA runs over DMA-BUF once nvidia-tuned's
+    # OCI profile has corrected PCIe ACS on the RoCE root ports, so
+    # nvidia-peermem stays off (base default).
+    #
+    # No kernel-module-params ConfigMap (NVreg_GrdmaPciTopoCheckOverride=1),
+    # unlike the GB200 leaves. Each GPU sits behind a ConnectX-8 PCIe switch
+    # with the NIC's DMA function, and nvidia-tuned's pci=config_acs= boot
+    # parameter (multi-device form fixed in kernel 6.15) puts the two in one
+    # IOMMU group. R580 allows the forced-PCIe dma-buf mapping NCCL selects
+    # (GDRDMA(PCI)) when the GPU and the attaching device share an IOMMU
+    # group, so the override is not needed.
+    - name: gpu-operator
+      type: Helm
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - prometheus-operator-crds
+        - nodewright-customizations
+      overrides:
+        gdrcopy:
+          enabled: true
+
+    # CRI-O Multus default network, then nvidia-tuned's OCI GB300 profile.
+    # nvidia-tuned names the provider oci, not oke. multiNodeTraining
+    # resolves to the OCI nvidia-gb300-performance chain. Depends on
+    # network-operator because the CRI-O drop-in leaves a rebooted node
+    # NotReady until Multus has written its CNI config.
+    - name: nodewright-customizations
+      type: Helm
+      manifestFiles:
+        - components/nodewright-customizations/manifests/tuning-oke-gb300.yaml
+      overrides:
+        service: oci
+        accelerator: gb300
+        intent: multiNodeTraining
+      dependencyRefs:
+        - nodewright-operator
+        - network-operator
+
+    - name: nfd
+      type: Helm
+      valuesFile: components/nfd/values-nvidia-nics.yaml
+      overrides:
+        topologyUpdater:
+          enable: true
+
+    # RoCE east-west fabric over SR-IOV VFs: sriovDevicePlugin advertises
+    # nvidia.com/mlnxnics, and the rdma-net NetworkAttachmentDefinition lets
+    # Multus attach the VF with host-device. No ofedDriver (host DOCA) and no
+    # nv-ipam (OCI SLAAC). NicClusterPolicy is manifest-supplied (chart
+    # deployCR off). Present in every gpuStack value; incompatible with
+    # Oracle's opt-in NvidiaNetworkOperator add-on, which the
+    # K8s.oke-addons.nvidia-network-operator constraint rejects.
+    - name: network-operator
+      type: Helm
+      valuesFile: components/network-operator/values-oke-gb300.yaml
+      manifestFiles:
+        - components/network-operator/manifests/nic-cluster-policy-oke-gb300.yaml
+        - components/network-operator/manifests/rdma-net-oke-gb300.yaml
+      dependencyRefs:
+        - nfd
+        - cert-manager
+
+  # The deployment-phase floor is contributed by the gb300-any cross-cutting
+  # overlay and is not duplicated here.
+  #
+  # Performance gating is intentionally omitted until an empirical GB300 OCI
+  # NCCL baseline is established, matching the a100-oke-training rationale.
+  validation:
+    conformance:
+      checks:
+        - gang-scheduling
+        - pod-autoscaling
+        - cluster-autoscaling
+        - secure-accelerator-access

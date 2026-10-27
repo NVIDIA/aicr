@@ -236,6 +236,67 @@ func TestCheckAcceleratedSelectorMissing(t *testing.T) {
 			wantErrors:   0,
 		},
 		{
+			name:          "disabled via --set override key",
+			componentName: "nodewright-customizations",
+			recipeResult: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "nodewright-customizations"},
+				},
+				Criteria: &recipe.Criteria{
+					Intent: recipe.CriteriaIntentTraining,
+				},
+			},
+			bundlerConfig: config.NewConfig(
+				config.WithValueOverrides(map[string]map[string]string{
+					"nodewrightcustomizations": {"enabled": "false"},
+				}),
+			),
+			conditions:   map[string][]string{"intent": {"training", "inference"}},
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			name:          "disabled via --set component name",
+			componentName: "nodewright-customizations",
+			recipeResult: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "nodewright-customizations"},
+				},
+				Criteria: &recipe.Criteria{
+					Intent: recipe.CriteriaIntentTraining,
+				},
+			},
+			bundlerConfig: config.NewConfig(
+				config.WithValueOverrides(map[string]map[string]string{
+					"nodewright-customizations": {"enabled": "false"},
+				}),
+			),
+			conditions:   map[string][]string{"intent": {"training", "inference"}},
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			name:          "enabled true via --set still warns",
+			componentName: "nodewright-customizations",
+			recipeResult: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "nodewright-customizations"},
+				},
+				Criteria: &recipe.Criteria{
+					Intent: recipe.CriteriaIntentTraining,
+				},
+			},
+			bundlerConfig: config.NewConfig(
+				config.WithValueOverrides(map[string]map[string]string{
+					"nodewrightcustomizations": {"enabled": "true"},
+				}),
+			),
+			conditions:     map[string][]string{"intent": {"training", "inference"}},
+			wantWarnings:   1,
+			wantErrors:     0,
+			wantWarningMsg: "nodewright-customizations is enabled but --accelerated-node-selector is not set",
+		},
+		{
 			name:          "nil config",
 			componentName: "nodewright-customizations",
 			recipeResult: &recipe.RecipeResult{

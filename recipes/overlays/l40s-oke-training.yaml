@@ -49,8 +49,8 @@ spec:
 
   componentRefs:
     # L40S-specific GPU Operator overrides (inherits valuesFile from oke-training).
-    # Nodewright tuning is omitted: the nodewright-customizations packages do
-    # not target service: oke.
+    # Nodewright tuning is omitted: nvidia-tuned ships no OCI profile for
+    # L40S.
     - name: gpu-operator
       type: Helm
       dependencyRefs:

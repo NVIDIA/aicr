@@ -2109,6 +2109,13 @@ func TestResolveRecipeFromSnapshot_OKENetworkOperatorAddonGate(t *testing.T) {
 			wantErr:     "gb200-oke-ubuntu-training-kubeflow " + gate + " (expected absent, got installed)",
 		},
 		{
+			name:        "gb300 ubuntu add-on installed fails closed",
+			accelerator: "gb300",
+			os:          "ubuntu",
+			nnoState:    "installed",
+			wantErr:     "gb300-oke-ubuntu-training " + gate + " (expected absent, got installed)",
+		},
+		{
 			name:        "add-on mid-create fails closed",
 			accelerator: "l40s",
 			os:          "ol",

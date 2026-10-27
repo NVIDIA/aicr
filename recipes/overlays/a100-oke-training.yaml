@@ -39,7 +39,7 @@ spec:
   componentRefs:
     # A100-specific GPU Operator overrides (inherits valuesFile from oke-training).
     # Nodewright tuning is omitted, mirroring the GB200 OKE training overlay:
-    # the nodewright-customizations packages do not target service: oke.
+    # nvidia-tuned ships no OCI profile for A100.
     - name: gpu-operator
       type: Helm
       dependencyRefs:

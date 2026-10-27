@@ -93,6 +93,7 @@ The table below is generated from the recipes by `make tuning-docs` — **do not
 | gke     | gb200        | -       | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | gb300        | gb200   | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | h100         | -       | -                  | nvidia-tuning-gke 0.1.2 |
+| oke     | gb300        | -       | -                  | nvidia-tuned 0.11.0     |
 | rke2    | *            | generic | -                  | nvidia-tuned 0.10.1     |
 | rke2    | vr200        | -       | -                  | nvidia-tuned 0.10.1     |
 
@@ -116,8 +117,10 @@ omits the `nvidia-tuned` package while `nvidia-setup` keeps running, and on the
 single-package manifests (`tuning-gke.yaml`, `tuning-generic.yaml`,
 `tuning-gb300.yaml`) it suppresses the whole tuning CR, since the tuning
 package is that CR's only content. On `tuning-rke2.yaml` it does the same
-unless the RDMA package below is enabled. No recipe sets it outside AKS today,
-so default renderings are unchanged elsewhere.
+unless the RDMA package below is enabled. On `tuning-oke-gb300.yaml` it drops
+`nvidia-tuned` and keeps the CR with the CRI-O package described below. No
+recipe sets it outside AKS today, so default renderings are unchanged
+elsewhere.
 
 `tuning-rke2.yaml` also carries an optional `rdma-netns-exclusive` package,
 gated by `rdmaNetnsExclusive` (default `false`; only an explicit `true`
@@ -134,9 +137,26 @@ drops the RDMA package from the CR but does not restore shared mode on nodes
 that already have it: the package has no uninstall step, so that takes
 removing `/etc/modprobe.d/dranet-rdma-netns-exclusive.conf` and a reboot.
 
+`tuning-oke-gb300.yaml` (OKE GB300) carries a `crio-multus-default-network`
+package ahead of `nvidia-tuned`. It writes
+`/etc/crio/crio.conf.d/99-cni-default-network.conf`, which sets
+`cni_default_network = "multus-cni-network"` so CRI-O waits for Multus before
+starting pods, and restarts CRI-O. `nvidia-tuned` runs there with
+`service: oci`, which takes the OCI GB300 profile and a reboot. Its DOCA
+Spectrum-X congestion control is set off with `spcx_cc: "off"`, because Oracle
+Cloud Agent 1.64 runs congestion control on the rails itself. With
+`--set nodewrightcustomizations:spcxCC=on`, `nvidia-tuned` (0.11.0 or later)
+defers to OCA's units when they are running, and otherwise runs congestion
+control itself, which fails on NICs whose firmware lacks
+`USER_PROGRAMMABLE_CC`. The CRI-O package has no uninstall
+step. Before removing `network-operator` or disabling this component, delete
+the drop-in and restart CRI-O on each node, or CRI-O keeps waiting for a Multus
+network that no longer exists and the node stays not ready.
+
 The tuning CR is a normal release-managed resource (no Helm hooks), so once
 its gates leave no package to render (`tuningEnabled=false`, plus
-`rdmaNetnsExclusive` off on `tuning-rke2.yaml`) it is retracted on all
+`rdmaNetnsExclusive` off on `tuning-rke2.yaml`; only `enabled: false` on
+`tuning-oke-gb300.yaml`) it is retracted on all
 deployers — under Helm/Argo (which already stripped the hooks at bundle time) and under
 Flux (where a hook resource would otherwise have been orphaned on the flip,
 since `before-hook-creation` never fires when the CR leaves the render).
@@ -170,7 +190,8 @@ deployment validator renders those values and suppresses the assert only when
 they produce no CR at all — `tuningEnabled: false` on a
 `tuning-gke.yaml`/`tuning-generic.yaml`/`tuning-gb300.yaml` recipe (or on a
 `tuning-rke2.yaml` recipe without `rdmaNetnsExclusive`), or `enabled: false`
-anywhere — so a deliberately untuned cluster passes
+anywhere, including `tuning-oke-gb300.yaml`, whose CR otherwise always renders
+— so a deliberately untuned cluster passes
 rather than failing on an intentionally absent CR
 ([#1844](https://github.com/NVIDIA/aicr/issues/1844)). When a CR does render,
 completion is still required. The suppression is fail-closed: a render, read or
@@ -196,7 +217,7 @@ See [recipes/components/nodewright-customizations/manifests](https://github.com/
 ### Rollout pacing
 
 Every reboot-carrying tuning manifest (`tuning.yaml`, `tuning-gb300.yaml`,
-`tuning-generic.yaml`, `tuning-rke2.yaml`) pins
+`tuning-generic.yaml`, `tuning-rke2.yaml`, `tuning-oke-gb300.yaml`) pins
 `spec.interruptionBudget.count: 1`, so nodewright reboots one matched node at a
 time.
 

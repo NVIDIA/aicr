@@ -122,7 +122,9 @@ func CheckWorkloadSelectorMissing(ctx context.Context, componentName string, rec
 }
 
 // CheckAcceleratedSelectorMissing checks if accelerated-node-selector is missing when conditions are met.
-// This is a generic check that can be used by any component.
+// This is a generic check that can be used by any component. A component
+// disabled via --set renders nothing that a selector would scope, so it is
+// skipped.
 func CheckAcceleratedSelectorMissing(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
 	if bundlerConfig == nil {
 		return nil, nil
@@ -144,6 +146,13 @@ func CheckAcceleratedSelectorMissing(ctx context.Context, componentName string, 
 	// Check conditions (e.g., intent: [training, inference])
 	if !checkConditions(recipeResult, conditions) {
 		return nil, nil
+	}
+
+	overrides := bundlerConfig.ValueOverrides()
+	for _, key := range append([]string{componentName}, nodewrightCustomizationsOverrideAliases...) {
+		if overrides[key]["enabled"] == overrideValueFalse {
+			return nil, nil
+		}
 	}
 
 	// Check if accelerated-node-selector is not set

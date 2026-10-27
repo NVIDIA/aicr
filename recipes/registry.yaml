@@ -454,6 +454,19 @@ components:
             - training
             - inference
         message: "Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes."
+      - function: CheckAcceleratedSelectorMissing
+        # Blocking for OKE GB300: tuning-oke-gb300.yaml makes CRI-O wait for
+        # Multus and reboots each node it matches, so an unscoped CR would
+        # reboot the CPU pools into the GB300 OCI profile.
+        severity: error
+        conditions:
+          service:
+            - oke
+          accelerator:
+            - gb300
+        message: "The OKE GB300 tuning CR reboots every node it matches and
+          makes CRI-O depend on Multus. Pass --accelerated-node-selector with a
+          label only the GB300 pool carries."
       - function: CheckWildcardAcceleratedToleration
         # Blocking: the wildcard deadlock requires manual node cordon/reboot to
         # recover, so fail the bundle rather than emit a missable warning. The
@@ -475,6 +488,7 @@ components:
         conditions:
           service:
             - generic
+            - oke
           accelerator:
             - gb300
         message: "nvidia-gb300-performance sizes hugepages for a 64k-page ARM64

@@ -2998,6 +2998,8 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"gb200-oke-ubuntu-inference", criteria{CriteriaServiceOKE, CriteriaAcceleratorGB200, CriteriaOSUbuntu, CriteriaIntentInference, ""}, true},
 		{"gb200-oke-ubuntu-training-kubeflow", criteria{CriteriaServiceOKE, CriteriaAcceleratorGB200, CriteriaOSUbuntu, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},
 		{"gb200-oke-ubuntu-inference-dynamo", criteria{CriteriaServiceOKE, CriteriaAcceleratorGB200, CriteriaOSUbuntu, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
+		// GB300 OKE Ubuntu variants
+		{"gb300-oke-ubuntu-training", criteria{CriteriaServiceOKE, CriteriaAcceleratorGB300, CriteriaOSUbuntu, CriteriaIntentTraining, ""}, true},
 		// RTX Pro 6000 LKE Ubuntu variants
 		{"rtx-pro-6000-lke-ubuntu-training", criteria{CriteriaServiceLKE, CriteriaAcceleratorRTXPro6000, CriteriaOSUbuntu, CriteriaIntentTraining, ""}, true},
 		{"rtx-pro-6000-lke-ubuntu-inference", criteria{CriteriaServiceLKE, CriteriaAcceleratorRTXPro6000, CriteriaOSUbuntu, CriteriaIntentInference, ""}, true},

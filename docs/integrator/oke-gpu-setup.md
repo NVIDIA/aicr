@@ -152,8 +152,8 @@ Oracle GPU add-on compatible with AICR bundles is the device plugin
 (`NvidiaGpuPlugin`), and only under `oci-managed`.
 
 The recipes that deploy `network-operator` (`gb200-oke-training`,
-`l40s-oke-training`, and their descendants) enforce this for
-`NvidiaNetworkOperator`. They require the
+`l40s-oke-training`, their descendants, and `gb300-oke-ubuntu-training`)
+enforce this for `NvidiaNetworkOperator`. They require the
 `K8s.oke-addons.nvidia-network-operator` reading from the same
 `--oke-addons` dump to be `absent`, so a cluster with the add-on fails
 snapshot-based recipe generation and the `aicr validate` pre-flight.
@@ -176,6 +176,96 @@ oci ce cluster disable-addon --cluster-id "${CLUSTER_ID}" \
 oci ce cluster list-addons --cluster-id "${CLUSTER_ID}" --all --output json > addons.json
 aicr snapshot --oke-addons addons.json --output snapshot.yaml
 ```
+
+Oracle's `CertManager` add-on also conflicts with AICR bundles, and no
+recipe checks for it yet. It runs cert-manager in the `cert-manager`
+namespace without a Helm release, so the bundle's `cert-manager` release fails
+on objects Helm does not own. Check `oci ce cluster list-addons` for
+`CertManager` before deploying, then either keep the add-on and leave
+cert-manager out of the bundle, so the components that depend on it use
+Oracle's, or remove the add-on so the bundle installs its own pinned version:
+
+```shell
+# Keep Oracle's cert-manager:
+aicr bundle -r recipe.yaml --set certmanager:enabled=false -o ./bundles
+
+# Or remove the add-on and let the bundle install cert-manager:
+oci ce cluster disable-addon --cluster-id "${CLUSTER_ID}" \
+  --addon-name CertManager --is-remove-existing-add-on true
+```
+
+## GB300 (`BM.GPU.GB300.4`)
+
+`gb300-oke-ubuntu-training` targets GB300 NVL72 nodes on a bring-your-own
+Ubuntu 24.04 image with the `NvidiaGpuPlugin` add-on removed, so generate it
+with `--profile gpuStack=operator-managed`. Pass `--accelerated-node-selector`
+at bundle time with a label only the GB300 pool carries: the recipe's
+Nodewright CR reboots every node it matches, and without a selector that
+includes the CPU pools.
+
+```shell
+GPU_POOL_LABEL="nodeGroup=gpu"  # replace with a label only your GB300 nodes carry
+
+aicr recipe --snapshot snapshot.yaml --intent training \
+  --profile gpuStack=operator-managed -o recipe.yaml
+aicr bundle -r recipe.yaml --accelerated-node-selector "${GPU_POOL_LABEL}" -o ./bundles
+```
+
+East-west traffic is RoCE over ConnectX SR-IOV VFs. `network-operator` runs
+the SR-IOV device plugin, which advertises the RDMA VFs as
+`nvidia.com/mlnxnics`, and Multus. The recipe also ships the `rdma-net`
+`NetworkAttachmentDefinition` in the network-operator release namespace
+(`nvidia-network-operator` by default). A
+workload attaches a VF by requesting `nvidia.com/mlnxnics` and annotating
+`k8s.v1.cni.cncf.io/networks: nvidia-network-operator/rdma-net` (one entry per
+VF). The network
+uses the `host-device` CNI, not `sriov`: GB300 NICs run in switchdev mode,
+and `sriov-cni` resolves the VF representor instead of the uplink
+([sriov-cni#247](https://github.com/k8snetworkplumbingwg/sriov-cni/issues/247)).
+The VFs take their addresses from OCI's IPv6 SLAAC fabric, so the attachment
+needs no IPAM, and the recipe deploys no `nv-ipam`.
+
+Node preparation runs through one Nodewright CR:
+
+- A CRI-O drop-in sets `cni_default_network = "multus-cni-network"`, so CRI-O
+  waits for Multus instead of starting pods on the primary network alone.
+- `nvidia-tuned` with `service: oci` corrects PCIe ACS on the RoCE root ports
+  (required for DMA-BUF GPUDirect RDMA), holds boot until the RDMA VFs are
+  ready, and writes the GB300 NCCL topology to `/etc/nccl/topo.xml`. Point
+  NCCL workloads at it with `NCCL_TOPO_FILE`. Each node reboots once.
+
+The CR reboots one node at a time, and a GB300 node takes about 8 minutes to
+tune and reboot. `deploy.sh` waits on the CR within its retry budget for the
+component (5 attempts of 10 minutes each), which covers about five nodes. For a
+larger pool on an initial build, use the bring-up opt-out in
+[Rollout pacing](components/nodewright.md#rollout-pacing).
+`network-operator` deploys first, so each node comes back Ready as soon as its
+reboot finishes.
+
+There is no `nvidia-setup` step, so the recipe expects the cluster and node
+image to provide the rest. Items marked *checked* fail `aicr validate`
+readiness when they do not hold; the others are assumed:
+
+| Requirement | Checked |
+|---|---|
+| Kubernetes 1.34 or later | checked |
+| Ubuntu 24.04 node image | checked |
+| 6.17 kernel line | checked (any 6.17 or later build) |
+| 64k-page arm64 kernel, which the GB300 tuning profile sizes hugepages for | assumed (bundle-time advisory only) |
+| No NVIDIA driver in the image: the GPU Operator installs it | checked (`NvidiaGpuPlugin` absent, via the `gpuStack` profile) |
+| `NvidiaNetworkOperator` add-on absent | checked |
+| DOCA (MOFED) host stack in the image | assumed |
+| Oracle Cloud Agent 1.64 or later with the Compute HPC RDMA Authentication and Compute HPC RDMA Auto-Configuration plugins enabled, which bring up the RoCE VFs with IPv6 SLAAC addresses | assumed |
+| `oci-hpc-network-device-names` 3.x, which names the four RoCE VFs `rdma_vf_rail0` to `rdma_vf_rail3` | assumed |
+| CRI-O container runtime (the Nodewright drop-in targets `/etc/crio/crio.conf.d`) | assumed |
+| `CertManager` add-on absent, or cert-manager left out of the bundle as described in [Oracle Add-on Interactions](#oracle-add-on-interactions) | assumed |
+
+If the node pool pre-taints its nodes with the legacy
+`skyhook.nvidia.com=runtime-required:NoSchedule` key, pass the same taint to
+`aicr bundle --workload-gate` (see
+[Nodewright](components/nodewright.md)). NCCL performance checks are not yet
+gated for this recipe, pending a measured baseline. The `oci-managed` path on
+Oracle's GPU images is not covered.
 
 ## References
 

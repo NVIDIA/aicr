@@ -133,13 +133,14 @@ func TestExtractPackagePins_RealManifests(t *testing.T) {
 	// Version-agnostic: asserts each real manifest yields the expected image
 	// basenames with non-empty versions, so a pin bump does not break this test.
 	cases := map[string][]string{
-		"components/nodewright-customizations/manifests/tuning.yaml":         {"nvidia-setup", "nvidia-tuned"},
-		"components/nodewright-customizations/manifests/tuning-generic.yaml": {"nvidia-tuned"},
-		"components/nodewright-customizations/manifests/tuning-rke2.yaml":    {"nvidia-tuned"},
-		"components/nodewright-customizations/manifests/tuning-gb300.yaml":   {"nvidia-tuned"},
-		"components/nodewright-customizations/manifests/tuning-gke.yaml":     {"nvidia-tuning-gke"},
-		"components/nodewright-customizations/manifests/bcm-setup.yaml":      {"nvidia-setup"},
-		"components/nodewright-customizations/manifests/no-op.yaml":          {"shellscript"},
+		"components/nodewright-customizations/manifests/tuning.yaml":           {"nvidia-setup", "nvidia-tuned"},
+		"components/nodewright-customizations/manifests/tuning-generic.yaml":   {"nvidia-tuned"},
+		"components/nodewright-customizations/manifests/tuning-rke2.yaml":      {"nvidia-tuned"},
+		"components/nodewright-customizations/manifests/tuning-gb300.yaml":     {"nvidia-tuned"},
+		"components/nodewright-customizations/manifests/tuning-oke-gb300.yaml": {"shellscript", "nvidia-tuned"},
+		"components/nodewright-customizations/manifests/tuning-gke.yaml":       {"nvidia-tuning-gke"},
+		"components/nodewright-customizations/manifests/bcm-setup.yaml":        {"nvidia-setup"},
+		"components/nodewright-customizations/manifests/no-op.yaml":            {"shellscript"},
 	}
 	for path, wantKeys := range cases {
 		t.Run(path, func(t *testing.T) {

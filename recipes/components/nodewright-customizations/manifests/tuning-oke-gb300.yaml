@@ -1,0 +1,145 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Nodewright GB300 customization for OKE (BM.GPU.GB300.4, Ubuntu 24.04):
+# a CRI-O drop-in that makes Multus the default CNI network, then
+# nvidia-tuned's OCI service profile. No nvidia-setup: it dispatches on
+# `<service>-<accelerator>` and ships no oke/oci combination, so the host
+# image supplies the 64k-page kernel and DOCA.
+#
+# Used by gb300-oke-ubuntu-training.
+{{- $cust := index .Values "nodewright-customizations" }}
+{{- if ne (toString (index $cust "enabled")) "false" }}
+---
+apiVersion: nodewright.nvidia.com/v1alpha1
+kind: NodeWright
+metadata:
+  annotations:
+    # No Helm hooks: this NodeWright CR is release-managed so that disabling
+    # tuning (tuningEnabled=false) actually retracts nvidia-tuned. Ordering
+    # after the NodeWright CRD is handled by the component dependency on
+    # nodewright-operator, not an intra-release hook.
+    aicr/skip-hook-validation: "true"
+  labels:
+    app.kubernetes.io/part-of: skyhook-operator
+    app.kubernetes.io/created-by: aicr
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+  name: tuning
+  namespace: {{ .Release.Namespace }}
+spec:
+  runtimeRequired: true
+  # Serialize this CR's reboots to one node at a time. nvidia-tuned carries
+  # `interrupt: reboot`.
+  # An omitted budget is not "unset": createLegacyDefaultCompartment
+  # substitutes percent: 100, so every matched node reboots together.
+  #
+  # BRINGUP ESCAPE HATCH: on an initial cluster build, before any workload has
+  # landed, serializing buys nothing and costs N x (reboot time). Delete this
+  # block or set `percent: 100` — its exact equivalent — to converge in one
+  # batch. count and percent are mutually exclusive.
+  interruptionBudget:
+    count: 1
+  # Default: true. Disable with --set nodewrightcustomizations:autoTaintNewNodes=false
+  {{- /* Sprig-safe: a "| default true" here would swallow an explicit false under --deployer flux. */}}
+  autoTaintNewNodes: {{ ne (toString (index $cust "autoTaintNewNodes")) "false" }}
+  # Dynamic: Supports --accelerated-node-toleration CLI flag
+  additionalTolerations:
+    {{- if $cust.acceleratedTolerations }}
+    {{- toYaml $cust.acceleratedTolerations | nindent 4 }}
+    {{- else }}
+    # Tolerate-all default, matching ParseTolerations()/DefaultTolerations()
+    # (operator Exists, no key). Only reached if no acceleratedTolerations are
+    # injected from scheduling defaults/flags.
+    - operator: Exists
+    {{- end }}
+  # Dynamic: Supports --accelerated-node-selector CLI flag. Without a selector
+  # this CR would match every node, CPU pools included, so the registry makes
+  # the flag mandatory for oke/gb300 (CheckAcceleratedSelectorMissing,
+  # severity: error). No nvidia.com/gpu.present fallback, for the same reason
+  # as tuning.yaml: GFD emits that label only after this CR has run.
+  {{- if $cust.acceleratedNodeSelector }}
+  nodeSelectors:
+    matchLabels:
+      {{- toYaml $cust.acceleratedNodeSelector | nindent 6 }}
+  {{- end }}
+  # Dynamic: Supports --workload-selector CLI flag
+  {{- if $cust.workloadSelector }}
+  podNonInterruptLabels:
+    matchLabels:
+      {{- toYaml $cust.workloadSelector | nindent 6 }}
+  {{- end }}
+  packages:
+    # OKE's CRI-O ships 10-network.conf with cni_default_network = "", so
+    # CRI-O starts pods on whichever CNI config it finds first; a pod
+    # sandboxed before Multus writes 00-multus.conf gets the primary network
+    # only and never its secondary RDMA attachment. Pinning the default to
+    # Multus makes CRI-O wait for it. The 99- prefix wins because drop-ins
+    # merge in lexical order. Safe before Multus is running: nodewright
+    # package pods and the network-operator DaemonSets use the host network.
+    crio-multus-default-network:
+      image: ghcr.io/nvidia/skyhook-packages/shellscript
+      version: "1.1.1"
+      containerSHA: sha256:5414b06e52c090d0842704f2580798064362d771f12421ccc8888186b5f5a3cf
+      interrupt:
+        type: service
+        services:
+          - crio
+      configMap:
+        apply.sh: |-
+          #!/bin/bash
+          set -euo pipefail
+          mkdir -p /etc/crio/crio.conf.d
+          printf '[crio.network]\ncni_default_network = "multus-cni-network"\n' > /etc/crio/crio.conf.d/99-cni-default-network.conf
+        apply_check.sh: |-
+          #!/bin/bash
+          set -euo pipefail
+          grep -qF 'cni_default_network = "multus-cni-network"' /etc/crio/crio.conf.d/99-cni-default-network.conf
+    {{- /* Per-package gate (default true): tuningEnabled=false drops nvidia-tuned and keeps the CRI-O package. */}}
+    {{- /* Sprig-safe: only an explicit false disables; never use `| default true` here. */}}
+    {{- /* NOTE: keep these template comments single-line — pkg/bom and pkg/tuning strip template directives line-by-line. */}}
+    {{- if ne (toString (index $cust "tuningEnabled")) "false" }}
+
+    # The OCI service profile's PCIe ACS correction and RDMA VF boot gate take
+    # effect only at boot, so the reboot is required even though its tuned
+    # chain carries no [bootloader] section.
+    nvidia-tuned:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
+      version: "0.11.0"
+      containerSHA: sha256:38e56b645a6e3234904e813c81b80dd79db3ba87721609eb6b6f452672b8a40a
+      interrupt:
+        type: reboot
+      env:
+        - name: INTERRUPT
+          value: "true"
+        # NCCL workloads read the topology from here via NCCL_TOPO_FILE.
+        - name: TOPO_PATH
+          value: /etc/nccl/topo.xml
+      configMap:
+        {{- if $cust.intent }}
+        intent: {{ $cust.intent }}
+        {{- end }}
+        accelerator: {{ $cust.accelerator }}
+        {{- if $cust.service }}
+        service: {{ $cust.service }}
+        {{- end }}
+        # DOCA Spectrum-X congestion control. Oracle Cloud Agent 1.64 runs it
+        # on the rails itself, so off leaves it to OCA. With spcxCC=on,
+        # nvidia-tuned defers to OCA's units when they run and otherwise runs
+        # it, which fails on NICs whose firmware lacks USER_PROGRAMMABLE_CC.
+        spcx_cc: {{ $cust.spcxCC | default "off" | quote }}
+      dependsOn:
+        crio-multus-default-network: "1.1.1"
+    {{- end }}
+{{- end }}

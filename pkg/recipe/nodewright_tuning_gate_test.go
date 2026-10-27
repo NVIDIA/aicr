@@ -41,6 +41,10 @@ const (
 	nodewrightTuningGB300Manifest   = "components/nodewright-customizations/manifests/tuning-gb300.yaml"
 )
 
+// nodewrightTuningOKEGB300Manifest carries the CRI-O Multus package beside
+// nvidia-tuned, so tuningEnabled=false leaves the CR in place.
+const nodewrightTuningOKEGB300Manifest = "components/nodewright-customizations/manifests/tuning-oke-gb300.yaml"
+
 // renderNodewrightTuning renders the tuning manifest with the given component
 // values and returns the parsed Skyhook packages map plus the dependsOn map of
 // the nvidia-setup-full package.
@@ -355,6 +359,69 @@ func TestNodewrightTuningRKE2RDMAGate(t *testing.T) {
 		}
 		if first := slices.Sorted(maps.Keys(packages))[0]; first != "nvidia-tuned" {
 			t.Errorf("first package in name order = %q, want nvidia-tuned to issue the merged reboot", first)
+		}
+	})
+}
+
+// TestNodewrightTuningOKEGB300Gate pins the gates in tuning-oke-gb300.yaml:
+// tuningEnabled (default on) gates nvidia-tuned only, so the CR keeps the
+// CRI-O Multus package when tuning is off, and enabled=false suppresses the
+// CR. It also pins the package ordering and the spcx_cc default.
+func TestNodewrightTuningOKEGB300Gate(t *testing.T) {
+	content, err := GetManifestContentWithContext(context.Background(), nil, nodewrightTuningOKEGB300Manifest)
+	if err != nil {
+		t.Fatalf("GetManifestContentWithContext(%q): %v", nodewrightTuningOKEGB300Manifest, err)
+	}
+	base := map[string]any{"service": "oci", "accelerator": "gb300", "intent": "multiNodeTraining"}
+
+	tests := []struct {
+		name      string
+		overrides map[string]any
+		want      []string
+	}{
+		{"default renders both packages", nil, []string{"crio-multus-default-network", "nvidia-tuned"}},
+		{"tuning disabled keeps the CRI-O package", map[string]any{"tuningEnabled": false}, []string{"crio-multus-default-network"}},
+		{"tuning disabled as string keeps the CRI-O package", map[string]any{"tuningEnabled": "false"}, []string{"crio-multus-default-network"}},
+		{"component disabled suppresses the CR", map[string]any{"enabled": false}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			values := maps.Clone(base)
+			maps.Copy(values, tt.overrides)
+			packages := renderedNodewrightPackages(t, content, values)
+			if got := slices.Sorted(maps.Keys(packages)); !slices.Equal(got, tt.want) {
+				t.Errorf("packages = %v, want %v", got, tt.want)
+			}
+		})
+	}
+
+	// The drop-in must be on disk before nvidia-tuned's reboot, so nvidia-tuned
+	// runs in a later pass than the CRI-O package rather than sharing its
+	// interrupt.
+	t.Run("nvidia-tuned runs after the CRI-O package", func(t *testing.T) {
+		packages := renderedNodewrightPackages(t, content, base)
+		tuned := valueAtPath[map[string]any](t, packages, "nvidia-tuned")
+		if _, ok := valueAtPath[map[string]any](t, tuned, "dependsOn")["crio-multus-default-network"]; !ok {
+			t.Errorf("nvidia-tuned dependsOn = %v, want crio-multus-default-network", tuned["dependsOn"])
+		}
+		if got := valueAtPath[string](t, packages, "crio-multus-default-network", "interrupt", "type"); got != "service" {
+			t.Errorf("crio-multus-default-network interrupt.type = %q, want service", got)
+		}
+	})
+
+	t.Run("spcx_cc defaults off and is overridable", func(t *testing.T) {
+		for _, tc := range []struct {
+			spcx any
+			want string
+		}{{nil, "off"}, {"on", "on"}} {
+			values := maps.Clone(base)
+			if tc.spcx != nil {
+				values["spcxCC"] = tc.spcx
+			}
+			packages := renderedNodewrightPackages(t, content, values)
+			if got := valueAtPath[string](t, packages, "nvidia-tuned", "configMap", "spcx_cc"); got != tc.want {
+				t.Errorf("spcxCC=%v: spcx_cc = %q, want %q", tc.spcx, got, tc.want)
+			}
 		}
 	})
 }
