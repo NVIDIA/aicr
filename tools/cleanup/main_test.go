@@ -197,16 +197,20 @@ func TestKubeTarget(t *testing.T) {
 	}
 }
 
-func TestExportKubeconfig(t *testing.T) {
+func TestExportHelmTarget(t *testing.T) {
 	t.Setenv("KUBECONFIG", " /a:/b")
-	if err := exportKubeconfig(nil); err != nil {
-		t.Fatalf("exportKubeconfig(nil) error = %v", err)
+	t.Setenv(helmAPIServerEnv, "https://other-cluster:6443")
+	if err := exportHelmTarget(nil); err != nil {
+		t.Fatalf("exportHelmTarget(nil) error = %v", err)
 	}
 	if got := os.Getenv("KUBECONFIG"); got != " /a:/b" {
-		t.Errorf("exportKubeconfig(nil) changed KUBECONFIG to %q", got)
+		t.Errorf("exportHelmTarget(nil) changed KUBECONFIG to %q", got)
 	}
-	if err := exportKubeconfig([]string{"/a", "/b"}); err != nil {
-		t.Fatalf("exportKubeconfig() error = %v", err)
+	if got, set := os.LookupEnv(helmAPIServerEnv); set {
+		t.Errorf("exportHelmTarget(nil) left %s = %q", helmAPIServerEnv, got)
+	}
+	if err := exportHelmTarget([]string{"/a", "/b"}); err != nil {
+		t.Fatalf("exportHelmTarget() error = %v", err)
 	}
 	if got, want := os.Getenv("KUBECONFIG"), "/a"+string(filepath.ListSeparator)+"/b"; got != want {
 		t.Errorf("KUBECONFIG = %q, want %q", got, want)

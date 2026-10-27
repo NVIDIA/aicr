@@ -231,9 +231,7 @@ func newCleaner(ctx context.Context, opts options, log *slog.Logger) (*cleaner, 
 		// from HELM_KUBECONTEXT. With neither flag, helm falls back to the
 		// same in-cluster config or KUBECONFIG merge the clients use.
 		c.helm = helmCLI{run: helm.Run, kubeArgs: helmKubeArgs(kubeconfig, kubeContext)}
-		// helm splits KUBECONFIG without trimming its entries, so it could
-		// merge different files than the clients.
-		if err := exportKubeconfig(mergedKubeconfig); err != nil {
+		if err := exportHelmTarget(mergedKubeconfig); err != nil {
 			return nil, err
 		}
 	}
@@ -254,9 +252,17 @@ func kubeTarget() (path string, merged []string, kubeContext string) {
 	return rules.ExplicitPath, merged, contextName(clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{}))
 }
 
-// exportKubeconfig sets this process's KUBECONFIG to the files merged lists,
-// and leaves it unchanged when merged is empty.
-func exportKubeconfig(merged []string) error {
+const helmAPIServerEnv = "HELM_KUBEAPISERVER"
+
+// exportHelmTarget sets the environment helm inherits so it targets the same
+// API server as the clients. It unsets HELM_KUBEAPISERVER, which would
+// override the server of any kubeconfig or in-cluster config. It sets
+// KUBECONFIG to the files merged lists, because helm splits KUBECONFIG
+// without trimming its entries, and leaves it unchanged when merged is empty.
+func exportHelmTarget(merged []string) error {
+	if err := os.Unsetenv(helmAPIServerEnv); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "unset "+helmAPIServerEnv+" for helm", err)
+	}
 	if len(merged) == 0 {
 		return nil
 	}
