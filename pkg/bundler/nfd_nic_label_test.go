@@ -35,9 +35,11 @@ const (
 		"labels the NVIDIA NIC nodes, and the pods that select on that label (the NicClusterPolicy " +
 		"operands) leave them. Select components/nfd/values-nvidia-nics.yaml " +
 		"(values-nvidia-nics-aks.yaml on AKS) as the nfd valuesFile in the overlay that adds " +
-		"network-operator, or include its rule in a worker.config.sources.custom override."
+		"network-operator, include its rule in a worker.config.sources.custom override, or publish " +
+		"pci.device again by removing it from worker.config.core.noPublishFeatures."
 	wantNFDNICWarningA = "Warning: " + wantNFDNICErrorA + " This is a warning, not an error, because " +
-		"nfd sets worker.extraArgs or a labelsTemplate rule, which this check does not evaluate."
+		"nfd sets worker.extraArgs, worker.config.sources.pci or a labelsTemplate rule, which this check " +
+		"does not evaluate."
 	wantNFDNICWarningB = "Warning: nfd labels NVIDIA NIC nodes feature.node.kubernetes.io/pci-15b3.present " +
 		"(worker.config.sources.custom), but network-operator is not in this bundle. The GPU Operator " +
 		"validator waits on those nodes for the network-operator MOFED driver when the GPU Operator " +
@@ -133,6 +135,39 @@ func TestCheckNFDNICLabelMismatch(t *testing.T) {
 					},
 				})},
 			want: wantNFDNICWarningA,
+		},
+		{
+			name:     "A warns: pci source labels by vendor",
+			criteria: nfdNICTestEKS,
+			mutate: []func(map[string]map[string]any){addNetOp,
+				setNFD("worker.config.sources.pci", map[string]any{
+					"deviceClassWhitelist": []any{"02", "03", "0200", "0207", "12"},
+					"deviceLabelFields":    []any{"vendor"},
+				})},
+			want: wantNFDNICWarningA,
+		},
+		{
+			name:     "A errors: empty pci source",
+			criteria: nfdNICTestEKS,
+			mutate: []func(map[string]map[string]any){addNetOp,
+				setNFD("worker.config.sources.pci", map[string]any{})},
+			wantErr: wantNFDNICErrorA,
+		},
+		{
+			name:     "A warns: typed []string worker.extraArgs",
+			criteria: nfdNICTestEKS,
+			mutate: []func(map[string]map[string]any){addNetOp,
+				setNFD("worker.extraArgs", []string{`-options={"core":{"noPublishFeatures":[]}}`})},
+			want: wantNFDNICWarningA,
+		},
+		{
+			name:     "A silent: typed []map sources.custom rule",
+			criteria: nfdNICTestEKS,
+			mutate: []func(map[string]map[string]any){addNetOp,
+				setNFD("worker.config.sources.custom", []map[string]any{{
+					"name":   "my-nics",
+					"labels": map[string]string{"pci-15b3.present": "true"},
+				}})},
 		},
 		{
 			name:     "A errors: empty worker.extraArgs",

@@ -15,6 +15,7 @@
 package bundler
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -32,6 +33,7 @@ const (
 	nfdNoPublishFeaturesValuePath = "worker.config.core.noPublishFeatures"
 	nfdCustomSourcesValuePath     = "worker.config.sources.custom"
 	nfdWorkerExtraArgsValuePath   = "worker.extraArgs"
+	nfdPCISourceValuePath         = "worker.config.sources.pci"
 	nfdPCIDeviceFeature           = "pci.device"
 	nfdMellanoxNICLabel           = "feature.node.kubernetes.io/pci-15b3.present"
 	nfdMellanoxNICLabelUnprefixed = "pci-15b3.present"
@@ -49,16 +51,18 @@ const (
 //
 // The check reads only worker.config.core.noPublishFeatures and the static
 // sources.custom labels. worker.extraArgs (nfd-worker -options can replace
-// the config) and labelsTemplate rules are not replayed, so when either is
-// set a missing rule is a warning instead of an error.
+// the config), the built-in pci label source (deviceLabelFields [vendor]
+// emits pci-15b3.present) and labelsTemplate rules are not replayed, so when
+// any is set a missing rule is a warning instead of an error.
 func (b *DefaultBundler) checkNFDNICLabelMismatch(componentValues map[string]map[string]any) error {
 	if b.Config == nil {
 		return nil
 	}
-	nfdValues, ok := componentValues[nfdComponentName]
+	rawNFDValues, ok := componentValues[nfdComponentName]
 	if !ok {
 		return nil
 	}
+	nfdValues, normalized := nfdJSONShapedValues(rawNFDValues)
 	_, networkOperator := componentValues[networkOperatorComponentName]
 	hasRule := nfdLabelsMellanoxNIC(nfdValues)
 
@@ -71,15 +75,15 @@ func (b *DefaultBundler) checkNFDNICLabelMismatch(componentValues map[string]map
 				"restarts nothing labels the NVIDIA NIC nodes, and the pods that select on that label "+
 				"(the NicClusterPolicy operands) leave them. Select components/nfd/values-nvidia-nics.yaml "+
 				"(values-nvidia-nics-aks.yaml on AKS) as the %[2]s valuesFile in the overlay that adds %[1]s, "+
-				"or include its rule in a %[6]s override.",
+				"include its rule in a %[6]s override, or publish %[3]s again by removing it from %[4]s.",
 			networkOperatorComponentName, nfdComponentName, nfdPCIDeviceFeature,
 			nfdNoPublishFeaturesValuePath, nfdMellanoxNICLabel, nfdCustomSourcesValuePath)
-		if !nfdHasUnreplayedLabelInputs(nfdValues) {
+		if normalized && !nfdHasUnreplayedLabelInputs(nfdValues) {
 			return errors.New(errors.ErrCodeInvalidRequest, msg)
 		}
-		warning = msg + fmt.Sprintf(" This is a warning, not an error, because %s sets %s or a "+
+		warning = msg + fmt.Sprintf(" This is a warning, not an error, because %s sets %s, %s or a "+
 			"labelsTemplate rule, which this check does not evaluate.",
-			nfdComponentName, nfdWorkerExtraArgsValuePath)
+			nfdComponentName, nfdWorkerExtraArgsValuePath, nfdPCISourceValuePath)
 	case !networkOperator && hasRule && len(b.Config.Bundlers()) == 0:
 		warning = fmt.Sprintf(
 			"%[1]s labels NVIDIA NIC nodes %[2]s (%[3]s), but %[4]s is not in this bundle. The GPU "+
@@ -140,12 +144,33 @@ func nfdLabelsMellanoxNIC(nfdValues map[string]any) bool {
 	return false
 }
 
+// nfdJSONShapedValues returns nfdValues with every list as []any and every
+// object as map[string]any. Typed SDK overrides (WithValueOverridesTypedPaths)
+// keep the caller's Go types, such as []string, which the type assertions
+// below would otherwise miss. It reports false, and returns the input
+// unchanged, when the values do not round-trip through JSON.
+func nfdJSONShapedValues(nfdValues map[string]any) (map[string]any, bool) {
+	raw, err := json.Marshal(nfdValues)
+	if err != nil {
+		return nfdValues, false
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nfdValues, false
+	}
+	return out, true
+}
+
 // nfdHasUnreplayedLabelInputs reports whether the nfd values set label inputs
-// that nfdLabelsMellanoxNIC cannot evaluate: any worker.extraArgs, or a
-// sources.custom rule with a labelsTemplate.
+// that nfdLabelsMellanoxNIC cannot evaluate: any worker.extraArgs, any
+// sources.pci configuration, or a sources.custom rule with a labelsTemplate.
 func nfdHasUnreplayedLabelInputs(nfdValues map[string]any) bool {
 	args, _ := component.GetValueByPath(nfdValues, nfdWorkerExtraArgsValuePath)
 	if list, _ := args.([]any); len(list) > 0 {
+		return true
+	}
+	pciSource, _ := component.GetValueByPath(nfdValues, nfdPCISourceValuePath)
+	if cfg, _ := pciSource.(map[string]any); len(cfg) > 0 {
 		return true
 	}
 	rules, _ := component.GetValueByPath(nfdValues, nfdCustomSourcesValuePath)
