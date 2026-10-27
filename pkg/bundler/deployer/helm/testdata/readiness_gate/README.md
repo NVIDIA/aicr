@@ -93,30 +93,28 @@ bash install.sh
 > A Helm 4 install and an earlier run of this step both claim fields that
 > way, but any other manager claiming the same field keeps it, and a Helm 3
 > install's claim counts as a separate owner. See
-> [Upgrade, uninstall, and troubleshooting](https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#upgrade-uninstall-and-troubleshooting)
-> for the exceptions. Only
-> components audited as the sole owner of every CRD they ship get this, and
-> only while the ref matches the registry's pinned source, chart, and version.
-> Those folders need `kubectl` and `timeout` (GNU coreutils) on `$PATH` in
-> addition to `helm`; the script refuses to run rather than run unbounded
-> inside a deploy, so on macOS install coreutils or apply the CRDs by hand.
-> Every helm and kubectl call it makes is bounded, 30s by default and
-> overridable with `AICR_CRD_STEP_TIMEOUT`. The bound is per call and
+> [Upgrading components that own CRDs](https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#upgrading-components-that-own-crds)
+> for the exceptions. Only components audited as the sole owner of every CRD
+> they ship get this, and only while the ref matches the registry's pinned
+> source, chart, and version. Those folders need `kubectl` and `timeout` (GNU
+> coreutils) on `$PATH` in addition to `helm`. The script refuses to run rather
+> than run unbounded inside a deploy, so on macOS install coreutils or apply the
+> CRDs by hand. Every helm and kubectl call it makes is bounded, 30s by default
+> and overridable with `AICR_CRD_STEP_TIMEOUT`. The bound is per call and
 > `deploy.sh` retries a failing component, so the budget it consumes is a
 > multiple of that. This step reads the same connection environment as
 > `deploy.sh` (`KUBE_CONTEXT`, `KUBECONFIG`, and the deprecated
 > `KUBECONFIG_FLAG`) and renders `kubectl`'s own spelling of it. Only
-> `--kube-context` and `--kubeconfig` are translated; any other helm connection
+> `--kube-context` and `--kubeconfig` are translated. Any other helm connection
 > flag stops the step rather than apply CRDs to an unintended cluster. The error
 > names the option only, never its argument, so a flag carrying a credential
-> does not reach the log. The step is
-> skipped when `DRY_RUN_FLAG` is set, and when
-> neither the release nor any of the chart's CRDs exist yet, since only then
-> does `helm install` create them. A release that was uninstalled leaves its
-> CRDs behind, so a reinstall still applies them. Only components audited as
-> the sole owner of every CRD they ship get the script; for the rest, applying
-> CRDs under Helm's field manager is unsafe because another component's
-> release ships the same CRD with a different schema.
+> does not reach the log. The step is skipped when `DRY_RUN_FLAG` is set, and
+> when neither the release nor any of the chart's CRDs exist yet, since only
+> then does `helm install` create them. A release that was uninstalled leaves
+> its CRDs behind, so a reinstall still applies them. Only components audited as
+> the sole owner of every CRD they ship get the script. For the rest, applying
+> CRDs under Helm's field manager is unsafe because another component's release
+> ships the same CRD with a different schema.
 
 ## Uninstall
 

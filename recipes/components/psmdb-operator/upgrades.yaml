@@ -71,9 +71,8 @@ transitions:
           - id: apply-new-crds
             description: >-
               Before applying the regenerated bundle, apply the new CRDs using
-              the CRD-apply command under "Upgrade, uninstall, and
-              troubleshooting" in docs/user/component-catalog.md, with
-              CHART=psmdb-operator,
+              the CRD-apply command under "Upgrading components that own CRDs"
+              in docs/user/component-catalog.md, with CHART=psmdb-operator,
               REPO=https://percona.github.io/percona-helm-charts/,
               VERSION=1.23.2 and MANAGER=terraform-provider-helm.
             reason: >-
@@ -99,9 +98,8 @@ transitions:
             description: >-
               Before applying the regenerated bundle, apply the new CRDs to
               every downstream cluster the bundle targets, using the
-              CRD-apply command under "Upgrade, uninstall, and
-              troubleshooting" in docs/user/component-catalog.md, with
-              CHART=psmdb-operator,
+              CRD-apply command under "Upgrading components that own CRDs" in
+              docs/user/component-catalog.md, with CHART=psmdb-operator,
               REPO=https://percona.github.io/percona-helm-charts/,
               VERSION=1.23.2 and MANAGER set to the manager that section's
               managed-fields check reports for the installed CRDs.
@@ -212,9 +210,8 @@ transitions:
           - id: apply-new-crds
             description: >-
               Before applying the regenerated bundle, apply the new CRDs using
-              the CRD-apply command under "Upgrade, uninstall, and
-              troubleshooting" in docs/user/component-catalog.md, with
-              CHART=psmdb-operator,
+              the CRD-apply command under "Upgrading components that own CRDs"
+              in docs/user/component-catalog.md, with CHART=psmdb-operator,
               REPO=https://percona.github.io/percona-helm-charts/,
               VERSION=<new> and MANAGER=terraform-provider-helm.
             reason: >-
@@ -240,9 +237,8 @@ transitions:
             description: >-
               Before applying the regenerated bundle, apply the new CRDs to
               every downstream cluster the bundle targets, using the
-              CRD-apply command under "Upgrade, uninstall, and
-              troubleshooting" in docs/user/component-catalog.md, with
-              CHART=psmdb-operator,
+              CRD-apply command under "Upgrading components that own CRDs" in
+              docs/user/component-catalog.md, with CHART=psmdb-operator,
               REPO=https://percona.github.io/percona-helm-charts/,
               VERSION=<new> and MANAGER set to the manager that section's
               managed-fields check reports for the installed CRDs.

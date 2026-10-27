@@ -1250,7 +1250,7 @@ The chart creates cluster-scoped objects with fixed names: four `LogProfile` res
   - **Fields the chart does not set** are not touched. On v0.8.2 with Helm 4.3.1, a `trainingStep` pattern added to `nccl-bandwidth` survived `helm upgrade --force-conflicts`, while an edit to `bandwidthResult.example` made at the same time was reverted. A pattern name outside the schema is rejected at edit time with `unknown field`.
 - **Reinstall** after an uninstall works through the bundle's `apply-crds.sh`, which detects the remaining CRDs ("no release but CRDs remain") and updates them before the install. The `LogProfile`s and RBAC objects come back identical to their pre-uninstall state.
 
-The ownership, upgrade, second-release, uninstall, and reinstall observations were made on EKS (Kubernetes v1.35) with the Helm deployer and Helm 4.3.0, on chart v0.7.0; the v0.8.2 object counts above come from a fresh v0.8.2 install on EKS. The `helmfile` CRD behavior was checked separately on a Kind cluster (Kubernetes v1.36, helmfile 1.7.2, Helm 3.17.1): upgrading the release from v0.6.0 to v0.7.0 with `helmfile sync` succeeded and left the v0.6.0 CRDs in place, so `certifications.nvcre.nvidia.com` still lacked `startupStallTimeoutSeconds`. Running the [CRD-apply command](#upgrade-uninstall-and-troubleshooting) with `CHART=oci://ghcr.io/nvidia/cluster-readiness-engine`, `VERSION=v0.7.0`, and `MANAGER=helm` added the field, and the controller stayed Running throughout. The `LogProfile` edit tests ran on Kind with the chart installed directly by Helm, not through a generated bundle (v0.6.0 to v0.7.0 on Helm 3 and Helm 4, and v0.8.2 on Helm 4.3.1), and an upgrade across Helm clients (installed with Helm 3, upgraded with Helm 4) was not tried. Not exercised: the `terraform`, `argocd`, `argocd-helm`, `flux`, and `fleet` deployers, and an uninstall while a `Certification` is still running.
+The ownership, upgrade, second-release, uninstall, and reinstall observations were made on EKS (Kubernetes v1.35) with the Helm deployer and Helm 4.3.0, on chart v0.7.0. The v0.8.2 object counts above come from a fresh v0.8.2 install on EKS. The `helmfile` CRD behavior was checked separately on a Kind cluster (Kubernetes v1.36, helmfile 1.7.2, Helm 3.17.1). Upgrading the release from v0.6.0 to v0.7.0 with `helmfile sync` succeeded and left the v0.6.0 CRDs in place, so `certifications.nvcre.nvidia.com` still lacked `startupStallTimeoutSeconds`. Running the [CRD-apply command](#upgrading-components-that-own-crds) with `CHART=oci://ghcr.io/nvidia/cluster-readiness-engine`, `VERSION=v0.7.0`, and `MANAGER=helm` added the field, and the controller stayed Running throughout. The `LogProfile` edit tests ran on Kind with the chart installed directly by Helm, not through a generated bundle (v0.6.0 to v0.7.0 on Helm 3 and Helm 4, and v0.8.2 on Helm 4.3.1), and an upgrade across Helm clients (installed with Helm 3, upgraded with Helm 4) was not tried. Not exercised: the `terraform`, `argocd`, `argocd-helm`, `flux`, and `fleet` deployers, and an uninstall while a `Certification` is still running.
 
 ## NIM Workload Credentials
 
@@ -1665,20 +1665,20 @@ catch a missing `spec.verification` (added in v1.5.0) but not the nested
 works on every version.
 
 `k8s-aibom` is marked `ownsCRDs` in the registry, so most deployers update its
-CRDs for you: Flux through `spec.upgrade.crds: CreateReplace`, `helm` through
-the generated `apply-crds.sh`, and Argo CD by applying them as ordinary
-manifests each sync. `helmfile`, `terraform` and `fleet` have no equivalent automation — see
-[Upgrade, uninstall, and troubleshooting](#upgrade-uninstall-and-troubleshooting)
-for the manual step. Whether a given bump needs that step is answered per
-transition by the upgrade record. A v1.3.0 to v1.5.1 bump on default values
-upgrades cleanly on `helmfile`, `terraform` and `fleet` against the old CRDs,
-but the same bump setting `config.verification` aborts the release with
+CRDs for you. Flux does it through `spec.upgrade.crds: CreateReplace`, `helm`
+through the generated `apply-crds.sh`, and Argo CD by applying them as ordinary
+manifests each sync. `helmfile`, `terraform` and `fleet` have no equivalent
+automation and need [the manual step](#upgrading-components-that-own-crds).
+Whether a given bump needs that step is answered per transition by the upgrade
+record. A v1.3.0 to v1.5.1 bump on default values upgrades cleanly on
+`helmfile`, `terraform` and `fleet` against the old CRDs, but the same bump
+setting `config.verification` aborts the release with
 `.spec.verification: field not declared in schema` after the Deployment has
-already advanced. The v1.5.1 to v1.6.x bump needs the step unconditionally:
-on CRDs still from v1.3.0 the new controller reports `Degraded` (on v1.6.2,
-also on CRDs from v1.5.1), and setting `config.discovery.workloadKinds` needs
-the v1.6 schema. v1.6.1 to v1.6.2 changes no CRD. When in doubt, apply
-the CRDs first; it is never harmful.
+already advanced. The v1.5.1 to v1.6.x bump needs the step unconditionally. On
+CRDs still from v1.3.0 the new controller reports `Degraded` (on v1.6.2, also
+on CRDs from v1.5.1), and setting `config.discovery.workloadKinds` needs the
+v1.6 schema. v1.6.1 to v1.6.2 changes no CRD. When in doubt, apply the CRDs
+first. It is never harmful.
 
 **That automation is tied to the registry-pinned coordinates, not to the
 component.** `ownsCRDs` records an audit of one specific chart, so Flux and
@@ -1699,11 +1699,9 @@ The assertion is still worth making on every deployer, because it proves the
 deployed CRDs match the pinned chart rather than merely that some deployer was
 expected to update them.
 
-Both CRDs are asserted separately, so a failure names which one is stranded
-and a partially applied CRD set cannot pass. If this check fails after a chart
-bump, the CRD command in
-[Upgrade, uninstall, and troubleshooting](#upgrade-uninstall-and-troubleshooting)
-is the thing to run.
+Both CRDs are asserted separately, so a failure names which one is stranded and
+a partially applied CRD set cannot pass. If this check fails after a chart
+bump, run the [CRD-apply command](#upgrading-components-that-own-crds).
 
 The assertion establishes that the storage-version contract matches the pinned
 chart. It is not provenance: it reads one field, so it cannot show the CRDs
@@ -1817,7 +1815,7 @@ uninstall; consequently AIBOM resources for owners that still exist may remain
 after controller removal. External sinks, if an operator configures one, have
 their own retention policy outside AICR.
 
-### Upgrade, uninstall, and troubleshooting
+### k8s-aibom upgrade, uninstall, and troubleshooting
 
 Upgrade the component by qualifying a new chart and image together, then
 regenerate the custom recipe and bundle. Do not change only the controller
@@ -1825,11 +1823,110 @@ image: chart, CRDs, status API, and image are one qualified set. Quiesce
 configuration changes during rollback and confirm that
 `AIBOMControllerConfig/default` returns to a current `Ready=True` state.
 
-**CRDs are applied for you on every deployer except `helmfile`, `terraform` and `fleet`.** The chart
-ships its CRDs under `crds/`. Helm installs that directory on first install and
-never touches it again on upgrade, so a chart bump whose CRDs changed would
-leave the previous schema in place and the API server would silently prune the
-new controller's writes to added fields.
+`k8s-aibom` is marked `ownsCRDs`. On `helmfile`, `terraform` and `fleet`, run
+the [CRD-apply command](#upgrading-components-that-own-crds) before upgrading.
+[Health and readiness](#health-and-readiness) says which transitions need it.
+
+Uninstall in this order. Removing the component from the overlay and applying a
+regenerated bundle does **not** remove the installed release under `helm` or
+`helmfile`. Both install releases by name and leave alone a release the new
+bundle no longer mentions. Under `terraform` and Fleet `gitrepo` mode it does,
+because Terraform holds the release in state and Fleet deletes a Bundle its
+repository no longer produces. Step 2 relies on that. Skipping the explicit
+uninstall leaves the controller reconciling while step 3 deletes the CRs and
+CRDs underneath it.
+
+1. Remove the component reference from the custom overlay and regenerate the
+   recipe and bundle.
+2. Uninstall the release, scoped to this component only:
+
+   ```bash
+   # Works for helm and helmfile bundles. Helmfile installs through Helm, so
+   # this removes exactly one ordinary Helm release.
+   helm uninstall k8s-aibom -n k8s-aibom-system
+   ```
+
+   For Argo CD, delete the owning `Application`. For Flux, delete the
+   `HelmRelease`. Under Terraform, `terraform apply` of the regenerated bundle
+   already removed it.
+
+   For Fleet, do not `helm uninstall` the release. Fleet still declares it and
+   reinstalls it on the next reconcile. Remove it from Fleet instead, and leave
+   the rest of the bundle in place:
+
+   - `--fleet-mode gitrepo`: push the regenerated bundle from step 1 and apply
+     its `gitrepo.yaml`. Fleet deletes the Bundle the repository no longer
+     produces (`<app-name>-k8s-aibom`), and the agent uninstalls its release on
+     every targeted cluster.
+   - `--fleet-mode helmop`: `kubectl apply` never deletes, so apply the
+     regenerated `helmops.yaml` first (it re-points the next component's
+     `dependsOn`), then delete only the removed HelmOp on the management
+     cluster:
+
+     ```bash
+     # FLEET_NAMESPACE and APP_NAME are the bundle's --fleet-namespace and --app-name.
+     kubectl delete helmops.fleet.cattle.io -n "$FLEET_NAMESPACE" "$APP_NAME-k8s-aibom"
+     ```
+
+   Do not delete the `GitRepo` or run `kubectl delete -f helmops.yaml`. Either
+   uninstalls every release in the bundle.
+
+   Confirm the controller Deployment is gone before continuing. For Fleet,
+   check each downstream cluster the bundle targets.
+
+   **Do not use `helmfile destroy` for this.** It tears down *every* release in
+   the bundle, not just this component, and it misses this one, because step 1
+   regenerated the bundle without `k8s-aibom`. To use Helmfile, run
+   `helmfile destroy --selector name=k8s-aibom` against a bundle that still
+   declares the component.
+3. Only then delete retained AIBOMs and, last, the CRDs.
+
+Deleting the CRDs cascades to every AIBOM stored cluster-wide, including ones
+in namespaces or releases you did not mean to touch. Enumerate before deleting
+rather than passing `--all`:
+
+```bash
+# Review what exists and who owns it. Delete only what this release owns.
+kubectl get aiboms.aibom.k8saibom.dev --all-namespaces \
+  -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,OWNER:.metadata.ownerReferences[0].name
+
+NAMESPACE="my-namespace"  # replace with the namespace from the listing above
+NAME="my-aibom"           # replace with the AIBOM to delete
+kubectl -n "${NAMESPACE}" delete aiboms.aibom.k8saibom.dev "${NAME}"
+
+# Delete the CRDs last, once no other release uses them. Deletion removes every
+# stored custom resource of these kinds cluster-wide.
+kubectl delete crd \
+  aiboms.aibom.k8saibom.dev \
+  aibomcontrollerconfigs.aibom.k8saibom.dev
+```
+
+If health validation fails, inspect the Deployment and configuration before
+looking for AIBOMs:
+
+```bash
+kubectl rollout status deployment/k8s-aibom -n k8s-aibom-system
+kubectl get aibomcontrollerconfig default -o yaml
+kubectl logs deployment/k8s-aibom -n k8s-aibom-system
+```
+
+A current `Ready=False` or stale `observedGeneration` means the active
+configuration was not accepted. If the controller is healthy but produces no
+inventory, verify the namespace label and the workload kind. A truncated BOM
+with no sink is expected once its canonical document exceeds the inline
+threshold. Configure retention and credentials explicitly before enabling an
+external sink.
+
+## Upgrading components that own CRDs
+
+This applies to components the registry marks `ownsCRDs`, listed at the end of
+this section.
+
+**CRDs are applied for you on every deployer except `helmfile`, `terraform` and
+`fleet`.** A chart ships its CRDs under `crds/`. Helm installs that directory
+on first install and never touches it again on upgrade, so a chart bump whose
+CRDs changed would leave the previous schema in place and the API server would
+silently prune the new controller's writes to added fields.
 
 Every other deployer closes that on its own, by a different route; see the
 deployer table below. `helm` bundles carry an `apply-crds.sh` in the
@@ -1851,6 +1948,9 @@ them do it for you:
   the bundle's `apply-crds.sh` failed and you are reproducing it by hand.
 - **`flux`, `argocd`, `argocd-helm`: not needed.** Their controllers apply the
   CRDs themselves.
+
+Set `CHART` and `VERSION` to the component's chart and the version you are
+upgrading to. The values shown are k8s-aibom's.
 
 ```bash
 set -euo pipefail
@@ -2021,99 +2121,6 @@ Currently `gatekeeper`, `k8s-aibom`, `nvcre`, `nvsentinel`, and
 `pkg/recipe/ownscrds_audit_test.go`, so bumping a pin without re-auditing fails
 CI. `nvsentinel` excludes the Percona CRDs its `mongodb-store` subchart embeds
 (`ownsCRDsExcludeSubcharts`), since `psmdb-operator` owns them.
-
-Uninstall in this order. Removing the component from the overlay and applying a
-regenerated bundle does **not** remove the previously installed release: the
-`helm` and `helmfile` deployers install releases by name, and a release the new
-bundle no longer mentions is simply left alone. `terraform` and Fleet in
-`gitrepo` mode are the exceptions: Terraform holds the release in state and
-Fleet deletes a Bundle its repository no longer produces, so applying the
-regenerated bundle uninstalls the release, and step 2 relies on that. Skipping the explicit uninstall
-leaves the controller running while the next step deletes the CRs and CRDs
-underneath it, so it reconciles against resources that are disappearing.
-
-1. Remove the component reference from the custom overlay and regenerate the
-   recipe and bundle.
-2. Uninstall the release, scoped to this component only:
-
-   ```bash
-   # helm and helmfile bundles alike: helmfile installs through Helm, so the
-   # release is an ordinary Helm release and this removes exactly one.
-   helm uninstall k8s-aibom -n k8s-aibom-system
-   ```
-
-   For Argo CD, delete the owning `Application`; for Flux, the `HelmRelease`;
-   under Terraform, `terraform apply` of the regenerated bundle already removed it.
-
-   For Fleet, do not `helm uninstall` the release: Fleet still declares it and
-   reinstalls it on the next reconcile. Remove it from Fleet instead, and leave
-   the rest of the bundle in place:
-
-   - `--fleet-mode gitrepo`: push the regenerated bundle from step 1 and apply
-     its `gitrepo.yaml`. Fleet deletes the Bundle the repository no longer
-     produces (`<app-name>-k8s-aibom`), and the agent uninstalls its release on
-     every targeted cluster.
-   - `--fleet-mode helmop`: `kubectl apply` never deletes, so apply the
-     regenerated `helmops.yaml` first (it re-points the next component's
-     `dependsOn`), then delete only the removed HelmOp on the management
-     cluster:
-
-     ```bash
-     # FLEET_NAMESPACE and APP_NAME are the bundle's --fleet-namespace and --app-name.
-     kubectl delete helmops.fleet.cattle.io -n "$FLEET_NAMESPACE" "$APP_NAME-k8s-aibom"
-     ```
-
-   Do not delete the `GitRepo` or run `kubectl delete -f helmops.yaml`; either
-   uninstalls every release in the bundle.
-
-   Confirm the controller Deployment is gone before continuing; for Fleet,
-   check each downstream cluster the bundle targets.
-
-   **Do not use `helmfile destroy` for this.** It tears down *every* release in
-   the bundle in reverse dependency order, not just this component. It is also
-   ineffective here: step 1 regenerated the bundle without `k8s-aibom`, so the
-   release is no longer declared in it and `destroy` would not remove the one
-   release you actually want gone while removing all the ones you do not. If
-   you prefer a Helmfile-native command, run it against a bundle that still
-   declares the component and scope it explicitly with
-   `helmfile destroy --selector name=k8s-aibom`.
-3. Only then delete retained AIBOMs and, last, the CRDs.
-
-Deleting the CRDs cascades to every AIBOM stored cluster-wide, including any
-belonging to a namespace or release you did not intend to touch. Enumerate
-before deleting rather than passing `--all`:
-
-```bash
-# Review what exists and who owns it; delete only what this release should own.
-kubectl get aiboms.aibom.k8saibom.dev --all-namespaces \
-  -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,OWNER:.metadata.ownerReferences[0].name
-
-NAMESPACE="my-namespace"  # replace with the namespace from the listing above
-NAME="my-aibom"           # replace with the AIBOM to delete
-kubectl -n "${NAMESPACE}" delete aiboms.aibom.k8saibom.dev "${NAME}"
-
-# CRDs last, and only once no other release uses them — deletion removes every
-# stored custom resource of these kinds cluster-wide.
-kubectl delete crd \
-  aiboms.aibom.k8saibom.dev \
-  aibomcontrollerconfigs.aibom.k8saibom.dev
-```
-
-If health validation fails, inspect the Deployment and configuration before
-looking for AIBOMs:
-
-```bash
-kubectl rollout status deployment/k8s-aibom -n k8s-aibom-system
-kubectl get aibomcontrollerconfig default -o yaml
-kubectl logs deployment/k8s-aibom -n k8s-aibom-system
-```
-
-A current `Ready=False` or stale `observedGeneration` means the active
-configuration was not accepted. If the controller is healthy but produces no
-inventory, verify the namespace label and the workload kind. A truncated BOM
-with no sink is expected once its canonical document exceeds the inline
-threshold; configure retention and credentials explicitly before enabling an
-external sink.
 
 ## Adding Components
 
