@@ -116,6 +116,11 @@ jobs:
           # The event exporter (#2621), which reads the datastore a step adds.
           - mixin: nvsentinel-observe,nvsentinel-event-exporter
             deployer: helm
+          # The log collector's file server runs on emptyDir under KWOK
+          # (kwok/scripts/validate-scheduling.sh); EKS's GPU Operator installs
+          # the driver, so CheckNVSentinelLogCollectorCoherent accepts it.
+          - mixin: 'nvsentinel-remediation,nvsentinel-health-events-analyzer,nvsentinel-log-collector'
+            deployer: helm
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1

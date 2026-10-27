@@ -17,3 +17,4 @@ self-hosted-runner:
     - linux-amd64-gpu-h100-latest-1
     - linux-amd64-gpu-h100-latest-2
     - linux-amd64-gpu-l40g-latest-1
+    - linux-amd64-cpu16
