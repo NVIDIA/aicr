@@ -82,6 +82,11 @@ func TestCheckNKTPExportersHaveBackend(t *testing.T) {
 				return v
 			}()),
 			want: nktpLGTMEndpoints[4:]},
+		{name: "disabled, endpoints blank from an empty --set", recipe: recipeOf(nil), cfg: sets(map[string]string{
+			nktpLGTMEnabledPath:  "false",
+			nktpLGTMEndpoints[0]: backend, nktpLGTMEndpoints[1]: backend, nktpLGTMEndpoints[2]: backend,
+			nktpLGTMEndpoints[3]: "", nktpLGTMEndpoints[4]: "  ",
+		}), want: watchdog},
 		{name: "disabled, an exporter section null",
 			recipe: recipeOf(func() map[string]any {
 				v := allSet()

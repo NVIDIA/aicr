@@ -45,7 +45,7 @@ var nktpLGTMEndpoints = []string{
 // healthy while every exporter retries into a missing Service and drops what
 // it receives.
 //
-// A null endpoint counts as unset. An endpoint covered by a --dynamic path
+// A null or blank endpoint counts as unset. An endpoint covered by a --dynamic path
 // counts as set, since the operator supplies it at install time. A --dynamic
 // otel-lgtm toggle counts as disabled, since it can be flipped then.
 func CheckNKTPExportersHaveBackend(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
@@ -76,7 +76,8 @@ func CheckNKTPExportersHaveBackend(ctx context.Context, componentName string, re
 		if len(dynamicPathIntersections(bundlerConfig, keys, []string{path})) > 0 {
 			continue
 		}
-		if v, ok := component.GetValueByPath(values, path); !ok || v == nil {
+		v, ok := component.GetValueByPath(values, path)
+		if s, isString := v.(string); !ok || v == nil || (isString && strings.TrimSpace(s) == "") {
 			unset = append(unset, path)
 		}
 	}
