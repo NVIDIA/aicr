@@ -45,6 +45,10 @@
 #     file:              Path to a ComponentUpgrades YAML file, relative to
 #                        the data directory (e.g.,
 #                        "components/nodewright-operator/upgrades.yaml")
+#   telemetry:         Runtime metrics contract (ADR-026)
+#     promql:            monitorsFrom (components exposing the data) and series
+#                        (RE2 patterns) a component queries from Prometheus
+#     promqlServer:      Value paths the bundler fills on the Prometheus server
 #
 # Note: A component must have either 'helm' OR 'kustomize' configuration, not both.
 # Node scheduling paths define WHERE CLI flags like --system-node-selector are applied.
