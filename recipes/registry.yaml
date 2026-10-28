@@ -565,8 +565,8 @@ components:
     # nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor (#2611),
     # nvsentinel-observe, -quarantine and -remediation,
     # nvsentinel-slinky-drainer (#2615), nvsentinel-health-events-analyzer
-    # (#2618), nvsentinel-event-exporter (#2621) and nvsentinel-log-collector
-    # (#2619) mixins: the exact leaf
+    # (#2618), nvsentinel-event-exporter (#2621), nvsentinel-log-collector
+    # (#2619) and nvsentinel-node-validation (#3088) mixins: the exact leaf
     # paths a mixin may set on this
     # already-base-chained component. global.tracing.endpoint is
     # deliberately absent -- it must come from outside the mixin (a leaf
@@ -703,6 +703,13 @@ components:
       - incluster-file-server.logCleanup.enabled
       - incluster-file-server.logCleanup.retentionDays
       - incluster-file-server.logCleanup.sleepInterval
+      - global.lifecycleManager.enabled
+      - lifecycle-manager.controllers.validationRequest.enabled
+      - lifecycle-manager.controllers.maintenanceRequest.enabled
+      - lifecycle-manager.config.schedulingGate.cordon.remove
+      - lifecycle-manager.config.schedulingGate.cordon.labelPrefix
+      - lifecycle-manager.config.newNodeValidation.criteria
+      - lifecycle-manager.config.newNodeValidation.newNodeTests
     # The in-cluster file server's ReadWriteOnce volume, which the
     # nvsentinel-log-collector mixin turns on (#2619).
     storageClassPaths:
@@ -817,6 +824,11 @@ components:
       # in the function's doc.
       - function: CheckNVSentinelDrainScopeCoherent
         severity: error
+      # Blocking, with non-blocking notes (dryRun, cert-manager): new-node
+      # validation (#3088) that cannot run would hold a node cordoned or test
+      # one already taking work. The rules are in the function's doc.
+      - function: CheckNVSentinelNodeValidationCoherent
+        severity: warning
 
   # NVSentinel's remediation datastore, added only by the nvsentinel-observe,
   # -quarantine and -remediation mixins. Bundled apart from NVSentinel's own

@@ -1,0 +1,144 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Runtime Kind test for the nvsentinel-node-validation mixin (#3088).
+#
+# Checks the bundle gate's refusals and its dryRun note, then installs
+# nvsentinel with the mixin via the bundle's own install.sh, with busybox
+# stubs in place of the DCGM diagnostic, and asserts that a cordoned new GPU
+# node is held cordoned until its ValidationRequest passes, that a failed one
+# keeps the node cordoned, and that deleting it releases the node. Not wired
+# into `make qualify`: it needs a Kind cluster.
+#
+# Path filter kept narrow for the same reason as nvsentinel-preflight-e2e.yaml.
+
+name: NVSentinel Node Validation E2E
+
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - 'recipes/mixins/nvsentinel-node-validation.yaml'
+      # The dryRun case bundles nvsentinel-observe, which adds the Percona
+      # datastore components, beside the mixin.
+      - 'recipes/mixins/nvsentinel-observe.yaml'
+      - 'recipes/components/nvsentinel-mongodb/**'
+      - 'recipes/components/psmdb-operator/**'
+      - 'recipes/registry.yaml'
+      - 'recipes/components/nvsentinel/**'
+      # The tested overlay inherits kind.yaml, which inherits base.yaml, and
+      # base.yaml is where nvsentinel enters the chain at all.
+      - 'recipes/overlays/h100-kind-training.yaml'
+      - 'recipes/overlays/kind.yaml'
+      - 'recipes/overlays/base.yaml'
+      # The run installs cert-manager, for lifecycle-manager's webhook
+      # certificate, and prometheus-operator-crds from the bundle.
+      - 'recipes/components/cert-manager/**'
+      - 'recipes/components/prometheus-operator-crds/**'
+      - 'pkg/bundler/validations/nvsentinel_node_validation.go'
+      - 'pkg/bundler/validations/checks.go'
+      - 'tests/e2e/nvsentinel-node-validation/**'
+      - 'pkg/bundler/deployer/localformat/templates/**'
+      # run.sh sources tools/common and is invoked through a make target.
+      - 'tools/common'
+      - 'Makefile'
+      - '.github/workflows/nvsentinel-node-validation-e2e.yaml'
+      - '.github/actions/setup-build-tools/**'
+      - '.github/actions/prep-kind-runner/**'
+      - '.github/actions/load-versions/**'
+      - '.settings.yaml'
+  pull_request:
+    branches: [main]
+    paths: *paths
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: NVSentinel Node Validation E2E
+    runs-on: ubuntu-22.04
+    # The script's bounded waits sum to ~43 minutes worst case (node Ready 2,
+    # cert-manager 10, nvsentinel rollout 10, new-node validation 10, failed
+    # validation and release 11), before kind create, go build, four bundles
+    # and the installs. A healthy run takes a fraction of that.
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Prep Kind runner
+        uses: ./.github/actions/prep-kind-runner
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      # run.sh's has_tools gate also needs jq, which the runner image already
+      # ships; installing only some of the rest fails the lane before it
+      # exercises anything.
+      - name: Install Kind, kubectl, Helm and yq
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_kind: 'true'
+          kind_version: '${{ steps.versions.outputs.kind }}'
+          install_kubectl: 'true'
+          kubectl_version: '${{ steps.versions.outputs.kubectl }}'
+          install_helm: 'true'
+          helm_version: '${{ steps.versions.outputs.helm }}'
+          install_yq: 'true'
+          yq_version: '${{ steps.versions.outputs.yq }}'
+
+      # KEEP_CLUSTER so the cluster survives for the diagnostics below; the
+      # script's own EXIT trap would otherwise delete it before they run.
+      - name: Run nvsentinel-node-validation e2e
+        env:
+          KEEP_CLUSTER: 'true'
+        run: make nvsentinel-node-validation-e2e
+
+      # run.sh writes its kubeconfig inside a mktemp dir and removes that dir on
+      # exit, so re-export before querying anything. cancelled() because a job
+      # timeout cancels rather than fails.
+      - name: Collect diagnostics on failure
+        if: ${{ failure() || cancelled() }}
+        run: |
+          set +e
+          cluster=aicr-3088-kind
+          export KUBECONFIG="${RUNNER_TEMP}/node-validation-diag.kubeconfig"
+          kind export kubeconfig --name "$cluster" --kubeconfig "$KUBECONFIG" || exit 0
+          kubectl get pods -A
+          kubectl get node -o yaml
+          kubectl get validationrequests.nvsentinel.nvidia.com -o yaml
+          kubectl -n nvsentinel get events --sort-by=.lastTimestamp
+          kubectl -n nvsentinel get jobs,deployment,certificate
+          kubectl -n nvsentinel get configmap lifecycle-manager -o yaml
+          kubectl -n nvsentinel describe pods -l app.kubernetes.io/name=lifecycle-manager
+          kubectl -n nvsentinel logs deployment/lifecycle-manager --tail=300
+
+      - name: Delete Kind cluster
+        if: ${{ always() }}
+        run: kind delete cluster --name aicr-3088-kind || true

@@ -19,8 +19,8 @@
 # carries nvsentinel-health-events-analyzer, which
 # CheckNVSentinelRemediationPipelineCoherent requires beside live remediation.
 # It also composes quarantine with nvsentinel-slinky-drainer onto the EKS Slurm
-# leaf, which adds the plugin and switches node-drainer to customDrain, and
-# the event exporter onto the observe step.
+# leaf, which adds the plugin and switches node-drainer to customDrain, the
+# event exporter onto the observe step, and node validation on its own.
 
 name: KWOK NVSentinel Remediation
 
@@ -120,6 +120,9 @@ jobs:
           # (kwok/scripts/validate-scheduling.sh); EKS's GPU Operator installs
           # the driver, so CheckNVSentinelLogCollectorCoherent accepts it.
           - mixin: 'nvsentinel-remediation,nvsentinel-health-events-analyzer,nvsentinel-log-collector'
+            deployer: helm
+          # New-node validation (#3088), which needs no datastore.
+          - mixin: nvsentinel-node-validation
             deployer: helm
     steps:
       - name: Checkout Code

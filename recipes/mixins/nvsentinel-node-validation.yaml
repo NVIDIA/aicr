@@ -1,0 +1,62 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Turns on NVSentinel's lifecycle-manager, which runs a DCGM diagnostic on a
+# new, cordoned GPU node before it takes work. A node that passes is
+# uncordoned; one that fails stays cordoned. Needs no datastore. See
+# docs/user/component-catalog.md#node-validation.
+#
+# The controller never cordons a node itself, so a new node is validated only
+# if something cordons it within 20 minutes of its creation, behind a scheduling
+# barrier from registration; the cordoned criterion is pinned so a
+# schedulable node is never selected.
+# CheckNVSentinelNodeValidationCoherent holds the rules.
+
+kind: RecipeMixin
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: nvsentinel-node-validation
+spec:
+  componentRefs:
+    - name: nvsentinel
+      overrides:
+        global:
+          lifecycleManager:
+            enabled: true
+        lifecycle-manager:
+          controllers:
+            validationRequest:
+              enabled: true
+            maintenanceRequest:
+              enabled: false
+          config:
+            schedulingGate:
+              cordon:
+                remove: true
+                labelPrefix: "k8saas.nvidia.com/"
+            newNodeValidation:
+              criteria:
+                - name: recently-joined
+                  expression: >-
+                    has(node.metadata.creationTimestamp) &&
+                    now() - timestamp(node.metadata.creationTimestamp) < duration("30m")
+                - name: gpu-present
+                  expression: >-
+                    has(node.metadata.labels) && "nvidia.com/gpu.present" in node.metadata.labels &&
+                    node.metadata.labels["nvidia.com/gpu.present"] == "true"
+                - name: cordoned
+                  expression: >-
+                    has(node.spec.unschedulable) && node.spec.unschedulable
+              newNodeTests:
+                - dcgm-diag-test

@@ -426,7 +426,7 @@ AICR ships NVSentinel in the upstream chart's **monitoring-only** configuration:
 
 Also off: `healthEventsAnalyzer`, `lifecycleManager`, `cspHealthMonitor`, `kubernetesObjectMonitor`, `nvcreCertificationMonitor`, `nicHealthMonitor`, `slurmDrainMonitor`, `preflight`, `eventExporter`, `inclusterFileServer`, `k8sdatastoreCrds`. Verified against chart `v1.28.0`, the version pinned in `recipes/registry.yaml`.
 
-Two entries above are turned back on by AICR's shipped recipes: `nicHealthMonitor` on AKS and OKE (see [NIC and fabric fault detection](#nic-and-fabric-fault-detection)), and `slurmDrainMonitor` on every `platform: slurm` recipe (see [Slurm Drain Monitor](#slurm-drain-monitor)). The remediation components are turned on only by the opt-in [remediation steps](#graded-remediation), which bring their own datastore rather than `mongodbStore`, `healthEventsAnalyzer` only by the opt-in [analyzer mixin](#health-events-analyzer), `eventExporter` only by the opt-in [event exporter mixin](#health-event-export), and `inclusterFileServer` only by the opt-in [log collector mixin](#diagnostics-capture).
+Two entries above are turned back on by AICR's shipped recipes: `nicHealthMonitor` on AKS and OKE (see [NIC and fabric fault detection](#nic-and-fabric-fault-detection)), and `slurmDrainMonitor` on every `platform: slurm` recipe (see [Slurm Drain Monitor](#slurm-drain-monitor)). The remediation components are turned on only by the opt-in [remediation steps](#graded-remediation), which bring their own datastore rather than `mongodbStore`, `healthEventsAnalyzer` only by the opt-in [analyzer mixin](#health-events-analyzer), `eventExporter` only by the opt-in [event exporter mixin](#health-event-export), `inclusterFileServer` only by the opt-in [log collector mixin](#diagnostics-capture), and `lifecycleManager` only by the opt-in [node validation mixin](#node-validation).
 
 **The practical effect.** A stock AICR bundle surfaces GPU faults; it does not act on them. A node that needs a reboot is reported, not rebooted, and an operator intervenes. That is deliberate: `janitor` can reboot or terminate nodes, and enabling it without the operator having chosen to is not a safe default.
 
@@ -1132,6 +1132,73 @@ curl -sO http://localhost:8081/upload/gpu-node-1/20261015-101500/nvidia-bug-repo
 **Bundle-time gates.** `CheckNVSentinelLogCollectorCoherent` blocks a bundle with only one of the two settings on; with the collector on but `fault-remediation` off, in dry run, or with a `dryRun` that is not a boolean; unless `incluster-file-server.fullnameOverride` is the mixin's `nvsentinel-incluster-file-server` (unset, the Service name follows the Helm release name, which Flux sets to `<namespace>-<name>`; renamed, the health check, which asserts the rollout by that name, would pass a failed one), or with an `uploadURL` that is not that Service; and on a platform where the collector cannot reach the driver, as above. An `env.UPLOAD_URL_BASE` or `env.GPU_OPERATOR_NAMESPACE` entry under `logCollector` replaces `uploadURL` or `gpuOperatorNamespaces` in the collector's Job, so the gate checks the entry instead; an empty namespace entry means `gpu-operator`, the collector's own fallback. It also rejects `--dynamic` on any path it verifies. The collector's `MOCK_MODE` (exactly `true`), which uploads a synthetic report without a driver, skips the platform rule; AICR's Kind e2e uses it.
 
 **Health check.** The `nvsentinel` health check fails when the `nvsentinel-incluster-file-server` Deployment renders without a complete rollout, and passes where it is absent. It does not prove a collection succeeds; the Kind e2e (`tests/e2e/nvsentinel-log-collector/`) drives one fault through live remediation and checks the uploaded report and that the repair was requested after it. A collection Job that fails leaves its Failed pods in the `nvsentinel` namespace for an hour (`ttlSecondsAfterFinished: 3600`, up to seven pods at the default retry limit), and the health check's failed-pod rule reports them until then.
+
+### Node Validation
+
+NVSentinel's lifecycle-manager runs a DCGM level-2 diagnostic on a new GPU node and keeps the node cordoned until it passes. The `nvsentinel-node-validation` mixin turns it on. It needs no datastore, so it composes alone or beside any [remediation step](#graded-remediation), and no shipped recipe composes it.
+
+```yaml
+# your-leaf-overlay.yaml
+spec:
+  mixins:
+    - nvsentinel-node-validation
+```
+
+**Which nodes are validated.** lifecycle-manager never cordons a node itself. It picks up a node labeled `nvidia.com/gpu.present=true` that is cordoned and was created less than 30 minutes ago. It collects every node that becomes eligible within a 600-second window into one ValidationRequest, and checks all three criteria again when it creates the request, which can be minutes after the window closes. So cordon a new GPU node as soon as it registers, and within 20 minutes of its creation; a node that is 30 minutes old by then is never validated and stays cordoned until you uncordon it. The cordoned criterion keeps the scheduler from placing new pods on the node while it is tested, but pods already on it keep running, which is why the node needs the barrier below. The mixin pins that criterion, and the gate rejects criteria without one named `cordoned` with the chart's expression. Each node is tried once: lifecycle-manager sets the node condition `NewNodeValidationRequested` and never clears it.
+
+**A new GPU node needs a scheduling barrier from the moment it registers, which is the operator's to set up.** lifecycle-manager validates only a cordoned node, and the diagnostic must not run beside workloads, so the node must take no pods until it is cordoned. EKS, Karpenter, GKE, AKS and OKE node pools can register a node with a taint but not cordoned, and the kubelet's own `--register-schedulable=false` was deprecated in Kubernetes 1.6 and [removed in 1.34](https://github.com/kubernetes/kubernetes/pull/122384).
+
+| Cluster | Barrier at registration | Then |
+|---|---|---|
+| Kubernetes 1.33 or earlier, where you set kubelet flags (kubeadm, EKS AL2023 `nodeadm` `spec.kubelet.flags`, OKE `--kubelet-extra-args`) | `--register-schedulable=false` (deprecated) registers the node cordoned | nothing |
+| Any other | A `NoSchedule` taint applied at registration: an EKS managed node group taint, Karpenter `startupTaints` (a regular NodePool taint [is restored after removal](https://docs.aws.amazon.com/eks/latest/userguide/node-taints-managed-node-groups.html)), a GKE node pool taint (whether GKE restores one removed through the Kubernetes API is not documented), AKS node initialization taints (`--node-taints` [cannot be removed through the Kubernetes API](https://learn.microsoft.com/en-us/azure/aks/use-node-taints)), or kubelet `registerWithTaints` | Your automation cordons the node, then removes the taint, within 20 minutes of its creation |
+
+Use a taint key your workloads do not tolerate, with effect `NoSchedule`, not `NoExecute`, and cordon before removing it, so no pod lands in between. A default AICR bundle tolerates every taint on the GPU Operator's and NFD's DaemonSets (`--accelerated-node-toleration` unset), and on its system components unless `--system-node-selector` keeps them off GPU nodes, so the GPU stack comes up and labels the node `nvidia.com/gpu.present=true` behind the barrier. If you restrict `--accelerated-node-toleration`, include the barrier taint: otherwise that label, and with it the node's eligibility, waits until the taint is removed, which leaves less of the 30-minute window. Without a barrier, pods can land on the node before it is cordoned and the diagnostic runs beside them; without a cordon, the mixin deploys and validates nothing. AICR ships no cordon automation and no taint-based gate.
+
+**The diagnostic.** Each test is a Job in NVSentinel's namespace, pinned to the node with `nodeName`, running `nvcr.io/nvidia/cloud-native/dcgm:4.7.0-ubuntu24.04`. It runs `dcgmi diag --run 2` against the GPU Operator's DCGM hostengine at `nvidia-dcgm-dra.gpu-operator.svc:5555` or `nvidia-dcgm.gpu-operator.svc:5555`. That Service routes only to the hostengine on the same node (`internalTrafficPolicy: Local`), so the test diagnoses the node it runs on. The client is DCGM 4.7.0 and AICR's hostengine is 4.6.1; the same major version, but the pairing has not been run on a GPU. A test that fails is retried up to five more times, each attempt limited to 30 minutes: three hours of testing for a node that keeps failing, plus any wait for its turn or for its GPUs. Up to three tests run at a time within one ValidationRequest; separate requests, one per batch and any you create, run concurrently, one per node. lifecycle-manager deletes each test's Job when the attempt ends, so the `dcgmi` output survives only in your log pipeline; the ValidationRequest keeps the failure reason.
+
+**`global.dryRun` does not apply.** lifecycle-manager does not read it. Composed with `nvsentinel-observe`, the diagnostics are real and a node that passes is uncordoned; the bundle prints a warning.
+
+**Prerequisites.**
+
+- **The GPU Operator's DCGM hostengine** in the `gpu-operator` namespace (`dcgm.enabled: true`, which AICR's values set). The test names that namespace, so it fails where the GPU Operator is relocated (`os-talos`) or runs without the standalone hostengine (the Kind overlay). The gate rejects both, unless `lifecycle-manager.config.tests.dcgm-diag-test.command` is overridden.
+- **GPUs the node advertises.** A request waits, with no time limit, until the node advertises `nvidia.com/gpu` (or a `gpu.nvidia.com` ResourceSlice) and is not quarantined; until then the node stays cordoned, labeled `nvsentinel.nvidia.com/validation-state=validation-pending`.
+- **cert-manager** for the admission webhook's certificate, which every recipe deploys. Unless `lifecycle-manager.webhook.certProvider` is `openshift-service-ca`, the chart renders a cert-manager Issuer and Certificate, so if the bundle disables cert-manager the cluster must already run one: without its CRDs the `nvsentinel` install fails, and without its controller lifecycle-manager never starts and every ValidationRequest is rejected. The bundle warns.
+
+**Bundle-time gates.** `CheckNVSentinelNodeValidationCoherent` blocks a bundle that lifecycle-manager would reject at startup: one whose `newNodeValidation` is neither a map, null nor false; whose `controllers.validationRequest.enabled` is not a boolean; whose `newNodeTests` or `defaultTests` name a test that is neither `dcgm-diag-test` nor defined under `lifecycle-manager.config.tests`, or name one twice, or are both empty (a null list counts as empty, since Helm then drops the chart's); whose `lifecycle-manager.config.tests`, or a test in it, is not a map, or leaves no test once null entries are dropped; or that defines a test whose `command`, when set, is not a non-empty list of strings, whose `image` is not a string, or whose `provider` is missing (on a test you add), null, or not one `lifecycle-manager.config.providers` defines. It also blocks new-node criteria that lack one named `cordoned` with the chart's expression; `dcgm-diag-test` run with the chart's command and no enabled GPU Operator in `gpu-operator` running `dcgm.enabled: true`; and a Deployment renamed with `lifecycle-manager.fullNameOverride`, which the health check asserts by name. It warns, without blocking, when `global.dryRun` is true, and when the bundle deploys no cert-manager and `webhook.certProvider` is not `openshift-service-ca`. It rejects `--dynamic` on `global.lifecycleManager`, on any `lifecycle-manager` value while it is on, and on the GPU Operator's `enabled` and `dcgm.enabled` while the DCGM rule applies.
+
+**Failure behavior and recovery.**
+
+- A node that fails stays cordoned, labeled `nvsentinel.nvidia.com/validation-state=validation-failed`, and is not sent back to remediation. Watch for that label and for `validation-pending`.
+- One node failing fails its whole request: tests not yet started never run, and every node in it stays cordoned and labeled `validation-failed`.
+- To retest nodes, create a ValidationRequest that names them and the same tests. When it passes, they are uncordoned:
+
+  ```yaml
+  apiVersion: nvsentinel.nvidia.com/v1alpha1
+  kind: ValidationRequest
+  metadata:
+    name: retest-<node>
+  spec:
+    nodes:
+      - name: <node>
+    tests:
+      - dcgm-diag-test
+  ```
+
+- To return nodes to service **without** a passing test, delete every failed request that names them; lifecycle-manager then uncordons the nodes those requests name, the failed one included. List requests with the nodes they name: `kubectl get validationrequests -o 'custom-columns=NAME:.metadata.name,PHASE:.status.phase,NODES:.spec.nodes[*].name'`.
+- lifecycle-manager uncordons a node once no request remains on it, whether it passed or was deleted, whoever cordoned it, and labels it `k8saas.nvidia.com/uncordon-reason=ValidationSucceeded` either way, so the label does not prove the node passed.
+- If lifecycle-manager is down, its webhook rejects every request (`failurePolicy: Fail`), and a deleted request stays `Terminating` on its finalizer. `kubectl uncordon <node>` returns a node to service; lifecycle-manager does not cordon it again, but the node keeps its `validation-failed` label until its failed requests are deleted.
+- Delete a node's pending requests before you uncordon it. The cordoned criterion only selects the node: lifecycle-manager does not check it again, so a pending request runs its diagnostic beside the workloads that land once the node is schedulable.
+
+**Resources and privileges.** One `lifecycle-manager` replica on a system node, with no resource requests or limits set. Its ClusterRole, bound cluster-wide, updates and patches Nodes and their status (cordon, labels, annotations and the condition above), manages ValidationRequests and their status, creates and deletes Jobs in any namespace, reads ResourceSlices, and manages Leases for leader election. The test Jobs run with the namespace's default ServiceAccount and no extra privileges, and reach DCGM over the network. The ValidationRequest and MaintenanceRequest CRDs, and the validating and mutating webhooks, are installed with it; the mixin keeps the MaintenanceRequest controller off, so its webhook rejects every MaintenanceRequest.
+
+**Retained data.** lifecycle-manager does not delete finished ValidationRequests; delete `Succeeded` ones by hand, since deleting a `Failed` one uncordons its nodes. Each validated node keeps the `NewNodeValidationRequested` condition, which stops it being validated again, and the `uncordon-*` labels.
+
+**What is qualified.** The render tests pin both images, the cordoned criterion and the diagnostic's DCGM address against the chart. A KWOK lane bundles and deploys the mixin. The Kind e2e (`tests/e2e/nvsentinel-node-validation/`) runs the new-node path with a stub test in place of the diagnostic, and the failure path with a ValidationRequest it creates itself. No CI job runs the DCGM diagnostic on a GPU, so treat the diagnostic itself as unqualified.
+
+**Deployment validation.** The registry's `nvsentinel` check asserts that the `lifecycle-manager` Deployment is fully rolled out wherever it renders, and passes where it does not. The same check fails on any pending pod in NVSentinel's namespace, so `aicr validate` can fail while a test Job pulls its image.
+
+**Stopping validation.** First stop your cordon automation. Then, while lifecycle-manager still runs, delete the remaining ValidationRequests, which releases their nodes. Then regenerate the bundle without the mixin and redeploy. Helm leaves the CRDs in place, so a request left behind keeps its finalizer with nothing to remove it, and its nodes stay cordoned until you uncordon them.
 
 ## NVSentinel on Provider-Installed-Driver Platforms
 
