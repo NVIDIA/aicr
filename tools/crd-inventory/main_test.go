@@ -25,6 +25,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -307,17 +308,34 @@ func TestReadImageCRDs(t *testing.T) {
 	}
 }
 
+// fakeRenderer returns the YAML under "<name>@<version>", else under the
+// release name.
 type fakeRenderer map[string]string
 
 func (f fakeRenderer) Render(_ context.Context, in helm.ChartInput) ([]byte, error) {
 	if !in.IncludeCRDs {
 		return nil, os.ErrInvalid
 	}
+	if out, ok := f[in.Name+"@"+in.Version]; ok {
+		return []byte(out), nil
+	}
 	return []byte(f[in.Name]), nil
+}
+
+const exampleRepo = "https://charts.example.com"
+
+func helmRef(name, version, asserts string) recipe.ComponentRef {
+	return recipe.ComponentRef{Name: name, Type: recipe.ComponentTypeHelm, Source: exampleRepo, Version: version,
+		HealthCheckAsserts: asserts}
+}
+
+func leafOf(name string, refs ...recipe.ComponentRef) recipe.ResolvedLeaf {
+	return recipe.ResolvedLeaf{Entry: recipe.CatalogEntry{Name: name}, Result: &recipe.RecipeResult{ComponentRefs: refs}}
 }
 
 func TestRun(t *testing.T) {
 	root := t.TempDir()
+	chartCheck := healthCheck(assertOp(crdKind, "a.x.io"), assertOp(crdKind, "vendored.x.io"))
 	dp := newMapProvider(t, map[string]string{
 		"registry.yaml": registryHeader + `components:
   - name: chart
@@ -332,12 +350,20 @@ func TestRun(t *testing.T) {
   - name: manifest-only
     healthCheck: {assertFile: checks/manifest-only/health-check.yaml}
 `,
-		"checks/chart/health-check.yaml":           healthCheck(assertOp(crdKind, "a.x.io"), assertOp(crdKind, "vendored.x.io")),
+		"checks/chart/health-check.yaml":           chartCheck,
 		"components/chart/manifests/a.yaml":        crdDoc("vendored.x.io"),
 		"checks/no-asserts/health-check.yaml":      healthCheck(assertOp("Pod", "p")),
 		"checks/dynamo-platform/health-check.yaml": healthCheck(assertOp(crdKind, "img.x.io")),
 		"checks/manifest-only/health-check.yaml":   healthCheck(assertOp(crdKind, "a.x.io")),
 	})
+	disabled := helmRef("chart", "9.9.9", chartCheck)
+	disabled.Overrides = map[string]any{"enabled": false}
+	leaves := []recipe.ResolvedLeaf{
+		leafOf("pinned", helmRef("chart", "1.1.0", chartCheck),
+			helmRef("inline", "3.0.0", healthCheck(assertOp(crdKind, "i.x.io"))),
+			helmRef("no-asserts", "1.1.0", healthCheck(assertOp("Pod", "p")))),
+		leafOf("disabled", disabled),
+	}
 	readInv := func(name string) inventory {
 		t.Helper()
 		inv, err := serializer.FromFile[inventory](inventoryPath(root, name))
@@ -348,7 +374,9 @@ func TestRun(t *testing.T) {
 	}
 
 	renderer := fakeRenderer{
-		"chart": crdDoc("a.x.io") + "---\n" + crdDoc("b.x.io"),
+		"chart":       crdDoc("a.x.io") + "---\n" + crdDoc("b.x.io"),
+		"chart@1.1.0": crdDoc("a.x.io") + "---\n" + crdDoc("c.x.io"),
+		"inline":      crdDoc("i.x.io"),
 		"dynamo-platform": "kind: Deployment\nspec:\n  template:\n    spec:\n      initContainers:\n" +
 			"        - name: crd-apply\n          image: op:2.0.0\n",
 	}
@@ -358,38 +386,60 @@ func TestRun(t *testing.T) {
 		}
 		return []string{"img.x.io"}, nil
 	}
+	orphan := inventoryPath(root, "no-asserts")
+	writeFile(t, orphan, "component: no-asserts\n")
 
-	if err := run(t.Context(), root, dp, renderer, readImage, true); err == nil {
-		t.Fatal("run(check) with no committed inventories succeeded, want stale error")
+	err := run(t.Context(), root, dp, leaves, renderer, readImage, true)
+	if err == nil || !strings.Contains(err.Error(), "belongs to no CRD assertion") {
+		t.Fatalf("run(check) with no committed inventories and an orphan error = %v, want stale and orphan", err)
 	}
-	if err := run(t.Context(), root, dp, renderer, readImage, false); err != nil {
+	if err = run(t.Context(), root, dp, leaves, renderer, readImage, false); err != nil {
 		t.Fatalf("run() error = %v", err)
 	}
-	if got, want := readInv("chart"), (inventory{Component: "chart", Chart: "chart", SourceVersion: "1.0.0",
-		CRDs: []string{"a.x.io", "b.x.io"}}); !equalInventory(got, want) {
-		t.Errorf("chart inventory = %+v, want %+v", got, want)
+	wantChart := inventory{Component: "chart", Charts: []chartCRDs{
+		{Repository: exampleRepo, Chart: "chart", SourceVersion: "1.0.0", CRDs: []string{"a.x.io", "b.x.io"}},
+		{Repository: exampleRepo, Chart: "chart", SourceVersion: "1.1.0", CRDs: []string{"a.x.io", "c.x.io"}},
+	}}
+	if got := readInv("chart"); !reflect.DeepEqual(got, wantChart) {
+		t.Errorf("chart inventory = %+v, want %+v", got, wantChart)
 	}
-	if got, want := readInv("dynamo-platform"), (inventory{Component: "dynamo-platform", Chart: "dynamo-platform",
-		SourceVersion: "2.0.0", Image: "op:2.0.0", CRDs: []string{"img.x.io"}}); !equalInventory(got, want) {
-		t.Errorf("image inventory = %+v, want %+v", got, want)
+	wantInline := inventory{Component: "inline", Charts: []chartCRDs{
+		{Repository: exampleRepo, Chart: "inline", SourceVersion: "3.0.0", CRDs: []string{"i.x.io"}},
+	}}
+	if got := readInv("inline"); !reflect.DeepEqual(got, wantInline) {
+		t.Errorf("inline inventory = %+v, want %+v", got, wantInline)
+	}
+	wantImage := inventory{Component: "dynamo-platform", Charts: []chartCRDs{
+		{Repository: exampleRepo, Chart: "dynamo-platform", SourceVersion: "2.0.0", Image: "op:2.0.0",
+			CRDs: []string{"img.x.io"}},
+	}}
+	if got := readInv("dynamo-platform"); !reflect.DeepEqual(got, wantImage) {
+		t.Errorf("image inventory = %+v, want %+v", got, wantImage)
 	}
 	for _, name := range []string{"no-asserts", "manifest-only"} {
 		if _, statErr := os.Stat(inventoryPath(root, name)); !os.IsNotExist(statErr) {
 			t.Errorf("inventory for %q exists (stat error %v), want none", name, statErr)
 		}
 	}
-	if err := run(t.Context(), root, dp, renderer, readImage, true); err != nil {
+	if err = run(t.Context(), root, dp, leaves, renderer, readImage, true); err != nil {
 		t.Errorf("run(check) after regeneration error = %v", err)
 	}
 
-	renderer["chart"] = crdDoc("b.x.io")
-	err := run(t.Context(), root, dp, renderer, readImage, true)
-	if err == nil || !strings.Contains(err.Error(), `"a.x.io"`) || !strings.Contains(err.Error(), "stale") {
-		t.Errorf("run(check) after the chart dropped a.x.io error = %v, want missing CRD and stale inventory", err)
+	err = run(t.Context(), root, dp, leaves[1:], renderer, readImage, true)
+	if err == nil || !strings.Contains(err.Error(), "stale") {
+		t.Errorf("run(check) after the leaf pin went away error = %v, want stale inventory", err)
+	}
+
+	renderer["chart@1.1.0"] = crdDoc("c.x.io")
+	err = run(t.Context(), root, dp, leaves, renderer, readImage, true)
+	for _, want := range []string{`"a.x.io"`, "leaf recipe pinned", "stale"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("run(check) after the leaf's chart dropped a.x.io error = %v, want it to contain %s", err, want)
+		}
 	}
 
 	renderer["chart"] = "kind: Deployment\n"
-	err = run(t.Context(), root, dp, renderer, readImage, false)
+	err = run(t.Context(), root, dp, leaves, renderer, readImage, false)
 	if err == nil || !strings.Contains(err.Error(), "installs none") {
 		t.Errorf("run() for a chart with no CRDs error = %v, want installs none", err)
 	}
@@ -434,6 +484,7 @@ func TestRunErrors(t *testing.T) {
 	tests := []struct {
 		name      string
 		files     map[string]string
+		leaves    []recipe.ResolvedLeaf
 		diskFiles []string
 		diskDirs  []string
 		render    renderFunc
@@ -441,6 +492,14 @@ func TestRunErrors(t *testing.T) {
 		canceled  bool
 		wantCode  errors.ErrorCode
 	}{
+		{name: "leaf fails to resolve", files: valid,
+			leaves:   []recipe.ResolvedLeaf{{Entry: recipe.CatalogEntry{Name: "l"}, Err: errors.New(errors.ErrCodeInvalidRequest, "bad overlay")}},
+			wantCode: errors.ErrCodeInvalidRequest},
+		{name: "leaf health check not yaml", files: valid,
+			leaves:   []recipe.ResolvedLeaf{leafOf("l", helmRef("chart", "1.0.0", "spec: ["))},
+			wantCode: errors.ErrCodeInvalidRequest},
+		{name: "orphan inventory cannot be deleted", files: valid,
+			diskFiles: []string{"recipes/components/other/crds.yaml/x"}, wantCode: errors.ErrCodeInternal},
 		{name: "missing registry", wantCode: errors.ErrCodeInternal},
 		{name: "registry without header", files: with(map[string]string{"registry.yaml": "components: []\n"}),
 			wantCode: errors.ErrCodeInvalidRequest},
@@ -495,13 +554,15 @@ func TestRunErrors(t *testing.T) {
 				ctx, cancel = context.WithCancel(ctx)
 				cancel()
 			}
-			errorstest.WantReportedCode(t, run(ctx, root, dp, r, ri, false), tt.wantCode)
+			errorstest.WantReportedCode(t, run(ctx, root, dp, tt.leaves, r, ri, false), tt.wantCode)
 		})
 	}
 }
 
 func TestDecodeInventory(t *testing.T) {
-	want := inventory{Component: "c", Chart: "c", SourceVersion: "1.0.0", Image: "op:1", CRDs: []string{"a.x.io"}}
+	want := inventory{Component: "c", Charts: []chartCRDs{
+		{Repository: exampleRepo, Chart: "c", SourceVersion: "1.0.0", Image: "op:1", CRDs: []string{"a.x.io"}},
+	}}
 	rendered, err := renderInventory(&want)
 	if err != nil {
 		t.Fatal(err)
@@ -510,18 +571,13 @@ func TestDecodeInventory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeInventory(rendered) error = %v", err)
 	}
-	if !equalInventory(*got, want) {
+	if !reflect.DeepEqual(*got, want) {
 		t.Errorf("decodeInventory(rendered) = %+v, want %+v", *got, want)
 	}
-	for _, data := range []string{"crds: [", "component: c\nversion: 1.0.0\n"} {
+	for _, data := range []string{"charts: [", "component: c\nversion: 1.0.0\n"} {
 		_, err := decodeInventory([]byte(data))
 		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 	}
-}
-
-func equalInventory(a, b inventory) bool {
-	return a.Component == b.Component && a.Chart == b.Chart && a.SourceVersion == b.SourceVersion &&
-		a.Image == b.Image && slices.Equal(a.CRDs, b.CRDs)
 }
 
 func writeFile(t *testing.T, path, content string) {

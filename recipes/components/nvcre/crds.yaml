@@ -14,20 +14,23 @@
 
 # GENERATED FILE. DO NOT EDIT. Regenerate with make crd-inventory.
 #
-# Every CRD the chart installs at sourceVersion, rendered with
-# helm template --include-crds and this component's values.yaml. When image is
-# set, the list also holds the CRDs the operator applies from that image.
-# Each CRD the component's health check asserts must appear here or in the
-# component's manifests, and sourceVersion must equal the registry pin.
-# TestHealthCheckCRDAssertionsAnchored enforces both.
-chart: cluster-readiness-engine
+# One entry per pinned chart: the registry pin, and every pin a leaf recipe
+# deploys with a health check that asserts a CRD. Each lists every CRD the chart
+# installs at sourceVersion, rendered with helm template --include-crds and this
+# component's values.yaml. When image is set, the list also holds the CRDs the
+# operator applies from that image. Each CRD a health check asserts must appear
+# in the entry for its pin or in the component's manifests.
+# TestHealthCheckCRDAssertionsAnchored enforces this.
+charts:
+  - chart: cluster-readiness-engine
+    crds:
+      - bandwidthmeasurements.nvcre.nvidia.com
+      - certifications.nvcre.nvidia.com
+      - goodputmeasurements.nvcre.nvidia.com
+      - jobs.nvcre.nvidia.com
+      - logprofiles.nvcre.nvidia.com
+      - workflows.nvcre.nvidia.com
+      - workloadruns.nvcre.nvidia.com
+    repository: oci://ghcr.io/nvidia
+    sourceVersion: v0.8.2
 component: nvcre
-crds:
-  - bandwidthmeasurements.nvcre.nvidia.com
-  - certifications.nvcre.nvidia.com
-  - goodputmeasurements.nvcre.nvidia.com
-  - jobs.nvcre.nvidia.com
-  - logprofiles.nvcre.nvidia.com
-  - workflows.nvcre.nvidia.com
-  - workloadruns.nvcre.nvidia.com
-sourceVersion: v0.8.2

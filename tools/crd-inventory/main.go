@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Crd-inventory writes recipes/components/<name>/crds.yaml, the CRDs the pinned
-// Helm chart installs, for every component whose health check asserts a CRD.
+// Crd-inventory writes recipes/components/<name>/crds.yaml, the CRDs each
+// pinned Helm chart installs, for every component whose health check asserts a
+// CRD. A component gets an entry for its registry pin and for every pin a leaf
+// recipe deploys, and loses its inventory when no CRD assertion needs it.
 // TestHealthCheckCRDAssertionsAnchored checks the assertions against these
-// files offline. The registry, health checks and manifests are read from the
-// recipe data embedded at build time, so -repo-root must be the tree the tool
-// was built from.
+// files offline. The registry, recipes, health checks and manifests are read
+// from the recipe data embedded at build time, so -repo-root must be the tree
+// the tool was built from.
 //
 // Usage:
 //
@@ -31,12 +33,15 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
+
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/helm"
@@ -53,8 +58,7 @@ func main() {
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	dp := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
-	err := run(ctx, repoRoot, dp, helm.Default(), readImageCRDs, check)
+	err := generate(ctx, repoRoot, check)
 	stop()
 	if err != nil {
 		slog.Error("crd-inventory failed", "error", err)
@@ -62,80 +66,73 @@ func main() {
 	}
 }
 
-// run writes, under repoRoot, the inventory of every Helm component in dp
-// whose health check asserts a CRD. If check is set, run writes nothing and
-// compares each inventory with the committed file. The returned error lists
-// every problem found.
-func run(ctx context.Context, repoRoot string, dp recipe.DataProvider, r helm.Renderer, readImage imageReader,
-	check bool,
+func generate(ctx context.Context, repoRoot string, check bool) error {
+	dp := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+	leaves, err := recipe.ResolveLeaves(ctx, recipe.ResolveLeavesOptions{Provider: dp, Version: resolveVersion})
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "resolve leaf recipes")
+	}
+	return run(ctx, repoRoot, dp, leaves, helm.Default(), readImageCRDs, check)
+}
+
+// run writes, under repoRoot, the inventory of every component in dp with a
+// CRD assertion against an external chart, as collectAssertions finds them in
+// dp and leaves, and deletes every other inventory. If check is set, run
+// changes nothing and compares each inventory with the committed file. The
+// returned error lists every problem found.
+func run(ctx context.Context, repoRoot string, dp recipe.DataProvider, leaves []recipe.ResolvedLeaf,
+	r helm.Renderer, readImage imageReader, check bool,
 ) error {
 
 	reg, err := recipe.GetComponentRegistryFor(dp)
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "load component registry")
 	}
+	all, err := collectAssertions(ctx, dp, reg, leaves)
+	if err != nil {
+		return err
+	}
 
 	var problems []string
-	for i := range reg.Components {
-		c := &reg.Components[i]
-		if err := ctx.Err(); err != nil {
-			return errors.WrapCtxErr(err, errors.ErrCodeTimeout, "crd-inventory interrupted")
+	kept := sets.New[string]()
+	for _, name := range slices.Sorted(maps.Keys(all)) {
+		inv, found, buildErr := buildInventory(ctx, repoRoot, dp, r, readImage, name, all[name])
+		if buildErr != nil {
+			return buildErr
 		}
-		ref, hasChart := chartRef(c)
-		if !hasChart {
+		problems = append(problems, found...)
+		if len(inv.Charts) == 0 {
 			continue
 		}
-		asserted, err := assertedCRDs(ctx, dp, c)
-		if err != nil {
-			return err
+		kept.Insert(name)
+		problem, writeErr := writeInventory(repoRoot, inv, check)
+		if writeErr != nil {
+			return writeErr
 		}
-		if len(asserted) == 0 {
-			continue
+		if problem != "" {
+			problems = append(problems, problem)
 		}
+	}
 
-		inv, err := deriveInventory(ctx, repoRoot, r, readImage, ref)
-		if err != nil {
-			return err
-		}
-		if len(inv.CRDs) == 0 {
-			problems = append(problems, fmt.Sprintf("%s: health check asserts CRDs %v, but chart %s %s installs none",
-				c.Name, asserted, inv.Chart, inv.SourceVersion))
+	stale, err := filepath.Glob(inventoryPath(repoRoot, "*"))
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "list CRD inventories", err)
+	}
+	for _, path := range stale {
+		name := filepath.Base(filepath.Dir(path))
+		if kept.Has(name) {
 			continue
 		}
-		vendored, err := manifestCRDs(ctx, dp, c.Name)
-		if err != nil {
-			return err
-		}
-		for _, name := range asserted {
-			if !slices.Contains(inv.CRDs, name) && !slices.Contains(vendored, name) {
-				problems = append(problems, fmt.Sprintf(
-					"%s: health check asserts CRD %q, which neither chart %s %s nor the component's manifests install",
-					c.Name, name, inv.Chart, inv.SourceVersion))
-			}
-		}
-
-		rendered, err := renderInventory(inv)
-		if err != nil {
-			return err
-		}
-		path := inventoryPath(repoRoot, c.Name)
 		if check {
-			committed, readErr := os.ReadFile(path) //nolint:gosec // inventory path under the repo root
-			if readErr != nil || !bytes.Equal(committed, rendered) {
-				problems = append(problems, fmt.Sprintf("%s: %s is stale or missing; regenerate with `make crd-inventory`",
-					c.Name, path))
-			}
+			problems = append(problems, fmt.Sprintf("%s: %s belongs to no CRD assertion against a chart; "+
+				"delete it with `make crd-inventory`", name, path))
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return errors.WrapWithContext(errors.ErrCodeInternal, "create component directory", err,
+		if err := os.Remove(path); err != nil {
+			return errors.WrapWithContext(errors.ErrCodeInternal, "delete CRD inventory", err,
 				map[string]any{pathKey: path})
 		}
-		if err := os.WriteFile(path, rendered, 0o600); err != nil {
-			return errors.WrapWithContext(errors.ErrCodeInternal, "write CRD inventory", err,
-				map[string]any{pathKey: path})
-		}
-		slog.Info("inventory written", "component", c.Name, "version", inv.SourceVersion, "crds", len(inv.CRDs))
+		slog.Info("inventory deleted", "component", name)
 	}
 
 	if len(problems) > 0 {
@@ -147,12 +144,76 @@ func run(ctx context.Context, repoRoot string, dp recipe.DataProvider, r helm.Re
 	return nil
 }
 
-// deriveInventory returns the inventory of ref's chart rendered with AICR's
-// values. For a component in imageCRDSources, the inventory also lists the
-// CRDs its operator applies from its image.
-func deriveInventory(ctx context.Context, repoRoot string, r helm.Renderer, readImage imageReader,
+// buildInventory returns the inventory of component name, with an entry for
+// each chart in a that installs a CRD, and a problem for each asserted CRD no
+// entry or vendored manifest backs.
+func buildInventory(ctx context.Context, repoRoot string, dp recipe.DataProvider, r helm.Renderer,
+	readImage imageReader, name string, a *componentAssertions,
+) (*inventory, []string, error) {
+
+	inv := &inventory{Component: name}
+	if len(a.charts) == 0 {
+		return inv, nil, nil
+	}
+	vendored, err := manifestCRDs(ctx, dp, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	var problems []string
+	for _, k := range a.sortedCharts() {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, nil, errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "crd-inventory interrupted")
+		}
+		ca := a.charts[k]
+		entry, deriveErr := deriveChartCRDs(ctx, repoRoot, r, readImage, ca.ref)
+		if deriveErr != nil {
+			return nil, nil, deriveErr
+		}
+		if len(entry.CRDs) == 0 {
+			problems = append(problems, fmt.Sprintf("%s: health checks assert CRDs %v, but chart %s installs none",
+				name, slices.Sorted(maps.Keys(ca.crds)), k))
+			continue
+		}
+		problems = append(problems, unanchored(name, ca.crds, entry, vendored)...)
+		inv.Charts = append(inv.Charts, *entry)
+	}
+	return inv, problems, nil
+}
+
+// writeInventory writes inv under repoRoot. If check is set, it writes nothing
+// and returns a problem when the committed file differs.
+func writeInventory(repoRoot string, inv *inventory, check bool) (string, error) {
+	rendered, err := renderInventory(inv)
+	if err != nil {
+		return "", err
+	}
+	path := inventoryPath(repoRoot, inv.Component)
+	if check {
+		committed, readErr := os.ReadFile(path) //nolint:gosec // inventory path under the repo root
+		if readErr != nil || !bytes.Equal(committed, rendered) {
+			return fmt.Sprintf("%s: %s is stale or missing; regenerate with `make crd-inventory`",
+				inv.Component, path), nil
+		}
+		return "", nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", errors.WrapWithContext(errors.ErrCodeInternal, "create component directory", err,
+			map[string]any{pathKey: path})
+	}
+	if err := os.WriteFile(path, rendered, 0o600); err != nil {
+		return "", errors.WrapWithContext(errors.ErrCodeInternal, "write CRD inventory", err,
+			map[string]any{pathKey: path})
+	}
+	slog.Info("inventory written", "component", inv.Component, "charts", len(inv.Charts))
+	return "", nil
+}
+
+// deriveChartCRDs returns the CRDs ref's chart installs, rendered with AICR's
+// values. For a component in imageCRDSources, the list also holds the CRDs its
+// operator applies from its image.
+func deriveChartCRDs(ctx context.Context, repoRoot string, r helm.Renderer, readImage imageReader,
 	ref recipe.ComponentRef,
-) (*inventory, error) {
+) (*chartCRDs, error) {
 
 	valuesPath := filepath.Join(recipesDir(repoRoot), "components", ref.Name, "values.yaml")
 	if _, err := os.Stat(valuesPath); err != nil {
@@ -180,8 +241,8 @@ func deriveInventory(ctx context.Context, repoRoot string, r helm.Renderer, read
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
 			"parse rendered chart for component "+ref.Name)
 	}
-	inv := &inventory{
-		Component:     ref.Name,
+	entry := &chartCRDs{
+		Repository:    ref.Source,
 		Chart:         ref.EffectiveChart(),
 		SourceVersion: ref.Version,
 		CRDs:          crds,
@@ -189,16 +250,16 @@ func deriveInventory(ctx context.Context, repoRoot string, r helm.Renderer, read
 
 	src, fromImage := imageCRDSources[ref.Name]
 	if !fromImage {
-		return inv, nil
+		return entry, nil
 	}
-	inv.Image, err = containerImage(out, src.Container)
+	entry.Image, err = containerImage(out, src.Container)
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "find CRD image for component "+ref.Name)
 	}
-	imageCRDs, err := readImage(ctx, inv.Image, src.Dir)
+	imageCRDs, err := readImage(ctx, entry.Image, src.Dir)
 	if err != nil {
 		return nil, err
 	}
-	inv.CRDs = slices.Compact(slices.Sorted(slices.Values(append(inv.CRDs, imageCRDs...))))
-	return inv, nil
+	entry.CRDs = slices.Compact(slices.Sorted(slices.Values(append(entry.CRDs, imageCRDs...))))
+	return entry, nil
 }

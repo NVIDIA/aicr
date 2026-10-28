@@ -17,12 +17,17 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	stderrors "errors"
+	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"path"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -40,23 +45,166 @@ const (
 	inventoryFile    = "crds.yaml"
 	pathKey          = "path"
 	decodeBufferSize = 4096
+	resolveVersion   = "crd-inventory"
 )
 
 // inventory is the content of a generated crds.yaml file.
 type inventory struct {
-	Component     string   `yaml:"component"`
+	Component string      `yaml:"component"`
+	Charts    []chartCRDs `yaml:"charts"`
+}
+
+// chartCRDs lists the CRDs one pinned chart installs.
+type chartCRDs struct {
+	Repository    string   `yaml:"repository"`
 	Chart         string   `yaml:"chart"`
 	SourceVersion string   `yaml:"sourceVersion"`
 	Image         string   `yaml:"image,omitempty"`
 	CRDs          []string `yaml:"crds"`
 }
 
-// chartRef returns the ref c's registry defaults resolve to. ok reports
-// whether ref deploys an external chart.
-func chartRef(c *recipe.ComponentConfig) (ref recipe.ComponentRef, ok bool) {
-	ref = recipe.ComponentRef{Name: c.Name}
-	ref.ApplyRegistryDefaults(c)
-	return ref, ref.HasExternalChart()
+func (c *chartCRDs) key() chartKey {
+	return chartKey{Repository: c.Repository, Chart: c.Chart, Version: c.SourceVersion}
+}
+
+// find returns the entry for the chart k, or nil.
+func (inv *inventory) find(k chartKey) *chartCRDs {
+	for i := range inv.Charts {
+		if inv.Charts[i].key() == k {
+			return &inv.Charts[i]
+		}
+	}
+	return nil
+}
+
+// chartKey identifies a pinned chart.
+type chartKey struct {
+	Repository string
+	Chart      string
+	Version    string
+}
+
+func (k chartKey) String() string {
+	return k.Chart + " " + k.Version + " from " + k.Repository
+}
+
+func (k chartKey) compare(o chartKey) int {
+	return cmp.Or(cmp.Compare(k.Repository, o.Repository), cmp.Compare(k.Chart, o.Chart),
+		cmp.Compare(k.Version, o.Version))
+}
+
+func keyOf(ref *recipe.ComponentRef) chartKey {
+	return chartKey{Repository: ref.Source, Chart: ref.EffectiveChart(), Version: ref.Version}
+}
+
+// crdSources maps each asserted CRD to where it is asserted: a registry health
+// check file, or a leaf recipe.
+type crdSources map[string]sets.Set[string]
+
+func (s crdSources) add(names []string, where string) {
+	for _, name := range names {
+		if s[name] == nil {
+			s[name] = sets.New[string]()
+		}
+		s[name].Insert(where)
+	}
+}
+
+// chartAssertions holds the CRDs asserted against one pinned chart, and a ref
+// that deploys it.
+type chartAssertions struct {
+	ref  recipe.ComponentRef
+	crds crdSources
+}
+
+// componentAssertions holds one component's CRD assertions. Those of a ref
+// with an external chart are keyed by that chart. The rest are chartless.
+type componentAssertions struct {
+	charts    map[chartKey]*chartAssertions
+	chartless crdSources
+}
+
+func (a *componentAssertions) sortedCharts() []chartKey {
+	return slices.SortedFunc(maps.Keys(a.charts), chartKey.compare)
+}
+
+// collectAssertions returns, by component name, every CRD a health check
+// asserts: each registry health check at its registry pin, and the health
+// check of each enabled component in each leaf at that leaf's pin. A leaf's
+// health check is the registry file or the overlay's inline asserts.
+func collectAssertions(ctx context.Context, dp recipe.DataProvider, reg *recipe.ComponentRegistry,
+	leaves []recipe.ResolvedLeaf,
+) (map[string]*componentAssertions, error) {
+
+	out := map[string]*componentAssertions{}
+	add := func(ref recipe.ComponentRef, names []string, where string) {
+		if len(names) == 0 {
+			return
+		}
+		a := out[ref.Name]
+		if a == nil {
+			a = &componentAssertions{charts: map[chartKey]*chartAssertions{}, chartless: crdSources{}}
+			out[ref.Name] = a
+		}
+		if !ref.HasExternalChart() {
+			a.chartless.add(names, where)
+			return
+		}
+		k := keyOf(&ref)
+		ca := a.charts[k]
+		if ca == nil {
+			ca = &chartAssertions{ref: ref, crds: crdSources{}}
+			a.charts[k] = ca
+		}
+		ca.crds.add(names, where)
+	}
+
+	for i := range reg.Components {
+		c := &reg.Components[i]
+		names, err := assertedCRDs(ctx, dp, c)
+		if err != nil {
+			return nil, err
+		}
+		ref := recipe.ComponentRef{Name: c.Name}
+		ref.ApplyRegistryDefaults(c)
+		add(ref, names, c.HealthCheck.AssertFile)
+	}
+
+	for _, leaf := range leaves {
+		if err := ctx.Err(); err != nil {
+			return nil, errors.WrapCtxErr(err, errors.ErrCodeTimeout, "collect CRD assertions interrupted")
+		}
+		if leaf.Err != nil {
+			return nil, errors.PropagateOrWrap(leaf.Err, errors.ErrCodeInternal, "resolve leaf recipe "+leaf.Entry.Name)
+		}
+		for _, ref := range leaf.Result.ComponentRefs {
+			if !ref.IsEnabled() || strings.TrimSpace(ref.HealthCheckAsserts) == "" {
+				continue
+			}
+			names, err := parseAssertedCRDs([]byte(ref.HealthCheckAsserts))
+			if err != nil {
+				return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("parse health check of component %q in leaf recipe %s", ref.Name, leaf.Entry.Name))
+			}
+			add(ref, names, "leaf recipe "+leaf.Entry.Name)
+		}
+	}
+	return out, nil
+}
+
+// unanchored returns a problem for each CRD in crds that neither entry nor
+// vendored lists.
+func unanchored(component string, crds crdSources, entry *chartCRDs, vendored []string) []string {
+	var problems []string
+	for _, name := range slices.Sorted(maps.Keys(crds)) {
+		if slices.Contains(entry.CRDs, name) || slices.Contains(vendored, name) {
+			continue
+		}
+		problems = append(problems, fmt.Sprintf(
+			"%s asserts CRD %q, which neither chart %s nor component %q's manifests install",
+			strings.Join(sets.List(crds[name]), ", "), name, entry.key(), component))
+	}
+	return problems
 }
 
 func recipesDir(repoRoot string) string {
@@ -224,10 +372,11 @@ const generatedHeader = `# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. 
 
 # GENERATED FILE. DO NOT EDIT. Regenerate with make crd-inventory.
 #
-# Every CRD the chart installs at sourceVersion, rendered with
-# helm template --include-crds and this component's values.yaml. When image is
-# set, the list also holds the CRDs the operator applies from that image.
-# Each CRD the component's health check asserts must appear here or in the
-# component's manifests, and sourceVersion must equal the registry pin.
-# TestHealthCheckCRDAssertionsAnchored enforces both.
+# One entry per pinned chart: the registry pin, and every pin a leaf recipe
+# deploys with a health check that asserts a CRD. Each lists every CRD the chart
+# installs at sourceVersion, rendered with helm template --include-crds and this
+# component's values.yaml. When image is set, the list also holds the CRDs the
+# operator applies from that image. Each CRD a health check asserts must appear
+# in the entry for its pin or in the component's manifests.
+# TestHealthCheckCRDAssertionsAnchored enforces this.
 `

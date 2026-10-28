@@ -14,17 +14,20 @@
 
 # GENERATED FILE. DO NOT EDIT. Regenerate with make crd-inventory.
 #
-# Every CRD the chart installs at sourceVersion, rendered with
-# helm template --include-crds and this component's values.yaml. When image is
-# set, the list also holds the CRDs the operator applies from that image.
-# Each CRD the component's health check asserts must appear here or in the
-# component's manifests, and sourceVersion must equal the registry pin.
-# TestHealthCheckCRDAssertionsAnchored enforces both.
-chart: kubeflow-trainer
+# One entry per pinned chart: the registry pin, and every pin a leaf recipe
+# deploys with a health check that asserts a CRD. Each lists every CRD the chart
+# installs at sourceVersion, rendered with helm template --include-crds and this
+# component's values.yaml. When image is set, the list also holds the CRDs the
+# operator applies from that image. Each CRD a health check asserts must appear
+# in the entry for its pin or in the component's manifests.
+# TestHealthCheckCRDAssertionsAnchored enforces this.
+charts:
+  - chart: kubeflow-trainer
+    crds:
+      - clustertrainingruntimes.trainer.kubeflow.org
+      - jobsets.jobset.x-k8s.io
+      - trainingruntimes.trainer.kubeflow.org
+      - trainjobs.trainer.kubeflow.org
+    repository: oci://ghcr.io/kubeflow/charts
+    sourceVersion: 2.2.0
 component: kubeflow-trainer
-crds:
-  - clustertrainingruntimes.trainer.kubeflow.org
-  - jobsets.jobset.x-k8s.io
-  - trainingruntimes.trainer.kubeflow.org
-  - trainjobs.trainer.kubeflow.org
-sourceVersion: 2.2.0

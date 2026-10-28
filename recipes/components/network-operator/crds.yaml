@@ -14,22 +14,37 @@
 
 # GENERATED FILE. DO NOT EDIT. Regenerate with make crd-inventory.
 #
-# Every CRD the chart installs at sourceVersion, rendered with
-# helm template --include-crds and this component's values.yaml. When image is
-# set, the list also holds the CRDs the operator applies from that image.
-# Each CRD the component's health check asserts must appear here or in the
-# component's manifests, and sourceVersion must equal the registry pin.
-# TestHealthCheckCRDAssertionsAnchored enforces both.
-chart: network-operator
+# One entry per pinned chart: the registry pin, and every pin a leaf recipe
+# deploys with a health check that asserts a CRD. Each lists every CRD the chart
+# installs at sourceVersion, rendered with helm template --include-crds and this
+# component's values.yaml. When image is set, the list also holds the CRDs the
+# operator applies from that image. Each CRD a health check asserts must appear
+# in the entry for its pin or in the component's manifests.
+# TestHealthCheckCRDAssertionsAnchored enforces this.
+charts:
+  - chart: network-operator
+    crds:
+      - cidrpools.nv-ipam.nvidia.com
+      - hostdevicenetworks.mellanox.com
+      - ipoibnetworks.mellanox.com
+      - ippools.nv-ipam.nvidia.com
+      - macvlannetworks.mellanox.com
+      - network-attachment-definitions.k8s.cni.cncf.io
+      - nicclusterpolicies.mellanox.com
+      - nicnodepolicies.mellanox.com
+    image: nvcr.io/nvidia/cloud-native/network-operator:v26.7.0
+    repository: https://helm.ngc.nvidia.com/nvidia
+    sourceVersion: 26.7.0
+  - chart: network-operator
+    crds:
+      - cidrpools.nv-ipam.nvidia.com
+      - hostdevicenetworks.mellanox.com
+      - ipoibnetworks.mellanox.com
+      - ippools.nv-ipam.nvidia.com
+      - macvlannetworks.mellanox.com
+      - network-attachment-definitions.k8s.cni.cncf.io
+      - nicclusterpolicies.mellanox.com
+    image: cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/network-operator:v25.1.0
+    repository: oci://cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/chart
+    sourceVersion: 25.7.0
 component: network-operator
-crds:
-  - cidrpools.nv-ipam.nvidia.com
-  - hostdevicenetworks.mellanox.com
-  - ipoibnetworks.mellanox.com
-  - ippools.nv-ipam.nvidia.com
-  - macvlannetworks.mellanox.com
-  - network-attachment-definitions.k8s.cni.cncf.io
-  - nicclusterpolicies.mellanox.com
-  - nicnodepolicies.mellanox.com
-image: nvcr.io/nvidia/cloud-native/network-operator:v26.7.0
-sourceVersion: 26.7.0

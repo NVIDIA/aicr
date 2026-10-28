@@ -1607,24 +1607,30 @@ so violations are caught before they ever reach the validator.
 in-tree record of what AICR installs, so a chart bump that renames or drops a
 CRD fails at PR time, before any cluster runs the check.
 `TestHealthCheckCRDAssertionsAnchored` in `tools/crd-inventory` enforces this
-offline under `make test`:
+offline under `make test`. It checks each registry health check at the
+registry pin, and each health check a leaf recipe deploys at that leaf's pin,
+including an overlay's inline `healthCheck.asserts`:
 
-- A Helm component's asserted CRDs must appear in its generated
-  `recipes/components/<name>/crds.yaml` or in its vendored `manifests/`, and
-  the inventory's `sourceVersion` must equal the registry pin.
+- A Helm component's generated `recipes/components/<name>/crds.yaml` has one
+  entry per pinned chart, keyed by repository, chart and `sourceVersion`. Each
+  CRD asserted against a pin must appear in that pin's entry or in the
+  component's vendored `manifests/`.
 - A component with no chart, such as an OLM or manifest-only wrapper, may
   assert only CRDs that some in-tree inventory or vendored manifest defines.
+- A `crds.yaml` may hold only entries for pins some CRD assertion is checked
+  against.
 
 `make crd-inventory` renders each such chart with `--include-crds` and the
-component's `values.yaml`, then rewrites the inventories. Run it after bumping
-the pin of a component whose check asserts a CRD, and after adding a CRD
-assertion. It also reports every asserted CRD the pinned chart no longer
-installs. Some operators apply CRDs from their own image at runtime, so their
-chart does not render them. `dynamo-platform` applies all of its CRDs from a
-`crd-apply` init container, and `network-operator` applies the nv-ipam CRDs
-when a NicClusterPolicy enables nvIpam. Such components are listed in
-`imageCRDSources`, and the tool also reads the CRDs from the image of the
-named container in the rendered chart.
+component's `values.yaml`, rewrites the inventories, and deletes any
+inventory no CRD assertion needs. Run it after bumping a pin, in the
+registry, an overlay, or a mixin, of a component whose check asserts a CRD,
+and after adding or removing a CRD assertion. It also reports every asserted
+CRD the pinned chart no longer installs. Some operators apply CRDs from their
+own image at runtime, so their chart does not render them. `dynamo-platform`
+applies all of its CRDs from a `crd-apply` init container, and
+`network-operator` applies the nv-ipam CRDs when a NicClusterPolicy enables
+nvIpam. Such components are listed in `imageCRDSources`, and the tool also
+reads the CRDs from the image of the named container in the rendered chart.
 `make crd-inventory-check` re-renders every chart and fails on a stale
 inventory. It needs helm and network access, so `make qualify` does not run
 it.

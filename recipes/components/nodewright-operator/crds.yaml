@@ -14,17 +14,20 @@
 
 # GENERATED FILE. DO NOT EDIT. Regenerate with make crd-inventory.
 #
-# Every CRD the chart installs at sourceVersion, rendered with
-# helm template --include-crds and this component's values.yaml. When image is
-# set, the list also holds the CRDs the operator applies from that image.
-# Each CRD the component's health check asserts must appear here or in the
-# component's manifests, and sourceVersion must equal the registry pin.
-# TestHealthCheckCRDAssertionsAnchored enforces both.
-chart: nodewright
+# One entry per pinned chart: the registry pin, and every pin a leaf recipe
+# deploys with a health check that asserts a CRD. Each lists every CRD the chart
+# installs at sourceVersion, rendered with helm template --include-crds and this
+# component's values.yaml. When image is set, the list also holds the CRDs the
+# operator applies from that image. Each CRD a health check asserts must appear
+# in the entry for its pin or in the component's manifests.
+# TestHealthCheckCRDAssertionsAnchored enforces this.
+charts:
+  - chart: nodewright
+    crds:
+      - deploymentpolicies.nodewright.nvidia.com
+      - deploymentpolicies.skyhook.nvidia.com
+      - nodewrights.nodewright.nvidia.com
+      - skyhooks.skyhook.nvidia.com
+    repository: oci://ghcr.io/nvidia/nodewright/charts
+    sourceVersion: v0.20.0
 component: nodewright-operator
-crds:
-  - deploymentpolicies.nodewright.nvidia.com
-  - deploymentpolicies.skyhook.nvidia.com
-  - nodewrights.nodewright.nvidia.com
-  - skyhooks.skyhook.nvidia.com
-sourceVersion: v0.20.0

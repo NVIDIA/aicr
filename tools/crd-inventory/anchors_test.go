@@ -17,8 +17,10 @@ package main
 import (
 	"context"
 	"io/fs"
+	"maps"
 	"path"
 	"slices"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -28,13 +30,16 @@ import (
 )
 
 // TestHealthCheckCRDAssertionsAnchored checks that every CRD a health check
-// asserts is defined in the embedded recipe data:
-//   - A component with a chart must have a crds.yaml derived from its pinned
-//     chart version, and each CRD its check asserts must be in that file or in
-//     its vendored manifests.
+// asserts is defined in the embedded recipe data. It covers each registry
+// health check at its registry pin, and each health check a leaf recipe
+// deploys at the leaf's pin, including inline asserts:
+//   - A CRD asserted against an external chart must be in that component's
+//     crds.yaml entry for the same repository, chart and version, or in its
+//     vendored manifests.
 //   - A component with no chart, such as an OLM or manifest-only wrapper, may
 //     assert only CRDs that some crds.yaml or vendored manifest defines.
-//   - No other component may have a crds.yaml.
+//   - A crds.yaml may hold only entries for charts some assertion is checked
+//     against.
 //
 // When this test fails after a pin bump, run make crd-inventory, then fix any
 // assertion it reports the new chart no longer installs.
@@ -42,72 +47,85 @@ func TestHealthCheckCRDAssertionsAnchored(t *testing.T) {
 	ctx := t.Context()
 	efs := recipe.GetEmbeddedFS()
 	dp := recipe.NewEmbeddedDataProvider(efs, "")
-	reg, loadErr := recipe.GetComponentRegistryFor(dp)
-	if loadErr != nil {
-		t.Fatalf("load component registry: %v", loadErr)
+	reg, err := recipe.GetComponentRegistryFor(dp)
+	if err != nil {
+		t.Fatalf("load component registry: %v", err)
+	}
+	leaves, err := recipe.ResolveLeaves(ctx, recipe.ResolveLeavesOptions{Provider: dp, Version: resolveVersion})
+	if err != nil {
+		t.Fatalf("resolve leaf recipes: %v", err)
+	}
+	all, err := collectAssertions(ctx, dp, reg, leaves)
+	if err != nil {
+		t.Fatalf("collect CRD assertions: %v", err)
 	}
 
 	inTree := inTreeCRDs(t, efs, dp)
-	needsInventory := sets.New[string]()
+	const regenerate = "run `make crd-inventory` and fix any assertion it reports the pinned chart no longer installs"
 	checked := 0
-	for i := range reg.Components {
-		c := &reg.Components[i]
-		asserted, err := assertedCRDs(ctx, dp, c)
-		if err != nil {
-			t.Errorf("component %q: %v", c.Name, err)
-			continue
-		}
-		if len(asserted) == 0 {
-			continue
-		}
-		checked += len(asserted)
-
-		ref, hasChart := chartRef(c)
-		if !hasChart {
-			for _, name := range asserted {
-				if !inTree.Has(name) {
-					t.Errorf("%s asserts CRD %q, but component %q has no chart and no in-tree inventory or "+
-						"manifest defines that CRD", c.HealthCheck.AssertFile, name, c.Name)
-				}
+	for _, name := range slices.Sorted(maps.Keys(all)) {
+		a := all[name]
+		for _, crd := range slices.Sorted(maps.Keys(a.chartless)) {
+			checked++
+			if !inTree.Has(crd) {
+				t.Errorf("%s asserts CRD %q, but component %q has no chart and no in-tree inventory or "+
+					"manifest defines that CRD", strings.Join(sets.List(a.chartless[crd]), ", "), crd, name)
 			}
+		}
+		if len(a.charts) == 0 {
 			continue
 		}
 
-		needsInventory.Insert(c.Name)
-		inv, err := readInventory(ctx, dp, c.Name)
+		inv, err := readInventory(ctx, dp, name)
 		if err != nil {
-			t.Errorf("component %q asserts CRDs %v but has no readable CRD inventory (%v); run `make crd-inventory`",
-				c.Name, asserted, err)
+			t.Errorf("component %q asserts CRDs against a chart but has no readable CRD inventory (%v); %s",
+				name, err, regenerate)
 			continue
 		}
-		if inv.Chart != ref.EffectiveChart() || inv.SourceVersion != ref.Version {
-			t.Errorf("the CRD inventory of component %q was derived from chart %s %s, but it is pinned to %s %s; "+
-				"run `make crd-inventory` and fix any assertion it reports the pinned chart no longer installs",
-				c.Name, inv.Chart, inv.SourceVersion, ref.EffectiveChart(), ref.Version)
-			continue
-		}
-		vendored, err := manifestCRDs(ctx, dp, c.Name)
+		vendored, err := manifestCRDs(ctx, dp, name)
 		if err != nil {
-			t.Fatalf("component %q: %v", c.Name, err)
+			t.Fatalf("component %q: %v", name, err)
 		}
-		for _, name := range asserted {
-			if !slices.Contains(inv.CRDs, name) && !slices.Contains(vendored, name) {
-				t.Errorf("%s asserts CRD %q, which neither chart %s %s nor component %q's manifests install",
-					c.HealthCheck.AssertFile, name, inv.Chart, inv.SourceVersion, c.Name)
+		for _, k := range a.sortedCharts() {
+			ca := a.charts[k]
+			checked += len(ca.crds)
+			entry := inv.find(k)
+			if entry == nil {
+				t.Errorf("the CRD inventory of component %q has no entry for chart %s, deployed by %s; %s",
+					name, k, strings.Join(sets.List(wheres(ca.crds)), ", "), regenerate)
+				continue
+			}
+			for _, problem := range unanchored(name, ca.crds, entry, vendored) {
+				t.Error(problem)
+			}
+		}
+		for i := range inv.Charts {
+			if k := inv.Charts[i].key(); a.charts[k] == nil {
+				t.Errorf("the CRD inventory of component %q has an entry for chart %s, which no CRD assertion "+
+					"is checked against; run `make crd-inventory`", name, k)
 			}
 		}
 	}
 
 	for _, name := range inventoryComponents(t, efs) {
-		if !needsInventory.Has(name) {
-			t.Errorf("component %q has a CRD inventory but is not a Helm component whose health check asserts a CRD; "+
-				"delete it", name)
+		if a := all[name]; a == nil || len(a.charts) == 0 {
+			t.Errorf("component %q has a CRD inventory but no CRD assertion against a chart; "+
+				"run `make crd-inventory` to delete it", name)
 		}
 	}
 
 	if checked == 0 {
 		t.Fatal("no health check asserts a CRD; this guard would be vacuous")
 	}
+}
+
+// wheres returns every place that asserts a CRD in s.
+func wheres(s crdSources) sets.Set[string] {
+	out := sets.New[string]()
+	for _, w := range s {
+		out = out.Union(w)
+	}
+	return out
 }
 
 // readInventory returns the CRD inventory of the named component in dp.
@@ -159,7 +177,9 @@ func inTreeCRDs(t *testing.T, efs fs.FS, dp recipe.DataProvider) sets.Set[string
 		if err != nil {
 			t.Fatalf("component %q: %v", name, err)
 		}
-		out.Insert(inv.CRDs...)
+		for i := range inv.Charts {
+			out.Insert(inv.Charts[i].CRDs...)
+		}
 	}
 	return out
 }
