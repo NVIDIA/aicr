@@ -80,24 +80,26 @@ bundler, and adds one exception:
   (`snapshot`, `recipe`, `bundle`, `upgrade-check`, `validate`) runs as a Job
   from the pinned image, so every bundle the operator deploys is identical to
   what `aicr bundle` renders from the same recipe and flags. Those flags
-  always include the per-component readiness gates (`--readiness-hooks`),
-  which the readiness rule below depends on. Each Job's output is stored
-  content-addressed and handed to the next by digest, and the resulting plan
-  is immutable and records the snapshot, recipe and bundle it came from; a
-  retry reuses it rather than deriving a new one. The operator only decides
-  when each command runs and what happens with its result.
+  always include `--readiness-hooks`, so every component AICR ships a
+  readiness gate for gets it, as the readiness rule below expects. Each Job's
+  output is stored content-addressed and handed to the next by digest, and the
+  resulting plan is immutable and records the snapshot, recipe and bundle it
+  came from; a retry reuses it rather than deriving a new one. The operator
+  only decides when each command runs and what happens with its result.
 - **Discovery is continuous.** A new node profile, AICR image or GPU stack
   re-runs `snapshot` and `recipe`; a cluster that no longer matches its
   criteria stops changing rather than drifting.
 - **AICR computes, the engine installs, the operator coordinates.** Before it
   writes an engine object, the operator publishes the plan's charts to an
   immutable source the engine can fetch, such as the OCI registry it is
-  configured with, pinned by digest. It writes one engine object per bundle
-  release, in the bundle's dependency order, and moves on only when the engine
-  reports that exact revision applied and healthy and the release's readiness
-  gate passes. A status that is missing or reports any other revision is not
-  ready; how each adapter reads its engine's status is an implementation
-  detail.
+  configured with. The revision it hands the engine is pinned by digest and
+  covers each release's chart and values together, so a values-only change is
+  a new revision. It writes one engine object per bundle release, in the
+  bundle's dependency order, and moves on only when the engine reports that
+  exact revision applied and healthy and, where AICR renders a custom
+  readiness gate for the component, that gate passes. A status that is missing
+  or reports any other revision is not ready; how each adapter reads its
+  engine's status is an implementation detail.
 - **Verdicts are enforced.** A transition runs automatically only when every
   changed component is assessed `safe` and no changed chart renders a CRD.
   The operator establishes the latter itself from the two bundles it holds:
@@ -105,7 +107,7 @@ bundler, and adds one exception:
   it cannot read in full counts as changing CRDs. A `blocked` verdict stops
   the transition before any change, naming the component, and no approval
   overrides it; the stored assessment keeps AICR's record with any migration
-  steps it gives. Every other verdict needs approval.
+  steps it gives. Every other transition that is not blocked needs approval.
 - **Nothing is removed by accident.** Deleting the operator or its runtime
   leaves the stack running. Removal is an approved rollout, and a reinstalled
   operator re-adopts the stack with approval.
@@ -154,7 +156,8 @@ envtest prove controller behavior only.
 
 A prototype of this design has passed that list on H100 training with Kubeflow
 on GKE (2 × `a3-megagpu-8g`, GPUDirect-TCPXO), against AICR v1.0.0 and v1.1.2,
-with a training job running throughout.
+with a training job running throughout. Its records are internal for now and
+available on request.
 
 ## Non-Goals
 
