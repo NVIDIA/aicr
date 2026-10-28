@@ -15,6 +15,7 @@ temperature, power) in Prometheus format via a standardized metrics endpoint.
 ### Prometheus
 
 **Prometheus pods**
+
 ```
 $ kubectl get pods -n monitoring -l app.kubernetes.io/name=prometheus
 NAME                                      READY   STATUS    RESTARTS   AGE
@@ -22,6 +23,7 @@ prometheus-kube-prometheus-prometheus-0   2/2     Running   0          27m
 ```
 
 **Prometheus service**
+
 ```
 $ kubectl get svc kube-prometheus-prometheus -n monitoring
 NAME                         TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)             AGE
@@ -31,6 +33,7 @@ kube-prometheus-prometheus   ClusterIP   REDACTED_IP_01   <none>        9090/TCP
 ### Prometheus Adapter (Custom Metrics API)
 
 **Prometheus adapter pod**
+
 ```
 $ kubectl get pods -n monitoring -l app.kubernetes.io/name=prometheus-adapter
 NAME                                  READY   STATUS    RESTARTS   AGE
@@ -38,6 +41,7 @@ prometheus-adapter-54f5596948-brj98   1/1     Running   0          26m
 ```
 
 **Prometheus adapter service**
+
 ```
 $ kubectl get svc prometheus-adapter -n monitoring
 NAME                 TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
@@ -47,6 +51,7 @@ prometheus-adapter   ClusterIP   REDACTED_IP_02   <none>        443/TCP   29h
 ### Grafana
 
 **Grafana pod**
+
 ```
 $ kubectl get pods -n monitoring -l app.kubernetes.io/name=grafana
 NAME                      READY   STATUS    RESTARTS   AGE
@@ -61,6 +66,7 @@ temperature, power draw, and more in Prometheus exposition format.
 ### DCGM Exporter Health
 
 **DCGM exporter pod**
+
 ```
 $ kubectl get pods -n gpu-operator -l app=nvidia-dcgm-exporter -o wide
 NAME                         READY   STATUS    RESTARTS      AGE   IP             NODE                                  NOMINATED NODE   READINESS GATES
@@ -69,6 +75,7 @@ nvidia-dcgm-exporter-sc8gf   1/1     Running   3 (29h ago)   29h   REDACTED_IP_2
 ```
 
 **DCGM exporter service**
+
 ```
 $ kubectl get svc -n gpu-operator -l app=nvidia-dcgm-exporter
 NAME                   TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)    AGE
@@ -80,6 +87,7 @@ nvidia-dcgm-exporter   ClusterIP   REDACTED_IP_04   <none>        9400/TCP   29h
 Query DCGM exporter directly to show raw GPU metrics in Prometheus format.
 
 **Key GPU metrics from DCGM exporter (sampled)**
+
 ```
 DCGM_FI_DEV_FB_FREE{gpu="1",UUID="GPU-REDACTED_UUID_01",pci_bus_id="00000009:01:00.0",device="nvidia1",modelName="NVIDIA GB200",hostname="gpu-worker-1",DCGM_FI_DRIVER_VERSION="580.173.02"} 188729
 DCGM_FI_DEV_FB_FREE{gpu="3",UUID="GPU-REDACTED_UUID_02",pci_bus_id="00000019:01:00.0",device="nvidia3",modelName="NVIDIA GB200",hostname="gpu-worker-1",DCGM_FI_DRIVER_VERSION="580.173.02"} 188729
@@ -112,6 +120,7 @@ DCGM_FI_DEV_POWER_USAGE{gpu="2",UUID="GPU-REDACTED_UUID_12",pci_bus_id="00000018
 Query Prometheus to verify it is actively scraping and storing DCGM metrics.
 
 **GPU Utilization (DCGM_FI_DEV_GPU_UTIL)**
+
 ```
 {
   "status": "success",
@@ -308,6 +317,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
 ```
 
 **GPU Memory Used (DCGM_FI_DEV_FB_USED)**
+
 ```
 {
   "status": "success",
@@ -504,6 +514,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
 ```
 
 **GPU Temperature (DCGM_FI_DEV_GPU_TEMP)**
+
 ```
 {
   "status": "success",
@@ -700,6 +711,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
 ```
 
 **GPU Power Draw (DCGM_FI_DEV_POWER_USAGE)**
+
 ```
 {
   "status": "success",

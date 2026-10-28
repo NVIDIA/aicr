@@ -14,6 +14,7 @@ ServiceMonitor CRD for automatic target discovery.
 ## PyTorch Training Workload
 
 **Training workload pod**
+
 ```
 $ kubectl get pods -n trainer-metrics-test -o wide
 NAME                   READY   STATUS    RESTARTS   AGE   IP              NODE                                  NOMINATED NODE   READINESS GATES
@@ -21,6 +22,7 @@ pytorch-training-job   1/1     Running   0          16s   REDACTED_IP_44   gpu-w
 ```
 
 **Training metrics endpoint (after training run)**
+
 ```
 # HELP training_step_total Total training steps completed
 # TYPE training_step_total counter
@@ -43,6 +45,7 @@ training_gpu_memory_total_bytes 197897617408
 ## ServiceMonitor
 
 **Training ServiceMonitor**
+
 ```
 $ kubectl get servicemonitor pytorch-training -n trainer-metrics-test -o yaml
 apiVersion: monitoring.coreos.com/v1
@@ -70,6 +73,7 @@ spec:
 ```
 
 **Service endpoint**
+
 ```
 $ kubectl get endpoints pytorch-training-metrics -n trainer-metrics-test
 Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
@@ -83,6 +87,7 @@ Prometheus automatically discovers the PyTorch training workload as a scrape
 target via ServiceMonitor and actively collects metrics.
 
 **Prometheus scrape target (active)**
+
 ```
 {
   "job": "pytorch-training-metrics",
@@ -98,6 +103,7 @@ Prometheus collects PyTorch training workload metrics including training step
 count, loss, throughput, and GPU memory utilization.
 
 **Training metrics queried from Prometheus**
+
 ```
 training_step_total = 100
 training_loss = 1.331875

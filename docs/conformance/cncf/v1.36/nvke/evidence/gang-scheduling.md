@@ -13,6 +13,7 @@ scheduler with PodGroups. Both pods in the group must be scheduled together or n
 ## KAI Scheduler Components
 
 **KAI scheduler deployments**
+
 ```
 $ kubectl get deploy -n kai-scheduler
 NAME                    READY   UP-TO-DATE   AVAILABLE   AGE
@@ -26,6 +27,7 @@ queue-controller        1/1     1            1           29h
 ```
 
 **KAI scheduler pods**
+
 ```
 $ kubectl get pods -n kai-scheduler
 NAME                                     READY   STATUS    RESTARTS   AGE
@@ -41,6 +43,7 @@ queue-controller-7fd6465c8f-72bvc        1/1     Running   0          9m32s
 ## PodGroup CRD
 
 **PodGroup CRD**
+
 ```
 $ kubectl get crd podgroups.scheduling.run.ai
 NAME                          CREATED AT
@@ -63,6 +66,7 @@ any scheduler would place both pods):
 
 **Test manifest:** `pkg/evidence/cncf/scripts/manifests/gang-scheduling-test.yaml`
 (the `GANG_TEST_NODE` placeholder is substituted with the chosen node)
+
 ```yaml
 # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 #
@@ -200,12 +204,14 @@ spec:
 **Test node:** `gpu-worker-1` (4 allocatable GPUs; blocker occupies 3)
 
 **Apply capacity blocker**
+
 ```
 $ kubectl apply -f -
 pod/gang-capacity-blocker created
 ```
 
 **Apply test manifest (node-pinned)**
+
 ```
 $ sed "s/GANG_TEST_NODE/gpu-worker-1/" manifests/gang-scheduling-test.yaml | kubectl apply -f -
 namespace/gang-scheduling-test configured
@@ -215,6 +221,7 @@ pod/gang-worker-1 created
 ```
 
 **Pod status under constrained capacity**
+
 ```
 $ kubectl get pods -n gang-scheduling-test -o wide
 NAME                    READY   STATUS    RESTARTS   AGE   IP              NODE                                  NOMINATED NODE   READINESS GATES
@@ -224,6 +231,7 @@ gang-worker-1           0/1     Pending   0          60s   <none>          <none
 ```
 
 **Worker PodScheduled conditions under constrained capacity**
+
 ```
 $ kubectl get pods -n gang-scheduling-test -o jsonpath={range .items[*]}{.metadata.name}{": "}{range .status.conditions[?(@.type=="PodScheduled")]}{.status}{" reason="}{.reason}{" msg="}{.message}{end}{"\n"}{end}
 gang-capacity-blocker: True reason= msg=
@@ -234,6 +242,7 @@ gang-worker-1: False reason=Unschedulable msg=no nodes with enough resources wer
 ```
 
 **PodGroup status under constrained capacity**
+
 ```
 $ kubectl get podgroups -n gang-scheduling-test -o yaml
 apiVersion: v1
@@ -280,6 +289,7 @@ metadata:
 ```
 
 **Scheduling events under constrained capacity**
+
 ```
 $ kubectl get events -n gang-scheduling-test --sort-by=.lastTimestamp
 LAST SEEN   TYPE      REASON          OBJECT                      MESSAGE
@@ -294,6 +304,7 @@ LAST SEEN   TYPE      REASON          OBJECT                      MESSAGE
 **Barrier phase:** worker-0 bound to node: `<none>`, worker-1 bound to node: `<none>`; the scheduler AFFIRMATIVELY made the gang decision (both workers PodScheduled=False/Unschedulable AND the named PodGroup reports the one-of-two gang refusal: 'Resources were found for 1 pods while 2 are required for gang scheduling').
 
 **PodGroup status**
+
 ```
 $ kubectl get podgroups -n gang-scheduling-test -o wide
 NAME              AGE
@@ -301,6 +312,7 @@ gang-test-group   65s
 ```
 
 **Pod status**
+
 ```
 $ kubectl get pods -n gang-scheduling-test -o wide
 NAME            READY   STATUS      RESTARTS   AGE   IP              NODE                                  NOMINATED NODE   READINESS GATES
@@ -309,6 +321,7 @@ gang-worker-1   0/1     Completed   0          65s   REDACTED_IP_51   gpu-worker
 ```
 
 **gang-worker-0 logs**
+
 ```
 $ kubectl logs gang-worker-0 -n gang-scheduling-test
 Tue Oct 27 23:54:45 2026
@@ -335,6 +348,7 @@ Gang worker 0 completed successfully
 ```
 
 **gang-worker-1 logs**
+
 ```
 $ kubectl logs gang-worker-1 -n gang-scheduling-test
 Tue Oct 27 23:54:45 2026
@@ -365,6 +379,7 @@ Gang worker 1 completed successfully
 ## Cleanup
 
 **Delete test namespace**
+
 ```
 $ cleanup_ns gang-scheduling-test
 
