@@ -140,7 +140,7 @@ func TestListCatalog_SourcePropagated(t *testing.T) {
 
 	entries := store.ListCatalog(nil)
 	for _, e := range entries {
-		// The inMemoryDataProvider returns "catalog-test:<path>" for every file.
+		// The in-memory provider returns "catalog-test:<path>" for every file.
 		if !strings.HasPrefix(e.Source, "catalog-test:") {
 			t.Errorf("entry %q: Source = %q, want prefix %q", e.Name, e.Source, "catalog-test:")
 		}

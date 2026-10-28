@@ -19,7 +19,6 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"io/fs"
 	"log"
 	"maps"
 	"net/http/httptest"
@@ -29,7 +28,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"testing/fstest"
 
 	"github.com/google/go-containerregistry/pkg/crane"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -40,6 +38,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/helm"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
@@ -117,29 +116,16 @@ func TestParseCRDNames(t *testing.T) {
 	}
 }
 
-// mapProvider is a recipe.DataProvider that serves files from memory.
-type mapProvider struct{ fsys fstest.MapFS }
-
-func newMapProvider(t *testing.T, files map[string]string) *mapProvider {
+func newMapProvider(t *testing.T, files map[string]string) *providertest.Provider {
 	t.Helper()
-	fsys := fstest.MapFS{}
+	data := make(map[string][]byte, len(files))
 	for file, body := range files {
-		fsys[file] = &fstest.MapFile{Data: []byte(body)}
+		data[file] = []byte(body)
 	}
-	dp := &mapProvider{fsys: fsys}
+	dp := providertest.NewMap(data)
 	t.Cleanup(func() { recipe.EvictCachedRegistry(dp) })
 	return dp
 }
-
-func (p *mapProvider) ReadFile(_ context.Context, name string) ([]byte, error) {
-	return fs.ReadFile(p.fsys, name)
-}
-
-func (p *mapProvider) WalkDir(_ context.Context, root string, fn fs.WalkDirFunc) error {
-	return fs.WalkDir(p.fsys, root, fn)
-}
-
-func (p *mapProvider) Source(string) string { return "test" }
 
 const registryHeader = "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\n"
 
