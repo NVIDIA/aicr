@@ -478,6 +478,7 @@ land later; none is implied by Preview alone.
 | `k0s / h200 / ubuntu / training` | [k0s H200 Setup](k0s-h200-setup.md) | [validation.aicr.run/#/k0s/h200-ubuntu/training](https://validation.aicr.run/#/k0s/h200-ubuntu/training) |
 | `nvke / gb200 / ubuntu / training` | [NVKE GB200 Setup](nvke-gb200-setup.md) | pending: published after merge from the `main` validator images ([#3295](https://github.com/NVIDIA/aicr/pull/3295)) |
 | `nvke / gb200 / ubuntu / training / kubeflow` | [NVKE GB200 Setup](nvke-gb200-setup.md) | pending: published after merge from the `main` validator images ([#3295](https://github.com/NVIDIA/aicr/pull/3295)) |
+| `nvke / gb300 / ubuntu / training` | [NVKE GB300 Setup](nvke-gb300-setup.md) | pending: published after merge from the `main` validator images ([#3392](https://github.com/NVIDIA/aicr/pull/3392)) |
 
 The platform-neutral `inference` row is the base the Dynamo leaf inherits from; it exists so that resolving `rke2/vr200/ubuntu/inference` **without** `--platform` resolves to the VR200-safe overlay rather than falling through to the generic `rke2-inference` base.
 

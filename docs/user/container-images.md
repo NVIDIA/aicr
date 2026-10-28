@@ -19,8 +19,8 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **56**
-- Unique images: **140**
+- Components: **57**
+- Unique images: **142**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -57,9 +57,10 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 4 |
 | kueue | helm | kueue | 0.19.6 | 1 |
+| macvlan-rdma-networks | manifest | — | — | 0 |
 | mariadb-operator | helm | mariadb-operator | 26.10.1 | 1 |
 | mariadb-operator-crds | helm | mariadb-operator-crds | 26.10.1 | 0 |
-| network-operator | helm | nvidia/network-operator | 26.7.0 | 15 |
+| network-operator | helm | nvidia/network-operator | 26.7.0 | 17 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
 | nfd | helm | node-feature-discovery | 0.20.1 | 1 |
@@ -98,7 +99,7 @@ from the component's registry default above.
 | dynamo-platform | 1.5.0 | b300-mk8s-ubuntu-inference-dynamo | 1 |
 | kai-scheduler | v0.17.1 | b300-mk8s-ubuntu-inference-dynamo | 12 |
 | kube-prometheus-stack | 83.7.0 | aks | 8 |
-| network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 15 |
+| network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 17 |
 
 ## Images by component
 
@@ -171,7 +172,7 @@ _No images extracted._
 
 - `gcr.io/gke-release/nri-device-injector:1.0.25-gke.6@sha256:7704e2bd74b8edbb76b6913c7904cc2362f1fa887c4d4aba7b19778ea353537c`
 - `gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830`
-- `ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7`
+- `ubuntu:26.04@sha256:19fcd1bf268f02b60aca3bd30bd8a6d9a11759a430e32921833e65f16d87348a`
 - `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15@sha256:4c9f0de3f39455a2ea35e844e0fc92564ca5629f6b03250fde40e8160719dae4`
 
 ### gpu-operator
@@ -257,6 +258,10 @@ _No images extracted._
 
 - `registry.k8s.io/kueue/kueue:v0.19.6`
 
+### macvlan-rdma-networks
+
+_No images extracted._
+
 ### mariadb-operator
 
 - `ghcr.io/mariadb-operator/mariadb-operator:26.10.1`
@@ -281,7 +286,9 @@ _No images extracted._
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.7.0`
+- `nvcr.io/nvidia/mellanox/multus-cni:network-operator-v26.7.0`
 - `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam:network-operator-v26.7.0`
+- `nvcr.io/nvidia/mellanox/plugins:network-operator-v26.7.0`
 
 ### network-operator-ocp
 
@@ -404,7 +411,7 @@ _No images extracted._
 
 ### slurm-accounting-mariadb
 
-- `mariadb:11.8.9@sha256:f16d7a344413e519dff518f27bdb221388f84b0d274c97c4fb5f2cb0dc1b34fa`
+- `mariadb:11.8.9@sha256:6a4b3c20cffebc8b2d9248924f6a63285176c15a532b8e4840b8804e1c2c0443`
 
 ### sriov-ib-networks
 
@@ -460,7 +467,9 @@ _No images extracted._
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.7.0`
+- `nvcr.io/nvidia/mellanox/multus-cni:network-operator-v26.7.0`
 - `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam:network-operator-v26.7.0`
+- `nvcr.io/nvidia/mellanox/plugins:network-operator-v26.7.0`
 
 <!-- END AICR-BOM -->
 

@@ -31,6 +31,7 @@ This section is for integrators who:
 | [Nebius B300 Inference](nebius-b300.md) | MK8s reference configuration, operator ownership, shared RDMA and qualification limits |
 | [k0s H200 Setup](k0s-h200-setup.md) | k0s setup for the H200 training Preview coordinate: host-provided driver posture, k0s's bundled containerd wiring, StorageClass note, and known gaps |
 | [NVKE GB200 Setup](nvke-gb200-setup.md) | NVKE (Forge/NICo) GB200 training Preview coordinate: inbox-driver posture (no DOCA-OFED, DMA-BUF GPUDirect), SR-IOV InfiniBand rails with IPoIB via nv-ipam, RDMA ULP module loading via nodewright, fabric P_Key prerequisite, and known gaps |
+| [NVKE GB300 Setup](nvke-gb300-setup.md) | NVKE (Forge/NICo) GB300 training Preview coordinate: the bare-metal GB300 shape on the inbox driver (no DOCA-OFED, DMA-BUF GPUDirect), shared-HCA RoCE over ConnectX-8 rails with per-rail macvlan attachments via nv-ipam, RDMA ULP module loading via nodewright, and known gaps |
 | [Talos Integration](talos-integration.md) | Running AICR on Talos Linux |
 | [OpenShift Deployment](openshift.md) | OpenShift/OCP-specific Helm and OLM integration and two-phase operator deployment |
 | [Recipe Development](recipe-development.md) | Creating and modifying recipe metadata for custom environments |

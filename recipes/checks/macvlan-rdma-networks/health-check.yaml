@@ -1,0 +1,54 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# macvlan-rdma-networks Health Check
+#
+# Asserts every MacvlanNetwork reports state "ready": the Network Operator
+# has rendered its NetworkAttachmentDefinition into the network namespace.
+# Unnamed, like the NicClusterPolicy readiness gate: one object per rail, and
+# all of them must have converged.
+# The first step asserts the nv-ipam IPPool CRD is Established: the operator
+# creates it while reconciling the NicClusterPolicy, and the pools in this
+# component cannot have applied without it.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: macvlan-rdma-networks-health-check
+spec:
+  timeouts:
+    assert: 10m
+  steps:
+    - name: validate-ippool-crd-established
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: ippools.nv-ipam.nvidia.com
+              status:
+                (conditions[?type == 'Established' && status == 'True'] | length(@) > `0`): true
+    - name: validate-macvlan-networks-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: mellanox.com/v1alpha1
+              kind: MacvlanNetwork
+              status:
+                state: ready
+        - error:
+            resource:
+              apiVersion: mellanox.com/v1alpha1
+              kind: MacvlanNetwork
+              (status.state != 'ready'): true

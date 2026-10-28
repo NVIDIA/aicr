@@ -1,0 +1,144 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# NicClusterPolicy for GB300 NVKE — RoCE on the inbox driver, shared HCA.
+#
+# No ofedDriver: the host's inbox mlx5_core carries OVN-Kubernetes on the
+# BlueField-3, so it must never be replaced (see values-nvke-gb300.yaml).
+# rdma_ucm, which the device plugin needs for /dev/infiniband/rdma_cm, comes
+# from the rdma-modules component.
+# No nicConfigurationOperator: NIC firmware is a host prerequisite on NVKE.
+# secondaryNetwork carries multus and the reference CNI plugins: unlike the
+# NVKE GB200 image, the GB300 reference tenant has no multus (its only
+# NetworkAttachmentDefinition is OVN-Kubernetes' own), so without them the
+# macvlan-rdma-networks attachments are never executed.
+#
+# nvIpam serves the per-rail macvlan networks of the macvlan-rdma-networks
+# component. rdmaSharedDevicePlugin exposes one pooled resource per rail
+# (rdma/rdma_shared_resource_rail_<n>), the multirail shape k8s-launch-kit
+# generates for `--deployment-type rdma_shared --fabric ethernet`, selected
+# by the rail's PCI address rather than its netdev name so that the policy
+# does not depend on the host's interface naming. Rail layout from the
+# Supermicro ARS-121GL-NB3-LCC-FG001 tray (two dual ConnectX-8 C8280Z
+# mezzanines, deviceID 1023; each NIC's two planes collapse onto the first
+# PF, l8k --collapse-nic-rails):
+#   rail 0  0000:03:00.0  mlx5_0  NUMA 0
+#   rail 1  0002:03:00.0  mlx5_2  NUMA 0
+#   rail 2  0010:03:00.0  mlx5_4  NUMA 1
+#   rail 3  0012:03:00.0  mlx5_6  NUMA 1
+# The BlueField-3 (a2dc, 0016:01:00.0) is the north-south port and is not
+# selected.
+apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+metadata:
+  name: nic-cluster-policy
+  annotations:
+    # Deliberately NOT a Helm hook: this CR is long-lived cluster networking
+    # and must be updated in place — hook-delete-policy would delete the live
+    # policy on every upgrade, tearing down the RDMA pods before the
+    # replacement reconciles. CRD-before-CR ordering is provided by the
+    # bundler's post-bundle sequencing (this manifest ships in the
+    # network-operator-post bundle, after the operator's CRDs).
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  # Fabric DaemonSets run only on Mellanox-NIC nodes (labeled pci-15b3.present
+  # by the nfd-worker rule in components/nfd/values-nvidia-nics.yaml).
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: feature.node.kubernetes.io/pci-15b3.present
+              operator: In
+              values:
+                - "true"
+  nvIpam:
+    image: nvidia-k8s-ipam
+    repository: nvcr.io/nvidia/mellanox
+    version: network-operator-v26.7.0
+    enableWebhook: false
+  secondaryNetwork:
+    cniPlugins:
+      image: plugins
+      repository: nvcr.io/nvidia/mellanox
+      version: network-operator-v26.7.0
+    multus:
+      image: multus-cni
+      repository: nvcr.io/nvidia/mellanox
+      version: network-operator-v26.7.0
+  deploymentTolerations:
+    - key: CriticalAddonsOnly
+      operator: Exists
+  # Shared-HCA RDMA (not SR-IOV VFs), one resource per rail.
+  rdmaSharedDevicePlugin:
+    image: k8s-rdma-shared-dev-plugin
+    repository: nvcr.io/nvidia/mellanox
+    version: network-operator-v26.7.0
+    imagePullSecrets: []
+    config: |
+      {
+        "configList": [
+          {
+            "resourceName": "rdma_shared_resource_rail_0",
+            "rdmaHcaMax": 63,
+            "selectors": {
+              "linkTypes": ["ether"],
+              "vendors": ["15b3"],
+              "deviceIDs": ["1023"],
+              "pciAddresses": ["0000:03:00.0"]
+            }
+          },
+          {
+            "resourceName": "rdma_shared_resource_rail_1",
+            "rdmaHcaMax": 63,
+            "selectors": {
+              "linkTypes": ["ether"],
+              "vendors": ["15b3"],
+              "deviceIDs": ["1023"],
+              "pciAddresses": ["0002:03:00.0"]
+            }
+          },
+          {
+            "resourceName": "rdma_shared_resource_rail_2",
+            "rdmaHcaMax": 63,
+            "selectors": {
+              "linkTypes": ["ether"],
+              "vendors": ["15b3"],
+              "deviceIDs": ["1023"],
+              "pciAddresses": ["0010:03:00.0"]
+            }
+          },
+          {
+            "resourceName": "rdma_shared_resource_rail_3",
+            "rdmaHcaMax": 63,
+            "selectors": {
+              "linkTypes": ["ether"],
+              "vendors": ["15b3"],
+              "deviceIDs": ["1023"],
+              "pciAddresses": ["0012:03:00.0"]
+            }
+          }
+        ]
+      }
+  # Fabric DaemonSets must land on tainted GPU nodes. The control-plane
+  # toleration is for NVKE tenants whose GPU tray is also the control plane.
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+    - key: CriticalAddonsOnly
+      operator: Exists
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists

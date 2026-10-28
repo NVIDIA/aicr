@@ -461,6 +461,23 @@ components:
       defaultRepository: ""
       defaultNamespace: nvidia-network-operator
 
+  # Per-rail RoCE objects (nv-ipam IPPool, MacvlanNetwork) for shared-HCA
+  # Ethernet fabrics. Manifest-only; requires network-operator as a
+  # componentRef dependency and is separate from it because the IPPool CRD is
+  # created by the operator while it reconciles the NicClusterPolicy, after
+  # that release is validated.
+  - name: macvlan-rdma-networks
+    displayName: macvlan-rdma-networks
+    class: core
+    valueOverrideKeys:
+      - macvlanrdmanetworks
+    healthCheck:
+      assertFile: checks/macvlan-rdma-networks/health-check.yaml
+    helm:
+      # Manifest-only component - no external Helm chart, uses manifestFiles
+      defaultRepository: ""
+      defaultNamespace: nvidia-network-operator
+
   - name: nodewright-customizations
     displayName: nodewright-customizations
     class: core
