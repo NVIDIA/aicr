@@ -24,6 +24,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/inventory"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -38,21 +39,17 @@ type helmRelease struct {
 const helmStatusUninstalled = "uninstalled"
 
 // legacyComponents maps component names no longer in the registry, whose
-// releases older installs still carry, to the reason.
+// releases older installs still carry, to the reason. Each left before bundles
+// stamped releases, so only its name identifies it.
 var legacyComponents = map[string]string{
 	"skyhook-operator":       "nodewright-operator's former name",
 	"skyhook-customizations": "nodewright-customizations' former name",
 	"dynamo-crds":            "Dynamo's CRD chart, installed into dynamo-system until dynamo-platform took over its CRDs",
-	"rdma-netns-exclusive":   "Nodewright RDMA package, installed into skyhook or nodewright until nodewright-customizations absorbed it",
 }
 
 // ownedReleaseNames returns every Helm release name a bundle can install for
 // a registry or legacyComponents component.
-func ownedReleaseNames() (map[string]bool, error) {
-	registry, err := recipe.GetComponentRegistry()
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "load component registry", err)
-	}
+func ownedReleaseNames(registry *recipe.ComponentRegistry) map[string]bool {
 	components := slices.Collect(maps.Keys(legacyComponents))
 	for _, c := range registry.Components {
 		components = append(components, c.Name)
@@ -63,7 +60,17 @@ func ownedReleaseNames() (map[string]bool, error) {
 			names[name] = true
 		}
 	}
-	return names, nil
+	return names
+}
+
+// inventoryComponents returns the registry's components and the
+// legacyComponents names, the latter with no namespace.
+func inventoryComponents(registry *recipe.ComponentRegistry) []inventory.Component {
+	comps := recipe.InventoryComponents(registry)
+	for _, name := range slices.Sorted(maps.Keys(legacyComponents)) {
+		comps = append(comps, inventory.Component{Name: name})
+	}
+	return comps
 }
 
 // helmClient is the subset of the helm CLI cleanup uses.
@@ -78,11 +85,16 @@ type runFunc func(ctx context.Context, timeout time.Duration, outputLimit int64,
 
 // helmCLI implements helmClient with run, which is helm.Run outside tests.
 type helmCLI struct {
-	run runFunc
+	run      runFunc
+	kubeArgs []string // appended to every command
+}
+
+func (h helmCLI) exec(ctx context.Context, timeout time.Duration, args ...string) ([]byte, error) {
+	return h.run(ctx, timeout, defaults.ClusterCleanupHelmOutputLimit, slices.Concat(args, h.kubeArgs)...)
 }
 
 func (h helmCLI) list(ctx context.Context) ([]helmRelease, error) {
-	out, err := h.run(ctx, defaults.K8sCleanupTimeout, defaults.ClusterCleanupHelmOutputLimit,
+	out, err := h.exec(ctx, defaults.K8sCleanupTimeout,
 		"list", "--all-namespaces", "--output", "json",
 		// Helm 3 lists only deployed and failed releases by default, and
 		// Helm 4 rejects Helm 3's --all.
@@ -102,15 +114,14 @@ func (h helmCLI) list(ctx context.Context) ([]helmRelease, error) {
 }
 
 func (h helmCLI) uninstall(ctx context.Context, rel helmRelease) error {
-	_, err := h.run(ctx, defaults.ClusterCleanupHelmUninstallTimeout+defaults.K8sCleanupTimeout,
-		defaults.ClusterCleanupHelmOutputLimit,
+	_, err := h.exec(ctx, defaults.ClusterCleanupHelmUninstallTimeout+defaults.K8sCleanupTimeout,
 		"uninstall", rel.Name, "--namespace", rel.Namespace,
 		"--wait", "--timeout", defaults.ClusterCleanupHelmUninstallTimeout.String())
 	return err
 }
 
 func (h helmCLI) values(ctx context.Context, rel helmRelease) (map[string]any, error) {
-	out, err := h.run(ctx, defaults.K8sCleanupTimeout, defaults.ClusterCleanupHelmOutputLimit,
+	out, err := h.exec(ctx, defaults.K8sCleanupTimeout,
 		"get", "values", rel.Name, "--namespace", rel.Namespace, "--all", "--output", "json")
 	if err != nil {
 		return nil, err

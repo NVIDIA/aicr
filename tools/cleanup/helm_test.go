@@ -123,12 +123,64 @@ func TestHelmCLIFailures(t *testing.T) {
 	}
 }
 
-func TestOwnedReleaseNames(t *testing.T) {
-	got, err := ownedReleaseNames()
-	if err != nil {
-		t.Fatalf("ownedReleaseNames() error = %v", err)
+func TestHelmCLIPinsKubeTarget(t *testing.T) {
+	run, calls := recordingRun(`[]`, nil)
+	h := helmCLI{run: run, kubeArgs: helmKubeArgs("/tmp/kubeconfig", "staging")}
+	rel := helmRelease{Name: "gpu-operator", Namespace: "gpu-operator"}
+
+	if _, err := h.list(context.Background()); err != nil {
+		t.Fatalf("list() error = %v", err)
 	}
-	for _, name := range []string{"gpu-operator", "gpu-operator-pre", "gpu-operator-post", "gpu-operator-readiness", "skyhook-operator", "dynamo-crds", "rdma-netns-exclusive"} {
+	if err := h.uninstall(context.Background(), rel); err != nil {
+		t.Fatalf("uninstall() error = %v", err)
+	}
+	if _, err := h.values(context.Background(), rel); err == nil {
+		t.Fatal("values() decoded a list as values")
+	}
+	const pinned = " --kubeconfig /tmp/kubeconfig --kube-context staging"
+	if len(*calls) != 3 {
+		t.Fatalf("helm calls = %v, want 3", *calls)
+	}
+	for _, call := range *calls {
+		if !strings.HasSuffix(call.args, pinned) {
+			t.Errorf("helm %s is not pinned with %q", call.args, pinned)
+		}
+	}
+}
+
+func TestHelmKubeArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		kubeconfig  string
+		kubeContext string
+		want        []string
+	}{
+		{"file and context", "/tmp/kubeconfig", "staging", []string{"--kubeconfig", "/tmp/kubeconfig", "--kube-context", "staging"}},
+		{"merged KUBECONFIG", "", "staging", []string{"--kube-context", "staging"}},
+		{"in-cluster", "", "", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := helmKubeArgs(tt.kubeconfig, tt.kubeContext); !slices.Equal(got, tt.want) {
+				t.Errorf("helmKubeArgs() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func testRegistry(t *testing.T) *recipe.ComponentRegistry {
+	t.Helper()
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry() error = %v", err)
+	}
+	return registry
+}
+
+func TestOwnedReleaseNames(t *testing.T) {
+	registry := testRegistry(t)
+	got := ownedReleaseNames(registry)
+	for _, name := range []string{"gpu-operator", "gpu-operator-pre", "gpu-operator-post", "gpu-operator-readiness", "skyhook-operator", "dynamo-crds"} {
 		if !got[name] {
 			t.Errorf("ownedReleaseNames() is missing %q", name)
 		}
@@ -137,10 +189,6 @@ func TestOwnedReleaseNames(t *testing.T) {
 		t.Error(`ownedReleaseNames() contains "team-app", which no component installs`)
 	}
 
-	registry, err := recipe.GetComponentRegistry()
-	if err != nil {
-		t.Fatalf("GetComponentRegistry() error = %v", err)
-	}
 	for name, reason := range legacyComponents {
 		if reason == "" {
 			t.Errorf("legacyComponents[%q] has no reason", name)

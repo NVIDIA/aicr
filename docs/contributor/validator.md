@@ -493,6 +493,7 @@ page are the contract.
 | Check | Keys |
 |-------|------|
 | `nccl-all-reduce-bw*` | `runtimeSource`, `transport`, `workerNodes`, `gpusInvolved`, `fabric`, `achievedGbps`, `thresholdGbps`, `tolerancePct`, `passMargin` |
+| `nccl-cre-all-reduce-bw` | `achievedGbps`, `thresholdGbps`, `tolerancePct`, `passMargin` |
 | `gke-gpu-nic-topology` | `nodesValidated`, `nodesTotal` |
 | `expected-resources` | `namespacesActive`, `namespacesExpected`, `draReady`, `draDesired`, `nodewrightComplete`, `nodewrightExpected`, and the RDMA gate's `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped` |
 | `inference-perf` | `throughputTokPerSec`, `ttftP99Ms`, `throughputThreshold`, `scaledThreshold`, `ttftThresholdMs`, `gpusBenchmarked`, `gpusPerNode` |

@@ -36,6 +36,16 @@
 # shellcheck disable=SC2034  # consumed by sourcing scripts
 readonly SYSTEM_NS_PATTERN="default|kube-node-lease|kube-public|kube-system|kwok-system|local-path-storage|argocd|aicr-registry|flux-system"
 
+# sriov_subchart_enabled reports whether a Helm release enables the
+# network-operator chart's sriov-network-operator subchart. A values read
+# failure or timeout counts as not enabled, so the uninstall keeps its hooks.
+sriov_subchart_enabled() {
+    local release=$1 namespace=$2 enabled
+    enabled=$(timeout 30s helm get values "$release" -n "$namespace" -o json 2>/dev/null |
+        jq -r '.sriovNetworkOperator.enabled // false' 2>/dev/null) || return 1
+    [[ "$enabled" == "true" ]]
+}
+
 cleanup_recipe_helm_releases() {
     local release_json releases kube_system_names failed=0
 
@@ -78,10 +88,19 @@ cleanup_recipe_helm_releases() {
         if [[ "$namespace" == "kube-system" ]]; then
             wait_option=--wait
         fi
+        # The sriov-network-operator subchart's pre-delete hook Job hardcodes
+        # control-plane tolerations, so it never schedules on KWOK and the
+        # uninstall times out. The hook only deletes the SriovOperatorConfig
+        # so the operator can remove its webhooks; nothing runs here to do
+        # that, and the namespace sweep removes the rest.
+        local hooks_option=()
+        if sriov_subchart_enabled "$release" "$namespace"; then
+            hooks_option=(--no-hooks)
+        fi
         # --ignore-not-found: under the Flux deployers the Kustomization's
         # prune cascade can uninstall a release between the list above and
         # this call, which is the clean state, not a failure.
-        if ! timeout 60s helm uninstall "$release" -n "$namespace" "$wait_option" --ignore-not-found; then
+        if ! timeout 60s helm uninstall "$release" -n "$namespace" "$wait_option" ${hooks_option[@]+"${hooks_option[@]}"} --ignore-not-found; then
             echo "[ERROR] Failed to uninstall Helm release $release from $namespace" >&2
             failed=1
         fi

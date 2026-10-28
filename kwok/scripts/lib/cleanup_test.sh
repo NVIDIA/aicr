@@ -42,8 +42,19 @@ if [[ "$1" == "list" ]]; then
     printf '%s\n' "${HELM_RELEASES}"
     exit 0
 fi
+if [[ "$1" == "get" && "$2" == "values" ]]; then
+    if [[ "${SRIOV_RELEASE:-}" == "$3" ]]; then
+        printf '{"sriovNetworkOperator":{"enabled":true}}\n'
+    else
+        printf '{}\n'
+    fi
+    exit 0
+fi
 if [[ "$1" == "uninstall" ]]; then
     printf '%s|%s|%s\n' "$2" "$4" "$5" >>"${HELM_CALLS}"
+    if [[ " $* " == *" --no-hooks "* ]]; then
+        printf '%s\n' "$2" >>"${HELM_CALLS}.no-hooks"
+    fi
     if [[ "${FAIL_RELEASE:-}" == "$2" ]]; then
         echo "mock uninstall failure for $2" >&2
         exit 1
@@ -84,6 +95,29 @@ if grep -Eq '^(kwok-controller|kwok-stage-fast|cluster-owned|argocd)\|' "${HELM_
     echo "FAIL: cleanup selected a protected release"
     exit 1
 fi
+if [[ -s "${HELM_CALLS}.no-hooks" ]]; then
+    echo "FAIL: cleanup skipped hooks for a release without the SR-IOV subchart"
+    exit 1
+fi
+
+# A release enabling the sriov-network-operator subchart is uninstalled
+# without hooks: its pre-delete Job cannot schedule on KWOK nodes.
+: >"${HELM_CALLS}"
+export SRIOV_RELEASE=recipe-release
+if ! cleanup_recipe_helm_releases >/dev/null; then
+    echo "FAIL: cleanup returned an error for the SR-IOV release"
+    exit 1
+fi
+grep -sFxq 'recipe-release' "${HELM_CALLS}.no-hooks" || {
+    echo "FAIL: SR-IOV release was not uninstalled with --no-hooks"
+    exit 1
+}
+if grep -Fvx 'recipe-release' "${HELM_CALLS}.no-hooks" | grep -q .; then
+    echo "FAIL: cleanup skipped hooks for a release without the SR-IOV subchart"
+    exit 1
+fi
+unset SRIOV_RELEASE
+rm -f "${HELM_CALLS}.no-hooks"
 
 # A release another controller already uninstalled (Flux's prune cascade)
 # counts as cleaned, not as a failure.

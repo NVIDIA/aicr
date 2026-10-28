@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"testing"
 
@@ -23,33 +24,60 @@ import (
 	"github.com/NVIDIA/aicr/validators/helper"
 )
 
-// TestRDMAFabricResource_RealManifests derives the fabric resource from the
+// TestRDMAFabricResources_RealManifests derives the fabric resources from the
 // actual embedded catalog manifests, so the gate's parser and the shipped
-// NicClusterPolicies cannot drift. The AKS case doubles as the pin between
-// this parser and helper.AKSRdmaSharedResource (the NCCL consumer's constant).
-func TestRDMAFabricResource_RealManifests(t *testing.T) {
+// policies cannot drift. The AKS case doubles as the pin between this parser
+// and helper.AKSRdmaSharedResource (the NCCL consumer's constant). The NVKE
+// case covers resources that live in SriovNetworkNodePolicy manifests of a
+// component other than network-operator, and the two-manifest case shows that
+// distinct resources are all returned (the gate polls each).
+func TestRDMAFabricResources_RealManifests(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		manifest string
-		want     string
+		name         string
+		ncpManifests []string
+		extraRefs    []recipe.ComponentRef
+		want         []string
 	}{
 		{
 			// Pin: manifest-derived == the NCCL consumer's constant.
-			name:     "AKS rdmaSharedDevicePlugin (hca_shared_devices_a)",
-			manifest: "components/network-operator/manifests/nic-cluster-policy-aks.yaml",
-			want:     helper.AKSRdmaSharedResource,
+			name:         "AKS rdmaSharedDevicePlugin (hca_shared_devices_a)",
+			ncpManifests: []string{"components/network-operator/manifests/nic-cluster-policy-aks.yaml"},
+			want:         []string{helper.AKSRdmaSharedResource},
 		},
 		{
-			name:     "OKE GB200 rdmaSharedDevicePlugin (IB shared HCAs)",
-			manifest: "components/network-operator/manifests/nic-cluster-policy-oke-gb200.yaml",
-			want:     "nvidia.com/mlnxnics",
+			name:         "OKE GB200 rdmaSharedDevicePlugin (IB shared HCAs)",
+			ncpManifests: []string{"components/network-operator/manifests/nic-cluster-policy-oke-gb200.yaml"},
+			want:         []string{"nvidia.com/mlnxnics"},
 		},
 		{
-			name:     "OKE L40S sriovDevicePlugin (RoCE VFs)",
-			manifest: "components/network-operator/manifests/nic-cluster-policy-oke-l40s.yaml",
-			want:     "nvidia.com/mlnxnics",
+			name:         "OKE L40S sriovDevicePlugin (RoCE VFs)",
+			ncpManifests: []string{"components/network-operator/manifests/nic-cluster-policy-oke-l40s.yaml"},
+			want:         []string{"nvidia.com/mlnxnics"},
+		},
+		{
+			name:         "NVKE GB200 SriovNetworkNodePolicy per rail (sriov-ib-networks component)",
+			ncpManifests: []string{"components/network-operator/manifests/nic-cluster-policy-nvke-gb200.yaml"},
+			extraRefs: []recipe.ComponentRef{{
+				Name:          "sriov-ib-networks",
+				Namespace:     "nvidia-network-operator",
+				ManifestFiles: []string{"components/sriov-ib-networks/manifests/nvke-gb200.yaml"},
+			}},
+			want: []string{
+				"nvidia.com/sriov_resource_rail_0",
+				"nvidia.com/sriov_resource_rail_1",
+				"nvidia.com/sriov_resource_rail_2",
+				"nvidia.com/sriov_resource_rail_3",
+			},
+		},
+		{
+			name: "two NicClusterPolicy manifests with distinct resources are both derived",
+			ncpManifests: []string{
+				"components/network-operator/manifests/nic-cluster-policy-aks.yaml",
+				"components/network-operator/manifests/nic-cluster-policy-oke-gb200.yaml",
+			},
+			want: []string{"nvidia.com/mlnxnics", helper.AKSRdmaSharedResource},
 		},
 	}
 
@@ -59,26 +87,28 @@ func TestRDMAFabricResource_RealManifests(t *testing.T) {
 			ref := recipe.ComponentRef{
 				Name:          networkOperatorComponent,
 				Namespace:     "network-operator",
-				ManifestFiles: []string{tt.manifest},
+				ManifestFiles: tt.ncpManifests,
 			}
-			got, err := rdmaFabricResource(context.Background(), ref)
+			refs := append([]recipe.ComponentRef{ref}, tt.extraRefs...)
+			got, err := rdmaFabricResources(context.Background(), ref, refs)
 			if err != nil {
-				t.Fatalf("rdmaFabricResource(%s) error = %v, want nil", tt.manifest, err)
+				t.Fatalf("rdmaFabricResources(%v) error = %v, want nil", tt.ncpManifests, err)
 			}
-			if got != tt.want {
-				t.Errorf("rdmaFabricResource(%s) = %q, want %q", tt.manifest, got, tt.want)
+			want := append([]string(nil), tt.want...)
+			sort.Strings(want)
+			if strings.Join(got, ",") != strings.Join(want, ",") {
+				t.Errorf("rdmaFabricResources(%v) = %v, want %v", tt.ncpManifests, got, want)
 			}
 		})
 	}
 }
 
-// TestRDMAFabricResource_FailsClosed proves derivation failures are errors,
-// never a silent skip: an unreadable manifest path and distinct resources
-// across manifests both fail. (The zero-derivable-resources branch is
-// exercised at the parser level in TestNICClusterPolicyResources_ParseShapes
-// — no embedded marker-named manifest without a device-plugin block exists
-// to drive it end to end.)
-func TestRDMAFabricResource_FailsClosed(t *testing.T) {
+// TestRDMAFabricResources_FailsClosed proves derivation failures are errors,
+// never a silent skip: an unreadable manifest path fails, and so does a
+// NicClusterPolicy without a device-plugin block when no SriovNetworkNodePolicy
+// supplies the resource. (The zero-derivable-resources branch at the parser
+// level is exercised in TestNICClusterPolicyResources_ParseShapes.)
+func TestRDMAFabricResources_FailsClosed(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -92,12 +122,9 @@ func TestRDMAFabricResource_FailsClosed(t *testing.T) {
 			wantErrSub:    "failed to load NicClusterPolicy manifest",
 		},
 		{
-			name: "two manifests with distinct resources fail closed",
-			manifestFiles: []string{
-				"components/network-operator/manifests/nic-cluster-policy-aks.yaml",
-				"components/network-operator/manifests/nic-cluster-policy-oke-gb200.yaml",
-			},
-			wantErrSub: "multiple distinct RDMA fabric resources",
+			name:          "NicClusterPolicy without device plugin and no SriovNetworkNodePolicy fails closed",
+			manifestFiles: []string{"components/network-operator/manifests/nic-cluster-policy-nvke-gb200.yaml"},
+			wantErrSub:    "no device-plugin resource could be derived",
 		},
 	}
 
@@ -109,12 +136,77 @@ func TestRDMAFabricResource_FailsClosed(t *testing.T) {
 				Namespace:     "network-operator",
 				ManifestFiles: tt.manifestFiles,
 			}
-			_, err := rdmaFabricResource(context.Background(), ref)
+			_, err := rdmaFabricResources(context.Background(), ref, []recipe.ComponentRef{ref})
 			if err == nil {
-				t.Fatalf("rdmaFabricResource() error = nil, want error containing %q", tt.wantErrSub)
+				t.Fatalf("rdmaFabricResources() error = nil, want error containing %q", tt.wantErrSub)
 			}
 			if !strings.Contains(err.Error(), tt.wantErrSub) {
-				t.Fatalf("rdmaFabricResource() error = %v, want substring %q", err, tt.wantErrSub)
+				t.Fatalf("rdmaFabricResources() error = %v, want substring %q", err, tt.wantErrSub)
+			}
+		})
+	}
+}
+
+// TestSriovNodePolicyResources_ParseShapes exercises the SriovNetworkNodePolicy
+// parser on synthetic documents: the operator prefix applied, accompanying
+// IPPool/SriovIBNetwork documents skipped, and a policy without resourceName
+// failing closed.
+func TestSriovNodePolicyResources_ParseShapes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		rendered   string
+		want       []string
+		wantErrSub string
+	}{
+		{
+			name: "operator prefix applied, companions skipped",
+			rendered: `apiVersion: nv-ipam.nvidia.com/v1alpha1
+kind: IPPool
+metadata:
+  name: pool
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetworkNodePolicy
+spec:
+  resourceName: sriov_resource_rail_0
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovIBNetwork
+spec:
+  resourceName: sriov_resource_rail_0
+`,
+			want: []string{"nvidia.com/sriov_resource_rail_0"},
+		},
+		{
+			name: "policy without resourceName fails closed",
+			rendered: `kind: SriovNetworkNodePolicy
+spec:
+  numVfs: 8
+`,
+			wantErrSub: "declares no resourceName",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := sriovNodePolicyResources([]byte(tt.rendered))
+			if tt.wantErrSub != "" {
+				if err == nil {
+					t.Fatalf("sriovNodePolicyResources() error = nil, want error containing %q", tt.wantErrSub)
+				}
+				if !strings.Contains(err.Error(), tt.wantErrSub) {
+					t.Fatalf("sriovNodePolicyResources() error = %v, want substring %q", err, tt.wantErrSub)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("sriovNodePolicyResources() error = %v, want nil", err)
+			}
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Errorf("sriovNodePolicyResources() = %v, want %v", got, tt.want)
 			}
 		})
 	}
