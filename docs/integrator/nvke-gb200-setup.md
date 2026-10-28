@@ -108,11 +108,12 @@ devices here.
 
 The Network Operator chart enables the SR-IOV Network Operator and the
 Maintenance Operator (external drainer, one node at a time). The
-NicClusterPolicy carries only `nvIpam`. Per rail, the `sriov-ib-networks`
-component (manifest-only, ordered after `network-operator`) supplies
-one nv-ipam `IPPool`
-(`192.168.<4n>.0/22`), one `SriovNetworkNodePolicy` (`linkType: IB`,
-`isRdma: true`, `deviceType: netdevice`, `numVfs: 16`, selected by the rail's
+NicClusterPolicy carries `nvIpam`, multus and the reference CNI plugins. Per
+rail, the `sriov-ib-networks` component (manifest-only, ordered after
+`network-operator`) supplies one nv-ipam `IPPool` (`10.255.<4n>.0/22`,
+outside the `192.168.0.0/16` pod network), one `SriovNetworkNodePolicy`
+(`linkType: IB`, `isRdma: true`, `deviceType: netdevice`, `numVfs: 16`,
+selected by the rail's
 PCI root device) and one `SriovIBNetwork` whose NetworkAttachmentDefinition
 lands in `default`. Nodes advertise `nvidia.com/sriov_resource_rail_0` to
 `_3`, 16 each. A pod takes one VF per rail and the matching attachments:

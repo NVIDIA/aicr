@@ -1568,12 +1568,12 @@ gb200-nvke-ubuntu-training-kubeflow:
   018-sriov-ib-networks/Chart.yaml: cf11fef32f24b6aefc8716a9431095cfb684127211b920f22faa6070114dd946
   018-sriov-ib-networks/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-sriov-ib-networks/install.sh: 8f4bff183a9169f137fd0c47dc059b67b1fa6121531af7d3000b093de7c277fc
-  018-sriov-ib-networks/templates/nvke-gb200.yaml: e5378703b704d4ff7c901ba691a66a83fd3e69f5ccb1133785338c4657070d01
+  018-sriov-ib-networks/templates/nvke-gb200.yaml: 1d78efb71cf8ecff1e40e37775d37270e9a3d9515fc23c5686ba590d611a454f
   018-sriov-ib-networks/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   README.md: 277cb1c71384b62556b1fe8496d5ada125e21215fc180d25a65e51fbdb00f051
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: fd69a2af304cf26f334e2595a27c1fd62726507a071c4185ccadbe0e3b641dec
-  checksums.txt: a64b0a8bfcbed8a46c51e179b3a4d37d700c5e57756977f5316fd63b59981e81
+  checksums.txt: 0efab1cb0c2d894bd3515e4f94f85137f1e4c99d745625d3654eeffe4c7eb19a
   deploy.sh: 7d5e92b02a59bef508ee433e801875d4e7ed9c4b7e0a352658f0d768af99c067
   recipe.yaml: 2d0c1126383892ea4166b371615b44756b7f337ae91175d12be44304d46d3bd2
 gb200-oke-ubuntu-inference-dynamo:
