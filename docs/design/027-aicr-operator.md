@@ -94,7 +94,8 @@ exception:
   ready.
 - **Verdicts are enforced.** A transition runs automatically only when every
   changed component is assessed `safe` with no CRD change; anything else needs
-  approval; `blocked` stops it.
+  approval; `blocked` stops it before any change, naming the component, and
+  the stored assessment keeps AICR's record with any migration steps it gives.
 - **Nothing is removed by accident.** Deleting the operator or its runtime
   leaves the stack running. Removal is an approved rollout, and a reinstalled
   operator re-adopts the stack with approval.
