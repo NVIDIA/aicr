@@ -50,9 +50,8 @@ func (rr *retryRenderer) Render(ctx context.Context, input ChartInput) ([]byte, 
 		// Only helm exiting non-zero can succeed on a retry. A missing helm
 		// binary or an unconfigured chart will not fix itself, and a chart
 		// that hung once would cost another full timeout.
-		if err == nil || timedOut || attempt >= rr.attempts ||
-			!stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
-
+		se, ok := stderrors.AsType[*errors.StructuredError](err)
+		if err == nil || timedOut || attempt >= rr.attempts || !ok || se.Code != errors.ErrCodeInternal {
 			return out, err
 		}
 		slog.Warn("chart render failed, retrying", "component", input.Name, "attempt", attempt, "error", err)

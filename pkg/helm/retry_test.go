@@ -58,6 +58,8 @@ func TestWithRetry(t *testing.T) {
 		{"transient failure is absorbed", 2, internal, 3, false},
 		{"persistent failure surfaces after all attempts", 99, internal, 3, true},
 		{"non-internal failure is not retried", 99, errors.New(errors.ErrCodeNotFound, "no helm"), 1, true},
+		{"non-internal failure wrapping an internal one is not retried", 99,
+			errors.Wrap(errors.ErrCodeNotFound, "no chart", internal), 1, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
