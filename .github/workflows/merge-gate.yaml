@@ -866,10 +866,17 @@ jobs:
     if: needs.check-paths.outputs.crdinv == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+      # Helm reads the Docker credentials this writes, so ghcr.io chart pulls
+      # are authenticated and not rate limited as anonymous.
+      - name: Authenticate to GHCR
+        uses: ./.github/actions/ghcr-login
       - uses: ./.github/actions/load-versions
         id: versions
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
