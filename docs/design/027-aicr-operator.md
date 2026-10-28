@@ -77,30 +77,37 @@ exception:
   (criteria, intent, platform, overrides) and adds none. Each AICR command
   (`snapshot`, `recipe`, `bundle`, `upgrade-check`, `validate`) runs as a Job
   from the pinned image, so every bundle the operator deploys is identical to
-  what `aicr bundle` renders from the same recipe and flags. The operator only
-  decides when each command runs and what happens with its result.
+  what `aicr bundle` renders from the same recipe and flags. Each Job's output
+  is stored content-addressed and handed to the next by digest, and the
+  resulting plan is immutable and records the snapshot, recipe and bundle it
+  came from; a retry reuses it rather than deriving a new one. The operator
+  only decides when each command runs and what happens with its result.
 - **Discovery is continuous.** A new node profile, AICR image or GPU stack
   re-runs `snapshot` and `recipe`; a cluster that no longer matches its
   criteria stops changing rather than drifting.
 - **AICR computes, the engine installs, the operator coordinates.** It writes
   one engine object per bundle release, in dependency order, and moves on only
-  when the engine reports the revision just written healthy and AICR's
-  readiness gate passes.
+  when the engine's status names exactly the chart digest and values just
+  written, reports them healthy, and the readiness gate AICR renders for that
+  component passes. A status that is missing or names anything else is not
+  ready.
 - **Verdicts are enforced.** A transition runs automatically only when every
   changed component is assessed `safe` with no CRD change; anything else needs
   approval; `blocked` stops it.
 - **Nothing is removed by accident.** Deleting the operator or its runtime
   leaves the stack running. Removal is an approved rollout, and a reinstalled
   operator re-adopts the stack with approval.
-- **Evidence covers what is deployed.** After each rollout, AICR's deployment
-  validation runs against the new recipe, and the operator binds its evidence
-  to the deployed plan, images and approval.
+- **Evidence covers what is deployed.** Once every step is ready, AICR's
+  deployment validation runs against the new recipe as a whole. The rollout
+  succeeds, and its plan becomes active, only if validation passes; the
+  operator binds the evidence to the deployed plan, images and approval.
 
 ### Approval
 
 An approval never claims a transition is safe. A named approver accepts one
-transition as assessed, bound to its target and steps; the approval expires and
-can be revoked. For `manual`, the approver also takes on the recorded
+transition as assessed, bound to its starting state (the live engine objects),
+target plan and steps; if the live state drifts from what was approved, the
+rollout stops. The approval expires and can be revoked. For `manual`, the approver also takes on the recorded
 precondition and every step except the apply, which is all the operator does.
 For `unknown` and `unversioned`, the approver accepts what AICR has not
 assessed. Approving is a role separate from editing the runtime.
