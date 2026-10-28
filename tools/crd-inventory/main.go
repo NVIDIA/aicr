@@ -18,8 +18,9 @@
 // recipe deploys, and loses its inventory when no CRD assertion needs it.
 // TestHealthCheckCRDAssertionsAnchored reads these files offline.
 //
-// Crd-inventory reads the registry, recipes, health checks and manifests
-// embedded at build time, so -repo-root must be the tree it was built from.
+// Crd-inventory reads the registry, recipes, values, health checks and
+// manifests embedded at build time, so -repo-root must be the tree it was built
+// from.
 //
 // Usage:
 //
@@ -49,8 +50,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
-// renderConcurrency is the maximum number of charts renderCharts renders at
-// once.
+// renderConcurrency is the maximum number of concurrent chart renders, and of
+// concurrent image reads.
 const renderConcurrency = 8
 
 func main() {
@@ -97,7 +98,7 @@ func run(ctx context.Context, repoRoot string, dp recipe.DataProvider, leaves []
 	if err != nil {
 		return err
 	}
-	rendered, err := renderCharts(ctx, repoRoot, r, readImage, all)
+	rendered, err := renderCharts(ctx, r, readImage, all)
 	if err != nil {
 		return err
 	}
@@ -153,23 +154,33 @@ func run(ctx context.Context, repoRoot string, dp recipe.DataProvider, leaves []
 	return nil
 }
 
-// renderCharts returns the CRDs that the chart of each CRD assertion in
-// assertions installs, keyed by component name and chart.
-func renderCharts(ctx context.Context, repoRoot string, r helm.Renderer, readImage imageReader,
+// chartRender holds the CRDs one render of a chart installs, and the image its
+// operator applies more CRDs from.
+type chartRender struct {
+	image string
+	crds  []string
+}
+
+// renderCharts returns the CRDs each chart in assertions installs with each set
+// of asserting values, keyed by component name, chart and values.
+func renderCharts(ctx context.Context, r helm.Renderer, readImage imageReader,
 	assertions map[string]*componentAssertions,
-) (map[string]map[chartKey]*chartCRDs, error) {
+) (map[string]map[chartKey]map[string]*chartRender, error) {
 
 	type job struct {
-		name string
-		key  chartKey
+		name   string
+		key    chartKey
+		values string
 	}
 	var jobs []job
 	for _, name := range slices.Sorted(maps.Keys(assertions)) {
 		for _, k := range assertions[name].sortedCharts() {
-			jobs = append(jobs, job{name: name, key: k})
+			for _, v := range slices.Sorted(maps.Keys(assertions[name].charts[k].byValues)) {
+				jobs = append(jobs, job{name: name, key: k, values: v})
+			}
 		}
 	}
-	entries := make([]*chartCRDs, len(jobs))
+	renders := make([]*chartRender, len(jobs))
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(renderConcurrency)
 	for i, j := range jobs {
@@ -177,35 +188,48 @@ func renderCharts(ctx context.Context, repoRoot string, r helm.Renderer, readIma
 			if err := gctx.Err(); err != nil {
 				return errors.WrapCtxErr(err, errors.ErrCodeTimeout, "crd-inventory interrupted")
 			}
-			entry, err := deriveChartCRDs(gctx, repoRoot, r, readImage, assertions[j.name].charts[j.key].ref)
+			va := assertions[j.name].charts[j.key].byValues[j.values]
+			render, err := deriveChartCRDs(gctx, r, va.ref, va.values)
 			if err != nil {
 				return err
 			}
-			entries[i] = entry
+			renders[i] = render
 			return nil
 		})
 	}
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
+	components := make([]string, len(jobs))
+	for i, j := range jobs {
+		components[i] = j.name
+	}
+	if err := addImageCRDs(ctx, readImage, components, renders); err != nil {
+		return nil, err
+	}
 
-	out := map[string]map[chartKey]*chartCRDs{}
+	out := map[string]map[chartKey]map[string]*chartRender{}
 	for i, j := range jobs {
 		if out[j.name] == nil {
-			out[j.name] = map[chartKey]*chartCRDs{}
+			out[j.name] = map[chartKey]map[string]*chartRender{}
 		}
-		out[j.name][j.key] = entries[i]
+		if out[j.name][j.key] == nil {
+			out[j.name][j.key] = map[string]*chartRender{}
+		}
+		out[j.name][j.key][j.values] = renders[i]
 	}
 	return out, nil
 }
 
 // buildInventory returns inv, the inventory of the named component, and
-// problems, its unmet CRD assertions. For each chart in assertions that
-// installs a CRD, inv holds the chart's entry in rendered. Each chart that
-// installs no CRD is a problem. An asserted CRD missing from both its chart and
-// the component's manifests is also a problem.
+// problems, its unmet CRD assertions. inv has an entry for each chart in
+// assertions that installs a CRD, built from its renders in rendered by
+// mergeRenders. Problems are:
+//   - a chart that installs no CRD
+//   - an asserted CRD missing from both the render with the asserting values
+//     and the component's manifests
 func buildInventory(ctx context.Context, dp recipe.DataProvider, name string, assertions *componentAssertions,
-	rendered map[chartKey]*chartCRDs,
+	rendered map[chartKey]map[string]*chartRender,
 ) (inv *inventory, problems []string, err error) {
 
 	inv = &inventory{Component: name}
@@ -218,16 +242,60 @@ func buildInventory(ctx context.Context, dp recipe.DataProvider, name string, as
 	}
 	for _, k := range assertions.sortedCharts() {
 		ca := assertions.charts[k]
-		entry := rendered[k]
-		if len(entry.CRDs) == 0 {
+		entry, mergeErr := mergeRenders(k, ca, rendered[k])
+		if mergeErr != nil {
+			return nil, nil, mergeErr
+		}
+		if len(entry.all()) == 0 {
 			problems = append(problems, fmt.Sprintf("%s: health checks assert CRDs %v, but chart %s installs none",
 				name, slices.Sorted(maps.Keys(ca.crds)), k))
 			continue
 		}
-		problems = append(problems, unanchored(name, ca.crds, entry, vendored)...)
+		for _, v := range slices.Sorted(maps.Keys(ca.byValues)) {
+			problems = append(problems, unanchored(name, ca.byValues[v].crds,
+				"chart "+k.String()+" rendered with their values", rendered[k][v].crds, vendored)...)
+		}
 		inv.Charts = append(inv.Charts, *entry)
 	}
 	return inv, problems, nil
+}
+
+// mergeRenders returns the inventory entry for chart k from renders, keyed like
+// ca.byValues. It returns an error if the renders name different CRD images.
+func mergeRenders(k chartKey, ca *chartAssertions, renders map[string]*chartRender) (*chartCRDs, error) {
+	entry := &chartCRDs{Repository: k.Repository, Chart: k.Chart, SourceVersion: k.Version}
+	keys := slices.Sorted(maps.Keys(renders))
+	for i, v := range keys {
+		if i == 0 {
+			entry.Image = renders[v].image
+		} else if renders[v].image != entry.Image {
+			return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+				"chart renders a different CRD image for different values", nil,
+				map[string]any{"chart": k.String(), "images": []string{entry.Image, renders[v].image}})
+		}
+		if ca.byValues[v].registry {
+			entry.CRDs = renders[v].crds
+		}
+	}
+	// Leaves whose values install the same list share a variant.
+	variants := map[string]*crdVariant{}
+	for _, v := range keys {
+		crds := renders[v].crds
+		if slices.Equal(crds, entry.CRDs) {
+			continue
+		}
+		id := strings.Join(crds, "\n")
+		if variants[id] == nil {
+			variants[id] = &crdVariant{CRDs: crds}
+		}
+		variants[id].Recipes = append(variants[id].Recipes, sets.List(ca.byValues[v].leaves)...)
+	}
+	for _, variant := range variants {
+		slices.Sort(variant.Recipes)
+		entry.Variants = append(entry.Variants, *variant)
+	}
+	slices.SortFunc(entry.Variants, func(a, b crdVariant) int { return slices.Compare(a.Recipes, b.Recipes) })
+	return entry, nil
 }
 
 // writeInventory writes inv under repoRoot. If check is set, it writes nothing
@@ -258,21 +326,11 @@ func writeInventory(repoRoot string, inv *inventory, check bool) (string, error)
 	return "", nil
 }
 
-// deriveChartCRDs returns the CRDs ref's chart installs, rendered with AICR's
-// values. For a component in imageCRDSources, the list also holds the CRDs its
-// operator applies from its image.
-func deriveChartCRDs(ctx context.Context, repoRoot string, r helm.Renderer, readImage imageReader,
-	ref recipe.ComponentRef,
-) (*chartCRDs, error) {
-
-	valuesPath := filepath.Join(recipesDir(repoRoot), "components", ref.Name, "values.yaml")
-	if _, err := os.Stat(valuesPath); err != nil {
-		if !os.IsNotExist(err) {
-			return nil, errors.WrapWithContext(errors.ErrCodeInternal, "stat values file", err,
-				map[string]any{pathKey: valuesPath})
-		}
-		valuesPath = ""
-	}
+// deriveChartCRDs returns the CRDs ref's chart installs, rendered with values.
+// For a component in imageCRDSources, it also sets the image its operator
+// applies more CRDs from.
+func deriveChartCRDs(ctx context.Context, r helm.Renderer, ref recipe.ComponentRef, values map[string]any,
+) (*chartRender, error) {
 
 	out, err := r.Render(ctx, helm.ChartInput{
 		Name:        ref.Name,
@@ -280,7 +338,7 @@ func deriveChartCRDs(ctx context.Context, repoRoot string, r helm.Renderer, read
 		Repository:  ref.Source,
 		Version:     ref.Version,
 		Namespace:   ref.Namespace,
-		ValuesPath:  valuesPath,
+		Values:      values,
 		IncludeCRDs: true,
 	})
 	if err != nil {
@@ -291,25 +349,53 @@ func deriveChartCRDs(ctx context.Context, repoRoot string, r helm.Renderer, read
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
 			"parse rendered chart for component "+ref.Name)
 	}
-	entry := &chartCRDs{
-		Repository:    ref.Source,
-		Chart:         ref.EffectiveChart(),
-		SourceVersion: ref.Version,
-		CRDs:          crds,
-	}
+	render := &chartRender{crds: crds}
 
 	src, fromImage := imageCRDSources[ref.Name]
 	if !fromImage {
-		return entry, nil
+		return render, nil
 	}
-	entry.Image, err = containerImage(out, src.Container)
+	render.image, err = containerImage(out, src.Container)
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "find CRD image for component "+ref.Name)
 	}
-	imageCRDs, err := readImage(ctx, entry.Image, src.Dir)
-	if err != nil {
-		return nil, err
+	return render, nil
+}
+
+// addImageCRDs adds to each renders[i] that has an image the CRDs stored in that
+// image under imageCRDSources[components[i]].Dir.
+func addImageCRDs(ctx context.Context, readImage imageReader, components []string, renders []*chartRender) error {
+	// Renders with different values usually share an image, so each image and
+	// directory is read once.
+	type source struct{ image, dir string }
+	read := map[source][]string{}
+	for i, render := range renders {
+		if render.image != "" {
+			read[source{render.image, imageCRDSources[components[i]].Dir}] = nil
+		}
 	}
-	entry.CRDs = slices.Compact(slices.Sorted(slices.Values(append(entry.CRDs, imageCRDs...))))
-	return entry, nil
+	sources := slices.Collect(maps.Keys(read))
+	found := make([][]string, len(sources))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(renderConcurrency)
+	for i, src := range sources {
+		g.Go(func() error {
+			crds, err := readImage(gctx, src.image, src.dir)
+			found[i] = crds
+			return err
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return err
+	}
+	for i, src := range sources {
+		read[src] = found[i]
+	}
+	for i, render := range renders {
+		if render.image != "" {
+			crds := read[source{render.image, imageCRDSources[components[i]].Dir}]
+			render.crds = slices.Compact(slices.Sorted(slices.Values(slices.Concat(render.crds, crds))))
+		}
+	}
+	return nil
 }

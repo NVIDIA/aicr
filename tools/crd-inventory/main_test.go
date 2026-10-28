@@ -35,6 +35,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	ociregistry "github.com/google/go-containerregistry/pkg/registry"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
@@ -386,13 +387,15 @@ func TestRun(t *testing.T) {
 	}
 	wantChart := inventory{Component: "chart", Charts: []chartCRDs{
 		{Repository: exampleRepo, Chart: "chart", SourceVersion: "1.0.0", CRDs: []string{"a.x.io", "b.x.io"}},
-		{Repository: exampleRepo, Chart: "chart", SourceVersion: "1.1.0", CRDs: []string{"a.x.io", "c.x.io"}},
+		{Repository: exampleRepo, Chart: "chart", SourceVersion: "1.1.0",
+			Variants: []crdVariant{{Recipes: []string{"pinned"}, CRDs: []string{"a.x.io", "c.x.io"}}}},
 	}}
 	if got := readInv("chart"); !reflect.DeepEqual(got, wantChart) {
 		t.Errorf("chart inventory = %+v, want %+v", got, wantChart)
 	}
 	wantInline := inventory{Component: "inline", Charts: []chartCRDs{
-		{Repository: exampleRepo, Chart: "inline", SourceVersion: "3.0.0", CRDs: []string{"i.x.io"}},
+		{Repository: exampleRepo, Chart: "inline", SourceVersion: "3.0.0",
+			Variants: []crdVariant{{Recipes: []string{"pinned"}, CRDs: []string{"i.x.io"}}}},
 	}}
 	if got := readInv("inline"); !reflect.DeepEqual(got, wantInline) {
 		t.Errorf("inline inventory = %+v, want %+v", got, wantInline)
@@ -581,9 +584,97 @@ func TestRunRendersChartsConcurrently(t *testing.T) {
 	}
 }
 
+func TestRunRendersEachRecipesValues(t *testing.T) {
+	const valuesFile = "components/chart/values.yaml"
+	chartCheck := healthCheck(assertOp(crdKind, "a.x.io"))
+	dp := newMapProvider(t, map[string]string{
+		"registry.yaml": registryHeader + `components:
+  - name: chart
+    healthCheck: {assertFile: checks/chart/health-check.yaml}
+    helm: {defaultRepository: https://charts.example.com, defaultVersion: "1.0.0"}
+  - name: dynamo-platform
+    healthCheck: {assertFile: checks/dynamo-platform/health-check.yaml}
+    helm: {defaultRepository: https://charts.example.com, defaultVersion: "2.0.0"}
+`,
+		"checks/chart/health-check.yaml":           chartCheck,
+		"checks/dynamo-platform/health-check.yaml": healthCheck(assertOp(crdKind, "img.x.io")),
+		valuesFile: "sub: {enabled: true}\n",
+	})
+	leafRef := func(name, version, asserts string, overrides map[string]any) recipe.ComponentRef {
+		ref := helmRef(name, version, asserts)
+		ref.ValuesFile = valuesFile
+		ref.Overrides = overrides
+		return ref
+	}
+	var mu sync.Mutex
+	var renders []map[string]any
+	render := renderFunc(func(_ context.Context, in helm.ChartInput) ([]byte, error) {
+		if in.Name == "dynamo-platform" {
+			return []byte("kind: Deployment\nspec:\n  template:\n    spec:\n      initContainers:\n" +
+				"        - name: crd-apply\n          image: op:2.0.0\n"), nil
+		}
+		mu.Lock()
+		renders = append(renders, in.Values)
+		mu.Unlock()
+		var out []string
+		if on, _, _ := unstructured.NestedBool(in.Values, "sub", "enabled"); on {
+			out = append(out, crdDoc("a.x.io"))
+		}
+		if on, _, _ := unstructured.NestedBool(in.Values, "extra", "enabled"); on {
+			out = append(out, crdDoc("b.x.io"))
+		}
+		return []byte(strings.Join(out, "---\n")), nil
+	})
+	imageReads := 0
+	readImage := func(context.Context, string, string) ([]string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		imageReads++
+		return []string{"img.x.io"}, nil
+	}
+	leaves := []recipe.ResolvedLeaf{
+		leafOf("keeps", leafRef("chart", "1.0.0", chartCheck, nil),
+			leafRef("dynamo-platform", "2.0.0", healthCheck(assertOp(crdKind, "img.x.io")),
+				map[string]any{"x": 1})),
+		leafOf("extra", leafRef("chart", "1.0.0", healthCheck(assertOp(crdKind, "b.x.io")),
+			map[string]any{"extra": map[string]any{"enabled": true}})),
+	}
+
+	root := t.TempDir()
+	if err := run(t.Context(), root, dp, leaves, render, readImage, false); err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+	if len(renders) != 2 {
+		t.Errorf("chart rendered %d times, want 2 (the registry and leaf keeps share values)", len(renders))
+	}
+	if imageReads != 1 {
+		t.Errorf("CRD image read %d times, want 1", imageReads)
+	}
+	inv, err := serializer.FromFile[inventory](inventoryPath(root, "chart"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []chartCRDs{{Repository: exampleRepo, Chart: "chart", SourceVersion: "1.0.0",
+		CRDs:     []string{"a.x.io"},
+		Variants: []crdVariant{{Recipes: []string{"extra"}, CRDs: []string{"a.x.io", "b.x.io"}}}}}
+	if !reflect.DeepEqual(inv.Charts, want) {
+		t.Errorf("chart inventory = %+v, want %+v", inv.Charts, want)
+	}
+
+	drops := leafOf("drops", leafRef("chart", "1.0.0", chartCheck,
+		map[string]any{"sub": map[string]any{"enabled": false}}))
+	err = run(t.Context(), root, dp, slices.Concat(leaves, []recipe.ResolvedLeaf{drops}), render, readImage, true)
+	if err == nil || !strings.Contains(err.Error(), `leaf recipe drops asserts CRD "a.x.io"`) ||
+		strings.Contains(err.Error(), "leaf recipe keeps") {
+
+		t.Errorf("run(check) with a leaf whose values drop a.x.io error = %v, want only leaf drops reported", err)
+	}
+}
+
 func TestDecodeInventory(t *testing.T) {
 	want := inventory{Component: "c", Charts: []chartCRDs{
-		{Repository: exampleRepo, Chart: "c", SourceVersion: "1.0.0", Image: "op:1", CRDs: []string{"a.x.io"}},
+		{Repository: exampleRepo, Chart: "c", SourceVersion: "1.0.0", Image: "op:1", CRDs: []string{"a.x.io"},
+			Variants: []crdVariant{{Recipes: []string{"l"}, CRDs: []string{"b.x.io"}}}},
 	}}
 	rendered, err := renderInventory(&want)
 	if err != nil {

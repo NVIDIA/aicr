@@ -212,7 +212,7 @@ jobs:
               - 'recipes/overlays/**'
               - 'recipes/mixins/**'
               - 'recipes/checks/**'
-              - 'recipes/components/*/values.yaml'
+              - 'recipes/components/*/values*.yaml'
               - 'recipes/components/*/crds.yaml'
               - 'recipes/components/*/manifests/**'
               - 'tools/crd-inventory/**'
