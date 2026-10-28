@@ -24,12 +24,10 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// WithRetry returns a Renderer that renders with r and retries a render that
-// fails with ErrCodeInternal, as a transient chart pull does. It makes up to
+// WithRetry returns a Renderer that retries r's renders only when they fail
+// with ErrCodeInternal and did not time out. It makes up to
 // defaults.HelmRenderAttempts attempts, each bounded by
-// defaults.HelmTemplateTimeout, and returns the last error if all fail. It
-// does not retry an attempt that timed out or a render that failed with any
-// other code.
+// defaults.HelmTemplateTimeout, and returns the last error if all fail.
 func WithRetry(r Renderer) Renderer {
 	return &retryRenderer{
 		r:        r,
@@ -66,7 +64,8 @@ func (rr *retryRenderer) Render(ctx context.Context, input ChartInput) ([]byte, 
 	}
 }
 
-// renderOnce renders input once and reports whether the attempt timed out.
+// renderOnce makes one attempt bounded by rr.timeout. timedOut reports whether
+// the attempt's context was done when rr.r returned.
 func (rr *retryRenderer) renderOnce(ctx context.Context, input ChartInput) (out []byte, timedOut bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, rr.timeout)
 	defer cancel()
