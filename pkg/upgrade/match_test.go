@@ -647,10 +647,6 @@ func TestMatchCrossingIgnoresFromMembership(t *testing.T) {
 	}
 }
 
-// TestMatchVerdictSelection covers the five branches of the selection order and
-// every Reason they can produce, including the invariants a blocked result must
-// hold: no Transition to render another record's steps from, and a StoppedAt
-// the report can name.
 // A safe boundary carries no steps, so crossing one composes nothing and skips
 // nothing. It must not stop a jump whose only substantive boundary describes
 // the whole move -- the nodewright shape, where a manual rename is followed by
@@ -662,6 +658,9 @@ func TestMatchSafeBoundaryDoesNotBlockComposition(t *testing.T) {
 	firstSafe := trans("<0.18.0", ">=0.18.0 <=0.18.0", VerdictSafe, "first-safe")
 	boundedA := trans(">=1.0.0 <1.1.0", ">=1.1.0 <=1.1.0", VerdictSafe, "bounded-A")
 	boundedB := trans(">=1.1.0 <1.2.0", ">=1.2.0 <=1.2.0", VerdictSafe, "bounded-B")
+	boundedManualB := trans(">=1.1.0 <1.2.0", ">=1.2.0 <=1.2.0", VerdictManual, "bounded-manual-B")
+	openA := trans("<1.1.0", ">=1.1.0 <=1.1.0", VerdictSafe, "open-A")
+	openB := trans("<1.2.0", ">=1.2.0 <=1.2.0", VerdictSafe, "open-B")
 
 	tests := []struct {
 		name        string
@@ -709,14 +708,15 @@ func TestMatchSafeBoundaryDoesNotBlockComposition(t *testing.T) {
 			// boundaries the jump crosses. Before the fromCovers guard this
 			// came back safe on two crossings while the identical origin was
 			// refused on one, so asking to go further bought a verdict that
-			// vouches. The floors are bounded below, which is the ADR's
-			// ordinary shape and the only one that exercises this.
+			// vouches. No record covers 0.9.0, so the undefined-origin check
+			// refuses it before that guard is reached; the two cases after the
+			// next one reach the guards.
 			name:        "an unassessed origin is not rescued by crossing more boundaries",
 			set:         oneComponent(boundedA, boundedB),
 			from:        "0.9.0",
 			to:          "1.2.0",
 			wantVerdict: VerdictBlocked,
-			wantReason:  ReasonMultipleBoundaries,
+			wantReason:  ReasonUndefinedOrigin,
 		},
 		{
 			// The same origin across a single boundary, for the comparison the
@@ -727,6 +727,29 @@ func TestMatchSafeBoundaryDoesNotBlockComposition(t *testing.T) {
 			to:          "1.1.0",
 			wantVerdict: VerdictBlocked,
 			wantReason:  ReasonUndefinedOrigin,
+		},
+		{
+			// open-B covers 0.9.0, so the undefined-origin check does not
+			// answer, but bounded-A, the boundary that has to own the origin,
+			// was written for 1.0.x. Without the all-safe path's origin check
+			// this reads safe.
+			name:        "every crossing safe but the lowest written for another origin",
+			set:         oneComponent(boundedA, openB),
+			from:        "0.9.0",
+			to:          "1.2.0",
+			wantVerdict: VerdictBlocked,
+			wantReason:  ReasonMultipleBoundaries,
+		},
+		{
+			// The lone-substantive path's counterpart: open-A covers 0.9.0,
+			// but the one boundary that asks something was written for 1.1.x,
+			// so its steps do not describe this jump.
+			name:        "a lone substantive boundary written for another origin is not lent",
+			set:         oneComponent(openA, boundedManualB),
+			from:        "0.9.0",
+			to:          "1.2.0",
+			wantVerdict: VerdictBlocked,
+			wantReason:  ReasonMultipleBoundaries,
 		},
 		{
 			// The control: two boundaries that both ask something still block,
@@ -759,11 +782,19 @@ func TestMatchSafeBoundaryDoesNotBlockComposition(t *testing.T) {
 	}
 }
 
+// TestMatchVerdictSelection covers the branches of the selection order,
+// including the invariants a blocked result must hold: no Transition to render
+// another record's steps from, and a StoppedAt the report can name.
 func TestMatchVerdictSelection(t *testing.T) {
 	safeLow := trans("<2.0.0", ">=2.0.0 <2.1.0", VerdictSafe, "S")
 	blockedHigh := trans("<3.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B")
 	blockedMid := trans("<2.5.0", ">=2.5.0 <2.6.0", VerdictBlocked, "M")
 	boundedOrigin := trans(">=2.0.0 <3.0.0", ">=3.0.0 <=3.0.0", VerdictManual, "O")
+	boundedManual := trans(">=2.0.0 <3.0.0", ">=3.0.0 <3.1.0", VerdictManual, "BM")
+	boundedNextManual := trans(">=3.0.0 <4.0.0", ">=4.0.0 <=4.0.0", VerdictManual, "BN")
+	boundedNextBlocked := trans(">=3.0.0 <4.0.0", ">=4.0.0 <=4.0.0", VerdictBlocked, "BB")
+	far := trans(">=1.0.0 <2.0.0", ">=5.0.0 <=5.0.0", VerdictManual, "far")
+	blockedOrigin := trans(">=2.0.0 <3.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "BO")
 
 	tests := []struct {
 		name          string
@@ -837,6 +868,86 @@ func TestMatchVerdictSelection(t *testing.T) {
 		{
 			name:          "one crossed record whose from excludes the source blocks",
 			set:           oneComponent(boundedOrigin),
+			from:          "1.5.0",
+			to:            "3.0.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonUndefinedOrigin,
+			wantStoppedAt: ">=3.0.0 <=3.0.0",
+		},
+		{
+			// Naming the lowest floor as the place to stop would send the
+			// operator on a first hop, 1.5.0 to 3.0.0, that no record
+			// describes either: checked on its own, it is undefined-origin.
+			name:          "several crossed records none of which covers the source",
+			set:           oneComponent(boundedManual, boundedNextManual),
+			from:          "1.5.0",
+			to:            "4.0.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonUndefinedOrigin,
+			wantStoppedAt: ">=3.0.0 <3.1.0",
+		},
+		{
+			// The block's floor is the move it forbids, so offering it as the
+			// stop from an origin no record reaches would be the worst advice
+			// available.
+			name:          "an authored block does not outrank a source no record covers",
+			set:           oneComponent(boundedManual, boundedNextBlocked),
+			from:          "1.5.0",
+			to:            "4.0.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonUndefinedOrigin,
+			wantStoppedAt: ">=3.0.0 <3.1.0",
+		},
+		{
+			// The previous case in its simplest form: the block's own floor is
+			// the move it forbids, and nothing describes a hop from 1.5.0.
+			name:          "a lone crossed block does not outrank a source no record covers",
+			set:           oneComponent(blockedOrigin),
+			from:          "1.5.0",
+			to:            "3.0.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonUndefinedOrigin,
+			wantStoppedAt: ">=3.0.0 <=3.0.0",
+		},
+		{
+			// far covers 1.5.0 without being in the way, so the authored
+			// block keeps its reason.
+			name:          "a lone crossed block keeps its reason when a record outside the jump covers the source",
+			set:           oneComponent(far, blockedOrigin),
+			from:          "1.5.0",
+			to:            "3.0.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonRecordBlocks,
+			wantStoppedAt: ">=3.0.0 <=3.0.0",
+		},
+		{
+			// far covers 1.5.0 without being in the way, so the undefined-origin
+			// check stays out: its sentence, that no record describes an
+			// upgrade from 1.5.0, would be false. The reason and stop pinned
+			// here and in the next case are the fallbacks this shape gets, not
+			// a claim that they are the best answer to it.
+			name:          "a record outside the jump that covers the source keeps undefined-origin out",
+			set:           oneComponent(far, boundedManual, boundedNextManual),
+			from:          "1.5.0",
+			to:            "4.0.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=3.0.0 <3.1.0",
+		},
+		{
+			name:          "a record outside the jump that covers the source keeps an authored block's reason",
+			set:           oneComponent(far, boundedManual, boundedNextBlocked),
+			from:          "1.5.0",
+			to:            "4.0.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonRecordBlocks,
+			wantStoppedAt: ">=4.0.0 <=4.0.0",
+		},
+		{
+			// A record covers the source but is not in the way, so the one
+			// record that is was still written for a different starting point.
+			name:          "one crossed record whose from excludes a source another record covers",
+			set:           oneComponent(far, boundedOrigin),
 			from:          "1.5.0",
 			to:            "3.0.0",
 			wantVerdict:   VerdictBlocked,
@@ -965,6 +1076,30 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 			to:   "3.0.0",
 			want: "crosses the boundary at 3.0.0, but no record describes an upgrade starting from 2.5.0, " +
 				"so nothing covers this move. Author a record for this starting point, then re-run this check",
+		},
+		{
+			name: "undefined-origin across several boundaries names the earliest recorded starting point",
+			set: oneComponent(
+				trans(">=2.0.0 <3.0.0", ">=3.0.0 <3.1.0", VerdictManual, "M"),
+				trans(">=3.0.0 <4.0.0", ">=4.0.0 <=4.0.0", VerdictBlocked, "B"),
+			),
+			from: "1.5.0",
+			to:   "4.0.0",
+			want: "crosses 2 recorded boundaries (3.0.0, 4.0.0), but no record describes an upgrade " +
+				"starting from 1.5.0; the earliest recorded starting point is 2.0.0. Upgrade to a " +
+				"recorded version first, then re-run this check",
+		},
+		{
+			name: "undefined-origin across several boundaries from a gap between from domains",
+			set: oneComponent(
+				trans(">=1.0.0 <2.0.0", ">=3.0.0 <3.1.0", VerdictManual, "M"),
+				trans(">=3.0.0 <4.0.0", ">=4.0.0 <=4.0.0", VerdictManual, "N"),
+			),
+			from: "2.5.0",
+			to:   "4.0.0",
+			want: "crosses 2 recorded boundaries (3.0.0, 4.0.0), but no record describes an upgrade " +
+				"starting from 2.5.0, so nothing covers this move. Author a record for this starting " +
+				"point, then re-run this check",
 		},
 		{
 			name: "beyond-record-ceiling",
@@ -1136,8 +1271,11 @@ func TestMatchPrereleaseBreakingDoesNotDisturbARecordedSafe(t *testing.T) {
 // to stop *below* that floor always already held. The floor itself is the
 // actionable landing point.
 func TestMatchRecordBlocksNamesTheFloorToLandOn(t *testing.T) {
+	// C closes the hole below B's from, so both sources start somewhere a
+	// record describes; one that does not is undefined-origin instead.
 	set := oneComponent(
 		trans("<2.0.0", ">=2.0.0 <2.1.0", VerdictSafe, "S"),
+		trans(">=2.0.0 <2.5.0", ">=2.5.0 <2.6.0", VerdictSafe, "C"),
 		trans(">=2.5.0 <3.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B"),
 	)
 	explanations := make(map[string]string, 2)

@@ -36,6 +36,14 @@ When `aicr bundle` resolves that recipe, the `os-talos` mixin:
 3. Adds an `OS.release.ID == talos` constraint to the recipe so the
    bundle won't silently install on a non-Talos cluster.
 
+The mixin adds network-operator even when the base does not ship it.
+On such a base, also select `components/nfd/values-nvidia-nics.yaml`
+as nfd's `valuesFile` in the leaf, or bundle with
+`--set networkoperator:enabled=false`. Otherwise `aicr bundle` fails,
+because nothing would label the NIC nodes that network-operator
+selects on. See the
+[nfd and network-operator upgrade note](../user/component-catalog.md#nfd-and-network-operator-custom-overlays-must-select-the-nic-rule).
+
 No operator pre-cluster setup is required. `kubectl apply -f` or an
 Argo CD GitOps sync handles namespace creation and chart install in
 the right order.

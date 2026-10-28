@@ -1,0 +1,55 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NKTP (NVKE Telemetry Pipeline) Helm values, ADR-026. Collector resources are
+# NKTP's to tune and are not overridden here. Images are the chart's defaults
+# at the pinned chart version (ADR-006).
+
+# Collectors schedule ahead of workloads but never evict a running pod. The
+# field is immutable: changing it on an installed cluster means deleting the
+# class.
+priorityClass:
+  preemptionPolicy: Never
+
+# Evaluation only: one pod with every signal on emptyDir, anonymous Grafana
+# Admin, running as root, no alerting. CheckNKTPExportersHaveBackend requires
+# all five backend exporter endpoints to be set when this is disabled.
+otel-lgtm:
+  enabled: true
+
+opentelemetry-kube-stack:
+  crds:
+    # prometheus-operator-crds owns the monitoring.coreos.com CRDs. Left on,
+    # Argo CD would reapply this chart's copies on every sync and Flux would
+    # replace them.
+    installPrometheus: false
+  opentelemetry-operator:
+    manager:
+      # The operator's NetworkPolicy allows egress only to the API server's
+      # endpoint IPs, but the operator dials the Service ClusterIP, so on EKS
+      # with VPC CNI network policy it crash-looped. Off by default since
+      # operator 0.160; pinned so a chart bump cannot re-enable it.
+      featureGatesMap:
+        operator.networkpolicy: false
+
+# Binds host port 9100 on every node. The chart default tolerates only
+# NoSchedule taints, which misses GPU nodes with NoExecute taints.
+node-exporter:
+  tolerations:
+    - operator: Exists
+
+# NKTP's autoscalers need a resource metrics API; an overlay enables this
+# only on a platform that ships none.
+metrics-server:
+  enabled: false

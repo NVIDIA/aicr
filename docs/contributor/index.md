@@ -64,14 +64,23 @@ AICR is not a deployment engine. The boundary matters: half of all
 The deployment tool that consumes AICR's output (Helm, Argo CD, Flux,
 Helmfile, Terraform) owns release reconciliation and lifecycle.
 
+This boundary holds for the CLI, API server, SDK and bundler, with one
+exception:
+
+> The AICR Operator ([ADR-027](https://github.com/NVIDIA/aicr/blob/main/docs/design/027-aicr-operator.md)) is an opt-in
+> in-cluster component under `pkg/operator`. It orders the engine objects it
+> writes, gates them on readiness and approval, and repairs drift only in
+> those objects; installing charts and reconciling what they deploy stay with
+> the engine.
+
 **On terminology.** Code under `pkg/bundler/deployer` includes things
 we call *deployers*. They are **output adapters** that serialize a
 bundle in a tool-specific format. They do not perform deployment.
 
-The only in-cluster component is the **snapshot agent** — a one-shot
-Kubernetes Job that captures state into a ConfigMap and exits. It is
-an input collector, not a runtime component, and is not part of the
-deployed system.
+Apart from that opt-in operator, the only in-cluster component is the
+**snapshot agent** — a one-shot Kubernetes Job that captures state into a
+ConfigMap and exits. It is an input collector, not a runtime component, and
+is not part of the deployed system.
 
 ## Is My Change In Scope?
 
@@ -91,6 +100,8 @@ review will not get past `make qualify` regardless of code quality.
 A rule of thumb: if a feature requires AICR to keep running after
 artifact generation, or to drive `kubectl` and direct API calls to
 deploy what it produces, it belongs in a deployment tool — not AICR.
+The AICR Operator is the one exception, scoped by
+[ADR-027](https://github.com/NVIDIA/aicr/blob/main/docs/design/027-aicr-operator.md); changes to it follow that ADR.
 
 ## Where Does My Change Go?
 

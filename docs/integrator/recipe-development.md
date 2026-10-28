@@ -568,6 +568,34 @@ Base → ValuesFile → Overrides → CLI --set flags
 # Result: driver.version="580.13.01", driver.repository="nvcr.io/nvidia" (preserved)
 ```
 
+### Runtime Metrics Declarations
+
+A component that queries the runtime Prometheus server declares what it reads in its registry entry ([ADR-026](https://github.com/NVIDIA/aicr/blob/main/docs/design/026-nktp-telemetry-collection.md)); overlays carry none.
+
+```yaml
+- name: my-autoscaler
+  telemetry:
+    promql:
+      monitorsFrom: [gpu-operator]   # components whose ServiceMonitors/PodMonitors expose the data
+      series: [DCGM_FI_DEV_GPU_UTIL] # RE2, matched against the whole scraped metric name
+- name: my-prometheus
+  telemetry:
+    promqlServer:                    # value paths the bundler owns
+      namespaceSelectorPaths:        # one path per monitor kind
+        - prometheus.prometheusSpec.serviceMonitorNamespaceSelector
+        - prometheus.prometheusSpec.podMonitorNamespaceSelector
+      monitorSelectorPaths:
+        - prometheus.prometheusSpec.serviceMonitorSelector
+        - prometheus.prometheusSpec.podMonitorSelector
+      scrapeClassesPath: prometheus.prometheusSpec.scrapeClasses
+```
+
+On every bundle path (CLI, `aicrd`, and the SDK's `Client.BundleComponents`), the bundler writes the union of the enabled consumers' declarations into the enabled server's values: namespace selectors naming exactly the `monitorsFrom` namespaces, monitor selectors matching every monitor (`matchExpressions: []`, since the chart treats an empty map as unset), and one default scrape class that keeps only the declared series. Prometheus still stores its own per-target series, such as `up`.
+
+The bundle fails with `INVALID_REQUEST` when a `monitorsFrom` component is absent or disabled, more than one server is enabled, the server's values already set an owned path, or `--set`, `--set-json`, `--set-file` or `--dynamic` targets one. A pattern that does not compile fails the registry load. With the server disabled or absent, nothing is injected or checked.
+
+**Monitors must use the default scrape class.** A declared source's ServiceMonitors and PodMonitors must not set `spec.scrapeClass`: the series filter is the server's default scrape class, and the server defines no other, so the operator rejects such a monitor. The bundler cannot check this, because operators create some monitors at run time.
+
 ### Configuration Profiles
 
 A service or OS overlay may declare one configuration profile when the same
