@@ -133,7 +133,7 @@ testing_tools:
   # kubelogin: Entra exec-plugin for AKS kubeconfigs, installed by uat-azure.yaml
   # via `az aks install-cli` (which defaults to latest without an explicit pin).
   # renovate: datasource=github-releases depName=Azure/kubelogin depType=testing_tools
-  kubelogin: 'v0.2.21'
+  kubelogin: 'v0.2.22'
   # renovate: datasource=github-releases depName=kubernetes-sigs/kind depType=testing_tools
   kind: '0.33.0'
   # renovate-digest: datasource=git-refs depName=nvkind packageName=https://github.com/NVIDIA/nvkind branch=main depType=testing_tools
