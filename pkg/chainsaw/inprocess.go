@@ -281,6 +281,36 @@ func decodeTests(yamlContent string) ([]v1alpha1.Test, error) {
 	}
 }
 
+// AssertedResources returns the resource of each assert operation in the try
+// blocks of the Tests in yamlContent, in document order. Error operations are
+// excluded. It returns an error if a document is not a Test or an assert has
+// no resource mapping.
+func AssertedResources(yamlContent string) ([]map[string]any, error) {
+	tests, err := decodeTests(yamlContent)
+	if err != nil {
+		return nil, err
+	}
+	var resources []map[string]any
+	for _, test := range tests {
+		for _, step := range test.Spec.Steps {
+			for _, op := range step.Try {
+				if op.Assert == nil {
+					continue
+				}
+				if op.Assert.Check == nil {
+					return nil, errors.New(errors.ErrCodeInvalidRequest, "assert.resource is required")
+				}
+				resource, ok := op.Assert.Check.Value().(map[string]any)
+				if !ok {
+					return nil, errors.New(errors.ErrCodeInvalidRequest, "assert.resource must be a mapping")
+				}
+				resources = append(resources, resource)
+			}
+		}
+	}
+	return resources, nil
+}
+
 // isEmptyYAMLDocument reports whether a decoded document carries no content:
 // the shape yaml.v3 produces for a trailing `---`, a comment-only document, or
 // an explicit `null`. Such a document is punctuation, not dropped content, so

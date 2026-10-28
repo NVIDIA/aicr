@@ -1603,6 +1603,32 @@ restricted at runtime to read-only Chainsaw operations
 registry-declared assert file against this allowlist under `make qualify`,
 so violations are caught before they ever reach the validator.
 
+**CRD assertions.** Every CRD a health check asserts must be backed by an
+in-tree record of what AICR installs, so a chart bump that renames or drops a
+CRD fails at PR time, before any cluster runs the check.
+`TestHealthCheckCRDAssertionsAnchored` in `tools/crd-inventory` enforces this
+offline under `make test`:
+
+- A Helm component's asserted CRDs must appear in its generated
+  `recipes/components/<name>/crds.yaml` or in its vendored `manifests/`, and
+  the inventory's `sourceVersion` must equal the registry pin.
+- A component with no chart, such as an OLM or manifest-only wrapper, may
+  assert only CRDs that some in-tree inventory or vendored manifest defines.
+
+`make crd-inventory` renders each such chart with `--include-crds` and the
+component's `values.yaml`, then rewrites the inventories. Run it after bumping
+the pin of a component whose check asserts a CRD, and after adding a CRD
+assertion. It also reports every asserted CRD the pinned chart no longer
+installs. Some operators apply CRDs from their own image at runtime, so their
+chart does not render them. `dynamo-platform` applies all of its CRDs from a
+`crd-apply` init container, and `network-operator` applies the nv-ipam CRDs
+when a NicClusterPolicy enables nvIpam. Such components are listed in
+`imageCRDSources`, and the tool also reads the CRDs from the image of the
+named container in the rendered chart.
+`make crd-inventory-check` re-renders every chart and fails on a stale
+inventory. It needs helm and network access, so `make qualify` does not run
+it.
+
 **Value-gate awareness (#1844).** A registry assert file is static — it
 cannot see the component's effective Helm values. That is a problem for a
 manifest whose whole resource is gated behind a value: e.g.
