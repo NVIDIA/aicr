@@ -98,10 +98,12 @@ exception:
 - **Nothing is removed by accident.** Deleting the operator or its runtime
   leaves the stack running. Removal is an approved rollout, and a reinstalled
   operator re-adopts the stack with approval.
-- **Evidence covers what is deployed.** Once every step is ready, AICR's
-  deployment validation runs against the new recipe as a whole. The rollout
-  succeeds, and its plan becomes active, only if validation passes; the
-  operator binds the evidence to the deployed plan, images and approval. A
+- **Evidence covers what is deployed.** Once every step is ready, the operator
+  takes a fresh snapshot, and AICR's deployment validation runs against the new
+  recipe as a whole and that snapshot, never one taken before the rollout. The
+  rollout succeeds, and its plan becomes active, only if validation passes; the
+  operator binds the evidence to the deployed plan, the snapshot's digest, the
+  images and the approval. A
   failed validation fails the rollout: its plan never becomes active, nothing
   rolls back, and the runtime stalls until a person retries with a fresh
   approval or selects another target, which is assessed against what is
