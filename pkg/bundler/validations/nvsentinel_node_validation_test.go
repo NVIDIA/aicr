@@ -46,6 +46,7 @@ func nodeValidationValues() map[string]any {
 						nodeValidationCriterion("gpu-present", `has(node.metadata.labels) && `+
 							`node.metadata.labels["nvidia.com/gpu.present"] == "true"`),
 						nodeValidationCriterion(nodeValidationCordonedCriterion, nodeValidationCordonedExpression),
+						nodeValidationCriterion(nodeValidationQuarantineCriterion, nodeValidationQuarantineExpression),
 					},
 					"newNodeTests": []any{nodeValidationDCGMTest},
 				},
@@ -140,6 +141,8 @@ func TestCheckNVSentinelNodeValidationCoherent(t *testing.T) {
 	gpuBurn := map[string]any{"provider": "k8s-job-provider", "image": "busybox:1.38.0", "command": stubCommand}
 	// broken fails several rules at once, so a case that passes with it shows
 	// the gate never looked.
+	cordoned := nodeValidationCriterion(nodeValidationCordonedCriterion, nodeValidationCordonedExpression)
+	notQuarantined := nodeValidationCriterion(nodeValidationQuarantineCriterion, nodeValidationQuarantineExpression)
 	broken := func(overrides ...map[string]any) map[string]any {
 		return nodeValidation(append([]map[string]any{
 			at(nodeValidationCriteriaPath, []any{}), at(nodeValidationNewNodeTestsPath, []any{"gpu-burn"}),
@@ -151,7 +154,8 @@ func TestCheckNVSentinelNodeValidationCoherent(t *testing.T) {
 		wantUndefined     = `names the test "gpu-burn", which is not defined`
 		wantNotTestList   = "not a list of test names"
 		wantBothEmpty     = "are both empty, which lifecycle-manager rejects at startup"
-		wantNoCordoned    = `does not include a criterion named "cordoned" with the chart's expression`
+		wantNoCordoned    = `does not include a criterion named "cordoned" with the expression`
+		wantNoQuarantine  = `does not include a criterion named "not-under-quarantine" with the expression`
 		wantNoGPUOperator = "no GPU Operator component is in the recipe"
 		wantGPUOpDisabled = "gpu-operator is disabled"
 		wantRelocated     = `gpu-operator is deployed to "privileged-gpu-operator"`
@@ -395,29 +399,52 @@ func TestCheckNVSentinelNodeValidationCoherent(t *testing.T) {
 		{name: "criteria without cordoned",
 			sentinel: nodeValidation(at(nodeValidationCriteriaPath, []any{
 				nodeValidationCriterion("recently-joined", "true"), nodeValidationCriterion("gpu-present", "true"),
+				notQuarantined,
 			})),
 			wantErrs: []string{wantNoCordoned}},
+		{name: "criteria without not-under-quarantine",
+			sentinel: nodeValidation(at(nodeValidationCriteriaPath, []any{
+				nodeValidationCriterion("recently-joined", "true"), nodeValidationCriterion("gpu-present", "true"),
+				cordoned,
+			})),
+			wantErrs: []string{wantNoQuarantine}},
 		{name: "criteria empty", sentinel: nodeValidation(at(nodeValidationCriteriaPath, []any{})),
-			wantErrs: []string{wantNoCordoned}},
+			wantErrs: []string{wantNoCordoned + " " + nodeValidationCordonedExpression + ": an empty list",
+				wantNoQuarantine}},
 		{name: "cordoned expression under another name",
 			sentinel: nodeValidation(at(nodeValidationCriteriaPath, []any{
-				nodeValidationCriterion("is-cordoned", nodeValidationCordonedExpression),
+				nodeValidationCriterion("is-cordoned", nodeValidationCordonedExpression), notQuarantined,
 			})),
 			wantErrs: []string{wantNoCordoned}},
 		{name: "cordoned name with a different expression",
 			sentinel: nodeValidation(at(nodeValidationCriteriaPath, []any{
-				nodeValidationCriterion(nodeValidationCordonedCriterion, "true"),
+				nodeValidationCriterion(nodeValidationCordonedCriterion, "true"), notQuarantined,
 			})),
 			wantErrs: []string{wantNoCordoned}},
 		{name: "cordoned expression reflowed",
 			sentinel: nodeValidation(at(nodeValidationCriteriaPath, []any{
 				nodeValidationCriterion(nodeValidationCordonedCriterion,
-					"has(node.spec.unschedulable)\n  &&\tnode.spec.unschedulable\n"),
+					"has(node.spec.unschedulable)\n  &&\tnode.spec.unschedulable\n"), notQuarantined,
 			}))},
-		{name: "criteria left to the chart default",
-			sentinel: withoutPath(nodeValidation(), nodeValidationCriteriaPath)},
+		{name: "not-under-quarantine expression under another name",
+			sentinel: nodeValidation(at(nodeValidationCriteriaPath, []any{
+				cordoned, nodeValidationCriterion("not-quarantined", nodeValidationQuarantineExpression),
+			})),
+			wantErrs: []string{wantNoQuarantine}},
+		{name: "not-under-quarantine name with a different expression",
+			sentinel: nodeValidation(at(nodeValidationCriteriaPath, []any{
+				cordoned, nodeValidationCriterion(nodeValidationQuarantineCriterion, "true"),
+			})),
+			wantErrs: []string{wantNoQuarantine}},
+		{name: "not-under-quarantine expression folded as YAML writes it",
+			sentinel: nodeValidation(at(nodeValidationCriteriaPath, []any{
+				cordoned, nodeValidationCriterion(nodeValidationQuarantineCriterion,
+					"!(has(node.metadata.annotations) &&\n\"quarantineHealthEvent\" in node.metadata.annotations)"),
+			}))},
+		{name: "criteria left to the chart default, which lacks not-under-quarantine",
+			sentinel: withoutPath(nodeValidation(), nodeValidationCriteriaPath), wantErrs: []string{wantNoQuarantine}},
 		{name: "newNodeValidation left to the chart default",
-			sentinel: withoutPath(nodeValidation(), nodeValidationNewNodePath)},
+			sentinel: withoutPath(nodeValidation(), nodeValidationNewNodePath), wantErrs: []string{wantNoQuarantine}},
 
 		// The DCGM hostengine dcgm-diag-test calls.
 		{name: "no GPU Operator", others: onlyCertManager, sentinel: nodeValidation(),
@@ -486,14 +513,14 @@ func TestCheckNVSentinelNodeValidationCoherent(t *testing.T) {
 		// Findings accumulate.
 		{name: "every new-node finding at once", noOthers: true,
 			sentinel:     broken(),
-			wantWarnings: []string{wantNoCertManager}, wantErrs: []string{wantNoCordoned, wantUndefined}},
+			wantWarnings: []string{wantNoCertManager}, wantErrs: []string{wantNoCordoned, wantNoQuarantine, wantUndefined}},
 
 		// Dry run.
 		{name: "dry run with new-node validation warns", sentinel: nodeValidation(at("global.dryRun", true)),
 			wantWarnings: []string{wantDryRun}},
 		{name: "dry run with new-node validation still blocks what it must",
 			sentinel:     nodeValidation(at("global.dryRun", true), at(nodeValidationCriteriaPath, []any{})),
-			wantWarnings: []string{wantDryRun}, wantErrs: []string{wantNoCordoned}},
+			wantWarnings: []string{wantDryRun}, wantErrs: []string{wantNoCordoned, wantNoQuarantine}},
 		{name: "dry run false is silent", sentinel: nodeValidation(at("global.dryRun", false))},
 
 		// --dynamic on a verified path.

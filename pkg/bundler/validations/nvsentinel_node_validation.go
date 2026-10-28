@@ -53,6 +53,8 @@ const (
 	nodeValidationDCGMTest              = "dcgm-diag-test"
 	nodeValidationCordonedCriterion     = "cordoned"
 	nodeValidationCordonedExpression    = "has(node.spec.unschedulable) && node.spec.unschedulable"
+	nodeValidationQuarantineCriterion   = "not-under-quarantine"
+	nodeValidationQuarantineExpression  = `!(has(node.metadata.annotations) && "quarantineHealthEvent" in node.metadata.annotations)`
 	nodeValidationDCGMNamespace         = "gpu-operator"
 	nodeValidationMixin                 = "nvsentinel-node-validation"
 )
@@ -82,7 +84,9 @@ const (
 //     config lifecycle-manager cannot decode, or new-node validation runs
 //     (newNodeValidation a map) with criteria that lack one named cordoned
 //     with the chart's expression, so a diagnostic would run on a schedulable
-//     node;
+//     node, or one named not-under-quarantine with the mixin's expression, so
+//     a node fault-quarantine cordons would be selected and tested once
+//     fault-quarantine released it to work;
 //   - the new-node tests (newNodeTests, else defaultTests) include
 //     dcgm-diag-test with the chart's command, which only reaches
 //     nvidia-dcgm(-dra).gpu-operator.svc:5555, and no enabled GPU Operator in
@@ -509,14 +513,26 @@ func nodeValidationTestViolations(path string, test map[string]any, inherited bo
 }
 
 // nodeValidationCriteriaViolations fails unless the effective criteria keep
-// one named cordoned with the chart's expression, which is what stops a
-// diagnostic running on a schedulable node.
+// the two the mixin pins: cordoned, with the chart's expression, which stops a
+// diagnostic running on a schedulable node, and not-under-quarantine, which
+// stops lifecycle-manager selecting a node by fault-quarantine's cordon. The
+// chart's own criteria, used when the list is absent, lack the second.
 func nodeValidationCriteriaViolations(ctx context.Context, values map[string]any, fail func(string, ...any)) error {
 	raw, present := component.GetValueByPath(values, nodeValidationCriteriaPath)
-	if !present {
-		return nil
+	required := []struct{ name, expression, why string }{
+		{nodeValidationCordonedCriterion, nodeValidationCordonedExpression,
+			"lifecycle-manager never cordons a node itself, so without it a new GPU node that is still schedulable " +
+				"would run the diagnostic while it takes work"},
+		{nodeValidationQuarantineCriterion, nodeValidationQuarantineExpression,
+			"fault-quarantine's cordon also satisfies cordoned, so without it a GPU node quarantined in its first " +
+				"30 minutes is selected; its test waits until fault-quarantine releases the node, then runs beside " +
+				"new work, and a failure leaves the node schedulable"},
 	}
+	found := map[string]bool{}
 	criteria, _ := raw.([]any)
+	if !present {
+		found[nodeValidationCordonedCriterion] = true
+	}
 	for _, item := range criteria {
 		if err := ctx.Err(); err != nil {
 			return aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "checking new-node criteria")
@@ -524,20 +540,23 @@ func nodeValidationCriteriaViolations(ctx context.Context, values map[string]any
 		criterion, _ := item.(map[string]any)
 		name, _ := criterion["name"].(string)
 		expression, _ := criterion["expression"].(string)
-		if name == nodeValidationCordonedCriterion &&
-			strings.Join(strings.Fields(expression), " ") == nodeValidationCordonedExpression {
-
-			return nil
+		for _, want := range required {
+			if name == want.name && strings.Join(strings.Fields(expression), " ") == want.expression {
+				found[want.name] = true
+			}
 		}
 	}
-	why := "a new GPU node that is still schedulable would run the diagnostic while it takes work"
-	if len(criteria) == 0 {
-		why = "an empty list matches every node"
+	for _, want := range required {
+		if found[want.name] {
+			continue
+		}
+		why := want.why
+		if present && len(criteria) == 0 {
+			why = "an empty list matches every node"
+		}
+		fail("%s does not include a criterion named %q with the expression %s: %s -- keep the criteria the %s "+
+			"mixin sets", nodeValidationCriteriaPath, want.name, want.expression, why, nodeValidationMixin)
 	}
-	fail("%s does not include a criterion named %q with the chart's expression (%s): lifecycle-manager never "+
-		"cordons a node itself, so without it %s -- keep the criterion the %s mixin sets",
-		nodeValidationCriteriaPath, nodeValidationCordonedCriterion, nodeValidationCordonedExpression, why,
-		nodeValidationMixin)
 	return nil
 }
 

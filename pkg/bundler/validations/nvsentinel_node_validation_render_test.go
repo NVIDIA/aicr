@@ -71,8 +71,8 @@ func lifecycleManagerConfig(t *testing.T, rendered string) map[string]any {
 // TestNVSentinelNodeValidationChartRender renders the pinned nvsentinel chart
 // with the node-validation mixin composed and asserts what #3088 promises
 // reaches the workload: the pinned lifecycle-manager image with only its
-// ValidationRequest controller, new-node validation keeping the cordoned
-// criterion and requesting dcgm-diag-test, and that test's image and the DCGM
+// ValidationRequest controller, new-node validation keeping the cordoned and
+// not-under-quarantine criteria and requesting dcgm-diag-test, and that test's image and the DCGM
 // address CheckNVSentinelNodeValidationCoherent assumes. A chart bump that
 // moves the address fails here rather than leaving the gate checking the
 // wrong Service.
@@ -116,19 +116,19 @@ func TestNVSentinelNodeValidationChartRender(t *testing.T) {
 	if tests := stringList(newNode["newNodeTests"]); !slices.Equal(tests, []string{nodeValidationDCGMTest}) {
 		t.Errorf("newNodeValidation.newNodeTests = %v, want [%s]", tests, nodeValidationDCGMTest)
 	}
-	var cordoned bool
 	criteria, _ := newNode["criteria"].([]any)
-	for _, item := range criteria {
-		criterion, _ := item.(map[string]any)
-		expression, _ := criterion["expression"].(string)
-		if criterion["name"] == nodeValidationCordonedCriterion &&
-			strings.Join(strings.Fields(expression), " ") == nodeValidationCordonedExpression {
-
-			cordoned = true
+	for name, want := range map[string]string{
+		nodeValidationCordonedCriterion:   nodeValidationCordonedExpression,
+		nodeValidationQuarantineCriterion: nodeValidationQuarantineExpression,
+	} {
+		found := slices.ContainsFunc(criteria, func(item any) bool {
+			criterion, _ := item.(map[string]any)
+			expression, _ := criterion["expression"].(string)
+			return criterion["name"] == name && strings.Join(strings.Fields(expression), " ") == want
+		})
+		if !found {
+			t.Errorf("newNodeValidation.criteria %v lack the %s criterion %q", criteria, name, want)
 		}
-	}
-	if !cordoned {
-		t.Errorf("newNodeValidation.criteria %v lack the cordoned criterion %q", criteria, nodeValidationCordonedExpression)
 	}
 	gate, _ := spec["schedulingGate"].(map[string]any)
 	cordon, _ := gate["cordon"].(map[string]any)

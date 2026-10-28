@@ -20,8 +20,9 @@
 # Bundle-only checks, then nvsentinel with the nvsentinel-node-validation mixin
 # installed through the bundle's own install.sh on Kind:
 #
-#   1. the gate refuses new-node criteria that drop the cordoned criterion,
-#      and newNodeTests naming a test nothing defines; it accepts the mixin
+#   1. the gate refuses new-node criteria that drop the cordoned or the
+#      not-under-quarantine criterion, and newNodeTests naming a test nothing
+#      defines; it accepts the mixin
 #      with the test stubbed;
 #   2. nvsentinel-observe with nvsentinel-node-validation bundles, with the
 #      gate's note that lifecycle-manager ignores dryRun;
@@ -231,13 +232,15 @@ test_gate() {
   compose_recipe live nvsentinel-node-validation
   compose_recipe observe nvsentinel-observe nvsentinel-node-validation
 
-  local criteria
-  criteria=$(yq -o=json '.spec.componentRefs[0].overrides["lifecycle-manager"].config.newNodeValidation.criteria |
-    map(select(.name != "cordoned"))' "${ROOT}/recipes/mixins/nvsentinel-node-validation.yaml" | jq -c .)
-  [[ "$(jq length <<<"${criteria}")" -ge 1 ]] || err "could not read the mixin's new-node criteria"
-  expect_refusal "#1 gate refuses new-node criteria without the cordoned criterion" \
-    live "does not include a criterion named \"cordoned\" with the chart's expression" \
-    --set-json "nvsentinel:lifecycle-manager.config.newNodeValidation.criteria=${criteria}"
+  local criteria dropped
+  for dropped in cordoned not-under-quarantine; do
+    criteria=$(yq -o=json '.spec.componentRefs[0].overrides["lifecycle-manager"].config.newNodeValidation.criteria' \
+      "${ROOT}/recipes/mixins/nvsentinel-node-validation.yaml" | jq -c --arg d "${dropped}" 'map(select(.name != $d))')
+    [[ "$(jq length <<<"${criteria}")" -ge 1 ]] || err "could not read the mixin's new-node criteria"
+    expect_refusal "#1 gate refuses new-node criteria without the ${dropped} criterion" \
+      live "does not include a criterion named \"${dropped}\" with the expression" \
+      --set-json "nvsentinel:lifecycle-manager.config.newNodeValidation.criteria=${criteria}"
+  done
   expect_refusal "#1 gate refuses newNodeTests naming an undefined test" \
     live "names the test \"${UNDEFINED_TEST}\", which is not defined" \
     --set-json "nvsentinel:lifecycle-manager.config.newNodeValidation.newNodeTests=[\"${UNDEFINED_TEST}\"]"
@@ -270,8 +273,11 @@ test_gate() {
   local values="${BUNDLE_DIR}/values.yaml"
   [[ "$(yq '.global.lifecycleManager.enabled' "${values}")" == "true" ]] ||
     err "bundle's nvsentinel values do not enable lifecycle-manager -- composition regressed"
-  [[ "$(yq '.["lifecycle-manager"].config.newNodeValidation.criteria[] | select(.name == "cordoned") | .name' "${values}")" == "cordoned" ]] ||
-    err "bundle's new-node criteria lack the cordoned criterion -- composition regressed"
+  for criterion in cordoned not-under-quarantine; do
+    [[ "$(yq ".[\"lifecycle-manager\"].config.newNodeValidation.criteria[] | select(.name == \"${criterion}\") | .name" \
+      "${values}")" == "${criterion}" ]] ||
+      err "bundle's new-node criteria lack the ${criterion} criterion -- composition regressed"
+  done
   [[ "$(yq '.["lifecycle-manager"].config.tests["dcgm-diag-test"].image' "${values}")" == "${BUSYBOX_IMAGE}" ]] ||
     err "the dcgm-diag-test stub did not reach the bundle"
   [[ "$(yq '.["lifecycle-manager"].config.tests["stub-fail"].command[2]' "${values}")" == "exit 1" ]] ||

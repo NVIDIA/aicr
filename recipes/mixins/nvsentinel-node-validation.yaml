@@ -18,9 +18,12 @@
 # docs/user/component-catalog.md#node-validation.
 #
 # The controller never cordons a node itself, so a new node is validated only
-# if something cordons it within 20 minutes of its creation, behind a scheduling
-# barrier from registration; the cordoned criterion is pinned so a
-# schedulable node is never selected.
+# if something cordons it within 10 minutes of its creation, behind a scheduling
+# barrier from registration: the 600-second batch and the reconcile that
+# creates its request, up to about five minutes later, must finish inside the
+# 30-minute recently-joined window, with margin.
+# The cordoned criterion is pinned so a schedulable node is never selected,
+# and not-under-quarantine so fault-quarantine's cordon does not select one.
 # CheckNVSentinelNodeValidationCoherent holds the rules.
 
 kind: RecipeMixin
@@ -58,5 +61,9 @@ spec:
                 - name: cordoned
                   expression: >-
                     has(node.spec.unschedulable) && node.spec.unschedulable
+                - name: not-under-quarantine
+                  expression: >-
+                    !(has(node.metadata.annotations) &&
+                    "quarantineHealthEvent" in node.metadata.annotations)
               newNodeTests:
                 - dcgm-diag-test

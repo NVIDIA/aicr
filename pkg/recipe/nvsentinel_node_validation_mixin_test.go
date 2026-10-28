@@ -29,13 +29,16 @@ const (
 	// cordonedCriterion is the chart's cordoned criterion, which keeps a
 	// diagnostic off a node that registered schedulable.
 	cordonedCriterion = "has(node.spec.unschedulable) && node.spec.unschedulable"
+	// quarantineCriterion keeps lifecycle-manager from selecting a node by
+	// fault-quarantine's cordon.
+	quarantineCriterion = `!(has(node.metadata.annotations) && "quarantineHealthEvent" in node.metadata.annotations)`
 )
 
 // TestMixinNVSentinelNodeValidation_Composes pins what the mixin sets, alone
 // and beside the full remediation step without a collision: lifecycle-manager
 // on with only its ValidationRequest controller, the cordon release under the
-// chart's label prefix, and new-node validation with the cordoned criterion
-// and dcgm-diag-test.
+// chart's label prefix, and new-node validation with the cordoned and
+// not-under-quarantine criteria and dcgm-diag-test.
 func TestMixinNVSentinelNodeValidation_Composes(t *testing.T) {
 	ctx, store := remediationStore(t)
 	if _, ok := store.Mixins[nodeValidationMixin]; !ok {
@@ -121,21 +124,28 @@ func assertLifecycleManagerOverrides(t *testing.T, overrides map[string]any) {
 	}
 	criteria, _ := newNode["criteria"].([]any)
 	names := make([]string, 0, len(criteria))
-	var cordoned string
+	var cordoned, notQuarantined string
 	for _, item := range criteria {
 		criterion, _ := item.(map[string]any)
 		name, _ := criterion["name"].(string)
 		names = append(names, name)
-		if name == "cordoned" {
+		switch name {
+		case "cordoned":
 			cordoned, _ = criterion["expression"].(string)
+		case "not-under-quarantine":
+			notQuarantined, _ = criterion["expression"].(string)
 		}
 	}
-	if want := []string{"recently-joined", "gpu-present", "cordoned"}; !slices.Equal(names, want) {
+	if want := []string{"recently-joined", "gpu-present", "cordoned", "not-under-quarantine"}; !slices.Equal(names, want) {
 		t.Errorf("newNodeValidation.criteria names = %v, want %v", names, want)
 	}
 	if strings.Join(strings.Fields(cordoned), " ") != cordonedCriterion {
 		t.Errorf("cordoned criterion = %q, want %q: without it a new node that registered schedulable is "+
 			"diagnosed while it takes work", cordoned, cordonedCriterion)
+	}
+	if strings.Join(strings.Fields(notQuarantined), " ") != quarantineCriterion {
+		t.Errorf("not-under-quarantine criterion = %q, want %q: without it a node fault-quarantine cordons is "+
+			"selected and diagnosed once fault-quarantine releases it to work", notQuarantined, quarantineCriterion)
 	}
 }
 
