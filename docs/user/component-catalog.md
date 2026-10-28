@@ -1877,21 +1877,43 @@ CRDs underneath it.
    argocd app delete "${CHILD}" --cascade
    ```
 
-   Then publish the regenerated bundle from step 1 and hard-refresh the
-   parent. Re-enabling auto-sync before Argo CD reads the new revision syncs
-   the cached one, which still declares the child and reinstalls it. Check
-   that `Sync Status` names the revision you just published:
+   Then publish the regenerated bundle from step 1 and point the parent at
+   it while auto-sync is still off. Re-enabling auto-sync before Argo CD
+   reads the new revision syncs the cached one, which still declares the
+   child and reinstalls it.
+
+   For `argocd`, hard-refresh the parent and check that `Sync Status` names
+   the revision you just published. Only then turn the parent's auto-sync
+   back on by re-applying it with `kubectl apply -f app-of-apps.yaml`.
 
    ```bash
    argocd app get "${APP}" --hard-refresh
    ```
 
-   Only then turn the parent's auto-sync back on by re-applying the parent
-   the way you installed it (`kubectl apply -f app-of-apps.yaml`, or
-   `helm upgrade` for `argocd-helm`).
+   For `argocd-helm`, the parent reads its chart version from the
+   `targetRevision` Helm value, so publishing alone never moves it. Push the
+   regenerated chart as a new version, `helm upgrade` the bundle release with
+   `targetRevision` set to that version, and check that `Sync Status` names
+   it. Then turn auto-sync back on with `argocd app set`. `helm upgrade` may
+   not restore it, because Helm 3 patches a custom resource from its old
+   manifest to its new one, and both declare `syncPolicy.automated`.
+
+   ```bash
+   VERSION="1.2.3"  # the chart version you just pushed
+   # Repeat every --set you installed with, such as appName and deployer.*.
+   helm upgrade aicr-bundle oci://ghcr.io/myorg/aicr-bundle --version "${VERSION}" -n argocd \
+     --set repoURL=oci://ghcr.io/myorg \
+     --set targetRevision="${VERSION}"
+   argocd app get "${APP}"
+   argocd app set "${APP}" --sync-policy automated --auto-prune --self-heal
+   # Prints the automated policy. Empty output means auto-sync is still off.
+   kubectl get application "${APP}" -n argocd -o jsonpath='{.spec.syncPolicy.automated}'
+   ```
 
    Bundles built with `--set deployer:cascadeDelete=true` already carry the
-   finalizer, so for them publishing the regenerated bundle is enough.
+   finalizer, so they skip the auto-sync steps. For `argocd`, publishing the
+   regenerated bundle is enough. For `argocd-helm`, publish it and run the
+   `helm upgrade` above.
 
    For Fleet, do not `helm uninstall` the release. Fleet still declares it and
    reinstalls it on the next reconcile. Remove it from Fleet instead, and leave
