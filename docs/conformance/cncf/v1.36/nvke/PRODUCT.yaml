@@ -1,0 +1,194 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+metadata:
+  kubernetesVersion: v1.36
+  platformName: NVIDIA Kubernetes Engine
+  platformVersion: 0.22.0
+  vendorName: NVIDIA
+  websiteUrl: https://docs.nvidia.com/dsx
+  repoUrl: https://github.com/dsx-ai-factory/nvke
+  documentationUrl: https://docs.nvidia.com/nvke
+  productLogoUrl: https://raw.githubusercontent.com/cncf/landscape/master/hosted_logos/nvidia-member.svg
+  description: NVIDIA Kubernetes Engine (NVKE) is open source software that AI cloud operators install on their
+    own infrastructure to create and run fleets of GPU-accelerated clusters on upstream Kubernetes.
+  contactEmailAddress: eboyd@nvidia.com
+  k8sConformanceUrl: https://github.com/cncf/k8s-conformance/tree/master/v1.36/nvke
+spec:
+  accelerators:
+  - id: driver_runtime_management
+    description: Provide a verifiable mechanism for ensuring that compatible accelerator drivers and corresponding
+      container runtime configurations are correctly installed and maintained on nodes with accelerators. Once the
+      accelerator supports exposing driver and runtime version information as part of DRA, then the platform should
+      use the DRA mechanism for verification.
+    level: SHOULD
+    status: Implemented
+    evidence:
+    - evidence/accelerator-metrics.md
+    - evidence/platform-configuration.md
+    notes: GPU Operator v26.7.2 installs and reconciles driver 580.173.02 and the NVIDIA toolkit on both GB200 workers;
+      actual per-GPU metrics and node software versions are captured.
+  - id: gpu_sharing
+    description: 'For accelerators that support static GPU sharing, provide well-defined mechanisms for at least
+      one GPU sharing strategy to improve utilization for workloads that do not require a full dedicated GPU. If
+      hardware-level partitioning is supported, then these fractional GPU resources should be exposed as schedulable
+      resources. If software-based sharing (e.g. time-slicing) is supported, then oversubscription of GPUs should
+      be allowed. Forward-looking: Once the accelerator supports static GPU sharing as part of DRA, the platform
+      should expose the DRA mechanism to allow users to leverage static GPU sharing. Once the accelerator supports
+      dynamic GPU sharing as part of DRA and the partitionable devices feature is GA, the platform should expose
+      the DRA mechanism to allow users to leverage dynamic GPU sharing.'
+    level: SHOULD
+    status: Not Implemented
+    evidence: []
+    notes: This submission exercises whole-GPU allocation only. MIG or time-sliced fractional allocation was not
+      demonstrated.
+  - id: virtualized_accelerator
+    description: 'For accelerators that support virtualized accelerator technologies (e.g. vGPU), provide well-defined
+      mechanisms for these to be exposed and managed, maintaining consistency with physical fractional GPUs. Forward-looking:
+      Once the accelerator supports virtualized accelerator technologies as part of DRA, then the platform should
+      use the DRA mechanism.'
+    level: SHOULD
+    status: Not Implemented
+    evidence: []
+    notes: No vGPU or other virtualized accelerator implementation is claimed by this tested configuration.
+  networking:
+  - id: ai_inference
+    description: Support the Kubernetes Gateway API with an implementation for advanced traffic management for inference
+      services, which enables capabilities like weighted traffic splitting, header-based routing (for OpenAI protocol
+      headers), and optional integration with service meshes.
+    level: MUST
+    status: Implemented
+    evidence:
+    - evidence/inference-gateway.md
+    - evidence/gateway-routing-behavior.txt
+    - evidence/gateway-routing-configuration.json
+    notes: Agentgateway v1.5.0 implements Gateway API. Header routing selected the expected backend, and a configured
+      80/20 split produced 77/23 responses across 100 requests. The Gateway uses an internal ClusterIP Service on
+      this bare-metal tenant.
+  - id: advanced_inference_ingress
+    description: Support an implementation of the Gateway API Inference Extension (GAIE), which can route requests
+      to models hosted on Kubernetes. The implementation supports serving LLMs and making advanced routing decisions
+      (e.g., K/V cache-aware routing) based on metrics and capabilities advertised by the underlying model serving
+      platform.
+    level: SHOULD
+    status: Not Implemented
+    evidence: []
+    notes: Inference extension CRDs are installed, but model-aware or KV-cache-aware inference routing was not demonstrated.
+  - id: high_performance_networking
+    description: If high performance pod-to-pod communication is needed, then provide well-defined mechanisms for
+      these specialized network resources to be managed and exposed such that their characteristics should be discoverable
+      to enable informed scheduling or workload configuration and to enable pods to attach to multiple network interfaces.
+      Platforms should use DRA as the mechanism to manage and expose these specialized network resources (e.g.,
+      DRANET).
+    level: SHOULD
+    status: Not Implemented
+    evidence:
+    - evidence/platform-configuration.md
+    notes: SR-IOV IB resources are advertised, but cross-node RDMA traffic was not exercised. No high-performance-networking
+      conformance claim is made.
+  - id: disaggregated_inference
+    description: Support the deployment and operation of disaggregated inference architectures. To be conformant,
+      the platform should demonstrate that it can successfully install and run a disaggregated inference solution
+      (e.g., vLLM, SGLang, llm-d, or Dynamo, with separate instances for distinct phases like prefill and decode).
+      Disaggregated serving splits phases such as prefill and decode into separately scalable components so each
+      phase can match different compute/memory/network needs, improving GPU utilization and tail latency while enabling
+      higher throughput under mixed and bursty LLM workloads.
+    level: SHOULD
+    status: Not Implemented
+    evidence: []
+    notes: No disaggregated prefill/decode inference application was deployed or tested.
+  schedulingOrchestration:
+  - id: gang_scheduling
+    description: The platform must allow for the installation and successful operation of at least one gang scheduling
+      solution that ensures all-or-nothing scheduling for distributed AI workloads (e.g. Kueue, Volcano, etc.) To
+      be conformant, the vendor must demonstrate that their platform can successfully run at least one such solution.
+    level: MUST
+    status: Implemented
+    evidence:
+    - evidence/gang-scheduling.md
+    notes: KAI Scheduler v0.16.9 held both gang members unbound under constrained capacity, then scheduled and completed
+      both after capacity was released.
+  - id: cluster_autoscaling
+    description: If the platform provides a cluster autoscaler or an equivalent mechanism, it must be able to scale
+      up/down node groups containing specific accelerator types based on pending pods requesting those accelerators.
+    level: MUST
+    status: N/A
+    evidence:
+    - evidence/cluster-autoscaling.md
+    - evidence/platform-configuration.md
+    notes: NVKE v0.22.0 does not provide workload-driven cluster autoscaling. Its desiredNodeCount changes only
+      on an operator request, as documented in docs/workload-clusters/node-pools.md at release commit 400c24fb6465b042be883d6b62472528520d6291.
+      The conditional requirement does not apply; manual scaling is not presented as autoscaling.
+  - id: pod_autoscaling
+    description: If the platform supports the HorizontalPodAutoscaler, it must function correctly for pods utilizing
+      accelerators. This includes the ability to scale these Pods based on custom metrics relevant to AI/ML workloads.
+    level: MUST
+    status: Implemented
+    evidence:
+    - evidence/pod-autoscaling.md
+    notes: The HPA consumes GPU utilization through the Prometheus custom-metrics adapter and scales GPU-requesting
+      pods when utilization exceeds the target.
+  observability:
+  - id: accelerator_metrics
+    description: For supported accelerator types, the platform must allow for the installation and successful operation
+      of at least one accelerator metrics solution that exposes fine-grained performance metrics via a standardized,
+      machine-readable metrics endpoint. This must include a core set of metrics for per-accelerator utilization
+      and memory usage. Additionally, other relevant metrics such as temperature, power draw, and interconnect bandwidth
+      should be exposed if the underlying hardware or virtualization layer makes them available. The list of metrics
+      should align with emerging standards, such as OpenTelemetry metrics, to ensure interoperability. The platform
+      may provide a managed solution, but this is not required for conformance.
+    level: MUST
+    status: Implemented
+    evidence:
+    - evidence/accelerator-metrics.md
+    notes: DCGM Exporter exposes per-GPU utilization, memory, temperature and power. Prometheus discovers, scrapes
+      and stores the samples.
+  - id: ai_service_metrics
+    description: Provide a monitoring system capable of discovering and collecting metrics from workloads that expose
+      them in a standard format (e.g. Prometheus exposition format). This ensures easy integration for collecting
+      key metrics from common AI frameworks and servers.
+    level: MUST
+    status: Implemented
+    evidence:
+    - evidence/ai-service-metrics.md
+    notes: A PyTorch GPU training workload exports loss, step, throughput and GPU-memory metrics; Prometheus discovers
+      its ServiceMonitor and stores queryable samples.
+  security:
+  - id: secure_accelerator_access
+    description: Ensure that access to accelerators from within containers is properly isolated and mediated by
+      the Kubernetes resource management framework (device plugin or DRA) and container runtime, preventing unauthorized
+      access or interference between workloads.
+    level: MUST
+    status: Implemented
+    evidence:
+    - evidence/secure-accelerator-access.md
+    - evidence/runtimeclass-isolation.md
+    - evidence/runtimeclass-isolation.json
+    notes: An authorized container sees exactly one allocated GPU; an unauthorized sibling sees none. Additional
+      non-root RuntimeClass probes on both workers verify that containers requesting one GPU see exactly one,
+      while containers requesting none cannot access GPU devices even with NVIDIA_VISIBLE_DEVICES=all.
+  operator:
+  - id: robust_controller
+    description: The platform must prove that at least one complex AI operator with a CRD (e.g., Ray, Kubeflow)
+      can be installed and functions reliably. This includes verifying that the operator's pods run correctly, its
+      webhooks are operational, and its custom resources can be reconciled.
+    level: MUST
+    status: Implemented
+    evidence:
+    - evidence/robust-operator.md
+    - evidence/trainjob-gpu-execution.txt
+    - evidence/trainjob-reconciliation.json
+    notes: Kubeflow Trainer v2.2.0 runs with operational admission webhooks. Its webhook rejects an invalid runtime
+      reference, and a valid TrainJob reconciled to successful completion and executed a CUDA matrix operation on
+      an allocated GB200 GPU.

@@ -1,0 +1,60 @@
+{
+  "apiVersion": "trainer.kubeflow.org/v1alpha1",
+  "kind": "TrainJob",
+  "metadata": {
+    "name": "nvke-robust-controller-proof-20261027",
+    "namespace": "nvke-ai-evidence-20261027",
+    "creationTimestamp": "2026-10-28T00:00:23Z"
+  },
+  "spec": {
+    "managedBy": "trainer.kubeflow.org/trainjob-controller",
+    "runtimeRef": {
+      "apiGroup": "trainer.kubeflow.org",
+      "kind": "ClusterTrainingRuntime",
+      "name": "torch-distributed"
+    },
+    "suspend": false,
+    "trainer": {
+      "command": [
+        "python3",
+        "-c",
+        "import torch; assert torch.cuda.is_available(); x=torch.ones((256,256),device='cuda'); y=x@x; torch.cuda.synchronize(); assert float(y[0,0]) == 256.0; print('GPU_TRAINJOB_PASS', torch.__version__, torch.cuda.get_device_name(0), float(y[0,0]))"
+      ],
+      "image": "nvcr.io/nvidia/pytorch:25.06-py3",
+      "numNodes": 1,
+      "resourcesPerNode": {
+        "limits": {
+          "cpu": "2",
+          "memory": "4Gi",
+          "nvidia.com/gpu": 1
+        },
+        "requests": {
+          "cpu": "1",
+          "memory": "2Gi",
+          "nvidia.com/gpu": 1
+        }
+      }
+    }
+  },
+  "status": {
+    "conditions": [
+      {
+        "lastTransitionTime": "2026-10-28T00:00:29Z",
+        "message": "jobset completed successfully",
+        "reason": "AllJobsCompleted",
+        "status": "True",
+        "type": "Complete"
+      }
+    ],
+    "jobsStatus": [
+      {
+        "active": 0,
+        "failed": 0,
+        "name": "node",
+        "ready": 0,
+        "succeeded": 1,
+        "suspended": 0
+      }
+    ]
+  }
+}

@@ -1,0 +1,366 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Pod",
+      "metadata": {
+        "name": "allocated-runtimeclass-worker-1",
+        "namespace": "nvke-ai-evidence-20261027",
+        "creationTimestamp": "2026-10-28T00:00:29Z"
+      },
+      "spec": {
+        "runtimeClassName": "nvidia",
+        "nodeSelector": {
+          "kubernetes.io/hostname": "gpu-worker-1"
+        },
+        "securityContext": {
+          "runAsNonRoot": true,
+          "runAsUser": 1000,
+          "seccompProfile": {
+            "type": "RuntimeDefault"
+          }
+        },
+        "containers": [
+          {
+            "command": [
+              "sh",
+              "-c",
+              "set -eu; nvidia-smi --query-gpu=uuid --format=csv,noheader > /tmp/gpus; cat /tmp/gpus; test \"$(grep -c \"^GPU-\" /tmp/gpus)\" -eq 1; echo ALLOCATED_GPU_ACCESS_PASS"
+            ],
+            "env": [
+              {
+                "name": "NVIDIA_VISIBLE_DEVICES",
+                "value": "all"
+              },
+              {
+                "name": "NVIDIA_DRIVER_CAPABILITIES",
+                "value": "utility"
+              }
+            ],
+            "image": "docker.io/nvidia/cuda:12.9.0-base-ubuntu24.04",
+            "imagePullPolicy": "IfNotPresent",
+            "name": "probe",
+            "resources": {
+              "limits": {
+                "cpu": "1",
+                "memory": "512Mi",
+                "nvidia.com/gpu": "1"
+              },
+              "requests": {
+                "cpu": "100m",
+                "memory": "128Mi",
+                "nvidia.com/gpu": "1"
+              }
+            },
+            "securityContext": {
+              "allowPrivilegeEscalation": false,
+              "capabilities": {
+                "drop": [
+                  "ALL"
+                ]
+              },
+              "readOnlyRootFilesystem": false
+            },
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File",
+            "volumeMounts": [
+              {
+                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                "name": "kube-api-access-ln455",
+                "readOnly": true
+              }
+            ]
+          }
+        ]
+      },
+      "status": {
+        "phase": "Succeeded",
+        "containerStatuses": [
+          {
+            "name": "probe",
+            "state": {
+              "terminated": {
+                "containerID": "containerd://a25d517972c4774c9c8fa4d8c554fdf43c0834c19b2631365d11ac85018f6152",
+                "exitCode": 0,
+                "finishedAt": "2026-10-28T00:00:30Z",
+                "reason": "Completed",
+                "startedAt": "2026-10-28T00:00:30Z"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Pod",
+      "metadata": {
+        "name": "allocated-runtimeclass-worker-2",
+        "namespace": "nvke-ai-evidence-20261027",
+        "creationTimestamp": "2026-10-28T00:00:29Z"
+      },
+      "spec": {
+        "runtimeClassName": "nvidia",
+        "nodeSelector": {
+          "kubernetes.io/hostname": "gpu-worker-2"
+        },
+        "securityContext": {
+          "runAsNonRoot": true,
+          "runAsUser": 1000,
+          "seccompProfile": {
+            "type": "RuntimeDefault"
+          }
+        },
+        "containers": [
+          {
+            "command": [
+              "sh",
+              "-c",
+              "set -eu; nvidia-smi --query-gpu=uuid --format=csv,noheader > /tmp/gpus; cat /tmp/gpus; test \"$(grep -c \"^GPU-\" /tmp/gpus)\" -eq 1; echo ALLOCATED_GPU_ACCESS_PASS"
+            ],
+            "env": [
+              {
+                "name": "NVIDIA_VISIBLE_DEVICES",
+                "value": "all"
+              },
+              {
+                "name": "NVIDIA_DRIVER_CAPABILITIES",
+                "value": "utility"
+              }
+            ],
+            "image": "docker.io/nvidia/cuda:12.9.0-base-ubuntu24.04",
+            "imagePullPolicy": "IfNotPresent",
+            "name": "probe",
+            "resources": {
+              "limits": {
+                "cpu": "1",
+                "memory": "512Mi",
+                "nvidia.com/gpu": "1"
+              },
+              "requests": {
+                "cpu": "100m",
+                "memory": "128Mi",
+                "nvidia.com/gpu": "1"
+              }
+            },
+            "securityContext": {
+              "allowPrivilegeEscalation": false,
+              "capabilities": {
+                "drop": [
+                  "ALL"
+                ]
+              },
+              "readOnlyRootFilesystem": false
+            },
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File",
+            "volumeMounts": [
+              {
+                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                "name": "kube-api-access-h5xhj",
+                "readOnly": true
+              }
+            ]
+          }
+        ]
+      },
+      "status": {
+        "phase": "Succeeded",
+        "containerStatuses": [
+          {
+            "name": "probe",
+            "state": {
+              "terminated": {
+                "containerID": "containerd://35c7fadce3123c280134753f7993fc0ca24644862ecdf660aef1c0a54aa670a4",
+                "exitCode": 0,
+                "finishedAt": "2026-10-28T00:00:30Z",
+                "reason": "Completed",
+                "startedAt": "2026-10-28T00:00:30Z"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Pod",
+      "metadata": {
+        "name": "unallocated-runtimeclass-worker-1",
+        "namespace": "nvke-ai-evidence-20261027",
+        "creationTimestamp": "2026-10-28T00:00:29Z"
+      },
+      "spec": {
+        "runtimeClassName": "nvidia",
+        "nodeSelector": {
+          "kubernetes.io/hostname": "gpu-worker-1"
+        },
+        "securityContext": {
+          "runAsNonRoot": true,
+          "runAsUser": 1000,
+          "seccompProfile": {
+            "type": "RuntimeDefault"
+          }
+        },
+        "containers": [
+          {
+            "command": [
+              "sh",
+              "-c",
+              "echo NO_GPU_ALLOCATION_REQUESTED; if command -v nvidia-smi >/dev/null 2>&1; then out=$(nvidia-smi --query-gpu=uuid --format=csv,noheader 2>&1); rc=$?; printf \"%s\\n\" \"$out\"; if [ \"$rc\" = 0 ] && printf \"%s\\n\" \"$out\" | grep -q \"^GPU-\"; then echo UNALLOCATED_GPU_ACCESS_FAIL; exit 1; fi; fi; if ls /dev/nvidia[0-9]* >/dev/null 2>&1; then echo UNALLOCATED_GPU_DEVICE_FAIL; exit 1; fi; echo UNALLOCATED_GPU_ACCESS_DENIED_PASS"
+            ],
+            "env": [
+              {
+                "name": "NVIDIA_VISIBLE_DEVICES",
+                "value": "all"
+              },
+              {
+                "name": "NVIDIA_DRIVER_CAPABILITIES",
+                "value": "utility"
+              }
+            ],
+            "image": "docker.io/nvidia/cuda:12.9.0-base-ubuntu24.04",
+            "imagePullPolicy": "IfNotPresent",
+            "name": "probe",
+            "resources": {
+              "limits": {
+                "cpu": "100m",
+                "memory": "128Mi"
+              },
+              "requests": {
+                "cpu": "10m",
+                "memory": "32Mi"
+              }
+            },
+            "securityContext": {
+              "allowPrivilegeEscalation": false,
+              "capabilities": {
+                "drop": [
+                  "ALL"
+                ]
+              },
+              "readOnlyRootFilesystem": true
+            },
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File",
+            "volumeMounts": [
+              {
+                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                "name": "kube-api-access-srj2h",
+                "readOnly": true
+              }
+            ]
+          }
+        ]
+      },
+      "status": {
+        "phase": "Succeeded",
+        "containerStatuses": [
+          {
+            "name": "probe",
+            "state": {
+              "terminated": {
+                "containerID": "containerd://b987160b8fccd66f7fc1ecbc4456fa928d49e614e09b57e7886e13bb56ac2478",
+                "exitCode": 0,
+                "finishedAt": "2026-10-28T00:00:31Z",
+                "reason": "Completed",
+                "startedAt": "2026-10-28T00:00:31Z"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Pod",
+      "metadata": {
+        "name": "unallocated-runtimeclass-worker-2",
+        "namespace": "nvke-ai-evidence-20261027",
+        "creationTimestamp": "2026-10-28T00:00:29Z"
+      },
+      "spec": {
+        "runtimeClassName": "nvidia",
+        "nodeSelector": {
+          "kubernetes.io/hostname": "gpu-worker-2"
+        },
+        "securityContext": {
+          "runAsNonRoot": true,
+          "runAsUser": 1000,
+          "seccompProfile": {
+            "type": "RuntimeDefault"
+          }
+        },
+        "containers": [
+          {
+            "command": [
+              "sh",
+              "-c",
+              "echo NO_GPU_ALLOCATION_REQUESTED; if command -v nvidia-smi >/dev/null 2>&1; then out=$(nvidia-smi --query-gpu=uuid --format=csv,noheader 2>&1); rc=$?; printf \"%s\\n\" \"$out\"; if [ \"$rc\" = 0 ] && printf \"%s\\n\" \"$out\" | grep -q \"^GPU-\"; then echo UNALLOCATED_GPU_ACCESS_FAIL; exit 1; fi; fi; if ls /dev/nvidia[0-9]* >/dev/null 2>&1; then echo UNALLOCATED_GPU_DEVICE_FAIL; exit 1; fi; echo UNALLOCATED_GPU_ACCESS_DENIED_PASS"
+            ],
+            "env": [
+              {
+                "name": "NVIDIA_VISIBLE_DEVICES",
+                "value": "all"
+              },
+              {
+                "name": "NVIDIA_DRIVER_CAPABILITIES",
+                "value": "utility"
+              }
+            ],
+            "image": "docker.io/nvidia/cuda:12.9.0-base-ubuntu24.04",
+            "imagePullPolicy": "IfNotPresent",
+            "name": "probe",
+            "resources": {
+              "limits": {
+                "cpu": "100m",
+                "memory": "128Mi"
+              },
+              "requests": {
+                "cpu": "10m",
+                "memory": "32Mi"
+              }
+            },
+            "securityContext": {
+              "allowPrivilegeEscalation": false,
+              "capabilities": {
+                "drop": [
+                  "ALL"
+                ]
+              },
+              "readOnlyRootFilesystem": true
+            },
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File",
+            "volumeMounts": [
+              {
+                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                "name": "kube-api-access-5f59j",
+                "readOnly": true
+              }
+            ]
+          }
+        ]
+      },
+      "status": {
+        "phase": "Succeeded",
+        "containerStatuses": [
+          {
+            "name": "probe",
+            "state": {
+              "terminated": {
+                "containerID": "containerd://9dacac08b0b7e527d34b25d83df2f7d665c31ad4dd987c82710454673f5dd0cc",
+                "exitCode": 0,
+                "finishedAt": "2026-10-28T00:00:30Z",
+                "reason": "Completed",
+                "startedAt": "2026-10-28T00:00:30Z"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
