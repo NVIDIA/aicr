@@ -27,7 +27,9 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/crane"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -542,6 +544,40 @@ func TestRunErrors(t *testing.T) {
 			}
 			errorstest.WantReportedCode(t, run(ctx, root, dp, tt.leaves, r, ri, false), tt.wantCode)
 		})
+	}
+}
+
+func TestRunRendersChartsConcurrently(t *testing.T) {
+	dp := newMapProvider(t, map[string]string{
+		"registry.yaml": registryHeader + `components:
+  - name: a
+    healthCheck: {assertFile: checks/a/health-check.yaml}
+    helm: {defaultRepository: https://charts.example.com, defaultVersion: "1.0.0"}
+  - name: b
+    healthCheck: {assertFile: checks/b/health-check.yaml}
+    helm: {defaultRepository: https://charts.example.com, defaultVersion: "1.0.0"}
+`,
+		"checks/a/health-check.yaml": healthCheck(assertOp(crdKind, "a.x.io")),
+		"checks/b/health-check.yaml": healthCheck(assertOp(crdKind, "b.x.io")),
+	})
+	// Each render waits for the other to start, so a sequential run times out.
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	var started sync.WaitGroup
+	started.Add(2)
+	bothStarted := make(chan struct{})
+	go func() { started.Wait(); close(bothStarted) }()
+	render := renderFunc(func(ctx context.Context, in helm.ChartInput) ([]byte, error) {
+		started.Done()
+		select {
+		case <-bothStarted:
+			return []byte(crdDoc(in.Name + ".x.io")), nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	})
+	if err := run(ctx, t.TempDir(), dp, nil, render, nil, false); err != nil {
+		t.Fatalf("run() error = %v", err)
 	}
 }
 

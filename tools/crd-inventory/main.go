@@ -41,12 +41,17 @@ import (
 	"strings"
 	"syscall"
 
+	"golang.org/x/sync/errgroup"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/helm"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
+
+// renderConcurrency is the maximum number of charts renderCharts renders at
+// once.
+const renderConcurrency = 8
 
 func main() {
 	var (
@@ -92,11 +97,15 @@ func run(ctx context.Context, repoRoot string, dp recipe.DataProvider, leaves []
 	if err != nil {
 		return err
 	}
+	rendered, err := renderCharts(ctx, repoRoot, r, readImage, all)
+	if err != nil {
+		return err
+	}
 
 	var problems []string
 	kept := sets.New[string]()
 	for _, name := range slices.Sorted(maps.Keys(all)) {
-		inv, found, buildErr := buildInventory(ctx, repoRoot, dp, r, readImage, name, all[name])
+		inv, found, buildErr := buildInventory(ctx, dp, name, all[name], rendered[name])
 		if buildErr != nil {
 			return buildErr
 		}
@@ -144,31 +153,72 @@ func run(ctx context.Context, repoRoot string, dp recipe.DataProvider, leaves []
 	return nil
 }
 
-// buildInventory returns inv, the inventory of component name with an entry
-// for each chart in a that installs a CRD. It also returns problems, listing
-// each chart in a that installs no CRD and each asserted CRD that no entry or
-// vendored manifest backs.
-func buildInventory(ctx context.Context, repoRoot string, dp recipe.DataProvider, r helm.Renderer,
-	readImage imageReader, name string, a *componentAssertions,
+// renderCharts returns the CRDs that the chart of each CRD assertion in
+// assertions installs, keyed by component name and chart.
+func renderCharts(ctx context.Context, repoRoot string, r helm.Renderer, readImage imageReader,
+	assertions map[string]*componentAssertions,
+) (map[string]map[chartKey]*chartCRDs, error) {
+
+	type job struct {
+		name string
+		key  chartKey
+	}
+	var jobs []job
+	for _, name := range slices.Sorted(maps.Keys(assertions)) {
+		for _, k := range assertions[name].sortedCharts() {
+			jobs = append(jobs, job{name: name, key: k})
+		}
+	}
+	entries := make([]*chartCRDs, len(jobs))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(renderConcurrency)
+	for i, j := range jobs {
+		g.Go(func() error {
+			if err := gctx.Err(); err != nil {
+				return errors.WrapCtxErr(err, errors.ErrCodeTimeout, "crd-inventory interrupted")
+			}
+			entry, err := deriveChartCRDs(gctx, repoRoot, r, readImage, assertions[j.name].charts[j.key].ref)
+			if err != nil {
+				return err
+			}
+			entries[i] = entry
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	out := map[string]map[chartKey]*chartCRDs{}
+	for i, j := range jobs {
+		if out[j.name] == nil {
+			out[j.name] = map[chartKey]*chartCRDs{}
+		}
+		out[j.name][j.key] = entries[i]
+	}
+	return out, nil
+}
+
+// buildInventory returns inv, the inventory of the named component, and
+// problems, its unmet CRD assertions. For each chart in assertions that
+// installs a CRD, inv holds the chart's entry in rendered. Each chart that
+// installs no CRD is a problem. An asserted CRD missing from both its chart and
+// the component's manifests is also a problem.
+func buildInventory(ctx context.Context, dp recipe.DataProvider, name string, assertions *componentAssertions,
+	rendered map[chartKey]*chartCRDs,
 ) (inv *inventory, problems []string, err error) {
 
 	inv = &inventory{Component: name}
-	if len(a.charts) == 0 {
+	if len(assertions.charts) == 0 {
 		return inv, nil, nil
 	}
 	vendored, err := manifestCRDs(ctx, dp, name)
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, k := range a.sortedCharts() {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, nil, errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "crd-inventory interrupted")
-		}
-		ca := a.charts[k]
-		entry, deriveErr := deriveChartCRDs(ctx, repoRoot, r, readImage, ca.ref)
-		if deriveErr != nil {
-			return nil, nil, deriveErr
-		}
+	for _, k := range assertions.sortedCharts() {
+		ca := assertions.charts[k]
+		entry := rendered[k]
 		if len(entry.CRDs) == 0 {
 			problems = append(problems, fmt.Sprintf("%s: health checks assert CRDs %v, but chart %s installs none",
 				name, slices.Sorted(maps.Keys(ca.crds)), k))
