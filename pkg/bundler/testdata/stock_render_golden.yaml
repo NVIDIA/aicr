@@ -3607,7 +3607,7 @@ h100-eks-ubuntu-training-slurm+slurm-accounting-aicr-provided:
   019-slurm-accounting-mariadb/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-slurm-accounting-mariadb/install.sh: 6ff39a5f737686c498b80415e170d70500574ecddb506f63c77dfb610bd3029b
   019-slurm-accounting-mariadb/upstream.env: a9490bd16c1284719d57073af518f214703a9157d499be490803de72e6953542
-  019-slurm-accounting-mariadb/values.yaml: 0d3fc6c9545a5567c103347984acad0da49001ba6b3fb7c43b5759113af93c8c
+  019-slurm-accounting-mariadb/values.yaml: ff971f80e78f095535eb4ae279681c28808493315ea181784e5819a4f040c9f5
   020-slinky-slurm-pre/Chart.yaml: f65c7669d78ddb55eeccb55768259568f88ceb23bc0853a325ebdefbab18a6a0
   020-slinky-slurm-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-slinky-slurm-pre/install.sh: 81a42ad3d2342f567074c56e5e18a07b665ff8eb934c12ae91594ab2c4abb4e3
@@ -3620,7 +3620,7 @@ h100-eks-ubuntu-training-slurm+slurm-accounting-aicr-provided:
   README.md: 983a02eb5847c4c66542bb08d9c9e6ab9ea56831ea32705c3f7ef9ef0cb5d28b
   UPGRADING.md: 6b392d9aa4c3c866d9e9754e48ed42efd0a71704de06aa8c4722056ed3484e8a
   bundle-info.yaml: 153f48248aa08e2b334bf40f9d86aa7184fe3e22e0d44a8967cb269ecef12124
-  checksums.txt: 0a72bb2a04038a032053e8a9d350310a8348813298d1ffebdd0e7ab52c0d1ddd
+  checksums.txt: 721d4e2d68678cb47dee5e8493c333a8cde169c248d38773f6c6991c8ef18c15
   deploy.sh: 5eb3138723061d7639b956d70d9a9997a85e4d35a5924382d17db8f4e66b7b15
   recipe.yaml: fc861b4a4545373680aa1d7bc4278475ddb8f30341b91ca3947cb551fe5b59b5
 h100-gke-cos-inference-dynamo:
