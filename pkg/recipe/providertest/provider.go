@@ -27,8 +27,8 @@ import (
 )
 
 // Provider is a recipe.DataProvider over an fs.FS that reads and walks like
-// recipe.EmbeddedDataProvider. Its Source reports embedded data, which the
-// recipe loaders trust, only if set with WithSource.
+// recipe.EmbeddedDataProvider. Its Source returns "providertest:" + path
+// unless set with WithSource.
 type Provider struct {
 	fsys   fs.FS
 	source func(path string) string
@@ -37,8 +37,7 @@ type Provider struct {
 // Option configures a Provider.
 type Option func(*Provider)
 
-// WithSource sets the function Source calls. The default returns
-// "providertest:" + path.
+// WithSource sets the function Source calls.
 func WithSource(source func(path string) string) Option {
 	return func(p *Provider) { p.source = source }
 }
