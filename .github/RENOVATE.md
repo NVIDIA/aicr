@@ -91,7 +91,10 @@ weekly under `RENOVATE_DRY_RUN=full` to produce a Slack digest and a
 edit — it can rename a values path `nodeScheduling` writes into, move the
 rendered image set, or need an ADR-021 upgrade record — so detection is
 automated and the decision stays human, assisted by the
-`aicr-reviewing-component-drift` skill.
+`aicr-reviewing-component-drift` skill. When the component's health check
+asserts a CRD, the bump PR must also commit the
+`recipes/components/<name>/crds.yaml` that `make crd-inventory` regenerates.
+`TestHealthCheckCRDAssertionsAnchored` fails `make test` until it does.
 
 Unlike the `.settings.yaml` manager, these annotations carry `registryUrl`
 inline:
@@ -137,6 +140,5 @@ This is guidance for a Renovate-owned branch. `AGENTS.md`'s branch-hygiene rule 
 - **AWS EFA device-plugin image** (`recipes/components/aws-efa/values.yaml`) is published only to AWS's authenticated public ECR (`602401143452.dkr.ecr.us-west-2.amazonaws.com/...`); no `public.ecr.aws` mirror. The image is in `ignoreDeps`; bumps must be coordinated manually with EKS add-on releases.
 - **`recipes/components/*/values.yaml`** is partially covered, and cannot be extended in place. `helm-values` auto-detects two shapes under any key ending in `image`: a `{ repository, tag }` (or `version`) map, and a single `name:tag` string such as the `mariadb.image` pin in `slurm-accounting-mariadb`, which a `packageRules` cap holds below MariaDB 12. Anything else goes undetected. No custom manager's `managerFilePatterns` covers this path, so a `# renovate:` annotation added in one of these files rotates nothing and reports nothing — extending coverage means adding a custom manager, as `.settings.yaml` and `recipes/registry.yaml` each do.
 - **aiperf PRs need a manual license refresh and VEX re-audit.** The committed `validators/performance/licenses/python-notices.md` records the sha256 of `requirements.txt`, so an `aiperf` group PR fails `notices-generator` until a maintainer runs `make python-licenses` (network access to PyPI) and pushes the regenerated fragment; no `postUpgradeTasks` entry regenerates it. The same maintainer must re-audit `.openvex.json` against the new closure with the `aicr-managing-openvex` skill: its statements cite the installed aiperf version as evidence, and nothing gates them against `requirements.txt`.
-- **Chart bumps of a component whose health check asserts a CRD need a manual inventory refresh.** `recipes/components/<name>/crds.yaml` records the chart version it was rendered from, so the PR fails `TestHealthCheckCRDAssertionsAnchored` until a maintainer runs `make crd-inventory` (Go, Helm and network chart pulls, none of which the Renovate image has) and fixes any CRD assertion it reports the new chart no longer installs.
 - **No vulnerability fast-path.** Self-hosted Renovate cannot consume GitHub vulnerability alerts (Mend-hosted feature). The weekday cron is the mitigation.
 - **The Renovate runner image** (`ghcr.io/renovatebot/renovate`) is not yet auto-managed. The digest is pinned in two places — the `RENOVATE_VALIDATOR_IMAGE` variable in `Makefile` and the `renovate-version` input in the workflow — and must be bumped manually in lockstep. The custom regex doesn't yet capture `image:tag@sha256:...` shapes.
