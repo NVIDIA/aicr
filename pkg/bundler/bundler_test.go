@@ -1827,7 +1827,7 @@ func TestFilterEnabledComponents_ExcludedDriverInstallerWarning(t *testing.T) {
 			}
 			recipeResult.Metadata.GPUDriverState = tt.state
 
-			if _, _, _, filterErr := b.filterEnabledComponents(recipeResult); filterErr != nil {
+			if _, filterErr := b.filterEnabledComponents(recipeResult); filterErr != nil {
 				t.Fatalf("filterEnabledComponents() error = %v", filterErr)
 			}
 

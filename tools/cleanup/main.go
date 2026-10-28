@@ -17,7 +17,8 @@
 //
 //  1. Helm releases of AICR components in AICR component namespaces
 //  2. aicr validate and snapshot-agent artifacts
-//  3. Custom Resource Definitions in AICR-owned API groups
+//  3. Custom Resource Definitions in AICR-owned API groups, with conversion
+//     webhooks disabled first and stuck-finalizer rescue of their instances
 //  4. AICR component and check-created namespaces, with stuck-finalizer rescue
 //
 // A release is AICR's when pkg/inventory attributes it to a component under
