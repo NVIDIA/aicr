@@ -15,61 +15,78 @@
 package bundler
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/component"
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // The nfd component name, values paths, stripped feature key, and label
-// spellings read by warnNFDNICLabelMismatch. The Mellanox NIC label counts with
+// spellings read by checkNFDNICLabelMismatch. The Mellanox NIC label counts with
 // or without its prefix, because nfd-master adds the prefix to an
 // un-namespaced label.
 const (
 	nfdComponentName              = "nfd"
 	nfdNoPublishFeaturesValuePath = "worker.config.core.noPublishFeatures"
 	nfdCustomSourcesValuePath     = "worker.config.sources.custom"
+	nfdWorkerExtraArgsValuePath   = "worker.extraArgs"
+	nfdPCISourceValuePath         = "worker.config.sources.pci"
 	nfdPCIDeviceFeature           = "pci.device"
 	nfdMellanoxNICLabel           = "feature.node.kubernetes.io/pci-15b3.present"
 	nfdMellanoxNICLabelUnprefixed = "pci-15b3.present"
 )
 
-// warnNFDNICLabelMismatch warns when network-operator and the nfd-worker rule
-// that labels Mellanox NIC nodes disagree in the final bundle. With
+// checkNFDNICLabelMismatch checks that network-operator and the nfd-worker
+// rule that labels Mellanox NIC nodes agree in the final bundle. With
 // network-operator present and pci.device stripped from the published
 // features, only an nfd-worker sources.custom rule can produce the label its
-// NicClusterPolicy selects on. Without network-operator, that rule makes a
-// GPU Operator that manages the driver with GPUDirect RDMA and no host MOFED
-// wait for a MOFED driver nothing installs; a subset bundle stays silent
+// NicClusterPolicy selects on, so a bundle without one is rejected. Without
+// network-operator, that rule makes a GPU Operator that manages the driver
+// with GPUDirect RDMA and no host MOFED wait for a MOFED driver nothing
+// installs; that direction only warns, and a subset bundle stays silent
 // because network-operator may be deployed outside it.
 //
 // The check reads only worker.config.core.noPublishFeatures and the static
-// sources.custom labels; worker.extraArgs overrides and labelsTemplate rules
-// are not replayed.
-func (b *DefaultBundler) warnNFDNICLabelMismatch(componentValues map[string]map[string]any) {
+// sources.custom labels. worker.extraArgs (nfd-worker -options can replace
+// the config), the built-in pci label source (deviceLabelFields [vendor]
+// emits pci-15b3.present) and labelsTemplate rules are not replayed, so when
+// any is set a missing rule is a warning instead of an error. So is an nfd
+// --dynamic path covering a label input, whose value is set at install time.
+func (b *DefaultBundler) checkNFDNICLabelMismatch(componentValues map[string]map[string]any, dynamicValues map[string][]string) error {
 	if b.Config == nil {
-		return
+		return nil
 	}
-	nfdValues, ok := componentValues[nfdComponentName]
+	rawNFDValues, ok := componentValues[nfdComponentName]
 	if !ok {
-		return
+		return nil
 	}
+	nfdValues, normalized := nfdJSONShapedValues(rawNFDValues)
 	_, networkOperator := componentValues[networkOperatorComponentName]
 	hasRule := nfdLabelsMellanoxNIC(nfdValues)
 
 	var warning string
 	switch {
 	case networkOperator && !hasRule && nfdStripsFeature(nfdValues, nfdPCIDeviceFeature):
-		warning = fmt.Sprintf(
+		msg := fmt.Sprintf(
 			"%[1]s is in this bundle, but %[2]s strips %[3]s (%[4]s) and has no nfd-worker rule "+
 				"labelling %[5]s (%[6]s). %[1]s's NodeFeatureRule reads %[3]s, so after nfd-worker "+
 				"restarts nothing labels the NVIDIA NIC nodes, and the pods that select on that label "+
 				"(the NicClusterPolicy operands) leave them. Select components/nfd/values-nvidia-nics.yaml "+
 				"(values-nvidia-nics-aks.yaml on AKS) as the %[2]s valuesFile in the overlay that adds %[1]s, "+
-				"or include its rule in a %[6]s override.",
+				"include its rule in a %[6]s override, or publish %[3]s again by removing it from %[4]s.",
 			networkOperatorComponentName, nfdComponentName, nfdPCIDeviceFeature,
 			nfdNoPublishFeaturesValuePath, nfdMellanoxNICLabel, nfdCustomSourcesValuePath)
+		evaluable := normalized && !nfdHasUnreplayedLabelInputs(nfdValues) &&
+			!nfdHasDynamicLabelInput(dynamicValues[nfdComponentName])
+		if evaluable {
+			return errors.New(errors.ErrCodeInvalidRequest, msg)
+		}
+		warning = msg + fmt.Sprintf(" This is a warning, not an error, because %s sets %s, %s, a "+
+			"labelsTemplate rule or a --dynamic label input, which this check does not evaluate.",
+			nfdComponentName, nfdWorkerExtraArgsValuePath, nfdPCISourceValuePath)
 	case !networkOperator && hasRule && len(b.Config.Bundlers()) == 0:
 		warning = fmt.Sprintf(
 			"%[1]s labels NVIDIA NIC nodes %[2]s (%[3]s), but %[4]s is not in this bundle. The GPU "+
@@ -80,13 +97,14 @@ func (b *DefaultBundler) warnNFDNICLabelMismatch(componentValues map[string]map[
 			nfdComponentName, nfdMellanoxNICLabel, nfdCustomSourcesValuePath,
 			networkOperatorComponentName, gpuDriverEnabledValuePath, gpuDriverRDMAEnabledValuePath)
 	default:
-		return
+		return nil
 	}
 
 	slog.Warn(warning,
 		"network_operator_in_bundle", networkOperator,
 		"nic_label_rule", hasRule)
 	b.appendWarning(warning)
+	return nil
 }
 
 // nfdStripsFeature mirrors the noPublishFeatures match of the nfd-worker that
@@ -124,6 +142,68 @@ func nfdLabelsMellanoxNIC(nfdValues map[string]any) bool {
 		_, unprefixed := labels[nfdMellanoxNICLabelUnprefixed]
 		if prefixed || unprefixed {
 			return true
+		}
+	}
+	return false
+}
+
+// nfdJSONShapedValues returns nfdValues with every list as []any and every
+// object as map[string]any. Typed SDK overrides (WithValueOverridesTypedPaths)
+// keep the caller's Go types, such as []string, which the type assertions
+// below would otherwise miss. It reports false, and returns the input
+// unchanged, when the values do not round-trip through JSON.
+func nfdJSONShapedValues(nfdValues map[string]any) (map[string]any, bool) {
+	raw, err := json.Marshal(nfdValues)
+	if err != nil {
+		return nfdValues, false
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nfdValues, false
+	}
+	return out, true
+}
+
+// nfdHasUnreplayedLabelInputs reports whether the nfd values set label inputs
+// that nfdLabelsMellanoxNIC cannot evaluate: any worker.extraArgs, any
+// sources.pci configuration, or a sources.custom rule with a labelsTemplate.
+func nfdHasUnreplayedLabelInputs(nfdValues map[string]any) bool {
+	args, _ := component.GetValueByPath(nfdValues, nfdWorkerExtraArgsValuePath)
+	if list, _ := args.([]any); len(list) > 0 {
+		return true
+	}
+	pciSource, _ := component.GetValueByPath(nfdValues, nfdPCISourceValuePath)
+	if cfg, _ := pciSource.(map[string]any); len(cfg) > 0 {
+		return true
+	}
+	rules, _ := component.GetValueByPath(nfdValues, nfdCustomSourcesValuePath)
+	list, _ := rules.([]any)
+	for _, r := range list {
+		rule, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		if tmpl, _ := rule["labelsTemplate"].(string); strings.TrimSpace(tmpl) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// nfdHasDynamicLabelInput reports whether a --dynamic nfd path covers, or lies
+// under, a values path the label check reads.
+func nfdHasDynamicLabelInput(dynamicPaths []string) bool {
+	inputs := []string{
+		nfdNoPublishFeaturesValuePath, nfdCustomSourcesValuePath,
+		nfdWorkerExtraArgsValuePath, nfdPCISourceValuePath,
+	}
+	for _, d := range dynamicPaths {
+		for _, in := range inputs {
+			covers := d == in || strings.HasPrefix(in, d+".") ||
+				strings.HasPrefix(d, in+".") || strings.HasPrefix(d, in+"[")
+			if covers {
+				return true
+			}
 		}
 	}
 	return false
