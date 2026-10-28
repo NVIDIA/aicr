@@ -1870,8 +1870,13 @@ CRDs underneath it.
 
    ```bash
    APP="k8s-aibom"  # the child Application, its namePrefix plus the component name
-   kubectl -n argocd patch application "${APP}" --type=merge \
-     -p '{"metadata":{"finalizers":["resources-finalizer.argocd.argoproj.io"]}}'
+   # Append to existing finalizers. Appending fails when the list is absent.
+   if [ -z "$(kubectl -n argocd get application "${APP}" -o jsonpath='{.metadata.finalizers}')" ]; then
+     PATCH='[{"op":"add","path":"/metadata/finalizers","value":["resources-finalizer.argocd.argoproj.io"]}]'
+   else
+     PATCH='[{"op":"add","path":"/metadata/finalizers/-","value":"resources-finalizer.argocd.argoproj.io"}]'
+   fi
+   kubectl -n argocd patch application "${APP}" --type=json -p "${PATCH}"
    ```
 
    For Fleet, do not `helm uninstall` the release. Fleet still declares it and
