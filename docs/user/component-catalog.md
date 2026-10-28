@@ -1859,32 +1859,38 @@ CRDs underneath it.
    Under Terraform, `terraform apply` of the regenerated bundle already
    removed it.
 
-   For Argo CD, deleting the child `Application` is not an uninstall. AICR sets
-   no `resources-finalizer.argocd.argoproj.io` finalizer by default, so the
-   controller keeps running, and the parent app-of-apps recreates a child it
-   still declares. Add the finalizer to the child, then apply the regenerated
-   bundle from step 1. Bundles built with `--set deployer:cascadeDelete=true`
-   already carry it. The parent prunes the child, and Argo CD deletes
+   For Argo CD, a plain delete of the child `Application` is not an uninstall.
+   AICR sets no `resources-finalizer.argocd.argoproj.io` finalizer by default,
+   so the controller keeps running. The parent app-of-apps syncs with
+   automated prune and self-heal. It recreates a child it still declares, and
+   pruning a child it no longer declares is the same plain delete. Turn off
+   the parent's auto-sync, then delete the child with cascade. Argo CD deletes
    everything the child rendered except its CRDs, which a cascading delete
    never removes.
 
    ```bash
-   APP="k8s-aibom"  # the child Application, its namePrefix plus the component name
-   if ! FINALIZERS="$(kubectl -n argocd get application "${APP}" \
-       -o jsonpath='{range .metadata.finalizers[*]}{@}{"\n"}{end}')"; then
-     echo "could not read Application ${APP}; not patching" >&2
-   elif [ -z "${FINALIZERS}" ]; then
-     # The test op rejects the patch if finalizers appeared since the read,
-     # because adding the list would replace them.
-     kubectl -n argocd patch application "${APP}" --type=json -p '[
-       {"op":"test","path":"/metadata/finalizers","value":null},
-       {"op":"add","path":"/metadata/finalizers","value":["resources-finalizer.argocd.argoproj.io"]}
-     ]'
-   elif ! printf '%s\n' "${FINALIZERS}" | grep -qxF resources-finalizer.argocd.argoproj.io; then
-     kubectl -n argocd patch application "${APP}" --type=json \
-       -p '[{"op":"add","path":"/metadata/finalizers/-","value":"resources-finalizer.argocd.argoproj.io"}]'
-   fi
+   APP="nvidia-stack"  # the parent Application: --app-name, default nvidia-stack (argocd) or aicr-stack (argocd-helm)
+   CHILD="k8s-aibom"   # prepend the deployer namePrefix, if the bundle set one
+   # With argocd-helm, a helm install --set appName=... or --set deployer.namePrefix=... overrides both names.
+   argocd app set "${APP}" --sync-policy none
+   argocd app delete "${CHILD}" --cascade
    ```
+
+   Then publish the regenerated bundle from step 1 and hard-refresh the
+   parent. Re-enabling auto-sync before Argo CD reads the new revision syncs
+   the cached one, which still declares the child and reinstalls it. Check
+   that `Sync Status` names the revision you just published:
+
+   ```bash
+   argocd app get "${APP}" --hard-refresh
+   ```
+
+   Only then turn the parent's auto-sync back on by re-applying the parent
+   the way you installed it (`kubectl apply -f app-of-apps.yaml`, or
+   `helm upgrade` for `argocd-helm`).
+
+   Bundles built with `--set deployer:cascadeDelete=true` already carry the
+   finalizer, so for them publishing the regenerated bundle is enough.
 
    For Fleet, do not `helm uninstall` the release. Fleet still declares it and
    reinstalls it on the next reconcile. Remove it from Fleet instead, and leave
