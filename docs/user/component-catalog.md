@@ -1871,7 +1871,7 @@ CRDs underneath it.
    ```bash
    APP="nvidia-stack"  # the parent Application: --app-name, default nvidia-stack (argocd) or aicr-stack (argocd-helm)
    CHILD="k8s-aibom"   # prepend the deployer namePrefix, if the bundle set one
-   # With argocd-helm, a helm install --set appName=... or --set deployer.namePrefix=... overrides both names.
+   # With argocd-helm, helm install --set appName=... renames APP, and --set deployer.namePrefix=... prefixes CHILD.
    argocd app set "${APP}" --sync-policy none
    argocd app delete "${CHILD}" --cascade
    ```
