@@ -1,0 +1,256 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# AICR Operator (ADR-027) lanes that `make test` cannot cover:
+#   - the CRD validation and chart suites on the Kubernetes floor, and
+#     generated code;
+#   - `make operator-e2e` (the pinned AICR images as operator-built Jobs);
+#   - `make operator-skeleton` (the operator with the pinned Argo CD, one
+#     release end to end);
+#   - `make operator-qualify` (the fault-injection suite against a candidate
+#     of the commit, upgraded mid-rollout to a second one);
+# each on its own kind cluster, for every AICR release in .settings.yaml
+# (operator.aicr_e2e), on the Kubernetes floor and the newest supported
+# version.
+
+name: Operator E2E
+
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - 'cmd/aicr-operator/**'
+      - 'cmd/kubectl-aicr/**'
+      - 'api/operator/**'
+      - 'pkg/operator/**'
+      - 'charts/aicr-operator/**'
+      - 'tests/operator/**'
+      - 'tools/operator-*'
+      - 'tools/operator-*/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - '.ko.yaml'
+      - '.settings.yaml'
+      - '.github/workflows/operator-e2e.yaml'
+      - '.github/actions/operator-kind/**'
+      - '.github/actions/load-versions/**'
+      - '.github/actions/prep-kind-runner/**'
+      - '.github/actions/setup-build-tools/**'
+      - '.go-version'
+  pull_request:
+    branches: [main]
+    paths: *paths
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  matrix:
+    name: Matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      aicr: ${{ steps.aicr.outputs.releases }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read AICR releases
+        id: aicr
+        run: |
+          set -euo pipefail
+          pinned="$(yq -r '.operator.aicr_image' .settings.yaml)"
+          if [[ "$(yq -r '[.operator.aicr_e2e[].image] | contains(["'"${pinned}"'"])' .settings.yaml)" != "true" ]]; then
+            echo "::error::operator.aicr_e2e must include operator.aicr_image (${pinned})"
+            exit 1
+          fi
+          if [[ "$(yq -r '[.operator.aicr_e2e[] | select((.validator_images // "") == "")] | length' .settings.yaml)" != "0" ]]; then
+            echo "::error::every operator.aicr_e2e release needs validator_images"
+            exit 1
+          fi
+          echo "releases=$(yq -o=json -I=0 '.operator.aicr_e2e' .settings.yaml)" >> "$GITHUB_OUTPUT"
+
+  floor:
+    name: Kubernetes floor and generated code
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      - name: Install setup-envtest, Helm and yq
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_setup_envtest: 'true'
+          setup_envtest_version: '${{ steps.versions.outputs.setup_envtest }}'
+          setup_envtest_sha256: '${{ steps.versions.outputs.setup_envtest_sha256_linux_amd64 }}'
+          install_helm: 'true'
+          helm_version: '${{ steps.versions.outputs.helm }}'
+          install_yq: 'true'
+          yq_version: '${{ steps.versions.outputs.yq }}'
+
+      - name: Generated code is current
+        run: make operator-check-generated
+
+      - name: CRD validation and chart suites on the floor
+        run: make operator-envtest-floor
+
+  # Job timeouts exceed the sum of their steps' own bounds, so a hung suite
+  # fails with Go's goroutine dump and the log steps still run.
+  e2e:
+    name: AICR ${{ matrix.aicr.version }} on Kubernetes ${{ matrix.kubernetes }}
+    needs: matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        aicr: ${{ fromJSON(needs.matrix.outputs.aicr) }}
+        kubernetes:
+          - floor
+          - newest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up the kind cluster
+        uses: ./.github/actions/operator-kind
+        with:
+          kubernetes: ${{ matrix.kubernetes }}
+
+      - name: Run e2e tests
+        env:
+          OPERATOR_E2E_REQUIRED: '1'
+          AICR_E2E_IMAGE: ${{ matrix.aicr.image }}
+          AICR_E2E_VERSION: ${{ matrix.aicr.version }}
+          AICR_E2E_VALIDATOR_IMAGES: ${{ matrix.aicr.validator_images }}
+        run: make operator-e2e
+
+      - name: Delete kind cluster
+        if: ${{ always() }}
+        run: make operator-kind-down
+
+  skeleton:
+    name: Walking skeleton with AICR ${{ matrix.aicr.version }} on Kubernetes ${{ matrix.kubernetes }}
+    needs: matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    strategy:
+      fail-fast: false
+      matrix:
+        aicr: ${{ fromJSON(needs.matrix.outputs.aicr) }}
+        kubernetes:
+          - floor
+          - newest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up the kind cluster
+        uses: ./.github/actions/operator-kind
+        with:
+          kubernetes: ${{ matrix.kubernetes }}
+
+      - name: Run the walking skeleton
+        env:
+          OPERATOR_E2E_REQUIRED: '1'
+          OPERATOR_KIND_IMAGE_CACHE: ${{ runner.temp }}/kind-images
+          AICR_E2E_IMAGE: ${{ matrix.aicr.image }}
+          AICR_E2E_VERSION: ${{ matrix.aicr.version }}
+          AICR_E2E_VALIDATOR_IMAGES: ${{ matrix.aicr.validator_images }}
+        run: make operator-skeleton
+
+      - name: Operator logs
+        if: ${{ failure() || cancelled() }}
+        run: |
+          kubectl --kubeconfig .operator-e2e/kubeconfig -n aicr-system logs deployment/aicr-operator --tail=300 || true
+          kubectl --kubeconfig .operator-e2e/kubeconfig get clusterruntimes,runtimerollouts -o yaml || true
+
+      - name: Delete kind cluster
+        if: ${{ always() }}
+        run: make operator-kind-down
+
+  qualify:
+    name: Qualify a candidate with AICR ${{ matrix.aicr.version }} on Kubernetes ${{ matrix.kubernetes }}
+    needs: matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 130
+    strategy:
+      fail-fast: false
+      matrix:
+        aicr: ${{ fromJSON(needs.matrix.outputs.aicr) }}
+        kubernetes:
+          - floor
+          - newest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up the kind cluster
+        uses: ./.github/actions/operator-kind
+        with:
+          kubernetes: ${{ matrix.kubernetes }}
+
+      # Two candidates of this commit, one to install and one to upgrade to
+      # mid-rollout; placeholder versions, never published.
+      - name: Build the candidates
+        run: |
+          set -euo pipefail
+          CANDIDATE_VERSION=v0.0.0-rc.0 make operator-candidate
+          CANDIDATE_DIR=dist/candidate-next CANDIDATE_VERSION=v0.0.0-rc.1 make operator-candidate
+
+      - name: Run the qualification suite
+        env:
+          OPERATOR_E2E_REQUIRED: '1'
+          OPERATOR_KIND_IMAGE_CACHE: ${{ runner.temp }}/kind-images
+          AICR_E2E_IMAGE: ${{ matrix.aicr.image }}
+          AICR_E2E_VERSION: ${{ matrix.aicr.version }}
+          AICR_E2E_VALIDATOR_IMAGES: ${{ matrix.aicr.validator_images }}
+        run: make operator-qualify
+
+      - name: Operator logs
+        if: ${{ failure() || cancelled() }}
+        run: |
+          kubectl --kubeconfig .operator-e2e/kubeconfig -n aicr-system logs deployment/aicr-operator --tail=300 || true
+          kubectl --kubeconfig .operator-e2e/kubeconfig get clusterruntimes,runtimerollouts -o yaml || true
+
+      - name: Delete kind cluster
+        if: ${{ always() }}
+        run: make operator-kind-down
