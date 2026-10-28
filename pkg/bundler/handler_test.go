@@ -331,6 +331,65 @@ func TestParseBundleConfig_Split(t *testing.T) {
 	}
 }
 
+func TestParseBundleConfig_ArgoCD(t *testing.T) {
+	t.Parallel()
+
+	t.Run("all parameters land as set fields", func(t *testing.T) {
+		t.Parallel()
+		target := "/v1/bundle?deployer=argocd" +
+			"&argocd-name-prefix=tenant-a-" +
+			"&argocd-destination-server=https://10.0.0.1:6443" +
+			"&argocd-project=gpu-infra" +
+			"&argocd-cascade-delete=false" +
+			"&argocd-sync-retry-limit=20" +
+			"&argocd-sync-retry-backoff-duration=30s" +
+			"&argocd-sync-retry-backoff-factor=2" +
+			"&argocd-sync-retry-backoff-max-duration=5m"
+		cfg, err := ParseBundleConfig(httptest.NewRequest("POST", target, nil))
+		if err != nil {
+			t.Fatalf("ParseBundleConfig() error = %v", err)
+		}
+		s := cfg.ArgoCDSettings()
+		if s.NamePrefix == nil || *s.NamePrefix != "tenant-a-" ||
+			s.DestinationServer == nil || *s.DestinationServer != "https://10.0.0.1:6443" ||
+			s.Project == nil || *s.Project != "gpu-infra" ||
+			s.CascadeDelete == nil || *s.CascadeDelete ||
+			s.SyncRetryLimit == nil || *s.SyncRetryLimit != 20 ||
+			s.SyncRetryBackoffDuration == nil || *s.SyncRetryBackoffDuration != "30s" ||
+			s.SyncRetryBackoffFactor == nil || *s.SyncRetryBackoffFactor != 2 ||
+			s.SyncRetryBackoffMaxDuration == nil || *s.SyncRetryBackoffMaxDuration != "5m" {
+
+			t.Errorf("ArgoCDSettings() = %+v, missing a parameter", s)
+		}
+	})
+
+	t.Run("absent parameters stay unset", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := ParseBundleConfig(httptest.NewRequest("POST", "/v1/bundle?deployer=argocd-helm", nil))
+		if err != nil {
+			t.Fatalf("ParseBundleConfig() error = %v", err)
+		}
+		if s := cfg.ArgoCDSettings(); !s.IsZero() {
+			t.Errorf("ArgoCDSettings() = %+v, want zero", s)
+		}
+	})
+
+	for _, tt := range []struct{ name, target string }{
+		{"rejected on helm deployer", "/v1/bundle?argocd-project=x"},
+		{"non-integer limit", "/v1/bundle?deployer=argocd&argocd-sync-retry-limit=many"},
+		{"non-integer factor", "/v1/bundle?deployer=argocd&argocd-sync-retry-backoff-factor=1.5"},
+		{"non-boolean cascade delete", "/v1/bundle?deployer=argocd&argocd-cascade-delete=maybe"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := ParseBundleConfig(httptest.NewRequest("POST", tt.target, nil))
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+				t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
+			}
+		})
+	}
+}
+
 func TestSupportedBundleQueryParametersReturnsDefensiveCopy(t *testing.T) {
 	t.Parallel()
 

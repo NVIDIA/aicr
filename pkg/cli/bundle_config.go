@@ -34,6 +34,76 @@ import (
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
+// The --argocd-* flags. Each mirrors a field of
+// spec.bundle.deployment.argocd and an argocd-* REST query parameter.
+const (
+	flagArgoCDNamePrefix                  = "argocd-name-prefix"
+	flagArgoCDDestinationServer           = "argocd-destination-server"
+	flagArgoCDProject                     = "argocd-project"
+	flagArgoCDCascadeDelete               = "argocd-cascade-delete"
+	flagArgoCDSyncRetryLimit              = "argocd-sync-retry-limit"
+	flagArgoCDSyncRetryBackoffDuration    = "argocd-sync-retry-backoff-duration"
+	flagArgoCDSyncRetryBackoffFactor      = "argocd-sync-retry-backoff-factor"
+	flagArgoCDSyncRetryBackoffMaxDuration = "argocd-sync-retry-backoff-max-duration"
+)
+
+var argoCDFlags = []string{
+	flagArgoCDNamePrefix,
+	flagArgoCDDestinationServer,
+	flagArgoCDProject,
+	flagArgoCDCascadeDelete,
+	flagArgoCDSyncRetryLimit,
+	flagArgoCDSyncRetryBackoffDuration,
+	flagArgoCDSyncRetryBackoffFactor,
+	flagArgoCDSyncRetryBackoffMaxDuration,
+}
+
+// argoCDSettingsFromFlags returns the --argocd-* flags explicitly set on cmd.
+// An unset flag stays nil, so it cannot mask the config file's value.
+func argoCDSettingsFromFlags(cmd *cli.Command) bundlercfg.ArgoCDSettings {
+	var s bundlercfg.ArgoCDSettings
+	str := func(name string) *string {
+		if !cmd.IsSet(name) {
+			return nil
+		}
+		v := cmd.String(name)
+		return &v
+	}
+	i64 := func(name string) *int64 {
+		if !cmd.IsSet(name) {
+			return nil
+		}
+		v := int64(cmd.Int(name))
+		return &v
+	}
+	s.NamePrefix = str(flagArgoCDNamePrefix)
+	s.DestinationServer = str(flagArgoCDDestinationServer)
+	s.Project = str(flagArgoCDProject)
+	if cmd.IsSet(flagArgoCDCascadeDelete) {
+		v := cmd.Bool(flagArgoCDCascadeDelete)
+		s.CascadeDelete = &v
+	}
+	s.SyncRetryLimit = i64(flagArgoCDSyncRetryLimit)
+	s.SyncRetryBackoffDuration = str(flagArgoCDSyncRetryBackoffDuration)
+	s.SyncRetryBackoffFactor = i64(flagArgoCDSyncRetryBackoffFactor)
+	s.SyncRetryBackoffMaxDuration = str(flagArgoCDSyncRetryBackoffMaxDuration)
+	return s
+}
+
+// resolveArgoCDSettings layers the --argocd-* flags over
+// spec.bundle.deployment.argocd, reconciling both with the deprecated
+// deployer:<key> entries in overrides, which resolveComponentPaths already
+// took from --set when given, else the config file. See
+// bundlercfg.LayerArgoCDSettings for the precedence.
+func resolveArgoCDSettings(
+	cmd *cli.Command,
+	overrides []bundlercfg.ComponentPath,
+	fromConfig bundlercfg.ArgoCDSettings,
+) ([]bundlercfg.ComponentPath, bundlercfg.ArgoCDSettings) {
+
+	return bundlercfg.LayerArgoCDSettings(cmd.IsSet("set"), overrides, fromConfig, argoCDSettingsFromFlags(cmd))
+}
+
 // boolFlagOrConfig returns the CLI flag value when explicitly set on the
 // command (or via env-var Source binding), otherwise the fallback. Logs an
 // INFO line when the CLI value differs from a non-default fallback.

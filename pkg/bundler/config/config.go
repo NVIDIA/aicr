@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/deprecation"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	corev1 "k8s.io/api/core/v1"
@@ -459,6 +460,9 @@ type Config struct {
 	// collide. See #1011.
 	appName string
 
+	// argoCD holds the dedicated Argo CD bundle settings. See #3264.
+	argoCD ArgoCDSettings
+
 	// readinessHooks emits a standalone per-component readiness gate chart
 	// (NNN-<name>-readiness/) for each component that ships a
 	// recipes/components/<name>/readiness.yaml chainsaw Test. The chart runs
@@ -738,6 +742,21 @@ func (c *Config) OCIParentNamespace() string {
 // and argocd deployers. Empty means "use the deployer's default". See #1011.
 func (c *Config) AppName() string {
 	return c.appName
+}
+
+// ArgoCDSettings returns a copy of the dedicated Argo CD bundle settings.
+func (c *Config) ArgoCDSettings() ArgoCDSettings {
+	return c.argoCD.Clone()
+}
+
+// LegacyDeployerNotice returns the deprecation notice for the deprecated
+// deployer:<key> value overrides, and whether c uses any.
+func (c *Config) LegacyDeployerNotice() (deprecation.Notice, bool) {
+	legacy := c.valueOverrides[DeployerOverrideKey]
+	if len(legacy) == 0 {
+		return deprecation.Notice{}, false
+	}
+	return LegacyDeployerNotice(sortedKeys(legacy)[0]), true
 }
 
 // ReadinessHooks reports whether per-component readiness gate charts should
@@ -1161,6 +1180,16 @@ func WithOCIParentNamespace(ns string) Option {
 func WithAppName(name string) Option {
 	return func(c *Config) {
 		c.appName = name
+	}
+}
+
+// WithArgoCDSettings sets the dedicated Argo CD bundle settings for the
+// argocd and argocd-helm deployers. Bundling with any other deployer rejects
+// a non-zero value. Validation runs at bundle time, together with any
+// deprecated deployer:<key> value overrides.
+func WithArgoCDSettings(s ArgoCDSettings) Option {
+	return func(c *Config) {
+		c.argoCD = s.Clone()
 	}
 }
 

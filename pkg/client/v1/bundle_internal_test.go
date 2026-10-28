@@ -36,6 +36,7 @@ func TestBundleOptions_BundlerConfig_FoldsFlatFields(t *testing.T) {
 	t.Parallel()
 
 	label := bundlerconfig.NodeLabel{Key: "nvidia.com/drain", Value: "true"}
+	argoProject, argoRetryLimit := "gpu-infra", int64(20)
 	opts := BundleOptions{
 		Deployer: bundlerconfig.DeployerArgoCD,
 		Repo:     "https://git.example.com/fleet",
@@ -63,6 +64,10 @@ func TestBundleOptions_BundlerConfig_FoldsFlatFields(t *testing.T) {
 		CertIDRegexp:         `^https://github\.com/NVIDIA/.*$`,
 		VendorCharts:         true,
 		AppName:              "fleet-gpu",
+		ArgoCD: bundlerconfig.ArgoCDSettings{
+			Project:        &argoProject,
+			SyncRetryLimit: &argoRetryLimit,
+		},
 	}
 
 	bc := opts.bundlerConfig()
@@ -107,6 +112,11 @@ func TestBundleOptions_BundlerConfig_FoldsFlatFields(t *testing.T) {
 	}
 	if got, want := bc.AppName(), "fleet-gpu"; got != want {
 		t.Errorf("AppName = %q, want %q", got, want)
+	}
+	if got := bc.ArgoCDSettings(); got.Project == nil || *got.Project != "gpu-infra" ||
+		got.SyncRetryLimit == nil || *got.SyncRetryLimit != 20 {
+
+		t.Errorf("ArgoCDSettings = %+v, want Project gpu-infra and SyncRetryLimit 20", got)
 	}
 	if got := bc.DRAEvictionNodeLabel(); got.Key != "nvidia.com/drain" || got.Value != "true" {
 		t.Errorf("DRAEvictionNodeLabel = %+v, want nvidia.com/drain=true", got)

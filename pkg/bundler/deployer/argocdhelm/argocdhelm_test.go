@@ -1924,7 +1924,7 @@ func TestBundleGolden_ReadinessGate(t *testing.T) {
 		TargetRevision: "main",
 		ComponentReadiness: map[string]map[string][]byte{
 			"gpu-operator": {
-				"readiness.yaml": readinessGateManifest(t, config.DeployerArgoCDHelm),
+				"readiness.yaml": readinessGateManifest(t),
 			},
 		},
 	}
@@ -1939,6 +1939,77 @@ func TestBundleGolden_ReadinessGate(t *testing.T) {
 		"002-gpu-operator-readiness/templates/readiness.yaml",
 	} {
 		assertGolden(t, outputDir, "testdata/readiness_gate", rel)
+	}
+}
+
+// TestBundleGolden_SyncRetry freezes spec.syncPolicy.retry through the
+// transformApplication YAML round-trip on every kind of child template —
+// pre, primary, post, and readiness gate. See #3264.
+func TestBundleGolden_SyncRetry(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	})
+	rr.DeploymentOrder = []string{"gpu-operator"}
+
+	g := &Generator{
+		RecipeResult: rr,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {"driver": map[string]any{"version": "580"}},
+		},
+		Version:        "v0.0.0-golden",
+		RepoURL:        "https://github.com/example/aicr-bundles.git",
+		TargetRevision: "main",
+		ComponentPreManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"components/gpu-operator/manifests/namespace.yaml": []byte("apiVersion: v1\n" +
+					"kind: Namespace\n" +
+					"metadata:\n" +
+					"  name: gpu-operator\n"),
+			},
+		},
+		ComponentPostManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"dcgm-exporter.yaml": []byte("apiVersion: v1\n" +
+					"kind: ConfigMap\n" +
+					"metadata:\n" +
+					"  name: dcgm-exporter-config\n" +
+					"  namespace: {{ .Release.Namespace }}\n"),
+			},
+		},
+		ComponentReadiness: map[string]map[string][]byte{
+			"gpu-operator": {
+				"readiness.yaml": readinessGateManifest(t),
+			},
+		},
+		SyncRetry: &config.SyncRetry{
+			Limit:              20,
+			BackoffDuration:    "30s",
+			BackoffFactor:      2,
+			BackoffMaxDuration: "5m",
+		},
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	for _, rel := range []string{
+		"templates/gpu-operator-pre.yaml",
+		"templates/gpu-operator.yaml",
+		"templates/gpu-operator-post.yaml",
+		"templates/gpu-operator-readiness.yaml",
+	} {
+		assertGolden(t, outputDir, "testdata/sync_retry", rel)
 	}
 }
 
@@ -2017,7 +2088,7 @@ func TestGenerateReportsLayout(t *testing.T) {
 		},
 		ComponentReadiness: map[string]map[string][]byte{
 			"gpu-operator": {
-				"readiness.yaml": readinessGateManifest(t, config.DeployerArgoCDHelm),
+				"readiness.yaml": readinessGateManifest(t),
 			},
 		},
 	}
@@ -2121,7 +2192,7 @@ func TestGenerate_ApplyOutOfSyncOnlySyncOptions(t *testing.T) {
 		TargetRevision: "main",
 		ComponentReadiness: map[string]map[string][]byte{
 			"gpu-operator": {
-				"readiness.yaml": readinessGateManifest(t, config.DeployerArgoCDHelm),
+				"readiness.yaml": readinessGateManifest(t),
 			},
 		},
 	}
@@ -2878,7 +2949,7 @@ func TestHelmTemplate_FailsWithoutRepoURL(t *testing.T) {
 	}
 }
 
-func readinessGateManifest(t *testing.T, deployer config.DeployerType) []byte {
+func readinessGateManifest(t *testing.T) []byte {
 	t.Helper()
 	manifest, err := gatemanifest.Render(
 		"gpu-operator",
@@ -2888,7 +2959,7 @@ kind: Test
 metadata:
   name: gpu-operator-readiness
 `),
-		deployer,
+		config.DeployerArgoCDHelm,
 		gatemanifest.Placement{},
 	)
 	if err != nil {
@@ -3401,8 +3472,8 @@ func TestGenerate_NamePrefixValidatedUpfront(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "namePrefix") {
-		t.Errorf("error %q does not mention namePrefix", err.Error())
+	if !strings.Contains(err.Error(), "Argo CD name prefix") {
+		t.Errorf("error %q does not mention the Argo CD name prefix", err.Error())
 	}
 }
 

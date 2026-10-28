@@ -49,6 +49,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/deprecation"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/netutil"
@@ -905,6 +906,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			DestinationServer:      argoOpts.DestinationServer,
 			Project:                argoOpts.Project,
 			CascadeDelete:          argoOpts.CascadeDelete,
+			SyncRetry:              argoOpts.SyncRetry,
 		}, nil
 
 	case config.DeployerArgoCD:
@@ -946,6 +948,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			DestinationServer:      argoOpts.DestinationServer,
 			Project:                argoOpts.Project,
 			CascadeDelete:          argoOpts.CascadeDelete,
+			SyncRetry:              argoOpts.SyncRetry,
 			// Inline values when the bundle repo is OCI: Argo CD's $values
 			// multi-source ref is Git-only (see #960), so an OCI repoURL
 			// must use single-source with helm.valuesObject embedded.
@@ -1073,23 +1076,24 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 	}
 }
 
-// argoDeployerOptions parses the deployer-level Argo Application options
-// (`--set deployer:<key>=<value>`) from the value overrides. Parsing lives
-// here — in front of deployer construction — so both the CLI and API paths
-// share a single validation point. The options only apply to the Argo CD
+// argoDeployerOptions resolves the deployer-level Argo Application options
+// from the dedicated Argo CD settings and the deprecated
+// `--set deployer:<key>=<value>` value overrides. Resolving here, in front
+// of deployer construction, validates the final layered settings for every
+// caller, whatever it checked on the way in. The options only apply to the Argo CD
 // generators; fail closed for every other deployer so a typo or unsupported
-// combination never silently ships a misconfigured bundle. See #1625.
+// combination never silently ships a misconfigured bundle. See #1625, #3264.
 // Typed (--set-json / --set-file) deployer overrides are rejected up front:
-// every deployer option is a scalar, so silently dropping typed input would
-// ship a misconfigured artifact.
-// Returns a zero-value options struct when no deployer overrides were set.
+// every deprecated deployer option is a scalar, so silently dropping typed
+// input would ship a misconfigured artifact.
+// Returns a zero-value options struct when nothing was set.
 func (b *DefaultBundler) argoDeployerOptions() (*config.ArgoDeployerOptions, error) {
 	if typed := b.Config.ValueOverridesTyped()[config.DeployerOverrideKey]; len(typed) > 0 {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			"deployer options do not support --set-json/--set-file; use --set deployer:<key>=<value>")
+			"deployer options do not support --set-json/--set-file; use the --argocd-* settings")
 	}
-	opts, err := config.ParseArgoDeployerOptions(
-		b.Config.ValueOverrides()[config.DeployerOverrideKey])
+	legacy := b.Config.ValueOverrides()[config.DeployerOverrideKey]
+	opts, err := config.ResolveArgoDeployerOptions(legacy, b.Config.ArgoCDSettings())
 	if err != nil {
 		return nil, err
 	}
@@ -1097,11 +1101,27 @@ func (b *DefaultBundler) argoDeployerOptions() (*config.ArgoDeployerOptions, err
 		return &config.ArgoDeployerOptions{}, nil
 	}
 	if d := b.Config.Deployer(); d != config.DeployerArgoCD && d != config.DeployerArgoCDHelm {
+		if len(legacy) > 0 {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("--set deployer:<key> options are only supported with --deployer argocd or argocd-helm (got %q)", d))
+		}
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("--set deployer:<key> options are only supported with --deployer argocd or argocd-helm (got %q)", d))
+			fmt.Sprintf("Argo CD settings are only supported with deployer argocd or argocd-helm (got %q)", d))
+	}
+	keys := make([]string, 0, len(legacy))
+	for key := range legacy {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	for _, key := range keys {
+		warnDeprecated(config.LegacyDeployerNotice(key))
 	}
 	return opts, nil
 }
+
+// warnDeprecated is deprecation.Warn, a variable so tests can observe each
+// notice despite the process-wide once-per-subject deduplication.
+var warnDeprecated = deprecation.Warn
 
 // runDeployer executes a deployer and builds the result output.
 // dataFiles is the list of external data file paths already copied by Make().

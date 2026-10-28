@@ -31,6 +31,9 @@ import (
 // values (e.g. `--set deployer:namePrefix=tenant-a-`). The component
 // registry must never declare a component with this name or override
 // key — a guard test in pkg/recipe enforces the reservation. See #1625.
+//
+// The prefix is deprecated in favor of ArgoCDSettings (the --argocd-*
+// flags) and keeps working through v1.x; see LegacyDeployerNotice.
 const DeployerOverrideKey = "deployer"
 
 // Allowlisted deployer option keys. Free-form paths into the generated
@@ -60,7 +63,7 @@ func ValidateNamePrefix(prefix string) error {
 	}
 	if !namePrefixPattern.MatchString(prefix) {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid deployer namePrefix %q: must be lowercase alphanumeric with hyphens, starting with an alphanumeric character", prefix))
+			fmt.Sprintf("invalid Argo CD name prefix %q: must be lowercase alphanumeric with hyphens, starting with an alphanumeric character", prefix))
 	}
 	return nil
 }
@@ -75,7 +78,7 @@ func ValidateNamePrefix(prefix string) error {
 // such characters, so rejecting them at validation time is safe.
 // Empty is allowed (means "use the in-cluster default").
 func ValidateDestinationServer(raw string) error {
-	if err := ValidateHTTPSURL("deployer destinationServer", raw); err != nil {
+	if err := ValidateHTTPSURL("Argo CD destination server", raw); err != nil {
 		return err
 	}
 	// Mirror the install-time values.schema.json pattern exactly so the two
@@ -86,11 +89,11 @@ func ValidateDestinationServer(raw string) error {
 	// because the schema regex cannot distinguish authority from path.
 	if raw != "" && !strings.HasPrefix(raw, "https://") {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid deployer destinationServer %q: scheme must be lowercase https://", raw))
+			fmt.Sprintf("invalid Argo CD destination server %q: scheme must be lowercase https://", raw))
 	}
 	if strings.ContainsAny(raw, `'" @`) || strings.ContainsFunc(raw, unicode.IsControl) {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid deployer destinationServer %q: must not contain quotes, spaces, control characters, or '@'", raw))
+			fmt.Sprintf("invalid Argo CD destination server %q: must not contain quotes, spaces, control characters, or '@'", raw))
 	}
 	return nil
 }
@@ -110,14 +113,15 @@ func ValidateProject(value string) error {
 	}
 	if errs := validation.IsDNS1123Subdomain(value); len(errs) > 0 {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid deployer project %q: %s", value, errs[0]))
+			fmt.Sprintf("invalid Argo CD project %q: %s", value, errs[0]))
 	}
 	return nil
 }
 
-// ArgoDeployerOptions carries the deployer-level Argo Application options
-// supplied via `--set deployer:<key>=<value>`. All fields apply to the
-// generated child Applications only, except CascadeDelete which also
+// ArgoDeployerOptions carries the validated deployer-level Argo Application
+// options, resolved from ArgoCDSettings and the deprecated
+// `--set deployer:<key>=<value>` overrides by ResolveArgoDeployerOptions.
+// All fields apply to the generated child Applications only, except CascadeDelete which also
 // applies to the parent — the parent Application must stay on the Argo CD
 // control-plane cluster in the default project (App-of-Apps is an
 // admin-only pattern; see the #1625 discussion for the upstream doc
@@ -136,6 +140,10 @@ type ArgoDeployerOptions struct {
 	// parent and every child Application so deleting the parent cascades
 	// to managed resources. See #1628.
 	CascadeDelete bool
+	// SyncRetry sets spec.syncPolicy.retry on every child Application. Nil
+	// leaves the field out, so Argo CD applies its own auto-sync default.
+	// See #3264.
+	SyncRetry *SyncRetry
 }
 
 // ParseArgoDeployerOptions validates and converts the raw
@@ -144,11 +152,13 @@ type ArgoDeployerOptions struct {
 // invalid values are rejected with ErrCodeInvalidRequest — a CLI typo
 // must not silently ship a misconfigured artifact.
 func ParseArgoDeployerOptions(overrides map[string]string) (*ArgoDeployerOptions, error) {
-	if len(overrides) == 0 {
-		//nolint:nilnil // returning (nil, nil) is intentional for optional configuration
-		return nil, nil
-	}
-	opts := &ArgoDeployerOptions{}
+	return ResolveArgoDeployerOptions(overrides, ArgoCDSettings{})
+}
+
+// argoCDSettingsFromLegacy validates the raw `--set deployer:*` override map
+// and converts it to the ArgoCDSettings fields it sets.
+func argoCDSettingsFromLegacy(overrides map[string]string) (ArgoCDSettings, error) {
+	var s ArgoCDSettings
 	// Iterate keys in sorted order so error reporting is deterministic
 	// when multiple entries are invalid (Go map order is randomized).
 	keys := make([]string, 0, len(overrides))
@@ -161,37 +171,41 @@ func ParseArgoDeployerOptions(overrides map[string]string) (*ArgoDeployerOptions
 		switch key {
 		case deployerKeyNamePrefix:
 			if err := ValidateNamePrefix(value); err != nil {
-				return nil, err
+				return ArgoCDSettings{}, err
 			}
-			opts.NamePrefix = value
+			s.NamePrefix = &value
 		case deployerKeyDestinationServer:
 			if err := ValidateDestinationServer(value); err != nil {
-				return nil, err
+				return ArgoCDSettings{}, err
 			}
-			opts.DestinationServer = value
+			s.DestinationServer = &value
 		case deployerKeyProject:
-			// An explicit empty value is a user error at parse time (the
-			// generator boundary allows empty as "use the default", but an
-			// explicit `--set deployer:project=` must fail closed).
-			if value == "" {
-				return nil, errors.New(errors.ErrCodeInvalidRequest,
-					`invalid deployer project "": must not be empty`)
+			if err := validateExplicitProject(value); err != nil {
+				return ArgoCDSettings{}, err
 			}
-			if err := ValidateProject(value); err != nil {
-				return nil, err
-			}
-			opts.Project = value
+			s.Project = &value
 		case deployerKeyCascadeDelete:
 			parsed, err := strconv.ParseBool(value)
 			if err != nil {
-				return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				return ArgoCDSettings{}, errors.Wrap(errors.ErrCodeInvalidRequest,
 					fmt.Sprintf("invalid deployer cascadeDelete value %q: must be a boolean", value), err)
 			}
-			opts.CascadeDelete = parsed
+			s.CascadeDelete = &parsed
 		default:
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
+			return ArgoCDSettings{}, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("unknown deployer option %q: valid keys are cascadeDelete, destinationServer, namePrefix, project", key))
 		}
 	}
-	return opts, nil
+	return s, nil
+}
+
+// validateExplicitProject is ValidateProject for a value the user supplied.
+// The generator boundary allows empty as "use the default", but an
+// explicitly empty project must fail closed.
+func validateExplicitProject(value string) error {
+	if value == "" {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			`invalid Argo CD project "": must not be empty`)
+	}
+	return ValidateProject(value)
 }
