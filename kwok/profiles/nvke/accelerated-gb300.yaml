@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# NVKE GB300 tray as observed on Firmus firmus-tenant8 (Supermicro
+# NVKE GB300 tray as observed on a reference NVKE tenant (Supermicro
 # ARS-121GL-NB3-LCC-FG001): 4 GB300 per tray, 144 Grace arm64 cores, Ubuntu
 # 24.04, driver 580.173.02 (matches the gpu-operator component default).
 # Memory is carried over from the NVKE GB200 tray profile pending an observed

@@ -3,7 +3,7 @@
 The `gb300-nvke-ubuntu-training` recipe targets NVKE (NVIDIA Kubernetes Engine,
 formerly NKE): bare-metal GB300 trays provisioned by Forge/NICo, running
 Ubuntu 24.04 with NVIDIA's `-nvidia-64k` kernel. It is a Preview coordinate.
-The reference tray is a Supermicro `ARS-121GL-NB3-LCC-FG001` (Firmus CBR01):
+The reference tray is a Supermicro `ARS-121GL-NB3-LCC-FG001`:
 4x GB300, 144 Grace cores, two dual ConnectX-8 SuperNIC mezzanines for the
 east-west fabric and a BlueField-3 for north-south.
 
@@ -83,7 +83,7 @@ The Network Operator in this recipe ships **no `ofedDriver`**. The host runs
 the inbox `mlx5_core` and OVN-Kubernetes rides on it through the BlueField-3.
 A DOCA driver container unloads `mlx5_core` to replace it, and the node's
 primary address disappears with it; a reboot restores the inbox driver and
-the operator applies the DOCA driver again. This was observed on Firmus GB300
+the operator applies the DOCA driver again. This was observed on NVKE GB300
 clusters with recipes that carried an `ofedDriver` block. A tenant whose only
 node is the control plane also cannot be drained for a driver rollout. Do not
 add an `ofedDriver` back for NVKE, and do not combine this recipe with

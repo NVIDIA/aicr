@@ -2401,7 +2401,7 @@ gb300-nvke-ubuntu-training:
   009-rdma-modules/Chart.yaml: 3bc76958add2f2cb30621de5fd77a5a282f1ff50e01a12abb5b9791be266d428
   009-rdma-modules/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-rdma-modules/install.sh: 949b915690561a3ad8240ddd528622c3d01bf2ea3fe2c5d5fb5f0dd10e86e4ea
-  009-rdma-modules/templates/rdma-ulp-roce.yaml: d1dfea595033bf40e136b27e6f07d4a861a3b0167334d4ce300c81fea775ac1e
+  009-rdma-modules/templates/rdma-ulp-roce.yaml: aa22ea606b5ff197233062ad1a3246570415b913960c79bd0e28095ceef9b5be
   009-rdma-modules/values.yaml: db77cadff69bf611dac908b82f55cde39d93826732afa6ead32924d78f361be3
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
@@ -2437,7 +2437,7 @@ gb300-nvke-ubuntu-training:
   README.md: 931b0b5480a6c616d26b57d80f4d8543e932340b18985f72b92c852074f7c737
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: b8a0b1a0b595caf4b0147893c07e2f9c814f076af82e998854bc83bacf5286b3
-  checksums.txt: 082af2d8b3e7e9f5048254e324038815199af8a423f3c41404ea50735907d716
+  checksums.txt: efab76a392aace4abe6aaef95a0e75acea08a1c5088b47cb0b206bb0f450338d
   deploy.sh: 162043e2df91851209d46bfbff6e935394b00417dd15005652f701a7c813caca
   recipe.yaml: 16e3162c63e5893f80636c6df86d6f17f6af144190a943c46df05a7bca91eb06
 h100-aks-ubuntu-inference-dynamo:

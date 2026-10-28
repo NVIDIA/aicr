@@ -16,8 +16,8 @@
 # on Mellanox-NIC nodes and persists them via modules-load.d. The RoCE
 # counterpart of rdma-ulp.yaml: no ib_ipoib, because shared-HCA RoCE hands
 # pods a macvlan netdev, not an IPoIB one. Needed where the RDMA stack is the
-# inbox kernel driver with no OFED: the NVKE GB300 image (checked on Firmus
-# firmus-tenant8, 2026-10-23) loads mlx5_core, mlx5_ib, ib_core and ib_uverbs
+# inbox kernel driver with no OFED: the NVKE GB300 image (checked on a
+# reference tenant, 2026-10-23) loads mlx5_core, mlx5_ib, ib_core and ib_uverbs
 # but not rdma_ucm, so /dev/infiniband/rdma_cm is missing and the
 # rdma-shared-device-plugin advertises no resource. A host image that ships
 # rdma-core or a DOCA-OFED install makes the package a no-op.

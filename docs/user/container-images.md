@@ -172,7 +172,7 @@ _No images extracted._
 
 - `gcr.io/gke-release/nri-device-injector:1.0.25-gke.6@sha256:7704e2bd74b8edbb76b6913c7904cc2362f1fa887c4d4aba7b19778ea353537c`
 - `gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830`
-- `ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7`
+- `ubuntu:26.04@sha256:19fcd1bf268f02b60aca3bd30bd8a6d9a11759a430e32921833e65f16d87348a`
 - `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15@sha256:4c9f0de3f39455a2ea35e844e0fc92564ca5629f6b03250fde40e8160719dae4`
 
 ### gpu-operator
@@ -411,7 +411,7 @@ _No images extracted._
 
 ### slurm-accounting-mariadb
 
-- `mariadb:11.8.9@sha256:f16d7a344413e519dff518f27bdb221388f84b0d274c97c4fb5f2cb0dc1b34fa`
+- `mariadb:11.8.9@sha256:6a4b3c20cffebc8b2d9248924f6a63285176c15a532b8e4840b8804e1c2c0443`
 
 ### sriov-ib-networks
 
