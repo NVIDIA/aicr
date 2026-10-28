@@ -86,7 +86,7 @@ security_tools:
   # renovate: datasource=github-releases depName=anchore/grype depType=security_tools
   grype: 'v0.121.0'
   # renovate: datasource=github-releases depName=sigstore/cosign depType=security_tools
-  cosign: 'v3.1.3'
+  cosign: 'v3.1.4'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
   syft: 'v1.55.0'
   # Attaches the aiperf-bench third-party source archive as an OCI 1.1 referrer
