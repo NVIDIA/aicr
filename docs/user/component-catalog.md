@@ -2141,6 +2141,7 @@ plaintext:
 
 ```shell
 BACKEND="<host:port>"   # your OTLP gRPC endpoint
+# Also set each exporter's otlp.tls block for your backend; they default to plaintext.
 aicr bundle -r recipe.yaml \
   --set nktp:otel-lgtm.enabled=false \
   --set "nktp:gateway_metrics.otelcol.config.exporters.otlp.endpoint=${BACKEND}" \
@@ -2156,7 +2157,10 @@ The bundle fails if `otel-lgtm` is disabled and any of the five is unset.
 NKTP owns the `opentelemetry.io` CRDs and replaces them on upgrade (see
 [Upgrade, uninstall, and troubleshooting](#upgrade-uninstall-and-troubleshooting)).
 The `monitoring.coreos.com` CRDs its chart bundles belong to
-`prometheus-operator-crds`, and no deployer applies them from NKTP.
+`prometheus-operator-crds`, and no deployer applies them from NKTP. When that
+section's manual CRD command is needed, run it with
+`CHART="oci://ghcr.io/dsx-ai-factory/nvke/charts/nktp"`, `VERSION` set to the
+chart version, and `EXCLUDE_SUBCHARTS="prometheus-crds opentelemetry-operator"`.
 
 Uninstall keeps the CRDs and deletes the collectors through a `pre-delete`
 hook whose Job takes no tolerations. Where it cannot schedule, or the deployer
