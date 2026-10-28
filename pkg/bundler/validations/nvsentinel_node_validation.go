@@ -380,7 +380,7 @@ func nodeValidationProviders(ctx context.Context, values map[string]any, fail fu
 // a null deletes the key, a map merges recursively, and anything else
 // replaces. Neither argument is modified.
 func nodeValidationHelmMerge(base, override map[string]any) map[string]any {
-	out := make(map[string]any, len(base)+len(override))
+	out := make(map[string]any, len(base))
 	maps.Copy(out, base)
 	for key, value := range override {
 		if value == nil {
