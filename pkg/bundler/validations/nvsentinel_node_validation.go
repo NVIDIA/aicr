@@ -43,6 +43,8 @@ const (
 	nodeValidationTestsPath             = "lifecycle-manager.config.tests"
 	nodeValidationProvidersPath         = "lifecycle-manager.config.providers"
 	nodeValidationChartProvider         = "k8s-job-provider"
+	nodeValidationConditionType         = "type"
+	nodeValidationConditionStatus       = "status"
 	nodeValidationFullNamePath          = "lifecycle-manager.fullNameOverride"
 	nodeValidationDeploymentName        = "lifecycle-manager"
 	nodeValidationOpenShiftCertProvider = "openshift-service-ca"
@@ -308,35 +310,131 @@ func nodeValidationDefinedTests(ctx context.Context, values map[string]any, fail
 	return defined, true, nil
 }
 
+// nodeValidationChartProviderDefaults is the chart's k8s-job-provider
+// definition (NVSentinel v1.28.0), which AICR's values merge over.
+var nodeValidationChartProviderDefaults = map[string]any{
+	"apiGroup":            "batch",
+	"version":             "v1",
+	"kind":                "Job",
+	"resource":            "jobs",
+	"templateFile":        "k8s-job-template.yaml",
+	"retries":             5,
+	"timeoutSeconds":      1800,
+	"successfulCondition": map[string]any{nodeValidationConditionType: "Complete", nodeValidationConditionStatus: "True"},
+	"failedCondition":     map[string]any{nodeValidationConditionType: "Failed", nodeValidationConditionStatus: "True"},
+}
+
 // nodeValidationProviders returns the provider names lifecycle-manager's
-// config will define: the chart's k8s-job-provider merged with AICR's
-// lifecycle-manager.config.providers, where a null deletes an entry.
+// config will define and accept: the chart's k8s-job-provider merged with
+// AICR's lifecycle-manager.config.providers, where a null deletes an entry or
+// field as Helm does. It fails on a provider definition lifecycle-manager
+// cannot decode or rejects at startup, and leaves that provider out.
 func nodeValidationProviders(ctx context.Context, values map[string]any, fail func(string, ...any)) (map[string]bool, error) {
-	known := map[string]bool{nodeValidationChartProvider: true}
+	effective := map[string]any{nodeValidationChartProvider: nodeValidationChartProviderDefaults}
 	raw, present := component.GetValueByPath(values, nodeValidationProvidersPath)
 	switch {
-	case !present:
-		return known, nil
-	case raw == nil:
-		return map[string]bool{}, nil
+	case present && raw == nil:
+		effective = map[string]any{}
+	case present:
+		providers, isMap := raw.(map[string]any)
+		if !isMap {
+			fail("%s is %#v, not a map of providers, so lifecycle-manager cannot decode its config and exits at "+
+				"startup", nodeValidationProvidersPath, raw)
+			return map[string]bool{}, nil
+		}
+		for name, provider := range providers {
+			if provider == nil {
+				delete(effective, name)
+				continue
+			}
+			override, isMap := provider.(map[string]any)
+			if !isMap {
+				effective[name] = provider
+				continue
+			}
+			base, _ := effective[name].(map[string]any)
+			effective[name] = nodeValidationHelmMerge(base, override)
+		}
 	}
-	providers, isMap := raw.(map[string]any)
-	if !isMap {
-		fail("%s is %#v, not a map of providers, so lifecycle-manager cannot decode its config and exits at startup",
-			nodeValidationProvidersPath, raw)
-		return known, nil
-	}
-	for name, provider := range providers {
+	known := map[string]bool{}
+	for _, name := range slices.Sorted(maps.Keys(effective)) {
 		if err := ctx.Err(); err != nil {
 			return nil, aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "checking lifecycle-manager providers")
 		}
-		if provider == nil {
-			delete(known, name)
-		} else {
+		path := nodeValidationProvidersPath + "." + name
+		provider, isMap := effective[name].(map[string]any)
+		if !isMap {
+			fail("%s is %#v, not a provider definition, so the chart cannot render lifecycle-manager's RBAC for it",
+				path, effective[name])
+			continue
+		}
+		if nodeValidationProviderViolations(path, provider, fail) {
 			known[name] = true
 		}
 	}
 	return known, nil
+}
+
+// nodeValidationHelmMerge returns override coalesced over base as Helm does:
+// a null deletes the key, a map merges recursively, and anything else
+// replaces. Neither argument is modified.
+func nodeValidationHelmMerge(base, override map[string]any) map[string]any {
+	out := make(map[string]any, len(base)+len(override))
+	maps.Copy(out, base)
+	for key, value := range override {
+		if value == nil {
+			delete(out, key)
+			continue
+		}
+		if child, isMap := value.(map[string]any); isMap {
+			if prior, priorMap := out[key].(map[string]any); priorMap {
+				out[key] = nodeValidationHelmMerge(prior, child)
+				continue
+			}
+		}
+		out[key] = value
+	}
+	return out
+}
+
+// nodeValidationProviderViolations fails on each field of an effective
+// provider definition lifecycle-manager rejects at startup, and reports
+// whether the definition is usable.
+func nodeValidationProviderViolations(path string, provider map[string]any, fail func(string, ...any)) bool {
+	ok := true
+	reject := func(format string, args ...any) {
+		ok = false
+		fail(format, args...)
+	}
+	for _, field := range []string{"apiGroup", "version", "kind", "resource", "templateFile"} {
+		if v, _ := provider[field].(string); strings.TrimSpace(v) == "" {
+			reject("%s.%s is %#v, not a non-empty string, which lifecycle-manager rejects at startup", path, field,
+				provider[field])
+		}
+	}
+	if n, whole := wholeNumber(provider["retries"]); provider["retries"] != nil && (!whole || n < 0) {
+		reject("%s.retries is %#v, not a whole number of at least 0, which lifecycle-manager rejects at startup",
+			path, provider["retries"])
+	}
+	if n, whole := wholeNumber(provider["timeoutSeconds"]); !whole || n <= 0 {
+		reject("%s.timeoutSeconds is %#v, not a whole number above 0, which lifecycle-manager rejects at startup",
+			path, provider["timeoutSeconds"])
+	}
+	for _, field := range []string{"successfulCondition", "failedCondition"} {
+		condition, _ := provider[field].(map[string]any)
+		for _, key := range []string{nodeValidationConditionType, nodeValidationConditionStatus} {
+			if v, _ := condition[key].(string); strings.TrimSpace(v) == "" {
+				reject("%s.%s.%s is %#v, not a non-empty string, which lifecycle-manager rejects at startup",
+					path, field, key, condition[key])
+			}
+		}
+	}
+	if batching, present := provider["supportsTestBatching"]; present && batching != nil {
+		if _, isBool := batching.(bool); !isBool {
+			reject("%s.supportsTestBatching is %#v, not a boolean", path, batching)
+		}
+	}
+	return ok
 }
 
 // nodeValidationTestViolations fails on a test definition lifecycle-manager
