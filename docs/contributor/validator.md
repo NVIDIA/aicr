@@ -1633,7 +1633,8 @@ nvIpam. Such components are listed in `imageCRDSources`, and the tool also
 reads the CRDs from the image of the named container in the rendered chart.
 `make crd-inventory-check` re-renders every chart and fails on a stale
 inventory. It needs helm and network access, so `make qualify` does not run
-it.
+it. The merge gate runs it on pull requests that change its inputs, and on
+every push to `main`.
 
 **Value-gate awareness (#1844).** A registry assert file is static — it
 cannot see the component's effective Helm values. That is a problem for a

@@ -87,6 +87,7 @@ jobs:
       bom: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.bom }}
       nvcre: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.nvcre }}
       crdcmd: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.crdcmd }}
+      crdinv: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.crdinv }}
       classcol: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.classcol }}
       tuning: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.tuning }}
       notices: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.notices }}
@@ -199,6 +200,25 @@ jobs:
               # workflow so a change to the job cannot skip it.
               - 'docs/user/component-catalog.md'
               - 'pkg/bundler/deployer/localformat/catalog_crd_command_test.go'
+              - '.github/workflows/merge-gate.yaml'
+            crdinv:
+              # Inputs to make crd-inventory-check, which renders each pinned
+              # chart a health check asserts a CRD against and compares it with
+              # the committed crds.yaml. The pins, values, asserts and manifests
+              # it reads live under recipes/. The tool, the renderer, the helm
+              # pin, the Makefile target and this workflow are listed so a
+              # change to the check runs it.
+              - 'recipes/registry.yaml'
+              - 'recipes/overlays/**'
+              - 'recipes/mixins/**'
+              - 'recipes/checks/**'
+              - 'recipes/components/*/values.yaml'
+              - 'recipes/components/*/crds.yaml'
+              - 'recipes/components/*/manifests/**'
+              - 'tools/crd-inventory/**'
+              - 'pkg/helm/**'
+              - '.settings.yaml'
+              - 'Makefile'
               - '.github/workflows/merge-gate.yaml'
             classcol:
               # TestComponentCatalogClassColumnMatchesRegistry keeps the Class
@@ -836,6 +856,44 @@ jobs:
       - run: echo "No catalog CRD command inputs changed, so the check is not required"
 
   # ---------------------------------------------------------------------------
+  # CRD inventory freshness: re-renders every chart a health check asserts a
+  # CRD against and compares the result with the committed crds.yaml files.
+  # It needs helm and network access, so make qualify does not run it.
+  # ---------------------------------------------------------------------------
+
+  crd-inventory:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.crdinv == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/load-versions
+        id: versions
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: true
+      # The runner image bundles Helm 3. The inventories are rendered with the
+      # pinned Helm 4.
+      - uses: ./.github/actions/setup-build-tools
+        with:
+          install_helm: 'true'
+          helm_version: ${{ steps.versions.outputs.helm }}
+      - name: Verify the committed CRD inventories match the pinned charts
+        run: make crd-inventory-check
+
+  crd-inventory-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.crdinv != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - run: echo "No CRD inventory inputs changed, so the check is not required"
+
+  # ---------------------------------------------------------------------------
   # Catalog Class column: keeps docs/user/component-catalog.md equal to the
   # registry's class assignments on docs-only PRs that skip the `tests` job
   # (mirrors nvcre-wiring).
@@ -1036,6 +1094,8 @@ jobs:
       - nvcre-wiring-skip
       - catalog-crd-command
       - catalog-crd-command-skip
+      - crd-inventory
+      - crd-inventory-skip
       - catalog-class-column
       - catalog-class-column-skip
       - tuning-freshness
