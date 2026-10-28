@@ -77,7 +77,7 @@ func generate(ctx context.Context, repoRoot string, check bool) error {
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "resolve leaf recipes")
 	}
-	return run(ctx, repoRoot, dp, leaves, helm.Default(), readImageCRDs, check)
+	return run(ctx, repoRoot, dp, leaves, helm.WithRetry(helm.Default()), readImageCRDs, check)
 }
 
 // run writes under repoRoot the inventory of each component with a CRD

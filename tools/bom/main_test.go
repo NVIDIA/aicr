@@ -21,11 +21,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bom"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/helm"
 	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
 )
 
@@ -272,7 +270,6 @@ func TestSurveyComponentSkipHelm(t *testing.T) {
 }
 
 func TestSurveyComponentRendererError(t *testing.T) {
-	setRetryBackoff(t, 0)
 	root := writeTestRegistry(t, testRegistryHelm)
 	mock := &helmtest.MockRenderer{
 		Errs: map[string]error{
@@ -487,7 +484,6 @@ func TestRenderHelmComponent(t *testing.T) {
 }
 
 func TestRenderHelmComponentError(t *testing.T) {
-	setRetryBackoff(t, 0)
 	root := writeTestRegistry(t, testRegistryHelm)
 	mock := &helmtest.MockRenderer{
 		Errs: map[string]error{
@@ -677,7 +673,6 @@ func TestRunStrictUnpinnedVersion(t *testing.T) {
 }
 
 func TestRunStrictWithWarnings(t *testing.T) {
-	setRetryBackoff(t, 0)
 	root := writeTestRegistry(t, testRegistryHelm)
 	outDir := t.TempDir()
 
@@ -892,103 +887,6 @@ func TestSurveyComponent_DRANodeLabelerImageInventoried(t *testing.T) {
 	}
 	if got.Type != kindManifest {
 		t.Errorf("type = %q, want %q", got.Type, kindManifest)
-	}
-}
-
-// setRetryBackoff overrides renderRetryBackoff for one test.
-func setRetryBackoff(t *testing.T, d time.Duration) {
-	t.Helper()
-	old := renderRetryBackoff
-	renderRetryBackoff = d
-	t.Cleanup(func() { renderRetryBackoff = old })
-}
-
-// flakyRenderer fails the first failures calls with err, then returns yaml.
-type flakyRenderer struct {
-	failures int
-	err      error
-	yaml     []byte
-	calls    int
-}
-
-func (f *flakyRenderer) Render(context.Context, helm.ChartInput) ([]byte, error) {
-	f.calls++
-	if f.calls <= f.failures {
-		return nil, f.err
-	}
-	return f.yaml, nil
-}
-
-func TestRenderWithRetry(t *testing.T) {
-	setRetryBackoff(t, 0)
-	internal := errors.New(errors.ErrCodeInternal, "pull failed")
-	tests := []struct {
-		name      string
-		failures  int
-		err       error
-		wantCalls int
-		wantErr   bool
-	}{
-		{"transient failure is absorbed", 2, internal, 3, false},
-		{"persistent failure surfaces after all attempts", 99, internal, renderAttempts, true},
-		{"non-internal failure is not retried", 99, errors.New(errors.ErrCodeNotFound, "no helm"), 1, true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			f := &flakyRenderer{failures: tt.failures, err: tt.err, yaml: []byte(renderedYAML)}
-			_, err := renderWithRetry(context.Background(), f, helm.ChartInput{Name: "x"})
-			if (err != nil) != tt.wantErr || f.calls != tt.wantCalls {
-				t.Errorf("err = %v, calls = %d; want err %v, calls %d", err, f.calls, tt.wantErr, tt.wantCalls)
-			}
-		})
-	}
-}
-
-// hangingRenderer blocks until its context is done, then fails.
-type hangingRenderer struct{ calls int }
-
-func (h *hangingRenderer) Render(ctx context.Context, _ helm.ChartInput) ([]byte, error) {
-	h.calls++
-	<-ctx.Done()
-	return nil, errors.New(errors.ErrCodeInternal, "signal: killed")
-}
-
-func TestRenderWithRetryDoesNotRetryTimeout(t *testing.T) {
-	setRetryBackoff(t, 0)
-	old := renderTimeout
-	renderTimeout = 10 * time.Millisecond
-	t.Cleanup(func() { renderTimeout = old })
-	h := &hangingRenderer{}
-	if _, err := renderWithRetry(context.Background(), h, helm.ChartInput{Name: "x"}); err == nil {
-		t.Fatal("renderWithRetry() error = nil, want the timeout failure")
-	}
-	if h.calls != 1 {
-		t.Errorf("calls = %d, want 1 (timeouts are not retried)", h.calls)
-	}
-}
-
-// cancelingRenderer cancels the caller's context on its first call, then fails.
-type cancelingRenderer struct {
-	cancel context.CancelFunc
-	calls  int
-}
-
-func (c *cancelingRenderer) Render(context.Context, helm.ChartInput) ([]byte, error) {
-	c.calls++
-	c.cancel()
-	return nil, errors.New(errors.ErrCodeInternal, "pull failed")
-}
-
-func TestRenderWithRetryStopsOnContextCancel(t *testing.T) {
-	setRetryBackoff(t, time.Hour)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	r := &cancelingRenderer{cancel: cancel}
-	if _, err := renderWithRetry(ctx, r, helm.ChartInput{Name: "x"}); err == nil {
-		t.Fatal("renderWithRetry() error = nil, want the render failure")
-	}
-	if r.calls != 1 {
-		t.Errorf("calls = %d, want 1 (no retry after cancel)", r.calls)
 	}
 }
 
