@@ -2,8 +2,9 @@
 
 ## Status
 
-**Proposed** — 2026-10-28. Answers [#3285](https://github.com/NVIDIA/aicr/issues/3285).
-Implementation follows acceptance as a separate change.
+**Accepted** — 2026-10-28 (proposed 2026-10-28). Answers
+[#3285](https://github.com/NVIDIA/aicr/issues/3285). Implementation follows as
+a separate change.
 
 ## Decision Summary
 
