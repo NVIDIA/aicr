@@ -303,9 +303,13 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 		return nil, err
 	}
 
-	recipeResult, err := b.filterAndValidateRecipe(recipeResult)
+	// The PromQL scrape scope spans the platform, not the bundlers subset.
+	recipeResult, platformRefs, err := b.filterAndValidateRecipe(recipeResult)
 	if err != nil {
 		return nil, err
+	}
+	if ownershipErr := b.enforcePromQLServerOwnership(recipeResult, platformRefs); ownershipErr != nil {
+		return nil, ownershipErr
 	}
 
 	// Bundle-time override policy for GPU allocation-policy keys (#1327):
@@ -346,10 +350,15 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	if evictionErr := b.injectDRAEvictionLabel(componentValues, recipeResult); evictionErr != nil {
 		return nil, evictionErr
 	}
+	if scopeErr := b.injectPromQLScrapeScope(recipeResult, platformRefs, componentValues); scopeErr != nil {
+		return nil, scopeErr
+	}
 	if warningErr := b.warnPeermemReadinessDisabled(ctx, recipeResult, componentValues); warningErr != nil {
 		return nil, warningErr
 	}
-	b.warnNFDNICLabelMismatch(componentValues)
+	if nicErr := b.checkNFDNICLabelMismatch(componentValues, dynamicValues); nicErr != nil {
+		return nil, nicErr
+	}
 	b.warnNRIManagementAllowlist(recipeResult, componentValues)
 
 	if warningErr := b.warnMissingStorageClassForPVCs(ctx, recipeResult, componentValues); warningErr != nil {
@@ -1537,46 +1546,46 @@ func (b *DefaultBundler) getTypedValueOverridesForComponent(componentName string
 	return mergeOverridesAcrossKeys(allOverrides, b.componentOverrideKeys(componentName, provider))
 }
 
-func (b *DefaultBundler) filterAndValidateRecipe(recipeResult *recipe.RecipeResult) (*recipe.RecipeResult, error) {
-	enabledRefs, filteredOrder, excludedReasons, filterErr := b.filterEnabledComponents(recipeResult)
+// filterAndValidateRecipe also returns the platform's refs, before the
+// bundlers filter.
+func (b *DefaultBundler) filterAndValidateRecipe(recipeResult *recipe.RecipeResult) (*recipe.RecipeResult, []recipe.ComponentRef, error) {
+	selection, filterErr := b.filterEnabledComponents(recipeResult)
 	if filterErr != nil {
-		return nil, filterErr
+		return nil, nil, filterErr
 	}
 
 	// A --set / --set-json / --set-file naming a component that is not in
 	// the generated bundle cannot take effect. Reject it rather than drop
 	// it on the floor. Runs immediately after filtering, so the "present"
 	// set is exactly what will be rendered.
-	if overrideErr := b.rejectOverridesForAbsentComponents(recipeResult, enabledRefs, excludedReasons); overrideErr != nil {
-		return nil, overrideErr
+	if overrideErr := b.rejectOverridesForAbsentComponents(recipeResult, selection.emitted, selection.excluded); overrideErr != nil {
+		return nil, nil, overrideErr
 	}
 
 	// Work on a shallow copy so the caller's RecipeResult is not mutated
 	filtered := *recipeResult
-	filtered.ComponentRefs = enabledRefs
-	filtered.DeploymentOrder = filteredOrder
+	filtered.ComponentRefs = selection.emitted
+	filtered.DeploymentOrder = selection.order
 	spec := recipe.RecipeMetadataSpec{ComponentRefs: filtered.ComponentRefs}
 	if err := spec.ValidateDependencies(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return &filtered, nil
+	return &filtered, selection.platform, nil
 }
 
-// filterEnabledComponents resolves the set of components to bundle by applying
-// recipe-level overrides.enabled, bundle-time --set enabled toggles, and the
-// positive bundlers component-name filter (config.WithBundlers, #1531), then
-// returns the enabled refs (with dangling dependency edges pruned) alongside
-// the deployment order filtered to those refs and a name-keyed map of why
-// each excluded component was dropped (consumed by
-// rejectOverridesForAbsentComponents).
-//
-// Bundle-time --set can disable a component the recipe enabled
-// (--set <c>:enabled=false), but it cannot re-enable a component the recipe
-// deliberately disabled: the author disables a component because the platform
-// already provides it (e.g. a CSP-managed cert-manager on OKE), so re-enabling
-// would install a conflicting second copy and there is no authored deployment
-// order for it. Such an attempt is rejected with ErrCodeInvalidRequest.
-func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResult) ([]recipe.ComponentRef, []string, map[string]string, error) {
+// componentSelection is what filterEnabledComponents selected. emitted has
+// dangling dependency edges pruned; platform is before the bundlers filter;
+// excluded holds the reason rejectOverridesForAbsentComponents quotes.
+type componentSelection struct {
+	emitted  []recipe.ComponentRef
+	order    []string
+	excluded map[string]string
+	platform []recipe.ComponentRef
+}
+
+// filterEnabledComponents narrows platformEnabledComponents by the bundlers
+// filter (config.WithBundlers, #1531).
+func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResult) (componentSelection, error) {
 	// declaredSet is every component the recipe names, regardless of enabled
 	// state. It distinguishes a declared-but-disabled dependency (prune the
 	// edge — satisfied externally) from an undeclared one (keep it so topology
@@ -1586,45 +1595,13 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 		declaredSet[ref.Name] = struct{}{}
 	}
 
-	enabledRefs := make([]recipe.ComponentRef, 0, len(recipeResult.ComponentRefs))
-	enabledSet := make(map[string]struct{})
-	// excludedReasons records, per dropped component, the reason phrase
-	// rejectOverridesForAbsentComponents quotes back to the operator.
-	excludedReasons := make(map[string]string)
-	for _, ref := range recipeResult.ComponentRefs {
-		setEnabled, ok, overrideErr := b.getSetEnabledOverride(ref.Name, recipeResult.DataProvider())
-		if overrideErr != nil {
-			return nil, nil, nil, overrideErr
-		}
-		recipeEnabled := ref.IsEnabled()
-		if ok {
-			if setEnabled && !recipeEnabled {
-				return nil, nil, nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-					"component %q is disabled by the recipe and cannot be re-enabled with "+
-						"--set %s:%s=true", ref.Name, ref.Name, config.ComponentEnabledKey))
-			}
-			if !setEnabled {
-				slog.Info("skipping component disabled via --set", "component", ref.Name)
-				// A redundant enabled=false on a component the recipe
-				// already disables keeps the recipe-disabled reason — it
-				// is the more fundamental one, and the override merely
-				// agrees with it.
-				if recipeEnabled {
-					excludedReasons[ref.Name] = "an " + config.ComponentEnabledKey + "=false value override removed it"
-				} else {
-					excludedReasons[ref.Name] = "the recipe disables it"
-				}
-				b.warnExcludedDriverInstaller(recipeResult, ref.Name, "disabled via --set")
-				continue
-			}
-			// setEnabled && recipeEnabled: explicit --set enabled=true is a no-op.
-		} else if !recipeEnabled {
-			slog.Info("skipping disabled component", "component", ref.Name)
-			excludedReasons[ref.Name] = "the recipe disables it"
-			b.warnExcludedDriverInstaller(recipeResult, ref.Name, "disabled by the recipe")
-			continue
-		}
-		enabledRefs = append(enabledRefs, ref)
+	platformRefs, excludedReasons, platformErr := b.platformEnabledComponents(recipeResult)
+	if platformErr != nil {
+		return componentSelection{}, platformErr
+	}
+	enabledRefs := slices.Clone(platformRefs)
+	enabledSet := make(map[string]struct{}, len(enabledRefs))
+	for _, ref := range enabledRefs {
 		enabledSet[ref.Name] = struct{}{}
 	}
 
@@ -1645,12 +1622,12 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 					for _, ref := range recipeResult.ComponentRefs {
 						declaredNames = append(declaredNames, ref.Name)
 					}
-					return nil, nil, nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+					return componentSelection{}, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 						"unknown component %q in bundlers filter; recipe declares: %s",
 						name, strings.Join(declaredNames, ", ")))
 				}
 				if _, enabled := enabledSet[name]; !enabled {
-					return nil, nil, nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+					return componentSelection{}, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 						"component %q is disabled and cannot be selected via the bundlers filter", name))
 				}
 				requestedSet[name] = struct{}{}
@@ -1674,11 +1651,11 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 	// labeler but drops either half of the contract it serves still removes it.
 	enabledRefs, labelerErr := b.dropUnservedDRANodeLabeler(enabledRefs, enabledSet, excludedReasons)
 	if labelerErr != nil {
-		return nil, nil, nil, labelerErr
+		return componentSelection{}, labelerErr
 	}
 
 	if len(enabledRefs) == 0 {
-		return nil, nil, nil, errors.New(errors.ErrCodeInvalidRequest,
+		return componentSelection{}, errors.New(errors.ErrCodeInvalidRequest,
 			"recipe has no enabled components after filtering")
 	}
 
@@ -1719,7 +1696,64 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 		}
 	}
 
-	return enabledRefs, filteredOrder, excludedReasons, nil
+	return componentSelection{
+		emitted:  enabledRefs,
+		order:    filteredOrder,
+		excluded: excludedReasons,
+		platform: platformRefs,
+	}, nil
+}
+
+// platformEnabledComponents returns the recipe's enabled refs minus those
+// --set <c>:enabled=false removes, and why each other component was dropped.
+//
+// Bundle-time --set can disable a component the recipe enabled
+// (--set <c>:enabled=false), but it cannot re-enable a component the recipe
+// deliberately disabled: the author disables a component because the platform
+// already provides it (e.g. a CSP-managed cert-manager on OKE), so re-enabling
+// would install a conflicting second copy and there is no authored deployment
+// order for it. Such an attempt is rejected with ErrCodeInvalidRequest.
+func (b *DefaultBundler) platformEnabledComponents(recipeResult *recipe.RecipeResult) ([]recipe.ComponentRef, map[string]string, error) {
+	enabledRefs := make([]recipe.ComponentRef, 0, len(recipeResult.ComponentRefs))
+	// excludedReasons records, per dropped component, the reason phrase
+	// rejectOverridesForAbsentComponents quotes back to the operator.
+	excludedReasons := make(map[string]string)
+	for _, ref := range recipeResult.ComponentRefs {
+		setEnabled, ok, overrideErr := b.getSetEnabledOverride(ref.Name, recipeResult.DataProvider())
+		if overrideErr != nil {
+			return nil, nil, overrideErr
+		}
+		recipeEnabled := ref.IsEnabled()
+		if ok {
+			if setEnabled && !recipeEnabled {
+				return nil, nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+					"component %q is disabled by the recipe and cannot be re-enabled with "+
+						"--set %s:%s=true", ref.Name, ref.Name, config.ComponentEnabledKey))
+			}
+			if !setEnabled {
+				slog.Info("skipping component disabled via --set", "component", ref.Name)
+				// A redundant enabled=false on a component the recipe
+				// already disables keeps the recipe-disabled reason — it
+				// is the more fundamental one, and the override merely
+				// agrees with it.
+				if recipeEnabled {
+					excludedReasons[ref.Name] = "an " + config.ComponentEnabledKey + "=false value override removed it"
+				} else {
+					excludedReasons[ref.Name] = "the recipe disables it"
+				}
+				b.warnExcludedDriverInstaller(recipeResult, ref.Name, "disabled via --set")
+				continue
+			}
+			// setEnabled && recipeEnabled: explicit --set enabled=true is a no-op.
+		} else if !recipeEnabled {
+			slog.Info("skipping disabled component", "component", ref.Name)
+			excludedReasons[ref.Name] = "the recipe disables it"
+			b.warnExcludedDriverInstaller(recipeResult, ref.Name, "disabled by the recipe")
+			continue
+		}
+		enabledRefs = append(enabledRefs, ref)
+	}
+	return enabledRefs, excludedReasons, nil
 }
 
 // rejectOverridesForAbsentComponents rejects a value override

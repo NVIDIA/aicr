@@ -382,8 +382,8 @@ func checkDirectional(where string, t *Transition) []string {
 //
 // Coverage starts at the lowest from floor, not at zero: requiring zero would
 // reject the ADR's stated ordinary case (from ">=25.0 <26.0"). A version below
-// every record resolves to the unknown verdict, not a malformed file. It runs
-// up to the pin, which is why a single-transition record is checked too.
+// every record is the matcher's to report, not a malformed file. It runs up to
+// the pin, which is why a single-transition record is checked too.
 func checkCoverage(component string, trs []Transition, pin string) []string {
 	if len(trs) == 0 {
 		return nil

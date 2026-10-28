@@ -248,6 +248,62 @@ type ComponentConfig struct {
 	// metadata_store.go. Rationale: ADR-005's "Silent constraint override"
 	// mitigation, docs/design/005-overlay-refactoring.md.
 	MixinSafeOverridePaths []string `yaml:"mixinSafeOverridePaths,omitempty"`
+
+	Telemetry TelemetryConfig `yaml:"telemetry,omitempty"`
+}
+
+// TelemetryConfig is a component's part in the runtime metrics contract
+// (ADR-026): a consumer of the runtime Prometheus server declares PromQL, and
+// the server declares PromQLServer. The bundler writes the enabled
+// consumers' union at the server's paths.
+type TelemetryConfig struct {
+	PromQL       PromQLConsumerConfig `yaml:"promql,omitempty"`
+	PromQLServer PromQLServerConfig   `yaml:"promqlServer,omitempty"`
+}
+
+// PromQLConsumerConfig is what one consumer queries from the server.
+type PromQLConsumerConfig struct {
+	// MonitorsFrom names components whose namespaces, as resolved in the
+	// recipe, hold the ServiceMonitors and PodMonitors exposing Series. Those
+	// monitors must not set spec.scrapeClass.
+	MonitorsFrom []string `yaml:"monitorsFrom,omitempty"`
+
+	// Series are RE2 patterns matched against the whole metric name as
+	// scraped, before monitor relabeling, so a histogram matches by its _sum,
+	// _count, or _bucket name.
+	Series []string `yaml:"series,omitempty"`
+}
+
+// PromQLServerConfig names the server's Helm value paths the bundler owns:
+// the server's values may not set them and bundle-time overrides may not
+// target them. NamespaceSelectorPaths receive a selector naming exactly the
+// consumers' namespaces, MonitorSelectorPaths one matching every monitor,
+// and ScrapeClassesPath a default scrape class keeping only their Series.
+type PromQLServerConfig struct {
+	NamespaceSelectorPaths []string `yaml:"namespaceSelectorPaths,omitempty"`
+	MonitorSelectorPaths   []string `yaml:"monitorSelectorPaths,omitempty"`
+	ScrapeClassesPath      string   `yaml:"scrapeClassesPath,omitempty"`
+}
+
+// IsDeclared reports whether the component declares itself a PromQL
+// consumer.
+func (c PromQLConsumerConfig) IsDeclared() bool {
+	return len(c.MonitorsFrom) > 0 || len(c.Series) > 0
+}
+
+// IsDeclared reports whether the component declares itself the PromQL
+// server.
+func (c PromQLServerConfig) IsDeclared() bool {
+	return len(c.NamespaceSelectorPaths) > 0 || len(c.MonitorSelectorPaths) > 0 || c.ScrapeClassesPath != ""
+}
+
+// OwnedPaths returns every path in c.
+func (c PromQLServerConfig) OwnedPaths() []string {
+	paths := slices.Concat(c.NamespaceSelectorPaths, c.MonitorSelectorPaths)
+	if c.ScrapeClassesPath != "" {
+		paths = append(paths, c.ScrapeClassesPath)
+	}
+	return paths
 }
 
 // HealthCheckConfig defines custom health check settings for a component.
@@ -568,6 +624,10 @@ func loadComponentRegistryFor(provider DataProvider) (*ComponentRegistry, error)
 		}
 	}
 
+	if errs := registry.validateTelemetry(); len(errs) > 0 {
+		return nil, errs[0]
+	}
+
 	// Build index for fast lookup
 	registry.byName = make(map[string]*ComponentConfig, len(registry.Components))
 	for i := range registry.Components {
@@ -840,7 +900,98 @@ func (r *ComponentRegistry) Validate() []error {
 		}
 	}
 
+	errs = append(errs, r.validateTelemetry()...)
+
 	return errs
+}
+
+// validateTelemetry leaves to the bundler what depends on the recipe: whether
+// a monitorsFrom component is enabled, and how many servers are.
+func (r *ComponentRegistry) validateTelemetry() []error {
+	known := make(map[string]bool, len(r.Components))
+	for _, comp := range r.Components {
+		known[comp.Name] = true
+	}
+
+	var errs []error
+	for _, comp := range r.Components {
+		consumer := comp.Telemetry.PromQL
+		if consumer.IsDeclared() {
+			if len(consumer.MonitorsFrom) == 0 {
+				errs = append(errs, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+					"component %q: telemetry.promql.monitorsFrom is required when series are declared", comp.Name)))
+			}
+			if len(consumer.Series) == 0 {
+				errs = append(errs, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+					"component %q: telemetry.promql.series is required when monitorsFrom is declared", comp.Name)))
+			}
+			for _, source := range consumer.MonitorsFrom {
+				if !known[source] {
+					errs = append(errs, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+						"component %q: telemetry.promql.monitorsFrom names %q, which is not a registry component",
+						comp.Name, source)))
+				}
+			}
+			for _, pattern := range consumer.Series {
+				if err := ValidatePromQLSeriesPattern(pattern); err != nil {
+					errs = append(errs, errors.Wrap(errors.ErrCodeInvalidRequest,
+						fmt.Sprintf("component %q: invalid telemetry.promql.series entry", comp.Name), err))
+				}
+			}
+		}
+
+		server := comp.Telemetry.PromQLServer
+		if !server.IsDeclared() {
+			continue
+		}
+		if len(server.NamespaceSelectorPaths) == 0 || len(server.MonitorSelectorPaths) == 0 || server.ScrapeClassesPath == "" {
+			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+				"component %q: telemetry.promqlServer needs namespaceSelectorPaths, monitorSelectorPaths and scrapeClassesPath",
+				comp.Name)))
+		}
+		owned := server.OwnedPaths()
+		for i, path := range owned {
+			if !isWellFormedValuePath(path) {
+				errs = append(errs, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+					"component %q: telemetry.promqlServer path %q is not a well-formed dotted path", comp.Name, path)))
+				continue
+			}
+			for _, other := range owned[i+1:] {
+				if PathsIntersect(path, other) {
+					errs = append(errs, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+						"component %q: telemetry.promqlServer paths %q and %q overlap", comp.Name, path, other)))
+				}
+			}
+		}
+	}
+	return errs
+}
+
+// ValidatePromQLSeriesPattern checks one telemetry.promql.series entry. Helm
+// template delimiters are rejected because a chart may render the scrape
+// class through tpl.
+func ValidatePromQLSeriesPattern(pattern string) error {
+	if strings.TrimSpace(pattern) == "" {
+		return errors.New(errors.ErrCodeInvalidRequest, "series pattern is empty")
+	}
+	if strings.Contains(pattern, "{{") || strings.Contains(pattern, "}}") {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("series pattern %q contains a Helm template delimiter", pattern))
+	}
+	// The union wraps each pattern as (?:p). An unterminated \Q compiles alone
+	// but quotes that closing paren, and a stray ) can escape the group, so
+	// both forms must compile.
+	for _, form := range []string{pattern, "(?:" + pattern + ")"} {
+		if _, err := regexp.Compile(form); err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("series pattern %q is not valid RE2", pattern), err)
+		}
+	}
+	return nil
+}
+
+func isWellFormedValuePath(path string) bool {
+	return path != "" && !strings.HasPrefix(path, ".") && !strings.HasSuffix(path, ".") && !strings.Contains(path, "..")
 }
 
 // GetSystemNodeSelectorPaths returns all system node selector paths for a component.

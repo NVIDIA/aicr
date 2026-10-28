@@ -255,11 +255,11 @@ func TestRejectOverridesForAbsentComponents(t *testing.T) {
 			b := &DefaultBundler{Config: config.NewConfig(opts...)}
 			rr := &recipe.RecipeResult{ComponentRefs: tt.refs}
 
-			enabledRefs, _, excluded, filterErr := b.filterEnabledComponents(rr)
+			selection, filterErr := b.filterEnabledComponents(rr)
 			if filterErr != nil {
 				t.Fatalf("filterEnabledComponents() error = %v", filterErr)
 			}
-			err := b.rejectOverridesForAbsentComponents(rr, enabledRefs, excluded)
+			err := b.rejectOverridesForAbsentComponents(rr, selection.emitted, selection.excluded)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -292,9 +292,9 @@ func TestRejectOverridesForAbsentComponents_RecipeDisabledReEnableUnchanged(t *t
 		{Name: "gpu-operator", Type: "Helm"},
 	}}
 
-	enabledRefs, _, _, err := b.filterEnabledComponents(rr)
+	selection, err := b.filterEnabledComponents(rr)
 	if err == nil {
-		t.Fatalf("filterEnabledComponents() enabledRefs = %v, want the re-enable rejection", enabledRefs)
+		t.Fatalf("filterEnabledComponents() emitted = %v, want the re-enable rejection", selection.emitted)
 	}
 	if !strings.Contains(err.Error(), "cannot be re-enabled") {
 		t.Errorf("error = %v, want the pre-existing re-enable rejection", err)
