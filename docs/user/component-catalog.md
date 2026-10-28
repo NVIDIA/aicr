@@ -1848,8 +1848,16 @@ CRDs underneath it.
    helm uninstall k8s-aibom -n k8s-aibom-system
    ```
 
-   For Flux, delete the `HelmRelease`. Under Terraform, `terraform apply` of
-   the regenerated bundle already removed it.
+   For Flux, push the regenerated bundle from step 1. Deleting the
+   `HelmRelease` by hand does not stick, because Flux recreates any
+   `HelmRelease` the published bundle still declares. With `prune: true` on
+   the entry-point `Kustomization`, as the bundle README sets it, Flux deletes
+   the `k8s-aibom` `HelmRelease` and helm-controller uninstalls its release.
+   Without `prune`, delete the `HelmRelease` after the push. Confirm
+   `flux get helmreleases -A` no longer lists it.
+
+   Under Terraform, `terraform apply` of the regenerated bundle already
+   removed it.
 
    For Argo CD, deleting the child `Application` is not an uninstall. AICR sets
    no `resources-finalizer.argocd.argoproj.io` finalizer by default, so the
