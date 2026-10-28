@@ -683,6 +683,22 @@ func TestPlatformWorkerScheduling(t *testing.T) {
 			t.Errorf("AKS non-GFD tolerations = %v, want tolerate-all", tols)
 		}
 	})
+	t.Run("NVKE pins to shared gpu.product and tolerates taints", func(t *testing.T) {
+		nodes := []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gpuProductLabel: "NVIDIA-GB200"}}},
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gpuProductLabel: "NVIDIA-GB200"}}},
+		}
+		ns, tols, err := platformWorkerScheduling(recipe.CriteriaServiceNVKE, "", nodes)
+		if err != nil {
+			t.Fatalf("platformWorkerScheduling() error = %v", err)
+		}
+		if ns[gpuProductLabel] != "NVIDIA-GB200" {
+			t.Errorf("NVKE nodeSelector = %v, want %s=NVIDIA-GB200", ns, gpuProductLabel)
+		}
+		if len(tols) != 1 || tols[0].Operator != corev1.TolerationOpExists {
+			t.Errorf("NVKE tolerations = %v, want tolerate-all", tols)
+		}
+	})
 	t.Run("unknown service returns nil", func(t *testing.T) {
 		ns, tols, err := platformWorkerScheduling("unknown", "", nil)
 		if err != nil {

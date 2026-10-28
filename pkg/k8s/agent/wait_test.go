@@ -131,7 +131,7 @@ func TestDeployer_GetSnapshotFromConfigMap(t *testing.T) {
 			Output:    "cm://" + ns + "/" + cmName,
 		})
 
-		data, err := d.getSnapshotFromConfigMap(context.Background())
+		data, err := d.getSnapshotFromConfigMap(context.Background(), false)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -147,7 +147,7 @@ func TestDeployer_GetSnapshotFromConfigMap(t *testing.T) {
 			Output:    "cm://" + ns + "/missing",
 		})
 
-		_, err := d.getSnapshotFromConfigMap(context.Background())
+		_, err := d.getSnapshotFromConfigMap(context.Background(), false)
 		if err == nil {
 			t.Fatal("expected error for missing ConfigMap")
 		}
@@ -168,7 +168,7 @@ func TestDeployer_GetSnapshotFromConfigMap(t *testing.T) {
 			Output:    "cm://" + ns + "/" + cmName,
 		})
 
-		_, err := d.getSnapshotFromConfigMap(context.Background())
+		_, err := d.getSnapshotFromConfigMap(context.Background(), false)
 		if err == nil {
 			t.Fatal("expected error for missing snapshot.yaml key")
 		}
@@ -181,7 +181,7 @@ func TestDeployer_GetSnapshotFromConfigMap(t *testing.T) {
 			Output:    "invalid-uri",
 		})
 
-		_, err := d.getSnapshotFromConfigMap(context.Background())
+		_, err := d.getSnapshotFromConfigMap(context.Background(), false)
 		if err == nil {
 			t.Fatal("expected error for invalid URI")
 		}

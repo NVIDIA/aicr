@@ -1,0 +1,76 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# network-operator Helm values for GB200 NVKE InfiniBand (SR-IOV).
+#
+# No ofedDriver: NVKE hosts run the inbox mlx5_core from the -nvidia-64k kernel and OVN-Kubernetes (the primary
+# CNI, on BlueField-3) is bound to it, so a DOCA driver container unloading
+# that module takes the node's primary address with it. The SR-IOV operator
+# creates the IB VFs on that inbox driver through sysfs.
+#
+# Shape follows k8s-launch-kit `generate --deployment-type sriov --fabric
+# infiniband` for this topology, except: the chart's NFD stays off (the
+# standalone nfd component labels Mellanox nodes pci-15b3.present through
+# components/nfd/values-nvidia-nics.yaml), and the Maintenance Operator budget
+# is 1 because the reference cluster has two GPU trays.
+#
+# externalDrainer and useDrainControllerRequestor are a pair: the operator's
+# drain controller ignores SriovNetworkNodeStates that the SR-IOV operator did
+# not mark for an external drainer, and the config daemon never applies VFs
+# without a completed drain. Both need the Maintenance Operator CRDs, so
+# maintenanceOperator is on.
+#
+# nvIpam and secondaryNetwork are off in the chart because the post-install
+# NicClusterPolicy manifest carries nvIpam (deployCR off so that manifest is
+# authoritative).
+deployCR: false
+nvIpam:
+  enabled: false
+secondaryNetwork:
+  deploy: false
+nfd:
+  enabled: false
+operator:
+  maintenanceOperator:
+    useRequestor: true
+    useDrainControllerRequestor: true
+  resources:
+    limits:
+      cpu: "1"
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 2Gi
+maintenanceOperator:
+  enabled: true
+maintenance-operator-chart:
+  operatorConfig:
+    deploy: true
+    maxParallelOperations: "1"
+    maxUnavailable: "1"
+    maxNodeMaintenanceTimeSeconds: "3600"
+sriovNetworkOperator:
+  enabled: true
+sriov-network-operator:
+  operator:
+    externalDrainer:
+      enabled: true
+  sriovOperatorConfig:
+    deploy: true
+    # No firmware writes: the mellanox plugin rewrites NUM_OF_VFS to each
+    # policy's numVfs and resets the NIC, which these trays reject, leaving
+    # the node drained. SR-IOV, NUM_OF_VFS and the IB link type are host
+    # prerequisites (docs/integrator/nvke-gb200-setup.md).
+    disablePlugins:
+      - mellanox

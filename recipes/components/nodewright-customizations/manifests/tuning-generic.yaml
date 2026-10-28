@@ -105,8 +105,8 @@ spec:
   packages:
     nvidia-tuned:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
-      version: "0.10.1"
-      containerSHA: sha256:b13d5e2bf426545b6bc0cb63575a43222644b3f0174e9bb56eba62ebb2bb1cf4
+      version: "0.11.0"
+      containerSHA: sha256:38e56b645a6e3234904e813c81b80dd79db3ba87721609eb6b6f452672b8a40a
       # The generic profile has no [bootloader] section, so no kernel parameter
       # needs this reboot.
       interrupt:

@@ -771,6 +771,11 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				if serErr != nil {
 					return errors.Wrap(errors.ErrCodeInternal, "failed to create output serializer", serErr)
 				}
+				// The stamp lets the controller tell this run's snapshot from
+				// an earlier one at the same ConfigMap.
+				if cmw, ok := ser.(*serializer.ConfigMapWriter); ok {
+					cmw.WithRunID(os.Getenv("AICR_RUN_ID"))
+				}
 				if c, ok := ser.(serializer.Closer); ok {
 					defer func() {
 						if closeErr := c.Close(); closeErr != nil {

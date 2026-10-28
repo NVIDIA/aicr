@@ -116,7 +116,7 @@ func (f *fixture) cleaner(opts options) *cleaner {
 		dyn:           f.dyn,
 		helm:          f.helm,
 		namespaces:    testNamespaces,
-		releaseNames:  testReleaseNames,
+		owners:        ownership{names: testReleaseNames},
 		namespaceWait: time.Millisecond,
 	}
 }
@@ -496,7 +496,7 @@ func TestDeleteNamespacesSharedNamespaces(t *testing.T) {
 			f := newFixture([]runtime.Object{namespace(shared), namespace("gpu-operator")})
 			c := f.cleaner(options{assumeYes: true})
 			c.namespaces = []string{"gpu-operator", shared}
-			c.releaseNames = map[string]bool{"nfd-ocp-olm": true}
+			c.owners = ownership{names: map[string]bool{"nfd-ocp-olm": true}}
 
 			c.deleteNamespaces(context.Background(), tt.releases)
 

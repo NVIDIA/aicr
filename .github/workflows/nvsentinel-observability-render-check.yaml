@@ -26,8 +26,10 @@
 # health-events-analyzer one asserts the workload, its datastore wiring and
 # that the mixin names every rule the chart ships, the event-exporter one
 # asserts the workload, its OIDC Secret and datastore wiring and its config,
-# and the CRD
-# exclusion one asserts the chart still ships mongodb-store's CRDs where
+# the log-collector one asserts the collector Job, the file server it uploads
+# to and that server's volume and images, the system-namespaces one asserts
+# the chart's default list still matches the one the drain scope keeps, and
+# the CRD exclusion one asserts the chart still ships mongodb-store's CRDs where
 # nvsentinel's ownsCRDsExcludeSubcharts expects them.
 # All are gated on testing.Short() -- `make
 # test`/`make qualify`/every other CI job run with -short, so this is the only
@@ -103,6 +105,8 @@ jobs:
             TestNVSentinelSlinkyDrainerChartRender
             TestNVSentinelHealthEventsAnalyzerChartRender
             TestNVSentinelEventExporterChartRender
+            TestNVSentinelLogCollectorChartRender
+            TestNVSentinelChartSystemNamespacesDefault
           )
           pattern="^($(IFS='|'; echo "${tests[*]}"))$"
           out=$(go test ./pkg/bundler/validations/... -run "$pattern" -v -count=1 2>&1) && rc=0 || rc=$?

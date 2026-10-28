@@ -18,12 +18,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -261,7 +263,9 @@ func buildAgentConfig(config *AgentConfig, runID, agentOutput string, ownsOutput
 
 // deployAndWaitForResult handles the common deploy-wait-retrieve lifecycle for an agent Job.
 // It creates the deployer, deploys RBAC and the Job, streams logs, waits for completion,
-// and retrieves the snapshot data from the result ConfigMap.
+// and retrieves the snapshot data from the result ConfigMap. A Job that cannot
+// complete after its agent wrote this run's snapshot still yields that
+// snapshot, with a warning (see awaitAgentResult).
 //
 // ownsOutput is agentConfigMapTarget's second return value: true when
 // agentOutput is the internal staging ConfigMap this run owns, false when it
@@ -349,6 +353,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 	// output after the snapshot has been returned.
 	logCtx, cancelLogs := context.WithCancel(ctx)
 	var logWG sync.WaitGroup
+	var logsStreamed atomic.Bool
 	defer func() {
 		cancelLogs()
 		logWG.Wait()
@@ -368,6 +373,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 			}
 			return
 		}
+		logsStreamed.Store(true)
 		if streamErr := deployer.StreamLogs(logCtx, logWriter(), ""); streamErr != nil {
 			if logCtx.Err() == nil {
 				slog.Warn("agent log streaming ended early",
@@ -376,12 +382,9 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		}
 	})
 
-	if waitErr := deployer.WaitForCompletion(ctx, timeout); waitErr != nil {
-		if logs, logErr := deployer.GetPodLogs(ctx); logErr == nil && logs != "" {
-			fmt.Fprintln(logWriter(), "--- agent logs ---")
-			fmt.Fprintln(logWriter(), logs)
-			fmt.Fprintln(logWriter(), "--- end logs ---")
-		}
+	snapshotData, recovered, waitErr := awaitAgentResult(ctx, deployer, timeout, defaults.AgentExitGracePeriod)
+	if waitErr != nil {
+		dumpAgentLogs(ctx, deployer)
 		isTransient := errors.IsTransient(waitErr)
 		msg := "job failed"
 		if autoInjectedGPUSelector {
@@ -405,12 +408,22 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		return nil, errors.Wrap(errors.ErrCodeInternal, msg, waitErr)
 	}
 
-	slog.Info("job completed successfully")
+	var err error
+	if recovered {
+		// Without a stream, the stalled path the agent logged is only
+		// reachable by reading its logs.
+		if !logsStreamed.Load() {
+			dumpAgentLogs(ctx, deployer)
+		}
+		warnJobCompletionUnobserved(ctx, deployer, agentConfig.Namespace)
+	} else {
+		slog.Info("job completed successfully")
 
-	slog.Debug("retrieving snapshot from ConfigMap")
-	snapshotData, err := deployer.GetSnapshot(ctx)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to retrieve snapshot", err)
+		slog.Debug("retrieving snapshot from ConfigMap")
+		snapshotData, err = deployer.GetSnapshot(ctx)
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to retrieve snapshot", err)
+		}
 	}
 
 	if len(projections) > 0 {
@@ -443,6 +456,121 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 	}
 
 	return snapshotData, nil
+}
+
+// agentWaiter is the subset of *agent.Deployer awaitAgentResult drives.
+type agentWaiter interface {
+	WaitForCompletion(ctx context.Context, timeout time.Duration) error
+	WaitForSnapshotWritten(ctx context.Context) error
+	GetRunSnapshot(ctx context.Context) ([]byte, error)
+}
+
+// awaitAgentResult waits up to timeout for the agent Job to complete. The
+// outcomes are:
+//   - the Job completes: all results are zero, and the caller reads the
+//     snapshot itself
+//   - the Job has not completed exitGrace after this run's snapshot is
+//     written, or the wait ends in any other error with this run's snapshot
+//     present: snapshot holds it and recovered is true
+//   - the wait ends in an error with no snapshot from this run: err is that
+//     error
+//   - the Job fails, or ctx is canceled: err is that error, never recovered
+func awaitAgentResult(ctx context.Context, d agentWaiter, timeout, exitGrace time.Duration) (snapshot []byte, recovered bool, err error) {
+	// A pod with a thread in uninterruptible sleep cannot be reaped after the
+	// agent exits, so its Job never completes. Watching for the snapshot the
+	// agent writes as its last step is what lets such a run return.
+	waitCtx, cancel := context.WithCancel(ctx)
+	var wg sync.WaitGroup
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
+
+	jobDone := make(chan error, 1)
+	wg.Go(func() { jobDone <- d.WaitForCompletion(waitCtx, timeout) })
+
+	written := make(chan struct{})
+	wg.Go(func() {
+		if watchErr := d.WaitForSnapshotWritten(waitCtx); watchErr != nil {
+			// Logged at Debug because a caller without list/watch on
+			// ConfigMaps hits this on every run and still recovers after a
+			// timeout.
+			if waitCtx.Err() == nil {
+				slog.Debug("cannot watch for the agent's snapshot ConfigMap; waiting for Job completion only",
+					"error", watchErr)
+			}
+			return
+		}
+		close(written)
+	})
+
+	var graceTimer *time.Timer
+	var graceExpired <-chan time.Time
+	defer func() {
+		if graceTimer != nil {
+			graceTimer.Stop()
+		}
+	}()
+	for {
+		select {
+		case waitErr := <-jobDone:
+			if waitErr == nil {
+				return nil, false, nil
+			}
+			if ctx.Err() != nil || stderrors.Is(waitErr, pod.ErrJobFailed) ||
+				stderrors.Is(waitErr, errors.New(errors.ErrCodeCanceled, "")) {
+
+				return nil, false, waitErr
+			}
+			data, getErr := d.GetRunSnapshot(ctx)
+			if getErr != nil {
+				slog.Debug("no snapshot from this run to recover after the Job wait ended",
+					"error", getErr, "waitError", waitErr)
+				return nil, false, waitErr
+			}
+			return data, true, nil
+
+		case <-written:
+			written = nil
+			graceTimer = time.NewTimer(exitGrace)
+			graceExpired = graceTimer.C
+
+		case <-graceExpired:
+			graceExpired = nil
+			data, getErr := d.GetRunSnapshot(ctx)
+			if getErr == nil {
+				return data, true, nil
+			}
+			slog.Debug("agent snapshot was written but could not be read; waiting for Job completion",
+				"error", getErr)
+		}
+	}
+}
+
+// dumpAgentLogs writes the agent pod's logs to logWriter, best effort.
+func dumpAgentLogs(ctx context.Context, deployer *agent.Deployer) {
+	if logs, logErr := deployer.GetPodLogs(ctx); logErr == nil && logs != "" {
+		fmt.Fprintln(logWriter(), "--- agent logs ---")
+		fmt.Fprintln(logWriter(), logs)
+		fmt.Fprintln(logWriter(), "--- end logs ---")
+	}
+}
+
+// warnJobCompletionUnobserved logs that the snapshot is returned without its
+// Job's completion being observed, naming the agent's pod and node.
+func warnJobCompletionUnobserved(ctx context.Context, deployer *agent.Deployer, namespace string) {
+	podName, nodeName, err := deployer.PodPlacement(ctx)
+	if err != nil {
+		slog.Debug("cannot locate the agent pod for the completion warning", "error", err)
+	}
+	slog.Warn("returning the agent's snapshot without observing its Job complete. "+
+		"If the pod is still running, a host read on the node is likely stuck in uninterruptible sleep, "+
+		"so the node needs attention, and the pod cannot terminate until the node recovers or reboots. "+
+		"The agent's logs name the path that stalled",
+		slog.String("namespace", namespace),
+		slog.String("job", deployer.JobName()),
+		slog.String("pod", podName),
+		slog.String("node", nodeName))
 }
 
 // mergeProviderProjection attaches a controller-side provider projection
@@ -546,6 +674,15 @@ func getKubeClient(kubeconfig string) (k8sclient.Interface, error) {
 // cm:// URI that ConfigMap IS the user's destination, so the Job writes there
 // directly; otherwise the Job writes to an internal ConfigMap in
 // config.Namespace and the caller delivers the returned bytes.
+//
+// # A Job that cannot complete
+//
+// A host read stuck in the kernel can leave the agent's pod unreapable after
+// it writes its snapshot. If this run's snapshot is written and the Job has not
+// completed defaults.AgentExitGracePeriod later, or the Job wait ends in an
+// error other than Job failure or cancellation, the snapshot is returned with
+// a warning instead of that error. A snapshot an earlier run left at a
+// caller-named cm:// destination is never returned.
 //
 // # Fail-before-mutate
 //

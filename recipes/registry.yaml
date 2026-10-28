@@ -61,11 +61,13 @@ components:
       - nfd
     healthCheck:
       assertFile: checks/nfd/health-check.yaml
+    upgrades:
+      file: components/nfd/upgrades.yaml
     helm:
       defaultRepository: https://kubernetes-sigs.github.io/node-feature-discovery/charts
       defaultChart: node-feature-discovery
       # renovate: datasource=helm depName=node-feature-discovery registryUrl=https://kubernetes-sigs.github.io/node-feature-discovery/charts
-      defaultVersion: "0.19.0"
+      defaultVersion: "0.20.1"
       defaultNamespace: node-feature-discovery
     nodeScheduling:
       system:
@@ -202,15 +204,17 @@ components:
       system:
         nodeSelectorPaths:
           - operator.nodeSelector
-          # The maintenance-operator subchart's deployment reads its own
-          # scoped operator.* placement values; the values key is the
-          # dependency name (maintenance-operator-chart, unaliased).
+          # The maintenance-operator and sriov-network-operator subchart
+          # deployments read their own scoped operator.* placement values;
+          # the values key is the dependency name.
           - maintenance-operator-chart.operator.nodeSelector
+          - sriov-network-operator.operator.nodeSelector
           - node-feature-discovery.master.nodeSelector
           - node-feature-discovery.gc.nodeSelector
         tolerationPaths:
           - operator.tolerations
           - maintenance-operator-chart.operator.tolerations
+          - sriov-network-operator.operator.tolerations
           - node-feature-discovery.master.tolerations
           - node-feature-discovery.gc.tolerations
 
@@ -416,6 +420,43 @@ components:
         # and before it every NodeWright stalled once auto-taint fired.
         severity: error
 
+  # Loads kernel modules the host image leaves out (rdma_ucm, ib_umad,
+  # ib_ipoib on NVKE) through a non-interrupting NodeWright CR. Manifest-only;
+  # requires nodewright-operator as a componentRef dependency.
+  - name: rdma-modules
+    displayName: rdma-modules
+    class: core
+    valueOverrideKeys:
+      - rdmamodules
+    healthCheck:
+      assertFile: checks/rdma-modules/health-check.yaml
+    helm:
+      # Manifest-only component - no external Helm chart, uses manifestFiles
+      defaultRepository: ""
+      defaultNamespace: nodewright
+    nodeScheduling:
+      accelerated:
+        nodeSelectorPaths:
+          - acceleratedNodeSelector
+        tolerationPaths:
+          - acceleratedTolerations
+
+  # Per-rail SR-IOV InfiniBand objects (nv-ipam IPPool, SriovNetworkNodePolicy,
+  # SriovIBNetwork) for the Network Operator's sriov-network-operator subchart.
+  # Manifest-only; requires network-operator as a componentRef dependency
+  # (why it is separate: see its manifest header).
+  - name: sriov-ib-networks
+    displayName: sriov-ib-networks
+    class: core
+    valueOverrideKeys:
+      - sriovibnetworks
+    healthCheck:
+      assertFile: checks/sriov-ib-networks/health-check.yaml
+    helm:
+      # Manifest-only component - no external Helm chart, uses manifestFiles
+      defaultRepository: ""
+      defaultNamespace: nvidia-network-operator
+
   - name: nodewright-customizations
     displayName: nodewright-customizations
     class: core
@@ -518,9 +559,10 @@ components:
     # Opt-in surface for the nvsentinel-observability (#2617),
     # nvsentinel-object-monitor (#2612), nvsentinel-preflight (#2610),
     # nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor (#2611),
-    # nvsentinel-observe, -quarantine and -remediation, and
+    # nvsentinel-observe, -quarantine and -remediation,
     # nvsentinel-slinky-drainer (#2615), nvsentinel-health-events-analyzer
-    # (#2618) and nvsentinel-event-exporter (#2621) mixins: the exact leaf
+    # (#2618), nvsentinel-event-exporter (#2621) and nvsentinel-log-collector
+    # (#2619) mixins: the exact leaf
     # paths a mixin may set on this
     # already-base-chained component. global.tracing.endpoint is
     # deliberately absent -- it must come from outside the mixin (a leaf
@@ -600,6 +642,10 @@ components:
       - fault-remediation.maintenance.templates.gpureset
       - janitor-provider.csp.generic.rebootImage
       - node-drainer.userNamespaces
+      - node-drainer.deleteAfterTimeoutMinutes
+      - node-drainer.evictionTimeoutInSeconds
+      - node-drainer.drainGPUPods
+      - node-drainer.partialDrainEnabled
       - node-drainer.customDrain.enabled
       - node-drainer.customDrain.templateConfigMapName
       - node-drainer.customDrain.templateMountPath
@@ -641,6 +687,22 @@ components:
       - event-exporter.exporter.sink.insecureSkipVerify
       - event-exporter.exporter.oidc.insecureSkipVerify
       - event-exporter.exporter.filter.expression
+      - global.inclusterFileServer.enabled
+      - fault-remediation.logCollector.enabled
+      - fault-remediation.logCollector.uploadURL
+      - fault-remediation.logCollector.enableGpuOperatorMustGather
+      - fault-remediation.logCollector.timeout
+      - incluster-file-server.fullnameOverride
+      - incluster-file-server.initImage.repository
+      - incluster-file-server.initImage.tag
+      - incluster-file-server.persistence.size
+      - incluster-file-server.logCleanup.enabled
+      - incluster-file-server.logCleanup.retentionDays
+      - incluster-file-server.logCleanup.sleepInterval
+    # The in-cluster file server's ReadWriteOnce volume, which the
+    # nvsentinel-log-collector mixin turns on (#2619).
+    storageClassPaths:
+      - incluster-file-server.persistence.storageClassName
     validations:
       # Blocking: the NVSentinel labeler decides
       # nvsentinel.dgxc.nvidia.com/driver.installed by watching for a GPU
@@ -733,6 +795,23 @@ components:
       # identity provider only the operator knows, so it cannot work from the
       # chart's placeholders (#2621). The rules are in the function's doc.
       - function: CheckNVSentinelEventExporterCoherent
+        severity: error
+      # Blocking: a log collector that cannot capture or upload anything --
+      # without the file server, without live remediation, uploading
+      # elsewhere, or where it cannot reach the driver (#2619). The rules are
+      # in the function's doc.
+      - function: CheckNVSentinelLogCollectorCoherent
+        severity: error
+      # Mixed-severity policy, as CheckNVSentinelDatastorePrerequisites: a
+      # blocking error when the snapshot shows no default StorageClass for
+      # the file server's classless volume, or evidence it could not read,
+      # and no class is named; a non-blocking warning when the recipe carries
+      # no snapshot evidence or the cluster has more than one default.
+      - function: CheckNVSentinelFileServerStorageClass
+        severity: warning
+      # Blocking: node-drainer's drain scope and timing (#2626). The rules are
+      # in the function's doc.
+      - function: CheckNVSentinelDrainScopeCoherent
         severity: error
 
   # NVSentinel's remediation datastore, added only by the nvsentinel-observe,
@@ -1594,18 +1673,18 @@ components:
   - name: slinky-topograph
     displayName: slinky-topograph
     class: ops
+    upgrades:
+      file: components/slinky-topograph/upgrades.yaml
     valueOverrideKeys:
       - slinkytopograph
     healthCheck:
       assertFile: checks/slinky-topograph/health-check.yaml
     helm:
-      # The topograph repository moved from NVIDIA to dsx-ai-factory; GitHub
-      # redirects the repository but not its Pages site, so the old index
-      # 404s. See issue #2793.
-      defaultRepository: https://dsx-ai-factory.github.io/topograph
+      # Topograph charts are published to NGC, not GitHub Pages (issue #2793).
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia/topograph
       defaultChart: topograph/topograph
-      # renovate: datasource=helm depName=topograph registryUrl=https://dsx-ai-factory.github.io/topograph
-      defaultVersion: "1.0.0"
+      # renovate: datasource=helm depName=topograph registryUrl=https://helm.ngc.nvidia.com/nvidia/topograph
+      defaultVersion: "1.1.0"
       defaultNamespace: topograph
     nodeScheduling:
       system:
@@ -1632,15 +1711,17 @@ components:
   - name: topograph
     displayName: topograph
     class: ops
+    upgrades:
+      file: components/topograph/upgrades.yaml
     valueOverrideKeys:
       - topograph
     healthCheck:
       assertFile: checks/topograph/health-check.yaml
     helm:
-      defaultRepository: https://dsx-ai-factory.github.io/topograph
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia/topograph
       defaultChart: topograph/topograph
-      # renovate: datasource=helm depName=topograph registryUrl=https://dsx-ai-factory.github.io/topograph
-      defaultVersion: "1.0.0"
+      # renovate: datasource=helm depName=topograph registryUrl=https://helm.ngc.nvidia.com/nvidia/topograph
+      defaultVersion: "1.1.0"
       defaultNamespace: topograph
     nodeScheduling:
       system:

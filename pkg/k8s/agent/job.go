@@ -281,6 +281,12 @@ func (d *Deployer) buildEnvVars() []corev1.EnvVar {
 			Value: "agent",
 		},
 		{
+			// The in-pod CLI stamps this on the snapshot ConfigMap it
+			// writes, and snapshotWrittenByRun reads it back.
+			Name:  "AICR_RUN_ID",
+			Value: d.config.RunID,
+		},
+		{
 			Name: "NODE_NAME",
 			ValueFrom: &corev1.EnvVarSource{
 				FieldRef: &corev1.ObjectFieldSelector{

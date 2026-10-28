@@ -25,10 +25,10 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"text/template"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
 	"github.com/NVIDIA/aicr/pkg/component"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -68,6 +68,9 @@ func init() {
 	registerCheck("CheckNVSentinelRemediationPipelineCoherent", CheckNVSentinelRemediationPipelineCoherent)
 	registerCheck("CheckNVSentinelSlurmCustomDrainCoherent", CheckNVSentinelSlurmCustomDrainCoherent)
 	registerCheck("CheckNVSentinelEventExporterCoherent", CheckNVSentinelEventExporterCoherent)
+	registerCheck("CheckNVSentinelLogCollectorCoherent", CheckNVSentinelLogCollectorCoherent)
+	registerCheck("CheckNVSentinelFileServerStorageClass", CheckNVSentinelFileServerStorageClass)
+	registerCheck("CheckNVSentinelDrainScopeCoherent", CheckNVSentinelDrainScopeCoherent)
 	registerCheck("CheckNVSentinelMongoDBCoherent", CheckNVSentinelMongoDBCoherent)
 	registerCheck("CheckNVSentinelDatastorePrerequisites", CheckNVSentinelDatastorePrerequisites)
 }
@@ -334,7 +337,7 @@ var npdProviderRunsItsOwn = map[recipe.CriteriaServiceType]bool{
 //   - os talos: recipes/mixins/os-talos.yaml relocates privileged components
 //     into privileged-* namespaces for Pod Security Admission. NPD is not in
 //     that list, so it would land in a restricted namespace and be denied.
-//   - anything else (lke, bcm, metal3, generic, k0s, ...): unverified.
+//   - anything else (lke, bcm, metal3, generic, k0s, mk8s, nvke, ...): unverified.
 //   - no criteria at all: the platform is unknown, and checkConditions' "nil
 //     Criteria means condition not met" would skip the gate entirely. A
 //     hand-authored or already-hydrated RecipeResult legitimately carries no
@@ -1546,8 +1549,7 @@ func declaredUnionView(recipeResult *recipe.RecipeResult) *recipe.RecipeResult {
 // value. The !ok case (no meaningful truth value) is fail-closed to
 // not-the-remedy.
 func helmTruthy(value any) bool {
-	truth, ok := template.IsTrue(value)
-	return ok && truth
+	return drainscope.HelmTruthy(value)
 }
 
 // nvsentinelAssumesDriverInstalled reports whether the effective
@@ -2347,29 +2349,7 @@ func nicInclusionOverrideUsable(override string) bool {
 // carry it. An absent key reports false: every subchart this reads defaults
 // to off.
 func nvsentinelSubchartRenders(values map[string]any, key string) bool {
-	global, ok := values["global"].(map[string]any)
-	if !ok {
-		return false
-	}
-	sectionRaw, present := global[key]
-	if !present {
-		return false
-	}
-	section, isMap := sectionRaw.(map[string]any)
-	if !isMap {
-		// A non-table section (--set-json global.<key>=true, =null, a
-		// string) leaves the condition path unresolvable, so Helm warns
-		// and falls back to rendering the dependency. Reading it as
-		// "absent, therefore off" would let exactly that through.
-		return true
-	}
-	raw, ok := section["enabled"]
-	if !ok {
-		return false
-	}
-	enabled, isBool := raw.(bool)
-
-	return !isBool || enabled
+	return drainscope.SubchartRenders(values, key)
 }
 
 // CheckNVSentinelNicHealthMonitorRequiresMetadataCollector blocks a bundle

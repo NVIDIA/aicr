@@ -22,6 +22,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -136,16 +137,24 @@ func ncclTransportCode(variant ncclVariant) string {
 	return string(variant)
 }
 
+// ncclThresholdExtra returns the Extra for the floor a run is held to: the
+// recipe threshold and the allowance below it.
+func ncclThresholdExtra(threshold float64) map[string]string {
+	return map[string]string{
+		validators.ExtraKeyThresholdGbps: validators.FormatDecimal(threshold),
+		validators.ExtraKeyTolerancePct:  validators.FormatDecimal((1 - ncclBandwidthFloorFraction) * 100),
+	}
+}
+
 // ncclScopeExtra returns the Extra for a run's scope and the floor it is held
 // to. fabric is omitted when empty.
 func ncclScopeExtra(variant ncclVariant, fabric ncclFabricType, threshold float64, workers, gpus int) map[string]string {
 	extra := map[string]string{
-		validators.ExtraKeyTransport:     ncclTransportCode(variant),
-		validators.ExtraKeyThresholdGbps: validators.FormatDecimal(threshold),
-		validators.ExtraKeyTolerancePct:  validators.FormatDecimal((1 - ncclBandwidthFloorFraction) * 100),
-		validators.ExtraKeyWorkerNodes:   strconv.Itoa(workers),
-		validators.ExtraKeyGPUsInvolved:  strconv.Itoa(gpus),
+		validators.ExtraKeyTransport:    ncclTransportCode(variant),
+		validators.ExtraKeyWorkerNodes:  strconv.Itoa(workers),
+		validators.ExtraKeyGPUsInvolved: strconv.Itoa(gpus),
 	}
+	maps.Copy(extra, ncclThresholdExtra(threshold))
 	if fabric != "" {
 		extra[validators.ExtraKeyFabric] = string(fabric)
 	}
@@ -1982,7 +1991,7 @@ func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType s
 			{Operator: v1.TolerationOpExists},
 			{Key: "nvidia.com/gpu", Operator: v1.TolerationOpEqual, Value: "present", Effect: v1.TaintEffectNoSchedule},
 		}, nil
-	case recipe.CriteriaServiceOKE, recipe.CriteriaServiceAKS, recipe.CriteriaServiceGeneric:
+	case recipe.CriteriaServiceOKE, recipe.CriteriaServiceAKS, recipe.CriteriaServiceGeneric, recipe.CriteriaServiceNVKE:
 		// These services share one shape: tainted GPU pools whose nodes carry
 		// GFD labels. Tolerate the pool taint and pin workers to the
 		// gpu.product label that resolveTargetGPUNodes → narrowByAccelerator

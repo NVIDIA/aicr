@@ -77,29 +77,29 @@ The table below is generated from the recipes by `make tuning-docs` — **do not
 
 | Service | Accelerator  | Profile | Setup              | Tuning                  |
 |---------|--------------|---------|--------------------|-------------------------|
-| aks     | a100         | h100    | nvidia-setup 0.8.0 | nvidia-tuned 0.10.1     |
-| aks     | h100         | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.10.1     |
+| aks     | a100         | h100    | nvidia-setup 0.8.0 | nvidia-tuned 0.11.0     |
+| aks     | h100         | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.11.0     |
 | bcm     | *            | h100    | nvidia-setup 0.3.0 | -                       |
 | bcm     | h100         | -       | nvidia-setup 0.3.0 | -                       |
-| eks     | a100         | h100    | nvidia-setup 0.8.0 | nvidia-tuned 0.10.1     |
-| eks     | gb200        | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.10.1     |
-| eks     | gb300        | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.10.1     |
-| eks     | h100         | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.10.1     |
-| eks     | h200         | h100    | nvidia-setup 0.8.0 | nvidia-tuned 0.10.1     |
-| eks     | rtx-pro-6000 | generic | -                  | nvidia-tuned 0.10.1     |
-| generic | gb300        | -       | -                  | nvidia-tuned 0.10.1     |
+| eks     | a100         | h100    | nvidia-setup 0.8.0 | nvidia-tuned 0.11.0     |
+| eks     | gb200        | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.11.0     |
+| eks     | gb300        | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.11.0     |
+| eks     | h100         | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.11.0     |
+| eks     | h200         | h100    | nvidia-setup 0.8.0 | nvidia-tuned 0.11.0     |
+| eks     | rtx-pro-6000 | generic | -                  | nvidia-tuned 0.11.0     |
+| generic | gb300        | -       | -                  | nvidia-tuned 0.11.0     |
 | gke     | a100         | h100    | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | b200         | -       | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | gb200        | -       | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | gb300        | gb200   | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | h100         | -       | -                  | nvidia-tuning-gke 0.1.2 |
-| rke2    | *            | generic | -                  | nvidia-tuned 0.10.1     |
-| rke2    | vr200        | -       | -                  | nvidia-tuned 0.10.1     |
+| rke2    | *            | generic | -                  | nvidia-tuned 0.11.0     |
+| rke2    | vr200        | -       | -                  | nvidia-tuned 0.11.0     |
 
 {/* END AICR-TUNING */}
 
 Note: the generated table lists the packages *pinned in the manifests* and
-cannot see per-recipe value gates. The `aks` rows show `nvidia-tuned 0.10.1`,
+cannot see per-recipe value gates. The `aks` rows show `nvidia-tuned 0.11.0`,
 but AKS recipes disable it by default via `nodewright-customizations`
 `tuningEnabled: false` under the Azure-managed driver profile; see
 [AKS GPU setup](../aks-gpu-setup.md#infiniband-rdma-host-setup-nodewright)

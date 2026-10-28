@@ -239,6 +239,20 @@ func TestBuildPodSpec_RuntimeClassName(t *testing.T) {
 	}
 }
 
+func TestBuildEnvVars_RunID(t *testing.T) {
+	const runID = "20260821-142233-9f3a1c0b7e2d4a55"
+	d := NewDeployer(fake.NewClientset(), Config{Namespace: "test-ns", RunID: runID})
+	for _, env := range d.buildEnvVars() {
+		if env.Name == "AICR_RUN_ID" {
+			if env.Value != runID {
+				t.Errorf("AICR_RUN_ID = %q, want %q", env.Value, runID)
+			}
+			return
+		}
+	}
+	t.Error("AICR_RUN_ID not set on the agent container")
+}
+
 func TestBuildEnvVars_RuntimeClassName(t *testing.T) {
 	tests := []struct {
 		name             string

@@ -1,0 +1,39 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# rdma-modules Health Check
+#
+# Asserts the rdma-modules NodeWright CR reports status.status "complete", i.e.
+# rdma_ucm, ib_umad and ib_ipoib are loaded on every matching node. Named, unlike the
+# nodewright-customizations check: this component renders exactly one CR.
+# No value gate: a recipe that disables the component drops this assert with
+# it, and a bundle-time `--set` never reaches the validator.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: rdma-modules-health-check
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-rdma-modules-complete
+      try:
+        - assert:
+            resource:
+              apiVersion: nodewright.nvidia.com/v1alpha1
+              kind: NodeWright
+              metadata:
+                name: rdma-modules
+              status:
+                status: complete

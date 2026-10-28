@@ -35,9 +35,10 @@
 # having: grub quietly failing to pick the drop-in up is invisible from the
 # config stage.
 #
-# Scope: the bootloader step is Debian-family only (grub.d sourcing is a
-# Debian/Ubuntu patch to grub-mkconfig) and the vr200 profiles are Ubuntu
-# 26.04 only. nvidia-setup is deliberately absent — its kernel-headers
+# Scope: the bootloader step covers Debian-family hosts (the grub.d drop-in
+# above; grub.d sourcing is a Debian/Ubuntu patch to grub-mkconfig) and, as
+# of nvidia-tuned 0.11.0, SUSE. The vr200 profiles are Ubuntu 26.04 only.
+# nvidia-setup is deliberately absent — its kernel-headers
 # aliasing is a bcm-path concern, and the RKE2 reference image provisions its
 # own kernel.
 #
@@ -132,8 +133,8 @@ spec:
     {{- if $tuning }}
     nvidia-tuned:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
-      version: "0.10.1"
-      containerSHA: sha256:b13d5e2bf426545b6bc0cb63575a43222644b3f0174e9bb56eba62ebb2bb1cf4
+      version: "0.11.0"
+      containerSHA: sha256:38e56b645a6e3234904e813c81b80dd79db3ba87721609eb6b6f452672b8a40a
       # Required by the rke2 service: the accelerator's [bootloader] stanza is
       # written during config and none of it is live until the node reboots.
       interrupt:

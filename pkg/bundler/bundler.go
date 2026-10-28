@@ -42,6 +42,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helm"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helmfile"
 	tfdeployer "github.com/NVIDIA/aicr/pkg/bundler/deployer/terraform"
+	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	"github.com/NVIDIA/aicr/pkg/bundler/types"
 	"github.com/NVIDIA/aicr/pkg/bundler/validations"
@@ -316,8 +317,10 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 		return nil, policyErr
 	}
 
-	// Extract values for each component from the recipe
-	componentValues, err := b.extractComponentValues(ctx, recipeResult)
+	// The declared union lets the NVSentinel drain scope cover components this
+	// bundle filters out.
+	componentValues, err := b.extractComponentValues(ctx,
+		recipeResult.WithDeclaredComponents(profileBaseline.ComponentRefs))
 	if err != nil {
 		if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
 			return nil, err
@@ -1445,6 +1448,14 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 		// already been applied; see validateRequiredNodeSelectors.
 		if err := b.validateRequiredNodeSelectors(ref.Name, values, provider, policy); err != nil {
 			return nil, err
+		}
+
+		// After every override, so an operator's own systemNamespaces is
+		// kept alongside the generated one rather than replacing it.
+		if ref.Name == drainscope.ComponentName {
+			if drainErr := ApplyNVSentinelDrainScope(ctx, values, recipeResult); drainErr != nil {
+				return nil, drainErr
+			}
 		}
 
 		if ref.Name == slinkySlurmComponentName {

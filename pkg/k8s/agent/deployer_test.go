@@ -1445,7 +1445,7 @@ func TestGetSnapshotFromConfigMap_RecordsUID_WhenOwned(t *testing.T) {
 				OwnsOutputConfigMap: tt.ownsOutput,
 			})
 
-			if _, err := d.getSnapshotFromConfigMap(context.Background()); err != nil {
+			if _, err := d.getSnapshotFromConfigMap(context.Background(), false); err != nil {
 				t.Fatalf("getSnapshotFromConfigMap() error = %v", err)
 			}
 
@@ -1479,7 +1479,7 @@ func TestCleanupDeletesStagingConfigMapWhenOwned(t *testing.T) {
 		OwnsOutputConfigMap: true,
 	})
 
-	if _, err := d.getSnapshotFromConfigMap(ctx); err != nil {
+	if _, err := d.getSnapshotFromConfigMap(ctx, false); err != nil {
 		t.Fatalf("getSnapshotFromConfigMap() error = %v", err)
 	}
 
