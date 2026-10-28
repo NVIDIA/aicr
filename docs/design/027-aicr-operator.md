@@ -34,7 +34,8 @@ tools:
 
 - **Verdicts nothing enforces.** `upgrade-check`
   ([ADR-021](021-component-upgrade-safety.md)) rates a transition `safe`,
-  `manual`, `unknown` or `blocked`; the deploy path applies it either way.
+  `manual`, `unknown`, `unversioned` or `blocked`; the deploy path applies it
+  either way.
 - **Evidence about a run, not a cluster.** Validation can pass while the
   cluster runs versions other than the recipe's
   ([#2977](https://github.com/NVIDIA/aicr/issues/2977)).
@@ -100,7 +101,11 @@ exception:
 - **Evidence covers what is deployed.** Once every step is ready, AICR's
   deployment validation runs against the new recipe as a whole. The rollout
   succeeds, and its plan becomes active, only if validation passes; the
-  operator binds the evidence to the deployed plan, images and approval.
+  operator binds the evidence to the deployed plan, images and approval. A
+  failed validation fails the rollout: its plan never becomes active, nothing
+  rolls back, and the runtime stalls until a person retries with a fresh
+  approval or selects another target, which is assessed against what is
+  deployed.
 
 ### Approval
 
