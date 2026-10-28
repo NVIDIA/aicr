@@ -97,9 +97,11 @@ NEW_NODE_BATCH_SECONDS=5
 # The mixin's recently-joined criterion, and how much of it must remain when
 # case 3 cordons the node.
 NEW_NODE_WINDOW_SECONDS=1800
-NEW_NODE_MARGIN_SECONDS=300
+NEW_NODE_MARGIN_SECONDS=720
 POLL_SECONDS=3
-VR_APPEAR_WAIT_SECONDS=180
+# lifecycle-manager flushes a batch only on a later Node update, which can be
+# minutes after the batch period; vr_found_or_nudge supplies those updates.
+VR_APPEAR_WAIT_SECONDS=600
 # Covers the stub image pull on a cold node as well as STUB_SECONDS.
 VALIDATION_WAIT_SECONDS=300
 RELEASE_WAIT_SECONDS=60
@@ -372,6 +374,11 @@ vr_for_node() {
 }
 
 vr_found() { [[ -n "$(vr_for_node "$1")" ]]; }
+vr_found_or_nudge() {
+  vr_found "$1" && return 0
+  kc annotate node "${NODE}" "aicr.nvidia.com/e2e-nudge=${SECONDS}" --overwrite >/dev/null
+  return 1
+}
 
 vr_phase() { kc get "${VR_RESOURCE}" "$1" -o jsonpath='{.status.phase}' 2>/dev/null; }
 
@@ -420,7 +427,7 @@ test_new_node_validation() {
 
   clear_uncordon_reason
   kc cordon "${NODE}" >/dev/null
-  if ! poll "${VR_APPEAR_WAIT_SECONDS}" vr_found lifecycle-manager; then
+  if ! poll "${VR_APPEAR_WAIT_SECONDS}" vr_found_or_nudge lifecycle-manager; then
     fail "#3 lifecycle-manager requests validation of the cordoned new GPU node" \
       "no ValidationRequest labelled ${CREATED_BY_LABEL}=lifecycle-manager names ${NODE} within ${VR_APPEAR_WAIT_SECONDS}s"
     kc uncordon "${NODE}" >/dev/null

@@ -64,11 +64,13 @@ const (
 //   - lifecycle-manager.controllers.validationRequest.enabled is not a
 //     boolean;
 //   - with that controller on, lifecycle-manager.config.tests or one of its
-//     entries is not a map, a test sets a command that is not a list of
-//     strings, an image that is not a string or a provider the config does
-//     not define, a test AICR adds names no provider, or no test is left once
-//     Helm drops the null entries, which lifecycle-manager cannot decode or
-//     rejects at startup;
+//     entries is not a map, no test is left once Helm drops the null entries,
+//     or a test's command is not a non-empty list of strings, its image not a
+//     non-empty string, or its provider not one the config defines (a test
+//     AICR adds must set its image and provider; on the chart's
+//     dcgm-diag-test an explicit null deletes the chart's value, as Helm does),
+//     which lifecycle-manager cannot decode, rejects at startup, or cannot
+//     run;
 //   - newNodeTests or defaultTests names a test the config does not define,
 //     names one twice, or both lists are empty (a null list counts as empty,
 //     since Helm deletes the chart's), which lifecycle-manager rejects at
@@ -150,11 +152,17 @@ func CheckNVSentinelNodeValidationCoherent(ctx context.Context, componentName st
 		return warnings, errs
 	}
 
-	defined, wellFormed := nodeValidationDefinedTests(values, fail)
+	defined, wellFormed, err := nodeValidationDefinedTests(ctx, values, fail)
+	if err != nil {
+		return warnings, append(errs, err)
+	}
 	if !wellFormed {
 		return warnings, errs
 	}
-	defaultTests := nodeValidationTestList(values, nodeValidationDefaultTestsPath, defined, fail)
+	defaultTests, err := nodeValidationTestList(ctx, values, nodeValidationDefaultTestsPath, defined, fail)
+	if err != nil {
+		return warnings, append(errs, err)
+	}
 	newNode, newNodeWellFormed := nodeValidationNewNodeRuns(values)
 	if !newNodeWellFormed {
 		raw, _ := component.GetValueByPath(values, nodeValidationNewNodePath)
@@ -167,8 +175,13 @@ func CheckNVSentinelNodeValidationCoherent(ctx context.Context, componentName st
 		return warnings, errs
 	}
 
-	nodeValidationCriteriaViolations(values, fail)
-	tests := nodeValidationTestList(values, nodeValidationNewNodeTestsPath, defined, fail)
+	if err = nodeValidationCriteriaViolations(ctx, values, fail); err != nil {
+		return warnings, append(errs, err)
+	}
+	tests, err := nodeValidationTestList(ctx, values, nodeValidationNewNodeTestsPath, defined, fail)
+	if err != nil {
+		return warnings, append(errs, err)
+	}
 	if len(tests) == 0 {
 		tests = defaultTests
 	}
@@ -177,11 +190,7 @@ func CheckNVSentinelNodeValidationCoherent(ctx context.Context, componentName st
 			nodeValidationDefaultTestsPath)
 	}
 	if dryRun, _ := nvsentinelDryRun(values); dryRun {
-		msg := fmt.Sprintf("component %q: global.dryRun is true, but lifecycle-manager does not read it: "+
-			"new-node validation runs real DCGM diagnostics on cordoned GPU nodes and uncordons the ones that pass",
-			componentName)
-		slog.Warn(msg, logKeyComponent, componentName)
-		warnings = append(warnings, msg)
+		warnings = append(warnings, nodeValidationDryRunWarning(componentName))
 	}
 
 	commandPath := nodeValidationTestsPath + "." + nodeValidationDCGMTest + ".command"
@@ -195,6 +204,16 @@ func CheckNVSentinelNodeValidationCoherent(ctx context.Context, componentName st
 		errs = append(errs, nodeValidationDynamicErrors(componentName, dynMsgs)...)
 	}
 	return warnings, errs
+}
+
+// nodeValidationDryRunWarning notes that lifecycle-manager runs for real
+// under global.dryRun, which it does not read.
+func nodeValidationDryRunWarning(componentName string) string {
+	msg := fmt.Sprintf("component %q: global.dryRun is true, but lifecycle-manager does not read it: "+
+		"new-node validation runs real DCGM diagnostics on cordoned GPU nodes and uncordons the ones that pass",
+		componentName)
+	slog.Warn(msg, logKeyComponent, componentName)
+	return msg
 }
 
 // nodeValidationDynamicErrors turns dynamic-guard messages into errors, since
@@ -237,80 +256,97 @@ func nodeValidationNewNodeRuns(values map[string]any) (runs, wellFormed bool) {
 // nodeValidationDefinedTests returns the tests lifecycle-manager's config
 // will define: the chart's dcgm-diag-test merged with AICR's
 // lifecycle-manager.config.tests, where a null deletes the chart's entry as
-// Helm does. It fails on a definition lifecycle-manager cannot decode or
-// accept at startup; wellFormed is false when the tests value itself is not
-// a map, so nothing about the tests can be read.
-func nodeValidationDefinedTests(values map[string]any, fail func(string, ...any)) (defined map[string]bool, wellFormed bool) {
+// Helm does. It fails on a definition lifecycle-manager cannot decode, accept
+// at startup or run; wellFormed is false when the tests value itself is not a
+// map, so nothing about the tests can be read.
+func nodeValidationDefinedTests(ctx context.Context, values map[string]any, fail func(string, ...any)) (defined map[string]bool, wellFormed bool, err error) {
+	providers, err := nodeValidationProviders(ctx, values, fail)
+	if err != nil {
+		return nil, false, err
+	}
+	tests := map[string]any{}
 	raw, present := component.GetValueByPath(values, nodeValidationTestsPath)
-	defined = map[string]bool{nodeValidationDCGMTest: true}
 	switch {
 	case present && raw == nil:
-		defined = map[string]bool{}
+		fail("%s is null, which Helm treats as deleting every test, so lifecycle-manager rejects its config at "+
+			"startup", nodeValidationTestsPath)
+		return map[string]bool{}, true, nil
 	case present:
-		tests, isMap := raw.(map[string]any)
+		m, isMap := raw.(map[string]any)
 		if !isMap {
 			fail("%s is %#v, not a map of test definitions, so lifecycle-manager cannot decode its config and exits "+
 				"at startup", nodeValidationTestsPath, raw)
-			return nil, false
+			return nil, false, nil
 		}
-		providers := nodeValidationProviders(values, fail)
-		for _, name := range slices.Sorted(maps.Keys(tests)) {
-			path := nodeValidationTestsPath + "." + name
-			test, isMap := tests[name].(map[string]any)
-			switch {
-			case tests[name] == nil:
-				delete(defined, name)
-				continue
-			case !isMap:
-				fail("%s is %#v, not a test definition, so lifecycle-manager cannot decode its config and exits at "+
-					"startup", path, tests[name])
-				continue
-			}
-			nodeValidationTestViolations(path, test, name != nodeValidationDCGMTest, providers, fail)
-			defined[name] = true
+		tests = m
+	}
+	defined = map[string]bool{}
+	if _, overridden := tests[nodeValidationDCGMTest]; !overridden {
+		tests[nodeValidationDCGMTest] = map[string]any{}
+	}
+	for _, name := range slices.Sorted(maps.Keys(tests)) {
+		if err := ctx.Err(); err != nil {
+			return nil, false, aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "checking lifecycle-manager tests")
 		}
+		path := nodeValidationTestsPath + "." + name
+		test, isMap := tests[name].(map[string]any)
+		switch {
+		case tests[name] == nil:
+			continue
+		case !isMap:
+			fail("%s is %#v, not a test definition, so lifecycle-manager cannot decode its config and exits at "+
+				"startup", path, tests[name])
+			continue
+		}
+		nodeValidationTestViolations(path, test, name == nodeValidationDCGMTest, providers, fail)
+		defined[name] = true
 	}
 	if len(defined) == 0 {
 		fail("%s defines no test once Helm drops the null entries, which lifecycle-manager rejects at startup",
 			nodeValidationTestsPath)
 	}
-	return defined, true
+	return defined, true, nil
 }
 
 // nodeValidationProviders returns the provider names lifecycle-manager's
 // config will define: the chart's k8s-job-provider merged with AICR's
-// lifecycle-manager.config.providers.
-func nodeValidationProviders(values map[string]any, fail func(string, ...any)) map[string]bool {
+// lifecycle-manager.config.providers, where a null deletes an entry.
+func nodeValidationProviders(ctx context.Context, values map[string]any, fail func(string, ...any)) (map[string]bool, error) {
 	known := map[string]bool{nodeValidationChartProvider: true}
 	raw, present := component.GetValueByPath(values, nodeValidationProvidersPath)
-	if !present {
-		return known
+	switch {
+	case !present:
+		return known, nil
+	case raw == nil:
+		return map[string]bool{}, nil
 	}
 	providers, isMap := raw.(map[string]any)
-	if raw != nil && !isMap {
+	if !isMap {
 		fail("%s is %#v, not a map of providers, so lifecycle-manager cannot decode its config and exits at startup",
 			nodeValidationProvidersPath, raw)
-	}
-	if raw == nil {
-		return map[string]bool{}
+		return known, nil
 	}
 	for name, provider := range providers {
+		if err := ctx.Err(); err != nil {
+			return nil, aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "checking lifecycle-manager providers")
+		}
 		if provider == nil {
 			delete(known, name)
 		} else {
 			known[name] = true
 		}
 	}
-	return known
+	return known, nil
 }
 
 // nodeValidationTestViolations fails on a test definition lifecycle-manager
-// cannot decode or accept at startup: a command that is not a list of
-// strings, an image that is not a string, or a provider that is null or not
-// one the config defines. A test AICR defines from scratch must name its
-// provider; the chart's dcgm-diag-test keeps its own unless it is nulled.
-func nodeValidationTestViolations(path string, test map[string]any, needsProvider bool, providers map[string]bool, fail func(string, ...any)) {
-	if command, present := test["command"]; present && command != nil {
+// cannot decode, accept at startup or run: a command that is not a non-empty
+// list of strings, an image that is not a non-empty string, or a provider the
+// config does not define. inherited marks the chart's dcgm-diag-test, whose
+// unset fields keep the chart's values; an explicit null deletes one, as Helm
+// does. A test AICR adds must set its image and provider.
+func nodeValidationTestViolations(path string, test map[string]any, inherited bool, providers map[string]bool, fail func(string, ...any)) {
+	if command, present := test["command"]; present {
 		items, isList := command.([]any)
 		ok := isList
 		for _, item := range items {
@@ -319,6 +355,10 @@ func nodeValidationTestViolations(path string, test map[string]any, needsProvide
 			}
 		}
 		switch {
+		case command == nil && inherited:
+			fail("%s.command is null, which Helm drops along with the chart's diagnostic, so the test Job runs the "+
+				"image's entrypoint instead of a test -- leave it unset or set a command", path)
+		case command == nil:
 		case !ok:
 			fail("%s.command is %#v, not a list of strings, so lifecycle-manager cannot decode its config and exits "+
 				"at startup -- pass it as a list: --set-json 'nv-sentinel:%s.command=[\"sh\",\"-c\",\"...\"]'",
@@ -328,23 +368,28 @@ func nodeValidationTestViolations(path string, test map[string]any, needsProvide
 				"command, or leave it unset to keep the chart's", path)
 		}
 	}
-	if image, present := test["image"]; present && image != nil {
-		if _, isString := image.(string); !isString {
-			fail("%s.image is %#v, not a string, so lifecycle-manager cannot decode its config and exits at startup",
-				path, image)
-		}
+	image, present := test["image"]
+	switch name, isString := image.(string); {
+	case !present && inherited:
+	case !present || image == nil:
+		fail("%s sets no image, so its test Job cannot run -- set %s.image", path, path)
+	case !isString:
+		fail("%s.image is %#v, not a string, so lifecycle-manager cannot decode its config and exits at startup",
+			path, image)
+	case strings.TrimSpace(name) == "":
+		fail("%s.image is empty, so its test Job cannot run -- set %s.image", path, path)
 	}
 	provider, present := test["provider"]
 	switch {
-	case present && provider == nil:
+	case !present && inherited:
+		provider = nodeValidationChartProvider
+	case !present:
+		fail("%s names no provider, which lifecycle-manager rejects at startup -- set %s.provider to %s",
+			path, path, nodeValidationChartProvider)
+		return
+	case provider == nil:
 		fail("%s.provider is null, which Helm drops along with the chart's value, so lifecycle-manager rejects "+
 			"the test at startup -- set it to %s or leave it unset", path, nodeValidationChartProvider)
-		return
-	case !present:
-		if needsProvider {
-			fail("%s names no provider, which lifecycle-manager rejects at startup -- set %s.provider to %s",
-				path, path, nodeValidationChartProvider)
-		}
 		return
 	}
 	if name, isString := provider.(string); !isString || !providers[name] {
@@ -356,20 +401,23 @@ func nodeValidationTestViolations(path string, test map[string]any, needsProvide
 // nodeValidationCriteriaViolations fails unless the effective criteria keep
 // one named cordoned with the chart's expression, which is what stops a
 // diagnostic running on a schedulable node.
-func nodeValidationCriteriaViolations(values map[string]any, fail func(string, ...any)) {
+func nodeValidationCriteriaViolations(ctx context.Context, values map[string]any, fail func(string, ...any)) error {
 	raw, present := component.GetValueByPath(values, nodeValidationCriteriaPath)
 	if !present {
-		return
+		return nil
 	}
 	criteria, _ := raw.([]any)
 	for _, item := range criteria {
+		if err := ctx.Err(); err != nil {
+			return aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "checking new-node criteria")
+		}
 		criterion, _ := item.(map[string]any)
 		name, _ := criterion["name"].(string)
 		expression, _ := criterion["expression"].(string)
 		if name == nodeValidationCordonedCriterion &&
 			strings.Join(strings.Fields(expression), " ") == nodeValidationCordonedExpression {
 
-			return
+			return nil
 		}
 	}
 	why := "a new GPU node that is still schedulable would run the diagnostic while it takes work"
@@ -380,36 +428,42 @@ func nodeValidationCriteriaViolations(values map[string]any, fail func(string, .
 		"cordons a node itself, so without it %s -- keep the criterion the %s mixin sets",
 		nodeValidationCriteriaPath, nodeValidationCordonedCriterion, nodeValidationCordonedExpression, why,
 		nodeValidationMixin)
+	return nil
 }
 
 // nodeValidationTestList returns the test names in the list at path: the
 // chart's [dcgm-diag-test] when it is absent, and none when it is null, which
 // Helm treats as deleting the chart's list. It fails on a name
 // lifecycle-manager would reject at startup.
-func nodeValidationTestList(values map[string]any, path string, defined map[string]bool, fail func(string, ...any)) []string {
+func nodeValidationTestList(ctx context.Context, values map[string]any, path string, defined map[string]bool, fail func(string, ...any)) ([]string, error) {
 	raw, present := component.GetValueByPath(values, path)
 	items := []any{nodeValidationDCGMTest}
 	switch {
 	case present && raw == nil:
-		return nil
+		return nil, nil
 	case present:
 		list, isList := raw.([]any)
 		if !isList {
 			fail("%s is %v, not a list of test names", path, raw)
-			return nil
+			return nil, nil
 		}
 		items = list
 	}
 	out := make([]string, 0, len(items))
+	seen := make(map[string]bool, len(items))
 	for i, item := range items {
+		if err := ctx.Err(); err != nil {
+			return nil, aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "checking "+path)
+		}
 		name, ok := item.(string)
 		switch {
 		case !ok:
 			fail("%s[%d] is %#v, not a test name", path, i, item)
 			continue
-		case slices.Contains(out, name):
+		case seen[name]:
 			fail("%s names %q twice, which lifecycle-manager rejects at startup", path, name)
 		}
+		seen[name] = true
 		if !defined[name] {
 			fail("%s names the test %q, which is not defined, so lifecycle-manager rejects its config at startup "+
 				"and crash-loops -- define it under %s.%s, with a provider, or remove it",
@@ -417,7 +471,7 @@ func nodeValidationTestList(values map[string]any, path string, defined map[stri
 		}
 		out = append(out, name)
 	}
-	return out
+	return out, nil
 }
 
 // nodeValidationCertManagerWarning reports when the webhook certificate is

@@ -15,6 +15,8 @@
 package validations
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -224,9 +226,25 @@ func TestCheckNVSentinelNodeValidationCoherent(t *testing.T) {
 		{name: "defaultTests checked with new-node validation off", others: onlyCertManager,
 			sentinel: nodeValidation(at(nodeValidationNewNodePath, nil), at(nodeValidationDefaultTestsPath, []any{"gpu-burn"})),
 			wantErrs: []string{wantUndefined}},
-		{name: "null dcgm-diag-test command keeps the DCGM check", others: onlyCertManager,
+		{name: "null dcgm-diag-test command deletes the chart's diagnostic", others: onlyCertManager,
 			sentinel: nodeValidation(at(nodeValidationTestsPath+"."+nodeValidationDCGMTest+".command", nil)),
-			wantErrs: []string{wantNoGPUOperator}},
+			wantErrs: []string{"." + nodeValidationDCGMTest + ".command is null", wantNoGPUOperator}},
+		{name: "null dcgm-diag-test image", others: onlyCertManager,
+			sentinel: nodeValidation(at(dcgmCommandPath, stubCommand), at(nodeValidationTestsPath+"."+nodeValidationDCGMTest+".image", nil)),
+			wantErrs: []string{"." + nodeValidationDCGMTest + " sets no image"}},
+		{name: "empty dcgm-diag-test image", others: onlyCertManager,
+			sentinel: nodeValidation(at(dcgmCommandPath, stubCommand), at(nodeValidationTestsPath+"."+nodeValidationDCGMTest+".image", " ")),
+			wantErrs: []string{"." + nodeValidationDCGMTest + ".image is empty"}},
+		{name: "an added test without an image", others: onlyCertManager,
+			sentinel: nodeValidation(at(nodeValidationNewNodeTestsPath, []any{"gpu-burn"}),
+				at(nodeValidationTestsPath+".gpu-burn", map[string]any{"provider": "k8s-job-provider", "command": stubCommand})),
+			wantErrs: []string{".gpu-burn sets no image"}},
+		{name: "providers null leaves the chart's test without a provider",
+			sentinel: nodeValidation(at(nodeValidationProvidersPath, nil)),
+			wantErrs: []string{"." + nodeValidationDCGMTest + `.provider is "k8s-job-provider", not a provider`}},
+		{name: "the chart's provider nulled",
+			sentinel: nodeValidation(at(nodeValidationProvidersPath+".k8s-job-provider", nil)),
+			wantErrs: []string{"." + nodeValidationDCGMTest + `.provider is "k8s-job-provider", not a provider`}},
 		{name: "newNodeTests not a list",
 			sentinel: nodeValidation(at(nodeValidationNewNodeTestsPath, nodeValidationDCGMTest)),
 			wantErrs: []string{wantNotTestList}},
@@ -263,10 +281,13 @@ func TestCheckNVSentinelNodeValidationCoherent(t *testing.T) {
 			wantErrs: []string{nodeValidationTestsPath + " is true, not a map of test definitions"}},
 		{name: "a test definition not a map",
 			sentinel: nodeValidation(at(nodeValidationTestsPath+"."+nodeValidationDCGMTest, true)),
-			wantErrs: []string{"." + nodeValidationDCGMTest + " is true, not a test definition"}},
+			wantErrs: []string{"." + nodeValidationDCGMTest + " is true, not a test definition",
+				"defines no test once Helm drops the null entries",
+				nodeValidationDefaultTestsPath + ` names the test "dcgm-diag-test", which is not defined`,
+				nodeValidationNewNodeTestsPath + ` names the test "dcgm-diag-test", which is not defined`}},
 		{name: "tests null deletes every test",
 			sentinel: nodeValidation(at(nodeValidationTestsPath, nil)),
-			wantErrs: []string{"defines no test once Helm drops the null entries",
+			wantErrs: []string{nodeValidationTestsPath + " is null, which Helm treats as deleting every test",
 				nodeValidationDefaultTestsPath + ` names the test "dcgm-diag-test", which is not defined`,
 				nodeValidationNewNodeTestsPath + ` names the test "dcgm-diag-test", which is not defined`}},
 		{name: "dcgm-diag-test null deletes the chart's test", others: onlyCertManager,
@@ -506,5 +527,29 @@ func TestCheckNVSentinelNodeValidationCoherentNoNVSentinel(t *testing.T) {
 	r := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{{Name: "gpu-operator"}}}
 	if w, e := CheckNVSentinelNodeValidationCoherent(t.Context(), nvsentinelComponent, r, config.NewConfig(), nil); w != nil || e != nil {
 		t.Errorf("no nvsentinel: got %v %v, want nothing", w, e)
+	}
+}
+
+// TestNodeValidationTestListHonorsCancellation pins that a long user-supplied
+// list is abandoned once the bundle's context ends, rather than checked in
+// full.
+func TestNodeValidationTestListHonorsCancellation(t *testing.T) {
+	t.Parallel()
+	items := make([]any, 100_000)
+	for i := range items {
+		items[i] = fmt.Sprintf("test-%d", i)
+	}
+	values := map[string]any{"lifecycle-manager": map[string]any{"config": map[string]any{"defaultTests": items}}}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	var findings int
+	tests, err := nodeValidationTestList(ctx, values, nodeValidationDefaultTestsPath, map[string]bool{},
+		func(string, ...any) { findings++ })
+	if err == nil {
+		t.Fatalf("nodeValidationTestList returned %d tests and %d findings with a canceled context, want an error",
+			len(tests), findings)
+	}
+	if code := errorstest.ReportedCode(err); code != aicrerrors.ErrCodeCanceled {
+		t.Errorf("error code = %s, want %s", code, aicrerrors.ErrCodeCanceled)
 	}
 }
