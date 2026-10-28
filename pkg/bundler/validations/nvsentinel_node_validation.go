@@ -45,6 +45,7 @@ const (
 	nodeValidationChartProvider         = "k8s-job-provider"
 	nodeValidationConditionType         = "type"
 	nodeValidationConditionStatus       = "status"
+	nodeValidationConditionTrue         = "True"
 	nodeValidationFullNamePath          = "lifecycle-manager.fullNameOverride"
 	nodeValidationDeploymentName        = "lifecycle-manager"
 	nodeValidationOpenShiftCertProvider = "openshift-service-ca"
@@ -320,8 +321,8 @@ var nodeValidationChartProviderDefaults = map[string]any{
 	"templateFile":        "k8s-job-template.yaml",
 	"retries":             5,
 	"timeoutSeconds":      1800,
-	"successfulCondition": map[string]any{nodeValidationConditionType: "Complete", nodeValidationConditionStatus: "True"},
-	"failedCondition":     map[string]any{nodeValidationConditionType: "Failed", nodeValidationConditionStatus: "True"},
+	"successfulCondition": map[string]any{nodeValidationConditionType: "Complete", nodeValidationConditionStatus: nodeValidationConditionTrue},
+	"failedCondition":     map[string]any{nodeValidationConditionType: "Failed", nodeValidationConditionStatus: nodeValidationConditionTrue},
 }
 
 // nodeValidationProviders returns the provider names lifecycle-manager's
@@ -397,9 +398,13 @@ func nodeValidationHelmMerge(base, override map[string]any) map[string]any {
 	return out
 }
 
+// nodeValidationConditionStatuses are the statuses a Kubernetes condition
+// reports.
+var nodeValidationConditionStatuses = []string{nodeValidationConditionTrue, "False", "Unknown"}
+
 // nodeValidationProviderViolations fails on each field of an effective
-// provider definition lifecycle-manager rejects at startup, and reports
-// whether the definition is usable.
+// provider definition lifecycle-manager rejects at startup or can never
+// match, and reports whether the definition is usable.
 func nodeValidationProviderViolations(path string, provider map[string]any, fail func(string, ...any)) bool {
 	ok := true
 	reject := func(format string, args ...any) {
@@ -422,6 +427,13 @@ func nodeValidationProviderViolations(path string, provider map[string]any, fail
 	}
 	for _, field := range []string{"successfulCondition", "failedCondition"} {
 		condition, _ := provider[field].(map[string]any)
+		if status, _ := condition[nodeValidationConditionStatus].(string); strings.TrimSpace(status) != "" &&
+			!slices.Contains(nodeValidationConditionStatuses, status) {
+
+			reject("%s.%s.%s is %q, not one of %s: a Kubernetes condition reports no other status, so the "+
+				"condition never matches and the test never completes", path, field, nodeValidationConditionStatus,
+				status, strings.Join(nodeValidationConditionStatuses, ", "))
+		}
 		for _, key := range []string{nodeValidationConditionType, nodeValidationConditionStatus} {
 			if v, _ := condition[key].(string); strings.TrimSpace(v) == "" {
 				reject("%s.%s.%s is %#v, not a non-empty string, which lifecycle-manager rejects at startup",
