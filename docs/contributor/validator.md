@@ -1609,7 +1609,7 @@ CRD fails at PR time, before any cluster runs the check.
 `TestHealthCheckCRDAssertionsAnchored` in `tools/crd-inventory` enforces this
 offline under `make test`. It checks each registry health check at the
 registry pin, and each health check a leaf recipe deploys at that leaf's pin,
-including an overlay's inline `healthCheck.asserts`:
+including an overlay's inline `healthCheckAsserts`:
 
 - A Helm component's generated `recipes/components/<name>/crds.yaml` has one
   entry per pinned chart, keyed by repository, chart and `sourceVersion`. Each
