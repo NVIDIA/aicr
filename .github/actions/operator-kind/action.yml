@@ -62,8 +62,42 @@ runs:
         command -v envsubst >/dev/null || sudo apt-get install -y --no-install-recommends gettext-base
 
     # The in-cluster registry's and Argo CD's redis images come from ECR
-    # Public, whose anonymous pulls are throttled; keep the pinned images
-    # between runs.
+    # Public, which throttles anonymous pulls per runner egress IP. The
+    # workflow's prime-images job saves both under the KWOK lanes' cache keys
+    # (kwok/scripts/lib/image-cache.sh, #2483); loading them here means no
+    # matrix job pulls them. A miss is not fatal: the pull path still runs.
+    - name: Resolve the cached image keys
+      id: images
+      shell: bash
+      run: |
+        set -euo pipefail
+        bash kwok/scripts/lib/image-cache.sh settings .settings.yaml >> "$GITHUB_OUTPUT"
+
+    - name: Restore the registry image
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: /tmp/kwok-image-cache/registry
+        key: ${{ steps.images.outputs.registry_key }}
+
+    - name: Restore the Argo CD redis image
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: /tmp/kwok-image-cache/argocd_redis
+        key: ${{ steps.images.outputs.argocd_redis_key }}
+
+    - name: Load the cached images
+      shell: bash
+      env:
+        REGISTRY_IMAGE: ${{ steps.images.outputs.registry_image }}
+        ARGOCD_REDIS_IMAGE: ${{ steps.images.outputs.argocd_redis_image }}
+      run: |
+        set -uo pipefail
+        bash kwok/scripts/lib/image-cache.sh load /tmp/kwok-image-cache/registry "${REGISTRY_IMAGE}" ||
+          echo "::warning::Image cache miss for ${REGISTRY_IMAGE}; the cluster setup pulls it"
+        bash kwok/scripts/lib/image-cache.sh load /tmp/kwok-image-cache/argocd_redis "${ARGOCD_REDIS_IMAGE}" ||
+          echo "::warning::Image cache miss for ${ARGOCD_REDIS_IMAGE}; the Argo CD install pulls it"
+
+    # The other Argo CD images, kept between runs.
     - name: Cache the registry and Argo CD images
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
       with:

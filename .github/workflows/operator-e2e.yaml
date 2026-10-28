@@ -49,6 +49,8 @@ on:
       - '.github/actions/prep-kind-runner/**'
       - '.github/actions/setup-build-tools/**'
       - '.go-version'
+      - 'kwok/scripts/lib/image-cache.sh'
+      - 'kwok/scripts/lib/preload-image.sh'
   pull_request:
     branches: [main]
     paths: *paths
@@ -88,6 +90,43 @@ jobs:
             exit 1
           fi
           echo "releases=$(yq -o=json -I=0 '.operator.aicr_e2e' .settings.yaml)" >> "$GITHUB_OUTPUT"
+
+  # Pulls the ECR Public images every kind job needs once, into the cache the
+  # KWOK lanes share (kwok/scripts/lib/image-cache.sh, #2483), so the matrix
+  # does not hit the per-IP anonymous pull limit. A cache hit pulls nothing.
+  prime-images:
+    name: Prime image cache (${{ matrix.image }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [registry, argocd_redis]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve image pins and cache keys
+        id: images
+        run: |
+          set -euo pipefail
+          bash kwok/scripts/lib/image-cache.sh settings .settings.yaml | tee -a "$GITHUB_OUTPUT"
+
+      - name: Cache image tarball
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: /tmp/kwok-image-cache/${{ matrix.image }}
+          key: ${{ steps.images.outputs[format('{0}_key', matrix.image)] }}
+
+      - name: Prime image
+        env:
+          IMAGE: ${{ steps.images.outputs[format('{0}_image', matrix.image)] }}
+          CACHE_DIR: /tmp/kwok-image-cache/${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          bash kwok/scripts/lib/image-cache.sh save "${CACHE_DIR}" "${IMAGE}"
 
   floor:
     name: Kubernetes floor and generated code
@@ -130,7 +169,7 @@ jobs:
   # fails with Go's goroutine dump and the log steps still run.
   e2e:
     name: AICR ${{ matrix.aicr.version }} on Kubernetes ${{ matrix.kubernetes }}
-    needs: matrix
+    needs: [matrix, prime-images]
     runs-on: ubuntu-24.04
     timeout-minutes: 50
     strategy:
@@ -165,7 +204,7 @@ jobs:
 
   skeleton:
     name: Walking skeleton with AICR ${{ matrix.aicr.version }} on Kubernetes ${{ matrix.kubernetes }}
-    needs: matrix
+    needs: [matrix, prime-images]
     runs-on: ubuntu-24.04
     timeout-minutes: 110
     strategy:
@@ -207,7 +246,7 @@ jobs:
 
   qualify:
     name: Qualify a candidate with AICR ${{ matrix.aicr.version }} on Kubernetes ${{ matrix.kubernetes }}
-    needs: matrix
+    needs: [matrix, prime-images]
     runs-on: ubuntu-24.04
     timeout-minutes: 130
     strategy:
