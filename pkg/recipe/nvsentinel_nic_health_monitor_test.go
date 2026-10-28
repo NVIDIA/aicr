@@ -183,6 +183,11 @@ func nicHealthMonitorPlatforms() []nicHealthMonitorPlatform {
 			wantMonitor: true,
 		},
 		{
+			name:        "NVKE GB200 training",
+			criteria:    &Criteria{Service: CriteriaServiceNVKE, Accelerator: CriteriaAcceleratorGB200, OS: CriteriaOSUbuntu, Intent: CriteriaIntentTraining},
+			wantMonitor: true,
+		},
+		{
 			name:     "EKS H100 training (aws-efa, not Mellanox)",
 			criteria: &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100, OS: CriteriaOSUbuntu, Intent: CriteriaIntentTraining},
 		},

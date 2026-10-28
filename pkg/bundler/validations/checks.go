@@ -337,7 +337,7 @@ var npdProviderRunsItsOwn = map[recipe.CriteriaServiceType]bool{
 //   - os talos: recipes/mixins/os-talos.yaml relocates privileged components
 //     into privileged-* namespaces for Pod Security Admission. NPD is not in
 //     that list, so it would land in a restricted namespace and be denied.
-//   - anything else (lke, bcm, metal3, generic, k0s, ...): unverified.
+//   - anything else (lke, bcm, metal3, generic, k0s, mk8s, nvke, ...): unverified.
 //   - no criteria at all: the platform is unknown, and checkConditions' "nil
 //     Criteria means condition not met" would skip the gate entirely. A
 //     hand-authored or already-hydrated RecipeResult legitimately carries no

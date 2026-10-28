@@ -636,9 +636,13 @@ no `--exclude-crd`.
 
 Some namespaces are kept without any flag:
 
-- A namespace holding a Helm release whose name no AICR bundle installs. Phase 1
+- A namespace holding a Helm release AICR does not own (see below). Phase 1
   skips that release, and phase 4 keeps its namespace so the release can still
   be removed with `helm uninstall`.
+- A namespace holding an AICR release that Flux's helm-controller manages.
+  Phase 1 skips it, because helm-controller reinstalls a release removed
+  behind its back. Delete the `HelmRelease` in the Flux namespace
+  (`flux-system` by default) instead, which uninstalls it.
 - `openshift-nfd` and `cert-manager-operator`, unless phase 1 finds an AICR
   release in them that is not in `uninstalled` status. On OpenShift the
   platform team often installs these operators through OperatorHub. The list
@@ -651,6 +655,73 @@ Some namespaces are kept without any flag:
 `aicr validate` left there: the validator Jobs and ConfigMaps, and the snapshot
 agent's Job, ServiceAccount, Role and RoleBinding. The snapshot agent's
 staging ConfigMap (`aicr-agent-snapshot-<runID>`) is left in place.
+
+### How Cleanup Decides Which Releases AICR Owns
+
+Phase 1 uninstalls a Helm release only when AICR owns it. Without `--bundle`,
+a release is owned when any of these recognizes it:
+
+- The installed-component inventory (`pkg/inventory`), read once per naming
+  scheme. Helm, helmfile, Terraform and Fleet releases carry the component
+  name. Flux releases are named `<targetNamespace>-<component>` and are
+  recognized but left to helm-controller. Argo CD Applications are not Helm
+  releases, so cleanup only warns that Argo CD re-syncs what it removes.
+  Delete the Applications or their parent Application first.
+- The AICR stamp (`aicr.run/generated-by`) on a Helm release, for
+  releases no component name matches, such as an injected manifest folder.
+- The registry's release names, plus the few retired components in
+  `legacyComponents` (`tools/cleanup/helm.go`), which predate the stamp. This
+  is also the fallback when an inventory read fails.
+
+### Limiting Cleanup to One Bundle
+
+```bash
+go run ./tools/cleanup --bundle ./bundles --dry-run
+```
+
+`--bundle` reads the release index in the bundle's `bundle-info.yaml`
+(`layout.releases`). Phase 1 uninstalls only those releases, matched by name
+and namespace. Phase 4 deletes only the namespaces those releases install
+into, so namespaces no bundle names, such as `gang-scheduling-test`, are left
+alone. A directory with no `bundle-info.yaml` is an error, so pass the root
+of a `--split` bundle set, not one of its class directories. For a bundle
+that predates the index, omit `--bundle`. An Argo CD bundle installs Applications, not
+Helm releases, so phase 1 uninstalls nothing and cleanup warns to delete the
+Applications first. `--bundle` does not limit phase 3, which still deletes
+CRDs in AICR's API groups cluster-wide, and with them every custom resource
+of those kinds. On a cluster shared with another tenant, add `--keep-crds`.
+
+### Workloads That Outlive Their Operator
+
+A user workload can hold objects of an AICR CRD in a namespace AICR does not
+own, for example a `DynamoGraphDeployment` or Grove `PodClique` in a serving
+namespace. Phase 1 uninstalls the operator that serves the CRD's conversion
+webhook and removes its finalizers, so deleting the CRD in phase 3 would hang:
+
+- the instances keep finalizers nothing will remove, so the CRD stays
+  `Terminating` and the next install of that operator fails on it;
+- every list of the kind fails on the dead webhook, so an AICR namespace that
+  phase 4 deletes stays `Terminating` with `NamespaceDeletionContentFailure`,
+  even when it is empty.
+
+Phase 3 therefore sets a webhook-converted CRD's conversion strategy to `None`
+before deleting it. After a short wait, for each CRD still `Terminating`, it
+clears the finalizers of the instances its deletion has already marked, except
+in `--exclude-ns` namespaces. Those objects are already being deleted with the
+CRD.
+
+`--keep-crds` changes neither, since a kept CRD must keep its webhook for the
+reinstalled operator. Instead, cleanup warns about each kept CRD whose webhook
+Service is gone: deleting any namespace hangs until its operator is
+reinstalled. Reinstall the operator before deleting namespaces, or run with
+`--keep-namespaces` as well.
+
+Cleanup ends by checking once more for CRDs and namespaces it deleted that are
+still `Terminating`. It names each one, with the namespace's deletion-failure
+condition, and finishes with "AICR cleanup finished with resources still
+terminating" instead of "AICR cleanup complete". A namespace whose delete was
+refused, for example by RBAC or admission, is reported as not deleted rather
+than as `Terminating`. Its exit status stays 0.
 
 ### Debugging Tests
 

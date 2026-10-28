@@ -37,6 +37,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/inventory"
 	"github.com/NVIDIA/aicr/pkg/k8s"
 	k8slabels "github.com/NVIDIA/aicr/pkg/k8s/labels"
 	vlabels "github.com/NVIDIA/aicr/pkg/validator/labels"
@@ -83,6 +84,11 @@ const (
 	gpuOperatorRelease  = "gpu-operator"
 )
 
+// disableConversionPatch drops a CRD's conversion webhook. The webhook field
+// must be cleared, since the API server rejects it unless the strategy is
+// Webhook.
+var disableConversionPatch = []byte(`{"spec":{"conversion":{"strategy":"None","webhook":null}}}`)
+
 var crdGVR = schema.GroupVersionResource{
 	Group:    "apiextensions.k8s.io",
 	Version:  "v1",
@@ -109,15 +115,22 @@ type cleaner struct {
 	dyn           dynamic.Interface
 	helm          helmClient // nil when helm is not installed
 	namespaces    []string   // sorted
-	releaseNames  map[string]bool
+	owners        ownership
+	readReleases  releaseReader // nil skips the inventory read
+	components    []inventory.Component
+	bundle        *bundleScope // nil without --bundle
 	namespaceWait time.Duration
 }
 
 func (c *cleaner) run(ctx context.Context, confirm prompt) error {
 	c.log.Info("target cluster", "context", c.kubeContext, "server", c.server)
 	c.reportExclusions()
+	c.reportBundle()
 
 	releases, releasesKnown := c.listReleases(ctx)
+	if releasesKnown {
+		c.readInstalled(ctx)
+	}
 	driverManaged := c.driverManaged(ctx, releases)
 	if driverManaged {
 		c.driverGuidance()
@@ -134,10 +147,12 @@ func (c *cleaner) run(ctx context.Context, confirm prompt) error {
 
 	c.uninstallReleases(ctx, releases)
 	c.removeValidatorArtifacts(ctx)
+	var deletedCRDs, deletedNamespaces []string
 	if c.opts.keepCRDs {
 		c.log.Info("skipping CRD deletion", "flag", "--keep-crds")
+		c.warnDeadConversionWebhooks(ctx)
 	} else {
-		c.deleteCRDs(ctx)
+		deletedCRDs = c.deleteCRDs(ctx)
 	}
 	switch {
 	case c.opts.keepNamespaces:
@@ -145,13 +160,18 @@ func (c *cleaner) run(ctx context.Context, confirm prompt) error {
 	case !releasesKnown:
 		c.log.Warn("skipping namespace deletion, since deleting a namespace with no helm release list could orphan releases in it")
 	default:
-		c.deleteNamespaces(ctx, releases)
+		deletedNamespaces = c.deleteNamespaces(ctx, releases)
 	}
+	stuck := c.reportStillTerminating(ctx, deletedCRDs, deletedNamespaces)
 	if err := ctx.Err(); err != nil {
 		return errors.WrapCtxErr(err, errors.ErrCodeTimeout, "cleanup interrupted")
 	}
 
-	c.log.Info("AICR cleanup complete")
+	if stuck {
+		c.log.Warn("AICR cleanup finished with resources still terminating, see the warnings above")
+	} else {
+		c.log.Info("AICR cleanup complete")
+	}
 	if !c.opts.dryRun {
 		c.log.Info("confirm no AICR remnants remain", "check", "kubectl get ns && helm ls -A")
 	}
@@ -264,12 +284,15 @@ func (c *cleaner) uninstallReleases(ctx context.Context, releases []helmRelease)
 			return
 		}
 		log := c.log.With("release", rel.Name, "namespace", rel.Namespace)
+		owned, managedBy := c.owners.owns(rel)
 		switch {
 		case c.excludedNS(rel.Namespace):
 			log.Info("skipping helm release in excluded namespace")
 		case !c.owned(rel.Namespace):
-		case !c.releaseNames[rel.Name]:
+		case !owned:
 			log.Info("skipping helm release AICR does not own")
+		case managedBy != "":
+			log.Warn("skipping helm release a controller manages", "reason", managedBy)
 		default:
 			log.Info("uninstalling helm release")
 			if c.opts.dryRun {
@@ -283,35 +306,48 @@ func (c *cleaner) uninstallReleases(ctx context.Context, releases []helmRelease)
 }
 
 // deleteObject deletes one object with del, which it skips under --dry-run.
-// It ignores NotFound and logs any other error.
-func (c *cleaner) deleteObject(ctx context.Context, resource, namespace, name string, del func(context.Context) error) {
+// It ignores NotFound and logs any other error. It reports whether the object
+// was deleted or already gone, which is false under --dry-run.
+func (c *cleaner) deleteObject(ctx context.Context, resource, namespace, name string, del func(context.Context) error) bool {
 	log := c.log.With("resource", resource, "name", name)
 	if namespace != "" {
 		log = log.With("namespace", namespace)
 	}
 	log.Info("deleting")
 	if c.opts.dryRun {
-		return
+		return false
 	}
 	ctx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
 	defer cancel()
 	if err := k8s.IgnoreNotFound(del(ctx)); err != nil {
 		log.Warn("delete failed", "error", err)
+		return false
 	}
+	return true
 }
 
-func (c *cleaner) deleteCRDs(ctx context.Context) {
+// deleteCRDs deletes the CRDs in AICR-owned groups. Phase 1 has already
+// uninstalled the operators that serve their conversion webhooks and clear
+// their instances' finalizers, so a CRD whose instances live on, such as a
+// user's workload in a namespace AICR does not own, would stay Terminating:
+// its instances keep their finalizers, and every list of the kind, including
+// the namespace controller's, fails on the dead webhook. deleteCRDs therefore
+// switches each such CRD to no conversion before deleting it, and then
+// rescues the instances of CRDs still Terminating. It returns the CRDs it
+// deleted, or nil under --dry-run.
+func (c *cleaner) deleteCRDs(ctx context.Context) []string {
 	c.log.Info("phase 3: deleting AICR component CRDs")
 	listCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
 	list, err := c.dyn.Resource(crdGVR).List(listCtx, metav1.ListOptions{})
 	cancel()
 	if err != nil {
 		c.log.Warn("could not list CRDs, skipping CRD deletion", "error", err)
-		return
+		return nil
 	}
+	var deleted []string
 	for _, crd := range list.Items {
 		if ctx.Err() != nil {
-			return
+			return nil
 		}
 		group, _, _ := unstructured.NestedString(crd.Object, "spec", "group")
 		if !aicrCRDGroups[group] {
@@ -322,42 +358,297 @@ func (c *cleaner) deleteCRDs(ctx context.Context) {
 			c.log.Info("skipping excluded CRD", "name", name)
 			continue
 		}
-		c.deleteObject(ctx, crdGVR.Resource, "", name, func(ctx context.Context) error {
+		disabled := c.disableConversionWebhook(ctx, &crd)
+		ok := c.deleteObject(ctx, crdGVR.Resource, "", name, func(ctx context.Context) error {
 			return c.dyn.Resource(crdGVR).Delete(ctx, name, metav1.DeleteOptions{})
 		})
+		if !ok {
+			if disabled {
+				c.log.Warn("CRD left with its conversion webhook disabled after its delete failed. Re-run cleanup, or reinstall its operator with the CRD replaced",
+					"name", name)
+			}
+			continue
+		}
+		deleted = append(deleted, name)
+	}
+	if c.opts.dryRun || len(deleted) == 0 {
+		return nil
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil
+	case <-time.After(c.namespaceWait):
+	}
+	for _, name := range deleted {
+		if ctx.Err() != nil {
+			return nil
+		}
+		c.rescueCRDInstances(ctx, name)
+	}
+	return deleted
+}
+
+// warnDeadConversionWebhooks warns, for each AICR CRD kept by --keep-crds,
+// when its conversion webhook Service is gone, as it is once phase 1 has
+// uninstalled the operator. Every list of the kind then fails, so deleting any
+// namespace hangs until the operator is reinstalled.
+func (c *cleaner) warnDeadConversionWebhooks(ctx context.Context) {
+	listCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+	list, err := c.dyn.Resource(crdGVR).List(listCtx, metav1.ListOptions{})
+	cancel()
+	if err != nil {
+		c.log.Debug("could not list CRDs to check conversion webhooks", "error", err)
+		return
+	}
+	for _, crd := range list.Items {
+		if ctx.Err() != nil {
+			return
+		}
+		group, _, _ := unstructured.NestedString(crd.Object, "spec", "group")
+		strategy, _, _ := unstructured.NestedString(crd.Object, "spec", "conversion", "strategy")
+		if !aicrCRDGroups[group] || strategy != "Webhook" {
+			continue
+		}
+		// Read the fields one by one: the API server defaults the integer port,
+		// which NestedStringMap rejects.
+		svcName, _, _ := unstructured.NestedString(crd.Object, "spec", "conversion", "webhook", "clientConfig", "service", "name")
+		svcNS, _, _ := unstructured.NestedString(crd.Object, "spec", "conversion", "webhook", "clientConfig", "service", "namespace")
+		if svcName == "" || svcNS == "" {
+			continue
+		}
+		getCtx, getCancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+		_, err := c.kube.CoreV1().Services(svcNS).Get(getCtx, svcName, metav1.GetOptions{})
+		getCancel()
+		if !apierrors.IsNotFound(err) {
+			continue
+		}
+		advice := "Reinstall the operator before deleting namespaces, or keep them with --keep-namespaces"
+		if c.opts.keepNamespaces {
+			advice = "Reinstall the operator before deleting any namespace"
+		}
+		c.log.Warn("kept CRD converts through a webhook whose Service is gone, so deleting any namespace hangs until its operator is reinstalled. "+advice,
+			"name", crd.GetName(), "service", svcNS+"/"+svcName)
 	}
 }
 
-// deleteNamespaces keeps a namespace holding any of releases that AICR does
-// not own, since deleting the namespace also deletes the release record and
-// leaves the release's cluster-scoped objects with no way to uninstall them.
-// It keeps a sharedNamespaces entry unless releases has an AICR release there
-// that is not uninstalled, since a release history kept by helm uninstall
-// --keep-history says nothing about who owns the namespace now.
-func (c *cleaner) deleteNamespaces(ctx context.Context, releases []helmRelease) {
+// reportStillTerminating waits once more, then warns about each CRD and
+// namespace this run tried to delete that still exists, naming a namespace's
+// deletion failure condition when it has one. A namespace with no deletion
+// timestamp was never deleted, for example because RBAC or admission refused
+// the delete, and is reported as such. It reports whether any remain.
+func (c *cleaner) reportStillTerminating(ctx context.Context, crds, namespaces []string) bool {
+	if c.opts.dryRun || len(crds)+len(namespaces) == 0 {
+		return false
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(c.namespaceWait):
+	}
+	stuck := false
+	for _, name := range crds {
+		if ctx.Err() != nil {
+			return false
+		}
+		getCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+		_, err := c.dyn.Resource(crdGVR).Get(getCtx, name, metav1.GetOptions{})
+		cancel()
+		switch {
+		case apierrors.IsNotFound(err):
+		case err != nil:
+			stuck = true
+			c.log.Warn("could not confirm the CRD is gone", "name", name, "error", err)
+		default:
+			stuck = true
+			c.log.Warn("CRD still terminating, so reinstalling its operator fails until it is gone. "+
+				"Check its instances for finalizers", "name", name)
+		}
+	}
+	for _, name := range namespaces {
+		if ctx.Err() != nil {
+			return false
+		}
+		getCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+		ns, err := c.kube.CoreV1().Namespaces().Get(getCtx, name, metav1.GetOptions{})
+		cancel()
+		if apierrors.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			stuck = true
+			c.log.Warn("could not confirm the namespace is gone", "namespace", name, "error", err)
+			continue
+		}
+		stuck = true
+		if ns.DeletionTimestamp == nil {
+			c.log.Warn("namespace was not deleted, see the delete failure above", "namespace", name)
+			continue
+		}
+		args := []any{"namespace", name, "check", "kubectl get ns " + name + " -o yaml"}
+		for _, cond := range ns.Status.Conditions {
+			if cond.Status == corev1.ConditionTrue && strings.HasPrefix(string(cond.Type), "NamespaceDeletion") {
+				args = append(args, "condition", string(cond.Type), "message", cond.Message)
+				break
+			}
+		}
+		c.log.Warn("namespace still terminating", args...)
+	}
+	return stuck
+}
+
+// disableConversionWebhook sets a webhook-converted CRD's conversion strategy
+// to None, so its objects can still be listed once the webhook's operator is
+// gone. It is called only on CRDs about to be deleted, since a kept CRD would
+// keep serving unconverted objects after the operator is reinstalled. It
+// reports whether it disabled the webhook, which is false under --dry-run.
+func (c *cleaner) disableConversionWebhook(ctx context.Context, crd *unstructured.Unstructured) bool {
+	strategy, _, _ := unstructured.NestedString(crd.Object, "spec", "conversion", "strategy")
+	if strategy != "Webhook" {
+		return false
+	}
+	log := c.log.With("name", crd.GetName())
+	log.Info("disabling conversion webhook before deleting CRD")
+	if c.opts.dryRun {
+		return false
+	}
+	patchCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+	defer cancel()
+	if _, err := c.dyn.Resource(crdGVR).Patch(patchCtx, crd.GetName(), types.MergePatchType, disableConversionPatch, metav1.PatchOptions{}); err != nil {
+		log.Warn("could not disable conversion webhook, so listing this kind may fail until the CRD is gone", "error", err)
+		return false
+	}
+	return true
+}
+
+// rescueCRDInstances clears the finalizers of the instances of CRD name that
+// its deletion has already marked for deletion, if the CRD is still
+// Terminating. It leaves instances in excluded namespaces alone.
+func (c *cleaner) rescueCRDInstances(ctx context.Context, name string) {
+	getCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+	crd, err := c.dyn.Resource(crdGVR).Get(getCtx, name, metav1.GetOptions{})
+	cancel()
+	if err != nil || crd.GetDeletionTimestamp() == nil {
+		return
+	}
+	gvr, ok := crdListGVR(crd)
+	if !ok {
+		c.log.Warn("CRD stuck terminating with no served version, cannot clear its instances' finalizers", "name", name)
+		return
+	}
+	c.log.Warn("CRD stuck terminating, clearing finalizers of its instances", "name", name)
+	listCtx, listCancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+	list, err := c.dyn.Resource(gvr).List(listCtx, metav1.ListOptions{})
+	listCancel()
+	if err != nil {
+		c.log.Warn("could not list CRD instances for finalizer rescue", "name", name, "error", err)
+		return
+	}
+	clearFinalizers := []byte(`{"metadata":{"finalizers":[]}}`)
+	for _, obj := range list.Items {
+		if ctx.Err() != nil {
+			return
+		}
+		if obj.GetDeletionTimestamp() == nil || len(obj.GetFinalizers()) == 0 {
+			continue
+		}
+		ns := obj.GetNamespace()
+		log := c.log.With("resource", gvr.Resource, "name", obj.GetName())
+		if ns != "" {
+			log = log.With("namespace", ns)
+		}
+		if c.excludedNS(ns) {
+			log.Info("skipping finalizer rescue in excluded namespace")
+			continue
+		}
+		patchCtx, patchCancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+		_, err := c.dyn.Resource(gvr).Namespace(ns).Patch(patchCtx, obj.GetName(), types.MergePatchType, clearFinalizers, metav1.PatchOptions{})
+		patchCancel()
+		if err != nil {
+			log.Warn("could not clear finalizers", "error", err)
+			continue
+		}
+		log.Info("cleared finalizers")
+	}
+}
+
+// crdListGVR returns the resource to list crd's instances through: its storage
+// version if served, else its first served version.
+func crdListGVR(crd *unstructured.Unstructured) (schema.GroupVersionResource, bool) {
+	group, _, _ := unstructured.NestedString(crd.Object, "spec", "group")
+	plural, _, _ := unstructured.NestedString(crd.Object, "spec", "names", "plural")
+	versions, _, _ := unstructured.NestedSlice(crd.Object, "spec", "versions")
+	var chosen string
+	for _, v := range versions {
+		version, _ := v.(map[string]any)
+		name, _ := version["name"].(string)
+		served, _ := version["served"].(bool)
+		if !served || name == "" {
+			continue
+		}
+		if storage, _ := version["storage"].(bool); storage {
+			chosen = name
+			break
+		}
+		if chosen == "" {
+			chosen = name
+		}
+	}
+	if chosen == "" || group == "" || plural == "" {
+		return schema.GroupVersionResource{}, false
+	}
+	return schema.GroupVersionResource{Group: group, Version: chosen, Resource: plural}, true
+}
+
+// deleteNamespaces deletes the owned and per-run check namespaces, skipping
+// excluded ones. It keeps:
+//   - a namespace holding any of releases that AICR does not own, since
+//     deleting it deletes the release record and leaves the release's
+//     cluster-scoped objects with no way to uninstall them
+//   - a namespace holding an AICR release a controller manages, which would
+//     recreate what was deleted
+//   - a sharedNamespaces entry, unless releases has an AICR release there
+//     that is not uninstalled
+//
+// Under --bundle it skips the check namespaces. It returns the namespaces it
+// tried to delete, including any whose delete was refused, or nil under
+// --dry-run.
+func (c *cleaner) deleteNamespaces(ctx context.Context, releases []helmRelease) []string {
 	c.log.Info("phase 4: deleting AICR component and check namespaces")
 	for _, ns := range slices.Sorted(maps.Keys(notOwnedNamespaces)) {
 		c.log.Info("skipping namespace AICR does not own", "namespace", ns, "reason", notOwnedNamespaces[ns])
 	}
 	foreign := map[string][]string{}
+	managed := map[string][]string{}
 	installed := map[string]bool{}
 	for _, rel := range releases {
-		if c.releaseNames[rel.Name] {
-			if rel.Status != helmStatusUninstalled {
-				installed[rel.Namespace] = true
-			}
-		} else {
+		owned, managedBy := c.owners.owns(rel)
+		switch {
+		case !owned:
 			foreign[rel.Namespace] = append(foreign[rel.Namespace], rel.Name)
+		case managedBy != "":
+			managed[rel.Namespace] = append(managed[rel.Namespace], rel.Name)
+		// A history kept by helm uninstall --keep-history says nothing about
+		// who owns the namespace now.
+		case rel.Status != helmStatusUninstalled:
+			installed[rel.Namespace] = true
 		}
 	}
 
+	candidates := c.namespaces
+	// No bundle installs a check namespace.
+	if c.bundle == nil {
+		candidates = slices.Concat(candidates, c.checkNamespaces(ctx))
+	}
 	var targets []string
-	for _, ns := range slices.Concat(c.namespaces, c.checkNamespaces(ctx)) {
+	for _, ns := range candidates {
 		switch {
 		case c.excludedNS(ns):
 			c.log.Info("skipping excluded namespace", "namespace", ns)
 		case len(foreign[ns]) > 0:
 			c.log.Info("keeping namespace that holds helm releases AICR does not own", "namespace", ns, "releases", foreign[ns])
+		case len(managed[ns]) > 0:
+			c.log.Info("keeping namespace that holds helm releases a controller manages", "namespace", ns, "releases", managed[ns])
 		case sharedNamespaces[ns] != "" && !installed[ns]:
 			c.log.Info("keeping shared namespace with no AICR helm release found", "namespace", ns, "reason", sharedNamespaces[ns])
 		default:
@@ -366,25 +657,26 @@ func (c *cleaner) deleteNamespaces(ctx context.Context, releases []helmRelease) 
 	}
 	for _, ns := range targets {
 		if ctx.Err() != nil {
-			return
+			return nil
 		}
 		c.deleteNamespace(ctx, ns)
 	}
 	if c.opts.dryRun {
-		return
+		return nil
 	}
 
 	select {
 	case <-ctx.Done():
-		return
+		return nil
 	case <-time.After(c.namespaceWait):
 	}
 	for _, ns := range targets {
 		if ctx.Err() != nil {
-			return
+			return nil
 		}
 		c.rescueNamespace(ctx, ns)
 	}
+	return targets
 }
 
 // checkNamespaces returns the sorted per-run namespaces conformance checks

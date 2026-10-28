@@ -960,6 +960,9 @@ generate_bundle() {
     # Disable features not needed for scheduling validation:
     # - PrometheusRules and AlertManager (slow to create)
     # - Nodewright customization (creates CRs that depend on operator CRDs)
+    # - sriov-ib-networks: its IPPools need the nv-ipam CRD, which the Network
+    #   Operator creates only while reconciling a NicClusterPolicy, and no
+    #   operator container runs on a KWOK node
     # - Nodewright's admission webhook: same failure mode as the
     #   slinky-slurm-operator webhook below. The operator Deployment is a
     #   system workload, so it carries the fake-node toleration and lands on
@@ -1013,6 +1016,9 @@ generate_bundle() {
     fi
     if grep -qx "nodewright-customizations" <<< "$bundled_components"; then
         conditional_sets+=(--set "nodewright-customizations:enabled=false")
+    fi
+    if grep -qx "sriov-ib-networks" <<< "$bundled_components"; then
+        conditional_sets+=(--set "sriov-ib-networks:enabled=false")
     fi
     if grep -qx "nodewright-operator" <<< "$bundled_components"; then
         conditional_sets+=(--set "nodewright:webhook.enable=false")
