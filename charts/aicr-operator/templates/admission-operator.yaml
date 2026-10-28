@@ -1,0 +1,285 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+{{/*
+Constraints on the operator: bindings match
+only the operator's ServiceAccount, so the API server enforces them however
+the operator behaves. They are deleted with the operator on uninstall.
+Constraints on Flux objects ship with the Flux adapter.
+*/}}
+{{- $operator := include "aicr-operator.operatorUser" . }}
+{{- $registry := .Values.registry.repository }}
+{{- $jobs := .Values.namespaces.jobs }}
+{{- $discovery := .Values.namespaces.discovery }}
+{{- $validation := .Values.namespaces.validation }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: aicr-operator-applications
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [argoproj.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [applications]
+  matchConditions:
+    - name: operator
+      expression: request.userInfo.username == {{ $operator | quote }}
+  variables:
+    - name: destinations
+      expression: {{ include "aicr-operator.destinations" . | squote }}
+    - name: cascades
+      expression: >-
+        has(object.metadata.finalizers) &&
+        object.metadata.finalizers.exists(f, f.startsWith('resources-finalizer.argocd.argoproj.io'))
+  validations:
+    - expression: request.namespace == {{ .Values.engine.namespace | quote }}
+      message: owned Applications live in the engine namespace {{ .Values.engine.namespace }}
+    - expression: object.spec.project == {{ .Values.engine.project | quote }}
+      message: owned Applications use the {{ .Values.engine.project }} project
+    - expression: has(object.spec.source) && !has(object.spec.sources)
+      message: owned Applications have a single source
+    - expression: >-
+        has(object.spec.source) && has(object.spec.source.repoURL) &&
+        (object.spec.source.repoURL.startsWith({{ printf "%s/charts/" $registry | quote }}) ||
+        object.spec.source.repoURL.startsWith({{ printf "%s/wrappers/" $registry | quote }}))
+      message: owned Applications pull from the runtime registry {{ $registry }}
+    - expression: >-
+        has(object.spec.source) && has(object.spec.source.targetRevision) &&
+        object.spec.source.targetRevision.matches('^sha256:[a-f0-9]{64}$')
+      message: owned Applications pin a sha256 digest
+    - expression: '!has(object.spec.source) || !has(object.spec.source.plugin)'
+      message: owned Applications use no config management plugin
+    - expression: >-
+        !has(object.spec.source) || !has(object.spec.source.helm) ||
+        ((!has(object.spec.source.helm.valueFiles) || size(object.spec.source.helm.valueFiles) == 0) &&
+        (!has(object.spec.source.helm.parameters) || size(object.spec.source.helm.parameters) == 0))
+      message: owned Applications carry values only in valuesObject
+    - expression: >-
+        has(object.spec.destination.server) && object.spec.destination.server == 'https://kubernetes.default.svc' &&
+        (!has(object.spec.destination.name) || object.spec.destination.name == '')
+      message: owned Applications deploy to the in-cluster server
+    - expression: has(object.spec.destination.namespace) && object.spec.destination.namespace in variables.destinations
+      messageExpression: >-
+        'namespace ' + (has(object.spec.destination.namespace) ? object.spec.destination.namespace : '<none>') +
+        ' is not an allowed component namespace'
+    - expression: >-
+        !variables.cascades ||
+        (has(object.metadata.annotations) && 'operator.aicr.run/delete-rollout' in object.metadata.annotations)
+      message: the resources finalizer is set only with the operator.aicr.run/delete-rollout annotation of an approved Remove step
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: aicr-operator-applications
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+spec:
+  policyName: aicr-operator-applications
+  validationActions: [Deny]
+---
+# The operator deletes an Application only after an approved Remove step
+# marked it with the resources finalizer and the rollout's annotation, and
+# never one it does not own.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: aicr-operator-application-deletes
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [argoproj.io]
+        apiVersions: ["*"]
+        operations: [DELETE]
+        resources: [applications]
+  matchConditions:
+    - name: operator
+      expression: request.userInfo.username == {{ $operator | quote }}
+  validations:
+    - expression: >-
+        has(oldObject.metadata.labels) && 'app.kubernetes.io/managed-by' in oldObject.metadata.labels &&
+        oldObject.metadata.labels['app.kubernetes.io/managed-by'] == 'aicr-operator' &&
+        has(oldObject.metadata.annotations) && 'operator.aicr.run/delete-rollout' in oldObject.metadata.annotations &&
+        has(oldObject.metadata.finalizers) &&
+        oldObject.metadata.finalizers.exists(f, f.startsWith('resources-finalizer.argocd.argoproj.io'))
+      message: the operator deletes only its own Applications, marked by an approved Remove step
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: aicr-operator-application-deletes
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+spec:
+  policyName: aicr-operator-application-deletes
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: aicr-operator-jobs
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [batch]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [jobs]
+  matchConditions:
+    - name: operator
+      expression: request.userInfo.username == {{ $operator | quote }}
+  variables:
+    - name: serviceAccounts
+      expression: >-
+        {{ printf "{'%s': 'aicr-jobs', '%s': 'aicr-snapshot', '%s': 'aicr-validation'}" $jobs $discovery $validation }}
+    - name: commands
+      expression: >-
+        {{ printf "{'%s': ['recipe', 'bundle', 'upgrade-check'], '%s': ['snapshot'], '%s': ['validate']}" $jobs $discovery $validation }}
+    - name: pod
+      expression: object.spec.template.spec
+  validations:
+    - expression: request.namespace in variables.serviceAccounts
+      message: AICR Jobs run in the Job, discovery and validation namespaces
+    - expression: has(object.spec.ttlSecondsAfterFinished)
+      message: AICR Jobs set ttlSecondsAfterFinished
+    - expression: >-
+        size(variables.pod.containers) == 1 &&
+        (!has(variables.pod.initContainers) || size(variables.pod.initContainers) == 0) &&
+        (!has(variables.pod.ephemeralContainers) || size(variables.pod.ephemeralContainers) == 0)
+      message: AICR Jobs run one container
+    - expression: variables.pod.containers.all(c, c.image == {{ .Values.aicr.image | quote }})
+      message: AICR Jobs run the pinned AICR image {{ .Values.aicr.image }}
+    - expression: >-
+        variables.pod.containers.all(c, !has(c.args) ||
+        (c.args.all(a, !a.startsWith('--image=')) &&
+        size(c.args.filter(a, a == '--image')) <= 1 &&
+        (!c.args.exists(a, a == '--image') ||
+        (c.args.indexOf('--image') + 1 < size(c.args) &&
+        c.args[c.args.indexOf('--image') + 1] == {{ .Values.aicr.image | quote }}))))
+      message: the snapshot agent runs the pinned AICR image {{ .Values.aicr.image }}
+    - expression: >-
+        request.namespace in variables.serviceAccounts &&
+        has(variables.pod.serviceAccountName) && variables.pod.serviceAccountName == variables.serviceAccounts[request.namespace]
+      message: AICR Jobs run as their namespace's AICR identity
+    - expression: >-
+        request.namespace in variables.commands &&
+        variables.pod.containers.all(c, !has(c.command) && has(c.args) && size(c.args) > 0 &&
+        c.args[0] in variables.commands[request.namespace])
+      message: AICR Jobs run a subcommand allowed in their namespace, with the image's entrypoint
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: aicr-operator-jobs
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+spec:
+  policyName: aicr-operator-jobs
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: aicr-operator-rollout-outcome
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [operator.aicr.run]
+        apiVersions: ["*"]
+        operations: [UPDATE]
+        resources: [runtimerollouts]
+  matchConditions:
+    - name: operator
+      expression: request.userInfo.username == {{ $operator | quote }}
+  validations:
+    - expression: >-
+        !(has(oldObject.metadata.labels) && 'operator.aicr.run/outcome' in oldObject.metadata.labels) ||
+        (has(object.metadata.labels) && 'operator.aicr.run/outcome' in object.metadata.labels &&
+        object.metadata.labels['operator.aicr.run/outcome'] == oldObject.metadata.labels['operator.aicr.run/outcome'])
+      message: a rollout's outcome label never changes once set
+    - expression: >-
+        !(has(oldObject.metadata.annotations) && 'operator.aicr.run/evidence' in oldObject.metadata.annotations) ||
+        (has(object.metadata.annotations) && 'operator.aicr.run/evidence' in object.metadata.annotations &&
+        object.metadata.annotations['operator.aicr.run/evidence'] == oldObject.metadata.annotations['operator.aicr.run/evidence'])
+      message: a rollout's evidence annotation never changes once set
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: aicr-operator-rollout-outcome
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+spec:
+  policyName: aicr-operator-rollout-outcome
+  validationActions: [Deny]
+---
+# The operator changes a ClusterRuntime only to add or remove its cleanup
+# finalizer: never its spec, labels, annotations
+# or anyone else's finalizer.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: aicr-operator-runtime
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [operator.aicr.run]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [clusterruntimes]
+  matchConditions:
+    - name: operator
+      expression: request.userInfo.username == {{ $operator | quote }}
+  validations:
+    - expression: request.operation == 'UPDATE'
+      message: the operator never creates a ClusterRuntime
+    - expression: >-
+        object.spec == oldObject.spec &&
+        (has(object.metadata.labels) == has(oldObject.metadata.labels) &&
+        (!has(object.metadata.labels) || object.metadata.labels == oldObject.metadata.labels)) &&
+        (has(object.metadata.annotations) == has(oldObject.metadata.annotations) &&
+        (!has(object.metadata.annotations) || object.metadata.annotations == oldObject.metadata.annotations))
+      message: the operator changes a ClusterRuntime only through its cleanup finalizer
+    - expression: >-
+        (!has(object.metadata.finalizers) || object.metadata.finalizers.all(f, f == 'operator.aicr.run/cleanup' ||
+        (has(oldObject.metadata.finalizers) && f in oldObject.metadata.finalizers))) &&
+        (!has(oldObject.metadata.finalizers) || oldObject.metadata.finalizers.all(f, f == 'operator.aicr.run/cleanup' ||
+        (has(object.metadata.finalizers) && f in object.metadata.finalizers)))
+      message: the operator adds or removes only its own finalizer
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: aicr-operator-runtime
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+spec:
+  policyName: aicr-operator-runtime
+  validationActions: [Deny]

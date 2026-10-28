@@ -1,0 +1,572 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: clusterruntimes.operator.aicr.run
+spec:
+  group: operator.aicr.run
+  names:
+    kind: ClusterRuntime
+    listKind: ClusterRuntimeList
+    plural: clusterruntimes
+    shortNames:
+    - aicrrt
+    singular: clusterruntime
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.intent
+      name: Intent
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .status.activePlanDigest
+      name: Active
+      priority: 1
+      type: string
+    - jsonPath: .status.rollout
+      name: Rollout
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ClusterRuntime is the administrator's desired GPU runtime for the cluster.
+          It is a singleton named "cluster" and holds intent and policy only;
+          infrastructure is installation configuration.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ClusterRuntimeSpec is the desired runtime intent and policy.
+            properties:
+              adoption:
+                description: Adoption names an earlier runtime whose engine objects
+                  to adopt.
+                properties:
+                  runtimeUID:
+                    description: RuntimeUID is the UID of the runtime whose objects
+                      to adopt.
+                    pattern: ^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$
+                    type: string
+                type: object
+              configuration:
+                description: |-
+                  Configuration is cluster-specific desired state AICR records in the
+                  recipe without a criteria axis, such as the GKE TCPXO interface mapping.
+                properties:
+                  gke:
+                    description: GKE is configuration for GKE clusters.
+                    properties:
+                      tcpxoInterfaces:
+                        description: |-
+                          TCPXOInterfaces binds each GPU NIC to the GKE Device Network
+                          provisioning attached to it. AICR requires it for recipes that ship
+                          the GPUDirect-TCPXO training runtime: on a3-megagpu-8g, eth1 to eth8.
+                        items:
+                          description: NetworkInterfaceMapping binds a guest network
+                            interface to a GKE Network.
+                          properties:
+                            interfaceName:
+                              description: InterfaceName is the guest interface, for
+                                example eth1.
+                              maxLength: 15
+                              minLength: 1
+                              type: string
+                            network:
+                              description: Network is the GKE Device Network object
+                                name.
+                              maxLength: 63
+                              minLength: 1
+                              type: string
+                          required:
+                          - interfaceName
+                          - network
+                          type: object
+                        maxItems: 16
+                        minItems: 1
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - interfaceName
+                        x-kubernetes-list-type: map
+                    required:
+                    - tcpxoInterfaces
+                    type: object
+                type: object
+              criteria:
+                description: Criteria are administrator-declared facts that must agree
+                  with discovery.
+                properties:
+                  accelerator:
+                    maxLength: 63
+                    type: string
+                  os:
+                    maxLength: 63
+                    type: string
+                  service:
+                    maxLength: 63
+                    type: string
+                type: object
+              deletionPolicy:
+                default: Orphan
+                description: DeletionPolicy decides what deleting the runtime does
+                  to the stack.
+                enum:
+                - Orphan
+                - Delete
+                type: string
+              intent:
+                description: Intent is the AICR criteria intent, for example "training".
+                maxLength: 63
+                minLength: 1
+                type: string
+              overrides:
+                description: |-
+                  Overrides are typed values passed to AICR's render. Each
+                  (component, path) appears at most once.
+                items:
+                  description: Override is one typed value passed to AICR's render.
+                  properties:
+                    additive:
+                      description: |-
+                        Additive allows a path absent from both the base render and the chart
+                        defaults (typo protection opt-out).
+                      type: boolean
+                    component:
+                      description: Component is the AICR component the value belongs
+                        to.
+                      maxLength: 63
+                      minLength: 1
+                      type: string
+                    path:
+                      description: Path is the dotted values path within the component.
+                      maxLength: 256
+                      minLength: 1
+                      type: string
+                    value:
+                      description: Value is any JSON value; its encoded size is bounded
+                        at reconcile time.
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                  - component
+                  - path
+                  - value
+                  type: object
+                maxItems: 64
+                type: array
+                x-kubernetes-list-map-keys:
+                - component
+                - path
+                x-kubernetes-list-type: map
+              paused:
+                description: Paused stops new rollout steps; observation continues.
+                type: boolean
+              placement:
+                description: Placement maps to AICR's system and accelerated scheduling
+                  flags.
+                properties:
+                  accelerated:
+                    description: NodeGroupPlacement selects and tolerates one node
+                      group.
+                    properties:
+                      nodeSelector:
+                        additionalProperties:
+                          description: LabelValue is a Kubernetes label value.
+                          maxLength: 63
+                          type: string
+                        description: NodeSelector selects the group's nodes.
+                        maxProperties: 16
+                        minProperties: 1
+                        type: object
+                      tolerations:
+                        description: Tolerations let the group's workloads run on
+                          tainted nodes.
+                        items:
+                          description: |-
+                            The pod this Toleration is attached to tolerates any taint that matches
+                            the triple <key,value,effect> using the matching operator <operator>.
+                          properties:
+                            effect:
+                              description: |-
+                                Effect indicates the taint effect to match. Empty means match all taint effects.
+                                When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
+                              type: string
+                            key:
+                              description: |-
+                                Key is the taint key that the toleration applies to. Empty means match all taint keys.
+                                If the key is empty, operator must be Exists; this combination means to match all values and all keys.
+                              type: string
+                            operator:
+                              description: |-
+                                Operator represents a key's relationship to the value.
+                                Valid operators are Exists, Equal, Lt, and Gt. Defaults to Equal.
+                                Exists is equivalent to wildcard for value, so that a pod can
+                                tolerate all taints of a particular category.
+                                Lt and Gt perform numeric comparisons (requires feature gate TaintTolerationComparisonOperators).
+                              type: string
+                            tolerationSeconds:
+                              description: |-
+                                TolerationSeconds represents the period of time the toleration (which must be
+                                of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
+                                it is not set, which means tolerate the taint forever (do not evict). Zero and
+                                negative values will be treated as 0 (evict immediately) by the system.
+                              format: int64
+                              type: integer
+                            value:
+                              description: |-
+                                Value is the taint value the toleration matches to.
+                                If the operator is Exists, the value should be empty, otherwise just a regular string.
+                              type: string
+                          type: object
+                        maxItems: 16
+                        type: array
+                        x-kubernetes-list-type: atomic
+                    required:
+                    - nodeSelector
+                    type: object
+                  system:
+                    description: NodeGroupPlacement selects and tolerates one node
+                      group.
+                    properties:
+                      nodeSelector:
+                        additionalProperties:
+                          description: LabelValue is a Kubernetes label value.
+                          maxLength: 63
+                          type: string
+                        description: NodeSelector selects the group's nodes.
+                        maxProperties: 16
+                        minProperties: 1
+                        type: object
+                      tolerations:
+                        description: Tolerations let the group's workloads run on
+                          tainted nodes.
+                        items:
+                          description: |-
+                            The pod this Toleration is attached to tolerates any taint that matches
+                            the triple <key,value,effect> using the matching operator <operator>.
+                          properties:
+                            effect:
+                              description: |-
+                                Effect indicates the taint effect to match. Empty means match all taint effects.
+                                When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
+                              type: string
+                            key:
+                              description: |-
+                                Key is the taint key that the toleration applies to. Empty means match all taint keys.
+                                If the key is empty, operator must be Exists; this combination means to match all values and all keys.
+                              type: string
+                            operator:
+                              description: |-
+                                Operator represents a key's relationship to the value.
+                                Valid operators are Exists, Equal, Lt, and Gt. Defaults to Equal.
+                                Exists is equivalent to wildcard for value, so that a pod can
+                                tolerate all taints of a particular category.
+                                Lt and Gt perform numeric comparisons (requires feature gate TaintTolerationComparisonOperators).
+                              type: string
+                            tolerationSeconds:
+                              description: |-
+                                TolerationSeconds represents the period of time the toleration (which must be
+                                of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
+                                it is not set, which means tolerate the taint forever (do not evict). Zero and
+                                negative values will be treated as 0 (evict immediately) by the system.
+                              format: int64
+                              type: integer
+                            value:
+                              description: |-
+                                Value is the taint value the toleration matches to.
+                                If the operator is Exists, the value should be empty, otherwise just a regular string.
+                              type: string
+                          type: object
+                        maxItems: 16
+                        type: array
+                        x-kubernetes-list-type: atomic
+                    required:
+                    - nodeSelector
+                    type: object
+                required:
+                - accelerated
+                - system
+                type: object
+                x-kubernetes-validations:
+                - message: system and accelerated node selectors must differ
+                  rule: self.system.nodeSelector != self.accelerated.nodeSelector
+              platform:
+                description: Platform is the optional AICR criteria platform, for
+                  example "kubeflow".
+                maxLength: 63
+                type: string
+              profile:
+                description: Profile is the optional AICR configuration profile.
+                maxLength: 63
+                type: string
+              rollout:
+                default:
+                  actionTimeout: 30m
+                  deadline: 6h
+                  stabilizationWindow: 10m
+                description: Rollout bounds stabilization, each step and the whole
+                  rollout.
+                properties:
+                  actionTimeout:
+                    default: 30m
+                    description: ActionTimeout bounds each step.
+                    maxLength: 32
+                    type: string
+                  deadline:
+                    default: 6h
+                    description: Deadline bounds the whole rollout.
+                    maxLength: 32
+                    type: string
+                  stabilizationWindow:
+                    default: 10m
+                    description: StabilizationWindow is how long a new plan must exist
+                      before a rollout.
+                    maxLength: 32
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: stabilizationWindow must not be negative
+                  rule: duration(self.stabilizationWindow) >= duration('0s')
+                - message: actionTimeout and deadline must be positive
+                  rule: duration(self.actionTimeout) > duration('0s') && duration(self.deadline)
+                    > duration('0s')
+                - message: actionTimeout must not exceed deadline
+                  rule: duration(self.actionTimeout) <= duration(self.deadline)
+              selection:
+                default:
+                  policy: Automatic
+                description: Selection chooses between the newest resolved plan and
+                  a pinned one.
+                properties:
+                  pinnedPlanDigest:
+                    description: PinnedPlanDigest is the desiredStateDigest of the
+                      plan to hold.
+                    pattern: ^(sha256:[a-f0-9]{64})?$
+                    type: string
+                  policy:
+                    default: Automatic
+                    description: SelectionPolicy chooses the target plan.
+                    enum:
+                    - Automatic
+                    - Pinned
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: pinnedPlanDigest is required when, and only when, policy
+                    is Pinned
+                  rule: (self.policy == 'Pinned') == (has(self.pinnedPlanDigest) &&
+                    size(self.pinnedPlanDigest) > 0)
+              suspendEngine:
+                description: SuspendEngine stops automated engine syncs and drift
+                  repair; it never deletes.
+                type: boolean
+              validation:
+                default:
+                  deployment: Required
+                description: Validation selects whether AICR deployment validation
+                  gates promotion.
+                properties:
+                  deployment:
+                    default: Required
+                    description: DeploymentValidation selects AICR deployment validation.
+                    enum:
+                    - Required
+                    - Disabled
+                    type: string
+                type: object
+            required:
+            - intent
+            - placement
+            type: object
+          status:
+            description: |-
+              ClusterRuntimeStatus holds observations rebuilt from specs, plans and live
+              objects. It never holds a snapshot, values or credentials.
+            properties:
+              activePlanDigest:
+                description: ActivePlanDigest is the desiredStateDigest of the active
+                  plan.
+                maxLength: 71
+                type: string
+              aicr:
+                description: AICRStatus is the AICR release the image reported.
+                properties:
+                  image:
+                    maxLength: 512
+                    type: string
+                  version:
+                    maxLength: 64
+                    type: string
+                type: object
+              candidatePlanDigest:
+                description: CandidatePlanDigest is the desiredStateDigest of the
+                  newest resolved plan.
+                maxLength: 71
+                type: string
+              conditions:
+                description: |-
+                  Conditions follow kstatus. The resolver owns only Resolved; the rollout
+                  controller owns every other type. Each controller applies only its own.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                maxItems: 16
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              discovery:
+                description: DiscoveryStatus summarizes the latest discovery.
+                properties:
+                  acceleratedNodes:
+                    format: int32
+                    type: integer
+                  criteria:
+                    description: ResolvedCriteria are the criteria the recipe was
+                      resolved with.
+                    properties:
+                      accelerator:
+                        maxLength: 63
+                        type: string
+                      intent:
+                        maxLength: 63
+                        type: string
+                      os:
+                        maxLength: 63
+                        type: string
+                      platform:
+                        maxLength: 63
+                        type: string
+                      service:
+                        maxLength: 63
+                        type: string
+                    type: object
+                  snapshot:
+                    description: SnapshotRef points at the AICR snapshot used for
+                      resolution.
+                    properties:
+                      configMap:
+                        maxLength: 253
+                        type: string
+                      digest:
+                        maxLength: 71
+                        type: string
+                      observedAt:
+                        format: date-time
+                        type: string
+                    type: object
+                  systemNodes:
+                    format: int32
+                    type: integer
+                type: object
+              inputDigest:
+                description: |-
+                  InputDigest is the resolution inputDigest the candidate plan was
+                  resolved for. It is a cache: after its loss the resolver resolves
+                  again and arrives at the same plan. Owner: resolver.
+                maxLength: 71
+                type: string
+              observedGeneration:
+                format: int64
+                type: integer
+              rollout:
+                description: Rollout names the rollout in progress, if any.
+                maxLength: 253
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: ClusterRuntime is a singleton named 'cluster'
+          rule: self.metadata.name == 'cluster'
+    served: true
+    storage: true
+    subresources:
+      status: {}

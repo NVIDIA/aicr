@@ -1,0 +1,83 @@
+{
+  "from": "/v10/recipe-h100-eks-ubuntu-training-kubeflow.json",
+  "to": "/w/recipe-h100-eks-ubuntu-training-kubeflow.json",
+  "deployer": "argocd",
+  "objectNamesCompared": false,
+  "objectNamesSkipped": "a recipe file records its values by reference, not by value, so it does not state the object names it deployed with. Compare against the bundle directory instead",
+  "components": [
+    {
+      "component": "gpu-operator",
+      "change": "version",
+      "from": "v26.7.1",
+      "to": "v26.7.2",
+      "verdict": "safe",
+      "notes": "1 patch, verified",
+      "reason": "recorded",
+      "explanation": "recorded safe: the record covering 26.7.2 describes the move from v26.7.1 to v26.7.2, verified by \"Live Helm upgrade on an EKS GB300 cluster (2x p6e-gb300r.36xlarge, k8s 1.35.6), 2026-10-13: v26.7.1 to v26.7.2 with DRA driver 0.5.0. Both nodes went from upgrade-required straight to pod-restart-required, the driver manager kept the loaded driver and the driver container did a userspace-only install; a GPU pod on each node kept running with no restart, and ClusterPolicy returned to ready. A two-node ComputeDomain then came up Ready with IMEX channels injected. Upstream v26.7.2 milestone and chart diff: no ClusterPolicy or computedomains CRD change.\"",
+      "jump": "1 patch",
+      "covers": "1 patch",
+      "breaking": false,
+      "downgrade": false,
+      "summary": "Patch release. The chart stamps its version (helm.sh/chart) on every operand pod template, so the driver DaemonSet changes. Its install config digest does not, so with driver.upgradePolicy.autoUpgrade the operator cordons each node in turn and restarts the driver pod in place without draining or evicting GPU workloads; a node missing the digest or waiting for safe driver load takes the full, evicting flow.",
+      "failsRun": false
+    },
+    {
+      "component": "nodewright-operator",
+      "change": "version",
+      "from": "v0.19.0",
+      "to": "v0.20.0",
+      "verdict": "safe",
+      "notes": "1 minor, verified",
+      "reason": "recorded",
+      "explanation": "recorded safe: the record covering 0.20.0 describes the move from v0.19.0 to v0.20.0, verified by \"Chart diff v0.19.1 to v0.20.0: both CRDs change field descriptions only, values move the operator image to v0.20.0 and the default agent to v7.0.0, and the Deployment gains a preferred pod anti-affinity. The KWOK Tier 1 and Tier 2 lanes on NVIDIA/aicr#3210 installed v0.20.0 and passed scheduling validation. Upstream release note operator/v0.20.0 for the behavior changes.\"",
+      "jump": "1 minor",
+      "covers": "1 minor",
+      "breaking": true,
+      "downgrade": false,
+      "summary": "The operator now exits at startup on a runtime-required taint key with a DNS prefix or over 53 characters, and no longer uncordons a node it did not cordon. Such a key already stalled every NodeWright on older versions once autoTaintNewNodes, on by default in AICR's tuning, tainted a node, and aicr bundle now rejects it, so a bundle that builds carries a valid key. Nothing to change on upgrade.",
+      "failsRun": false
+    },
+    {
+      "component": "nvsentinel",
+      "change": "version",
+      "from": "v1.25.0",
+      "to": "v1.28.0",
+      "verdict": "manual",
+      "notes": "3 minors, 3 steps",
+      "reason": "recorded",
+      "explanation": "recorded manual: the record covering 1.28.0 describes the move from v1.25.0 to v1.28.0. Follow the steps below, then apply",
+      "jump": "3 minors",
+      "covers": "3 minors",
+      "breaking": false,
+      "downgrade": false,
+      "summary": "From v1.27.0 janitor records in GPUReset status.managedServices which GPU Operator services it stopped before a reset, and restores only those. The v1.26.0 GPUReset CRD does not declare the field, so the API server prunes it; janitor then rewrites the record every second and the reset never reaches its Job, leaving the node cordoned. It matters only where janitor runs, which is the nvsentinel-remediation step. On the observe step, the quarantine annotations v1.26.0 wrote carry no dry-run marker, so the new release reads each once as a manual uncordon and cancels the faults observed before the upgrade; and v1.26.0's dry run fed the circuit breaker, so a trip it persisted halts fault-quarantine once the cluster moves to a live step.",
+      "precondition": "Where janitor runs (kubectl -n nvsentinel get deployment janitor finds it, as on the nvsentinel-remediation step), no GPUReset is in progress: kubectl get gpuresets.janitor.dgxc.nvidia.com -o jsonpath='{range .items[*]}{.metadata.name}{\" \"}{.status.conditions[?(@.type==\"Complete\")].status}{\"\\n\"}{end}' prints True for every GPUReset.",
+      "steps": [
+        {
+          "id": "apply",
+          "description": "Re-run install.sh (helm), or commit the regenerated bundle and reconcile or sync it (flux, argocd, argocd-helm).",
+          "reason": "These deployers apply the chart's CRDs themselves, then roll the DaemonSets and Deployments to v1.28.0."
+        },
+        {
+          "id": "reset-breaker",
+          "description": "If the cluster ran the observe step before v1.27.0 and this bundle moves it to a live step (quarantine or remediation), check kubectl get cm circuit-breaker -n nvsentinel -o jsonpath='{.data.status}'. If it prints TRIPPED, reset it with upstream's circuit-breaker runbook (docs/runbooks/circuit-breaker.md at v1.28.0), which patches the ConfigMap to CLOSED and restarts fault-quarantine.",
+          "reason": "v1.26.0's dry run fed the breaker, and a trip it persisted halts fault-quarantine at its first live start, so no fault is quarantined or released until the breaker is reset."
+        },
+        {
+          "id": "verify",
+          "description": "If janitor runs (kubectl -n nvsentinel get deployment janitor), kubectl get crd gpuresets.janitor.dgxc.nvidia.com -o jsonpath='{.spec.versions[0].schema.openAPIV3Schema.properties.status.properties.managedServices.type}' prints object. Without janitor the chart renders no GPUReset CRD and there is nothing to check.",
+          "reason": "Confirms the deployer applied the new CRD; the stall shows only when a reset runs."
+        }
+      ],
+      "failsRun": true
+    }
+  ],
+  "summary": {
+    "components": 3,
+    "failing": 1
+  },
+  "atRisk": {
+    "scanned": false,
+    "reason": "no cluster access requested"
+  }
+}

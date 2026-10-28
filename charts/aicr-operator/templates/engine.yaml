@@ -1,0 +1,65 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+{{/*
+Argo CD objects: the project every owned Application uses and the
+runtime registry's repo-creds with the aws provider. Nothing is written to
+argocd-cm, whose keys every Argo CD user shares. The project and repo-creds
+are kept on uninstall, so owned Applications stay valid.
+*/}}
+{{- $registry := .Values.registry.repository }}
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: {{ .Values.engine.project }}
+  namespace: {{ .Values.engine.namespace }}
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+  annotations:
+    {{- include "aicr-operator.keep" . | nindent 4 }}
+spec:
+  description: GPU stack releases of the AICR Operator
+  sourceRepos:
+    - {{ $registry }}/charts/*
+    - {{ $registry }}/wrappers/*
+  destinations:
+    {{- range .Values.namespaces.components }}
+    - server: https://kubernetes.default.svc
+      namespace: {{ .name }}
+    {{- else }}
+    []
+    {{- end }}
+  # The GPU stack installs CRDs, cluster roles, webhooks and device classes.
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+{{- if eq .Values.registry.auth.provider "aws" }}
+---
+# The operator writes the ECR token into this Secret and refreshes it every
+# 6 hours; the chart never carries a credential.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.registry.auth.repoCredsSecret }}
+  namespace: {{ .Values.engine.namespace }}
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+    argocd.argoproj.io/secret-type: repo-creds
+  annotations:
+    {{- include "aicr-operator.keep" . | nindent 4 }}
+type: Opaque
+stringData:
+  type: oci
+  url: {{ $registry }}
+{{- end }}

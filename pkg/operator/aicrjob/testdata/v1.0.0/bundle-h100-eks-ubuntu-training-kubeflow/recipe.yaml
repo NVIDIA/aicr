@@ -1,0 +1,2271 @@
+apiVersion: aicr.run/v1
+componentRefs:
+  - chart: aws-ebs-csi-driver
+    healthCheckAsserts: |
+      # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+      #
+      # Licensed under the Apache License, Version 2.0 (the "License");
+      # you may not use this file except in compliance with the License.
+      # You may obtain a copy of the License at
+      #
+      #     http://www.apache.org/licenses/LICENSE-2.0
+      #
+      # Unless required by applicable law or agreed to in writing, software
+      # distributed under the License is distributed on an "AS IS" BASIS,
+      # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      # See the License for the specific language governing permissions and
+      # limitations under the License.
+
+      # AWS EBS CSI Driver Health Check
+      #
+      # Validates that the AWS EBS CSI Driver is running and healthy in the
+      # kube-system namespace. Checks that the ebs-csi-controller deployment has
+      # at least one available replica and that no EBS CSI driver pods (selected
+      # by label) are stuck in Pending, Failed, or Unknown phases. Label selectors
+      # are used because kube-system is a shared namespace.
+      apiVersion: chainsaw.kyverno.io/v1alpha1
+      kind: Test
+      metadata:
+        name: aws-ebs-csi-driver-health-check
+      spec:
+        timeouts:
+          assert: 5m
+        steps:
+          - name: validate-deployment-exists
+            try:
+              # Guard against vacuous pass: verify the ebs-csi-controller
+              # deployment exists and has at least one ready replica.
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: ebs-csi-controller
+                      namespace: kube-system
+                    status:
+                      (availableReplicas > `0`): true
+          - name: validate-all-pods-healthy
+            try:
+              # Assert no EBS CSI driver pods are in unhealthy phases
+              # (Pending / Failed / Unknown) or stuck in Running phase
+              # with a known-bad container-waiting reason
+              # (CrashLoopBackOff, ImagePullBackOff, ErrImagePull,
+              # CreateContainerConfigError). Phase-only filtering misses
+              # CrashLoopBackOff because such pods typically remain in
+              # Running phase with an unhealthy container.
+              # Uses label selector because kube-system is a shared namespace.
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: kube-system
+                      labels:
+                        app.kubernetes.io/name: aws-ebs-csi-driver
+                    status:
+                      phase: Pending
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: kube-system
+                      labels:
+                        app.kubernetes.io/name: aws-ebs-csi-driver
+                    status:
+                      phase: Failed
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: kube-system
+                      labels:
+                        app.kubernetes.io/name: aws-ebs-csi-driver
+                    status:
+                      phase: Unknown
+              # JMESPath projection (not single-element match): kyverno-json's
+              # sliceNode.Assert gates on exact slice length before per-element
+              # comparison, so a `containerStatuses: - state: ...` shape only
+              # matches single-container pods and silently passes sidecars. Use
+              # `containerStatuses[?...] | length(@) > 0` to fire on any
+              # container at any index. Parallel initContainerStatuses block
+              # below catches init-container failures (invisible to
+              # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: kube-system
+                      labels:
+                        app.kubernetes.io/name: aws-ebs-csi-driver
+                    status:
+                      ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: kube-system
+                      labels:
+                        app.kubernetes.io/name: aws-ebs-csi-driver
+                    status:
+                      ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+    name: aws-ebs-csi-driver
+    namespace: kube-system
+    source: https://kubernetes-sigs.github.io/aws-ebs-csi-driver
+    type: Helm
+    valuesFile: components/aws-ebs-csi-driver/values.yaml
+    version: 2.59.0
+  - chart: aws-efa-k8s-device-plugin
+    healthCheckAsserts: |
+      # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+      #
+      # Licensed under the Apache License, Version 2.0 (the "License");
+      # you may not use this file except in compliance with the License.
+      # You may obtain a copy of the License at
+      #
+      #     http://www.apache.org/licenses/LICENSE-2.0
+      #
+      # Unless required by applicable law or agreed to in writing, software
+      # distributed under the License is distributed on an "AS IS" BASIS,
+      # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      # See the License for the specific language governing permissions and
+      # limitations under the License.
+
+      # AWS EFA Health Check
+      #
+      # Validates that the AWS EFA K8s device plugin is running and healthy
+      # in the kube-system namespace. The DaemonSet must roll out fully —
+      # numberReady == desiredNumberScheduled (with desiredNumberScheduled > 0
+      # as a guard against vacuous pass on a 0-node selector). The previous
+      # check gated only on numberReady > 0, which passed on partial
+      # failures; see #1222 / recipes/checks/nfd/health-check.yaml for the
+      # same rationale. updatedNumberScheduled/observedGeneration additionally
+      # guard against a stale rollout: a node still running the previous
+      # revision's pod also reports numberReady, so that alone can't
+      # distinguish it from a fully current rollout.
+      # Container-state errors (CrashLoopBackOff, ImagePullBackOff,
+      # ErrImagePull, CreateContainerConfigError) are label-scoped because
+      # kube-system is a shared namespace.
+      apiVersion: chainsaw.kyverno.io/v1alpha1
+      kind: Test
+      metadata:
+        name: aws-efa-health-check
+      spec:
+        timeouts:
+          assert: 5m
+        steps:
+          - name: validate-daemonset-fully-rolled-out
+            try:
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: DaemonSet
+                    metadata:
+                      name: aws-efa-k8s-device-plugin
+                      namespace: kube-system
+                    ((status.desiredNumberScheduled || `0`) > `0`): true
+                    ((status.numberReady || `0`) == status.desiredNumberScheduled): true
+                    ((status.updatedNumberScheduled || `0`) == status.desiredNumberScheduled): true
+                    ((status.observedGeneration || `0`) == metadata.generation): true
+          - name: validate-all-pods-healthy
+            try:
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: kube-system
+                      labels:
+                        app.kubernetes.io/name: aws-efa-k8s-device-plugin
+                    status:
+                      phase: Pending
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: kube-system
+                      labels:
+                        app.kubernetes.io/name: aws-efa-k8s-device-plugin
+                    status:
+                      phase: Failed
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: kube-system
+                      labels:
+                        app.kubernetes.io/name: aws-efa-k8s-device-plugin
+                    status:
+                      phase: Unknown
+              # JMESPath projection (not single-element match): kyverno-json's
+              # sliceNode.Assert gates on exact slice length before per-element
+              # comparison, so a `containerStatuses: - state: ...` shape only
+              # matches single-container pods and silently passes sidecars. Use
+              # `containerStatuses[?...] | length(@) > 0` to fire on any
+              # container at any index. Parallel initContainerStatuses block
+              # below catches init-container failures (invisible to
+              # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: kube-system
+                      labels:
+                        app.kubernetes.io/name: aws-efa-k8s-device-plugin
+                    status:
+                      ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: kube-system
+                      labels:
+                        app.kubernetes.io/name: aws-efa-k8s-device-plugin
+                    status:
+                      ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+    name: aws-efa
+    namespace: kube-system
+    source: https://aws.github.io/eks-charts
+    type: Helm
+    valuesFile: components/aws-efa/values.yaml
+    version: v0.5.29
+  - chart: cert-manager
+    healthCheckAsserts: |
+      # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+      #
+      # Licensed under the Apache License, Version 2.0 (the "License");
+      # you may not use this file except in compliance with the License.
+      # You may obtain a copy of the License at
+      #
+      #     http://www.apache.org/licenses/LICENSE-2.0
+      #
+      # Unless required by applicable law or agreed to in writing, software
+      # distributed under the License is distributed on an "AS IS" BASIS,
+      # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      # See the License for the specific language governing permissions and
+      # limitations under the License.
+
+      # Cert Manager Health Check
+      #
+      # Validates that cert-manager is running and healthy in the cert-manager
+      # namespace. The chart deploys three Deployments — the controller
+      # (cert-manager), the CA injector (cert-manager-cainjector), and the
+      # webhook (cert-manager-webhook) — all of which must be available for
+      # the operator to issue / inject / validate certificates. The previous
+      # check only asserted the controller; this check covers all three to
+      # avoid silently passing while the webhook is down (which would block
+      # every Certificate/Issuer CR admission).
+      #
+      # Also asserts the three core CRDs are Established=True so the
+      # apiserver will accept CRs of those kinds (per #1222 / #660).
+      apiVersion: chainsaw.kyverno.io/v1alpha1
+      kind: Test
+      metadata:
+        name: cert-manager-health-check
+      spec:
+        timeouts:
+          assert: 5m
+        steps:
+          - name: validate-crds-established
+            try:
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: certificates.cert-manager.io
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: issuers.cert-manager.io
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: clusterissuers.cert-manager.io
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+          - name: validate-controller-deployment
+            try:
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: cert-manager
+                      namespace: cert-manager
+                    status:
+                      (availableReplicas > `0`): true
+          - name: validate-cainjector-deployment
+            try:
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: cert-manager-cainjector
+                      namespace: cert-manager
+                    status:
+                      (availableReplicas > `0`): true
+          - name: validate-webhook-deployment
+            try:
+              # The webhook must be ready before any Certificate / Issuer CR
+              # can be admitted. Without this assert, a healthy controller
+              # with a dead webhook would still pass the check while the
+              # cluster silently rejects every cert-manager CR.
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: cert-manager-webhook
+                      namespace: cert-manager
+                    status:
+                      (availableReplicas > `0`): true
+          - name: validate-all-pods-healthy
+            try:
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: cert-manager
+                    status:
+                      phase: Pending
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: cert-manager
+                    status:
+                      phase: Failed
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: cert-manager
+                    status:
+                      phase: Unknown
+              # JMESPath projection (not single-element match): kyverno-json's
+              # sliceNode.Assert gates on exact slice length before per-element
+              # comparison, so a `containerStatuses: - state: ...` shape only
+              # matches single-container pods and silently passes sidecars. Use
+              # `containerStatuses[?...] | length(@) > 0` to fire on any
+              # container at any index. Parallel initContainerStatuses block
+              # below catches init-container failures (invisible to
+              # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: cert-manager
+                    status:
+                      ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: cert-manager
+                    status:
+                      ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+    name: cert-manager
+    namespace: cert-manager
+    source: https://charts.jetstack.io
+    type: Helm
+    valuesFile: components/cert-manager/values.yaml
+    version: v1.20.2
+  - chart: gpu-operator
+    dependencyRefs:
+      - nfd
+      - cert-manager
+      - kube-prometheus-stack
+      - nodewright-customizations
+    healthCheckAsserts: |
+      # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+      #
+      # Licensed under the Apache License, Version 2.0 (the "License");
+      # you may not use this file except in compliance with the License.
+      # You may obtain a copy of the License at
+      #
+      #     http://www.apache.org/licenses/LICENSE-2.0
+      #
+      # Unless required by applicable law or agreed to in writing, software
+      # distributed under the License is distributed on an "AS IS" BASIS,
+      # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      # See the License for the specific language governing permissions and
+      # limitations under the License.
+
+      # GPU Operator Health Check
+      #
+      # Validates the GPU operator stack:
+      # 1. The gpu-operator Deployment has at least one available replica.
+      # 2. The clusterpolicies.nvidia.com CRD is Established (apiserver will
+      #    accept the singleton ClusterPolicy CR).
+      # 3. The ClusterPolicy singleton named "cluster-policy" has reconciled
+      #    to status.state == "ready" — this is the deepest signal that the
+      #    full GPU stack (driver, toolkit, cuda, plugin DaemonSets, validators)
+      #    is healthy. Migrates the verifyClusterPolicyReady Go check that
+      #    PR #1235 task 7 deferred for assertion-equivalence proof.
+      # 4. No pods in unhealthy phases or stuck container-waiting states.
+      #
+      # The nvidia-operator-validator DaemonSet runs 4 sequential init
+      # containers (driver, toolkit, cuda, plugin) before reaching Running;
+      # the ClusterPolicy state assertion is the canonical post-reconcile
+      # signal that all four passed.
+      apiVersion: chainsaw.kyverno.io/v1alpha1
+      kind: Test
+      metadata:
+        name: gpu-operator-health-check
+      spec:
+        timeouts:
+          assert: 5m
+        steps:
+          - name: validate-cluster-policy-crd-established
+            try:
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: clusterpolicies.nvidia.com
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+          - name: validate-deployment-exists
+            try:
+              # Guard against vacuous pass on empty namespace: verify the
+              # gpu-operator deployment exists and has at least one ready replica.
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: gpu-operator
+                      namespace: gpu-operator
+                    status:
+                      (availableReplicas > `0`): true
+          - name: validate-cluster-policy-ready
+            try:
+              # Deepest GPU readiness signal: ClusterPolicy singleton has
+              # reconciled to state=ready. Replaces the deferred
+              # verifyClusterPolicyReady Go check from PR #1235 task 7.
+              - assert:
+                  resource:
+                    apiVersion: nvidia.com/v1
+                    kind: ClusterPolicy
+                    metadata:
+                      name: cluster-policy
+                    status:
+                      state: ready
+          - name: validate-all-pods-healthy
+            try:
+              # Phase-based errors: Pending/Failed/Unknown.
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: gpu-operator
+                    status:
+                      phase: Pending
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: gpu-operator
+                    status:
+                      phase: Failed
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: gpu-operator
+                    status:
+                      phase: Unknown
+              # Container-state errors: pods stuck in Running phase with a
+              # container in a known-bad waiting reason. Phase filtering alone
+              # misses CrashLoopBackOff/ImagePullBackOff because those pods
+              # typically remain in Running phase with unhealthy containers.
+              # JMESPath projection (not single-element match): kyverno-json's
+              # sliceNode.Assert gates on exact slice length before per-element
+              # comparison, so a `containerStatuses: - state: ...` shape only
+              # matches single-container pods and silently passes sidecars. Use
+              # `containerStatuses[?...] | length(@) > 0` to fire on any
+              # container at any index. Parallel initContainerStatuses block
+              # below catches init-container failures (invisible to
+              # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: gpu-operator
+                    status:
+                      ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: gpu-operator
+                    status:
+                      ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+    name: gpu-operator
+    namespace: gpu-operator
+    overrides:
+      cdi:
+        enabled: true
+      gdrcopy:
+        enabled: true
+    source: https://helm.ngc.nvidia.com/nvidia
+    type: Helm
+    valuesFile: components/gpu-operator/values-eks-training.yaml
+    version: v26.7.1
+  - chart: k8s-ephemeral-storage-metrics
+    dependencyRefs:
+      - kube-prometheus-stack
+      - prometheus-operator-crds
+    healthCheckAsserts: |
+      # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+      #
+      # Licensed under the Apache License, Version 2.0 (the "License");
+      # you may not use this file except in compliance with the License.
+      # You may obtain a copy of the License at
+      #
+      #     http://www.apache.org/licenses/LICENSE-2.0
+      #
+      # Unless required by applicable law or agreed to in writing, software
+      # distributed under the License is distributed on an "AS IS" BASIS,
+      # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      # See the License for the specific language governing permissions and
+      # limitations under the License.
+
+      # K8s Ephemeral Storage Metrics Health Check
+      #
+      # Validates that the k8s-ephemeral-storage-metrics Deployment is running and
+      # healthy in the monitoring namespace. Checks that the Deployment has at least
+      # one available replica and that no ephemeral storage metrics pods (selected by label)
+      # are stuck in Pending, Failed, or Unknown phases. Label selectors are used
+      # because monitoring is a shared namespace.
+      apiVersion: chainsaw.kyverno.io/v1alpha1
+      kind: Test
+      metadata:
+        name: k8s-ephemeral-storage-metrics-health-check
+      spec:
+        timeouts:
+          assert: 5m
+        steps:
+          - name: validate-deployment-exists
+            try:
+              # Guard against vacuous pass: verify the k8s-ephemeral-storage-metrics
+              # DaemonSet exists and has at least one ready pod.
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: k8s-ephemeral-storage-metrics
+                      namespace: monitoring
+                    status:
+                      (availableReplicas > `0`): true
+          - name: validate-all-pods-healthy
+            try:
+              # Assert no ephemeral storage metrics pods are in unhealthy phases
+              # (Pending / Failed / Unknown) or stuck in Running phase
+              # with a known-bad container-waiting reason
+              # (CrashLoopBackOff, ImagePullBackOff, ErrImagePull,
+              # CreateContainerConfigError). Phase-only filtering misses
+              # CrashLoopBackOff because such pods typically remain in
+              # Running phase with an unhealthy container.
+              # Uses label selector because monitoring is a shared namespace.
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: monitoring
+                      labels:
+                        app.kubernetes.io/name: k8s-ephemeral-storage-metrics
+                    status:
+                      phase: Pending
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: monitoring
+                      labels:
+                        app.kubernetes.io/name: k8s-ephemeral-storage-metrics
+                    status:
+                      phase: Failed
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: monitoring
+                      labels:
+                        app.kubernetes.io/name: k8s-ephemeral-storage-metrics
+                    status:
+                      phase: Unknown
+              # JMESPath projection (not single-element match): kyverno-json's
+              # sliceNode.Assert gates on exact slice length before per-element
+              # comparison, so a `containerStatuses: - state: ...` shape only
+              # matches single-container pods and silently passes sidecars. Use
+              # `containerStatuses[?...] | length(@) > 0` to fire on any
+              # container at any index. Parallel initContainerStatuses block
+              # below catches init-container failures (invisible to
+              # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: monitoring
+                      labels:
+                        app.kubernetes.io/name: k8s-ephemeral-storage-metrics
+                    status:
+                      ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: monitoring
+                      labels:
+                        app.kubernetes.io/name: k8s-ephemeral-storage-metrics
+                    status:
+                      ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+    name: k8s-ephemeral-storage-metrics
+    namespace: monitoring
+    source: https://jmcgrath207.github.io/k8s-ephemeral-storage-metrics/chart
+    type: Helm
+    valuesFile: components/k8s-ephemeral-storage-metrics/values.yaml
+    version: 1.19.2
+  - chart: kai-scheduler
+    dependencyRefs:
+      - gpu-operator
+    healthCheckAsserts: |
+      # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+      #
+      # Licensed under the Apache License, Version 2.0 (the "License");
+      # you may not use this file except in compliance with the License.
+      # You may obtain a copy of the License at
+      #
+      #     http://www.apache.org/licenses/LICENSE-2.0
+      #
+      # Unless required by applicable law or agreed to in writing, software
+      # distributed under the License is distributed on an "AS IS" BASIS,
+      # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      # See the License for the specific language governing permissions and
+      # limitations under the License.
+
+      # KAI Scheduler Health Check
+      #
+      # Validates that the KAI Scheduler is running and healthy in the kai-scheduler
+      # namespace. Checks that the kai-operator deployment has at least one
+      # available replica and that no pods in the namespace are stuck in Pending,
+      # Failed, or Unknown phases.
+      apiVersion: chainsaw.kyverno.io/v1alpha1
+      kind: Test
+      metadata:
+        name: kai-scheduler-health-check
+      spec:
+        timeouts:
+          assert: 5m
+        steps:
+          - name: validate-deployment-exists
+            try:
+              # Guard against vacuous pass on empty namespace: verify the
+              # kai-scheduler deployment exists and has at least one ready replica.
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: kai-operator
+                      namespace: kai-scheduler
+                    status:
+                      (availableReplicas > `0`): true
+          - name: validate-all-pods-healthy
+            try:
+              # Assert no pods are in unhealthy phases (Pending / Failed /
+              # Unknown) or stuck in Running phase with a known-bad
+              # container-waiting reason (CrashLoopBackOff,
+              # ImagePullBackOff, ErrImagePull, CreateContainerConfigError).
+              # Phase-only filtering misses CrashLoopBackOff because such
+              # pods typically remain in Running phase with an unhealthy
+              # container.
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: kai-scheduler
+                    status:
+                      phase: Pending
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: kai-scheduler
+                    status:
+                      phase: Failed
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: kai-scheduler
+                    status:
+                      phase: Unknown
+              # JMESPath projection (not single-element match): kyverno-json's
+              # sliceNode.Assert gates on exact slice length before per-element
+              # comparison, so a `containerStatuses: - state: ...` shape only
+              # matches single-container pods and silently passes sidecars. Use
+              # `containerStatuses[?...] | length(@) > 0` to fire on any
+              # container at any index. Parallel initContainerStatuses block
+              # below catches init-container failures (invisible to
+              # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: kai-scheduler
+                    status:
+                      ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: kai-scheduler
+                    status:
+                      ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+    name: kai-scheduler
+    namespace: kai-scheduler
+    source: oci://ghcr.io/kai-scheduler/kai-scheduler
+    type: Helm
+    valuesFile: components/kai-scheduler/values.yaml
+    version: v0.16.9
+  - chart: kube-prometheus-stack
+    dependencyRefs:
+      - prometheus-operator-crds
+    healthCheckAsserts: |
+      # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+      #
+      # Licensed under the Apache License, Version 2.0 (the "License");
+      # you may not use this file except in compliance with the License.
+      # You may obtain a copy of the License at
+      #
+      #     http://www.apache.org/licenses/LICENSE-2.0
+      #
+      # Unless required by applicable law or agreed to in writing, software
+      # distributed under the License is distributed on an "AS IS" BASIS,
+      # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      # See the License for the specific language governing permissions and
+      # limitations under the License.
+
+      # Kube Prometheus Stack Health Check
+      #
+      # Validates that the kube-prometheus-stack operator, its managed CRs, and
+      # associated workloads are running and healthy in the monitoring namespace:
+      #
+      # 1. The kube-prometheus-operator Deployment has at least one available replica.
+      # 2. The Prometheus CR (kube-prometheus-prometheus) reports Available=True.
+      #    This explicitly catches operator-level reconcile stalls (e.g., webhook
+      #    rejections) where a target StatefulSet might never be created at all.
+      # 3. The Alertmanager CR (kube-prometheus-alertmanager) reports Available=True.
+      # 4. The Prometheus StatefulSet (prometheus-kube-prometheus-prometheus) has
+      #    reached full rollout: readyReplicas >= replicas, with a replicas > 0
+      #    vacuous-pass guard so a missing StatefulSet does not silently pass.
+      # 5. The Alertmanager StatefulSet (alertmanager-kube-prometheus-alertmanager)
+      #    reaches the same full-rollout threshold.
+      # 6. No stack operator pods (label-scoped to app.kubernetes.io/name:
+      #    kube-prometheus-stack) are stuck in Pending, Failed, Unknown, or a
+      #    known-bad container-waiting reason (CrashLoopBackOff, ImagePullBackOff,
+      #    ErrImagePull, CreateContainerConfigError).
+      #
+      # StatefulSet and CR names are derived from fullnameOverride=kube-prometheus
+      # in recipes/components/kube-prometheus-stack/values.yaml. The prometheus-
+      # operator creates StatefulSets named <workload>-<cr-name>, and the chart
+      # renders CR names as <fullname>-<workload>. Names verified against
+      # tests/chainsaw/ai-conformance/common/assert-monitoring.yaml and
+      # tests/chainsaw/ai-conformance/kind-common/assert-monitoring.yaml
+      # (both live-cluster-validated). Label selectors are used in the pod-health
+      # step because monitoring is a shared namespace.
+      apiVersion: chainsaw.kyverno.io/v1alpha1
+      kind: Test
+      metadata:
+        name: kube-prometheus-stack-health-check
+      spec:
+        timeouts:
+          assert: 5m
+        steps:
+          - name: validate-deployment-exists
+            try:
+              # Guard against vacuous pass: verify the kube-prometheus-stack-operator
+              # deployment exists and has at least one ready replica.
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: kube-prometheus-operator
+                      namespace: monitoring
+                    status:
+                      (availableReplicas > `0`): true
+          - name: validate-prometheus-cr-available
+            try:
+              # Assert the Prometheus CR has been reconciled by the operator.
+              # The prometheus-operator sets an Available condition on the CR once
+              # it has successfully reconciled the CR into a running StatefulSet.
+              # CR name kube-prometheus-prometheus derives from the chart's
+              # fullnameOverride=kube-prometheus + the chart's -prometheus suffix.
+              - assert:
+                  resource:
+                    apiVersion: monitoring.coreos.com/v1
+                    kind: Prometheus
+                    metadata:
+                      name: kube-prometheus-prometheus
+                      namespace: monitoring
+                    status:
+                      (conditions[?type == 'Available']):
+                        - status: "True"
+          - name: validate-alertmanager-cr-available
+            try:
+              # Assert the Alertmanager CR has been reconciled by the operator.
+              # CR name kube-prometheus-alertmanager derives from the chart's
+              # fullnameOverride=kube-prometheus + the chart's -alertmanager suffix.
+              - assert:
+                  resource:
+                    apiVersion: monitoring.coreos.com/v1
+                    kind: Alertmanager
+                    metadata:
+                      name: kube-prometheus-alertmanager
+                      namespace: monitoring
+                    status:
+                      (conditions[?type == 'Available']):
+                        - status: "True"
+          - name: validate-prometheus-statefulset-ready
+            try:
+              # Assert the Prometheus StatefulSet created by the operator has
+              # reached full rollout. readyReplicas >= replicas ensures all pods
+              # are ready, not just some. The replicas > 0 guard prevents a
+              # vacuous pass when the StatefulSet is missing or has 0 replicas.
+              # StatefulSet name prometheus-kube-prometheus-prometheus is
+              # <workload>-<cr-name> per prometheus-operator convention, verified
+              # from tests/chainsaw/ai-conformance/common/assert-monitoring.yaml.
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: StatefulSet
+                    metadata:
+                      name: prometheus-kube-prometheus-prometheus
+                      namespace: monitoring
+                    status:
+                      (replicas > `0`): true
+                      (readyReplicas >= replicas): true
+          - name: validate-alertmanager-statefulset-ready
+            try:
+              # Assert the Alertmanager StatefulSet has reached full rollout.
+              # Same pattern as Prometheus above. StatefulSet name
+              # alertmanager-kube-prometheus-alertmanager is <workload>-<cr-name>
+              # per prometheus-operator convention, verified from
+              # tests/chainsaw/ai-conformance/common/assert-monitoring.yaml.
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: StatefulSet
+                    metadata:
+                      name: alertmanager-kube-prometheus-alertmanager
+                      namespace: monitoring
+                    status:
+                      (replicas > `0`): true
+                      (readyReplicas >= replicas): true
+          - name: validate-all-pods-healthy
+            try:
+              # Assert no prometheus stack pods are in unhealthy phases
+              # (Pending / Failed / Unknown) or stuck in Running phase
+              # with a known-bad container-waiting reason
+              # (CrashLoopBackOff, ImagePullBackOff, ErrImagePull,
+              # CreateContainerConfigError). Phase-only filtering misses
+              # CrashLoopBackOff because such pods typically remain in
+              # Running phase with an unhealthy container.
+              # Uses label selector because monitoring is a shared namespace.
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: monitoring
+                      labels:
+                        app.kubernetes.io/name: kube-prometheus-stack
+                    status:
+                      phase: Pending
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: monitoring
+                      labels:
+                        app.kubernetes.io/name: kube-prometheus-stack
+                    status:
+                      phase: Failed
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: monitoring
+                      labels:
+                        app.kubernetes.io/name: kube-prometheus-stack
+                    status:
+                      phase: Unknown
+              # JMESPath projection (not single-element match): kyverno-json's
+              # sliceNode.Assert gates on exact slice length before per-element
+              # comparison, so a `containerStatuses: - state: ...` shape only
+              # matches single-container pods and silently passes sidecars. Use
+              # `containerStatuses[?...] | length(@) > 0` to fire on any
+              # container at any index. Parallel initContainerStatuses block
+              # below catches init-container failures (invisible to
+              # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: monitoring
+                      labels:
+                        app.kubernetes.io/name: kube-prometheus-stack
+                    status:
+                      ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: monitoring
+                      labels:
+                        app.kubernetes.io/name: kube-prometheus-stack
+                    status:
+                      ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+    name: kube-prometheus-stack
+    namespace: monitoring
+    overrides:
+      prometheus:
+        prometheusSpec:
+          storageSpec:
+            emptyDir: null
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 50Gi
+    source: https://prometheus-community.github.io/helm-charts
+    type: Helm
+    valuesFile: components/kube-prometheus-stack/values.yaml
+    version: 84.4.0
+  - chart: kubeflow-trainer
+    dependencyRefs:
+      - cert-manager
+      - kube-prometheus-stack
+      - gpu-operator
+    healthCheckAsserts: |
+      # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+      #
+      # Licensed under the Apache License, Version 2.0 (the "License");
+      # you may not use this file except in compliance with the License.
+      # You may obtain a copy of the License at
+      #
+      #     http://www.apache.org/licenses/LICENSE-2.0
+      #
+      # Unless required by applicable law or agreed to in writing, software
+      # distributed under the License is distributed on an "AS IS" BASIS,
+      # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      # See the License for the specific language governing permissions and
+      # limitations under the License.
+
+      # Kubeflow Trainer Health Check
+      #
+      # Validates that the Kubeflow Trainer is running and healthy in the
+      # kubeflow namespace. Also asserts trainjobs.trainer.kubeflow.org,
+      # trainingruntimes.trainer.kubeflow.org, and
+      # clustertrainingruntimes.trainer.kubeflow.org are Established=True
+      # (verified against chart 2.2.0; re-verify on defaultVersion bump) —
+      # clustertrainingruntimes is load-bearing because platform-kubeflow.yaml
+      # applies a ClusterTrainingRuntime CR
+      # (torch-distributed-cluster-training-runtime.yaml) via manifestFiles.
+      # Checks that the kubeflow-trainer-controller-manager deployment has at
+      # least one available replica and that no pods in the namespace are
+      # stuck in Pending, Failed, or Unknown phases.
+      apiVersion: chainsaw.kyverno.io/v1alpha1
+      kind: Test
+      metadata:
+        name: kubeflow-trainer-health-check
+      spec:
+        timeouts:
+          assert: 5m
+        steps:
+          - name: validate-crds-established
+            # trainjobs + trainingruntimes + clustertrainingruntimes verified
+            # against chart 2.2.0 (recipes/registry.yaml). clustertrainingruntimes
+            # is the CRD platform-kubeflow.yaml actually instantiates a CR
+            # against — see the kubeflow-trainer entry's manifestFiles block
+            # in registry.yaml.
+            try:
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: trainjobs.trainer.kubeflow.org
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: clustertrainingruntimes.trainer.kubeflow.org
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: trainingruntimes.trainer.kubeflow.org
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+          - name: validate-deployment-exists
+            try:
+              # Guard against vacuous pass on empty namespace: verify the
+              # training-operator deployment exists and has at least one ready replica.
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: kubeflow-trainer-controller-manager
+                      namespace: kubeflow
+                    status:
+                      (availableReplicas > `0`): true
+          - name: validate-all-pods-healthy
+            try:
+              # Assert no pods are in unhealthy phases (Pending / Failed /
+              # Unknown) or stuck in Running phase with a known-bad
+              # container-waiting reason (CrashLoopBackOff,
+              # ImagePullBackOff, ErrImagePull, CreateContainerConfigError).
+              # Phase-only filtering misses CrashLoopBackOff because such
+              # pods typically remain in Running phase with an unhealthy
+              # container.
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: kubeflow
+                    status:
+                      phase: Pending
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: kubeflow
+                    status:
+                      phase: Failed
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: kubeflow
+                    status:
+                      phase: Unknown
+              # JMESPath projection (not single-element match): kyverno-json's
+              # sliceNode.Assert gates on exact slice length before per-element
+              # comparison, so a `containerStatuses: - state: ...` shape only
+              # matches single-container pods and silently passes sidecars. Use
+              # `containerStatuses[?...] | length(@) > 0` to fire on any
+              # container at any index. Parallel initContainerStatuses block
+              # below catches init-container failures (invisible to
+              # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: kubeflow
+                    status:
+                      ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: kubeflow
+                    status:
+                      ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+    manifestFiles:
+      - components/kubeflow-trainer/manifests/torch-distributed-cluster-training-runtime.yaml
+    name: kubeflow-trainer
+    namespace: kubeflow
+    source: oci://ghcr.io/kubeflow/charts
+    type: Helm
+    valuesFile: components/kubeflow-trainer/values.yaml
+    version: 2.2.0
+  - chart: node-feature-discovery
+    healthCheckAsserts: |
+      # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+      #
+      # Licensed under the Apache License, Version 2.0 (the "License");
+      # you may not use this file except in compliance with the License.
+      # You may obtain a copy of the License at
+      #
+      #     http://www.apache.org/licenses/LICENSE-2.0
+      #
+      # Unless required by applicable law or agreed to in writing, software
+      # distributed under the License is distributed on an "AS IS" BASIS,
+      # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      # See the License for the specific language governing permissions and
+      # limitations under the License.
+
+      # Node Feature Discovery Health Check
+      #
+      # Validates the standalone NFD deployment by checking:
+      # 1. NFD Master Deployment has at least one ready replica
+      # 2. NFD Worker DaemonSet has fully rolled out and is current
+      #    (desiredNumberScheduled > 0, numberReady/updatedNumberScheduled both
+      #    match it, and observedGeneration matches metadata.generation, so
+      #    neither a partial nor a stale rollout passes)
+      # 3. NFD GC Deployment has at least one ready replica (gc.enable: true)
+      #
+      # Resource names: AICR deploys the kubernetes-sigs/node-feature-discovery
+      # chart under release name "nfd" (matching the ComponentRef Name in
+      # recipes/registry.yaml). The chart's fullname template prefixes the
+      # release name to the chart name when they don't overlap, yielding
+      # "nfd-node-feature-discovery-*" for the master Deployment, worker
+      # DaemonSet, and gc Deployment. If a deployer ever switches the release
+      # name to "node-feature-discovery", these asserts need updating in
+      # lockstep.
+      # 4. No pods in unhealthy phases (Pending, Failed, Unknown) or stuck in
+      #    Running with a known-unhealthy container waiting reason
+      #    (CrashLoopBackOff, ImagePullBackOff, ErrImagePull,
+      #    CreateContainerConfigError)
+      apiVersion: chainsaw.kyverno.io/v1alpha1
+      kind: Test
+      metadata:
+        name: nfd-health-check
+      spec:
+        timeouts:
+          assert: 5m
+        steps:
+          - name: validate-master-deployment
+            try:
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: nfd-node-feature-discovery-master
+                      namespace: node-feature-discovery
+                    status:
+                      (availableReplicas > `0`): true
+          - name: validate-worker-daemonset
+            try:
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: DaemonSet
+                    metadata:
+                      name: nfd-node-feature-discovery-worker
+                      namespace: node-feature-discovery
+                    # Guard against vacuous pass when 0 nodes match the
+                    # DaemonSet: require at least one scheduled pod.
+                    ((status.desiredNumberScheduled || `0`) > `0`): true
+                    # Full rollout: every scheduled pod is ready. Combined with
+                    # the guard above, this rejects partial failures. We assert on
+                    # numberReady (always present in DaemonSetStatus) rather than
+                    # numberUnavailable, which is `omitempty` and disappears from
+                    # the status when zero — making `numberUnavailable == 0`
+                    # evaluate `null == 0` (false) on a fully-healthy DaemonSet.
+                    ((status.numberReady || `0`) == status.desiredNumberScheduled): true
+                    # numberReady alone doesn't distinguish a node still on the
+                    # previous revision (also Ready) from a fully current rollout;
+                    # updatedNumberScheduled/observedGeneration close that gap.
+                    ((status.updatedNumberScheduled || `0`) == status.desiredNumberScheduled): true
+                    ((status.observedGeneration || `0`) == metadata.generation): true
+          - name: validate-gc-deployment
+            try:
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: nfd-node-feature-discovery-gc
+                      namespace: node-feature-discovery
+                    status:
+                      (availableReplicas > `0`): true
+          - name: validate-all-pods-healthy
+            try:
+              # Phase-based errors: Pending/Failed/Unknown.
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: node-feature-discovery
+                    status:
+                      phase: Pending
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: node-feature-discovery
+                    status:
+                      phase: Failed
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: node-feature-discovery
+                    status:
+                      phase: Unknown
+              # Container-state errors: pods stuck in Running phase with a
+              # container in a known-bad waiting reason. Phase filtering alone
+              # misses CrashLoopBackOff/ImagePullBackOff because those pods
+              # typically remain in Running phase with unhealthy containers.
+              # JMESPath projection (not single-element match): kyverno-json's
+              # sliceNode.Assert gates on exact slice length before per-element
+              # comparison, so a `containerStatuses: - state: ...` shape only
+              # matches single-container pods and silently passes sidecars. Use
+              # `containerStatuses[?...] | length(@) > 0` to fire on any
+              # container at any index. Parallel initContainerStatuses block
+              # below catches init-container failures (invisible to
+              # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: node-feature-discovery
+                    status:
+                      ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: node-feature-discovery
+                    status:
+                      ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+    name: nfd
+    namespace: node-feature-discovery
+    overrides:
+      topologyUpdater:
+        enable: true
+    source: https://kubernetes-sigs.github.io/node-feature-discovery/charts
+    type: Helm
+    valuesFile: components/nfd/values.yaml
+    version: 0.19.0
+  - dependencyRefs:
+      - nodewright-operator
+    healthCheckAsserts: |
+      # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+      #
+      # Licensed under the Apache License, Version 2.0 (the "License");
+      # you may not use this file except in compliance with the License.
+      # You may obtain a copy of the License at
+      #
+      #     http://www.apache.org/licenses/LICENSE-2.0
+      #
+      # Unless required by applicable law or agreed to in writing, software
+      # distributed under the License is distributed on an "AS IS" BASIS,
+      # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      # See the License for the specific language governing permissions and
+      # limitations under the License.
+
+      # Nodewright Customizations Health Check
+      #
+      # Validates that the NodeWright custom resource(s) deployed by the nodewright-customizations
+      # component have completed successfully. The NodeWright CR status.status (see
+      # github.com/NVIDIA/nodewright/chart/templates/nodewright-crd.yaml) is one of: unknown,
+      # complete, blocked, waiting, disabled, paused, in_progress, erroring. This check
+      # asserts status.status is "complete" so that node-level customizations (e.g. tuning)
+      # have been applied to all matching nodes.
+      #
+      # Kind (#2593): nodewright-operator v0.18.0 renamed
+      # skyhook.nvidia.com Skyhook to nodewright.nvidia.com NodeWright. The operator
+      # mirrors each legacy Skyhook into a NodeWright and writes status ONLY on the
+      # NodeWright, so asserting the legacy kind never sees "complete" even on a fully
+      # tuned cluster. The manifests may still declare Skyhook; the mirrored NodeWright
+      # of the same name is what carries the status. A static assert cannot fall back,
+      # so this check follows the pinned operator. When the recipe pins the operator
+      # below v0.18.0 and the cluster serves only skyhook.nvidia.com, the deployment
+      # validator skips this assert (gatedHealthCheckSuppressed) and the Go readiness
+      # check verifies the Skyhook CRs by name instead, so a healthy legacy cluster
+      # still passes. A v0.18.0+ pin on a cluster that does not serve
+      # nodewright.nvidia.com fails closed: that is a broken operator install, and a
+      # stale legacy Skyhook must not stand in for the missing NodeWright.
+      #
+      # Value-gate awareness (#1844): this static assert cannot see the component's
+      # effective Helm values, so it would fail when the whole `tuning` CR is
+      # deliberately suppressed — e.g. `--set nodewrightcustomizations:tuningEnabled=false`
+      # on a single-package tuning manifest (tuning-gke.yaml / tuning-generic.yaml). The
+      # deployment validator therefore renders the component's manifests with the
+      # effective values and skips this assert when they yield no Nodewright CR (see
+      # nodewrightHealthCheckSuppressed in validators/deployment/expected_resources.go).
+      # The skip is fail-closed: whenever the values keep the CR, the render still lists
+      # it and this assert runs — only an intentionally-absent CR is tolerated. The
+      # render-aware Go readiness check (verifyNodewrightReady) enforces the same
+      # status.status == "complete" signal (plus the runtime-required taint gate), so
+      # nodewright readiness is never left unverified.
+      #
+      # Boundary: the suppression must be in the recipe (an overlay-declared or inline
+      # `overrides:`, e.g. the AKS tuningEnabled: false default), because the in-cluster
+      # validator Job renders from the recipe it is handed. A bundle-time-only
+      # `--set` is NOT persisted to the recipe and `aicr validate` has no `--set`, so
+      # it does not reach this render. See docs/contributor/validator.md
+      # ("Value-gate awareness").
+      apiVersion: chainsaw.kyverno.io/v1alpha1
+      kind: Test
+      metadata:
+        name: nodewright-customizations-health-check
+      spec:
+        timeouts:
+          assert: 5m
+        steps:
+          - name: validate-nodewright-cr-complete
+            try:
+              # Assert a NodeWright CR has status.status == "complete" per the
+              # NodeWright CRD schema. NodeWright is cluster-scoped.
+              #
+              # Deliberately name-agnostic. The manifests do not agree on a name —
+              # tuning.yaml / tuning-gke.yaml / tuning-generic.yaml render "tuning"
+              # while no-op.yaml renders "no-op" — so a hardcoded name asserts a CR
+              # that never exists for any component wiring a differently-named
+              # manifest. A nameless assert uses the executor's list-and-match path
+              # (pkg/chainsaw/inprocess.go): it fails closed when the collection is
+              # empty (ErrCodeNotFound, not a vacuous pass) and passes when a live,
+              # non-terminating NodeWright reports complete.
+              #
+              # Per-CR completeness is not weakened by this: the render-aware Go
+              # readiness check (verifyNodewrightReady) derives the expected CR names
+              # from the component's rendered manifests and requires every one of
+              # them to be live (not Terminating) and complete, reporting each failure
+              # by name. That per-name gate is what binds readiness to the CRs the
+              # recipe declared — this assert alone would accept a stale or unrelated
+              # complete NodeWright.
+              - assert:
+                  resource:
+                    apiVersion: nodewright.nvidia.com/v1alpha1
+                    kind: NodeWright
+                    status:
+                      status: complete
+    manifestFiles:
+      - components/nodewright-customizations/manifests/tuning.yaml
+    name: nodewright-customizations
+    namespace: nodewright
+    overrides:
+      accelerator: h100
+      intent: multiNodeTraining
+      service: eks
+    source: ""
+    type: Helm
+  - chart: nodewright
+    healthCheckAsserts: |
+      # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+      #
+      # Licensed under the Apache License, Version 2.0 (the "License");
+      # you may not use this file except in compliance with the License.
+      # You may obtain a copy of the License at
+      #
+      #     http://www.apache.org/licenses/LICENSE-2.0
+      #
+      # Unless required by applicable law or agreed to in writing, software
+      # distributed under the License is distributed on an "AS IS" BASIS,
+      # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      # See the License for the specific language governing permissions and
+      # limitations under the License.
+
+      # Nodewright Operator Health Check
+      #
+      # Validates that the Nodewright Operator is running and healthy in the
+      # skyhook namespace:
+      # 1. skyhooks.skyhook.nvidia.com CRD Established=True (the apiserver
+      #    will accept Skyhook CRs that nodewright-customizations declares).
+      #    Both the pre- and post-rename charts render this CRD; the v0.18.0
+      #    nodewrights.nodewright.nvidia.com CRD is deliberately not asserted
+      #    here so a v0.17.x operator still passes. The Go readiness gate
+      #    (resolveNodewrightGVR) fails closed when the recipe pins v0.18.0+ and
+      #    that group is not served, so its absence is never mistaken for a
+      #    legacy operator.
+      # 2. Every Deployment labeled as the controller-manager has at least one
+      #    available replica. Chainsaw cannot count, so the Go readiness check
+      #    separately requires exactly one such Deployment.
+      # 3. No pods stuck in Pending/Failed/Unknown phases or known-bad
+      #    container-waiting states.
+      apiVersion: chainsaw.kyverno.io/v1alpha1
+      kind: Test
+      metadata:
+        name: nodewright-operator-health-check
+      spec:
+        timeouts:
+          assert: 5m
+        steps:
+          - name: validate-skyhook-crd-established
+            try:
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: skyhooks.skyhook.nvidia.com
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+          - name: validate-deployment-exists
+            try:
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      namespace: nodewright
+                      labels:
+                        app.kubernetes.io/component: manager
+                        control-plane: controller-manager
+                    status:
+                      (availableReplicas > `0`): true
+              # Any match without an available replica fails (omitted at zero).
+              - error:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      namespace: nodewright
+                      labels:
+                        app.kubernetes.io/component: manager
+                        control-plane: controller-manager
+                    status:
+                      ((availableReplicas || `0`) > `0`): false
+          - name: validate-all-pods-healthy
+            try:
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: nodewright
+                    status:
+                      phase: Pending
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: nodewright
+                    status:
+                      phase: Failed
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: nodewright
+                    status:
+                      phase: Unknown
+              # JMESPath projection (not single-element match): kyverno-json's
+              # sliceNode.Assert gates on exact slice length before per-element
+              # comparison, so a `containerStatuses: - state: ...` shape only
+              # matches single-container pods and silently passes sidecars. Use
+              # `containerStatuses[?...] | length(@) > 0` to fire on any
+              # container at any index. Parallel initContainerStatuses block
+              # below catches init-container failures (invisible to
+              # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: nodewright
+                    status:
+                      ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: nodewright
+                    status:
+                      ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+    name: nodewright-operator
+    namespace: nodewright
+    source: oci://ghcr.io/nvidia/nodewright/charts
+    type: Helm
+    valuesFile: components/nodewright-operator/values.yaml
+    version: v0.19.0
+  - chart: dra-driver-nvidia-gpu
+    dependencyRefs:
+      - gpu-operator
+    healthCheckAsserts: |
+      # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+      #
+      # Licensed under the Apache License, Version 2.0 (the "License");
+      # you may not use this file except in compliance with the License.
+      # You may obtain a copy of the License at
+      #
+      #     http://www.apache.org/licenses/LICENSE-2.0
+      #
+      # Unless required by applicable law or agreed to in writing, software
+      # distributed under the License is distributed on an "AS IS" BASIS,
+      # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      # See the License for the specific language governing permissions and
+      # limitations under the License.
+
+      # NVIDIA DRA Driver GPU Health Check
+      #
+      # Validates that the NVIDIA DRA (Dynamic Resource Allocation) GPU driver
+      # is running and healthy in the nvidia-dra-driver namespace. The
+      # kubelet-plugin DaemonSet must roll out fully — numberReady ==
+      # desiredNumberScheduled (with desiredNumberScheduled > 0 as a guard).
+      # Previous check gated only on numberReady > 0, passing on partial
+      # failures; see #1222 and recipes/checks/nfd/health-check.yaml for
+      # the same rationale. updatedNumberScheduled/observedGeneration
+      # additionally guard against a stale rollout: a node still running the
+      # previous revision's pod also reports numberReady, so that alone
+      # can't distinguish it from a fully current rollout.
+      #
+      # Resource names: the DaemonSet name is release-derived
+      # (<release>-kubelet-plugin). AICR's release name is
+      # `nvidia-dra-driver-gpu` (matches ComponentRef Name in registry.yaml).
+      # If a deployer renames the release, this assert needs updating in
+      # lockstep — see verifyDRAKubeletPluginReady commentary in
+      # validators/deployment/expected_resources.go for why a chart-shape
+      # label would be a more robust selector.
+      apiVersion: chainsaw.kyverno.io/v1alpha1
+      kind: Test
+      metadata:
+        name: nvidia-dra-driver-gpu-health-check
+      spec:
+        timeouts:
+          assert: 5m
+        steps:
+          - name: validate-kubelet-plugin-daemonset-fully-rolled-out
+            try:
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: DaemonSet
+                    metadata:
+                      name: nvidia-dra-driver-gpu-kubelet-plugin
+                      namespace: nvidia-dra-driver
+                    ((status.desiredNumberScheduled || `0`) > `0`): true
+                    ((status.numberReady || `0`) == status.desiredNumberScheduled): true
+                    ((status.updatedNumberScheduled || `0`) == status.desiredNumberScheduled): true
+                    ((status.observedGeneration || `0`) == metadata.generation): true
+          - name: validate-all-pods-healthy
+            try:
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: nvidia-dra-driver
+                    status:
+                      phase: Pending
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: nvidia-dra-driver
+                    status:
+                      phase: Failed
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: nvidia-dra-driver
+                    status:
+                      phase: Unknown
+              # JMESPath projection (not single-element match): kyverno-json's
+              # sliceNode.Assert gates on exact slice length before per-element
+              # comparison, so a `containerStatuses: - state: ...` shape only
+              # matches single-container pods and silently passes sidecars. Use
+              # `containerStatuses[?...] | length(@) > 0` to fire on any
+              # container at any index. Parallel initContainerStatuses block
+              # below catches init-container failures (invisible to
+              # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: nvidia-dra-driver
+                    status:
+                      ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: nvidia-dra-driver
+                    status:
+                      ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+    name: nvidia-dra-driver-gpu
+    namespace: nvidia-dra-driver
+    overrides:
+      controller:
+        affinity:
+          nodeAffinity: null
+    source: oci://registry.k8s.io/dra-driver-nvidia/charts
+    type: Helm
+    valuesFile: components/nvidia-dra-driver-gpu/values.yaml
+    version: 0.5.0
+  - chart: nvsentinel
+    dependencyRefs:
+      - cert-manager
+      - gpu-operator
+      - prometheus-operator-crds
+    healthCheckAsserts: |
+      # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+      #
+      # Licensed under the Apache License, Version 2.0 (the "License");
+      # you may not use this file except in compliance with the License.
+      # You may obtain a copy of the License at
+      #
+      #     http://www.apache.org/licenses/LICENSE-2.0
+      #
+      # Unless required by applicable law or agreed to in writing, software
+      # distributed under the License is distributed on an "AS IS" BASIS,
+      # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      # See the License for the specific language governing permissions and
+      # limitations under the License.
+
+      # NVSentinel Health Check
+      #
+      # Validates that NVSentinel is running and healthy in the nvsentinel
+      # namespace. Checks that the labeler deployment has at least one
+      # available replica, that the required DaemonSets gated on the labeler's
+      # driver.installed node label (metadata-collector,
+      # syslog-health-monitor-regular; the optional syslog-health-monitor-kata
+      # legitimately has 0 desired without Kata nodes and is excluded) are
+      # actually rolled out, and that no pods
+      # in the namespace are stuck in Pending, Failed, or Unknown phases.
+      apiVersion: chainsaw.kyverno.io/v1alpha1
+      kind: Test
+      metadata:
+        name: nvsentinel-health-check
+      spec:
+        # 90s, deliberately below the 5m the sibling checks author. The
+        # in-process executor (pkg/chainsaw/inprocess.go) supports exactly one
+        # timeout knob — this Test-level assert budget caps the WHOLE check
+        # (per-step/per-operation timeouts are not honored) — and this check is
+        # uniquely prone to a legitimately-never-true wait: on a cluster in the
+        # #2175 broken state the driver-labeled DaemonSets sit at 0 desired
+        # FOREVER, so a 5m budget here does not buy readiness, it buys a stall.
+        # Verified live (issue #2186): the stalled assert pushed the
+        # expected-resources Job past its 8m activeDeadline, the pod was
+        # deleted, and the operator saw "pod not found" (status=other) instead
+        # of the assert diff naming the DaemonSets. 90s fails fast with the
+        # real message while still covering the healthy path, where every step
+        # passes in seconds (the components are already rolled out by the time
+        # the deployment phase runs).
+        timeouts:
+          assert: 90s
+        steps:
+          - name: validate-deployment-exists
+            try:
+              # Guard against vacuous pass on empty namespace: verify the
+              # nvsentinel-controller-manager deployment exists and has at least
+              # one ready replica.
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: labeler
+                      namespace: nvsentinel
+                    status:
+                      (availableReplicas > `0`): true
+          - name: validate-driver-labeled-daemonsets-rolled-out
+            try:
+              # metadata-collector and syslog-health-monitor-regular select on
+              # the nvsentinel.dgxc.nvidia.com/driver.installed node label, which
+              # the labeler applies only when it can observe a GPU driver pod.
+              # Where the driver ships in the node image (AKS azure-managed, GKE
+              # COS gke-default, OKE) the label is never applied and both
+              # DaemonSets sit at 0 desired pods. That state is invisible to the
+              # assertions in the surrounding steps: pods that are never created
+              # cannot be Pending, Failed, or CrashLooping, and the labeler
+              # Deployment itself stays available — which is how issue #2175
+              # shipped unnoticed.
+              #
+              # Assert non-omitempty status fields only. numberUnavailable is
+              # omitempty, so it is ABSENT on a healthy DaemonSet and a
+              # `numberUnavailable: 0` assertion passes vacuously on a 0-desired
+              # DaemonSet too. desiredNumberScheduled and numberReady are always
+              # serialized, so the pair below fails closed on 0 desired.
+              #
+              # syslog-health-monitor-kata and gpu-health-monitor-dcgm-3.x are
+              # deliberately NOT asserted: both legitimately have 0 desired pods
+              # on clusters without Kata nodes / DCGM 3.x GPUs.
+              # metadata-collector uses the NEGATIVE (error-op) form, not a
+              # positive assert: the bundle-time RuntimeClass gate explicitly
+              # permits disabling the subchart (global.metadataCollector.enabled
+              # =false renders no DaemonSet), so a positive existence assert
+              # would fail deployment validation for a configuration bundling
+              # explicitly allows. The error ops below pass on a true 404
+              # (disabled subchart — the in-process executor fails closed on
+              # transient fetch errors, so this is not an API-blip loophole)
+              # while still catching both failure states when the DaemonSet IS
+              # rendered: the #2175 signature (present with 0 desired) and a
+              # partial rollout. Trade-off, stated plainly: a DaemonSet deleted
+              # out-of-band also passes — accepted, because the disabled-
+              # subchart configuration is supported and chainsaw cannot
+              # condition one resource's assert on another's values.
+              - error:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: DaemonSet
+                    metadata:
+                      name: metadata-collector
+                      namespace: nvsentinel
+                    status:
+                      # `> `0`: false` rather than `== `0`: true`: kyverno-json's
+                      # equality between an int64 field (what unstructured cluster
+                      # reads and the in-process fetcher both deliver) and a JMESPath
+                      # numeric literal is type-strict and never matches, so the ==
+                      # form silently disarms this op. The ordering comparator
+                      # coerces numeric kinds and is already relied on by the assert
+                      # ops below; expecting false inverts it into "desired is zero".
+                      (desiredNumberScheduled > `0`): false
+              - error:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: DaemonSet
+                    metadata:
+                      name: metadata-collector
+                      namespace: nvsentinel
+                    status:
+                      (numberReady < desiredNumberScheduled): true
+              # Stale-rollout guard: numberReady alone can't distinguish a node
+              # still running the previous revision's pod (also Ready) from a
+              # fully current rollout. Flat (not status:-nested) so
+              # metadata.generation is addressable below. `<` (not `!=`) states
+              # the violated invariant directly: fewer nodes updated than desired.
+              # updatedNumberScheduled is itself omitempty (unlike
+              # desiredNumberScheduled/numberReady), so it needs the `|| `0``
+              # null-coalescing too.
+              - error:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: DaemonSet
+                    metadata:
+                      name: metadata-collector
+                      namespace: nvsentinel
+                    ((status.updatedNumberScheduled || `0`) < status.desiredNumberScheduled): true
+              - error:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: DaemonSet
+                    metadata:
+                      name: metadata-collector
+                      namespace: nvsentinel
+                    ((status.observedGeneration || `0`) < metadata.generation): true
+              # syslog-health-monitor-regular: same negative form — the
+              # syslog-health-monitor subchart is switchable via its chart
+              # condition (global.syslogHealthMonitor.enabled) exactly like
+              # metadata-collector, and the driver-label gate's consumer-aware
+              # skip treats it as an optional label consumer, so the one
+              # coherent rule is "explicitly-disabled consumers render nothing
+              # and validation tolerates their absence; rendered consumers must
+              # be fully rolled out".
+              - error:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: DaemonSet
+                    metadata:
+                      name: syslog-health-monitor-regular
+                      namespace: nvsentinel
+                    status:
+                      (desiredNumberScheduled > `0`): false
+              - error:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: DaemonSet
+                    metadata:
+                      name: syslog-health-monitor-regular
+                      namespace: nvsentinel
+                    status:
+                      (numberReady < desiredNumberScheduled): true
+              # Stale-rollout guard: numberReady alone can't distinguish a node
+              # still running the previous revision's pod (also Ready) from a
+              # fully current rollout. Flat (not status:-nested) so
+              # metadata.generation is addressable below. updatedNumberScheduled
+              # is itself omitempty (unlike desiredNumberScheduled/numberReady),
+              # so it needs the `|| `0`` null-coalescing too.
+              - error:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: DaemonSet
+                    metadata:
+                      name: syslog-health-monitor-regular
+                      namespace: nvsentinel
+                    ((status.updatedNumberScheduled || `0`) < status.desiredNumberScheduled): true
+              - error:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: DaemonSet
+                    metadata:
+                      name: syslog-health-monitor-regular
+                      namespace: nvsentinel
+                    ((status.observedGeneration || `0`) < metadata.generation): true
+              # nic-health-monitor: same negative form again. Its chart
+              # condition (global.nicHealthMonitor.enabled) is off in every
+              # recipe except those composing the nvsentinel-nic-health-monitor
+              # mixin, so on the other platforms these four ops pass vacuously
+              # on a 404 and only bite where the mixin is applied.
+              - error:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: DaemonSet
+                    metadata:
+                      name: nic-health-monitor
+                      namespace: nvsentinel
+                    status:
+                      (desiredNumberScheduled > `0`): false
+              - error:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: DaemonSet
+                    metadata:
+                      name: nic-health-monitor
+                      namespace: nvsentinel
+                    status:
+                      (numberReady < desiredNumberScheduled): true
+              - error:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: DaemonSet
+                    metadata:
+                      name: nic-health-monitor
+                      namespace: nvsentinel
+                    ((status.updatedNumberScheduled || `0`) < status.desiredNumberScheduled): true
+              - error:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: DaemonSet
+                    metadata:
+                      name: nic-health-monitor
+                      namespace: nvsentinel
+                    ((status.observedGeneration || `0`) < metadata.generation): true
+          - name: validate-all-pods-healthy
+            try:
+              # Assert no pods are in unhealthy phases (Pending / Failed /
+              # Unknown) or stuck in Running phase with a known-bad
+              # container-waiting reason (CrashLoopBackOff,
+              # ImagePullBackOff, ErrImagePull, CreateContainerConfigError).
+              # Phase-only filtering misses CrashLoopBackOff because such
+              # pods typically remain in Running phase with an unhealthy
+              # container.
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: nvsentinel
+                    status:
+                      phase: Pending
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: nvsentinel
+                    status:
+                      phase: Failed
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: nvsentinel
+                    status:
+                      phase: Unknown
+              # JMESPath projection (not single-element match): kyverno-json's
+              # sliceNode.Assert gates on exact slice length before per-element
+              # comparison, so a `containerStatuses: - state: ...` shape only
+              # matches single-container pods and silently passes sidecars. Use
+              # `containerStatuses[?...] | length(@) > 0` to fire on any
+              # container at any index. Parallel initContainerStatuses block
+              # below catches init-container failures (invisible to
+              # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: nvsentinel
+                    status:
+                      ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: nvsentinel
+                    status:
+                      ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+    name: nvsentinel
+    namespace: nvsentinel
+    source: oci://ghcr.io/nvidia
+    type: Helm
+    valuesFile: components/nvsentinel/values.yaml
+    version: v1.25.0
+  - chart: prometheus-adapter
+    dependencyRefs:
+      - kube-prometheus-stack
+    healthCheckAsserts: |
+      # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+      #
+      # Licensed under the Apache License, Version 2.0 (the "License");
+      # you may not use this file except in compliance with the License.
+      # You may obtain a copy of the License at
+      #
+      #     http://www.apache.org/licenses/LICENSE-2.0
+      #
+      # Unless required by applicable law or agreed to in writing, software
+      # distributed under the License is distributed on an "AS IS" BASIS,
+      # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      # See the License for the specific language governing permissions and
+      # limitations under the License.
+
+      # Prometheus Adapter Health Check
+      #
+      # Validates that the Prometheus Adapter is running and healthy in the
+      # monitoring namespace. Checks that the prometheus-adapter deployment has
+      # at least one available replica and that no prometheus adapter pods
+      # (selected by label) are stuck in Pending, Failed, or Unknown phases.
+      # Label selectors are used because monitoring is a shared namespace.
+      apiVersion: chainsaw.kyverno.io/v1alpha1
+      kind: Test
+      metadata:
+        name: prometheus-adapter-health-check
+      spec:
+        timeouts:
+          assert: 5m
+        steps:
+          - name: validate-deployment-exists
+            try:
+              # Guard against vacuous pass: verify the prometheus-adapter
+              # deployment exists and has at least one ready replica.
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: prometheus-adapter
+                      namespace: monitoring
+                    status:
+                      (availableReplicas > `0`): true
+          - name: validate-all-pods-healthy
+            try:
+              # Assert no prometheus adapter pods are in unhealthy phases
+              # (Pending / Failed / Unknown) or stuck in Running phase
+              # with a known-bad container-waiting reason
+              # (CrashLoopBackOff, ImagePullBackOff, ErrImagePull,
+              # CreateContainerConfigError). Phase-only filtering misses
+              # CrashLoopBackOff because such pods typically remain in
+              # Running phase with an unhealthy container.
+              # Uses label selector because monitoring is a shared namespace.
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: monitoring
+                      labels:
+                        app.kubernetes.io/name: prometheus-adapter
+                    status:
+                      phase: Pending
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: monitoring
+                      labels:
+                        app.kubernetes.io/name: prometheus-adapter
+                    status:
+                      phase: Failed
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: monitoring
+                      labels:
+                        app.kubernetes.io/name: prometheus-adapter
+                    status:
+                      phase: Unknown
+              # JMESPath projection (not single-element match): kyverno-json's
+              # sliceNode.Assert gates on exact slice length before per-element
+              # comparison, so a `containerStatuses: - state: ...` shape only
+              # matches single-container pods and silently passes sidecars. Use
+              # `containerStatuses[?...] | length(@) > 0` to fire on any
+              # container at any index. Parallel initContainerStatuses block
+              # below catches init-container failures (invisible to
+              # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: monitoring
+                      labels:
+                        app.kubernetes.io/name: prometheus-adapter
+                    status:
+                      ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: monitoring
+                      labels:
+                        app.kubernetes.io/name: prometheus-adapter
+                    status:
+                      ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+    name: prometheus-adapter
+    namespace: monitoring
+    source: https://prometheus-community.github.io/helm-charts
+    type: Helm
+    valuesFile: components/prometheus-adapter/values.yaml
+    version: 5.3.0
+  - chart: prometheus-operator-crds
+    healthCheckAsserts: |
+      # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+      #
+      # Licensed under the Apache License, Version 2.0 (the "License");
+      # you may not use this file except in compliance with the License.
+      # You may obtain a copy of the License at
+      #
+      #     http://www.apache.org/licenses/LICENSE-2.0
+      #
+      # Unless required by applicable law or agreed to in writing, software
+      # distributed under the License is distributed on an "AS IS" BASIS,
+      # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      # See the License for the specific language governing permissions and
+      # limitations under the License.
+
+      # prometheus-operator-crds Health Check
+      #
+      # CRD-only component. Validates that every CRD this chart installs has
+      # reached the `Established=True` condition (CRD storage is up and the
+      # apiserver will accept CRs of those kinds).
+      #
+      # CRDs come from the upstream prometheus-community/prometheus-operator-crds
+      # chart pinned to 28.0.1 in recipes/registry.yaml. The 8 kinds under
+      # monitoring.coreos.com/v1 are enumerated in
+      # recipes/components/prometheus-operator-crds/values.yaml header:
+      # Alertmanager, AlertmanagerConfig, PodMonitor, Probe, Prometheus,
+      # PrometheusRule, ServiceMonitor, ThanosRuler. Plural names match the
+      # long-standing upstream prometheus-operator chart shape.
+      apiVersion: chainsaw.kyverno.io/v1alpha1
+      kind: Test
+      metadata:
+        name: prometheus-operator-crds-health-check
+      spec:
+        timeouts:
+          assert: 5m
+        steps:
+          - name: validate-prometheus-operator-crds-established
+            try:
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: alertmanagers.monitoring.coreos.com
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: alertmanagerconfigs.monitoring.coreos.com
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: podmonitors.monitoring.coreos.com
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: probes.monitoring.coreos.com
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: prometheuses.monitoring.coreos.com
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: prometheusrules.monitoring.coreos.com
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: servicemonitors.monitoring.coreos.com
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: thanosrulers.monitoring.coreos.com
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+    name: prometheus-operator-crds
+    namespace: monitoring
+    source: https://prometheus-community.github.io/helm-charts
+    type: Helm
+    valuesFile: components/prometheus-operator-crds/values.yaml
+    version: 28.0.1
+constraints:
+  - name: K8s.server.version
+    value: '>= 1.32.4'
+  - name: OS.release.ID
+    value: ubuntu
+  - name: OS.release.VERSION_ID
+    value: "24.04"
+  - name: OS.sysctl./proc/sys/kernel/osrelease
+    value: '>= 6.8'
+criteria:
+  accelerator: h100
+  intent: training
+  os: ubuntu
+  platform: kubeflow
+  service: eks
+deploymentOrder:
+  - aws-ebs-csi-driver
+  - aws-efa
+  - cert-manager
+  - nfd
+  - nodewright-operator
+  - nodewright-customizations
+  - prometheus-operator-crds
+  - kube-prometheus-stack
+  - gpu-operator
+  - k8s-ephemeral-storage-metrics
+  - kai-scheduler
+  - kubeflow-trainer
+  - nvidia-dra-driver-gpu
+  - nvsentinel
+  - prometheus-adapter
+kind: RecipeResult
+metadata:
+  appliedOverlays:
+    - base
+    - monitoring-hpa
+    - h100-any
+    - eks
+    - eks-ubuntu
+    - eks-training
+    - h100-eks-training
+    - h100-eks-ubuntu-training
+    - h100-eks-ubuntu-training-kubeflow
+  version: 1.0.0
+validation:
+  conformance:
+    checks:
+      - platform-health
+      - gpu-operator-health
+      - dra-support
+      - accelerator-metrics
+      - ai-service-metrics
+      - gang-scheduling
+      - pod-autoscaling
+      - cluster-autoscaling
+      - secure-accelerator-access
+      - robust-controller
+  deployment:
+    checks:
+      - operator-health
+      - expected-resources
+      - gpu-operator-version
+      - check-nvidia-smi
+    constraints:
+      - name: Deployment.gpu-operator.version
+        value: '>= v24.6.0'
+  performance:
+    checks:
+      - nccl-all-reduce-bw
+    constraints:
+      - name: nccl-all-reduce-bw
+        value: '>= 300'

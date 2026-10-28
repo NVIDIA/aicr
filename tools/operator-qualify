@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Runs the fault-injection and isolation qualification suite against a
+# candidate (`make operator-candidate`) on the operator's kind cluster. It installs the
+# pinned Argo CD chart, loads the candidate's operator image into the nodes
+# by digest, installs the candidate's chart with its deployment inputs and
+# tests/operator/qualify/testdata/values.yaml, then runs
+# tests/operator/qualify. The candidate is a release build: no development
+# setting is available, so the suite discovers the kind nodes and approves
+# rollouts as an approver. Create the cluster first with
+# `make operator-kind-up`.
+#
+# Usage: tools/operator-qualify [install|upgrade|test]   (default: install, then test)
+#   install  the candidate in CANDIDATE_DIR (default dist/candidate)
+#   upgrade  the candidate in CANDIDATE_NEXT_DIR (default dist/candidate-next),
+#            as an operator upgrade; the suite runs it mid-rollout
+#   test     the suite
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "${repo_root}"
+
+export OPERATOR_KIND_CLUSTER="${OPERATOR_KIND_CLUSTER:-aicr-operator}"
+export KUBECONFIG="${repo_root}/.operator-e2e/kubeconfig"
+# shellcheck source=tools/operator-lib.sh
+source tools/operator-lib.sh
+
+candidate="${CANDIDATE_DIR:-dist/candidate}"
+next="${CANDIDATE_NEXT_DIR:-dist/candidate-next}"
+values=tests/operator/qualify/testdata/values.yaml
+REGISTRY_URI="$(yq -r '.registry.repository' "${values}")"
+
+# load_candidate imports the candidate's image index into every node and
+# names it by digest, as a registry pull would; the kubelet then runs the
+# exact image the candidate records, never a rebuild.
+load_candidate() {
+  local dir="$1" repository digest version tmp node
+  repository="$(yq -r '.operator.repository' "${dir}/candidate.json")"
+  digest="$(yq -r '.operator.digest' "${dir}/candidate.json")"
+  version="$(yq -r '.version' "${dir}/candidate.json")"
+  tmp="$(mktemp -d)"
+  cp -R "${dir}/image" "${tmp}/layout"
+  yq -i -o=json ".manifests[0].annotations.\"org.opencontainers.image.ref.name\" = \"${repository}:${version}\"" "${tmp}/layout/index.json"
+  tar -C "${tmp}/layout" -cf "${tmp}/image.tar" .
+  # Each node imports its own platform only (kind's loader unpacks every
+  # platform), then names the index by its digest.
+  while read -r node; do
+    docker exec -i "${node}" ctr -n k8s.io images import --digests --snapshotter=overlayfs - <"${tmp}/image.tar" >/dev/null
+    docker exec "${node}" ctr -n k8s.io images tag --force "${repository}:${version}" "${repository}@${digest}" >/dev/null
+  done < <(kind get nodes --name "${OPERATOR_KIND_CLUSTER}")
+  rm -rf "${tmp}"
+}
+
+# install_candidate installs or upgrades the operator release to a
+# candidate's chart and image, with the AICR release under test.
+install_candidate() {
+  local dir="$1" aicr_version
+  load_candidate "${dir}"
+  operator_namespace
+  aicr_version="${AICR_E2E_VERSION:-$(yq -r '.aicr.version' "${dir}/candidate-values.yaml")}"
+  release_flags "${aicr_version}"
+  helm upgrade --install aicr-operator "${dir}"/chart/*.tgz --namespace aicr-system \
+    -f "${dir}/candidate-values.yaml" -f "${values}" \
+    --set aicr.version="${aicr_version}" \
+    --set aicr.image="${AICR_E2E_IMAGE:-$(yq -r '.aicr.image' "${dir}/candidate-values.yaml")}" \
+    --set "aicr.validatorImages={${AICR_E2E_VALIDATOR_IMAGES:-$(yq -r '.aicr.validatorImages | join(",")' "${dir}/candidate-values.yaml")}}" \
+    "${HELM_RELEASE_FLAGS[@]}" >/dev/null
+  registry_credentials "${REGISTRY_URI}"
+  kubectl -n aicr-system rollout status deployment/aicr-operator --timeout=180s
+}
+
+# absolute resolves a candidate directory, which may be relative to the
+# repository root, for the suite.
+absolute() {
+  if [[ "$1" == /* ]]; then echo "$1"; else echo "${repo_root}/$1"; fi
+}
+
+run_tests() {
+  AICR_OPERATOR_E2E_KUBECONFIG="${KUBECONFIG}" \
+    AICR_OPERATOR_E2E_AICR_VERSION="${AICR_E2E_VERSION:-$(yq -r '.aicr.version' "${candidate}/candidate-values.yaml")}" \
+    AICR_OPERATOR_E2E_REGISTRY_AUTH="${repo_root}/.operator-e2e/registry-auth.json" \
+    AICR_OPERATOR_QUALIFY_CANDIDATE="$(absolute "${candidate}")/candidate.json" \
+    AICR_OPERATOR_QUALIFY_NEXT="$(absolute "${next}")/candidate.json" \
+    GOFLAGS="-mod=readonly" go test -count=1 -v -timeout=90m ./tests/operator/qualify/...
+}
+
+case "${1:-all}" in
+install)
+  install_argocd
+  install_candidate "${candidate}"
+  ;;
+upgrade) install_candidate "${next}" ;;
+test) run_tests ;;
+# Sequential, not `install && run_tests`: errexit does not apply inside a
+# function that is part of an && list.
+all)
+  install_argocd
+  install_candidate "${candidate}"
+  run_tests
+  ;;
+*)
+  echo "usage: $0 [install|upgrade|test]" >&2
+  exit 2
+  ;;
+esac
