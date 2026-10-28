@@ -93,10 +93,8 @@ spec:
       DRANET).
     level: SHOULD
     status: Not Implemented
-    evidence:
-    - evidence/platform-configuration.md
-    notes: SR-IOV IB resources are advertised, but cross-node RDMA traffic was not exercised. No high-performance-networking
-      conformance claim is made.
+    evidence: []
+    notes: Cross-node RDMA traffic was not exercised; no high-performance-networking conformance claim is made.
   - id: disaggregated_inference
     description: Support the deployment and operation of disaggregated inference architectures. To be conformant,
       the platform should demonstrate that it can successfully install and run a disaggregated inference solution
