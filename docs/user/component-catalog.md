@@ -1882,13 +1882,20 @@ CRDs underneath it.
    reads the new revision syncs the cached one, which still declares the
    child and reinstalls it.
 
-   For `argocd`, hard-refresh the parent and check that `Sync Status` names
-   the revision you just published. Only then turn the parent's auto-sync
-   back on by re-applying it with `kubectl apply -f app-of-apps.yaml`.
+   For `argocd`, when the parent's `targetRevision` is a branch, hard-refresh
+   the parent and check that `Sync Status` names the revision you just
+   published. Only then turn the parent's auto-sync back on by re-applying it
+   with `kubectl apply -f app-of-apps.yaml`.
 
    ```bash
    argocd app get "${APP}" --hard-refresh
    ```
+
+   When it is a fixed tag, such as that of a bundle pushed with
+   `--output oci://<registry>/<path>:<tag>`, publishing never moves it. Push
+   the regenerated bundle under a new tag and `kubectl apply` its
+   `app-of-apps.yaml`. That points the parent at the new tag and turns
+   auto-sync back on together.
 
    For `argocd-helm`, the parent reads its chart version from the
    `targetRevision` Helm value, so publishing alone never moves it. Push the
@@ -1911,9 +1918,10 @@ CRDs underneath it.
    ```
 
    Bundles built with `--set deployer:cascadeDelete=true` already carry the
-   finalizer, so they skip the auto-sync steps. For `argocd`, publishing the
-   regenerated bundle is enough. For `argocd-helm`, publish it and run the
-   `helm upgrade` above.
+   finalizer, so they skip the auto-sync steps. For `argocd` with a branch
+   `targetRevision`, publishing the regenerated bundle is enough. With a fixed
+   tag, push it under a new tag and apply its `app-of-apps.yaml`. For
+   `argocd-helm`, publish it and run the `helm upgrade` above.
 
    For Fleet, do not `helm uninstall` the release. Fleet still declares it and
    reinstalls it on the next reconcile. Remove it from Fleet instead, and leave
