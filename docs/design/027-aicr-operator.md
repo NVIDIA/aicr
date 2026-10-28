@@ -93,9 +93,10 @@ exception:
   component passes. A status that is missing or names anything else is not
   ready.
 - **Verdicts are enforced.** A transition runs automatically only when every
-  changed component is assessed `safe` with no CRD change; anything else needs
-  approval; `blocked` stops it before any change, naming the component, and
-  the stored assessment keeps AICR's record with any migration steps it gives.
+  changed component is assessed `safe` with no CRD change. `blocked` stops it
+  before any change, naming the component, and no approval overrides it; the
+  stored assessment keeps AICR's record with any migration steps it gives.
+  Every other verdict needs approval.
 - **Nothing is removed by accident.** Deleting the operator or its runtime
   leaves the stack running. Removal is an approved rollout, and a reinstalled
   operator re-adopts the stack with approval.
