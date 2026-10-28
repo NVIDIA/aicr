@@ -1554,7 +1554,7 @@ gb200-nvke-ubuntu-training-kubeflow:
   015-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
   015-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
-  015-network-operator-post/templates/nic-cluster-policy-nvke-gb200.yaml: f0a866253b7a5c247c74e554a260d7002d6d8ce665487351543c1861123fde6c
+  015-network-operator-post/templates/nic-cluster-policy-nvke-gb200.yaml: 5da88c6ef85c59f83a4410ea16f728b692cc219efe742063177a94d808477814
   015-network-operator-post/values.yaml: e9d6f1481a61bac0626eecd824ba302bde4ea1258648b8bfd0fd8ca6a96330fc
   016-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
@@ -1573,7 +1573,7 @@ gb200-nvke-ubuntu-training-kubeflow:
   README.md: 277cb1c71384b62556b1fe8496d5ada125e21215fc180d25a65e51fbdb00f051
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: fd69a2af304cf26f334e2595a27c1fd62726507a071c4185ccadbe0e3b641dec
-  checksums.txt: f19e55bd840be40b92c7149db2eab9d8d07b5ba0337fcbf88d36998ea60137c0
+  checksums.txt: a64b0a8bfcbed8a46c51e179b3a4d37d700c5e57756977f5316fd63b59981e81
   deploy.sh: 7d5e92b02a59bef508ee433e801875d4e7ed9c4b7e0a352658f0d768af99c067
   recipe.yaml: 2d0c1126383892ea4166b371615b44756b7f337ae91175d12be44304d46d3bd2
 gb200-oke-ubuntu-inference-dynamo:

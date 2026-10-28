@@ -22,14 +22,16 @@ plus Kubeflow Trainer through the `platform-kubeflow` mixin.
   explicitly where that matters (`rdma-modules`), and `deploy.sh`'s DRA
   driver-migration gate waits its full timeout on them before continuing.
 - The primary CNI is OVN-Kubernetes on the BlueField-3, bound to the host's
-  inbox `mlx5_core`. Multus is already present on the nodes.
-- Every pod on the pod network is given one BlueField-3 VF: the `sdn-mutator`
-  webhook adds a `nvidia.com/asap2_vf: 1` request, and a node advertises 28.
-  That caps non-hostNetwork pods at 28 per node, platform pods included; the
-  recipe's own DaemonSets take eight slots per GPU node (GPU Operator) plus
-  nvsentinel, NFD, DRA and monitoring. Keep a system node pool for the
-  cluster-scoped charts or expect pods to stay Pending on
-  `Insufficient nvidia.com/asap2_vf`.
+  inbox `mlx5_core`. It is the only CNI on the image: no multus, no reference
+  plugins beyond what OVN-Kubernetes needs.
+- Some NVKE builds hand every pod on the pod network one BlueField-3 VF: an
+  `sdn-mutator` webhook adds a `nvidia.com/asap2_vf: 1` request and a node
+  advertises 28, which caps non-hostNetwork pods at 28 per node, platform
+  pods included (the recipe's own DaemonSets take eight slots per GPU node
+  for GPU Operator plus nvsentinel, NFD, DRA and monitoring). The reference
+  tenant has neither the webhook nor the resource. Where it does, keep a
+  system node pool for the cluster-scoped charts or expect pods to stay
+  Pending on `Insufficient nvidia.com/asap2_vf`.
 - East-west fabric: four ConnectX-7 InfiniBand rails per tray (`mlx5_0`,
   `mlx5_1`, `mlx5_3`, `mlx5_4`), active NDR, no IPoIB netdevs until the recipe
   loads `ib_ipoib`. `mlx5_2` is the BlueField-3 host representor. Firmware
@@ -50,11 +52,16 @@ plus Kubeflow Trainer through the `platform-kubeflow` mixin.
   load `/etc/rdma/modules/infiniband.conf` (`ib_ipoib`, `ib_umad`) and
   `rdma.conf` (`ib_iser`, `ib_uverbs`, `rdma_ucm`, `xprtrdma`, `svcrdma`), a
   superset of what the recipe loads.
-- Multus and the reference CNI plugins are preinstalled by NVKE
-  (`kube-system/multus-ds`, `/opt/cni/bin`), as is a `sriov-device-plugin`
-  that partitions the BlueField-3 VFs. The recipe installs neither; the
-  SR-IOV operator's NetworkAttachmentDefinitions are served by the platform
-  multus, and its policies select only the ConnectX-7 root devices.
+- The tenant image ships no multus: `/etc/cni/net.d` holds only
+  `10-ovn-kubernetes.conf`, `/opt/cni/bin` has no `multus`, and no DaemonSet
+  or package provides one (measured 2026-10-28). OVN-Kubernetes runs with
+  `--enable-multi-network`, but that serves only its own
+  NetworkAttachmentDefinitions; a pod that requests `sriov-network-rail-<n>`
+  on such a node gets the VF allocated and no IB interface, silently. The
+  NicClusterPolicy therefore carries `secondaryNetwork.multus` and
+  `cniPlugins`. Should a later NVKE image preinstall multus, remove that
+  block: two multus installs rewrite each other's host CNI configuration.
+  The SR-IOV policies select only the ConnectX-7 root devices.
 
 ## Never install DOCA-OFED on these nodes
 
@@ -125,9 +132,8 @@ spec:
 ```
 
 This is the shape k8s-launch-kit generates for
-`--deployment-type sriov --fabric infiniband` on this topology, minus its
-`secondaryNetwork.multus`/`cniPlugins` (preinstalled on NVKE, see above) and
-with the Maintenance Operator budget set to one node, with `numVfs` raised
+`--deployment-type sriov --fabric infiniband` on this topology, with the
+Maintenance Operator budget set to one node, with `numVfs` raised
 from l8k's 8 to the firmware's 16, and with the SR-IOV config daemon's
 `mellanox` plugin disabled (`sriovOperatorConfig.disablePlugins`). That
 plugin rewrites firmware `NUM_OF_VFS` to exactly `numVfs` and then runs
