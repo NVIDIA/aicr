@@ -1755,7 +1755,7 @@ func existingRawOverrideLayers(ctx context.Context, provider DataProvider, ref C
 	var layers []map[string]any
 
 	if ref.ValuesFile != "" {
-		baseValuesFile := fmt.Sprintf("components/%s/values.yaml", ref.Name)
+		baseValuesFile := BaseValuesFile(ref.Name)
 		if ref.ValuesFile != baseValuesFile {
 			baseData, err := provider.ReadFile(ctx, baseValuesFile)
 			switch {
