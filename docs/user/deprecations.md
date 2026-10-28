@@ -72,7 +72,7 @@ example `customer-managed`) and drop the override.
 ### Argo CD options as `deployer:` value overrides
 
 **Surface:** CLI, REST, config file, Go SDK ·
-**Deprecated in:** v1.2 · **Removed in:** not scheduled (v2.0.0 at the earliest)
+**Deprecated in:** v1.2 · **Removed in:** v2.0.0
 
 The four Argo CD bundle options were set with a reserved `deployer` prefix on
 the value-override flag: `--set deployer:<key>=<value>`, `set=deployer:<key>=<value>`
@@ -100,7 +100,9 @@ The argocd-helm install-time values are unaffected:
 `helm install --set deployer.namePrefix=...` (a dot, not a colon) is a chart
 value, not this bundle-time option.
 
-No removal release is set yet, so the warning does not name one.
+The spelling is on frozen v1 surfaces, so it keeps working through v1.x and
+is removed in v2.0.0, per the
+[deprecation policy](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md#deprecation-policy).
 
 **What to do.** Replace each `deployer:<key>` entry with the setting in the
 table, then confirm the bundle is unchanged.

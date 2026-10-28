@@ -443,12 +443,13 @@ var legacyReplacements = map[string]string{
 const legacyDeployerAnchor = "argo-cd-options-as-deployer-value-overrides"
 
 // LegacyDeployerNotice returns the deprecation notice for the deprecated
-// `deployer:<key>` value override. No removal release is scheduled; the
-// earliest possible is v2.0.0 (RELEASE.md § Deprecation Policy).
+// `deployer:<key>` value override. Removal waits for v2.0.0 because the
+// spelling is on frozen v1 surfaces (RELEASE.md § Deprecation Policy).
 func LegacyDeployerNotice(key string) deprecation.Notice {
 	return deprecation.Notice{
 		Subject:     "--set deployer:" + key,
 		Replacement: legacyReplacements[key],
+		RemovedIn:   "v2.0.0",
 		Anchor:      legacyDeployerAnchor,
 	}
 }

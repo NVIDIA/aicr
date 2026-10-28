@@ -310,8 +310,8 @@ func TestLegacyDeployerNotice(t *testing.T) {
 		if n.Replacement == "" {
 			t.Errorf("%s: notice names no replacement", key)
 		}
-		if n.RemovedIn != "" {
-			t.Errorf("%s: notice names removal %q, but none is scheduled", key, n.RemovedIn)
+		if n.RemovedIn != "v2.0.0" {
+			t.Errorf("%s: notice names removal %q, want v2.0.0", key, n.RemovedIn)
 		}
 		if !strings.Contains(n.URL(), "#"+legacyDeployerAnchor) {
 			t.Errorf("%s: notice URL %q does not point at the entry", key, n.URL())
