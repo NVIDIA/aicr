@@ -1950,6 +1950,16 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 			return nil, err
 		}
 	}
+	// Before pinning, so the gates read the injected values. With no bundlers
+	// filter or --set here, the platform is every enabled ref.
+	scope, scopeErr := bundler.InjectPromQLScrapeScope(r.internal.DataProvider(), r.internal.ComponentRefs, helmValues)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	if scope.Server != "" && len(scope.Consumers) == 0 {
+		slog.Warn("PromQL server is enabled but no enabled component declares telemetry.promql, so its Prometheus scrapes nothing",
+			"component", scope.Server)
+	}
 	pinned := r.internal.WithResolvedValues(helmValues)
 	if err := bundler.ValidateAccountingValues(pinned, helmValues); err != nil {
 		return nil, err

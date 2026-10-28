@@ -182,7 +182,8 @@ func TestFilterEnabledComponents_DRANodeLabelerGate(t *testing.T) {
 				t.Fatalf("PrepareAndValidate: %v", perr)
 			}
 
-			enabled, order, reasons, err := b.filterEnabledComponents(rr)
+			selection, err := b.filterEnabledComponents(rr)
+			enabled, order, reasons := selection.emitted, selection.order, selection.excluded
 			if tt.wantErr != "" {
 				if err == nil {
 					t.Fatalf("filterEnabledComponents() error = nil, want substring %q", tt.wantErr)

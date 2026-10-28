@@ -127,6 +127,20 @@ var stockRenderOptIns = []stockRenderOptIn{
 		covers: []string{"node-problem-detector", "nvcre", "gatekeeper"},
 	},
 	{
+		// No stock recipe selects nktp yet; the dependency edges are ADR-026's.
+		name: "h100-eks-ubuntu-training-kubeflow+nktp",
+		leaf: "h100-eks-ubuntu-training-kubeflow",
+		overlay: &overlayAddition{
+			componentRefs: []recipe.ComponentRef{{
+				Name:           "nktp",
+				Type:           recipe.ComponentTypeHelm,
+				ValuesFile:     "components/nktp/values.yaml",
+				DependencyRefs: []string{"cert-manager", "prometheus-operator-crds", "kube-prometheus-stack"},
+			}},
+		},
+		covers: []string{"nktp"},
+	},
+	{
 		name: "h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer",
 		leaf: "h100-eks-ubuntu-training-slurm",
 		overlay: &overlayAddition{

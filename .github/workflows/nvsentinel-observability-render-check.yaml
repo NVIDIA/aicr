@@ -29,8 +29,8 @@
 # the log-collector one asserts the collector Job, the file server it uploads
 # to and that server's volume and images, the system-namespaces one asserts
 # the chart's default list still matches the one the drain scope keeps, and
-# the CRD exclusion one asserts the chart still ships mongodb-store's CRDs where
-# nvsentinel's ownsCRDsExcludeSubcharts expects them.
+# the CRD exclusion one asserts every component's ownsCRDsExcludeSubcharts
+# (nvsentinel's and nktp's) still matches its pinned chart.
 # All are gated on testing.Short() -- `make
 # test`/`make qualify`/every other CI job run with -short, so this is the only
 # place they execute. There is no PR-blocking trigger here on purpose: these
@@ -101,7 +101,7 @@ jobs:
             TestNVSentinelRemediationChartRender
             TestNVSentinelRemediationAbsentWithoutMixin
             TestNVSentinelMongoDBChartRender
-            TestNVSentinelCRDExclusionMatchesChart
+            TestCRDExclusionsMatchChart
             TestNVSentinelSlinkyDrainerChartRender
             TestNVSentinelHealthEventsAnalyzerChartRender
             TestNVSentinelEventExporterChartRender

@@ -86,7 +86,7 @@ security_tools:
   # renovate: datasource=github-releases depName=anchore/grype depType=security_tools
   grype: 'v0.121.0'
   # renovate: datasource=github-releases depName=sigstore/cosign depType=security_tools
-  cosign: 'v3.1.3'
+  cosign: 'v3.1.4'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
   syft: 'v1.55.0'
   # Attaches the aiperf-bench third-party source archive as an OCI 1.1 referrer
@@ -108,7 +108,7 @@ security_tools:
   # followed immediately by `key: 'value'`, so any comment between them silently
   # drops this pin from Renovate's scan.
   # renovate: datasource=github-releases depName=oras-project/oras depType=security_tools
-  oras: '1.3.5'
+  oras: '1.3.6'
   # Refreshed automatically by tools/update-oras-checksums via Renovate
   # postUpgradeTasks whenever the version above is bumped. Pinning the digest
   # here — rather than trusting the checksums.txt served beside the tarball —
@@ -124,7 +124,7 @@ security_tools:
   #
   # linux/amd64 only: this pin feeds the setup-build-tools action, which runs on
   # ubuntu runners. tools/setup-tools handles local dev on other platforms.
-  oras_sha256_linux_amd64: 'f48a73ea6d026a862c3919fc773da9a8c86fc259c2c737d5baed3b8b9614ad22'
+  oras_sha256_linux_amd64: '66fb0ad7206f3f6fa77ed5b552049d364ccf4b50b1684554f731f76302b52ca0'
 
 # E2E Testing Tools
 testing_tools:
@@ -133,7 +133,7 @@ testing_tools:
   # kubelogin: Entra exec-plugin for AKS kubeconfigs, installed by uat-azure.yaml
   # via `az aks install-cli` (which defaults to latest without an explicit pin).
   # renovate: datasource=github-releases depName=Azure/kubelogin depType=testing_tools
-  kubelogin: 'v0.2.21'
+  kubelogin: 'v0.2.22'
   # renovate: datasource=github-releases depName=kubernetes-sigs/kind depType=testing_tools
   kind: '0.33.0'
   # renovate-digest: datasource=git-refs depName=nvkind packageName=https://github.com/NVIDIA/nvkind branch=main depType=testing_tools

@@ -45,6 +45,10 @@
 #     file:              Path to a ComponentUpgrades YAML file, relative to
 #                        the data directory (e.g.,
 #                        "components/nodewright-operator/upgrades.yaml")
+#   telemetry:         Runtime metrics contract (ADR-026)
+#     promql:            monitorsFrom (components exposing the data) and series
+#                        (RE2 patterns) a component queries from Prometheus
+#     promqlServer:      Value paths the bundler fills on the Prometheus server
 #
 # Note: A component must have either 'helm' OR 'kustomize' configuration, not both.
 # Node scheduling paths define WHERE CLI flags like --system-node-selector are applied.
@@ -1069,6 +1073,83 @@ components:
           - nodeSelector
         tolerationPaths:
           - tolerations
+
+  - name: nktp
+    displayName: NKTP Telemetry Pipeline
+    class: ops
+    # ADR-026. No stock recipe selects it yet; its dependency edges
+    # (cert-manager, prometheus-operator-crds, and kube-prometheus-stack, whose
+    # node-exporter must release host port 9100 first) land with the overlays
+    # that select it.
+    #
+    # prometheus-crds carries the CRDs prometheus-operator-crds owns, and
+    # opentelemetry-operator's conf/crds/ holds Helm templates, not manifests.
+    ownsCRDs: true
+    ownsCRDsExcludeSubcharts:
+      - prometheus-crds
+      - opentelemetry-operator
+    # The release renders OpenTelemetryCollector CRs whose CRD its own
+    # otel-crds subchart installs.
+    hasSelfRefCRDs: true
+    valueOverrideKeys:
+      - nktp
+    healthCheck:
+      assertFile: checks/nktp/health-check.yaml
+    helm:
+      defaultRepository: oci://ghcr.io/dsx-ai-factory/nvke/charts
+      defaultChart: nktp
+      # Moves to 0.1.1 at GA.
+      # renovate: datasource=docker depName=ghcr.io/dsx-ai-factory/nvke/charts/nktp
+      defaultVersion: "0.1.1-rc.3"
+      # The node collector is privileged: a platform that enforces Pod
+      # Security needs this namespace labeled privileged (os-talos pattern).
+      defaultNamespace: nktp
+    # The three node agents (the daemonset collector, node-exporter, and the
+    # kube-state-metrics pods DaemonSet) are absent: system-toleration
+    # injection would replace their operator: Exists toleration.
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - opentelemetry-kube-stack.opentelemetry-operator.nodeSelector
+          - gateway_metrics.kubernetes.nodeSelector
+          - gateway_logs.kubernetes.nodeSelector
+          - gateway_traces.kubernetes.nodeSelector
+          - watchdog.kubernetes.nodeSelector
+          - watchdog.kubernetes.targetAllocator.nodeSelector
+          - large_target_metrics.kubernetes.nodeSelector
+          - large_target_metrics.kubernetes.targetAllocator.nodeSelector
+          - cluster_events.kubernetes.nodeSelector
+          - daemonset.kubernetes.targetAllocator.nodeSelector
+          - kube-state-metrics.deployments.unscheduled-pods.kubernetes.nodeSelector
+          - kube-state-metrics.deployments.workloads.kubernetes.nodeSelector
+          - kube-state-metrics.deployments.networking.kubernetes.nodeSelector
+          - kube-state-metrics.deployments.storage.kubernetes.nodeSelector
+          - kube-state-metrics.deployments.configuration.kubernetes.nodeSelector
+          - kube-state-metrics.deployments.cluster.kubernetes.nodeSelector
+          - otel-lgtm.nodeSelector
+          - metrics-server.nodeSelector
+        tolerationPaths:
+          - opentelemetry-kube-stack.opentelemetry-operator.tolerations
+          - gateway_metrics.kubernetes.tolerations
+          - gateway_logs.kubernetes.tolerations
+          - gateway_traces.kubernetes.tolerations
+          - watchdog.kubernetes.tolerations
+          - watchdog.kubernetes.targetAllocator.tolerations
+          - large_target_metrics.kubernetes.tolerations
+          - large_target_metrics.kubernetes.targetAllocator.tolerations
+          - cluster_events.kubernetes.tolerations
+          - daemonset.kubernetes.targetAllocator.tolerations
+          - kube-state-metrics.deployments.unscheduled-pods.kubernetes.tolerations
+          - kube-state-metrics.deployments.workloads.kubernetes.tolerations
+          - kube-state-metrics.deployments.networking.kubernetes.tolerations
+          - kube-state-metrics.deployments.storage.kubernetes.tolerations
+          - kube-state-metrics.deployments.configuration.kubernetes.tolerations
+          - kube-state-metrics.deployments.cluster.kubernetes.tolerations
+          - otel-lgtm.tolerations
+          - metrics-server.tolerations
+    validations:
+      - function: CheckNKTPExportersHaveBackend
+        severity: error
 
   - name: aws-ebs-csi-driver
     displayName: aws-ebs-csi-driver

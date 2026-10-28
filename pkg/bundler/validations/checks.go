@@ -73,6 +73,7 @@ func init() {
 	registerCheck("CheckNVSentinelDrainScopeCoherent", CheckNVSentinelDrainScopeCoherent)
 	registerCheck("CheckNVSentinelMongoDBCoherent", CheckNVSentinelMongoDBCoherent)
 	registerCheck("CheckNVSentinelDatastorePrerequisites", CheckNVSentinelDatastorePrerequisites)
+	registerCheck("CheckNKTPExportersHaveBackend", CheckNKTPExportersHaveBackend)
 }
 
 // registerCheck is a helper to register validation functions from checks.go.
