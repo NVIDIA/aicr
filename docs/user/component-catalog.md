@@ -1870,13 +1870,20 @@ CRDs underneath it.
 
    ```bash
    APP="k8s-aibom"  # the child Application, its namePrefix plus the component name
-   # Append to existing finalizers. Appending fails when the list is absent.
-   if [ -z "$(kubectl -n argocd get application "${APP}" -o jsonpath='{.metadata.finalizers}')" ]; then
-     PATCH='[{"op":"add","path":"/metadata/finalizers","value":["resources-finalizer.argocd.argoproj.io"]}]'
-   else
-     PATCH='[{"op":"add","path":"/metadata/finalizers/-","value":"resources-finalizer.argocd.argoproj.io"}]'
+   if ! FINALIZERS="$(kubectl -n argocd get application "${APP}" \
+       -o jsonpath='{range .metadata.finalizers[*]}{@}{"\n"}{end}')"; then
+     echo "could not read Application ${APP}; not patching" >&2
+   elif [ -z "${FINALIZERS}" ]; then
+     # The test op rejects the patch if finalizers appeared since the read,
+     # because adding the list would replace them.
+     kubectl -n argocd patch application "${APP}" --type=json -p '[
+       {"op":"test","path":"/metadata/finalizers","value":null},
+       {"op":"add","path":"/metadata/finalizers","value":["resources-finalizer.argocd.argoproj.io"]}
+     ]'
+   elif ! printf '%s\n' "${FINALIZERS}" | grep -qxF resources-finalizer.argocd.argoproj.io; then
+     kubectl -n argocd patch application "${APP}" --type=json \
+       -p '[{"op":"add","path":"/metadata/finalizers/-","value":"resources-finalizer.argocd.argoproj.io"}]'
    fi
-   kubectl -n argocd patch application "${APP}" --type=json -p "${PATCH}"
    ```
 
    For Fleet, do not `helm uninstall` the release. Fleet still declares it and
