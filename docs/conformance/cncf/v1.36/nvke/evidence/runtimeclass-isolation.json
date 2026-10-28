@@ -82,7 +82,7 @@
             "name": "probe",
             "state": {
               "terminated": {
-                "containerID": "containerd://a25d517972c4774c9c8fa4d8c554fdf43c0834c19b2631365d11ac85018f6152",
+                "containerID": "REDACTED_CONTAINER_ID_01",
                 "exitCode": 0,
                 "finishedAt": "2026-10-28T00:00:30Z",
                 "reason": "Completed",
@@ -173,7 +173,7 @@
             "name": "probe",
             "state": {
               "terminated": {
-                "containerID": "containerd://35c7fadce3123c280134753f7993fc0ca24644862ecdf660aef1c0a54aa670a4",
+                "containerID": "REDACTED_CONTAINER_ID_02",
                 "exitCode": 0,
                 "finishedAt": "2026-10-28T00:00:30Z",
                 "reason": "Completed",
@@ -262,7 +262,7 @@
             "name": "probe",
             "state": {
               "terminated": {
-                "containerID": "containerd://b987160b8fccd66f7fc1ecbc4456fa928d49e614e09b57e7886e13bb56ac2478",
+                "containerID": "REDACTED_CONTAINER_ID_03",
                 "exitCode": 0,
                 "finishedAt": "2026-10-28T00:00:31Z",
                 "reason": "Completed",
@@ -351,7 +351,7 @@
             "name": "probe",
             "state": {
               "terminated": {
-                "containerID": "containerd://9dacac08b0b7e527d34b25d83df2f7d665c31ad4dd987c82710454673f5dd0cc",
+                "containerID": "REDACTED_CONTAINER_ID_04",
                 "exitCode": 0,
                 "finishedAt": "2026-10-28T00:00:30Z",
                 "reason": "Completed",

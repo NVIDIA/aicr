@@ -10,7 +10,15 @@ Gateway API traffic management.
 - [PRODUCT.yaml](PRODUCT.yaml)
 - [Underlying Kubernetes conformance](https://github.com/cncf/k8s-conformance/tree/master/v1.36/nvke)
 
+The complete directory, including `evidence/`, is submitted as `v1.36/nvke/`
+in [cncf/k8s-ai-conformance](https://github.com/cncf/k8s-ai-conformance) so all
+relative evidence references resolve.
+
 ## Evidence
+
+Evidence was collected with [NVIDIA AI Cluster Runtime (AICR)](https://github.com/NVIDIA/aicr)
+at commit [`864dd60065f1`](https://github.com/NVIDIA/aicr/commit/864dd60065f1c0f0b544213d896271d212dd6a00),
+using the `gb200-nvke-ubuntu-training-kubeflow` recipe.
 
 Evidence was collected on October 27–28, 2026 (UTC), using the NVKE v0.22.0
 qualification builds on Kubernetes v1.36.3, with two ARM64 NVIDIA GB200 workers
@@ -41,6 +49,7 @@ checks demonstrate header-based and weighted routing, completed GPU TrainJob
 execution, and authorized and unauthorized RuntimeClass GPU access on both
 workers.
 
-Internal IP addresses, site and host names, and infrastructure and hardware
-identifiers have been removed or consistently aliased. Test commands,
-timestamps, software versions, outcomes, and measured values are retained.
+Internal IP addresses, site and host names, infrastructure UUIDs, GPU UUIDs,
+and container IDs have been removed or consistently aliased. DCGM `pci_bus_id`
+labels are retained. Test commands, timestamps, software versions, outcomes,
+and measured values are retained.
