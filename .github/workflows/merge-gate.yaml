@@ -204,20 +204,46 @@ jobs:
             crdinv:
               # Inputs to make crd-inventory-check, which renders each pinned
               # chart a health check asserts a CRD against and compares it with
-              # the committed crds.yaml. The pins, values, asserts and manifests
-              # it reads live under recipes/. The tool, the renderer, the helm
-              # pin, the Makefile target and this workflow are listed so a
-              # change to the check runs it.
+              # the committed crds.yaml. The recipes/ entries cover the data
+              # embedded in the recipes package, and the pkg/ entries every
+              # in-repo package the tool imports, directly or not.
+              # TestMergeGateWatchesCRDInventoryInputs fails when either misses
+              # a file the tool builds from. The helm pin, the Go toolchain and
+              # modules, the actions that set up the job, the Makefile target
+              # and this workflow are listed so a change to the check runs it.
+              - 'recipes/*.go'
               - 'recipes/registry.yaml'
               - 'recipes/overlays/**'
               - 'recipes/mixins/**'
               - 'recipes/checks/**'
-              - 'recipes/components/*/values*.yaml'
-              - 'recipes/components/*/crds.yaml'
+              - 'recipes/validators/catalog.yaml'
+              - 'recipes/components/*/*.yaml'
               - 'recipes/components/*/manifests/**'
               - 'tools/crd-inventory/**'
+              - 'pkg/allocpolicy/*.go'
+              - 'pkg/chainsaw/*.go'
+              - 'pkg/constraints/expr/*.go'
+              - 'pkg/defaults/*.go'
+              - 'pkg/errors/*.go'
+              - 'pkg/header/*.go'
               - 'pkg/helm/**'
+              - 'pkg/inventory/*.go'
+              - 'pkg/k8s/client/*.go'
+              - 'pkg/k8s/labels/*.go'
+              - 'pkg/k8s/pod/*.go'
+              - 'pkg/measurement/*.go'
+              - 'pkg/recipe/*.go'
+              - 'pkg/recipe/oskind/*.go'
+              - 'pkg/serializer/*.go'
+              - 'pkg/upgrade/*.go'
+              - 'pkg/version/*.go'
               - '.settings.yaml'
+              - '.go-version'
+              - 'go.mod'
+              - 'go.sum'
+              - '.github/actions/load-versions/**'
+              - '.github/actions/setup-build-tools/**'
+              - '.github/actions/ghcr-login/**'
               - 'Makefile'
               - '.github/workflows/merge-gate.yaml'
             classcol:
