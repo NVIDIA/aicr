@@ -1628,7 +1628,7 @@ A component need not sit in its registry default namespace to be found. The read
 
 **Permissions.** A cluster read lists at cluster scope, so it needs `list` on `secrets` and `configmaps` under `helm`, `helmfile`, `terraform`, `flux` and `fleet`, and `list` on `applications.argoproj.io` under `argocd` and `argocd-helm`, plus `list` on `secrets` when an `Application` names its destination cluster rather than addressing it. The at-risk scan additionally needs API discovery and `list` on each kind it scans. Nothing is written. `--format json` and `--format yaml` carry the same thing as `source`.
 
-**Under Argo CD, only `https://kubernetes.default.svc` counts as this cluster.** That is Argo CD's in-cluster address, and an `Application` is read as deploying here only when its destination server is that address or its destination name resolves to it: through a cluster Secret registering the name at that address, or, when no Secret registers the name, as Argo CD's built-in `in-cluster`. One that reaches this cluster any other way, such as through the cluster's external API endpoint, is counted as `remote`, and its component reads "added", which carries no verdict and does not fail a strict run. The child `Application`s AICR generates use the in-cluster address unless [`deployer:destinationServer`](#argo-cd-deployer-options) names another.
+**Under Argo CD, only `https://kubernetes.default.svc` counts as this cluster.** That is Argo CD's in-cluster address, and an `Application` is read as deploying here only when its destination server is that address or its destination name resolves to it: through a cluster Secret registering the name at that address, or, when no Secret registers the name, as Argo CD's built-in `in-cluster`. One that reaches this cluster any other way, such as through the cluster's external API endpoint, is counted as `remote`, and its component reads "added", which carries no verdict and does not fail a strict run. The child `Application`s AICR generates use the in-cluster address unless [`--argocd-destination-server`](#argo-cd-deployer-options) names another.
 
 A read that recognizes nothing is reported, never failed. Every row then reads "added", and the block says so in as many words, because from the rows alone a cluster with none of these components installed looks identical to the two likelier causes: the wrong cluster, or components installed by a deployer other than the one you named.
 
@@ -1833,6 +1833,14 @@ aicr bundle [flags]
 | `--fleet-namespace` | | string | Fleet workspace the generated GitRepo or HelmOps are applied to (default: `fleet-default`, which targets downstream clusters registered with Rancher). `fleet-local` targets the Rancher local cluster. Used with `--deployer fleet`. |
 | `--fleet-mode` | | string | Fleet output shape for `--deployer fleet`: `gitrepo` (default) writes a `fleet.yaml` per component plus `gitrepo.yaml`; `helmop` writes `helmops.yaml` with one HelmOp per component and needs Fleet v0.13 or later. In `gitrepo` mode Fleet embeds each chart in a Bundle object (gzip-compressed above 1MB, capped by etcd at about 1.5MiB); kube-prometheus-stack compresses to about 1.4MB, which deploys from a GitRepo but is rejected when `fleet apply` posts it through Rancher's 1Mi `public-api-body-limit`. HelmOps reference charts instead of embedding them, so Bundle size does not apply, but local charts (raw manifests, `--vendor-charts`) are rejected. |
 | `--app-name` | | string | Parent Argo Application name (default: `aicr-stack` for `--deployer argocd-helm`, `nvidia-stack` for `--deployer argocd`), or the Fleet GitRepo name and bundle-name prefix for `--deployer fleet` (default: `aicr`). Must be a DNS-1123 subdomain. With `--deployer fleet` it must be a DNS-1123 label, and every `<app-name>-<release>` bundle name must be at most 63 characters (Fleet copies it into a label value). Required when deploying multiple non-overlapping AICR bundles to the same Argo CD namespace so the parent Applications do not collide. For `--deployer argocd-helm`, the value is the chart default and can still be overridden at install time via `helm install --set appName=...`. Rejected on other deployers (`helm`, `flux`, `helmfile`, `terraform`). |
+| `--argocd-name-prefix` | | string | Prefix prepended to every child Application name (`--deployer argocd` or `argocd-helm` only). See [Argo CD Deployer Options](#argo-cd-deployer-options). |
+| `--argocd-destination-server` | | string | Cluster API URL child Applications deploy to (default: `https://kubernetes.default.svc`; `--deployer argocd` or `argocd-helm` only). |
+| `--argocd-project` | | string | Argo CD project for child Applications (default: `default`; `--deployer argocd` or `argocd-helm` only). |
+| `--argocd-cascade-delete` | | bool | Add Argo CD's resources finalizer to the parent and every child Application (`--deployer argocd` or `argocd-helm` only). |
+| `--argocd-sync-retry-limit` | | int | Set `spec.syncPolicy.retry.limit` on every child Application (`--deployer argocd` or `argocd-helm` only). Unset leaves Argo CD's auto-sync default; `0` disables retries. |
+| `--argocd-sync-retry-backoff-duration` | | string | Delay before the first sync retry (e.g. `30s`). Requires a sync retry limit, from `--argocd-sync-retry-limit` or `--config`. |
+| `--argocd-sync-retry-backoff-factor` | | int | Multiplier applied to the retry delay after each failed sync (at least `1`). Requires a sync retry limit, from `--argocd-sync-retry-limit` or `--config`. |
+| `--argocd-sync-retry-backoff-max-duration` | | string | Upper bound on the delay between sync retries (e.g. `5m`). Requires a sync retry limit, from `--argocd-sync-retry-limit` or `--config`. |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file |
 | `--insecure-tls` | | bool | Skip TLS verification for OCI registry connections |
 | `--plain-http` | | bool | Use plain HTTP for OCI registry connections |
@@ -1925,6 +1933,14 @@ spec:
       repo: https://example.git/charts
       set:
         - gpuoperator:driver.version=570.86.16
+      argocd:
+        project: gpu-infra
+        syncRetry:
+          limit: 20
+          backoff:
+            duration: 30s
+            factor: 2
+            maxDuration: 5m
     scheduling:
       systemNodeSelector:
         role: system
@@ -1956,8 +1972,9 @@ spec:
 # Drive the bundle entirely from a config file
 aicr bundle --config bundle.yaml
 
-# Override the deployer for a one-off run
-aicr bundle --config bundle.yaml --deployer helm
+# Override the deployer for a one-off run (the argocd block above needs
+# an Argo CD deployer; with --deployer helm it is rejected)
+aicr bundle --config bundle.yaml --deployer argocd-helm
 ```
 
 CLI flags always override values loaded from `--config`. For slice/map flags (`--set`, `--dynamic`, `--system-node-selector`, etc.), CLI presence replaces the config's value rather than appending. Override events are logged at INFO so users can see which input won.
@@ -2279,38 +2296,57 @@ aicr bundle -r recipe.yaml \
 
 #### Argo CD Deployer Options
 
-The `deployer` prefix is reserved: with `--deployer argocd` or `--deployer argocd-helm`, `--set deployer:<key>=<value>` configures the generated Argo CD Applications instead of component chart values. Unknown `deployer:` keys are rejected, and the prefix is rejected entirely with any other `--deployer` type (`helm`, `flux`, `helmfile`, `terraform`).
+With `--deployer argocd` or `--deployer argocd-helm`, the `--argocd-*` flags configure the generated Argo CD Applications. Each flag has a config-file field under `spec.bundle.deployment.argocd` (see [CLI Config File](cli-config.md)) and a REST query parameter of the same name without the leading dashes (see [API Reference](api-reference.md)). The flags are rejected with any other `--deployer` type.
 
-| Key | Applies to | Default | Example |
-|-----|------------|---------|---------|
-| `namePrefix` | Child Application names | (none) | `--set deployer:namePrefix=tenant-a-` |
-| `destinationServer` | Child Applications' `spec.destination.server` | `https://kubernetes.default.svc` | `--set deployer:destinationServer=https://prod.example.com:6443` |
-| `project` | Child Applications' `spec.project` | `default` | `--set deployer:project=gpu-infra` |
-| `cascadeDelete` | Parent and child Applications | `false` | `--set deployer:cascadeDelete=true` |
+| Flag | Config field | Applies to | Default |
+|------|--------------|------------|---------|
+| `--argocd-name-prefix` | `namePrefix` | Child Application names | (none) |
+| `--argocd-destination-server` | `destinationServer` | Child Applications' `spec.destination.server` | `https://kubernetes.default.svc` |
+| `--argocd-project` | `project` | Child Applications' `spec.project` | `default` |
+| `--argocd-cascade-delete` | `cascadeDelete` | Parent and child Applications' finalizers | `false` |
+| `--argocd-sync-retry-limit` | `syncRetry.limit` | Child Applications' `spec.syncPolicy.retry.limit` | (unset) |
+| `--argocd-sync-retry-backoff-duration` | `syncRetry.backoff.duration` | Child Applications' `spec.syncPolicy.retry.backoff.duration` | (Argo CD: `5s`) |
+| `--argocd-sync-retry-backoff-factor` | `syncRetry.backoff.factor` | Child Applications' `spec.syncPolicy.retry.backoff.factor` | (Argo CD: `2`) |
+| `--argocd-sync-retry-backoff-max-duration` | `syncRetry.backoff.maxDuration` | Child Applications' `spec.syncPolicy.retry.backoff.maxDuration` | (Argo CD: `3m`) |
 
-**Child Applications only:** `namePrefix`, `destinationServer`, and `project` affect the per-component child Applications, not the parent app-of-apps. Application CRs are reconciled only from the cluster running Argo CD, so the parent stays on the control-plane cluster in project `default` — see the Argo CD [cluster bootstrapping guide](https://argo-cd.readthedocs.io/en/stable/operator-manual/cluster-bootstrapping/). The parent's name is set with [`--app-name`](#aicr-bundle).
+A flag overrides the same field in `--config`, field by field. An unset flag is distinct from an explicit `false` or `0`: `--argocd-cascade-delete=false` overrides a config file that sets `cascadeDelete: true`.
 
-**Prerequisites for remote destinations:** AICR only writes `deployer:destinationServer` and `deployer:project` into the generated Applications — it does not configure Argo CD. The destination cluster must already be registered with Argo CD (`argocd cluster add <context>` or a [declarative cluster Secret](https://argo-cd.readthedocs.io/en/stable/operator-manual/declarative-setup/#clusters)), and the [Argo CD project](https://argo-cd.readthedocs.io/en/stable/user-guide/projects/) referenced by `deployer:project` must permit the emitted destinations and source repositories; otherwise the child Applications fail to sync with a permission or unknown-cluster error.
+**Deprecated `--set deployer:<key>` spelling:** the first four settings were originally `--set deployer:namePrefix=...`, `deployer:destinationServer`, `deployer:project` and `deployer:cascadeDelete`. That spelling still works through v1.x and warns; see [Deprecations](deprecations.md#argo-cd-options-as-deployer-value-overrides). Giving the same setting both ways in one source (two flags, or `set` and `argocd` in one config file) is rejected. Across sources, the CLI wins over the config file whichever spelling each uses. Sync retry has no `deployer:` spelling.
 
-**Name limits:** the composed child Application name (`namePrefix` + component name) must be at most 53 characters — Argo CD uses the Application name as the Helm release name, which Helm caps at 53 — and must not equal the parent Application's name (set with `--app-name`). Both violations are rejected at bundle time, and argocd-helm bundles re-check them at `helm template`/`helm install` time for install-time `--set deployer.namePrefix=...` overrides.
+**Child Applications only:** the name prefix, destination server, project and sync retry affect the per-component child Applications, not the parent app-of-apps. Application CRs are reconciled only from the cluster running Argo CD, so the parent stays on the control-plane cluster in project `default` — see the Argo CD [cluster bootstrapping guide](https://argo-cd.readthedocs.io/en/stable/operator-manual/cluster-bootstrapping/). The parent's name is set with [`--app-name`](#aicr-bundle).
 
-**Install-time overrides with argocd-helm:** for `--deployer argocd-helm`, the three string keys ship as defaults in the bundle chart's root `values.yaml` and can also be overridden at install time via `helm install --set deployer.<key>=...` (note the dot, not colon). The bundle ships a `values.schema.json` that Helm applies on install/upgrade/template/lint: unknown `deployer.*` keys (e.g. a `destinationSever` typo) and malformed values are rejected at install time instead of silently falling back to defaults. `cascadeDelete` is bundle-time only — it adds the [`resources-finalizer.argocd.argoproj.io` finalizer](https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/) (a list field, not overridable via `--set`) so deleting an Application also deletes its deployed resources.
+**Prerequisites for remote destinations:** AICR only writes the destination server and project into the generated Applications — it does not configure Argo CD. The destination cluster must already be registered with Argo CD (`argocd cluster add <context>` or a [declarative cluster Secret](https://argo-cd.readthedocs.io/en/stable/operator-manual/declarative-setup/#clusters)), and the [Argo CD project](https://argo-cd.readthedocs.io/en/stable/user-guide/projects/) named by `--argocd-project` must permit the emitted destinations and source repositories; otherwise the child Applications fail to sync with a permission or unknown-cluster error.
 
-**Children-only rendering (`deployer.includeRootApp`, install-time only):** argocd-helm bundles render the parent app-of-apps Application as a chart template, so an *externally managed* root Application pointed at the published chart — for example one created by a controller such as a Cluster API addon provider — would otherwise render a second parent (`aicr-stack`) that owns the same child Applications and fights the external root through its automated prune/selfHeal sync policy. Set `deployer.includeRootApp: false` in that root Application's `spec.source.helm.valuesObject` (or `helm install --set deployer.includeRootApp=false`) to render children-only. The default (`true`) keeps the standalone `helm install` flow unchanged; the same published bundle serves both consumption modes. This is a **boolean** key — pass it with plain `--set` (not `--set-string`), and note it is not a bundle-time `deployer:` key.
+**Name limits:** the composed child Application name (name prefix + component name) must be at most 53 characters — Argo CD uses the Application name as the Helm release name, which Helm caps at 53 — and must not equal the parent Application's name (set with `--app-name`). Both violations are rejected at bundle time, and argocd-helm bundles re-check them at `helm template`/`helm install` time for install-time `--set deployer.namePrefix=...` overrides.
+
+**Sync retry:** without a retry policy, Argo CD auto-sync (as of v3.3) retries a failed sync 5 times with its default backoff and then stops retrying that revision. A child Application whose resources need a CRD that a sibling installs (a `-post` folder's custom resources, for example) can exhaust those attempts before the CRD exists. `--argocd-sync-retry-limit` sets `spec.syncPolicy.retry` on every child Application, including the `-pre`, `-post` and readiness-gate Applications, to give such a sibling time to arrive. It does not order components or wait for readiness. The backoff flags require a limit, from `--argocd-sync-retry-limit` or the config file's `syncRetry.limit`, because Argo CD reads a missing limit as `0`, which disables retries. The limit must be `0` or more; Argo CD would retry a negative limit forever. Durations use Go syntax (`30s`, `5m`), and the factor must be at least `1`. Unset backoff fields keep Argo CD's defaults.
+
+**Install-time overrides with argocd-helm:** for `--deployer argocd-helm`, the name prefix, destination server and project ship as defaults in the bundle chart's root `values.yaml` and can also be overridden at install time via `helm install --set deployer.<key>=...` (`deployer.namePrefix`, `deployer.destinationServer`, `deployer.project`). The bundle ships a `values.schema.json` that Helm applies on install/upgrade/template/lint: unknown `deployer.*` keys (e.g. a `destinationSever` typo) and malformed values are rejected at install time instead of silently falling back to defaults. Cascade delete and sync retry are bundle-time only. Cascade delete adds the [`resources-finalizer.argocd.argoproj.io` finalizer](https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/) (a list field, not overridable via `--set`) so deleting an Application also deletes its deployed resources.
+
+**Children-only rendering (`deployer.includeRootApp`, install-time only):** argocd-helm bundles render the parent app-of-apps Application as a chart template, so an *externally managed* root Application pointed at the published chart — for example one created by a controller such as a Cluster API addon provider — would otherwise render a second parent (`aicr-stack`) that owns the same child Applications and fights the external root through its automated prune/selfHeal sync policy. Set `deployer.includeRootApp: false` in that root Application's `spec.source.helm.valuesObject` (or `helm install --set deployer.includeRootApp=false`) to render children-only. The default (`true`) keeps the standalone `helm install` flow unchanged; the same published bundle serves both consumption modes. This is a **boolean** key — pass it with plain `--set` (not `--set-string`), and note it has no bundle-time `--argocd-*` flag.
 
 **Use `--set-string` for values Helm would type-infer:** apart from the boolean `deployer.includeRootApp`, the schema is intentionally string-typed, and Helm's plain `--set` parses booleans and bare numbers into their inferred types — `helm install ... --set deployer.project=true` delivers a boolean, which the schema rejects. Pass such values with `--set-string` so they stay strings: `helm install ... --set-string deployer.project=true`.
 
 ```shell
 # Deploy child Applications to a remote cluster under a tenant prefix
 aicr bundle -r recipe.yaml --deployer argocd \
-  --set deployer:namePrefix=tenant-a- \
-  --set deployer:destinationServer=https://prod.example.com:6443 \
-  --set deployer:project=gpu-infra \
+  --argocd-name-prefix tenant-a- \
+  --argocd-destination-server https://prod.example.com:6443 \
+  --argocd-project gpu-infra \
   -o ./bundles
 
 # Enable cascading deletion on the app-of-apps and its children
 aicr bundle -r recipe.yaml --deployer argocd-helm \
-  --set deployer:cascadeDelete=true \
+  --argocd-cascade-delete \
+  -o ./bundle
+
+# Retry failed child syncs for about 87 minutes before giving up
+# (30s, 60s, 120s, 240s, then 16 x 5m)
+aicr bundle -r recipe.yaml --deployer argocd-helm \
+  --argocd-sync-retry-limit 20 \
+  --argocd-sync-retry-backoff-duration 30s \
+  --argocd-sync-retry-backoff-factor 2 \
+  --argocd-sync-retry-backoff-max-duration 5m \
   -o ./bundle
 
 # argocd-helm: override the shipped defaults at install time instead
@@ -3383,7 +3419,7 @@ Delete the parent `Application` that owns the bundle's child Applications
 `resources-finalizer.argocd.argoproj.io` finalizer on generated
 Applications, so a plain `kubectl delete` removes only the Application CR
 and leaves the managed resources running. Bundles generated with
-`--set deployer:cascadeDelete=true` (see
+`--argocd-cascade-delete` (see
 [Argo CD Deployer Options](#argo-cd-deployer-options)) are the exception:
 the finalizer is baked onto the parent and every child Application, so a
 plain `kubectl delete` on the parent already cascades to the managed

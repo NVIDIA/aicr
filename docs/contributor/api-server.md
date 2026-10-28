@@ -56,7 +56,7 @@ Order is **outermost first**:
 |---|-------|---------|
 | 1 | `metricsMiddleware` | Start timer, increment in-flight gauge, record duration and status histogram. Outermost so total latency is captured. |
 | 2 | `versionMiddleware` | Parse `Accept` for `application/vnd.nvidia.aicr.v<N>+json`; stash version in context; set `X-API-Version` response header |
-| 3 | `deprecationMiddleware` | Attaches `Deprecation`, `Sunset` and `Link` headers on routes registered via `WithDeprecatedRoutes`. No route is deprecated today. |
+| 3 | `deprecationMiddleware` | Attaches `Deprecation`, `Sunset` and `Link` headers on routes registered via `WithDeprecatedRoutes`. No route is deprecated today. A deprecation scoped to one parameter value is handled in the route's handler instead: `/v1/bundle` attaches the headers itself when a request uses `set=deployer:<key>`. |
 | 4 | `requestIDMiddleware` | Honor `X-Request-Id` if a valid UUID, else mint one; stash in context; echo to response header |
 | 5 | `timeoutMiddleware` | `context.WithTimeout(r.Context(), defaults.ServerHandlerTimeout)` (90s). Bounds every inner layer, including body reads inside the handler. |
 | 6 | `loggingMiddleware` | Captures status via `responseWriter`; logs request start (Debug) and completion (Debug/Warn/Error keyed on status class) |

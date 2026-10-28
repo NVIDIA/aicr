@@ -373,9 +373,9 @@ func (c *Config) IsRequireEvidence() bool {
 // particular) can read and override individual settings with its own flag
 // precedence instead of reaching into an opaque built config.
 //
-// Eighteen flat fields project the bundler settings the section configures —
+// Nineteen flat fields project the bundler settings the section configures —
 // deployment (deployer, repo, value overrides, dynamic values, vendoring, app
-// name), scheduling (system/accelerated selectors and tolerations, DRA
+// name, Argo CD settings), scheduling (system/accelerated selectors and tolerations, DRA
 // eviction label, workload gate and selector, node count, storage classes),
 // and the two attestation flags the bundler itself reads (attest, certificate
 // identity regexp). OIDCResolve carries what reaches the attester rather than
@@ -441,6 +441,7 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 		CertIDRegexp:         resolved.CertIDRegexp,
 		VendorCharts:         resolved.VendorCharts,
 		AppName:              resolved.AppName,
+		ArgoCD:               resolved.ArgoCD,
 		OIDCResolve: OIDCResolveOptions{
 			Attest:     resolved.Attest,
 			DeviceFlow: resolved.OIDCDeviceFlow,

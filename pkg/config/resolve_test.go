@@ -1253,3 +1253,101 @@ func TestValidateResolve_SkipChecksUnsetIsNil(t *testing.T) {
 		t.Errorf("SkipChecks = %v, want nil", got.SkipChecks)
 	}
 }
+
+func TestBundleResolve_ArgoCD(t *testing.T) {
+	limit := int64(20)
+	factor := int64(2)
+	duration, maxDuration := "30s", "5m"
+	project := "gpu-infra"
+	cascade := false
+
+	negative := int64(-1)
+	tests := []struct {
+		name      string
+		dep       *config.DeploymentSpec
+		want      bundlercfg.ArgoCDSettings
+		errSubstr []string
+	}{
+		{
+			name: "unset stays zero",
+			dep:  &config.DeploymentSpec{Deployer: "argocd"},
+		},
+		{
+			name: "settings and nested retry flatten",
+			dep: &config.DeploymentSpec{ArgoCD: &config.ArgoCDSpec{
+				Project:       &project,
+				CascadeDelete: &cascade,
+				SyncRetry: &config.SyncRetrySpec{
+					Limit: &limit,
+					Backoff: &config.SyncRetryBackoffSpec{
+						Duration: &duration, Factor: &factor, MaxDuration: &maxDuration,
+					},
+				},
+			}},
+			want: bundlercfg.ArgoCDSettings{
+				Project:                     &project,
+				CascadeDelete:               &cascade,
+				SyncRetryLimit:              &limit,
+				SyncRetryBackoffDuration:    &duration,
+				SyncRetryBackoffFactor:      &factor,
+				SyncRetryBackoffMaxDuration: &maxDuration,
+			},
+		},
+		{
+			// A CLI --argocd-sync-retry-limit may still complete it; the
+			// bundler rejects the layered result if nothing does.
+			name: "backoff without limit is left to the bundler",
+			dep: &config.DeploymentSpec{ArgoCD: &config.ArgoCDSpec{
+				SyncRetry: &config.SyncRetrySpec{
+					Backoff: &config.SyncRetryBackoffSpec{Duration: &duration},
+				},
+			}},
+			want: bundlercfg.ArgoCDSettings{SyncRetryBackoffDuration: &duration},
+		},
+		{
+			name: "same setting in set and argocd is rejected",
+			dep: &config.DeploymentSpec{
+				Set:    []string{"deployer:project=other"},
+				ArgoCD: &config.ArgoCDSpec{Project: &project},
+			},
+			errSubstr: []string{"spec.bundle.deployment.set and spec.bundle.deployment.argocd conflict", "set twice"},
+		},
+		{
+			name: "invalid argocd field names the argocd block",
+			dep: &config.DeploymentSpec{ArgoCD: &config.ArgoCDSpec{
+				SyncRetry: &config.SyncRetrySpec{Limit: &negative},
+			}},
+			errSubstr: []string{"invalid spec.bundle.deployment.argocd", "sync retry limit -1: must be >= 0"},
+		},
+		{
+			name: "invalid deployer entry next to an argocd block names set",
+			dep: &config.DeploymentSpec{
+				Set:    []string{"deployer:cascadeDelete=maybe"},
+				ArgoCD: &config.ArgoCDSpec{Project: &project},
+			},
+			errSubstr: []string{"invalid spec.bundle.deployment.set", "cascadeDelete"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := (&config.BundleSpec{Deployment: tt.dep}).Resolve()
+			if len(tt.errSubstr) > 0 {
+				if err == nil {
+					t.Fatalf("Resolve() succeeded, want an error containing %q", tt.errSubstr)
+				}
+				for _, want := range tt.errSubstr {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error = %v, want it to contain %q", err, want)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Resolve() error = %v", err)
+			}
+			if !reflect.DeepEqual(got.ArgoCD, tt.want) {
+				t.Errorf("ArgoCD = %+v, want %+v", got.ArgoCD, tt.want)
+			}
+		})
+	}
+}

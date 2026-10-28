@@ -141,6 +141,11 @@ type BundleResolved struct {
 	// AppName is spec.bundle.deployment.appName, validated as a DNS-1123
 	// subdomain. Empty means each deployer applies its own default. See #1011.
 	AppName string
+
+	// ArgoCD is spec.bundle.deployment.argocd, flattened and validated. A
+	// setting also given as a deprecated deployer:<key> entry in
+	// spec.bundle.deployment.set is rejected. See #3264.
+	ArgoCD bundlercfg.ArgoCDSettings
 }
 
 // Resolve converts a BundleSpec from the wire-string form to a typed
@@ -207,6 +212,10 @@ func (b *BundleSpec) Resolve() (*BundleResolved, error) {
 					"invalid spec.bundle.deployment.appName", err)
 			}
 			out.AppName = b.Deployment.AppName
+		}
+		out.ArgoCD = b.Deployment.ArgoCD.settings()
+		if err := validateArgoCD(bundlercfg.LegacyDeployerOverrides(out.ValueOverrides), out.ArgoCD); err != nil {
+			return nil, err
 		}
 	}
 
@@ -1002,4 +1011,49 @@ func (r *RecipeSpec) ResolveGKETCPXOInterfaces() ([]recipe.NetworkInterfaceMappi
 // resolved layer can stay plain bool for downstream consumers.
 func boolPtrOrFalse(p *bool) bool {
 	return p != nil && *p
+}
+
+// validateArgoCD checks the Argo CD settings this document gives in either
+// spelling, naming the key that failed. Backoff without a limit is not
+// rejected here: a CLI flag may supply the limit, and the bundler checks the
+// layered result. A document using only the deprecated spelling is checked
+// at bundle time, as it was before the argocd block existed.
+func validateArgoCD(legacy map[string]string, settings bundlercfg.ArgoCDSettings) error {
+	if settings.IsZero() {
+		return nil
+	}
+	if err := bundlercfg.ValidateArgoCDSource(nil, settings); err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid spec.bundle.deployment.argocd", err)
+	}
+	if err := bundlercfg.ValidateArgoCDSource(legacy, bundlercfg.ArgoCDSettings{}); err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid spec.bundle.deployment.set", err)
+	}
+	if err := bundlercfg.ValidateArgoCDSource(legacy, settings); err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest,
+			"spec.bundle.deployment.set and spec.bundle.deployment.argocd conflict", err)
+	}
+	return nil
+}
+
+// settings flattens s into the bundler's ArgoCDSettings. A nil s is the
+// zero value.
+func (s *ArgoCDSpec) settings() bundlercfg.ArgoCDSettings {
+	if s == nil {
+		return bundlercfg.ArgoCDSettings{}
+	}
+	out := bundlercfg.ArgoCDSettings{
+		NamePrefix:        s.NamePrefix,
+		DestinationServer: s.DestinationServer,
+		Project:           s.Project,
+		CascadeDelete:     s.CascadeDelete,
+	}
+	if r := s.SyncRetry; r != nil {
+		out.SyncRetryLimit = r.Limit
+		if b := r.Backoff; b != nil {
+			out.SyncRetryBackoffDuration = b.Duration
+			out.SyncRetryBackoffFactor = b.Factor
+			out.SyncRetryBackoffMaxDuration = b.MaxDuration
+		}
+	}
+	return out.Clone()
 }

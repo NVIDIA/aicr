@@ -51,6 +51,15 @@ func TestNoticeMessage(t *testing.T) {
 			},
 			want: "apiVersion aicr.run/v1alpha2 is deprecated and will be removed in v1.0.0",
 		},
+		{
+			// An unscheduled removal must not render "will be removed in ".
+			name: "no removal release scheduled",
+			notice: Notice{
+				Subject:     "--set deployer:project",
+				Replacement: "--argocd-project",
+			},
+			want: "--set deployer:project is deprecated; use --argocd-project instead",
+		},
 	}
 
 	for _, tt := range tests {
@@ -119,6 +128,23 @@ func TestRecorderWarnEmitsStructuredContext(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("log output missing %q\ngot: %s", want, out)
 		}
+	}
+}
+
+// An unscheduled removal omits the removedIn attribute instead of emitting an
+// empty one, and an anchored notice points at its entry.
+func TestRecorderWarnUnscheduledAnchored(t *testing.T) {
+	buf := captureLogs(t)
+
+	var r Recorder
+	r.Warn(Notice{Subject: "--old", Replacement: "--new", Anchor: "old-entry"})
+
+	out := buf.String()
+	if strings.Contains(out, "removedIn") {
+		t.Errorf("log output carries removedIn for an unscheduled removal\ngot: %s", out)
+	}
+	if want := DocsURL + "#old-entry"; !strings.Contains(out, want) {
+		t.Errorf("log output missing %q\ngot: %s", want, out)
 	}
 }
 
@@ -222,6 +248,18 @@ func TestSetHTTPHeaders(t *testing.T) {
 			want:    map[string]string{},
 			absent:  []string{"Deprecation", "Sunset"},
 			linkSub: `rel="deprecation"`,
+		},
+		{
+			// A deprecation scoped to one parameter value links to its own
+			// entry, not the top of the register.
+			name: "anchored notice links to its entry",
+			notice: Notice{
+				Subject: "set=deployer:project",
+				Anchor:  "old-entry",
+			},
+			want:    map[string]string{},
+			absent:  []string{"Deprecation", "Sunset"},
+			linkSub: "<" + DocsURL + "#old-entry>",
 		},
 	}
 

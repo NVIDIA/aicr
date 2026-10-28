@@ -25,8 +25,9 @@
 #                                roots do not fight over the same apps.
 #
 #   deployer.cascadeDelete is intentionally NOT an install-time value —
-#   it is bundle-time only (aicr bundle --set deployer:cascadeDelete=true);
-#   helm --set deployer.cascadeDelete=... fails the values schema.
+#   it is bundle-time only (aicr bundle --argocd-cascade-delete);
+#   helm --set deployer.cascadeDelete=... fails the values schema. Child
+#   sync retry is bundle-time only too (aicr bundle --argocd-sync-retry-*).
 #
 ---
 deployer:

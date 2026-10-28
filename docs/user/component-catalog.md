@@ -173,11 +173,11 @@ helm uninstall nfd -n node-feature-discovery
 
 With `argocd` or `argocd-helm`, the hook needs Argo CD 3.4.1 or later, because earlier versions never finish deleting an Application whose post-delete hooks include cluster-scoped objects. On an earlier version, do not publish that revision. Run the commands below with the hook still disabled, then run the Helm prune that follows them.
 
-On Argo CD 3.4.1 or later, publish that revision the same way as the original and let the nfd Application sync. With `argocd-helm`, publish the chart under a new version and set the parent's `targetRevision` to it. Argo CD caches a chart by version, so republishing the same version leaves the nfd child on its old values. Before deleting the child, confirm `kubectl get application -n argocd "${CHILD}" -o jsonpath='{.spec.source.helm.values}'` shows `postDeleteCleanup: true`. The parent Application syncs every child with automated prune and self-heal, so it recreates a deleted nfd child. Generated children also carry no `resources-finalizer.argocd.argoproj.io` finalizer unless the bundle set `deployer:cascadeDelete=true`, so a plain delete leaves nfd running. Turn off the parent's auto-sync, then delete the child with cascade:
+On Argo CD 3.4.1 or later, publish that revision the same way as the original and let the nfd Application sync. With `argocd-helm`, publish the chart under a new version and set the parent's `targetRevision` to it. Argo CD caches a chart by version, so republishing the same version leaves the nfd child on its old values. Before deleting the child, confirm `kubectl get application -n argocd "${CHILD}" -o jsonpath='{.spec.source.helm.values}'` shows `postDeleteCleanup: true`. The parent Application syncs every child with automated prune and self-heal, so it recreates a deleted nfd child. Generated children also carry no `resources-finalizer.argocd.argoproj.io` finalizer unless the bundle was built with `--argocd-cascade-delete`, so a plain delete leaves nfd running. Turn off the parent's auto-sync, then delete the child with cascade:
 
 ```bash
 APP="nvidia-stack"  # replace with the parent Application: --app-name, default nvidia-stack (argocd) or aicr-stack (argocd-helm)
-CHILD="nfd"         # prepend the deployer namePrefix, if the bundle set one
+CHILD="nfd"         # prepend the --argocd-name-prefix, if the bundle set one
 # With argocd-helm, a helm install --set appName=... or --set deployer.namePrefix=... overrides both names.
 argocd app set "${APP}" --sync-policy none
 argocd app delete "${CHILD}" --cascade

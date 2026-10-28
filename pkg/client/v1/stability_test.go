@@ -287,7 +287,7 @@ func TestStability_Bundle(t *testing.T) {
 	// configuration" godoc); the CLI's own bundle-generation call and the
 	// aicrd /v1/bundle handler both rely on it.
 	requireType[*aicr.BundleConfig](aicr.BundleOptions{}.Config)
-	// The 18 flat fields Config.BundleOptions derives from spec.bundle.
+	// The 19 flat fields Config.BundleOptions derives from spec.bundle.
 	// Pinned by name and type together: a bare zero-value literal above
 	// would still compile through a rename or retype of any one of them.
 	_ = aicr.BundleOptions{
@@ -309,6 +309,7 @@ func TestStability_Bundle(t *testing.T) {
 		CertIDRegexp:               "",
 		VendorCharts:               false,
 		AppName:                    "",
+		ArgoCD:                     bundlerconfig.ArgoCDSettings{},
 	}
 	requireType[bundlerconfig.DeployerType](aicr.BundleOptions{}.Deployer)
 	requireType[[]bundlerconfig.ComponentPath](aicr.BundleOptions{}.ValueOverrides)
@@ -326,6 +327,7 @@ func TestStability_Bundle(t *testing.T) {
 	requireType[int](aicr.BundleOptions{}.Nodes)
 	requireType[bool](aicr.BundleOptions{}.Attest)
 	requireType[bool](aicr.BundleOptions{}.VendorCharts)
+	requireType[bundlerconfig.ArgoCDSettings](aicr.BundleOptions{}.ArgoCD)
 
 	var bi aicr.BundleInputOptions
 	_ = bi.RecipePath

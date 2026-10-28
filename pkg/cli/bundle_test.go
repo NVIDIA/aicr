@@ -104,6 +104,38 @@ func TestBundleCmd(t *testing.T) {
 	}
 }
 
+// urfave/cli keeps the last value of a repeated single-value flag silently,
+// so every --argocd-* flag must be in the bundle command's
+// validateSingleValueFlags list.
+func TestBundleCmdRejectsRepeatedArgoCDFlags(t *testing.T) {
+	values := map[string][2]string{
+		flagArgoCDNamePrefix:                  {"a-", "b-"},
+		flagArgoCDDestinationServer:           {"https://a:6443", "https://b:6443"},
+		flagArgoCDProject:                     {"a", "b"},
+		flagArgoCDCascadeDelete:               {"true", "false"},
+		flagArgoCDSyncRetryLimit:              {"5", "50"},
+		flagArgoCDSyncRetryBackoffDuration:    {"5s", "30s"},
+		flagArgoCDSyncRetryBackoffFactor:      {"2", "3"},
+		flagArgoCDSyncRetryBackoffMaxDuration: {"1m", "5m"},
+	}
+	for _, name := range argoCDFlags {
+		t.Run(name, func(t *testing.T) {
+			v, ok := values[name]
+			if !ok {
+				t.Fatalf("no test values for --%s", name)
+			}
+			err := bundleCmd().Run(t.Context(), []string{
+				"bundle", "--deployer", "argocd",
+				"--" + name + "=" + v[0],
+				"--" + name + "=" + v[1],
+			})
+			if err == nil || !strings.Contains(err.Error(), "flag --"+name+" can only be specified once") {
+				t.Fatalf("bundle command error = %v, want repeated --%s rejection", err, name)
+			}
+		})
+	}
+}
+
 func TestBundleCmdRejectsRepeatedSharedStorageClass(t *testing.T) {
 	err := bundleCmd().Run(t.Context(), []string{
 		"bundle",
