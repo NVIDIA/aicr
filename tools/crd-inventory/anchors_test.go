@@ -92,7 +92,7 @@ func TestHealthCheckCRDAssertionsAnchored(t *testing.T) {
 			entry := inv.find(k)
 			if entry == nil {
 				t.Errorf("the CRD inventory of component %q has no entry for chart %s, deployed by %s; %s",
-					name, k, strings.Join(sets.List(wheres(ca.crds)), ", "), regenerate)
+					name, k, strings.Join(ca.crds.asserters(), ", "), regenerate)
 				continue
 			}
 			for _, problem := range anchorProblems(name, k, ca, entry, vendored) {
@@ -199,7 +199,7 @@ func anchorProblems(component string, k chartKey, ca *chartAssertions, entry *ch
 			if !slices.Equal(entry.installed(r), installed) {
 				problems = append(problems, fmt.Sprintf("the CRD inventory of component %q lists different CRDs "+
 					"for chart %s for %s, which deploy it with the same values; %s",
-					component, k, strings.Join(sets.List(wheres(va.crds)), ", "), regenerate))
+					component, k, strings.Join(va.crds.asserters(), ", "), regenerate))
 				break
 			}
 		}
@@ -217,13 +217,14 @@ func anchorProblems(component string, k chartKey, ca *chartAssertions, entry *ch
 	return problems
 }
 
-// wheres returns every place that asserts a CRD in s.
-func wheres(s crdSources) sets.Set[string] {
+// asserters returns the sorted health check files and leaf recipes that
+// assert a CRD in s.
+func (s crdSources) asserters() []string {
 	out := sets.New[string]()
 	for _, w := range s {
 		out = out.Union(w)
 	}
-	return out
+	return sets.List(out)
 }
 
 // readInventory returns the CRD inventory of the named component in dp.
