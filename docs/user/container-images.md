@@ -416,7 +416,7 @@ _No images extracted._
 
 ### slurm-accounting-mariadb
 
-- `mariadb:11.8.9@sha256:6a4b3c20cffebc8b2d9248924f6a63285176c15a532b8e4840b8804e1c2c0443`
+- `mariadb:11.8.9@sha256:c4124d1afa875e47f2892edf26b482fa54f796e2f342d3717a04ca091a22a9bd`
 
 ### sriov-ib-networks
 

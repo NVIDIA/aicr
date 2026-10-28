@@ -2164,13 +2164,16 @@ chart version, and `EXCLUDE_SUBCHARTS="prometheus-crds opentelemetry-operator"`.
 
 Uninstall keeps the CRDs and deletes the collectors through a `pre-delete`
 hook whose Job takes no tolerations. Where it cannot schedule, or the deployer
-runs no Helm hooks, delete the collectors while the operator still runs, then
-uninstall without hooks:
+runs no Helm hooks, delete the collectors while the operator still runs:
 
 ```shell
 kubectl delete opentelemetrycollectors.opentelemetry.io -n nktp --all --wait --timeout=5m
-helm uninstall nktp -n nktp --no-hooks
 ```
+
+Then, for `helm` and `helmfile` bundles, uninstall without hooks with
+`helm uninstall nktp -n nktp --no-hooks`. Other deployers remove `nktp`
+through their own resource, as described in
+[Upgrade, uninstall, and troubleshooting](#upgrade-uninstall-and-troubleshooting).
 
 ## Adding Components
 
