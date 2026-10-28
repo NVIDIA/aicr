@@ -14,12 +14,12 @@
 
 // Crd-inventory writes recipes/components/<name>/crds.yaml, the CRDs each
 // pinned Helm chart installs, for every component whose health check asserts a
-// CRD. A component gets an entry for its registry pin and for every pin a leaf
+// CRD. A component gets an entry for its registry pin and for each pin a leaf
 // recipe deploys, and loses its inventory when no CRD assertion needs it.
-// TestHealthCheckCRDAssertionsAnchored checks the assertions against these
-// files offline. The registry, recipes, health checks and manifests are read
-// from the recipe data embedded at build time, so -repo-root must be the tree
-// the tool was built from.
+// TestHealthCheckCRDAssertionsAnchored reads these files offline.
+//
+// Crd-inventory reads the registry, recipes, health checks and manifests
+// embedded at build time, so -repo-root must be the tree it was built from.
 //
 // Usage:
 //
@@ -75,11 +75,11 @@ func generate(ctx context.Context, repoRoot string, check bool) error {
 	return run(ctx, repoRoot, dp, leaves, helm.Default(), readImageCRDs, check)
 }
 
-// run writes, under repoRoot, the inventory of every component in dp with a
-// CRD assertion against an external chart, as collectAssertions finds them in
-// dp and leaves, and deletes every other inventory. If check is set, run
-// changes nothing and compares each inventory with the committed file. The
-// returned error lists every problem found.
+// run writes under repoRoot the inventory of each component with a CRD
+// assertion against an external chart in dp or leaves, and deletes every other
+// inventory. If check is set, run changes nothing and reports each inventory
+// that differs from the committed file. The returned error lists every
+// problem found.
 func run(ctx context.Context, repoRoot string, dp recipe.DataProvider, leaves []recipe.ResolvedLeaf,
 	r helm.Renderer, readImage imageReader, check bool,
 ) error {
@@ -144,14 +144,15 @@ func run(ctx context.Context, repoRoot string, dp recipe.DataProvider, leaves []
 	return nil
 }
 
-// buildInventory returns the inventory of component name, with an entry for
-// each chart in a that installs a CRD, and a problem for each asserted CRD no
-// entry or vendored manifest backs.
+// buildInventory returns inv, the inventory of component name with an entry
+// for each chart in a that installs a CRD. It also returns problems, listing
+// each chart in a that installs no CRD and each asserted CRD that no entry or
+// vendored manifest backs.
 func buildInventory(ctx context.Context, repoRoot string, dp recipe.DataProvider, r helm.Renderer,
 	readImage imageReader, name string, a *componentAssertions,
-) (*inventory, []string, error) {
+) (inv *inventory, problems []string, err error) {
 
-	inv := &inventory{Component: name}
+	inv = &inventory{Component: name}
 	if len(a.charts) == 0 {
 		return inv, nil, nil
 	}
@@ -159,7 +160,6 @@ func buildInventory(ctx context.Context, repoRoot string, dp recipe.DataProvider
 	if err != nil {
 		return nil, nil, err
 	}
-	var problems []string
 	for _, k := range a.sortedCharts() {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, nil, errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "crd-inventory interrupted")
@@ -181,7 +181,7 @@ func buildInventory(ctx context.Context, repoRoot string, dp recipe.DataProvider
 }
 
 // writeInventory writes inv under repoRoot. If check is set, it writes nothing
-// and returns a problem when the committed file differs.
+// and returns a problem when the committed file differs or is missing.
 func writeInventory(repoRoot string, inv *inventory, check bool) (string, error) {
 	rendered, err := renderInventory(inv)
 	if err != nil {

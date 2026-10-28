@@ -97,8 +97,8 @@ func keyOf(ref *recipe.ComponentRef) chartKey {
 	return chartKey{Repository: ref.Source, Chart: ref.EffectiveChart(), Version: ref.Version}
 }
 
-// crdSources maps each asserted CRD to where it is asserted: a registry health
-// check file, or a leaf recipe.
+// crdSources maps each asserted CRD to the registry health check files and
+// leaf recipes that assert it.
 type crdSources map[string]sets.Set[string]
 
 func (s crdSources) add(names []string, where string) {
@@ -117,21 +117,19 @@ type chartAssertions struct {
 	crds crdSources
 }
 
-// componentAssertions holds one component's CRD assertions. Those of a ref
-// with an external chart are keyed by that chart. The rest are chartless.
+// componentAssertions holds one component's CRD assertions.
 type componentAssertions struct {
-	charts    map[chartKey]*chartAssertions
-	chartless crdSources
+	charts    map[chartKey]*chartAssertions // asserted against an external chart
+	chartless crdSources                    // asserted by a ref with no external chart
 }
 
 func (a *componentAssertions) sortedCharts() []chartKey {
 	return slices.SortedFunc(maps.Keys(a.charts), chartKey.compare)
 }
 
-// collectAssertions returns, by component name, every CRD a health check
-// asserts: each registry health check at its registry pin, and the health
-// check of each enabled component in each leaf at that leaf's pin. A leaf's
-// health check is the registry file or the overlay's inline asserts.
+// collectAssertions returns, by component name, the CRDs asserted by each
+// registry health check at the registry pin, and by each enabled component's
+// health check in each leaf, inline asserts included, at the leaf's pin.
 func collectAssertions(ctx context.Context, dp recipe.DataProvider, reg *recipe.ComponentRegistry,
 	leaves []recipe.ResolvedLeaf,
 ) (map[string]*componentAssertions, error) {

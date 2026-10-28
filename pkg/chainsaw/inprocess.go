@@ -282,8 +282,8 @@ func decodeTests(yamlContent string) ([]v1alpha1.Test, error) {
 }
 
 // AssertedResources returns the resource of each assert operation in the try
-// blocks of the Tests in yamlContent, in document order. Error operations are
-// excluded. It returns an error if a document is not a Test or an assert has
+// blocks of the Tests in yamlContent, in document order, skipping error
+// operations. It returns an error if a document is not a Test or an assert has
 // no resource mapping.
 func AssertedResources(yamlContent string) ([]map[string]any, error) {
 	tests, err := decodeTests(yamlContent)

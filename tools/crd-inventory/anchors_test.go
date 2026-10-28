@@ -29,12 +29,11 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
-// TestHealthCheckCRDAssertionsAnchored checks that every CRD a health check
-// asserts is defined in the embedded recipe data. It covers each registry
-// health check at its registry pin, and each health check a leaf recipe
-// deploys at the leaf's pin, including inline asserts:
-//   - A CRD asserted against an external chart must be in that component's
-//     crds.yaml entry for the same repository, chart and version, or in its
+// TestHealthCheckCRDAssertionsAnchored checks the CRDs asserted by each
+// registry health check at the registry pin, and by each health check a leaf
+// recipe deploys, inline asserts included, at the leaf's pin:
+//   - A CRD asserted against an external chart must be in the component's
+//     crds.yaml entry for that repository, chart and version, or in its
 //     vendored manifests.
 //   - A component with no chart, such as an OLM or manifest-only wrapper, may
 //     assert only CRDs that some crds.yaml or vendored manifest defines.

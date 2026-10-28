@@ -21,13 +21,13 @@ import (
 	"syscall"
 )
 
-// groupHasLiveMember reports whether group pgid still exists. macOS reports
-// EPERM while the group's last members are exiting.
+// groupHasLiveMember reports whether process group pgid exists.
 func groupHasLiveMember(pgid int) (bool, error) {
 	err := syscall.Kill(-pgid, 0)
 	switch {
 	case stderrors.Is(err, syscall.ESRCH):
 		return false, nil
+	// macOS reports EPERM while the group's last members are exiting.
 	case err == nil, stderrors.Is(err, syscall.EPERM):
 		return true, nil
 	default:

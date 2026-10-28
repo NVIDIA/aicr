@@ -25,9 +25,8 @@ import (
 	"syscall"
 )
 
-// groupHasLiveMember reports whether a process in group pgid is not a zombie.
-// Zombies count as gone, because a container PID 1 that never reaps orphans
-// keeps them in the group indefinitely.
+// groupHasLiveMember reports whether process group pgid has a member that has
+// not exited.
 func groupHasLiveMember(pgid int) (bool, error) {
 	paths, err := filepath.Glob("/proc/[0-9]*/stat")
 	if err != nil {
@@ -52,6 +51,8 @@ func groupHasLiveMember(pgid int) (bool, error) {
 		if len(fields) < 3 || fields[2] != want {
 			continue
 		}
+		// Zombies count as exited. A container PID 1 that never reaps orphans
+		// keeps them in the group indefinitely.
 		if fields[0] != "Z" && fields[0] != "X" {
 			return true, nil
 		}
