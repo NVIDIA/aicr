@@ -116,7 +116,7 @@ by the old UID.
 | Recipes, values, assessment reports | Immutable ConfigMaps in the operator namespace | While a kept plan or rollout references them; any created in the last hour |
 | Snapshots | ConfigMaps `aicr-snapshot-*` in the operator namespace | Discovery's newest one, and each kept rollout's deployment snapshot, owned by the rollout and removed with it |
 | Rollouts | Cluster-scoped `RuntimeRollout` objects | Every unfinished rollout, the newest `Succeeded` one, and the ten most recent that ended |
-| AICR Jobs | The Job, discovery and validation namespaces | Deleted once read; failed Jobs until the inputs change; at most 24 hours after finishing, even with no operator running |
+| AICR Jobs | The Job, discovery and validation namespaces | Deleted once read; failed Jobs until the inputs change, and at most 24 hours after finishing (seven days for a stalled stage's failed Jobs), even with no operator running |
 | Bundles, mirrored charts, evidence | Your registry: `bundles/`, `charts/`, `wrappers/`, `evidence/` under `registry.repository` | Never deleted by the operator; your registry's retention applies |
 
 The operator-namespace ConfigMaps are caches. Losing them, even by deleting

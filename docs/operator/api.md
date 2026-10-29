@@ -57,7 +57,7 @@ operator:
   resources: {}                       # requests and limits; defaults in values.yaml
   serviceAccountAnnotations: {}       # e.g. the IRSA role ARN of the operator's AWS identity
 engine:
-  type: ArgoCD                        # the supported engine; Flux follows with its adapter
+  type: ArgoCD                        # the only engine in this release
   namespace: argocd                   # Argo CD control namespace
   project: aicr                       # AppProject created by the chart; nothing is written to argocd-cm
 registry:
@@ -87,15 +87,11 @@ development:
   skipDiscovery: false                # development builds only: declared criteria, no node gates or snapshot
 ```
 
-Values join the schema when the operator consumes them: `aicr.gateImage`, the
-readiness-gate image by digest.
-
 The chart fails to render when `aicr.version` is outside `>=1.0.0, <2.0.0`.
 The operator also checks the version each AICR Job reports and stops on a
-mismatch. Changing `engine.type` on a
-live installation is unsupported; the operator refuses while it owns objects of
-the other engine. CRDs, namespaces, the AppProject and the `repo-creds` Secret
-survive `helm uninstall`.
+mismatch. `engine.type` accepts only `ArgoCD` in this release; the chart schema
+and the operator reject any other value. CRDs, namespaces, the AppProject and
+the `repo-creds` Secret survive `helm uninstall`.
 
 ## ClusterRuntime
 
@@ -208,7 +204,6 @@ itself:
 | `Available` | Rollout controller | The active plan's releases are currently healthy; the message names the first release that is not |
 | `Reconciling` | Rollout controller | Work is in progress for the current generation, including resolution reported through `Resolved` |
 | `Stalled` | Rollout controller | Progress needs intervention (approval, conflict, blocked transition, version mismatch, expired deadline), including a resolver stall reported through `Resolved` |
-| `Degraded` | Rollout controller | Active releases are failing or drifted |
 | `Resolved` | Resolver | A plan was produced for the current generation and snapshot |
 | `EngineAvailable` | Rollout controller | Engine CRDs and project are present |
 
@@ -513,9 +508,8 @@ object, not committed through GitOps.
 
 ## Engine object metadata
 
-Argo CD (default) uses one `Application` per plan release in the engine
-namespace. Flux uses an `OCIRepository` and a `HelmRelease` per release, plus a
-values ConfigMap copied into the engine namespace.
+The operator uses one Argo CD `Application` per plan release in the engine
+namespace.
 Every engine object, and every
 operator-owned ConfigMap or Job, carries:
 
@@ -576,7 +570,8 @@ objects rely on garbage collection:
   without an outcome, and the ten most recent terminal ones.
 - AICR Jobs: delete a Job with `propagationPolicy: Foreground` after its outputs
   are recorded; the `batch/v1` default orphans the Job's pods. Every Job also
-  sets `ttlSecondsAfterFinished` (24 hours) as a backstop while the operator is
+  sets `ttlSecondsAfterFinished` (24 hours, raised to seven days on a stalled
+  stage's failed Jobs) as a backstop while the operator is
   down or uninstalled. A Job's run-scoped objects are owned by the Job and go
   with it, so a result the operator keeps (snapshot, recipe, assessment report)
   is first copied into a ConfigMap without an owner. Keep those copies while a

@@ -141,10 +141,13 @@ gh attestation verify "oci://ghcr.io/nvidia/charts/aicr-operator:${VERSION}" --r
   --version "${VERSION}" --namespace aicr-system -f values.yaml
 ```
 
-Required: `registry.repository`, `namespaces.components` and at least one of
-`approvers.users` or `approvers.groups`; with the `aws` registry provider, the
-operator's AWS identity in `operator.serviceAccountAnnotations`. Everything
-else has a working default; `validation.enabled` is recommended. Every value,
+Required: `registry.repository` and `namespaces.components`; with the `aws`
+registry provider, the operator's AWS identity in
+`operator.serviceAccountAnnotations`. Set `approvers.users` or
+`approvers.groups`, or bind the `aicr-operator-approver` roles yourself: with no
+approver, a rollout that needs approval waits in `AwaitingApproval` and expires
+at its deadline. Everything else has a working default; `validation.enabled` is
+recommended. Every value,
 with its default and when to set it, is in the
 [chart's values reference](https://github.com/NVIDIA/aicr/blob/main/charts/aicr-operator/README.md#values).
 

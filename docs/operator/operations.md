@@ -118,9 +118,11 @@ Service, so scrape the pod or port-forward
 7. **Steps run one at a time** in dependency order, each with one write to
    Argo CD, and each must be ready at its current revision within
    `spec.rollout.actionTimeout` (default 30 minutes). Removals run last, in
-   reverse order.
+   reverse order. A `manual` release with recorded steps after the apply stops
+   the rollout in `AwaitingAcknowledgement` until those steps are done and an
+   approver runs `kubectl aicr acknowledge`.
 8. **Deployment validation** runs once when `spec.validation.deployment` is
-   `Required`.
+   `Required`, against a new snapshot taken after every step is ready.
 9. **The rollout succeeds** and its target becomes the active plan. The whole
    rollout must finish within `spec.rollout.deadline` (default 6 hours) of its
    creation.
