@@ -66,20 +66,6 @@ spec:
             - name: MOFED_ENABLED
               value: "false"
 
-    # Prometheus persistent storage (provide --storage-class at bundle time, e.g. oci-bv)
-    - name: kube-prometheus-stack
-      type: Helm
-      overrides:
-        prometheus:
-          prometheusSpec:
-            storageSpec:
-              emptyDir: null
-              volumeClaimTemplate:
-                spec:
-                  accessModes: ["ReadWriteOnce"]
-                  resources:
-                    requests:
-                      storage: 50Gi
     # NVSentinel's labeler.assumeDriverInstalled is owned by the gpuStack
     # profile below (#2175): whether a driver pod exists for the labeler to
     # watch depends on the selected value, so the polarity is per value —

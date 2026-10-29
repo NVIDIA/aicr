@@ -246,21 +246,6 @@ spec:
       dependencyRefs:
         - gcp-driver-installer
 
-    # Enable Prometheus persistent storage for GKE (GKE PD CSI is built-in)
-    - name: kube-prometheus-stack
-      type: Helm
-      overrides:
-        prometheus:
-          prometheusSpec:
-            storageSpec:
-              emptyDir: null
-              volumeClaimTemplate:
-                spec:
-                  accessModes: ["ReadWriteOnce"]
-                  resources:
-                    requests:
-                      storage: 50Gi
-
     # GKE has no user-accessible control-plane nodes — remove the default
     # nodeAffinity that requires node-role.kubernetes.io/control-plane
     - name: nvidia-dra-driver-gpu

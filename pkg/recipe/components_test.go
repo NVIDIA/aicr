@@ -574,24 +574,6 @@ func TestComponentRegistry_KubePrometheusStack_NodeSchedulingPaths(t *testing.T)
 		t.Errorf("kube-prometheus-stack system toleration paths missing %q (got %v)",
 			"prometheus.prometheusSpec.tolerations", got)
 	}
-	// Regression guard. Once --storage-class gives it a PVC, an unpinned
-	// prometheus pod can land on a GPU node and strand a later reschedule
-	// the same way slinky-slurm's pods can. This must stay a bundle-time
-	// failure, not a silent no-op, if requireNodeSelectorIfStorageClassSet
-	// is ever dropped from the registry entry. Unconditional
-	// requireNodeSelector must stay off, since the chart defaults to
-	// emptyDir, so this base component appears in nearly every bundle
-	// regardless of whether a PVC is ever in play.
-	if !prom.RequireSystemNodeSelectorIfStorageClassSet() {
-		t.Error("kube-prometheus-stack nodeScheduling.system.requireNodeSelectorIfStorageClassSet must stay true (see registry.yaml comment)")
-	}
-	if prom.RequireSystemNodeSelector() {
-		t.Error("kube-prometheus-stack nodeScheduling.system.requireNodeSelector must stay false; use requireNodeSelectorIfStorageClassSet instead")
-	}
-	if got := prom.GetStorageClassPaths(); !slices.Contains(got, "prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName") {
-		t.Errorf("kube-prometheus-stack storageClassPaths missing %q (got %v); requireNodeSelectorIfStorageClassSet has nothing to condition on",
-			"prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName", got)
-	}
 }
 
 func TestComponentRegistry_TaintStrPaths(t *testing.T) {

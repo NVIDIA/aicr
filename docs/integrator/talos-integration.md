@@ -135,11 +135,6 @@ Talos, please open an issue against [#565](https://github.com/NVIDIA/aicr/issues
 - **`nodewright-customizations`** — the Customization CRDs the
   nodewright-operator manages; out of scope until their per-node
   privileged story is settled.
-- **`kube-prometheus-stack`** — only the `node-exporter` daemon
-  needs privileged. The right fix is a chart-level override
-  (`nodeExporter.enabled: false` or a custom Helm value pointing
-  the daemon at a separate namespace), not a whole-chart namespace
-  move.
 
 ## Snapshot agent on Talos
 
