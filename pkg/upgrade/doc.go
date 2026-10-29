@@ -86,10 +86,14 @@
 // crossed record covers where it stands. A record is on the path when its
 // `from` covers a version the walk stood at. Records off the path describe a
 // move this operator does not make and do not decide the verdict, unless they
-// are blocked and in the way. A record is in the way when its `from` admits a
-// version the jump passes before reaching its floor. Records that share a
-// floor are ordered by where their `from` starts, lowest first, so declaration
-// order decides nothing.
+// are in the way and ask something. A record is in the way when its `from`
+// admits a version the jump passes before reaching its floor. A blocked record
+// in the way blocks. Any other non-safe record in the way, off the path, on a
+// floor no record on the path shares, and not ahead of where the walk stopped,
+// is a skipped boundary. A manual record on a path record's floor describes
+// that boundary for other sources. Records that share a floor are ordered by
+// where their `from` starts, lowest first, so declaration order decides
+// nothing.
 //
 // Verdict selection runs in this order:
 //
@@ -97,17 +101,20 @@
 //	                                                      when the target is past it
 //	2  nothing crossed was written for the source         blocked, stop at the lowest
 //	3  one record on the path, its to holds the target,   that record's verdict
-//	   and no other blocked record in the way
+//	   and nothing else in the way asks something
 //	4  a blocked record in the way                        blocked, stop at its to
-//	5  the path stops short, all safe or one hop asking   blocked, stop at the next record's to,
-//	                                                      or the last hop's to when none lies ahead
-//	6  two or more records on the path, one asks          blocked, stop where the hop before lands
+//	5  the path stops short, all safe or one hop asking,  blocked, stop at the next record's to,
+//	   and no boundary skipped                            or the last hop's to when none lies ahead
+//	6  two or more records on the path, one asks, or a    blocked, stop where the hop before lands,
+//	   boundary skipped                                   or at its from when no hop lands before it
 //
-// Rule 3 attaches a Transition even when blocked, because that record's steps
-// describe this exact move. Safe records carry no steps, so a path that is all
-// safe and reaches the target takes its last hop's verdict. Ahead of rules 5
-// and 6, a record on the path that covers the source and holds the target
-// takes its own verdict when every other record on the path is safe. Every
+// Under rule 3 a record sharing the path record's floor counts only when it is
+// blocked and the path record is not. Rule 3 attaches a Transition even when
+// blocked, because that record's steps describe this exact move. Safe records
+// carry no steps, so a path that is all safe, reaches the target and skips no
+// boundary takes its last hop's verdict. Ahead of rules 5 and 6, a record on
+// the path that covers the source and holds the target takes its own verdict
+// when every other record on the path is safe and no boundary is skipped. Every
 // other result leaves Transition nil, so no renderer prints steps for a move
 // their record does not describe.
 //

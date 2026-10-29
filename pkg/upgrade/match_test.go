@@ -765,14 +765,25 @@ func TestMatchSafeBoundaryDoesNotBlockComposition(t *testing.T) {
 			wantReason:  ReasonMultipleBoundaries,
 		},
 		{
-			// rename's `to` holds the target, so second is off the path.
-			name:        "a manual record covering the whole jump is honored over one off the path",
+			// rename's `to` holds the target, so the walk never stands in
+			// second's `from`, but the jump still passes through it.
+			name:        "a manual record the jump flies over is a skipped boundary",
 			set:         oneComponent(rename, secondManual),
 			from:        "0.16.0",
 			to:          "0.19.0",
-			wantVerdict: VerdictManual,
-			wantReason:  ReasonRecorded,
-			wantMatched: "rename",
+			wantVerdict: VerdictBlocked,
+			wantReason:  ReasonMultipleBoundaries,
+		},
+		{
+			name: "a safe record covering the whole jump does not hide a manual one it flies over",
+			set: oneComponent(
+				trans("<0.18.0", ">=0.18.0 <=0.19.0", VerdictSafe, "wide-safe"),
+				secondManual,
+			),
+			from:        "0.16.0",
+			to:          "0.19.0",
+			wantVerdict: VerdictBlocked,
+			wantReason:  ReasonMultipleBoundaries,
 		},
 		{
 			// renameShort lands on 0.18.0, where second was written for.
@@ -1237,6 +1248,28 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 				"Upgrade to 2.0.0 first, then re-run this check",
 		},
 		{
+			name: "multiple-boundaries lands below a manual record the jump flies over",
+			set: oneComponent(
+				trans("<0.18.0", ">=0.18.0 <=0.19.0", VerdictSafe, "W"),
+				trans(">=0.18.0 <0.19.0", ">=0.19.0 <=0.19.0", VerdictManual, "M"),
+			),
+			from: "0.16.0",
+			to:   "0.19.0",
+			want: "crosses 2 recorded boundaries (0.18.0, 0.19.0); no single record describes the whole jump. " +
+				"Upgrade to 0.18.0 first, then re-run this check",
+		},
+		{
+			name: "multiple-boundaries names the from of a flown-over record no hop lands below",
+			set: oneComponent(
+				trans(">=1.0.0 <2.0.0", ">=4.0.0 <=4.0.0", VerdictManual, "C"),
+				trans(">=2.0.0 <3.0.0", ">=3.0.0 <3.1.0", VerdictManual, "B"),
+			),
+			from: "1.5.0",
+			to:   "4.0.0",
+			want: "crosses 2 recorded boundaries (3.0.0, 4.0.0); no single record describes the whole jump. " +
+				"Upgrade to a version in >=2.0.0 <3.0.0 first, then re-run this check",
+		},
+		{
 			name: "undefined-origin",
 			set:  oneComponent(trans(">=2.0.0 <3.0.0", ">=3.0.0 <=3.0.0", VerdictManual, "O")),
 			from: "1.5.0",
@@ -1562,13 +1595,25 @@ func TestMatchFollowsTheSourcesPath(t *testing.T) {
 			wantStoppedAt: ">=3.0.0 <=3.0.0",
 		},
 		{
-			name:        "a record covering the whole jump is honored",
-			set:         oneComponent(wide, between),
-			from:        "1.5.0",
-			to:          "4.0.0",
-			wantVerdict: VerdictManual,
-			wantReason:  ReasonRecorded,
-			wantMatched: "C",
+			name:          "a record covering the whole jump does not hide a manual one it flies over",
+			set:           oneComponent(wide, between),
+			from:          "1.5.0",
+			to:            "4.0.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=2.0.0 <3.0.0",
+		},
+		{
+			name: "a blocked record on the path does not hide a second block it flies over",
+			set: oneComponent(
+				trans("<1.0.0", ">=3.0.0", VerdictBlocked, "B1"),
+				trans(">=1.0.0 <4.0.0", ">=4.0.0", VerdictBlocked, "B2"),
+			),
+			from:          "0.5.0",
+			to:            "4.5.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonRecordBlocks,
+			wantStoppedAt: ">=3.0.0",
 		},
 		{
 			name:          "a stop short of the whole jump is undefined-origin",

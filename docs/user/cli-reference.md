@@ -1692,12 +1692,12 @@ Renaming is applied by Helm as delete-and-recreate: expect a service gap, and an
 
 This axis needs a **bundle** as `--from`. A resolved recipe records `valuesFile` as a path resolved against whichever binary reads it, so comparing two recipe files would read today's values twice and see nothing move; only a bundle writes the merged result down. `--from cluster` cannot supply them either, because the cluster read recovers versions alone. When the source cannot supply them, the report says so once above the table rather than reporting that nothing moved, and `--format json` carries `objectNamesCompared: false` with `objectNamesSkipped` naming the reason. See [Upgrading a Deployed Stack](upgrading.md#when-a-components-objects-are-renamed).
 
-**The four routes to `blocked`.** A record is *crossed* when your source version sits below the boundary its `to` names and your target reaches it. The check follows the records written for your version, boundary by boundary, toward your target. Only records *on that path* decide the verdict, with one exception. A `blocked` record also stops a jump that passes through its `from` range on the way to its boundary.
+**The four routes to `blocked`.** A record is *crossed* when your source version sits below the boundary its `to` names and your target reaches it. The check follows the records written for your version, boundary by boundary, toward your target. Only records *on that path* decide the verdict, with one exception. A record that asks for work also counts when your jump passes through its `from` range on the way to its boundary, unless it shares that boundary with a record on your path and is not `blocked`. A `blocked` one stops the jump outright.
 
 | Route | When | `reason` | Renders steps |
 |---|---|---|---|
-| A record describes this move and blocks it | One record is on your path and its `to` holds your target | `recorded` | yes |
-| You would skip a boundary | Two or more records are on your path and at least one asks something, or a `blocked` record is in the way | `multiple-boundaries`, `record-blocks` | no |
+| A record describes this move and blocks it | One record counts toward your jump and its `to` holds your target | `recorded` | yes |
+| You would skip a boundary | Two or more records count toward your jump and at least one asks something, or a `blocked` record is in the way | `multiple-boundaries`, `record-blocks` | no |
 | Nothing describes your starting version | No crossed record was written for your source, or your path lands where none continues | `undefined-origin` | no |
 | Your target is past what the records assessed | Your path stops at a ceiling below your target, or your target sits above the highest `to` ceiling any of the component's records names | `beyond-record-ceiling` | no |
 

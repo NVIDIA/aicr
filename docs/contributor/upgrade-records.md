@@ -95,13 +95,16 @@ reason `manual` does: the verdict says "not in one step", and the steps are you
 saying what to do instead. They render under the row, deployer-scoped, exactly
 as a `manual` record's do, whenever your record is the one that describes the
 operator's move. What the check withholds is somebody *else's* steps. When two
-or more records on the operator's path ask for work, or the jump crosses your
-boundary from a starting point your `from` does not cover, no steps render at
-all, because composing two migrations or running one authored for a different
-origin is the failure `blocked` exists to prevent. A jump across several
-boundaries still renders your steps when your record covers its starting point
-and holds its target, every other record on its path is `safe`, and no other
-`blocked` record is in the way. So write
+or more records ask for work along the jump, or the jump crosses your boundary
+from a starting point your `from` does not cover, no steps render at all,
+because composing two migrations or running one authored for a different origin
+is the failure `blocked` exists to prevent. A record asks for work along the
+jump when it is on the operator's path, or when the jump passes through its
+`from` range on the way to its boundary, even if the operator's version is not
+in that range. A jump across several boundaries still renders your steps when
+your record covers its starting point and holds its target, and every other
+record along the jump is `safe`. A `manual` record on your own boundary,
+written for another starting range, does not count. So write
 the `blocked` steps as instructions a reader will follow, not as a formality to
 satisfy the gate.
 

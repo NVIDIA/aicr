@@ -216,11 +216,13 @@ type ComponentResult struct {
 	// ChangeReplaced row.
 	Replaces *Replaces
 
-	// StoppedAt is the `to` range a blocked version transition stops at, and
-	// is empty on every other result, a blocked ChangeReplaced row included.
-	// It is the landing's range for ReasonMultipleBoundaries, the assessed
-	// ceiling's range for ReasonBeyondRecordCeiling, and otherwise the
-	// interval not to enter in one step.
+	// StoppedAt is the range a blocked version transition stops at, and is
+	// empty on every other result, a blocked ChangeReplaced row included. It
+	// is the landing's range for ReasonMultipleBoundaries, which is a `to`
+	// range or, when no hop lands below a skipped record, that record's
+	// `from`. It is the assessed ceiling's range for
+	// ReasonBeyondRecordCeiling, and otherwise the interval not to enter in
+	// one step.
 	StoppedAt string
 
 	// Span is how far the matched record's claim reaches, from the source
@@ -730,9 +732,11 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 		r.Explanation = undefinedOriginExplanation(u, r, crossed, src)
 		return r
 	}
-	blocking, isBlocked := lowestBlocked(inTheWay(crossed, src))
+	way := inTheWay(crossed, src)
+	blocking, isBlocked := lowestBlocked(way)
+	skipped, skips := skippedBoundary(way, p)
 	// A blocked verdict here carries the record, whose steps say what to do instead.
-	if len(p.onPath) == 1 && p.reached && (!isBlocked || blocking.tr == p.onPath[0].tr) {
+	if len(p.onPath) == 1 && p.reached && !skips && (!isBlocked || blocking.tr == p.onPath[0].tr) {
 		r = lend(r, src, p.onPath[0])
 		if r.Verdict == VerdictBlocked {
 			r.StoppedAt = r.Transition.To
@@ -753,31 +757,63 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 		r.Explanation = recordBlocksExplanation(r, p, blocking, src)
 		return r
 	}
-	// Safe records carry no steps, so crossing one skips nothing.
-	if p.reached && everySafe(p.onPath) {
-		return lend(r, src, p.hops[len(p.hops)-1])
-	}
-	if c, ok := wholeJump(p.onPath, src, tgt); ok {
-		return lend(r, src, c)
-	}
-	if p.stalled() {
-		return stalledResult(u, r, p, tgt)
-	}
-	// An intermediate record's steps never run on a jump straight past it, so
-	// the report names a landing the first substantive record describes.
-	stop := p.hops[0]
-	if m, ok := firstSubstantive(p.onPath); ok {
-		if h, ok := p.hopBefore(m); ok {
-			stop = h
+	if !skips {
+		// Safe records carry no steps, so crossing one skips nothing.
+		if p.reached && everySafe(p.onPath) {
+			return lend(r, src, p.hops[len(p.hops)-1])
+		}
+		if c, ok := wholeJump(p.onPath, src, tgt); ok {
+			return lend(r, src, c)
+		}
+		if p.stalled() {
+			return stalledResult(u, r, p, tgt)
 		}
 	}
+	// An intermediate record's steps never run on a jump straight past it, so
+	// the report names a landing short of the first substantive record.
 	r.Verdict = VerdictBlocked
 	r.Reason = ReasonMultipleBoundaries
+	stop := p.hops[0]
+	m, ok := firstSubstantive(p.onPath)
+	if skips && (!ok || crossingBefore(skipped, m)) {
+		m, ok = skipped, true
+	}
+	if ok {
+		if h, found := p.hopBefore(m); found {
+			stop = h
+		} else if !fromCovers(m.tr, pointAt(src)) {
+			r.StoppedAt = m.tr.From
+			r.Explanation = fmt.Sprintf(
+				"%s; no single record describes the whole jump. Upgrade to a version in %s first, "+
+					"then re-run this check", crossingPhrase(crossed), m.tr.From)
+			return r
+		}
+	}
 	r.StoppedAt = stop.tr.To
 	r.Explanation = fmt.Sprintf(
 		"%s; no single record describes the whole jump. Upgrade to %s first, then re-run this check",
 		crossingPhrase(crossed), landingPhrase(stop))
 	return r
+}
+
+// skippedBoundary returns the lowest record in way that asks something of the
+// operator, is neither on p nor ahead of it, and shares no floor with a record
+// on p. ok is false when there is none.
+func skippedBoundary(way []crossing, p path) (c crossing, ok bool) {
+	for _, x := range way {
+		if x.tr.Verdict == VerdictSafe || slices.ContainsFunc(p.ahead, func(a crossing) bool { return a.tr == x.tr }) {
+			continue
+		}
+		// A record on the same floor as one on the path describes that
+		// boundary for other sources, and the path's record covers it here.
+		covered := slices.ContainsFunc(p.onPath, func(o crossing) bool {
+			return o.tr == x.tr || boundaryKeyOf(o.floor) == boundaryKeyOf(x.floor)
+		})
+		if !covered {
+			return x, true
+		}
+	}
+	return crossing{}, false
 }
 
 // lend returns r with the verdict, Transition and Span of c, the record that
