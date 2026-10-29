@@ -901,6 +901,7 @@ func (r *RolloutReconciler) step(ctx context.Context, p *plan.Document, ro *v1al
 	switch {
 	case obs.State == argocd.StateReady:
 		setReleaseState(ro, step.Release, v1alpha1.ReleaseReady, rel.Chart.Digest)
+		recordSpec(ro, step.Release, obs.SpecDigest)
 		ro.Status.Current = nil
 		return true, r.saveStatus(ctx, ro, "")
 	case obs.State == argocd.StateFailed:
@@ -984,6 +985,7 @@ func (r *RolloutReconciler) observeHalted(ctx context.Context, ro *v1alpha1.Runt
 	}
 	if obs.State == argocd.StateReady {
 		setReleaseState(ro, cur.Release, done, revision)
+		recordSpec(ro, cur.Release, obs.SpecDigest)
 		ro.Status.Current = nil
 		return r.saveStatus(ctx, ro, message)
 	}
@@ -1612,6 +1614,21 @@ func releaseState(ro *v1alpha1.RuntimeRollout, id string) v1alpha1.ReleaseState 
 		}
 	}
 	return v1alpha1.ReleasePending
+}
+
+// recordSpec records the spec fingerprint a release had when it became
+// ready, which is the spec this rollout wrote; inventoryDrift compares
+// later observations with it. An empty digest records nothing.
+func recordSpec(ro *v1alpha1.RuntimeRollout, id, digest string) {
+	if digest == "" {
+		return
+	}
+	for i := range ro.Status.Releases {
+		if ro.Status.Releases[i].ID == id {
+			ro.Status.Releases[i].SpecDigest = digest
+			return
+		}
+	}
 }
 
 func setReleaseState(ro *v1alpha1.RuntimeRollout, id string, state v1alpha1.ReleaseState, revision string) {

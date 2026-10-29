@@ -61,7 +61,8 @@ func startingInventory(items []argocd.InventoryItem) []v1alpha1.InventoryEntry {
 	}
 	out := make([]v1alpha1.InventoryEntry, len(items))
 	for i, it := range items {
-		out[i] = v1alpha1.InventoryEntry{ReleaseID: it.ReleaseID, Name: it.Name, UID: it.UID, PlanDigest: it.PlanDigest, Revision: it.Revision}
+		out[i] = v1alpha1.InventoryEntry{ReleaseID: it.ReleaseID, Name: it.Name, UID: it.UID, PlanDigest: it.PlanDigest, Revision: it.Revision,
+			SpecDigest: it.SpecDigest}
 	}
 	return out
 }
@@ -72,7 +73,8 @@ func startingInventory(items []argocd.InventoryItem) []v1alpha1.InventoryEntry {
 func recordedInventory(ro *v1alpha1.RuntimeRollout) (map[string]v1alpha1.InventoryEntry, bool) {
 	items := make([]argocd.InventoryItem, 0, len(ro.Spec.StartingInventory))
 	for _, e := range ro.Spec.StartingInventory {
-		items = append(items, argocd.InventoryItem{ReleaseID: e.ReleaseID, Name: e.Name, UID: e.UID, PlanDigest: e.PlanDigest, Revision: e.Revision})
+		items = append(items, argocd.InventoryItem{ReleaseID: e.ReleaseID, Name: e.Name, UID: e.UID, PlanDigest: e.PlanDigest, Revision: e.Revision,
+			SpecDigest: e.SpecDigest})
 	}
 	candidates := [][]argocd.InventoryItem{items}
 	if len(items) == 0 {
@@ -97,6 +99,9 @@ func recordedInventory(ro *v1alpha1.RuntimeRollout) (map[string]v1alpha1.Invento
 // state; a pending step's release may be either, as after a write whose
 // record a restart lost. The release of the step in flight is not judged.
 // The engine's observed revision is not compared: it follows the spec.
+// "As it started" includes the spec fingerprint the starting inventory
+// recorded, and a completed step's end state the fingerprint recorded when
+// it became ready; a missing fingerprint is not compared.
 func inventoryDrift(ro *v1alpha1.RuntimeRollout, live []argocd.InventoryItem) []string {
 	start, ok := recordedInventory(ro)
 	if !ok {
@@ -133,7 +138,9 @@ func inventoryDrift(ro *v1alpha1.RuntimeRollout, live []argocd.InventoryItem) []
 		}
 		s, started := start[id]
 		l, present := now[id]
-		original := started == present && (!started || (l.UID == s.UID && l.Name == s.Name && l.PlanDigest == s.PlanDigest))
+		identical := started && present && l.UID == s.UID && l.Name == s.Name && l.PlanDigest == s.PlanDigest
+		original := started == present && (!started || (identical && sameSpec(s.SpecDigest, l.SpecDigest)))
+		edited := identical && !sameSpec(s.SpecDigest, l.SpecDigest)
 		step, stepped := steps[id]
 		var ok bool
 		switch state := releaseState(ro, id); {
@@ -141,14 +148,37 @@ func inventoryDrift(ro *v1alpha1.RuntimeRollout, live []argocd.InventoryItem) []
 			ok = original
 		case state == v1alpha1.ReleaseReady || state == v1alpha1.ReleaseRemoved:
 			ok = ended(ro, step, s, started, l, present)
+			if written := writtenSpec(ro, id); ok && present && !sameSpec(written, l.SpecDigest) {
+				ok, edited = false, true
+			}
 		default:
-			ok = original || ended(ro, step, s, started, l, present)
+			// Not written by this rollout yet, so a changed spec on the
+			// object it started from is an edit even when that object is
+			// already at the target plan, as on a retry.
+			ok = !edited && (original || ended(ro, step, s, started, l, present))
 		}
 		if !ok {
-			drift = append(drift, describeDrift(id, s, started, l, present))
+			drift = append(drift, describeDrift(id, s, started, l, present, edited))
 		}
 	}
 	return drift
+}
+
+// sameSpec compares a recorded spec fingerprint with a live one; a missing
+// record, as in a rollout created before fingerprints were recorded, is not
+// compared.
+func sameSpec(recorded, live string) bool {
+	return recorded == "" || recorded == live
+}
+
+// writtenSpec is the spec fingerprint recordSpec kept for a release.
+func writtenSpec(ro *v1alpha1.RuntimeRollout, id string) string {
+	for _, r := range ro.Status.Releases {
+		if r.ID == id {
+			return r.SpecDigest
+		}
+	}
+	return ""
 }
 
 // ended reports whether a release is at the end state of its step.
@@ -170,8 +200,10 @@ func ended(ro *v1alpha1.RuntimeRollout, step v1alpha1.RolloutStep, s v1alpha1.In
 	}
 }
 
-func describeDrift(id string, s v1alpha1.InventoryEntry, started bool, l argocd.InventoryItem, present bool) string {
+func describeDrift(id string, s v1alpha1.InventoryEntry, started bool, l argocd.InventoryItem, present, edited bool) string {
 	switch {
+	case edited:
+		return fmt.Sprintf("%s was edited (object %s: its source, values or destination changed)", id, l.UID)
 	case !started:
 		return fmt.Sprintf("%s appeared (object %s at plan %s)", id, l.UID, orNone(l.PlanDigest))
 	case !present:

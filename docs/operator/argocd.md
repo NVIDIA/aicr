@@ -128,7 +128,7 @@ avoids reading stale health.
 
 | Don't | Because | Instead |
 | --- | --- | --- |
-| Edit an owned Application | The operator forces its fields back and records `FieldOwnershipOverridden`: when no rollout is in progress, or in the release's own step. Edit a release whose step is in flight and the step stays `SpecDrifted` until its action timeout fails the rollout | Change the runtime: overrides, placement, or the AICR version |
+| Edit an owned Application | With no rollout in progress, the operator forces its fields back and records `FieldOwnershipOverridden`. During a rollout, an edit of a release's source, values or destination stalls it with `InventoryDrift`, other fields are forced back in the release's own step, and an edit of the release whose step is in flight stays `SpecDrifted` until its action timeout fails the rollout | Change the runtime: overrides, placement, or the AICR version |
 | Disable automated sync on an owned Application | The operator states `enabled: true` and repairs it | `spec.suspendEngine: true` on the runtime ([operations](operations.md#pausing-versus-suspending-the-engine)) |
 | Add the resources finalizer | The admission policy then denies every operator write to that Application, and deleting it would delete the release's resources | Remove a component through the plan; the operator adds the finalizer only for an approved `Remove` step |
 | Delete an owned Application to remove a component | Its resources stay, and the operator writes it again | Remove the component from the recipe or plan |

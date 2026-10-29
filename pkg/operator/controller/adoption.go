@@ -247,6 +247,8 @@ func (r *RolloutReconciler) adopt(ctx context.Context, rt *v1alpha1.ClusterRunti
 		}
 	}
 	setReleaseState(ro, step.Release, v1alpha1.ReleaseReady, entry.Revision)
+	// Adoption changes only ownership, so the spec stays as it started.
+	recordSpec(ro, step.Release, entry.SpecDigest)
 	ro.Status.Current = nil
 	return true, r.saveStatus(ctx, ro, "")
 }

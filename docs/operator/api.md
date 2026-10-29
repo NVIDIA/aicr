@@ -383,7 +383,8 @@ spec:                                 # immutable, except the set-once approval 
   toPlanDigest: sha256:<...>
   startingInventoryDigest: sha256:<...>
   startingInventory:                  # the owned engine objects the digest covers; drift is judged against them
-  - {releaseID: gpu-operator, name: gpu-operator, uid: <uid>, planDigest: sha256:<...>, revision: sha256:<...>}
+  - {releaseID: gpu-operator, name: gpu-operator, uid: <uid>, planDigest: sha256:<...>, revision: sha256:<...>, specDigest: sha256:<...>}
+                                      # specDigest fingerprints the Application's source, Helm values and destination
   assessmentRef: {configMap: aicr-upgrade-check-<run id>, digest: sha256:<...>}
   deadline: "2026-10-15T04:00:00Z"
   actionTimeout: 30m
@@ -423,7 +424,7 @@ status:
   current: {release: gpu-operator-readiness, operation: Verify, startedAt: <time>, attempts: 1}
                                       # timeoutFrom: <time> once a halt ended; the action timeout runs from it
   releases:                           # state: Pending | Progressing | Ready | Failed | Suspended (step in flight while halted) | Deleting | Removed | Unknown
-  - {id: cert-manager, state: Ready, revision: sha256:<...>}
+  - {id: cert-manager, state: Ready, revision: sha256:<...>, specDigest: sha256:<...>}   # specDigest: the spec this rollout wrote, from when it became ready
   - {id: nvsentinel, state: Removed}
   validation: {job: <name>, runID: <id>, result: Passed, evidence: oci://<ref>@sha256:<...>}
   message: ""

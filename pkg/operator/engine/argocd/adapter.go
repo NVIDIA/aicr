@@ -421,9 +421,12 @@ const (
 )
 
 // Observation is a release's state with the evidence that decided it.
+// SpecDigest is the observed object's; at Ready, it is the spec the
+// operator wrote.
 type Observation struct {
-	State  State
-	Reason string
+	State      State
+	Reason     string
+	SpecDigest string
 }
 
 // Observe applies current-revision readiness: an Application is
@@ -451,7 +454,31 @@ func (a *Adapter) Observe(ctx context.Context, p *plan.Document, r *plan.Release
 	if err != nil {
 		return Observation{}, err
 	}
-	return observe(live, desired, r, since, verify), nil
+	obs := observe(live, desired, r, since, verify)
+	obs.SpecDigest = SpecDigest(live)
+	return obs, nil
+}
+
+// SpecDigest fingerprints what an Application deploys: its source or
+// sources, Helm values included, and its destination. It leaves out the
+// sync policy, which a suspension toggles, and everything Argo CD writes.
+// It is empty for an object without any of them.
+func SpecDigest(app *unstructured.Unstructured) string {
+	spec, _, _ := unstructured.NestedMap(app.Object, "spec")
+	deployed := map[string]any{}
+	for _, k := range []string{"source", "sources", "destination"} {
+		if v, ok := spec[k]; ok {
+			deployed[k] = v
+		}
+	}
+	if len(deployed) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(deployed)
+	if err != nil {
+		return ""
+	}
+	return plan.DigestOf(raw)
 }
 
 func observe(live, desired *unstructured.Unstructured, r *plan.Release, since time.Time, verify bool) Observation {
@@ -623,13 +650,16 @@ func timeOf(v any) time.Time {
 	return t
 }
 
-// InventoryItem is one owned Application as the rollout sees it.
+// InventoryItem is one owned Application as the rollout sees it. SpecDigest
+// is omitted when empty, so an inventory recorded without it digests as it
+// did.
 type InventoryItem struct {
 	ReleaseID  string `json:"releaseID"`
 	Name       string `json:"name"`
 	UID        string `json:"uid"`
 	PlanDigest string `json:"planDigest"`
 	Revision   string `json:"revision"`
+	SpecDigest string `json:"specDigest,omitempty"`
 }
 
 // Suspend turns automated sync off, or back on, for every Application of
@@ -800,6 +830,7 @@ func (a *Adapter) Inventory(ctx context.Context, runtimeUID string) ([]Inventory
 			UID:        string(app.GetUID()),
 			PlanDigest: app.GetAnnotations()[v1alpha1.AnnotationPlanDigest],
 			Revision:   revision,
+			SpecDigest: SpecDigest(app),
 		})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].ReleaseID < items[j].ReleaseID })
