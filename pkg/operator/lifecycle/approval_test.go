@@ -17,6 +17,7 @@ package lifecycle
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,11 +26,13 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
@@ -192,6 +195,114 @@ func TestAcknowledgeThePausedRelease(t *testing.T) {
 	}
 	if _, _, err = Acknowledge(ctx, bob, ro.Name, "bob", time.Now()); operrors.CodeOf(err) != operrors.ErrCodeConflict {
 		t.Fatalf("a second acknowledgement: %v", err)
+	}
+}
+
+// Without an expiry an approval lasts until the rollout's deadline, so it
+// never ends before the rollout can; a rollout past its deadline is refused.
+func TestApproveDefaultsToTheDeadline(t *testing.T) {
+	ctx := testContext(t)
+	tests := []struct {
+		name     string
+		deadline time.Duration
+		code     operrors.ErrorCode
+	}{
+		{"deadline ahead", 6 * time.Hour, ""},
+		{"deadline passed", -time.Minute, operrors.ErrCodeConflict},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ro := newRollout(t, ctx, fmt.Sprintf("rollout-deadline-test-%d", i), func(ro *v1alpha1.RuntimeRollout) {
+				ro.Spec.Deadline = metav1.NewTime(time.Now().Add(tt.deadline).Truncate(time.Second))
+			})
+			got, err := Approve(ctx, as(t, "alice"), ro.Name, "alice", "window", time.Time{})
+			if tt.code != "" {
+				if operrors.CodeOf(err) != tt.code || !strings.Contains(err.Error(), "passed its deadline") {
+					t.Fatalf("Approve() = %v, want %s", err, tt.code)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Approve() = %v", err)
+			}
+			if !got.Spec.Approval.ExpiresAt.Equal(&ro.Spec.Deadline) {
+				t.Fatalf("Approve() expires at %s; want the deadline %s", got.Spec.Approval.ExpiresAt, ro.Spec.Deadline)
+			}
+		})
+	}
+}
+
+// conflictOnce is user's client with its first patch failing as a
+// conflict, as a write by another, such as the operator's status update,
+// does under the optimistic lock.
+func conflictOnce(t *testing.T, user string) (client.Client, *int) {
+	t.Helper()
+	cfg := rest.CopyConfig(restConfig)
+	cfg.Impersonate = rest.ImpersonationConfig{UserName: user, Groups: []string{"system:masters", "system:authenticated"}}
+	base, err := client.NewWithWatch(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		t.Fatal(err)
+	}
+	patches := 0
+	return interceptor.NewClient(base, interceptor.Funcs{
+		Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+			if patches++; patches == 1 {
+				return apierrors.NewConflict(v1alpha1.GroupVersion.WithResource("runtimerollouts").GroupResource(), obj.GetName(),
+					errors.New("the object has been modified"))
+			}
+			return c.Patch(ctx, obj, patch, opts...)
+		},
+	}), &patches
+}
+
+// Approving, revoking and acknowledging read the rollout again after a
+// conflicting write and succeed, instead of failing the command.
+func TestApprovalWritesRetryAConflict(t *testing.T) {
+	ctx := testContext(t)
+	approved := func(ro *v1alpha1.RuntimeRollout) {
+		ro.Spec.Approval = &v1alpha1.Approval{ApprovedBy: "alice", ExpiresAt: metav1.NewTime(time.Now().Add(time.Hour).Truncate(time.Second)), Reason: "window"}
+	}
+	tests := []struct {
+		name    string
+		prepare func(*v1alpha1.RuntimeRollout)
+		paused  bool
+		write   func(c client.Client, name string) (*v1alpha1.RuntimeRollout, error)
+		landed  func(*v1alpha1.RuntimeRollout) bool
+	}{
+		{name: "approve", write: func(c client.Client, name string) (*v1alpha1.RuntimeRollout, error) {
+			return Approve(ctx, c, name, "alice", "window", time.Now().Add(time.Hour))
+		}, landed: func(ro *v1alpha1.RuntimeRollout) bool {
+			return ro.Spec.Approval != nil && ro.Spec.Approval.ApprovedBy == "alice"
+		}},
+		{name: "revoke", prepare: approved, write: func(c client.Client, name string) (*v1alpha1.RuntimeRollout, error) {
+			return Revoke(ctx, c, name, "alice", "incident", time.Now())
+		}, landed: func(ro *v1alpha1.RuntimeRollout) bool { return ro.Spec.Approval.RevokedBy == "alice" }},
+		{name: "acknowledge", paused: true, prepare: func(ro *v1alpha1.RuntimeRollout) {
+			approved(ro)
+			ro.Spec.Steps[0].PostApplySteps = []string{"verify"}
+		}, write: func(c client.Client, name string) (*v1alpha1.RuntimeRollout, error) {
+			ro, _, err := Acknowledge(ctx, c, name, "alice", time.Now())
+			return ro, err
+		}, landed: func(ro *v1alpha1.RuntimeRollout) bool { return len(ro.Spec.Approval.Acknowledgements) == 1 }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ro := newRollout(t, ctx, "rollout-conflict-"+tt.name, tt.prepare)
+			if tt.paused {
+				ro.Status.Phase = v1alpha1.PhaseAwaitingAcknowledgement
+				ro.Status.Releases = []v1alpha1.ReleaseStatus{{ID: "gpu-operator", State: v1alpha1.ReleaseReady}}
+				if err := admin.Status().Update(ctx, ro); err != nil {
+					t.Fatal(err)
+				}
+			}
+			c, patches := conflictOnce(t, "alice")
+			if _, err := tt.write(c, ro.Name); err != nil || *patches != 2 {
+				t.Fatalf("after a conflict: %v, %d patches", err, *patches)
+			}
+			if err := admin.Get(ctx, client.ObjectKeyFromObject(ro), ro); err != nil || !tt.landed(ro) {
+				t.Fatalf("the write did not land: %+v, %v", ro.Spec.Approval, err)
+			}
+		})
 	}
 }
 

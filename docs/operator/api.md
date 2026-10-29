@@ -416,7 +416,7 @@ status:
   observedGeneration: 2
   conditions: []
   approval: Approved                  # NotRequired | Pending | Approved | Bypassed | Revoked | Expired
-  current: {release: gpu-operator-readiness, operation: Verify, startedAt: <time>, attempts: 1}
+  current: {release: gpu-operator-readiness, operation: Verify, startedAt: <time>}
                                       # timeoutFrom: <time> once a halt ended; the action timeout runs from it
   releases:                           # state: Pending | Progressing | Ready | Failed | Suspended (step in flight while halted) | Deleting | Removed | Unknown
   - {id: cert-manager, state: Ready, revision: sha256:<...>, specDigest: sha256:<...>}   # specDigest: the spec this rollout wrote, from when it became ready

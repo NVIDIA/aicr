@@ -49,6 +49,10 @@ const (
 	ReasonValidationDisabled = "ValidationDisabled"
 )
 
+// validationNotInstalled is why a runtime that requires deployment
+// validation stalls in an installation without it, and the ways forward.
+const validationNotInstalled = "deployment validation is not installed (validation.enabled); enable it or set spec.validation.deployment: Disabled"
+
 // Validation results recorded in status.validation.result.
 const (
 	resultPending = "Pending"
@@ -101,7 +105,8 @@ func (r *RolloutReconciler) validate(ctx context.Context, rt *v1alpha1.ClusterRu
 		return r.saveStatus(ctx, ro, message)
 	}
 	if !r.Config.ValidationEnabled {
-		return unavailable("deployment validation is not installed (validation.enabled); enable it or set spec.validation.deployment: Disabled")
+		// A backstop for a rollout created while validation was installed.
+		return unavailable(validationNotInstalled)
 	}
 	if p.Recipe == nil {
 		return unavailable("plan " + p.DesiredStateDigest + " records no recipe to validate against")
@@ -199,15 +204,13 @@ func (r *RolloutReconciler) validate(ctx context.Context, rt *v1alpha1.ClusterRu
 		return r.failValidation(ctx, ro, ref, "deployment validation run "+b.runID+" exited 0, but its evidence records failed checks")
 	}
 	ro.Status.Validation.Result, ro.Status.Validation.Evidence = resultPassed, ref
-	validationRuns.WithLabelValues("passed").Inc()
-	return r.finishWith(ctx, ro, v1alpha1.PhaseSucceeded, "", ref)
+	return r.finishWith(ctx, ro, v1alpha1.PhaseSucceeded, "", map[string]string{v1alpha1.AnnotationEvidence: ref})
 }
 
 // failValidation ends the rollout Failed, recording the evidence a failed
 // run pushed, if any: failed runs document what did not pass.
 func (r *RolloutReconciler) failValidation(ctx context.Context, ro *v1alpha1.RuntimeRollout, ref, message string) error {
 	ro.Status.Validation.Result, ro.Status.Validation.Evidence = resultFailed, ref
-	validationRuns.WithLabelValues("failed").Inc()
 	return r.finish(ctx, ro, v1alpha1.PhaseFailed, message)
 }
 
@@ -226,8 +229,10 @@ type binding struct {
 }
 
 // bind reads the evidence the run pushed, checks that it is about the plan's
-// recipe, this AICR release and the pinned validators, and signed with the
-// configured key, and pushes the operator's binding statement with AICR's
+// recipe, this AICR release and the pinned validators and, when a signing
+// key is configured, that it carries exactly one key signature, whose key
+// fingerprint it records unverified (`aicr evidence verify --key` verifies
+// the signature), and pushes the operator's binding statement with AICR's
 // evidence as its subject. It returns the binding's reference and whether
 // every check passed; a run that pushed nothing is NotFound. Binding is
 // idempotent: the same run binds to the same digest.
@@ -375,14 +380,18 @@ func (r *RolloutReconciler) predicate(ctx context.Context, b *binding, validator
 }
 
 // approvalRecord is the rollout's approval as the evidence records it: the
-// approver and reason with any acknowledgements of post-apply steps,
-// NotRequired, or the development bypass.
+// approver and reason with any acknowledgements of post-apply steps and any
+// revocation, NotRequired, or the development bypass.
 func approvalRecord(ro *v1alpha1.RuntimeRollout) evidence.Approval {
 	switch a := ro.Spec.Approval; {
 	case !ro.Spec.ApprovalRequired:
 		return evidence.Approval{State: approvalNotRequired}
 	case a != nil:
-		record := evidence.Approval{State: approvalApproved, ApprovedBy: a.ApprovedBy, Reason: a.Reason, ExpiresAt: a.ExpiresAt.UTC().Format(time.RFC3339)}
+		record := evidence.Approval{State: approvalApproved, ApprovedBy: a.ApprovedBy, Reason: a.Reason, ExpiresAt: a.ExpiresAt.UTC().Format(time.RFC3339),
+			RevokedBy: a.RevokedBy, RevokeReason: a.RevokeReason}
+		if a.RevokedAt != nil {
+			record.RevokedAt = a.RevokedAt.UTC().Format(time.RFC3339)
+		}
 		for _, k := range a.Acknowledgements {
 			ack := evidence.Acknowledgement{Release: k.Release, AcknowledgedBy: k.AcknowledgedBy}
 			if k.AcknowledgedAt != nil {

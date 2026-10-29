@@ -236,7 +236,10 @@ func validRollout(t *testing.T) *v1alpha1.RuntimeRollout {
 			StartingInventoryDigest: digestB,
 			Deadline:                metav1.NewTime(time.Now().Add(6 * time.Hour).Truncate(time.Second)),
 			ActionTimeout:           metav1.Duration{Duration: 30 * time.Minute},
-			ApprovalRequired:        true,
+			StartingInventory: []v1alpha1.InventoryEntry{
+				{ReleaseID: "nvsentinel", Name: "nvsentinel", UID: uidA, PlanDigest: digestB, SpecDigest: digestA},
+			},
+			ApprovalRequired: true,
 			Steps: []v1alpha1.RolloutStep{
 				{Release: "gpu-operator", Operation: v1alpha1.OperationInstall, Assessment: v1alpha1.AssessmentNotApplicable},
 				{Release: "gpu-operator-readiness", Operation: v1alpha1.OperationVerify, Assessment: v1alpha1.AssessmentNotApplicable},
@@ -275,6 +278,12 @@ func TestRolloutSpecIsImmutable(t *testing.T) {
 		{"add assessment", func(r *v1alpha1.RuntimeRollout) {
 			r.Spec.AssessmentRef = &v1alpha1.DigestedConfigMapRef{ConfigMap: "aicr-upgrade-check-1", Digest: digestA}
 		}},
+		{"schema version", func(r *v1alpha1.RuntimeRollout) { r.Spec.SchemaVersion++ }},
+		{"runtime UID", func(r *v1alpha1.RuntimeRollout) { r.Spec.RuntimeUID = "1c2d3e4f-5061-7283-94a5-b6c7d8e9f0a1" }},
+		{"starting inventory digest", func(r *v1alpha1.RuntimeRollout) { r.Spec.StartingInventoryDigest = digestA }},
+		{"action timeout", func(r *v1alpha1.RuntimeRollout) { r.Spec.ActionTimeout = metav1.Duration{Duration: time.Hour} }},
+		{"inventory entry", func(r *v1alpha1.RuntimeRollout) { r.Spec.StartingInventory[0].SpecDigest = digestB }},
+		{"inventory dropped", func(r *v1alpha1.RuntimeRollout) { r.Spec.StartingInventory = nil }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

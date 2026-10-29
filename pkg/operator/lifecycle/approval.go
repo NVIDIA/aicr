@@ -27,6 +27,7 @@ import (
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
@@ -49,57 +50,80 @@ func WhoAmI(ctx context.Context, c client.Client) (string, error) {
 	return review.Status.UserInfo.Username, nil
 }
 
-// Approve sets the rollout's set-once approval as user, valid until expires.
-// It refuses a rollout that is approved already, needs no approval or has
-// ended, and writes with an optimistic lock, so it approves exactly the
+// Approve sets the rollout's set-once approval as user, valid until expires,
+// or until the rollout's deadline when expires is zero. It refuses a rollout
+// that is approved already, needs no approval or has ended, and one whose
+// deadline has passed when expires is zero. It writes with an optimistic
+// lock, reading again after a conflicting write, so it approves exactly the
 // rollout it read.
 func Approve(ctx context.Context, c client.Client, name, user, reason string, expires time.Time) (*v1alpha1.RuntimeRollout, error) {
 	if strings.TrimSpace(reason) == "" {
 		return nil, operrors.New(operrors.ErrCodeInvalidRequest, "an approval needs a reason")
 	}
-	ro, err := get(ctx, c, name)
+	var ro *v1alpha1.RuntimeRollout
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var err error
+		if ro, err = get(ctx, c, name); err != nil {
+			return err
+		}
+		switch {
+		case ro.Labels[v1alpha1.LabelOutcome] != "":
+			return operrors.New(operrors.ErrCodeConflict, fmt.Sprintf("rollout %s has ended %s", name, ro.Labels[v1alpha1.LabelOutcome]))
+		case ro.Spec.Approval != nil:
+			return operrors.New(operrors.ErrCodeConflict, fmt.Sprintf("rollout %s is already approved by %s", name, ro.Spec.Approval.ApprovedBy))
+		case !ro.Spec.ApprovalRequired:
+			return operrors.New(operrors.ErrCodeInvalidRequest, fmt.Sprintf("rollout %s needs no approval", name))
+		}
+		until := expires
+		if until.IsZero() {
+			if until = ro.Spec.Deadline.Time; !until.After(time.Now()) {
+				return operrors.New(operrors.ErrCodeConflict, fmt.Sprintf("rollout %s passed its deadline at %s", name, until.UTC().Format(time.RFC3339)))
+			}
+		}
+		patch := client.MergeFromWithOptions(ro.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		ro.Spec.Approval = &v1alpha1.Approval{ApprovedBy: user, ExpiresAt: metav1.NewTime(until.UTC().Truncate(time.Second)), Reason: reason}
+		if err = c.Patch(ctx, ro, patch); err != nil {
+			return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "approve "+name)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	switch {
-	case ro.Labels[v1alpha1.LabelOutcome] != "":
-		return nil, operrors.New(operrors.ErrCodeConflict, fmt.Sprintf("rollout %s has ended %s", name, ro.Labels[v1alpha1.LabelOutcome]))
-	case ro.Spec.Approval != nil:
-		return nil, operrors.New(operrors.ErrCodeConflict, fmt.Sprintf("rollout %s is already approved by %s", name, ro.Spec.Approval.ApprovedBy))
-	case !ro.Spec.ApprovalRequired:
-		return nil, operrors.New(operrors.ErrCodeInvalidRequest, fmt.Sprintf("rollout %s needs no approval", name))
-	}
-	patch := client.MergeFromWithOptions(ro.DeepCopy(), client.MergeFromWithOptimisticLock{})
-	ro.Spec.Approval = &v1alpha1.Approval{ApprovedBy: user, ExpiresAt: metav1.NewTime(expires.UTC().Truncate(time.Second)), Reason: reason}
-	if err = c.Patch(ctx, ro, patch); err != nil {
-		return nil, operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "approve "+name)
 	}
 	return ro, nil
 }
 
 // Revoke adds the set-once revocation to an approved rollout as user. The
-// step in flight finishes and no further step starts.
+// step in flight finishes and no further step starts. It reads again after a
+// conflicting write.
 func Revoke(ctx context.Context, c client.Client, name, user, reason string, now time.Time) (*v1alpha1.RuntimeRollout, error) {
 	if strings.TrimSpace(reason) == "" {
 		return nil, operrors.New(operrors.ErrCodeInvalidRequest, "a revocation needs a reason")
 	}
-	ro, err := get(ctx, c, name)
+	var ro *v1alpha1.RuntimeRollout
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var err error
+		if ro, err = get(ctx, c, name); err != nil {
+			return err
+		}
+		switch {
+		case ro.Labels[v1alpha1.LabelOutcome] != "":
+			return operrors.New(operrors.ErrCodeConflict, fmt.Sprintf("rollout %s has ended %s", name, ro.Labels[v1alpha1.LabelOutcome]))
+		case ro.Spec.Approval == nil:
+			return operrors.New(operrors.ErrCodeConflict, fmt.Sprintf("rollout %s is not approved; nothing to revoke", name))
+		case ro.Spec.Approval.RevokedBy != "":
+			return operrors.New(operrors.ErrCodeConflict, fmt.Sprintf("rollout %s is already revoked by %s", name, ro.Spec.Approval.RevokedBy))
+		}
+		patch := client.MergeFromWithOptions(ro.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		at := metav1.NewTime(now.UTC().Truncate(time.Second))
+		ro.Spec.Approval.RevokedBy, ro.Spec.Approval.RevokedAt, ro.Spec.Approval.RevokeReason = user, &at, reason
+		if err = c.Patch(ctx, ro, patch); err != nil {
+			return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "revoke "+name)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	switch {
-	case ro.Labels[v1alpha1.LabelOutcome] != "":
-		return nil, operrors.New(operrors.ErrCodeConflict, fmt.Sprintf("rollout %s has ended %s", name, ro.Labels[v1alpha1.LabelOutcome]))
-	case ro.Spec.Approval == nil:
-		return nil, operrors.New(operrors.ErrCodeConflict, fmt.Sprintf("rollout %s is not approved; nothing to revoke", name))
-	case ro.Spec.Approval.RevokedBy != "":
-		return nil, operrors.New(operrors.ErrCodeConflict, fmt.Sprintf("rollout %s is already revoked by %s", name, ro.Spec.Approval.RevokedBy))
-	}
-	patch := client.MergeFromWithOptions(ro.DeepCopy(), client.MergeFromWithOptimisticLock{})
-	at := metav1.NewTime(now.UTC().Truncate(time.Second))
-	ro.Spec.Approval.RevokedBy, ro.Spec.Approval.RevokedAt, ro.Spec.Approval.RevokeReason = user, &at, reason
-	if err = c.Patch(ctx, ro, patch); err != nil {
-		return nil, operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "revoke "+name)
 	}
 	return ro, nil
 }
@@ -107,23 +131,31 @@ func Revoke(ctx context.Context, c client.Client, name, user, reason string, now
 // Acknowledge records, as user, that the post-apply steps of the release
 // the rollout is paused on are done, and returns that step. It refuses
 // a rollout that is not waiting for an acknowledgement, and writes with an
-// optimistic lock.
+// optimistic lock, reading again after a conflicting write.
 func Acknowledge(ctx context.Context, c client.Client, name, user string, now time.Time) (*v1alpha1.RuntimeRollout, v1alpha1.RolloutStep, error) {
-	ro, err := get(ctx, c, name)
+	var ro *v1alpha1.RuntimeRollout
+	var step v1alpha1.RolloutStep
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var err error
+		if ro, err = get(ctx, c, name); err != nil {
+			return err
+		}
+		var ok bool
+		if step, ok = awaiting(ro); !ok {
+			return operrors.New(operrors.ErrCodeConflict,
+				fmt.Sprintf("rollout %s is not waiting for an acknowledgement (phase %s)", name, or(string(ro.Status.Phase), "Pending")))
+		}
+		patch := client.MergeFromWithOptions(ro.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		at := metav1.NewTime(now.UTC().Truncate(time.Second))
+		ro.Spec.Approval.Acknowledgements = append(ro.Spec.Approval.Acknowledgements,
+			v1alpha1.Acknowledgement{Release: step.Release, AcknowledgedBy: user, AcknowledgedAt: &at})
+		if err = c.Patch(ctx, ro, patch); err != nil {
+			return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "acknowledge "+name)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, v1alpha1.RolloutStep{}, err
-	}
-	step, ok := awaiting(ro)
-	if !ok {
-		return nil, v1alpha1.RolloutStep{}, operrors.New(operrors.ErrCodeConflict,
-			fmt.Sprintf("rollout %s is not waiting for an acknowledgement (phase %s)", name, or(string(ro.Status.Phase), "Pending")))
-	}
-	patch := client.MergeFromWithOptions(ro.DeepCopy(), client.MergeFromWithOptimisticLock{})
-	at := metav1.NewTime(now.UTC().Truncate(time.Second))
-	ro.Spec.Approval.Acknowledgements = append(ro.Spec.Approval.Acknowledgements,
-		v1alpha1.Acknowledgement{Release: step.Release, AcknowledgedBy: user, AcknowledgedAt: &at})
-	if err = c.Patch(ctx, ro, patch); err != nil {
-		return nil, v1alpha1.RolloutStep{}, operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "acknowledge "+name)
 	}
 	return ro, step, nil
 }

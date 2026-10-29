@@ -254,12 +254,13 @@ longer than `actionTimeout` can fail on resume
 
 ## Validation
 
-**`ValidationUnavailable`.** The rollout is in `Validating` and cannot run
-deployment validation:
+**`ValidationUnavailable`.** Deployment validation cannot run. Without
+validation installed, the runtime stalls before any step runs; otherwise the
+rollout is in `Validating`:
 
 | Message | Fix |
 | --- | --- |
-| `deployment validation is not installed (validation.enabled)` | Install the validation identities (`validation.enabled: true` with `aicr.validatorImages`) or set `spec.validation.deployment: Disabled` |
+| `deployment validation is not installed (validation.enabled)` | Install the validation identities (`validation.enabled: true` with `aicr.validatorImages`) or set `spec.validation.deployment: Disabled`. The runtime stalls before any step; a rollout created while validation was installed stalls in `Validating` |
 | `plan <digest> records no recipe to validate against` | The rollout targets a plan rebuilt from Applications and was created by an operator that predates `PlanWithoutRecipe`; set `Disabled` for this rollout, or roll to a resolved plan. Current operators refuse such a rollout before any step |
 | `taking the deployment snapshot` (rollout message, not a stall) | Validation waits for the snapshot the rollout takes after its last step; it runs in `aicr-discovery` like discovery's. If it fails, the rollout ends `Failed` with `the deployment snapshot failed: <cause>`: fix the cause as for a discovery snapshot, then retry |
 

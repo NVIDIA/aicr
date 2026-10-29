@@ -137,12 +137,17 @@ func (r *RepoCredsRefresher) Refresh(ctx context.Context) error {
 	return nil
 }
 
-// Check reports RegistryCredentialsStale when the token in the repo-creds
-// Secret expires within defaults.RepoCredsStaleAfter, or carries no expiry.
+// Check reports RegistryCredentialsStale when the repo-creds Secret is
+// missing, or its token expires within defaults.RepoCredsStaleAfter or
+// carries no expiry. A failed read carries no reason: it says nothing about
+// the token.
 func (r *RepoCredsRefresher) Check(ctx context.Context) error {
 	secret := &corev1.Secret{}
 	if err := r.Reader.Get(ctx, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, secret); err != nil {
-		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "read repo-creds Secret").WithReason(ReasonRegistryCredentialsStale)
+		if apierrors.IsNotFound(err) {
+			return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "read repo-creds Secret").WithReason(ReasonRegistryCredentialsStale)
+		}
+		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "read repo-creds Secret")
 	}
 	expires, err := time.Parse(time.RFC3339, secret.Annotations[v1alpha1.AnnotationTokenExpiresAt])
 	if err != nil {

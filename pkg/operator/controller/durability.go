@@ -146,19 +146,6 @@ func retryToken(rt *v1alpha1.ClusterRuntime, rollouts []v1alpha1.RuntimeRollout)
 	return token
 }
 
-// markRetry records on a rollout the retry token that ends it.
-func (r *RolloutReconciler) markRetry(ctx context.Context, ro *v1alpha1.RuntimeRollout, token string) error {
-	patch := client.MergeFrom(ro.DeepCopy())
-	if ro.Annotations == nil {
-		ro.Annotations = map[string]string{}
-	}
-	ro.Annotations[v1alpha1.AnnotationRetry] = token
-	if err := r.Client.Patch(ctx, ro, patch); err != nil {
-		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "record retry on "+ro.Name)
-	}
-	return nil
-}
-
 // restorePlan rebuilds a lost active plan ConfigMap from the live engine
 // objects. It writes the plan and its values when the rebuilt
 // digest is the active one; otherwise the runtime stalls with PlanMissing
@@ -202,8 +189,10 @@ func (r *RolloutReconciler) restorePlan(ctx context.Context, rt *v1alpha1.Cluste
 // the ten newest terminal ones; plans beyond the active, candidate and pinned
 // ones, those retained rollouts reference and the five newest others; and
 // recipe, values and assessment content nothing retained references, once
-// older than a grace period that covers a resolution in flight.
-func (r *RolloutReconciler) retain(ctx context.Context, rt *v1alpha1.ClusterRuntime, active, target string) error {
+// older than a grace period that covers a resolution in flight. The
+// assessment report of a blocked transition, which no rollout references,
+// is kept.
+func (r *RolloutReconciler) retain(ctx context.Context, rt *v1alpha1.ClusterRuntime, active, target, blockedReport string) error {
 	rollouts, err := r.rollouts(ctx, rt)
 	if err != nil {
 		return err
@@ -221,7 +210,7 @@ func (r *RolloutReconciler) retain(ctx context.Context, rt *v1alpha1.ClusterRunt
 		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "list ConfigMaps")
 	}
 	keepPlans := map[string]bool{active: true, target: true, rt.Status.CandidatePlanDigest: true, rt.Spec.Selection.PinnedPlanDigest: true}
-	keepContent := map[string]bool{}
+	keepContent := map[string]bool{blockedReport: true}
 	for i := range kept {
 		keepPlans[kept[i].Spec.FromPlanDigest], keepPlans[kept[i].Spec.ToPlanDigest] = true, true
 		if ref := kept[i].Spec.AssessmentRef; ref != nil {

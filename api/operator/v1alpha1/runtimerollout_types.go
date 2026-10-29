@@ -184,7 +184,8 @@ type RolloutStep struct {
 
 	Assessment Assessment `json:"assessment"`
 
-	// CRDChange is true when the release owns CRDs whose chart changes.
+	// CRDChange is true when the chart changes and either version of the
+	// release owns CRDs, including a chart that stops owning them.
 	// +optional
 	CRDChange bool `json:"crdChange,omitempty"`
 
@@ -355,8 +356,6 @@ type CurrentStep struct {
 	// the end of a halt. Time halted does not count against the step.
 	// +optional
 	TimeoutFrom *metav1.Time `json:"timeoutFrom,omitempty"`
-	// +optional
-	Attempts int32 `json:"attempts,omitempty"`
 }
 
 // ReleaseState is a release's observed state.

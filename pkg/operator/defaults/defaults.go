@@ -35,9 +35,6 @@ const (
 const (
 	// PluginTimeout bounds every plugin command's API calls.
 	PluginTimeout = 30 * time.Second
-	// ApprovalLifetime is how long an approval made with the plugin stays
-	// valid unless --expires says otherwise.
-	ApprovalLifetime = 2 * time.Hour
 )
 
 // Leader election. Leader election coordinates replicas; it is not fencing.

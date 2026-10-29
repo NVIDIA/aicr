@@ -106,18 +106,26 @@ type Ensured struct {
 }
 
 // Capabilities reports whether Argo CD can take the operator's writes: the
-// Application CRD is served and the project exists.
+// Application CRD is served and the project exists. Only a kind that is not
+// served or a project that is not found carries a reason; any other failure
+// to read them is transient and carries none.
 func (a *Adapter) Capabilities(ctx context.Context) error {
 	if _, err := a.Mapper.RESTMapping(ApplicationGVK.GroupKind(), ApplicationGVK.Version); err != nil {
-		return operrors.Wrap(operrors.ErrCodeUnavailable, "the Argo CD Application kind is not served", err).
-			WithReason(ReasonEngineMissing)
+		if meta.IsNoMatchError(err) {
+			return operrors.Wrap(operrors.ErrCodeUnavailable, "the Argo CD Application kind is not served", err).
+				WithReason(ReasonEngineMissing)
+		}
+		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "look up the Argo CD Application kind")
 	}
 	project := &unstructured.Unstructured{}
 	project.SetGroupVersionKind(AppProjectGVK)
 	err := a.Reader.Get(ctx, client.ObjectKey{Namespace: a.Target.Namespace, Name: a.Target.Project}, project)
-	if err != nil {
+	switch {
+	case apierrors.IsNotFound(err) || meta.IsNoMatchError(err):
 		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "read Argo CD project "+a.Target.Project).
 			WithReason(ReasonProjectMissing)
+	case err != nil:
+		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "read Argo CD project "+a.Target.Project)
 	}
 	return nil
 }

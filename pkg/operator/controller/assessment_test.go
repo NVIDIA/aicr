@@ -83,6 +83,12 @@ func TestAssessSteps(t *testing.T) {
 	if approval, _ = assessSteps(steps, from, to, report); !approval || !steps[0].CRDChange || steps[0].Assessment != v1alpha1.AssessmentSafe {
 		t.Errorf("CRD owner: approval=%v, %+v", approval, steps[0])
 	}
+	// So does a safe chart change that stops owning the CRDs.
+	dropped := &plan.Document{Releases: []plan.Release{rel("gpu-operator", "gpu-operator", "gpu-operator", "gpu-operator", "g2", "v1", false)}}
+	steps = []v1alpha1.RolloutStep{upgrade("gpu-operator")}
+	if approval, _ = assessSteps(steps, from, dropped, report); !approval || !steps[0].CRDChange || steps[0].Assessment != v1alpha1.AssessmentSafe {
+		t.Errorf("CRDs dropped: approval=%v, %+v", approval, steps[0])
+	}
 	// No verdict for a changed chart is unknown.
 	steps = []v1alpha1.RolloutStep{upgrade("kai-scheduler")}
 	if approval, _ = assessSteps(steps, from, to, nil); !approval || steps[0].Assessment != v1alpha1.AssessmentUnknown {
@@ -212,6 +218,52 @@ func TestRolloutAssessesRecipeChange(t *testing.T) {
 		if x.Spec.ToPlanDigest == target {
 			t.Fatal("a blocked transition got a rollout")
 		}
+	}
+}
+
+// A blocked transition has no rollout to reference its assessment report,
+// yet retention keeps the report: the transition stays blocked and is not
+// assessed again once the grace period for unreferenced content passes.
+func TestBlockedTransitionKeepsItsReport(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, stabilized)
+	gpu := func(chart string) releaseWithValues {
+		r := testRelease("gpu-operator", plan.PhasePrimary, "", `{}`)
+		r.Chart.Digest = plan.DigestOf([]byte(chart))
+		return r
+	}
+	active := putResolved(t, ctx, rt, map[string]string{"service": "eks", "version": "1"}, gpu("g1"))
+	target := putResolved(t, ctx, rt, map[string]string{"service": "eks", "version": "2"}, gpu("g2"))
+	succeedTo(t, ctx, rt, active)
+	resolved(t, ctx, target)
+	engine := newEngine()
+	engine.ensured["gpu-operator"] = active
+	engine.inventory = []argocd.InventoryItem{{ReleaseID: "gpu-operator", UID: "u-g", PlanDigest: active}}
+	r, clk := newRollout(t, engine, true)
+	clk.now = time.Now().Add(2 * time.Second)
+	reconcileRollout(t, ctx, r)
+	job := liveJobs(t, ctx, "assessment")[0]
+	succeed(t, ctx, &job, []byte(`{"deployer":"argocd","objectNamesCompared":false,"components":[`+
+		`{"component":"gpu-operator","change":"version","from":"v25.10.1","to":"v26.7.1","verdict":"blocked","breaking":false,"downgrade":false,"failsRun":false}],`+
+		`"summary":{"components":1,"failing":0}}`))
+	reconcileRollout(t, ctx, r)
+	if c := cond(getRuntime(t, ctx), v1alpha1.ConditionStalled); c.Reason != ReasonTransitionBlocked {
+		t.Fatalf("Stalled = %+v", c)
+	}
+
+	clk.now = clk.now.Add(2 * time.Hour)
+	for range 2 {
+		reconcileRollout(t, ctx, r)
+	}
+	reports := &corev1.ConfigMapList{}
+	if err := k8s.List(ctx, reports, client.InNamespace(operatorNS), client.MatchingLabels{v1alpha1.LabelRole: v1alpha1.RoleAssessment}); err != nil {
+		t.Fatal(err)
+	}
+	if len(reports.Items) != 1 || len(liveJobs(t, ctx, "assessment")) != 0 {
+		t.Fatalf("%d assessment reports, %d assessment Jobs; want the report kept and no new run", len(reports.Items), len(liveJobs(t, ctx, "assessment")))
+	}
+	if c := cond(getRuntime(t, ctx), v1alpha1.ConditionStalled); c.Reason != ReasonTransitionBlocked {
+		t.Fatalf("Stalled = %+v", c)
 	}
 }
 

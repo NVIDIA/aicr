@@ -16,6 +16,7 @@ package controller
 
 import (
 	"context"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -199,6 +200,54 @@ func TestDeletionRemovesInReverseOrder(t *testing.T) {
 	}
 	if want := []string{"Ensure cert-manager", "Remove nfd", "Remove cert-manager"}; !slices.Equal(engine.order, want) {
 		t.Fatalf("engine calls = %v, want %v", engine.order, want)
+	}
+}
+
+// Without the development bypass a removal waits for an approver: the
+// runtime stalls AwaitingApproval, nothing is removed and the cleanup
+// finalizer stays. A failed engine check meanwhile is retried and changes
+// nothing. Once approved, every release is removed and the runtime goes.
+func TestDeletionRemovalWaitsForApproval(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+		stabilized(rt)
+		rt.Spec.DeletionPolicy = v1alpha1.DeletionDelete
+	})
+	active := putPlan(t, ctx, rt, "50m")
+	succeedTo(t, ctx, rt, active)
+	resolved(t, ctx, active)
+	engine := newEngine()
+	engine.ensured["cert-manager"] = active
+	engine.inventory = []argocd.InventoryItem{{ReleaseID: "cert-manager", UID: "u-c", PlanDigest: active}}
+	r, clk := newRollout(t, engine, false)
+	reconcileRollout(t, ctx, r) // finalizer
+	deleteRuntime(t, ctx)
+	reconcileRollout(t, ctx, r) // removal rollout
+	reconcileRollout(t, ctx, r) // awaiting approval
+	removal := onlyRollout(t, ctx, removalDigest(string(rt.UID)))
+	waiting := getRuntime(t, ctx)
+	if c := cond(waiting, v1alpha1.ConditionStalled); removal.Status.Phase != v1alpha1.PhaseAwaitingApproval || c.Reason != ReasonAwaitingApproval ||
+		len(engine.removed) != 0 || !controllerutil.ContainsFinalizer(waiting, v1alpha1.FinalizerCleanup) {
+
+		t.Fatalf("before approval: rollout %+v, Stalled %+v, removed %v, finalizers %v", removal.Status, c, engine.removed, waiting.Finalizers)
+	}
+
+	engine.capabilities = operrors.New(operrors.ErrCodeUnavailable, "read Argo CD project aicr: timeout")
+	if _, err := r.Reconcile(ctx, request); err == nil || !reflect.DeepEqual(getRuntime(t, ctx).Status.Conditions, waiting.Status.Conditions) {
+		t.Fatalf("a failed engine check: Reconcile() = %v, conditions %+v", err, getRuntime(t, ctx).Status.Conditions)
+	}
+	engine.capabilities = nil
+
+	approve(t, ctx, removal.Name, clk.now.Add(time.Hour))
+	engine.gone["cert-manager"] = true
+	for range 5 {
+		if runtimeGone(t, ctx) {
+			break
+		}
+		reconcileRollout(t, ctx, r)
+	}
+	if !runtimeGone(t, ctx) || engine.removed["cert-manager"] != "u-c" {
+		t.Fatalf("after approval: runtime gone %t, removed %v", runtimeGone(t, ctx), engine.removed)
 	}
 }
 

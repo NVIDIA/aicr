@@ -16,6 +16,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -25,10 +26,12 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
@@ -136,7 +139,9 @@ func (f *fakeEngine) liveSpec(id string) string {
 }
 
 // Observe is Ready only for what was ensured at this plan: never stale. A
-// Verify step is Ready only after a Verify call.
+// Verify step is Ready only after a Verify call. Drift is reported only at
+// the plan the object carries, as the adapter checks the plan annotation
+// first.
 func (f *fakeEngine) Observe(_ context.Context, p *plan.Document, r *plan.Release, _ []byte, _ time.Time, verify bool) (argocd.Observation, error) {
 	if f.observeErr != nil {
 		return argocd.Observation{}, f.observeErr
@@ -144,10 +149,10 @@ func (f *fakeEngine) Observe(_ context.Context, p *plan.Document, r *plan.Releas
 	switch {
 	case f.missing[r.ID]:
 		return argocd.Observation{State: argocd.StateMissing, Reason: argocd.ReasonApplicationGone}, nil
-	case f.drifted[r.ID]:
-		return argocd.Observation{State: argocd.StateProgressing, Reason: argocd.ReasonSpecDrifted}, nil
 	case f.ensured[r.ID] != p.DesiredStateDigest:
 		return argocd.Observation{State: argocd.StateProgressing, Reason: argocd.ReasonSpecNotWritten}, nil
+	case f.drifted[r.ID]:
+		return argocd.Observation{State: argocd.StateProgressing, Reason: argocd.ReasonSpecDrifted}, nil
 	case verify && f.verified[r.ID] == 0:
 		return argocd.Observation{State: argocd.StateProgressing, Reason: argocd.ReasonSyncNotStarted}, nil
 	case !verify && f.priorFailed[r.ID] && f.verified[r.ID] == 0:
@@ -715,6 +720,42 @@ func TestResolutionStallHoldsTheRollout(t *testing.T) {
 	}
 }
 
+// A resolution that stalls once the target is rolled out, as when the
+// cluster stops matching its criteria after a spec change, keeps the runtime
+// from being Ready: Ready takes the stall's reason, and Available still
+// reports the healthy stack.
+func TestStalledResolutionIsNotReady(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, stabilized)
+	digest := putPlan(t, ctx, rt, "50m")
+	resolved(t, ctx, digest)
+	r, clk := newRollout(t, newEngine(), true)
+	clk.now = time.Now().Add(2 * time.Second)
+	for range 4 {
+		reconcileRollout(t, ctx, r)
+	}
+	if c := cond(getRuntime(t, ctx), v1alpha1.ConditionReady); c.Status != metav1.ConditionTrue {
+		t.Fatalf("Ready after the rollout = %+v", c)
+	}
+
+	rt = getRuntime(t, ctx)
+	patch := client.MergeFrom(rt.DeepCopy())
+	rt.Spec.Intent = "inference"
+	if err := k8s.Patch(ctx, rt, patch); err != nil {
+		t.Fatal(err)
+	}
+	stallResolution(t, ctx, digest, discovery.ReasonCriteriaConflict)
+	reconcileRollout(t, ctx, r)
+	got := getRuntime(t, ctx)
+	ready, available := cond(got, v1alpha1.ConditionReady), cond(got, v1alpha1.ConditionAvailable)
+	if ready.Status != metav1.ConditionFalse || ready.Reason != discovery.ReasonCriteriaConflict || ready.Message != discovery.ReasonCriteriaConflict+" in test" {
+		t.Fatalf("Ready while resolution is stalled = %+v", ready)
+	}
+	if available.Status != metav1.ConditionTrue {
+		t.Fatalf("Available = %+v; the stack is healthy", available)
+	}
+}
+
 // Terminal conditions end a rollout before any engine write.
 func TestRolloutTerminalStates(t *testing.T) {
 	tests := []struct {
@@ -760,8 +801,9 @@ func TestRolloutTerminalStates(t *testing.T) {
 	}
 }
 
-// Deployment validation, which this build cannot run yet, stalls the
-// rollout with a specific reason instead of acting.
+// A runtime that requires deployment validation from an installation
+// without it stalls with a specific reason before any step: no rollout
+// applies releases that would then wait for a validation that cannot run.
 func TestRolloutStallsOnUnsupportedWork(t *testing.T) {
 	ctx := testContext(t)
 	rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
@@ -774,16 +816,14 @@ func TestRolloutStallsOnUnsupportedWork(t *testing.T) {
 	for range 3 {
 		reconcileRollout(t, ctx, r)
 	}
-	ro := rollouts(t, ctx)[0]
-	if ro.Status.Phase != v1alpha1.PhaseValidating || ro.Labels[v1alpha1.LabelOutcome] != "" {
-		t.Fatalf("rollout = %+v", ro.Status)
+	if n := len(rollouts(t, ctx)); n != 0 || len(engine.order) != 0 {
+		t.Fatalf("%d rollouts, engine writes %v; want none", n, engine.order)
 	}
-	if c := cond(getRuntime(t, ctx), v1alpha1.ConditionStalled); c.Reason != ReasonValidationMissing {
+	// Stalled names why, and what to change.
+	if c := cond(getRuntime(t, ctx), v1alpha1.ConditionStalled); c.Status != metav1.ConditionTrue || c.Reason != ReasonValidationMissing ||
+		!strings.Contains(c.Message, "validation.enabled") || !strings.Contains(c.Message, "spec.validation.deployment: Disabled") {
+
 		t.Fatalf("Stalled = %+v", c)
-	}
-	// Ready names why validation waits, not only that it does.
-	if c := cond(getRuntime(t, ctx), v1alpha1.ConditionReady); !strings.Contains(c.Message, "validation.enabled") {
-		t.Fatalf("Ready = %+v", c)
 	}
 }
 
@@ -920,40 +960,55 @@ func TestRolloutVerifiesAndRemoves(t *testing.T) {
 }
 
 // A rollout that started removing a release and then ended without
-// succeeding never has that release written again: the active plan still
-// lists it, but nothing rolls back on its own.
+// succeeding, at its deadline or at the Remove step's action timeout, never
+// has that release written again once its delete finishes: the active plan
+// still lists it, but nothing rolls back on its own.
 func TestUnfinishedRolloutDoesNotReinstallWhatItRemoved(t *testing.T) {
-	ctx := testContext(t)
-	rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
-		rt.Spec.Rollout.StabilizationWindow = &metav1.Duration{Duration: time.Millisecond}
-	})
-	active := putReleases(t, ctx, rt, testRelease("gpu-operator", plan.PhasePrimary, "", `{"v":1}`),
-		testRelease("nvsentinel", plan.PhasePrimary, "", `{}`))
-	succeedTo(t, ctx, rt, active)
-	target := putReleases(t, ctx, rt, testRelease("gpu-operator", plan.PhasePrimary, "", `{"v":2}`))
-	resolved(t, ctx, target)
-	engine := newEngine()
-	engine.inventory = []argocd.InventoryItem{{ReleaseID: "gpu-operator", UID: "u-g"}, {ReleaseID: "nvsentinel", UID: "u-s"}}
-	r, clk := newRollout(t, engine, true)
-	clk.now = time.Now().Add(2 * time.Second)
-	for range 6 {
-		reconcileRollout(t, ctx, r)
+	tests := []struct {
+		name    string
+		elapsed time.Duration
+		want    v1alpha1.RolloutPhase
+	}{
+		{"deadline", defaults.RolloutDeadline + time.Hour, v1alpha1.PhaseExpired},
+		{"action timeout", defaults.RolloutActionTimeout + time.Minute, v1alpha1.PhaseFailed},
 	}
-	if want := []string{"Ensure gpu-operator", "Remove nvsentinel"}; !slices.Equal(engine.order, want) {
-		t.Fatalf("engine calls = %v, want %v", engine.order, want)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := testContext(t)
+			rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+				rt.Spec.Rollout.StabilizationWindow = &metav1.Duration{Duration: time.Millisecond}
+			})
+			active := putReleases(t, ctx, rt, testRelease("gpu-operator", plan.PhasePrimary, "", `{"v":1}`),
+				testRelease("nvsentinel", plan.PhasePrimary, "", `{}`))
+			succeedTo(t, ctx, rt, active)
+			target := putReleases(t, ctx, rt, testRelease("gpu-operator", plan.PhasePrimary, "", `{"v":2}`))
+			resolved(t, ctx, target)
+			engine := newEngine()
+			engine.inventory = []argocd.InventoryItem{{ReleaseID: "gpu-operator", UID: "u-g"}, {ReleaseID: "nvsentinel", UID: "u-s"}}
+			r, clk := newRollout(t, engine, true)
+			clk.now = time.Now().Add(2 * time.Second)
+			for range 6 {
+				reconcileRollout(t, ctx, r)
+			}
+			if want := []string{"Ensure gpu-operator", "Remove nvsentinel"}; !slices.Equal(engine.order, want) {
+				t.Fatalf("engine calls = %v, want %v", engine.order, want)
+			}
 
-	clk.now = clk.now.Add(defaults.RolloutDeadline + time.Hour)
-	engine.gone["nvsentinel"], engine.missing["nvsentinel"] = true, true
-	for range 3 {
-		reconcileRollout(t, ctx, r)
-	}
-	ro := onlyRollout(t, ctx, target)
-	if ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseExpired) {
-		t.Fatalf("rollout = %v %+v", ro.Labels, ro.Status)
-	}
-	if slices.Contains(engine.order[2:], "Ensure nvsentinel") {
-		t.Fatalf("the removed release was written again: %v", engine.order)
+			clk.now = clk.now.Add(tt.elapsed)
+			reconcileRollout(t, ctx, r)
+			ro := onlyRollout(t, ctx, target)
+			if ro.Labels[v1alpha1.LabelOutcome] != string(tt.want) {
+				t.Fatalf("rollout = %v %+v", ro.Labels, ro.Status)
+			}
+			// The delete finishes after the rollout ended.
+			engine.gone["nvsentinel"], engine.missing["nvsentinel"] = true, true
+			for range 3 {
+				reconcileRollout(t, ctx, r)
+			}
+			if slices.Contains(engine.order[2:], "Ensure nvsentinel") {
+				t.Fatalf("the removed release was written again: %v", engine.order)
+			}
+		})
 	}
 }
 
@@ -1073,6 +1128,37 @@ func TestReleasesMovedByAFailedRolloutStayAvailable(t *testing.T) {
 	reconcileRollout(t, ctx, r)
 	if c := cond(getRuntime(t, ctx), v1alpha1.ConditionAvailable); c.Status != metav1.ConditionFalse || !strings.Contains(c.Message, "HealthDegraded") {
 		t.Fatalf("a degraded moved release: Available %+v", c)
+	}
+}
+
+// A release a failed rollout moved that then drifts at the plan it was
+// moved to is named, never repaired: repair writes the active plan's
+// release, a rollback nobody approved.
+func TestDriftedMovedReleaseIsNotRolledBack(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, stabilized)
+	active := putReleases(t, ctx, rt, testRelease("cert-manager", plan.PhasePrimary, "", `{"cpu":"50m"}`),
+		testRelease("nfd", plan.PhasePrimary, "", `{}`))
+	failed := putReleases(t, ctx, rt, testRelease("cert-manager", plan.PhasePrimary, "", `{"cpu":"60m"}`),
+		testRelease("nfd", plan.PhasePrimary, "", `{}`))
+	succeedTo(t, ctx, rt, active)
+	resolved(t, ctx, failed)
+	endedTo(t, ctx, rt, "rollout-that-failed", active, failed, v1alpha1.PhaseFailed)
+	engine := newEngine()
+	engine.ensured["cert-manager"], engine.ensured["nfd"] = failed, active
+	engine.inventory = []argocd.InventoryItem{{ReleaseID: "cert-manager", UID: "u-c", PlanDigest: failed},
+		{ReleaseID: "nfd", UID: "u-n", PlanDigest: active}}
+	engine.drifted["cert-manager"] = true
+	r, clk := newRollout(t, engine, true)
+	clk.now = time.Now().Add(2 * time.Second)
+
+	reconcileRollout(t, ctx, r)
+	c := cond(getRuntime(t, ctx), v1alpha1.ConditionAvailable)
+	if len(engine.order) != 0 || engine.ensured["cert-manager"] != failed {
+		t.Fatalf("a drifted moved release was written back to the active plan: writes %v", engine.order)
+	}
+	if c.Status != metav1.ConditionFalse || !strings.Contains(c.Message, "release cert-manager: "+argocd.ReasonSpecDrifted) {
+		t.Fatalf("Available = %+v; want the drifted release named", c)
 	}
 }
 
@@ -1393,35 +1479,180 @@ func TestMissingStepValuesFailsTheRollout(t *testing.T) {
 	}
 }
 
-// A failed engine or credentials check is reported, but never erases what
-// the runtime runs: the active plan and Available stay as last
-// observed, so the resolver is not woken into a new snapshot.
+// A failed engine or credentials check never erases what the runtime runs.
+// One that could not read what it checks, as on a timeout, is an error the
+// reconcile retries, and no condition changes. One that found the project or
+// the repo-creds Secret missing is reported, with the active plan and
+// Available kept as last observed, so the resolver is not woken into a new
+// snapshot.
 func TestEngineCheckFailureKeepsTheActivePlan(t *testing.T) {
+	timingOut := func(t *testing.T) client.Reader {
+		t.Helper()
+		base, err := client.NewWithWatch(restConfig, client.Options{Scheme: k8s.Scheme()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return interceptor.NewClient(base, interceptor.Funcs{
+			Get: func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error {
+				return apierrors.NewTimeoutError("injected", 1)
+			},
+		})
+	}
+	tests := []struct {
+		name         string
+		capabilities error
+		credentials  func(t *testing.T) *RepoCredsRefresher
+		reason       string
+	}{
+		{name: "engine check timed out", capabilities: operrors.New(operrors.ErrCodeUnavailable, "read Argo CD project aicr: timeout")},
+		{name: "project missing", reason: argocd.ReasonProjectMissing,
+			capabilities: operrors.New(operrors.ErrCodeUnavailable, "read Argo CD project aicr: not found").WithReason(argocd.ReasonProjectMissing)},
+		{name: "repo-creds read timed out", credentials: func(t *testing.T) *RepoCredsRefresher {
+			return &RepoCredsRefresher{Reader: timingOut(t), Namespace: "argocd", Name: "aicr-registry", Now: time.Now}
+		}},
+		{name: "repo-creds missing", reason: ReasonRegistryCredentialsStale, credentials: func(*testing.T) *RepoCredsRefresher {
+			return &RepoCredsRefresher{Reader: k8s, Namespace: "argocd", Name: "aicr-registry-missing", Now: time.Now}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := testContext(t)
+			rt := freshRuntime(t, ctx, stabilized)
+			active := putPlan(t, ctx, rt, "50m")
+			succeedTo(t, ctx, rt, active)
+			resolved(t, ctx, active)
+			engine := newEngine()
+			engine.ensured["cert-manager"] = active
+			engine.inventory = []argocd.InventoryItem{{ReleaseID: "cert-manager", UID: "u-c", PlanDigest: active}}
+			r, _ := newRollout(t, engine, true)
+			reconcileRollout(t, ctx, r)
+			before := getRuntime(t, ctx)
+			if before.Status.ActivePlanDigest != active || cond(before, v1alpha1.ConditionAvailable).Status != metav1.ConditionTrue {
+				t.Fatalf("before the failure: %+v", before.Status)
+			}
+
+			engine.capabilities = tt.capabilities
+			if tt.credentials != nil {
+				r.Credentials = tt.credentials(t)
+			}
+			_, err := r.Reconcile(ctx, request)
+			got := getRuntime(t, ctx)
+			if tt.reason == "" {
+				if err == nil || !reflect.DeepEqual(got.Status.Conditions, before.Status.Conditions) {
+					t.Fatalf("Reconcile() = %v; conditions %+v, were %+v", err, got.Status.Conditions, before.Status.Conditions)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Reconcile() = %v", err)
+			}
+			if got.Status.ActivePlanDigest != active {
+				t.Fatalf("a failed engine check erased the active plan: %+v", got.Status)
+			}
+			if c := cond(got, v1alpha1.ConditionAvailable); c.Status != metav1.ConditionTrue {
+				t.Fatalf("Available = %+v; the stack was not observed to change", c)
+			}
+			if c := cond(got, v1alpha1.ConditionEngineAvailable); c.Status != metav1.ConditionFalse || c.Reason != tt.reason {
+				t.Fatalf("EngineAvailable = %+v", c)
+			}
+		})
+	}
+}
+
+// faultOnce is an envtest client that fails, before it lands, the first
+// rollout Patch and the first rollout status update that fails selects.
+func faultOnce(t *testing.T, fails func(op string, ro *v1alpha1.RuntimeRollout) bool) client.Client {
+	t.Helper()
+	base, err := client.NewWithWatch(restConfig, client.Options{Scheme: k8s.Scheme()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := map[string]bool{}
+	inject := func(op string, obj client.Object) error {
+		ro, ok := obj.(*v1alpha1.RuntimeRollout)
+		if !ok || failed[op] || !fails(op, ro) {
+			return nil
+		}
+		failed[op] = true
+		return apierrors.NewConflict(v1alpha1.GroupVersion.WithResource("runtimerollouts").GroupResource(), ro.Name,
+			errors.New("injected "+op+" failure"))
+	}
+	return interceptor.NewClient(base, interceptor.Funcs{
+		Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+			if err := inject("patch", obj); err != nil {
+				return err
+			}
+			return c.Patch(ctx, obj, patch, opts...)
+		},
+		SubResourceUpdate: func(ctx context.Context, c client.Client, sub string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+			if err := inject(sub, obj); err != nil {
+				return err
+			}
+			return c.SubResource(sub).Update(ctx, obj, opts...)
+		},
+	})
+}
+
+// withOutcome selects writes of a rollout that carries an outcome.
+func withOutcome(_ string, ro *v1alpha1.RuntimeRollout) bool {
+	return ro.Labels[v1alpha1.LabelOutcome] != ""
+}
+
+// A retry of a stalled rollout whose outcome write is lost still supersedes
+// it on the next reconcile: the token is recorded with the outcome, so it is
+// not consumed before the rollout ends.
+func TestRetrySurvivesALostOutcomeWrite(t *testing.T) {
 	ctx := testContext(t)
 	rt := freshRuntime(t, ctx, stabilized)
-	active := putPlan(t, ctx, rt, "50m")
-	succeedTo(t, ctx, rt, active)
-	resolved(t, ctx, active)
+	target := twoReleases(t, ctx, rt)
+	resolved(t, ctx, target)
 	engine := newEngine()
-	engine.ensured["cert-manager"] = active
-	engine.inventory = []argocd.InventoryItem{{ReleaseID: "cert-manager", UID: "u-c", PlanDigest: active}}
-	r, _ := newRollout(t, engine, true)
-	reconcileRollout(t, ctx, r)
-	if got := getRuntime(t, ctx); got.Status.ActivePlanDigest != active || cond(got, v1alpha1.ConditionAvailable).Status != metav1.ConditionTrue {
-		t.Fatalf("before the failure: %+v", got.Status)
+	r, clk := newRollout(t, engine, true)
+	clk.now = time.Now().Add(2 * time.Second)
+	reconcileRollout(t, ctx, r) // create
+	engine.inventory = append(engine.inventory, argocd.InventoryItem{ReleaseID: "stray", Name: "stray", UID: "u-stray"})
+	reconcileRollout(t, ctx, r) // the drift stalls it before its first step
+	ro := onlyRollout(t, ctx, target)
+	if ro.Status.Phase != v1alpha1.PhaseStalled {
+		t.Fatalf("rollout = %+v", ro.Status)
+	}
+	rt = getRuntime(t, ctx)
+	patch := client.MergeFrom(rt.DeepCopy())
+	rt.Annotations = map[string]string{v1alpha1.AnnotationRetry: "try-1"}
+	if err := k8s.Patch(ctx, rt, patch); err != nil {
+		t.Fatal(err)
 	}
 
-	engine.capabilities = operrors.New(operrors.ErrCodeUnavailable, "read AppProject aicr: timeout")
+	r.Client = faultOnce(t, func(op string, ro *v1alpha1.RuntimeRollout) bool { return op == "patch" && withOutcome(op, ro) })
+	if _, err := r.Reconcile(ctx, request); err == nil {
+		t.Fatal("the outcome write did not fail")
+	}
 	reconcileRollout(t, ctx, r)
-	got := getRuntime(t, ctx)
-	if got.Status.ActivePlanDigest != active {
-		t.Fatalf("a failed engine check erased the active plan: %+v", got.Status)
+	if err := k8s.Get(ctx, client.ObjectKeyFromObject(ro), ro); err != nil {
+		t.Fatal(err)
 	}
-	if c := cond(got, v1alpha1.ConditionAvailable); c.Status != metav1.ConditionTrue {
-		t.Fatalf("Available = %+v; the stack was not observed to change", c)
+	if ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseSuperseded) || ro.Annotations[v1alpha1.AnnotationRetry] != "try-1" {
+		t.Fatalf("after the lost write: %v %v %+v", ro.Labels, ro.Annotations, ro.Status)
 	}
-	if c := cond(got, v1alpha1.ConditionEngineAvailable); c.Status != metav1.ConditionFalse || !strings.Contains(c.Message, "timeout") {
-		t.Fatalf("EngineAvailable = %+v", c)
+}
+
+// A failed check of the rollouts' schemas is an error alone, retried with
+// backoff: a result with it would be ignored.
+func TestFailedSchemaCheckReturnsOnlyTheError(t *testing.T) {
+	ctx := testContext(t)
+	freshRuntime(t, ctx, stabilized)
+	r, _ := newRollout(t, newEngine(), true)
+	base, err := client.NewWithWatch(restConfig, client.Options{Scheme: k8s.Scheme()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Reader = interceptor.NewClient(base, interceptor.Funcs{
+		List: func(context.Context, client.WithWatch, client.ObjectList, ...client.ListOption) error {
+			return apierrors.NewServiceUnavailable("injected")
+		},
+	})
+	if res, err := r.Reconcile(ctx, request); err == nil || !res.IsZero() {
+		t.Fatalf("Reconcile() = %+v, %v; want only the error", res, err)
 	}
 }
 

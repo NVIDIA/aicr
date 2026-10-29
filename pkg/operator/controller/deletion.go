@@ -152,6 +152,9 @@ func (r *RolloutReconciler) orphanRuntime(ctx context.Context, rt *v1alpha1.Clus
 func (r *RolloutReconciler) removeRuntime(ctx context.Context, rt *v1alpha1.ClusterRuntime) (*runtimeView, error) {
 	v := &runtimeView{requeue: resyncInterval, engineOK: true, engineReason: ReasonEngineAvailable}
 	if err := r.Engine.Capabilities(ctx); err != nil {
+		if operrors.ReasonOf(err) == "" {
+			return nil, err
+		}
 		v.engineOK, v.engineReason, v.engineMessage = false, reasonOf(err), errorMessage(err)
 		v.stalled, v.stalledReason, v.stalledMsg = true, v.engineReason, v.engineMessage
 		keepObserved(rt, v)
@@ -175,7 +178,7 @@ func (r *RolloutReconciler) removeRuntime(ctx context.Context, rt *v1alpha1.Clus
 		if !isRemoval(current) {
 			supersede = "superseded by the deletion of runtime " + rt.Name
 		}
-		if err = r.advance(ctx, rt, current, v, supersede, ""); err != nil {
+		if err = r.advance(ctx, rt, current, v, supersede, "", ""); err != nil {
 			return nil, err
 		}
 		if isRemoval(current) && current.Status.Phase == v1alpha1.PhaseSucceeded {

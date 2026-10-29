@@ -235,6 +235,10 @@ starts again (`status.current.timeoutFrom`), so a release that never becomes
 ready fails with its own reason a full timeout later. The rollout's deadline
 keeps running throughout.
 
+A stalled resolution, such as a cluster that no longer matches its criteria,
+holds a rollout in progress at its next step boundary, as a pause does, and
+the rollout's deadline keeps running.
+
 ## Rolling back by pinning
 
 Nothing rolls back on its own. To go back to an earlier plan, pin it:
