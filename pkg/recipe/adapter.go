@@ -315,6 +315,12 @@ func GetComponentValuesWithContext(ctx context.Context, dp DataProvider, ref *Co
 	return resolveComponentValues(ctx, dp, ref)
 }
 
+// BaseValuesFile returns the DataProvider path of componentName's base values
+// file.
+func BaseValuesFile(componentName string) string {
+	return fmt.Sprintf("components/%s/values.yaml", componentName)
+}
+
 // resolveComponentValues merges a ComponentRef's values in precedence order
 // (base values.yaml → ValuesFile → inline Overrides). A nil provider falls back
 // to the embedded-data singleton. Shared by RecipeResult.GetValuesForComponent
@@ -336,7 +342,7 @@ func resolveComponentValues(ctx context.Context, provider DataProvider, ref *Com
 	// Step 1: Load base and/or overlay values from files (if ValuesFile specified)
 	if ref.ValuesFile != "" {
 		// Determine if this is an overlay values file (not the base values.yaml)
-		baseValuesFile := fmt.Sprintf("components/%s/values.yaml", ref.Name)
+		baseValuesFile := BaseValuesFile(ref.Name)
 		isOverlay := ref.ValuesFile != baseValuesFile
 
 		if isOverlay {

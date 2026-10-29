@@ -392,7 +392,7 @@ func TestConstraintEvalResult(t *testing.T) {
 	}
 }
 
-// buildIsolationProvider returns an inMemoryDataProvider seeded with a
+// buildIsolationProvider returns an in-memory provider seeded with a
 // minimal registry.yaml, an empty base recipe, and a single leaf overlay
 // whose metadata name is derived from `overlayName`. The overlay declares
 // `criteria.service: eks` and a uniquely-named componentRef

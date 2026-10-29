@@ -1604,6 +1604,49 @@ restricted at runtime to read-only Chainsaw operations
 registry-declared assert file against this allowlist under `make qualify`,
 so violations are caught before they ever reach the validator.
 
+**CRD assertions.** Every CRD a health check asserts must be backed by an
+in-tree record of what AICR installs, so a chart bump that renames or drops a
+CRD fails at PR time, before any cluster runs the check.
+`TestHealthCheckCRDAssertionsAnchored` in `tools/crd-inventory` enforces this
+offline under `make test`. It checks each registry health check at the
+registry pin, and each health check a leaf recipe deploys at that leaf's pin,
+including an overlay's inline `healthCheckAsserts`:
+
+- A Helm component's generated `recipes/components/<name>/crds.yaml` has one
+  entry per pinned chart, keyed by repository, chart and `sourceVersion`. Each
+  CRD asserted against a pin must appear in the list that pin's entry gives the
+  asserting recipe, or in the component's vendored `manifests/`.
+- A component with no chart, such as an OLM or manifest-only wrapper, may
+  assert only CRDs that some in-tree inventory or vendored manifest defines.
+- A `crds.yaml` may hold only entries for pins some CRD assertion is checked
+  against.
+
+`make crd-inventory` renders each such chart with `--include-crds` once for
+each set of values a recipe asserting against it deploys. The registry pin
+uses the component's `values.yaml`. A leaf uses its merged `valuesFile` and
+inline `overrides`, as the bundler does. At the registry pin, an entry's
+`crds` lists the CRDs the chart installs with `values.yaml`. Its `variants`
+list the leaves whose values install a different list, and that list. A leaf
+not named in `variants` gets `crds`. The tool rewrites the inventories and
+deletes any inventory no CRD assertion needs. Run it after bumping a pin, in
+the registry, an
+overlay, or a mixin, of a component whose check asserts a CRD, after changing
+that component's values, and after adding or removing a CRD assertion. It
+reports every asserted CRD missing from the render with the asserting
+recipe's values, such as a CRD from a subchart a leaf's values turn off. When
+that leaf should not have the CRD, give it its own check, as described in
+[Replace a component's health check in an overlay](../integrator/recipe-development.md#replace-a-components-health-check-in-an-overlay).
+Some operators apply CRDs from their
+own image at runtime, so their chart does not render them. `dynamo-platform`
+applies all of its CRDs from a `crd-apply` init container, and
+`network-operator` applies the nv-ipam CRDs when a NicClusterPolicy enables
+nvIpam. Such components are listed in `imageCRDSources`, and the tool also
+reads the CRDs from the image of the named container in the rendered chart.
+`make crd-inventory-check` re-renders every chart and fails on a stale
+inventory. It needs helm and network access, so `make qualify` does not run
+it. The merge gate runs it on pull requests that change its inputs, and on
+every push to `main`.
+
 **Value-gate awareness (#1844).** A registry assert file is static — it
 cannot see the component's effective Helm values. That is a problem for a
 manifest whose whole resource is gated behind a value: e.g.

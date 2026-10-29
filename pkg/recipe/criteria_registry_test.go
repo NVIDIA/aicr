@@ -295,10 +295,10 @@ func TestSeedCriteriaRegistry(t *testing.T) {
 	}
 }
 
-// buildProviderWithServiceCriteria returns an inMemoryDataProvider whose
+// buildProviderWithServiceCriteria returns an in-memory provider whose
 // single overlay declares the supplied custom service criteria value. Loading
 // its metadata store seeds the provider's criteria registry with that value
-// (OriginExternal, since inMemoryDataProvider.Source never returns
+// (OriginExternal, since newInMemoryProvider's Source never returns
 // "embedded"). Used by the per-provider isolation test.
 func buildProviderWithServiceCriteria(t *testing.T, tag, serviceValue string) DataProvider {
 	t.Helper()

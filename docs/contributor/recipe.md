@@ -793,7 +793,10 @@ externally-visible product. Fields beyond `ComponentRefs` and
    [chainsaw health check section in validator.md](validator.md#chainsaw-health-checks)
    for the assertion patterns currently in use (DaemonSet
    `numberReady == desiredNumberScheduled`, Deployment
-   `Available=True`, CRD `Established=True`).
+   `Available=True`, CRD `Established=True`). A check that asserts a
+   CRD also needs `make crd-inventory`, and the generated
+   `recipes/components/<name>/crds.yaml` committed alongside it (see
+   [CRD assertions](validator.md#chainsaw-health-checks)).
 4. **Run `make bom-docs` and commit `docs/user/container-images.md`**
    if your change touches `registry.yaml`, a component's `values.yaml`,
    or a chart version pin (see [BOM regeneration](#bom-regeneration)).

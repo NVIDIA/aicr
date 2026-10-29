@@ -226,9 +226,20 @@ func startDRALabeler(t *testing.T, env *envtest.Environment, cfg *rest.Config, d
 		cancel()
 		<-run.exited
 		// A child forked while the first kill was in flight escapes it. The
-		// shell is gone now, so nothing new can join the group.
-		if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil && !stderrors.Is(err, syscall.ESRCH) {
-			t.Errorf("kill labeler process group: %v", err)
+		// shell is gone now, so nothing new can join the group. Kill until no
+		// member is left running.
+		var killErr error
+		err := wait.PollUntilContextTimeout(context.Background(), draLabelerPollInterval, draLabelerKillDelay, true,
+			func(context.Context) (bool, error) {
+				killErr = syscall.Kill(-pgid, syscall.SIGKILL)
+				if killErr != nil && !stderrors.Is(killErr, syscall.ESRCH) && !stderrors.Is(killErr, syscall.EPERM) {
+					return false, killErr
+				}
+				live, liveErr := groupHasLiveMember(pgid)
+				return !live, liveErr
+			})
+		if err != nil {
+			t.Errorf("kill labeler process group: %v (last kill: %v)", err, killErr)
 		}
 	})
 	return run

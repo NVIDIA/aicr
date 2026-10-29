@@ -710,6 +710,14 @@ nvcre-closure: ## Regenerates the NVCRE workload runtime closure from the regist
 nvcre-closure-check: ## Verifies the committed NVCRE workload closure matches the pinned chart version
 	@GOFLAGS="-mod=readonly" go run ./tools/nvcre-closure -check
 
+.PHONY: crd-inventory
+crd-inventory: ## Regenerates recipes/components/*/crds.yaml, the CRDs each pinned chart installs (needs helm and network)
+	@GOFLAGS="-mod=readonly" go run ./tools/crd-inventory -repo-root "$(CURDIR)"
+
+.PHONY: crd-inventory-check
+crd-inventory-check: ## Verifies every committed CRD inventory matches a fresh render of its pinned chart (needs helm and network)
+	@GOFLAGS="-mod=readonly" go run ./tools/crd-inventory -repo-root "$(CURDIR)" -check
+
 .PHONY: registry-inventory
 registry-inventory: ## Extracts the build/CI registry & package egress inventory (YAML + Markdown) from structured sources
 	@GOFLAGS="-mod=readonly" go run ./tools/registry-inventory \
