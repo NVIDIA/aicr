@@ -311,5 +311,6 @@ So a rollback needs human review before you run it. Read the component's own dow
 
 - [`aicr upgrade-check` reference](cli-reference.md#aicr-upgrade-check)
 - [Upgrade Notes](component-catalog.md#upgrade-notes): per-component migration prose, including the ones with no record yet
+- [Upgrading components that own CRDs](component-catalog.md#upgrading-components-that-own-crds), covering how each deployer handles CRDs on upgrade and the manual CRD-apply command
 - [Authoring transition records](../contributor/upgrade-records.md): for whoever bumps the pin
 - [Generating Bundles](bundling.md): including the DRA driver eviction caveat, which is upgrade-relevant and predates this check
