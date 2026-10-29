@@ -153,7 +153,10 @@ type runtimeView struct {
 	// inProgress is the rollout still in progress after this reconcile's
 	// step: Ready reports its progress and Available observes the releases
 	// it moved at its target plan.
-	inProgress                  *v1alpha1.RuntimeRollout
+	inProgress *v1alpha1.RuntimeRollout
+	// retired are releases a rollout ended since the newest success
+	// started removing; nothing writes them again until a rollout does.
+	retired                     map[string]bool
 	ready, available            bool
 	readyReason, readyMessage   string
 	availableMessage            string
@@ -229,9 +232,13 @@ func (r *RolloutReconciler) reconcile(ctx context.Context, rt *v1alpha1.ClusterR
 	resolved := meta.FindStatusCondition(rt.Status.Conditions, v1alpha1.ConditionResolved)
 	resolvedNow := resolved != nil && resolved.ObservedGeneration == rt.Generation && resolved.Status == metav1.ConditionTrue
 	target := r.target(rt)
+	// A stalled resolution, such as a cluster that no longer matches its
+	// criteria, holds a rollout in progress at its next step boundary.
+	hold := ""
 	switch {
 	case resolved != nil && resolved.Status == metav1.ConditionFalse && resolved.Reason != ReasonResolving:
 		v.stalled, v.stalledReason, v.stalledMsg = true, resolved.Reason, resolved.Message
+		hold = resolved.Reason
 	case !resolvedNow:
 		v.reconciling, v.reconcilingReason = true, ReasonResolving
 	}
@@ -267,7 +274,7 @@ func (r *RolloutReconciler) reconcile(ctx context.Context, rt *v1alpha1.ClusterR
 				return nil, err
 			}
 		}
-		if err = r.advance(ctx, rt, current, v, supersede); err != nil {
+		if err = r.advance(ctx, rt, current, v, supersede, hold); err != nil {
 			return nil, err
 		}
 		if current.Status.Phase.IsTerminal() {
@@ -294,6 +301,8 @@ func (r *RolloutReconciler) reconcile(ctx context.Context, rt *v1alpha1.ClusterR
 			return nil, err
 		}
 	}
+	// After advance, which may have just ended the rollout in progress.
+	v.retired = retired(rollouts)
 	if err = r.observeActive(ctx, rt, target, v); err != nil {
 		return nil, err
 	}
@@ -564,6 +573,12 @@ func (r *RolloutReconciler) create(ctx context.Context, rt *v1alpha1.ClusterRunt
 	if err != nil || steps == nil {
 		return err
 	}
+	// Live state hides what an unfinished rollout to the same target already
+	// applied, so a retry is judged against those rollouts too.
+	if earlier := unfinished(rollouts, target); len(earlier) > 0 {
+		approvalRequired = true
+		carryPostApplySteps(steps, earlier)
+	}
 	invJSON, err := json.Marshal(inventory)
 	if err != nil {
 		return operrors.Wrap(operrors.ErrCodeInternal, "encode inventory", err)
@@ -693,9 +708,11 @@ func nextSuffix(rollouts []v1alpha1.RuntimeRollout, transition string) int {
 }
 
 // advance moves a rollout one step at a time: deadline, approval,
-// pause, then the steps in order with one engine mutation each.
+// pause, then the steps in order with one engine mutation each. A non-empty
+// hold names why no further step starts, as a pause does; a removal rollout
+// is never held, so a runtime with broken inputs can still be deleted.
 func (r *RolloutReconciler) advance(ctx context.Context, rt *v1alpha1.ClusterRuntime, ro *v1alpha1.RuntimeRollout, v *runtimeView,
-	supersede string) error {
+	supersede, hold string) error {
 
 	now := r.Now()
 	if now.After(ro.Spec.Deadline.Time) {
@@ -720,6 +737,9 @@ func (r *RolloutReconciler) advance(ctx context.Context, rt *v1alpha1.ClusterRun
 	if halt := haltedRuntime(rt); halt != "" {
 		v.readyReason = halt
 		return r.observeHalted(ctx, ro, halt, v)
+	}
+	if hold != "" && !isRemoval(ro) {
+		return r.observeHalted(ctx, ro, hold, v)
 	}
 	if cur := ro.Status.Current; cur != nil && releaseState(ro, cur.Release) == v1alpha1.ReleaseSuspended {
 		// The halt ended: the step's action timeout starts again.
@@ -1305,7 +1325,7 @@ func (r *RolloutReconciler) observeActive(ctx context.Context, rt *v1alpha1.Clus
 	}
 	for i := range p.Releases {
 		rel := &p.Releases[i]
-		if ro != nil && removing(ro, rel.ID) {
+		if (ro != nil && removing(ro, rel.ID)) || v.retired[rel.ID] {
 			continue
 		}
 		values, err := r.values(ctx, rel)
@@ -1449,6 +1469,34 @@ func progress(ro *v1alpha1.RuntimeRollout) string {
 // inFlight reports the release of the rollout's step in flight.
 func inFlight(ro *v1alpha1.RuntimeRollout, id string) bool {
 	return ro != nil && ro.Status.Current != nil && ro.Status.Current.Release == id
+}
+
+// retired returns the releases that rollouts ended since the newest success
+// left removing or removed, from rollouts newest first. The newest such
+// rollout to touch a release decides, so a later one that installed it
+// again clears it.
+func retired(rollouts []v1alpha1.RuntimeRollout) map[string]bool {
+	out, seen := map[string]bool{}, map[string]bool{}
+	for i := range rollouts {
+		ro := &rollouts[i]
+		outcome := ro.Labels[v1alpha1.LabelOutcome]
+		if outcome == string(v1alpha1.PhaseSucceeded) {
+			break
+		}
+		if outcome == "" {
+			continue
+		}
+		for _, rel := range ro.Status.Releases {
+			if seen[rel.ID] || rel.State == "" || rel.State == v1alpha1.ReleasePending {
+				continue
+			}
+			seen[rel.ID] = true
+			if removing(ro, rel.ID) {
+				out[rel.ID] = true
+			}
+		}
+	}
+	return out
 }
 
 // removing reports a release whose Remove step started: its Application is

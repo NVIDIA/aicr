@@ -33,6 +33,7 @@ import (
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
 	"github.com/NVIDIA/aicr/pkg/operator/defaults"
+	"github.com/NVIDIA/aicr/pkg/operator/discovery"
 	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 	"github.com/NVIDIA/aicr/pkg/operator/plan"
@@ -648,6 +649,59 @@ func TestHaltedStepIsStillObserved(t *testing.T) {
 	}
 }
 
+// stallResolution reports the runtime's inputs as no longer resolving, as
+// the resolver does when the cluster stops matching its criteria; the
+// candidate stays.
+func stallResolution(t *testing.T, ctx context.Context, digest, reason string) {
+	t.Helper()
+	r := &ResolverReconciler{Client: k8s, Reader: k8s, Config: testConfig()}
+	res := &resolution{status: metav1.ConditionFalse, reason: reason, message: reason + " in test", candidate: digest,
+		inputDigest: plan.DigestOf([]byte(digest))}
+	if err := r.applyStatus(ctx, getRuntime(t, ctx), res); err != nil {
+		t.Fatalf("apply resolver status: %v", err)
+	}
+}
+
+// A cluster that stops matching its criteria stops changing: while
+// resolution is stalled, an approved rollout's step in flight is observed
+// to completion and no further step starts; it continues once resolution
+// recovers.
+func TestResolutionStallHoldsTheRollout(t *testing.T) {
+	for _, reason := range []string{discovery.ReasonHeterogeneous, discovery.ReasonCriteriaConflict} {
+		t.Run(reason, func(t *testing.T) {
+			ctx := testContext(t)
+			rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+				rt.Spec.Rollout.StabilizationWindow = &metav1.Duration{Duration: time.Millisecond}
+			})
+			digest := twoReleases(t, ctx, rt)
+			resolved(t, ctx, digest)
+			engine := newEngine()
+			engine.state = argocd.StateProgressing
+			r, _ := newRollout(t, engine, true)
+			reconcileRollout(t, ctx, r) // create
+			reconcileRollout(t, ctx, r) // first step started
+			writes := slices.Clone(engine.order)
+
+			stallResolution(t, ctx, digest, reason)
+			engine.state = argocd.StateReady
+			reconcileRollout(t, ctx, r)
+			reconcileRollout(t, ctx, r)
+			ro := rollouts(t, ctx)[0]
+			if releaseState(&ro, "cert-manager") != v1alpha1.ReleaseReady || ro.Status.Current != nil ||
+				!slices.Equal(engine.order, writes) || !strings.Contains(ro.Status.Message, reason) {
+
+				t.Fatalf("while resolution is stalled: %+v, engine writes %v", ro.Status, engine.order)
+			}
+
+			resolved(t, ctx, digest)
+			reconcileRollout(t, ctx, r)
+			if len(engine.order) != len(writes)+1 {
+				t.Fatalf("the next step did not start once resolution recovered: %v", engine.order)
+			}
+		})
+	}
+}
+
 // Terminal conditions end a rollout before any engine write.
 func TestRolloutTerminalStates(t *testing.T) {
 	tests := []struct {
@@ -849,6 +903,44 @@ func TestRolloutVerifiesAndRemoves(t *testing.T) {
 	}
 	if got := getRuntime(t, ctx); got.Status.ActivePlanDigest != target || cond(got, v1alpha1.ConditionReady).Status != metav1.ConditionTrue {
 		t.Fatalf("runtime = %+v", got.Status)
+	}
+}
+
+// A rollout that started removing a release and then ended without
+// succeeding never has that release written again: the active plan still
+// lists it, but nothing rolls back on its own.
+func TestUnfinishedRolloutDoesNotReinstallWhatItRemoved(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+		rt.Spec.Rollout.StabilizationWindow = &metav1.Duration{Duration: time.Millisecond}
+	})
+	active := putReleases(t, ctx, rt, testRelease("gpu-operator", plan.PhasePrimary, "", `{"v":1}`),
+		testRelease("nvsentinel", plan.PhasePrimary, "", `{}`))
+	succeedTo(t, ctx, rt, active)
+	target := putReleases(t, ctx, rt, testRelease("gpu-operator", plan.PhasePrimary, "", `{"v":2}`))
+	resolved(t, ctx, target)
+	engine := newEngine()
+	engine.inventory = []argocd.InventoryItem{{ReleaseID: "gpu-operator", UID: "u-g"}, {ReleaseID: "nvsentinel", UID: "u-s"}}
+	r, clk := newRollout(t, engine, true)
+	clk.now = time.Now().Add(2 * time.Second)
+	for range 6 {
+		reconcileRollout(t, ctx, r)
+	}
+	if want := []string{"Ensure gpu-operator", "Remove nvsentinel"}; !slices.Equal(engine.order, want) {
+		t.Fatalf("engine calls = %v, want %v", engine.order, want)
+	}
+
+	clk.now = clk.now.Add(defaults.RolloutDeadline + time.Hour)
+	engine.gone["nvsentinel"], engine.missing["nvsentinel"] = true, true
+	for range 3 {
+		reconcileRollout(t, ctx, r)
+	}
+	ro := onlyRollout(t, ctx, target)
+	if ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseExpired) {
+		t.Fatalf("rollout = %v %+v", ro.Labels, ro.Status)
+	}
+	if slices.Contains(engine.order[2:], "Ensure nvsentinel") {
+		t.Fatalf("the removed release was written again: %v", engine.order)
 	}
 }
 

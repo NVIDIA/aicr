@@ -284,18 +284,24 @@ func afterApply(steps []aicrjob.UpgradeStep) []string {
 //     blocks the transition.
 func assessSteps(steps []v1alpha1.RolloutStep, from, to *plan.Document, report *aicrjob.UpgradeReport) (bool, error) {
 	verdicts, postApply := map[string]v1alpha1.Assessment{}, map[string][]string{}
+	var blocked []string
 	if report != nil {
 		for i := range report.Components {
-			if c := &report.Components[i]; c.Change == "version" {
+			c := &report.Components[i]
+			switch {
+			case c.Change == "version":
 				verdicts[c.Component] = c.Assessment()
 				if c.Assessment() == v1alpha1.AssessmentManual {
 					postApply[c.Component] = afterApply(c.Steps)
 				}
+			case c.Assessment() == v1alpha1.AssessmentBlocked:
+				// A replacement surfaces as a removal and an install, which
+				// carry no verdict of their own.
+				blocked = append(blocked, fmt.Sprintf("%s is blocked by AICR's upgrade-check (%s)", c.Component, c.Change))
 			}
 		}
 	}
 	approval := false
-	var blocked []string
 	for i := range steps {
 		s := &steps[i]
 		s.Assessment, s.CRDChange = v1alpha1.AssessmentNotApplicable, false
@@ -335,6 +341,52 @@ func assessSteps(steps []v1alpha1.RolloutStep, from, to *plan.Document, report *
 			"the transition needs a separately qualified migration: "+strings.Join(blocked, "; ")).WithReason(ReasonTransitionBlocked)
 	}
 	return approval, nil
+}
+
+// unfinished returns the rollouts to target that ended without succeeding
+// since the newest success, newest first from rollouts. A rollout to target
+// after them is a retry, which needs a fresh approval.
+func unfinished(rollouts []v1alpha1.RuntimeRollout, target string) []*v1alpha1.RuntimeRollout {
+	var out []*v1alpha1.RuntimeRollout
+	for i := range rollouts {
+		ro := &rollouts[i]
+		outcome := ro.Labels[v1alpha1.LabelOutcome]
+		if outcome == string(v1alpha1.PhaseSucceeded) {
+			break
+		}
+		if outcome != "" && ro.Spec.ToPlanDigest == target {
+			out = append(out, ro)
+		}
+	}
+	return out
+}
+
+// carryPostApplySteps gives a step the post-apply steps of a manual release
+// that an earlier rollout applied and nobody acknowledged: the release is
+// already at its target, so the step's own assessment no longer sees the
+// change that recorded them.
+func carryPostApplySteps(steps []v1alpha1.RolloutStep, earlier []*v1alpha1.RuntimeRollout) {
+	acknowledged := map[string]bool{}
+	for _, ro := range earlier {
+		if a := ro.Spec.Approval; a != nil {
+			for _, k := range a.Acknowledgements {
+				acknowledged[k.Release] = true
+			}
+		}
+	}
+	for i := range steps {
+		s := &steps[i]
+		if len(s.PostApplySteps) > 0 || acknowledged[s.Release] {
+			continue
+		}
+		for _, ro := range earlier {
+			idx := slices.IndexFunc(ro.Spec.Steps, func(e v1alpha1.RolloutStep) bool { return e.Release == s.Release })
+			if idx >= 0 && len(ro.Spec.Steps[idx].PostApplySteps) > 0 && releaseState(ro, s.Release) == v1alpha1.ReleaseReady {
+				s.Assessment, s.PostApplySteps = ro.Spec.Steps[idx].Assessment, ro.Spec.Steps[idx].PostApplySteps
+				break
+			}
+		}
+	}
 }
 
 // chartName is the chart a release installs: the last path segment of its

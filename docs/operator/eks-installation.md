@@ -194,6 +194,9 @@ signature.
 
 ## 6. Install
 
+> **Not yet published.** No AICR release ships the operator chart yet
+> ([#3469](https://github.com/NVIDIA/aicr/issues/3469)).
+
 ```shell
 kubectl create namespace aicr-system
 kubectl label namespace aicr-system pod-security.kubernetes.io/enforce=restricted

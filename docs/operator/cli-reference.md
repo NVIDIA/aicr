@@ -6,6 +6,9 @@ talks to the API server only; it never calls the operator.
 
 ## Install
 
+> **Not yet published.** No AICR release carries the `kubectl-aicr` binaries
+> yet ([#3469](https://github.com/NVIDIA/aicr/issues/3469)).
+
 Each AICR [GitHub release](https://github.com/NVIDIA/aicr/releases)
 carries `kubectl-aicr-<os>-<arch>` for Linux and macOS on amd64 and arm64:
 

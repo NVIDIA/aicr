@@ -170,7 +170,7 @@ func (r *RolloutReconciler) removeRuntime(ctx context.Context, rt *v1alpha1.Clus
 		if !isRemoval(current) {
 			supersede = "superseded by the deletion of runtime " + rt.Name
 		}
-		if err = r.advance(ctx, rt, current, v, supersede); err != nil {
+		if err = r.advance(ctx, rt, current, v, supersede, ""); err != nil {
 			return nil, err
 		}
 		if isRemoval(current) && current.Status.Phase == v1alpha1.PhaseSucceeded {

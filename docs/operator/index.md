@@ -91,6 +91,10 @@ identity and the component namespaces.
 
 ### Install the chart
 
+> **Not yet published.** No AICR release ships the operator yet, so the chart,
+> image and `kubectl-aicr` binaries and their attestations below do not exist
+> until one does ([#3469](https://github.com/NVIDIA/aicr/issues/3469)).
+
 Each AICR release publishes the operator image and its chart, tagged with the
 release version. The chart defaults to the operator, AICR and validator images
 that release was built and tested with, all pinned by digest.

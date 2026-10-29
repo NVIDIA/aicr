@@ -35,7 +35,7 @@ var SupportedRolloutSchemaVersions = map[int32]bool{RolloutSchemaVersion: true}
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Approval",type=string,JSONPath=`.status.approval`
 // +kubebuilder:printcolumn:name="To",type=string,JSONPath=`.metadata.labels.operator\.aicr\.run/to-plan`
-// +kubebuilder:printcolumn:name="Deadline",type=date,JSONPath=`.spec.deadline`
+// +kubebuilder:printcolumn:name="Deadline",type=string,JSONPath=`.spec.deadline`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 type RuntimeRollout struct {
 	metav1.TypeMeta   `json:",inline"`

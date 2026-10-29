@@ -128,6 +128,13 @@ func TestAssessSteps(t *testing.T) {
 	if _, err = assessSteps([]v1alpha1.RolloutStep{upgrade("kai-scheduler")}, from, to, blocked); operrors.ReasonOf(err) != ReasonTransitionBlocked {
 		t.Errorf("blocked verdict: %v", err)
 	}
+	// A replacement surfaces as a removal and an install, yet its record's
+	// blocked verdict still blocks the transition.
+	replaced := &aicrjob.UpgradeReport{Components: []aicrjob.ComponentChange{{Component: "kai-scheduler", Change: "replaced", Verdict: "blocked"}}}
+	steps = []v1alpha1.RolloutStep{{Release: "x", Operation: v1alpha1.OperationInstall}, {Release: "y", Operation: v1alpha1.OperationRemove, UID: "u"}}
+	if _, err = assessSteps(steps, from, to, replaced); operrors.ReasonOf(err) != ReasonTransitionBlocked {
+		t.Errorf("blocked replacement: %v", err)
+	}
 	moved := &plan.Document{Releases: []plan.Release{rel("nfd", "nfd", "other", "node-feature-discovery", "n1", "v1", false)}}
 	_, err = assessSteps([]v1alpha1.RolloutStep{upgrade("nfd")}, from, moved, report)
 	if operrors.ReasonOf(err) != ReasonTransitionBlocked || !strings.Contains(err.Error(), "nfd moves from nfd/node-feature-discovery to other/node-feature-discovery") {
@@ -359,6 +366,87 @@ func TestManualPostApplyStepsAwaitAcknowledgement(t *testing.T) {
 	}
 	if ro = onlyRollout(t, ctx, target); ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseSucceeded) || getRuntime(t, ctx).Status.ActivePlanDigest != target {
 		t.Fatalf("after the acknowledgement: %v %+v", ro.Labels, ro.Status)
+	}
+}
+
+// A retry needs a fresh approval and keeps the post-apply steps nobody
+// acknowledged: after a manual release is applied and the rollout is
+// revoked while it awaits acknowledgement, the retry to the same target
+// finds the release already at the target, yet still needs approval and
+// still waits for the acknowledgement before the plan becomes active.
+func TestRetriedManualRolloutKeepsItsAcknowledgementAndApproval(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+		rt.Spec.Rollout.StabilizationWindow = &metav1.Duration{Duration: time.Millisecond}
+	})
+	sentinel := func(chart string) releaseWithValues {
+		r := testRelease("nvsentinel", plan.PhasePrimary, "", `{}`)
+		r.Chart.Digest = plan.DigestOf([]byte(chart))
+		return r
+	}
+	active := putResolved(t, ctx, rt, map[string]string{"service": "gke", "version": "1"}, sentinel("s1"))
+	target := putResolved(t, ctx, rt, map[string]string{"service": "gke", "version": "2"}, sentinel("s2"))
+	succeedTo(t, ctx, rt, active)
+	resolved(t, ctx, target)
+	engine := newEngine()
+	engine.ensured["nvsentinel"] = active
+	engine.inventory = []argocd.InventoryItem{{ReleaseID: "nvsentinel", UID: "u-s", PlanDigest: active}}
+	r, clk := newRollout(t, engine, false)
+	clk.now = time.Now().Add(2 * time.Second)
+
+	reconcileRollout(t, ctx, r)
+	job := liveJobs(t, ctx, "assessment")[0]
+	succeed(t, ctx, &job, []byte(`{"deployer":"argocd","objectNamesCompared":false,"components":[`+
+		`{"component":"nvsentinel","change":"version","from":"v1.25.0","to":"v1.28.0","verdict":"manual","breaking":false,"downgrade":false,"failsRun":false,`+
+		`"steps":[{"id":"before","description":"no GPUReset in progress"},{"id":"apply","description":"sync"},`+
+		`{"id":"reset-breaker","description":"reset a tripped circuit breaker"},{"id":"verify","description":"check the CRD"}]}],`+
+		`"summary":{"components":1,"failing":0}}`))
+	reconcileRollout(t, ctx, r)
+	first := onlyRollout(t, ctx, target)
+	approve(t, ctx, first.Name, clk.now.Add(time.Hour))
+	for range 3 {
+		reconcileRollout(t, ctx, r)
+	}
+	if first = onlyRollout(t, ctx, target); first.Status.Phase != v1alpha1.PhaseAwaitingAcknowledgement {
+		t.Fatalf("before the revocation: %+v", first.Status)
+	}
+	revoke(t, ctx, first.Name)
+	reconcileRollout(t, ctx, r)
+	if first = onlyRollout(t, ctx, target); first.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseRevoked) {
+		t.Fatalf("after the revocation: %v %+v", first.Labels, first.Status)
+	}
+
+	got := getRuntime(t, ctx)
+	patch := client.MergeFrom(got.DeepCopy())
+	got.Annotations = map[string]string{v1alpha1.AnnotationRetry: "after-revoke"}
+	if err := k8s.Patch(ctx, got, patch); err != nil {
+		t.Fatal(err)
+	}
+	reconcileRollout(t, ctx, r)
+	reconcileRollout(t, ctx, r)
+	var retried *v1alpha1.RuntimeRollout
+	for _, x := range rolloutsTo(t, ctx, target) {
+		if x.Annotations[v1alpha1.AnnotationRetry] == "after-revoke" {
+			retried = &x
+		}
+	}
+	if retried == nil || !retried.Spec.ApprovalRequired || retried.Status.Phase != v1alpha1.PhaseAwaitingApproval ||
+		!slices.Equal(retried.Spec.Steps[0].PostApplySteps, []string{"reset-breaker", "verify"}) ||
+		retried.Spec.Steps[0].Assessment != v1alpha1.AssessmentManual {
+
+		t.Fatalf("retry rollout = %+v", retried)
+	}
+
+	approve(t, ctx, retried.Name, clk.now.Add(time.Hour))
+	for range 3 {
+		reconcileRollout(t, ctx, r)
+	}
+	ro := &v1alpha1.RuntimeRollout{}
+	if err := k8s.Get(ctx, client.ObjectKey{Name: retried.Name}, ro); err != nil {
+		t.Fatal(err)
+	}
+	if ro.Status.Phase != v1alpha1.PhaseAwaitingAcknowledgement || getRuntime(t, ctx).Status.ActivePlanDigest != active {
+		t.Fatalf("the retry finished without the acknowledgement: %v %+v", ro.Labels, ro.Status)
 	}
 }
 

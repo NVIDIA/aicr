@@ -35,12 +35,14 @@ type UpgradeReport struct {
 // ComponentChange is one component's assessed change.
 type ComponentChange struct {
 	Component string `json:"component"`
-	// Change is "version", "added" or "removed" at v1.0.0.
+	// Change is "version", "identity", "added", "removed" or "replaced"
+	// (NVIDIA/aicr pkg/upgrade/match.go).
 	Change string `json:"change"`
 	From   string `json:"from,omitempty"`
 	To     string `json:"to,omitempty"`
-	// Verdict is set for version changes: safe, manual, blocked, unknown or
-	// unversioned (NVIDIA/aicr pkg/upgrade/record.go).
+	// Verdict is set for version changes, and for a replacement from its
+	// transition record: safe, manual, blocked, unknown or unversioned
+	// (NVIDIA/aicr pkg/upgrade/record.go).
 	Verdict     string `json:"verdict,omitempty"`
 	Notes       string `json:"notes,omitempty"`
 	Reason      string `json:"reason,omitempty"`
