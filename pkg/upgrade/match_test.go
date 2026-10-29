@@ -596,12 +596,9 @@ func TestLevelDiffClampsRatherThanWrapping(t *testing.T) {
 	}
 }
 
-// TestMatchCrossingIgnoresFromMembership is the regression this file exists
-// for. Both record pairs describe the same two boundaries; only the `from`
-// grammar differs. A matcher that requires the source to satisfy `from` before
-// a record can apply skips the intermediate block in the bounded-below pair,
-// leaves exactly one record applying, and hands over its safe verdict, so a
-// jump straight over a recorded block reports safe and exits zero.
+// TestMatchCrossingIgnoresFromMembership checks that a jump over a blocked
+// record is blocked however its `from` is written, whether or not the safe
+// record's `to` reaches the target.
 func TestMatchCrossingIgnoresFromMembership(t *testing.T) {
 	tests := []struct {
 		name string
@@ -618,6 +615,20 @@ func TestMatchCrossingIgnoresFromMembership(t *testing.T) {
 			name: "from ranges open below",
 			set: oneComponent(
 				trans("<2.0.0", ">=2.0.0 <2.1.0", VerdictSafe, "S"),
+				trans("<3.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B"),
+			),
+		},
+		{
+			name: "from ranges bounded below, safe to holding the target",
+			set: oneComponent(
+				trans(">=1.0.0 <2.0.0", ">=2.0.0 <=3.0.0", VerdictSafe, "S"),
+				trans(">=2.0.0 <3.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B"),
+			),
+		},
+		{
+			name: "from ranges open below, safe to holding the target",
+			set: oneComponent(
+				trans("<2.0.0", ">=2.0.0 <=3.0.0", VerdictSafe, "S"),
 				trans("<3.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B"),
 			),
 		},
@@ -1118,6 +1129,17 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 				"then re-run this check",
 		},
 		{
+			name: "record-blocks off the path with no hop before the block names its from",
+			set: oneComponent(
+				trans("<2.0.0", ">=2.0.0 <=3.0.0", VerdictSafe, "S"),
+				trans(">=1.8.0 <1.9.0", ">=1.9.0 <=1.9.0", VerdictBlocked, "B"),
+			),
+			from: "1.5.0",
+			to:   "2.5.0",
+			want: "blocked by the record covering 1.9.0: do not move from 1.5.0 into >=1.9.0 <=1.9.0 " +
+				"in one step. Upgrade to a version in >=1.8.0 <1.9.0 first, then re-run this check",
+		},
+		{
 			name: "multiple-boundaries landing on an exclusive floor names the range",
 			set: oneComponent(
 				trans("<2.0.0", ">2.0.0 <2.1.0", VerdictSafe, "S"),
@@ -1485,13 +1507,15 @@ func TestMatchFollowsTheSourcesPath(t *testing.T) {
 			wantMatched: "A",
 		},
 		{
-			name:        "a block on a shared floor written for another origin does not decide the verdict",
-			set:         oneComponent(sharedB(VerdictBlocked), sharedA(VerdictManual)),
-			from:        "1.5.0",
-			to:          "3.0.0",
-			wantVerdict: VerdictManual,
-			wantReason:  ReasonRecorded,
-			wantMatched: "A",
+			// The jump passes through 2.x, which B forbids leaving for 3.0.0
+			// in one step.
+			name:          "a block on a shared floor the jump flies over blocks",
+			set:           oneComponent(sharedB(VerdictBlocked), sharedA(VerdictManual)),
+			from:          "1.5.0",
+			to:            "3.0.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonRecordBlocks,
+			wantStoppedAt: ">=3.0.0 <=3.0.0",
 		},
 		{
 			name:          "the other origin on a shared floor still gets its own record",

@@ -85,15 +85,18 @@
 // on that record's `to` floor. It repeats until a `to` holds the target or no
 // crossed record covers where it stands. A record is on the path when its
 // `from` covers a version the walk stood at. Records off the path describe a
-// move this operator does not make and do not decide the verdict.
+// move this operator does not make and do not decide the verdict, unless they
+// are blocked and in the way. A record is in the way when its `from` admits a
+// version the jump passes before reaching its floor.
 //
 // Verdict selection runs in this order:
 //
 //	1  nothing crossed                                    unknown, or blocked at the highest to ceiling
 //	                                                      when the target is past it
 //	2  nothing crossed was written for the source         blocked, stop at the lowest
-//	3  one record on the path, its to holds the target    that record's verdict
-//	4  a record on the path authored blocked              blocked, stop at its to
+//	3  one record on the path, its to holds the target,   that record's verdict
+//	   and no other blocked record in the way
+//	4  a blocked record in the way                        blocked, stop at its to
 //	5  the path stops short, all safe or one hop asking   blocked, stop at the next record's to,
 //	                                                      or the last hop's to when none lies ahead
 //	6  two or more records on the path, one asks          blocked, stop where the hop before lands

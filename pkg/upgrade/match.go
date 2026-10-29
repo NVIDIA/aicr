@@ -731,19 +731,20 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 		r.Explanation = undefinedOriginExplanation(u, r, crossed, src)
 		return r
 	}
+	blocking, isBlocked := lowestBlocked(inTheWay(crossed, src))
 	// A blocked verdict here carries the record, whose steps say what to do instead.
-	if len(p.onPath) == 1 && p.reached {
+	if len(p.onPath) == 1 && p.reached && (!isBlocked || blocking.tr == p.onPath[0].tr) {
 		r = lend(r, src, p.onPath[0])
 		if r.Verdict == VerdictBlocked {
 			r.StoppedAt = r.Transition.To
 		}
 		return r
 	}
-	if blocking, ok := lowestBlocked(p.onPath); ok {
+	if isBlocked {
 		r.Verdict = VerdictBlocked
 		r.Reason = ReasonRecordBlocks
 		r.StoppedAt = blocking.tr.To
-		r.Explanation = recordBlocksExplanation(r, p, blocking)
+		r.Explanation = recordBlocksExplanation(r, p, blocking, src)
 		return r
 	}
 	// Safe records carry no steps, so crossing one skips nothing.
@@ -897,9 +898,11 @@ func (p path) hopBefore(c crossing) (h crossing, ok bool) {
 }
 
 // recordBlocksExplanation returns the Explanation for r when the blocked
-// record b on p stops it. It names where the hop before b lands, or, when b is
-// the first hop, points at b's own steps.
-func recordBlocksExplanation(r ComponentResult, p path, b crossing) string {
+// record b stops the jump from src. It names the first of:
+//   - where the hop before b on p lands
+//   - b's `from`, when it does not cover src
+//   - b's own steps
+func recordBlocksExplanation(r ComponentResult, p path, b crossing, src *semver.Version) string {
 	s := fmt.Sprintf("blocked by the record covering %s: do not move from %s into %s in one step. ",
 		b.floor.ver, r.From, b.tr.To)
 	// b's own floor sits inside the interval it forbids, so it is never the
@@ -907,8 +910,33 @@ func recordBlocksExplanation(r ComponentResult, p path, b crossing) string {
 	if stop, ok := p.hopBefore(b); ok {
 		return s + fmt.Sprintf("Upgrade to %s first, then re-run this check", landingPhrase(stop))
 	}
+	if !fromCovers(b.tr, pointAt(src)) {
+		return s + fmt.Sprintf("Upgrade to a version in %s first, then re-run this check", b.tr.From)
+	}
 	return s + fmt.Sprintf("Check the move from %s to %s on its own for that record's steps, "+
 		"then re-run this check", r.From, landingPhrase(b))
+}
+
+// inTheWay returns the records in crossed whose `from` admits a version the
+// jump from src passes before reaching their floor.
+func inTheWay(crossed []crossing, src *semver.Version) []crossing {
+	var out []crossing
+	for _, c := range crossed {
+		from, err := parseBounds(c.tr.From)
+		if err != nil {
+			continue
+		}
+		// The walk need not have stood in `from`, so a bounded-below `from`
+		// cannot hide a block the jump flies over.
+		below := bounds{
+			lower: pointAt(src),
+			upper: bound{ver: c.floor.ver, inclusive: !c.floor.inclusive},
+		}
+		if intervalsIntersect(from, below) {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // landingPhrase returns the version c lands on, or "a version in" c's `to`

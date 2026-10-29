@@ -211,12 +211,12 @@ The branch row is why this needs its own verdict rather than falling through to 
 
 `from` decides whether a crossed record's *guidance* was authored for this starting point.
 
-**The verdict follows the source's path** (amended in [#3397](https://github.com/NVIDIA/aicr/issues/3397)). From the source, the matcher takes the lowest-floor crossed record whose `from` covers where it stands and lands on that record's `to` floor, repeating until a `to` holds the target. A record is *on the path* when its `from` covers a version the walk stood at. Records off the path are still reported as crossed but do not decide the verdict, so declaration order never does either. In the nodewright example, A and B are both written for 0.17.2, so both are on the path. Verdict selection runs in this order:
+**The verdict follows the source's path** (amended in [#3397](https://github.com/NVIDIA/aicr/issues/3397)). From the source, the matcher takes the lowest-floor crossed record whose `from` covers where it stands and lands on that record's `to` floor, repeating until a `to` holds the target. A record is *on the path* when its `from` covers a version the walk stood at. Records off the path are still reported as crossed but do not decide the verdict unless they are `blocked` and in the way (rule 4), so declaration order never does either. In the nodewright example, A and B are both written for 0.17.2, so both are on the path. Verdict selection runs in this order:
 
 1. **Nothing crossed** gives `unknown`, or `blocked` naming the highest `to` ceiling when the target is past every recorded ceiling.
 2. **Nothing crossed was written for the source** gives `blocked`, naming the lowest crossed record's `to`. The check is opt-in, so it errs toward safety rather than lending a verdict authored for another origin.
-3. **One record on the path, and its `to` holds the target** gives that record's verdict, `blocked` included. Its own steps say what to do instead, so the report renders them.
-4. **A `blocked` record on the path** gives `blocked`, naming that record's `to`.
+3. **One record on the path, its `to` holds the target, and no other `blocked` record in the way** gives that record's verdict, `blocked` included. Its own steps say what to do instead, so the report renders them.
+4. **A `blocked` record in the way** gives `blocked`, naming that record's `to`. A record is in the way when its `from` covers a version the jump passes before reaching its floor, whether or not the walk stood there. A bounded-below `from` therefore cannot hide a block, as the correction above requires.
 5. **The path stops short of the target, its records all `safe` or only its one hop asking,** gives `blocked`, naming the next crossed record's `to` when one lies ahead, otherwise the last hop's `to`.
 6. **Two or more records on the path, at least one asking something,** gives `blocked`, naming where the hop before the first substantive record lands.
 
@@ -393,7 +393,7 @@ That shared code path was aspirational when written and is now real: only `helm`
 | Route | When | `reason` | Steps |
 |---|---|---|---|
 | A record describes the move and blocks it | One record on the source's path, and its `to` holds the target | `recorded` | yes |
-| An authored block is flown past | A `blocked` record is on the path beside another | `record-blocks` | no |
+| An authored block is flown past | A `blocked` record is in the way and does not alone describe the move | `record-blocks` | no |
 | Several boundaries at once | Two or more records on the path, at least one asking something | `multiple-boundaries` | no |
 | Nothing describes the starting point | A record is crossed but none was written for the source, or the path lands where the records ahead were written for other starting points | `undefined-origin` | no |
 | The target is past what anyone assessed | The target sits above the highest `to` ceiling the component's records name, or above the ceiling where the source's path stops | `beyond-record-ceiling` | no |
