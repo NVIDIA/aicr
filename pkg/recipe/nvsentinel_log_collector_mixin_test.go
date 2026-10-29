@@ -35,7 +35,7 @@ var (
 	}
 	logCollectorThirdPartyImages = []struct{ image, tag string }{
 		{"docker.io/bitnamilegacy/nginx", "1.27.2-debian-12-r2"},
-		{"docker.io/library/busybox", "1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"},
+		{"docker.io/library/busybox", "1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4"},
 		{"quay.io/martinhelmich/prometheus-nginxlog-exporter", "v1.10.0"},
 	}
 )
@@ -88,7 +88,7 @@ func TestMixinNVSentinelLogCollector_Composes(t *testing.T) {
 				t.Errorf("incluster-file-server.persistence = %v, want exactly {size: 50Gi}", persistence)
 			}
 			initImage, _ := server["initImage"].(map[string]any)
-			if want := map[string]any{"repository": "docker.io/library/busybox", "tag": "1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"}; !maps.Equal(initImage, want) {
+			if want := map[string]any{"repository": "docker.io/library/busybox", "tag": "1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4"}; !maps.Equal(initImage, want) {
 				t.Errorf("incluster-file-server.initImage = %v, want exactly %v", initImage, want)
 			}
 			cleanup, _ := server["logCleanup"].(map[string]any)

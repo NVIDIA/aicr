@@ -46,7 +46,7 @@ a100-aks-ubuntu-training-kubeflow:
   009-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
   009-network-operator-post/templates/nfd-network-rule.yaml: 8ab7f572705ba9be8b0057954fbb7e918be7590e4360bee8c8fdaa1e909d08a1
   009-network-operator-post/templates/nic-cluster-policy-aks.yaml: ed3226b248994b8ab6ad69f6762fb5caba304e56fa59532586af4174524e20b4
-  009-network-operator-post/templates/nvidia-peermem-reloader.yaml: f6ae38499c16a1b97aeda3ac77774d4f6352809ee2d2838a7779df97ad1b26be
+  009-network-operator-post/templates/nvidia-peermem-reloader.yaml: bf1373f46b14b1475c6773d71f45c5383d17e496b0ef80ea2bba13db9b8b31cb
   009-network-operator-post/values.yaml: e63dfe21cdad75cb78b6b02f6f75f05eba527e3bb7cec75be2b197cd2ab0494c
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
@@ -55,7 +55,7 @@ a100-aks-ubuntu-training-kubeflow:
   011-gpu-operator-post/Chart.yaml: fdac8d93a8b2405c183cfe0e620c0ff14235e3c2adec47227d302fce3f29e81b
   011-gpu-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gpu-operator-post/install.sh: 461aa46af62d13ebb97af6cf27b588881b401197f09479847ebfe4c9173acf51
-  011-gpu-operator-post/templates/nvidia-toolkit-hardening-aks.yaml: 84ae47c2b388fd58ed7192b053f205ecf4da572dc430db0041fd70dc5f80f724
+  011-gpu-operator-post/templates/nvidia-toolkit-hardening-aks.yaml: 4f2a6acceda50caee7d792d707f62354dbe0b2e0a43811b9aa6a956501bbd50a
   011-gpu-operator-post/values.yaml: 3914a46bdeda1ad87c309c982feca1e0c7eb9409f8da76147538757d62674606
   012-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
@@ -78,7 +78,7 @@ a100-aks-ubuntu-training-kubeflow:
   016-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   016-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  016-nvsentinel/values.yaml: aa27bae925e838d0ba1a1b8a9d9ce6460ccfc20cfb29d9d52d85f9d1f927f008
+  016-nvsentinel/values.yaml: 1ecefff46566fc55a81fd949bfbb304b0b3e17172fbf3e58312baa412140c28b
   017-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -86,7 +86,7 @@ a100-aks-ubuntu-training-kubeflow:
   README.md: 34a33b6c3d48e548328b5db6a4cf490c612058b7be4d70e891868edb7216accd
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: 2a78ccf14a5e6ea7be2da7b0c896023e9ed5da1715dbe9f5396efe7a0c43062c
-  checksums.txt: e072b0fbedcdb29d6e79295e63ac44fc14b4b2d990a37776a35b55ddae0a7016
+  checksums.txt: f81a27a1b4111bef53dd454e1a15b77ec9317bb9737aa3756db866ae80a15254
   deploy.sh: cfb12fbb4315ebaadd1378f55f81e866e9f5faaa909b57e569bab1c0ce558c0b
   recipe.yaml: 33fd6f3b252c5e31688f31c7ca15ea3fc01bf917f8713d901d96093903629357
 a100-any:
@@ -130,7 +130,7 @@ a100-any:
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   010-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  010-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  010-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   011-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -138,7 +138,7 @@ a100-any:
   README.md: 51d39cf91c4ba6b59b4c39516306cc0cfb1383064ca561facee9272a8101d6a0
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 611a5c08160e682c55c52e425296e0f81fe625277212d8f6847148494505b031
-  checksums.txt: dd6e23e03c972c549b7cd53641410aa60eb130e72e075076d1ea22fc37917d9d
+  checksums.txt: ff342ac3fe79242c4d5fcc1449dcf354bd7c48831c3d35d137ea3ed641866318
   deploy.sh: 187bf11702c83fdf08c22fbdd72a6b16c937314d87f85da747c4753cbe5d5de4
   recipe.yaml: 1bea32dcc18e5f79afd5e6c44e366b7f530d7446aa9013c449994588a30ec339
 a100-eks-ubuntu-training-kubeflow:
@@ -204,7 +204,7 @@ a100-eks-ubuntu-training-kubeflow:
   015-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   015-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  015-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  015-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   016-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -212,7 +212,7 @@ a100-eks-ubuntu-training-kubeflow:
   README.md: f08ac8297b32c105241a3400b51c21814bbde89932cc93868e8efd8ecbb5a21a
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 13b57a0f4146290c3e224d7f357510faeebfd6b1547218e2a5c89ddfb6f4f550
-  checksums.txt: d36eb23a556fed62c4a8658f7e1ae81f545977f5f6d54659c6076ecb51d86e26
+  checksums.txt: 1d07ba1c98bc4d4d9d8b864b2320565730f30510b859e9513325e5ff380f76d4
   deploy.sh: 949466ed3363eb59ea6ff5a61a29ca150215a2041c47323cada206dcf3cdc0a8
   recipe.yaml: 431fc164b8244ea1b6f8dec440dce96479ffb862c29beed89d4158ae4b1b3dcd
 a100-gke-cos-training-kubeflow:
@@ -279,7 +279,7 @@ a100-gke-cos-training-kubeflow:
   015-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   015-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  015-nvsentinel/values.yaml: 7f5f9edb985771f1b7c01e5ee67edba4a2a6182b990a940a5e89601e5d589ae0
+  015-nvsentinel/values.yaml: 9b0b67e0c1165ddee6be8db9034fa6bfc06bb45269b76c09c9f34bbad2ed6bbf
   016-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -287,7 +287,7 @@ a100-gke-cos-training-kubeflow:
   README.md: 98bef086096d55ef2d636c257e5ee826d5830039f18d4eaf9b2b568545ddd55e
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: a82e1eda08c32f8dea2ec21b2e5295819a0dc8dac8f590b82e02cdd62ba2fc5f
-  checksums.txt: c8cc2a369fc4882c7e4af9f0098f5ca228dca1bbe5c0a987197740c4b07ed278
+  checksums.txt: 1bd254caeeacafd9543ab98d1026bc745e5c5d42a0fa9c5b3ad84ff4ae9d7ce0
   deploy.sh: 50736743f1a6091c2dcb82baedfed99d4ae2f5bfe3325f7e7ab89995353f81bd
   recipe.yaml: 2bdeb3bb0d89668ac7a735e21758c0010e22e599ad4b205d1b0639e74b663dea
 a100-oke-ubuntu-training-kubeflow:
@@ -340,7 +340,7 @@ a100-oke-ubuntu-training-kubeflow:
   012-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   012-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  012-nvsentinel/values.yaml: 6f417215aceac1cf2154ab9ac04a92eea2cfd631b116e2642fc8446b7cbca974
+  012-nvsentinel/values.yaml: 4208ccac81be3c795c7a866392250417f7d4e5ce655e0c19c1d6b198bf2f70aa
   013-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   013-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -348,7 +348,7 @@ a100-oke-ubuntu-training-kubeflow:
   README.md: 0f483a833c1e82554adec925871903e6fd1edbced21c2f5b983770fec81d8c83
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 719e09b3d9781f71d9e8f59ad5e0a1b23211fdbcf98691907f4a4ba312a127d2
-  checksums.txt: 8418df7ea0747bb51c2ab408437752160a13c7ba0e3beaea694c3fd55addf1ba
+  checksums.txt: 2edf5d5a3c8acbc0c1b941d63057ab249946d41c7c5bf691629091f65694b2cc
   deploy.sh: e3fbb41b352a410cced1659ded2f3c4e42afc681fac4a241a8b61c7e22c14f30
   recipe.yaml: df4edfbb330b620571b89f77d423c922b0b04355028c0b6dc958655c26a4e1ca
 aks-ubuntu:
@@ -385,7 +385,7 @@ aks-ubuntu:
   008-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
   008-network-operator-post/templates/nfd-network-rule.yaml: 8ab7f572705ba9be8b0057954fbb7e918be7590e4360bee8c8fdaa1e909d08a1
   008-network-operator-post/templates/nic-cluster-policy-aks.yaml: ed3226b248994b8ab6ad69f6762fb5caba304e56fa59532586af4174524e20b4
-  008-network-operator-post/templates/nvidia-peermem-reloader.yaml: f6ae38499c16a1b97aeda3ac77774d4f6352809ee2d2838a7779df97ad1b26be
+  008-network-operator-post/templates/nvidia-peermem-reloader.yaml: bf1373f46b14b1475c6773d71f45c5383d17e496b0ef80ea2bba13db9b8b31cb
   008-network-operator-post/values.yaml: e63dfe21cdad75cb78b6b02f6f75f05eba527e3bb7cec75be2b197cd2ab0494c
   009-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
@@ -394,7 +394,7 @@ aks-ubuntu:
   010-gpu-operator-post/Chart.yaml: fdac8d93a8b2405c183cfe0e620c0ff14235e3c2adec47227d302fce3f29e81b
   010-gpu-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator-post/install.sh: 461aa46af62d13ebb97af6cf27b588881b401197f09479847ebfe4c9173acf51
-  010-gpu-operator-post/templates/nvidia-toolkit-hardening-aks.yaml: 84ae47c2b388fd58ed7192b053f205ecf4da572dc430db0041fd70dc5f80f724
+  010-gpu-operator-post/templates/nvidia-toolkit-hardening-aks.yaml: 4f2a6acceda50caee7d792d707f62354dbe0b2e0a43811b9aa6a956501bbd50a
   010-gpu-operator-post/values.yaml: ffb7458f02296190f2d168a662d3576dfdeba0d816edcd4cf2d7835ee57a54c7
   011-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
@@ -408,7 +408,7 @@ aks-ubuntu:
   013-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   013-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  013-nvsentinel/values.yaml: aa27bae925e838d0ba1a1b8a9d9ce6460ccfc20cfb29d9d52d85f9d1f927f008
+  013-nvsentinel/values.yaml: 1ecefff46566fc55a81fd949bfbb304b0b3e17172fbf3e58312baa412140c28b
   014-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   014-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -416,7 +416,7 @@ aks-ubuntu:
   README.md: b220bfb000e1042f10e7d5da282f4a598ab578369b1668cacec14d351ec33288
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: 713f8d190f0f12747f75cb67fc31ad03245dff6a0554738623d6e9b7bc266975
-  checksums.txt: 24b1de7dc1393a3ef3ebe86a7a8910ab0d7f074cc3679452e4f3841ebc299887
+  checksums.txt: 67be70b746c1b4f06167aadc03f3df2dae8d73e0b63808c65dac9a55a5e4bfe7
   deploy.sh: 8f468711ed209c09e6c8e5d220abbdc6f273ddba9c9634f103bd57d6514136cf
   recipe.yaml: 3ef09af6010a2a3afd540f1476b6bfcbbec104c4c39b82c7a52a6a8277058ae4
 b200-any:
@@ -460,7 +460,7 @@ b200-any:
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   010-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  010-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  010-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   011-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -468,7 +468,7 @@ b200-any:
   README.md: fe5e345cfec93e3accd163bb9e56e43ed73bede9a9875961ba3382587c5ada88
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 700c842fc6519339d0bafe6e27c944b3113effdd67c52b00f15ea0b2358d4d3a
-  checksums.txt: 27b5f701aeff7e79b0be166d183888ec45654c008e8ff879f4ff6d2b5717f4b0
+  checksums.txt: 047d5f13ffb3cce876280f80398f30f28e451ec09554f203aeed92bfcdae3f7f
   deploy.sh: 187bf11702c83fdf08c22fbdd72a6b16c937314d87f85da747c4753cbe5d5de4
   recipe.yaml: 6b9686e88249993ffa660a6a14b0fa1997f62c87ba58d5a727f1bf5f21220b04
 b200-gke-cos-inference-dynamo:
@@ -553,7 +553,7 @@ b200-gke-cos-inference-dynamo:
   019-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   019-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  019-nvsentinel/values.yaml: 7f5f9edb985771f1b7c01e5ee67edba4a2a6182b990a940a5e89601e5d589ae0
+  019-nvsentinel/values.yaml: 9b0b67e0c1165ddee6be8db9034fa6bfc06bb45269b76c09c9f34bbad2ed6bbf
   020-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   020-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -561,7 +561,7 @@ b200-gke-cos-inference-dynamo:
   README.md: 254107758fbe782d94f324cb5453898b8d59ec61c29fd5ac5ad8e22f6d7987ac
   UPGRADING.md: c13181818215d70ba0546fcd97b33316362bbd728bedc1cebb5c720afa4fb1e5
   bundle-info.yaml: 5b70262325864c44ada82284cef5c5600e124ed8d7a2964132ab0dafaeb4e308
-  checksums.txt: 0e2a93acb180fa372e0efa990657e9b54b859e4d85bfb7e51ccd76e926215de8
+  checksums.txt: d67a670aa8466c17025d2efd2833bd08017da6ca188ebe28ecb60692c46a1246
   deploy.sh: 841a92636bb0a65da6fa0162b67084f68f362fa0e41837b1c57e6560c10a7a63
   recipe.yaml: c9b8d93aa35835955c86d6111f309b55c23a7235708c1eefb2712e82473821e7
 b200-gke-cos-training-kubeflow:
@@ -628,7 +628,7 @@ b200-gke-cos-training-kubeflow:
   015-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   015-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  015-nvsentinel/values.yaml: 7f5f9edb985771f1b7c01e5ee67edba4a2a6182b990a940a5e89601e5d589ae0
+  015-nvsentinel/values.yaml: 9b0b67e0c1165ddee6be8db9034fa6bfc06bb45269b76c09c9f34bbad2ed6bbf
   016-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -636,7 +636,7 @@ b200-gke-cos-training-kubeflow:
   README.md: b3fba59b12b171858ae53fd816dc1090e6b8190704efa34fc626de84fdd6aa59
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 33ebe4bb1e917997631c8c5ef7704e29eee6a0270f84bd51bb455d1d20d4b907
-  checksums.txt: e6f120b728ad01fd5298b1d2f1cbe89e808a0dc45e5911197d74fcebf317ffbf
+  checksums.txt: 0873ca719f38482e9fbf2f26473705ba7715d4bf5a4052aedf7be45506807dd3
   deploy.sh: 50736743f1a6091c2dcb82baedfed99d4ae2f5bfe3325f7e7ab89995353f81bd
   recipe.yaml: e9b2ed7162ca4980970acaf8f4cbc782186c6a8a908831815daa37f394dc7b16
 b300-mk8s-ubuntu-inference-dynamo:
@@ -744,7 +744,7 @@ bcm-inference:
   015-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   015-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  015-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  015-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   016-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -752,7 +752,7 @@ bcm-inference:
   README.md: 94c9125ad500d8f420b912ade875217c20c81d4518c4b844a8768989e702f8d9
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 68bfe5f62c2812346e4ba9c4c96ef37dce9054fd4587bd5137d897b2c32b8a1c
-  checksums.txt: 811a61b44a724f4699b4f7c21648ad6a1aa96ece172a1b6688a256cceadd5f4e
+  checksums.txt: d80d1c9ee5d07587e96a81db2d73529236163f90d32303ae32557c4c4ea6ccdd
   deploy.sh: 1ccc85228bcbafaf6345c9da5753ab24dac14c7edec7f22e99c53c2535b4653b
   recipe.yaml: 47b5e632f648684bd99a9a1808c6d38bd8024aa73c90f03876343efef242abcb
 eks-ubuntu:
@@ -804,7 +804,7 @@ eks-ubuntu:
   012-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   012-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  012-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  012-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   013-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   013-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -812,7 +812,7 @@ eks-ubuntu:
   README.md: 9856b43e76cd81ed29b7fc5ded46c23eb03e3ad86ed7613e2ec26d17dda585c5
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 4a38e0d30d8f3951f1102354971ac0478e41fe80cc969f36a4eae225e352fc39
-  checksums.txt: e6d7e8c0e4188146eea971ddb62ad562daa842893bdc8656e826e1d061313af5
+  checksums.txt: a34bac03ea531e83e7847463e70f9e475598bf06e2d2ea3739ba157398d51a09
   deploy.sh: 4e2e552d2fdb5b8485a1b3abba65a1cac19d50c59a3fa000796224fe59eb72e5
   recipe.yaml: 1d5e3be7d82a87629c2741c3a3c60cd3143a19ae5a0eb211c2ad01b42236b351
 gb200-any:
@@ -856,7 +856,7 @@ gb200-any:
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   010-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  010-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  010-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   011-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -864,7 +864,7 @@ gb200-any:
   README.md: afe9f469cfcc14d07c316263073f537088a8eeaadac0128891e7b21114c01944
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 051fd14741c7dd60861615571895ed5398aeec3c5876fd7cbee99690ba4d8833
-  checksums.txt: 1898fab9fd21f0942c097d4e1990aeaa81cd2121f7cf427fad91a6e5e006cf7b
+  checksums.txt: c6d5947933adeea55b4385308008381d2afe43e6f6441a5fe76d179286d0e160
   deploy.sh: 187bf11702c83fdf08c22fbdd72a6b16c937314d87f85da747c4753cbe5d5de4
   recipe.yaml: 019cd6bbc9a6e7897673302e3fd7e7770c54fe954710b73bd7f6a6c713e2f27f
 gb200-eks-amazonlinux-inference:
@@ -940,7 +940,7 @@ gb200-eks-amazonlinux-inference:
   017-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   017-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  017-nvsentinel/values.yaml: 376d322d05dfab359cef13a99ded134b567f8100905a39caaf4af614efefa223
+  017-nvsentinel/values.yaml: ff4f1bd9a9d3ef62ee452144ffa4449f7c1b292d8aeffe870cae5141cea80b31
   018-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   018-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -948,7 +948,7 @@ gb200-eks-amazonlinux-inference:
   README.md: 0c65b95427818508444d6d4738c8c1bb684d9b65600b2e2d23738d8ecdadc807
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 24db7bc925bd6fc67bb79fb000e31b35035ce56ed07b087ff16d825f95679f65
-  checksums.txt: fd0ab5161383afd4ac4816ab5676cbe94e2895e43ea0b3403e26b5bb8b175485
+  checksums.txt: 6c45df46fddeab52a4bf344290575156045e81a02a9c862212728755a5b5a758
   deploy.sh: 0248fabe5a8e4dbdbe60fc3f0cbf1aaab47a637402bec6eca1191fa601e8bfd6
   recipe.yaml: 0cda0e658a2707fbf1d0cdd2901816abb7142007a04e64a78d2153c0e5da36b1
 gb200-eks-ubuntu-inference-dynamo:
@@ -1037,7 +1037,7 @@ gb200-eks-ubuntu-inference-dynamo:
   020-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   020-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  020-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  020-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   021-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   021-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   021-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -1045,7 +1045,7 @@ gb200-eks-ubuntu-inference-dynamo:
   README.md: 01143781819e9a68e54c1c853a3dbbcd58ff78338f71ee4b123ddbc0b033b61c
   UPGRADING.md: c13181818215d70ba0546fcd97b33316362bbd728bedc1cebb5c720afa4fb1e5
   bundle-info.yaml: 975b473bdc6a04391d9b37aa001f1b5e51461bb01eca6303c80c94c54c5fb579
-  checksums.txt: 337c72546f21d8150590874133d8b9f96f30af32737bcd269e06f9b081b0bdea
+  checksums.txt: 033219b52879dbf75766f67e1e4df23183f304f0f197892d6a81b19bf691e09e
   deploy.sh: 5463ca8ed80e72d789bfb987637d85e2d3da5e4212a6a20e52b3640465c24da1
   recipe.yaml: 119e1690a9e780cc2cafa40a6b6ca5af632082fe9ddf3fd79ff14ec99d69dacf
 gb200-eks-ubuntu-training-kubeflow:
@@ -1116,7 +1116,7 @@ gb200-eks-ubuntu-training-kubeflow:
   016-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   016-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  016-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  016-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   017-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -1124,7 +1124,7 @@ gb200-eks-ubuntu-training-kubeflow:
   README.md: 1e1d78e4d6edee339ec119819edd2f524bbc66ecad2931ef563db79030e6921e
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 7c74ac82ec9a716c81534d4bb4ce92c91f3227a15fbf395999e96294ce133472
-  checksums.txt: b453c852629b3152ed09798cd9dbbda5a0be462c5f90d1355b854884ab14d25b
+  checksums.txt: f78aa69dbbc6cfc3bcbfaa94eee563d7d623744b2d18de62f68b601c275f4844
   deploy.sh: 949466ed3363eb59ea6ff5a61a29ca150215a2041c47323cada206dcf3cdc0a8
   recipe.yaml: 29a212da22126dbd10fb03f2ae5f787aed49d90cf46a92ea642b75863c180f3c
 gb200-eks-ubuntu-training-slurm:
@@ -1186,7 +1186,7 @@ gb200-eks-ubuntu-training-slurm:
   014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   014-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  014-nvsentinel/values.yaml: 8d8fc8ff4f18cad5c88227aaf425e76cfe57781de040cf96cd10bb285dcbf403
+  014-nvsentinel/values.yaml: 27ef756e6ed93b26be92f9cb1c8a9edbf74a540cf2ba955c49c5b38a498a7470
   015-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -1212,7 +1212,7 @@ gb200-eks-ubuntu-training-slurm:
   README.md: 574588e034cda755212549d20065565fca1c13a811c5c9d2a508f34e979eac3a
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 1e390a67eb15aab0ec6f78745bdd44d79e26e167271359693e1d0b92af35feff
-  checksums.txt: bea65cf6d6b78d04291c4e1c8c8c1ddf31047ecfbb11766e443dff839309e651
+  checksums.txt: 6404e4f493ec14ba9c02bbe5e2e3d80a669c927320b34d0718dd4da55683898c
   deploy.sh: 49009b25d90dd3b0c344008506134dc39d12e4b80582b1ce3356216f7cfb871d
   recipe.yaml: a1d981ed4280613634bb63f925873d46e88cd1df377effdbc1115a7c1c34f4b6
 gb200-gke-cos-inference-dynamo:
@@ -1308,7 +1308,7 @@ gb200-gke-cos-inference-dynamo:
   021-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   021-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   021-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  021-nvsentinel/values.yaml: 7f5f9edb985771f1b7c01e5ee67edba4a2a6182b990a940a5e89601e5d589ae0
+  021-nvsentinel/values.yaml: 9b0b67e0c1165ddee6be8db9034fa6bfc06bb45269b76c09c9f34bbad2ed6bbf
   022-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   022-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   022-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -1316,7 +1316,7 @@ gb200-gke-cos-inference-dynamo:
   README.md: ca10ba4a2af0cb7163ae2fff3a91720eb2a800c2948d56c9526e2d9697163e0d
   UPGRADING.md: c13181818215d70ba0546fcd97b33316362bbd728bedc1cebb5c720afa4fb1e5
   bundle-info.yaml: e8f1cfcc35f2a671d435806aa58a236eae88879ef65c056a1d4ca3b7bda09c6a
-  checksums.txt: 3417197d62ac34126994d3635fa208cf1c5d805b4639957fe9f84adb579298fd
+  checksums.txt: 40e7a9f8525da27a813a27d3153af746db730b14328df56530259747138671ae
   deploy.sh: 169ebed142cd9adf4392755b843629729d2d26e0cfd613dfce97b816b1069827
   recipe.yaml: 65e7397aadc5db61c007f879e54afaa2be68672b31b277ffc581106a25fb34aa
 gb200-gke-cos-training-kubeflow:
@@ -1390,7 +1390,7 @@ gb200-gke-cos-training-kubeflow:
   016-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   016-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  016-nvsentinel/values.yaml: 7f5f9edb985771f1b7c01e5ee67edba4a2a6182b990a940a5e89601e5d589ae0
+  016-nvsentinel/values.yaml: 9b0b67e0c1165ddee6be8db9034fa6bfc06bb45269b76c09c9f34bbad2ed6bbf
   017-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -1398,7 +1398,7 @@ gb200-gke-cos-training-kubeflow:
   README.md: af0a060d00045f517fcf09b206f5719d0d9bfef56c4e7a90f88b78111431372e
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: db8bcaef13f30a1e48204016fbc60f487fb374f850092490308d453122bd47b3
-  checksums.txt: f79a49c589e84c6608f96b04bacbf958bd9f70c248af7ffe803a29db8a805022
+  checksums.txt: e12fba8f00df74174317f4e50743c1f63ab77a4e2243d0345674bdfd2e1bbf8b
   deploy.sh: 4fa420735f0c5403b7e2bb44e37f180f928c157aab09355d29be499cdffb27d2
   recipe.yaml: 80ab87e70f56bd9adf1512afa364acfb2185d8c1fa7a4389275eb703e4b8904e
 gb200-gke-cos-training-slurm:
@@ -1462,7 +1462,7 @@ gb200-gke-cos-training-slurm:
   014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   014-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  014-nvsentinel/values.yaml: 631c76fda879256d07d8e329e6f4582d7680e10b316444be4f7215356ca5c655
+  014-nvsentinel/values.yaml: 307f869b681c2722d272630db5457bf2048917641ecc35c5837a5b0f0bad668f
   015-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -1488,7 +1488,7 @@ gb200-gke-cos-training-slurm:
   README.md: e03175dd224538df6fa828ccfb61078736968032049072bb8ea7e2c8c6a1111e
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 52bee3717524f28adfe4191bcaa67dfcb884844e0c7df6a1c912bcb728686914
-  checksums.txt: e00b85fe72b6f53f1de8ad82ced799c49dde20759e4279b32ce70c6b10727b1b
+  checksums.txt: a4de7d92a9f11b96be30c056b7d3c5e67bad29e0b3adb9e547d87c190804169d
   deploy.sh: d54909f4d258435a4f5a944a2624c6ab0adf954532cebb9c8c27321f08d0d0bc
   recipe.yaml: c4acbf5e91276b4cedea7c8331ffae25acd2b01e1b8847f4b5e099cf2c37afae
 gb200-nvke-ubuntu-training-kubeflow:
@@ -1564,7 +1564,7 @@ gb200-nvke-ubuntu-training-kubeflow:
   017-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   017-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  017-nvsentinel/values.yaml: 2d7d0fb3d9a11c0250b6564e2e6b9d7695fc460efb3bdbe8b1dbb91e80264915
+  017-nvsentinel/values.yaml: 0af63c5f93656b55dd0d0c8725169dccdc0ffe02dfe9d9b70a46466017368d7d
   018-sriov-ib-networks/Chart.yaml: cf11fef32f24b6aefc8716a9431095cfb684127211b920f22faa6070114dd946
   018-sriov-ib-networks/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-sriov-ib-networks/install.sh: 8f4bff183a9169f137fd0c47dc059b67b1fa6121531af7d3000b093de7c277fc
@@ -1573,7 +1573,7 @@ gb200-nvke-ubuntu-training-kubeflow:
   README.md: 277cb1c71384b62556b1fe8496d5ada125e21215fc180d25a65e51fbdb00f051
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: fd69a2af304cf26f334e2595a27c1fd62726507a071c4185ccadbe0e3b641dec
-  checksums.txt: 0efab1cb0c2d894bd3515e4f94f85137f1e4c99d745625d3654eeffe4c7eb19a
+  checksums.txt: 967eafd35aa64de16dc1dd1d602455fdbcbc1533b19c6e639d2116f1c8a49a7c
   deploy.sh: 7d5e92b02a59bef508ee433e801875d4e7ed9c4b7e0a352658f0d768af99c067
   recipe.yaml: 2d0c1126383892ea4166b371615b44756b7f337ae91175d12be44304d46d3bd2
 gb200-oke-ubuntu-inference-dynamo:
@@ -1644,7 +1644,7 @@ gb200-oke-ubuntu-inference-dynamo:
   016-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   016-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  016-nvsentinel/values.yaml: 6f417215aceac1cf2154ab9ac04a92eea2cfd631b116e2642fc8446b7cbca974
+  016-nvsentinel/values.yaml: 4208ccac81be3c795c7a866392250417f7d4e5ce655e0c19c1d6b198bf2f70aa
   017-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -1652,7 +1652,7 @@ gb200-oke-ubuntu-inference-dynamo:
   README.md: 5af37353e54f18d4a0e56a189e148f69e6a216262025a2aad6839096e3bf3fe5
   UPGRADING.md: c13181818215d70ba0546fcd97b33316362bbd728bedc1cebb5c720afa4fb1e5
   bundle-info.yaml: aafca86f473a9a8dc9d67d282531c64386bd50661f164931c25b6dd0d8a069a5
-  checksums.txt: 63100f36c33bcab240c2c6206163a2a3a3297fbcb53d20819ee21f41f227f195
+  checksums.txt: b3db153ec81ebfd663e0b835494437853b581ca80b093a142dc504d1c065367e
   deploy.sh: 1e42e0e0bc9c9ddc7f45c00104c12763d0ebf6ace12098813023d30512df1fdc
   recipe.yaml: 84316e588ebc07b6654be93dc69b1afa32bc080a9f3a12439e9fd461188c445a
 gb200-oke-ubuntu-training-kubeflow:
@@ -1719,7 +1719,7 @@ gb200-oke-ubuntu-training-kubeflow:
   015-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   015-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  015-nvsentinel/values.yaml: 6f417215aceac1cf2154ab9ac04a92eea2cfd631b116e2642fc8446b7cbca974
+  015-nvsentinel/values.yaml: 4208ccac81be3c795c7a866392250417f7d4e5ce655e0c19c1d6b198bf2f70aa
   016-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -1727,7 +1727,7 @@ gb200-oke-ubuntu-training-kubeflow:
   README.md: 96991929d7be063b68d358e0d7e3643d30b959c0dc3beb410ea174891dd4c915
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: 343099ea193f210726a698cd06ef6ddcdf695d2ba70c607b00e383d2ebc3f3d8
-  checksums.txt: a3678e5d690d0f99374cbc7c12397883dccedcb520bf75099b4bce4f4e53ae7e
+  checksums.txt: eb0ab22e5c00b48829d348567c5655d7b91a6dbc12d1543ffb04640ac6e6ed6a
   deploy.sh: 585028988d2cdbd7fad24e6a6aa04e416399fb8c675ac560c1ea2cf01e76def6
   recipe.yaml: 5c712d0bfb547b8d63628c966be28d2fd303cb762d8778ad4e2d716ff272df98
 gb300-any:
@@ -1771,7 +1771,7 @@ gb300-any:
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   010-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  010-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  010-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   011-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -1779,7 +1779,7 @@ gb300-any:
   README.md: 0d1ce89601daf7792831f296f7e9e504471a93255e9eac4e4854e4cb60f8b55f
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: d64de5e6b5c83a0acaa04e96216f4f0c0fab3d2b4d7334519544ac3e9ea0bd9d
-  checksums.txt: 12d97a8a9063a7ddf6785e482876f064bfa35978f436837aee267718a9cc9b73
+  checksums.txt: eea6fe0226ec8366bcd38c120d6cdbb40d6d3a471dcd993a362f8e890709f5cf
   deploy.sh: 187bf11702c83fdf08c22fbdd72a6b16c937314d87f85da747c4753cbe5d5de4
   recipe.yaml: 67a6366f91baddaea6faf0821f3fc6e922b1c57ff2b6c3396aaecb6ff0af27a6
 gb300-eks-amazonlinux-inference:
@@ -1855,7 +1855,7 @@ gb300-eks-amazonlinux-inference:
   017-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   017-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  017-nvsentinel/values.yaml: 376d322d05dfab359cef13a99ded134b567f8100905a39caaf4af614efefa223
+  017-nvsentinel/values.yaml: ff4f1bd9a9d3ef62ee452144ffa4449f7c1b292d8aeffe870cae5141cea80b31
   018-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   018-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -1863,7 +1863,7 @@ gb300-eks-amazonlinux-inference:
   README.md: 128f12126080d611247de5c4c63f8c104d534864edba7bc9246e957dddc5702a
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: fac9751f704c96c3b8b9b89ff3e47b75427325da6e1c005f8c1c1af8ad899c5b
-  checksums.txt: c3767a947ee226f29335e399cb3211e9971a0d6fcd368b3deef0cc2973cf4256
+  checksums.txt: 363a986b65f08266c7d2b4cdb846f4dc319d17e5aa8d0c815fbea9eb254f9d8a
   deploy.sh: 0248fabe5a8e4dbdbe60fc3f0cbf1aaab47a637402bec6eca1191fa601e8bfd6
   recipe.yaml: 64a77d443ea7cd3c94f189042aca58c736541a0a48c5b4716fde67f55b28b778
 gb300-eks-ubuntu-inference-dynamo:
@@ -1952,7 +1952,7 @@ gb300-eks-ubuntu-inference-dynamo:
   020-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   020-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  020-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  020-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   021-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   021-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   021-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -1960,7 +1960,7 @@ gb300-eks-ubuntu-inference-dynamo:
   README.md: f998930212bedf803bbd12997b89e18a94c59e6fc6e4dad554ce16677aabf314
   UPGRADING.md: c13181818215d70ba0546fcd97b33316362bbd728bedc1cebb5c720afa4fb1e5
   bundle-info.yaml: 37b219deae9477e52d8c65f8152b1b41774f1d67bdc5871b506e8105faa5eac6
-  checksums.txt: b669ba73efd94e6563d797a88dae4be58f38e14143dfdef91613a0c872d11d20
+  checksums.txt: 6c50d4a2c032bf695fcb1cf9429e88c5d67f0ea7618942779e6112fabc36df0c
   deploy.sh: 5463ca8ed80e72d789bfb987637d85e2d3da5e4212a6a20e52b3640465c24da1
   recipe.yaml: 71150a071c7e3948b0e751fdca1d97b527d1ba9a08e4b2e31a974e31a4a134b0
 gb300-eks-ubuntu-training-kubeflow:
@@ -2031,7 +2031,7 @@ gb300-eks-ubuntu-training-kubeflow:
   016-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   016-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  016-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  016-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   017-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -2039,7 +2039,7 @@ gb300-eks-ubuntu-training-kubeflow:
   README.md: 647002a3ea125a33ac5f9689d693a0f4da3902f1ebedfcd883fbd83c48397aa9
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 8030870edbe97510dda889b0ab81634cc98a68dc3fbb199bcfe0f990168014ab
-  checksums.txt: 885c4e53a1b648057c1cac5588dd731ed41fba88dfdbdfccf83c7a74b4a53a1f
+  checksums.txt: 768476f421ca1c45708e29cd46e5dbe4ff960a94de24328b68e1c2892280cd51
   deploy.sh: 949466ed3363eb59ea6ff5a61a29ca150215a2041c47323cada206dcf3cdc0a8
   recipe.yaml: dc2958918dc0d0504c9e7e86494062008e5813b8f8fe9de174ca0a6253451dbe
 gb300-eks-ubuntu-training-slurm:
@@ -2101,7 +2101,7 @@ gb300-eks-ubuntu-training-slurm:
   014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   014-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  014-nvsentinel/values.yaml: 8d8fc8ff4f18cad5c88227aaf425e76cfe57781de040cf96cd10bb285dcbf403
+  014-nvsentinel/values.yaml: 27ef756e6ed93b26be92f9cb1c8a9edbf74a540cf2ba955c49c5b38a498a7470
   015-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -2127,7 +2127,7 @@ gb300-eks-ubuntu-training-slurm:
   README.md: 27e7f454f144faef0affd2aae64af59653d3e3170b7ea2d5c39569bf9e1fa26d
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 1cb84ce7889d79dc694d133dcaa6e434c3f921cec8ff9de4cbc1d1b45b62d882
-  checksums.txt: 80627ac839dc66a4370592609fad68acc85a0c99dc14dd1a45e7feeef0278044
+  checksums.txt: 55a418a5c7c5ad8b829a1938905243695563b237098592da612ebb0e4bd1ec1f
   deploy.sh: 49009b25d90dd3b0c344008506134dc39d12e4b80582b1ce3356216f7cfb871d
   recipe.yaml: 08c76869b76a9f2a72178530328bce97c29151f706b9fe85b7c7870ad15f13ce
 gb300-generic-ubuntu-training:
@@ -2185,7 +2185,7 @@ gb300-generic-ubuntu-training:
   013-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   013-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  013-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  013-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   014-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   014-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -2193,7 +2193,7 @@ gb300-generic-ubuntu-training:
   README.md: 58f81d6c46999de3fe85f1ce47c6c77b3ccf4ba04b25160f7708e8c78bb947d8
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: 633ab360e2e8e6e6f1fc4792861f814fb7f846afafb4a39dc25ebbf23f9a8495
-  checksums.txt: e64f05d33d6e7bca9b0ad2a58bd7cc920eacae788788c9f6a5506e0d84def06b
+  checksums.txt: ae2bf1cfea17b5862bbf2069a33fe08fc136f415fcdc3a17c77af78d4cef396a
   deploy.sh: 4196d34c287d2bdc2086c77410c18acfc254f60a86d60cc8d6ba400e4837f3b0
   recipe.yaml: ece6536418dd4930def39c70289c01a8ec9f8157b625f69438495d2bd49a9d34
 gb300-gke-cos-inference-dynamo:
@@ -2278,7 +2278,7 @@ gb300-gke-cos-inference-dynamo:
   019-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   019-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  019-nvsentinel/values.yaml: 7f5f9edb985771f1b7c01e5ee67edba4a2a6182b990a940a5e89601e5d589ae0
+  019-nvsentinel/values.yaml: 9b0b67e0c1165ddee6be8db9034fa6bfc06bb45269b76c09c9f34bbad2ed6bbf
   020-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   020-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -2286,7 +2286,7 @@ gb300-gke-cos-inference-dynamo:
   README.md: 0089fcf436e0fb6b5e704b8a77ed8ec3f10e66b4a2ca284caabb55316e501fac
   UPGRADING.md: c13181818215d70ba0546fcd97b33316362bbd728bedc1cebb5c720afa4fb1e5
   bundle-info.yaml: 4bfd0a94808ce223eabc3c4640749691cecb4a97109ae77cc26f9f19bd44af3a
-  checksums.txt: a26c655d89e24dbc480cd7ad462f539de64143d01d5e51f273add634343d3fb7
+  checksums.txt: b64e4fe1a2c175eb28b0191dcd92a83a9dcc7733699cff14af84c83e637ea96b
   deploy.sh: 841a92636bb0a65da6fa0162b67084f68f362fa0e41837b1c57e6560c10a7a63
   recipe.yaml: 523ec8149ace8173e415e3a9c02a2d09d5335b4d3810f4ac875c3dcf63a4b382
 gb300-gke-cos-training-kubeflow:
@@ -2353,7 +2353,7 @@ gb300-gke-cos-training-kubeflow:
   015-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   015-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  015-nvsentinel/values.yaml: 7f5f9edb985771f1b7c01e5ee67edba4a2a6182b990a940a5e89601e5d589ae0
+  015-nvsentinel/values.yaml: 9b0b67e0c1165ddee6be8db9034fa6bfc06bb45269b76c09c9f34bbad2ed6bbf
   016-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -2361,7 +2361,7 @@ gb300-gke-cos-training-kubeflow:
   README.md: 1bf1cc0a02c0574531cc21bffb375745c809a06aad50c5d6bb72693d73dc2d0e
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: b2da0cbe1d9855acce090756b0968ae8f381424c451916a580119b336fb03218
-  checksums.txt: 8a10e964da6ba67950f978ad3a737fe47b09515f477d8b09532d95a8f2cfd000
+  checksums.txt: 15228a30b3c48920ddd336320c57640e19333830f215db32b2d8961bc918e817
   deploy.sh: 50736743f1a6091c2dcb82baedfed99d4ae2f5bfe3325f7e7ab89995353f81bd
   recipe.yaml: 33829b7576a745e5639e0b7861229129415c5a3db2217fc1818dade4197d2c3c
 h100-aks-ubuntu-inference-dynamo:
@@ -2426,7 +2426,7 @@ h100-aks-ubuntu-inference-dynamo:
   014-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
   014-network-operator-post/templates/nfd-network-rule.yaml: 8ab7f572705ba9be8b0057954fbb7e918be7590e4360bee8c8fdaa1e909d08a1
   014-network-operator-post/templates/nic-cluster-policy-aks.yaml: ed3226b248994b8ab6ad69f6762fb5caba304e56fa59532586af4174524e20b4
-  014-network-operator-post/templates/nvidia-peermem-reloader.yaml: f6ae38499c16a1b97aeda3ac77774d4f6352809ee2d2838a7779df97ad1b26be
+  014-network-operator-post/templates/nvidia-peermem-reloader.yaml: bf1373f46b14b1475c6773d71f45c5383d17e496b0ef80ea2bba13db9b8b31cb
   014-network-operator-post/values.yaml: e63dfe21cdad75cb78b6b02f6f75f05eba527e3bb7cec75be2b197cd2ab0494c
   015-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
@@ -2435,7 +2435,7 @@ h100-aks-ubuntu-inference-dynamo:
   016-gpu-operator-post/Chart.yaml: fdac8d93a8b2405c183cfe0e620c0ff14235e3c2adec47227d302fce3f29e81b
   016-gpu-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-gpu-operator-post/install.sh: 461aa46af62d13ebb97af6cf27b588881b401197f09479847ebfe4c9173acf51
-  016-gpu-operator-post/templates/nvidia-toolkit-hardening-aks.yaml: 84ae47c2b388fd58ed7192b053f205ecf4da572dc430db0041fd70dc5f80f724
+  016-gpu-operator-post/templates/nvidia-toolkit-hardening-aks.yaml: 4f2a6acceda50caee7d792d707f62354dbe0b2e0a43811b9aa6a956501bbd50a
   016-gpu-operator-post/values.yaml: ffb7458f02296190f2d168a662d3576dfdeba0d816edcd4cf2d7835ee57a54c7
   017-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
@@ -2453,7 +2453,7 @@ h100-aks-ubuntu-inference-dynamo:
   020-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   020-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  020-nvsentinel/values.yaml: aa27bae925e838d0ba1a1b8a9d9ce6460ccfc20cfb29d9d52d85f9d1f927f008
+  020-nvsentinel/values.yaml: 1ecefff46566fc55a81fd949bfbb304b0b3e17172fbf3e58312baa412140c28b
   021-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   021-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   021-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -2461,7 +2461,7 @@ h100-aks-ubuntu-inference-dynamo:
   README.md: 42d7af8416179eae70d1c5ae72c7e5113392d29838fb4f037c442a09537ae441
   UPGRADING.md: 6cb67acfd9eb81979395397faf676cb48343ed293f73b7354d23a6b540a75a84
   bundle-info.yaml: febe15ce0511a98016c8bedaa8d5760fb01ff926254e8a3834a41b946fc15776
-  checksums.txt: bd3085902feed5bd5eeb38a493a1e65c162eae3a19008c2b89cd830b64ba0e94
+  checksums.txt: eb75fa340292ce41df77aa0cd3c0e3cb4c1ac67dda6070ee2987eb3bb3667782
   deploy.sh: 1a78677ffdf4ba1f861de19dbb30bffaab64b77aa62b48a87bd929a564bce55a
   recipe.yaml: b6ed936f2a9b47be41814f20d2a0742e8c5ff129c2557f48ec8208ac011b0a27
 h100-aks-ubuntu-training-kubeflow:
@@ -2503,7 +2503,7 @@ h100-aks-ubuntu-training-kubeflow:
   009-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
   009-network-operator-post/templates/nfd-network-rule.yaml: 8ab7f572705ba9be8b0057954fbb7e918be7590e4360bee8c8fdaa1e909d08a1
   009-network-operator-post/templates/nic-cluster-policy-aks.yaml: ed3226b248994b8ab6ad69f6762fb5caba304e56fa59532586af4174524e20b4
-  009-network-operator-post/templates/nvidia-peermem-reloader.yaml: f6ae38499c16a1b97aeda3ac77774d4f6352809ee2d2838a7779df97ad1b26be
+  009-network-operator-post/templates/nvidia-peermem-reloader.yaml: bf1373f46b14b1475c6773d71f45c5383d17e496b0ef80ea2bba13db9b8b31cb
   009-network-operator-post/values.yaml: e63dfe21cdad75cb78b6b02f6f75f05eba527e3bb7cec75be2b197cd2ab0494c
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
@@ -2512,7 +2512,7 @@ h100-aks-ubuntu-training-kubeflow:
   011-gpu-operator-post/Chart.yaml: fdac8d93a8b2405c183cfe0e620c0ff14235e3c2adec47227d302fce3f29e81b
   011-gpu-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gpu-operator-post/install.sh: 461aa46af62d13ebb97af6cf27b588881b401197f09479847ebfe4c9173acf51
-  011-gpu-operator-post/templates/nvidia-toolkit-hardening-aks.yaml: 84ae47c2b388fd58ed7192b053f205ecf4da572dc430db0041fd70dc5f80f724
+  011-gpu-operator-post/templates/nvidia-toolkit-hardening-aks.yaml: 4f2a6acceda50caee7d792d707f62354dbe0b2e0a43811b9aa6a956501bbd50a
   011-gpu-operator-post/values.yaml: 3914a46bdeda1ad87c309c982feca1e0c7eb9409f8da76147538757d62674606
   012-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
@@ -2535,7 +2535,7 @@ h100-aks-ubuntu-training-kubeflow:
   016-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   016-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  016-nvsentinel/values.yaml: aa27bae925e838d0ba1a1b8a9d9ce6460ccfc20cfb29d9d52d85f9d1f927f008
+  016-nvsentinel/values.yaml: 1ecefff46566fc55a81fd949bfbb304b0b3e17172fbf3e58312baa412140c28b
   017-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -2543,7 +2543,7 @@ h100-aks-ubuntu-training-kubeflow:
   README.md: b66d45a47d93329b3e5032a337517e8c023b6770711628c1ea7f6536ac7a214b
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: bae86cb70be8c2c112bd98c5a3cdf7d48cfc10330db5aa625d981b9978e03f71
-  checksums.txt: 809920cfa40e2bef87a0d829a0842f5103c3cf772d8c538394dc033c7851d16d
+  checksums.txt: 10078e8cf8bc345398f4744a17bc92ea109d3b65497eb907bafd5bb8c9e2933e
   deploy.sh: cfb12fbb4315ebaadd1378f55f81e866e9f5faaa909b57e569bab1c0ce558c0b
   recipe.yaml: 9460bed5c2e5e3aa644e077f41f93aff7e0a9824e6b937fef67b790dacebc8b2
 h100-aks-ubuntu-training-slurm:
@@ -2585,7 +2585,7 @@ h100-aks-ubuntu-training-slurm:
   009-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
   009-network-operator-post/templates/nfd-network-rule.yaml: 8ab7f572705ba9be8b0057954fbb7e918be7590e4360bee8c8fdaa1e909d08a1
   009-network-operator-post/templates/nic-cluster-policy-aks.yaml: ed3226b248994b8ab6ad69f6762fb5caba304e56fa59532586af4174524e20b4
-  009-network-operator-post/templates/nvidia-peermem-reloader.yaml: f6ae38499c16a1b97aeda3ac77774d4f6352809ee2d2838a7779df97ad1b26be
+  009-network-operator-post/templates/nvidia-peermem-reloader.yaml: bf1373f46b14b1475c6773d71f45c5383d17e496b0ef80ea2bba13db9b8b31cb
   009-network-operator-post/values.yaml: e63dfe21cdad75cb78b6b02f6f75f05eba527e3bb7cec75be2b197cd2ab0494c
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
@@ -2594,7 +2594,7 @@ h100-aks-ubuntu-training-slurm:
   011-gpu-operator-post/Chart.yaml: fdac8d93a8b2405c183cfe0e620c0ff14235e3c2adec47227d302fce3f29e81b
   011-gpu-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gpu-operator-post/install.sh: 461aa46af62d13ebb97af6cf27b588881b401197f09479847ebfe4c9173acf51
-  011-gpu-operator-post/templates/nvidia-toolkit-hardening-aks.yaml: 84ae47c2b388fd58ed7192b053f205ecf4da572dc430db0041fd70dc5f80f724
+  011-gpu-operator-post/templates/nvidia-toolkit-hardening-aks.yaml: 4f2a6acceda50caee7d792d707f62354dbe0b2e0a43811b9aa6a956501bbd50a
   011-gpu-operator-post/values.yaml: 3914a46bdeda1ad87c309c982feca1e0c7eb9409f8da76147538757d62674606
   012-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
@@ -2608,7 +2608,7 @@ h100-aks-ubuntu-training-slurm:
   014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   014-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  014-nvsentinel/values.yaml: beec1d6f08d5ceb658ea48d2a70e9fae46a7f0cb58a0e4d352501949b074e292
+  014-nvsentinel/values.yaml: 0f8310075051e1e81cf586dfc8260f1678d90b7293e1768042a70f8d64980624
   015-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -2633,7 +2633,7 @@ h100-aks-ubuntu-training-slurm:
   README.md: d0a7ae2a7e69226526d9cb4bb98dcf956ee30968cd51b9537a57b1cf81343f6d
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: 2498e26b788585fc6f080dfb23f778b1219266b9c461e20c0cb5a0d80e8ee3e2
-  checksums.txt: d250822e8c9131b73794fb8f59089f76b68c0c3a54c129a65041a1678c0d77fc
+  checksums.txt: 2e87544700192f53ca83341cb1f92f2c0fce60449bf52feb0b85d561ede9994c
   deploy.sh: 8d85df5a2b5665074cf1efa1980f5b1de87dc8be91f8c6c7ae5132aef410cabc
   recipe.yaml: db8269910c8b2ffc4b16c7bc6d13438fc19ceb945d7368484f8493c5db9b86a0
 h100-any:
@@ -2677,7 +2677,7 @@ h100-any:
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   010-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  010-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  010-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   011-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -2685,7 +2685,7 @@ h100-any:
   README.md: 2e6118c896d8fcd7ed9e67cc0117da1dfa486656efe7f0e162a41273627f3c3b
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 8d77c276b11270e6d722e589145304cba84776dcc68bfdef1155f5410567668d
-  checksums.txt: ddc130810ab3fcecc0c6f9c77fe0e513104f038cda7c8a6275cc86c8fd80f6bc
+  checksums.txt: e5c0bb83b292ce98281bb86d9038472bc8c5354c82c75fd534778de4f11bd34a
   deploy.sh: 187bf11702c83fdf08c22fbdd72a6b16c937314d87f85da747c4753cbe5d5de4
   recipe.yaml: 22bf2000d24af070f0cf780dc05d11bd1a5fd5f3e7f315f9456e5fd06e1f8f9c
 h100-bcm-ubuntu-training-kubeflow:
@@ -2743,7 +2743,7 @@ h100-bcm-ubuntu-training-kubeflow:
   013-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   013-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  013-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  013-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   014-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   014-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -2751,7 +2751,7 @@ h100-bcm-ubuntu-training-kubeflow:
   README.md: b821c5b021c196a3d17adf98c9da993977bb95478e515828ae19d3e007f170b2
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 08afd6baa4557f006cf8acc30b76fa5a9d10fe77caef86ad4138c41dfe9d77af
-  checksums.txt: da771df0e7740ca48ee8e25924b1ac952eefa02a2a597007b30da0d8fe5c9591
+  checksums.txt: 50f8735efad2138c65dd11cec771fb568d32ba1a9f827bfd9a357fcab3c3c580
   deploy.sh: cf8476042245b8769a0db57a19a57b9d874d957734fb0a778adc5e238a7988e8
   recipe.yaml: 0b64ac79782d670117a0e5d019b90483e3388801a38e28b86939f23720d63342
 h100-eks-amazonlinux-inference:
@@ -2822,7 +2822,7 @@ h100-eks-amazonlinux-inference:
   016-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   016-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  016-nvsentinel/values.yaml: 376d322d05dfab359cef13a99ded134b567f8100905a39caaf4af614efefa223
+  016-nvsentinel/values.yaml: ff4f1bd9a9d3ef62ee452144ffa4449f7c1b292d8aeffe870cae5141cea80b31
   017-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -2830,7 +2830,7 @@ h100-eks-amazonlinux-inference:
   README.md: b3ee10146087a4f040ce96d6ca661615b6beac1fc757e74e5ce2699cd7d329a9
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: c933e5b490aaec2f1285bd04def17aeb423b6feebbf62842d4fda66adc60733c
-  checksums.txt: 9c03b107e6e1a699fc46d73e26eea601ba320f09cce14dfb7e07e5a23cb46553
+  checksums.txt: 342e3bfe8b77a950004a3b07af279400135abcba2dc2b8fc89b83c0d4209d75b
   deploy.sh: 0248fabe5a8e4dbdbe60fc3f0cbf1aaab47a637402bec6eca1191fa601e8bfd6
   recipe.yaml: c8b7b04258ff04d45771cb3b942b8229564006194f4a42de698c113cac1c8381
 h100-eks-ubuntu-inference-dynamo:
@@ -2914,7 +2914,7 @@ h100-eks-ubuntu-inference-dynamo:
   019-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   019-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  019-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  019-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   020-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   020-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -2922,7 +2922,7 @@ h100-eks-ubuntu-inference-dynamo:
   README.md: 13f60a380ef1d5f8f64b32c3e620c94a05182f36042a399cc272e861d3646e69
   UPGRADING.md: c13181818215d70ba0546fcd97b33316362bbd728bedc1cebb5c720afa4fb1e5
   bundle-info.yaml: 867dcb4981f1f526743f58f05d662f5fc0a80ee767fac4464309a9d14c1da801
-  checksums.txt: 913536a8a033c3e29b14b6d46d623657f51e86b242139e8c98bf69c4bba6411e
+  checksums.txt: 472127928b25486b84596fbdaee6ffbcdb5396011147973cba3e888da0c26c86
   deploy.sh: 5463ca8ed80e72d789bfb987637d85e2d3da5e4212a6a20e52b3640465c24da1
   recipe.yaml: 3f058070820f9c070e11610266abbf82dcfb0e76228250af57a4cb0b6ca51ead
 h100-eks-ubuntu-inference-nim:
@@ -3002,7 +3002,7 @@ h100-eks-ubuntu-inference-nim:
   018-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   018-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  018-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  018-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   019-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   019-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -3010,7 +3010,7 @@ h100-eks-ubuntu-inference-nim:
   README.md: d61dfeaa2361460cfaed534bc2c21219823c8e8a5c90de131740cc7e2be4ba3d
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 0c96e57ac1d1c840927b6b2e2f646dbb9030665869ca278abcd68278bdc23f24
-  checksums.txt: 692e87d27d83e9e8331e19a6cfe20112878ee768f7d1a5c505695bdccd57f655
+  checksums.txt: 842d2cd66713bd8845e3e7eaf3a0e6d70f957cdcd86870d67d424969039182d5
   deploy.sh: 93abef48d4cfd33ed295b33a924b01bb02e810595d7dd63575ae58c29c0122be
   recipe.yaml: d4a935e91e2a995afc0b059b30f3da7dbe8335c5cad5d0c7c7421b11acc50f60
 h100-eks-ubuntu-training-kubeflow:
@@ -3076,7 +3076,7 @@ h100-eks-ubuntu-training-kubeflow:
   015-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   015-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  015-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  015-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   016-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -3084,7 +3084,7 @@ h100-eks-ubuntu-training-kubeflow:
   README.md: 31b272a67b8bdcdd88455197fc90a1c1b85ee078c7b6ae2cb525789d047b6c46
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 56b5d48ac13d8d6095a38324a349f76e32d6221b779f55bb974d8a29e630a8e4
-  checksums.txt: 563820e1f9741bb0cdee6d3184aeb7946c870f4ae3d01f805d0636de734656c9
+  checksums.txt: 2851e75c14e0c0d16e162d32d559af8867442b13833727ac4fbfb6c7e60cccd5
   deploy.sh: 949466ed3363eb59ea6ff5a61a29ca150215a2041c47323cada206dcf3cdc0a8
   recipe.yaml: ed7aba1753ebc777028943679db3cf6ab2650ecc9113678fc9c7f4b090477c0d
 h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label:
@@ -3155,7 +3155,7 @@ h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label:
   016-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   016-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  016-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  016-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   017-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -3163,7 +3163,7 @@ h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label:
   README.md: 37fa0e23995ceb5a25f76557cc63578dd57400e2f3bc743b804ed12cb8f42aae
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 9be4ed7b62ba836344dab7b0ef7e911479b7cd07cba3a42e80f731f9633f688c
-  checksums.txt: 1dcb0d0ee5d6657f3886319cfc6e5e462dd78d201f01d895305072ef6e92dd64
+  checksums.txt: 4db6e8bf89d9a286b0bf1878ab1cd8367536b4e4abdf39bbd2e11bac4cd70ea7
   deploy.sh: c8a75ff8a8aa453cd38287c76c42294ce706a2f4e04b3e157dd676789117a1ef
   recipe.yaml: 0dc17ef7aa3e26d059eef5e18d560dd8eecf6eb35a10e1e35ff8dadf9a99b737
 h100-eks-ubuntu-training-kubeflow+nktp:
@@ -3234,7 +3234,7 @@ h100-eks-ubuntu-training-kubeflow+nktp:
   016-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   016-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  016-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  016-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   017-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -3242,7 +3242,7 @@ h100-eks-ubuntu-training-kubeflow+nktp:
   README.md: dacb878ca60fa303f91697a480765cf4b857680b94842592bf85828b778f47f2
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 367761b880cd742f10f22142a56d5926f7f75e31e69aaf7f562c9bd0a94a968b
-  checksums.txt: 03cb4b63dbbe2668981a89c5e6cb199c8751a875739a06b10e00105f0fb21dc9
+  checksums.txt: 5d97d26b2dcf7edd36f656cb7f3ae00f96228ffaaa4d35ff176a8cdeeba90550
   data/overlays/stock-render-opt-in.yaml: 28518490ca46ac3ecf1b7cb220cfc55c3c4d3e3f595446b6aab9894f15f80557
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: 60bc9db84b4c9ccbacf807ab424ce27099463dbbfbca83aa07db4cf4c69bca0a
@@ -3324,7 +3324,7 @@ h100-eks-ubuntu-training-kubeflow+user-overlay-components:
   018-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   018-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  018-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  018-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   019-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   019-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -3332,7 +3332,7 @@ h100-eks-ubuntu-training-kubeflow+user-overlay-components:
   README.md: 8e736fa1ab8a662d3c2706945dec23467bfdd53fcad18970adc91ca24f2da4a0
   UPGRADING.md: 2b5c95261481624c46fb66dd44f9a32d61b2776ea85d0fc55b60144a006a28b1
   bundle-info.yaml: 08f29dff0c994738254cb447b22d27aca2f2b5730e263698e46c1f21a0263d72
-  checksums.txt: ad63af4896764e27b0fb7f5b7059eb7f7ce0356017d396510bd16fdbade7c903
+  checksums.txt: 826f575c14432c711f13089298731e60d305c6b04953fd94dcdf87eb3a44cd82
   data/overlays/stock-render-opt-in.yaml: 100a230e36a3fe11b9678bb4ad0dcd59fe8ae0a51534814dace25056bb9a2ba3
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: 71e3992efdc69f520f5e7f4c824964c1611f59ac4ea0ec4b0223025464445a44
@@ -3391,7 +3391,7 @@ h100-eks-ubuntu-training-kueue:
   013-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   013-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  013-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  013-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   014-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   014-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -3415,7 +3415,7 @@ h100-eks-ubuntu-training-kueue:
   README.md: 4dc1cb23948698bbdc92ca87fa3119d20acfa6bc154cc2f904fff7cfa3661791
   UPGRADING.md: 178b6ec387fb25c26d40fee666377c54227cb33d1b37c5b01b783607172ad725
   bundle-info.yaml: 826cb1515504c3b0b0f07d42e2ad711bf090f4ed25de3c5d02801f1aad385e17
-  checksums.txt: a76ddd35239c2f48e3f87d2744b1c6eaaca6b107b59c560fd739dec6491358a9
+  checksums.txt: ad25b98c7212cb6cf35659ec8407b5053135257b32a3242f62a1486a7863523c
   deploy.sh: be46432db13f4a3fc337d6271516f97efaad65cc61f7e21a3af308e3d56d3735
   recipe.yaml: fd59198f02a096215265016f1e1010d89f1c8dc4670387481373ab5dea6902bc
 h100-eks-ubuntu-training-slurm:
@@ -3472,7 +3472,7 @@ h100-eks-ubuntu-training-slurm:
   013-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   013-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  013-nvsentinel/values.yaml: 8d8fc8ff4f18cad5c88227aaf425e76cfe57781de040cf96cd10bb285dcbf403
+  013-nvsentinel/values.yaml: 27ef756e6ed93b26be92f9cb1c8a9edbf74a540cf2ba955c49c5b38a498a7470
   014-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   014-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -3497,7 +3497,7 @@ h100-eks-ubuntu-training-slurm:
   README.md: ae2c61731504ab435205299556933909d700e13a292aa717f8a55d02751bd59e
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 79607a2d97a5bf36b482593693c5dcf7a23e664a7e0c8a004a59421b9aad9e26
-  checksums.txt: 97f1e0278638dc4b1da4abe23ec957b83c4a09da15696bab777a9a6b7aa8908e
+  checksums.txt: df414ff7d10ce107119b7fbbb22125b07b597f33750d40dcdbec01b008f7b696
   deploy.sh: 49009b25d90dd3b0c344008506134dc39d12e4b80582b1ce3356216f7cfb871d
   recipe.yaml: 0a4da064b3a5d24146ff300e4fd8515c682efae578f710deba58a0aa1a651866
 h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
@@ -3584,7 +3584,7 @@ h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
   019-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   019-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  019-nvsentinel/values.yaml: 6bad3666efc50bd6c223bf28255beb1ce58c107c950eed82c03c761d9eb1cb0b
+  019-nvsentinel/values.yaml: c9b2472612fc17eb560f9ce7d3fd117884b6c243de341251c9bb7c7c9db80494
   020-slinky-slurm-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-slinky-slurm-operator-crds/install.sh: b763afb19a730721e43f3a5be956d4ff183eb0623c8e3c168544ad26e8fbb46f
   020-slinky-slurm-operator-crds/upstream.env: 4d0a2be7546b7bf8bc9469de1609fdaca2af94c51f77882e050878f5820e2b88
@@ -3605,7 +3605,7 @@ h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
   README.md: 54a36d9e0cba9a7ccef3eed58dadd3585a760cb7fcacb94ee41429fc69d4a4d5
   UPGRADING.md: f5f610cd1eff4c73f8be44c89f0a6855c57891df0e94e08b8ba9c2342cadd9de
   bundle-info.yaml: 8f5c51675ecb577108582e722c487d3a6c41ed32e98d44e1e0d37de95ed9fc3d
-  checksums.txt: 70cc638a67453549ac836b82c950e0f3ed76ddb2c4570bd323e2a45515a9b38e
+  checksums.txt: a842724195fe3a0b0fcb4ff419c8a6570387eb4dde103ba5d2295006a119532e
   data/overlays/stock-render-opt-in.yaml: 328e7217055d4c00c950d690a1579830a95456e9953214a1ec0803416edaaaf3
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: 03dc63942cd1283225f2d20f0651f318bbf346b29f376876204c849a1af150ea
@@ -3672,7 +3672,7 @@ h100-eks-ubuntu-training-slurm+slurm-accounting-aicr-provided:
   015-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   015-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  015-nvsentinel/values.yaml: 8d8fc8ff4f18cad5c88227aaf425e76cfe57781de040cf96cd10bb285dcbf403
+  015-nvsentinel/values.yaml: 27ef756e6ed93b26be92f9cb1c8a9edbf74a540cf2ba955c49c5b38a498a7470
   016-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -3701,7 +3701,7 @@ h100-eks-ubuntu-training-slurm+slurm-accounting-aicr-provided:
   README.md: 983a02eb5847c4c66542bb08d9c9e6ab9ea56831ea32705c3f7ef9ef0cb5d28b
   UPGRADING.md: 6b392d9aa4c3c866d9e9754e48ed42efd0a71704de06aa8c4722056ed3484e8a
   bundle-info.yaml: 153f48248aa08e2b334bf40f9d86aa7184fe3e22e0d44a8967cb269ecef12124
-  checksums.txt: 721d4e2d68678cb47dee5e8493c333a8cde169c248d38773f6c6991c8ef18c15
+  checksums.txt: e08d5a51d754759b15ec32bd7935106942681f3ead3fd5c064b93dac08608f51
   deploy.sh: 5eb3138723061d7639b956d70d9a9997a85e4d35a5924382d17db8f4e66b7b15
   recipe.yaml: fc861b4a4545373680aa1d7bc4278475ddb8f30341b91ca3947cb551fe5b59b5
 h100-gke-cos-inference-dynamo:
@@ -3791,7 +3791,7 @@ h100-gke-cos-inference-dynamo:
   020-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   020-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  020-nvsentinel/values.yaml: 7f5f9edb985771f1b7c01e5ee67edba4a2a6182b990a940a5e89601e5d589ae0
+  020-nvsentinel/values.yaml: 9b0b67e0c1165ddee6be8db9034fa6bfc06bb45269b76c09c9f34bbad2ed6bbf
   021-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   021-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   021-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -3799,7 +3799,7 @@ h100-gke-cos-inference-dynamo:
   README.md: 6bef6f0f47251aa52a96b795514590f06280f96cdad94922b228f680661e221c
   UPGRADING.md: 9193061614a8c7bc80b525a060dc92f0e873335853f7dcda37973d3c37b2381c
   bundle-info.yaml: 0897feacd0f407b1e5c32d0315555f43890b19232ecf6277090e7d58fe348e82
-  checksums.txt: 47628f0417504e1b79c1b9b0a874e67cf937afad0b194e4d60de57cc8917bb95
+  checksums.txt: c3cb9dbf0f84cb5b7a9ea812193f3aeaab40576df2ae115032a6fe3d38225c30
   deploy.sh: 34d9d6c33e26fe690cb388ba01ea383b3444fa18c63e525c83f143f5c41f613e
   recipe.yaml: 52c80288314cf7be3c99dbecb1edee422cc6f00aa5920ab3b9786001011d96b8
 h100-gke-cos-training-kubeflow:
@@ -3848,7 +3848,7 @@ h100-gke-cos-training-kubeflow:
   011-gke-nccl-tcpxo/Chart.yaml: e25a9f6fc8e192d7427cbf100d13efa1ae3670e1bdc5c67238b7a1dcf508bd98
   011-gke-nccl-tcpxo/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gke-nccl-tcpxo/install.sh: d15b387b2ff18c783039f64a3c83ef7c83594a8c749cb6fcb470e90038538626
-  011-gke-nccl-tcpxo/templates/nccl-tcpxo-installer.yaml: 4839d5f395af0a598216e335dd6f695b3afb8269326920fad410141f50fea6e6
+  011-gke-nccl-tcpxo/templates/nccl-tcpxo-installer.yaml: 33744a07295dfc45da20350f88f2a102c7918622be5f5495cb2494e365225c00
   011-gke-nccl-tcpxo/templates/nri-device-injector.yaml: df6636ec3f59af79ba1d60ef9997d99761c0c941bb82c4c7a35ea3747b9a0de6
   011-gke-nccl-tcpxo/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -3873,7 +3873,7 @@ h100-gke-cos-training-kubeflow:
   016-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   016-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  016-nvsentinel/values.yaml: 7f5f9edb985771f1b7c01e5ee67edba4a2a6182b990a940a5e89601e5d589ae0
+  016-nvsentinel/values.yaml: 9b0b67e0c1165ddee6be8db9034fa6bfc06bb45269b76c09c9f34bbad2ed6bbf
   017-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -3881,7 +3881,7 @@ h100-gke-cos-training-kubeflow:
   README.md: ade6d649b4d928db7d8e1b7d82ac81c23e39b1284601b70f98049b651e4adedf
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 22a36a45fe7859503a321506df96e8187d2f4a18ba00c90e21d3224d0475b321
-  checksums.txt: 75e6961b7c2c56271f2159b483b374e024c9da6dee729e0c157ff3fa0007665d
+  checksums.txt: e5554e28bc245272d8c7fe0d2cfebe9d6cc55cdda39555e9a931127dd1bcd065
   deploy.sh: 0f6a2c61ae21d657eacbd33dcbdb5224b6148dbd42c8182f6dd56d7d06c9be8a
   recipe.yaml: 8bb8735b1d094172a837a4109148ae8375d6e7b42e507ef1e5ff5819341ff635
 h100-gke-cos-training-kueue:
@@ -3930,7 +3930,7 @@ h100-gke-cos-training-kueue:
   011-gke-nccl-tcpxo/Chart.yaml: e25a9f6fc8e192d7427cbf100d13efa1ae3670e1bdc5c67238b7a1dcf508bd98
   011-gke-nccl-tcpxo/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gke-nccl-tcpxo/install.sh: d15b387b2ff18c783039f64a3c83ef7c83594a8c749cb6fcb470e90038538626
-  011-gke-nccl-tcpxo/templates/nccl-tcpxo-installer.yaml: 4839d5f395af0a598216e335dd6f695b3afb8269326920fad410141f50fea6e6
+  011-gke-nccl-tcpxo/templates/nccl-tcpxo-installer.yaml: 33744a07295dfc45da20350f88f2a102c7918622be5f5495cb2494e365225c00
   011-gke-nccl-tcpxo/templates/nri-device-injector.yaml: df6636ec3f59af79ba1d60ef9997d99761c0c941bb82c4c7a35ea3747b9a0de6
   011-gke-nccl-tcpxo/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -3945,7 +3945,7 @@ h100-gke-cos-training-kueue:
   014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   014-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  014-nvsentinel/values.yaml: 7f5f9edb985771f1b7c01e5ee67edba4a2a6182b990a940a5e89601e5d589ae0
+  014-nvsentinel/values.yaml: 9b0b67e0c1165ddee6be8db9034fa6bfc06bb45269b76c09c9f34bbad2ed6bbf
   015-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -3969,7 +3969,7 @@ h100-gke-cos-training-kueue:
   README.md: bca313006a7a014dd2fd05b89c2adf489b2240a72c5d68b3e626e7123617f41c
   UPGRADING.md: 178b6ec387fb25c26d40fee666377c54227cb33d1b37c5b01b783607172ad725
   bundle-info.yaml: 2a5539b04d6018801a744fb2874696eb0d63013d0f00076030bbd0d8cfdd23f7
-  checksums.txt: 869173eb4825bdf25f5dd267965d82c01cdd4540d58ab64667f252bcb097dd5e
+  checksums.txt: b37d59e3e03529a372ca7fc13b682c337c524e249adbebdb97cf26d00920ed43
   deploy.sh: 70e0b277ed17dfc69744f487905b679d1f9f3820bf647248e87f2e0e95493f8a
   recipe.yaml: b7ceedc234ee2a331637a042a793fd1787fcf751b818f62743d7b87c926b6757
 h100-gke-cos-training-slurm:
@@ -4018,7 +4018,7 @@ h100-gke-cos-training-slurm:
   011-gke-nccl-tcpxo/Chart.yaml: e25a9f6fc8e192d7427cbf100d13efa1ae3670e1bdc5c67238b7a1dcf508bd98
   011-gke-nccl-tcpxo/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gke-nccl-tcpxo/install.sh: d15b387b2ff18c783039f64a3c83ef7c83594a8c749cb6fcb470e90038538626
-  011-gke-nccl-tcpxo/templates/nccl-tcpxo-installer.yaml: 4839d5f395af0a598216e335dd6f695b3afb8269326920fad410141f50fea6e6
+  011-gke-nccl-tcpxo/templates/nccl-tcpxo-installer.yaml: 33744a07295dfc45da20350f88f2a102c7918622be5f5495cb2494e365225c00
   011-gke-nccl-tcpxo/templates/nri-device-injector.yaml: df6636ec3f59af79ba1d60ef9997d99761c0c941bb82c4c7a35ea3747b9a0de6
   011-gke-nccl-tcpxo/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -4033,7 +4033,7 @@ h100-gke-cos-training-slurm:
   014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   014-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  014-nvsentinel/values.yaml: 631c76fda879256d07d8e329e6f4582d7680e10b316444be4f7215356ca5c655
+  014-nvsentinel/values.yaml: 307f869b681c2722d272630db5457bf2048917641ecc35c5837a5b0f0bad668f
   015-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -4062,7 +4062,7 @@ h100-gke-cos-training-slurm:
   README.md: 2b032932610b978737c2c2dd5a92ac3b59afa37ede7c632e7cf79f3aa6df9e20
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: dd5aa9fa191468ce03a2f2df2d3f5dd9f74d5b59992702c4cac668a3288326f4
-  checksums.txt: e3789c1a5d5e8e1f44796c34bf26e4e9e2366fe2129e00b2ac49d210f9be9bad
+  checksums.txt: 0f78ac70e767fbe6480bf3f77464ba56fce58d007a3b22e9119e57f8d63cfe17
   deploy.sh: 3c91727718e2f0d106a7dd220171cdb28fda16113de7394a668c62fa9388a197
   recipe.yaml: fbe3d3a58e519556f5e038d3e94c6bcb322346e1af8989c88600808d4813268f
 h100-kind-inference-dynamo:
@@ -4137,7 +4137,7 @@ h100-kind-inference-dynamo:
   017-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   017-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  017-nvsentinel/values.yaml: 7dea0ee93e9c35d925e7db9120898cc8a572558823b11bc434fe95000a30c6a5
+  017-nvsentinel/values.yaml: 247e2447a9b299f94d059e99c0588a0ef0546ae36cccab51132df896fddac593
   018-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   018-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -4145,7 +4145,7 @@ h100-kind-inference-dynamo:
   README.md: 61c68728c9813201116e09e93399396a65866205bbf7ab2bc3123a11f0e94c25
   UPGRADING.md: 6cb67acfd9eb81979395397faf676cb48343ed293f73b7354d23a6b540a75a84
   bundle-info.yaml: 565b91d0c2194514b0134e32a5150ae6c63e3c9d228716f53cadd209c8c12736
-  checksums.txt: 5b49b1ceedfdadb4fcf1f6a5dd8af45faff34c7fdeb79723e48c2d13932c3952
+  checksums.txt: 3daf787cd2b963286ef356ed07d5682bc9cd0f3ede7a097c968a1252cde0cb06
   deploy.sh: fc332287efdf91cc0ea399c6b5227ed2bb2fac9577a14311a44f24646cd09ad2
   recipe.yaml: 65570d906d88a9554966c99e1ab12af1f3df630ffc46c97c625156b5feb272bd
 h100-kind-training-kubeflow:
@@ -4202,7 +4202,7 @@ h100-kind-training-kubeflow:
   013-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   013-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  013-nvsentinel/values.yaml: 7dea0ee93e9c35d925e7db9120898cc8a572558823b11bc434fe95000a30c6a5
+  013-nvsentinel/values.yaml: 247e2447a9b299f94d059e99c0588a0ef0546ae36cccab51132df896fddac593
   014-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   014-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -4210,7 +4210,7 @@ h100-kind-training-kubeflow:
   README.md: e049e01273a5320b90770aa7e41fb7f9bd61c0f73ba28c11e9e867094183bfcb
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: bac17ce36488ce569561f7a7b1de4d39107b3dd4e62796a4e218ca53cbd45bbb
-  checksums.txt: ab7df5964b01691dd0dc0f08b7faf64d09625302ecd4ab268602a10b7f6dafd6
+  checksums.txt: 9da40095e3c1f6b5bd94bcd526e01c9d1b64223af7caf23c6c18640d8aef1c8d
   deploy.sh: 585028988d2cdbd7fad24e6a6aa04e416399fb8c675ac560c1ea2cf01e76def6
   recipe.yaml: 64b3b5fa3d86b61daeddf852e245fb2ede8991ec721a2ee426da4e20ccee7422
 h100-kind-training-kueue:
@@ -4258,7 +4258,7 @@ h100-kind-training-kueue:
   011-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   011-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  011-nvsentinel/values.yaml: 7dea0ee93e9c35d925e7db9120898cc8a572558823b11bc434fe95000a30c6a5
+  011-nvsentinel/values.yaml: 247e2447a9b299f94d059e99c0588a0ef0546ae36cccab51132df896fddac593
   012-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   012-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -4282,7 +4282,7 @@ h100-kind-training-kueue:
   README.md: 33784d181ca97b704f13b253bf47fe29b7bdefe92163fc6fd8e6b062c383c977
   UPGRADING.md: 2c69c04891da4e9cd89362f5d89f599c8af9d0706c56b3becbc5c541c7020a65
   bundle-info.yaml: 6e4198900b46abdc902e0c36fd968a8c1f6ca7795c939a2e16000195dab663c8
-  checksums.txt: b17c18cde59a61ce92bee90eb33460f6592e6411e92cc88d96fba58ab7482a90
+  checksums.txt: 44051bba39d19ee2836d91a7aa5d771cdcfd0df76eeae7efe4b2d7f8370deead
   deploy.sh: 706a8d58c6b713b9376215029a49a213fc943bdecab7cd7d4ea7d7ef2d86e692
   recipe.yaml: 308d7b9d282155d2e7268a780a7893a06cda671fba0f32f15436283c557779c6
 h100-kind-training-slurm:
@@ -4330,7 +4330,7 @@ h100-kind-training-slurm:
   011-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   011-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  011-nvsentinel/values.yaml: 9c8d231e7d34f6e9f0ed152083e9cd404cb7a6316b85f7198cc89106031e0f0b
+  011-nvsentinel/values.yaml: 5aebb9320f9ead100763245e000ca091701faf172b1668ad42f579177b538fdb
   012-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   012-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -4359,7 +4359,7 @@ h100-kind-training-slurm:
   README.md: 72530a4f406a3002aba2cd10b04d2d98c8d7a720718931c1c452922c2281d32b
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: 8faa0bc5e8e89ba5c884a957787568999bceaa5df23e37b2ada0bb8c966d3a03
-  checksums.txt: 0d31c1e2841cf617c3acf6d0143253a3774ae29bb2723641ca3729b02c996131
+  checksums.txt: c4da7fb6bd89e9dd7978a98d0f8d11dff32d6653662b9690a9ce5cb790c6a830
   deploy.sh: cd7ccfe96441d0d0a17d9b7ef13f18e2938613e70854fc367a7bd8e64039019c
   recipe.yaml: a25ab925d4a28cf51f82836a4778e5410c210cdf1f4d5b41199aba7d23b0579f
 h200-any:
@@ -4403,7 +4403,7 @@ h200-any:
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   010-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  010-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  010-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   011-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -4411,7 +4411,7 @@ h200-any:
   README.md: f789ad2c753da037160d35b5616052a1fbc959ae93c8170a0fa4da40ab7c09a0
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 2fd85acbf6fdf4524c2084b91493c7a1eafbcd4872ac0fb3a268980d4486b755
-  checksums.txt: 0b431ef67de76f0287762aaf24e6dff05162d46aafb3ae91ca66252ad88e691a
+  checksums.txt: 7d43b4b0a334b762595b17aadcda21b4c0ee55aa0e7ce29799b3e447db0dc14a
   deploy.sh: 187bf11702c83fdf08c22fbdd72a6b16c937314d87f85da747c4753cbe5d5de4
   recipe.yaml: d8275e174d8cd686b01f33a5989f8716c82e89f13145182a8da3bd58ae35c3e6
 h200-eks-inference:
@@ -4487,7 +4487,7 @@ h200-eks-inference:
   017-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   017-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  017-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  017-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   018-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   018-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -4495,7 +4495,7 @@ h200-eks-inference:
   README.md: 5446713db1fa77bc8bb5d274198a75fcf1908346bb66310a789702674251e27b
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 6b520fba3a8c6a09d6aa816abf2fd4446d9c7b97c7df856ef712a9370578e330
-  checksums.txt: faa8a2ec979e2f4e6008e3d3539b458e50d7f7651a196d73570c7b63421e12d4
+  checksums.txt: a1cf9847d3de7899740bc286d8464a5e1a8bc373f601477def1c8321f3342cf6
   deploy.sh: 4dc09cb6d1d5fe7cc484477ddc854ac7156a258c39f5885eac02c2fe8b1afe54
   recipe.yaml: 907519391b7472f2b8291b9e40fef5864d4fa02443dcf49b4d162c4ae2d03c7c
 h200-eks-training-kubeflow:
@@ -4561,7 +4561,7 @@ h200-eks-training-kubeflow:
   015-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   015-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  015-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  015-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   016-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -4569,7 +4569,7 @@ h200-eks-training-kubeflow:
   README.md: c3a1652918487041e6e1ae718306162b14d3a355dd0cddb0f752f501c324514d
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: ea0f55343bb0644c3fd0a2b790845837e9b088b276e2d7cb8bd9be12081de49e
-  checksums.txt: 0cbce86aede3997d1ef3a5ceb6e9d47ccf2681fc728add0e5908980deff7c935
+  checksums.txt: 9cc8149b9c26a0cb9790931e9fb98eff8419c6d78735468f4f7e76038769eec8
   deploy.sh: 949466ed3363eb59ea6ff5a61a29ca150215a2041c47323cada206dcf3cdc0a8
   recipe.yaml: 178bf46d8f11fa887109493da22e55323edd839113a28d2865fa227e63de95dc
 h200-k0s-ubuntu-training:
@@ -4613,7 +4613,7 @@ h200-k0s-ubuntu-training:
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   010-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  010-nvsentinel/values.yaml: 376d322d05dfab359cef13a99ded134b567f8100905a39caaf4af614efefa223
+  010-nvsentinel/values.yaml: ff4f1bd9a9d3ef62ee452144ffa4449f7c1b292d8aeffe870cae5141cea80b31
   011-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -4621,7 +4621,7 @@ h200-k0s-ubuntu-training:
   README.md: 4aa2c1195b579d2cccdd2153aac9eafd97d583b1dbb442f734638e9e8fdd9117
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 0718cfa38b76531a93439b1e626325341e77d40b6036bb81ef0272e0aeccc05d
-  checksums.txt: 1bddad6f4866cf6961847d7877bfa45301e58db1e100f737b4639db6f183c2a4
+  checksums.txt: d3fe5155aa7d3de44a47979dbf24763fddbc63af08e248750011f2a7b27c6650
   deploy.sh: cc316b6457856fa5913d4da2b95e9345278177c284e554a8c45072f3aabad4bd
   recipe.yaml: 5196036d45ffd19bfffcf2d8e6760b5cf5c484c140c69167d1ffd083b2efbe21
 l40-any:
@@ -4665,7 +4665,7 @@ l40-any:
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   010-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  010-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  010-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   011-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -4673,7 +4673,7 @@ l40-any:
   README.md: b0c8cdcecb0a7dcc7da420791fad3375877983bb49f9aa144f27ad050b10a9b8
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: b25c2d27a68ecc0f3a9287c19cda8e44126b6931c23198c9570184af6dcb3c85
-  checksums.txt: da8a5c2a6cf53987b6d87116bd7f67e465d9fdf608e10822f1f4921e6bf7f610
+  checksums.txt: 8dec0a526f3dddd7f164b6e4d9f51f3df0a3e18edec58cba5c34e9b7bb69c5bc
   deploy.sh: 187bf11702c83fdf08c22fbdd72a6b16c937314d87f85da747c4753cbe5d5de4
   recipe.yaml: 0730e1a74c27d84874d16e83b6cd348747d435e12e97634961bf8abed32af2c5
 l40s-any:
@@ -4717,7 +4717,7 @@ l40s-any:
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   010-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  010-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  010-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   011-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -4725,7 +4725,7 @@ l40s-any:
   README.md: 33a1511154ceb2b7173174a5ba43e65858bd737725601dbef10e13673eae9344
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 37e1ab841203d0022985cc9bc73ff4e654bccb80253f0b168a3977ef26263172
-  checksums.txt: 89b28d709ee528c75f3597eaa4a73962ac350e2c9ca820c8bf331ad56ab1a879
+  checksums.txt: ba10f5cc9c4973991b3b3cbde739904b70a691ca6acda1a6d82ceab0dc6a7b5b
   deploy.sh: 187bf11702c83fdf08c22fbdd72a6b16c937314d87f85da747c4753cbe5d5de4
   recipe.yaml: 8190be00f55adc7de3b7ca7331e2259729d4a2a98a5372eac7172f564459b6a7
 l40s-oke-inference:
@@ -4788,7 +4788,7 @@ l40s-oke-inference:
   014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   014-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  014-nvsentinel/values.yaml: 6f417215aceac1cf2154ab9ac04a92eea2cfd631b116e2642fc8446b7cbca974
+  014-nvsentinel/values.yaml: 4208ccac81be3c795c7a866392250417f7d4e5ce655e0c19c1d6b198bf2f70aa
   015-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -4796,7 +4796,7 @@ l40s-oke-inference:
   README.md: 96cb1bb3259cdb10924d25fd589b407027a1b21db5277dd2d3b688d266e8a51a
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 3d0bcbf45e485b25ae4fe56e933cffc429d797f78023afd7d29593fb3efbbf00
-  checksums.txt: 66a88c226df684210ea65c231cfeb9da641e52b946774e102052a7899b8de931
+  checksums.txt: 537924be43523092fba0134c570ae7635a11b0e318f4ae11b51438f42e9b49c7
   deploy.sh: e576ddc4b52f43843cee5b8b516961df9e34b6566cb6df72f34d01a5f09173fe
   recipe.yaml: 387ae612286278c5ccd566d5bee628b8c26324b1d2e11ca216e8a83b6c96094d
 l40s-oke-training-kubeflow:
@@ -4858,7 +4858,7 @@ l40s-oke-training-kubeflow:
   014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   014-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  014-nvsentinel/values.yaml: 6f417215aceac1cf2154ab9ac04a92eea2cfd631b116e2642fc8446b7cbca974
+  014-nvsentinel/values.yaml: 4208ccac81be3c795c7a866392250417f7d4e5ce655e0c19c1d6b198bf2f70aa
   015-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -4866,7 +4866,7 @@ l40s-oke-training-kubeflow:
   README.md: 1b2073218fca7d1eba8f0b49a6b9f52a281a7bdd294b09a1ff8d6963ad8bb444
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: 6a0b729a78c07352bb8c46300dae6f882356cb7f73fb235805b19978dd8d0297
-  checksums.txt: e41b2b9587757807038c168f6846ea999d8ea7eaa339846bf8d5bd7951ea0f61
+  checksums.txt: 12ae587bfac6d80e5c07b234f587c21b5e9b03b49d105608f19aceeb0b18c1b1
   deploy.sh: 585028988d2cdbd7fad24e6a6aa04e416399fb8c675ac560c1ea2cf01e76def6
   recipe.yaml: 493b51f0a76689ec39f4da4ae874981205042a188d09dec7f0943f2d307cc2b8
 monitoring-hpa:
@@ -4910,7 +4910,7 @@ monitoring-hpa:
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   010-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  010-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  010-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   011-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -4918,7 +4918,7 @@ monitoring-hpa:
   README.md: e50024f76c6bb881f5820b0f811a724c00d66fe26d92167bf8379697d562f8ad
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: c508ef8146327187cf3da9a6eaeac40c6df47d610c8ba61ae576a304d103c0fe
-  checksums.txt: 201c03fca9b550d1211cc2c27f1727832b79f053770df0a6895ed61c20594aea
+  checksums.txt: 9638e91f97d5eff46dfe9a0bdd10eeb168935f2104524501a85751a72a3a1e81
   deploy.sh: 187bf11702c83fdf08c22fbdd72a6b16c937314d87f85da747c4753cbe5d5de4
   recipe.yaml: ccbb4dd03ddc75b0d38e3144fe5639e158a06231107ae93d9e2efb9b55816adc
 ocp-inference-nim:
@@ -5126,7 +5126,7 @@ rke2-sles:
   011-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   011-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  011-nvsentinel/values.yaml: 750c6f6ca9acbac9ef054da0480064e4e909e813aede75fc9392028d956e53a4
+  011-nvsentinel/values.yaml: b7653cde0af626dc5c15f1aa070e98be69ba6b7465cf36914798b58b9ab44021
   012-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   012-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -5134,7 +5134,7 @@ rke2-sles:
   README.md: 9ec2ced7bfe8ee83a75247c4043f432222cbe7d9f4ac650ec36bedd74e92313f
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: fe0581fba489f5e5e1d4228d04ea54cc1c431c05ea121113e451a4fe20dd233e
-  checksums.txt: 3d280f307440638da59f8d15593d32ea5db26e408f71d20bda904a9f48815707
+  checksums.txt: 3a2ccefa460be3d15857c82eeb275b77c4efeaf180a5c1d46ef708f81df789fb
   deploy.sh: c9b22d53d6f5d5b6964dd6bca38379e3cf7585685dc3bf07970aaa73328b885a
   recipe.yaml: 853aa181dee696ec12d84e6cb7463fed0262f17d967facf3cf1907580e1c70d9
 rtx-pro-6000-any:
@@ -5178,7 +5178,7 @@ rtx-pro-6000-any:
   010-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   010-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  010-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  010-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   011-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -5186,7 +5186,7 @@ rtx-pro-6000-any:
   README.md: 6f4ed8f86d3636fe247f5c40ab1fb4c8bacd99cc21fa3428d7ca049040c7445d
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 63703c5dade2bb59b2483bef9c16da49ae3630b33a663550dac88dac1950f9de
-  checksums.txt: f963d74c3a0003bfb06ff820875598cd2ef9044a4a08475bbc1dc411dde9216d
+  checksums.txt: d10e155239c29eef5def48379be0c7dddf1988754072b294f76e204d85f4fb9b
   deploy.sh: 187bf11702c83fdf08c22fbdd72a6b16c937314d87f85da747c4753cbe5d5de4
   recipe.yaml: 6267a30a6f63a9cbbc482968c1d76b089268c790de378768eb92bc610a0da93c
 rtx-pro-6000-eks-amazonlinux-inference:
@@ -5257,7 +5257,7 @@ rtx-pro-6000-eks-amazonlinux-inference:
   016-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   016-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  016-nvsentinel/values.yaml: 376d322d05dfab359cef13a99ded134b567f8100905a39caaf4af614efefa223
+  016-nvsentinel/values.yaml: ff4f1bd9a9d3ef62ee452144ffa4449f7c1b292d8aeffe870cae5141cea80b31
   017-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -5265,7 +5265,7 @@ rtx-pro-6000-eks-amazonlinux-inference:
   README.md: b236410a855fec25fddb0bd8964247c80a0be8c2274a8b35dacc604d6c2e894b
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: ea26c0cc29e28fd40d20aa3d5f6cf3534107334719fe07dc2f7b30c3117846ea
-  checksums.txt: c39142d02c8468637e0c7102dc82b187f7c7ec64ef43e2e3357ee10050c27350
+  checksums.txt: b9b4acf0014c0d69c6bb2b112599f68b05c87efd3c0ca56b5e5ecbed1c0806cb
   deploy.sh: 0248fabe5a8e4dbdbe60fc3f0cbf1aaab47a637402bec6eca1191fa601e8bfd6
   recipe.yaml: 1dd3b9b7fdee7f16e198c1fa564d7837305caf23bc97abca9667631f9df39023
 rtx-pro-6000-eks-ubuntu-inference-dynamo:
@@ -5349,7 +5349,7 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   019-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   019-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  019-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  019-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   020-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   020-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -5357,7 +5357,7 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   README.md: 799ed3799dea8b299bfabee1a9874ebffa09b87182a9b7eab26757de0eab673e
   UPGRADING.md: c13181818215d70ba0546fcd97b33316362bbd728bedc1cebb5c720afa4fb1e5
   bundle-info.yaml: 0f1c5a92cdac0dbac72abe0bbf32c2e30048f5ab4762c82f4a1454974987c123
-  checksums.txt: 25cb832768ce47ee82f30ffbe4626fc1658a24d778b945f42ac7fffe9ee45482
+  checksums.txt: 04632a6203f2f254eb9932c2cb3a18fcb5dc9d2dc9540167c9835dec5af19f18
   deploy.sh: 5463ca8ed80e72d789bfb987637d85e2d3da5e4212a6a20e52b3640465c24da1
   recipe.yaml: b1d59e4921c6d365349fc7c4463d74c28ed3d4a6c95cdb9f418ae3e598747e83
 rtx-pro-6000-eks-ubuntu-inference-nim:
@@ -5437,7 +5437,7 @@ rtx-pro-6000-eks-ubuntu-inference-nim:
   018-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   018-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  018-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  018-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   019-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   019-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -5445,7 +5445,7 @@ rtx-pro-6000-eks-ubuntu-inference-nim:
   README.md: 50897cb459cf0ac173aaf3dee5282c2496735ee24d8091e5ad2640d3f7701343
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 5b26b38157854ab18f1d88b80bab6fc939503507c59c1f290debdd2938c844de
-  checksums.txt: 36dcd3d7cdce2ce1fc0c8c63e6cf866327856b7fcbfd2961cf6d1b39c90fde74
+  checksums.txt: 1fc3c07f1dc057c4bfcd018ce80551a1b6de46178cb7f8d1647826c2942f7e6b
   deploy.sh: 93abef48d4cfd33ed295b33a924b01bb02e810595d7dd63575ae58c29c0122be
   recipe.yaml: 6730a43c7bccb714b571acd42829ab2cceaf12c542fa26e9ba5461d036199765
 rtx-pro-6000-eks-ubuntu-training-kubeflow:
@@ -5511,7 +5511,7 @@ rtx-pro-6000-eks-ubuntu-training-kubeflow:
   015-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   015-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  015-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  015-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   016-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -5519,7 +5519,7 @@ rtx-pro-6000-eks-ubuntu-training-kubeflow:
   README.md: 77892d23158621f62fbc6b051c529d6a614957c4b3f66d836372217525fe3cdb
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 2ec2900939209a2f5b9b53df19aa979bdd83dfb9c0e29f9e1f7f6989a14a5b40
-  checksums.txt: 1bdda5f351a22dbe5085dd16791eeaad2fc50fa448bc817b0ef5c46f7daac9bc
+  checksums.txt: be492e744c9116144e3ae313dbf5534159c959d015592f59683dce3ade079521
   deploy.sh: 949466ed3363eb59ea6ff5a61a29ca150215a2041c47323cada206dcf3cdc0a8
   recipe.yaml: 0e4975975e48fc27574178d4891036b1ef4d7659848d75931813c9d4df48a760
 rtx-pro-6000-lke-ubuntu-inference:
@@ -5582,7 +5582,7 @@ rtx-pro-6000-lke-ubuntu-inference:
   014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   014-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  014-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  014-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   015-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -5590,7 +5590,7 @@ rtx-pro-6000-lke-ubuntu-inference:
   README.md: b913f35cc997d0b6e2696b19721488ed6ab47b75abb844363dac997f1a5e269d
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: ecfa604cb06cb1975bf20df64c6744f6b89368e6f239f03dabdc7a607f6eec5d
-  checksums.txt: 10424a2c7fc6fc210c5fddccd18cf03aa10c98084674a65d91e18badf5c3cf1f
+  checksums.txt: 75f278b8dfd305e00cdea54f479008c970b1c6d11c1dd2b887c9ac0bff75ffca
   deploy.sh: 68dbbe44b809aaa9dd14281f7b43cf6c55a7006e3931b03dff27b5bcb6744ca3
   recipe.yaml: 624824b307bed965f8bab489c5187d3e86cb68b66b0feadd4688e23b4ee495f2
 rtx-pro-6000-lke-ubuntu-training-kubeflow:
@@ -5643,7 +5643,7 @@ rtx-pro-6000-lke-ubuntu-training-kubeflow:
   012-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   012-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  012-nvsentinel/values.yaml: 14400ae55936f06cc2025495b7d2efbb933e388a985abf2061b3b4fcbc36eeea
+  012-nvsentinel/values.yaml: 4a760966b77987824bf8962302a0461ee1d925c9888b18ed48f672d23605fe20
   013-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   013-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -5651,7 +5651,7 @@ rtx-pro-6000-lke-ubuntu-training-kubeflow:
   README.md: 10238ab8fa1d1e888a8261ceb44e1c6ae704c440819b1634eb9439e0898b18c0
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: caa2d3ad45f6c3cd55ed554329a2bfe916e137bf49af616196233d15ae146ea1
-  checksums.txt: 8e0481d1da557260a5b81431e6609caee88bbefa3a0ee855e01f0b25341f8f7f
+  checksums.txt: a212d8dbb517cf5ba0ba0a540bbdd127410198ffe8faf4b9a42b323d2cf7c43e
   deploy.sh: 79df4a5d6ddf25879ec925d7ba35a33815b9c929451c4cb88ed85fbe42e09b6d
   recipe.yaml: 4a739b5c9c5bcddbb04a4758fa491faa89d37109ea8225a0bc7d852d5eadd638
 vr200-rke2-ubuntu-inference-dynamo:
@@ -5733,7 +5733,7 @@ vr200-rke2-ubuntu-inference-dynamo:
   018-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   018-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  018-nvsentinel/values.yaml: 58e4b4c7078de0520cfeea044d1110e84d532aba7d4a5dd7dafba554ec65921d
+  018-nvsentinel/values.yaml: 743f9cef20535f3c3918676ab250aadc9a355f610b0e64404f5785b137c5e940
   019-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   019-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -5741,7 +5741,7 @@ vr200-rke2-ubuntu-inference-dynamo:
   README.md: 75d104843050c111e381add3c78e38f74b67a87b0884c1346649c3e055f2bb09
   UPGRADING.md: c13181818215d70ba0546fcd97b33316362bbd728bedc1cebb5c720afa4fb1e5
   bundle-info.yaml: 8fc031e56cd9bc1ef5905a82c02d7f462ba7bad02806e0cd1b9b666ee214de3e
-  checksums.txt: d2b958f2f14831c4fa1f709d5dfe00350d35835b859d33e78e91a8d4cde47698
+  checksums.txt: 2a827f6a93ab82fb42f38d4c94266329e14ace72983e2ad1640295d0961ab88d
   deploy.sh: 841a92636bb0a65da6fa0162b67084f68f362fa0e41837b1c57e6560c10a7a63
   recipe.yaml: 84798c36b7547892e3e26ed156387947af68b7a2e48e9cf4ed95e937f764a29e
 vr200-rke2-ubuntu-training-kubeflow:
@@ -5804,7 +5804,7 @@ vr200-rke2-ubuntu-training-kubeflow:
   014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   014-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  014-nvsentinel/values.yaml: 58e4b4c7078de0520cfeea044d1110e84d532aba7d4a5dd7dafba554ec65921d
+  014-nvsentinel/values.yaml: 743f9cef20535f3c3918676ab250aadc9a355f610b0e64404f5785b137c5e940
   015-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -5812,6 +5812,6 @@ vr200-rke2-ubuntu-training-kubeflow:
   README.md: 2a629792c3454bba0dd7bea9cfd0ab5d1bdae7504c5e4a609e6cc7e2689e40b9
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: c6a68f8ba0aebc27e19861620946ad1a6de73c7770ea09259078bdcd6e6a1dda
-  checksums.txt: 4c18a658a4488fb2da3a9e664ee58f693319a9b4130b531ceb14aa415b7e6011
+  checksums.txt: 45527cd216ecb89911588d366c1a811833baeb5cd91ccca6b87be1284122b68f
   deploy.sh: 50736743f1a6091c2dcb82baedfed99d4ae2f5bfe3325f7e7ab89995353f81bd
   recipe.yaml: f957a8820daeff3b8559452f246d67d9269980230727b510db1e631119548d30
