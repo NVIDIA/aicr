@@ -458,6 +458,11 @@ goes into the document itself.
 - Image source: `validators/performance/aiperf-bench.Dockerfile`
 - aiperf pin: `validators/performance/requirements.txt` (what installs) and
   the `AIPERF_VERSION` ARG in that Dockerfile (must match; Renovate moves both)
+- Transitive overrides: `validators/performance/requirements-overrides.txt`,
+  installed with `--no-deps` over aiperf's closure. Use it when a fix ships
+  only outside aiperf's declared range (pillow 13.0.0 under aiperf's
+  `pillow~=12.3.0`) and aiperf calls no API the fixed release removed; that is
+  a bump, not a VEX statement
 - Grype version pin (read from scan-action): `GrypeVersion.js` at the
   pinned scan-action SHA in the workflow
 - Workflow output format (per image, in scan-N artifact):

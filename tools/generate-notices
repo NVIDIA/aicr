@@ -56,6 +56,7 @@ PACKAGES=("./...")
 # time, where neither docker nor PyPI is available.
 PYTHON_NOTICES="${PYTHON_NOTICES:-validators/performance/licenses/python-notices.md}"
 PYTHON_REQUIREMENTS="${PYTHON_REQUIREMENTS:-validators/performance/requirements.txt}"
+PYTHON_OVERRIDES="${PYTHON_OVERRIDES:-validators/performance/requirements-overrides.txt}"
 
 if ! command -v go-licenses >/dev/null 2>&1; then
     echo "ERROR: go-licenses is not installed." >&2
@@ -95,32 +96,34 @@ fi
 # re-running 'make python-licenses' would otherwise ship an image whose
 # attributions silently describe the PREVIOUS dependency set.
 #
-# The fragment records the sha256 of the requirements file it was generated
-# from; comparing hashes catches every kind of edit (version bump, added or
-# removed package), unlike matching a single version string. Pure file
-# comparison, no network, so the existing gate enforces it for free.
-if [[ ! -f "${PYTHON_REQUIREMENTS}" ]]; then
-    echo "ERROR: ${PYTHON_REQUIREMENTS} not found — run 'make notices' from the repo root." >&2
-    exit 1
-fi
-# sha256sum is coreutils (Linux/CI); shasum is the perl one macOS ships. Accept
-# either so the gate and a developer laptop compute the same digest.
-if command -v sha256sum >/dev/null 2>&1; then
-    req_sha=$(sha256sum "${PYTHON_REQUIREMENTS}" | cut -d' ' -f1)
-elif command -v shasum >/dev/null 2>&1; then
-    req_sha=$(shasum -a 256 "${PYTHON_REQUIREMENTS}" | cut -d' ' -f1)
-else
-    echo "ERROR: neither sha256sum nor shasum is available to verify" >&2
-    echo "${PYTHON_NOTICES} against ${PYTHON_REQUIREMENTS}." >&2
-    exit 1
-fi
-if ! grep -qF "${req_sha}" "${PYTHON_NOTICES}"; then
-    echo "ERROR: ${PYTHON_NOTICES} is stale." >&2
-    echo "It was generated from a different ${PYTHON_REQUIREMENTS} than the one" >&2
-    echo "committed now (expected sha256 ${req_sha}). Re-run 'make python-licenses'" >&2
-    echo "(requires docker + network) and commit the result alongside the change." >&2
-    exit 1
-fi
+# The fragment records the sha256 of the requirements and overrides files it
+# was generated from; comparing hashes catches every kind of edit (version
+# bump, added or removed package), unlike matching a single version string.
+# Pure file comparison, no network, so the existing gate enforces it for free.
+for python_input in "${PYTHON_REQUIREMENTS}" "${PYTHON_OVERRIDES}"; do
+    if [[ ! -f "${python_input}" ]]; then
+        echo "ERROR: ${python_input} not found — run 'make notices' from the repo root." >&2
+        exit 1
+    fi
+    # sha256sum is coreutils (Linux/CI); shasum is the perl one macOS ships.
+    # Accept either so the gate and a developer laptop compute the same digest.
+    if command -v sha256sum >/dev/null 2>&1; then
+        input_sha=$(sha256sum "${python_input}" | cut -d' ' -f1)
+    elif command -v shasum >/dev/null 2>&1; then
+        input_sha=$(shasum -a 256 "${python_input}" | cut -d' ' -f1)
+    else
+        echo "ERROR: neither sha256sum nor shasum is available to verify" >&2
+        echo "${PYTHON_NOTICES} against ${python_input}." >&2
+        exit 1
+    fi
+    if ! grep -qF "${input_sha}" "${PYTHON_NOTICES}"; then
+        echo "ERROR: ${PYTHON_NOTICES} is stale." >&2
+        echo "It was generated from a different ${python_input} than the one" >&2
+        echo "committed now (expected sha256 ${input_sha}). Re-run 'make python-licenses'" >&2
+        echo "(requires network) and commit the result alongside the change." >&2
+        exit 1
+    fi
+done
 
 # Emit a code fence long enough to contain a license file verbatim.
 #

@@ -8,4 +8,7 @@
 # Bumping anything here requires re-running 'make python-licenses' and
 # 'make notices'; the notices generator fails closed if this file changes
 # without a corresponding license refresh.
+#
+# A transitive version that aiperf's own pins rule out is replaced through
+# requirements-overrides.txt, not here: pip rejects a conflicting pin.
 aiperf==0.13.0

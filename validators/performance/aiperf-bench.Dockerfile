@@ -81,6 +81,7 @@ ENV PATH="/opt/venv/bin:${PATH}"
 # installs the same file to enumerate what ships here; without a shared input it
 # would have to reconstruct this environment and could silently diverge from it.
 COPY validators/performance/requirements.txt /tmp/requirements.txt
+COPY validators/performance/requirements-overrides.txt /tmp/requirements-overrides.txt
 
 # AIPERF_VERSION now feeds only the io.aicr.aiperf.version label below, so it
 # can drift from what is actually installed. Fail the build closed instead of
@@ -93,7 +94,11 @@ RUN grep -qE "^aiperf==${AIPERF_VERSION}([[:space:]]|$)" /tmp/requirements.txt \
 # runtime needs no package installer, and pip is third-party software added on
 # top of the approved base (which carries no Python distributions), so shipping
 # it obliges us to publish its source. Nothing in the closure depends on it.
+#
+# The overrides install with --no-deps because pip cannot resolve a version
+# outside a dependency's declared range; see requirements-overrides.txt.
 RUN pip install --no-cache-dir -r /tmp/requirements.txt \
+ && pip install --no-cache-dir --no-deps -r /tmp/requirements-overrides.txt \
  && pip uninstall --yes pip
 
 # Syntax-gate the framing wrapper here, where a shell and a compiler still

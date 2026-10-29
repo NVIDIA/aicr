@@ -787,16 +787,16 @@ exists as a file, which catches a renamed or deleted page.
   changes and fails CI if it cannot complete, so a break surfaces on the
   PR that causes it instead of blocking a release at tag time.
 - **Forgetting `make python-licenses`** after editing
-  `validators/performance/requirements.txt`. The notices file also covers
+  `validators/performance/requirements.txt` or
+  `validators/performance/requirements-overrides.txt`. The notices file also covers
   the Python closure installed into the `aiperf-bench` image, but that
   closure is fetched from PyPI at image-build time and is not part of the
   Go dependency graph, so `make notices` cannot regenerate it.
   `make python-licenses`
   (needs network) refreshes the committed fragment at
   `validators/performance/licenses/python-notices.md`; `make notices`
-  then folds it in. The fragment records the sha256 of the requirements
-  file it came from, and `make notices` fails closed when that no longer
-  matches, so any edit without a refresh is caught by the same
+  then folds it in. The fragment records the sha256 of both files it came
+  from, and `make notices` fails closed when either no longer matches, so any edit without a refresh is caught by the same
   `notices-generator` job rather than shipping stale attributions.
   The generator sets a fixed platform matrix and `LC_ALL=C`, so
   `make notices` produces byte-identical output on macOS and Linux.
