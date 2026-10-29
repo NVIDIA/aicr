@@ -17,6 +17,7 @@ package upgrade
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -38,7 +39,7 @@ func (s Set) Validate(comps []Component) error {
 	for name := range s {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 
 	violations := make([]string, 0, len(names))
 	for _, name := range names {
@@ -506,20 +507,12 @@ type boundaryClaim struct {
 	from bounds
 }
 
-// checkDistinctBoundaries implements rule 8, an addition to ADR-021. A
-// boundary is identified by the floor its `to` names, so two transitions
-// sharing that floor describe the same boundary twice. ADR-021's matcher
-// blocks any jump where more than one record applies, so a duplicate silently
-// converts that boundary's crossings from manual to blocked.
-//
-// Sharing a floor is only a duplicate when the two `from` domains intersect.
-// Where they are disjoint, ADR-021's own applies predicate lets at most one of
-// them match any given source version, so the pair describes one boundary
-// reached from two different blocks rather than the same boundary twice.
-//
-// Overlapping `from` domains stay legal across *different* floors on purpose: a
-// jump spanning two real blocks must resolve to blocked, which is the ADR's
-// design.
+// checkDistinctBoundaries implements rule 8, an addition to ADR-021. It
+// returns a violation for each transition in trs whose `to` floor matches an
+// earlier one's and whose `from` domain intersects it, because the pair would
+// put two records on one path and turn the boundary blocked. Disjoint `from`
+// domains sharing a floor, and overlapping domains on different floors, are
+// legal. Unparseable ranges are skipped, since other checks report them.
 func checkDistinctBoundaries(component string, trs []Transition) []string {
 	seen := make(map[boundaryKey][]boundaryClaim, len(trs))
 	var v []string

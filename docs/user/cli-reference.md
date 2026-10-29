@@ -1692,16 +1692,16 @@ Renaming is applied by Helm as delete-and-recreate: expect a service gap, and an
 
 This axis needs a **bundle** as `--from`. A resolved recipe records `valuesFile` as a path resolved against whichever binary reads it, so comparing two recipe files would read today's values twice and see nothing move; only a bundle writes the merged result down. `--from cluster` cannot supply them either, because the cluster read recovers versions alone. When the source cannot supply them, the report says so once above the table rather than reporting that nothing moved, and `--format json` carries `objectNamesCompared: false` with `objectNamesSkipped` naming the reason. See [Upgrading a Deployed Stack](upgrading.md#when-a-components-objects-are-renamed).
 
-**The four routes to `blocked`.** A record is *crossed* when your source version sits below the boundary its `to` names and your target reaches it. That is a property of the jump alone, so a record still counts even when the jump flies straight over it:
+**The four routes to `blocked`.** A record is *crossed* when your source version sits below the boundary its `to` names and your target reaches it. The check follows the records written for your version, boundary by boundary, toward your target. Only records *on that path* decide the verdict:
 
 | Route | When | `reason` | Renders steps |
 |---|---|---|---|
-| A record describes this move and blocks it | One record is crossed and its `from` covers your source | `recorded` | yes |
-| You would skip a boundary | Some record covers your source, and either two or more records are crossed and no single one describes the whole move, or a crossed `blocked` record is not the only boundary in the way, or a crossed `blocked` record was written for a different starting point | `multiple-boundaries`, `record-blocks` | no |
-| Nothing describes your starting version | At least one record is crossed but no record's `from` covers your source, usually because you are below the lowest recorded starting point; or the one record crossed is not `blocked` and was written for a different starting point | `undefined-origin` | no |
-| Your target is past what the record assessed | One record is crossed and its `from` covers your source, but your target sits above the ceiling that record's `to` names | `beyond-record-ceiling` | no |
+| A record describes this move and blocks it | One record is on your path and its `to` holds your target | `recorded` | yes |
+| You would skip a boundary | Two or more records on your path ask something, or one of them is `blocked` | `multiple-boundaries`, `record-blocks` | no |
+| Nothing describes your starting version | No crossed record was written for your source, or your path lands where none continues | `undefined-origin` | no |
+| Your target is past what the records assessed | Your path stops at a ceiling below your target | `beyond-record-ceiling` | no |
 
-A crossed `safe` boundary does not stop a jump on its own: it carries no steps by construction, so crossing one composes nothing and skips nothing. A jump whose only *substantive* boundary is `manual` and describes the whole move reports that record rather than stopping (a crossed `blocked` record beside any other boundary still stops it, as the second row says), and so does a jump whose boundaries are all `safe`, as long as the lowest was written for your starting point and the highest reaches your target. The first row renders its record's steps, deployer-scoped, exactly as a `manual` row does: the author marked the move `blocked` and then wrote what to do instead. The other three render none, because the record that carries them describes a different move than the one you asked about. All four name a stopping point.
+`safe` records carry no steps, so they never stop a jump on their own. The first row renders its record's steps, deployer-scoped, like a `manual` row. The other three render none, because no record describes your exact move. All four name a stopping point.
 
 The fourth exists because a record vouches only as far as its own `to` ceiling. A record claiming `>=0.18.0 <0.19.0` says nothing about `0.25.0`, and letting it lend its verdict there would report eight minors as safe on the strength of a two-minor claim. Stop at the assessed ceiling and re-run, or have the record widened. This is also how a component deliberately held below a breaking release reports: its record's ceiling sits at that release, so any target above it is told to stop there and take the boundary on its own.
 

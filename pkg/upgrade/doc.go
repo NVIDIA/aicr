@@ -77,52 +77,34 @@
 // and reporting it is the point.
 //
 // On the version axis, a record is *crossed* when the source sits below the
-// floor its `to` names and the target reaches it. Crossing is a property of the
-// jump alone; `from` is not consulted, because a record whose `from` excludes
-// the source still describes a boundary the jump flies over, and skipping it
-// there is how a recorded block goes unreported. `from` answers the separate
-// question of whether that record's guidance was authored for this starting
-// point.
+// floor its `to` names and the target reaches it. ComponentResult.Crossed lists
+// every crossed record for the at-risk scan.
+//
+// The verdict follows the source's path. From the source, the matcher takes
+// the lowest-floor crossed record whose `from` covers where it stands and lands
+// on that record's `to` floor. It repeats until a `to` holds the target or no
+// crossed record covers where it stands. A record is on the path when its
+// `from` covers a version the walk stood at. Records off the path describe a
+// move this operator does not make and do not decide the verdict.
 //
 // Verdict selection runs in this order:
 //
-//	1  nothing crossed                              unknown
-//	2  one crossed, from covers the source          that record's verdict
-//	2a   ... but the target is past its to ceiling  blocked, stop at that ceiling
-//	3  no record's from covers the source           blocked, stop at the lowest
-//	4  another crossed record authored blocked      blocked, stop at its to
-//	5  two or more crossed                          blocked, stop at the lowest
-//	6  one crossed, from does not cover the source  blocked, stop at its to
+//	1  nothing crossed                                    unknown
+//	2  nothing crossed was written for the source         blocked, stop at the lowest
+//	3  one record on the path, its to holds the target    that record's verdict
+//	4  a record on the path authored blocked              blocked, stop at its to
+//	5  the path stops short, and only its one hop asks    blocked, stop at the last hop's to
+//	6  two or more records on the path, one asks          blocked, stop where the hop before lands
 //
-// Rule 2 attaches a Transition for every verdict including blocked: that
-// record describes this exact move, so its blocked verdict means "not in one
-// step" and its steps say what to do instead. Rule 5 exempts safe boundaries,
-// which carry no steps, so crossing one skips nothing: when every crossing is
-// safe, the lowest covers the source and the highest reaches the target, the
-// highest one's verdict and Transition stand, and when a single manual record
-// remains, covers the source and reaches the target, its verdict and
-// Transition stand. Otherwise rules 2a and 3 through 6 leave Transition nil,
-// so no renderer can print one record's steps for a jump that record does not
-// describe. Rule 2a is the forward-reach case: the record was authored for
-// this starting point but stops assessing before the target, and lending its
-// verdict there would vouch for releases its author cannot have read the
-// migration notes for, which is the same reach checkPinCeiling rejects at
-// authoring time. Rule 3 is the outside-every-recorded-origin case, usually
-// below the lowest `from` floor: nothing describes an upgrade from where the
-// operator is, and an opt-in check errs toward safety there. It outranks rules
-// 4 and 5 because both tell the operator to upgrade to their stop first, and
-// that hop starts from the same undescribed origin and, checked on its own,
-// lands back on rule 3. Its own StoppedAt is the lowest crossed transition's
-// `to`: the interval not to enter in one step, not a place to land. Where to
-// go is the Explanation's job: below the earliest recorded starting point it
-// names that point, and elsewhere nothing recorded is a place to send the
-// operator, so it asks for a record instead. Rule 3 asks whether any record
-// covers the source, crossed or not, because that is what keeps its sentence,
-// that no record describes an upgrade from there, true. Rule 6 is what
-// remains: the crossed record was written for a different starting point,
-// though another record covers this one. Every blocked version transition
-// names a StoppedAt, and every result carries a Reason code and an
-// Explanation sentence saying which rule it was and what to do about it.
+// Rule 3 attaches a Transition even when blocked, because that record's steps
+// describe this exact move. Safe records carry no steps, so a path that is all
+// safe, or whose one manual record covers the source and holds the target,
+// takes that record's verdict too. Every other result leaves Transition nil,
+// so no renderer prints steps for a move their record does not describe.
+//
+// StoppedAt is the interval not to enter in one step. The Explanation names a
+// landing short of it, or asks for a record when nothing recorded leads there.
+// Rule 5 blocks because the path's records never assessed the target.
 //
 // Matching takes an already validated Set and does not re-run Validate.
 // Validate is therefore not optional: a record that violates a well-formedness

@@ -19,6 +19,7 @@ import (
 	"io"
 	"strings"
 	"text/tabwriter"
+	"unicode"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
@@ -471,7 +472,7 @@ func wrapText(text string, width int) []string {
 // Only the table does this. JSON output stays faithful because encoding/json
 // already escapes these bytes, and a consumer parsing it is not a terminal.
 func safe(s string) string {
-	if strings.IndexFunc(s, isControl) < 0 {
+	if strings.IndexFunc(s, unicode.IsControl) < 0 {
 		return s
 	}
 	var b strings.Builder
@@ -484,7 +485,7 @@ func safe(s string) string {
 			b.WriteString(`\r`)
 		case r == '\t':
 			b.WriteString(`\t`)
-		case isControl(r):
+		case unicode.IsControl(r):
 			fmt.Fprintf(&b, `\x%02x`, r)
 		default:
 			b.WriteRune(r)
@@ -492,13 +493,6 @@ func safe(s string) string {
 	}
 	return b.String()
 }
-
-// isControl reports whether r is a C0 or C1 control character, or DEL. ESC
-// (0x1b) is the one that matters most: it opens every ANSI sequence.
-func isControl(r rune) bool {
-	return r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f)
-}
-
 func cell(s string) string {
 	if s == "" {
 		return "-"

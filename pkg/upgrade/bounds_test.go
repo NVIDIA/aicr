@@ -114,9 +114,9 @@ func TestParseBoundsRejected(t *testing.T) {
 	}
 }
 
-// Every parseBounds rejection must name the full constraint text it came
-// from: Task 5 aggregates these into a per-record list where an
-// unattributed message is useless.
+// TestParseBoundsErrorMessagesNameConstraint checks that every parseBounds
+// error names the full constraint, which callers surface without the record
+// around it.
 func TestParseBoundsErrorMessagesNameConstraint(t *testing.T) {
 	tests := []struct {
 		name       string

@@ -308,16 +308,8 @@ func versionsOnly(versions map[string]string) map[string]Identity {
 //
 // The two axes move independently, and only one of them is assessed by anybody.
 //
-// On the version axis a record is crossed when the source sits below the floor
-// its `to` names and the target reaches it. Verdict selection then runs in this
-// order: nothing crossed is unknown; one crossed record whose `from` covers the
-// source lends its verdict, blocked included, because it describes this exact
-// move, unless the target lands past the ceiling that record's `to` names,
-// which blocks the jump at that ceiling; any other crossed record authored
-// blocked blocks the jump; two or more crossed records block it; one crossed
-// record whose `from` does not cover the source blocks it, because nothing
-// describes an upgrade from where the operator is. Every result carries a
-// Reason and an Explanation saying which of those it was.
+// On the version axis the verdict follows the records along the source's
+// path. Every result carries a Reason and an Explanation.
 //
 // On the identity axis nothing is recorded, so nothing lends a verdict. A
 // component that moved there alone produces a ChangeIdentity row, which a
@@ -343,7 +335,7 @@ func MatchIdentities(set Set, from, to map[string]Identity) []ComponentResult {
 			names = append(names, name)
 		}
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 
 	results := make([]ComponentResult, 0, len(names))
 	for _, name := range names {
@@ -444,7 +436,7 @@ func identityChanges(from, to Identity) []IdentityChange {
 			paths = append(paths, path)
 		}
 	}
-	sort.Strings(paths)
+	slices.Sort(paths)
 	for _, path := range paths {
 		src, tgt := from.ObjectNames[path], to.ObjectNames[path]
 		if src == tgt {
@@ -654,7 +646,7 @@ func replacements(set Set, from, to map[string]Identity) (map[string]*Replaces, 
 	for name := range set {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 
 	arrivals := make(map[string]*Replaces)
 	superseded := make(map[string]bool)
@@ -722,152 +714,233 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 	r.Jump = spanBetween(src, tgt)
 	r.Breaking = breaking(src, tgt)
 
-	crossed := crossings(u, src, tgt)
+	crossed := crossings(u, pointAt(src), tgt)
 	// Recorded before the verdict is decided, because every branch below
 	// returns r and only some of them keep a record around.
 	r.Crossed = transitionsOf(crossed)
 	if len(crossed) == 0 {
 		return unmatched(u, r, tgt)
 	}
-	// One record, authored for this starting point and reaching the target:
-	// its verdict stands whatever it is. A blocked verdict here is that record
-	// saying "not in one step", and its own steps say what to do instead, so
-	// the result carries it and a renderer can show them.
-	if len(crossed) == 1 && fromCovers(crossed[0].tr, src) {
-		only := crossed[0]
-		if ceiling, past := beyondCeiling(only.tr, tgt); past {
-			// The record describes this starting point but stops assessing
-			// before the target, so lending its verdict would reach forward
-			// over ground nobody read the migration notes for. Rule 2 forbids
-			// the same reach at authoring time; this is it at match time.
-			r.Verdict = VerdictBlocked
-			r.Reason = ReasonBeyondRecordCeiling
-			r.StoppedAt = only.tr.To
-			r.Explanation = beyondCeilingExplanation(ceiling, r.To)
-			return r
-		}
-		r.Verdict = only.tr.Verdict
-		r.Transition = only.tr
-		r.Span = claimSpan(src, only.tr)
-		r.Reason = ReasonRecorded
-		r.Explanation = recordedExplanation(r, only)
-		if r.Verdict == VerdictBlocked {
-			r.StoppedAt = only.tr.To
-		}
-		return r
-	}
-	if !anyFromCovers(u, src) {
-		// Each branch below tells the operator to upgrade to its stop first,
-		// and that hop starts here, where no record describes an upgrade from;
-		// checked on its own, it lands back on this route, so the advice only
-		// defers the answer. The test is any record, crossed or not, because
-		// that is what keeps this route's "no record describes an upgrade
-		// starting from" true.
+	p := walk(u, src, tgt)
+	if len(p.onPath) == 0 {
 		r.Verdict = VerdictBlocked
 		r.Reason = ReasonUndefinedOrigin
 		r.StoppedAt = crossed[0].tr.To
 		r.Explanation = undefinedOriginExplanation(u, r, crossed, src)
 		return r
 	}
-	if blocking, ok := lowestBlocked(crossed); ok {
-		// A block reached from somewhere its author did not describe, or
-		// alongside other boundaries, stops the jump regardless: an authored
-		// blocked verdict anywhere in the way is still a block.
+	// A blocked verdict here carries the record, whose steps say what to do instead.
+	if len(p.onPath) == 1 && p.reached {
+		r = lend(r, src, p.onPath[0])
+		if r.Verdict == VerdictBlocked {
+			r.StoppedAt = r.Transition.To
+		}
+		return r
+	}
+	if blocking, ok := lowestBlocked(p.onPath); ok {
 		r.Verdict = VerdictBlocked
 		r.Reason = ReasonRecordBlocks
 		r.StoppedAt = blocking.tr.To
-		r.Explanation = fmt.Sprintf(
-			"blocked by the record covering %s: do not move from %s into %s in one step. "+
-				"Upgrade to %s first, then re-run this check",
-			blocking.floor.ver, r.From, blocking.tr.To, blocking.floor.ver)
+		r.Explanation = recordBlocksExplanation(r, p, blocking)
 		return r
 	}
-	if len(crossed) > 1 {
-		// A safe boundary asks nothing of the operator, so crossing it composes
-		// nothing and skips nothing. When it is the only thing standing beside
-		// one substantive record that does describe this jump, defer to that
-		// record rather than stopping a move whose extra boundary is "nothing
-		// to do". Reached only after the blocked checks above, so an authored
-		// block still outranks everything here.
-		// N safe boundaries compose exactly as one does: none carries steps,
-		// so there is no work to skip and no origin whose guidance could be
-		// wrong. Coverage (rule 3) is what makes the chain trustworthy, since
-		// it leaves no hole below the pin, so the only question left is
-		// whether the assessment reaches the target.
-		// crossings orders by floor, so crossed[0] is the boundary that has to
-		// own the origin while top is the one that has to reach the target.
-		// Both must hold: skipping the origin check let a jump come back safe
-		// on a lowest boundary written for some other starting point, purely
-		// because it crossed two boundaries instead of one.
-		if top, ok := everySafeCrossing(crossed); ok && fromCovers(crossed[0].tr, src) {
-			if _, past := beyondCeiling(top.tr, tgt); !past {
-				r.Verdict = VerdictSafe
-				r.Transition = top.tr
-				r.Span = claimSpan(src, top.tr)
-				r.Reason = ReasonRecorded
-				r.Explanation = recordedExplanation(r, top)
-				return r
-			}
-		}
-		if only, ok := loneSubstantive(crossed); ok && fromCovers(only.tr, src) {
-			if _, past := beyondCeiling(only.tr, tgt); !past {
-				r.Verdict = only.tr.Verdict
-				r.Transition = only.tr
-				r.Span = claimSpan(src, only.tr)
-				r.Reason = ReasonRecorded
-				r.Explanation = recordedExplanation(r, only)
-				return r
-			}
-		}
-		// Composing both records' steps would be wrong rather than merely
-		// cautious: an intermediate record's work never runs on a jump straight
-		// past it, so the report names where to stop instead.
-		r.Verdict = VerdictBlocked
-		r.Reason = ReasonMultipleBoundaries
-		r.StoppedAt = crossed[0].tr.To
-		r.Explanation = fmt.Sprintf(
-			"%s; no single record describes the whole jump. Upgrade to %s first, then re-run this check",
-			crossingPhrase(crossed), crossed[0].floor.ver)
-		return r
+	// Safe records carry no steps, so crossing one skips nothing.
+	if p.reached && everySafe(p.onPath) {
+		return lend(r, src, p.hops[len(p.hops)-1])
 	}
-
-	// The one record in the way was written for a different starting point,
-	// and the record that covers this one is not in the way. The tool is
-	// opt-in, so it errs toward safety rather than lending a verdict authored
-	// for a starting point this jump never had.
+	if only, ok := loneSubstantive(p.onPath); ok && fromCovers(only.tr, pointAt(src)) {
+		if _, past := beyondCeiling(only.tr, tgt); !past {
+			return lend(r, src, only)
+		}
+	}
+	if p.stalled() {
+		return stalledResult(u, r, p, tgt)
+	}
+	// An intermediate record's steps never run on a jump straight past it, so
+	// the report names a landing the first substantive record describes.
+	stop := p.hops[0]
+	if m, ok := firstSubstantive(p.onPath); ok {
+		if h, ok := p.hopBefore(m); ok {
+			stop = h
+		}
+	}
 	r.Verdict = VerdictBlocked
-	r.Reason = ReasonUndefinedOrigin
-	r.StoppedAt = crossed[0].tr.To
-	r.Explanation = undefinedOriginExplanation(u, r, crossed, src)
+	r.Reason = ReasonMultipleBoundaries
+	r.StoppedAt = stop.tr.To
+	r.Explanation = fmt.Sprintf(
+		"%s; no single record describes the whole jump. Upgrade to %s first, then re-run this check",
+		crossingPhrase(crossed), landingPhrase(stop))
 	return r
 }
 
-// everySafeCrossing returns the boundary nearest the target when every crossed
-// boundary is safe, so the caller can lend that verdict instead of blocking a
-// jump across boundaries that each ask nothing. crossings orders by floor, so
-// the last is the one whose ceiling has to reach the target.
-//
-// If one safe boundary composes nothing and skips nothing, N of them compose
-// nothing either: rule 4 forbids a safe record carrying steps, so there is no
-// intermediate work a jump past it could miss. Blocking such a jump names a
-// stopping point where nothing happens, which is the false-confidence
-// direction rather than the cautious one.
-//
-// This answers only "does anything ask something of the operator". The origin
-// and the ceiling are separate questions the call site still has to ask, and
-// conflating them is a mistake worth naming: a safe record carrying no steps
-// says nothing about whether the starting version was ever assessed, which is
-// what undefined-origin is about.
-func everySafeCrossing(crossed []crossing) (crossing, bool) {
+// lend returns r with the verdict, Transition and Span of c, the record that
+// describes the move.
+func lend(r ComponentResult, src *semver.Version, c crossing) ComponentResult {
+	r.Verdict = c.tr.Verdict
+	r.Transition = c.tr
+	r.Span = claimSpan(src, c.tr)
+	r.Reason = ReasonRecorded
+	r.Explanation = recordedExplanation(r, c)
+	return r
+}
+
+// stalledResult returns r blocked for a path p that stops short of tgt. The
+// reason is beyond-record-ceiling when p.ahead is empty, and undefined-origin
+// otherwise.
+func stalledResult(u *ComponentUpgrades, r ComponentResult, p path, tgt *semver.Version) ComponentResult {
+	last := p.hops[len(p.hops)-1]
+	r.Verdict = VerdictBlocked
+	if len(p.ahead) == 0 {
+		ceiling, _ := beyondCeiling(last.tr, tgt)
+		r.Reason = ReasonBeyondRecordCeiling
+		r.StoppedAt = last.tr.To
+		r.Explanation = beyondCeilingExplanation(ceiling, r.To)
+		if _, highest, ok := highestCeiling(u); ok && upperAfter(highest, ceiling) {
+			r.Explanation = pathCeilingExplanation(ceiling, r.From, r.To)
+		}
+		return r
+	}
+	r.Reason = ReasonUndefinedOrigin
+	r.StoppedAt = p.ahead[0].tr.To
+	r.Explanation = fmt.Sprintf(
+		"%s, but no record describes an upgrade starting from %s, where the records written for %s lead. "+
+			"Author a record for that starting point, then re-run this check",
+		crossingPhrase(p.ahead), landingPhrase(last), r.From)
+	return r
+}
+
+// path is the route the source's own records describe toward the target.
+type path struct {
+	// hops are the records the walk took, in order.
+	hops []crossing
+
+	// onPath is every crossed record whose `from` covers a version the walk
+	// stood at, ordered by floor.
+	onPath []crossing
+
+	// reached reports whether the last hop's `to` contains the target.
+	reached bool
+
+	// ahead holds the crossed records left when the walk stops short.
+	ahead []crossing
+}
+
+// walk returns the path u's records describe from src toward tgt.
+func walk(u *ComponentUpgrades, src, tgt *semver.Version) path {
+	var p path
+	at := pointAt(src)
+	seen := make(map[*Transition]bool)
+	// From each position, take the lowest-floor crossed record whose `from`
+	// covers it and land on its `to` floor. Every hop lands strictly above
+	// at, so the loop terminates.
+	for {
+		ahead := crossings(u, at, tgt)
+		var here []crossing
+		for _, c := range ahead {
+			if fromCovers(c.tr, at) {
+				here = append(here, c)
+			}
+		}
+		if len(here) == 0 {
+			p.ahead = ahead
+			break
+		}
+		for _, c := range here {
+			if !seen[c.tr] {
+				seen[c.tr] = true
+				p.onPath = append(p.onPath, c)
+			}
+		}
+		hop := here[0]
+		p.hops = append(p.hops, hop)
+		if _, past := beyondCeiling(hop.tr, tgt); !past {
+			p.reached = true
+			break
+		}
+		at = hop.floor
+	}
+	sort.SliceStable(p.onPath, func(i, j int) bool {
+		return lowerBefore(p.onPath[i].floor, p.onPath[j].floor)
+	})
+	return p
+}
+
+// stalled reports whether p stops short of the target with no record on it
+// asking anything except its single hop.
+func (p path) stalled() bool {
+	if p.reached {
+		return false
+	}
+	for _, c := range p.onPath {
+		if c.tr.Verdict == VerdictSafe {
+			continue
+		}
+		if len(p.hops) != 1 || c.tr != p.hops[0].tr {
+			return false
+		}
+	}
+	return true
+}
+
+// hopBefore returns the last hop h whose floor sits below c's, and ok false
+// when there is none.
+func (p path) hopBefore(c crossing) (h crossing, ok bool) {
+	for _, hop := range p.hops {
+		if !lowerBefore(hop.floor, c.floor) {
+			break
+		}
+		h, ok = hop, true
+	}
+	return h, ok
+}
+
+// recordBlocksExplanation returns the Explanation for r when the blocked
+// record b on p stops it. It names where the hop before b lands, or, when b is
+// the first hop, points at b's own steps.
+func recordBlocksExplanation(r ComponentResult, p path, b crossing) string {
+	s := fmt.Sprintf("blocked by the record covering %s: do not move from %s into %s in one step. ",
+		b.floor.ver, r.From, b.tr.To)
+	// b's own floor sits inside the interval it forbids, so it is never the
+	// landing.
+	if stop, ok := p.hopBefore(b); ok {
+		return s + fmt.Sprintf("Upgrade to %s first, then re-run this check", landingPhrase(stop))
+	}
+	return s + fmt.Sprintf("Check the move from %s to %s on its own for that record's steps, "+
+		"then re-run this check", r.From, landingPhrase(b))
+}
+
+// landingPhrase returns the version c lands on, or "a version in" c's `to`
+// range when its floor is exclusive.
+func landingPhrase(c crossing) string {
+	if c.floor.inclusive {
+		return c.floor.ver.String()
+	}
+	return "a version in " + c.tr.To
+}
+
+// everySafe reports whether crossed is non-empty and every record in it is
+// safe.
+func everySafe(crossed []crossing) bool {
 	if len(crossed) == 0 {
-		return crossing{}, false
+		return false
 	}
 	for _, c := range crossed {
 		if c.tr.Verdict != VerdictSafe {
-			return crossing{}, false
+			return false
 		}
 	}
-	return crossed[len(crossed)-1], true
+	return true
+}
+
+// firstSubstantive returns the first record c in crossed that is not safe, and
+// ok false when every one is.
+func firstSubstantive(crossed []crossing) (c crossing, ok bool) {
+	for _, x := range crossed {
+		if x.tr.Verdict != VerdictSafe {
+			return x, true
+		}
+	}
+	return crossing{}, false
 }
 
 // loneSubstantive returns the single crossed boundary that asks something of
@@ -892,16 +965,15 @@ type crossing struct {
 	floor bound
 }
 
-// crossings returns every transition the jump crosses, ordered by that floor.
-// The lowest comes first because that is the boundary a blocked jump has to
-// stop at, which declaration order does not track.
-func crossings(u *ComponentUpgrades, src, tgt *semver.Version) []crossing {
+// crossings returns every transition a jump from at to tgt crosses, ordered by
+// floor.
+func crossings(u *ComponentUpgrades, at bound, tgt *semver.Version) []crossing {
 	if u == nil {
 		return nil
 	}
 	out := make([]crossing, 0, len(u.Transitions))
 	for i := range u.Transitions {
-		floor, ok := crosses(&u.Transitions[i], src, tgt)
+		floor, ok := crosses(&u.Transitions[i], at, tgt)
 		if !ok {
 			continue
 		}
@@ -913,16 +985,13 @@ func crossings(u *ComponentUpgrades, src, tgt *semver.Version) []crossing {
 	return out
 }
 
-// crosses reports whether the jump passes the boundary a transition describes,
-// and returns the floor its `to` names.
+// crosses returns the floor t's `to` names, and ok true when a jump from at to
+// tgt passes it, which holds when at sits below the floor and tgt reaches it.
+// t's `from` is not consulted beyond parsing. Special cases are:
 //
-// Crossing is a property of the jump alone: the source sits below the floor and
-// the target reaches it. `from` is deliberately not consulted, because a record
-// whose `from` excludes the source still describes a boundary the jump flies
-// over, and skipping it there is how a recorded block goes unreported. Whether
-// that record's *guidance* was authored for this starting point is fromCovers'
-// separate question.
-func crosses(t *Transition, src, tgt *semver.Version) (bound, bool) {
+//   - an unparseable `from` or `to` crosses nothing
+//   - a `to` with no floor crosses nothing
+func crosses(t *Transition, at bound, tgt *semver.Version) (floor bound, ok bool) {
 	if _, err := parseBounds(t.From); err != nil {
 		// An unparseable `from` leaves no way to tell whose guidance this is,
 		// so the record stays inert rather than blocking every jump past it.
@@ -938,7 +1007,9 @@ func crosses(t *Transition, src, tgt *semver.Version) (bound, bool) {
 	if toRange.lower.unbounded {
 		return bound{}, false
 	}
-	if cmp := src.Compare(toRange.lower.ver); cmp > 0 || (cmp == 0 && toRange.lower.inclusive) {
+	// `from` membership is fromCovers' question. Crossing ignores it so the
+	// at-risk scan sees every boundary a jump passes.
+	if !lowerBefore(at, toRange.lower) {
 		return bound{}, false
 	}
 	cmp := tgt.Compare(toRange.lower.ver)
@@ -979,28 +1050,50 @@ func ceilingPhrase(b bound) string {
 	return "the last version below " + b.ver.String()
 }
 
-// fromCovers reports whether a transition's guidance was authored for this
-// starting point.
-func fromCovers(t *Transition, src *semver.Version) bool {
+// pointAt returns the walk position exactly on v.
+func pointAt(v *semver.Version) bound {
+	return bound{ver: v, inclusive: true}
+}
+
+// fromCovers reports whether t's `from` admits the walk position at. An
+// unparseable `from` admits nothing.
+func fromCovers(t *Transition, at bound) bool {
 	b, err := parseBounds(t.From)
 	if err != nil {
 		return false
 	}
-	return b.contains(src)
+	return admits(b, at)
 }
 
-// anyFromCovers reports whether any of the component's records, crossed or
-// not, was authored for this starting point.
-func anyFromCovers(u *ComponentUpgrades, src *semver.Version) bool {
-	if u == nil {
+// admits reports whether b holds the walk position at. A non-inclusive at
+// stands just above its version, as after landing on an exclusive floor.
+func admits(b bounds, at bound) bool {
+	if at.inclusive {
+		return b.contains(at.ver)
+	}
+	if !b.lower.unbounded && (b.lower.ver == nil || at.ver.Compare(b.lower.ver) < 0) {
 		return false
 	}
+	if !b.upper.unbounded && (b.upper.ver == nil || at.ver.Compare(b.upper.ver) >= 0) {
+		return false
+	}
+	return true
+}
+
+// leadsFrom returns the distinct `to` ranges of the records whose `from`
+// covers src.
+func leadsFrom(u *ComponentUpgrades, src *semver.Version) []string {
+	if u == nil {
+		return nil
+	}
+	var out []string
 	for i := range u.Transitions {
-		if fromCovers(&u.Transitions[i], src) {
-			return true
+		t := &u.Transitions[i]
+		if fromCovers(t, pointAt(src)) && !slices.Contains(out, t.To) {
+			out = append(out, t.To)
 		}
 	}
-	return false
+	return out
 }
 
 // lowestBlocked returns the lowest-floor crossed transition an author marked
@@ -1027,22 +1120,30 @@ func transitionsOf(crossed []crossing) []*Transition {
 	return out
 }
 
+// floorNames returns the version of each distinct floor in crossed, in order.
 func floorNames(crossed []crossing) []string {
-	names := make([]string, len(crossed))
+	names := make([]string, 0, len(crossed))
 	for i, c := range crossed {
-		names[i] = c.floor.ver.String()
+		if i > 0 && boundaryKeyOf(crossed[i-1].floor) == boundaryKeyOf(c.floor) {
+			continue
+		}
+		names = append(names, c.floor.ver.String())
 	}
 	return names
 }
 
-// crossingPhrase names the boundaries a jump crosses, as the clause the
-// multiple-boundaries and undefined-origin explanations open with.
+func boundaryKeyOf(b bound) boundaryKey {
+	return boundaryKey{ver: b.ver.String(), inclusive: b.inclusive}
+}
+
+// crossingPhrase returns the clause naming the distinct floors in crossed,
+// which must be ordered by floor.
 func crossingPhrase(crossed []crossing) string {
-	if len(crossed) == 1 {
-		return "crosses the boundary at " + crossed[0].floor.ver.String()
+	names := floorNames(crossed)
+	if len(names) == 1 {
+		return "crosses the boundary at " + names[0]
 	}
-	return fmt.Sprintf("crosses %d recorded boundaries (%s)",
-		len(crossed), strings.Join(floorNames(crossed), ", "))
+	return fmt.Sprintf("crosses %d recorded boundaries (%s)", len(names), strings.Join(names, ", "))
 }
 
 // unmatched classifies a jump that crosses no recorded boundary.
@@ -1105,6 +1206,18 @@ func beyondCeilingExplanation(ceiling bound, target string) string {
 		landing, target, landing, landing, target)
 }
 
+// pathCeilingExplanation returns the Explanation for a jump from source to
+// target whose path stops assessing at ceiling, below the component's highest
+// ceiling.
+func pathCeilingExplanation(ceiling bound, source, target string) string {
+	landing := ceilingPhrase(ceiling)
+	return fmt.Sprintf(
+		"the records along the upgrade path from %s assess only as far as %s, and %s lands past that, "+
+			"so nothing assesses this move. Upgrade no further than %s and re-run this check, or widen "+
+			"a record's `to` range to cover %s",
+		source, landing, target, landing, target)
+}
+
 // highestCeiling returns the transition whose `to` reaches furthest forward and
 // the ceiling it names. ok is false when no ceiling bounds the coverage, either
 // because a record reaches forward without limit or because none parsed.
@@ -1150,6 +1263,11 @@ func recordedExplanation(r ComponentResult, c crossing) string {
 }
 
 func undefinedOriginExplanation(u *ComponentUpgrades, r ComponentResult, crossed []crossing, src *semver.Version) string {
+	if leads := leadsFrom(u, src); len(leads) > 0 {
+		return fmt.Sprintf("%s, but the records written for %s lead only into %s, so none describes this move. "+
+			"Author a record for this move, then re-run this check",
+			crossingPhrase(crossed), r.From, strings.Join(leads, " and "))
+	}
 	s := fmt.Sprintf("%s, but no record describes an upgrade starting from %s", crossingPhrase(crossed), r.From)
 	if origin := earliestOrigin(u); origin != nil && src.Compare(origin) < 0 {
 		return fmt.Sprintf("%s; the earliest recorded starting point is %s. "+

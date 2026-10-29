@@ -80,13 +80,12 @@ func (b bounds) contains(v *semver.Version) bool {
 	return true
 }
 
-// parseBounds extracts the interval of a constraint written in the restricted
-// grammar: a single AND-group of simple comparators. Anything whose bounds are
-// ambiguous is rejected rather than approximated, because a wrong structural
-// check is worse than a rejected record. Every rejection names the full
-// constraint text, since callers (Task 5's aggregation) surface these
-// messages without the surrounding record context.
+// parseBounds returns the interval of constraint, which must be a single
+// AND-group of simple comparators. It rejects anything whose bounds are
+// ambiguous, and every error names constraint in full.
 func parseBounds(constraint string) (bounds, error) {
+	// Ambiguity is rejected rather than approximated, because a wrong
+	// structural check is worse than a rejected record.
 	if strings.Contains(constraint, "||") {
 		return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("range %q uses ||; only a single AND-group of simple comparators is allowed", constraint))

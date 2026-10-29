@@ -271,11 +271,10 @@ group is unaffected.
 ### Where your lowest `from` floor starts is a real decision
 
 A record is *crossed* when the operator's source version sits below the floor
-its `to` names and their target reaches it. That is a property of the jump, not
-of `from`: a boundary a jump flies straight over still counts, so writing
-`from: ">=2.0.0 <3.0.0"` instead of `from: "<3.0.0"` no longer hides the
-boundary from anyone starting below 2.0.0. It used to, and a `blocked` record
-written that way was invisible to exactly the jump it existed to stop.
+its `to` names and their target reaches it. A crossed record decides the
+verdict when the operator's path lands in its `from`, even if they start below
+it. A record whose `to` reaches past another record's floor vouches for every
+release in between, so only write that reach when you have read their notes.
 
 What `from` still decides is whether *your guidance* was authored for that
 starting point. So the space below your file's lowest `from` floor is not
