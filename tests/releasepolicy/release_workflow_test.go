@@ -99,11 +99,50 @@ func TestReleaseUsesSingleDigestMap(t *testing.T) {
 		t.Error("attester must receive the same digest map and candidate tag")
 	}
 
-	releaseCheckText := marshalYAML(t, mapValue(t, jobs, "release-check"))
-	for _, gate := range []string{"resolve-candidates", "image-vuln-scan", "attest"} {
-		if !strings.Contains(releaseCheckText, gate) {
+	releaseCheck := mapValue(t, jobs, "release-check")
+	gateSteps := sliceValue(t, releaseCheck, "steps")
+	gateIndex := stepIndex(gateSteps, "Check release security gates")
+	if gateIndex < 0 {
+		t.Fatal("release-check must check the release security gates")
+	}
+	gateStep, ok := gateSteps[gateIndex].(map[string]any)
+	if !ok {
+		t.Fatal("release-check's gate step is not a map")
+	}
+	gateEnv := mapValue(t, gateStep, "env")
+	gateRun := fmt.Sprint(gateStep["run"])
+	for gate, variable := range map[string]string{
+		"resolve-candidates": "RESOLVE_RESULT",
+		"image-vuln-scan":    "SCAN_RESULT",
+		"attest":             "ATTEST_RESULT",
+		"operator-candidate": "OPERATOR_CANDIDATE_RESULT",
+		"operator-scan":      "OPERATOR_SCAN_RESULT",
+	} {
+		if !containsString(stringSlice(releaseCheck["needs"]), gate) ||
+			fmt.Sprint(gateEnv[variable]) != "${{ needs."+gate+".result }}" ||
+			!strings.Contains(gateRun, `"${`+variable+`}" != "success"`) {
+
 			t.Errorf("release-check must fail closed on %s", gate)
 		}
+	}
+	// The operator publishes only after the integrity check, and the release
+	// waits for it.
+	for _, dependency := range []string{"release-check", "promote-images"} {
+		if !containsString(stringSlice(mapValue(t, jobs, "operator-publish")["needs"]), dependency) {
+			t.Errorf("operator-publish must wait for %s", dependency)
+		}
+	}
+	if !containsString(stringSlice(mapValue(t, jobs, "publish")["needs"]), "operator-publish") {
+		t.Error("publish must wait for operator-publish")
+	}
+	// The plugin binaries are scanned before release-check, so a finding
+	// stops promotion and every push.
+	candidateSteps := sliceValue(t, mapValue(t, jobs, "operator-candidate"), "steps")
+	build := stepIndex(candidateSteps, "Build the operator candidate")
+	scan := stepIndex(candidateSteps, "Malware scan the kubectl-aicr binaries")
+	upload := stepIndex(candidateSteps, "Upload the candidate")
+	if build < 0 || scan < 0 || upload < 0 || scan < build || scan > upload {
+		t.Error("operator-candidate must malware-scan the kubectl-aicr binaries after building and before uploading them")
 	}
 }
 

@@ -17,8 +17,9 @@ name: Weekly Image Vulnerability Scan
 on:
   schedule:
     # Weekly on Thursday at 6:00 AM UTC. Every run reports the full HIGH+
-    # set, carried-over findings included -- an open vulnerability keeps
-    # being reported until it is fixed or VEX-suppressed.
+    # set in its scan-* artifacts, carried-over findings included -- an open
+    # vulnerability keeps being reported until it is fixed or VEX-suppressed.
+    # The Slack message summarizes it (tools/vuln-scan-summary).
     - cron: '0 6 * * 4'
   workflow_dispatch:
     inputs:
@@ -570,6 +571,11 @@ jobs:
       # before uploading its artifact is reported instead of omitted.
       actions: read
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Download all scan results
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
@@ -600,14 +606,9 @@ jobs:
           # Aggregate critical and high counts across all images
           TOTAL_CRITICAL=0
           TOTAL_HIGH=0
-          RESULTS=""
           for f in scan-results/*.txt; do
             [[ -f "$f" ]] || continue
-            # First line: summary counts. Subsequent lines (when present):
-            # HIGH+ CVE/GHSA IDs for triage. Both flow into the Slack message.
             HEADER=$(head -1 "$f")
-            BODY=$(cat "$f")
-            RESULTS="${RESULTS}\\n• ${BODY//$'\n'/\\n  }"
             # Parse counts from the header line only so trailing ID lines
             # never contaminate the totals.
             C=$(echo "${HEADER}" | grep -oP '\d+(?= critical)' || echo 0)
@@ -638,30 +639,35 @@ jobs:
           INCOMPLETE_COUNT=0
           while IFS= read -r line; do
             [[ -n "${line}" ]] || continue
-            RESULTS="${RESULTS}\\n• ${line}"
             INCOMPLETE_COUNT=$((INCOMPLETE_COUNT + 1))
           done <<< "${INCOMPLETE}"
+
+          # One line per image with findings, naming its first five distinct
+          # advisory IDs; the clean images collapse into one line. The full
+          # lists stay in the run's scan-* artifacts.
+          RESULTS=$(tools/vuln-scan-summary scan-results <<< "${INCOMPLETE}")
 
           # Notify when critical or high vulnerabilities are found, or when
           # a scan did not complete and its image went unchecked.
           if [[ "${TOTAL_CRITICAL}" -eq 0 && "${TOTAL_HIGH}" -eq 0 && "${INCOMPLETE_COUNT}" -eq 0 ]]; then
             echo "No critical or high vulnerabilities found, skipping Slack notification"
-            echo -e "Vulnerability Scan: ${TIMESTAMP} (${SHORT_SHA})${RESULTS}"
+            printf 'Vulnerability Scan: %s (%s)\n%s\n' "${TIMESTAMP}" "${SHORT_SHA}" "${RESULTS}"
             exit 0
           fi
 
-          MESSAGE="Vulnerability Scan: ${TIMESTAMP} (${SHORT_SHA})${RESULTS}\\n<${RUN_URL}|View run>"
+          MESSAGE=$(printf 'Vulnerability Scan: %s (%s)\n%s\n<%s|Full findings in the run>' \
+            "${TIMESTAMP}" "${SHORT_SHA}" "${RESULTS}" "${RUN_URL}")
 
           # Always echo the message so the run logs carry the findings,
           # then post to Slack only when enabled for this trigger.
-          echo -e "${MESSAGE}"
+          echo "${MESSAGE}"
 
           if [[ "${POST_SLACK}" != "true" ]]; then
             echo "Slack notification disabled for this run (POST_SLACK=${POST_SLACK}); skipping post"
           elif [[ -n "${SLACK_SERVICE}" ]]; then
-            curl -sSf -X POST \
+            jq -n --arg text "${MESSAGE}" '{text: $text}' | curl -sSf -X POST \
               -H 'Content-type: application/json' \
-              --data "{\"text\":\"${MESSAGE}\"}" \
+              --data @- \
               "https://hooks.slack.com/services/${SLACK_SERVICE}"
           else
             echo "SLACK_SERVICE not set, skipping notification"

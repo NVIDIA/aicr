@@ -128,14 +128,14 @@ avoids reading stale health.
 
 | Don't | Because | Instead |
 | --- | --- | --- |
-| Edit an owned Application | The operator forces its fields back and records `FieldOwnershipOverridden`: when no rollout is in progress, or in the release's own step. Edit a release whose step is in flight and the step stays `SpecDrifted` until its action timeout fails the rollout | Change the runtime: overrides, placement, or the AICR version |
+| Edit an owned Application | With no rollout in progress, the operator forces its fields back and records `FieldOwnershipOverridden`. During a rollout, an edit of a release's source, values or destination stalls it with `InventoryDrift`, other fields are forced back in the release's own step, and an edit of the release whose step is in flight stays `SpecDrifted` until its action timeout fails the rollout | Change the runtime: overrides, placement, or the AICR version |
 | Disable automated sync on an owned Application | The operator states `enabled: true` and repairs it | `spec.suspendEngine: true` on the runtime ([operations](operations.md#pausing-versus-suspending-the-engine)) |
 | Add the resources finalizer | The admission policy then denies every operator write to that Application, and deleting it would delete the release's resources | Remove a component through the plan; the operator adds the finalizer only for an approved `Remove` step |
 | Delete an owned Application to remove a component | Its resources stay, and the operator writes it again | Remove the component from the recipe or plan |
 | Manage these Applications from another tool (an app-of-apps, an ApplicationSet, Flux) | Two writers fight over the same objects | Leave them to the operator |
 | Create an Application with a release's name yourself | It is foreign: the operator never writes or deletes it, and the rollout that reaches that release fails (`ForeignObject`) | Use another name |
 | Delete the `aicr` AppProject | Every owned Application references it | `helm upgrade` recreates it |
-| Add fields to a component's resources by hand (an env var on a Deployment, a label) | With server-side apply, Argo CD compares and self-heals only the fields its manifests set, so an added field stays, `Synced` and `Healthy`, and nothing reverts it. Fields the manifests set are reverted. Found on the GKE lane, 2026-10-28 | Change the component through the runtime's overrides; to undo an addition, remove the field by hand |
+| Add fields to a component's resources by hand (an env var on a Deployment, a label) | With server-side apply, Argo CD compares and self-heals only the fields its manifests set, so an added field stays, `Synced` and `Healthy`, and nothing reverts it. Fields the manifests set are reverted. | Change the component through the runtime's overrides; to undo an addition, remove the field by hand |
 
 Argo CD rolls nothing back on its own, and neither does the operator: a failed
 release stays where it failed until a new rollout moves it.

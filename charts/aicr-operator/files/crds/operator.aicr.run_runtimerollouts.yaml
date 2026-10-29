@@ -215,6 +215,12 @@ spec:
                       description: Revision is the engine's observed revision.
                       maxLength: 256
                       type: string
+                    specDigest:
+                      description: |-
+                        SpecDigest fingerprints the object's source, values and destination.
+                        Entries recorded without it are not compared on spec.
+                      maxLength: 71
+                      type: string
                     uid:
                       maxLength: 36
                       type: string
@@ -480,6 +486,12 @@ spec:
                       maxLength: 53
                       type: string
                     revision:
+                      maxLength: 71
+                      type: string
+                    specDigest:
+                      description: |-
+                        SpecDigest fingerprints the spec this rollout wrote, recorded when
+                        the release became ready.
                       maxLength: 71
                       type: string
                     state:

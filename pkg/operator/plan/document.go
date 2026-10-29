@@ -111,12 +111,26 @@ type Provenance struct {
 }
 
 // Recipe identifies the AICR recipe a resolved plan was rendered from.
-// Rebuilt plans have none.
+// Rebuilt plans have none. ConfigMapRef is the recipe Job's output, which
+// upgrade-check and reproduce read; ValidationConfigMapRef is the recipe
+// the bundle records after AICR filtered it by the render flags, which
+// deployment validation reads. Plans written before it was recorded have
+// no ValidationConfigMapRef. Neither ref is part of the plan's digest.
 type Recipe struct {
-	Name         string            `json:"name"`
-	Criteria     map[string]string `json:"criteria,omitempty"`
-	ConfigMapRef DigestedRef       `json:"configMapRef"`
-	Warnings     []string          `json:"warnings,omitempty"`
+	Name                   string            `json:"name"`
+	Criteria               map[string]string `json:"criteria,omitempty"`
+	ConfigMapRef           DigestedRef       `json:"configMapRef"`
+	ValidationConfigMapRef *DigestedRef      `json:"validationConfigMapRef,omitempty"`
+	Warnings               []string          `json:"warnings,omitempty"`
+}
+
+// Validation is the recipe deployment validation runs against: the
+// bundle's, or the render recipe for a plan that records none.
+func (r *Recipe) Validation() DigestedRef {
+	if r.ValidationConfigMapRef != nil {
+		return *r.ValidationConfigMapRef
+	}
+	return r.ConfigMapRef
 }
 
 // DigestedRef names a ConfigMap and the digest of its content.

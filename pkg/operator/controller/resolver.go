@@ -418,7 +418,11 @@ func (r *ResolverReconciler) persist(ctx context.Context, rt *v1alpha1.ClusterRu
 			return "", err
 		}
 	}
-	for _, c := range append([]*plan.Content{recipeContent}, built.Values...) {
+	contents := append([]*plan.Content{recipeContent}, built.Values...)
+	if built.ValidationRecipe != nil {
+		contents = append(contents, built.ValidationRecipe)
+	}
+	for _, c := range contents {
 		content, cmErr := c.ConfigMap(r.Config.OperatorNamespace, rt.Name, string(rt.UID), nil)
 		if cmErr != nil {
 			return "", cmErr
