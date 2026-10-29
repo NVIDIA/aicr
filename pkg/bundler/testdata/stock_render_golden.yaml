@@ -206,7 +206,7 @@ a100-eks-ubuntu-training-kubeflow:
   014-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   014-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  014-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  014-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   015-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   015-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -222,10 +222,10 @@ a100-eks-ubuntu-training-kubeflow:
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 92f2a983b846a5cdaf617c9ecfdb36b38e60a31347a0ff10e97372108945450b
   UPGRADING.md: c6eb73c8e6064f76b3e32a7bc3acea88f73318e38e88674223ba6fa65da14d48
-  bundle-info.yaml: f22c0427ebed956c221e1441a9309d173290cfa2657067c0d5c9a9f268632915
-  checksums.txt: 4861acbdf4fc60c3b7ae548f9acc15829879ecf6e7e30071d12960425d6ba3da
+  bundle-info.yaml: 9125499eae7230a9c94bde392d9d2196be85cde005ff8ac98efae8d7df4eb51d
+  checksums.txt: 8e40dd036477e39b0258b5904fcca91d1a3106d82b81d33a0cc9dcd9520d34da
   deploy.sh: 808bf3632cd336bcb1e82e37fe9c555488e2194ef545153e5b4e4490df415a25
-  recipe.yaml: 0fa66f227e27980224916b5c20667948dfc5335efc61c7757c39bafdcbdb5c22
+  recipe.yaml: d38790c4003a4c26bab02e9b4773e885e4270aa9af6960cf2641520c4411853f
 a100-gke-cos-training-kubeflow:
   001-gcp-driver-installer/Chart.yaml: b0476226ebbc9a7738c4e5c2828ce5a73dbd371f3fa7cf1139c5fe9b2e825c02
   001-gcp-driver-installer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -851,7 +851,7 @@ eks-ubuntu:
   011-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   011-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  011-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  011-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   012-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   012-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -867,10 +867,10 @@ eks-ubuntu:
   014-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 626d44718ad4b45a230cc1f58dec0dd6ef81a3f27fdf1662da6f949910e822b5
   UPGRADING.md: c6eb73c8e6064f76b3e32a7bc3acea88f73318e38e88674223ba6fa65da14d48
-  bundle-info.yaml: 6c964e6452ad0e2d6f0d240b0fa56716f005bfa218a2a3e816a1b34f9fbcb8e3
-  checksums.txt: 3f42d32ff2191d28e3d9615872370da1fb3338222c4918c9ba20965ce83894fc
+  bundle-info.yaml: a5a959730d788b572ffdf2002ba352abd47ad4afc9ea5a22cb8885b2cd572752
+  checksums.txt: c10a2ba955ea1cb72a1d685510e2f6bc3c6799feef8a7667320eebdea69a3258
   deploy.sh: 3bdbe1984d42bb9094016f5f41e636ed95c85b649c3682abe135c94827ac9dc8
-  recipe.yaml: 128f2597a05c97df72e776050650de801c7ac858a68b3181f9f65be54ce2443b
+  recipe.yaml: 006f29b2ddd3d3ec64e4d13c7bc6c14f3fe2582de35b8285b548fc935465f6c8
 gb200-any:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -997,7 +997,7 @@ gb200-eks-amazonlinux-inference:
   016-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   016-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  016-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  016-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   017-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   017-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -1013,10 +1013,10 @@ gb200-eks-amazonlinux-inference:
   019-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: e67dab20c2239f89187f51bc9997ffed30b669db64876a6d6622298e0743fe34
   UPGRADING.md: c6eb73c8e6064f76b3e32a7bc3acea88f73318e38e88674223ba6fa65da14d48
-  bundle-info.yaml: dcafd6cf9cb48855c72a24a06fd200854c1f62d933cb438a7b72d598eefc9e60
-  checksums.txt: 7a6ba079667b0fdf22186dfd7acb2fa5a287e50d8caadd2975e2893e268d7fb6
+  bundle-info.yaml: 4f316baecbc4a7f6b808e9f5e3cfefc4be4b00b6cc3a789f3dabf89582497514
+  checksums.txt: a8c61f805a2d403f1dfe28fc900c2f458d32ef854b659ed873c8375496aa8c0d
   deploy.sh: 3d1a3a9604bfaadf9bd91c90752314a594391ad654d671403d8da82b36868def
-  recipe.yaml: 813f62e45c54f0a1496d2b8c929e1c073437d6beb1cb9e54c18b818179322b66
+  recipe.yaml: b6d44464d31756e1bd930f06ed32181e380dc7fa841f5ea0fc0b966eb5063ddb
 gb200-eks-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
@@ -1099,7 +1099,7 @@ gb200-eks-ubuntu-inference-dynamo:
   019-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   019-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  019-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  019-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   020-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   020-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -1115,10 +1115,10 @@ gb200-eks-ubuntu-inference-dynamo:
   022-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 2093f59d580e740ec3bfcebaf366a781d1834316dc112542ebd938a30e79cb6f
   UPGRADING.md: db296d4e30c9634a81ef585d707943ee057fbb19c319b37417ed4c3cc6f6e485
-  bundle-info.yaml: 72e110ab48f6880820aa7cb502bdf4fb6f09528aa2abf4b6cb2e4a421090b392
-  checksums.txt: 8e1b3da208a81d4b75dabe694622b75fd6aaba7cacfdb110608a597f1bf41ab7
+  bundle-info.yaml: bd9cb507842d5fdb14fef34328ad97d1b2fca62f5ed0061e5cffe5131fe4b9ed
+  checksums.txt: 7fed79ad2be107b3d9efe81cbca25fbad02537d88db1ac98d8b47244849fa697
   deploy.sh: 5cb6189767626d1ade33ebc2726965dd3bf85d5eb4a796df973716a11f77f705
-  recipe.yaml: 79283bc082f71dcb5231a73cf56245b9588f39fc4e674fafaaffc9498a512110
+  recipe.yaml: 0a4b9f061cb15c646a74759e87ddf66ace1c17d9e65393b82fd910d5d511ebe4
 gb200-eks-ubuntu-training-kubeflow:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -1183,7 +1183,7 @@ gb200-eks-ubuntu-training-kubeflow:
   015-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   015-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  015-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  015-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   016-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   016-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -1199,10 +1199,10 @@ gb200-eks-ubuntu-training-kubeflow:
   018-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 47d7e263a6b8d8870df20cd95100d01935991f8f9d3d0a01ed0eb0664e2366a8
   UPGRADING.md: c6eb73c8e6064f76b3e32a7bc3acea88f73318e38e88674223ba6fa65da14d48
-  bundle-info.yaml: 9d1f1ad2d62a72f03205601993da47f614a787e00f025ec11d32fc7aa5707aa8
-  checksums.txt: 4fce34913f54c0df2aa73f13bc0b94c13e3dc7d5e79fb8be0ca955d054d0cf12
+  bundle-info.yaml: 0a77a4e6acccb19425baf1ee90e1741b07658ff0fc88610e463a961d87f8e76f
+  checksums.txt: e67e076e9dd9ba852223397699cdbb83f7555814086c67b609b106252f896b30
   deploy.sh: 808bf3632cd336bcb1e82e37fe9c555488e2194ef545153e5b4e4490df415a25
-  recipe.yaml: b4752982a0f24499951bc65d8c6552cac2ad0bc77f6ff8251bc90c5af7e1bdcf
+  recipe.yaml: 8bda5c7bc1ec93fda9d7fd461f07281066c88363f2d4109b898279cd0b7a22e3
 gb200-eks-ubuntu-training-slurm:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -1258,7 +1258,7 @@ gb200-eks-ubuntu-training-slurm:
   013-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   013-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  013-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  013-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   014-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   014-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -1292,10 +1292,10 @@ gb200-eks-ubuntu-training-slurm:
   020-slinky-slurm/values.yaml: 3a2dd1888df27899c573b67f06a75fc8eff8cb4ae9f0efd681c0fa09b57c0117
   README.md: 8ae2262cc7ca53796b2dc81de2ee995d2d12a905e3c3a2cc3665d3192ac66e61
   UPGRADING.md: c6eb73c8e6064f76b3e32a7bc3acea88f73318e38e88674223ba6fa65da14d48
-  bundle-info.yaml: a4b448ec43226b58b3aab2a379cfae1c3491dfc255ac254cb389cda8741299a0
-  checksums.txt: cb9ac0d03014fc6ee2881bd21c56a8a3201a8cf0f512bbb898010e2e23bac532
+  bundle-info.yaml: cd3d512bbcf332574b6b5347bdf72514e2f4629995faee54ce41893dfac1c207
+  checksums.txt: 805eb83c92f7ae2e2f1fb396caa1178f48f670183f5f6cb076147144c9c1cfd7
   deploy.sh: a48728ddb64a4f2b0506394abc5a3ec777445e5efe57bbbb1f98d1c8a43ee303
-  recipe.yaml: 5fe08c0d7d96ccf209f3178398e239d47cd438b58d2fabc2e17636364c6777ba
+  recipe.yaml: e856b9c78370fe536af4b5e8d4cc92adb2012cde5ab486d773a62a938b89c5de
 gb200-gke-cos-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
@@ -2061,7 +2061,7 @@ gb300-eks-amazonlinux-inference:
   016-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   016-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  016-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  016-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   017-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   017-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -2077,10 +2077,10 @@ gb300-eks-amazonlinux-inference:
   019-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 171e828420b9b343e6b3af0832e1746f7b3d229eac3703dcfa49d2b75e075f5e
   UPGRADING.md: c6eb73c8e6064f76b3e32a7bc3acea88f73318e38e88674223ba6fa65da14d48
-  bundle-info.yaml: 6ebf3ab58f57785512523f300f9224c847e3ded3eb2282026aaaec67b675b32a
-  checksums.txt: cd36736ea5a13e7ecf2cebe75a0396445996dcd476b3a23791e982cb8860a6ff
+  bundle-info.yaml: 5e5d439f72548b26847984d0317d60b9f54543521d139651263021d854de1713
+  checksums.txt: ae0707c2d83f103713e488bee994796b66952a3cde265db3f7f0e39fadfef3f5
   deploy.sh: 3d1a3a9604bfaadf9bd91c90752314a594391ad654d671403d8da82b36868def
-  recipe.yaml: 2d2fd947778d3e02defee95283a1c42de15940041fa811422fdd8ebd8380a84a
+  recipe.yaml: 88bf55abb10b4d9a35bb3182b69f449e128cfdc981d8d49a1367f7e75c974caf
 gb300-eks-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
@@ -2163,7 +2163,7 @@ gb300-eks-ubuntu-inference-dynamo:
   019-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   019-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  019-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  019-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   020-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   020-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -2179,10 +2179,10 @@ gb300-eks-ubuntu-inference-dynamo:
   022-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: c36f7767491f0a7f10044f627cbf123b7ed39ed274ae002c91bfd93f4d65e6a2
   UPGRADING.md: db296d4e30c9634a81ef585d707943ee057fbb19c319b37417ed4c3cc6f6e485
-  bundle-info.yaml: 369c10cbd13009546f04912605340a32f10eb405b83de3540cae01c5814c1917
-  checksums.txt: 5784f1125544a432f22f6b12da4d87968847c039e77b008f55fdd30f057695cc
+  bundle-info.yaml: 703f32dcef977b7531870a5a24ba38a5a8d3fc0eb56c01e8ed202cb49cc4a49c
+  checksums.txt: 2ddb2db3441b3e4573aec41372312e07f46507f1e8f28404b20be8ff8aa7d354
   deploy.sh: 5cb6189767626d1ade33ebc2726965dd3bf85d5eb4a796df973716a11f77f705
-  recipe.yaml: 5080d4531e3005b08a0b8e2064565dccd0df059afb549549d1bcce501c604064
+  recipe.yaml: 8453b162eba775dabcde20a9360a3f0544c06f3512e87de20ec0913f8104dd40
 gb300-eks-ubuntu-training-kubeflow:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -2247,7 +2247,7 @@ gb300-eks-ubuntu-training-kubeflow:
   015-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   015-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  015-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  015-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   016-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   016-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -2263,10 +2263,10 @@ gb300-eks-ubuntu-training-kubeflow:
   018-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 0ee4f76e06253cad95ffbc36f13f6a03d6685a186e57ac16dbe37b12617e5494
   UPGRADING.md: c6eb73c8e6064f76b3e32a7bc3acea88f73318e38e88674223ba6fa65da14d48
-  bundle-info.yaml: 43123f9cee5a3ebf96c38ae81c8b907ab18d3ba2c6459873249de2d2afc9b617
-  checksums.txt: e74f1b6283cb9de60f7f4477f30721617740afe24843d77667ab8d66a416fe2e
+  bundle-info.yaml: 78f110410d787edf120cb93ee524242453f2e2b89ba55df217852aab439dbd2e
+  checksums.txt: 77b34fb01006e7d594b1e9b44d26f712cfaf2c742da9b74a58eb26c62d5a709c
   deploy.sh: 808bf3632cd336bcb1e82e37fe9c555488e2194ef545153e5b4e4490df415a25
-  recipe.yaml: d4a95d7d604f0739c4842fa0fe21442dd63ff219af2595a691fde983ca4b4a07
+  recipe.yaml: cd3176eadf27fb60101e1af968d02e41a7e1284676e3ab7c47e9f45ee1d9b85e
 gb300-eks-ubuntu-training-slurm:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -2322,7 +2322,7 @@ gb300-eks-ubuntu-training-slurm:
   013-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   013-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  013-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  013-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   014-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   014-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -2356,10 +2356,10 @@ gb300-eks-ubuntu-training-slurm:
   020-slinky-slurm/values.yaml: 7156ebcc98d8c91ea1f3792ccbf7c21dfc612ad2652909d3d626f5499e4eb16f
   README.md: 4e023c91cd8d2d0ff158521dde3bbc08a81687e4ef9726383f4528747a6f1eb9
   UPGRADING.md: c6eb73c8e6064f76b3e32a7bc3acea88f73318e38e88674223ba6fa65da14d48
-  bundle-info.yaml: b6721e8e7cc9a1ca39d7b39ff695c460da3f046654afafeeb40bdc23f44c9c2e
-  checksums.txt: 180d1ecf7eb1c9814a89ab921a8623233f93f8a4ce2a41224ce1e9454058f7f2
+  bundle-info.yaml: 45fde7d7f73a512ffa36c779b7ecccd0cd72b8c0543579a1ca226c3d327c7f34
+  checksums.txt: 36c720e57bdb73de9e716993c9b0a17c18db809741515e3a1bbbaff1ea56975b
   deploy.sh: a48728ddb64a4f2b0506394abc5a3ec777445e5efe57bbbb1f98d1c8a43ee303
-  recipe.yaml: ef51cc66775987028c87a3511788403a985cfb0e3df1a283bda19975586c3f8b
+  recipe.yaml: f930d3573b1f72bbf40f32d7adb58794ec2a11dc9db8a0564afc32115fe080fc
 gb300-generic-ubuntu-training:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -3335,7 +3335,7 @@ h100-eks-amazonlinux-inference:
   015-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   015-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  015-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  015-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   016-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   016-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -3351,10 +3351,10 @@ h100-eks-amazonlinux-inference:
   018-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 95bf9d34cf9650de6b968b5e44752abd2cb73689b021b88a918fcb65cb77e44a
   UPGRADING.md: c6eb73c8e6064f76b3e32a7bc3acea88f73318e38e88674223ba6fa65da14d48
-  bundle-info.yaml: e6110f5b670df95627b1561bfda5905e113c768c47923860b63089dc4e8f7e2e
-  checksums.txt: 89d8054a3fa1e2ed228b2b47c459e9d22cb2a8e28a8c1b03319c4fa3f40c762d
+  bundle-info.yaml: 0849f3b91ee2d3239aa965f66c0711d7f84f84669302c2c26d5d504b59827f55
+  checksums.txt: 6554efe6d992a04aed0ae841eb9589935f3c4a14deb50e175d8bc904431c0395
   deploy.sh: 3d1a3a9604bfaadf9bd91c90752314a594391ad654d671403d8da82b36868def
-  recipe.yaml: 3c7d5fa605a986c785052d9628b57e45a20c7c1e8b7b1ddb1c352d700c314080
+  recipe.yaml: 91b5900f201cbf9f83f5aebd0addb17076d925dade5705d36d8e2f17538cb9ec
 h100-eks-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
@@ -3432,7 +3432,7 @@ h100-eks-ubuntu-inference-dynamo:
   018-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   018-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  018-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  018-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   019-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   019-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -3448,10 +3448,10 @@ h100-eks-ubuntu-inference-dynamo:
   021-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 3253cc69157a37350a7cb428478331187ebd338018d232511d79eae6382d8f05
   UPGRADING.md: db296d4e30c9634a81ef585d707943ee057fbb19c319b37417ed4c3cc6f6e485
-  bundle-info.yaml: 08dfaba3748f1b3aeb49efc0c76cac9c309689b78002c9ba5861da02513bd02e
-  checksums.txt: 727922ae34906b0940300d9d66005f0077cd0fc6053026e27ccf880409a6322f
+  bundle-info.yaml: 0192853ea60ccd2af55dcc9841e8ad12ca6484ffabb949a525ec66523c659c16
+  checksums.txt: 4976ee12758bcaf493afef17c09c67080d005de068287b2e9282cfe52f1a70f1
   deploy.sh: 5cb6189767626d1ade33ebc2726965dd3bf85d5eb4a796df973716a11f77f705
-  recipe.yaml: 56dd492b71f34941c8fd0e3ebf05d58855ba289d547ab9535b17dd1249f004d5
+  recipe.yaml: 48d8051151c324ca9e7c5b687a93a677b0c15bc72b19b3191ff4d97b1495b7c6
 h100-eks-ubuntu-inference-nim:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
@@ -3525,7 +3525,7 @@ h100-eks-ubuntu-inference-nim:
   017-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   017-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  017-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  017-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   018-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   018-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -3541,10 +3541,10 @@ h100-eks-ubuntu-inference-nim:
   020-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: e517b2f480c6c8a373edc44d6134a85649f66eb388275a58be58a492161d6f1f
   UPGRADING.md: c6eb73c8e6064f76b3e32a7bc3acea88f73318e38e88674223ba6fa65da14d48
-  bundle-info.yaml: 8e6954d633bf9de50a7435badf7a460320c911691e9db6896de4558db08a9094
-  checksums.txt: 02c5840d18c3b3b731a27d74e2c742b661749b96b10b16c3446e364903c8a8e1
+  bundle-info.yaml: b314c8e5f97b3f979cb58a41734fc86526e73b9f0f17b0f902bf7ca248cab6d9
+  checksums.txt: f989db0f910e70bc24d0c60366cd048ae12af2712b3ef8dffc1ce778411ccc35
   deploy.sh: a81b07fb31958892348737540f086f83c5371d9de09134b9a9cb85c49a3bf48c
-  recipe.yaml: 3c18aad32911c3583e22625b561b0041c084534f73901073981c662ce6ed1e12
+  recipe.yaml: 079576fb59dd85cf763238f175d780b368b18856dfe301f5ef19537c2a42ed1c
 h100-eks-ubuntu-training-kubeflow:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -3604,7 +3604,7 @@ h100-eks-ubuntu-training-kubeflow:
   014-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   014-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  014-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  014-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   015-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   015-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -3620,10 +3620,10 @@ h100-eks-ubuntu-training-kubeflow:
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: d933e18b660e16e3de00e17e80f02eb437e06e265016069f282969c2736c6bfb
   UPGRADING.md: c6eb73c8e6064f76b3e32a7bc3acea88f73318e38e88674223ba6fa65da14d48
-  bundle-info.yaml: 2dc9a1a001e8567a69532a569c5dddc166d109233c3f98ea738a507daf11cbe6
-  checksums.txt: 23806ee6874db6b2198bf02b083a80b8c54a5749c4d5cabcfa36d2969604e037
+  bundle-info.yaml: 91bc55f1907f3d8d15361377532a34512ccb2472396faf46eaf399afb3d9c771
+  checksums.txt: 7cd15ad35296fd303f1efc7e7e83b7de69e5e06d627cb19cdd058e1e05b3d955
   deploy.sh: 808bf3632cd336bcb1e82e37fe9c555488e2194ef545153e5b4e4490df415a25
-  recipe.yaml: 488ffa19bde4bd79a9940fe824fc620b483d06b8f359ec6b68febfa0363e88d7
+  recipe.yaml: 27856d5730b7aa3a00160507d6809b4452eeb13a28209e0b49dcadf5e0849835
 h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -3688,7 +3688,7 @@ h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label:
   015-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   015-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  015-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  015-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   016-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   016-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -3704,10 +3704,10 @@ h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label:
   018-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 045bfe966753e9c76834fba1c0d06aefbb5242ef9314b69508758efa9ce3ffdd
   UPGRADING.md: c6eb73c8e6064f76b3e32a7bc3acea88f73318e38e88674223ba6fa65da14d48
-  bundle-info.yaml: 337f03d711a45793b20356fb091e2dc34c9a9fdefdc146a6957d0286e89744c9
-  checksums.txt: d9bbfc6e6b527ee35c52400907a1468a44e5593e5ea046420ad1274be6bb4e42
+  bundle-info.yaml: 59f34b4d8c02475edfecd9e8aa03dc6baf5bb00ad42431ece25359311979e533
+  checksums.txt: 4f33d5f24162b16e4bc884844115dcce3adda6124dec90933b5390b2cbf9a306
   deploy.sh: 2808edb0dd40f6022b6a2edb79c620cdd2cd908a0f8f700a3142796f6fccead9
-  recipe.yaml: 33ebc6e0142edc03e5bb5313b635e548570f3122520bce8c927e83c0d7d7053f
+  recipe.yaml: 4f9fab96672010f6ac1eeba95213bf5c89cb579937627a1a35e983b610cb38af
 h100-eks-ubuntu-training-kubeflow+nktp:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -3767,7 +3767,7 @@ h100-eks-ubuntu-training-kubeflow+nktp:
   014-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   014-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  014-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  014-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   015-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   015-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -3783,12 +3783,12 @@ h100-eks-ubuntu-training-kubeflow+nktp:
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: d933e18b660e16e3de00e17e80f02eb437e06e265016069f282969c2736c6bfb
   UPGRADING.md: c6eb73c8e6064f76b3e32a7bc3acea88f73318e38e88674223ba6fa65da14d48
-  bundle-info.yaml: ff07a28b2e24454dd1f8f6ca3f54d590892bdc5f9072058688a7979bb429018f
-  checksums.txt: b6a3a84d80b3fbb911d8174d244fe68b1662d3c8e4fc4c2116ff8a2812dc9ae5
+  bundle-info.yaml: 25ef24d58ca2ba87d4752bcf5cec827c81625dc167d394a2e7980f61dd0c87b4
+  checksums.txt: fcb9e1dfc76642e1a1bd6f9a0349acfff7e7ada7a2326fcc05edc81ec2a373f1
   data/overlays/stock-render-opt-in.yaml: 28518490ca46ac3ecf1b7cb220cfc55c3c4d3e3f595446b6aab9894f15f80557
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: 808bf3632cd336bcb1e82e37fe9c555488e2194ef545153e5b4e4490df415a25
-  recipe.yaml: 1c115eebae7c424a8c6c107c3bccff15c5a3f0a1b0ea326f73b45e3767554bb1
+  recipe.yaml: 336eeda0da0d8528bf1a958a0489a083101c8fe1c148d490c8149c791debd6e6
 h100-eks-ubuntu-training-kubeflow+user-overlay-components:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -3853,7 +3853,7 @@ h100-eks-ubuntu-training-kubeflow+user-overlay-components:
   015-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   015-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  015-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  015-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   016-node-problem-detector/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-node-problem-detector/install.sh: 6ba06c4023d2485dd198dd6a6063edda36675b2daf2ec51113e3db8e30bb02ba
   016-node-problem-detector/upstream.env: ef6ae27151ec40531376d97fa9312870af2cded8644ce3886700476b72e64fbe
@@ -3878,12 +3878,12 @@ h100-eks-ubuntu-training-kubeflow+user-overlay-components:
   020-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 97afa631a111d852734fd4534ad8d2340fe9bc2fbc380b1f1696bb53f6852175
   UPGRADING.md: 920e88cdffd80ff91592cc43721fae715358d1402acfc6b485c31d875a9e0279
-  bundle-info.yaml: b617f310f9d967f329a0d55492e2a8ac702ef127bb95af7875592f7020be4e5d
-  checksums.txt: 107d3ab8a24e80b7a386bdf8e6007f031b578f353ecf9f88cbde2fd62e934aa4
+  bundle-info.yaml: d442a9b1744f057297aa76d61b1522d5589afd0f338421a81f02d34d9fc5ad97
+  checksums.txt: f9a08f6c735f7689a02f9cb05ad6d168c4350a941c7993d0fde44e96b5f0010e
   data/overlays/stock-render-opt-in.yaml: 100a230e36a3fe11b9678bb4ad0dcd59fe8ae0a51534814dace25056bb9a2ba3
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: f3cf689c1ca70b4765d472d7e4286a7aad6663c47ca5912c2c2c81ee760248ae
-  recipe.yaml: f2b2711fc28791e315ceb896834f9df377345b2ebe07ed4c292e7484ae6fca85
+  recipe.yaml: 3a003967087c83be8ff00f2bbd0edce9e9dadca50e9476557291bb49912e527c
 h100-eks-ubuntu-training-kueue:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -3934,7 +3934,7 @@ h100-eks-ubuntu-training-kueue:
   012-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   012-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  012-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  012-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   013-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   013-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -3966,10 +3966,10 @@ h100-eks-ubuntu-training-kueue:
   018-kueue-post/values.yaml: 9ae0af1abd28154ef1efc514bd20ee1daf35cfccbfaa0c6d97e08092b211d6fc
   README.md: b2bedf8ffc9519f80f69af73f9073d04fd7c6c97219975ab518753213ff01154
   UPGRADING.md: 53e18da2d67e662fae28979a1c685f5c92d961ccf117e30c828ab8cb6e0a8aee
-  bundle-info.yaml: 7db99c315c765c7899a9fb6d9d7264cb9069319957b5f9a759e7fa9eb9569cc4
-  checksums.txt: 93b0698aa960859b09e34521e3417c396c1e966d29f21475a28486cd32bd1ae4
+  bundle-info.yaml: a65ce6b401fed2b555cb5ddc1e9bc42541510a2f0d32b43fc924c1b9eed6e1bc
+  checksums.txt: be0dcc19d161fef8f27c7212fe358df3c9ae8b5ca98e22e47fdbd7a1da7555bf
   deploy.sh: 8f3f1ab323c15679382a0d4f01844880618a56c0ceefa2f3fd813eea627f47ac
-  recipe.yaml: b1603150c8dc9fb2e12108acafaffe6f762632ad43a6556d3b8f2d79f76c3415
+  recipe.yaml: cbaf17b9010f1f2f3791f7be88b4f4bb18aa7e3cd3deb44eaddd80af45f5082e
 h100-eks-ubuntu-training-runai:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -4016,7 +4016,7 @@ h100-eks-ubuntu-training-runai:
   011-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   011-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  011-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  011-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   012-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   012-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -4036,10 +4036,10 @@ h100-eks-ubuntu-training-runai:
   015-runai-cluster/values.yaml: e2ac7f29d744958609a2b841608d3de4fc3b4dceb05bab12118976fb23c9a403
   README.md: d0fd12dd9a2652aa2846d6152617e1db6a5c12319f454b6aca4b1a4b6d9afb31
   UPGRADING.md: c6eb73c8e6064f76b3e32a7bc3acea88f73318e38e88674223ba6fa65da14d48
-  bundle-info.yaml: 123d7794ed15b725e3404a79ed1289f43af8724c6ae47c3afd95e93cbbf99fdb
-  checksums.txt: 8d6fb44a1542d8f5eadc07e503b700bb941c2e566a87835eb6bab11104391799
+  bundle-info.yaml: 0e43521cc1bdbc5fe20d9559b161fa62e46b1eb0217b9e9c98e7c923b866e125
+  checksums.txt: 0fb862e5406e08d3733afca1aa0e4db30df2f05028ca4d6f3523ccaa49d80079
   deploy.sh: 40b10c9ce1ef17b178abe06c234986cdab66345ea253d12371efc386274a4e03
-  recipe.yaml: 464efd12a71d80f257b13123a1629c519d110d923837dc11d8bf794e4926166f
+  recipe.yaml: 95fb722f80b686ee23fdb92beeafd9531f13099c4ad70f13ff156f7346ad7543
 h100-eks-ubuntu-training-slurm:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -4090,7 +4090,7 @@ h100-eks-ubuntu-training-slurm:
   012-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   012-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  012-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  012-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   013-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   013-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -4123,10 +4123,10 @@ h100-eks-ubuntu-training-slurm:
   019-slinky-slurm/values.yaml: efd9525d04fb69ffea430a76aae43654b7ac9ab8970fcff9f32dbf9b01c06de5
   README.md: 1d5d9983ce39ecf570a69554a756320d435693b499a1b583eb36d06a0669be28
   UPGRADING.md: c6eb73c8e6064f76b3e32a7bc3acea88f73318e38e88674223ba6fa65da14d48
-  bundle-info.yaml: 54d43722cb5a10952933b197992e85cacd35ea841d261da7aafc36442ae792af
-  checksums.txt: 86b8a1e42af1503c8d4e02ef7232fb7cf91deca3099f0181e9afe2cc7097e8ce
+  bundle-info.yaml: 3fb4a8ebd45b79756f79f13189f90308f7054565760eaca23425c3197b06b354
+  checksums.txt: fa27bbffc4da8cac77dbf2e9945c0458b9e99e6e188a97bd6b8ba94c4e6d8256
   deploy.sh: a48728ddb64a4f2b0506394abc5a3ec777445e5efe57bbbb1f98d1c8a43ee303
-  recipe.yaml: 2e1ac187c7be8577768116122b987303c1e4aaeb03223a70b86c473ed48625de
+  recipe.yaml: 0b57adf46d5b0ba237a2ede0b61ffd855f3c1c4eb4ded6dce8ed9b6dcf9c77fb
 h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -4177,7 +4177,7 @@ h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
   012-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   012-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  012-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  012-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   013-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   013-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -4236,12 +4236,12 @@ h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
   024-slinky-slurm/values.yaml: 24b4418eae1e7dec15ae641661f5a21b925dd268b28304b18ad7639269e288a2
   README.md: 626b387aa692b548c2f33fee8322e868689685fdf915dec00ca02e235f3ed08d
   UPGRADING.md: 3a24abaac2dbecf9c85c7ac191b5f17cdc7809ee1174e2e232ae7dcc020979cc
-  bundle-info.yaml: 1f5c8b372bcdcff5d22a666975e594dbe6699cd1c85dce53d45c21409f69143a
-  checksums.txt: f0c3c7f67d767acc1ac777c1cff5488ee6cb896416ccf5af93a618f4d0ac5b75
+  bundle-info.yaml: 2829249447d23e452bcc1075c8a42f0987a8b6eda8446df4c8978264dc2fb509
+  checksums.txt: 1a3fdb6a8e1469ba953673db04ef2da97b970d90f3d089b9287d82e2b7b405b4
   data/overlays/stock-render-opt-in.yaml: 328e7217055d4c00c950d690a1579830a95456e9953214a1ec0803416edaaaf3
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: a1caa602f37efd2f1d9109d1de28f7642b5bcfbfff3396fdc6e274a14f224411
-  recipe.yaml: 2f2473717014a99120be59cfac997babbb732b0e13b0df5a9124958d62cd3c5b
+  recipe.yaml: 8d0248412d7b6e468cac277c47ab3c096d77b666b8a879066dabbba7b1640496
 h100-eks-ubuntu-training-slurm+slurm-accounting-aicr-provided:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -4300,7 +4300,7 @@ h100-eks-ubuntu-training-slurm+slurm-accounting-aicr-provided:
   014-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   014-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  014-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  014-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   015-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   015-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -4337,10 +4337,10 @@ h100-eks-ubuntu-training-slurm+slurm-accounting-aicr-provided:
   022-slinky-slurm/values.yaml: b97df3268a17dd1b4d1d963c6e003ab30b6b5ead510207f2a1476140143f6ea8
   README.md: 3a8db690eb3233aa9c4ba1ecb912117fd914ee67ea6d490ba8a6bb52aa45aed3
   UPGRADING.md: 4ae8ddee98ecdd78ebafe3c480c5e285cdb6afb56f288ebe16dfa0210071ed5a
-  bundle-info.yaml: 84039c4a20dd11f9a372b5d0a204eeb4258660aad58f0209135441acd213d104
-  checksums.txt: 58b215a9406b85b0bb07a1bd7697a4c7ade10ec66e9cdc6fc1d46c12151f9e72
+  bundle-info.yaml: 9122d335389382beb199870eeee6c0a10ac21a904946ab68f6717ce972dc5bd5
+  checksums.txt: 6e7b02ed98071cf1560e1921480b2c723810476eec8ea0dc3fd81d0c7b9a1f2a
   deploy.sh: c90e6e6449061f0f382d6289cbf87107044de4a4311576989095198506648f22
-  recipe.yaml: fb85781b54a71760d6ccb8e31d40404744247544b0a5d8e63874bf87f5cf2f1f
+  recipe.yaml: 8b1cf0eafebd68f55cb9796733624b9340a40082392058a9efb570a3924783dc
 h100-gke-cos-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
@@ -5330,7 +5330,7 @@ h200-eks-inference:
   016-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   016-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  016-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  016-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   017-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   017-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -5346,10 +5346,10 @@ h200-eks-inference:
   019-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 1d35dc382ee346b06a1eca8cfeaac720bcbe39df9f1126badb413074e63bf107
   UPGRADING.md: c6eb73c8e6064f76b3e32a7bc3acea88f73318e38e88674223ba6fa65da14d48
-  bundle-info.yaml: 792c3d6502f19e2b89ee60d533225849a9623c45ed947c40785c29f73ff05e26
-  checksums.txt: f983550ecdbb5a72cb2e24c7169f0caa93acfb7e079cc6d758e9f7b645fcf071
+  bundle-info.yaml: b8d920c20f74f87926e650e940d3b14acea5a99e5b9dc64d8960581f576df15b
+  checksums.txt: 8bd271fad399b7a6f2b47a530a3c216ebb89b06b39490019e243caac47fb4ec2
   deploy.sh: 020ffcfce89c3a3b7548a1ea0cbad4967f3de16d60f3b4f878bd8bfc339772a3
-  recipe.yaml: 4d40e883543359deddadcc1fa06c75fd2d79e8c3ab8892b708e0d6e8e3e08d27
+  recipe.yaml: a8443f7f8ee12452dfbd73e94840503d38fe363bca2616205b63ae59c558f4ff
 h200-eks-training-kubeflow:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -5409,7 +5409,7 @@ h200-eks-training-kubeflow:
   014-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   014-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  014-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  014-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   015-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   015-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -5425,10 +5425,10 @@ h200-eks-training-kubeflow:
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 2f8a608e693744ccd44487ff478ae246ec427d96b884a0dcdfdeeb19e026b461
   UPGRADING.md: c6eb73c8e6064f76b3e32a7bc3acea88f73318e38e88674223ba6fa65da14d48
-  bundle-info.yaml: 4d708dd4645a1579f98949ce5ad3baf1b9ae7a8762d8275c4098b7ed9c163127
-  checksums.txt: ec3a79d651d870cb993069ea3ad54697a3edf06063e17bea17cd2084daebebcb
+  bundle-info.yaml: ca04f468660745c11d34e9be95744b46268cb22685f1133c35e066ce7e322671
+  checksums.txt: e1afa28e7def8e6ffc2f64d8eb9e7c6bfc349eb8bf8391e7c480d529d49b95a1
   deploy.sh: 808bf3632cd336bcb1e82e37fe9c555488e2194ef545153e5b4e4490df415a25
-  recipe.yaml: f9353d557887145b1317e3a5e9a3f04c9d26dde76ed927bfd26194f414c6c376
+  recipe.yaml: dc19fbc2cc7c4df049d6cbbe58deff79439b56461bb15f3465e93dae23664415
 h200-k0s-ubuntu-training:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -6196,7 +6196,7 @@ rtx-pro-6000-eks-amazonlinux-inference:
   015-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   015-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  015-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  015-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   016-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   016-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -6212,10 +6212,10 @@ rtx-pro-6000-eks-amazonlinux-inference:
   018-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 423fd8a83859272e64991a3fa827cba1982736078ee20a553dd8ba96cfdce8db
   UPGRADING.md: c6eb73c8e6064f76b3e32a7bc3acea88f73318e38e88674223ba6fa65da14d48
-  bundle-info.yaml: d7123aa65135971b811d6f33b2d1dafaa6d9da275c37496e3249a8c3c51c9b49
-  checksums.txt: e069760a46a9145edec9566a7f69db3219799fbde9f82faa51046b1e570d3fcb
+  bundle-info.yaml: 80020e887e10b109152e73671d9fdef9004090b00d1c1239da2d3de442eb5aaf
+  checksums.txt: 3b2b176c3e4f816715049589958f31f40c779362c45dfc76a4e4e39c9efbbce4
   deploy.sh: 3d1a3a9604bfaadf9bd91c90752314a594391ad654d671403d8da82b36868def
-  recipe.yaml: 4f5c3a76c18d8790253cafee95b2b6dc52d5cdf4530a9da973a9f232a9e91277
+  recipe.yaml: b676692c4ab62b3aea7d19d577e26c4f2a70a1bb79e4eb32f11a6cbd89a43d0e
 rtx-pro-6000-eks-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
@@ -6293,7 +6293,7 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   018-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   018-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  018-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  018-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   019-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   019-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -6309,10 +6309,10 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   021-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 29f62fec8f54dd599555c930679c454bd2bf3081bc8d132d67f6756d4aa89d76
   UPGRADING.md: db296d4e30c9634a81ef585d707943ee057fbb19c319b37417ed4c3cc6f6e485
-  bundle-info.yaml: 8c42524e3c5bdac0e7ab3e13c72cfa8737b72bbceea810d19e82235a11b5ddfb
-  checksums.txt: 48a5bdb938c7511016b33fa9b09c9030058fb6367487bc8aaf7337910a59399c
+  bundle-info.yaml: 3da148ffa1cc4b49d9874b8693963268be8a53b90a86ab5c0586b79f5d892e25
+  checksums.txt: d4272cea9e1754ac34b12733249418ba52d9d29126443628e9046370f0278428
   deploy.sh: 5cb6189767626d1ade33ebc2726965dd3bf85d5eb4a796df973716a11f77f705
-  recipe.yaml: f74f77ff230bbb75d6140db4fee5cc6d0a0ceb33c7c320e096bac4698b79571f
+  recipe.yaml: 4ade54c11c074e352ce2cd76847cfb7398223552211dab997edc674c99567433
 rtx-pro-6000-eks-ubuntu-inference-nim:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
@@ -6386,7 +6386,7 @@ rtx-pro-6000-eks-ubuntu-inference-nim:
   017-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   017-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  017-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  017-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   018-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   018-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -6402,10 +6402,10 @@ rtx-pro-6000-eks-ubuntu-inference-nim:
   020-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 0f1d69ff567a7d2692bd313a6434f0ed32b838f772ed3e9180a4910b79ad1969
   UPGRADING.md: c6eb73c8e6064f76b3e32a7bc3acea88f73318e38e88674223ba6fa65da14d48
-  bundle-info.yaml: 54dd4240a63e62e4c637eeedbc10135dd7be73d218766c86335f272acb6c28d9
-  checksums.txt: 9b834d811a1794eff4860c45343cef4c44318e229732e77d6fbc66f8f262b7c8
+  bundle-info.yaml: 654c9a7d4ae6770e36449624201310f6687c33b0a4acc975f42d0cc9bd42ab8d
+  checksums.txt: b5d3abdb0d22d8969dc79b7d2667db1754d089c4508f575eae8d559b418ee6bc
   deploy.sh: a81b07fb31958892348737540f086f83c5371d9de09134b9a9cb85c49a3bf48c
-  recipe.yaml: ebf077dfa82503037d949c2c71006efb3e019df228081e8397ad0a6077b80177
+  recipe.yaml: 65c12cb60cf6e851e93baa1a096c783772d933b46dd63a020235485ce30523f0
 rtx-pro-6000-eks-ubuntu-training-kubeflow:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -6465,7 +6465,7 @@ rtx-pro-6000-eks-ubuntu-training-kubeflow:
   014-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
   014-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
-  014-nktp/values.yaml: 9a48d18862d08c9808052e93ee523f832c350e8f6ea74e3c2bc365aade80828e
+  014-nktp/values.yaml: 6cc5ad08d4caa32f07a52ed640e7395503dabf2579b6a5027958e666f1b09139
   015-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   015-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -6481,10 +6481,10 @@ rtx-pro-6000-eks-ubuntu-training-kubeflow:
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 618256437e76f4bdb2f0f62a1350cfbf1c1e034f4f2891337f35b49e187f8581
   UPGRADING.md: c6eb73c8e6064f76b3e32a7bc3acea88f73318e38e88674223ba6fa65da14d48
-  bundle-info.yaml: 607515946162db9de4ca3e0033b463b967221f679c2094b719b386492d9ff283
-  checksums.txt: f6184c768a28ed9a62cd6e94dc0c880e57de7665692dff4053f9339a0e40ca97
+  bundle-info.yaml: 1747f8103cd006f0e97067a11bbedda8b3c181129a177cbaa9d39cf6e7ad4a9e
+  checksums.txt: f97770a959d36411ce25bd61b62aa618f88d526663e23ef125cfa86c7539fd11
   deploy.sh: 808bf3632cd336bcb1e82e37fe9c555488e2194ef545153e5b4e4490df415a25
-  recipe.yaml: e41fd52f9cb4bdae9cc74daee137acac7b5230b5fafa792d0327d68154b82aa2
+  recipe.yaml: 8f2eadb283d5672071cb2b83c54b4acd94d079b2213feee4c8a3fcba64e8e1ff
 rtx-pro-6000-lke-ubuntu-inference:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
