@@ -36,4 +36,4 @@ No, it is not supported. A recipe is a point-in-time artifact of the binary that
 
 **Are CRDs upgraded when a component's Helm chart is upgraded?**
 
-Helm skips `crds/` on upgrade, so whether CRDs update depends on the deployer, the component, and whether the recipe overrides the chart. Check the deployer table before upgrading: [Upgrade, uninstall, and troubleshooting](component-catalog.md#upgrade-uninstall-and-troubleshooting).
+Helm skips `crds/` on upgrade, so whether CRDs update depends on the deployer, the component, and whether the recipe overrides the chart. Check the deployer table before upgrading: [Upgrading components that own CRDs](component-catalog.md#upgrading-components-that-own-crds).

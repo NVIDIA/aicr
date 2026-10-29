@@ -230,10 +230,10 @@ Read the diff:
   update each, and a hook re-run on each gate among them.
 - Helm installs a chart's `crds/` once and never upgrades them, and this
   bundle has no CRD step of its own. Before upgrading a component whose CRDs
-  changed, apply the new CRDs with the CRD-apply command under "Upgrade,
-  uninstall, and troubleshooting" in AICR's component catalog, with `CHART`
-  and `VERSION` set to the component's new coordinates, `REPO` for a chart
-  from a classic repository, `EXCLUDE_SUBCHARTS` from the registry's
+  changed, apply the new CRDs with the CRD-apply command under "Upgrading
+  components that own CRDs" in AICR's component catalog, with `CHART` and
+  `VERSION` set to the component's new coordinates, `REPO` for a chart from a
+  classic repository, `EXCLUDE_SUBCHARTS` from the registry's
   `ownsCRDsExcludeSubcharts`, and `MANAGER=terraform-provider-helm`, the
   field manager the provider installed the CRDs under (the helm deployer's
   `apply-crds.sh` does the same). `aicr upgrade-check --deployer terraform`
