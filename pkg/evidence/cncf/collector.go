@@ -124,7 +124,7 @@ var FeatureDescriptions = map[string]string{
 	featureGangScheduling:     "Gang scheduling co-scheduling test",
 	featureSecureAccess:       "Secure accelerator access verification (device-plugin two-container isolation or DRA ResourceClaim isolation, policy/mode-selected)",
 	featureAcceleratorMetrics: "Accelerator metrics (DCGM exporter)",
-	featureAIServiceMetrics:   "AI service metrics (Prometheus ServiceMonitor discovery)",
+	featureAIServiceMetrics:   "AI service metrics (NKTP ServiceMonitor/PodMonitor discovery)",
 	featureInferenceGateway:   "Inference API gateway conditions",
 	featureRobustOperator:     "Robust AI operator + webhook test",
 	featurePodAutoscaling:     "HPA pod autoscaling (scale-up + scale-down)",

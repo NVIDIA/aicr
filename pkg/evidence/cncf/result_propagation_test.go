@@ -29,6 +29,9 @@ import (
 const resultPropagationHarness = `#!/usr/bin/env bash
 source "${SCRIPT_DIR}/collect-evidence.sh"
 
+# A developer's own NKTP_NAMESPACE must not steer backend resolution.
+unset NKTP_NAMESPACE
+
 kubectl() {
     [ "${1:-}" = "cluster-info" ]
 }
@@ -367,7 +370,7 @@ case "${mode}" in
         }
         SECTION="service-metrics"
         ;;
-    dynamo-prometheus-unavailable)
+    dynamo-lgtm-unavailable)
         kubectl() {
             if [ "${1:-}" = "cluster-info" ]; then
                 return 0
@@ -378,6 +381,8 @@ case "${mode}" in
                 echo "frontend"
             elif [[ " $* " == *" --no-headers "* ]]; then
                 echo "dynamo-worker Running"
+            elif [[ "$*" == *"metadata.name=lgtm"* ]]; then
+                echo "nktp"
             elif [[ " $* " == *" port-forward "* ]]; then
                 return 1
             fi
@@ -391,13 +396,15 @@ case "${mode}" in
         }
         SECTION="service-metrics"
         ;;
-    trainer-prometheus-unavailable)
+    trainer-lgtm-unavailable)
         kubectl() {
             if [ "${1:-}" = "cluster-info" ]; then
                 return 0
             fi
             if [[ "$*" == *"jsonpath={.status.phase}"* ]]; then
                 echo "Running"
+            elif [[ "$*" == *"metadata.name=lgtm"* ]]; then
+                echo "nktp"
             elif [[ " $* " == *" port-forward "* ]]; then
                 return 1
             fi
@@ -410,6 +417,194 @@ case "${mode}" in
             collect_service_metrics_trainer
         }
         SECTION="service-metrics"
+        ;;
+    app-*)
+        # Drives the REAL lgtm resolution, discovery, and application-series
+        # gate of one AI service metrics collector against a fake otel-lgtm
+        # that evaluates label selectors and the sample-age filter.
+        # Mode: app-<workload>-<target>[-<app>]. workload: trainer|nim|dynamo.
+        # target: up (healthy), down (up is 0), stale (up is 1 but sampled
+        # before the check started), nolgtm (no Service named lgtm).
+        # app: absent (series under the discovered target), empty, failed, or
+        # elsewhere (series only under an unrelated workload).
+        IFS=- read -r _ workload target app_state _ <<< "${mode}"
+        case "${workload}" in
+            trainer)
+                job="pytorch-training-metrics" ns="trainer-metrics-test" inst="10.0.0.7:8080"
+                metric="training_step_total" other_job="${job}" other_ns="other-team" other_inst="10.9.9.9:8080" ;;
+            nim)
+                job="nim-llm" ns="nim-workload" inst="10.0.1.5:8000"
+                metric="prompt_tokens_total" other_job="vllm-other" other_ns="other-team" other_inst="10.9.9.9:8000" ;;
+            dynamo)
+                job="dynamo-system/dynamo-worker" ns="dynamo-workload" inst="10.0.2.3:9090"
+                metric="dynamo_component_requests_total" other_job="${job}" other_ns="other-dynamo" other_inst="10.9.9.9:9090" ;;
+        esac
+        up_value=1 up_ts=1700000030
+        case "${target}" in
+            down) up_value=0 ;;
+            stale) up_ts=1699999000 ;;
+        esac
+        app_job="${job}" app_ns="${ns}" app_inst="${inst}"
+        if [ "${app_state}" = "elsewhere" ]; then
+            app_job="${other_job}" app_ns="${other_ns}" app_inst="${other_inst}"
+        fi
+        series='[{"labels":{"__name__":"up","job":"'"${job}"'","namespace":"'"${ns}"'","instance":"'"${inst}"'"},"value":"'"${up_value}"'","ts":'"${up_ts}"'}'
+        if [ "${app_state}" != "empty" ]; then
+            series="${series}"',{"labels":{"__name__":"'"${metric}"'","job":"'"${app_job}"'","namespace":"'"${app_ns}"'","instance":"'"${app_inst}"'","model_name":"m"},"value":"42","ts":1700000040}'
+        fi
+        series="${series}]"
+        cat > "${SCRIPT_DIR}/fake_promql.py" <<'PYEOF'
+import json, os, re, sys
+query = sys.argv[1]
+series = json.loads(os.environ["SERIES"])
+m = re.match(r'\s*([A-Za-z_:][A-Za-z0-9_:]*)?\{([^}]*)\}', query)
+if not m:
+    print(json.dumps({"status": "error", "error": "unsupported query"}))
+    sys.exit(0)
+matchers = []
+if m.group(1):
+    matchers.append(("__name__", "=", m.group(1)))
+for key, op, val in re.findall(r'(\w+)\s*(=~|=)\s*"((?:[^"\\]|\\.)*)"', m.group(2)):
+    matchers.append((key, op, re.sub(r'\\(.)', r'\1', val)))
+since = re.search(r'timestamp\(.*\)\s*>\s*([0-9.]+)\)\s*$', query)
+def selected(s):
+    if since and s["ts"] <= float(since.group(1)):
+        return False
+    for key, op, val in matchers:
+        have = s["labels"].get(key, "")
+        if op == "=" and have != val:
+            return False
+        if op == "=~" and not re.fullmatch(val, have):
+            return False
+    return True
+result = [{"metric": s["labels"], "value": [s["ts"], s["value"]]} for s in series if selected(s)]
+print(json.dumps({"status": "success", "data": {"resultType": "vector", "result": result}}))
+PYEOF
+        kubectl() {
+            if [ "${1:-}" = "cluster-info" ]; then
+                return 0
+            fi
+            case " $* " in
+                *"metadata.name=lgtm"*)
+                    [ "${target}" != "nolgtm" ] && echo "nktp"
+                    return 0 ;;
+                *" apply "*)
+                    echo "workload applied" > "${SCRIPT_DIR}/applied"
+                    return 0 ;;
+                *"jsonpath={.status.phase}"*)
+                    echo "Running"
+                    return 0 ;;
+                *"component-type=worker"*"status.phase=Running"*)
+                    echo "worker"
+                    return 0 ;;
+                *"component-type=frontend"*"status.phase=Running"*)
+                    echo "frontend"
+                    return 0 ;;
+                *" --no-headers "*)
+                    echo "dynamo-worker Running"
+                    return 0 ;;
+                *"k8s-nim-operator"*"status.phase=Running"*)
+                    echo "nim-pod"
+                    return 0 ;;
+            esac
+            return 0
+        }
+        curl() {
+            # An unbounded request to otel-lgtm fails, so every PASS lane also
+            # proves the timeouts are applied.
+            case " $* " in *" --connect-timeout "*" --max-time "*) ;; *) return 28 ;; esac
+            local last="${!#}"
+            if [ "${last}" = "query=time()" ]; then
+                echo '{"status":"success","data":{"resultType":"scalar","result":[1700000000.5,"1700000000.5"]}}'
+                return 0
+            fi
+            case "${last}" in
+                query=*)
+                    case "${last}" in
+                        "query=up{"*) ;;
+                        *) if [ "${app_state}" = "failed" ]; then return 22; fi ;;
+                    esac
+                    SERIES="${series}" python3 "${SCRIPT_DIR}/fake_promql.py" "${last#query=}"
+                    return 0 ;;
+            esac
+            return 0
+        }
+        sleep() { return 0; }
+        wait_for_port() { return 0; }
+        collect_service_metrics() {
+            EVIDENCE_FILE="${EVIDENCE_DIR}/ai-service-metrics.md"
+            "collect_service_metrics_${workload}"
+        }
+        SECTION="service-metrics"
+        ;;
+    accelerator-pass|accelerator-dcgm-absent|accelerator-exporter-empty|accelerator-backend-empty|accelerator-backend-unreachable)
+        # Drives the REAL accelerator collector. PASS needs the exporter
+        # Service, DCGM_FI_* series from its /metrics, and a non-empty
+        # otel-lgtm query; each other lane removes one.
+        kubectl() {
+            if [ "${1:-}" = "cluster-info" ]; then
+                return 0
+            fi
+            case " $* " in
+                *"metadata.name=lgtm"*)
+                    echo "nktp"
+                    return 0 ;;
+                *"app=nvidia-dcgm-exporter -o jsonpath"*)
+                    [ "${mode}" != "accelerator-dcgm-absent" ] && printf '%s' "nvidia-dcgm-exporter"
+                    return 0 ;;
+            esac
+            return 0
+        }
+        curl() {
+            case " $* " in *" --connect-timeout "*" --max-time "*) ;; *) return 28 ;; esac
+            case " $* " in
+                *"localhost:9401/metrics"*)
+                    echo "# HELP DCGM_FI_DEV_GPU_UTIL GPU utilization (in %)."
+                    if [ "${mode}" != "accelerator-exporter-empty" ]; then
+                        echo 'DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-0"} 37'
+                    fi ;;
+                *"query=DCGM_FI_DEV_"*)
+                    if [ "${mode}" = "accelerator-backend-empty" ]; then
+                        echo '{"status":"success","data":{"resultType":"vector","result":[]}}'
+                    else
+                        echo '{"status":"success","data":{"resultType":"vector","result":[{"metric":{"__name__":"DCGM_FI_DEV_GPU_UTIL","gpu":"0"},"value":[1700000000,"37"]}]}}'
+                    fi ;;
+            esac
+            return 0
+        }
+        sleep() { return 0; }
+        if [ "${mode}" = "accelerator-backend-unreachable" ]; then
+            wait_for_port() { return 1; }
+        else
+            wait_for_port() { return 0; }
+        fi
+        SECTION="accelerator-metrics"
+        ;;
+    accelerator-backend-read-error|accelerator-backend-ambiguous|accelerator-nktp-namespace-missing)
+        # lgtm resolution fails closed: a failed lookup, two lgtm Services,
+        # or NKTP_NAMESPACE naming a namespace without lgtm.
+        if [ "${mode}" = "accelerator-nktp-namespace-missing" ]; then
+            NKTP_NAMESPACE="nktp"
+        fi
+        kubectl() {
+            if [ "${1:-}" = "cluster-info" ]; then
+                return 0
+            fi
+            case " $* " in
+                *"metadata.name=lgtm"*)
+                    if [ "${mode}" = "accelerator-backend-read-error" ]; then
+                        echo 'Error from server (Forbidden): services is forbidden' >&2
+                        return 1
+                    fi
+                    printf '%s\n' "nktp" "observability"
+                    return 0 ;;
+                *" svc lgtm -n nktp "*)
+                    echo 'Error from server (NotFound): services "lgtm" not found' >&2
+                    return 1 ;;
+            esac
+            return 0
+        }
+        SECTION="accelerator-metrics"
         ;;
     *)
         echo "unknown test mode: ${mode}" >&2
@@ -446,6 +641,10 @@ func TestEvidenceResultPropagatesThroughCollector(t *testing.T) {
 		staleOutput    bool
 		wantStatus     string
 		wantEvidence   string
+		// wantEvidenceAlso lists further substrings the evidence must contain.
+		wantEvidenceAlso []string
+		// wantNotApplied asserts the section never ran kubectl apply.
+		wantNotApplied bool
 		// singleVerdictFile, when set, is an evidence artifact (relative to the
 		// evidence dir) that must contain exactly one column-zero "**Result:"
 		// verdict line — the invariant evidence_result relies on. Only set for
@@ -690,21 +889,205 @@ func TestEvidenceResultPropagatesThroughCollector(t *testing.T) {
 			wantErr:           true,
 		},
 		{
-			name:              "Dynamo Prometheus connection failure is explicit fail",
-			mode:              "dynamo-prometheus-unavailable",
+			name:              "Dynamo otel-lgtm connection failure is explicit fail",
+			mode:              "dynamo-lgtm-unavailable",
 			displayName:       "AI Service Metrics",
 			wantStatus:        "FAIL",
-			wantEvidence:      "**Result: FAIL** — Could not connect to Prometheus.",
+			wantEvidence:      "**Result: FAIL** — Could not connect to otel-lgtm (svc/lgtm in nktp).",
 			singleVerdictFile: "ai-service-metrics.md",
 			wantErr:           true,
 		},
 		{
-			name:              "trainer Prometheus connection failure is explicit fail",
-			mode:              "trainer-prometheus-unavailable",
+			name:              "trainer otel-lgtm connection failure is explicit fail",
+			mode:              "trainer-lgtm-unavailable",
 			displayName:       "AI Service Metrics",
 			wantStatus:        "FAIL",
-			wantEvidence:      "**Result: FAIL** — Could not connect to Prometheus.",
+			wantEvidence:      "**Result: FAIL** — Could not connect to otel-lgtm (svc/lgtm in nktp).",
 			singleVerdictFile: "ai-service-metrics.md",
+			wantErr:           true,
+		},
+		{
+			name:        "healthy up series with scoped application series is pass",
+			mode:        "app-trainer-up",
+			displayName: "AI Service Metrics",
+			wantStatus:  "PASS",
+			wantEvidence: `$ promql 'up{job=~"pytorch-training-metrics",namespace=~"trainer-metrics-test"} and ` +
+				`(timestamp(up{job=~"pytorch-training-metrics",namespace=~"trainer-metrics-test"}) > 1700000000.5)'` + "\n" +
+				`{"job": "pytorch-training-metrics", "instance": "10.0.0.7:8080", "namespace": "trainer-metrics-test", "up": "1"}`,
+			wantEvidenceAlso: []string{
+				`# application queries are scoped to {job=~"pytorch-training-metrics",namespace=~"trainer-metrics-test",instance=~"10\\.0\\.0\\.7:8080"}`,
+				"training_step_total = 42",
+				"**Result: PASS** — The PyTorch training workload's ServiceMonitor target was discovered and scraped, " +
+					"and its training metrics (step count, loss, throughput, GPU memory) are queryable in otel-lgtm.",
+			},
+			singleVerdictFile: "ai-service-metrics.md",
+		},
+		{
+			name:              "up series of 0 is fail",
+			mode:              "app-trainer-down",
+			displayName:       "AI Service Metrics",
+			wantStatus:        "FAIL",
+			wantEvidence:      `{"job": "pytorch-training-metrics", "instance": "10.0.0.7:8080", "namespace": "trainer-metrics-test", "up": "0"}`,
+			wantEvidenceAlso:  []string{"appeared in otel-lgtm within 3 minutes. NKTP needs no monitor label"},
+			singleVerdictFile: "ai-service-metrics.md",
+			wantErr:           true,
+		},
+		{
+			name:              "up series sampled before the check started is fail",
+			mode:              "app-trainer-stale",
+			displayName:       "AI Service Metrics",
+			wantStatus:        "FAIL",
+			wantEvidence:      "(no series)",
+			wantEvidenceAlso:  []string{"appeared in otel-lgtm within 3 minutes."},
+			singleVerdictFile: "ai-service-metrics.md",
+			wantErr:           true,
+		},
+		{
+			name:              "empty application queries are fail",
+			mode:              "app-trainer-up-empty",
+			displayName:       "AI Service Metrics",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — discovery succeeded, but no application series came back from otel-lgtm; NKTP's OTLP export may have renamed them",
+			wantEvidenceAlso:  []string{"(no training series returned by otel-lgtm)"},
+			singleVerdictFile: "ai-service-metrics.md",
+			wantErr:           true,
+		},
+		{
+			name:              "failed application queries are fail",
+			mode:              "app-trainer-up-failed",
+			displayName:       "AI Service Metrics",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — discovery succeeded, but no application series came back from otel-lgtm;",
+			singleVerdictFile: "ai-service-metrics.md",
+			wantErr:           true,
+		},
+		{
+			name:              "no lgtm Service fails before deploying the trainer",
+			mode:              "app-trainer-nolgtm",
+			displayName:       "AI Service Metrics",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — NKTP's otel-lgtm was not found: no Service named lgtm in any namespace.",
+			singleVerdictFile: "ai-service-metrics.md",
+			wantNotApplied:    true,
+			wantErr:           true,
+		},
+		{
+			name:              "trainer series only under an unrelated namespace is fail",
+			mode:              "app-trainer-up-elsewhere",
+			displayName:       "AI Service Metrics",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — discovery succeeded, but no application series came back from otel-lgtm;",
+			singleVerdictFile: "ai-service-metrics.md",
+			wantErr:           true,
+		},
+		{
+			name:              "NIM series scoped to the discovered target is pass",
+			mode:              "app-nim-up",
+			displayName:       "AI Service Metrics",
+			wantStatus:        "PASS",
+			wantEvidence:      `prompt_tokens_total{model_name="m"} = 42`,
+			wantEvidenceAlso:  []string{"**Result: PASS** — The NIM inference workload's ServiceMonitor targets were discovered and scraped"},
+			singleVerdictFile: "ai-service-metrics.md",
+		},
+		{
+			name:              "NIM series only under an unrelated job and namespace is fail",
+			mode:              "app-nim-up-elsewhere",
+			displayName:       "AI Service Metrics",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — discovery succeeded, but no application series came back from otel-lgtm;",
+			singleVerdictFile: "ai-service-metrics.md",
+			wantErr:           true,
+		},
+		{
+			name:        "Dynamo series scoped to the workload pods' namespace is pass",
+			mode:        "app-dynamo-up",
+			displayName: "AI Service Metrics",
+			wantStatus:  "PASS",
+			wantEvidence: `# application queries are scoped to ` +
+				`{job=~"dynamo-system/dynamo-worker",namespace=~"dynamo-workload",instance=~"10\\.0\\.2\\.3:9090"}`,
+			wantEvidenceAlso:  []string{"dynamo_component_requests_total = 42", "**Result: PASS** — The Dynamo inference workload's"},
+			singleVerdictFile: "ai-service-metrics.md",
+		},
+		{
+			name:              "Dynamo series only under another workload namespace is fail",
+			mode:              "app-dynamo-up-elsewhere",
+			displayName:       "AI Service Metrics",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — discovery succeeded, but no application series came back from otel-lgtm;",
+			singleVerdictFile: "ai-service-metrics.md",
+			wantErr:           true,
+		},
+		{
+			name:              "accelerator evidence with exporter series and otel-lgtm data is pass",
+			mode:              "accelerator-pass",
+			displayName:       "Accelerator Metrics",
+			wantStatus:        "PASS",
+			wantEvidence:      `DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-0"} 37`,
+			wantEvidenceAlso:  []string{"**Result: PASS** — DCGM exporter provides per-GPU metrics", `"__name__": "DCGM_FI_DEV_GPU_UTIL"`},
+			singleVerdictFile: "accelerator-metrics.md",
+		},
+		{
+			name:              "accelerator evidence without the exporter Service is fail",
+			mode:              "accelerator-dcgm-absent",
+			displayName:       "Accelerator Metrics",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — DCGM exporter Service not found in gpu-operator.",
+			singleVerdictFile: "accelerator-metrics.md",
+			wantErr:           true,
+		},
+		{
+			name:              "accelerator evidence without exporter DCGM series is fail",
+			mode:              "accelerator-exporter-empty",
+			displayName:       "Accelerator Metrics",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — no DCGM_FI_* series read from the exporter's /metrics.",
+			singleVerdictFile: "accelerator-metrics.md",
+			wantErr:           true,
+		},
+		{
+			name:              "accelerator evidence with empty otel-lgtm queries is fail",
+			mode:              "accelerator-backend-empty",
+			displayName:       "Accelerator Metrics",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — none of the four DCGM queries returned data from otel-lgtm.",
+			wantEvidenceAlso:  []string{`"result": []`},
+			singleVerdictFile: "accelerator-metrics.md",
+			wantErr:           true,
+		},
+		{
+			name:              "accelerator evidence without an otel-lgtm port-forward is fail",
+			mode:              "accelerator-backend-unreachable",
+			displayName:       "Accelerator Metrics",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — could not port-forward to otel-lgtm (svc/lgtm in nktp).",
+			singleVerdictFile: "accelerator-metrics.md",
+			wantErr:           true,
+		},
+		{
+			name:              "failed lgtm lookup fails closed",
+			mode:              "accelerator-backend-read-error",
+			displayName:       "Accelerator Metrics",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — could not list Services named lgtm to find NKTP's otel-lgtm",
+			singleVerdictFile: "accelerator-metrics.md",
+			wantErr:           true,
+		},
+		{
+			name:              "lgtm Services in two namespaces are ambiguous",
+			mode:              "accelerator-backend-ambiguous",
+			displayName:       "Accelerator Metrics",
+			wantStatus:        "FAIL",
+			wantEvidence:      "set NKTP_NAMESPACE to choose NKTP's",
+			singleVerdictFile: "accelerator-metrics.md",
+			wantErr:           true,
+		},
+		{
+			name:              "explicit NKTP namespace without lgtm fails closed",
+			mode:              "accelerator-nktp-namespace-missing",
+			displayName:       "Accelerator Metrics",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — NKTP_NAMESPACE=nktp is set, but Service lgtm could not be read there",
+			singleVerdictFile: "accelerator-metrics.md",
 			wantErr:           true,
 		},
 	}
@@ -735,7 +1118,7 @@ func TestEvidenceResultPropagatesThroughCollector(t *testing.T) {
 					t.Fatalf("write harness mode: %v", err)
 				}
 			}
-			if tt.mode == "trainer-prometheus-unavailable" {
+			if strings.HasPrefix(tt.mode, "trainer-") || strings.HasPrefix(tt.mode, "app-trainer-") {
 				manifestDir := filepath.Join(dir, "manifests")
 				if err := os.MkdirAll(manifestDir, 0o755); err != nil {
 					t.Fatalf("create manifest directory: %v", err)
@@ -820,8 +1203,17 @@ func TestEvidenceResultPropagatesThroughCollector(t *testing.T) {
 				if evidenceErr != nil {
 					t.Fatalf("read evidence artifact: %v", evidenceErr)
 				}
-				if !strings.Contains(string(evidence), tt.wantEvidence) {
-					t.Errorf("evidence does not contain %q", tt.wantEvidence)
+				for _, want := range append([]string{tt.wantEvidence}, tt.wantEvidenceAlso...) {
+					if !strings.Contains(string(evidence), want) {
+						t.Errorf("evidence does not contain %q\n%s", want, evidence)
+					}
+				}
+			}
+			if tt.wantNotApplied {
+				if _, statErr := os.Stat(filepath.Join(dir, "applied")); statErr == nil {
+					t.Error("section applied a workload manifest, want none")
+				} else if !stderrors.Is(statErr, os.ErrNotExist) {
+					t.Fatalf("stat applied marker: %v", statErr)
 				}
 			}
 			if tt.singleVerdictFile != "" {

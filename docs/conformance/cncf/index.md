@@ -70,7 +70,7 @@ aicr validate -r recipe.yaml \
 
 Add `--cncf-submission` to collect detailed behavioral evidence for CNCF AI
 Conformance submission. This deploys GPU workloads, captures command outputs,
-workload logs, nvidia-smi output, and Prometheus queries:
+workload logs, nvidia-smi output, and `otel-lgtm` queries:
 
 ```bash
 # Collect all behavioral evidence
@@ -96,6 +96,13 @@ names are `dra`, `gang`, `secure`, `accelerator-metrics`, `service-metrics`,
 > type (NIM inference, Dynamo inference, or Kubeflow training) and collects
 > appropriate metrics and operator evidence.
 
+### Metrics Backend
+
+The accelerator-metrics and AI service metrics sections query NKTP's
+`otel-lgtm` backend (the `lgtm` Service, port 9090), which they find by name
+across namespaces. Set `NKTP_NAMESPACE` to pin it when more than one namespace
+has an `lgtm` Service. Without exactly one `lgtm` Service, both sections fail.
+
 Each section writes exactly one **PASS**, **SKIP**, or **FAIL** verdict.
 **SKIP** marks an absent optional prerequisite (no inference gateway, no
 supported operator, an unsupported cluster-autoscaling provider, or an
@@ -117,7 +124,7 @@ recorded section failure is no longer masked as overall success.
 | **GPU allocation test** | secure-accelerator-access deploys a test pod via DRA or the device plugin (capability-driven) and verifies GPU access + isolation; dra-support's full-GPU DRA behavioral subtest is recorded N/A on ComputeDomain-only clusters; on MNNVL clusters (a Ready, schedulable node carrying the `nvidia.com/gpu.clique` label with a usable `compute-domain.nvidia.com` ResourceSlice) dra-support instead runs a behavioral IMEX channel subtest — it creates a ComputeDomain, waits for the driver-generated ResourceClaimTemplate, and a probe pod must observe exactly one allocated IMEX channel device (#1649); clusters without the clique label record that subtest N/A; clusters whose MNNVL nodes' channels are all held by existing claims (e.g. the Slinky Slurm leaves' standing ComputeDomain) are verified from the holding claim instead (allocated, reserved, consumer pod Running on the node) and fail as inconclusive when no holder verifies. On Slinky Slurm recipes secure-accelerator-access **skips**: the NodeSet reserves every GPU on a node for its `slurmd` pod and Slurm allocates per job through GRES and cgroups, so a Kubernetes-scheduled probe would either never schedule or attest an access path the workloads never use. On the GPU-backed Slinky recipes (not the kind leaf) `slinky-slurm-gpu-access` verifies Slurm's own access path instead: an `srun --gpus=1` job must list exactly one GPU and open exactly one GPU device node, and a job with no GPU request on the same Slurm node must open none (Slurm's cgroup device controller refuses the open with EPERM). Its result fills the `secure_accelerator_access` evidence page. `slinky-slurm-health` additionally confirms that a GPU-requesting job is allocated and its Pyxis container starts, and `slinky-slurm-imex-channel`, selected by the three GB Slurm leaves, confirms concurrent jobs receive distinct IMEX channels | Mode-aware evidence script (recipe policy selects the mode, standalone runs detect capability): behavioral full-GPU ResourceClaim test under DRA, device-plugin two-container isolation test + ResourceSlice evidence otherwise; nvidia-smi output capture. The evidence script has no Slinky Slurm path. |
 | **Gang scheduling test** | Deploys PodGroup, verifies co-scheduling | Two-phase all-or-nothing test on one pinned GPU node: a blocker leaves exactly one GPU free — neither worker may be **bound** (`spec.nodeName`, not pod phase) during the barrier window — then the blocker is removed and both workers must complete together; worker logs captured. Requires a **fully idle, Ready, schedulable GPU node with ≥ 2 allocatable GPUs**. Barrier credit requires the scheduler's AFFIRMATIVE gang decision, both parts verified live: each worker shows `PodScheduled=False/Unschedulable` AND the named PodGroup's scheduling status carries KAI's one-of-two gang refusal ("Resources were found for 1 pods while 2 are required for gang scheduling") — so merely-unbound pods (down/restarting/backlogged scheduler) and generically-refused pods (queue quota, transient fit errors) are never credited. Pods associate to the PodGroup via the `pod-group-name` annotation (the `pod-group.scheduling.run.ai/*` labels alone do NOT associate — KAI's pod-grouper ignores them and creates per-pod groups) |
 | **HPA autoscaling** | Metrics API + scale-up validation | CUDA GPU stress test + scale-up |
-| **Metrics** | Custom metrics API data-path verification | DCGM exporter + Prometheus queries |
+| **Metrics** | Custom metrics API data-path verification | DCGM exporter + `otel-lgtm` queries |
 | **Gateway** | Condition verification (Accepted, Programmed) | Same |
 | **Webhook test** | Rejection test with invalid CR | Schema-valid but webhook-invalid CR per operator, submitted with server-side dry-run (nothing persists); PASS requires a denial naming the operator's own webhook entry — CRD-schema rejections (`Required value`) and denials from other admission webhooks (e.g. a cluster policy webhook) are explicitly classified as NOT demonstrating the operator's webhook and FAIL |
 | **Cluster autoscaling** | Cloud node group validation | Cloud-provider autoscaler API |

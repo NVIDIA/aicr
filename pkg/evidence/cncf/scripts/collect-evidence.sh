@@ -106,14 +106,168 @@ wait_for_pod() {
 # Exits early if the background process dies.
 wait_for_port() {
     local port="$1" timeout="$2" pid="$3"
-    local elapsed=0
-    while [ $elapsed -lt "$timeout" ]; do
-        if curl -sf "http://localhost:${port}/-/ready" &>/dev/null; then return 0; fi
+    local elapsed=0 deadline=$((SECONDS + timeout))
+    while [ $elapsed -lt "$timeout" ] && [ "${SECONDS}" -lt "${deadline}" ]; do
+        if curl "${LGTM_CURL_OPTS[@]}" "http://localhost:${port}/-/ready" &>/dev/null; then return 0; fi
         if ! kill -0 "$pid" 2>/dev/null; then return 1; fi
         sleep 1
         elapsed=$((elapsed + 1))
     done
     return 1
+}
+
+# --- Metrics backend: NKTP's otel-lgtm (ADR-026) ---
+#
+# The metrics sections query the Prometheus API of NKTP's otel-lgtm (Service
+# lgtm, port 9090). kube-prometheus-stack's server is no fallback: under
+# ADR-026 it keeps only the series its runtime consumers declare.
+LGTM_NS=""
+LGTM_ERR=""
+LGTM_HINT=""
+LGTM_API='http://localhost:9090/api/v1'
+# Bounds every request so a wedged endpoint cannot stretch a section's wait.
+LGTM_CURL_OPTS=(-sf --connect-timeout 5 --max-time 15)
+NO_APP_SERIES_MSG="discovery succeeded, but no application series came back from otel-lgtm; NKTP's OTLP export may have renamed them, so check the metric names there."
+
+# resolve_lgtm sets LGTM_NS from NKTP_NAMESPACE, or else from the one Service
+# named lgtm in the cluster. Anything else fails closed with LGTM_ERR set.
+resolve_lgtm() {
+    LGTM_NS="" LGTM_ERR=""
+    local out="" rc=0 count
+    if [ -n "${NKTP_NAMESPACE:-}" ]; then
+        if ! out=$(kubectl get svc lgtm -n "${NKTP_NAMESPACE}" -o name 2>&1); then
+            LGTM_ERR="NKTP_NAMESPACE=${NKTP_NAMESPACE} is set, but Service lgtm could not be read there: ${out}"
+            return 1
+        fi
+        LGTM_NS="${NKTP_NAMESPACE}"
+    else
+        # stderr is dropped, not merged: a kubectl warning would read as a namespace.
+        out=$(kubectl get svc -A --field-selector metadata.name=lgtm \
+            -o jsonpath='{range .items[*]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null) || rc=$?
+        if [ "${rc}" -ne 0 ]; then
+            LGTM_ERR="could not list Services named lgtm to find NKTP's otel-lgtm (kubectl exit ${rc})."
+            return 1
+        fi
+        out=$(printf '%s\n' "${out}" | sed '/^[[:space:]]*$/d')
+        count=$(printf '%s\n' "${out}" | grep -c .)
+        if [ "${count}" -eq 0 ]; then
+            LGTM_ERR="NKTP's otel-lgtm was not found: no Service named lgtm in any namespace. Install NKTP, or set NKTP_NAMESPACE."
+            return 1
+        fi
+        if [ "${count}" -gt 1 ]; then
+            LGTM_ERR="found a Service named lgtm in more than one namespace ($(printf '%s' "${out}" | tr '\n' ' ')); set NKTP_NAMESPACE to choose NKTP's."
+            return 1
+        fi
+        LGTM_NS="${out}"
+    fi
+    LGTM_HINT="NKTP needs no monitor label: check the monitor's selector and port, and the ${LGTM_NS} collectors' logs for 'Failed to scrape Prometheus endpoint'."
+}
+
+# lgtm_query <promql> runs an instant query through the localhost:9090 port-forward.
+lgtm_query() {
+    curl "${LGTM_CURL_OPTS[@]}" -G "${LGTM_API}/query" --data-urlencode "query=$1" 2>/dev/null
+}
+
+# promql_has_result: the response on stdin is a success with a non-empty result.
+promql_has_result() {
+    python3 -c "
+import sys,json
+try:
+    data=json.load(sys.stdin)
+except ValueError:
+    sys.exit(1)
+sys.exit(0 if data.get('status')=='success' and data.get('data',{}).get('result') else 1)" 2>/dev/null
+}
+
+# promql_selector <job-regex> <namespace-regex> <instance-regex> prints a
+# selector body; an empty argument adds no matcher. Discovery and the
+# application queries share it so they cannot drift apart.
+promql_selector() {
+    local sel="job=~\"$1\""
+    if [ -n "$2" ]; then sel="${sel},namespace=~\"$2\""; fi
+    if [ -n "$3" ]; then sel="${sel},instance=~\"$3\""; fi
+    printf '%s' "${sel}"
+}
+
+# up_series <healthy|rows|ids> reads an `up` query response on stdin. healthy
+# exits 0 when a series is 1; rows prints one JSON line per series; ids prints
+# the healthy series' jobs, namespaces, and instances, one line each, as
+# alternations of RE2 literals escaped for a PromQL string.
+UP_SERIES_PY='
+import json, re, sys
+mode = sys.argv[1]
+try:
+    data = json.load(sys.stdin)
+except ValueError:
+    data = {}
+result = data.get("data", {}).get("result", []) if data.get("status") == "success" else []
+if mode == "healthy":
+    sys.exit(0 if any(r["value"][1] == "1" for r in result) else 1)
+if mode == "rows":
+    rows = [{"job": r["metric"].get("job", ""), "instance": r["metric"].get("instance", ""),
+             "namespace": r["metric"].get("namespace", ""), "up": r["value"][1]} for r in result]
+    rows.sort(key=lambda x: (x["job"], x["instance"]))
+    print("\n".join(json.dumps(x) for x in rows) or "(no series)")
+if mode == "ids":
+    def lit(v):
+        v = re.sub(r"([\\.+*?()|\[\]{}^$])", r"\\\1", v)
+        return v.replace("\\", "\\\\").replace(chr(34), "\\" + chr(34))
+    healthy = [r["metric"] for r in result if r["value"][1] == "1"]
+    for key in ("job", "namespace", "instance"):
+        vals = sorted({m.get(key, "") for m in healthy})
+        print("" if vals == [""] else "|".join(lit(v) for v in vals))
+'
+up_series() {
+    python3 -c "${UP_SERIES_PY}" "$1" 2>/dev/null
+}
+
+# check_discovery <job-regex> <namespace> <timeout-seconds> succeeds when a
+# matching target's `up` series is 1; otel-lgtm has no target list to check
+# instead. OTLP writes no staleness markers, so a deleted target's last sample
+# stays queryable for 5m: only samples newer than the check's start count. On
+# success WORKLOAD_SELECTOR names the healthy targets, and the section's
+# application queries must use it.
+check_discovery() {
+    local job_re="$1" ns="$2" timeout="$3"
+    local deadline=$((SECONDS + timeout)) found=false response="" since="" sel query attempt ids
+    WORKLOAD_SELECTOR=""
+
+    since=$(lgtm_query 'time()' | \
+        python3 -c "import sys,json; print(json.load(sys.stdin)['data']['result'][1])" 2>/dev/null)
+    if [ -z "${since}" ]; then
+        log_error "Could not read the current time from otel-lgtm"
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "Could not read the current time from otel-lgtm's query API." >> "${EVIDENCE_FILE}"
+        return 1
+    fi
+    sel=$(promql_selector "${job_re}" "${ns}" "")
+    query="up{${sel}} and (timestamp(up{${sel}}) > ${since})"
+
+    # The attempt cap bounds the loop even where time does not advance.
+    for attempt in $(seq 1 $((timeout / 10 + 1))); do
+        response=$(lgtm_query "${query}") || response=""
+        if printf '%s' "${response}" | up_series healthy; then
+            found=true
+            break
+        fi
+        if [ "${SECONDS}" -ge "${deadline}" ]; then break; fi
+        log_info "No healthy up series for job ${job_re} yet (attempt ${attempt}), retrying in 10s..."
+        sleep 10
+    done
+
+    echo "" >> "${EVIDENCE_FILE}"
+    echo "**\`up\` series in otel-lgtm (sampled since the check started; 1 = scraped successfully)**" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+    echo "\$ promql '${query}'" >> "${EVIDENCE_FILE}"
+    printf '%s' "${response}" | up_series rows >> "${EVIDENCE_FILE}"
+    if [ "${found}" = "true" ]; then
+        ids=$(printf '%s' "${response}" | up_series ids)
+        WORKLOAD_SELECTOR=$(promql_selector "$(sed -n 1p <<<"${ids}")" "$(sed -n 2p <<<"${ids}")" "$(sed -n 3p <<<"${ids}")")
+        echo "# application queries are scoped to {${WORKLOAD_SELECTOR}}" >> "${EVIDENCE_FILE}"
+    fi
+    echo '```' >> "${EVIDENCE_FILE}"
+
+    [ "${found}" = "true" ]
 }
 
 # Runtime results tracker — records check name and status as they execute.
@@ -1623,8 +1777,31 @@ Demonstrates that the DCGM exporter exposes per-GPU metrics (utilization, memory
 temperature, power) in Prometheus format via a standardized metrics endpoint.
 
 ## Monitoring Stack Health
+EOF
+
+    if ! resolve_lgtm; then
+        log_error "${LGTM_ERR}"
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — ${LGTM_ERR}" >> "${EVIDENCE_FILE}"
+        return
+    fi
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+### NKTP Telemetry Pipeline
+
+NKTP's collectors scrape the DCGM exporter and export its metrics to
+otel-lgtm, which this section queries.
+EOF
+    capture "NKTP collectors" kubectl get opentelemetrycollectors -n "${LGTM_NS}"
+    capture "otel-lgtm pod" kubectl get pods -n "${LGTM_NS}" -l app=lgtm -o wide
+    capture "otel-lgtm service" kubectl get svc lgtm -n "${LGTM_NS}"
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
 
 ### Prometheus
+
+The runtime Prometheus server that prometheus-adapter reads.
 EOF
     capture "Prometheus pods" kubectl get pods -n monitoring -l app.kubernetes.io/name=prometheus
     capture "Prometheus service" kubectl get svc kube-prometheus-prometheus -n monitoring
@@ -1635,12 +1812,6 @@ EOF
 EOF
     capture "Prometheus adapter pod" kubectl get pods -n monitoring -l app.kubernetes.io/name=prometheus-adapter
     capture "Prometheus adapter service" kubectl get svc prometheus-adapter -n monitoring
-
-    cat >> "${EVIDENCE_FILE}" <<'EOF'
-
-### Grafana
-EOF
-    capture "Grafana pod" kubectl get pods -n monitoring -l app.kubernetes.io/name=grafana
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 
@@ -1663,7 +1834,7 @@ EOF
 
     # Query DCGM metrics via port-forward to the exporter service.
     # The DCGM container is minimal (no shell tools), so we port-forward and curl from the host.
-    local dcgm_svc
+    local dcgm_svc="" dcgm_read=false backend_ok=false
     dcgm_svc=$(kubectl get svc -n gpu-operator -l app=nvidia-dcgm-exporter -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
     if [ -n "${dcgm_svc}" ]; then
         echo "" >> "${EVIDENCE_FILE}"
@@ -1671,19 +1842,23 @@ EOF
         echo '```' >> "${EVIDENCE_FILE}"
         kubectl port-forward "svc/${dcgm_svc}" -n gpu-operator 9401:9400 &>/dev/null &
         local dcgm_pf_pid=$!
-        # Wait for port-forward to be ready (up to 10s)
-        local dcgm_ready=false
+        # Wait for port-forward to be ready (up to 10 attempts)
+        local dcgm_metrics="" i
         for i in $(seq 1 10); do
-            if curl -sf http://localhost:9401/metrics &>/dev/null; then dcgm_ready=true; break; fi
+            if dcgm_metrics=$(curl "${LGTM_CURL_OPTS[@]}" http://localhost:9401/metrics 2>/dev/null); then break; fi
+            dcgm_metrics=""
             if ! kill -0 "${dcgm_pf_pid}" 2>/dev/null; then break; fi
             sleep 1
         done
-        if [ "${dcgm_ready}" = "true" ]; then
-            curl -sf http://localhost:9401/metrics 2>/dev/null | \
-                grep -E "^(DCGM_FI_DEV_GPU_UTIL|DCGM_FI_DEV_FB_USED|DCGM_FI_DEV_FB_FREE|DCGM_FI_DEV_GPU_TEMP|DCGM_FI_DEV_POWER_USAGE|DCGM_FI_DEV_MEM_COPY_UTIL)" | \
-                head -30 >> "${EVIDENCE_FILE}" 2>&1
-        fi
         kill "${dcgm_pf_pid}" 2>/dev/null || true
+        if printf '%s\n' "${dcgm_metrics}" | grep -q '^DCGM_FI_'; then
+            dcgm_read=true
+            printf '%s\n' "${dcgm_metrics}" | \
+                grep -E "^(DCGM_FI_DEV_GPU_UTIL|DCGM_FI_DEV_FB_USED|DCGM_FI_DEV_FB_FREE|DCGM_FI_DEV_GPU_TEMP|DCGM_FI_DEV_POWER_USAGE|DCGM_FI_DEV_MEM_COPY_UTIL)" | \
+                head -30 >> "${EVIDENCE_FILE}"
+        else
+            echo "(no DCGM_FI_* series read from the exporter's /metrics)" >> "${EVIDENCE_FILE}"
+        fi
         echo '```' >> "${EVIDENCE_FILE}"
     else
         echo "" >> "${EVIDENCE_FILE}"
@@ -1692,72 +1867,75 @@ EOF
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 
-### Prometheus Querying GPU Metrics
+### otel-lgtm Querying GPU Metrics
 
-Query Prometheus to verify it is actively scraping and storing DCGM metrics.
+Query otel-lgtm to verify that NKTP collects and stores DCGM metrics.
 EOF
 
-    # Port-forward to Prometheus and query
-    kubectl port-forward svc/kube-prometheus-prometheus -n monitoring 9090:9090 &>/dev/null &
+    # Checked on kind: DCGM gauge names survive NKTP's OTLP export unchanged.
+    kubectl port-forward svc/lgtm -n "${LGTM_NS}" 9090:9090 &>/dev/null &
     local pf_pid=$!
-
+    local pf_ok=false
     if wait_for_port 9090 30 "${pf_pid}"; then
-        # GPU Utilization
-        echo "" >> "${EVIDENCE_FILE}"
-        echo "**GPU Utilization (DCGM_FI_DEV_GPU_UTIL)**" >> "${EVIDENCE_FILE}"
-        echo '```' >> "${EVIDENCE_FILE}"
-        curl -sf 'http://localhost:9090/api/v1/query?query=DCGM_FI_DEV_GPU_UTIL' 2>&1 | \
-            python3 -c "import sys,json; data=json.loads(sys.stdin.read()); print(json.dumps(data,indent=2))" >> "${EVIDENCE_FILE}" 2>&1
-        echo '```' >> "${EVIDENCE_FILE}"
-
-        # GPU Memory Used
-        echo "" >> "${EVIDENCE_FILE}"
-        echo "**GPU Memory Used (DCGM_FI_DEV_FB_USED)**" >> "${EVIDENCE_FILE}"
-        echo '```' >> "${EVIDENCE_FILE}"
-        curl -sf 'http://localhost:9090/api/v1/query?query=DCGM_FI_DEV_FB_USED' 2>&1 | \
-            python3 -c "import sys,json; data=json.loads(sys.stdin.read()); print(json.dumps(data,indent=2))" >> "${EVIDENCE_FILE}" 2>&1
-        echo '```' >> "${EVIDENCE_FILE}"
-
-        # GPU Temperature
-        echo "" >> "${EVIDENCE_FILE}"
-        echo "**GPU Temperature (DCGM_FI_DEV_GPU_TEMP)**" >> "${EVIDENCE_FILE}"
-        echo '```' >> "${EVIDENCE_FILE}"
-        curl -sf 'http://localhost:9090/api/v1/query?query=DCGM_FI_DEV_GPU_TEMP' 2>&1 | \
-            python3 -c "import sys,json; data=json.loads(sys.stdin.read()); print(json.dumps(data,indent=2))" >> "${EVIDENCE_FILE}" 2>&1
-        echo '```' >> "${EVIDENCE_FILE}"
-
-        # GPU Power Usage
-        echo "" >> "${EVIDENCE_FILE}"
-        echo "**GPU Power Draw (DCGM_FI_DEV_POWER_USAGE)**" >> "${EVIDENCE_FILE}"
-        echo '```' >> "${EVIDENCE_FILE}"
-        curl -sf 'http://localhost:9090/api/v1/query?query=DCGM_FI_DEV_POWER_USAGE' 2>&1 | \
-            python3 -c "import sys,json; data=json.loads(sys.stdin.read()); print(json.dumps(data,indent=2))" >> "${EVIDENCE_FILE}" 2>&1
-        echo '```' >> "${EVIDENCE_FILE}"
-
+        pf_ok=true
+        local entry metric title response
+        for entry in \
+            "DCGM_FI_DEV_GPU_UTIL|GPU Utilization" \
+            "DCGM_FI_DEV_FB_USED|GPU Memory Used" \
+            "DCGM_FI_DEV_GPU_TEMP|GPU Temperature" \
+            "DCGM_FI_DEV_POWER_USAGE|GPU Power Draw"; do
+            metric="${entry%%|*}" title="${entry#*|}"
+            response=$(lgtm_query "${metric}") || response=""
+            echo "" >> "${EVIDENCE_FILE}"
+            echo "**${title} (${metric})**" >> "${EVIDENCE_FILE}"
+            echo '```' >> "${EVIDENCE_FILE}"
+            if printf '%s' "${response}" | promql_has_result; then
+                backend_ok=true
+            fi
+            if [ -n "${response}" ]; then
+                printf '%s' "${response}" | \
+                    python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin),indent=2))" >> "${EVIDENCE_FILE}" 2>/dev/null || \
+                    printf '%s\n' "${response}" >> "${EVIDENCE_FILE}"
+            else
+                echo "(no response from otel-lgtm)" >> "${EVIDENCE_FILE}"
+            fi
+            echo '```' >> "${EVIDENCE_FILE}"
+        done
     else
         echo "" >> "${EVIDENCE_FILE}"
-        echo "**WARNING:** Could not port-forward to Prometheus" >> "${EVIDENCE_FILE}"
+        echo "**WARNING:** Could not port-forward to otel-lgtm (svc/lgtm in ${LGTM_NS})" >> "${EVIDENCE_FILE}"
     fi
     # Always clean up port-forward process to avoid leaking on timeout/failure
     kill "${pf_pid}" 2>/dev/null || true
 
     # Verdict
+    local failures=()
+    if [ -z "${dcgm_svc}" ]; then
+        failures+=("DCGM exporter Service not found in gpu-operator")
+    elif [ "${dcgm_read}" != "true" ]; then
+        failures+=("no DCGM_FI_* series read from the exporter's /metrics")
+    fi
+    if [ "${pf_ok}" != "true" ]; then
+        failures+=("could not port-forward to otel-lgtm (svc/lgtm in ${LGTM_NS})")
+    elif [ "${backend_ok}" != "true" ]; then
+        failures+=("none of the four DCGM queries returned data from otel-lgtm")
+    fi
     echo "" >> "${EVIDENCE_FILE}"
-    local pass=true
-    if [ -z "${dcgm_svc}" ]; then pass=false; fi
-    if [ "${pass}" = "true" ]; then
-        echo "**Result: PASS** — DCGM exporter provides per-GPU metrics (utilization, memory, temperature, power). Prometheus actively scrapes and stores metrics." >> "${EVIDENCE_FILE}"
+    if [ "${#failures[@]}" -eq 0 ]; then
+        echo "**Result: PASS** — DCGM exporter provides per-GPU metrics (utilization, memory, temperature, power), and they are queryable in otel-lgtm." >> "${EVIDENCE_FILE}"
     else
-        echo "**Result: FAIL** — DCGM exporter not found or metrics unavailable." >> "${EVIDENCE_FILE}"
+        local joined
+        joined=$(printf '%s; ' "${failures[@]}")
+        echo "**Result: FAIL** — ${joined%; }." >> "${EVIDENCE_FILE}"
     fi
 
     log_info "Accelerator metrics evidence collection complete."
 }
 
-# --- Section 4b: AI Service Metrics (Prometheus Discovery) ---
+# --- Section 4b: AI Service Metrics (NKTP Discovery) ---
 # Detects the AI workload type and collects metrics evidence accordingly.
 # Priority: Dynamo inference > standalone PyTorch training (with embedded manifest).
-# The training path only requires GPU nodes + Prometheus — no Kubeflow Trainer needed.
+# The training path only requires GPU nodes + NKTP — no Kubeflow Trainer needed.
 collect_service_metrics() {
     EVIDENCE_FILE="${EVIDENCE_DIR}/ai-service-metrics.md"
     log_info "Collecting AI Service Metrics evidence → ${EVIDENCE_FILE}"
@@ -1796,7 +1974,7 @@ collect_service_metrics() {
         collect_service_metrics_nim
     else
         # Training path: deploys a standalone PyTorch pod with Prometheus metrics.
-        # Only requires GPU nodes + Prometheus — no Kubeflow Trainer dependency.
+        # Only requires GPU nodes + NKTP — no Kubeflow Trainer dependency.
         collect_service_metrics_trainer
     fi
 }
@@ -1806,7 +1984,7 @@ collect_service_metrics_dynamo() {
     write_section_header "AI Service Metrics (Prometheus PodMonitor Discovery)"
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
-Demonstrates that Prometheus discovers and collects metrics from AI workloads
+Demonstrates that NKTP discovers and collects metrics from AI workloads
 that expose them in Prometheus exposition format, using the PodMonitor CRD
 for automatic target discovery.
 
@@ -1915,13 +2093,20 @@ for l in data.split('\n'):
         print(l)" 2>&1 | head -15 >> "${EVIDENCE_FILE}"
     echo '```' >> "${EVIDENCE_FILE}"
 
+    if ! resolve_lgtm; then
+        log_error "${LGTM_ERR}"
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — ${LGTM_ERR}" >> "${EVIDENCE_FILE}"
+        return
+    fi
+
     # Show PodMonitors (auto-created by Dynamo operator)
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 
 ## PodMonitors (Auto-Created by Dynamo Operator)
 
 The Dynamo operator automatically creates PodMonitors for worker and frontend
-pods. Prometheus discovers workload pods in any namespace via
+pods. NKTP discovers workload pods in any namespace via
 `namespaceSelector.any: true`.
 EOF
     capture "Dynamo PodMonitors" kubectl get podmonitors -n dynamo-system
@@ -1935,61 +2120,44 @@ EOF
         python3 -c "import sys,json; d=json.loads(sys.stdin.read()); [print(f'{k}: {v}') for k,v in sorted(d.items()) if 'dynamo' in k or 'metrics' in k]" >> "${EVIDENCE_FILE}" 2>&1
     echo '```' >> "${EVIDENCE_FILE}"
 
-    # Verify Prometheus target discovery via port-forward
+    # Verify NKTP target discovery via port-forward to otel-lgtm
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 
-## Prometheus Target Discovery
+## NKTP Target Discovery
 
-Prometheus automatically discovers both Dynamo frontend and worker pods as
-scrape targets via PodMonitors and actively collects metrics.
+NKTP discovers both Dynamo frontend and worker pods as scrape targets via
+PodMonitors; each target's `up` series in otel-lgtm records its scrapes.
 EOF
 
-    log_info "Checking Prometheus targets for Dynamo workload..."
-    kubectl port-forward svc/kube-prometheus-prometheus -n monitoring 9090:9090 &>/dev/null &
+    log_info "Checking otel-lgtm for Dynamo workload targets..."
+    kubectl port-forward svc/lgtm -n "${LGTM_NS}" 9090:9090 &>/dev/null &
     local pf_pid=$!
 
     if wait_for_port 9090 30 "${pf_pid}"; then
-        # Wait for Dynamo targets to appear (up to 2 minutes)
-        local target_found=false
-        for i in $(seq 1 12); do
-            if curl -sf 'http://localhost:9090/api/v1/targets?state=active' 2>/dev/null | \
-                python3 -c "import sys,json; data=json.load(sys.stdin); exit(0 if any('dynamo' in t['labels'].get('job','') for t in data['data']['activeTargets']) else 1)" 2>/dev/null; then
-                target_found=true
-                break
-            fi
-            sleep 10
-        done
-
-        if [ "${target_found}" = "true" ]; then
-            echo "" >> "${EVIDENCE_FILE}"
-            echo "**Prometheus scrape targets (active)**" >> "${EVIDENCE_FILE}"
-            echo '```' >> "${EVIDENCE_FILE}"
-            curl -sf 'http://localhost:9090/api/v1/targets?state=active' 2>/dev/null | \
-                python3 -c "
-import sys,json
-data=json.load(sys.stdin)
-for t in data['data']['activeTargets']:
-    job = t['labels'].get('job','')
-    # Only show workload PodMonitor targets (dynamo-system/dynamo-*), not operator ServiceMonitor
-    if job.startswith('dynamo-system/dynamo-'):
-        print(json.dumps({'job':job,'endpoint':t['scrapeUrl'],'health':t['health'],'lastScrape':t['lastScrape']},indent=2))" >> "${EVIDENCE_FILE}" 2>&1
-            echo '```' >> "${EVIDENCE_FILE}"
-
-            # Query Dynamo metrics from Prometheus
+        # Workload PodMonitor targets only (job <namespace>/<monitor>), not the
+        # operator's own ServiceMonitor.
+        if check_discovery 'dynamo-system/dynamo-.*' '' 120; then
+            # Query Dynamo metrics from otel-lgtm
             cat >> "${EVIDENCE_FILE}" <<'EOF'
 
-## Dynamo Metrics in Prometheus
+## Dynamo Metrics in otel-lgtm
 
-Prometheus collects Dynamo application-level inference metrics from both
+otel-lgtm holds Dynamo application-level inference metrics from both
 frontend and worker, including request throughput, latency, token counts,
 and model KV cache utilization.
 EOF
             echo "" >> "${EVIDENCE_FILE}"
-            echo "**Dynamo metrics queried from Prometheus (after 10 inference requests)**" >> "${EVIDENCE_FILE}"
+            echo "**Dynamo metrics queried from otel-lgtm (after 10 inference requests)**" >> "${EVIDENCE_FILE}"
             echo '```' >> "${EVIDENCE_FILE}"
-            local prom_response
-            prom_response=$(curl -sf --data-urlencode 'query={job=~"dynamo-system/dynamo-.*",__name__=~"dynamo_.*"}' 'http://localhost:9090/api/v1/query' 2>/dev/null)
-            if [ -n "${prom_response}" ]; then
+            # Checked on kind for a ServiceMonitor target: dynamo_* counter and
+            # histogram names survive OTLP export, and the series carry their
+            # target's job, instance, and namespace as `up` does. Not yet
+            # checked for Dynamo's PodMonitors, whose namespace must be the
+            # pods' namespace, not dynamo-system.
+            local prom_response app_ok=false
+            prom_response=$(lgtm_query "{${WORKLOAD_SELECTOR},__name__=~\"dynamo_.*\"}") || prom_response=""
+            if printf '%s' "${prom_response}" | promql_has_result; then
+                app_ok=true
                 echo "${prom_response}" | python3 -c "
 import sys,json
 data=json.load(sys.stdin)
@@ -2003,19 +2171,23 @@ for r in data['data']['result']:
         label=f'{{endpoint=\"{endpoint}\"}}' if endpoint else ''
         print(f'{name}{label} = {val}')" 2>&1 | head -15 >> "${EVIDENCE_FILE}"
             else
-                echo "WARNING: No response from Prometheus query" >> "${EVIDENCE_FILE}"
+                echo "(no Dynamo series returned by otel-lgtm)" >> "${EVIDENCE_FILE}"
             fi
             echo '```' >> "${EVIDENCE_FILE}"
 
             echo "" >> "${EVIDENCE_FILE}"
-            echo "**Result: PASS** — Prometheus discovers Dynamo inference workloads (frontend + worker) via operator-managed PodMonitors and actively scrapes their Prometheus-format metrics endpoints. Application-level AI inference metrics are collected and queryable." >> "${EVIDENCE_FILE}"
+            if [ "${app_ok}" = "true" ]; then
+                echo "**Result: PASS** — The Dynamo inference workload's operator-managed PodMonitor targets were discovered and scraped, and its application-level AI inference metrics are queryable in otel-lgtm." >> "${EVIDENCE_FILE}"
+            else
+                echo "**Result: FAIL** — ${NO_APP_SERIES_MSG}" >> "${EVIDENCE_FILE}"
+            fi
         else
             echo "" >> "${EVIDENCE_FILE}"
-            echo "**Result: FAIL** — Prometheus did not discover Dynamo targets within 2 minutes. Ensure PodMonitors have the 'release' label matching Prometheus podMonitorSelector." >> "${EVIDENCE_FILE}"
+            echo "**Result: FAIL** — no healthy Dynamo workload target (job dynamo-system/dynamo-*) appeared in otel-lgtm within 2 minutes. ${LGTM_HINT}" >> "${EVIDENCE_FILE}"
         fi
     else
         echo "" >> "${EVIDENCE_FILE}"
-        echo "**Result: FAIL** — Could not connect to Prometheus." >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — Could not connect to otel-lgtm (svc/lgtm in ${LGTM_NS})." >> "${EVIDENCE_FILE}"
     fi
     kill "${pf_pid}" 2>/dev/null || true
 
@@ -2139,7 +2311,14 @@ for l in data.split('\n'):
             print(l)" 2>&1 | head -20 >> "${EVIDENCE_FILE}"
     echo '```' >> "${EVIDENCE_FILE}"
 
-    # Create a ServiceMonitor so Prometheus can discover and scrape NIM metrics.
+    if ! resolve_lgtm; then
+        log_error "${LGTM_ERR}"
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — ${LGTM_ERR}" >> "${EVIDENCE_FILE}"
+        return
+    fi
+
+    # Create a ServiceMonitor so NKTP can discover and scrape NIM metrics.
     # NIM exposes metrics at /v1/metrics (not /metrics), so we need a custom path.
     log_info "Creating ServiceMonitor for NIM metrics discovery..."
     kubectl apply -f - <<'SM_EOF'
@@ -2148,8 +2327,6 @@ kind: ServiceMonitor
 metadata:
   name: nim-inference
   namespace: monitoring
-  labels:
-    release: kube-prometheus
 spec:
   namespaceSelector:
     matchNames:
@@ -2165,53 +2342,31 @@ SM_EOF
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 
-## Prometheus Metrics Discovery
+## NKTP Metrics Discovery
 
-A ServiceMonitor is created to enable Prometheus auto-discovery of NIM inference
+A ServiceMonitor is created to enable NKTP auto-discovery of NIM inference
 metrics. NIM exposes metrics at `/v1/metrics` in Prometheus exposition format.
 EOF
 
     capture "NIM ServiceMonitor" kubectl get servicemonitor nim-inference -n monitoring -o yaml
 
-    log_info "Waiting for Prometheus to discover and scrape NIM targets (up to 3m)..."
-    kubectl port-forward svc/kube-prometheus-prometheus -n monitoring 9090:9090 &>/dev/null &
+    log_info "Waiting for otel-lgtm to show healthy NIM targets (up to 3m)..."
+    kubectl port-forward svc/lgtm -n "${LGTM_NS}" 9090:9090 &>/dev/null &
     local pf_pid=$!
 
     if wait_for_port 9090 30 "${pf_pid}"; then
-        # Wait for NIM targets with health=up (at least one successful scrape).
         # Match by namespace since the job name comes from the service name.
-        local target_found=false
-        for i in $(seq 1 18); do
-            if curl -sf 'http://localhost:9090/api/v1/targets?state=active' 2>/dev/null | \
-                python3 -c "import sys,json; data=json.load(sys.stdin); exit(0 if any(t['labels'].get('namespace','')=='${NS}' and t.get('health')=='up' for t in data['data']['activeTargets']) else 1)" 2>/dev/null; then
-                target_found=true
-                break
-            fi
-            log_info "NIM target not yet healthy (attempt ${i}/18), retrying in 10s..."
-            sleep 10
-        done
+        if check_discovery '.+' "${NS}" 180; then
+            # Checked on kind for a ServiceMonitor target: names survive OTLP
+            # export, and the series carry their target's job, instance, and
+            # namespace as `up` does.
+            local prom_response app_ok=false
+            prom_response=$(lgtm_query "{${WORKLOAD_SELECTOR},__name__=~\"prompt_tokens_total|generation_tokens_total|time_to_first_token_seconds_sum|time_per_output_token_seconds_sum|e2e_request_latency_seconds_sum\"}") || prom_response=""
 
-        if [ "${target_found}" = "true" ]; then
-            echo "" >> "${EVIDENCE_FILE}"
-            echo "**Prometheus scrape targets (active)**" >> "${EVIDENCE_FILE}"
-            echo '```' >> "${EVIDENCE_FILE}"
-            curl -sf 'http://localhost:9090/api/v1/targets?state=active' 2>/dev/null | \
-                python3 -c "
-import sys,json
-data=json.load(sys.stdin)
-for t in data['data']['activeTargets']:
-    ns = t['labels'].get('namespace','')
-    if ns == '${NS}':
-        print(json.dumps({'job':t['labels'].get('job',''),'endpoint':t['scrapeUrl'],'health':t['health'],'lastScrape':t['lastScrape']},indent=2))" >> "${EVIDENCE_FILE}" 2>&1
-            echo '```' >> "${EVIDENCE_FILE}"
-
-            # Query NIM-specific metrics from Prometheus
-            local prom_response
-            prom_response=$(curl -sf --data-urlencode "query={__name__=~\"prompt_tokens_total|generation_tokens_total|time_to_first_token_seconds_sum|time_per_output_token_seconds_sum|e2e_request_latency_seconds_sum\",model_name=~\".*\"}" 'http://localhost:9090/api/v1/query' 2>/dev/null)
-
-            if [ -n "${prom_response}" ] && echo "${prom_response}" | python3 -c "import sys,json; data=json.load(sys.stdin); exit(0 if data['data']['result'] else 1)" 2>/dev/null; then
+            if printf '%s' "${prom_response}" | promql_has_result; then
+                app_ok=true
                 echo "" >> "${EVIDENCE_FILE}"
-                echo "**NIM metrics queried from Prometheus**" >> "${EVIDENCE_FILE}"
+                echo "**NIM metrics queried from otel-lgtm**" >> "${EVIDENCE_FILE}"
                 echo '```' >> "${EVIDENCE_FILE}"
                 echo "${prom_response}" | python3 -c "
 import sys,json
@@ -2225,14 +2380,18 @@ for r in data['data']['result']:
             fi
 
             echo "" >> "${EVIDENCE_FILE}"
-            echo "**Result: PASS** — Prometheus discovers NIM inference workloads via ServiceMonitor and actively scrapes application-level AI inference metrics (token throughput, request latency, time-to-first-token) from the /v1/metrics endpoint." >> "${EVIDENCE_FILE}"
+            if [ "${app_ok}" = "true" ]; then
+                echo "**Result: PASS** — The NIM inference workload's ServiceMonitor targets were discovered and scraped, and its application-level AI inference metrics (token throughput, request latency, time-to-first-token) are queryable in otel-lgtm." >> "${EVIDENCE_FILE}"
+            else
+                echo "**Result: FAIL** — ${NO_APP_SERIES_MSG}" >> "${EVIDENCE_FILE}"
+            fi
         else
             echo "" >> "${EVIDENCE_FILE}"
-            echo "**Result: FAIL** — Prometheus did not discover NIM targets within 2 minutes." >> "${EVIDENCE_FILE}"
+            echo "**Result: FAIL** — no healthy NIM target in namespace ${NS} appeared in otel-lgtm within 3 minutes. ${LGTM_HINT}" >> "${EVIDENCE_FILE}"
         fi
     else
         echo "" >> "${EVIDENCE_FILE}"
-        echo "**Result: FAIL** — Could not connect to Prometheus." >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — Could not connect to otel-lgtm (svc/lgtm in ${LGTM_NS})." >> "${EVIDENCE_FILE}"
     fi
     kill "${pf_pid}" 2>/dev/null || true
 
@@ -2261,7 +2420,7 @@ collect_service_metrics_trainer() {
     write_section_header "AI Service Metrics (Prometheus ServiceMonitor Discovery)"
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
-Demonstrates that Prometheus discovers and collects metrics from AI training
+Demonstrates that NKTP discovers and collects metrics from AI training
 workloads that expose them in Prometheus exposition format, using the
 ServiceMonitor CRD for automatic target discovery.
 
@@ -2272,16 +2431,22 @@ EOF
     local train_manifest="${SCRIPT_DIR}/manifests/trainer-pytorch-test.yaml"
     local deployed_training=false
 
-    # Deploy PyTorch training workload
-    if [ -f "${train_manifest}" ]; then
-        log_info "Deploying PyTorch training workload..."
-        kubectl apply -f "${train_manifest}"
-        deployed_training=true
-    else
+    if [ ! -f "${train_manifest}" ]; then
         log_warn "trainer-pytorch-test.yaml not found at ${train_manifest}"
         echo "**Result: SKIP (prerequisite absent)** — training manifest not found." >> "${EVIDENCE_FILE}"
         return
     fi
+
+    # Before deploying, so a cluster without NKTP never runs the GPU workload.
+    if ! resolve_lgtm; then
+        log_error "${LGTM_ERR}"
+        echo "**Result: FAIL** — ${LGTM_ERR}" >> "${EVIDENCE_FILE}"
+        return
+    fi
+
+    log_info "Deploying PyTorch training workload..."
+    kubectl apply -f "${train_manifest}"
+    deployed_training=true
 
     # Wait for training pod to be running (poll every 15s, up to 5 minutes)
     log_info "Waiting for training pod to be running (up to 5m)..."
@@ -2349,77 +2514,66 @@ EOF
     capture "Training ServiceMonitor" kubectl get servicemonitor pytorch-training -n "${NS}" -o yaml
     capture "Service endpoint" kubectl get endpoints pytorch-training-metrics -n "${NS}"
 
-    # Verify Prometheus target discovery
+    # Verify NKTP target discovery
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 
-## Prometheus Target Discovery
+## NKTP Target Discovery
 
-Prometheus automatically discovers the PyTorch training workload as a scrape
-target via ServiceMonitor and actively collects metrics.
+NKTP discovers the PyTorch training workload as a scrape target via
+ServiceMonitor; its `up` series in otel-lgtm records its scrapes.
 EOF
 
-    log_info "Checking Prometheus targets for training workload..."
-    kubectl port-forward svc/kube-prometheus-prometheus -n monitoring 9090:9090 &>/dev/null &
+    log_info "Checking otel-lgtm for the training workload target..."
+    kubectl port-forward svc/lgtm -n "${LGTM_NS}" 9090:9090 &>/dev/null &
     local pf_pid=$!
 
     if wait_for_port 9090 30 "${pf_pid}"; then
-        # Wait for target to appear (up to 3 minutes)
-        local target_found=false
-        for i in $(seq 1 18); do
-            if curl -sf 'http://localhost:9090/api/v1/targets?state=active' 2>/dev/null | \
-                python3 -c "import sys,json; data=json.load(sys.stdin); exit(0 if any(t['labels'].get('job','')=='pytorch-training-metrics' for t in data['data']['activeTargets']) else 1)" 2>/dev/null; then
-                target_found=true
-                break
-            fi
-            sleep 10
-        done
-
-        if [ "${target_found}" = "true" ]; then
-            echo "" >> "${EVIDENCE_FILE}"
-            echo "**Prometheus scrape target (active)**" >> "${EVIDENCE_FILE}"
-            echo '```' >> "${EVIDENCE_FILE}"
-            curl -sf 'http://localhost:9090/api/v1/targets?state=active' 2>/dev/null | \
-                python3 -c "
-import sys,json
-data=json.load(sys.stdin)
-for t in data['data']['activeTargets']:
-    if t['labels'].get('job','')=='pytorch-training-metrics':
-        print(json.dumps({'job':t['labels']['job'],'endpoint':t['scrapeUrl'],'health':t['health'],'lastScrape':t['lastScrape']},indent=2))" >> "${EVIDENCE_FILE}" 2>&1
-            echo '```' >> "${EVIDENCE_FILE}"
-
+        # A ServiceMonitor's job is the Service's name.
+        if check_discovery 'pytorch-training-metrics' "${NS}" 180; then
             # Wait for metrics to be ingested (one more scrape cycle)
             sleep 20
 
-            # Query training metrics from Prometheus
+            # Query training metrics from otel-lgtm
             cat >> "${EVIDENCE_FILE}" <<'EOF'
 
-## Training Metrics in Prometheus
+## Training Metrics in otel-lgtm
 
-Prometheus collects PyTorch training workload metrics including training step
+otel-lgtm holds PyTorch training workload metrics including training step
 count, loss, throughput, and GPU memory utilization.
 EOF
             echo "" >> "${EVIDENCE_FILE}"
-            echo "**Training metrics queried from Prometheus**" >> "${EVIDENCE_FILE}"
+            echo "**Training metrics queried from otel-lgtm**" >> "${EVIDENCE_FILE}"
             echo '```' >> "${EVIDENCE_FILE}"
+            # Checked on kind for a ServiceMonitor target: names survive OTLP
+            # export, and the series carry their target's job, instance, and
+            # namespace as `up` does.
+            local metric response app_ok=false
             for metric in training_step_total training_loss training_throughput_samples_per_sec training_gpu_memory_used_bytes training_gpu_memory_total_bytes; do
-                local val
-                val=$(curl -sf --data-urlencode "query=${metric}{job=\"pytorch-training-metrics\"}" 'http://localhost:9090/api/v1/query' 2>/dev/null | \
-                    python3 -c "import sys,json; data=json.load(sys.stdin); r=data['data']['result']; print(f'{r[0][\"metric\"][\"__name__\"]} = {r[0][\"value\"][1]}') if r else None" 2>/dev/null)
-                if [ -n "${val}" ]; then
-                    echo "${val}" >> "${EVIDENCE_FILE}"
+                response=$(lgtm_query "${metric}{${WORKLOAD_SELECTOR}}") || response=""
+                if printf '%s' "${response}" | promql_has_result; then
+                    app_ok=true
+                    printf '%s' "${response}" | \
+                        python3 -c "import sys,json; r=json.load(sys.stdin)['data']['result'][0]; print(f'{r[\"metric\"][\"__name__\"]} = {r[\"value\"][1]}')" >> "${EVIDENCE_FILE}" 2>/dev/null
                 fi
             done
+            if [ "${app_ok}" != "true" ]; then
+                echo "(no training series returned by otel-lgtm)" >> "${EVIDENCE_FILE}"
+            fi
             echo '```' >> "${EVIDENCE_FILE}"
 
             echo "" >> "${EVIDENCE_FILE}"
-            echo "**Result: PASS** — Prometheus discovers the PyTorch training workload via ServiceMonitor and actively scrapes its Prometheus-format metrics endpoint. Training-level metrics (step count, loss, throughput, GPU memory) are collected and queryable." >> "${EVIDENCE_FILE}"
+            if [ "${app_ok}" = "true" ]; then
+                echo "**Result: PASS** — The PyTorch training workload's ServiceMonitor target was discovered and scraped, and its training metrics (step count, loss, throughput, GPU memory) are queryable in otel-lgtm." >> "${EVIDENCE_FILE}"
+            else
+                echo "**Result: FAIL** — ${NO_APP_SERIES_MSG}" >> "${EVIDENCE_FILE}"
+            fi
         else
             echo "" >> "${EVIDENCE_FILE}"
-            echo "**Result: FAIL** — Prometheus did not discover training target within 3 minutes." >> "${EVIDENCE_FILE}"
+            echo "**Result: FAIL** — no healthy training target (job pytorch-training-metrics) appeared in otel-lgtm within 3 minutes. ${LGTM_HINT}" >> "${EVIDENCE_FILE}"
         fi
     else
         echo "" >> "${EVIDENCE_FILE}"
-        echo "**Result: FAIL** — Could not connect to Prometheus." >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — Could not connect to otel-lgtm (svc/lgtm in ${LGTM_NS})." >> "${EVIDENCE_FILE}"
     fi
     kill "${pf_pid}" 2>/dev/null || true
 
