@@ -42,12 +42,17 @@ spec:
       dependencyRefs:
         - prometheus-operator-crds
 
-    # nktp: EKS ships no resource metrics API.
+    # nktp: EKS ships no resource metrics API. With VPC CNI custom networking,
+    # pods sit in a security group that a node's kubelet need not admit, so
+    # metrics-server runs on the host network, off the kubelet's port 10250.
     - name: nktp
       type: Helm
       overrides:
         metrics-server:
           enabled: true
+          hostNetwork:
+            enabled: true
+          containerPort: 4443
 
     # EKS has no control-plane nodes — remove the default nodeAffinity
     # that requires node-role.kubernetes.io/control-plane

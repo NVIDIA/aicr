@@ -2294,7 +2294,9 @@ Every stock recipe installs it except `ocp` and
 - Its bundled metrics-server is on only where the platform ships no resource
   metrics API: EKS, OKE, LKE, NVKE, CKS, Kind, and generic GB300. On LKE
   and Kind it skips kubelet certificate verification, which their kubelet
-  certificates cannot pass.
+  certificates cannot pass. On EKS it runs on the host network, so it can reach
+  kubelets when VPC CNI custom networking puts pods in a different security
+  group from their nodes.
 - On Kind, each central collector runs one replica.
 - On RKE2 and CKS, its `node-exporter` listens on port 9110, since some RKE2
   hosts and CoreWeave's own exporter use 9100.
