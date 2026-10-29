@@ -187,7 +187,6 @@ func TestRepoCredsRefresher(t *testing.T) {
 	}
 }
 
-// gauges reads the token's expiry and refresh timestamps.
 func gauges(r *RepoCredsRefresher) (expiry, refresh float64) {
 	c := r.Collectors()
 	return testutil.ToFloat64(c[0]), testutil.ToFloat64(c[1])

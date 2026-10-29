@@ -15,6 +15,7 @@
 package resolver
 
 import (
+	"archive/tar"
 	"bytes"
 	"compress/gzip"
 	"fmt"
@@ -156,6 +157,7 @@ func TestChartDefaults(t *testing.T) {
 		"oversized entry": chartArchive(t, map[string]string{"c/values.yaml": strings.Repeat("#", maxChartDefaultsBytes+1)}),
 		"oversized total": chartArchive(t, oversized),
 		"too many files":  chartArchive(t, numerous),
+		"repeated file":   repeatedEntry(t, maxChartDefaultsEntries+1),
 	} {
 		if _, err := chartDefaults(bad); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
 			t.Errorf("%s: chartDefaults() = %v", name, err)
@@ -186,6 +188,24 @@ func TestChartDefaultsStopsAtTheNestingBound(t *testing.T) {
 	if hasPath(got, "l1.l2.l3") {
 		t.Errorf("defaults were read %d levels deep: %v", maxNestedCharts+1, got)
 	}
+}
+
+func repeatedEntry(t *testing.T, n int) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for range n {
+		if err := tw.WriteHeader(&tar.Header{Name: "c/values.yaml", Mode: 0o644, Size: 5, Typeflag: tar.TypeReg}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte("a: 1\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return gzipped(t, buf.Bytes())
 }
 
 func gzipped(t *testing.T, data []byte) []byte {

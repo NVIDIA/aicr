@@ -261,8 +261,6 @@ func TestFailedRunsAreRecordedAndKept(t *testing.T) {
 	}
 }
 
-// jobObservations is how many Job durations the histogram holds for a stage
-// and result.
 func jobObservations(t *testing.T, stage, result string) uint64 {
 	t.Helper()
 	reg := prometheus.NewRegistry()

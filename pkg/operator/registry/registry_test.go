@@ -472,8 +472,8 @@ func TestMirrorHTTPChartPlainHTTPIsPerHost(t *testing.T) {
 
 // A redirect is held to the same rule as the URL it came from, before it is
 // followed: a configured plain-HTTP host cannot hand the fetch to an
-// unconfigured one.
-func TestMirrorHTTPChartRefusesARedirectToPlainHTTP(t *testing.T) {
+// unconfigured one. A supplied client's own redirect policy still applies.
+func TestMirrorHTTPChartRedirectPolicy(t *testing.T) {
 	t.Parallel()
 	_, repo := testRegistry(t)
 	target, fetches := counted(t, nil)
@@ -481,10 +481,28 @@ func TestMirrorHTTPChartRefusesARedirectToPlainHTTP(t *testing.T) {
 		http.Redirect(w, r, target+r.URL.Path, http.StatusFound)
 	}))
 	t.Cleanup(redirect.Close)
-	c := New(Options{PlainHTTPHosts: []string{repo.Host, hostOf(t, redirect.URL)}})
-	_, err := c.MirrorHTTPChart(context.Background(), UpstreamChart{Repository: redirect.URL, Chart: "demo", Version: "1.0.0"}, repo.Child("charts"))
-	if operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest || !strings.Contains(fmt.Sprint(err), "redirect to") || fetches.Load() != 0 {
-		t.Fatalf("MirrorHTTPChart() = %v with %d requests to the unconfigured host; want a redirect refused before it is followed", err, fetches.Load())
+	refusing := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return operrors.New(operrors.ErrCodeUnauthorized, "refused by the supplied policy")
+	}}
+	tests := []struct {
+		name     string
+		plain    []string
+		client   *http.Client
+		wantCode operrors.ErrorCode
+		wantText string
+	}{
+		{"to an unconfigured plain-HTTP host", []string{repo.Host, hostOf(t, redirect.URL)}, nil,
+			operrors.ErrCodeInvalidRequest, "redirect to"},
+		{"refused by the supplied client", []string{repo.Host, hostOf(t, redirect.URL), hostOf(t, target)}, refusing,
+			operrors.ErrCodeUnauthorized, "supplied policy"},
+	}
+	for _, tt := range tests {
+		fetches.Store(0)
+		c := New(Options{PlainHTTPHosts: tt.plain, HTTPClient: tt.client})
+		_, err := c.MirrorHTTPChart(context.Background(), UpstreamChart{Repository: redirect.URL, Chart: "demo", Version: "1.0.0"}, repo.Child("charts"))
+		if operrors.CodeOf(err) != tt.wantCode || !strings.Contains(fmt.Sprint(err), tt.wantText) || fetches.Load() != 0 {
+			t.Errorf("%s: MirrorHTTPChart() = %v with %d requests to the target; want %q before it is followed", tt.name, err, fetches.Load(), tt.wantText)
+		}
 	}
 }
 
@@ -527,6 +545,7 @@ func TestClassify(t *testing.T) {
 		{resp(http.StatusForbidden), operrors.ErrCodeUnauthorized},
 		{resp(http.StatusTooManyRequests), operrors.ErrCodeRateLimitExceeded},
 		{resp(http.StatusBadGateway), operrors.ErrCodeUnavailable},
+		{fmt.Errorf("listing: %w", errdef.ErrTooManyPages), operrors.ErrCodeInvalidRequest},
 		{context.DeadlineExceeded, operrors.ErrCodeTimeout},
 		{operrors.New(operrors.ErrCodeConflict, "kept"), operrors.ErrCodeConflict},
 	}

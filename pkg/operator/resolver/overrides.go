@@ -193,7 +193,7 @@ func readArchive(archive []byte) (map[string][]byte, error) {
 	defer gz.Close()
 	tr := tar.NewReader(gz)
 	files := map[string][]byte{}
-	total := 0
+	entries, total := 0, 0
 	for {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -206,7 +206,7 @@ func readArchive(archive []byte) (map[string][]byte, error) {
 		if h.Typeflag != tar.TypeReg || (path.Base(name) != chartValuesFile && !strings.HasSuffix(name, ".tgz")) {
 			continue
 		}
-		if len(files) >= maxChartDefaultsEntries {
+		if entries++; entries > maxChartDefaultsEntries {
 			return nil, operrors.New(operrors.ErrCodeInvalidRequest,
 				fmt.Sprintf("chart archive has more than %d values files and subcharts", maxChartDefaultsEntries))
 		}

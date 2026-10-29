@@ -55,13 +55,11 @@ var aicrJobRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Help: "Finished AICR runs, by stage, result and, for failures, retry class.",
 }, []string{"stage", labelResult, "class"})
 
-// metricStages are the stages AICR Jobs record metrics under.
 var metricStages = []aicrjob.Stage{
 	aicrjob.StageSnapshot, aicrjob.StageRecipe, aicrjob.StageBaseRender,
 	aicrjob.StageRender, aicrjob.StageAssessment, aicrjob.StageValidation,
 }
 
-// terminalPhases are the rollout outcomes.
 var terminalPhases = []v1alpha1.RolloutPhase{
 	v1alpha1.PhaseSucceeded, v1alpha1.PhaseFailed, v1alpha1.PhaseExpired,
 	v1alpha1.PhaseRevoked, v1alpha1.PhaseSuperseded, v1alpha1.PhaseOrphaned,

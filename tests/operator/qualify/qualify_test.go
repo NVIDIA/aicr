@@ -526,9 +526,16 @@ func uninstallReinstall(ctx context.Context, t *testing.T, active string) {
 	}
 }
 
+// logCursor names one run of an operator pod's container: a restart in
+// place starts a new log under the same pod UID.
+type logCursor struct {
+	pod      types.UID
+	restarts int32
+}
+
 // scannedLines is how many log lines nothingForbidden has read from each
-// operator pod, by UID.
-var scannedLines = map[types.UID]int{}
+// operator container run.
+var scannedLines = map[logCursor]int{}
 
 // nothingForbidden scans the running operator pods' logs for an API denial:
 // the suite installs the RBAC the chart ships, so a missing grant shows
@@ -537,6 +544,10 @@ var scannedLines = map[types.UID]int{}
 func nothingForbidden(ctx context.Context, t *testing.T) {
 	t.Helper()
 	for _, p := range operatorPods(ctx, t) {
+		cursor := logCursor{pod: p.UID}
+		for _, s := range p.Status.ContainerStatuses {
+			cursor.restarts += s.RestartCount
+		}
 		logs, err := clientset.CoreV1().Pods(operatorNamespace).GetLogs(p.Name, &corev1.PodLogOptions{}).DoRaw(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -546,10 +557,10 @@ func nothingForbidden(ctx context.Context, t *testing.T) {
 		line := 0
 		for sc.Scan() {
 			line++
-			if line > scannedLines[p.UID] && strings.Contains(strings.ToLower(sc.Text()), "forbidden") {
+			if line > scannedLines[cursor] && strings.Contains(strings.ToLower(sc.Text()), "forbidden") {
 				t.Errorf("%s: %s", p.Name, sc.Text())
 			}
 		}
-		scannedLines[p.UID] = line
+		scannedLines[cursor] = line
 	}
 }

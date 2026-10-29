@@ -56,6 +56,7 @@ type fakeEngine struct {
 	removed       map[string]string // release -> UID passed to Remove
 	removeRefused map[string]error  // release -> error Remove returns instead
 	gone          map[string]bool   // release -> Retired reports it gone
+	deletePending map[string]bool   // release -> Retired reports its delete never landed
 	drifted       map[string]bool   // release -> Observe reports SpecDrifted
 	missing       map[string]bool   // release -> Observe reports Missing
 	priorFailed   map[string]bool   // release -> Observe reports PriorSyncFailed until a Verify
@@ -177,6 +178,9 @@ func (f *fakeEngine) Retired(_ context.Context, name, uid string) (argocd.Observ
 	if f.removed[name] == uid && f.gone[name] {
 		f.inventory = slices.DeleteFunc(f.inventory, func(i argocd.InventoryItem) bool { return i.ReleaseID == name })
 		return argocd.Observation{State: argocd.StateReady, Reason: argocd.ReasonRetired}, nil
+	}
+	if f.deletePending[name] {
+		return argocd.Observation{State: argocd.StateProgressing, Reason: "DeletePending"}, nil
 	}
 	return argocd.Observation{State: argocd.StateProgressing, Reason: "Deleting"}, nil
 }
@@ -971,15 +975,17 @@ func TestRolloutVerifiesAndRemoves(t *testing.T) {
 // still lists it, but nothing rolls back on its own.
 func TestUnfinishedRolloutDoesNotReinstallWhatItRemoved(t *testing.T) {
 	tests := []struct {
-		name    string
-		elapsed time.Duration
-		refused bool
-		want    v1alpha1.RolloutPhase
+		name     string
+		elapsed  time.Duration
+		refused  bool
+		reissued bool
+		want     v1alpha1.RolloutPhase
 	}{
 		{name: "deadline", elapsed: defaults.RolloutDeadline + time.Hour, want: v1alpha1.PhaseExpired},
 		{name: "action timeout", elapsed: defaults.RolloutActionTimeout + time.Minute, want: v1alpha1.PhaseFailed},
 		// A delete that never landed leaves the release to repair.
 		{name: "delete refused", refused: true, want: v1alpha1.PhaseFailed},
+		{name: "re-issued delete refused", reissued: true, want: v1alpha1.PhaseFailed},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -994,8 +1000,9 @@ func TestUnfinishedRolloutDoesNotReinstallWhatItRemoved(t *testing.T) {
 			resolved(t, ctx, target)
 			engine := newEngine()
 			engine.inventory = []argocd.InventoryItem{{ReleaseID: "gpu-operator", UID: "u-g"}, {ReleaseID: "nvsentinel", UID: "u-s"}}
+			refusal := map[string]error{"nvsentinel": operrors.New(operrors.ErrCodeUnauthorized, "delete refused by admission")}
 			if tt.refused {
-				engine.removeRefused = map[string]error{"nvsentinel": operrors.New(operrors.ErrCodeUnauthorized, "delete refused by admission")}
+				engine.removeRefused = refusal
 			}
 			r, clk := newRollout(t, engine, true)
 			clk.now = time.Now().Add(2 * time.Second)
@@ -1005,7 +1012,12 @@ func TestUnfinishedRolloutDoesNotReinstallWhatItRemoved(t *testing.T) {
 			if want := []string{"Ensure gpu-operator", "Remove nvsentinel"}; !slices.Equal(engine.order, want) {
 				t.Fatalf("engine calls = %v, want %v", engine.order, want)
 			}
-			if tt.refused {
+			if tt.reissued {
+				engine.deletePending = map[string]bool{"nvsentinel": true}
+				engine.removeRefused = refusal
+				reconcileRollout(t, ctx, r)
+			}
+			if tt.refused || tt.reissued {
 				// The Application is deleted by hand, not by the rollout.
 				engine.missing["nvsentinel"] = true
 				for range 3 {

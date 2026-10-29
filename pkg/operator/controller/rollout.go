@@ -1135,15 +1135,16 @@ func (r *RolloutReconciler) remove(ctx context.Context, rt *v1alpha1.ClusterRunt
 		return false, nil
 	}
 	obs, err := r.Engine.Retired(ctx, step.Release, step.UID)
+	issued := true
 	if err == nil && obs.Reason == "DeletePending" {
 		// The mark or the delete did not land: issue it again.
-		err = r.Engine.Remove(ctx, string(rt.UID), step.Release, step.UID, ro.Name)
+		err, issued = r.Engine.Remove(ctx, string(rt.UID), step.Release, step.UID, ro.Name), false
 	}
 	if err != nil {
 		if ended, finishErr := r.timedOut(ctx, ro, step, cur, now, "removed", err); ended {
 			return false, finishErr
 		}
-		return fail(err, true)
+		return fail(err, issued)
 	}
 	switch {
 	case obs.State == argocd.StateReady:

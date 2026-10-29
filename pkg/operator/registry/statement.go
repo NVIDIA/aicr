@@ -48,6 +48,10 @@ const sigstoreBundlePrefix = "application/vnd.dev.sigstore.bundle"
 // and the operator's binding, with room for re-runs.
 const maxReferrers = 16
 
+// maxReferrerPages bounds the referrer pages read for one subject. A page
+// without referrers never reaches the maxReferrers check.
+const maxReferrerPages = maxReferrers
+
 // SigstoreBundles returns the Sigstore bundles attached to the manifest with
 // digest subject as referrers: the signatures AICR attaches to its evidence,
 // which the evidence bundle itself never carries. Other referrers, such as
@@ -64,6 +68,7 @@ func (c *Client) SigstoreBundles(ctx context.Context, r Repository, subject stri
 	if err != nil {
 		return nil, err
 	}
+	repo.ReferrerListMaxPages = maxReferrerPages
 	desc, err := repo.Resolve(ctx, subject)
 	if err != nil {
 		return nil, classify(err, fmt.Sprintf("resolve %s@%s", r, subject))
