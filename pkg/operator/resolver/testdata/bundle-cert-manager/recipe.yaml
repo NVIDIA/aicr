@@ -1,0 +1,219 @@
+apiVersion: aicr.run/v1
+componentRefs:
+  - chart: cert-manager
+    healthCheckAsserts: |
+      # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+      #
+      # Licensed under the Apache License, Version 2.0 (the "License");
+      # you may not use this file except in compliance with the License.
+      # You may obtain a copy of the License at
+      #
+      #     http://www.apache.org/licenses/LICENSE-2.0
+      #
+      # Unless required by applicable law or agreed to in writing, software
+      # distributed under the License is distributed on an "AS IS" BASIS,
+      # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      # See the License for the specific language governing permissions and
+      # limitations under the License.
+
+      # Cert Manager Health Check
+      #
+      # Validates that cert-manager is running and healthy in the cert-manager
+      # namespace. The chart deploys three Deployments — the controller
+      # (cert-manager), the CA injector (cert-manager-cainjector), and the
+      # webhook (cert-manager-webhook) — all of which must be available for
+      # the operator to issue / inject / validate certificates. The previous
+      # check only asserted the controller; this check covers all three to
+      # avoid silently passing while the webhook is down (which would block
+      # every Certificate/Issuer CR admission).
+      #
+      # Also asserts the three core CRDs are Established=True so the
+      # apiserver will accept CRs of those kinds (per #1222 / #660).
+      apiVersion: chainsaw.kyverno.io/v1alpha1
+      kind: Test
+      metadata:
+        name: cert-manager-health-check
+      spec:
+        timeouts:
+          assert: 5m
+        steps:
+          - name: validate-crds-established
+            try:
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: certificates.cert-manager.io
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: issuers.cert-manager.io
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: clusterissuers.cert-manager.io
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+          - name: validate-controller-deployment
+            try:
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: cert-manager
+                      namespace: cert-manager
+                    status:
+                      (availableReplicas > `0`): true
+          - name: validate-cainjector-deployment
+            try:
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: cert-manager-cainjector
+                      namespace: cert-manager
+                    status:
+                      (availableReplicas > `0`): true
+          - name: validate-webhook-deployment
+            try:
+              # The webhook must be ready before any Certificate / Issuer CR
+              # can be admitted. Without this assert, a healthy controller
+              # with a dead webhook would still pass the check while the
+              # cluster silently rejects every cert-manager CR.
+              - assert:
+                  resource:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: cert-manager-webhook
+                      namespace: cert-manager
+                    status:
+                      (availableReplicas > `0`): true
+          - name: validate-all-pods-healthy
+            try:
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: cert-manager
+                    status:
+                      phase: Pending
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: cert-manager
+                    status:
+                      phase: Failed
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: cert-manager
+                    status:
+                      phase: Unknown
+              # JMESPath projection (not single-element match): kyverno-json's
+              # sliceNode.Assert gates on exact slice length before per-element
+              # comparison, so a `containerStatuses: - state: ...` shape only
+              # matches single-container pods and silently passes sidecars. Use
+              # `containerStatuses[?...] | length(@) > 0` to fire on any
+              # container at any index. Parallel initContainerStatuses block
+              # below catches init-container failures (invisible to
+              # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: cert-manager
+                    status:
+                      ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+              - error:
+                  resource:
+                    apiVersion: v1
+                    kind: Pod
+                    metadata:
+                      namespace: cert-manager
+                    status:
+                      ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+    name: cert-manager
+    namespace: cert-manager
+    source: https://charts.jetstack.io
+    type: Helm
+    valuesFile: components/cert-manager/values.yaml
+    version: v1.20.2
+constraints:
+  - name: K8s.server.version
+    value: '>= 1.32.4'
+  - name: OS.release.ID
+    value: ubuntu
+  - name: OS.release.VERSION_ID
+    value: "24.04"
+  - name: OS.sysctl./proc/sys/kernel/osrelease
+    value: '>= 6.8'
+criteria:
+  accelerator: h100
+  intent: training
+  os: ubuntu
+  platform: kubeflow
+  service: eks
+deploymentOrder:
+  - cert-manager
+kind: RecipeResult
+metadata:
+  appliedOverlays:
+    - base
+    - monitoring-hpa
+    - h100-any
+    - eks
+    - eks-ubuntu
+    - eks-training
+    - h100-eks-training
+    - h100-eks-ubuntu-training
+    - h100-eks-ubuntu-training-kubeflow
+  version: 1.0.0
+validation:
+  conformance:
+    checks:
+      - platform-health
+      - gpu-operator-health
+      - dra-support
+      - accelerator-metrics
+      - ai-service-metrics
+      - gang-scheduling
+      - pod-autoscaling
+      - cluster-autoscaling
+      - secure-accelerator-access
+      - robust-controller
+  deployment:
+    checks:
+      - operator-health
+      - expected-resources
+      - gpu-operator-version
+      - check-nvidia-smi
+    constraints:
+      - name: Deployment.gpu-operator.version
+        value: '>= v24.6.0'
+  performance:
+    checks:
+      - nccl-all-reduce-bw
+    constraints:
+      - name: nccl-all-reduce-bw
+        value: '>= 300'

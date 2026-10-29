@@ -1,0 +1,85 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+{{/*
+Approvers: they read rollouts and the runtime, approve or
+revoke through the virtual subresource runtimerollouts/approve, and read
+assessment reports in the operator namespace, where no credential is kept.
+Granted separately from ClusterRuntime editing; approvers.users and
+approvers.groups bind it, or administrators bind it themselves.
+*/}}
+{{- $subjects := list }}
+{{- range .Values.approvers.users }}
+{{- $subjects = append $subjects (dict "apiGroup" "rbac.authorization.k8s.io" "kind" "User" "name" .) }}
+{{- end }}
+{{- range .Values.approvers.groups }}
+{{- $subjects = append $subjects (dict "apiGroup" "rbac.authorization.k8s.io" "kind" "Group" "name" .) }}
+{{- end }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: aicr-operator-approver
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [operator.aicr.run]
+    resources: [runtimerollouts]
+    verbs: [get, list, watch, patch]
+  - apiGroups: [operator.aicr.run]
+    resources: [runtimerollouts/approve]
+    verbs: [update]
+  - apiGroups: [operator.aicr.run]
+    resources: [clusterruntimes]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aicr-operator-approver
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list]
+{{- with $subjects }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: aicr-operator-approver
+  labels:
+    {{- include "aicr-operator.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: aicr-operator-approver
+subjects:
+  {{- toYaml . | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aicr-operator-approver
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "aicr-operator.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: aicr-operator-approver
+subjects:
+  {{- toYaml . | nindent 2 }}
+{{- end }}

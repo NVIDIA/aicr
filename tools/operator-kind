@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Manages the operator's kind test cluster: `up` creates it with the node image
+# pinned in .settings.yaml plus a plain-HTTP OCI registry inside the cluster
+# that requires a password; `down` deletes it. The kubeconfig is written to
+# .operator-e2e/kubeconfig and never merged into ~/.kube/config. The registry
+# password is random per cluster; its docker config is written to
+# .operator-e2e/registry-auth.json and never committed.
+#
+# Usage: tools/operator-kind up|down [floor]
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "${repo_root}"
+
+cluster="${OPERATOR_KIND_CLUSTER:-aicr-operator}"
+kubeconfig="${repo_root}/.operator-e2e/kubeconfig"
+registry_auth="${repo_root}/.operator-e2e/registry-auth.json"
+registry_host="registry.aicr-registry.svc.cluster.local:5000"
+registry_user="aicr-e2e"
+setting() { yq -r "$1" .settings.yaml; }
+
+case "${1:-}" in
+up)
+  if [[ "${2:-}" == "floor" ]]; then
+    node_image="$(setting '.operator.kind_node_image_floor')"
+  else
+    node_image="$(setting '.testing.kind_node_image')"
+  fi
+  registry_image="$(setting '.testing_tools.registry_image')"
+  mkdir -p "$(dirname "${kubeconfig}")"
+  if ! kind get clusters 2>/dev/null | grep -qx "${cluster}"; then
+    # Two nodes: the control plane is the system group and the worker the
+    # accelerated group, so discovery's placement groups do not overlap.
+    kind create cluster --name "${cluster}" --image "${node_image}" --kubeconfig "${kubeconfig}" --wait 180s --config - <<'YAML'
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+  - role: worker
+YAML
+  else
+    kind get kubeconfig --name "${cluster}" > "${kubeconfig}"
+    want="${node_image#*:}"
+    want="${want%%@*}"
+    have="$(kubectl --kubeconfig "${kubeconfig}" get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}')"
+    if [[ "${have}" != "${want}" ]]; then
+      echo "kind cluster ${cluster} runs Kubernetes ${have}, not ${want}; run make operator-kind-down first" >&2
+      exit 1
+    fi
+  fi
+  export KUBECONFIG="${kubeconfig}"
+  # The registry image comes from a public registry that throttles and
+  # fails transiently: pull it on the host with retries and load it into the
+  # nodes, so no kubelet pulls it. Loading is best effort: kind cannot load
+  # multi-platform images from Docker's containerd image store, and the
+  # kubelet then pulls the image itself.
+  # OPERATOR_KIND_IMAGE_CACHE names a directory, such as a CI cache, that
+  # keeps the pinned image between runs; the registry then sees one pull.
+  cached=""
+  if [[ -n "${OPERATOR_KIND_IMAGE_CACHE:-}" ]]; then
+    cached="${OPERATOR_KIND_IMAGE_CACHE}/registry.tar"
+    [[ -f "${cached}" ]] && docker load --quiet --input "${cached}" >/dev/null 2>&1 || true
+  fi
+  if ! docker image inspect "${registry_image}" >/dev/null 2>&1; then
+    for attempt in 1 2 3 4 5; do
+      docker pull --quiet "${registry_image}" >/dev/null && break
+      [[ "${attempt}" == 5 ]] && { echo "cannot pull ${registry_image}" >&2; exit 1; }
+      sleep $((attempt * 10))
+    done
+  fi
+  if [[ -n "${cached}" && ! -f "${cached}" ]]; then
+    mkdir -p "${OPERATOR_KIND_IMAGE_CACHE}"
+    docker save --output "${cached}" "${registry_image}"
+  fi
+  kind load docker-image "${registry_image}" --name "${cluster}" >/dev/null 2>&1 ||
+    echo "warning: could not preload ${registry_image}; the kubelet pulls it" >&2
+  kubectl create namespace aicr-registry --dry-run=client -o yaml | kubectl apply -f -
+  if ! kubectl -n aicr-registry get secret registry-htpasswd >/dev/null 2>&1; then
+    password="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    printf '%s\n' "${password}" | go run ./tests/operator/htpasswd "${registry_user}" > "${repo_root}/.operator-e2e/htpasswd"
+    kubectl -n aicr-registry create secret generic registry-htpasswd --from-file=htpasswd="${repo_root}/.operator-e2e/htpasswd"
+    rm -f "${repo_root}/.operator-e2e/htpasswd"
+    auth="$(printf '%s:%s' "${registry_user}" "${password}" | base64 | tr -d '\n')"
+    umask 077
+    printf '{"auths":{"%s":{"auth":"%s"}}}\n' "${registry_host}" "${auth}" > "${registry_auth}"
+  elif [[ ! -s "${registry_auth}" ]]; then
+    # The password exists only in the Secret's hash and in this file.
+    echo "the registry's credentials are not in ${registry_auth}; run make operator-kind-down first" >&2
+    exit 1
+  fi
+  kubectl apply -f - <<YAML
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry
+  namespace: aicr-registry
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: registry}
+  template:
+    metadata:
+      labels: {app: registry}
+    spec:
+      containers:
+      - name: registry
+        image: ${registry_image}
+        env:
+        - {name: REGISTRY_AUTH, value: htpasswd}
+        - {name: REGISTRY_AUTH_HTPASSWD_REALM, value: aicr-e2e}
+        - {name: REGISTRY_AUTH_HTPASSWD_PATH, value: /auth/htpasswd}
+        ports:
+        - containerPort: 5000
+        volumeMounts:
+        - {name: auth, mountPath: /auth, readOnly: true}
+      volumes:
+      - name: auth
+        secret: {secretName: registry-htpasswd}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry
+  namespace: aicr-registry
+spec:
+  selector: {app: registry}
+  ports:
+  - port: 5000
+    targetPort: 5000
+YAML
+  if ! kubectl -n aicr-registry rollout status deployment/registry --timeout=300s; then
+    kubectl -n aicr-registry describe pods >&2
+    kubectl -n aicr-registry get events --sort-by=.lastTimestamp >&2
+    exit 1
+  fi
+  echo "kind cluster ${cluster} ready (${node_image}); KUBECONFIG=${kubeconfig}"
+  ;;
+down)
+  kind delete cluster --name "${cluster}"
+  rm -f "${kubeconfig}" "${registry_auth}"
+  ;;
+*)
+  echo "usage: $0 up|down [floor]" >&2
+  exit 2
+  ;;
+esac

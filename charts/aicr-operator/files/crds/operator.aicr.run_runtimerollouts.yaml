@@ -1,0 +1,532 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: runtimerollouts.operator.aicr.run
+spec:
+  group: operator.aicr.run
+  names:
+    kind: RuntimeRollout
+    listKind: RuntimeRolloutList
+    plural: runtimerollouts
+    shortNames:
+    - aicrro
+    singular: runtimerollout
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.approval
+      name: Approval
+      type: string
+    - jsonPath: .metadata.labels.operator\.aicr\.run/to-plan
+      name: To
+      type: string
+    - jsonPath: .spec.deadline
+      name: Deadline
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          RuntimeRollout is one transition between plans: its target, assessment,
+          steps, deadline and approval. Its spec is immutable except
+          the set-once approval; its outcome label is set once by the operator.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              RuntimeRolloutSpec is immutable except Approval, which is set once and may
+              then gain a revocation, also set once.
+            properties:
+              actionTimeout:
+                description: ActionTimeout bounds each step.
+                maxLength: 32
+                type: string
+              approval:
+                description: Approval is written by an approver, never by the operator.
+                properties:
+                  acknowledgements:
+                    description: |-
+                      Acknowledgements record, per release, that the approver completed its
+                      post-apply steps. Append-only; each names its requester
+                      (admission policy).
+                    items:
+                      description: |-
+                        Acknowledgement is an approver's statement that a release's post-apply
+                        steps are done.
+                      properties:
+                        acknowledgedAt:
+                          description: AcknowledgedAt is informational, written by
+                            the client.
+                          format: date-time
+                          type: string
+                        acknowledgedBy:
+                          description: AcknowledgedBy must equal the requester's username
+                            (admission policy).
+                          maxLength: 1024
+                          minLength: 1
+                          type: string
+                        release:
+                          maxLength: 53
+                          type: string
+                      required:
+                      - acknowledgedBy
+                      - release
+                      type: object
+                    maxItems: 64
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - release
+                    x-kubernetes-list-type: map
+                  approvedBy:
+                    description: ApprovedBy must equal the requester's username (admission
+                      policy).
+                    maxLength: 1024
+                    minLength: 1
+                    type: string
+                  expiresAt:
+                    description: ExpiresAt ends the approval; expiry ends the rollout
+                      as Expired.
+                    format: date-time
+                    type: string
+                  reason:
+                    maxLength: 1024
+                    minLength: 1
+                    type: string
+                  revokeReason:
+                    maxLength: 1024
+                    minLength: 1
+                    type: string
+                  revokedAt:
+                    description: RevokedAt is informational, written by the client.
+                    format: date-time
+                    type: string
+                  revokedBy:
+                    description: RevokedBy must equal the requester's username (admission
+                      policy).
+                    maxLength: 1024
+                    minLength: 1
+                    type: string
+                required:
+                - approvedBy
+                - expiresAt
+                - reason
+                type: object
+                x-kubernetes-validations:
+                - message: revokedBy, revokedAt and revokeReason are set together
+                  rule: has(self.revokedBy) == has(self.revokedAt) && has(self.revokedBy)
+                    == has(self.revokeReason)
+              approvalRequired:
+                description: ApprovalRequired is true when any step requires approval.
+                type: boolean
+              assessmentRef:
+                description: AssessmentRef points at the AICR upgrade-check report.
+                properties:
+                  configMap:
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                  digest:
+                    pattern: ^sha256:[a-f0-9]{64}$
+                    type: string
+                required:
+                - configMap
+                - digest
+                type: object
+              deadline:
+                description: Deadline bounds the rollout; computed once at creation.
+                format: date-time
+                type: string
+              fromPlanDigest:
+                description: FromPlanDigest is the active plan at creation; empty
+                  for an initial install.
+                pattern: ^(sha256:[a-f0-9]{64})?$
+                type: string
+              runtimeUID:
+                description: RuntimeUID is the UID of the ClusterRuntime the rollout
+                  belongs to.
+                pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+                type: string
+              schemaVersion:
+                description: SchemaVersion is the spec schema; an unknown version
+                  stalls.
+                format: int32
+                minimum: 1
+                type: integer
+              startingInventory:
+                description: |-
+                  StartingInventory lists the owned engine objects at creation, which
+                  StartingInventoryDigest digests. Before each step the controller
+                  compares the live inventory with it and the completed steps.
+                items:
+                  description: InventoryEntry is one owned engine object.
+                  properties:
+                    name:
+                      maxLength: 253
+                      minLength: 1
+                      type: string
+                    planDigest:
+                      description: PlanDigest is the object's plan-digest annotation.
+                      maxLength: 71
+                      type: string
+                    releaseID:
+                      maxLength: 53
+                      minLength: 1
+                      type: string
+                    revision:
+                      description: Revision is the engine's observed revision.
+                      maxLength: 256
+                      type: string
+                    uid:
+                      maxLength: 36
+                      type: string
+                  required:
+                  - name
+                  - releaseID
+                  - uid
+                  type: object
+                maxItems: 256
+                type: array
+                x-kubernetes-list-type: atomic
+              startingInventoryDigest:
+                description: StartingInventoryDigest digests the owned objects at
+                  creation.
+                pattern: ^sha256:[a-f0-9]{64}$
+                type: string
+              steps:
+                description: Steps run in order; 128 target releases plus removals
+                  from the active plan.
+                items:
+                  description: RolloutStep is one engine mutation for one release.
+                  properties:
+                    assessment:
+                      description: Assessment is AICR's upgrade-check verdict for
+                        a step.
+                      enum:
+                      - Safe
+                      - Manual
+                      - Blocked
+                      - Unknown
+                      - Unversioned
+                      - NotApplicable
+                      type: string
+                    crdChange:
+                      description: CRDChange is true when the release owns CRDs whose
+                        chart changes.
+                      type: boolean
+                    operation:
+                      description: StepOperation is what a step does to one release.
+                      enum:
+                      - Install
+                      - Upgrade
+                      - Verify
+                      - Remove
+                      - Adopt
+                      type: string
+                    postApplySteps:
+                      description: |-
+                        PostApplySteps are the IDs, in order, of a manual transition record's
+                        steps after the apply. Once the release is ready the rollout waits for
+                        the approver to acknowledge them before the plan becomes active.
+                      items:
+                        maxLength: 63
+                        type: string
+                      maxItems: 16
+                      type: array
+                      x-kubernetes-list-type: atomic
+                    release:
+                      description: Release is the plan release ID (the Helm release-name
+                        limit).
+                      maxLength: 53
+                      minLength: 1
+                      type: string
+                    uid:
+                      description: |-
+                        UID is the engine object a Remove step deletes, fixed when the rollout
+                        is created: an object recreated under the same name is never deleted.
+                      maxLength: 36
+                      type: string
+                  required:
+                  - assessment
+                  - operation
+                  - release
+                  type: object
+                  x-kubernetes-validations:
+                  - message: uid is set exactly on Remove steps
+                    rule: (self.operation == 'Remove') == has(self.uid)
+                maxItems: 256
+                type: array
+                x-kubernetes-list-type: atomic
+              toPlanDigest:
+                description: ToPlanDigest is the target plan.
+                pattern: ^sha256:[a-f0-9]{64}$
+                type: string
+            required:
+            - actionTimeout
+            - approvalRequired
+            - deadline
+            - runtimeUID
+            - schemaVersion
+            - startingInventoryDigest
+            - steps
+            - toPlanDigest
+            type: object
+            x-kubernetes-validations:
+            - message: rollout spec is immutable except spec.approval
+              rule: self.schemaVersion == oldSelf.schemaVersion && self.runtimeUID
+                == oldSelf.runtimeUID && self.toPlanDigest == oldSelf.toPlanDigest
+                && self.startingInventoryDigest == oldSelf.startingInventoryDigest
+                && self.deadline == oldSelf.deadline && self.actionTimeout == oldSelf.actionTimeout
+                && self.approvalRequired == oldSelf.approvalRequired && self.steps
+                == oldSelf.steps
+            - message: rollout spec is immutable except spec.approval
+              rule: has(self.fromPlanDigest) == has(oldSelf.fromPlanDigest) && (!has(self.fromPlanDigest)
+                || self.fromPlanDigest == oldSelf.fromPlanDigest) && has(self.assessmentRef)
+                == has(oldSelf.assessmentRef) && (!has(self.assessmentRef) || self.assessmentRef
+                == oldSelf.assessmentRef)
+            - message: rollout spec is immutable except spec.approval
+              rule: has(self.startingInventory) == has(oldSelf.startingInventory)
+                && (!has(self.startingInventory) || self.startingInventory == oldSelf.startingInventory)
+            - message: an approval can be neither cleared nor changed
+              rule: '!has(oldSelf.approval) || (has(self.approval) && self.approval.approvedBy
+                == oldSelf.approval.approvedBy && self.approval.expiresAt == oldSelf.approval.expiresAt
+                && self.approval.reason == oldSelf.approval.reason)'
+            - message: a revocation can be neither cleared nor changed
+              rule: '!has(oldSelf.approval) || !has(oldSelf.approval.revokedBy) ||
+                (has(self.approval.revokedBy) && self.approval.revokedBy == oldSelf.approval.revokedBy
+                && self.approval.revokedAt == oldSelf.approval.revokedAt && self.approval.revokeReason
+                == oldSelf.approval.revokeReason)'
+            - message: a revocation needs an existing approval
+              rule: '!has(self.approval) || !has(self.approval.revokedBy) || has(oldSelf.approval)'
+            - message: acknowledgements are append-only
+              rule: '!has(oldSelf.approval) || !has(oldSelf.approval.acknowledgements)
+                || (has(self.approval.acknowledgements) && oldSelf.approval.acknowledgements.all(o,
+                self.approval.acknowledgements.exists(n, n == o)))'
+            - message: an acknowledgement needs an existing approval
+              rule: '!has(self.approval) || !has(self.approval.acknowledgements) ||
+                has(oldSelf.approval)'
+          status:
+            description: |-
+              RuntimeRolloutStatus holds observations rebuilt from the spec, the outcome
+              label and live objects.
+            properties:
+              approval:
+                description: ApprovalState summarizes a rollout's approval in status.
+                enum:
+                - NotRequired
+                - Pending
+                - Approved
+                - Bypassed
+                - Revoked
+                - Expired
+                type: string
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                maxItems: 16
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              current:
+                description: Current is the step in progress.
+                properties:
+                  attempts:
+                    format: int32
+                    type: integer
+                  operation:
+                    description: StepOperation is what a step does to one release.
+                    enum:
+                    - Install
+                    - Upgrade
+                    - Verify
+                    - Remove
+                    - Adopt
+                    type: string
+                  release:
+                    maxLength: 53
+                    type: string
+                  startedAt:
+                    format: date-time
+                    type: string
+                  timeoutFrom:
+                    description: |-
+                      TimeoutFrom, when set, is when the action timeout last started again:
+                      the end of a halt. Time halted does not count against the step.
+                    format: date-time
+                    type: string
+                required:
+                - operation
+                - release
+                type: object
+              message:
+                maxLength: 1024
+                type: string
+              observedGeneration:
+                format: int64
+                type: integer
+              phase:
+                description: RolloutPhase is the rollout state machine phase.
+                enum:
+                - Pending
+                - AwaitingApproval
+                - Progressing
+                - AwaitingAcknowledgement
+                - Validating
+                - Stalled
+                - Succeeded
+                - Failed
+                - Expired
+                - Revoked
+                - Superseded
+                - Orphaned
+                type: string
+              releases:
+                description: Releases are per-release observations.
+                items:
+                  description: ReleaseStatus is one release's observation.
+                  properties:
+                    id:
+                      maxLength: 53
+                      type: string
+                    revision:
+                      maxLength: 71
+                      type: string
+                    state:
+                      description: ReleaseState is a release's observed state.
+                      enum:
+                      - Pending
+                      - Progressing
+                      - Ready
+                      - Failed
+                      - Suspended
+                      - Deleting
+                      - Removed
+                      - Unknown
+                      type: string
+                  required:
+                  - id
+                  - state
+                  type: object
+                maxItems: 256
+                type: array
+                x-kubernetes-list-map-keys:
+                - id
+                x-kubernetes-list-type: map
+              validation:
+                description: Validation is the deployment validation run.
+                properties:
+                  evidence:
+                    maxLength: 512
+                    type: string
+                  job:
+                    maxLength: 253
+                    type: string
+                  result:
+                    enum:
+                    - Pending
+                    - Passed
+                    - Failed
+                    type: string
+                  runID:
+                    maxLength: 63
+                    type: string
+                type: object
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

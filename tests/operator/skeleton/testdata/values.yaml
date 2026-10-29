@@ -1,0 +1,61 @@
+# Walking-skeleton installation values for charts/aicr-operator on the
+# kind cluster, whose in-cluster registry requires a password.
+# tools/operator-skeleton sets aicr.version and aicr.image from .settings.yaml
+# and creates the static provider's Secrets: registry-auth in the operator and
+# Job namespaces and the Argo CD repo-creds; none is committed. The operator
+# resolves the EKS lane from declared criteria (development.skipDiscovery),
+# which a kind snapshot cannot match; the discovery subtest turns discovery on
+# with kind-compatible criteria.
+operator:
+  image: ko.local/aicr-operator:skeleton
+  imagePullPolicy: Never
+  logLevel: debug
+registry:
+  repository: oci://registry.aicr-registry.svc.cluster.local:5000/aicr/cluster
+  plainHTTP: true
+  auth:
+    provider: static
+    staticSecretRef: registry-auth
+    repoCredsSecret: aicr-registry
+namespaces:
+  # cert-manager for the skeleton's release, node-feature-discovery for the
+  # removal test, monitoring for the foreign-object test and aicr-e2e for the
+  # readiness gate the Verify test packages itself; the rest are those of the
+  # H100 EKS lane, which the full-lane subtest resolves, and of the kind
+  # recipe the discovery subtest resolves (neither is rolled out).
+  components:
+    - name: cert-manager
+      podSecurity: restricted
+    - name: node-feature-discovery
+      podSecurity: privileged
+    - name: monitoring
+      podSecurity: privileged
+    - name: aicr-e2e
+      podSecurity: restricted
+    - name: kube-system
+      podSecurity: privileged
+      create: false
+    - name: gpu-operator
+      podSecurity: privileged
+    - name: kai-scheduler
+      podSecurity: privileged
+    - name: kubeflow
+      podSecurity: privileged
+    - name: nodewright
+      podSecurity: privileged
+    - name: nvidia-dra-driver
+      podSecurity: privileged
+    - name: nvsentinel
+      podSecurity: privileged
+    - name: nvidia-network-operator
+      podSecurity: privileged
+# The validation subtest runs AICR's deployment validation as the chart's
+# launcher; tools/operator-skeleton sets aicr.validatorImages.
+validation:
+  enabled: true
+discovery:
+  # AICR's defaults are sized for GPU nodes, not a CI runner.
+  agentRequests: cpu=250m,memory=512Mi,ephemeral-storage=512Mi
+development:
+  bypassApprovals: true
+  skipDiscovery: true

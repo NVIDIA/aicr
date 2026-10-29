@@ -1,0 +1,40 @@
+apiVersion: operator.aicr.run/v1alpha1
+kind: ClusterRuntime
+metadata:
+  name: cluster                       # required singleton name
+spec:
+  intent: training                    # required AICR criteria value
+  platform: kubeflow                  # optional AICR criteria value
+  profile: ""                         # optional AICR configuration profile value (AICR ADR-015)
+  criteria:                           # optional administrator-declared facts; must agree with discovery
+    service: eks
+    accelerator: h100
+    os: ubuntu
+  placement:                          # maps to AICR system/accelerated scheduling flags
+    system:
+      nodeSelector: {example.com/pool: system}
+      tolerations: []
+    accelerated:
+      nodeSelector: {example.com/pool: gpu}
+      tolerations:
+      - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+  configuration: {}                   # optional AICR recipe configuration, such as gke.tcpxoInterfaces (below)
+  selection:
+    policy: Automatic                 # Automatic | Pinned
+    pinnedPlanDigest: ""              # plan desiredStateDigest; required when policy is Pinned
+  overrides:                          # typed values passed to AICR
+  - component: gpu-operator
+    path: dcgmExporter.enabled
+    value: false
+    additive: false                   # true allows a path absent from the base render
+  rollout:
+    stabilizationWindow: 10m
+    actionTimeout: 30m
+    deadline: 6h
+  validation:
+    deployment: Required              # Required | Disabled; Required needs validation.enabled at install
+  deletionPolicy: Orphan              # Orphan | Delete
+  adoption:
+    runtimeUID: ""                    # explicit re-adoption of engine objects owned by this earlier runtime
+  suspendEngine: false                # emergency stop of automated engine syncs
+  paused: false                       # stops new rollout steps; observation continues

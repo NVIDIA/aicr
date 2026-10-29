@@ -1,0 +1,217 @@
+{
+  "aws-ebs-csi-driver": {
+    "accelerated": {
+      "tolerationPaths": [
+        "node.tolerations"
+      ]
+    },
+    "system": {
+      "nodeSelectorPaths": [
+        "controller.nodeSelector"
+      ],
+      "tolerationPaths": [
+        "controller.tolerations",
+        "node.tolerations"
+      ]
+    }
+  },
+  "aws-efa": {
+    "accelerated": {
+      "nodeSelectorPaths": [
+        "nodeSelector"
+      ],
+      "tolerationPaths": [
+        "tolerations"
+      ]
+    }
+  },
+  "cert-manager": {
+    "system": {
+      "nodeSelectorPaths": [
+        "nodeSelector",
+        "webhook.nodeSelector",
+        "cainjector.nodeSelector",
+        "startupapicheck.nodeSelector"
+      ],
+      "tolerationPaths": [
+        "tolerations",
+        "webhook.tolerations",
+        "cainjector.tolerations",
+        "startupapicheck.tolerations"
+      ]
+    }
+  },
+  "dra-node-labeler": {
+    "accelerated": {
+      "tolerationPaths": [
+        "acceleratedTolerations"
+      ]
+    }
+  },
+  "gpu-operator": {
+    "accelerated": {
+      "tolerationPaths": [
+        "daemonsets.tolerations"
+      ]
+    },
+    "system": {
+      "nodeSelectorPaths": [
+        "operator.nodeSelector"
+      ],
+      "tolerationPaths": [
+        "operator.tolerations"
+      ]
+    }
+  },
+  "k8s-ephemeral-storage-metrics": {
+    "system": {
+      "nodeSelectorPaths": [
+        "nodeSelector"
+      ],
+      "tolerationPaths": [
+        "tolerations"
+      ]
+    }
+  },
+  "kai-scheduler": {
+    "system": {
+      "nodeSelectorPaths": [
+        "global.nodeSelector"
+      ],
+      "tolerationPaths": [
+        "global.tolerations"
+      ]
+    }
+  },
+  "kube-prometheus-stack": {
+    "system": {
+      "nodeSelectorPaths": [
+        "prometheus.prometheusSpec.nodeSelector",
+        "alertmanager.alertmanagerSpec.nodeSelector",
+        "grafana.nodeSelector",
+        "prometheusOperator.nodeSelector",
+        "prometheusOperator.admissionWebhooks.patch.nodeSelector",
+        "kube-state-metrics.nodeSelector",
+        "prometheus-node-exporter.nodeSelector",
+        "thanosRuler.thanosRulerSpec.nodeSelector"
+      ],
+      "requireNodeSelectorIfStorageClassSet": true,
+      "tolerationPaths": [
+        "prometheus.prometheusSpec.tolerations",
+        "alertmanager.alertmanagerSpec.tolerations",
+        "grafana.tolerations",
+        "prometheusOperator.tolerations",
+        "prometheusOperator.admissionWebhooks.patch.tolerations",
+        "kube-state-metrics.tolerations",
+        "prometheus-node-exporter.tolerations",
+        "thanosRuler.thanosRulerSpec.tolerations"
+      ]
+    }
+  },
+  "kubeflow-trainer": {
+    "accelerated": {
+      "nodeSelectorPaths": [
+        "acceleratedNodeSelector"
+      ],
+      "tolerationPaths": [
+        "acceleratedTolerations"
+      ]
+    },
+    "system": {
+      "nodeSelectorPaths": [
+        "manager.nodeSelector",
+        "jobset.controller.nodeSelector"
+      ],
+      "tolerationPaths": [
+        "manager.tolerations",
+        "jobset.controller.tolerations"
+      ]
+    }
+  },
+  "nfd": {
+    "accelerated": {
+      "tolerationPaths": [
+        "worker.tolerations",
+        "topologyUpdater.tolerations"
+      ]
+    },
+    "system": {
+      "nodeSelectorPaths": [
+        "master.nodeSelector",
+        "gc.nodeSelector"
+      ],
+      "tolerationPaths": [
+        "master.tolerations",
+        "gc.tolerations",
+        "worker.tolerations",
+        "topologyUpdater.tolerations"
+      ]
+    }
+  },
+  "nodewright-customizations": {
+    "accelerated": {
+      "nodeSelectorPaths": [
+        "acceleratedNodeSelector"
+      ],
+      "tolerationPaths": [
+        "acceleratedTolerations"
+      ]
+    }
+  },
+  "nodewright-operator": {
+    "accelerated": {
+      "taintStrPaths": [
+        "controllerManager.manager.env.runtimeRequiredTaint"
+      ]
+    },
+    "nodeCountPaths": [
+      "estimatedNodeCount"
+    ],
+    "system": {
+      "nodeSelectorPaths": [
+        "controllerManager.selectors"
+      ],
+      "tolerationPaths": [
+        "controllerManager.tolerations"
+      ]
+    }
+  },
+  "nvidia-dra-driver-gpu": {
+    "accelerated": {
+      "nodeSelectorPaths": [
+        "kubeletPlugin.nodeSelector"
+      ],
+      "tolerationPaths": [
+        "kubeletPlugin.tolerations"
+      ]
+    },
+    "system": {
+      "nodeSelectorPaths": [
+        "controller.nodeSelector"
+      ],
+      "tolerationPaths": [
+        "controller.tolerations"
+      ]
+    }
+  },
+  "nvsentinel": {
+    "system": {
+      "nodeSelectorPaths": [
+        "global.systemNodeSelector"
+      ],
+      "tolerationPaths": [
+        "global.systemNodeTolerations"
+      ]
+    }
+  },
+  "prometheus-adapter": {
+    "system": {
+      "nodeSelectorPaths": [
+        "nodeSelector"
+      ],
+      "tolerationPaths": [
+        "tolerations"
+      ]
+    }
+  }
+}

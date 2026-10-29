@@ -204,3 +204,9 @@ tools/mdx/.aicr-install-lock/
 /THIRD_PARTY_NOTICES.md
 /performance
 /validators/*/performance
+
+# AICR Operator kind suites: the kind cluster's kubeconfig and registry
+# credentials, and the kubeconfig path tests point at so they never reach a
+# real cluster.
+/.operator-e2e/
+/.no-kubeconfig

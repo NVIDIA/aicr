@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Builds an immutable qualification candidate from the
+# current commit into dist/candidate: the operator image for linux/amd64 and
+# linux/arm64 as an OCI layout with SPDX SBOMs (ko, on AICR's base image), the
+# kubectl-aicr binaries, the chart packaged deterministically, and
+# candidate.json recording every digest with the AICR release the candidate
+# runs. The candidate is a release build: the operator refuses its
+# development settings.
+#
+# Usage: CANDIDATE_VERSION=v0.1.0-rc.1 tools/operator-candidate [build|verify]
+#   build   (default) build dist/candidate
+#   verify  build twice and require identical bytes
+#
+# CANDIDATE_REPOSITORY names the operator image repository the candidate is
+# published to (default ghcr.io/nvidia/aicr-operator); the build pushes
+# nothing (`go run ./tools/operator-release push` publishes a candidate, and
+# no workflow runs it yet). CANDIDATE_DIR is where it is built (default
+# dist/candidate).
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "${repo_root}"
+setting() { yq -r "$1" .settings.yaml; }
+# Only the commit's go.mod and go.sum select module code, never a go.work.
+export GOWORK=off
+
+version="${CANDIDATE_VERSION:?set CANDIDATE_VERSION to a release version, such as v0.1.0-rc.1}"
+repository="${CANDIDATE_REPOSITORY:-ghcr.io/nvidia/aicr-operator}"
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "the tree has uncommitted changes; a candidate is built from a commit" >&2
+  exit 1
+fi
+# The chart is packaged from its directory, so an ignored file there would
+# ship in it.
+if [[ -n "$(git status --porcelain --ignored -- charts/aicr-operator)" ]]; then
+  echo "ignored files under charts/aicr-operator would be packaged; remove them:" >&2
+  git status --porcelain --ignored -- charts/aicr-operator >&2
+  exit 1
+fi
+commit="$(git rev-parse HEAD)"
+commit_date="$(TZ=UTC git show -s --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd HEAD)"
+# Image creation times, SBOM timestamps and file times come from the commit.
+SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+export SOURCE_DATE_EPOCH
+module="$(go list -m)"
+ldflags="-s -w -X ${module}/pkg/operator/version.Version=${version} -X ${module}/pkg/operator/version.Commit=${commit} -X ${module}/pkg/operator/version.Date=${commit_date}"
+
+build() {
+  local out="$1"
+  rm -rf "${out}"
+  mkdir -p "${out}/plugin"
+  # .ko.yaml stamps the version and date from these variables.
+  AICR_OPERATOR_VERSION="${version}" AICR_OPERATOR_DATE="${commit_date}" KO_DOCKER_REPO="${repository}" \
+    go run "github.com/google/ko@$(setting '.build_tools.ko')" build --bare --push=false \
+    --platform=linux/amd64,linux/arm64 --oci-layout-path "${out}/image" --sbom-dir "${out}/sbom" \
+    ./cmd/aicr-operator >/dev/null
+  local platform
+  for platform in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+    CGO_ENABLED=0 GOOS="${platform%/*}" GOARCH="${platform#*/}" GOFLAGS=-mod=readonly \
+      go build -trimpath -ldflags "${ldflags}" -o "${out}/plugin/kubectl-aicr-${platform%/*}-${platform#*/}" ./cmd/kubectl-aicr
+  done
+  go run ./tools/operator-release build -dir "${out}" -version "${version}" -repository "${repository}" \
+    -commit "${commit}" -commit-date "${commit_date}" -go-version "$(go env GOVERSION)"
+  # The packaged chart defaults to the candidate's images, so it renders with
+  # only the cluster's own inputs.
+  helm template aicr-operator "${out}"/chart/*.tgz --namespace aicr-system \
+    --set registry.repository=oci://registry.example.com/aicr/cluster --set validation.enabled=true >/dev/null
+  refuses_bypass "${out}"
+  clean "${out}"
+}
+
+# clean requires the candidate, its image binaries included, to carry no
+# credential material and no agent attribution.
+clean() {
+  local out="$1" bins platform found
+  bins="$(mktemp -d)"
+  for platform in linux/amd64 linux/arm64/v8; do
+    go run ./tools/operator-release extract -dir "${out}" -platform "${platform}" -out "${bins}/aicr-operator-${platform//\//-}"
+  done
+  # The chart is compressed; scan its files.
+  mkdir "${bins}/chart"
+  tar -xzf "${out}"/chart/*.tgz -C "${bins}/chart"
+  found="$(grep -r -l -a -i -E 'co-authored-by|claude|anthropic|generated with' "${out}" "${bins}" || true)
+$(grep -r -l -a -E 'AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{36}' "${out}" "${bins}" || true)"
+  rm -rf "${bins}"
+  if [[ -n "${found//[[:space:]]/}" ]]; then
+    echo "credential material or agent attribution in the candidate: ${found}" >&2
+    exit 1
+  fi
+}
+
+# refuses_bypass runs the candidate image's own operator binary, where the
+# host can, and requires it to refuse development.bypassApprovals.
+refuses_bypass() {
+  local out="$1" host platform bin output
+  host="$(go env GOOS)/$(go env GOARCH)"
+  case "${host}" in
+  linux/amd64) platform=linux/amd64 ;;
+  linux/arm64) platform=linux/arm64/v8 ;;
+  *)
+    echo "skipping the bypass refusal check: the image's binary does not run on ${host}"
+    return
+    ;;
+  esac
+  bin="$(mktemp -d)/aicr-operator"
+  go run ./tools/operator-release extract -dir "${out}" -platform "${platform}" -out "${bin}"
+  # No cluster is reachable, so a binary that failed to refuse cannot act on
+  # one, and the timeout ends it.
+  if output="$(KUBECONFIG="${repo_root}/.no-kubeconfig" KUBERNETES_SERVICE_HOST='' KUBERNETES_SERVICE_PORT='' \
+    timeout 60 "${bin}" --development-bypass-approvals --aicr-version=v1.0.0 \
+    --aicr-image="$(setting '.operator.aicr_image')" --registry-repository=oci://registry.example.com/aicr/cluster 2>&1)"; then
+    echo "the candidate started with development.bypassApprovals" >&2
+    exit 1
+  fi
+  if ! grep -q "refused by release builds" <<<"${output}"; then
+    echo "the candidate failed without refusing development.bypassApprovals: ${output}" >&2
+    exit 1
+  fi
+  echo "the candidate's ${host} binary refuses development.bypassApprovals"
+  rm -rf "$(dirname "${bin}")"
+}
+
+dir="${CANDIDATE_DIR:-dist/candidate}"
+case "${1:-build}" in
+build) build "${dir}" ;;
+verify)
+  build "${dir}"
+  build "${dir}-again"
+  if ! diff -r "${dir}" "${dir}-again" >/dev/null; then
+    diff -r "${dir}" "${dir}-again" | head -20 >&2
+    echo "two builds of ${commit} differ" >&2
+    exit 1
+  fi
+  rm -rf "${dir}-again"
+  echo "two builds of ${commit} are identical: $(yq -r '.digest' "${dir}/candidate.json")"
+  ;;
+*)
+  echo "usage: $0 [build|verify]" >&2
+  exit 2
+  ;;
+esac
