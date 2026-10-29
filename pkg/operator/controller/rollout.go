@@ -83,6 +83,10 @@ const (
 	// which did not succeed may have moved is gone; repairing it from the
 	// active plan would roll it back without approval.
 	ReasonMovedReleaseMissing = "MovedReleaseMissing"
+	// ReasonEngineSuspensionRefused: the API server refused for good to
+	// change an Application's automated sync for spec.suspendEngine, so the
+	// engine is not suspended or resumed as declared.
+	ReasonEngineSuspensionRefused = "EngineSuspensionRefused"
 )
 
 // resyncInterval re-observes a steady runtime: it covers what no watch
@@ -110,7 +114,7 @@ const (
 	EventStalled = "Stalled"
 	// EventEngineSuspensionRefused, on the runtime: the API server refused
 	// for good to change an Application's automated sync.
-	EventEngineSuspensionRefused = "EngineSuspensionRefused"
+	EventEngineSuspensionRefused = ReasonEngineSuspensionRefused
 )
 
 // Engine is the adapter contract the rollout controller drives.
@@ -169,14 +173,17 @@ type runtimeView struct {
 	retired map[string]bool
 	// moved are releases such a rollout may have written to its target
 	// plan; repair never writes them back to the active plan.
-	moved                       map[string]movedBy
-	ready, available            bool
-	readyReason, readyMessage   string
-	availableMessage            string
-	reconciling                 bool
-	reconcilingReason           string
-	stalled                     bool
-	stalledReason, stalledMsg   string
+	moved                     map[string]movedBy
+	ready, available          bool
+	readyReason, readyMessage string
+	availableMessage          string
+	reconciling               bool
+	reconcilingReason         string
+	stalled                   bool
+	stalledReason, stalledMsg string
+	// suspensionRefused names the Applications whose automated sync the API
+	// server refused for good to set as spec.suspendEngine declares.
+	suspensionRefused           string
 	engineOK                    bool
 	engineReason, engineMessage string
 	requeue                     time.Duration
@@ -302,6 +309,13 @@ func (r *RolloutReconciler) reconcile(ctx context.Context, rt *v1alpha1.ClusterR
 		if err = r.advance(ctx, rt, current, v, supersede, token, hold); err != nil {
 			return nil, err
 		}
+		if pending := current.Annotations[v1alpha1.AnnotationRetryRequested]; pending != "" &&
+			current.Status.Phase != v1alpha1.PhaseStalled && !current.Status.Phase.IsTerminal() {
+
+			if err = r.retrySpent(ctx, current, pending); err != nil {
+				return nil, err
+			}
+		}
 		if current.Status.Phase.IsTerminal() {
 			v.rollout, v.inProgress = "", nil
 			if current.Status.Phase == v1alpha1.PhaseSucceeded {
@@ -403,7 +417,7 @@ func (r *RolloutReconciler) prepare(ctx context.Context, rt *v1alpha1.ClusterRun
 	if err = r.orphan(ctx, rt.Name, string(rt.UID)); err != nil {
 		return false, err
 	}
-	if err = r.suspension(ctx, rt); err != nil {
+	if err = r.suspension(ctx, rt, v); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -1275,6 +1289,19 @@ func (r *RolloutReconciler) retryRequested(ctx context.Context, ro *v1alpha1.Run
 	return nil
 }
 
+// retrySpent records that a rollout recovered from the stall a retry was
+// requested for before the retry ended it: the token stays consumed, as
+// the rollout's retry, and a later stall needs a new one.
+func (r *RolloutReconciler) retrySpent(ctx context.Context, ro *v1alpha1.RuntimeRollout, token string) error {
+	patch := client.MergeFrom(ro.DeepCopy())
+	delete(ro.Annotations, v1alpha1.AnnotationRetryRequested)
+	ro.Annotations[v1alpha1.AnnotationRetry] = token
+	if err := r.Client.Patch(ctx, ro, patch); err != nil {
+		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "record spent retry on "+ro.Name)
+	}
+	return nil
+}
+
 // superseded ends a rollout Superseded, recording the token of the retry
 // that superseded it, if any, in the outcome's patch: the token is consumed
 // exactly when the rollout ends.
@@ -1401,11 +1428,7 @@ func contentUnreadable(err error, v *runtimeView) error {
 func (r *RolloutReconciler) observeActive(ctx context.Context, rt *v1alpha1.ClusterRuntime, target string, v *runtimeView) error {
 	suspended := rt.Spec.SuspendEngine
 	if suspended {
-		// Argo CD neither syncs nor heals: nothing is repaired, and readiness
-		// is not claimed for a stack nobody reconciles, but a release that
-		// drifts or degrades is still named.
-		v.readyReason, v.readyMessage = ReasonEngineSuspended, "automated engine syncs are suspended (spec.suspendEngine)"
-		v.availableMessage = v.readyMessage
+		suspendedReady(v)
 	}
 	ro := v.inProgress
 	if ro != nil && v.readyMessage == "" {
@@ -1500,6 +1523,19 @@ func (r *RolloutReconciler) observeActive(ctx context.Context, rt *v1alpha1.Clus
 		markAvailable(rt, target, v)
 	}
 	return nil
+}
+
+// suspendedReady reports a suspended engine: Argo CD neither syncs nor
+// heals, so nothing is repaired and readiness is not claimed for a stack
+// nobody reconciles, but a release that drifts or degrades is still named,
+// and so is an Application whose suspension was refused, which still syncs.
+func suspendedReady(v *runtimeView) {
+	v.readyReason, v.readyMessage = ReasonEngineSuspended, "automated engine syncs are suspended (spec.suspendEngine)"
+	if v.suspensionRefused != "" {
+		v.readyReason = ReasonEngineSuspensionRefused
+		v.readyMessage += ", except: " + v.suspensionRefused
+	}
+	v.availableMessage = v.readyMessage
 }
 
 // markAvailable records every active release healthy, and Ready once the target

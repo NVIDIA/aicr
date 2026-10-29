@@ -23,7 +23,7 @@ reason and message.
 | `EngineMissing`, `ProjectMissing`; `Unauthorized` on `EngineAvailable` | [Argo CD not available](#argo-cd-not-available) |
 | `AwaitingApproval`, `AwaitingAcknowledgement` | [Waiting for approval](#waiting-for-approval) |
 | `TransitionBlocked` | [Transition blocked](#transition-blocked) |
-| `InventoryDrift`, `StepUnknown`, `MovedReleaseMissing` | [Rollout stalled](#rollout-stalled) |
+| `InventoryDrift`, `StepUnknown`, `MovedReleaseMissing`, `EngineSuspensionRefused` | [Rollout stalled](#rollout-stalled) |
 | `RolloutFailed`, `RolloutExpired`, `RolloutRevoked`; `ForeignObject` on `Ready` | [Rollout failed, expired or revoked](#rollout-failed-expired-or-revoked) |
 | `ValidationUnavailable` | [Validation](#validation) |
 | `PlanUnreadable`, `PlanMissing`, `PlanOfAnotherRuntime`, `PlanWithoutRecipe`, `NotFound` | [Unreadable or missing plans](#unreadable-or-missing-plans) |
@@ -239,6 +239,13 @@ migration is a separate procedure, outside the operator.
   approval. To keep the active plan instead, revert the runtime change behind
   the failed target: the operator then creates a rollout to the active plan
   that installs the release there, also with a fresh approval.
+- **`EngineSuspensionRefused`** (on the runtime). The API server refused for
+  good to turn an Application's automated sync off for `spec.suspendEngine`,
+  or back on after it, as for an Application edited outside the admission
+  policy. That Application is not in the declared state: during an emergency
+  stop it keeps syncing. The message and the `EngineSuspensionRefused` Event
+  name it. Undo the edit to the Application; the operator tries again on every
+  reconcile, and no new rollout starts until it succeeds.
 
 ## Rollout failed, expired or revoked
 

@@ -20,7 +20,7 @@ kubectl get configmaps -n aicr-system -l operator.aicr.run/role=plan
 
 | Condition | `True` means | Reasons to expect |
 | --- | --- | --- |
-| `Ready` | The target plan is rolled out, every release is ready at its current revision, and the rollout passed deployment validation when required | `RolledOut`; `ValidationDisabled` when `spec.validation.deployment` is `Disabled`. Not ready: `RollingOut`, `NotReady`, `NoActivePlan`, `Paused`, `EngineSuspended`, an engine reason, `PlanUnreadable`, `Deleting`. During a rollout, `RollingOut` names it and its progress: `rollout <name>: step 9/18 gpu-operator (Upgrade)`, `rollout <name> awaiting approval`, `rollout <name>: deployment validation run <id>` or `rollout <name> stalled: <message>`; before it exists, `the target plan is not rolled out yet`, with `; its stabilization window has not passed` while it stabilizes |
+| `Ready` | The target plan is rolled out, every release is ready at its current revision, and the rollout passed deployment validation when required | `RolledOut`; `ValidationDisabled` when `spec.validation.deployment` is `Disabled`. Not ready: `RollingOut`, `NotReady`, `NoActivePlan`, `Paused`, `EngineSuspended`, `EngineSuspensionRefused`, an engine reason, `PlanUnreadable`, `Deleting`. During a rollout, `RollingOut` names it and its progress: `rollout <name>: step 9/18 gpu-operator (Upgrade)`, `rollout <name> awaiting approval`, `rollout <name>: deployment validation run <id>` or `rollout <name> stalled: <message>`; before it exists, `the target plan is not rolled out yet`, with `; its stabilization window has not passed` while it stabilizes |
 | `Available` | Every release of the active plan is ready | `Healthy`; not: `NotReady`, `NoActivePlan`. The message names the release that is not ready and why, as `release <id>: <reason>`. During a rollout, a release it already moved is checked at the rollout's target plan, one it is removing no longer counts, and the step in flight counts only once it fails. While the engine is suspended, `Available` reports `NotReady` whatever the stack's health |
 | `Reconciling` | Work is in progress | `Resolving`, `Stabilizing`, `Assessing`, `RollingOut`, `Validating`. `False` with `RolledOut` only means nothing is in progress: it is also reported while paused or stalled |
 | `Stalled` | Progress needs you; the reason says why ([troubleshooting](troubleshooting.md)) | `Progressing` when not stalled |
@@ -78,7 +78,7 @@ in the `default` namespace; `kubectl describe` shows them.
 | `ReconcileFailed` | Warning | The runtime: a reconcile ended in an error the operator retries, such as an API server timeout. Conditions keep what was last observed; a step in flight still fails at its action timeout, naming the error |
 | `FieldOwnershipOverridden` | Warning | An Argo CD Application whose hand edits the operator forced back, naming the other field managers |
 | `ApplicationRecreated` | Warning | An Argo CD Application deleted by hand and written again; its resources stayed in place |
-| `EngineSuspensionRefused` | Warning | The runtime: the API server refused for good to change an Application's automated sync for `spec.suspendEngine`, as for an Application edited outside the admission policy; the other Applications are changed and the operator keeps reconciling |
+| `EngineSuspensionRefused` | Warning | The runtime: the API server refused for good to change an Application's automated sync for `spec.suspendEngine`, as for an Application edited outside the admission policy; the other Applications are changed, the runtime stalls with `EngineSuspensionRefused`, and the operator keeps reconciling |
 | `OrphanAnnotationRefused` | Warning | The runtime: while orphaning on deletion, Applications whose `orphaned-from` annotation was refused, such as by admission; they are left in place and the runtime is still released |
 
 ### Metrics
@@ -206,9 +206,9 @@ kubectl annotate clusterruntime cluster operator.aicr.run/retry="$(date +%s)" --
 
 The retry creates a new rollout to the same target from the live state, which
 needs a fresh approval. A retry while a rollout is `Stalled` (for example on
-`InventoryDrift`) first ends it `Superseded`. A token acts once, even when the
-stalled rollout recovers before the retry ends it; each retry needs a new
-value. Releases a failed rollout already moved stay on its target
+`InventoryDrift`) first ends it `Superseded`. A token acts once: if the
+stalled rollout recovers before the retry ends it, the token is spent, and a
+later stall needs a new one. Releases a failed rollout already moved stay on its target
 plan; nothing rolls back automatically.
 
 ## Pausing versus suspending the engine
@@ -220,7 +220,7 @@ plan; nothing rolls back automatically.
 | A step in flight | Not abandoned; Argo CD finishes its sync | Not abandoned; Argo CD finishes an operation it started |
 | Argo CD automated sync and drift repair | Continue. With no rollout held, the operator also forces hand edits of active Applications back; with one held, an edit of a release's source, values or destination stalls it with `InventoryDrift` when it resumes | Stopped: the operator sets `syncPolicy.automated.enabled: false` on every owned Application |
 | Approval | Kept; the rollout resumes under it | Kept |
-| Runtime | `Ready=False` with `Paused` while a rollout is held or due; a runtime with nothing to do stays `Ready` | `Ready=False` with `EngineSuspended`, `Available=False`, the message naming the first release that drifted or is not healthy; `EngineSuspended` and `EngineResumed` Events |
+| Runtime | `Ready=False` with `Paused` while a rollout is held or due; a runtime with nothing to do stays `Ready` | `Ready=False` with `EngineSuspended`, `Available=False`, the message naming the first release that drifted or is not healthy; `EngineSuspended` and `EngineResumed` Events. An Application whose suspension the API server refuses keeps syncing, and `Ready` and `Stalled` report `EngineSuspensionRefused`, naming it |
 
 ```shell
 kubectl patch clusterruntime cluster --type merge -p '{"spec":{"paused":true}}'
