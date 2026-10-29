@@ -67,10 +67,12 @@ type BuildInput struct {
 	Recipe *plan.Recipe
 }
 
-// Built is an assembled plan and the values content its releases reference.
+// Built is an assembled plan and the content it references: each release's
+// values and, with a recipe, the bundle's recipe that validation reads.
 type Built struct {
-	Plan   *plan.Document
-	Values []*plan.Content
+	Plan             *plan.Document
+	Values           []*plan.Content
+	ValidationRecipe *plan.Content
 	// ChartDefaults are each component's chart default values, from its
 	// primary release's archive, for the override path check.
 	ChartDefaults map[string]map[string]any
@@ -85,7 +87,8 @@ func Build(ctx context.Context, delivery ChartDelivery, in *BuildInput) (*Built,
 	if err != nil {
 		return nil, err
 	}
-	recipe, err := info.ParseBundleRecipe(in.Bundle.Files[info.Build.Recipe.Path], in.DeclaredVersion)
+	recipeData := in.Bundle.Files[info.Build.Recipe.Path]
+	recipe, err := info.ParseBundleRecipe(recipeData, in.DeclaredVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -106,8 +109,20 @@ func Build(ctx context.Context, delivery ChartDelivery, in *BuildInput) (*Built,
 		EnginePolicy:  in.EnginePolicy,
 		InputDigest:   in.InputDigest,
 		Provenance:    in.Provenance,
-		Recipe:        in.Recipe,
 	}}
+	if in.Recipe != nil {
+		// The bundle's recipe drops what the render flags turned off, so
+		// validation never requires a component the bundle does not deploy.
+		recipeJSON, jsonErr := info.BundleRecipeJSON(recipeData)
+		if jsonErr != nil {
+			return nil, jsonErr
+		}
+		built.ValidationRecipe = plan.RecipeContent(recipeJSON)
+		r := *in.Recipe
+		ref := built.ValidationRecipe.Ref()
+		r.ValidationConfigMapRef = &ref
+		built.Plan.Recipe = &r
+	}
 	built.Plan.Provenance.Source = plan.SourceResolved
 	built.Plan.Provenance.Bundle = in.BundleURI
 	for i := range info.Layout.Releases {

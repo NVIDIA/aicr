@@ -260,7 +260,9 @@ deployment validation:
 fail, after pushing their evidence, and 2 when it refuses the recipe or its
 readiness pre-flight. `status.validation` names the Job, the run and, when
 evidence was pushed, its reference. Read the Job in `aicr-validation`, fix
-the cause, and retry: a retry is a new rollout and a new run.
+the cause, and retry: a retry is a new rollout and a new run. Validation
+checks the components the bundle deploys: it runs against the recipe the
+bundle records, so a component an override turns off is not required.
 
 A validator image that is not pinned in `aicr.validatorImages` at the tag AICR
 names, or a pinned tag that resolves to another digest, also fails the run.
