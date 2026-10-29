@@ -32,6 +32,8 @@ set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "${repo_root}"
+work="$(mktemp -d)"
+trap 'rm -rf "${work}"' EXIT
 
 export OPERATOR_KIND_CLUSTER="${OPERATOR_KIND_CLUSTER:-aicr-operator}"
 export KUBECONFIG="${repo_root}/.operator-e2e/kubeconfig"
@@ -51,7 +53,7 @@ load_candidate() {
   repository="$(yq -r '.operator.repository' "${dir}/candidate.json")"
   digest="$(yq -r '.operator.digest' "${dir}/candidate.json")"
   version="$(yq -r '.version' "${dir}/candidate.json")"
-  tmp="$(mktemp -d)"
+  tmp="$(mktemp -d "${work}/candidate.XXXXXX")"
   cp -R "${dir}/image" "${tmp}/layout"
   yq -i -o=json ".manifests[0].annotations.\"org.opencontainers.image.ref.name\" = \"${repository}:${version}\"" "${tmp}/layout/index.json"
   tar -C "${tmp}/layout" -cf "${tmp}/image.tar" .
@@ -61,7 +63,6 @@ load_candidate() {
     docker exec -i "${node}" ctr -n k8s.io images import --digests --snapshotter=overlayfs - <"${tmp}/image.tar" >/dev/null
     docker exec "${node}" ctr -n k8s.io images tag --force "${repository}:${version}" "${repository}@${digest}" >/dev/null
   done < <(kind get nodes --name "${OPERATOR_KIND_CLUSTER}")
-  rm -rf "${tmp}"
 }
 
 # install_candidate installs or upgrades the operator release to a

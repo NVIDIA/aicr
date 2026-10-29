@@ -32,10 +32,9 @@ import (
 // validationGates requires deployment validation for a new plan. Its steps
 // land, then the operator runs AICR's validation as the chart's launcher in
 // the validation namespace against the snapshot discovery kept. The
-// skeleton's EKS recipe requires Ubuntu, so AICR's readiness pre-flight
-// refuses kind's Debian node before any check: the rollout ends Failed with
-// AICR's exit category and cause, records no evidence, and the plan is
-// never promoted. Turning validation off rolls the runtime back to the
+// skeleton's bundle turns off every GPU advertiser, so AICR refuses the
+// bundle's recipe before any check: the rollout ends Failed with AICR's exit
+// category and cause, records no evidence, and the plan is never promoted. Turning validation off rolls the runtime back to the
 // active plan, Ready with reason ValidationDisabled.
 func validationGates(ctx context.Context, t *testing.T, active string) {
 	t.Helper()
@@ -93,7 +92,7 @@ func validationGates(ctx context.Context, t *testing.T, active string) {
 	if ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseFailed) || v == nil || v.Result != "Failed" || v.Evidence != "" ||
 		ro.Annotations[v1alpha1.AnnotationEvidence] != "" || !strings.HasPrefix(v.Job, "aicr-validation-") ||
 		!strings.Contains(ro.Status.Message, "deployment validation failed") || !strings.Contains(ro.Status.Message, "aicr validation exited 2") ||
-		!strings.Contains(ro.Status.Message, "readiness check failed") {
+		!strings.Contains(ro.Status.Message, "invalid GPU allocation configuration") {
 
 		t.Fatalf("rollout %s: labels %v, annotations %v, status %+v", ro.Name, ro.Labels, ro.Annotations, ro.Status)
 	}

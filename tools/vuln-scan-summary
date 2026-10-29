@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# vuln-scan-summary renders the body of the weekly image scan's Slack message
+# from the per-image results in .github/workflows/vuln-scan-images.yaml: one
+# line per image with critical or high findings, naming at most MAX_IDS
+# (default 5) distinct primary advisory IDs, then one line counting the clean
+# images. Lines read from stdin (scans that did not complete) are appended as
+# they are. The per-image files keep the full lists; the message points to them.
+#
+# Each <dir>/<image>.txt holds the line
+#   <image>: N critical, N high, N medium, N low, N negligible (N VEX-suppressed)
+# optionally followed by
+#   HIGH+: <pkg> <primary-id>[ (<alias>,<alias>)], <pkg> <primary-id>...
+#
+# Usage: tools/vuln-scan-summary <scan-results-dir> [< incomplete-lines]
+set -euo pipefail
+
+dir="${1:?usage: vuln-scan-summary <scan-results-dir>}"
+max_ids="${MAX_IDS:-5}"
+[[ "${max_ids}" =~ ^[1-9][0-9]*$ ]] || { echo "MAX_IDS must be a positive integer" >&2; exit 2; }
+
+findings=""
+clean=0
+shopt -s nullglob
+for f in "${dir}"/*.txt; do
+  header="$(head -n 1 "${f}")"
+  name="${header%%:*}"
+  critical="$(sed -nE 's/.* ([0-9]+) critical.*/\1/p' <<<"${header}")"
+  high="$(sed -nE 's/.* ([0-9]+) high.*/\1/p' <<<"${header}")"
+  vex="$(sed -nE 's/.*\(([0-9]+) VEX-suppressed\).*/\1/p' <<<"${header}")"
+  if [[ -z "${critical}" || -z "${high}" ]]; then
+    findings+="${critical:-0}"$'\t'"${high:-0}"$'\t'"${name}"$'\t'"${name}: unreadable result line"$'\n'
+    continue
+  fi
+  if (( critical + high == 0 )); then
+    clean=$((clean + 1))
+    continue
+  fi
+  # Entries are separated by ", "; alias lists inside parentheses are joined
+  # with "," alone, so they never split. The primary ID is the second field.
+  ids="$(sed -n 's/^  HIGH+: //p' "${f}" | awk -v max="${max_ids}" '
+    BEGIN { RS = ", " }
+    { gsub(/\n/, ""); split($0, field, " "); id = field[2] }
+    id != "" && !(id in seen) { seen[id] = 1; order[++n] = id }
+    END {
+      line = ""
+      for (i = 1; i <= n && i <= max; i++) line = line (i > 1 ? ", " : "") order[i]
+      if (n > max) line = line " +" (n - max) " more"
+      print line
+    }')"
+  line="${name}: ${critical} critical, ${high} high"
+  [[ "${vex:-0}" -gt 0 ]] && line+=" (${vex} VEX-suppressed)"
+  [[ -n "${ids}" ]] && line+=" | ${ids}"
+  findings+="${critical}"$'\t'"${high}"$'\t'"${name}"$'\t'"${line}"$'\n'
+done
+
+# Most critical first, then most high, then by name, so the line to act on
+# leads.
+if [[ -n "${findings}" ]]; then
+  printf '%s' "${findings}" | sort -t $'\t' -k1,1nr -k2,2nr -k3,3 | cut -f4 | sed 's/^/• /'
+fi
+if (( clean > 0 )); then
+  noun="images"
+  (( clean == 1 )) && noun="image"
+  echo "• ${clean} ${noun} with no critical or high findings"
+fi
+while IFS= read -r line || [[ -n "${line}" ]]; do
+  [[ -n "${line}" ]] && echo "• ${line}"
+done
+exit 0

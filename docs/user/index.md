@@ -15,6 +15,7 @@ This section is for users who:
 | Document | Description |
 |----------|-------------|
 | [Installation](installation.md) | Install the `aicr` CLI (automated script, manual, or build from source) |
+| [Frequently Asked Questions](faq.md) | Short answers to common questions, each linking to the full guide |
 | [End-to-End Tutorial](tutorial.md) | Learning path: install → recipe → bundle → deploy → validate, start to finish |
 | [CLI Reference](cli-reference.md) | Complete command reference with examples for all CLI operations |
 | [CLI Configuration File](cli-config.md) | The complete `AICRConfig` schema for `--config` on snapshot, recipe, bundle, validate, and verify |

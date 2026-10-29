@@ -129,6 +129,11 @@ type InventoryEntry struct {
 	// +optional
 	// +kubebuilder:validation:MaxLength=256
 	Revision string `json:"revision,omitempty"`
+	// SpecDigest fingerprints the object's source, values and destination.
+	// Entries recorded without it are not compared on spec.
+	// +optional
+	// +kubebuilder:validation:MaxLength=71
+	SpecDigest string `json:"specDigest,omitempty"`
 }
 
 // DigestedConfigMapRef names a ConfigMap and the digest of its content.
@@ -378,6 +383,11 @@ type ReleaseStatus struct {
 	// +optional
 	// +kubebuilder:validation:MaxLength=71
 	Revision string `json:"revision,omitempty"`
+	// SpecDigest fingerprints the spec this rollout wrote, recorded when
+	// the release became ready.
+	// +optional
+	// +kubebuilder:validation:MaxLength=71
+	SpecDigest string `json:"specDigest,omitempty"`
 }
 
 // ValidationStatus is the deployment validation run.

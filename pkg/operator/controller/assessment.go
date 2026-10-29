@@ -148,6 +148,12 @@ func (r *RolloutReconciler) recipe(ctx context.Context, p *plan.Document) ([]byt
 	return readContent(ctx, r.Reader, r.Config.OperatorNamespace, p.Recipe.ConfigMapRef, plan.RecipeDataKey, "recipe")
 }
 
+// validationRecipe reads the recipe deployment validation runs against,
+// verified against its digest (plan.Recipe.Validation).
+func (r *RolloutReconciler) validationRecipe(ctx context.Context, p *plan.Document) ([]byte, error) {
+	return readContent(ctx, r.Reader, r.Config.OperatorNamespace, p.Recipe.Validation(), plan.RecipeDataKey, "validation recipe")
+}
+
 // baseline is what a transition is judged against: what is deployed, which
 // a failed rollout leaves partly on its own target plan.
 type baseline struct {
