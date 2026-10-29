@@ -408,7 +408,7 @@ operator:
   # pkg@version` so its dependencies stay out of go.mod; v0.22.0 is built on
   # k8s.io v0.37.0, matching the API machinery in go.mod.
   # renovate: datasource=github-releases depName=kubernetes-sigs/controller-tools depType=build_tools
-  controller_gen: 'v0.22.0'
+  controller_gen: 'v0.23.0'
   # Kubernetes floor `make operator-envtest-floor` runs the CRD tests against;
   # `make test` runs them on the newest envtest release.
   envtest_kubernetes_floor: '1.34.x'
