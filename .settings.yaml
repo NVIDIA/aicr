@@ -263,7 +263,7 @@ testing_tools:
   # kustomize-controller and helm-controller are the only controllers the
   # bundle consumes (OCIRepository -> Kustomization -> HelmRelease).
   # renovate: datasource=github-releases depName=fluxcd/flux2 depType=testing_tools
-  flux_version: 'v2.9.6'
+  flux_version: 'v2.10.0'
   # In-cluster Git server for the KWOK flux-git deployer lane (issue #963).
   # Rootless variant so the admin-user bootstrap can `kubectl exec gitea
   # admin user create` directly without su gymnastics.
