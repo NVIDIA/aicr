@@ -73,8 +73,10 @@ type snapshotInput struct {
 // declared criteria and the active plan's. It returns nil and no
 // error while the snapshot Job runs.
 func (r *ResolverReconciler) discover(ctx context.Context, rt *v1alpha1.ClusterRuntime, st *stages) (*discovered, time.Duration, error) {
+	// Observe only reads the Nodes, so the cache's objects are shared rather
+	// than copied on every resolve.
 	nodes := &corev1.NodeList{}
-	if err := r.Client.List(ctx, nodes); err != nil {
+	if err := r.Client.List(ctx, nodes, client.UnsafeDisableDeepCopy); err != nil {
 		return nil, 0, operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "list Nodes")
 	}
 	groups := discovery.Observe(nodes.Items, &rt.Spec.Placement)

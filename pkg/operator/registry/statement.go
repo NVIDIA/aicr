@@ -69,15 +69,22 @@ func (c *Client) SigstoreBundles(ctx context.Context, r Repository, subject stri
 		return nil, classify(err, fmt.Sprintf("resolve %s@%s", r, subject))
 	}
 	var referrers []ocispec.Descriptor
+	var tooMany error
 	err = repo.Referrers(ctx, desc, "", func(page []ocispec.Descriptor) error {
 		referrers = append(referrers, page...)
+		if len(referrers) > maxReferrers {
+			// Stop paging: a registry that keeps returning pages would grow
+			// this until the timeout.
+			tooMany = invalid("%s@%s has more than %d referrers", r, subject, maxReferrers)
+			return tooMany
+		}
 		return nil
 	})
+	if tooMany != nil {
+		return nil, tooMany
+	}
 	if err != nil {
 		return nil, classify(err, fmt.Sprintf("list referrers of %s@%s", r, subject))
-	}
-	if len(referrers) > maxReferrers {
-		return nil, invalid("%s@%s has %d referrers; at most %d", r, subject, len(referrers), maxReferrers)
 	}
 	var out [][]byte
 	for _, ref := range referrers {

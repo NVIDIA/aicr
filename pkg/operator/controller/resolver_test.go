@@ -26,12 +26,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
@@ -712,9 +714,29 @@ func TestReasonOf(t *testing.T) {
 			t.Errorf("reasonOf(%v) = %s, want %s", err, got, want)
 		}
 	}
-	if got := errorMessage(operrors.New(operrors.ErrCodeInternal, strings.Repeat("x", 2000))); len(got) != maxConditionMessage {
+	if got := errorMessage(operrors.New(operrors.ErrCodeInternal, strings.Repeat("x", 2000))); len(got) != maxMessage {
 		t.Errorf("errorMessage() length = %d", len(got))
 	}
+	// A cut inside a rune would become a 3-byte replacement character in
+	// JSON and push the message past its bound.
+	for _, lead := range []string{"", "x"} {
+		got := errorMessage(operrors.New(operrors.ErrCodeInternal, lead+strings.Repeat("é", 1000)))
+		if len(got) > maxMessage || !utf8.ValidString(got) {
+			t.Errorf("errorMessage() = %d bytes, valid UTF-8 %t", len(got), utf8.ValidString(got))
+		}
+	}
+}
+
+// An Event note is bounded to what events/v1 accepts, on a rune boundary.
+func TestEmitBoundsTheNote(t *testing.T) {
+	t.Parallel()
+	rec := events.NewFakeRecorder(1)
+	emit(rec, &corev1.ConfigMap{}, corev1.EventTypeWarning, "Reason", "Action", "%s", "x"+strings.Repeat("é", 1000))
+	got := strings.TrimPrefix(<-rec.Events, corev1.EventTypeWarning+" Reason ")
+	if len(got) > maxMessage || !utf8.ValidString(got) || !strings.HasSuffix(got, truncatedMark) {
+		t.Errorf("note = %d bytes, valid UTF-8 %t", len(got), utf8.ValidString(got))
+	}
+	emit(nil, &corev1.ConfigMap{}, corev1.EventTypeWarning, "Reason", "Action", "no recorder")
 }
 
 // chartArchive is a minimal cert-manager chart archive with a CRD template.

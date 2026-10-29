@@ -154,7 +154,7 @@ func (s *stages) record(ctx context.Context, rt *v1alpha1.ClusterRuntime, stage 
 		log.FromContext(ctx).Info("AICR run failed", "stage", stage, "runID", runID, "job", job.Name,
 			"attempt", attempt(job), "retry", class, "error", errorMessage(outcome.Err))
 		if s.events != nil {
-			s.events.Eventf(rt, nil, corev1.EventTypeWarning, EventAICRRunFailed, "Run",
+			emit(s.events, rt, corev1.EventTypeWarning, EventAICRRunFailed, "Run",
 				"aicr %s run %s (attempt %d, retry %s) failed: %s", stage, runID, attempt(job), class, errorMessage(outcome.Err))
 		}
 	}

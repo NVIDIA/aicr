@@ -81,7 +81,9 @@ const (
 	ReasonPlanWithoutRecipe = "PlanWithoutRecipe"
 )
 
-// resyncInterval re-observes a steady runtime; engines have no watch yet.
+// resyncInterval re-observes a steady runtime: it covers what no watch
+// delivers, such as Applications before the engine kind is served and the
+// clock-driven windows and deadlines.
 const resyncInterval = 30 * time.Second
 
 // Event reasons the rollout controller records on engine objects and the
@@ -1165,7 +1167,7 @@ func (r *RolloutReconciler) reconcileFailed(rt *v1alpha1.ClusterRuntime, err err
 	if r.Events == nil || operrors.CodeOf(err) == operrors.ErrCodeCanceled {
 		return
 	}
-	r.Events.Eventf(rt, nil, corev1.EventTypeWarning, EventReconcileFailed, "Reconcile", "%s", errorMessage(err))
+	emit(r.Events, rt, corev1.EventTypeWarning, EventReconcileFailed, "Reconcile", "%s", errorMessage(err))
 }
 
 // overridden records an Event on an Application whose fields other managers
@@ -1174,7 +1176,7 @@ func (r *RolloutReconciler) overridden(e *argocd.Ensured, planDigest string) {
 	if r.Events == nil || e == nil || len(e.Overridden) == 0 {
 		return
 	}
-	r.Events.Eventf(e.Application, nil, corev1.EventTypeWarning, EventFieldOwnershipOverridden, "Ensure",
+	emit(r.Events, e.Application, corev1.EventTypeWarning, EventFieldOwnershipOverridden, "Ensure",
 		"forced fields owned by %s back to plan %s", strings.Join(e.Overridden, ", "), planDigest)
 }
 
@@ -1265,9 +1267,7 @@ func (r *RolloutReconciler) finishWith(ctx context.Context, ro *v1alpha1.Runtime
 
 // event records an Event when a recorder is set.
 func (r *RolloutReconciler) event(regarding runtime.Object, eventType, reason, note string, args ...any) {
-	if r.Events != nil {
-		r.Events.Eventf(regarding, nil, eventType, reason, "Reconcile", note, args...)
-	}
+	emit(r.Events, regarding, eventType, reason, "Reconcile", note, args...)
 }
 
 func orNone(s string) string {
@@ -1278,7 +1278,7 @@ func orNone(s string) string {
 }
 
 func (r *RolloutReconciler) saveStatus(ctx context.Context, ro *v1alpha1.RuntimeRollout, message string) error {
-	ro.Status.Message = bounded(message, maxRolloutMessage)
+	ro.Status.Message = bounded(message)
 	ro.Status.ObservedGeneration = ro.Generation
 	if err := r.Client.Status().Update(ctx, ro); err != nil {
 		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "update status of "+ro.Name)
@@ -1584,7 +1584,7 @@ func (r *RolloutReconciler) repair(ctx context.Context, p *plan.Document, rel *p
 	}
 	log.FromContext(ctx).Info("repaired engine drift", "release", rel.ID, "reason", obs.Reason, "overridden", ensured.Overridden)
 	if obs.State == argocd.StateMissing && r.Events != nil {
-		r.Events.Eventf(ensured.Application, nil, corev1.EventTypeWarning, EventApplicationRecreated, "Ensure",
+		emit(r.Events, ensured.Application, corev1.EventTypeWarning, EventApplicationRecreated, "Ensure",
 			"the Application of plan %s was deleted by hand and written again; its resources were left in place", p.DesiredStateDigest)
 	}
 	r.overridden(ensured, p.DesiredStateDigest)
@@ -1647,7 +1647,7 @@ func (r *RolloutReconciler) applyStatus(ctx context.Context, rt *v1alpha1.Cluste
 	}
 	if v.stalled && r.Events != nil && (before == nil || before.Status != metav1.ConditionTrue || before.Reason != stalledReason) {
 		// Each stall, and each new cause, is a durable record.
-		r.Events.Eventf(rt, nil, corev1.EventTypeWarning, EventStalled, "Stall", "%s: %s", stalledReason, v.stalledMsg)
+		emit(r.Events, rt, corev1.EventTypeWarning, EventStalled, "Stall", "%s: %s", stalledReason, v.stalledMsg)
 	}
 	return nil
 }

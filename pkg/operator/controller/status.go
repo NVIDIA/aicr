@@ -17,6 +17,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 	"unicode"
@@ -25,28 +26,29 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 )
 
-// maxConditionMessage is the CRD bound on condition messages.
-const maxConditionMessage = 1024
-
-// maxRolloutMessage is the CRD bound on a rollout's status.message.
-const maxRolloutMessage = 1024
+// maxMessage bounds every message the operator writes: the CRD bounds on
+// condition messages and on a rollout's status.message, and the events/v1
+// bound on an Event's note, are all 1024 bytes.
+const maxMessage = 1024
 
 // truncatedMark ends a message cut to fit its bound.
 const truncatedMark = " [truncated]"
 
-// bounded cuts message to at most limit bytes on a UTF-8 boundary, marked,
-// so a status write never exceeds its schema bound.
-func bounded(message string, limit int) string {
-	if len(message) <= limit {
+// bounded cuts message to at most maxMessage bytes on a UTF-8 boundary,
+// marked, so a write never exceeds its bound.
+func bounded(message string) string {
+	if len(message) <= maxMessage {
 		return message
 	}
-	cut := limit - len(truncatedMark)
+	cut := maxMessage - len(truncatedMark)
 	for cut > 0 && !utf8.RuneStart(message[cut]) {
 		cut--
 	}
@@ -60,7 +62,7 @@ func condition(rt *v1alpha1.ClusterRuntime, conditionType string, status metav1.
 	if existing := meta.FindStatusCondition(rt.Status.Conditions, conditionType); existing != nil && existing.Status == status {
 		transition = existing.LastTransitionTime
 	}
-	message = bounded(message, maxConditionMessage)
+	message = bounded(message)
 	return map[string]any{
 		"type":               conditionType,
 		"status":             string(status),
@@ -111,11 +113,16 @@ func reasonOf(err error) string {
 
 // errorMessage is an error's message, bounded for a condition.
 func errorMessage(err error) string {
-	msg := err.Error()
-	if len(msg) > maxConditionMessage {
-		msg = msg[:maxConditionMessage]
+	return bounded(err.Error())
+}
+
+// emit records an Event with its note bounded: the API server rejects a
+// longer note, and the recorder does not retry, so the Event would be lost.
+func emit(rec events.EventRecorder, regarding runtime.Object, eventType, reason, action, note string, args ...any) {
+	if rec == nil {
+		return
 	}
-	return msg
+	rec.Eventf(regarding, nil, eventType, reason, action, "%s", bounded(fmt.Sprintf(note, args...)))
 }
 
 // camel turns an error code such as INVALID_REQUEST into InvalidRequest.

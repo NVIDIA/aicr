@@ -19,7 +19,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/specs-go"
@@ -97,6 +102,53 @@ func TestSigstoreBundles(t *testing.T) {
 				t.Fatalf("a tag as the subject: %v", err)
 			}
 		})
+	}
+}
+
+// A registry that keeps returning referrer pages is cut off once the
+// referrers pass maxReferrers, not read until the timeout.
+func TestSigstoreBundlesStopsPagingAtTheBound(t *testing.T) {
+	t.Parallel()
+	subject := ocispec.Manifest{Versioned: specs.Versioned{SchemaVersion: 2}, MediaType: ocispec.MediaTypeImageManifest,
+		Config: ocispec.DescriptorEmptyJSON, Layers: []ocispec.Descriptor{}}
+	raw, err := json.Marshal(subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subjectDigest := digest.FromBytes(raw)
+	var pages atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/manifests/"):
+			w.Header().Set("Content-Type", ocispec.MediaTypeImageManifest)
+			w.Header().Set("Docker-Content-Digest", subjectDigest.String())
+			w.Header().Set("Content-Length", fmt.Sprint(len(raw)))
+			if r.Method == http.MethodGet {
+				_, _ = w.Write(raw)
+			}
+		case strings.Contains(r.URL.Path, "/referrers/"):
+			n := pages.Add(1)
+			page := ocispec.Index{Versioned: specs.Versioned{SchemaVersion: 2}, MediaType: ocispec.MediaTypeImageIndex}
+			for i := range 5 {
+				d := digest.FromString(fmt.Sprintf("page %d referrer %d", n, i))
+				page.Manifests = append(page.Manifests, ocispec.Descriptor{MediaType: ocispec.MediaTypeImageManifest, Digest: d, Size: 2,
+					ArtifactType: SigstoreBundleArtifactType})
+			}
+			w.Header().Set("Content-Type", ocispec.MediaTypeImageIndex)
+			w.Header().Set("Link", fmt.Sprintf(`<%s?last=%d>; rel="next"`, r.URL.Path, n))
+			_ = json.NewEncoder(w).Encode(page)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	host := strings.TrimPrefix(srv.URL, "http://")
+	c := New(Options{PlainHTTPHosts: []string{host}})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err = c.SigstoreBundles(ctx, Repository{Host: host, Path: "aicr/cluster/evidence"}, subjectDigest.String())
+	if operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest || !strings.Contains(fmt.Sprint(err), "referrers") || pages.Load() > 5 {
+		t.Fatalf("SigstoreBundles() = %v after %d pages; want the referrer bound after at most 5", err, pages.Load())
 	}
 }
 
