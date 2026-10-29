@@ -70,8 +70,8 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nodewright-customizations | manifest | — | — | 6 |
 | nodewright-operator | helm | nodewright | v0.20.0 | 2 |
 | nvcre | helm | cluster-readiness-engine | v0.8.2 | 4 |
-| nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
-| nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
+| nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.1 | 1 |
+| nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.5.1 | 1 |
 | nvsentinel | helm | nvsentinel | v1.28.0 | 6 |
 | nvsentinel-mongodb | helm | psmdb-db | 1.23.3 | 5 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
@@ -344,11 +344,11 @@ _No images extracted._
 
 ### nvidia-dra-driver-gpu
 
-- `registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.5.0`
+- `registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.5.1`
 
 ### nvidia-dra-driver-gpu-ocp
 
-- `registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.5.0`
+- `registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.5.1`
 
 ### nvsentinel
 
@@ -628,7 +628,7 @@ Y = artifact attached, - = artifact absent, ? = could not probe.
 
   Image                                                           Sig  SBOM  Prov  Notes
   --------------------------------------------------------------  ---  ----  ----  -----
-  registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.5.0  Y    -     -
+  registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.5.1  Y    -     -
 
 Summary: 1/1 signed · 0/1 SBOM · 0/1 provenance
 ```

@@ -30,5 +30,5 @@ charts:
       - computedomaincliques.resource.nvidia.com
       - computedomains.resource.nvidia.com
     repository: oci://registry.k8s.io/dra-driver-nvidia/charts
-    sourceVersion: 0.5.0
+    sourceVersion: 0.5.1
 component: nvidia-dra-driver-gpu

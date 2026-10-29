@@ -930,6 +930,8 @@ components:
   - name: nvidia-dra-driver-gpu
     displayName: nvidia-dra-driver-gpu
     class: core
+    upgrades:
+      file: components/nvidia-dra-driver-gpu/upgrades.yaml
     valueOverrideKeys:
       - dradriver
     healthCheck:
@@ -938,7 +940,7 @@ components:
       defaultRepository: oci://registry.k8s.io/dra-driver-nvidia/charts
       defaultChart: dra-driver-nvidia-gpu
       # renovate: datasource=docker depName=registry.k8s.io/dra-driver-nvidia/charts/dra-driver-nvidia-gpu
-      defaultVersion: "0.5.0"
+      defaultVersion: "0.5.1"
       defaultNamespace: nvidia-dra-driver
     nodeScheduling:
       system:
@@ -1989,6 +1991,8 @@ components:
   - name: nvidia-dra-driver-gpu-ocp
     displayName: nvidia-dra-driver-gpu OCP
     class: core
+    upgrades:
+      file: components/nvidia-dra-driver-gpu-ocp/upgrades.yaml
     valueOverrideKeys:
       - dradriverocp
     healthCheck:
@@ -2001,7 +2005,7 @@ components:
       defaultRepository: oci://registry.k8s.io/dra-driver-nvidia/charts
       defaultChart: dra-driver-nvidia-gpu
       # renovate: datasource=docker depName=registry.k8s.io/dra-driver-nvidia/charts/dra-driver-nvidia-gpu
-      defaultVersion: "0.5.0"
+      defaultVersion: "0.5.1"
       defaultNamespace: nvidia-dra-driver
     nodeScheduling:
       system:

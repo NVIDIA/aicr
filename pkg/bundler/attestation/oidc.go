@@ -160,12 +160,12 @@ func fetchAmbientOIDCTokenAttempt(ctx context.Context, reqURL, requestToken stri
 
 // classifyOIDCFetchContextError maps an outer-context error encountered during
 // the ambient OIDC fetch to a structured error: deadline expiry is a timeout,
-// any other cause (typically caller cancellation) is reported as unavailable.
+// any other cause (typically caller cancellation) is reported as canceled.
 func classifyOIDCFetchContextError(err error, phase string) error {
 	if stderrors.Is(err, context.DeadlineExceeded) {
 		return errors.Wrap(errors.ErrCodeTimeout, "OIDC token request timed out "+phase, err)
 	}
-	return errors.Wrap(errors.ErrCodeUnavailable, "OIDC token request canceled "+phase, err)
+	return errors.Wrap(errors.ErrCodeCanceled, "OIDC token request canceled "+phase, err)
 }
 
 // Sigstore public-good OIDC configuration.
@@ -276,12 +276,12 @@ func runOIDCConnect(ctx context.Context, label string, getter oauthflow.TokenGet
 
 // classifyOIDCContextError wraps a context error into the appropriate
 // pkg/errors structured error code. context.Canceled is a deliberate
-// caller-side cancel (mapped to Unavailable so it's not mistaken for a
+// caller-side cancel (mapped to Canceled so it's not mistaken for a
 // service timeout); anything else — typically context.DeadlineExceeded
 // — is treated as a true timeout.
 func classifyOIDCContextError(label string, err error) error {
 	if stderrors.Is(err, context.Canceled) {
-		return errors.Wrap(errors.ErrCodeUnavailable,
+		return errors.Wrap(errors.ErrCodeCanceled,
 			label+" OIDC authentication canceled", err)
 	}
 	return errors.Wrap(errors.ErrCodeTimeout,
