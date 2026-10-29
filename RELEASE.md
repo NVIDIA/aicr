@@ -249,7 +249,9 @@ make bump-rc          # v1.2.3 → v1.3.0-rc1 (always the next minor)
 make bump-rc          # v1.3.0-rc1 → v1.3.0-rc2
 ```
 
-An RC runs the full build, test, scan, and attest pipeline and gets
+The release workflow accepts only `vX.Y.Z` and `vX.Y.Z-(alpha|beta|rc)N` tags
+(a dot before `N` is allowed), the versions the AICR Operator's release builds
+accept. An RC runs the full build, test, scan, and attest pipeline and gets
 `vX.Y.Z-rcN` image tags, but it does not update:
 
 - the Homebrew formula

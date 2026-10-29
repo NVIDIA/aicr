@@ -99,9 +99,29 @@ func TestReleaseUsesSingleDigestMap(t *testing.T) {
 		t.Error("attester must receive the same digest map and candidate tag")
 	}
 
-	releaseCheckText := marshalYAML(t, mapValue(t, jobs, "release-check"))
-	for _, gate := range []string{"resolve-candidates", "image-vuln-scan", "attest", "operator-candidate", "operator-scan"} {
-		if !strings.Contains(releaseCheckText, gate) {
+	releaseCheck := mapValue(t, jobs, "release-check")
+	gateSteps := sliceValue(t, releaseCheck, "steps")
+	gateIndex := stepIndex(gateSteps, "Check release security gates")
+	if gateIndex < 0 {
+		t.Fatal("release-check must check the release security gates")
+	}
+	gateStep, ok := gateSteps[gateIndex].(map[string]any)
+	if !ok {
+		t.Fatal("release-check's gate step is not a map")
+	}
+	gateEnv := mapValue(t, gateStep, "env")
+	gateRun := fmt.Sprint(gateStep["run"])
+	for gate, variable := range map[string]string{
+		"resolve-candidates": "RESOLVE_RESULT",
+		"image-vuln-scan":    "SCAN_RESULT",
+		"attest":             "ATTEST_RESULT",
+		"operator-candidate": "OPERATOR_CANDIDATE_RESULT",
+		"operator-scan":      "OPERATOR_SCAN_RESULT",
+	} {
+		if !containsString(stringSlice(releaseCheck["needs"]), gate) ||
+			fmt.Sprint(gateEnv[variable]) != "${{ needs."+gate+".result }}" ||
+			!strings.Contains(gateRun, `"${`+variable+`}" != "success"`) {
+
 			t.Errorf("release-check must fail closed on %s", gate)
 		}
 	}

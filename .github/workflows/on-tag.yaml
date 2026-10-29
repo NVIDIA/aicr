@@ -61,9 +61,11 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          SEMVER_TAG_PATTERN='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?$'
+          # The operator's release builds accept only these tags
+          # (pkg/operator/version), and a failing operator blocks the release.
+          SEMVER_TAG_PATTERN='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.?(0|[1-9][0-9]*))?$'
           if [[ ! "${TAG}" =~ ${SEMVER_TAG_PATTERN} ]]; then
-            echo "::error::release tag is not valid SemVer: ${TAG}"
+            echo "::error::release tag is not vX.Y.Z or vX.Y.Z-(alpha|beta|rc)N: ${TAG}"
             exit 1
           fi
           CANDIDATE_TAG="candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
