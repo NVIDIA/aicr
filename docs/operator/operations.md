@@ -88,10 +88,13 @@ Service, so scrape the pod or port-forward
 | Metric | Meaning |
 | --- | --- |
 | `aicr_operator_rollout_outcomes_total{outcome}` | Rollouts ended, by outcome |
-| `aicr_operator_aicr_job_duration_seconds{stage,result}` | AICR Job durations by stage and result |
+| `aicr_operator_job_duration_seconds{stage,result}` | AICR Job durations by stage and result |
 | `aicr_operator_validation_runs_total{result}` | Deployment validation runs by result |
-| `aicr_operator_aicr_job_runs_total{stage,result,class}` | AICR runs when first seen finished, by stage, result and, for failures, retry class (`never`, `bounded`, `transient`, `authorization`) |
+| `aicr_operator_job_runs_total{stage,result,class}` | AICR runs when first seen finished, by stage, result and, for failures, retry class (`never`, `bounded`, `transient`, `authorization`) |
 | `aicr_operator_registry_token_expiry_seconds`, `aicr_operator_registry_token_age_seconds` | The Argo CD registry token (`aws` provider) |
+
+Every outcome, result, stage and retry class is exported at zero from
+startup, so a rate reads zero rather than nothing before its first event.
 
 ## How a change reaches the cluster
 

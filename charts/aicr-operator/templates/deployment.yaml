@@ -36,6 +36,8 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       serviceAccountName: aicr-operator
+      # Above the operator's 30-second graceful shutdown.
+      terminationGracePeriodSeconds: 45
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -79,6 +81,14 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            # The Go runtime collects harder as the heap nears the memory
+            # limit. A divisor only changes the unit, so this is the full
+            # limit, with no headroom.
+            - name: GOMEMLIMIT
+              valueFrom:
+                resourceFieldRef:
+                  containerName: manager
+                  resource: limits.memory
           ports:
             - name: metrics
               containerPort: 8080

@@ -36,6 +36,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/operator/config"
 	"github.com/NVIDIA/aicr/pkg/operator/controller"
 	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
+	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 	"github.com/NVIDIA/aicr/pkg/operator/manager"
 	"github.com/NVIDIA/aicr/pkg/operator/registry"
 	"github.com/NVIDIA/aicr/pkg/operator/version"
@@ -80,6 +81,10 @@ func run(args []string) error {
 		"bypassApprovals", cfg.BypassApprovals)
 	if err := cfg.Validate(info.Release); err != nil {
 		return err
+	}
+	if cfg.ValidationEnabled && os.Getenv("POD_NAME") == "" {
+		return operrors.New(operrors.ErrCodeInvalidRequest,
+			"validation needs POD_NAME, the operator's pod name, to bind evidence to the digest the operator runs as")
 	}
 
 	scheme, err := manager.NewScheme()

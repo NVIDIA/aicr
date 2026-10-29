@@ -16,9 +16,9 @@
 Protection of operator state, for every requester: only
 the operator creates or updates the ConfigMaps it labels in its namespace,
 including removing the label. Deletion is left to RBAC, so deleting the
-namespace keeps working. A second policy governs rollout approval. Both are kept
-on uninstall, so kept plans and rollouts stay protected while no operator
-runs.
+namespace keeps working. A second policy governs rollout creation and
+approval. Both are kept on uninstall, so kept plans and rollouts stay
+protected while no operator runs.
 */}}
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -66,8 +66,8 @@ spec:
   policyName: aicr-operator-state
   validationActions: [Deny]
 ---
-# Rollout approval. No rollout is created with an
-# approval, and the operator never writes one. Anyone else changes only
+# Rollout creation and approval. Only the operator creates rollouts, never
+# with an approval, and it never writes one. Anyone else changes only
 # spec.approval; setting the approval or the revocation takes update on the
 # virtual subresource runtimerollouts/approve, records the requester's own
 # username, and a revocation is refused once the rollout has an outcome or
@@ -116,6 +116,8 @@ spec:
         authorizer.group('operator.aicr.run').resource('runtimerollouts').subresource('approve')
         .name(object.metadata.name).check('update').allowed()
   validations:
+    - expression: variables.update || variables.operator
+      message: only the AICR Operator creates rollouts
     - expression: variables.update || !has(object.spec.approval)
       message: no rollout is created with an approval
     - expression: >-

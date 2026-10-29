@@ -61,11 +61,9 @@ PARTITION=aws REPOSITORY_PREFIX="${PREFIX}" ACCOUNT_ID="${ACCOUNT}" REGION="${RE
 aws iam create-policy --policy-name "aicr-operator-${CLUSTER}" --policy-document file://aicr-operator-ecr.json
 ```
 
-It allows `ecr:GetAuthorizationToken`, and push and pull on
-`repository/${PREFIX}/*` only. Whether pushing through the creation template
-also needs `ecr:CreateRepository` is not yet confirmed on EKS. If the first
-push fails with an access-denied error naming it, add that action for the same
-resource.
+It allows `ecr:GetAuthorizationToken`, and creating, pushing and pulling
+repositories under `repository/${PREFIX}/*` only; the creation template sets
+each repository up on its first push.
 
 Give the policy to a role the operator's ServiceAccount (`aicr-operator` in
 `aicr-system`) can assume, with either mechanism:

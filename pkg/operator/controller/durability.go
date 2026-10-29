@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
+	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
 	"github.com/NVIDIA/aicr/pkg/operator/defaults"
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 	"github.com/NVIDIA/aicr/pkg/operator/plan"
@@ -37,24 +38,52 @@ var rolloutOutcomes = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Help: "Rollouts that reached a terminal phase, by outcome.",
 }, []string{"outcome"})
 
-// jobSeconds is the duration of finished AICR Jobs by stage and result.
+// jobSeconds is the duration of finished AICR Jobs by stage and result. The
+// top bucket, 5120s, is above the longest stage deadline.
 var jobSeconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-	Name:    "aicr_operator_aicr_job_duration_seconds",
+	Name:    "aicr_operator_job_duration_seconds",
 	Help:    "Duration of finished AICR Jobs, by stage and result.",
-	Buckets: prometheus.ExponentialBuckets(5, 2, 10),
+	Buckets: prometheus.ExponentialBuckets(5, 2, 11),
 }, []string{"stage", labelResult})
 
-// Collectors are the controllers' metrics, for the manager's registry.
 // labelResult is the metric label for how a run or Job ended.
 const labelResult = "result"
 
 // aicrJobRuns counts AICR runs when first seen finished.
 var aicrJobRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
-	Name: "aicr_operator_aicr_job_runs_total",
+	Name: "aicr_operator_job_runs_total",
 	Help: "Finished AICR runs, by stage, result and, for failures, retry class.",
 }, []string{"stage", labelResult, "class"})
 
+// metricStages are the stages AICR Jobs record metrics under.
+var metricStages = []aicrjob.Stage{
+	aicrjob.StageSnapshot, aicrjob.StageRecipe, aicrjob.StageBaseRender,
+	aicrjob.StageRender, aicrjob.StageAssessment, aicrjob.StageValidation,
+}
+
+// terminalPhases are the rollout outcomes.
+var terminalPhases = []v1alpha1.RolloutPhase{
+	v1alpha1.PhaseSucceeded, v1alpha1.PhaseFailed, v1alpha1.PhaseExpired,
+	v1alpha1.PhaseRevoked, v1alpha1.PhaseSuperseded, v1alpha1.PhaseOrphaned,
+}
+
+// Collectors are the controllers' metrics, for the manager's registry, with
+// every known label value already at zero, so a rate reads zero rather than
+// nothing before the first event.
 func Collectors() []prometheus.Collector {
+	for _, phase := range terminalPhases {
+		rolloutOutcomes.WithLabelValues(string(phase))
+	}
+	validationRuns.WithLabelValues("passed")
+	validationRuns.WithLabelValues("failed")
+	for _, stage := range metricStages {
+		jobSeconds.WithLabelValues(string(stage), "succeeded")
+		jobSeconds.WithLabelValues(string(stage), "failed")
+		aicrJobRuns.WithLabelValues(string(stage), "succeeded", "")
+		for _, class := range retryClasses {
+			aicrJobRuns.WithLabelValues(string(stage), "failed", class)
+		}
+	}
 	return []prometheus.Collector{rolloutOutcomes, jobSeconds, validationRuns, aicrJobRuns}
 }
 

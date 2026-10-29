@@ -23,8 +23,9 @@ import (
 	"testing"
 )
 
-// The operator's IAM policy grants only an authorization token and push and
-// pull on the runtime repository prefix.
+// The operator's IAM policy grants only an authorization token and create,
+// push and pull on the runtime repository prefix, and all of them: a push
+// through the creation template creates the repository.
 func TestECRPolicyIsLeastPrivilege(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "charts", "aicr-operator", "files", "ecr-iam-policy.json"))
@@ -42,9 +43,10 @@ func TestECRPolicyIsLeastPrivilege(t *testing.T) {
 		t.Fatalf("policy is not JSON: %v", err)
 	}
 	pushPull := []string{
-		"ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:CompleteLayerUpload", "ecr:GetDownloadUrlForLayer",
-		"ecr:InitiateLayerUpload", "ecr:PutImage", "ecr:UploadLayerPart",
+		"ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:CompleteLayerUpload", "ecr:CreateRepository",
+		"ecr:GetDownloadUrlForLayer", "ecr:InitiateLayerUpload", "ecr:PutImage", "ecr:UploadLayerPart",
 	}
+	granted := map[string]bool{}
 	for _, s := range policy.Statement {
 		if s.Effect != "Allow" {
 			t.Fatalf("unexpected effect %q", s.Effect)
@@ -59,6 +61,7 @@ func TestECRPolicyIsLeastPrivilege(t *testing.T) {
 			}
 		}
 		for _, a := range actions {
+			granted[a] = true
 			if strings.Contains(a, "*") {
 				t.Errorf("wildcard action %q", a)
 			}
@@ -72,8 +75,13 @@ func TestECRPolicyIsLeastPrivilege(t *testing.T) {
 					t.Errorf("%s is not scoped to the runtime prefix: %s", a, s.Resource)
 				}
 			default:
-				t.Errorf("action %s is not push, pull or token", a)
+				t.Errorf("action %s is not create, push, pull or token", a)
 			}
+		}
+	}
+	for _, a := range append(pushPull, "ecr:GetAuthorizationToken") {
+		if !granted[a] {
+			t.Errorf("the policy does not grant %s", a)
 		}
 	}
 }

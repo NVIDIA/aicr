@@ -52,7 +52,7 @@ uninstall:
 | Policy | Holds |
 | --- | --- |
 | `aicr-operator-state` | Only the operator creates or updates a ConfigMap labeled `app.kubernetes.io/managed-by: aicr-operator` in the operator namespace, including removing the label. Deletion is left to RBAC, so deleting the namespace still works; a deleted plan is rebuilt or resolved again |
-| `aicr-operator-approval` | No rollout is created with an approval, and the operator never writes one. Anyone else changes only `spec.approval`, holds `update` on `runtimerollouts/approve` for that rollout, records their own username, and cannot revoke a rollout that has ended or is validating |
+| `aicr-operator-approval` | Only the operator creates rollouts, never with an approval, and it never writes one. Anyone else changes only `spec.approval`, holds `update` on `runtimerollouts/approve` for that rollout, records their own username, and cannot revoke a rollout that has ended or is validating |
 
 The CRDs add their own rules: a rollout's spec is immutable except its
 approval, and an approval or revocation is set once and never cleared.

@@ -66,7 +66,7 @@ context; the schema rejects unknown keys.
 | `operator.imagePullPolicy` | `IfNotPresent` | Optional | |
 | `operator.replicas` | `1` | Optional | 1 to 3; extra replicas wait on the leader-election Lease |
 | `operator.logLevel` | `info` | Optional | `debug`, `info`, `warn` or `error` |
-| `operator.resources` | Requests `100m`, `128Mi`; limit `512Mi` | Optional | The operator container's requests and limits |
+| `operator.resources` | Requests `100m`, `128Mi`; limit `512Mi` | Optional | The operator container's requests and limits; the memory limit is also its `GOMEMLIMIT` |
 | `operator.serviceAccountAnnotations` | `{}` | With `registry.auth.provider: aws` | Annotations on the operator's ServiceAccount, such as the IRSA role ARN |
 | `operator.nodeSelector` | `{}` | Optional | Node selector for the operator pod |
 | `operator.tolerations` | `[]` | Optional | Tolerations for the operator pod |
@@ -129,15 +129,18 @@ Admission policies, all ValidatingAdmissionPolicies without webhooks:
 - `aicr-operator-applications` (the operator only): project `aicr`; one source
   under the runtime registry's `charts/` or `wrappers/` pinned by `sha256:`;
   no plugin, value files or parameters; the in-cluster server and a component
-  namespace; the resources finalizer only with the `delete-rollout`
+  namespace; the resources finalizer only with a non-empty `delete-rollout`
   annotation.
 - `aicr-operator-application-deletes` (the operator only): deletes only of
-  its own Applications already marked by an approved `Remove` step.
+  its own Applications that carry the resources finalizer and a non-empty
+  `delete-rollout` annotation, which an approved `Remove` step sets.
 - `aicr-operator-jobs` (the operator only): one container running the pinned
   AICR image with its entrypoint; the namespace's AICR identity and allowed
   subcommand (`recipe`, `bundle`, `upgrade-check` in the Job namespace,
   `snapshot` in discovery, `validate` in validation); a TTL; a snapshot agent
-  `--image` naming the pinned AICR image.
+  `--image` naming the pinned AICR image; only `HOME`, `TMPDIR` and
+  `DOCKER_CONFIG` in the environment, each set by value, and only `emptyDir`
+  and Secret volumes.
 - `aicr-operator-rollout-outcome` (the operator only): the `outcome` label and
   `evidence` annotation never change once set.
 - `aicr-operator-runtime` (the operator only): a `ClusterRuntime` changes only
@@ -145,10 +148,11 @@ Admission policies, all ValidatingAdmissionPolicies without webhooks:
 - `aicr-operator-state` (everyone but the operator): no create or update of an
   operator-labeled ConfigMap in the operator namespace, including removing the
   label. Deletion is left to RBAC, so deleting the namespace works.
-- `aicr-operator-approval` (kept on uninstall): no rollout is created with an
-  approval and the operator never writes one; anyone else changes only
-  `spec.approval`, needs `update` on `runtimerollouts/approve`, records their
-  own username, and cannot revoke a rollout that has ended or is validating.
+- `aicr-operator-approval` (kept on uninstall): only the operator creates
+  rollouts, never with an approval, and it never writes one; anyone else
+  changes only `spec.approval`, needs `update` on `runtimerollouts/approve`,
+  records their own username, and cannot revoke a rollout that has ended or
+  is validating.
 
 Approvers get the `aicr-operator-approver` ClusterRole and Role (read
 rollouts, the runtime and assessment reports in the operator namespace;

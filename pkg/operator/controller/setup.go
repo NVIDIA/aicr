@@ -20,12 +20,14 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlcontroller "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -65,11 +67,45 @@ var relevantNode = predicate.Funcs{
 	},
 }
 
+// relevantApplication passes Application updates that change more than what
+// Argo CD rewrites on every refresh of an unchanged Application.
+var relevantApplication = predicate.Funcs{
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		old, okOld := e.ObjectOld.(*unstructured.Unstructured)
+		updated, okNew := e.ObjectNew.(*unstructured.Unstructured)
+		return !okOld || !okNew || !equality.Semantic.DeepEqual(withoutRefresh(old), withoutRefresh(updated))
+	},
+}
+
+// withoutRefresh is a copy of an Application without what a refresh
+// rewrites.
+func withoutRefresh(app *unstructured.Unstructured) map[string]any {
+	c := app.DeepCopy()
+	c.SetResourceVersion("")
+	c.SetManagedFields(nil)
+	unstructured.RemoveNestedField(c.Object, "status", "reconciledAt")
+	unstructured.RemoveNestedField(c.Object, "status", "observedAt")
+	return c.Object
+}
+
+// resolverControllerOptions runs one worker, as the single runtime needs.
+// A reconcile has no timeout: a chart mirror cut short does not resume.
+func resolverControllerOptions() ctrlcontroller.Options {
+	return ctrlcontroller.Options{MaxConcurrentReconciles: 1}
+}
+
+// rolloutControllerOptions runs one worker, which finishWith and the single
+// runtime rely on, and bounds each reconcile.
+func rolloutControllerOptions() ctrlcontroller.Options {
+	return ctrlcontroller.Options{MaxConcurrentReconciles: 1, ReconciliationTimeout: defaults.RolloutReconcileTimeout}
+}
+
 // SetupWithManager registers the resolver: the runtime, its AICR Jobs and,
 // with discovery, the Nodes that make up the placement groups.
 func (r *ResolverReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	b := ctrl.NewControllerManagedBy(mgr).
 		Named("resolver").
+		WithOptions(resolverControllerOptions()).
 		For(&v1alpha1.ClusterRuntime{}).
 		Watches(&batchv1.Job{}, handler.EnqueueRequestsFromMapFunc(toRuntime))
 	if !r.Config.SkipDiscovery {
@@ -89,6 +125,7 @@ func (r *ResolverReconciler) SetupWithManager(mgr ctrl.Manager) error {
 func (r *RolloutReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	c, err := ctrl.NewControllerManagedBy(mgr).
 		Named("rollout").
+		WithOptions(rolloutControllerOptions()).
 		For(&v1alpha1.ClusterRuntime{}).
 		Watches(&v1alpha1.RuntimeRollout{}, handler.EnqueueRequestsFromMapFunc(toRuntime)).
 		Build(r)
@@ -119,7 +156,7 @@ func (r *RolloutReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			}
 			app := &unstructured.Unstructured{}
 			app.SetGroupVersionKind(gvk)
-			return c.Watch(source.Kind(engineCache, client.Object(app), handler.EnqueueRequestsFromMapFunc(toRuntime)))
+			return c.Watch(source.Kind(engineCache, client.Object(app), handler.EnqueueRequestsFromMapFunc(toRuntime), relevantApplication))
 		},
 	}
 	if err = mgr.Add(w); err != nil {

@@ -485,6 +485,9 @@ changes `spec.approval`:
   (the spec written, or a sync since the rollout was created).
 - The request changes nothing but `spec.approval`; the operator's own identity
   can never write it, and a rollout cannot be created with it.
+- Only the operator's identity creates rollouts, so nobody else can create one
+  that skips approval with `approvalRequired: false` or an `outcome` label
+  already set.
 
 Approvers also need `get`, `list`, `watch` and `patch` on `runtimerollouts`,
 and `get` on ConfigMaps in the operator namespace to read assessment reports.

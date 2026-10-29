@@ -27,6 +27,8 @@ const (
 	// GracefulShutdownTimeout bounds how long runnables get to stop after the
 	// manager's context is canceled.
 	GracefulShutdownTimeout = 30 * time.Second
+	// RolloutReconcileTimeout bounds one reconcile of the rollout controller.
+	RolloutReconcileTimeout = 30 * time.Minute
 )
 
 // kubectl aicr plugin.
