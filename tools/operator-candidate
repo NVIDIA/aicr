@@ -34,6 +34,8 @@ set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "${repo_root}"
+work="$(mktemp -d)"
+trap 'rm -rf "${work}"' EXIT
 setting() { yq -r "$1" .settings.yaml; }
 # Only the commit's go.mod and go.sum select module code, never a go.work.
 export GOWORK=off
@@ -87,7 +89,7 @@ build() {
 # credential material and no agent attribution.
 clean() {
   local out="$1" bins platform found
-  bins="$(mktemp -d)"
+  bins="$(mktemp -d "${work}/bins.XXXXXX")"
   for platform in linux/amd64 linux/arm64/v8; do
     go run ./tools/operator-release extract -dir "${out}" -platform "${platform}" -out "${bins}/aicr-operator-${platform//\//-}"
   done
@@ -96,7 +98,6 @@ clean() {
   tar -xzf "${out}"/chart/*.tgz -C "${bins}/chart"
   found="$(grep -r -l -a -i -E 'co-authored-by|claude|anthropic|generated with' "${out}" "${bins}" || true)
 $(grep -r -l -a -E 'AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{36}' "${out}" "${bins}" || true)"
-  rm -rf "${bins}"
   if [[ -n "${found//[[:space:]]/}" ]]; then
     echo "credential material or agent attribution in the candidate: ${found}" >&2
     exit 1
@@ -116,7 +117,7 @@ refuses_bypass() {
     return
     ;;
   esac
-  bin="$(mktemp -d)/aicr-operator"
+  bin="$(mktemp -d "${work}/bypass.XXXXXX")/aicr-operator"
   go run ./tools/operator-release extract -dir "${out}" -platform "${platform}" -out "${bin}"
   # No cluster is reachable, so a binary that failed to refuse cannot act on
   # one, and the timeout ends it.
@@ -131,7 +132,6 @@ refuses_bypass() {
     exit 1
   fi
   echo "the candidate's ${host} binary refuses development.bypassApprovals"
-  rm -rf "$(dirname "${bin}")"
 }
 
 dir="${CANDIDATE_DIR:-dist/candidate}"
