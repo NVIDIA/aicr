@@ -40,22 +40,6 @@ spec:
   # in addition to the upstream `node-role.kubernetes.io/control-plane`,
   # and ships `local-path` as the default StorageClass.
   componentRefs:
-    # Persist Prometheus on the BCM-provisioned local-path StorageClass.
-    - name: kube-prometheus-stack
-      type: Helm
-      overrides:
-        prometheus:
-          prometheusSpec:
-            storageSpec:
-              emptyDir: null
-              volumeClaimTemplate:
-                spec:
-                  accessModes: ["ReadWriteOnce"]
-                  storageClassName: local-path
-                  resources:
-                    requests:
-                      storage: 50Gi
-
     # Tolerate the BCM `master` label so control-plane workloads that
     # already tolerate `control-plane` schedule on BCM masters as well.
     # Mirrored onto kubeletPlugin so DRA's kubelet plugin DaemonSet still

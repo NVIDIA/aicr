@@ -20,7 +20,8 @@
 //
 // The shapes exercised here are taken from the registry rather than invented:
 // nodewright-operator pins one top-level override, nvidia-dra-driver-gpu pins
-// both keys, and kube-prometheus-stack pins four across subcharts.
+// both keys, and kube-prometheus-stack pinned four across subcharts before
+// ADR-026 removed them.
 
 package recipe
 
@@ -605,7 +606,6 @@ func TestApplyInheritedObjectNamesFlagsAnEmbeddedFullname(t *testing.T) {
 		"name: legacy-kps-operator",
 		"name: legacy-kps-prometheus",
 		"name: prometheus-kube-prometheus-prometheus",
-		"name: alertmanager-kube-prometheus-alertmanager",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("health check is missing %q:\n%s", want, got)
