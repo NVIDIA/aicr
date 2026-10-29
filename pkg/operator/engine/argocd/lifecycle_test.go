@@ -440,7 +440,8 @@ func refusing(a *Adapter, name string, err error) {
 var applications = schema.GroupResource{Group: ApplicationGVK.Group, Resource: "applications"}
 
 // A refused write to one Application leaves the others suspended, and the
-// error names the one left unchanged.
+// error names the one left unchanged and is permanent, so the controller
+// goes on reconciling.
 func TestSuspendContinuesPastARefusedApplication(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -449,8 +450,8 @@ func TestSuspendContinuesPastARefusedApplication(t *testing.T) {
 	refusing(a, "a", apierrors.NewForbidden(applications, "a", errors.New("denied by admission policy")))
 
 	changed, err := a.Suspend(ctx, uid, true)
-	if !slices.Equal(changed, []string{"b", "c"}) || err == nil || !strings.Contains(err.Error(), "Applications a") {
-		t.Fatalf("Suspend() = %v, %v; want b and c changed and an error naming a", changed, err)
+	if !slices.Equal(changed, []string{"b", "c"}) || !operrors.IsPermanent(err) || !strings.Contains(err.Error(), "Applications a") {
+		t.Fatalf("Suspend() = %v, %v; want b and c changed and a permanent error naming a", changed, err)
 	}
 	for name, want := range map[string]bool{"a": true, "b": false, "c": false} {
 		if live, getErr := a.get(ctx, name); getErr != nil || automatedEnabled(live) != want {

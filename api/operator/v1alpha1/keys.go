@@ -95,6 +95,9 @@ const (
 	// AnnotationRetry requests a retry of a failed, expired, revoked or
 	// stalled rollout; each retry needs a new token.
 	AnnotationRetry = "operator.aicr.run/retry"
+	// AnnotationRetryRequested records on a stalled rollout the retry token
+	// that asked to supersede it, consuming the token.
+	AnnotationRetryRequested = "operator.aicr.run/retry-requested"
 	// AnnotationResnapshot requests an AICR snapshot outside the schedule.
 	AnnotationResnapshot = "operator.aicr.run/resnapshot"
 )

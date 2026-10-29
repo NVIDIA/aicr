@@ -78,6 +78,7 @@ in the `default` namespace; `kubectl describe` shows them.
 | `ReconcileFailed` | Warning | The runtime: a reconcile ended in an error the operator retries, such as an API server timeout. Conditions keep what was last observed; a step in flight still fails at its action timeout, naming the error |
 | `FieldOwnershipOverridden` | Warning | An Argo CD Application whose hand edits the operator forced back, naming the other field managers |
 | `ApplicationRecreated` | Warning | An Argo CD Application deleted by hand and written again; its resources stayed in place |
+| `EngineSuspensionRefused` | Warning | The runtime: the API server refused for good to change an Application's automated sync for `spec.suspendEngine`, as for an Application edited outside the admission policy; the other Applications are changed and the operator keeps reconciling |
 | `OrphanAnnotationRefused` | Warning | The runtime: while orphaning on deletion, Applications whose `orphaned-from` annotation was refused, such as by admission; they are left in place and the runtime is still released |
 
 ### Metrics
@@ -92,7 +93,7 @@ Service, so scrape the pod or port-forward
 | `aicr_operator_job_duration_seconds{stage,result}` | AICR Job durations by stage and result |
 | `aicr_operator_validation_runs_total{result}` | Deployment validation runs by result |
 | `aicr_operator_job_runs_total{stage,result,class}` | AICR runs when first seen finished, by stage, result and, for failures, retry class (`never`, `bounded`, `transient`, `authorization`) |
-| `aicr_operator_registry_token_expiry_timestamp_seconds`, `aicr_operator_registry_token_refresh_timestamp_seconds` | When the Argo CD registry token expires and when the operator last refreshed it, as Unix times (`aws` provider); `0` until known |
+| `aicr_operator_registry_token_expiry_timestamp_seconds`, `aicr_operator_registry_token_refresh_timestamp_seconds` | When the Argo CD registry token expires and when the operator last refreshed it, as Unix times (`aws` provider); `0` until known. Only the leader refreshes the token, so a standby replica stays at `0`: alert on `max()` across operator pods |
 
 Every outcome, result, stage and retry class is exported at zero from
 startup, so a rate reads zero rather than nothing before its first event.
@@ -205,8 +206,9 @@ kubectl annotate clusterruntime cluster operator.aicr.run/retry="$(date +%s)" --
 
 The retry creates a new rollout to the same target from the live state, which
 needs a fresh approval. A retry while a rollout is `Stalled` (for example on
-`InventoryDrift`) first ends it `Superseded`. A token acts once; each retry
-needs a new value. Releases a failed rollout already moved stay on its target
+`InventoryDrift`) first ends it `Superseded`. A token acts once, even when the
+stalled rollout recovers before the retry ends it; each retry needs a new
+value. Releases a failed rollout already moved stay on its target
 plan; nothing rolls back automatically.
 
 ## Pausing versus suspending the engine

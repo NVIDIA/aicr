@@ -108,6 +108,9 @@ const (
 	// EventStalled, on the runtime: it turned Stalled, or stalled for
 	// another reason.
 	EventStalled = "Stalled"
+	// EventEngineSuspensionRefused, on the runtime: the API server refused
+	// for good to change an Application's automated sync.
+	EventEngineSuspensionRefused = "EngineSuspensionRefused"
 )
 
 // Engine is the adapter contract the rollout controller drives.
@@ -269,7 +272,7 @@ func (r *RolloutReconciler) reconcile(ctx context.Context, rt *v1alpha1.ClusterR
 	}
 	converge := target != "" && target != active
 	if !converge && target != "" && current == nil && resolvedNow && !v.stalled {
-		if converge, err = r.diverged(ctx, rt, target); err != nil {
+		if converge, err = r.diverged(ctx, rt, target, rollouts); err != nil {
 			return nil, err
 		}
 	}
@@ -282,11 +285,19 @@ func (r *RolloutReconciler) reconcile(ctx context.Context, rt *v1alpha1.ClusterR
 		// at the plan they carry; the target rolls forward after it, not
 		// instead of it.
 		var supersede, token string
+		requested := rt.Annotations[v1alpha1.AnnotationRetry]
 		switch {
 		case target != "" && resolvedNow && target != current.Spec.ToPlanDigest && !isAdopt(current):
 			supersede = "superseded by plan " + target
-		case retry != "" && current.Status.Phase == v1alpha1.PhaseStalled:
-			supersede, token = "superseded by retry "+retry, retry
+		case current.Status.Phase == v1alpha1.PhaseStalled && requested != "" &&
+			(retry == requested || current.Annotations[v1alpha1.AnnotationRetryRequested] == requested):
+			// The token is consumed on this rollout now, so one the rollout
+			// recovers from before a step boundary acts on no later rollout;
+			// the rollout is superseded while it stays stalled.
+			if err = r.retryRequested(ctx, current, requested); err != nil {
+				return nil, err
+			}
+			supersede, token = "superseded by retry "+requested, requested
 		}
 		if err = r.advance(ctx, rt, current, v, supersede, token, hold); err != nil {
 			return nil, err
@@ -399,16 +410,50 @@ func (r *RolloutReconciler) prepare(ctx context.Context, rt *v1alpha1.ClusterRun
 }
 
 // diverged reports whether an owned engine object carries a plan other than
-// target, as a failed rollout leaves the releases it already moved. When the
-// target is the active plan, rolling out to it from live state is moving to
-// the declared target, not an automatic rollback.
-func (r *RolloutReconciler) diverged(ctx context.Context, rt *v1alpha1.ClusterRuntime, target string) (bool, error) {
+// target, as a failed rollout leaves the releases it already moved, or
+// whether a release of the target plan that such a rollout moved elsewhere
+// or removed is gone, which repair does not restore. When the target is the
+// active plan, rolling out to it from live state is moving to the declared
+// target, not an automatic rollback.
+func (r *RolloutReconciler) diverged(ctx context.Context, rt *v1alpha1.ClusterRuntime, target string,
+	rollouts []v1alpha1.RuntimeRollout) (bool, error) {
+
 	inventory, err := r.Engine.Inventory(ctx, string(rt.UID))
 	if err != nil {
 		return false, err
 	}
+	live := map[string]bool{}
 	for _, i := range inventory {
 		if i.PlanDigest != target {
+			return true, nil
+		}
+		live[i.ReleaseID] = true
+	}
+	retired, moved := leftBehind(rollouts)
+	gone := map[string]bool{}
+	for id := range retired {
+		if !live[id] {
+			gone[id] = true
+		}
+	}
+	for id, m := range moved {
+		if m.plan != target && !live[id] {
+			gone[id] = true
+		}
+	}
+	if len(gone) == 0 {
+		return false, nil
+	}
+	p, err := readPlan(ctx, r.Reader, r.Config.OperatorNamespace, target)
+	if operrors.CodeOf(err) == operrors.ErrCodeNotFound {
+		// observeActive restores the active plan or stalls without it.
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	for i := range p.Releases {
+		if gone[p.Releases[i].ID] {
 			return true, nil
 		}
 	}
@@ -1213,6 +1258,23 @@ func (r *RolloutReconciler) finish(ctx context.Context, ro *v1alpha1.RuntimeRoll
 	return r.finishWith(ctx, ro, phase, message, nil)
 }
 
+// retryRequested records on a stalled rollout the retry token that asked to
+// supersede it, which consumes the token.
+func (r *RolloutReconciler) retryRequested(ctx context.Context, ro *v1alpha1.RuntimeRollout, token string) error {
+	if ro.Annotations[v1alpha1.AnnotationRetryRequested] == token {
+		return nil
+	}
+	patch := client.MergeFrom(ro.DeepCopy())
+	if ro.Annotations == nil {
+		ro.Annotations = map[string]string{}
+	}
+	ro.Annotations[v1alpha1.AnnotationRetryRequested] = token
+	if err := r.Client.Patch(ctx, ro, patch); err != nil {
+		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "record retry request on "+ro.Name)
+	}
+	return nil
+}
+
 // superseded ends a rollout Superseded, recording the token of the retry
 // that superseded it, if any, in the outcome's patch: the token is consumed
 // exactly when the rollout ends.
@@ -1544,7 +1606,8 @@ func (v *runtimeView) lostMove(id string, obs argocd.Observation) bool {
 	}
 	v.stalled, v.stalledReason = true, ReasonMovedReleaseMissing
 	v.stalledMsg = fmt.Sprintf("release %s: its Application is gone, and rollout %s, which did not succeed, may have moved it "+
-		"to plan %s; repairing it from the active plan would roll it back, so retry the rollout to restore it", id, m.rollout, m.plan)
+		"to plan %s; repairing it from the active plan would roll it back. Retry to restore it at the target plan, or return the "+
+		"target to the active plan to restore it there through an approved rollout", id, m.rollout, m.plan)
 	return true
 }
 

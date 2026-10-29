@@ -333,5 +333,12 @@ func (r *RolloutReconciler) suspension(ctx context.Context, rt *v1alpha1.Cluster
 		}
 		r.event(rt, corev1.EventTypeNormal, reason, "automated sync %s for %s", verb, strings.Join(changed, ", "))
 	}
+	if err != nil && operrors.IsPermanent(err) {
+		// An Application the API server refuses to patch for good, such as
+		// one edited outside the admission policy, must not stop status and
+		// drift repair for the rest; each reconcile tries it again.
+		r.event(rt, corev1.EventTypeWarning, EventEngineSuspensionRefused, "%s", errorMessage(err))
+		return nil
+	}
 	return err
 }

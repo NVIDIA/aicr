@@ -525,8 +525,6 @@ func uninstallReinstall(ctx context.Context, t *testing.T, active string) {
 	}
 }
 
-// logCursor names one run of an operator pod's container: a restart in
-// place starts a new log under the same pod UID.
 // reportedDenials holds the denial lines nothingForbidden already reported,
 // per pod. Lines are matched by content, which carries the log timestamp,
 // not by position: a rotated log starts over at line 1.

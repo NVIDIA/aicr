@@ -236,14 +236,18 @@ migration is a separate procedure, outside the operator.
   and that release's Application was then deleted. The operator does not write
   it again from the active plan, which would roll it back without approval.
   Retry: the new rollout installs the release at its target plan, with a fresh
-  approval.
+  approval. To keep the active plan instead, revert the runtime change behind
+  the failed target: the operator then creates a rollout to the active plan
+  that installs the release there, also with a fresh approval.
 
 ## Rollout failed, expired or revoked
 
 The rollout's message and its `RolloutFailed`, `RolloutExpired` or
 `RolloutRevoked` Event say why. Releases the rollout already moved stay on
 its target plan, and the runtime stays `Stalled` until the target changes or a
-[retry](operations.md#retrying).
+[retry](operations.md#retrying). Changing the target back to the active plan
+creates a rollout to it, with a fresh approval, that also reinstalls releases
+the failed rollout removed.
 
 | Message | Cause | Next |
 | --- | --- | --- |

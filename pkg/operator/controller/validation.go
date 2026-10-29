@@ -230,7 +230,7 @@ type binding struct {
 
 // bind reads the evidence the run pushed, checks that it is about the plan's
 // recipe, this AICR release and the pinned validators and, when a signing
-// key is configured, that it carries exactly one key signature, whose key
+// key is configured, that it is signed by exactly one key, whose
 // fingerprint it records unverified (`aicr evidence verify --key` verifies
 // the signature), and pushes the operator's binding statement with AICR's
 // evidence as its subject. It returns the binding's reference and whether

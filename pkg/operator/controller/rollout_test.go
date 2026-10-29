@@ -67,6 +67,7 @@ type fakeEngine struct {
 	rebuilt       *plan.Document
 	contents      []*plan.Content
 	suspended     bool
+	suspendErr    error                             // Suspend fails with it
 	foreign       map[string][]argocd.InventoryItem // runtime UID -> objects it owns
 	rebuildErr    error
 }
@@ -201,6 +202,9 @@ func (f *fakeEngine) Inventory(_ context.Context, runtimeUID string) ([]argocd.I
 // Suspend records the requested suspension and reports a change once per
 // toggle, as the adapter does.
 func (f *fakeEngine) Suspend(_ context.Context, _ string, suspended bool) ([]string, error) {
+	if f.suspendErr != nil {
+		return nil, f.suspendErr
+	}
 	if f.suspended == suspended {
 		return nil, nil
 	}
@@ -1315,6 +1319,136 @@ func TestRestoredRolloutKeepsTheRollbackGuard(t *testing.T) {
 				t.Fatalf("writes %v, Stalled %+v; want repaired %t", engine.order, c, tt.wantRepair)
 			}
 		})
+	}
+}
+
+// With the target returned to the active plan, a deleted release a failed
+// rollout moved or removed is divergence: an approved rollout back to the
+// active plan restores it, instead of a stall no retry can clear. A release
+// the active plan lacks is no divergence.
+func TestRevertedTargetRestoresADeletedRelease(t *testing.T) {
+	tests := []struct {
+		name   string
+		failed []releaseWithValues
+		state  v1alpha1.ReleaseState
+	}{
+		{"moved", []releaseWithValues{testRelease("cert-manager", plan.PhasePrimary, "", `{"cpu":"60m"}`),
+			testRelease("nfd", plan.PhasePrimary, "", `{}`)}, v1alpha1.ReleaseReady},
+		{"removed", []releaseWithValues{testRelease("nfd", plan.PhasePrimary, "", `{}`)}, v1alpha1.ReleaseRemoved},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := testContext(t)
+			rt := freshRuntime(t, ctx, stabilized)
+			active := putReleases(t, ctx, rt, testRelease("cert-manager", plan.PhasePrimary, "", `{"cpu":"50m"}`),
+				testRelease("nfd", plan.PhasePrimary, "", `{}`))
+			failed := putReleases(t, ctx, rt, tt.failed...)
+			succeedTo(t, ctx, rt, active)
+			ro := endedTo(t, ctx, rt, "rollout-that-failed", active, failed, v1alpha1.PhaseFailed)
+			ro.Status.Phase = v1alpha1.PhaseFailed
+			ro.Status.Releases = []v1alpha1.ReleaseStatus{{ID: "cert-manager", State: tt.state}}
+			if err := k8s.Status().Update(ctx, ro); err != nil {
+				t.Fatal(err)
+			}
+			resolved(t, ctx, active)
+			engine := newEngine()
+			engine.ensured["nfd"] = active
+			engine.missing["cert-manager"] = true
+			engine.inventory = []argocd.InventoryItem{{ReleaseID: "nfd", UID: "u-n", PlanDigest: active}}
+			r, clk := newRollout(t, engine, true)
+			clk.now = time.Now().Add(2 * time.Second)
+
+			reconcileRollout(t, ctx, r)
+			var converge *v1alpha1.RuntimeRollout
+			for _, ro := range rollouts(t, ctx) {
+				if ro.Spec.ToPlanDigest == active && ro.Spec.FromPlanDigest == active {
+					converge = ro.DeepCopy()
+				}
+			}
+			if c := cond(getRuntime(t, ctx), v1alpha1.ConditionStalled); converge == nil || c.Reason == ReasonMovedReleaseMissing {
+				t.Fatalf("no rollout back to the active plan: Stalled %+v, rollouts %d", c, len(rollouts(t, ctx)))
+			}
+		})
+	}
+}
+
+// A retry requested while a rollout is stalled mid-step is consumed on that
+// rollout at once: if the rollout recovers before a step boundary it runs to
+// the end, and the token acts on no later rollout.
+func TestRetryOfARecoveredRolloutIsConsumed(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, stabilized)
+	target := twoReleases(t, ctx, rt)
+	resolved(t, ctx, target)
+	engine := newEngine()
+	engine.state = argocd.StateProgressing
+	r, clk := newRollout(t, engine, true)
+	clk.now = time.Now().Add(2 * time.Second)
+	for range 3 {
+		reconcileRollout(t, ctx, r)
+	}
+	ro := onlyRollout(t, ctx, target)
+	if ro.Status.Current == nil {
+		t.Fatalf("no step in flight: %+v", ro.Status)
+	}
+	name, _ := plan.Name(target)
+	cm := &corev1.ConfigMap{}
+	if err := k8s.Get(ctx, client.ObjectKey{Namespace: operatorNS, Name: name}, cm); err != nil {
+		t.Fatal(err)
+	}
+	if err := k8s.Delete(ctx, cm); err != nil {
+		t.Fatal(err)
+	}
+	reconcileRollout(t, ctx, r)
+	if ro = onlyRollout(t, ctx, target); ro.Status.Phase != v1alpha1.PhaseStalled || ro.Status.Current == nil {
+		t.Fatalf("not stalled mid-step: %+v", ro.Status)
+	}
+	rt = getRuntime(t, ctx)
+	patch := client.MergeFrom(rt.DeepCopy())
+	rt.Annotations = map[string]string{v1alpha1.AnnotationRetry: "try-1"}
+	if err := k8s.Patch(ctx, rt, patch); err != nil {
+		t.Fatal(err)
+	}
+	reconcileRollout(t, ctx, r)
+	if ro = onlyRollout(t, ctx, target); ro.Annotations[v1alpha1.AnnotationRetryRequested] != "try-1" || ro.Labels[v1alpha1.LabelOutcome] != "" {
+		t.Fatalf("the retry was not consumed on the stalled rollout: %v %v", ro.Annotations, ro.Labels)
+	}
+
+	cm.ResourceVersion, cm.UID = "", ""
+	if err := k8s.Create(ctx, cm); err != nil {
+		t.Fatal(err)
+	}
+	reconcileRollout(t, ctx, r) // the step is still in flight, so no step boundary ends the rollout
+	engine.state = argocd.StateReady
+	for range 6 {
+		reconcileRollout(t, ctx, r)
+	}
+	if ro = onlyRollout(t, ctx, target); ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseSucceeded) {
+		t.Fatalf("the recovered rollout did not finish: %v %+v", ro.Labels, ro.Status)
+	}
+	if token := retryToken(getRuntime(t, ctx), []v1alpha1.RuntimeRollout{*ro}); token != "" {
+		t.Fatalf("the token is still available: %q", token)
+	}
+}
+
+// An Application the API server refuses for good to suspend does not stop
+// the reconcile: status and drift repair go on.
+func TestRefusedSuspensionKeepsReconciling(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, stabilized)
+	active := putPlan(t, ctx, rt, "50m")
+	succeedTo(t, ctx, rt, active)
+	resolved(t, ctx, active)
+	engine := newEngine()
+	engine.ensured["cert-manager"] = active
+	engine.inventory = []argocd.InventoryItem{{ReleaseID: "cert-manager", UID: "u-c", PlanDigest: active}}
+	engine.suspendErr = operrors.New(operrors.ErrCodeInvalidRequest, "set automated sync of Applications cert-manager: denied")
+	r, _ := newRollout(t, engine, true)
+	if _, err := r.Reconcile(ctx, request); err != nil {
+		t.Fatalf("Reconcile() = %v; a refused suspension stopped the reconcile", err)
+	}
+	if c := cond(getRuntime(t, ctx), v1alpha1.ConditionAvailable); c.Status != metav1.ConditionTrue {
+		t.Fatalf("Available = %+v; status was not applied", c)
 	}
 }
 

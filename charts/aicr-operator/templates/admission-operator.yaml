@@ -185,11 +185,14 @@ spec:
         (c.args.indexOf('--image') + 1 < size(c.args) &&
         c.args[c.args.indexOf('--image') + 1] == {{ .Values.aicr.image | quote }}))))
       message: the snapshot agent runs the pinned AICR image {{ .Values.aicr.image }}
-    # An AICRConfig file can name the agent image too.
+    # An AICRConfig file can name the agent image too, and a --data
+    # directory can replace the validator catalog.
     - expression: >-
         variables.pod.containers.all(c, !has(c.args) || c.args.all(a,
-        !(a == '--config' || a == '-config' || a.startsWith('--config=') || a.startsWith('-config='))))
-      message: AICR Jobs take no --config file
+        !(a in ['--config', '-config', '--data', '-data'] ||
+        a.startsWith('--config=') || a.startsWith('-config=') ||
+        a.startsWith('--data=') || a.startsWith('-data='))))
+      message: AICR Jobs take no --config file or --data directory
     # AICR reads image overrides, such as AICR_IMAGE, from its environment.
     - expression: >-
         variables.pod.containers.all(c, (!has(c.envFrom) || size(c.envFrom) == 0) &&

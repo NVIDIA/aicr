@@ -145,7 +145,7 @@ func retryToken(rt *v1alpha1.ClusterRuntime, rollouts []v1alpha1.RuntimeRollout)
 		return ""
 	}
 	for i := range rollouts {
-		if rollouts[i].Annotations[v1alpha1.AnnotationRetry] == token {
+		if a := rollouts[i].Annotations; a[v1alpha1.AnnotationRetry] == token || a[v1alpha1.AnnotationRetryRequested] == token {
 			return ""
 		}
 	}
