@@ -985,6 +985,15 @@ func TestMatchVerdictSelection(t *testing.T) {
 			wantStoppedAt: ">=2.5.0 <2.6.0",
 		},
 		{
+			name:          "a lone blocked record below the target is beyond its ceiling",
+			set:           oneComponent(trans("<3.0.0", ">=3.0.0 <3.1.0", VerdictBlocked, "B")),
+			from:          "1.5.0",
+			to:            "5.0.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonBeyondRecordCeiling,
+			wantStoppedAt: ">=3.0.0 <3.1.0",
+		},
+		{
 			// The walk takes S1 and stalls at 2.0.0, but S2 covers the source
 			// and holds the target.
 			name: "an all-safe path honors a safe record covering the whole jump",
@@ -1285,6 +1294,15 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 			want: "transition records for this component assess only as far as 0.20.0, and 0.25.0 lands " +
 				"past that, so nothing assesses this move or anything above 0.20.0. Upgrade no further " +
 				"than 0.20.0 and re-run this check, or widen a record's `to` range to cover 0.25.0",
+		},
+		{
+			name: "beyond-record-ceiling on a lone blocked hop points at its steps",
+			set:  oneComponent(trans("<3.0.0", ">=3.0.0 <3.1.0", VerdictBlocked, "B")),
+			from: "1.5.0",
+			to:   "5.0.0",
+			want: "the record covering 3.0.0 assesses only as far as the last version below 3.1.0, and 5.0.0 " +
+				"lands past that. It also blocks moving from 1.5.0 into >=3.0.0 <3.1.0 in one step. Check " +
+				"the move from 1.5.0 to 3.0.0 on its own for that record's steps, then re-run this check",
 		},
 		{
 			name: "no-record",

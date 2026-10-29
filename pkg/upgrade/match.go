@@ -740,6 +740,13 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 		}
 		return r
 	}
+	// A lone blocked hop that stops below the target with nothing ahead holds
+	// the component at that record's ceiling.
+	if isBlocked && blocking.tr == p.hops[0].tr && p.stalled() && len(p.ahead) == 0 {
+		r = stalledResult(u, r, p, tgt)
+		r.Explanation = heldExplanation(r, blocking, tgt)
+		return r
+	}
 	if isBlocked {
 		r.Verdict = VerdictBlocked
 		r.Reason = ReasonRecordBlocks
@@ -913,6 +920,17 @@ func recordBlocksExplanation(r ComponentResult, p path, b crossing, src *semver.
 	}
 	return s + fmt.Sprintf("Check the move from %s to %s on its own for that record's steps, "+
 		"then re-run this check", r.From, landingPhrase(b))
+}
+
+// heldExplanation returns the Explanation for r when the blocked record b, the
+// only hop, stops assessing below tgt.
+func heldExplanation(r ComponentResult, b crossing, tgt *semver.Version) string {
+	ceiling, _ := beyondCeiling(b.tr, tgt)
+	return fmt.Sprintf(
+		"the record covering %s assesses only as far as %s, and %s lands past that. It also blocks moving "+
+			"from %s into %s in one step. Check the move from %s to %s on its own for that record's steps, "+
+			"then re-run this check",
+		b.floor.ver, ceilingPhrase(ceiling), r.To, r.From, b.tr.To, r.From, landingPhrase(b))
 }
 
 // inTheWay returns the records in crossed whose `from` admits a version the

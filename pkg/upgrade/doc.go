@@ -115,7 +115,9 @@
 // interval not to enter in one step, and the Explanation names a landing short
 // of it, or asks for a record when nothing recorded leads there.
 // Rule 5 blocks because the path's records never assessed the target, or
-// because no record starts where they land.
+// because no record starts where they land. Rule 4 yields to rule 5 when the
+// blocked record is the path's only hop and no crossed record lies past where
+// it lands.
 //
 // Matching takes an already validated Set and does not re-run Validate.
 // Validate is therefore not optional: a record that violates a well-formedness
