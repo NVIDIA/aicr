@@ -213,7 +213,7 @@ The branch row is why this needs its own verdict rather than falling through to 
 
 **The verdict follows the source's path** (amended in [#3397](https://github.com/NVIDIA/aicr/issues/3397)). From the source, the matcher takes the lowest-floor crossed record whose `from` covers where it stands and lands on that record's `to` floor, repeating until a `to` holds the target. A record is *on the path* when its `from` covers a version the walk stood at. Records off the path are still reported as crossed but do not decide the verdict, so declaration order never does either. In the nodewright example, A and B are both written for 0.17.2, so both are on the path. Verdict selection runs in this order:
 
-1. **Nothing crossed** gives `unknown`.
+1. **Nothing crossed** gives `unknown`, or `blocked` naming the highest `to` ceiling when the target is past every recorded ceiling.
 2. **Nothing crossed was written for the source** gives `blocked`, naming the lowest crossed record's `to`. The check is opt-in, so it errs toward safety rather than lending a verdict authored for another origin.
 3. **One record on the path, and its `to` holds the target** gives that record's verdict, `blocked` included. Its own steps say what to do instead, so the report renders them.
 4. **A `blocked` record on the path** gives `blocked`, naming that record's `to`.

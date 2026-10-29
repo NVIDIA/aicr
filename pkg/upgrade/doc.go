@@ -89,7 +89,8 @@
 //
 // Verdict selection runs in this order:
 //
-//	1  nothing crossed                                    unknown
+//	1  nothing crossed                                    unknown, or blocked at the highest to ceiling
+//	                                                      when the target is past it
 //	2  nothing crossed was written for the source         blocked, stop at the lowest
 //	3  one record on the path, its to holds the target    that record's verdict
 //	4  a record on the path authored blocked              blocked, stop at its to
