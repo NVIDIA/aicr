@@ -333,8 +333,9 @@ profile value has to pick one shape. Four ways to do that:
    manifests already read `.Values "network-operator"` today
    (`nic-cluster-policy-generic-gb300.yaml`), so the key is in scope of the
    template. The chart tolerates the key: the pinned network-operator
-   chart ships no `values.schema.json` of its own (checked at 25.10.0; the
-   conversion PR re-checks against the pin it ships). Nothing changes
+   chart ships no `values.schema.json` of its own (checked at the pinned
+   26.7.0, where only the bundled node-feature-discovery subchart carries a
+   schema; the conversion PR re-checks against the pin it ships). Nothing changes
    hands: the live `nic-cluster-policy` CR stays in the
    `network-operator-post` release on every deployer, so an existing
    cluster upgrades in place with no ownership migration. Cost: the gate
