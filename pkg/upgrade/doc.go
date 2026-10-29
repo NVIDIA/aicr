@@ -113,7 +113,10 @@
 // of the landing the Explanation names. For beyond-record-ceiling it is the
 // range whose ceiling the move goes no further than. Otherwise it is the
 // interval not to enter in one step, and the Explanation names a landing short
-// of it, or asks for a record when nothing recorded leads there.
+// of it, or asks for a record when nothing recorded leads there. When the
+// blocked record covers the source and is the path's first hop, the
+// Explanation instead says to check the move to its floor on its own,
+// including where rule 4 yields to rule 5.
 // Rule 5 blocks because the path's records never assessed the target, or
 // because no record starts where they land. Rule 4 yields to rule 5 when the
 // blocked record is the path's only hop and no crossed record lies past where
