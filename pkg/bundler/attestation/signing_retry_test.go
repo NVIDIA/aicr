@@ -25,6 +25,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // TestSignWithRetry_SuccessOnFirstAttempt verifies the happy path:
@@ -151,8 +152,8 @@ func TestSignWithRetry_OuterDeadlineExceeded(t *testing.T) {
 }
 
 // TestSignWithRetry_OuterCanceled verifies that caller cancellation
-// terminates the retry loop with ErrCodeUnavailable (not Timeout —
-// cancellation is intent, not deadline).
+// terminates the retry loop with ErrCodeCanceled (not Timeout or
+// Unavailable — cancellation is intent, not a retryable fault).
 func TestSignWithRetry_OuterCanceled(t *testing.T) {
 	t.Parallel()
 
@@ -172,11 +173,5 @@ func TestSignWithRetry_OuterCanceled(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error after cancel, got nil")
 	}
-	var se *errors.StructuredError
-	if !stderrors.As(err, &se) {
-		t.Fatalf("expected StructuredError, got %T", err)
-	}
-	if se.Code != errors.ErrCodeUnavailable {
-		t.Errorf("expected ErrCodeUnavailable (caller cancel), got %v", se.Code)
-	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeCanceled)
 }

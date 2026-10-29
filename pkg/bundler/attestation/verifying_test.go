@@ -21,6 +21,7 @@ import (
 	"crypto/rand"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sigstore/sigstore-go/pkg/fulcio/certificate"
 	"github.com/sigstore/sigstore-go/pkg/root"
@@ -92,6 +93,17 @@ func TestVerifyStatementWith_CancelledContext(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
+
+	_, err := VerifyStatementWith(ctx, []byte("{}"), id, tlog, []byte{1})
+	requireErrCode(t, err, errors.ErrCodeCanceled)
+}
+
+func TestVerifyStatementWith_DeadlineExceededContext(t *testing.T) {
+	id := anyCertIdentity(t)
+	tlog := NewRequireTLogPolicy()
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
+	defer cancel()
 
 	_, err := VerifyStatementWith(ctx, []byte("{}"), id, tlog, []byte{1})
 	requireErrCode(t, err, errors.ErrCodeTimeout)

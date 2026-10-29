@@ -34,7 +34,7 @@ const (
 	// Asserting this also pins the override that displaces the chart's
 	// frozen bitnamilegacy default; a dropped override renders the chart
 	// value and fails here rather than shipping quietly.
-	nicHealthMonitorInitImage = "docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
+	nicHealthMonitorInitImage = "docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4"
 )
 
 // nicHealthMonitorMixinName is the mixin the aks and oke-ol overlays compose.

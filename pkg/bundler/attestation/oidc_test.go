@@ -26,6 +26,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestFetchAmbientOIDCToken(t *testing.T) {
@@ -188,8 +189,9 @@ func TestFetchAmbientOIDCToken_CancelledContext(t *testing.T) {
 
 	_, err := FetchAmbientOIDCToken(ctx, "http://localhost:1", "token")
 	if err == nil {
-		t.Error("FetchAmbientOIDCToken() with cancelled context should return error")
+		t.Fatal("FetchAmbientOIDCToken() with cancelled context should return error")
 	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeCanceled)
 }
 
 func TestFetchAmbientOIDCToken_InvalidResponseJSON(t *testing.T) {
@@ -220,4 +222,5 @@ func TestFetchDeviceCodeOIDCToken_CancelledContext(t *testing.T) {
 	if !stderrors.Is(err, context.Canceled) {
 		t.Fatalf("FetchDeviceCodeOIDCToken() error = %v, want wrapped context.Canceled", err)
 	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeCanceled)
 }

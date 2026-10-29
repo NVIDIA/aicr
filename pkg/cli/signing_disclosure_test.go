@@ -22,6 +22,8 @@ import (
 
 	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestKeylessOIDCPathIsInteractive(t *testing.T) {
@@ -135,6 +137,9 @@ func TestConfirmKeylessSigningDisclosure_TTYConfirmation(t *testing.T) {
 				bundleattest.ResolveOptions{}, false, strings.NewReader(tt.input), &out)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("confirmKeylessSigningDisclosure() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				errorstest.WantReportedCode(t, err, errors.ErrCodeCanceled)
 			}
 			if !strings.Contains(out.String(), tt.wantInOut) {
 				t.Errorf("banner missing %q from output:\n%s", tt.wantInOut, out.String())

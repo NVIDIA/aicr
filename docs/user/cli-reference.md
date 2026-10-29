@@ -3139,7 +3139,7 @@ prints a disclosure banner naming the Fulcio/Rekor endpoints in effect and what
 will be published, then:
 
 - **On a TTY**, it pauses for a `y/N` confirmation (default **no**) and aborts
-  cleanly — no browser opens — if you decline.
+  with exit code `9` (`CANCELED`) — no browser opens — if you decline.
 - **On non-interactive stdin** (CI, pipes), it prints the banner and proceeds
   without blocking, so scripted/CI signing is never wedged.
 - Pre-fetched `--identity-token`, ambient GitHub Actions OIDC, and `--signing-key`
@@ -3856,7 +3856,8 @@ The positional `<bundle-dir>` is either the directory `--emit-attestation` wrote
 | Code | Meaning |
 |------|---------|
 | 0 | Bundle pushed and `pointer.yaml` written (signed, or unsigned with `--no-sign`). |
-| non-zero | Identity-disclosure prompt declined, or bundle could not be loaded, signed, or pushed. |
+| 9 | Identity-disclosure prompt declined (`CANCELED`). |
+| non-zero | Bundle could not be loaded, signed, or pushed. |
 
 **Examples:**
 
@@ -3914,7 +3915,8 @@ With `--relocate`, the now-signed pointer is moved from its flat pending path to
 | Code | Meaning |
 |------|---------|
 | 0 | Bundle signed, referrer attached, and the pointer's `signer` block written back. |
-| non-zero | Pointer already signed / has nothing pushed to sign, bundle could not be pulled (e.g. a private registry returns 403), identity-disclosure prompt declined, or signing/attach failed. |
+| 9 | Identity-disclosure prompt declined (`CANCELED`). |
+| non-zero | Pointer already signed / has nothing pushed to sign, bundle could not be pulled (e.g. a private registry returns 403), or signing/attach failed. |
 
 **Examples:**
 

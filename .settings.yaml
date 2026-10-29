@@ -263,7 +263,7 @@ testing_tools:
   # kustomize-controller and helm-controller are the only controllers the
   # bundle consumes (OCIRepository -> Kustomization -> HelmRelease).
   # renovate: datasource=github-releases depName=fluxcd/flux2 depType=testing_tools
-  flux_version: 'v2.9.6'
+  flux_version: 'v2.10.0'
   # In-cluster Git server for the KWOK flux-git deployer lane (issue #963).
   # Rootless variant so the admin-user bootstrap can `kubectl exec gitea
   # admin user create` directly without su gymnastics.
@@ -405,10 +405,10 @@ operator:
   # Kubernetes floor (support policy): newest 1.34 patch in kind v0.33.0.
   kind_node_image_floor: 'kindest/node:v1.34.11@sha256:44e222ee2132dab25ff87301682f89eb82c7880ea3a1bf543bfe9708fd08d67d'
   # Generates deep copies and CRDs (`make generate`). Run with `go run
-  # pkg@version` so its dependencies stay out of go.mod; v0.22.0 is built on
-  # k8s.io v0.37.0, matching the API machinery in go.mod.
+  # pkg@version` so its dependencies stay out of go.mod; v0.23.0 is built on
+  # k8s.io v0.37.0, the same minor as the API machinery in go.mod.
   # renovate: datasource=github-releases depName=kubernetes-sigs/controller-tools depType=build_tools
-  controller_gen: 'v0.22.0'
+  controller_gen: 'v0.23.0'
   # Kubernetes floor `make operator-envtest-floor` runs the CRD tests against;
   # `make test` runs them on the newest envtest release.
   envtest_kubernetes_floor: '1.34.x'
