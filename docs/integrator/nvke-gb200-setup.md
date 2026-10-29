@@ -47,8 +47,11 @@ plus Kubeflow Trainer through the `platform-kubeflow` mixin.
   `/sys/class/infiniband/mlx5_*/ports/1/pkeys/`. VFs are separate virtual
   ports with their own GUIDs, so the fabric must add the VF GUIDs to the
   partition too (UFM GUID mapping or ib-kubernetes); fixing the PFs alone is
-  not enough. If the tenant P_Key is not at index 0, the rail attachments
-  must be configured to use it (ib-sriov CNI `pkey`). Traffic between trays
+  not enough. The fabric must provision partition membership for each VF
+  GUID. This recipe does not select a non-default P_Key for IPoIB interfaces
+  (the pinned `SriovIBNetwork` has no such field, and the ib-sriov CNI `pkey`
+  only informs ib-kubernetes, which this recipe does not install); native
+  RDMA applications can select their own P_Key index. Traffic between trays
   in the same NVLink domain uses multi-node NVLink and does not need this; it
   matters for jobs spanning NVLink domains and for IPoIB or RDMA storage.
 - `rdma_ucm`, `ib_umad` and `ib_ipoib` are not loaded by the NVKE image and
@@ -69,9 +72,11 @@ plus Kubeflow Trainer through the `platform-kubeflow` mixin.
   `cniPlugins`; the NVKE image contract is OVN-Kubernetes only, and multus is
   the recipe's to install. The operator renders the multus DaemonSet with
   `--skip-config-watch`, so the service-account token multus copies into
-  `multus.kubeconfig` is not refreshed on rotation; the API server's default
-  legacy-token extension keeps it valid, and a multus pod restart rewrites
-  the file. The SR-IOV policies select only the ConnectX-7 root devices.
+  `multus.kubeconfig` is not refreshed on rotation. Under default API-server
+  settings the legacy-token extension keeps that copy valid for one year
+  from issuance (`serviceaccount.ExpirationExtensionSeconds`); other settings
+  may shorten it. Restart the multus pods before it expires to rewrite the
+  file. The SR-IOV policies select only the ConnectX-7 root devices.
 
 ## Never install DOCA-OFED on these nodes
 
@@ -145,7 +150,9 @@ spec:
 This is the shape k8s-launch-kit generates for
 `--deployment-type sriov --fabric infiniband` on this topology, with the
 Maintenance Operator budget set to one node, with `numVfs` raised
-from l8k's 8 to the firmware's 16, and with the SR-IOV config daemon's
+from l8k's 8 to the firmware's 16, with the IPPool subnets moved from l8k's
+`192.168.<4n>.0/22` to `10.255.<4n>.0/22` (outside the OVN-Kubernetes pod
+network), and with the SR-IOV config daemon's
 `mellanox` plugin disabled (`sriovOperatorConfig.disablePlugins`). That
 plugin rewrites firmware `NUM_OF_VFS` to exactly `numVfs` and then runs
 `mstfwreset -l 3`, which this tray's firmware rejects ("not supported in the
