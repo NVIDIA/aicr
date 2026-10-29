@@ -1692,20 +1692,20 @@ Renaming is applied by Helm as delete-and-recreate: expect a service gap, and an
 
 This axis needs a **bundle** as `--from`. A resolved recipe records `valuesFile` as a path resolved against whichever binary reads it, so comparing two recipe files would read today's values twice and see nothing move; only a bundle writes the merged result down. `--from cluster` cannot supply them either, because the cluster read recovers versions alone. When the source cannot supply them, the report says so once above the table rather than reporting that nothing moved, and `--format json` carries `objectNamesCompared: false` with `objectNamesSkipped` naming the reason. See [Upgrading a Deployed Stack](upgrading.md#when-a-components-objects-are-renamed).
 
-**The four routes to `blocked`.** A record is *crossed* when your source version sits below the boundary its `to` names and your target reaches it. The check follows the records written for your version, boundary by boundary, toward your target. Only records *on that path* decide the verdict, with one exception. A record that asks for work also counts when your jump passes through its `from` range on the way to its boundary, unless it shares that boundary with a record on your path and is not `blocked`. A `blocked` one stops the jump outright.
+**The four routes to `blocked`.** A record is *crossed* when your source version sits below the boundary its `to` names and your target reaches it. Each record describes one-step upgrades from any version in its `from` to any version in its `to`. The check plans a route of crossed records from your version toward your target, each starting where the one before lands, and counts the upgrades it takes. Consecutive `safe` records join into one upgrade unless one of them is a required stop or the component allows only one minor version per upgrade. A record whose upgrade would pass another record's boundary without listing it in `skips` does not describe that upgrade, so no route uses it.
 
 | Route | When | `reason` | Renders steps |
 |---|---|---|---|
-| A record describes this move and blocks it | One record counts toward your jump and its `to` holds your target | `recorded` | yes |
-| You would skip a boundary | Two or more records count toward your jump and at least one asks something, or a `blocked` record is in the way | `multiple-boundaries`, `record-blocks` | no |
-| Nothing describes your starting version | No crossed record was written for your source, or your path lands where none continues | `undefined-origin` | no |
-| Your target is past what the records assessed | Your path stops at a ceiling below your target, or your target sits above the highest `to` ceiling any of the component's records names | `beyond-record-ceiling` | no |
+| A record describes this move and blocks it | One upgrade reaches your target, and its record is `blocked` | `recorded` | yes |
+| You would skip a boundary | The route takes two or more upgrades, which `record-blocks` reports when one of them is `blocked` | `multiple-boundaries`, `record-blocks` | no |
+| Nothing describes your starting version | No record describes an upgrade from your version, or the route lands where none continues | `undefined-origin` | no |
+| Your target is past what the records assessed | The route stops at a ceiling below your target, or your target sits above the highest `to` ceiling any of the component's records names | `beyond-record-ceiling` | no |
 
 `safe` records carry no steps, so they never stop a jump on their own. The first row renders its record's steps, deployer-scoped, like a `manual` row. The other three render none, because no record describes your exact move. All four name a stopping point.
 
 The fourth exists because a record vouches only as far as its own `to` ceiling. A record claiming `>=0.18.0 <0.19.0` says nothing about `0.25.0`, and letting it lend its verdict there would report eight minors as safe on the strength of a two-minor claim. Stop at the assessed ceiling and re-run, or have the record widened. This is also how a component deliberately held below a breaking release reports. Its record's ceiling sits at that release, so any target above it is told to take the boundary on its own. When that record is `blocked`, the report points at its steps rather than its ceiling.
 
-Every row states its reason in the detail block under the table, and `--format json` carries the same thing as `reason` (a stable code: `recorded`, `record-blocks`, `multiple-boundaries`, `undefined-origin`, `beyond-record-ceiling`, `no-record`, `no-boundary-crossed`, `downgrade`, `identity-changed`, `not-comparable`) plus `explanation`, the sentence naming your versions.
+Every row states its reason in the detail block under the table, and `--format json` carries the same thing as `reason` (a stable code: `recorded`, `record-blocks`, `multiple-boundaries`, `undefined-origin`, `beyond-record-ceiling`, `no-record`, `no-boundary-crossed`, `downgrade`, `identity-changed`, `not-comparable`) plus `explanation`, the sentence naming your versions. When a blocked row's route reaches your target in more than one upgrade, `route` lists them in order, each as `versions` (the range it lands in, or your target for the last) and `verdict`.
 
 **Why `--deployer` is required rather than defaulted:**
 

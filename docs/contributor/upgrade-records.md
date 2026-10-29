@@ -98,13 +98,14 @@ operator's move. What the check withholds is somebody *else's* steps. When two
 or more records ask for work along the jump, or the jump crosses your boundary
 from a starting point your `from` does not cover, no steps render at all,
 because composing two migrations or running one authored for a different origin
-is the failure `blocked` exists to prevent. A record asks for work along the
-jump when it is on the operator's path, or when the jump passes through its
-`from` range on the way to its boundary, even if the operator's version is not
-in that range. A jump across several boundaries still renders your steps when
-your record covers its starting point and holds its target, and every other
-record along the jump is `safe`. A `manual` record on your own boundary,
-written for another starting range, does not count. So write
+is the failure `blocked` exists to prevent. Your steps render when your record
+alone describes the operator's upgrade. Its `from` holds their version, its
+`to` holds their target, and it lists every boundary in between that it must
+(see [Listing the boundaries your record
+passes](#listing-the-boundaries-your-record-passes)). A run of `safe` records
+before yours, taken as one upgrade, still lets yours describe the rest. A
+`manual` record on your own boundary, written for another starting range, does
+not count. So write
 the `blocked` steps as instructions a reader will follow, not as a formality to
 satisfy the gate.
 
@@ -278,9 +279,9 @@ group is unaffected.
 ### Where your lowest `from` floor starts is a real decision
 
 A record is *crossed* when the operator's source version sits below the floor
-its `to` names and their target reaches it. A crossed record decides the
-verdict when the operator's path lands in its `from`, even if they start below
-it. A record whose `to` reaches past another record's floor vouches for every
+its `to` names and their target reaches it. A crossed record can take part in
+the operator's route when the route lands in its `from`, even if they start
+below it. A record whose `to` reaches past another record's floor vouches for every
 release in between, so only write that reach when you have read their notes.
 
 What `from` still decides is whether *your guidance* was authored for that
@@ -322,6 +323,59 @@ on its own" into something the tool says rather than something prose asks for.
 When that record is `blocked`, the report sends the operator to its steps
 rather than to its ceiling, since the ceiling lies inside the interval it
 forbids.
+
+### Listing the boundaries your record passes
+
+A record describes upgrades from any version in its `from` to any version in
+its `to`, so a wide record can pass other records' boundaries in one step.
+When no single record describes a jump, the check plans a route of records,
+each starting where the one before lands, and reports the upgrades it takes.
+
+Your record must list in `skips` each boundary its upgrades pass that is one
+of these:
+
+- a floor inside your `to`, above your own floor
+- the floor of a `manual` or `blocked` record whose `from` admits a version
+  your upgrade goes by
+- the floor of a `requiredStop` record whose `from` overlaps yours
+
+A `blocked` record on your own floor counts too, unless yours is `blocked` as
+well. A `safe` boundary below your floor needs no entry. Listing a floor is
+your claim that a cluster taking your record may skip that boundary's
+guidance. psmdb's minor record lists the 1.23.2 patch boundary because
+Percona upgrades past patch versions in one step:
+
+```yaml
+  - from: ">=1.23.0 <1.24.0"
+    to: ">=1.24.0"
+    skips: ["1.23.2"]
+    verdict: manual
+```
+
+A `skips` entry cannot override a stricter verdict for the sources it was
+written for. A `safe` record may not skip a `manual` or `blocked` boundary,
+and a `manual` record may not skip a `blocked` one, when the other record's
+`from` overlaps yours. Narrow your `from` to leave those sources out. If
+clusters that ran 1.2 must take a `manual` move to 1.3, a `safe` jump to 2.0
+that skips 1.3 must start below 1.2.
+
+The lint gate rejects a record that passes a boundary it must list and does
+not, and one whose `skips` names a boundary its upgrades never pass. A record
+missing an entry describes no upgrade past that boundary, so the check plans a
+route through the other record instead.
+
+**`requiredStop: true`** makes a `safe` record a place every route stops, for
+a release that does work an operator must let finish, such as an automatic
+migration. A cluster taking it re-runs the check before moving further.
+`manual` and `blocked` records already stop a route.
+
+**`stepLimit: minor`**, at the top of the file beside `component`, caps every
+upgrade at the next minor version, ignoring patches. Use it when upstream
+supports upgrading one minor at a time. Under it a `manual` or `blocked` `to`
+may leave out its ceiling, which is then the end of its floor's minor. A
+`safe` `to` still names one. A move into a new major needs a record whose `to`
+is in that major's first minor and whose `from` names the old major's last
+minor, so the check blocks a major bump until someone writes it.
 
 ### When a migration only runs inside a window of versions
 
