@@ -250,8 +250,8 @@ if [[ -z "${TIMEOUT_BIN}" ]]; then
   echo "ERROR: neither timeout(1) nor gtimeout(1) is available, so the ${RELEASE} CRD" >&2
   echo "       step cannot be bounded and will not run unbounded inside a deploy." >&2
   echo "       Install GNU coreutils (macOS: brew install coreutils), or apply this" >&2
-  echo "       chart's CRDs manually before upgrading; see the upgrade section of" >&2
-  echo "       docs/user/component-catalog.md." >&2
+  echo "       chart's CRDs manually before upgrading. See \"Upgrading components" >&2
+  echo "       that own CRDs\" in docs/user/component-catalog.md." >&2
   exit 1
 fi
 
@@ -479,10 +479,10 @@ fi
 # As `helm` rather than the default `kubectl`, so a field `helm` claimed
 # through a server-side apply (a Helm 4 install, or an earlier run of this
 # step) is pruned once the chart drops it, unless another manager claims it
-# too. Which removals take, including
-# after a Helm 3 install, is set out under "Upgrade, uninstall, and
-# troubleshooting" in docs/user/component-catalog.md. --force-conflicts is
-# required because other managers may hold individual fields.
+# too. Which removals take, including after a Helm 3 install, is set out
+# under "Upgrading components that own CRDs" in
+# docs/user/component-catalog.md. --force-conflicts is required because
+# other managers may hold individual fields.
 while IFS= read -r doc; do
   # A whitespace-only file under crds/ is not an error, but handing it to
   # kubectl is: "no objects passed" aborts the deploy, and because the loop is
