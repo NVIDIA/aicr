@@ -502,8 +502,10 @@ does:
 A restored rollout comes back without its status. The operator rebuilds its
 phase from the `outcome` label and records each release in its steps as
 `Unknown`, because which ones it wrote is lost. Until a later rollout succeeds,
-a missing Application of such a release stalls the runtime with
-`MovedReleaseMissing` instead of being repaired from the active plan.
+a missing Application of such a release is not repaired from the active plan.
+While the target differs from the active plan, the runtime stalls with
+`MovedReleaseMissing`; with the target at the active plan, the operator creates
+a rollout to it that reinstalls the release, with a fresh approval.
 
 Approvers also need `get`, `list`, `watch` and `patch` on `runtimerollouts`,
 and `get` on ConfigMaps in the operator namespace to read assessment reports.
