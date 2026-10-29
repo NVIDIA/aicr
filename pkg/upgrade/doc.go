@@ -93,7 +93,8 @@
 //	2  nothing crossed was written for the source         blocked, stop at the lowest
 //	3  one record on the path, its to holds the target    that record's verdict
 //	4  a record on the path authored blocked              blocked, stop at its to
-//	5  the path stops short, and only its one hop asks    blocked, stop at the last hop's to
+//	5  the path stops short, all safe or one hop asking   blocked, stop at the next record's to,
+//	                                                      or the last hop's to when none lies ahead
 //	6  two or more records on the path, one asks          blocked, stop where the hop before lands
 //
 // Rule 3 attaches a Transition even when blocked, because that record's steps
@@ -104,7 +105,8 @@
 //
 // StoppedAt is the interval not to enter in one step. The Explanation names a
 // landing short of it, or asks for a record when nothing recorded leads there.
-// Rule 5 blocks because the path's records never assessed the target.
+// Rule 5 blocks because the path's records never assessed the target, or
+// because no record starts where they land.
 //
 // Matching takes an already validated Set and does not re-run Validate.
 // Validate is therefore not optional: a record that violates a well-formedness

@@ -217,7 +217,7 @@ The branch row is why this needs its own verdict rather than falling through to 
 2. **Nothing crossed was written for the source** gives `blocked`, naming the lowest crossed record's `to`. The check is opt-in, so it errs toward safety rather than lending a verdict authored for another origin.
 3. **One record on the path, and its `to` holds the target** gives that record's verdict, `blocked` included. Its own steps say what to do instead, so the report renders them.
 4. **A `blocked` record on the path** gives `blocked`, naming that record's `to`.
-5. **The path stops short of the target** gives `blocked`, naming the last hop's `to`.
+5. **The path stops short of the target, its records all `safe` or only its one hop asking,** gives `blocked`, naming the next crossed record's `to` when one lies ahead, otherwise the last hop's `to`.
 6. **Two or more records on the path, at least one asking something,** gives `blocked`, naming where the hop before the first substantive record lands.
 
 A path that is all `safe` and reaches the target takes its last hop's verdict, and a path whose one substantive record covers the source and holds the target takes that record's verdict. Both attach that record, as rule 3 does.
