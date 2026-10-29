@@ -1680,6 +1680,194 @@ func TestMatchFollowsTheSourcesPath(t *testing.T) {
 	}
 }
 
+// TestMatchMigrationWindow checks a migration that only versions in a window
+// can run. A rename's mirror exists only in 0.18.0 through 0.20.x, and 0.21.0
+// removes the legacy objects. A jump from below the window to past it never
+// runs the mirror, so it must stop in the window. Each case runs in both
+// declaration orders.
+func TestMatchMigrationWindow(t *testing.T) {
+	rename := trans("<0.18.0", ">=0.18.0 <=0.20.0", VerdictManual, "rename")
+	wideRename := trans("<0.18.0", ">=0.18.0 <=0.21.0", VerdictManual, "rename")
+	drain := trans(">=0.18.0 <0.20.0", "=0.20.0", VerdictSafe, "drain")
+	removal := func(v Verdict) Transition { return trans(">=0.18.0 <0.21.0", "=0.21.0", v, "removal") }
+	passThrough := trans("<0.18.0", "=0.21.0", VerdictBlocked, "pass-through")
+
+	tests := []struct {
+		name          string
+		trs           []Transition
+		from, to      string
+		wantVerdict   Verdict
+		wantReason    Reason
+		wantMatched   string
+		wantStoppedAt string
+		wantInExpl    string
+	}{
+		{
+			name:          "a jump past the window stops at its start",
+			trs:           []Transition{rename, drain, removal(VerdictManual)},
+			from:          "0.17.2",
+			to:            "0.21.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=0.18.0 <=0.20.0",
+			wantInExpl:    "Upgrade to 0.18.0 first",
+		},
+		{
+			// The rename's ceiling, not the removal's verdict, ends the
+			// window.
+			name:          "a safe removal still stops the jump at the window",
+			trs:           []Transition{rename, drain, removal(VerdictSafe)},
+			from:          "0.17.2",
+			to:            "0.21.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=0.18.0 <=0.20.0",
+			wantInExpl:    "Upgrade to 0.18.0 first",
+		},
+		{
+			name:          "a rename ceiling past the window does not hide a manual removal",
+			trs:           []Transition{wideRename, drain, removal(VerdictManual)},
+			from:          "0.17.2",
+			to:            "0.21.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=0.18.0 <=0.21.0",
+			wantInExpl:    "Upgrade to 0.18.0 first",
+		},
+		{
+			// A ceiling is its author's claim that the steps hold that far,
+			// and a safe record carries no steps to skip, so nothing here says
+			// the mirror is needed.
+			name:        "a rename ceiling past the window with a safe removal vouches for the jump",
+			trs:         []Transition{wideRename, drain, removal(VerdictSafe)},
+			from:        "0.17.2",
+			to:          "0.21.0",
+			wantVerdict: VerdictManual,
+			wantReason:  ReasonRecorded,
+			wantMatched: "rename",
+		},
+		{
+			name:          "a pass-through block holds however far the rename's ceiling reaches",
+			trs:           []Transition{wideRename, drain, removal(VerdictSafe), passThrough},
+			from:          "0.17.2",
+			to:            "0.21.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonRecordBlocks,
+			wantStoppedAt: "=0.21.0",
+			wantInExpl:    "Upgrade to 0.18.0 first",
+		},
+		{
+			name:          "a pass-through block names the window's last landing",
+			trs:           []Transition{rename, drain, removal(VerdictManual), passThrough},
+			from:          "0.17.2",
+			to:            "0.21.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonRecordBlocks,
+			wantStoppedAt: "=0.21.0",
+			wantInExpl:    "Upgrade to 0.20.0 first",
+		},
+		{
+			name:          "a removal written for every source still stops the jump at the window",
+			trs:           []Transition{rename, drain, trans("<0.21.0", "=0.21.0", VerdictManual, "removal")},
+			from:          "0.17.2",
+			to:            "0.21.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=0.18.0 <=0.20.0",
+			wantInExpl:    "Upgrade to 0.18.0 first",
+		},
+		{
+			name:        "the move into the window carries the rename's steps",
+			trs:         []Transition{rename, drain, removal(VerdictManual), passThrough},
+			from:        "0.17.2",
+			to:          "0.18.0",
+			wantVerdict: VerdictManual,
+			wantReason:  ReasonRecorded,
+			wantMatched: "rename",
+		},
+		{
+			name:        "a move to the window's end carries the rename's steps",
+			trs:         []Transition{rename, drain, removal(VerdictManual), passThrough},
+			from:        "0.17.2",
+			to:          "0.20.0",
+			wantVerdict: VerdictManual,
+			wantReason:  ReasonRecorded,
+			wantMatched: "rename",
+		},
+		{
+			name:        "within the window the drain reads safe",
+			trs:         []Transition{rename, drain, removal(VerdictManual), passThrough},
+			from:        "0.18.0",
+			to:          "0.20.0",
+			wantVerdict: VerdictSafe,
+			wantReason:  ReasonRecorded,
+			wantMatched: "drain",
+		},
+		{
+			name:        "from inside the window the removal carries the jump",
+			trs:         []Transition{rename, drain, removal(VerdictManual), passThrough},
+			from:        "0.18.0",
+			to:          "0.21.0",
+			wantVerdict: VerdictManual,
+			wantReason:  ReasonRecorded,
+			wantMatched: "removal",
+		},
+		{
+			name:        "from the window's end the removal carries the jump",
+			trs:         []Transition{rename, drain, removal(VerdictManual), passThrough},
+			from:        "0.20.0",
+			to:          "0.21.0",
+			wantVerdict: VerdictManual,
+			wantReason:  ReasonRecorded,
+			wantMatched: "removal",
+		},
+		{
+			name:          "a target past the removal's ceiling stops at that ceiling",
+			trs:           []Transition{rename, drain, removal(VerdictManual), passThrough},
+			from:          "0.20.0",
+			to:            "0.22.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonBeyondRecordCeiling,
+			wantStoppedAt: "=0.21.0",
+			wantInExpl:    "0.21.0",
+		},
+	}
+	for _, tt := range tests {
+		for _, order := range []string{"declared", "reversed"} {
+			t.Run(tt.name+"/"+order, func(t *testing.T) {
+				trs := slices.Clone(tt.trs)
+				if order == "reversed" {
+					slices.Reverse(trs)
+				}
+				got := Match(oneComponent(trs...), map[string]string{"c": tt.from}, map[string]string{"c": tt.to})
+				if len(got) != 1 {
+					t.Fatalf("Match() returned %d rows, want 1: %+v", len(got), got)
+				}
+				r := got[0]
+				if r.Verdict != tt.wantVerdict {
+					t.Errorf("verdict = %q, want %q", r.Verdict, tt.wantVerdict)
+				}
+				if r.Reason != tt.wantReason {
+					t.Errorf("reason = %q, want %q", r.Reason, tt.wantReason)
+				}
+				if r.StoppedAt != tt.wantStoppedAt {
+					t.Errorf("stoppedAt = %q, want %q", r.StoppedAt, tt.wantStoppedAt)
+				}
+				matched := ""
+				if r.Transition != nil {
+					matched = r.Transition.Summary
+				}
+				if matched != tt.wantMatched {
+					t.Errorf("matched record = %q, want %q", matched, tt.wantMatched)
+				}
+				if !strings.Contains(r.Explanation, tt.wantInExpl) {
+					t.Errorf("explanation = %q, want it to contain %q", r.Explanation, tt.wantInExpl)
+				}
+			})
+		}
+	}
+}
+
 // TestMatchTiesIgnoreDeclarationOrder checks that records tied on a floor or a
 // ceiling give the same result in either declaration order.
 func TestMatchTiesIgnoreDeclarationOrder(t *testing.T) {

@@ -323,6 +323,30 @@ When that record is `blocked`, the report sends the operator to its steps
 rather than to its ceiling, since the ceiling lies inside the interval it
 forbids.
 
+### When a migration only runs inside a window of versions
+
+Some migrations happen only while a particular range of versions is running.
+Nodewright's rename is one. An operator-side mirror converts Skyhook objects to
+NodeWright in v0.18.0 through v0.20.x, and a release that drops the legacy group
+would strand any object the mirror never converted. A jump from below the
+window to past it never runs the mirror. Express the window with fields the
+record already has.
+
+- End the migration record's `to` ceiling at the last version that still runs
+  the migration. The ceiling is your claim that the steps hold that far, so a
+  jump past the window cannot borrow your verdict. Nothing else catches a
+  ceiling that reaches too far. A later `safe` record carries no steps, so the
+  check reads the wider ceiling as your word that the jump is fine.
+- Give the release that closes the window its own record, with `from` starting
+  inside the window and a `precondition` naming what must have finished, such
+  as every object mirrored. A jump that crosses both records stops at the start
+  of the window.
+- To make the requirement hold however the other records change, add a
+  `blocked` record whose `from` covers everything below the window and whose
+  `to` starts at the release that closes it. Its steps say to land in the
+  window, let the migration finish, then continue. It stops any jump from below
+  the window to past it, and the report names a landing inside the window.
+
 ## Checking your work
 
 ```bash
