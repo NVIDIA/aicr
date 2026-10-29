@@ -281,6 +281,33 @@ func decodeTests(yamlContent string) ([]v1alpha1.Test, error) {
 	}
 }
 
+// AssertedResources returns the resource of each assert operation in the try
+// blocks of the Tests in yamlContent, in document order, skipping error
+// operations. It returns an error if a document is not a Test or an assert has
+// no resource mapping.
+func AssertedResources(yamlContent string) ([]map[string]any, error) {
+	tests, err := decodeTests(yamlContent)
+	if err != nil {
+		return nil, err
+	}
+	var resources []map[string]any
+	for _, test := range tests {
+		for _, step := range test.Spec.Steps {
+			for _, op := range step.Try {
+				if op.Assert == nil {
+					continue
+				}
+				resource, err := assertResource(op.Assert)
+				if err != nil {
+					return nil, err
+				}
+				resources = append(resources, resource)
+			}
+		}
+	}
+	return resources, nil
+}
+
 // isEmptyYAMLDocument reports whether a decoded document carries no content:
 // the shape yaml.v3 produces for a trailing `---`, a comment-only document, or
 // an explicit `null`. Such a document is punctuation, not dropped content, so
@@ -540,16 +567,25 @@ func notFoundGraceDeadline(err error, sawResource bool, absentDeadline, deadline
 	return deadline
 }
 
+// assertResource returns the mapping in a's resource field.
+func assertResource(a *v1alpha1.Assert) (map[string]any, error) {
+	if a == nil || a.Check == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "assert.resource is required")
+	}
+	resource, ok := a.Check.Value().(map[string]any)
+	if !ok {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "assert.resource must be a mapping")
+	}
+	return resource, nil
+}
+
 // evaluateAssert runs a single positive assertion against the cluster.
 // Returns nil if the assertion passes (resource exists AND matches the
 // shape), non-nil error otherwise.
 func evaluateAssert(ctx context.Context, a *v1alpha1.Assert, fetcher ResourceFetcher) error {
-	if a == nil || a.Check == nil {
-		return errors.New(errors.ErrCodeInvalidRequest, "assert.resource is required")
-	}
-	resourceSpec, ok := a.Check.Value().(map[string]any)
-	if !ok {
-		return errors.New(errors.ErrCodeInvalidRequest, "assert.resource must be a mapping")
+	resourceSpec, specErr := assertResource(a)
+	if specErr != nil {
+		return specErr
 	}
 	apiVersion, kind, namespace, name, labels, specErr := extractResourceSelector(resourceSpec)
 	if specErr != nil {

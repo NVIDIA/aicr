@@ -19,6 +19,7 @@ import (
 	stderrors "errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -1007,6 +1008,54 @@ func TestDescribePodStatus(t *testing.T) {
 			t.Parallel()
 			if got := describePodStatus(tt.obj); got != tt.want {
 				t.Errorf("describePodStatus = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAssertedResources(t *testing.T) {
+	t.Parallel()
+
+	test := func(ops string) string {
+		return "apiVersion: chainsaw.kyverno.io/v1alpha1\nkind: Test\nmetadata:\n  name: t\nspec:\n  steps:\n" +
+			"    - name: s\n      try:\n" + ops
+	}
+	op := func(action, name string) string {
+		return "        - " + action + ":\n            resource:\n              kind: Pod\n" +
+			"              metadata:\n                name: " + name + "\n"
+	}
+
+	tests := []struct {
+		name      string
+		content   string
+		wantNames []string
+		wantErr   bool
+	}{
+		{"asserts in document order, errors excluded",
+			test(op("assert", "a")+op("error", "b")+op("assert", "c")) + "---\n" + test(op("assert", "d")),
+			[]string{"a", "c", "d"}, false},
+		{"no asserts", test(op("error", "b")), nil, false},
+		{"assert without a resource", test("        - assert: {}\n"), nil, true},
+		{"assert resource not a mapping", test("        - assert:\n            resource: [a]\n"), nil, true},
+		{"document that is not a Test", "apiVersion: v1\nkind: Pod\nmetadata:\n  name: p\n", nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := AssertedResources(tt.content)
+			if tt.wantErr {
+				errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+				return
+			}
+			if err != nil {
+				t.Fatalf("AssertedResources() error = %v", err)
+			}
+			var names []string
+			for _, r := range got {
+				names = append(names, r["metadata"].(map[string]any)["name"].(string))
+			}
+			if !slices.Equal(names, tt.wantNames) {
+				t.Errorf("AssertedResources() names = %v, want %v", names, tt.wantNames)
 			}
 		})
 	}

@@ -20,7 +20,8 @@
 # transitioning to True — mirrors the existing assertion in
 # tests/chainsaw/ai-conformance/kind-inference-dynamo/assert-dynamo.yaml
 # so this registry check produces the same readiness signal that the
-# ai-conformance suite exercises.
+# ai-conformance suite exercises. It also asserts every CRD the chart
+# installs is Established.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -29,6 +30,66 @@ spec:
   timeouts:
     assert: 5m
   steps:
+    - name: validate-crds-established
+      # Verified against chart v0.1.0-alpha.13, which installs these six CRDs
+      # from crds/. A CRD whose shortName a leftover CRD still holds, such as
+      # clustertopologybindings after an upgrade from v0.1.0-alpha.8, never
+      # becomes Established.
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: clustertopologybindings.grove.io
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: podcliques.grove.io
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: podcliquescalinggroups.grove.io
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: podcliquesets.grove.io
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: podgangmaps.grove.io
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: podgangs.scheduler.grove.io
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
     - name: validate-grove-operator-deployment
       try:
         - assert:

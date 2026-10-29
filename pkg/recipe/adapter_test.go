@@ -725,7 +725,7 @@ func buildIsolatedCriteria(t *testing.T) *Criteria {
 	return &Criteria{Service: "eks"}
 }
 
-// buildProviderWithValues returns an inMemoryDataProvider whose values for
+// buildProviderWithValues returns an in-memory provider whose values for
 // the gpu-operator component live only in the bound provider. It seeds:
 //   - an empty registry.yaml
 //   - a base overlay
@@ -791,7 +791,7 @@ spec:
 	return newInMemoryProvider("bound-values", files)
 }
 
-// buildProviderWithManifest returns an inMemoryDataProvider seeded with a
+// buildProviderWithManifest returns an in-memory provider seeded with a
 // single manifest file at the supplied path. Used to verify that
 // GetManifestContentWithProvider reads from the supplied provider rather
 // than the embedded default.

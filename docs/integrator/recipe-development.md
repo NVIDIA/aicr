@@ -992,6 +992,56 @@ conflicting second copy. Disabling is therefore an authoring decision: to ship
 the component, remove the `enabled: false` override from the recipe/overlay.
 See [Enable or disable components](../user/bundling.md#enable-or-disable-components).
 
+## Replace a Component's Health Check in an Overlay
+
+A component's registry health check (`healthCheck.assertFile` in
+`recipes/registry.yaml`) can assert a resource that a leaf's values remove.
+For example, a leaf might turn off the subchart that installs an asserted CRD.
+The check would then fail on every cluster that leaf deploys. When the leaf
+should not have the resource, set inline `healthCheckAsserts` on that
+component's `componentRef` in the leaf overlay:
+
+```yaml
+# Leaf overlay: these values turn off the widgets subchart, so this leaf
+# does not assert its CRD.
+componentRefs:
+  - name: my-operator
+    valuesFile: components/my-operator/values-no-widgets.yaml
+    # Copy of recipes/checks/my-operator/health-check.yaml without the
+    # widgets.example.com assert.
+    healthCheckAsserts: |
+      apiVersion: chainsaw.kyverno.io/v1alpha1
+      kind: Test
+      metadata:
+        name: my-operator-health-check
+      spec:
+        steps:
+          - name: validate-crds-established
+            try:
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: gadgets.example.com
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+```
+
+- The inline check replaces the registry check for this leaf and every
+  overlay that inherits from it. Nothing is merged, so start from a copy of
+  the registry file and remove only the asserts this leaf's values remove.
+- Later edits to the registry file do not reach the copy. Update both.
+- Set it in an overlay. A mixin that sets `healthCheckAsserts` on a component
+  already in the chain is rejected.
+- Do not use `healthCheckSkip` for this. It drops the whole check, and is
+  meant for rolling back a regressing upstream check.
+- For an in-tree leaf, run `make crd-inventory`. It checks the inline asserts
+  against the chart rendered with the leaf's values, and reports each asserted
+  CRD that render does not install. See "CRD assertions" in the
+  [validator guide](../contributor/validator.md).
+
 ## File Naming Conventions
 
 File names are for human readability—matching uses `spec.criteria`, not file names.

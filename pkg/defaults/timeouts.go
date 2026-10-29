@@ -1527,6 +1527,13 @@ var MirrorExtraAPIVersions = []string{
 // serves as a safety net so the subprocess is never unbounded.
 const HelmTemplateTimeout = 90 * time.Second
 
+// HelmRenderAttempts and HelmRenderRetryBackoff configure helm.WithRetry. The
+// wait before retry n is n times HelmRenderRetryBackoff.
+const (
+	HelmRenderAttempts     = 3
+	HelmRenderRetryBackoff = 2 * time.Second
+)
+
 // HelmTemplateOutputLimit caps the bytes written to the stdout buffer of
 // a helm-template subprocess. --recipe accepts user-provided chart sources
 // with no allowlist, so the subprocess is not a trusted source. The 90s
