@@ -87,7 +87,7 @@ For all security-related concerns: [NVIDIA Product Security](https://www.nvidia.
 
 ## Supply Chain Security
 
-AICR (AI Cluster Runtime) provides supply chain security artifacts for all container images:
+AICR (AI Cluster Runtime) provides supply chain security artifacts for its release container images (the AICR Operator preview carries less; see [Trust Guarantees](#trust-guarantees)):
 
 - **SBOM Attestation**: Complete inventory of packages, libraries, and components in CycloneDX format, one per platform manifest
 - **VEX Attestation**: OpenVEX triage recording which CVEs do not affect the image and why, published alongside each platform SBOM
@@ -156,6 +156,14 @@ and how it is signed:
 | Binary SBOM | CLI binaries | SPDX v2.3 JSON (via GoReleaser) | Separate release asset (`*.sbom.json`), not embedded |
 | Bundle attestation | `aicr bundle` output | SLSA Build Provenance v1 | Sigstore keyless OIDC (opt-in `--attest`) |
 | Recipe / bundle validity | `aicr verify` trust levels | `verified` / `attested` / `unverified` / `unknown` | Checksums + Sigstore trusted root |
+
+**The AICR Operator preview carries less.** Its image
+(`ghcr.io/nvidia/aicr-operator`), chart (`oci://ghcr.io/nvidia/charts/aicr-operator`)
+and `kubectl-aicr` binaries carry SLSA Build Level 2 provenance generated in
+`on-tag.yaml` rather than the reusable workflow, the image carries an SPDX SBOM
+attestation per platform, and none carries OpenVEX. Verify them with
+`--signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml` and the release
+tag ([RELEASE.md](RELEASE.md#aicr-operator-preview)).
 
 **Why image provenance is Build Level 3.** Image attestations are generated
 from a dedicated *reusable* workflow

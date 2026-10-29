@@ -27,8 +27,8 @@
 #
 # CANDIDATE_REPOSITORY names the operator image repository the candidate is
 # published to (default ghcr.io/nvidia/aicr-operator); the build pushes
-# nothing (`go run ./tools/operator-release push` publishes a candidate, and
-# no workflow runs it yet). CANDIDATE_DIR is where it is built (default
+# nothing (the release workflow publishes it with `go run ./tools/operator-release
+# push`, .github/workflows/on-tag.yaml). CANDIDATE_DIR is where it is built (default
 # dist/candidate).
 set -euo pipefail
 

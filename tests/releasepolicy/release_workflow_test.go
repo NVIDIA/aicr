@@ -100,10 +100,20 @@ func TestReleaseUsesSingleDigestMap(t *testing.T) {
 	}
 
 	releaseCheckText := marshalYAML(t, mapValue(t, jobs, "release-check"))
-	for _, gate := range []string{"resolve-candidates", "image-vuln-scan", "attest"} {
+	for _, gate := range []string{"resolve-candidates", "image-vuln-scan", "attest", "operator-candidate", "operator-scan"} {
 		if !strings.Contains(releaseCheckText, gate) {
 			t.Errorf("release-check must fail closed on %s", gate)
 		}
+	}
+	// The operator publishes only after the integrity check, and the release
+	// waits for it.
+	for _, dependency := range []string{"release-check", "promote-images"} {
+		if !containsString(stringSlice(mapValue(t, jobs, "operator-publish")["needs"]), dependency) {
+			t.Errorf("operator-publish must wait for %s", dependency)
+		}
+	}
+	if !containsString(stringSlice(mapValue(t, jobs, "publish")["needs"]), "operator-publish") {
+		t.Error("publish must wait for operator-publish")
 	}
 }
 

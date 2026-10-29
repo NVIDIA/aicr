@@ -125,6 +125,10 @@ expected_release_asset_names() {
     "aicrd_\($version)_linux_arm64.sbom.json.sigstore.json",
     "THIRD_PARTY_NOTICES.md",
     "aicr_checksums.txt",
+    "kubectl-aicr-darwin-amd64",
+    "kubectl-aicr-darwin-arm64",
+    "kubectl-aicr-linux-amd64",
+    "kubectl-aicr-linux-arm64",
     "recipe-catalog.sigstore.json"
   ] | sort'
 }

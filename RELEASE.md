@@ -310,8 +310,9 @@ validation of those changes.
   keep the candidate tag emitted by `detect`, so promotion converges on the same
   digest set. If GoReleaser left a partial exact-tag draft, the rerun reuses it
   only when its name and tag both equal the release tag, its pre-release state
-  matches the tag, and every asset belongs to the fixed 13-asset GoReleaser
-  set. It then replaces expected assets, uploads missing ones, and regenerates
+  matches the tag, and every asset belongs to the release's fixed asset set
+  (`expected_release_asset_names` in `.github/scripts/release-images.sh`: the
+  GoReleaser assets and the four `kubectl-aicr` binaries). It then replaces expected assets, uploads missing ones, and regenerates
   release notes from the current tag. Unexpected, duplicate, or malformed
   assets fail closed for maintainer inspection. The generated Homebrew formula
   is kept for GitHub's 30-day workflow-rerun window.
@@ -322,7 +323,7 @@ validation of those changes.
   candidate tag.
 - Once the exact-tag GitHub release is public, the build fails closed rather
   than modify its assets; cut a new tag for any further release. Publication
-  revalidates the tag commit and the exact 13-asset set, then publishes by the
+  revalidates the tag commit and that exact asset set, then publishes by the
   validated numeric release ID, never by a mutable name or tag. If GitHub made
   the release public but the response was lost, a failed-job rerun accepts it
   after revalidating source, identity, pre-release state, and assets, and does
@@ -407,9 +408,44 @@ Stable releases promote `vX.Y.Z` and `latest`; pre-releases promote
 `candidate-<run-id>-<run-attempt>` tags stay in the public packages for audit,
 diagnosis, and recovery.
 
+### AICR Operator (preview)
+
+The [AICR Operator](docs/operator/index.md) ships at the release's version
+outside the image promotion above: `operator-candidate` builds it from the tag
+(`make operator-candidate`), `operator-scan` scans both architectures, and
+`operator-publish` runs only after the release integrity check. It publishes:
+
+| Artifact | Where |
+|----------|-------|
+| Operator image | `ghcr.io/nvidia/aicr-operator:vX.Y.Z`, with build provenance on the index and an SPDX SBOM attestation on each platform image, in the registry |
+| Helm chart | `oci://ghcr.io/nvidia/charts/aicr-operator`, version `X.Y.Z`, with build provenance in the registry |
+| `kubectl-aicr` | Release assets `kubectl-aicr-<os>-<arch>` for darwin and linux on amd64 and arm64, malware-scanned and attested |
+
+The chart defaults to the operator image by digest and to the AICR release the
+operator was qualified against (`operator:` in `.settings.yaml`).
+`release-check` fails closed on the operator candidate and its scan, so neither
+the image aliases above nor the operator are published when they fail, and
+`publish` waits for `operator-publish`. Publishing the same candidate again is
+a no-op, so re-running the failed jobs converges; a tag that already names
+other content is refused. The operator image takes no `latest` alias.
+
+The first release that publishes the operator creates the `aicr-operator` and
+`charts/aicr-operator` packages. If GHCR creates them private, an organization
+administrator makes both public once, as for the other images, so users can
+pull and verify them anonymously.
+
+The operator's attestations are generated in `on-tag.yaml` itself, not in the
+reusable `attest-images.yaml`, so they are SLSA Build Level 2. Verify them
+against that workflow and the tag:
+
+```shell
+gh attestation verify "oci://ghcr.io/nvidia/charts/aicr-operator:${VERSION}" --repo NVIDIA/aicr \
+  --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/v${VERSION}"
+```
+
 ### Supply Chain
 
-Every release includes:
+Every release includes, for the AICR binaries and the seven images above:
 
 - **SLSA Build Level 3 Provenance**: verifiable image build attestations (provenance v1), generated from a reusable workflow
 - **SBOM**: SPDX for the release binaries, CycloneDX for the container images
@@ -427,6 +463,12 @@ Every release includes:
   `GITHUB_TOKEN` keeps its license-URL probes from being rate-limited. The
   `notices-generator` merge-gate job runs it on dependency changes, so a break
   shows up on the PR rather than at tag time.
+
+The AICR Operator preview's artifacts carry less: Level 2 provenance on the
+image index, the chart and each `kubectl-aicr` binary, an SPDX SBOM attestation
+on each operator platform image, no OpenVEX, and no `aicr_checksums.txt` entry
+for the plugin, whose attestations bind its digests
+([AICR Operator (preview)](#aicr-operator-preview)).
 
 ## Versioning
 
