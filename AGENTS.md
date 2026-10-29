@@ -132,6 +132,7 @@ workspace paths. Use local file paths only when explicitly requested.
 | `pkg/k8s/pod` | Shared K8s Job/Pod utilities (wait, logs, ConfigMap URIs) | Yes |
 | `validators/helper` | Shared validator helpers (PodLifecycle, GPU/resource utilities) | Yes |
 | `pkg/defaults` | Centralized timeout and configuration constants | Yes |
+| `pkg/operator` | Opt-in AICR Operator (ADR-027): runs AICR only as a pinned image and imports no other AICR package (`operator-boundary` depguard rule), so `pkg/errors` and `pkg/defaults` do not apply | Yes |
 
 **Critical Architecture Principle:**
 - `pkg/cli` and `pkg/server` = user interaction only, no business logic

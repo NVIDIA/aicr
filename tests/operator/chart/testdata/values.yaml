@@ -1,0 +1,26 @@
+# Installation values for the chart tests: the aws provider (so the chart
+# creates repo-creds), validation on, and three component namespaces, one of
+# which already exists.
+aicr:
+  version: v1.0.0
+  image: ghcr.io/nvidia/aicr:v1.0.0@sha256:e91ba6f4916a5bfcd19d05933b5b4d07a4dd05a738a1ffebfab243a32cbff433
+  validatorImages:
+    - ghcr.io/nvidia/aicr-validators/deployment:v1.0.0@sha256:3c0a8553a346e6ba5a273a10f0b91574945b8b23cffc9d83db3107701e467790
+operator:
+  image: ghcr.io/nvidia/aicr-operator@sha256:0000000000000000000000000000000000000000000000000000000000000000
+registry:
+  repository: oci://123456789012.dkr.ecr.us-west-2.amazonaws.com/aicr/cluster
+namespaces:
+  components:
+    - name: gpu-operator
+      podSecurity: privileged
+    - name: cert-manager
+      podSecurity: restricted
+    - name: kube-system
+      podSecurity: privileged
+      create: false
+validation:
+  enabled: true
+approvers:
+  groups:
+    - aicr-approvers

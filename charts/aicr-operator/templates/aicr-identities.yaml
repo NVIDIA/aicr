@@ -1,0 +1,352 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+{{/*
+AICR's own identities: the Job ServiceAccount for recipe, bundle
+and upgrade-check, and the snapshot launcher and agent. The agent's cluster
+read rules are those aicr snapshot --add-roles-to-service-account generates
+for AICR v1.0.0, under the name it generates.
+*/}}
+{{- $discovery := .Values.namespaces.discovery }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aicr-jobs
+  namespace: {{ .Values.namespaces.jobs }}
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+---
+# AICR Jobs read their input copies and write their outputs, nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aicr-jobs
+  namespace: {{ .Values.namespaces.jobs }}
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list, create, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aicr-jobs
+  namespace: {{ .Values.namespaces.jobs }}
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: aicr-jobs
+subjects:
+  - kind: ServiceAccount
+    name: aicr-jobs
+    namespace: {{ .Values.namespaces.jobs }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aicr-snapshot
+  namespace: {{ $discovery }}
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aicr-snapshot-agent
+  namespace: {{ $discovery }}
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+---
+# The launcher runs aicr snapshot in exact-ServiceAccount mode.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aicr-snapshot
+  namespace: {{ $discovery }}
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [serviceaccounts]
+    verbs: [get]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, get, list, watch, delete]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list, create, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aicr-snapshot
+  namespace: {{ $discovery }}
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: aicr-snapshot
+subjects:
+  - kind: ServiceAccount
+    name: aicr-snapshot
+    namespace: {{ $discovery }}
+{{- if semverCompare "<1.1.0" (trimPrefix "v" .Values.aicr.version) }}
+---
+# AICR v1.0.x's exact-ServiceAccount mode creates its namespace when missing,
+# and needs namespace create even when it exists. From v1.1.0 it sends no
+# namespace request (NVIDIA/aicr#3255).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: aicr-snapshot-namespace
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [namespaces]
+    resourceNames: [{{ $discovery | quote }}]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: aicr-snapshot-namespace
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: aicr-snapshot-namespace
+subjects:
+  - kind: ServiceAccount
+    name: aicr-snapshot
+    namespace: {{ $discovery }}
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aicr-snapshot-agent
+  namespace: {{ $discovery }}
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [create, get, update, patch]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aicr-snapshot-agent
+  namespace: {{ $discovery }}
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: aicr-snapshot-agent
+subjects:
+  - kind: ServiceAccount
+    name: aicr-snapshot-agent
+    namespace: {{ $discovery }}
+---
+# Cluster reads only: Nodes, Pods, DaemonSets and GPU stack state; nothing
+# writes Nodes or reads Secrets.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: aicr-agent-{{ $discovery }}.aicr-snapshot-agent
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [nodes, pods]
+    verbs: [get, list]
+  - apiGroups: [nvidia.com]
+    resources: [clusterpolicies]
+    verbs: [get, list]
+  - apiGroups: [slinky.slurm.net]
+    resources: [controllers, nodesets, loginsets, restapis, accountings]
+    verbs: [list]
+  - apiGroups: [k8s.mariadb.com]
+    resources: [mariadbs]
+    verbs: [list]
+  - apiGroups: [apps]
+    resources: [daemonsets]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: aicr-agent-{{ $discovery }}.aicr-snapshot-agent
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: aicr-agent-{{ $discovery }}.aicr-snapshot-agent
+subjects:
+  - kind: ServiceAccount
+    name: aicr-snapshot-agent
+    namespace: {{ $discovery }}
+{{- if .Values.validation.enabled }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aicr-validation
+  namespace: {{ .Values.namespaces.validation }}
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+  {{- with .Values.validation.serviceAccountAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- if semverCompare ">=1.1.0-0" (trimPrefix "v" .Values.aicr.version) }}
+---
+# AICR >= v1.1.0: the launcher runs validators as a pre-provisioned
+# ServiceAccount and cannot create bindings.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aicr-validation
+  namespace: {{ .Values.namespaces.validation }}
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [serviceaccounts]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [create, get, update, patch, delete]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, get, list, watch, patch, delete]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aicr-validation
+  namespace: {{ .Values.namespaces.validation }}
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: aicr-validation
+subjects:
+  - kind: ServiceAccount
+    name: aicr-validation
+    namespace: {{ .Values.namespaces.validation }}
+---
+# AICR checks the validator's cluster-admin binding with a
+# SubjectAccessReview before it runs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: aicr-validation
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: aicr-validation-access-reviews
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: aicr-validation
+subjects:
+  - kind: ServiceAccount
+    name: aicr-validation
+    namespace: {{ .Values.namespaces.validation }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aicr-validator
+  namespace: {{ .Values.namespaces.validation }}
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+---
+# AICR's validators are cluster-admin-equivalent and AICR refuses a weaker
+# binding.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: aicr-validator
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: aicr-validator
+    namespace: {{ .Values.namespaces.validation }}
+{{- else }}
+---
+# AICR v1.0.x binds cluster-admin to its validators per run, so the launcher
+# itself needs cluster-admin. Each AICR version range names its
+# launcher binding apart, and apart from charts before v0.1.0-rc.10
+# (aicr-validation): a roleRef cannot change, so a changed AICR version
+# replaces the binding instead.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: aicr-validation-cluster-admin
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: aicr-validation
+    namespace: {{ .Values.namespaces.validation }}
+{{- end }}
+{{- end }}

@@ -1111,6 +1111,89 @@ cleanup: ## Cleans up AICR Kubernetes resources (requires a kubeconfig and helm)
 	GOFLAGS="-mod=readonly" go run ./tools/cleanup
 
 # =============================================================================
+# AICR Operator (ADR-027)
+# =============================================================================
+
+# The operator's pins live under `operator:` in .settings.yaml. Its unit and
+# envtest suites run in `make test`; these targets cover what `make test`
+# cannot: the Kubernetes floor, generated code, and the kind suites, which use
+# only the kind cluster's own kubeconfig, never ~/.kube/config.
+OPERATOR_ENVTEST_K8S_FLOOR ?= $(shell yq -r '.operator.envtest_kubernetes_floor' .settings.yaml 2>/dev/null)
+OPERATOR_E2E_KUBECONFIG    ?= $(CURDIR)/.operator-e2e/kubeconfig
+AICR_E2E_IMAGE             ?= $(shell yq -r '.operator.aicr_image' .settings.yaml 2>/dev/null)
+AICR_E2E_VERSION           ?= $(shell yq -r '.operator.aicr_version' .settings.yaml 2>/dev/null)
+AICR_E2E_VALIDATOR_IMAGES  ?= $(shell yq -r '.operator.aicr_validator_images | [.[]] | join(",")' .settings.yaml 2>/dev/null)
+# A development build: release versions are stamped only by operator-candidate.
+OPERATOR_VERSION           ?= v0.0.0-dev
+OPERATOR_LDFLAGS           := -s -w \
+	-X github.com/NVIDIA/aicr/pkg/operator/version.Version=$(OPERATOR_VERSION) \
+	-X github.com/NVIDIA/aicr/pkg/operator/version.Commit=$(COMMIT)
+
+.PHONY: operator-build
+operator-build: ## Builds the operator and the kubectl-aicr plugin into dist/
+	@GOFLAGS="-mod=readonly" CGO_ENABLED=0 go build -trimpath -ldflags "$(OPERATOR_LDFLAGS)" -o dist/aicr-operator ./cmd/aicr-operator
+	@GOFLAGS="-mod=readonly" CGO_ENABLED=0 go build -trimpath -ldflags "$(OPERATOR_LDFLAGS)" -o dist/kubectl-aicr ./cmd/kubectl-aicr
+	@echo "Built dist/aicr-operator and dist/kubectl-aicr ($(OPERATOR_VERSION))"
+
+.PHONY: operator-check-generated
+operator-check-generated: generate ## Fails if the operator's generated deep copies or CRDs are stale
+	@git diff --exit-code -- api/operator charts/aicr-operator/files/crds >/dev/null || \
+		(echo "Generated code is stale. Run 'make generate' and commit the result." && git diff --stat -- api/operator charts/aicr-operator/files/crds && exit 1)
+	@test -z "$$(git status --porcelain --untracked-files=all -- ':(glob)api/operator/**/zz_generated.*' charts/aicr-operator/files/crds)" || \
+		(echo "Untracked generated files:" && git status --porcelain --untracked-files=all -- ':(glob)api/operator/**/zz_generated.*' charts/aicr-operator/files/crds && exit 1)
+	@echo "Generated code is current"
+
+# CRD rules and admission policies are evaluated by the API server, so they
+# run again on the oldest supported Kubernetes.
+.PHONY: operator-envtest-floor
+operator-envtest-floor: ## Runs the operator's CRD validation and chart suites on the Kubernetes floor
+	@set -e; \
+	test -n "$(OPERATOR_ENVTEST_K8S_FLOOR)" || { echo "no operator.envtest_kubernetes_floor in .settings.yaml (is yq installed?)"; exit 1; }; \
+	echo "Running CRD validation and chart tests on Kubernetes $(OPERATOR_ENVTEST_K8S_FLOOR)..."; \
+	assets=$$(setup-envtest use $(OPERATOR_ENVTEST_K8S_FLOOR) -p path); \
+	test -n "$$assets" || { echo "setup-envtest returned no assets for $(OPERATOR_ENVTEST_K8S_FLOOR)"; exit 1; }; \
+	KUBECONFIG=$(CURDIR)/.no-kubeconfig KUBERNETES_SERVICE_HOST= KUBERNETES_SERVICE_PORT= \
+	KUBEBUILDER_ASSETS="$$assets" \
+	GOFLAGS="-mod=readonly" go test -count=1 -timeout=$(TEST_TIMEOUT) ./api/operator/... ./tests/operator/chart/...
+
+.PHONY: operator-kind-up
+operator-kind-up: ## Creates the operator's kind cluster with an in-cluster registry
+	@./tools/operator-kind up
+
+.PHONY: operator-kind-up-floor
+operator-kind-up-floor: ## Creates the operator's kind cluster on the Kubernetes floor
+	@./tools/operator-kind up floor
+
+.PHONY: operator-kind-down
+operator-kind-down: ## Deletes the operator's kind cluster
+	@./tools/operator-kind down
+
+.PHONY: operator-candidate
+operator-candidate: ## Builds an operator candidate into dist/candidate (CANDIDATE_VERSION=v0.1.0-rc.1)
+	@./tools/operator-candidate build
+
+.PHONY: operator-candidate-verify
+operator-candidate-verify: ## Builds the operator candidate twice and requires identical bytes
+	@./tools/operator-candidate verify
+
+.PHONY: operator-e2e
+operator-e2e: ## Runs the pinned AICR images as operator-built Jobs on the operator's kind cluster
+	@AICR_OPERATOR_E2E_KUBECONFIG=$(OPERATOR_E2E_KUBECONFIG) \
+	AICR_OPERATOR_E2E_REGISTRY_AUTH=$(CURDIR)/.operator-e2e/registry-auth.json \
+	AICR_OPERATOR_E2E_IMAGE=$(AICR_E2E_IMAGE) \
+	AICR_OPERATOR_E2E_AICR_VERSION=$(AICR_E2E_VERSION) \
+	AICR_OPERATOR_E2E_VALIDATOR_IMAGES=$(AICR_E2E_VALIDATOR_IMAGES) \
+	GOFLAGS="-mod=readonly" go test -count=1 -v -timeout=30m ./tests/operator/e2e/...
+
+.PHONY: operator-skeleton
+operator-skeleton: ## Runs the operator with the pinned Argo CD on its kind cluster, one release end to end
+	@./tools/operator-skeleton
+
+.PHONY: operator-qualify
+operator-qualify: ## Runs the operator's fault-injection suite against dist/candidate, upgrading to dist/candidate-next
+	@./tools/operator-qualify
+
+# =============================================================================
 # Tilt Local Development
 # =============================================================================
 

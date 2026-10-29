@@ -75,6 +75,8 @@ navigation:
       - page: Slurm Shared Storage
         path: user/slinky-slurm-storage.md
 
+  # docs/operator joins the navigation when a release ships the operator (#3469).
+
   - section: Integrator Guide
     contents:
       - page: Automation

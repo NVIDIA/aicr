@@ -1,0 +1,131 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Installation values (docs/operator/api.md). The AICR version, images, engine
+# and registry are platform-administrator decisions: changing any of them is a
+# chart upgrade. The operator namespace is the release namespace.
+
+aicr:
+  # Declared AICR release; rendering fails outside >=1.0.0, <2.0.0.
+  version: v1.0.0
+  # AICR CLI and snapshot agent image, pinned by digest. Required.
+  image: ""
+  # AICR's validator images for aicr.version, each as repository:tag@digest;
+  # required with validation.enabled. AICR names the tag in its evidence; the
+  # operator fails a run whose evidence names any other validator image and
+  # checks that each tag still resolves to its digest.
+  validatorImages: []
+  # Placement of every AICR Job the operator runs (snapshot, recipe, render,
+  # upgrade-check and the validation launcher), for clusters whose nodes are
+  # all tainted, such as EKS system nodes with CriticalAddonsOnly. Empty
+  # places none. AICR's snapshot agent follows the runtime's accelerated
+  # placement instead.
+  jobs:
+    nodeSelector: {}
+    tolerations: []
+
+operator:
+  # Operator image. Pin it by digest on any shared cluster. Required.
+  image: ""
+  imagePullPolicy: IfNotPresent
+  # A second replica waits on the leader-election Lease.
+  replicas: 1
+  # debug, info, warn or error.
+  logLevel: info
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  # Annotations on the operator's ServiceAccount, such as an IRSA role ARN.
+  serviceAccountAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+engine:
+  # ArgoCD is the supported engine.
+  type: ArgoCD
+  # Argo CD control namespace; Argo CD is installed before this chart.
+  namespace: argocd
+  # AppProject the chart creates and every owned Application uses.
+  project: aicr
+
+registry:
+  # Runtime registry prefix (oci://host/path). Required.
+  repository: ""
+  # Plain HTTP to the registry: test clusters only.
+  plainHTTP: false
+  auth:
+    # aws: ECR through the operator's AWS identity (EKS Pod Identity or IRSA);
+    # the chart creates repoCredsSecret and the operator refreshes it.
+    # static: administrator-provided Secrets; the operator only reads them.
+    provider: aws
+    # static: docker config Secret with this name in the operator, Job and
+    # validation namespaces, created by the administrator; empty is an
+    # anonymous registry.
+    staticSecretRef: ""
+    # The Argo CD repo-creds Secret for the runtime registry. With aws the
+    # chart creates it; with static the administrator does.
+    repoCredsSecret: aicr-registry
+
+namespaces:
+  # Snapshot agent only; Pod Security privileged.
+  discovery: aicr-discovery
+  # Recipe, bundle and upgrade-check Jobs; Pod Security restricted.
+  jobs: aicr-jobs
+  # Validation Jobs; created only when validation.enabled.
+  validation: aicr-validation
+  # Namespaces the GPU stack deploys into: the AppProject's destinations and
+  # the namespaces owned Applications may target. Each entry:
+  #   name: gpu-operator
+  #   podSecurity: privileged   # privileged, baseline or restricted
+  #   create: true              # false for one that already exists, such as kube-system
+  # The chart creates each with its Pod Security labels and keeps it on
+  # uninstall. The operator creates no namespaces.
+  components: []
+
+discovery:
+  # Snapshot agent resource requests (name=quantity,...); empty keeps AICR's
+  # defaults, which are sized for GPU nodes.
+  agentRequests: ""
+
+validation:
+  # Installs the validation launcher and, for AICR >= v1.1.0, the
+  # cluster-admin validator ServiceAccount; AICR v1.0.x binds the launcher
+  # itself to cluster-admin.
+  enabled: false
+  # Annotations on the launcher's ServiceAccount, such as the workload
+  # identity that signs evidence.
+  serviceAccountAnnotations: {}
+  # AICR >= v1.1.0: the KMS key URI (awskms://, gcpkms://, azurekms:// or
+  # hashivault://) that signs evidence, through the launcher's workload
+  # identity; empty pushes it unsigned.
+  signingKey: ""
+  # Upload key signatures to the Rekor transparency log; false keeps them
+  # out of the public log.
+  transparencyLog: true
+
+approvers:
+  # Users and groups bound to the approver roles: approve and revoke rollouts
+  # and read assessment reports. Keep them apart from ClusterRuntime editors,
+  # so nobody approves their own change.
+  users: []
+  groups: []
+
+development:
+  # Development builds only; a release build refuses to start with either set.
+  bypassApprovals: false
+  skipDiscovery: false
