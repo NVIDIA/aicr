@@ -30,7 +30,9 @@
 # to and that server's volume and images, the system-namespaces one asserts
 # the chart's default list still matches the one the drain scope keeps, and
 # the CRD exclusion one asserts every component's ownsCRDsExcludeSubcharts
-# (nvsentinel's and nktp's) still matches its pinned chart.
+# (nvsentinel's and nktp's) still matches its pinned chart. One more test
+# (pkg/bundler) renders kube-prometheus-stack with a stock bundle's values and
+# asserts the Prometheus CR carries the bundler's PromQL scrape scope.
 # All are gated on testing.Short() -- `make
 # test`/`make qualify`/every other CI job run with -short, so this is the only
 # place they execute. There is no PR-blocking trigger here on purpose: these
@@ -120,3 +122,9 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Render kube-prometheus-stack with the PromQL scope
+        if: ${{ !cancelled() }}
+        run: |
+          go test ./pkg/bundler/ -run '^TestPromQLScrapeScopeRendersOnChart$' -v -count=1 | tee "${RUNNER_TEMP}/promql-render.log"
+          grep -q -- '--- PASS: TestPromQLScrapeScopeRendersOnChart' "${RUNNER_TEMP}/promql-render.log"

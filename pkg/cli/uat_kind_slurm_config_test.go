@@ -56,7 +56,7 @@ func TestKindSlurmUATBundles(t *testing.T) {
 				"--intent", "training", "--platform", "slurm", "--output", "recipe.yaml"},
 			bundle: []string{"bundle", "--recipe", "recipe.yaml", "--deployer", "helmfile",
 				"--set", "gpuoperator:enabled=false", "--set", "dradriver:enabled=false",
-				"--output", "bundle"},
+				"--set", "prometheusadapter:enabled=false", "--output", "bundle"},
 		},
 	}
 	for _, tt := range tests {

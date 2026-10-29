@@ -1013,46 +1013,32 @@ components:
     # described in issue #914.
     healthCheck:
       assertFile: checks/kube-prometheus-stack/health-check.yaml
+    upgrades:
+      file: components/kube-prometheus-stack/upgrades.yaml
     helm:
       defaultRepository: https://prometheus-community.github.io/helm-charts
       defaultChart: prometheus-community/kube-prometheus-stack
       # renovate: datasource=helm depName=kube-prometheus-stack registryUrl=https://prometheus-community.github.io/helm-charts
-      defaultVersion: 84.4.0
+      defaultVersion: 84.5.0
       defaultNamespace: monitoring
+    # Prometheus stores to an emptyDir, so there are no storageClassPaths.
     nodeScheduling:
       system:
         nodeSelectorPaths:
           - prometheus.prometheusSpec.nodeSelector
-          - alertmanager.alertmanagerSpec.nodeSelector
-          - grafana.nodeSelector
           - prometheusOperator.nodeSelector
-          - prometheusOperator.admissionWebhooks.patch.nodeSelector
-          - kube-state-metrics.nodeSelector
-          - prometheus-node-exporter.nodeSelector
-          - thanosRuler.thanosRulerSpec.nodeSelector
-        # This chart defaults prometheus.prometheusSpec.storageSpec to
-        # emptyDir, so there is no PVC and no zone-pinning hazard until
-        # --storage-class configures one. Once it does, an unpinned
-        # prometheus pod can land on a GPU node and inherit its zone; the
-        # PVC then binds to that zone, and a later reschedule onto the
-        # correct system-node pool in a different zone gets stuck forever
-        # waiting on a PVC it can't attach to.
-        # requireNodeSelectorIfStorageClassSet fails the bundle instead of
-        # shipping this misconfiguration silently, without forcing every
-        # bundle of this near-universal base component to pass
-        # --system-node-selector when it has no PVC to strand at all.
-        requireNodeSelectorIfStorageClassSet: true
         tolerationPaths:
           - prometheus.prometheusSpec.tolerations
-          - alertmanager.alertmanagerSpec.tolerations
-          - grafana.tolerations
           - prometheusOperator.tolerations
-          - prometheusOperator.admissionWebhooks.patch.tolerations
-          - kube-state-metrics.tolerations
-          - prometheus-node-exporter.tolerations
-          - thanosRuler.thanosRulerSpec.tolerations
-    storageClassPaths:
-      - prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName
+    telemetry:
+      promqlServer:
+        namespaceSelectorPaths:
+          - prometheus.prometheusSpec.serviceMonitorNamespaceSelector
+          - prometheus.prometheusSpec.podMonitorNamespaceSelector
+        monitorSelectorPaths:
+          - prometheus.prometheusSpec.serviceMonitorSelector
+          - prometheus.prometheusSpec.podMonitorSelector
+        scrapeClassesPath: prometheus.prometheusSpec.scrapeClasses
 
   - name: prometheus-adapter
     displayName: prometheus-adapter
@@ -1073,6 +1059,17 @@ components:
           - nodeSelector
         tolerationPaths:
           - tolerations
+    # The DCGM gauges behind the rules in
+    # components/prometheus-adapter/values.yaml, from gpu-operator's
+    # dcgm-exporter ServiceMonitor.
+    telemetry:
+      promql:
+        monitorsFrom:
+          - gpu-operator
+        series:
+          - DCGM_FI_DEV_GPU_UTIL
+          - DCGM_FI_DEV_FB_USED
+          - DCGM_FI_DEV_POWER_USAGE
 
   - name: nktp
     displayName: NKTP Telemetry Pipeline
@@ -1309,6 +1306,24 @@ components:
         tolerationPaths:
           - dynamo-operator.controllerManager.tolerations
           - nats.podTemplate.merge.spec.tolerations
+    # What the planner queries at ai-dynamo/dynamo v1.4.2
+    # (components/src/dynamo/planner/monitoring/traffic_metrics.py), in
+    # frontend and router mode, plus the engines' speculative-decoding
+    # acceptance. The operator's PodMonitors live in this release's namespace
+    # and select Dynamo pods in every namespace.
+    telemetry:
+      promql:
+        monitorsFrom:
+          - dynamo-platform
+        series:
+          - dynamo_frontend_(requests_started|requests)_total
+          - dynamo_frontend_(time_to_first_token_seconds|inter_token_latency_seconds|request_duration_seconds|input_sequence_tokens|output_sequence_tokens)_(sum|count)
+          - dynamo_component_router_(requests_started|requests)_total
+          - dynamo_component_router_(kv_hit_rate|time_to_first_token_seconds|inter_token_latency_seconds|input_sequence_tokens|output_sequence_tokens)_(sum|count)
+          - dynamo_component_request_duration_seconds_(sum|count)
+          - vllm:spec_decode_num_(accepted_tokens|drafts)_total
+          - sglang:spec_accept_length
+          - trtllm_spec_decode_acceptance_length
 
   - name: agentgateway-crds
     displayName: agentgateway-crds

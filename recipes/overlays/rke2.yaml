@@ -29,19 +29,8 @@ spec:
   # service root.
   #
   # Storage note: RKE2 ships NO StorageClass (unlike k3s, local-path is not
-  # bundled). The base kube-prometheus-stack defaults to emptyDir storage, so
-  # nothing here requires a StorageClass. If persistent monitoring is needed,
-  # install a provisioner (e.g. local-path-provisioner) and override
-  # prometheusSpec.storageSpec per the bcm.yaml pattern.
-  #
-  # node-exporter port note: some RKE2 host images run a host-level
-  # node_exporter systemd service bound to the default port 9100. The base
-  # kube-prometheus-stack node-exporter DaemonSet runs hostNetwork with
-  # tolerate-all on the same default, so on a node with a host exporter it
-  # crash-loops with "bind: address already in use" and helm --wait wedges
-  # the release. This root therefore overrides the exporter to port 9110
-  # (see the kube-prometheus-stack ref below); Prometheus scrapes via the
-  # Service, so the non-default port is side-effect-free.
+  # bundled). The base kube-prometheus-stack uses emptyDir storage, so
+  # nothing here requires a StorageClass.
 
   criteria:
     service: rke2
@@ -124,15 +113,6 @@ spec:
               gpuReset:
                 resetJob:
                   runtimeClassName: ""
-
-    # Move the node-exporter off 9100 — see the port note above.
-    - name: kube-prometheus-stack
-      type: Helm
-      overrides:
-        prometheus-node-exporter:
-          service:
-            port: 9110
-            targetPort: 9110
 
   # Baseline conformance floor for any recipe resolved at the rke2 service
   # root (mirrors the bcm.yaml bare-metal service root). Leaves extend this

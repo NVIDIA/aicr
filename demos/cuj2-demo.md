@@ -52,7 +52,7 @@
   │    ├── 010-nodewright-operator/            (node configuration)        │
   │    ├── 011-nodewright-customizations/      (H100 tuning)               │
   │    ├── 012-prometheus-operator-crds/       (monitoring CRDs)           │
-  │    ├── 013-kube-prometheus-stack/          (Prometheus, Grafana)       │
+  │    ├── 013-kube-prometheus-stack/          (Prometheus)                │
   │    ├── 014-gpu-operator/                   (driver, plugin, DCGM)      │
   │    ├── 015-k8s-ephemeral-storage-metrics/  (storage metrics)           │
   │    ├── 016-kai-scheduler/                  (gang scheduling)           │

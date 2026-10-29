@@ -20,7 +20,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 - Components: **57**
-- Unique images: **150**
+- Unique images: **140**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -54,7 +54,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
 | k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.0 | 1 |
 | kai-scheduler | helm | kai-scheduler | v0.16.9 | 12 |
-| kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
+| kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.5.0 | 2 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 4 |
 | kueue | helm | kueue | 0.19.6 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.10.1 | 1 |
@@ -98,7 +98,6 @@ from the component's registry default above.
 |-----------|-----------------|-------------|--------|
 | dynamo-platform | 1.5.0 | b300-mk8s-ubuntu-inference-dynamo | 1 |
 | kai-scheduler | v0.17.1 | b300-mk8s-ubuntu-inference-dynamo | 12 |
-| kube-prometheus-stack | 83.7.0 | aks | 8 |
 | network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 17 |
 
 ## Images by component
@@ -238,14 +237,8 @@ _No images extracted._
 
 ### kube-prometheus-stack
 
-- `docker.io/grafana/grafana:13.0.1`
-- `ghcr.io/jkroepke/kube-webhook-certgen:1.8.2`
-- `quay.io/kiwigrid/k8s-sidecar:2.7.1`
 - `quay.io/prometheus-operator/prometheus-operator:v0.90.1`
-- `quay.io/prometheus/alertmanager:v0.32.0`
-- `quay.io/prometheus/node-exporter:v1.11.1`
 - `quay.io/prometheus/prometheus:v3.11.3`
-- `registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.18.0`
 
 ### kubeflow-trainer
 
@@ -446,17 +439,6 @@ _No images extracted._
 - `ghcr.io/kai-scheduler/kai-scheduler/resourcereservation:v0.17.1`
 - `ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.17.1`
 - `ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.17.1`
-
-### kube-prometheus-stack@83.7.0 (variant)
-
-- `docker.io/grafana/grafana:12.4.3`
-- `ghcr.io/jkroepke/kube-webhook-certgen:1.8.1`
-- `quay.io/kiwigrid/k8s-sidecar:2.6.0`
-- `quay.io/prometheus-operator/prometheus-operator:v0.90.1`
-- `quay.io/prometheus/alertmanager:v0.32.0`
-- `quay.io/prometheus/node-exporter:v1.11.1`
-- `quay.io/prometheus/prometheus:v3.11.2`
-- `registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.18.0`
 
 ### network-operator@25.7.0 (variant)
 

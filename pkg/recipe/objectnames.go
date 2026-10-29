@@ -53,9 +53,8 @@ const maxObjectNameDepth = 12
 // ObjectNameValues projects merged Helm values onto the object names they pin,
 // keyed by dotted value path ("fullnameOverride", "grafana.fullnameOverride").
 //
-// Nesting is not incidental: kube-prometheus-stack pins four subchart names and
-// network-operator pins one under a parent key, so reading two top-level keys
-// would miss most of the surface.
+// Nesting is not incidental: network-operator pins its name under a parent
+// key, so reading two top-level keys would miss it.
 //
 // A non-string or empty value is skipped. Helm treats either as unset, so
 // carrying it would name a value that never reaches an object.

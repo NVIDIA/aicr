@@ -23,10 +23,8 @@ spec:
   # own bundled containerd, kube-router (or Calico) CNI, CoreDNS, and
   # metrics-server.
   # Storage note: k0s ships NO StorageClass (same posture as rke2). The
-  # base kube-prometheus-stack defaults to emptyDir storage, so nothing
-  # here requires a StorageClass. If persistent monitoring is needed,
-  # install a provisioner (e.g. local-path-provisioner) and override
-  # prometheusSpec.storageSpec per the bcm.yaml pattern.
+  # base kube-prometheus-stack uses emptyDir storage, so nothing here
+  # requires a StorageClass.
 
   criteria:
     service: k0s

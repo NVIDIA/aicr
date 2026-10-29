@@ -99,32 +99,11 @@ spec:
               cpu: 500m
               memory: 500Mi
 
-    # kube-prometheus-stack: use emptyDir storage (default), reduce resources
+    # kube-prometheus-stack: the base values already fit kind; only the
+    # operator needs kind-specific settings.
     - name: kube-prometheus-stack
       type: Helm
       overrides:
-        # CI only needs component health, not the full upstream alerting rule
-        # set. Skipping default rules reduces PrometheusRule churn during
-        # install on small kind control planes.
-        defaultRules:
-          create: false
-        prometheus:
-          prometheusSpec:
-            # Smaller storage for local testing
-            storageSpec:
-              emptyDir:
-                medium: ""
-                sizeLimit: 5Gi
-            # Reduced resources for local development
-            resources:
-              requests:
-                cpu: 250m
-                memory: 512Mi
-              limits:
-                cpu: 1
-                memory: 1Gi
-            # Shorter retention for local testing
-            retention: 7d
         prometheusOperator:
           # Keep operator-owned monitoring custom resources in the monitoring
           # namespace for kind. Do not scope ServiceMonitor discovery here;
@@ -152,17 +131,6 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
-        grafana:
-          enabled: false
-        alertmanager:
-          alertmanagerSpec:
-            resources:
-              requests:
-                cpu: 50m
-                memory: 64Mi
-              limits:
-                cpu: 250m
-                memory: 256Mi
 
     # nvsentinel: reduce resources for local development, and assume the
     # host-installed driver.

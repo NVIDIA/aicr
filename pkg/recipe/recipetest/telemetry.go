@@ -29,8 +29,8 @@ import (
 // PromQLServerComponent is the component the fixtures declare the server.
 const PromQLServerComponent = "kube-prometheus-stack"
 
-// Paths the fixture server owns. They are not the chart's: its embedded
-// values already set the real namespace selectors.
+// Paths the fixture server owns. They are not the chart's, so a fixture's
+// scope never mixes with the embedded registry's.
 const (
 	FixtureSMNamespaceSelectorPath = "promqlFixture.serviceMonitorNamespaceSelector"
 	FixturePMNamespaceSelectorPath = "promqlFixture.podMonitorNamespaceSelector"

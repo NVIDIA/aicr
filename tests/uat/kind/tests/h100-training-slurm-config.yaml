@@ -247,6 +247,10 @@ spec:
         # keep gpu-operator for the deployments it is actually for.
         - gpuoperator:enabled=false
         - dradriver:enabled=false
+        # prometheus-adapter reads gpu-operator's DCGM metrics
+        # (telemetry.promql), so the bundle fails if it stays enabled without
+        # gpu-operator. The checks that use it are skipped below.
+        - prometheusadapter:enabled=false
     scheduling:
       # In step with the kubeflow sibling: no nodeSelector (no component in
       # this recipe requires one on kind -- the slurm leaf opts out of

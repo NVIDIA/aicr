@@ -592,9 +592,9 @@ A component that queries the runtime Prometheus server declares what it reads in
 
 On every bundle path (CLI, `aicrd`, and the SDK's `Client.BundleComponents`), the bundler writes the union of the enabled consumers' declarations into the enabled server's values: namespace selectors naming exactly the `monitorsFrom` namespaces, monitor selectors matching every monitor (`matchExpressions: []`, since the chart treats an empty map as unset), and one default scrape class that keeps only the declared series. Prometheus still stores its own per-target series, such as `up`.
 
-The bundle fails with `INVALID_REQUEST` when a `monitorsFrom` component is absent or disabled, more than one server is enabled, the server's values already set an owned path, or `--set`, `--set-json`, `--set-file` or `--dynamic` targets one. A pattern that does not compile fails the registry load. With the server disabled or absent, nothing is injected or checked.
+The bundle fails with `INVALID_REQUEST` when a `monitorsFrom` component is absent or disabled, more than one server is enabled, the server's values already set an owned path, or `--set`, `--set-json`, `--set-file` or `--dynamic` targets one. A pattern that does not compile fails the registry load. With no server enabled, nothing is injected and `monitorsFrom` is not checked, but the registry declarations are still validated.
 
-**Monitors must use the default scrape class.** A declared source's ServiceMonitors and PodMonitors must not set `spec.scrapeClass`: the series filter is the server's default scrape class, and the server defines no other, so the operator rejects such a monitor. The bundler cannot check this, because operators create some monitors at run time.
+**Monitors must use the default scrape class.** A declared source's ServiceMonitors and PodMonitors must not name another class in `spec.scrapeClass`: the series filter is the server's default scrape class, the server defines no other, and the operator rejects a monitor that names a class it doesn't know. The bundler cannot check this, because operators create some monitors at run time.
 
 ### Configuration Profiles
 
