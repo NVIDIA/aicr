@@ -101,7 +101,7 @@ var perconaImages = []string{
 
 // genericRebootImage is the image janitor-provider's generic reboot Job runs.
 // The chart passes it as an env var, which aicr mirror cannot discover.
-const genericRebootImage = "docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
+const genericRebootImage = "docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4"
 
 // chartDefaultRuleSets are fault-quarantine's rule sets at chart v1.28.0, in
 // evaluation order. AICR overrides none of them.

@@ -25,6 +25,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 	"github.com/NVIDIA/aicr/pkg/upgrade"
 )
 
@@ -181,22 +182,6 @@ func orphanUpgradeRecords(ctx context.Context, provider DataProvider, comps []up
 	return orphans, nil
 }
 
-// mapFSProvider is the DataProvider subset orphanUpgradeRecords uses, over an
-// in-memory tree. The embedded provider cannot stand in: no component has
-// authored a components/<name>/upgrades.yaml yet, so the real tree cannot
-// produce an orphan to detect.
-type mapFSProvider struct {
-	DataProvider
-	fsys fs.FS
-}
-
-func (p mapFSProvider) WalkDir(ctx context.Context, root string, fn fs.WalkDirFunc) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return fs.WalkDir(p.fsys, root, fn)
-}
-
 func TestOrphanUpgradeRecords(t *testing.T) {
 	record := &fstest.MapFile{Data: []byte("kind: ComponentUpgrades\n")}
 	tests := []struct {
@@ -248,7 +233,9 @@ func TestOrphanUpgradeRecords(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			provider := mapFSProvider{fsys: fstest.MapFS(tt.files)}
+			// No component has authored a components/<name>/upgrades.yaml
+			// yet, so the embedded tree has no orphan to detect.
+			provider := providertest.New(fstest.MapFS(tt.files))
 			got, err := orphanUpgradeRecords(t.Context(), provider, tt.comps)
 			if err != nil {
 				t.Fatalf("orphanUpgradeRecords: %v", err)

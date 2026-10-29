@@ -26,6 +26,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
@@ -606,7 +607,7 @@ func TestComputeEmptyCatalog(t *testing.T) {
 // a deterministic defect that must grade fail, not be held as unknown. This
 // guards the narrowed isTransient bucket end-to-end.
 func TestComputeGradesDeterministicDefectAsFail(t *testing.T) {
-	provider := newInMemoryProvider(map[string][]byte{
+	provider := providertest.NewMap(map[string][]byte{
 		"overlays/base.yaml": []byte(`kind: RecipeMetadata
 apiVersion: aicr.run/v1beta1
 metadata:
@@ -677,7 +678,7 @@ components:
 // builder; it remains as defense-in-depth for directly-constructed
 // RecipeResults (covered by TestClassifyChartPinned).
 func TestComputeChartPinnedFailThroughBuilder(t *testing.T) {
-	provider := newInMemoryProvider(map[string][]byte{
+	provider := providertest.NewMap(map[string][]byte{
 		"overlays/base.yaml": []byte(`kind: RecipeMetadata
 apiVersion: aicr.run/v1beta1
 metadata:
@@ -766,7 +767,7 @@ components:
 // TestComputeConstraintsWellformedFailThroughBuilder below, which uses a
 // malformed constraint VALUE — an axis #1783 deliberately does not gate.
 func TestComputeMalformedConstraintPathFailsCatalogLoad(t *testing.T) {
-	provider := newInMemoryProvider(map[string][]byte{
+	provider := providertest.NewMap(map[string][]byte{
 		"overlays/base.yaml": []byte(`kind: RecipeMetadata
 apiVersion: aicr.run/v1beta1
 metadata:
@@ -811,7 +812,7 @@ components: []
 // constraints_wellformed must fail and drag the rolled-up status to fail.
 // Hermetic: no snapshot.
 func TestComputeConstraintsWellformedFailThroughBuilder(t *testing.T) {
-	provider := newInMemoryProvider(map[string][]byte{
+	provider := providertest.NewMap(map[string][]byte{
 		"overlays/base.yaml": []byte(`kind: RecipeMetadata
 apiVersion: aicr.run/v1beta1
 metadata:
@@ -872,7 +873,7 @@ components: []
 // pass. A pinned Helm component, a well-formed constraint, and a declared
 // deployment phase are all present.
 func TestComputeAllDimensionsCoexistAndRollUpClean(t *testing.T) {
-	provider := newInMemoryProvider(map[string][]byte{
+	provider := providertest.NewMap(map[string][]byte{
 		"overlays/base.yaml": []byte(`kind: RecipeMetadata
 apiVersion: aicr.run/v1beta1
 metadata:
@@ -970,48 +971,3 @@ func (p *failingProvider) WalkDir(_ context.Context, _ string, _ fs.WalkDirFunc)
 }
 
 func (p *failingProvider) Source(_ string) string { return "failing-provider" }
-
-// inMemoryProvider is a recipe.DataProvider backed by an in-memory file map,
-// used to construct a minimal isolated catalog without touching the embedded
-// FS. A read for a path not in the map returns fs.ErrNotExist, mirroring the
-// embedded provider.
-type inMemoryProvider struct {
-	files map[string][]byte
-}
-
-func newInMemoryProvider(files map[string][]byte) *inMemoryProvider {
-	return &inMemoryProvider{files: files}
-}
-
-func (p *inMemoryProvider) ReadFile(ctx context.Context, path string) ([]byte, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	content, ok := p.files[path]
-	if !ok {
-		return nil, fs.ErrNotExist
-	}
-	return content, nil
-}
-
-func (p *inMemoryProvider) WalkDir(ctx context.Context, _ string, fn fs.WalkDirFunc) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	for path := range p.files {
-		if err := fn(path, inMemoryDirEntry{name: path}, nil); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (p *inMemoryProvider) Source(path string) string { return "in-memory:" + path }
-
-// inMemoryDirEntry is a minimal fs.DirEntry for in-memory files (all files).
-type inMemoryDirEntry struct{ name string }
-
-func (e inMemoryDirEntry) Name() string               { return e.name }
-func (e inMemoryDirEntry) IsDir() bool                { return false }
-func (e inMemoryDirEntry) Type() fs.FileMode          { return 0 }
-func (e inMemoryDirEntry) Info() (fs.FileInfo, error) { return nil, fs.ErrNotExist }

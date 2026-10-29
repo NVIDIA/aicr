@@ -56,11 +56,8 @@ func verifiedChartClaims(content string) []chartClaim {
 // A health check shared by several components is held to each of their pins,
 // because it runs against each of their charts.
 //
-// When this test fails, render the pinned chart's CRDs (helm template <chart>
-// --version <pin> --include-crds), confirm every CRD the check asserts is still
-// installed, then update the claim.
-//
-// See https://github.com/NVIDIA/aicr/issues/1948.
+// When this test fails, run make crd-inventory to list the asserted CRDs the
+// pinned chart no longer installs, then update the claim.
 func TestHealthCheckChartClaimsMatchRegistry(t *testing.T) {
 	t.Parallel()
 

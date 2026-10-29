@@ -48,7 +48,7 @@ const nvsentinelObservabilityTestEndpoint = "otel-collector.example:4317"
 // Kept in lockstep with that note. AICR overrides the chart's frozen
 // bitnamilegacy default here, so this string also guards the override:
 // dropping it renders the chart value and fails rather than shipping.
-const nvsentinelAuditInitImage = "docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
+const nvsentinelAuditInitImage = "docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4"
 
 // k8sVolumeMountSpec mirrors the subset of a Kubernetes container spec this
 // test needs: the audit-logging mount shape, plus the image and env the
