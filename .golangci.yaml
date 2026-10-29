@@ -141,6 +141,24 @@ linters:
               desc: "Deprecated since Go 1.16. Use io and os packages instead."
             - pkg: math/rand$
               desc: "Use math/rand/v2 for new code, or crypto/rand for security-sensitive code."
+        # The operator consumes AICR only through the pinned image and its
+        # published artifacts (ADR-027). An AICR package outside the operator
+        # needs its own allow entry here.
+        operator-boundary:
+          list-mode: lax
+          files:
+            - "**/cmd/aicr-operator/**"
+            - "**/cmd/kubectl-aicr/**"
+            - "**/api/operator/**"
+            - "**/pkg/operator/**"
+            - "**/tests/operator/**"
+          allow:
+            - github.com/NVIDIA/aicr/api/operator
+            - github.com/NVIDIA/aicr/pkg/operator
+            - github.com/NVIDIA/aicr/tests/operator
+          deny:
+            - pkg: github.com/NVIDIA/aicr/
+              desc: "The operator runs AICR as a pinned image and computes no recipe, bundle, snapshot, verdict or evidence in process (ADR-027)."
 
   exclusions:
     generated: lax

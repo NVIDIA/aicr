@@ -1,0 +1,15 @@
+# A runtime that outlives helm uninstall.
+apiVersion: operator.aicr.run/v1alpha1
+kind: ClusterRuntime
+metadata:
+  name: cluster
+spec:
+  intent: training
+  platform: kubeflow
+  placement:
+    system:
+      nodeSelector:
+        example.com/pool: system
+    accelerated:
+      nodeSelector:
+        example.com/pool: gpu

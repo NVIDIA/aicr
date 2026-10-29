@@ -1,0 +1,30 @@
+apiVersion: aicr.run/v1
+build:
+  deployer: helm
+  recipe:
+    digest: sha256:9f3f0ba334e85d5ae3afa2b9b3c19c920428b5ffb7b82aeffd02d8823e30d345
+    path: recipe.yaml
+    version: 1.0.0
+  settings:
+    attested: false
+    checksums: true
+    nodeScheduling:
+      accelerated:
+        tolerations:
+          - operator: Exists
+      system:
+        tolerations:
+          - operator: Exists
+    readinessHooks: true
+    serial: false
+    vendorCharts: false
+kind: BundleInfo
+layout:
+  entrypoint: deploy.sh
+  releases:
+    - component: cert-manager
+      name: cert-manager
+      namespace: cert-manager
+      path: 001-cert-manager
+metadata:
+  version: 1.0.0

@@ -1,0 +1,45 @@
+# Minimal Argo CD Application and AppProject CRDs for envtest: the chart
+# needs the kinds to exist, and the admission policies read the fields the
+# operator writes. The skeleton runs the policies against the real CRDs.
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: applications.argoproj.io
+spec:
+  group: argoproj.io
+  names:
+    kind: Application
+    listKind: ApplicationList
+    plural: applications
+    singular: application
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: appprojects.argoproj.io
+spec:
+  group: argoproj.io
+  names:
+    kind: AppProject
+    listKind: AppProjectList
+    plural: appprojects
+    singular: appproject
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true

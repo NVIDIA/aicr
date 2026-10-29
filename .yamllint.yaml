@@ -40,6 +40,9 @@ ignore: |
   # Helm templates (contain Go template syntax, not valid YAML)
   recipes/components/*/manifests/
 
+  # Operator chart templates (Go template syntax); the chart tests render them.
+  charts/aicr-operator/templates/
+
   # KWOK templates (contain shell variable syntax, not valid YAML)
   kwok/templates/
 

@@ -471,6 +471,28 @@ For the deployer matrix (Argo CD and Flux, OCI and Git source lanes), see [Deplo
 
 See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troubleshooting.
 
+## AICR Operator
+
+The opt-in AICR Operator ([ADR-027](docs/design/027-aicr-operator.md)) lives in `cmd/aicr-operator`, `cmd/kubectl-aicr`, `api/operator`, `pkg/operator`, `charts/aicr-operator` and `tests/operator`. It runs AICR only as a pinned image: the `operator-boundary` depguard rule in `.golangci.yaml` rejects any import of another AICR package. Its pins live under `operator:` in `.settings.yaml`, and its user documentation is in [docs/operator](docs/operator/index.md).
+
+Its unit and envtest suites run in `make test`. The targets below cover the rest; the kind suites need Docker, kind, Helm, yq and envsubst.
+
+| Command | Description |
+|---------|-------------|
+| `make operator-build` | Build `dist/aicr-operator` and `dist/kubectl-aicr` (development version) |
+| `make generate` | Regenerate deep copies and CRDs after an API type change |
+| `make operator-check-generated` | Fail when generated code or CRDs are stale |
+| `make operator-envtest-floor` | CRD validation and chart suites on the Kubernetes floor |
+| `make operator-kind-up` / `operator-kind-up-floor` | Create the two-node `aicr-operator` kind cluster with an in-cluster registry |
+| `make operator-kind-down` | Delete it |
+| `make operator-e2e` | Run the pinned AICR images as operator-built Jobs |
+| `make operator-skeleton` | Run the operator with the pinned Argo CD, one release end to end |
+| `CANDIDATE_VERSION=<version> make operator-candidate` | Build a release candidate of the current commit into `dist/candidate` (clean tree required) |
+| `make operator-candidate-verify` | Build the candidate twice and require identical bytes |
+| `make operator-qualify` | Fault-injection suite against `dist/candidate`, upgraded to `dist/candidate-next` |
+
+CI runs each kind suite on its own cluster. Locally, recreate the cluster between suites (`make operator-kind-down operator-kind-up`), or set `OPERATOR_ADOPT=1` to install over another suite's objects. Set `OPERATOR_E2E_REQUIRED=1` to make a suite fail, not skip, when no cluster is reachable. `make operator-qualify` needs both candidates, built as `.github/workflows/operator-e2e.yaml` builds them.
+
 ## Make Targets Reference
 
 ### Quality & Testing

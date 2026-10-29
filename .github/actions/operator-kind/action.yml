@@ -1,0 +1,118 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Sets up Go, the pinned kind, kubectl, helm and yq, and the AICR Operator's
+# two-node kind cluster with its in-cluster registry, for the operator's kind
+# suites. Run after checkout.
+
+name: 'Operator kind cluster'
+description: 'Installs the pinned tools and creates the AICR Operator kind cluster'
+
+inputs:
+  kubernetes:
+    description: 'floor (operator.kind_node_image_floor) or newest (testing.kind_node_image)'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Load versions
+      id: versions
+      uses: ./.github/actions/load-versions
+
+    # Two kind nodes each run a kubelet; prep-kind-runner raises the inotify
+    # instance limit the second one needs, and frees the disk the kind, Argo CD
+    # and operator images take.
+    - name: Prep Kind runner
+      uses: ./.github/actions/prep-kind-runner
+
+    - name: Set up Go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+      with:
+        go-version: ${{ steps.versions.outputs.go }}
+        cache: false
+
+    - name: Install Kind, kubectl, Helm and yq
+      uses: ./.github/actions/setup-build-tools
+      with:
+        install_kind: 'true'
+        kind_version: '${{ steps.versions.outputs.kind }}'
+        install_kubectl: 'true'
+        kubectl_version: '${{ steps.versions.outputs.kubectl }}'
+        install_helm: 'true'
+        helm_version: '${{ steps.versions.outputs.helm }}'
+        install_yq: 'true'
+        yq_version: '${{ steps.versions.outputs.yq }}'
+
+    - name: Install envsubst
+      shell: bash
+      run: |
+        set -euo pipefail
+        command -v envsubst >/dev/null || sudo apt-get install -y --no-install-recommends gettext-base
+
+    # The in-cluster registry's and Argo CD's redis images come from ECR
+    # Public, which throttles anonymous pulls per runner egress IP. The
+    # workflow's prime-images job saves both under the KWOK lanes' cache keys
+    # (kwok/scripts/lib/image-cache.sh, #2483); loading them here means no
+    # matrix job pulls them. A miss is not fatal: the pull path still runs.
+    - name: Resolve the cached image keys
+      id: images
+      shell: bash
+      run: |
+        set -euo pipefail
+        bash kwok/scripts/lib/image-cache.sh settings .settings.yaml >> "$GITHUB_OUTPUT"
+
+    - name: Restore the registry image
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: /tmp/kwok-image-cache/registry
+        key: ${{ steps.images.outputs.registry_key }}
+
+    - name: Restore the Argo CD redis image
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: /tmp/kwok-image-cache/argocd_redis
+        key: ${{ steps.images.outputs.argocd_redis_key }}
+
+    - name: Load the cached images
+      shell: bash
+      env:
+        REGISTRY_IMAGE: ${{ steps.images.outputs.registry_image }}
+        ARGOCD_REDIS_IMAGE: ${{ steps.images.outputs.argocd_redis_image }}
+      run: |
+        set -uo pipefail
+        bash kwok/scripts/lib/image-cache.sh load /tmp/kwok-image-cache/registry "${REGISTRY_IMAGE}" ||
+          echo "::warning::Image cache miss for ${REGISTRY_IMAGE}; the cluster setup pulls it"
+        bash kwok/scripts/lib/image-cache.sh load /tmp/kwok-image-cache/argocd_redis "${ARGOCD_REDIS_IMAGE}" ||
+          echo "::warning::Image cache miss for ${ARGOCD_REDIS_IMAGE}; the Argo CD install pulls it"
+
+    # The other Argo CD images, kept between runs.
+    - name: Cache the registry and Argo CD images
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: ${{ runner.temp }}/kind-images
+        key: operator-kind-images-${{ steps.versions.outputs.registry_image }}-argo-cd-${{ steps.versions.outputs.argocd_chart }}
+
+    - name: Create kind cluster
+      env:
+        KUBERNETES: ${{ inputs.kubernetes }}
+        OPERATOR_KIND_IMAGE_CACHE: ${{ runner.temp }}/kind-images
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ "${KUBERNETES}" == "floor" ]]; then
+          make operator-kind-up-floor
+        else
+          make operator-kind-up
+        fi

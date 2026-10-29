@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "aicr-operator installation values",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["aicr", "operator", "engine", "registry", "namespaces", "development"],
+  "definitions": {
+    "dnsLabel": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"},
+    "annotations": {"type": "object", "additionalProperties": {"type": "string"}}
+  },
+  "properties": {
+    "aicr": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "image"],
+      "properties": {
+        "version": {"type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"},
+        "image": {"type": "string", "pattern": "@sha256:[a-f0-9]{64}$"},
+        "validatorImages": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[^\\s@]+/[^\\s@/:]+:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}@sha256:[a-f0-9]{64}$"}
+        },
+        "jobs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "nodeSelector": {"type": "object", "additionalProperties": {"type": "string"}},
+            "tolerations": {"type": "array", "items": {"type": "object"}}
+          }
+        }
+      }
+    },
+    "operator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image"],
+      "properties": {
+        "image": {"type": "string", "minLength": 1},
+        "imagePullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]},
+        "replicas": {"type": "integer", "minimum": 1, "maximum": 3},
+        "logLevel": {"enum": ["debug", "info", "warn", "error"]},
+        "resources": {"type": "object"},
+        "serviceAccountAnnotations": {"$ref": "#/definitions/annotations"},
+        "nodeSelector": {"type": "object", "additionalProperties": {"type": "string"}},
+        "tolerations": {"type": "array"},
+        "affinity": {"type": "object"}
+      }
+    },
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "namespace", "project"],
+      "properties": {
+        "type": {"enum": ["ArgoCD"]},
+        "namespace": {"$ref": "#/definitions/dnsLabel"},
+        "project": {"$ref": "#/definitions/dnsLabel"},
+        "manageCustomizations": {"type": "boolean", "description": "Deprecated and ignored: the comparison exceptions are on each owned Application, and nothing is written to argocd-cm."}
+      }
+    },
+    "registry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "auth"],
+      "properties": {
+        "repository": {"type": "string", "pattern": "^oci://[^/]+/[^@:]*[^/@:]$"},
+        "plainHTTP": {"type": "boolean"},
+        "auth": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider", "repoCredsSecret"],
+          "properties": {
+            "provider": {"enum": ["aws", "static"]},
+            "staticSecretRef": {"type": "string"},
+            "repoCredsSecret": {"$ref": "#/definitions/dnsLabel"}
+          }
+        }
+      }
+    },
+    "namespaces": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["discovery", "jobs", "validation", "components"],
+      "properties": {
+        "discovery": {"$ref": "#/definitions/dnsLabel"},
+        "jobs": {"$ref": "#/definitions/dnsLabel"},
+        "validation": {"$ref": "#/definitions/dnsLabel"},
+        "components": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "podSecurity"],
+            "properties": {
+              "name": {"$ref": "#/definitions/dnsLabel"},
+              "podSecurity": {"enum": ["privileged", "baseline", "restricted"]},
+              "create": {"type": "boolean"}
+            }
+          }
+        }
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "agentRequests": {"type": "string"}
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "serviceAccountAnnotations": {"$ref": "#/definitions/annotations"},
+        "signingKey": {"type": "string"},
+        "transparencyLog": {"type": "boolean"}
+      }
+    },
+    "approvers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "users": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "groups": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "development": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bypassApprovals": {"type": "boolean"},
+        "skipDiscovery": {"type": "boolean"}
+      }
+    }
+  }
+}

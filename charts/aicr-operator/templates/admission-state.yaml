@@ -1,0 +1,168 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+{{/*
+Protection of operator state, for every requester: only
+the operator creates or updates the ConfigMaps it labels in its namespace,
+including removing the label. Deletion is left to RBAC, so deleting the
+namespace keeps working. A second policy governs rollout approval. Both are kept
+on uninstall, so kept plans and rollouts stay protected while no operator
+runs.
+*/}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: aicr-operator-state
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+  annotations:
+    {{- include "aicr-operator.keep" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ .Release.Namespace }}
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [configmaps]
+  matchConditions:
+    - name: not-operator
+      expression: request.userInfo.username != {{ include "aicr-operator.operatorUser" . | quote }}
+    - name: operator-labeled
+      expression: >-
+        (object != null && has(object.metadata.labels) &&
+        'app.kubernetes.io/managed-by' in object.metadata.labels &&
+        object.metadata.labels['app.kubernetes.io/managed-by'] == 'aicr-operator') ||
+        (oldObject != null && has(oldObject.metadata.labels) &&
+        'app.kubernetes.io/managed-by' in oldObject.metadata.labels &&
+        oldObject.metadata.labels['app.kubernetes.io/managed-by'] == 'aicr-operator')
+  validations:
+    - expression: 'false'
+      message: only the AICR Operator creates or updates its ConfigMaps in {{ .Release.Namespace }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: aicr-operator-state
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+  annotations:
+    {{- include "aicr-operator.keep" . | nindent 4 }}
+spec:
+  policyName: aicr-operator-state
+  validationActions: [Deny]
+---
+# Rollout approval. No rollout is created with an
+# approval, and the operator never writes one. Anyone else changes only
+# spec.approval; setting the approval or the revocation takes update on the
+# virtual subresource runtimerollouts/approve, records the requester's own
+# username, and a revocation is refused once the rollout has an outcome or
+# is validating. The CRD makes the approval and revocation set-once.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: aicr-operator-approval
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+  annotations:
+    {{- include "aicr-operator.keep" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [operator.aicr.run]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [runtimerollouts]
+  variables:
+    - name: operator
+      expression: request.userInfo.username == {{ include "aicr-operator.operatorUser" . | quote }}
+    - name: update
+      expression: request.operation == 'UPDATE'
+    - name: approving
+      expression: >-
+        variables.update && has(object.spec.approval) && !has(oldObject.spec.approval)
+    - name: revoking
+      expression: >-
+        variables.update && has(object.spec.approval) && has(object.spec.approval.revokedBy) &&
+        !(has(oldObject.spec.approval) && has(oldObject.spec.approval.revokedBy))
+    - name: acknowledgements
+      expression: >-
+        has(object.spec.approval) && has(object.spec.approval.acknowledgements) ?
+        object.spec.approval.acknowledgements : []
+    - name: acknowledged
+      expression: >-
+        variables.update && has(oldObject.spec.approval) && has(oldObject.spec.approval.acknowledgements) ?
+        oldObject.spec.approval.acknowledgements : []
+    - name: acknowledging
+      expression: >-
+        variables.update && variables.acknowledgements.exists(n, !variables.acknowledged.exists(o, o == n))
+    - name: approver
+      expression: >-
+        authorizer.group('operator.aicr.run').resource('runtimerollouts').subresource('approve')
+        .name(object.metadata.name).check('update').allowed()
+  validations:
+    - expression: variables.update || !has(object.spec.approval)
+      message: no rollout is created with an approval
+    - expression: >-
+        !variables.operator || !variables.update ||
+        (has(object.spec.approval) == has(oldObject.spec.approval) &&
+        (!has(object.spec.approval) || object.spec.approval == oldObject.spec.approval))
+      message: the operator never writes spec.approval
+    - expression: >-
+        variables.operator || !variables.update ||
+        ((has(object.metadata.labels) == has(oldObject.metadata.labels) &&
+        (!has(object.metadata.labels) || object.metadata.labels == oldObject.metadata.labels)) &&
+        (has(object.metadata.annotations) == has(oldObject.metadata.annotations) &&
+        (!has(object.metadata.annotations) || object.metadata.annotations == oldObject.metadata.annotations)) &&
+        (has(object.metadata.finalizers) == has(oldObject.metadata.finalizers) &&
+        (!has(object.metadata.finalizers) || object.metadata.finalizers == oldObject.metadata.finalizers)) &&
+        (has(object.metadata.ownerReferences) == has(oldObject.metadata.ownerReferences) &&
+        (!has(object.metadata.ownerReferences) || object.metadata.ownerReferences == oldObject.metadata.ownerReferences)))
+      message: only spec.approval may change, and only by an approver
+    - expression: variables.operator || !(variables.approving || variables.revoking || variables.acknowledging) || variables.approver
+      messageExpression: >-
+        'approving, revoking or acknowledging ' + object.metadata.name + ' needs update on runtimerollouts/approve'
+    - expression: variables.operator || !variables.approving || object.spec.approval.approvedBy == request.userInfo.username
+      message: approvedBy must be the approver's own username
+    - expression: variables.operator || !variables.revoking || object.spec.approval.revokedBy == request.userInfo.username
+      message: revokedBy must be the revoker's own username
+    - expression: >-
+        variables.operator || !variables.acknowledging ||
+        variables.acknowledgements.all(n, variables.acknowledged.exists(o, o == n) || n.acknowledgedBy == request.userInfo.username)
+      message: acknowledgedBy must be the approver's own username
+    - expression: >-
+        variables.operator || !variables.acknowledging ||
+        (has(oldObject.status) && has(oldObject.status.phase) && oldObject.status.phase == 'AwaitingAcknowledgement')
+      message: acknowledge only while the rollout awaits acknowledgement
+    - expression: >-
+        variables.operator || !variables.revoking ||
+        (!(has(oldObject.metadata.labels) && 'operator.aicr.run/outcome' in oldObject.metadata.labels) &&
+        !(has(oldObject.status) && has(oldObject.status.phase) && oldObject.status.phase == 'Validating'))
+      message: a rollout that has ended or is validating can no longer be revoked
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: aicr-operator-approval
+  labels:
+    {{- include "aicr-operator.labels" . | nindent 4 }}
+  annotations:
+    {{- include "aicr-operator.keep" . | nindent 4 }}
+spec:
+  policyName: aicr-operator-approval
+  validationActions: [Deny]

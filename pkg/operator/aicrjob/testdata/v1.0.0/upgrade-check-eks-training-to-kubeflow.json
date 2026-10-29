@@ -1,0 +1,26 @@
+{
+  "from": "/in/recipe-h100-eks-ubuntu-training.json",
+  "to": "/in/recipe-h100-eks-ubuntu-training-kubeflow.json",
+  "deployer": "argocd",
+  "objectNamesCompared": false,
+  "objectNamesSkipped": "a recipe file records its values by reference, not by value, so it does not state the object names it deployed with. Compare against the bundle directory instead",
+  "components": [
+    {
+      "component": "kubeflow-trainer",
+      "change": "added",
+      "to": "2.2.0",
+      "notes": "new component, nothing to do",
+      "breaking": false,
+      "downgrade": false,
+      "failsRun": false
+    }
+  ],
+  "summary": {
+    "components": 1,
+    "failing": 0
+  },
+  "atRisk": {
+    "scanned": false,
+    "reason": "no cluster access requested"
+  }
+}

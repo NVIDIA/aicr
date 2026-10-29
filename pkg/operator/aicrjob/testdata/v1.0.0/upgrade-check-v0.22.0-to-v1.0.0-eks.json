@@ -1,0 +1,48 @@
+{
+  "from": "/in/recipe-v0.22.0-h100-eks-ubuntu-training-kubeflow.json",
+  "to": "/in/recipe-h100-eks-ubuntu-training-kubeflow.json",
+  "deployer": "argocd",
+  "objectNamesCompared": false,
+  "objectNamesSkipped": "a recipe file records its values by reference, not by value, so it does not state the object names it deployed with. Compare against the bundle directory instead",
+  "components": [
+    {
+      "component": "gpu-operator",
+      "change": "version",
+      "from": "v26.7.0",
+      "to": "v26.7.1",
+      "verdict": "safe",
+      "notes": "1 patch, verified",
+      "reason": "recorded",
+      "explanation": "recorded safe: the record covering 26.7.1 describes the move from v26.7.0 to v26.7.1, verified by \"Live Helm upgrade on an EKS GB300 cluster (2x p6e-gb300r.36xlarge, k8s 1.35.6), 2026-09-28: v26.7.0 to v26.7.1 with DRA driver 0.5.0; ClusterPolicy ready, all operand DaemonSets on the new images, driver reloaded cleanly on both nodes. Upstream v26.7.1 release notes.\"",
+      "jump": "1 patch",
+      "covers": "1 patch",
+      "breaking": false,
+      "downgrade": false,
+      "summary": "Patch release. The operand image bumps include k8s-driver-manager, which changes the driver DaemonSet, so with driver.upgradePolicy.autoUpgrade the operator cycles the driver pod node by node and evicts GPU workloads on each node in turn; the driver version itself is unchanged. The computedomains CRD now matches the DRA driver's, but AICR's Helm and Flux deployments leave an installed copy unchanged (gpu-operator is not ownsCRDs, and the chart's CRD upgrade hook skips computedomains), so a cluster first installed with v26.7.0 keeps the copy that requires spec.numNodes.",
+      "failsRun": false
+    },
+    {
+      "component": "nvsentinel",
+      "change": "version",
+      "from": "v1.20.0",
+      "to": "v1.25.0",
+      "verdict": "blocked",
+      "notes": "5 minors, stops at 1.25.0",
+      "reason": "undefined-origin",
+      "explanation": "crosses the boundary at 1.25.0, but no record describes an upgrade starting from v1.20.0; the earliest recorded starting point is 1.22.0. Upgrade to a recorded version first, then re-run this check",
+      "jump": "5 minors",
+      "breaking": false,
+      "downgrade": false,
+      "stoppedAt": "1.25.0",
+      "failsRun": true
+    }
+  ],
+  "summary": {
+    "components": 2,
+    "failing": 1
+  },
+  "atRisk": {
+    "scanned": false,
+    "reason": "no cluster access requested"
+  }
+}

@@ -1,0 +1,7 @@
+The AICR Operator runs in {{ .Release.Namespace }} with AICR {{ .Values.aicr.version }}.
+
+Next: create the ClusterRuntime named "cluster" (docs/operator/api.md).
+
+helm uninstall keeps the CRDs, runtime and rollout objects, namespaces, the
+{{ .Values.engine.project }} AppProject, repo-creds and the operator-state policy, so
+the GPU stack keeps running. Delete the ClusterRuntime first.

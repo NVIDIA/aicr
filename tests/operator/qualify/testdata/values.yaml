@@ -1,0 +1,51 @@
+# Qualification installation values for a candidate's chart on the kind
+# cluster, layered over the candidate's own deployment inputs
+# (candidate-values.yaml). tools/operator-qualify sets the AICR release under
+# test and creates the static provider's Secrets; none is committed. Nothing
+# here is a development setting: the candidate is a release build.
+operator:
+  # The image is loaded into the nodes by digest (tools/operator-qualify).
+  imagePullPolicy: Never
+  logLevel: debug
+registry:
+  repository: oci://registry.aicr-registry.svc.cluster.local:5000/aicr/cluster
+  plainHTTP: true
+  auth:
+    provider: static
+    staticSecretRef: registry-auth
+    repoCredsSecret: aicr-registry
+namespaces:
+  # cert-manager is the one release rolled out; the rest are the kind
+  # recipe's, which the first resolution renders before overrides disable
+  # them.
+  components:
+    - name: cert-manager
+      podSecurity: restricted
+    - name: kube-system
+      podSecurity: privileged
+      create: false
+    - name: gpu-operator
+      podSecurity: privileged
+    - name: kai-scheduler
+      podSecurity: privileged
+    - name: kubeflow
+      podSecurity: privileged
+    - name: nodewright
+      podSecurity: privileged
+    - name: nvidia-dra-driver
+      podSecurity: privileged
+    - name: nvsentinel
+      podSecurity: privileged
+    - name: nvidia-network-operator
+      podSecurity: privileged
+    - name: node-feature-discovery
+      podSecurity: privileged
+    - name: monitoring
+      podSecurity: privileged
+discovery:
+  # AICR's defaults are sized for GPU nodes, not a CI runner.
+  agentRequests: cpu=250m,memory=512Mi,ephemeral-storage=512Mi
+approvers:
+  # The suite approves as a member of this group, never as the operator.
+  groups:
+    - aicr-qualify-approvers
