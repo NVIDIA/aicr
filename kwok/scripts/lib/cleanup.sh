@@ -92,9 +92,12 @@ cleanup_recipe_helm_releases() {
         # control-plane tolerations, so it never schedules on KWOK and the
         # uninstall times out. The hook only deletes the SriovOperatorConfig
         # so the operator can remove its webhooks; nothing runs here to do
-        # that, and the namespace sweep removes the rest.
+        # that, and the namespace sweep removes the rest. nktp's pre-delete
+        # Job (opentelemetry-kube-stack's cleanupJob) takes no tolerations at
+        # all, so it never schedules either, and only deletes collectors the
+        # KWOK-simulated operator never reconciled.
         local hooks_option=()
-        if sriov_subchart_enabled "$release" "$namespace"; then
+        if [[ "$release" == "nktp" ]] || sriov_subchart_enabled "$release" "$namespace"; then
             hooks_option=(--no-hooks)
         fi
         # --ignore-not-found: under the Flux deployers the Kustomization's

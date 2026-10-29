@@ -31,6 +31,13 @@ spec:
   # Storage note: RKE2 ships NO StorageClass (unlike k3s, local-path is not
   # bundled). The base kube-prometheus-stack uses emptyDir storage, so
   # nothing here requires a StorageClass.
+  #
+  # node-exporter port note: some RKE2 host images run a host-level
+  # node_exporter systemd service bound to the default port 9100. nktp's
+  # node-exporter DaemonSet runs hostNetwork on every node with the same
+  # default, so on such a node it crash-loops with "bind: address already in
+  # use". This root therefore moves it to port 9110 (see the nktp ref
+  # below); nktp scrapes it by port name, so the move is side-effect-free.
 
   criteria:
     service: rke2
@@ -113,6 +120,15 @@ spec:
               gpuReset:
                 resetJob:
                   runtimeClassName: ""
+
+    # Move nktp's node-exporter off 9100 — see the port note above.
+    - name: nktp
+      type: Helm
+      overrides:
+        node-exporter:
+          service:
+            port: 9110
+            targetPort: 9110
 
   # Baseline conformance floor for any recipe resolved at the rke2 service
   # root (mirrors the bcm.yaml bare-metal service root). Leaves extend this
