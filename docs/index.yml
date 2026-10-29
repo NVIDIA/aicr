@@ -34,6 +34,8 @@ navigation:
     contents:
       - page: Installation
         path: user/installation.md
+      - page: Frequently Asked Questions
+        path: user/faq.md
       - page: End-to-End Tutorial
         path: user/tutorial.md
       - page: CLI Reference

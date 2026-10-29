@@ -10,6 +10,7 @@ Where to go depends on what you need.
 
 ## Before You Ask
 
+- Check the [FAQ](docs/user/faq.md) for answers to common questions.
 - Check the [documentation](https://docs.nvidia.com/aicr), including the troubleshooting section of the relevant guide.
 - Search [existing issues](https://github.com/NVIDIA/aicr/issues?q=is%3Aissue) for the same problem.
 
