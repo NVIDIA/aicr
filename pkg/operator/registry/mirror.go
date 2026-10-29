@@ -156,6 +156,9 @@ func (c *Client) get(ctx context.Context, rawURL string, maxBytes int64) ([]byte
 		return nil, operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "fetch "+rawURL)
 	}
 	defer resp.Body.Close()
+	if !c.allowedScheme(resp.Request.URL) {
+		return nil, invalid("fetch %s: redirected to %s, which is neither HTTPS nor a plain-HTTP host", rawURL, resp.Request.URL.Redacted())
+	}
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
 		return nil, operrors.New(operrors.ErrCodeNotFound, fmt.Sprintf("fetch %s: %s", rawURL, resp.Status))

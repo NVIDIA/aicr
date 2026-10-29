@@ -84,8 +84,8 @@ const (
 	StageRetryMaxBackoff = 5 * time.Minute
 	// JobScratchSizeLimit bounds the emptyDir each AICR Job writes to.
 	JobScratchSizeLimit = "1Gi"
-	// Initial AICR Job resources. Measured values are required; these are
-	// replaced once the integration task records real usage.
+	// Initial AICR Job resources: estimates until measured on real profiles
+	// (https://github.com/NVIDIA/aicr/issues/3495).
 	JobCPURequest    = "100m"
 	JobMemoryRequest = "256Mi"
 	JobMemoryLimit   = "1Gi"

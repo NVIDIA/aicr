@@ -470,6 +470,25 @@ func TestMirrorHTTPChartPlainHTTPIsPerHost(t *testing.T) {
 	}
 }
 
+// A redirect is held to the same rule as the URL it came from: a configured
+// plain-HTTP host cannot hand the fetch to an unconfigured one.
+func TestMirrorHTTPChartRefusesARedirectToPlainHTTP(t *testing.T) {
+	t.Parallel()
+	_, repo := testRegistry(t)
+	archive := chartArchive(t, "demo", "1.0.0", "")
+	sum := sha256.Sum256(archive)
+	target := upstream(t, archive, hex.EncodeToString(sum[:]), "demo-1.0.0.tgz")
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target+r.URL.Path, http.StatusFound)
+	}))
+	t.Cleanup(redirect.Close)
+	c := New(Options{PlainHTTPHosts: []string{repo.Host, hostOf(t, redirect.URL)}})
+	_, err := c.MirrorHTTPChart(context.Background(), UpstreamChart{Repository: redirect.URL, Chart: "demo", Version: "1.0.0"}, repo.Child("charts"))
+	if operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest || !strings.Contains(fmt.Sprint(err), "redirected") {
+		t.Fatalf("MirrorHTTPChart() = %v, want a refused redirect", err)
+	}
+}
+
 func TestDockerConfigCredentials(t *testing.T) {
 	t.Parallel()
 	cfg := fmt.Sprintf(`{"auths":{"https://reg.example.com/v1/":{"auth":%q},"other:5000":{"username":"u","password":"p"}}}`,

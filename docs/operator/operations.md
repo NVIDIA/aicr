@@ -78,6 +78,7 @@ in the `default` namespace; `kubectl describe` shows them.
 | `ReconcileFailed` | Warning | The runtime: a reconcile ended in an error the operator retries, such as an API server timeout. Conditions keep what was last observed; a step in flight still fails at its action timeout, naming the error |
 | `FieldOwnershipOverridden` | Warning | An Argo CD Application whose hand edits the operator forced back, naming the other field managers |
 | `ApplicationRecreated` | Warning | An Argo CD Application deleted by hand and written again; its resources stayed in place |
+| `OrphanAnnotationRefused` | Warning | The runtime: while orphaning on deletion, Applications whose `orphaned-from` annotation was refused, such as by admission; they are left in place and the runtime is still released |
 
 ### Metrics
 
@@ -143,7 +144,7 @@ A rollout needs approval when any step does:
 | Upgrade to a new chart that AICR assesses `safe`, with no CRD change | Not required |
 | Upgrade to a new chart assessed `manual`, `unknown` or `unversioned`, or without a verdict | Required |
 | Upgrade with the same chart and new values (AICR assesses versions, not values) | Required (`Unknown`) |
-| A new chart for a component that owns CRDs (Argo CD applies CRD changes on every sync) | Required |
+| A new chart for a component whose old or new chart owns CRDs (Argo CD applies CRD changes on every sync, and prunes CRDs a new chart drops) | Required |
 | Remove, adoption and runtime removal | Required |
 | Verify (re-run a readiness gate) | Not required |
 
