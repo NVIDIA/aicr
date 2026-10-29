@@ -1557,7 +1557,8 @@ type movedBy struct{ rollout, plan string }
 // and the others they may have written to their target plan. The newest such
 // rollout to touch a release decides, so a later one that installed it again
 // clears an earlier removal. Moves come from rollout history rather than the
-// live objects, so they survive an Application deleted by hand.
+// live objects, so they survive an Application deleted by hand; a rollout
+// restored without its status keeps them as Unknown (restoreOutcomes).
 func leftBehind(rollouts []v1alpha1.RuntimeRollout) (map[string]bool, map[string]movedBy) {
 	retired, moved, seen := map[string]bool{}, map[string]movedBy{}, map[string]bool{}
 	for i := range rollouts {

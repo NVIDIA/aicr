@@ -1254,6 +1254,70 @@ func TestDeletedMovedReleaseIsNotRolledBack(t *testing.T) {
 	}
 }
 
+// A rollout restored by creating it again comes back with its spec and
+// outcome but no status, so which releases it wrote is unknown: a missing
+// Application of any release in its steps stalls instead of being repaired
+// from the active plan. A rollout that ended before any step has a phase and
+// moved nothing, so a missing Application is repaired as before.
+func TestRestoredRolloutKeepsTheRollbackGuard(t *testing.T) {
+	tests := []struct {
+		name       string
+		phase      v1alpha1.RolloutPhase
+		wantRepair bool
+	}{
+		{"restored without its status", "", false},
+		{"ended before any step", v1alpha1.PhaseExpired, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := testContext(t)
+			rt := freshRuntime(t, ctx, stabilized)
+			active := putReleases(t, ctx, rt, testRelease("cert-manager", plan.PhasePrimary, "", `{"cpu":"50m"}`),
+				testRelease("nfd", plan.PhasePrimary, "", `{}`))
+			failed := putReleases(t, ctx, rt, testRelease("cert-manager", plan.PhasePrimary, "", `{"cpu":"60m"}`),
+				testRelease("nfd", plan.PhasePrimary, "", `{}`))
+			succeedTo(t, ctx, rt, active)
+			resolved(t, ctx, failed)
+			ro := &v1alpha1.RuntimeRollout{
+				ObjectMeta: metav1.ObjectMeta{Name: "rollout-restored", Labels: map[string]string{
+					v1alpha1.LabelRuntime: rt.Name, v1alpha1.LabelOutcome: string(v1alpha1.PhaseFailed)}},
+				Spec: v1alpha1.RuntimeRolloutSpec{
+					SchemaVersion: v1alpha1.RolloutSchemaVersion, RuntimeUID: string(rt.UID), FromPlanDigest: active, ToPlanDigest: failed,
+					StartingInventoryDigest: failed, Deadline: metav1.NewTime(time.Now().Add(time.Hour)),
+					ActionTimeout: metav1.Duration{Duration: time.Minute},
+					Steps: []v1alpha1.RolloutStep{
+						{Release: "cert-manager", Operation: v1alpha1.OperationUpgrade, Assessment: v1alpha1.AssessmentNotApplicable},
+						{Release: "nfd", Operation: v1alpha1.OperationVerify, Assessment: v1alpha1.AssessmentNotApplicable},
+					},
+				},
+			}
+			if err := k8s.Create(ctx, ro); err != nil {
+				t.Fatal(err)
+			}
+			if tt.phase != "" {
+				ro.Status.Phase = tt.phase
+				if err := k8s.Status().Update(ctx, ro); err != nil {
+					t.Fatal(err)
+				}
+			}
+			engine := newEngine()
+			engine.ensured["nfd"] = active
+			engine.missing["cert-manager"] = true
+			engine.inventory = []argocd.InventoryItem{{ReleaseID: "nfd", UID: "u-n", PlanDigest: active}}
+			r, clk := newRollout(t, engine, true)
+			clk.now = time.Now().Add(2 * time.Second)
+
+			reconcileRollout(t, ctx, r)
+			repaired := slices.Contains(engine.order, "Ensure cert-manager")
+			c := cond(getRuntime(t, ctx), v1alpha1.ConditionStalled)
+			stalled := c.Status == metav1.ConditionTrue && c.Reason == ReasonMovedReleaseMissing
+			if repaired != tt.wantRepair || stalled == tt.wantRepair {
+				t.Fatalf("writes %v, Stalled %+v; want repaired %t", engine.order, c, tt.wantRepair)
+			}
+		})
+	}
+}
+
 // A new engine policy changes every plan's digest but no chart or values:
 // the rollout to it rewrites each release without approval.
 func TestEnginePolicyChangeNeedsNoApproval(t *testing.T) {

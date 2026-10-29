@@ -108,7 +108,10 @@ func (r *RolloutReconciler) orphan(ctx context.Context, name, keep string) error
 
 // restoreOutcomes rebuilds the status phase of terminal rollouts from their
 // outcome label, and a validated rollout's evidence from its annotation,
-// after a restore dropped status.
+// after a restore dropped status. A rollout restored with no status at all
+// also lost which releases it wrote, so each release in its steps is
+// recorded as Unknown: repair then treats it as possibly moved and never
+// rolls it back.
 func (r *RolloutReconciler) restoreOutcomes(ctx context.Context, rollouts []v1alpha1.RuntimeRollout) error {
 	for i := range rollouts {
 		ro := &rollouts[i]
@@ -120,6 +123,11 @@ func (r *RolloutReconciler) restoreOutcomes(ctx context.Context, rollouts []v1al
 		}
 		if lostEvidence {
 			ro.Status.Validation = &v1alpha1.ValidationStatus{Result: resultPassed, Evidence: ref}
+		}
+		if ro.Status.Phase == "" && len(ro.Status.Releases) == 0 {
+			for _, step := range ro.Spec.Steps {
+				setReleaseState(ro, step.Release, v1alpha1.ReleaseUnknown, "")
+			}
 		}
 		ro.Status.Phase, ro.Status.Current = outcome, nil
 		if err := r.saveStatus(ctx, ro, ro.Status.Message); err != nil {

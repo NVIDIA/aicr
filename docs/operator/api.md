@@ -499,6 +499,12 @@ does:
 4. Run `helm upgrade` on the operator chart with the same values. It recreates
    the binding and restores the operator's replica count.
 
+A restored rollout comes back without its status. The operator rebuilds its
+phase from the `outcome` label and records each release in its steps as
+`Unknown`, because which ones it wrote is lost. Until a later rollout succeeds,
+a missing Application of such a release stalls the runtime with
+`MovedReleaseMissing` instead of being repaired from the active plan.
+
 Approvers also need `get`, `list`, `watch` and `patch` on `runtimerollouts`,
 and `get` on ConfigMaps in the operator namespace to read assessment reports.
 The chart's `aicr-operator-approver` roles grant exactly that plus reading the
