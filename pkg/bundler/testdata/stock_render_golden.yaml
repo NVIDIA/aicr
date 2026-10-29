@@ -1554,7 +1554,7 @@ gb200-nvke-ubuntu-training-kubeflow:
   015-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
   015-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
-  015-network-operator-post/templates/nic-cluster-policy-nvke-gb200.yaml: f0a866253b7a5c247c74e554a260d7002d6d8ce665487351543c1861123fde6c
+  015-network-operator-post/templates/nic-cluster-policy-nvke-gb200.yaml: 5da88c6ef85c59f83a4410ea16f728b692cc219efe742063177a94d808477814
   015-network-operator-post/values.yaml: e9d6f1481a61bac0626eecd824ba302bde4ea1258648b8bfd0fd8ca6a96330fc
   016-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
@@ -1568,12 +1568,12 @@ gb200-nvke-ubuntu-training-kubeflow:
   018-sriov-ib-networks/Chart.yaml: cf11fef32f24b6aefc8716a9431095cfb684127211b920f22faa6070114dd946
   018-sriov-ib-networks/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-sriov-ib-networks/install.sh: 8f4bff183a9169f137fd0c47dc059b67b1fa6121531af7d3000b093de7c277fc
-  018-sriov-ib-networks/templates/nvke-gb200.yaml: e5378703b704d4ff7c901ba691a66a83fd3e69f5ccb1133785338c4657070d01
+  018-sriov-ib-networks/templates/nvke-gb200.yaml: 1d78efb71cf8ecff1e40e37775d37270e9a3d9515fc23c5686ba590d611a454f
   018-sriov-ib-networks/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   README.md: 277cb1c71384b62556b1fe8496d5ada125e21215fc180d25a65e51fbdb00f051
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: d4925efff6f8ebed268f131c919df6417a65ae21bbda321ce9ce5c371a87d238
-  checksums.txt: 435a2a04aba0e16faa8a914d0ee356b070df8f200ee69508ec94153e38e4a542
+  checksums.txt: b0bec1cd2e5bb487a2bdb9f73b701c3534bddb65d1fd21b99c73816bb411a8ef
   deploy.sh: 7d5e92b02a59bef508ee433e801875d4e7ed9c4b7e0a352658f0d768af99c067
   recipe.yaml: eae65c894998a1210c04641f5d70c0e91135cb4bc560a131c0b42fbbbb2442e3
 gb200-oke-ubuntu-inference-dynamo:

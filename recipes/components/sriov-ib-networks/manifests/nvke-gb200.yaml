@@ -23,7 +23,11 @@
 # proposes 8) and cannot exceed it: the network-operator values disable the
 # config daemon's mellanox plugin, so nothing in the cluster changes firmware
 # and VF creation is a sysfs write with no drain or reboot.
-# The IPPool subnets are IPoIB-only on the isolated IB fabric.
+# The IPPool subnets are IPoIB-only on the isolated IB fabric. They sit in
+# 10.255.0.0/16, not the k8s-launch-kit default 192.168.<4n>.0/22: the NVKE
+# OVN-Kubernetes pod network is 192.168.0.0/16, and a pool inside it installs
+# a more specific route than the pod network's in every attached pod, which
+# sends traffic for the other nodes' pods out the IB VF.
 # The VF netdevs are IPoIB children, so ib_ipoib must be loaded on the host
 # (rdma-modules component).
 #
@@ -61,9 +65,9 @@ metadata:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 spec:
-  subnet: 192.168.0.0/22
+  subnet: 10.255.0.0/22
   perNodeBlockSize: 10
-  gateway: 192.168.0.1
+  gateway: 10.255.0.1
   nodeSelector:
     nodeSelectorTerms:
       - matchExpressions:
@@ -131,9 +135,9 @@ metadata:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 spec:
-  subnet: 192.168.4.0/22
+  subnet: 10.255.4.0/22
   perNodeBlockSize: 10
-  gateway: 192.168.4.1
+  gateway: 10.255.4.1
   nodeSelector:
     nodeSelectorTerms:
       - matchExpressions:
@@ -201,9 +205,9 @@ metadata:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 spec:
-  subnet: 192.168.8.0/22
+  subnet: 10.255.8.0/22
   perNodeBlockSize: 10
-  gateway: 192.168.8.1
+  gateway: 10.255.8.1
   nodeSelector:
     nodeSelectorTerms:
       - matchExpressions:
@@ -271,9 +275,9 @@ metadata:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 spec:
-  subnet: 192.168.12.0/22
+  subnet: 10.255.12.0/22
   perNodeBlockSize: 10
-  gateway: 192.168.12.1
+  gateway: 10.255.12.1
   nodeSelector:
     nodeSelectorTerms:
       - matchExpressions:
