@@ -13,8 +13,8 @@ carries `kubectl-aicr-<os>-<arch>` for Linux and macOS on amd64 and arm64:
 VERSION="<release>"   # the AICR release of your operator chart, without the leading v
 gh release download "v${VERSION}" --repo NVIDIA/aicr --pattern kubectl-aicr-linux-amd64
 gh attestation verify kubectl-aicr-linux-amd64 --repo NVIDIA/aicr \
-  --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/v${VERSION}"
-install -m 0755 kubectl-aicr-linux-amd64 /usr/local/bin/kubectl-aicr
+  --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/v${VERSION}" \
+  && install -m 0755 kubectl-aicr-linux-amd64 /usr/local/bin/kubectl-aicr
 ```
 
 `kubectl` finds any `kubectl-aicr` on the `PATH`. Use the plugin from the same

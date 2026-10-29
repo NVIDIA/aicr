@@ -412,7 +412,8 @@ diagnosis, and recovery.
 
 The [AICR Operator](docs/operator/index.md) ships at the release's version
 outside the image promotion above: `operator-candidate` builds it from the tag
-(`make operator-candidate`), `operator-scan` scans both architectures, and
+(`make operator-candidate`) and malware-scans the `kubectl-aicr` binaries,
+`operator-scan` scans the image on both architectures, and
 `operator-publish` runs only after the release integrity check. It publishes:
 
 | Artifact | Where |
@@ -423,7 +424,7 @@ outside the image promotion above: `operator-candidate` builds it from the tag
 
 The chart defaults to the operator image by digest and to the AICR release the
 operator was qualified against (`operator:` in `.settings.yaml`).
-`release-check` fails closed on the operator candidate and its scan, so neither
+`release-check` fails closed on the operator candidate and its scans, so neither
 the image aliases above nor the operator are published when they fail, and
 `publish` waits for `operator-publish`. Publishing the same candidate again is
 a no-op, so re-running the failed jobs converges; a tag that already names

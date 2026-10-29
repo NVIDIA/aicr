@@ -889,6 +889,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      security-events: write
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -942,6 +943,13 @@ jobs:
           CANDIDATE_VERSION: ${{ github.ref_name }}
           CANDIDATE_REPOSITORY: ghcr.io/nvidia/aicr-operator
         run: make operator-candidate
+
+      # Before release-check, so a finding stops promotion and every push.
+      - name: Malware scan the kubectl-aicr binaries
+        uses: ./.github/actions/malware-scan
+        with:
+          scan_path: dist/candidate/plugin/
+          category: 'clamav-operator-plugin'
 
       - name: Name the candidate artifact
         id: name
@@ -1143,12 +1151,6 @@ jobs:
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
         with:
           subject-path: dist/candidate/plugin/kubectl-aicr-*
-
-      - name: Malware scan the kubectl-aicr binaries
-        uses: ./.github/actions/malware-scan
-        with:
-          scan_path: dist/candidate/plugin/
-          category: 'clamav-operator-plugin'
 
       # The draft release build-ko created; publish requires these names
       # (expected_release_asset_names in release-images.sh).

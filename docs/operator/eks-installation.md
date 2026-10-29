@@ -50,10 +50,12 @@ references; `bundles/` and `evidence/` hold provenance and evidence.
 
 Only the operator needs AWS access: it mints ECR tokens for itself, for Argo
 CD's `repo-creds` Secret and for each AICR Job that pushes. Its policy ships
-with the chart:
+with the chart, so verify the chart before you use its files:
 
 ```shell
-helm pull oci://ghcr.io/nvidia/charts/aicr-operator --version "${VERSION}" --untar
+gh attestation verify "oci://ghcr.io/nvidia/charts/aicr-operator:${VERSION}" --repo NVIDIA/aicr \
+  --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/v${VERSION}" \
+  && helm pull oci://ghcr.io/nvidia/charts/aicr-operator --version "${VERSION}" --untar
 PARTITION=aws REPOSITORY_PREFIX="${PREFIX}" ACCOUNT_ID="${ACCOUNT}" REGION="${REGION}" \
   envsubst < aicr-operator/files/ecr-iam-policy.json > aicr-operator-ecr.json
 aws iam create-policy --policy-name "aicr-operator-${CLUSTER}" --policy-document file://aicr-operator-ecr.json
@@ -199,8 +201,8 @@ signature.
 kubectl create namespace aicr-system
 kubectl label namespace aicr-system pod-security.kubernetes.io/enforce=restricted
 gh attestation verify "oci://ghcr.io/nvidia/charts/aicr-operator:${VERSION}" --repo NVIDIA/aicr \
-  --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/v${VERSION}"
-helm install aicr-operator oci://ghcr.io/nvidia/charts/aicr-operator \
+  --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/v${VERSION}" \
+  && helm install aicr-operator oci://ghcr.io/nvidia/charts/aicr-operator \
   --version "${VERSION}" --namespace aicr-system -f values.yaml
 kubectl -n aicr-system rollout status deployment/aicr-operator
 ```

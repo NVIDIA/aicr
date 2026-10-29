@@ -105,10 +105,6 @@ moves it.
 ```shell
 VERSION="<release>"   # an AICR release that ships the operator, without the leading v
 
-gh attestation verify "oci://ghcr.io/nvidia/charts/aicr-operator:${VERSION}" \
-  --repo NVIDIA/aicr \
-  --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/v${VERSION}"
-
 kubectl create namespace aicr-system
 kubectl label namespace aicr-system pod-security.kubernetes.io/enforce=restricted
 ```
@@ -136,10 +132,12 @@ leave `validation.enabled` off, set `spec.validation.deployment: Disabled` on
 the `ClusterRuntime` below; otherwise every rollout waits in `Validating` with
 `ValidationUnavailable`.
 
-Then install:
+Then verify the chart and install it:
 
 ```shell
-helm install aicr-operator oci://ghcr.io/nvidia/charts/aicr-operator \
+gh attestation verify "oci://ghcr.io/nvidia/charts/aicr-operator:${VERSION}" --repo NVIDIA/aicr \
+  --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/v${VERSION}" \
+  && helm install aicr-operator oci://ghcr.io/nvidia/charts/aicr-operator \
   --version "${VERSION}" --namespace aicr-system -f values.yaml
 ```
 
@@ -159,8 +157,8 @@ for Linux and macOS (`kubectl-aicr-<os>-<arch>`):
 ```shell
 gh release download "v${VERSION}" --repo NVIDIA/aicr --pattern kubectl-aicr-darwin-arm64
 gh attestation verify kubectl-aicr-darwin-arm64 --repo NVIDIA/aicr \
-  --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/v${VERSION}"
-install -m 0755 kubectl-aicr-darwin-arm64 /usr/local/bin/kubectl-aicr
+  --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/v${VERSION}" \
+  && install -m 0755 kubectl-aicr-darwin-arm64 /usr/local/bin/kubectl-aicr
 ```
 
 ## Usage
