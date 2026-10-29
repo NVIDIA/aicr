@@ -71,10 +71,10 @@ Fleet uninstalls every release in the bundle.
   - k8s-aibom
 
   Before upgrading any of them, apply the new chart's CRDs with the CRD-apply
-  command under "Upgrade, uninstall, and troubleshooting" in the AICR
-  component catalog (`docs/user/component-catalog.md`), then let Fleet
-  reconcile. Run it against every downstream cluster the bundle targets,
-  not the Rancher management cluster: Fleet installs the charts there.
+  command under "Upgrading components that own CRDs" in the AICR component
+  catalog (`docs/user/component-catalog.md`), then let Fleet reconcile.
+  Run it against every downstream cluster the bundle targets, not the Rancher
+  management cluster. Fleet installs the charts there.
 - Readiness hooks (`--readiness-hooks`) are not supported.
 - A chart that ships CRDs in `crds/`, templates objects of those kinds, and
   uses Helm `lookup` fails Fleet's server-side dry run on a cluster where the

@@ -38,7 +38,8 @@ installed by an earlier level before a later level references them
 Components the registry marks `ownsCRDs` need their CRDs applied before an
 upgrade, and this deployer does not do it for you: a `helmfile apply` that
 detects no change skips the release, and any hook attached to it with it. See
-the upgrade section of the AICR component catalog for the command to run.
+"Upgrading components that own CRDs" in the AICR component catalog
+(`docs/user/component-catalog.md`) for the command to run.
 
 ```bash
 # Preview changes (no cluster mutation):

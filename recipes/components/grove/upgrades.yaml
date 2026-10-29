@@ -81,7 +81,7 @@ transitions:
           - id: apply-new-crds
             description: >-
               Apply the alpha.12 CRDs with the CRD-apply command under
-              "Upgrade, uninstall, and troubleshooting" in
+              "Upgrading components that own CRDs" in
               docs/user/component-catalog.md, with
               CHART=oci://ghcr.io/ai-dynamo/grove/grove-charts,
               VERSION=v0.1.0-alpha.12 and MANAGER=terraform-provider-helm.
@@ -163,7 +163,7 @@ transitions:
           - id: apply-new-crds
             description: >-
               Apply the alpha.13 CRDs with the CRD-apply command under
-              "Upgrade, uninstall, and troubleshooting" in
+              "Upgrading components that own CRDs" in
               docs/user/component-catalog.md, with
               CHART=oci://ghcr.io/ai-dynamo/grove/grove-charts,
               VERSION=v0.1.0-alpha.13 and MANAGER=terraform-provider-helm.
