@@ -2718,8 +2718,8 @@ an `ai-dynamo` chart value. It never reaches the rendered Helm values.
 both ship the `computedomains.resource.nvidia.com` CRD. In `gpu-operator`
 v26.7.0 the two copies disagreed on schema: the operator's copy required
 `spec.numNodes` and carried no default. `gpu-operator` v26.7.1 ships a copy
-identical to the DRA driver 0.5.0 chart's, so the two charts no longer
-contend.
+identical to the DRA driver chart's (0.5.0 and 0.5.1 ship the same CRDs), so
+the two charts no longer contend.
 
 **Argo CD.** Bundles built with `gpu-operator` v26.7.0 carried an
 `ignoreDifferences` entry and `RespectIgnoreDifferences=true` on the
@@ -2747,6 +2747,21 @@ certified `v26.7` channel, whose v26.7.1 bundle ships the same
 also installs `computedomains` from its chart. This pairing has not yet been
 verified on a live OpenShift cluster; see
 [NVIDIA/aicr#2969](https://github.com/NVIDIA/aicr/issues/2969).
+
+**Multi-node ComputeDomains need DRA driver 0.5.1 under
+`OwnerReferencesPermissionEnforcement`.** OpenShift enables that admission
+plugin by default, and some other distributions (NVKE among them) do too. With
+DRA driver 0.5.0 the compute-domain daemon has no `delete` permission on
+`computedomaincliques`, so the second and subsequent daemons joining a
+ComputeDomain's existing NVLink clique cannot register: the first daemon creates
+the clique, the rest are refused when they add themselves to its
+`ownerReferences`. On GB200 and GB300, where the nodes of an NVLink domain share
+one clique, the ComputeDomain then never covers more than one of them and NVLS
+or MNNVL workloads stay in `PodInitializing`. 0.5.1 grants the verb
+([kubernetes-sigs/dra-driver-nvidia-gpu#1527](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu/issues/1527));
+both `nvidia-dra-driver-gpu` and `nvidia-dra-driver-gpu-ocp` pin it. A cluster
+still running 0.5.0 shows the daemon logging `cannot set an ownerRef on a
+resource you can't delete`.
 
 ### `mariadb-operator`: `26.3.0` or `26.6.0` to `26.10.1`
 

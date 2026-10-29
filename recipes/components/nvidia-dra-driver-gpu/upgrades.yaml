@@ -1,0 +1,47 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Coverage starts at 0.5.0, the release AICR pinned before 0.5.1 and the only
+# one assessed here; an origin below it resolves to blocked. The chart is
+# shared with the sibling nvidia-dra-driver-gpu-ocp component; keep the two
+# records in step.
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: nvidia-dra-driver-gpu
+transitions:
+  - from: ">=0.5.0 <0.5.1"
+    to: "0.5.1"
+    verdict: safe
+    verifiedBy: >-
+      Live helm upgrade of the nvidia-dra-driver-gpu release from 0.5.0 to
+      0.5.1 with unchanged values on a two-node GB200 NVKE cluster
+      (2026-10-29): controller and kubelet plugins rolled to v0.5.1 and the
+      nccl-all-reduce-bw-nvls check passed across both nodes (839.5 GB/s,
+      NVLS), where 0.5.0 could not form a two-node ComputeDomain. A diff -r of
+      the two pulled charts shows identical CRDs, the same kubeVersion floor,
+      the same workload and ServiceAccount names, and one new optional value
+      (resources.computeDomains.imex.config, default empty). Upstream
+      v0.5.1 release note and kubernetes-sigs/dra-driver-nvidia-gpu#1527.
+    summary: >-
+      Patch release. The compute-domain daemon role gains delete on
+      computedomaincliques, without which daemons joining an existing NVLink
+      clique cannot register under the OwnerReferencesPermissionEnforcement
+      admission plugin. The ResourceSlice ValidatingAdmissionPolicy now
+      matches the real kubelet-plugin ServiceAccount, so its node restriction
+      applies to the plugin's identity for the first time. Nothing to change on
+      upgrade.
+    references:
+      - https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu/releases/tag/v0.5.1
+      - https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu/issues/1527
+      - https://github.com/NVIDIA/aicr/issues/3500

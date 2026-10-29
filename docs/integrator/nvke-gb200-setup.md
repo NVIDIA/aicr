@@ -284,14 +284,17 @@ before re-flooring.
 
 ## Known gaps
 
-- No `gb200/nvke` NCCL runtime yet; the performance phase does not run on this
-  leaf.
+- No `gb200/nvke` NCCL runtime yet: `nccl-all-reduce-bw-net` borrows the
+  `gb200/oke` runtime, whose workers request `nvidia.com/mlnxnics`, which this
+  leaf does not expose, so that check cannot schedule.
 - The reference fabric has not passed RDMA traffic (limited P_Key membership,
   see prerequisites), so neither the SR-IOV nor the earlier shared-HCA shape
   has NCCL evidence.
-- `nccl-all-reduce-bw-nvls` has no NVKE evidence yet. The reference trays
-  share one multi-node NVLink domain (`nvidia-smi -q` reports the fabric
-  healthy with a common ClusterUUID), so the check applies there; drop it
-  only on a cluster without an NVLink fabric.
+- `nccl-all-reduce-bw-nvls` passes on the reference tenant: 839.5 GB/s
+  across both trays (8 GPUs, one multi-node NVLink domain), measured
+  2026-10-29. It needs DRA driver 0.5.1: the NVKE API server enables
+  `OwnerReferencesPermissionEnforcement`, under which 0.5.0's daemon on the
+  second tray cannot join the trays' shared NVLink clique (see the component
+  catalog's ComputeDomain upgrade note).
 - No published evidence yet.
 - KWOK profiles model scheduling only; they cannot validate RDMA traffic.
