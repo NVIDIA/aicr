@@ -2258,8 +2258,12 @@ kubectl delete opentelemetrycollectors.opentelemetry.io -n nktp --all --wait --t
 helm uninstall nktp -n nktp --no-hooks
 ```
 
-Other deployers remove `nktp` through their own resource, as described in
-[k8s-aibom upgrade, uninstall, and troubleshooting](#k8s-aibom-upgrade-uninstall-and-troubleshooting).
+Other deployers remove `nktp` through their own resource. Follow step 2 of the
+[k8s-aibom uninstall](#k8s-aibom-upgrade-uninstall-and-troubleshooting) with
+`nktp` in place of `k8s-aibom` in every release, Application, `HelmRelease`,
+Bundle, and HelmOp name, and `nktp` in place of the `k8s-aibom-system`
+namespace. Skip its step 3. Those AIBOM and CRD deletions belong to
+`k8s-aibom`, and NKTP keeps its CRDs on uninstall.
 
 ## Adding Components
 
