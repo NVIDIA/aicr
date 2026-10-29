@@ -406,7 +406,7 @@ operator:
   kind_node_image_floor: 'kindest/node:v1.34.11@sha256:44e222ee2132dab25ff87301682f89eb82c7880ea3a1bf543bfe9708fd08d67d'
   # Generates deep copies and CRDs (`make generate`). Run with `go run
   # pkg@version` so its dependencies stay out of go.mod; v0.23.0 is built on
-  # k8s.io v0.37.0, matching the API machinery in go.mod.
+  # k8s.io v0.37.0, the same minor as the API machinery in go.mod.
   # renovate: datasource=github-releases depName=kubernetes-sigs/controller-tools depType=build_tools
   controller_gen: 'v0.23.0'
   # Kubernetes floor `make operator-envtest-floor` runs the CRD tests against;
