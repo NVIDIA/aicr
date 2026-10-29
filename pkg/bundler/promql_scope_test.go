@@ -39,6 +39,9 @@ const (
 	testPromQLServer            = recipetest.PromQLServerComponent
 	testSMNamespaceSelectorPath = "prometheus.prometheusSpec.serviceMonitorNamespaceSelector"
 	testPMSelectorPath          = "prometheus.prometheusSpec.podMonitorSelector"
+
+	// stockValuesPath is set by components/kube-prometheus-stack/values.yaml.
+	stockValuesPath = "prometheus.prometheusSpec.ruleNamespaceSelector"
 )
 
 // staticRegistryProvider serves one registry.yaml and nothing else.
@@ -453,7 +456,11 @@ func TestMake_PromQLScrapeScope(t *testing.T) {
 		{name: "--set-disabled consumer drops out", criteria: dynamo, opts: []config.Option{disable("dynamoplatform")},
 			wantNamespaces: []string{"gpu-operator"}, wantRegex: adapterRegex},
 		{name: "server without consumers selects nothing and warns", criteria: training,
-			fixture:     map[string]recipe.TelemetryConfig{testPromQLServer: recipetest.FixturePromQLServer()},
+			fixture: map[string]recipe.TelemetryConfig{
+				testPromQLServer:     recipetest.FixturePromQLServer(),
+				"prometheus-adapter": {},
+				"dynamo-platform":    {},
+			},
 			wantRegex:   `^(?:)$`,
 			wantWarning: "no enabled component declares telemetry.promql"},
 		{name: "disabling the server injects and checks nothing", criteria: training,
@@ -477,11 +484,11 @@ func TestMake_PromQLScrapeScope(t *testing.T) {
 			wantErr: "--dynamic cannot override"},
 		{name: "values that set an owned path fail", criteria: training,
 			fixture: withServer(recipe.TelemetryConfig{PromQLServer: recipe.PromQLServerConfig{
-				NamespaceSelectorPaths: chartScopePaths.namespaceSelectors,
-				MonitorSelectorPaths:   chartScopePaths.monitorSelectors,
-				ScrapeClassesPath:      chartScopePaths.scrapeClasses,
+				NamespaceSelectorPaths: []string{stockValuesPath},
+				MonitorSelectorPaths:   fixtureScopePaths.monitorSelectors,
+				ScrapeClassesPath:      fixtureScopePaths.scrapeClasses,
 			}}),
-			wantErr: testSMNamespaceSelectorPath + ", which the bundler writes"},
+			wantErr: stockValuesPath + ", which the bundler writes"},
 		{name: "a --data registry with an invalid pattern fails", criteria: training,
 			fixture: invalidPattern, wantErr: "is not valid RE2"},
 	}

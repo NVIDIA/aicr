@@ -3026,12 +3026,12 @@ func TestApplyNodeSchedulingOverrides_StorageClass(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetComponentRegistry() error = %v", err)
 	}
-	comp := registry.Get("kube-prometheus-stack")
+	comp := registry.Get("slurm-accounting-mariadb")
 	if comp == nil || len(comp.GetStorageClassPaths()) == 0 {
-		t.Fatalf("registry missing kube-prometheus-stack or storageClassPaths: cannot run storage class path test")
+		t.Fatalf("registry missing slurm-accounting-mariadb or storageClassPaths: cannot run storage class path test")
 	}
 
-	const scPath = "prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName"
+	const scPath = "mariadb.storage.storageClassName"
 
 	tests := []struct {
 		name          string
@@ -3058,8 +3058,7 @@ func TestApplyNodeSchedulingOverrides_StorageClass(t *testing.T) {
 			cfgOpts: []config.Option{
 				config.WithStorageClass("my-storage-class"),
 				config.WithValueOverrides(map[string]map[string]string{
-					// "prometheus" is the valueOverrideKey for kube-prometheus-stack.
-					"prometheus": {scPath: "explicit-gp2"},
+					"slurmaccountingmariadb": {scPath: "explicit-gp2"},
 				}),
 			},
 			initialValues: map[string]string{scPath: "explicit-gp2"},
@@ -3083,7 +3082,7 @@ func TestApplyNodeSchedulingOverrides_StorageClass(t *testing.T) {
 				}
 			}
 
-			b.applyNodeSchedulingOverrides("kube-prometheus-stack", values, nil, schedulingPathPolicy{})
+			b.applyNodeSchedulingOverrides("slurm-accounting-mariadb", values, nil, schedulingPathPolicy{})
 
 			got, ok := component.GetValueByPath(values, scPath)
 			if ok != tt.wantPresent {
@@ -3859,10 +3858,10 @@ func TestApplyNodeSchedulingOverrides_RequireNodeSelector(t *testing.T) {
 
 // TestApplyNodeSchedulingOverrides_RequireNodeSelectorIfStorageClassSet
 // covers requireNodeSelectorIfStorageClassSet (registry.yaml), the
-// conditional counterpart to requireNodeSelector for a chart, like
-// kube-prometheus-stack, whose zone-pinning PVC only exists once a storage
-// class is configured. Real opt-ins are covered by their own
-// component-specific tests; this exercises the mechanism in isolation.
+// conditional counterpart to requireNodeSelector for a chart whose
+// zone-pinning PVC only exists once a storage class is configured. Real
+// opt-ins are covered by their own component-specific tests; this exercises
+// the mechanism in isolation.
 func TestApplyNodeSchedulingOverrides_RequireNodeSelectorIfStorageClassSet(t *testing.T) {
 	provider := requireNodeSelectorIfStorageClassSetFixtureProvider(t)
 
@@ -4379,11 +4378,11 @@ func TestBundler_Make_BoundProviderEndToEnd(t *testing.T) {
 }
 
 func TestWarnMissingStorageClassForPVCs(t *testing.T) {
-	const scPath = "prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName"
-	const pvcSizePath = "prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.resources.requests.storage"
+	const scPath = "mariadb.storage.storageClassName"
+	const pvcSizePath = "mariadb.storage.size"
 
 	recipeResult := &recipe.RecipeResult{
-		ComponentRefs: []recipe.ComponentRef{{Name: "kube-prometheus-stack"}},
+		ComponentRefs: []recipe.ComponentRef{{Name: "slurm-accounting-mariadb"}},
 	}
 
 	tests := []struct {
@@ -4395,14 +4394,14 @@ func TestWarnMissingStorageClassForPVCs(t *testing.T) {
 		{
 			name: "warns when rendered PVC omits storageClassName",
 			setupValues: func(values map[string]any) {
-				component.SetValueByPath(values, pvcSizePath, "50Gi")
+				component.SetValueByPath(values, pvcSizePath, "20Gi")
 			},
 			wantWarning: true,
 		},
 		{
 			name: "warns when rendered PVC has blank storageClassName",
 			setupValues: func(values map[string]any) {
-				component.SetValueByPath(values, pvcSizePath, "50Gi")
+				component.SetValueByPath(values, pvcSizePath, "20Gi")
 				component.SetValueByPath(values, scPath, " ")
 			},
 			wantWarning: true,
@@ -4414,16 +4413,16 @@ func TestWarnMissingStorageClassForPVCs(t *testing.T) {
 			},
 		},
 		{
-			name: "does not warn for emptyDir storage",
+			name: "does not warn when no PVC is rendered",
 			setupValues: func(values map[string]any) {
-				component.SetValueByPath(values, "prometheus.prometheusSpec.storageSpec.emptyDir.sizeLimit", "10Gi")
+				component.SetValueByPath(values, "mariadb.replicas", 1)
 			},
 		},
 		{
 			name:    "warns when explicit blank override wins over global storageClass",
 			cfgOpts: []config.Option{config.WithStorageClass("gp3")},
 			setupValues: func(values map[string]any) {
-				component.SetValueByPath(values, pvcSizePath, "50Gi")
+				component.SetValueByPath(values, pvcSizePath, "20Gi")
 				component.SetValueByPath(values, scPath, " ")
 			},
 			wantWarning: true,
@@ -4432,7 +4431,7 @@ func TestWarnMissingStorageClassForPVCs(t *testing.T) {
 			name:    "does not warn when global storageClass was injected",
 			cfgOpts: []config.Option{config.WithStorageClass("gp3")},
 			setupValues: func(values map[string]any) {
-				component.SetValueByPath(values, pvcSizePath, "50Gi")
+				component.SetValueByPath(values, pvcSizePath, "20Gi")
 				component.SetValueByPath(values, scPath, "gp3")
 			},
 		},
@@ -4450,7 +4449,7 @@ func TestWarnMissingStorageClassForPVCs(t *testing.T) {
 
 			r := &bundleRun{DefaultBundler: b}
 			err = r.warnMissingStorageClassForPVCs(context.Background(), recipeResult, map[string]map[string]any{
-				"kube-prometheus-stack": values,
+				"slurm-accounting-mariadb": values,
 			})
 			if err != nil {
 				t.Fatalf("warnMissingStorageClassForPVCs() error = %v", err)
@@ -4463,10 +4462,10 @@ func TestWarnMissingStorageClassForPVCs(t *testing.T) {
 			if tt.wantWarning {
 				warning := r.warnings[0]
 				for _, want := range []string{
-					"Warning: kube-prometheus-stack renders a PVC without storageClassName",
+					"Warning: slurm-accounting-mariadb renders a PVC without storageClassName",
 					scPath,
 					"--storage-class <name>",
-					"--set kube-prometheus-stack:" + scPath + "=<name>",
+					"--set slurm-accounting-mariadb:" + scPath + "=<name>",
 				} {
 					if !strings.Contains(warning, want) {
 						t.Errorf("warning = %q, want substring %q", warning, want)
