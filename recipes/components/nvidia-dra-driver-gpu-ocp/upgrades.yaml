@@ -15,7 +15,7 @@
 # Coverage starts at 0.5.0, the release AICR pinned before 0.5.1 and the only
 # one assessed here; an origin below it resolves to blocked. The chart is
 # shared with the sibling nvidia-dra-driver-gpu component; keep the two
-# records in step.
+# records' transitions in step.
 apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades
 component: nvidia-dra-driver-gpu-ocp
@@ -29,7 +29,9 @@ transitions:
       NVKE cluster, which runs OwnerReferencesPermissionEnforcement as
       OpenShift does (2026-10-29): the nccl-all-reduce-bw-nvls check passed
       across both nodes (839.5 GB/s, NVLS), where 0.5.0 could not form a
-      two-node ComputeDomain. Not yet run on OpenShift. A diff -r of
+      two-node ComputeDomain. Not yet run on OpenShift; the OCP values set
+      nothing the 0.5.0 to 0.5.1 diff touches, and the kubelet-plugin
+      ServiceAccount the SCC RoleBinding names is unchanged. A diff -r of
       the two pulled charts shows identical CRDs, the same kubeVersion floor,
       the same workload and ServiceAccount names, and one new optional value
       (resources.computeDomains.imex.config, default empty). Upstream
@@ -38,11 +40,13 @@ transitions:
       Patch release. The compute-domain daemon role gains delete on
       computedomaincliques, without which daemons joining an existing NVLink
       clique cannot register under the OwnerReferencesPermissionEnforcement
-      admission plugin; OpenShift enables that plugin by default. The ResourceSlice ValidatingAdmissionPolicy now
+      admission plugin. The ResourceSlice ValidatingAdmissionPolicy now
       matches the real kubelet-plugin ServiceAccount, so its node restriction
-      applies to the plugin's identity for the first time. Nothing to change on
-      upgrade.
+      applies to the plugin's identity for the first time; it needs node-bound
+      ServiceAccount tokens, which Kubernetes 1.32 (the chart's floor)
+      provides. Nothing to change on upgrade.
     references:
       - https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu/releases/tag/v0.5.1
       - https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu/issues/1527
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#nvidia-dra-driver-gpu-050-to-051
       - https://github.com/NVIDIA/aicr/issues/3500

@@ -2748,10 +2748,12 @@ also installs `computedomains` from its chart. This pairing has not yet been
 verified on a live OpenShift cluster; see
 [NVIDIA/aicr#2969](https://github.com/NVIDIA/aicr/issues/2969).
 
-**Multi-node ComputeDomains need DRA driver 0.5.1 under
-`OwnerReferencesPermissionEnforcement`.** OpenShift enables that admission
-plugin by default, and some other distributions (NVKE among them) do too. With
-DRA driver 0.5.0 the compute-domain daemon has no `delete` permission on
+### `nvidia-dra-driver-gpu`: `0.5.0` to `0.5.1`
+
+Multi-node ComputeDomains need DRA driver 0.5.1 where the API server enables
+the `OwnerReferencesPermissionEnforcement` admission plugin. OpenShift enables
+that plugin by default, and some other distributions (NVKE among them) do too.
+With DRA driver 0.5.0 the compute-domain daemon has no `delete` permission on
 `computedomaincliques`, so the second and subsequent daemons joining a
 ComputeDomain's existing NVLink clique cannot register: the first daemon creates
 the clique, the rest are refused when they add themselves to its
@@ -2762,6 +2764,13 @@ or MNNVL workloads stay in `PodInitializing`. 0.5.1 grants the verb
 both `nvidia-dra-driver-gpu` and `nvidia-dra-driver-gpu-ocp` pin it. A cluster
 still running 0.5.0 shows the daemon logging `cannot set an ownerRef on a
 resource you can't delete`.
+
+0.5.1 is otherwise a patch release: CRDs and workload names are unchanged, and
+nothing needs changing on upgrade. One compatibility note: the chart's
+ResourceSlice `ValidatingAdmissionPolicy` now matches the kubelet plugin's real
+ServiceAccount, so its node restriction applies for the first time. It needs
+node-bound ServiceAccount tokens, which Kubernetes 1.32 and later (the chart's
+floor) provide.
 
 ### `mariadb-operator`: `26.3.0` or `26.6.0` to `26.10.1`
 

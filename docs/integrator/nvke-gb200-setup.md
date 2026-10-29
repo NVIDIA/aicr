@@ -274,13 +274,14 @@ aicr validate --recipe bundle/recipe.yaml --phase deployment --phase conformance
 `aicr validate` runs the deployment and conformance phases against the live
 cluster, so the bundle must be deployed before it.
 
-Performance thresholds are copied from the GB200 OKE recipe until an NVKE
-baseline is measured. The `nccl-benchmark-profile` constraint still names the
-`gb200/oke` runtime, whose workers request `nvidia.com/mlnxnics`; this leaf
-no longer exposes that resource, so the performance phase cannot schedule
-until a `gb200/nvke` runtime requesting the per-rail VFs and attachments is
-added to the validator. Record the measured peak in qualification evidence
-before re-flooring.
+Performance thresholds are copied from the GB200 OKE recipe. The
+`nccl-benchmark-profile` constraint names the `gb200/oke` runtime.
+`nccl-all-reduce-bw-nvls` runs with it and measured 839.5 GB/s on the
+reference tenant (2026-10-29), the NVKE NVLS baseline; the `>= 500` floor is
+kept until the result is recorded in qualification evidence.
+`nccl-all-reduce-bw-net` cannot schedule: that runtime's workers request
+`nvidia.com/mlnxnics`, which this leaf does not expose, so it waits for a
+`gb200/nvke` runtime requesting the per-rail VFs and attachments.
 
 ## Known gaps
 
@@ -294,7 +295,8 @@ before re-flooring.
   across both trays (8 GPUs, one multi-node NVLink domain), measured
   2026-10-29. It needs DRA driver 0.5.1: the NVKE API server enables
   `OwnerReferencesPermissionEnforcement`, under which 0.5.0's daemon on the
-  second tray cannot join the trays' shared NVLink clique (see the component
-  catalog's ComputeDomain upgrade note).
+  second tray cannot join the trays' shared NVLink clique (see
+  [Upgrade Notes: `nvidia-dra-driver-gpu` 0.5.0 to
+  0.5.1](../user/component-catalog.md#nvidia-dra-driver-gpu-050-to-051)).
 - No published evidence yet.
 - KWOK profiles model scheduling only; they cannot validate RDMA traffic.

@@ -15,7 +15,7 @@
 # Coverage starts at 0.5.0, the release AICR pinned before 0.5.1 and the only
 # one assessed here; an origin below it resolves to blocked. The chart is
 # shared with the sibling nvidia-dra-driver-gpu-ocp component; keep the two
-# records in step.
+# records' transitions in step.
 apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades
 component: nvidia-dra-driver-gpu
@@ -39,9 +39,11 @@ transitions:
       clique cannot register under the OwnerReferencesPermissionEnforcement
       admission plugin. The ResourceSlice ValidatingAdmissionPolicy now
       matches the real kubelet-plugin ServiceAccount, so its node restriction
-      applies to the plugin's identity for the first time. Nothing to change on
-      upgrade.
+      applies to the plugin's identity for the first time; it needs node-bound
+      ServiceAccount tokens, which Kubernetes 1.32 (the chart's floor)
+      provides. Nothing to change on upgrade.
     references:
       - https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu/releases/tag/v0.5.1
       - https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu/issues/1527
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#nvidia-dra-driver-gpu-050-to-051
       - https://github.com/NVIDIA/aicr/issues/3500
