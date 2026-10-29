@@ -347,6 +347,22 @@ record already has.
   window, let the migration finish, then continue. It stops any jump from below
   the window to past it, and the report names a landing inside the window.
 
+### Two records on one boundary each speak for their own starting range
+
+Two records may name the same `to` floor when their `from` ranges do not
+overlap. Each then describes crossing that boundary from its own range only.
+An operator jumping from 1.5.0 past a boundary at 3.0.0 gets the record written
+for 1.x, even though the version numbers pass through the range of a `manual`
+record written for 2.x. That cluster never ran 2.x, so the 2.x record's steps
+describe state it does not have. A `blocked` record written for 2.x still
+stops the jump, because it forbids leaving that range for the boundary in one
+step.
+
+So if crossing the boundary from 1.x needs something only 2.x provides, such as
+a migration that runs on 2.x software, the 2.x record cannot say it for you.
+Say it in the 1.x record. Mark it `blocked`, and write steps that land in 2.x
+first, as the window's `blocked` record above does.
+
 ## Checking your work
 
 ```bash
