@@ -87,7 +87,9 @@
 // `from` covers a version the walk stood at. Records off the path describe a
 // move this operator does not make and do not decide the verdict, unless they
 // are blocked and in the way. A record is in the way when its `from` admits a
-// version the jump passes before reaching its floor.
+// version the jump passes before reaching its floor. Records that share a
+// floor are ordered by where their `from` starts, lowest first, so declaration
+// order decides nothing.
 //
 // Verdict selection runs in this order:
 //

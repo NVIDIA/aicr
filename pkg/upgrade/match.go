@@ -822,7 +822,7 @@ type path struct {
 	hops []crossing
 
 	// onPath is every crossed record whose `from` covers a version the walk
-	// stood at, ordered by floor.
+	// stood at, in crossingBefore order.
 	onPath []crossing
 
 	// reached reports whether the last hop's `to` contains the target.
@@ -866,9 +866,7 @@ func walk(u *ComponentUpgrades, src, tgt *semver.Version) path {
 		}
 		at = hop.floor
 	}
-	sort.SliceStable(p.onPath, func(i, j int) bool {
-		return lowerBefore(p.onPath[i].floor, p.onPath[j].floor)
-	})
+	sort.SliceStable(p.onPath, func(i, j int) bool { return crossingBefore(p.onPath[i], p.onPath[j]) })
 	return p
 }
 
@@ -1032,8 +1030,8 @@ type crossing struct {
 	floor bound
 }
 
-// crossings returns every transition a jump from at to tgt crosses, ordered by
-// floor.
+// crossings returns every transition a jump from at to tgt crosses, in
+// crossingBefore order.
 func crossings(u *ComponentUpgrades, at bound, tgt *semver.Version) []crossing {
 	if u == nil {
 		return nil
@@ -1046,10 +1044,26 @@ func crossings(u *ComponentUpgrades, at bound, tgt *semver.Version) []crossing {
 		}
 		out = append(out, crossing{tr: &u.Transitions[i], floor: floor})
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		return lowerBefore(out[i].floor, out[j].floor)
-	})
+	sort.SliceStable(out, func(i, j int) bool { return crossingBefore(out[i], out[j]) })
 	return out
+}
+
+// crossingBefore orders crossings by floor, then by the lower bound of `from`,
+// unbounded first, then by the `to` and `from` text, so only records with the
+// same `from` and `to` tie.
+func crossingBefore(a, b crossing) bool {
+	if lowerBefore(a.floor, b.floor) || lowerBefore(b.floor, a.floor) {
+		return lowerBefore(a.floor, b.floor)
+	}
+	af, aErr := parseBounds(a.tr.From)
+	bf, bErr := parseBounds(b.tr.From)
+	if aErr == nil && bErr == nil && (lowerBefore(af.lower, bf.lower) || lowerBefore(bf.lower, af.lower)) {
+		return lowerBefore(af.lower, bf.lower)
+	}
+	if a.tr.To != b.tr.To {
+		return a.tr.To < b.tr.To
+	}
+	return a.tr.From < b.tr.From
 }
 
 // crosses returns the floor t's `to` names, and ok true when a jump from at to
@@ -1147,20 +1161,43 @@ func admits(b bounds, at bound) bool {
 	return true
 }
 
-// leadsFrom returns the distinct `to` ranges of the records whose `from`
-// covers src.
+// leadsFrom returns the distinct parseable `to` ranges of the records whose
+// `from` covers src, in toBefore order.
 func leadsFrom(u *ComponentUpgrades, src *semver.Version) []string {
 	if u == nil {
 		return nil
 	}
-	var out []string
+	type lead struct {
+		text string
+		to   bounds
+	}
+	var leads []lead
 	for i := range u.Transitions {
 		t := &u.Transitions[i]
-		if fromCovers(t, pointAt(src)) && !slices.Contains(out, t.To) {
-			out = append(out, t.To)
+		if !fromCovers(t, pointAt(src)) || slices.ContainsFunc(leads, func(l lead) bool { return l.text == t.To }) {
+			continue
 		}
+		to, err := parseBounds(t.To)
+		if err != nil {
+			continue
+		}
+		leads = append(leads, lead{text: t.To, to: to})
+	}
+	sort.Slice(leads, func(i, j int) bool { return toBefore(leads[i].to, leads[j].to, leads[i].text, leads[j].text) })
+	out := make([]string, len(leads))
+	for i, l := range leads {
+		out[i] = l.text
 	}
 	return out
+}
+
+// toBefore orders the `to` ranges a and b, written as aText and bText, by
+// floor, unbounded first, then by text.
+func toBefore(a, b bounds, aText, bText string) bool {
+	if lowerBefore(a.lower, b.lower) || lowerBefore(b.lower, a.lower) {
+		return lowerBefore(a.lower, b.lower)
+	}
+	return aText < bText
 }
 
 // lowestBlocked returns the lowest-floor crossed transition an author marked
@@ -1286,14 +1323,17 @@ func pathCeilingExplanation(ceiling bound, source, target string) string {
 }
 
 // highestCeiling returns the transition whose `to` reaches furthest forward and
-// the ceiling it names. ok is false when no ceiling bounds the coverage, either
-// because a record reaches forward without limit or because none parsed.
+// the ceiling it names. Among records sharing that ceiling it returns the one
+// with the lowest floor, then the lowest `to` text. ok is false when no ceiling
+// bounds the coverage, either because a record reaches forward without limit
+// or because none parsed.
 func highestCeiling(u *ComponentUpgrades) (*Transition, bound, bool) {
 	if u == nil {
 		return nil, bound{}, false
 	}
 	var (
 		top     *Transition
+		topTo   bounds
 		highest bound
 	)
 	for i := range u.Transitions {
@@ -1304,8 +1344,9 @@ func highestCeiling(u *ComponentUpgrades) (*Transition, bound, bool) {
 		if b.upper.unbounded || b.upper.ver == nil {
 			return nil, bound{}, false
 		}
-		if top == nil || upperAfter(b.upper, highest) {
-			top, highest = &u.Transitions[i], b.upper
+		tie := top != nil && !upperAfter(b.upper, highest) && !upperAfter(highest, b.upper)
+		if top == nil || upperAfter(b.upper, highest) || (tie && toBefore(b, topTo, u.Transitions[i].To, top.To)) {
+			top, topTo, highest = &u.Transitions[i], b, b.upper
 		}
 	}
 	if top == nil {

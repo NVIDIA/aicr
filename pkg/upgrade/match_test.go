@@ -17,6 +17,7 @@ package upgrade
 import (
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1631,6 +1632,88 @@ func TestMatchFollowsTheSourcesPath(t *testing.T) {
 				t.Errorf("matched record = %q, want %q", matched, tt.wantMatched)
 			}
 		})
+	}
+}
+
+// TestMatchTiesIgnoreDeclarationOrder checks that records tied on a floor or a
+// ceiling give the same result in either declaration order.
+func TestMatchTiesIgnoreDeclarationOrder(t *testing.T) {
+	tests := []struct {
+		name          string
+		trs           []Transition
+		from, to      string
+		wantReason    Reason
+		wantMatched   string
+		wantStoppedAt string
+		wantInExpl    string
+	}{
+		{
+			name: "two blocked records on one floor resolve to the lower from",
+			trs: []Transition{
+				trans("<1.0.0", ">=3.0.0 <3.1.0", VerdictBlocked, "B1"),
+				trans(">=1.0.0 <2.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B2"),
+			},
+			from:          "0.5.0",
+			to:            "3.0.0",
+			wantReason:    ReasonRecorded,
+			wantMatched:   "B1",
+			wantStoppedAt: ">=3.0.0 <3.1.0",
+		},
+		{
+			name: "two records on one ceiling resolve to the lower floor",
+			trs: []Transition{
+				trans("<1.0.0", ">=1.0.0 <2.0.0", VerdictSafe, "S1"),
+				trans(">=1.0.0 <1.5.0", ">=1.5.0 <2.0.0", VerdictSafe, "S2"),
+			},
+			from:          "1.6.0",
+			to:            "2.5.0",
+			wantReason:    ReasonBeyondRecordCeiling,
+			wantStoppedAt: ">=1.0.0 <2.0.0",
+		},
+		{
+			name: "the ranges the source's records lead into are listed by floor",
+			trs: []Transition{
+				trans("<1.0.0", ">=5.0.0", VerdictSafe, "L1"),
+				trans("<1.0.0", ">=4.0.0 <5.0.0", VerdictSafe, "L2"),
+				trans(">=2.0.0 <3.0.0", ">=3.0.0 <4.0.0", VerdictSafe, "X"),
+			},
+			from:          "0.5.0",
+			to:            "3.5.0",
+			wantReason:    ReasonUndefinedOrigin,
+			wantStoppedAt: ">=3.0.0 <4.0.0",
+			wantInExpl:    "lead only into >=4.0.0 <5.0.0 and >=5.0.0,",
+		},
+	}
+	for _, tt := range tests {
+		for _, order := range []string{"declared", "reversed"} {
+			t.Run(tt.name+"/"+order, func(t *testing.T) {
+				trs := slices.Clone(tt.trs)
+				if order == "reversed" {
+					slices.Reverse(trs)
+				}
+				got := Match(oneComponent(trs...), map[string]string{"c": tt.from}, map[string]string{"c": tt.to})
+				if len(got) != 1 {
+					t.Fatalf("Match() returned %d rows, want 1: %+v", len(got), got)
+				}
+				r := got[0]
+				if r.Reason != tt.wantReason {
+					t.Errorf("reason = %q, want %q", r.Reason, tt.wantReason)
+				}
+				if r.StoppedAt != tt.wantStoppedAt {
+					t.Errorf("stoppedAt = %q, want %q", r.StoppedAt, tt.wantStoppedAt)
+				}
+				matched := ""
+				if r.Transition != nil {
+					matched = r.Transition.Summary
+				}
+				if matched != tt.wantMatched {
+					t.Errorf("matched record = %q, want %q", matched, tt.wantMatched)
+				}
+				if !strings.Contains(r.Explanation, tt.wantInExpl) {
+					t.Errorf("explanation = %q, want it to contain %q", r.Explanation, tt.wantInExpl)
+				}
+			})
+		}
 	}
 }
 
