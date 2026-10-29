@@ -135,6 +135,9 @@ func TestRepoCredsRefresher(t *testing.T) {
 	if err := r.Check(ctx); operrors.ReasonOf(err) != ReasonRegistryCredentialsStale {
 		t.Fatalf("Check() before any refresh = %v, want stale", err)
 	}
+	if expiry, refresh := gauges(r); expiry != 0 || refresh != 0 {
+		t.Errorf("before any refresh: expiry %v, refresh %v; want 0, unknown", expiry, refresh)
+	}
 	if err := r.Refresh(ctx); err != nil {
 		t.Fatalf("Refresh() = %v", err)
 	}
@@ -150,8 +153,8 @@ func TestRepoCredsRefresher(t *testing.T) {
 		t.Fatalf("Check() after a refresh = %v", err)
 	}
 	clock = now.Add(2 * time.Hour)
-	if age := testutil.ToFloat64(r.Collectors()[1]); age != (2 * time.Hour).Seconds() {
-		t.Errorf("token age = %v", age)
+	if expiry, refresh := gauges(r); expiry != float64(api.expires.Unix()) || refresh != float64(now.Unix()) {
+		t.Errorf("expiry %v, refresh %v; want %d, %d", expiry, refresh, api.expires.Unix(), now.Unix())
 	}
 
 	// The operator was down past the token's life: stale until the restart's
@@ -169,9 +172,25 @@ func TestRepoCredsRefresher(t *testing.T) {
 	if err := restarted.Check(ctx); err != nil || api.calls != 2 {
 		t.Fatalf("after restart: Check() = %v, %d token calls", err, api.calls)
 	}
-	if left := testutil.ToFloat64(restarted.Collectors()[0]); left != (12 * time.Hour).Seconds() {
-		t.Errorf("token expiry = %v", left)
+	if expiry, refresh := gauges(restarted); expiry != float64(api.expires.Unix()) || refresh != float64(clock.Unix()) {
+		t.Errorf("after restart: expiry %v, refresh %v; want %d, %d", expiry, refresh, api.expires.Unix(), clock.Unix())
 	}
+	// A refresher that has only read the Secret knows the expiry, but no
+	// refresh of its own: that is unknown, not fresh.
+	checked := &RepoCredsRefresher{Client: k8s, Reader: k8s, Provider: provider, Namespace: "argocd", Name: "aicr-registry",
+		Now: func() time.Time { return clock }}
+	if err := checked.Check(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if expiry, refresh := gauges(checked); expiry != float64(api.expires.Unix()) || refresh != 0 {
+		t.Errorf("after a check only: expiry %v, refresh %v; want %d, 0", expiry, refresh, api.expires.Unix())
+	}
+}
+
+// gauges reads the token's expiry and refresh timestamps.
+func gauges(r *RepoCredsRefresher) (expiry, refresh float64) {
+	c := r.Collectors()
+	return testutil.ToFloat64(c[0]), testutil.ToFloat64(c[1])
 }
 
 // Pushing Jobs mount the administrator's static Secret as it is; with brokered

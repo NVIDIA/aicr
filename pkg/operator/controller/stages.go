@@ -124,9 +124,11 @@ var retryClasses = map[aicrjob.Retry]string{
 	aicrjob.RetryTransient: "transient", aicrjob.RetryAuthorization: "authorization",
 }
 
-// record counts a run the first time it is seen finished and, when it
-// failed, reports it on the runtime as a Warning Event and a log line, then
-// marks the Job so it is recorded once.
+// record marks a Job the first time its run is seen finished, then counts
+// the run and its duration and, when it failed, reports it on the runtime as
+// a Warning Event and a log line. The mark comes first, so a failed mark
+// counts nothing and the next observation records the run once; a Job
+// already gone is counted, since nothing will see it again.
 func (s *stages) record(ctx context.Context, rt *v1alpha1.ClusterRuntime, stage aicrjob.Stage, job *batchv1.Job,
 	outcome aicrjob.Outcome) error {
 
@@ -136,15 +138,7 @@ func (s *stages) record(ctx context.Context, rt *v1alpha1.ClusterRuntime, stage 
 	result, class := "succeeded", ""
 	if outcome.State == aicrjob.StateFailed {
 		result, class = "failed", retryClasses[outcome.Retry()]
-		runID := job.Labels[v1alpha1.LabelRunID]
-		log.FromContext(ctx).Info("AICR run failed", "stage", stage, "runID", runID, "job", job.Name,
-			"attempt", attempt(job), "retry", class, "error", errorMessage(outcome.Err))
-		if s.events != nil {
-			s.events.Eventf(rt, nil, corev1.EventTypeWarning, EventAICRRunFailed, "Run",
-				"aicr %s run %s (attempt %d, retry %s) failed: %s", stage, runID, attempt(job), class, errorMessage(outcome.Err))
-		}
 	}
-	aicrJobRuns.WithLabelValues(string(stage), result, class).Inc()
 	patch := client.MergeFrom(job.DeepCopy())
 	if job.Annotations == nil {
 		job.Annotations = map[string]string{}
@@ -152,6 +146,17 @@ func (s *stages) record(ctx context.Context, rt *v1alpha1.ClusterRuntime, stage 
 	job.Annotations[v1alpha1.AnnotationRecorded] = result
 	if err := s.client.Patch(ctx, job, patch); client.IgnoreNotFound(err) != nil {
 		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "record run of Job "+job.Name)
+	}
+	aicrJobRuns.WithLabelValues(string(stage), result, class).Inc()
+	observeJob(job)
+	if outcome.State == aicrjob.StateFailed {
+		runID := job.Labels[v1alpha1.LabelRunID]
+		log.FromContext(ctx).Info("AICR run failed", "stage", stage, "runID", runID, "job", job.Name,
+			"attempt", attempt(job), "retry", class, "error", errorMessage(outcome.Err))
+		if s.events != nil {
+			s.events.Eventf(rt, nil, corev1.EventTypeWarning, EventAICRRunFailed, "Run",
+				"aicr %s run %s (attempt %d, retry %s) failed: %s", stage, runID, attempt(job), class, errorMessage(outcome.Err))
+		}
 	}
 	return nil
 }
@@ -469,7 +474,6 @@ func (s *stages) remove(ctx context.Context, job *batchv1.Job) error {
 	if err != nil && !apierrors.IsNotFound(err) {
 		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "delete Job "+job.Name)
 	}
-	observeJob(job)
 	return nil
 }
 

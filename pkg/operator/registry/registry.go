@@ -71,9 +71,10 @@ func (r Repository) URI() string { return URIScheme + r.String() }
 
 // Options configure a Client.
 type Options struct {
-	// PlainHTTPHosts are the registry hosts reached over HTTP instead of
-	// HTTPS: only a runtime registry inside a test cluster. Every other host,
-	// upstream chart registries included, is reached over HTTPS.
+	// PlainHTTPHosts are the hosts, registries and Helm repositories alike,
+	// reached over HTTP instead of HTTPS: only a runtime registry inside a
+	// test cluster. Every other host, upstream chart sources included, is
+	// reached over HTTPS.
 	PlainHTTPHosts []string
 	// Credentials resolves the credential for a registry host. Nil means
 	// anonymous access.

@@ -91,7 +91,7 @@ Service, so scrape the pod or port-forward
 | `aicr_operator_job_duration_seconds{stage,result}` | AICR Job durations by stage and result |
 | `aicr_operator_validation_runs_total{result}` | Deployment validation runs by result |
 | `aicr_operator_job_runs_total{stage,result,class}` | AICR runs when first seen finished, by stage, result and, for failures, retry class (`never`, `bounded`, `transient`, `authorization`) |
-| `aicr_operator_registry_token_expiry_seconds`, `aicr_operator_registry_token_age_seconds` | The Argo CD registry token (`aws` provider) |
+| `aicr_operator_registry_token_expiry_timestamp_seconds`, `aicr_operator_registry_token_refresh_timestamp_seconds` | When the Argo CD registry token expires and when the operator last refreshed it, as Unix times (`aws` provider); `0` until known |
 
 Every outcome, result, stage and retry class is exported at zero from
 startup, so a rate reads zero rather than nothing before its first event.

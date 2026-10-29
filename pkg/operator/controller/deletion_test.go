@@ -17,15 +17,19 @@ package controller
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
 	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
+	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 	"github.com/NVIDIA/aicr/pkg/operator/plan"
 )
 
@@ -73,6 +77,49 @@ func TestDeletionOrphans(t *testing.T) {
 	}
 	if want := []string{"Ensure cert-manager", "Orphan " + string(rt.UID)}; !slices.Equal(engine.order, want) {
 		t.Fatalf("engine calls = %v, want %v", engine.order, want)
+	}
+}
+
+// refusingOrphan is an engine on which the API server refuses the
+// orphaned-from annotation for one object, as an admission policy can.
+type refusingOrphan struct{ *fakeEngine }
+
+func (e refusingOrphan) Orphan(ctx context.Context, runtimeUID string) ([]string, error) {
+	names, err := e.fakeEngine.Orphan(ctx, runtimeUID)
+	if err != nil {
+		return names, err
+	}
+	return names, operrors.New(operrors.ErrCodeUnauthorized, "Applications nfd refused the orphaned-from annotation").
+		WithReason(argocd.ReasonOrphanAnnotationRefused)
+}
+
+// An engine object refused the orphaned-from annotation is named in a
+// Warning Event and does not keep the runtime from going.
+func TestDeletionOrphansPastARefusedAnnotation(t *testing.T) {
+	ctx := testContext(t)
+	freshRuntime(t, ctx, stabilized)
+	engine := newEngine()
+	recorder := events.NewFakeRecorder(10)
+	r, _ := newRollout(t, engine, true)
+	r.Engine, r.Events = refusingOrphan{engine}, recorder
+	reconcileRollout(t, ctx, r)
+	if !controllerutil.ContainsFinalizer(getRuntime(t, ctx), v1alpha1.FinalizerCleanup) {
+		t.Fatal("the runtime has no cleanup finalizer")
+	}
+	deleteRuntime(t, ctx)
+	reconcileRollout(t, ctx, r)
+	if !runtimeGone(t, ctx) {
+		t.Fatalf("the runtime stayed Terminating: finalizers %v", getRuntime(t, ctx).Finalizers)
+	}
+	for {
+		select {
+		case e := <-recorder.Events:
+			if strings.HasPrefix(e, corev1.EventTypeWarning+" "+argocd.ReasonOrphanAnnotationRefused) && strings.Contains(e, "nfd") {
+				return
+			}
+		default:
+			t.Fatal("no Warning Event names the object refused the annotation")
+		}
 	}
 }
 

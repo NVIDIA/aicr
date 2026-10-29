@@ -16,15 +16,19 @@ package argocd
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"slices"
 	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
@@ -409,6 +413,52 @@ func TestSuspendTogglesAutomatedSync(t *testing.T) {
 	}
 }
 
+// ownedApps writes an owned Application for each release ID.
+func ownedApps(t *testing.T, ctx context.Context, a *Adapter, ids ...string) {
+	t.Helper()
+	for _, id := range ids {
+		p, r := testPlan()
+		r.ID, r.Component, r.DependsOn = id, id, nil
+		if _, err := a.Ensure(ctx, p, r, values); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// refusing makes the adapter's writes to one Application fail with err.
+func refusing(a *Adapter, name string, err error) {
+	a.Writer = interceptor.NewClient(a.Writer.(client.WithWatch), interceptor.Funcs{
+		Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+			if obj.GetName() == name {
+				return err
+			}
+			return c.Patch(ctx, obj, patch, opts...)
+		},
+	})
+}
+
+var applications = schema.GroupResource{Group: ApplicationGVK.Group, Resource: "applications"}
+
+// A refused write to one Application leaves the others suspended, and the
+// error names the one left unchanged.
+func TestSuspendContinuesPastARefusedApplication(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	a := fakeAdapter(t)
+	ownedApps(t, ctx, a, "a", "b", "c")
+	refusing(a, "a", apierrors.NewForbidden(applications, "a", errors.New("denied by admission policy")))
+
+	changed, err := a.Suspend(ctx, uid, true)
+	if !slices.Equal(changed, []string{"b", "c"}) || err == nil || !strings.Contains(err.Error(), "Applications a") {
+		t.Fatalf("Suspend() = %v, %v; want b and c changed and an error naming a", changed, err)
+	}
+	for name, want := range map[string]bool{"a": true, "b": false, "c": false} {
+		if live, getErr := a.get(ctx, name); getErr != nil || automatedEnabled(live) != want {
+			t.Errorf("%s: automated sync enabled = %t, want %t (%v)", name, automatedEnabled(live), want, getErr)
+		}
+	}
+}
+
 // Foreign names other runtimes' objects; Adopt moves exactly the recorded
 // object to the new runtime, drops orphaned-from, and refuses a recreated
 // object or one another runtime owns.
@@ -498,6 +548,46 @@ func TestOrphanAnnotatesOwnObjects(t *testing.T) {
 	annotated := after.GetAnnotations()[v1alpha1.AnnotationOrphanedFrom] == p.RuntimeUID && jsonEqual(after.Object["spec"], before.Object["spec"])
 	if !annotated || other.GetAnnotations()[v1alpha1.AnnotationOrphanedFrom] != "" {
 		t.Fatalf("after Orphan: %v; other %v", after.GetAnnotations(), other.GetAnnotations())
+	}
+}
+
+// The orphaned-from annotation is best effort: an Application refused it for
+// good is skipped and named, and the rest are annotated. A transient
+// failure still fails Orphan, so the deletion retries.
+func TestOrphanSkipsARefusedApplication(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tests := []struct {
+		name          string
+		err           error
+		wantAnnotated []string
+		wantReason    string
+		wantTransient bool
+	}{
+		{"admission denied", apierrors.NewForbidden(applications, "a", errors.New("denied by admission policy")),
+			[]string{"b", "c"}, ReasonOrphanAnnotationRefused, false},
+		{"invalid", apierrors.NewInvalid(ApplicationGVK.GroupKind(), "a", nil), []string{"b", "c"}, ReasonOrphanAnnotationRefused, false},
+		{"unavailable", apierrors.NewServiceUnavailable("apiserver overloaded"), nil, "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			a := fakeAdapter(t)
+			ownedApps(t, ctx, a, "a", "b", "c")
+			refusing(a, "a", tt.err)
+			annotated, err := a.Orphan(ctx, uid)
+			if !slices.Equal(annotated, tt.wantAnnotated) || operrors.ReasonOf(err) != tt.wantReason || operrors.IsTransient(err) != tt.wantTransient {
+				t.Fatalf("Orphan() = %v, %v; want %v, reason %q", annotated, err, tt.wantAnnotated, tt.wantReason)
+			}
+			if tt.wantReason != "" && !strings.Contains(err.Error(), "Applications a refused") {
+				t.Errorf("error = %v, want it to name a", err)
+			}
+			for _, name := range tt.wantAnnotated {
+				if live, getErr := a.get(ctx, name); getErr != nil || live.GetAnnotations()[v1alpha1.AnnotationOrphanedFrom] != uid {
+					t.Errorf("%s is not annotated orphaned-from: %v", name, getErr)
+				}
+			}
+		})
 	}
 }
 

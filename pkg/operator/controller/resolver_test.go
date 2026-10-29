@@ -44,12 +44,15 @@ import (
 	"github.com/NVIDIA/aicr/pkg/operator/resolver"
 )
 
-// fakeRegistry serves one rendered bundle and mirrors charts in memory.
+// fakeRegistry serves one rendered bundle and mirrors charts in memory,
+// counting bundle pulls and chart mirrors.
 type fakeRegistry struct {
 	bundle   *registry.Bundle
 	resolved map[string]string
 	// err fails every call, as unavailable credentials do.
-	err error
+	err     error
+	pulls   int
+	mirrors int
 }
 
 func (f *fakeRegistry) Resolve(_ context.Context, _ registry.Repository, tag string) (string, error) {
@@ -63,10 +66,12 @@ func (f *fakeRegistry) Resolve(_ context.Context, _ registry.Repository, tag str
 }
 
 func (f *fakeRegistry) PullBundle(_ context.Context, _ registry.Repository, digest string) (*registry.Bundle, error) {
+	f.pulls++
 	return f.bundle, nil
 }
 
 func (f *fakeRegistry) MirrorHTTPChart(_ context.Context, up registry.UpstreamChart, target registry.Repository) (*registry.MirroredChart, error) {
+	f.mirrors++
 	return &registry.MirroredChart{Repository: target.Child(up.Chart), Digest: plan.DigestOf([]byte(up.Chart)),
 		ArchiveDigest: plan.DigestOf([]byte("archive")), Archive: chartArchive(t0)}, nil
 }
@@ -672,6 +677,7 @@ func TestResolverChecksOverridePaths(t *testing.T) {
 
 		t.Fatalf("Resolved = %+v, candidate %q", c, rt.Status.CandidatePlanDigest)
 	}
+	stallsAgainWithoutPulling(t, ctx, r, reg, resolver.ReasonOverridePathUnknown)
 
 	patch := client.MergeFrom(rt.DeepCopy())
 	rt.Spec.Overrides[3].Additive = true
@@ -764,6 +770,25 @@ func TestResolverRefusesNamespacesOutsideTheAllowlist(t *testing.T) {
 	refused := c.Status == metav1.ConditionFalse && c.Reason == resolver.ReasonNamespaceNotAllowed && strings.Contains(c.Message, "cert-manager in cert-manager")
 	if !refused || rt.Status.CandidatePlanDigest != "" {
 		t.Fatalf("Resolved = %+v, candidate %q", c, rt.Status.CandidatePlanDigest)
+	}
+	stallsAgainWithoutPulling(t, ctx, r, reg, resolver.ReasonNamespaceNotAllowed)
+}
+
+// stallsAgainWithoutPulling resyncs a resolution its plan checks refused:
+// the verdict depends on the inputs alone, so it stands without another
+// bundle pull or chart mirror.
+func stallsAgainWithoutPulling(t *testing.T, ctx context.Context, r *ResolverReconciler, reg *fakeRegistry, reason string) {
+	t.Helper()
+	pulls, mirrors := reg.pulls, reg.mirrors
+	if pulls == 0 || mirrors == 0 {
+		t.Fatalf("the first resolution pulled %d bundles and mirrored %d charts", pulls, mirrors)
+	}
+	if err := reconcileResolver(t, ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	c := cond(getRuntime(t, ctx), v1alpha1.ConditionResolved)
+	if c.Status != metav1.ConditionFalse || c.Reason != reason || reg.pulls != pulls || reg.mirrors != mirrors {
+		t.Fatalf("after a resync: Resolved = %+v; %d more bundle pulls, %d more chart mirrors", c, reg.pulls-pulls, reg.mirrors-mirrors)
 	}
 }
 

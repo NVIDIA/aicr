@@ -234,7 +234,9 @@ func TransformNode(obj any) (any, error) { //nolint:unparam // implements cache.
 }
 
 // Relevant reports whether a Node update changes anything discovery reads:
-// labels, taints, provider ID, node info or readiness. Heartbeats do not.
+// labels, taints, provider ID, the node info fields of its tuple or
+// readiness. Heartbeats do not, nor does node info discovery never reads,
+// such as swap status.
 func Relevant(old, updated *corev1.Node) bool {
 	ready := func(n *corev1.Node) corev1.ConditionStatus {
 		for _, c := range n.Status.Conditions {
@@ -245,6 +247,6 @@ func Relevant(old, updated *corev1.Node) bool {
 		return corev1.ConditionUnknown
 	}
 	return !reflect.DeepEqual(old.Labels, updated.Labels) || !reflect.DeepEqual(old.Spec.Taints, updated.Spec.Taints) ||
-		old.Spec.ProviderID != updated.Spec.ProviderID || old.Status.NodeInfo != updated.Status.NodeInfo ||
+		old.Spec.ProviderID != updated.Spec.ProviderID || tupleOf(old) != tupleOf(updated) ||
 		ready(old) != ready(updated)
 }

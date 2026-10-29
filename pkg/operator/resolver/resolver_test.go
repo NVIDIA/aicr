@@ -22,6 +22,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -278,8 +279,21 @@ func chartArchive(t *testing.T, files map[string]string) []byte {
 	return buf.Bytes()
 }
 
+// nestedCharts packages a chart with no CRDs inside depth levels of
+// packaged subcharts.
+func nestedCharts(t *testing.T, depth int) map[string]string {
+	t.Helper()
+	files := map[string]string{"c/Chart.yaml": "name: c"}
+	for i := range depth {
+		name := fmt.Sprintf("s%d", i)
+		files = map[string]string{name + "/Chart.yaml": "name: " + name, name + "/charts/inner-1.0.0.tgz": string(chartArchive(t, files))}
+	}
+	return files
+}
+
 func TestChartOwnsCRDs(t *testing.T) {
 	t.Parallel()
+	const crd = "kind: CustomResourceDefinition\n"
 	tests := map[string]struct {
 		files map[string]string
 		want  bool
@@ -294,6 +308,14 @@ func TestChartOwnsCRDs(t *testing.T) {
 		"crd in files/":     {map[string]string{"c/files/x-crd.yaml": "kind: CustomResourceDefinition\n", "c/templates/crd.yaml": "{{ .Files.Get \"files/x-crd.yaml\" }}"}, true},
 		"packaged chart":    {map[string]string{"c/charts/s-1.0.0.tgz": string(chartArchive(t, map[string]string{"s/crds/x.yaml": "x"}))}, true},
 		"too large to scan": {map[string]string{"c/templates/big.yaml": strings.Repeat("#", maxTemplateBytes+1)}, true},
+		// Only a chart's own values file is never rendered.
+		"subchart values":            {map[string]string{"c/charts/s/values.yaml": crd}, false},
+		"values.yaml in templates/":  {map[string]string{"c/templates/values.yaml": crd}, true},
+		"values.yaml in files/":      {map[string]string{"c/files/values.yaml": crd, "c/templates/x.yaml": "{{ .Files.Get \"files/values.yaml\" }}"}, true},
+		"subchart template values":   {map[string]string{"c/charts/s/templates/values.yml": crd}, true},
+		"unreadable packaged chart":  {map[string]string{"c/charts/s-1.0.0.tgz": "not an archive"}, true},
+		"nested within the bound":    {nestedCharts(t, maxNestedCharts), false},
+		"nested deeper than scanned": {nestedCharts(t, maxNestedCharts+1), true},
 	}
 	for name, tt := range tests {
 		got, err := chartOwnsCRDs(chartArchive(t, tt.files))

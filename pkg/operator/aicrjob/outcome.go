@@ -118,18 +118,25 @@ func ObserveOutcome(stage Stage, wantRunID string, job *batchv1.Job, pod *corev1
 	case hasCondition(job, batchv1.JobFailed):
 		code, ok := exitCode(pod)
 		msg := terminationMessage(pod)
-		if !ok {
+		if ok && code != ExitSuccess {
+			return Outcome{State: StateFailed, Message: msg, Err: ErrorFromExitCode(stage, code, msg), exited: true, exitCode: code}, nil
+		}
+		// No failing exit, so a new run may succeed, within the bound.
+		reason := failedReason(job)
+		var err *operrors.StructuredError
+		if ok {
+			// The container exited 0, but the Job failed regardless, as
+			// when its deadline is reached as the container exits.
+			err = operrors.New(operrors.ErrCodeInternal, fmt.Sprintf("aicr %s Job failed (%s) although its container exited 0", stage, reason))
+		} else {
 			// No terminated container: deadline exceeded, eviction or a pod
-			// that never started. A new run may succeed, within the bound.
-			reason := failedReason(job)
+			// that never started.
 			if last := job.Annotations[v1alpha1.AnnotationWaiting]; last != "" {
 				reason += "; last: " + last
 			}
-			return Outcome{State: StateFailed, Message: msg, Err: operrors.New(operrors.ErrCodeTimeout,
-				fmt.Sprintf("aicr %s Job failed without a container exit (%s)", stage, reason)).
-				WithContext(map[string]any{"stage": string(stage), "jobReason": reason})}, nil
+			err = operrors.New(operrors.ErrCodeTimeout, fmt.Sprintf("aicr %s Job failed without a container exit (%s)", stage, reason))
 		}
-		return Outcome{State: StateFailed, Message: msg, Err: ErrorFromExitCode(stage, code, msg), exited: true, exitCode: code}, nil
+		return Outcome{State: StateFailed, Message: msg, Err: err.WithContext(map[string]any{"stage": string(stage), "jobReason": reason})}, nil
 	default:
 		waiting, cannotStart := podWaiting(job, pod)
 		if cannotStart {

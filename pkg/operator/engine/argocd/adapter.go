@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"sort"
@@ -666,7 +667,9 @@ type InventoryItem struct {
 // the runtime, and returns the names it changed. It writes only
 // syncPolicy.automated.enabled and never deletes. While suspended, Argo CD
 // neither syncs nor heals, and the operator starts no step and repairs no
-// drift; the next Ensure after a resume states enabled: true again.
+// drift; the next Ensure after a resume states enabled: true again. One
+// refused write does not stop the rest: the error names every Application
+// left unchanged.
 func (a *Adapter) Suspend(ctx context.Context, runtimeUID string, suspended bool) ([]string, error) {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(ApplicationGVK.GroupVersion().WithKind(ApplicationGVK.Kind + "List"))
@@ -678,25 +681,39 @@ func (a *Adapter) Suspend(ctx context.Context, runtimeUID string, suspended bool
 		return nil, operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "list Applications")
 	}
 	patch := []byte(fmt.Sprintf(`{"spec":{"syncPolicy":{"automated":{"enabled":%t}}}}`, !suspended))
-	var changed []string
+	var changed, failed []string
+	var errs []error
 	for i := range list.Items {
 		app := &list.Items[i]
 		if !a.owned(app, runtimeUID) || automatedEnabled(app) != suspended {
 			continue
 		}
 		if err = a.Writer.Patch(ctx, app, client.RawPatch(types.MergePatchType, patch), client.FieldOwner(SuspensionFieldManager)); err != nil {
-			return changed, operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "set automated sync of Application "+app.GetName())
+			failed, errs = append(failed, app.GetName()), append(errs, err)
+			continue
 		}
 		changed = append(changed, app.GetName())
 	}
 	sort.Strings(changed)
+	if len(failed) > 0 {
+		sort.Strings(failed)
+		return changed, operrors.WrapCtxErr(errors.Join(errs...), operrors.ErrCodeUnavailable,
+			"set automated sync of Applications "+strings.Join(failed, ", "))
+	}
 	return changed, nil
 }
+
+// ReasonOrphanAnnotationRefused marks an Orphan error that names the
+// Applications the API server refused to annotate, after the rest were.
+const ReasonOrphanAnnotationRefused = "OrphanAnnotationRefused"
 
 // Orphan annotates every Application of a deleted runtime with
 // operator.aicr.run/orphaned-from and returns the names it annotated.
 // The objects keep their spec, so Argo CD keeps reconciling them,
 // and their annotations remain the record a later runtime adopts from.
+// The annotation is a record only: an Application the API server refuses it
+// for good, such as by an admission policy, is skipped, and the error, of
+// reason ReasonOrphanAnnotationRefused, names it once the rest are annotated.
 func (a *Adapter) Orphan(ctx context.Context, runtimeUID string) ([]string, error) {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(ApplicationGVK.GroupVersion().WithKind(ApplicationGVK.Kind + "List"))
@@ -708,7 +725,8 @@ func (a *Adapter) Orphan(ctx context.Context, runtimeUID string) ([]string, erro
 		return nil, operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "list Applications")
 	}
 	patch := []byte(`{"metadata":{"annotations":{"` + v1alpha1.AnnotationOrphanedFrom + `":"` + runtimeUID + `"}}}`)
-	var annotated []string
+	var annotated, refused []string
+	var errs []error
 	for i := range list.Items {
 		app := &list.Items[i]
 		if !a.owned(app, runtimeUID) {
@@ -716,12 +734,23 @@ func (a *Adapter) Orphan(ctx context.Context, runtimeUID string) ([]string, erro
 		}
 		if app.GetAnnotations()[v1alpha1.AnnotationOrphanedFrom] != runtimeUID {
 			if err = a.Writer.Patch(ctx, app, client.RawPatch(types.MergePatchType, patch), client.FieldOwner(OrphanFieldManager)); err != nil {
-				return annotated, operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "orphan Application "+app.GetName())
+				wrapped := operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "orphan Application "+app.GetName())
+				if !operrors.IsPermanent(wrapped) {
+					return annotated, wrapped
+				}
+				refused, errs = append(refused, app.GetName()), append(errs, err)
+				continue
 			}
 		}
 		annotated = append(annotated, app.GetName())
 	}
 	sort.Strings(annotated)
+	if len(refused) > 0 {
+		sort.Strings(refused)
+		return annotated, operrors.WrapCtxErr(errors.Join(errs...), operrors.ErrCodeInvalidRequest,
+			"Applications "+strings.Join(refused, ", ")+" refused the orphaned-from annotation").
+			WithReason(ReasonOrphanAnnotationRefused)
+	}
 	return annotated, nil
 }
 

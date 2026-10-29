@@ -159,32 +159,28 @@ func (r *RepoCredsRefresher) Check(ctx context.Context) error {
 	return nil
 }
 
-// Collectors exposes the token's remaining validity and the age of the last
-// successful refresh, in seconds.
+// Collectors exposes when the token expires and when it was last refreshed,
+// as Unix timestamps. Each is 0 until known, which an alert on its age reads
+// as long ago, never as fresh.
 func (r *RepoCredsRefresher) Collectors() []prometheus.Collector {
-	read := func(f func(now, expires, refreshed time.Time) float64) func() float64 {
+	read := func(at func() time.Time) func() float64 {
 		return func() float64 {
 			r.mu.Lock()
 			defer r.mu.Unlock()
-			if r.expires.IsZero() {
-				return 0
+			if t := at(); !t.IsZero() {
+				return float64(t.Unix())
 			}
-			return f(r.Now(), r.expires, r.refreshed)
+			return 0
 		}
 	}
 	return []prometheus.Collector{
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-			Name: "aicr_operator_registry_token_expiry_seconds",
-			Help: "Seconds until the engine's registry token expires.",
-		}, read(func(now, expires, _ time.Time) float64 { return expires.Sub(now).Seconds() })),
+			Name: "aicr_operator_registry_token_expiry_timestamp_seconds",
+			Help: "Unix time the engine's registry token expires; 0 until known.",
+		}, read(func() time.Time { return r.expires })),
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-			Name: "aicr_operator_registry_token_age_seconds",
-			Help: "Seconds since the engine's registry token was last refreshed.",
-		}, read(func(now, _, refreshed time.Time) float64 {
-			if refreshed.IsZero() {
-				return 0
-			}
-			return now.Sub(refreshed).Seconds()
-		})),
+			Name: "aicr_operator_registry_token_refresh_timestamp_seconds",
+			Help: "Unix time of the last successful refresh of the engine's registry token; 0 until one since the operator started.",
+		}, read(func() time.Time { return r.refreshed })),
 	}
 }

@@ -94,15 +94,19 @@ const (
 	JobMemoryLimit   = "1Gi"
 )
 
-// Registry and chart delivery. Every fetched artifact is bounded,
-// so a hostile or broken registry cannot exhaust the operator's memory.
+// Registry and chart delivery. Every fetched artifact is bounded, so a
+// hostile or broken registry cannot exhaust the operator's memory: a
+// resolution holds two bundles at once, the render and its base render, each
+// at most MaxBundleLayerBytes compressed plus MaxBundleBytes unpacked, 160 MiB
+// together, which leaves room under the chart's 512Mi limit for a chart index
+// and archive being mirrored.
 const (
 	// RegistryTimeout bounds one registry or upstream chart operation.
 	RegistryTimeout = 2 * time.Minute
 	// MaxBundleLayerBytes bounds the compressed AICR bundle layer.
-	MaxBundleLayerBytes = 64 << 20
+	MaxBundleLayerBytes = 16 << 20
 	// MaxBundleBytes bounds the bundle's uncompressed content.
-	MaxBundleBytes = 256 << 20
+	MaxBundleBytes = 64 << 20
 	// MaxBundleFiles bounds the entries in a bundle.
 	MaxBundleFiles = 4096
 	// MaxChartArchiveBytes bounds one chart archive.

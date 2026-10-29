@@ -161,9 +161,10 @@ kubectl -n argocd get secret aicr-registry \
   -o jsonpath='{.metadata.annotations.operator\.aicr\.run/token-expires-at}'
 ```
 
-`aicr_operator_registry_token_expiry_seconds` shows the same expiry. Once a
-token has expired, Argo CD reports `ComparisonError` on the Applications;
-running workloads are unaffected, and comparisons recover after the refresh.
+`aicr_operator_registry_token_expiry_timestamp_seconds` shows the same expiry
+as a Unix time. Once a token has expired, Argo CD reports `ComparisonError` on
+the Applications; running workloads are unaffected, and comparisons recover
+after the refresh.
 
 ## AICR version mismatch
 

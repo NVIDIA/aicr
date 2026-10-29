@@ -36,8 +36,13 @@ import (
 // render nor the chart's defaults know: a likely typo.
 const ReasonOverridePathUnknown = "OverridePathUnknown"
 
-// maxChartDefaultsBytes bounds one values file read from a chart archive.
-const maxChartDefaultsBytes = 4 << 20
+// Bounds on what the chart defaults read from one chart archive: each
+// values file or packaged subchart, all of them together, and their number.
+const (
+	maxChartDefaultsBytes      = 4 << 20
+	maxChartDefaultsTotalBytes = 16 << 20
+	maxChartDefaultsEntries    = 1024
+)
 
 // ValueOverrides reports whether a spec overrides values, not only component
 // toggles; only then does resolution need a base render.
@@ -138,8 +143,13 @@ func hasPath(values map[string]any, p string) bool {
 
 // chartDefaults reads a chart archive's default values: the chart's
 // values.yaml, with each bundled subchart's defaults under its name, as Helm
-// scopes them. Subcharts may be directories or nested archives.
+// scopes them. Subcharts may be directories or nested archives; archives
+// nested deeper than the CRD scan follows contribute nothing.
 func chartDefaults(archive []byte) (map[string]any, error) {
+	return chartDefaultsAt(archive, 0)
+}
+
+func chartDefaultsAt(archive []byte, depth int) (map[string]any, error) {
 	files, err := readArchive(archive)
 	if err != nil {
 		return nil, err
@@ -154,12 +164,12 @@ func chartDefaults(archive []byte) (map[string]any, error) {
 				return nil, operrors.New(operrors.ErrCodeInvalidRequest, "chart values.yaml: "+perr.Error())
 			}
 			defaults = mergeValues(defaults, doc)
-		case len(parts) == 4 && parts[1] == "charts" && parts[3] == chartValuesFile:
+		case len(parts) == 4 && parts[1] == subchartsDir && parts[3] == chartValuesFile:
 			if doc, perr := parseValues(data); perr == nil {
 				defaults = mergeValues(defaults, map[string]any{parts[2]: doc})
 			}
-		case len(parts) == 3 && parts[1] == "charts" && strings.HasSuffix(parts[2], ".tgz"):
-			sub, serr := chartDefaults(data)
+		case len(parts) == 3 && parts[1] == subchartsDir && strings.HasSuffix(parts[2], ".tgz") && depth < maxNestedCharts:
+			sub, serr := chartDefaultsAt(data, depth+1)
 			if serr != nil {
 				continue
 			}
@@ -174,7 +184,7 @@ func chartDefaults(archive []byte) (map[string]any, error) {
 }
 
 // readArchive reads the values files and nested chart archives of a chart
-// archive, bounded per file.
+// archive, bounded per file, in total and in number.
 func readArchive(archive []byte) (map[string][]byte, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(archive))
 	if err != nil {
@@ -183,6 +193,7 @@ func readArchive(archive []byte) (map[string][]byte, error) {
 	defer gz.Close()
 	tr := tar.NewReader(gz)
 	files := map[string][]byte{}
+	total := 0
 	for {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -195,9 +206,17 @@ func readArchive(archive []byte) (map[string][]byte, error) {
 		if h.Typeflag != tar.TypeReg || (path.Base(name) != chartValuesFile && !strings.HasSuffix(name, ".tgz")) {
 			continue
 		}
+		if len(files) >= maxChartDefaultsEntries {
+			return nil, operrors.New(operrors.ErrCodeInvalidRequest,
+				fmt.Sprintf("chart archive has more than %d values files and subcharts", maxChartDefaultsEntries))
+		}
 		data, err := io.ReadAll(io.LimitReader(tr, maxChartDefaultsBytes+1))
 		if err != nil || len(data) > maxChartDefaultsBytes {
 			return nil, operrors.New(operrors.ErrCodeInvalidRequest, "chart archive entry "+name+" is unreadable or too large")
+		}
+		if total += len(data); total > maxChartDefaultsTotalBytes {
+			return nil, operrors.New(operrors.ErrCodeInvalidRequest,
+				fmt.Sprintf("chart archive values files and subcharts exceed %d bytes", maxChartDefaultsTotalBytes))
 		}
 		files[name] = data
 	}

@@ -17,6 +17,7 @@ package resolver
 import (
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -141,15 +142,49 @@ func TestChartDefaults(t *testing.T) {
 		}
 	}
 
+	oversized, numerous := map[string]string{}, map[string]string{}
+	for i := range maxChartDefaultsTotalBytes/maxChartDefaultsBytes + 1 {
+		oversized[fmt.Sprintf("c/charts/s%d/values.yaml", i)] = strings.Repeat("#", maxChartDefaultsBytes)
+	}
+	for i := range maxChartDefaultsEntries + 1 {
+		numerous[fmt.Sprintf("c/charts/s%d/values.yaml", i)] = "a: 1\n"
+	}
 	for name, bad := range map[string][]byte{
 		"not gzip":        []byte("plain"),
 		"not tar":         gzipped(t, []byte("not a tar stream at all, just bytes")),
 		"bad values":      chartArchive(t, map[string]string{"c/values.yaml": "a: ["}),
 		"oversized entry": chartArchive(t, map[string]string{"c/values.yaml": strings.Repeat("#", maxChartDefaultsBytes+1)}),
+		"oversized total": chartArchive(t, oversized),
+		"too many files":  chartArchive(t, numerous),
 	} {
 		if _, err := chartDefaults(bad); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
 			t.Errorf("%s: chartDefaults() = %v", name, err)
 		}
+	}
+}
+
+// Defaults are read from packaged subcharts as deep as the CRD scan
+// follows them, and no deeper.
+func TestChartDefaultsStopsAtTheNestingBound(t *testing.T) {
+	t.Parallel()
+	archive := chartArchive(t, map[string]string{"l3/Chart.yaml": "apiVersion: v2\nname: l3\nversion: 1.0.0\n", "l3/values.yaml": "deepest: 3\n"})
+	for level := 2; level >= 0; level-- {
+		name := fmt.Sprintf("l%d", level)
+		archive = chartArchive(t, map[string]string{
+			name + "/Chart.yaml":  fmt.Sprintf("apiVersion: v2\nname: %s\nversion: 1.0.0\n", name),
+			name + "/values.yaml": fmt.Sprintf("level: %d\n", level),
+			fmt.Sprintf("%s/charts/l%d-1.0.0.tgz", name, level+1): string(archive),
+		})
+	}
+	got, err := chartDefaults(archive)
+	if err != nil {
+		t.Fatalf("chartDefaults() = %v", err)
+	}
+	if !hasPath(got, "level") || !hasPath(got, "l1.level") || !hasPath(got, "l1.l2.level") {
+		t.Errorf("defaults within the bound are missing: %v", got)
+	}
+	if hasPath(got, "l1.l2.l3") {
+		t.Errorf("defaults were read %d levels deep: %v", maxNestedCharts+1, got)
 	}
 }
 

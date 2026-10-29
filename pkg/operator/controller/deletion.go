@@ -117,7 +117,8 @@ func (r *RolloutReconciler) deleting(ctx context.Context, rt *v1alpha1.ClusterRu
 // engine operation, end any unfinished rollout Orphaned, annotate the engine
 // objects with orphaned-from, and remove the finalizer. The engine keeps
 // reconciling everything, and the objects are the record a later runtime
-// adopts from.
+// adopts from. An object refused the annotation for good is named in a
+// Warning Event and does not hold the finalizer.
 func (r *RolloutReconciler) orphanRuntime(ctx context.Context, rt *v1alpha1.ClusterRuntime) error {
 	rollouts, err := r.rollouts(ctx, rt)
 	if err != nil {
@@ -131,6 +132,10 @@ func (r *RolloutReconciler) orphanRuntime(ctx context.Context, rt *v1alpha1.Clus
 		}
 	}
 	annotated, err := r.Engine.Orphan(ctx, string(rt.UID))
+	if operrors.ReasonOf(err) == argocd.ReasonOrphanAnnotationRefused {
+		r.event(rt, corev1.EventTypeWarning, argocd.ReasonOrphanAnnotationRefused, "%s", errorMessage(err))
+		err = nil
+	}
 	if err != nil {
 		return err
 	}
