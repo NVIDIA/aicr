@@ -17,6 +17,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -27,6 +28,7 @@ import (
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
 	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
+	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 	"github.com/NVIDIA/aicr/pkg/operator/plan"
 )
 
@@ -338,20 +340,78 @@ func TestInventoryDriftAllowsTheRolloutsOwnWrites(t *testing.T) {
 		{ReleaseID: "a", Name: "a", UID: "u-a", PlanDigest: to},
 		{ReleaseID: "b", Name: "b", UID: "u-b", PlanDigest: to},
 	}
-	if d := inventoryDrift(ro, live); len(d) != 0 {
+	if d := driftOf(t, ro, live); len(d) != 0 {
 		t.Fatalf("own writes reported as drift: %v", d)
 	}
 	ro.Status.Releases = nil
-	if d := inventoryDrift(ro, start); len(d) != 0 {
+	if d := driftOf(t, ro, start); len(d) != 0 {
 		t.Fatalf("the starting state reported as drift: %v", d)
 	}
 	setReleaseState(ro, "a", v1alpha1.ReleaseReady, "")
-	if d := inventoryDrift(ro, start); len(d) != 1 || !strings.Contains(d[0], "a is at plan") {
+	if d := driftOf(t, ro, start); len(d) != 1 || !strings.Contains(d[0], "a is at plan") {
 		t.Fatalf("a completed step back at its starting plan: %v", d)
 	}
 	ro.Spec.StartingInventoryDigest = digestOther
-	if d := inventoryDrift(ro, nil); d != nil {
+	if d := driftOf(t, ro, nil); d != nil {
 		t.Fatalf("a rollout without a recorded inventory: %v", d)
+	}
+}
+
+// driftOf runs inventoryDrift with every Application at the target plan
+// carrying the plan's write.
+func driftOf(t *testing.T, ro *v1alpha1.RuntimeRollout, live []argocd.InventoryItem) []string {
+	t.Helper()
+	d, err := inventoryDrift(ro, live, func(string) (bool, error) { return true, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// A pending step's release at the target plan that this rollout has not
+// recorded writing must carry the plan's write: an editor who changes the
+// spec and sets the plan digest annotation is reported, not taken for a
+// write a restart lost. Only such a release is checked against the plan.
+func TestInventoryDriftChecksUnrecordedWritesAgainstThePlan(t *testing.T) {
+	t.Parallel()
+	from, to := digestOther, "sha256:0000000000000000000000000000000000000000000000000000000000000002"
+	spec := "sha256:" + strings.Repeat("a", 64)
+	start := []argocd.InventoryItem{
+		{ReleaseID: "a", Name: "a", UID: "u-a", PlanDigest: from, SpecDigest: spec},
+		{ReleaseID: "c", Name: "c", UID: "u-c", PlanDigest: from, SpecDigest: spec},
+	}
+	ro := &v1alpha1.RuntimeRollout{Spec: v1alpha1.RuntimeRolloutSpec{
+		ToPlanDigest: to, StartingInventory: startingInventory(start), StartingInventoryDigest: inventoryDigest(t, start),
+		Steps: []v1alpha1.RolloutStep{
+			{Release: "a", Operation: v1alpha1.OperationUpgrade},
+			{Release: "b", Operation: v1alpha1.OperationInstall},
+			{Release: "c", Operation: v1alpha1.OperationUpgrade},
+		},
+	}}
+	live := []argocd.InventoryItem{
+		{ReleaseID: "a", Name: "a", UID: "u-a", PlanDigest: to, SpecDigest: "sha256:" + strings.Repeat("e", 64)},
+		{ReleaseID: "b", Name: "b", UID: "u-b", PlanDigest: to},
+		{ReleaseID: "c", Name: "c", UID: "u-c", PlanDigest: from, SpecDigest: spec},
+	}
+	var checked []string
+	carries := func(written bool) func(string) (bool, error) {
+		return func(id string) (bool, error) {
+			checked = append(checked, id)
+			return written, nil
+		}
+	}
+	d, err := inventoryDrift(ro, live, carries(true))
+	if err != nil || len(d) != 0 || !slices.Equal(checked, []string{"a", "b"}) {
+		t.Fatalf("writes carrying the plan: drift %v, err %v, checked %v", d, err, checked)
+	}
+	checked = nil
+	d, err = inventoryDrift(ro, live, carries(false))
+	if err != nil || len(d) != 2 || !strings.Contains(d[0], "a was edited") || !strings.Contains(d[1], "b was edited") {
+		t.Fatalf("objects at the target plan without its write: drift %v, err %v", d, err)
+	}
+	unavailable := operrors.New(operrors.ErrCodeUnavailable, "read values")
+	if _, err = inventoryDrift(ro, live, func(string) (bool, error) { return false, unavailable }); !errors.Is(err, unavailable) {
+		t.Fatalf("a failed check: %v", err)
 	}
 }
 
@@ -387,13 +447,13 @@ func TestInventoryDriftNamesEditedSpecs(t *testing.T) {
 
 	ro := rollout(start)
 	completed(ro)
-	if d := inventoryDrift(ro, live(written, specB)); len(d) != 0 {
+	if d := driftOf(t, ro, live(written, specB)); len(d) != 0 {
 		t.Fatalf("the rollout's own write and an untouched release: %v", d)
 	}
-	if d := inventoryDrift(ro, live(edited, specB)); len(d) != 1 || !strings.Contains(d[0], "a was edited") {
+	if d := driftOf(t, ro, live(edited, specB)); len(d) != 1 || !strings.Contains(d[0], "a was edited") {
 		t.Fatalf("a written release edited afterwards: %v", d)
 	}
-	if d := inventoryDrift(ro, live(written, edited)); len(d) != 1 || !strings.Contains(d[0], "b was edited") {
+	if d := driftOf(t, ro, live(written, edited)); len(d) != 1 || !strings.Contains(d[0], "b was edited") {
 		t.Fatalf("a release not reached yet edited: %v", d)
 	}
 
@@ -405,11 +465,11 @@ func TestInventoryDriftNamesEditedSpecs(t *testing.T) {
 	completed(ro)
 	carried := live(written, specB)
 	carried[1].PlanDigest = to
-	if d := inventoryDrift(ro, carried); len(d) != 0 {
+	if d := driftOf(t, ro, carried); len(d) != 0 {
 		t.Fatalf("an untouched release already at the target: %v", d)
 	}
 	carried[1].SpecDigest = edited
-	if d := inventoryDrift(ro, carried); len(d) != 1 || !strings.Contains(d[0], "b was edited") {
+	if d := driftOf(t, ro, carried); len(d) != 1 || !strings.Contains(d[0], "b was edited") {
 		t.Fatalf("a release already at the target, not reached yet, edited: %v", d)
 	}
 
@@ -419,7 +479,7 @@ func TestInventoryDriftNamesEditedSpecs(t *testing.T) {
 	}
 	ro = rollout(unrecorded)
 	setReleaseState(ro, "a", v1alpha1.ReleaseReady, "")
-	if d := inventoryDrift(ro, live(edited, edited)); len(d) != 0 {
+	if d := driftOf(t, ro, live(edited, edited)); len(d) != 0 {
 		t.Fatalf("a rollout recorded without fingerprints: %v", d)
 	}
 }

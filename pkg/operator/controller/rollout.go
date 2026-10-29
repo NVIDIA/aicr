@@ -778,7 +778,7 @@ func (r *RolloutReconciler) advance(ctx context.Context, rt *v1alpha1.ClusterRun
 		if cur := ro.Status.Current; cur == nil || cur.Release != step.Release {
 			// Before each step, live state must be the starting inventory
 			// plus the completed steps.
-			if drifted, dErr := r.checkDrift(ctx, rt, ro, v); dErr != nil || drifted {
+			if drifted, dErr := r.checkDrift(ctx, rt, ro, p, v); dErr != nil || drifted {
 				return dErr
 			}
 		}

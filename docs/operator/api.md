@@ -291,8 +291,8 @@ provenance:
 recipe:                             # absent on a Rebuilt plan
   name: h100-eks-ubuntu-training-kubeflow
   criteria: {service: eks, accelerator: h100, os: ubuntu, intent: training, platform: kubeflow}
-  configMapRef: {name: aicr-recipe-<digest prefix>, digest: sha256:<...>}            # the recipe Job's output: upgrade-check and reproduce
-  validationConfigMapRef: {name: aicr-recipe-<digest prefix>, digest: sha256:<...>}  # the bundle's recipe: deployment validation
+  configMapRef: {configMap: aicr-recipe-<digest prefix>, digest: sha256:<...>}            # the recipe Job's output: upgrade-check and reproduce
+  validationConfigMapRef: {configMap: aicr-recipe-<digest prefix>, digest: sha256:<...>}  # the bundle's recipe: deployment validation
   warnings: []                      # bounded AICR bundle notes and warnings
 releases:                           # AICR normative order; DAG edges explicit
 - id: gpu-operator

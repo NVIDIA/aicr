@@ -26,6 +26,7 @@ import (
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
 	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
+	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 	"github.com/NVIDIA/aicr/pkg/operator/plan"
 )
 
@@ -97,15 +98,17 @@ func recordedInventory(ro *v1alpha1.RuntimeRollout) (map[string]v1alpha1.Invento
 // inventory plus its completed steps. A release outside the steps
 // must be as it started; a completed step's release must be at its end
 // state; a pending step's release may be either, as after a write whose
-// record a restart lost. The release of the step in flight is not judged.
-// The engine's observed revision is not compared: it follows the spec.
-// "As it started" includes the spec fingerprint the starting inventory
-// recorded, and a completed step's end state the fingerprint recorded when
-// it became ready; a missing fingerprint is not compared.
-func inventoryDrift(ro *v1alpha1.RuntimeRollout, live []argocd.InventoryItem) []string {
+// record a restart lost, and at its end state it must carry the plan's
+// write, which carries reports: a plan digest alone is an annotation any
+// Application editor can set. The release of the step in flight is not
+// judged. The engine's observed revision is not compared: it follows the
+// spec. "As it started" includes the spec fingerprint the starting
+// inventory recorded, and a completed step's end state the fingerprint
+// recorded when it became ready; a missing fingerprint is not compared.
+func inventoryDrift(ro *v1alpha1.RuntimeRollout, live []argocd.InventoryItem, carries func(id string) (bool, error)) ([]string, error) {
 	start, ok := recordedInventory(ro)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	var drift []string
 	now := map[string]argocd.InventoryItem{}
@@ -156,12 +159,19 @@ func inventoryDrift(ro *v1alpha1.RuntimeRollout, live []argocd.InventoryItem) []
 			// object it started from is an edit even when that object is
 			// already at the target plan, as on a retry.
 			ok = !edited && (original || ended(ro, step, s, started, l, present))
+			if ok && !original && present && l.PlanDigest == ro.Spec.ToPlanDigest {
+				var err error
+				if ok, err = carries(id); err != nil {
+					return nil, err
+				}
+				edited = !ok
+			}
 		}
 		if !ok {
 			drift = append(drift, describeDrift(id, s, started, l, present, edited))
 		}
 	}
-	return drift
+	return drift, nil
 }
 
 // sameSpec compares a recorded spec fingerprint with a live one; a missing
@@ -217,7 +227,9 @@ func describeDrift(id string, s v1alpha1.InventoryEntry, started bool, l argocd.
 
 // checkDrift stalls the rollout when the live inventory drifted; the next
 // reconcile checks again, and a retry replaces the rollout.
-func (r *RolloutReconciler) checkDrift(ctx context.Context, rt *v1alpha1.ClusterRuntime, ro *v1alpha1.RuntimeRollout, v *runtimeView) (bool, error) {
+func (r *RolloutReconciler) checkDrift(ctx context.Context, rt *v1alpha1.ClusterRuntime, ro *v1alpha1.RuntimeRollout, p *plan.Document,
+	v *runtimeView) (bool, error) {
+
 	var live []argocd.InventoryItem
 	var err error
 	if isAdopt(ro) {
@@ -228,7 +240,15 @@ func (r *RolloutReconciler) checkDrift(ctx context.Context, rt *v1alpha1.Cluster
 	if err != nil {
 		return false, err
 	}
-	drift := inventoryDrift(ro, live)
+	drift, err := inventoryDrift(ro, live, func(id string) (bool, error) { return r.carriesPlan(ctx, p, id) })
+	if err != nil {
+		if operrors.IsPermanent(err) {
+			ro.Status.Phase = v1alpha1.PhaseStalled
+			v.stalled, v.stalledReason, v.stalledMsg = true, reasonOf(err), errorMessage(err)
+			return true, r.saveStatus(ctx, ro, errorMessage(err))
+		}
+		return false, err
+	}
 	if len(drift) == 0 {
 		return false, nil
 	}
@@ -236,6 +256,24 @@ func (r *RolloutReconciler) checkDrift(ctx context.Context, rt *v1alpha1.Cluster
 	ro.Status.Phase = v1alpha1.PhaseStalled
 	v.stalled, v.stalledReason, v.stalledMsg = true, ReasonInventoryDrift, msg
 	return true, r.saveStatus(ctx, ro, msg)
+}
+
+// carriesPlan reports whether a release's Application carries the target
+// plan's write of it, spec included.
+func (r *RolloutReconciler) carriesPlan(ctx context.Context, p *plan.Document, id string) (bool, error) {
+	rel := release(p, id)
+	if rel == nil {
+		return false, nil
+	}
+	values, err := r.values(ctx, rel)
+	if err != nil {
+		return false, err
+	}
+	obs, err := r.Engine.Observe(ctx, p, rel, values, r.Now(), false)
+	if err != nil {
+		return false, err
+	}
+	return obs.State != argocd.StateMissing && obs.Reason != argocd.ReasonSpecNotWritten && obs.Reason != argocd.ReasonSpecDrifted, nil
 }
 
 // landed reports whether a step's mutation was already made by this
