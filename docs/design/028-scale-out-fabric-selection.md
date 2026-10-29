@@ -139,7 +139,10 @@ NVCRE APIs with this resolution order:
 
 1. `spec.fabric` set: use it and validate it against the cluster.
 2. Unset: detect from the cluster (`vpc.amazonaws.com/efa` allocatable,
-   `roce.networking.k8s.aws` ResourceSlices, and similar).
+   RoCE ResourceSlices published by the `dra.networking.k8s.aws` driver
+   with `dra.vpc.amazonaws.com/deviceType: roce` devices, and similar;
+   `roce.networking.k8s.aws` is the DeviceClass that selects them, not the
+   slice driver, as cluster-readiness-engine#576 records).
 3. Unset and inconclusive: fall back to today's platform plus GPU
    architecture mapping.
 
