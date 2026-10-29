@@ -423,13 +423,13 @@
       <em>bundle</em> format AICR&rsquo;s images carry:
       <a href="https://docs.sigstore.dev/policy-controller/overview/">Sigstore Policy Controller</a>
       v0.13.0+ (<code class="inl">signatureFormat: bundle</code>) or
-      <a href="https://kyverno.io/">Kyverno</a> (<code class="inl">type: SigstoreBundle</code>; cluster testing has not yet verified AICR images).</p>
+      <a href="https://kyverno.io/">Kyverno</a> (an <code class="inl">ImageValidatingPolicy</code>, verified on v1.19.2).</p>
     <div class="note">
       <span class="t info">Release identity</span>
-      Issuer <code class="inl">https://token.actions.githubusercontent.com</code>, subject
-      <code class="inl">https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/*</code>.
-      Validated, cluster-tested copy-paste policies are tracked in
-      <a href="https://github.com/NVIDIA/aicr/issues/1537">#1537</a>.
+      Issuer <code class="inl">https://token.actions.githubusercontent.com</code>, subject matched by the regular expression
+      <code class="inl">^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/v.*$</code>.
+      Validated, cluster-tested policies are in
+      <a href="../docs/integrator/supply-chain-verification.md#enforcing-with-admission-policies">Enforcing with Admission Policies</a>.
     </div>
     <div class="grid2">
       <div class="mini"><h4 class="ok">Allowed</h4><p><code class="inl">kubectl run a --image=ghcr.io/nvidia/aicr:vX.Y.Z</code> — has attestation, identity matches.</p></div>

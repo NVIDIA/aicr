@@ -790,26 +790,141 @@ Sigstore *bundle* format (not the legacy Cosign signature format):
 Pin every policy to AICR's release identity:
 
 - **issuer:** `https://token.actions.githubusercontent.com`
-- **subject:** `https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/*` (the reusable attestation workflow that signs image provenance/SBOMs; narrow to the release pattern rather than trusting every workflow/ref)
+- **subject:** the reusable attestation workflow that signs image provenance and
+  SBOMs, at a release tag. Match it with a regular expression,
+  `^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/v.*$`,
+  rather than trusting every workflow or ref. A field that takes an exact
+  subject compares it literally, so a `*` in it never matches.
+
+Releases before v0.17.0 were signed by `on-tag.yaml` instead, and so is the AICR
+Operator preview image.
 
 ### Kyverno
 
-> **Not verified against AICR images — use Sigstore Policy Controller (below).**
-> Kyverno verifies Sigstore bundles with `type: SigstoreBundle` (v1.18+; see
-> Kyverno's
-> [Verifying Sigstore Bundles](https://kyverno.io/docs/policy-types/cluster-policy/verify-images/sigstore/#verifying-sigstore-bundles)
-> guide). In testing on GKE 1.35 with Kyverno **v1.18.1**, a `SigstoreBundle`
-> `verifyImages` rule pinned to AICR's release identity could **not** verify
-> AICR's GitHub Artifact Attestation — it failed with `no matching signatures
-> found`, even though `cosign verify-attestation` and the Policy Controller
-> policy below verify the same Sigstore-bundle (`v0.3`) referrer on the image's
-> index digest. Until that gap is understood, enforce AICR images with the
-> Sigstore Policy Controller policy below. Tracking:
-> [#1537](https://github.com/NVIDIA/aicr/issues/1537).
+Measured on kind with Kubernetes v1.37.0 and Kyverno v1.19.2, with internet
+access, against AICR v1.1.2 on ghcr.io. This `ImageValidatingPolicy` verified
+the provenance of `aicr` (by tag and by digest), `aicrd`, a validator image and
+`aicr-gate`, and denied v0.16.0, which `on-tag.yaml` signed. It checks only the
+images it names, so a Pod that also runs a non-AICR image was admitted with just
+the AICR image checked.
+
+```yaml
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: verify-aicr-provenance
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  webhookConfiguration:
+    timeoutSeconds: 30
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  matchImageReferences:
+    - glob: "ghcr.io/nvidia/aicr:*"
+    - glob: "ghcr.io/nvidia/aicr@*"
+    - glob: "ghcr.io/nvidia/aicrd*"
+    - glob: "ghcr.io/nvidia/aicr-validators/*"
+    - glob: "ghcr.io/nvidia/aicr-gate*"
+  validationConfigurations:
+    mutateDigest: true
+    verifyDigest: true
+    required: true
+  attestors:
+    - name: aicr
+      cosign:
+        keyless:
+          identities:
+            - issuer: https://token.actions.githubusercontent.com
+              subjectRegExp: '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/v.*$'
+  attestations:
+    - name: provenance
+      intoto:
+        type: https://slsa.dev/provenance/v1
+  validations:
+    - expression: >-
+        (images.containers + images.initContainers + images.ephemeralContainers)
+        .map(image, verifyAttestationSignatures(image, attestations.provenance, [attestors.aicr])).all(e, e > 0)
+      message: image has no provenance attestation from AICR's release workflow; see the Kyverno admission controller log
+```
+
+* **The images.** `matchImageReferences` lists the images `attest-images.yaml`
+  attests. A glob's `*` also matches `/`, so `ghcr.io/nvidia/aicr*` would take
+  in the AICR Operator preview image as well, which `on-tag.yaml` signs.
+* **Attestations, not signatures.** AICR's images carry only attestations, so
+  the expression calls `verifyAttestationSignatures` with the SLSA provenance
+  type.
+* **The index digest.** `mutateDigest` pins a tag to the index digest, which
+  carries the provenance (see
+  [Unified Metadata Retrieval](#unified-metadata-retrieval)).
+
+Confirm it (`TAG` is set in [Prerequisites and Setup](#prerequisites-and-setup)):
+
+```shell
+kubectl wait --for=jsonpath='{.status.conditionStatus.conditions[?(@.type=="WebhookConfigured")].status}'=True \
+  imagevalidatingpolicy/verify-aicr-provenance --timeout=120s
+kubectl create namespace aicr-provenance-test
+
+# Admitted: the tag comes back pinned to the index digest
+kubectl -n aicr-provenance-test run aicr --image="ghcr.io/nvidia/aicr:${TAG}" --restart=Never \
+  --dry-run=server -o jsonpath='{.spec.containers[0].image}{"\n"}'
+
+# Denied: v0.16.0 is a genuine release, but on-tag.yaml signed it
+kubectl -n aicr-provenance-test run aicr-old --image=ghcr.io/nvidia/aicr:v0.16.0 --restart=Never --dry-run=server
+```
+
+A cluster that still uses `ClusterPolicy`, which Kyverno 1.19 deprecates, needs
+`type: SigstoreBundle`, `subjectRegExp` and a `rekor.url`. Measured the same
+way, this one gave the same results. Wait for it with
+`kubectl wait --for=condition=Ready clusterpolicy/verify-aicr-provenance`:
+
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-aicr-provenance
+spec:
+  background: false
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: verify-aicr-provenance
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      verifyImages:
+        - failureAction: Enforce
+          type: SigstoreBundle
+          imageReferences:
+            - "ghcr.io/nvidia/aicr:*"
+            - "ghcr.io/nvidia/aicr@*"
+            - "ghcr.io/nvidia/aicrd*"
+            - "ghcr.io/nvidia/aicr-validators/*"
+            - "ghcr.io/nvidia/aicr-gate*"
+          attestations:
+            - type: https://slsa.dev/provenance/v1
+              attestors:
+                - entries:
+                    - keyless:
+                        issuer: https://token.actions.githubusercontent.com
+                        subjectRegExp: '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/v.*$'
+                        rekor:
+                          url: https://rekor.sigstore.dev
+```
+
+A `ClusterPolicy` keyless `subject:` is compared exactly. With
+`…/on-tag.yaml@refs/tags/*` there, a genuine v0.15.0 image was denied with
+`no matching signatures found`, the error
+[#1537](https://github.com/NVIDIA/aicr/issues/1537) recorded on Kyverno v1.18.1.
+That version was not re-tested.
 
 ### Kyverno and per-platform evidence
 
-The caveat above concerns AICR's **GitHub Artifact Attestation** on the index
+The policies above verify AICR's **GitHub Artifact Attestation** on the index
 digest. The results below are a separate measurement: `cosign attest` output on
 **platform manifests**, read with `type: SigstoreBundle`. Different producer,
 different subject, and both results hold.
@@ -941,9 +1056,10 @@ admission webhook rejects it.
 > cluster-validated against Policy Controller **v0.13.1** on GKE 1.35: a signed
 > AICR image is admitted and a wrong-identity pin is rejected (note that
 > `signatureFormat` and `ctlog` are *per-authority* fields). The Kyverno
-> `SigstoreBundle` path was cluster-tested (v1.18.1) and **failed** to verify
-> AICR's bundle attestation (`no matching signatures found`) — see the Kyverno
-> note above; tracked in [#1537](https://github.com/NVIDIA/aicr/issues/1537).
+> policies above were measured on Kyverno **v1.19.2**. On v1.18.1 a
+> `SigstoreBundle` rule failed with `no matching signatures found`
+> ([#1537](https://github.com/NVIDIA/aicr/issues/1537)), the error an exact
+> `subject:` with a `*` in it produces.
 
 ## Enforcing Your Signatures on Mirrored Images
 
@@ -951,8 +1067,8 @@ The policies above trust AICR's release identity, and AICR attests only its own
 images. A site that mirrors a recipe's images into a private registry can
 instead sign the mirrored copies with its own key and admit only images that
 carry that signature. That covers every image in the mirror, component images
-included, and depends neither on AICR's attestations nor on the Kyverno caveat
-above.
+included, and does not depend on AICR's attestations. To require those as well
+on AICR's own images, see [Adding AICR's provenance](#adding-aicrs-provenance).
 
 Measured on kind with Kubernetes v1.37.0, Kyverno v1.19.2 and cosign v3.1.4,
 with key-pair signatures and no transparency log, against a Distribution
@@ -1206,6 +1322,48 @@ kubectl -n kyverno logs deploy/kyverno-admission-controller --since=10m | grep '
 signatures do not match threshold, Found: 0, Expected 1` means its signatures
 were made with another key.
 
+### Adding AICR's provenance
+
+The mirror policies show that your pipeline signed an image. To also require
+that AICR's own images came from AICR's release workflow, copy them with their
+attestations and point the [Kyverno](#kyverno) policy at your registry.
+`oras cp -r` copies an image together with the artifacts attached to it:
+
+```shell
+oras cp -r "ghcr.io/nvidia/aicr:${TAG}" "registry.example.com/nvidia/aicr:${TAG}"
+```
+
+Sign the copy as in [Signing the mirrored images](#signing-the-mirrored-images),
+then change two things in `verify-aicr-provenance`: point each glob at your
+registry, and add the Secret Kyverno reads it with.
+
+```yaml
+  matchImageReferences:
+    - glob: "registry.example.com/nvidia/aicr:*"
+    - glob: "registry.example.com/nvidia/aicr@*"
+    - glob: "registry.example.com/nvidia/aicrd*"
+    - glob: "registry.example.com/nvidia/aicr-validators/*"
+    - glob: "registry.example.com/nvidia/aicr-gate*"
+  credentials:
+    secrets: [mirror-credentials]
+```
+
+With both sets of policies applied, an AICR image was admitted only when it
+carried your signature and AICR's provenance. An image at the AICR path without
+the attestation was denied by `verify-aicr-provenance`. A copied AICR image you
+had not signed was denied by `verify-mirror-images`. A signed component image
+was admitted, because the keyless policy does not match it. On a registry
+without the referrers API, signing the copy kept the attestation: both sit
+under the referrers fallback tag.
+
+The log reasons look odd here because each policy finds the other's bundle. On
+a copied AICR image you have not signed, `verify-mirror-images` logs
+`expected key signature, not certificate`, since the only bundle there is AICR's
+attestation. On an image with your signature and no attestation,
+`verify-aicr-provenance` logs
+`not enough verified log entries from transparency log: 0 < 1`, since the only
+bundle there is your key signature.
+
 ### Operating the mirror policies
 
 **A registry outage denies every matched Pod.** With the registry unreachable,
@@ -1227,9 +1385,11 @@ maintenance, and alert on the policy's webhook in
 `kyverno-resource-validating-webhook-cfg` rather than on the policy's status.
 
 **Not covered by these measurements:** a Kyverno crash that leaves its webhooks
-in place, revoking a signature after Kyverno has cached a verification, a
-cluster with no outbound network access, and registry credentials from a cloud
-provider's credential helper.
+in place, revoking a signature after Kyverno has cached a verification,
+registry credentials from a cloud provider's credential helper, whether Hauler
+or Zarf copy AICR's attestations into the mirror, and a cluster with no
+outbound network access. The keyless policies were only run with internet
+access.
 
 ## Gating Deployment on Verification
 

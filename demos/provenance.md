@@ -251,10 +251,9 @@ property of the cluster, enforce it with an admission controller. AICR's
 images carry **GitHub Artifact Attestations** (Sigstore *bundles*), so the
 policy must verify the Sigstore bundle format:
 
-- **Kyverno** — `type: SigstoreBundle`; see
-  [Verifying Sigstore Bundles](https://kyverno.io/docs/policy-types/cluster-policy/verify-images/sigstore/#verifying-sigstore-bundles).
-  Not yet verified against AICR images — cluster testing returned `no matching
-  signatures found`; prefer Policy Controller. See #1537.
+- **Kyverno** — an `ImageValidatingPolicy` that calls
+  `verifyAttestationSignatures`, or a `ClusterPolicy` with
+  `type: SigstoreBundle`; both verified AICR images on Kyverno v1.19.2.
 - **Sigstore Policy Controller** — requires **v0.13.0+** and
   `signatureFormat: bundle` (see the
   [Sigstore bundle format](https://docs.sigstore.dev/policy-controller/overview/#sigstore-bundle-format)
@@ -262,14 +261,15 @@ policy must verify the Sigstore bundle format:
   `policy.sigstore.dev/include=true`.
 
 Verify against AICR's release identity — issuer
-`https://token.actions.githubusercontent.com`, subject
-`https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/*`.
+`https://token.actions.githubusercontent.com`, and a subject matched with the
+regular expression
+`^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/v.*$`.
 
-> Validated, cluster-tested copy-paste policies are tracked in
-> [#1537](https://github.com/NVIDIA/aicr/issues/1537). Earlier inline examples
-> here used the legacy Cosign format / a pre-bundle Policy Controller version
-> and an out-of-scope negative test, so they were removed rather than ship
-> policy that silently fails to verify.
+> Validated, cluster-tested policies for both are in
+> [Enforcing with Admission Policies](../docs/integrator/supply-chain-verification.md#enforcing-with-admission-policies).
+> Earlier inline examples here used the legacy Cosign format / a pre-bundle
+> Policy Controller version and an out-of-scope negative test, so they were
+> removed rather than ship policy that silently fails to verify.
 
 ## Troubleshooting
 
