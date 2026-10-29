@@ -132,6 +132,45 @@ spec:
               cpu: 500m
               memory: 512Mi
 
+    # nktp: one replica per central collector to fit a kind node; collector
+    # resources are NKTP's (ADR-026). kind ships no resource metrics API, and
+    # its kubelets serve self-signed certificates.
+    - name: nktp
+      type: Helm
+      overrides:
+        gateway_metrics:
+          kubernetes:
+            replicas: 1
+            autoscaler:
+              minReplicas: 1
+        gateway_logs:
+          kubernetes:
+            replicas: 1
+            autoscaler:
+              minReplicas: 1
+        gateway_traces:
+          kubernetes:
+            replicas: 1
+            autoscaler:
+              minReplicas: 1
+        large_target_metrics:
+          kubernetes:
+            replicas: 1
+            autoscaler:
+              minReplicas: 1
+        watchdog:
+          kubernetes:
+            replicas: 1
+            autoscaler:
+              minReplicas: 1
+        cluster_events:
+          kubernetes:
+            replicas: 1
+        metrics-server:
+          enabled: true
+          args:
+            - --kubelet-insecure-tls
+
     # nvsentinel: reduce resources for local development, and assume the
     # host-installed driver.
     #
