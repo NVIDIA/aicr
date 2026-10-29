@@ -37,13 +37,20 @@ plus Kubeflow Trainer through the `platform-kubeflow` mixin.
   loads `ib_ipoib`. `mlx5_2` is the BlueField-3 host representor. Firmware
   enables SR-IOV with `NUM_OF_VFS` 16 per PF (`sriov_totalvfs`), which is
   the count the recipe requests (see below).
-- The fabric Subnet Manager must make the GPU host ports **full members** of
-  their partition. On the reference cluster every rail's P_Key table held
-  only `0x7fff` (limited membership), which leaves links up and LIDs assigned
-  while every RDMA connection between hosts fails with retry-exceeded, even
-  same-tray loopback through the switch. Check
-  `/sys/class/infiniband/mlx5_0/ports/1/pkeys/0`: `0xffff` is required. VFs
-  inherit the PF's membership, so this applies to the SR-IOV VFs too.
+- InfiniBand traffic between hosts needs every tenant port, PF and VF, to be a
+  full member of a common partition: a P_Key with the `0x8000` bit set, either
+  `0xffff` (default partition) or a tenant P_Key assigned by the fabric (UFM).
+  On the reference cluster every port, including allocated VFs, held only
+  `0x7fff` (limited membership): links are up and LIDs assigned, but every
+  RDMA connection between hosts fails with retry-exceeded, even same-tray
+  loopback through the switch. Check the non-zero entries under
+  `/sys/class/infiniband/mlx5_*/ports/1/pkeys/`. VFs are separate virtual
+  ports with their own GUIDs, so the fabric must add the VF GUIDs to the
+  partition too (UFM GUID mapping or ib-kubernetes); fixing the PFs alone is
+  not enough. If the tenant P_Key is not at index 0, the rail attachments
+  must be configured to use it (ib-sriov CNI `pkey`). Traffic between trays
+  in the same NVLink domain uses multi-node NVLink and does not need this; it
+  matters for jobs spanning NVLink domains and for IPoIB or RDMA storage.
 - `rdma_ucm`, `ib_umad` and `ib_ipoib` are not loaded by the NVKE image and
   `rdma-core` is not installed (the modules ship in
   `linux-modules-<kernel>`); the recipe's `rdma-modules` component loads them
@@ -59,9 +66,12 @@ plus Kubeflow Trainer through the `platform-kubeflow` mixin.
   NetworkAttachmentDefinitions; a pod that requests `sriov-network-rail-<n>`
   on such a node gets the VF allocated and no IB interface, silently. The
   NicClusterPolicy therefore carries `secondaryNetwork.multus` and
-  `cniPlugins`. Should a later NVKE image preinstall multus, remove that
-  block: two multus installs rewrite each other's host CNI configuration.
-  The SR-IOV policies select only the ConnectX-7 root devices.
+  `cniPlugins`; the NVKE image contract is OVN-Kubernetes only, and multus is
+  the recipe's to install. The operator renders the multus DaemonSet with
+  `--skip-config-watch`, so the service-account token multus copies into
+  `multus.kubeconfig` is not refreshed on rotation; the API server's default
+  legacy-token extension keeps it valid, and a multus pod restart rewrites
+  the file. The SR-IOV policies select only the ConnectX-7 root devices.
 
 ## Never install DOCA-OFED on these nodes
 
@@ -272,7 +282,9 @@ before re-flooring.
 - The reference fabric has not passed RDMA traffic (limited P_Key membership,
   see prerequisites), so neither the SR-IOV nor the earlier shared-HCA shape
   has NCCL evidence.
-- `nccl-all-reduce-bw-nvls` is declared but unproven on NVL4 trays without an
-  NVSwitch; drop it from the recipe if the cluster has no NVLink fabric.
+- `nccl-all-reduce-bw-nvls` has no NVKE evidence yet. The reference trays
+  share one multi-node NVLink domain (`nvidia-smi -q` reports the fabric
+  healthy with a common ClusterUUID), so the check applies there; drop it
+  only on a cluster without an NVLink fabric.
 - No published evidence yet.
 - KWOK profiles model scheduling only; they cannot validate RDMA traffic.

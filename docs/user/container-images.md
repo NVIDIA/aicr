@@ -20,7 +20,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 - Components: **57**
-- Unique images: **148**
+- Unique images: **150**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -59,7 +59,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kueue | helm | kueue | 0.19.6 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.10.1 | 1 |
 | mariadb-operator-crds | helm | mariadb-operator-crds | 26.10.1 | 0 |
-| network-operator | helm | nvidia/network-operator | 26.7.0 | 15 |
+| network-operator | helm | nvidia/network-operator | 26.7.0 | 17 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
 | nfd | helm | node-feature-discovery | 0.20.1 | 1 |
@@ -99,7 +99,7 @@ from the component's registry default above.
 | dynamo-platform | 1.5.0 | b300-mk8s-ubuntu-inference-dynamo | 1 |
 | kai-scheduler | v0.17.1 | b300-mk8s-ubuntu-inference-dynamo | 12 |
 | kube-prometheus-stack | 83.7.0 | aks | 8 |
-| network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 15 |
+| network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 17 |
 
 ## Images by component
 
@@ -282,7 +282,9 @@ _No images extracted._
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.7.0`
+- `nvcr.io/nvidia/mellanox/multus-cni:network-operator-v26.7.0`
 - `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam:network-operator-v26.7.0`
+- `nvcr.io/nvidia/mellanox/plugins:network-operator-v26.7.0`
 
 ### network-operator-ocp
 
@@ -472,7 +474,9 @@ _No images extracted._
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.7.0`
+- `nvcr.io/nvidia/mellanox/multus-cni:network-operator-v26.7.0`
 - `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam:network-operator-v26.7.0`
+- `nvcr.io/nvidia/mellanox/plugins:network-operator-v26.7.0`
 
 <!-- END AICR-BOM -->
 
