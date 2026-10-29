@@ -87,8 +87,13 @@ func enforced(ctx context.Context, t *testing.T) {
 	op := operator(t)
 	outcome := rollout("rollout-policy-probe")
 	outcome.Labels[v1alpha1.LabelOutcome] = string(v1alpha1.PhaseSucceeded)
-	if err := admin.Create(ctx, outcome); err != nil {
-		t.Fatal(err)
+	// The operator's RBAC also takes effect shortly after it is created.
+	var createErr error
+	if err := wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 30*time.Second, true, func(context.Context) (bool, error) {
+		createErr = op.Create(ctx, outcome.DeepCopy())
+		return client.IgnoreAlreadyExists(createErr) == nil, nil
+	}); err != nil {
+		t.Fatalf("the operator cannot create a rollout: %v", createErr)
 	}
 	defer func() { _ = admin.Delete(context.WithoutCancel(ctx), outcome) }()
 	probeRuntime := runtimeObject(t)
@@ -211,6 +216,10 @@ func operatorApplications(t *testing.T) {
 		{"the background resources finalizer alone", func(o map[string]any) {
 			o["metadata"].(map[string]any)["finalizers"] = []any{argocd.ResourcesFinalizer + "/background"}
 		}, "resources finalizer is set only"},
+		{"the resources finalizer with an empty annotation", func(o map[string]any) {
+			o["metadata"].(map[string]any)["finalizers"] = []any{argocd.ResourcesFinalizer}
+			o["metadata"].(map[string]any)["annotations"] = map[string]any{v1alpha1.AnnotationDeleteRollout: ""}
+		}, "non-empty operator.aicr.run/delete-rollout annotation"},
 	}
 	for _, tc := range cases {
 		denied(t, tc.name, create(set(tc.mutate)), tc.want)
@@ -320,14 +329,20 @@ func operatorApplicationDeletes(t *testing.T) {
 	if err := op.Delete(ctx, marked, client.DryRunAll); err != nil {
 		t.Errorf("deleting an Application an approved Remove step marked is denied: %v", err)
 	}
+	const marks = "non-empty operator.aicr.run/delete-rollout annotation and the resources finalizer"
 	unmarked := put("owned-unmarked", func(*unstructured.Unstructured) {})
-	denied(t, "an owned Application no Remove step marked", op.Delete(ctx, unmarked, client.DryRunAll), "marked by an approved Remove step")
+	denied(t, "an owned Application no Remove step marked", op.Delete(ctx, unmarked, client.DryRunAll), marks)
+	emptyMark := put("owned-empty-mark", func(a *unstructured.Unstructured) {
+		a.SetFinalizers([]string{argocd.ResourcesFinalizer})
+		a.SetAnnotations(map[string]string{v1alpha1.AnnotationDeleteRollout: ""})
+	})
+	denied(t, "an owned Application with an empty delete-rollout annotation", op.Delete(ctx, emptyMark, client.DryRunAll), marks)
 	foreign := put("another-teams-app", func(a *unstructured.Unstructured) {
 		a.SetLabels(map[string]string{"team": "other"})
 		a.SetFinalizers([]string{argocd.ResourcesFinalizer})
 		a.SetAnnotations(map[string]string{v1alpha1.AnnotationDeleteRollout: "rollout-x"})
 	})
-	denied(t, "another team's Application", op.Delete(ctx, foreign, client.DryRunAll), "marked by an approved Remove step")
+	denied(t, "another team's Application", op.Delete(ctx, foreign, client.DryRunAll), marks)
 }
 
 func operatorJobs(t *testing.T) {
@@ -336,6 +351,7 @@ func operatorJobs(t *testing.T) {
 	create := func(j *batchv1.Job) error { return op.Create(ctx, j, client.DryRunAll) }
 	for _, ok := range []*batchv1.Job{
 		job(t, aicrjob.StageRecipe, "aicr-jobs"),
+		job(t, aicrjob.StageBaseRender, "aicr-jobs"),
 		job(t, aicrjob.StageRender, "aicr-jobs"),
 		job(t, aicrjob.StageAssessment, "aicr-jobs"),
 		job(t, aicrjob.StageSnapshot, "aicr-snapshot"),
@@ -347,6 +363,11 @@ func operatorJobs(t *testing.T) {
 	}
 	recipe := func(mutate func(j *batchv1.Job)) *batchv1.Job {
 		j := job(t, aicrjob.StageRecipe, "aicr-jobs")
+		mutate(j)
+		return j
+	}
+	validationJob := func(mutate func(j *batchv1.Job)) *batchv1.Job {
+		j := job(t, aicrjob.StageValidation, "aicr-validation")
 		mutate(j)
 		return j
 	}
@@ -371,6 +392,28 @@ func operatorJobs(t *testing.T) {
 			pod(j).Containers = append(pod(j).Containers, *pod(j).Containers[0].DeepCopy())
 			pod(j).Containers[1].Name = "second"
 		}), "one container"},
+		{"an image override in the environment", recipe(func(j *batchv1.Job) {
+			pod(j).Containers[0].Env = append(pod(j).Containers[0].Env, corev1.EnvVar{Name: "AICR_IMAGE", Value: "busybox@" + digestA})
+		}), "only HOME, TMPDIR and DOCKER_CONFIG"},
+		{"a validator image override in the environment", validationJob(func(j *batchv1.Job) {
+			pod(j).Containers[0].Env = append(pod(j).Containers[0].Env, corev1.EnvVar{Name: "AICR_VALIDATOR_IMAGE", Value: "busybox@" + digestA})
+		}), "only HOME, TMPDIR and DOCKER_CONFIG"},
+		{"an environment from a ConfigMap", recipe(func(j *batchv1.Job) {
+			pod(j).Containers[0].EnvFrom = []corev1.EnvFromSource{{ConfigMapRef: &corev1.ConfigMapEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "x"}}}}
+		}), "only HOME, TMPDIR and DOCKER_CONFIG"},
+		{"an allowed variable from a ConfigMap", recipe(func(j *batchv1.Job) {
+			pod(j).Containers[0].Env[0] = corev1.EnvVar{Name: "HOME", ValueFrom: &corev1.EnvVarSource{
+				ConfigMapKeyRef: &corev1.ConfigMapKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "x"}, Key: "home"},
+			}}
+		}), "only HOME, TMPDIR and DOCKER_CONFIG"},
+		{"a hostPath volume", recipe(func(j *batchv1.Job) {
+			pod(j).Volumes = append(pod(j).Volumes, corev1.Volume{Name: "host",
+				VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/"}}})
+		}), "only emptyDir and Secret volumes"},
+		{"a ConfigMap volume", recipe(func(j *batchv1.Job) {
+			pod(j).Volumes = append(pod(j).Volumes, corev1.Volume{Name: "config",
+				VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "x"}}}})
+		}), "only emptyDir and Secret volumes"},
 	}
 	for _, tc := range cases {
 		denied(t, tc.name, create(tc.job), tc.want)
@@ -385,6 +428,14 @@ func operatorJobs(t *testing.T) {
 	}
 	denied(t, "a snapshot agent on another image", create(snapshot("--image", "busybox@"+digestA)), "snapshot agent")
 	denied(t, "a snapshot agent on another image, joined", create(snapshot("--image=busybox@"+digestA)), "snapshot agent")
+	denied(t, "a snapshot agent on another image, single dash", create(snapshot("-image", "busybox@"+digestA)), "snapshot agent")
+	denied(t, "a snapshot agent on another image, single dash joined", create(snapshot("-image=busybox@"+digestA)), "snapshot agent")
+	denied(t, "a snapshot agent configured from a file", create(snapshot("--config", "https://example.com/aicr.yaml")), "no --config")
+	denied(t, "a snapshot agent configured from a file, single dash joined", create(snapshot("-config=/tmp/aicr.yaml")), "no --config")
+	denied(t, "a snapshot agent configured from a file, trailing newline", create(snapshot("--config=/tmp/aicr.yaml\n")), "no --config")
+	denied(t, "an AICR Job with its own data directory", create(snapshot("--data", "/tmp/catalog")), "--data directory")
+	denied(t, "an AICR Job with its own data directory, single dash joined", create(snapshot("-data=/tmp/catalog")), "--data directory")
+	denied(t, "a snapshot agent on another image, trailing newline", create(snapshot("-image=busybox@"+digestA+"\n")), "snapshot agent")
 	snapshotInJobs := job(t, aicrjob.StageSnapshot, "aicr-snapshot")
 	snapshotInJobs.Namespace = jobsNS
 	denied(t, "snapshot in the Job namespace", create(snapshotInJobs), "AICR identity")
@@ -417,7 +468,7 @@ func operatorOutcome(t *testing.T) {
 	ctx := ctxFor(t)
 	op := operator(t)
 	ro := rollout("rollout-outcome-test")
-	if err := admin.Create(ctx, ro); err != nil {
+	if err := op.Create(ctx, ro); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = admin.Delete(context.Background(), ro) })
@@ -616,7 +667,7 @@ func setAcknowledgement(ctx context.Context, c client.Client, name, by string) e
 func acknowledgements(ctx context.Context, t *testing.T, alice, bob, eve client.Client) {
 	t.Helper()
 	ro := rollout("rollout-acknowledgement-test")
-	if err := admin.Create(ctx, ro); err != nil {
+	if err := operator(t).Create(ctx, ro); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = admin.Delete(context.WithoutCancel(ctx), ro) })
@@ -668,8 +719,16 @@ func approvals(t *testing.T) {
 	}
 	eve := as(t, "eve")
 
+	// A rollout someone else creates could skip approval: approvalRequired
+	// false, or an outcome already set.
+	forgedOutcome := rollout("rollout-forged-outcome")
+	forgedOutcome.Labels[v1alpha1.LabelOutcome] = string(v1alpha1.PhaseSucceeded)
+	for _, forged := range []*v1alpha1.RuntimeRollout{rollout("rollout-forged"), forgedOutcome} {
+		denied(t, "an administrator creating "+forged.Name, admin.Create(ctx, forged, client.DryRunAll), "only the AICR Operator creates rollouts")
+	}
+
 	ro := rollout("rollout-approval-test")
-	if err := admin.Create(ctx, ro); err != nil {
+	if err := operator(t).Create(ctx, ro); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = admin.Delete(context.Background(), ro) })
@@ -701,7 +760,7 @@ func approvals(t *testing.T) {
 	ended := rollout("rollout-ended-test")
 	ended.Labels[v1alpha1.LabelOutcome] = string(v1alpha1.PhaseSucceeded)
 	for _, r := range []*v1alpha1.RuntimeRollout{validating, ended} {
-		if err := admin.Create(ctx, r); err != nil {
+		if err := operator(t).Create(ctx, r); err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = admin.Delete(context.Background(), r) })
@@ -734,7 +793,7 @@ func pluginCommands(t *testing.T) {
 	ctx := ctxFor(t)
 	ro := rollout("rollout-plugin-test")
 	ro.Spec.ApprovalRequired = true
-	if err := admin.Create(ctx, ro); err != nil {
+	if err := operator(t).Create(ctx, ro); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = admin.Delete(context.Background(), ro) })
@@ -772,7 +831,7 @@ func pluginCommands(t *testing.T) {
 	eve := kubeconfigFor(t, "mallory")
 	other := rollout("rollout-plugin-denied")
 	other.Spec.ApprovalRequired = true
-	if err = admin.Create(ctx, other); err != nil {
+	if err = operator(t).Create(ctx, other); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = admin.Delete(context.Background(), other) })
@@ -784,7 +843,7 @@ func pluginCommands(t *testing.T) {
 	manual := rollout("rollout-plugin-acknowledge")
 	manual.Spec.ApprovalRequired = true
 	manual.Spec.Steps[0].PostApplySteps = []string{"reset-breaker", "verify"}
-	if err = admin.Create(ctx, manual); err != nil {
+	if err = operator(t).Create(ctx, manual); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = admin.Delete(context.Background(), manual) })
@@ -1006,7 +1065,7 @@ func uninstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	ro := rollout("rollout-kept")
-	if err = admin.Create(ctx, ro); err != nil {
+	if err = operator(t).Create(ctx, ro); err != nil {
 		t.Fatal(err)
 	}
 	plan := labeledConfigMap("aicr-plan-kept")
@@ -1093,6 +1152,8 @@ func uninstall(t *testing.T) {
 	// not approve them cannot approve a kept rollout.
 	denied(t, "approving after uninstall", setApproval(ctx, t, as(t, "eve"), ro.Name, "eve", nil),
 		"needs update on runtimerollouts/approve")
+	denied(t, "creating a rollout after uninstall", admin.Create(ctx, rollout("rollout-forged"), client.DryRunAll),
+		"only the AICR Operator creates rollouts")
 
 	// A reinstall adopts what the uninstall kept.
 	if out, inErr := helm(ctx, "install", release, chartDir, "--namespace", operatorNS, "-f", valuesFile); inErr != nil {

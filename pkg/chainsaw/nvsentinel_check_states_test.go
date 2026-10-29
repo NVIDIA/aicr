@@ -75,7 +75,8 @@ func TestNVSentinelHealthCheckClusterStates(t *testing.T) {
 		return dsGen(name, desired, ready, desired, 1, 1)
 	}
 
-	// Ordered so the first two are the nvsentinel-quarantine set.
+	// Ordered so the first two are the nvsentinel-quarantine set and the last
+	// is the one nvsentinel-node-validation renders on its own.
 	pipelineWorkloads := []struct{ kind, name string }{
 		{"Deployment", "fault-quarantine"},
 		{"Deployment", "node-drainer"},
@@ -85,6 +86,7 @@ func TestNVSentinelHealthCheckClusterStates(t *testing.T) {
 		{"Deployment", "health-events-analyzer"},
 		{"Deployment", "event-exporter"},
 		{"Deployment", "nvsentinel-incluster-file-server"},
+		{"Deployment", "lifecycle-manager"},
 	}
 	// pipeline returns every remediation workload fully rolled out, except
 	// that the one named faulty gets status[field] = value (nil omits it,
@@ -222,6 +224,13 @@ func TestNVSentinelHealthCheckClusterStates(t *testing.T) {
 			collector: ds("metadata-collector", 2, 2),
 			syslog:    healthySyslog,
 			pipeline:  pipeline("", "", nil)[:2],
+			wantPass:  true,
+		},
+		{
+			name:      "node validation alone, only lifecycle-manager rendered → pass",
+			collector: ds("metadata-collector", 2, 2),
+			syslog:    healthySyslog,
+			pipeline:  pipeline("", "", nil)[len(pipelineWorkloads)-1:],
 			wantPass:  true,
 		},
 	}

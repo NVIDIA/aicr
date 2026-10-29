@@ -16,6 +16,7 @@ package argocd
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"slices"
 	"strings"
@@ -23,12 +24,15 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
@@ -445,6 +449,16 @@ func TestEnsureWritesOwnedAndRefusesForeign(t *testing.T) {
 	}
 }
 
+// lookupFailing is a REST mapper whose lookups fail, as discovery does
+// while the API server is unreachable.
+type lookupFailing struct{ meta.RESTMapper }
+
+func (lookupFailing) RESTMapping(schema.GroupKind, ...string) (*meta.RESTMapping, error) {
+	return nil, errors.New("discovery: connection refused")
+}
+
+// Only a kind that is not served or a project that is not found is reported
+// with a reason; a read that failed carries none, so it changes no condition.
 func TestCapabilities(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -452,14 +466,33 @@ func TestCapabilities(t *testing.T) {
 	project.SetGroupVersionKind(AppProjectGVK)
 	project.SetNamespace("argocd")
 	project.SetName("aicr")
-	if err := fakeAdapter(t, project).Capabilities(ctx); err != nil {
-		t.Fatalf("Capabilities() = %v", err)
+	timingOut := fakeAdapter(t, project.DeepCopy())
+	timingOut.Reader = interceptor.NewClient(timingOut.Reader.(client.WithWatch), interceptor.Funcs{
+		Get: func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error {
+			return apierrors.NewTimeoutError("injected", 1)
+		},
+	})
+	unreachable := fakeAdapter(t, project.DeepCopy())
+	unreachable.Mapper = lookupFailing{unreachable.Mapper}
+	tests := []struct {
+		name    string
+		adapter *Adapter
+		wantErr bool
+		reason  string
+	}{
+		{"ready", fakeAdapter(t, project.DeepCopy()), false, ""},
+		{"no project", fakeAdapter(t), true, ReasonProjectMissing},
+		{"no CRD", &Adapter{Mapper: meta.NewDefaultRESTMapper(nil), Target: target}, true, ReasonEngineMissing},
+		{"project read timed out", timingOut, true, ""},
+		{"kind lookup failed", unreachable, true, ""},
 	}
-	if err := fakeAdapter(t).Capabilities(ctx); operrors.CodeOf(err) != operrors.ErrCodeNotFound && operrors.CodeOf(err) != operrors.ErrCodeUnavailable {
-		t.Fatalf("Capabilities(no project) = %v", err)
-	}
-	empty := &Adapter{Mapper: meta.NewDefaultRESTMapper(nil), Target: target}
-	if err := empty.Capabilities(ctx); operrors.CodeOf(err) != operrors.ErrCodeUnavailable {
-		t.Fatalf("Capabilities(no CRD) = %v", err)
+	for _, tt := range tests {
+		err := tt.adapter.Capabilities(ctx)
+		if (err != nil) != tt.wantErr || operrors.ReasonOf(err) != tt.reason {
+			t.Errorf("%s: Capabilities() = %v, want reason %q", tt.name, err, tt.reason)
+		}
+		if err != nil && operrors.IsPermanent(err) {
+			t.Errorf("%s: Capabilities() = %v; an engine that is not ready yet is not permanent", tt.name, err)
+		}
 	}
 }

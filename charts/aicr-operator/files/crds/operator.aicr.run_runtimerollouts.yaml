@@ -255,8 +255,9 @@ spec:
                       - NotApplicable
                       type: string
                     crdChange:
-                      description: CRDChange is true when the release owns CRDs whose
-                        chart changes.
+                      description: |-
+                        CRDChange is true when the chart changes and either version of the
+                        release owns CRDs, including a chart that stops owning them.
                       type: boolean
                     operation:
                       description: StepOperation is what a step does to one release.
@@ -427,9 +428,6 @@ spec:
               current:
                 description: Current is the step in progress.
                 properties:
-                  attempts:
-                    format: int32
-                    type: integer
                   operation:
                     description: StepOperation is what a step does to one release.
                     enum:

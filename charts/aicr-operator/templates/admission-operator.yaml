@@ -80,8 +80,9 @@ spec:
         ' is not an allowed component namespace'
     - expression: >-
         !variables.cascades ||
-        (has(object.metadata.annotations) && 'operator.aicr.run/delete-rollout' in object.metadata.annotations)
-      message: the resources finalizer is set only with the operator.aicr.run/delete-rollout annotation of an approved Remove step
+        (has(object.metadata.annotations) && 'operator.aicr.run/delete-rollout' in object.metadata.annotations &&
+        object.metadata.annotations['operator.aicr.run/delete-rollout'] != '')
+      message: the resources finalizer is set only together with a non-empty operator.aicr.run/delete-rollout annotation
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -118,9 +119,12 @@ spec:
         has(oldObject.metadata.labels) && 'app.kubernetes.io/managed-by' in oldObject.metadata.labels &&
         oldObject.metadata.labels['app.kubernetes.io/managed-by'] == 'aicr-operator' &&
         has(oldObject.metadata.annotations) && 'operator.aicr.run/delete-rollout' in oldObject.metadata.annotations &&
+        oldObject.metadata.annotations['operator.aicr.run/delete-rollout'] != '' &&
         has(oldObject.metadata.finalizers) &&
         oldObject.metadata.finalizers.exists(f, f.startsWith('resources-finalizer.argocd.argoproj.io'))
-      message: the operator deletes only its own Applications, marked by an approved Remove step
+      message: >-
+        the operator deletes only its own Applications that carry a non-empty operator.aicr.run/delete-rollout
+        annotation and the resources finalizer
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -170,14 +174,33 @@ spec:
       message: AICR Jobs run one container
     - expression: variables.pod.containers.all(c, c.image == {{ .Values.aicr.image | quote }})
       message: AICR Jobs run the pinned AICR image {{ .Values.aicr.image }}
+    # The CLI also parses a single dash and a joined value, so only the exact
+    # --image <pinned> pair may name an image. Prefix checks, not a regex:
+    # RE2's `.` and `$` let a trailing newline through.
     - expression: >-
         variables.pod.containers.all(c, !has(c.args) ||
-        (c.args.all(a, !a.startsWith('--image=')) &&
+        (c.args.all(a, !(a == '-image' || a.startsWith('--image=') || a.startsWith('-image='))) &&
         size(c.args.filter(a, a == '--image')) <= 1 &&
         (!c.args.exists(a, a == '--image') ||
         (c.args.indexOf('--image') + 1 < size(c.args) &&
         c.args[c.args.indexOf('--image') + 1] == {{ .Values.aicr.image | quote }}))))
       message: the snapshot agent runs the pinned AICR image {{ .Values.aicr.image }}
+    # An AICRConfig file can name the agent image too, and a --data
+    # directory can replace the validator catalog.
+    - expression: >-
+        variables.pod.containers.all(c, !has(c.args) || c.args.all(a,
+        !(a in ['--config', '-config', '--data', '-data'] ||
+        a.startsWith('--config=') || a.startsWith('-config=') ||
+        a.startsWith('--data=') || a.startsWith('-data='))))
+      message: AICR Jobs take no --config file or --data directory
+    # AICR reads image overrides, such as AICR_IMAGE, from its environment.
+    - expression: >-
+        variables.pod.containers.all(c, (!has(c.envFrom) || size(c.envFrom) == 0) &&
+        (!has(c.env) || c.env.all(e, e.name in ['HOME', 'TMPDIR', 'DOCKER_CONFIG'] && !has(e.valueFrom))))
+      message: AICR Jobs set only HOME, TMPDIR and DOCKER_CONFIG, each by value
+    - expression: >-
+        !has(variables.pod.volumes) || variables.pod.volumes.all(v, has(v.emptyDir) || has(v.secret))
+      message: AICR Jobs mount only emptyDir and Secret volumes
     - expression: >-
         request.namespace in variables.serviceAccounts &&
         has(variables.pod.serviceAccountName) && variables.pod.serviceAccountName == variables.serviceAccounts[request.namespace]

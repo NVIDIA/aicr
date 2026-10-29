@@ -24,6 +24,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
@@ -199,6 +200,12 @@ func TestTransformAndRelevance(t *testing.T) {
 	beat.Status.Conditions[0].LastHeartbeatTime = metav1.NewTime(time.Unix(200, 0))
 	if Relevant(&n, beat) {
 		t.Error("a heartbeat is relevant")
+	}
+	// Each decoded Node holds its own swap status pointer.
+	swap := n.DeepCopy()
+	swap.Status.NodeInfo.Swap = &corev1.NodeSwapStatus{Capacity: ptr.To[int64](8 << 30)}
+	if Relevant(swap, swap.DeepCopy()) {
+		t.Error("an equal swap status behind another pointer is relevant")
 	}
 	for name, f := range map[string]func(*corev1.Node){
 		"label":     func(m *corev1.Node) { m.Labels["new"] = "x" },

@@ -27,15 +27,14 @@ const (
 	// GracefulShutdownTimeout bounds how long runnables get to stop after the
 	// manager's context is canceled.
 	GracefulShutdownTimeout = 30 * time.Second
+	// RolloutReconcileTimeout bounds one reconcile of the rollout controller.
+	RolloutReconcileTimeout = 30 * time.Minute
 )
 
 // kubectl aicr plugin.
 const (
 	// PluginTimeout bounds every plugin command's API calls.
 	PluginTimeout = 30 * time.Second
-	// ApprovalLifetime is how long an approval made with the plugin stays
-	// valid unless --expires says otherwise.
-	ApprovalLifetime = 2 * time.Hour
 )
 
 // Leader election. Leader election coordinates replicas; it is not fencing.
@@ -85,22 +84,26 @@ const (
 	StageRetryMaxBackoff = 5 * time.Minute
 	// JobScratchSizeLimit bounds the emptyDir each AICR Job writes to.
 	JobScratchSizeLimit = "1Gi"
-	// Initial AICR Job resources. Measured values are required; these are
-	// replaced once the integration task records real usage.
+	// Initial AICR Job resources: estimates until measured on real profiles
+	// (https://github.com/NVIDIA/aicr/issues/3495).
 	JobCPURequest    = "100m"
 	JobMemoryRequest = "256Mi"
 	JobMemoryLimit   = "1Gi"
 )
 
-// Registry and chart delivery. Every fetched artifact is bounded,
-// so a hostile or broken registry cannot exhaust the operator's memory.
+// Registry and chart delivery. Every fetched artifact is bounded, so a
+// hostile or broken registry cannot exhaust the operator's memory: a
+// resolution holds two bundles at once, the render and its base render, each
+// at most MaxBundleLayerBytes compressed plus MaxBundleBytes unpacked, 160 MiB
+// together, which leaves room under the chart's 512Mi limit for a chart index
+// and archive being mirrored.
 const (
 	// RegistryTimeout bounds one registry or upstream chart operation.
 	RegistryTimeout = 2 * time.Minute
 	// MaxBundleLayerBytes bounds the compressed AICR bundle layer.
-	MaxBundleLayerBytes = 64 << 20
+	MaxBundleLayerBytes = 16 << 20
 	// MaxBundleBytes bounds the bundle's uncompressed content.
-	MaxBundleBytes = 256 << 20
+	MaxBundleBytes = 64 << 20
 	// MaxBundleFiles bounds the entries in a bundle.
 	MaxBundleFiles = 4096
 	// MaxChartArchiveBytes bounds one chart archive.

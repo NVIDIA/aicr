@@ -40,9 +40,9 @@ and are deleted with it:
 
 | Policy | Holds the operator to |
 | --- | --- |
-| `aicr-operator-applications` | Applications in the `aicr` project, in the Argo CD namespace, with one source under the registry's `charts/` or `wrappers/` pinned by `sha256:` digest; no plugin, value files or Helm parameters; the in-cluster server and a namespace from `namespaces.components`; Argo CD's resources finalizer only together with the `operator.aicr.run/delete-rollout` annotation |
-| `aicr-operator-application-deletes` | Deletes only of its own Applications, already marked by an approved `Remove` step (the resources finalizer and the `operator.aicr.run/delete-rollout` annotation) |
-| `aicr-operator-jobs` | Jobs only in the Job, discovery and validation namespaces, each with one container running the pinned AICR image, that namespace's ServiceAccount, an allowed AICR subcommand (`recipe`, `bundle` or `upgrade-check`; `snapshot`; `validate`) and a TTL; a snapshot agent `--image` naming the pinned AICR image too |
+| `aicr-operator-applications` | Applications in the `aicr` project, in the Argo CD namespace, with one source under the registry's `charts/` or `wrappers/` pinned by `sha256:` digest; no plugin, value files or Helm parameters; the in-cluster server and a namespace from `namespaces.components`; Argo CD's resources finalizer only together with a non-empty `operator.aicr.run/delete-rollout` annotation |
+| `aicr-operator-application-deletes` | Deletes only of its own Applications that carry the resources finalizer and a non-empty `operator.aicr.run/delete-rollout` annotation, which the operator sets for a `Remove` step |
+| `aicr-operator-jobs` | Jobs only in the Job, discovery and validation namespaces, each with one container running the pinned AICR image, that namespace's ServiceAccount, an allowed AICR subcommand (`recipe`, `bundle` or `upgrade-check`; `snapshot`; `validate`) and a TTL; a snapshot agent image named only as `--image <pinned AICR image>`, no `--config` file and no `--data` directory; no environment but `HOME`, `TMPDIR` and `DOCKER_CONFIG` set by value, and only emptyDir and Secret volumes |
 | `aicr-operator-rollout-outcome` | A rollout's `operator.aicr.run/outcome` label and `operator.aicr.run/evidence` annotation never change once set |
 | `aicr-operator-runtime` | A `ClusterRuntime` changes only through the operator's `operator.aicr.run/cleanup` finalizer; the operator never creates one |
 
@@ -52,7 +52,7 @@ uninstall:
 | Policy | Holds |
 | --- | --- |
 | `aicr-operator-state` | Only the operator creates or updates a ConfigMap labeled `app.kubernetes.io/managed-by: aicr-operator` in the operator namespace, including removing the label. Deletion is left to RBAC, so deleting the namespace still works; a deleted plan is rebuilt or resolved again |
-| `aicr-operator-approval` | No rollout is created with an approval, and the operator never writes one. Anyone else changes only `spec.approval`, holds `update` on `runtimerollouts/approve` for that rollout, records their own username, and cannot revoke a rollout that has ended or is validating |
+| `aicr-operator-approval` | Only the operator creates rollouts, never with an approval, and it never writes one. Anyone else changes only `spec.approval`, holds `update` on `runtimerollouts/approve` for that rollout, records their own username, and cannot revoke a rollout that has ended or is validating |
 
 The CRDs add their own rules: a rollout's spec is immutable except its
 approval, and an approval or revocation is set once and never cleared.

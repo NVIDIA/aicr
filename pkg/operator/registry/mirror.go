@@ -18,10 +18,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -54,11 +56,14 @@ type MirroredChart struct {
 // target/<chart>. The archive's SHA-256 must equal the digest the repository
 // index records for that version; a mismatch is a conflict, because it means
 // the upstream content changed after it was indexed. Upstreams in
-// OCI registries are not mirrored here.
+// OCI registries are not mirrored here. The index and the archive are
+// fetched over HTTPS, or over HTTP from a host in PlainHTTPHosts. The
+// archive may be on another host than the index: chart-releaser
+// repositories keep theirs on github.com.
 func (c *Client) MirrorHTTPChart(ctx context.Context, up UpstreamChart, target Repository) (*MirroredChart, error) {
 	base, err := url.Parse(up.Repository)
-	if err != nil || (base.Scheme != "https" && base.Scheme != "http") || base.Host == "" {
-		return nil, invalid("upstream repository %q is not an HTTP(S) URL", up.Repository)
+	if err != nil || base.Host == "" || !c.allowedScheme(base) {
+		return nil, invalid("upstream repository %q must be an HTTPS URL, or HTTP to a host configured for plain HTTP", up.Repository)
 	}
 	ctx, cancel := context.WithTimeout(ctx, defaults.RegistryTimeout)
 	defer cancel()
@@ -73,7 +78,7 @@ func (c *Client) MirrorHTTPChart(ctx context.Context, up UpstreamChart, target R
 		dir.Path += "/"
 	}
 	archiveURL, err := dir.Parse(entry.URLs[0])
-	if err != nil || (archiveURL.Scheme != "https" && archiveURL.Scheme != "http") {
+	if err != nil || !c.allowedScheme(archiveURL) {
 		return nil, invalid("chart %s %s has an unusable URL %q", up.Chart, up.Version, entry.URLs[0])
 	}
 	archive, err := c.get(ctx, archiveURL.String(), defaults.MaxChartArchiveBytes)
@@ -98,6 +103,12 @@ func (c *Client) MirrorHTTPChart(ctx context.Context, up UpstreamChart, target R
 		return nil, err
 	}
 	return &MirroredChart{Repository: repo, Digest: digest, ArchiveDigest: "sha256:" + entry.Digest, Archive: archive}, nil
+}
+
+// allowedScheme reports whether a chart URL may be fetched: over HTTPS, or
+// over HTTP from a host configured for it.
+func (c *Client) allowedScheme(u *url.URL) bool {
+	return u.Scheme == "https" || (u.Scheme == "http" && slices.Contains(c.opts.PlainHTTPHosts, u.Host))
 }
 
 type indexEntry struct {
@@ -143,6 +154,10 @@ func (c *Client) get(ctx context.Context, rawURL string, maxBytes int64) ([]byte
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
+		var refused *operrors.StructuredError
+		if errors.As(err, &refused) {
+			return nil, refused
+		}
 		return nil, operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "fetch "+rawURL)
 	}
 	defer resp.Body.Close()

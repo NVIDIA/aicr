@@ -21,11 +21,13 @@ import (
 	"fmt"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	ctrlmanager "sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -95,8 +97,11 @@ func (o Options) controllerOptions(scheme *runtime.Scheme, cacheOptions cache.Op
 	retryPeriod := defaults.RetryPeriod
 	shutdown := o.GracefulShutdownTimeout
 	return ctrl.Options{
-		Scheme:                  scheme,
-		Cache:                   cacheOptions,
+		Scheme: scheme,
+		Cache:  cacheOptions,
+		// A cached read of a Secret would start a cluster-wide informer the
+		// operator's per-namespace RBAC cannot list or watch.
+		Client:                  client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.Secret{}}}},
 		Metrics:                 metricsserver.Options{BindAddress: o.MetricsBindAddress},
 		HealthProbeBindAddress:  o.HealthProbeBindAddress,
 		LeaderElection:          o.LeaderElection,

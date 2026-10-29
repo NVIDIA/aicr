@@ -226,6 +226,11 @@ type Approval struct {
 	ApprovedBy string `json:"approvedBy,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 	ExpiresAt  string `json:"expiresAt,omitempty"`
+	// RevokedBy, RevokedAt and RevokeReason record a revocation made after
+	// the last step, which stopped nothing.
+	RevokedBy    string `json:"revokedBy,omitempty"`
+	RevokedAt    string `json:"revokedAt,omitempty"`
+	RevokeReason string `json:"revokeReason,omitempty"`
 	// Acknowledgements record who attested each manual release's
 	// post-apply steps.
 	Acknowledgements []Acknowledgement `json:"acknowledgements,omitempty"`

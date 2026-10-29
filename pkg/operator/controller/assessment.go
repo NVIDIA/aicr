@@ -330,7 +330,7 @@ func assessSteps(steps []v1alpha1.RolloutStep, from, to *plan.Document, report *
 				if v, ok := verdicts[b.Component]; ok {
 					s.Assessment, s.PostApplySteps = v, postApply[b.Component]
 				}
-				s.CRDChange = b.OwnsCRDs
+				s.CRDChange = a.OwnsCRDs || b.OwnsCRDs
 			}
 			if s.Assessment == v1alpha1.AssessmentBlocked {
 				blocked = append(blocked, s.Release+" is blocked by AICR's upgrade-check")

@@ -21,11 +21,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/events"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
 	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
@@ -254,5 +258,82 @@ func TestFailedRunsAreRecordedAndKept(t *testing.T) {
 		if ttl := j.Spec.TTLSecondsAfterFinished; ttl == nil || time.Duration(*ttl)*time.Second < defaults.JobTTLStalled {
 			t.Errorf("failed Job %s keeps TTL %v after its stage stalled", j.Name, ttl)
 		}
+	}
+}
+
+func jobObservations(t *testing.T, stage, result string) uint64 {
+	t.Helper()
+	reg := prometheus.NewRegistry()
+	if err := reg.Register(jobSeconds); err != nil {
+		t.Fatal(err)
+	}
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range families {
+		for _, m := range f.GetMetric() {
+			labels := map[string]string{}
+			for _, l := range m.GetLabel() {
+				labels[l.GetName()] = l.GetValue()
+			}
+			if labels["stage"] == stage && labels["result"] == result {
+				return m.GetHistogram().GetSampleCount()
+			}
+		}
+	}
+	return 0
+}
+
+// A finished run is marked on its Job before it is counted: when the mark
+// fails, nothing is counted and the next observation counts the run, and
+// its duration, once. The duration needs no deletion of the Job, which its
+// TTL may do first.
+func TestRunIsCountedOnceItsMarkLands(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, nil)
+	base, err := client.NewWithWatch(restConfig, client.Options{Scheme: k8s.Scheme()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refuseNextPatch := false
+	st := &stages{reader: k8s, config: testConfig(), client: interceptor.NewClient(base, interceptor.Funcs{
+		Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+			if refuseNextPatch {
+				refuseNextPatch = false
+				return apierrors.NewServiceUnavailable("apiserver overloaded")
+			}
+			return c.Patch(ctx, obj, patch, opts...)
+		},
+	})}
+	run := &stageRun{stage: aicrjob.StageRecipe, input: "0123456789abcdef",
+		args: func(*aicrjob.Request) ([]string, error) { return []string{"recipe"}, nil }}
+	if _, _, err = st.drive(ctx, rt, run); err != nil {
+		t.Fatal(err)
+	}
+	job := liveJobs(t, ctx, string(aicrjob.StageRecipe))[0]
+	succeed(t, ctx, &job, nil)
+	runs := func() float64 {
+		return testutil.ToFloat64(aicrJobRuns.WithLabelValues(string(aicrjob.StageRecipe), "succeeded", ""))
+	}
+	beforeRuns, beforeDurations := runs(), jobObservations(t, string(aicrjob.StageRecipe), "succeeded")
+
+	refuseNextPatch = true
+	if _, _, err = st.drive(ctx, rt, run); err == nil {
+		t.Fatal("drive() recorded the run although its mark failed")
+	}
+	if got := runs() - beforeRuns; got != 0 {
+		t.Fatalf("a run whose mark failed was counted %v times", got)
+	}
+	for range 2 {
+		if done, _, driveErr := st.drive(ctx, rt, run); driveErr != nil || done == nil {
+			t.Fatalf("drive() = %v, %v", done, driveErr)
+		}
+	}
+	if got := runs() - beforeRuns; got != 1 {
+		t.Errorf("the run was counted %v times, want once", got)
+	}
+	if got := jobObservations(t, string(aicrjob.StageRecipe), "succeeded") - beforeDurations; got != 1 {
+		t.Errorf("the run's duration was observed %d times, want once", got)
 	}
 }

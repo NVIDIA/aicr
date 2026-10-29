@@ -36,7 +36,7 @@ func TestRunRejectsBadCommandLines(t *testing.T) {
 		{[]string{"approve"}, "approve needs a rollout name"},
 		{[]string{"approve", "rollout-x"}, "approve needs --reason"},
 		{[]string{"revoke", "--reason", "x"}, "revoke needs a rollout name"},
-		{[]string{"approve", "rollout-x", "--reason", "r", "--expires", "-1h"}, "--expires must be positive"},
+		{[]string{"approve", "rollout-x", "--reason", "r", "--expires", "-1h"}, "--expires must not be negative"},
 		{[]string{"approve", "rollout-x", "--reason", "r", "extra"}, "unexpected arguments after rollout-x"},
 		{[]string{"approve", "rollout-x", "--username", "bob"}, "flag provided but not defined: -username"},
 	} {

@@ -416,7 +416,7 @@ status:
   observedGeneration: 2
   conditions: []
   approval: Approved                  # NotRequired | Pending | Approved | Bypassed | Revoked | Expired
-  current: {release: gpu-operator-readiness, operation: Verify, startedAt: <time>, attempts: 1}
+  current: {release: gpu-operator-readiness, operation: Verify, startedAt: <time>}
                                       # timeoutFrom: <time> once a halt ended; the action timeout runs from it
   releases:                           # state: Pending | Progressing | Ready | Failed | Suspended (step in flight while halted) | Deleting | Removed | Unknown
   - {id: cert-manager, state: Ready, revision: sha256:<...>, specDigest: sha256:<...>}   # specDigest: the spec this rollout wrote, from when it became ready
@@ -485,6 +485,27 @@ changes `spec.approval`:
   (the spec written, or a sync since the rollout was created).
 - The request changes nothing but `spec.approval`; the operator's own identity
   can never write it, and a rollout cannot be created with it.
+- Only the operator's identity creates rollouts, so nobody else can create one
+  that skips approval with `approvalRequired: false` or an `outcome` label
+  already set.
+
+To restore RuntimeRollouts from a backup under another identity, as Velero
+does:
+
+1. Stop the operator, so no rollout advances while admission is relaxed:
+   `kubectl -n aicr-system scale deployment/aicr-operator --replicas=0`.
+2. Delete the `aicr-operator-approval` ValidatingAdmissionPolicyBinding.
+3. Restore the rollouts.
+4. Run `helm upgrade` on the operator chart with the same values. It recreates
+   the binding and restores the operator's replica count.
+
+A restored rollout comes back without its status. The operator rebuilds its
+phase from the `outcome` label and records each release in its steps as
+`Unknown`, because which ones it wrote is lost. Until a later rollout succeeds,
+a missing Application of such a release is not repaired from the active plan.
+While the target differs from the active plan, the runtime stalls with
+`MovedReleaseMissing`; with the target at the active plan, the operator creates
+a rollout to it that reinstalls the release, with a fresh approval.
 
 Approvers also need `get`, `list`, `watch` and `patch` on `runtimerollouts`,
 and `get` on ConfigMaps in the operator namespace to read assessment reports.

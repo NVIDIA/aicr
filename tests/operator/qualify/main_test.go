@@ -64,6 +64,9 @@ var (
 	aicrVersion string
 	candidate   candidateManifest
 	next        candidateManifest
+	// operator impersonates the operator's ServiceAccount, the only identity
+	// the chart's policy lets create rollouts.
+	operator client.Client
 )
 
 func TestMain(m *testing.M) {
@@ -121,6 +124,12 @@ func setup(path string) error {
 	}
 	as := rest.CopyConfig(cfg)
 	as.Impersonate = rest.ImpersonationConfig{UserName: approverUser, Groups: []string{approverGroup, "system:authenticated"}}
-	approver, err = client.New(as, client.Options{Scheme: scheme})
+	if approver, err = client.New(as, client.Options{Scheme: scheme}); err != nil {
+		return err
+	}
+	asOperator := rest.CopyConfig(cfg)
+	asOperator.Impersonate = rest.ImpersonationConfig{UserName: "system:serviceaccount:" + operatorNamespace + ":aicr-operator",
+		Groups: []string{"system:serviceaccounts", "system:serviceaccounts:" + operatorNamespace, "system:authenticated"}}
+	operator, err = client.New(asOperator, client.Options{Scheme: scheme})
 	return err
 }

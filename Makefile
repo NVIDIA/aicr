@@ -462,6 +462,12 @@ nvsentinel-log-collector-e2e: ## Live Kind test: nvsentinel-log-collector captur
 	echo "Running nvsentinel-log-collector mixin e2e test..."; \
 	tests/e2e/nvsentinel-log-collector/run.sh
 
+.PHONY: nvsentinel-node-validation-e2e
+nvsentinel-node-validation-e2e: ## Live Kind test: nvsentinel-node-validation holds a cordoned new GPU node until a ValidationRequest passes (#3088)
+	@set -e; \
+	echo "Running nvsentinel-node-validation mixin e2e test..."; \
+	tests/e2e/nvsentinel-node-validation/run.sh
+
 .PHONY: npd-nvsentinel-object-monitor-e2e
 npd-nvsentinel-object-monitor-e2e: ## Live Kind test: an NPD Node condition becomes an NVSentinel health event (#2614)
 	@set -e; \

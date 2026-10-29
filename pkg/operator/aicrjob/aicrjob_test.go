@@ -15,6 +15,7 @@
 package aicrjob
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -358,6 +359,22 @@ func TestOutcomeRetry(t *testing.T) {
 	}
 }
 
+// A Job that failed although its container exited 0, as when the deadline
+// lands while the container exits, is a failed run with an internal error
+// and a bounded retry, never a failure without an error.
+func TestObserveOutcomeFailedJobThatExitedZero(t *testing.T) {
+	t.Parallel()
+	o, err := ObserveOutcome(StageRender, runID, finishedJob(batchv1.JobFailed, "DeadlineExceeded"), podExited(ExitSuccess, "done"))
+	if err != nil || o.State != StateFailed || o.Err == nil {
+		t.Fatalf("ObserveOutcome() = %+v, %v; want a failed run with an error", o, err)
+	}
+	if operrors.CodeOf(o.Err) != operrors.ErrCodeInternal || o.Retry() != RetryBounded ||
+		!strings.Contains(o.Err.Error(), "DeadlineExceeded") || !strings.Contains(o.Err.Error(), "exited 0") {
+
+		t.Fatalf("error = %v, retry %d; want INTERNAL naming the Job's reason, with a bounded retry", o.Err, o.Retry())
+	}
+}
+
 func TestVersionGate(t *testing.T) {
 	t.Parallel()
 	for _, v := range []string{"v1.0.0", "v1.1.0", "v1.99.3"} {
@@ -379,10 +396,7 @@ func TestVersionGate(t *testing.T) {
 	for _, reported := range []string{"v1.1.0", ""} {
 		err := CheckArtifactVersion("v1.0.0", reported)
 		var se *operrors.StructuredError
-		if s, ok := err.(*operrors.StructuredError); ok { //nolint:errorlint // returned directly
-			se = s
-		}
-		if se == nil || se.Context["reason"] != ReasonVersionMismatch {
+		if !errors.As(err, &se) || se.Context["reason"] != ReasonVersionMismatch {
 			t.Errorf("CheckArtifactVersion(v1.0.0, %q) = %v, want %s", reported, err, ReasonVersionMismatch)
 		}
 	}

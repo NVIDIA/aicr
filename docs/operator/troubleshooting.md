@@ -18,12 +18,12 @@ reason and message.
 | `NodeGroupEmpty`, `PlacementOverlap`, `AcceleratedGroupHeterogeneous`, `SnapshotIncomplete`, `CriteriaConflict` | [Discovery](#discovery) |
 | `OverridePathUnknown`, `InvalidOverride`, `InvalidPlacement`, `NamespaceNotAllowed`, `ChartSourceUnsupported`, `ContentTooLarge`, `Conflict` | [Render and registry content](#render-and-registry-content) |
 | `AICRInvalidRequest`, `AICRNotFound`, `AICRUnauthorized`, `AICRInternal`, `AICRTimeout` | [AICR Job failures](#aicr-job-failures) |
-| `retrying after a transient failure` or `[SERVICE_UNAVAILABLE]` in the `Resolved` message, `RegistryCredentialsUnavailable`, `Unauthorized`, `RegistryCredentialsStale` | [Registry and credential outages](#registry-and-credential-outages) |
+| `retrying after a transient failure` or `[SERVICE_UNAVAILABLE]` in the `Resolved` message, `RegistryCredentialsUnavailable`, `Unauthorized` on `Resolved`, `RegistryCredentialsStale` | [Registry and credential outages](#registry-and-credential-outages) |
 | `AICRVersionMismatch`, `AICRArtifactUnsupported` | [AICR version mismatch](#aicr-version-mismatch) |
-| `EngineMissing`, `ProjectMissing` | [Argo CD not available](#argo-cd-not-available) |
+| `EngineMissing`, `ProjectMissing`; `Unauthorized` on `EngineAvailable` | [Argo CD not available](#argo-cd-not-available) |
 | `AwaitingApproval`, `AwaitingAcknowledgement` | [Waiting for approval](#waiting-for-approval) |
 | `TransitionBlocked` | [Transition blocked](#transition-blocked) |
-| `InventoryDrift`, `StepUnknown` | [Rollout stalled](#rollout-stalled) |
+| `InventoryDrift`, `StepUnknown`, `MovedReleaseMissing`, `EngineSuspensionRefused` | [Rollout stalled](#rollout-stalled) |
 | `RolloutFailed`, `RolloutExpired`, `RolloutRevoked`; `ForeignObject` on `Ready` | [Rollout failed, expired or revoked](#rollout-failed-expired-or-revoked) |
 | `ValidationUnavailable` | [Validation](#validation) |
 | `PlanUnreadable`, `PlanMissing`, `PlanOfAnotherRuntime`, `PlanWithoutRecipe`, `NotFound` | [Unreadable or missing plans](#unreadable-or-missing-plans) |
@@ -161,9 +161,10 @@ kubectl -n argocd get secret aicr-registry \
   -o jsonpath='{.metadata.annotations.operator\.aicr\.run/token-expires-at}'
 ```
 
-`aicr_operator_registry_token_expiry_seconds` shows the same expiry. Once a
-token has expired, Argo CD reports `ComparisonError` on the Applications;
-running workloads are unaffected, and comparisons recover after the refresh.
+`aicr_operator_registry_token_expiry_timestamp_seconds` shows the same expiry
+as a Unix time. Once a token has expired, Argo CD reports `ComparisonError` on
+the Applications; running workloads are unaffected, and comparisons recover
+after the refresh.
 
 ## AICR version mismatch
 
@@ -177,7 +178,8 @@ running workloads are unaffected, and comparisons recover after the refresh.
 | Reason (`EngineAvailable=False`) | Cause | Fix |
 | --- | --- | --- |
 | `EngineMissing` | The Argo CD `Application` CRD is not served | Install Argo CD; the operator checks every 30 seconds and starts watching once it is |
-| `ProjectMissing` | The `aicr` AppProject cannot be read | `helm upgrade` the operator chart to recreate it |
+| `ProjectMissing` | The `aicr` AppProject does not exist | `helm upgrade` the operator chart to recreate it |
+| `Unauthorized` | The operator may not read the AppProject, the Argo CD CRDs or the `repo-creds` Secret, as after an RBAC change | `helm upgrade` the operator chart to restore its RBAC |
 
 Nothing is written to Argo CD while the engine is unavailable. See
 [Argo CD](argocd.md).
@@ -229,13 +231,30 @@ migration is a separate procedure, outside the operator.
   `SpecDrifted` until the edit is undone or its action timeout fails the
   rollout.
 - **`StepUnknown`.** A step names a release the target plan lacks. Retry.
+- **`MovedReleaseMissing`** (on the runtime, with no rollout in progress). A
+  rollout that did not succeed may have moved a release to its target plan,
+  and that release's Application was then deleted. The operator does not write
+  it again from the active plan, which would roll it back without approval.
+  Retry: the new rollout installs the release at its target plan, with a fresh
+  approval. To keep the active plan instead, revert the runtime change behind
+  the failed target: the operator then creates a rollout to the active plan
+  that installs the release there, also with a fresh approval.
+- **`EngineSuspensionRefused`** (on the runtime). The API server refused for
+  good to turn an Application's automated sync off for `spec.suspendEngine`,
+  or back on after it, as for an Application edited outside the admission
+  policy. That Application is not in the declared state: during an emergency
+  stop it keeps syncing. The message and the `EngineSuspensionRefused` Event
+  name it. Undo the edit to the Application; the operator tries again on every
+  reconcile, and no new rollout starts until it succeeds.
 
 ## Rollout failed, expired or revoked
 
 The rollout's message and its `RolloutFailed`, `RolloutExpired` or
 `RolloutRevoked` Event say why. Releases the rollout already moved stay on
 its target plan, and the runtime stays `Stalled` until the target changes or a
-[retry](operations.md#retrying).
+[retry](operations.md#retrying). Changing the target back to the active plan
+creates a rollout to it, with a fresh approval, that also reinstalls releases
+the failed rollout removed.
 
 | Message | Cause | Next |
 | --- | --- | --- |
@@ -253,12 +272,13 @@ longer than `actionTimeout` can fail on resume
 
 ## Validation
 
-**`ValidationUnavailable`.** The rollout is in `Validating` and cannot run
-deployment validation:
+**`ValidationUnavailable`.** Deployment validation cannot run. Without
+validation installed, the runtime stalls before any step runs; otherwise the
+rollout is in `Validating`:
 
 | Message | Fix |
 | --- | --- |
-| `deployment validation is not installed (validation.enabled)` | Install the validation identities (`validation.enabled: true` with `aicr.validatorImages`) or set `spec.validation.deployment: Disabled` |
+| `deployment validation is not installed (validation.enabled)` | Install the validation identities (`validation.enabled: true` with `aicr.validatorImages`) or set `spec.validation.deployment: Disabled`. The runtime stalls before any step; a rollout created while validation was installed stalls in `Validating` |
 | `plan <digest> records no recipe to validate against` | The rollout targets a plan rebuilt from Applications and was created by an operator that predates `PlanWithoutRecipe`; set `Disabled` for this rollout, or roll to a resolved plan. Current operators refuse such a rollout before any step |
 | `taking the deployment snapshot` (rollout message, not a stall) | Validation waits for the snapshot the rollout takes after its last step; it runs in `aicr-discovery` like discovery's. If it fails, the rollout ends `Failed` with `the deployment snapshot failed: <cause>`: fix the cause as for a discovery snapshot, then retry |
 
@@ -395,7 +415,10 @@ release's resources and the Application.
 Deleting an owned Application without the finalizer leaves its resources
 running. While no rollout is in progress the operator writes it again
 (`ApplicationRecreated`); during a rollout, the deletion is
-[drift](#rollout-stalled).
+[drift](#rollout-stalled). The exception is a release that a rollout which did
+not succeed may have moved to its target plan: writing it from the active plan
+would roll it back without approval, so the runtime stalls with
+`MovedReleaseMissing` instead ([Rollout stalled](#rollout-stalled)).
 
 ## Orphaned objects and re-adoption
 

@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 
@@ -116,6 +117,11 @@ func TestControllerOptionsMapping(t *testing.T) {
 	}
 	if co.Metrics.BindAddress != o.MetricsBindAddress || co.HealthProbeBindAddress != o.HealthProbeBindAddress {
 		t.Errorf("addresses = %q %q", co.Metrics.BindAddress, co.HealthProbeBindAddress)
+	}
+	if c := co.Client.Cache; c == nil || len(c.DisableFor) != 1 {
+		t.Errorf("Client.Cache = %+v, want Secrets read uncached", c)
+	} else if _, ok := c.DisableFor[0].(*corev1.Secret); !ok {
+		t.Errorf("Client.Cache.DisableFor = %T, want *corev1.Secret", c.DisableFor[0])
 	}
 }
 

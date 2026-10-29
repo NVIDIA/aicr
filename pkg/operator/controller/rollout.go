@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strconv"
@@ -78,9 +79,19 @@ const (
 	// objects and records no recipe, so deployment validation cannot run
 	// against it; it is not rolled out while validation is required.
 	ReasonPlanWithoutRecipe = "PlanWithoutRecipe"
+	// ReasonMovedReleaseMissing: the Application of a release that a rollout
+	// which did not succeed may have moved is gone; repairing it from the
+	// active plan would roll it back without approval.
+	ReasonMovedReleaseMissing = "MovedReleaseMissing"
+	// ReasonEngineSuspensionRefused: the API server refused for good to
+	// change an Application's automated sync for spec.suspendEngine, so the
+	// engine is not suspended or resumed as declared.
+	ReasonEngineSuspensionRefused = "EngineSuspensionRefused"
 )
 
-// resyncInterval re-observes a steady runtime; engines have no watch yet.
+// resyncInterval re-observes a steady runtime: it covers what no watch
+// delivers, such as Applications before the engine kind is served and the
+// clock-driven windows and deadlines.
 const resyncInterval = 30 * time.Second
 
 // Event reasons the rollout controller records on engine objects and the
@@ -101,6 +112,9 @@ const (
 	// EventStalled, on the runtime: it turned Stalled, or stalled for
 	// another reason.
 	EventStalled = "Stalled"
+	// EventEngineSuspensionRefused, on the runtime: the API server refused
+	// for good to change an Application's automated sync.
+	EventEngineSuspensionRefused = ReasonEngineSuspensionRefused
 )
 
 // Engine is the adapter contract the rollout controller drives.
@@ -156,17 +170,27 @@ type runtimeView struct {
 	inProgress *v1alpha1.RuntimeRollout
 	// retired are releases a rollout ended since the newest success
 	// started removing; nothing writes them again until a rollout does.
-	retired                     map[string]bool
-	ready, available            bool
-	readyReason, readyMessage   string
-	availableMessage            string
-	reconciling                 bool
-	reconcilingReason           string
-	stalled                     bool
-	stalledReason, stalledMsg   string
+	retired map[string]bool
+	// moved are releases such a rollout may have written to its target
+	// plan; repair never writes them back to the active plan.
+	moved                     map[string]movedBy
+	ready, available          bool
+	readyReason, readyMessage string
+	availableMessage          string
+	reconciling               bool
+	reconcilingReason         string
+	stalled                   bool
+	stalledReason, stalledMsg string
+	// suspensionRefused names the Applications whose automated sync the API
+	// server refused for good to set as spec.suspendEngine declares.
+	suspensionRefused           string
 	engineOK                    bool
 	engineReason, engineMessage string
 	requeue                     time.Duration
+	// blockedReport is the assessment report ConfigMap of a transition that
+	// stalled blocked: no rollout references it, yet retention keeps it so
+	// the transition is not assessed again.
+	blockedReport string
 }
 
 // Reconcile drives the runtime named in req.
@@ -184,8 +208,11 @@ func (r *RolloutReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if rt.Name != v1alpha1.SingletonName {
 		return ctrl.Result{}, nil
 	}
-	if stalled, err := r.unreadableRollouts(ctx, rt); err != nil || stalled {
-		return ctrl.Result{RequeueAfter: resyncInterval}, err
+	switch stalled, err := r.unreadableRollouts(ctx, rt); {
+	case err != nil:
+		return ctrl.Result{}, err
+	case stalled:
+		return ctrl.Result{RequeueAfter: resyncInterval}, nil
 	}
 	if !rt.DeletionTimestamp.IsZero() {
 		view, err := r.deleting(ctx, rt)
@@ -252,7 +279,7 @@ func (r *RolloutReconciler) reconcile(ctx context.Context, rt *v1alpha1.ClusterR
 	}
 	converge := target != "" && target != active
 	if !converge && target != "" && current == nil && resolvedNow && !v.stalled {
-		if converge, err = r.diverged(ctx, rt, target); err != nil {
+		if converge, err = r.diverged(ctx, rt, target, rollouts); err != nil {
 			return nil, err
 		}
 	}
@@ -264,18 +291,30 @@ func (r *RolloutReconciler) reconcile(ctx context.Context, rt *v1alpha1.ClusterR
 		// next step boundary. An Adopt rollout moves the objects
 		// at the plan they carry; the target rolls forward after it, not
 		// instead of it.
-		var supersede string
+		var supersede, token string
+		requested := rt.Annotations[v1alpha1.AnnotationRetry]
 		switch {
 		case target != "" && resolvedNow && target != current.Spec.ToPlanDigest && !isAdopt(current):
 			supersede = "superseded by plan " + target
-		case retry != "" && current.Status.Phase == v1alpha1.PhaseStalled:
-			supersede = "superseded by retry " + retry
-			if err = r.markRetry(ctx, current, retry); err != nil {
+		case current.Status.Phase == v1alpha1.PhaseStalled && requested != "" &&
+			(retry == requested || current.Annotations[v1alpha1.AnnotationRetryRequested] == requested):
+			// The token is consumed on this rollout now, so one the rollout
+			// recovers from before a step boundary acts on no later rollout;
+			// the rollout is superseded while it stays stalled.
+			if err = r.retryRequested(ctx, current, requested); err != nil {
 				return nil, err
 			}
+			supersede, token = "superseded by retry "+requested, requested
 		}
-		if err = r.advance(ctx, rt, current, v, supersede, hold); err != nil {
+		if err = r.advance(ctx, rt, current, v, supersede, token, hold); err != nil {
 			return nil, err
+		}
+		if pending := current.Annotations[v1alpha1.AnnotationRetryRequested]; pending != "" &&
+			current.Status.Phase != v1alpha1.PhaseStalled && !current.Status.Phase.IsTerminal() {
+
+			if err = r.retrySpent(ctx, current, pending); err != nil {
+				return nil, err
+			}
 		}
 		if current.Status.Phase.IsTerminal() {
 			v.rollout, v.inProgress = "", nil
@@ -302,12 +341,12 @@ func (r *RolloutReconciler) reconcile(ctx context.Context, rt *v1alpha1.ClusterR
 		}
 	}
 	// After advance, which may have just ended the rollout in progress.
-	v.retired = retired(rollouts)
+	v.retired, v.moved = leftBehind(rollouts)
 	if err = r.observeActive(ctx, rt, target, v); err != nil {
 		return nil, err
 	}
 	if v.rollout == "" {
-		if err = r.retain(ctx, rt, v.active, target); err != nil {
+		if err = r.retain(ctx, rt, v.active, target, v.blockedReport); err != nil {
 			log.FromContext(ctx).Info("retention will retry", "error", err.Error())
 		}
 	}
@@ -356,13 +395,19 @@ func keepObserved(rt *v1alpha1.ClusterRuntime, v *runtimeView) {
 
 // prepare checks the engine and the registry credentials, orphans earlier
 // runtimes' unfinished rollouts and applies spec.suspendEngine. It reports
-// whether the runtime can be reconciled further.
+// whether the runtime can be reconciled further. A check that fails with a
+// reason reports it, and so does one refused for good, such as a forbidden
+// read; one that could not read what it checks for now returns its error, so
+// one failed read flips no condition.
 func (r *RolloutReconciler) prepare(ctx context.Context, rt *v1alpha1.ClusterRuntime, v *runtimeView) (bool, error) {
 	err := r.Engine.Capabilities(ctx)
 	if err == nil && r.Credentials != nil {
 		err = r.Credentials.Check(ctx)
 	}
 	if err != nil {
+		if operrors.ReasonOf(err) == "" && !operrors.IsPermanent(err) {
+			return false, err
+		}
 		v.engineOK, v.engineReason, v.engineMessage = false, reasonOf(err), errorMessage(err)
 		v.stalled, v.stalledReason, v.stalledMsg = true, v.engineReason, v.engineMessage
 		v.readyReason, v.readyMessage = v.engineReason, v.engineMessage
@@ -372,23 +417,57 @@ func (r *RolloutReconciler) prepare(ctx context.Context, rt *v1alpha1.ClusterRun
 	if err = r.orphan(ctx, rt.Name, string(rt.UID)); err != nil {
 		return false, err
 	}
-	if err = r.suspension(ctx, rt); err != nil {
+	if err = r.suspension(ctx, rt, v); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
 // diverged reports whether an owned engine object carries a plan other than
-// target, as a failed rollout leaves the releases it already moved. When the
-// target is the active plan, rolling out to it from live state is moving to
-// the declared target, not an automatic rollback.
-func (r *RolloutReconciler) diverged(ctx context.Context, rt *v1alpha1.ClusterRuntime, target string) (bool, error) {
+// target, as a failed rollout leaves the releases it already moved, or
+// whether a release of the target plan that such a rollout moved elsewhere
+// or removed is gone, which repair does not restore. When the target is the
+// active plan, rolling out to it from live state is moving to the declared
+// target, not an automatic rollback.
+func (r *RolloutReconciler) diverged(ctx context.Context, rt *v1alpha1.ClusterRuntime, target string,
+	rollouts []v1alpha1.RuntimeRollout) (bool, error) {
+
 	inventory, err := r.Engine.Inventory(ctx, string(rt.UID))
 	if err != nil {
 		return false, err
 	}
+	live := map[string]bool{}
 	for _, i := range inventory {
 		if i.PlanDigest != target {
+			return true, nil
+		}
+		live[i.ReleaseID] = true
+	}
+	retired, moved := leftBehind(rollouts)
+	gone := map[string]bool{}
+	for id := range retired {
+		if !live[id] {
+			gone[id] = true
+		}
+	}
+	for id, m := range moved {
+		if m.plan != target && !live[id] {
+			gone[id] = true
+		}
+	}
+	if len(gone) == 0 {
+		return false, nil
+	}
+	p, err := readPlan(ctx, r.Reader, r.Config.OperatorNamespace, target)
+	if operrors.CodeOf(err) == operrors.ErrCodeNotFound {
+		// observeActive restores the active plan or stalls without it.
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	for i := range p.Releases {
+		if gone[p.Releases[i].ID] {
 			return true, nil
 		}
 	}
@@ -463,8 +542,9 @@ func failedOutcome(ro *v1alpha1.RuntimeRollout) bool {
 
 // refused stalls the runtime on a target plan it never rolls out: another
 // runtime's, or one without a recipe while deployment validation is
-// required.
-func refused(rt *v1alpha1.ClusterRuntime, p *plan.Document, v *runtimeView) bool {
+// required. It also stalls, before any step, a runtime that requires
+// deployment validation from an installation without it.
+func (r *RolloutReconciler) refused(rt *v1alpha1.ClusterRuntime, p *plan.Document, v *runtimeView) bool {
 	switch {
 	case p.RuntimeUID != string(rt.UID):
 		// Its engine objects would carry the other UID, which this runtime's
@@ -477,9 +557,15 @@ func refused(rt *v1alpha1.ClusterRuntime, p *plan.Document, v *runtimeView) bool
 		v.stalledMsg = fmt.Sprintf("plan %s was rebuilt from engine objects and records no recipe, so deployment validation cannot run: "+
 			"change the inputs so resolution reproduces it, which restores its recipe; select another plan; "+
 			"or set spec.validation.deployment: Disabled", p.DesiredStateDigest)
+	case !r.Config.ValidationEnabled && rt.Spec.Validation.Deployment != v1alpha1.DeploymentValidationDisabled:
+		// Every step would be applied and then wait for a validation that
+		// cannot run.
+		v.stalled, v.stalledReason, v.stalledMsg = true, ReasonValidationMissing, validationNotInstalled
 	default:
 		return false
 	}
+	// Nothing rolls out until the cause is fixed, so Ready names it too.
+	v.readyReason, v.readyMessage = v.stalledReason, v.stalledMsg
 	return true
 }
 
@@ -514,6 +600,9 @@ func (r *RolloutReconciler) judge(ctx context.Context, rt *v1alpha1.ClusterRunti
 	approvalRequired, err := assessSteps(steps, base.doc, p, without(report, base.unassessed))
 	if err != nil {
 		v.stalled, v.stalledReason, v.stalledMsg = true, reasonOf(err), errorMessage(err)
+		if assessment != nil {
+			v.blockedReport = assessment.ConfigMap
+		}
 		return nil, false, nil, nil
 	}
 	return steps, approvalRequired, assessment, nil
@@ -535,7 +624,7 @@ func (r *RolloutReconciler) create(ctx context.Context, rt *v1alpha1.ClusterRunt
 		}
 		return err
 	}
-	if refused(rt, p, v) {
+	if r.refused(rt, p, v) {
 		return nil
 	}
 	planCM, err := plan.Name(target)
@@ -709,10 +798,12 @@ func nextSuffix(rollouts []v1alpha1.RuntimeRollout, transition string) int {
 
 // advance moves a rollout one step at a time: deadline, approval,
 // pause, then the steps in order with one engine mutation each. A non-empty
-// hold names why no further step starts, as a pause does; a removal rollout
-// is never held, so a runtime with broken inputs can still be deleted.
+// supersede ends it at the next step boundary, recording the token of the
+// retry that asked for it, if any. A non-empty hold names why no further step
+// starts, as a pause does; a removal rollout is never held, so a runtime
+// with broken inputs can still be deleted.
 func (r *RolloutReconciler) advance(ctx context.Context, rt *v1alpha1.ClusterRuntime, ro *v1alpha1.RuntimeRollout, v *runtimeView,
-	supersede, hold string) error {
+	supersede, retry, hold string) error {
 
 	now := r.Now()
 	if now.After(ro.Spec.Deadline.Time) {
@@ -722,7 +813,7 @@ func (r *RolloutReconciler) advance(ctx context.Context, rt *v1alpha1.ClusterRun
 	// superseded.
 	atBoundary := ro.Status.Current == nil && ro.Status.Phase != v1alpha1.PhaseValidating
 	if supersede != "" && atBoundary {
-		return r.finish(ctx, ro, v1alpha1.PhaseSuperseded, supersede)
+		return r.superseded(ctx, ro, supersede, retry)
 	}
 	approval := r.approval(ro, now)
 	if approval == v1alpha1.ApprovalPending {
@@ -773,7 +864,7 @@ func (r *RolloutReconciler) advance(ctx context.Context, rt *v1alpha1.ClusterRun
 			continue
 		}
 		if supersede != "" && ro.Status.Current == nil {
-			return r.finish(ctx, ro, v1alpha1.PhaseSuperseded, supersede)
+			return r.superseded(ctx, ro, supersede, retry)
 		}
 		if cur := ro.Status.Current; cur == nil || cur.Release != step.Release {
 			// Before each step, live state must be the starting inventory
@@ -841,7 +932,7 @@ func (r *RolloutReconciler) step(ctx context.Context, p *plan.Document, ro *v1al
 			// Observe the sync this rollout already started.
 			start = ro.CreationTimestamp
 		}
-		ro.Status.Current = &v1alpha1.CurrentStep{Release: step.Release, Operation: step.Operation, StartedAt: &start, Attempts: 1}
+		ro.Status.Current = &v1alpha1.CurrentStep{Release: step.Release, Operation: step.Operation, StartedAt: &start}
 		setReleaseState(ro, step.Release, v1alpha1.ReleaseProgressing, "")
 		// Record the step before its mutation, so a restart observes it.
 		if err = r.saveStatus(ctx, ro, ""); err != nil {
@@ -1071,12 +1162,19 @@ func (r *RolloutReconciler) mutate(ctx context.Context, p *plan.Document, rel *p
 func (r *RolloutReconciler) remove(ctx context.Context, rt *v1alpha1.ClusterRuntime, ro *v1alpha1.RuntimeRollout,
 	step v1alpha1.RolloutStep, now time.Time, stop *halt, v *runtimeView) (bool, error) {
 
-	fail := func(err error) (bool, error) {
-		if operrors.IsPermanent(err) {
-			setReleaseState(ro, step.Release, v1alpha1.ReleaseFailed, "")
-			return false, r.finish(ctx, ro, v1alpha1.PhaseFailed, errorMessage(err))
+	// fail ends the rollout on a permanent error. Only a release whose delete
+	// was issued is Failed, which keeps repair from writing it again; one
+	// whose delete never landed is Pending, its Application as it was.
+	fail := func(err error, issued bool) (bool, error) {
+		if !operrors.IsPermanent(err) {
+			return false, err
 		}
-		return false, err
+		state := v1alpha1.ReleasePending
+		if issued {
+			state = v1alpha1.ReleaseFailed
+		}
+		setReleaseState(ro, step.Release, state, "")
+		return false, r.finish(ctx, ro, v1alpha1.PhaseFailed, errorMessage(err))
 	}
 	cur := ro.Status.Current
 	if cur == nil || cur.Release != step.Release || cur.StartedAt == nil {
@@ -1084,34 +1182,35 @@ func (r *RolloutReconciler) remove(ctx context.Context, rt *v1alpha1.ClusterRunt
 			// Only a removal already made by this rollout finishes.
 			obs, err := r.Engine.Retired(ctx, step.Release, step.UID)
 			if err != nil {
-				return fail(err)
+				return fail(err, false)
 			}
 			if obs.State != argocd.StateReady {
 				return false, r.finish(ctx, ro, stop.phase, stop.message)
 			}
 		}
 		start := metav1.NewTime(now)
-		ro.Status.Current = &v1alpha1.CurrentStep{Release: step.Release, Operation: step.Operation, StartedAt: &start, Attempts: 1}
+		ro.Status.Current = &v1alpha1.CurrentStep{Release: step.Release, Operation: step.Operation, StartedAt: &start}
 		setReleaseState(ro, step.Release, v1alpha1.ReleaseDeleting, "")
 		if err := r.saveStatus(ctx, ro, ""); err != nil {
 			return false, err
 		}
 		if err := r.Engine.Remove(ctx, string(rt.UID), step.Release, step.UID, ro.Name); err != nil {
-			return fail(err)
+			return fail(err, false)
 		}
 		v.requeue = pollInterval
 		return false, nil
 	}
 	obs, err := r.Engine.Retired(ctx, step.Release, step.UID)
+	issued := true
 	if err == nil && obs.Reason == "DeletePending" {
 		// The mark or the delete did not land: issue it again.
-		err = r.Engine.Remove(ctx, string(rt.UID), step.Release, step.UID, ro.Name)
+		err, issued = r.Engine.Remove(ctx, string(rt.UID), step.Release, step.UID, ro.Name), false
 	}
 	if err != nil {
 		if ended, finishErr := r.timedOut(ctx, ro, step, cur, now, "removed", err); ended {
 			return false, finishErr
 		}
-		return fail(err)
+		return fail(err, issued)
 	}
 	switch {
 	case obs.State == argocd.StateReady:
@@ -1135,7 +1234,7 @@ func (r *RolloutReconciler) reconcileFailed(rt *v1alpha1.ClusterRuntime, err err
 	if r.Events == nil || operrors.CodeOf(err) == operrors.ErrCodeCanceled {
 		return
 	}
-	r.Events.Eventf(rt, nil, corev1.EventTypeWarning, EventReconcileFailed, "Reconcile", "%s", errorMessage(err))
+	emit(r.Events, rt, corev1.EventTypeWarning, EventReconcileFailed, "Reconcile", "%s", errorMessage(err))
 }
 
 // overridden records an Event on an Application whose fields other managers
@@ -1144,7 +1243,7 @@ func (r *RolloutReconciler) overridden(e *argocd.Ensured, planDigest string) {
 	if r.Events == nil || e == nil || len(e.Overridden) == 0 {
 		return
 	}
-	r.Events.Eventf(e.Application, nil, corev1.EventTypeWarning, EventFieldOwnershipOverridden, "Ensure",
+	emit(r.Events, e.Application, corev1.EventTypeWarning, EventFieldOwnershipOverridden, "Ensure",
 		"forced fields owned by %s back to plan %s", strings.Join(e.Overridden, ", "), planDigest)
 }
 
@@ -1170,14 +1269,56 @@ func (r *RolloutReconciler) approval(ro *v1alpha1.RuntimeRollout, now time.Time)
 
 // finish ends a rollout: the durable outcome label first, then status.
 func (r *RolloutReconciler) finish(ctx context.Context, ro *v1alpha1.RuntimeRollout, phase v1alpha1.RolloutPhase, message string) error {
-	return r.finishWith(ctx, ro, phase, message, "")
+	return r.finishWith(ctx, ro, phase, message, nil)
 }
 
-// finishWith is finish recording, with the outcome and in the same patch,
-// the evidence reference of a validated rollout, so it survives
-// the loss of status. Its validation Jobs go once the outcome is recorded.
+// retryRequested records on a stalled rollout the retry token that asked to
+// supersede it, which consumes the token.
+func (r *RolloutReconciler) retryRequested(ctx context.Context, ro *v1alpha1.RuntimeRollout, token string) error {
+	if ro.Annotations[v1alpha1.AnnotationRetryRequested] == token {
+		return nil
+	}
+	patch := client.MergeFrom(ro.DeepCopy())
+	if ro.Annotations == nil {
+		ro.Annotations = map[string]string{}
+	}
+	ro.Annotations[v1alpha1.AnnotationRetryRequested] = token
+	if err := r.Client.Patch(ctx, ro, patch); err != nil {
+		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "record retry request on "+ro.Name)
+	}
+	return nil
+}
+
+// retrySpent records that a rollout recovered from the stall a retry was
+// requested for before the retry ended it: the token stays consumed, as
+// the rollout's retry, and a later stall needs a new one.
+func (r *RolloutReconciler) retrySpent(ctx context.Context, ro *v1alpha1.RuntimeRollout, token string) error {
+	patch := client.MergeFrom(ro.DeepCopy())
+	delete(ro.Annotations, v1alpha1.AnnotationRetryRequested)
+	ro.Annotations[v1alpha1.AnnotationRetry] = token
+	if err := r.Client.Patch(ctx, ro, patch); err != nil {
+		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "record spent retry on "+ro.Name)
+	}
+	return nil
+}
+
+// superseded ends a rollout Superseded, recording the token of the retry
+// that superseded it, if any, in the outcome's patch: the token is consumed
+// exactly when the rollout ends.
+func (r *RolloutReconciler) superseded(ctx context.Context, ro *v1alpha1.RuntimeRollout, message, retry string) error {
+	var annotations map[string]string
+	if retry != "" {
+		annotations = map[string]string{v1alpha1.AnnotationRetry: retry}
+	}
+	return r.finishWith(ctx, ro, v1alpha1.PhaseSuperseded, message, annotations)
+}
+
+// finishWith is finish recording annotations with the outcome, in the same
+// patch: the evidence reference of a validated rollout, so it survives the
+// loss of status, or the retry token that ended it. The outcome is counted
+// once that patch lands, and its validation Jobs go.
 func (r *RolloutReconciler) finishWith(ctx context.Context, ro *v1alpha1.RuntimeRollout, phase v1alpha1.RolloutPhase,
-	message, evidenceRef string) error {
+	message string, annotations map[string]string) error {
 
 	if ro.Labels[v1alpha1.LabelOutcome] == "" {
 		// The patch response carries the stored status; keep the one this
@@ -1188,23 +1329,24 @@ func (r *RolloutReconciler) finishWith(ctx context.Context, ro *v1alpha1.Runtime
 			ro.Labels = map[string]string{}
 		}
 		ro.Labels[v1alpha1.LabelOutcome] = string(phase)
-		if evidenceRef != "" {
-			if ro.Annotations == nil {
-				ro.Annotations = map[string]string{}
-			}
-			ro.Annotations[v1alpha1.AnnotationEvidence] = evidenceRef
+		if len(annotations) > 0 && ro.Annotations == nil {
+			ro.Annotations = map[string]string{}
 		}
+		maps.Copy(ro.Annotations, annotations)
 		if err := r.Client.Patch(ctx, ro, patch); err != nil {
 			return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "record outcome of "+ro.Name)
 		}
 		ro.Status = *status
+		rolloutOutcomes.WithLabelValues(string(phase)).Inc()
+		if val := status.Validation; val != nil && (val.Result == resultPassed || val.Result == resultFailed) {
+			validationRuns.WithLabelValues(strings.ToLower(val.Result)).Inc()
+		}
 	}
 	ro.Status.Phase = phase
 	ro.Status.Current = nil
 	if err := r.saveStatus(ctx, ro, message); err != nil {
 		return err
 	}
-	rolloutOutcomes.WithLabelValues(string(phase)).Inc()
 	eventType := corev1.EventTypeNormal
 	if phase != v1alpha1.PhaseSucceeded && phase != v1alpha1.PhaseSuperseded {
 		eventType = corev1.EventTypeWarning
@@ -1222,9 +1364,7 @@ func (r *RolloutReconciler) finishWith(ctx context.Context, ro *v1alpha1.Runtime
 
 // event records an Event when a recorder is set.
 func (r *RolloutReconciler) event(regarding runtime.Object, eventType, reason, note string, args ...any) {
-	if r.Events != nil {
-		r.Events.Eventf(regarding, nil, eventType, reason, "Reconcile", note, args...)
-	}
+	emit(r.Events, regarding, eventType, reason, "Reconcile", note, args...)
 }
 
 func orNone(s string) string {
@@ -1235,7 +1375,7 @@ func orNone(s string) string {
 }
 
 func (r *RolloutReconciler) saveStatus(ctx context.Context, ro *v1alpha1.RuntimeRollout, message string) error {
-	ro.Status.Message = bounded(message, maxRolloutMessage)
+	ro.Status.Message = bounded(message)
 	ro.Status.ObservedGeneration = ro.Generation
 	if err := r.Client.Status().Update(ctx, ro); err != nil {
 		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "update status of "+ro.Name)
@@ -1288,11 +1428,7 @@ func contentUnreadable(err error, v *runtimeView) error {
 func (r *RolloutReconciler) observeActive(ctx context.Context, rt *v1alpha1.ClusterRuntime, target string, v *runtimeView) error {
 	suspended := rt.Spec.SuspendEngine
 	if suspended {
-		// Argo CD neither syncs nor heals: nothing is repaired, and readiness
-		// is not claimed for a stack nobody reconciles, but a release that
-		// drifts or degrades is still named.
-		v.readyReason, v.readyMessage = ReasonEngineSuspended, "automated engine syncs are suspended (spec.suspendEngine)"
-		v.availableMessage = v.readyMessage
+		suspendedReady(v)
 	}
 	ro := v.inProgress
 	if ro != nil && v.readyMessage == "" {
@@ -1335,7 +1471,11 @@ func (r *RolloutReconciler) observeActive(ctx context.Context, rt *v1alpha1.Clus
 			return contentUnreadable(err, v)
 		}
 		obs, err := r.Engine.Observe(ctx, p, rel, values, time.Time{}, false)
-		if moved := release(carried[rel.ID], rel.ID); err == nil && moved != nil && obs.Reason == argocd.ReasonSpecNotWritten {
+		moved := release(carried[rel.ID], rel.ID)
+		// Repair writes the active plan's release, so a release observed at
+		// the plan a rollout moved it to is never repaired.
+		atMoved := err == nil && moved != nil && obs.Reason == argocd.ReasonSpecNotWritten
+		if atMoved {
 			var movedValues []byte
 			if movedValues, err = r.values(ctx, moved); err != nil {
 				return contentUnreadable(err, v)
@@ -1350,7 +1490,8 @@ func (r *RolloutReconciler) observeActive(ctx context.Context, rt *v1alpha1.Clus
 			}
 			return err
 		}
-		if v.rollout == "" && !suspended && (obs.State == argocd.StateMissing || obs.Reason == argocd.ReasonSpecDrifted) {
+		lost := !atMoved && v.lostMove(rel.ID, obs)
+		if v.rollout == "" && !suspended && !atMoved && !lost && (obs.State == argocd.StateMissing || obs.Reason == argocd.ReasonSpecDrifted) {
 			if err = r.repair(ctx, p, rel, values, obs); err != nil {
 				if operrors.IsPermanent(err) {
 					v.readyReason, v.readyMessage = reasonOf(err), errorMessage(err)
@@ -1384,16 +1525,34 @@ func (r *RolloutReconciler) observeActive(ctx context.Context, rt *v1alpha1.Clus
 	return nil
 }
 
+// suspendedReady reports a suspended engine: Argo CD neither syncs nor
+// heals, so nothing is repaired and readiness is not claimed for a stack
+// nobody reconciles, but a release that drifts or degrades is still named,
+// and so is an Application whose suspension was refused, which still syncs.
+func suspendedReady(v *runtimeView) {
+	v.readyReason, v.readyMessage = ReasonEngineSuspended, "automated engine syncs are suspended (spec.suspendEngine)"
+	if v.suspensionRefused != "" {
+		v.readyReason = ReasonEngineSuspensionRefused
+		v.readyMessage += ", except: " + v.suspensionRefused
+	}
+	v.availableMessage = v.readyMessage
+}
+
 // markAvailable records every active release healthy, and Ready once the target
-// plan is the active one and nothing is in progress.
+// plan is the active one, nothing is in progress and nothing stalls; a stall
+// gives Ready its reason.
 func markAvailable(rt *v1alpha1.ClusterRuntime, target string, v *runtimeView) {
 	v.available = true
-	if target == v.active && v.rollout == "" && !v.reconciling {
+	rolledOut := target == v.active && v.rollout == "" && !v.reconciling
+	switch {
+	case rolledOut && v.stalled:
+		v.readyReason, v.readyMessage = v.stalledReason, v.stalledMsg
+	case rolledOut:
 		v.ready, v.readyReason, v.readyMessage = true, ReasonRolledOut, "plan "+v.active+" is rolled out and current-revision ready"
 		if rt.Spec.Validation.Deployment == v1alpha1.DeploymentValidationDisabled {
 			v.readyReason, v.readyMessage = ReasonValidationDisabled, v.readyMessage+"; deployment validation is disabled"
 		}
-	} else if v.readyReason == "" {
+	case v.readyReason == "":
 		v.readyReason, v.readyMessage = ReasonRollingOut, "the target plan is not rolled out yet"
 		if v.reconcilingReason == ReasonStabilizing {
 			v.readyMessage += "; its stabilization window has not passed"
@@ -1473,12 +1632,34 @@ func inFlight(ro *v1alpha1.RuntimeRollout, id string) bool {
 	return ro != nil && ro.Status.Current != nil && ro.Status.Current.Release == id
 }
 
-// retired returns the releases that rollouts ended since the newest success
-// left removing or removed, from rollouts newest first. The newest such
-// rollout to touch a release decides, so a later one that installed it
-// again clears it.
-func retired(rollouts []v1alpha1.RuntimeRollout) map[string]bool {
-	out, seen := map[string]bool{}, map[string]bool{}
+// lostMove reports, with no rollout in progress, a moved release whose
+// Application is gone, and stalls the runtime naming it: it has no live plan
+// to be observed at, and the active plan's release would roll it back.
+func (v *runtimeView) lostMove(id string, obs argocd.Observation) bool {
+	m, ok := v.moved[id]
+	if !ok || v.rollout != "" || m.plan == v.active || obs.State != argocd.StateMissing {
+		return false
+	}
+	v.stalled, v.stalledReason = true, ReasonMovedReleaseMissing
+	v.stalledMsg = fmt.Sprintf("release %s: its Application is gone, and rollout %s, which did not succeed, may have moved it "+
+		"to plan %s; repairing it from the active plan would roll it back. Retry to restore it at the target plan, or return the "+
+		"target to the active plan to restore it there through an approved rollout", id, m.rollout, m.plan)
+	return true
+}
+
+// movedBy is the ended rollout that may have written a release, and the plan
+// it targeted.
+type movedBy struct{ rollout, plan string }
+
+// leftBehind returns what rollouts ended since the newest success left behind,
+// from rollouts newest first: the releases they left removing or removed,
+// and the others they may have written to their target plan. The newest such
+// rollout to touch a release decides, so a later one that installed it again
+// clears an earlier removal. Moves come from rollout history rather than the
+// live objects, so they survive an Application deleted by hand; a rollout
+// restored without its status keeps them as Unknown (restoreOutcomes).
+func leftBehind(rollouts []v1alpha1.RuntimeRollout) (map[string]bool, map[string]movedBy) {
+	retired, moved, seen := map[string]bool{}, map[string]movedBy{}, map[string]bool{}
 	for i := range rollouts {
 		ro := &rollouts[i]
 		outcome := ro.Labels[v1alpha1.LabelOutcome]
@@ -1494,22 +1675,29 @@ func retired(rollouts []v1alpha1.RuntimeRollout) map[string]bool {
 			}
 			seen[rel.ID] = true
 			if removing(ro, rel.ID) {
-				out[rel.ID] = true
+				retired[rel.ID] = true
+			} else {
+				moved[rel.ID] = movedBy{rollout: ro.Name, plan: ro.Spec.ToPlanDigest}
 			}
 		}
 	}
-	return out
+	return retired, moved
 }
 
 // removing reports a release whose Remove step started: its Application is
-// being deleted, possibly while halted, or is gone.
+// being deleted, possibly while halted, or is gone, or the step failed after
+// its delete was issued, as at its action timeout.
 func removing(ro *v1alpha1.RuntimeRollout, id string) bool {
 	switch releaseState(ro, id) {
 	case v1alpha1.ReleaseDeleting, v1alpha1.ReleaseRemoved:
 		return true
 	case v1alpha1.ReleaseSuspended:
 		return inFlight(ro, id) && ro.Status.Current.Operation == v1alpha1.OperationRemove
-	case v1alpha1.ReleasePending, v1alpha1.ReleaseProgressing, v1alpha1.ReleaseReady, v1alpha1.ReleaseFailed, v1alpha1.ReleaseUnknown:
+	case v1alpha1.ReleaseFailed:
+		return slices.ContainsFunc(ro.Spec.Steps, func(s v1alpha1.RolloutStep) bool {
+			return s.Release == id && s.Operation == v1alpha1.OperationRemove
+		})
+	case v1alpha1.ReleasePending, v1alpha1.ReleaseProgressing, v1alpha1.ReleaseReady, v1alpha1.ReleaseUnknown:
 		return false
 	default:
 		return false
@@ -1527,7 +1715,7 @@ func (r *RolloutReconciler) repair(ctx context.Context, p *plan.Document, rel *p
 	}
 	log.FromContext(ctx).Info("repaired engine drift", "release", rel.ID, "reason", obs.Reason, "overridden", ensured.Overridden)
 	if obs.State == argocd.StateMissing && r.Events != nil {
-		r.Events.Eventf(ensured.Application, nil, corev1.EventTypeWarning, EventApplicationRecreated, "Ensure",
+		emit(r.Events, ensured.Application, corev1.EventTypeWarning, EventApplicationRecreated, "Ensure",
 			"the Application of plan %s was deleted by hand and written again; its resources were left in place", p.DesiredStateDigest)
 	}
 	r.overridden(ensured, p.DesiredStateDigest)
@@ -1590,7 +1778,7 @@ func (r *RolloutReconciler) applyStatus(ctx context.Context, rt *v1alpha1.Cluste
 	}
 	if v.stalled && r.Events != nil && (before == nil || before.Status != metav1.ConditionTrue || before.Reason != stalledReason) {
 		// Each stall, and each new cause, is a durable record.
-		r.Events.Eventf(rt, nil, corev1.EventTypeWarning, EventStalled, "Stall", "%s: %s", stalledReason, v.stalledMsg)
+		emit(r.Events, rt, corev1.EventTypeWarning, EventStalled, "Stall", "%s: %s", stalledReason, v.stalledMsg)
 	}
 	return nil
 }

@@ -27,9 +27,14 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,9 +42,12 @@ import (
 	digest "github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"go.yaml.in/yaml/v3"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"oras.land/oras-go/v2/errdef"
 	"oras.land/oras-go/v2/registry/remote/errcode"
 
+	"github.com/NVIDIA/aicr/pkg/operator/defaults"
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 )
 
@@ -172,6 +180,13 @@ func TestReadChartMetaRejects(t *testing.T) {
 // pushBundle pushes an AICR-shaped bundle artifact and returns its digest.
 func pushBundle(t *testing.T, c *Client, r Repository, artifactType string, layer []byte) string {
 	t.Helper()
+	return pushBundleDeclaring(t, c, r, artifactType, layer, int64(len(layer)))
+}
+
+// pushBundleDeclaring pushes a bundle whose manifest declares the layer
+// size given, whatever the layer holds.
+func pushBundleDeclaring(t *testing.T, c *Client, r Repository, artifactType string, layer []byte, size int64) string {
+	t.Helper()
 	ctx := context.Background()
 	repo, err := c.repository(r)
 	if err != nil {
@@ -188,6 +203,7 @@ func pushBundle(t *testing.T, c *Client, r Repository, artifactType string, laye
 			t.Fatal(err)
 		}
 	}
+	layerDesc.Size = size
 	manifest, _ := json.Marshal(ocispec.Manifest{
 		Versioned: specs.Versioned{SchemaVersion: 2}, MediaType: ocispec.MediaTypeImageManifest,
 		ArtifactType: artifactType, Config: config, Layers: []ocispec.Descriptor{layerDesc},
@@ -255,6 +271,99 @@ func TestPullBundleRejects(t *testing.T) {
 	}
 }
 
+// The layer bound is checked on the manifest, before the layer is fetched.
+func TestPullBundleBoundsTheLayer(t *testing.T) {
+	t.Parallel()
+	c, repo := testRegistry(t)
+	layer := targz(t, []tarEntry{{name: "a", body: "x"}})
+	for size, want := range map[int64]operrors.ErrorCode{
+		defaults.MaxBundleLayerBytes + 1: operrors.ErrCodeInvalidRequest,
+		int64(len(layer)):                "",
+	} {
+		d := pushBundleDeclaring(t, c, repo, BundleArtifactType, layer, size)
+		if _, err := c.PullBundle(context.Background(), repo, d); operrors.CodeOf(err) != want {
+			t.Errorf("PullBundle(layer declared %d bytes) = %v, want %q", size, err, want)
+		}
+	}
+}
+
+// A resolution holds two bundles at once, the render and its base render,
+// while it mirrors charts. Their bounds take at most half of the chart's
+// default memory limit, since Go's collector can need twice the live heap.
+func TestBundleBoundsFitTheMemoryLimit(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "charts", "aicr-operator", "values.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var values struct {
+		Operator struct {
+			Resources struct {
+				Limits struct {
+					Memory string `yaml:"memory"`
+				} `yaml:"limits"`
+			} `yaml:"resources"`
+		} `yaml:"operator"`
+	}
+	if err = yaml.Unmarshal(raw, &values); err != nil {
+		t.Fatal(err)
+	}
+	limit, err := resource.ParseQuantity(values.Operator.Resources.Limits.Memory)
+	if err != nil {
+		t.Fatalf("operator memory limit %q: %v", values.Operator.Resources.Limits.Memory, err)
+	}
+	held := int64(2*(defaults.MaxBundleLayerBytes+defaults.MaxBundleBytes) + defaults.MaxChartIndexBytes + defaults.MaxChartArchiveBytes)
+	if held > limit.Value()/2 {
+		t.Errorf("bundles and a mirrored chart can hold %d MiB, over half of the %s limit", held>>20, limit.String())
+	}
+}
+
+// bundleLayer is a gzip-compressed tar of one full entry followed by a
+// header that declares size bytes and has no body.
+func bundleLayer(t *testing.T, first string, size int64) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	if err := tw.WriteHeader(&tar.Header{Name: "first", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(first))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte(first)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.WriteHeader(&tar.Header{Name: "second", Typeflag: tar.TypeReg, Mode: 0o644, Size: size}); err != nil {
+		t.Fatal(err)
+	}
+	// The tar writer is left open: closing it would require the body.
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// The content bound holds at its exact edge and for a declared size that
+// would overflow a running total; an entry over it is refused from its
+// header, before its body is read.
+func TestUntarBoundsTheContent(t *testing.T) {
+	t.Parallel()
+	const first = "0123456789abcdef"
+	tests := []struct {
+		name string
+		size int64
+		want string
+	}{
+		{"at the bound", defaults.MaxBundleBytes - int64(len(first)), "truncated"},
+		{"one byte over", defaults.MaxBundleBytes - int64(len(first)) + 1, "exceeds"},
+		{"overflowing the total", math.MaxInt64 - 8, "exceeds"},
+	}
+	for _, tt := range tests {
+		_, err := untar(bundleLayer(t, first, tt.size))
+		if operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("%s: untar() = %v, want INVALID_REQUEST that the entry %s", tt.name, err, tt.want)
+		}
+	}
+}
+
 // upstream serves a Helm repository index and archives over HTTP.
 func upstream(t *testing.T, archive []byte, indexDigest, url string) string {
 	t.Helper()
@@ -269,13 +378,28 @@ func upstream(t *testing.T, archive []byte, indexDigest, url string) string {
 	return srv.URL + "/charts"
 }
 
+// hostOf is a URL's host and port.
+func hostOf(t *testing.T, rawURL string) string {
+	t.Helper()
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u.Host
+}
+
 func TestMirrorHTTPChart(t *testing.T) {
 	t.Parallel()
-	c, repo := testRegistry(t)
+	_, repo := testRegistry(t)
 	ctx := context.Background()
 	archive := chartArchive(t, "demo", "1.0.0", "")
 	sum := sha256.Sum256(archive)
 	base := upstream(t, archive, hex.EncodeToString(sum[:]), "demo-1.0.0.tgz")
+	tampered := upstream(t, archive, strings.Repeat("b", 64), "demo-1.0.0.tgz")
+	wrongName := chartArchive(t, "other", "1.0.0", "")
+	wsum := sha256.Sum256(wrongName)
+	mismatch := upstream(t, wrongName, hex.EncodeToString(wsum[:]), "demo-1.0.0.tgz")
+	c := New(Options{PlainHTTPHosts: []string{repo.Host, hostOf(t, base), hostOf(t, tampered), hostOf(t, mismatch)}})
 
 	m, err := c.MirrorHTTPChart(ctx, UpstreamChart{Repository: base, Chart: "demo", Version: "1.0.0"}, repo.Child("charts"))
 	if err != nil {
@@ -288,7 +412,6 @@ func TestMirrorHTTPChart(t *testing.T) {
 		t.Fatalf("registry digest = %s, want %s", got, m.Digest)
 	}
 
-	tampered := upstream(t, archive, strings.Repeat("b", 64), "demo-1.0.0.tgz")
 	if _, err = c.MirrorHTTPChart(ctx, UpstreamChart{Repository: tampered, Chart: "demo", Version: "1.0.0"}, repo.Child("charts")); operrors.CodeOf(err) != operrors.ErrCodeConflict {
 		t.Fatalf("tampered archive = %v, want CONFLICT", err)
 	}
@@ -298,11 +421,88 @@ func TestMirrorHTTPChart(t *testing.T) {
 	if _, err = c.MirrorHTTPChart(ctx, UpstreamChart{Repository: "oci://ghcr.io/x", Chart: "demo", Version: "1.0.0"}, repo); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
 		t.Fatalf("OCI upstream = %v, want INVALID_REQUEST", err)
 	}
-	wrongName := chartArchive(t, "other", "1.0.0", "")
-	wsum := sha256.Sum256(wrongName)
-	mismatch := upstream(t, wrongName, hex.EncodeToString(wsum[:]), "demo-1.0.0.tgz")
 	if _, err = c.MirrorHTTPChart(ctx, UpstreamChart{Repository: mismatch, Chart: "demo", Version: "1.0.0"}, repo.Child("charts")); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
 		t.Fatalf("archive of another chart = %v, want INVALID_REQUEST", err)
+	}
+}
+
+// counted serves the archive at /demo-1.0.0.tgz and counts its fetches.
+func counted(t *testing.T, archive []byte) (string, *atomic.Int32) {
+	t.Helper()
+	var fetches atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetches.Add(1)
+		_, _ = w.Write(archive)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL, &fetches
+}
+
+// Plain HTTP is per host for chart repositories too: an index or an archive
+// on a host outside PlainHTTPHosts is refused before it is fetched. The
+// archive need not share the index's host.
+func TestMirrorHTTPChartPlainHTTPIsPerHost(t *testing.T) {
+	t.Parallel()
+	_, repo := testRegistry(t)
+	archive := chartArchive(t, "demo", "1.0.0", "")
+	sum := sha256.Sum256(archive)
+	elsewhere, fetches := counted(t, archive)
+	local := upstream(t, archive, hex.EncodeToString(sum[:]), "demo-1.0.0.tgz")
+	split := upstream(t, archive, hex.EncodeToString(sum[:]), elsewhere+"/demo-1.0.0.tgz")
+	tests := []struct {
+		name        string
+		repository  string
+		plain       []string
+		wantCode    operrors.ErrorCode
+		wantFetches int32
+	}{
+		{"index host not configured", local, nil, operrors.ErrCodeInvalidRequest, 0},
+		{"archive host not configured", split, []string{hostOf(t, split)}, operrors.ErrCodeInvalidRequest, 0},
+		{"archive on another configured host", split, []string{hostOf(t, split), hostOf(t, elsewhere)}, "", 1},
+	}
+	for _, tt := range tests {
+		fetches.Store(0)
+		c := New(Options{PlainHTTPHosts: append([]string{repo.Host}, tt.plain...)})
+		_, err := c.MirrorHTTPChart(context.Background(), UpstreamChart{Repository: tt.repository, Chart: "demo", Version: "1.0.0"}, repo.Child("charts"))
+		if operrors.CodeOf(err) != tt.wantCode || fetches.Load() != tt.wantFetches {
+			t.Errorf("%s: MirrorHTTPChart() = %v with %d archive fetches; want %q, %d", tt.name, err, fetches.Load(), tt.wantCode, tt.wantFetches)
+		}
+	}
+}
+
+// A redirect is held to the same rule as the URL it came from, before it is
+// followed: a configured plain-HTTP host cannot hand the fetch to an
+// unconfigured one. A supplied client's own redirect policy still applies.
+func TestMirrorHTTPChartRedirectPolicy(t *testing.T) {
+	t.Parallel()
+	_, repo := testRegistry(t)
+	target, fetches := counted(t, nil)
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target+r.URL.Path, http.StatusFound)
+	}))
+	t.Cleanup(redirect.Close)
+	refusing := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return operrors.New(operrors.ErrCodeUnauthorized, "refused by the supplied policy")
+	}}
+	tests := []struct {
+		name     string
+		plain    []string
+		client   *http.Client
+		wantCode operrors.ErrorCode
+		wantText string
+	}{
+		{"to an unconfigured plain-HTTP host", []string{repo.Host, hostOf(t, redirect.URL)}, nil,
+			operrors.ErrCodeInvalidRequest, "redirect to"},
+		{"refused by the supplied client", []string{repo.Host, hostOf(t, redirect.URL), hostOf(t, target)}, refusing,
+			operrors.ErrCodeUnauthorized, "supplied policy"},
+	}
+	for _, tt := range tests {
+		fetches.Store(0)
+		c := New(Options{PlainHTTPHosts: tt.plain, HTTPClient: tt.client})
+		_, err := c.MirrorHTTPChart(context.Background(), UpstreamChart{Repository: redirect.URL, Chart: "demo", Version: "1.0.0"}, repo.Child("charts"))
+		if operrors.CodeOf(err) != tt.wantCode || !strings.Contains(fmt.Sprint(err), tt.wantText) || fetches.Load() != 0 {
+			t.Errorf("%s: MirrorHTTPChart() = %v with %d requests to the target; want %q before it is followed", tt.name, err, fetches.Load(), tt.wantText)
+		}
 	}
 }
 
@@ -345,6 +545,7 @@ func TestClassify(t *testing.T) {
 		{resp(http.StatusForbidden), operrors.ErrCodeUnauthorized},
 		{resp(http.StatusTooManyRequests), operrors.ErrCodeRateLimitExceeded},
 		{resp(http.StatusBadGateway), operrors.ErrCodeUnavailable},
+		{fmt.Errorf("listing: %w", errdef.ErrTooManyPages), operrors.ErrCodeInvalidRequest},
 		{context.DeadlineExceeded, operrors.ErrCodeTimeout},
 		{operrors.New(operrors.ErrCodeConflict, "kept"), operrors.ErrCodeConflict},
 	}

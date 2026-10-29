@@ -28,8 +28,10 @@
 # asserts the workload, its OIDC Secret and datastore wiring and its config,
 # the log-collector one asserts the collector Job, the file server it uploads
 # to and that server's volume and images, the system-namespaces one asserts
-# the chart's default list still matches the one the drain scope keeps, and
-# the CRD exclusion one asserts every component's ownsCRDsExcludeSubcharts
+# the chart's default list still matches the one the drain scope keeps, the
+# node-validation one asserts lifecycle-manager's workload, its new-node
+# criteria and tests, and the DCGM address its dcgm-diag-test calls, and the
+# CRD exclusion one asserts every component's ownsCRDsExcludeSubcharts
 # (nvsentinel's and nktp's) still matches its pinned chart.
 # All are gated on testing.Short() -- `make
 # test`/`make qualify`/every other CI job run with -short, so this is the only
@@ -107,6 +109,7 @@ jobs:
             TestNVSentinelEventExporterChartRender
             TestNVSentinelLogCollectorChartRender
             TestNVSentinelChartSystemNamespacesDefault
+            TestNVSentinelNodeValidationChartRender
           )
           pattern="^($(IFS='|'; echo "${tests[*]}"))$"
           out=$(go test ./pkg/bundler/validations/... -run "$pattern" -v -count=1 2>&1) && rc=0 || rc=$?

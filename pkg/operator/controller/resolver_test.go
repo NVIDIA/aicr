@@ -26,12 +26,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
@@ -44,12 +46,15 @@ import (
 	"github.com/NVIDIA/aicr/pkg/operator/resolver"
 )
 
-// fakeRegistry serves one rendered bundle and mirrors charts in memory.
+// fakeRegistry serves one rendered bundle and mirrors charts in memory,
+// counting bundle pulls and chart mirrors.
 type fakeRegistry struct {
 	bundle   *registry.Bundle
 	resolved map[string]string
 	// err fails every call, as unavailable credentials do.
-	err error
+	err     error
+	pulls   int
+	mirrors int
 }
 
 func (f *fakeRegistry) Resolve(_ context.Context, _ registry.Repository, tag string) (string, error) {
@@ -63,10 +68,12 @@ func (f *fakeRegistry) Resolve(_ context.Context, _ registry.Repository, tag str
 }
 
 func (f *fakeRegistry) PullBundle(_ context.Context, _ registry.Repository, digest string) (*registry.Bundle, error) {
+	f.pulls++
 	return f.bundle, nil
 }
 
 func (f *fakeRegistry) MirrorHTTPChart(_ context.Context, up registry.UpstreamChart, target registry.Repository) (*registry.MirroredChart, error) {
+	f.mirrors++
 	return &registry.MirroredChart{Repository: target.Child(up.Chart), Digest: plan.DigestOf([]byte(up.Chart)),
 		ArchiveDigest: plan.DigestOf([]byte("archive")), Archive: chartArchive(t0)}, nil
 }
@@ -672,6 +679,7 @@ func TestResolverChecksOverridePaths(t *testing.T) {
 
 		t.Fatalf("Resolved = %+v, candidate %q", c, rt.Status.CandidatePlanDigest)
 	}
+	stallsAgainWithoutPulling(t, ctx, r, reg, resolver.ReasonOverridePathUnknown)
 
 	patch := client.MergeFrom(rt.DeepCopy())
 	rt.Spec.Overrides[3].Additive = true
@@ -706,9 +714,29 @@ func TestReasonOf(t *testing.T) {
 			t.Errorf("reasonOf(%v) = %s, want %s", err, got, want)
 		}
 	}
-	if got := errorMessage(operrors.New(operrors.ErrCodeInternal, strings.Repeat("x", 2000))); len(got) != maxConditionMessage {
+	if got := errorMessage(operrors.New(operrors.ErrCodeInternal, strings.Repeat("x", 2000))); len(got) != maxMessage {
 		t.Errorf("errorMessage() length = %d", len(got))
 	}
+	// A cut inside a rune would become a 3-byte replacement character in
+	// JSON and push the message past its bound.
+	for _, lead := range []string{"", "x"} {
+		got := errorMessage(operrors.New(operrors.ErrCodeInternal, lead+strings.Repeat("é", 1000)))
+		if len(got) > maxMessage || !utf8.ValidString(got) {
+			t.Errorf("errorMessage() = %d bytes, valid UTF-8 %t", len(got), utf8.ValidString(got))
+		}
+	}
+}
+
+// An Event note is bounded to what events/v1 accepts, on a rune boundary.
+func TestEmitBoundsTheNote(t *testing.T) {
+	t.Parallel()
+	rec := events.NewFakeRecorder(1)
+	emit(rec, &corev1.ConfigMap{}, corev1.EventTypeWarning, "Reason", "Action", "%s", "x"+strings.Repeat("é", 1000))
+	got := strings.TrimPrefix(<-rec.Events, corev1.EventTypeWarning+" Reason ")
+	if len(got) > maxMessage || !utf8.ValidString(got) || !strings.HasSuffix(got, truncatedMark) {
+		t.Errorf("note = %d bytes, valid UTF-8 %t", len(got), utf8.ValidString(got))
+	}
+	emit(nil, &corev1.ConfigMap{}, corev1.EventTypeWarning, "Reason", "Action", "no recorder")
 }
 
 // chartArchive is a minimal cert-manager chart archive with a CRD template.
@@ -764,6 +792,25 @@ func TestResolverRefusesNamespacesOutsideTheAllowlist(t *testing.T) {
 	refused := c.Status == metav1.ConditionFalse && c.Reason == resolver.ReasonNamespaceNotAllowed && strings.Contains(c.Message, "cert-manager in cert-manager")
 	if !refused || rt.Status.CandidatePlanDigest != "" {
 		t.Fatalf("Resolved = %+v, candidate %q", c, rt.Status.CandidatePlanDigest)
+	}
+	stallsAgainWithoutPulling(t, ctx, r, reg, resolver.ReasonNamespaceNotAllowed)
+}
+
+// stallsAgainWithoutPulling resyncs a resolution its plan checks refused:
+// the verdict depends on the inputs alone, so it stands without another
+// bundle pull or chart mirror.
+func stallsAgainWithoutPulling(t *testing.T, ctx context.Context, r *ResolverReconciler, reg *fakeRegistry, reason string) {
+	t.Helper()
+	pulls, mirrors := reg.pulls, reg.mirrors
+	if pulls == 0 || mirrors == 0 {
+		t.Fatalf("the first resolution pulled %d bundles and mirrored %d charts", pulls, mirrors)
+	}
+	if err := reconcileResolver(t, ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	c := cond(getRuntime(t, ctx), v1alpha1.ConditionResolved)
+	if c.Status != metav1.ConditionFalse || c.Reason != reason || reg.pulls != pulls || reg.mirrors != mirrors {
+		t.Fatalf("after a resync: Resolved = %+v; %d more bundle pulls, %d more chart mirrors", c, reg.pulls-pulls, reg.mirrors-mirrors)
 	}
 }
 

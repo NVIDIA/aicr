@@ -16,6 +16,7 @@ package aicrjob
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -130,8 +131,8 @@ func TestParseRejectsUnsupportedArtifacts(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			_, err := ParseRecipeResult(tt.data, "v1.0.0")
-			se, ok := err.(*operrors.StructuredError) //nolint:errorlint // returned directly
-			if !ok || se.Code != operrors.ErrCodeInvalidRequest || se.Context["reason"] != tt.reason {
+			var se *operrors.StructuredError
+			if !errors.As(err, &se) || se.Code != operrors.ErrCodeInvalidRequest || se.Context["reason"] != tt.reason {
 				t.Fatalf("ParseRecipeResult() = %v, want INVALID_REQUEST with %s", err, tt.reason)
 			}
 		})

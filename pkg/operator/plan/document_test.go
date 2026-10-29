@@ -29,15 +29,15 @@ const (
 	uid     = "0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"
 )
 
-// validDocument mirrors the plan example in docs/operator/api.md.
+// validDocument mirrors the plan example in docs/operator/api.md, with the
+// desiredStateDigest its content computes.
 func validDocument() *Document {
-	return &Document{
-		SchemaVersion:      SchemaVersion,
-		RuntimeUID:         uid,
-		Engine:             EngineArgoCD,
-		EnginePolicy:       "argocd.v1",
-		DesiredStateDigest: digestA,
-		InputDigest:        digestB,
+	d := &Document{
+		SchemaVersion: SchemaVersion,
+		RuntimeUID:    uid,
+		Engine:        EngineArgoCD,
+		EnginePolicy:  "argocd.v1",
+		InputDigest:   digestB,
 		Provenance: Provenance{
 			Source:          SourceResolved,
 			OperatorVersion: "v0.0.0-dev",
@@ -66,6 +66,12 @@ func validDocument() *Document {
 			},
 		},
 	}
+	digest, err := ComputeDesiredStateDigest(d)
+	if err != nil {
+		panic(err)
+	}
+	d.DesiredStateDigest = digest
+	return d
 }
 
 func TestValidDocument(t *testing.T) {

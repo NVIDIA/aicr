@@ -316,17 +316,41 @@ const maxTemplateBytes = 8 << 20
 // maxNestedCharts bounds how deep the CRD scan follows packaged subcharts.
 const maxNestedCharts = 2
 
+// subchartsDir holds a chart's subcharts, as directories or archives.
+const subchartsDir = "charts"
+
 // crdKind matches a CustomResourceDefinition declared in YAML or JSON, quoted
 // or not.
 var crdKind = regexp.MustCompile(`"?kind"?\s*:\s*["']?CustomResourceDefinition\b`)
 
 // chartOwnsCRDs reports whether a chart can install CustomResourceDefinitions
 // (any CRD change is a crdChange). It fails closed: a
-// crds/ directory, any file but the values that declares one (a template, or
-// a file a template includes), a packaged subchart that does, and anything
-// the scan cannot read in full all count.
+// crds/ directory, any file but a chart's own values that declares one (a
+// template, or a file a template includes), a packaged subchart that does,
+// and anything the scan cannot read in full all count.
 func chartOwnsCRDs(archive []byte) (bool, error) {
 	return scanCRDs(archive, 0)
+}
+
+// valuesFile reports whether an archive path is a values file of a chart:
+// at the archive's chart root or at the root of a subchart under charts/,
+// never one a template directory holds.
+func valuesFile(name string) bool {
+	parts := strings.Split(name, "/")
+	switch parts[len(parts)-1] {
+	case chartValuesFile, "values.yml", "values.schema.json":
+	default:
+		return false
+	}
+	if len(parts)%2 != 0 {
+		return false
+	}
+	for i := 1; i < len(parts)-1; i += 2 {
+		if parts[i] != subchartsDir {
+			return false
+		}
+	}
+	return true
 }
 
 func scanCRDs(archive []byte, depth int) (bool, error) {
@@ -351,7 +375,7 @@ func scanCRDs(archive []byte, depth int) (bool, error) {
 		if slices.Contains(strings.Split(name, "/"), "crds") || h.Size > maxTemplateBytes {
 			return true, nil
 		}
-		if base := path.Base(name); base == "values.yaml" || base == "values.yml" || base == "values.schema.json" {
+		if valuesFile(name) {
 			continue
 		}
 		data, err := io.ReadAll(io.LimitReader(tr, maxTemplateBytes))

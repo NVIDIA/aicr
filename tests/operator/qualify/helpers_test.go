@@ -159,7 +159,8 @@ func awaitingApproval(ctx context.Context, t *testing.T, digest string) *v1alpha
 }
 
 // approve approves a rollout as the approver, the way `kubectl aicr approve`
-// does: under its own username, with a reason and an expiry.
+// does: under its own username, with a reason, valid until the rollout's
+// deadline.
 func approve(ctx context.Context, t *testing.T, name string) {
 	t.Helper()
 	ro := &v1alpha1.RuntimeRollout{}
@@ -168,7 +169,7 @@ func approve(ctx context.Context, t *testing.T, name string) {
 	}
 	patch := client.MergeFrom(ro.DeepCopy())
 	ro.Spec.Approval = &v1alpha1.Approval{ApprovedBy: approverUser, Reason: "qualification",
-		ExpiresAt: metav1.NewTime(time.Now().Add(defaults.ApprovalLifetime).Truncate(time.Second))}
+		ExpiresAt: ro.Spec.Deadline}
 	if err := approver.Patch(ctx, ro, patch); err != nil {
 		t.Fatalf("approve %s: %v", name, err)
 	}
