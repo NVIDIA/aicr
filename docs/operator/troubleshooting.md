@@ -198,7 +198,7 @@ If approval is refused, the message says why:
 
 | Message | Fix |
 | --- | --- |
-| `[UNAUTHORIZED] read rollout <name>: … is forbidden` (plugin) | You are not an approver: add the user or group to the chart's `approvers` and `helm upgrade` |
+| `[UNAUTHORIZED] read rollout <name>: … is forbidden` (plugin) | You are not an approver: add the user or group to the chart's `approvers` and `helm upgrade`, or bind them to the `aicr-operator-approver` roles yourself |
 | `approving, revoking or acknowledging <rollout> needs update on runtimerollouts/approve` | You can patch rollouts but are not an approver; as above |
 | `approvedBy must be the approver's own username` | Approve with the plugin, which records the username the API server reports |
 | `acknowledge only while the rollout awaits acknowledgement` | The release is not applied yet; acknowledge once the rollout is `AwaitingAcknowledgement` |

@@ -252,7 +252,8 @@ make bump-rc          # v1.3.0-rc1 → v1.3.0-rc2
 The release workflow accepts only `vX.Y.Z` and `vX.Y.Z-(alpha|beta|rc)N` tags
 (a dot before `N` is allowed), the versions the AICR Operator's release builds
 accept. An RC runs the full build, test, scan, and attest pipeline and gets
-`vX.Y.Z-rcN` image tags, but it does not update:
+image tags spelled exactly as its git tag (`vX.Y.Z-rcN` or `vX.Y.Z-rc.N`), but
+it does not update:
 
 - the Homebrew formula
 - container `:latest` tags
