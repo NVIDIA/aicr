@@ -94,12 +94,16 @@ there looking authoritative.
 reason `manual` does: the verdict says "not in one step", and the steps are you
 saying what to do instead. They render under the row, deployer-scoped, exactly
 as a `manual` record's do, whenever your record is the one that describes the
-operator's move. What the check withholds is somebody *else's* steps: when a
-jump crosses two boundaries, or crosses yours from a starting point your `from`
-does not cover, no steps render at all, because composing two migrations or
-running one authored for a different origin is the failure `blocked` exists to
-prevent. So write the `blocked` steps as instructions a reader will follow, not
-as a formality to satisfy the gate.
+operator's move. What the check withholds is somebody *else's* steps. When two
+or more records on the operator's path ask for work, or the jump crosses your
+boundary from a starting point your `from` does not cover, no steps render at
+all, because composing two migrations or running one authored for a different
+origin is the failure `blocked` exists to prevent. A jump across several
+boundaries still renders your steps when your record covers its starting point
+and holds its target, every other record on its path is `safe`, and no other
+`blocked` record is in the way. So write
+the `blocked` steps as instructions a reader will follow, not as a formality to
+satisfy the gate.
 
 **Your `manual` and `blocked` records also ship in bundles.** When a bundle pins
 a version inside your record's `to` range, `aicr bundle` writes the record into
