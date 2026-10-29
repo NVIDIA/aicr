@@ -121,7 +121,7 @@ func TestReleaseUsesSingleDigestMap(t *testing.T) {
 	build := stepIndex(candidateSteps, "Build the operator candidate")
 	scan := stepIndex(candidateSteps, "Malware scan the kubectl-aicr binaries")
 	upload := stepIndex(candidateSteps, "Upload the candidate")
-	if scan < 0 || scan < build || scan > upload {
+	if build < 0 || scan < 0 || upload < 0 || scan < build || scan > upload {
 		t.Error("operator-candidate must malware-scan the kubectl-aicr binaries after building and before uploading them")
 	}
 }
