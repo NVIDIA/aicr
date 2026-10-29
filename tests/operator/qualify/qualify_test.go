@@ -292,10 +292,9 @@ func operatorKilled(ctx context.Context, t *testing.T, active string) string {
 func leaderChange(ctx context.Context, t *testing.T, active string) string {
 	t.Helper()
 	scaleOperator(ctx, t, 2)
-	defer func() {
-		nothingForbidden(ctx, t)
-		scaleOperator(ctx, t, 1)
-	}()
+	// Separate defers: scaling back runs even if the log scan stops the test.
+	defer scaleOperator(ctx, t, 1)
+	defer nothingForbidden(ctx, t)
 	before := syncs(ctx, t)
 	digest, ro := nextPlan(ctx, t, active, "30m")
 	approve(ctx, t, ro.Name)
@@ -533,6 +532,22 @@ func uninstallReinstall(ctx context.Context, t *testing.T, active string) {
 // not by position: a rotated log starts over at line 1.
 var reportedDenials = map[types.UID]map[string]bool{}
 
+// logOptions selects the log to read: the current container's once it has
+// started, or the previous one's while a crashed container waits to
+// restart. A container that never started has no log, and the API server
+// refuses to read one.
+func logOptions(p corev1.Pod) (*corev1.PodLogOptions, bool) {
+	for _, s := range p.Status.ContainerStatuses {
+		switch {
+		case s.State.Running != nil || s.State.Terminated != nil:
+			return &corev1.PodLogOptions{Container: s.Name}, true
+		case s.LastTerminationState.Terminated != nil:
+			return &corev1.PodLogOptions{Container: s.Name, Previous: true}, true
+		}
+	}
+	return nil, false
+}
+
 // nothingForbidden scans the running operator pods' logs for an API denial:
 // the suite installs the RBAC the chart ships, so a missing grant shows
 // here. Scenarios call it before a pod is killed, scaled away or replaced,
@@ -540,15 +555,11 @@ var reportedDenials = map[types.UID]map[string]bool{}
 func nothingForbidden(ctx context.Context, t *testing.T) {
 	t.Helper()
 	for _, p := range operatorPods(ctx, t) {
-		// A container that has not started has no log yet, and the API
-		// server refuses to read one.
-		started := slices.ContainsFunc(p.Status.ContainerStatuses, func(s corev1.ContainerStatus) bool {
-			return s.State.Running != nil || s.State.Terminated != nil
-		})
-		if !started {
+		opts, ok := logOptions(p)
+		if !ok {
 			continue
 		}
-		logs, err := clientset.CoreV1().Pods(operatorNamespace).GetLogs(p.Name, &corev1.PodLogOptions{}).DoRaw(ctx)
+		logs, err := clientset.CoreV1().Pods(operatorNamespace).GetLogs(p.Name, opts).DoRaw(ctx)
 		if apierrors.IsNotFound(err) {
 			continue
 		}
