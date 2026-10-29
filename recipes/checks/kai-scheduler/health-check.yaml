@@ -17,7 +17,8 @@
 # Validates that the KAI Scheduler is running and healthy in the kai-scheduler
 # namespace. Checks that the kai-operator deployment has at least one
 # available replica and that no pods in the namespace are stuck in Pending,
-# Failed, or Unknown phases.
+# Failed, or Unknown phases. Also asserts every CRD the chart installs is
+# Established.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -26,6 +27,64 @@ spec:
   timeouts:
     assert: 5m
   steps:
+    - name: validate-crds-established
+      # Verified against chart v0.16.9, which installs these six CRDs from
+      # crds/.
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: bindrequests.scheduling.run.ai
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: podgroups.scheduling.run.ai
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: queues.scheduling.run.ai
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: configs.kai.scheduler
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: schedulingshards.kai.scheduler
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: topologies.kai.scheduler
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
     - name: validate-deployment-exists
       try:
         # Guard against vacuous pass on empty namespace: verify the

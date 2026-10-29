@@ -65,7 +65,7 @@ func wantEmptyVersionError(t *testing.T, err error, component string) {
 func TestResolveRejectsEmptyHelmVersion_ExternalRegistry(t *testing.T) {
 	t.Cleanup(ResetMetadataStoreForTesting)
 
-	provider := newInMemoryProvider("external-unpinned", map[string][]byte{
+	files := map[string][]byte{
 		"overlays/base.yaml": []byte(`kind: RecipeMetadata
 apiVersion: aicr.run/v1beta1
 metadata:
@@ -92,7 +92,8 @@ components:
       defaultRepository: https://charts.example.com
       defaultChart: example/unpinned-helm
 `),
-	})
+	}
+	provider := newInMemoryProvider("external-unpinned", files)
 
 	ctx := context.Background()
 	// Loading/building also populates the component- and criteria-registry
@@ -118,8 +119,8 @@ components:
 	// The same registry with an overlay-level version pin resolves cleanly:
 	// the invariant demands a version, not a registry default specifically.
 	provider2 := newInMemoryProvider("external-pinned", map[string][]byte{
-		"overlays/base.yaml": provider.files["overlays/base.yaml"],
-		"registry.yaml":      provider.files["registry.yaml"],
+		"overlays/base.yaml": files["overlays/base.yaml"],
+		"registry.yaml":      files["registry.yaml"],
 		"overlays/pinned-leaf.yaml": []byte(`kind: RecipeMetadata
 apiVersion: aicr.run/v1beta1
 metadata:
@@ -157,8 +158,8 @@ spec:
 	// ApplyRegistryDefaults but trims to empty in Helm — it must be rejected
 	// the same as an omitted one.
 	provider3 := newInMemoryProvider("external-whitespace", map[string][]byte{
-		"overlays/base.yaml":          provider.files["overlays/base.yaml"],
-		"overlays/unpinned-leaf.yaml": provider.files["overlays/unpinned-leaf.yaml"],
+		"overlays/base.yaml":          files["overlays/base.yaml"],
+		"overlays/unpinned-leaf.yaml": files["overlays/unpinned-leaf.yaml"],
 		"registry.yaml": []byte(`apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:

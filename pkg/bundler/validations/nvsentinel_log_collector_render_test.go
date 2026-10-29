@@ -36,7 +36,7 @@ const (
 	logCollectorImage       = "ghcr.io/nvidia/nvsentinel/log-collector:v1.28.0"
 	fileServerCleanupImage  = "ghcr.io/nvidia/nvsentinel/file-server-cleanup:v1.28.0"
 	fileServerNginxImage    = "docker.io/bitnamilegacy/nginx:1.27.2-debian-12-r2"
-	fileServerInitImage     = "docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
+	fileServerInitImage     = "docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4"
 	fileServerExporterImage = "quay.io/martinhelmich/prometheus-nginxlog-exporter:v1.10.0"
 	fileServerName          = "nvsentinel-incluster-file-server"
 )

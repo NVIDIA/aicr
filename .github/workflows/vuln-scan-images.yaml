@@ -466,7 +466,7 @@ jobs:
           # not move with defaultVersion. Digest-pinned, so the tag is only
           # there to read; grype resolves the digest.
           - image: docker.io/library/busybox
-            tag: 1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e
+            tag: 1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1

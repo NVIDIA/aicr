@@ -91,7 +91,10 @@ weekly under `RENOVATE_DRY_RUN=full` to produce a Slack digest and a
 edit — it can rename a values path `nodeScheduling` writes into, move the
 rendered image set, or need an ADR-021 upgrade record — so detection is
 automated and the decision stays human, assisted by the
-`aicr-reviewing-component-drift` skill.
+`aicr-reviewing-component-drift` skill. When the component's health check
+asserts a CRD, the bump PR must also commit the
+`recipes/components/<name>/crds.yaml` that `make crd-inventory` regenerates.
+`TestHealthCheckCRDAssertionsAnchored` fails `make test` until it does.
 
 Unlike the `.settings.yaml` manager, these annotations carry `registryUrl`
 inline:

@@ -52,6 +52,8 @@ type ChartInput struct {
 	// APIVersions is passed as --api-versions entries. When nil,
 	// defaults.MirrorExtraAPIVersions is used.
 	APIVersions []string
+	// IncludeCRDs is passed to --include-crds.
+	IncludeCRDs bool
 }
 
 // Renderer renders a Helm chart to YAML bytes. The default implementation
@@ -154,6 +156,9 @@ func templateArgs(input ChartInput, valuesOnStdin bool) []string {
 		args = append(args, "--values", "-")
 	}
 
+	if input.IncludeCRDs {
+		return append(args, "--include-crds=true")
+	}
 	// Skip CRD installation in render to avoid surfacing CRD-shipped images
 	// twice (manifests are walked separately).
 	return append(args, "--include-crds=false")
