@@ -125,7 +125,7 @@ func VerifyStatementWith(ctx context.Context, bundleBytes []byte,
 			"artifact digest is required for attestation verification")
 	}
 	if err := ctx.Err(); err != nil {
-		return "", errors.Wrap(errors.ErrCodeTimeout, "context cancelled before attestation verification", err)
+		return "", errors.WrapCtxErr(err, errors.ErrCodeTimeout, "context cancelled before attestation verification")
 	}
 
 	b, err := loadSigstoreBundleBytes(bundleBytes)

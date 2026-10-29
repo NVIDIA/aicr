@@ -420,7 +420,7 @@ type signBundleAttempt func(ctx context.Context) (*protobundle.Bundle, error)
 //   - outer ctx DeadlineExceeded → ErrCodeTimeout, no retry (the whole
 //     signing budget is gone; further retries would just chew through
 //     it without any chance of success).
-//   - outer ctx Canceled → ErrCodeUnavailable, no retry (caller signaled
+//   - outer ctx Canceled → ErrCodeCanceled, no retry (caller signaled
 //     they don't want to wait).
 //   - per-attempt failure with outer ctx alive → retry until
 //     SigstoreRetryBudget is exhausted, then return ErrCodeUnavailable.
@@ -447,7 +447,7 @@ func signWithRetry(ctx context.Context, attempt signBundleAttempt) (*protobundle
 				return nil, errors.Wrap(errors.ErrCodeTimeout,
 					"sigstore signing timed out before attempt", err)
 			}
-			return nil, errors.Wrap(errors.ErrCodeUnavailable,
+			return nil, errors.Wrap(errors.ErrCodeCanceled,
 				"sigstore signing canceled before attempt", err)
 		}
 
@@ -463,7 +463,7 @@ func signWithRetry(ctx context.Context, attempt signBundleAttempt) (*protobundle
 			return nil, errors.Wrap(errors.ErrCodeTimeout, "sigstore signing timed out", lastErr)
 		}
 		if stderrors.Is(ctx.Err(), context.Canceled) {
-			return nil, errors.Wrap(errors.ErrCodeUnavailable, "sigstore signing canceled", lastErr)
+			return nil, errors.Wrap(errors.ErrCodeCanceled, "sigstore signing canceled", lastErr)
 		}
 
 		// Outer ctx alive; this attempt failed (per-attempt timeout or
@@ -486,7 +486,7 @@ func signWithRetry(ctx context.Context, attempt signBundleAttempt) (*protobundle
 				return nil, errors.Wrap(errors.ErrCodeTimeout,
 					"sigstore signing timed out during retry backoff", lastErr)
 			}
-			return nil, errors.Wrap(errors.ErrCodeUnavailable,
+			return nil, errors.Wrap(errors.ErrCodeCanceled,
 				"sigstore signing canceled during retry backoff", lastErr)
 		case <-time.After(backoff):
 		}

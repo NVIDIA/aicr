@@ -102,12 +102,16 @@ func normalizeURIScheme(uri string) string {
 }
 
 // kmsTimeoutError classifies a context deadline or cancellation surfaced by a
-// KMS RPC as ErrCodeTimeout (504 at the HTTP boundary), distinct from the
-// ErrCodeUnavailable used for provider-init / network failures. It mirrors the
-// deadline handling in SignStatementWith. Returns nil when err is not a context
-// timeout or cancellation.
+// KMS RPC: a deadline is ErrCodeTimeout (504 at the HTTP boundary) and a
+// cancellation is ErrCodeCanceled, both distinct from the ErrCodeUnavailable
+// used for provider-init / network failures. Returns nil when err is neither.
 func kmsTimeoutError(err error, keyURI string) error {
-	if stderrors.Is(err, context.DeadlineExceeded) || stderrors.Is(err, context.Canceled) {
+	switch {
+	case stderrors.Is(err, context.Canceled):
+		return errors.WrapWithContext(errors.ErrCodeCanceled,
+			"KMS operation canceled", err,
+			map[string]any{ctxKeySigningKey: keyURI})
+	case stderrors.Is(err, context.DeadlineExceeded):
 		return errors.WrapWithContext(errors.ErrCodeTimeout,
 			"KMS operation timed out", err,
 			map[string]any{ctxKeySigningKey: keyURI})

@@ -162,12 +162,9 @@ func confirmKeylessSigningDisclosure(opts bundleattest.ResolveOptions, assumeYes
 	}
 }
 
-// errSigningDeclined is the clean-abort error returned when the user declines
-// the interactive keyless-signing prompt. ErrCodeUnavailable matches the
-// classification the OIDC helpers use for a caller-side cancel, so a declined
-// prompt and a canceled login surface the same way to the CLI exit-code mapper.
+// errSigningDeclined reports an operator cancellation at the keyless-signing prompt.
 func errSigningDeclined() error {
-	return errors.New(errors.ErrCodeUnavailable,
+	return errors.New(errors.ErrCodeCanceled,
 		"keyless signing declined at the identity-disclosure prompt; no identity was published "+
 			"(re-run with --yes / AICR_ASSUME_YES to skip this prompt, or supply --identity-token)")
 }
