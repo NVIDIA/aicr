@@ -55,8 +55,9 @@ bundle.
 sign the mirrored digests with your own key and enforce the signature at
 admission; see
 [Enforcing Your Signatures on Mirrored Images](../integrator/supply-chain-verification.md#enforcing-your-signatures-on-mirrored-images).
-Those policies need the registry to serve TLS, so the plain-HTTP examples below
-suit only a test registry.
+With the Sigstore-bundle signatures cosign v3 writes by default, those policies
+need the registry to serve TLS, so the plain-HTTP examples below suit only a
+test registry.
 
 ## Prerequisites
 
