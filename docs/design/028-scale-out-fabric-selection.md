@@ -5,7 +5,8 @@
 **Proposed** — 2026-10-29. Answers
 [#3503](https://github.com/NVIDIA/aicr/issues/3503). Amends
 [ADR-015](015-recipe-configuration-profiles.md) by widening what a `gpuStack`
-profile value may encode; ADR-015 receives its reciprocal "Amended by
+profile value may encode and by letting a leaf declaration shadow an
+inherited one; ADR-015 receives its reciprocal "Amended by
 ADR-028" banner when this ADR is accepted. Related:
 [#3439](https://github.com/NVIDIA/aicr/issues/3439) (rail gate follow-up),
 [#1256](https://github.com/NVIDIA/aicr/issues/1256) (fabric-specific NCCL
@@ -221,7 +222,7 @@ bundle-time `--dynamic` value.
 | | A. Criteria | B. New profile | C. Extend gpuStack | D. Detect / dynamic |
 |---|---|---|---|---|
 | Change surface | Large: CLI, API, docs, all overlays | Medium: resolver, wire model, evidence | Small: marker, few overlays | Small |
-| ADR-015 impact | None | Reopens one-declaration rule | Widens value semantics only | Violates design-time principle |
+| ADR-015 impact | None | Reopens one-declaration rule | Widens value semantics; adds leaf shadowing of one inherited declaration | Violates design-time principle |
 | Value explosion | None | None (orthogonal) | M×N on overlays with both axes | None |
 | Snapshot inference | Same new readings | Same new readings | Same new readings | Runtime detection instead |
 | Evidence coordinates | New dimension in every path | Two profile segments | Unchanged shape | Fabric not in evidence |
@@ -233,7 +234,8 @@ bundle-time `--dynamic` value.
 
 **Option C.** Extend `gpuStack` with a reserved `fabric` marker. It is the
 cheapest path that satisfies the goals and keeps every ADR-015 invariant
-intact. The known costs are accepted and made explicit rather than implied
+intact but one, the declaration-uniqueness rule, which gains the narrow
+shadowing case described under "OKE declaration scope". The known costs are accepted and made explicit rather than implied
 by value names: the tuple is written as `fabric:` on each value, not
 inferred from a `-roce` suffix.
 
@@ -409,17 +411,20 @@ the fabric question without changing. For those, a single function in
 in the recipe. Nothing is persisted. The function is pure and
 deterministic, so two readers of the same recipe bytes get the same answer.
 
-Derivation keys on component identity and on manifest identity, never on
-manifest content. Five of the six NicClusterPolicy manifests are Helm
-templated, so a plain YAML parse is not available, and shape is not a
-reliable signal anyway: AKS and Nebius use the shared RDMA plugin with no
-`linkTypes` selector and are InfiniBand, while OKE L40S uses SR-IOV and is
-RoCE.
+Derivation keys on three things the resolved recipe already holds:
+component identity, manifest identity, and, for a gated manifest, the
+gate's value under the component's resolved values (`aicr.fabric` on
+`network-operator`). It never reads manifest content. Five of the six
+NicClusterPolicy manifests are Helm templated, so a plain YAML parse is
+not available, and shape is not a reliable signal anyway: AKS and Nebius
+use the shared RDMA plugin with no `linkTypes` selector and are
+InfiniBand, while OKE L40S uses SR-IOV and is RoCE. A gated manifest
+whose gate value is absent from the recipe is an error, not an open gate.
 
 | Composition contains | Derived fabric |
 |---|---|
 | `aws-efa` | `efa` |
-| A policy manifest in the table below whose gate is on (or that has no gate) | the fabric registered for that manifest |
+| A policy manifest in the table below, ungated or with its gate value selecting it | the fabric registered for that manifest |
 | `gke-gb200-rdma` | `roce` |
 | `gke-nccl-tcpxo` | `tcpxo` |
 | `network-operator` with no policy manifest (kind), `network-operator-ocp-olm` alone, `dranet` (VR200), a namespace-only `network-operator` ref (Talos) | not a fabric signal |
@@ -675,31 +680,43 @@ cannot land ahead of its second value.
 | `eks.yaml` and leaves | None. Derived `efa`. | Unchanged |
 | `gke-cos.yaml` | None. Derived `roce` on A4X (GB200), `tcpxo` on A3 Mega, unset on A4 (B200) and A4X Max (GB300), which carry no networking component. | Unchanged |
 | `aks.yaml` | None. Derived `ib`. | Unchanged |
-| `oke-ol.yaml` and OKE leaves | None until an OKE GB300 leaf with a qualified RoCE target exists; then the declaration moves per accelerator (see "OKE declaration scope"). | Unchanged now |
+| `oke-ol.yaml` and OKE leaves | None until an OKE GB300 leaf with a qualified RoCE target exists; then that leaf declares its own marked `gpuStack`, which shadows the inherited one (see "OKE declaration scope"). | Unchanged, including the accelerator-less OKE coordinates |
 | `gb300-generic-ubuntu-training.yaml` | None until a Spectrum-X RoCE GB300 cluster is qualified; then a new `gpuStack` declaration, default `operator-managed` (`fabric: ib`) reproducing today's rendered composition, plus `operator-managed-roce`, and the gated per-fabric policy manifests on the `network-operator` ref (placement 1a). | Unchanged now. At conversion: overlay and result version bumps, the three signed pointers under `recipes/evidence/gb300-generic-ubuntu-training` re-signed in the same release, and an upgrade test from a pre-conversion bundle proving the live `nic-cluster-policy` is updated in place on every deployer. |
 | `gb200-nvke-ubuntu-training.yaml`, `b300-mk8s-*` | None. Derived `ib`. | Unchanged |
 
 **OKE declaration scope.** `oke-ol.yaml` carries the one `gpuStack`
-declaration for every OKE leaf: A100, GB200 (InfiniBand), and L40S (RoCE)
-all inherit the same `oci-managed` default. A fabric marker cannot be
-added there, because one value would label two fabrics, and a leaf cannot
-add a second declaration, because ADR-015 deduplicates by declaring source
-and fails composition-wide uniqueness otherwise. When the first OKE GB300
-RoCE target is qualified, the declaration moves down one level: it is
-removed from `oke-ol.yaml` and declared on each per-accelerator overlay
-(`gb200-oke-training`, `gb200-oke-inference`, `l40s-oke-training`,
-`l40s-oke-inference`, `a100-oke-training`, and the new GB300 leaf). Only
-the GB300 leaf's declaration carries markers and gains `*-roce`. Every
-other leaf receives the declaration with identical values and no marker:
-`gb200-oke-training` and `l40s-oke-training` have one fabric each, which
-derivation already answers, and `a100-oke-training`, `gb200-oke-inference`,
-and `l40s-oke-inference` deploy no network component, so no marker would
-be correct for them. `selectedProfile` does not record the declaring
-overlay, so those leaves resolve byte-identically, digest included, and
-the headline invariant holds: fabric enters only the leaf that gained its
-second value. No OKE evidence pointer is committed today, so nothing is
-re-signed. The move ships as one change with a golden test asserting the
-unmarked leaves unchanged and the GB300 leaf changed only by the marker.
+declaration for every OKE composition: A100, GB200 (InfiniBand), and L40S
+(RoCE) leaves all inherit the same `oci-managed` default, and so do the
+accelerator-less OKE coordinates (`--service oke --os ol --intent
+training`, and the same for inference), which the resolver builds without
+any accelerator overlay. A fabric marker cannot be added to that
+declaration, because one value would label two fabrics. Moving the
+declaration down to the per-accelerator overlays was considered and
+rejected: the accelerator-less coordinates would lose their declaration,
+drop from `aicr.run/v1beta2` to `aicr.run/v1`, and lose `selectedProfile`,
+which breaks the headline invariant for two shipped coordinates.
+
+Instead this ADR amends the ADR-015 uniqueness rule with one narrow case,
+**declaration shadowing**: when a composition carries declarations from
+more than one overlay, the declaration from the most specific overlay in
+the existing merge order replaces the inherited one whole. Values are not
+merged across declarations, `default` is not inherited, and the result is
+still exactly one declaration, so the resolution algorithm, the lock
+template, and the evidence segment are unchanged. Two declarations at the
+same depth remain an error, and external catalogs still extend rather
+than redeclare. The shadowing declaration must satisfy the same totality,
+distinguishing-constraint, and qualification rules as any other.
+
+When the first OKE GB300 RoCE target is qualified, the new GB300 leaf
+declares its own `gpuStack` with the same driver-mode values as
+`oke-ol.yaml` plus the markers and `*-roce`, shadowing the inherited one.
+`oke-ol.yaml` is not edited. Every other OKE composition, the A100, GB200,
+L40S leaves and the accelerator-less coordinates alike, keeps resolving
+from the `oke-ol.yaml` declaration byte-identically, digest included. No
+OKE evidence pointer is committed today, so nothing is re-signed. The
+change ships with a golden test over every OKE coordinate the resolver can
+produce, including the accelerator-less ones, asserting that only the new
+GB300 leaf differs.
 
 This ADR by itself changes no recipe. GB300 generic is expected to convert
 first, because Spectrum-X GB300 racks are shipping now. That conversion is
@@ -715,8 +732,10 @@ its own change, reviewed against the costs listed above.
 - One function, `FabricOf`, answers "which fabric" for the CLI, the API,
   evidence, NVCRE, and the validators. The answer is fixed by the recipe
   bytes.
-- The ADR-015 one-declaration rule, resolution algorithm, lock template,
-  component-set rule, and evidence coordinate shape are unchanged.
+- The ADR-015 resolution algorithm, lock template, component-set rule,
+  and evidence coordinate shape are unchanged. The one-declaration rule is
+  amended in one narrow way: a leaf declaration may shadow an inherited
+  one whole, so a composition still resolves exactly one declaration.
 - `gpuStack` values on overlays with both axes become tuples. The value
   list on OKE can reach four entries. The marker keeps the tuple explicit.
   Splitting `fabric` into a criteria dimension later is mechanical because
@@ -773,8 +792,10 @@ its own change, reviewed against the costs listed above.
    per-fabric policy manifests, the gate-aware `recipeDeclaresRDMAFabric`
    and `recipeAttachesNicClusterPolicy`, re-signed evidence, and an
    upgrade test from a pre-conversion bundle on each deployer, together.
-   GB300 generic first; OKE, with the declaration moved per accelerator,
-   when a RoCE OKE GB300 target exists.
+   GB300 generic first; OKE, with a shadowing declaration on the new GB300
+   leaf, when a RoCE OKE GB300 target exists. The shadowing rule itself,
+   with its same-depth conflict test and the accelerator-less OKE golden
+   coordinates, lands in step 2.
 6. Docs: `docs/contributor/recipe.md` profile vocabulary, component catalog
    notes, CLI and API references.
 
