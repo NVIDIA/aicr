@@ -528,14 +528,10 @@ func uninstallReinstall(ctx context.Context, t *testing.T, active string) {
 
 // logCursor names one run of an operator pod's container: a restart in
 // place starts a new log under the same pod UID.
-type logCursor struct {
-	pod      types.UID
-	restarts int32
-}
-
-// scannedLines is how many log lines nothingForbidden has read from each
-// operator container run.
-var scannedLines = map[logCursor]int{}
+// reportedDenials holds the denial lines nothingForbidden already reported,
+// per pod. Lines are matched by content, which carries the log timestamp,
+// not by position: a rotated log starts over at line 1.
+var reportedDenials = map[types.UID]map[string]bool{}
 
 // nothingForbidden scans the running operator pods' logs for an API denial:
 // the suite installs the RBAC the chart ships, so a missing grant shows
@@ -544,23 +540,22 @@ var scannedLines = map[logCursor]int{}
 func nothingForbidden(ctx context.Context, t *testing.T) {
 	t.Helper()
 	for _, p := range operatorPods(ctx, t) {
-		cursor := logCursor{pod: p.UID}
-		for _, s := range p.Status.ContainerStatuses {
-			cursor.restarts += s.RestartCount
-		}
 		logs, err := clientset.CoreV1().Pods(operatorNamespace).GetLogs(p.Name, &corev1.PodLogOptions{}).DoRaw(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
+		reported := reportedDenials[p.UID]
+		if reported == nil {
+			reported = map[string]bool{}
+			reportedDenials[p.UID] = reported
+		}
 		sc := bufio.NewScanner(strings.NewReader(string(logs)))
 		sc.Buffer(make([]byte, 1<<20), 1<<20)
-		line := 0
 		for sc.Scan() {
-			line++
-			if line > scannedLines[cursor] && strings.Contains(strings.ToLower(sc.Text()), "forbidden") {
-				t.Errorf("%s: %s", p.Name, sc.Text())
+			if text := sc.Text(); !reported[text] && strings.Contains(strings.ToLower(text), "forbidden") {
+				reported[text] = true
+				t.Errorf("%s: %s", p.Name, text)
 			}
 		}
-		scannedLines[cursor] = line
 	}
 }
