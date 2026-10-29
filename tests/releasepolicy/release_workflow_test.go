@@ -118,9 +118,10 @@ func TestReleaseUsesSingleDigestMap(t *testing.T) {
 	// The plugin binaries are scanned before release-check, so a finding
 	// stops promotion and every push.
 	candidateSteps := sliceValue(t, mapValue(t, jobs, "operator-candidate"), "steps")
+	build := stepIndex(candidateSteps, "Build the operator candidate")
 	scan := stepIndex(candidateSteps, "Malware scan the kubectl-aicr binaries")
-	if build := stepIndex(candidateSteps, "Build the operator candidate"); scan < 0 || scan < build ||
-		scan > stepIndex(candidateSteps, "Upload the candidate") {
+	upload := stepIndex(candidateSteps, "Upload the candidate")
+	if scan < 0 || scan < build || scan > upload {
 		t.Error("operator-candidate must malware-scan the kubectl-aicr binaries after building and before uploading them")
 	}
 }
