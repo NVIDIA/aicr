@@ -175,10 +175,11 @@ spec:
     - expression: variables.pod.containers.all(c, c.image == {{ .Values.aicr.image | quote }})
       message: AICR Jobs run the pinned AICR image {{ .Values.aicr.image }}
     # The CLI also parses a single dash and a joined value, so only the exact
-    # --image <pinned> pair may name an image.
+    # --image <pinned> pair may name an image. Prefix checks, not a regex:
+    # RE2's `.` and `$` let a trailing newline through.
     - expression: >-
         variables.pod.containers.all(c, !has(c.args) ||
-        (c.args.all(a, a == '--image' || !a.matches('^--?image(=.*)?$')) &&
+        (c.args.all(a, !(a == '-image' || a.startsWith('--image=') || a.startsWith('-image='))) &&
         size(c.args.filter(a, a == '--image')) <= 1 &&
         (!c.args.exists(a, a == '--image') ||
         (c.args.indexOf('--image') + 1 < size(c.args) &&
@@ -186,7 +187,8 @@ spec:
       message: the snapshot agent runs the pinned AICR image {{ .Values.aicr.image }}
     # An AICRConfig file can name the agent image too.
     - expression: >-
-        variables.pod.containers.all(c, !has(c.args) || c.args.all(a, !a.matches('^--?config(=.*)?$')))
+        variables.pod.containers.all(c, !has(c.args) || c.args.all(a,
+        !(a == '--config' || a == '-config' || a.startsWith('--config=') || a.startsWith('-config='))))
       message: AICR Jobs take no --config file
     # AICR reads image overrides, such as AICR_IMAGE, from its environment.
     - expression: >-

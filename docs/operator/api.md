@@ -489,6 +489,16 @@ changes `spec.approval`:
   that skips approval with `approvalRequired: false` or an `outcome` label
   already set.
 
+To restore RuntimeRollouts from a backup under another identity, as Velero
+does:
+
+1. Stop the operator, so no rollout advances while admission is relaxed:
+   `kubectl -n aicr-system scale deployment/aicr-operator --replicas=0`.
+2. Delete the `aicr-operator-approval` ValidatingAdmissionPolicyBinding.
+3. Restore the rollouts.
+4. Run `helm upgrade` on the operator chart with the same values. It recreates
+   the binding and restores the operator's replica count.
+
 Approvers also need `get`, `list`, `watch` and `patch` on `runtimerollouts`,
 and `get` on ConfigMaps in the operator namespace to read assessment reports.
 The chart's `aicr-operator-approver` roles grant exactly that plus reading the

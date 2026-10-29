@@ -432,6 +432,8 @@ func operatorJobs(t *testing.T) {
 	denied(t, "a snapshot agent on another image, single dash joined", create(snapshot("-image=busybox@"+digestA)), "snapshot agent")
 	denied(t, "a snapshot agent configured from a file", create(snapshot("--config", "https://example.com/aicr.yaml")), "no --config")
 	denied(t, "a snapshot agent configured from a file, single dash joined", create(snapshot("-config=/tmp/aicr.yaml")), "no --config")
+	denied(t, "a snapshot agent configured from a file, trailing newline", create(snapshot("--config=/tmp/aicr.yaml\n")), "no --config")
+	denied(t, "a snapshot agent on another image, trailing newline", create(snapshot("-image=busybox@"+digestA+"\n")), "snapshot agent")
 	snapshotInJobs := job(t, aicrjob.StageSnapshot, "aicr-snapshot")
 	snapshotInJobs.Namespace = jobsNS
 	denied(t, "snapshot in the Job namespace", create(snapshotInJobs), "AICR identity")

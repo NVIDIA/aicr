@@ -23,7 +23,7 @@ reason and message.
 | `EngineMissing`, `ProjectMissing`; `Unauthorized` on `EngineAvailable` | [Argo CD not available](#argo-cd-not-available) |
 | `AwaitingApproval`, `AwaitingAcknowledgement` | [Waiting for approval](#waiting-for-approval) |
 | `TransitionBlocked` | [Transition blocked](#transition-blocked) |
-| `InventoryDrift`, `StepUnknown` | [Rollout stalled](#rollout-stalled) |
+| `InventoryDrift`, `StepUnknown`, `MovedReleaseMissing` | [Rollout stalled](#rollout-stalled) |
 | `RolloutFailed`, `RolloutExpired`, `RolloutRevoked`; `ForeignObject` on `Ready` | [Rollout failed, expired or revoked](#rollout-failed-expired-or-revoked) |
 | `ValidationUnavailable` | [Validation](#validation) |
 | `PlanUnreadable`, `PlanMissing`, `PlanOfAnotherRuntime`, `PlanWithoutRecipe`, `NotFound` | [Unreadable or missing plans](#unreadable-or-missing-plans) |
@@ -231,6 +231,12 @@ migration is a separate procedure, outside the operator.
   `SpecDrifted` until the edit is undone or its action timeout fails the
   rollout.
 - **`StepUnknown`.** A step names a release the target plan lacks. Retry.
+- **`MovedReleaseMissing`** (on the runtime, with no rollout in progress). A
+  rollout that did not succeed may have moved a release to its target plan,
+  and that release's Application was then deleted. The operator does not write
+  it again from the active plan, which would roll it back without approval.
+  Retry: the new rollout installs the release at its target plan, with a fresh
+  approval.
 
 ## Rollout failed, expired or revoked
 
@@ -398,7 +404,10 @@ release's resources and the Application.
 Deleting an owned Application without the finalizer leaves its resources
 running. While no rollout is in progress the operator writes it again
 (`ApplicationRecreated`); during a rollout, the deletion is
-[drift](#rollout-stalled).
+[drift](#rollout-stalled). The exception is a release that a rollout which did
+not succeed may have moved to its target plan: writing it from the active plan
+would roll it back without approval, so the runtime stalls with
+`MovedReleaseMissing` instead ([Rollout stalled](#rollout-stalled)).
 
 ## Orphaned objects and re-adoption
 

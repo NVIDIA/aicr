@@ -1199,6 +1199,61 @@ func TestDriftedMovedReleaseIsNotRolledBack(t *testing.T) {
 	}
 }
 
+// A release a failed rollout moved whose Application is then deleted by hand
+// is not recreated from the active plan, a rollback nobody approved: the
+// move is known from the rollout's history, not the deleted object. The
+// runtime stalls naming the release and the rollout, while a deleted release
+// no ended rollout touched is still repaired.
+func TestDeletedMovedReleaseIsNotRolledBack(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, stabilized)
+	active := putReleases(t, ctx, rt, testRelease("cert-manager", plan.PhasePrimary, "", `{"cpu":"50m"}`),
+		testRelease("nfd", plan.PhasePrimary, "", `{}`))
+	failed := putReleases(t, ctx, rt, testRelease("cert-manager", plan.PhasePrimary, "", `{"cpu":"60m"}`),
+		testRelease("nfd", plan.PhasePrimary, "", `{}`))
+	succeedTo(t, ctx, rt, active)
+	resolved(t, ctx, failed)
+	ro := endedTo(t, ctx, rt, "rollout-that-failed", active, failed, v1alpha1.PhaseFailed)
+	ro.Status.Releases = []v1alpha1.ReleaseStatus{
+		{ID: "cert-manager", State: v1alpha1.ReleaseReady}, {ID: "nfd", State: v1alpha1.ReleaseFailed},
+	}
+	if err := k8s.Status().Update(ctx, ro); err != nil {
+		t.Fatal(err)
+	}
+	engine := newEngine()
+	engine.ensured["nfd"] = active
+	engine.missing["cert-manager"] = true
+	engine.inventory = []argocd.InventoryItem{{ReleaseID: "nfd", UID: "u-n", PlanDigest: active}}
+	r, clk := newRollout(t, engine, true)
+	clk.now = time.Now().Add(2 * time.Second)
+
+	reconcileRollout(t, ctx, r)
+	if slices.Contains(engine.order, "Ensure cert-manager") {
+		t.Fatalf("a deleted moved release was recreated from the active plan: writes %v", engine.order)
+	}
+	c := cond(getRuntime(t, ctx), v1alpha1.ConditionStalled)
+	if c.Status != metav1.ConditionTrue || c.Reason != ReasonMovedReleaseMissing ||
+		!strings.Contains(c.Message, "cert-manager") || !strings.Contains(c.Message, ro.Name) {
+
+		t.Fatalf("Stalled = %+v; want the deleted moved release and its rollout named", c)
+	}
+
+	// Without cert-manager in any ended rollout's history, its deleted
+	// Application is repaired as before.
+	engine.order = nil
+	if err := k8s.Get(ctx, client.ObjectKeyFromObject(ro), ro); err != nil {
+		t.Fatal(err)
+	}
+	ro.Status.Releases = []v1alpha1.ReleaseStatus{{ID: "nfd", State: v1alpha1.ReleaseFailed}}
+	if err := k8s.Status().Update(ctx, ro); err != nil {
+		t.Fatal(err)
+	}
+	reconcileRollout(t, ctx, r)
+	if !slices.Contains(engine.order, "Ensure cert-manager") {
+		t.Fatalf("a deleted release no rollout moved was not repaired: writes %v", engine.order)
+	}
+}
+
 // A new engine policy changes every plan's digest but no chart or values:
 // the rollout to it rewrites each release without approval.
 func TestEnginePolicyChangeNeedsNoApproval(t *testing.T) {

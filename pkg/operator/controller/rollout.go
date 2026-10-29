@@ -79,6 +79,10 @@ const (
 	// objects and records no recipe, so deployment validation cannot run
 	// against it; it is not rolled out while validation is required.
 	ReasonPlanWithoutRecipe = "PlanWithoutRecipe"
+	// ReasonMovedReleaseMissing: the Application of a release that a rollout
+	// which did not succeed may have moved is gone; repairing it from the
+	// active plan would roll it back without approval.
+	ReasonMovedReleaseMissing = "MovedReleaseMissing"
 )
 
 // resyncInterval re-observes a steady runtime: it covers what no watch
@@ -159,7 +163,10 @@ type runtimeView struct {
 	inProgress *v1alpha1.RuntimeRollout
 	// retired are releases a rollout ended since the newest success
 	// started removing; nothing writes them again until a rollout does.
-	retired                     map[string]bool
+	retired map[string]bool
+	// moved are releases such a rollout may have written to its target
+	// plan; repair never writes them back to the active plan.
+	moved                       map[string]movedBy
 	ready, available            bool
 	readyReason, readyMessage   string
 	availableMessage            string
@@ -309,7 +316,7 @@ func (r *RolloutReconciler) reconcile(ctx context.Context, rt *v1alpha1.ClusterR
 		}
 	}
 	// After advance, which may have just ended the rollout in progress.
-	v.retired = retired(rollouts)
+	v.retired, v.moved = leftBehind(rollouts)
 	if err = r.observeActive(ctx, rt, target, v); err != nil {
 		return nil, err
 	}
@@ -1398,7 +1405,8 @@ func (r *RolloutReconciler) observeActive(ctx context.Context, rt *v1alpha1.Clus
 			}
 			return err
 		}
-		if v.rollout == "" && !suspended && !atMoved && (obs.State == argocd.StateMissing || obs.Reason == argocd.ReasonSpecDrifted) {
+		lost := !atMoved && v.lostMove(rel.ID, obs)
+		if v.rollout == "" && !suspended && !atMoved && !lost && (obs.State == argocd.StateMissing || obs.Reason == argocd.ReasonSpecDrifted) {
 			if err = r.repair(ctx, p, rel, values, obs); err != nil {
 				if operrors.IsPermanent(err) {
 					v.readyReason, v.readyMessage = reasonOf(err), errorMessage(err)
@@ -1526,12 +1534,32 @@ func inFlight(ro *v1alpha1.RuntimeRollout, id string) bool {
 	return ro != nil && ro.Status.Current != nil && ro.Status.Current.Release == id
 }
 
-// retired returns the releases that rollouts ended since the newest success
-// left removing or removed, from rollouts newest first. The newest such
-// rollout to touch a release decides, so a later one that installed it
-// again clears it.
-func retired(rollouts []v1alpha1.RuntimeRollout) map[string]bool {
-	out, seen := map[string]bool{}, map[string]bool{}
+// lostMove reports, with no rollout in progress, a moved release whose
+// Application is gone, and stalls the runtime naming it: it has no live plan
+// to be observed at, and the active plan's release would roll it back.
+func (v *runtimeView) lostMove(id string, obs argocd.Observation) bool {
+	m, ok := v.moved[id]
+	if !ok || v.rollout != "" || m.plan == v.active || obs.State != argocd.StateMissing {
+		return false
+	}
+	v.stalled, v.stalledReason = true, ReasonMovedReleaseMissing
+	v.stalledMsg = fmt.Sprintf("release %s: its Application is gone, and rollout %s, which did not succeed, may have moved it "+
+		"to plan %s; repairing it from the active plan would roll it back, so retry the rollout to restore it", id, m.rollout, m.plan)
+	return true
+}
+
+// movedBy is the ended rollout that may have written a release, and the plan
+// it targeted.
+type movedBy struct{ rollout, plan string }
+
+// leftBehind returns what rollouts ended since the newest success left behind,
+// from rollouts newest first: the releases they left removing or removed,
+// and the others they may have written to their target plan. The newest such
+// rollout to touch a release decides, so a later one that installed it again
+// clears an earlier removal. Moves come from rollout history rather than the
+// live objects, so they survive an Application deleted by hand.
+func leftBehind(rollouts []v1alpha1.RuntimeRollout) (map[string]bool, map[string]movedBy) {
+	retired, moved, seen := map[string]bool{}, map[string]movedBy{}, map[string]bool{}
 	for i := range rollouts {
 		ro := &rollouts[i]
 		outcome := ro.Labels[v1alpha1.LabelOutcome]
@@ -1547,11 +1575,13 @@ func retired(rollouts []v1alpha1.RuntimeRollout) map[string]bool {
 			}
 			seen[rel.ID] = true
 			if removing(ro, rel.ID) {
-				out[rel.ID] = true
+				retired[rel.ID] = true
+			} else {
+				moved[rel.ID] = movedBy{rollout: ro.Name, plan: ro.Spec.ToPlanDigest}
 			}
 		}
 	}
-	return out
+	return retired, moved
 }
 
 // removing reports a release whose Remove step started: its Application is
