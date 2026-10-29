@@ -2686,7 +2686,9 @@ Every stock recipe installs it except `ocp` and
 - Its bundled metrics-server is on only where the platform ships no resource
   metrics API: EKS, OKE, LKE, NVKE, CKS, Kind, and generic GB300. On LKE
   and Kind it skips kubelet certificate verification, which their kubelet
-  certificates cannot pass.
+  certificates cannot pass. On EKS it runs on the host network, so it can reach
+  kubelets when VPC CNI custom networking puts pods in a different security
+  group from their nodes.
   Where a cluster already serves the resource metrics API, such as an OKE or
   EKS cluster with the metrics-server add-on, turn the bundled one off with
   `--set nktp:metrics-server.enabled=false`. Both register the same
