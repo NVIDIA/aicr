@@ -540,9 +540,20 @@ var reportedDenials = map[types.UID]map[string]bool{}
 func nothingForbidden(ctx context.Context, t *testing.T) {
 	t.Helper()
 	for _, p := range operatorPods(ctx, t) {
+		// A container that has not started has no log yet, and the API
+		// server refuses to read one.
+		started := slices.ContainsFunc(p.Status.ContainerStatuses, func(s corev1.ContainerStatus) bool {
+			return s.State.Running != nil || s.State.Terminated != nil
+		})
+		if !started {
+			continue
+		}
 		logs, err := clientset.CoreV1().Pods(operatorNamespace).GetLogs(p.Name, &corev1.PodLogOptions{}).DoRaw(ctx)
+		if apierrors.IsNotFound(err) {
+			continue
+		}
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("read %s's log: %v", p.Name, err)
 		}
 		reported := reportedDenials[p.UID]
 		if reported == nil {
