@@ -51,6 +51,13 @@ the chart coordinates themselves. For a fully air-gapped deployment, use both:
 mirror images and charts into your private registry, then deploy the vendored
 bundle.
 
+**Enforcing signatures on the mirror:** to admit only images you have signed,
+sign the mirrored digests with your own key and enforce the signature at
+admission; see
+[Enforcing Your Signatures on Mirrored Images](../integrator/supply-chain-verification.md#enforcing-your-signatures-on-mirrored-images).
+Those policies need the registry to serve TLS, so the plain-HTTP examples below
+suit only a test registry.
+
 ## Prerequisites
 
 - `aicr` CLI installed (see [Installation](installation.md))

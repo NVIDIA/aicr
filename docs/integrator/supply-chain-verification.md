@@ -945,6 +945,292 @@ admission webhook rejects it.
 > AICR's bundle attestation (`no matching signatures found`) — see the Kyverno
 > note above; tracked in [#1537](https://github.com/NVIDIA/aicr/issues/1537).
 
+## Enforcing Your Signatures on Mirrored Images
+
+The policies above trust AICR's release identity, and AICR attests only its own
+images. A site that mirrors a recipe's images into a private registry can
+instead sign the mirrored copies with its own key and admit only images that
+carry that signature. That covers every image in the mirror, component images
+included, and depends neither on AICR's attestations nor on the Kyverno caveat
+above.
+
+Measured on kind with Kubernetes v1.37.0, Kyverno v1.19.2 and cosign v3.1.4,
+with key-pair signatures and no transparency log, against a Distribution
+registry serving TLS from a private CA with basic auth, and against zot, which
+serves the OCI referrers API.
+
+### Signing the mirrored images
+
+Sign each image by digest where it lands in your registry, after mirroring it
+(see [Air-Gapped Image Mirroring](../user/air-gap-mirror.md)). A signing config
+with no services records no transparency-log entry and no timestamp, so signing
+needs no network access beyond the registry:
+
+```shell
+cosign generate-key-pair    # cosign.key stays with the signer; cosign.pub goes into the policies
+cosign signing-config create --out signing-config.json
+
+export REPO=registry.example.com/nvidia/gpu-operator   # a mirrored image, as your registry names it
+export DIGEST=$(crane digest "${REPO}:v26.7.2")
+cosign sign --key cosign.key --signing-config signing-config.json --recursive \
+  "${REPO}@${DIGEST}"
+```
+
+Add `--registry-cacert` with your CA file if the registry's CA is not in the
+system trust store.
+
+`--recursive` signs a multi-platform index and each platform manifest under
+it. A Pod that names a tag or the index digest is checked against the index
+signature. One that names a platform digest is checked against that manifest's
+own signature, which only `--recursive` writes.
+
+cosign v3 stores the signature as a Sigstore bundle, attached to the image as an
+OCI referrer, or under cosign's fallback tag on a registry without the referrers
+API. The policies below name no signature format, and Kyverno accepted both the
+bundle and the older `.sig` format. A signature copied onto another image is
+rejected, because it names the digest it was made for.
+
+### The mirror policies
+
+Paste your `cosign.pub` in place of the key in both `ImageValidatingPolicy`
+objects below, create the `mirror-credentials` Secret (see
+[Registry access for Kyverno](#registry-access-for-kyverno)), and apply them:
+
+```yaml
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: verify-mirror-images
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  webhookConfiguration:
+    timeoutSeconds: 30
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: [kube-system, kyverno]
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  matchImageReferences:
+    - glob: "*"
+  credentials:
+    secrets: [mirror-credentials]
+  validationConfigurations:
+    mutateDigest: true
+    verifyDigest: true
+    required: true
+  attestors:
+    - name: mirror
+      cosign:
+        key:
+          data: |-
+            -----BEGIN PUBLIC KEY-----
+            ...
+            -----END PUBLIC KEY-----
+        ctlog:
+          insecureIgnoreTlog: true
+          insecureIgnoreSCT: true
+  validations:
+    - expression: >-
+        (images.containers + images.initContainers + images.ephemeralContainers)
+        .map(image, verifyImageSignatures(image, [attestors.mirror])).all(e, e > 0)
+      message: image is not signed with the mirror key; see the Kyverno admission controller log
+---
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: verify-mirror-images-debug
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  webhookConfiguration:
+    timeoutSeconds: 30
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: [kube-system, kyverno]
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["pods/ephemeralcontainers"]
+  matchImageReferences:
+    - glob: "*"
+  credentials:
+    secrets: [mirror-credentials]
+  validationConfigurations:
+    mutateDigest: true
+    verifyDigest: true
+    required: true
+  attestors:
+    - name: mirror
+      cosign:
+        key:
+          data: |-
+            -----BEGIN PUBLIC KEY-----
+            ...
+            -----END PUBLIC KEY-----
+        ctlog:
+          insecureIgnoreTlog: true
+          insecureIgnoreSCT: true
+  validations:
+    - expression: >-
+        (images.containers + images.initContainers + images.ephemeralContainers)
+        .map(image, verifyImageSignatures(image, [attestors.mirror])).all(e, e > 0)
+      message: image is not signed with the mirror key; see the Kyverno admission controller log
+```
+
+What each part is for:
+
+* **Every container list.** The expression checks `containers`,
+  `initContainers` and `ephemeralContainers`, and `required: true` also denies
+  any matched image that no attestor verified. An expression over
+  `images.containers` alone denied every init container, signed or not, and
+  with `required: false` added it admitted an unsigned one instead.
+* **Updates and `kubectl debug`.** `CREATE` and `UPDATE` on `pods` cover an
+  image patched into a running Pod. `kubectl debug` adds its container through
+  the `pods/ephemeralcontainers` subresource, which the second policy matches.
+  It is a separate policy because a subresource in the first one switches off
+  the rules Kyverno generates for Pod controllers.
+* **Pod controllers.** From the `pods` rule, Kyverno generates rules for
+  Deployments, Jobs and CronJobs, so one with an unsigned image is denied when
+  it is created. A Deployment that predates the policy keeps its running Pods,
+  but the new Pods it creates are denied.
+* **Every image.** `glob: "*"` matches every image, so an image from any other
+  registry, or a short name such as `busybox:1.36`, is denied unless it is in
+  your mirror and signed. A narrower glob leaves the images outside it
+  unchecked.
+* **Exemptions.** The namespace selector skips `kube-system` and `kyverno`, so
+  the policies cannot block Kyverno's own recovery. Add namespaces to that list
+  to exempt them. Kyverno's PolicyExceptions are off by default in its Helm
+  chart. An exception created while they are off, or outside the namespace
+  that `features.policyExceptions.namespace` names, is stored with only a
+  warning and then ignored, and an `ImageValidatingPolicy` also ignores an
+  exception that lists `images`.
+* **Digest pinning.** `mutateDigest` rewrites a tag to the digest Kyverno
+  verified (`…:v26.7.2@sha256:…`), so the node pulls what was checked. A tag
+  later moved to an unsigned digest is denied at its next admission.
+* **No transparency log.** `insecureIgnoreTlog: true` accepts a signature that
+  has no transparency-log entry. The signature is still checked against your
+  key. With no `ctlog` settings, Kyverno denies a correctly signed image with
+  `not enough verified log entries from transparency log: 0 < 1`.
+  `insecureIgnoreSCT` concerns keyless certificates.
+
+### Registry access for Kyverno
+
+Kyverno fetches signatures itself, with its own credentials and its own CA
+trust, separately from the nodes that pull the images.
+
+**Credentials.** `credentials.secrets` names `kubernetes.io/dockerconfigjson`
+Secrets in Kyverno's namespace:
+
+```shell
+kubectl -n kyverno create secret docker-registry mirror-credentials \
+  --docker-server=registry.example.com \
+  --docker-username="${MIRROR_USER}" --docker-password="${MIRROR_PASSWORD}"
+```
+
+Missing and wrong credentials look the same: every matched Pod is denied, and
+kubectl shows `failed to evaluate policy: GET …: UNAUTHORIZED: authentication
+required`. These credentials do not reach the nodes. A Pod without
+`imagePullSecrets` was admitted, then failed to start with `ErrImagePull`
+(`no basic auth credentials`), so give workloads pull credentials as usual.
+
+**CA trust.** Serve the mirror over TLS and give Kyverno its CA. The chart's
+`admissionController.caCertificates` mounts a bundle over the admission
+controller's whole CA file instead of adding to it, so keep the public roots in
+that bundle unless Kyverno only ever talks to your mirror. Passed as
+`caCertificates.data`, a bundle with the public roots can push the Helm release
+past its 1 MiB limit; `caCertificates.volume` mounts it from a volume instead.
+The nodes' container runtime needs the CA too (for containerd, a `hosts.toml`
+under `/etc/containerd/certs.d/`).
+
+**Plain HTTP.** Kyverno v1.19.2 did not find Sigstore-bundle signatures on a
+plain-HTTP registry addressed by hostname, even with
+`credentials.allowInsecureRegistry: true`, and denied correctly signed images
+with `no signatures found`. `.sig` signatures were not affected. The plain-HTTP
+examples in [Air-Gapped Image Mirroring](../user/air-gap-mirror.md) suit a test
+registry, not one these policies read.
+
+### Testing the mirror policies
+
+A server-side dry run sends a Pod through admission without creating it. Wait
+for both policies' webhooks first. The `-debug` policy never reports ready,
+because Kyverno's reports controller has no permission on the
+`pods/ephemeralcontainers` subresource, but it enforces once its webhook is
+configured.
+
+```shell
+kubectl wait --for=jsonpath='{.status.conditionStatus.conditions[?(@.type=="WebhookConfigured")].status}'=True \
+  imagevalidatingpolicy/verify-mirror-images imagevalidatingpolicy/verify-mirror-images-debug --timeout=120s
+kubectl create namespace mirror-policy-test
+
+export UNSIGNED=registry.example.com/library/busybox:1.36   # mirrored, never signed
+export OTHER=registry.example.com/library/alpine            # mirrored, signed below with another key only
+cosign generate-key-pair --output-key-prefix other
+cosign sign --key other.key --signing-config signing-config.json \
+  "${OTHER}@$(crane digest "${OTHER}:3.23.3")"
+
+# Admitted: signed with your key; the tag comes back pinned to the verified digest
+kubectl -n mirror-policy-test run signed --image="${REPO}:v26.7.2" --restart=Never \
+  --dry-run=server -o jsonpath='{.spec.containers[0].image}{"\n"}'
+
+# Denied: not signed
+kubectl -n mirror-policy-test run unsigned --image="${UNSIGNED}" --restart=Never --dry-run=server
+
+# Denied: signed with another key
+kubectl -n mirror-policy-test run other-key --image="${OTHER}:3.23.3" --restart=Never --dry-run=server
+```
+
+Both denials print the policy's own message:
+
+```text
+Error from server: admission webhook "ivpol.validate.kyverno.svc-fail-finegrained-verify-mirror-images" denied the request: Policy verify-mirror-images failed: image is not signed with the mirror key; see the Kyverno admission controller log
+```
+
+The admission controller's log says which failure it was:
+
+```shell
+kubectl -n kyverno logs deploy/kyverno-admission-controller --since=10m | grep 'image verification failed'
+```
+
+`no signatures found` means the image carries no signature. `accepted
+signatures do not match threshold, Found: 0, Expected 1` means its signatures
+were made with another key.
+
+### Operating the mirror policies
+
+**A registry outage denies every matched Pod.** With the registry unreachable,
+admission fails with `failed to evaluate policy: Get "https://…/v2/": …`. That
+includes a digest verified minutes earlier, a label-only update to a running
+Pod, and a policy with `failurePolicy: Ignore`, which covers only an
+unreachable webhook. Running Pods keep running, but no new or replacement Pod
+is admitted until the registry is back, so run the mirror with the availability
+you expect of the cluster's control plane.
+
+**Kyverno at zero replicas enforces nothing.** Scaled to zero, the admission
+controller deletes its webhook configurations as it stops, so the API server
+admits Pods without asking it, whatever the `failurePolicy`. Scaled back up,
+the new pod waited about 16 seconds for the old pod's leader lease before it
+registered the webhooks again. An unsigned image was admitted in that window,
+while the policy still reported `WebhookConfigured`. Run more than one replica
+(`admissionController.replicas` in the chart), don't scale it to zero for
+maintenance, and alert on the policy's webhook in
+`kyverno-resource-validating-webhook-cfg` rather than on the policy's status.
+
+**Not covered by these measurements:** a Kyverno crash that leaves its webhooks
+in place, revoking a signature after Kyverno has cached a verification, a
+cluster with no outbound network access, and registry credentials from a cloud
+provider's credential helper.
+
 ## Gating Deployment on Verification
 
 `aicr verify` is the deploy-time gate: run it against the bundle directory
