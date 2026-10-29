@@ -1016,12 +1016,16 @@ Valid feature names (from `pkg/evidence/cncf/consts.go`):
 | `dra-support` | Dynamic Resource Allocation driver and ResourceSlices |
 | `gang-scheduling` | Gang-scheduler presence and PodGroup support |
 | `secure-access` | Cluster authn/authz posture for AI workloads |
-| `accelerator-metrics` | GPU metrics exporter and Prometheus scrape config |
+| `accelerator-metrics` | GPU metrics exporter and `otel-lgtm` queries |
 | `ai-service-metrics` | Inference-service metrics via custom-metrics API |
 | `inference-gateway` | Gateway API + Inference Extension installation; also records the gateway `LoadBalancer` network exposure (open `0.0.0.0/0` vs scoped source ranges). Fails on an open gateway only when `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY=true`. |
 | `robust-operator` | Operator readiness and leader-election posture |
 | `pod-autoscaling` | HPA-driven pod autoscaling: external GPU metric + behavioral scale-up/down test (pod-scoped custom metrics collected best-effort — absent for DRA-allocated GPUs, not a failure) |
 | `cluster-autoscaling` | Karpenter (preferred) or EKS managed node-group autoscaling fallback |
+
+The `accelerator-metrics` and `ai-service-metrics` evidence queries NKTP's
+`otel-lgtm` backend, found as the cluster's one `lgtm` Service. Set
+`NKTP_NAMESPACE` to pin its namespace.
 
 ### Evidence verdicts and exit status
 
