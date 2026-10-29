@@ -35,6 +35,12 @@ func trans(from, to string, v Verdict, summary string) Transition {
 	return Transition{From: from, To: to, Verdict: v, Summary: summary}
 }
 
+// skipping returns t with Skips set to floors.
+func skipping(t Transition, floors ...string) Transition {
+	t.Skips = floors
+	return t
+}
+
 // oneComponent wraps transitions into a single-component Set keyed "c", the
 // component name every version-matching table below uses.
 func oneComponent(trs ...Transition) Set {
@@ -599,11 +605,14 @@ func TestLevelDiffClampsRatherThanWrapping(t *testing.T) {
 
 // TestMatchCrossingIgnoresFromMembership checks that a jump over a blocked
 // record is blocked however its `from` is written, whether or not the safe
-// record's `to` reaches the target.
+// record's `to` reaches the target. When the blocked record's `from` holds the
+// source, that record describes the jump and its steps render.
 func TestMatchCrossingIgnoresFromMembership(t *testing.T) {
 	tests := []struct {
-		name string
-		set  Set
+		name        string
+		set         Set
+		wantReason  Reason
+		wantMatched string
 	}{
 		{
 			name: "from ranges bounded below",
@@ -611,6 +620,7 @@ func TestMatchCrossingIgnoresFromMembership(t *testing.T) {
 				trans(">=1.0.0 <2.0.0", ">=2.0.0 <2.1.0", VerdictSafe, "S"),
 				trans(">=2.0.0 <3.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B"),
 			),
+			wantReason: ReasonRecordBlocks,
 		},
 		{
 			name: "from ranges open below",
@@ -618,6 +628,8 @@ func TestMatchCrossingIgnoresFromMembership(t *testing.T) {
 				trans("<2.0.0", ">=2.0.0 <2.1.0", VerdictSafe, "S"),
 				trans("<3.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B"),
 			),
+			wantReason:  ReasonRecorded,
+			wantMatched: "B",
 		},
 		{
 			name: "from ranges bounded below, safe to holding the target",
@@ -625,6 +637,7 @@ func TestMatchCrossingIgnoresFromMembership(t *testing.T) {
 				trans(">=1.0.0 <2.0.0", ">=2.0.0 <=3.0.0", VerdictSafe, "S"),
 				trans(">=2.0.0 <3.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B"),
 			),
+			wantReason: ReasonRecordBlocks,
 		},
 		{
 			name: "from ranges open below, safe to holding the target",
@@ -632,6 +645,8 @@ func TestMatchCrossingIgnoresFromMembership(t *testing.T) {
 				trans("<2.0.0", ">=2.0.0 <=3.0.0", VerdictSafe, "S"),
 				trans("<3.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B"),
 			),
+			wantReason:  ReasonRecorded,
+			wantMatched: "B",
 		},
 	}
 	for _, tt := range tests {
@@ -644,15 +659,18 @@ func TestMatchCrossingIgnoresFromMembership(t *testing.T) {
 			if r.Verdict != VerdictBlocked {
 				t.Errorf("verdict = %q, want %q: the jump flies over a recorded block", r.Verdict, VerdictBlocked)
 			}
-			if r.Reason != ReasonRecordBlocks {
-				t.Errorf("reason = %q, want %q", r.Reason, ReasonRecordBlocks)
+			if r.Reason != tt.wantReason {
+				t.Errorf("reason = %q, want %q", r.Reason, tt.wantReason)
 			}
 			if r.StoppedAt != ">=3.0.0 <=3.0.0" {
 				t.Errorf("stoppedAt = %q, want the blocked record's to range", r.StoppedAt)
 			}
+			matched := ""
 			if r.Transition != nil {
-				t.Errorf("transition = %q; two records are crossed, so neither describes the jump",
-					r.Transition.Summary)
+				matched = r.Transition.Summary
+			}
+			if matched != tt.wantMatched {
+				t.Errorf("matched record = %q, want %q", matched, tt.wantMatched)
 			}
 			if !r.FailsRun() {
 				t.Error("FailsRun() = false, want true")
@@ -667,6 +685,7 @@ func TestMatchCrossingIgnoresFromMembership(t *testing.T) {
 // a safe release and a jump spanning both should land on the rename's steps.
 func TestMatchSafeBoundaryDoesNotBlockComposition(t *testing.T) {
 	rename := trans("<0.18.0", ">=0.18.0 <=0.19.0", VerdictManual, "rename")
+	renameSkipsDrain := skipping(rename, "0.19.0")
 	renameShort := trans("<0.18.0", ">=0.18.0 <0.19.0", VerdictManual, "rename-short")
 	drain := trans(">=0.18.0 <0.19.0", ">=0.19.0 <=0.19.0", VerdictSafe, "drain")
 	secondManual := trans(">=0.18.0 <0.19.0", ">=0.19.0 <=0.19.0", VerdictManual, "second")
@@ -686,15 +705,25 @@ func TestMatchSafeBoundaryDoesNotBlockComposition(t *testing.T) {
 		wantMatched string
 	}{
 		{
-			// Crosses both boundaries. The safe one asks nothing, so the
-			// rename's own verdict and steps carry the jump.
-			name:        "manual plus safe defers to the manual record",
-			set:         oneComponent(rename, drain),
+			// Crosses both boundaries. The rename lists the safe one, so its
+			// own verdict and steps carry the jump.
+			name:        "manual plus a listed safe boundary defers to the manual record",
+			set:         oneComponent(renameSkipsDrain, drain),
 			from:        "0.16.0",
 			to:          "0.19.0",
 			wantVerdict: VerdictManual,
 			wantReason:  ReasonRecorded,
 			wantMatched: "rename",
+		},
+		{
+			// The rename's `to` holds the drain's floor without listing it,
+			// so it describes no move that far and the route stops between.
+			name:        "manual plus an unlisted safe boundary inside its to stops between them",
+			set:         oneComponent(rename, drain),
+			from:        "0.16.0",
+			to:          "0.19.0",
+			wantVerdict: VerdictBlocked,
+			wantReason:  ReasonMultipleBoundaries,
 		},
 		{
 			// Crosses only the safe boundary.
@@ -839,8 +868,23 @@ func TestMatchVerdictSelection(t *testing.T) {
 		wantMatched   string
 	}{
 		{
+			// The block's `from` holds the source and passes only a safe
+			// floor, so the block describes the jump.
 			name:          "an authored block outranks a lower non-blocking boundary",
 			set:           oneComponent(safeLow, blockedHigh),
+			from:          "1.5.0",
+			to:            "3.0.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonRecorded,
+			wantStoppedAt: ">=3.0.0 <=3.0.0",
+			wantMatched:   "B",
+		},
+		{
+			name: "a block reached past a lower non-blocking boundary is a record block",
+			set: oneComponent(
+				safeLow,
+				trans(">=2.0.0 <3.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B"),
+			),
 			from:          "1.5.0",
 			to:            "3.0.0",
 			wantVerdict:   VerdictBlocked,
@@ -1145,7 +1189,7 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 			name: "record-blocks",
 			set: oneComponent(
 				trans("<2.0.0", ">=2.0.0 <2.1.0", VerdictSafe, "S"),
-				trans("<3.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B"),
+				trans(">=2.0.0 <3.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B"),
 			),
 			from: "1.5.0",
 			to:   "3.0.0",
@@ -1165,15 +1209,17 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 				"then re-run this check",
 		},
 		{
-			name: "record-blocks off the path with no hop before the block names its from",
+			name: "undefined-origin names a block the source's record passes without listing it",
 			set: oneComponent(
 				trans("<2.0.0", ">=2.0.0 <=3.0.0", VerdictSafe, "S"),
 				trans(">=1.8.0 <1.9.0", ">=1.9.0 <=1.9.0", VerdictBlocked, "B"),
 			),
 			from: "1.5.0",
 			to:   "2.5.0",
-			want: "blocked by the record covering 1.9.0: do not move from 1.5.0 into >=1.9.0 <=1.9.0 " +
-				"in one step. Upgrade to a version in >=1.8.0 <1.9.0 first, then re-run this check",
+			want: "crosses 2 recorded boundaries (1.9.0, 2.0.0), but the record covering 2.0.0 whose from " +
+				"holds 1.5.0 passes the boundary at 1.9.0 described for >=1.8.0 <1.9.0 without listing it " +
+				"in skips, so it describes no move that far. Author a record for this move, or list that " +
+				"boundary in skips if a cluster may pass it, then re-run this check",
 		},
 		{
 			name: "multiple-boundaries landing on an exclusive floor names the range",
@@ -1184,7 +1230,8 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 			from: "1.5.0",
 			to:   "3.0.0",
 			want: "crosses 2 recorded boundaries (2.0.0, 3.0.0); no single record describes the whole jump. " +
-				"Upgrade to a version in >2.0.0 <2.1.0 first, then re-run this check",
+				"Upgrade to a version in >2.0.0 <2.1.0 first, then re-run this check. The whole route " +
+				"takes 2 upgrades: to >2.0.0 <2.1.0 (safe), then to 3.0.0 (manual)",
 		},
 		{
 			name: "undefined-origin where the source's records lead past the target",
@@ -1245,7 +1292,8 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 			from: "1.5.0",
 			to:   "3.0.0",
 			want: "crosses 2 recorded boundaries (2.0.0, 3.0.0); no single record describes the whole jump. " +
-				"Upgrade to 2.0.0 first, then re-run this check",
+				"Upgrade to 2.0.0 first, then re-run this check. The whole route takes 2 upgrades: " +
+				"to >=2.0.0 <2.1.0 (manual), then to 3.0.0 (manual)",
 		},
 		{
 			name: "multiple-boundaries lands below a manual record the jump flies over",
@@ -1256,18 +1304,47 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 			from: "0.16.0",
 			to:   "0.19.0",
 			want: "crosses 2 recorded boundaries (0.18.0, 0.19.0); no single record describes the whole jump. " +
-				"Upgrade to 0.18.0 first, then re-run this check",
+				"Upgrade to 0.18.0 first, then re-run this check. The whole route takes 2 upgrades: " +
+				"to >=0.18.0 <0.19.0 (safe), then to 0.19.0 (manual)",
 		},
 		{
-			name: "multiple-boundaries names the from of a flown-over record no hop lands below",
+			name: "multiple-boundaries names a required stop",
+			set: oneComponent(
+				Transition{From: "<2.0.0", To: ">=2.0.0 <2.1.0", Verdict: VerdictSafe, RequiredStop: true, Summary: "S"},
+				trans(">=2.0.0 <3.0.0", ">=3.0.0 <=3.0.0", VerdictSafe, "T"),
+			),
+			from: "1.5.0",
+			to:   "3.0.0",
+			want: "crosses 2 recorded boundaries (2.0.0, 3.0.0); no single record describes the whole jump. " +
+				"Upgrade to 2.0.0 first, then re-run this check. The record covering 2.0.0 is a required " +
+				"stop: a version in >=2.0.0 <2.1.0 has to run before the component moves further. The " +
+				"whole route takes 2 upgrades: to >=2.0.0 <2.1.0 (safe), then to 3.0.0 (safe)",
+		},
+		{
+			name: "multiple-boundaries names the step limit",
+			set: Set{"c": &ComponentUpgrades{Component: "c", StepLimit: StepLimitMinor, Transitions: []Transition{
+				trans(">=1.4.0 <1.5.0", ">=1.5.0", VerdictSafe, "S"),
+				trans(">=1.5.0 <1.6.0", ">=1.6.0", VerdictSafe, "T"),
+			}}},
+			from: "1.4.2",
+			to:   "1.6.1",
+			want: "crosses 2 recorded boundaries (1.5.0, 1.6.0); no single record describes the whole jump. " +
+				"Upgrade to 1.5.0 first, then re-run this check. This component moves at most one minor " +
+				"version per upgrade. The whole route takes 2 upgrades: to >=1.5.0 <1.6.0 (safe), then " +
+				"to 1.6.1 (safe)",
+		},
+		{
+			name: "undefined-origin names a manual boundary a covering record passes without listing it",
 			set: oneComponent(
 				trans(">=1.0.0 <2.0.0", ">=4.0.0 <=4.0.0", VerdictManual, "C"),
 				trans(">=2.0.0 <3.0.0", ">=3.0.0 <3.1.0", VerdictManual, "B"),
 			),
 			from: "1.5.0",
 			to:   "4.0.0",
-			want: "crosses 2 recorded boundaries (3.0.0, 4.0.0); no single record describes the whole jump. " +
-				"Upgrade to a version in >=2.0.0 <3.0.0 first, then re-run this check",
+			want: "crosses 2 recorded boundaries (3.0.0, 4.0.0), but the record covering 4.0.0 whose from " +
+				"holds 1.5.0 passes the boundary at 3.0.0 described for >=2.0.0 <3.0.0 without listing it " +
+				"in skips, so it describes no move that far. Author a record for this move, or list that " +
+				"boundary in skips if a cluster may pass it, then re-run this check",
 		},
 		{
 			name: "undefined-origin",
@@ -1575,14 +1652,23 @@ func TestMatchFollowsTheSourcesPath(t *testing.T) {
 		},
 		{
 			// The jump passes through 2.x, which B forbids leaving for 3.0.0
-			// in one step.
+			// in one step, and A does not list B's floor.
 			name:          "a block on a shared floor the jump flies over blocks",
 			set:           oneComponent(sharedB(VerdictBlocked), sharedA(VerdictManual)),
 			from:          "1.5.0",
 			to:            "3.0.0",
 			wantVerdict:   VerdictBlocked,
-			wantReason:    ReasonRecordBlocks,
+			wantReason:    ReasonUndefinedOrigin,
 			wantStoppedAt: ">=3.0.0 <=3.0.0",
+		},
+		{
+			name:        "a record listing a block on its shared floor describes the jump",
+			set:         oneComponent(sharedB(VerdictBlocked), skipping(sharedA(VerdictManual), "3.0.0")),
+			from:        "1.5.0",
+			to:          "3.0.0",
+			wantVerdict: VerdictManual,
+			wantReason:  ReasonRecorded,
+			wantMatched: "A",
 		},
 		{
 			name:          "the other origin on a shared floor still gets its own record",
@@ -1600,8 +1686,17 @@ func TestMatchFollowsTheSourcesPath(t *testing.T) {
 			from:          "1.5.0",
 			to:            "4.0.0",
 			wantVerdict:   VerdictBlocked,
-			wantReason:    ReasonMultipleBoundaries,
-			wantStoppedAt: ">=2.0.0 <3.0.0",
+			wantReason:    ReasonUndefinedOrigin,
+			wantStoppedAt: ">=3.0.0 <3.1.0",
+		},
+		{
+			name:        "a record covering the whole jump that lists the manual one describes it",
+			set:         oneComponent(skipping(wide, "3.0.0"), between),
+			from:        "1.5.0",
+			to:          "4.0.0",
+			wantVerdict: VerdictManual,
+			wantReason:  ReasonRecorded,
+			wantMatched: "C",
 		},
 		{
 			name: "a blocked record on the path does not hide a second block it flies over",
@@ -1680,14 +1775,13 @@ func TestMatchFollowsTheSourcesPath(t *testing.T) {
 	}
 }
 
-// TestMatchMigrationWindow checks a migration that only versions in a window
-// can run. A rename's mirror exists only in 0.18.0 through 0.20.x, and 0.21.0
-// removes the legacy objects. A jump from below the window to past it never
-// runs the mirror, so it must stop in the window. Each case runs in both
-// declaration orders.
+// TestMatchMigrationWindow checks that a jump past 0.18.0 through 0.20.x, the
+// only versions that run a rename's mirror before 0.21.0 removes the legacy
+// objects, stops inside them. Each case runs in both declaration orders.
 func TestMatchMigrationWindow(t *testing.T) {
-	rename := trans("<0.18.0", ">=0.18.0 <=0.20.0", VerdictManual, "rename")
-	wideRename := trans("<0.18.0", ">=0.18.0 <=0.21.0", VerdictManual, "rename")
+	rename := skipping(trans("<0.18.0", ">=0.18.0 <=0.20.0", VerdictManual, "rename"), "0.20.0")
+	wideRename := skipping(trans("<0.18.0", ">=0.18.0 <=0.21.0", VerdictManual, "rename"), "0.20.0")
+	wideRenameSkipsRemoval := skipping(wideRename, "0.20.0", "0.21.0")
 	drain := trans(">=0.18.0 <0.20.0", "=0.20.0", VerdictSafe, "drain")
 	removal := func(v Verdict) Transition { return trans(">=0.18.0 <0.21.0", "=0.21.0", v, "removal") }
 	passThrough := trans("<0.18.0", "=0.21.0", VerdictBlocked, "pass-through")
@@ -1725,21 +1819,33 @@ func TestMatchMigrationWindow(t *testing.T) {
 			wantInExpl:    "Upgrade to 0.18.0 first",
 		},
 		{
+			// The removal's floor sits inside the rename's `to`, so the
+			// landing before it ends below that floor.
 			name:          "a rename ceiling past the window does not hide a manual removal",
 			trs:           []Transition{wideRename, drain, removal(VerdictManual)},
 			from:          "0.17.2",
 			to:            "0.21.0",
 			wantVerdict:   VerdictBlocked,
 			wantReason:    ReasonMultipleBoundaries,
-			wantStoppedAt: ">=0.18.0 <=0.21.0",
+			wantStoppedAt: ">=0.18.0 <0.21.0",
 			wantInExpl:    "Upgrade to 0.18.0 first",
 		},
 		{
-			// A ceiling is its author's claim that the steps hold that far,
-			// and a safe record carries no steps to skip, so nothing here says
-			// the mirror is needed.
-			name:        "a rename ceiling past the window with a safe removal vouches for the jump",
-			trs:         []Transition{wideRename, drain, removal(VerdictSafe)},
+			// A safe removal still needs listing when the rename's `to`
+			// holds its floor, so widening the ceiling vouches for nothing on
+			// its own.
+			name:          "a rename ceiling past the window with an unlisted safe removal stops at the window",
+			trs:           []Transition{wideRename, drain, removal(VerdictSafe)},
+			from:          "0.17.2",
+			to:            "0.21.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=0.18.0 <0.21.0",
+			wantInExpl:    "Upgrade to 0.18.0 first",
+		},
+		{
+			name:        "a rename that lists the safe removal vouches for the jump",
+			trs:         []Transition{wideRenameSkipsRemoval, drain, removal(VerdictSafe)},
 			from:        "0.17.2",
 			to:          "0.21.0",
 			wantVerdict: VerdictManual,
@@ -1747,24 +1853,25 @@ func TestMatchMigrationWindow(t *testing.T) {
 			wantMatched: "rename",
 		},
 		{
-			name:          "a pass-through block holds however far the rename's ceiling reaches",
-			trs:           []Transition{wideRename, drain, removal(VerdictSafe), passThrough},
-			from:          "0.17.2",
-			to:            "0.21.0",
-			wantVerdict:   VerdictBlocked,
-			wantReason:    ReasonRecordBlocks,
-			wantStoppedAt: "=0.21.0",
-			wantInExpl:    "Upgrade to 0.18.0 first",
-		},
-		{
-			name:          "a pass-through block names the window's last landing",
+			name:          "a pass-through block that does not list the window describes no move",
 			trs:           []Transition{rename, drain, removal(VerdictManual), passThrough},
 			from:          "0.17.2",
 			to:            "0.21.0",
 			wantVerdict:   VerdictBlocked,
-			wantReason:    ReasonRecordBlocks,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=0.18.0 <=0.20.0",
+			wantInExpl:    "Upgrade to 0.18.0 first",
+		},
+		{
+			name:          "a pass-through block that lists the window describes the jump it forbids",
+			trs:           []Transition{rename, drain, removal(VerdictManual), skipping(passThrough, "0.18.0", "0.20.0")},
+			from:          "0.17.2",
+			to:            "0.21.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonRecorded,
+			wantMatched:   "pass-through",
 			wantStoppedAt: "=0.21.0",
-			wantInExpl:    "Upgrade to 0.20.0 first",
+			wantInExpl:    "Follow the steps below",
 		},
 		{
 			name:          "a removal written for every source still stops the jump at the window",
@@ -1862,6 +1969,207 @@ func TestMatchMigrationWindow(t *testing.T) {
 				}
 				if !strings.Contains(r.Explanation, tt.wantInExpl) {
 					t.Errorf("explanation = %q, want it to contain %q", r.Explanation, tt.wantInExpl)
+				}
+			})
+		}
+	}
+}
+
+// TestMatchRoutes checks route planning over skips, required stops and the
+// minor step limit. Each case runs in both declaration orders.
+func TestMatchRoutes(t *testing.T) {
+	patch := trans(">=1.23.0 <1.23.2", "=1.23.2", VerdictManual, "patch")
+	minor := trans(">=1.23.0 <1.24.0", ">=1.24.0", VerdictManual, "minor")
+	minorSkipsPatch := skipping(minor, "1.23.2")
+	lower := skipping(trans(">=1.22.0 <1.23.0", ">=1.23.0", VerdictSafe, "lower"), "1.23.2")
+	major := trans(">=1.9.0 <1.10.0", ">=2.0.0", VerdictManual, "major")
+	stop := Transition{From: ">=1.0.0 <2.0.0", To: ">=2.0.0 <2.1.0", Verdict: VerdictSafe, RequiredStop: true, Summary: "stop"}
+	sharing := trans("<1.0.0", ">=2.0.0 <2.1.0", VerdictSafe, "sharing")
+	after := trans(">=2.0.0 <3.0.0", "=3.0.0", VerdictSafe, "after")
+	// A cluster that ran 1.2 must take the manual move to 1.3. One that never
+	// did may jump straight to 2.0.
+	enter := trans("<1.2.0", ">=1.2.0 <1.3.0", VerdictSafe, "enter")
+	leave := trans(">=1.2.0 <1.3.0", ">=1.3.0 <2.0.0", VerdictManual, "leave")
+	onward := trans(">=1.3.0 <2.0.0", "=2.0.0", VerdictSafe, "onward")
+	direct := skipping(trans("<1.2.0", "=2.0.0", VerdictSafe, "direct"), "1.3.0")
+
+	tests := []struct {
+		name          string
+		trs           []Transition
+		stepLimit     string
+		from, to      string
+		wantVerdict   Verdict
+		wantReason    Reason
+		wantMatched   string
+		wantStoppedAt string
+		wantRoute     []RouteStop
+	}{
+		{
+			name:        "a jump that never ran the window skips its manual exit",
+			trs:         []Transition{enter, leave, onward, direct},
+			from:        "1.0.0",
+			to:          "2.0.0",
+			wantVerdict: VerdictSafe,
+			wantReason:  ReasonRecorded,
+			wantMatched: "direct",
+		},
+		{
+			name:          "a jump from inside the window takes its manual exit first",
+			trs:           []Transition{enter, leave, onward, direct},
+			from:          "1.2.5",
+			to:            "2.0.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=1.3.0 <2.0.0",
+			wantRoute: []RouteStop{
+				{Versions: ">=1.3.0 <2.0.0", Verdict: VerdictManual},
+				{Versions: "2.0.0", Verdict: VerdictSafe},
+			},
+		},
+		{
+			name:        "a record that lists a patch boundary describes the jump past it",
+			trs:         []Transition{patch, minorSkipsPatch},
+			stepLimit:   StepLimitMinor,
+			from:        "1.23.0",
+			to:          "1.24.1",
+			wantVerdict: VerdictManual,
+			wantReason:  ReasonRecorded,
+			wantMatched: "minor",
+		},
+		{
+			name:          "an unlisted patch boundary makes the jump two upgrades",
+			trs:           []Transition{patch, minor},
+			stepLimit:     StepLimitMinor,
+			from:          "1.23.0",
+			to:            "1.24.1",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: "=1.23.2",
+			wantRoute: []RouteStop{
+				{Versions: "=1.23.2", Verdict: VerdictManual},
+				{Versions: "1.24.1", Verdict: VerdictManual},
+			},
+		},
+		{
+			name:        "the patch boundary alone carries its own steps",
+			trs:         []Transition{patch, minorSkipsPatch},
+			stepLimit:   StepLimitMinor,
+			from:        "1.23.0",
+			to:          "1.23.2",
+			wantVerdict: VerdictManual,
+			wantReason:  ReasonRecorded,
+			wantMatched: "patch",
+		},
+		{
+			name:          "a derived ceiling ends at the next minor",
+			trs:           []Transition{patch, minorSkipsPatch},
+			stepLimit:     StepLimitMinor,
+			from:          "1.23.2",
+			to:            "1.25.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonBeyondRecordCeiling,
+			wantStoppedAt: ">=1.24.0 <1.25.0",
+		},
+		{
+			name:          "a move reaches the next minor at most",
+			trs:           []Transition{lower, patch, minorSkipsPatch},
+			stepLimit:     StepLimitMinor,
+			from:          "1.22.4",
+			to:            "1.24.1",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=1.23.0 <1.24.0",
+			wantRoute: []RouteStop{
+				{Versions: ">=1.23.0 <1.24.0", Verdict: VerdictSafe},
+				{Versions: "1.24.1", Verdict: VerdictManual},
+			},
+		},
+		{
+			name:        "a major bump from the last minor follows its record",
+			trs:         []Transition{major},
+			stepLimit:   StepLimitMinor,
+			from:        "1.9.3",
+			to:          "2.0.1",
+			wantVerdict: VerdictManual,
+			wantReason:  ReasonRecorded,
+			wantMatched: "major",
+		},
+		{
+			name:          "a major bump from an earlier minor is undefined",
+			trs:           []Transition{major},
+			stepLimit:     StepLimitMinor,
+			from:          "1.8.0",
+			to:            "2.0.1",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonUndefinedOrigin,
+			wantStoppedAt: ">=2.0.0 <2.1.0",
+		},
+		{
+			name:          "a required stop holds its own sources",
+			trs:           []Transition{stop, sharing, after},
+			from:          "1.5.0",
+			to:            "3.0.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=2.0.0 <2.1.0",
+			wantRoute: []RouteStop{
+				{Versions: ">=2.0.0 <2.1.0", Verdict: VerdictSafe},
+				{Versions: "3.0.0", Verdict: VerdictSafe},
+			},
+		},
+		{
+			name: "a to with no ceiling that passes an unlisted floor is no partial route",
+			trs: []Transition{
+				trans("<0.18.0", ">=0.18.0", VerdictManual, "open"),
+				trans(">=0.18.0 <0.19.0", "=0.19.0", VerdictManual, "next"),
+			},
+			from:          "0.17.0",
+			to:            "0.19.5",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=0.18.0 <0.19.0",
+		},
+		{
+			name:        "a required stop does not hold another record's sources",
+			trs:         []Transition{stop, sharing, after},
+			from:        "0.5.0",
+			to:          "3.0.0",
+			wantVerdict: VerdictSafe,
+			wantReason:  ReasonRecorded,
+			wantMatched: "after",
+		},
+	}
+	for _, tt := range tests {
+		for _, order := range []string{"declared", "reversed"} {
+			t.Run(tt.name+"/"+order, func(t *testing.T) {
+				trs := slices.Clone(tt.trs)
+				if order == "reversed" {
+					slices.Reverse(trs)
+				}
+				set := Set{"c": &ComponentUpgrades{Component: "c", StepLimit: tt.stepLimit, Transitions: trs}}
+				got := Match(set, map[string]string{"c": tt.from}, map[string]string{"c": tt.to})
+				if len(got) != 1 {
+					t.Fatalf("Match() returned %d rows, want 1: %+v", len(got), got)
+				}
+				r := got[0]
+				if r.Verdict != tt.wantVerdict {
+					t.Errorf("verdict = %q, want %q", r.Verdict, tt.wantVerdict)
+				}
+				if r.Reason != tt.wantReason {
+					t.Errorf("reason = %q, want %q", r.Reason, tt.wantReason)
+				}
+				if r.StoppedAt != tt.wantStoppedAt {
+					t.Errorf("stoppedAt = %q, want %q", r.StoppedAt, tt.wantStoppedAt)
+				}
+				matched := ""
+				if r.Transition != nil {
+					matched = r.Transition.Summary
+				}
+				if matched != tt.wantMatched {
+					t.Errorf("matched record = %q, want %q", matched, tt.wantMatched)
+				}
+				if !slices.Equal(r.Route, tt.wantRoute) {
+					t.Errorf("route = %+v, want %+v", r.Route, tt.wantRoute)
 				}
 			})
 		}

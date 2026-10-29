@@ -41,6 +41,10 @@ type BundleNote struct {
 	Component  string
 	Pin        string
 	Transition *Transition
+
+	// To is Transition.To with any ceiling the component's step limit
+	// derives.
+	To string
 }
 
 // BundleNotes selects, in pin order, the manual and blocked transitions whose
@@ -66,11 +70,11 @@ func BundleNotes(set Set, pins []BundlePin) []BundleNote {
 			if tr.Verdict != VerdictManual && tr.Verdict != VerdictBlocked {
 				continue
 			}
-			b, err := parseBounds(tr.To)
+			b, err := toBounds(u, tr)
 			if err != nil || !b.contains(v) {
 				continue
 			}
-			notes = append(notes, BundleNote{Component: p.Component, Pin: p.Version, Transition: tr})
+			notes = append(notes, BundleNote{Component: p.Component, Pin: p.Version, Transition: tr, To: toText(u, tr)})
 		}
 	}
 	return notes
@@ -107,12 +111,17 @@ func WriteGuide(w io.Writer, notes []BundleNote, deployer string) error {
 func writeGuideSection(ew *errWriter, n BundleNote, deployer string) {
 	tr := n.Transition
 	steps := stepsFor(tr.StepsByDeployer, deployer)
+	// A note built by hand rather than by BundleNotes may leave To empty.
+	to := n.To
+	if to == "" {
+		to = tr.To
+	}
 
 	ew.println("")
 	ew.printf("## %s: %s\n", mdInline(n.Component), mdInline(string(tr.Verdict)))
 	ew.println("")
 	ew.printf("This bundle pins `%s`. Applies when upgrading from `%s` into `%s`.\n",
-		mdInline(n.Pin), mdInline(tr.From), mdInline(tr.To))
+		mdInline(n.Pin), mdInline(tr.From), mdInline(to))
 	if tr.Summary != "" {
 		ew.println("")
 		ew.println(mdInline(tr.Summary))
@@ -140,7 +149,7 @@ func writeGuideSection(ew *errWriter, n BundleNote, deployer string) {
 		// version just below the floor is still inside `from`, so naming it
 		// would be circular.
 		line := fmt.Sprintf("**Blocked:** do not upgrade from `%s` into `%s` in one step.",
-			mdInline(tr.From), mdInline(tr.To))
+			mdInline(tr.From), mdInline(to))
 		if len(steps) > 0 {
 			line += " Follow the steps below to get there safely."
 		}

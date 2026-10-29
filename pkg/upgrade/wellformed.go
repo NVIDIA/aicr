@@ -61,19 +61,79 @@ func validateRecord(name string, u *ComponentUpgrades, pin string) []string {
 		return []string{fmt.Sprintf("component %q has a nil record", name)}
 	}
 	v := make([]string, 0, len(u.Transitions))
+	limited := u.StepLimit == StepLimitMinor
+	if u.StepLimit != "" && !limited {
+		v = append(v, fmt.Sprintf("component %q has stepLimit %q; the only value is %q",
+			u.Component, u.StepLimit, StepLimitMinor))
+	}
 	for i := range u.Transitions {
 		where := fmt.Sprintf("component %q transition %d", u.Component, i)
 		v = append(v, checkVerdictFields(where, &u.Transitions[i])...)
 		v = append(v, checkStepGroups(where, &u.Transitions[i])...)
-		v = append(v, checkPinCeiling(where, &u.Transitions[i], pin)...)
+		v = append(v, checkPinCeiling(where, &u.Transitions[i], pin, limited)...)
 		v = append(v, checkDirectional(where, &u.Transitions[i])...)
 		v = append(v, checkHooks(where, &u.Transitions[i])...)
 		v = append(v, checkAffectedResources(where, &u.Transitions[i])...)
+		v = append(v, checkSkips(where, u, &u.Transitions[i])...)
+		if msg := stepViolation(u, &u.Transitions[i]); msg != "" {
+			v = append(v, where+" "+msg)
+		}
 	}
 	v = append(v, checkCoverage(u.Component, u.Transitions, pin)...)
-	v = append(v, checkDistinctBoundaries(u.Component, u.Transitions)...)
+	v = append(v, checkDistinctMoves(u)...)
 	v = append(v, checkReplaces(u.Component, u.Replaces)...)
 	return v
+}
+
+// checkSkips implements rule 11, an addition to ADR-021. It returns a
+// violation for each floor t's moves pass that t must list in Skips but does
+// not, for each Skips entry that is invalid or names no floor they pass, and
+// for each listed floor whose transition has a stricter verdict and a `from`
+// overlapping t's.
+func checkSkips(where string, u *ComponentUpgrades, t *Transition) []string {
+	var v []string
+	ps := passages(u, t)
+	from, ferr := parseBounds(t.From)
+	for _, p := range ps {
+		if ferr != nil || strictness(t.Verdict) < 0 || !lists(t, p.c.floor.ver) ||
+			strictness(p.c.tr.Verdict) <= strictness(t.Verdict) {
+
+			continue
+		}
+		if sfrom, err := parseBounds(p.c.tr.From); err == nil && intervalsIntersect(sfrom, from) {
+			v = append(v, fmt.Sprintf(
+				"%s is %s but skips the %s boundary at %s (transition %d) for sources in that transition's from, "+
+					"so narrow from to leave them out",
+				where, t.Verdict, p.c.tr.Verdict, p.c.floor.ver, p.index))
+		}
+	}
+	for _, s := range t.Skips {
+		sv, err := parseRangeVersion(s, s)
+		if err != nil {
+			v = append(v, where+" skips an invalid version: "+err.Error())
+			continue
+		}
+		if !slices.ContainsFunc(ps, func(p passage) bool { return p.c.floor.ver.Equal(sv) }) {
+			v = append(v, fmt.Sprintf("%s skips %s, which is not the floor of a boundary its moves pass", where, s))
+		}
+	}
+	for _, p := range ps {
+		if !p.unlistedBy(t) {
+			continue
+		}
+		v = append(v, fmt.Sprintf(
+			"%s passes the boundary at %s (transition %d) in one step without listing it in skips; "+
+				"list it if a cluster taking this transition may skip that boundary's guidance, "+
+				"or narrow from or to so the moves do not pass it",
+			where, p.c.floor.ver, p.index))
+	}
+	return v
+}
+
+// strictness returns v's position in safe, manual, blocked order, or -1 for a
+// verdict that cannot be authored.
+func strictness(v Verdict) int {
+	return slices.Index([]Verdict{VerdictSafe, VerdictManual, VerdictBlocked}, v)
 }
 
 // checkReplaces applies rules 4, 5 and 6 to a replaces block. Rules 2, 3 and 7
@@ -274,7 +334,9 @@ func checkStepGroups(where string, t *Transition) []string {
 // check time and does not make it an authoring error; failing closed here means
 // a record cannot make version claims nobody can verify. Relaxing this later is
 // the cheap direction if it proves wrong.
-func checkPinCeiling(where string, t *Transition, pin string) []string {
+//
+// When limited, a manual or blocked `to` may omit its ceiling.
+func checkPinCeiling(where string, t *Transition, pin string, limited bool) []string {
 	b, err := parseBounds(t.To)
 	if err != nil {
 		// Not "already reported by the loader": Validate is exported on an
@@ -283,7 +345,7 @@ func checkPinCeiling(where string, t *Transition, pin string) []string {
 		return []string{where + " has an unparseable to range: " + err.Error()}
 	}
 	var v []string
-	if b.upper.unbounded {
+	if b.upper.unbounded && (!limited || t.Verdict == VerdictSafe) {
 		v = append(v, where+" has a to range with no upper bound; a record must name the ceiling of the block it describes")
 	}
 	if b.lower.unbounded {
@@ -500,45 +562,32 @@ type boundaryKey struct {
 	inclusive bool
 }
 
-// boundaryClaim is the transition that first claimed a boundary, kept with its
-// `from` domain so a later claim on the same floor can be tested for overlap.
-type boundaryClaim struct {
-	idx  int
-	from bounds
-}
-
-// checkDistinctBoundaries implements rule 8, an addition to ADR-021. It
-// returns a violation for each transition in trs whose `to` floor matches an
-// earlier one's and whose `from` domain intersects it. Disjoint `from` domains
-// sharing a floor, and overlapping domains on different floors, are legal.
-// Unparseable ranges are skipped.
-func checkDistinctBoundaries(component string, trs []Transition) []string {
-	seen := make(map[boundaryKey][]boundaryClaim, len(trs))
-	var v []string
-	for i := range trs {
-		b, err := parseBounds(trs[i].To)
-		if err != nil || b.lower.unbounded {
+// checkDistinctMoves implements rule 8, an addition to ADR-021. It returns a
+// violation for each pair of u's transitions whose `from` ranges overlap and
+// whose `to` ranges overlap, skipping ranges that do not parse.
+func checkDistinctMoves(u *ComponentUpgrades) []string {
+	type span struct{ from, to bounds }
+	spans := make([]*span, len(u.Transitions))
+	for i := range u.Transitions {
+		from, ferr := parseBounds(u.Transitions[i].From)
+		to, terr := toBounds(u, &u.Transitions[i])
+		if ferr != nil || terr != nil {
 			continue // reported elsewhere
 		}
-		from, ferr := parseBounds(trs[i].From)
-		if ferr != nil {
-			continue // reported by checkDirectional
-		}
-		key := boundaryKey{ver: b.lower.ver.String(), inclusive: b.lower.inclusive}
-		dup, found := -1, false
-		for _, c := range seen[key] {
-			if intervalsIntersect(c.from, from) {
-				dup, found = c.idx, true
-				break
+		spans[i] = &span{from: from, to: to}
+	}
+	var v []string
+	for i, a := range spans {
+		for j := i + 1; j < len(spans); j++ {
+			b := spans[j]
+			if a == nil || b == nil || !intervalsIntersect(a.from, b.from) || !intervalsIntersect(a.to, b.to) {
+				continue
 			}
-		}
-		if found {
 			v = append(v, fmt.Sprintf(
-				"component %q transitions %d and %d describe the same boundary (to starts at %s) for overlapping from ranges; a jump crossing it would resolve to blocked rather than the authored verdict",
-				component, dup, i, key.ver))
-			continue
+				"component %q transitions %d and %d describe the same move: their from ranges overlap and "+
+					"so do their to ranges, so a jump between the two overlaps would have two verdicts",
+				u.Component, i, j))
 		}
-		seen[key] = append(seen[key], boundaryClaim{idx: i, from: from})
 	}
 	return v
 }

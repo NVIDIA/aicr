@@ -13,10 +13,12 @@
 # limitations under the License.
 
 # Both transitions start from 1.23.0 because AICR has shipped no earlier
-# Percona release.
+# Percona release. stepLimit is Percona's rule that the operator moves to the
+# nearest major.minor at most, with patch versions not counting.
 apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades
 component: psmdb-operator
+stepLimit: minor
 transitions:
   # A patch boundary that still changes the CRDs. Manual rather than safe
   # because helmfile, terraform and fleet never apply a changed crds/
@@ -158,13 +160,14 @@ transitions:
       - https://github.com/percona/k8spsmdb-docs/blob/main/docs/update-operator.md
       - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#graded-remediation
   # Written at chart pin 1.23.1 (operator 1.23.0), describing the next minor
-  # above it. The <1.25.0 ceiling is Percona's one-minor-at-a-time rule: a jump
-  # over two minors lands beyond it and is reported blocked. 1.24 is unreleased;
-  # the steps are transcribed from Percona's upgrade docs, which remain the
-  # authoritative account, and are re-read against the 1.24 release notes
-  # before the bump.
+  # above it. stepLimit ends its to at 1.25.0, so a jump over two minors is
+  # reported blocked. It lists the 1.23.2 patch boundary because Percona
+  # upgrades past patch versions in one step. 1.24 is unreleased. The steps are
+  # transcribed from Percona's upgrade docs, which remain the authoritative
+  # account, and are re-read against the 1.24 release notes before the bump.
   - from: ">=1.23.0 <1.24.0"
-    to: ">=1.24.0 <1.25.0"
+    to: ">=1.24.0"
+    skips: ["1.23.2"]
     verdict: manual
     summary: >-
       Percona moves the operator one minor at a time, CRDs before the operator.

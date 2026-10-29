@@ -47,11 +47,25 @@ func (v Verdict) Authorable() bool {
 	}
 }
 
+// StepLimitMinor is the one StepLimit value.
+const StepLimitMinor = "minor"
+
 // ComponentUpgrades is one component's transition records.
 type ComponentUpgrades struct {
-	APIVersion  string       `yaml:"apiVersion"`
-	Kind        string       `yaml:"kind"`
-	Component   string       `yaml:"component"`
+	APIVersion string `yaml:"apiVersion"`
+	Kind       string `yaml:"kind"`
+	Component  string `yaml:"component"`
+
+	// StepLimit, when StepLimitMinor, limits each move to the next
+	// major.minor, ignoring patch versions. Empty means no limit. Under the
+	// limit:
+	//
+	//   - a move into a new major needs a record whose `to` is in that major's
+	//     first minor and whose `from` names the old major's last minor
+	//   - a manual or blocked `to` may omit its ceiling, which is then the end
+	//     of its floor's minor
+	StepLimit string `yaml:"stepLimit,omitempty"`
+
 	Transitions []Transition `yaml:"transitions,omitempty"`
 	Replaces    *Replaces    `yaml:"replaces,omitempty"`
 }
@@ -70,7 +84,7 @@ func (u *ComponentUpgrades) Covers(version string) bool {
 		return false
 	}
 	for i := range u.Transitions {
-		b, err := parseBounds(u.Transitions[i].To)
+		b, err := toBounds(u, &u.Transitions[i])
 		if err == nil && b.contains(v) {
 			return true
 		}
@@ -104,12 +118,34 @@ func (u *ComponentUpgrades) AheadOf(version string) bool {
 	return true
 }
 
-// Transition describes one version boundary and what crossing it requires.
+// Transition describes one version boundary, as the one-step moves from any
+// version in From to any in To, and what crossing it requires.
 type Transition struct {
-	From              string             `yaml:"from"`
-	To                string             `yaml:"to"`
-	Verdict           Verdict            `yaml:"verdict"`
-	VerifiedBy        string             `yaml:"verifiedBy,omitempty"`
+	From       string  `yaml:"from"`
+	To         string  `yaml:"to"`
+	Verdict    Verdict `yaml:"verdict"`
+	VerifiedBy string  `yaml:"verifiedBy,omitempty"`
+
+	// Skips lists other transitions' floors whose guidance a cluster taking
+	// this transition may skip. It must list each floor this one's moves pass
+	// that is:
+	//
+	//   - inside To, above this transition's own floor
+	//   - a manual or blocked transition's, whose From admits a version the
+	//     move goes by
+	//   - a RequiredStop's, whose From overlaps this one's
+	//
+	// A blocked transition sharing this one's floor counts unless this one is
+	// blocked too. A move passing a floor it must list but does not is not
+	// described by this transition.
+	Skips []string `yaml:"skips,omitempty"`
+
+	// RequiredStop reports whether a cluster taking this transition must stop
+	// inside To and re-run the check, as for an automatic migration. It has
+	// effect only on a safe transition, since a manual or blocked one already
+	// stops a route.
+	RequiredStop bool `yaml:"requiredStop,omitempty"`
+
 	Summary           string             `yaml:"summary"`
 	Precondition      string             `yaml:"precondition,omitempty"`
 	Reversible        *bool              `yaml:"reversible,omitempty"`

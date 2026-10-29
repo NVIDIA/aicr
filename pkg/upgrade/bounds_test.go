@@ -115,8 +115,7 @@ func TestParseBoundsRejected(t *testing.T) {
 }
 
 // TestParseBoundsErrorMessagesNameConstraint checks that every parseBounds
-// error names the full constraint, which callers surface without the record
-// around it.
+// error names the full constraint.
 func TestParseBoundsErrorMessagesNameConstraint(t *testing.T) {
 	tests := []struct {
 		name       string

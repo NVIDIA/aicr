@@ -350,7 +350,7 @@ func TestLoadAllowsNilSourceWhenNothingReferencesAFile(t *testing.T) {
 }
 
 // TestLoadAndValidateAcceptAWellFormedRecord checks that one realistic record,
-// replaces included, decodes and satisfies all ten rules at once. Each clause
+// replaces included, decodes and satisfies all eleven rules at once. Each clause
 // is load bearing. Rule 3 needs the two from domains to meet and reach the
 // pin, rule 7 needs each from to stop at its own to floor, rule 8 needs the
 // two floors to differ, and rule 6 needs the explicit group plus the remainder

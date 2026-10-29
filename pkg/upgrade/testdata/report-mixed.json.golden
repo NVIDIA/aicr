@@ -88,11 +88,21 @@
       "verdict": "blocked",
       "notes": "2 majors, stops at \u003e=2.0.0 \u003c3.0.0",
       "reason": "multiple-boundaries",
-      "explanation": "crosses 2 recorded boundaries (2.0.0, 3.0.0); no single record describes the whole jump. Upgrade to 2.0.0 first, then re-run this check",
+      "explanation": "crosses 2 recorded boundaries (2.0.0, 3.0.0); no single record describes the whole jump. Upgrade to 2.0.0 first, then re-run this check. The whole route takes 2 upgrades: to \u003e=2.0.0 \u003c3.0.0 (manual), then to 3.0.0 (manual)",
       "jump": "2 majors",
       "breaking": true,
       "downgrade": false,
       "stoppedAt": "\u003e=2.0.0 \u003c3.0.0",
+      "route": [
+        {
+          "versions": "\u003e=2.0.0 \u003c3.0.0",
+          "verdict": "manual"
+        },
+        {
+          "versions": "3.0.0",
+          "verdict": "manual"
+        }
+      ],
       "failsRun": true
     },
     {

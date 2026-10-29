@@ -35,7 +35,8 @@ beta-operator 0.17.2 -> 0.18.1  (manual)
 
 gamma-operator 1.0.0 -> 3.0.0  (blocked)
   crosses 2 recorded boundaries (2.0.0, 3.0.0); no single record describes the
-  whole jump. Upgrade to 2.0.0 first, then re-run this check
+  whole jump. Upgrade to 2.0.0 first, then re-run this check. The whole route
+  takes 2 upgrades: to >=2.0.0 <3.0.0 (manual), then to 3.0.0 (manual)
 
 kappa-operator 3.2.0 -> 4.0.0  (blocked)
   4.0.0 drops in-place conversion; the store has to be exported and reloaded.

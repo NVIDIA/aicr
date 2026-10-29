@@ -34,9 +34,9 @@
 // rather than returning the first, so an author sees all of a record's problems
 // in one run. The lint gate calls both.
 //
-// # The ten rules
+// # The eleven rules
 //
-// Rule 1 is Load's. Rules 2 through 10 are Validate's, one function each in
+// Rule 1 is Load's. Rules 2 through 11 are Validate's, one function each in
 // wellformed.go.
 //
 //	1  apiVersion and kind are recognized                        decodeRecord
@@ -46,9 +46,18 @@
 //	5  manual and blocked carry steps in every group             checkVerdictFields
 //	6  deployer groups partition the deployers                   checkStepGroups
 //	7  from is forward-only against to                           checkDirectional
-//	8  no two transitions share a to floor for the same from     checkDistinctBoundaries
+//	8  no two transitions describe the same move                 checkDistinctMoves
 //	9  hooks name a phase and a local manifests/migrations file  checkHooks
 //	10 affectedResources name no core Secret                     checkAffectedResources
+//	11 skips lists every floor it must, and only floors passed   checkSkips
+//
+// Rule 11 also rejects a skips entry naming the floor of a transition with a
+// stricter verdict, in safe, manual, blocked order, whose from overlaps the
+// skipping transition's.
+//
+// Under stepLimit minor, rule 2 lets a manual or blocked to omit its ceiling.
+// Validate also rejects any other stepLimit value, and any transition whose
+// moves break the limit (stepViolation).
 //
 // # Matching
 //
@@ -80,54 +89,36 @@
 // floor its `to` names and the target reaches it. ComponentResult.Crossed lists
 // every crossed record for the at-risk scan.
 //
-// The verdict follows the source's path. From the source, the matcher takes
-// the lowest-floor crossed record whose `from` covers where it stands and lands
-// on that record's `to` floor. It repeats until a `to` holds the target or no
-// crossed record covers where it stands. A record is on the path when its
-// `from` covers a version the walk stood at. Records off the path describe a
-// move this operator does not make and do not decide the verdict, unless they
-// are in the way and ask something. A record is in the way when its `from`
-// admits a version the jump passes before reaching its floor. A blocked record
-// in the way blocks. Any other non-safe record in the way, off the path, on a
-// floor no record on the path shares, and not ahead of where the walk stopped,
-// is a skipped boundary. A manual record on a path record's floor describes
-// that boundary for other sources. Records that share a floor are ordered by
-// where their `from` starts, lowest first, so declaration order decides
-// nothing.
+// The verdict comes from a route of crossed records from the source toward the
+// target, each starting where the one before lands. A record takes part only
+// if it keeps to the step limit and its move passes no floor it must list in
+// Skips but does not. The best route has the fewest hops, then the fewest
+// manual or blocked ones. Consecutive safe hops join into one upgrade unless
+// the earlier is a RequiredStop, the step limit ends it, or the joined move
+// passes a floor no hop in it lists. Records that share a floor are ordered by
+// where their `from` starts, so declaration order decides nothing.
 //
 // Verdict selection runs in this order:
 //
-//	1  nothing crossed                                    unknown, or blocked at the highest to ceiling
-//	                                                      when the target is past it
-//	2  nothing crossed was written for the source         blocked, stop at the lowest
-//	3  one record on the path, its to holds the target,   that record's verdict
-//	   and nothing else in the way asks something
-//	4  a blocked record in the way                        blocked, stop at its to
-//	5  the path stops short, all safe or one hop asking,  blocked, stop at the next record's to,
-//	   and no boundary skipped                            or the last hop's to when none lies ahead
-//	6  two or more records on the path, one asks, or a    blocked, stop where the hop before lands,
-//	   boundary skipped                                   or at its from when no hop lands before it
+//	1  nothing crossed                        unknown, or blocked at the highest to ceiling
+//	                                          when the target is past it
+//	2  no record describes a move from the    blocked, stop at the lowest crossed to
+//	   source
+//	3  one upgrade reaches the target         that record's verdict
+//	4  one upgrade stops short of the target  blocked, stop at its to, or at the next crossed
+//	                                          record's to when one lies past it
+//	5  a blocked upgrade on the route         blocked, stop at its to
+//	6  two or more upgrades                   blocked, stop where the first lands
 //
-// Under rule 3 a record sharing the path record's floor counts only when it is
-// blocked and the path record is not. Rule 3 attaches a Transition even when
-// blocked, because that record's steps describe this exact move. Safe records
-// carry no steps, so a path that is all safe, reaches the target and skips no
-// boundary takes its last hop's verdict. Ahead of rules 5 and 6, a record on
-// the path that covers the source and holds the target takes its own verdict
-// when every other record on the path is safe and no boundary is skipped. Every
-// other result leaves Transition nil, so no renderer prints steps for a move
-// their record does not describe.
+// Only rule 3 attaches a Transition, so no renderer prints steps for a move
+// their record does not describe. Rules 5 and 6 set Route when the route
+// reaches the target. Rule 4 reports beyond-record-ceiling when the route's
+// records never assessed the target, and undefined-origin when no record
+// starts where they land.
 //
-// Rule 4 yields to rule 5 when the blocked record is the path's only hop and no
-// crossed record lies past where it lands. Rule 5 reports beyond-record-ceiling
-// when the path's records never assessed the target, and undefined-origin when
-// no record starts where they land.
-//
-// Where ComponentResult.StoppedAt is the interval not to enter in one step, the
-// Explanation names a landing short of it, or asks for a record when nothing
-// recorded leads there. When the blocked record covers the source and is the
-// path's first hop, it instead says to check the move to that record's floor on
-// its own, including where rule 4 yields to rule 5.
+// A blocked Explanation names where to upgrade first, or asks for a record when
+// nothing recorded leads there. When the blocked record is the first upgrade,
+// it instead says to check the move to that record's floor on its own.
 //
 // Matching takes an already validated Set and does not re-run Validate.
 // Validate is therefore not optional: a record that violates a well-formedness

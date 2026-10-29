@@ -255,11 +255,14 @@ type ReportComponent struct {
 	Breaking  bool `json:"breaking" yaml:"breaking"`
 	Downgrade bool `json:"downgrade" yaml:"downgrade"`
 
-	// StoppedAt is the row's ComponentResult.StoppedAt. A blocked row carries
-	// a Summary, Precondition and Steps only when one record describes the
-	// whole jump.
+	// StoppedAt is the row's ComponentResult.StoppedAt.
 	StoppedAt string `json:"stoppedAt,omitempty" yaml:"stoppedAt,omitempty"`
 
+	// Route is the row's ComponentResult.Route.
+	Route []ReportRouteStop `json:"route,omitempty" yaml:"route,omitempty"`
+
+	// Summary and Precondition are set on a blocked row only when one record
+	// describes the whole jump.
 	Summary      string `json:"summary,omitempty" yaml:"summary,omitempty"`
 	Precondition string `json:"precondition,omitempty" yaml:"precondition,omitempty"`
 
@@ -283,6 +286,12 @@ type ReportIdentityChange struct {
 	Field string `json:"field" yaml:"field"`
 	From  string `json:"from" yaml:"from"`
 	To    string `json:"to" yaml:"to"`
+}
+
+// ReportRouteStop is one upgrade of a route, restated with JSON names.
+type ReportRouteStop struct {
+	Versions string  `json:"versions" yaml:"versions"`
+	Verdict  Verdict `json:"verdict" yaml:"verdict"`
 }
 
 // ReportStep is one operator action, restated with JSON names.
@@ -401,6 +410,7 @@ func reportComponent(r ComponentResult, deployer string, unproven []ReportUnprov
 		Breaking:        r.Breaking,
 		Downgrade:       r.Downgrade,
 		StoppedAt:       r.StoppedAt,
+		Route:           reportRoute(r.Route),
 		Reason:          r.Reason,
 		Explanation:     r.Explanation,
 		FailsRun:        r.FailsRun(),
@@ -489,6 +499,17 @@ func reportIdentityChanges(changes []IdentityChange) []ReportIdentityChange {
 	out := make([]ReportIdentityChange, len(changes))
 	for i, c := range changes {
 		out[i] = ReportIdentityChange{Field: c.Field, From: c.From, To: c.To}
+	}
+	return out
+}
+
+func reportRoute(route []RouteStop) []ReportRouteStop {
+	if len(route) == 0 {
+		return nil
+	}
+	out := make([]ReportRouteStop, len(route))
+	for i, s := range route {
+		out[i] = ReportRouteStop(s)
 	}
 	return out
 }
