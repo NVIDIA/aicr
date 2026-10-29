@@ -235,9 +235,10 @@ bundle-time `--dynamic` value.
 **Option C.** Extend `gpuStack` with a reserved `fabric` marker. It is the
 cheapest path that satisfies the goals and keeps every ADR-015 invariant
 intact but one, the declaration-uniqueness rule, which gains the narrow
-shadowing case described under "OKE declaration scope". The known costs are accepted and made explicit rather than implied
-by value names: the tuple is written as `fabric:` on each value, not
-inferred from a `-roce` suffix.
+shadowing case described under "OKE declaration scope". The known costs
+are accepted and made explicit rather than implied by value names: the
+tuple is written as `fabric:` on each value, not inferred from a `-roce`
+suffix.
 
 Option A remains the right answer if a fourth axis arrives, or if more than
 a handful of overlays end up with both a driver choice and a fabric choice.
@@ -443,6 +444,12 @@ they are explicit no-fabric leaves until a VR200 NET check exists.
 | `nic-cluster-policy-oke-gb200.yaml` | `network-operator` | `ib` |
 | `nic-cluster-policy-oke-l40s.yaml` | `network-operator` | `roce` |
 | `nicclusterpolicy.yaml` | `network-operator-ocp` | `ib` |
+
+Every row above is ungated: each manifest renders whenever its component
+is in the composition. A row for a gated manifest records the gate path
+and the value that selects it (for example `aicr.fabric = roce` on
+`network-operator`), and derivation consults that value as described
+above. No gated row exists until the first family conversion adds one.
 
 The manifest table lives in `pkg/recipe` beside `FabricOf`. Each row also
 carries the manifest's content digest. Rows are permanent:
@@ -697,20 +704,40 @@ drop from `aicr.run/v1beta2` to `aicr.run/v1`, and lose `selectedProfile`,
 which breaks the headline invariant for two shipped coordinates.
 
 Instead this ADR amends the ADR-015 uniqueness rule with one narrow case,
-**declaration shadowing**: when a composition carries declarations from
-more than one overlay, the declaration from the most specific overlay in
-the existing merge order replaces the inherited one whole. Values are not
-merged across declarations, `default` is not inherited, and the result is
-still exactly one declaration, so the resolution algorithm, the lock
-template, and the evidence segment are unchanged. Two declarations at the
-same depth remain an error, and external catalogs still extend rather
-than redeclare. The shadowing declaration must satisfy the same totality,
+**declaration shadowing**, defined by ancestry rather than by position.
+The resolver collects declarations from every criteria-matched chain, not
+one (`resolveProfileDeclaration` in `pkg/recipe/profile_resolution.go`),
+and a composition routinely includes co-matched chains unrelated to the
+leaf, so there is no single merge order or depth to compare across chains.
+The rule is therefore: a declaration shadows another only when the
+shadowed overlay is an ancestor of the shadowing one, in every matched
+chain that contains the shadowed overlay. The shadowing declaration
+replaces the inherited one whole: values are not merged across
+declarations, `default` is not inherited, and the result is still exactly
+one declaration, so the resolution algorithm, the lock template, and the
+evidence segment are unchanged. Any other pair of declarations, from
+sibling or unrelated chains at whatever depth, remains the error it is
+today, and external catalogs still extend rather than redeclare. The
+shadowing declaration must satisfy the same totality,
 distinguishing-constraint, and qualification rules as any other.
+
+Snapshot filtering keeps the fail-closed behavior ADR-015 already has.
+`ensureProfileDeclarationSurvived` compares the declaring source before
+and after filtering, so if filtering drops the shadowing leaf and the
+inherited declaration becomes effective, the source differs and
+generation fails with the existing "declaration removed by filtering"
+diagnostic. A recipe can never fall back to a shadowed parent and quietly
+lose its marker; the implementation keeps the shadowing overlay as the
+recorded source so that comparison stays meaningful.
 
 When the first OKE GB300 RoCE target is qualified, the new GB300 leaf
 declares its own `gpuStack` with the same driver-mode values as
 `oke-ol.yaml` plus the markers and `*-roce`, shadowing the inherited one.
-`oke-ol.yaml` is not edited. Every other OKE composition, the A100, GB200,
+`oke-ol.yaml` is not edited. Because the leaf repeats the parent's values,
+a test asserts that each shadowing value equals the parent's value of the
+same name apart from the marker and the `network-operator` gate override,
+so a later change to `oke-ol.yaml` cannot drift away from the leaf
+unnoticed. Every other OKE composition, the A100, GB200,
 L40S leaves and the accelerator-less coordinates alike, keeps resolving
 from the `oke-ol.yaml` declaration byte-identically, digest included. No
 OKE evidence pointer is committed today, so nothing is re-signed. The
