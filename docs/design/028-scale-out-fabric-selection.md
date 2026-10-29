@@ -598,8 +598,12 @@ its own change, reviewed against the costs listed above.
    lands first and alone, so the compatibility invariant is proven before
    any schema change.
 2. Catalog schema: the `fabric` marker and its load-time validation. Wire
-   model: `selectedProfile.fabric` on `/v2`, OpenAPI update, api-diff and
-   openapi-diff gates.
+   model: extend `ProfileValue`, `SelectedProfile`, `applyEffectiveProfile`
+   (`pkg/recipe`), and `RecipeResult.schema.json` so `selectedProfile.fabric`
+   survives resolution, the digest, and `/v2` serialization. A
+   fabric-marked profile round-trip and digest test covers that path, since
+   the step 1 golden test exercises only unmarked leaves. OpenAPI update,
+   api-diff and openapi-diff gates.
 3. Measurement: promote `linkType` to a scalar with the pseudo-version
    bump; add the EFA and mrdma readings; fail-closed tests. A prerequisite
    for step 5, since an absent reading fails generation.
