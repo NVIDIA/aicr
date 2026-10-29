@@ -118,9 +118,11 @@ Service, so scrape the pod or port-forward
 7. **Steps run one at a time** in dependency order, each with one write to
    Argo CD, and each must be ready at its current revision within
    `spec.rollout.actionTimeout` (default 30 minutes). Removals run last, in
-   reverse order.
+   reverse order. A `manual` release with recorded steps after the apply stops
+   the rollout in `AwaitingAcknowledgement` until those steps are done and an
+   approver runs `kubectl aicr acknowledge`.
 8. **Deployment validation** runs once when `spec.validation.deployment` is
-   `Required`.
+   `Required`, against a new snapshot taken after every step is ready.
 9. **The rollout succeeds** and its target becomes the active plan. The whole
    rollout must finish within `spec.rollout.deadline` (default 6 hours) of its
    creation.
@@ -162,10 +164,15 @@ kubectl aicr approve rollout-3f9a1c0d2b7e4a51-1 --expires 2h --reason "Maintenan
 
 `describe` shows the transition, every step with its operation, AICR verdict
 and CRD change, and AICR's assessment report. An approval binds the rollout's
-target plan, starting inventory, steps and deadline, records the approver's
-username as the API server reports it, and can be neither changed nor
-extended. If the inventory changes after approval, the rollout stalls with
-`InventoryDrift` instead of acting on a state nobody approved.
+target plan, starting inventory (each Application's identity, plan and a
+fingerprint of its source, values and destination), steps and deadline,
+records the approver's username as the API server reports it, and can be
+neither changed nor extended. If the inventory changes after approval,
+including a hand edit of an Application's source, values or destination, the
+rollout stalls with `InventoryDrift` instead of acting on a state nobody
+approved. An edit of the release whose step is in flight instead stays
+`SpecDrifted` until it is undone or the step's action timeout fails the
+rollout ([troubleshooting](troubleshooting.md#rollout-stalled)).
 
 When an approval expires, the step in flight finishes and the rollout ends
 `Expired`. The rollout's own deadline still applies while it waits: a rollout
@@ -205,7 +212,7 @@ plan; nothing rolls back automatically.
 | Purpose | Hold the operator's changes, for example during a maintenance freeze | Stop Argo CD itself from changing the stack, during an incident |
 | New rollouts and steps | None start | None start |
 | A step in flight | Not abandoned; Argo CD finishes its sync | Not abandoned; Argo CD finishes an operation it started |
-| Argo CD automated sync and drift repair | Continue; the operator also keeps repairing hand edits of active Applications | Stopped: the operator sets `syncPolicy.automated.enabled: false` on every owned Application |
+| Argo CD automated sync and drift repair | Continue. With no rollout held, the operator also forces hand edits of active Applications back; with one held, an edit of a release's source, values or destination stalls it with `InventoryDrift` when it resumes | Stopped: the operator sets `syncPolicy.automated.enabled: false` on every owned Application |
 | Approval | Kept; the rollout resumes under it | Kept |
 | Runtime | `Ready=False` with `Paused` while a rollout is held or due; a runtime with nothing to do stays `Ready` | `Ready=False` with `EngineSuspended`, `Available=False`, the message naming the first release that drifted or is not healthy; `EngineSuspended` and `EngineResumed` Events |
 

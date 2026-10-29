@@ -581,6 +581,62 @@ func TestBuildLaneBundle(t *testing.T) {
 	rebuildFromApplications(t, built)
 }
 
+// Deployment validation runs against the recipe the bundle was rendered
+// from, which AICR filters by the render flags, not the recipe Job's
+// output: the lane bundles leave out dra-node-labeler, which the recipe
+// still names, so validation must not require it. The render recipe stays
+// the plan's recipe for upgrade-check and reproduce.
+func TestBuildRecordsTheBundleRecipeForValidation(t *testing.T) {
+	t.Parallel()
+	for _, version := range []string{"v1.0.0", "v1.1.2"} {
+		t.Run(version, func(t *testing.T) {
+			t.Parallel()
+			in := buildInput(t)
+			in.DeclaredVersion = version
+			in.Bundle = readBundle(t, filepath.Join("..", "aicrjob", "testdata", version, "bundle-h100-eks-ubuntu-training-kubeflow"))
+			render := in.Recipe.ConfigMapRef
+			built, err := Build(context.Background(), &fakeDelivery{archive: chartArchive(t, map[string]string{"c/Chart.yaml": "name: c"})}, in)
+			if err != nil {
+				t.Fatalf("Build() = %v", err)
+			}
+			got := built.Plan.Recipe
+			if built.ValidationRecipe == nil || got == nil || got.ConfigMapRef != render || in.Recipe.ValidationConfigMapRef != nil ||
+				got.ValidationConfigMapRef == nil || *got.ValidationConfigMapRef != built.ValidationRecipe.Ref() {
+
+				t.Fatalf("plan recipe = %+v, validation content = %+v", got, built.ValidationRecipe)
+			}
+			if got.Validation() != built.ValidationRecipe.Ref() {
+				t.Fatalf("Validation() = %+v, want the bundle recipe", got.Validation())
+			}
+			var recipe struct {
+				ComponentRefs []struct {
+					Name string `json:"name"`
+				} `json:"componentRefs"`
+			}
+			if err = json.Unmarshal(built.ValidationRecipe.Data, &recipe); err != nil {
+				t.Fatal(err)
+			}
+			names := make([]string, 0, len(recipe.ComponentRefs))
+			for _, c := range recipe.ComponentRefs {
+				names = append(names, c.Name)
+			}
+			if len(names) != 15 || slices.Contains(names, "dra-node-labeler") || !slices.Contains(names, "gpu-operator") {
+				t.Fatalf("validation recipe components = %v", names)
+			}
+		})
+	}
+}
+
+// A plan written before it recorded a validation recipe validates against
+// its render recipe.
+func TestRecipeValidationFallsBackToTheRenderRecipe(t *testing.T) {
+	t.Parallel()
+	r := &plan.Recipe{ConfigMapRef: plan.DigestedRef{ConfigMap: "aicr-recipe-a", Digest: "sha256:a"}}
+	if r.Validation() != r.ConfigMapRef {
+		t.Fatalf("Validation() = %+v", r.Validation())
+	}
+}
+
 // rebuildFromApplications renders every release's Application as the
 // adapter writes it, round-trips it through JSON as the API server returns
 // it, suspends automated sync on some, and rebuilds the plan from them: the

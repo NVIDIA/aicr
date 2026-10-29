@@ -303,6 +303,76 @@ func TestValidationTakesASnapshotAfterTheSteps(t *testing.T) {
 	}
 }
 
+// withValidationRecipe gives the stored plan of digest a validation recipe
+// with data, as a resolution records the bundle's recipe.
+func withValidationRecipe(t *testing.T, ctx context.Context, rt *v1alpha1.ClusterRuntime, digest, data string) *plan.Content {
+	t.Helper()
+	c := plan.RecipeContent([]byte(data))
+	content, err := c.ConfigMap(operatorNS, rt.Name, string(rt.UID), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = k8s.Create(ctx, content); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := readPlan(ctx, k8s, operatorNS, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := c.Ref()
+	doc.Recipe.ValidationConfigMapRef = &ref
+	name, err := plan.Name(digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := &corev1.ConfigMap{}
+	if err = k8s.Get(ctx, client.ObjectKey{Namespace: operatorNS, Name: name}, stored); err != nil {
+		t.Fatal(err)
+	}
+	cm, err := plan.ToConfigMap(doc, operatorNS, rt.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = k8s.Delete(ctx, stored); err != nil {
+		t.Fatal(err)
+	}
+	if err = k8s.Create(ctx, cm); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// Validation reads the plan's validation recipe, the bundle's, not the
+// recipe Job's output: a component the render flags turned off is not
+// required. A plan without one validates against its render recipe.
+func TestValidationReadsTheValidationRecipe(t *testing.T) {
+	for name, bundled := range map[string]bool{"bundle recipe": true, "render recipe only": false} {
+		t.Run(name, func(t *testing.T) {
+			ctx := testContext(t)
+			rt, digest, _ := validatedRuntime(t, ctx)
+			doc, err := readPlan(ctx, k8s, operatorNS, digest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := readContent(ctx, k8s, operatorNS, doc.Recipe.ConfigMapRef, plan.RecipeDataKey, "recipe")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bundled {
+				want = withValidationRecipe(t, ctx, rt, digest, `{"kind":"RecipeResult","criteria":{"accelerator":"h100"},"componentRefs":[]}`).Data
+			}
+			r, _ := newValidating(t, newEngine(), true)
+			job := untilValidating(t, ctx, r)
+			copied := &corev1.ConfigMap{}
+			if err = k8s.Get(ctx, client.ObjectKey{Namespace: validateNS, Name: job.Name + "-to"}, copied); err != nil ||
+				copied.Data[aicrjob.PayloadKey] != string(want) {
+
+				t.Fatalf("validation recipe = %q, want %q (%v)", copied.Data[aicrjob.PayloadKey], want, err)
+			}
+		})
+	}
+}
+
 func rollout(t *testing.T, ctx context.Context) *v1alpha1.RuntimeRollout {
 	t.Helper()
 	ros := rollouts(t, ctx)

@@ -110,7 +110,8 @@ instead; to run a stalled one again, delete its failed `aicr-assessment-*`
 Jobs in `aicr-jobs`.
 
 A successful Job is deleted once its output is read. A failed one stays, with
-its pod and logs, until the inputs change or its 24-hour TTL ends.
+its pod and logs, until the inputs change or its TTL ends: 24 hours, or seven
+days once its stage stalls.
 
 ## Registry and credential outages
 
@@ -149,9 +150,10 @@ Resolution resumes once credentials work.
 
 **`RegistryCredentialsStale`** (`EngineAvailable=False`, `aws` only). Argo CD's
 `repo-creds` Secret holds a token that expires within an hour, or none. The
-operator refreshes it at start and every 6 hours; a failed refresh is only in
-its log. No new rollout or step starts while it is stale. Fix the AWS identity,
-then restart the operator to refresh at once:
+operator refreshes it at start and every 6 hours; after a failed refresh it
+retries with backoff from 10 seconds to 5 minutes, logging each failure. No new
+rollout or step starts while it is stale. Fix the AWS identity; the next retry,
+within 5 minutes, refreshes it. To refresh at once, restart the operator:
 
 ```shell
 kubectl -n aicr-system rollout restart deployment/aicr-operator
@@ -196,7 +198,7 @@ If approval is refused, the message says why:
 
 | Message | Fix |
 | --- | --- |
-| `[NOT_FOUND] read rollout <name>: … is forbidden` (plugin) | You are not an approver: add the user or group to the chart's `approvers` and `helm upgrade` |
+| `[UNAUTHORIZED] read rollout <name>: … is forbidden` (plugin) | You are not an approver: add the user or group to the chart's `approvers` and `helm upgrade`, or bind them to the `aicr-operator-approver` roles yourself |
 | `approving, revoking or acknowledging <rollout> needs update on runtimerollouts/approve` | You can patch rollouts but are not an approver; as above |
 | `approvedBy must be the approver's own username` | Approve with the plugin, which records the username the API server reports |
 | `acknowledge only while the rollout awaits acknowledgement` | The release is not applied yet; acknowledge once the rollout is `AwaitingAcknowledgement` |
@@ -214,14 +216,18 @@ migration is a separate procedure, outside the operator.
 
 `kubectl aicr describe <rollout>` shows the message and the step in flight.
 
-- **`InventoryDrift`.** Applications were deleted, created or recreated, or
-  moved to another plan, after the rollout was created and approved; the
-  message lists each change (`appeared`, `disappeared`, `was recreated`, `is
-  at plan …`). The check repeats, so undoing the change resumes the rollout.
-  Otherwise, a retry ends it `Superseded` and creates a new rollout from the
-  current state, which needs a fresh approval. A hand edit of an
-  Application's spec is not drift: the release's own step writes it back
-  (`FieldOwnershipOverridden`).
+- **`InventoryDrift`.** Applications were deleted, created or recreated,
+  moved to another plan, or edited after the rollout was created and
+  approved; the message lists each change (`appeared`, `disappeared`,
+  `was recreated`, `is at plan …`, `was edited`). An edit is a change to an
+  Application's source, Helm values or destination, whether the rollout has
+  not reached the release yet or already wrote it; its sync policy and
+  status are not compared. The check repeats, so undoing the change resumes
+  the rollout. Otherwise, a retry ends it `Superseded` and creates a new
+  rollout from the current state, which needs a fresh approval. A hand edit
+  of the release whose step is in flight is not written back: its step stays
+  `SpecDrifted` until the edit is undone or its action timeout fails the
+  rollout.
 - **`StepUnknown`.** A step names a release the target plan lacks. Retry.
 
 ## Rollout failed, expired or revoked
@@ -260,7 +266,9 @@ deployment validation:
 fail, after pushing their evidence, and 2 when it refuses the recipe or its
 readiness pre-flight. `status.validation` names the Job, the run and, when
 evidence was pushed, its reference. Read the Job in `aicr-validation`, fix
-the cause, and retry: a retry is a new rollout and a new run.
+the cause, and retry: a retry is a new rollout and a new run. Validation
+checks the components the bundle deploys: it runs against the recipe the
+bundle records, so a component an override turns off is not required.
 
 A validator image that is not pinned in `aicr.validatorImages` at the tag AICR
 names, or a pinned tag that resolves to another digest, also fails the run.
@@ -291,12 +299,6 @@ kubectl label namespace aicr-discovery aicr-validation app.kubernetes.io/managed
 
 The operator's AICR v1.1.0 and later runs do not relabel, so this applies
 only after AICR v1.0.x ran.
-
-**`helm upgrade` fails with `cannot change roleRef`** on the
-`aicr-validation` ClusterRoleBinding, when `aicr.version` moves between v1.0.x
-and v1.1.0 or later. Charts before v0.1.0-rc.10 kept that binding's name across
-the change. Upgrade to v0.1.0-rc.10 or later, which names the binding per
-AICR version range, or delete the binding and upgrade again.
 
 ## Unreadable or missing plans
 
@@ -329,8 +331,7 @@ AICR version range, or delete the binding and upgrade again.
   runtime of the same name (the message names both), so its Applications
   would belong to that runtime. A pinned plan must be one this runtime
   resolved: pin another, or return to `Automatic`. A candidate is resolved
-  again for this runtime, which replaces the ConfigMap; operators before
-  v0.1.0-rc.12 need it deleted first.
+  again for this runtime, which replaces the ConfigMap.
 - **`PlanWithoutRecipe`.** The target plan was rebuilt from the Applications,
   by adoption or after its ConfigMap was lost, so it has no recipe, and
   deployment validation is `Required`. Nothing was written. Change the inputs

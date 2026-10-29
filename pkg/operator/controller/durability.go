@@ -225,6 +225,7 @@ func (r *RolloutReconciler) retain(ctx context.Context, rt *v1alpha1.ClusterRunt
 		}
 		if doc.Recipe != nil {
 			keepContent[doc.Recipe.ConfigMapRef.ConfigMap] = true
+			keepContent[doc.Recipe.Validation().ConfigMap] = true
 		}
 		for _, rel := range doc.Releases {
 			keepContent[rel.Values.ConfigMap] = true

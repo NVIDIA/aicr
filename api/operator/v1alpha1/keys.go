@@ -133,8 +133,8 @@ const (
 	// ConditionStalled: progress needs intervention, including a resolver
 	// stall reported through Resolved. Owner: rollout controller.
 	ConditionStalled = "Stalled"
-	// ConditionDegraded: active releases are failing or drifted. Owner:
-	// rollout controller.
+	// ConditionDegraded is reserved: this version does not set it, and reports
+	// unhealthy releases through Available.
 	ConditionDegraded = "Degraded"
 	// ConditionResolved: a plan was produced for the current generation and
 	// snapshot. Owner: resolver, its only condition.

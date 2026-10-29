@@ -221,6 +221,16 @@ func ambiguous(component string, components map[string]bool) error {
 	return nil
 }
 
+// BundleRecipeJSON returns the recipe file a bundle carries as JSON, after
+// checking it against the digest bundle-info.yaml records.
+func (b *BundleInfo) BundleRecipeJSON(data []byte) ([]byte, error) {
+	sum := sha256.Sum256(data)
+	if got := "sha256:" + hex.EncodeToString(sum[:]); got != b.Build.Recipe.Digest {
+		return nil, unsupported("bundle recipe digest %s does not match %s", got, b.Build.Recipe.Digest)
+	}
+	return yamlToJSON(data, b.Build.Recipe.Path)
+}
+
 // ParseBundleRecipe decodes the recipe file a bundle carries and binds it to
 // the record: its SHA-256 must equal build.recipe.digest. AICR writes this
 // file after bundle-time filtering, so it, not the recipe Job's output, lists
@@ -228,11 +238,7 @@ func ambiguous(component string, components map[string]bool) error {
 // have a primary release, and primary releases follow the recipe's
 // deployment order.
 func (b *BundleInfo) ParseBundleRecipe(data []byte, declaredVersion string) (*RecipeResult, error) {
-	sum := sha256.Sum256(data)
-	if got := "sha256:" + hex.EncodeToString(sum[:]); got != b.Build.Recipe.Digest {
-		return nil, unsupported("bundle recipe digest %s does not match %s", got, b.Build.Recipe.Digest)
-	}
-	doc, err := yamlToJSON(data, b.Build.Recipe.Path)
+	doc, err := b.BundleRecipeJSON(data)
 	if err != nil {
 		return nil, err
 	}

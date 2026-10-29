@@ -110,7 +110,7 @@ func (r *RolloutReconciler) validate(ctx context.Context, rt *v1alpha1.ClusterRu
 	if err != nil || snapshot == nil {
 		return err
 	}
-	recipeJSON, err := r.recipe(ctx, p)
+	recipeJSON, err := r.validationRecipe(ctx, p)
 	if err != nil {
 		if operrors.IsPermanent(err) {
 			return unavailable(errorMessage(err))

@@ -26,6 +26,7 @@ import (
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
 	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
+	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 	"github.com/NVIDIA/aicr/pkg/operator/plan"
 )
 
@@ -61,7 +62,8 @@ func startingInventory(items []argocd.InventoryItem) []v1alpha1.InventoryEntry {
 	}
 	out := make([]v1alpha1.InventoryEntry, len(items))
 	for i, it := range items {
-		out[i] = v1alpha1.InventoryEntry{ReleaseID: it.ReleaseID, Name: it.Name, UID: it.UID, PlanDigest: it.PlanDigest, Revision: it.Revision}
+		out[i] = v1alpha1.InventoryEntry{ReleaseID: it.ReleaseID, Name: it.Name, UID: it.UID, PlanDigest: it.PlanDigest, Revision: it.Revision,
+			SpecDigest: it.SpecDigest}
 	}
 	return out
 }
@@ -72,7 +74,8 @@ func startingInventory(items []argocd.InventoryItem) []v1alpha1.InventoryEntry {
 func recordedInventory(ro *v1alpha1.RuntimeRollout) (map[string]v1alpha1.InventoryEntry, bool) {
 	items := make([]argocd.InventoryItem, 0, len(ro.Spec.StartingInventory))
 	for _, e := range ro.Spec.StartingInventory {
-		items = append(items, argocd.InventoryItem{ReleaseID: e.ReleaseID, Name: e.Name, UID: e.UID, PlanDigest: e.PlanDigest, Revision: e.Revision})
+		items = append(items, argocd.InventoryItem{ReleaseID: e.ReleaseID, Name: e.Name, UID: e.UID, PlanDigest: e.PlanDigest, Revision: e.Revision,
+			SpecDigest: e.SpecDigest})
 	}
 	candidates := [][]argocd.InventoryItem{items}
 	if len(items) == 0 {
@@ -95,12 +98,17 @@ func recordedInventory(ro *v1alpha1.RuntimeRollout) (map[string]v1alpha1.Invento
 // inventory plus its completed steps. A release outside the steps
 // must be as it started; a completed step's release must be at its end
 // state; a pending step's release may be either, as after a write whose
-// record a restart lost. The release of the step in flight is not judged.
-// The engine's observed revision is not compared: it follows the spec.
-func inventoryDrift(ro *v1alpha1.RuntimeRollout, live []argocd.InventoryItem) []string {
+// record a restart lost, and at its end state it must carry the plan's
+// write, which carries reports: a plan digest alone is an annotation any
+// Application editor can set. The release of the step in flight is not
+// judged. The engine's observed revision is not compared: it follows the
+// spec. "As it started" includes the spec fingerprint the starting
+// inventory recorded, and a completed step's end state the fingerprint
+// recorded when it became ready; a missing fingerprint is not compared.
+func inventoryDrift(ro *v1alpha1.RuntimeRollout, live []argocd.InventoryItem, carries func(id string) (bool, error)) ([]string, error) {
 	start, ok := recordedInventory(ro)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	var drift []string
 	now := map[string]argocd.InventoryItem{}
@@ -133,7 +141,9 @@ func inventoryDrift(ro *v1alpha1.RuntimeRollout, live []argocd.InventoryItem) []
 		}
 		s, started := start[id]
 		l, present := now[id]
-		original := started == present && (!started || (l.UID == s.UID && l.Name == s.Name && l.PlanDigest == s.PlanDigest))
+		identical := started && present && l.UID == s.UID && l.Name == s.Name && l.PlanDigest == s.PlanDigest
+		original := started == present && (!started || (identical && sameSpec(s.SpecDigest, l.SpecDigest)))
+		edited := identical && !sameSpec(s.SpecDigest, l.SpecDigest)
 		step, stepped := steps[id]
 		var ok bool
 		switch state := releaseState(ro, id); {
@@ -141,14 +151,44 @@ func inventoryDrift(ro *v1alpha1.RuntimeRollout, live []argocd.InventoryItem) []
 			ok = original
 		case state == v1alpha1.ReleaseReady || state == v1alpha1.ReleaseRemoved:
 			ok = ended(ro, step, s, started, l, present)
+			if written := writtenSpec(ro, id); ok && present && !sameSpec(written, l.SpecDigest) {
+				ok, edited = false, true
+			}
 		default:
-			ok = original || ended(ro, step, s, started, l, present)
+			// Not written by this rollout yet, so a changed spec on the
+			// object it started from is an edit even when that object is
+			// already at the target plan, as on a retry.
+			ok = !edited && (original || ended(ro, step, s, started, l, present))
+			if ok && !original && present && l.PlanDigest == ro.Spec.ToPlanDigest {
+				var err error
+				if ok, err = carries(id); err != nil {
+					return nil, err
+				}
+				edited = !ok
+			}
 		}
 		if !ok {
-			drift = append(drift, describeDrift(id, s, started, l, present))
+			drift = append(drift, describeDrift(id, s, started, l, present, edited))
 		}
 	}
-	return drift
+	return drift, nil
+}
+
+// sameSpec compares a recorded spec fingerprint with a live one; a missing
+// record, as in a rollout created before fingerprints were recorded, is not
+// compared.
+func sameSpec(recorded, live string) bool {
+	return recorded == "" || recorded == live
+}
+
+// writtenSpec is the spec fingerprint recordSpec kept for a release.
+func writtenSpec(ro *v1alpha1.RuntimeRollout, id string) string {
+	for _, r := range ro.Status.Releases {
+		if r.ID == id {
+			return r.SpecDigest
+		}
+	}
+	return ""
 }
 
 // ended reports whether a release is at the end state of its step.
@@ -170,8 +210,10 @@ func ended(ro *v1alpha1.RuntimeRollout, step v1alpha1.RolloutStep, s v1alpha1.In
 	}
 }
 
-func describeDrift(id string, s v1alpha1.InventoryEntry, started bool, l argocd.InventoryItem, present bool) string {
+func describeDrift(id string, s v1alpha1.InventoryEntry, started bool, l argocd.InventoryItem, present, edited bool) string {
 	switch {
+	case edited:
+		return fmt.Sprintf("%s was edited (object %s: its source, values or destination changed)", id, l.UID)
 	case !started:
 		return fmt.Sprintf("%s appeared (object %s at plan %s)", id, l.UID, orNone(l.PlanDigest))
 	case !present:
@@ -185,7 +227,9 @@ func describeDrift(id string, s v1alpha1.InventoryEntry, started bool, l argocd.
 
 // checkDrift stalls the rollout when the live inventory drifted; the next
 // reconcile checks again, and a retry replaces the rollout.
-func (r *RolloutReconciler) checkDrift(ctx context.Context, rt *v1alpha1.ClusterRuntime, ro *v1alpha1.RuntimeRollout, v *runtimeView) (bool, error) {
+func (r *RolloutReconciler) checkDrift(ctx context.Context, rt *v1alpha1.ClusterRuntime, ro *v1alpha1.RuntimeRollout, p *plan.Document,
+	v *runtimeView) (bool, error) {
+
 	var live []argocd.InventoryItem
 	var err error
 	if isAdopt(ro) {
@@ -196,7 +240,15 @@ func (r *RolloutReconciler) checkDrift(ctx context.Context, rt *v1alpha1.Cluster
 	if err != nil {
 		return false, err
 	}
-	drift := inventoryDrift(ro, live)
+	drift, err := inventoryDrift(ro, live, func(id string) (bool, error) { return r.carriesPlan(ctx, p, id) })
+	if err != nil {
+		if operrors.IsPermanent(err) {
+			ro.Status.Phase = v1alpha1.PhaseStalled
+			v.stalled, v.stalledReason, v.stalledMsg = true, reasonOf(err), errorMessage(err)
+			return true, r.saveStatus(ctx, ro, errorMessage(err))
+		}
+		return false, err
+	}
 	if len(drift) == 0 {
 		return false, nil
 	}
@@ -204,6 +256,24 @@ func (r *RolloutReconciler) checkDrift(ctx context.Context, rt *v1alpha1.Cluster
 	ro.Status.Phase = v1alpha1.PhaseStalled
 	v.stalled, v.stalledReason, v.stalledMsg = true, ReasonInventoryDrift, msg
 	return true, r.saveStatus(ctx, ro, msg)
+}
+
+// carriesPlan reports whether a release's Application carries the target
+// plan's write of it, spec included.
+func (r *RolloutReconciler) carriesPlan(ctx context.Context, p *plan.Document, id string) (bool, error) {
+	rel := release(p, id)
+	if rel == nil {
+		return false, nil
+	}
+	values, err := r.values(ctx, rel)
+	if err != nil {
+		return false, err
+	}
+	obs, err := r.Engine.Observe(ctx, p, rel, values, r.Now(), false)
+	if err != nil {
+		return false, err
+	}
+	return obs.State != argocd.StateMissing && obs.Reason != argocd.ReasonSpecNotWritten && obs.Reason != argocd.ReasonSpecDrifted, nil
 }
 
 // landed reports whether a step's mutation was already made by this

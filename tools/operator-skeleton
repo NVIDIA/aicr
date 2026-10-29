@@ -24,6 +24,8 @@ set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "${repo_root}"
+work="$(mktemp -d)"
+trap 'rm -rf "${work}"' EXIT
 
 cluster="${OPERATOR_KIND_CLUSTER:-aicr-operator}"
 export KUBECONFIG="${repo_root}/.operator-e2e/kubeconfig"
@@ -44,11 +46,10 @@ install() {
   # local registry credentials away from the anonymous base-image pull.
   arch="$(kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.architecture}')"
   docker_host="$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)"
-  empty="$(mktemp -d)"
+  empty="$(mktemp -d "${work}/docker.XXXXXX")"
   echo '{}' > "${empty}/config.json"
   DOCKER_HOST="${DOCKER_HOST:-${docker_host}}" DOCKER_CONFIG="${empty}" KO_DOCKER_REPO=ko.local/aicr-operator \
     go run "github.com/google/ko@$(setting '.build_tools.ko')" build --bare --sbom=none --push=false --platform="linux/${arch}" --tags=skeleton ./cmd/aicr-operator
-  rm -rf "${empty}"
   kind load docker-image "${OPERATOR_IMAGE}" --name "${cluster}"
 
   operator_namespace

@@ -36,8 +36,9 @@ var (
 const DevVersion = "v0.0.0-dev"
 
 // releasePattern matches the versions the release pipeline stamps: a semantic
-// version tag, optionally with an alpha, beta or rc pre-release.
-var releasePattern = regexp.MustCompile(`^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-(alpha|beta|rc)\.(0|[1-9]\d*))?$`)
+// version tag, optionally with an alpha, beta or rc pre-release, numbered as
+// in rc.1 or, as AICR's release tags are, rc1.
+var releasePattern = regexp.MustCompile(`^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-(alpha|beta|rc)\.?(0|[1-9]\d*))?$`)
 
 // Info is the build identity in a form suitable for logs and metrics.
 type Info struct {

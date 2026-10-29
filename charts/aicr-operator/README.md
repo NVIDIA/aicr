@@ -36,8 +36,9 @@ helm upgrade --install aicr-operator oci://ghcr.io/nvidia/charts/aicr-operator \
   --version <version> --namespace aicr-system -f values.yaml
 ```
 
-A published chart defaults to the operator, AICR and validator images its
-release was built and tested with, pinned by digest. Installing from this
+A published chart defaults to its release's operator image and to the AICR
+and validator images the operator was qualified against, which can be an
+earlier AICR release, all pinned by digest. Installing from this
 source tree instead needs `operator.image` and `aicr.image` set, and
 `aicr.validatorImages` with `validation.enabled`.
 

@@ -111,15 +111,28 @@ func (f *fakeEngine) inject(op string, landed bool) error {
 	return f.fault(op, landed)
 }
 
-// track keeps the inventory as a real engine's would after a write.
+// track keeps the inventory as a real engine's would after a write,
+// fingerprinting the spec it wrote.
 func (f *fakeEngine) track(id, digest string) {
+	spec := plan.DigestOf([]byte("spec " + id + " " + digest))
 	for i := range f.inventory {
 		if f.inventory[i].ReleaseID == id {
-			f.inventory[i].PlanDigest = digest
+			f.inventory[i].PlanDigest, f.inventory[i].SpecDigest = digest, spec
 			return
 		}
 	}
-	f.inventory = append(f.inventory, argocd.InventoryItem{ReleaseID: id, Name: id, UID: "u-" + id, PlanDigest: digest})
+	f.inventory = append(f.inventory, argocd.InventoryItem{ReleaseID: id, Name: id, UID: "u-" + id, PlanDigest: digest, SpecDigest: spec})
+}
+
+// liveSpec is the live object's fingerprint, as the adapter's Observe
+// reports it.
+func (f *fakeEngine) liveSpec(id string) string {
+	for _, it := range f.inventory {
+		if it.ReleaseID == id {
+			return it.SpecDigest
+		}
+	}
+	return ""
 }
 
 // Observe is Ready only for what was ensured at this plan: never stale. A
@@ -142,7 +155,7 @@ func (f *fakeEngine) Observe(_ context.Context, p *plan.Document, r *plan.Releas
 	case f.unhealthy[r.ID] != "":
 		return argocd.Observation{State: argocd.StateProgressing, Reason: f.unhealthy[r.ID]}, nil
 	}
-	return argocd.Observation{State: f.state, Reason: string(f.state)}, nil
+	return argocd.Observation{State: f.state, Reason: string(f.state), SpecDigest: f.liveSpec(r.ID)}, nil
 }
 
 func (f *fakeEngine) Remove(_ context.Context, _, name, uid, _ string) error {

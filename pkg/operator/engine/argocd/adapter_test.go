@@ -89,6 +89,56 @@ func TestApplicationCarriesPlanGraphAndPolicy(t *testing.T) {
 	}
 }
 
+// The spec fingerprint follows what an Application deploys (source, Helm
+// values and destination) and ignores the sync policy a suspension toggles
+// and the status Argo CD writes.
+func TestSpecDigest(t *testing.T) {
+	t.Parallel()
+	p, r := testPlan()
+	app, err := Application(target, p, r, values)
+	if err != nil {
+		t.Fatalf("Application() = %v", err)
+	}
+	base := SpecDigest(app)
+	if base == "" {
+		t.Fatal("an Application has no fingerprint")
+	}
+	tests := []struct {
+		name    string
+		edit    func(*unstructured.Unstructured)
+		changed bool
+	}{
+		{"automated sync off", func(u *unstructured.Unstructured) {
+			_ = unstructured.SetNestedField(u.Object, false, "spec", "syncPolicy", "automated", "enabled")
+		}, false},
+		{"status", func(u *unstructured.Unstructured) {
+			_ = unstructured.SetNestedField(u.Object, "Synced", "status", "sync", "status")
+		}, false},
+		{"values", func(u *unstructured.Unstructured) {
+			_ = unstructured.SetNestedField(u.Object, int64(3), "spec", "source", "helm", "valuesObject", "replicas")
+		}, true},
+		{"chart revision", func(u *unstructured.Unstructured) {
+			_ = unstructured.SetNestedField(u.Object, "sha256:"+strings.Repeat("0", 64), "spec", "source", "targetRevision")
+		}, true},
+		{"destination", func(u *unstructured.Unstructured) {
+			_ = unstructured.SetNestedField(u.Object, "default", "spec", "destination", "namespace")
+		}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			edited := app.DeepCopy()
+			tt.edit(edited)
+			if got := SpecDigest(edited) != base; got != tt.changed {
+				t.Errorf("fingerprint changed = %v, want %v", got, tt.changed)
+			}
+		})
+	}
+	if got := SpecDigest(&unstructured.Unstructured{Object: map[string]any{}}); got != "" {
+		t.Errorf("SpecDigest(no spec) = %q", got)
+	}
+}
+
 // Each Application carries the comparison exceptions AICR's releases need,
 // and Argo CD respects them when it syncs: no argocd-cm key is shared with
 // other Argo CD users. A plan written under the first policy renders
