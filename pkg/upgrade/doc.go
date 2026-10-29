@@ -106,21 +106,19 @@
 // safe and reaches the target takes its last hop's verdict. Ahead of rules 5
 // and 6, a record on the path that covers the source and holds the target
 // takes its own verdict when every other record on the path is safe. Every
-// other result leaves Transition nil,
-// so no renderer prints steps for a move their record does not describe.
+// other result leaves Transition nil, so no renderer prints steps for a move
+// their record does not describe.
 //
-// StoppedAt depends on the Reason. For multiple-boundaries it is the `to` range
-// of the landing the Explanation names. For beyond-record-ceiling it is the
-// range whose ceiling the move goes no further than. Otherwise it is the
-// interval not to enter in one step, and the Explanation names a landing short
-// of it, or asks for a record when nothing recorded leads there. When the
-// blocked record covers the source and is the path's first hop, the
-// Explanation instead says to check the move to its floor on its own,
-// including where rule 4 yields to rule 5.
-// Rule 5 blocks because the path's records never assessed the target, or
-// because no record starts where they land. Rule 4 yields to rule 5 when the
-// blocked record is the path's only hop and no crossed record lies past where
-// it lands.
+// Rule 4 yields to rule 5 when the blocked record is the path's only hop and no
+// crossed record lies past where it lands. Rule 5 reports beyond-record-ceiling
+// when the path's records never assessed the target, and undefined-origin when
+// no record starts where they land.
+//
+// Where ComponentResult.StoppedAt is the interval not to enter in one step, the
+// Explanation names a landing short of it, or asks for a record when nothing
+// recorded leads there. When the blocked record covers the source and is the
+// path's first hop, it instead says to check the move to that record's floor on
+// its own, including where rule 4 yields to rule 5.
 //
 // Matching takes an already validated Set and does not re-run Validate.
 // Validate is therefore not optional: a record that violates a well-formedness

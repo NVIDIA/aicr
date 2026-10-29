@@ -255,13 +255,9 @@ type ReportComponent struct {
 	Breaking  bool `json:"breaking" yaml:"breaking"`
 	Downgrade bool `json:"downgrade" yaml:"downgrade"`
 
-	// StoppedAt is the `to` range a blocked row stops at, as
-	// ComponentResult.StoppedAt defines it for the row's Reason. Set on every
-	// blocked version row, and empty on a blocked replaced row, which joins two
-	// pieces of software rather than two versions of one. Such a row
-	// carries a Summary, Precondition and Steps only when one record describes
-	// the whole jump: rendering one record's instructions for a jump it does
-	// not describe is the thing the verdict exists to prevent.
+	// StoppedAt is the row's ComponentResult.StoppedAt. A blocked row carries
+	// a Summary, Precondition and Steps only when one record describes the
+	// whole jump.
 	StoppedAt string `json:"stoppedAt,omitempty" yaml:"stoppedAt,omitempty"`
 
 	Summary      string `json:"summary,omitempty" yaml:"summary,omitempty"`

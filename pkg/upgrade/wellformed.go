@@ -509,10 +509,9 @@ type boundaryClaim struct {
 
 // checkDistinctBoundaries implements rule 8, an addition to ADR-021. It
 // returns a violation for each transition in trs whose `to` floor matches an
-// earlier one's and whose `from` domain intersects it, because the pair would
-// put two records on one path and turn the boundary blocked. Disjoint `from`
-// domains sharing a floor, and overlapping domains on different floors, are
-// legal. Unparseable ranges are skipped, since other checks report them.
+// earlier one's and whose `from` domain intersects it. Disjoint `from` domains
+// sharing a floor, and overlapping domains on different floors, are legal.
+// Unparseable ranges are skipped.
 func checkDistinctBoundaries(component string, trs []Transition) []string {
 	seen := make(map[boundaryKey][]boundaryClaim, len(trs))
 	var v []string

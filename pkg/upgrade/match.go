@@ -216,12 +216,11 @@ type ComponentResult struct {
 	// ChangeReplaced row.
 	Replaces *Replaces
 
-	// StoppedAt is the `to` range a blocked jump stops at. It is the landing's
-	// range for ReasonMultipleBoundaries, the assessed ceiling's range for
-	// ReasonBeyondRecordCeiling, and otherwise the interval not to enter in
-	// one step. Set on every blocked version transition, and empty on every
-	// other result including a blocked ChangeReplaced row, where two pieces of
-	// software share no version line for a boundary to sit on.
+	// StoppedAt is the `to` range a blocked version transition stops at, and
+	// is empty on every other result, a blocked ChangeReplaced row included.
+	// It is the landing's range for ReasonMultipleBoundaries, the assessed
+	// ceiling's range for ReasonBeyondRecordCeiling, and otherwise the
+	// interval not to enter in one step.
 	StoppedAt string
 
 	// Span is how far the matched record's claim reaches, from the source
