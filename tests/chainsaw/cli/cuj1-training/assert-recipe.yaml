@@ -45,6 +45,7 @@ componentRefs: ## alphabetically sorted
   - name: kube-prometheus-stack
   - name: kubeflow-trainer
   - name: nfd
+  - name: nktp
   - name: nodewright-customizations
   - name: nodewright-operator
   - name: nvidia-dra-driver-gpu
@@ -65,6 +66,7 @@ deploymentOrder:
   - dra-node-labeler
   - kai-scheduler
   - kubeflow-trainer
+  - nktp
   - nvidia-dra-driver-gpu
   - nvsentinel
   - prometheus-adapter

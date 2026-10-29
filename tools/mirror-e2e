@@ -630,10 +630,14 @@ verify_registry() {
         # Tools strip the registry domain when it has a dot or port
         # (e.g., "ghcr.io/foo/bar:v1" → "foo/bar:v1") but keep the full
         # path for Docker Hub library images without a domain prefix
-        # (e.g., "bitnami/kubectl:latest" stays "bitnami/kubectl:latest").
+        # (e.g., "bitnami/kubectl:latest" stays "bitnami/kubectl:latest"),
+        # and store a bare Docker Hub name under library/ (e.g.,
+        # "busybox:latest" → "library/busybox:latest").
         local img_path img_tag first_segment
         first_segment="${img%%/*}"
-        if [[ "$first_segment" == *"."* || "$first_segment" == *":"* ]]; then
+        if [[ "$img" != */* ]]; then
+            img_path="library/${img}"
+        elif [[ "$first_segment" == *"."* || "$first_segment" == *":"* ]]; then
             # Has a registry domain (contains . or :) — strip it
             img_path="${img#*/}"
         else

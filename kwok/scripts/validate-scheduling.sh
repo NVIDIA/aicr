@@ -2473,14 +2473,14 @@ main() {
         kubectl taint nodes "$cp_node" nfd-excluded=true:NoSchedule --overwrite
     done
 
-    # nvsentinel-mongodb and nvsentinel's lifecycle-manager ship cert-manager
-    # Certificates, and cert-manager's webhook runs on a KWOK fake that serves
-    # nothing, so the create would time out. The webhook's namespaceSelector
-    # skips namespaces carrying this label; harmless under KWOK, where no
-    # certificate is really issued.
+    # nvsentinel-mongodb, nvsentinel's lifecycle-manager, and nktp ship
+    # cert-manager Certificates, and cert-manager's webhook runs on a KWOK fake
+    # that serves nothing, so the create would time out. The webhook's
+    # namespaceSelector skips namespaces carrying this label; harmless under
+    # KWOK, where no certificate is really issued.
     local cert_ns
     cert_ns=$(yq eval '.componentRefs[]
-        | select(.name == "nvsentinel-mongodb"
+        | select(.name == "nvsentinel-mongodb" or .name == "nktp"
             or (.name == "nvsentinel" and .overrides.global.lifecycleManager.enabled == true))
         | .namespace' "${WORK_DIR}/recipe.yaml" | sort -u)
     for ns in $cert_ns; do
