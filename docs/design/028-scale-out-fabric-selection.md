@@ -440,26 +440,40 @@ they are explicit no-fabric leaves until a VR200 NET check exists.
 | `nicclusterpolicy.yaml` | `network-operator-ocp` | `ib` |
 
 The manifest table lives in `pkg/recipe` beside `FabricOf`. Each row also
-carries the manifest's content digest. Rows are append-only: a row's
-fabric never changes once shipped, because a fabric change is a new
-manifest file, not an edit to an old one, and a row is removed only with
-the manifest it names. That is what keeps `FabricOf` stable across AICR
-versions for a recipe whose bytes did not change. Two tests back it: one
-fails when a policy manifest is added to the catalog without a row, and
-one fails when a shipped manifest's content changes without its row's
-digest being updated in the same change, so every edit of a policy
-manifest is reviewed beside the fabric it is registered under.
+carries the manifest's content digest. Rows are permanent:
 
-"Unset" is reserved for compositions with no fabric signal at all. The
-explicit no-fabric leaves today are the GKE A4 (B200) and A4X Max (GB300)
-leaves, the OKE leaves that deploy no network component
-(`a100-oke-training`, `gb200-oke-inference`, `l40s-oke-inference`), kind,
-OCP leaves that carry only the OLM subscription, Talos, and VR200. Each
-matches its empty NET check list. Unset is not a catch-all: a policy
-manifest missing from the table, or more than one signal deriving
-different fabrics, is an error rather than unset. A test enumerates the
-no-fabric leaves and asserts every other catalog leaf derives exactly one
-fabric.
+- A row's fabric never changes once shipped. A fabric change is a new
+  manifest file, not an edit to an old one.
+- A row outlives its manifest. When a policy manifest is retired from the
+  catalog, as a conversion to gated per-fabric manifests may do, its row
+  stays and is marked retired. Recipes generated before the retirement
+  still name the file, and so does the evidence signed over them.
+
+That is what keeps `FabricOf` stable across AICR versions for a recipe
+whose bytes did not change. Two tests back it. One fails when a policy
+manifest is added to the catalog without a row. The other fails when a
+shipped manifest's content changes without its row's digest being updated
+in the same change, so every edit of a policy manifest is reviewed beside
+the fabric it is registered under.
+
+"Unset" is reserved for compositions with no fabric signal at all. Many
+catalog leaves have none because they deploy no scale-out networking
+component. Examples:
+
+- GKE A100 (`gke-nccl-tcpxo` is omitted on purpose), A4 (B200), and A4X
+  Max (GB300), and the GKE H100 inference leaves.
+- The OKE leaves that deploy no network component (`a100-oke-training`,
+  `gb200-oke-inference`, `l40s-oke-inference`).
+- BCM, k0s, LKE, kind, OCP leaves that carry only the OLM subscription,
+  Talos, and VR200.
+
+None of them declares an NCCL NET check. Unset is not a catch-all: a
+policy manifest missing from the table, or more than one signal deriving
+different fabrics, is an error rather than unset. Two tests pin the
+split. Every leaf that declares an NCCL NET check must derive exactly one
+fabric. The set of leaves that derive unset is a committed golden list, so
+a leaf that gains or loses a fabric signal changes that list and is
+reviewed, rather than passing silently.
 
 `FabricOf` returns the declared marker when `metadata.selectedProfile.fabric`
 is present and derives otherwise. Derivation is a fallback, not a second
@@ -624,14 +638,20 @@ converts. Unprofiled families (EKS among them) are unaffected.
   `linkType` constraint is the guard for that case.
 - **Bandwidth floors.** Per-fabric floors become expressible, which is the
   shape #1256 asks for.
-- **Evidence and attestation.** The attestation builder records `FabricOf`
-  beside the profile segment it already records, and the evidence verifier
-  binds it the way it binds every other profile claim
+- **Evidence and attestation.** The fabric claim ships in a new predicate
+  type, `recipe-evidence/v4`, following the v2 and v3 precedent
+  (`pkg/evidence/attestation/types.go`). The attestation builder records
+  `FabricOf` as a top-level predicate field, so unprofiled recipes such as
+  EKS carry it too. v4 requires the field and records an empty value for a
+  recipe that derives unset. For a v4 statement the evidence verifier
+  binds it the way it binds the profile claims
   (`pkg/evidence/verifier/identity.go`): it recomputes `FabricOf` from the
   manifest-verified recipe and rejects a statement whose recorded fabric
-  differs. Signed evidence can therefore not carry a fabric that disagrees
-  with the attested composition. The evidence path and the existing
-  pointers do not change.
+  differs or is missing. Signed v4 evidence can therefore not carry a
+  fabric that disagrees with the attested composition. v1 through v3
+  statements carry no fabric claim and verify under their original rules,
+  as v1 and v2 statements do today, so every committed pointer stays
+  verifiable. The evidence path and the existing pointers do not change.
 - **`aicr upgrade-check`.** A fabric change between two recipes is reported
   the same way a `selectedProfile` change is. If upgrade-check does not yet
   surface profile changes, that is added here.
@@ -745,8 +765,9 @@ its own change, reviewed against the costs listed above.
    result is trusted; `creQualifiedEntries` keyed on
    `(service, accelerator, fabric)` with an entry per fabric the check is
    measured on; the banner accept list on INFO runtimes and the worker-pod
-   watch as the `tcpxo` guard; per-fabric floors; the verifier's `FabricOf`
-   binding. Lands with cluster-readiness-engine#576.
+   watch as the `tcpxo` guard; per-fabric floors; the `recipe-evidence/v4`
+   predicate and the verifier's `FabricOf` binding. Lands with
+   cluster-readiness-engine#576.
 5. Per family, in the release where its second fabric is qualified: the
    `gpuStack` declaration or markers, the second value, the gated
    per-fabric policy manifests, the gate-aware `recipeDeclaresRDMAFabric`
