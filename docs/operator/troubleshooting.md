@@ -20,7 +20,7 @@ reason and message.
 | `AICRInvalidRequest`, `AICRNotFound`, `AICRUnauthorized`, `AICRInternal`, `AICRTimeout` | [AICR Job failures](#aicr-job-failures) |
 | `retrying after a transient failure` or `[SERVICE_UNAVAILABLE]` in the `Resolved` message, `RegistryCredentialsUnavailable`, `Unauthorized`, `RegistryCredentialsStale` | [Registry and credential outages](#registry-and-credential-outages) |
 | `AICRVersionMismatch`, `AICRArtifactUnsupported` | [AICR version mismatch](#aicr-version-mismatch) |
-| `EngineMissing`, `ProjectMissing` | [Argo CD not available](#argo-cd-not-available) |
+| `EngineMissing`, `ProjectMissing`; `Unauthorized` on `EngineAvailable` | [Argo CD not available](#argo-cd-not-available) |
 | `AwaitingApproval`, `AwaitingAcknowledgement` | [Waiting for approval](#waiting-for-approval) |
 | `TransitionBlocked` | [Transition blocked](#transition-blocked) |
 | `InventoryDrift`, `StepUnknown` | [Rollout stalled](#rollout-stalled) |
@@ -178,7 +178,8 @@ after the refresh.
 | Reason (`EngineAvailable=False`) | Cause | Fix |
 | --- | --- | --- |
 | `EngineMissing` | The Argo CD `Application` CRD is not served | Install Argo CD; the operator checks every 30 seconds and starts watching once it is |
-| `ProjectMissing` | The `aicr` AppProject cannot be read | `helm upgrade` the operator chart to recreate it |
+| `ProjectMissing` | The `aicr` AppProject does not exist | `helm upgrade` the operator chart to recreate it |
+| `Unauthorized` | The operator may not read the AppProject, the Argo CD CRDs or the `repo-creds` Secret, as after an RBAC change | `helm upgrade` the operator chart to restore its RBAC |
 
 Nothing is written to Argo CD while the engine is unavailable. See
 [Argo CD](argocd.md).

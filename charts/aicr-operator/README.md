@@ -138,7 +138,8 @@ Admission policies, all ValidatingAdmissionPolicies without webhooks:
   AICR image with its entrypoint; the namespace's AICR identity and allowed
   subcommand (`recipe`, `bundle`, `upgrade-check` in the Job namespace,
   `snapshot` in discovery, `validate` in validation); a TTL; a snapshot agent
-  `--image` naming the pinned AICR image; only `HOME`, `TMPDIR` and
+  image named only as `--image <pinned AICR image>`, and no `--config` file;
+  only `HOME`, `TMPDIR` and
   `DOCKER_CONFIG` in the environment, each set by value, and only `emptyDir`
   and Secret volumes.
 - `aicr-operator-rollout-outcome` (the operator only): the `outcome` label and

@@ -94,12 +94,28 @@ type Client struct {
 
 // New returns a Client.
 func New(opts Options) *Client {
-	hc := opts.HTTPClient
-	if hc == nil {
-		hc = &http.Client{Transport: retry.NewTransport(http.DefaultTransport.(*http.Transport).Clone()), Timeout: defaults.RegistryTimeout}
+	hc := &http.Client{Transport: retry.NewTransport(http.DefaultTransport.(*http.Transport).Clone()), Timeout: defaults.RegistryTimeout}
+	if opts.HTTPClient != nil {
+		copied := *opts.HTTPClient
+		hc = &copied
 	}
-	return &Client{opts: opts, http: hc}
+	c := &Client{opts: opts, http: hc}
+	// A redirect is held to the rule of the URL it replaces, before it is
+	// followed: HTTPS anywhere, plain HTTP only to a configured host.
+	hc.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if !c.allowedScheme(req.URL) {
+			return invalid("redirect to %s: neither HTTPS nor a plain-HTTP host", req.URL.Redacted())
+		}
+		if len(via) >= maxRedirects {
+			return invalid("stopped after %d redirects", maxRedirects)
+		}
+		return nil
+	}
+	return c
 }
+
+// maxRedirects is net/http's own limit.
+const maxRedirects = 10
 
 func (c *Client) repository(r Repository) (*remote.Repository, error) {
 	repo, err := remote.NewRepository(r.String())

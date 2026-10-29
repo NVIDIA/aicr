@@ -46,27 +46,28 @@ import (
 type fakeEngine struct {
 	// fault, when set, is asked before and after each mutation lands; an
 	// error before skips the mutation, one after loses its response.
-	fault        func(op string, landed bool) error
-	capabilities error
-	ensured      map[string]string // release -> plan digest
-	ensureErr    error
-	state        argocd.State
-	inventory    []argocd.InventoryItem
-	verified     map[string]int    // release -> Verify calls
-	removed      map[string]string // release -> UID passed to Remove
-	gone         map[string]bool   // release -> Retired reports it gone
-	drifted      map[string]bool   // release -> Observe reports SpecDrifted
-	missing      map[string]bool   // release -> Observe reports Missing
-	priorFailed  map[string]bool   // release -> Observe reports PriorSyncFailed until a Verify
-	unhealthy    map[string]string // release -> Observe reports Progressing with this reason at its written plan
-	observeErr   error             // Observe fails with it
-	overridden   []string
-	order        []string // mutations, "<op> <release>"
-	rebuilt      *plan.Document
-	contents     []*plan.Content
-	suspended    bool
-	foreign      map[string][]argocd.InventoryItem // runtime UID -> objects it owns
-	rebuildErr   error
+	fault         func(op string, landed bool) error
+	capabilities  error
+	ensured       map[string]string // release -> plan digest
+	ensureErr     error
+	state         argocd.State
+	inventory     []argocd.InventoryItem
+	verified      map[string]int    // release -> Verify calls
+	removed       map[string]string // release -> UID passed to Remove
+	removeRefused map[string]error  // release -> error Remove returns instead
+	gone          map[string]bool   // release -> Retired reports it gone
+	drifted       map[string]bool   // release -> Observe reports SpecDrifted
+	missing       map[string]bool   // release -> Observe reports Missing
+	priorFailed   map[string]bool   // release -> Observe reports PriorSyncFailed until a Verify
+	unhealthy     map[string]string // release -> Observe reports Progressing with this reason at its written plan
+	observeErr    error             // Observe fails with it
+	overridden    []string
+	order         []string // mutations, "<op> <release>"
+	rebuilt       *plan.Document
+	contents      []*plan.Content
+	suspended     bool
+	foreign       map[string][]argocd.InventoryItem // runtime UID -> objects it owns
+	rebuildErr    error
 }
 
 func newEngine() *fakeEngine {
@@ -164,8 +165,11 @@ func (f *fakeEngine) Observe(_ context.Context, p *plan.Document, r *plan.Releas
 }
 
 func (f *fakeEngine) Remove(_ context.Context, _, name, uid, _ string) error {
-	f.removed[name] = uid
 	f.order = append(f.order, "Remove "+name)
+	if err := f.removeRefused[name]; err != nil {
+		return err
+	}
+	f.removed[name] = uid
 	return nil
 }
 
@@ -819,11 +823,13 @@ func TestRolloutStallsOnUnsupportedWork(t *testing.T) {
 	if n := len(rollouts(t, ctx)); n != 0 || len(engine.order) != 0 {
 		t.Fatalf("%d rollouts, engine writes %v; want none", n, engine.order)
 	}
-	// Stalled names why, and what to change.
-	if c := cond(getRuntime(t, ctx), v1alpha1.ConditionStalled); c.Status != metav1.ConditionTrue || c.Reason != ReasonValidationMissing ||
-		!strings.Contains(c.Message, "validation.enabled") || !strings.Contains(c.Message, "spec.validation.deployment: Disabled") {
+	// Stalled and Ready name why, and what to change.
+	for _, typ := range []string{v1alpha1.ConditionStalled, v1alpha1.ConditionReady} {
+		if c := cond(getRuntime(t, ctx), typ); c.Reason != ReasonValidationMissing ||
+			!strings.Contains(c.Message, "validation.enabled") || !strings.Contains(c.Message, "spec.validation.deployment: Disabled") {
 
-		t.Fatalf("Stalled = %+v", c)
+			t.Fatalf("%s = %+v", typ, c)
+		}
 	}
 }
 
@@ -967,10 +973,13 @@ func TestUnfinishedRolloutDoesNotReinstallWhatItRemoved(t *testing.T) {
 	tests := []struct {
 		name    string
 		elapsed time.Duration
+		refused bool
 		want    v1alpha1.RolloutPhase
 	}{
-		{"deadline", defaults.RolloutDeadline + time.Hour, v1alpha1.PhaseExpired},
-		{"action timeout", defaults.RolloutActionTimeout + time.Minute, v1alpha1.PhaseFailed},
+		{name: "deadline", elapsed: defaults.RolloutDeadline + time.Hour, want: v1alpha1.PhaseExpired},
+		{name: "action timeout", elapsed: defaults.RolloutActionTimeout + time.Minute, want: v1alpha1.PhaseFailed},
+		// A delete that never landed leaves the release to repair.
+		{name: "delete refused", refused: true, want: v1alpha1.PhaseFailed},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -985,6 +994,9 @@ func TestUnfinishedRolloutDoesNotReinstallWhatItRemoved(t *testing.T) {
 			resolved(t, ctx, target)
 			engine := newEngine()
 			engine.inventory = []argocd.InventoryItem{{ReleaseID: "gpu-operator", UID: "u-g"}, {ReleaseID: "nvsentinel", UID: "u-s"}}
+			if tt.refused {
+				engine.removeRefused = map[string]error{"nvsentinel": operrors.New(operrors.ErrCodeUnauthorized, "delete refused by admission")}
+			}
 			r, clk := newRollout(t, engine, true)
 			clk.now = time.Now().Add(2 * time.Second)
 			for range 6 {
@@ -992,6 +1004,19 @@ func TestUnfinishedRolloutDoesNotReinstallWhatItRemoved(t *testing.T) {
 			}
 			if want := []string{"Ensure gpu-operator", "Remove nvsentinel"}; !slices.Equal(engine.order, want) {
 				t.Fatalf("engine calls = %v, want %v", engine.order, want)
+			}
+			if tt.refused {
+				// The Application is deleted by hand, not by the rollout.
+				engine.missing["nvsentinel"] = true
+				for range 3 {
+					reconcileRollout(t, ctx, r)
+				}
+				if ro := onlyRollout(t, ctx, target); ro.Labels[v1alpha1.LabelOutcome] != string(tt.want) ||
+					!slices.Contains(engine.order[2:], "Ensure nvsentinel") {
+
+					t.Fatalf("rollout %v; engine calls %v, want nvsentinel repaired", ro.Labels, engine.order)
+				}
+				return
 			}
 
 			clk.now = clk.now.Add(tt.elapsed)
@@ -1505,6 +1530,8 @@ func TestEngineCheckFailureKeepsTheActivePlan(t *testing.T) {
 		reason       string
 	}{
 		{name: "engine check timed out", capabilities: operrors.New(operrors.ErrCodeUnavailable, "read Argo CD project aicr: timeout")},
+		{name: "project read forbidden", reason: "Unauthorized",
+			capabilities: operrors.New(operrors.ErrCodeUnauthorized, "read Argo CD project aicr: forbidden")},
 		{name: "project missing", reason: argocd.ReasonProjectMissing,
 			capabilities: operrors.New(operrors.ErrCodeUnavailable, "read Argo CD project aicr: not found").WithReason(argocd.ReasonProjectMissing)},
 		{name: "repo-creds read timed out", credentials: func(t *testing.T) *RepoCredsRefresher {

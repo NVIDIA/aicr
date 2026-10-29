@@ -174,14 +174,20 @@ spec:
       message: AICR Jobs run one container
     - expression: variables.pod.containers.all(c, c.image == {{ .Values.aicr.image | quote }})
       message: AICR Jobs run the pinned AICR image {{ .Values.aicr.image }}
+    # The CLI also parses a single dash and a joined value, so only the exact
+    # --image <pinned> pair may name an image.
     - expression: >-
         variables.pod.containers.all(c, !has(c.args) ||
-        (c.args.all(a, !a.startsWith('--image=')) &&
+        (c.args.all(a, a == '--image' || !a.matches('^--?image(=.*)?$')) &&
         size(c.args.filter(a, a == '--image')) <= 1 &&
         (!c.args.exists(a, a == '--image') ||
         (c.args.indexOf('--image') + 1 < size(c.args) &&
         c.args[c.args.indexOf('--image') + 1] == {{ .Values.aicr.image | quote }}))))
       message: the snapshot agent runs the pinned AICR image {{ .Values.aicr.image }}
+    # An AICRConfig file can name the agent image too.
+    - expression: >-
+        variables.pod.containers.all(c, !has(c.args) || c.args.all(a, !a.matches('^--?config(=.*)?$')))
+      message: AICR Jobs take no --config file
     # AICR reads image overrides, such as AICR_IMAGE, from its environment.
     - expression: >-
         variables.pod.containers.all(c, (!has(c.envFrom) || size(c.envFrom) == 0) &&

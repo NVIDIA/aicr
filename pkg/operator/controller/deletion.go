@@ -152,7 +152,7 @@ func (r *RolloutReconciler) orphanRuntime(ctx context.Context, rt *v1alpha1.Clus
 func (r *RolloutReconciler) removeRuntime(ctx context.Context, rt *v1alpha1.ClusterRuntime) (*runtimeView, error) {
 	v := &runtimeView{requeue: resyncInterval, engineOK: true, engineReason: ReasonEngineAvailable}
 	if err := r.Engine.Capabilities(ctx); err != nil {
-		if operrors.ReasonOf(err) == "" {
+		if operrors.ReasonOf(err) == "" && !operrors.IsPermanent(err) {
 			return nil, err
 		}
 		v.engineOK, v.engineReason, v.engineMessage = false, reasonOf(err), errorMessage(err)

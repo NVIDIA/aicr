@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -153,12 +154,13 @@ func (c *Client) get(ctx context.Context, rawURL string, maxBytes int64) ([]byte
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
+		var refused *operrors.StructuredError
+		if errors.As(err, &refused) {
+			return nil, refused
+		}
 		return nil, operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "fetch "+rawURL)
 	}
 	defer resp.Body.Close()
-	if !c.allowedScheme(resp.Request.URL) {
-		return nil, invalid("fetch %s: redirected to %s, which is neither HTTPS nor a plain-HTTP host", rawURL, resp.Request.URL.Redacted())
-	}
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
 		return nil, operrors.New(operrors.ErrCodeNotFound, fmt.Sprintf("fetch %s: %s", rawURL, resp.Status))

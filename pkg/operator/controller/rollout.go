@@ -362,15 +362,16 @@ func keepObserved(rt *v1alpha1.ClusterRuntime, v *runtimeView) {
 // prepare checks the engine and the registry credentials, orphans earlier
 // runtimes' unfinished rollouts and applies spec.suspendEngine. It reports
 // whether the runtime can be reconciled further. A check that fails with a
-// reason reports it; one that could not read what it checks returns its
-// error, so one failed read flips no condition.
+// reason reports it, and so does one refused for good, such as a forbidden
+// read; one that could not read what it checks for now returns its error, so
+// one failed read flips no condition.
 func (r *RolloutReconciler) prepare(ctx context.Context, rt *v1alpha1.ClusterRuntime, v *runtimeView) (bool, error) {
 	err := r.Engine.Capabilities(ctx)
 	if err == nil && r.Credentials != nil {
 		err = r.Credentials.Check(ctx)
 	}
 	if err != nil {
-		if operrors.ReasonOf(err) == "" {
+		if operrors.ReasonOf(err) == "" && !operrors.IsPermanent(err) {
 			return false, err
 		}
 		v.engineOK, v.engineReason, v.engineMessage = false, reasonOf(err), errorMessage(err)
@@ -495,6 +496,8 @@ func (r *RolloutReconciler) refused(rt *v1alpha1.ClusterRuntime, p *plan.Documen
 	default:
 		return false
 	}
+	// Nothing rolls out until the cause is fixed, so Ready names it too.
+	v.readyReason, v.readyMessage = v.stalledReason, v.stalledMsg
 	return true
 }
 
@@ -1091,12 +1094,19 @@ func (r *RolloutReconciler) mutate(ctx context.Context, p *plan.Document, rel *p
 func (r *RolloutReconciler) remove(ctx context.Context, rt *v1alpha1.ClusterRuntime, ro *v1alpha1.RuntimeRollout,
 	step v1alpha1.RolloutStep, now time.Time, stop *halt, v *runtimeView) (bool, error) {
 
-	fail := func(err error) (bool, error) {
-		if operrors.IsPermanent(err) {
-			setReleaseState(ro, step.Release, v1alpha1.ReleaseFailed, "")
-			return false, r.finish(ctx, ro, v1alpha1.PhaseFailed, errorMessage(err))
+	// fail ends the rollout on a permanent error. Only a release whose delete
+	// was issued is Failed, which keeps repair from writing it again; one
+	// whose delete never landed is Pending, its Application as it was.
+	fail := func(err error, issued bool) (bool, error) {
+		if !operrors.IsPermanent(err) {
+			return false, err
 		}
-		return false, err
+		state := v1alpha1.ReleasePending
+		if issued {
+			state = v1alpha1.ReleaseFailed
+		}
+		setReleaseState(ro, step.Release, state, "")
+		return false, r.finish(ctx, ro, v1alpha1.PhaseFailed, errorMessage(err))
 	}
 	cur := ro.Status.Current
 	if cur == nil || cur.Release != step.Release || cur.StartedAt == nil {
@@ -1104,7 +1114,7 @@ func (r *RolloutReconciler) remove(ctx context.Context, rt *v1alpha1.ClusterRunt
 			// Only a removal already made by this rollout finishes.
 			obs, err := r.Engine.Retired(ctx, step.Release, step.UID)
 			if err != nil {
-				return fail(err)
+				return fail(err, false)
 			}
 			if obs.State != argocd.StateReady {
 				return false, r.finish(ctx, ro, stop.phase, stop.message)
@@ -1117,7 +1127,7 @@ func (r *RolloutReconciler) remove(ctx context.Context, rt *v1alpha1.ClusterRunt
 			return false, err
 		}
 		if err := r.Engine.Remove(ctx, string(rt.UID), step.Release, step.UID, ro.Name); err != nil {
-			return fail(err)
+			return fail(err, false)
 		}
 		v.requeue = pollInterval
 		return false, nil
@@ -1131,7 +1141,7 @@ func (r *RolloutReconciler) remove(ctx context.Context, rt *v1alpha1.ClusterRunt
 		if ended, finishErr := r.timedOut(ctx, ro, step, cur, now, "removed", err); ended {
 			return false, finishErr
 		}
-		return fail(err)
+		return fail(err, true)
 	}
 	switch {
 	case obs.State == argocd.StateReady:
@@ -1544,8 +1554,8 @@ func retired(rollouts []v1alpha1.RuntimeRollout) map[string]bool {
 }
 
 // removing reports a release whose Remove step started: its Application is
-// being deleted, possibly while halted, or is gone, or the step failed, as
-// at its action timeout.
+// being deleted, possibly while halted, or is gone, or the step failed after
+// its delete was issued, as at its action timeout.
 func removing(ro *v1alpha1.RuntimeRollout, id string) bool {
 	switch releaseState(ro, id) {
 	case v1alpha1.ReleaseDeleting, v1alpha1.ReleaseRemoved:
