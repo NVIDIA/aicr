@@ -95,7 +95,7 @@ Full flag and verdict reference lives in the [CLI reference](cli-reference.md#ai
 
 **Blocked, and here is how to do it safely.** One record describes exactly your move, and its author marked it `blocked`, meaning it must not be done in a single step. That record's steps are under the row, scoped to the deployer you named, saying what to do instead: typically land on an intermediate version, do some work there, and continue. Read them the way you read a `manual` row, and re-run the check when you get there.
 
-**Blocked because you would skip a boundary.** The records along your path ask for work at two or more boundaries, or one of them is `blocked`. The report names a version short of the problem. Upgrade to it, apply, then re-run.
+**Blocked because you would skip a boundary.** Two or more records are on your path and at least one asks for work, or one of them is `blocked`. The report names a version short of the problem. Upgrade to it, apply, then re-run.
 
 **Blocked because nothing describes your starting version.** A boundary is in the way, but no record covers an upgrade *from* where you are. Usually that is because your version is below the lowest one anybody has written a record for, and the report names that earliest recorded starting point: upgrade to it first, then re-run. This takes precedence over skipping a boundary, however many boundaries or `blocked` records are in the way, because the first boundary is no place to land when nothing describes the hop to it either. Where your version instead falls in a gap between recorded `from` domains there is no such landing point to name, so the report says to author a record for your starting point instead.
 

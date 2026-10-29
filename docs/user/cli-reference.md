@@ -1697,9 +1697,9 @@ This axis needs a **bundle** as `--from`. A resolved recipe records `valuesFile`
 | Route | When | `reason` | Renders steps |
 |---|---|---|---|
 | A record describes this move and blocks it | One record is on your path and its `to` holds your target | `recorded` | yes |
-| You would skip a boundary | Two or more records on your path ask something, or one of them is `blocked` | `multiple-boundaries`, `record-blocks` | no |
+| You would skip a boundary | Two or more records are on your path and at least one asks something, or one of them is `blocked` | `multiple-boundaries`, `record-blocks` | no |
 | Nothing describes your starting version | No crossed record was written for your source, or your path lands where none continues | `undefined-origin` | no |
-| Your target is past what the records assessed | Your path stops at a ceiling below your target | `beyond-record-ceiling` | no |
+| Your target is past what the records assessed | Your path stops at a ceiling below your target, or your target sits above the highest `to` ceiling any of the component's records names | `beyond-record-ceiling` | no |
 
 `safe` records carry no steps, so they never stop a jump on their own. The first row renders its record's steps, deployer-scoped, like a `manual` row. The other three render none, because no record describes your exact move. All four name a stopping point.
 
