@@ -6,15 +6,14 @@ talks to the API server only; it never calls the operator.
 
 ## Install
 
-> **Not yet published.** No AICR release carries the `kubectl-aicr` binaries
-> yet ([#3469](https://github.com/NVIDIA/aicr/issues/3469)).
-
 Each AICR [GitHub release](https://github.com/NVIDIA/aicr/releases)
 carries `kubectl-aicr-<os>-<arch>` for Linux and macOS on amd64 and arm64:
 
 ```shell
+VERSION="<release>"   # the AICR release of your operator chart, without the leading v
 gh release download "v${VERSION}" --repo NVIDIA/aicr --pattern kubectl-aicr-linux-amd64
-gh attestation verify kubectl-aicr-linux-amd64 --repo NVIDIA/aicr
+gh attestation verify kubectl-aicr-linux-amd64 --repo NVIDIA/aicr \
+  --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/v${VERSION}"
 install -m 0755 kubectl-aicr-linux-amd64 /usr/local/bin/kubectl-aicr
 ```
 
@@ -125,9 +124,8 @@ recipe with the plan's flags, an `oras pull` of the operator's bundle, and a
 AICR CLI renders ([verify the bundle yourself](index.md#verify-the-bundle-yourself)).
 
 It changes nothing in the cluster. It refuses a plan rebuilt from Applications
-(it has no recipe), a plan that does not record its render flags (written
-before v0.1.0-rc.3), and a recipe whose content does not match its recorded
-digest.
+(it has no recipe), a plan that does not record its render flags, and a
+recipe whose content does not match its recorded digest.
 
 ## Permissions
 

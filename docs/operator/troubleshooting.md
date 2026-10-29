@@ -298,12 +298,6 @@ kubectl label namespace aicr-discovery aicr-validation app.kubernetes.io/managed
 The operator's AICR v1.1.0 and later runs do not relabel, so this applies
 only after AICR v1.0.x ran.
 
-**`helm upgrade` fails with `cannot change roleRef`** on the
-`aicr-validation` ClusterRoleBinding, when `aicr.version` moves between v1.0.x
-and v1.1.0 or later. Charts before v0.1.0-rc.10 kept that binding's name across
-the change. Upgrade to v0.1.0-rc.10 or later, which names the binding per
-AICR version range, or delete the binding and upgrade again.
-
 ## Unreadable or missing plans
 
 - **`PlanUnreadable`** with `rollouts written by a newer operator: …;
@@ -335,8 +329,7 @@ AICR version range, or delete the binding and upgrade again.
   runtime of the same name (the message names both), so its Applications
   would belong to that runtime. A pinned plan must be one this runtime
   resolved: pin another, or return to `Automatic`. A candidate is resolved
-  again for this runtime, which replaces the ConfigMap; operators before
-  v0.1.0-rc.12 need it deleted first.
+  again for this runtime, which replaces the ConfigMap.
 - **`PlanWithoutRecipe`.** The target plan was rebuilt from the Applications,
   by adoption or after its ConfigMap was lost, so it has no recipe, and
   deployment validation is `Required`. Nothing was written. Change the inputs

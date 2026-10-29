@@ -75,7 +75,28 @@ navigation:
       - page: Slurm Shared Storage
         path: user/slinky-slurm-storage.md
 
-  # docs/operator joins the navigation when a release ships the operator (#3469).
+  - section: Operator (Preview)
+    contents:
+      - page: Overview
+        path: operator/index.md
+      - page: Installing on EKS
+        path: operator/eks-installation.md
+      - page: Day-2 Operations
+        path: operator/operations.md
+      - page: Troubleshooting
+        path: operator/troubleshooting.md
+      - page: Operator Lifecycle
+        path: operator/lifecycle.md
+      - page: Privilege Boundaries
+        path: operator/security.md
+      - page: Argo CD
+        path: operator/argocd.md
+      - page: kubectl aicr
+        path: operator/cli-reference.md
+      - page: Support Policy
+        path: operator/support.md
+      - page: API Reference
+        path: operator/api.md
 
   - section: Integrator Guide
     contents:

@@ -8,8 +8,8 @@ Applications that survive the operator.
 
 The [overview](index.md#installation) installs the published chart, and
 [installing on EKS](eks-installation.md) covers ECR. Each chart version
-defaults to the operator, AICR and validator images it was built and tested
-with, pinned by digest. The operator namespace is the Helm release namespace;
+defaults to its operator image and to the AICR and validator images the
+operator was qualified against, pinned by digest. The operator namespace is the Helm release namespace;
 create it first with the `restricted` Pod Security label, because Helm cannot
 template its own release namespace.
 

@@ -6,8 +6,12 @@ changes and validation evidence for each rollout. The operator is opt-in; the
 CLI, API server and bundles work as they always have without it
 ([ADR-027](https://github.com/NVIDIA/aicr/blob/main/docs/design/027-aicr-operator.md)).
 
-**Status: preview.** The API is `operator.aicr.run/v1alpha1` and may change
-without a conversion path. The operator supports AICR `>=1.0.0, <2.0.0`,
+**Status: preview.** The operator is in preview: its API
+(`operator.aicr.run/v1alpha1`) may change without a conversion path, and no
+hardware profile is qualified yet. The configuration it deploys is not a preview. The
+operator renders nothing itself: every bundle it rolls out is the one the
+pinned AICR release renders, with zero diff, from the same validated and
+optimized recipes as the AICR CLI. The operator supports AICR `>=1.0.0, <2.0.0`,
 Kubernetes 1.34 or later, Argo CD as the deployment engine, and one homogeneous
 accelerator and OS profile per cluster. A GB200 profile, a Flux adapter and
 greenfield bootstrap follow later ([support policy](support.md)).
@@ -91,19 +95,19 @@ identity and the component namespaces.
 
 ### Install the chart
 
-> **Not yet published.** No AICR release ships the operator yet, so the chart,
-> image and `kubectl-aicr` binaries and their attestations below do not exist
-> until one does ([#3469](https://github.com/NVIDIA/aicr/issues/3469)).
-
 Each AICR release publishes the operator image and its chart, tagged with the
-release version. The chart defaults to the operator, AICR and validator images
-that release was built and tested with, all pinned by digest.
+release version. The chart defaults to that release's operator image and to the
+AICR and validator images the operator was qualified against, all pinned by
+digest. That AICR release can be earlier than the one the chart ships in:
+`helm show values` shows it, and [operations](operations.md#upgrading-aicr-within-v1)
+moves it.
 
 ```shell
 VERSION="<release>"   # an AICR release that ships the operator, without the leading v
 
 gh attestation verify "oci://ghcr.io/nvidia/charts/aicr-operator:${VERSION}" \
-  --repo NVIDIA/aicr
+  --repo NVIDIA/aicr \
+  --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/v${VERSION}"
 
 kubectl create namespace aicr-system
 kubectl label namespace aicr-system pod-security.kubernetes.io/enforce=restricted
@@ -154,7 +158,8 @@ for Linux and macOS (`kubectl-aicr-<os>-<arch>`):
 
 ```shell
 gh release download "v${VERSION}" --repo NVIDIA/aicr --pattern kubectl-aicr-darwin-arm64
-gh attestation verify kubectl-aicr-darwin-arm64 --repo NVIDIA/aicr
+gh attestation verify kubectl-aicr-darwin-arm64 --repo NVIDIA/aicr \
+  --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/v${VERSION}"
 install -m 0755 kubectl-aicr-darwin-arm64 /usr/local/bin/kubectl-aicr
 ```
 

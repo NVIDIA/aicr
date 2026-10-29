@@ -135,7 +135,7 @@ avoids reading stale health.
 | Manage these Applications from another tool (an app-of-apps, an ApplicationSet, Flux) | Two writers fight over the same objects | Leave them to the operator |
 | Create an Application with a release's name yourself | It is foreign: the operator never writes or deletes it, and the rollout that reaches that release fails (`ForeignObject`) | Use another name |
 | Delete the `aicr` AppProject | Every owned Application references it | `helm upgrade` recreates it |
-| Add fields to a component's resources by hand (an env var on a Deployment, a label) | With server-side apply, Argo CD compares and self-heals only the fields its manifests set, so an added field stays, `Synced` and `Healthy`, and nothing reverts it. Fields the manifests set are reverted. Found on the GKE lane, 2026-10-28 | Change the component through the runtime's overrides; to undo an addition, remove the field by hand |
+| Add fields to a component's resources by hand (an env var on a Deployment, a label) | With server-side apply, Argo CD compares and self-heals only the fields its manifests set, so an added field stays, `Synced` and `Healthy`, and nothing reverts it. Fields the manifests set are reverted. | Change the component through the runtime's overrides; to undo an addition, remove the field by hand |
 
 Argo CD rolls nothing back on its own, and neither does the operator: a failed
 release stays where it failed until a new rollout moves it.

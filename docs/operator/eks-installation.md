@@ -4,7 +4,8 @@ A complete install on Amazon EKS with ECR as the runtime registry, for the
 `h100-eks-ubuntu-training-kubeflow` recipe. The
 [overview](index.md#installation) has the short version.
 
-You need `aws`, `kubectl`, `helm`, `oras`, `yq`, `envsubst` and `gh`, and:
+You need `aws`, `kubectl`, `helm`, `oras`, `yq`, `envsubst`, `gh` and the
+[`kubectl aicr` plugin](cli-reference.md#install), and:
 
 - an EKS cluster on Kubernetes 1.34 or later;
 - a system node group and a GPU node group, the GPU nodes on Ubuntu (AICR
@@ -194,13 +195,11 @@ signature.
 
 ## 6. Install
 
-> **Not yet published.** No AICR release ships the operator chart yet
-> ([#3469](https://github.com/NVIDIA/aicr/issues/3469)).
-
 ```shell
 kubectl create namespace aicr-system
 kubectl label namespace aicr-system pod-security.kubernetes.io/enforce=restricted
-gh attestation verify "oci://ghcr.io/nvidia/charts/aicr-operator:${VERSION}" --repo NVIDIA/aicr
+gh attestation verify "oci://ghcr.io/nvidia/charts/aicr-operator:${VERSION}" --repo NVIDIA/aicr \
+  --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/v${VERSION}"
 helm install aicr-operator oci://ghcr.io/nvidia/charts/aicr-operator \
   --version "${VERSION}" --namespace aicr-system -f values.yaml
 kubectl -n aicr-system rollout status deployment/aicr-operator
