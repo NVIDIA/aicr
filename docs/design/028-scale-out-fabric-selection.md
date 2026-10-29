@@ -531,7 +531,11 @@ readings today, so each is new collector and catalog work:
   recipe targets. The DeviceClass is cluster-scoped, so the reading is
   bound to those nodes through their ResourceSlices rather than to the
   object's existence. It takes the same `all | none | mixed` states, and
-  `mixed` fails closed.
+  `mixed` fails closed. Any DRA-based reading, this one and any later EKS
+  RoCE reading alike, filters on the slice's `spec.driver` and the device
+  attributes that name the fabric, never on the presence of ResourceSlices
+  as such: GB300 EKS nodes publish `compute-domain.nvidia.com` slices that
+  say nothing about the fabric.
 
 These are live-cluster readings, unlike the AKS and GKE pool projections
 (`--aks-gpu-pools`, `--gke-gpu-pools`), which come from a provider dump.
@@ -577,11 +581,26 @@ converts. Unprofiled families (EKS among them) are unaffected.
   back door. AICR requires that an explicit `spec.fabric` wins over
   detection and that a mismatch with the cluster fails the run rather than
   switching fabric; NVCRE's proposal already validates an explicit value
-  against the cluster. Each fabric the check runs on needs its own
-  qualification entry; none exists beyond `(eks, h100)` today.
+  against the cluster. "Explicit wins" is enforced on the AICR side too,
+  because today the Certification is created through the dynamic client
+  with default create options (`createUnstructured`), and an API server
+  prunes a field the installed CRD does not know with at most a warning.
+  Against an NVCRE whose CRD predates `spec.fabric`, the field would vanish
+  silently and NVCRE would render from platform and architecture. Three
+  guards close that: the check runs only against an NVCRE at or above the
+  pinned version that carries the field; the Certification is created with
+  `fieldValidation: Strict`, so an unknown field is an error rather than a
+  prune; and the check reads `spec.fabric` back from the created object
+  and fails if it is absent or differs before trusting any result. The
+  qualification key gains a fabric dimension, `(service, accelerator,
+  fabric)`, since the current `(service, accelerator)` key cannot say
+  "qualified on EFA, not on RoCE" for one accelerator; only
+  `(eks, h100, efa)` exists today.
 - **TrainJob checks.** `nccl-all-reduce-bw-net` and `-nvls` keep their
   `(service, accelerator)` template matrix. ADR-025 keeps them in place,
-  so moving that matrix onto `FabricOf` is possible but not required by
+  and whether a recipe selects the TrainJob or the NVCRE backend is decided
+  by a separate ADR-025 amendment on per-recipe backend selection, not
+  here. Moving that matrix onto `FabricOf` is possible but not required by
   this ADR.
 - **Transport assertion.** Two mechanisms exist today, and the fabric
   picks between them. On runtimes that log at `NCCL_DEBUG=INFO`,
@@ -720,7 +739,10 @@ its own change, reviewed against the costs listed above.
    for step 5, since an absent reading fails generation.
 4. Validators, evidence, and NVCRE: `ValidationInput.Fabric`;
    `nccl-cre-all-reduce-bw` passes `spec.fabric` and reports not applicable
-   when it is empty; a `creQualifiedEntries` entry per fabric the check is
+   when it is empty, gated on the pinned NVCRE version that carries the
+   field, created with strict field validation, and read back before the
+   result is trusted; `creQualifiedEntries` keyed on
+   `(service, accelerator, fabric)` with an entry per fabric the check is
    measured on; the banner accept list on INFO runtimes and the worker-pod
    watch as the `tcpxo` guard; per-fabric floors; the verifier's `FabricOf`
    binding. Lands with cluster-readiness-engine#576.
