@@ -87,7 +87,21 @@ deferred_verifications:
       above returned `[]`. A failure on that release is the finding to triage,
       not something a later release discharges.
 
-known_negatives: []
+known_negatives:
+  - id: pillow-13-blocked-by-aiperf-pin
+    checked: 2026-10-29
+    result: >-
+      Every pillow statement in .openvex.json (28 at document version 24) is
+      fixed only in pillow 13.0.0, and no bump reaches it: aiperf 0.13.0, the
+      newest aiperf on PyPI, requires pillow~=12.3.0, pillow 12.3.0 is the last
+      12.x release, and requirements.txt pins only aiperf, so pip resolves
+      pillow from that constraint. Overriding aiperf's declared range was not
+      attempted.
+    invalidated_by: >-
+      an aiperf release whose requires_dist admits pillow>=13 (then bump aiperf
+      in requirements.txt and AIPERF_VERSION together and retire every pillow
+      statement the scan no longer reports), or a pillow 12.x release carrying
+      these fixes
 
 deliberate_exclusions:
   - id: arm64-aiperf-bench-is-never-scanned
