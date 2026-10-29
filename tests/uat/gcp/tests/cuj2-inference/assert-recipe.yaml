@@ -49,6 +49,7 @@ componentRefs: ## alphabetically sorted
   - name: kai-scheduler
   - name: kube-prometheus-stack
   - name: nfd
+  - name: nktp
   - name: nodewright-customizations
   - name: nodewright-operator
   - name: nvidia-dra-driver-gpu
@@ -71,6 +72,8 @@ deploymentOrder:
   - dra-node-labeler
   - kai-scheduler
   - dynamo-platform
+  - k8s-aibom
+  - nktp
   - nvidia-dra-driver-gpu
   - nvsentinel
   - prometheus-adapter

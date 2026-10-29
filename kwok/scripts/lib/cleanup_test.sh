@@ -119,6 +119,25 @@ fi
 unset SRIOV_RELEASE
 rm -f "${HELM_CALLS}.no-hooks"
 
+# nktp is uninstalled without hooks: its pre-delete Job takes no tolerations.
+: >"${HELM_CALLS}"
+base_releases=${HELM_RELEASES}
+HELM_RELEASES=$(jq -c '. + [{name: "nktp", namespace: "nktp"}]' <<<"${base_releases}")
+if ! cleanup_recipe_helm_releases >/dev/null; then
+    echo "FAIL: cleanup returned an error for the nktp release"
+    exit 1
+fi
+grep -sFxq 'nktp' "${HELM_CALLS}.no-hooks" || {
+    echo "FAIL: nktp release was not uninstalled with --no-hooks"
+    exit 1
+}
+if grep -Fvx 'nktp' "${HELM_CALLS}.no-hooks" | grep -q .; then
+    echo "FAIL: cleanup skipped hooks for a release other than nktp"
+    exit 1
+fi
+HELM_RELEASES=${base_releases}
+rm -f "${HELM_CALLS}.no-hooks"
+
 # A release another controller already uninstalled (Flux's prune cascade)
 # counts as cleaned, not as a failure.
 : >"${HELM_CALLS}"

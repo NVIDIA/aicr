@@ -181,6 +181,10 @@ spec:
       type: Helm
       overrides:
         enabled: false
+    - name: nktp
+      type: Helm
+      overrides:
+        enabled: false
     - name: nodewright-operator
       type: Helm
       overrides:

@@ -84,3 +84,10 @@ metadata:
   name: kai-resource-reservation
 status:
   phase: Active
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nktp
+status:
+  phase: Active

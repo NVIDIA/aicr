@@ -2473,18 +2473,21 @@ main() {
         kubectl taint nodes "$cp_node" nfd-excluded=true:NoSchedule --overwrite
     done
 
-    # nvsentinel-mongodb ships a cert-manager Certificate, and cert-manager's
-    # webhook runs on a KWOK fake that serves nothing, so the create would
-    # time out. The webhook's namespaceSelector skips namespaces carrying
-    # this label; harmless under KWOK, where no certificate is really issued.
-    local mongodb_ns
-    mongodb_ns=$(yq eval '.componentRefs[] | select(.name == "nvsentinel-mongodb") | .namespace' \
-        "${WORK_DIR}/recipe.yaml")
-    if [[ -n "$mongodb_ns" ]]; then
-        log_info "Disabling cert-manager validation in namespace ${mongodb_ns} for KWOK"
-        kubectl create namespace "$mongodb_ns" --dry-run=client -o yaml | kubectl apply -f -
-        kubectl label namespace "$mongodb_ns" cert-manager.io/disable-validation=true --overwrite
-    fi
+    # nvsentinel-mongodb and nktp ship cert-manager Certificates, and
+    # cert-manager's webhook runs on a KWOK fake that serves nothing, so the
+    # creates would time out. The webhook's namespaceSelector skips namespaces
+    # carrying this label; harmless under KWOK, where no certificate is really
+    # issued.
+    local cm_component cm_ns
+    for cm_component in nvsentinel-mongodb nktp; do
+        cm_ns=$(yq eval ".componentRefs[] | select(.name == \"${cm_component}\") | .namespace" \
+            "${WORK_DIR}/recipe.yaml")
+        if [[ -n "$cm_ns" ]]; then
+            log_info "Disabling cert-manager validation in namespace ${cm_ns} for KWOK"
+            kubectl create namespace "$cm_ns" --dry-run=client -o yaml | kubectl apply -f -
+            kubectl label namespace "$cm_ns" cert-manager.io/disable-validation=true --overwrite
+        fi
+    done
 
     log_debug "Step 5: Deploying bundle..."
     deploy_bundle

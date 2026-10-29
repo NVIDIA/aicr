@@ -38,7 +38,16 @@ spec:
     # No GPU operator overrides needed.
     # LKE clusters start empty — GPU Operator manages all NVIDIA software
     # (drivers, toolkit, DCGM). Base values are correct as-is.
-    []
+    #
+    # nktp: LKE ships no resource metrics API, and its kubelet serving
+    # certificates do not cover the node IP.
+    - name: nktp
+      type: Helm
+      overrides:
+        metrics-server:
+          enabled: true
+          args:
+            - --kubelet-insecure-tls
 
   validation:
     conformance:

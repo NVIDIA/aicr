@@ -89,6 +89,18 @@ spec:
         # chart's ServiceMonitor CR. Issue #928.
         - prometheus-operator-crds
 
+    # Telemetry pipeline (ADR-026). kube-prometheus-stack goes first: an
+    # upgrade must remove its node-exporter, which holds host port 9100,
+    # before NKTP's starts.
+    - name: nktp
+      type: Helm
+      source: oci://ghcr.io/dsx-ai-factory/nvke/charts
+      valuesFile: components/nktp/values.yaml
+      dependencyRefs:
+        - cert-manager
+        - prometheus-operator-crds
+        - kube-prometheus-stack
+
     - name: nvidia-dra-driver-gpu
       type: Helm
       source: oci://registry.k8s.io/dra-driver-nvidia/charts

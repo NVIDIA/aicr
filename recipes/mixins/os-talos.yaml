@@ -54,3 +54,7 @@ spec:
       namespace: privileged-nodewright-operator
       preManifestFiles:
         - components/nodewright-operator/manifests/talos-namespace.yaml
+    - name: nktp
+      namespace: privileged-nktp
+      preManifestFiles:
+        - components/nktp/manifests/talos-namespace.yaml

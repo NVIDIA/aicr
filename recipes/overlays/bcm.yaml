@@ -21,7 +21,8 @@ spec:
   # Inherits from base (implicit when spec.base is empty).
   # BCM 11.x (`cm-kubernetes-setup`) provisions only the base platform —
   # Kubernetes control plane, CNI (tigera-operator/calico by default), DNS,
-  # and MetalLB. The NVIDIA runtime stack (GPU Operator, NFD, cert-manager,
+  # MetalLB, and by default metrics-server, so nktp's stays off. The NVIDIA
+  # runtime stack (GPU Operator, NFD, cert-manager,
   # Prometheus, nvsentinel, DRA driver, etc.) is delivered by AICR via
   # base.yaml and applied with the `helmfile` deployer
   # (`aicr bundle -r recipe.yaml --deployer helmfile -o ./bundles`).

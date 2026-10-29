@@ -42,6 +42,13 @@ spec:
       dependencyRefs:
         - prometheus-operator-crds
 
+    # nktp: EKS ships no resource metrics API.
+    - name: nktp
+      type: Helm
+      overrides:
+        metrics-server:
+          enabled: true
+
     # EKS has no control-plane nodes — remove the default nodeAffinity
     # that requires node-role.kubernetes.io/control-plane
     - name: nvidia-dra-driver-gpu

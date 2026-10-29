@@ -75,6 +75,14 @@ spec:
     - name: nvsentinel
       type: Helm
 
+    # nktp: OKE's metrics-server is an optional cluster add-on, not deployed
+    # by default.
+    - name: nktp
+      type: Helm
+      overrides:
+        metrics-server:
+          enabled: true
+
     # OKE DRA driver: host-installed driver root, compute domains enabled
     - name: nvidia-dra-driver-gpu
       type: Helm

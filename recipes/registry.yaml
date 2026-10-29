@@ -1074,10 +1074,7 @@ components:
   - name: nktp
     displayName: NKTP Telemetry Pipeline
     class: ops
-    # ADR-026. No stock recipe selects it yet; its dependency edges
-    # (cert-manager, prometheus-operator-crds, and kube-prometheus-stack, whose
-    # node-exporter must release host port 9100 first) land with the overlays
-    # that select it.
+    # ADR-026. base.yaml selects it with its dependency edges.
     #
     # prometheus-crds carries the CRDs prometheus-operator-crds owns, and
     # opentelemetry-operator's conf/crds/ holds Helm templates, not manifests.
