@@ -104,8 +104,11 @@
 // takes that record's verdict too. Every other result leaves Transition nil,
 // so no renderer prints steps for a move their record does not describe.
 //
-// StoppedAt is the interval not to enter in one step. The Explanation names a
-// landing short of it, or asks for a record when nothing recorded leads there.
+// StoppedAt depends on the Reason. For multiple-boundaries it is the `to` range
+// of the landing the Explanation names. For beyond-record-ceiling it is the
+// range whose ceiling the move goes no further than. Otherwise it is the
+// interval not to enter in one step, and the Explanation names a landing short
+// of it, or asks for a record when nothing recorded leads there.
 // Rule 5 blocks because the path's records never assessed the target, or
 // because no record starts where they land.
 //
