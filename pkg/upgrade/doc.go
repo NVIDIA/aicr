@@ -103,8 +103,10 @@
 //
 // Rule 3 attaches a Transition even when blocked, because that record's steps
 // describe this exact move. Safe records carry no steps, so a path that is all
-// safe, or whose one manual record covers the source and holds the target,
-// takes that record's verdict too. Every other result leaves Transition nil,
+// safe and reaches the target takes its last hop's verdict. Ahead of rules 5
+// and 6, a record on the path that covers the source and holds the target
+// takes its own verdict when every other record on the path is safe. Every
+// other result leaves Transition nil,
 // so no renderer prints steps for a move their record does not describe.
 //
 // StoppedAt depends on the Reason. For multiple-boundaries it is the `to` range

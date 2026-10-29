@@ -220,7 +220,7 @@ The branch row is why this needs its own verdict rather than falling through to 
 5. **The path stops short of the target, its records all `safe` or only its one hop asking,** gives `blocked`, naming the next crossed record's `to` when one lies ahead, otherwise the last hop's `to`.
 6. **Two or more records on the path, at least one asking something,** gives `blocked`, naming where the hop before the first substantive record lands.
 
-A path that is all `safe` and reaches the target takes its last hop's verdict, and a path whose one substantive record covers the source and holds the target takes that record's verdict. Both attach that record, as rule 3 does.
+A path that is all `safe` and reaches the target takes its last hop's verdict. Ahead of rules 5 and 6, a record on the path that covers the source and holds the target takes its own verdict when every other record on the path is `safe`, even if the walk took a lower `safe` hop that stalls. Both attach that record, as rule 3 does.
 
 Every blocked result's explanation names a landing short of the interval it forbids, or asks for a record when none leads there.
 

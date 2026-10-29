@@ -985,6 +985,21 @@ func TestMatchVerdictSelection(t *testing.T) {
 			wantStoppedAt: ">=2.5.0 <2.6.0",
 		},
 		{
+			// The walk takes S1 and stalls at 2.0.0, but S2 covers the source
+			// and holds the target.
+			name: "an all-safe path honors a safe record covering the whole jump",
+			set: oneComponent(
+				trans("<2.0.0", ">=2.0.0 <2.5.0", VerdictSafe, "S1"),
+				trans(">=1.0.0 <2.0.0", ">=2.8.0 <=3.0.0", VerdictSafe, "S2"),
+				trans(">=2.0.0 <3.0.0", ">=3.0.0 <=3.0.0", VerdictManual, "S3"),
+			),
+			from:        "1.5.0",
+			to:          "2.9.0",
+			wantVerdict: VerdictSafe,
+			wantReason:  ReasonRecorded,
+			wantMatched: "S2",
+		},
+		{
 			// The walk lands on 2.0.0. The next record starts at 2.2.0.
 			name: "a path that lands where no record continues is undefined-origin",
 			set: oneComponent(

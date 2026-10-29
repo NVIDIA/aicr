@@ -751,10 +751,8 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 	if p.reached && everySafe(p.onPath) {
 		return lend(r, src, p.hops[len(p.hops)-1])
 	}
-	if only, ok := loneSubstantive(p.onPath); ok && fromCovers(only.tr, pointAt(src)) {
-		if _, past := beyondCeiling(only.tr, tgt); !past {
-			return lend(r, src, only)
-		}
+	if c, ok := wholeJump(p.onPath, src, tgt); ok {
+		return lend(r, src, c)
 	}
 	if p.stalled() {
 		return stalledResult(u, r, p, tgt)
@@ -967,6 +965,28 @@ func everySafe(crossed []crossing) bool {
 func firstSubstantive(crossed []crossing) (c crossing, ok bool) {
 	for _, x := range crossed {
 		if x.tr.Verdict != VerdictSafe {
+			return x, true
+		}
+	}
+	return crossing{}, false
+}
+
+// wholeJump returns the lowest-floor record c on onPath whose `from` covers
+// src, whose `to` holds tgt, and beside which every record on onPath is safe.
+// ok is false when there is none.
+func wholeJump(onPath []crossing, src, tgt *semver.Version) (c crossing, ok bool) {
+	describes := func(x crossing) bool {
+		_, past := beyondCeiling(x.tr, tgt)
+		return fromCovers(x.tr, pointAt(src)) && !past
+	}
+	if only, found := loneSubstantive(onPath); found {
+		return only, describes(only)
+	}
+	if !everySafe(onPath) {
+		return crossing{}, false
+	}
+	for _, x := range onPath {
+		if describes(x) {
 			return x, true
 		}
 	}
