@@ -1,0 +1,19 @@
+# Packages installed over the closure resolved from requirements.txt, without
+# dependency resolution (`pip install --no-deps`), to replace a version that a
+# dependency's own pin would otherwise select.
+#
+# Each entry overrides a package already in that closure; it must not add one.
+# The same three consumers read this file as requirements.txt:
+#   - aiperf-bench.Dockerfile installs it after requirements.txt.
+#   - tools/generate-python-licenses records the override's license, not the
+#     version it replaced.
+#   - tools/generate-aiperf-source publishes the override's source.
+#
+# Editing this file requires 'make python-licenses' and 'make notices', exactly
+# as for requirements.txt; the notices generator fails closed otherwise.
+#
+# pillow: aiperf 0.13.0 pins pillow~=12.3.0, and every pillow advisory reported
+# against 12.3.0 is fixed only in 13.0.0. aiperf uses no API pillow 13 removed.
+# Delete this entry once an aiperf release admits pillow>=13
+# (ai-dynamo/aiperf#1630).
+pillow==13.0.0

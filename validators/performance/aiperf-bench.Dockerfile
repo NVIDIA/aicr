@@ -75,12 +75,14 @@ RUN apt-get update \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 
-# Installed from requirements.txt rather than a bare "aiperf==${AIPERF_VERSION}"
-# so that this image and the third-party license record in
-# THIRD_PARTY_NOTICES.md are driven by ONE input. tools/generate-python-licenses
-# installs the same file to enumerate what ships here; without a shared input it
-# would have to reconstruct this environment and could silently diverge from it.
+# Installed from requirements.txt and requirements-overrides.txt rather than a
+# bare "aiperf==${AIPERF_VERSION}" so that this image and the third-party
+# license record in THIRD_PARTY_NOTICES.md are driven by the same inputs.
+# tools/generate-python-licenses resolves the same files to enumerate what ships
+# here; without shared inputs it would have to reconstruct this environment and
+# could silently diverge from it.
 COPY validators/performance/requirements.txt /tmp/requirements.txt
+COPY validators/performance/requirements-overrides.txt /tmp/requirements-overrides.txt
 
 # AIPERF_VERSION now feeds only the io.aicr.aiperf.version label below, so it
 # can drift from what is actually installed. Fail the build closed instead of
@@ -93,7 +95,11 @@ RUN grep -qE "^aiperf==${AIPERF_VERSION}([[:space:]]|$)" /tmp/requirements.txt \
 # runtime needs no package installer, and pip is third-party software added on
 # top of the approved base (which carries no Python distributions), so shipping
 # it obliges us to publish its source. Nothing in the closure depends on it.
+#
+# The overrides install with --no-deps because pip cannot resolve a version
+# outside a dependency's declared range; see requirements-overrides.txt.
 RUN pip install --no-cache-dir -r /tmp/requirements.txt \
+ && pip install --no-cache-dir --no-deps -r /tmp/requirements-overrides.txt \
  && pip uninstall --yes pip
 
 # Syntax-gate the framing wrapper here, where a shell and a compiler still
@@ -110,7 +116,7 @@ RUN python -m py_compile /opt/aicr/aiperf_entrypoint.py
 # renovate: pinned by digest. The tag is retained for readability; the digest
 # is what actually resolves, so a retag upstream cannot silently change the
 # runtime. Bump both together.
-FROM nvcr.io/nvidia/distroless/python:3.13-v4.1.8@sha256:ef8b16b4877985a9043588aa0dafcc7f6dd2fa3bc207ba5766e858545d0e1e6f
+FROM nvcr.io/nvidia/distroless/python:3.13-v4.1.10@sha256:c718fc9571456bdb18a964450aa77025898747e3a5f92b7d4d81b194413bc09d
 
 ARG AIPERF_VERSION
 
