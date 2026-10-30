@@ -121,6 +121,7 @@ Currently on disk:
 
 | Service | Accelerator | System profile | GPU profile |
 |---------|-------------|----------------|-------------|
+| cks | rtx-pro-6000 | `cks/system-generic.yaml` | `cks/accelerated-rtx-pro-6000.yaml` |
 | eks | h100 | `eks/system-m7i.yaml` | `eks/p5-h100.yaml` |
 | eks | gb200 | `eks/system-m7i.yaml` | `eks/p6-gb200.yaml` |
 | eks | gb300 | `eks/system-m7i.yaml` | `eks/p6e-gb300.yaml` |

@@ -683,6 +683,7 @@ NVSentinel watches GPUs, drivers, NVLink and syslog. It does not watch the rest 
 | AKS | enabled by default via the AKS Linux Extension | blocked at bundle time |
 | OKE | ships `oke-node-problem-detector`, disabled behind the `oci.oraclecloud.com/oke-node-problem-detector-enabled=true` node label | blocked — the label is operator-settable and invisible at bundle time, so a second instance cannot be ruled out |
 | OCP | — | blocked — needs a SecurityContextConstraints binding AICR does not ship |
+| CKS | NPD observed in the reference RTX PRO 6000 cluster; provider-wide ownership is unqualified | blocked — CKS is not on the verified allowlist |
 | LKE, BCM, Metal3, k0s, MK8s, NVKE, generic | unverified | blocked until someone confirms they run none |
 
 The gate is an allowlist, not a denylist: a platform is permitted only once someone has checked it runs no NPD of its own. To qualify a new one, verify that, then add it to `npdQualifiedServices` in `pkg/bundler/validations/checks.go`.
@@ -695,6 +696,7 @@ The gate is an allowlist, not a denylist: a platform is permitted only once some
 | `oke` | Oracle ships one disabled behind a node label; that label is operator-settable and invisible at bundle time, so a second instance cannot be ruled out |
 | `ocp` | the privileged DaemonSet needs a SecurityContextConstraints binding AICR does not ship — it would bundle cleanly, then fail admission |
 | `os: talos` | `os-talos` relocates privileged components into `privileged-*` namespaces for Pod Security Admission, but not NPD, so it would land in a restricted namespace |
+| `cks` | not allowlisted; the reference RTX PRO 6000 cluster already runs NPD, so a second installation has not been qualified |
 | `lke`, `bcm`, `metal3`, `k0s`, `mk8s`, `nvke`, `generic` | unverified — nobody has checked whether they run their own |
 | no criteria at all | the platform is unknown, and could be any of the above |
 
