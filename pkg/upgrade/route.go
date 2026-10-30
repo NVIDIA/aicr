@@ -148,8 +148,8 @@ func stepViolation(u *ComponentUpgrades, t *Transition) string {
 //
 //   - to is more than one major above from
 //   - to reaches past the new major's first minor
-//   - another transition's floor inside from sits in a later minor of from's
-//     major, so from's lowest minor is not the last of that major
+//   - another transition's floor sits in a later minor of from's major, so
+//     from's lowest minor is not the last of that major
 func crossMajorViolation(u *ComponentUpgrades, t *Transition, from, to bounds) string {
 	lo := from.lower.ver
 	if lo.Major() == math.MaxUint64 || to.lower.ver.Major() != lo.Major()+1 {
@@ -171,7 +171,7 @@ func crossMajorViolation(u *ComponentUpgrades, t *Transition, from, to bounds) s
 			continue
 		}
 		f := sto.lower.ver
-		if f.Major() == lo.Major() && f.Minor() > lo.Minor() && from.contains(f) {
+		if f.Major() == lo.Major() && f.Minor() > lo.Minor() {
 			return fmt.Sprintf("names %d.%d as the last minor of major %d, but transition %d starts "+
 				"a later one at %s", lo.Major(), lo.Minor(), lo.Major(), i, f)
 		}

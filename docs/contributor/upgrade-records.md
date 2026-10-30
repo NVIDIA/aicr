@@ -385,7 +385,8 @@ supports upgrading one minor at a time. Under it a `manual` or `blocked` `to`
 may leave out its ceiling, which is then the end of its floor's minor. A
 `safe` `to` still names one. A move into a new major needs a record whose `to`
 is in that major's first minor and whose `from` names the old major's last
-minor, so the check blocks a major bump until someone writes it.
+minor, so the check blocks a major bump until someone writes it. A minor is not
+the last when any record's `to` starts a later minor of the same major.
 
 **`stepLimit: major`** caps every upgrade at the next major version, ignoring
 minors and patches. Use it when upstream supports skipping minors but not

@@ -1097,6 +1097,18 @@ func TestValidateSkipsAndStepLimit(t *testing.T) {
 			mentioned: true,
 		},
 		{
+			name:      "a later minor outside a major bump's from contradicts it",
+			pin:       "v2.0.0",
+			stepLimit: StepLimitMinor,
+			trs: []Transition{
+				safe(">=1.9.0 <1.10.0", ">=2.0.0 <=2.0.0"),
+				safe(">=1.9.0 <1.10.0", ">=1.10.0 <=1.10.0"),
+				safe(">=1.10.0 <2.0.0", ">=2.0.0 <=2.0.0"),
+			},
+			text:      "names 1.9 as the last minor of major 1, but transition 1 starts a later one at 1.10.0",
+			mentioned: true,
+		},
+		{
 			name:      "a manual to may omit its ceiling under the major step limit",
 			pin:       "v0.18.0",
 			stepLimit: StepLimitMajor,
