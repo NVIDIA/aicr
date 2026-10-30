@@ -38,9 +38,8 @@ func newConstraint(s string) (*semver.Constraints, error) {
 }
 
 // rangeEnd is one side of a range. An unbounded side has no limit in that
-// direction; ver is nil there. A bounded side with a nil ver is the
-// zero-value result of a rejected parseRange call and is treated as
-// unsatisfiable rather than dereferenced.
+// direction, and its ver is nil. A bounded side with a nil ver is the zero
+// value a rejected parseRange call returns, and is unsatisfiable.
 type rangeEnd struct {
 	ver       *semver.Version
 	inclusive bool
@@ -148,8 +147,8 @@ func contiguous(upper, lower rangeEnd) bool {
 	return upper.inclusive || lower.inclusive
 }
 
-// pastCeiling reports whether v sits above a bounded ceiling. A version exactly
-// at an inclusive ceiling is covered by it; at an exclusive one it is not.
+// pastCeiling reports whether v sits above a bounded ceiling. A version at an
+// inclusive ceiling is not past it, and one at an exclusive ceiling is.
 func pastCeiling(ceiling rangeEnd, v *semver.Version) bool {
 	cmp := v.Compare(ceiling.comparedAt())
 	return cmp > 0 || (cmp == 0 && !ceiling.inclusive)
