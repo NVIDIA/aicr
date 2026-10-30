@@ -1505,6 +1505,17 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 				`verified by "uat: synthetic lane"`,
 		},
 		{
+			name: "a joined safe run names the run and its last record's evidence",
+			set: oneComponent(
+				Transition{From: "<2.0.0", To: ">=2.0.0 <3.0.0", Verdict: VerdictSafe, VerifiedBy: "uat: first", Summary: "A"},
+				Transition{From: ">=2.0.0 <3.0.0", To: ">=3.0.0 <4.0.0", Verdict: VerdictSafe, VerifiedBy: "uat: last", Summary: "B"},
+			),
+			from: "1.5.0",
+			to:   "3.5.0",
+			want: `recorded safe: a run of 2 safe records ending at the one covering 3.0.0 describes the move ` +
+				`from 1.5.0 to 3.5.0, the last verified by "uat: last"`,
+		},
+		{
 			name: "recorded blocked says not in one step, and points at the steps",
 			set:  oneComponent(trans("<3.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B")),
 			from: "1.5.0",

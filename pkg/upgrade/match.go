@@ -761,7 +761,7 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 			return r
 		}
 		// A blocked record that describes the move keeps its steps.
-		r = recordedResult(u, r, src, last)
+		r = recordedResult(u, r, src, last, len(ms[0].hops))
 		if r.Verdict == VerdictBlocked {
 			r.StoppedAt = targetRangeText(u, r.Transition)
 		}
@@ -822,13 +822,14 @@ func multipleBoundariesExplanation(u *ComponentUpgrades, r ComponentResult, cros
 	return s + fmt.Sprintf(". The whole route takes %d upgrades: to %s", len(parts), strings.Join(parts, ", then to "))
 }
 
-// recordedResult returns r with the verdict, Transition and Span of c's record.
-func recordedResult(u *ComponentUpgrades, r ComponentResult, src *semver.Version, c crossing) ComponentResult {
+// recordedResult returns r with the verdict, Transition and Span of c's record,
+// the last of a run of n records.
+func recordedResult(u *ComponentUpgrades, r ComponentResult, src *semver.Version, c crossing, n int) ComponentResult {
 	r.Verdict = c.tr.Verdict
 	r.Transition = c.tr
 	r.Span = claimSpan(u, src, c.tr)
 	r.Reason = ReasonRecorded
-	r.Explanation = recordedExplanation(r, c)
+	r.Explanation = recordedExplanation(r, c, n)
 	return r
 }
 
@@ -1188,12 +1189,18 @@ func highestCeiling(u *ComponentUpgrades) (top *Transition, highest rangeEnd, ok
 	return top, highest, true
 }
 
-func recordedExplanation(r ComponentResult, c crossing) string {
+func recordedExplanation(r ComponentResult, c crossing, n int) string {
 	s := fmt.Sprintf("recorded %s: the record covering %s describes the move from %s to %s",
 		c.tr.Verdict, c.floor.ver, r.From, r.To)
+	verified := ", verified by "
+	if n > 1 {
+		s = fmt.Sprintf("recorded %s: a run of %d %s records ending at the one covering %s describes the move from %s to %s",
+			c.tr.Verdict, n, c.tr.Verdict, c.floor.ver, r.From, r.To)
+		verified = ", the last verified by "
+	}
 	switch {
 	case c.tr.Verdict == VerdictSafe && c.tr.VerifiedBy != "":
-		return s + ", verified by " + strconv.Quote(c.tr.VerifiedBy)
+		return s + verified + strconv.Quote(c.tr.VerifiedBy)
 	case c.tr.Verdict == VerdictManual:
 		return s + ". Follow the steps below, then apply"
 	case c.tr.Verdict == VerdictBlocked:
