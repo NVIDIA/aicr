@@ -345,6 +345,7 @@
 <span class="p">$</span> cosign verify-attestation --type cyclonedx \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
     --certificate-identity "https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/${TAG}" \
+    --certificate-github-workflow-repository NVIDIA/aicr \
     "$IMAGE@$DIGEST_AMD64" > predicate.json
 
 <span class="c"># Vulnerability scan, straight off the SBOM (no re-pull).</span>
@@ -427,7 +428,8 @@
     <div class="note">
       <span class="t info">Release identity</span>
       Issuer <code class="inl">https://token.actions.githubusercontent.com</code>, subject matched by the regular expression
-      <code class="inl">^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/v.*$</code>.
+      <code class="inl">^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/v.*$</code>,
+      and repository <code class="inl">NVIDIA/aicr</code> from the certificate's workflow repository extension.
       Validated, cluster-tested policies are in
       <a href="../docs/integrator/supply-chain-verification.md#enforcing-with-admission-policies">Enforcing with Admission Policies</a>.
     </div>

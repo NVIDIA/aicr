@@ -124,6 +124,7 @@ cosign verify-attestation \
   --type cyclonedx \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity "https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/${TAG}" \
+  --certificate-github-workflow-repository NVIDIA/aicr \
   "${IMAGE_PLATFORM}" \
   --output-file predicate.json
 ```
@@ -146,6 +147,7 @@ cosign verify-attestation \
   --type openvex \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity "https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/${TAG}" \
+  --certificate-github-workflow-repository NVIDIA/aicr \
   "${IMAGE_PLATFORM}" \
   --output-file vex-predicate.json
 
@@ -252,18 +254,23 @@ images carry **GitHub Artifact Attestations** (Sigstore *bundles*), so the
 policy must verify the Sigstore bundle format:
 
 - **Kyverno** — an `ImageValidatingPolicy` that calls
-  `verifyAttestationSignatures`, or a `ClusterPolicy` with
-  `type: SigstoreBundle`; both verified AICR images on Kyverno v1.19.2.
+  `verifyAttestationSignatures` and requires the repository through
+  `additionalExtensions`, verified on Kyverno v1.19.2. A `ClusterPolicy` cannot
+  require the repository.
 - **Sigstore Policy Controller** — requires **v0.13.0+** and
   `signatureFormat: bundle` (see the
   [Sigstore bundle format](https://docs.sigstore.dev/policy-controller/overview/#sigstore-bundle-format)
   docs); enforcement runs only in namespaces labeled
-  `policy.sigstore.dev/include=true`.
+  `policy.sigstore.dev/include=true`. It cannot require the repository for
+  these attestations, so pair it with `gh attestation verify --repo NVIDIA/aicr`.
 
 Verify against AICR's release identity — issuer
-`https://token.actions.githubusercontent.com`, and a subject matched with the
+`https://token.actions.githubusercontent.com`, a subject matched with the
 regular expression
-`^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/v.*$`.
+`^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/v.*$`,
+and the repository `NVIDIA/aicr` from the certificate's GitHub workflow
+repository extension. Any repository can call that reusable workflow, so the
+subject alone does not identify AICR's release.
 
 > Validated, cluster-tested policies for both are in
 > [Enforcing with Admission Policies](../docs/integrator/supply-chain-verification.md#enforcing-with-admission-policies).
