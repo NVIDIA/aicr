@@ -86,9 +86,16 @@ variants, provider-specific health checks, fabric tuning,
 and service detection remain separate work. No driver version is pinned:
 CoreWeave owns that lifecycle.
 
-The H100 accelerator wildcard still supplies deployment validation, including
-`check-nvidia-smi`. The conformance phase runs `platform-health` for the enabled
-AICR components. Checks for AICR-managed components do not verify the
-provider's equivalents when those components are disabled. This recipe adds
-no training benchmark or performance threshold. Passing local catalog,
-render, or offline snapshot checks does not establish live workload health.
+Deployment validation runs `expected-resources` for the enabled AICR
+components and `check-nvidia-smi` on schedulable GPU nodes that are not busy.
+The CKS recipe removes the inherited GPU Operator health and version checks,
+including the operator-version constraint, because CoreWeave owns that
+installation. The conformance phase runs `platform-health` for the enabled
+AICR components; it does not verify disabled components' provider equivalents.
+
+KWOK profiles model CPU system nodes and H100 GPU nodes for the
+repository's simulated scheduling tests. These exercise bundle rendering and
+pod placement without running the GPU software. They do not qualify the
+provider stack or GPU workloads. This recipe adds no training benchmark or
+performance threshold. Passing catalog, render, scheduling, or offline
+snapshot checks does not establish live workload health.

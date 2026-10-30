@@ -2781,10 +2781,10 @@ h100-cks-ubuntu-training:
   006-k8s-ephemeral-storage-metrics/values.yaml: bd965e10e0f6eca07d732ea00d66e8327c176acfdc52d998809f7d4d53e056e8
   README.md: 83b110cabbf9c0b459542504818222beee655de280e1156fe4dae60869ad8ae0
   UPGRADING.md: 627350cdf2e92e31479be7cdbc4b3d93657d4dc6a722ab4823c2f692f6ba60f9
-  bundle-info.yaml: 9112446c323ce373db09f1af66ede443d20e0a00ecb5b9547f824d798f96911b
-  checksums.txt: 84406e4218a165ef8cc1fc8a5dc5c2355ed62a40df23fb1c8b666d4fd433578e
+  bundle-info.yaml: 2c5897e7e85ee7bd3ed903816738948e4a5aca0afe44d92941ffb5a1b6e7fdcd
+  checksums.txt: 17acf05338b4175b9cfb5c4cb7b327d490075b523bb2c4c3aeb70ec894a83a4d
   deploy.sh: e48c374ec3bd9cc26949b794323951533e826dfb953e6ee8f75f862ea84af45a
-  recipe.yaml: 1d18e87c983cc160acaa41c8158b726c2af88e1613fa2fc79b60ee3a565daf4a
+  recipe.yaml: 734497a008b79624e0fcdc6c6420aad4ff759dfa7500147b78027decec5f0b29
 h100-eks-amazonlinux-inference:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f

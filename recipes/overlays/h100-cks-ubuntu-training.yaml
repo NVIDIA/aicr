@@ -26,3 +26,11 @@ spec:
     intent: training
   mixins:
     - os-ubuntu
+
+  # The CKS base clears GPU Operator checks inherited from accelerator wildcards.
+  # Keep validation of AICR-owned resources and the provider's working GPUs.
+  validation:
+    deployment:
+      checks:
+        - expected-resources
+        - check-nvidia-smi

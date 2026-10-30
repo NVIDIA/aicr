@@ -816,6 +816,7 @@ Its constraints require `GPU.hardware.driver-loaded` and
 fail closed. These are prerequisites for the one provider-managed stack,
 not a control-plane signal distinguishing driver-installation modes or
 proof of the provider stack's health. See
+[CoreWeave H100 Setup](cks-h100-setup.md) and
 [CoreWeave RTX PRO 6000 Setup](cks-rtx-pro-6000-setup.md).
 
 For other services, introduce selectable driver-ownership modes only once

@@ -99,30 +99,35 @@ func TestCKSGPUStackProfile(t *testing.T) {
 func TestCKSDeploymentValidation(t *testing.T) {
 	t.Parallel()
 
-	for _, selection := range []string{"", "gpuStack=coreweave"} {
-		t.Run(selection, func(t *testing.T) {
+	for _, accelerator := range []CriteriaAcceleratorType{CriteriaAcceleratorRTXPro6000, CriteriaAcceleratorH100} {
+		t.Run(string(accelerator), func(t *testing.T) {
 			t.Parallel()
-			result, err := NewBuilder().BuildFromCriteriaWithProfile(t.Context(), cksCriteria(), selection)
-			if err != nil {
-				t.Fatalf("resolve CoreWeave recipe: %v", err)
-			}
-			if result.Validation == nil || result.Validation.Deployment == nil {
-				t.Fatal("missing deployment validation")
-			}
-			deployment := result.Validation.Deployment
-			wantChecks := []string{"expected-resources", "check-nvidia-smi"}
-			if !slices.Equal(deployment.Checks, wantChecks) {
-				t.Errorf("deployment checks = %v, want %v", deployment.Checks, wantChecks)
-			}
-			for _, constraint := range deployment.Constraints {
-				if constraint.Name == "Deployment.gpu-operator.version" {
-					t.Errorf("provider-managed GPU Operator must not inherit version constraint %q", constraint.Value)
-				}
-			}
-			if result.Validation.Conformance == nil ||
-				!slices.Equal(result.Validation.Conformance.Checks, []string{"platform-health"}) {
+			for _, selection := range []string{"", "gpuStack=coreweave"} {
+				t.Run(selection, func(t *testing.T) {
+					t.Parallel()
+					result, err := NewBuilder().BuildFromCriteriaWithProfile(t.Context(), cksCriteria(accelerator), selection)
+					if err != nil {
+						t.Fatalf("resolve CoreWeave recipe: %v", err)
+					}
+					if result.Validation == nil || result.Validation.Deployment == nil {
+						t.Fatal("missing deployment validation")
+					}
+					deployment := result.Validation.Deployment
+					wantChecks := []string{"expected-resources", "check-nvidia-smi"}
+					if !slices.Equal(deployment.Checks, wantChecks) {
+						t.Errorf("deployment checks = %v, want %v", deployment.Checks, wantChecks)
+					}
+					for _, constraint := range deployment.Constraints {
+						if constraint.Name == "Deployment.gpu-operator.version" {
+							t.Errorf("provider-managed GPU Operator must not inherit version constraint %q", constraint.Value)
+						}
+					}
+					if result.Validation.Conformance == nil ||
+						!slices.Equal(result.Validation.Conformance.Checks, []string{"platform-health"}) {
 
-				t.Errorf("conformance = %+v, want only platform-health", result.Validation.Conformance)
+						t.Errorf("conformance = %+v, want only platform-health", result.Validation.Conformance)
+					}
+				})
 			}
 		})
 	}
