@@ -1697,7 +1697,7 @@ This axis needs a **bundle** as `--from`. A resolved recipe records `valuesFile`
 | Route | When | `reason` | Renders steps |
 |---|---|---|---|
 | A record describes this move and blocks it | One upgrade reaches your target, and its record is `blocked` | `recorded` | yes |
-| You would skip a boundary | The route takes two or more upgrades, which `record-blocks` reports when one of them is `blocked` | `multiple-boundaries`, `record-blocks` | no |
+| Your jump takes more than one upgrade | The route takes two or more upgrades. `record-blocks` applies when one of them is `blocked`, and `multiple-boundaries` otherwise | `multiple-boundaries`, `record-blocks` | no |
 | Nothing describes your starting version | No record describes an upgrade from your version, or the route lands where none continues | `undefined-origin` | no |
 | Your target is past what the records assessed | The route stops at a ceiling below your target, or your target sits above the highest `to` ceiling any of the component's records names | `beyond-record-ceiling` | no |
 
