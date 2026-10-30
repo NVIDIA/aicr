@@ -274,12 +274,6 @@ func floorsBetween(u *ComponentUpgrades, start, end versionRange) []transitionFl
 	return out
 }
 
-// rangeUpTo returns the versions from lower up to, but not including, the first
-// version floor admits.
-func rangeUpTo(lower, floor rangeEnd) versionRange {
-	return versionRange{lower: lower, upper: rangeEnd{ver: floor.ver, inclusive: !floor.inclusive, family: floor.family}}
-}
-
 // unclearedBy reports whether t must list p's floor in Skips and does not, or
 // whether p is a stop, which no listing clears.
 func (p passage) unclearedBy(t *Transition) bool {
@@ -323,19 +317,6 @@ func transitionsWithinStepLimit(u *ComponentUpgrades) sets.Set[*Transition] {
 		}
 	}
 	return out
-}
-
-// overlap returns the interval a and b share. ok is false when they share no
-// version.
-func overlap(a, b versionRange) (out versionRange, ok bool) {
-	out = a
-	if lowerBefore(a.lower, b.lower) {
-		out.lower = b.lower
-	}
-	if upperAfter(a.upper, b.upper) {
-		out.upper = b.upper
-	}
-	return out, lowerAtOrBelow(out.lower, out.upper)
 }
 
 // route is a sequence of records from the source toward the target, each
@@ -612,17 +593,6 @@ func moveLandingText(u *ComponentUpgrades, m move) string {
 		return targetRangeText(u, last)
 	}
 	return rangeText(m.lands)
-}
-
-// endsEqual reports whether a and b are the same range end.
-func endsEqual(a, b rangeEnd) bool {
-	if a.unbounded || b.unbounded {
-		return a.unbounded == b.unbounded
-	}
-	if a.ver == nil || b.ver == nil {
-		return a.ver == nil && b.ver == nil && a.inclusive == b.inclusive
-	}
-	return a.inclusive == b.inclusive && a.comparedAt().Equal(b.comparedAt())
 }
 
 // moveLandingPhrase returns the lowest version m, a move before the last,

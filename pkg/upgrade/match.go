@@ -981,13 +981,6 @@ func targetCeiling(u *ComponentUpgrades, t *Transition) rangeEnd {
 	return b.upper
 }
 
-// pastCeiling reports whether v sits above a bounded ceiling. A version exactly
-// at an inclusive ceiling is covered by it; at an exclusive one it is not.
-func pastCeiling(ceiling rangeEnd, v *semver.Version) bool {
-	cmp := v.Compare(ceiling.comparedAt())
-	return cmp > 0 || (cmp == 0 && !ceiling.inclusive)
-}
-
 // ceilingPhrase names the highest version a ceiling actually covers, as a place
 // an operator can be told to stop. The bare number will not do: "<0.19.0" and
 // "<=0.19.0" end at different versions, and only one of them is 0.19.0 itself.
@@ -996,16 +989,6 @@ func ceilingPhrase(b rangeEnd) string {
 		return b.ver.String()
 	}
 	return "the last version below " + b.ver.String()
-}
-
-// inclusiveEnd returns the inclusive range end at v.
-func inclusiveEnd(v *semver.Version) rangeEnd {
-	return rangeEnd{ver: v, inclusive: true}
-}
-
-// onlyVersion returns the interval holding v and nothing else.
-func onlyVersion(v *semver.Version) versionRange {
-	return versionRange{lower: inclusiveEnd(v), upper: inclusiveEnd(v)}
 }
 
 // fromCovers reports whether t's `from` admits at. An unparseable `from`

@@ -515,54 +515,6 @@ func checkCoverageReachesPin(component string, cur rangeEnd, pinVer *semver.Vers
 		component, cur.ver, pinVer)}
 }
 
-// lowerBefore orders lower bounds, unbounded first.
-func lowerBefore(a, b rangeEnd) bool {
-	if a.unbounded != b.unbounded {
-		return a.unbounded
-	}
-	if a.unbounded {
-		return false
-	}
-	if cmp := a.comparedAt().Compare(b.comparedAt()); cmp != 0 {
-		return cmp < 0
-	}
-	return a.inclusive && !b.inclusive
-}
-
-// upperAfter reports whether a extends coverage beyond b.
-func upperAfter(a, b rangeEnd) bool {
-	if a.unbounded {
-		return true
-	}
-	if b.unbounded {
-		return false
-	}
-	if cmp := a.comparedAt().Compare(b.comparedAt()); cmp != 0 {
-		return cmp > 0
-	}
-	return a.inclusive && !b.inclusive
-}
-
-// contiguous reports whether coverage continues from an upper bound into the
-// next lower bound. Comparing versions alone is not enough: "<0.18.0" followed
-// by ">0.18.0" leaves exactly 0.18.0 uncovered while the versions look equal.
-// Coverage compares versions as written, so "<0.18.0" followed by ">=0.18.0"
-// is contiguous although it leaves out 0.18.0's prereleases. No record need
-// describe those, and a cluster on one matches no transition.
-func contiguous(upper, lower rangeEnd) bool {
-	if upper.unbounded || lower.unbounded {
-		return true
-	}
-	cmp := lower.ver.Compare(upper.ver)
-	if cmp < 0 {
-		return true
-	}
-	if cmp > 0 {
-		return false
-	}
-	return upper.inclusive || lower.inclusive
-}
-
 // boundaryKey identifies a `to` floor by version and inclusivity as two
 // comparable fields rather than one delimited string: `to` permits
 // prereleases, and a prerelease tag can itself read as a delimiter suffix,
@@ -600,26 +552,6 @@ func checkDistinctMoves(u *ComponentUpgrades) []string {
 		}
 	}
 	return v
-}
-
-// overlaps reports whether two intervals share at least one version.
-func overlaps(a, b versionRange) bool {
-	return lowerAtOrBelow(a.lower, b.upper) && lowerAtOrBelow(b.lower, a.upper)
-}
-
-// lowerAtOrBelow reports whether a lower bound sits at or below an upper bound,
-// so the pair admits at least one version. Unlike contiguous, which asks
-// whether coverage continues across a shared point and accepts either side
-// including it, sharing a version requires both sides to include it.
-func lowerAtOrBelow(lo, hi rangeEnd) bool {
-	if lo.unbounded || hi.unbounded {
-		return true
-	}
-	cmp := lo.comparedAt().Compare(hi.comparedAt())
-	if cmp != 0 {
-		return cmp < 0
-	}
-	return lo.inclusive && hi.inclusive
 }
 
 // hookDir is where ADR-021 puts a hook manifest. The location is

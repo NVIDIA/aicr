@@ -63,10 +63,96 @@ func (b rangeEnd) comparedAt() *semver.Version {
 	return semver.New(b.ver.Major(), b.ver.Minor(), b.ver.Patch(), "0", "")
 }
 
+// inclusiveEnd returns the inclusive range end at v.
+func inclusiveEnd(v *semver.Version) rangeEnd {
+	return rangeEnd{ver: v, inclusive: true}
+}
+
 // exclusiveEnd returns the exclusive upper end at v, which also leaves out v's
 // prereleases when v is a release.
 func exclusiveEnd(v *semver.Version) rangeEnd {
 	return rangeEnd{ver: v, family: v.Prerelease() == ""}
+}
+
+// endsEqual reports whether a and b are the same range end.
+func endsEqual(a, b rangeEnd) bool {
+	if a.unbounded || b.unbounded {
+		return a.unbounded == b.unbounded
+	}
+	if a.ver == nil || b.ver == nil {
+		return a.ver == nil && b.ver == nil && a.inclusive == b.inclusive
+	}
+	return a.inclusive == b.inclusive && a.comparedAt().Equal(b.comparedAt())
+}
+
+// lowerBefore orders lower bounds, unbounded first.
+func lowerBefore(a, b rangeEnd) bool {
+	if a.unbounded != b.unbounded {
+		return a.unbounded
+	}
+	if a.unbounded {
+		return false
+	}
+	if cmp := a.comparedAt().Compare(b.comparedAt()); cmp != 0 {
+		return cmp < 0
+	}
+	return a.inclusive && !b.inclusive
+}
+
+// upperAfter reports whether a extends coverage beyond b.
+func upperAfter(a, b rangeEnd) bool {
+	if a.unbounded {
+		return true
+	}
+	if b.unbounded {
+		return false
+	}
+	if cmp := a.comparedAt().Compare(b.comparedAt()); cmp != 0 {
+		return cmp > 0
+	}
+	return a.inclusive && !b.inclusive
+}
+
+// lowerAtOrBelow reports whether a lower bound sits at or below an upper bound,
+// so the pair admits at least one version. Unlike contiguous, which asks
+// whether coverage continues across a shared point and accepts either side
+// including it, sharing a version requires both sides to include it.
+func lowerAtOrBelow(lo, hi rangeEnd) bool {
+	if lo.unbounded || hi.unbounded {
+		return true
+	}
+	cmp := lo.comparedAt().Compare(hi.comparedAt())
+	if cmp != 0 {
+		return cmp < 0
+	}
+	return lo.inclusive && hi.inclusive
+}
+
+// contiguous reports whether coverage continues from an upper bound into the
+// next lower bound. Comparing versions alone is not enough: "<0.18.0" followed
+// by ">0.18.0" leaves exactly 0.18.0 uncovered while the versions look equal.
+// Coverage compares versions as written, so "<0.18.0" followed by ">=0.18.0"
+// is contiguous although it leaves out 0.18.0's prereleases. No record need
+// describe those, and a cluster on one matches no transition.
+func contiguous(upper, lower rangeEnd) bool {
+	if upper.unbounded || lower.unbounded {
+		return true
+	}
+	cmp := lower.ver.Compare(upper.ver)
+	if cmp < 0 {
+		return true
+	}
+	if cmp > 0 {
+		return false
+	}
+	return upper.inclusive || lower.inclusive
+}
+
+// pastCeiling reports whether v sits above a bounded ceiling. A version exactly
+// at an inclusive ceiling is covered by it; at an exclusive one it is not.
+func pastCeiling(ceiling rangeEnd, v *semver.Version) bool {
+	cmp := v.Compare(ceiling.comparedAt())
+	return cmp > 0 || (cmp == 0 && !ceiling.inclusive)
 }
 
 // versionRange is a half-open or closed version interval.
@@ -100,6 +186,35 @@ func (b versionRange) contains(v *semver.Version) bool {
 		}
 	}
 	return true
+}
+
+// onlyVersion returns the interval holding v and nothing else.
+func onlyVersion(v *semver.Version) versionRange {
+	return versionRange{lower: inclusiveEnd(v), upper: inclusiveEnd(v)}
+}
+
+// overlaps reports whether two intervals share at least one version.
+func overlaps(a, b versionRange) bool {
+	return lowerAtOrBelow(a.lower, b.upper) && lowerAtOrBelow(b.lower, a.upper)
+}
+
+// overlap returns the interval a and b share. ok is false when they share no
+// version.
+func overlap(a, b versionRange) (out versionRange, ok bool) {
+	out = a
+	if lowerBefore(a.lower, b.lower) {
+		out.lower = b.lower
+	}
+	if upperAfter(a.upper, b.upper) {
+		out.upper = b.upper
+	}
+	return out, lowerAtOrBelow(out.lower, out.upper)
+}
+
+// rangeUpTo returns the versions from lower up to, but not including, the first
+// version floor admits.
+func rangeUpTo(lower, floor rangeEnd) versionRange {
+	return versionRange{lower: lower, upper: rangeEnd{ver: floor.ver, inclusive: !floor.inclusive, family: floor.family}}
 }
 
 // parseRange returns the interval of constraint, which must be a single
