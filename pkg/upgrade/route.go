@@ -37,6 +37,17 @@ func toBounds(u *ComponentUpgrades, t *Transition) (bounds, error) {
 	return b, nil
 }
 
+// targetFloor returns the floor of t's `to` range, the lower bound every move
+// through t lands at or above. ok is false when `to` does not parse or has no
+// floor.
+func targetFloor(u *ComponentUpgrades, t *Transition) (floor bound, ok bool) {
+	to, err := toBounds(u, t)
+	if err != nil || to.lower.unbounded || to.lower.ver == nil {
+		return bound{}, false
+	}
+	return to.lower, true
+}
+
 // derivedCeiling returns the exclusive end of the minor, or under
 // StepLimitMajor the major, holding to's floor. ok is false unless u has a step
 // limit and to names a floor but no ceiling, or when that minor or major is the
@@ -166,14 +177,10 @@ func crossMajorViolation(u *ComponentUpgrades, t *Transition, from, to bounds) s
 		if s == t {
 			continue
 		}
-		sto, err := toBounds(u, s)
-		if err != nil || sto.lower.unbounded || sto.lower.ver == nil {
-			continue
-		}
-		f := sto.lower.ver
-		if f.Major() == lo.Major() && f.Minor() > lo.Minor() {
+		f, ok := targetFloor(u, s)
+		if ok && f.ver.Major() == lo.Major() && f.ver.Minor() > lo.Minor() {
 			return fmt.Sprintf("names %d.%d as the last minor of major %d, but transition %d starts "+
-				"a later one at %s", lo.Major(), lo.Minor(), lo.Major(), i, f)
+				"a later one at %s", lo.Major(), lo.Minor(), lo.Major(), i, f.ver)
 		}
 	}
 	return ""
@@ -211,47 +218,65 @@ func passages(u *ComponentUpgrades, t *Transition) []passage {
 // admits a version the move goes by below it. A floor t shares counts only
 // when the other transition is blocked and t is not.
 func passagesOf(u *ComponentUpgrades, t *Transition, from, to bounds) []passage {
-	if u == nil {
+	own, ok := targetFloor(u, t)
+	if !ok {
 		return nil
 	}
-	ownTo, err := toBounds(u, t)
-	if err != nil || ownTo.lower.unbounded || ownTo.lower.ver == nil {
-		return nil
-	}
-	own := ownTo.lower
 	var out []passage
-	for i := range u.Transitions {
-		s := &u.Transitions[i]
-		if s == t {
-			continue
-		}
-		sfrom, err := parseBounds(s.From)
-		if err != nil {
-			continue
-		}
-		sto, err := toBounds(u, s)
-		if err != nil || sto.lower.unbounded || sto.lower.ver == nil {
-			continue
-		}
-		f := sto.lower
+	for _, r := range floorsBetween(u, from, to) {
+		s, f := r.tr, r.floor
 		shared := boundaryKeyOf(f) == boundaryKeyOf(own)
-		if (shared && (s.Verdict != VerdictBlocked || t.Verdict == VerdictBlocked)) ||
-			!lowerBefore(from.lower, f) || !lowerAtOrBelow(f, to.upper) {
+		if s == t || (shared && (s.Verdict != VerdictBlocked || t.Verdict == VerdictBlocked)) ||
+			!intervalsIntersect(r.from, rangeUpTo(from.lower, f)) {
 
-			continue
-		}
-		below := bounds{lower: from.lower, upper: bound{ver: f.ver, inclusive: !f.inclusive, family: f.family}}
-		if !intervalsIntersect(sfrom, below) {
 			continue
 		}
 		// Required are floors inside t's `to`, manual or blocked floors, and
 		// required stops whose `from` admits a version the move starts from.
-		stop := s.Verdict == VerdictSafe && s.RequiredStop && intervalsIntersect(sfrom, from)
+		stop := s.Verdict == VerdictSafe && s.RequiredStop && intervalsIntersect(r.from, from)
 		required := lowerBefore(own, f) || s.Verdict != VerdictSafe || stop
-		out = append(out, passage{c: crossing{tr: s, floor: f}, index: i, required: required, stop: stop})
+		out = append(out, passage{c: crossing{tr: s, floor: f}, index: r.index, required: required, stop: stop})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return crossingBefore(out[i].c, out[j].c) })
 	return out
+}
+
+// transitionFloor is a transition with its parsed `from` and the floor of its
+// `to`.
+type transitionFloor struct {
+	tr    *Transition
+	index int
+	from  bounds
+	floor bound
+}
+
+// floorsBetween returns, in declaration order, the transitions whose `to`
+// floor sits above start's lower bound and at or below end's upper one. A
+// transition whose `from` or `to` does not parse is left out.
+func floorsBetween(u *ComponentUpgrades, start, end bounds) []transitionFloor {
+	if u == nil {
+		return nil
+	}
+	var out []transitionFloor
+	for i := range u.Transitions {
+		s := &u.Transitions[i]
+		from, err := parseBounds(s.From)
+		if err != nil {
+			continue
+		}
+		f, ok := targetFloor(u, s)
+		if !ok || !lowerBefore(start.lower, f) || !lowerAtOrBelow(f, end.upper) {
+			continue
+		}
+		out = append(out, transitionFloor{tr: s, index: i, from: from, floor: f})
+	}
+	return out
+}
+
+// rangeUpTo returns the versions from lower up to, but not including, the first
+// version floor admits.
+func rangeUpTo(lower, floor bound) bounds {
+	return bounds{lower: lower, upper: bound{ver: floor.ver, inclusive: !floor.inclusive, family: floor.family}}
 }
 
 // unlistedBy reports whether t must list p's floor in Skips and does not, or
@@ -375,7 +400,7 @@ func plan(u *ComponentUpgrades, crossed []crossing, src, tgt *semver.Version) (b
 			order = append(order, c)
 		}
 	}
-	at := bounds{lower: pointAt(src), upper: pointAt(src)}
+	at := onlyVersion(src)
 	reach := make(map[*Transition]route, len(order))
 	for i, c := range order {
 		var cand route
@@ -416,7 +441,7 @@ func plan(u *ComponentUpgrades, crossed []crossing, src, tgt *semver.Version) (b
 		// A route into tgt that passes an unlisted floor is neither complete
 		// nor partial.
 		if to.contains(tgt) {
-			if describes(u, c.tr, r.start, bounds{lower: pointAt(tgt), upper: pointAt(tgt)}) && (!complete || r.better(best)) {
+			if describes(u, c.tr, r.start, onlyVersion(tgt)) && (!complete || r.better(best)) {
 				best, complete = r, true
 			}
 			continue
@@ -466,9 +491,9 @@ func (m move) verdict() Verdict {
 //   - the joined move breaks u's step limit
 //   - the joined move passes a floor joinPasses reports
 func moves(u *ComponentUpgrades, r route, src, tgt *semver.Version) []move {
-	target := bounds{lower: pointAt(tgt), upper: pointAt(tgt)}
+	target := onlyVersion(tgt)
 	var out []move
-	first, start := 0, bounds{lower: pointAt(src), upper: pointAt(src)}
+	first, start := 0, onlyVersion(src)
 	for i := 1; i < len(r.hops); i++ {
 		prev, next := r.hops[i-1].tr, r.hops[i].tr
 		end := target
@@ -504,37 +529,30 @@ func moves(u *ComponentUpgrades, r route, src, tgt *semver.Version) []move {
 // unless that record admits a version in start. Rule 11 lets a hop list a
 // stricter floor only for sources outside that record's `from`.
 func joinPasses(u *ComponentUpgrades, run []crossing, start, end bounds) bool {
-	for i := range u.Transitions {
-		s := &u.Transitions[i]
+	for _, r := range floorsBetween(u, start, end) {
+		s := r.tr
 		if (s.Verdict == VerdictSafe && !s.RequiredStop) || slices.ContainsFunc(run, func(c crossing) bool { return c.tr == s }) {
 			continue
 		}
-		sfrom, err := parseBounds(s.From)
-		if err != nil {
-			continue
-		}
-		sto, err := toBounds(u, s)
-		if err != nil || sto.lower.unbounded || sto.lower.ver == nil {
-			continue
-		}
-		f := sto.lower
-		if !lowerBefore(start.lower, f) || !lowerAtOrBelow(f, end.upper) {
-			continue
-		}
-		by := bounds{lower: start.lower, upper: bound{ver: f.ver, inclusive: !f.inclusive, family: f.family}}
 		if s.Verdict == VerdictSafe {
-			by = start
-		}
-		if !intervalsIntersect(sfrom, by) {
+			if intervalsIntersect(r.from, start) {
+				return true
+			}
 			continue
 		}
-		if s.Verdict == VerdictSafe || intervalsIntersect(sfrom, start) ||
-			!slices.ContainsFunc(run, func(c crossing) bool { return lists(c.tr, f.ver) }) {
-
+		if !intervalsIntersect(r.from, rangeUpTo(start.lower, r.floor)) {
+			continue
+		}
+		if intervalsIntersect(r.from, start) || !anyHopSkips(run, r.floor.ver) {
 			return true
 		}
 	}
 	return false
+}
+
+// anyHopSkips reports whether any hop in run lists v in its Skips.
+func anyHopSkips(run []crossing, v *semver.Version) bool {
+	return slices.ContainsFunc(run, func(c crossing) bool { return lists(c.tr, v) })
 }
 
 // withinStep reports whether a move from start may reach end under u's step

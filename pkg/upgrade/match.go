@@ -1003,6 +1003,11 @@ func pointAt(v *semver.Version) bound {
 	return bound{ver: v, inclusive: true}
 }
 
+// onlyVersion returns the interval holding v and nothing else.
+func onlyVersion(v *semver.Version) bounds {
+	return bounds{lower: pointAt(v), upper: pointAt(v)}
+}
+
 // fromCovers reports whether t's `from` admits at. An unparseable `from`
 // admits nothing.
 func fromCovers(t *Transition, at bound) bool {
@@ -1269,7 +1274,7 @@ func undefinedOriginExplanation(u *ComponentUpgrades, r ComponentResult, crossed
 // src and whose move toward tgt passes a floor it must list but does not, with
 // that floor's crossing as passed.
 func unlistedPassage(u *ComponentUpgrades, crossed []crossing, src, tgt *semver.Version) (rec, passed crossing, ok bool) {
-	at := bounds{lower: pointAt(src), upper: pointAt(src)}
+	at := onlyVersion(src)
 	for _, c := range crossed {
 		if !fromCovers(c.tr, pointAt(src)) {
 			continue
@@ -1279,7 +1284,7 @@ func unlistedPassage(u *ComponentUpgrades, crossed []crossing, src, tgt *semver.
 			continue
 		}
 		if to.contains(tgt) {
-			to = bounds{lower: pointAt(tgt), upper: pointAt(tgt)}
+			to = onlyVersion(tgt)
 		}
 		ps := passagesOf(u, c.tr, at, to)
 		if i := slices.IndexFunc(ps, func(p passage) bool { return p.unlistedBy(c.tr) }); i >= 0 {
