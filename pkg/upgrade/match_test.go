@@ -1265,9 +1265,9 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 			from: "1.5.0",
 			to:   "2.7.0",
 			want: "the records along the upgrade path from 1.5.0 assess only as far as the last version " +
-				"below 2.6.0, and 2.7.0 lands past that, so nothing assesses this move. Upgrade no further " +
-				"than the last version below 2.6.0 and re-run this check, or widen a record's `to` range " +
-				"to cover 2.7.0",
+				"below 2.6.0, and 2.7.0 lands past that, so nothing assesses this move. Check the move to " +
+				"the last version below 2.6.0 on its own and follow what that check reports, then re-run " +
+				"this check, or widen a record's `to` range to cover 2.7.0",
 		},
 		{
 			name: "undefined-origin names a shared floor once",
@@ -1440,8 +1440,9 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 			to:   "0.25.0",
 			want: "transition records for this component assess only as far as the last version below " +
 				"0.20.0, and 0.25.0 lands past that, so nothing assesses this move or anything above " +
-				"the last version below 0.20.0. Upgrade no further than the last version below 0.20.0 " +
-				"and re-run this check, or widen a record's `to` range to cover 0.25.0",
+				"the last version below 0.20.0. Check the move to the last version below 0.20.0 on its " +
+				"own and follow what that check reports, then re-run this check, or widen a record's " +
+				"`to` range to cover 0.25.0",
 		},
 		{
 			name: "beyond-record-ceiling names an inclusive ceiling as the version itself",
@@ -1449,8 +1450,9 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 			from: "0.17.2",
 			to:   "0.25.0",
 			want: "transition records for this component assess only as far as 0.20.0, and 0.25.0 lands " +
-				"past that, so nothing assesses this move or anything above 0.20.0. Upgrade no further " +
-				"than 0.20.0 and re-run this check, or widen a record's `to` range to cover 0.25.0",
+				"past that, so nothing assesses this move or anything above 0.20.0. Check the move to " +
+				"0.20.0 on its own and follow what that check reports, then re-run this check, or widen " +
+				"a record's `to` range to cover 0.25.0",
 		},
 		{
 			name: "beyond-record-ceiling from a source at the ceiling asks for a record from it",
@@ -1478,6 +1480,17 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 			want: "the record covering 3.0.0 assesses only as far as the last version below 3.1.0, and 5.0.0 " +
 				"lands past that. It also blocks moving from 1.5.0 into >=3.0.0 <3.1.0 in one step. Check " +
 				"the move from 1.5.0 to 3.0.0 on its own for that record's steps, then re-run this check",
+		},
+		{
+			name: "beyond-record-ceiling on a lone manual hop asks for a check of the move to its ceiling",
+			set:  oneComponent(trans("<3.0.0", ">=3.0.0 <3.1.0", VerdictManual, "M")),
+			from: "1.5.0",
+			to:   "5.0.0",
+			want: "transition records for this component assess only as far as the last version below " +
+				"3.1.0, and 5.0.0 lands past that, so nothing assesses this move or anything above the " +
+				"last version below 3.1.0. Check the move to the last version below 3.1.0 on its own and " +
+				"follow what that check reports, then re-run this check, or widen a record's `to` range " +
+				"to cover 5.0.0",
 		},
 		{
 			name: "no-record",

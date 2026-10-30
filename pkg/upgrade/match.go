@@ -1120,8 +1120,8 @@ func beyondCeilingExplanation(ceiling rangeEnd, target string) string {
 	landing := ceilingPhrase(ceiling)
 	return fmt.Sprintf(
 		"transition records for this component assess only as far as %s, and %s lands past that, "+
-			"so nothing assesses this move or anything above %s. Upgrade no further than %s and "+
-			"re-run this check, or widen a record's `to` range to cover %s",
+			"so nothing assesses this move or anything above %s. Check the move to %s on its own and "+
+			"follow what that check reports, then re-run this check, or widen a record's `to` range to cover %s",
 		landing, target, landing, landing, target)
 }
 
@@ -1146,8 +1146,8 @@ func pathCeilingExplanation(ceiling rangeEnd, source, target string) string {
 	landing := ceilingPhrase(ceiling)
 	return fmt.Sprintf(
 		"the records along the upgrade path from %s assess only as far as %s, and %s lands past that, "+
-			"so nothing assesses this move. Upgrade no further than %s and re-run this check, or widen "+
-			"a record's `to` range to cover %s",
+			"so nothing assesses this move. Check the move to %s on its own and follow what that check "+
+			"reports, then re-run this check, or widen a record's `to` range to cover %s",
 		source, landing, target, landing, target)
 }
 

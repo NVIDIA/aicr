@@ -156,7 +156,7 @@
       "verdict": "blocked",
       "notes": "8 minors, stops at \u003e=1.18.0 \u003c1.19.0",
       "reason": "beyond-record-ceiling",
-      "explanation": "transition records for this component assess only as far as the last version below 1.19.0, and 1.25.0 lands past that, so nothing assesses this move or anything above the last version below 1.19.0. Upgrade no further than the last version below 1.19.0 and re-run this check, or widen a record's `to` range to cover 1.25.0",
+      "explanation": "transition records for this component assess only as far as the last version below 1.19.0, and 1.25.0 lands past that, so nothing assesses this move or anything above the last version below 1.19.0. Check the move to the last version below 1.19.0 on its own and follow what that check reports, then re-run this check, or widen a record's `to` range to cover 1.25.0",
       "jump": "8 minors",
       "breaking": false,
       "downgrade": false,
