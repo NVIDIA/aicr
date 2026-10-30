@@ -132,13 +132,23 @@ spec:
       {{- /* as such or deployers like Argo that continuously sync the resources will result in a */}}
       {{- /* broken deployment. See https://github.com/NVIDIA/nodewright/pull/450 */}}
       resources:
-        # Sized like nvidia-setup-full: on an existing node this package now
+        {{- if eq (toString $cust.service) "eks" }}
+        # Sized like nvidia-setup-full: on an existing EKS node this package now
         # builds EFA with DKMS. At 4 CPU / 8Gi on GB300 the memory cgroup
         # OOM-killed efa's kernel-feature probes and the build failed.
         cpuLimit: 8
         cpuRequest: 4
         memoryLimit: 16Gi
         memoryRequest: 8Gi
+        {{- else }}
+        # Elsewhere the package is a no-op and runs on an undrained node (no
+        # interrupt), bound to it by nodeName: a GPU node whose workloads leave
+        # less than the request free rejects the pod outright, so stay small.
+        cpuLimit: 4
+        cpuRequest: 2
+        memoryLimit: 8Gi
+        memoryRequest: 4Gi
+        {{- end }}
 
     {{- /* Per-package gate (default true). The AKS overlays set tuningEnabled: false */}}
     {{- /* under the Azure-managed driver profile: skipping nvidia-tuned avoids its */}}
@@ -172,9 +182,14 @@ spec:
         {{- if $cust.service }}
         service: {{ $cust.service }}
         {{- end }}
-      # No dependsOn on nvidia-setup-kernel: the two run in the same pass, so on a
-      # fresh node their reboots coalesce into one. On a version bump of either,
-      # its own reboot lands before nvidia-setup-full, which waits on both.
+      # Runs after nvidia-setup-kernel rather than alongside it. nodewright hands a
+      # node's merged reboot to the first runnable package in name order and fires
+      # it as soon as no package Job is running (NVIDIA/nodewright#934), so with
+      # both runnable in one pass the kernel package's reboot could land between
+      # this package's apply and config Jobs. The chain is kernel, tuned, full,
+      # each with its own reboot, so a fresh EKS node reboots three times.
+      dependsOn:
+        nvidia-setup-kernel: "0.9.0"
     {{- end }}
 
     # Full setup after kernel is in place
