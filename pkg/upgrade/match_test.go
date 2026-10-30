@@ -603,6 +603,35 @@ func TestLevelDiffClampsRatherThanWrapping(t *testing.T) {
 	}
 }
 
+func TestStepStartsRejectOverflow(t *testing.T) {
+	tests := []struct {
+		name  string
+		start func(*semver.Version, uint64) (*semver.Version, bool)
+		v     *semver.Version
+		want  string
+	}{
+		{"next minor", minorStart, semver.MustParse("1.2.3"), "1.3.0"},
+		{"the last minor", minorStart, semver.New(1, math.MaxUint64-1, 0, "", ""), semver.New(1, math.MaxUint64, 0, "", "").String()},
+		{"a minor past the last", minorStart, semver.New(1, math.MaxUint64, 0, "", ""), ""},
+		{"next major", majorStart, semver.MustParse("1.2.3"), "2.0.0"},
+		{"a major past the last", majorStart, semver.New(math.MaxUint64, 0, 0, "", ""), ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			next, ok := tt.start(tt.v, 1)
+			if tt.want == "" {
+				if ok {
+					t.Errorf("start(%s, 1) = %s, want overflow", tt.v, next)
+				}
+				return
+			}
+			if !ok || next.String() != tt.want {
+				t.Errorf("start(%s, 1) = %v, %v, want %s", tt.v, next, ok, tt.want)
+			}
+		})
+	}
+}
+
 // TestMatchCrossingIgnoresFromMembership checks that a jump over a blocked
 // record is blocked however its `from` is written, whether or not the safe
 // record's `to` reaches the target. When the blocked record's `from` holds the

@@ -294,3 +294,113 @@ func TestVersionRangePrereleaseOfARelease(t *testing.T) {
 		})
 	}
 }
+
+func rangeOf(t *testing.T, s string) versionRange {
+	t.Helper()
+	r, err := parseRange(s)
+	if err != nil {
+		t.Fatalf("parseRange(%q) error = %v", s, err)
+	}
+	return r
+}
+
+func TestOverlaps(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b string
+		want bool
+	}{
+		{"inclusive ends meeting share that version", ">=1.0.0 <=2.0.0", ">=2.0.0 <3.0.0", true},
+		{"an exclusive end meeting an inclusive one shares nothing", ">=1.0.0 <2.0.0", ">=2.0.0 <3.0.0", false},
+		{"two exclusive ends meeting share nothing", ">=1.0.0 <2.0.0", ">2.0.0 <3.0.0", false},
+		{"< on a release leaves out its prereleases", "<2.0.0", ">=2.0.0-rc.1 <=2.0.0-rc.2", false},
+		{"<= on a release holds its prereleases", "<=2.0.0", ">=2.0.0-rc.1 <=2.0.0-rc.2", true},
+		{"disjoint ranges", ">=1.0.0 <1.5.0", ">=1.6.0 <2.0.0", false},
+		{"open ends reach each other", "<2.0.0", ">=1.0.0", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a, b := rangeOf(t, tt.a), rangeOf(t, tt.b)
+			if got := overlaps(a, b); got != tt.want {
+				t.Errorf("overlaps(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+			if got := overlaps(b, a); got != tt.want {
+				t.Errorf("overlaps(%q, %q) = %v, want %v", tt.b, tt.a, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPastCeiling(t *testing.T) {
+	tests := []struct {
+		rng, v string
+		want   bool
+	}{
+		{"<=2.0.0", "2.0.0", false},
+		{"<=2.0.0", "2.0.1", true},
+		{"<2.0.0", "2.0.0", true},
+		{"<2.0.0", "1.9.9", false},
+		{"<2.0.0", "2.0.0-rc.1", true},
+		{"<2.0.0-rc.2", "2.0.0-rc.1", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.rng+" "+tt.v, func(t *testing.T) {
+			ceiling := rangeOf(t, tt.rng).upper
+			if got := pastCeiling(ceiling, semver.MustParse(tt.v)); got != tt.want {
+				t.Errorf("pastCeiling(%q, %s) = %v, want %v", tt.rng, tt.v, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEndsEqual(t *testing.T) {
+	lower := func(s string) rangeEnd { return rangeOf(t, s).lower }
+	upper := func(s string) rangeEnd { return rangeOf(t, s).upper }
+	tests := []struct {
+		name string
+		a, b rangeEnd
+		want bool
+	}{
+		{"the same inclusive floor", lower(">=1.0.0"), lower(">=1.0.0"), true},
+		{"inclusive and exclusive at one version", lower(">=1.0.0"), lower(">1.0.0"), false},
+		{"different versions", lower(">=1.0.0"), lower(">=1.1.0"), false},
+		{"< on a release and < its first prerelease", upper("<1.0.0"), upper("<1.0.0-0"), true},
+		{"unbounded and bounded", lower("<2.0.0"), lower(">=1.0.0"), false},
+		{"two unbounded ends", lower("<2.0.0"), lower("<3.0.0"), true},
+		{"two zero values", rangeEnd{}, rangeEnd{}, true},
+		{"a zero value and a bounded end", rangeEnd{}, lower(">=1.0.0"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := endsEqual(tt.a, tt.b); got != tt.want {
+				t.Errorf("endsEqual(%+v, %+v) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+			if got := endsEqual(tt.b, tt.a); got != tt.want {
+				t.Errorf("endsEqual(%+v, %+v) = %v, want %v", tt.b, tt.a, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRangeUpTo(t *testing.T) {
+	tests := []struct {
+		floor, v string
+		want     bool
+	}{
+		{">=2.0.0", "1.9.9", true},
+		{">=2.0.0", "2.0.0-rc.1", true},
+		{">=2.0.0", "2.0.0", false},
+		{">2.0.0", "2.0.0", true},
+		{">2.0.0", "2.0.1", false},
+		{">=2.0.0", "0.9.0", false},
+	}
+	lower := rangeOf(t, ">=1.0.0").lower
+	for _, tt := range tests {
+		t.Run(tt.floor+" "+tt.v, func(t *testing.T) {
+			r := rangeUpTo(lower, rangeOf(t, tt.floor).lower)
+			if got := r.contains(semver.MustParse(tt.v)); got != tt.want {
+				t.Errorf("rangeUpTo(>=1.0.0, %q).contains(%s) = %v, want %v", tt.floor, tt.v, got, tt.want)
+			}
+		})
+	}
+}
