@@ -971,16 +971,6 @@ func crosses(t *Transition, at rangeEnd, tgt *semver.Version) (floor rangeEnd, o
 	return toRange.lower, true
 }
 
-// targetCeiling returns the ceiling of t's `to`, or the zero rangeEnd when it
-// has none or does not parse.
-func targetCeiling(u *ComponentUpgrades, t *Transition) rangeEnd {
-	b, err := targetRange(u, t)
-	if err != nil || b.upper.unbounded || b.upper.ver == nil {
-		return rangeEnd{}
-	}
-	return b.upper
-}
-
 // ceilingPhrase names the highest version a ceiling actually covers, as a place
 // an operator can be told to stop. The bare number will not do: "<0.19.0" and
 // "<=0.19.0" end at different versions, and only one of them is 0.19.0 itself.

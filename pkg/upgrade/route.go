@@ -47,6 +47,16 @@ func targetFloor(u *ComponentUpgrades, t *Transition) (floor rangeEnd, ok bool) 
 	return to.lower, true
 }
 
+// targetCeiling returns the ceiling of t's `to`, or the zero rangeEnd when it
+// has none or does not parse.
+func targetCeiling(u *ComponentUpgrades, t *Transition) rangeEnd {
+	b, err := targetRange(u, t)
+	if err != nil || b.upper.unbounded || b.upper.ver == nil {
+		return rangeEnd{}
+	}
+	return b.upper
+}
+
 // derivedCeiling returns the exclusive end of the minor, or under
 // StepLimitMajor the major, holding to's floor. ok is false unless u has a step
 // limit and to names a floor but no ceiling, or when that minor or major is the
