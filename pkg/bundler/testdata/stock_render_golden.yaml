@@ -5189,6 +5189,37 @@ rtx-pro-6000-any:
   checksums.txt: 9d5309e03ae3417bf9379e166b5c637ab5ab99351d2e266b16755e3c41379127
   deploy.sh: 187bf11702c83fdf08c22fbdd72a6b16c937314d87f85da747c4753cbe5d5de4
   recipe.yaml: ff63ef05d37bfbc5f23cdfba454836dfab9e1a6f03baa59a041a7c38b08146d2
+rtx-pro-6000-cks-ubuntu-training:
+  001-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  001-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
+  001-kai-scheduler/upstream.env: 28796b9c560ab50439fa444585d161dfdb838c82420680a85a0e6eeef3fb7af0
+  001-kai-scheduler/values.yaml: 478f75baf393a9f6c9425b543f8ea2b3103b090e75dea49284805e0ddd625265
+  002-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  002-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
+  002-nodewright-operator/upstream.env: 0255cc861df919fb968136cea798c7c118ee2df603ac2373aed0be4e4d726345
+  002-nodewright-operator/values.yaml: 51fa2415047c28bd86ba33936eaa3de9f79c6ad8ed584a152570dd02e3112299
+  003-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  003-prometheus-operator-crds/install.sh: 4c10c479d2d735c3024bf809520a4efb7f97904cda4fe211f9374189ea3292d4
+  003-prometheus-operator-crds/upstream.env: 79fc2ce93f1bb62225f9b62cfe618fde8081bce8f7a6d9a56f3a118346da4a4c
+  003-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
+  004-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  004-cert-manager/install.sh: d8043b8845f8225dc46f54e05a3a86362e30487775b59ac74f47be104e8555bd
+  004-cert-manager/upstream.env: 8984ad504d9290d252f1fd39602328bce17d424b3a96e1dc794b4887b949c01e
+  004-cert-manager/values.yaml: ce084da8e50e390f133c8b1598cc26d5cdc6655fc7e4a2a475a7fcbee4d8b22e
+  005-kube-prometheus-stack/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  005-kube-prometheus-stack/install.sh: b3575fdaa7b355db924a2cd2e8a18f82372979a4752fd89fa352a0a0f98837d6
+  005-kube-prometheus-stack/upstream.env: 4cb3f21994a62e8c6f073fca04e2fa0361f9e2841932205321375af4c8ee638a
+  005-kube-prometheus-stack/values.yaml: 2f7d660353345038395c6121dbea0b088b064bea29044ed8ccd8845ac53b36be
+  006-k8s-ephemeral-storage-metrics/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  006-k8s-ephemeral-storage-metrics/install.sh: 727160f359e5476c7211551f781f1a857aedd834922ed255197f7059d78ea816
+  006-k8s-ephemeral-storage-metrics/upstream.env: dbb5b7f8b156e8f1ad3ace176d3d1bef38280a533242107e49e0b76b24fbf435
+  006-k8s-ephemeral-storage-metrics/values.yaml: bd965e10e0f6eca07d732ea00d66e8327c176acfdc52d998809f7d4d53e056e8
+  README.md: 127c023674236f00962d21e49861d9cac267e269097dd2d7d8dc4da2b7ebc2d4
+  UPGRADING.md: 627350cdf2e92e31479be7cdbc4b3d93657d4dc6a722ab4823c2f692f6ba60f9
+  bundle-info.yaml: bb9873a9baee72773aa87d960f7eb8eb329122a98c5517dcb8574b270e30cd38
+  checksums.txt: 3d64fb64200a9e25a9a08a03bc6fa98c47acb66ea798e438e01fc1ccdd194d80
+  deploy.sh: e48c374ec3bd9cc26949b794323951533e826dfb953e6ee8f75f862ea84af45a
+  recipe.yaml: 4de7dca39151829a807f34af16ebac1e2ec031848a77945eb68656afbfb4322a
 rtx-pro-6000-eks-amazonlinux-inference:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f

@@ -85,6 +85,7 @@
             "aks",
             "any",
             "bcm",
+            "cks",
             "eks",
             "generic",
             "gke",
