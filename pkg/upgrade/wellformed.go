@@ -95,7 +95,7 @@ func checkSkips(where string, u *ComponentUpgrades, t *Transition) []string {
 	ps := passages(u, t)
 	from, ferr := parseRange(t.From)
 	for _, p := range ps {
-		if ferr != nil || strictness(t.Verdict) < 0 || !lists(t, p.c.floor.ver) ||
+		if ferr != nil || strictness(t.Verdict) < 0 || !skipsVersion(t, p.c.floor.ver) ||
 			strictness(p.c.tr.Verdict) <= strictness(t.Verdict) {
 
 			continue
@@ -118,7 +118,7 @@ func checkSkips(where string, u *ComponentUpgrades, t *Transition) []string {
 		}
 	}
 	for _, p := range ps {
-		if !p.unlistedBy(t) {
+		if !p.unclearedBy(t) {
 			continue
 		}
 		if p.stop {

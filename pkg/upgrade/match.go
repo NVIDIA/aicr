@@ -1286,8 +1286,8 @@ func unlistedPassage(u *ComponentUpgrades, crossed []crossing, src, tgt *semver.
 		if to.contains(tgt) {
 			to = onlyVersion(tgt)
 		}
-		ps := passagesOf(u, c.tr, at, to)
-		if i := slices.IndexFunc(ps, func(p passage) bool { return p.unlistedBy(c.tr) }); i >= 0 {
+		ps := passagesBetween(u, c.tr, at, to)
+		if i := slices.IndexFunc(ps, func(p passage) bool { return p.unclearedBy(c.tr) }); i >= 0 {
 			return c, ps[i].c, true
 		}
 	}

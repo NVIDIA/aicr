@@ -209,15 +209,15 @@ func passages(u *ComponentUpgrades, t *Transition) []passage {
 	if ferr != nil || terr != nil {
 		return nil
 	}
-	return passagesOf(u, t, from, to)
+	return passagesBetween(u, t, from, to)
 }
 
-// passagesOf returns the boundaries t's moves from a version in from to one in
+// passagesBetween returns the boundaries t's moves from a version in from to one in
 // to pass, in crossingBefore order. A move passes another transition's floor
 // when it starts below the floor, reaches it, and that transition's `from`
 // admits a version the move goes by below it. A floor t shares counts only
 // when the other transition is blocked and t is not.
-func passagesOf(u *ComponentUpgrades, t *Transition, from, to versionRange) []passage {
+func passagesBetween(u *ComponentUpgrades, t *Transition, from, to versionRange) []passage {
 	own, ok := targetFloor(u, t)
 	if !ok {
 		return nil
@@ -279,14 +279,14 @@ func rangeUpTo(lower, floor rangeEnd) versionRange {
 	return versionRange{lower: lower, upper: rangeEnd{ver: floor.ver, inclusive: !floor.inclusive, family: floor.family}}
 }
 
-// unlistedBy reports whether t must list p's floor in Skips and does not, or
+// unclearedBy reports whether t must list p's floor in Skips and does not, or
 // whether p is a stop, which no listing clears.
-func (p passage) unlistedBy(t *Transition) bool {
-	return p.stop || (p.required && !lists(t, p.c.floor.ver))
+func (p passage) unclearedBy(t *Transition) bool {
+	return p.stop || (p.required && !skipsVersion(t, p.c.floor.ver))
 }
 
-// lists reports whether t's Skips names v.
-func lists(t *Transition, v *semver.Version) bool {
+// skipsVersion reports whether t's Skips names v.
+func skipsVersion(t *Transition, v *semver.Version) bool {
 	return slices.ContainsFunc(t.Skips, func(s string) bool {
 		sv, err := semver.NewVersion(s)
 		return err == nil && sv.Equal(v)
@@ -296,7 +296,7 @@ func lists(t *Transition, v *semver.Version) bool {
 // describes reports whether t's moves from a version in from to one in to pass
 // no floor t must list but does not.
 func describes(u *ComponentUpgrades, t *Transition, from, to versionRange) bool {
-	return !slices.ContainsFunc(passagesOf(u, t, from, to), func(p passage) bool { return p.unlistedBy(t) })
+	return !slices.ContainsFunc(passagesBetween(u, t, from, to), func(p passage) bool { return p.unclearedBy(t) })
 }
 
 // floorOnlyRange returns the interval holding only t's `to` floor, or the zero versionRange
@@ -309,8 +309,8 @@ func floorOnlyRange(u *ComponentUpgrades, t *Transition) versionRange {
 	return versionRange{lower: to.lower, upper: rangeEnd{ver: to.lower.ver, inclusive: to.lower.inclusive, family: to.lower.family}}
 }
 
-// withinLimit returns u's transitions that keep to its step limit.
-func withinLimit(u *ComponentUpgrades) sets.Set[*Transition] {
+// transitionsWithinStepLimit returns u's transitions that keep to its step limit.
+func transitionsWithinStepLimit(u *ComponentUpgrades) sets.Set[*Transition] {
 	out := sets.New[*Transition]()
 	if u == nil {
 		return out
@@ -363,7 +363,7 @@ func (a route) better(b route) bool {
 	return false
 }
 
-func (a route) then(c crossing, start versionRange) route {
+func (a route) withHop(c crossing, start versionRange) route {
 	out := route{hops: append(slices.Clone(a.hops), c), nonSafe: a.nonSafe, start: start}
 	if c.tr.Verdict != VerdictSafe {
 		out.nonSafe++
@@ -393,7 +393,7 @@ func plan(u *ComponentUpgrades, crossed []crossing, src, tgt *semver.Version) (b
 	// Each hop's floor sits above the last, so a record's best route depends
 	// only on the records below it, and one pass in floor order finds every
 	// one.
-	limited := withinLimit(u)
+	limited := transitionsWithinStepLimit(u)
 	var order []crossing
 	for _, c := range crossed {
 		if limited.Has(c.tr) {
@@ -406,7 +406,7 @@ func plan(u *ComponentUpgrades, crossed []crossing, src, tgt *semver.Version) (b
 		var cand route
 		found := false
 		if fromCovers(c.tr, inclusiveEnd(src)) && describes(u, c.tr, at, floorOnlyRange(u, c.tr)) {
-			cand, found = route{}.then(c, at), true
+			cand, found = route{}.withHop(c, at), true
 		}
 		for _, p := range order[:i] {
 			prev, has := reach[p.tr]
@@ -419,7 +419,7 @@ func plan(u *ComponentUpgrades, crossed []crossing, src, tgt *semver.Version) (b
 
 				continue
 			}
-			if next := prev.then(c, l); !found || next.better(cand) {
+			if next := prev.withHop(c, l); !found || next.better(cand) {
 				cand, found = next, true
 			}
 		}
@@ -489,7 +489,7 @@ func (m move) verdict() Verdict {
 //
 //   - the earlier hop is a RequiredStop
 //   - the joined move breaks u's step limit
-//   - the joined move passes a floor joinPasses reports
+//   - joinMustSplit reports the joined move passes a floor it may not
 func moves(u *ComponentUpgrades, r route, src, tgt *semver.Version) []move {
 	target := onlyVersion(tgt)
 	var out []move
@@ -506,7 +506,7 @@ func moves(u *ComponentUpgrades, r route, src, tgt *semver.Version) []move {
 			why, joins = stopRequired, false
 		case joins && !withinStep(u, start.lower.ver, end.lower):
 			why, joins = stopStepLimit, false
-		case joins && joinPasses(u, r.hops[first:i+1], start, end):
+		case joins && joinMustSplit(u, r.hops[first:i+1], start, end):
 			joins = false
 		}
 		if joins {
@@ -522,13 +522,13 @@ func moves(u *ComponentUpgrades, r route, src, tgt *semver.Version) []move {
 	return append(out, move{hops: r.hops[first:], lands: target})
 }
 
-// joinPasses reports whether one move from start to end over run passes the
-// floor of a record outside run that is a RequiredStop admitting a version in
+// joinMustSplit reports whether joining run into one move from start to end
+// would pass the floor of a record outside run that is a RequiredStop admitting a version in
 // start, or manual or blocked and admitting a version the move goes by below
 // the floor. A hop in run listing the floor clears a manual or blocked one
 // unless that record admits a version in start. Rule 11 lets a hop list a
 // stricter floor only for sources outside that record's `from`.
-func joinPasses(u *ComponentUpgrades, run []crossing, start, end versionRange) bool {
+func joinMustSplit(u *ComponentUpgrades, run []crossing, start, end versionRange) bool {
 	for _, r := range floorsBetween(u, start, end) {
 		s := r.tr
 		if (s.Verdict == VerdictSafe && !s.RequiredStop) || slices.ContainsFunc(run, func(c crossing) bool { return c.tr == s }) {
@@ -552,7 +552,7 @@ func joinPasses(u *ComponentUpgrades, run []crossing, start, end versionRange) b
 
 // anyHopSkips reports whether any hop in run lists v in its Skips.
 func anyHopSkips(run []crossing, v *semver.Version) bool {
-	return slices.ContainsFunc(run, func(c crossing) bool { return lists(c.tr, v) })
+	return slices.ContainsFunc(run, func(c crossing) bool { return skipsVersion(c.tr, v) })
 }
 
 // withinStep reports whether a move from start may reach end under u's step
