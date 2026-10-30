@@ -106,8 +106,7 @@ spec:
     nvidia-setup-kernel:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-setup
       version: "0.9.0"
-      # TODO: the nvidia-setup 0.9.0 release digest, once nvidia-setup/0.9.0 is tagged.
-      containerSHA: TODO
+      containerSHA: sha256:4e7311133fd8746b2701b34c4de2c73f12ee208cace4f95bd5a5e74d454ba028
       {{- if eq (toString $cust.service) "eks" }}
       # On an existing EKS node this package does disruptive work: a version bump
       # runs its upgrade step, which upgrades EFA (an efa module too old for the
@@ -158,8 +157,8 @@ spec:
 
     nvidia-tuned:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
-      version: "0.11.0"
-      containerSHA: sha256:38e56b645a6e3234904e813c81b80dd79db3ba87721609eb6b6f452672b8a40a
+      version: "0.11.1"
+      containerSHA: sha256:d70ce00c80181d8fdeab29941a8370aced758aa6a9db9afdc5c095b6a142032a
       interrupt:
         type: reboot
       env:
@@ -182,8 +181,7 @@ spec:
     nvidia-setup-full:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-setup
       version: "0.9.0"
-      # TODO: the nvidia-setup 0.9.0 release digest, once nvidia-setup/0.9.0 is tagged.
-      containerSHA: TODO
+      containerSHA: sha256:4e7311133fd8746b2701b34c4de2c73f12ee208cace4f95bd5a5e74d454ba028
       interrupt:
         type: reboot
       {{- /* Until nodewright >= v0.18 resources that get reduced to whole numbers should be expressed */}}
@@ -214,6 +212,6 @@ spec:
         {{- /* never leave a dangling dependsOn on the omitted nvidia-tuned. */}}
         nvidia-setup-kernel: "0.9.0"
         {{- if ne (toString (index $cust "tuningEnabled")) "false" }}
-        nvidia-tuned: "0.11.0"
+        nvidia-tuned: "0.11.1"
         {{- end }}
 {{- end }}

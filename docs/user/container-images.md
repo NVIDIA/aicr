@@ -20,7 +20,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 - Components: **57**
-- Unique images: **150**
+- Unique images: **151**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -67,7 +67,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nfd-ocp-olm | manifest | — | — | 0 |
 | nktp | helm | nktp | 0.1.1-rc.3 | 8 |
 | node-problem-detector | helm | node-problem-detector | 2.4.1 | 1 |
-| nodewright-customizations | manifest | — | — | 6 |
+| nodewright-customizations | manifest | — | — | 7 |
 | nodewright-operator | helm | nodewright | v0.20.0 | 2 |
 | nvcre | helm | cluster-readiness-engine | v0.8.2 | 4 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.1 | 1 |
@@ -324,8 +324,9 @@ _No images extracted._
 ### nodewright-customizations
 
 - `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.3.0@sha256:f17c951d60b519d097c20a3d9f49668f043a996adb31b9bb4db24a112a8f60a2`
-- `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.9.0@TODO`
+- `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.9.0@sha256:4e7311133fd8746b2701b34c4de2c73f12ee208cace4f95bd5a5e74d454ba028`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.11.0@sha256:38e56b645a6e3234904e813c81b80dd79db3ba87721609eb6b6f452672b8a40a`
+- `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.11.1@sha256:d70ce00c80181d8fdeab29941a8370aced758aa6a9db9afdc5c095b6a142032a`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke:0.1.2@sha256:6671d49f006afdbeefd8858f1fa1216f7748205bc42edab3340210a2cc459a81`
 - `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1`
 - `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1@sha256:5414b06e52c090d0842704f2580798064362d771f12421ccc8888186b5f5a3cf`
