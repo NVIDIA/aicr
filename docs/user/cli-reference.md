@@ -1699,7 +1699,7 @@ This axis needs a **bundle** as `--from`. A resolved recipe records `valuesFile`
 | A record describes this move and blocks it | One upgrade reaches your target, and its record is `blocked` | `recorded` | yes |
 | Your jump takes more than one upgrade | The route takes two or more upgrades. `record-blocks` applies when one of them is `blocked`, and `multiple-boundaries` otherwise | `multiple-boundaries`, `record-blocks` | no |
 | Nothing describes your starting version | No record describes an upgrade from your version, or the route lands where none continues | `undefined-origin` | no |
-| Your target is past what the records assessed | The route stops at a ceiling below your target, or your target sits above the highest `to` ceiling any of the component's records names | `beyond-record-ceiling` | no |
+| Your target is past what the records assessed | The route stops at a ceiling below your target with no crossed boundary past that ceiling, or your target sits above the highest `to` ceiling any of the component's records names | `beyond-record-ceiling` | no |
 
 `safe` records carry no steps, so they never stop a jump on their own. The first row renders its record's steps, deployer-scoped, like a `manual` row. The other three render none, because no record describes your exact move. All four name a stopping point.
 
