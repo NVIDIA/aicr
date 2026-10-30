@@ -1432,6 +1432,24 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 				"than 0.20.0 and re-run this check, or widen a record's `to` range to cover 0.25.0",
 		},
 		{
+			name: "beyond-record-ceiling from a source at the ceiling asks for a record from it",
+			set:  oneComponent(trans("<0.18.0", ">=0.18.0 <=0.20.0", VerdictSafe, "S")),
+			from: "0.20.0",
+			to:   "0.25.0",
+			want: "transition records for this component assess only as far as 0.20.0, and 0.20.0 is " +
+				"already at that, so nothing assesses any move from it. Author a record whose `from` " +
+				"admits 0.20.0 and whose `to` covers 0.25.0, then re-run this check",
+		},
+		{
+			name: "beyond-record-ceiling from a source past the ceiling asks for a record from it",
+			set:  oneComponent(trans("<0.18.0", ">=0.18.0 <0.20.0", VerdictSafe, "S")),
+			from: "0.21.0",
+			to:   "0.25.0",
+			want: "transition records for this component assess only as far as the last version below " +
+				"0.20.0, and 0.21.0 is already past that, so nothing assesses any move from it. Author " +
+				"a record whose `from` admits 0.21.0 and whose `to` covers 0.25.0, then re-run this check",
+		},
+		{
 			name: "beyond-record-ceiling on a lone blocked hop points at its steps",
 			set:  oneComponent(trans("<3.0.0", ">=3.0.0 <3.1.0", VerdictBlocked, "B")),
 			from: "1.5.0",

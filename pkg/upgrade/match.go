@@ -738,7 +738,7 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 	// returns r and only some of them keep a record around.
 	r.Crossed = transitionsOf(crossed)
 	if len(crossed) == 0 {
-		return unmatched(u, r, tgt)
+		return unmatched(u, r, src, tgt)
 	}
 	best, complete, ok := plan(u, crossed, src, tgt)
 	if !ok {
@@ -1117,7 +1117,12 @@ func crossingPhrase(crossed []crossing) string {
 // and 3 hold together: rule 3 leaves the `from` domains no hole below the pin,
 // and rule 2 keeps every `to` ceiling at or under it, so a target above the
 // highest ceiling is past the data rather than inside a quiet stretch of it.
-func unmatched(u *ComponentUpgrades, r ComponentResult, tgt *semver.Version) ComponentResult {
+//
+// src distinguishes the two ways a jump can land past that ceiling. When src
+// is still below it, the jump passes the ceiling and the explanation names
+// where assessment stops. When src is already at or past it, nothing assesses
+// any move from src at all, and the explanation says so instead.
+func unmatched(u *ComponentUpgrades, r ComponentResult, src, tgt *semver.Version) ComponentResult {
 	switch {
 	case r.Downgrade:
 		r.Verdict = VerdictUnknown
@@ -1143,6 +1148,9 @@ func unmatched(u *ComponentUpgrades, r ComponentResult, tgt *semver.Version) Com
 			r.Reason = ReasonBeyondRecordCeiling
 			r.StoppedAt = toText(u, top)
 			r.Explanation = beyondCeilingExplanation(ceiling, r.To)
+			if pastBound(ceiling, src) || (ceiling.inclusive && src.Equal(ceiling.ver)) {
+				r.Explanation = sourceAtCeilingExplanation(ceiling, src, r.From, r.To)
+			}
 			return r
 		}
 		r.Verdict = VerdictUnknown
@@ -1166,6 +1174,21 @@ func beyondCeilingExplanation(ceiling bound, target string) string {
 			"so nothing assesses this move or anything above %s. Upgrade no further than %s and "+
 			"re-run this check, or widen a record's `to` range to cover %s",
 		landing, target, landing, landing, target)
+}
+
+// sourceAtCeilingExplanation returns the Explanation for a jump past ceiling
+// from a source already at or past it, which leaves no recorded version to
+// stop at.
+func sourceAtCeilingExplanation(ceiling bound, src *semver.Version, source, target string) string {
+	where := "at"
+	if pastBound(ceiling, src) {
+		where = "past"
+	}
+	return fmt.Sprintf(
+		"transition records for this component assess only as far as %s, and %s is already %s that, "+
+			"so nothing assesses any move from it. Author a record whose `from` admits %s and whose "+
+			"`to` covers %s, then re-run this check",
+		ceilingPhrase(ceiling), source, where, source, target)
 }
 
 // pathCeilingExplanation returns the Explanation for a jump from source to
