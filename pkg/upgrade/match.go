@@ -1213,9 +1213,10 @@ func undefinedOriginExplanation(u *ComponentUpgrades, r ComponentResult, crossed
 			crossingPhrase(crossed), r.From, strings.Join(leads, " and "))
 	}
 	s := fmt.Sprintf("%s, but no record describes an upgrade starting from %s", crossingPhrase(crossed), r.From)
-	if origin := earliestOrigin(u); origin != nil && src.Compare(origin) < 0 {
-		return fmt.Sprintf("%s; the earliest recorded starting point is %s. "+
-			"Upgrade to a recorded version first, then re-run this check", s, origin)
+	if origin, ok := earliestOrigin(u); ok && !lowerAtOrBelow(origin, inclusiveEnd(src)) {
+		return fmt.Sprintf("%s. The earliest recorded starting point is %s, and no record assesses the "+
+			"move from %s to it. Read the component's upstream release notes for that move before "+
+			"applying it, then re-run this check", s, originPhrase(origin), r.From)
 	}
 	return s + ", so nothing covers this move. Author a record for this starting point, then re-run this check"
 }
@@ -1244,26 +1245,34 @@ func unlistedPassage(u *ComponentUpgrades, crossed []crossing, src, tgt *semver.
 	return crossing{}, crossing{}, false
 }
 
-// earliestOrigin is the lowest version any of the component's `from` domains
-// admits, or nil when one of them reaches down without limit.
-func earliestOrigin(u *ComponentUpgrades) *semver.Version {
+// earliestOrigin returns the lowest floor of the component's From ranges. ok
+// is false when one reaches down without limit, or none parses.
+func earliestOrigin(u *ComponentUpgrades) (lowest rangeEnd, ok bool) {
 	if u == nil {
-		return nil
+		return rangeEnd{}, false
 	}
-	var lowest *semver.Version
 	for i := range u.Transitions {
 		b, err := parseRange(u.Transitions[i].From)
 		if err != nil {
 			continue
 		}
 		if b.lower.unbounded || b.lower.ver == nil {
-			return nil
+			return rangeEnd{}, false
 		}
-		if lowest == nil || b.lower.ver.Compare(lowest) < 0 {
-			lowest = b.lower.ver
+		if !ok || lowerBefore(b.lower, lowest) {
+			lowest, ok = b.lower, true
 		}
 	}
-	return lowest
+	return lowest, ok
+}
+
+// originPhrase returns b's version, or "the first version above" it when b is
+// exclusive.
+func originPhrase(b rangeEnd) string {
+	if b.inclusive {
+		return b.ver.String()
+	}
+	return "the first version above " + b.ver.String()
 }
 
 // claimSpan measures how far a matched record's claim reaches: from the source

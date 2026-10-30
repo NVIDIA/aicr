@@ -1277,8 +1277,9 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 			),
 			from: "1.5.0",
 			to:   "3.0.0",
-			want: "crosses the boundary at 3.0.0, but no record describes an upgrade starting from 1.5.0; " +
-				"the earliest recorded starting point is 2.0.0. Upgrade to a recorded version first, " +
+			want: "crosses the boundary at 3.0.0, but no record describes an upgrade starting from 1.5.0. " +
+				"The earliest recorded starting point is 2.0.0, and no record assesses the move from 1.5.0 " +
+				"to it. Read the component's upstream release notes for that move before applying it, " +
 				"then re-run this check",
 		},
 		{
@@ -1374,9 +1375,30 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 			set:  oneComponent(trans(">=2.0.0 <3.0.0", ">=3.0.0 <=3.0.0", VerdictManual, "O")),
 			from: "1.5.0",
 			to:   "3.0.0",
-			want: "crosses the boundary at 3.0.0, but no record describes an upgrade starting from 1.5.0; " +
-				"the earliest recorded starting point is 2.0.0. Upgrade to a recorded version first, " +
+			want: "crosses the boundary at 3.0.0, but no record describes an upgrade starting from 1.5.0. " +
+				"The earliest recorded starting point is 2.0.0, and no record assesses the move from 1.5.0 " +
+				"to it. Read the component's upstream release notes for that move before applying it, " +
 				"then re-run this check",
+		},
+		{
+			name: "undefined-origin below an exclusive from floor names the first version above it",
+			set:  oneComponent(trans(">2.0.0 <3.0.0", ">=3.0.0 <=3.0.0", VerdictManual, "O")),
+			from: "1.5.0",
+			to:   "3.0.0",
+			want: "crosses the boundary at 3.0.0, but no record describes an upgrade starting from 1.5.0. " +
+				"The earliest recorded starting point is the first version above 2.0.0, and no record " +
+				"assesses the move from 1.5.0 to it. Read the component's upstream release notes for that " +
+				"move before applying it, then re-run this check",
+		},
+		{
+			name: "undefined-origin at an exclusive from floor names the first version above it",
+			set:  oneComponent(trans(">2.0.0 <3.0.0", ">=3.0.0 <=3.0.0", VerdictManual, "O")),
+			from: "2.0.0",
+			to:   "3.0.0",
+			want: "crosses the boundary at 3.0.0, but no record describes an upgrade starting from 2.0.0. " +
+				"The earliest recorded starting point is the first version above 2.0.0, and no record " +
+				"assesses the move from 2.0.0 to it. Read the component's upstream release notes for that " +
+				"move before applying it, then re-run this check",
 		},
 		{
 			name: "undefined-origin above every from ceiling",
@@ -1395,8 +1417,9 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 			from: "1.5.0",
 			to:   "4.0.0",
 			want: "crosses 2 recorded boundaries (3.0.0, 4.0.0), but no record describes an upgrade " +
-				"starting from 1.5.0; the earliest recorded starting point is 2.0.0. Upgrade to a " +
-				"recorded version first, then re-run this check",
+				"starting from 1.5.0. The earliest recorded starting point is 2.0.0, and no record " +
+				"assesses the move from 1.5.0 to it. Read the component's upstream release notes for " +
+				"that move before applying it, then re-run this check",
 		},
 		{
 			name: "undefined-origin across several boundaries from a gap between from domains",

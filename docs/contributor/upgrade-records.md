@@ -297,9 +297,10 @@ release in between, so only write that reach when you have read their notes.
 What `from` still decides is whether *your guidance* was authored for that
 starting point. So the space below your file's lowest `from` floor is not
 neutral ground. An operator down there crosses your boundary, matches no
-`from`, and is told `blocked`: "upgrade to a recorded version first". They get
-no verdict and, unlike someone your `from` does cover, no steps either, because
-you did not write any for where they are.
+`from`, and is told `blocked` and pointed at your earliest recorded starting
+point, a move no record assesses. They get no verdict and, unlike someone your
+`from` does cover, no steps either, because you did not write any for where
+they are.
 
 That is deliberate, and it is why the floor is a decision rather than a
 formality. Choose it at the oldest version you are willing to make a statement
