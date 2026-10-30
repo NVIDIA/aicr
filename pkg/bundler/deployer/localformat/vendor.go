@@ -780,6 +780,7 @@ func doFetchIndexYAMLAttempt(ctx context.Context, indexURL string) ([]byte, erro
 			return nil
 		},
 	}
+	defer client.CloseIdleConnections()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, indexURL, nil)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
