@@ -2055,6 +2055,17 @@ func TestMatchRoutes(t *testing.T) {
 	patchStep := trans(">=1.0.0 <1.1.0", ">=1.1.0 <1.1.5", VerdictSafe, "patchStep")
 	wideStep := trans(">=1.1.0 <1.1.5", ">=1.1.5 <1.2.5", VerdictSafe, "wideStep")
 	lateManual := trans(">=1.1.5 <1.2.5", ">=1.2.5", VerdictManual, "lateManual")
+	// A safe run from 1.2.0 whose last hop lists gate's floor for entry's
+	// boundary at the same version, and gate admits 1.2.0.
+	gated := func(v Verdict) []Transition {
+		return []Transition{
+			trans(">=1.0.0 <1.5.0", ">=1.5.0 <1.8.0", VerdictSafe, "climb"),
+			trans(">=1.0.0 <1.5.0", ">=2.0.0 <2.1.0", v, "gate"),
+			skipping(trans(">=1.5.0 <1.8.0", ">=1.9.0 <2.5.0", VerdictSafe, "vault"), "2.0.0"),
+			trans(">=1.8.0 <2.0.0", ">=2.0.0 <2.5.0", VerdictSafe, "entry"),
+			trans(">=2.0.0 <2.5.0", "=2.5.0", VerdictSafe, "settle"),
+		}
+	}
 
 	tests := []struct {
 		name          string
@@ -2090,6 +2101,32 @@ func TestMatchRoutes(t *testing.T) {
 			wantVerdict: VerdictSafe,
 			wantReason:  ReasonRecorded,
 			wantMatched: "lowExit",
+		},
+		{
+			name:          "a safe run splits at a blocked floor admitting its start that a hop lists for another record",
+			trs:           gated(VerdictBlocked),
+			from:          "1.2.0",
+			to:            "2.3.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=1.5.0 <1.8.0",
+			wantRoute: []RouteStop{
+				{Versions: ">=1.5.0 <1.8.0", Verdict: VerdictSafe},
+				{Versions: "2.3.0", Verdict: VerdictSafe},
+			},
+		},
+		{
+			name:          "a safe run splits at a manual floor admitting its start that a hop lists for another record",
+			trs:           gated(VerdictManual),
+			from:          "1.2.0",
+			to:            "2.3.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=1.5.0 <1.8.0",
+			wantRoute: []RouteStop{
+				{Versions: ">=1.5.0 <1.8.0", Verdict: VerdictSafe},
+				{Versions: "2.3.0", Verdict: VerdictSafe},
+			},
 		},
 		{
 			name:          "a stop under the step limit lands within one minor of where the upgrade starts",

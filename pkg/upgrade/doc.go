@@ -96,7 +96,9 @@
 // manual or blocked ones. Consecutive safe hops join into one upgrade unless
 // the earlier is a RequiredStop, the step limit ends it, or the joined move
 // passes another RequiredStop's floor, or a manual or blocked floor no hop in
-// it lists. No Skips entry passes a RequiredStop for sources in its From.
+// it lists. No Skips entry passes a RequiredStop for sources in its From, and
+// no hop's Skips entry lets a joined move pass a manual or blocked floor whose
+// From admits the version the move starts from.
 // Records that share a floor are ordered by
 // where their `from` starts, so declaration order decides nothing.
 //

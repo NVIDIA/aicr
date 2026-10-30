@@ -498,9 +498,11 @@ func moves(u *ComponentUpgrades, r route, src, tgt *semver.Version) []move {
 }
 
 // joinPasses reports whether one move from start to end over run passes the
-// floor of a record outside run that is either a RequiredStop admitting a
-// version in start, or manual or blocked, admitting a version the move goes by
-// below the floor, and listed by no hop in run.
+// floor of a record outside run that is a RequiredStop admitting a version in
+// start, or manual or blocked and admitting a version the move goes by below
+// the floor. A hop in run listing the floor clears a manual or blocked one
+// unless that record admits a version in start. Rule 11 lets a hop list a
+// stricter floor only for sources outside that record's `from`.
 func joinPasses(u *ComponentUpgrades, run []crossing, start, end bounds) bool {
 	for i := range u.Transitions {
 		s := &u.Transitions[i]
@@ -526,7 +528,9 @@ func joinPasses(u *ComponentUpgrades, run []crossing, start, end bounds) bool {
 		if !intervalsIntersect(sfrom, by) {
 			continue
 		}
-		if s.Verdict == VerdictSafe || !slices.ContainsFunc(run, func(c crossing) bool { return lists(c.tr, f.ver) }) {
+		if s.Verdict == VerdictSafe || intervalsIntersect(sfrom, start) ||
+			!slices.ContainsFunc(run, func(c crossing) bool { return lists(c.tr, f.ver) }) {
+
 			return true
 		}
 	}
