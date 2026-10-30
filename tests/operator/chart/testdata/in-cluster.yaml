@@ -1,0 +1,6 @@
+# Layered over values.yaml: the default in-cluster registry instead of ECR.
+registry:
+  mode: inCluster
+  repository: ""
+  inCluster:
+    image: ghcr.io/nvidia/aicr-registry@sha256:1111111111111111111111111111111111111111111111111111111111111111

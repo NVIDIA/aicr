@@ -64,22 +64,55 @@ engine:
   project: aicr
 
 registry:
-  # Runtime registry prefix (oci://host/path). Required.
+  # Where the operator keeps mirrored charts, rendered bundles and evidence.
+  # inCluster: the chart runs a registry in the operator namespace with a
+  # generated login. external: the registry at registry.repository, with the
+  # aws or static provider.
+  mode: inCluster
+  # external: runtime registry prefix (oci://host/path). Required.
   repository: ""
-  # Plain HTTP to the registry: test clusters only.
+  # external: plain HTTP to the registry, test clusters only. The in-cluster
+  # registry is always plain HTTP, behind its NetworkPolicy.
   plainHTTP: false
   auth:
-    # aws: ECR through the operator's AWS identity (EKS Pod Identity or IRSA);
-    # the chart creates repoCredsSecret and the operator refreshes it.
-    # static: administrator-provided Secrets; the operator only reads them.
+    # external only. aws: ECR through the operator's AWS identity (EKS Pod
+    # Identity or IRSA); the chart creates repoCredsSecret and the operator
+    # refreshes it. static: administrator-provided Secrets; the operator only
+    # reads them.
     provider: aws
     # static: docker config Secret with this name in the operator, Job and
     # validation namespaces, created by the administrator; empty is an
     # anonymous registry.
     staticSecretRef: ""
-    # The Argo CD repo-creds Secret for the runtime registry. With aws the
-    # chart creates it; with static the administrator does.
+    # The Argo CD repo-creds Secret for the runtime registry. With aws and
+    # inCluster the chart creates it; with static the administrator does.
     repoCredsSecret: aicr-registry
+  inCluster:
+    # Registry image (cmd/aicr-registry, CNCF Distribution). Required with
+    # inCluster; the published chart defaults to its release's, by digest. The
+    # registry runs on the operator's nodes: operator.nodeSelector,
+    # operator.tolerations and operator.affinity's node affinity.
+    image: ""
+    # The cluster's DNS domain, for the registry's fully qualified host.
+    clusterDomain: cluster.local
+    storage:
+      # Holds every chart, bundle and evidence artifact the cluster ever
+      # resolves; nothing is deleted from it. The volume is kept on
+      # uninstall. Growing it needs a StorageClass that allows expansion.
+      size: 10Gi
+      # Empty uses the cluster's default StorageClass, which must exist before
+      # install; it cannot change afterwards.
+      storageClassName: ""
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 512Mi
+    # Labels of Argo CD's repo server pods, the only pods in engine.namespace
+    # the registry's NetworkPolicy admits.
+    repoServerLabels:
+      app.kubernetes.io/name: argocd-repo-server
 
 namespaces:
   # Snapshot agent only; Pod Security privileged.

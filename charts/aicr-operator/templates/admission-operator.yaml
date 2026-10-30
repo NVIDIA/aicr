@@ -19,7 +19,7 @@ the operator behaves. They are deleted with the operator on uninstall.
 Constraints on Flux objects ship with the Flux adapter.
 */}}
 {{- $operator := include "aicr-operator.operatorUser" . }}
-{{- $registry := .Values.registry.repository }}
+{{- $registry := include "aicr-operator.registry" . }}
 {{- $jobs := .Values.namespaces.jobs }}
 {{- $discovery := .Values.namespaces.discovery }}
 {{- $validation := .Values.namespaces.validation }}

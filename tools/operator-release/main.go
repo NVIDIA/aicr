@@ -60,9 +60,10 @@ func run(args []string, out io.Writer) error {
 
 func build(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("build", flag.ContinueOnError)
-	dir := fs.String("dir", "dist/candidate", "Candidate directory: image/, sbom/ and plugin/ from the build.")
+	dir := fs.String("dir", "dist/candidate", "Candidate directory: image/, registry-image/, sbom/ and plugin/ from the build.")
 	ver := fs.String("version", "", "Candidate release version, such as v0.1.0-rc.1.")
 	repository := fs.String("repository", "", "Operator image repository the candidate is published to.")
+	registryRepository := fs.String("registry-repository", "ghcr.io/nvidia/aicr-registry", "In-cluster registry image repository the candidate is published to.")
 	commit := fs.String("commit", "", "Source commit.")
 	commitDate := fs.String("commit-date", "", "Source commit date, RFC 3339 UTC.")
 	goVersion := fs.String("go-version", "", "Go toolchain version.")
@@ -91,8 +92,12 @@ func build(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	registry, err := readImage(filepath.Join(*dir, "registry-image"), *registryRepository)
+	if err != nil {
+		return err
+	}
 	aicr := AICR{Version: s.Operator.AICRVersion, Image: s.Operator.AICRImage, ValidatorImages: s.validators()}
-	name, archive, err := packageChart(os.DirFS(*chartDir), *ver, aicr, image.Ref())
+	name, archive, err := packageChart(os.DirFS(*chartDir), *ver, aicr, image.Ref(), registry.Ref())
 	if err != nil {
 		return err
 	}
@@ -126,8 +131,9 @@ func build(args []string, out io.Writer) error {
 		Operator:  image,
 		Chart:     File{Name: chartFile, Digest: sha256Of(archive)},
 		Plugin:    plugin, SBOMs: sboms,
-		AICR:   aicr,
-		Inputs: inputs,
+		AICR:     aicr,
+		Registry: registry,
+		Inputs:   inputs,
 	}
 	if err = m.seal(); err != nil {
 		return err
@@ -146,7 +152,8 @@ func build(args []string, out io.Writer) error {
 	if err = os.WriteFile(filepath.Join(*dir, "candidate-values.yaml"), vals, 0o600); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(out, "candidate %s %s\noperator %s\nchart %s %s\n", m.Version, m.Digest, m.Operator.Ref(), m.Chart.Name, m.Chart.Digest)
+	_, err = fmt.Fprintf(out, "candidate %s %s\noperator %s\nregistry %s\nchart %s %s\n",
+		m.Version, m.Digest, m.Operator.Ref(), m.Registry.Ref(), m.Chart.Name, m.Chart.Digest)
 	return err
 }
 
@@ -154,6 +161,7 @@ func extract(args []string) error {
 	fs := flag.NewFlagSet("extract", flag.ContinueOnError)
 	dir := fs.String("dir", "dist/candidate", "Candidate directory.")
 	platform := fs.String("platform", "linux/amd64", "Image platform.")
+	layout := fs.String("image", "image", "Image layout in the candidate directory: image (the operator) or registry-image.")
 	binary := fs.String("binary", "ko-app/aicr-operator", "Binary path in the image.")
 	outFile := fs.String("out", "", "Where to write the binary.")
 	if err := fs.Parse(args); err != nil {
@@ -162,7 +170,7 @@ func extract(args []string) error {
 	if *outFile == "" {
 		return errors.New("-out is required")
 	}
-	image, err := readImage(filepath.Join(*dir, "image"), "candidate")
+	image, err := readImage(filepath.Join(*dir, *layout), "candidate")
 	if err != nil {
 		return err
 	}
@@ -170,5 +178,5 @@ func extract(args []string) error {
 	if !ok {
 		return fmt.Errorf("the candidate has no %s image", *platform)
 	}
-	return extractBinary(filepath.Join(*dir, "image"), digest, *binary, *outFile)
+	return extractBinary(filepath.Join(*dir, *layout), digest, *binary, *outFile)
 }

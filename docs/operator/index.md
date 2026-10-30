@@ -70,7 +70,7 @@ GKE with a training job running throughout.
 | Installing charts and repairing drift | Argo CD |
 | Device lifecycles | Component operators, such as GPU Operator |
 | When to resolve and roll out, in what order, approvals, readiness at the current revision, removal | The operator |
-| Serving every chart from your registry, pinned by digest | The operator |
+| Serving every chart from the runtime registry, pinned by digest | The operator |
 
 The operator does not replace GPU Operator, allocate tenant GPUs, infer
 training performance from healthy pods, roll back automatically, or run its own
@@ -81,24 +81,27 @@ node drains.
 ### Prerequisites
 
 - Kubernetes 1.34 or later, with Argo CD installed at the pinned release.
-- An OCI registry for charts, bundles and evidence. On EKS, an ECR repository
-  prefix plus an IAM role for the operator through EKS Pod Identity or IRSA;
-  the operator refreshes Argo CD's ECR credentials.
+- Storage for the runtime registry. By default the chart runs the registry in
+  the operator namespace, on a 10 GiB volume from the cluster's default
+  StorageClass and with a login it generates. That StorageClass and its CSI
+  driver must exist before install. EKS has neither until its recipe installs
+  them through the operator, so on EKS use an external registry
+  ([choosing a registry](#choosing-a-registry)).
 - The namespaces your recipe deploys into, listed in the chart values; the
   chart creates them with their Pod Security labels and keeps them on
   uninstall.
 
 The [chart README](https://github.com/NVIDIA/aicr/blob/main/charts/aicr-operator/README.md)
 details each prerequisite, what the chart installs, and its admission policies;
-[installing on EKS](eks-installation.md) walks through ECR, the operator's AWS
-identity and the component namespaces.
+[installing on EKS](eks-installation.md) walks through an ECR registry, the
+operator's AWS identity and the component namespaces.
 
 ### Install the chart
 
-Each AICR release publishes the operator image and its chart, tagged with the
-release version. The chart defaults to that release's operator image and to the
-AICR and validator images the operator was qualified against, all pinned by
-digest. That AICR release can be earlier than the one the chart ships in:
+Each AICR release publishes the operator image, the in-cluster registry image
+and the chart, tagged with the release version. The chart defaults to that
+release's operator and registry images and to the AICR and validator images
+the operator was qualified against, all pinned by digest. That AICR release can be earlier than the one the chart ships in:
 `helm show values` shows it, and [operations](operations.md#upgrading-aicr-within-v1)
 moves it.
 
@@ -112,11 +115,6 @@ kubectl label namespace aicr-system pod-security.kubernetes.io/enforce=restricte
 Create `values.yaml` with your cluster's inputs:
 
 ```yaml
-registry:
-  repository: oci://<account>.dkr.ecr.<region>.amazonaws.com/aicr
-operator:
-  serviceAccountAnnotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::<account>:role/aicr-operator
 namespaces:
   components:          # every namespace the recipe deploys into
     - name: gpu-operator
@@ -141,15 +139,41 @@ gh attestation verify "oci://ghcr.io/nvidia/charts/aicr-operator:${VERSION}" --r
   --version "${VERSION}" --namespace aicr-system -f values.yaml
 ```
 
-Required: `registry.repository` and `namespaces.components`; with the `aws`
-registry provider, the operator's AWS identity in
-`operator.serviceAccountAnnotations`. Set `approvers.users` or
+Required: `namespaces.components`, and with an external registry,
+`registry.repository` and its credentials. Set `approvers.users` or
 `approvers.groups`, or bind the `aicr-operator-approver` roles yourself: with no
 approver, a rollout that needs approval waits in `AwaitingApproval` and expires
 at its deadline. Everything else has a working default; `validation.enabled` is
 recommended. Every value,
 with its default and when to set it, is in the
 [chart's values reference](https://github.com/NVIDIA/aicr/blob/main/charts/aicr-operator/README.md#values).
+
+### Choosing a registry
+
+The operator keeps the charts it mirrors, the bundles AICR renders and
+validation evidence in an OCI registry, and Argo CD pulls every chart from it.
+The registry is storage, not something the operator trusts: every plan pins
+each chart by digest, so a lost or altered artifact fails the pull instead of
+deploying other content.
+
+| `registry.mode` | What you provide | Use it for |
+| --- | --- | --- |
+| `inCluster`, the default | A default StorageClass that exists before install, or `registry.inCluster.storage.storageClassName` | A cluster with storage in place and no registry of its own to manage |
+| `external` | `registry.repository` and its credentials: ECR through the operator's AWS identity (`aws`), or Secrets you create (`static`) | A registry you already run, with your own retention, replication or access control; EKS, whose storage the recipe installs |
+
+The in-cluster registry runs in the operator namespace under the restricted
+Pod Security profile and serves plain HTTP inside the cluster. Only the
+operator, the AICR Job and validation namespaces and Argo CD's repo server
+reach it, where the CNI enforces NetworkPolicy; `kubectl port-forward`
+bypasses the policy, so for anyone allowed to port-forward in the operator
+namespace the login is the only control. It keeps serving through uninstall,
+and it deletes nothing, so size the volume for every plan the cluster will
+resolve. [Security](security.md#the-runtime-registry) covers the trust model.
+
+Choose before you install: plans name the registry they were mirrored to, so
+changing `registry.mode` on a running installation is not supported. An
+installation from a release before the in-cluster default keeps its registry
+with `registry.mode: external`; the chart refuses to render until it is set.
 
 ### Install the kubectl plugin
 
@@ -233,7 +257,8 @@ BUNDLE="<registry>/bundles/cluster@sha256:<digest>"
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/aicr-reproduce:/work" -w /work \
   "${AICR_IMAGE}" bundle --recipe recipe.json "${PLAN_FLAGS[@]}" --output cli-bundle
 
-# Pull the bundle the operator rendered (log in to your registry first).
+# Pull the bundle the operator rendered: log in to an external registry first.
+# For the in-cluster registry, run the port-forward and pull reproduce prints.
 oras pull "${BUNDLE}" -o aicr-reproduce/operator-bundle
 
 diff -r aicr-reproduce/operator-bundle aicr-reproduce/cli-bundle && echo "zero diff"
