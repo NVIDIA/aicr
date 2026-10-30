@@ -60,13 +60,13 @@ type ComponentUpgrades struct {
 	Kind       string `yaml:"kind"`
 	Component  string `yaml:"component"`
 
-	// StepLimit limits each move to the next major.minor under StepLimitMinor,
-	// ignoring patch versions, or to the next major under StepLimitMajor,
-	// ignoring minor and patch versions. Empty means no limit. Under either
-	// limit a manual or blocked `to` may omit its ceiling, which is then the
-	// end of its floor's minor or major. Under StepLimitMinor a move into a new
-	// major also needs a record whose `to` is in that major's first minor and
-	// whose `from` names the old major's last minor.
+	// StepLimit caps each move at the next minor under StepLimitMinor or the
+	// next major under StepLimitMajor, whatever the lower levels. Empty means
+	// no limit. Under either limit a manual or blocked To may omit its
+	// ceiling, which is then the end of its floor's minor or major. Under
+	// StepLimitMinor a move into a new major also needs a record whose To is
+	// in that major's first minor and whose From names the old major's last
+	// minor.
 	StepLimit string `yaml:"stepLimit,omitempty"`
 
 	Transitions []Transition `yaml:"transitions,omitempty"`
@@ -138,9 +138,9 @@ type Transition struct {
 	//     move goes by
 	//
 	// A blocked transition sharing this one's floor counts unless this one is
-	// blocked too. A move passing a floor it must list but does not is not
-	// described by this transition, and neither is one passing a RequiredStop
-	// whose From overlaps this one's, listed or not.
+	// blocked too. This transition does not describe a move that passes a
+	// floor it must list but does not, or a RequiredStop whose From overlaps
+	// this one's, listed or not.
 	Skips []string `yaml:"skips,omitempty"`
 
 	// RequiredStop reports whether a cluster taking this transition must stop

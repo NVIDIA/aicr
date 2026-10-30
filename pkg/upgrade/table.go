@@ -464,16 +464,12 @@ func wrapText(text string, width int) []string {
 	return append(lines, line)
 }
 
-// escapeControlChars renders artifact-derived text for a terminal. Component
-// names, versions and artifact paths all come from a recipe or bundle the
-// operator did not necessarily write, and the table is the surface they read a
-// verdict off, so a crafted value carrying newlines or an ANSI sequence could
-// forge a row or recolor one. Control characters are shown rather than
-// executed.
-//
-// Only the table does this. JSON output stays faithful because encoding/json
-// already escapes these bytes, and a consumer parsing it is not a terminal.
+// escapeControlChars returns s with each control character written as \n, \r,
+// \t or \xNN, so artifact-derived text cannot forge or recolor a table row.
 func escapeControlChars(s string) string {
+	// Component names, versions and paths come from artifacts the operator
+	// may not have written. JSON output needs no such step, since
+	// encoding/json already escapes these bytes.
 	if strings.IndexFunc(s, unicode.IsControl) < 0 {
 		return s
 	}

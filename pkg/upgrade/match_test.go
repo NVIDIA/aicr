@@ -602,8 +602,8 @@ func TestLevelDiffClampsRatherThanWrapping(t *testing.T) {
 }
 
 // TestMatchCrossingIgnoresFromMembership checks that a jump over a blocked
-// record is blocked however its `from` is written, whether or not the safe
-// record's `to` reaches the target. When the blocked record's `from` holds the
+// record is blocked however its From is written, whether or not the safe
+// record's To reaches the target. When the blocked record's From holds the
 // source, that record describes the jump and its steps render.
 func TestMatchCrossingIgnoresFromMembership(t *testing.T) {
 	tests := []struct {

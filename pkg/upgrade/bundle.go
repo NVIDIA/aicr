@@ -261,11 +261,11 @@ func checkRenderCall(w io.Writer, deployer string) error {
 	return nil
 }
 
-// mdInline renders record prose as one Markdown line. Record prose is folded
-// YAML, so its line breaks carry no meaning, and one left in would end a list
-// item or table row early. escapeControlChars then escapes what control
-// characters remain.
+// mdInline returns s as one Markdown line, with each run of whitespace
+// collapsed to a space and control characters escaped.
 func mdInline(s string) string {
+	// Record prose is folded YAML, so its line breaks carry no meaning, and
+	// one left in would end a list item or table row early.
 	return escapeControlChars(strings.Join(strings.Fields(s), " "))
 }
 

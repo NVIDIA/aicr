@@ -45,12 +45,10 @@ type rangeEnd struct {
 	inclusive bool
 	unbounded bool
 
-	// family reports whether ver is a release whose prereleases this
-	// exclusive upper side also leaves out, so the side sits at ver's first
-	// prerelease, X.Y.Z-0. parseRange sets it for a release named by <, so
-	// "<1.25.0" leaves out 1.25.0-rc.1, which likely carries changes meant
-	// for 1.25.0. Every other operator compares in plain semver order, so
-	// ">=1.25.0" leaves it out too.
+	// family reports whether this exclusive upper side also leaves out the
+	// prereleases of ver, a release, so it compares at X.Y.Z-0. parseRange
+	// sets it only for a release named by <, so "<1.25.0" leaves out
+	// 1.25.0-rc.1. Every other operator compares in plain semver order.
 	family bool
 }
 
@@ -127,16 +125,18 @@ func lowerAtOrBelow(lo, hi rangeEnd) bool {
 	return lo.inclusive && hi.inclusive
 }
 
-// contiguous reports whether coverage continues from an upper bound into the
-// next lower bound. Comparing versions alone is not enough: "<0.18.0" followed
-// by ">0.18.0" leaves exactly 0.18.0 uncovered while the versions look equal.
-// Coverage compares versions as written, so "<0.18.0" followed by ">=0.18.0"
-// is contiguous although it leaves out 0.18.0's prereleases. No record need
-// describe those, and a cluster on one matches no transition.
+// contiguous reports whether coverage continues from upper into the next lower
+// bound, lower, comparing versions as written. Special cases are:
+//
+//   - "<0.18.0" then ">0.18.0" is not contiguous, since 0.18.0 is uncovered
+//   - "<0.18.0" then ">=0.18.0" is contiguous, though it leaves out 0.18.0's
+//     prereleases
 func contiguous(upper, lower rangeEnd) bool {
 	if upper.unbounded || lower.unbounded {
 		return true
 	}
+	// No record need describe the prereleases of a release named by <, and a
+	// cluster on one matches no transition.
 	cmp := lower.ver.Compare(upper.ver)
 	if cmp < 0 {
 		return true
@@ -160,11 +160,8 @@ type versionRange struct {
 	upper rangeEnd
 }
 
-// contains reports whether v falls inside the interval. The zero value of
-// versionRange (both sides bounded with a nil ver, the shape returned alongside
-// every parseRange error) contains nothing, so a caller that logs a
-// parseRange error and calls contains anyway gets a safe "no match" instead
-// of a nil-pointer panic.
+// contains reports whether b holds v. The zero versionRange, which parseRange
+// returns with every error, contains nothing.
 func (b versionRange) contains(v *semver.Version) bool {
 	if !b.lower.unbounded {
 		if b.lower.ver == nil {
@@ -207,7 +204,7 @@ func onlyVersion(v *semver.Version) versionRange {
 	return versionRange{lower: inclusiveEnd(v), upper: inclusiveEnd(v)}
 }
 
-// overlaps reports whether two intervals share at least one version.
+// overlaps reports whether a and b share at least one version.
 func overlaps(a, b versionRange) bool {
 	return lowerAtOrBelow(a.lower, b.upper) && lowerAtOrBelow(b.lower, a.upper)
 }
@@ -362,12 +359,12 @@ func splitComparator(tok string) (op, ver string) {
 	}
 }
 
-// parseRangeVersion parses one bound's version under the grammar's rules:
-// full X.Y.Z, no wildcard, no build metadata. A prerelease identifier is
-// legal on either bound and compares exactly, because a component pinned at a
-// prerelease (grove, v0.1.0-alpha.12) cannot otherwise have an honest record. constraint is the full range text
-// the version came from, carried only so rejections can name it.
+// parseRangeVersion parses s, one bound's version in constraint. s must be a
+// full X.Y.Z version with no wildcard or build metadata, and may carry a
+// prerelease, which compares exactly. Every error names constraint.
 func parseRangeVersion(constraint, s string) (*semver.Version, error) {
+	// Prereleases are legal because a component pinned at one, like grove at
+	// v0.1.0-alpha.12, cannot otherwise have an honest record.
 	if strings.Contains(s, "+") {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("range %q: version %q carries build metadata, which semver orders as equal; "+

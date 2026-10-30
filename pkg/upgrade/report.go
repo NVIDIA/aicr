@@ -529,9 +529,9 @@ func reportSteps(steps []Step) []ReportStep {
 	return out
 }
 
-// notesCell composes the table's last column. It states what changed, then
-// what the verdict rests on, then how far the verdict's claim reaches when
-// that is wider than the jump itself.
+// notesCell returns the table's notes column for r: what changed, what the
+// verdict rests on, and how far the verdict's claim reaches when that is wider
+// than the jump.
 func notesCell(r ComponentResult, c ReportComponent) string {
 	switch r.Change {
 	case ChangeAdded:

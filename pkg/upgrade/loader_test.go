@@ -350,11 +350,10 @@ func TestLoadAllowsNilSourceWhenNothingReferencesAFile(t *testing.T) {
 }
 
 // TestLoadAndValidateAcceptAWellFormedRecord checks that one realistic record,
-// replaces included, decodes and satisfies all eleven rules at once. Each clause
-// is load bearing. Rule 3 needs the two from domains to meet and reach the
-// pin, rule 7 needs each from to stop at its own to floor, rule 8 needs the
-// two floors to differ, and rule 6 needs the explicit group plus the remainder
-// to cover every deployer.
+// replaces included, decodes and satisfies all eleven rules. Its two From
+// domains meet and reach the pin (rule 3), each From stops at its own To floor
+// (rule 7), its two floors differ (rule 8), and its explicit group plus the
+// remainder cover every deployer (rule 6).
 func TestLoadAndValidateAcceptAWellFormedRecord(t *testing.T) {
 	const body = `apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades

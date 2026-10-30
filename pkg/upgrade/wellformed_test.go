@@ -490,12 +490,10 @@ func TestValidatePinCeilingSkipsReplacesOnlyRecord(t *testing.T) {
 	}
 }
 
-// parseRange treats an empty or contradictory `to` interval (e.g.
-// ">=0.30.0 <=0.19.0") as harmless: both range representations agree it
-// matches nothing. Rule 2 only ever compares upper(to) against the pin, so
-// such a to must be rejected explicitly, or a record moving the floor
-// without moving the ceiling would validate clean while claiming a boundary
-// that does not exist.
+// TestValidatePinCeilingRejectsEmptyToRange checks that rule 2 rejects a To
+// matching no version, such as ">=0.30.0 <=0.19.0". Rule 2 compares only To's
+// ceiling against the pin, so without this a record could move its floor past
+// its ceiling and still validate.
 func TestValidatePinCeilingRejectsEmptyToRange(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -585,11 +583,10 @@ func TestValidateDirectionalUnparseableToReportedOnce(t *testing.T) {
 	}
 }
 
-// parseRange treats an empty or contradictory `from` interval (e.g.
-// ">=0.20.0 <0.18.0") as harmless: both range representations agree it
-// matches nothing. checkDirectional compares upper(from) against lower(to),
-// so such a from must be rejected explicitly, or a record that can never
-// apply would sail through the disjointness check as spuriously "safe".
+// TestValidateDirectionalRejectsEmptyFromRange checks that a From matching no
+// version, such as ">=0.20.0 <0.18.0", is rejected. checkDirectional compares
+// only From's ceiling against To's floor, so without this a record that can
+// never apply would pass it.
 func TestValidateDirectionalRejectsEmptyFromRange(t *testing.T) {
 	tests := []struct {
 		name string

@@ -184,9 +184,9 @@ func TestNewConstraintError(t *testing.T) {
 	}
 }
 
-// Every parseRange error returns the zero-value versionRange{}, whose sides are
-// bounded (unbounded: false) with a nil ver. A caller that logs the error
-// and calls contains anyway must get false, not a nil-pointer panic.
+// TestVersionRangeZeroValueContainsIsFalse checks that the zero versionRange,
+// which every parseRange error returns, contains no version and does not
+// panic on its nil vers.
 func TestVersionRangeZeroValueContainsIsFalse(t *testing.T) {
 	v, err := semver.NewVersion("1.0.0")
 	if err != nil {
@@ -217,11 +217,8 @@ func TestParseRangePrereleaseAllowedInTo(t *testing.T) {
 	}
 }
 
-// parseRange agrees with Masterminds, except that "<X.Y.Z" on a release also
-// leaves out X.Y.Z's prereleases, so its oracle is "<X.Y.Z-0". A sweep over
-// release versions only would pass while missing prerelease behavior
-// entirely, so the table carries prerelease and boundary-adjacent versions on
-// purpose.
+// TestVersionRangeAgreesWithMasterminds checks that parseRange agrees with
+// Masterminds, whose oracle for "<X.Y.Z" on a release is "<X.Y.Z-0".
 func TestVersionRangeAgreesWithMasterminds(t *testing.T) {
 	constraints := []struct{ rng, oracle string }{
 		{"<0.18.0", "<0.18.0-0"},
@@ -233,6 +230,7 @@ func TestVersionRangeAgreesWithMasterminds(t *testing.T) {
 		{">=0.1.0-alpha.1 <=0.1.0-alpha.12", ">=0.1.0-alpha.1 <=0.1.0-alpha.12"},
 		{"<0.1.0-alpha.12", "<0.1.0-alpha.12"},
 	}
+	// A sweep over releases alone would miss prerelease behavior entirely.
 	sweep := []string{
 		"0.0.1", "0.17.9", "0.17.9-rc.1",
 		"0.18.0-alpha.1", "0.18.0-rc.1", "0.18.0", "0.18.1",
@@ -264,9 +262,9 @@ func TestVersionRangeAgreesWithMasterminds(t *testing.T) {
 	}
 }
 
-// A release's prerelease likely carries changes meant for that release, so
-// "<1.25.0" leaves it out. Every other operator orders it in plain semver,
-// below the release.
+// TestVersionRangePrereleaseOfARelease checks that "<1.25.0" leaves out
+// 1.25.0-rc.1 and that every other operator orders it below 1.25.0, in plain
+// semver.
 func TestVersionRangePrereleaseOfARelease(t *testing.T) {
 	rc := semver.MustParse("1.25.0-rc.1")
 	tests := []struct {

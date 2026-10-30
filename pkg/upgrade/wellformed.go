@@ -86,10 +86,12 @@ func validateRecord(name string, u *ComponentUpgrades, pin string) []string {
 }
 
 // checkSkips implements rule 11, an addition to ADR-021. It returns a
-// violation for each floor t's moves pass that t must list in Skips but does
-// not, for each Skips entry that is invalid or names no floor they pass, and
-// for each listed floor whose transition has a stricter verdict and a `from`
-// overlapping t's.
+// violation for each:
+//
+//   - floor t's moves pass that t must list in Skips but does not
+//   - Skips entry that is invalid or names no floor they pass
+//   - listed floor whose transition has a stricter verdict and a From
+//     overlapping t's
 func checkSkips(where string, u *ComponentUpgrades, t *Transition) []string {
 	var v []string
 	ps := passages(u, t)
@@ -316,33 +318,16 @@ func checkStepGroups(where string, t *Transition) []string {
 	return v
 }
 
-// checkPinCeiling implements rule 2. It fires per transition, so a record
-// carrying only a replaces block is untouched: it has no `to` to compare.
+// checkPinCeiling implements rule 2 for t, a transition of a component pinned
+// at pin. It returns a violation when t's To:
 //
-// Only safe is held to the pin. ADR-021 originally held every verdict to it,
-// reasoning that an author cannot have read the migration notes for a version
-// nobody has released. That reasoning covers safe and only safe: safe is the
-// vouching verdict, and vouching past what AICR ships is the false-confidence
-// failure the ADR exists to prevent. manual and blocked are warnings carrying
-// instructions, and holding those to the pin forced the wrong order of work —
-// bump first, document after — when the order that actually qualifies an
-// upgrade is to read the migration notes, write the record, then bump. A
-// component AICR deliberately holds below a known-breaking release is the case
-// that exposed this: the record most worth having described the release AICR
-// would not ship, so the rule forbade exactly the guidance operators needed.
-// Over-warning is the safe direction; a manual or blocked record reaching
-// forward can never read as a pass.
+//   - does not parse
+//   - has no floor
+//   - has no ceiling, unless limited and t is manual or blocked
+//   - matches no version
 //
-// The obligation stays self-renewing without this: rule 3 fails any bump that
-// leaves a from gap below the new pin, which is what forces a record back open.
-//
-// The non-comparable-pin failure is an addition to ADR-021 rather than a
-// transcription of it. The ADR assigns such a pin the unversioned verdict at
-// check time and does not make it an authoring error; failing closed here means
-// a record cannot make version claims nobody can verify. Relaxing this later is
-// the cheap direction if it proves wrong.
-//
-// When limited, a manual or blocked `to` may omit its ceiling.
+// For a safe t it also returns one when pin carries build metadata or is not
+// a comparable version, or when To's ceiling reaches past pin.
 func checkPinCeiling(where string, t *Transition, pin string, limited bool) []string {
 	b, err := parseRange(t.To)
 	if err != nil {
@@ -375,11 +360,16 @@ func checkPinCeiling(where string, t *Transition, pin string, limited bool) []st
 	if b.upper.unbounded {
 		return v
 	}
-	// Everything below compares the ceiling against the pin, which only a
-	// vouching verdict owes an answer to.
+	// Only safe vouches, so only safe is held to the pin. A manual or blocked
+	// record may describe a release past the pin, which lets guidance land
+	// before the bump, and rule 3 still fails a bump that leaves a From gap
+	// below the new pin.
 	if t.Verdict != VerdictSafe {
 		return v
 	}
+	// Failing on a non-comparable pin is an addition to ADR-021, which gives
+	// such a pin the unversioned verdict at check time. It keeps a record
+	// from making version claims nobody can verify.
 	if strings.Contains(pin, "+") {
 		return append(v, fmt.Sprintf(
 			"%s is pinned at %q, which carries build metadata; semver orders build metadata as equal, so such a bump would move past no ceiling",
@@ -516,8 +506,8 @@ func checkCoverageReachesPin(component string, cur rangeEnd, pinVer *semver.Vers
 }
 
 // checkDistinctMoves implements rule 8, an addition to ADR-021. It returns a
-// violation for each pair of u's transitions whose `from` ranges overlap and
-// whose `to` ranges overlap, skipping ranges that do not parse.
+// violation for each pair of u's transitions whose From ranges overlap and
+// whose To ranges overlap, skipping ranges that do not parse.
 func checkDistinctMoves(u *ComponentUpgrades) []string {
 	type span struct{ from, to versionRange }
 	spans := make([]*span, len(u.Transitions))
