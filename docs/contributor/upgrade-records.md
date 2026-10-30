@@ -94,8 +94,8 @@ there looking authoritative.
 reason `manual` does: the verdict says "not in one step", and the steps are you
 saying what to do instead. They render under the row, deployer-scoped, exactly
 as a `manual` record's do, whenever your record is the one that describes the
-operator's move. What the check withholds is somebody *else's* steps. When two
-or more records ask for work along the jump, or the jump crosses your boundary
+operator's move. What the check withholds is somebody *else's* steps. When the
+selected route takes two or more upgrades, or the jump crosses your boundary
 from a starting point your `from` does not cover, no steps render at all,
 because composing two migrations or running one authored for a different origin
 is the failure `blocked` exists to prevent. Your steps render when your record
