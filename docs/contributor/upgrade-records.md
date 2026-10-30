@@ -330,9 +330,10 @@ describes the release you are *not* shipping is exactly the one an operator
 needs. Put the ceiling at the boundary you assessed and let a target above it
 land on `beyond-record-ceiling`, which is what turns "this jump has to be taken
 on its own" into something the tool says rather than something prose asks for.
-When that record is `blocked`, the report sends the operator to its steps
-rather than to its ceiling, since the ceiling lies inside the interval it
-forbids.
+When that record is `blocked`, the report renders no steps and does not send
+the operator to its ceiling, since the ceiling lies inside the interval it
+forbids. Its explanation says to check the move to the record's floor on its
+own, and that check renders the steps.
 
 ### Listing the boundaries your record passes
 
