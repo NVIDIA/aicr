@@ -250,8 +250,18 @@ Range grammar is deliberately restricted: a single AND-group of simple
 comparators (`<`, `<=`, `>`, `>=`, `=`, or a bare version). No `||`, no hyphen
 ranges, no `^`/`~`, no wildcards, no partial versions, no build metadata.
 Anything ambiguous is rejected rather than approximated, because a wrong
-structural check is worse than a rejected record. Prereleases are supported:
-grove is pinned at one.
+structural check is worse than a rejected record. Prereleases are supported,
+and grove is pinned at one.
+
+`<1.25.0` leaves out 1.25.0's prereleases, such as `1.25.0-rc.1`, because a
+prerelease likely carries changes meant for its release. Every other operator
+orders a prerelease below its release, so `<=1.25.0` admits `1.25.0-rc.1` and
+`>=1.25.0`, `>1.25.0` and `=1.25.0` leave it out. A cluster on a release's
+prerelease therefore matches no record unless one names prereleases
+explicitly, as grove's do with `<0.1.0-alpha.12`. The coverage check does not
+count those versions as a gap. A prerelease bound compares exactly, so
+`>=1.25.0-rc.1 <1.25.0` matches nothing. Write `<=1.25.0` or name the last
+prerelease instead.
 
 **Deployer groups must partition.** No two explicit groups may claim the same
 deployer, at most one group may omit `deployers` (that one is *the* remainder),

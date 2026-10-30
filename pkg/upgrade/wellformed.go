@@ -365,7 +365,7 @@ func checkPinCeiling(where string, t *Transition, pin string, limited bool) []st
 	// it and validate a boundary at a version the record never actually
 	// reaches. Both sides must be bounded to ask the question at all.
 	if !b.lower.unbounded && !b.upper.unbounded {
-		cmp := b.lower.ver.Compare(b.upper.ver)
+		cmp := b.lower.at().Compare(b.upper.at())
 		if cmp > 0 || (cmp == 0 && (!b.lower.inclusive || !b.upper.inclusive)) {
 			return []string{fmt.Sprintf(
 				"%s has a to range %q that matches no version: the lower bound %s is not below the upper bound %s",
@@ -391,7 +391,7 @@ func checkPinCeiling(where string, t *Transition, pin string, limited bool) []st
 			"%s is pinned at %q, which is not a comparable version, so no ceiling can be checked against it",
 			where, pin))
 	}
-	if b.upper.ver.Compare(pinVer) > 0 {
+	if b.upper.at().Compare(pinVer) > 0 {
 		v = append(v, fmt.Sprintf(
 			"%s is safe with a to ceiling of %s which reaches past the pinned version %s; widen from backward instead, or say manual or blocked if this is guidance written ahead of the bump",
 			where, b.upper.ver, pinVer))
@@ -419,7 +419,7 @@ func checkDirectional(where string, t *Transition) []string {
 	// disjointness check below and produce a record that can never apply, so
 	// it is rejected as its own violation.
 	if !fb.lower.unbounded && !fb.upper.unbounded {
-		cmp := fb.lower.ver.Compare(fb.upper.ver)
+		cmp := fb.lower.at().Compare(fb.upper.at())
 		if cmp > 0 || (cmp == 0 && (!fb.lower.inclusive || !fb.upper.inclusive)) {
 			return []string{fmt.Sprintf(
 				"%s has a from range %q that matches no version: the lower bound %s is not below the upper bound %s",
@@ -432,7 +432,7 @@ func checkDirectional(where string, t *Transition) []string {
 	if tb.lower.unbounded {
 		return nil // reported by checkPinCeiling
 	}
-	cmp := fb.upper.ver.Compare(tb.lower.ver)
+	cmp := fb.upper.at().Compare(tb.lower.at())
 	disjoint := cmp < 0 || (cmp == 0 && (!fb.upper.inclusive || !tb.lower.inclusive))
 	if disjoint {
 		return nil
@@ -523,7 +523,7 @@ func lowerBefore(a, b bound) bool {
 	if a.unbounded {
 		return false
 	}
-	if cmp := a.ver.Compare(b.ver); cmp != 0 {
+	if cmp := a.at().Compare(b.at()); cmp != 0 {
 		return cmp < 0
 	}
 	return a.inclusive && !b.inclusive
@@ -537,7 +537,7 @@ func upperAfter(a, b bound) bool {
 	if b.unbounded {
 		return false
 	}
-	if cmp := a.ver.Compare(b.ver); cmp != 0 {
+	if cmp := a.at().Compare(b.at()); cmp != 0 {
 		return cmp > 0
 	}
 	return a.inclusive && !b.inclusive
@@ -546,6 +546,9 @@ func upperAfter(a, b bound) bool {
 // contiguous reports whether coverage continues from an upper bound into the
 // next lower bound. Comparing versions alone is not enough: "<0.18.0" followed
 // by ">0.18.0" leaves exactly 0.18.0 uncovered while the versions look equal.
+// Coverage compares versions as written, so "<0.18.0" followed by ">=0.18.0"
+// is contiguous although it leaves out 0.18.0's prereleases. No record need
+// describe those, and a cluster on one matches no transition.
 func contiguous(upper, lower bound) bool {
 	if upper.unbounded || lower.unbounded {
 		return true
@@ -612,7 +615,7 @@ func lowerAtOrBelow(lo, hi bound) bool {
 	if lo.unbounded || hi.unbounded {
 		return true
 	}
-	cmp := lo.ver.Compare(hi.ver)
+	cmp := lo.at().Compare(hi.at())
 	if cmp != 0 {
 		return cmp < 0
 	}

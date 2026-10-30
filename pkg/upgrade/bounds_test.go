@@ -217,35 +217,38 @@ func TestParseBoundsPrereleaseAllowedInTo(t *testing.T) {
 	}
 }
 
-// The whole point of parseBounds is that it agrees with the library that
-// actually decides membership. A sweep over release versions only would pass
-// while missing Masterminds' prerelease behavior entirely, so the table
-// carries prerelease and boundary-adjacent versions on purpose.
+// parseBounds agrees with Masterminds, except that "<X.Y.Z" on a release also
+// leaves out X.Y.Z's prereleases, so its oracle is "<X.Y.Z-0". A sweep over
+// release versions only would pass while missing prerelease behavior
+// entirely, so the table carries prerelease and boundary-adjacent versions on
+// purpose.
 func TestBoundsAgreeWithMasterminds(t *testing.T) {
-	constraints := []string{
-		"<0.18.0",
-		">=0.18.0",
-		">=0.18.0 <0.20.0",
-		">=0.18.0 <=0.18.0",
-		">0.18.0 <0.20.0",
-		"=0.18.0",
-		">=0.1.0-alpha.1 <=0.1.0-alpha.12",
+	constraints := []struct{ rng, oracle string }{
+		{"<0.18.0", "<0.18.0-0"},
+		{">=0.18.0", ">=0.18.0"},
+		{">=0.18.0 <0.20.0", ">=0.18.0 <0.20.0-0"},
+		{">=0.18.0 <=0.18.0", ">=0.18.0 <=0.18.0"},
+		{">0.18.0 <0.20.0", ">0.18.0 <0.20.0-0"},
+		{"=0.18.0", "=0.18.0"},
+		{">=0.1.0-alpha.1 <=0.1.0-alpha.12", ">=0.1.0-alpha.1 <=0.1.0-alpha.12"},
+		{"<0.1.0-alpha.12", "<0.1.0-alpha.12"},
 	}
 	sweep := []string{
 		"0.0.1", "0.17.9", "0.17.9-rc.1",
 		"0.18.0-alpha.1", "0.18.0-rc.1", "0.18.0", "0.18.1",
-		"0.19.9", "0.20.0", "0.20.1", "1.0.0",
-		"0.1.0-alpha.1", "0.1.0-alpha.12", "0.1.0",
+		"0.19.9", "0.20.0-rc.1", "0.20.0", "0.20.1", "1.0.0",
+		"0.1.0-alpha.1", "0.1.0-alpha.11", "0.1.0-alpha.12", "0.1.0",
 	}
-	for _, cs := range constraints {
+	for _, tc := range constraints {
+		cs := tc.rng
 		t.Run(cs, func(t *testing.T) {
 			b, err := parseBounds(cs)
 			if err != nil {
 				t.Fatalf("parseBounds(%q) error = %v", cs, err)
 			}
-			c, err := newConstraint(cs)
+			c, err := newConstraint(tc.oracle)
 			if err != nil {
-				t.Fatalf("newConstraint(%q) error = %v", cs, err)
+				t.Fatalf("newConstraint(%q) error = %v", tc.oracle, err)
 			}
 			for _, vs := range sweep {
 				v, err := semver.NewVersion(vs)
@@ -253,9 +256,40 @@ func TestBoundsAgreeWithMasterminds(t *testing.T) {
 					t.Fatalf("bad sweep version %q: %v", vs, err)
 				}
 				if got, want := b.contains(v), c.Check(v); got != want {
-					t.Errorf("%q vs %q: bounds.contains = %v, Constraints.Check = %v",
-						cs, vs, got, want)
+					t.Errorf("%q vs %q: bounds.contains = %v, Constraints.Check(%q) = %v",
+						cs, vs, got, tc.oracle, want)
 				}
+			}
+		})
+	}
+}
+
+// A release's prerelease likely carries changes meant for that release, so
+// "<1.25.0" leaves it out. Every other operator orders it in plain semver,
+// below the release.
+func TestBoundsPrereleaseOfARelease(t *testing.T) {
+	rc := semver.MustParse("1.25.0-rc.1")
+	tests := []struct {
+		rng  string
+		want bool
+	}{
+		{"<1.25.0", false},
+		{"<=1.25.0", true},
+		{">1.25.0", false},
+		{">=1.25.0", false},
+		{"=1.25.0", false},
+		{"<1.25.0-rc.2", true},
+		{">=1.25.0-rc.1 <1.25.0", false},
+		{">=1.25.0-rc.1 <=1.25.0", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.rng, func(t *testing.T) {
+			b, err := parseBounds(tt.rng)
+			if err != nil {
+				t.Fatalf("parseBounds(%q) error = %v", tt.rng, err)
+			}
+			if got := b.contains(rc); got != tt.want {
+				t.Errorf("parseBounds(%q).contains(%s) = %v, want %v", tt.rng, rc, got, tt.want)
 			}
 		})
 	}

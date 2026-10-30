@@ -110,7 +110,7 @@ func (u *ComponentUpgrades) AheadOf(version string) bool {
 		if err != nil || b.lower.unbounded || b.lower.ver == nil {
 			return false
 		}
-		cmp := v.Compare(b.lower.ver)
+		cmp := v.Compare(b.lower.at())
 		if cmp > 0 || (cmp == 0 && b.lower.inclusive) {
 			return false
 		}

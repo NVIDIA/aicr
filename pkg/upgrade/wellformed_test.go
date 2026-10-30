@@ -1039,6 +1039,14 @@ func TestValidateSkipsAndStepLimit(t *testing.T) {
 			mentioned: true,
 		},
 		{
+			name:      "a to reaching a prerelease two minors up breaks the step limit",
+			pin:       "v0.19.0",
+			stepLimit: StepLimitMinor,
+			trs:       []Transition{manual(">=0.17.0 <0.18.0", ">=0.18.0 <=0.19.0-rc.1")},
+			text:      "has a to range reaching 0.19.0 or later, past the next minor above 0.17.0",
+			mentioned: true,
+		},
+		{
 			name:      "a from with no lower bound cannot keep to the step limit",
 			pin:       "v0.18.0",
 			stepLimit: StepLimitMinor,
@@ -1059,6 +1067,14 @@ func TestValidateSkipsAndStepLimit(t *testing.T) {
 			stepLimit: StepLimitMinor,
 			trs:       []Transition{manual(">=1.9.0 <1.10.0", ">=2.0.0 <=2.1.0")},
 			text:      "a move into a new major under stepLimit minor lands in its first minor",
+			mentioned: true,
+		},
+		{
+			name:      "a major bump reaching a prerelease of the second minor breaks the step limit",
+			pin:       "v2.1.0",
+			stepLimit: StepLimitMinor,
+			trs:       []Transition{manual(">=1.9.0 <1.10.0", ">=2.0.0 <=2.1.0-rc.1")},
+			text:      "has a to range reaching 2.1.0 or later",
 			mentioned: true,
 		},
 		{

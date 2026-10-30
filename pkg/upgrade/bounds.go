@@ -45,6 +45,28 @@ type bound struct {
 	ver       *semver.Version
 	inclusive bool
 	unbounded bool
+
+	// family reports whether ver is a release whose prereleases this
+	// exclusive upper side also leaves out, so the side sits at ver's first
+	// prerelease, X.Y.Z-0. parseBounds sets it for a release named by <, so
+	// "<1.25.0" leaves out 1.25.0-rc.1, which likely carries changes meant
+	// for 1.25.0. Every other operator compares in plain semver order, so
+	// ">=1.25.0" leaves it out too.
+	family bool
+}
+
+// at returns the version b compares at.
+func (b bound) at() *semver.Version {
+	if !b.family || b.ver == nil {
+		return b.ver
+	}
+	return semver.New(b.ver.Major(), b.ver.Minor(), b.ver.Patch(), "0", "")
+}
+
+// below returns the exclusive upper bound at v, which also leaves out v's
+// prereleases when v is a release.
+func below(v *semver.Version) bound {
+	return bound{ver: v, family: v.Prerelease() == ""}
 }
 
 // bounds is a half-open or closed version interval.
@@ -63,7 +85,7 @@ func (b bounds) contains(v *semver.Version) bool {
 		if b.lower.ver == nil {
 			return false
 		}
-		cmp := v.Compare(b.lower.ver)
+		cmp := v.Compare(b.lower.at())
 		if cmp < 0 || (cmp == 0 && !b.lower.inclusive) {
 			return false
 		}
@@ -72,7 +94,7 @@ func (b bounds) contains(v *semver.Version) bool {
 		if b.upper.ver == nil {
 			return false
 		}
-		cmp := v.Compare(b.upper.ver)
+		cmp := v.Compare(b.upper.at())
 		if cmp > 0 || (cmp == 0 && !b.upper.inclusive) {
 			return false
 		}
@@ -152,7 +174,10 @@ func parseBounds(constraint string) (bounds, error) {
 				return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
 					fmt.Sprintf("range %q sets an upper bound twice", constraint))
 			}
-			b.upper = bound{ver: v, inclusive: op == "<="}
+			b.upper = bound{ver: v, inclusive: true}
+			if op == "<" {
+				b.upper = below(v)
+			}
 		case "=":
 			if !b.lower.unbounded || !b.upper.unbounded {
 				return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
@@ -185,10 +210,8 @@ func splitComparator(tok string) (op, ver string) {
 
 // parseRangeVersion parses one bound's version under the grammar's rules:
 // full X.Y.Z, no wildcard, no build metadata. A prerelease identifier is
-// legal on either bound — newConstraint sets IncludePrerelease globally, so
-// Masterminds agrees with these bounds numerically regardless of which side
-// names one, and a component pinned at a prerelease (grove, v0.1.0-alpha.12)
-// cannot otherwise have an honest record. constraint is the full range text
+// legal on either bound and compares exactly, because a component pinned at a
+// prerelease (grove, v0.1.0-alpha.12) cannot otherwise have an honest record. constraint is the full range text
 // the version came from, carried only so rejections can name it.
 func parseRangeVersion(constraint, s string) (*semver.Version, error) {
 	if strings.Contains(s, "+") {

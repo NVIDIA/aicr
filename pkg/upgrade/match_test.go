@@ -2169,6 +2169,16 @@ func TestMatchRoutes(t *testing.T) {
 			wantStoppedAt: ">=1.24.0 <1.25.0",
 		},
 		{
+			name:          "a derived ceiling leaves out the next minor's prereleases",
+			trs:           []Transition{patch, minorSkipsPatch},
+			stepLimit:     StepLimitMinor,
+			from:          "1.23.2",
+			to:            "1.25.0-rc.1",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonBeyondRecordCeiling,
+			wantStoppedAt: ">=1.24.0 <1.25.0",
+		},
+		{
 			name:          "a move reaches the next minor at most",
 			trs:           []Transition{lower, patch, minorSkipsPatch},
 			stepLimit:     StepLimitMinor,

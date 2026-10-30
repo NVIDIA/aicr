@@ -964,7 +964,7 @@ func crosses(t *Transition, at bound, tgt *semver.Version) (floor bound, ok bool
 	if !lowerBefore(at, toRange.lower) {
 		return bound{}, false
 	}
-	cmp := tgt.Compare(toRange.lower.ver)
+	cmp := tgt.Compare(toRange.lower.at())
 	if cmp < 0 || (cmp == 0 && !toRange.lower.inclusive) {
 		return bound{}, false
 	}
@@ -984,7 +984,7 @@ func ceilingOf(u *ComponentUpgrades, t *Transition) bound {
 // pastBound reports whether v sits above a bounded ceiling. A version exactly
 // at an inclusive ceiling is covered by it; at an exclusive one it is not.
 func pastBound(ceiling bound, v *semver.Version) bool {
-	cmp := v.Compare(ceiling.ver)
+	cmp := v.Compare(ceiling.at())
 	return cmp > 0 || (cmp == 0 && !ceiling.inclusive)
 }
 
@@ -1017,12 +1017,12 @@ func fromCovers(t *Transition, at bound) bool {
 // version.
 func admits(b bounds, at bound) bool {
 	if at.inclusive {
-		return b.contains(at.ver)
+		return b.contains(at.at())
 	}
-	if !b.lower.unbounded && (b.lower.ver == nil || at.ver.Compare(b.lower.ver) < 0) {
+	if !b.lower.unbounded && (b.lower.ver == nil || at.at().Compare(b.lower.at()) < 0) {
 		return false
 	}
-	if !b.upper.unbounded && (b.upper.ver == nil || at.ver.Compare(b.upper.ver) >= 0) {
+	if !b.upper.unbounded && (b.upper.ver == nil || at.at().Compare(b.upper.at()) >= 0) {
 		return false
 	}
 	return true
@@ -1095,7 +1095,7 @@ func floorNames(crossed []crossing) []string {
 }
 
 func boundaryKeyOf(b bound) boundaryKey {
-	return boundaryKey{ver: b.ver.String(), inclusive: b.inclusive}
+	return boundaryKey{ver: b.at().String(), inclusive: b.inclusive}
 }
 
 // crossingPhrase returns the clause naming the distinct floors in crossed,

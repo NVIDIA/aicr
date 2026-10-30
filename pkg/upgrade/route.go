@@ -48,7 +48,7 @@ func derivedCeiling(u *ComponentUpgrades, to bounds) (ceiling bound, ok bool) {
 	if !ok {
 		return bound{}, false
 	}
-	return bound{ver: next}, true
+	return below(next), true
 }
 
 // toText returns t's `to` as written, with the ceiling derivedCeiling adds.
@@ -72,13 +72,18 @@ func minorStart(v *semver.Version, n uint64) (next *semver.Version, ok bool) {
 	return semver.New(v.Major(), v.Minor()+n, 0, "", ""), true
 }
 
-// stepCap returns the exclusive limit of a one-step move from v. ok is false
-// when u has no step limit or the limit overflows.
-func stepCap(u *ComponentUpgrades, v *semver.Version) (limit *semver.Version, ok bool) {
+// stepCap returns the exclusive limit of a one-step move from v, which also
+// leaves out the limit's prereleases. ok is false when u has no step limit or
+// the limit overflows.
+func stepCap(u *ComponentUpgrades, v *semver.Version) (limit bound, ok bool) {
 	if u == nil || u.StepLimit != StepLimitMinor {
-		return nil, false
+		return bound{}, false
 	}
-	return minorStart(v, 2)
+	next, ok := minorStart(v, 2)
+	if !ok {
+		return bound{}, false
+	}
+	return below(next), true
 }
 
 // stepViolation returns why t's moves break u's step limit, or "" when they
@@ -103,9 +108,9 @@ func stepViolation(u *ComponentUpgrades, t *Transition) string {
 	if !ok {
 		return ""
 	}
-	if upperAfter(to.upper, bound{ver: limit}) {
+	if upperAfter(to.upper, limit) {
 		return fmt.Sprintf("has a to range reaching %s or later, past the next minor above %s, "+
-			"the lowest version its from admits; stepLimit minor allows one minor per step", limit, lo)
+			"the lowest version its from admits; stepLimit minor allows one minor per step", limit.ver, lo)
 	}
 	return ""
 }
@@ -124,10 +129,10 @@ func crossMajorViolation(u *ComponentUpgrades, t *Transition, from, to bounds) s
 		return fmt.Sprintf("has a to range in major %d, more than one major above %s; "+
 			"stepLimit minor allows one major per step", to.lower.ver.Major(), lo)
 	}
-	firstMinorEnd := semver.New(lo.Major()+1, 1, 0, "", "")
-	if upperAfter(to.upper, bound{ver: firstMinorEnd}) {
+	firstMinorEnd := below(semver.New(lo.Major()+1, 1, 0, "", ""))
+	if upperAfter(to.upper, firstMinorEnd) {
 		return fmt.Sprintf("has a to range reaching %s or later; a move into a new major under "+
-			"stepLimit minor lands in its first minor", firstMinorEnd)
+			"stepLimit minor lands in its first minor", firstMinorEnd.ver)
 	}
 	for i := range u.Transitions {
 		s := &u.Transitions[i]
@@ -208,7 +213,7 @@ func passagesOf(u *ComponentUpgrades, t *Transition, from, to bounds) []passage 
 
 			continue
 		}
-		below := bounds{lower: from.lower, upper: bound{ver: f.ver, inclusive: !f.inclusive}}
+		below := bounds{lower: from.lower, upper: bound{ver: f.ver, inclusive: !f.inclusive, family: f.family}}
 		if !intervalsIntersect(sfrom, below) {
 			continue
 		}
@@ -249,7 +254,7 @@ func floorOf(u *ComponentUpgrades, t *Transition) bounds {
 	if err != nil {
 		return bounds{}
 	}
-	return bounds{lower: to.lower, upper: bound{ver: to.lower.ver, inclusive: to.lower.inclusive}}
+	return bounds{lower: to.lower, upper: bound{ver: to.lower.ver, inclusive: to.lower.inclusive, family: to.lower.family}}
 }
 
 // withinLimit returns u's transitions that keep to its step limit.
@@ -487,7 +492,7 @@ func joinPasses(u *ComponentUpgrades, run []crossing, start, end bounds) bool {
 		if !lowerBefore(start.lower, f) || !lowerAtOrBelow(f, end.upper) {
 			continue
 		}
-		by := bounds{lower: start.lower, upper: bound{ver: f.ver, inclusive: !f.inclusive}}
+		by := bounds{lower: start.lower, upper: bound{ver: f.ver, inclusive: !f.inclusive, family: f.family}}
 		if s.Verdict == VerdictSafe {
 			by = start
 		}
@@ -508,17 +513,17 @@ func withinStep(u *ComponentUpgrades, start *semver.Version, end bound) bool {
 	if !ok {
 		return true
 	}
-	return end.ver != nil && end.ver.Compare(limit) < 0
+	return end.ver != nil && end.at().Compare(limit.at()) < 0
 }
 
 // clipToStep returns l cut to what one step from start reaches under u's step
 // limit.
 func clipToStep(u *ComponentUpgrades, start *semver.Version, l bounds) bounds {
 	limit, ok := stepCap(u, start)
-	if !ok || !upperAfter(l.upper, bound{ver: limit}) {
+	if !ok || !upperAfter(l.upper, limit) {
 		return l
 	}
-	l.upper = bound{ver: limit}
+	l.upper = limit
 	return l
 }
 
@@ -565,7 +570,7 @@ func boundEqual(a, b bound) bool {
 	if a.ver == nil || b.ver == nil {
 		return a.ver == nil && b.ver == nil && a.inclusive == b.inclusive
 	}
-	return a.inclusive == b.inclusive && a.ver.Equal(b.ver)
+	return a.inclusive == b.inclusive && a.at().Equal(b.at())
 }
 
 // landsPhrase returns the lowest version m, a move before the last, lands on
