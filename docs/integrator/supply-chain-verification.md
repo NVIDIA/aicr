@@ -902,7 +902,10 @@ spec:
   globs match the reference as the Pod spec writes it:
   `ghcr.io:443/nvidia/aicr:v0.16.0` names the same image as the denied
   `ghcr.io/nvidia/aicr:v0.16.0`, but it matched no glob and was admitted
-  unchecked.
+  unchecked. These policies are not an allowlist, and a glob per spelling
+  would not make them one. To check every image, however its reference is
+  written, pair them with a policy that matches every reference, such as the
+  [mirror policies](#the-mirror-policies).
 * **Attestations, not signatures.** AICR's images carry only attestations, so
   the expression calls `verifyAttestationSignatures` with the SLSA provenance
   type.
@@ -1468,9 +1471,11 @@ from Sigstore's public TUF repository unless `attestors[].cosign.tuf` names
 another. A cluster without outbound access needs an internal TUF mirror there;
 that setup was not measured.
 
-With both sets of policies applied, an AICR image was admitted only when it
-carried your signature and AICR's provenance, in a Pod or through
-`kubectl debug`. An image at an AICR path without the attestation was denied by
+With both sets of policies applied, an AICR image in a Pod's containers, or
+added through `kubectl debug`, was admitted only when it carried your
+signature and AICR's provenance. Neither set checks image volumes, so apply
+the [image-volume policy](#image-volumes) with them. An image at an AICR path
+without the attestation was denied by
 the keyless policies, including at the default validator path. A copied AICR
 image you had not signed was denied by `verify-mirror-images`. A signed
 component image was admitted, because the keyless policies do not match it. On
