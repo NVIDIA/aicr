@@ -19,7 +19,6 @@ import (
 	"math"
 	"slices"
 	"sort"
-	"strings"
 
 	"github.com/Masterminds/semver/v3"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -558,31 +557,6 @@ func clipToStep(u *ComponentUpgrades, start *semver.Version, l versionRange) ver
 	}
 	l.upper = limit
 	return l
-}
-
-// rangeText returns b in the record range grammar.
-func rangeText(b versionRange) string {
-	if !b.lower.unbounded && !b.upper.unbounded && b.lower.inclusive && b.upper.inclusive &&
-		b.lower.ver.Equal(b.upper.ver) {
-
-		return "=" + b.lower.ver.String()
-	}
-	var parts []string
-	if !b.lower.unbounded {
-		op := ">"
-		if b.lower.inclusive {
-			op = ">="
-		}
-		parts = append(parts, op+b.lower.ver.String())
-	}
-	if !b.upper.unbounded {
-		op := "<"
-		if b.upper.inclusive {
-			op = "<="
-		}
-		parts = append(parts, op+b.upper.ver.String())
-	}
-	return strings.Join(parts, " ")
 }
 
 // moveLandingText returns the range m, a move before the last, lands in,

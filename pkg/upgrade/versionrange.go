@@ -232,6 +232,31 @@ func rangeUpTo(lower, floor rangeEnd) versionRange {
 	return versionRange{lower: lower, upper: rangeEnd{ver: floor.ver, inclusive: !floor.inclusive, family: floor.family}}
 }
 
+// rangeText returns b in the record range grammar.
+func rangeText(b versionRange) string {
+	if !b.lower.unbounded && !b.upper.unbounded && b.lower.inclusive && b.upper.inclusive &&
+		b.lower.ver.Equal(b.upper.ver) {
+
+		return "=" + b.lower.ver.String()
+	}
+	var parts []string
+	if !b.lower.unbounded {
+		op := ">"
+		if b.lower.inclusive {
+			op = ">="
+		}
+		parts = append(parts, op+b.lower.ver.String())
+	}
+	if !b.upper.unbounded {
+		op := "<"
+		if b.upper.inclusive {
+			op = "<="
+		}
+		parts = append(parts, op+b.upper.ver.String())
+	}
+	return strings.Join(parts, " ")
+}
+
 // parseRange returns the interval of constraint, which must be a single
 // AND-group of simple comparators. It rejects anything whose bounds are
 // ambiguous, and every error names constraint in full.
