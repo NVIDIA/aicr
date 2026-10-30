@@ -2319,8 +2319,8 @@ func TestMatchTiesIgnoreDeclarationOrder(t *testing.T) {
 		{
 			name: "two records on one floor and one from start resolve by to",
 			trs: []Transition{
-				trans(">=1.0.0 <2.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B1"),
-				trans(">=1.0.0 <1.5.0", ">=3.0.0 <3.1.0", VerdictBlocked, "B2"),
+				trans(">=1.0.0 <1.5.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B1"),
+				trans(">=1.0.0 <2.0.0", ">=3.0.0 <3.1.0", VerdictBlocked, "B2"),
 			},
 			from:          "1.2.0",
 			to:            "3.0.0",
