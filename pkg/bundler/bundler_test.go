@@ -5737,6 +5737,59 @@ func TestCreateDeployer_DeployerOptions(t *testing.T) {
 	})
 }
 
+func TestMake_RejectsDeployerConfigBeforeOutput(t *testing.T) {
+	duration, limit := "30s", int64(3)
+	tests := []struct {
+		name    string
+		options []config.Option
+		wantErr string
+	}{
+		{"argo backoff without limit", []config.Option{
+			config.WithDeployer(config.DeployerArgoCD),
+			config.WithArgoCDSettings(config.ArgoCDSettings{SyncRetryBackoffDuration: &duration}),
+		}, "limit"},
+		{"argo settings on another deployer", []config.Option{
+			config.WithDeployer(config.DeployerHelm),
+			config.WithArgoCDSettings(config.ArgoCDSettings{SyncRetryLimit: &limit}),
+		}, "only supported"},
+		{"legacy deployer: override on another deployer", []config.Option{
+			config.WithDeployer(config.DeployerHelm),
+			config.WithValueOverrides(map[string]map[string]string{config.DeployerOverrideKey: {"project": "a"}}),
+		}, "--set deployer:<key> options are only supported"},
+		{"typed deployer: override", []config.Option{
+			config.WithDeployer(config.DeployerArgoCD),
+			config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+				{Component: config.DeployerOverrideKey, Path: "project", Value: "a"},
+			}),
+		}, "do not support --set-json/--set-file"},
+		{"readiness hooks on flux", []config.Option{
+			config.WithDeployer(config.DeployerFlux),
+			config.WithReadinessHooks(true),
+		}, "--readiness-hooks is not supported"},
+		{"dynamic values on argocd", []config.Option{
+			config.WithDeployer(config.DeployerArgoCD),
+			config.WithDynamicValues(map[string][]string{"gpuoperator": {"driver.version"}}),
+		}, "dynamic declarations are not supported"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, err := New(WithConfig(config.NewConfig(tt.options...)))
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			outputDir := filepath.Join(t.TempDir(), "not-created")
+			_, err = b.Make(t.Context(), closedWorldRecipeResult(), outputDir)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Make() error = %v, want containing %q", err, tt.wantErr)
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			if _, statErr := os.Stat(outputDir); !stderrors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("output directory exists after rejection: %v", statErr)
+			}
+		})
+	}
+}
+
 // TestCreateDeployer_ArgoCDSettings covers the dedicated settings at the
 // bundler, which every surface reaches: they wire into
 // both Argo generators, a setting also given as a deprecated deployer:<key>
