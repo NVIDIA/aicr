@@ -317,7 +317,8 @@ lands above it is told `blocked` with reason `beyond-record-ceiling`. From
 below the ceiling, they are told to check the move to the ceiling you assessed
 on its own or get the record widened. From at or past it, there is nowhere to
 stop, so they are asked for a record whose `from` admits their version. Either
-way they get no verdict and no steps, for the same reason as the floor case.
+way the row stays `blocked` but carries neither your verdict nor your steps,
+for the same reason as the floor case.
 When your record is `manual`, the check of the move to its ceiling renders
 your steps.
 
