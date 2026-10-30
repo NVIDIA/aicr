@@ -337,7 +337,6 @@ of these:
 - a floor inside your `to`, above your own floor
 - the floor of a `manual` or `blocked` record whose `from` admits a version
   your upgrade goes by
-- the floor of a `requiredStop` record whose `from` overlaps yours
 
 A `blocked` record on your own floor counts too, unless yours is `blocked` as
 well. A `safe` boundary below your floor needs no entry. Listing a floor is
@@ -367,7 +366,8 @@ route through the other record instead.
 **`requiredStop: true`** makes a `safe` record a place every route stops, for
 a release that does work an operator must let finish, such as an automatic
 migration. A cluster taking it re-runs the check before moving further.
-`manual` and `blocked` records already stop a route.
+`manual` and `blocked` records already stop a route. No `skips` entry passes a
+required stop, so a record whose `from` overlaps one must not reach its floor.
 
 **`stepLimit: minor`**, at the top of the file beside `component`, caps every
 upgrade at the next minor version, ignoring patches. Use it when upstream

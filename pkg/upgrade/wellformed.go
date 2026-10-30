@@ -121,6 +121,13 @@ func checkSkips(where string, u *ComponentUpgrades, t *Transition) []string {
 		if !p.unlistedBy(t) {
 			continue
 		}
+		if p.stop {
+			v = append(v, fmt.Sprintf(
+				"%s passes the required stop at %s (transition %d) for sources in both from ranges, "+
+					"which no skips entry clears, so narrow from or to so the moves do not pass it",
+				where, p.c.floor.ver, p.index))
+			continue
+		}
 		v = append(v, fmt.Sprintf(
 			"%s passes the boundary at %s (transition %d) in one step without listing it in skips; "+
 				"list it if a cluster taking this transition may skip that boundary's guidance, "+

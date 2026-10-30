@@ -133,11 +133,11 @@ type Transition struct {
 	//   - inside To, above this transition's own floor
 	//   - a manual or blocked transition's, whose From admits a version the
 	//     move goes by
-	//   - a RequiredStop's, whose From overlaps this one's
 	//
 	// A blocked transition sharing this one's floor counts unless this one is
 	// blocked too. A move passing a floor it must list but does not is not
-	// described by this transition.
+	// described by this transition, and neither is one passing a RequiredStop
+	// whose From overlaps this one's, listed or not.
 	Skips []string `yaml:"skips,omitempty"`
 
 	// RequiredStop reports whether a cluster taking this transition must stop

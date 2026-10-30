@@ -957,7 +957,14 @@ func TestValidateSkipsAndStepLimit(t *testing.T) {
 			name:      "a required stop below the own floor must be listed when the from ranges overlap",
 			pin:       "v0.20.0",
 			trs:       []Transition{requiredStop(safe("<0.18.0", "=0.18.0")), manual("<0.20.0", "=0.20.0")},
-			text:      "passes the boundary at 0.18.0 (transition 0)",
+			text:      "passes the required stop at 0.18.0 (transition 0)",
+			mentioned: true,
+		},
+		{
+			name:      "listing a required stop does not clear it",
+			pin:       "v0.20.0",
+			trs:       []Transition{requiredStop(safe("<0.18.0", "=0.18.0")), manual("<0.20.0", "=0.20.0", "0.18.0")},
+			text:      "passes the required stop at 0.18.0 (transition 0)",
 			mentioned: true,
 		},
 		{

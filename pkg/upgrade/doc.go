@@ -95,7 +95,9 @@
 // Skips but does not. The best route has the fewest hops, then the fewest
 // manual or blocked ones. Consecutive safe hops join into one upgrade unless
 // the earlier is a RequiredStop, the step limit ends it, or the joined move
-// passes a floor no hop in it lists. Records that share a floor are ordered by
+// passes another RequiredStop's floor, or a manual or blocked floor no hop in
+// it lists. No Skips entry passes a RequiredStop for sources in its From.
+// Records that share a floor are ordered by
 // where their `from` starts, so declaration order decides nothing.
 //
 // Verdict selection runs in this order:

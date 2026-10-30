@@ -1998,6 +1998,12 @@ func TestMatchRoutes(t *testing.T) {
 	stop := Transition{From: ">=1.0.0 <2.0.0", To: ">=2.0.0 <2.1.0", Verdict: VerdictSafe, RequiredStop: true, Summary: "stop"}
 	sharing := trans("<1.0.0", ">=2.0.0 <2.1.0", VerdictSafe, "sharing")
 	after := trans(">=2.0.0 <3.0.0", "=3.0.0", VerdictSafe, "after")
+	past := skipping(trans(">=1.0.0 <2.0.0", "=3.0.0", VerdictSafe, "past"), "2.0.0")
+	// A safe run from 1.2.0 whose last hop lists stop's floor without passing
+	// it from its own from.
+	early := Transition{From: ">=1.0.0 <1.3.0", To: ">=2.0.0 <2.1.0", Verdict: VerdictSafe, RequiredStop: true, Summary: "early"}
+	rise := trans(">=1.0.0 <1.3.0", ">=1.3.0 <1.4.0", VerdictSafe, "rise")
+	jump := skipping(trans(">=1.3.0 <1.4.0", "=3.0.0", VerdictSafe, "jump"), "2.0.0")
 	// A cluster that ran 1.2 must take the manual move to 1.3. One that never
 	// did may jump straight to 2.0.
 	enter := trans("<1.2.0", ">=1.2.0 <1.3.0", VerdictSafe, "enter")
@@ -2220,6 +2226,32 @@ func TestMatchRoutes(t *testing.T) {
 			wantVerdict:   VerdictBlocked,
 			wantReason:    ReasonMultipleBoundaries,
 			wantStoppedAt: ">=0.18.0 <0.19.0",
+		},
+		{
+			name:          "listing a required stop in skips does not pass it",
+			trs:           []Transition{stop, past, after},
+			from:          "1.5.0",
+			to:            "3.0.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=2.0.0 <2.1.0",
+			wantRoute: []RouteStop{
+				{Versions: ">=2.0.0 <2.1.0", Verdict: VerdictSafe},
+				{Versions: "3.0.0", Verdict: VerdictSafe},
+			},
+		},
+		{
+			name:          "a safe run that lists a required stop does not join past it",
+			trs:           []Transition{early, rise, jump},
+			from:          "1.2.0",
+			to:            "3.0.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=1.3.0 <1.4.0",
+			wantRoute: []RouteStop{
+				{Versions: ">=1.3.0 <1.4.0", Verdict: VerdictSafe},
+				{Versions: "3.0.0", Verdict: VerdictSafe},
+			},
 		},
 		{
 			name:        "a required stop does not hold another record's sources",

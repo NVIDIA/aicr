@@ -157,6 +157,10 @@ type passage struct {
 	// required reports whether the passing transition must list the floor in
 	// its Skips.
 	required bool
+
+	// stop reports whether c.tr is a safe RequiredStop whose `from` overlaps
+	// the passing transition's. No Skips entry clears such a passage.
+	stop bool
 }
 
 // passages returns the boundaries t's moves pass, in crossingBefore order.
@@ -210,16 +214,18 @@ func passagesOf(u *ComponentUpgrades, t *Transition, from, to bounds) []passage 
 		}
 		// Required are floors inside t's `to`, manual or blocked floors, and
 		// required stops whose `from` admits a version the move starts from.
-		required := lowerBefore(own, f) || s.Verdict != VerdictSafe || (s.RequiredStop && intervalsIntersect(sfrom, from))
-		out = append(out, passage{c: crossing{tr: s, floor: f}, index: i, required: required})
+		stop := s.Verdict == VerdictSafe && s.RequiredStop && intervalsIntersect(sfrom, from)
+		required := lowerBefore(own, f) || s.Verdict != VerdictSafe || stop
+		out = append(out, passage{c: crossing{tr: s, floor: f}, index: i, required: required, stop: stop})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return crossingBefore(out[i].c, out[j].c) })
 	return out
 }
 
-// unlistedBy reports whether t must list p's floor in Skips and does not.
+// unlistedBy reports whether t must list p's floor in Skips and does not, or
+// whether p is a stop, which no listing clears.
 func (p passage) unlistedBy(t *Transition) bool {
-	return p.required && !lists(t, p.c.floor.ver)
+	return p.stop || (p.required && !lists(t, p.c.floor.ver))
 }
 
 // lists reports whether t's Skips names v.
@@ -459,10 +465,10 @@ func moves(u *ComponentUpgrades, r route, src, tgt *semver.Version) []move {
 	return append(out, move{hops: r.hops[first:], lands: target})
 }
 
-// joinPasses reports whether one move from start to end over run passes a
-// floor no hop in run lists, of a record outside run that is either manual or
-// blocked and admits a version the move goes by below the floor, or a
-// RequiredStop that admits a version in start.
+// joinPasses reports whether one move from start to end over run passes the
+// floor of a record outside run that is either a RequiredStop admitting a
+// version in start, or manual or blocked, admitting a version the move goes by
+// below the floor, and listed by no hop in run.
 func joinPasses(u *ComponentUpgrades, run []crossing, start, end bounds) bool {
 	for i := range u.Transitions {
 		s := &u.Transitions[i]
@@ -488,7 +494,7 @@ func joinPasses(u *ComponentUpgrades, run []crossing, start, end bounds) bool {
 		if !intervalsIntersect(sfrom, by) {
 			continue
 		}
-		if !slices.ContainsFunc(run, func(c crossing) bool { return lists(c.tr, f.ver) }) {
+		if s.Verdict == VerdictSafe || !slices.ContainsFunc(run, func(c crossing) bool { return lists(c.tr, f.ver) }) {
 			return true
 		}
 	}
