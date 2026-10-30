@@ -263,9 +263,10 @@ func checkRenderCall(w io.Writer, deployer string) error {
 
 // mdInline renders record prose as one Markdown line. Record prose is folded
 // YAML, so its line breaks carry no meaning, and one left in would end a list
-// item or table row early; safe then escapes what control characters remain.
+// item or table row early. escapeControlChars then escapes what control
+// characters remain.
 func mdInline(s string) string {
-	return safe(strings.Join(strings.Fields(s), " "))
+	return escapeControlChars(strings.Join(strings.Fields(s), " "))
 }
 
 // mdCell is mdInline for a Markdown table cell, where a bare pipe starts a new

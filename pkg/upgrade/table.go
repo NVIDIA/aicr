@@ -101,13 +101,13 @@ func WriteTable(w io.Writer, r *Report) error {
 	ew := &errWriter{w: w}
 	ew.println("UPGRADE CHECK")
 	if r.From != "" {
-		ew.printf("  from      %s\n", safe(r.From))
+		ew.printf("  from      %s\n", escapeControlChars(r.From))
 	}
 	if r.To != "" {
-		ew.printf("  to        %s\n", safe(r.To))
+		ew.printf("  to        %s\n", escapeControlChars(r.To))
 	}
 	if r.Deployer != "" {
-		ew.printf("  deployer  %s\n", safe(r.Deployer))
+		ew.printf("  deployer  %s\n", escapeControlChars(r.Deployer))
 	}
 	ew.println("")
 
@@ -163,10 +163,11 @@ func writeRows(w io.Writer, rows []ReportComponent) error {
 	ew.println("---------\t----\t--\t-------\t-----")
 	for _, c := range rows {
 		from, to := rowCells(c)
-		// Component and Notes go through safe() too: every field in this row
-		// is artifact-derived, and one unescaped cell is enough to forge a row.
+		// Component and Notes go through escapeControlChars too. Every field
+		// in this row is artifact-derived, and one unescaped cell is enough to
+		// forge a row.
 		ew.printf("%s\t%s\t%s\t%s\t%s\n",
-			safe(c.Component), from, to, cell(string(c.Verdict)), safe(c.Notes))
+			escapeControlChars(c.Component), from, to, tableCell(string(c.Verdict)), escapeControlChars(c.Notes))
 	}
 	if ew.err != nil {
 		return wrapTableErr(ew.err)
@@ -186,7 +187,7 @@ func writeRows(w io.Writer, rows []ReportComponent) error {
 // The displaced version moves into NOTES.
 func rowCells(c ReportComponent) (from, to string) {
 	if c.Change != ChangeIdentity || len(c.IdentityChanges) == 0 {
-		return cell(c.From), cell(c.To)
+		return tableCell(c.From), tableCell(c.To)
 	}
 	fromFields := make([]string, len(c.IdentityChanges))
 	toFields := make([]string, len(c.IdentityChanges))
@@ -194,7 +195,7 @@ func rowCells(c ReportComponent) (from, to string) {
 		fromFields[i] = ch.Field + "=" + identityValue(ch.Field, ch.From)
 		toFields[i] = ch.Field + "=" + identityValue(ch.Field, ch.To)
 	}
-	return cell(strings.Join(fromFields, ", ")), cell(strings.Join(toFields, ", "))
+	return tableCell(strings.Join(fromFields, ", ")), tableCell(strings.Join(toFields, ", "))
 }
 
 // writeSource states which cluster the `from` table was read from, above the
@@ -214,8 +215,8 @@ func writeSource(ew *errWriter, s *ReportSource) {
 	// Rendered even when empty. Neither is always knowable — an in-cluster run
 	// has no kubeconfig file — and a dropped line reads as nothing to say
 	// rather than as not known.
-	ew.printf(sourceLine, "kubeconfig", cell(s.Kubeconfig))
-	ew.printf(sourceLine, "context", cell(s.Context))
+	ew.printf(sourceLine, "kubeconfig", tableCell(s.Kubeconfig))
+	ew.printf(sourceLine, "context", tableCell(s.Context))
 	ew.printf(sourceLine, "matched", plural(s.Matched, "component", "components"))
 	// A reader the deployer does not use says so, rather than printing zeros
 	// that read as a cluster with nothing in it.
@@ -286,7 +287,7 @@ func writeAtRisk(w io.Writer, ew *errWriter, a *AtRiskReport) error {
 			label, detail = "not installed", "the cluster does not serve this kind"
 		}
 		ew.printf(atRiskKindLine, label, fmt.Sprintf("%s%s: %s",
-			safe(atRiskKindName(kind.Group, kind.Kind)), atRiskOwners(kind.Components), detail))
+			escapeControlChars(atRiskKindName(kind.Group, kind.Kind)), atRiskOwners(kind.Components), detail))
 	}
 	ew.println("")
 
@@ -321,8 +322,8 @@ func writeAtRiskRows(w io.Writer, findings []AtRiskFinding) error {
 		// Every cell is cluster- or artifact-derived, and escaped for the same
 		// reason: a crafted object name is as able to forge a row as a crafted
 		// component name.
-		ew.printf("  %s\t%s\t%s\t%s\n", cell(strings.Join(f.Components, ", ")),
-			safe(atRiskKindName(f.Group, f.Kind)), cell(f.Namespace), safe(f.Name))
+		ew.printf("  %s\t%s\t%s\t%s\n", tableCell(strings.Join(f.Components, ", ")),
+			escapeControlChars(atRiskKindName(f.Group, f.Kind)), tableCell(f.Namespace), escapeControlChars(f.Name))
 	}
 	if ew.err != nil {
 		return wrapTableErr(ew.err)
@@ -340,7 +341,7 @@ func atRiskOwners(components []string) string {
 		return ""
 	}
 
-	return " (" + safe(strings.Join(components, ", ")) + ")"
+	return " (" + escapeControlChars(strings.Join(components, ", ")) + ")"
 }
 
 // atRiskKindName is Kind.group, the form an operator writes into kubectl. The
@@ -400,7 +401,7 @@ func writeDetail(ew *errWriter, c *ReportComponent, deployer string) error {
 	}
 
 	ew.println("")
-	ew.printf("  STEPS (deployer: %s)\n", safe(deployer))
+	ew.printf("  STEPS (deployer: %s)\n", escapeControlChars(deployer))
 	if len(c.Steps) == 0 {
 		writeParagraph(ew, "    ", fmt.Sprintf(
 			"This record declares no steps for deployer %q. Its verdict says operator action is "+
@@ -408,7 +409,7 @@ func writeDetail(ew *errWriter, c *ReportComponent, deployer string) error {
 		return wrapTableErr(ew.err)
 	}
 	for i, s := range c.Steps {
-		ew.printf("    %d. %s\n", i+1, safe(s.ID))
+		ew.printf("    %d. %s\n", i+1, escapeControlChars(s.ID))
 		writeParagraph(ew, "       ", s.Description)
 		if s.Reason != "" {
 			writeParagraph(ew, "       ", "Why: "+s.Reason)
@@ -421,9 +422,9 @@ func writeDetail(ew *errWriter, c *ReportComponent, deployer string) error {
 // replacement joins two components rather than two versions of one.
 func heading(c *ReportComponent) string {
 	if c.Change == ChangeReplaced {
-		return fmt.Sprintf("%s replaces %s", safe(c.Component), safe(c.From))
+		return fmt.Sprintf("%s replaces %s", escapeControlChars(c.Component), escapeControlChars(c.From))
 	}
-	return fmt.Sprintf("%s %s -> %s", safe(c.Component), safe(c.From), safe(c.To))
+	return fmt.Sprintf("%s %s -> %s", escapeControlChars(c.Component), escapeControlChars(c.From), escapeControlChars(c.To))
 }
 
 // writeParagraph emits record prose at a fixed indent, wrapped to a width a
@@ -431,7 +432,7 @@ func heading(c *ReportComponent) string {
 func writeParagraph(ew *errWriter, indent, text string) {
 	// Every caller passes record prose: summary, precondition, explanation, a
 	// step description or its reason. Escaping at this one point covers them all.
-	for _, line := range wrapText(safe(text), reportWrapWidth-len(indent)) {
+	for _, line := range wrapText(escapeControlChars(text), reportWrapWidth-len(indent)) {
 		ew.println(indent + line)
 	}
 }
@@ -463,15 +464,16 @@ func wrapText(text string, width int) []string {
 	return append(lines, line)
 }
 
-// safe renders artifact-derived text for a terminal. Component names, versions
-// and artifact paths all come from a recipe or bundle the operator did not
-// necessarily write, and the table is the surface they read a verdict off, so a
-// crafted value carrying newlines or an ANSI sequence could forge a row or
-// recolor one. Control characters are shown rather than executed.
+// escapeControlChars renders artifact-derived text for a terminal. Component
+// names, versions and artifact paths all come from a recipe or bundle the
+// operator did not necessarily write, and the table is the surface they read a
+// verdict off, so a crafted value carrying newlines or an ANSI sequence could
+// forge a row or recolor one. Control characters are shown rather than
+// executed.
 //
 // Only the table does this. JSON output stays faithful because encoding/json
 // already escapes these bytes, and a consumer parsing it is not a terminal.
-func safe(s string) string {
+func escapeControlChars(s string) string {
 	if strings.IndexFunc(s, unicode.IsControl) < 0 {
 		return s
 	}
@@ -493,11 +495,11 @@ func safe(s string) string {
 	}
 	return b.String()
 }
-func cell(s string) string {
+func tableCell(s string) string {
 	if s == "" {
 		return "-"
 	}
-	return safe(s)
+	return escapeControlChars(s)
 }
 
 func wrapTableErr(err error) error {

@@ -428,7 +428,7 @@ func reportComponent(r ComponentResult, deployer string, unproven []ReportUnprov
 		c.Precondition = r.Transition.Precondition
 		c.Steps = reportSteps(stepsFor(r.Transition.StepsByDeployer, deployer))
 	}
-	c.Notes = notes(r, c)
+	c.Notes = notesCell(r, c)
 	if len(c.Unproven) > 0 {
 		c.Notes = strings.TrimPrefix(c.Notes+", "+unprovenPhrase(c.Unproven), ", ")
 	}
@@ -529,10 +529,10 @@ func reportSteps(steps []Step) []ReportStep {
 	return out
 }
 
-// notes composes the table's last column: what changed, then what the verdict
-// rests on, then how far the verdict's claim reaches when that is wider than
-// the jump itself.
-func notes(r ComponentResult, c ReportComponent) string {
+// notesCell composes the table's last column. It states what changed, then
+// what the verdict rests on, then how far the verdict's claim reaches when
+// that is wider than the jump itself.
+func notesCell(r ComponentResult, c ReportComponent) string {
 	switch r.Change {
 	case ChangeAdded:
 		return "new component, nothing to do"
