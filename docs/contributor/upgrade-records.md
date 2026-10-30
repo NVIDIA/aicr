@@ -313,11 +313,13 @@ first rather than handed a claim nobody verified.
 
 `to`'s floor is the boundary a jump crosses; its ceiling is how far your verdict
 reaches. A record does not vouch past that ceiling. An operator whose target
-lands above it is told `blocked` with reason `beyond-record-ceiling`, and to
-check the move to the ceiling you assessed on its own or get the record
-widened. They get no verdict and no steps, for the same reason as the floor
-case. When your record is `manual`, the check of the move to its ceiling
-renders your steps.
+lands above it is told `blocked` with reason `beyond-record-ceiling`. From
+below the ceiling, they are told to check the move to the ceiling you assessed
+on its own or get the record widened. From at or past it, there is nowhere to
+stop, so they are asked for a record whose `from` admits their version. Either
+way they get no verdict and no steps, for the same reason as the floor case.
+When your record is `manual`, the check of the move to its ceiling renders
+your steps.
 
 That is not a limitation to route around. A ceiling is your claim about how far
 forward you actually looked, so put it where you looked, and widen it
