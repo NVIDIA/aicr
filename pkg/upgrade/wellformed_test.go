@@ -144,6 +144,16 @@ func TestValidateVerdictFields(t *testing.T) {
 			}),
 			true, "duplicate step id",
 		},
+		{
+			"a step with no id fails",
+			tr(func(x *Transition) { x.StepsByDeployer[0].Steps[0].ID = "" }),
+			true, "has a step with no id",
+		},
+		{
+			"a step with no description fails",
+			tr(func(x *Transition) { x.StepsByDeployer[0].Steps[0].Description = "" }),
+			true, `step "rename" has no description`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

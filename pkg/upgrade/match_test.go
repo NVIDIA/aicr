@@ -1209,6 +1209,18 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 				"then re-run this check",
 		},
 		{
+			name: "record-blocks with no hop before a block on an exclusive floor",
+			set: oneComponent(
+				trans("<3.0.0", ">3.0.0 <3.1.0", VerdictBlocked, "B"),
+				trans(">3.0.0 <3.5.0", ">=3.5.0 <=3.5.0", VerdictSafe, "X"),
+			),
+			from: "1.5.0",
+			to:   "3.5.0",
+			want: "blocked by the record covering 3.0.0: do not move from 1.5.0 into >3.0.0 <3.1.0 " +
+				"in one step. Check the move from 1.5.0 to a version in >3.0.0 <3.1.0 on its own for " +
+				"that record's steps, then re-run this check",
+		},
+		{
 			name: "undefined-origin names a block the source's record passes without listing it",
 			set: oneComponent(
 				trans("<2.0.0", ">=2.0.0 <=3.0.0", VerdictSafe, "S"),
@@ -1992,6 +2004,16 @@ func TestMatchRoutes(t *testing.T) {
 	leave := trans(">=1.2.0 <1.3.0", ">=1.3.0 <2.0.0", VerdictManual, "leave")
 	onward := trans(">=1.3.0 <2.0.0", "=2.0.0", VerdictSafe, "onward")
 	direct := skipping(trans("<1.2.0", "=2.0.0", VerdictSafe, "direct"), "1.3.0")
+	// Two two-hop routes from 1.x to 3.0.0, through 2.0.x or through 2.1.x.
+	lowEntry := trans(">=1.0.0 <2.0.0", ">=2.0.0 <2.1.0", VerdictSafe, "lowEntry")
+	highEntry := trans(">=1.0.0 <2.0.0", ">=2.1.0 <2.2.0", VerdictSafe, "highEntry")
+	lowExit := func(v Verdict) Transition { return trans(">=2.0.0 <2.1.0", "=3.0.0", v, "lowExit") }
+	highExit := trans(">=2.1.0 <2.2.0", "=3.0.0", VerdictSafe, "highExit")
+	// A safe run from 1.0.0 whose landing before a manual record reaches past
+	// 1.2.0.
+	patchStep := trans(">=1.0.0 <1.1.0", ">=1.1.0 <1.1.5", VerdictSafe, "patchStep")
+	wideStep := trans(">=1.1.0 <1.1.5", ">=1.1.5 <1.2.5", VerdictSafe, "wideStep")
+	lateManual := trans(">=1.1.5 <1.2.5", ">=1.2.5", VerdictManual, "lateManual")
 
 	tests := []struct {
 		name          string
@@ -2004,6 +2026,76 @@ func TestMatchRoutes(t *testing.T) {
 		wantStoppedAt string
 		wantRoute     []RouteStop
 	}{
+		{
+			// The safe route still splits, because joining its hops would pass
+			// through 2.0.x, which lowExit says needs work.
+			name:          "of two routes with as many hops, the one with fewer manual hops wins",
+			trs:           []Transition{lowEntry, highEntry, lowExit(VerdictManual), highExit},
+			from:          "1.0.0",
+			to:            "3.0.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=2.1.0 <2.2.0",
+			wantRoute: []RouteStop{
+				{Versions: ">=2.1.0 <2.2.0", Verdict: VerdictSafe},
+				{Versions: "3.0.0", Verdict: VerdictSafe},
+			},
+		},
+		{
+			name:        "of two equal routes, the one through the lower floor wins",
+			trs:         []Transition{lowEntry, highEntry, lowExit(VerdictSafe), highExit},
+			from:        "1.0.0",
+			to:          "3.0.0",
+			wantVerdict: VerdictSafe,
+			wantReason:  ReasonRecorded,
+			wantMatched: "lowExit",
+		},
+		{
+			name:          "a stop under the step limit lands within one minor of where the upgrade starts",
+			trs:           []Transition{patchStep, wideStep, lateManual},
+			stepLimit:     StepLimitMinor,
+			from:          "1.0.0",
+			to:            "1.2.5",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=1.1.5 <1.2.0",
+			wantRoute: []RouteStop{
+				{Versions: ">=1.1.5 <1.2.0", Verdict: VerdictSafe},
+				{Versions: "1.2.5", Verdict: VerdictManual},
+			},
+		},
+		{
+			name: "a landing on one version names it",
+			trs: []Transition{
+				trans("<2.0.0", ">=2.0.0 <=2.5.0", VerdictManual, "into"),
+				trans(">=2.5.0 <3.0.0", "=3.0.0", VerdictManual, "out"),
+			},
+			from:          "1.5.0",
+			to:            "3.0.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: "=2.5.0",
+			wantRoute: []RouteStop{
+				{Versions: "=2.5.0", Verdict: VerdictManual},
+				{Versions: "3.0.0", Verdict: VerdictManual},
+			},
+		},
+		{
+			name: "a landing that ends on an inclusive ceiling names it",
+			trs: []Transition{
+				trans("<2.0.0", ">=2.0.0 <=2.5.0", VerdictManual, "into"),
+				trans(">=2.2.0 <=2.8.0", "=3.0.0", VerdictManual, "out"),
+			},
+			from:          "1.5.0",
+			to:            "3.0.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=2.2.0 <=2.5.0",
+			wantRoute: []RouteStop{
+				{Versions: ">=2.2.0 <=2.5.0", Verdict: VerdictManual},
+				{Versions: "3.0.0", Verdict: VerdictManual},
+			},
+		},
 		{
 			name:        "a jump that never ran the window skips its manual exit",
 			trs:         []Transition{enter, leave, onward, direct},
@@ -2223,6 +2315,30 @@ func TestMatchTiesIgnoreDeclarationOrder(t *testing.T) {
 			wantReason:    ReasonUndefinedOrigin,
 			wantStoppedAt: ">=3.0.0 <4.0.0",
 			wantInExpl:    "lead only into >=4.0.0 <5.0.0 and >=5.0.0,",
+		},
+		{
+			name: "two records on one floor and one from start resolve by to",
+			trs: []Transition{
+				trans(">=1.0.0 <2.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B1"),
+				trans(">=1.0.0 <1.5.0", ">=3.0.0 <3.1.0", VerdictBlocked, "B2"),
+			},
+			from:          "1.2.0",
+			to:            "3.0.0",
+			wantReason:    ReasonRecorded,
+			wantMatched:   "B2",
+			wantStoppedAt: ">=3.0.0 <3.1.0",
+		},
+		{
+			name: "two records with one floor, from start and to resolve by from",
+			trs: []Transition{
+				trans(">=1.0.0 <2.0.0", ">=3.0.0 <3.1.0", VerdictBlocked, "B1"),
+				trans(">=1.0.0 <1.5.0", ">=3.0.0 <3.1.0", VerdictBlocked, "B2"),
+			},
+			from:          "1.2.0",
+			to:            "3.0.0",
+			wantReason:    ReasonRecorded,
+			wantMatched:   "B2",
+			wantStoppedAt: ">=3.0.0 <3.1.0",
 		},
 	}
 	for _, tt := range tests {
