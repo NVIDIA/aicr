@@ -333,7 +333,8 @@ on its own" into something the tool says rather than something prose asks for.
 When that record is `blocked`, the report renders no steps and does not send
 the operator to its ceiling, since the ceiling lies inside the interval it
 forbids. Its explanation says to check the move to the record's floor on its
-own, and that check renders the steps.
+own, or to a version in its `to` when that floor is exclusive, and that check
+renders the steps.
 
 ### Listing the boundaries your record passes
 
