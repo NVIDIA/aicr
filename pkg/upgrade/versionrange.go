@@ -188,6 +188,21 @@ func (b versionRange) contains(v *semver.Version) bool {
 	return true
 }
 
+// admits reports whether b holds at. A non-inclusive at stands just above its
+// version.
+func admits(b versionRange, at rangeEnd) bool {
+	if at.inclusive {
+		return b.contains(at.comparedAt())
+	}
+	if !b.lower.unbounded && (b.lower.ver == nil || at.comparedAt().Compare(b.lower.comparedAt()) < 0) {
+		return false
+	}
+	if !b.upper.unbounded && (b.upper.ver == nil || at.comparedAt().Compare(b.upper.comparedAt()) >= 0) {
+		return false
+	}
+	return true
+}
+
 // onlyVersion returns the interval holding v and nothing else.
 func onlyVersion(v *semver.Version) versionRange {
 	return versionRange{lower: inclusiveEnd(v), upper: inclusiveEnd(v)}

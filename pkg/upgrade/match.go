@@ -1001,21 +1001,6 @@ func fromCovers(t *Transition, at rangeEnd) bool {
 	return admits(b, at)
 }
 
-// admits reports whether b holds at. A non-inclusive at stands just above its
-// version.
-func admits(b versionRange, at rangeEnd) bool {
-	if at.inclusive {
-		return b.contains(at.comparedAt())
-	}
-	if !b.lower.unbounded && (b.lower.ver == nil || at.comparedAt().Compare(b.lower.comparedAt()) < 0) {
-		return false
-	}
-	if !b.upper.unbounded && (b.upper.ver == nil || at.comparedAt().Compare(b.upper.comparedAt()) >= 0) {
-		return false
-	}
-	return true
-}
-
 // leadsFrom returns the distinct parseable `to` ranges of records whose `from`
 // covers src, in targetRangeBefore order.
 func leadsFrom(u *ComponentUpgrades, src *semver.Version) []string {

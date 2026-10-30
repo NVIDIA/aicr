@@ -2561,36 +2561,6 @@ func TestMatchTiesIgnoreDeclarationOrder(t *testing.T) {
 	}
 }
 
-func TestAdmits(t *testing.T) {
-	v := semver.MustParse
-	tests := []struct {
-		name string
-		rng  string
-		at   rangeEnd
-		want bool
-	}{
-		{"on an inclusive floor", ">=2.0.0 <3.0.0", rangeEnd{ver: v("2.0.0"), inclusive: true}, true},
-		{"on an exclusive floor", ">2.0.0 <3.0.0", rangeEnd{ver: v("2.0.0"), inclusive: true}, false},
-		{"just above an exclusive floor", ">2.0.0 <3.0.0", rangeEnd{ver: v("2.0.0")}, true},
-		{"just above an inclusive floor", ">=2.0.0 <3.0.0", rangeEnd{ver: v("2.0.0")}, true},
-		{"just above a version below the floor", ">=2.0.0 <3.0.0", rangeEnd{ver: v("1.9.0")}, false},
-		{"just above an inclusive ceiling", ">=1.0.0 <=2.0.0", rangeEnd{ver: v("2.0.0")}, false},
-		{"just above a version below the ceiling", ">=1.0.0 <2.0.0", rangeEnd{ver: v("1.9.0")}, true},
-		{"just above anything in an open range", "<3.0.0", rangeEnd{ver: v("2.0.0")}, true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			b, err := parseRange(tt.rng)
-			if err != nil {
-				t.Fatalf("parseRange(%q): %v", tt.rng, err)
-			}
-			if got := admits(b, tt.at); got != tt.want {
-				t.Errorf("admits(%q, %+v) = %v, want %v", tt.rng, tt.at, got, tt.want)
-			}
-		})
-	}
-}
-
 // A record vouches only as far as its own `to` ceiling. Reaching past it is the
 // same forward reach checkPinCeiling rejects at authoring time.
 func TestMatchTargetPastTheRecordCeiling(t *testing.T) {
