@@ -39,7 +39,7 @@ exclude:
 # carries the structured status + justification + per-CVE
 # reachability evidence and is self-sufficient for suppression.
 # The image builds on python:3.13-slim (Debian trixie) and ships on
-# nvcr.io/nvidia/distroless/python:3.13-v4.1.8 (CPython 3.13.16). A
+# nvcr.io/nvidia/distroless/python:3.13-v4.1.10 (CPython 3.13.18). A
 # base-package or interpreter finding is answered by bumping that pin; a
 # statement is reserved for a finding no available bump fixes.
 #
@@ -47,7 +47,7 @@ exclude:
 # .openvex.json` alongside `-c .grype.yaml`. Scans of the AICR Go
 # source tree (`make scan` → `grype dir:.`) don't need VEX, since its
 # statements target the aiperf-bench image and never Go source.
-# Reviewed: 2026-10-21
+# Reviewed: 2026-10-30
 
 # Go-source suppressions (accepted risk, not "not affected").
 #
