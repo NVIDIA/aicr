@@ -44,8 +44,8 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 {/* BEGIN AICR-HEALTH */}
 ## Summary
 
-- Recipes: **72**
-- Pass: **72** · Warn: **0** · Fail: **0** · Unknown: **0**
+- Recipes: **73**
+- Pass: **73** · Warn: **0** · Fail: **0** · Unknown: **0**
 
 ## Recipes
 
@@ -68,6 +68,7 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 | h100-aks-ubuntu-training-slurm | aks | h100 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
 | bcm-inference | bcm | — | — | inference | — | pass | R:0 D:0 P:0 C:5 | pending |
 | h100-bcm-ubuntu-training-kubeflow | bcm | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:6 | pending |
+| rtx-pro-6000-cks-ubuntu-training | cks | rtx-pro-6000 | ubuntu | training | — | pass | R:0 D:2 P:0 C:1 | pending |
 | eks-ubuntu | eks | — | ubuntu | — | — | pass | R:0 D:0 P:0 C:5 | pending |
 | a100-eks-ubuntu-training-kubeflow | eks | a100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
 | gb200-eks-amazonlinux-inference | eks | gb200 | amazonlinux | inference | — | pass | R:0 D:4 P:0 C:5 | pending |
