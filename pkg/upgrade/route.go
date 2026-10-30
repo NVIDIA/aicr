@@ -25,8 +25,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
-// toBounds returns t's `to` interval, with the ceiling derivedCeiling adds.
-func toBounds(u *ComponentUpgrades, t *Transition) (versionRange, error) {
+// targetRange returns t's `to` interval, with the ceiling derivedCeiling adds.
+func targetRange(u *ComponentUpgrades, t *Transition) (versionRange, error) {
 	b, err := parseRange(t.To)
 	if err != nil {
 		return versionRange{}, err
@@ -41,7 +41,7 @@ func toBounds(u *ComponentUpgrades, t *Transition) (versionRange, error) {
 // through t lands at or above. ok is false when `to` does not parse or has no
 // floor.
 func targetFloor(u *ComponentUpgrades, t *Transition) (floor rangeEnd, ok bool) {
-	to, err := toBounds(u, t)
+	to, err := targetRange(u, t)
 	if err != nil || to.lower.unbounded || to.lower.ver == nil {
 		return rangeEnd{}, false
 	}
@@ -63,8 +63,8 @@ func derivedCeiling(u *ComponentUpgrades, to versionRange) (ceiling rangeEnd, ok
 	return exclusiveEnd(next), true
 }
 
-// toText returns t's `to` as written, with the ceiling derivedCeiling adds.
-func toText(u *ComponentUpgrades, t *Transition) string {
+// targetRangeText returns t's `to` as written, with the ceiling derivedCeiling adds.
+func targetRangeText(u *ComponentUpgrades, t *Transition) string {
 	b, err := parseRange(t.To)
 	if err != nil {
 		return t.To
@@ -130,7 +130,7 @@ func stepViolation(u *ComponentUpgrades, t *Transition) string {
 		return ""
 	}
 	from, ferr := parseRange(t.From)
-	to, terr := toBounds(u, t)
+	to, terr := targetRange(u, t)
 	if ferr != nil || terr != nil || to.lower.unbounded || to.lower.ver == nil {
 		return ""
 	}
@@ -205,7 +205,7 @@ type passage struct {
 // passages returns the boundaries t's moves pass, in crossingBefore order.
 func passages(u *ComponentUpgrades, t *Transition) []passage {
 	from, ferr := parseRange(t.From)
-	to, terr := toBounds(u, t)
+	to, terr := targetRange(u, t)
 	if ferr != nil || terr != nil {
 		return nil
 	}
@@ -299,10 +299,10 @@ func describes(u *ComponentUpgrades, t *Transition, from, to versionRange) bool 
 	return !slices.ContainsFunc(passagesOf(u, t, from, to), func(p passage) bool { return p.unlistedBy(t) })
 }
 
-// floorOf returns the interval holding only t's `to` floor, or the zero versionRange
+// floorOnlyRange returns the interval holding only t's `to` floor, or the zero versionRange
 // when `to` does not parse.
-func floorOf(u *ComponentUpgrades, t *Transition) versionRange {
-	to, err := toBounds(u, t)
+func floorOnlyRange(u *ComponentUpgrades, t *Transition) versionRange {
+	to, err := targetRange(u, t)
 	if err != nil {
 		return versionRange{}
 	}
@@ -374,7 +374,7 @@ func (a route) then(c crossing, start versionRange) route {
 // landing returns the versions in both a's `to` and b's `from`. ok is false
 // when there are none or either range does not parse.
 func landing(u *ComponentUpgrades, a, b *Transition) (l versionRange, ok bool) {
-	to, err := toBounds(u, a)
+	to, err := targetRange(u, a)
 	if err != nil {
 		return versionRange{}, false
 	}
@@ -405,7 +405,7 @@ func plan(u *ComponentUpgrades, crossed []crossing, src, tgt *semver.Version) (b
 	for i, c := range order {
 		var cand route
 		found := false
-		if fromCovers(c.tr, inclusiveEnd(src)) && describes(u, c.tr, at, floorOf(u, c.tr)) {
+		if fromCovers(c.tr, inclusiveEnd(src)) && describes(u, c.tr, at, floorOnlyRange(u, c.tr)) {
 			cand, found = route{}.then(c, at), true
 		}
 		for _, p := range order[:i] {
@@ -415,7 +415,7 @@ func plan(u *ComponentUpgrades, crossed []crossing, src, tgt *semver.Version) (b
 			}
 			l, meets := landing(u, p.tr, c.tr)
 			if !meets || !lowerBefore(l.lower, c.floor) || !lowerAtOrBelow(l.lower, inclusiveEnd(tgt)) ||
-				!describes(u, p.tr, prev.start, l) || !describes(u, c.tr, l, floorOf(u, c.tr)) {
+				!describes(u, p.tr, prev.start, l) || !describes(u, c.tr, l, floorOnlyRange(u, c.tr)) {
 
 				continue
 			}
@@ -434,7 +434,7 @@ func plan(u *ComponentUpgrades, crossed []crossing, src, tgt *semver.Version) (b
 		if !has {
 			continue
 		}
-		to, err := toBounds(u, c.tr)
+		to, err := targetRange(u, c.tr)
 		if err != nil {
 			continue
 		}
@@ -605,8 +605,8 @@ func rangeText(b versionRange) string {
 // its last hop's `to` when the landing is all of it.
 func landsText(u *ComponentUpgrades, m move) string {
 	last := m.hops[len(m.hops)-1].tr
-	if to, err := toBounds(u, last); err == nil && endsEqual(to.lower, m.lands.lower) && endsEqual(to.upper, m.lands.upper) {
-		return toText(u, last)
+	if to, err := targetRange(u, last); err == nil && endsEqual(to.lower, m.lands.lower) && endsEqual(to.upper, m.lands.upper) {
+		return targetRangeText(u, last)
 	}
 	return rangeText(m.lands)
 }

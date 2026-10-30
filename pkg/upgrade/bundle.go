@@ -70,11 +70,11 @@ func BundleNotes(set Set, pins []BundlePin) []BundleNote {
 			if tr.Verdict != VerdictManual && tr.Verdict != VerdictBlocked {
 				continue
 			}
-			b, err := toBounds(u, tr)
+			b, err := targetRange(u, tr)
 			if err != nil || !b.contains(v) {
 				continue
 			}
-			notes = append(notes, BundleNote{Component: p.Component, Pin: p.Version, Transition: tr, To: toText(u, tr)})
+			notes = append(notes, BundleNote{Component: p.Component, Pin: p.Version, Transition: tr, To: targetRangeText(u, tr)})
 		}
 	}
 	return notes

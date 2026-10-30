@@ -87,7 +87,7 @@ func (u *ComponentUpgrades) Covers(version string) bool {
 		return false
 	}
 	for i := range u.Transitions {
-		b, err := toBounds(u, &u.Transitions[i])
+		b, err := targetRange(u, &u.Transitions[i])
 		if err == nil && b.contains(v) {
 			return true
 		}

@@ -580,7 +580,7 @@ func checkDistinctMoves(u *ComponentUpgrades) []string {
 	spans := make([]*span, len(u.Transitions))
 	for i := range u.Transitions {
 		from, ferr := parseRange(u.Transitions[i].From)
-		to, terr := toBounds(u, &u.Transitions[i])
+		to, terr := targetRange(u, &u.Transitions[i])
 		if ferr != nil || terr != nil {
 			continue // reported elsewhere
 		}
