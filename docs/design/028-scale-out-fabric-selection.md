@@ -95,6 +95,10 @@ must validate the same thing.
   product is EFA; the RoCE variant stays an internal overlay.
 - Multi-fabric clusters (mixed IB and RoCE node pools). Out of scope until a
   user appears; a mixed snapshot fails closed.
+- Switching a live cluster between fabric values. A fabric change replaces
+  the NIC stack, not a value, and the supported transitions are a fresh
+  install of a value and an in-place upgrade that keeps the value. The
+  companion section records why a live switch is not promised.
 - Changing how `--set` or `--dynamic` work.
 
 ## Context
@@ -395,22 +399,38 @@ profile value has to pick one shape. Four ways to do that:
    per-value owned path locked for every value. The companion's manifest
    path then carries the `sriov` marker (for example
    `manifests/sriov-roce-networks.yaml`) so `rdmaFabricResources` reads its
-   node policies, as it does for `sriov-ib-networks` today.
+   node policies, as it does for `sriov-ib-networks` today. That path is
+   why a live switch between values is not promised (see "Non-Goals"):
+   Helm installs a subchart's CRDs only on a fresh install, so turning the
+   subchart on over an existing release needs its CRDs applied by hand
+   first, and turning it off removes the operator before the companion's
+   node policies, the reverse of the teardown order the NVKE guide
+   prescribes. The supported transitions are a fresh install of a value
+   and an in-place upgrade that keeps the value, and step 5 tests those
+   two.
 
    `dependencyRefs` orders the companion after `network-operator` but does
    not wait for the `IPPool` CRD, which appears only once the policy has
    reconciled, so the companion needs the readiness barrier the
-   `network-operator` gate already provides (`readiness.yaml`). On Helm,
-   Argo CD, argocd-helm and Terraform that is `--readiness-hooks`; the
-   bundler rejects the flag for Helmfile, Flux and Fleet
-   (`pkg/bundler/bundler.go`), and on those the conversion documents the
-   staged install `docs/integrator/nvke-gb200-setup.md` already prescribes:
-   apply everything but the companion, wait for the CRD to be created and
+   `network-operator` gate already provides (`readiness.yaml`). Today that
+   gate is opt-in (`--readiness-hooks`), the API cannot request it
+   (`pkg/bundler/handler.go`), and the bundler rejects it for Helmfile,
+   Flux and Fleet (`pkg/bundler/bundler.go`). A RoCE value cannot depend
+   on an opt-in, so the bundler emits the `network-operator` gate
+   unconditionally for a composition whose companion renders objects, on
+   Helm, Argo CD, argocd-helm and Terraform, from the CLI and the API
+   alike; the flag keeps its meaning everywhere else. For Helmfile and
+   Flux the conversion documents the staged install
+   `docs/integrator/nvke-gb200-setup.md` already prescribes: apply
+   everything but the companion, wait for the CRD to be created and
    Established, then apply the companion, or reset the Flux release after
-   the CRD exists. An IB value renders no companion objects and needs no
-   stage. The fresh-install test in step 5 runs each value through the
-   gate on the hook-capable deployers and through the staged procedure on
-   the others, and asserts the policy reaches `ready` and the companion's
+   the CRD exists. Fleet chains bundles with `dependsOn` and has no CRD
+   wait either, so the conversion adds the same staged procedure for
+   Fleet to that page. An IB value renders no companion objects and needs
+   no stage. The fresh-install test in step 5 runs each value through the
+   emitted gate on the four gate-capable deployers, from a CLI bundle and
+   an API bundle, and through the staged procedure on Helmfile, Flux and
+   Fleet, and asserts the policy reaches `ready` and the companion's
    objects apply.
 
    **1b. Separate manifest-only components**, `network-operator-policy-ib`
@@ -511,7 +531,7 @@ whose gate value is absent from the recipe is an error, not an open gate.
 | `gke-gb200-rdma` | `roce` |
 | `gke-nccl-tcpxo` | `tcpxo` |
 | `network-operator` with no policy manifest (kind), a policy manifest registered below as no signal (OCP), `dranet` (VR200), a namespace-only `network-operator` ref (Talos) | not a fabric signal |
-| no fabric signal | unset; NCCL NET checks are not applicable |
+| no fabric signal | unset; the NVCRE checks report not applicable, the TrainJob checks and the Socket-only transport check run as today |
 
 `dranet` exposes ConnectX-9 RDMA ports through DRA and says nothing about
 the fabric behind them, and the VR200 leaves run only the NVLS variant, so
@@ -561,12 +581,17 @@ consulted only at catalog load, never by derivation. Rows are permanent:
   hash.
 
 That is what keeps `FabricOf` stable across AICR versions for a recipe
-whose bytes did not change. Two tests back it at catalog load. One fails
-when a policy manifest is added to the catalog without a row. The other
-fails when a shipped manifest's content changes without its row's digest
-being updated in the same change, so every edit of a policy manifest is
-reviewed beside the fabric it is registered under. The verifier is tested
-against a recipe naming a retired row, which must still derive.
+whose bytes did not change. Three tests back it at catalog load. One fails
+when a policy manifest is added to the catalog without a row. One fails
+when a shipped manifest's content changes without its row's digest being
+updated in the same change, so every edit of a policy manifest is
+reviewed beside the fabric it is registered under. The third is an
+append-only golden of the table itself (path, component, fabric, gate
+path and value, retired flag): it fails when any shipped row's fabric or
+gate changes, when a retired row is deleted, or when a retired path is
+reused, so the permanence rules are enforced rather than stated. The
+verifier is tested against a recipe naming a retired row, which must
+still derive.
 
 "Unset" is reserved for compositions with no fabric signal at all. Many
 catalog leaves have none because they deploy no scale-out networking
@@ -579,13 +604,16 @@ component. Examples:
 - BCM, k0s, LKE, kind, OCP (its policy is registered as no signal),
   Talos, and VR200.
 
-None of them declares an NCCL NET check. Unset is not a catch-all: a
-policy manifest missing from the table, or more than one signal deriving
-different fabrics, is an error rather than unset. Two tests pin the
-split. Every leaf that declares an NCCL NET check must derive exactly one
-fabric. The set of leaves that derive unset is a committed golden list, so
-a leaf that gains or loses a fabric signal changes that list and is
-reviewed, rather than passing silently.
+None of them declares an NCCL NET check. Unset is not a catch-all: an
+embedded policy manifest missing from the table, or more than one signal
+deriving different fabrics, is an error rather than unset. Two
+embedded-catalog tests pin the split. Every embedded leaf that declares an
+NCCL NET check must derive exactly one fabric. The set of embedded leaves
+that derive unset is a committed golden list, so a leaf that gains or
+loses a fabric signal changes that list and is reviewed, rather than
+passing silently. Unset itself costs a recipe only the NVCRE checks: the
+TrainJob checks keep their `(service, accelerator)` template matrix and
+the transport check keeps rejecting only `Socket`, exactly as today.
 
 **External catalogs.** The compiled tables know only the embedded
 catalog, while a `--data` directory adds components and manifests of its
@@ -603,23 +631,29 @@ binary may feed derivation. Three rules follow.
 - A same-path override of a registered policy manifest keeps the row's
   fabric. The path is the key, and a fabric change is a new path, so an
   operator who overrides `nic-cluster-policy-oke-l40s.yaml` with different
-  content is still shipping RoCE as far as derivation is concerned. The
-  data-extension page says so.
-- An external composition whose fabric must be known declares it. The
-  marker is in the recipe bytes, `FabricOf` returns it, and the conflict
-  check still runs over the embedded signals in the composition. From
-  step 2 on, catalog load fails for an external composition that declares
-  an NCCL NET check and neither derives a fabric nor declares a marker,
-  with a diagnostic naming the composition and the marker as the remedy.
-  Compositions with no NET check need no fabric and are untouched. The
-  rule lands in step 2 with the marker, because that is the first binary
-  that can decode the remedy, and `data-extension.md` is updated in the
-  same change.
+  content is still shipping RoCE as far as derivation is concerned, and
+  signed evidence records RoCE for it. An external catalog that changes
+  the fabric therefore ships the policy at a new path and replaces the
+  overlay that lists the embedded file with one listing the new path
+  (`manifestFiles` merge additively, so the old path cannot be removed by
+  a patch). The data-extension page says so.
+- An external composition that derives unset loses only the NVCRE checks,
+  which report not applicable with a diagnostic naming the composition
+  and the signals it lacks. Nothing fails at catalog load, nothing changes
+  for a composition with no NET check, and the TrainJob checks it opted
+  into through `nccl-benchmark-profile` run as today. Where its chain
+  allows, an external composition may declare the marker; under an
+  embedded family that already declares `gpuStack`, an external patch may
+  only add values (`pkg/recipe/provider_profile.go`), and the "every
+  value must" rule means the fabric for such a family arrives with that
+  family's own conversion, never through an external patch.
 
-Two `--data` tests cover this: an external recipe with a declared marker
-and its own policy manifest resolves, validates, and verifies; a
-same-path override of an embedded policy derives the embedded row's
-fabric.
+Three `--data` tests cover this: an external recipe with a declared
+marker and its own policy manifest resolves, validates, and verifies; an
+external leaf under `gke-cos.yaml` that opts into NCCL derives unset and
+reports the NVCRE checks not applicable while its TrainJob checks keep
+running; a same-path override of an embedded policy derives the embedded
+row's fabric.
 
 `FabricOf` returns the declared marker when `metadata.selectedProfile.fabric`
 is present and derives otherwise. Derivation is a fallback, not a second
@@ -811,7 +845,10 @@ converts. Unprofiled families (EKS among them) are unaffected.
   (`pkg/evidence/verifier/identity.go`): it recomputes `FabricOf` from the
   manifest-verified recipe and rejects a statement whose recorded fabric
   differs or is missing. Signed v4 evidence can therefore not carry a
-  fabric that disagrees with the attested composition. v1 through v3
+  fabric that disagrees with the attested composition as the recipe names
+  it: its component names, manifest paths, and gate values. Manifest
+  content is bound separately by the bundle manifest's digests, not by
+  the fabric claim. v1 through v3
   statements carry no fabric claim and verify under their original rules,
   as v1 and v2 statements do today, so every committed pointer stays
   verifiable. The evidence path and the existing pointers do not change.
@@ -968,9 +1005,10 @@ its own change, reviewed against the costs listed above.
   family, not by this ADR.
 - External catalogs feed derivation nothing: a policy manifest at an
   unknown path is not a signal, a same-path override keeps the embedded
-  row's fabric, and an external composition that declares an NCCL NET
-  check carries a fabric marker from step 2 on or fails catalog load.
-  That is the one change visible outside the embedded catalog.
+  row's fabric, and an external composition that derives unset loses only
+  the NVCRE checks, which report not applicable. Nothing fails at catalog
+  load for an external catalog, and nothing changes for its TrainJob
+  checks.
 - Fabric-marked recipes are readable only by binaries from the release
   that introduced the marker onward; older binaries reject them at decode.
   The schema change ships at least one release ahead of the first marker.
@@ -983,17 +1021,17 @@ its own change, reviewed against the costs listed above.
 ## Adoption plan
 
 1. `FabricOf`, the derivation and manifest tables keyed by path, the
-   `--data` test that a same-path override derives the embedded row's
-   fabric, and a golden test asserting every current catalog leaf resolves
-   byte-identically. Nothing consumes the result yet, so no behavior
-   changes for any catalog. This lands first and alone, so the
-   compatibility invariant is proven before any schema change.
+   append-only golden of the table, the `--data` test that a same-path
+   override derives the embedded row's fabric, and a golden test asserting
+   every current catalog leaf resolves byte-identically. Nothing consumes
+   the result yet, so no behavior changes for any catalog. This lands
+   first and alone, so the compatibility invariant is proven before any
+   schema change.
 2. Catalog schema: the `fabric` marker and its load-time validation, the
    same vocabulary check in `ValidateProfileContract` on every decode with
    an out-of-vocabulary decode test, the resolution-time recheck on the
-   filtered composition, the external NET-check rule with its `--data`
-   test and the `data-extension.md` update, and `Remediation` carried into
-   the generation-path constraint failure with a test. Wire model: extend `ProfileValue`,
+   filtered composition, and `Remediation` carried into the
+   generation-path constraint failure with a test. Wire model: extend `ProfileValue`,
    `SelectedProfile`, `applyEffectiveProfile` (`pkg/recipe`), and
    `RecipeResult.schema.json` so `selectedProfile.fabric` survives
    resolution, the digest, and `/v1` serialization. A fabric-marked profile
@@ -1013,25 +1051,32 @@ its own change, reviewed against the costs listed above.
    `(service, accelerator, fabric)` for both checks, with an entry per
    fabric each is measured on; the banner accept list on INFO runtimes and
    the worker-pod watch as the `tcpxo` guard; per-fabric floors; the
-   `recipe-evidence/v4` predicate and the verifier's `FabricOf` binding.
-   Lands with cluster-readiness-engine#576.
+   `recipe-evidence/v4` predicate and the verifier's `FabricOf` binding,
+   with the retired-row verifier test; the not-applicable diagnostic for
+   an unset external composition with its two `--data` tests, and the
+   `data-extension.md` update that describes unset, same-path overrides
+   and the new-path remedy. Lands with cluster-readiness-engine#576.
 5. Per family, in the release where its second fabric is qualified: the
    `gpuStack` declaration or markers, the second value, the gated
    per-fabric policy manifests and the gated companion component (with
    the `sriov` path marker and the subchart enablement where the shape
    needs them), a test that a gated IB and RoCE pair, companion included,
    yields only the selected fabric's resources through
-   `rdmaFabricResources`, new evidence under the suffixed coordinate, an
-   upgrade test from a pre-conversion bundle on each deployer, and a fresh
-   install of each value on each deployer through the readiness gate or
-   the documented staged install, together. GB300 generic first; OKE, with a shadowing declaration on the
+   `rdmaFabricResources`, new evidence under the suffixed coordinate, the
+   unconditional readiness gate for compositions whose companion renders
+   objects, an upgrade test from a pre-conversion bundle on each deployer
+   that keeps the value, and a fresh install of each value on each
+   deployer, from a CLI and an API bundle through the emitted gate on
+   Helm, Argo CD, argocd-helm and Terraform and through the documented
+   staged install on Helmfile, Flux and Fleet, together. GB300 generic first; OKE, with a shadowing declaration on the
    new GB300 leaf, when a RoCE OKE GB300 target exists. The shadowing rule
    itself, with its maximal-leaf reduction on every resolver path, the
    same-depth conflict test, the three snapshot-path tests, and the
    accelerator-less OKE golden coordinates, lands in step 2.
 6. Docs: `docs/contributor/recipe.md` profile vocabulary, component catalog
    notes, CLI and API references. The `data-extension.md` update ships in
-   step 2 with the rule it describes.
+   step 4 with the behavior it describes, and the Fleet staging procedure
+   joins `nvke-gb200-setup.md` in step 5.
 
 ## Open questions
 
