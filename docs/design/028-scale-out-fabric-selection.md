@@ -419,15 +419,25 @@ profile value has to pick one shape. Four ways to do that:
    on an opt-in, so the bundler emits the `network-operator` gate
    unconditionally for a composition whose companion renders objects, on
    Helm, Argo CD, argocd-helm and Terraform, from the CLI and the API
-   alike; the flag keeps its meaning everywhere else. For Helmfile and
+   alike; the flag keeps its meaning everywhere else. The API path needs
+   one more change: `/v1/bundle` builds its config without a version, so
+   `gateImage()` (`pkg/bundler/readiness.go`) falls back to
+   `aicr-gate:dev`, which releases never publish, and the repository is a
+   hard-coded constant outside the air-gap mirror list. The conversion
+   pins the API gate to the serving release's tag, makes the gate image
+   overridable the way other images are and lists it for mirroring, and
+   adds an API-bundle test asserting the tag. For Helmfile and
    Flux the conversion documents the staged install
    `docs/integrator/nvke-gb200-setup.md` already prescribes: apply
    everything but the companion, wait for the CRD to be created and
    Established, then apply the companion, or reset the Flux release after
    the CRD exists. Fleet chains bundles with `dependsOn` and has no CRD
-   wait either, so the conversion adds the same staged procedure for
-   Fleet to that page. An IB value renders no companion objects and needs
-   no stage. The fresh-install test in step 5 runs each value through the
+   wait either, so it takes the same staged procedure. Because the NVKE
+   guide covers only the NVKE recipe and GB300 generic converts first, the
+   conversion writes the companion's Helmfile, Flux and Fleet staging into
+   `docs/user/bundling.md`, linked from the converted family's
+   component-catalog entry. An IB value renders no companion objects and
+   needs no stage. The fresh-install test in step 5 runs each value through the
    emitted gate on the four gate-capable deployers, from a CLI bundle and
    an API bundle, and through the staged procedure on Helmfile, Flux and
    Fleet, and asserts the policy reaches `ready` and the companion's
@@ -846,15 +856,22 @@ converts. Unprofiled families (EKS among them) are unaffected.
   manifest-verified recipe and rejects a statement whose recorded fabric
   differs or is missing. Signed v4 evidence can therefore not carry a
   fabric that disagrees with the attested composition as the recipe names
-  it: its component names, manifest paths, and gate values. Manifest
-  content is bound separately by the bundle manifest's digests, not by
-  the fabric claim. v1 through v3
+  it: its component names, manifest paths, and gate values. No evidence
+  artifact binds manifest content: the evidence bundle's `manifest.json`
+  hashes `recipe.yaml`, `snapshot.yaml`, the BOM and the CTRF reports
+  (`pkg/evidence/attestation/builder.go`), `recipe.yaml` holds paths, and
+  the predicate does not reference the deployment bundle's checksums. A
+  same-path override therefore deploys content the signed fabric claim
+  does not see, which is why a fabric change must be a new path. v1 through v3
   statements carry no fabric claim and verify under their original rules,
   as v1 and v2 statements do today, so every committed pointer stays
   verifiable. The evidence path and the existing pointers do not change.
-- **`aicr upgrade-check`.** A fabric change between two recipes is reported
-  the same way a `selectedProfile` change is. If upgrade-check does not yet
-  surface profile changes, that is added here.
+- **`aicr upgrade-check`.** A fabric change between two recipes, compared
+  through `FabricOf` on each side, is flagged as requiring a fresh install
+  of the target value, not reported as a routine upgrade: live switches
+  between fabric values are a non-goal (see "Non-Goals" and the companion
+  section). `upgrade-check` does not surface profile changes today, so
+  this is new work, scheduled in step 4.
 
 ### Overlay plan
 
@@ -1004,11 +1021,15 @@ its own change, reviewed against the costs listed above.
   and a fresh install of each value on every deployer. It is scheduled per
   family, not by this ADR.
 - External catalogs feed derivation nothing: a policy manifest at an
-  unknown path is not a signal, a same-path override keeps the embedded
-  row's fabric, and an external composition that derives unset loses only
-  the NVCRE checks, which report not applicable. Nothing fails at catalog
-  load for an external catalog, and nothing changes for its TrainJob
-  checks.
+  unknown path is not a signal and a same-path override keeps the
+  embedded row's fabric. An external composition that derives unset loses
+  only the NVCRE checks, which report not applicable; nothing fails at
+  catalog load for it and its TrainJob checks run as today. An external
+  composition that inherits an embedded signal derives that fabric and is
+  held to the per-fabric transport accept list, recipe-supplied `-net`
+  runtimes included, as any embedded leaf is; and one that declares a
+  marker conflicting with an inherited signal fails catalog load, as any
+  embedded leaf would.
 - Fabric-marked recipes are readable only by binaries from the release
   that introduced the marker onward; older binaries reject them at decode.
   The schema change ships at least one release ahead of the first marker.
@@ -1055,7 +1076,9 @@ its own change, reviewed against the costs listed above.
    with the retired-row verifier test; the not-applicable diagnostic for
    an unset external composition with its two `--data` tests, and the
    `data-extension.md` update that describes unset, same-path overrides
-   and the new-path remedy. Lands with cluster-readiness-engine#576.
+   and the new-path remedy; and `aicr upgrade-check` flagging a `FabricOf`
+   change between two recipes as requiring a fresh install of the target
+   value, with a test. Lands with cluster-readiness-engine#576.
 5. Per family, in the release where its second fabric is qualified: the
    `gpuStack` declaration or markers, the second value, the gated
    per-fabric policy manifests and the gated companion component (with
@@ -1064,19 +1087,28 @@ its own change, reviewed against the costs listed above.
    yields only the selected fabric's resources through
    `rdmaFabricResources`, new evidence under the suffixed coordinate, the
    unconditional readiness gate for compositions whose companion renders
-   objects, an upgrade test from a pre-conversion bundle on each deployer
-   that keeps the value, and a fresh install of each value on each
-   deployer, from a CLI and an API bundle through the emitted gate on
-   Helm, Argo CD, argocd-helm and Terraform and through the documented
-   staged install on Helmfile, Flux and Fleet, together. GB300 generic first; OKE, with a shadowing declaration on the
+   objects with the API gate image pinned to the release tag, overridable
+   and mirrorable, and an API-bundle test asserting the tag, an upgrade
+   test from a pre-conversion bundle on each deployer that keeps the
+   value, and a fresh install of each value on each deployer, from a CLI
+   and an API bundle through the emitted gate on Helm, Argo CD,
+   argocd-helm and Terraform and through the documented staged install on
+   Helmfile, Flux and Fleet, together. The same change updates the
+   `--readiness-hooks` row and the readiness-gate section of
+   `docs/user/cli-reference.md`, which the unconditional gate otherwise
+   falsifies, and adds the Helmfile, Flux and Fleet staging procedure for
+   the companion to `docs/user/bundling.md`, linked from the converted
+   family's component-catalog entry, since the NVKE guide covers only the
+   NVKE recipe. GB300 generic first; OKE, with a shadowing declaration on the
    new GB300 leaf, when a RoCE OKE GB300 target exists. The shadowing rule
    itself, with its maximal-leaf reduction on every resolver path, the
    same-depth conflict test, the three snapshot-path tests, and the
    accelerator-less OKE golden coordinates, lands in step 2.
 6. Docs: `docs/contributor/recipe.md` profile vocabulary, component catalog
-   notes, CLI and API references. The `data-extension.md` update ships in
-   step 4 with the behavior it describes, and the Fleet staging procedure
-   joins `nvke-gb200-setup.md` in step 5.
+   notes, CLI and API references not already updated by the step that
+   changed the behavior: `data-extension.md` ships in step 4, and the
+   readiness-gate rows of the CLI reference and the companion staging
+   procedure in `bundling.md` ship in step 5.
 
 ## Open questions
 
