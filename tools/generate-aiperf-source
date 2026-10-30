@@ -183,11 +183,11 @@ def _resolve(requirements: pathlib.Path, no_deps: bool) -> list[tuple[str, str]]
 
 
 def read_closure() -> list[tuple[str, str]]:
-    """Resolve requirements.txt to the exact closure the image installs.
+    """Resolve the requirements inputs to the exact closure the image installs.
 
     Resolved here rather than read from the committed notices fragment so that
-    the archive and the image derive from ONE input: the same requirements.txt
-    the Dockerfile installs. A committed snapshot is a point-in-time record that
+    the archive and the image derive from the same inputs: requirements.txt and
+    requirements-overrides.txt, as the Dockerfile installs them. A committed snapshot is a point-in-time record that
     silently ages out of step with what a later build resolves, which would
     break the per-digest correspondence the referrer exists to assert.
 

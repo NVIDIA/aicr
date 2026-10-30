@@ -75,11 +75,12 @@ RUN apt-get update \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 
-# Installed from requirements.txt rather than a bare "aiperf==${AIPERF_VERSION}"
-# so that this image and the third-party license record in
-# THIRD_PARTY_NOTICES.md are driven by ONE input. tools/generate-python-licenses
-# installs the same file to enumerate what ships here; without a shared input it
-# would have to reconstruct this environment and could silently diverge from it.
+# Installed from requirements.txt and requirements-overrides.txt rather than a
+# bare "aiperf==${AIPERF_VERSION}" so that this image and the third-party
+# license record in THIRD_PARTY_NOTICES.md are driven by the same inputs.
+# tools/generate-python-licenses resolves the same files to enumerate what ships
+# here; without shared inputs it would have to reconstruct this environment and
+# could silently diverge from it.
 COPY validators/performance/requirements.txt /tmp/requirements.txt
 COPY validators/performance/requirements-overrides.txt /tmp/requirements-overrides.txt
 

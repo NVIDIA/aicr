@@ -94,27 +94,31 @@ deferred_verifications:
       Version 25 retired all 28 pillow statements because the image now
       installs pillow 13.0.0 from validators/performance/requirements-overrides.txt.
       The evidence is a local linux/amd64 build scanned with grype 0.116.1
-      (`--only-fixed -c .grype.yaml`, no VEX): 0 critical, 0 high, no pillow
-      match at any severity, and syft catalogued pillow 13.0.0. That is a
-      newer grype than the scan action pins and not the bytes CI publishes.
+      (`--only-fixed -c .grype.yaml`, no VEX): no pillow match at any
+      severity, and syft catalogued pillow 13.0.0. That is a newer grype than
+      the scan action pins and not the bytes CI publishes. The weekly scan
+      cannot settle it: its cleanup job deletes the scan-<sha> images when the
+      run ends and its text artifact expires after a day, so the first
+      published release image is the earliest evidence that persists.
     check: >-
-      The first Weekly Image Vulnerability Scan run on a main head containing
-      document version 25 reports aiperf-bench with 0 critical, 0 high and
-      0 VEX-suppressed in its scan-results summary, and a JSON rescan of the
-      exact image that run scanned has no pillow match at any severity. The
-      run's artifact is a text summary naming packages only for HIGH+
-      findings, so it cannot prove the second half on its own.
+      The aiperf-bench image of the first release cut from a main head
+      containing document version 25, scanned by digest on both linux/amd64
+      and linux/arm64, has no pillow match at any severity and catalogues
+      pillow 13.0.0. Scoped to pillow: other findings (CVE-2026-115557 in the
+      base's CPython, NVIDIA/aicr#3523) are not this entry's concern.
     how: |
-      gh workflow run "Weekly Image Vulnerability Scan" --repo NVIDIA/aicr --ref main
-      # 1. read aiperf-bench.txt in that run's scan-results artifact
-      # 2. rescan the bytes it scanned (tag scan-<run head sha>-amd64):
-      grype "ghcr.io/nvidia/aicr-validators/aiperf-bench:scan-${SHA}-amd64" \
-        --only-fixed -c .grype.yaml -o json \
-        | jq '[.matches[], (.ignoredMatches // [])[]] | map(select(.artifact.name == "pillow")) | length'
+      IMG=ghcr.io/nvidia/aicr-validators/aiperf-bench@$(crane digest ghcr.io/nvidia/aicr-validators/aiperf-bench:<release tag>)
+      for arch in amd64 arm64; do
+        grype "registry:${IMG}" --platform "linux/${arch}" --only-fixed -c .grype.yaml -o json \
+          | jq '[.matches[], (.ignoredMatches // [])[]] | map(select(.artifact.name == "pillow")) | length'
+        syft "registry:${IMG}" --platform "linux/${arch}" -q -o json \
+          | jq -r '.artifacts[] | select(.name == "pillow") | .version'
+      done
     resolves_when: >-
-      that run has been inspected and its aiperf-bench result matches the
-      check. A pillow finding there is the finding to triage, not something a
-      later run discharges.
+      that release's image has been scanned as above, every count is 0 and
+      every version is 13.0.0, with the release tag and digest recorded in the
+      PR that deletes this entry. A pillow finding on that release is the
+      finding to triage, not something a later release discharges.
 
 known_negatives: []
 
