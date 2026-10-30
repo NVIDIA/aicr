@@ -41,3 +41,13 @@ builds:
       - -X github.com/NVIDIA/aicr/pkg/operator/version.Version={{ or (index .Env "AICR_OPERATOR_VERSION") "v0.0.0-dev" }}
       - -X github.com/NVIDIA/aicr/pkg/operator/version.Commit={{ .Git.FullCommit }}
       - -X github.com/NVIDIA/aicr/pkg/operator/version.Date={{ or (index .Env "AICR_OPERATOR_DATE") "unknown" }}
+  # The operator's in-cluster registry (registry.inCluster in
+  # charts/aicr-operator), built with the operator.
+  - id: aicr-registry
+    main: ./cmd/aicr-registry
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w

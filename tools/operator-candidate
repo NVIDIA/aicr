@@ -14,11 +14,11 @@
 # limitations under the License.
 
 # Builds an immutable qualification candidate from the
-# current commit into dist/candidate: the operator image for linux/amd64 and
-# linux/arm64 as an OCI layout with SPDX SBOMs (ko, on AICR's base image), the
-# kubectl-aicr binaries, the chart packaged deterministically, and
-# candidate.json recording every digest with the AICR release the candidate
-# runs. The candidate is a release build: the operator refuses its
+# current commit into dist/candidate: the operator image and the in-cluster
+# registry image for linux/amd64 and linux/arm64 as OCI layouts with SPDX SBOMs
+# (ko, on AICR's base image), the kubectl-aicr binaries, the chart packaged
+# deterministically, and candidate.json recording every digest with the AICR
+# release the candidate runs. The candidate is a release build: the operator refuses its
 # development settings.
 #
 # Usage: CANDIDATE_VERSION=v0.1.0-rc.1 tools/operator-candidate [build|verify]
@@ -26,8 +26,9 @@
 #   verify  build twice and require identical bytes
 #
 # CANDIDATE_REPOSITORY names the operator image repository the candidate is
-# published to (default ghcr.io/nvidia/aicr-operator); the build pushes
-# nothing (the release workflow publishes it with `go run ./tools/operator-release
+# published to (default ghcr.io/nvidia/aicr-operator), and
+# CANDIDATE_REGISTRY_REPOSITORY the registry image's (default aicr-registry
+# beside it); the build pushes nothing (the release workflow publishes it with `go run ./tools/operator-release
 # push`, .github/workflows/on-tag.yaml). CANDIDATE_DIR is where it is built (default
 # dist/candidate).
 set -euo pipefail
@@ -42,6 +43,7 @@ export GOWORK=off
 
 version="${CANDIDATE_VERSION:?set CANDIDATE_VERSION to a release version, such as v0.1.0-rc.1}"
 repository="${CANDIDATE_REPOSITORY:-ghcr.io/nvidia/aicr-operator}"
+registry_repository="${CANDIDATE_REGISTRY_REPOSITORY:-${repository%/*}/aicr-registry}"
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "the tree has uncommitted changes; a candidate is built from a commit" >&2
   exit 1
@@ -70,17 +72,22 @@ build() {
     go run "github.com/google/ko@$(setting '.build_tools.ko')" build --bare --push=false \
     --platform=linux/amd64,linux/arm64 --oci-layout-path "${out}/image" --sbom-dir "${out}/sbom" \
     ./cmd/aicr-operator >/dev/null
+  KO_DOCKER_REPO="${registry_repository}" \
+    go run "github.com/google/ko@$(setting '.build_tools.ko')" build --bare --push=false \
+    --platform=linux/amd64,linux/arm64 --oci-layout-path "${out}/registry-image" --sbom-dir "${out}/sbom" \
+    ./cmd/aicr-registry >/dev/null
   local platform
   for platform in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
     CGO_ENABLED=0 GOOS="${platform%/*}" GOARCH="${platform#*/}" GOFLAGS=-mod=readonly \
       go build -trimpath -ldflags "${ldflags}" -o "${out}/plugin/kubectl-aicr-${platform%/*}-${platform#*/}" ./cmd/kubectl-aicr
   done
   go run ./tools/operator-release build -dir "${out}" -version "${version}" -repository "${repository}" \
-    -commit "${commit}" -commit-date "${commit_date}" -go-version "$(go env GOVERSION)"
+    -registry-repository "${registry_repository}" -commit "${commit}" -commit-date "${commit_date}" -go-version "$(go env GOVERSION)"
   # The packaged chart defaults to the candidate's images, so it renders with
-  # only the cluster's own inputs.
-  helm template aicr-operator "${out}"/chart/*.tgz --namespace aicr-system \
-    --set registry.repository=oci://registry.example.com/aicr/cluster --set validation.enabled=true >/dev/null
+  # only the cluster's own inputs, with either registry.
+  helm template aicr-operator "${out}"/chart/*.tgz --namespace aicr-system --set validation.enabled=true >/dev/null
+  helm template aicr-operator "${out}"/chart/*.tgz --namespace aicr-system --set validation.enabled=true \
+    --set registry.mode=external --set registry.repository=oci://registry.example.com/aicr/cluster >/dev/null
   refuses_bypass "${out}"
   clean "${out}"
 }
@@ -92,6 +99,8 @@ clean() {
   bins="$(mktemp -d "${work}/bins.XXXXXX")"
   for platform in linux/amd64 linux/arm64/v8; do
     go run ./tools/operator-release extract -dir "${out}" -platform "${platform}" -out "${bins}/aicr-operator-${platform//\//-}"
+    go run ./tools/operator-release extract -dir "${out}" -image registry-image -binary ko-app/aicr-registry \
+      -platform "${platform}" -out "${bins}/aicr-registry-${platform//\//-}"
   done
   # The chart is compressed; scan its files.
   mkdir "${bins}/chart"

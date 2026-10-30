@@ -392,7 +392,7 @@ spec:
 		}
 		reg := registry.New(registry.Options{PlainHTTPHosts: []string{host},
 			Credentials: func(ctx context.Context, _ string) (auth.Credential, error) { return creds(ctx, registryHost) }})
-		repo, err := registry.ParseRepository("oci://" + host + "/aicr/cluster/wrappers/e2e-readiness")
+		repo, err := registry.ParseRepository("oci://" + host + "/aicr/wrappers/e2e-readiness")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -405,7 +405,7 @@ spec:
 		Target: argocd.Target{Namespace: "argocd", Project: "aicr", RuntimeName: "verify-e2e"}}
 	p := &plan.Document{RuntimeUID: "5d0c1f9e-0a6b-4c1e-9d0e-3f7a2b8c4e61", DesiredStateDigest: plan.DigestOf([]byte("verify-e2e"))}
 	rel := &plan.Release{ID: "e2e-readiness", Component: "e2e", Phase: plan.PhaseReadiness, ReadinessFor: "e2e", TargetNamespace: "aicr-e2e",
-		Chart: plan.Chart{Source: plan.ChartWrapper, Repository: "oci://" + registryHost + "/aicr/cluster/wrappers/e2e-readiness", Digest: pushed.Digest}}
+		Chart: plan.Chart{Source: plan.ChartWrapper, Repository: "oci://" + registryHost + "/aicr/wrappers/e2e-readiness", Digest: pushed.Digest}}
 	values := []byte(`{}`)
 	t.Cleanup(func() {
 		bg := context.WithoutCancel(ctx)

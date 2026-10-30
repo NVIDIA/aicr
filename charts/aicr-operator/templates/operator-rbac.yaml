@@ -99,8 +99,8 @@ rules:
   - apiGroups: [""]
     resources: [pods]
     verbs: [get]
-  {{- with .Values.registry.auth.staticSecretRef }}
-  # The static provider's credentials, read by name only.
+  {{- with include "aicr-operator.credentialsSecret" . }}
+  # The registry credentials, read by name only.
   - apiGroups: [""]
     resources: [secrets]
     resourceNames: [{{ . | quote }}]
@@ -212,7 +212,7 @@ rules:
     resources: [appprojects]
     resourceNames: [{{ .Values.engine.project | quote }}]
     verbs: [get]
-  {{- if eq .Values.registry.auth.provider "aws" }}
+  {{- if eq (include "aicr-operator.ecr" .) "true" }}
   - apiGroups: [""]
     resources: [secrets]
     resourceNames: [{{ .Values.registry.auth.repoCredsSecret | quote }}]

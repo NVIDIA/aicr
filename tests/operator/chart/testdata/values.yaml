@@ -1,6 +1,7 @@
-# Installation values for the chart tests: the aws provider (so the chart
-# creates repo-creds), validation on, and three component namespaces, one of
-# which already exists.
+# Installation values for the chart tests: an external registry with the aws
+# provider (so the chart creates repo-creds), validation on, and three
+# component namespaces, one of which already exists. inClusterValuesFile
+# layers the in-cluster registry over these.
 aicr:
   version: v1.0.0
   image: ghcr.io/nvidia/aicr:v1.0.0@sha256:e91ba6f4916a5bfcd19d05933b5b4d07a4dd05a738a1ffebfab243a32cbff433
@@ -9,6 +10,7 @@ aicr:
 operator:
   image: ghcr.io/nvidia/aicr-operator@sha256:0000000000000000000000000000000000000000000000000000000000000000
 registry:
+  mode: external
   repository: oci://123456789012.dkr.ecr.us-west-2.amazonaws.com/aicr/cluster
 namespaces:
   components:

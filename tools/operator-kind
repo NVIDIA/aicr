@@ -15,7 +15,9 @@
 
 # Manages the operator's kind test cluster: `up` creates it with the node image
 # pinned in .settings.yaml plus a plain-HTTP OCI registry inside the cluster
-# that requires a password; `down` deletes it. The kubeconfig is written to
+# that requires a password, for the e2e suite, which runs AICR Jobs without
+# the chart (the skeleton and qualify suites install the chart's own
+# in-cluster registry); `down` deletes it. The kubeconfig is written to
 # .operator-e2e/kubeconfig and never merged into ~/.kube/config. The registry
 # password is random per cluster; its docker config is written to
 # .operator-e2e/registry-auth.json and never committed.

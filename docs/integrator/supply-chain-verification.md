@@ -907,9 +907,11 @@ spec:
           predicateType: https://slsa.dev/provenance/v1
 ```
 
-The `ghcr.io/nvidia/aicr**` glob also matches the AICR Operator preview image,
-`ghcr.io/nvidia/aicr-operator`, whose provenance is signed by `on-tag.yaml`, not
-`attest-images.yaml`, so this policy rejects the operator's pods. Label only
+The `ghcr.io/nvidia/aicr**` glob also matches the AICR Operator preview images,
+`ghcr.io/nvidia/aicr-operator` and its in-cluster registry
+`ghcr.io/nvidia/aicr-registry`, whose provenance is signed by `on-tag.yaml`, not
+`attest-images.yaml`, so this policy rejects the operator's and the registry's
+pods. Label only
 workload namespaces for enforcement and leave the operator's namespace
 (`aicr-system`) unlabeled, or narrow the glob to the images you run.
 

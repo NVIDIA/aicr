@@ -129,6 +129,15 @@ it:
 The active plan and the running stack are unaffected, but Argo CD cannot fetch
 charts for new comparisons until the registry returns.
 
+With the in-cluster registry, check its pod and volume:
+`kubectl -n aicr-system get pods -l app.kubernetes.io/name=aicr-registry` and
+`kubectl -n aicr-system get pvc aicr-registry`. A pod `Pending` on an unbound
+volume means no StorageClass serves it: set a default StorageClass, or
+`registry.inCluster.storage.storageClassName`. Pushes that fail once the volume
+is full need a larger `registry.inCluster.storage.size`, which a StorageClass
+that allows expansion applies in place; nothing is ever deleted from the
+registry.
+
 **`Unauthorized`** (`Resolved=False`, stalled). The registry refused the
 operator's own push or pull (HTTP 401 or 403). Check the identity's policy and
 the repository prefix in `registry.repository` ([installing on
@@ -145,6 +154,9 @@ get registry credentials:
 - `static`: the docker config Secret `registry.auth.staticSecretRef` is missing
   or unreadable in the operator namespace. Recreate it there, and in the Job
   and validation namespaces.
+- In-cluster registry: the chart's Secret `aicr-registry-auth` is missing in
+  the operator namespace. `helm upgrade` with the same values recreates it
+  from the kept login.
 
 Resolution resumes once credentials work.
 

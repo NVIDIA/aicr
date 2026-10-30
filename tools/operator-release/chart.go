@@ -33,6 +33,7 @@ import (
 const (
 	aicrValues     = "aicr"
 	operatorValues = "operator"
+	registryValues = "registry"
 )
 
 var (
@@ -47,7 +48,7 @@ var (
 // entries with fixed times, owners and modes, and a gzip header without name
 // or time, so the same source always yields the same digest. .helmignore
 // lines are a directory prefix ("dir/"), a base-name glob, or a path.
-func packageChart(dir fs.FS, version string, aicr AICR, operatorImage string) (name string, archive []byte, err error) {
+func packageChart(dir fs.FS, version string, aicr AICR, operatorImage, registryImage string) (name string, archive []byte, err error) {
 	chartYAML, err := fs.ReadFile(dir, "Chart.yaml")
 	if err != nil {
 		return "", nil, fmt.Errorf("read Chart.yaml: %w", err)
@@ -63,7 +64,7 @@ func packageChart(dir fs.FS, version string, aicr AICR, operatorImage string) (n
 	if err != nil {
 		return "", nil, fmt.Errorf("read values.yaml: %w", err)
 	}
-	if values, err = stampValues(values, aicr, operatorImage); err != nil {
+	if values, err = stampValues(values, aicr, operatorImage, registryImage); err != nil {
 		return "", nil, err
 	}
 
@@ -133,12 +134,12 @@ func packageChart(dir fs.FS, version string, aicr AICR, operatorImage string) (n
 	return name, buf.Bytes(), nil
 }
 
-// stampValues sets the chart's default AICR release, AICR images and
-// operator image to the candidate's, so the published chart installs exactly
-// what was qualified without other inputs. It edits values.yaml's text, which
-// keeps its comments; each field must appear once in its section, the images
-// empty.
-func stampValues(values []byte, aicr AICR, operatorImage string) ([]byte, error) {
+// stampValues sets the chart's default AICR release, AICR images, operator
+// image and in-cluster registry image to the candidate's, so the published
+// chart installs exactly what was qualified without other inputs. It edits
+// values.yaml's text, which keeps its comments; each field must appear once
+// in its section, the images empty.
+func stampValues(values []byte, aicr AICR, operatorImage, registryImage string) ([]byte, error) {
 	validators := "  validatorImages: []"
 	if len(aicr.ValidatorImages) > 0 {
 		validators = "  validatorImages:"
@@ -151,6 +152,7 @@ func stampValues(values []byte, aicr AICR, operatorImage string) ([]byte, error)
 		{aicrValues, `  image: ""`, fmt.Sprintf("  image: %q", aicr.Image)},
 		{aicrValues, "  validatorImages: []", validators},
 		{operatorValues, `  image: ""`, fmt.Sprintf("  image: %q", operatorImage)},
+		{registryValues, `    image: ""`, fmt.Sprintf("    image: %q", registryImage)},
 	}
 	stamped := make([]int, len(stamps))
 	lines := strings.Split(string(values), "\n")
