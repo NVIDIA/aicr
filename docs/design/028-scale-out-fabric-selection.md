@@ -79,8 +79,11 @@ must validate the same thing.
   recipe alone before validation runs.
 - The fabric selects the right components and manifests on overlays where
   more than one fabric ships for the same accelerator.
-- Snapshot-driven generation infers the fabric where the snapshot can see
-  it, and fails closed when the snapshot contradicts an explicit selection.
+- Snapshot-driven generation validates the selected fabric value against
+  the snapshot where the snapshot can see the fabric, fails closed when they
+  disagree, and names the matching value in the remediation. Selection stays
+  explicit: ADR-015 lists choosing a configuration from cluster state as a
+  non-goal, and this ADR keeps that.
 - The NCCL validators and the NVCRE integration read the fabric from the
   recipe, never from the cluster.
 
@@ -191,9 +194,10 @@ Keep one declaration. Each `gpuStack` value states its fabric through a
 reserved `fabric` marker. Overlays with two fabrics declare one value per
 (driver mode, fabric) pair.
 
-- Pro: cheapest. No ADR-015 exception, no new criteria enum, one optional
-  field in the wire model, and the evidence segment keeps its
-  `gpustack-<value>` shape. Overlays with one fabric change nothing; their
+- Pro: cheapest. One narrow ADR-015 amendment (a leaf declaration may
+  shadow an inherited one, see "OKE declaration scope"), no new criteria
+  enum, one optional field in the wire model, and the evidence segment
+  keeps its `gpustack-<value>` shape. Overlays with one fabric change nothing; their
   fabric is derived.
 - Con: the value becomes a tuple. On OKE the set can grow from two values to
   four, and every new driver mode or fabric multiplies it. The product
@@ -224,7 +228,7 @@ bundle-time `--dynamic` value.
 | Change surface | Large: CLI, API, docs, all overlays | Medium: resolver, wire model, evidence | Small: marker, few overlays | Small |
 | ADR-015 impact | None | Reopens one-declaration rule | Widens value semantics; adds leaf shadowing of one inherited declaration | Violates design-time principle |
 | Value explosion | None | None (orthogonal) | M×N on overlays with both axes | None |
-| Snapshot inference | Same new readings | Same new readings | Same new readings | Runtime detection instead |
+| Snapshot check of the selection | Same new readings | Same new readings | Same new readings | Runtime detection instead |
 | Evidence coordinates | New dimension in every path | Two profile segments | Unchanged shape | Fabric not in evidence |
 | Fit for EKS (single fabric) | Redundant axis | No declaration | No declaration; derived | Detected |
 | Readability | Best | Good | Worst: tuple in a name | n/a |
@@ -297,7 +301,15 @@ Rules, enforced at catalog load:
   vocabulary validated by a new check, persisted verbatim like
   `advertiser`, and included in the digest. Unlike `advertiser` it has
   several values and triggers no lock closure. It may appear on a value
-  that also carries `advertiser: external`.
+  that also carries `advertiser: external`. Like `advertiser`, the
+  vocabulary is enforced on every decode as well as at catalog load:
+  `ValidateProfileContract` (`pkg/recipe/profile.go`) checks
+  `selectedProfile.fabric` beside `ValidateAdvertiser`, so an adopted
+  `v1beta2` recipe handed to `aicr validate -r`, `aicr bundle -r`, or
+  `POST /v1/bundle`, which never load the catalog, cannot carry an
+  out-of-vocabulary marker into `ValidationInput.Fabric`, the qualification
+  lookup, or a signed predicate. A decode test with an out-of-vocabulary
+  marker pins this.
 - If any value of a declaration carries `fabric`, every value must. A
   declaration either models the fabric or it does not.
 - Values that differ only in `fabric` must still satisfy ADR-015 union
@@ -329,8 +341,8 @@ profile value has to pick one shape. Four ways to do that:
    **1a. Gated manifests on the existing `network-operator` ref**
    (preferred). The ref lists one policy manifest per fabric, for example
    `nic-cluster-policy-<target>-ib.yaml` and
-   `nic-cluster-policy-<target>-roce.yaml` (the RoCE file also carrying the
-   IPAM pool and NADs). Each file wraps itself in a gate on an AICR-owned
+   `nic-cluster-policy-<target>-roce.yaml`, each carrying only the
+   `NicClusterPolicy`. Each file wraps itself in a gate on an AICR-owned
    key under the component's values, for example
    `network-operator.aicr.fabric`, which the profile value sets. The
    manifests already read `.Values "network-operator"` today
@@ -342,8 +354,30 @@ profile value has to pick one shape. Four ways to do that:
    hands: the live `nic-cluster-policy` CR stays in the
    `network-operator-post` release on every deployer, so an existing
    cluster upgrades in place with no ownership migration. Cost: the gate
-   key is an owned path locked for every value, and the two readiness
-   couplings below must learn to see through the gate.
+   key is an owned path locked for every value.
+
+   The objects a RoCE policy needs beside the `NicClusterPolicy`, the
+   `nv-ipam` `IPPool`, the `SriovNetworkNodePolicy` and the network objects
+   that render the NetworkAttachmentDefinitions, cannot ride in the policy
+   file. Their CRDs exist only after the operator has reconciled the
+   policy, and Helm validates every document of a release before it applies
+   any, so a release that carries both never installs: Helm and Helmfile
+   fail REST mapping, Argo CD fails its dry-run, Flux retries without end.
+   NVKE already keeps its `IPPool` and SR-IOV objects in the separate
+   `sriov-ib-networks` component ordered after `network-operator` for this
+   reason (`gb200-nvke-ubuntu-training.yaml`). The conversion follows that
+   shape: a manifest-only companion component, for example
+   `network-operator-roce-networks`, listed unconditionally in the
+   composition with `dependencyRefs: [network-operator]`, whose manifest is
+   gated on its own AICR-owned key (`<companion>.aicr.fabric`) that the same
+   profile value sets. It renders nothing when another fabric is selected,
+   which keeps the component set identical across values as ADR-015
+   requires. The companion is not a derivation signal; the policy manifest
+   row is. Because this path is a fresh install on a cluster that has
+   never run `nv-ipam`, and the upgrade test in step 5 starts from a bundle
+   that already has, step 5 also installs each fabric value fresh on every
+   deployer and asserts the policy reaches `ready` and the companion's
+   objects apply.
 
    **1b. Separate manifest-only components**, `network-operator-policy-ib`
    and `network-operator-policy-roce`, both unconditionally in the
@@ -363,25 +397,34 @@ profile value has to pick one shape. Four ways to do that:
    into the new component. 1b is kept only as the fallback if the gate
    key proves unacceptable to a future chart version.
 
-   **Couplings costed into both placements.** Two readers derive fabric
-   resources from the policy manifest. `recipeDeclaresRDMAFabric`
-   (`validators/deployment/expected_resources.go`) is a filename check on
-   the `network-operator` ref alone, and `recipeAttachesNicClusterPolicy`
-   (`pkg/bundler/readiness.go`) regex-scans raw manifest content across
-   every ref. With two gated files both scans would see both fabrics and
-   gate on resources that never appear. Both must evaluate the gate, by
-   rendering the manifest with the component's values before extracting
-   resources, and 1b must additionally point them at the new components.
-   This is costed into step 5 together with an upgrade test from a
-   pre-conversion bundle.
+   **Readiness couplings.** Three readers touch the policy manifest.
+   `recipeDeclaresRDMAFabric` (`validators/deployment/expected_resources.go`)
+   and `recipeAttachesNicClusterPolicy` (`pkg/bundler/readiness.go`) are
+   presence predicates: the first checks file names on the
+   `network-operator` ref, the second scans manifest content across every
+   ref for a `NicClusterPolicy` document. Under 1a exactly one policy
+   renders and both files carry the marker, so both predicates stay
+   correct and need no change. The reader that derives fabric resources is
+   `rdmaFabricResources` (`validators/deployment/rdma_fabric_resource.go`),
+   and it already renders each marker-matched manifest with the
+   component's effective values before parsing, so a gated-off manifest
+   renders empty and contributes nothing, while the set-level fail-closed
+   check still holds because the selected manifest contributes. Step 5
+   adds a test that a gated IB and RoCE pair yields only the selected
+   fabric's resources. Under 1b the predicates and the reader must all be
+   pointed at the new components, one more cost of that placement.
 2. **Values-driven policy through the chart.** Set `deployCR: true` and
-   express the policy under the chart's `nicClusterPolicy` values, as
-   `values-mk8s-b300.yaml` already starts to do. The profile value then
-   switches fabric with `overrides` alone. Cost: the OKE and generic
-   overlays turned `deployCR` off on purpose, so the manifest CR is
-   authoritative and the chart cannot fight it on upgrade. SR-IOV plus IPAM
-   plus multus is a large, deeply nested values tree. Union totality would
-   force every value to assign every nested path the other fabric touches.
+   express the policy under the chart's `nicClusterPolicy` values, so the
+   profile value switches fabric with `overrides` alone. Not viable at the
+   pin: the 26.7.0 chart does not template a `NicClusterPolicy` even with
+   `deployCR: true` (recorded in
+   `recipes/components/network-operator/readiness.yaml`), and every shipped
+   values file, `values-mk8s-b300.yaml` included, sets `deployCR: false`
+   and `nicClusterPolicy.enabled: false` so the manifest CR stays
+   authoritative. Taking this option renders no policy at all. Even on a
+   chart that did template it, SR-IOV plus IPAM plus multus is a large,
+   deeply nested values tree, and union totality would force every value
+   to assign every nested path the other fabric touches.
 3. **`manifestFiles` in the profile fragment.** Extend the fragment grammar
    so a value names its own manifest files on a component ref, recorded as
    a synthetic `<component>.manifestFiles` owned path. Smallest change to
@@ -398,10 +441,11 @@ profile value has to pick one shape. Four ways to do that:
 **Preferred: option 1, placement 1a.** It is the pattern ADR-015 already
 defines, it changes neither the profile grammar nor the release that owns
 the live policy, and the lock machinery works as it does for
-`gcp-driver-installer`. Option 2 is the fallback if the gate key cannot be
-carried on the chart's values. Option 3 is kept in reserve for a future
-case where a single component must vary a manifest without a presence
-gate.
+`gcp-driver-installer`. Placement 1b is the single fallback, taken only if
+a future chart version rejects the gate key. Option 2 cannot render the
+policy at the pinned chart and is not a fallback. Option 3 is kept in
+reserve for a future case where a single component must vary a manifest
+without a presence gate.
 
 ### Derivation where no declaration models the fabric
 
@@ -415,11 +459,11 @@ deterministic, so two readers of the same recipe bytes get the same answer.
 Derivation keys on three things the resolved recipe already holds:
 component identity, manifest identity, and, for a gated manifest, the
 gate's value under the component's resolved values (`aicr.fabric` on
-`network-operator`). It never reads manifest content. Five of the six
-NicClusterPolicy manifests are Helm templated, so a plain YAML parse is
-not available, and shape is not a reliable signal anyway: AKS and Nebius
-use the shared RDMA plugin with no `linkTypes` selector and are
-InfiniBand, while OKE L40S uses SR-IOV and is RoCE. A gated manifest
+`network-operator`). It never reads manifest content. Six of the seven
+NicClusterPolicy manifests in the catalog are Helm templated, so a plain
+YAML parse is not available, and shape is not a reliable signal anyway:
+AKS and Nebius use the shared RDMA plugin with no `linkTypes` selector and
+are InfiniBand, while OKE L40S uses SR-IOV and is RoCE. A gated manifest
 whose gate value is absent from the recipe is an error, not an open gate.
 
 | Composition contains | Derived fabric |
@@ -428,7 +472,7 @@ whose gate value is absent from the recipe is an error, not an open gate.
 | A policy manifest in the table below, ungated or with its gate value selecting it | the fabric registered for that manifest |
 | `gke-gb200-rdma` | `roce` |
 | `gke-nccl-tcpxo` | `tcpxo` |
-| `network-operator` with no policy manifest (kind), `network-operator-ocp-olm` alone, `dranet` (VR200), a namespace-only `network-operator` ref (Talos) | not a fabric signal |
+| `network-operator` with no policy manifest (kind), a policy manifest registered below as no signal (OCP), `dranet` (VR200), a namespace-only `network-operator` ref (Talos) | not a fabric signal |
 | no fabric signal | unset; NCCL NET checks are not applicable |
 
 `dranet` exposes ConnectX-9 RDMA ports through DRA and says nothing about
@@ -443,7 +487,16 @@ they are explicit no-fabric leaves until a VR200 NET check exists.
 | `nic-cluster-policy-nvke-gb200.yaml` | `network-operator` | `ib` |
 | `nic-cluster-policy-oke-gb200.yaml` | `network-operator` | `ib` |
 | `nic-cluster-policy-oke-l40s.yaml` | `network-operator` | `roce` |
-| `nicclusterpolicy.yaml` | `network-operator-ocp` | `ib` |
+| `nicclusterpolicy.yaml` | `network-operator-ocp` | no signal |
+
+The OCP policy is registered as no signal on purpose. `ocp.yaml` attaches
+it to every OCP composition, and its RDMA shared device plugin selects by
+vendor `15b3` and driver `mlx5_core` alone, which binds InfiniBand and RoCE
+ports alike, so the manifest does not say which fabric an OCP cluster
+runs. Registering it as `ib` would sign `ib` into every OCP recipe's
+evidence, and a row cannot be corrected later. When an OCP fabric is
+qualified, the manifest is replaced by per-fabric gated files with rows of
+their own, as any fabric change is.
 
 Every row above is ungated: each manifest renders whenever its component
 is in the composition. A row for a gated manifest records the gate path
@@ -476,7 +529,7 @@ component. Examples:
   Max (GB300), and the GKE H100 inference leaves.
 - The OKE leaves that deploy no network component (`a100-oke-training`,
   `gb200-oke-inference`, `l40s-oke-inference`).
-- BCM, k0s, LKE, kind, OCP leaves that carry only the OLM subscription,
+- BCM, k0s, LKE, kind, OCP (its policy is registered as no signal),
   Talos, and VR200.
 
 None of them declares an NCCL NET check. Unset is not a catch-all: a
@@ -486,6 +539,26 @@ split. Every leaf that declares an NCCL NET check must derive exactly one
 fabric. The set of leaves that derive unset is a committed golden list, so
 a leaf that gains or loses a fabric signal changes that list and is
 reviewed, rather than passing silently.
+
+**External catalogs.** The compiled tables know only the embedded
+catalog, while a `--data` directory adds components and manifests of its
+own and may replace an embedded file at the same path
+(`docs/integrator/data-extension.md`), and external recipes opt into the
+NCCL NET checks through `nccl-benchmark-profile`. Rows are matched by
+manifest path and content digest, so a same-path override whose content
+differs from the embedded file matches no row and is treated as an
+unregistered external manifest, never as the embedded row's fabric. An
+external catalog registers its own fabric signals in its `registry.yaml`:
+a component entry gains an optional `fabricSignals` list with the same
+row shape as the embedded table (manifest path, digest, fabric or no
+signal, gate path and value for a gated manifest), validated by the same
+load-time checks. An external overlay that attaches a policy manifest
+with neither a row nor a declared marker fails catalog load with a
+diagnostic naming the manifest and both remedies. This is the one
+external-facing change step 1 makes, and `data-extension.md` documents it
+in step 6. A `--data` test resolves and validates an external recipe that
+attaches its own registered policy manifest, and another covers a
+same-path override of an embedded policy.
 
 `FabricOf` returns the declared marker when `metadata.selectedProfile.fabric`
 is present and derives otherwise. Derivation is a fallback, not a second
@@ -534,7 +607,7 @@ time a marked recipe exists, the previous release already reads it. The
 rule holds for a family already on `v1beta2` (OKE) as much as for one
 converting from `aicr.run/v1`. Unmarked recipes are unaffected either way.
 
-### Snapshot inference and fail-closed behavior
+### Snapshot validation and fail-closed behavior
 
 Snapshot-driven generation applies the per-value constraints as ADR-015
 already specifies. The signals this ADR needs do not exist as addressable
@@ -573,9 +646,16 @@ The ADR-015 resolution algorithm is unchanged, including its treatment of
 an unavailable reading: on the snapshot path, a fabric-modeling family
 whose distinguishing reading is absent fails generation with the existing
 "reading unavailable, regenerate the snapshot" diagnostic. There is no
-fabric-specific exception that defaults silently. Criteria-only generation
-(no `--snapshot`) selects the declared default and records the constraints
-unevaluated, as it does for `gpuStack` today. A snapshot whose reading
+fabric-specific exception that defaults silently. Selection is never
+inferred from the snapshot: without `--profile`, the snapshot path selects
+the declared default and evaluates its distinguishing constraint, so a
+converted RoCE GB300 cluster generating without `--profile` fails the
+default value's `linkType` constraint, and the constraint's remediation
+names the matching value (`--profile gpuStack=operator-managed-roce`), the
+way the `oke-ol.yaml` add-on constraint already points at
+`operator-managed`. Criteria-only generation (no `--snapshot`) selects the
+declared default and records the constraints unevaluated, as it does for
+`gpuStack` today. A snapshot whose reading
 contradicts an explicit `--profile` selection fails with
 `ErrCodeInvalidRequest` naming the reading. A snapshot whose cohort reading
 is `mixed`, or that reports both link types across GPU nodes, fails closed;
@@ -598,14 +678,18 @@ converts. Unprofiled families (EKS among them) are unaffected.
   the input is built, exactly as `GPUAllocationPolicy` is resolved from the
   recipe today. Empty means no fabric: an unset derivation, or a standalone
   input built without recipe context.
-- **NVCRE check.** `nccl-cre-all-reduce-bw` is the opt-in NVCRE-driven
-  validator (`validators/performance/cre_nccl.go`), qualified today only on
-  EKS H100 (`cre_qualification.go`). It copies `ValidationInput.Fabric`
-  into `spec.fabric` on the `Certification`, the field
-  cluster-readiness-engine#576 introduces. When `Fabric` is empty the check
-  reports not applicable and does not run; it never omits `spec.fabric` and
-  leaves NVCRE to detect, which would reintroduce Option D through the
-  back door. AICR requires that an explicit `spec.fabric` wins over
+- **NVCRE checks.** Two opt-in NVCRE-driven validators create a
+  `Certification` today, `nccl-cre-all-reduce-bw`
+  (`validators/performance/cre_nccl.go`) and `cre-training-goodput`
+  (`cre_goodput.go`), through the shared `buildCRECertification` and
+  `createUnstructured` path, and both are qualified only on EKS H100 in the
+  one `creQualifiedEntries` map (`cre_qualification.go`). Every rule in
+  this bullet applies to both, and to any later check that creates a
+  `Certification`. Each copies `ValidationInput.Fabric` into `spec.fabric`
+  on the `Certification`, the field cluster-readiness-engine#576
+  introduces. When `Fabric` is empty the check reports not applicable and
+  does not run; it never omits `spec.fabric` and leaves NVCRE to detect,
+  which would reintroduce Option D through the back door. AICR requires that an explicit `spec.fabric` wins over
   detection and that a mismatch with the cluster fails the run rather than
   switching fabric; NVCRE's proposal already validates an explicit value
   against the cluster. "Explicit wins" is enforced on the AICR side too,
@@ -622,7 +706,7 @@ converts. Unprofiled families (EKS among them) are unaffected.
   qualification key gains a fabric dimension, `(service, accelerator,
   fabric)`, since the current `(service, accelerator)` key cannot say
   "qualified on EFA, not on RoCE" for one accelerator; only
-  `(eks, h100, efa)` exists today.
+  `(eks, h100, efa)` exists today, for each of the two checks.
 - **TrainJob checks.** `nccl-all-reduce-bw-net` and `-nvls` keep their
   `(service, accelerator)` template matrix. ADR-025 keeps them in place,
   and whether a recipe selects the TrainJob or the NVCRE backend is decided
@@ -677,8 +761,18 @@ family. Adding a declaration to a family that has none is a full ADR-015
 family conversion: the overlay (`RecipeMetadata`) moves from
 `aicr.run/v1beta1` to `aicr.run/v1beta2`, the resolved `RecipeResult` moves
 from `aicr.run/v1` to `aicr.run/v1beta2`, `ownedPaths` appears, clients
-start receiving `v1beta2` artifacts for the family, and every shipped
-evidence pointer for the family must be re-signed. ADR-015
+start receiving `v1beta2` artifacts for the family, and the family's
+evidence moves to a new coordinate. `RecipeNameFor`
+(`pkg/evidence/attestation/builder.go`) appends `-gpustack-<value>` to
+every profiled recipe, the declaration's default included, so new
+evidence lands under the suffixed directory. The pre-conversion pointers
+cannot be re-signed in place, because the pointer contract rejects a
+`pointer.recipe` that differs from its directory
+(`pkg/evidence/verifier/discover.go`). They stay where they are as the
+record of the pre-conversion recipe, verify under their own statements,
+and receive no new evidence, which is what the AKS conversion did:
+`h100-aks-ubuntu-training-kubeflow` sits beside
+`h100-aks-ubuntu-training-kubeflow-gpustack-azure-managed` today. ADR-015
 also forbids declaring a value that is not yet qualified, so a declaration
 cannot land ahead of its second value.
 
@@ -688,7 +782,7 @@ cannot land ahead of its second value.
 | `gke-cos.yaml` | None. Derived `roce` on A4X (GB200), `tcpxo` on A3 Mega, unset on A4 (B200) and A4X Max (GB300), which carry no networking component. | Unchanged |
 | `aks.yaml` | None. Derived `ib`. | Unchanged |
 | `oke-ol.yaml` and OKE leaves | None until an OKE GB300 leaf with a qualified RoCE target exists; then that leaf declares its own marked `gpuStack`, which shadows the inherited one (see "OKE declaration scope"). | Unchanged, including the accelerator-less OKE coordinates |
-| `gb300-generic-ubuntu-training.yaml` | None until a Spectrum-X RoCE GB300 cluster is qualified; then a new `gpuStack` declaration, default `operator-managed` (`fabric: ib`) reproducing today's rendered composition, plus `operator-managed-roce`, and the gated per-fabric policy manifests on the `network-operator` ref (placement 1a). | Unchanged now. At conversion: overlay and result version bumps, the three signed pointers under `recipes/evidence/gb300-generic-ubuntu-training` re-signed in the same release, and an upgrade test from a pre-conversion bundle proving the live `nic-cluster-policy` is updated in place on every deployer. |
+| `gb300-generic-ubuntu-training.yaml` | None until a Spectrum-X RoCE GB300 cluster is qualified; then a new `gpuStack` declaration, default `operator-managed` (`fabric: ib`) reproducing today's rendered composition, plus `operator-managed-roce`, the gated per-fabric policy manifests on the `network-operator` ref (placement 1a), and the gated RoCE companion component. | Unchanged now. At conversion: overlay and result version bumps; new evidence signed in the same release under `recipes/evidence/gb300-generic-ubuntu-training-gpustack-operator-managed`, while the three pointers under `gb300-generic-ubuntu-training` stay as the pre-conversion record; an upgrade test from a pre-conversion bundle proving the live `nic-cluster-policy` is updated in place on every deployer; and a fresh install of each value on every deployer. |
 | `gb200-nvke-ubuntu-training.yaml`, `b300-mk8s-*` | None. Derived `ib`. | Unchanged |
 
 **OKE declaration scope.** `oke-ol.yaml` carries the one `gpuStack`
@@ -709,16 +803,29 @@ The resolver collects declarations from every criteria-matched chain, not
 one (`resolveProfileDeclaration` in `pkg/recipe/profile_resolution.go`),
 and a composition routinely includes co-matched chains unrelated to the
 leaf, so there is no single merge order or depth to compare across chains.
-The rule is therefore: a declaration shadows another only when the
-shadowed overlay is an ancestor of the shadowing one, in every matched
-chain that contains the shadowed overlay. The shadowing declaration
-replaces the inherited one whole: values are not merged across
-declarations, `default` is not inherited, and the result is still exactly
-one declaration, so the resolution algorithm, the lock template, and the
-evidence segment are unchanged. Any other pair of declarations, from
-sibling or unrelated chains at whatever depth, remains the error it is
-today, and external catalogs still extend rather than redeclare. The
-shadowing declaration must satisfy the same totality,
+The rule is therefore defined over maximal-leaf chains: a declaration
+shadows another only when the shadowed overlay is an ancestor of the
+shadowing one in every maximal chain that contains the shadowed overlay.
+Today only the pre-filter path reduces its candidates to maximal leaves
+(`FindMatchingOverlays`); the post-filter recheck and the direct-overlay
+load hand the resolver every applied overlay, ancestors included
+(`resolveAppliedProfileDeclaration`, `pkg/recipe/loader.go`), and the
+resolver builds one chain per overlay it is handed. For a GB300 leaf based
+on `oke-ol-training`, the chains built for `oke-ol` and `oke-ol-training`
+contain `oke-ol` without the leaf, so a rule read over those chains fails
+and `aicr recipe --snapshot`, or `-r` on the leaf, reports multiple
+declarations even when nothing was filtered. The resolver therefore
+reduces the overlays it is handed to maximal leaves on every call, pre-
+and post-filter and direct load alike: an applied overlay whose chain is
+a prefix of another applied overlay's chain is subsumed by it. The
+ancestry rule is then evaluated over the chains that remain. The
+shadowing declaration replaces the inherited one whole: values are not
+merged across declarations, `default` is not inherited, and the result is
+still exactly one declaration, so the resolution algorithm, the lock
+template, and the evidence segment are unchanged. Any other pair of
+declarations, from sibling or unrelated chains at whatever depth, remains
+the error it is today, and external catalogs still extend rather than
+redeclare. The shadowing declaration must satisfy the same totality,
 distinguishing-constraint, and qualification rules as any other.
 
 Snapshot filtering keeps the fail-closed behavior ADR-015 already has.
@@ -728,16 +835,24 @@ inherited declaration becomes effective, the source differs and
 generation fails with the existing "declaration removed by filtering"
 diagnostic. A recipe can never fall back to a shadowed parent and quietly
 lose its marker; the implementation keeps the shadowing overlay as the
-recorded source so that comparison stays meaningful.
+recorded source so that comparison stays meaningful. Three snapshot-path
+tests pin the rule where it is weakest: the shadowing leaf resolves
+unfiltered with its own declaration; the leaf filtered out fails closed
+through the source check; and the leaf beside a co-matched sibling chain
+that declares a profile of its own still fails as multiple declarations.
 
 When the first OKE GB300 RoCE target is qualified, the new GB300 leaf
 declares its own `gpuStack` with the same driver-mode values as
 `oke-ol.yaml` plus the markers and `*-roce`, shadowing the inherited one.
 `oke-ol.yaml` is not edited. Because the leaf repeats the parent's values,
 a test asserts that each shadowing value equals the parent's value of the
-same name apart from the marker and the `network-operator` gate override,
-so a later change to `oke-ol.yaml` cannot drift away from the leaf
-unnoticed. Every other OKE composition, the A100, GB200,
+same name apart from three things the leaf must add: the marker, the
+gate overrides on `network-operator` and the RoCE companion, and the
+fabric-distinguishing constraint (`NetworkTopology.identity.linkType` in
+the example under "Declaration", which the distinguishing-constraint rule
+requires and the parent's `oci-managed` does not carry). Anything else
+that differs fails the test, so a later change to `oke-ol.yaml` cannot
+drift away from the leaf unnoticed. Every other OKE composition, the A100, GB200,
 L40S leaves and the accelerator-less coordinates alike, keeps resolving
 from the `oke-ol.yaml` declaration byte-identically, digest included. No
 OKE evidence pointer is committed today, so nothing is re-signed. The
@@ -768,15 +883,22 @@ its own change, reviewed against the costs listed above.
   Splitting `fabric` into a criteria dimension later is mechanical because
   the value set and the recorded field already exist.
 - On the overlays that gain a second fabric, the `network-operator` ref
-  carries one gated policy manifest per fabric, and the gate key is locked
-  for every value, the standing ADR-015 cost. The live policy stays in the
-  `network-operator-post` release, so no deployer migrates ownership. The
-  two readiness scans that derive fabric resources from the manifest learn
-  to evaluate the gate.
+  carries one gated policy manifest per fabric, the RoCE side's
+  operator-CRD objects ride in a gated companion component ordered after
+  it, and both gate keys are locked for every value, the standing ADR-015
+  cost. The live policy stays in the `network-operator-post` release, so
+  no deployer migrates ownership. The readiness predicates need no change;
+  the resource reader already renders through the gate and gains a test.
 - A family's first conversion to two fabrics is a full ADR-015 family
-  conversion, with the overlay and result version bumps and evidence
-  re-signing that implies, and an upgrade test from a pre-conversion
-  bundle. It is scheduled per family, not by this ADR.
+  conversion, with the overlay and result version bumps that implies, new
+  evidence under the suffixed coordinate while the old pointers stay as
+  the pre-conversion record, an upgrade test from a pre-conversion bundle,
+  and a fresh install of each value on every deployer. It is scheduled per
+  family, not by this ADR.
+- External catalogs that attach their own NicClusterPolicy register it in
+  their `registry.yaml` or declare a marker; an unregistered policy fails
+  catalog load. This is the one change visible outside the embedded
+  catalog.
 - Fabric-marked recipes are readable only by binaries from the release
   that introduced the marker onward; older binaries reject them at decode.
   The schema change ships at least one release ahead of the first marker.
@@ -788,43 +910,51 @@ its own change, reviewed against the costs listed above.
 
 ## Adoption plan
 
-1. `FabricOf`, the derivation and manifest tables, and a golden test
+1. `FabricOf`, the derivation and manifest tables, the external-catalog
+   `fabricSignals` registration with its `--data` tests, and a golden test
    asserting every current catalog leaf resolves byte-identically. This
    lands first and alone, so the compatibility invariant is proven before
    any schema change.
-2. Catalog schema: the `fabric` marker and its load-time validation, plus
-   the resolution-time recheck on the filtered composition. Wire model:
-   extend `ProfileValue`, `SelectedProfile`, `applyEffectiveProfile`
-   (`pkg/recipe`), and `RecipeResult.schema.json` so `selectedProfile.fabric`
-   survives resolution, the digest, and `/v1` serialization. A
-   fabric-marked profile round-trip and digest test covers that path, since
-   the step 1 golden test exercises only unmarked leaves. OpenAPI update,
-   api-diff and openapi-diff gates. Ships at least one release before
-   step 5 (compatibility rule).
+2. Catalog schema: the `fabric` marker and its load-time validation, the
+   same vocabulary check in `ValidateProfileContract` on every decode with
+   an out-of-vocabulary decode test, plus the resolution-time recheck on
+   the filtered composition. Wire model: extend `ProfileValue`,
+   `SelectedProfile`, `applyEffectiveProfile` (`pkg/recipe`), and
+   `RecipeResult.schema.json` so `selectedProfile.fabric` survives
+   resolution, the digest, and `/v1` serialization. A fabric-marked profile
+   round-trip and digest test covers that path, since the step 1 golden
+   test exercises only unmarked leaves. OpenAPI update, api-diff and
+   openapi-diff gates. Ships at least one release before step 5
+   (compatibility rule).
 3. Measurement: promote `linkType` to a scalar with the pseudo-version
    bump; add the EFA and mrdma readings; fail-closed tests. A prerequisite
    for step 5, since an absent reading fails generation.
-4. Validators, evidence, and NVCRE: `ValidationInput.Fabric`;
-   `nccl-cre-all-reduce-bw` passes `spec.fabric` and reports not applicable
-   when it is empty, gated on the pinned NVCRE version that carries the
-   field, created with strict field validation, and read back before the
-   result is trusted; `creQualifiedEntries` keyed on
-   `(service, accelerator, fabric)` with an entry per fabric the check is
-   measured on; the banner accept list on INFO runtimes and the worker-pod
-   watch as the `tcpxo` guard; per-fabric floors; the `recipe-evidence/v4`
-   predicate and the verifier's `FabricOf` binding. Lands with
-   cluster-readiness-engine#576.
+4. Validators, evidence, and NVCRE: `ValidationInput.Fabric`; every
+   Certification-creating check, `nccl-cre-all-reduce-bw` and
+   `cre-training-goodput` today, passes `spec.fabric` and reports not
+   applicable when it is empty, gated on the pinned NVCRE version that
+   carries the field, created with strict field validation, and read back
+   before the result is trusted; `creQualifiedEntries` keyed on
+   `(service, accelerator, fabric)` for both checks, with an entry per
+   fabric each is measured on; the banner accept list on INFO runtimes and
+   the worker-pod watch as the `tcpxo` guard; per-fabric floors; the
+   `recipe-evidence/v4` predicate and the verifier's `FabricOf` binding.
+   Lands with cluster-readiness-engine#576.
 5. Per family, in the release where its second fabric is qualified: the
    `gpuStack` declaration or markers, the second value, the gated
-   per-fabric policy manifests, the gate-aware `recipeDeclaresRDMAFabric`
-   and `recipeAttachesNicClusterPolicy`, re-signed evidence, and an
-   upgrade test from a pre-conversion bundle on each deployer, together.
-   GB300 generic first; OKE, with a shadowing declaration on the new GB300
-   leaf, when a RoCE OKE GB300 target exists. The shadowing rule itself,
-   with its same-depth conflict test and the accelerator-less OKE golden
-   coordinates, lands in step 2.
+   per-fabric policy manifests and the gated companion component, a test
+   that a gated IB and RoCE pair yields only the selected fabric's
+   resources through `rdmaFabricResources`, new evidence under the
+   suffixed coordinate, an upgrade test from a pre-conversion bundle on
+   each deployer, and a fresh install of each value on each deployer,
+   together. GB300 generic first; OKE, with a shadowing declaration on the
+   new GB300 leaf, when a RoCE OKE GB300 target exists. The shadowing rule
+   itself, with its maximal-leaf reduction on every resolver path, the
+   same-depth conflict test, the three snapshot-path tests, and the
+   accelerator-less OKE golden coordinates, lands in step 2.
 6. Docs: `docs/contributor/recipe.md` profile vocabulary, component catalog
-   notes, CLI and API references.
+   notes, `docs/integrator/data-extension.md` for `fabricSignals`, CLI and
+   API references.
 
 ## Open questions
 
