@@ -898,7 +898,11 @@ spec:
 
 * **The images.** `matchImageReferences` lists the images `attest-images.yaml`
   attests. A glob's `*` also matches `/`, so `ghcr.io/nvidia/aicr*` would take
-  in the AICR Operator preview image as well, which `on-tag.yaml` signs.
+  in the AICR Operator preview image as well, which `on-tag.yaml` signs. The
+  globs match the reference as the Pod spec writes it:
+  `ghcr.io:443/nvidia/aicr:v0.16.0` names the same image as the denied
+  `ghcr.io/nvidia/aicr:v0.16.0`, but it matched no glob and was admitted
+  unchecked.
 * **Attestations, not signatures.** AICR's images carry only attestations, so
   the expression calls `verifyAttestationSignatures` with the SLSA provenance
   type.
@@ -963,7 +967,8 @@ spec:
                           url: https://rekor.sigstore.dev
 ```
 
-A `ClusterPolicy` keyless `subject:` is compared exactly. With
+With `type: SigstoreBundle`, a `ClusterPolicy` keyless `subject:` is compared
+exactly. With
 `…/on-tag.yaml@refs/tags/*` there, a genuine v0.15.0 image was denied with
 `no matching signatures found`, the error
 [#1537](https://github.com/NVIDIA/aicr/issues/1537) recorded on Kyverno v1.18.1.
@@ -1270,13 +1275,26 @@ What each part is for:
   Deployments, Jobs and CronJobs, so one with an unsigned image is denied when
   it is created. A Deployment that predates the policy keeps its running Pods,
   but the new Pods it creates are denied.
-* **Every image.** `glob: "*"` matches every image, so an image from any other
-  registry, or a short name such as `busybox:1.36`, is denied unless it is in
-  your mirror and signed. A narrower glob leaves the images outside it
-  unchecked.
+* **Pods that predate the policies.** They are checked at their next update,
+  even one that only adds a label. With an unsigned image, the update was
+  denied. With a signed image given by tag, it was admitted and the tag was
+  pinned to its digest, which restarted the container. Roll existing workloads
+  after applying the policies, so that every Pod is checked and pinned when it
+  is created.
+* **Every container image.** `glob: "*"` matches every image in those lists, so
+  an image from any other registry, or a short name such as `busybox:1.36`, is
+  denied unless it carries your signature. The policies check the signature,
+  not where the image is served from: an image you signed was admitted from a
+  second registry too. A narrower glob leaves the images outside it unchecked.
+  Image volumes are not checked at all; see [Image volumes](#image-volumes).
 * **Exemptions.** The namespace selector skips `kube-system` and `kyverno`, so
   the policies cannot block Kyverno's own recovery. Add namespaces to that list
-  to exempt them. Kyverno's PolicyExceptions are off by default in its Helm
+  to exempt them. Kyverno also skips some namespaces before any policy runs:
+  the chart's default `config.resourceFilters` ignore every resource in
+  `kube-system`, `kube-public`, `kube-node-lease` and `kyverno`, and a Pod in
+  `kube-public` or `kube-node-lease` was admitted unchecked. To check those two
+  as well, list them in `config.resourceFiltersExcludeNamespaces`, which drops
+  their filters. Kyverno's PolicyExceptions are off by default in its Helm
   chart. An exception created while they are off, or outside the namespace
   that `features.policyExceptions.namespace` names, is stored with only a
   warning and then ignored, and an `ImageValidatingPolicy` also ignores an
@@ -1289,6 +1307,46 @@ What each part is for:
   key. With no `ctlog` settings, Kyverno denies a correctly signed image with
   `not enough verified log entries from transparency log: 0 < 1`.
   `insecureIgnoreSCT` concerns keyless certificates.
+
+### Image volumes
+
+The mirror policies check the images in a Pod's container lists, not image
+volumes (`spec.volumes[].image`), which Kubernetes enables by default from
+v1.35. Under the mirror policies alone, a Pod with signed containers was
+admitted with an unsigned image volume, from your registry or another one, and
+the volume's tag was not pinned. Unless you need image volumes, deny them with
+a third policy, alongside the mirror policies:
+
+```yaml
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: deny-image-volumes
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: [kube-system, kyverno]
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  validations:
+    - expression: "!has(object.spec.volumes) || object.spec.volumes.all(v, !has(v.image))"
+      message: Pods may not mount image volumes, which the mirror policies do not verify
+```
+
+It denied a Pod with an image volume, whether the volume's image was signed or
+not, and a Deployment, Job, CronJob or StatefulSet whose template had one,
+including a Deployment edited to add one: Kyverno generates the rules for Pod
+controllers from the `pods` rule here too. Pods with no volumes, or only other
+kinds, were admitted. The denial reads
+`Policy deny-image-volumes failed: Pods may not mount image volumes, which the mirror policies do not verify`.
 
 ### Registry access for Kyverno
 
@@ -1388,8 +1446,10 @@ Copy the validator images the same way, to wherever
 air-gap guide, it makes `aicr validate` run them from
 `registry.example.com/aicr-validators/…`, without the `nvidia/` segment.
 Sign each copy as in [Signing the mirrored images](#signing-the-mirrored-images),
-then change two things in both keyless policies: point the globs at your
-registry, and add the Secret Kyverno reads it with.
+then change both keyless `ImageValidatingPolicy` objects,
+`verify-aicr-provenance` and `verify-aicr-provenance-debug`: replace their
+globs with ones for your registry, including the validator path above, and add
+the Secret Kyverno reads it with.
 
 ```yaml
   matchImageReferences:
@@ -1403,6 +1463,11 @@ registry, and add the Secret Kyverno reads it with.
     secrets: [mirror-credentials]
 ```
 
+Keyless verification also needs Sigstore's trusted root, which Kyverno fetches
+from Sigstore's public TUF repository unless `attestors[].cosign.tuf` names
+another. A cluster without outbound access needs an internal TUF mirror there;
+that setup was not measured.
+
 With both sets of policies applied, an AICR image was admitted only when it
 carried your signature and AICR's provenance, in a Pod or through
 `kubectl debug`. An image at an AICR path without the attestation was denied by
@@ -1410,7 +1475,9 @@ the keyless policies, including at the default validator path. A copied AICR
 image you had not signed was denied by `verify-mirror-images`. A signed
 component image was admitted, because the keyless policies do not match it. On
 a registry without the referrers API, signing the copy kept the attestation:
-both sit under the referrers fallback tag.
+both sit under the referrers fallback tag. These runs used the
+`ImageValidatingPolicy` form; the `ClusterPolicy` form was not run against a
+mirror.
 
 The log reasons look odd here because each policy finds the other's bundle. On
 a copied AICR image you have not signed, `verify-mirror-images` logs
@@ -1443,26 +1510,33 @@ maintenance, and alert on the policy's webhook in
 **The mirror policies deny some of AICR's own Pods.** Their images cannot be
 pointed at your mirror yet:
 
-* With `--readiness-hooks`, each component's readiness-gate Job runs
-  `ghcr.io/nvidia/aicr-gate` in that component's namespace.
-* Some `aicr validate` checks start probe Pods from fixed images,
-  `docker.io/library/busybox:1.37` and `nvcr.io/nvidia/cuda:13.0.0-base-ubuntu22.04`,
-  in namespaces they create for each run. The validator Jobs themselves follow
-  `AICR_VALIDATOR_IMAGE_REGISTRY` and need your signature like any other image.
+* With `--readiness-hooks`, which the AICR Operator always sets, each
+  component's readiness-gate Job runs `ghcr.io/nvidia/aicr-gate` in that
+  component's namespace.
+* Some `aicr validate` checks start Pods from fixed images, for example
+  `docker.io/library/busybox:1.37`, `nvcr.io/nvidia/cuda:13.0.0-base-ubuntu22.04`,
+  `docker.io/nvidia/cuda:12.9.0-base-ubuntu24.04` and
+  `docker.io/library/ubuntu:22.04`. The nvidia-smi and NCCL preflight checks run
+  theirs in the validator's namespace (`aicr-validation` by default), and
+  several conformance checks create a namespace for each run. The validator
+  Jobs themselves follow `AICR_VALIDATOR_IMAGE_REGISTRY` and need your
+  signature like any other image.
 
-Pods with those three images were denied under the mirror policies. Readiness
-hooks and `aicr validate` themselves were not run under them. The failure is
-loud: the gate Job or the check fails. No single namespace exemption allows
-these Pods, because the gate Jobs share their component's namespace and the
-probe Pods get a new namespace on each run.
+Pods with the gate image, `busybox:1.37` and the CUDA 13 image were denied
+under the mirror policies. Readiness hooks and `aicr validate` themselves were
+not run under them. The failure is loud: the gate Job or the check fails. No
+single namespace exemption allows these Pods: the gate Jobs share their
+component's namespace, some checks get a new namespace on each run, and
+exempting the validator's namespace would exempt the validator Jobs as well.
 
 **Not covered by these measurements:** a Kyverno crash that leaves its webhooks
 in place, revoking a signature after Kyverno has cached a verification,
 registry credentials from a cloud provider's credential helper, whether Hauler
 or Zarf copy AICR's attestations into the mirror, readiness hooks and
-`aicr validate` run end to end under the mirror policies, and a cluster with no
-outbound network access. The keyless policies were only run with internet
-access.
+`aicr validate` run end to end under the mirror policies, verifying image
+volumes instead of denying them, the keyless `ClusterPolicy` against a mirror,
+and a cluster with no outbound network access. The keyless policies were only
+run with internet access.
 
 ## Gating Deployment on Verification
 
