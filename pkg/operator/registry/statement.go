@@ -48,6 +48,10 @@ const sigstoreBundlePrefix = "application/vnd.dev.sigstore.bundle"
 // and the operator's binding, with room for re-runs.
 const maxReferrers = 16
 
+// maxReferrerPages bounds the referrer pages read for one subject. A page
+// without referrers never reaches the maxReferrers check.
+const maxReferrerPages = maxReferrers
+
 // SigstoreBundles returns the Sigstore bundles attached to the manifest with
 // digest subject as referrers: the signatures AICR attaches to its evidence,
 // which the evidence bundle itself never carries. Other referrers, such as
@@ -64,20 +68,28 @@ func (c *Client) SigstoreBundles(ctx context.Context, r Repository, subject stri
 	if err != nil {
 		return nil, err
 	}
+	repo.ReferrerListMaxPages = maxReferrerPages
 	desc, err := repo.Resolve(ctx, subject)
 	if err != nil {
 		return nil, classify(err, fmt.Sprintf("resolve %s@%s", r, subject))
 	}
 	var referrers []ocispec.Descriptor
+	var tooMany error
 	err = repo.Referrers(ctx, desc, "", func(page []ocispec.Descriptor) error {
 		referrers = append(referrers, page...)
+		if len(referrers) > maxReferrers {
+			// Stop paging: a registry that keeps returning pages would grow
+			// this until the timeout.
+			tooMany = invalid("%s@%s has more than %d referrers", r, subject, maxReferrers)
+			return tooMany
+		}
 		return nil
 	})
+	if tooMany != nil {
+		return nil, tooMany
+	}
 	if err != nil {
 		return nil, classify(err, fmt.Sprintf("list referrers of %s@%s", r, subject))
-	}
-	if len(referrers) > maxReferrers {
-		return nil, invalid("%s@%s has %d referrers; at most %d", r, subject, len(referrers), maxReferrers)
 	}
 	var out [][]byte
 	for _, ref := range referrers {

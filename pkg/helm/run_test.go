@@ -365,6 +365,15 @@ func TestTemplateArgs(t *testing.T) {
 			want: "template release-ebs aws-ebs-csi-driver --repo https://charts.example.com --kube-version 1.33.0 " +
 				"--api-versions a/v1 --api-versions b/v1 --values /tmp/values.yaml --values - --include-crds=false",
 		},
+		{
+			name: "include crds",
+			input: ChartInput{
+				Name: "gatekeeper", Chart: "gatekeeper/gatekeeper", Repository: "https://charts.example.com",
+				Version: "3.22.2", KubeVersion: "1.33.0", APIVersions: []string{}, IncludeCRDs: true,
+			},
+			want: "template release-gatekeeper gatekeeper --repo https://charts.example.com --version 3.22.2 " +
+				"--kube-version 1.33.0 --include-crds=true",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -121,23 +121,24 @@ func TestKMSTimeoutError(t *testing.T) {
 	tests := []struct {
 		name     string
 		err      error
-		wantCode bool // true => expect ErrCodeTimeout, false => expect nil
+		wantCode errors.ErrorCode // empty => expect nil
 	}{
-		{"deadline exceeded", context.DeadlineExceeded, true},
-		{"canceled", context.Canceled, true},
-		{"wrapped deadline", errors.Wrap(errors.ErrCodeInternal, "rpc", context.DeadlineExceeded), true},
-		{"generic error", stderrors.New("kms down"), false},
-		{"nil", nil, false},
+		{"deadline exceeded", context.DeadlineExceeded, errors.ErrCodeTimeout},
+		{"canceled", context.Canceled, errors.ErrCodeCanceled},
+		{"wrapped deadline", errors.Wrap(errors.ErrCodeInternal, "rpc", context.DeadlineExceeded), errors.ErrCodeTimeout},
+		{"wrapped canceled", errors.Wrap(errors.ErrCodeInternal, "rpc", context.Canceled), errors.ErrCodeCanceled},
+		{"generic error", stderrors.New("kms down"), ""},
+		{"nil", nil, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := kmsTimeoutError(tt.err, "awskms://alias/key")
-			if tt.wantCode {
+			if tt.wantCode != "" {
 				if got == nil {
-					t.Fatal("want ErrCodeTimeout, got nil")
+					t.Fatalf("want %v, got nil", tt.wantCode)
 				}
-				if errorstest.ReportedCode(got) != errors.ErrCodeTimeout {
-					t.Errorf("want ErrCodeTimeout, got %v", got)
+				if errorstest.ReportedCode(got) != tt.wantCode {
+					t.Errorf("want %v, got %v", tt.wantCode, got)
 				}
 			} else if got != nil {
 				t.Errorf("want nil, got %v", got)

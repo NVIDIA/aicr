@@ -16,16 +16,21 @@ package controller
 
 import (
 	"context"
+	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
 	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
+	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 	"github.com/NVIDIA/aicr/pkg/operator/plan"
 )
 
@@ -73,6 +78,49 @@ func TestDeletionOrphans(t *testing.T) {
 	}
 	if want := []string{"Ensure cert-manager", "Orphan " + string(rt.UID)}; !slices.Equal(engine.order, want) {
 		t.Fatalf("engine calls = %v, want %v", engine.order, want)
+	}
+}
+
+// refusingOrphan is an engine on which the API server refuses the
+// orphaned-from annotation for one object, as an admission policy can.
+type refusingOrphan struct{ *fakeEngine }
+
+func (e refusingOrphan) Orphan(ctx context.Context, runtimeUID string) ([]string, error) {
+	names, err := e.fakeEngine.Orphan(ctx, runtimeUID)
+	if err != nil {
+		return names, err
+	}
+	return names, operrors.New(operrors.ErrCodeUnauthorized, "Applications nfd refused the orphaned-from annotation").
+		WithReason(argocd.ReasonOrphanAnnotationRefused)
+}
+
+// An engine object refused the orphaned-from annotation is named in a
+// Warning Event and does not keep the runtime from going.
+func TestDeletionOrphansPastARefusedAnnotation(t *testing.T) {
+	ctx := testContext(t)
+	freshRuntime(t, ctx, stabilized)
+	engine := newEngine()
+	recorder := events.NewFakeRecorder(10)
+	r, _ := newRollout(t, engine, true)
+	r.Engine, r.Events = refusingOrphan{engine}, recorder
+	reconcileRollout(t, ctx, r)
+	if !controllerutil.ContainsFinalizer(getRuntime(t, ctx), v1alpha1.FinalizerCleanup) {
+		t.Fatal("the runtime has no cleanup finalizer")
+	}
+	deleteRuntime(t, ctx)
+	reconcileRollout(t, ctx, r)
+	if !runtimeGone(t, ctx) {
+		t.Fatalf("the runtime stayed Terminating: finalizers %v", getRuntime(t, ctx).Finalizers)
+	}
+	for {
+		select {
+		case e := <-recorder.Events:
+			if strings.HasPrefix(e, corev1.EventTypeWarning+" "+argocd.ReasonOrphanAnnotationRefused) && strings.Contains(e, "nfd") {
+				return
+			}
+		default:
+			t.Fatal("no Warning Event names the object refused the annotation")
+		}
 	}
 }
 
@@ -152,6 +200,54 @@ func TestDeletionRemovesInReverseOrder(t *testing.T) {
 	}
 	if want := []string{"Ensure cert-manager", "Remove nfd", "Remove cert-manager"}; !slices.Equal(engine.order, want) {
 		t.Fatalf("engine calls = %v, want %v", engine.order, want)
+	}
+}
+
+// Without the development bypass a removal waits for an approver: the
+// runtime stalls AwaitingApproval, nothing is removed and the cleanup
+// finalizer stays. A failed engine check meanwhile is retried and changes
+// nothing. Once approved, every release is removed and the runtime goes.
+func TestDeletionRemovalWaitsForApproval(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+		stabilized(rt)
+		rt.Spec.DeletionPolicy = v1alpha1.DeletionDelete
+	})
+	active := putPlan(t, ctx, rt, "50m")
+	succeedTo(t, ctx, rt, active)
+	resolved(t, ctx, active)
+	engine := newEngine()
+	engine.ensured["cert-manager"] = active
+	engine.inventory = []argocd.InventoryItem{{ReleaseID: "cert-manager", UID: "u-c", PlanDigest: active}}
+	r, clk := newRollout(t, engine, false)
+	reconcileRollout(t, ctx, r) // finalizer
+	deleteRuntime(t, ctx)
+	reconcileRollout(t, ctx, r) // removal rollout
+	reconcileRollout(t, ctx, r) // awaiting approval
+	removal := onlyRollout(t, ctx, removalDigest(string(rt.UID)))
+	waiting := getRuntime(t, ctx)
+	if c := cond(waiting, v1alpha1.ConditionStalled); removal.Status.Phase != v1alpha1.PhaseAwaitingApproval || c.Reason != ReasonAwaitingApproval ||
+		len(engine.removed) != 0 || !controllerutil.ContainsFinalizer(waiting, v1alpha1.FinalizerCleanup) {
+
+		t.Fatalf("before approval: rollout %+v, Stalled %+v, removed %v, finalizers %v", removal.Status, c, engine.removed, waiting.Finalizers)
+	}
+
+	engine.capabilities = operrors.New(operrors.ErrCodeUnavailable, "read Argo CD project aicr: timeout")
+	if _, err := r.Reconcile(ctx, request); err == nil || !reflect.DeepEqual(getRuntime(t, ctx).Status.Conditions, waiting.Status.Conditions) {
+		t.Fatalf("a failed engine check: Reconcile() = %v, conditions %+v", err, getRuntime(t, ctx).Status.Conditions)
+	}
+	engine.capabilities = nil
+
+	approve(t, ctx, removal.Name, clk.now.Add(time.Hour))
+	engine.gone["cert-manager"] = true
+	for range 5 {
+		if runtimeGone(t, ctx) {
+			break
+		}
+		reconcileRollout(t, ctx, r)
+	}
+	if !runtimeGone(t, ctx) || engine.removed["cert-manager"] != "u-c" {
+		t.Fatalf("after approval: runtime gone %t, removed %v", runtimeGone(t, ctx), engine.removed)
 	}
 }
 

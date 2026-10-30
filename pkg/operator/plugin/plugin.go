@@ -58,7 +58,8 @@ Flags:
   --context NAME               kubeconfig context
   --operator-namespace NAME    where assessment reports live (default aicr-system)
   --reason TEXT                why (approve, revoke; required)
-  --expires DURATION           how long the approval stays valid (approve; default 2h)
+  --expires DURATION           how long the approval stays valid (approve; default: until
+                               the rollout's deadline)
   --dir PATH                   where reproduce writes the recipe (default aicr-reproduce)
 `
 
@@ -86,7 +87,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	kubeContext := fs.String("context", "", "")
 	namespace := fs.String("operator-namespace", "aicr-system", "")
 	reason := fs.String("reason", "", "")
-	expires := fs.Duration("expires", defaults.ApprovalLifetime, "")
+	expires := fs.Duration("expires", 0, "")
 	dir := fs.String("dir", "aicr-reproduce", "")
 	switch command {
 	case commandDescribe, commandApprove, commandAcknowledge, commandRevoke, commandReproduce:
@@ -115,8 +116,8 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	if (command == commandApprove || command == commandRevoke) && *reason == "" {
 		return usage(command + " needs --reason")
 	}
-	if *expires <= 0 {
-		return usage("--expires must be positive")
+	if *expires < 0 {
+		return usage("--expires must not be negative")
 	}
 
 	c, err := newClient(*kubeconfig, *kubeContext)
@@ -146,7 +147,11 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		return err
 	}
 	if command == commandApprove {
-		ro, aErr := lifecycle.Approve(ctx, c, name, user, *reason, now.Add(*expires))
+		var until time.Time
+		if *expires > 0 {
+			until = now.Add(*expires)
+		}
+		ro, aErr := lifecycle.Approve(ctx, c, name, user, *reason, until)
 		if aErr != nil {
 			return aErr
 		}

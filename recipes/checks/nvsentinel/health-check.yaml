@@ -235,10 +235,11 @@ spec:
         # The remediation workloads the nvsentinel-observe, -quarantine and
         # -remediation mixins turn on, the health-events-analyzer the
         # nvsentinel-health-events-analyzer mixin adds, the event-exporter the
-        # nvsentinel-event-exporter mixin adds, and the in-cluster file server
-        # the nvsentinel-log-collector mixin adds; their datastore is checked
-        # by nvsentinel-mongodb's own health check. Negative form, as above:
-        # off in every shipped recipe, so each op passes on a 404 and
+        # nvsentinel-event-exporter mixin adds, the in-cluster file server the
+        # nvsentinel-log-collector mixin adds, and the lifecycle-manager the
+        # nvsentinel-node-validation mixin adds; the datastore the others read
+        # is checked by nvsentinel-mongodb's own health check. Negative form,
+        # as above: off in every shipped recipe, so each op passes on a 404 and
         # fails only when the workload renders without a complete rollout.
         # The status counters are omitempty, hence the `|| 0`.
         # updatedReplicas catches pods still on the previous revision, and
@@ -498,6 +499,38 @@ spec:
               kind: Deployment
               metadata:
                 name: nvsentinel-incluster-file-server
+                namespace: nvsentinel
+              ((status.observedGeneration || `0`) < metadata.generation): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: lifecycle-manager
+                namespace: nvsentinel
+              ((status.readyReplicas || `0`) < spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: lifecycle-manager
+                namespace: nvsentinel
+              ((status.updatedReplicas || `0`) < spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: lifecycle-manager
+                namespace: nvsentinel
+              ((status.replicas || `0`) > spec.replicas): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: lifecycle-manager
                 namespace: nvsentinel
               ((status.observedGeneration || `0`) < metadata.generation): true
     - name: validate-all-pods-healthy

@@ -22,13 +22,17 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	ggcrregistry "github.com/google/go-containerregistry/pkg/registry"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -432,5 +436,51 @@ func TestPush(t *testing.T) {
 	}
 	if err = run([]string{"push", "-dir", t.TempDir()}, io.Discard); err == nil {
 		t.Fatal("pushed without a candidate")
+	}
+}
+
+// A manifest the registry denies, as GHCR denies those that reach a new
+// package before it grants the pushing repository access, is pushed again;
+// a push denied for good fails after deniedAttempts copies.
+func TestPushRetriesDenied(t *testing.T) {
+	saved := deniedBackoff
+	deniedBackoff = time.Millisecond
+	t.Cleanup(func() { deniedBackoff = saved })
+	tests := []struct {
+		name    string
+		deny    int64 // manifest PUTs denied before the registry accepts them
+		wantErr bool
+	}{
+		{"the first manifest is denied", 1, false},
+		{"every manifest is denied", math.MaxInt64, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var puts, denials atomic.Int64
+			registry := ggcrregistry.New(ggcrregistry.Logger(log.New(io.Discard, "", 0)))
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/manifests/") && puts.Add(1) <= tt.deny {
+					denials.Add(1)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusForbidden)
+					_, _ = io.WriteString(w, `{"errors":[{"code":"DENIED","message":"requested access to the resource is denied"}]}`)
+					return
+				}
+				registry.ServeHTTP(w, r)
+			}))
+			t.Cleanup(srv.Close)
+			host := strings.TrimPrefix(srv.URL, "http://")
+			dir, _ := writeCandidate(t, host+"/nvidia/aicr-operator", []byte("operator-binary"), demoAICR.Image)
+
+			err := run([]string{"push", "-dir", dir, "-chart-registry", host + "/nvidia/charts", "-plain-http"}, io.Discard)
+			if (err != nil) != tt.wantErr || (tt.wantErr && !strings.Contains(err.Error(), "403")) {
+				t.Fatalf("push = %v after %d denials; want an error %t", err, denials.Load(), tt.wantErr)
+			}
+			// Both platforms of the test candidate's index name one manifest,
+			// and a copy stops at its first denied manifest: one denial per copy.
+			if tt.wantErr && denials.Load() != deniedAttempts {
+				t.Fatalf("push gave up after %d denials, want %d copies", denials.Load(), deniedAttempts)
+			}
+		})
 	}
 }

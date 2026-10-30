@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -77,6 +78,42 @@ type ResolverReconciler struct {
 	Now func() time.Time
 	// Events records failed AICR runs on the runtime; nil records none.
 	Events events.EventRecorder
+
+	mu sync.Mutex
+	// refused is the last plan the checks refused for its inputs alone, so a
+	// resync reports it again without pulling bundles and mirroring charts.
+	refused *refusal
+}
+
+// refusal is a plan check's verdict on an input digest.
+type refusal struct {
+	inputDigest string
+	err         error
+}
+
+// refusedFor returns the remembered verdict on inputDigest, if any.
+func (r *ResolverReconciler) refusedFor(inputDigest string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.refused == nil || r.refused.inputDigest != inputDigest {
+		return nil
+	}
+	return r.refused.err
+}
+
+// remember keeps a verdict that depends on the inputs alone: an override
+// path neither render knows, or a namespace outside the allowlist. A stall
+// on anything outside the inputs, such as credentials or a conflict, is
+// checked again on every resync.
+func (r *ResolverReconciler) remember(inputDigest string, err error) {
+	switch operrors.ReasonOf(err) {
+	case resolver.ReasonOverridePathUnknown, resolver.ReasonNamespaceNotAllowed:
+	default:
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.refused = &refusal{inputDigest: inputDigest, err: err}
 }
 
 // resolution is a reconcile's result for the Resolved condition.
@@ -173,6 +210,9 @@ func (r *ResolverReconciler) resolve(ctx context.Context, rt *v1alpha1.ClusterRu
 	if err != nil {
 		return nil, err
 	}
+	if err = r.refusedFor(inputDigest); err != nil {
+		return nil, err
+	}
 	input := resolver.ShortDigest(inputDigest)
 
 	// Already resolved for these inputs, and the plan is still there as this
@@ -247,6 +287,7 @@ func (r *ResolverReconciler) resolve(ctx context.Context, rt *v1alpha1.ClusterRu
 	}
 	digest, err := r.persist(ctx, rt, recipe, recipeJSON, bundles, stagesToRun[0].digest, baseDigest, inputDigest, found.digest())
 	if err != nil {
+		r.remember(inputDigest, err)
 		return nil, err
 	}
 	return r.done(ctx, rt, inputDigest, digest, waiting.discovery)

@@ -36,7 +36,7 @@ Flags may come before or after the name. Every command accepts every flag:
 | `--context NAME` | The current context | All |
 | `--operator-namespace NAME` | `aicr-system` | `describe`, `reproduce`: where assessment reports and plans live |
 | `--reason TEXT` | none; required | `approve`, `revoke`; at most 1024 characters |
-| `--expires DURATION` | `2h` | `approve`: how long the approval stays valid; must be positive |
+| `--expires DURATION` | the rollout's deadline | `approve`: how long the approval stays valid; must not be negative |
 | `--dir PATH` | `aicr-reproduce` | `reproduce`: where the recipe is written |
 
 Each command's API calls share a 30-second deadline. Output is plain text.
@@ -93,10 +93,12 @@ Asks the API server who you are (a `SelfSubjectReview`), then sets the
 rollout's `spec.approval` to your username, the expiry and the reason. Prints
 `rollout <name> approved by <user> until <time>`.
 
-It refuses a rollout that has ended, is already approved, or needs no
-approval. An approval can be neither changed nor extended: if it expires, the
-step in flight finishes, the rollout ends `Expired`, and a
-[retry](operations.md#retrying) needs a new approval.
+Without `--expires`, the approval lasts until the rollout's deadline. It
+refuses a rollout that has ended, is already approved, or needs no approval,
+and without `--expires` one whose deadline has passed. An approval can be
+neither changed nor extended: if it expires, the step in flight finishes, the
+rollout ends `Expired`, and a [retry](operations.md#retrying) needs a new
+approval.
 
 ## revoke
 

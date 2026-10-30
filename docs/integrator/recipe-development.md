@@ -186,6 +186,8 @@ When authoring a recipe targeting Talos (`criteria.os: talos`), append the `os-t
 
 **`nvsentinel-log-collector`** captures a faulty node's diagnostics before NVSentinel repairs it, composed beside the remediation step and the health events analyzer that live remediation requires (`spec.mixins: [nvsentinel-remediation, nvsentinel-health-events-analyzer, nvsentinel-log-collector]`), because only live `fault-remediation` runs the collector. It turns on `fault-remediation.logCollector` and `global.inclusterFileServer` together, pins the file server's name and the upload URL that names it, sets must-gather explicitly off and the volume size and cleanup cycle deliberately, all through `nvsentinel`'s `mixinSafeOverridePaths`; it sets no path a step sets. The file server's claim is in `nvsentinel`'s `storageClassPaths`, so `--storage-class` reaches it. `CheckNVSentinelLogCollectorCoherent` fails the bundle without live remediation, with only one of the two settings on, and on a platform where the collector cannot reach the driver (AKS and OKE at their default `gpuStack`, Kind, the EKS `os=amazonlinux` leaves, and the VR200 RKE2 and H200 k0s leaves). See [component catalog](../user/component-catalog.md#diagnostics-capture) for where bundles land, how to retrieve them, and the privileges involved.
 
+**`nvsentinel-node-validation`** turns on NVSentinel's lifecycle-manager, which runs a DCGM diagnostic on a new GPU node that is cordoned within 10 minutes of its creation, behind a scheduling barrier from registration, and keeps it cordoned until the test passes. It sets `global.lifecycleManager.enabled` and the `lifecycle-manager.*` paths it owns through the same `mixinSafeOverridePaths` allowlist, sets no path a remediation step sets, and needs no datastore, so it composes alone or beside any step. `CheckNVSentinelNodeValidationCoherent` fails the bundle when, among other rules, the new-node criteria lose the cordoned criterion, a test is undefined, or the diagnostic's DCGM hostengine is not deployed where the test looks for it. See [component catalog](../user/component-catalog.md#node-validation) for how new GPU nodes must be cordoned and how to retry or release a node that fails.
+
 **Cross-cutting overlays with wildcard criteria** apply across one criteria dimension without being referenced via `spec.base` or listed in `spec.mixins`. The resolver can return multiple independent maximal-leaf overlays for a single query, so a `service: any` overlay is picked up alongside the service-specific maximal leaf and its inheritance chain:
 
 ```yaml
@@ -991,6 +993,56 @@ is rejected, because re-enabling a platform-provided component would install a
 conflicting second copy. Disabling is therefore an authoring decision: to ship
 the component, remove the `enabled: false` override from the recipe/overlay.
 See [Enable or disable components](../user/bundling.md#enable-or-disable-components).
+
+## Replace a Component's Health Check in an Overlay
+
+A component's registry health check (`healthCheck.assertFile` in
+`recipes/registry.yaml`) can assert a resource that a leaf's values remove.
+For example, a leaf might turn off the subchart that installs an asserted CRD.
+The check would then fail on every cluster that leaf deploys. When the leaf
+should not have the resource, set inline `healthCheckAsserts` on that
+component's `componentRef` in the leaf overlay:
+
+```yaml
+# Leaf overlay: these values turn off the widgets subchart, so this leaf
+# does not assert its CRD.
+componentRefs:
+  - name: my-operator
+    valuesFile: components/my-operator/values-no-widgets.yaml
+    # Copy of recipes/checks/my-operator/health-check.yaml without the
+    # widgets.example.com assert.
+    healthCheckAsserts: |
+      apiVersion: chainsaw.kyverno.io/v1alpha1
+      kind: Test
+      metadata:
+        name: my-operator-health-check
+      spec:
+        steps:
+          - name: validate-crds-established
+            try:
+              - assert:
+                  resource:
+                    apiVersion: apiextensions.k8s.io/v1
+                    kind: CustomResourceDefinition
+                    metadata:
+                      name: gadgets.example.com
+                    status:
+                      (conditions[?type == 'Established']):
+                        - status: "True"
+```
+
+- The inline check replaces the registry check for this leaf and every
+  overlay that inherits from it. Nothing is merged, so start from a copy of
+  the registry file and remove only the asserts this leaf's values remove.
+- Later edits to the registry file do not reach the copy. Update both.
+- Set it in an overlay. A mixin that sets `healthCheckAsserts` on a component
+  already in the chain is rejected.
+- Do not use `healthCheckSkip` for this. It drops the whole check, and is
+  meant for rolling back a regressing upstream check.
+- For an in-tree leaf, run `make crd-inventory`. It checks the inline asserts
+  against the chart rendered with the leaf's values, and reports each asserted
+  CRD that render does not install. See "CRD assertions" in the
+  [validator guide](../contributor/validator.md).
 
 ## File Naming Conventions
 

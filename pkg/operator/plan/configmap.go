@@ -101,7 +101,9 @@ func ToConfigMap(doc *Document, namespace, runtimeName string) (*corev1.ConfigMa
 
 // FromConfigMap reads a plan, refusing anything it cannot trust: a schema
 // version it does not support, a label that disagrees with the payload, a
-// payload digest that disagrees with the annotation, or an invalid document.
+// payload digest that disagrees with the annotation, an invalid document, a
+// recorded digest its content does not reproduce, or a ConfigMap not named
+// for its digest.
 // Every refusal is INVALID_REQUEST with reason PlanUnreadable in its context;
 // the operator never guesses.
 func FromConfigMap(cm *corev1.ConfigMap) (*Document, error) {
@@ -133,6 +135,16 @@ func FromConfigMap(cm *corev1.ConfigMap) (*Document, error) {
 	}
 	if err := doc.Validate(); err != nil {
 		return nil, unreadable("invalid plan document: %v", err)
+	}
+	computed, digestErr := ComputeDesiredStateDigest(doc)
+	if digestErr != nil {
+		return nil, unreadable("digest plan document: %v", digestErr)
+	}
+	if computed != doc.DesiredStateDigest {
+		return nil, unreadable("plan content digests to %s, not its recorded %s", computed, doc.DesiredStateDigest)
+	}
+	if name, _ := Name(doc.DesiredStateDigest); name != cm.Name {
+		return nil, unreadable("plan %s is stored as ConfigMap %s, not %s", doc.DesiredStateDigest, cm.Name, name)
 	}
 	return doc, nil
 }

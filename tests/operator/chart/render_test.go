@@ -15,6 +15,7 @@
 package chart
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -23,11 +24,16 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"go.yaml.in/yaml/v3"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
+	"github.com/NVIDIA/aicr/pkg/operator/defaults"
 )
 
 // The chart renders exactly the AICR versions the operator supports, and
@@ -344,6 +350,40 @@ func TestDeploymentFlags(t *testing.T) {
 		if !slices.Contains(args, want) {
 			t.Errorf("missing %s in %v", want, args)
 		}
+	}
+}
+
+// The operator pod outlives the manager's graceful shutdown, and the Go
+// runtime's soft memory limit is the container's memory limit, in bytes.
+func TestOperatorPodRuntime(t *testing.T) {
+	ctx := ctxFor(t)
+	objs, out, err := render(ctx)
+	if err != nil {
+		t.Fatal(out)
+	}
+	raw, err := find(t, objs, "Deployment", "aicr-operator").MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &appsv1.Deployment{}
+	if err = json.Unmarshal(raw, d); err != nil {
+		t.Fatal(err)
+	}
+	pod := d.Spec.Template.Spec
+	if g := pod.TerminationGracePeriodSeconds; g == nil || time.Duration(*g)*time.Second <= defaults.GracefulShutdownTimeout {
+		t.Errorf("terminationGracePeriodSeconds %v is not above the %s graceful shutdown", g, defaults.GracefulShutdownTimeout)
+	}
+	manager := pod.Containers[0]
+	var limit *corev1.ResourceFieldSelector
+	for _, e := range manager.Env {
+		if e.Name == "GOMEMLIMIT" && e.ValueFrom != nil {
+			limit = e.ValueFrom.ResourceFieldRef
+		}
+	}
+	if limit == nil || limit.ContainerName != manager.Name || limit.Resource != "limits.memory" ||
+		(!limit.Divisor.IsZero() && limit.Divisor.Cmp(resource.MustParse("1")) != 0) {
+
+		t.Errorf("GOMEMLIMIT is %+v, want the %s container's memory limit in bytes", limit, manager.Name)
 	}
 }
 

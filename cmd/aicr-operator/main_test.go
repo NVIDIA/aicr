@@ -81,6 +81,30 @@ func TestRunRejectsInvalidInstallation(t *testing.T) {
 	}
 }
 
+// Validation binds evidence to the operator's own pod, so it refuses to start
+// without the pod name; past that check, startup reaches client config.
+func TestRunNeedsPodNameForValidation(t *testing.T) {
+	validation := append([]string{"--leader-elect=false", "--metrics-bind-address=0", "--health-probe-bind-address=127.0.0.1:0",
+		"--validation-enabled=true",
+		"--validator-images=ghcr.io/nvidia/aicr-validators/deployment:v1.0.0@sha256:3c0a8553a346e6ba5a273a10f0b91574945b8b23cffc9d83db3107701e467790",
+	}, installFlags...)
+	cases := []struct {
+		name, pod, want string
+	}{
+		{"without POD_NAME", "", "POD_NAME"},
+		{"with POD_NAME", "aicr-operator-0", "client config"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolate(t)
+			t.Setenv("POD_NAME", tc.pod)
+			if err := run(validation); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("run() = %v, want an error naming %q", err, tc.want)
+			}
+		})
+	}
+}
+
 // The static provider needs nothing from AWS; the aws provider derives its
 // region from the ECR host and refreshes the configured repo-creds Secret.
 func TestCredentialProviders(t *testing.T) {

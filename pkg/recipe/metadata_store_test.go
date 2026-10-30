@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"reflect"
 	"slices"
 	"strings"
@@ -30,6 +29,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/manifest"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 )
@@ -2638,58 +2638,13 @@ func TestBuildMixinConstraintWarningReason(t *testing.T) {
 	}
 }
 
-// inMemoryDataProvider is a minimal DataProvider backed by an in-memory
-// map[path]content. Used to construct distinct DataProvider identities in
-// isolation tests without touching the filesystem or the embedded FS.
-type inMemoryDataProvider struct {
-	files map[string][]byte
-	tag   string
+// newInMemoryProvider returns a provider over files whose Source returns
+// tag + ":" + path.
+func newInMemoryProvider(tag string, files map[string][]byte) *providertest.Provider {
+	return providertest.NewMap(files, providertest.WithSource(func(path string) string { return tag + ":" + path }))
 }
 
-func newInMemoryProvider(tag string, files map[string][]byte) *inMemoryDataProvider {
-	return &inMemoryDataProvider{files: files, tag: tag}
-}
-
-func (p *inMemoryDataProvider) ReadFile(ctx context.Context, path string) ([]byte, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	content, ok := p.files[path]
-	if !ok {
-		return nil, fs.ErrNotExist
-	}
-	return content, nil
-}
-
-func (p *inMemoryDataProvider) WalkDir(ctx context.Context, _ string, fn fs.WalkDirFunc) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	for path := range p.files {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := fn(path, inMemoryDirEntry{name: path}, nil); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (p *inMemoryDataProvider) Source(path string) string {
-	return p.tag + ":" + path
-}
-
-// inMemoryDirEntry is a minimal fs.DirEntry for in-memory files.
-// All entries are files (IsDir returns false).
-type inMemoryDirEntry struct{ name string }
-
-func (e inMemoryDirEntry) Name() string               { return e.name }
-func (e inMemoryDirEntry) IsDir() bool                { return false }
-func (e inMemoryDirEntry) Type() fs.FileMode          { return 0 }
-func (e inMemoryDirEntry) Info() (fs.FileInfo, error) { return nil, fs.ErrNotExist }
-
-// buildProviderWithOverlays returns an inMemoryDataProvider that contains a
+// buildProviderWithOverlays returns an in-memory provider that contains a
 // minimal base recipe plus one overlay whose metadata name is derived from the
 // supplied filename (e.g., "alpha-only.yaml" → overlay metadata name
 // "alpha-only"). This lets isolation tests verify that the metadata store
@@ -3986,10 +3941,10 @@ spec:
   componentRefs: []
 `)
 
-	dp := &externalSourceProvider{files: map[string][]byte{
+	dp := providertest.NewMap(map[string][]byte{
 		"overlays/base.yaml":        baseYAML,
 		"overlays/nodes-gated.yaml": externalYAML,
-	}}
+	}, providertest.WithSource(func(string) string { return CatalogSourceExternal }))
 
 	_, err := LoadMetadataStoreFor(context.Background(), dp)
 	if err == nil {
@@ -4005,33 +3960,6 @@ spec:
 	if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
-}
-
-// externalSourceProvider is an in-memory DataProvider whose Source() always
-// returns CatalogSourceExternal, simulating an overlay loaded via --data.
-type externalSourceProvider struct {
-	files map[string][]byte
-}
-
-func (p *externalSourceProvider) ReadFile(_ context.Context, path string) ([]byte, error) {
-	content, ok := p.files[path]
-	if !ok {
-		return nil, fs.ErrNotExist
-	}
-	return content, nil
-}
-
-func (p *externalSourceProvider) WalkDir(_ context.Context, _ string, fn fs.WalkDirFunc) error {
-	for path := range p.files {
-		if err := fn(path, inMemoryDirEntry{name: path}, nil); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (p *externalSourceProvider) Source(_ string) string {
-	return CatalogSourceExternal
 }
 
 // TestLoadMetadataStore_EmbeddedOverlayNodesDoesNotError verifies that an
@@ -4057,7 +3985,7 @@ spec:
   componentRefs: []
 `)
 
-	// inMemoryDataProvider.Source() returns tag+":"+path, not CatalogSourceExternal.
+	// newInMemoryProvider's Source returns tag+":"+path, not CatalogSourceExternal.
 	dp := newInMemoryProvider("embedded", map[string][]byte{
 		"overlays/base.yaml":           baseYAML,
 		"overlays/nodes-embedded.yaml": embeddedYAML,

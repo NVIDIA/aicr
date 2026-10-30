@@ -1996,6 +1996,8 @@ NFD (Node Feature Discovery) workers must run on **all nodes** (GPU, CPU, and sy
 
 > **Note:** When no `--accelerated-node-toleration` is specified, a default toleration (`operator: Exists`) is applied to both GPU DaemonSets and NFD workers, allowing them to run on nodes with any taint.
 
+> **gpu-operator operands also tolerate NVSentinel's release taint.** The `base` overlay sets `daemonsets.tolerations` on the gpu-operator componentRef to `nvsentinel.dgxc.nvidia.com/external-remediation:NoSchedule` plus the chart's own default (`nvidia.com/gpu:NoSchedule`, `operator: Exists`), so that path is in append mode: your `--accelerated-node-toleration` entries are added after them rather than replacing them (duplicates are dropped). Without it, operand pods already running on a node NVSentinel has handed to external remediation become misscheduled, and the GPU Operator upgrade controller refuses every driver upgrade while one such pod exists. A leaf that sets a non-empty `daemonsets.tolerations` itself replaces the two base entries, and your flag entries are still appended after it. A `--set-json`/`--set-file` on that path is applied after the flag and replaces the whole list, flag entries included. An empty list such as `kind`'s `[]` opts the path out: nothing is written there and the flag is ignored for gpu-operator operands.
+
 > **Shared toleration paths:** a value path the registry declares under both the system and accelerated tiers (NFD `worker` and `topologyUpdater`, aws-ebs-csi-driver `node`) receives the deduplicated union of the keyed `--system-node-toleration` entries followed by all `--accelerated-node-toleration` entries. Keyless system tolerations — the tolerate-all default when the flag is unset, and an explicit `*` — are left out of that union so a system tolerate-all never widens an accelerated list you restricted on purpose. With no accelerated tolerations at all (possible through the Go SDK or a config file; the CLI defaults the flag), these paths receive the system list as given. To tolerate everything on these DaemonSets, pass the wildcard on the accelerated flag.
 
 **Example:**
@@ -3139,7 +3141,7 @@ prints a disclosure banner naming the Fulcio/Rekor endpoints in effect and what
 will be published, then:
 
 - **On a TTY**, it pauses for a `y/N` confirmation (default **no**) and aborts
-  cleanly — no browser opens — if you decline.
+  with exit code `9` (`CANCELED`) — no browser opens — if you decline.
 - **On non-interactive stdin** (CI, pipes), it prints the banner and proceeds
   without blocking, so scripted/CI signing is never wedged.
 - Pre-fetched `--identity-token`, ambient GitHub Actions OIDC, and `--signing-key`
@@ -3856,7 +3858,8 @@ The positional `<bundle-dir>` is either the directory `--emit-attestation` wrote
 | Code | Meaning |
 |------|---------|
 | 0 | Bundle pushed and `pointer.yaml` written (signed, or unsigned with `--no-sign`). |
-| non-zero | Identity-disclosure prompt declined, or bundle could not be loaded, signed, or pushed. |
+| 9 | Identity-disclosure prompt declined (`CANCELED`). |
+| non-zero | Bundle could not be loaded, signed, or pushed. |
 
 **Examples:**
 
@@ -3914,7 +3917,8 @@ With `--relocate`, the now-signed pointer is moved from its flat pending path to
 | Code | Meaning |
 |------|---------|
 | 0 | Bundle signed, referrer attached, and the pointer's `signer` block written back. |
-| non-zero | Pointer already signed / has nothing pushed to sign, bundle could not be pulled (e.g. a private registry returns 403), identity-disclosure prompt declined, or signing/attach failed. |
+| 9 | Identity-disclosure prompt declined (`CANCELED`). |
+| non-zero | Pointer already signed / has nothing pushed to sign, bundle could not be pulled (e.g. a private registry returns 403), or signing/attach failed. |
 
 **Examples:**
 

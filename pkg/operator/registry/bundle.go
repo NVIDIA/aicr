@@ -144,13 +144,13 @@ func untar(layer []byte) (map[string][]byte, error) {
 			return nil, invalid("bundle entry %q leaves the bundle", h.Name)
 		case len(files) >= defaults.MaxBundleFiles:
 			return nil, invalid("bundle has more than %d files", defaults.MaxBundleFiles)
-		case h.Size < 0 || total+h.Size > defaults.MaxBundleBytes:
+		case h.Size < 0 || h.Size > defaults.MaxBundleBytes-total:
 			return nil, invalid("bundle content exceeds %d bytes", defaults.MaxBundleBytes)
 		}
 		if _, dup := files[name]; dup {
 			return nil, invalid("bundle entry %q appears twice", name)
 		}
-		data, err := io.ReadAll(io.LimitReader(tr, h.Size+1))
+		data, err := io.ReadAll(io.LimitReader(tr, defaults.MaxBundleBytes-total+1))
 		if err != nil || int64(len(data)) != h.Size {
 			return nil, invalid("bundle entry %q is truncated", h.Name)
 		}

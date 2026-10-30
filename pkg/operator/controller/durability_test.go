@@ -27,6 +27,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -41,6 +42,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
+	"github.com/NVIDIA/aicr/pkg/operator/defaults"
 	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 	"github.com/NVIDIA/aicr/pkg/operator/manager"
@@ -610,6 +612,56 @@ func TestObserveJobDuration(t *testing.T) {
 	}
 	if len(Collectors()) != 4 {
 		t.Fatal("Collectors() misses a metric")
+	}
+}
+
+// Collectors exposes every known label value before its first event, and a
+// Job duration up to the longest stage deadline lands in a finite bucket.
+// Not parallel: TestObserveJobDuration counts the series it adds.
+func TestCollectorsExposeKnownSeries(t *testing.T) {
+	collectors := Collectors()
+	stages, classes := 6, 4
+	for _, tc := range []struct {
+		name string
+		c    prometheus.Collector
+		want int
+	}{
+		{"rollout outcomes", rolloutOutcomes, 6},
+		{"validation runs", validationRuns, 2},
+		{"AICR runs", aicrJobRuns, stages * (1 + classes)},
+	} {
+		if got := testutil.CollectAndCount(tc.c); got != tc.want {
+			t.Errorf("%s: %d series, want %d", tc.name, got, tc.want)
+		}
+	}
+	// TestObserveJobDuration adds stages of its own.
+	if got := testutil.CollectAndCount(jobSeconds); got < stages*2 {
+		t.Errorf("Job durations: %d series, want at least %d", got, stages*2)
+	}
+
+	reg := prometheus.NewPedanticRegistry()
+	reg.MustRegister(collectors...)
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(families))
+	for _, f := range families {
+		names = append(names, f.GetName())
+		if f.GetName() != "aicr_operator_job_duration_seconds" {
+			continue
+		}
+		for _, m := range f.GetMetric() {
+			buckets := m.GetHistogram().GetBucket()
+			if top := buckets[len(buckets)-1].GetUpperBound(); top < defaults.ValidationJobDeadline.Seconds() {
+				t.Fatalf("the top Job duration bucket is %gs, below the %s validation deadline", top, defaults.ValidationJobDeadline)
+			}
+		}
+	}
+	want := []string{"aicr_operator_job_duration_seconds", "aicr_operator_job_runs_total",
+		"aicr_operator_rollout_outcomes_total", "aicr_operator_validation_runs_total"}
+	if !slices.Equal(names, want) {
+		t.Errorf("metric families %v, want %v", names, want)
 	}
 }
 

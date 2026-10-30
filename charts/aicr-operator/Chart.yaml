@@ -20,5 +20,6 @@ description: >-
 type: application
 version: 0.1.0
 appVersion: 0.1.0
-# The Kubernetes floor; ValidatingAdmissionPolicy is GA from 1.30.
+# The Kubernetes floor: 1.34 is the first release with DRA resource.k8s.io/v1
+# GA (docs/operator/support.md).
 kubeVersion: '>=1.34.0-0'

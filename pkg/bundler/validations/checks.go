@@ -71,6 +71,7 @@ func init() {
 	registerCheck("CheckNVSentinelLogCollectorCoherent", CheckNVSentinelLogCollectorCoherent)
 	registerCheck("CheckNVSentinelFileServerStorageClass", CheckNVSentinelFileServerStorageClass)
 	registerCheck("CheckNVSentinelDrainScopeCoherent", CheckNVSentinelDrainScopeCoherent)
+	registerCheck("CheckNVSentinelNodeValidationCoherent", CheckNVSentinelNodeValidationCoherent)
 	registerCheck("CheckNVSentinelMongoDBCoherent", CheckNVSentinelMongoDBCoherent)
 	registerCheck("CheckNVSentinelDatastorePrerequisites", CheckNVSentinelDatastorePrerequisites)
 	registerCheck("CheckNKTPExportersHaveBackend", CheckNKTPExportersHaveBackend)
@@ -3741,6 +3742,10 @@ func preflightDCGMServingGPUOperator(
 // anything AICR sets, so a different port on that Service name reaches nothing.
 const gpuOperatorDCGMPort = "5555"
 
+// gpuOperatorDCGMGuardPaths are the GPU Operator values that decide whether
+// its DCGM hostengine Service exists.
+var gpuOperatorDCGMGuardPaths = []string{"enabled", "dcgm.enabled"}
+
 // clusterLocalServiceRef splits a cluster-local Service address
 // (service.namespace.svc[.cluster.local][:port]) into its Service, namespace
 // and port. ok=false means the address is not of that form -- an external host
@@ -3903,7 +3908,7 @@ func CheckNVSentinelPreflightDCGMReachable(ctx context.Context, componentName st
 	// recipes where the DCGM check is absent or targets an external hostengine,
 	// neither of which depends on gpu-operator at all.
 	if msgs := nvsentinelDynamicGuardViolations(bundlerConfig, gpuName, gpuKeys,
-		[]string{"enabled", "dcgm.enabled"},
+		gpuOperatorDCGMGuardPaths,
 		"decides whether the DCGM hostengine this check depends on is deployed at all",
 	); len(msgs) > 0 {
 		for _, msg := range msgs {

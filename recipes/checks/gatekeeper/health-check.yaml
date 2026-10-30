@@ -32,14 +32,10 @@ spec:
     assert: 5m
   steps:
     - name: validate-crds-established
-      # Verified against chart 3.22.2 (recipes/registry.yaml): rendered
-      # `helm template gatekeeper/gatekeeper --version 3.22.2 --include-crds`
-      # and confirmed both constrainttemplates.templates.gatekeeper.sh and
-      # configs.config.gatekeeper.sh are present (17 CRDs total; the
-      # feature-conditional mutation/expansion/external-data CRDs also
-      # render under default values, confirming these two unconditional
-      # core CRDs are the correct minimal assertion set). Re-verify on
-      # defaultVersion bump — tracked systemically in #1948.
+      # Verified against chart 3.22.2. The 17 CRDs that chart installs are
+      # listed in recipes/components/gatekeeper/crds.yaml. These two are the
+      # ones it installs unconditionally. The mutation, expansion and
+      # external-data CRDs depend on feature flags.
       try:
         - assert:
             resource:

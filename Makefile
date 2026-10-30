@@ -462,6 +462,12 @@ nvsentinel-log-collector-e2e: ## Live Kind test: nvsentinel-log-collector captur
 	echo "Running nvsentinel-log-collector mixin e2e test..."; \
 	tests/e2e/nvsentinel-log-collector/run.sh
 
+.PHONY: nvsentinel-node-validation-e2e
+nvsentinel-node-validation-e2e: ## Live Kind test: nvsentinel-node-validation holds a cordoned new GPU node until a ValidationRequest passes (#3088)
+	@set -e; \
+	echo "Running nvsentinel-node-validation mixin e2e test..."; \
+	tests/e2e/nvsentinel-node-validation/run.sh
+
 .PHONY: npd-nvsentinel-object-monitor-e2e
 npd-nvsentinel-object-monitor-e2e: ## Live Kind test: an NPD Node condition becomes an NVSentinel health event (#2614)
 	@set -e; \
@@ -709,6 +715,14 @@ nvcre-closure: ## Regenerates the NVCRE workload runtime closure from the regist
 .PHONY: nvcre-closure-check
 nvcre-closure-check: ## Verifies the committed NVCRE workload closure matches the pinned chart version
 	@GOFLAGS="-mod=readonly" go run ./tools/nvcre-closure -check
+
+.PHONY: crd-inventory
+crd-inventory: ## Regenerates recipes/components/*/crds.yaml, the CRDs each pinned chart installs (needs helm and network)
+	@GOFLAGS="-mod=readonly" go run ./tools/crd-inventory -repo-root "$(CURDIR)"
+
+.PHONY: crd-inventory-check
+crd-inventory-check: ## Verifies every committed CRD inventory matches a fresh render of its pinned chart (needs helm and network)
+	@GOFLAGS="-mod=readonly" go run ./tools/crd-inventory -repo-root "$(CURDIR)" -check
 
 .PHONY: registry-inventory
 registry-inventory: ## Extracts the build/CI registry & package egress inventory (YAML + Markdown) from structured sources

@@ -24,6 +24,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -39,11 +40,22 @@ import (
 	"oras.land/oras-go/v2/errdef"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
+	"oras.land/oras-go/v2/registry/remote/errcode"
 	"oras.land/oras-go/v2/registry/remote/retry"
 )
 
 // pushTimeout bounds publishing a candidate.
 const pushTimeout = 10 * time.Minute
+
+// deniedAttempts bounds copying to a repository that denies the push. GHCR
+// creates a package with the first manifest pushed to it and denies the
+// others that arrive before it grants the pushing repository access, as the
+// platform manifests of an image index, pushed in parallel, do.
+const deniedAttempts = 4
+
+// deniedBackoff is the wait before the first retry of a denied push; each
+// later retry waits one more of it.
+var deniedBackoff = 2 * time.Second
 
 // Helm's OCI chart media types, so `helm pull` and `helm install` read the
 // published chart.
@@ -152,7 +164,7 @@ func publish(ctx context.Context, src content.ReadOnlyStorage, desc ocispec.Desc
 	case err != nil && !errors.Is(err, errdef.ErrNotFound):
 		return fmt.Errorf("resolve %s: %w", ref, err)
 	}
-	if err = oras.CopyGraph(ctx, src, repo, desc, oras.DefaultCopyGraphOptions); err != nil {
+	if err = copyGraph(ctx, src, repo, desc); err != nil {
 		return fmt.Errorf("push %s@%s: %w", ref, desc.Digest, err)
 	}
 	if err = repo.Tag(ctx, desc, tag); err != nil {
@@ -166,6 +178,28 @@ func publish(ctx context.Context, src content.ReadOnlyStorage, desc ocispec.Desc
 		return fmt.Errorf("%s is %s, not the candidate's %s", ref, tagged.Digest, desc.Digest)
 	}
 	return nil
+}
+
+// copyGraph copies desc and everything it references from src to repo,
+// copying again while the registry denies the push: a copy skips what
+// already landed.
+func copyGraph(ctx context.Context, src content.ReadOnlyStorage, repo *remote.Repository, desc ocispec.Descriptor) error {
+	err := oras.CopyGraph(ctx, src, repo, desc, oras.DefaultCopyGraphOptions)
+	for attempt := 1; attempt < deniedAttempts && denied(err); attempt++ {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%w (retrying after: %w)", ctx.Err(), err)
+		case <-time.After(time.Duration(attempt) * deniedBackoff):
+		}
+		err = oras.CopyGraph(ctx, src, repo, desc, oras.DefaultCopyGraphOptions)
+	}
+	return err
+}
+
+// denied reports a registry response of 403 Forbidden.
+func denied(err error) bool {
+	var resp *errcode.ErrorResponse
+	return errors.As(err, &resp) && resp.StatusCode == http.StatusForbidden
 }
 
 // packChart stores a chart archive in dst as a Helm OCI chart: Chart.yaml as

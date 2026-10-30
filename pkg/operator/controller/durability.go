@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
+	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
 	"github.com/NVIDIA/aicr/pkg/operator/defaults"
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 	"github.com/NVIDIA/aicr/pkg/operator/plan"
@@ -37,24 +38,50 @@ var rolloutOutcomes = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Help: "Rollouts that reached a terminal phase, by outcome.",
 }, []string{"outcome"})
 
-// jobSeconds is the duration of finished AICR Jobs by stage and result.
+// jobSeconds is the duration of finished AICR Jobs by stage and result. The
+// top bucket, 5120s, is above the longest stage deadline.
 var jobSeconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-	Name:    "aicr_operator_aicr_job_duration_seconds",
+	Name:    "aicr_operator_job_duration_seconds",
 	Help:    "Duration of finished AICR Jobs, by stage and result.",
-	Buckets: prometheus.ExponentialBuckets(5, 2, 10),
+	Buckets: prometheus.ExponentialBuckets(5, 2, 11),
 }, []string{"stage", labelResult})
 
-// Collectors are the controllers' metrics, for the manager's registry.
 // labelResult is the metric label for how a run or Job ended.
 const labelResult = "result"
 
 // aicrJobRuns counts AICR runs when first seen finished.
 var aicrJobRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
-	Name: "aicr_operator_aicr_job_runs_total",
+	Name: "aicr_operator_job_runs_total",
 	Help: "Finished AICR runs, by stage, result and, for failures, retry class.",
 }, []string{"stage", labelResult, "class"})
 
+var metricStages = []aicrjob.Stage{
+	aicrjob.StageSnapshot, aicrjob.StageRecipe, aicrjob.StageBaseRender,
+	aicrjob.StageRender, aicrjob.StageAssessment, aicrjob.StageValidation,
+}
+
+var terminalPhases = []v1alpha1.RolloutPhase{
+	v1alpha1.PhaseSucceeded, v1alpha1.PhaseFailed, v1alpha1.PhaseExpired,
+	v1alpha1.PhaseRevoked, v1alpha1.PhaseSuperseded, v1alpha1.PhaseOrphaned,
+}
+
+// Collectors are the controllers' metrics, for the manager's registry, with
+// every known label value already at zero, so a rate reads zero rather than
+// nothing before the first event.
 func Collectors() []prometheus.Collector {
+	for _, phase := range terminalPhases {
+		rolloutOutcomes.WithLabelValues(string(phase))
+	}
+	validationRuns.WithLabelValues("passed")
+	validationRuns.WithLabelValues("failed")
+	for _, stage := range metricStages {
+		jobSeconds.WithLabelValues(string(stage), "succeeded")
+		jobSeconds.WithLabelValues(string(stage), "failed")
+		aicrJobRuns.WithLabelValues(string(stage), "succeeded", "")
+		for _, class := range retryClasses {
+			aicrJobRuns.WithLabelValues(string(stage), "failed", class)
+		}
+	}
 	return []prometheus.Collector{rolloutOutcomes, jobSeconds, validationRuns, aicrJobRuns}
 }
 
@@ -81,7 +108,10 @@ func (r *RolloutReconciler) orphan(ctx context.Context, name, keep string) error
 
 // restoreOutcomes rebuilds the status phase of terminal rollouts from their
 // outcome label, and a validated rollout's evidence from its annotation,
-// after a restore dropped status.
+// after a restore dropped status. A rollout restored with no status at all
+// also lost which releases it wrote, so each release in its steps is
+// recorded as Unknown: repair then treats it as possibly moved and never
+// rolls it back.
 func (r *RolloutReconciler) restoreOutcomes(ctx context.Context, rollouts []v1alpha1.RuntimeRollout) error {
 	for i := range rollouts {
 		ro := &rollouts[i]
@@ -93,6 +123,11 @@ func (r *RolloutReconciler) restoreOutcomes(ctx context.Context, rollouts []v1al
 		}
 		if lostEvidence {
 			ro.Status.Validation = &v1alpha1.ValidationStatus{Result: resultPassed, Evidence: ref}
+		}
+		if ro.Status.Phase == "" && len(ro.Status.Releases) == 0 {
+			for _, step := range ro.Spec.Steps {
+				setReleaseState(ro, step.Release, v1alpha1.ReleaseUnknown, "")
+			}
 		}
 		ro.Status.Phase, ro.Status.Current = outcome, nil
 		if err := r.saveStatus(ctx, ro, ro.Status.Message); err != nil {
@@ -110,24 +145,11 @@ func retryToken(rt *v1alpha1.ClusterRuntime, rollouts []v1alpha1.RuntimeRollout)
 		return ""
 	}
 	for i := range rollouts {
-		if rollouts[i].Annotations[v1alpha1.AnnotationRetry] == token {
+		if a := rollouts[i].Annotations; a[v1alpha1.AnnotationRetry] == token || a[v1alpha1.AnnotationRetryRequested] == token {
 			return ""
 		}
 	}
 	return token
-}
-
-// markRetry records on a rollout the retry token that ends it.
-func (r *RolloutReconciler) markRetry(ctx context.Context, ro *v1alpha1.RuntimeRollout, token string) error {
-	patch := client.MergeFrom(ro.DeepCopy())
-	if ro.Annotations == nil {
-		ro.Annotations = map[string]string{}
-	}
-	ro.Annotations[v1alpha1.AnnotationRetry] = token
-	if err := r.Client.Patch(ctx, ro, patch); err != nil {
-		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "record retry on "+ro.Name)
-	}
-	return nil
 }
 
 // restorePlan rebuilds a lost active plan ConfigMap from the live engine
@@ -173,8 +195,10 @@ func (r *RolloutReconciler) restorePlan(ctx context.Context, rt *v1alpha1.Cluste
 // the ten newest terminal ones; plans beyond the active, candidate and pinned
 // ones, those retained rollouts reference and the five newest others; and
 // recipe, values and assessment content nothing retained references, once
-// older than a grace period that covers a resolution in flight.
-func (r *RolloutReconciler) retain(ctx context.Context, rt *v1alpha1.ClusterRuntime, active, target string) error {
+// older than a grace period that covers a resolution in flight. The
+// assessment report of a blocked transition, which no rollout references,
+// is kept.
+func (r *RolloutReconciler) retain(ctx context.Context, rt *v1alpha1.ClusterRuntime, active, target, blockedReport string) error {
 	rollouts, err := r.rollouts(ctx, rt)
 	if err != nil {
 		return err
@@ -192,7 +216,7 @@ func (r *RolloutReconciler) retain(ctx context.Context, rt *v1alpha1.ClusterRunt
 		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "list ConfigMaps")
 	}
 	keepPlans := map[string]bool{active: true, target: true, rt.Status.CandidatePlanDigest: true, rt.Spec.Selection.PinnedPlanDigest: true}
-	keepContent := map[string]bool{}
+	keepContent := map[string]bool{blockedReport: true}
 	for i := range kept {
 		keepPlans[kept[i].Spec.FromPlanDigest], keepPlans[kept[i].Spec.ToPlanDigest] = true, true
 		if ref := kept[i].Spec.AssessmentRef; ref != nil {

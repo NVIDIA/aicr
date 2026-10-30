@@ -117,7 +117,8 @@ func (r *RolloutReconciler) deleting(ctx context.Context, rt *v1alpha1.ClusterRu
 // engine operation, end any unfinished rollout Orphaned, annotate the engine
 // objects with orphaned-from, and remove the finalizer. The engine keeps
 // reconciling everything, and the objects are the record a later runtime
-// adopts from.
+// adopts from. An object refused the annotation for good is named in a
+// Warning Event and does not hold the finalizer.
 func (r *RolloutReconciler) orphanRuntime(ctx context.Context, rt *v1alpha1.ClusterRuntime) error {
 	rollouts, err := r.rollouts(ctx, rt)
 	if err != nil {
@@ -131,6 +132,10 @@ func (r *RolloutReconciler) orphanRuntime(ctx context.Context, rt *v1alpha1.Clus
 		}
 	}
 	annotated, err := r.Engine.Orphan(ctx, string(rt.UID))
+	if operrors.ReasonOf(err) == argocd.ReasonOrphanAnnotationRefused {
+		r.event(rt, corev1.EventTypeWarning, argocd.ReasonOrphanAnnotationRefused, "%s", errorMessage(err))
+		err = nil
+	}
 	if err != nil {
 		return err
 	}
@@ -147,6 +152,9 @@ func (r *RolloutReconciler) orphanRuntime(ctx context.Context, rt *v1alpha1.Clus
 func (r *RolloutReconciler) removeRuntime(ctx context.Context, rt *v1alpha1.ClusterRuntime) (*runtimeView, error) {
 	v := &runtimeView{requeue: resyncInterval, engineOK: true, engineReason: ReasonEngineAvailable}
 	if err := r.Engine.Capabilities(ctx); err != nil {
+		if operrors.ReasonOf(err) == "" && !operrors.IsPermanent(err) {
+			return nil, err
+		}
 		v.engineOK, v.engineReason, v.engineMessage = false, reasonOf(err), errorMessage(err)
 		v.stalled, v.stalledReason, v.stalledMsg = true, v.engineReason, v.engineMessage
 		keepObserved(rt, v)
@@ -170,7 +178,7 @@ func (r *RolloutReconciler) removeRuntime(ctx context.Context, rt *v1alpha1.Clus
 		if !isRemoval(current) {
 			supersede = "superseded by the deletion of runtime " + rt.Name
 		}
-		if err = r.advance(ctx, rt, current, v, supersede, ""); err != nil {
+		if err = r.advance(ctx, rt, current, v, supersede, "", ""); err != nil {
 			return nil, err
 		}
 		if isRemoval(current) && current.Status.Phase == v1alpha1.PhaseSucceeded {

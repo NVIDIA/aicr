@@ -28,6 +28,7 @@ import (
 
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -463,6 +464,39 @@ func TestValidationPromotesWithBoundEvidence(t *testing.T) {
 	}
 }
 
+// A validated rollout counts its outcome and its validation run once each,
+// when the outcome is recorded: an outcome write that fails is not counted,
+// and one whose status write then conflicts still is.
+func TestValidationOutcomeIsCountedOnce(t *testing.T) {
+	ctx := testContext(t)
+	validatedRuntime(t, ctx)
+	r, f := newValidating(t, newEngine(), true)
+	job := untilValidating(t, ctx, r)
+	f.pushEvidence(t, job.Labels[v1alpha1.LabelRunID], "h100", 0, deploymentValidator)
+	succeed(t, ctx, job, nil)
+	passed := testutil.ToFloat64(validationRuns.WithLabelValues("passed"))
+	succeeded := testutil.ToFloat64(rolloutOutcomes.WithLabelValues(string(v1alpha1.PhaseSucceeded)))
+
+	r.Client = faultOnce(t, withOutcome)
+	for range 2 { // the outcome patch fails; then it lands and the status update conflicts
+		if _, err := r.Reconcile(ctx, request); err == nil {
+			t.Fatal("an injected failure was not returned")
+		}
+	}
+	for range 2 {
+		reconcileRollout(t, ctx, r)
+	}
+	if ro := rollout(t, ctx); ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseSucceeded) || ro.Status.Phase != v1alpha1.PhaseSucceeded {
+		t.Fatalf("rollout = %v %+v", ro.Labels, ro.Status)
+	}
+	if got := testutil.ToFloat64(validationRuns.WithLabelValues("passed")) - passed; got != 1 {
+		t.Errorf("validation runs counted %v times, want once", got)
+	}
+	if got := testutil.ToFloat64(rolloutOutcomes.WithLabelValues(string(v1alpha1.PhaseSucceeded))) - succeeded; got != 1 {
+		t.Errorf("the outcome was counted %v times, want once", got)
+	}
+}
+
 // Evidence from the development approval bypass, or from any development
 // installation, never qualifies.
 func TestValidationUnderBypassNeverQualifies(t *testing.T) {
@@ -796,16 +830,26 @@ func TestOperatorImage(t *testing.T) {
 }
 
 // The evidence records who acknowledged a manual release's post-apply
-// steps, with the approval it belongs to.
+// steps, with the approval it belongs to, and a revocation made after the
+// last step, which stopped nothing.
 func TestApprovalRecordCarriesAcknowledgements(t *testing.T) {
 	at := metav1.NewTime(time.Date(2026, 10, 28, 19, 25, 50, 0, time.UTC))
+	revokedAt := metav1.NewTime(at.Add(time.Minute))
 	ro := &v1alpha1.RuntimeRollout{Spec: v1alpha1.RuntimeRolloutSpec{ApprovalRequired: true, Approval: &v1alpha1.Approval{
 		ApprovedBy: "alice", Reason: "window", ExpiresAt: metav1.NewTime(at.Add(time.Hour)),
+		RevokedBy: "carol", RevokedAt: &revokedAt, RevokeReason: "incident",
 		Acknowledgements: []v1alpha1.Acknowledgement{{Release: "nvsentinel", AcknowledgedBy: "bob", AcknowledgedAt: &at}},
 	}}}
 	got := approvalRecord(ro)
 	want := []evidence.Acknowledgement{{Release: "nvsentinel", AcknowledgedBy: "bob", AcknowledgedAt: "2026-10-28T19:25:50Z"}}
 	if got.ApprovedBy != "alice" || !slices.Equal(got.Acknowledgements, want) {
 		t.Fatalf("approvalRecord() = %+v", got)
+	}
+	if got.RevokedBy != "carol" || got.RevokedAt != "2026-10-28T19:26:50Z" || got.RevokeReason != "incident" {
+		t.Fatalf("approvalRecord() revocation = %+v", got)
+	}
+	ro.Spec.Approval.RevokedBy, ro.Spec.Approval.RevokedAt, ro.Spec.Approval.RevokeReason = "", nil, ""
+	if got = approvalRecord(ro); got.RevokedBy != "" || got.RevokedAt != "" || got.RevokeReason != "" {
+		t.Fatalf("approvalRecord() without a revocation = %+v", got)
 	}
 }

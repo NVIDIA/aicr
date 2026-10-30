@@ -129,8 +129,8 @@ validation:
 
 Deployment validation runs AICR's validators with `cluster-admin`. If you
 leave `validation.enabled` off, set `spec.validation.deployment: Disabled` on
-the `ClusterRuntime` below; otherwise every rollout waits in `Validating` with
-`ValidationUnavailable`.
+the `ClusterRuntime` below; otherwise the runtime stalls with
+`ValidationUnavailable` before any step runs.
 
 Then verify the chart and install it:
 

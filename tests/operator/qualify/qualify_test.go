@@ -29,6 +29,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
@@ -272,6 +273,7 @@ func operatorKilled(ctx context.Context, t *testing.T, active string) string {
 	approve(ctx, t, ro.Name)
 	waitStepStarted(ctx, t, ro.Name)
 	for range 2 {
+		nothingForbidden(ctx, t)
 		for _, p := range operatorPods(ctx, t) {
 			killPod(ctx, t, &p)
 		}
@@ -290,7 +292,9 @@ func operatorKilled(ctx context.Context, t *testing.T, active string) string {
 func leaderChange(ctx context.Context, t *testing.T, active string) string {
 	t.Helper()
 	scaleOperator(ctx, t, 2)
+	// Separate defers: scaling back runs even if the log scan stops the test.
 	defer scaleOperator(ctx, t, 1)
+	defer nothingForbidden(ctx, t)
 	before := syncs(ctx, t)
 	digest, ro := nextPlan(ctx, t, active, "30m")
 	approve(ctx, t, ro.Name)
@@ -299,6 +303,7 @@ func leaderChange(ctx context.Context, t *testing.T, active string) string {
 	if first == "" {
 		t.Fatal("no leader holds the Lease")
 	}
+	nothingForbidden(ctx, t)
 	for _, p := range operatorPods(ctx, t) {
 		if p.Name == first {
 			killPod(ctx, t, &p)
@@ -431,7 +436,7 @@ func newerSchema(ctx context.Context, t *testing.T, active string) string {
 			Steps:         []v1alpha1.RolloutStep{{Release: release, Operation: v1alpha1.OperationUpgrade, Assessment: v1alpha1.AssessmentNotApplicable}},
 		},
 	}
-	if err := k8s.Create(ctx, newer); err != nil {
+	if err := operator.Create(ctx, newer); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, 2*time.Minute, "Stalled with PlanUnreadable naming the newer rollout", func() bool {
@@ -462,6 +467,7 @@ func upgradeMidRollout(ctx context.Context, t *testing.T, active string) string 
 	digest, ro := nextPlan(ctx, t, active, "35m")
 	approve(ctx, t, ro.Name)
 	waitStepStarted(ctx, t, ro.Name)
+	nothingForbidden(ctx, t)
 	t.Setenv("CANDIDATE_NEXT_DIR", filepath.Dir(os.Getenv("AICR_OPERATOR_QUALIFY_NEXT")))
 	run(ctx, t, "tools/operator-qualify", "upgrade")
 	runsCandidate(ctx, t, &next)
@@ -500,6 +506,7 @@ func uninstallReinstall(ctx context.Context, t *testing.T, active string) {
 	if err := k8s.List(ctx, rollouts); err != nil {
 		t.Fatal(err)
 	}
+	nothingForbidden(ctx, t)
 	run(ctx, t, "helm", "uninstall", "aicr-operator", "--namespace", operatorNamespace,
 		"--kubeconfig", os.Getenv("AICR_OPERATOR_E2E_KUBECONFIG"), "--wait")
 	time.Sleep(20 * time.Second)
@@ -518,20 +525,56 @@ func uninstallReinstall(ctx context.Context, t *testing.T, active string) {
 	}
 }
 
-// nothingForbidden scans the running operator's log for an API denial: the
-// suite installs the RBAC the chart ships, so a missing grant shows here.
+// reportedDenials holds the denial lines nothingForbidden already reported,
+// per pod. Lines are matched by content, which carries the log timestamp,
+// not by position: a rotated log starts over at line 1.
+var reportedDenials = map[types.UID]map[string]bool{}
+
+// logOptions selects the log to read: the current container's once it has
+// started, or the previous one's while a crashed container waits to
+// restart. A container that never started has no log, and the API server
+// refuses to read one.
+func logOptions(p corev1.Pod) (*corev1.PodLogOptions, bool) {
+	for _, s := range p.Status.ContainerStatuses {
+		switch {
+		case s.State.Running != nil || s.State.Terminated != nil:
+			return &corev1.PodLogOptions{Container: s.Name}, true
+		case s.LastTerminationState.Terminated != nil:
+			return &corev1.PodLogOptions{Container: s.Name, Previous: true}, true
+		}
+	}
+	return nil, false
+}
+
+// nothingForbidden scans the running operator pods' logs for an API denial:
+// the suite installs the RBAC the chart ships, so a missing grant shows
+// here. Scenarios call it before a pod is killed, scaled away or replaced,
+// whose log goes with it; it reports each line once.
 func nothingForbidden(ctx context.Context, t *testing.T) {
 	t.Helper()
 	for _, p := range operatorPods(ctx, t) {
-		logs, err := clientset.CoreV1().Pods(operatorNamespace).GetLogs(p.Name, &corev1.PodLogOptions{}).DoRaw(ctx)
+		opts, ok := logOptions(p)
+		if !ok {
+			continue
+		}
+		logs, err := clientset.CoreV1().Pods(operatorNamespace).GetLogs(p.Name, opts).DoRaw(ctx)
+		if apierrors.IsNotFound(err) {
+			continue
+		}
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("read %s's log: %v", p.Name, err)
+		}
+		reported := reportedDenials[p.UID]
+		if reported == nil {
+			reported = map[string]bool{}
+			reportedDenials[p.UID] = reported
 		}
 		sc := bufio.NewScanner(strings.NewReader(string(logs)))
 		sc.Buffer(make([]byte, 1<<20), 1<<20)
 		for sc.Scan() {
-			if strings.Contains(strings.ToLower(sc.Text()), "forbidden") {
-				t.Errorf("%s: %s", p.Name, sc.Text())
+			if text := sc.Text(); !reported[text] && strings.Contains(strings.ToLower(text), "forbidden") {
+				reported[text] = true
+				t.Errorf("%s: %s", p.Name, text)
 			}
 		}
 	}

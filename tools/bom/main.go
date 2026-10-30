@@ -26,16 +26,13 @@ package main
 
 import (
 	"context"
-	stderrors "errors"
 	"flag"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"gopkg.in/yaml.v3"
@@ -59,15 +56,7 @@ var expectedNoImages = map[string]string{
 	"slinky-slurm-operator-crds": crdsOnly,
 }
 
-// renderTimeout and renderRetryBackoff are vars so tests can shrink them.
-var (
-	renderTimeout      = 90 * time.Second
-	renderRetryBackoff = 2 * time.Second
-)
-
 const (
-	renderAttempts = 3
-
 	// Keys labeling structured error context.
 	componentContextKey = "component"
 	pathContextKey      = "path"
@@ -115,7 +104,7 @@ func main() {
 	flag.BoolVar(&noTitle, "no-title", false, "omit the H1 title in the Markdown output so the body can be embedded as a section of a larger document")
 	flag.Parse()
 
-	renderer := helm.Default()
+	renderer := helm.WithRetry(helm.Default())
 	if err := run(repoRoot, outDir, aicrVersion, renderer, skipHelm, strict, deterministic, noTitle); err != nil {
 		fmt.Fprintln(os.Stderr, "bom:", err)
 		os.Exit(1)
@@ -318,45 +307,6 @@ func surveyComponents(
 	return results, nil
 }
 
-// renderWithRetry renders in, retrying render failures (chart pulls are
-// network calls that fail transiently) up to renderAttempts times with linear
-// backoff. Each attempt gets its own timeout, and an attempt that hit it is
-// not retried, so a hung chart costs one timeout rather than three. A failure
-// that survives every attempt is returned, so a missing chart still surfaces.
-func renderWithRetry(ctx context.Context, r helm.Renderer, in helm.ChartInput) ([]byte, error) {
-	var (
-		out []byte
-		err error
-	)
-	for attempt := 1; attempt <= renderAttempts; attempt++ {
-		var timedOut bool
-		out, timedOut, err = renderOnce(ctx, r, in)
-		// Only ErrCodeInternal (helm exited non-zero) is worth retrying. A
-		// missing helm binary or an unconfigured chart will not fix itself.
-		if err == nil || timedOut || attempt == renderAttempts ||
-			!stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
-
-			break
-		}
-		slog.Warn("chart render failed, retrying", "component", in.Name, "attempt", attempt, "error", err)
-		select {
-		case <-ctx.Done():
-			return out, err
-		case <-time.After(time.Duration(attempt) * renderRetryBackoff):
-		}
-	}
-	return out, err
-}
-
-// renderOnce runs a single render attempt and reports whether it ran out of
-// time.
-func renderOnce(ctx context.Context, r helm.Renderer, in helm.ChartInput) (out []byte, timedOut bool, err error) {
-	ctx, cancel := context.WithTimeout(ctx, renderTimeout)
-	defer cancel()
-	out, err = r.Render(ctx, in)
-	return out, ctx.Err() != nil, err
-}
-
 // renderHelmComponent shells out to `helm template` for c.
 func renderHelmComponent(ctx context.Context, repoRoot string, c component, r helm.Renderer) ([]byte, []string) {
 	var warnings []string
@@ -370,7 +320,7 @@ func renderHelmComponent(ctx context.Context, repoRoot string, c component, r he
 			valuesPath = ""
 		}
 	}
-	out, err := renderWithRetry(ctx, r, helm.ChartInput{
+	out, err := r.Render(ctx, helm.ChartInput{
 		Name:       c.Name,
 		Chart:      c.effectiveChart(),
 		Repository: c.Helm.DefaultRepository,

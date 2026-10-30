@@ -1,0 +1,36 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# GENERATED FILE. DO NOT EDIT. Regenerate with make crd-inventory.
+#
+# One entry per pinned chart: the registry pin, and every pin a leaf recipe
+# deploys with a health check that asserts a CRD. Each lists the CRDs the chart
+# installs at sourceVersion, rendered with helm template --include-crds and the
+# values of each such recipe. At the registry pin, crds lists the CRDs it
+# installs with this component's values.yaml. variants lists the leaf recipes
+# whose merged values install a different list, and that list. A leaf recipe
+# not named in variants installs crds. When image is set, each list also holds
+# the CRDs the operator applies from that image. Each CRD a health check
+# asserts must appear in the list for the asserting recipe or in the
+# component's manifests. TestHealthCheckCRDAssertionsAnchored enforces this.
+charts:
+  - chart: agentgateway-crds
+    crds:
+      - agentgatewaybackends.agentgateway.dev
+      - agentgatewaymodels.agentgateway.dev
+      - agentgatewayparameters.agentgateway.dev
+      - agentgatewaypolicies.agentgateway.dev
+    repository: oci://cr.agentgateway.dev/charts
+    sourceVersion: v1.5.0
+component: agentgateway-crds

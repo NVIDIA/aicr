@@ -1,0 +1,284 @@
+// Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package main
+
+import (
+	"context"
+	"fmt"
+	"io/fs"
+	"maps"
+	"path"
+	"slices"
+	"strings"
+	"testing"
+
+	"k8s.io/apimachinery/pkg/util/sets"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/recipe"
+)
+
+// TestHealthCheckCRDAssertionsAnchored checks the CRDs asserted by each
+// registry health check at the registry pin, and by each health check a leaf
+// recipe deploys, inline asserts included, at the leaf's pin:
+//   - A CRD asserted against an external chart must be in the list the
+//     component's crds.yaml entry for that repository, chart and version gives
+//     the asserting recipe, or in its vendored manifests.
+//   - A component with no chart, such as an OLM or manifest-only wrapper, may
+//     assert only CRDs that some crds.yaml or vendored manifest defines.
+//   - A crds.yaml may hold only entries for charts some assertion is checked
+//     against.
+//
+// When this test fails after a pin bump, run make crd-inventory, then fix any
+// assertion it reports the new chart no longer installs.
+func TestHealthCheckCRDAssertionsAnchored(t *testing.T) {
+	ctx := t.Context()
+	efs := recipe.GetEmbeddedFS()
+	dp := recipe.NewEmbeddedDataProvider(efs, "")
+	reg, err := recipe.GetComponentRegistryFor(dp)
+	if err != nil {
+		t.Fatalf("load component registry: %v", err)
+	}
+	leaves, err := recipe.ResolveLeaves(ctx, recipe.ResolveLeavesOptions{Provider: dp, Version: resolveVersion})
+	if err != nil {
+		t.Fatalf("resolve leaf recipes: %v", err)
+	}
+	all, err := collectAssertions(ctx, dp, reg, leaves)
+	if err != nil {
+		t.Fatalf("collect CRD assertions: %v", err)
+	}
+
+	inTree := inTreeCRDs(t, efs, dp)
+	const regenerate = "run `make crd-inventory` and fix any assertion it reports the pinned chart no longer installs"
+	checked := 0
+	for _, name := range slices.Sorted(maps.Keys(all)) {
+		a := all[name]
+		for _, crd := range slices.Sorted(maps.Keys(a.chartless)) {
+			checked++
+			if !inTree.Has(crd) {
+				t.Errorf("%s asserts CRD %q, but component %q has no chart and no in-tree inventory or "+
+					"manifest defines that CRD", strings.Join(sets.List(a.chartless[crd]), ", "), crd, name)
+			}
+		}
+		if len(a.charts) == 0 {
+			continue
+		}
+
+		inv, err := readInventory(ctx, dp, name)
+		if err != nil {
+			t.Errorf("component %q asserts CRDs against a chart but has no readable CRD inventory (%v); %s",
+				name, err, regenerate)
+			continue
+		}
+		vendored, err := manifestCRDs(ctx, dp, name)
+		if err != nil {
+			t.Fatalf("component %q: %v", name, err)
+		}
+		for _, k := range a.sortedCharts() {
+			ca := a.charts[k]
+			checked += len(ca.crds)
+			entry := inv.find(k)
+			if entry == nil {
+				t.Errorf("the CRD inventory of component %q has no entry for chart %s, deployed by %s; %s",
+					name, k, strings.Join(ca.crds.asserters(), ", "), regenerate)
+				continue
+			}
+			for _, problem := range anchorProblems(name, k, ca, entry, vendored) {
+				t.Error(problem)
+			}
+		}
+		for i := range inv.Charts {
+			if k := inv.Charts[i].key(); a.charts[k] == nil {
+				t.Errorf("the CRD inventory of component %q has an entry for chart %s, which no CRD assertion "+
+					"is checked against; run `make crd-inventory`", name, k)
+			}
+		}
+	}
+
+	for _, name := range inventoryComponents(t, efs) {
+		if a := all[name]; a == nil || len(a.charts) == 0 {
+			t.Errorf("component %q has a CRD inventory but no CRD assertion against a chart; "+
+				"run `make crd-inventory` to delete it", name)
+		}
+	}
+
+	if checked == 0 {
+		t.Fatal("no health check asserts a CRD; this guard would be vacuous")
+	}
+}
+
+func TestAnchorProblems(t *testing.T) {
+	k := chartKey{Repository: exampleRepo, Chart: "c", Version: "1.0.0"}
+	entry := &chartCRDs{Repository: exampleRepo, Chart: "c", SourceVersion: "1.0.0", CRDs: []string{"a.x.io"},
+		Variants: []crdVariant{{Recipes: []string{"extra"}, CRDs: []string{"a.x.io", "b.x.io"}}}}
+	assertion := func(registry bool, leaf, crd string) *valuesAssertions {
+		va := &valuesAssertions{crds: crdSources{}, registry: registry, leaves: sets.New[string]()}
+		where := "checks/c/health-check.yaml"
+		if leaf != "" {
+			va.leaves.Insert(leaf)
+			where = "leaf recipe " + leaf
+		}
+		va.crds.add([]string{crd}, where)
+		return va
+	}
+	tests := []struct {
+		name     string
+		byValues []*valuesAssertions
+		vendored []string
+		want     []string
+	}{
+		{"registry asserts its own CRD", []*valuesAssertions{assertion(true, "", "a.x.io"),
+			assertion(false, "extra", "b.x.io")}, nil, nil},
+		{"registry asserts a CRD only a variant installs", []*valuesAssertions{assertion(true, "", "b.x.io"),
+			assertion(false, "extra", "b.x.io")}, nil,
+			[]string{`checks/c/health-check.yaml asserts CRD "b.x.io"`}},
+		{"leaf not in variants gets the registry list", []*valuesAssertions{assertion(false, "keeps", "b.x.io"),
+			assertion(false, "extra", "b.x.io")}, nil, []string{`leaf recipe keeps asserts CRD "b.x.io"`}},
+		{"vendored CRD", []*valuesAssertions{assertion(true, "", "b.x.io"),
+			assertion(false, "extra", "b.x.io")}, []string{"b.x.io"}, nil},
+		{"same values, different lists", []*valuesAssertions{
+			func() *valuesAssertions {
+				va := assertion(true, "", "a.x.io")
+				va.leaves.Insert("extra")
+				return va
+			}()}, nil, []string{"lists different CRDs"}},
+		{"variant names a leaf that asserts nothing", []*valuesAssertions{assertion(true, "", "a.x.io")}, nil,
+			[]string{"for leaf recipe extra, which asserts no CRD against it"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ca := &chartAssertions{byValues: map[string]*valuesAssertions{}}
+			for i, va := range tt.byValues {
+				ca.byValues[fmt.Sprint(i)] = va
+			}
+			got := anchorProblems("c", k, ca, entry, tt.vendored)
+			if len(got) != len(tt.want) {
+				t.Fatalf("anchorProblems() = %q, want %d problems containing %q", got, len(tt.want), tt.want)
+			}
+			for i, want := range tt.want {
+				if !strings.Contains(got[i], want) {
+					t.Errorf("anchorProblems()[%d] = %q, want it to contain %q", i, got[i], want)
+				}
+			}
+		})
+	}
+}
+
+// anchorProblems returns the problems with ca's assertions against entry, the
+// CRD inventory entry for chart k:
+//   - an asserted CRD missing from both the list entry gives the asserting
+//     recipe and vendored
+//   - recipes that deploy the chart with the same values but get different
+//     lists
+//   - a variant naming a leaf recipe that does not assert against the chart
+func anchorProblems(component string, k chartKey, ca *chartAssertions, entry *chartCRDs, vendored []string) []string {
+	const regenerate = "run `make crd-inventory`"
+	var problems []string
+	asserting := sets.New[string]()
+	for _, v := range slices.Sorted(maps.Keys(ca.byValues)) {
+		va := ca.byValues[v]
+		asserting = asserting.Union(va.leaves)
+		recipes := sets.List(va.leaves)
+		if va.registry {
+			recipes = slices.Insert(recipes, 0, "")
+		}
+		installed := entry.installed(recipes[0])
+		for _, r := range recipes[1:] {
+			if !slices.Equal(entry.installed(r), installed) {
+				problems = append(problems, fmt.Sprintf("the CRD inventory of component %q lists different CRDs "+
+					"for chart %s for %s, which deploy it with the same values; %s",
+					component, k, strings.Join(va.crds.asserters(), ", "), regenerate))
+				break
+			}
+		}
+		problems = append(problems, unanchored(component, va.crds,
+			"chart "+k.String()+" rendered with their values", installed, vendored)...)
+	}
+	for _, variant := range entry.Variants {
+		for _, r := range variant.Recipes {
+			if !asserting.Has(r) {
+				problems = append(problems, fmt.Sprintf("the CRD inventory of component %q lists a variant of "+
+					"chart %s for leaf recipe %s, which asserts no CRD against it; %s", component, k, r, regenerate))
+			}
+		}
+	}
+	return problems
+}
+
+// asserters returns the sorted health check files and leaf recipes that
+// assert a CRD in s.
+func (s crdSources) asserters() []string {
+	out := sets.New[string]()
+	for _, w := range s {
+		out = out.Union(w)
+	}
+	return sets.List(out)
+}
+
+// readInventory returns the CRD inventory of the named component in dp.
+func readInventory(ctx context.Context, dp recipe.DataProvider, componentName string) (*inventory, error) {
+	p := path.Join("components", componentName, inventoryFile)
+	data, err := dp.ReadFile(ctx, p)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeNotFound, "read CRD inventory "+p)
+	}
+	return decodeInventory(data)
+}
+
+// inventoryComponents returns the names of the components in efs that have a
+// CRD inventory.
+func inventoryComponents(t *testing.T, efs fs.FS) []string {
+	t.Helper()
+	paths, err := fs.Glob(efs, path.Join("components", "*", inventoryFile))
+	if err != nil {
+		t.Fatalf("glob inventories: %v", err)
+	}
+	names := make([]string, 0, len(paths))
+	for _, p := range paths {
+		names = append(names, path.Base(path.Dir(p)))
+	}
+	return names
+}
+
+// inTreeCRDs returns every CRD named by a CRD inventory or defined in a
+// component's vendored manifests.
+func inTreeCRDs(t *testing.T, efs fs.FS, dp recipe.DataProvider) sets.Set[string] {
+	t.Helper()
+	dirs, err := fs.ReadDir(efs, "components")
+	if err != nil {
+		t.Fatalf("read components: %v", err)
+	}
+	out := sets.New[string]()
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		names, err := manifestCRDs(t.Context(), dp, d.Name())
+		if err != nil {
+			t.Fatalf("component %q: %v", d.Name(), err)
+		}
+		out.Insert(names...)
+	}
+	for _, name := range inventoryComponents(t, efs) {
+		inv, err := readInventory(t.Context(), dp, name)
+		if err != nil {
+			t.Fatalf("component %q: %v", name, err)
+		}
+		for i := range inv.Charts {
+			out.Insert(inv.Charts[i].all()...)
+		}
+	}
+	return out
+}

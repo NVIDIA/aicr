@@ -324,7 +324,7 @@ func haltedRuntime(rt *v1alpha1.ClusterRuntime) string {
 
 // suspension keeps every owned engine object's automated sync off while
 // spec.suspendEngine is set and on otherwise, recording each change.
-func (r *RolloutReconciler) suspension(ctx context.Context, rt *v1alpha1.ClusterRuntime) error {
+func (r *RolloutReconciler) suspension(ctx context.Context, rt *v1alpha1.ClusterRuntime, v *runtimeView) error {
 	changed, err := r.Engine.Suspend(ctx, string(rt.UID), rt.Spec.SuspendEngine)
 	if len(changed) > 0 {
 		reason, verb := "EngineResumed", "resumed"
@@ -332,6 +332,16 @@ func (r *RolloutReconciler) suspension(ctx context.Context, rt *v1alpha1.Cluster
 			reason, verb = ReasonEngineSuspended, "suspended"
 		}
 		r.event(rt, corev1.EventTypeNormal, reason, "automated sync %s for %s", verb, strings.Join(changed, ", "))
+	}
+	if err != nil && operrors.IsPermanent(err) {
+		// An Application the API server refuses to patch for good, such as
+		// one edited outside the admission policy, must not stop status and
+		// drift repair for the rest; each reconcile tries it again. The
+		// runtime stalls, as the engine is not in the declared state.
+		v.suspensionRefused = errorMessage(err)
+		v.stalled, v.stalledReason, v.stalledMsg = true, ReasonEngineSuspensionRefused, v.suspensionRefused
+		r.event(rt, corev1.EventTypeWarning, EventEngineSuspensionRefused, "%s", v.suspensionRefused)
+		return nil
 	}
 	return err
 }

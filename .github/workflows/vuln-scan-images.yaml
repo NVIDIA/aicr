@@ -339,7 +339,8 @@ jobs:
           # (#2610), nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor
           # (#2611), remediation, nvsentinel-slinky-drainer (#2615),
           # nvsentinel-health-events-analyzer (#2618), nvsentinel-event-exporter
-          # (#2621) and nvsentinel-log-collector (#2619) mixins, and no other job
+          # (#2621), nvsentinel-log-collector (#2619) and
+          # nvsentinel-node-validation (#3088) mixins, and no other job
           # scans a mixin-gated image, so nothing else would surface a CVE in
           # them.
           # Because they are not built by this workflow they carry their
@@ -362,6 +363,7 @@ jobs:
           - ghcr.io/nvidia/nvsentinel/event-exporter
           - ghcr.io/nvidia/nvsentinel/log-collector
           - ghcr.io/nvidia/nvsentinel/file-server-cleanup
+          - ghcr.io/nvidia/nvsentinel/lifecycle-manager
           # The nvsentinel-log-collector mixin's file server, at the nvsentinel
           # chart's own pins; its init container's busybox is the AICR pin
           # below. bitnamilegacy is Bitnami's frozen archive and is never
@@ -439,6 +441,8 @@ jobs:
             tag: v1.28.0
           - image: ghcr.io/nvidia/nvsentinel/file-server-cleanup
             tag: v1.28.0
+          - image: ghcr.io/nvidia/nvsentinel/lifecycle-manager
+            tag: v1.28.0
           # The nvsentinel chart's own pins for the file server's third-party
           # images. The weekly TestNVSentinelLogCollectorChartRender fails if a
           # chart bump moves them; TestLogCollectorImagesPinnedEverywhere then
@@ -466,7 +470,7 @@ jobs:
           # not move with defaultVersion. Digest-pinned, so the tag is only
           # there to read; grype resolves the digest.
           - image: docker.io/library/busybox
-            tag: 1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e
+            tag: 1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1

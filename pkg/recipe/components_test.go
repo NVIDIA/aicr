@@ -1363,7 +1363,7 @@ components:
 	}
 }
 
-// buildProviderWithRegistry returns an inMemoryDataProvider whose registry.yaml
+// buildProviderWithRegistry returns an in-memory provider whose registry.yaml
 // declares a single component whose name is derived from the supplied tag
 // (e.g., "registry-alpha.yaml" -> component name "alpha-only"). This lets
 // isolation tests verify that the component registry cache keyed by

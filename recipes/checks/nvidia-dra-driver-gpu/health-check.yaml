@@ -15,7 +15,8 @@
 # NVIDIA DRA Driver GPU Health Check
 #
 # Validates that the NVIDIA DRA (Dynamic Resource Allocation) GPU driver
-# is running and healthy in the nvidia-dra-driver namespace. The
+# is running and healthy in the nvidia-dra-driver namespace, and that the
+# ComputeDomain CRDs the chart installs are Established. The
 # kubelet-plugin DaemonSet must roll out fully — numberReady ==
 # desiredNumberScheduled (with desiredNumberScheduled > 0 as a guard).
 # Previous check gated only on numberReady > 0, passing on partial
@@ -40,6 +41,27 @@ spec:
   timeouts:
     assert: 5m
   steps:
+    - name: validate-crds-established
+      # Verified against chart 0.5.1, which installs these two CRDs from crds/.
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: computedomains.resource.nvidia.com
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: computedomaincliques.resource.nvidia.com
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
     - name: validate-kubelet-plugin-daemonset-fully-rolled-out
       try:
         - assert:

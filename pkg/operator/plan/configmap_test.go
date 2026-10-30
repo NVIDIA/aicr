@@ -16,6 +16,7 @@ package plan
 
 import (
 	"bytes"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -64,7 +65,7 @@ func TestConfigMapRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToConfigMap() = %v", err)
 	}
-	if cm.Name != "aicr-plan-aaaaaaaaaaaaaaaa" || cm.Namespace != "aicr-system" {
+	if cm.Name != NamePrefix+strings.TrimPrefix(doc.DesiredStateDigest, "sha256:")[:16] || cm.Namespace != "aicr-system" {
 		t.Errorf("name = %s/%s", cm.Namespace, cm.Name)
 	}
 	if cm.Immutable == nil || !*cm.Immutable {
@@ -79,7 +80,7 @@ func TestConfigMapRoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(cm.Labels, wantLabels) {
 		t.Errorf("labels = %v, want %v", cm.Labels, wantLabels)
 	}
-	if cm.Annotations[v1alpha1.AnnotationPlanDigest] != digestA || cm.Annotations[v1alpha1.AnnotationRuntimeUID] != uid {
+	if cm.Annotations[v1alpha1.AnnotationPlanDigest] != doc.DesiredStateDigest || cm.Annotations[v1alpha1.AnnotationRuntimeUID] != uid {
 		t.Errorf("annotations = %v", cm.Annotations)
 	}
 
@@ -120,6 +121,15 @@ func TestFromConfigMapRefusesUntrustedPlans(t *testing.T) {
 		{"invalid document", func(cm *corev1.ConfigMap) {
 			cm.Data[DataKey] = strings.Replace(cm.Data[DataKey], `"engine":"ArgoCD"`, `"engine":"Nope"`, 1)
 		}},
+		{"content edited under the same digest", func(cm *corev1.ConfigMap) {
+			cm.Data[DataKey] = strings.Replace(cm.Data[DataKey], `"targetNamespace":"gpu-operator"`, `"targetNamespace":"kube-system"`, 1)
+		}},
+		{"a digest its content does not reproduce", func(cm *corev1.ConfigMap) {
+			cm.Data[DataKey] = strings.Replace(cm.Data[DataKey], cm.Annotations[v1alpha1.AnnotationPlanDigest], digestB, 1)
+			cm.Annotations[v1alpha1.AnnotationPlanDigest] = digestB
+			cm.Name = "aicr-plan-bbbbbbbbbbbbbbbb"
+		}},
+		{"stored under another name", func(cm *corev1.ConfigMap) { cm.Name = "aicr-plan-bbbbbbbbbbbbbbbb" }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -131,17 +141,9 @@ func TestFromConfigMapRefusesUntrustedPlans(t *testing.T) {
 			tt.mutate(cm)
 			_, err = FromConfigMap(cm)
 			var se *operrors.StructuredError
-			if !asStructured(err, &se) || se.Code != operrors.ErrCodeInvalidRequest || se.Context["reason"] != ReasonPlanUnreadable {
+			if !errors.As(err, &se) || se.Code != operrors.ErrCodeInvalidRequest || se.Context["reason"] != ReasonPlanUnreadable {
 				t.Fatalf("FromConfigMap() = %v, want INVALID_REQUEST with reason %s", err, ReasonPlanUnreadable)
 			}
 		})
 	}
-}
-
-func asStructured(err error, target **operrors.StructuredError) bool {
-	se, ok := err.(*operrors.StructuredError) //nolint:errorlint // FromConfigMap returns the structured error directly
-	if ok {
-		*target = se
-	}
-	return ok
 }

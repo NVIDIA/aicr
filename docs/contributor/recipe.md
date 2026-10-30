@@ -361,7 +361,8 @@ Mixin files currently in the tree: `os-ubuntu`, `os-talos`, `os-amazonlinux`, `o
 `nvsentinel-object-monitor`, `nvsentinel-nic-health-monitor`,
 `nvsentinel-preflight`, `nvsentinel-slurm-drain-monitor`, `nvsentinel-observe`,
 `nvsentinel-quarantine`, `nvsentinel-remediation`, `nvsentinel-slinky-drainer`,
-`nvsentinel-health-events-analyzer`, `nvsentinel-event-exporter`, `nvsentinel-datastore-eks`, `nvsentinel-log-collector`, `npd`.
+`nvsentinel-health-events-analyzer`, `nvsentinel-event-exporter`, `nvsentinel-datastore-eks`, `nvsentinel-log-collector`,
+`nvsentinel-node-validation`, `npd`.
 
 The OS-scoped mixins (`os-ubuntu`, `os-talos`, `os-amazonlinux`, `os-sles`) are
 mutually exclusive:
@@ -793,7 +794,10 @@ externally-visible product. Fields beyond `ComponentRefs` and
    [chainsaw health check section in validator.md](validator.md#chainsaw-health-checks)
    for the assertion patterns currently in use (DaemonSet
    `numberReady == desiredNumberScheduled`, Deployment
-   `Available=True`, CRD `Established=True`).
+   `Available=True`, CRD `Established=True`). A check that asserts a
+   CRD also needs `make crd-inventory`, and the generated
+   `recipes/components/<name>/crds.yaml` committed alongside it (see
+   [CRD assertions](validator.md#chainsaw-health-checks)).
 4. **Run `make bom-docs` and commit `docs/user/container-images.md`**
    if your change touches `registry.yaml`, a component's `values.yaml`,
    or a chart version pin (see [BOM regeneration](#bom-regeneration)).

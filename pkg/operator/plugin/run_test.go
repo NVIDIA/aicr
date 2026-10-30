@@ -99,7 +99,9 @@ func TestRunAgainstAnAPIServer(t *testing.T) {
 		want string
 	}{
 		{[]string{"describe", ro.Name, "--kubeconfig", kubeconfig}, "required, pending"},
-		{[]string{"approve", ro.Name, "--kubeconfig", kubeconfig, "--reason", "window", "--expires", "30m"}, "approved by carol"},
+		// Without --expires the approval lasts until the rollout's deadline.
+		{[]string{"approve", ro.Name, "--kubeconfig", kubeconfig, "--reason", "window"},
+			"approved by carol until " + ro.Spec.Deadline.UTC().Format(time.RFC3339)},
 		{[]string{"revoke", ro.Name, "--reason", "incident", "--kubeconfig", kubeconfig}, "revoked by carol"},
 		{[]string{"describe", "--kubeconfig", kubeconfig, ro.Name}, "revoked by carol"},
 	} {

@@ -71,16 +71,18 @@ func (r Repository) URI() string { return URIScheme + r.String() }
 
 // Options configure a Client.
 type Options struct {
-	// PlainHTTPHosts are the registry hosts reached over HTTP instead of
-	// HTTPS: only a runtime registry inside a test cluster. Every other host,
-	// upstream chart registries included, is reached over HTTPS.
+	// PlainHTTPHosts are the hosts, registries and Helm repositories alike,
+	// reached over HTTP instead of HTTPS: only a runtime registry inside a
+	// test cluster. Every other host, upstream chart sources included, is
+	// reached over HTTPS.
 	PlainHTTPHosts []string
 	// Credentials resolves the credential for a registry host. Nil means
 	// anonymous access.
 	Credentials auth.CredentialFunc
 	// HTTPClient carries requests to registries and upstream chart
-	// repositories. Nil uses a client that retries throttled and failed
-	// requests with bounded exponential backoff, within RegistryTimeout.
+	// repositories; its redirect policy applies after the plain-HTTP rule.
+	// Nil uses a client that retries throttled and failed requests with
+	// bounded exponential backoff, within RegistryTimeout.
 	HTTPClient *http.Client
 }
 
@@ -93,12 +95,32 @@ type Client struct {
 
 // New returns a Client.
 func New(opts Options) *Client {
-	hc := opts.HTTPClient
-	if hc == nil {
-		hc = &http.Client{Transport: retry.NewTransport(http.DefaultTransport.(*http.Transport).Clone()), Timeout: defaults.RegistryTimeout}
+	hc := &http.Client{Transport: retry.NewTransport(http.DefaultTransport.(*http.Transport).Clone()), Timeout: defaults.RegistryTimeout}
+	if opts.HTTPClient != nil {
+		copied := *opts.HTTPClient
+		hc = &copied
 	}
-	return &Client{opts: opts, http: hc}
+	c := &Client{opts: opts, http: hc}
+	// A redirect is held to the rule of the URL it replaces, before it is
+	// followed: HTTPS anywhere, plain HTTP only to a configured host.
+	supplied := hc.CheckRedirect
+	hc.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if !c.allowedScheme(req.URL) {
+			return invalid("redirect to %s: neither HTTPS nor a plain-HTTP host", req.URL.Redacted())
+		}
+		if len(via) >= maxRedirects {
+			return invalid("stopped after %d redirects", maxRedirects)
+		}
+		if supplied != nil {
+			return supplied(req, via)
+		}
+		return nil
+	}
+	return c
 }
+
+// maxRedirects is net/http's own limit.
+const maxRedirects = 10
 
 func (c *Client) repository(r Repository) (*remote.Repository, error) {
 	repo, err := remote.NewRepository(r.String())
@@ -131,8 +153,9 @@ func (c *Client) Resolve(ctx context.Context, r Repository, tag string) (string,
 
 // classify maps registry errors onto operator codes: a missing artifact is
 // NOT_FOUND, an authorization failure UNAUTHORIZED, a throttled request
-// RATE_LIMIT_EXCEEDED, cancellation and deadlines keep their codes, and
-// anything else is SERVICE_UNAVAILABLE so the caller retries with backoff.
+// RATE_LIMIT_EXCEEDED, a listing past its page bound INVALID_REQUEST,
+// cancellation and deadlines keep their codes, and anything else is
+// SERVICE_UNAVAILABLE so the caller retries with backoff.
 func classify(err error, message string) error {
 	var se *operrors.StructuredError
 	if errors.As(err, &se) {
@@ -140,6 +163,9 @@ func classify(err error, message string) error {
 	}
 	if errors.Is(err, errdef.ErrNotFound) {
 		return operrors.Wrap(operrors.ErrCodeNotFound, message, err)
+	}
+	if errors.Is(err, errdef.ErrTooManyPages) {
+		return operrors.Wrap(operrors.ErrCodeInvalidRequest, message, err)
 	}
 	var resp *errcode.ErrorResponse
 	if errors.As(err, &resp) {

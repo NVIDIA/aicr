@@ -48,6 +48,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"syscall"
 
 	prototrustroot "github.com/sigstore/protobuf-specs/gen/pb-go/trustroot/v1"
@@ -94,9 +95,7 @@ func classifyTUFError(err error) errors.ErrorCode {
 // Uses the sigstore-go TUF client with ForceCache to avoid network calls.
 // Falls back to the embedded TUF root if no cache exists.
 func GetTrustedMaterial() (root.TrustedMaterial, error) {
-	opts := tuf.DefaultOptions().WithForceCache()
-
-	client, err := tuf.New(opts)
+	client, err := newClient(tuf.DefaultOptions().WithForceCache())
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to initialize TUF client", err)
 	}
@@ -131,11 +130,55 @@ func GetSigningConfig() (*root.SigningConfig, error) {
 // signing-config cache readers so the construction and its error classification
 // stay in one place.
 func newCacheTUFClient() (*tuf.Client, error) {
-	client, err := tuf.New(tuf.DefaultOptions().WithForceCache())
+	client, err := newClient(tuf.DefaultOptions().WithForceCache())
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to initialize TUF client", err)
 	}
 	return client, nil
+}
+
+// persistRace is go-tuf's error when a metadata file it renamed into the
+// shared cache reads back different: another process refreshing the same
+// cache replaced it in between (updater.persistMetadata, go-tuf v2). go-tuf
+// exports no sentinel for it.
+const persistRace = "failed to persist metadata"
+
+// tufNew and tufRefresh are the TUF client operations; tests replace them.
+var (
+	tufNew     = tuf.New
+	tufRefresh = func(c *tuf.Client) error { return c.Refresh() }
+)
+
+// newClient builds a TUF client over the shared local cache. When it loses
+// the persist race, it builds one that reads the metadata into memory
+// instead, which a concurrent writer cannot fail again.
+func newClient(opts *tuf.Options) (*tuf.Client, error) {
+	client, err := tufNew(opts)
+	if err != nil && lostPersistRace(err, opts) {
+		slog.Debug("TUF cache written concurrently; reading metadata into memory", "error", err)
+		return tufNew(opts.WithDisableLocalCache())
+	}
+	return client, err
+}
+
+// refresh refreshes client. When the refresh loses the persist race, it
+// returns a client that refreshed into memory instead.
+func refresh(client *tuf.Client, opts *tuf.Options) (*tuf.Client, error) {
+	err := tufRefresh(client)
+	if err == nil || !lostPersistRace(err, opts) {
+		return client, err
+	}
+	slog.Debug("TUF cache written concurrently; refreshing metadata into memory", "error", err)
+	client, err = tufNew(opts.WithDisableLocalCache())
+	if err != nil {
+		return nil, err
+	}
+	return client, tufRefresh(client)
+}
+
+// lostPersistRace reports a persist race on a client that uses the cache.
+func lostPersistRace(err error, opts *tuf.Options) bool {
+	return !opts.DisableLocalCache && strings.Contains(err.Error(), persistRace)
 }
 
 // ResolveSigningConfig returns the Rekor v2 signing config, preferring the local
@@ -161,12 +204,14 @@ func ResolveSigningConfig(ctx context.Context) (*root.SigningConfig, error) {
 	}
 	ch := make(chan result, 1)
 	go func() {
-		client, err := tuf.New(tuf.DefaultOptions())
+		opts := tuf.DefaultOptions()
+		client, err := newClient(opts)
 		if err != nil {
 			ch <- result{err: errors.Wrap(errors.ErrCodeInternal, "failed to initialize TUF client for signing config fetch", err)}
 			return
 		}
-		if refreshErr := client.Refresh(); refreshErr != nil {
+		client, refreshErr := refresh(client, opts)
+		if refreshErr != nil {
 			code := classifyTUFError(refreshErr)
 			ch <- result{err: errors.Wrap(code, "TUF refresh failed while fetching signing config", refreshErr)}
 			return
@@ -260,7 +305,7 @@ func Update(ctx context.Context) (root.TrustedMaterial, error) {
 	go func() {
 		opts := tuf.DefaultOptions()
 
-		client, err := tuf.New(opts)
+		client, err := newClient(opts)
 		if err != nil {
 			// tuf.New only performs local config setup (parses the embedded
 			// root, computes cache paths). Failures here are configuration
@@ -269,7 +314,8 @@ func Update(ctx context.Context) (root.TrustedMaterial, error) {
 			return
 		}
 
-		if refreshErr := client.Refresh(); refreshErr != nil {
+		client, refreshErr := refresh(client, opts)
+		if refreshErr != nil {
 			// Distinguish transport errors (server unreachable, HTTP failure)
 			// from verification errors (signature, hash, expiry) using
 			// go-tuf's typed error sentinels. Operators get a more

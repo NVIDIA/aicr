@@ -61,11 +61,9 @@ PARTITION=aws REPOSITORY_PREFIX="${PREFIX}" ACCOUNT_ID="${ACCOUNT}" REGION="${RE
 aws iam create-policy --policy-name "aicr-operator-${CLUSTER}" --policy-document file://aicr-operator-ecr.json
 ```
 
-It allows `ecr:GetAuthorizationToken`, and push and pull on
-`repository/${PREFIX}/*` only. Whether pushing through the creation template
-also needs `ecr:CreateRepository` is not yet confirmed on EKS. If the first
-push fails with an access-denied error naming it, add that action for the same
-resource.
+It allows `ecr:GetAuthorizationToken`, and creating, pushing and pulling
+repositories under `repository/${PREFIX}/*` only; the creation template sets
+each repository up on its first push.
 
 Give the policy to a role the operator's ServiceAccount (`aicr-operator` in
 `aicr-system`) can assume, with either mechanism:
@@ -173,8 +171,8 @@ validators as; with v1.0.x the launcher itself holds `cluster-admin`, because
 AICR binds validators per run. Either way validation is
 cluster-admin-equivalent, so enable it only where that is acceptable
 ([privilege boundaries](security.md)). Without it, set
-`spec.validation.deployment: Disabled` on the runtime; otherwise the first
-rollout waits in `Validating` with `ValidationUnavailable`.
+`spec.validation.deployment: Disabled` on the runtime; otherwise the runtime
+stalls with `ValidationUnavailable` before any step runs.
 
 To sign evidence with a KMS key (AICR v1.1.0 or later), give the validation
 launcher an identity with `kms:Sign`, `kms:GetPublicKey` and `kms:DescribeKey`

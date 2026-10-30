@@ -239,6 +239,7 @@ func TestRolloutIgnoresLateRevocation(t *testing.T) {
 	resolved(t, ctx, target)
 	engine := newEngine()
 	r, clk := newRollout(t, engine, false)
+	r.Config.ValidationEnabled = true
 	clk.now = time.Now().Add(2 * time.Second)
 	reconcileRollout(t, ctx, r)
 	ro := onlyRollout(t, ctx, target)

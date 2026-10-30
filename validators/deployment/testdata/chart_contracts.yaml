@@ -33,4 +33,4 @@ nvidia-dra-driver-gpu:
   bundleValuesSHA256: sha256:2d98dd39fa54a58c62f6a357a7e511516db4e4f665a9f205229b970f489b2ee5
   daemonSets:
   - nvidia-dra-driver-gpu-kubelet-plugin
-  version: 0.5.0
+  version: 0.5.1
