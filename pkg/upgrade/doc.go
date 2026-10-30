@@ -122,7 +122,8 @@
 //
 // A blocked Explanation names where to upgrade first, or asks for a record when
 // nothing recorded leads there. When the blocked record is the first upgrade,
-// it instead says to check the move to that record's floor on its own.
+// it instead says to check the move to that record's floor on its own, or to a
+// version in its to when that floor is exclusive.
 //
 // Matching takes an already validated Set and does not re-run Validate.
 // Validate is therefore not optional: a record that violates a well-formedness
