@@ -64,9 +64,10 @@ const (
 	helmChartMediaType  = "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
 )
 
-// push publishes a candidate as built, never rebuilt: the operator image
-// index from its OCI layout to the repository candidate.json names, tagged
-// with the candidate version, and the chart archive as a Helm OCI chart under
+// push publishes a candidate as built, never rebuilt: the operator and
+// in-cluster registry image indexes from their OCI layouts to the
+// repositories candidate.json names, tagged with the candidate version, then
+// the chart archive that defaults to them as a Helm OCI chart under
 // chart-registry/<chart name>, tagged with the chart version. A tag that
 // already names other content is refused, since a version names one
 // candidate. Credentials come from CANDIDATE_REGISTRY_USERNAME and
@@ -88,8 +89,10 @@ func push(args []string, out io.Writer) error {
 	if err = json.Unmarshal(data, m); err != nil {
 		return fmt.Errorf("parse candidate.json: %w", err)
 	}
-	if m.Version == "" || m.Operator.Repository == "" || m.Operator.Digest == "" || m.Chart.Name == "" {
-		return errors.New("candidate.json names no version, image or chart")
+	if m.Version == "" || m.Operator.Repository == "" || m.Operator.Digest == "" ||
+		m.Registry.Repository == "" || m.Registry.Digest == "" || m.Chart.Name == "" {
+
+		return errors.New("candidate.json names no version, operator image, registry image or chart")
 	}
 	archive, err := os.ReadFile(filepath.Join(*dir, "chart", m.Chart.Name))
 	if err != nil {
@@ -101,19 +104,10 @@ func push(args []string, out io.Writer) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), pushTimeout)
 	defer cancel()
-	images, err := oci.NewFromFS(ctx, os.DirFS(filepath.Join(*dir, "image")))
-	if err != nil {
-		return fmt.Errorf("open the candidate's image layout: %w", err)
-	}
-	image, err := images.Resolve(ctx, m.Operator.Digest)
-	if err != nil {
-		return fmt.Errorf("the candidate's image layout: %w", err)
-	}
-	imageRepo, err := repository(m.Operator.Repository, *plainHTTP)
-	if err != nil {
+	if err = pushImage(ctx, filepath.Join(*dir, "image"), m.Operator, m.Version, *plainHTTP); err != nil {
 		return err
 	}
-	if err = publish(ctx, images, image, imageRepo, m.Version); err != nil {
+	if err = pushImage(ctx, filepath.Join(*dir, "registry-image"), m.Registry, m.Version, *plainHTTP); err != nil {
 		return err
 	}
 
@@ -130,9 +124,29 @@ func push(args []string, out io.Writer) error {
 	if err = publish(ctx, charts, chart, chartRepo, strings.ReplaceAll(version, "+", "_")); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(out, "image-repository=%s\nimage-digest=%s\nchart-repository=%s\nchart-version=%s\nchart-digest=%s\n",
-		m.Operator.Repository, m.Operator.Digest, chartRepo.Reference.Registry+"/"+chartRepo.Reference.Repository, version, chart.Digest)
+	_, err = fmt.Fprintf(out, "image-repository=%s\nimage-digest=%s\nregistry-repository=%s\nregistry-digest=%s\n"+
+		"chart-repository=%s\nchart-version=%s\nchart-digest=%s\n",
+		m.Operator.Repository, m.Operator.Digest, m.Registry.Repository, m.Registry.Digest,
+		chartRepo.Reference.Registry+"/"+chartRepo.Reference.Repository, version, chart.Digest)
 	return err
+}
+
+// pushImage publishes the image index img names from the OCI layout at
+// layout to img's repository, tagged tag.
+func pushImage(ctx context.Context, layout string, img Image, tag string, plainHTTP bool) error {
+	images, err := oci.NewFromFS(ctx, os.DirFS(layout))
+	if err != nil {
+		return fmt.Errorf("open the image layout %s: %w", layout, err)
+	}
+	desc, err := images.Resolve(ctx, img.Digest)
+	if err != nil {
+		return fmt.Errorf("the image layout %s: %w", layout, err)
+	}
+	repo, err := repository(img.Repository, plainHTTP)
+	if err != nil {
+		return err
+	}
+	return publish(ctx, images, desc, repo, tag)
 }
 
 // repository is a remote repository using the candidate registry credentials.

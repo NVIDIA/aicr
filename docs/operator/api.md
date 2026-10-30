@@ -61,12 +61,19 @@ engine:
   namespace: argocd                   # Argo CD control namespace
   project: aicr                       # AppProject created by the chart; nothing is written to argocd-cm
 registry:
-  repository: oci://<account>.dkr.ecr.<region>.amazonaws.com/aicr/<cluster>
-  plainHTTP: false                    # test registries only
+  mode: inCluster                     # inCluster: the chart runs the registry | external: the registry at repository
+  repository: ""                      # external: oci://<account>.dkr.ecr.<region>.amazonaws.com/aicr/<cluster>
+  plainHTTP: false                    # external test registries only; the in-cluster registry always uses plain HTTP
   auth:
-    provider: aws                     # aws (ECR via EKS Pod Identity or IRSA) | static
+    provider: aws                     # external: aws (ECR via EKS Pod Identity or IRSA) | static
     staticSecretRef: ""               # static: docker config Secret, same name in the operator, Job and validation namespaces; empty is anonymous
-    repoCredsSecret: aicr-registry    # the Argo CD repo-creds Secret: created by the chart and refreshed by the operator (aws), or provided (static)
+    repoCredsSecret: aicr-registry    # the Argo CD repo-creds Secret: created by the chart (inCluster, aws) and refreshed by the operator (aws), or provided (static)
+  inCluster:
+    image: <registry image>           # a published chart defaults to its release's, by digest
+    clusterDomain: cluster.local      # completes the fully qualified host aicr-registry.<namespace>.svc.<domain>:5000
+    storage: {size: 10Gi, storageClassName: ""}   # kept on uninstall; nothing is deleted from it; the class must exist before install
+    resources: {}                     # requests and limits; defaults in values.yaml
+    repoServerLabels: {app.kubernetes.io/name: argocd-repo-server}   # the Argo CD pods its NetworkPolicy admits
 namespaces:
   discovery: aicr-discovery           # Pod Security privileged; snapshot agent only
   jobs: aicr-jobs                     # recipe, bundle and upgrade-check Jobs; restricted
@@ -90,8 +97,8 @@ development:
 The chart fails to render when `aicr.version` is outside `>=1.0.0, <2.0.0`.
 The operator also checks the version each AICR Job reports and stops on a
 mismatch. `engine.type` accepts only `ArgoCD` in this release; the chart schema
-and the operator reject any other value. CRDs, namespaces, the AppProject and
-the `repo-creds` Secret survive `helm uninstall`.
+and the operator reject any other value. CRDs, namespaces, the AppProject, the
+`repo-creds` Secret and the in-cluster registry survive `helm uninstall`.
 
 ## ClusterRuntime
 

@@ -41,7 +41,9 @@ import (
 	"github.com/NVIDIA/aicr/pkg/operator/registry"
 )
 
-const registryHost = "registry.aicr-registry.svc.cluster.local:5000"
+// registryHost is the chart's in-cluster registry; the operator's
+// repository is its /aicr path.
+const registryHost = "aicr-registry." + operatorNamespace + ".svc.cluster.local:5000"
 
 // resolveFullLane pauses the runtime, so nothing is rolled out on a cluster
 // without GPUs, and enables every lane component: the plan must serve all
@@ -91,7 +93,7 @@ func resolveFullLane(ctx context.Context, t *testing.T) {
 func tamperBlocksPlan(ctx context.Context, t *testing.T, active string) {
 	t.Helper()
 	before := applicationVersion(ctx, t)
-	const repo, tag = "aicr/cluster/charts/cert-manager", "v1.20.2"
+	const repo, tag = "aicr/charts/cert-manager", "v1.20.2"
 	var original []byte
 	withRegistry(ctx, t, func(base string) { original = retag(ctx, t, base, repo, tag) })
 	// Put the mirrored content back, so a later run starts from a clean registry.
@@ -164,19 +166,19 @@ func registryCall(ctx context.Context, t *testing.T, method, url string, body []
 	return out
 }
 
-// withRegistry runs f with the base URL of the in-cluster registry, reached
-// through a port-forward.
+// withRegistry runs f with the base URL of the chart's in-cluster registry,
+// reached through a port-forward, which its NetworkPolicy does not apply to.
 func withRegistry(ctx context.Context, t *testing.T, f func(base string)) {
 	t.Helper()
 	pods := &corev1.PodList{}
-	if err := k8s.List(ctx, pods, client.InNamespace("aicr-registry"), client.MatchingLabels{"app": "registry"}); err != nil || len(pods.Items) == 0 {
+	if err := k8s.List(ctx, pods, client.InNamespace(operatorNamespace), client.MatchingLabels{"app.kubernetes.io/name": "aicr-registry"}); err != nil || len(pods.Items) == 0 {
 		t.Fatalf("find registry pod: %v", err)
 	}
 	transport, upgrader, err := spdy.RoundTripperFor(restConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
-	url := clientset.CoreV1().RESTClient().Post().Resource("pods").Namespace("aicr-registry").Name(pods.Items[0].Name).SubResource("portforward").URL()
+	url := clientset.CoreV1().RESTClient().Post().Resource("pods").Namespace(operatorNamespace).Name(pods.Items[0].Name).SubResource("portforward").URL()
 	stop, ready := make(chan struct{}), make(chan struct{})
 	defer close(stop)
 	fw, err := portforward.New(spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, url),

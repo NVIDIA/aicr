@@ -122,7 +122,9 @@ Writes the plan's recipe to `<dir>/recipe.json` and prints the plan, the AICR
 image it was rendered with, the operator's bundle reference, and three
 commands to run yourself: a `docker run` of that AICR image rendering the
 recipe with the plan's flags, an `oras pull` of the operator's bundle, and a
-`diff -r` of the two. Zero diff means the operator deployed exactly what the
+`diff -r` of the two. When the bundle is in the chart's in-cluster registry,
+the pull runs through a `kubectl port-forward` with the login the chart
+generated, passed to `oras` on standard input so nothing stores it. Zero diff means the operator deployed exactly what the
 AICR CLI renders ([verify the bundle yourself](index.md#verify-the-bundle-yourself)).
 
 It changes nothing in the cluster. It refuses a plan rebuilt from Applications
@@ -136,6 +138,9 @@ recipe whose content does not match its recorded digest.
 | `describe` | `get` on `runtimerollouts`; `get` on ConfigMaps in the operator namespace for the assessment report |
 | `approve`, `revoke` | `get` and `patch` on `runtimerollouts`, and `update` on the virtual subresource `runtimerollouts/approve`; `create` on `selfsubjectreviews`, which Kubernetes grants every authenticated user |
 | `reproduce` | `get` on `clusterruntimes` (without a PLAN argument) and on ConfigMaps in the operator namespace |
+| The printed in-cluster pull | `get` on Secret `aicr-registry-login`, and `create` on `pods/portforward`, in the operator namespace |
 
-The chart's `aicr-operator-approver` ClusterRole and Role grant all of these
-to the users and groups in its `approvers` value.
+The chart's `aicr-operator-approver` ClusterRole and Role grant the commands'
+permissions to the users and groups in its `approvers` value. They do not
+grant the in-cluster pull's: that login can write to the registry, so the pull
+is an administrator's step.

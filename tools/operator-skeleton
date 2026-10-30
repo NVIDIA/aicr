@@ -14,9 +14,10 @@
 # limitations under the License.
 
 # Runs the walking skeleton on the operator's kind cluster: installs the
-# pinned Argo CD chart, builds the operator image with ko and loads it into
-# kind, installs charts/aicr-operator with
-# tests/operator/skeleton/testdata/values.yaml, then runs the skeleton tests.
+# pinned Argo CD chart, builds the operator and in-cluster registry images
+# with ko and loads them into kind, installs charts/aicr-operator with
+# tests/operator/skeleton/testdata/values.yaml and its default in-cluster
+# registry, then runs the skeleton tests.
 # Create the cluster first with `make operator-kind-up`.
 #
 # Usage: tools/operator-skeleton [install|test]   (default: both)
@@ -35,8 +36,8 @@ source tools/operator-lib.sh
 export AICR_VERSION="${AICR_E2E_VERSION:-$(setting '.operator.aicr_version')}"
 export AICR_IMAGE="${AICR_E2E_IMAGE:-$(setting '.operator.aicr_image')}"
 VALIDATOR_IMAGES="${AICR_E2E_VALIDATOR_IMAGES:-$(setting '.operator.aicr_validator_images | [.[]] | join(",")')}"
-REGISTRY_URI="$(yq -r '.registry.repository' tests/operator/skeleton/testdata/values.yaml)"
 OPERATOR_IMAGE="$(yq -r '.operator.image' tests/operator/skeleton/testdata/values.yaml)"
+REGISTRY_IMAGE=ko.local/aicr-registry:skeleton
 
 install() {
   local arch docker_host empty
@@ -50,23 +51,25 @@ install() {
   echo '{}' > "${empty}/config.json"
   DOCKER_HOST="${DOCKER_HOST:-${docker_host}}" DOCKER_CONFIG="${empty}" KO_DOCKER_REPO=ko.local/aicr-operator \
     go run "github.com/google/ko@$(setting '.build_tools.ko')" build --bare --sbom=none --push=false --platform="linux/${arch}" --tags=skeleton ./cmd/aicr-operator
-  kind load docker-image "${OPERATOR_IMAGE}" --name "${cluster}"
+  DOCKER_HOST="${DOCKER_HOST:-${docker_host}}" DOCKER_CONFIG="${empty}" KO_DOCKER_REPO=ko.local/aicr-registry \
+    go run "github.com/google/ko@$(setting '.build_tools.ko')" build --bare --sbom=none --push=false --platform="linux/${arch}" --tags=skeleton ./cmd/aicr-registry
+  kind load docker-image "${OPERATOR_IMAGE}" "${REGISTRY_IMAGE}" --name "${cluster}"
 
   operator_namespace
   release_flags "${AICR_VERSION}"
   helm upgrade --install aicr-operator charts/aicr-operator --namespace aicr-system \
     -f tests/operator/skeleton/testdata/values.yaml \
     --set aicr.version="${AICR_VERSION}" --set aicr.image="${AICR_IMAGE}" \
-    --set "aicr.validatorImages={${VALIDATOR_IMAGES}}" \
+    --set "aicr.validatorImages={${VALIDATOR_IMAGES}}" --set registry.inCluster.image="${REGISTRY_IMAGE}" \
     "${HELM_RELEASE_FLAGS[@]}" >/dev/null
-  registry_credentials "${REGISTRY_URI}"
-  kubectl -n aicr-system rollout restart deployment/aicr-operator
+  # A rebuilt image keeps its tag: restart both, so they run it.
+  kubectl -n aicr-system rollout restart deployment/aicr-registry deployment/aicr-operator
+  kubectl -n aicr-system rollout status deployment/aicr-registry --timeout=180s
   kubectl -n aicr-system rollout status deployment/aicr-operator --timeout=180s
 }
 
 run_tests() {
   AICR_OPERATOR_E2E_KUBECONFIG="${KUBECONFIG}" AICR_OPERATOR_E2E_AICR_VERSION="${AICR_VERSION}" AICR_E2E_IMAGE="${AICR_IMAGE}" \
-    AICR_OPERATOR_E2E_REGISTRY_AUTH="${repo_root}/.operator-e2e/registry-auth.json" \
     GOFLAGS="-mod=readonly" go test -count=1 -v -timeout=70m ./tests/operator/skeleton/...
 }
 

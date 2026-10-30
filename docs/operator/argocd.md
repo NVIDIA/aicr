@@ -22,7 +22,7 @@ starts watching Applications once they appear.
 | Resource | Created by | Purpose |
 | --- | --- | --- |
 | AppProject `aicr` (`engine.project`) | The chart | Sources limited to `<registry>/charts/*` and `<registry>/wrappers/*`; destinations limited to the component namespaces on the in-cluster server; all cluster-scoped kinds allowed. Kept on uninstall |
-| `repo-creds` Secret `aicr-registry` (`registry.auth.repoCredsSecret`) | The chart with `aws`; you with `static` | Registry credentials for every chart path under `registry.repository`. With `aws` the operator writes a fresh ECR token into it at start and every 6 hours. Kept on uninstall |
+| `repo-creds` Secret `aicr-registry` (`registry.auth.repoCredsSecret`) | The chart with `aws` and the in-cluster registry; you with `static` | Registry credentials for every chart path in the runtime registry; for the in-cluster registry, its generated login over plain HTTP. With `aws` the operator writes a fresh ECR token into it at start and every 6 hours. Kept on uninstall |
 
 With `static`, create the Secret yourself in the Argo CD namespace:
 
@@ -101,7 +101,7 @@ spec:
     syncOptions: [ServerSideApply=true]
 ```
 
-- Charts come only from your registry, pinned by digest; Argo CD never
+- Charts come only from the runtime registry, pinned by digest; Argo CD never
   contacts upstream chart repositories.
 - No `CreateNamespace`: the chart pre-creates the component namespaces.
 - No resources finalizer, so deleting an Application never deletes the stack.

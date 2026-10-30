@@ -1,4 +1,5 @@
 The AICR Operator runs in {{ .Release.Namespace }} with AICR {{ .Values.aicr.version }}.
+Runtime registry: {{ include "aicr-operator.registry" . }}{{ if eq .Values.registry.mode "inCluster" }} (in-cluster; its login and volume are kept on uninstall){{ end }}
 
 Next: create the ClusterRuntime named "cluster" (docs/operator/api.md).
 

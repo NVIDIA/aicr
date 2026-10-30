@@ -37,6 +37,15 @@ const (
 	CLIBundle  = "cli-bundle"
 )
 
+// The chart's in-cluster registry (charts/aicr-operator/templates/registry.yaml):
+// its Service and login Secret in the operator namespace, and the local port
+// a reproduction forwards to it, away from 5000, which macOS AirPlay holds.
+const (
+	inClusterService = "aicr-registry"
+	inClusterLogin   = "aicr-registry-login"
+	forwardPort      = "15000"
+)
+
 // Reproduction is what the AICR CLI needs to render a plan's bundle again:
 // the recipe the operator's render read, the flags it ran with and the AICR
 // image that ran it, with the bundle the operator pushed to compare against.
@@ -140,6 +149,24 @@ func reproduce(ctx context.Context, c client.Reader, namespace, ref, dir string,
 	if err = os.WriteFile(filepath.Join(dir, RecipeFile), r.Recipe, 0o600); err != nil {
 		return operrors.Wrap(operrors.ErrCodeInternal, "write the recipe", err)
 	}
+	operatorBundle := shellQuote(filepath.Join(dir, "operator-bundle"))
+	pull := fmt.Sprintf("Pull the operator's bundle (log in to the registry first) and compare:\n\n  oras pull %s -o %s\n",
+		shellQuote(r.BundleRef()), operatorBundle)
+	if port, ok := chartRegistryPort(r.BundleRef(), namespace); ok {
+		_, path, _ := strings.Cut(r.BundleRef(), "/")
+		ns := shellQuote(namespace)
+		secret := fmt.Sprintf("kubectl -n %s get secret %s -o jsonpath=", ns, inClusterLogin)
+		pull = fmt.Sprintf(`Pull the operator's bundle from the in-cluster registry through a port-forward,
+with the login the chart generated (this needs get on Secret %s and
+create on pods/portforward in %s), and compare:
+
+  kubectl -n %s port-forward service/%s %s &
+  %s'{.data.password}' | base64 -d |
+    oras pull --plain-http -u "$(%s'{.data.username}' | base64 -d)" --password-stdin %s -o %s
+  kill %%1
+`, inClusterLogin, namespace, ns, inClusterService, shellQuote(forwardPort+":"+port), secret, secret,
+			shellQuote("localhost:"+forwardPort+"/"+path), operatorBundle)
+	}
 	_, err = fmt.Fprintf(out, `Plan %s (%s)
 AICR image: %s
 The operator's bundle: %s
@@ -149,15 +176,27 @@ Render the same bundle with the AICR image the operator ran:
 
   docker run --rm --user "$(id -u):$(id -g)" %s
 
-Pull the operator's bundle (log in to the registry first) and compare:
-
-  oras pull %s -o %s
-  diff -r %s %s && echo "zero diff"
+%s  diff -r %s %s && echo "zero diff"
 `, r.Plan, r.Digest, r.Image, r.Bundle, filepath.Join(dir, RecipeFile),
-		shellJoin(r.ContainerArgs(dir)),
-		shellQuote(r.BundleRef()), shellQuote(filepath.Join(dir, "operator-bundle")),
-		shellQuote(filepath.Join(dir, "operator-bundle")), shellQuote(filepath.Join(dir, CLIBundle)))
+		shellJoin(r.ContainerArgs(dir)), pull, operatorBundle, shellQuote(filepath.Join(dir, CLIBundle)))
 	return err
+}
+
+// chartRegistryPort returns the Service port of a registry reference whose
+// host is the chart's in-cluster registry in namespace,
+// aicr-registry.<namespace>.svc[.<cluster domain>]:<port>, which a client
+// outside the cluster reaches only through a port-forward. Any other
+// registry, a Service another registry runs included, is not the chart's.
+func chartRegistryPort(ref, namespace string) (string, bool) {
+	host, _, _ := strings.Cut(ref, "/")
+	name, port, hasPort := strings.Cut(host, ":")
+	labels := strings.Split(name, ".")
+	if !hasPort || port == "" || len(labels) < 3 ||
+		labels[0] != inClusterService || labels[1] != namespace || labels[2] != "svc" {
+
+		return "", false
+	}
+	return port, true
 }
 
 var shellSafe = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)

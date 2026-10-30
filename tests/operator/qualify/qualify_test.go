@@ -328,14 +328,14 @@ func written(ctx context.Context, t *testing.T) string {
 	return application(ctx, t).GetAnnotations()[v1alpha1.AnnotationPlanDigest]
 }
 
-// registryOutage points the registry Service at no pod, so every registry
-// call fails, and changes the inputs: resolution reports the outage and
+// registryOutage points the chart's registry Service at no pod, so every
+// registry call fails, and changes the inputs: resolution reports the outage and
 // retries, no rollout starts and the engine is not written; restoring the
 // Service resumes resolution with no intervention.
 func registryOutage(ctx context.Context, t *testing.T, active string) string {
 	t.Helper()
 	svc := &corev1.Service{}
-	key := client.ObjectKey{Namespace: "aicr-registry", Name: "registry"}
+	key := client.ObjectKey{Namespace: operatorNamespace, Name: "aicr-registry"}
 	if err := k8s.Get(ctx, key, svc); err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +350,7 @@ func registryOutage(ctx context.Context, t *testing.T, active string) string {
 			t.Fatal(err)
 		}
 	}
-	setSelector(map[string]string{"app": "registry-outage"})
+	setSelector(map[string]string{"app.kubernetes.io/name": "registry-outage"})
 	restored := false
 	defer func() {
 		if !restored {
@@ -379,24 +379,27 @@ func registryOutage(ctx context.Context, t *testing.T, active string) string {
 	return digest
 }
 
-// credentialsMissing deletes the operator's static registry credentials and
-// changes the inputs: resolution stalls with CredentialsUnavailable and
-// nothing is written; restoring the Secret resumes it on the resync.
+// credentialsMissing deletes the operator's registry credentials, which the
+// chart generates, and changes the inputs: resolution stalls with
+// CredentialsUnavailable and nothing is written; restoring the Secret as the
+// troubleshooting guide does, with helm upgrade and the same values, resumes
+// it on the resync. Helm, not the suite, owns the restored Secret's fields,
+// so a later upgrade applies cleanly.
 func credentialsMissing(ctx context.Context, t *testing.T, active string) string {
 	t.Helper()
 	secret := &corev1.Secret{}
-	key := client.ObjectKey{Namespace: operatorNamespace, Name: "registry-auth"}
+	key := client.ObjectKey{Namespace: operatorNamespace, Name: "aicr-registry-auth"}
 	if err := k8s.Get(ctx, key, secret); err != nil {
 		t.Fatal(err)
 	}
-	saved := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: secret.Name, Namespace: secret.Namespace}, Type: secret.Type, Data: secret.Data}
 	if err := k8s.Delete(ctx, secret); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("CANDIDATE_DIR", filepath.Dir(os.Getenv("AICR_OPERATOR_QUALIFY_CANDIDATE")))
 	restored := false
 	defer func() {
 		if !restored {
-			_ = k8s.Create(context.WithoutCancel(ctx), saved.DeepCopy())
+			run(context.WithoutCancel(ctx), t, "tools/operator-qualify", "reinstall")
 		}
 	}()
 	setCPU(ctx, t, "25m")
@@ -407,9 +410,7 @@ func credentialsMissing(ctx context.Context, t *testing.T, active string) string
 	if rt := getRuntime(ctx, t); written(ctx, t) != active || rt.Status.Rollout != "" {
 		t.Fatalf("without credentials: Application at %s, rollout %q", written(ctx, t), rt.Status.Rollout)
 	}
-	if err := k8s.Create(ctx, saved); err != nil {
-		t.Fatal(err)
-	}
+	run(ctx, t, "tools/operator-qualify", "reinstall")
 	restored = true
 	waitFor(t, 2*time.Minute, "resolution to resume once the Secret is back", func() bool {
 		return cond(getRuntime(ctx, t), v1alpha1.ConditionResolved).Reason != registry.ReasonCredentialsUnavailable

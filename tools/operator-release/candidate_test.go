@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -53,7 +54,14 @@ aicr:
 operator:
   image: ""
   logLevel: info
+
+registry:
+  mode: inCluster
+  inCluster:
+    image: ""
 `
+
+const demoRegistry = "public.ecr.aws/docker/library/registry:3.1.1@sha256:dd"
 
 var demoAICR = AICR{
 	Version:         "v1.1.0",
@@ -106,11 +114,11 @@ func entries(t *testing.T, archive []byte) map[string]string {
 // candidate version, without ignored files.
 func TestPackageChart(t *testing.T) {
 	t.Parallel()
-	name, first, err := packageChart(chartFS(), "v0.2.0-rc.1", demoAICR, "ghcr.io/nvidia/aicr-operator@sha256:cc")
+	name, first, err := packageChart(chartFS(), "v0.2.0-rc.1", demoAICR, "ghcr.io/nvidia/aicr-operator@sha256:cc", demoRegistry)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, again, err := packageChart(chartFS(), "v0.2.0-rc.1", demoAICR, "ghcr.io/nvidia/aicr-operator@sha256:cc")
+	_, again, err := packageChart(chartFS(), "v0.2.0-rc.1", demoAICR, "ghcr.io/nvidia/aicr-operator@sha256:cc", demoRegistry)
 	if err != nil || !bytes.Equal(first, again) {
 		t.Fatalf("packaging is not deterministic: %v", err)
 	}
@@ -139,36 +147,44 @@ aicr:
 operator:
   image: "ghcr.io/nvidia/aicr-operator@sha256:cc"
   logLevel: info
+
+registry:
+  mode: inCluster
+  inCluster:
+    image: "public.ecr.aws/docker/library/registry:3.1.1@sha256:dd"
 `
 	if v := got["demo/values.yaml"]; v != wantValues {
 		t.Fatalf("values.yaml = %q, want %q", v, wantValues)
 	}
-	if _, other, _ := packageChart(chartFS(), "v0.2.0", demoAICR, "ghcr.io/nvidia/aicr-operator@sha256:cc"); bytes.Equal(first, other) {
+	if _, other, _ := packageChart(chartFS(), "v0.2.0", demoAICR, "ghcr.io/nvidia/aicr-operator@sha256:cc", demoRegistry); bytes.Equal(first, other) {
 		t.Fatal("another version packaged to the same bytes")
 	}
 	broken := chartFS()
 	broken["Chart.yaml"] = &fstest.MapFile{Data: []byte("name: demo\nversion: 1\n")}
-	if _, _, err = packageChart(broken, "v0.2.0", demoAICR, "ghcr.io/nvidia/aicr-operator@sha256:cc"); err == nil {
+	if _, _, err = packageChart(broken, "v0.2.0", demoAICR, "ghcr.io/nvidia/aicr-operator@sha256:cc", demoRegistry); err == nil {
 		t.Fatal("a Chart.yaml without appVersion was packaged")
 	}
 	for name, values := range map[string]string{
 		"a pinned operator image":   strings.Replace(demoValues, "operator:\n  image: \"\"", "operator:\n  image: \"x\"", 1),
 		"no AICR section":           strings.Replace(demoValues, "aicr:", "other:", 1),
-		"two operator image fields": demoValues + "  image: \"\"\n",
+		"two operator image fields": strings.Replace(demoValues, "  logLevel: info\n", "  logLevel: info\n  image: \"\"\n", 1),
+		"no registry image field":   strings.Replace(demoValues, "    image: \"\"", "    tag: \"\"", 1),
+		"two registry image fields": demoValues + "    image: \"\"\n",
 	} {
 		broken = chartFS()
 		broken["values.yaml"] = &fstest.MapFile{Data: []byte(values)}
-		if _, _, err = packageChart(broken, "v0.2.0", demoAICR, "ghcr.io/nvidia/aicr-operator@sha256:cc"); err == nil {
+		if _, _, err = packageChart(broken, "v0.2.0", demoAICR, "ghcr.io/nvidia/aicr-operator@sha256:cc", demoRegistry); err == nil {
 			t.Errorf("%s: values.yaml was stamped", name)
 		}
 	}
 }
 
-// writeLayout writes an OCI layout as ko does: an index of one image index
-// whose platform manifests' last layer holds the binary.
-func writeLayout(t *testing.T, dir string, binary []byte) {
+// writeLayout writes an OCI layout as ko does, at dir/layout: an index of one
+// image index whose platform manifests' last layer holds the binary
+// /ko-app/<name>.
+func writeLayout(t *testing.T, dir, layout, name string, binary []byte) {
 	t.Helper()
-	blobs := filepath.Join(dir, "image", "blobs", "sha256")
+	blobs := filepath.Join(dir, layout, "blobs", "sha256")
 	if err := os.MkdirAll(blobs, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +199,7 @@ func writeLayout(t *testing.T, dir string, binary []byte) {
 	var layer bytes.Buffer
 	gz := gzip.NewWriter(&layer)
 	tw := tar.NewWriter(gz)
-	_ = tw.WriteHeader(&tar.Header{Name: "/ko-app/aicr-operator", Mode: 0o755, Size: int64(len(binary)), Typeflag: tar.TypeReg})
+	_ = tw.WriteHeader(&tar.Header{Name: "/ko-app/" + name, Mode: 0o755, Size: int64(len(binary)), Typeflag: tar.TypeReg})
 	_, _ = tw.Write(binary)
 	_ = tw.Close()
 	_ = gz.Close()
@@ -196,7 +212,7 @@ func writeLayout(t *testing.T, dir string, binary []byte) {
 		`{`+manifest+`,"platform":{"os":"linux","architecture":"arm64","variant":"v8"}}]}`))
 	top := `{"schemaVersion":2,"manifests":[{` + index + `}]}`
 	for name, data := range map[string]string{"index.json": top, "oci-layout": `{"imageLayoutVersion":"1.0.0"}`} {
-		if err := os.WriteFile(filepath.Join(dir, "image", name), []byte(data), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, layout, name), []byte(data), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -207,7 +223,8 @@ func writeLayout(t *testing.T, dir string, binary []byte) {
 func TestBuildAndExtract(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	writeLayout(t, dir, []byte("operator-binary"))
+	writeLayout(t, dir, "image", "aicr-operator", []byte("operator-binary"))
+	writeLayout(t, dir, "registry-image", "aicr-registry", []byte("registry-binary"))
 	for _, d := range []string{"plugin", "sbom"} {
 		if err := os.MkdirAll(filepath.Join(dir, d), 0o755); err != nil {
 			t.Fatal(err)
@@ -234,6 +251,7 @@ func TestBuildAndExtract(t *testing.T) {
 	if m.Version != "v0.1.0-rc.1" || len(m.Operator.Platforms) != 2 || m.Operator.Platforms["linux/arm64/v8"] == "" ||
 		m.Chart.Name != "aicr-operator-0.1.0-rc.1.tgz" || m.Plugin["kubectl-aicr-linux-amd64"] != sha256Of([]byte("plugin")) ||
 		!strings.Contains(m.AICR.Image, "@sha256:") || len(m.AICR.ValidatorImages) == 0 || m.Inputs["go.sum"] == "" ||
+		m.Registry.Repository != "ghcr.io/nvidia/aicr-registry" || len(m.Registry.Platforms) != 2 ||
 		!strings.Contains(m.Toolchain.BaseImage, "@sha256:") || !strings.Contains(out.String(), m.Digest) {
 
 		t.Fatalf("candidate.json = %s", data)
@@ -249,10 +267,13 @@ func TestBuildAndExtract(t *testing.T) {
 	var vals struct {
 		AICR     struct{ Version, Image string } `yaml:"aicr"`
 		Operator struct{ Image string }          `yaml:"operator"`
+		Registry struct {
+			InCluster struct{ Image string } `yaml:"inCluster"`
+		} `yaml:"registry"`
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "candidate-values.yaml"))
 	if err != nil || yaml.Unmarshal(raw, &vals) != nil || vals.Operator.Image != "ghcr.io/nvidia/aicr-operator@"+m.Operator.Digest ||
-		vals.AICR.Image != m.AICR.Image {
+		vals.AICR.Image != m.AICR.Image || vals.Registry.InCluster.Image != m.Registry.Ref() {
 
 		t.Fatalf("candidate-values.yaml = %s (%v)", raw, err)
 	}
@@ -262,7 +283,7 @@ func TestBuildAndExtract(t *testing.T) {
 		t.Fatal(err)
 	}
 	if v := entries(t, archive)["aicr-operator/values.yaml"]; !strings.Contains(v, fmt.Sprintf("  image: %q\n", m.Operator.Ref())) ||
-		!strings.Contains(v, fmt.Sprintf("  image: %q\n", m.AICR.Image)) {
+		!strings.Contains(v, fmt.Sprintf("  image: %q\n", m.AICR.Image)) || !strings.Contains(v, fmt.Sprintf("    image: %q\n", m.Registry.Ref())) {
 
 		t.Fatalf("the packaged chart does not default to the candidate's images: %s", v)
 	}
@@ -273,6 +294,12 @@ func TestBuildAndExtract(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(bin); string(got) != "operator-binary" {
 		t.Fatalf("extracted %q", got)
+	}
+	if err = run([]string{"extract", "-dir", dir, "-image", "registry-image", "-binary", "ko-app/aicr-registry", "-platform", "linux/amd64", "-out", bin}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(bin); string(got) != "registry-binary" {
+		t.Fatalf("extracted %q from the registry image", got)
 	}
 	if err = run([]string{"extract", "-dir", dir, "-platform", "windows/amd64", "-out", bin}, io.Discard); err == nil {
 		t.Fatal("extracted a platform the candidate lacks")
@@ -294,19 +321,26 @@ func TestBuildRefuses(t *testing.T) {
 	}
 }
 
-// writeCandidate writes a candidate with the given image binary, whose chart
-// defaults to the given AICR image, as candidate.json names them.
+// writeCandidate writes a candidate with the given operator image binary,
+// published to repository, and a registry image published beside it, whose
+// chart defaults to them and to the given AICR image, as candidate.json names
+// them.
 func writeCandidate(t *testing.T, repository string, binary []byte, aicrImage string) (string, *Manifest) {
 	t.Helper()
 	dir := t.TempDir()
-	writeLayout(t, dir, binary)
+	writeLayout(t, dir, "image", "aicr-operator", binary)
+	writeLayout(t, dir, "registry-image", "aicr-registry", []byte("registry-binary"))
 	image, err := readImage(filepath.Join(dir, "image"), repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := readImage(filepath.Join(dir, "registry-image"), path.Dir(repository)+"/aicr-registry")
 	if err != nil {
 		t.Fatal(err)
 	}
 	aicr := demoAICR
 	aicr.Image = aicrImage
-	name, archive, err := packageChart(chartFS(), "v0.1.0-rc.1", aicr, image.Ref())
+	name, archive, err := packageChart(chartFS(), "v0.1.0-rc.1", aicr, image.Ref(), registry.Ref())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,6 +354,7 @@ func writeCandidate(t *testing.T, repository string, binary []byte, aicrImage st
 		Version:  "v0.1.0-rc.1",
 		Source:   Source{CommitDate: "2026-10-16T00:00:00Z"},
 		Operator: image,
+		Registry: registry,
 		Chart:    File{Name: name, Digest: sha256Of(archive)},
 	}
 	data, err := json.Marshal(m)
@@ -369,10 +404,12 @@ func TestPush(t *testing.T) {
 	}
 	got := pushed(t, out)
 	want := map[string]string{
-		"image-repository": repository,
-		"image-digest":     m.Operator.Digest,
-		"chart-repository": host + "/nvidia/charts/demo",
-		"chart-version":    "0.1.0-rc.1",
+		"image-repository":    repository,
+		"image-digest":        m.Operator.Digest,
+		"registry-repository": host + "/nvidia/aicr-registry",
+		"registry-digest":     m.Registry.Digest,
+		"chart-repository":    host + "/nvidia/charts/demo",
+		"chart-version":       "0.1.0-rc.1",
 	}
 	for k, v := range want {
 		if got[k] != v {
@@ -389,6 +426,14 @@ func TestPush(t *testing.T) {
 	tagged, err := images.Resolve(ctx, m.Version)
 	if err != nil || tagged.Digest.String() != m.Operator.Digest {
 		t.Fatalf("%s:%s resolves to %v (%v), want %s", repository, m.Version, tagged.Digest, err, m.Operator.Digest)
+	}
+	registries, err := remote.NewRepository(m.Registry.Repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registries.PlainHTTP = true
+	if tagged, err = registries.Resolve(ctx, m.Version); err != nil || tagged.Digest.String() != m.Registry.Digest {
+		t.Fatalf("%s:%s resolves to %v (%v), want %s", m.Registry.Repository, m.Version, tagged.Digest, err, m.Registry.Digest)
 	}
 	charts, err := remote.NewRepository(got["chart-repository"])
 	if err != nil {

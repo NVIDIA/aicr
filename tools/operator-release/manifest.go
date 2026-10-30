@@ -39,11 +39,13 @@ type Manifest struct {
 	Version       string            `json:"version"`
 	Source        Source            `json:"source"`
 	Toolchain     Toolchain         `json:"toolchain"`
-	Operator      OperatorImage     `json:"operator"`
+	Operator      Image             `json:"operator"`
 	Chart         File              `json:"chart"`
 	Plugin        map[string]string `json:"plugin"`
 	SBOMs         map[string]string `json:"sboms"`
 	AICR          AICR              `json:"aicr"`
+	// Registry is the in-cluster registry image the chart defaults to.
+	Registry Image `json:"registry"`
 	// Inputs are the digests of the files that pin everything else.
 	Inputs map[string]string `json:"inputs"`
 	Digest string            `json:"digest,omitempty"`
@@ -62,8 +64,8 @@ type Toolchain struct {
 	BaseImage string `json:"baseImage"`
 }
 
-// OperatorImage is the operator image index and its platform images.
-type OperatorImage struct {
+// Image is an image index and its platform images.
+type Image struct {
 	Repository string            `json:"repository"`
 	Digest     string            `json:"digest"`
 	Platforms  map[string]string `json:"platforms"`
@@ -83,7 +85,7 @@ type AICR struct {
 }
 
 // Ref is the operator image reference, pinned by digest.
-func (o OperatorImage) Ref() string { return o.Repository + "@" + o.Digest }
+func (o Image) Ref() string { return o.Repository + "@" + o.Digest }
 
 func sha256Of(data []byte) string {
 	sum := sha256.Sum256(data)
@@ -114,19 +116,19 @@ type ociIndex struct {
 	} `json:"manifests"`
 }
 
-// readImage reads the operator image index ko wrote to an OCI layout.
-func readImage(layout, repository string) (OperatorImage, error) {
+// readImage reads the image index ko wrote to an OCI layout.
+func readImage(layout, repository string) (Image, error) {
 	top, err := readIndex(filepath.Join(layout, "index.json"))
 	if err != nil {
-		return OperatorImage{}, err
+		return Image{}, err
 	}
 	if len(top.Manifests) != 1 || !strings.HasSuffix(top.Manifests[0].MediaType, "image.index.v1+json") {
-		return OperatorImage{}, fmt.Errorf("%s holds %d entries; want the one image index", layout, len(top.Manifests))
+		return Image{}, fmt.Errorf("%s holds %d entries; want the one image index", layout, len(top.Manifests))
 	}
-	img := OperatorImage{Repository: repository, Digest: top.Manifests[0].Digest, Platforms: map[string]string{}}
+	img := Image{Repository: repository, Digest: top.Manifests[0].Digest, Platforms: map[string]string{}}
 	index, err := readIndex(blobPath(layout, img.Digest))
 	if err != nil {
-		return OperatorImage{}, err
+		return Image{}, err
 	}
 	for _, m := range index.Manifests {
 		if p := m.Platform; p != nil {
@@ -138,7 +140,7 @@ func readImage(layout, repository string) (OperatorImage, error) {
 		}
 	}
 	if len(img.Platforms) == 0 {
-		return OperatorImage{}, fmt.Errorf("image index %s names no platform", img.Digest)
+		return Image{}, fmt.Errorf("image index %s names no platform", img.Digest)
 	}
 	return img, nil
 }
@@ -292,11 +294,13 @@ func baseImage(koYAML string) (string, error) {
 // values renders the candidate's deployment inputs: the images and AICR
 // release it was qualified with, for `helm install -f`.
 func values(m *Manifest) ([]byte, error) {
+	const image = "image"
 	doc := map[string]any{
 		aicrValues: map[string]any{
-			"version": m.AICR.Version, "image": m.AICR.Image, "validatorImages": m.AICR.ValidatorImages,
+			"version": m.AICR.Version, image: m.AICR.Image, "validatorImages": m.AICR.ValidatorImages,
 		},
-		operatorValues: map[string]any{"image": m.Operator.Ref()},
+		operatorValues: map[string]any{image: m.Operator.Ref()},
+		registryValues: map[string]any{"inCluster": map[string]any{image: m.Registry.Ref()}},
 	}
 	body, err := yaml.Marshal(doc)
 	if err != nil {

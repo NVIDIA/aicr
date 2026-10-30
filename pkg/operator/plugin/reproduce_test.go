@@ -139,6 +139,83 @@ func TestReproduce(t *testing.T) {
 	}
 }
 
+// A bundle in the chart's in-cluster registry is pulled through a
+// port-forward with the login the chart generated, which nothing stores;
+// another registry gets the generic instruction.
+func TestReproduceInClusterRegistry(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	digest := "@sha256:" + strings.Repeat("b", 64)
+	reproduceWith := func(t *testing.T, bundle string) string {
+		t.Helper()
+		doc, objs := testPlan(t, `{"kind":"RecipeResult","componentRefs":[]}`, func(d *plan.Document) {
+			d.Provenance.Bundle = "oci://" + bundle
+		})
+		c := testReader(t, v1alpha1.ClusterRuntimeStatus{CandidatePlanDigest: doc.DesiredStateDigest}, objs...)
+		var out bytes.Buffer
+		if err := reproduce(ctx, c, testNS, "", filepath.Join(t.TempDir(), "check"), &out); err != nil {
+			t.Fatalf("reproduce() = %v", err)
+		}
+		return out.String()
+	}
+
+	out := reproduceWith(t, "aicr-registry.aicr-system.svc.cluster.local:5000/aicr/bundles/cluster"+digest)
+	for _, want := range []string{
+		"get on Secret aicr-registry-login and\ncreate on pods/portforward in aicr-system",
+		"kubectl -n aicr-system port-forward service/aicr-registry 15000:5000 &",
+		"kubectl -n aicr-system get secret aicr-registry-login -o jsonpath='{.data.password}' | base64 -d |",
+		`oras pull --plain-http -u "$(kubectl -n aicr-system get secret aicr-registry-login -o jsonpath='{.data.username}' | base64 -d)" ` +
+			"--password-stdin localhost:15000/aicr/bundles/cluster" + digest,
+		"kill %1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "oras login") {
+		t.Errorf("output stores the in-cluster login:\n%s", out)
+	}
+
+	for name, bundle := range map[string]string{
+		"a registry Service of another namespace": "aicr-registry.registry.svc.cluster.local:5000/aicr/bundles/cluster" + digest,
+		"another registry Service":                "zot.aicr-system.svc:5000/aicr/bundles/cluster" + digest,
+	} {
+		out = reproduceWith(t, bundle)
+		if strings.Contains(out, inClusterLogin) || strings.Contains(out, "--plain-http") ||
+			!strings.Contains(out, "log in to the registry first") || !strings.Contains(out, "oras pull "+bundle) {
+
+			t.Errorf("%s: output is not the generic instruction:\n%s", name, out)
+		}
+	}
+}
+
+func TestChartRegistryPort(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, ref string
+		port      string
+		ok        bool
+	}{
+		{"chart registry", "aicr-registry.aicr-system.svc.cluster.local:5000/aicr/bundles/x@sha256:aa", "5000", true},
+		{"other cluster domain", "aicr-registry.aicr-system.svc.corp.example:5000/x", "5000", true},
+		{"short Service name", "aicr-registry.aicr-system.svc:5000/x", "5000", true},
+		{"another namespace", "aicr-registry.other.svc.cluster.local:5000/x", "", false},
+		{"another Service", "registry.aicr-system.svc.cluster.local:5000/x", "", false},
+		{"no port", "aicr-registry.aicr-system.svc.cluster.local/x", "", false},
+		{"ECR", "123456789012.dkr.ecr.us-west-2.amazonaws.com/aicr/cluster/bundles/x", "", false},
+		{"short name", "aicr-registry:5000/x", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			port, ok := chartRegistryPort(tt.ref, testNS)
+			if port != tt.port || ok != tt.ok {
+				t.Errorf("chartRegistryPort(%q) = %q, %t; want %q, %t", tt.ref, port, ok, tt.port, tt.ok)
+			}
+		})
+	}
+}
+
 // The active plan wins over the candidate, and a plan that cannot be
 // rendered again says why.
 func TestLoadReproductionChoosesAndRefuses(t *testing.T) {

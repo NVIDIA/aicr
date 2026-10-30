@@ -58,10 +58,11 @@ spec:
             - --engine={{ .Values.engine.type }}
             - --engine-namespace={{ .Values.engine.namespace }}
             - --engine-project={{ .Values.engine.project }}
-            - --registry-repository={{ .Values.registry.repository }}
-            - --registry-plain-http={{ .Values.registry.plainHTTP }}
-            - --registry-auth-provider={{ .Values.registry.auth.provider }}
-            - --registry-credentials-secret={{ .Values.registry.auth.staticSecretRef }}
+            {{- $inCluster := eq .Values.registry.mode "inCluster" }}
+            - --registry-repository={{ include "aicr-operator.registry" . }}
+            - --registry-plain-http={{ or $inCluster .Values.registry.plainHTTP }}
+            - --registry-auth-provider={{ ternary "static" .Values.registry.auth.provider $inCluster }}
+            - --registry-credentials-secret={{ include "aicr-operator.credentialsSecret" . }}
             - --engine-repo-creds-secret={{ .Values.registry.auth.repoCredsSecret }}
             - --snapshot-agent-requests={{ .Values.discovery.agentRequests }}
             - --job-node-selector={{ .Values.aicr.jobs.nodeSelector | default dict | toJson }}

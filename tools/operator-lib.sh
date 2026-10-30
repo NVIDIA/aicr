@@ -102,23 +102,3 @@ release_flags() {
     HELM_RELEASE_FLAGS+=(--take-ownership --force-conflicts)
   fi
 }
-
-# registry_credentials provides the registry's generated credentials
-# (tools/operator-kind) as an administrator does for the static provider: a
-# docker config Secret in the operator, Job and validation namespaces, and
-# Argo CD repo-creds for the plain-HTTP registry at $1.
-registry_credentials() {
-  local registry_uri="$1" auth credentials ns
-  auth="$(git rev-parse --show-toplevel)/.operator-e2e/registry-auth.json"
-  credentials="$(yq -r '.auths[].auth' "${auth}" | base64 -d)"
-  for ns in aicr-system aicr-jobs aicr-validation; do
-    kubectl get namespace "${ns}" >/dev/null 2>&1 || continue
-    kubectl -n "${ns}" create secret generic registry-auth --type=kubernetes.io/dockerconfigjson \
-      --from-file=.dockerconfigjson="${auth}" --dry-run=client -o yaml | kubectl apply --server-side -f - >/dev/null
-  done
-  kubectl -n argocd create secret generic aicr-registry \
-    --from-literal=type=oci --from-literal=url="${registry_uri}" --from-literal=insecureOCIForceHttp=true \
-    --from-literal=username="${credentials%%:*}" --from-literal=password="${credentials#*:}" \
-    --dry-run=client -o yaml | kubectl label --local -f - argocd.argoproj.io/secret-type=repo-creds -o yaml |
-    kubectl apply --server-side --force-conflicts -f - >/dev/null
-}

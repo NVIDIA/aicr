@@ -11,7 +11,7 @@ accidental or casual misuse; they do not contain a fully compromised operator.
 
 | Identity | Namespace | May | May not |
 | --- | --- | --- | --- |
-| Operator (`aicr-operator`) | Operator | Read and patch `ClusterRuntime` (only its cleanup finalizer, by policy) and write its status; create, update and delete `RuntimeRollout`; read Nodes; manage labeled ConfigMaps, Leases and Events in its namespace and read its own pod; create, watch and delete Jobs and read their pods and ConfigMaps in the Job, discovery and validation namespaces; create per-run registry Secrets in the Job and validation namespaces; write Applications in the Argo CD namespace; read the `aicr` AppProject; get and update the `repo-creds` Secret, by name (`aws`); read its docker config Secret, by name (`static`) | Write a `ClusterRuntime` spec, or any rollout approval; read or write `argocd-cm`; list or watch Secrets, or read any other Secret; create Namespaces; `escalate`, `bind`, `impersonate` or `pods/exec`; create Pods directly |
+| Operator (`aicr-operator`) | Operator | Read and patch `ClusterRuntime` (only its cleanup finalizer, by policy) and write its status; create, update and delete `RuntimeRollout`; read Nodes; manage labeled ConfigMaps, Leases and Events in its namespace and read its own pod; create, watch and delete Jobs and read their pods and ConfigMaps in the Job, discovery and validation namespaces; create per-run registry Secrets in the Job and validation namespaces; write Applications in the Argo CD namespace; read the `aicr` AppProject; get and update the `repo-creds` Secret, by name (`aws`); read its docker config Secret, by name (`static` and the in-cluster registry) | Write a `ClusterRuntime` spec, or any rollout approval; read or write `argocd-cm`; list or watch Secrets, or read any other Secret; create Namespaces; `escalate`, `bind`, `impersonate` or `pods/exec`; create Pods directly |
 | AICR Jobs (`aicr-jobs`) | Job | Read and write ConfigMaps in their namespace; push to the registry with the per-run Secret mounted into their pod | Anything else |
 | Snapshot launcher (`aicr-snapshot`) | Discovery | Run AICR's snapshot agent: Jobs, Pods, logs and ConfigMaps in its namespace; read ServiceAccounts. With AICR v1.0.x, also cluster-wide `create` on Namespaces, which AICR requires even though the namespace exists | |
 | Snapshot agent (`aicr-snapshot-agent`) | Discovery (`privileged`) | Run privileged with host PID, network and IPC and read-only host paths, as AICR's agent requires; read Nodes, Pods, DaemonSets and GPU Operator `ClusterPolicy` cluster-wide | Write anything but ConfigMaps in its namespace |
@@ -61,6 +61,37 @@ The `aicr` AppProject is enforced by Argo CD independently: sources limited to
 the registry's `charts/` and `wrappers/`, destinations limited to the component
 namespaces on the in-cluster server.
 
+## The runtime registry
+
+The registry holds what the operator mirrors and renders: upstream charts,
+wrapper charts, bundles and evidence. The operator treats it as storage, not as
+a trust boundary. Each plan pins every chart by its manifest digest, Argo CD
+pulls by that digest, and the policies above admit no other source, so an
+artifact lost or altered in the registry fails the pull instead of deploying
+different content.
+
+The default in-cluster registry (`registry.mode: inCluster`):
+
+- runs CNCF Distribution (`ghcr.io/nvidia/aicr-registry`), built, scanned and
+  attested with each release like the operator image, under the restricted Pod
+  Security profile;
+- requires a login for every read and write. The chart generates it on
+  install, keeps it across upgrades and reinstalls, and places it only where it
+  is used: the operator, Job and validation namespaces and Argo CD's
+  `repo-creds`;
+- admits connections only from the operator, the Job and validation
+  namespaces and Argo CD's repo server, where the CNI enforces NetworkPolicy.
+  Where it does not, and for anyone allowed `pods/portforward` in the operator
+  namespace (`kubectl port-forward` bypasses the policy), the login is the
+  only control;
+- serves plain HTTP. Traffic between pods is unencrypted unless your CNI or
+  service mesh encrypts it; integrity still rests on the digests;
+- is never pulled from by nodes: the operator copies no container images.
+
+With an external registry, its access control is yours, and the operator's
+identity can write anywhere under `registry.repository`, so give each cluster
+its own prefix.
+
 ## Namespaces and Pod Security
 
 | Namespace | Pod Security | Created by |
@@ -76,9 +107,9 @@ chart never removes the GPU stack. The operator creates no namespaces, and
 Argo CD's `CreateNamespace` stays off: a plan that renders a release into any
 other namespace is refused before it reaches Argo CD (`NamespaceNotAllowed`).
 
-The operator and AICR's recipe, bundle and upgrade-check Jobs run as non-root
-with a read-only root file system, all capabilities dropped, `RuntimeDefault`
-seccomp and size-limited scratch space.
+The operator, the in-cluster registry and AICR's recipe, bundle and
+upgrade-check Jobs run as non-root with a read-only root file system, all
+capabilities dropped, `RuntimeDefault` seccomp and size-limited scratch space.
 
 ## Credentials
 
@@ -89,21 +120,25 @@ seccomp and size-limited scratch space.
   cluster: it can push there.
 - With `static`, you provide every Secret, and the operator only reads its own
   copy by name.
+- With the in-cluster registry, the chart generates the login and its Secrets;
+  the operator only reads its own copy by name.
 - Credentials never appear in plans, values, status, Events, logs or evidence;
   errors name the Secret, never its content. Approvers can read assessment
   reports but no Secret.
 
 ## Network egress
 
-The chart ships no NetworkPolicy. If you restrict egress, allow:
+The chart ships no egress NetworkPolicy; the in-cluster registry's ingress
+policy is [above](#the-runtime-registry). If you restrict egress, allow:
 
 | Component | Destinations |
 | --- | --- |
-| Operator | The Kubernetes API; your registry; the upstream chart repositories the recipes pin; the validator images' registry; AWS STS and ECR endpoints (`aws`) |
-| AICR render Jobs | The Kubernetes API; your registry |
-| Argo CD repo-server | Your registry only |
+| Operator | The Kubernetes API; the runtime registry; the upstream chart repositories the recipes pin; the validator images' registry; AWS STS and ECR endpoints (`aws`) |
+| AICR render Jobs | The Kubernetes API; the runtime registry |
+| Argo CD repo-server | The runtime registry only |
 | Snapshot agent | The Kubernetes API |
-| Validation Jobs | The Kubernetes API; your registry, for evidence |
+| Validation Jobs | The Kubernetes API; the runtime registry, for evidence |
+| In-cluster registry | Nothing; it makes no outbound connections |
 
 ## Tenants
 
