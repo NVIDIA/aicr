@@ -276,7 +276,8 @@ dependencies are Go modules, named exactly by the `go.sum` in the release source
 archive and fetchable from the public module proxy at those coordinates.
 
 **Scope of the correspondence.** The archive is resolved from the same
-`requirements.txt` the image installs, so both derive from one input. Two gaps
+`requirements.txt` and `requirements-overrides.txt` the image installs, so both
+derive from the same inputs. Two gaps
 remain and are tracked rather than claimed away:
 
 * `pip` and `wheel` are provided by `python -m venv` rather than declared in

@@ -28,34 +28,40 @@ import (
 const (
 	noticesTool           = "tools/generate-notices"
 	committedRequirements = "validators/performance/requirements.txt"
+	committedOverrides    = "validators/performance/requirements-overrides.txt"
 	committedFragment     = "validators/performance/licenses/python-notices.md"
 )
 
 // TestCommittedFragmentMatchesRequirements is the cheap, always-runnable half
 // of the freshness contract: the committed fragment records the sha256 of the
-// requirements file it was generated from, so a requirements edit that skips
-// `make python-licenses` is caught here at `make test` time rather than only by
-// the notices-generator merge-gate job.
+// requirements and overrides files it was generated from, so an edit to either
+// that skips `make python-licenses` is caught here at `make test` time rather
+// than only by the notices-generator merge-gate job.
 //
 // It needs no tooling and no network, which is the point — the expensive
 // regeneration cannot run in every CI job, but this invariant can.
 func TestCommittedFragmentMatchesRequirements(t *testing.T) {
-	requirements, err := os.ReadFile(repositoryPath(t, committedRequirements))
-	if err != nil {
-		t.Fatalf("read committed requirements: %v", err)
-	}
 	fragment, err := os.ReadFile(repositoryPath(t, committedFragment))
 	if err != nil {
 		t.Fatalf("read committed fragment: %v", err)
 	}
 
-	sum := sha256.Sum256(requirements)
-	want := hex.EncodeToString(sum[:])
+	for _, input := range []string{committedRequirements, committedOverrides} {
+		t.Run(input, func(t *testing.T) {
+			content, err := os.ReadFile(repositoryPath(t, input))
+			if err != nil {
+				t.Fatalf("read %s: %v", input, err)
+			}
 
-	if !strings.Contains(string(fragment), want) {
-		t.Errorf("%s does not record the sha256 of %s (%s).\n"+
-			"Run 'make python-licenses', then commit the regenerated fragment.",
-			committedFragment, committedRequirements, want)
+			sum := sha256.Sum256(content)
+			want := hex.EncodeToString(sum[:])
+
+			if !strings.Contains(string(fragment), want) {
+				t.Errorf("%s does not record the sha256 of %s (%s).\n"+
+					"Run 'make python-licenses', then commit the regenerated fragment.",
+					committedFragment, input, want)
+			}
+		})
 	}
 }
 
@@ -100,8 +106,9 @@ func TestCommittedFragmentIsWellFormed(t *testing.T) {
 // actually ships rather than a copy that happened to be regenerated.
 
 // TestNoticesRejectsStaleFragment drives the generator's fail-closed path: a
-// fragment whose recorded hash does not match the requirements must abort the
-// run rather than emit a notices file describing the wrong dependency set.
+// fragment whose recorded hashes do not match both the requirements and the
+// overrides must abort the run rather than emit a notices file describing the
+// wrong dependency set.
 func TestNoticesRejectsStaleFragment(t *testing.T) {
 	// The generator checks its own tool prerequisites before reaching the
 	// staleness gate, so skip rather than fail where those are absent. The
@@ -110,39 +117,71 @@ func TestNoticesRejectsStaleFragment(t *testing.T) {
 		t.Skip("go-licenses not installed; the merge gate covers this path")
 	}
 
-	dir := t.TempDir()
-	requirements := filepath.Join(dir, "requirements.txt")
-	fragment := filepath.Join(dir, "python-notices.md")
-
-	if err := os.WriteFile(requirements, []byte("example==9.9.9\n"), 0o600); err != nil {
-		t.Fatalf("write requirements: %v", err)
-	}
-	// Records a hash that cannot match the requirements above.
-	if err := os.WriteFile(fragment, []byte("## Python Package Index\n\nsha256 `"+
-		strings.Repeat("0", 64)+"`\n"), 0o600); err != nil {
-		t.Fatalf("write fragment: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), scriptTimeout)
-	defer cancel()
-
-	command := exec.CommandContext(ctx, "bash", repositoryPath(t, noticesTool))
-	command.Dir = repositoryPath(t, ".")
-	command.Env = append(os.Environ(),
-		"PYTHON_REQUIREMENTS="+requirements,
-		"PYTHON_NOTICES="+fragment,
-		"OUTPUT="+filepath.Join(dir, "NOTICES.md"),
+	const (
+		requirementsBody = "example==9.9.9\n"
+		overridesBody    = "override==1.0.0\n"
 	)
-	output, err := command.CombinedOutput()
-	if ctx.Err() != nil {
-		t.Fatalf("generator exceeded deadline: %v\n%s", ctx.Err(), output)
+	shaOf := func(body string) string {
+		sum := sha256.Sum256([]byte(body))
+		return hex.EncodeToString(sum[:])
 	}
+	stale := strings.Repeat("0", 64)
 
-	if err == nil {
-		t.Fatal("generator succeeded with a stale fragment; it must fail closed")
+	tests := []struct {
+		name         string
+		recorded     []string
+		staleInInput string
+	}{
+		{"requirements changed", []string{stale, shaOf(overridesBody)}, "requirements.txt"},
+		{"overrides changed", []string{shaOf(requirementsBody), stale}, "requirements-overrides.txt"},
 	}
-	if !strings.Contains(string(output), "is stale") {
-		t.Errorf("expected a staleness error, got:\n%s", output)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			requirements := filepath.Join(dir, "requirements.txt")
+			overrides := filepath.Join(dir, "requirements-overrides.txt")
+			fragment := filepath.Join(dir, "python-notices.md")
+
+			if err := os.WriteFile(requirements, []byte(requirementsBody), 0o600); err != nil {
+				t.Fatalf("write requirements: %v", err)
+			}
+			if err := os.WriteFile(overrides, []byte(overridesBody), 0o600); err != nil {
+				t.Fatalf("write overrides: %v", err)
+			}
+			body := "## Python Package Index\n\n"
+			for _, sha := range tt.recorded {
+				body += "sha256 `" + sha + "`\n"
+			}
+			if err := os.WriteFile(fragment, []byte(body), 0o600); err != nil {
+				t.Fatalf("write fragment: %v", err)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), scriptTimeout)
+			defer cancel()
+
+			command := exec.CommandContext(ctx, "bash", repositoryPath(t, noticesTool))
+			command.Dir = repositoryPath(t, ".")
+			command.Env = append(os.Environ(),
+				"PYTHON_REQUIREMENTS="+requirements,
+				"PYTHON_OVERRIDES="+overrides,
+				"PYTHON_NOTICES="+fragment,
+				"OUTPUT="+filepath.Join(dir, "NOTICES.md"),
+			)
+			output, err := command.CombinedOutput()
+			if ctx.Err() != nil {
+				t.Fatalf("generator exceeded deadline: %v\n%s", ctx.Err(), output)
+			}
+
+			if err == nil {
+				t.Fatal("generator succeeded with a stale fragment; it must fail closed")
+			}
+			if !strings.Contains(string(output), "is stale") {
+				t.Errorf("expected a staleness error, got:\n%s", output)
+			}
+			if !strings.Contains(string(output), tt.staleInInput+" than the one") {
+				t.Errorf("staleness error does not name %s:\n%s", tt.staleInInput, output)
+			}
+		})
 	}
 }
 
