@@ -226,7 +226,7 @@ func passagesBetween(u *ComponentUpgrades, t *Transition, from, to versionRange)
 	var out []passage
 	for _, r := range floorsBetween(u, from, to) {
 		s, f := r.tr, r.floor
-		shared := boundaryKeyOf(f) == boundaryKeyOf(own)
+		shared := endsEqual(f, own)
 		if s == t || (shared && (s.Verdict != VerdictBlocked || t.Verdict == VerdictBlocked)) ||
 			!overlaps(r.from, rangeUpTo(from.lower, f)) {
 

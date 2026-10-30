@@ -1074,16 +1074,12 @@ func transitionsOf(crossed []crossing) []*Transition {
 func floorNames(crossed []crossing) []string {
 	names := make([]string, 0, len(crossed))
 	for i, c := range crossed {
-		if i > 0 && boundaryKeyOf(crossed[i-1].floor) == boundaryKeyOf(c.floor) {
+		if i > 0 && endsEqual(crossed[i-1].floor, c.floor) {
 			continue
 		}
 		names = append(names, c.floor.ver.String())
 	}
 	return names
-}
-
-func boundaryKeyOf(b rangeEnd) boundaryKey {
-	return boundaryKey{ver: b.comparedAt().String(), inclusive: b.inclusive}
 }
 
 // crossingPhrase returns the clause naming the distinct floors in crossed,

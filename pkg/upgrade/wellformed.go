@@ -515,15 +515,6 @@ func checkCoverageReachesPin(component string, cur rangeEnd, pinVer *semver.Vers
 		component, cur.ver, pinVer)}
 }
 
-// boundaryKey identifies a `to` floor by version and inclusivity as two
-// comparable fields rather than one delimited string: `to` permits
-// prereleases, and a prerelease tag can itself read as a delimiter suffix,
-// so string concatenation cannot distinguish content from marker.
-type boundaryKey struct {
-	ver       string
-	inclusive bool
-}
-
 // checkDistinctMoves implements rule 8, an addition to ADR-021. It returns a
 // violation for each pair of u's transitions whose `from` ranges overlap and
 // whose `to` ranges overlap, skipping ranges that do not parse.
