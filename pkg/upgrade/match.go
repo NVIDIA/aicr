@@ -809,7 +809,7 @@ func multipleBoundariesExplanation(u *ComponentUpgrades, r ComponentResult, cros
 		s += fmt.Sprintf(". The record covering %s is a required stop: a version in %s has to run "+
 			"before the component moves further", last.floor.ver, toText(u, last.tr))
 	case stopStepLimit:
-		s += ". This component moves at most one minor version per upgrade"
+		s += fmt.Sprintf(". This component moves at most one %s version per upgrade", u.StepLimit)
 	case stopSteps:
 	}
 	if len(r.Route) == 0 {

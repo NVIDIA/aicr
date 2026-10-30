@@ -1346,6 +1346,19 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 				"to 1.6.1 (safe)",
 		},
 		{
+			name: "multiple-boundaries names the major step limit",
+			set: Set{"c": &ComponentUpgrades{Component: "c", StepLimit: StepLimitMajor, Transitions: []Transition{
+				trans(">=1.4.0 <2.0.0", ">=2.0.0 <2.1.0", VerdictSafe, "S"),
+				trans(">=2.0.0 <3.0.0", ">=3.0.0 <3.1.0", VerdictSafe, "T"),
+			}}},
+			from: "1.4.2",
+			to:   "3.0.1",
+			want: "crosses 2 recorded boundaries (2.0.0, 3.0.0); no single record describes the whole jump. " +
+				"Upgrade to 2.0.0 first, then re-run this check. This component moves at most one major " +
+				"version per upgrade. The whole route takes 2 upgrades: to >=2.0.0 <2.1.0 (safe), then " +
+				"to 3.0.1 (safe)",
+		},
+		{
 			name: "undefined-origin names a manual boundary a covering record passes without listing it",
 			set: oneComponent(
 				trans(">=1.0.0 <2.0.0", ">=4.0.0 <=4.0.0", VerdictManual, "C"),
@@ -1995,6 +2008,10 @@ func TestMatchRoutes(t *testing.T) {
 	minorSkipsPatch := skipping(minor, "1.23.2")
 	lower := skipping(trans(">=1.22.0 <1.23.0", ">=1.23.0", VerdictSafe, "lower"), "1.23.2")
 	major := trans(">=1.9.0 <1.10.0", ">=2.0.0", VerdictManual, "major")
+	toTwo := trans(">=1.0.0 <2.0.0", ">=2.0.0", VerdictManual, "toTwo")
+	intoTwo := trans(">=1.0.0 <2.0.0", ">=2.0.0 <2.1.0", VerdictSafe, "intoTwo")
+	withinTwo := trans(">=2.0.0 <2.5.0", ">=2.5.0 <2.6.0", VerdictSafe, "withinTwo")
+	intoThree := trans(">=2.5.0 <3.0.0", ">=3.0.0 <3.1.0", VerdictSafe, "intoThree")
 	stop := Transition{From: ">=1.0.0 <2.0.0", To: ">=2.0.0 <2.1.0", Verdict: VerdictSafe, RequiredStop: true, Summary: "stop"}
 	sharing := trans("<1.0.0", ">=2.0.0 <2.1.0", VerdictSafe, "sharing")
 	after := trans(">=2.0.0 <3.0.0", "=3.0.0", VerdictSafe, "after")
@@ -2211,6 +2228,50 @@ func TestMatchRoutes(t *testing.T) {
 			wantVerdict:   VerdictBlocked,
 			wantReason:    ReasonUndefinedOrigin,
 			wantStoppedAt: ">=2.0.0 <2.1.0",
+		},
+		{
+			name:        "a derived major ceiling holds the whole next major",
+			trs:         []Transition{toTwo},
+			stepLimit:   StepLimitMajor,
+			from:        "1.5.0",
+			to:          "2.9.0",
+			wantVerdict: VerdictManual,
+			wantReason:  ReasonRecorded,
+			wantMatched: "toTwo",
+		},
+		{
+			name:          "a derived major ceiling ends below the next major",
+			trs:           []Transition{toTwo},
+			stepLimit:     StepLimitMajor,
+			from:          "1.5.0",
+			to:            "3.0.0-rc.1",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonBeyondRecordCeiling,
+			wantStoppedAt: ">=2.0.0 <3.0.0",
+		},
+		{
+			name:        "a safe run joins across minors under the major step limit",
+			trs:         []Transition{intoTwo, withinTwo},
+			stepLimit:   StepLimitMajor,
+			from:        "1.5.0",
+			to:          "2.5.1",
+			wantVerdict: VerdictSafe,
+			wantReason:  ReasonRecorded,
+			wantMatched: "withinTwo",
+		},
+		{
+			name:          "a safe run splits at the major step limit",
+			trs:           []Transition{intoTwo, withinTwo, intoThree},
+			stepLimit:     StepLimitMajor,
+			from:          "1.5.0",
+			to:            "3.0.1",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=2.5.0 <2.6.0",
+			wantRoute: []RouteStop{
+				{Versions: ">=2.5.0 <2.6.0", Verdict: VerdictSafe},
+				{Versions: "3.0.1", Verdict: VerdictSafe},
+			},
 		},
 		{
 			name:          "a required stop holds its own sources",

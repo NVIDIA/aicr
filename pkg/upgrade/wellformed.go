@@ -61,10 +61,10 @@ func validateRecord(name string, u *ComponentUpgrades, pin string) []string {
 		return []string{fmt.Sprintf("component %q has a nil record", name)}
 	}
 	v := make([]string, 0, len(u.Transitions))
-	limited := u.StepLimit == StepLimitMinor
+	limited := hasStepLimit(u)
 	if u.StepLimit != "" && !limited {
-		v = append(v, fmt.Sprintf("component %q has stepLimit %q; the only value is %q",
-			u.Component, u.StepLimit, StepLimitMinor))
+		v = append(v, fmt.Sprintf("component %q has stepLimit %q; it must be %q or %q",
+			u.Component, u.StepLimit, StepLimitMinor, StepLimitMajor))
 	}
 	for i := range u.Transitions {
 		where := fmt.Sprintf("component %q transition %d", u.Component, i)

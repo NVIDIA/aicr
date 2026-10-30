@@ -387,6 +387,12 @@ may leave out its ceiling, which is then the end of its floor's minor. A
 is in that major's first minor and whose `from` names the old major's last
 minor, so the check blocks a major bump until someone writes it.
 
+**`stepLimit: major`** caps every upgrade at the next major version, ignoring
+minors and patches. Use it when upstream supports skipping minors but not
+majors. A move from any minor may reach anywhere in the next major, and a
+`manual` or `blocked` `to` without a ceiling ends at the end of its floor's
+major. No shipped record uses it yet.
+
 ### When a migration only runs inside a window of versions
 
 Some migrations happen only while a particular range of versions is running.

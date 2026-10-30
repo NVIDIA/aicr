@@ -1010,9 +1010,9 @@ func TestValidateSkipsAndStepLimit(t *testing.T) {
 		{
 			name:      "an unknown step limit is a violation",
 			pin:       "v0.18.0",
-			stepLimit: "major",
+			stepLimit: "patch",
 			trs:       []Transition{manual(">=0.17.0 <0.18.0", "=0.18.0")},
-			text:      `has stepLimit "major"; the only value is "minor"`,
+			text:      `has stepLimit "patch"; it must be "minor" or "major"`,
 			mentioned: true,
 		},
 		{
@@ -1094,6 +1094,37 @@ func TestValidateSkipsAndStepLimit(t *testing.T) {
 				manual(">=1.9.0 <1.10.0", ">=1.10.0"),
 			},
 			text:      "names 1.9 as the last minor of major 1, but transition 1 starts a later one at 1.10.0",
+			mentioned: true,
+		},
+		{
+			name:      "a manual to may omit its ceiling under the major step limit",
+			pin:       "v0.18.0",
+			stepLimit: StepLimitMajor,
+			trs:       []Transition{manual(">=0.17.0 <0.18.0", ">=0.18.0")},
+			text:      "no upper bound",
+		},
+		{
+			name:      "a major bump from any minor may reach anywhere in the next major",
+			pin:       "v2.9.0",
+			stepLimit: StepLimitMajor,
+			trs:       []Transition{manual(">=1.2.0 <2.0.0", ">=2.0.0 <=2.9.0")},
+			text:      "stepLimit major",
+		},
+		{
+			name:      "a to past the next major breaks the major step limit",
+			pin:       "v3.0.0",
+			stepLimit: StepLimitMajor,
+			trs:       []Transition{manual(">=1.2.0 <2.0.0", ">=2.0.0 <=3.0.0")},
+			text: "has a to range reaching 3.0.0 or later, past the next major above 1.2.0, " +
+				"the lowest version its from admits; stepLimit major allows one major per step",
+			mentioned: true,
+		},
+		{
+			name:      "a from with no lower bound cannot keep to the major step limit",
+			pin:       "v1.0.0",
+			stepLimit: StepLimitMajor,
+			trs:       []Transition{manual("<1.0.0", ">=1.0.0")},
+			text:      "has a from range with no lower bound, so stepLimit major cannot bound its moves",
 			mentioned: true,
 		},
 	}

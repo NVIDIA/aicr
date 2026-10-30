@@ -47,8 +47,12 @@ func (v Verdict) Authorable() bool {
 	}
 }
 
-// StepLimitMinor is the one StepLimit value.
-const StepLimitMinor = "minor"
+// StepLimit values. StepLimitMinor caps each move at the next minor and
+// StepLimitMajor at the next major.
+const (
+	StepLimitMinor = "minor"
+	StepLimitMajor = "major"
+)
 
 // ComponentUpgrades is one component's transition records.
 type ComponentUpgrades struct {
@@ -56,14 +60,13 @@ type ComponentUpgrades struct {
 	Kind       string `yaml:"kind"`
 	Component  string `yaml:"component"`
 
-	// StepLimit, when StepLimitMinor, limits each move to the next
-	// major.minor, ignoring patch versions. Empty means no limit. Under the
-	// limit:
-	//
-	//   - a move into a new major needs a record whose `to` is in that major's
-	//     first minor and whose `from` names the old major's last minor
-	//   - a manual or blocked `to` may omit its ceiling, which is then the end
-	//     of its floor's minor
+	// StepLimit limits each move to the next major.minor under StepLimitMinor,
+	// ignoring patch versions, or to the next major under StepLimitMajor,
+	// ignoring minor and patch versions. Empty means no limit. Under either
+	// limit a manual or blocked `to` may omit its ceiling, which is then the
+	// end of its floor's minor or major. Under StepLimitMinor a move into a new
+	// major also needs a record whose `to` is in that major's first minor and
+	// whose `from` names the old major's last minor.
 	StepLimit string `yaml:"stepLimit,omitempty"`
 
 	Transitions []Transition `yaml:"transitions,omitempty"`

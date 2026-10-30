@@ -55,9 +55,9 @@
 // stricter verdict, in safe, manual, blocked order, whose from overlaps the
 // skipping transition's.
 //
-// Under stepLimit minor, rule 2 lets a manual or blocked to omit its ceiling.
-// Validate also rejects any other stepLimit value, and any transition whose
-// moves break the limit (stepViolation).
+// Under stepLimit minor or major, rule 2 lets a manual or blocked to omit its
+// ceiling. Validate also rejects any other stepLimit value, and any transition
+// whose moves break the limit (stepViolation).
 //
 // # Matching
 //

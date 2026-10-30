@@ -37,14 +37,15 @@ func toBounds(u *ComponentUpgrades, t *Transition) (bounds, error) {
 	return b, nil
 }
 
-// derivedCeiling returns the exclusive end of the minor holding to's floor. ok
-// is false unless u has StepLimitMinor and to names a floor but no ceiling, or
-// when that minor is the last.
+// derivedCeiling returns the exclusive end of the minor, or under
+// StepLimitMajor the major, holding to's floor. ok is false unless u has a step
+// limit and to names a floor but no ceiling, or when that minor or major is the
+// last.
 func derivedCeiling(u *ComponentUpgrades, to bounds) (ceiling bound, ok bool) {
-	if u == nil || u.StepLimit != StepLimitMinor || !to.upper.unbounded || to.lower.unbounded || to.lower.ver == nil {
+	if !to.upper.unbounded || to.lower.unbounded || to.lower.ver == nil {
 		return bound{}, false
 	}
-	next, ok := minorStart(to.lower.ver, 1)
+	next, ok := unitStart(u, to.lower.ver, 1)
 	if !ok {
 		return bound{}, false
 	}
@@ -72,14 +73,39 @@ func minorStart(v *semver.Version, n uint64) (next *semver.Version, ok bool) {
 	return semver.New(v.Major(), v.Minor()+n, 0, "", ""), true
 }
 
+// majorStart returns the .0.0 release of the major n above v's. ok is false
+// when that major overflows.
+func majorStart(v *semver.Version, n uint64) (next *semver.Version, ok bool) {
+	if v.Major() > math.MaxUint64-n {
+		return nil, false
+	}
+	return semver.New(v.Major()+n, 0, 0, "", ""), true
+}
+
+// hasStepLimit reports whether u carries a known StepLimit.
+func hasStepLimit(u *ComponentUpgrades) bool {
+	return u != nil && (u.StepLimit == StepLimitMinor || u.StepLimit == StepLimitMajor)
+}
+
+// unitStart returns the first release of the minor, or under StepLimitMajor
+// the major, n above v's. ok is false when u has no step limit or that version
+// overflows.
+func unitStart(u *ComponentUpgrades, v *semver.Version, n uint64) (next *semver.Version, ok bool) {
+	switch {
+	case !hasStepLimit(u):
+		return nil, false
+	case u.StepLimit == StepLimitMajor:
+		return majorStart(v, n)
+	default:
+		return minorStart(v, n)
+	}
+}
+
 // stepCap returns the exclusive limit of a one-step move from v, which also
 // leaves out the limit's prereleases. ok is false when u has no step limit or
 // the limit overflows.
 func stepCap(u *ComponentUpgrades, v *semver.Version) (limit bound, ok bool) {
-	if u == nil || u.StepLimit != StepLimitMinor {
-		return bound{}, false
-	}
-	next, ok := minorStart(v, 2)
+	next, ok := unitStart(u, v, 2)
 	if !ok {
 		return bound{}, false
 	}
@@ -89,7 +115,7 @@ func stepCap(u *ComponentUpgrades, v *semver.Version) (limit bound, ok bool) {
 // stepViolation returns why t's moves break u's step limit, or "" when they
 // keep to it, u has none, or a range does not parse.
 func stepViolation(u *ComponentUpgrades, t *Transition) string {
-	if u == nil || u.StepLimit != StepLimitMinor {
+	if !hasStepLimit(u) {
 		return ""
 	}
 	from, ferr := parseBounds(t.From)
@@ -98,10 +124,10 @@ func stepViolation(u *ComponentUpgrades, t *Transition) string {
 		return ""
 	}
 	if from.lower.unbounded || from.lower.ver == nil {
-		return "has a from range with no lower bound, so stepLimit minor cannot bound its moves"
+		return fmt.Sprintf("has a from range with no lower bound, so stepLimit %s cannot bound its moves", u.StepLimit)
 	}
 	lo := from.lower.ver
-	if to.lower.ver.Major() > lo.Major() {
+	if u.StepLimit == StepLimitMinor && to.lower.ver.Major() > lo.Major() {
 		return crossMajorViolation(u, t, from, to)
 	}
 	limit, ok := stepCap(u, lo)
@@ -109,8 +135,9 @@ func stepViolation(u *ComponentUpgrades, t *Transition) string {
 		return ""
 	}
 	if upperAfter(to.upper, limit) {
-		return fmt.Sprintf("has a to range reaching %s or later, past the next minor above %s, "+
-			"the lowest version its from admits; stepLimit minor allows one minor per step", limit.ver, lo)
+		return fmt.Sprintf("has a to range reaching %s or later, past the next %s above %s, "+
+			"the lowest version its from admits; stepLimit %s allows one %s per step",
+			limit.ver, u.StepLimit, lo, u.StepLimit, u.StepLimit)
 	}
 	return ""
 }
