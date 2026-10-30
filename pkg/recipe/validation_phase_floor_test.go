@@ -51,6 +51,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/allocpolicy"
 )
 
 const strictEnvVar = "AICR_VALIDATION_FLOOR_STRICT"
@@ -279,24 +281,32 @@ func TestOverlayValidationPhaseFloor(t *testing.T) {
 			// Required: deployment for accelerator-bound classifications;
 			// conformance for every classification.
 			//
-			// For deployment, the gate has two independent halves and
-			// both must be present — either half missing turns the
-			// version assertion into a no-op:
-			//   • `gpu-operator-version` in deployment.checks (the
-			//     validator only runs the check if its name is
-			//     declared).
-			//   • `Deployment.gpu-operator.version` in
-			//     deployment.constraints (the check skips at runtime
-			//     when no constraint targets that path).
+			// Every deployment must check AICR-owned resources and usable
+			// GPUs, including recipes whose provider owns the GPU stack.
+			// When AICR installs GPU Operator (Helm or OLM), also require
+			// both the version check and its constraint: either half alone
+			// leaves the version assertion unevaluated.
 			if class.requiresDeployment() {
 				if result.Validation == nil || result.Validation.Deployment == nil {
 					fail("deployment")
 				} else {
-					if !hasGPUOperatorVersionCheck(result.Validation.Deployment) {
-						fail("deployment.checks.gpu-operator-version")
+					deployment := result.Validation.Deployment
+					for _, check := range []string{"expected-resources", "check-nvidia-smi"} {
+						if !slices.Contains(deployment.Checks, check) {
+							fail("deployment.checks." + check)
+						}
 					}
-					if !hasGPUOperatorVersionConstraint(result.Validation.Deployment) {
-						fail("deployment.constraints.Deployment.gpu-operator.version")
+					ownsGPUOperator := slices.ContainsFunc(result.ComponentRefs, func(ref ComponentRef) bool {
+						return ref.IsEnabled() && (ref.Name == allocpolicy.ComponentGPUOperator ||
+							ref.Name == allocpolicy.ComponentGPUOperatorOCP || ref.Name == "gpu-operator-ocp-olm")
+					})
+					if ownsGPUOperator {
+						if !hasGPUOperatorVersionCheck(deployment) {
+							fail("deployment.checks.gpu-operator-version")
+						}
+						if !hasGPUOperatorVersionConstraint(deployment) {
+							fail("deployment.constraints.Deployment.gpu-operator.version")
+						}
 					}
 				}
 			}
@@ -351,6 +361,7 @@ func TestClassifyOverlay(t *testing.T) {
 	}{
 		// Accelerator-bound: deployment required; perf depends on intent/platform.
 		{"training-eks-h100", CriteriaIntentTraining, CriteriaServiceEKS, CriteriaPlatformAny, CriteriaAcceleratorH100, false, true, true},
+		{"training-cks-rtx-pro-6000", CriteriaIntentTraining, CriteriaServiceCKS, CriteriaPlatformAny, CriteriaAcceleratorRTXPro6000, false, true, true},
 		{"training-aks-h100-kubeflow", CriteriaIntentTraining, CriteriaServiceAKS, CriteriaPlatformKubeflow, CriteriaAcceleratorH100, false, true, true},
 		{"training-kind-h100", CriteriaIntentTraining, CriteriaServiceKind, CriteriaPlatformAny, CriteriaAcceleratorH100, true, true, false},
 		{"inference-eks-h100-plain", CriteriaIntentInference, CriteriaServiceEKS, CriteriaPlatformAny, CriteriaAcceleratorH100, false, true, false},

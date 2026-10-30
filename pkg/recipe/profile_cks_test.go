@@ -88,6 +88,41 @@ func TestCKSGPUStackProfile(t *testing.T) {
 	}
 }
 
+// TestCKSDeploymentValidation resolves the wildcard and service inheritance
+// together: disabling GPU Operator must also remove its deployment checks,
+// while keeping checks for the components AICR owns and usable provider GPUs.
+func TestCKSDeploymentValidation(t *testing.T) {
+	t.Parallel()
+
+	for _, selection := range []string{"", "gpuStack=coreweave"} {
+		t.Run(selection, func(t *testing.T) {
+			t.Parallel()
+			result, err := NewBuilder().BuildFromCriteriaWithProfile(t.Context(), cksCriteria(), selection)
+			if err != nil {
+				t.Fatalf("resolve CoreWeave recipe: %v", err)
+			}
+			if result.Validation == nil || result.Validation.Deployment == nil {
+				t.Fatal("missing deployment validation")
+			}
+			deployment := result.Validation.Deployment
+			wantChecks := []string{"expected-resources", "check-nvidia-smi"}
+			if !slices.Equal(deployment.Checks, wantChecks) {
+				t.Errorf("deployment checks = %v, want %v", deployment.Checks, wantChecks)
+			}
+			for _, constraint := range deployment.Constraints {
+				if constraint.Name == "Deployment.gpu-operator.version" {
+					t.Errorf("provider-managed GPU Operator must not inherit version constraint %q", constraint.Value)
+				}
+			}
+			if result.Validation.Conformance == nil ||
+				!slices.Equal(result.Validation.Conformance.Checks, []string{"platform-health"}) {
+
+				t.Errorf("conformance = %+v, want only platform-health", result.Validation.Conformance)
+			}
+		})
+	}
+}
+
 func TestCKSProfileQualification(t *testing.T) {
 	t.Parallel()
 

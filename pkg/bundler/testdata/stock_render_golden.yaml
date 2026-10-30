@@ -5216,10 +5216,10 @@ rtx-pro-6000-cks-ubuntu-training:
   006-k8s-ephemeral-storage-metrics/values.yaml: bd965e10e0f6eca07d732ea00d66e8327c176acfdc52d998809f7d4d53e056e8
   README.md: 127c023674236f00962d21e49861d9cac267e269097dd2d7d8dc4da2b7ebc2d4
   UPGRADING.md: 627350cdf2e92e31479be7cdbc4b3d93657d4dc6a722ab4823c2f692f6ba60f9
-  bundle-info.yaml: bb9873a9baee72773aa87d960f7eb8eb329122a98c5517dcb8574b270e30cd38
-  checksums.txt: 3d64fb64200a9e25a9a08a03bc6fa98c47acb66ea798e438e01fc1ccdd194d80
+  bundle-info.yaml: b70bd8bd4a678e2b97644fad2b9fc972cc316acfdd21e9e6d9ddc1b264a9049d
+  checksums.txt: dc6a4c9116a17abdccfd825d44505d6f60687b747515fd6cfb5c70ea7430babd
   deploy.sh: e48c374ec3bd9cc26949b794323951533e826dfb953e6ee8f75f862ea84af45a
-  recipe.yaml: 4de7dca39151829a807f34af16ebac1e2ec031848a77945eb68656afbfb4322a
+  recipe.yaml: a13048d98417cbc527509eba80a6a0d898f3ab536e3995cbb8eb267f941fda84
 rtx-pro-6000-eks-amazonlinux-inference:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f

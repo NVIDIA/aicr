@@ -71,6 +71,11 @@ spec:
         enabled: false
 
   validation:
+    # Accelerator wildcards assume an AICR-managed GPU Operator. Clear their
+    # deployment checks and version floor; CKS leaves add the applicable checks.
+    deployment:
+      checks: []
+      constraints: []
     conformance:
       checks:
         - platform-health

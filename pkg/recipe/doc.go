@@ -75,6 +75,7 @@
 //   - CriteriaServiceK0s: k0s (self-managed k0s clusters)
 //   - CriteriaServiceMK8s: Nebius Managed Service for Kubernetes
 //   - CriteriaServiceNVKE: NVIDIA Kubernetes Engine (Forge/NICo bare metal)
+//   - CriteriaServiceCKS: CoreWeave Kubernetes Service
 //   - CriteriaServiceAny: Any service (wildcard)
 //
 // Accelerator types for GPU selection:

@@ -410,7 +410,7 @@ accounting mode determines which schema track applies.
 
 There is a single route family. `/v1/recipe`, `/v1/query`, and `/v1/bundle`
 serve every composition — profiled and unprofiled alike — with one contract.
-The AKS, GKE, and OKE families are the embedded profile adopters (`gpuStack`) and
+The AKS, GKE, OKE, and CKS families are the embedded profile adopters (`gpuStack`) and
 need no special routing.
 
 **GET `/v1/recipe`.** Accepts the `/v1/recipe` criteria parameters plus
@@ -485,7 +485,7 @@ application/x-yaml`; missing, aliased, or unsupported media types are
 rejected.
 
 ```shell
-# The AKS, GKE, and OKE families are the embedded adopters (gpuStack profiles).
+# The AKS, GKE, OKE, and CKS families are the embedded adopters (gpuStack profiles).
 # -f stops on an HTTP error so a 4xx/5xx recipe body is never staged and
 # an error response is never written to bundles.zip. POSIX sh suffices:
 # the commands are sequential (no pipeline), so pipefail is not needed.
@@ -509,9 +509,12 @@ v1.0.0 it is the only value the schema admits. Profile and
 Slurm-accounting selection are available on every endpoint; no composition
 needs special routing.
 
-The AKS, GKE, and OKE families are the embedded profile adopters (`gpuStack`). Their
+The AKS, GKE, OKE, and CKS families are the embedded profile adopters (`gpuStack`). Their
 compositions resolve like any other: omit `profile=` to take the declared
-default, or select one explicitly.
+default, or select one explicitly. CKS has a single value, `coreweave`,
+which preserves provider ownership and requires a loaded driver and enabled
+device plugin when resolving from a snapshot. See
+[CoreWeave RTX PRO 6000 Setup](../integrator/cks-rtx-pro-6000-setup.md).
 
 ```shell
 # GKE: omit profile= for the gke-default default, or select
