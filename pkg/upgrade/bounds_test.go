@@ -21,7 +21,7 @@ import (
 	"github.com/Masterminds/semver/v3"
 )
 
-func TestParseBoundsAccepted(t *testing.T) {
+func TestParseRangeAccepted(t *testing.T) {
 	tests := []struct {
 		name       string
 		constraint string
@@ -50,9 +50,9 @@ func TestParseBoundsAccepted(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b, err := parseBounds(tt.constraint)
+			b, err := parseRange(tt.constraint)
 			if err != nil {
-				t.Fatalf("parseBounds(%q) error = %v", tt.constraint, err)
+				t.Fatalf("parseRange(%q) error = %v", tt.constraint, err)
 			}
 			checkBound(t, "lower", b.lower, tt.wantLower, tt.lowerIncl)
 			checkBound(t, "upper", b.upper, tt.wantUpper, tt.upperIncl)
@@ -60,7 +60,7 @@ func TestParseBoundsAccepted(t *testing.T) {
 	}
 }
 
-func checkBound(t *testing.T, side string, got bound, wantVer string, wantIncl bool) {
+func checkBound(t *testing.T, side string, got rangeEnd, wantVer string, wantIncl bool) {
 	t.Helper()
 	if wantVer == "" {
 		if !got.unbounded {
@@ -79,7 +79,7 @@ func checkBound(t *testing.T, side string, got bound, wantVer string, wantIncl b
 	}
 }
 
-func TestParseBoundsRejected(t *testing.T) {
+func TestParseRangeRejected(t *testing.T) {
 	tests := []struct {
 		name       string
 		constraint string
@@ -107,16 +107,16 @@ func TestParseBoundsRejected(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := parseBounds(tt.constraint); err == nil {
-				t.Errorf("parseBounds(%q) = nil error, want rejection", tt.constraint)
+			if _, err := parseRange(tt.constraint); err == nil {
+				t.Errorf("parseRange(%q) = nil error, want rejection", tt.constraint)
 			}
 		})
 	}
 }
 
-// TestParseBoundsErrorMessagesNameConstraint checks that every parseBounds
+// TestParseRangeErrorMessagesNameConstraint checks that every parseRange
 // error names the full constraint.
-func TestParseBoundsErrorMessagesNameConstraint(t *testing.T) {
+func TestParseRangeErrorMessagesNameConstraint(t *testing.T) {
 	tests := []struct {
 		name       string
 		constraint string
@@ -135,9 +135,9 @@ func TestParseBoundsErrorMessagesNameConstraint(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := parseBounds(tt.constraint)
+			_, err := parseRange(tt.constraint)
 			if err == nil {
-				t.Fatalf("parseBounds(%q) = nil error, want rejection", tt.constraint)
+				t.Fatalf("parseRange(%q) = nil error, want rejection", tt.constraint)
 			}
 			if !strings.Contains(err.Error(), tt.constraint) {
 				t.Errorf("error %q does not name the constraint %q", err.Error(), tt.constraint)
@@ -149,10 +149,10 @@ func TestParseBoundsErrorMessagesNameConstraint(t *testing.T) {
 // The most likely authoring slip - a space after the operator - must not be
 // silently accepted (that would widen the grammar) but must tell the author
 // exactly what to write instead.
-func TestParseBoundsMissingVersionSuggestsJoinedForm(t *testing.T) {
-	_, err := parseBounds(">= 0.18.0")
+func TestParseRangeMissingVersionSuggestsJoinedForm(t *testing.T) {
+	_, err := parseRange(">= 0.18.0")
 	if err == nil {
-		t.Fatal("parseBounds(\">= 0.18.0\") = nil error, want rejection")
+		t.Fatal("parseRange(\">= 0.18.0\") = nil error, want rejection")
 	}
 	msg := err.Error()
 	for _, want := range []string{"space", ">=0.18.0"} {
@@ -166,10 +166,10 @@ func TestParseBoundsMissingVersionSuggestsJoinedForm(t *testing.T) {
 // an exact-version conflict regardless of which side appears first; the
 // exact-version branch sets both bounds, so a naive twice-check on whichever
 // bound the second comparator targets reports the wrong reason.
-func TestParseBoundsExactVersionFirstReportsConflict(t *testing.T) {
-	_, err := parseBounds("0.18.0 <0.20.0")
+func TestParseRangeExactVersionFirstReportsConflict(t *testing.T) {
+	_, err := parseRange("0.18.0 <0.20.0")
 	if err == nil {
-		t.Fatal("parseBounds(\"0.18.0 <0.20.0\") = nil error, want rejection")
+		t.Fatal("parseRange(\"0.18.0 <0.20.0\") = nil error, want rejection")
 	}
 	if !strings.Contains(err.Error(), "combines an exact version") {
 		t.Errorf("error = %q, want a message about combining an exact version", err.Error())
@@ -184,45 +184,45 @@ func TestNewConstraintError(t *testing.T) {
 	}
 }
 
-// Every parseBounds error returns the zero-value bounds{}, whose sides are
+// Every parseRange error returns the zero-value versionRange{}, whose sides are
 // bounded (unbounded: false) with a nil ver. A caller that logs the error
 // and calls contains anyway must get false, not a nil-pointer panic.
-func TestBoundsZeroValueContainsIsFalse(t *testing.T) {
+func TestVersionRangeZeroValueContainsIsFalse(t *testing.T) {
 	v, err := semver.NewVersion("1.0.0")
 	if err != nil {
 		t.Fatalf("semver.NewVersion error = %v", err)
 	}
-	var zero bounds
+	var zero versionRange
 	if zero.contains(v) {
-		t.Error("zero-value bounds.contains = true, want false")
+		t.Error("zero-value versionRange.contains = true, want false")
 	}
 	// The zero-value check above short-circuits on the lower side before
 	// ever reaching the upper side's nil guard; exercise that guard
 	// directly with an otherwise-unbounded lower side.
-	upperOnly := bounds{lower: bound{unbounded: true}, upper: bound{unbounded: false, ver: nil}}
+	upperOnly := versionRange{lower: rangeEnd{unbounded: true}, upper: rangeEnd{unbounded: false, ver: nil}}
 	if upperOnly.contains(v) {
-		t.Error("bounds with nil upper.ver: contains = true, want false")
+		t.Error("versionRange with nil upper.ver: contains = true, want false")
 	}
 }
 
 // A prerelease is legal in `to`, which is what makes grove's
 // v0.1.0-alpha.12 pin recordable at all.
-func TestParseBoundsPrereleaseAllowedInTo(t *testing.T) {
-	b, err := parseBounds(">=0.1.0-alpha.1 <=0.1.0-alpha.12")
+func TestParseRangePrereleaseAllowedInTo(t *testing.T) {
+	b, err := parseRange(">=0.1.0-alpha.1 <=0.1.0-alpha.12")
 	if err != nil {
-		t.Fatalf("parseBounds error = %v", err)
+		t.Fatalf("parseRange error = %v", err)
 	}
 	if b.upper.unbounded || b.upper.ver.String() != "0.1.0-alpha.12" {
 		t.Errorf("upper = %v, want 0.1.0-alpha.12", b.upper.ver)
 	}
 }
 
-// parseBounds agrees with Masterminds, except that "<X.Y.Z" on a release also
+// parseRange agrees with Masterminds, except that "<X.Y.Z" on a release also
 // leaves out X.Y.Z's prereleases, so its oracle is "<X.Y.Z-0". A sweep over
 // release versions only would pass while missing prerelease behavior
 // entirely, so the table carries prerelease and boundary-adjacent versions on
 // purpose.
-func TestBoundsAgreeWithMasterminds(t *testing.T) {
+func TestVersionRangeAgreesWithMasterminds(t *testing.T) {
 	constraints := []struct{ rng, oracle string }{
 		{"<0.18.0", "<0.18.0-0"},
 		{">=0.18.0", ">=0.18.0"},
@@ -242,9 +242,9 @@ func TestBoundsAgreeWithMasterminds(t *testing.T) {
 	for _, tc := range constraints {
 		cs := tc.rng
 		t.Run(cs, func(t *testing.T) {
-			b, err := parseBounds(cs)
+			b, err := parseRange(cs)
 			if err != nil {
-				t.Fatalf("parseBounds(%q) error = %v", cs, err)
+				t.Fatalf("parseRange(%q) error = %v", cs, err)
 			}
 			c, err := newConstraint(tc.oracle)
 			if err != nil {
@@ -256,7 +256,7 @@ func TestBoundsAgreeWithMasterminds(t *testing.T) {
 					t.Fatalf("bad sweep version %q: %v", vs, err)
 				}
 				if got, want := b.contains(v), c.Check(v); got != want {
-					t.Errorf("%q vs %q: bounds.contains = %v, Constraints.Check(%q) = %v",
+					t.Errorf("%q vs %q: versionRange.contains = %v, Constraints.Check(%q) = %v",
 						cs, vs, got, tc.oracle, want)
 				}
 			}
@@ -267,7 +267,7 @@ func TestBoundsAgreeWithMasterminds(t *testing.T) {
 // A release's prerelease likely carries changes meant for that release, so
 // "<1.25.0" leaves it out. Every other operator orders it in plain semver,
 // below the release.
-func TestBoundsPrereleaseOfARelease(t *testing.T) {
+func TestVersionRangePrereleaseOfARelease(t *testing.T) {
 	rc := semver.MustParse("1.25.0-rc.1")
 	tests := []struct {
 		rng  string
@@ -284,12 +284,12 @@ func TestBoundsPrereleaseOfARelease(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.rng, func(t *testing.T) {
-			b, err := parseBounds(tt.rng)
+			b, err := parseRange(tt.rng)
 			if err != nil {
-				t.Fatalf("parseBounds(%q) error = %v", tt.rng, err)
+				t.Fatalf("parseRange(%q) error = %v", tt.rng, err)
 			}
 			if got := b.contains(rc); got != tt.want {
-				t.Errorf("parseBounds(%q).contains(%s) = %v, want %v", tt.rng, rc, got, tt.want)
+				t.Errorf("parseRange(%q).contains(%s) = %v, want %v", tt.rng, rc, got, tt.want)
 			}
 		})
 	}

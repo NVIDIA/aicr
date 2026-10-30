@@ -490,7 +490,7 @@ func TestValidatePinCeilingSkipsReplacesOnlyRecord(t *testing.T) {
 	}
 }
 
-// parseBounds treats an empty or contradictory `to` interval (e.g.
+// parseRange treats an empty or contradictory `to` interval (e.g.
 // ">=0.30.0 <=0.19.0") as harmless: both range representations agree it
 // matches nothing. Rule 2 only ever compares upper(to) against the pin, so
 // such a to must be rejected explicitly, or a record moving the floor
@@ -585,7 +585,7 @@ func TestValidateDirectionalUnparseableToReportedOnce(t *testing.T) {
 	}
 }
 
-// parseBounds treats an empty or contradictory `from` interval (e.g.
+// parseRange treats an empty or contradictory `from` interval (e.g.
 // ">=0.20.0 <0.18.0") as harmless: both range representations agree it
 // matches nothing. checkDirectional compares upper(from) against lower(to),
 // so such a from must be rejected explicitly, or a record that can never

@@ -2537,23 +2537,23 @@ func TestAdmits(t *testing.T) {
 	tests := []struct {
 		name string
 		rng  string
-		at   bound
+		at   rangeEnd
 		want bool
 	}{
-		{"on an inclusive floor", ">=2.0.0 <3.0.0", bound{ver: v("2.0.0"), inclusive: true}, true},
-		{"on an exclusive floor", ">2.0.0 <3.0.0", bound{ver: v("2.0.0"), inclusive: true}, false},
-		{"just above an exclusive floor", ">2.0.0 <3.0.0", bound{ver: v("2.0.0")}, true},
-		{"just above an inclusive floor", ">=2.0.0 <3.0.0", bound{ver: v("2.0.0")}, true},
-		{"just above a version below the floor", ">=2.0.0 <3.0.0", bound{ver: v("1.9.0")}, false},
-		{"just above an inclusive ceiling", ">=1.0.0 <=2.0.0", bound{ver: v("2.0.0")}, false},
-		{"just above a version below the ceiling", ">=1.0.0 <2.0.0", bound{ver: v("1.9.0")}, true},
-		{"just above anything in an open range", "<3.0.0", bound{ver: v("2.0.0")}, true},
+		{"on an inclusive floor", ">=2.0.0 <3.0.0", rangeEnd{ver: v("2.0.0"), inclusive: true}, true},
+		{"on an exclusive floor", ">2.0.0 <3.0.0", rangeEnd{ver: v("2.0.0"), inclusive: true}, false},
+		{"just above an exclusive floor", ">2.0.0 <3.0.0", rangeEnd{ver: v("2.0.0")}, true},
+		{"just above an inclusive floor", ">=2.0.0 <3.0.0", rangeEnd{ver: v("2.0.0")}, true},
+		{"just above a version below the floor", ">=2.0.0 <3.0.0", rangeEnd{ver: v("1.9.0")}, false},
+		{"just above an inclusive ceiling", ">=1.0.0 <=2.0.0", rangeEnd{ver: v("2.0.0")}, false},
+		{"just above a version below the ceiling", ">=1.0.0 <2.0.0", rangeEnd{ver: v("1.9.0")}, true},
+		{"just above anything in an open range", "<3.0.0", rangeEnd{ver: v("2.0.0")}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b, err := parseBounds(tt.rng)
+			b, err := parseRange(tt.rng)
 			if err != nil {
-				t.Fatalf("parseBounds(%q): %v", tt.rng, err)
+				t.Fatalf("parseRange(%q): %v", tt.rng, err)
 			}
 			if got := admits(b, tt.at); got != tt.want {
 				t.Errorf("admits(%q, %+v) = %v, want %v", tt.rng, tt.at, got, tt.want)

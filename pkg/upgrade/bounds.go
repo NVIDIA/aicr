@@ -37,55 +37,55 @@ func newConstraint(s string) (*semver.Constraints, error) {
 	return c, nil
 }
 
-// bound is one side of a range. An unbounded side has no limit in that
+// rangeEnd is one side of a range. An unbounded side has no limit in that
 // direction; ver is nil there. A bounded side with a nil ver is the
-// zero-value result of a rejected parseBounds call and is treated as
+// zero-value result of a rejected parseRange call and is treated as
 // unsatisfiable rather than dereferenced.
-type bound struct {
+type rangeEnd struct {
 	ver       *semver.Version
 	inclusive bool
 	unbounded bool
 
 	// family reports whether ver is a release whose prereleases this
 	// exclusive upper side also leaves out, so the side sits at ver's first
-	// prerelease, X.Y.Z-0. parseBounds sets it for a release named by <, so
+	// prerelease, X.Y.Z-0. parseRange sets it for a release named by <, so
 	// "<1.25.0" leaves out 1.25.0-rc.1, which likely carries changes meant
 	// for 1.25.0. Every other operator compares in plain semver order, so
 	// ">=1.25.0" leaves it out too.
 	family bool
 }
 
-// at returns the version b compares at.
-func (b bound) at() *semver.Version {
+// comparedAt returns the version b compares at.
+func (b rangeEnd) comparedAt() *semver.Version {
 	if !b.family || b.ver == nil {
 		return b.ver
 	}
 	return semver.New(b.ver.Major(), b.ver.Minor(), b.ver.Patch(), "0", "")
 }
 
-// below returns the exclusive upper bound at v, which also leaves out v's
+// exclusiveEnd returns the exclusive upper end at v, which also leaves out v's
 // prereleases when v is a release.
-func below(v *semver.Version) bound {
-	return bound{ver: v, family: v.Prerelease() == ""}
+func exclusiveEnd(v *semver.Version) rangeEnd {
+	return rangeEnd{ver: v, family: v.Prerelease() == ""}
 }
 
-// bounds is a half-open or closed version interval.
-type bounds struct {
-	lower bound
-	upper bound
+// versionRange is a half-open or closed version interval.
+type versionRange struct {
+	lower rangeEnd
+	upper rangeEnd
 }
 
 // contains reports whether v falls inside the interval. The zero value of
-// bounds (both sides bounded with a nil ver, the shape returned alongside
-// every parseBounds error) contains nothing, so a caller that logs a
-// parseBounds error and calls contains anyway gets a safe "no match" instead
+// versionRange (both sides bounded with a nil ver, the shape returned alongside
+// every parseRange error) contains nothing, so a caller that logs a
+// parseRange error and calls contains anyway gets a safe "no match" instead
 // of a nil-pointer panic.
-func (b bounds) contains(v *semver.Version) bool {
+func (b versionRange) contains(v *semver.Version) bool {
 	if !b.lower.unbounded {
 		if b.lower.ver == nil {
 			return false
 		}
-		cmp := v.Compare(b.lower.at())
+		cmp := v.Compare(b.lower.comparedAt())
 		if cmp < 0 || (cmp == 0 && !b.lower.inclusive) {
 			return false
 		}
@@ -94,7 +94,7 @@ func (b bounds) contains(v *semver.Version) bool {
 		if b.upper.ver == nil {
 			return false
 		}
-		cmp := v.Compare(b.upper.at())
+		cmp := v.Compare(b.upper.comparedAt())
 		if cmp > 0 || (cmp == 0 && !b.upper.inclusive) {
 			return false
 		}
@@ -102,18 +102,18 @@ func (b bounds) contains(v *semver.Version) bool {
 	return true
 }
 
-// parseBounds returns the interval of constraint, which must be a single
+// parseRange returns the interval of constraint, which must be a single
 // AND-group of simple comparators. It rejects anything whose bounds are
 // ambiguous, and every error names constraint in full.
-func parseBounds(constraint string) (bounds, error) {
+func parseRange(constraint string) (versionRange, error) {
 	// Ambiguity is rejected rather than approximated, because a wrong
 	// structural check is worse than a rejected record.
 	if strings.Contains(constraint, "||") {
-		return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
+		return versionRange{}, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("range %q uses ||; only a single AND-group of simple comparators is allowed", constraint))
 	}
 	if strings.Contains(constraint, " - ") {
-		return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
+		return versionRange{}, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("range %q is a hyphen range; write explicit >= and <= comparators instead", constraint))
 	}
 
@@ -121,11 +121,11 @@ func parseBounds(constraint string) (bounds, error) {
 		return r == ' ' || r == ',' || r == '\t'
 	})
 	if len(fields) == 0 {
-		return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
+		return versionRange{}, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("range %q is empty", constraint))
 	}
 
-	var b bounds
+	var b versionRange
 	b.lower.unbounded = true
 	b.upper.unbounded = true
 	exactSet := false
@@ -133,58 +133,58 @@ func parseBounds(constraint string) (bounds, error) {
 	for i, f := range fields {
 		op, verStr := splitComparator(f)
 		if op == "" {
-			return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
+			return versionRange{}, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("range %q contains unsupported comparator %q; allowed: <, <=, >, >=, = or a bare version", constraint, f))
 		}
 		if verStr == "" {
 			// A space between the operator and the version (">= 0.18.0")
 			// splits into two fields; the operator alone reaches here with
 			// no version attached. This is not a grammar we widen to accept
-			// (Masterminds does, but bounds does not) — instead the message
+			// (Masterminds does, but parseRange does not). The message
 			// shows the join an author almost certainly meant.
 			suggestion := f
 			if i+1 < len(fields) {
 				suggestion = f + fields[i+1]
 			}
-			return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
+			return versionRange{}, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("range %q: comparator %q is missing a version; the operator and version must not be separated by a space (write %q)",
 					constraint, f, suggestion))
 		}
 		v, err := parseRangeVersion(constraint, verStr)
 		if err != nil {
-			return bounds{}, err
+			return versionRange{}, err
 		}
 		switch op {
 		case ">", ">=":
 			if exactSet {
-				return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
+				return versionRange{}, errors.New(errors.ErrCodeInvalidRequest,
 					fmt.Sprintf("range %q combines an exact version with another comparator", constraint))
 			}
 			if !b.lower.unbounded {
-				return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
+				return versionRange{}, errors.New(errors.ErrCodeInvalidRequest,
 					fmt.Sprintf("range %q sets a lower bound twice", constraint))
 			}
-			b.lower = bound{ver: v, inclusive: op == ">="}
+			b.lower = rangeEnd{ver: v, inclusive: op == ">="}
 		case "<", "<=":
 			if exactSet {
-				return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
+				return versionRange{}, errors.New(errors.ErrCodeInvalidRequest,
 					fmt.Sprintf("range %q combines an exact version with another comparator", constraint))
 			}
 			if !b.upper.unbounded {
-				return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
+				return versionRange{}, errors.New(errors.ErrCodeInvalidRequest,
 					fmt.Sprintf("range %q sets an upper bound twice", constraint))
 			}
-			b.upper = bound{ver: v, inclusive: true}
+			b.upper = rangeEnd{ver: v, inclusive: true}
 			if op == "<" {
-				b.upper = below(v)
+				b.upper = exclusiveEnd(v)
 			}
 		case "=":
 			if !b.lower.unbounded || !b.upper.unbounded {
-				return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
+				return versionRange{}, errors.New(errors.ErrCodeInvalidRequest,
 					fmt.Sprintf("range %q combines an exact version with another comparator", constraint))
 			}
-			b.lower = bound{ver: v, inclusive: true}
-			b.upper = bound{ver: v, inclusive: true}
+			b.lower = rangeEnd{ver: v, inclusive: true}
+			b.upper = rangeEnd{ver: v, inclusive: true}
 			exactSet = true
 		}
 	}

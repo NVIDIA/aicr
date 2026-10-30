@@ -109,11 +109,11 @@ func (u *ComponentUpgrades) AheadOf(version string) bool {
 		return false
 	}
 	for i := range u.Transitions {
-		b, err := parseBounds(u.Transitions[i].To)
+		b, err := parseRange(u.Transitions[i].To)
 		if err != nil || b.lower.unbounded || b.lower.ver == nil {
 			return false
 		}
-		cmp := v.Compare(b.lower.at())
+		cmp := v.Compare(b.lower.comparedAt())
 		if cmp > 0 || (cmp == 0 && b.lower.inclusive) {
 			return false
 		}

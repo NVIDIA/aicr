@@ -733,7 +733,7 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 	r.Jump = spanBetween(src, tgt)
 	r.Breaking = breaking(src, tgt)
 
-	crossed := crossings(u, pointAt(src), tgt)
+	crossed := crossings(u, inclusiveEnd(src), tgt)
 	// Recorded before the verdict is decided, because every branch below
 	// returns r and only some of them keep a record around.
 	r.Crossed = transitionsOf(crossed)
@@ -900,12 +900,12 @@ func landingPhrase(u *ComponentUpgrades, c crossing) string {
 // crossing pairs a transition with the floor its `to` names.
 type crossing struct {
 	tr    *Transition
-	floor bound
+	floor rangeEnd
 }
 
 // crossings returns the transitions a jump from at to tgt crosses, in
 // crossingBefore order.
-func crossings(u *ComponentUpgrades, at bound, tgt *semver.Version) []crossing {
+func crossings(u *ComponentUpgrades, at rangeEnd, tgt *semver.Version) []crossing {
 	if u == nil {
 		return nil
 	}
@@ -927,8 +927,8 @@ func crossingBefore(a, b crossing) bool {
 	if lowerBefore(a.floor, b.floor) || lowerBefore(b.floor, a.floor) {
 		return lowerBefore(a.floor, b.floor)
 	}
-	af, aErr := parseBounds(a.tr.From)
-	bf, bErr := parseBounds(b.tr.From)
+	af, aErr := parseRange(a.tr.From)
+	bf, bErr := parseRange(b.tr.From)
 	if aErr == nil && bErr == nil && (lowerBefore(af.lower, bf.lower) || lowerBefore(bf.lower, af.lower)) {
 		return lowerBefore(af.lower, bf.lower)
 	}
@@ -943,75 +943,75 @@ func crossingBefore(a, b crossing) bool {
 //
 //   - an unparseable `from` or `to` crosses nothing
 //   - a `to` with no floor crosses nothing
-func crosses(t *Transition, at bound, tgt *semver.Version) (floor bound, ok bool) {
-	if _, err := parseBounds(t.From); err != nil {
+func crosses(t *Transition, at rangeEnd, tgt *semver.Version) (floor rangeEnd, ok bool) {
+	if _, err := parseRange(t.From); err != nil {
 		// An unparseable `from` leaves no way to tell whose guidance this is,
 		// so the record stays inert rather than blocking every jump past it.
-		return bound{}, false
+		return rangeEnd{}, false
 	}
-	toRange, err := parseBounds(t.To)
+	toRange, err := parseRange(t.To)
 	if err != nil {
-		return bound{}, false
+		return rangeEnd{}, false
 	}
 	// A `to` with no floor names no boundary at all, so there is nothing to
 	// cross. Rule 2 rejects the shape, but Match also runs on Sets that never
 	// met Validate.
 	if toRange.lower.unbounded {
-		return bound{}, false
+		return rangeEnd{}, false
 	}
 	// `from` membership is fromCovers' question. Crossing ignores it so the
 	// at-risk scan sees every boundary a jump passes.
 	if !lowerBefore(at, toRange.lower) {
-		return bound{}, false
+		return rangeEnd{}, false
 	}
-	cmp := tgt.Compare(toRange.lower.at())
+	cmp := tgt.Compare(toRange.lower.comparedAt())
 	if cmp < 0 || (cmp == 0 && !toRange.lower.inclusive) {
-		return bound{}, false
+		return rangeEnd{}, false
 	}
 	return toRange.lower, true
 }
 
-// ceilingOf returns the ceiling of t's `to`, or the zero bound when it has
+// ceilingOf returns the ceiling of t's `to`, or the zero rangeEnd when it has
 // none or does not parse.
-func ceilingOf(u *ComponentUpgrades, t *Transition) bound {
+func ceilingOf(u *ComponentUpgrades, t *Transition) rangeEnd {
 	b, err := toBounds(u, t)
 	if err != nil || b.upper.unbounded || b.upper.ver == nil {
-		return bound{}
+		return rangeEnd{}
 	}
 	return b.upper
 }
 
-// pastBound reports whether v sits above a bounded ceiling. A version exactly
+// pastCeiling reports whether v sits above a bounded ceiling. A version exactly
 // at an inclusive ceiling is covered by it; at an exclusive one it is not.
-func pastBound(ceiling bound, v *semver.Version) bool {
-	cmp := v.Compare(ceiling.at())
+func pastCeiling(ceiling rangeEnd, v *semver.Version) bool {
+	cmp := v.Compare(ceiling.comparedAt())
 	return cmp > 0 || (cmp == 0 && !ceiling.inclusive)
 }
 
 // ceilingPhrase names the highest version a ceiling actually covers, as a place
 // an operator can be told to stop. The bare number will not do: "<0.19.0" and
 // "<=0.19.0" end at different versions, and only one of them is 0.19.0 itself.
-func ceilingPhrase(b bound) string {
+func ceilingPhrase(b rangeEnd) string {
 	if b.inclusive {
 		return b.ver.String()
 	}
 	return "the last version below " + b.ver.String()
 }
 
-// pointAt returns the inclusive bound at v.
-func pointAt(v *semver.Version) bound {
-	return bound{ver: v, inclusive: true}
+// inclusiveEnd returns the inclusive range end at v.
+func inclusiveEnd(v *semver.Version) rangeEnd {
+	return rangeEnd{ver: v, inclusive: true}
 }
 
 // onlyVersion returns the interval holding v and nothing else.
-func onlyVersion(v *semver.Version) bounds {
-	return bounds{lower: pointAt(v), upper: pointAt(v)}
+func onlyVersion(v *semver.Version) versionRange {
+	return versionRange{lower: inclusiveEnd(v), upper: inclusiveEnd(v)}
 }
 
 // fromCovers reports whether t's `from` admits at. An unparseable `from`
 // admits nothing.
-func fromCovers(t *Transition, at bound) bool {
-	b, err := parseBounds(t.From)
+func fromCovers(t *Transition, at rangeEnd) bool {
+	b, err := parseRange(t.From)
 	if err != nil {
 		return false
 	}
@@ -1020,14 +1020,14 @@ func fromCovers(t *Transition, at bound) bool {
 
 // admits reports whether b holds at. A non-inclusive at stands just above its
 // version.
-func admits(b bounds, at bound) bool {
+func admits(b versionRange, at rangeEnd) bool {
 	if at.inclusive {
-		return b.contains(at.at())
+		return b.contains(at.comparedAt())
 	}
-	if !b.lower.unbounded && (b.lower.ver == nil || at.at().Compare(b.lower.at()) < 0) {
+	if !b.lower.unbounded && (b.lower.ver == nil || at.comparedAt().Compare(b.lower.comparedAt()) < 0) {
 		return false
 	}
-	if !b.upper.unbounded && (b.upper.ver == nil || at.at().Compare(b.upper.at()) >= 0) {
+	if !b.upper.unbounded && (b.upper.ver == nil || at.comparedAt().Compare(b.upper.comparedAt()) >= 0) {
 		return false
 	}
 	return true
@@ -1041,13 +1041,13 @@ func leadsFrom(u *ComponentUpgrades, src *semver.Version) []string {
 	}
 	type lead struct {
 		text string
-		to   bounds
+		to   versionRange
 	}
 	var leads []lead
 	for i := range u.Transitions {
 		t := &u.Transitions[i]
 		text := toText(u, t)
-		if !fromCovers(t, pointAt(src)) || slices.ContainsFunc(leads, func(l lead) bool { return l.text == text }) {
+		if !fromCovers(t, inclusiveEnd(src)) || slices.ContainsFunc(leads, func(l lead) bool { return l.text == text }) {
 			continue
 		}
 		to, err := toBounds(u, t)
@@ -1066,7 +1066,7 @@ func leadsFrom(u *ComponentUpgrades, src *semver.Version) []string {
 
 // toBefore reports whether a sorts before b by floor, unbounded first, then by
 // their text aText and bText.
-func toBefore(a, b bounds, aText, bText string) bool {
+func toBefore(a, b versionRange, aText, bText string) bool {
 	if lowerBefore(a.lower, b.lower) || lowerBefore(b.lower, a.lower) {
 		return lowerBefore(a.lower, b.lower)
 	}
@@ -1099,8 +1099,8 @@ func floorNames(crossed []crossing) []string {
 	return names
 }
 
-func boundaryKeyOf(b bound) boundaryKey {
-	return boundaryKey{ver: b.at().String(), inclusive: b.inclusive}
+func boundaryKeyOf(b rangeEnd) boundaryKey {
+	return boundaryKey{ver: b.comparedAt().String(), inclusive: b.inclusive}
 }
 
 // crossingPhrase returns the clause naming the distinct floors in crossed,
@@ -1148,12 +1148,12 @@ func unmatched(u *ComponentUpgrades, r ComponentResult, src, tgt *semver.Version
 				"not repeat the work",
 			r.From, r.To)
 	default:
-		if top, ceiling, ok := highestCeiling(u); ok && pastBound(ceiling, tgt) {
+		if top, ceiling, ok := highestCeiling(u); ok && pastCeiling(ceiling, tgt) {
 			r.Verdict = VerdictBlocked
 			r.Reason = ReasonBeyondRecordCeiling
 			r.StoppedAt = toText(u, top)
 			r.Explanation = beyondCeilingExplanation(ceiling, r.To)
-			if pastBound(ceiling, src) || (ceiling.inclusive && src.Equal(ceiling.ver)) {
+			if pastCeiling(ceiling, src) || (ceiling.inclusive && src.Equal(ceiling.ver)) {
 				r.Explanation = sourceAtCeilingExplanation(ceiling, src, r.From, r.To)
 			}
 			return r
@@ -1172,7 +1172,7 @@ func unmatched(u *ComponentUpgrades, r ComponentResult, src, tgt *semver.Version
 
 // beyondCeilingExplanation states what both routes to ReasonBeyondRecordCeiling
 // have in common: assessment stops at a version the target is above.
-func beyondCeilingExplanation(ceiling bound, target string) string {
+func beyondCeilingExplanation(ceiling rangeEnd, target string) string {
 	landing := ceilingPhrase(ceiling)
 	return fmt.Sprintf(
 		"transition records for this component assess only as far as %s, and %s lands past that, "+
@@ -1184,9 +1184,9 @@ func beyondCeilingExplanation(ceiling bound, target string) string {
 // sourceAtCeilingExplanation returns the Explanation for a jump past ceiling
 // from a source already at or past it, which leaves no recorded version to
 // stop at.
-func sourceAtCeilingExplanation(ceiling bound, src *semver.Version, source, target string) string {
+func sourceAtCeilingExplanation(ceiling rangeEnd, src *semver.Version, source, target string) string {
 	where := "at"
-	if pastBound(ceiling, src) {
+	if pastCeiling(ceiling, src) {
 		where = "past"
 	}
 	return fmt.Sprintf(
@@ -1198,7 +1198,7 @@ func sourceAtCeilingExplanation(ceiling bound, src *semver.Version, source, targ
 
 // pathCeilingExplanation returns the Explanation for a jump from source to
 // target whose route stops assessing at ceiling, below the component's highest.
-func pathCeilingExplanation(ceiling bound, source, target string) string {
+func pathCeilingExplanation(ceiling rangeEnd, source, target string) string {
 	landing := ceilingPhrase(ceiling)
 	return fmt.Sprintf(
 		"the records along the upgrade path from %s assess only as far as %s, and %s lands past that, "+
@@ -1210,18 +1210,18 @@ func pathCeilingExplanation(ceiling bound, source, target string) string {
 // highestCeiling returns the transition whose `to` reaches furthest, and that
 // ceiling, breaking ties by toBefore. ok is false when a `to` has no ceiling
 // or none parses.
-func highestCeiling(u *ComponentUpgrades) (top *Transition, highest bound, ok bool) {
+func highestCeiling(u *ComponentUpgrades) (top *Transition, highest rangeEnd, ok bool) {
 	if u == nil {
-		return nil, bound{}, false
+		return nil, rangeEnd{}, false
 	}
-	var topTo bounds
+	var topTo versionRange
 	for i := range u.Transitions {
 		b, err := toBounds(u, &u.Transitions[i])
 		if err != nil {
 			continue
 		}
 		if b.upper.unbounded || b.upper.ver == nil {
-			return nil, bound{}, false
+			return nil, rangeEnd{}, false
 		}
 		tie := top != nil && !upperAfter(b.upper, highest) && !upperAfter(highest, b.upper)
 		if top == nil || upperAfter(b.upper, highest) || (tie && toBefore(b, topTo, u.Transitions[i].To, top.To)) {
@@ -1229,7 +1229,7 @@ func highestCeiling(u *ComponentUpgrades) (top *Transition, highest bound, ok bo
 		}
 	}
 	if top == nil {
-		return nil, bound{}, false
+		return nil, rangeEnd{}, false
 	}
 	return top, highest, true
 }
@@ -1276,7 +1276,7 @@ func undefinedOriginExplanation(u *ComponentUpgrades, r ComponentResult, crossed
 func unlistedPassage(u *ComponentUpgrades, crossed []crossing, src, tgt *semver.Version) (rec, passed crossing, ok bool) {
 	at := onlyVersion(src)
 	for _, c := range crossed {
-		if !fromCovers(c.tr, pointAt(src)) {
+		if !fromCovers(c.tr, inclusiveEnd(src)) {
 			continue
 		}
 		to, err := toBounds(u, c.tr)
@@ -1302,7 +1302,7 @@ func earliestOrigin(u *ComponentUpgrades) *semver.Version {
 	}
 	var lowest *semver.Version
 	for i := range u.Transitions {
-		b, err := parseBounds(u.Transitions[i].From)
+		b, err := parseRange(u.Transitions[i].From)
 		if err != nil {
 			continue
 		}
