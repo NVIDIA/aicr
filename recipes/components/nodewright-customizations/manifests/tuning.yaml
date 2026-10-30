@@ -42,8 +42,8 @@ metadata:
   namespace: {{ .Release.Namespace }}
 spec:
   runtimeRequired: true
-  # Serialize this CR's reboots to one node at a time. nvidia-tuned and
-  # nvidia-setup-full both carry `interrupt: reboot`.
+  # Serialize this CR's reboots to one node at a time. nvidia-tuned,
+  # nvidia-setup-full and, on EKS, nvidia-setup-kernel carry `interrupt: reboot`.
   # An omitted budget is not "unset": createLegacyDefaultCompartment
   # substitutes percent: 100, so every matched node reboots together.
   #
@@ -99,13 +99,26 @@ spec:
   {{- end }}
   # Tuning
   packages:
-    # Check for kernel being >= to 6.17.0-1019 and if not install.
+    # Install the kernel the nvidia-setup defaults pin (7.0.0-1014-aws on EKS,
+    # the -64k flavor on arm64) unless the node already runs it.
     # On AKS this package is a designed no-op: the aks defaults omit KERNEL
     # (AKS manages its own Ubuntu kernel) and ensure_kernel exits early.
     nvidia-setup-kernel:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-setup
-      version: "0.8.0"
-      containerSHA: sha256:1551abdd54476f6bddce863d383903a0a76f8a91bb4daa53c4f3c9490b980dae
+      version: "0.9.0"
+      # TODO: the nvidia-setup 0.9.0 release digest, once nvidia-setup/0.9.0 is tagged.
+      containerSHA: TODO
+      {{- if eq (toString $cust.service) "eks" }}
+      # On an existing EKS node this package does disruptive work: a version bump
+      # runs its upgrade step, which upgrades EFA (an efa module too old for the
+      # new kernel would fail its DKMS build there) and installs the new kernel.
+      # Its own reboot is what makes the operator cordon and drain the node before
+      # that work, and boot the new kernel before nvidia-setup-full, whose exact
+      # kernel check needs it running. Not on AKS, where this package is a no-op
+      # and its post-interrupt check would compare against an unset kernel.
+      interrupt:
+        type: reboot
+      {{- end }}
       configMap:
         {{- if $cust.service }}
         service: {{ $cust.service }}
@@ -120,10 +133,13 @@ spec:
       {{- /* as such or deployers like Argo that continuously sync the resources will result in a */}}
       {{- /* broken deployment. See https://github.com/NVIDIA/nodewright/pull/450 */}}
       resources:
-        cpuLimit: 4
-        cpuRequest: 2
-        memoryLimit: 8Gi
-        memoryRequest: 4Gi
+        # Sized like nvidia-setup-full: on an existing node this package now
+        # builds EFA with DKMS. At 4 CPU / 8Gi on GB300 the memory cgroup
+        # OOM-killed efa's kernel-feature probes and the build failed.
+        cpuLimit: 8
+        cpuRequest: 4
+        memoryLimit: 16Gi
+        memoryRequest: 8Gi
 
     {{- /* Per-package gate (default true). The AKS overlays set tuningEnabled: false */}}
     {{- /* under the Azure-managed driver profile: skipping nvidia-tuned avoids its */}}
@@ -157,15 +173,17 @@ spec:
         {{- if $cust.service }}
         service: {{ $cust.service }}
         {{- end }}
-      dependsOn:
-        nvidia-setup-kernel: "0.8.0"
+      # No dependsOn on nvidia-setup-kernel: the two run in the same pass, so on a
+      # fresh node their reboots coalesce into one. On a version bump of either,
+      # its own reboot lands before nvidia-setup-full, which waits on both.
     {{- end }}
 
     # Full setup after kernel is in place
     nvidia-setup-full:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-setup
-      version: "0.8.0"
-      containerSHA: sha256:1551abdd54476f6bddce863d383903a0a76f8a91bb4daa53c4f3c9490b980dae
+      version: "0.9.0"
+      # TODO: the nvidia-setup 0.9.0 release digest, once nvidia-setup/0.9.0 is tagged.
+      containerSHA: TODO
       interrupt:
         type: reboot
       {{- /* Until nodewright >= v0.18 resources that get reduced to whole numbers should be expressed */}}
@@ -194,9 +212,8 @@ spec:
       dependsOn:
         {{- /* With tuning disabled, chain directly off the kernel package — */}}
         {{- /* never leave a dangling dependsOn on the omitted nvidia-tuned. */}}
+        nvidia-setup-kernel: "0.9.0"
         {{- if ne (toString (index $cust "tuningEnabled")) "false" }}
         nvidia-tuned: "0.11.0"
-        {{- else }}
-        nvidia-setup-kernel: "0.8.0"
         {{- end }}
 {{- end }}
