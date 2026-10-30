@@ -63,7 +63,8 @@ func derivedCeiling(u *ComponentUpgrades, to versionRange) (ceiling rangeEnd, ok
 	return exclusiveEnd(next), true
 }
 
-// targetRangeText returns t's `to` as written, with the ceiling derivedCeiling adds.
+// targetRangeText returns t's `to` as written, with the ceiling
+// derivedCeiling adds.
 func targetRangeText(u *ComponentUpgrades, t *Transition) string {
 	b, err := parseRange(t.To)
 	if err != nil {
@@ -212,11 +213,11 @@ func passages(u *ComponentUpgrades, t *Transition) []passage {
 	return passagesBetween(u, t, from, to)
 }
 
-// passagesBetween returns the boundaries t's moves from a version in from to one in
-// to pass, in crossingBefore order. A move passes another transition's floor
-// when it starts below the floor, reaches it, and that transition's `from`
-// admits a version the move goes by below it. A floor t shares counts only
-// when the other transition is blocked and t is not.
+// passagesBetween returns the boundaries t's moves from a version in from to
+// one in to pass, in crossingBefore order. A move passes another transition's
+// floor when it starts below the floor, reaches it, and that transition's
+// `from` admits a version the move goes by below it. A floor t shares counts
+// only when the other transition is blocked and t is not.
 func passagesBetween(u *ComponentUpgrades, t *Transition, from, to versionRange) []passage {
 	own, ok := targetFloor(u, t)
 	if !ok {
@@ -299,8 +300,8 @@ func describes(u *ComponentUpgrades, t *Transition, from, to versionRange) bool 
 	return !slices.ContainsFunc(passagesBetween(u, t, from, to), func(p passage) bool { return p.unclearedBy(t) })
 }
 
-// floorOnlyRange returns the interval holding only t's `to` floor, or the zero versionRange
-// when `to` does not parse.
+// floorOnlyRange returns the interval holding only t's `to` floor, or the
+// zero versionRange when `to` does not parse.
 func floorOnlyRange(u *ComponentUpgrades, t *Transition) versionRange {
 	to, err := targetRange(u, t)
 	if err != nil {
@@ -309,7 +310,8 @@ func floorOnlyRange(u *ComponentUpgrades, t *Transition) versionRange {
 	return versionRange{lower: to.lower, upper: rangeEnd{ver: to.lower.ver, inclusive: to.lower.inclusive, family: to.lower.family}}
 }
 
-// transitionsWithinStepLimit returns u's transitions that keep to its step limit.
+// transitionsWithinStepLimit returns u's transitions that keep to its step
+// limit.
 func transitionsWithinStepLimit(u *ComponentUpgrades) sets.Set[*Transition] {
 	out := sets.New[*Transition]()
 	if u == nil {
@@ -523,11 +525,12 @@ func moves(u *ComponentUpgrades, r route, src, tgt *semver.Version) []move {
 }
 
 // joinMustSplit reports whether joining run into one move from start to end
-// would pass the floor of a record outside run that is a RequiredStop admitting a version in
-// start, or manual or blocked and admitting a version the move goes by below
-// the floor. A hop in run listing the floor clears a manual or blocked one
-// unless that record admits a version in start. Rule 11 lets a hop list a
-// stricter floor only for sources outside that record's `from`.
+// would pass the floor of a record outside run that is a RequiredStop
+// admitting a version in start, or manual or blocked and admitting a version
+// the move goes by below the floor. A hop in run listing the floor clears a
+// manual or blocked one unless that record admits a version in start. Rule 11
+// lets a hop list a stricter floor only for sources outside that record's
+// `from`.
 func joinMustSplit(u *ComponentUpgrades, run []crossing, start, end versionRange) bool {
 	for _, r := range floorsBetween(u, start, end) {
 		s := r.tr
@@ -601,9 +604,9 @@ func rangeText(b versionRange) string {
 	return strings.Join(parts, " ")
 }
 
-// landsText returns the range m, a move before the last, lands in, written as
-// its last hop's `to` when the landing is all of it.
-func landsText(u *ComponentUpgrades, m move) string {
+// moveLandingText returns the range m, a move before the last, lands in,
+// written as its last hop's `to` when the landing is all of it.
+func moveLandingText(u *ComponentUpgrades, m move) string {
 	last := m.hops[len(m.hops)-1].tr
 	if to, err := targetRange(u, last); err == nil && endsEqual(to.lower, m.lands.lower) && endsEqual(to.upper, m.lands.upper) {
 		return targetRangeText(u, last)
@@ -622,11 +625,12 @@ func endsEqual(a, b rangeEnd) bool {
 	return a.inclusive == b.inclusive && a.comparedAt().Equal(b.comparedAt())
 }
 
-// landsPhrase returns the lowest version m, a move before the last, lands on
-// when that is inclusive, and "a version in" its landing range otherwise.
-func landsPhrase(u *ComponentUpgrades, m move) string {
+// moveLandingPhrase returns the lowest version m, a move before the last,
+// lands on when that is inclusive, and "a version in" its landing range
+// otherwise.
+func moveLandingPhrase(u *ComponentUpgrades, m move) string {
 	if m.lands.lower.inclusive && m.lands.lower.ver != nil {
 		return m.lands.lower.ver.String()
 	}
-	return "a version in " + landsText(u, m)
+	return "a version in " + moveLandingText(u, m)
 }

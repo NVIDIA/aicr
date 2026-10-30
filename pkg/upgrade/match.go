@@ -738,7 +738,7 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 	// returns r and only some of them keep a record around.
 	r.Crossed = transitionsOf(crossed)
 	if len(crossed) == 0 {
-		return unmatched(u, r, src, tgt)
+		return noCrossingResult(u, r, src, tgt)
 	}
 	best, complete, ok := plan(u, crossed, src, tgt)
 	if !ok {
@@ -752,16 +752,16 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 	if len(ms) == 1 {
 		last := ms[0].hops[len(ms[0].hops)-1]
 		if !complete {
-			r = stalledResult(u, r, last, crossed)
+			r = partialRouteResult(u, r, last, crossed)
 			// A lone blocked record below the target holds the component at
 			// its ceiling.
 			if len(ms[0].hops) == 1 && last.tr.Verdict == VerdictBlocked && r.Reason == ReasonBeyondRecordCeiling {
-				r.Explanation = heldExplanation(u, r, last)
+				r.Explanation = blockedCeilingExplanation(u, r, last)
 			}
 			return r
 		}
 		// A blocked record that describes the move keeps its steps.
-		r = lend(u, r, src, last)
+		r = recordedResult(u, r, src, last)
 		if r.Verdict == VerdictBlocked {
 			r.StoppedAt = targetRangeText(u, r.Transition)
 		}
@@ -780,7 +780,7 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 		return r
 	}
 	r.Reason = ReasonMultipleBoundaries
-	r.StoppedAt = landsText(u, ms[0])
+	r.StoppedAt = moveLandingText(u, ms[0])
 	r.Explanation = multipleBoundariesExplanation(u, r, crossed, ms)
 	return r
 }
@@ -791,7 +791,7 @@ func routeStops(u *ComponentUpgrades, ms []move, target string) []RouteStop {
 	for i, m := range ms {
 		out[i] = RouteStop{Versions: target, Verdict: m.verdict()}
 		if i < len(ms)-1 {
-			out[i].Versions = landsText(u, m)
+			out[i].Versions = moveLandingText(u, m)
 		}
 	}
 	return out
@@ -802,7 +802,7 @@ func routeStops(u *ComponentUpgrades, ms []move, target string) []RouteStop {
 func multipleBoundariesExplanation(u *ComponentUpgrades, r ComponentResult, crossed []crossing, ms []move) string {
 	first := ms[0]
 	s := fmt.Sprintf("%s; no single record describes the whole jump. Upgrade to %s first, then re-run this check",
-		crossingPhrase(crossed), landsPhrase(u, first))
+		crossingPhrase(crossed), moveLandingPhrase(u, first))
 	switch first.why {
 	case stopRequired:
 		last := first.hops[len(first.hops)-1]
@@ -822,8 +822,8 @@ func multipleBoundariesExplanation(u *ComponentUpgrades, r ComponentResult, cros
 	return s + fmt.Sprintf(". The whole route takes %d upgrades: to %s", len(parts), strings.Join(parts, ", then to "))
 }
 
-// lend returns r with the verdict, Transition and Span of c's record.
-func lend(u *ComponentUpgrades, r ComponentResult, src *semver.Version, c crossing) ComponentResult {
+// recordedResult returns r with the verdict, Transition and Span of c's record.
+func recordedResult(u *ComponentUpgrades, r ComponentResult, src *semver.Version, c crossing) ComponentResult {
 	r.Verdict = c.tr.Verdict
 	r.Transition = c.tr
 	r.Span = claimSpan(u, src, c.tr)
@@ -832,10 +832,10 @@ func lend(u *ComponentUpgrades, r ComponentResult, src *semver.Version, c crossi
 	return r
 }
 
-// stalledResult returns r blocked for a route whose last hop stops short of
-// the target, with ReasonUndefinedOrigin when a floor in crossed sits past
+// partialRouteResult returns r blocked for a route whose last hop stops short
+// of the target, with ReasonUndefinedOrigin when a floor in crossed sits past
 // last's ceiling and ReasonBeyondRecordCeiling otherwise.
-func stalledResult(u *ComponentUpgrades, r ComponentResult, last crossing, crossed []crossing) ComponentResult {
+func partialRouteResult(u *ComponentUpgrades, r ComponentResult, last crossing, crossed []crossing) ComponentResult {
 	r.Verdict = VerdictBlocked
 	var ahead []crossing
 	if to, err := targetRange(u, last.tr); err == nil {
@@ -860,7 +860,7 @@ func stalledResult(u *ComponentUpgrades, r ComponentResult, last crossing, cross
 	r.Explanation = fmt.Sprintf(
 		"%s, but no record describes an upgrade starting from %s, where the records written for %s lead. "+
 			"Author a record for that starting point, then re-run this check",
-		crossingPhrase(ahead), landingPhrase(u, last), r.From)
+		crossingPhrase(ahead), floorPhrase(u, last), r.From)
 	return r
 }
 
@@ -871,26 +871,26 @@ func recordBlocksExplanation(u *ComponentUpgrades, r ComponentResult, ms []move,
 	s := fmt.Sprintf("blocked by the record covering %s: do not move from %s into %s in one step. ",
 		b.floor.ver, r.From, targetRangeText(u, b.tr))
 	if i > 0 {
-		return s + fmt.Sprintf("Upgrade to %s first, then re-run this check", landsPhrase(u, ms[0]))
+		return s + fmt.Sprintf("Upgrade to %s first, then re-run this check", moveLandingPhrase(u, ms[0]))
 	}
 	return s + fmt.Sprintf("Check the move from %s to %s on its own for that record's steps, "+
-		"then re-run this check", r.From, landingPhrase(u, b))
+		"then re-run this check", r.From, floorPhrase(u, b))
 }
 
-// heldExplanation returns r's Explanation when b, a lone blocked hop, stops
-// assessing below the target.
-func heldExplanation(u *ComponentUpgrades, r ComponentResult, b crossing) string {
+// blockedCeilingExplanation returns r's Explanation when b, a lone blocked
+// hop, stops assessing below the target.
+func blockedCeilingExplanation(u *ComponentUpgrades, r ComponentResult, b crossing) string {
 	ceiling := targetCeiling(u, b.tr)
 	return fmt.Sprintf(
 		"the record covering %s assesses only as far as %s, and %s lands past that. It also blocks moving "+
 			"from %s into %s in one step. Check the move from %s to %s on its own for that record's steps, "+
 			"then re-run this check",
-		b.floor.ver, ceilingPhrase(ceiling), r.To, r.From, targetRangeText(u, b.tr), r.From, landingPhrase(u, b))
+		b.floor.ver, ceilingPhrase(ceiling), r.To, r.From, targetRangeText(u, b.tr), r.From, floorPhrase(u, b))
 }
 
-// landingPhrase returns c's floor version, or "a version in" c's `to` when the
+// floorPhrase returns c's floor version, or "a version in" c's `to` when the
 // floor is exclusive.
-func landingPhrase(u *ComponentUpgrades, c crossing) string {
+func floorPhrase(u *ComponentUpgrades, c crossing) string {
 	if c.floor.inclusive {
 		return c.floor.ver.String()
 	}
@@ -971,8 +971,8 @@ func crosses(t *Transition, at rangeEnd, tgt *semver.Version) (floor rangeEnd, o
 	return toRange.lower, true
 }
 
-// targetCeiling returns the ceiling of t's `to`, or the zero rangeEnd when it has
-// none or does not parse.
+// targetCeiling returns the ceiling of t's `to`, or the zero rangeEnd when it
+// has none or does not parse.
 func targetCeiling(u *ComponentUpgrades, t *Transition) rangeEnd {
 	b, err := targetRange(u, t)
 	if err != nil || b.upper.unbounded || b.upper.ver == nil {
@@ -1064,8 +1064,8 @@ func leadsFrom(u *ComponentUpgrades, src *semver.Version) []string {
 	return out
 }
 
-// targetRangeBefore reports whether a sorts before b by floor, unbounded first, then by
-// their text aText and bText.
+// targetRangeBefore reports whether a sorts before b by floor, unbounded
+// first, then by their text aText and bText.
 func targetRangeBefore(a, b versionRange, aText, bText string) bool {
 	if lowerBefore(a.lower, b.lower) || lowerBefore(b.lower, a.lower) {
 		return lowerBefore(a.lower, b.lower)
@@ -1113,7 +1113,7 @@ func crossingPhrase(crossed []crossing) string {
 	return fmt.Sprintf("crosses %d recorded boundaries (%s)", len(names), strings.Join(names, ", "))
 }
 
-// unmatched classifies a jump that crosses no recorded boundary.
+// noCrossingResult classifies a jump that crosses no recorded boundary.
 //
 // Direction comes first: a downgrade needs a reverse record rule 7 forbids, so
 // reporting a coverage gap there would point the reader at a remedy that cannot
@@ -1127,7 +1127,7 @@ func crossingPhrase(crossed []crossing) string {
 // is still below it, the jump passes the ceiling and the explanation names
 // where assessment stops. When src is already at or past it, nothing assesses
 // any move from src at all, and the explanation says so instead.
-func unmatched(u *ComponentUpgrades, r ComponentResult, src, tgt *semver.Version) ComponentResult {
+func noCrossingResult(u *ComponentUpgrades, r ComponentResult, src, tgt *semver.Version) ComponentResult {
 	switch {
 	case r.Downgrade:
 		r.Verdict = VerdictUnknown
@@ -1208,8 +1208,8 @@ func pathCeilingExplanation(ceiling rangeEnd, source, target string) string {
 }
 
 // highestCeiling returns the transition whose `to` reaches furthest, and that
-// ceiling, breaking ties by targetRangeBefore. ok is false when a `to` has no ceiling
-// or none parses.
+// ceiling, breaking ties by targetRangeBefore. ok is false when a `to` has no
+// ceiling or none parses.
 func highestCeiling(u *ComponentUpgrades) (top *Transition, highest rangeEnd, ok bool) {
 	if u == nil {
 		return nil, rangeEnd{}, false
