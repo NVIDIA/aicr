@@ -283,6 +283,12 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
 			"invalid bundler configuration")
 	}
+	// Before any output exists: os.CopyFS will not overwrite the data files a
+	// rejected attempt leaves behind, so a corrected rerun into the same
+	// directory would fail.
+	if err := b.validateDeployerConfig(); err != nil {
+		return nil, err
+	}
 
 	// Reject incoherent component refs (e.g. a Helm ref that also carries a
 	// Kustomize tag/path, which the deployers silently build as Kustomize)
@@ -821,35 +827,8 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 		"dynamic_components", len(dynamicValues),
 	)
 
-	// Readiness gate emission is wired for the deployers whose ordering
-	// primitive can block on the gate Job:
-	//   - helm: deploy.sh runs the folder's install.sh with
-	//     `helm upgrade --install --wait`; the gate Job is a helm hook, and
-	//     helm blocks on hook completion as part of the release.
-	//   - argocd / argocd-helm: the gate folder inherits the next sync-wave,
-	//     and Argo CD's built-in batch/Job health blocks that wave until the
-	//     Job completes.
-	//   - terraform: the gate is the last helm_release in the component's
-	//     module call, and the provider blocks on the hook as helm does.
-	// Flux, helmfile and fleet wrap each folder in HelmRelease / needs /
-	// dependsOn semantics that need dedicated gating wiring (not yet
-	// implemented). Fail clearly rather
-	// than silently dropping the opt-in flag and shipping a bundle without the
-	// readiness gate the user asked for. See #904.
-	if b.Config.ReadinessHooks() {
-		switch b.Config.Deployer() {
-		case config.DeployerHelm, config.DeployerArgoCD, config.DeployerArgoCDHelm, config.DeployerTerraform:
-			// supported. terraform gates on the emitted readiness release
-			// natively: the gate arrives as one more folder in the
-			// component's chain and becomes the last helm_release in its
-			// module; the gate Job is a helm hook, so that release does not
-			// apply until the Job COMPLETES, and a dependent's depends_on
-			// on the module call waits for it.
-		case config.DeployerFlux, config.DeployerHelmfile, config.DeployerFleet:
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("--readiness-hooks is not supported with --deployer %q; supported deployers: helm, argocd, argocd-helm, terraform",
-					b.Config.Deployer()))
-		}
+	if err = b.validateDeployerConfig(); err != nil {
+		return nil, err
 	}
 
 	argoOpts, err := b.argoDeployerOptions()
@@ -910,10 +889,6 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 		}, nil
 
 	case config.DeployerArgoCD:
-		if b.Config.HasDynamicValues() {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				"dynamic declarations are not supported with deployer \"argocd\"; use deployer \"argocd-helm\" instead")
-		}
 		componentPreManifests, err := b.collectComponentPreManifests(ctx, recipeResult)
 		if err != nil {
 			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
@@ -1076,6 +1051,50 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 	}
 }
 
+// validateDeployerConfig rejects deployer settings that are invalid whatever
+// the recipe.
+func (b *DefaultBundler) validateDeployerConfig() error {
+	// Readiness gate emission is wired for the deployers whose ordering
+	// primitive can block on the gate Job:
+	//   - helm: deploy.sh runs the folder's install.sh with
+	//     `helm upgrade --install --wait`; the gate Job is a helm hook, and
+	//     helm blocks on hook completion as part of the release.
+	//   - argocd / argocd-helm: the gate folder inherits the next sync-wave,
+	//     and Argo CD's built-in batch/Job health blocks that wave until the
+	//     Job completes.
+	//   - terraform: the gate is the last helm_release in the component's
+	//     module call, and the provider blocks on the hook as helm does.
+	// Flux, helmfile and fleet wrap each folder in HelmRelease / needs /
+	// dependsOn semantics that need dedicated gating wiring (not yet
+	// implemented). Fail clearly rather
+	// than silently dropping the opt-in flag and shipping a bundle without the
+	// readiness gate the user asked for. See #904.
+	if b.Config.ReadinessHooks() {
+		switch b.Config.Deployer() {
+		case config.DeployerHelm, config.DeployerArgoCD, config.DeployerArgoCDHelm, config.DeployerTerraform:
+			// supported. terraform gates on the emitted readiness release
+			// natively: the gate arrives as one more folder in the
+			// component's chain and becomes the last helm_release in its
+			// module; the gate Job is a helm hook, so that release does not
+			// apply until the Job COMPLETES, and a dependent's depends_on
+			// on the module call waits for it.
+		case config.DeployerFlux, config.DeployerHelmfile, config.DeployerFleet:
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("--readiness-hooks is not supported with --deployer %q; supported deployers: helm, argocd, argocd-helm, terraform",
+					b.Config.Deployer()))
+		}
+	}
+
+	if _, err := b.resolveArgoDeployerOptions(); err != nil {
+		return err
+	}
+	if b.Config.Deployer() == config.DeployerArgoCD && b.Config.HasDynamicValues() {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"dynamic declarations are not supported with deployer \"argocd\"; use deployer \"argocd-helm\" instead")
+	}
+	return nil
+}
+
 // argoDeployerOptions resolves the deployer-level Argo Application options
 // from the dedicated Argo CD settings and the deprecated
 // `--set deployer:<key>=<value>` value overrides. Resolving here, in front
@@ -1088,6 +1107,25 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 // input would ship a misconfigured artifact.
 // Returns a zero-value options struct when nothing was set.
 func (b *DefaultBundler) argoDeployerOptions() (*config.ArgoDeployerOptions, error) {
+	opts, err := b.resolveArgoDeployerOptions()
+	if err != nil {
+		return nil, err
+	}
+	legacy := b.Config.ValueOverrides()[config.DeployerOverrideKey]
+	keys := make([]string, 0, len(legacy))
+	for key := range legacy {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	for _, key := range keys {
+		warnDeprecated(config.LegacyDeployerNotice(key))
+	}
+	return opts, nil
+}
+
+// resolveArgoDeployerOptions is argoDeployerOptions without the deprecation
+// warnings, so validateDeployerConfig can run it without warning twice.
+func (b *DefaultBundler) resolveArgoDeployerOptions() (*config.ArgoDeployerOptions, error) {
 	if typed := b.Config.ValueOverridesTyped()[config.DeployerOverrideKey]; len(typed) > 0 {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"deployer options do not support --set-json/--set-file; use the --argocd-* settings")
@@ -1107,14 +1145,6 @@ func (b *DefaultBundler) argoDeployerOptions() (*config.ArgoDeployerOptions, err
 		}
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("Argo CD settings are only supported with deployer argocd or argocd-helm (got %q)", d))
-	}
-	keys := make([]string, 0, len(legacy))
-	for key := range legacy {
-		keys = append(keys, key)
-	}
-	slices.Sort(keys)
-	for _, key := range keys {
-		warnDeprecated(config.LegacyDeployerNotice(key))
 	}
 	return opts, nil
 }
