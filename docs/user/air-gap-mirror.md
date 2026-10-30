@@ -57,7 +57,8 @@ admission; see
 [Enforcing Your Signatures on Mirrored Images](../integrator/supply-chain-verification.md#enforcing-your-signatures-on-mirrored-images).
 With the Sigstore-bundle signatures cosign v3 writes by default, those policies
 need the registry to serve TLS, so the plain-HTTP examples below suit only a
-test registry.
+test registry. Those policies were measured on a cluster with outbound network
+access, not an air-gapped one.
 
 ## Prerequisites
 

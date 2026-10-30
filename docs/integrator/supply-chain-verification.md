@@ -932,9 +932,10 @@ spec:
   unchecked. A reference with no tag is not one of those spellings: Kyverno
   adds `:latest` before it matches, so `ghcr.io/nvidia/aicr` was checked as
   `ghcr.io/nvidia/aicr:latest`. These policies are not an allowlist, and a glob per spelling
-  would not make them one. To check every image, however its reference is
+  would not make them one. To check an image however its reference is
   written, pair them with a policy that matches every reference, such as the
-  [mirror policies](#the-mirror-policies).
+  [mirror policies](#the-mirror-policies), which check your own signature, not
+  AICR's provenance.
 * **Attestations, not signatures.** AICR's images carry only attestations, so
   the expression calls `verifyAttestationSignatures` with the SLSA provenance
   type.
@@ -1122,7 +1123,7 @@ admission webhook rejects it.
 > policies above were measured on Kyverno **v1.19.2**. On v1.18.1 a
 > `SigstoreBundle` rule failed with `no matching signatures found`
 > ([#1537](https://github.com/NVIDIA/aicr/issues/1537)), the error an exact
-> `subject:` with a `*` in it produces.
+> `subject:` with a `*` in it produces. v1.18.1 itself was not re-tested.
 
 ## Enforcing Your Signatures on Mirrored Images
 
@@ -1490,10 +1491,16 @@ from Sigstore's public TUF repository unless `attestors[].cosign.tuf` names
 another. A cluster without outbound access needs an internal TUF mirror there;
 that setup was not measured.
 
-With both sets of policies applied, an AICR image in a Pod's containers, or
-added through `kubectl debug`, was admitted only when it carried your
-signature and AICR's provenance. Neither set checks image volumes, so apply
-the [image-volume policy](#image-volumes) with them. An image at an AICR path
+With both sets of policies applied, an AICR image whose reference matched the
+keyless policies' globs, in a Pod's containers or added through
+`kubectl debug`, was admitted only when it carried your signature and AICR's
+provenance. The globs match the reference as written, as with `ghcr.io:443`
+under [Kyverno](#kyverno), so `registry.example.com:443/nvidia/aicr:TAG`
+matches none of them. Only the mirror policies check it, and they check your
+signature, not AICR's provenance. Neither set checks image volumes, so apply
+the [image-volume policy](#image-volumes) with them, and by default neither
+runs in the namespaces Kyverno's resource filters skip, listed under
+[The mirror policies](#the-mirror-policies). An image at an AICR path
 without the attestation was denied by
 the keyless policies, including at the default validator path. A copied AICR
 image you had not signed was denied by `verify-mirror-images`. A signed

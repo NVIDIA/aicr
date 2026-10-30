@@ -172,8 +172,10 @@ run gh attestation verify "oci://$IMAGE_AICRD@$DIGEST_AICRD" --repo "$OWNER/aicr
 # --- verify the SBOM attestation ---------------------------------------------
 
 banner "Verify the CycloneDX SBOM attestation (via cosign)"
-note "cosign verify-attestation enforces the OIDC issuer + exact identity and writes"
-note "the verified DSSE envelope to disk. Identity is pinned to the release workflow at $TAG."
+note "cosign verify-attestation enforces the OIDC issuer + exact identity + calling"
+note "repository and writes the verified DSSE envelope to disk. Identity is pinned to"
+note "the release workflow at $TAG. Any repository can call that reusable workflow,"
+note "so the calling repository is pinned to NVIDIA/aicr too."
 note "Subject is the platform manifest, not the index; asking the index for this"
 note "predicate type returns nothing."
 pause "Press Enter to verify the SBOM attestation"
@@ -181,6 +183,7 @@ run cosign verify-attestation \
   --type cyclonedx \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity "https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/$TAG" \
+  --certificate-github-workflow-repository NVIDIA/aicr \
   "$IMAGE_PLATFORM" \
   --output-file "$PREDICATE"
 
@@ -204,6 +207,7 @@ run cosign verify-attestation \
   --type openvex \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity "https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/$TAG" \
+  --certificate-github-workflow-repository NVIDIA/aicr \
   "$IMAGE_PLATFORM" \
   --output-file "$VEX_PREDICATE"
 

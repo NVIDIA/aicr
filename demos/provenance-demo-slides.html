@@ -430,12 +430,14 @@
       Issuer <code class="inl">https://token.actions.githubusercontent.com</code>, subject matched by the regular expression
       <code class="inl">^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/v.*$</code>,
       and repository <code class="inl">NVIDIA/aicr</code> from the certificate's workflow repository extension.
-      Validated, cluster-tested policies are in
+      Policy Controller cannot require the repository for these attestations: use Kyverno, or check it before you
+      deploy with <code class="inl">gh attestation verify --repo NVIDIA/aicr</code>.
+      Tested policies, and what each was tested on, are in
       <a href="../docs/integrator/supply-chain-verification.md#enforcing-with-admission-policies">Enforcing with Admission Policies</a>.
     </div>
     <div class="grid2">
       <div class="mini"><h4 class="ok">Allowed</h4><p><code class="inl">kubectl run a --image=ghcr.io/nvidia/aicr:vX.Y.Z</code> — has attestation, identity matches.</p></div>
-      <div class="mini"><h4 class="bad">Rejected</h4><p>A <code class="inl">ghcr.io/nvidia/aicr*</code> image without a valid release attestation — <em>no matching attestations found</em>. Images the policy does not match (e.g. <code class="inl">nginx:latest</code>) are not evaluated.</p></div>
+      <div class="mini"><h4 class="bad">Rejected</h4><p><code class="inl">kubectl run b --image=ghcr.io/nvidia/aicr:v0.16.0</code> — attested by <code class="inl">on-tag.yaml</code>, not <code class="inl">attest-images.yaml</code>, so the identity does not match. Kyverno does not evaluate images its policies do not match (e.g. <code class="inl">nginx:latest</code>).</p></div>
     </div>
   </div>
 </section>

@@ -272,7 +272,7 @@ and the repository `NVIDIA/aicr` from the certificate's GitHub workflow
 repository extension. Any repository can call that reusable workflow, so the
 subject alone does not identify AICR's release.
 
-> Validated, cluster-tested policies for both are in
+> Tested policies for both, and what each was tested on, are in
 > [Enforcing with Admission Policies](../docs/integrator/supply-chain-verification.md#enforcing-with-admission-policies).
 > Earlier inline examples here used the legacy Cosign format / a pre-bundle
 > Policy Controller version and an out-of-scope negative test, so they were
