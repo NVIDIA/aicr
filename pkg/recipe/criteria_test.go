@@ -43,6 +43,9 @@ func TestParseCriteriaServiceType(t *testing.T) {
 		{"MK8S whitespace", " MK8S ", CriteriaServiceMK8s, false},
 		{"unqualified Nebius provider", "nebius", CriteriaServiceAny, true},
 		{"nvke", "nvke", CriteriaServiceNVKE, false},
+		{"cks", "cks", CriteriaServiceCKS, false},
+		{"CKS whitespace", " CKS ", CriteriaServiceCKS, false},
+		{"CoreWeave alias", " CoreWeave ", CriteriaServiceCKS, false},
 		{"NVKE whitespace", " NVKE ", CriteriaServiceNVKE, false},
 		{"legacy NKE name", "nke", CriteriaServiceAny, true},
 		{"raw NICo provider", "nico", CriteriaServiceAny, true},
@@ -729,7 +732,7 @@ func TestGetCriteriaServiceTypes(t *testing.T) {
 	types := GetCriteriaServiceTypes()
 
 	// Should return sorted list
-	expected := []string{"aks", "bcm", "eks", "generic", "gke", "k0s", "kind", "lke", "metal3", "mk8s", "nvke", "ocp", "oke", "rke2"}
+	expected := []string{"aks", "bcm", "cks", "eks", "generic", "gke", "k0s", "kind", "lke", "metal3", "mk8s", "nvke", "ocp", "oke", "rke2"}
 	if len(types) != len(expected) {
 		t.Errorf("GetCriteriaServiceTypes() returned %d types, want %d", len(types), len(expected))
 	}

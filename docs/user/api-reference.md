@@ -122,7 +122,7 @@ Generate an optimized configuration recipe based on environment parameters.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `service` | string | any | K8s service: `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `metal3`, `rke2`, `generic`, `k0s`, `mk8s`, `nvke`, `any`. `mk8s` is Nebius Managed Service for Kubernetes; `nvke` is NVIDIA Kubernetes Engine (Forge/NICo bare metal). `generic` is a concrete value (self-managed Kubernetes with no distinguishing distro or provisioner; aliases: `self-managed`, `self`, `vanilla`); `any` is the wildcard and does not select `generic` recipes. `generic` is never inferred from a snapshot (the fingerprint reports the detected provisioner, such as `metal3` or `rke2`), so `generic` recipes require `service=generic` explicitly, also when a snapshot is supplied; recipe evidence records that dimension as `not-inferable` with the observed provider, which does not disqualify the evidence |
+| `service` | string | any | K8s service: `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `metal3`, `rke2`, `generic`, `k0s`, `mk8s`, `nvke`, `cks`, `any`. `mk8s` is Nebius Managed Service for Kubernetes; `nvke` is NVIDIA Kubernetes Engine (Forge/NICo bare metal). `generic` is a concrete value (self-managed Kubernetes with no distinguishing distro or provisioner; aliases: `self-managed`, `self`, `vanilla`); `any` is the wildcard and does not select `generic` recipes. `generic` is never inferred from a snapshot (the fingerprint reports the detected provisioner, such as `metal3` or `rke2`), so `generic` recipes require `service=generic` explicitly, also when a snapshot is supplied; recipe evidence records that dimension as `not-inferable` with the observed provider, which does not disqualify the evidence |
 | `accelerator` | string | any | GPU type: `h100`, `h200`, `gb200`, `gb300`, `b200`, `b300`, `a100`, `l40`, `l40s`, `rtx-pro-6000`, `vr200`, `any`. `b300` is B300 SXM, distinct from Grace Blackwell `gb300` |
 | `gpu` | string | any | Alias for `accelerator` |
 | `intent` | string | any | Workload: `training`, `inference`, `any` |
@@ -137,6 +137,8 @@ Generate an optimized configuration recipe based on environment parameters.
 > **`service=rke2` and `accelerator=vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. See the published validation evidence at [validation.aicr.run](https://validation.aicr.run/) for current coverage.
 
 > **`service=k0s` is Preview**, covering the single `k0s / h200 / ubuntu / training` coordinate. See [k0s H200 Setup](../integrator/k0s-h200-setup.md) for its prerequisites and known gaps.
+
+> **`service=cks` is Preview**, limited to RTX PRO 6000 / Ubuntu / training. Set the service explicitly, including when supplying a snapshot. See [CoreWeave RTX PRO 6000 Setup](../integrator/cks-rtx-pro-6000-setup.md) for provider ownership and qualification gaps.
 
 > **`service=nvke` is Preview**, covering the `nvke / gb200 / ubuntu / training` and `nvke / gb200 / ubuntu / training / kubeflow` coordinates. See [NVKE GB200 Setup](../integrator/nvke-gb200-setup.md) for its prerequisites and known gaps.
 
@@ -408,7 +410,7 @@ accounting mode determines which schema track applies.
 
 There is a single route family. `/v1/recipe`, `/v1/query`, and `/v1/bundle`
 serve every composition — profiled and unprofiled alike — with one contract.
-The AKS, GKE, and OKE families are the embedded profile adopters (`gpuStack`) and
+The AKS, GKE, OKE, and CKS families are the embedded profile adopters (`gpuStack`) and
 need no special routing.
 
 **GET `/v1/recipe`.** Accepts the `/v1/recipe` criteria parameters plus
@@ -483,7 +485,7 @@ application/x-yaml`; missing, aliased, or unsupported media types are
 rejected.
 
 ```shell
-# The AKS, GKE, and OKE families are the embedded adopters (gpuStack profiles).
+# The AKS, GKE, OKE, and CKS families are the embedded adopters (gpuStack profiles).
 # -f stops on an HTTP error so a 4xx/5xx recipe body is never staged and
 # an error response is never written to bundles.zip. POSIX sh suffices:
 # the commands are sequential (no pipeline), so pipefail is not needed.
@@ -507,9 +509,12 @@ v1.0.0 it is the only value the schema admits. Profile and
 Slurm-accounting selection are available on every endpoint; no composition
 needs special routing.
 
-The AKS, GKE, and OKE families are the embedded profile adopters (`gpuStack`). Their
+The AKS, GKE, OKE, and CKS families are the embedded profile adopters (`gpuStack`). Their
 compositions resolve like any other: omit `profile=` to take the declared
-default, or select one explicitly.
+default, or select one explicitly. CKS has a single value, `coreweave`,
+which preserves provider ownership and requires a loaded driver and enabled
+device plugin when resolving from a snapshot. See
+[CoreWeave RTX PRO 6000 Setup](../integrator/cks-rtx-pro-6000-setup.md).
 
 ```shell
 # GKE: omit profile= for the gke-default default, or select

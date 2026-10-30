@@ -25,7 +25,7 @@
 // Criteria: Specifies target deployment parameters
 //
 //	type Criteria struct {
-//	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, bcm, ocp, metal3, rke2, generic, k0s, mk8s, nvke, any
+//	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, bcm, ocp, metal3, rke2, generic, k0s, mk8s, nvke, cks, any
 //	    Accelerator CriteriaAcceleratorType // h100, h200, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any
 //	    Intent      CriteriaIntentType      // training, inference, any
 //	    OS          CriteriaOSType          // ubuntu, rhel, cos, amazonlinux, ol, talos, sles, rocky, any
@@ -75,6 +75,7 @@
 //   - CriteriaServiceK0s: k0s (self-managed k0s clusters)
 //   - CriteriaServiceMK8s: Nebius Managed Service for Kubernetes
 //   - CriteriaServiceNVKE: NVIDIA Kubernetes Engine (Forge/NICo bare metal)
+//   - CriteriaServiceCKS: CoreWeave Kubernetes Service
 //   - CriteriaServiceAny: Any service (wildcard)
 //
 // Accelerator types for GPU selection:
@@ -194,7 +195,7 @@
 // # Query Parameters (HTTP API - GET)
 //
 // The HTTP handler accepts these query parameters for GET requests:
-//   - service: eks, gke, aks, oke, kind, lke, bcm, ocp, metal3, rke2, generic, k0s, mk8s, nvke, any (default: any)
+//   - service: eks, gke, aks, oke, kind, lke, bcm, ocp, metal3, rke2, generic, k0s, mk8s, nvke, cks, any (default: any)
 //   - accelerator: h100, h200, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any (default: any)
 //   - gpu: alias for accelerator (backwards compatibility)
 //   - intent: training, inference, any (default: any)

@@ -10,7 +10,7 @@ You may obtain a copy of the License at
 
 # Recipe Health
 
-This page reports the **structural health** of every recipe AICR can resolve — one row per leaf criteria combination (service × accelerator × OS × intent × platform), plus any non-leaf coordinate retained because it carries published dashboard evidence (a plain coordinate that gained a platform sibling keeps its row so its Evidence link is never silently dropped). It answers *"across the whole matrix, what is the current structural state of each recipe?"* and is the catalog-wide complement to per-recipe [conformance evidence](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md). For a family carrying an ADR-015 configuration profile (`gpuStack` on AKS, GKE, and OKE), the row grades the composition resolved at the **declaration default** (`azure-managed` on AKS, `gke-default` on GKE, `oci-managed` on OKE); per-profile-value rows are a follow-up.
+This page reports the **structural health** of every recipe AICR can resolve — one row per leaf criteria combination (service × accelerator × OS × intent × platform), plus any non-leaf coordinate retained because it carries published dashboard evidence (a plain coordinate that gained a platform sibling keeps its row so its Evidence link is never silently dropped). It answers *"across the whole matrix, what is the current structural state of each recipe?"* and is the catalog-wide complement to per-recipe [conformance evidence](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md). For a family carrying an ADR-015 configuration profile (`gpuStack` on AKS, GKE, OKE, and CKS), the row grades the composition resolved at the **declaration default** (`azure-managed` on AKS, `gke-default` on GKE, `oci-managed` on OKE, `coreweave` on CKS); per-profile-value rows are a follow-up.
 
 The matrix is computed **hermetically and offline**: every signal is a pure read of the resolved recipe — no Helm render, no GPU, no cluster, no network. It is regenerated from the recipe catalog by `make recipe-health-docs` and is kept current by a weekly bot PR. `make recipe-health-check` is an advisory staleness check (it is **not** wired into `make qualify` or the merge gate). The full design is recorded in [ADR-009](https://github.com/NVIDIA/aicr/blob/main/docs/design/009-recipe-health-tracking.md).
 
@@ -44,8 +44,8 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 {/* BEGIN AICR-HEALTH */}
 ## Summary
 
-- Recipes: **72**
-- Pass: **72** · Warn: **0** · Fail: **0** · Unknown: **0**
+- Recipes: **73**
+- Pass: **73** · Warn: **0** · Fail: **0** · Unknown: **0**
 
 ## Recipes
 
@@ -68,6 +68,7 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 | h100-aks-ubuntu-training-slurm | aks | h100 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
 | bcm-inference | bcm | — | — | inference | — | pass | R:0 D:0 P:0 C:5 | pending |
 | h100-bcm-ubuntu-training-kubeflow | bcm | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:6 | pending |
+| rtx-pro-6000-cks-ubuntu-training | cks | rtx-pro-6000 | ubuntu | training | — | pass | R:0 D:2 P:0 C:1 | pending |
 | eks-ubuntu | eks | — | ubuntu | — | — | pass | R:0 D:0 P:0 C:5 | pending |
 | a100-eks-ubuntu-training-kubeflow | eks | a100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
 | gb200-eks-amazonlinux-inference | eks | gb200 | amazonlinux | inference | — | pass | R:0 D:4 P:0 C:5 | pending |
