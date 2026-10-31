@@ -473,6 +473,7 @@ land later; none is implied by Preview alone.
 
 | Coordinate | Setup guide | Evidence |
 |---|---|---|
+| `cks / h100 / ubuntu / training` | [CoreWeave H100 Setup](cks-h100-setup.md) | pending: live cluster qualification and signed publication to [validation.aicr.run](https://validation.aicr.run/) tracked in [#2342](https://github.com/NVIDIA/aicr/issues/2342) |
 | `cks / rtx-pro-6000 / ubuntu / training` | [CoreWeave RTX PRO 6000 Setup](cks-rtx-pro-6000-setup.md) | pending: live cluster qualification and signed publication to [validation.aicr.run](https://validation.aicr.run/) tracked in [#2342](https://github.com/NVIDIA/aicr/issues/2342) |
 | `rke2 / vr200 / ubuntu / training` | [RKE2 VR200 Setup](rke2-vr200-setup.md) | [validation.aicr.run/#/rke2/vr200-ubuntu/training](https://validation.aicr.run/#/rke2/vr200-ubuntu/training) |
 | `rke2 / vr200 / ubuntu / training / kubeflow` | [RKE2 VR200 Setup](rke2-vr200-setup.md) | [validation.aicr.run/#/rke2/vr200-ubuntu/training-kubeflow](https://validation.aicr.run/#/rke2/vr200-ubuntu/training-kubeflow) |
@@ -815,6 +816,7 @@ Its constraints require `GPU.hardware.driver-loaded` and
 fail closed. These are prerequisites for the one provider-managed stack,
 not a control-plane signal distinguishing driver-installation modes or
 proof of the provider stack's health. See
+[CoreWeave H100 Setup](cks-h100-setup.md) and
 [CoreWeave RTX PRO 6000 Setup](cks-rtx-pro-6000-setup.md).
 
 For other services, introduce selectable driver-ownership modes only once

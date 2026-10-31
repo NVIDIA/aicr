@@ -1,0 +1,45 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Synthetic CKS GPU worker for the H100 training recipe. Capacity
+# and driver labels are scheduling fixtures, not a supported CoreWeave
+# instance specification or a recipe driver pin. KWOK advertises GPU
+# resources directly; no provider GPU controller runs on these fake nodes.
+
+apiVersion: aicr.run/v1beta1
+kind: KWOKNodeProfile
+metadata:
+  name: accelerated-h100
+  labels:
+    provider: cks
+    nodeType: accelerated
+    accelerator: h100
+
+spec:
+  instanceType: cks-h100-simulated
+  arch: amd64
+  osImage: Ubuntu 24.04
+
+  resources:
+    cpu: "128"
+    memory: 1024Gi
+    storage: 3800Gi
+
+  gpu:
+    product: NVIDIA-H100-80GB-HBM3
+    count: 8
+    memory: 81920  # MiB per GPU (80 GiB)
+    driver: "580.95.05"
+    driverMajor: "580"
+    driverMinor: "95"
