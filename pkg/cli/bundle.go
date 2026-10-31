@@ -733,13 +733,14 @@ func signingTargetFromFlags(rekorURL, signingConfigPath string) (useTUF bool, er
 // Without the oci:// scheme the bundler renders Git-sourced Applications.
 func argoCDLayoutRepoURL(repo string) (string, error) {
 	const want = "--deployer argocd with --output " + oci.LayoutScheme +
-		" requires --repo oci://<registry>/<repository>, the repository the layout will be published to"
-	if !strings.HasPrefix(repo, oci.URIScheme) {
+		" requires --repo oci://<registry>/<repository> with no tag or digest, the repository the layout will be published to"
+	// A digest would parse but be dropped from the derived repoURL.
+	if !strings.HasPrefix(repo, oci.URIScheme) || strings.Contains(repo, "@") {
 		return "", errors.New(errors.ErrCodeInvalidRequest, want)
 	}
 	ref, err := oci.ParseOutputTarget(repo)
 	if err != nil || ref.Tag != "" {
-		return "", errors.Wrap(errors.ErrCodeInvalidRequest, want+" (no tag)", err)
+		return "", errors.Wrap(errors.ErrCodeInvalidRequest, want, err)
 	}
 	return oci.EnsureScheme(ref.Registry + "/" + ref.Repository), nil
 }
@@ -1536,7 +1537,7 @@ func runBundleCmdWithDependencies(
 	deps = normalizeBundleCommandDependencies(deps)
 
 	// Validate single-value flags are not duplicated
-	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class", "shared-storage-class", "dra-eviction-node-label", "app-name", flagFulcioURL, flagRekorURL, flagSigningKey); err != nil {
+	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class", "shared-storage-class", "dra-eviction-node-label", "app-name", flagChartName, flagFulcioURL, flagRekorURL, flagSigningKey); err != nil {
 		return err
 	}
 	if err := validateSingleValueFlags(cmd, argoCDFlags...); err != nil {

@@ -197,6 +197,11 @@ func TestParseBundleCmdOptions_OCILayout(t *testing.T) {
 			wantCode: errors.ErrCodeInvalidRequest,
 		},
 		{
+			name:     "argocd rejects a digest-bearing --repo",
+			args:     []string{"--output", layout + ":v2", "--deployer", "argocd", "--repo", "oci://ghcr.io/team/aicr-bundle@sha256:" + strings.Repeat("a", 64)},
+			wantCode: errors.ErrCodeInvalidRequest,
+		},
+		{
 			name:     "layout at the bundle staging directory is rejected",
 			args:     []string{"--output", oci.LayoutScheme + "bundle:v2", "--deployer", "helm"},
 			wantCode: errors.ErrCodeInvalidRequest,
@@ -309,4 +314,17 @@ func TestBundleCommandOCILayoutWritesImageRefs(t *testing.T) {
 	if want := layoutTagDigest(t, layout) + "\n"; string(data) != want {
 		t.Fatalf("image refs = %q, want %q", data, want)
 	}
+}
+
+func TestBundleCommandRejectsRepeatedChartName(t *testing.T) {
+	deps := defaultBundleCommandDependencies()
+	deps.prepareBundleOutput = func(context.Context, string) (*bundleOutputTarget, error) {
+		t.Fatal("bundle generation started with a repeated --chart-name")
+		return nil, errors.New(errors.ErrCodeInternal, "unreachable")
+	}
+	err := runBundleInWorkDir(t, realTempDir(t), deps,
+		"--recipe", layoutTestRecipe(t), "--deployer", "argocd-helm",
+		"--output", oci.LayoutScheme+filepath.Join(realTempDir(t), "layout")+":"+layoutTestTag,
+		"--chart-name", "a", "--chart-name", "b")
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 }
