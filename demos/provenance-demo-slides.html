@@ -345,6 +345,7 @@
 <span class="p">$</span> cosign verify-attestation --type cyclonedx \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
     --certificate-identity "https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/${TAG}" \
+    --certificate-github-workflow-repository NVIDIA/aicr \
     "$IMAGE@$DIGEST_AMD64" > predicate.json
 
 <span class="c"># Vulnerability scan, straight off the SBOM (no re-pull).</span>
@@ -423,17 +424,20 @@
       <em>bundle</em> format AICR&rsquo;s images carry:
       <a href="https://docs.sigstore.dev/policy-controller/overview/">Sigstore Policy Controller</a>
       v0.13.0+ (<code class="inl">signatureFormat: bundle</code>) or
-      <a href="https://kyverno.io/">Kyverno</a> (<code class="inl">type: SigstoreBundle</code>; cluster testing has not yet verified AICR images).</p>
+      <a href="https://kyverno.io/">Kyverno</a> (an <code class="inl">ImageValidatingPolicy</code>, verified on v1.19.2).</p>
     <div class="note">
       <span class="t info">Release identity</span>
-      Issuer <code class="inl">https://token.actions.githubusercontent.com</code>, subject
-      <code class="inl">https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/*</code>.
-      Validated, cluster-tested copy-paste policies are tracked in
-      <a href="https://github.com/NVIDIA/aicr/issues/1537">#1537</a>.
+      Issuer <code class="inl">https://token.actions.githubusercontent.com</code>, subject matched by the regular expression
+      <code class="inl">^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/v.*$</code>,
+      and repository <code class="inl">NVIDIA/aicr</code> from the certificate's workflow repository extension.
+      Policy Controller cannot require the repository for these attestations: use Kyverno, or check it before you
+      deploy with <code class="inl">gh attestation verify --repo NVIDIA/aicr</code>.
+      Tested policies, and what each was tested on, are in
+      <a href="../docs/integrator/supply-chain-verification.md#enforcing-with-admission-policies">Enforcing with Admission Policies</a>.
     </div>
     <div class="grid2">
       <div class="mini"><h4 class="ok">Allowed</h4><p><code class="inl">kubectl run a --image=ghcr.io/nvidia/aicr:vX.Y.Z</code> — has attestation, identity matches.</p></div>
-      <div class="mini"><h4 class="bad">Rejected</h4><p>A <code class="inl">ghcr.io/nvidia/aicr*</code> image without a valid release attestation — <em>no matching attestations found</em>. Images the policy does not match (e.g. <code class="inl">nginx:latest</code>) are not evaluated.</p></div>
+      <div class="mini"><h4 class="bad">Rejected</h4><p><code class="inl">kubectl run b --image=ghcr.io/nvidia/aicr:v0.16.0</code> — attested by <code class="inl">on-tag.yaml</code>, not <code class="inl">attest-images.yaml</code>, so the identity does not match. Kyverno does not evaluate images its policies do not match (e.g. <code class="inl">nginx:latest</code>).</p></div>
     </div>
   </div>
 </section>
