@@ -15,6 +15,15 @@
 # Kubeflow Training Operator (kubeflow-trainer) Helm values
 # Enables distributed training with TrainJob API
 # Ref: https://www.kubeflow.org/docs/components/trainer/
+#
+# Set only keys the pinned chart reads. The chart has no values schema, so Helm
+# accepts unknown keys silently and they change nothing in the rendered
+# manifests. Settings that look missing here live elsewhere in the chart:
+#   - leader election: manager.config.leaderElection.leaderElect
+#   - webhook port:    manager.config.webhook.port
+#   - CRDs:            shipped in the chart's crds/ directory
+#   - service account: always created by the chart
+# Chart defaults: https://github.com/kubeflow/trainer/blob/v2.2.0/charts/kubeflow-trainer/values.yaml
 
 # Override release name prefix
 fullnameOverride: kubeflow-trainer
@@ -30,36 +39,14 @@ manager:
       cpu: 500m
       memory: 512Mi
 
-  # Leader election for HA deployments
-  leaderElection:
-    enabled: true
-
-  # Logging configuration
-  logging:
-    # Verbosity level (0=info, 1=debug, 2=trace)
-    verbosity: 0
-
-  # Service account configuration
-  serviceAccount:
-    create: true
-    name: ""
-    annotations: {}
-
-  # Security context for pods
-  podSecurityContext:
-    runAsNonRoot: true
-
-  # Container security context
+  # Container security context, merged over the chart default, which already
+  # sets runAsNonRoot: true and seccompProfile: RuntimeDefault
   securityContext:
     allowPrivilegeEscalation: false
     capabilities:
       drop:
         - ALL
     readOnlyRootFilesystem: true
-
-# Install CRDs (TrainJob, etc.)
-crds:
-  install: true
 
 # JobSet integration (required for TrainJob)
 # JobSet provides the underlying primitive for multi-replica training jobs
@@ -72,9 +59,3 @@ jobset:
   install: true
   prometheus:
     enable: true
-
-# Webhook configuration for TrainJob validation
-webhook:
-  enabled: true
-  # Port for the webhook server
-  port: 9443
