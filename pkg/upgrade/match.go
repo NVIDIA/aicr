@@ -1097,7 +1097,7 @@ func noCrossingResult(u *ComponentUpgrades, r ComponentResult, src, tgt *semver.
 			r.Reason = ReasonBeyondRecordCeiling
 			r.StoppedAt = targetRangeText(u, top)
 			r.Explanation = beyondCeilingExplanation(ceiling, r.To)
-			if pastCeiling(ceiling, src) || (ceiling.inclusive && src.Equal(ceiling.ver)) {
+			if atOrPastCeiling(ceiling, src) {
 				r.Explanation = sourceAtCeilingExplanation(ceiling, src, r.From, r.To)
 			}
 			return r

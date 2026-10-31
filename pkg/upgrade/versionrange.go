@@ -154,6 +154,12 @@ func pastCeiling(ceiling rangeEnd, v *semver.Version) bool {
 	return cmp > 0 || (cmp == 0 && !ceiling.inclusive)
 }
 
+// atOrPastCeiling reports whether v leaves no version below a bounded ceiling
+// to move to, because v is past it or at an inclusive one.
+func atOrPastCeiling(ceiling rangeEnd, v *semver.Version) bool {
+	return pastCeiling(ceiling, v) || (ceiling.inclusive && v.Equal(ceiling.ver))
+}
+
 // versionRange is a half-open or closed version interval.
 type versionRange struct {
 	lower rangeEnd

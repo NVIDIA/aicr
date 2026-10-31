@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/Masterminds/semver/v3"
 )
 
 // The ReportUnproven.Source values a cluster read writes.
@@ -580,7 +582,11 @@ func notesCell(r ComponentResult, c ReportComponent) string {
 	case VerdictManual:
 		parts = append(parts, plural(len(c.Steps), "step", "steps"))
 	case VerdictBlocked:
-		parts = append(parts, "stops at "+r.StoppedAt)
+		if r.Reason == ReasonBeyondRecordCeiling && sourcePastStop(r) {
+			parts = append(parts, "assessed only to "+r.StoppedAt)
+		} else {
+			parts = append(parts, "stops at "+r.StoppedAt)
+		}
 		if len(c.Steps) > 0 {
 			parts = append(parts, plural(len(c.Steps), "step", "steps"))
 		}
@@ -621,6 +627,20 @@ func notesCell(r ComponentResult, c ReportComponent) string {
 		parts = append(parts, movedFieldsPhrase(c.IdentityChanges))
 	}
 	return strings.Join(parts, ", ")
+}
+
+// sourcePastStop reports whether r's source sits at or past the ceiling of
+// r.StoppedAt, so that range is behind the cluster and no place to stop.
+func sourcePastStop(r ComponentResult) bool {
+	src, err := semver.NewVersion(r.From)
+	if err != nil {
+		return false
+	}
+	b, err := parseRange(r.StoppedAt)
+	if err != nil || b.upper.unbounded {
+		return false
+	}
+	return atOrPastCeiling(b.upper, src)
 }
 
 // movedFieldsPhrase states the identity moves the way the FROM and TO columns
