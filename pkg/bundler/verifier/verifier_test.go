@@ -1646,3 +1646,21 @@ func TestReadBinaryAttestation(t *testing.T) {
 		t.Error("ReadBinaryAttestation(symlink) = nil error, want refusal")
 	}
 }
+
+// TestReadBinaryAttestation_CanceledContext covers a context that is already
+// canceled: the read fails with ErrCodeTimeout and returns no bytes, so nothing
+// unverified can reach the bundle.
+func TestReadBinaryAttestation_CanceledContext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "binary.sigstore.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	data, err := ReadBinaryAttestation(ctx, path)
+	errorstest.WantReportedCode(t, err, errors.ErrCodeTimeout)
+	if data != nil {
+		t.Errorf("ReadBinaryAttestation(canceled) returned %d bytes, want none", len(data))
+	}
+}
