@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/Masterminds/semver/v3"
 )
 
 // The ReportUnproven.Source values a cluster read writes.
@@ -255,14 +257,14 @@ type ReportComponent struct {
 	Breaking  bool `json:"breaking" yaml:"breaking"`
 	Downgrade bool `json:"downgrade" yaml:"downgrade"`
 
-	// StoppedAt is the interval a blocked row must not enter in one step. Set
-	// on every blocked version row, and empty on a blocked replaced row, which
-	// joins two pieces of software rather than two versions of one. Such a row
-	// carries a Summary, Precondition and Steps only when one record describes
-	// the whole jump: rendering one record's instructions for a jump it does
-	// not describe is the thing the verdict exists to prevent.
+	// StoppedAt is the row's ComponentResult.StoppedAt.
 	StoppedAt string `json:"stoppedAt,omitempty" yaml:"stoppedAt,omitempty"`
 
+	// Route is the row's ComponentResult.Route.
+	Route []ReportRouteStop `json:"route,omitempty" yaml:"route,omitempty"`
+
+	// Summary and Precondition are set on a blocked row only when one record
+	// describes the whole jump.
 	Summary      string `json:"summary,omitempty" yaml:"summary,omitempty"`
 	Precondition string `json:"precondition,omitempty" yaml:"precondition,omitempty"`
 
@@ -286,6 +288,12 @@ type ReportIdentityChange struct {
 	Field string `json:"field" yaml:"field"`
 	From  string `json:"from" yaml:"from"`
 	To    string `json:"to" yaml:"to"`
+}
+
+// ReportRouteStop is one upgrade of a route, restated with JSON names.
+type ReportRouteStop struct {
+	Versions string  `json:"versions" yaml:"versions"`
+	Verdict  Verdict `json:"verdict" yaml:"verdict"`
 }
 
 // ReportStep is one operator action, restated with JSON names.
@@ -404,6 +412,7 @@ func reportComponent(r ComponentResult, deployer string, unproven []ReportUnprov
 		Breaking:        r.Breaking,
 		Downgrade:       r.Downgrade,
 		StoppedAt:       r.StoppedAt,
+		Route:           reportRoute(r.Route),
 		Reason:          r.Reason,
 		Explanation:     r.Explanation,
 		FailsRun:        r.FailsRun(),
@@ -421,7 +430,7 @@ func reportComponent(r ComponentResult, deployer string, unproven []ReportUnprov
 		c.Precondition = r.Transition.Precondition
 		c.Steps = reportSteps(stepsFor(r.Transition.StepsByDeployer, deployer))
 	}
-	c.Notes = notes(r, c)
+	c.Notes = notesCell(r, c)
 	if len(c.Unproven) > 0 {
 		c.Notes = strings.TrimPrefix(c.Notes+", "+unprovenPhrase(c.Unproven), ", ")
 	}
@@ -496,6 +505,17 @@ func reportIdentityChanges(changes []IdentityChange) []ReportIdentityChange {
 	return out
 }
 
+func reportRoute(route []RouteStop) []ReportRouteStop {
+	if len(route) == 0 {
+		return nil
+	}
+	out := make([]ReportRouteStop, len(route))
+	for i, s := range route {
+		out[i] = ReportRouteStop(s)
+	}
+	return out
+}
+
 func reportSteps(steps []Step) []ReportStep {
 	if len(steps) == 0 {
 		return nil
@@ -511,10 +531,10 @@ func reportSteps(steps []Step) []ReportStep {
 	return out
 }
 
-// notes composes the table's last column: what changed, then what the verdict
-// rests on, then how far the verdict's claim reaches when that is wider than
-// the jump itself.
-func notes(r ComponentResult, c ReportComponent) string {
+// notesCell returns the table's notes column for r: what changed, what the
+// verdict rests on, and how far the verdict's claim reaches when that is wider
+// than the jump.
+func notesCell(r ComponentResult, c ReportComponent) string {
 	switch r.Change {
 	case ChangeAdded:
 		return "new component, nothing to do"
@@ -562,7 +582,11 @@ func notes(r ComponentResult, c ReportComponent) string {
 	case VerdictManual:
 		parts = append(parts, plural(len(c.Steps), "step", "steps"))
 	case VerdictBlocked:
-		parts = append(parts, "stops at "+r.StoppedAt)
+		if r.Reason == ReasonBeyondRecordCeiling && sourcePastStop(r) {
+			parts = append(parts, "assessed only to "+r.StoppedAt)
+		} else {
+			parts = append(parts, "stops at "+r.StoppedAt)
+		}
 		if len(c.Steps) > 0 {
 			parts = append(parts, plural(len(c.Steps), "step", "steps"))
 		}
@@ -603,6 +627,20 @@ func notes(r ComponentResult, c ReportComponent) string {
 		parts = append(parts, movedFieldsPhrase(c.IdentityChanges))
 	}
 	return strings.Join(parts, ", ")
+}
+
+// sourcePastStop reports whether r's source sits at or past the ceiling of
+// r.StoppedAt, so that range is behind the cluster and no place to stop.
+func sourcePastStop(r ComponentResult) bool {
+	src, err := semver.NewVersion(r.From)
+	if err != nil {
+		return false
+	}
+	b, err := parseRange(r.StoppedAt)
+	if err != nil || b.upper.unbounded {
+		return false
+	}
+	return atOrPastCeiling(b.upper, src)
 }
 
 // movedFieldsPhrase states the identity moves the way the FROM and TO columns

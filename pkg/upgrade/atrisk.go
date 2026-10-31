@@ -15,7 +15,9 @@
 package upgrade
 
 import (
-	"sort"
+	"cmp"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -166,12 +168,8 @@ func AffectedKinds(results []ComponentResult) []ResourceKind {
 	}
 	// Sorted because the set was accumulated through a map, and an order that
 	// changes run to run over identical inputs would move rows in the report.
-	sort.Slice(kinds, func(i, j int) bool {
-		if kinds[i].Group != kinds[j].Group {
-			return kinds[i].Group < kinds[j].Group
-		}
-
-		return kinds[i].Kind < kinds[j].Kind
+	slices.SortFunc(kinds, func(a, b ResourceKind) int {
+		return cmp.Or(strings.Compare(a.Group, b.Group), strings.Compare(a.Kind, b.Kind))
 	})
 
 	return kinds
@@ -183,13 +181,7 @@ func sortedNames(set map[string]struct{}) []string {
 	if len(set) == 0 {
 		return nil
 	}
-	names := make([]string, 0, len(set))
-	for name := range set {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	return names
+	return slices.Sorted(maps.Keys(set))
 }
 
 // clone deep-copies the report so it owns what it carries, matching the
@@ -202,25 +194,17 @@ func (a *AtRiskReport) clone() AtRiskReport {
 			// Copying the struct alone would leave the report sharing the
 			// caller's Components backing array, which is the aliasing a
 			// shallow deep-copy always misses.
-			kind.Components = copyNames(kind.Components)
+			kind.Components = slices.Clone(kind.Components)
 			out.Kinds[i] = kind
 		}
 	}
 	if len(a.Findings) > 0 {
 		out.Findings = make([]AtRiskFinding, len(a.Findings))
 		for i, finding := range a.Findings {
-			finding.Components = copyNames(finding.Components)
+			finding.Components = slices.Clone(finding.Components)
 			out.Findings[i] = finding
 		}
 	}
 
 	return out
-}
-
-func copyNames(names []string) []string {
-	if len(names) == 0 {
-		return nil
-	}
-
-	return append([]string(nil), names...)
 }

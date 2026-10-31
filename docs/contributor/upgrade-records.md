@@ -94,12 +94,20 @@ there looking authoritative.
 reason `manual` does: the verdict says "not in one step", and the steps are you
 saying what to do instead. They render under the row, deployer-scoped, exactly
 as a `manual` record's do, whenever your record is the one that describes the
-operator's move. What the check withholds is somebody *else's* steps: when a
-jump crosses two boundaries, or crosses yours from a starting point your `from`
-does not cover, no steps render at all, because composing two migrations or
-running one authored for a different origin is the failure `blocked` exists to
-prevent. So write the `blocked` steps as instructions a reader will follow, not
-as a formality to satisfy the gate.
+operator's move. What the check withholds is somebody *else's* steps. When the
+selected route takes two or more upgrades, or the jump crosses your boundary
+from a starting point your `from` does not cover, no steps render at all,
+because composing two migrations or running one authored for a different origin
+is the failure `blocked` exists to prevent. Your steps render when your record
+alone describes the operator's upgrade. Its `from` holds their version, its
+`to` holds their target, and it lists every boundary in between that it must
+(see [Listing the boundaries your record
+passes](#listing-the-boundaries-your-record-passes)). A run of `safe` records
+before yours, taken as one upgrade, still lets yours describe the rest. A
+`manual` record on your own boundary, written for another starting range, does
+not count. So write
+the `blocked` steps as instructions a reader will follow, not as a formality to
+satisfy the gate.
 
 **Your `manual` and `blocked` records also ship in bundles.** When a bundle pins
 a version inside your record's `to` range, `aicr bundle` writes the record into
@@ -242,8 +250,19 @@ Range grammar is deliberately restricted: a single AND-group of simple
 comparators (`<`, `<=`, `>`, `>=`, `=`, or a bare version). No `||`, no hyphen
 ranges, no `^`/`~`, no wildcards, no partial versions, no build metadata.
 Anything ambiguous is rejected rather than approximated, because a wrong
-structural check is worse than a rejected record. Prereleases are supported:
-grove is pinned at one.
+structural check is worse than a rejected record. Prereleases are supported,
+and grove is pinned at one.
+
+`<1.25.0` leaves out 1.25.0's prereleases, such as `1.25.0-rc.1`, because a
+prerelease likely carries changes meant for its release. Every other operator
+orders a prerelease below its release, so `<=1.25.0` admits `1.25.0-rc.1` and
+`>=1.25.0`, `>1.25.0` and `=1.25.0` leave it out. When the `from` domains
+split at a release with `<X` and `>=X`, a cluster on that release's
+prerelease therefore matches no record unless one names prereleases
+explicitly, as grove's do with `<0.1.0-alpha.12`. The coverage check does not
+count those versions as a gap. A prerelease bound compares exactly, so
+`>=1.25.0-rc.1 <1.25.0` matches nothing. Write `<=1.25.0` or name the last
+prerelease instead.
 
 **Deployer groups must partition.** No two explicit groups may claim the same
 deployer, at most one group may omit `deployers` (that one is *the* remainder),
@@ -271,18 +290,18 @@ group is unaffected.
 ### Where your lowest `from` floor starts is a real decision
 
 A record is *crossed* when the operator's source version sits below the floor
-its `to` names and their target reaches it. That is a property of the jump, not
-of `from`: a boundary a jump flies straight over still counts, so writing
-`from: ">=2.0.0 <3.0.0"` instead of `from: "<3.0.0"` no longer hides the
-boundary from anyone starting below 2.0.0. It used to, and a `blocked` record
-written that way was invisible to exactly the jump it existed to stop.
+its `to` names and their target reaches it. A crossed record can take part in
+the operator's route when the route lands in its `from`, even if they start
+below it. A record whose `to` reaches past another record's floor vouches for every
+release in between, so only write that reach when you have read their notes.
 
 What `from` still decides is whether *your guidance* was authored for that
 starting point. So the space below your file's lowest `from` floor is not
 neutral ground. An operator down there crosses your boundary, matches no
-`from`, and is told `blocked`: "upgrade to a recorded version first". They get
-no verdict and, unlike someone your `from` does cover, no steps either, because
-you did not write any for where they are.
+`from`, and is told `blocked` and pointed at your earliest recorded starting
+point, a move no record assesses. They get no verdict and, unlike someone your
+`from` does cover, no steps either, because you did not write any for where
+they are.
 
 That is deliberate, and it is why the floor is a decision rather than a
 formality. Choose it at the oldest version you are willing to make a statement
@@ -295,10 +314,15 @@ first rather than handed a claim nobody verified.
 
 `to`'s floor is the boundary a jump crosses; its ceiling is how far your verdict
 reaches. A record does not vouch past that ceiling. An operator whose target
-lands above it is told `blocked` with reason `beyond-record-ceiling`: stop at
-the ceiling you assessed and re-run, or get the record widened. They get no
-verdict and no steps, for the same reason as the floor case, and the report
-names your ceiling as the place to stop.
+lands above it is told `blocked` with reason `beyond-record-ceiling`. From
+below the ceiling, they are told to check the move to the ceiling you assessed
+on its own or get the record widened. From at or past it, there is nowhere to
+stop, so they are asked for a record whose `from` admits their version. Either
+way the row stays `blocked` but carries neither your verdict nor your steps,
+for the same reason as the floor case.
+When your record is `manual` and the operator is below its floor, the check of
+the move to its ceiling renders your steps. From inside your `to`, that check
+crosses no boundary and reports `unknown`.
 
 That is not a limitation to route around. A ceiling is your claim about how far
 forward you actually looked, so put it where you looked, and widen it
@@ -313,6 +337,112 @@ describes the release you are *not* shipping is exactly the one an operator
 needs. Put the ceiling at the boundary you assessed and let a target above it
 land on `beyond-record-ceiling`, which is what turns "this jump has to be taken
 on its own" into something the tool says rather than something prose asks for.
+When that record is `blocked`, the report renders no steps and does not send
+the operator to its ceiling, since the ceiling lies inside the interval it
+forbids. Its explanation says to check the move to the record's floor on its
+own, or to a version in its `to` when that floor is exclusive, and that check
+renders the steps.
+
+### Listing the boundaries your record passes
+
+A record describes upgrades from any version in its `from` to any version in
+its `to`, so a wide record can pass other records' boundaries in one step.
+When no single record describes a jump, the check plans a route of records,
+each starting where the one before lands, and reports the upgrades it takes.
+
+Your record must list in `skips` each boundary its upgrades pass that is one
+of these:
+
+- a floor inside your `to`, above your own floor
+- the floor of a `manual` or `blocked` record whose `from` admits a version
+  your upgrade goes by
+
+A `blocked` record on your own floor counts too, unless yours is `blocked` as
+well. A `safe` boundary below your floor needs no entry. Listing a floor is
+your claim that a cluster taking your record may skip that boundary's
+guidance. psmdb's minor record lists the 1.23.2 patch boundary because
+Percona upgrades past patch versions in one step:
+
+```yaml
+  - from: ">=1.23.0 <1.24.0"
+    to: ">=1.24.0"
+    skips: ["1.23.2"]
+    verdict: manual
+```
+
+A `skips` entry cannot override a stricter verdict for the sources it was
+written for. A `safe` record may not skip a `manual` or `blocked` boundary,
+and a `manual` record may not skip a `blocked` one, when the other record's
+`from` overlaps yours. Narrow your `from` to leave those sources out. If
+clusters that ran 1.2 must take a `manual` move to 1.3, a `safe` jump to 2.0
+that skips 1.3 must start below 1.2.
+
+The lint gate rejects a record that passes a boundary it must list and does
+not, and one whose `skips` names a boundary its upgrades never pass. A record
+missing an entry describes no upgrade past that boundary, so the check plans a
+route through the other record instead.
+
+**`requiredStop: true`** makes a `safe` record a place every route stops, for
+a release that does work an operator must let finish, such as an automatic
+migration. A cluster taking it re-runs the check before moving further.
+`manual` and `blocked` records already stop a route. No `skips` entry passes a
+required stop, so a record whose `from` overlaps one must not reach its floor.
+
+**`stepLimit: minor`**, at the top of the file beside `component`, caps every
+upgrade at the next minor version, ignoring patches. Use it when upstream
+supports upgrading one minor at a time. Under it a `manual` or `blocked` `to`
+may leave out its ceiling, which is then the end of its floor's minor. A
+`safe` `to` still names one. A move into a new major needs a record whose `to`
+is in that major's first minor and whose `from` names the old major's last
+minor, so the check blocks a major bump until someone writes it. A minor is not
+the last when any record's `to` starts a later minor of the same major.
+
+**`stepLimit: major`** caps every upgrade at the next major version, ignoring
+minors and patches. Use it when upstream supports skipping minors but not
+majors. A move from any minor may reach anywhere in the next major, and a
+`manual` or `blocked` `to` without a ceiling ends at the end of its floor's
+major. No shipped record uses it yet.
+
+### When a migration only runs inside a window of versions
+
+Some migrations happen only while a particular range of versions is running.
+Nodewright's rename is one. An operator-side mirror converts Skyhook objects to
+NodeWright in v0.18.0 through v0.20.x, and a release that drops the legacy group
+would strand any object the mirror never converted. A jump from below the
+window to past it never runs the mirror. Express the window with fields the
+record already has.
+
+- End the migration record's `to` ceiling at the last version that still runs
+  the migration. The ceiling is your claim that the steps hold that far, so a
+  jump past the window cannot borrow your verdict. Nothing else catches a
+  ceiling that reaches too far. A later `safe` record carries no steps, so the
+  check reads the wider ceiling as your word that the jump is fine.
+- Give the release that closes the window its own record, with `from` starting
+  inside the window and a `precondition` naming what must have finished, such
+  as every object mirrored. A jump that crosses both records stops at the start
+  of the window.
+- To make the requirement hold however the other records change, add a
+  `blocked` record whose `from` covers everything below the window and whose
+  `to` starts at the release that closes it. Its steps say to land in the
+  window, let the migration finish, then continue. It stops any jump from below
+  the window to past it, and the report names a landing inside the window.
+
+### Two records on one boundary each speak for their own starting range
+
+Two records may name the same `to` floor when their `from` ranges do not
+overlap. Each then describes crossing that boundary from its own range only.
+An operator jumping from 1.5.0 past a boundary at 3.0.0 gets the record written
+for 1.x, even though the version numbers pass through the range of a `manual`
+record written for 2.x. That cluster never ran 2.x, so the 2.x record's steps
+describe state it does not have. A `blocked` record written for 2.x does not
+stop the jump either. Unless the 1.x record is `blocked` too, it must list that
+floor in `skips`, and the listing hands the jump to the 1.x record's verdict.
+
+So if crossing the boundary from 1.x must not happen in one step, such as when
+it needs a migration that runs on 2.x software, the 2.x record cannot say it
+for you. Say it in the 1.x record. Mark it `blocked` and write steps that land
+in 2.x first, as the window's `blocked` record above does, or end its `to`
+inside 2.x so the route lands there before the boundary.
 
 ## Checking your work
 

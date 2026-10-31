@@ -47,11 +47,28 @@ func (v Verdict) Authorable() bool {
 	}
 }
 
+// StepLimit values. StepLimitMinor caps each move at the next minor and
+// StepLimitMajor at the next major.
+const (
+	StepLimitMinor = "minor"
+	StepLimitMajor = "major"
+)
+
 // ComponentUpgrades is one component's transition records.
 type ComponentUpgrades struct {
-	APIVersion  string       `yaml:"apiVersion"`
-	Kind        string       `yaml:"kind"`
-	Component   string       `yaml:"component"`
+	APIVersion string `yaml:"apiVersion"`
+	Kind       string `yaml:"kind"`
+	Component  string `yaml:"component"`
+
+	// StepLimit caps each move at the next minor under StepLimitMinor or the
+	// next major under StepLimitMajor, whatever the lower levels. Empty means
+	// no limit. Under either limit a manual or blocked To may omit its
+	// ceiling, which is then the end of its floor's minor or major. Under
+	// StepLimitMinor a move into a new major also needs a record whose To is
+	// in that major's first minor and whose From names the old major's last
+	// minor.
+	StepLimit string `yaml:"stepLimit,omitempty"`
+
 	Transitions []Transition `yaml:"transitions,omitempty"`
 	Replaces    *Replaces    `yaml:"replaces,omitempty"`
 }
@@ -70,7 +87,7 @@ func (u *ComponentUpgrades) Covers(version string) bool {
 		return false
 	}
 	for i := range u.Transitions {
-		b, err := parseBounds(u.Transitions[i].To)
+		b, err := targetRange(u, &u.Transitions[i])
 		if err == nil && b.contains(v) {
 			return true
 		}
@@ -92,11 +109,11 @@ func (u *ComponentUpgrades) AheadOf(version string) bool {
 		return false
 	}
 	for i := range u.Transitions {
-		b, err := parseBounds(u.Transitions[i].To)
+		b, err := parseRange(u.Transitions[i].To)
 		if err != nil || b.lower.unbounded || b.lower.ver == nil {
 			return false
 		}
-		cmp := v.Compare(b.lower.ver)
+		cmp := v.Compare(b.lower.comparedAt())
 		if cmp > 0 || (cmp == 0 && b.lower.inclusive) {
 			return false
 		}
@@ -104,12 +121,34 @@ func (u *ComponentUpgrades) AheadOf(version string) bool {
 	return true
 }
 
-// Transition describes one version boundary and what crossing it requires.
+// Transition describes one version boundary, as the one-step moves from any
+// version in From to any in To, and what crossing it requires.
 type Transition struct {
-	From              string             `yaml:"from"`
-	To                string             `yaml:"to"`
-	Verdict           Verdict            `yaml:"verdict"`
-	VerifiedBy        string             `yaml:"verifiedBy,omitempty"`
+	From       string  `yaml:"from"`
+	To         string  `yaml:"to"`
+	Verdict    Verdict `yaml:"verdict"`
+	VerifiedBy string  `yaml:"verifiedBy,omitempty"`
+
+	// Skips lists other transitions' floors whose guidance a cluster taking
+	// this transition may skip. It must list each floor this one's moves pass
+	// that is:
+	//
+	//   - inside To, above this transition's own floor
+	//   - a manual or blocked transition's, whose From admits a version the
+	//     move goes by
+	//
+	// A blocked transition sharing this one's floor counts unless this one is
+	// blocked too. This transition does not describe a move that passes a
+	// floor it must list but does not, or a RequiredStop whose From overlaps
+	// this one's, listed or not.
+	Skips []string `yaml:"skips,omitempty"`
+
+	// RequiredStop reports whether a cluster taking this transition must stop
+	// inside To and re-run the check, as for an automatic migration. It has
+	// effect only on a safe transition, since a manual or blocked one already
+	// stops a route.
+	RequiredStop bool `yaml:"requiredStop,omitempty"`
+
 	Summary           string             `yaml:"summary"`
 	Precondition      string             `yaml:"precondition,omitempty"`
 	Reversible        *bool              `yaml:"reversible,omitempty"`

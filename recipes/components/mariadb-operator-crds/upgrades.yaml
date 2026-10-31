@@ -24,6 +24,7 @@ transitions:
   # first, so they resolve to blocked here as well.
   - from: ">=26.3.0 <26.10.0"
     to: ">=26.10.0 <=26.10.1"
+    skips: ["26.10.1"]
     verdict: manual
     summary: >-
       The CRD changes up to 26.10.1 only add optional fields, but this chart

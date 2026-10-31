@@ -15,10 +15,11 @@
 # The rename record was written while the pin was still v0.17.1, under the
 # rule-2 allowance that lets manual and blocked describe a boundary above it.
 # It is the only boundary that asks anything of an operator, so its to range
-# reaches through the current pin: a jump from below v0.18.0 lands on the
-# rename steps rather than being told to stop partway at a safe boundary that
-# adds no work. Upstream serves the legacy group through v0.20.x, so the steps
-# hold that far; v0.21.0 removes it and needs a record of its own.
+# reaches through the current pin and skips lists the safe boundaries inside
+# it. A jump from below v0.18.0 lands on the rename steps rather than being
+# told to stop partway at a safe boundary that adds no work. Upstream serves
+# the legacy group through v0.20.x, so the steps hold that far. v0.21.0
+# removes it and needs a record of its own.
 #
 # The rename is transcribed from NVIDIA/nodewright
 # docs/getting-started/migration.md, which remains the authoritative account.
@@ -30,6 +31,7 @@ component: nodewright-operator
 transitions:
   - from: "<0.18.0"
     to: ">=0.18.0 <=0.20.0"
+    skips: ["0.19.0", "0.19.1", "0.20.0"]
     verdict: manual
     summary: >-
       v0.18.0 renames skyhook.nvidia.com/v1alpha1 Skyhook to
@@ -271,6 +273,7 @@ transitions:
   # to cross first.
   - from: ">=0.18.0 <0.19.0"
     to: ">=0.19.0 <=0.19.1"
+    skips: ["0.19.1"]
     verdict: safe
     verifiedBy: >-
       Upstream release note operator/v0.19.0 (NVIDIA/nodewright), which

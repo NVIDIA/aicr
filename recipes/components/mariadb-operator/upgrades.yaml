@@ -23,15 +23,17 @@ transitions:
   # runs a replication migration script, and it and UPGRADE_25.08.0.md forbid
   # skipping intermediate versions. Those origins resolve to blocked.
   #
-  # to reaches 26.10.1 because upstream's 26.10.1 guide takes an operator
-  # from before 26.10.x straight to 26.10.1 with this same procedure; a
-  # ceiling at 26.10.0 would block that jump at 26.10.0.
+  # to reaches 26.10.1, and skips lists its boundary, because upstream's
+  # 26.10.1 guide takes an operator from before 26.10.x straight to 26.10.1
+  # with this same procedure. A ceiling at 26.10.0 would block that jump at
+  # 26.10.0.
   #
   # verdict is manual, not safe, and carries no verifiedBy: no UAT lane or
   # KWOK run has exercised this transition. The procedure below is transcribed
   # from upstream's own upgrade guide, not vouched for by a run here.
   - from: ">=26.3.0 <26.10.0"
     to: ">=26.10.0 <=26.10.1"
+    skips: ["26.10.1"]
     verdict: manual
     summary: >-
       26.10.0 changes the replication configuration the MariaDB init
