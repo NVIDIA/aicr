@@ -97,3 +97,48 @@ func TestStability_RecipeStaticValidation(t *testing.T) {
 	requireType[string](diagnostic.Severity)
 	requireType[string](diagnostic.Message)
 }
+
+func TestValidateRecipeCatalogDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "overlays"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	base := "apiVersion: aicr.run/v1beta1\nkind: RecipeMetadata\nmetadata:\n  name: base\nspec: {}\n"
+	if err := os.WriteFile(filepath.Join(dir, "overlays", "base.yaml"), []byte(base), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	content := "apiVersion: aicr.run/v1beta1\nkind: RecipeMetadata\nmetadata:\n  name: example\nspec:\n  base: h100-eks-training\n"
+	if err := os.WriteFile(filepath.Join(dir, "overlays", "example.yaml"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name    string
+		ctx     context.Context
+		dir     string
+		wantErr bool
+	}{
+		{name: "missing parent", ctx: t.Context(), dir: dir},
+		{name: "nil context", dir: dir, wantErr: true},
+		{name: "empty directory", ctx: t.Context(), wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			diagnostics, err := aicr.ValidateRecipeCatalogDirectory(tt.ctx, tt.dir)
+			if tt.wantErr {
+				errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, diagnostic := range diagnostics {
+				if strings.Contains(diagnostic.Message, "h100-eks-training") {
+					return
+				}
+			}
+			t.Fatalf("expected missing parent diagnostic: %+v", diagnostics)
+		})
+	}
+}

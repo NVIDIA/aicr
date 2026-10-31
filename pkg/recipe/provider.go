@@ -218,9 +218,11 @@ func (p *EmbeddedDataProvider) Source(path string) string {
 // An external overlay replaces the embedded one at the same path, unless it carries
 // only a profile declaration. That patch adds values to the embedded overlay's profile.
 // For all other files: external completely replaces embedded if present.
+// ExternalOnly disables all embedded reads and merges.
 type LayeredDataProvider struct {
-	embedded    *EmbeddedDataProvider
-	externalDir string
+	externalOnly bool
+	embedded     *EmbeddedDataProvider
+	externalDir  string
 
 	// maxFileSize bounds read-time loads against the same limit the walk-time
 	// check uses, so a TOCTOU swap on a network mount cannot bypass a
@@ -252,6 +254,9 @@ type LayeredDataProvider struct {
 
 // LayeredProviderConfig configures the layered data provider.
 type LayeredProviderConfig struct {
+	// ExternalOnly disables embedded fallback and merging for complete catalogs.
+	ExternalOnly bool
+
 	// ExternalDir is the path to the external data directory.
 	ExternalDir string
 
@@ -401,6 +406,7 @@ func NewLayeredDataProvider(embedded *EmbeddedDataProvider, config LayeredProvid
 	}
 
 	return &LayeredDataProvider{
+		externalOnly:  config.ExternalOnly,
 		embedded:      embedded,
 		externalDir:   config.ExternalDir,
 		maxFileSize:   config.MaxFileSize,
@@ -437,6 +443,13 @@ func (p *LayeredDataProvider) ReadFile(ctx context.Context, path string) ([]byte
 	slog.Debug("reading file from layered provider", "path", path)
 
 	lookupPath := filepath.ToSlash(path)
+	if p.externalOnly {
+		data, err := readExternalFile(p.externalDir, lookupPath, p.maxFileSize, p.allowSymlinks)
+		if err != nil {
+			return nil, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInvalidRequest, "failed to read external catalog file")
+		}
+		return data, nil
+	}
 
 	// Special handling for registry file - merge instead of replace
 	if lookupPath == registryFileName {
@@ -532,6 +545,10 @@ func (p *LayeredDataProvider) WalkDir(ctx context.Context, root string, fn fs.Wa
 		}
 	}
 
+	if p.externalOnly {
+		return nil
+	}
+
 	slog.Debug("walking embedded directory", "root", root)
 
 	// Walk embedded, skipping already-visited paths
@@ -550,6 +567,9 @@ func (p *LayeredDataProvider) WalkDir(ctx context.Context, root string, fn fs.Wa
 
 // Source returns "external" or "embedded" depending on where the file comes from.
 func (p *LayeredDataProvider) Source(path string) string {
+	if p.externalOnly {
+		return sourceExternal
+	}
 	normalizedPath := filepath.ToSlash(path)
 	var source string
 	// The catalog loader reads a file before asking for its source, so ReadFile

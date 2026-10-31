@@ -34,10 +34,26 @@ type RecipeDiagnostic struct {
 // over the embedded catalog. Findings are returned as diagnostics, while err
 // reports an operation that could not complete. Validation requires no cluster.
 func ValidateRecipeCatalog(ctx context.Context, path, dataDir string) ([]RecipeDiagnostic, error) {
+	return validateRecipeCatalog(ctx, path, dataDir, false)
+}
+
+// ValidateRecipeCatalogDirectory validates a complete catalog directory without
+// embedded fallback, so missing working-tree references remain errors.
+func ValidateRecipeCatalogDirectory(ctx context.Context, dataDir string) ([]RecipeDiagnostic, error) {
+	return validateRecipeCatalog(ctx, "", dataDir, true)
+}
+
+func validateRecipeCatalog(ctx context.Context, path, dataDir string, externalOnly bool) ([]RecipeDiagnostic, error) {
 	if ctx == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
 	}
-	diagnostics, err := recipe.ValidateStatic(ctx, path, dataDir)
+	var diagnostics []recipe.StaticDiagnostic
+	var err error
+	if externalOnly {
+		diagnostics, err = recipe.ValidateStaticDirectory(ctx, dataDir)
+	} else {
+		diagnostics, err = recipe.ValidateStatic(ctx, path, dataDir)
+	}
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to validate recipe catalog")
 	}

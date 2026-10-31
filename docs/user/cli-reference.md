@@ -777,17 +777,36 @@ metadata:
 ### aicr recipe validate
 
 Check an overlay, mixin, registry, or entire catalog without connecting to a
-cluster. Diagnostics identify the source and field when available. Errors give
-a non-zero exit status; warnings do not.
+cluster. Diagnostics identify the source and field when available. Current
+checks emit error diagnostics; errors cause a non-zero exit status.
+
+**Synopsis:**
+
+```text
+aicr recipe validate [--data DIR] [--external-only] [--format text|json] [FILE]
+```
+
+**Flags:**
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--data` | | string | | Catalog directory used to resolve references; required when no FILE is given |
+| `--external-only` | | bool | false | Validate the complete external catalog without embedded fallback; requires `--data` and no FILE |
+| `--format` | | string | text | Output format: `text` or `json` |
+
+**Examples:**
 
 ```bash
 aicr recipe validate --data recipes recipes/overlays/example.yaml
-aicr recipe validate --data recipes --format json
+aicr recipe validate --data recipes --external-only --format json
 ```
 
 `--data` supplies the catalog used to resolve references; with no file it
-validates the catalog. `--format json` emits an array of diagnostics with
-`file`, `field`, `severity`, and `message` fields for CI.
+validates the catalog. By default, external data layers over the embedded
+catalog. Use `--external-only` for a complete working-tree catalog so deleted
+files and registry entries cannot be supplied by embedded copies.
+`--format json` emits an array of diagnostics with `file`, `field`, `severity`,
+and `message` fields for CI.
 
 ---
 

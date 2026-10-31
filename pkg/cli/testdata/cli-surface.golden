@@ -201,6 +201,7 @@ flag    aicr recipe sign-catalog  --oidc-device-flow  type=bool default=false re
 flag    aicr recipe sign-catalog  --output,-o  type=string default= required=true hidden=false env=
 flag    aicr recipe sign-catalog  --signing-config  type=string default= required=false hidden=false env=AICR_SIGNING_CONFIG
 flag    aicr recipe validate  --data  type=string default= required=false hidden=false env=
+flag    aicr recipe validate  --external-only  type=bool default=false required=false hidden=false env=
 flag    aicr recipe validate  --format  type=string default="text" required=false hidden=false env=
 flag    aicr recipe verify-catalog  --identity-pattern  type=string default= required=false hidden=false env=AICR_CATALOG_IDENTITY_PATTERN
 flag    aicr skill  --agent  type=string default= required=true hidden=false env=

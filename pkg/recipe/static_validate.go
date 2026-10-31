@@ -45,8 +45,20 @@ type StaticDiagnostic struct {
 // ValidateStatic validates an authoring file or, when path is empty, the
 // effective catalog. dataDir layers external data over the embedded catalog.
 // Validation does not contact a cluster.
-func ValidateStatic(ctx context.Context, path, dataDir string) (diagnostics []StaticDiagnostic, resultErr error) {
-	ctx, cancel := context.WithTimeout(ctx, defaults.FileReadTimeout)
+func ValidateStatic(ctx context.Context, path, dataDir string) ([]StaticDiagnostic, error) {
+	return validateStatic(ctx, path, dataDir, false)
+}
+
+// ValidateStaticDirectory validates a complete catalog without embedded fallback.
+func ValidateStaticDirectory(ctx context.Context, dataDir string) ([]StaticDiagnostic, error) {
+	if dataDir == "" {
+		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "catalog directory is required")
+	}
+	return validateStatic(ctx, "", dataDir, true)
+}
+
+func validateStatic(ctx context.Context, path, dataDir string, externalOnly bool) (diagnostics []StaticDiagnostic, resultErr error) {
+	ctx, cancel := context.WithTimeout(ctx, defaults.StaticValidationTimeout)
 	defer cancel()
 	defer func() {
 		if err := ctx.Err(); err != nil {
@@ -56,7 +68,7 @@ func ValidateStatic(ctx context.Context, path, dataDir string) (diagnostics []St
 	}()
 	dp := defaultEmbeddedProvider
 	if dataDir != "" {
-		layered, err := NewLayeredDataProvider(NewEmbeddedDataProvider(GetEmbeddedFS(), ""), LayeredProviderConfig{ExternalDir: dataDir})
+		layered, err := NewLayeredDataProvider(NewEmbeddedDataProvider(GetEmbeddedFS(), ""), LayeredProviderConfig{ExternalDir: dataDir, ExternalOnly: externalOnly})
 		if err != nil {
 			return nil, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInvalidRequest, "invalid catalog")
 		}
@@ -191,7 +203,14 @@ func staticOverlaySources(ctx context.Context, dp DataProvider, add func(string,
 		if decodeErr := yaml.Unmarshal(content, &h); decodeErr != nil {
 			return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "invalid overlay header", decodeErr)
 		}
-		if h.Kind != RecipeMetadataKind || h.Metadata.Name == "" {
+		if h.Kind != RecipeMetadataKind {
+			return nil
+		}
+		var overlay RecipeMetadata
+		if decodeErr := decodeStaticYAML(content, &overlay, true); decodeErr != nil {
+			add(name, "spec", decodeErr)
+		}
+		if h.Metadata.Name == "" {
 			return nil
 		}
 		if prior, ok := seen[h.Metadata.Name]; ok {
@@ -227,7 +246,7 @@ func validateStaticAuthoringFile(ctx context.Context, path string, data []byte, 
 		return
 	}
 	var overlay RecipeMetadata
-	if err := decodeStaticYAML(data, &overlay, hdr.APIVersion == RecipeProfileAPIVersion); err != nil {
+	if err := decodeStaticYAML(data, &overlay, true); err != nil {
 		add(path, "spec", err)
 		return
 	}

@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestValidateStaticFile(t *testing.T) {
@@ -248,4 +250,116 @@ spec:
 		}
 	}
 	t.Fatalf("missing overlay component diagnostic: %+v", diagnostics)
+}
+
+func TestValidateStaticRejectsUnknownOverlayFields(t *testing.T) {
+	for _, version := range []string{"aicr.run/v1beta1", "aicr.run/v1beta2"} {
+		for _, catalog := range []bool{false, true} {
+			name := version + "/file"
+			if catalog {
+				name = version + "/catalog"
+			}
+			t.Run(name, func(t *testing.T) {
+				dir := t.TempDir()
+				if err := os.CopyFS(dir, GetEmbeddedFS()); err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(dir, "overlays", "typo.yaml")
+				content := "apiVersion: " + version + "\nkind: RecipeMetadata\nmetadata:\n  name: typo\nspec:\n  mixin: [missing-mixin]\n"
+				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				var diagnostics []StaticDiagnostic
+				var err error
+				if catalog {
+					diagnostics, err = ValidateStaticDirectory(t.Context(), dir)
+				} else {
+					diagnostics, err = ValidateStatic(t.Context(), path, "")
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, d := range diagnostics {
+					if strings.Contains(d.Message, "field mixin not found") {
+						return
+					}
+				}
+				t.Fatalf("unknown field accepted: %+v", diagnostics)
+			})
+		}
+	}
+}
+
+func TestValidateStaticDirectoryDoesNotMaskDeletions(t *testing.T) {
+	tests := []struct {
+		name            string
+		removeFile      string
+		removeComponent string
+		wantDiagnostic  string
+	}{
+		{name: "complete catalog"},
+		{name: "deleted parent", removeFile: "overlays/h100-eks-training.yaml", wantDiagnostic: "h100-eks-training"},
+		{name: "deleted mixin", removeFile: "mixins/os-ubuntu.yaml", wantDiagnostic: "os-ubuntu"},
+		{name: "deleted component", removeComponent: "gpu-operator", wantDiagnostic: "gpu-operator"},
+		{name: "deleted assertion", removeFile: "checks/nfd/health-check.yaml", wantDiagnostic: "checks/nfd/health-check.yaml"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.CopyFS(dir, GetEmbeddedFS()); err != nil {
+				t.Fatal(err)
+			}
+			if tt.removeFile != "" {
+				if err := os.Remove(filepath.Join(dir, tt.removeFile)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.removeComponent != "" {
+				path := filepath.Join(dir, RegistryFileName)
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var registry ComponentRegistry
+				if decodeErr := yaml.Unmarshal(data, &registry); decodeErr != nil {
+					t.Fatal(decodeErr)
+				}
+				var kept []ComponentConfig
+				for _, comp := range registry.Components {
+					if comp.Name != tt.removeComponent {
+						kept = append(kept, comp)
+					}
+				}
+				registry.Components = kept
+				data, err = yaml.Marshal(registry)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if writeErr := os.WriteFile(path, data, 0o600); writeErr != nil {
+					t.Fatal(writeErr)
+				}
+			}
+			diagnostics, err := ValidateStaticDirectory(t.Context(), dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.wantDiagnostic == "" {
+				if len(diagnostics) != 0 {
+					t.Fatalf("complete catalog rejected: %+v", diagnostics)
+				}
+			} else {
+				found := false
+				for _, d := range diagnostics {
+					found = found || strings.Contains(d.Message, tt.wantDiagnostic)
+				}
+				if !found {
+					t.Fatalf("missing deletion diagnostic for %s: %+v", tt.wantDiagnostic, diagnostics)
+				}
+			}
+			diagnostics, err = ValidateStatic(t.Context(), "", dir)
+			if err != nil || len(diagnostics) != 0 {
+				t.Fatalf("layered catalog changed behavior: diagnostics=%+v err=%v", diagnostics, err)
+			}
+		})
+	}
 }
