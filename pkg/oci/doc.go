@@ -20,12 +20,14 @@
 //
 // # Overview
 //
-// The package provides six main operations:
-//   - ParseOutputTarget: Parses output targets (file paths or OCI URIs) into Reference
+// The package provides eight main operations:
+//   - ParseOutputTarget: Parses output targets (file paths, OCI URIs, or oci-layout: targets) into Reference
 //   - Package: Creates a local OCI artifact in OCI Image Layout format
 //   - PushFromStore: Pushes one required immutable descriptor from a local layout
 //   - PackageAndPush: Retains layout ownership through remote publication
 //   - PackageAndPushHelmChart: Publishes an immutable Helm-compatible OCI chart
+//   - WriteLayout: Writes the artifact PackageAndPush would push as an OCI image layout directory
+//   - WriteHelmChartLayout: Writes the chart PackageAndPushHelmChart would push as an OCI image layout directory
 //   - PushReferrer: Publishes a single-blob OCI 1.1 referrer
 //
 // The Reference type encapsulates parsed output target information, making it easy to
@@ -33,7 +35,7 @@
 //
 // # Core Types
 //
-//   - Reference: Parsed output target (file path or OCI URI with registry/repository/tag)
+//   - Reference: Parsed output target (file path, OCI URI with registry/repository/tag, or OCI layout directory with tag)
 //   - OutputConfig: Configuration for PackageAndPush workflow
 //   - HelmChartOptions: Configuration for PackageAndPushHelmChart
 //   - PackageAndPushResult: Combined result of package and push operations
