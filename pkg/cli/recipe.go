@@ -188,6 +188,7 @@ Override snapshot-detected criteria:
 		),
 		Commands: []*cli.Command{
 			recipeListCmd(),
+			recipeValidateCmd(),
 			recipeSignCatalogCmd(),
 			recipeVerifyCatalogCmd(),
 		},
