@@ -256,7 +256,8 @@ and grove is pinned at one.
 `<1.25.0` leaves out 1.25.0's prereleases, such as `1.25.0-rc.1`, because a
 prerelease likely carries changes meant for its release. Every other operator
 orders a prerelease below its release, so `<=1.25.0` admits `1.25.0-rc.1` and
-`>=1.25.0`, `>1.25.0` and `=1.25.0` leave it out. A cluster on a release's
+`>=1.25.0`, `>1.25.0` and `=1.25.0` leave it out. When the `from` domains
+split at a release with `<X` and `>=X`, a cluster on that release's
 prerelease therefore matches no record unless one names prereleases
 explicitly, as grove's do with `<0.1.0-alpha.12`. The coverage check does not
 count those versions as a gap. A prerelease bound compares exactly, so
