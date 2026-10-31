@@ -2320,6 +2320,37 @@ func TestMatchRoutes(t *testing.T) {
 			wantMatched: "major",
 		},
 		{
+			name: "a stop after a major bump from the last minor lands in the new major's first minor",
+			trs: []Transition{
+				trans(">=1.8.0 <1.9.0", ">=1.9.0", VerdictManual, "toLast"),
+				trans(">=1.9.0 <2.0.0", ">=2.0.0", VerdictManual, "bump"),
+				trans(">=2.0.0 <2.1.0", ">=2.1.0", VerdictManual, "next"),
+			},
+			stepLimit:     StepLimitMinor,
+			from:          "1.9.0",
+			to:            "2.1.0",
+			wantVerdict:   VerdictBlocked,
+			wantReason:    ReasonMultipleBoundaries,
+			wantStoppedAt: ">=2.0.0 <2.1.0",
+			wantRoute: []RouteStop{
+				{Versions: ">=2.0.0 <2.1.0", Verdict: VerdictManual},
+				{Versions: "2.1.0", Verdict: VerdictManual},
+			},
+		},
+		{
+			name: "a safe run from the last minor joins into the new major's first minor",
+			trs: []Transition{
+				trans(">=1.9.0 <1.9.5", ">=1.9.5 <1.10.0", VerdictSafe, "patch"),
+				trans(">=1.9.5 <2.0.0", ">=2.0.0", VerdictSafe, "bump"),
+			},
+			stepLimit:   StepLimitMinor,
+			from:        "1.9.0",
+			to:          "2.0.1",
+			wantVerdict: VerdictSafe,
+			wantReason:  ReasonRecorded,
+			wantMatched: "bump",
+		},
+		{
 			name:          "a major bump from an earlier minor is undefined",
 			trs:           []Transition{major},
 			stepLimit:     StepLimitMinor,

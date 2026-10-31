@@ -147,7 +147,7 @@ func stepViolation(u *ComponentUpgrades, t *Transition) string {
 	}
 	lo := from.lower.ver
 	if u.StepLimit == StepLimitMinor && to.lower.ver.Major() > lo.Major() {
-		return crossMajorViolation(u, t, from, to)
+		return crossMajorViolation(u, from, to)
 	}
 	limit, ok := stepCap(u, lo)
 	if !ok {
@@ -161,15 +161,15 @@ func stepViolation(u *ComponentUpgrades, t *Transition) string {
 	return ""
 }
 
-// crossMajorViolation returns why t, whose To floor is in a later major than
-// from's lower bound, breaks u's step limit, or "" when it does not. It breaks
-// the limit when:
+// crossMajorViolation returns why a transition with from and to, whose to floor
+// is in a later major than from's lower bound, breaks u's step limit, or ""
+// when it does not. It breaks the limit when:
 //
 //   - to is more than one major above from
 //   - to reaches past the new major's first minor
-//   - another transition's floor sits in a later minor of from's major, so
-//     from's lowest minor is not the last of that major
-func crossMajorViolation(u *ComponentUpgrades, t *Transition, from, to versionRange) string {
+//   - a transition's floor sits in a later minor of from's major, so from's
+//     lowest minor is not the last of that major
+func crossMajorViolation(u *ComponentUpgrades, from, to versionRange) string {
 	lo := from.lower.ver
 	if lo.Major() == math.MaxUint64 || to.lower.ver.Major() != lo.Major()+1 {
 		return fmt.Sprintf("has a to range in major %d, more than one major above %s; "+
@@ -180,18 +180,24 @@ func crossMajorViolation(u *ComponentUpgrades, t *Transition, from, to versionRa
 		return fmt.Sprintf("has a to range reaching %s or later; a move into a new major under "+
 			"stepLimit minor lands in its first minor", firstMinorEnd.ver)
 	}
-	for i := range u.Transitions {
-		s := &u.Transitions[i]
-		if s == t {
-			continue
-		}
-		f, ok := targetFloor(u, s)
-		if ok && f.ver.Major() == lo.Major() && f.ver.Minor() > lo.Minor() {
-			return fmt.Sprintf("names %d.%d as the last minor of major %d, but transition %d starts "+
-				"a later one at %s", lo.Major(), lo.Minor(), lo.Major(), i, f.ver)
-		}
+	if i, f, ok := laterMinorFloor(u, lo); ok {
+		return fmt.Sprintf("names %d.%d as the last minor of major %d, but transition %d starts "+
+			"a later one at %s", lo.Major(), lo.Minor(), lo.Major(), i, f.ver)
 	}
 	return ""
+}
+
+// laterMinorFloor returns the first transition, at index i, whose To floor f
+// starts a later minor of v's major. ok is false when none does, so v's minor
+// is the last of its major.
+func laterMinorFloor(u *ComponentUpgrades, v *semver.Version) (i int, f rangeEnd, ok bool) {
+	for j := range u.Transitions {
+		floor, has := targetFloor(u, &u.Transitions[j])
+		if has && floor.ver.Major() == v.Major() && floor.ver.Minor() > v.Minor() {
+			return j, floor, true
+		}
+	}
+	return 0, rangeEnd{}, false
 }
 
 // passage is another transition's boundary that a transition's moves pass.
@@ -547,10 +553,25 @@ func anyHopSkips(run []crossing, v *semver.Version) bool {
 	return slices.ContainsFunc(run, func(c crossing) bool { return skipsVersion(c.tr, v) })
 }
 
+// moveCap returns the exclusive limit of one move from v under u's step limit.
+// Under StepLimitMinor, a move from the last minor of a major reaches through
+// the next major's first minor, as crossMajorViolation allows. ok is false
+// when u has no step limit or the limit overflows.
+func moveCap(u *ComponentUpgrades, v *semver.Version) (limit rangeEnd, ok bool) {
+	limit, ok = stepCap(u, v)
+	if !ok || u.StepLimit != StepLimitMinor || v.Major() == math.MaxUint64 {
+		return limit, ok
+	}
+	if _, _, later := laterMinorFloor(u, v); later {
+		return limit, true
+	}
+	return exclusiveEnd(semver.New(v.Major()+1, 1, 0, "", "")), true
+}
+
 // withinStep reports whether a move from start may reach end under u's step
 // limit.
 func withinStep(u *ComponentUpgrades, start *semver.Version, end rangeEnd) bool {
-	limit, ok := stepCap(u, start)
+	limit, ok := moveCap(u, start)
 	if !ok {
 		return true
 	}
@@ -560,7 +581,7 @@ func withinStep(u *ComponentUpgrades, start *semver.Version, end rangeEnd) bool 
 // clipToStep returns l cut to what one step from start reaches under u's step
 // limit.
 func clipToStep(u *ComponentUpgrades, start *semver.Version, l versionRange) versionRange {
-	limit, ok := stepCap(u, start)
+	limit, ok := moveCap(u, start)
 	if !ok || !upperAfter(l.upper, limit) {
 		return l
 	}
