@@ -319,8 +319,9 @@ on its own or get the record widened. From at or past it, there is nowhere to
 stop, so they are asked for a record whose `from` admits their version. Either
 way the row stays `blocked` but carries neither your verdict nor your steps,
 for the same reason as the floor case.
-When your record is `manual`, the check of the move to its ceiling renders
-your steps.
+When your record is `manual` and the operator is below its floor, the check of
+the move to its ceiling renders your steps. From inside your `to`, that check
+crosses no boundary and reports `unknown`.
 
 That is not a limitation to route around. A ceiling is your claim about how far
 forward you actually looked, so put it where you looked, and widen it
