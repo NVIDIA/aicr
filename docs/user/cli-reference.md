@@ -774,6 +774,23 @@ metadata:
 
 ---
 
+### aicr recipe validate
+
+Check an overlay, mixin, registry, or entire catalog without connecting to a
+cluster. Diagnostics identify the source and field when available. Errors give
+a non-zero exit status; warnings do not.
+
+```bash
+aicr recipe validate --data recipes recipes/overlays/example.yaml
+aicr recipe validate --data recipes --format json
+```
+
+`--data` supplies the catalog used to resolve references; with no file it
+validates the catalog. `--format json` emits an array of diagnostics with
+`file`, `field`, `severity`, and `message` fields for CI.
+
+---
+
 ### aicr recipe list
 
 Enumerate overlay recipes in the catalog. Useful for discovering which criteria

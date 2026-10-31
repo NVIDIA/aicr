@@ -20,6 +20,7 @@ command aicr query  aliases= hidden=false
 command aicr recipe  aliases= hidden=false
 command aicr recipe list  aliases= hidden=false
 command aicr recipe sign-catalog  aliases= hidden=true
+command aicr recipe validate  aliases= hidden=false
 command aicr recipe verify-catalog  aliases= hidden=false
 command aicr skill  aliases= hidden=false
 command aicr snapshot  aliases= hidden=false
@@ -199,6 +200,8 @@ flag    aicr recipe sign-catalog  --identity-token  type=string default= require
 flag    aicr recipe sign-catalog  --oidc-device-flow  type=bool default=false required=false hidden=false env=AICR_OIDC_DEVICE_FLOW
 flag    aicr recipe sign-catalog  --output,-o  type=string default= required=true hidden=false env=
 flag    aicr recipe sign-catalog  --signing-config  type=string default= required=false hidden=false env=AICR_SIGNING_CONFIG
+flag    aicr recipe validate  --data  type=string default= required=false hidden=false env=
+flag    aicr recipe validate  --format  type=string default="text" required=false hidden=false env=
 flag    aicr recipe verify-catalog  --identity-pattern  type=string default= required=false hidden=false env=AICR_CATALOG_IDENTITY_PATTERN
 flag    aicr skill  --agent  type=string default= required=true hidden=false env=
 flag    aicr skill  --force  type=bool default=false required=false hidden=false env=
