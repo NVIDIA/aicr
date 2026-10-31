@@ -138,6 +138,16 @@ func TestNodewrightTuningGateAcrossCatalog(t *testing.T) {
 				if _, ok := fullDependsOn["nvidia-tuned"]; ok {
 					t.Errorf("AKS nvidia-setup-full.dependsOn = %v, must not reference the omitted nvidia-tuned", fullDependsOn)
 				}
+				// On AKS nvidia-setup-kernel is a no-op with no interrupt, so its Job
+				// runs on an undrained node bound by nodeName. Keep it small: a GPU
+				// node whose workloads leave less than the request free rejects it.
+				kernel := valueAtPath[map[string]any](t, packages, "nvidia-setup-kernel")
+				if _, ok := kernel["interrupt"]; ok {
+					t.Error("AKS nvidia-setup-kernel declares an interrupt; the package is a no-op there")
+				}
+				if got := fmt.Sprint(valueAtPath[any](t, kernel, "resources", "cpuLimit")); got != "4" {
+					t.Errorf("AKS nvidia-setup-kernel resources.cpuLimit = %s, want 4 (undrained node)", got)
+				}
 			} else {
 				sawNonAKS = true
 				if _, ok := packages["nvidia-tuned"]; !ok {
@@ -145,6 +155,35 @@ func TestNodewrightTuningGateAcrossCatalog(t *testing.T) {
 				}
 				if _, ok := fullDependsOn["nvidia-tuned"]; !ok {
 					t.Errorf("non-AKS nvidia-setup-full.dependsOn = %v, want nvidia-tuned", fullDependsOn)
+				}
+				// The packages form a chain, kernel then tuned then full. nodewright
+				// hands a node's merged reboot to the first runnable package in name
+				// order and fires it as soon as no package Job is running
+				// (NVIDIA/nodewright#934), so nvidia-tuned must not be runnable in the
+				// same pass as nvidia-setup-kernel: the kernel package's reboot could
+				// land between nvidia-tuned's apply and config Jobs. nvidia-tuned keeps
+				// its own reboot, which boots the command line its config stage writes
+				// and runs its post-interrupt checks.
+				tuned := valueAtPath[map[string]any](t, packages, "nvidia-tuned")
+				if got := valueAtPath[string](t, tuned, "interrupt", "type"); got != "reboot" {
+					t.Errorf("nvidia-tuned interrupt.type = %q, want reboot", got)
+				}
+				tunedDependsOn, _ := tuned["dependsOn"].(map[string]any)
+				if _, ok := tunedDependsOn["nvidia-setup-kernel"]; !ok {
+					t.Errorf("nvidia-tuned.dependsOn = %v, want nvidia-setup-kernel", tuned["dependsOn"])
+				}
+				if _, ok := fullDependsOn["nvidia-setup-kernel"]; !ok {
+					t.Errorf("non-AKS nvidia-setup-full.dependsOn = %v, want nvidia-setup-kernel as well", fullDependsOn)
+				}
+				if leaf.Entry.Criteria.Service == CriteriaServiceEKS {
+					// The kernel package's reboot is what drains the node before its EFA
+					// and kernel work on EKS, and that work is what needs the larger pod.
+					if got := valueAtPath[string](t, packages, "nvidia-setup-kernel", "interrupt", "type"); got != "reboot" {
+						t.Errorf("EKS nvidia-setup-kernel interrupt.type = %q, want reboot", got)
+					}
+					if got := fmt.Sprint(valueAtPath[any](t, packages, "nvidia-setup-kernel", "resources", "cpuLimit")); got != "8" {
+						t.Errorf("EKS nvidia-setup-kernel resources.cpuLimit = %s, want 8 for the EFA DKMS build", got)
+					}
 				}
 			}
 		})
