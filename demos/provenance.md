@@ -124,6 +124,7 @@ cosign verify-attestation \
   --type cyclonedx \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity "https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/${TAG}" \
+  --certificate-github-workflow-repository NVIDIA/aicr \
   "${IMAGE_PLATFORM}" \
   --output-file predicate.json
 ```
@@ -146,6 +147,7 @@ cosign verify-attestation \
   --type openvex \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity "https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/${TAG}" \
+  --certificate-github-workflow-repository NVIDIA/aicr \
   "${IMAGE_PLATFORM}" \
   --output-file vex-predicate.json
 
@@ -251,25 +253,30 @@ property of the cluster, enforce it with an admission controller. AICR's
 images carry **GitHub Artifact Attestations** (Sigstore *bundles*), so the
 policy must verify the Sigstore bundle format:
 
-- **Kyverno** — `type: SigstoreBundle`; see
-  [Verifying Sigstore Bundles](https://kyverno.io/docs/policy-types/cluster-policy/verify-images/sigstore/#verifying-sigstore-bundles).
-  Not yet verified against AICR images — cluster testing returned `no matching
-  signatures found`; prefer Policy Controller. See #1537.
+- **Kyverno** — an `ImageValidatingPolicy` that calls
+  `verifyAttestationSignatures` and requires the repository through
+  `additionalExtensions`, verified on Kyverno v1.19.2. A `ClusterPolicy` cannot
+  require the repository.
 - **Sigstore Policy Controller** — requires **v0.13.0+** and
   `signatureFormat: bundle` (see the
   [Sigstore bundle format](https://docs.sigstore.dev/policy-controller/overview/#sigstore-bundle-format)
   docs); enforcement runs only in namespaces labeled
-  `policy.sigstore.dev/include=true`.
+  `policy.sigstore.dev/include=true`. It cannot require the repository for
+  these attestations, so pair it with `gh attestation verify --repo NVIDIA/aicr`.
 
 Verify against AICR's release identity — issuer
-`https://token.actions.githubusercontent.com`, subject
-`https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/*`.
+`https://token.actions.githubusercontent.com`, a subject matched with the
+regular expression
+`^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/v.*$`,
+and the repository `NVIDIA/aicr` from the certificate's GitHub workflow
+repository extension. Any repository can call that reusable workflow, so the
+subject alone does not identify AICR's release.
 
-> Validated, cluster-tested copy-paste policies are tracked in
-> [#1537](https://github.com/NVIDIA/aicr/issues/1537). Earlier inline examples
-> here used the legacy Cosign format / a pre-bundle Policy Controller version
-> and an out-of-scope negative test, so they were removed rather than ship
-> policy that silently fails to verify.
+> Tested policies for both, and what each was tested on, are in
+> [Enforcing with Admission Policies](../docs/integrator/supply-chain-verification.md#enforcing-with-admission-policies).
+> Earlier inline examples here used the legacy Cosign format / a pre-bundle
+> Policy Controller version and an out-of-scope negative test, so they were
+> removed rather than ship policy that silently fails to verify.
 
 ## Troubleshooting
 
