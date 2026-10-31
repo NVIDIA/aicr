@@ -3123,7 +3123,15 @@ func (b *DefaultBundler) verifyAndCopyBinaryAttestation(ctx context.Context, dir
 			"pattern", identityPattern)
 	}
 
-	binaryBuilder, verifyErr := verifier.VerifyBinaryAttestation(ctx, binaryAttestPath, identityPattern, binaryDigest)
+	// Read once, verify that exact buffer, write the same buffer: the file
+	// cannot be swapped between verification and copy.
+	binaryAttestData, readErr := verifier.ReadBinaryAttestation(ctx, binaryAttestPath)
+	if readErr != nil {
+		return errors.PropagateOrWrap(readErr, errors.ErrCodeInternal,
+			"binary attestation exists but cannot be read: "+binaryAttestPath)
+	}
+
+	binaryBuilder, verifyErr := verifier.VerifyBinaryAttestationData(ctx, binaryAttestData, identityPattern, binaryDigest)
 	if verifyErr != nil {
 		if stderrors.Is(verifyErr, errors.New(errors.ErrCodeTimeout, "")) {
 			return verifyErr
@@ -3133,12 +3141,6 @@ func (b *DefaultBundler) verifyAndCopyBinaryAttestation(ctx context.Context, dir
 				"remove --attest to skip", verifyErr)
 	}
 	slog.Info("binary provenance verified", "builder", binaryBuilder)
-
-	binaryAttestData, readErr := readBoundedFile(binaryAttestPath, defaults.MaxAttestationFileBytes)
-	if readErr != nil {
-		return errors.Wrap(errors.ErrCodeInternal,
-			"binary attestation exists but cannot be read: "+binaryAttestPath, readErr)
-	}
 
 	destPath, joinErr := deployer.SafeJoin(dir, attestation.BinaryAttestationFile)
 	if joinErr != nil {

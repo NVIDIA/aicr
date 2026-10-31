@@ -886,6 +886,15 @@ func VerifyBinaryAttestation(ctx context.Context, bundlePath string, identityPat
 	return VerifyBinaryAttestationData(ctx, data, identityPattern, artifactDigest)
 }
 
+// ReadBinaryAttestation reads a binary attestation file once. It refuses a
+// symlink as the final path component, does not block on special files, and is
+// size-bounded and cancellable. Verify the returned bytes with
+// VerifyBinaryAttestationData and copy those same bytes, so what is written is
+// what was verified.
+func ReadBinaryAttestation(ctx context.Context, path string) ([]byte, error) {
+	return readBoundedFileContext(ctx, path)
+}
+
 // VerifyBinaryAttestationData verifies an already-read binary attestation
 // (Sigstore bundle bytes) against the NVIDIA-CI identity pattern and the
 // artifact digest. VerifyBinaryAttestation reads a file then delegates here;
