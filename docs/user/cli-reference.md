@@ -3036,16 +3036,16 @@ Raw manifests (manifest-only components and mixed-component `-post` folders) are
 
 #### OCI Layout Output
 
-`--output oci-layout:<dir>[:tag]` builds the same OCI artifact that `--output oci://` pushes and writes it to `<dir>` as an [OCI image layout](https://github.com/opencontainers/image-spec/blob/main/image-layout.md) instead. No registry is contacted, so an offline or air-gapped builder can produce the published artifact and a reproduction check can compare digests. The tag defaults to the CLI version, as with `oci://`; as with `oras --oci-layout`, the text after the last colon is the tag only when it is a valid tag containing no `/`.
+`--output oci-layout:<dir>[:tag]` builds the same OCI artifact that `--output oci://` pushes and writes it to `<dir>` as an [OCI image layout](https://github.com/opencontainers/image-spec/blob/main/image-layout.md) instead. No registry is contacted, so an offline or air-gapped builder can produce the published artifact and, for a bundle built without `--attest`, a reproduction check can compare digests. The tag defaults to the CLI version, as with `oci://`; as with `oras --oci-layout`, the text after the last colon is the tag only when it is a valid tag containing no `/`.
 
-`<dir>` must not exist, and its parent must. An existing target fails with a conflict error before the bundle is generated, and a failure leaves no layout behind. The content is rendered as for `oci://` output:
+`<dir>` must not exist, and its parent must. An existing target, a missing parent, a path at or below the `./bundle` staging directory, and an `--image-refs` file at the layout path all fail before the bundle is generated. A failure while the layout is written leaves no layout behind; a failure after it is written, such as writing the `--image-refs` file, leaves the layout in place, so remove it before rerunning. The content is rendered as for `oci://` output:
 
 - `--deployer flux` emits ArtifactGenerator and ExternalArtifact CRs against the OCIRepository named by `--flux-oci-source-name` (see [Flux OCI Mode](#flux-oci-mode)).
-- `--deployer argocd` requires `--repo`, because the generated Applications name the registry repository they are published to; `targetRevision` is the tag.
+- `--deployer argocd` requires `--repo oci://<registry>/<repository>`, the repository the layout will be published to, because the generated Applications name it; `targetRevision` is the tag. A value without the `oci://` scheme is rejected.
 - `--deployer argocd-helm` takes the chart version from the tag and the chart name from `--chart-name` (default `aicr-bundle`), where `oci://` output uses the repository's last path segment. `oci://` output also writes the registry namespace into `values.yaml` as the default `repoURL`; for a layout, pass that namespace as `--repo oci://<registry>/<namespace>`. Without `--repo` the default stays empty, as for directory output, and is supplied at install time with `--set repoURL=...`.
 - `--deployer fleet` and `--split` are rejected, as with `oci://`.
 
-For `helm`, `helmfile`, `terraform`, and `flux`, the layout's manifest digest equals the digest `--output oci://` publishes for the same recipe, tag, and CLI version. For `argocd-helm` it does when `--chart-name` and `--repo` name the repository the chart is pushed to; `argocd` content names its destination through `--repo`. `--image-refs` receives the layout's manifest digest. Publish the layout with any OCI copy tool:
+For `helm`, `helmfile`, `terraform`, and `flux`, the layout's manifest digest equals the digest `--output oci://` publishes for the same recipe, tag, and CLI version. For `argocd-helm` it does when `--chart-name` and `--repo` name the repository the chart is pushed to, and for `argocd` when `--repo` does. None of this holds with `--attest`: each attestation records its own invocation ID and start time, so every run's digest differs. `--image-refs` receives the layout's manifest digest. Publish the layout with any OCI copy tool:
 
 ```shell
 aicr bundle -r recipe.yaml --deployer flux --output oci-layout:./aicr-bundle:v1.0.0

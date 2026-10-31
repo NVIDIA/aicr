@@ -215,7 +215,8 @@ type BundleInputSpec struct {
 
 // BundleOutputSpec describes the bundle output destination.
 type BundleOutputSpec struct {
-	// Target is a local directory path or an oci:// URI.
+	// Target is a local directory path, an oci:// URI, or an
+	// oci-layout:<dir>[:tag] OCI image layout target.
 	Target    string `yaml:"target,omitempty" json:"target,omitempty"`
 	ImageRefs string `yaml:"imageRefs,omitempty" json:"imageRefs,omitempty"`
 }

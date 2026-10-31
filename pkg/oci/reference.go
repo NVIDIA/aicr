@@ -65,7 +65,8 @@ func TrimScheme(ref string) string {
 // Reference represents a parsed output target: an OCI registry reference, an
 // OCI image layout directory, or a local directory path.
 type Reference struct {
-	// IsOCI indicates whether this is an OCI registry reference (true) or local path (false).
+	// IsOCI indicates an OCI registry reference; it is false for a local
+	// directory and for an OCI image layout target.
 	IsOCI bool
 	// IsLayout indicates an OCI image layout target. LocalPath is the layout
 	// directory and Tag its tag; IsOCI is false.

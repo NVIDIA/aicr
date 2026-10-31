@@ -347,17 +347,21 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 	// argocd-helm`). Auto-filling repoURL here would surface that
 	// "ignored" warning even when the user never passed --repo, which
 	// blurs the URL-portable contract of the deployer.
-	// An OCI layout has no registry location to derive it from.
-	if opts.deployer == config.DeployerArgoCD && opts.ociRef != nil && opts.repoURL == "" {
-		if opts.ociRef.IsLayout {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				"--deployer argocd with --output "+oci.LayoutScheme+" requires --repo: "+
-					"the Applications name the registry repository they are published to")
+	// An OCI layout has no registry location to derive it from, so --repo
+	// must name the oci:// repository the layout will be published to.
+	if opts.deployer == config.DeployerArgoCD && opts.ociRef != nil && opts.ociRef.IsLayout {
+		if opts.repoURL, err = argoCDLayoutRepoURL(opts.repoURL); err != nil {
+			return nil, err
 		}
+	}
+	if opts.deployer == config.DeployerArgoCD && opts.ociRef != nil && opts.repoURL == "" {
 		opts.repoURL = oci.EnsureScheme(opts.ociRef.Registry + "/" + opts.ociRef.Repository)
 	}
 
 	if err = resolveArgoCDHelmLayoutOptions(cmd, opts); err != nil {
+		return nil, err
+	}
+	if err = checkLayoutTargetConflicts(opts); err != nil {
 		return nil, err
 	}
 
@@ -722,6 +726,56 @@ func signingTargetFromFlags(rekorURL, signingConfigPath string) (useTUF bool, er
 				" (or their env vars AICR_REKOR_URL / AICR_SIGNING_CONFIG, or spec.bundle.rekorURL in --config) are mutually exclusive")
 	}
 	return rekorURL == "" && signingConfigPath == "", nil
+}
+
+// argoCDLayoutRepoURL returns repo, which must be the oci://<registry>/<repository>
+// an argocd OCI layout will be published to, in the form oci:// output derives.
+// Without the oci:// scheme the bundler renders Git-sourced Applications.
+func argoCDLayoutRepoURL(repo string) (string, error) {
+	const want = "--deployer argocd with --output " + oci.LayoutScheme +
+		" requires --repo oci://<registry>/<repository>, the repository the layout will be published to"
+	if !strings.HasPrefix(repo, oci.URIScheme) {
+		return "", errors.New(errors.ErrCodeInvalidRequest, want)
+	}
+	ref, err := oci.ParseOutputTarget(repo)
+	if err != nil || ref.Tag != "" {
+		return "", errors.Wrap(errors.ErrCodeInvalidRequest, want+" (no tag)", err)
+	}
+	return oci.EnsureScheme(ref.Registry + "/" + ref.Repository), nil
+}
+
+// checkLayoutTargetConflicts rejects an OCI layout path that this command
+// also writes, which would otherwise fail only after generation: the bundle
+// staging directory or a path below it, and the --image-refs file.
+func checkLayoutTargetConflicts(opts *bundleCmdOptions) error {
+	if opts.ociRef == nil || !opts.ociRef.IsLayout {
+		return nil
+	}
+	layout := resolvedTargetPath(opts.ociRef.LocalPath)
+	if pathsConflict(layout, opts.outputDir) {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"--output "+oci.LayoutScheme+" path must be outside the bundle staging directory "+opts.outputDir)
+	}
+	if opts.imageRefsPath != "" && pathsConflict(resolvedTargetPath(opts.imageRefsPath), layout) {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"--"+flagImageRefs+" must not be the --output "+oci.LayoutScheme+" directory")
+	}
+	return nil
+}
+
+// resolvedTargetPath returns path made absolute with its parent's symlinks
+// resolved, for comparing targets that may not exist yet. It falls back to
+// the absolute path when the parent cannot be resolved; later checks report that.
+func resolvedTargetPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(abs))
+	if err != nil {
+		return abs
+	}
+	return filepath.Join(parent, filepath.Base(abs))
 }
 
 // resolveArgoCDHelmLayoutOptions applies --chart-name and --repo to an

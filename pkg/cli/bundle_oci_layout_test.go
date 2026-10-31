@@ -18,6 +18,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	storeoci "oras.land/oras-go/v2/content/oci"
@@ -178,6 +179,32 @@ func TestParseBundleCmdOptions_OCILayout(t *testing.T) {
 			args:     []string{"--output", layout + ":v2", "--deployer", "argocd", "--repo", "oci://ghcr.io/x/y"},
 			wantTag:  "v2",
 			wantRepo: "oci://ghcr.io/x/y",
+		},
+		{
+			name:     "argocd canonicalizes --repo as oci:// output derives it",
+			args:     []string{"--output", layout + ":v2", "--deployer", "argocd", "--repo", "oci://ghcr.io/team/aicr-bundle"},
+			wantTag:  "v2",
+			wantRepo: "oci://ghcr.io/team/aicr-bundle",
+		},
+		{
+			name:     "argocd rejects a --repo without the oci:// scheme",
+			args:     []string{"--output", layout + ":v2", "--deployer", "argocd", "--repo", "ghcr.io/team/aicr-bundle"},
+			wantCode: errors.ErrCodeInvalidRequest,
+		},
+		{
+			name:     "argocd rejects a tagged --repo",
+			args:     []string{"--output", layout + ":v2", "--deployer", "argocd", "--repo", "oci://ghcr.io/team/aicr-bundle:v2"},
+			wantCode: errors.ErrCodeInvalidRequest,
+		},
+		{
+			name:     "layout at the bundle staging directory is rejected",
+			args:     []string{"--output", oci.LayoutScheme + "bundle:v2", "--deployer", "helm"},
+			wantCode: errors.ErrCodeInvalidRequest,
+		},
+		{
+			name:     "image refs at the layout path is rejected",
+			args:     []string{"--output", layout + ":v2", "--deployer", "helm", "--image-refs", strings.TrimPrefix(layout, oci.LayoutScheme)},
+			wantCode: errors.ErrCodeInvalidRequest,
 		},
 		{
 			name:     "argocd without --repo is rejected",
