@@ -320,8 +320,9 @@ func versionsOnly(versions map[string]string) map[string]Identity {
 // MatchIdentities compares two component-to-identity tables against set and
 // returns one result, sorted by component name, for each component whose
 // deployment changes. It does no I/O. A version change's verdict comes from
-// the route of records from the source to the target, and every result
-// carries a Reason and an Explanation. Special cases are:
+// the route of records from the source to the target. Every result but a
+// ChangeAdded or ChangeRemoved row carries a Reason and an Explanation.
+// Special cases are:
 //
 //   - a component that moved only in identity gets a ChangeIdentity row,
 //     since no record assesses identity
