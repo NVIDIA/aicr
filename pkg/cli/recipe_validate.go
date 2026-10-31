@@ -31,12 +31,14 @@ func recipeValidateCmd() *cli.Command {
 		Usage: "Statically validate recipe catalog files without a cluster.",
 		Description: `Validate an overlay, mixin, or registry file, or a catalog directory.
 Use --data with a file to resolve references against that catalog.
+Use --external-only with --data to validate a complete working-tree catalog.
 
 Examples:
   aicr recipe validate --data recipes recipes/overlays/example.yaml
-  aicr recipe validate --data recipes --format json`,
+  aicr recipe validate --data recipes --external-only --format json`,
 		Flags: []cli.Flag{
 			dataFlag(),
+			&cli.BoolFlag{Name: "external-only", Usage: "Validate only the catalog in --data, without embedded fallback (no FILE)", Category: catInput},
 			&cli.StringFlag{Name: flagFormat, Value: verifyFormatText, Usage: "Output format (text or json)", Category: catOutput},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -46,11 +48,20 @@ Examples:
 			if cmd.Args().Len() > 1 || (cmd.Args().Len() == 0 && cmd.String("data") == "") {
 				return errors.New(errors.ErrCodeInvalidRequest, "provide one file or --data <directory>")
 			}
+			if cmd.Bool("external-only") && (cmd.String("data") == "" || cmd.Args().Len() != 0) {
+				return errors.New(errors.ErrCodeInvalidRequest, "--external-only requires --data and no file argument")
+			}
 			format := cmd.String(flagFormat)
 			if format != verifyFormatText && format != verifyFormatJSON {
 				return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("unknown output format %q, valid formats are: text, json", format))
 			}
-			diagnostics, err := aicr.ValidateRecipeCatalog(ctx, cmd.Args().First(), cmd.String("data"))
+			var diagnostics []aicr.RecipeDiagnostic
+			var err error
+			if cmd.Bool("external-only") {
+				diagnostics, err = aicr.ValidateRecipeCatalogDirectory(ctx, cmd.String("data"))
+			} else {
+				diagnostics, err = aicr.ValidateRecipeCatalog(ctx, cmd.Args().First(), cmd.String("data"))
+			}
 			if err != nil {
 				return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to validate recipe data")
 			}

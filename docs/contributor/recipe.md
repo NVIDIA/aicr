@@ -21,12 +21,15 @@ data without a cluster or snapshot:
 
 ```bash
 aicr recipe validate --data recipes recipes/overlays/my-recipe.yaml
-aicr recipe validate --data recipes --format json
+aicr recipe validate --data recipes --external-only --format json
 ```
 
 The first command checks the named file with `recipes` as its reference
-catalog. The second checks the catalog and emits JSON diagnostics for CI.
-Errors cause a non-zero exit status; warnings are reported without failing.
+catalog. The second checks only the working-tree catalog and emits JSON
+diagnostics for CI, without filling missing files or registry entries from the
+embedded catalog. Omit `--external-only` when validating an extension layered
+on the embedded catalog. Current checks emit error diagnostics; errors cause
+a non-zero exit status.
 For pre-commit, install a local hook such as:
 
 ```yaml
@@ -35,7 +38,7 @@ repos:
     hooks:
       - id: aicr-recipe-validate
         name: Validate AICR recipe catalog
-        entry: aicr recipe validate --data recipes
+        entry: aicr recipe validate --data recipes --external-only
         language: system
         pass_filenames: false
         files: ^recipes/
