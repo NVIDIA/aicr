@@ -399,7 +399,7 @@ That shared code path was aspirational when written and is now real: only `helm`
 | A record describes the move and blocks it | One `blocked` upgrade from the source reaches the target | `recorded` | yes |
 | An authored block is on the route | The route takes more than one upgrade, and one is `blocked` | `record-blocks` | no |
 | Several boundaries at once | The route takes two or more upgrades, none `blocked` | `multiple-boundaries` | no |
-| Nothing describes the starting point | A record is crossed but none describes a move from the source, or the route lands where no record continues | `undefined-origin` | no |
+| Nothing describes the starting point | A record is crossed but none describes a move from the source, the records for the source lead only past the target, or the route lands where no record continues | `undefined-origin` | no |
 | The target is past what anyone assessed | The target sits above the highest `to` ceiling the component's records name, or above the ceiling where the route stops | `beyond-record-ceiling` | no |
 
 Only the first attaches a record and renders its deployer-scoped steps, because only there did an author write instructions for the move actually being made. The rest attach none: composing one record's steps for a jump it does not describe is the failure the verdict exists to prevent.
