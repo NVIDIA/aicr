@@ -291,19 +291,22 @@ constrained:
       SupportedFormats: behavioral
   pkg/oci:
     reason: >-
-      The CLI's own OCI push/publish pipeline for `--output oci://...`:
-      parsing the --output target, allocating a private workspace, and
-      packaging and pushing the generated bundle directory as an OCI
-      artifact after MakeBundle returns it. MakeBundle's job ends at
+      The CLI's own OCI push/publish pipeline for `--output oci://...` and
+      `--output oci-layout:...`: parsing the --output target, allocating a
+      private workspace, and packaging the generated bundle directory as an
+      OCI artifact after MakeBundle returns it, then pushing it or writing
+      it as an OCI image layout. MakeBundle's job ends at
       producing the on-disk artifact; pushing that artifact to a registry is
       an output-target concern parallel to writing a zip file or a plain
       directory, which the CLI's bundle-output-target abstraction already
       owns for every output kind.
     permanent: true
     symbols:
+      CheckLayoutTarget: behavioral
       EnsureScheme: behavioral
       HelmChartOptions: type
       HelmChartVersionFromTag: behavioral
+      LayoutScheme: const
       NewPrivateWorkspace: behavioral
       OutputConfig: type
       PackageAndPush: behavioral
@@ -315,9 +318,12 @@ constrained:
       Reference.ParentNamespace: behavioral
       Reference.WithTag: behavioral
       URIScheme: const
+      ValidateChartName: behavioral
       Workspace: type
       Workspace.Close: behavioral
       Workspace.Path: behavioral
+      WriteHelmChartLayout: behavioral
+      WriteLayout: behavioral
   pkg/recipe:
     reason: >-
       Two deliberate, documented patterns, not a gap. First, wire-format

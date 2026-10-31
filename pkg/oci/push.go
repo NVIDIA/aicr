@@ -90,6 +90,10 @@ type PackageOptions struct {
 	// Annotations are additional manifest annotations to include.
 	// Standard OCI annotations (org.opencontainers.image.*) are recommended.
 	Annotations map[string]string
+
+	// layoutOnly drops the Registry and Repository requirement for a layout
+	// written by WriteLayout, which is addressed by tag alone.
+	layoutOnly bool
 }
 
 // PackageResult contains the result of local OCI packaging.
@@ -399,6 +403,9 @@ func runPackageHook(hook func() error, message string) error {
 func validatePackageOptions(opts PackageOptions) error {
 	if opts.Tag == "" {
 		return apperrors.New(apperrors.ErrCodeInvalidRequest, "tag is required for OCI packaging")
+	}
+	if opts.layoutOnly {
+		return validateDistributionTag(opts.Tag)
 	}
 	if opts.Registry == "" {
 		return apperrors.New(apperrors.ErrCodeInvalidRequest, "registry is required for OCI packaging")

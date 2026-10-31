@@ -152,7 +152,8 @@ type bundleCmdOptions struct {
 	// config or a private v2 instance). See #1650.
 	signingConfigPath string
 
-	// OCI output reference (nil if outputting to local directory)
+	// OCI output reference: a registry reference or an OCI image layout
+	// target (nil if outputting to local directory)
 	ociRef        *oci.Reference
 	plainHTTP     bool
 	insecureTLS   bool
@@ -285,12 +286,17 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 		return nil, err
 	}
 
-	if ref.IsOCI {
+	if ref.IsOCI || ref.IsLayout {
 		// Use CLI version as default tag when not specified in URI
 		if ref.Tag == "" {
 			opts.ociRef = ref.WithTag(version)
 		} else {
 			opts.ociRef = ref
+		}
+		if ref.IsLayout {
+			if err = oci.CheckLayoutTarget(opts.ociRef); err != nil {
+				return nil, err
+			}
 		}
 		// For OCI output, retain one absolute planned path from preflight
 		// through generation and publication.
@@ -341,8 +347,18 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 	// argocd-helm`). Auto-filling repoURL here would surface that
 	// "ignored" warning even when the user never passed --repo, which
 	// blurs the URL-portable contract of the deployer.
+	// An OCI layout has no registry location to derive it from.
 	if opts.deployer == config.DeployerArgoCD && opts.ociRef != nil && opts.repoURL == "" {
+		if opts.ociRef.IsLayout {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--deployer argocd with --output "+oci.LayoutScheme+" requires --repo: "+
+					"the Applications name the registry repository they are published to")
+		}
 		opts.repoURL = oci.EnsureScheme(opts.ociRef.Registry + "/" + opts.ociRef.Repository)
+	}
+
+	if err = resolveArgoCDHelmLayoutOptions(cmd, opts); err != nil {
+		return nil, err
 	}
 
 	// When using --deployer flux with OCI output, set the OCIRepository
@@ -708,6 +724,47 @@ func signingTargetFromFlags(rekorURL, signingConfigPath string) (useTUF bool, er
 	return rekorURL == "" && signingConfigPath == "", nil
 }
 
+// resolveArgoCDHelmLayoutOptions applies --chart-name and --repo to an
+// argocd-helm bundle written as an OCI layout. With oci:// output both come
+// from the registry reference; a layout has none, so --chart-name names the
+// chart (default aicr-bundle) and --repo, the registry namespace the layout
+// will be published under, becomes the default repoURL in values.yaml.
+func resolveArgoCDHelmLayoutOptions(cmd *cli.Command, opts *bundleCmdOptions) error {
+	layoutArgoCDHelm := opts.deployer == config.DeployerArgoCDHelm && opts.ociRef != nil && opts.ociRef.IsLayout
+	if !layoutArgoCDHelm {
+		if cmd.IsSet(flagChartName) {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				"--"+flagChartName+" is only valid with --deployer argocd-helm and --output "+oci.LayoutScheme)
+		}
+		return nil
+	}
+	if cmd.IsSet(flagChartName) {
+		opts.bundleChartName = cmd.String(flagChartName)
+		if err := oci.ValidateChartName(opts.bundleChartName); err != nil {
+			return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid --"+flagChartName)
+		}
+	}
+	if opts.repoURL == "" {
+		return nil
+	}
+	if !strings.HasPrefix(opts.repoURL, oci.URIScheme) {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"--repo with --deployer argocd-helm and --output "+oci.LayoutScheme+
+				" must be the oci://<registry>/<namespace> the chart will be published under")
+	}
+	// Derive it as oci:// output does, from a chart reference under the
+	// namespace; ParentNamespace strips the placeholder chart segment again.
+	chartRef, err := oci.ParseOutputTarget(opts.repoURL + "/chart")
+	if err != nil || chartRef.Tag != "" {
+		return errors.Wrap(errors.ErrCodeInvalidRequest,
+			"invalid --repo: want oci://<registry>/<namespace> with no tag", err)
+	}
+	opts.ociParentNamespace = chartRef.ParentNamespace()
+	// The bundler warns that --repo is ignored for argocd-helm; here it is not.
+	opts.repoURL = ""
+	return nil
+}
+
 // resolveOutputTarget returns the parsed *oci.Reference for --output,
 // preferring CLI input over the typed fallback in input. When the
 // CLI flag is set to an empty string OR neither source supplies a
@@ -826,8 +883,8 @@ Flux:
   - README.md: Deployment instructions
   - checksums.txt: SHA256 checksums of generated files
 
-Flux with OCI output (--output oci://...):
-  When --output targets an OCI registry, local-chart components emit
+Flux with OCI output (--output oci://... or oci-layout:...):
+  When --output targets an OCI registry or layout, local-chart components emit
   ArtifactGenerator + ExternalArtifact CRs instead of GitRepository sources.
   This requires Flux v2.7+ with:
     - source-watcher controller deployed (source.extensions.fluxcd.io)
@@ -915,6 +972,10 @@ Package and push bundle to OCI registry (uses CLI version as tag):
 
 Package with explicit tag (overrides CLI version):
   aicr bundle --recipe recipe.yaml --output oci://ghcr.io/nvidia/aicr-bundle:v1.0.0
+
+Write the same artifact as an OCI image layout without pushing, then publish it:
+  aicr bundle --recipe recipe.yaml --output oci-layout:./aicr-bundle:v1.0.0
+  oras cp --from-oci-layout ./aicr-bundle:v1.0.0 ghcr.io/nvidia/aicr-bundle:v1.0.0
 `,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
@@ -929,9 +990,11 @@ Package with explicit tag (overrides CLI version):
 			&cli.StringFlag{
 				Name:    flagOutput,
 				Aliases: []string{"o"},
-				Usage: `Output target: local directory path or OCI registry URI (default: current dir).
+				Usage: `Output target: local directory path, OCI registry URI, or OCI image layout (default: current dir).
 	For local output: ./my-bundle or /tmp/bundle
 	For OCI registry: oci://ghcr.io/nvidia/bundle:v1.0.0
+	For OCI image layout: oci-layout:./bundle-layout:v1.0.0 (the directory must not exist;
+	same artifact as oci://, written locally instead of pushed)
 	If no tag specified, CLI version is used (e.g., oci://ghcr.io/nvidia/bundle)
 	May also be supplied via spec.bundle.output.target in --config.`,
 				Category: catOutput,
@@ -1036,7 +1099,15 @@ Package with explicit tag (overrides CLI version):
 				Value: "",
 				Usage: "Git repository URL for GitOps deployers (used with --deployer argocd, flux, and fleet). " +
 					"Ignored by --deployer argocd-helm: that bundle is URL-portable and the publish " +
-					"location is supplied at install time via `helm install --set repoURL=...`.",
+					"location is supplied at install time via `helm install --set repoURL=...`. " +
+					"With --deployer argocd-helm and --output oci-layout:, an oci://<registry>/<namespace> " +
+					"value becomes the default repoURL, as oci:// output sets it.",
+				Category: catDeployment,
+			},
+			&cli.StringFlag{
+				Name: flagChartName,
+				Usage: "Helm chart name for --deployer argocd-helm with --output oci-layout: (default: aicr-bundle). " +
+					"With oci:// output the name is the repository's last path segment.",
 				Category: catDeployment,
 			},
 			&cli.StringFlag{
@@ -1776,6 +1847,8 @@ type bundlePublishDependencies struct {
 	newWorkspace       func(context.Context, string, ...string) (*oci.Workspace, error)
 	packageAndPush     func(context.Context, oci.OutputConfig) (*oci.PackageAndPushResult, error)
 	packageAndPushHelm func(context.Context, oci.HelmChartOptions) (*oci.PackageAndPushResult, error)
+	writeLayout        func(context.Context, oci.OutputConfig) (*oci.PackageAndPushResult, error)
+	writeHelmLayout    func(context.Context, oci.HelmChartOptions) (*oci.PackageAndPushResult, error)
 	writeImageRefs     func(context.Context, *imageRefsTarget, []byte) error
 }
 
@@ -1785,6 +1858,8 @@ func defaultBundlePublishDependencies() bundlePublishDependencies {
 		newWorkspace:        oci.NewPrivateWorkspace,
 		packageAndPush:      oci.PackageAndPush,
 		packageAndPushHelm:  oci.PackageAndPushHelmChart,
+		writeLayout:         oci.WriteLayout,
+		writeHelmLayout:     oci.WriteHelmChartLayout,
 		writeImageRefs: func(ctx context.Context, target *imageRefsTarget, data []byte) error {
 			return target.write(ctx, data)
 		},
@@ -1804,6 +1879,12 @@ func normalizeBundlePublishDependencies(deps bundlePublishDependencies) bundlePu
 	}
 	if deps.packageAndPushHelm == nil {
 		deps.packageAndPushHelm = defaults.packageAndPushHelm
+	}
+	if deps.writeLayout == nil {
+		deps.writeLayout = defaults.writeLayout
+	}
+	if deps.writeHelmLayout == nil {
+		deps.writeHelmLayout = defaults.writeHelmLayout
 	}
 	if deps.writeImageRefs == nil {
 		deps.writeImageRefs = defaults.writeImageRefs
@@ -1845,7 +1926,7 @@ func pushOCIBundleWithDependencies(
 ) (retErr error) {
 
 	deps = normalizeBundlePublishDependencies(deps)
-	if opts == nil || opts.ociRef == nil || !opts.ociRef.IsOCI {
+	if opts == nil || opts.ociRef == nil || (!opts.ociRef.IsOCI && !opts.ociRef.IsLayout) {
 		return errors.New(errors.ErrCodeInvalidRequest, "OCI bundle options are required")
 	}
 	if out == nil || bundle == nil {
@@ -1951,10 +2032,14 @@ func pushOCIBundleWithDependencies(
 	if len(sourceFiles) == 0 {
 		return errors.New(errors.ErrCodeInternal, "verified bundle inventory is empty")
 	}
+	packageGeneric, packageHelm := deps.packageAndPush, deps.packageAndPushHelm
+	if opts.ociRef.IsLayout {
+		packageGeneric, packageHelm = deps.writeLayout, deps.writeHelmLayout
+	}
 	var pushResult *oci.PackageAndPushResult
 	var publishErr error
 	if opts.deployer == config.DeployerArgoCDHelm {
-		pushResult, publishErr = deps.packageAndPushHelm(publishCtx, oci.HelmChartOptions{
+		pushResult, publishErr = packageHelm(publishCtx, oci.HelmChartOptions{
 			SourceDir:   stagedDir,
 			OutputDir:   workspace.Path(),
 			SourceFiles: sourceFiles,
@@ -1964,7 +2049,7 @@ func pushOCIBundleWithDependencies(
 			InsecureTLS: opts.insecureTLS,
 		})
 	} else {
-		pushResult, publishErr = deps.packageAndPush(publishCtx, oci.OutputConfig{
+		pushResult, publishErr = packageGeneric(publishCtx, oci.OutputConfig{
 			SourceDir:   stagedDir,
 			OutputDir:   workspace.Path(),
 			SourceFiles: sourceFiles,
@@ -1993,7 +2078,7 @@ func pushOCIBundleWithDependencies(
 
 	for i := range out.Results {
 		if out.Results[i].Success {
-			out.Results[i].SetOCIMetadata(pushResult.Digest, pushResult.Reference, true)
+			out.Results[i].SetOCIMetadata(pushResult.Digest, pushResult.Reference, opts.ociRef.IsOCI)
 		}
 	}
 
