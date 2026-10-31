@@ -1618,3 +1618,31 @@ func TestValidateIdentityPattern_RejectsUncompilablePattern(t *testing.T) {
 		t.Fatal("ValidateIdentityPattern() error = nil, want rejection of an uncompilable pattern")
 	}
 }
+
+// TestReadBinaryAttestation covers the single read that the bundler verifies and
+// then copies into the bundle: the bytes come back unchanged, and a symlinked
+// path is refused.
+func TestReadBinaryAttestation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "binary.sigstore.json")
+	want := `{"ok":true}`
+	if err := os.WriteFile(path, []byte(want), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	got, err := ReadBinaryAttestation(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadBinaryAttestation() error = %v", err)
+	}
+	if string(got) != want {
+		t.Errorf("ReadBinaryAttestation() = %q, want %q", got, want)
+	}
+
+	link := filepath.Join(dir, "link.sigstore.json")
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	if _, err := ReadBinaryAttestation(context.Background(), link); err == nil {
+		t.Error("ReadBinaryAttestation(symlink) = nil error, want refusal")
+	}
+}
