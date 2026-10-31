@@ -14,6 +14,36 @@ authoring lives in
 page is for contributors changing recipe content or extending the
 resolver in `pkg/recipe`.
 
+## Validate recipe changes
+
+Run static validation locally before opening a pull request. It checks recipe
+data without a cluster or snapshot:
+
+```bash
+aicr recipe validate --data recipes recipes/overlays/my-recipe.yaml
+aicr recipe validate --data recipes --external-only --format json
+```
+
+The first command checks the named file with `recipes` as its reference
+catalog. The second checks only the working-tree catalog and emits JSON
+diagnostics for CI, without filling missing files or registry entries from the
+embedded catalog. Omit `--external-only` when validating an extension layered
+on the embedded catalog. Current checks emit error diagnostics; errors cause
+a non-zero exit status.
+For pre-commit, install a local hook such as:
+
+```yaml
+repos:
+  - repo: local
+    hooks:
+      - id: aicr-recipe-validate
+        name: Validate AICR recipe catalog
+        entry: aicr recipe validate --data recipes --external-only
+        language: system
+        pass_filenames: false
+        files: ^recipes/
+```
+
 > **Where does my change go?** Most changes hit exactly one of three
 > files. Skim [Decision matrix](#decision-matrix) before editing —
 > picking the wrong layer leaks defaults across recipes or duplicates

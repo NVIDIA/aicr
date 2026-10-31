@@ -222,6 +222,7 @@ jobs:
               - 'tools/crd-inventory/**'
               - 'pkg/allocpolicy/*.go'
               - 'pkg/chainsaw/*.go'
+              - 'pkg/chainsaw/validation/*.go'
               - 'pkg/constraints/expr/*.go'
               - 'pkg/defaults/*.go'
               - 'pkg/errors/*.go'

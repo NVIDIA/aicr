@@ -31,6 +31,7 @@ This is a **different axis** from the per-recipe **Coverage** column in the reci
 | `query` | chainsaw, demo | simulated / none | per-PR | covered | — |
 | `recipe` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
 | `recipe list` | — | — | — | not-yet-covered | — |
+| `recipe validate` | — | — | — | not-yet-covered | — |
 | `recipe verify-catalog` | — | — | — | not-yet-covered | — |
 | `skill` | demo | docs | — | not-yet-covered | documented in demos only; no executable test yet |
 | `snapshot` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
