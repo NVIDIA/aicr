@@ -82,8 +82,10 @@ func CheckLayoutTarget(ref *Reference) error {
 	return err
 }
 
-// layoutTarget validates ref and returns the parent directory and base name
-// of its layout directory. An existing target fails before any packaging.
+// layoutTarget validates ref and returns the resolved parent directory and
+// base name of its layout directory. An existing target or a missing parent
+// fails before any packaging. The parent is resolved because the owned
+// layout rejects a parent path that is itself a symlink, such as macOS /tmp.
 func layoutTarget(ref *Reference) (string, string, error) {
 	if ref == nil || !ref.IsLayout {
 		return "", "", apperrors.New(apperrors.ErrCodeInvalidRequest, "OCI layout reference is required")
@@ -101,12 +103,27 @@ func layoutTarget(ref *Reference) (string, string, error) {
 		return "", "", apperrors.New(apperrors.ErrCodeInvalidRequest,
 			"OCI layout path must name a new directory: "+ref.LocalPath)
 	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(abs))
+	if err != nil {
+		code := apperrors.ErrCodeInternal
+		if stderrors.Is(err, fs.ErrNotExist) {
+			code = apperrors.ErrCodeInvalidRequest
+		}
+		return "", "", apperrors.Wrap(code, "OCI layout parent directory is unavailable: "+filepath.Dir(abs), err)
+	}
+	info, err := os.Stat(parent)
+	if err != nil {
+		return "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to inspect OCI layout parent: "+parent, err)
+	}
+	if !info.IsDir() {
+		return "", "", apperrors.New(apperrors.ErrCodeInvalidRequest, "OCI layout parent is not a directory: "+parent)
+	}
 	if _, statErr := os.Lstat(abs); statErr == nil {
 		return "", "", apperrors.New(apperrors.ErrCodeConflict, "OCI layout target already exists: "+abs)
 	} else if !stderrors.Is(statErr, fs.ErrNotExist) {
 		return "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to inspect OCI layout target: "+abs, statErr)
 	}
-	return filepath.Dir(abs), name, nil
+	return parent, name, nil
 }
 
 // releaseLayout copies the packaged graph into a new layout beside the
@@ -167,6 +184,11 @@ func releaseLayout(
 	// The store's ingest directory is its own scratch space, not layout content.
 	if err = layout.child.Remove(rootStoreIngestDir); err != nil {
 		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to remove OCI layout ingest directory", err)
+	}
+	// Remove the workspace layout first: a failure after the rename would
+	// return an error while leaving the released target behind.
+	if err = op.Close(); err != nil {
+		return nil, err
 	}
 	released = true
 	path, err := layout.releaseAs(name)

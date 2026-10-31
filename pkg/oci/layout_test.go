@@ -157,7 +157,7 @@ func TestWriteLayoutMatchesPushedDigest(t *testing.T) {
 	if written.Digest != pushed.Digest {
 		t.Fatalf("layout digest = %s, pushed digest = %s", written.Digest, pushed.Digest)
 	}
-	if written.StorePath != layoutDir || written.Reference != "oci-layout:"+layoutDir+":v1.2.3" {
+	if written.StorePath != resolvedPath(t, layoutDir) || written.Reference != "oci-layout:"+layoutDir+":v1.2.3" {
 		t.Fatalf("WriteLayout() = %+v", written)
 	}
 	assertLayoutPublishes(t, layoutDir, "v1.2.3", pushed.Digest, host)
@@ -314,6 +314,14 @@ func TestCheckLayoutTarget(t *testing.T) {
 	if err := os.Mkdir(existing, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	file := filepath.Join(parent, "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(parent, "link")
+	if err := os.Symlink(existing, link); err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		name     string
 		ref      *Reference
@@ -322,6 +330,9 @@ func TestCheckLayoutTarget(t *testing.T) {
 		{name: "new directory", ref: &Reference{IsLayout: true, LocalPath: filepath.Join(parent, "new"), Tag: "v1"}},
 		{name: "existing directory", ref: &Reference{IsLayout: true, LocalPath: existing, Tag: "v1"}, wantCode: apperrors.ErrCodeConflict},
 		{name: "filesystem root", ref: &Reference{IsLayout: true, LocalPath: "/", Tag: "v1"}, wantCode: apperrors.ErrCodeInvalidRequest},
+		{name: "missing parent", ref: &Reference{IsLayout: true, LocalPath: filepath.Join(parent, "missing", "new"), Tag: "v1"}, wantCode: apperrors.ErrCodeInvalidRequest},
+		{name: "parent is a file", ref: &Reference{IsLayout: true, LocalPath: filepath.Join(file, "new"), Tag: "v1"}, wantCode: apperrors.ErrCodeInvalidRequest},
+		{name: "symlinked parent", ref: &Reference{IsLayout: true, LocalPath: filepath.Join(link, "new"), Tag: "v1"}},
 		{name: "invalid tag", ref: &Reference{IsLayout: true, LocalPath: filepath.Join(parent, "new"), Tag: "bad tag"}, wantCode: apperrors.ErrCodeInvalidRequest},
 		{name: "nil reference", wantCode: apperrors.ErrCodeInvalidRequest},
 	}
@@ -364,4 +375,40 @@ func TestValidateChartName(t *testing.T) {
 			errorstest.WantReportedCode(t, err, apperrors.ErrCodeInvalidRequest)
 		})
 	}
+}
+
+// TestWriteLayoutThroughSymlinkedParent covers a target whose parent path is
+// itself a symlink, as macOS /tmp is.
+func TestWriteLayoutThroughSymlinkedParent(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	written, err := WriteLayout(context.Background(), OutputConfig{
+		SourceDir: writeBundleFixture(t),
+		OutputDir: t.TempDir(),
+		Reference: &Reference{IsLayout: true, LocalPath: filepath.Join(link, "layout"), Tag: "v1"},
+	})
+	if err != nil {
+		t.Fatalf("WriteLayout() error = %v", err)
+	}
+	if want := filepath.Join(resolvedPath(t, real), "layout"); written.StorePath != want {
+		t.Fatalf("StorePath = %q, want %q", written.StorePath, want)
+	}
+	if _, err := os.Stat(filepath.Join(link, "layout", "index.json")); err != nil {
+		t.Fatalf("layout not reachable through the symlink: %v", err)
+	}
+}
+
+func resolvedPath(t *testing.T, path string) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("resolve %s: %v", path, err)
+	}
+	if filepath.Dir(path) == path {
+		return dir
+	}
+	return filepath.Join(dir, filepath.Base(path))
 }
