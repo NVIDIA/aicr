@@ -156,7 +156,7 @@ spec:
     input:
       recipe: recipe.yaml            # must match recipe.output.path when both set
     output:
-      target: ./bundles              # local dir or oci:// URI
+      target: ./bundles              # local dir, oci:// URI, or oci-layout:<dir>[:tag]
       imageRefs: ""                  # external digest file; OCI output only
     deployment:
       deployer: helmfile             # helm | helmfile | argocd | argocd-helm | flux | terraform | fleet
@@ -296,7 +296,7 @@ Inputs to `aicr bundle`.
 | Field | Type | Notes |
 |-------|------|-------|
 | `input.recipe` | string | Recipe to bundle |
-| `output.target` | string | Local directory or `oci://` URI |
+| `output.target` | string | Local directory, `oci://` URI, or `oci-layout:<dir>[:tag]` OCI image layout (see [OCI Layout Output](cli-reference.md#oci-layout-output)) |
 | `output.imageRefs` | string | Optional external image-reference output file for an OCI `output.target` only. Local output is rejected. Its parent must be an existing real directory, and the target must be outside and not aliased to the planned or completed bundle. The target, including that it can be written, is checked before the bundle is generated. |
 | `deployment.deployer` | string | Deployer choice (same values as `--deployer`) |
 | `deployment.repo` | string | GitOps repo for repo-shaped deployers |
