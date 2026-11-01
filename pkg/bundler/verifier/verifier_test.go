@@ -1618,3 +1618,49 @@ func TestValidateIdentityPattern_RejectsUncompilablePattern(t *testing.T) {
 		t.Fatal("ValidateIdentityPattern() error = nil, want rejection of an uncompilable pattern")
 	}
 }
+
+// TestReadBinaryAttestation covers the single read that the bundler verifies and
+// then copies into the bundle: the bytes come back unchanged, and a symlinked
+// path is refused.
+func TestReadBinaryAttestation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "binary.sigstore.json")
+	want := `{"ok":true}`
+	if err := os.WriteFile(path, []byte(want), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	got, err := ReadBinaryAttestation(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadBinaryAttestation() error = %v", err)
+	}
+	if string(got) != want {
+		t.Errorf("ReadBinaryAttestation() = %q, want %q", got, want)
+	}
+
+	link := filepath.Join(dir, "link.sigstore.json")
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	if _, err := ReadBinaryAttestation(context.Background(), link); err == nil {
+		t.Error("ReadBinaryAttestation(symlink) = nil error, want refusal")
+	}
+}
+
+// TestReadBinaryAttestation_CanceledContext covers a context that is already
+// canceled: the read fails with ErrCodeTimeout and returns no bytes, so nothing
+// unverified can reach the bundle.
+func TestReadBinaryAttestation_CanceledContext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "binary.sigstore.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	data, err := ReadBinaryAttestation(ctx, path)
+	errorstest.WantReportedCode(t, err, errors.ErrCodeTimeout)
+	if data != nil {
+		t.Errorf("ReadBinaryAttestation(canceled) returned %d bytes, want none", len(data))
+	}
+}
