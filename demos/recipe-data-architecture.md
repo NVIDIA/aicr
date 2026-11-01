@@ -189,9 +189,10 @@ aicr recipe \
 ```
 
 Order in `dependencyRefs`:
-1. `cert-manager` (no dependencies)
-2. `gpu-operator` (depends on cert-manager)
-3. Other components...
+1. `prometheus-operator-crds` (no dependencies)
+2. `cert-manager` (depends on prometheus-operator-crds)
+3. `gpu-operator` (depends on nfd, cert-manager, prometheus-operator-crds)
+4. Other components...
 
 > Dependency-driven ordering based on [Kahn's algorithm](https://www.geeksforgeeks.org/dsa/topological-sorting-indegree-based-solution/) for topological sort.
 

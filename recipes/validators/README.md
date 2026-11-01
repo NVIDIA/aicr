@@ -27,7 +27,7 @@ validators:
 
 Applied by `catalog.Load` (`pkg/validator/catalog/catalog.go`) in order:
 
-1. `:latest` is replaced with the CLI version (e.g., `:v0.9.5`) for release builds — locks validators to the CLI version. Dev builds keep `:latest`.
+1. `:latest` is replaced with the CLI version (e.g., `:v0.9.5`) for release builds — locks validators to the CLI version. Dev builds with a known commit get `:sha-<commit>` instead (matching the `on-push.yaml` image tags).
 2. Explicit version tags (e.g., `:v1.2.3`) are never modified — use these to pin a validator independently.
 3. `AICR_VALIDATOR_IMAGE_REGISTRY` overrides the registry prefix (e.g., `localhost:5001` replaces `ghcr.io/nvidia`).
 
