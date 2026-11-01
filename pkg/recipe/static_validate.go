@@ -82,17 +82,14 @@ func validateStatic(ctx context.Context, path, dataDir string, externalOnly bool
 	var data []byte
 	var hdr RecipeMetadataHeader
 	if path != "" {
-		f, err := os.Open(path)
+		input, err := readStaticInput(path)
 		if err != nil {
-			return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "failed to open validation input", err)
+			return nil, err
 		}
-		data, err = io.ReadAll(io.LimitReader(f, defaults.MaxExternalDataFileBytes+1))
-		_ = f.Close()
+		data, err = mergeStaticProfilePatch(ctx, path, dataDir, input)
 		if err != nil {
-			return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to read validation input", err)
-		}
-		if int64(len(data)) > defaults.MaxExternalDataFileBytes {
-			return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "validation input exceeds size limit")
+			add(path, "spec.profile", err)
+			return diagnostics, nil
 		}
 		if err := yaml.Unmarshal(data, &hdr); err != nil {
 			add(path, "", err)
@@ -100,7 +97,7 @@ func validateStatic(ctx context.Context, path, dataDir string, externalOnly bool
 		}
 		if hdr.Kind == ComponentRegistryKind {
 			var reg ComponentRegistry
-			if err := decodeStaticYAML(data, &reg, false); err != nil {
+			if err := decodeStaticYAML(data, &reg); err != nil {
 				add(path, "", err)
 				return diagnostics, nil
 			}
@@ -149,6 +146,50 @@ func validateStatic(ctx context.Context, path, dataDir string, externalOnly bool
 	return diagnostics, resultErr
 }
 
+func readStaticInput(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "failed to open validation input", err)
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, defaults.MaxExternalDataFileBytes+1))
+	if err != nil {
+		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to read validation input", err)
+	}
+	if int64(len(data)) > defaults.MaxExternalDataFileBytes {
+		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "validation input exceeds size limit")
+	}
+	return data, nil
+}
+
+func mergeStaticProfilePatch(ctx context.Context, path, dataDir string, data []byte) ([]byte, error) {
+	if dataDir == "" {
+		return data, nil
+	}
+	inputPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "failed to resolve validation input path", err)
+	}
+	catalogPath, err := filepath.Abs(dataDir)
+	if err != nil {
+		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "failed to resolve catalog path", err)
+	}
+	rel, err := filepath.Rel(catalogPath, inputPath)
+	if err != nil {
+		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "failed to resolve input catalog path", err)
+	}
+	lookupPath := filepath.ToSlash(rel)
+	if isOverlay, _ := filepath.Match("overlays/*.yaml", lookupPath); !isOverlay {
+		return data, nil
+	}
+	embedded, err := defaultEmbeddedProvider.ReadFile(ctx, lookupPath)
+	if err != nil {
+		return data, nil
+	}
+	merged, _, err := patchOverlayProfile(lookupPath, embedded, data)
+	return merged, err
+}
+
 func staticDiagnostic(file, field string, err error) StaticDiagnostic {
 	for cause := err; cause != nil; cause = stderrors.Unwrap(cause) {
 		var se *aicrerrors.StructuredError
@@ -171,7 +212,7 @@ func validateStaticExternalRegistry(dataDir string, add func(string, string, err
 		return false
 	}
 	var external ComponentRegistry
-	if err := yaml.Unmarshal(raw, &external); err != nil {
+	if err := decodeStaticYAML(raw, &external); err != nil {
 		add(filepath.Join(dataDir, RegistryFileName), "components", err)
 		return false
 	}
@@ -207,7 +248,7 @@ func staticOverlaySources(ctx context.Context, dp DataProvider, add func(string,
 			return nil
 		}
 		var overlay RecipeMetadata
-		if decodeErr := decodeStaticYAML(content, &overlay, true); decodeErr != nil {
+		if decodeErr := decodeStaticYAML(content, &overlay); decodeErr != nil {
 			add(name, "spec", decodeErr)
 		}
 		if h.Metadata.Name == "" {
@@ -229,7 +270,7 @@ func staticOverlaySources(ctx context.Context, dp DataProvider, add func(string,
 func validateStaticAuthoringFile(ctx context.Context, path string, data []byte, hdr RecipeMetadataHeader, store *MetadataStore, registry *ComponentRegistry, add func(string, string, error)) {
 	if hdr.Kind == RecipeMixinKind {
 		var mix RecipeMixin
-		if err := decodeStaticYAML(data, &mix, true); err != nil {
+		if err := decodeStaticYAML(data, &mix); err != nil {
 			add(path, "spec", err)
 			return
 		}
@@ -246,7 +287,7 @@ func validateStaticAuthoringFile(ctx context.Context, path string, data []byte, 
 		return
 	}
 	var overlay RecipeMetadata
-	if err := decodeStaticYAML(data, &overlay, true); err != nil {
+	if err := decodeStaticYAML(data, &overlay); err != nil {
 		add(path, "spec", err)
 		return
 	}
@@ -415,9 +456,9 @@ func validateStaticRegistry(ctx context.Context, registry *ComponentRegistry, dp
 	}
 }
 
-func decodeStaticYAML(data []byte, target any, strict bool) error {
+func decodeStaticYAML(data []byte, target any) error {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(strict)
+	decoder.KnownFields(true)
 	if err := decoder.Decode(target); err != nil {
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "invalid YAML", err)
 	}

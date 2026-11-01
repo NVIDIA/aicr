@@ -101,6 +101,95 @@ spec:
 	}
 }
 
+func TestValidateStaticProfilePatch(t *testing.T) {
+	valid := `spec: {profile: {values: {custom: {advertiser: external, componentRefs: [
+  {name: gcp-driver-installer, overrides: {installer: {enabled: false}}},
+  {name: gpu-operator, overrides: {devicePlugin: {enabled: false}}},
+  {name: nvsentinel, optional: true, overrides: {labeler: {assumeDriverInstalled: true}}}]}}}}`
+	tests := []struct {
+		name, patch, wantDiagnostic string
+	}{
+		{name: "inherits default and existing values", patch: valid},
+		{name: "cannot replace default", patch: "spec: {profile: {default: custom, values: {custom: {}}}}", wantDiagnostic: "not set default or description"},
+		{name: "cannot redeclare value", patch: "spec: {profile: {values: {bundle-installer: {}}}}", wantDiagnostic: "already declares"},
+		{name: "merged profile requires totality", patch: "spec: {profile: {values: {custom: {}}}}", wantDiagnostic: "union totality"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(dir, "overlays"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			registry := "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"
+			if err := os.WriteFile(filepath.Join(dir, RegistryFileName), []byte(registry), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, "overlays", "gke-cos.yaml")
+			if err := os.WriteFile(path, []byte(withPatch(t, "gke-cos.yaml", tt.patch)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			diagnostics, err := ValidateStatic(t.Context(), path, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.wantDiagnostic == "" {
+				if len(diagnostics) != 0 {
+					t.Fatalf("valid patch rejected: %+v", diagnostics)
+				}
+				return
+			}
+			for _, d := range diagnostics {
+				if strings.Contains(d.Message, tt.wantDiagnostic) {
+					return
+				}
+			}
+			t.Fatalf("missing %q diagnostic: %+v", tt.wantDiagnostic, diagnostics)
+		})
+	}
+}
+
+func TestValidateStaticRejectsUnknownRegistryFields(t *testing.T) {
+	for _, catalog := range []bool{false, true} {
+		name := "file"
+		if catalog {
+			name = "catalog"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, RegistryFileName)
+			content := `apiVersion: aicr.run/v1beta1
+kind: ComponentRegistry
+components:
+  - name: example
+    displayName: Example
+    helm:
+      defaultRepositroy: https://example.com/charts
+      defaultChart: example/chart
+      defaultVersion: 1.0.0
+`
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var diagnostics []StaticDiagnostic
+			var err error
+			if catalog {
+				diagnostics, err = ValidateStaticDirectory(t.Context(), dir)
+			} else {
+				diagnostics, err = ValidateStatic(t.Context(), path, "")
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, d := range diagnostics {
+				if strings.Contains(d.Message, "field defaultRepositroy not found") {
+					return
+				}
+			}
+			t.Fatalf("unknown registry field accepted: %+v", diagnostics)
+		})
+	}
+}
+
 func TestValidateStaticRejectsUnsafeAssertFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "registry.yaml")
