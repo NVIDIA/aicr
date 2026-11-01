@@ -540,19 +540,27 @@ got_rc=$?
 check "profile_status-generic-tier1-defaults-accelerator-to-h100" 0 "0" "" \
     "${got_rc}" "${got_out}" ""
 
-# 37. The shipped CKS RTX Preview coordinate must select its actual profiles
+# 37. The shipped CKS Preview coordinates must select their actual profiles
 # and stay eligible for CI discovery. Synthetic selector fixtures alone would
 # not catch a missing profile or a mismatched label in the committed tree.
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 REAL_PROFILES="${REPO_ROOT}/kwok/profiles"
-CKS_OVERLAY="${REPO_ROOT}/recipes/overlays/rtx-pro-6000-cks-ubuntu-training.yaml"
-run_select cks rtx-pro-6000 "${REAL_PROFILES}"
-check "shipped-cks-rtx-selects-system-and-gpu-profiles" 0 \
-    "cks/system-generic.yaml:cks/accelerated-rtx-pro-6000.yaml" "" \
-    "${got_rc}" "${got_out}" "${got_err}"
-got_out=$(profile_status "${CKS_OVERLAY}" "${REAL_PROFILES}" 2>/dev/null)
+for accelerator in rtx-pro-6000 h100; do
+    CKS_OVERLAY="${REPO_ROOT}/recipes/overlays/${accelerator}-cks-ubuntu-training.yaml"
+    run_select cks "${accelerator}" "${REAL_PROFILES}"
+    check "shipped-cks-${accelerator}-selects-system-and-gpu-profiles" 0 \
+        "cks/system-generic.yaml:cks/accelerated-${accelerator}.yaml" "" \
+        "${got_rc}" "${got_out}" "${got_err}"
+    got_out=$(profile_status "${CKS_OVERLAY}" "${REAL_PROFILES}" 2>/dev/null)
+    got_rc=$?
+    check "shipped-cks-${accelerator}-is-eligible-for-ci-discovery" 0 "0" "" \
+        "${got_rc}" "${got_out}" ""
+done
+
+# The generic CKS overlay uses the same h100 fallback as other Tier-1 recipes.
+got_out=$(profile_status "${REPO_ROOT}/recipes/overlays/cks.yaml" "${REAL_PROFILES}" 2>/dev/null)
 got_rc=$?
-check "shipped-cks-rtx-is-eligible-for-ci-discovery" 0 "0" "" \
+check "shipped-cks-generic-is-eligible-for-tier1-discovery" 0 "0" "" \
     "${got_rc}" "${got_out}" ""
 
 if (( fails > 0 )); then

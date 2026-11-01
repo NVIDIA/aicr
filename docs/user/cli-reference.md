@@ -411,6 +411,7 @@ CoreWeave supplies the GPU stack and the external `nvidia.com/gpu` advertiser;
 AICR disables its duplicate GPU controllers. Snapshot-based generation requires
 `GPU.hardware.driver-loaded` and `K8s.policy.devicePlugin.enabled` to be `true`.
 These prerequisites do not establish comprehensive provider-stack health; see
+[CoreWeave H100 Setup](../integrator/cks-h100-setup.md) and
 [CoreWeave RTX PRO 6000 Setup](../integrator/cks-rtx-pro-6000-setup.md).
 Profiles can also be exercised through a versioned external overlay.
 
@@ -538,7 +539,7 @@ node shape the resolved recipe targets. See
 
 > **`--service k0s` is Preview**, covering the single `k0s / h200 / ubuntu / training` coordinate. See [k0s H200 Setup](../integrator/k0s-h200-setup.md) for its prerequisites and known gaps.
 
-> **`--service cks` is Preview**, limited to RTX PRO 6000 / Ubuntu / training. Pass the service explicitly, including with a snapshot; CKS auto-detection is not implemented. See [CoreWeave RTX PRO 6000 Setup](../integrator/cks-rtx-pro-6000-setup.md) for provider ownership and qualification gaps.
+> **`--service cks` is Preview**, covering H100 and RTX PRO 6000 on Ubuntu for training. Pass the service explicitly, including with a snapshot; CKS auto-detection is not implemented. See [CoreWeave H100 Setup](../integrator/cks-h100-setup.md) and [CoreWeave RTX PRO 6000 Setup](../integrator/cks-rtx-pro-6000-setup.md) for provider ownership and qualification gaps.
 
 > **`--service nvke` is Preview**, covering the `nvke / gb200 / ubuntu / training` and `nvke / gb200 / ubuntu / training / kubeflow` coordinates. See [NVKE GB200 Setup](../integrator/nvke-gb200-setup.md) for its prerequisites and known gaps.
 

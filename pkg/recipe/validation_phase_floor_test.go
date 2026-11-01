@@ -362,6 +362,7 @@ func TestClassifyOverlay(t *testing.T) {
 		// Accelerator-bound: deployment required; perf depends on intent/platform.
 		{"training-eks-h100", CriteriaIntentTraining, CriteriaServiceEKS, CriteriaPlatformAny, CriteriaAcceleratorH100, false, true, true},
 		{"training-cks-rtx-pro-6000", CriteriaIntentTraining, CriteriaServiceCKS, CriteriaPlatformAny, CriteriaAcceleratorRTXPro6000, false, true, true},
+		{"training-cks-h100", CriteriaIntentTraining, CriteriaServiceCKS, CriteriaPlatformAny, CriteriaAcceleratorH100, false, true, true},
 		{"training-aks-h100-kubeflow", CriteriaIntentTraining, CriteriaServiceAKS, CriteriaPlatformKubeflow, CriteriaAcceleratorH100, false, true, true},
 		{"training-kind-h100", CriteriaIntentTraining, CriteriaServiceKind, CriteriaPlatformAny, CriteriaAcceleratorH100, true, true, false},
 		{"inference-eks-h100-plain", CriteriaIntentInference, CriteriaServiceEKS, CriteriaPlatformAny, CriteriaAcceleratorH100, false, true, false},

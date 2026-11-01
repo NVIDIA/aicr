@@ -77,8 +77,9 @@ this recipe does not promise GPU metrics or GPU-based HPA.
 
 ## Qualification scope
 
-Only `cks / rtx-pro-6000 / ubuntu / training` is added here. H100,
-inference, platform variants, provider-specific health checks, fabric tuning,
+This page covers `cks / rtx-pro-6000 / ubuntu / training`. H100 has a
+[separate setup guide](cks-h100-setup.md). Inference, platform variants,
+provider-specific health checks, fabric tuning,
 and service detection remain separate work. No driver version is pinned:
 CoreWeave owns that lifecycle.
 

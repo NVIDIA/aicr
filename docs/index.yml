@@ -120,6 +120,8 @@ navigation:
         path: integrator/nebius-b300.md
       - page: k0s H200 Setup
         path: integrator/k0s-h200-setup.md
+      - page: CoreWeave H100 Setup
+        path: integrator/cks-h100-setup.md
       - page: CoreWeave RTX PRO 6000 Setup
         path: integrator/cks-rtx-pro-6000-setup.md
       - page: NVKE GB200 Setup

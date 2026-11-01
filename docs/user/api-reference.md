@@ -138,7 +138,7 @@ Generate an optimized configuration recipe based on environment parameters.
 
 > **`service=k0s` is Preview**, covering the single `k0s / h200 / ubuntu / training` coordinate. See [k0s H200 Setup](../integrator/k0s-h200-setup.md) for its prerequisites and known gaps.
 
-> **`service=cks` is Preview**, limited to RTX PRO 6000 / Ubuntu / training. Set the service explicitly, including when supplying a snapshot. See [CoreWeave RTX PRO 6000 Setup](../integrator/cks-rtx-pro-6000-setup.md) for provider ownership and qualification gaps.
+> **`service=cks` is Preview**, covering H100 and RTX PRO 6000 on Ubuntu for training. Set the service explicitly, including when supplying a snapshot. See [CoreWeave H100 Setup](../integrator/cks-h100-setup.md) and [CoreWeave RTX PRO 6000 Setup](../integrator/cks-rtx-pro-6000-setup.md) for provider ownership and qualification gaps.
 
 > **`service=nvke` is Preview**, covering the `nvke / gb200 / ubuntu / training` and `nvke / gb200 / ubuntu / training / kubeflow` coordinates. See [NVKE GB200 Setup](../integrator/nvke-gb200-setup.md) for its prerequisites and known gaps.
 
@@ -514,6 +514,7 @@ compositions resolve like any other: omit `profile=` to take the declared
 default, or select one explicitly. CKS has a single value, `coreweave`,
 which preserves provider ownership and requires a loaded driver and enabled
 device plugin when resolving from a snapshot. See
+[CoreWeave H100 Setup](../integrator/cks-h100-setup.md) and
 [CoreWeave RTX PRO 6000 Setup](../integrator/cks-rtx-pro-6000-setup.md).
 
 ```shell
