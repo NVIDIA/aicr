@@ -148,6 +148,13 @@ func TestNodewrightTuningGateAcrossCatalog(t *testing.T) {
 				if got := fmt.Sprint(valueAtPath[any](t, kernel, "resources", "cpuLimit")); got != "4" {
 					t.Errorf("AKS nvidia-setup-kernel resources.cpuLimit = %s, want 4 (undrained node)", got)
 				}
+				// Admission is decided by the requests, so pin those too.
+				if got := fmt.Sprint(valueAtPath[any](t, kernel, "resources", "cpuRequest")); got != "2" {
+					t.Errorf("AKS nvidia-setup-kernel resources.cpuRequest = %s, want 2 (undrained node)", got)
+				}
+				if got := fmt.Sprint(valueAtPath[any](t, kernel, "resources", "memoryRequest")); got != "4Gi" {
+					t.Errorf("AKS nvidia-setup-kernel resources.memoryRequest = %s, want 4Gi (undrained node)", got)
+				}
 			} else {
 				sawNonAKS = true
 				if _, ok := packages["nvidia-tuned"]; !ok {

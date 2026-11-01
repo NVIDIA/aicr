@@ -88,8 +88,8 @@ spec:
           kernelModuleConfig:
             name: nvidia-kernel-module-params
 
-    # GB300 takes the shared tuning.yaml chain (nvidia-setup-kernel and
-    # nvidia-tuned, then nvidia-setup-full), same as gb200. nvidia-setup 0.8.0 added
+    # GB300 takes the shared tuning.yaml chain (nvidia-setup-kernel ->
+    # nvidia-tuned -> nvidia-setup-full), same as gb200. nvidia-setup 0.8.0 added
     # the eks-gb300 combination; before that the setup packages failed on
     # accelerator=gb300 and this leaf ran tuning-gb300.yaml (nvidia-tuned alone).
     #

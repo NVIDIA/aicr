@@ -113,8 +113,9 @@ spec:
       # new kernel would fail its DKMS build there) and installs the new kernel.
       # Its own reboot is what makes the operator cordon and drain the node before
       # that work, and boot the new kernel before nvidia-setup-full, whose exact
-      # kernel check needs it running. Not on AKS, where this package is a no-op
-      # and its post-interrupt check would compare against an unset kernel.
+      # kernel check needs it running. Not on AKS, where this package is a no-op:
+      # its post-interrupt check there is the memlock check, which would fail
+      # because only nvidia-setup-full's apply writes the memlock limits.
       interrupt:
         type: reboot
       {{- end }}
