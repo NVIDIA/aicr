@@ -56,7 +56,7 @@ integration.
 | Kubernetes Version | DRA Status | Feature Gate |
 |--------------------|-----------|--------------|
 | 1.26–1.31 | Alpha | `DynamicResourceAllocation` — off by default |
-| 1.32–1.33 | Beta | `DynamicResourceAllocation` — on by default |
+| 1.32–1.33 | Beta | `DynamicResourceAllocation` — off by default |
 | 1.34+ | **GA / Stable** | `resource.k8s.io/v1` — always enabled, no feature gate needed |
 
 On AKS 1.34, DRA is GA. You do not need to pass any custom API server flags or
