@@ -978,6 +978,38 @@ func TestWriteTableArgoStampIsNotApplicable(t *testing.T) {
 	}
 }
 
+// TestWriteTableBeyondCeilingFromPastTheCeilingNamesNoStop checks that a
+// source already past the highest ceiling does not see that ceiling's range
+// as a place to stop, while a source below it does.
+func TestWriteTableBeyondCeilingFromPastTheCeilingNamesNoStop(t *testing.T) {
+	t.Parallel()
+
+	set := oneComponent(trans("<0.18.0", ">=0.18.0 <0.20.0", VerdictManual, "M"))
+	tests := []struct {
+		name, from, want string
+	}{
+		{"past the ceiling", "0.21.0", "assessed only to >=0.18.0 <0.20.0"},
+		{"below the ceiling", "0.17.0", "stops at >=0.18.0 <0.20.0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			results := Match(set, map[string]string{"c": tt.from}, map[string]string{"c": "0.25.0"})
+			if len(results) != 1 || results[0].Reason != ReasonBeyondRecordCeiling {
+				t.Fatalf("Match() = %+v, want one %s row", results, ReasonBeyondRecordCeiling)
+			}
+			var buf bytes.Buffer
+			if err := WriteTable(&buf, NewReport(results, ReportOptions{Deployer: "helm"})); err != nil {
+				t.Fatalf("WriteTable: %v", err)
+			}
+			row := lineWithPrefix(t, buf.String(), "c ")
+			if !strings.Contains(row, tt.want) {
+				t.Errorf("row = %q, want it to contain %q", row, tt.want)
+			}
+		})
+	}
+}
+
 // TestWriteTableSourceCountsAreNotInterchangeable pins each reader's count to
 // its own label and its own unit. The two must never be summed — a Helm
 // storage record is one revision of one release, an Argo Application is one

@@ -726,3 +726,21 @@ func TestIdentityNounNamesTheKindOfMove(t *testing.T) {
 		})
 	}
 }
+
+func TestIdentityValue(t *testing.T) {
+	tests := []struct {
+		name, field, v, want string
+	}{
+		{"a set value", "namespace", "nodewright", "nodewright"},
+		{"an unset field", "fullnameOverride", "", "(unset)"},
+		{"an emptied manifest set", fieldManifestFiles, "", "(none)"},
+		{"an emptied pre-manifest set", fieldPreManifestFiles, "", "(none)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := identityValue(tt.field, tt.v); got != tt.want {
+				t.Errorf("identityValue(%q, %q) = %q, want %q", tt.field, tt.v, got, tt.want)
+			}
+		})
+	}
+}
