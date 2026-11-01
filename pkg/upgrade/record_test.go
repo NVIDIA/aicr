@@ -100,6 +100,37 @@ transitions:
 	}
 }
 
+func TestComponentUpgradesDecodeRouteFields(t *testing.T) {
+	const doc = `
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: widget-operator
+stepLimit: minor
+transitions:
+  - from: ">=1.23.0 <1.24.0"
+    to: ">=1.24.0"
+    verdict: safe
+    verifiedBy: uat-lane-eks-h100
+    requiredStop: true
+    skips: ["1.23.2"]
+    summary: the 1.24 release migrates stored objects on start
+`
+	var u ComponentUpgrades
+	if err := yaml.Unmarshal([]byte(doc), &u); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if u.StepLimit != StepLimitMinor {
+		t.Errorf("StepLimit = %q, want %q", u.StepLimit, StepLimitMinor)
+	}
+	tr := u.Transitions[0]
+	if !tr.RequiredStop {
+		t.Error("RequiredStop did not decode")
+	}
+	if len(tr.Skips) != 1 || tr.Skips[0] != "1.23.2" {
+		t.Errorf("Skips = %v, want [1.23.2]", tr.Skips)
+	}
+}
+
 // Absent `reversible` must stay nil — absent means no claim, not false.
 func TestReversibleAbsentIsNil(t *testing.T) {
 	const doc = `
@@ -132,6 +163,11 @@ func TestComponentUpgradesCovers(t *testing.T) {
 			{From: "<0.30.0", To: "not a range", Verdict: VerdictSafe},
 		},
 	}
+	limited := &ComponentUpgrades{
+		Component:   "widget-operator",
+		StepLimit:   StepLimitMinor,
+		Transitions: []Transition{{From: ">=1.23.0 <1.24.0", To: ">=1.24.0", Verdict: VerdictManual}},
+	}
 	tests := []struct {
 		name    string
 		u       *ComponentUpgrades
@@ -151,6 +187,8 @@ func TestComponentUpgradesCovers(t *testing.T) {
 		{"empty version", u, "", false},
 		{"no transitions", &ComponentUpgrades{Component: "widget-operator"}, "0.18.0", false},
 		{"nil record", nil, "0.18.0", false},
+		{"inside a derived ceiling", limited, "1.24.9", true},
+		{"at a derived ceiling", limited, "1.25.0", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

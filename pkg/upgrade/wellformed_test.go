@@ -144,6 +144,16 @@ func TestValidateVerdictFields(t *testing.T) {
 			}),
 			true, "duplicate step id",
 		},
+		{
+			"a step with no id fails",
+			tr(func(x *Transition) { x.StepsByDeployer[0].Steps[0].ID = "" }),
+			true, "has a step with no id",
+		},
+		{
+			"a step with no description fails",
+			tr(func(x *Transition) { x.StepsByDeployer[0].Steps[0].Description = "" }),
+			true, `step "rename" has no description`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -480,12 +490,10 @@ func TestValidatePinCeilingSkipsReplacesOnlyRecord(t *testing.T) {
 	}
 }
 
-// parseBounds treats an empty or contradictory `to` interval (e.g.
-// ">=0.30.0 <=0.19.0") as harmless: both range representations agree it
-// matches nothing. Rule 2 only ever compares upper(to) against the pin, so
-// such a to must be rejected explicitly, or a record moving the floor
-// without moving the ceiling would validate clean while claiming a boundary
-// that does not exist.
+// TestValidatePinCeilingRejectsEmptyToRange checks that rule 2 rejects a To
+// matching no version, such as ">=0.30.0 <=0.19.0". Rule 2 compares only To's
+// ceiling against the pin, so without this a record could move its floor past
+// its ceiling and still validate.
 func TestValidatePinCeilingRejectsEmptyToRange(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -575,11 +583,10 @@ func TestValidateDirectionalUnparseableToReportedOnce(t *testing.T) {
 	}
 }
 
-// parseBounds treats an empty or contradictory `from` interval (e.g.
-// ">=0.20.0 <0.18.0") as harmless: both range representations agree it
-// matches nothing. checkDirectional compares upper(from) against lower(to),
-// so such a from must be rejected explicitly, or a record that can never
-// apply would sail through the disjointness check as spuriously "safe".
+// TestValidateDirectionalRejectsEmptyFromRange checks that a From matching no
+// version, such as ">=0.20.0 <0.18.0", is rejected. checkDirectional compares
+// only From's ceiling against To's floor, so without this a record that can
+// never apply would pass it.
 func TestValidateDirectionalRejectsEmptyFromRange(t *testing.T) {
 	tests := []struct {
 		name string
@@ -795,7 +802,7 @@ func TestValidateReplaces(t *testing.T) {
 	}
 }
 
-func TestValidateDistinctBoundaries(t *testing.T) {
+func TestValidateDistinctMoves(t *testing.T) {
 	mk := func(from, to string) Transition {
 		x := tr(nil)
 		x.From, x.To = from, to
@@ -853,15 +860,18 @@ func TestValidateDistinctBoundaries(t *testing.T) {
 			true,
 		},
 		{
-			// A prerelease tag that reads as the exclusivity marker must not
-			// collide with it: an exclusive floor at 1.0.0 and an inclusive
-			// floor at the distinct version 1.0.0-exclusive are not the same
-			// boundary, even though naive string concatenation of version and
-			// marker would produce the same key for both.
-			"exclusive floor does not collide with a same-named prerelease floor",
+			"different floors with overlapping from and to ranges are the same move",
 			[]Transition{
-				mk("<1.0.0", ">1.0.0 <2.0.0"),
-				mk("<1.0.0", ">=1.0.0-exclusive <2.0.0"),
+				mk(">=0.10.0 <0.15.0", ">=0.15.0 <=0.20.0"),
+				mk(">=0.12.0 <0.15.0", ">=0.17.0 <=0.17.0"),
+			},
+			true,
+		},
+		{
+			"a shared from with disjoint to ranges is two moves",
+			[]Transition{
+				mk("<0.15.0", ">=0.15.0 <0.17.0"),
+				mk("<0.15.0", ">=0.17.0 <=0.17.0"),
 			},
 			false,
 		},
@@ -871,9 +881,269 @@ func TestValidateDistinctBoundaries(t *testing.T) {
 			set := Set{"c": &ComponentUpgrades{Component: "c", Transitions: tt.trs}}
 			comps := []Component{{Name: "c", File: "components/c/upgrades.yaml", PinnedVersion: "v0.20.0"}}
 			err := set.Validate(comps)
-			got := err != nil && strings.Contains(err.Error(), "same boundary")
+			got := err != nil && strings.Contains(err.Error(), "describe the same move")
 			if got != tt.wantErr {
-				t.Fatalf("duplicate-boundary violation = %v, want %v (err: %v)", got, tt.wantErr, err)
+				t.Fatalf("duplicate-move violation = %v, want %v (err: %v)", got, tt.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestValidateSkipsAndStepLimit(t *testing.T) {
+	safe := func(from, to string, skips ...string) Transition {
+		return tr(func(x *Transition) {
+			x.From, x.To, x.Skips = from, to, skips
+			x.Verdict, x.VerifiedBy, x.StepsByDeployer = VerdictSafe, "the UAT lane", nil
+		})
+	}
+	manual := func(from, to string, skips ...string) Transition {
+		return tr(func(x *Transition) { x.From, x.To, x.Skips = from, to, skips })
+	}
+	blocked := func(from, to string) Transition {
+		return tr(func(x *Transition) { x.From, x.To, x.Verdict = from, to, VerdictBlocked })
+	}
+	// window enters 1.2, which only a manual move to 1.3 leaves, beside a
+	// direct jump to 2.0 from direct.
+	window := func(direct Transition) []Transition {
+		return []Transition{
+			safe("<1.2.0", ">=1.2.0 <1.3.0"),
+			manual(">=1.2.0 <1.3.0", ">=1.3.0 <2.0.0"),
+			safe(">=1.3.0 <2.0.0", "=2.0.0"),
+			direct,
+		}
+	}
+	requiredStop := func(t Transition) Transition {
+		t.RequiredStop = true
+		return t
+	}
+	tests := []struct {
+		name      string
+		pin       string
+		stepLimit string
+		trs       []Transition
+		text      string
+		mentioned bool
+	}{
+		{
+			name:      "a wide from passing a manual floor must list it",
+			pin:       "v0.20.0",
+			trs:       []Transition{manual("<0.18.0", "=0.18.0"), manual("<0.20.0", "=0.20.0")},
+			text:      "passes the boundary at 0.18.0 (transition 0) in one step without listing it in skips",
+			mentioned: true,
+		},
+		{
+			name: "listing the manual floor clears it",
+			pin:  "v0.20.0",
+			trs:  []Transition{manual("<0.18.0", "=0.18.0"), manual("<0.20.0", "=0.20.0", "0.18.0")},
+			text: "skips",
+		},
+		{
+			name:      "a safe floor inside to must be listed",
+			pin:       "v0.20.0",
+			trs:       []Transition{manual("<0.18.0", ">=0.18.0 <=0.20.0"), safe(">=0.18.0 <0.20.0", "=0.20.0")},
+			text:      "passes the boundary at 0.20.0 (transition 1)",
+			mentioned: true,
+		},
+		{
+			name: "a safe floor below the own floor needs no listing",
+			pin:  "v0.20.0",
+			trs:  []Transition{safe("<0.18.0", "=0.18.0"), manual("<0.20.0", "=0.20.0")},
+			text: "skips",
+		},
+		{
+			name:      "a required stop below the own floor must be listed when the from ranges overlap",
+			pin:       "v0.20.0",
+			trs:       []Transition{requiredStop(safe("<0.18.0", "=0.18.0")), manual("<0.20.0", "=0.20.0")},
+			text:      "passes the required stop at 0.18.0 (transition 0)",
+			mentioned: true,
+		},
+		{
+			name:      "listing a required stop does not clear it",
+			pin:       "v0.20.0",
+			trs:       []Transition{requiredStop(safe("<0.18.0", "=0.18.0")), manual("<0.20.0", "=0.20.0", "0.18.0")},
+			text:      "passes the required stop at 0.18.0 (transition 0)",
+			mentioned: true,
+		},
+		{
+			name: "a required stop for other sources needs no listing",
+			pin:  "v0.20.0",
+			trs:  []Transition{requiredStop(safe(">=0.10.0 <0.18.0", "=0.18.0")), manual("<0.10.0", "=0.20.0")},
+			text: "skips",
+		},
+		{
+			name: "a safe jump may skip a manual boundary for sources outside its from",
+			pin:  "v2.0.0",
+			trs:  window(safe("<1.2.0", "=2.0.0", "1.3.0")),
+			text: "skips",
+		},
+		{
+			name:      "a safe jump may not skip a manual boundary for sources in its from",
+			pin:       "v2.0.0",
+			trs:       window(safe("<1.3.0", "=2.0.0", "1.3.0")),
+			text:      "is safe but skips the manual boundary at 1.3.0 (transition 1) for sources in that transition's from",
+			mentioned: true,
+		},
+		{
+			name:      "a manual jump may not skip a blocked boundary for sources in its from",
+			pin:       "v0.20.0",
+			trs:       []Transition{blocked("<0.18.0", "=0.18.0"), manual("<0.20.0", "=0.20.0", "0.18.0")},
+			text:      "is manual but skips the blocked boundary at 0.18.0 (transition 0)",
+			mentioned: true,
+		},
+		{
+			name:      "a stale skip is a violation",
+			pin:       "v0.20.0",
+			trs:       []Transition{manual("<0.20.0", "=0.20.0", "0.19.0")},
+			text:      "skips 0.19.0, which is not the floor of a boundary its moves pass",
+			mentioned: true,
+		},
+		{
+			name:      "an invalid skip is a violation",
+			pin:       "v0.20.0",
+			trs:       []Transition{manual("<0.20.0", "=0.20.0", "not-a-version")},
+			text:      "skips an invalid version",
+			mentioned: true,
+		},
+		{
+			name:      "an unknown step limit is a violation",
+			pin:       "v0.18.0",
+			stepLimit: "patch",
+			trs:       []Transition{manual(">=0.17.0 <0.18.0", "=0.18.0")},
+			text:      `has stepLimit "patch"; it must be "minor" or "major"`,
+			mentioned: true,
+		},
+		{
+			name:      "a manual to may omit its ceiling under the step limit",
+			pin:       "v0.18.0",
+			stepLimit: StepLimitMinor,
+			trs:       []Transition{manual(">=0.17.0 <0.18.0", ">=0.18.0")},
+			text:      "no upper bound",
+		},
+		{
+			name:      "a safe to names its ceiling under the step limit",
+			pin:       "v0.18.0",
+			stepLimit: StepLimitMinor,
+			trs:       []Transition{safe(">=0.17.0 <0.18.0", ">=0.18.0")},
+			text:      "has a to range with no upper bound",
+			mentioned: true,
+		},
+		{
+			name:      "a to past the next minor breaks the step limit",
+			pin:       "v0.19.0",
+			stepLimit: StepLimitMinor,
+			trs:       []Transition{manual(">=0.17.0 <0.18.0", ">=0.18.0 <=0.19.0")},
+			text:      "past the next minor above 0.17.0",
+			mentioned: true,
+		},
+		{
+			name:      "a to reaching a prerelease two minors up breaks the step limit",
+			pin:       "v0.19.0",
+			stepLimit: StepLimitMinor,
+			trs:       []Transition{manual(">=0.17.0 <0.18.0", ">=0.18.0 <=0.19.0-rc.1")},
+			text:      "has a to range reaching 0.19.0 or later, past the next minor above 0.17.0",
+			mentioned: true,
+		},
+		{
+			name:      "a from with no lower bound cannot keep to the step limit",
+			pin:       "v0.18.0",
+			stepLimit: StepLimitMinor,
+			trs:       []Transition{manual("<0.18.0", ">=0.18.0")},
+			text:      "has a from range with no lower bound",
+			mentioned: true,
+		},
+		{
+			name:      "a major bump from the last minor keeps to the step limit",
+			pin:       "v2.0.0",
+			stepLimit: StepLimitMinor,
+			trs:       []Transition{manual(">=1.9.0 <1.10.0", ">=2.0.0")},
+			text:      "stepLimit minor",
+		},
+		{
+			name:      "a major bump lands in the new major's first minor",
+			pin:       "v2.1.0",
+			stepLimit: StepLimitMinor,
+			trs:       []Transition{manual(">=1.9.0 <1.10.0", ">=2.0.0 <=2.1.0")},
+			text:      "a move into a new major under stepLimit minor lands in its first minor",
+			mentioned: true,
+		},
+		{
+			name:      "a major bump reaching a prerelease of the second minor breaks the step limit",
+			pin:       "v2.1.0",
+			stepLimit: StepLimitMinor,
+			trs:       []Transition{manual(">=1.9.0 <1.10.0", ">=2.0.0 <=2.1.0-rc.1")},
+			text:      "has a to range reaching 2.1.0 or later",
+			mentioned: true,
+		},
+		{
+			name:      "a major bump crosses one major",
+			pin:       "v3.0.0",
+			stepLimit: StepLimitMinor,
+			trs:       []Transition{manual(">=1.9.0 <1.10.0", ">=3.0.0")},
+			text:      "more than one major above 1.9.0",
+			mentioned: true,
+		},
+		{
+			name:      "a later minor inside a major bump's from contradicts it",
+			pin:       "v2.0.0",
+			stepLimit: StepLimitMinor,
+			trs: []Transition{
+				manual(">=1.9.0 <2.0.0", ">=2.0.0", "1.10.0"),
+				manual(">=1.9.0 <1.10.0", ">=1.10.0"),
+			},
+			text:      "names 1.9 as the last minor of major 1, but transition 1 starts a later one at 1.10.0",
+			mentioned: true,
+		},
+		{
+			name:      "a later minor outside a major bump's from contradicts it",
+			pin:       "v2.0.0",
+			stepLimit: StepLimitMinor,
+			trs: []Transition{
+				safe(">=1.9.0 <1.10.0", ">=2.0.0 <=2.0.0"),
+				safe(">=1.9.0 <1.10.0", ">=1.10.0 <=1.10.0"),
+				safe(">=1.10.0 <2.0.0", ">=2.0.0 <=2.0.0"),
+			},
+			text:      "names 1.9 as the last minor of major 1, but transition 1 starts a later one at 1.10.0",
+			mentioned: true,
+		},
+		{
+			name:      "a manual to may omit its ceiling under the major step limit",
+			pin:       "v0.18.0",
+			stepLimit: StepLimitMajor,
+			trs:       []Transition{manual(">=0.17.0 <0.18.0", ">=0.18.0")},
+			text:      "no upper bound",
+		},
+		{
+			name:      "a major bump from any minor may reach anywhere in the next major",
+			pin:       "v2.9.0",
+			stepLimit: StepLimitMajor,
+			trs:       []Transition{manual(">=1.2.0 <2.0.0", ">=2.0.0 <=2.9.0")},
+			text:      "stepLimit major",
+		},
+		{
+			name:      "a to past the next major breaks the major step limit",
+			pin:       "v3.0.0",
+			stepLimit: StepLimitMajor,
+			trs:       []Transition{manual(">=1.2.0 <2.0.0", ">=2.0.0 <=3.0.0")},
+			text: "has a to range reaching 3.0.0 or later, past the next major above 1.2.0, " +
+				"the lowest version its from admits; stepLimit major allows one major per step",
+			mentioned: true,
+		},
+		{
+			name:      "a from with no lower bound cannot keep to the major step limit",
+			pin:       "v1.0.0",
+			stepLimit: StepLimitMajor,
+			trs:       []Transition{manual("<1.0.0", ">=1.0.0")},
+			text:      "has a from range with no lower bound, so stepLimit major cannot bound its moves",
+			mentioned: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set, comps := rec(tt.pin, tt.trs...)
+			set["c"].StepLimit = tt.stepLimit
+			err := set.Validate(comps)
+			if mentions(err, tt.text) != tt.mentioned {
+				t.Fatalf("Validate error = %v, want mentions %q = %v", err, tt.text, tt.mentioned)
 			}
 		})
 	}
@@ -981,7 +1251,7 @@ func TestValidateGroveShapedRecordPasses(t *testing.T) {
 			x.To = ">=0.1.0-alpha.9 <=0.1.0-alpha.11"
 		}),
 		tr(func(x *Transition) {
-			x.From = "<0.1.0-alpha.12"
+			x.From = ">=0.1.0-alpha.9 <0.1.0-alpha.12"
 			x.To = ">=0.1.0-alpha.12 <=0.1.0-alpha.12"
 		}),
 	)
