@@ -1544,6 +1544,45 @@ func (l *ownedLayout) release() (string, error) {
 	return l.path, nil
 }
 
+// releaseAs renames the layout to name in its parent and releases it. It
+// fails with ErrCodeConflict when name exists and removes the layout on any
+// failure. Portable Go has no no-replace rename, so a directory created at
+// name between the check and the rename is a race the check cannot close.
+func (l *ownedLayout) releaseAs(name string) (string, error) {
+	l.finishOnce.Do(func() {
+		l.finishErr = l.finishReleaseAs(name)
+		if l.finishErr != nil {
+			l.finishErr = apperrors.PropagateOrWrap(l.finishErr, apperrors.ErrCodeInternal,
+				"failed to finalize OCI layout")
+		}
+	})
+	if l.finishErr != nil {
+		return "", l.finishErr
+	}
+	return l.path, nil
+}
+
+func (l *ownedLayout) finishReleaseAs(name string) error {
+	if err := l.validate(); err != nil {
+		return l.finishRemove(err)
+	}
+	target := filepath.Join(l.parentPath, name)
+	if _, err := l.parent.Lstat(name); err == nil {
+		return l.finishRemove(apperrors.New(apperrors.ErrCodeConflict,
+			"OCI layout target already exists: "+target))
+	} else if !stderrors.Is(err, fs.ErrNotExist) {
+		return l.finishRemove(apperrors.Wrap(apperrors.ErrCodeInternal,
+			"failed to inspect OCI layout target: "+target, err))
+	}
+	if err := l.parent.Rename(l.childName, name); err != nil {
+		return l.finishRemove(apperrors.Wrap(apperrors.ErrCodeInternal,
+			"failed to move OCI layout to "+target, err))
+	}
+	l.childName = name
+	l.path = target
+	return l.finishRelease()
+}
+
 func (l *ownedLayout) finish(release bool) {
 	l.finishOnce.Do(func() {
 		if release {
