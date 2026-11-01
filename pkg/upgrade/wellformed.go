@@ -17,6 +17,7 @@ package upgrade
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -38,7 +39,7 @@ func (s Set) Validate(comps []Component) error {
 	for name := range s {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 
 	violations := make([]string, 0, len(names))
 	for _, name := range names {
@@ -60,19 +61,88 @@ func validateRecord(name string, u *ComponentUpgrades, pin string) []string {
 		return []string{fmt.Sprintf("component %q has a nil record", name)}
 	}
 	v := make([]string, 0, len(u.Transitions))
+	limited := hasStepLimit(u)
+	if u.StepLimit != "" && !limited {
+		v = append(v, fmt.Sprintf("component %q has stepLimit %q; it must be %q or %q",
+			u.Component, u.StepLimit, StepLimitMinor, StepLimitMajor))
+	}
 	for i := range u.Transitions {
 		where := fmt.Sprintf("component %q transition %d", u.Component, i)
 		v = append(v, checkVerdictFields(where, &u.Transitions[i])...)
 		v = append(v, checkStepGroups(where, &u.Transitions[i])...)
-		v = append(v, checkPinCeiling(where, &u.Transitions[i], pin)...)
+		v = append(v, checkPinCeiling(where, &u.Transitions[i], pin, limited)...)
 		v = append(v, checkDirectional(where, &u.Transitions[i])...)
 		v = append(v, checkHooks(where, &u.Transitions[i])...)
 		v = append(v, checkAffectedResources(where, &u.Transitions[i])...)
+		v = append(v, checkSkips(where, u, &u.Transitions[i])...)
+		if msg := stepViolation(u, &u.Transitions[i]); msg != "" {
+			v = append(v, where+" "+msg)
+		}
 	}
 	v = append(v, checkCoverage(u.Component, u.Transitions, pin)...)
-	v = append(v, checkDistinctBoundaries(u.Component, u.Transitions)...)
+	v = append(v, checkDistinctMoves(u)...)
 	v = append(v, checkReplaces(u.Component, u.Replaces)...)
 	return v
+}
+
+// checkSkips implements rule 11, an addition to ADR-021. It returns a
+// violation for each:
+//
+//   - floor t's moves pass that t must list in Skips but does not
+//   - Skips entry that is invalid or names no floor they pass
+//   - listed floor whose transition has a stricter verdict and a From
+//     overlapping t's
+func checkSkips(where string, u *ComponentUpgrades, t *Transition) []string {
+	var v []string
+	ps := passages(u, t)
+	from, ferr := parseRange(t.From)
+	for _, p := range ps {
+		if ferr != nil || strictness(t.Verdict) < 0 || !skipsVersion(t, p.c.floor.ver) ||
+			strictness(p.c.tr.Verdict) <= strictness(t.Verdict) {
+
+			continue
+		}
+		if sfrom, err := parseRange(p.c.tr.From); err == nil && overlaps(sfrom, from) {
+			v = append(v, fmt.Sprintf(
+				"%s is %s but skips the %s boundary at %s (transition %d) for sources in that transition's from, "+
+					"so narrow from to leave them out",
+				where, t.Verdict, p.c.tr.Verdict, p.c.floor.ver, p.index))
+		}
+	}
+	for _, s := range t.Skips {
+		sv, err := parseRangeVersion(s, s)
+		if err != nil {
+			v = append(v, where+" skips an invalid version: "+err.Error())
+			continue
+		}
+		if !slices.ContainsFunc(ps, func(p passage) bool { return p.c.floor.ver.Equal(sv) }) {
+			v = append(v, fmt.Sprintf("%s skips %s, which is not the floor of a boundary its moves pass", where, s))
+		}
+	}
+	for _, p := range ps {
+		if !p.unclearedBy(t) {
+			continue
+		}
+		if p.stop {
+			v = append(v, fmt.Sprintf(
+				"%s passes the required stop at %s (transition %d) for sources in both from ranges, "+
+					"which no skips entry clears, so narrow from or to so the moves do not pass it",
+				where, p.c.floor.ver, p.index))
+			continue
+		}
+		v = append(v, fmt.Sprintf(
+			"%s passes the boundary at %s (transition %d) in one step without listing it in skips; "+
+				"list it if a cluster taking this transition may skip that boundary's guidance, "+
+				"or narrow from or to so the moves do not pass it",
+			where, p.c.floor.ver, p.index))
+	}
+	return v
+}
+
+// strictness returns v's position in safe, manual, blocked order, or -1 for a
+// verdict that cannot be authored.
+func strictness(v Verdict) int {
+	return slices.Index([]Verdict{VerdictSafe, VerdictManual, VerdictBlocked}, v)
 }
 
 // checkReplaces applies rules 4, 5 and 6 to a replaces block. Rules 2, 3 and 7
@@ -248,33 +318,18 @@ func checkStepGroups(where string, t *Transition) []string {
 	return v
 }
 
-// checkPinCeiling implements rule 2. It fires per transition, so a record
-// carrying only a replaces block is untouched: it has no `to` to compare.
+// checkPinCeiling implements rule 2 for t, a transition of a component pinned
+// at pin. It returns a violation when t's To:
 //
-// Only safe is held to the pin. ADR-021 originally held every verdict to it,
-// reasoning that an author cannot have read the migration notes for a version
-// nobody has released. That reasoning covers safe and only safe: safe is the
-// vouching verdict, and vouching past what AICR ships is the false-confidence
-// failure the ADR exists to prevent. manual and blocked are warnings carrying
-// instructions, and holding those to the pin forced the wrong order of work —
-// bump first, document after — when the order that actually qualifies an
-// upgrade is to read the migration notes, write the record, then bump. A
-// component AICR deliberately holds below a known-breaking release is the case
-// that exposed this: the record most worth having described the release AICR
-// would not ship, so the rule forbade exactly the guidance operators needed.
-// Over-warning is the safe direction; a manual or blocked record reaching
-// forward can never read as a pass.
+//   - does not parse
+//   - has no floor
+//   - has no ceiling, unless limited and t is manual or blocked
+//   - matches no version
 //
-// The obligation stays self-renewing without this: rule 3 fails any bump that
-// leaves a from gap below the new pin, which is what forces a record back open.
-//
-// The non-comparable-pin failure is an addition to ADR-021 rather than a
-// transcription of it. The ADR assigns such a pin the unversioned verdict at
-// check time and does not make it an authoring error; failing closed here means
-// a record cannot make version claims nobody can verify. Relaxing this later is
-// the cheap direction if it proves wrong.
-func checkPinCeiling(where string, t *Transition, pin string) []string {
-	b, err := parseBounds(t.To)
+// For a safe t it also returns one when pin carries build metadata or is not
+// a comparable version, or when To's ceiling reaches past pin.
+func checkPinCeiling(where string, t *Transition, pin string, limited bool) []string {
+	b, err := parseRange(t.To)
 	if err != nil {
 		// Not "already reported by the loader": Validate is exported on an
 		// exported map type, so a Set can be built without ever going
@@ -282,20 +337,20 @@ func checkPinCeiling(where string, t *Transition, pin string) []string {
 		return []string{where + " has an unparseable to range: " + err.Error()}
 	}
 	var v []string
-	if b.upper.unbounded {
+	if b.upper.unbounded && (!limited || t.Verdict == VerdictSafe) {
 		v = append(v, where+" has a to range with no upper bound; a record must name the ceiling of the block it describes")
 	}
 	if b.lower.unbounded {
 		v = append(v, where+" has a to range with no lower bound; without one the record would apply to every target version")
 	}
-	// parseBounds accepts an empty or contradictory interval (e.g.
-	// ">=0.30.0 <=0.19.0") because at the bounds layer such a range is
-	// harmless: it matches nothing. The ceiling check below only ever
+	// parseRange accepts an empty or contradictory interval (e.g.
+	// ">=0.30.0 <=0.19.0") because such a versionRange is harmless. It
+	// matches nothing. The ceiling check below only ever
 	// compares b.upper against the pin, so an inverted to would sail through
 	// it and validate a boundary at a version the record never actually
 	// reaches. Both sides must be bounded to ask the question at all.
 	if !b.lower.unbounded && !b.upper.unbounded {
-		cmp := b.lower.ver.Compare(b.upper.ver)
+		cmp := b.lower.comparedAt().Compare(b.upper.comparedAt())
 		if cmp > 0 || (cmp == 0 && (!b.lower.inclusive || !b.upper.inclusive)) {
 			return []string{fmt.Sprintf(
 				"%s has a to range %q that matches no version: the lower bound %s is not below the upper bound %s",
@@ -305,11 +360,16 @@ func checkPinCeiling(where string, t *Transition, pin string) []string {
 	if b.upper.unbounded {
 		return v
 	}
-	// Everything below compares the ceiling against the pin, which only a
-	// vouching verdict owes an answer to.
+	// Only safe vouches, so only safe is held to the pin. A manual or blocked
+	// record may describe a release past the pin, which lets guidance land
+	// before the bump, and rule 3 still fails a bump that leaves a From gap
+	// below the new pin.
 	if t.Verdict != VerdictSafe {
 		return v
 	}
+	// Failing on a non-comparable pin is an addition to ADR-021, which gives
+	// such a pin the unversioned verdict at check time. It keeps a record
+	// from making version claims nobody can verify.
 	if strings.Contains(pin, "+") {
 		return append(v, fmt.Sprintf(
 			"%s is pinned at %q, which carries build metadata; semver orders build metadata as equal, so such a bump would move past no ceiling",
@@ -321,7 +381,7 @@ func checkPinCeiling(where string, t *Transition, pin string) []string {
 			"%s is pinned at %q, which is not a comparable version, so no ceiling can be checked against it",
 			where, pin))
 	}
-	if b.upper.ver.Compare(pinVer) > 0 {
+	if b.upper.comparedAt().Compare(pinVer) > 0 {
 		v = append(v, fmt.Sprintf(
 			"%s is safe with a to ceiling of %s which reaches past the pinned version %s; widen from backward instead, or say manual or blocked if this is guidance written ahead of the bump",
 			where, b.upper.ver, pinVer))
@@ -335,21 +395,21 @@ func checkPinCeiling(where string, t *Transition, pin string) []string {
 // that passes on an ambiguous condition" anti-pattern, and it is easy to write
 // by accident.
 func checkDirectional(where string, t *Transition) []string {
-	fb, ferr := parseBounds(t.From)
-	tb, terr := parseBounds(t.To)
+	fb, ferr := parseRange(t.From)
+	tb, terr := parseRange(t.To)
 	if ferr != nil {
 		return []string{where + " has an unparseable from range: " + ferr.Error()}
 	}
 	if terr != nil {
 		return nil // reported by checkPinCeiling
 	}
-	// parseBounds accepts an empty or contradictory interval (e.g.
-	// ">=0.20.0 <0.18.0") because at the bounds layer such a range is
-	// harmless: it matches nothing. Here it would sail through the
+	// parseRange accepts an empty or contradictory interval (e.g.
+	// ">=0.20.0 <0.18.0") because such a versionRange is harmless. It
+	// matches nothing. Here it would sail through the
 	// disjointness check below and produce a record that can never apply, so
 	// it is rejected as its own violation.
 	if !fb.lower.unbounded && !fb.upper.unbounded {
-		cmp := fb.lower.ver.Compare(fb.upper.ver)
+		cmp := fb.lower.comparedAt().Compare(fb.upper.comparedAt())
 		if cmp > 0 || (cmp == 0 && (!fb.lower.inclusive || !fb.upper.inclusive)) {
 			return []string{fmt.Sprintf(
 				"%s has a from range %q that matches no version: the lower bound %s is not below the upper bound %s",
@@ -362,7 +422,7 @@ func checkDirectional(where string, t *Transition) []string {
 	if tb.lower.unbounded {
 		return nil // reported by checkPinCeiling
 	}
-	cmp := fb.upper.ver.Compare(tb.lower.ver)
+	cmp := fb.upper.comparedAt().Compare(tb.lower.comparedAt())
 	disjoint := cmp < 0 || (cmp == 0 && (!fb.upper.inclusive || !tb.lower.inclusive))
 	if disjoint {
 		return nil
@@ -388,9 +448,9 @@ func checkCoverage(component string, trs []Transition, pin string) []string {
 	if len(trs) == 0 {
 		return nil
 	}
-	intervals := make([]bounds, 0, len(trs))
+	intervals := make([]versionRange, 0, len(trs))
 	for i := range trs {
-		b, err := parseBounds(trs[i].From)
+		b, err := parseRange(trs[i].From)
 		if err != nil {
 			// Rule 3 is a whole-record property, and the range that failed to
 			// parse may be the one bridging the gap, so a hole computed from
@@ -436,7 +496,7 @@ func checkCoverage(component string, trs []Transition, pin string) []string {
 // so a record whose coverage falls short of the pin is accepted while every
 // version between the two matches no transition — the exact shape a record has
 // immediately after a pin bump that nobody extended it for.
-func checkCoverageReachesPin(component string, cur bound, pinVer *semver.Version, perr error) []string {
+func checkCoverageReachesPin(component string, cur rangeEnd, pinVer *semver.Version, perr error) []string {
 	if cur.unbounded || perr != nil || cur.ver.Compare(pinVer) >= 0 {
 		return nil
 	}
@@ -445,130 +505,34 @@ func checkCoverageReachesPin(component string, cur bound, pinVer *semver.Version
 		component, cur.ver, pinVer)}
 }
 
-// lowerBefore orders lower bounds, unbounded first.
-func lowerBefore(a, b bound) bool {
-	if a.unbounded != b.unbounded {
-		return a.unbounded
-	}
-	if a.unbounded {
-		return false
-	}
-	if cmp := a.ver.Compare(b.ver); cmp != 0 {
-		return cmp < 0
-	}
-	return a.inclusive && !b.inclusive
-}
-
-// upperAfter reports whether a extends coverage beyond b.
-func upperAfter(a, b bound) bool {
-	if a.unbounded {
-		return true
-	}
-	if b.unbounded {
-		return false
-	}
-	if cmp := a.ver.Compare(b.ver); cmp != 0 {
-		return cmp > 0
-	}
-	return a.inclusive && !b.inclusive
-}
-
-// contiguous reports whether coverage continues from an upper bound into the
-// next lower bound. Comparing versions alone is not enough: "<0.18.0" followed
-// by ">0.18.0" leaves exactly 0.18.0 uncovered while the versions look equal.
-func contiguous(upper, lower bound) bool {
-	if upper.unbounded || lower.unbounded {
-		return true
-	}
-	cmp := lower.ver.Compare(upper.ver)
-	if cmp < 0 {
-		return true
-	}
-	if cmp > 0 {
-		return false
-	}
-	return upper.inclusive || lower.inclusive
-}
-
-// boundaryKey identifies a `to` floor by version and inclusivity as two
-// comparable fields rather than one delimited string: `to` permits
-// prereleases, and a prerelease tag can itself read as a delimiter suffix,
-// so string concatenation cannot distinguish content from marker.
-type boundaryKey struct {
-	ver       string
-	inclusive bool
-}
-
-// boundaryClaim is the transition that first claimed a boundary, kept with its
-// `from` domain so a later claim on the same floor can be tested for overlap.
-type boundaryClaim struct {
-	idx  int
-	from bounds
-}
-
-// checkDistinctBoundaries implements rule 8, an addition to ADR-021. A
-// boundary is identified by the floor its `to` names, so two transitions
-// sharing that floor describe the same boundary twice. ADR-021's matcher
-// blocks any jump where more than one record applies, so a duplicate silently
-// converts that boundary's crossings from manual to blocked.
-//
-// Sharing a floor is only a duplicate when the two `from` domains intersect.
-// Where they are disjoint, ADR-021's own applies predicate lets at most one of
-// them match any given source version, so the pair describes one boundary
-// reached from two different blocks rather than the same boundary twice.
-//
-// Overlapping `from` domains stay legal across *different* floors on purpose: a
-// jump spanning two real blocks must resolve to blocked, which is the ADR's
-// design.
-func checkDistinctBoundaries(component string, trs []Transition) []string {
-	seen := make(map[boundaryKey][]boundaryClaim, len(trs))
-	var v []string
-	for i := range trs {
-		b, err := parseBounds(trs[i].To)
-		if err != nil || b.lower.unbounded {
+// checkDistinctMoves implements rule 8, an addition to ADR-021. It returns a
+// violation for each pair of u's transitions whose From ranges overlap and
+// whose To ranges overlap, skipping ranges that do not parse.
+func checkDistinctMoves(u *ComponentUpgrades) []string {
+	type span struct{ from, to versionRange }
+	spans := make([]*span, len(u.Transitions))
+	for i := range u.Transitions {
+		from, ferr := parseRange(u.Transitions[i].From)
+		to, terr := targetRange(u, &u.Transitions[i])
+		if ferr != nil || terr != nil {
 			continue // reported elsewhere
 		}
-		from, ferr := parseBounds(trs[i].From)
-		if ferr != nil {
-			continue // reported by checkDirectional
-		}
-		key := boundaryKey{ver: b.lower.ver.String(), inclusive: b.lower.inclusive}
-		dup, found := -1, false
-		for _, c := range seen[key] {
-			if intervalsIntersect(c.from, from) {
-				dup, found = c.idx, true
-				break
+		spans[i] = &span{from: from, to: to}
+	}
+	var v []string
+	for i, a := range spans {
+		for j := i + 1; j < len(spans); j++ {
+			b := spans[j]
+			if a == nil || b == nil || !overlaps(a.from, b.from) || !overlaps(a.to, b.to) {
+				continue
 			}
-		}
-		if found {
 			v = append(v, fmt.Sprintf(
-				"component %q transitions %d and %d describe the same boundary (to starts at %s) for overlapping from ranges; a jump crossing it would resolve to blocked rather than the authored verdict",
-				component, dup, i, key.ver))
-			continue
+				"component %q transitions %d and %d describe the same move: their from ranges overlap and "+
+					"so do their to ranges, so a jump between the two overlaps would have two verdicts",
+				u.Component, i, j))
 		}
-		seen[key] = append(seen[key], boundaryClaim{idx: i, from: from})
 	}
 	return v
-}
-
-// intervalsIntersect reports whether two intervals share at least one version.
-func intervalsIntersect(a, b bounds) bool {
-	return lowerAtOrBelow(a.lower, b.upper) && lowerAtOrBelow(b.lower, a.upper)
-}
-
-// lowerAtOrBelow reports whether a lower bound sits at or below an upper bound,
-// so the pair admits at least one version. Unlike contiguous, which asks
-// whether coverage continues across a shared point and accepts either side
-// including it, sharing a version requires both sides to include it.
-func lowerAtOrBelow(lo, hi bound) bool {
-	if lo.unbounded || hi.unbounded {
-		return true
-	}
-	cmp := lo.ver.Compare(hi.ver)
-	if cmp != 0 {
-		return cmp < 0
-	}
-	return lo.inclusive && hi.inclusive
 }
 
 // hookDir is where ADR-021 puts a hook manifest. The location is

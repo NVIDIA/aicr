@@ -190,6 +190,9 @@ transitions:
       - https://github.com/GoogleCloudPlatform/k8s-aibom/blob/c08e9ac2fda11a339865abdf2a7339a5a34c59e2/docs/evidence/v1.5.1-gke-upgrade-rollback-apiserver.md
   - from: ">=1.5.1 <1.6.1"
     to: ">=1.6.1 <=1.6.2"
+    # 1.6.2 is a safe patch on the 1.6.1 CRDs and RBAC, so these steps hold
+    # for a move straight to it.
+    skips: ["1.6.2"]
     verdict: manual
     verifiedBy: >-
       CRD schema diff (helm show crds
