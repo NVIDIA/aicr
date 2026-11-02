@@ -330,17 +330,19 @@ func TestBundleCommandRejectsRepeatedChartName(t *testing.T) {
 }
 
 // TestBundleCommandOCILayoutRemovedAfterLaterFailure covers failures after
-// the layout is renamed into place: the run removes it, so a rerun to the
-// same path does not conflict with it.
+// the layout is renamed into place, inside publication or later in the
+// command: the run removes it, so a rerun to the same path does not conflict
+// with it.
 func TestBundleCommandOCILayoutRemovedAfterLaterFailure(t *testing.T) {
 	failImageRefs := func(context.Context, *imageRefsTarget, []byte) error {
 		return errors.New(errors.ErrCodeInternal, "injected image-refs write failure")
 	}
 	tests := []struct {
-		name       string
-		inject     func(*bundlePublishDependencies, context.CancelFunc)
-		wantCode   errors.ErrorCode
-		wantRemove string
+		name          string
+		inject        func(*bundlePublishDependencies, context.CancelFunc)
+		failAfterPush bool
+		removeErr     error
+		wantCode      errors.ErrorCode
 	}{
 		{
 			name:     "image-refs write fails",
@@ -359,13 +361,16 @@ func TestBundleCommandOCILayoutRemovedAfterLaterFailure(t *testing.T) {
 			wantCode: errors.ErrCodeTimeout,
 		},
 		{
-			name: "removal fails",
-			inject: func(p *bundlePublishDependencies, _ context.CancelFunc) {
-				p.writeImageRefs = failImageRefs
-				p.removeLayout = func(string) error { return os.ErrPermission }
-			},
-			wantCode:   errors.ErrCodeInternal,
-			wantRemove: "failed to remove OCI layout",
+			name:          "command fails after publication succeeds",
+			inject:        func(*bundlePublishDependencies, context.CancelFunc) {},
+			failAfterPush: true,
+			wantCode:      errors.ErrCodeInternal,
+		},
+		{
+			name:      "removal fails",
+			inject:    func(p *bundlePublishDependencies, _ context.CancelFunc) { p.writeImageRefs = failImageRefs },
+			removeErr: os.ErrPermission,
+			wantCode:  errors.ErrCodeInternal,
 		},
 	}
 	for _, tt := range tests {
@@ -387,14 +392,21 @@ func TestBundleCommandOCILayoutRemovedAfterLaterFailure(t *testing.T) {
 				defer cancel()
 				publish := defaultBundlePublishDependencies()
 				tt.inject(&publish, cancel)
-				return pushOCIBundleWithDependencies(ctx, opts, out, bundle, imageRefs, publish)
+				err := pushOCIBundleWithDependencies(ctx, opts, out, bundle, imageRefs, publish)
+				if err == nil && tt.failAfterPush {
+					return errors.New(errors.ErrCodeInternal, "injected failure after publication")
+				}
+				return err
+			}
+			if tt.removeErr != nil {
+				deps.removeLayout = func(string) error { return tt.removeErr }
 			}
 
 			err := runBundleInWorkDir(t, realTempDir(t), deps, args...)
 			errorstest.WantReportedCode(t, err, tt.wantCode)
 			_, statErr := os.Lstat(layout)
-			if tt.wantRemove != "" {
-				if !strings.Contains(err.Error(), tt.wantRemove) || statErr != nil {
+			if tt.removeErr != nil {
+				if !strings.Contains(err.Error(), "failed to remove OCI layout") || statErr != nil {
 					t.Fatalf("error = %v, layout stat = %v; want the removal failure reported and the layout kept",
 						err, statErr)
 				}

@@ -188,6 +188,11 @@ type bundleCmdOptions struct {
 	// It is runtime state, not a parsed command option, and remains owned by
 	// runBundleCmdWithDependencies until OCI publication finishes.
 	verifiedBundleSource *verifiedBundleSource
+
+	// publishedLayout is the OCI layout directory that publication wrote. It
+	// is runtime state: runBundleCmdWithDependencies removes it when the
+	// command fails afterward.
+	publishedLayout string
 }
 
 type verifiedBundleSource struct {
@@ -1444,6 +1449,7 @@ type bundleCommandDependencies struct {
 		*bundleOutputTarget,
 		*imageRefsTarget,
 	) error
+	removeLayout func(string) error
 }
 
 func defaultBundleCommandDependencies() bundleCommandDependencies {
@@ -1461,6 +1467,7 @@ func defaultBundleCommandDependencies() bundleCommandDependencies {
 		prepareImageRefsTarget: prepareImageRefsTarget,
 		newGenerationWorkspace: oci.NewPrivateWorkspace,
 		pushOCIBundle:          pushOCIBundle,
+		removeLayout:           os.RemoveAll,
 	}
 }
 
@@ -1480,6 +1487,9 @@ func normalizeBundleCommandDependencies(deps bundleCommandDependencies) bundleCo
 	}
 	if deps.pushOCIBundle == nil {
 		deps.pushOCIBundle = defaults.pushOCIBundle
+	}
+	if deps.removeLayout == nil {
+		deps.removeLayout = defaults.removeLayout
 	}
 	return deps
 }
@@ -1565,6 +1575,18 @@ func runBundleCmdWithDependencies(
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid bundle command options")
 	}
+	// Registered before every later cleanup so it runs after them and sees
+	// their errors too: a failed run must not leave a layout that makes a
+	// rerun to the same path conflict.
+	defer func() {
+		if retErr == nil || opts.publishedLayout == "" {
+			return
+		}
+		if removeErr := deps.removeLayout(opts.publishedLayout); removeErr != nil {
+			retErr = stderrors.Join(retErr, errors.Wrap(errors.ErrCodeInternal,
+				"failed to remove OCI layout "+opts.publishedLayout+" after a failed run", removeErr))
+		}
+	}()
 
 	bundleTarget, imageRefs, err := prepareBundlePublicationTargets(ctx, opts, deps)
 	if err != nil {
@@ -1905,7 +1927,6 @@ type bundlePublishDependencies struct {
 	writeLayout        func(context.Context, oci.OutputConfig) (*oci.PackageAndPushResult, error)
 	writeHelmLayout    func(context.Context, oci.HelmChartOptions) (*oci.PackageAndPushResult, error)
 	writeImageRefs     func(context.Context, *imageRefsTarget, []byte) error
-	removeLayout       func(string) error
 }
 
 func defaultBundlePublishDependencies() bundlePublishDependencies {
@@ -1919,7 +1940,6 @@ func defaultBundlePublishDependencies() bundlePublishDependencies {
 		writeImageRefs: func(ctx context.Context, target *imageRefsTarget, data []byte) error {
 			return target.write(ctx, data)
 		},
-		removeLayout: os.RemoveAll,
 	}
 }
 
@@ -1946,9 +1966,6 @@ func normalizeBundlePublishDependencies(deps bundlePublishDependencies) bundlePu
 	if deps.writeImageRefs == nil {
 		deps.writeImageRefs = defaults.writeImageRefs
 	}
-	if deps.removeLayout == nil {
-		deps.removeLayout = defaults.removeLayout
-	}
 	return deps
 }
 
@@ -1973,9 +1990,9 @@ func pushOCIBundle(
 // filesystem. Local syscalls are cooperatively checked between calls but may
 // not be forcibly interruptible, and os.Root's complete retained-root behavior
 // is unavailable on its excluded platforms. Registry push and final local
-// image-reference publication are intentionally non-transactional; a written
-// OCI layout is removed when a later step fails, so a rerun to the same path
-// does not conflict with it.
+// image-reference publication are intentionally non-transactional. A written
+// OCI layout is recorded in opts.publishedLayout, even when a later step here
+// fails, for the command to remove.
 //
 //nolint:funlen // publication ownership and cleanup order is intentionally linear
 func pushOCIBundleWithDependencies(
@@ -1988,18 +2005,6 @@ func pushOCIBundleWithDependencies(
 ) (retErr error) {
 
 	deps = normalizeBundlePublishDependencies(deps)
-	// Registered first so it runs last and sees every later failure,
-	// including deferred cleanup errors.
-	var publishedLayout string
-	defer func() {
-		if retErr == nil || publishedLayout == "" {
-			return
-		}
-		if err := deps.removeLayout(publishedLayout); err != nil {
-			retErr = stderrors.Join(retErr, errors.Wrap(errors.ErrCodeInternal,
-				"failed to remove OCI layout "+publishedLayout+" after a failed publication", err))
-		}
-	}()
 	if opts == nil || opts.ociRef == nil || (!opts.ociRef.IsOCI && !opts.ociRef.IsLayout) {
 		return errors.New(errors.ErrCodeInvalidRequest, "OCI bundle options are required")
 	}
@@ -2134,7 +2139,7 @@ func pushOCIBundleWithDependencies(
 		})
 	}
 	if opts.ociRef.IsLayout && publishErr == nil && pushResult != nil {
-		publishedLayout = pushResult.StorePath
+		opts.publishedLayout = pushResult.StorePath
 	}
 	publishErr = authoritativeFilesystemContextError(publishCtx,
 		"OCI bundle publication canceled", publishErr)
