@@ -162,6 +162,11 @@ func TestWriteLayoutMatchesPushedDigest(t *testing.T) {
 	if written.StorePath != resolvedPath(t, layoutDir) || written.Reference != "oci-layout:"+layoutDir+":v1.2.3" {
 		t.Fatalf("WriteLayout() = %+v", written)
 	}
+	if info, statErr := os.Lstat(layoutDir); statErr != nil || written.StoreInfo == nil ||
+		!os.SameFile(written.StoreInfo, info) {
+
+		t.Fatalf("WriteLayout() StoreInfo does not identify %s: stat error = %v", layoutDir, statErr)
+	}
 	assertLayoutPublishes(t, layoutDir, "v1.2.3", pushed.Digest, host)
 }
 

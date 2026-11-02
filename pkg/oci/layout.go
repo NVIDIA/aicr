@@ -202,5 +202,6 @@ func releaseLayout(
 		Size:      op.result.Size,
 		Reference: ref.String(),
 		StorePath: path,
+		StoreInfo: layout.childInfo,
 	}, nil
 }

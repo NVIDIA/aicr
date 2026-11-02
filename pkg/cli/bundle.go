@@ -2169,10 +2169,11 @@ func pushOCIBundleWithDependencies(
 			InsecureTLS: opts.insecureTLS,
 		})
 	}
-	if opts.ociRef.IsLayout && publishErr == nil && pushResult != nil && pushResult.StorePath != "" {
-		if info, statErr := os.Lstat(pushResult.StorePath); statErr == nil {
-			opts.publishedLayout = &publishedOCILayout{path: pushResult.StorePath, info: info}
+	if opts.ociRef.IsLayout && publishErr == nil && pushResult != nil {
+		if pushResult.StorePath == "" || pushResult.StoreInfo == nil {
+			return errors.New(errors.ErrCodeInternal, "OCI layout publication returned no layout identity")
 		}
+		opts.publishedLayout = &publishedOCILayout{path: pushResult.StorePath, info: pushResult.StoreInfo}
 	}
 	publishErr = authoritativeFilesystemContextError(publishCtx,
 		"OCI bundle publication canceled", publishErr)
