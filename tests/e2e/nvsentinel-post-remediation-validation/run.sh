@@ -23,8 +23,9 @@
 #
 #   1. the gate refuses nvsentinel-remediation without
 #      nvsentinel-node-validation, an empty validation rule set list, a rule
-#      set naming a test nothing defines, and a disabled rule set sharing the
-#      post-reboot rule set's name; it accepts the full
+#      set naming a test nothing defines, a disabled rule set sharing the
+#      post-reboot rule set's name, and a release taint whose value breaks
+#      every test Job; it accepts the full
 #      composition, whose values carry the mixin's post-reboot rule set;
 #   2. a fatal RESTART_VM fault is quarantined, drained and repaired; its
 #      healthy event makes fault-quarantine create a ValidationRequest and keep
@@ -306,6 +307,11 @@ test_gate() {
   expect_refusal "#1 gate refuses a disabled rule set sharing the post-reboot rule set's name" \
     live "has the name \"Post-reboot validation\"" \
     --set-json "nvsentinel:fault-quarantine.validation.ruleSets=${shadowed}"
+  # lifecycle-manager writes the value unquoted into every test Job, where
+  # "true" is a bool the API server rejects.
+  expect_refusal "#1 gate refuses a release taint whose value breaks every test Job" \
+    live "which lifecycle-manager's Job template writes unquoted" \
+    --set-json 'nvsentinel:lifecycle-manager.config.schedulingGate.taints=[{"key":"example.com/hold","value":"true","effect":"NoSchedule","remove":true}]'
 
   bundle_to live deploy ||
     { tail -20 "${WORK}/bundle-deploy.log"; err "bundle generation failed for the full composition"; }
@@ -333,15 +339,6 @@ test_gate() {
   else
     fail "#1 the bundle carries post-reboot validation" \
       "enabled $(yq '.["fault-quarantine"].validation.enabled' "${values}"), ruleSets ${bundled}"
-  fi
-
-  if yq -o=json '.["lifecycle-manager"].config.schedulingGate.taints' "${values}" | jq -e 'any(.[]?;
-      .key == "nvsentinel.dgxc.nvidia.com/nvcre-cert-failed" and .value == "true" and
-      .effect == "NoSchedule" and .remove == true)' >/dev/null; then
-    pass "#1 the bundle releases the chart's NVCRE quarantine taint once a node passes"
-  else
-    fail "#1 the bundle releases the chart's quarantine taint" \
-      "schedulingGate.taints is $(yq -o=json -I=0 '.["lifecycle-manager"].config.schedulingGate.taints' "${values}")"
   fi
 
   # Fail here, not later as "nothing happened": a composition or test-only

@@ -24,6 +24,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/component"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	sigsyaml "sigs.k8s.io/yaml"
 )
 
 // Value paths CheckNVSentinelPostRemediationValidationCoherent reads under
@@ -96,12 +97,12 @@ func (t postRemediationTaint) String() string { return t.key + "=" + t.value + "
 //     or fault-quarantine and lifecycle-manager write their cordon labels
 //     under different prefixes, so lifecycle-manager's release leaves
 //     fault-quarantine's labels on the node;
-//   - an enabled fault-quarantine rule set, the chart's own when ruleSets is
-//     unset, applies a NoSchedule or NoExecute taint that
-//     lifecycle-manager.config.schedulingGate.taints does not list with
-//     remove: true: fault-quarantine keeps its taints on the hand-over and
-//     lifecycle-manager lifts only the listed ones, so a node that passes is
-//     uncordoned but stays closed to work.
+//   - a lifecycle-manager.config.schedulingGate.taints entry's value is not
+//     a string once written unquoted, which breaks every test Job; or an
+//     enabled fault-quarantine rule set applies a NoSchedule or NoExecute
+//     taint that list does not release with remove: true, so a node that
+//     passes is uncordoned but stays closed to work. With ruleSets unset, the
+//     chart's NVCRE certification taint counts while its monitor runs.
 //
 // It rejects --dynamic on fault-quarantine.validation.enabled, on
 // fault-quarantine.validation, fault-quarantine.labelPrefix and
@@ -273,25 +274,53 @@ func postRemediationReadinessViolations(ctx context.Context, values map[string]a
 	return nil
 }
 
-// postRemediationTaintViolations fails on each NoSchedule or NoExecute taint
-// an enabled fault-quarantine rule set applies that
-// lifecycle-manager.config.schedulingGate.taints does not list with remove:
-// true. fault-quarantine keeps its taints when it hands a node to validation,
-// and lifecycle-manager lifts only the listed ones, so the node would pass,
-// be uncordoned and stay closed to work.
+// postRemediationTaintViolations fails on two ways the release of a validated
+// node can go wrong. Each schedulingGate.taints entry's value must stay a
+// string when lifecycle-manager's Job template (NVSentinel v1.28.0) writes it
+// unquoted into every test Job's tolerations: "true" or "1" turns into a bool
+// or number, the API server rejects the Job, and every validation fails. And
+// each NoSchedule or NoExecute taint an enabled fault-quarantine rule set
+// applies must be listed there with remove: true, since fault-quarantine keeps
+// its taints on the hand-over and lifecycle-manager lifts only the listed
+// ones. The chart's own rule sets apply only the NVCRE certification taint,
+// and only while its monitor runs.
 func postRemediationTaintViolations(ctx context.Context, values map[string]any, fail func(string, ...any)) error {
+	type release struct {
+		taint  postRemediationTaint
+		remove bool
+	}
+	raw, _ := component.GetValueByPath(values, postRemediationReleaseTaintsPath)
+	items, _ := raw.([]any)
+	releases := make([]release, 0, len(items))
+	for i, item := range items {
+		if err := ctx.Err(); err != nil {
+			return aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "checking "+postRemediationReleaseTaintsPath)
+		}
+		entry, _ := item.(map[string]any)
+		key, _ := entry["key"].(string)
+		value, _ := entry["value"].(string)
+		effect, _ := entry["effect"].(string)
+		if !postRemediationUnquotedString(value) {
+			fail("%s[%d].value is %q, which lifecycle-manager's Job template writes unquoted into every test Job's "+
+				"tolerations, where it is not a string, so the API server rejects every test Job, every validation "+
+				"fails and every validated node stays cordoned", postRemediationReleaseTaintsPath, i, value)
+		}
+		releases = append(releases, release{postRemediationTaint{key, value, effect}, entry["remove"] == true})
+	}
+
 	type applied struct {
 		source string
 		taint  postRemediationTaint
 	}
 	var required []applied
-	raw, present := component.GetValueByPath(values, postRemediationQuarantineRules)
-	if !present {
+	rules, present := component.GetValueByPath(values, postRemediationQuarantineRules)
+	if !present && nvsentinelSubchartRenders(values, "nvcreCertificationMonitor") {
 		for _, taint := range postRemediationChartQuarantineTaints {
-			required = append(required, applied{"the chart's default " + postRemediationQuarantineRules, taint})
+			required = append(required, applied{"the chart's default " + postRemediationQuarantineRules +
+				", with global.nvcreCertificationMonitor on,", taint})
 		}
 	}
-	ruleSets, _ := raw.([]any)
+	ruleSets, _ := rules.([]any)
 	for i, item := range ruleSets {
 		if err := ctx.Err(); err != nil {
 			return aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "checking "+postRemediationQuarantineRules)
@@ -310,35 +339,38 @@ func postRemediationTaintViolations(ctx context.Context, values map[string]any, 
 			required = append(required, applied{fmt.Sprintf("%s[%d]", postRemediationQuarantineRules, i), t})
 		}
 	}
-	if len(required) == 0 {
-		return nil
-	}
 
-	releases, _ := component.GetValueByPath(values, postRemediationReleaseTaintsPath)
-	entries, _ := releases.([]any)
 	for _, req := range required {
-		released := false
-		for _, item := range entries {
-			if err := ctx.Err(); err != nil {
-				return aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "checking "+postRemediationReleaseTaintsPath)
-			}
-			entry, _ := item.(map[string]any)
-			key, _ := entry["key"].(string)
-			value, _ := entry["value"].(string)
-			effect, _ := entry["effect"].(string)
-			if entry["remove"] == true && (postRemediationTaint{key, value, effect}) == req.taint {
-				released = true
-				break
-			}
+		if slices.Contains(releases, release{req.taint, true}) {
+			continue
 		}
-		if !released {
-			fail("%s applies the taint %s, which fault-quarantine keeps when it hands a node to validation, but %s "+
-				"does not list it with remove: true, so lifecycle-manager uncordons a node that passes and leaves it "+
-				"tainted, closed to work -- add {key: %q, value: %q, effect: %q, remove: true}", req.source, req.taint,
-				postRemediationReleaseTaintsPath, req.taint.key, req.taint.value, req.taint.effect)
+		fix := fmt.Sprintf("add {key: %q, value: %q, effect: %q, remove: true}", req.taint.key, req.taint.value,
+			req.taint.effect)
+		if !postRemediationUnquotedString(req.taint.value) {
+			fix = fmt.Sprintf("no entry can release it, since its value %q would break every test Job -- change the "+
+				"taint's value, or turn the taint or validation off", req.taint.value)
 		}
+		fail("%s applies the taint %s, which fault-quarantine keeps when it hands a node to validation, but %s "+
+			"does not list it with remove: true, so lifecycle-manager uncordons a node that passes and leaves it "+
+			"tainted, closed to work -- %s", req.source, req.taint, postRemediationReleaseTaintsPath, fix)
 	}
 	return nil
+}
+
+// postRemediationUnquotedString reports whether value stays the same string
+// when written unquoted as a YAML value and decoded as lifecycle-manager
+// decodes its rendered Job. An empty value decodes to null, which a string
+// field reads as empty.
+func postRemediationUnquotedString(value string) bool {
+	if value == "" {
+		return true
+	}
+	var doc map[string]any
+	if err := sigsyaml.Unmarshal([]byte("value: "+value), &doc); err != nil {
+		return false
+	}
+	decoded, isString := doc["value"].(string)
+	return isString && decoded == value
 }
 
 // postRemediationRuleSetTests returns the tests post-remediation validation

@@ -105,15 +105,6 @@ func assertPostRebootValidation(t *testing.T, mixin string, overrides map[string
 	}
 	rule, _ := all[0].(map[string]any)
 	expression, _ := rule["expression"].(string)
-	wantRelease := map[string]any{"lifecycle-manager": map[string]any{"config": map[string]any{"schedulingGate": map[string]any{
-		"taints": []any{map[string]any{
-			"key": "nvsentinel.dgxc.nvidia.com/nvcre-cert-failed", "value": "true", "effect": "NoSchedule", "remove": true,
-		}},
-	}}}}
-	if got := map[string]any{"lifecycle-manager": overrides["lifecycle-manager"]}; !reflect.DeepEqual(got, wantRelease) {
-		t.Errorf("%s: lifecycle-manager overrides = %v, want only the release of the chart's NVCRE taint %v",
-			mixin, got, wantRelease)
-	}
 	const want = "event.componentClass == 'GPU' && event.isFatal == true && event.recommendedAction in [15, 24]"
 	if got := strings.Join(strings.Fields(expression), " "); got != want {
 		t.Errorf("%s: rule set expression %q, want %q: only fatal GPU faults repaired by RESTART_VM (15) or "+
@@ -190,7 +181,7 @@ func TestMixinNVSentinelRemediationSteps_Compose(t *testing.T) {
 				assertComponentResetIsGPUReset(t, step.mixin, nvsentinel.Overrides)
 			}
 			if step.mixin == "nvsentinel-remediation" {
-				wantKeys = append(wantKeys, "fault-quarantine", "lifecycle-manager")
+				wantKeys = append(wantKeys, "fault-quarantine")
 				assertPostRebootValidation(t, step.mixin, nvsentinel.Overrides)
 			}
 			if slices.Contains(step.enables, "janitorProvider") {

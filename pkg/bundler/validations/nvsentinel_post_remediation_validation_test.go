@@ -54,9 +54,6 @@ func postRemediationValues() map[string]any {
 			"enabled":  true,
 			"ruleSets": []any{postRemediationRuleSet("Post-reboot validation", nodeValidationDCGMTest)},
 		}},
-		"lifecycle-manager": map[string]any{"config": map[string]any{"schedulingGate": map[string]any{
-			"taints": []any{postRemediationRelease(postRemediationChartQuarantineTaints[0], true)},
-		}}},
 	}
 }
 
@@ -157,7 +154,12 @@ func TestCheckNVSentinelPostRemediationValidationCoherent(t *testing.T) {
 		return rule
 	}
 	customTaint := postRemediationTaint{key: "example.com/gpu", value: "bad", effect: "NoExecute"}
-	wantNVCRE := "the chart's default " + postRemediationQuarantineRules + " applies the taint " + nvcre.String()
+	nvcreOn := at("global.nvcreCertificationMonitor.enabled", true)
+	wantNoRelease := "no entry can release it, since its value \"true\" would break every test Job"
+	wantBadValue := func(i int, value string) string {
+		return fmt.Sprintf("%s[%d].value is %q, which lifecycle-manager's Job template writes unquoted",
+			postRemediationReleaseTaintsPath, i, value)
+	}
 	wantCustom := postRemediationQuarantineRules + "[0] applies the taint " + customTaint.String()
 	criterion := func(name, expression string) any { return nodeValidationCriterion(name, expression) }
 	readiness := func(items ...any) map[string]any { return at(postRemediationReadinessPath, items) }
@@ -245,39 +247,49 @@ func TestCheckNVSentinelPostRemediationValidationCoherent(t *testing.T) {
 		{name: "cordon.remove left to the chart default",
 			sentinel: withoutPath(remediation(), postRemediationCordonRemovePath)},
 		{name: "schedulingGate null", sentinel: remediation(at(postRemediationSchedulingGate, nil)),
-			wantErrs: []string{postRemediationSchedulingGate + wantNotGateMap, wantNVCRE}},
+			wantErrs: []string{postRemediationSchedulingGate + wantNotGateMap}},
 		{name: "schedulingGate null by --set-json", sentinel: remediation(),
 			cfg:      setJSON("nv-sentinel:" + postRemediationSchedulingGate + "=null"),
-			wantErrs: []string{postRemediationSchedulingGate + wantNotGateMap, wantNVCRE}},
+			wantErrs: []string{postRemediationSchedulingGate + wantNotGateMap}},
 		{name: "schedulingGate.cordon null", sentinel: remediation(at(postRemediationCordonPath, nil)),
 			wantErrs: []string{postRemediationCordonPath + wantNotGateMap}},
 		{name: "schedulingGate.cordon a string", sentinel: remediation(at(postRemediationCordonPath, "remove")),
 			wantErrs: []string{postRemediationCordonPath + ` is "remove", not a map`}},
-		{name: "schedulingGate left to the chart default releases no taint",
-			sentinel: withoutPath(remediation(), postRemediationSchedulingGate), wantErrs: []string{wantNVCRE}},
+		{name: "schedulingGate left to the chart default",
+			sentinel: withoutPath(remediation(), postRemediationSchedulingGate)},
 
 		// Taints fault-quarantine keeps on the hand-over.
-		{name: "the chart's NVCRE taint without a release entry",
-			sentinel: withoutPath(remediation(), postRemediationReleaseTaintsPath), wantErrs: []string{wantNVCRE}},
-		{name: "the chart's NVCRE taint with remove false",
-			sentinel: remediation(releases(postRemediationRelease(nvcre, false))), wantErrs: []string{wantNVCRE}},
-		{name: "the chart's NVCRE taint released with another value",
-			sentinel: remediation(releases(postRemediationRelease(postRemediationTaint{nvcre.key, "false", nvcre.effect}, true))),
-			wantErrs: []string{wantNVCRE}},
-		{name: "release taints null", sentinel: remediation(at(postRemediationReleaseTaintsPath, nil)),
-			wantErrs: []string{wantNVCRE}},
+		{name: "the chart's NVCRE taint needs no release while its monitor is off", sentinel: remediation()},
+		{name: "the chart's NVCRE taint with its monitor on cannot be released",
+			sentinel: remediation(nvcreOn), wantErrs: []string{wantNoRelease}},
+		{name: "a release entry valued true breaks every test Job",
+			sentinel: remediation(nvcreOn, releases(postRemediationRelease(nvcre, true))),
+			wantErrs: []string{wantBadValue(0, "true")}},
+		{name: "a release entry valued yes or 1 breaks every test Job",
+			sentinel: remediation(releases(postRemediationRelease(postRemediationTaint{"a", "yes", "NoSchedule"}, true),
+				postRemediationRelease(postRemediationTaint{"b", "1", "NoSchedule"}, true))),
+			wantErrs: []string{wantBadValue(0, "yes"), wantBadValue(1, "1")}},
+		{name: "a release entry with no value is fine",
+			sentinel: remediation(releases(postRemediationRelease(postRemediationTaint{"a", "", "NoSchedule"}, true)))},
 		{name: "a custom rule set's NoExecute taint released",
 			sentinel: remediation(quarantineRules(tainting("NoExecute", nil)), releases(postRemediationRelease(customTaint, true)))},
 		{name: "a custom rule set's NoExecute taint not released",
 			sentinel: remediation(quarantineRules(tainting("NoExecute", true))), wantErrs: []string{wantCustom}},
+		{name: "a custom rule set's taint released with remove false",
+			sentinel: remediation(quarantineRules(tainting("NoExecute", nil)), releases(postRemediationRelease(customTaint, false))),
+			wantErrs: []string{wantCustom}},
+		{name: "a custom rule set's taint released with another value",
+			sentinel: remediation(quarantineRules(tainting("NoExecute", nil)),
+				releases(postRemediationRelease(postRemediationTaint{customTaint.key, "other", customTaint.effect}, true))),
+			wantErrs: []string{wantCustom}},
 		{name: "a custom rule set's PreferNoSchedule taint needs no release",
 			sentinel: remediation(quarantineRules(tainting("PreferNoSchedule", nil)))},
 		{name: "a disabled rule set's taint needs no release",
 			sentinel: remediation(quarantineRules(tainting("NoExecute", false)))},
 		{name: "rule sets without taints need no release",
-			sentinel: withoutPath(remediation(quarantineRules(map[string]any{"name": "cordon only"})), postRemediationReleaseTaintsPath)},
-		{name: "rule sets null need no release",
-			sentinel: withoutPath(remediation(at(postRemediationQuarantineRules, nil)), postRemediationReleaseTaintsPath)},
+			sentinel: remediation(quarantineRules(map[string]any{"name": "cordon only"}))},
+		{name: "rule sets null need no release, even with the NVCRE monitor on",
+			sentinel: remediation(nvcreOn, at(postRemediationQuarantineRules, nil))},
 		{name: "--dynamic fault-quarantine rule sets", sentinel: remediation(),
 			cfg: dynamic("nv-sentinel", postRemediationQuarantineRules), wantErrs: []string{wantDynamic}},
 

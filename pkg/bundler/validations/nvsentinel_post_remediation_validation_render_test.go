@@ -16,7 +16,6 @@ package validations
 
 import (
 	"context"
-	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -138,8 +137,8 @@ func TestNVSentinelPostRemediationValidationChartRender(t *testing.T) {
 			postRebootRuleSetName, actions, postRebootActions)
 	}
 	// The gate assumes these are the chart's only quarantine taints when AICR
-	// leaves fault-quarantine.ruleSets unset; a chart bump that adds one fails
-	// here rather than leaving a node tainted after it passes.
+	// leaves fault-quarantine.ruleSets unset; a chart bump that adds or changes
+	// one fails here rather than leaving a node tainted after it passes.
 	matches := quarantineTaintRe.FindAllStringSubmatch(cfg, -1)
 	chartTaints := make([]postRemediationTaint, 0, len(matches))
 	for _, m := range matches {
@@ -148,18 +147,6 @@ func TestNVSentinelPostRemediationValidationChartRender(t *testing.T) {
 	if !slices.Equal(chartTaints, postRemediationChartQuarantineTaints) {
 		t.Errorf("fault-quarantine rule sets apply taints %v, want %v (postRemediationChartQuarantineTaints)",
 			chartTaints, postRemediationChartQuarantineTaints)
-	}
-	gate, _ := lifecycleManagerConfig(t, out)["schedulingGate"].(map[string]any)
-	releases, _ := gate["taints"].([]any)
-	for _, taint := range postRemediationChartQuarantineTaints {
-		want := postRemediationRelease(taint, true)
-		if !slices.ContainsFunc(releases, func(item any) bool {
-			entry, _ := item.(map[string]any)
-			return maps.Equal(entry, want)
-		}) {
-
-			t.Errorf("lifecycle-manager schedulingGate.taints = %v, want an entry %v", gate["taints"], want)
-		}
 	}
 	if !grantsValidationRequestCreate(t, out) {
 		t.Errorf("fault-quarantine ClusterRole does not grant create on %s.%s; ValidationRequest creation fails "+
