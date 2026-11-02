@@ -39,22 +39,31 @@ func TestParseOutputTargetLayout(t *testing.T) {
 		input   string
 		wantDir string
 		wantTag string
-		wantErr bool
+		wantErr string
 	}{
 		{name: "directory only", input: "oci-layout:./layout", wantDir: "./layout"},
 		{name: "directory and tag", input: "oci-layout:out:v1.2.3", wantDir: "out", wantTag: "v1.2.3"},
 		{name: "absolute directory and tag", input: "oci-layout:/tmp/out:1.0.0", wantDir: "/tmp/out", wantTag: "1.0.0"},
 		{name: "colon inside path is not a tag", input: "oci-layout:a:b/c", wantDir: "a:b/c"},
-		{name: "invalid tag stays in path", input: "oci-layout:out:bad tag", wantDir: "out:bad tag"},
-		{name: "empty", input: "oci-layout:", wantErr: true},
-		{name: "tag without directory", input: "oci-layout::v1", wantErr: true},
+		{name: "colon in a parent directory", input: "oci-layout:/tmp/a:b/out:v1", wantDir: "/tmp/a:b/out", wantTag: "v1"},
+		{name: "invalid tag", input: "oci-layout:out:bad tag", wantErr: "must not contain ':' or '@'"},
+		{name: "invalid tag with punctuation", input: "oci-layout:./l8:bad tag!", wantErr: "must not contain ':' or '@'"},
+		{name: "empty tag", input: "oci-layout:out:", wantErr: "must not contain ':' or '@'"},
+		{name: "digest", input: "oci-layout:./l9@sha256:abc", wantErr: "must not contain ':' or '@'"},
+		{name: "at sign without tag", input: "oci-layout:out@v1", wantErr: "must not contain ':' or '@'"},
+		{name: "invalid tag before trailing separator", input: "oci-layout:out:bad tag/", wantErr: "must not contain ':' or '@'"},
+		{name: "empty", input: "oci-layout:", wantErr: "requires a directory"},
+		{name: "tag without directory", input: "oci-layout::v1", wantErr: "requires a directory"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			ref, err := ParseOutputTarget(tt.input)
-			if tt.wantErr {
+			if tt.wantErr != "" {
 				errorstest.WantReportedCode(t, err, apperrors.ErrCodeInvalidRequest)
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("ParseOutputTarget(%q) error = %v, want it to contain %q", tt.input, err, tt.wantErr)
+				}
 				return
 			}
 			if err != nil {
@@ -387,6 +396,8 @@ func TestCheckLayoutTarget(t *testing.T) {
 		{name: "parent is a file", ref: &Reference{IsLayout: true, LocalPath: filepath.Join(file, "new"), Tag: "v1"}, wantCode: apperrors.ErrCodeInvalidRequest},
 		{name: "symlinked parent", ref: &Reference{IsLayout: true, LocalPath: filepath.Join(link, "new"), Tag: "v1"}},
 		{name: "invalid tag", ref: &Reference{IsLayout: true, LocalPath: filepath.Join(parent, "new"), Tag: "bad tag"}, wantCode: apperrors.ErrCodeInvalidRequest},
+		{name: "colon in directory name", ref: &Reference{IsLayout: true, LocalPath: filepath.Join(parent, "new:bad"), Tag: "v1"}, wantCode: apperrors.ErrCodeInvalidRequest},
+		{name: "at sign in directory name", ref: &Reference{IsLayout: true, LocalPath: filepath.Join(parent, "new@sha256"), Tag: "abc"}, wantCode: apperrors.ErrCodeInvalidRequest},
 		{name: "nil reference", wantCode: apperrors.ErrCodeInvalidRequest},
 	}
 	for _, tt := range tests {

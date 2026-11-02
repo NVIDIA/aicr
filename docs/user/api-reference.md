@@ -563,7 +563,7 @@ Generate deployment bundles from a recipe.
 | `argocd-sync-retry-limit` | int | _(unset)_ | `spec.syncPolicy.retry.limit` on every child Application. Unset leaves Argo CD's auto-sync default; `0` disables retries. Required by the backoff parameters. |
 | `argocd-sync-retry-backoff-duration` | string | _(Argo CD: `5s`)_ | Delay before the first sync retry, as a Go duration (`30s`). |
 | `argocd-sync-retry-backoff-factor` | int | _(Argo CD: `2`)_ | Multiplier applied to the retry delay after each failed sync (at least `1`). |
-| `argocd-sync-retry-backoff-max-duration` | string | _(Argo CD: `3m`)_ | Upper bound on the delay between sync retries, as a Go duration (`5m`). |
+| `argocd-sync-retry-backoff-max-duration` | string | _(Argo CD: `3m`)_ | Upper bound on the delay between sync retries, as a Go duration (`5m`); must not be less than `argocd-sync-retry-backoff-duration`. |
 | `attest` | bool | false | Return a cryptographically signed bundle. When `true`, the server signs the bundle as **itself** using its operator-configured signing identity; no signing key, token, or identity is ever taken from the request. Parsed with Go `strconv.ParseBool` semantics; a present-but-unparseable value is rejected with HTTP 400. Absent or `false` returns an unsigned bundle. If the server has no signing identity configured, `attest=true` is rejected with HTTP 400 (`Server is not configured for attestation`). See [Server-Side Signing](#server-side-signing) for setup. |
 
 **Request Body:**

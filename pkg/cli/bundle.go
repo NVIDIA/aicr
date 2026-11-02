@@ -1331,7 +1331,9 @@ Write the same artifact as an OCI image layout without pushing, then publish it:
 					"retries a failed sync (--deployer argocd or argocd-helm only). Unset leaves retry to " +
 					"Argo CD's auto-sync default; 0 disables retries. " +
 					"May also be supplied via spec.bundle.deployment.argocd.syncRetry.limit in --config.",
-				Category: catDeployment,
+				// Unset and 0 differ (see Usage), so the rendered "(default: 0)" misleads.
+				HideDefault: true,
+				Category:    catDeployment,
 			},
 			&cli.StringFlag{
 				Name: flagArgoCDSyncRetryBackoffDuration,
@@ -1343,11 +1345,14 @@ Write the same artifact as an OCI image layout without pushing, then publish it:
 				Name: flagArgoCDSyncRetryBackoffFactor,
 				Usage: "Multiplier applied to the retry delay after each failed sync (>= 1). " +
 					"Requires a sync retry limit, from --" + flagArgoCDSyncRetryLimit + " or --config.",
-				Category: catDeployment,
+				// Unset leaves Argo CD's factor, and 0 is rejected.
+				HideDefault: true,
+				Category:    catDeployment,
 			},
 			&cli.StringFlag{
 				Name: flagArgoCDSyncRetryBackoffMaxDuration,
-				Usage: "Upper bound on the delay between sync retries, as a duration (e.g. 5m). " +
+				Usage: "Upper bound on the delay between sync retries, as a duration (e.g. 5m); " +
+					"must not be less than --" + flagArgoCDSyncRetryBackoffDuration + ". " +
 					"Requires a sync retry limit, from --" + flagArgoCDSyncRetryLimit + " or --config.",
 				Category: catDeployment,
 			},

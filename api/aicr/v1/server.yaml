@@ -1344,7 +1344,9 @@ components:
       name: argocd-sync-retry-backoff-max-duration
       in: query
       required: false
-      description: Upper bound on the delay between sync retries, as a Go duration.
+      description: >-
+        Upper bound on the delay between sync retries, as a Go duration. Must
+        not be less than argocd-sync-retry-backoff-duration.
       schema:
         type: string
       example: 5m

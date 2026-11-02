@@ -108,8 +108,9 @@ func clonePtr[T any](p *T) *T {
 }
 
 // Validate reports the first invalid setting with ErrCodeInvalidRequest,
-// including backoff set without a limit. It is for the final, layered
-// settings; see ValidateFields for one source on its own.
+// including backoff set without a limit and a backoff max duration below the
+// backoff duration. It is for the final, layered settings; see
+// ValidateFields for one source on its own.
 func (s ArgoCDSettings) Validate() error {
 	if err := s.ValidateFields(); err != nil {
 		return err
@@ -120,13 +121,13 @@ func (s ArgoCDSettings) Validate() error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"Argo CD sync retry backoff requires a sync retry limit: Argo CD reads a missing limit as 0, which disables retries")
 	}
-	return nil
+	return s.syncRetry().Validate()
 }
 
 // ValidateFields reports the first set field whose value is invalid on its
-// own, with ErrCodeInvalidRequest. Unlike Validate it skips the rule that
-// backoff needs a limit, so it suits one source that a higher-precedence
-// source may still complete.
+// own, with ErrCodeInvalidRequest. Unlike Validate it skips the rules that
+// relate fields (backoff needs a limit, max duration >= duration), so it
+// suits one source that a higher-precedence source may still complete.
 func (s ArgoCDSettings) ValidateFields() error {
 	if s.DestinationServer != nil {
 		if err := ValidateDestinationServer(*s.DestinationServer); err != nil {
@@ -173,7 +174,7 @@ func (s ArgoCDSettings) ValidateFields() error {
 	if s.SyncRetryBackoffMaxDuration != nil {
 		r.BackoffMaxDuration = *s.SyncRetryBackoffMaxDuration
 	}
-	return r.Validate()
+	return r.validateFields()
 }
 
 // syncRetry returns the SyncRetry the settings describe, or nil when
@@ -264,6 +265,25 @@ func (r *SyncRetry) Validate() error {
 	if r == nil {
 		return nil
 	}
+	if err := r.validateFields(); err != nil {
+		return err
+	}
+	if r.BackoffDuration == "" || r.BackoffMaxDuration == "" {
+		return nil
+	}
+	// validateFields has already parsed both.
+	d, _ := time.ParseDuration(r.BackoffDuration)
+	maxD, _ := time.ParseDuration(r.BackoffMaxDuration)
+	if maxD < d {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid Argo CD sync retry backoff max duration %q: must not be less than the backoff duration %q",
+				r.BackoffMaxDuration, r.BackoffDuration))
+	}
+	return nil
+}
+
+// validateFields is Validate without the rule relating the two durations.
+func (r *SyncRetry) validateFields() error {
 	if r.Limit < 0 {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("invalid Argo CD sync retry limit %d: must be >= 0 (Argo CD retries a negative limit forever)", r.Limit))
