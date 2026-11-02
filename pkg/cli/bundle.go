@@ -192,7 +192,14 @@ type bundleCmdOptions struct {
 	// publishedLayout is the OCI layout directory that publication wrote. It
 	// is runtime state: runBundleCmdWithDependencies removes it when the
 	// command fails afterward.
-	publishedLayout string
+	publishedLayout *publishedOCILayout
+}
+
+// publishedOCILayout is a layout directory publication wrote, with the
+// identity it had then so cleanup removes only that directory.
+type publishedOCILayout struct {
+	path string
+	info os.FileInfo
 }
 
 type verifiedBundleSource struct {
@@ -1449,7 +1456,7 @@ type bundleCommandDependencies struct {
 		*bundleOutputTarget,
 		*imageRefsTarget,
 	) error
-	removeLayout func(string) error
+	removeLayout func(*publishedOCILayout) error
 }
 
 func defaultBundleCommandDependencies() bundleCommandDependencies {
@@ -1467,7 +1474,7 @@ func defaultBundleCommandDependencies() bundleCommandDependencies {
 		prepareImageRefsTarget: prepareImageRefsTarget,
 		newGenerationWorkspace: oci.NewPrivateWorkspace,
 		pushOCIBundle:          pushOCIBundle,
-		removeLayout:           os.RemoveAll,
+		removeLayout:           removePublishedLayout,
 	}
 }
 
@@ -1579,12 +1586,12 @@ func runBundleCmdWithDependencies(
 	// their errors too: a failed run must not leave a layout that makes a
 	// rerun to the same path conflict.
 	defer func() {
-		if retErr == nil || opts.publishedLayout == "" {
+		if retErr == nil || opts.publishedLayout == nil {
 			return
 		}
 		if removeErr := deps.removeLayout(opts.publishedLayout); removeErr != nil {
-			retErr = stderrors.Join(retErr, errors.Wrap(errors.ErrCodeInternal,
-				"failed to remove OCI layout "+opts.publishedLayout+" after a failed run", removeErr))
+			retErr = stderrors.Join(retErr, errors.PropagateOrWrap(removeErr, errors.ErrCodeInternal,
+				"failed to remove OCI layout "+opts.publishedLayout.path+" after a failed run"))
 		}
 	}()
 
@@ -1969,6 +1976,30 @@ func normalizeBundlePublishDependencies(deps bundlePublishDependencies) bundlePu
 	return deps
 }
 
+// removePublishedLayout removes layout only while its path still names the
+// directory publication wrote; anything put there since is left in place.
+// The identity check and the removal are separate syscalls.
+func removePublishedLayout(layout *publishedOCILayout) error {
+	root, err := os.OpenRoot(filepath.Dir(layout.path))
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to open OCI layout parent", err)
+	}
+	defer func() { _ = root.Close() }()
+	name := filepath.Base(layout.path)
+	current, err := root.Lstat(name)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to inspect OCI layout", err)
+	}
+	if !os.SameFile(layout.info, current) {
+		return errors.New(errors.ErrCodeConflict,
+			"OCI layout "+layout.path+" was replaced after publication; leaving it in place")
+	}
+	if err = root.RemoveAll(name); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to remove OCI layout", err)
+	}
+	return nil
+}
+
 func pushOCIBundle(
 	ctx context.Context,
 	opts *bundleCmdOptions,
@@ -2138,8 +2169,10 @@ func pushOCIBundleWithDependencies(
 			InsecureTLS: opts.insecureTLS,
 		})
 	}
-	if opts.ociRef.IsLayout && publishErr == nil && pushResult != nil {
-		opts.publishedLayout = pushResult.StorePath
+	if opts.ociRef.IsLayout && publishErr == nil && pushResult != nil && pushResult.StorePath != "" {
+		if info, statErr := os.Lstat(pushResult.StorePath); statErr == nil {
+			opts.publishedLayout = &publishedOCILayout{path: pushResult.StorePath, info: info}
+		}
 	}
 	publishErr = authoritativeFilesystemContextError(publishCtx,
 		"OCI bundle publication canceled", publishErr)

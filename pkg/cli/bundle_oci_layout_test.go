@@ -341,8 +341,10 @@ func TestBundleCommandOCILayoutRemovedAfterLaterFailure(t *testing.T) {
 		name          string
 		inject        func(*bundlePublishDependencies, context.CancelFunc)
 		failAfterPush bool
+		replace       bool
 		removeErr     error
 		wantCode      errors.ErrorCode
+		wantKept      string
 	}{
 		{
 			name:     "image-refs write fails",
@@ -371,6 +373,15 @@ func TestBundleCommandOCILayoutRemovedAfterLaterFailure(t *testing.T) {
 			inject:    func(p *bundlePublishDependencies, _ context.CancelFunc) { p.writeImageRefs = failImageRefs },
 			removeErr: os.ErrPermission,
 			wantCode:  errors.ErrCodeInternal,
+			wantKept:  "failed to remove OCI layout",
+		},
+		{
+			name:          "a directory that replaced the layout is left alone",
+			inject:        func(*bundlePublishDependencies, context.CancelFunc) {},
+			failAfterPush: true,
+			replace:       true,
+			wantCode:      errors.ErrCodeInternal,
+			wantKept:      "was replaced after publication",
 		},
 	}
 	for _, tt := range tests {
@@ -393,22 +404,30 @@ func TestBundleCommandOCILayoutRemovedAfterLaterFailure(t *testing.T) {
 				publish := defaultBundlePublishDependencies()
 				tt.inject(&publish, cancel)
 				err := pushOCIBundleWithDependencies(ctx, opts, out, bundle, imageRefs, publish)
-				if err == nil && tt.failAfterPush {
-					return errors.New(errors.ErrCodeInternal, "injected failure after publication")
+				if err != nil || !tt.failAfterPush {
+					return err
 				}
-				return err
+				if tt.replace {
+					if err := os.Rename(layout, layout+".moved"); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Mkdir(layout, 0o755); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return errors.New(errors.ErrCodeInternal, "injected failure after publication")
 			}
 			if tt.removeErr != nil {
-				deps.removeLayout = func(string) error { return tt.removeErr }
+				deps.removeLayout = func(*publishedOCILayout) error { return tt.removeErr }
 			}
 
 			err := runBundleInWorkDir(t, realTempDir(t), deps, args...)
 			errorstest.WantReportedCode(t, err, tt.wantCode)
 			_, statErr := os.Lstat(layout)
-			if tt.removeErr != nil {
-				if !strings.Contains(err.Error(), "failed to remove OCI layout") || statErr != nil {
-					t.Fatalf("error = %v, layout stat = %v; want the removal failure reported and the layout kept",
-						err, statErr)
+			if tt.wantKept != "" {
+				if !strings.Contains(err.Error(), tt.wantKept) || statErr != nil {
+					t.Fatalf("error = %v, layout stat = %v; want %q reported and the path kept",
+						err, statErr, tt.wantKept)
 				}
 				return
 			}
