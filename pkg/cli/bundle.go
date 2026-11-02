@@ -1978,7 +1978,9 @@ func normalizeBundlePublishDependencies(deps bundlePublishDependencies) bundlePu
 
 // removePublishedLayout removes layout only while its path still names the
 // directory publication wrote; anything put there since is left in place.
-// The identity check and the removal are separate syscalls.
+// The contents are removed through a handle on that directory, and the
+// directory itself without recursion, so a replacement that appears after
+// the check survives unless it is empty.
 func removePublishedLayout(layout *publishedOCILayout) error {
 	root, err := os.OpenRoot(filepath.Dir(layout.path))
 	if err != nil {
@@ -1986,7 +1988,12 @@ func removePublishedLayout(layout *publishedOCILayout) error {
 	}
 	defer func() { _ = root.Close() }()
 	name := filepath.Base(layout.path)
-	current, err := root.Lstat(name)
+	layoutRoot, err := root.OpenRoot(name)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to open OCI layout", err)
+	}
+	defer func() { _ = layoutRoot.Close() }()
+	current, err := layoutRoot.Stat(".")
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to inspect OCI layout", err)
 	}
@@ -1994,7 +2001,21 @@ func removePublishedLayout(layout *publishedOCILayout) error {
 		return errors.New(errors.ErrCodeConflict,
 			"OCI layout "+layout.path+" was replaced after publication; leaving it in place")
 	}
-	if err = root.RemoveAll(name); err != nil {
+	dir, err := layoutRoot.Open(".")
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to open OCI layout contents", err)
+	}
+	entries, err := dir.Readdirnames(-1)
+	_ = dir.Close()
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to read OCI layout contents", err)
+	}
+	for _, entry := range entries {
+		if err = layoutRoot.RemoveAll(entry); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to remove OCI layout contents", err)
+		}
+	}
+	if err = root.Remove(name); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to remove OCI layout", err)
 	}
 	return nil
