@@ -218,6 +218,40 @@ are not promoted.
 
 ## How to Release
 
+### Release Checklist
+
+The release captain's path from `main` to GA. The subsections below explain
+each command. Post progress in a release thread as you go.
+
+1. **Check UAT on `main`** with the `aicr-uat-report` skill. Failures in
+   cluster bring-up or image builds are infra, not product signal; cover that
+   combination manually in step 3.
+2. **Cut an RC.** Confirm every check on `main`'s tip passed (page through all
+   of them with `gh api --paginate`), then `make bump-rc`.
+3. **Validate the RC.**
+   - UAT runs on the RC commit.
+   - Live clusters for what UAT misses (new services or accelerators, lanes
+     that are down): deploy the bundle, `aicr validate --phase all` per intent,
+     and compare performance with the previous release.
+   - `--no-cluster` CLI checks for new features and repros of issues filed
+     against the RC.
+4. **Iterate.** Fix blockers on `main`, cut the next RC, re-validate what
+   changed.
+5. **Draft the release notes** with the `aicr-release-notes` skill and review
+   them with another maintainer. Lead with new and updated recipes, keep
+   highlights in proportion, and call out first-time contributors.
+6. **Promote** after a maintainer's go-ahead: `make bump-promote`. First check
+   the stable tag the GA changelog will start from:
+   `git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' v1.3.0-rc2^`.
+7. **Publish the notes** above the generated changelog in the GitHub UI, or
+   with `gh release edit v1.3.0 --notes-file <file>`. That flag replaces the
+   whole body, so the file must include the existing changelog after the
+   summary.
+8. **Announce** with the link, three or four highlights, and contributor
+   thanks (GitHub handles in public channels).
+9. **Finish the post-release steps** in
+   [What Goes Into a Release](#what-goes-into-a-release).
+
 ### Standard Release
 
 ```bash
@@ -601,6 +635,8 @@ fi
 | Version alias conflict | Stop and verify the existing digest; the workflow intentionally refuses overwrite |
 | Draft identity or asset check fails | Inspect the exact-tag draft; correct the name/tag or remove only verified stale assets, then re-run failed jobs |
 | Need a full rebuild | Re-run all jobs only before public aliases move; this creates a new candidate tag |
+| `make bump-rc` skips or repeats an RC number | It counts from the latest tag of any kind in your local clone, so a tag deleted on the remote can still count locally. Delete the stale local tag (`git tag -d <tag>`) and re-run |
+| `Publish Operator Artifacts` fails with `403 Forbidden` while downloading Go modules | A transient Go module proxy error. Re-run the failed job (`gh run rerun <run-id> --failed`) |
 
 ## Prerequisites
 
