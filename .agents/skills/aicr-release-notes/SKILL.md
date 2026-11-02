@@ -126,8 +126,8 @@ order:
    if it does not, the deprecation is incomplete and the release is not ready.
 5. **Closing credits line** — `***Thanks to*** @user1, @user2, …, and
    @<author>.` Alphabetical (case-insensitive) by handle, with the
-   release-notes author moved to the final position preceded by `and `
-   when they are in the list (see Step 4).
+   release-notes author last when they are in the list. Step 4 has the
+   full rules.
 
 **Style rules** drawn from prior releases:
 
@@ -167,10 +167,14 @@ Then:
   `dependabot[bot]`, `github-actions[bot]`, `renovate[bot]`,
   `copy-pr-bot`, etc.).
 - Sort alphabetically (case-insensitive).
-- Move the release-notes author (Step 1) to the final slot preceded by
-  `and `, matching the handle case-insensitively. If the author is not
-  in the extracted list, do not add them; the last handle alphabetically
-  takes the `and ` slot, and the unresolved questions (Step 5) say so.
+- Move the release-notes author (Step 1) to the end of the list,
+  matching the handle case-insensitively. If the author is not in the
+  extracted list, do not add them; say so in the unresolved questions
+  (Step 5).
+- Join by count: one handle is `@a`, two are `@a and @b`, three or
+  more are `@a, @b, and @c`. If no handle remains, omit the thanks line
+  and say so in the unresolved questions; an empty list usually means
+  `tools/changelog` rendered no `by [@handle]` annotations.
 - Do NOT link the @-mentions in the output — GitHub auto-links them.
 
 ### Step 5 — Write the draft
@@ -189,8 +193,8 @@ the file, not in chat. Typical content:
 - Things to verify before publishing (issue references, feature
   completeness, prior-release framing)
 - Anything the skill chose to omit that the author may want back
-- The release-notes author missing from the contributor list, so they
-  are not credited last (Step 4)
+- Thanks-line gaps from Step 4: the release-notes author missing from
+  the contributor list, or no handles at all
 
 Format the section as:
 
