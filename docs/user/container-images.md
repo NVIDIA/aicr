@@ -19,8 +19,8 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **57**
-- Unique images: **151**
+- Components: **58**
+- Unique images: **161**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -78,6 +78,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
 | psmdb-operator | helm | psmdb-operator | 1.23.2 | 1 |
+| runai-cluster | helm | runai-cluster | 3.0.20 | 10 |
 | rdma-modules | manifest | — | — | 1 |
 | slinky-drainer | manifest | — | — | 1 |
 | slinky-drainer-crds | manifest | — | — | 0 |
@@ -387,6 +388,19 @@ _No images extracted._
 ### rdma-modules
 
 - `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1@sha256:5414b06e52c090d0842704f2580798064362d771f12421ccc8888186b5f5a3cf`
+
+### runai-cluster
+
+- `ghcr.io/dsx-ai-factory/workload-map/karta-operator:0.2.6`
+- `ghcr.io/kai-scheduler/gpu-fractioning/operator:v0.1.6`
+- `ghcr.io/kai-scheduler/kai-resource-management/helm-hooks:v0.18.3`
+- `ghcr.io/kai-scheduler/kai-resource-management/krm-operator:v0.18.3`
+- `ghcr.io/kai-scheduler/kai-scheduler/helm-hooks:v0.18.3`
+- `ghcr.io/kai-scheduler/kai-scheduler/operator:v0.18.3`
+- `nvcr.io/nvidia/runai-oss/go-operator:3.0.20`
+- `nvcr.io/nvidia/runai-oss/helm-hooks-handler:3.0.20`
+- `nvcr.io/nvidia/runai-oss/karta-migrate:3.0.20`
+- `nvcr.io/nvidia/runai-oss/runai-crd-upgrader:3.0.20`
 
 ### slinky-drainer
 

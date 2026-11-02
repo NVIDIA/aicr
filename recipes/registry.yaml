@@ -1499,6 +1499,38 @@ components:
           accelerator:
             - h100
 
+  - name: runai-cluster
+    displayName: Run:ai cluster
+    class: ops
+    valueOverrideKeys:
+      - runaicluster
+      - runai
+    # The chart's crds/ carry the run.ai CRDs (RunaiConfig, Cluster, ...) and
+    # its templates render a Cluster CR of a kind those CRDs define; the
+    # bundled kai-scheduler subchart does the same with its
+    # GpuFractioningConfig. helm-diff's render pass on a fresh cluster cannot
+    # resolve the kinds. disableValidation: true on this release tells
+    # helm-diff to skip the live-mapper check. See #914.
+    hasSelfRefCRDs: true
+    healthCheck:
+      assertFile: checks/runai-cluster/health-check.yaml
+    helm:
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia/runai-oss
+      defaultChart: runai-cluster
+      # renovate: datasource=helm depName=runai-cluster registryUrl=https://helm.ngc.nvidia.com/nvidia/runai-oss
+      defaultVersion: "3.0.20"
+      # The chart's templates name this namespace outright, so the release
+      # cannot live anywhere else. Its pre-install hook labels the namespace
+      # pod-security.kubernetes.io/enforce=privileged itself.
+      defaultNamespace: runai
+    # global.tolerations reaches every pod the chart renders, hook Jobs
+    # included. global.nodeSelector reaches only the KAI subcharts, so no
+    # nodeSelector path is mapped until the chart threads one through.
+    nodeScheduling:
+      system:
+        tolerationPaths:
+          - global.tolerations
+
   # NVIDIA Cluster Readiness Engine — GPU cluster burn-in certification
   # controller. Named `nvcre` after the chart nameOverride, install
   # namespace, and CRD group (nvcre.nvidia.com). Override keys include
