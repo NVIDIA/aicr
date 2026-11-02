@@ -163,8 +163,8 @@ deploying other content.
 
 The in-cluster registry runs in the operator namespace under the restricted
 Pod Security profile and serves plain HTTP inside the cluster. Only the
-operator, the AICR Job and validation namespaces and Argo CD's repo server
-reach it, where the CNI enforces NetworkPolicy; `kubectl port-forward`
+operator, its AICR Jobs in the Job and validation namespaces and Argo CD's
+repo server reach it, where the CNI enforces NetworkPolicy; `kubectl port-forward`
 bypasses the policy, so for anyone allowed to port-forward in the operator
 namespace the login is the only control. It keeps serving through uninstall,
 and it deletes nothing, so size the volume for every plan the cluster will

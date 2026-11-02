@@ -160,11 +160,13 @@ func reproduce(ctx context.Context, c client.Reader, namespace, ref, dir string,
 with the login the chart generated (this needs get on Secret %s and
 create on pods/portforward in %s), and compare:
 
-  kubectl -n %s port-forward service/%s %s &
+  kubectl -n %s port-forward service/%s %s >/dev/null & pf=$!
+  curl -so /dev/null --retry 10 --retry-connrefused --retry-delay 1 %s
   %s'{.data.password}' | base64 -d |
     oras pull --plain-http -u "$(%s'{.data.username}' | base64 -d)" --password-stdin %s -o %s
-  kill %%1
-`, inClusterLogin, namespace, ns, inClusterService, shellQuote(forwardPort+":"+port), secret, secret,
+  kill "$pf"
+`, inClusterLogin, namespace, ns, inClusterService, shellQuote(forwardPort+":"+port),
+			shellQuote("http://localhost:"+forwardPort+"/v2/"), secret, secret,
 			shellQuote("localhost:"+forwardPort+"/"+path), operatorBundle)
 	}
 	_, err = fmt.Fprintf(out, `Plan %s (%s)

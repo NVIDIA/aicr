@@ -214,8 +214,9 @@ Two namespaces are documented exceptions:
 | Validation Jobs | Kubernetes API; runtime registry for evidence |
 
 The operator makes no Sigstore or TUF calls. The in-cluster registry makes no
-outbound calls; its NetworkPolicy admits only the operator, the Job and
-validation namespaces and Argo CD's repo server, where the CNI enforces
+outbound calls; its NetworkPolicy admits only the operator, the operator's
+Jobs in the Job and validation namespaces and Argo CD's repo server, where
+the CNI enforces
 NetworkPolicy. `kubectl port-forward` bypasses that policy, so for anyone
 allowed `pods/portforward` in the operator namespace the login is the only
 control.

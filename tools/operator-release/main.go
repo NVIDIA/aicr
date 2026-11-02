@@ -90,11 +90,11 @@ func build(args []string, out io.Writer) error {
 	}
 	image, err := readImage(filepath.Join(*dir, "image"), *repository)
 	if err != nil {
-		return err
+		return fmt.Errorf("read the operator image: %w", err)
 	}
 	registry, err := readImage(filepath.Join(*dir, "registry-image"), *registryRepository)
 	if err != nil {
-		return err
+		return fmt.Errorf("read the registry image: %w", err)
 	}
 	aicr := AICR{Version: s.Operator.AICRVersion, Image: s.Operator.AICRImage, ValidatorImages: s.validators()}
 	name, archive, err := packageChart(os.DirFS(*chartDir), *ver, aicr, image.Ref(), registry.Ref())

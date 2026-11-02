@@ -123,8 +123,9 @@ image it was rendered with, the operator's bundle reference, and three
 commands to run yourself: a `docker run` of that AICR image rendering the
 recipe with the plan's flags, an `oras pull` of the operator's bundle, and a
 `diff -r` of the two. When the bundle is in the chart's in-cluster registry,
-the pull runs through a `kubectl port-forward` with the login the chart
-generated, passed to `oras` on standard input so nothing stores it. Zero diff means the operator deployed exactly what the
+the pull runs through a `kubectl port-forward`, which `curl` waits for and
+`kill` stops afterwards, with the login the chart generated, passed to `oras`
+on standard input so nothing stores it. Zero diff means the operator deployed exactly what the
 AICR CLI renders ([verify the bundle yourself](index.md#verify-the-bundle-yourself)).
 
 It changes nothing in the cluster. It refuses a plan rebuilt from Applications

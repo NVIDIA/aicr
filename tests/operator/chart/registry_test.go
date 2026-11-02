@@ -29,9 +29,11 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
 	opregistry "github.com/NVIDIA/aicr/pkg/operator/registry"
 )
 
@@ -169,6 +171,7 @@ func TestInClusterRegistryRender(t *testing.T) {
 	if !slices.Equal(namespaces, []string{jobsNS, validationNS}) {
 		t.Errorf("the registry admits the namespaces %v, want the pushing Jobs'", namespaces)
 	}
+	checkJobPeer(t, from[1].PodSelector)
 	if from[2].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != engineNS ||
 		from[2].PodSelector.MatchLabels["app.kubernetes.io/name"] != "argocd-repo-server" {
 
@@ -223,6 +226,40 @@ func TestInClusterRegistryRender(t *testing.T) {
 	}
 }
 
+// checkJobPeer requires the Job namespaces' peer to admit the pods of every
+// Job the operator builds for a pushing stage, and no unlabelled pod.
+func checkJobPeer(t *testing.T, peer *metav1.LabelSelector) {
+	t.Helper()
+	if peer == nil {
+		t.Error("the registry admits every pod in the Job namespaces")
+		return
+	}
+	selector, err := metav1.LabelSelectorAsSelector(peer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selector.Matches(labels.Set{}) {
+		t.Errorf("the registry admits unlabelled pods in the Job namespaces: %s", selector)
+	}
+	namespaces := aicrjob.Namespaces{Jobs: jobsNS, Discovery: discoveryNS, Validation: validationNS}
+	for _, stage := range []aicrjob.Stage{aicrjob.StageBaseRender, aicrjob.StageRender, aicrjob.StageValidation} {
+		if !stage.Pushes() {
+			t.Fatalf("stage %s does not push", stage)
+		}
+		job, err := aicrjob.Build(&aicrjob.Request{
+			Stage: stage, RunID: "0123456789ab", RuntimeName: "cluster", RuntimeUID: "u",
+			Image: "ghcr.io/nvidia/aicr@sha256:" + strings.Repeat("a", 64), Namespaces: namespaces,
+			ServiceAccount: "aicr-jobs", CredentialSecret: "creds", Input: "0123456789abcdef",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !selector.Matches(labels.Set(job.Spec.Template.Labels)) {
+			t.Errorf("the registry refuses the %s Job's pod %v", stage, job.Spec.Template.Labels)
+		}
+	}
+}
+
 func must(b []byte, err error) []byte {
 	if err != nil {
 		panic(err)
@@ -262,6 +299,19 @@ func TestInClusterRegistryInstall(t *testing.T) {
 	ensureNamespace(ctx, t, operatorNS, map[string]string{"pod-security.kubernetes.io/enforce": "restricted"})
 	ensureNamespace(ctx, t, engineNS, nil)
 	files := []string{"-f", valuesFile, "-f", inClusterValuesFile}
+	project := &unstructured.Unstructured{}
+	project.SetGroupVersionKind(schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "AppProject"})
+	project.SetNamespace(engineNS)
+	project.SetName("aicr")
+	// Uninstall keeps the project, which names this test's registry; a later
+	// installation would refuse to switch from it.
+	t.Cleanup(func() {
+		cleanupCtx := context.WithoutCancel(ctx)
+		_, _ = helm(cleanupCtx, "uninstall", release, "--namespace", operatorNS, "--ignore-not-found")
+		if err := admin.Delete(cleanupCtx, project); err != nil && !apierrors.IsNotFound(err) {
+			t.Errorf("delete the kept AppProject: %v", err)
+		}
+	})
 	// An installation on an external registry refuses an upgrade that would
 	// switch it, whatever the values say.
 	if out, err := helm(ctx, "upgrade", "--install", release, chartDir, "--namespace", operatorNS, "-f", valuesFile); err != nil {
@@ -277,19 +327,12 @@ func TestInClusterRegistryInstall(t *testing.T) {
 	if out, err := helm(ctx, "uninstall", release, "--namespace", operatorNS); err != nil {
 		t.Fatalf("helm uninstall: %v\n%s", err, out)
 	}
-	project := &unstructured.Unstructured{}
-	project.SetGroupVersionKind(schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "AppProject"})
-	project.SetNamespace(engineNS)
-	project.SetName("aicr")
 	if err := admin.Delete(ctx, project); err != nil {
 		t.Fatal(err)
 	}
 	if out, err := helm(ctx, append([]string{"install", release, chartDir, "--namespace", operatorNS}, files...)...); err != nil {
 		t.Fatalf("helm install: %v\n%s", err, out)
 	}
-	t.Cleanup(func() {
-		_, _ = helm(context.WithoutCancel(ctx), "uninstall", release, "--namespace", operatorNS, "--ignore-not-found")
-	})
 	installed, configs, repoCreds := installedLogin(ctx, t)
 	checkCredentials(t, installed, configs, repoCreds)
 

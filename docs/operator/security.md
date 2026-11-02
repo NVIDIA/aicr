@@ -79,8 +79,9 @@ The default in-cluster registry (`registry.mode: inCluster`):
   install, keeps it across upgrades and reinstalls, and places it only where it
   is used: the operator, Job and validation namespaces and Argo CD's
   `repo-creds`;
-- admits connections only from the operator, the Job and validation
-  namespaces and Argo CD's repo server, where the CNI enforces NetworkPolicy.
+- admits connections only from the operator, the operator's Jobs in the Job
+  and validation namespaces (pods carrying the labels the operator puts on
+  its Jobs) and Argo CD's repo server, where the CNI enforces NetworkPolicy.
   Where it does not, and for anyone allowed `pods/portforward` in the operator
   namespace (`kubectl port-forward` bypasses the policy), the login is the
   only control;

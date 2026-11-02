@@ -263,9 +263,11 @@ spec:
       port: 5000
       targetPort: registry
 ---
-# Only the operator, the pushing Jobs and Argo CD's repo server reach the
-# registry, where the CNI enforces NetworkPolicy. kubectl port-forward
-# bypasses it, so there the login is the only control.
+# Only the operator, its pushing Jobs and Argo CD's repo server reach the
+# registry, where the CNI enforces NetworkPolicy. In the Job namespaces only
+# pods with the labels the operator puts on its Jobs are admitted.
+# kubectl port-forward bypasses the policy, so there the login is the only
+# control.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -297,6 +299,12 @@ spec:
                   {{- range (without $pushers .Release.Namespace) }}
                   - {{ . }}
                   {{- end }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/managed-by: aicr-operator
+            matchExpressions:
+              - key: operator.aicr.run/run-id
+                operator: Exists
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Values.engine.namespace }}
