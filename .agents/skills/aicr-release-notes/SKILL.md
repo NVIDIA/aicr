@@ -189,6 +189,8 @@ the file, not in chat. Typical content:
 - Things to verify before publishing (issue references, feature
   completeness, prior-release framing)
 - Anything the skill chose to omit that the author may want back
+- The release-notes author missing from the contributor list, so they
+  are not credited last (Step 4)
 
 Format the section as:
 
