@@ -106,16 +106,31 @@ func resolveArgoCDSettings(
 
 // boolFlagOrConfig returns the CLI flag value when explicitly set on the
 // command (or via env-var Source binding), otherwise the fallback. Logs an
-// INFO line when the CLI value differs from a non-default fallback.
+// INFO line when the CLI value differs from a fallback that is not the flag's
+// declared default. A plain bool cannot tell an absent config field from one
+// set to the default, so only a non-default fallback proves --config set it.
 func boolFlagOrConfig(cmd *cli.Command, flagName string, fallback bool) bool {
 	if cmd.IsSet(flagName) {
 		v := cmd.Bool(flagName)
-		if v != fallback {
+		if v != fallback && fallback != boolFlagDefault(cmd, flagName) {
 			slog.Info("CLI flag overriding config value", "flag", flagName, "config", fallback, "override", v)
 		}
 		return v
 	}
 	return fallback
+}
+
+// boolFlagDefault returns the declared Value of the bool flag flagName on cmd
+// or an ancestor, and false when there is none.
+func boolFlagDefault(cmd *cli.Command, flagName string) bool {
+	for _, c := range cmd.Lineage() {
+		for _, f := range c.Flags {
+			if bf, ok := f.(*cli.BoolFlag); ok && slices.Contains(bf.Names(), flagName) {
+				return bf.Value
+			}
+		}
+	}
+	return false
 }
 
 // stringSliceFlagOrConfig returns the CLI slice value when explicitly set,

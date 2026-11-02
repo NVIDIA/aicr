@@ -175,7 +175,7 @@ spec:
       #     backoff:                 # omitted fields keep Argo CD's defaults
       #       duration: 30s
       #       factor: 2
-      #       maxDuration: 5m
+      #       maxDuration: 5m       # must not be less than duration
     scheduling:
       systemNodeSelector: {}
       systemNodeTolerations: []

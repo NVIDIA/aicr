@@ -5859,6 +5859,20 @@ func TestCreateDeployer_ArgoCDSettings(t *testing.T) {
 		}
 	})
 
+	inverted := settings.Clone()
+	inverted.SyncRetryBackoffDuration = &[]string{"10m"}[0]
+	inverted.SyncRetryBackoffMaxDuration = &[]string{"1m"}[0]
+	for _, dep := range []config.DeployerType{config.DeployerArgoCD, config.DeployerArgoCDHelm} {
+		t.Run("max duration below duration rejected for "+string(dep), func(t *testing.T) {
+			_, err := mk(t, dep, nil, inverted).
+				buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			if !strings.Contains(err.Error(), "must not be less than the backoff duration") {
+				t.Errorf("error = %v, want the duration ordering rejection", err)
+			}
+		})
+	}
+
 	t.Run("rejected for helm deployer", func(t *testing.T) {
 		_, err := mk(t, config.DeployerHelm, nil, settings).
 			buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil, "")

@@ -648,6 +648,20 @@ func TestBundleResolve_InvalidValues(t *testing.T) {
 			wantSub: "spec.bundle.output.target",
 		},
 		{
+			name: "invalid oci-layout tag",
+			spec: &config.BundleSpec{
+				Output: &config.BundleOutputSpec{Target: "oci-layout:./out:bad tag!"},
+			},
+			wantSub: "spec.bundle.output.target",
+		},
+		{
+			name: "oci-layout digest",
+			spec: &config.BundleSpec{
+				Output: &config.BundleOutputSpec{Target: "oci-layout:./out@sha256:abc"},
+			},
+			wantSub: "digest (@sha256:...) is not accepted",
+		},
+		{
 			name: "negative nodes",
 			spec: &config.BundleSpec{
 				Scheduling: &config.SchedulingSpec{Nodes: -3},

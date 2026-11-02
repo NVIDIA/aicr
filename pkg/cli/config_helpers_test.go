@@ -139,23 +139,36 @@ func TestIntFlagOrConfig(t *testing.T) {
 
 func TestBoolFlagOrConfig(t *testing.T) {
 	tests := []struct {
-		name     string
-		args     []string
-		fallback bool
-		want     bool
+		name        string
+		args        []string
+		flagDefault bool
+		fallback    bool
+		want        bool
+		wantLog     bool
 	}{
-		{"unset returns false fallback", []string{}, false, false},
-		{"unset returns true fallback", []string{}, true, true},
-		{"explicit true overrides false fallback", []string{"--b"}, false, true},
-		{"explicit true matches true fallback", []string{"--b"}, true, true},
+		{name: "unset returns false fallback", fallback: false, want: false},
+		{name: "unset returns true fallback", fallback: true, want: true},
+		// A default fallback is what an absent --config yields, so it is not
+		// reported as a config value being overridden.
+		{name: "explicit true over default fallback", args: []string{"--b"}, fallback: false, want: true},
+		{name: "explicit true matches true fallback", args: []string{"--b"}, fallback: true, want: true},
+		{name: "explicit false over config true", args: []string{"--b=false"}, fallback: true, want: false, wantLog: true},
+		{name: "explicit false over default-true fallback", args: []string{"--b=false"},
+			flagDefault: true, fallback: true, want: false},
+		{name: "explicit true over config false on default-true flag", args: []string{"--b"},
+			flagDefault: true, fallback: false, want: true, wantLog: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runWith(t, []cli.Flag{&cli.BoolFlag{Name: "b"}}, tt.args, func(c *cli.Command) {
+			logs := captureJSONLogs(t)
+			runWith(t, []cli.Flag{&cli.BoolFlag{Name: "b", Value: tt.flagDefault}}, tt.args, func(c *cli.Command) {
 				if got := boolFlagOrConfig(c, "b", tt.fallback); got != tt.want {
 					t.Errorf("got %v, want %v", got, tt.want)
 				}
 			})
+			if gotLog := strings.Contains(logs.String(), "CLI flag overriding config value"); gotLog != tt.wantLog {
+				t.Errorf("override logged = %v, want %v; logs: %s", gotLog, tt.wantLog, logs)
+			}
 		})
 	}
 }

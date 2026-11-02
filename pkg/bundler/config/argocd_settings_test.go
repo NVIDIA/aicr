@@ -123,6 +123,20 @@ func TestResolveArgoDeployerOptions(t *testing.T) {
 			errSubstr: "must be positive",
 		},
 		{
+			name: "max duration below duration",
+			settings: ArgoCDSettings{SyncRetryLimit: ptr(int64(3)),
+				SyncRetryBackoffDuration: ptr("10m"), SyncRetryBackoffMaxDuration: ptr("1m")},
+			errSubstr: `backoff max duration "1m": must not be less than the backoff duration "10m"`,
+		},
+		{
+			name: "max duration equal to duration",
+			settings: ArgoCDSettings{SyncRetryLimit: ptr(int64(3)),
+				SyncRetryBackoffDuration: ptr("60s"), SyncRetryBackoffMaxDuration: ptr("1m")},
+			want: &ArgoDeployerOptions{SyncRetry: &SyncRetry{
+				Limit: 3, BackoffDuration: "60s", BackoffMaxDuration: "1m",
+			}},
+		},
+		{
 			name:      "explicit empty duration",
 			settings:  ArgoCDSettings{SyncRetryLimit: ptr(int64(3)), SyncRetryBackoffDuration: ptr("")},
 			errSubstr: "must not be empty",
@@ -171,8 +185,8 @@ func TestResolveArgoDeployerOptions(t *testing.T) {
 }
 
 // TestValidateArgoCDSource pins what one source is held to before layering:
-// field values and duplicate spellings, but not backoff needing a limit,
-// which a higher-precedence source may supply.
+// field values and duplicate spellings, but not backoff needing a limit or
+// the duration ordering, which a higher-precedence source may satisfy.
 func TestValidateArgoCDSource(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -181,6 +195,8 @@ func TestValidateArgoCDSource(t *testing.T) {
 		errSubstr string
 	}{
 		{name: "backoff without limit passes", settings: ArgoCDSettings{SyncRetryBackoffFactor: ptr(int64(2))}},
+		{name: "max duration below duration passes", settings: ArgoCDSettings{
+			SyncRetryBackoffDuration: ptr("10m"), SyncRetryBackoffMaxDuration: ptr("1m")}},
 		{name: "zero factor fails", settings: ArgoCDSettings{SyncRetryBackoffFactor: ptr(int64(0))}, errSubstr: "backoff factor 0"},
 		{name: "duplicate spelling fails", legacy: map[string]string{"project": "a"},
 			settings: ArgoCDSettings{Project: ptr("b")}, errSubstr: "set twice"},
