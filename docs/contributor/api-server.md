@@ -140,7 +140,7 @@ underlying violation is the
 (`aicr.ParseAllowListsFromEnv`) and passed to both:
 
 - The `aicr.Client` via `aicr.WithAllowLists(...)`. The facade enforces on `ResolveRecipeFromCriteria` and `MakeBundle`. This is the **backstop**.
-- Each handler via `newRecipeHandler(client, allowLists)` / `newBundleHandler(client, allowLists)`. The handler runs an explicit pre-check (`validateAgainstAllowLists`) so the user-facing rejection message stays exact.
+- Each handler via `newRecipeHandler(client, allowLists)` / `newBundleHandler(client, allowLists, signing, allowVendorCharts)`. The handler runs an explicit pre-check (`validateAgainstAllowLists`) so the user-facing rejection message stays exact.
 
 Both call sites go through `aicr.ToInternalAllowLists` so a new
 field is wired in one place.

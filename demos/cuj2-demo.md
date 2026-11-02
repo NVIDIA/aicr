@@ -42,19 +42,19 @@
   │    ├── recipe.yaml      (resolved recipe; covered by checksums)        │
   │    ├── 001-agentgateway-crds/              (agentgateway.dev CRDs)     │
   │    ├── 002-agentgateway-crds-post/         (Gateway API + Inf-Ext CRDs)│
-  │    ├── 003-aws-ebs-csi-driver/             (EBS storage)               │
-  │    ├── 004-aws-efa/                        (Elastic Fabric Adapter)    │
-  │    ├── 005-cert-manager/                   (TLS certificates)          │
-  │    ├── 006-agentgateway/                   (inference gateway)         │
-  │    ├── 007-agentgateway-post/              (post-chart manifests)      │
-  │    ├── 008-grove/                          (multinode inference)       │
-  │    ├── 009-nfd/                            (node feature discovery)    │
-  │    ├── 010-nodewright-operator/            (node configuration)        │
-  │    ├── 011-nodewright-customizations/      (H100 tuning)               │
-  │    ├── 012-prometheus-operator-crds/       (monitoring CRDs)           │
-  │    ├── 013-kube-prometheus-stack/          (Prometheus, Grafana)       │
-  │    ├── 014-gpu-operator/                   (driver, plugin, DCGM)      │
-  │    ├── 015-k8s-ephemeral-storage-metrics/  (storage metrics)           │
+  │    ├── 003-aws-efa/                        (Elastic Fabric Adapter)    │
+  │    ├── 004-nodewright-operator/            (node configuration)        │
+  │    ├── 005-nodewright-customizations/      (H100 tuning)               │
+  │    ├── 006-prometheus-operator-crds/       (monitoring CRDs)           │
+  │    ├── 007-aws-ebs-csi-driver/             (EBS storage)               │
+  │    ├── 008-cert-manager/                   (TLS certificates)          │
+  │    ├── 009-agentgateway/                   (inference gateway)         │
+  │    ├── 010-agentgateway-post/              (post-chart manifests)      │
+  │    ├── 011-grove/                          (multinode inference)       │
+  │    ├── 012-kube-prometheus-stack/          (Prometheus, Grafana)       │
+  │    ├── 013-k8s-ephemeral-storage-metrics/  (storage metrics)           │
+  │    ├── 014-nfd/                            (node feature discovery)    │
+  │    ├── 015-gpu-operator/                   (driver, plugin, DCGM)      │
   │    ├── 016-kai-scheduler/                  (gang scheduling)           │
   │    ├── 017-dynamo-platform/                (inference serving)         │
   │    ├── 018-nvidia-dra-driver-gpu/          (DRA driver)                │

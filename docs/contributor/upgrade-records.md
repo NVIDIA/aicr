@@ -266,7 +266,7 @@ prerelease instead.
 
 **Deployer groups must partition.** No two explicit groups may claim the same
 deployer, at most one group may omit `deployers` (that one is *the* remainder),
-and a `manual` or `blocked` verdict must cover all six of `argocd`,
+and a `manual` or `blocked` verdict must cover all seven of `argocd`,
 `argocd-helm`, `fleet`, `flux`, `helm`, `helmfile`, `terraform`. Otherwise an Argo CD operator gets a
 verdict promising steps with none for them.
 
