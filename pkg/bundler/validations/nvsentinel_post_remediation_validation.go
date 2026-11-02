@@ -298,7 +298,7 @@ func postRemediationTaintViolations(ctx context.Context, values map[string]any, 
 		}
 		entry, _ := item.(map[string]any)
 		key, _ := entry["key"].(string)
-		value, _ := entry["value"].(string)
+		value := postRemediationQuoted(entry["value"])
 		effect, _ := entry["effect"].(string)
 		if !postRemediationUnquotedString(value) {
 			fail("%s[%d].value is %q, which lifecycle-manager's Job template writes unquoted into every test Job's "+

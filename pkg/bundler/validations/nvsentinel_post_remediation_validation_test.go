@@ -269,6 +269,15 @@ func TestCheckNVSentinelPostRemediationValidationCoherent(t *testing.T) {
 			sentinel: remediation(releases(postRemediationRelease(postRemediationTaint{"a", "yes", "NoSchedule"}, true),
 				postRemediationRelease(postRemediationTaint{"b", "1", "NoSchedule"}, true))),
 			wantErrs: []string{wantBadValue(0, "yes"), wantBadValue(1, "1")}},
+		{name: "a release entry with a typed bool or number value breaks every test Job",
+			sentinel: remediation(releases(
+				map[string]any{"key": "a", "value": true, "effect": "NoSchedule", "remove": true},
+				map[string]any{"key": "b", "value": 1, "effect": "NoSchedule", "remove": true})),
+			wantErrs: []string{wantBadValue(0, "true"), wantBadValue(1, "1")}},
+		{name: "a release entry with a typed bool value by --set-json breaks every test Job", sentinel: remediation(),
+			cfg: setJSON(`nv-sentinel:` + postRemediationReleaseTaintsPath +
+				`=[{"key":"a","value":true,"effect":"NoSchedule","remove":true}]`),
+			wantErrs: []string{wantBadValue(0, "true")}},
 		{name: "a release entry with no value is fine",
 			sentinel: remediation(releases(postRemediationRelease(postRemediationTaint{"a", "", "NoSchedule"}, true)))},
 		{name: "a custom rule set's NoExecute taint released",
