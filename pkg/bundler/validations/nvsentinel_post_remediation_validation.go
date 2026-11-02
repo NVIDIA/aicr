@@ -40,9 +40,26 @@ const (
 	postRemediationLMLabelPrefixPath = "lifecycle-manager.config.schedulingGate.cordon.labelPrefix"
 	postRemediationCordonRemovePath  = "lifecycle-manager.config.schedulingGate.cordon.remove"
 	postRemediationReadinessPath     = "lifecycle-manager.config.readinessCriteria"
+	postRemediationQuarantineRules   = "fault-quarantine.ruleSets"
+	postRemediationReleaseTaintsPath = "lifecycle-manager.config.schedulingGate.taints"
 	postRemediationChartLabelPrefix  = "k8saas.nvidia.com/"
 	postRemediationRuleKind          = "HealthEvent"
+	postRemediationNVCRETaintValue   = "true"
 )
+
+// postRemediationChartQuarantineTaints are the taints the chart's own
+// fault-quarantine rule sets apply (NVSentinel v1.28.0: the NVCRE
+// certification rule set's), used when AICR's values leave ruleSets unset.
+// TestNVSentinelPostRemediationValidationChartRender pins them to the chart.
+var postRemediationChartQuarantineTaints = []postRemediationTaint{
+	{key: "nvsentinel.dgxc.nvidia.com/nvcre-cert-failed", value: postRemediationNVCRETaintValue, effect: "NoSchedule"},
+}
+
+// postRemediationTaint is a taint as fault-quarantine applies it and
+// lifecycle-manager matches it: on key, value and effect together.
+type postRemediationTaint struct{ key, value, effect string }
+
+func (t postRemediationTaint) String() string { return t.key + "=" + t.value + ":" + t.effect }
 
 // CheckNVSentinelPostRemediationValidationCoherent blocks a bundle in which
 // post-remediation validation (fault-quarantine.validation) would hold a
@@ -78,12 +95,18 @@ const (
 //   - either cordon label prefix is set to anything but a non-empty string,
 //     or fault-quarantine and lifecycle-manager write their cordon labels
 //     under different prefixes, so lifecycle-manager's release leaves
-//     fault-quarantine's labels on the node.
+//     fault-quarantine's labels on the node;
+//   - an enabled fault-quarantine rule set, the chart's own when ruleSets is
+//     unset, applies a NoSchedule or NoExecute taint that
+//     lifecycle-manager.config.schedulingGate.taints does not list with
+//     remove: true: fault-quarantine keeps its taints on the hand-over and
+//     lifecycle-manager lifts only the listed ones, so a node that passes is
+//     uncordoned but stays closed to work.
 //
 // It rejects --dynamic on fault-quarantine.validation.enabled, on
-// fault-quarantine.validation and fault-quarantine.labelPrefix while
-// validation is on, and on the GPU Operator's enabled and dcgm.enabled while
-// the DCGM rule applies.
+// fault-quarantine.validation, fault-quarantine.labelPrefix and
+// fault-quarantine.ruleSets while validation is on, and on the GPU Operator's
+// enabled and dcgm.enabled while the DCGM rule applies.
 func CheckNVSentinelPostRemediationValidationCoherent(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
 	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
 		return nil, nil
@@ -125,7 +148,8 @@ func CheckNVSentinelPostRemediationValidationCoherent(ctx context.Context, compo
 	}
 	guarded := []string{postRemediationValidationEnabled}
 	if enabled {
-		guarded = append(guarded, postRemediationValidationPath, postRemediationFQLabelPrefixPath)
+		guarded = append(guarded, postRemediationValidationPath, postRemediationFQLabelPrefixPath,
+			postRemediationQuarantineRules)
 	}
 	if msgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys, guarded,
 		"decides whether a repaired node is validated before it returns to work"); len(msgs) > 0 {
@@ -153,6 +177,9 @@ func CheckNVSentinelPostRemediationValidationCoherent(ctx context.Context, compo
 		return nil, append(errs, err)
 	}
 	postRemediationLabelPrefixViolations(values, fail)
+	if err = postRemediationTaintViolations(ctx, values, fail); err != nil {
+		return nil, append(errs, err)
+	}
 
 	defined, testsWellFormed, err := nodeValidationDefinedTests(ctx, values, func(string, ...any) {})
 	if err != nil {
@@ -246,6 +273,74 @@ func postRemediationReadinessViolations(ctx context.Context, values map[string]a
 	return nil
 }
 
+// postRemediationTaintViolations fails on each NoSchedule or NoExecute taint
+// an enabled fault-quarantine rule set applies that
+// lifecycle-manager.config.schedulingGate.taints does not list with remove:
+// true. fault-quarantine keeps its taints when it hands a node to validation,
+// and lifecycle-manager lifts only the listed ones, so the node would pass,
+// be uncordoned and stay closed to work.
+func postRemediationTaintViolations(ctx context.Context, values map[string]any, fail func(string, ...any)) error {
+	type applied struct {
+		source string
+		taint  postRemediationTaint
+	}
+	var required []applied
+	raw, present := component.GetValueByPath(values, postRemediationQuarantineRules)
+	if !present {
+		for _, taint := range postRemediationChartQuarantineTaints {
+			required = append(required, applied{"the chart's default " + postRemediationQuarantineRules, taint})
+		}
+	}
+	ruleSets, _ := raw.([]any)
+	for i, item := range ruleSets {
+		if err := ctx.Err(); err != nil {
+			return aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "checking "+postRemediationQuarantineRules)
+		}
+		ruleSet, _ := item.(map[string]any)
+		taint, isMap := ruleSet["taint"].(map[string]any)
+		if !isMap || ruleSet["enabled"] == false {
+			continue
+		}
+		t := postRemediationTaint{
+			key:    postRemediationQuoted(taint["key"]),
+			value:  postRemediationQuoted(taint["value"]),
+			effect: postRemediationQuoted(taint["effect"]),
+		}
+		if t.effect == "NoSchedule" || t.effect == "NoExecute" {
+			required = append(required, applied{fmt.Sprintf("%s[%d]", postRemediationQuarantineRules, i), t})
+		}
+	}
+	if len(required) == 0 {
+		return nil
+	}
+
+	releases, _ := component.GetValueByPath(values, postRemediationReleaseTaintsPath)
+	entries, _ := releases.([]any)
+	for _, req := range required {
+		released := false
+		for _, item := range entries {
+			if err := ctx.Err(); err != nil {
+				return aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "checking "+postRemediationReleaseTaintsPath)
+			}
+			entry, _ := item.(map[string]any)
+			key, _ := entry["key"].(string)
+			value, _ := entry["value"].(string)
+			effect, _ := entry["effect"].(string)
+			if entry["remove"] == true && (postRemediationTaint{key, value, effect}) == req.taint {
+				released = true
+				break
+			}
+		}
+		if !released {
+			fail("%s applies the taint %s, which fault-quarantine keeps when it hands a node to validation, but %s "+
+				"does not list it with remove: true, so lifecycle-manager uncordons a node that passes and leaves it "+
+				"tainted, closed to work -- add {key: %q, value: %q, effect: %q, remove: true}", req.source, req.taint,
+				postRemediationReleaseTaintsPath, req.taint.key, req.taint.value, req.taint.effect)
+		}
+	}
+	return nil
+}
+
 // postRemediationRuleSetTests returns the tests post-remediation validation
 // can request: the chart's reboot rule set's dcgm-diag-test when ruleSets is
 // absent. It fails on a rule set list that requests none.
@@ -275,7 +370,7 @@ func postRemediationRuleSetTests(ctx context.Context, values map[string]any, fai
 			fail("%s is %#v, not a rule set", path, item)
 			continue
 		}
-		name := postRemediationRuleSetName(ruleSet["name"])
+		name := postRemediationQuoted(ruleSet["name"])
 		if first, dup := names[name]; dup {
 			fail("%s has the name %q, as %s[%d] does: fault-quarantine looks a matched rule set's tests up by name, "+
 				"disabled rule sets included, so the later one's tests replace the earlier one's -- give each rule "+
@@ -325,10 +420,10 @@ func postRemediationRuleSetTests(ctx context.Context, values map[string]any, fai
 	return tests, nil
 }
 
-// postRemediationRuleSetName returns the name fault-quarantine reads for a
-// rule set: the chart quotes the value into its config, so an absent or null
-// name is the empty string and any other value its printed form.
-func postRemediationRuleSetName(raw any) string {
+// postRemediationQuoted returns what fault-quarantine reads for a value the
+// chart quotes into its config, such as a rule set's name or taint: an absent
+// or null value is the empty string, and any other value its printed form.
+func postRemediationQuoted(raw any) string {
 	if raw == nil {
 		return ""
 	}

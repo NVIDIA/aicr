@@ -335,6 +335,15 @@ test_gate() {
       "enabled $(yq '.["fault-quarantine"].validation.enabled' "${values}"), ruleSets ${bundled}"
   fi
 
+  if yq -o=json '.["lifecycle-manager"].config.schedulingGate.taints' "${values}" | jq -e 'any(.[]?;
+      .key == "nvsentinel.dgxc.nvidia.com/nvcre-cert-failed" and .value == "true" and
+      .effect == "NoSchedule" and .remove == true)' >/dev/null; then
+    pass "#1 the bundle releases the chart's NVCRE quarantine taint once a node passes"
+  else
+    fail "#1 the bundle releases the chart's quarantine taint" \
+      "schedulingGate.taints is $(yq -o=json -I=0 '.["lifecycle-manager"].config.schedulingGate.taints' "${values}")"
+  fi
+
   # Fail here, not later as "nothing happened": a composition or test-only
   # setting that did not reach the values would otherwise read as a
   # controller that never acted.
@@ -541,10 +550,13 @@ node_annotated() { node_has --arg k "$1" '.metadata.annotations | has($k)'; }
 node_annotation_absent() { node_has --arg k "$1" '(.metadata.annotations // {}) | has($k) | not'; }
 node_condition_absent() { node_has --arg t "$1" 'all((.status.conditions // [])[]; .type != $t)'; }
 
-# node_quarantine_cleared succeeds when fault-quarantine has removed every
-# quarantine annotation from the node.
+# node_quarantine_cleared succeeds when the node carries none of
+# fault-quarantine's active quarantine annotations (quarantineHealthEvent*,
+# quarantineValidationHealthEvent). The quarantinedNode*Manually annotations
+# a manual uncordon leaves are history, not an active quarantine.
 node_quarantine_cleared() {
-  node_has '(.metadata.annotations // {}) | keys | all(.[]; startswith("quarantine") | not)'
+  node_has --arg v "${VALIDATION_ANNOTATION}" '(.metadata.annotations // {}) | keys |
+    all(.[]; (startswith("quarantineHealthEvent") or . == $v) | not)'
 }
 
 # node_quarantine_cancelled succeeds once a manual uncordon has cancelled the

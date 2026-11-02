@@ -63,7 +63,7 @@ func TestMixinNVSentinelNodeValidation_Composes(t *testing.T) {
 			if section, _ := global["lifecycleManager"].(map[string]any); len(section) != 1 || section["enabled"] != true {
 				t.Errorf("global.lifecycleManager = %v, want exactly {enabled: true}", global["lifecycleManager"])
 			}
-			assertLifecycleManagerOverrides(t, nvsentinel.Overrides)
+			assertLifecycleManagerOverrides(t, nvsentinel.Overrides, slices.Contains(mixins, remediationMixin))
 		})
 	}
 
@@ -85,7 +85,7 @@ func TestMixinNVSentinelNodeValidation_Composes(t *testing.T) {
 
 // assertLifecycleManagerOverrides pins the mixin's lifecycle-manager block
 // exactly, so a path added or dropped fails here.
-func assertLifecycleManagerOverrides(t *testing.T, overrides map[string]any) {
+func assertLifecycleManagerOverrides(t *testing.T, overrides map[string]any, withRemediation bool) {
 	t.Helper()
 	lm, _ := overrides["lifecycle-manager"].(map[string]any)
 	if got := slices.Sorted(maps.Keys(lm)); !slices.Equal(got, []string{"config", "controllers"}) {
@@ -110,9 +110,16 @@ func assertLifecycleManagerOverrides(t *testing.T, overrides map[string]any) {
 	}
 	gate, _ := config["schedulingGate"].(map[string]any)
 	cordon, _ := gate["cordon"].(map[string]any)
-	if len(gate) != 1 || !maps.Equal(cordon, map[string]any{"remove": true, "labelPrefix": "k8saas.nvidia.com/"}) {
-		t.Errorf("lifecycle-manager.config.schedulingGate = %v, want exactly cordon {remove: true, "+
-			"labelPrefix: k8saas.nvidia.com/}", gate)
+	wantGate := []string{"cordon"}
+	if withRemediation {
+		// The remediation mixin adds the taint release its rule sets need.
+		wantGate = append(wantGate, "taints")
+	}
+	if !slices.Equal(slices.Sorted(maps.Keys(gate)), wantGate) ||
+		!maps.Equal(cordon, map[string]any{"remove": true, "labelPrefix": "k8saas.nvidia.com/"}) {
+
+		t.Errorf("lifecycle-manager.config.schedulingGate = %v, want exactly %v with cordon {remove: true, "+
+			"labelPrefix: k8saas.nvidia.com/}", gate, wantGate)
 	}
 
 	newNode, _ := config["newNodeValidation"].(map[string]any)

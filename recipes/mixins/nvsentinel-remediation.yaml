@@ -71,6 +71,18 @@ spec:
                         event.recommendedAction in [15, 24]
                 tests:
                   - dcgm-diag-test
+        # fault-quarantine keeps the taints its rule sets applied when it hands
+        # a node to validation, and lifecycle-manager lifts only the ones
+        # listed here once the node passes: the chart's NVCRE certification
+        # rule set's taint (CheckNVSentinelPostRemediationValidationCoherent).
+        lifecycle-manager:
+          config:
+            schedulingGate:
+              taints:
+                - key: nvsentinel.dgxc.nvidia.com/nvcre-cert-failed
+                  value: "true"
+                  effect: NoSchedule
+                  remove: true
         # Same drain timing as nvsentinel-quarantine.
         node-drainer:
           deleteAfterTimeoutMinutes: 300

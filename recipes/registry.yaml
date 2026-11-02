@@ -712,6 +712,7 @@ components:
       - lifecycle-manager.config.newNodeValidation.newNodeTests
       - fault-quarantine.validation.enabled
       - fault-quarantine.validation.ruleSets
+      - lifecycle-manager.config.schedulingGate.taints
     # The in-cluster file server's ReadWriteOnce volume, which the
     # nvsentinel-log-collector mixin turns on (#2619).
     storageClassPaths:
