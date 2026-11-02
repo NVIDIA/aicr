@@ -72,6 +72,7 @@ func init() {
 	registerCheck("CheckNVSentinelFileServerStorageClass", CheckNVSentinelFileServerStorageClass)
 	registerCheck("CheckNVSentinelDrainScopeCoherent", CheckNVSentinelDrainScopeCoherent)
 	registerCheck("CheckNVSentinelNodeValidationCoherent", CheckNVSentinelNodeValidationCoherent)
+	registerCheck("CheckNVSentinelPostRemediationValidationCoherent", CheckNVSentinelPostRemediationValidationCoherent)
 	registerCheck("CheckNVSentinelMongoDBCoherent", CheckNVSentinelMongoDBCoherent)
 	registerCheck("CheckNVSentinelDatastorePrerequisites", CheckNVSentinelDatastorePrerequisites)
 	registerCheck("CheckNKTPExportersHaveBackend", CheckNKTPExportersHaveBackend)

@@ -126,21 +126,21 @@ The `faultinject` step runs after `verify` on every cloud lane. It writes a synt
 |---|---|---|
 | 1. Detection | `SysLogsXIDError=True` appears on the node | always |
 | 2. Quarantine | the node is cordoned | `nvsentinel-quarantine` or `nvsentinel-remediation` |
-| 3. Recovery | the node's boot ID changes, then the node is uncordoned | `nvsentinel-remediation` |
+| 3. Recovery | the node's boot ID changes, then the node is uncordoned by a passing post-reboot DCGM diagnostic (`k8saas.nvidia.com/uncordon-reason=ValidationSucceeded` and a `Succeeded` ValidationRequest that `fault-quarantine` created) | `nvsentinel-remediation` |
 
 A stage that does not apply is recorded as `skipped` in `faultinject-result.json`, not failed. The gates are read from `bundle/recipe.yaml`, the recipe the bundle deployed. No shipped recipe composes either mixin, so nightly cells run Stage 1 only.
 
-**Running Stages 2 and 3.** Dispatch with `nvsentinel_remediation=quarantine` or `remediation`. `phase_prep` then composes the matching mixin onto the cell's leaf overlay through a `--data` overlay of the same name, and fails if the re-resolved recipe does not deploy that step. `remediation` also composes `nvsentinel-health-events-analyzer`, which `aicr bundle` requires beside live remediation:
+**Running Stages 2 and 3.** Dispatch with `nvsentinel_remediation=quarantine` or `remediation`. `phase_prep` then composes the matching mixin onto the cell's leaf overlay through a `--data` overlay of the same name, and fails if the re-resolved recipe does not deploy that step. `remediation` also composes `nvsentinel-health-events-analyzer` and `nvsentinel-node-validation`, which `aicr bundle` requires beside live remediation:
 
 ```bash
-# Stages 1-3 on AWS H100 training: cordon, janitor reboot, uncordon
+# Stages 1-3 on AWS H100 training: cordon, janitor reboot, DCGM diagnostic, uncordon
 gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
   -f reservation=aws-h100-ct-2 -f intent=training -f nvsentinel_remediation=remediation
 ```
 
 **Where it is accepted.** `uat-run.yaml`'s `resolve` job refuses the input before anything is provisioned unless every bound below holds. `tests/uat/lib/platform-gate_test.sh` covers each one.
 
-- **`intent=training`.** The `faultinject` step grows to 15 minutes with quarantine and 30 with remediation, and only the training budget has room. A serving workload left on the node would also hold `node-drainer` for up to its `deleteAfterTimeoutMinutes` (set by the remediation step mixins), past the budget, so janitor would not reboot it in time.
+- **`intent=training`.** The `faultinject` step grows to 15 minutes with quarantine and 55 with remediation, which waits for the post-reboot diagnostic, and only the training budget has room. A serving workload left on the node would also hold `node-drainer` for up to its `deleteAfterTimeoutMinutes` (set by the remediation step mixins), past the budget, so janitor would not reboot it in time.
 - **`lifecycle=nightly`.** Quarantine leaves the node cordoned with the fault set, because a syslog fault clears only on a reboot. A held daytime cluster would keep that node out of service.
 - **`deployer=helmfile`.** The Argo CD budget has no room either.
 - **Built from source (`aicr_version` empty).** The leaf overlay is read from the checkout, so it must match the binary.

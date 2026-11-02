@@ -1,0 +1,163 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Runtime Kind test for NVSentinel post-remediation validation (#3089).
+#
+# Checks the bundle gate's refusals, then installs the remediation step with
+# the analyzer and nvsentinel-node-validation via the bundle's own install.sh,
+# with a busybox stub in place of the DCGM diagnostic and NVSentinel's
+# simulated Kind provider completing each reboot, and sends synthetic GPU
+# faults. Asserts that a node repaired for RESTART_VM or RESTART_BM stays
+# cordoned until fault-quarantine's ValidationRequest passes, that a failed
+# validation holds the node until a passing retest, that a request that cannot
+# be created leaves the node quarantined and is not retried, that the
+# documented recovery validates such a node, and that a GPU reset is released
+# without a request. Not wired into `make qualify`: it needs a Kind cluster.
+#
+# Path filter kept narrow for the same reason as nvsentinel-preflight-e2e.yaml.
+
+name: NVSentinel Post-Remediation Validation E2E
+
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - 'recipes/mixins/nvsentinel-remediation.yaml'
+      - 'recipes/mixins/nvsentinel-health-events-analyzer.yaml'
+      - 'recipes/mixins/nvsentinel-node-validation.yaml'
+      - 'pkg/bundler/validations/nvsentinel_post_remediation_validation.go'
+      - 'pkg/bundler/validations/nvsentinel_node_validation.go'
+      - 'pkg/bundler/validations/checks.go'
+      # Every case waits for the drain, whose scope the bundler generates.
+      - 'pkg/bundler/drainscope/**'
+      - 'pkg/bundler/nvsentinel_drain_scope.go'
+      - 'pkg/bundler/validations/nvsentinel_drain_scope.go'
+      - 'recipes/registry.yaml'
+      - 'recipes/components/nvsentinel/**'
+      - 'recipes/components/nvsentinel-mongodb/**'
+      - 'recipes/components/psmdb-operator/**'
+      # The tested overlay inherits kind.yaml, which inherits base.yaml, and
+      # base.yaml is where nvsentinel enters the chain at all.
+      - 'recipes/overlays/h100-kind-training.yaml'
+      - 'recipes/overlays/kind.yaml'
+      - 'recipes/overlays/base.yaml'
+      # The run installs cert-manager, for the Percona cluster's certificates
+      # and lifecycle-manager's webhook certificate, and
+      # prometheus-operator-crds from the bundle.
+      - 'recipes/components/cert-manager/**'
+      - 'recipes/components/prometheus-operator-crds/**'
+      - 'tests/e2e/nvsentinel-post-remediation-validation/**'
+      - 'pkg/bundler/deployer/localformat/templates/**'
+      # run.sh sources tools/common and is invoked through a make target.
+      - 'tools/common'
+      - 'Makefile'
+      - '.github/workflows/nvsentinel-post-remediation-validation-e2e.yaml'
+      - '.github/actions/setup-build-tools/**'
+      - '.github/actions/prep-kind-runner/**'
+      - '.github/actions/load-versions/**'
+      - '.settings.yaml'
+  pull_request:
+    branches: [main]
+    paths: *paths
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: NVSentinel Post-Remediation Validation E2E
+    # mongod 8.0 before 8.0.35 exits at startup on the ubuntu-24.04 image's
+    # 7.0 kernel (https://jira.mongodb.org/browse/SERVER-131779). Return to
+    # ubuntu-24.04 once the Percona MongoDB pin is 8.0.35 or newer.
+    runs-on: ubuntu-22.04
+    # The script's bounded waits sum to ~176 minutes worst case (node Ready 2,
+    # cert-manager 10, Percona datastore 15, nvsentinel rollout 15, proto
+    # fetch 1, post-reboot validation 23.5, failed validation and retest 29,
+    # creation failure 34.5, stranded-node recovery 34.5, GPU reset 11.5; each
+    # reboot case waits up to 6 for its repair), before kind create, go build,
+    # five bundles and the installs. A healthy run takes a fraction of that.
+    timeout-minutes: 200
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Prep Kind runner
+        uses: ./.github/actions/prep-kind-runner
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      # run.sh's has_tools gate also needs jq and curl, which the runner image
+      # already ships; installing only some of the rest fails the lane before
+      # it exercises anything.
+      - name: Install Kind, kubectl, Helm and yq
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_kind: 'true'
+          kind_version: '${{ steps.versions.outputs.kind }}'
+          install_kubectl: 'true'
+          kubectl_version: '${{ steps.versions.outputs.kubectl }}'
+          install_helm: 'true'
+          helm_version: '${{ steps.versions.outputs.helm }}'
+          install_yq: 'true'
+          yq_version: '${{ steps.versions.outputs.yq }}'
+
+      # KEEP_CLUSTER so the cluster survives for the diagnostics below; the
+      # script's own EXIT trap would otherwise delete it before they run.
+      - name: Run nvsentinel post-remediation validation e2e
+        env:
+          KEEP_CLUSTER: 'true'
+        run: make nvsentinel-post-remediation-validation-e2e
+
+      # run.sh writes its kubeconfig inside a mktemp dir and removes that dir on
+      # exit, so re-export before querying anything. cancelled() because a job
+      # timeout cancels rather than fails.
+      - name: Collect diagnostics on failure
+        if: ${{ failure() || cancelled() }}
+        run: |
+          set +e
+          cluster=aicr-3089-kind
+          export KUBECONFIG="${RUNNER_TEMP}/post-remediation-validation-diag.kubeconfig"
+          kind export kubeconfig --name "$cluster" --kubeconfig "$KUBECONFIG" || exit 0
+          kubectl get pods -A
+          kubectl get node -o yaml
+          kubectl get validationrequests.nvsentinel.nvidia.com -o yaml
+          kubectl get rebootnodes.janitor.dgxc.nvidia.com -o yaml
+          kubectl -n nvsentinel get events --sort-by=.lastTimestamp
+          kubectl -n nvsentinel get jobs,deployment,statefulset,perconaservermongodb,certificate
+          kubectl -n nvsentinel get configmap lifecycle-manager -o yaml
+          for d in fault-quarantine node-drainer fault-remediation janitor janitor-provider lifecycle-manager; do
+            kubectl -n nvsentinel logs "deployment/$d" --tail=300
+          done
+          kubectl -n nvsentinel logs daemonset/platform-connectors --tail=200
+          kubectl -n nvsentinel logs deployment/psmdb-operator --tail=100
+          kubectl -n nvsentinel logs statefulset/nvsentinel-mongodb-rs0 -c mongod --tail=100
+
+      - name: Delete Kind cluster
+        if: ${{ always() }}
+        run: kind delete cluster --name aicr-3089-kind || true
