@@ -3417,8 +3417,8 @@ func TestHelmTemplate_IncludeRootAppToggle(t *testing.T) {
 // TestGenerate_ChildNameLimits verifies the bundle-time guards for
 // composed child Application names in the argocd-helm path: names over
 // Helm's 53-character release-name cap and names colliding with the
-// parent Application are rejected with ErrCodeInvalidRequest. The
-// install-time equivalents are covered by
+// parent Application are rejected with ErrCodeInvalidRequest before any
+// output is written. The install-time equivalents are covered by
 // TestHelmTemplate_ChildNameGuards below.
 func TestGenerate_ChildNameLimits(t *testing.T) {
 	tests := []struct {
@@ -3444,9 +3444,13 @@ func TestGenerate_ChildNameLimits(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			g := newTestHelmGenerator(t)
 			tt.mutate(g)
-			_, err := g.Generate(context.Background(), t.TempDir())
+			outputDir := filepath.Join(t.TempDir(), "bundle")
+			_, err := g.Generate(context.Background(), outputDir)
 			if err == nil {
 				t.Fatal("expected error, got nil")
+			}
+			if _, statErr := os.Stat(outputDir); !os.IsNotExist(statErr) {
+				t.Errorf("rejected bundle left output behind: stat error = %v", statErr)
 			}
 			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
@@ -3460,7 +3464,7 @@ func TestGenerate_ChildNameLimits(t *testing.T) {
 
 // TestGenerate_NamePrefixValidatedUpfront verifies the boundary check
 // rejects a malformed NamePrefix even when the recipe produces no
-// NNN-folders (the per-folder validation in processFolders never runs).
+// NNN-folders, so no child name is ever composed and checked.
 func TestGenerate_NamePrefixValidatedUpfront(t *testing.T) {
 	rr := newRecipeResult("v1.0.0", nil)
 	g := &Generator{

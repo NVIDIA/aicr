@@ -176,6 +176,31 @@ const DefaultProject = "default"
 // "release name exceeds max length of 53" error.
 const HelmReleaseNameMaxLen = 53
 
+// ValidateChildAppNames rejects a prefix that composes any release into a
+// child Application name that is not a valid DNS-1123 subdomain, exceeds
+// HelmReleaseNameMaxLen, or equals parent (a child with the parent's name
+// would overwrite the parent Application CR). The cap applies to every child,
+// Helm-rendered or not, to keep one invariant. Deployers call it before
+// writing any output, so a rejected bundle leaves nothing behind.
+func ValidateChildAppNames(prefix, parent string, releases []string) error {
+	for _, release := range releases {
+		name := prefix + release
+		if err := bundlercfg.ValidateAppName(name); err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("Argo CD name prefix produces invalid child Application name %q", name), err)
+		}
+		if len(name) > HelmReleaseNameMaxLen {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("Argo CD name prefix produces child Application name %q (%d chars); child Application names are capped at %d characters because Argo CD derives the Helm release name from the Application name for Helm-rendered children", name, len(name), HelmReleaseNameMaxLen))
+		}
+		if name == parent {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("child Application name %q collides with the parent Application name; choose a different --app-name or --argocd-name-prefix", name))
+		}
+	}
+	return nil
+}
+
 // ResourcesFinalizer is Argo CD's cascading-deletion finalizer. When
 // CascadeDelete is set it is added to the parent and every child
 // Application so `kubectl delete` on the parent prunes managed
@@ -526,12 +551,6 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		}
 	}
 
-	// Create output directory
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to create output directory", err)
-	}
-
 	repoURL, targetRevision := resolveRepoSettings(g)
 
 	// All three are baked unconditionally below: repoURL and targetRevision
@@ -553,6 +572,26 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("invalid component name %q: must not contain path separators or parent directory references", comp.Name))
 		}
+	}
+
+	// Child names compose from the releases localformat will emit, so plan
+	// them and validate before anything touches outputDir.
+	releases, planErr := localformat.ReleaseNames(ctx, localformat.Options{
+		Components:             g.toLocalformatComponents(components, nil),
+		ComponentPreManifests:  g.ComponentPreManifests,
+		ComponentPostManifests: g.ComponentPostManifests,
+		ComponentReadiness:     g.ComponentReadiness,
+	})
+	if planErr != nil {
+		return nil, planErr
+	}
+	if nameErr := ValidateChildAppNames(g.NamePrefix, g.appName(), releases); nameErr != nil {
+		return nil, nameErr
+	}
+
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			"failed to create output directory", err)
 	}
 
 	// Delegate per-component folder writing to localformat.Write. localformat
@@ -670,26 +709,6 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			return nil, err
 		}
 		appData.Name = g.NamePrefix + appData.Name
-		if err := bundlercfg.ValidateAppName(appData.Name); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("Argo CD name prefix produces invalid child Application name %q", appData.Name), err)
-		}
-		// Argo CD derives the Helm release name from the Application name
-		// for Helm-rendered children, so a composed name over Helm's cap
-		// passes DNS-1123 validation but fails at sync time. The cap is
-		// applied uniformly to ALL children (including non-Helm ones) to
-		// keep a single invariant rather than branching on folder kind.
-		// Reject at bundle time instead.
-		if len(appData.Name) > HelmReleaseNameMaxLen {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("Argo CD name prefix produces child Application name %q (%d chars); child Application names are capped at %d characters because Argo CD derives the Helm release name from the Application name for Helm-rendered children", appData.Name, len(appData.Name), HelmReleaseNameMaxLen))
-		}
-		// A child that composes to the parent's name would overwrite the
-		// parent Application CR in the argocd namespace.
-		if appData.Name == appName {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("child Application name %q collides with the parent Application name; choose a different --app-name or --argocd-name-prefix", appData.Name))
-		}
 		appData.DestinationServer = g.destinationServer()
 		appData.Project = g.project()
 		appData.CascadeDelete = g.CascadeDelete

@@ -2624,7 +2624,7 @@ func TestGenerate_ProjectReservedScalarQuoted(t *testing.T) {
 // TestGenerate_ChildNameLimits verifies the bundle-time guards for
 // composed child Application names: names over Helm's 53-character
 // release-name cap and names that collide with the parent Application
-// are rejected with ErrCodeInvalidRequest.
+// are rejected with ErrCodeInvalidRequest before any output is written.
 func TestGenerate_ChildNameLimits(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -2651,9 +2651,13 @@ func TestGenerate_ChildNameLimits(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			g := newTestGenerator(t)
 			tt.mutate(g)
-			_, err := g.Generate(context.Background(), t.TempDir())
+			outputDir := filepath.Join(t.TempDir(), "bundle")
+			_, err := g.Generate(context.Background(), outputDir)
 			if err == nil {
 				t.Fatal("expected error, got nil")
+			}
+			if _, statErr := os.Stat(outputDir); !os.IsNotExist(statErr) {
+				t.Errorf("rejected bundle left output behind: stat error = %v", statErr)
 			}
 			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
