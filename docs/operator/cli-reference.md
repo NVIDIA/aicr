@@ -139,7 +139,7 @@ recipe whose content does not match its recorded digest.
 | `describe` | `get` on `runtimerollouts`; `get` on ConfigMaps in the operator namespace for the assessment report |
 | `approve`, `revoke` | `get` and `patch` on `runtimerollouts`, and `update` on the virtual subresource `runtimerollouts/approve`; `create` on `selfsubjectreviews`, which Kubernetes grants every authenticated user |
 | `reproduce` | `get` on `clusterruntimes` (without a PLAN argument) and on ConfigMaps in the operator namespace |
-| The printed in-cluster pull | `get` on Secret `aicr-registry-login`, and `create` on `pods/portforward`, in the operator namespace |
+| The printed in-cluster pull | `get` on Secret `aicr-registry-login` and Service `aicr-registry`, `get`, `list` and `watch` on pods (`kubectl port-forward` resolves the Service to a pod), and `create` on `pods/portforward`, in the operator namespace |
 
 The chart's `aicr-operator-approver` ClusterRole and Role grant the commands'
 permissions to the users and groups in its `approvers` value. They do not

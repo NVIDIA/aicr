@@ -157,15 +157,16 @@ func reproduce(ctx context.Context, c client.Reader, namespace, ref, dir string,
 		ns := shellQuote(namespace)
 		secret := fmt.Sprintf("kubectl -n %s get secret %s -o jsonpath=", ns, inClusterLogin)
 		pull = fmt.Sprintf(`Pull the operator's bundle from the in-cluster registry through a port-forward,
-with the login the chart generated (this needs get on Secret %s and
-create on pods/portforward in %s), and compare:
+with the login the chart generated (this needs, in %s, get on Secret %s and
+Service %s, get, list and watch on pods, and create on pods/portforward),
+and compare:
 
   kubectl -n %s port-forward service/%s %s >/dev/null & pf=$!
   curl -so /dev/null --retry 10 --retry-connrefused --retry-delay 1 %s
   %s'{.data.password}' | base64 -d |
     oras pull --plain-http -u "$(%s'{.data.username}' | base64 -d)" --password-stdin %s -o %s
   kill "$pf"
-`, inClusterLogin, namespace, ns, inClusterService, shellQuote(forwardPort+":"+port),
+`, namespace, inClusterLogin, inClusterService, ns, inClusterService, shellQuote(forwardPort+":"+port),
 			shellQuote("http://localhost:"+forwardPort+"/v2/"), secret, secret,
 			shellQuote("localhost:"+forwardPort+"/"+path), operatorBundle)
 	}

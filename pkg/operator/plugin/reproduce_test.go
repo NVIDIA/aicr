@@ -161,7 +161,7 @@ func TestReproduceInClusterRegistry(t *testing.T) {
 
 	out := reproduceWith(t, "aicr-registry.aicr-system.svc.cluster.local:5000/aicr/bundles/cluster"+digest)
 	for _, want := range []string{
-		"get on Secret aicr-registry-login and\ncreate on pods/portforward in aicr-system",
+		"in aicr-system, get on Secret aicr-registry-login and\nService aicr-registry, get, list and watch on pods, and create on pods/portforward",
 		"kubectl -n aicr-system port-forward service/aicr-registry 15000:5000 >/dev/null & pf=$!\n" +
 			"  curl -so /dev/null --retry 10 --retry-connrefused --retry-delay 1 http://localhost:15000/v2/\n" +
 			"  kubectl -n aicr-system get secret aicr-registry-login -o jsonpath='{.data.password}' | base64 -d |",
