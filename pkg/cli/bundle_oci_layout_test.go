@@ -328,3 +328,84 @@ func TestBundleCommandRejectsRepeatedChartName(t *testing.T) {
 		"--chart-name", "a", "--chart-name", "b")
 	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 }
+
+// TestBundleCommandOCILayoutRemovedAfterLaterFailure covers failures after
+// the layout is renamed into place: the run removes it, so a rerun to the
+// same path does not conflict with it.
+func TestBundleCommandOCILayoutRemovedAfterLaterFailure(t *testing.T) {
+	failImageRefs := func(context.Context, *imageRefsTarget, []byte) error {
+		return errors.New(errors.ErrCodeInternal, "injected image-refs write failure")
+	}
+	tests := []struct {
+		name       string
+		inject     func(*bundlePublishDependencies, context.CancelFunc)
+		wantCode   errors.ErrorCode
+		wantRemove string
+	}{
+		{
+			name:     "image-refs write fails",
+			inject:   func(p *bundlePublishDependencies, _ context.CancelFunc) { p.writeImageRefs = failImageRefs },
+			wantCode: errors.ErrCodeInternal,
+		},
+		{
+			name: "canceled after the layout is written",
+			inject: func(p *bundlePublishDependencies, cancel context.CancelFunc) {
+				p.writeLayout = func(ctx context.Context, cfg oci.OutputConfig) (*oci.PackageAndPushResult, error) {
+					res, err := oci.WriteLayout(ctx, cfg)
+					cancel()
+					return res, err
+				}
+			},
+			wantCode: errors.ErrCodeTimeout,
+		},
+		{
+			name: "removal fails",
+			inject: func(p *bundlePublishDependencies, _ context.CancelFunc) {
+				p.writeImageRefs = failImageRefs
+				p.removeLayout = func(string) error { return os.ErrPermission }
+			},
+			wantCode:   errors.ErrCodeInternal,
+			wantRemove: "failed to remove OCI layout",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			layout := filepath.Join(realTempDir(t), "layout")
+			args := []string{"--recipe", layoutTestRecipe(t), "--deployer", "helm",
+				"--output", oci.LayoutScheme + layout + ":" + layoutTestTag,
+				"--image-refs", filepath.Join(realTempDir(t), "refs.txt")}
+			deps := defaultBundleCommandDependencies()
+			deps.pushOCIBundle = func(
+				ctx context.Context,
+				opts *bundleCmdOptions,
+				out *result.Output,
+				bundle *bundleOutputTarget,
+				imageRefs *imageRefsTarget,
+			) error {
+
+				ctx, cancel := context.WithCancel(ctx)
+				defer cancel()
+				publish := defaultBundlePublishDependencies()
+				tt.inject(&publish, cancel)
+				return pushOCIBundleWithDependencies(ctx, opts, out, bundle, imageRefs, publish)
+			}
+
+			err := runBundleInWorkDir(t, realTempDir(t), deps, args...)
+			errorstest.WantReportedCode(t, err, tt.wantCode)
+			_, statErr := os.Lstat(layout)
+			if tt.wantRemove != "" {
+				if !strings.Contains(err.Error(), tt.wantRemove) || statErr != nil {
+					t.Fatalf("error = %v, layout stat = %v; want the removal failure reported and the layout kept",
+						err, statErr)
+				}
+				return
+			}
+			if !os.IsNotExist(statErr) {
+				t.Fatalf("layout stat = %v, want it removed", statErr)
+			}
+			if err := runBundleInWorkDir(t, realTempDir(t), defaultBundleCommandDependencies(), args...); err != nil {
+				t.Fatalf("rerun to the same layout path: %v", err)
+			}
+		})
+	}
+}
