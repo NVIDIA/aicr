@@ -17,6 +17,7 @@ package oci
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"path"
 	"strings"
@@ -284,6 +285,10 @@ type PackageAndPushResult struct {
 	Reference string
 	// StorePath is the path to the local OCI Image Layout directory.
 	StorePath string
+	// StoreInfo identifies the directory at StorePath as WriteLayout or
+	// WriteHelmChartLayout published it, so a caller can tell it from one
+	// put there afterward. It is nil for other operations.
+	StoreInfo fs.FileInfo
 }
 
 // PackageAndPush packages a directory as an OCI artifact and pushes it to a registry.

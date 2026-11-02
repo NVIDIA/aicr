@@ -16,6 +16,8 @@ package oci
 
 import (
 	"context"
+	stderrors "errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -160,6 +162,11 @@ func TestWriteLayoutMatchesPushedDigest(t *testing.T) {
 	if written.StorePath != resolvedPath(t, layoutDir) || written.Reference != "oci-layout:"+layoutDir+":v1.2.3" {
 		t.Fatalf("WriteLayout() = %+v", written)
 	}
+	if info, statErr := os.Lstat(layoutDir); statErr != nil || written.StoreInfo == nil ||
+		!os.SameFile(written.StoreInfo, info) {
+
+		t.Fatalf("WriteLayout() StoreInfo does not identify %s: stat error = %v", layoutDir, statErr)
+	}
 	assertLayoutPublishes(t, layoutDir, "v1.2.3", pushed.Digest, host)
 }
 
@@ -264,9 +271,10 @@ func TestWriteLayoutFailsClosed(t *testing.T) {
 	}
 }
 
-// TestOwnedLayoutReleaseAsRejectsLateTarget covers a target that appears
-// after WriteLayout's early check: the release fails closed and removes the
-// staged layout.
+// TestOwnedLayoutReleaseAsRejectsLateTarget covers an empty directory that
+// appears after WriteLayout's early check, which a plain rename would
+// replace: the release fails closed, leaves that directory alone, and removes
+// the staged layout.
 func TestOwnedLayoutReleaseAsRejectsLateTarget(t *testing.T) {
 	parent := t.TempDir()
 	layout, err := newOwnedLayout(context.Background(), parent)
@@ -281,8 +289,53 @@ func TestOwnedLayoutReleaseAsRejectsLateTarget(t *testing.T) {
 	if got := dirNames(t, parent); strings.Join(got, ",") != "layout" {
 		t.Fatalf("parent entries = %v, want only the pre-existing target", got)
 	}
+	if got := dirNames(t, filepath.Join(parent, "layout")); len(got) != 0 {
+		t.Fatalf("pre-existing target entries = %v, want it left empty", got)
+	}
 	if closeErr := layout.Close(); closeErr == nil {
 		t.Fatal("Close() after failed release returned nil, want the release error")
+	}
+}
+
+// TestRenameCheckThenMove covers the fallback that Linux reaches only on a
+// filesystem without RENAME_NOREPLACE.
+func TestRenameCheckThenMove(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing bool
+		wantErr  error
+	}{
+		{name: "absent target", existing: false},
+		{name: "existing empty directory", existing: true, wantErr: fs.ErrExist},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parent := t.TempDir()
+			if err := os.Mkdir(filepath.Join(parent, "stage"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if tt.existing {
+				if err := os.Mkdir(filepath.Join(parent, "target"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			root, err := os.OpenRoot(parent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = root.Close() }()
+			err = renameCheckThenMove(root, "stage", "target")
+			if !stderrors.Is(err, tt.wantErr) {
+				t.Fatalf("renameCheckThenMove() error = %v, want %v", err, tt.wantErr)
+			}
+			want := "target"
+			if tt.existing {
+				want = "stage,target"
+			}
+			if got := strings.Join(dirNames(t, parent), ","); got != want {
+				t.Fatalf("parent entries = %s, want %s", got, want)
+			}
+		})
 	}
 }
 
