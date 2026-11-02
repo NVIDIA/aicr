@@ -327,8 +327,9 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	if err := bundlercfg.ValidateAppName(g.AppName); err != nil {
 		return nil, err
 	}
-	// Validate NamePrefix upfront (not only per-folder in processFolders)
-	// so zero-folder recipes still reject a malformed prefix.
+	// Validate NamePrefix itself here, not only as part of the composed child
+	// names checked after the base generation, so zero-folder recipes still
+	// reject a malformed prefix.
 	if err := bundlercfg.ValidateNamePrefix(g.NamePrefix); err != nil {
 		return nil, err
 	}
@@ -1487,8 +1488,8 @@ func transformApplication(
 }
 
 // childNameGuard returns the Helm template guard block prepended to every
-// child Application template. The bundle-time checks in processFolders
-// cover baked NamePrefix values, but install-time `--set
+// child Application template. The bundle-time argocd.ValidateChildAppNames
+// call in Generate covers baked NamePrefix values, but install-time `--set
 // deployer.namePrefix=...` bypasses them — these guards fail `helm
 // template`/`helm install` when the composed child name exceeds Helm's
 // release-name cap (Argo CD uses the Application name as the Helm release

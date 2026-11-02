@@ -20,8 +20,11 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // TestReleaseNames_MatchesWrite pins ReleaseNames to the folders Write
@@ -109,6 +112,30 @@ func TestReleaseNames_MatchesWrite(t *testing.T) {
 			if !reflect.DeepEqual(got, written) {
 				t.Errorf("ReleaseNames() = %v, but Write emitted %v", got, written)
 			}
+		})
+	}
+}
+
+// TestReleaseNames_DeadContext checks that a dead context is classified by
+// cause: a user abort must report CANCELED, not a retryable TIMEOUT.
+func TestReleaseNames_DeadContext(t *testing.T) {
+	expired, cancelExpired := context.WithDeadline(context.Background(), time.Unix(0, 0))
+	defer cancelExpired()
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tests := []struct {
+		name string
+		ctx  context.Context
+		want errors.ErrorCode
+	}{
+		{"canceled", canceled, errors.ErrCodeCanceled},
+		{"deadline exceeded", expired, errors.ErrCodeTimeout},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := localformat.ReleaseNames(tt.ctx, localformat.Options{})
+			errorstest.WantReportedCode(t, err, tt.want)
 		})
 	}
 }

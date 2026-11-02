@@ -182,7 +182,7 @@ func FilterEmptyPreManifests(
 // that inject no folder, so it takes a context.
 func ReleaseNames(ctx context.Context, opts Options) ([]string, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled", err)
+		return nil, errors.WrapCtxErr(err, errors.ErrCodeTimeout, "release name planning canceled")
 	}
 	pre, err := filterEmptyPreManifests(ctx, opts.Components, opts.ComponentPreManifests)
 	if err != nil {
