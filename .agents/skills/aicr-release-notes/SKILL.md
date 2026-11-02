@@ -40,6 +40,11 @@ Do NOT re-derive any of this with separate `git log`, `gh api`, or
 `gh pr list` calls. If `tools/changelog` doesn't surface it, it
 doesn't belong in the summary.
 
+The one exception is the release-notes author, which
+`tools/changelog` cannot supply: the GitHub handle of the person
+running this skill, who publishes the release and is credited last in
+the thanks line. Step 1 resolves it with `gh api user`.
+
 No optional input is needed. Do not ask for or guess the target tag —
 the filename is fixed (see Step 5) and the body never names the new
 tag (GitHub renders the tag in the release header).
@@ -57,7 +62,13 @@ tools/changelog
 # Previous release body for style mirroring (use the tag from
 # tools/changelog's "[MSG] Changes since vX.Y.Z" stderr line)
 gh release view <previous-tag> --json body --jq '.body'
+
+# Release-notes author, credited last in the thanks line (Step 4)
+gh api user --jq .login
 ```
+
+If `gh api user` fails, ask the user for their GitHub handle. Do not
+derive it from `git config`.
 
 If `tools/changelog` errors ("No release tags found", empty output),
 stop and ask the user how to proceed — do not invent a range.
@@ -114,8 +125,9 @@ order:
    Every bullet here must also have an entry in `docs/user/deprecations.md`;
    if it does not, the deprecation is incomplete and the release is not ready.
 5. **Closing credits line** — `***Thanks to*** @user1, @user2, …, and
-   @mchmarny.` Alphabetical (case-insensitive) by handle, with
-   `@mchmarny` moved to the final position preceded by `and `.
+   @<author>.` Alphabetical (case-insensitive) by handle, with the
+   release-notes author moved to the final position preceded by `and `
+   when they are in the list (see Step 4).
 
 **Style rules** drawn from prior releases:
 
@@ -155,7 +167,10 @@ Then:
   `dependabot[bot]`, `github-actions[bot]`, `renovate[bot]`,
   `copy-pr-bot`, etc.).
 - Sort alphabetically (case-insensitive).
-- Move `mchmarny` to the final slot preceded by `and `.
+- Move the release-notes author (Step 1) to the final slot preceded by
+  `and `, matching the handle case-insensitively. If the author is not
+  in the extracted list, do not add them; the last handle alphabetically
+  takes the `and ` slot, and the unresolved questions (Step 5) say so.
 - Do NOT link the @-mentions in the output — GitHub auto-links them.
 
 ### Step 5 — Write the draft
@@ -230,7 +245,7 @@ why it matters to a user. Reference commands in backticks. Link issues as
 
 **<Supply Chain or Trust Theme>** — <narrative>
 
-***Thanks to*** @alice, @bob, @carol, and @mchmarny.
+***Thanks to*** @alice, @bob, @carol, and @<author>.
 ```
 
 ## Failure Modes
@@ -248,5 +263,5 @@ why it matters to a user. Reference commands in backticks. Link issues as
 - Does not run `git tag` or push tags
 - Does not create the GitHub release
 - Does not edit `CHANGELOG.md` or any in-repo file
-- Does not re-derive commit ranges, author handles, or commit lists
+- Does not re-derive commit ranges, commit author handles, or commit lists
   outside of `tools/changelog` output
