@@ -41,6 +41,13 @@ func TestRenameNoReplaceUsesRenameat2(t *testing.T) {
 	}
 	defer func() { _ = root.Close() }()
 
+	probe := unix.Renameat2(unix.AT_FDCWD, filepath.Join(parent, "stage"),
+		unix.AT_FDCWD, filepath.Join(parent, "target"), unix.RENAME_NOREPLACE)
+	if stderrors.Is(probe, unix.EINVAL) || stderrors.Is(probe, unix.ENOSYS) ||
+		stderrors.Is(probe, unix.ENOTSUP) || stderrors.Is(probe, unix.EOPNOTSUPP) {
+
+		t.Skipf("renameat2 with RENAME_NOREPLACE is unavailable here: %v", probe)
+	}
 	if err = renameNoReplace(root, "stage", "target"); !stderrors.Is(err, unix.EEXIST) {
 		t.Fatalf("renameNoReplace() error = %v, want EEXIST from renameat2", err)
 	}
