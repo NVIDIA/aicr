@@ -394,10 +394,22 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		SyncRetry:     g.SyncRetry,
 	}
 
-	if _, genErr := argocdGen.Generate(ctx, tmpDir); genErr != nil {
+	baseOut, genErr := argocdGen.Generate(ctx, tmpDir)
+	if genErr != nil {
 		// PropagateOrWrap keeps the delegate's code, so a chart digest
 		// mismatch reports CONFLICT here as it does under the argocd deployer.
 		return nil, errors.PropagateOrWrap(genErr, errors.ErrCodeInternal, "failed to generate base Argo CD output")
+	}
+
+	// The baked NamePrefix default composes into every child template, so
+	// validate it against the emitted releases before outputDir exists. The
+	// rendered template guard covers install-time deployer.namePrefix overrides.
+	releases := make([]string, 0, len(baseOut.Releases))
+	for _, r := range baseOut.Releases {
+		releases = append(releases, r.Name)
+	}
+	if nameErr := argocd.ValidateChildAppNames(g.NamePrefix, cmp.Or(g.AppName, DefaultAppName), releases); nameErr != nil {
+		return nil, nameErr
 	}
 
 	// Step 2: Create Helm chart output structure
@@ -1359,36 +1371,6 @@ func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templ
 			// copyFolderContent and transformed into templates/<name>.yaml.
 			Manifest: path.Join(dirTemplates, folderComponent+".yaml"),
 		})
-
-		// Validate the composed child name at bundle time: the rendered
-		// template prepends `.Values.deployer.namePrefix` (defaulting to
-		// the baked NamePrefix in root values.yaml), so a prefix that
-		// composes into an invalid DNS-1123 name must fail here rather
-		// than at apiserver admission.
-		if nameErr := bundlercfg.ValidateAppName(g.NamePrefix + folderComponent); nameErr != nil {
-			return errors.Wrap(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("deployer namePrefix produces invalid child Application name %q", g.NamePrefix+folderComponent), nameErr)
-		}
-		// Argo CD derives the Helm release name from the Application name
-		// for Helm-rendered children, so a composed name over Helm's cap
-		// passes DNS-1123 validation but fails at sync time. The cap is
-		// applied uniformly to ALL children (including non-Helm ones) to
-		// keep a single invariant rather than branching on folder kind.
-		// Reject at bundle time; the rendered template guard covers
-		// install-time --set deployer.namePrefix overrides.
-		composedName := g.NamePrefix + folderComponent
-		if len(composedName) > argocd.HelmReleaseNameMaxLen {
-			return errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("deployer namePrefix produces child Application name %q (%d chars); child Application names are capped at %d characters because Argo CD derives the Helm release name from the Application name for Helm-rendered children", composedName, len(composedName), argocd.HelmReleaseNameMaxLen))
-		}
-		parentName := g.AppName
-		if parentName == "" {
-			parentName = DefaultAppName
-		}
-		if composedName == parentName {
-			return errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("child Application name %q collides with the parent Application name; choose a different --app-name or deployer namePrefix", composedName))
-		}
 
 		overrideKey, keyErr := resolveOverrideKey(parentComponent, g.RecipeResult.DataProvider())
 		if keyErr != nil {
