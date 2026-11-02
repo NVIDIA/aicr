@@ -83,10 +83,6 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	restConfig = cfg
-	if registryAuth, err = os.ReadFile(os.Getenv("AICR_OPERATOR_E2E_REGISTRY_AUTH")); err != nil {
-		fmt.Fprintf(os.Stderr, "read registry credentials: %v\n", err)
-		os.Exit(1)
-	}
 	if clientset, err = kubernetes.NewForConfig(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "create clientset: %v\n", err)
 		os.Exit(1)
@@ -103,7 +99,23 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "create client: %v\n", err)
 		os.Exit(1)
 	}
+	if registryAuth, err = chartRegistryAuth(); err != nil {
+		fmt.Fprintf(os.Stderr, "read the in-cluster registry's credentials: %v\n", err)
+		os.Exit(1)
+	}
 	os.Exit(m.Run())
+}
+
+// chartRegistryAuth reads the docker config the chart generated for its
+// in-cluster registry, as the operator does.
+func chartRegistryAuth() ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	secret := &corev1.Secret{}
+	if err := k8s.Get(ctx, client.ObjectKey{Namespace: operatorNamespace, Name: "aicr-registry-auth"}, secret); err != nil {
+		return nil, err
+	}
+	return secret.Data[corev1.DockerConfigJsonKey], nil
 }
 
 // TestSkeleton runs the acceptance criteria in order against the singleton

@@ -51,7 +51,7 @@ The Kind GPU workflows use these leaf recipes instead:
 | nfd | node-feature-discovery | Helm | In the bundle; no dedicated assertion in this suite |
 | gpu-operator | gpu-operator | Helm | Operator Deployment, ClusterPolicy ready, 6 DaemonSets (driver, device-plugin, dcgm-exporter, toolkit, gfd, validator) |
 | nvsentinel | nvsentinel | Helm | Controller Deployment, platform-connector DaemonSet |
-| nodewright-operator | skyhook | Helm | Controller-manager Deployment |
+| nodewright-operator | nodewright | Helm | Controller-manager Deployment |
 | prometheus-operator-crds | monitoring | Helm | CRDs only (`Alertmanager`, `Prometheus`, `ServiceMonitor`, etc. — `monitoring.coreos.com/v1`) |
 | kube-prometheus-stack | monitoring | Helm | 3 Deployments (operator, grafana, kube-state-metrics), 2 StatefulSets (prometheus, alertmanager), node-exporter DaemonSet (CRDs installed by `prometheus-operator-crds`) |
 | k8s-ephemeral-storage-metrics | monitoring | Helm | Deployment |
@@ -60,7 +60,7 @@ The Kind GPU workflows use these leaf recipes instead:
 | aws-efa | kube-system | Helm | Device plugin DaemonSet |
 | agentgateway-crds | agentgateway-system | Helm | CRDs only (Gateway API + Inference Extension) |
 | agentgateway | agentgateway-system | Helm | Controller Deployment |
-| nodewright-customizations | skyhook | Manifest | No workloads (NodeConfiguration CRs) |
+| nodewright-customizations | nodewright | Manifest | No workloads (NodeConfiguration CRs) |
 | nvidia-dra-driver-gpu | nvidia-dra-driver | Helm | Controller Deployment, kubelet-plugin DaemonSet |
 | kai-scheduler | kai-scheduler | Helm | Scheduler Deployment |
 | grove | dynamo-system | Helm | Pod lifecycle management |
@@ -98,7 +98,7 @@ tests/chainsaw/ai-conformance/
 │   └── assert-recipe.yaml               # Recipe structure assertion
 └── cluster/                             # Requires deployed inference stack
     ├── chainsaw-test.yaml               # Cluster health check orchestration
-    ├── assert-namespaces.yaml           # 9 namespaces exist
+    ├── assert-namespaces.yaml           # 10 namespaces exist
     ├── assert-crds.yaml                 # Critical CRDs installed
     ├── assert-gpu-operator.yaml         # GPU operator + DaemonSets healthy
     ├── assert-kube-system.yaml          # AWS EFA healthy

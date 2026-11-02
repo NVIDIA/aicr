@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -1991,4 +1992,38 @@ func TestFetchIndexYAMLContextCancellation(t *testing.T) {
 			t.Errorf("expected exactly 1 attempt before cancellation, got %d", attempt)
 		}
 	})
+}
+
+// TestDoFetchIndexYAMLAttempt_ClosesIdleConnections is a regression test
+// for #3298: doFetchIndexYAMLAttempt used to build a fresh *http.Transport
+// on every attempt and never close its idle connections, leaking
+// idle-connection goroutines for up to HTTPIdleConnTimeout. Stubs
+// checkFetchTargetURL so the loopback httptest.Server URL is not rejected
+// by the production egress policy (same pattern as TestDefaultFetchIndexYAML).
+func TestDoFetchIndexYAMLAttempt_ClosesIdleConnections(t *testing.T) {
+	origCheck := checkFetchTargetURL
+	checkFetchTargetURL = func(_ context.Context, _ string) error { return nil }
+	t.Cleanup(func() { checkFetchTargetURL = origCheck })
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "apiVersion: v1\nentries: {}\n")
+	}))
+	defer ts.Close()
+
+	runtime.GC()
+	before := runtime.NumGoroutine()
+
+	for i := 0; i < 20; i++ {
+		if _, err := doFetchIndexYAMLAttempt(context.Background(), ts.URL+"/index.yaml"); err != nil {
+			t.Fatalf("attempt %d: %v", i, err)
+		}
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	runtime.GC()
+	after := runtime.NumGoroutine()
+
+	if delta := after - before; delta > 5 {
+		t.Errorf("goroutine leak: before=%d after=%d delta=%d (want <=5)", before, after, delta)
+	}
 }

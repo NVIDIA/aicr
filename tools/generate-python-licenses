@@ -9,7 +9,16 @@ verbatim to ``THIRD_PARTY_NOTICES.md``.
 Usage::
 
     make python-licenses
-    tools/generate-python-licenses [--requirements PATH] [--output PATH]
+    tools/generate-python-licenses [--requirements PATH] [--overrides PATH] [--output PATH]
+
+Overrides
+---------
+The image installs ``requirements-overrides.txt`` with ``--no-deps`` after the
+resolved closure, replacing versions a dependency's own pins would select. The
+overrides are fetched the same way and take precedence, so each package is
+recorded at the version that actually ships. An override naming a package the
+closure does not contain fails the run: it would add a package rather than
+replace one, and its own dependencies would never be installed.
 
 Why ``pip download`` instead of installing
 ------------------------------------------
@@ -93,6 +102,7 @@ COLLECT_TAGS = [
 RELEASED_PLATFORMS = {"linux/amd64": "x86_64", "linux/arm64": "aarch64"}
 
 DEFAULT_REQUIREMENTS = pathlib.Path("validators/performance/requirements.txt")
+DEFAULT_OVERRIDES = pathlib.Path("validators/performance/requirements-overrides.txt")
 DEFAULT_OUTPUT = pathlib.Path("validators/performance/licenses/python-notices.md")
 
 IMAGE = "ghcr.io/nvidia/aicr-validators/aiperf-bench"
@@ -156,7 +166,7 @@ def clean_license(raw: str) -> str:
     return first
 
 
-def download(requirements: pathlib.Path, dest: pathlib.Path) -> None:
+def download(requirements: pathlib.Path, dest: pathlib.Path, no_deps: bool = False) -> None:
     """Fetch the resolved closure as wheels for the collection platform."""
     cmd = [
         sys.executable, "-m", "pip", "download",
@@ -165,6 +175,8 @@ def download(requirements: pathlib.Path, dest: pathlib.Path) -> None:
         "--requirement", str(requirements),
         "--dest", str(dest),
     ]
+    if no_deps:
+        cmd.append("--no-deps")
     for tag in COLLECT_TAGS:
         cmd += ["--platform", tag]
 
@@ -334,45 +346,84 @@ def check_arch_markers(packages: list[dict]) -> None:
         )
 
 
-def collect(
-    requirements: pathlib.Path,
-    work: pathlib.Path,
-    wheels_dir: pathlib.Path | None = None,
-) -> list[dict]:
-    """Download the closure and read each wheel's attribution record.
-
-    ``wheels_dir`` bypasses the download and reads pre-supplied wheels. Fetching
-    and rendering are otherwise fused, which would make every rendering rule
-    (fence sizing, the License-File fallback, license sanitizing) reachable only
-    with live PyPI access and therefore untestable in CI. Tests pass fixture
-    wheels here; nothing in the normal path uses it.
-    """
-    if wheels_dir is not None:
-        dest = wheels_dir
-    else:
-        dest = work / "wheels"
-        dest.mkdir(parents=True, exist_ok=True)
-        print(f"Downloading closure for {COLLECT_PLATFORM} (python {PYTHON_VERSION})...",
-              file=sys.stderr)
-        download(requirements, dest)
-
-    wheels = sorted(dest.glob("*.whl"))
-    if not wheels:
-        raise SystemExit(f"ERROR: no wheels downloaded for {COLLECT_PLATFORM}.")
-
+def read_wheels(dest: pathlib.Path) -> dict[str, dict]:
+    """Read the attribution record of every wheel in ``dest``, keyed by package."""
     merged: dict[str, dict] = {}
-    for wheel in wheels:
+    for wheel in sorted(dest.glob("*.whl")):
         record = read_metadata(wheel)
         if record is None:
             print(f"WARNING: no METADATA in {wheel.name}", file=sys.stderr)
             continue
         merged.setdefault(record["key"], record)
+    return merged
 
-    print(f"  {len(wheels)} wheels, {len(merged)} packages", file=sys.stderr)
+
+def apply_overrides(merged: dict[str, dict], overrides: dict[str, dict]) -> None:
+    """Replace closure records with the override versions the image installs."""
+    added = sorted(set(overrides) - set(merged))
+    if added:
+        raise SystemExit(
+            "ERROR: override names a package the resolved closure does not contain: "
+            + ", ".join(added)
+            + "\nAn override replaces a version; it must not add a package, because\n"
+            "it is installed with --no-deps and its dependencies would be missing."
+        )
+    for key in sorted(overrides):
+        replaced = merged[key]["version"]
+        if replaced == overrides[key]["version"]:
+            print(f"WARNING: override {key}=={replaced} matches the resolved version; "
+                  "it is redundant and can be removed.", file=sys.stderr)
+        else:
+            print(f"  override {key}: {replaced} -> {overrides[key]['version']}",
+                  file=sys.stderr)
+        merged[key] = overrides[key]
+
+
+def collect(
+    requirements: pathlib.Path,
+    overrides: pathlib.Path,
+    work: pathlib.Path,
+    wheels_dir: pathlib.Path | None = None,
+) -> list[dict]:
+    """Download the closure and read each wheel's attribution record.
+
+    ``wheels_dir`` bypasses the download and reads pre-supplied wheels, with
+    override wheels read from its ``overrides/`` subdirectory. Fetching and
+    rendering are otherwise fused, which would make every rendering rule (fence
+    sizing, the License-File fallback, license sanitizing) reachable only with
+    live PyPI access and therefore untestable in CI. Tests pass fixture wheels
+    here; nothing in the normal path uses it.
+    """
+    if wheels_dir is not None:
+        dest = wheels_dir
+        override_dest = wheels_dir / "overrides"
+    else:
+        dest = work / "wheels"
+        override_dest = work / "overrides"
+        dest.mkdir(parents=True, exist_ok=True)
+        override_dest.mkdir(parents=True, exist_ok=True)
+        print(f"Downloading closure for {COLLECT_PLATFORM} (python {PYTHON_VERSION})...",
+              file=sys.stderr)
+        download(requirements, dest)
+        download(overrides, override_dest, no_deps=True)
+
+    merged = read_wheels(dest)
+    if not merged:
+        raise SystemExit(f"ERROR: no wheels downloaded for {COLLECT_PLATFORM}.")
+    if override_dest.is_dir():
+        apply_overrides(merged, read_wheels(override_dest))
+
+    print(f"  {len(merged)} packages", file=sys.stderr)
     return [merged[key] for key in sorted(merged)]
 
 
-def render(packages: list[dict], requirements: pathlib.Path, req_sha: str) -> str:
+def render(
+    packages: list[dict],
+    requirements: pathlib.Path,
+    req_sha: str,
+    overrides: pathlib.Path,
+    overrides_sha: str,
+) -> str:
     """Render the Markdown fragment appended to THIRD_PARTY_NOTICES.md."""
     out: list[str] = []
     add = out.append
@@ -390,7 +441,8 @@ def render(packages: list[dict], requirements: pathlib.Path, req_sha: str) -> st
     )
     add(
         f"\nGenerated by `make python-licenses` from `{requirements}`\n"
-        f"(sha256 `{req_sha}`). Versions reflect the closure resolved at that time.\n"
+        f"(sha256 `{req_sha}`) and `{overrides}`\n"
+        f"(sha256 `{overrides_sha}`). Versions reflect the closure resolved at that time.\n"
     )
     add("\n| Package | Version | License | Source |")
     add("|---------|---------|---------|--------|")
@@ -424,6 +476,7 @@ def render(packages: list[dict], requirements: pathlib.Path, req_sha: str) -> st
 def main() -> int:
     parser = argparse.ArgumentParser(description="Collect Python license notices.")
     parser.add_argument("--requirements", type=pathlib.Path, default=DEFAULT_REQUIREMENTS)
+    parser.add_argument("--overrides", type=pathlib.Path, default=DEFAULT_OVERRIDES)
     parser.add_argument("--output", type=pathlib.Path, default=DEFAULT_OUTPUT)
     parser.add_argument(
         "--wheels-dir",
@@ -436,20 +489,22 @@ def main() -> int:
     if args.wheels_dir is not None and not args.wheels_dir.is_dir():
         raise SystemExit(f"ERROR: --wheels-dir is not a directory: {args.wheels_dir}")
 
-    if not args.requirements.is_file():
-        raise SystemExit(
-            f"ERROR: requirements file not found: {args.requirements}\n"
-            "Run 'make python-licenses' from the repo root."
-        )
+    for path in (args.requirements, args.overrides):
+        if not path.is_file():
+            raise SystemExit(
+                f"ERROR: requirements file not found: {path}\n"
+                "Run 'make python-licenses' from the repo root."
+            )
 
     # Recorded in the fragment so generate-notices can detect, offline, that
-    # the requirements changed without a license refresh. A hash covers every
-    # kind of edit, unlike matching a single version string.
+    # either input changed without a license refresh. A hash covers every kind
+    # of edit, unlike matching a single version string.
     req_sha = hashlib.sha256(args.requirements.read_bytes()).hexdigest()
+    overrides_sha = hashlib.sha256(args.overrides.read_bytes()).hexdigest()
 
     work = pathlib.Path(tempfile.mkdtemp(prefix="aicr-pylicenses."))
     try:
-        packages = collect(args.requirements, work, args.wheels_dir)
+        packages = collect(args.requirements, args.overrides, work, args.wheels_dir)
         check_arch_markers(packages)
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -458,7 +513,10 @@ def main() -> int:
         raise SystemExit("ERROR: no packages collected — refusing to write an empty fragment.")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(render(packages, args.requirements, req_sha), encoding="utf-8")
+    args.output.write_text(
+        render(packages, args.requirements, req_sha, args.overrides, overrides_sha),
+        encoding="utf-8",
+    )
 
     print(f"Wrote {args.output} ({len(packages)} packages)", file=sys.stderr)
 

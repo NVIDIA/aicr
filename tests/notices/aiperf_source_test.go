@@ -73,35 +73,71 @@ class FakeResult:
     stdout = ""
     stderr = ""
 
+RESOLUTIONS = {
+    "requirements.txt": [
+        {"metadata": {"name": "aiperf", "version": "0.11.0"}},
+        {"metadata": {"name": "Pillow", "version": "12.3.0"}},
+        {"metadata": {"name": "certifi", "version": "2026.7.22"}},
+    ],
+    "requirements-overrides.txt": [
+        {"metadata": {"name": "pillow", "version": "13.0.0"}},
+    ],
+}
+
 def fake_run(cmd, **kwargs):
-    captured["cmd"] = cmd
+    req = cmd[cmd.index("--requirement") + 1]
+    captured[req.split("/")[-1]] = cmd
     # pip writes the resolution to the --report path; emit a minimal one.
     report = pathlib.Path(cmd[cmd.index("--report") + 1])
-    report.write_text(json.dumps({"install": [
-        {"metadata": {"name": "aiperf", "version": "0.11.0"}},
-        {"metadata": {"name": "certifi", "version": "2026.7.22"}},
-    ]}))
+    report.write_text(json.dumps({"install": RESOLUTIONS[req.split("/")[-1]]}))
     return FakeResult()
 
 mod.subprocess.run = fake_run
 pkgs = mod.read_closure()
 
-assert pkgs == [("aiperf", "0.11.0"), ("certifi", "2026.7.22")], pkgs
+assert pkgs == [("aiperf", "0.11.0"), ("pillow", "13.0.0"), ("certifi", "2026.7.22")], pkgs
 
-cmd = captured["cmd"]
-# The requirements file the image installs must be the resolution input.
-assert "--requirement" in cmd, cmd
-req = cmd[cmd.index("--requirement") + 1]
-assert req.endswith("validators/performance/requirements.txt"), req
-# Resolution only; a real install here would be a different (and slow) thing.
-assert "--dry-run" in cmd, cmd
-print("resolved from:", req.split("/")[-1])
+# The files the image installs must be the resolution inputs.
+for name in RESOLUTIONS:
+    cmd = captured[name]
+    req = cmd[cmd.index("--requirement") + 1]
+    assert req.endswith("validators/performance/" + name), req
+    # Resolution only; a real install here would be a different (and slow) thing.
+    assert "--dry-run" in cmd, cmd
+# The image installs the overrides without dependency resolution.
+assert "--no-deps" in captured["requirements-overrides.txt"], captured
+assert "--no-deps" not in captured["requirements.txt"], captured
+print("resolved from:", " ".join(sorted(RESOLUTIONS)))
 `)
 	if err != nil {
 		t.Fatalf("read_closure failed: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "resolved from: requirements.txt") {
+	if !strings.Contains(out, "resolved from: requirements-overrides.txt requirements.txt") {
 		t.Errorf("unexpected output: %s", out)
+	}
+}
+
+// TestAiperfSourceRejectsOverrideOutsideClosure pins that an override adding a
+// package, rather than replacing one, aborts: the image installs it with
+// --no-deps, so its dependencies would ship missing.
+func TestAiperfSourceRejectsOverrideOutsideClosure(t *testing.T) {
+	out, err := runPy(t, `
+resolutions = {False: [("aiperf", "0.11.0")], True: [("stranger", "1.0.0")]}
+mod._resolve = lambda requirements, no_deps: resolutions[no_deps]
+try:
+    mod.read_closure()
+    print("NO-ABORT")
+except SystemExit as e:
+    print("ABORTED:", str(e))
+`)
+	if err != nil {
+		t.Fatalf("helper failed: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "NO-ABORT") {
+		t.Error("an override outside the closure did not abort")
+	}
+	if !strings.Contains(out, "does not contain: stranger") {
+		t.Errorf("expected the fail-closed error naming the package, got: %s", out)
 	}
 }
 

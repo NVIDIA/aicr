@@ -188,14 +188,20 @@ func fixtures() []wheel {
 func runGenerator(t *testing.T, wheelsDir, outPath string) (string, error) {
 	t.Helper()
 
-	requirements := filepath.Join(t.TempDir(), "requirements.txt")
+	inputs := t.TempDir()
+	requirements := filepath.Join(inputs, "requirements.txt")
 	if err := os.WriteFile(requirements, []byte("example==1.0.0\n"), 0o600); err != nil {
 		t.Fatalf("write requirements: %v", err)
+	}
+	overrides := filepath.Join(inputs, "requirements-overrides.txt")
+	if err := os.WriteFile(overrides, []byte("fenced==4.1.0\n"), 0o600); err != nil {
+		t.Fatalf("write overrides: %v", err)
 	}
 
 	args := []string{
 		repositoryPath(t, pythonLicensesTool),
 		"--requirements", requirements,
+		"--overrides", overrides,
 		"--output", outPath,
 		"--wheels-dir", wheelsDir,
 	}
@@ -237,6 +243,8 @@ func TestPythonLicensesGolden(t *testing.T) {
 		ReplaceAll(got, []byte("sha256 `<redacted>`"))
 	normalized = regexp.MustCompile(`from `+"`"+`[^`+"`"+`]*requirements\.txt`+"`").
 		ReplaceAll(normalized, []byte("from `<requirements>`"))
+	normalized = regexp.MustCompile("`"+`[^`+"`"+`]*requirements-overrides\.txt`+"`").
+		ReplaceAll(normalized, []byte("`<overrides>`"))
 
 	goldenPath := repositoryPath(t, "tests/notices/testdata/python-notices.golden.md")
 	if *update {
@@ -404,6 +412,79 @@ func TestPythonLicensesSanitizesProseLicense(t *testing.T) {
 		if len(line) > 300 {
 			t.Errorf("index row suspiciously long, prose leaked into a cell: %q", line[:120])
 		}
+	}
+}
+
+// TestPythonLicensesOverrides pins that an override wheel replaces the closure's
+// record, since the image installs it over the resolved version, and that an
+// override naming a package outside the closure fails closed.
+func TestPythonLicensesOverrides(t *testing.T) {
+	override := func(name, version string) wheel {
+		return wheel{
+			name:    name,
+			version: version,
+			metadata: strings.Join([]string{
+				"Metadata-Version: 2.1",
+				"Name: " + name,
+				"Version: " + version,
+				"License: MIT-CMU",
+				"",
+			}, "\n"),
+			files: map[string]string{"LICENSE": "Override license for " + name + ".\n"},
+		}
+	}
+
+	tests := []struct {
+		name     string
+		override wheel
+		wantErr  string
+	}{
+		{"replaces the resolved version", override("fenced", "4.1.0"), ""},
+		{"rejects a package outside the closure", override("stranger", "1.0.0"),
+			"override names a package the resolved closure does not contain: stranger"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wheelsDir := t.TempDir()
+			for _, w := range fixtures() {
+				w.write(t, wheelsDir)
+			}
+			overridesDir := filepath.Join(wheelsDir, "overrides")
+			if err := os.Mkdir(overridesDir, 0o700); err != nil {
+				t.Fatalf("create overrides dir: %v", err)
+			}
+			tt.override.write(t, overridesDir)
+
+			outPath := filepath.Join(t.TempDir(), "python-notices.md")
+			output, err := runGenerator(t, wheelsDir, outPath)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatal("generator accepted an override outside the closure; it must fail closed")
+				}
+				if !strings.Contains(output, tt.wantErr) {
+					t.Errorf("expected %q, got:\n%s", tt.wantErr, output)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("generator failed: %v\n%s", err, output)
+			}
+
+			content, err := os.ReadFile(outPath) //nolint:gosec // test-controlled path
+			if err != nil {
+				t.Fatalf("read output: %v", err)
+			}
+			text := string(content)
+			if !strings.Contains(text, "| `fenced` | 4.1.0 | MIT-CMU |") {
+				t.Errorf("index does not record the override version:\n%s", text)
+			}
+			if strings.Contains(text, "| `fenced` | 4.0.0 |") || strings.Contains(text, "not a real fence") {
+				t.Error("the replaced version is still recorded alongside the override")
+			}
+			if !strings.Contains(text, "Override license for fenced.") {
+				t.Error("the override's license text is not rendered")
+			}
+		})
 	}
 }
 

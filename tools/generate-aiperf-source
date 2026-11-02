@@ -67,6 +67,7 @@ import urllib.request
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 REQUIREMENTS = REPO_ROOT / "validators/performance/requirements.txt"
+OVERRIDES = REPO_ROOT / "validators/performance/requirements-overrides.txt"
 
 # Must match the aiperf-bench builder stage so the resolution matches what the
 # image installs: `FROM python:3.13-slim` and the manylinux targets its wheels
@@ -138,27 +139,15 @@ def with_retry(operation, description: str):
     raise RuntimeError("unreachable")
 
 
-def read_closure() -> list[tuple[str, str]]:
-    """Resolve requirements.txt to the exact closure the image installs.
+def _normalize(name: str) -> str:
+    """Normalize a distribution name per PEP 503."""
+    return re.sub(r"[-_.]+", "-", name).lower()
 
-    Resolved here rather than read from the committed notices fragment so that
-    the archive and the image derive from ONE input: the same requirements.txt
-    the Dockerfile installs. A committed snapshot is a point-in-time record that
-    silently ages out of step with what a later build resolves, which would
-    break the per-digest correspondence the referrer exists to assert.
 
-    `--dry-run --report` resolves without downloading, so this costs a resolution
-    (~90s) rather than a full install, and deps stay free to float: a rebuild
-    picks up patched transitive versions exactly as it does today, and this
-    follows it instead of pinning it.
-
-    Two known gaps, tracked separately rather than claimed away: pip and wheel
-    come from `python -m venv` and are not declared here, and the image build
-    layer-caches its own resolution (#2086), so a cached build can ship an older
-    closure than this resolves.
-    """
-    if not REQUIREMENTS.is_file():
-        raise SystemExit(f"ERROR: {REQUIREMENTS} not found.")
+def _resolve(requirements: pathlib.Path, no_deps: bool) -> list[tuple[str, str]]:
+    """Return the (name, version) pairs pip would install from ``requirements``."""
+    if not requirements.is_file():
+        raise SystemExit(f"ERROR: {requirements} not found.")
 
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as handle:
         report = pathlib.Path(handle.name)
@@ -169,8 +158,10 @@ def read_closure() -> list[tuple[str, str]]:
         "--report", str(report),
         "--only-binary=:all:",
         "--python-version", PYTHON_VERSION,
-        "--requirement", str(REQUIREMENTS),
+        "--requirement", str(requirements),
     ]
+    if no_deps:
+        cmd.append("--no-deps")
     for tag in PLATFORM_TAGS:
         cmd += ["--platform", tag]
 
@@ -179,19 +170,54 @@ def read_closure() -> list[tuple[str, str]]:
         if result.returncode != 0:
             sys.stderr.write(result.stdout)
             sys.stderr.write(result.stderr)
-            raise SystemExit(f"ERROR: could not resolve {REQUIREMENTS}")
+            raise SystemExit(f"ERROR: could not resolve {requirements}")
 
         data = json.loads(report.read_text(encoding="utf-8"))
     finally:
         report.unlink(missing_ok=True)
 
-    packages = [
+    return [
         (entry["metadata"]["name"], entry["metadata"]["version"])
         for entry in data.get("install", [])
     ]
+
+
+def read_closure() -> list[tuple[str, str]]:
+    """Resolve the requirements inputs to the exact closure the image installs.
+
+    Resolved here rather than read from the committed notices fragment so that
+    the archive and the image derive from the same inputs: requirements.txt and
+    requirements-overrides.txt, as the Dockerfile installs them. A committed snapshot is a point-in-time record that
+    silently ages out of step with what a later build resolves, which would
+    break the per-digest correspondence the referrer exists to assert.
+
+    `--dry-run --report` resolves without downloading, so this costs a resolution
+    (~90s) rather than a full install, and deps stay free to float: a rebuild
+    picks up patched transitive versions exactly as it does today, and this
+    follows it instead of pinning it.
+
+    requirements-overrides.txt is resolved with `--no-deps`, as the image
+    installs it, and replaces the matching entries, so the archive carries the
+    source of the version that ships rather than the one it displaced.
+
+    Two known gaps, tracked separately rather than claimed away: pip and wheel
+    come from `python -m venv` and are not declared here, and the image build
+    layer-caches its own resolution (#2086), so a cached build can ship an older
+    closure than this resolves.
+    """
+    packages = _resolve(REQUIREMENTS, no_deps=False)
     if not packages:
         raise SystemExit(f"ERROR: {REQUIREMENTS} resolved to no packages")
-    return packages
+
+    overrides = {_normalize(n): (n, v) for n, v in _resolve(OVERRIDES, no_deps=True)}
+    present = {_normalize(n) for n, _ in packages}
+    added = sorted(set(overrides) - present)
+    if added:
+        raise SystemExit(
+            f"ERROR: {OVERRIDES} names a package the closure does not contain: "
+            + ", ".join(added)
+        )
+    return [overrides.get(_normalize(n), (n, v)) for n, v in packages]
 
 
 def sdist_for(name: str, version: str) -> tuple[str, str, str] | None:

@@ -1,8 +1,7 @@
 # Walking-skeleton installation values for charts/aicr-operator on the
-# kind cluster, whose in-cluster registry requires a password.
+# kind cluster, with the chart's default in-cluster registry.
 # tools/operator-skeleton sets aicr.version and aicr.image from .settings.yaml
-# and creates the static provider's Secrets: registry-auth in the operator and
-# Job namespaces and the Argo CD repo-creds; none is committed. The operator
+# and registry.inCluster.image to the registry image it builds. The operator
 # resolves the EKS lane from declared criteria (development.skipDiscovery),
 # which a kind snapshot cannot match; the discovery subtest turns discovery on
 # with kind-compatible criteria.
@@ -10,13 +9,6 @@ operator:
   image: ko.local/aicr-operator:skeleton
   imagePullPolicy: Never
   logLevel: debug
-registry:
-  repository: oci://registry.aicr-registry.svc.cluster.local:5000/aicr/cluster
-  plainHTTP: true
-  auth:
-    provider: static
-    staticSecretRef: registry-auth
-    repoCredsSecret: aicr-registry
 namespaces:
   # cert-manager for the skeleton's release, node-feature-discovery for the
   # removal test, monitoring for the foreign-object test and aicr-e2e for the

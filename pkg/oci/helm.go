@@ -93,6 +93,10 @@ func packageAndPushHelmChartWithDependencies(
 	if err := validateHelmChartOptions(opts); err != nil {
 		return nil, err
 	}
+	if !opts.Reference.IsOCI {
+		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest,
+			"OCI registry reference is required for PackageAndPushHelmChart")
+	}
 	if err := contextError(ctx, "Helm OCI publication canceled"); err != nil {
 		return nil, err
 	}
@@ -224,7 +228,7 @@ func packageHelmOperationWithDependencies(
 	if loadErr != nil {
 		return nil, loadErr
 	}
-	if path.Base(opts.Reference.Repository) != meta.Name {
+	if opts.Reference.IsOCI && path.Base(opts.Reference.Repository) != meta.Name {
 		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("OCI repository basename %q must match Chart.yaml name %q",
 				path.Base(opts.Reference.Repository), meta.Name))
@@ -328,7 +332,7 @@ func packageHelmOperationWithDependencies(
 }
 
 func validateHelmChartOptions(opts HelmChartOptions) error {
-	if opts.Reference == nil || !opts.Reference.IsOCI {
+	if opts.Reference == nil || (!opts.Reference.IsOCI && !opts.Reference.IsLayout) {
 		return apperrors.New(apperrors.ErrCodeInvalidRequest,
 			"OCI reference is required for PackageAndPushHelmChart")
 	}
@@ -338,8 +342,10 @@ func validateHelmChartOptions(opts HelmChartOptions) error {
 	if _, err := HelmChartVersionFromTag(opts.Reference.Tag); err != nil {
 		return err
 	}
-	if err := validateRegistryReference(opts.Reference.Registry, opts.Reference.Repository); err != nil {
-		return err
+	if opts.Reference.IsOCI {
+		if err := validateRegistryReference(opts.Reference.Registry, opts.Reference.Repository); err != nil {
+			return err
+		}
 	}
 	if opts.SourceFiles != nil && !containsSourceFile(opts.SourceFiles, "Chart.yaml") {
 		return apperrors.New(apperrors.ErrCodeInvalidRequest,
@@ -428,6 +434,19 @@ func loadChartYAML(
 				meta.Version, encoded, expectedTag))
 	}
 	return &meta, nil
+}
+
+// ValidateChartName reports whether name can be both a Helm chart name and
+// the final path segment of the OCI repository the chart is published to.
+func ValidateChartName(name string) error {
+	if err := validateChartName(name); err != nil {
+		return err
+	}
+	if !repositoryPattern.MatchString(name) {
+		return apperrors.New(apperrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("chart name %q must be lowercase alphanumeric with optional separators (., _, -)", name))
+	}
+	return nil
 }
 
 func validateChartName(name string) error {

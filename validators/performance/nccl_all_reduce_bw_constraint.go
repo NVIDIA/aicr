@@ -2006,7 +2006,7 @@ func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType s
 			nodeSelector = map[string]string{gpuProductLabel: product}
 		}
 		return nodeSelector, []v1.Toleration{{Operator: v1.TolerationOpExists}}, nil
-	case recipe.CriteriaServiceAny, recipe.CriteriaServiceOCP, recipe.CriteriaServiceKind, recipe.CriteriaServiceLKE, recipe.CriteriaServiceBCM, recipe.CriteriaServiceMetal3, recipe.CriteriaServiceRKE2, recipe.CriteriaServiceK0s, recipe.CriteriaServiceMK8s:
+	case recipe.CriteriaServiceAny, recipe.CriteriaServiceCKS, recipe.CriteriaServiceOCP, recipe.CriteriaServiceKind, recipe.CriteriaServiceLKE, recipe.CriteriaServiceBCM, recipe.CriteriaServiceMetal3, recipe.CriteriaServiceRKE2, recipe.CriteriaServiceK0s, recipe.CriteriaServiceMK8s:
 		return nil, nil, nil
 	default:
 		return nil, nil, nil

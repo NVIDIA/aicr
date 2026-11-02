@@ -14,11 +14,12 @@
 
 {{/*
 Argo CD objects: the project every owned Application uses and the
-runtime registry's repo-creds with the aws provider. Nothing is written to
-argocd-cm, whose keys every Argo CD user shares. The project and repo-creds
-are kept on uninstall, so owned Applications stay valid.
+runtime registry's repo-creds with the aws provider; the in-cluster
+registry's are in registry.yaml. Nothing is written to argocd-cm, whose keys
+every Argo CD user shares. The project and repo-creds are kept on uninstall,
+so owned Applications stay valid.
 */}}
-{{- $registry := .Values.registry.repository }}
+{{- $registry := include "aicr-operator.registry" . }}
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
@@ -44,7 +45,7 @@ spec:
   clusterResourceWhitelist:
     - group: '*'
       kind: '*'
-{{- if eq .Values.registry.auth.provider "aws" }}
+{{- if eq (include "aicr-operator.ecr" .) "true" }}
 ---
 # The operator writes the ECR token into this Secret and refreshes it every
 # 6 hours; the chart never carries a credential.

@@ -473,6 +473,8 @@ land later; none is implied by Preview alone.
 
 | Coordinate | Setup guide | Evidence |
 |---|---|---|
+| `cks / h100 / ubuntu / training` | [CoreWeave H100 Setup](cks-h100-setup.md) | pending: live cluster qualification and signed publication to [validation.aicr.run](https://validation.aicr.run/) tracked in [#2342](https://github.com/NVIDIA/aicr/issues/2342) |
+| `cks / rtx-pro-6000 / ubuntu / training` | [CoreWeave RTX PRO 6000 Setup](cks-rtx-pro-6000-setup.md) | pending: live cluster qualification and signed publication to [validation.aicr.run](https://validation.aicr.run/) tracked in [#2342](https://github.com/NVIDIA/aicr/issues/2342) |
 | `rke2 / vr200 / ubuntu / training` | [RKE2 VR200 Setup](rke2-vr200-setup.md) | [validation.aicr.run/#/rke2/vr200-ubuntu/training](https://validation.aicr.run/#/rke2/vr200-ubuntu/training) |
 | `rke2 / vr200 / ubuntu / training / kubeflow` | [RKE2 VR200 Setup](rke2-vr200-setup.md) | [validation.aicr.run/#/rke2/vr200-ubuntu/training-kubeflow](https://validation.aicr.run/#/rke2/vr200-ubuntu/training-kubeflow) |
 | `rke2 / vr200 / ubuntu / inference` | [RKE2 VR200 Setup](rke2-vr200-setup.md) | [validation.aicr.run/#/rke2/vr200-ubuntu/inference](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference) |
@@ -808,9 +810,18 @@ the pool was actually created with the managed driver install disabled.
 readings fail closed. `gke-default` declares no constraint on this
 reading. It remains the zero-setup default.
 
-No equivalent reading exists for other services yet. Declare a
-driver-ownership profile only once the signal for that service exists, and
-give both values symmetric constraints over it. Do not substitute a signal
+**CKS** declares only `gpuStack=coreweave`, with an external GPU advertiser.
+Its constraints require `GPU.hardware.driver-loaded` and
+`K8s.policy.devicePlugin.enabled` to be `true`; missing or false readings
+fail closed. These are prerequisites for the one provider-managed stack,
+not a control-plane signal distinguishing driver-installation modes or
+proof of the provider stack's health. See
+[CoreWeave H100 Setup](cks-h100-setup.md) and
+[CoreWeave RTX PRO 6000 Setup](cks-rtx-pro-6000-setup.md).
+
+For other services, introduce selectable driver-ownership modes only once
+a signal distinguishing those modes exists, and give both values symmetric
+constraints over it. Do not substitute a signal
 that reports something adjacent: GKE's
 `gke-no-default-nvidia-gpu-device-plugin` label, for instance, governs
 device-plugin advertisement rather than driver provisioning
@@ -1366,7 +1377,7 @@ aicr bundle --recipe recipe.yaml \
 helm install ... --set image.repository=602401143452.dkr.ecr.eu-west-1.amazonaws.com/eks/aws-efa-k8s-device-plugin
 ```
 
-`--dynamic` is supported with `helm`, `helmfile`, `argocd-helm`, `flux`, and `terraform` deployers; `argocd` does not support it (use `argocd-helm` instead). See [Dynamic Install-Time Values](../user/cli-reference.md#dynamic-install-time-values) for the broader pattern.
+`--dynamic` is supported with `helm`, `helmfile`, `argocd-helm`, `flux`, `terraform`, and `fleet` deployers; `argocd` does not support it (use `argocd-helm` instead). See [Dynamic Install-Time Values](../user/cli-reference.md#dynamic-install-time-values) for the broader pattern.
 
 **Partition-aware variants.** Standard AWS uses account ID `602401143452`. GovCloud and China use different accounts and URI suffixes:
 

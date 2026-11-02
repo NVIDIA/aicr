@@ -298,8 +298,8 @@ jobs:
               # image, whose dependency closure is an installed venv and not
               # part of the Go module graph. It cannot be regenerated here (needs
               # docker + PyPI), so the committed fragment is watched directly,
-              # alongside the requirements.txt whose sha256 the generator
-              # asserts the fragment still records — editing requirements
+              # alongside the requirements and overrides files whose sha256 the
+              # generator asserts the fragment still records — editing either
               # without a refresh must fail this gate rather than ship stale
               # attributions.
               - 'Makefile'
@@ -312,6 +312,7 @@ jobs:
               - 'tools/check-fence-balance'
               - 'tools/generate-python-licenses'
               - 'validators/performance/requirements.txt'
+              - 'validators/performance/requirements-overrides.txt'
               - 'validators/performance/licenses/**'
               # The actions that supply this job's toolchain. install-go-licenses
               # matters most: it exists to pin GOFLAGS, and a build that

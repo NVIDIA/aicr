@@ -97,7 +97,7 @@ spec:
     # extra host prep: nvidia-gb300-performance sizes its hugepages for a 64k
     # granule (hugepagesz=512M, and no 1G, which a 64k granule cannot register),
     # and nvidia-setup-kernel installs the pinned kernel, which resolves to
-    # 6.17.0-1019-aws-64k on arm64. Running the profile on a 4k-granule kernel
+    # 7.0.0-1014-aws-64k on arm64. Running the profile on a 4k-granule kernel
     # would get the 512M clause rejected at boot and its hugepages= dropped.
     #
     # multiNodeTraining is a shim onto nvidia-gb300-performance in nvidia-tuned

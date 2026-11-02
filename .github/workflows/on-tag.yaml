@@ -944,6 +944,7 @@ jobs:
         env:
           CANDIDATE_VERSION: ${{ github.ref_name }}
           CANDIDATE_REPOSITORY: ghcr.io/nvidia/aicr-operator
+          CANDIDATE_REGISTRY_REPOSITORY: ghcr.io/nvidia/aicr-registry
         run: make operator-candidate
 
       # Before release-check, so a finding stops promotion and every push.
@@ -1026,10 +1027,40 @@ jobs:
           category: 'anchore-image-aicr-operator-${{ matrix.platform.arch }}'
         continue-on-error: true
 
+      # The chart's in-cluster registry (cmd/aicr-registry), built with the
+      # operator and held to the same bar.
+      - name: Scan the in-cluster registry image
+        id: registry-scan
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2
+        env:
+          GRYPE_PLATFORM: ${{ matrix.platform.name }}
+        with:
+          image: 'oci-dir:dist/candidate/registry-image'
+          severity-cutoff: 'high'
+          output-format: sarif
+          only-fixed: true
+          fail-build: true
+          config: .grype.yaml
+          vex: .openvex.json
+        continue-on-error: true
+
+      - name: Upload the registry SARIF to GitHub Security
+        if: steps.registry-scan.outputs.sarif != ''
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370  # v4.39.1
+        with:
+          sarif_file: ${{ steps.registry-scan.outputs.sarif }}
+          category: 'anchore-image-aicr-registry-${{ matrix.platform.arch }}'
+        continue-on-error: true
+
       - name: Fail on vulnerabilities
-        if: steps.scan.outcome == 'failure'
+        if: steps.scan.outcome == 'failure' || steps.registry-scan.outcome == 'failure'
+        env:
+          OPERATOR_SCAN: ${{ steps.scan.outcome }}
+          REGISTRY_SCAN: ${{ steps.registry-scan.outcome }}
+          PLATFORM: ${{ matrix.platform.name }}
         run: |
-          echo "::error::Vulnerability scan found issues in the operator image for ${{ matrix.platform.name }}"
+          [[ "${OPERATOR_SCAN}" == failure ]] && echo "::error::Vulnerability scan found issues in the operator image for ${PLATFORM}"
+          [[ "${REGISTRY_SCAN}" == failure ]] && echo "::error::Vulnerability scan found issues in the in-cluster registry image for ${PLATFORM}"
           exit 1
 
   operator-publish:
@@ -1098,7 +1129,7 @@ jobs:
 
       # Publishing the same candidate again is a no-op, so a rerun converges;
       # a tag that already names other content is refused.
-      - name: Push the operator image and chart
+      - name: Push the operator and registry images and the chart
         id: push
         env:
           CANDIDATE_REGISTRY_USERNAME: ${{ github.actor }}
@@ -1118,6 +1149,13 @@ jobs:
           subject-digest: ${{ steps.push.outputs.image-digest }}
           push-to-registry: true
 
+      - name: Attest the in-cluster registry image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-name: ${{ steps.push.outputs.registry-repository }}
+          subject-digest: ${{ steps.push.outputs.registry-digest }}
+          push-to-registry: true
+
       - name: Attest the operator chart
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
         with:
@@ -1130,8 +1168,12 @@ jobs:
         id: platforms
         run: |
           set -euo pipefail
-          echo "amd64=$(jq -er '.operator.platforms["linux/amd64"]' dist/candidate/candidate.json)" >> "$GITHUB_OUTPUT"
-          echo "arm64=$(jq -er '.operator.platforms["linux/arm64/v8"]' dist/candidate/candidate.json)" >> "$GITHUB_OUTPUT"
+          {
+            echo "amd64=$(jq -er '.operator.platforms["linux/amd64"]' dist/candidate/candidate.json)"
+            echo "arm64=$(jq -er '.operator.platforms["linux/arm64/v8"]' dist/candidate/candidate.json)"
+            echo "registry-amd64=$(jq -er '.registry.platforms["linux/amd64"]' dist/candidate/candidate.json)"
+            echo "registry-arm64=$(jq -er '.registry.platforms["linux/arm64/v8"]' dist/candidate/candidate.json)"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Attest the linux/amd64 SBOM
         uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e  # v4.1.0
@@ -1147,6 +1189,22 @@ jobs:
           subject-name: ${{ steps.push.outputs.image-repository }}
           subject-digest: ${{ steps.platforms.outputs.arm64 }}
           sbom-path: dist/candidate/sbom/aicr-operator-linux-arm64-v8.spdx.json
+          push-to-registry: true
+
+      - name: Attest the registry linux/amd64 SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e  # v4.1.0
+        with:
+          subject-name: ${{ steps.push.outputs.registry-repository }}
+          subject-digest: ${{ steps.platforms.outputs.registry-amd64 }}
+          sbom-path: dist/candidate/sbom/aicr-registry-linux-amd64.spdx.json
+          push-to-registry: true
+
+      - name: Attest the registry linux/arm64 SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e  # v4.1.0
+        with:
+          subject-name: ${{ steps.push.outputs.registry-repository }}
+          subject-digest: ${{ steps.platforms.outputs.registry-arm64 }}
+          sbom-path: dist/candidate/sbom/aicr-registry-linux-arm64-v8.spdx.json
           push-to-registry: true
 
       - name: Attest the kubectl-aicr binaries

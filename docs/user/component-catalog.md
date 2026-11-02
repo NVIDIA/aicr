@@ -683,6 +683,7 @@ NVSentinel watches GPUs, drivers, NVLink and syslog. It does not watch the rest 
 | AKS | enabled by default via the AKS Linux Extension | blocked at bundle time |
 | OKE | ships `oke-node-problem-detector`, disabled behind the `oci.oraclecloud.com/oke-node-problem-detector-enabled=true` node label | blocked — the label is operator-settable and invisible at bundle time, so a second instance cannot be ruled out |
 | OCP | — | blocked — needs a SecurityContextConstraints binding AICR does not ship |
+| CKS | NPD observed in the reference RTX PRO 6000 cluster; provider-wide ownership is unqualified | blocked — CKS is not on the verified allowlist |
 | LKE, BCM, Metal3, k0s, MK8s, NVKE, generic | unverified | blocked until someone confirms they run none |
 
 The gate is an allowlist, not a denylist: a platform is permitted only once someone has checked it runs no NPD of its own. To qualify a new one, verify that, then add it to `npdQualifiedServices` in `pkg/bundler/validations/checks.go`.
@@ -695,6 +696,7 @@ The gate is an allowlist, not a denylist: a platform is permitted only once some
 | `oke` | Oracle ships one disabled behind a node label; that label is operator-settable and invisible at bundle time, so a second instance cannot be ruled out |
 | `ocp` | the privileged DaemonSet needs a SecurityContextConstraints binding AICR does not ship — it would bundle cleanly, then fail admission |
 | `os: talos` | `os-talos` relocates privileged components into `privileged-*` namespaces for Pod Security Admission, but not NPD, so it would land in a restricted namespace |
+| `cks` | not allowlisted; the reference RTX PRO 6000 cluster already runs NPD, so a second installation has not been qualified |
 | `lke`, `bcm`, `metal3`, `k0s`, `mk8s`, `nvke`, `generic` | unverified — nobody has checked whether they run their own |
 | no criteria at all | the platform is unknown, and could be any of the above |
 
@@ -769,7 +771,7 @@ When a Slurm health check drains a node, that fact stays inside Slurm: Kubernete
 
 **It requires `slinky-slurm`.** The monitor watches worker pods in the namespace `slinky-slurm` deploys to (`slurm`), and only `slinky-slurm` creates them. `CheckNVSentinelSlurmDrainMonitorRequiresSlinky` blocks the bundle when the mixin is used on a recipe without `slinky-slurm`, with it disabled, or with the two namespaces out of step, because each of those deploys a monitor that runs and never sees a pod.
 
-**What it reads.** Worker pods are selected with `app.kubernetes.io/name=slurmd,app.kubernetes.io/component=worker`, the labels the Slinky slurm-operator's NodeSet controller sets. Those labels, the condition name, and the `.Message` field were verified against the slurm-operator v1.2.0 source this repo pins; `TestSlurmDrainMonitorSelectorPinnedToVerifiedSlinkyVersion` fails when `slinky-slurm-operator` is bumped, so the next version is re-checked rather than assumed. A reason that carries several causes (`a; b`) is split on `; `, and each part is matched on its own.
+**What it reads.** Worker pods are selected with `app.kubernetes.io/name=slurmd,app.kubernetes.io/component=worker`, the labels the Slinky slurm-operator's NodeSet controller sets. Those labels, the condition name, and the `.Message` field were verified against the slurm-operator v1.2.2 source this repo pins; `TestSlurmDrainMonitorSelectorPinnedToVerifiedSlinkyVersion` fails when `slinky-slurm-operator` is bumped, so the next version is re-checked rather than assumed. A reason that carries several causes (`a; b`) is split on `; `, and each part is matched on its own.
 
 | Drain reason | Result |
 |---|---|
@@ -2346,7 +2348,7 @@ New components are added declaratively in `recipes/registry.yaml` — no Go code
 
 ## Topology-aware scheduling with Kueue and Topograph
 
-Kueue topology-aware scheduling (TAS) is on by default in the shipped Kueue (0.19.3) but only reads node labels; it does not create them. The `platform=kueue` leaves install [Topograph](https://github.com/dsx-ai-factory/topograph) with the `k8s` engine to write the labels, and wire Kueue's `Topology` and `ResourceFlavor` to them. Recipes without `--platform kueue` are unchanged. `platform` takes a single value, so these leaves cannot be combined with `--platform kubeflow`: there is no recipe that installs Kubeflow Trainer together with Kueue TAS. Kueue itself can queue `TrainJob`s (Trainer v2.0.0 or later, `trainer.kubeflow.org/trainjob` is already enabled in the shipped Kueue config), but topology-aware placement of `TrainJob`s is not covered by Kueue's TrainJob documentation and has not been verified here.
+Kueue topology-aware scheduling (TAS) is on by default in the shipped Kueue (0.19.6) but only reads node labels; it does not create them. The `platform=kueue` leaves install [Topograph](https://github.com/dsx-ai-factory/topograph) with the `k8s` engine to write the labels, and wire Kueue's `Topology` and `ResourceFlavor` to them. Recipes without `--platform kueue` are unchanged. `platform` takes a single value, so these leaves cannot be combined with `--platform kubeflow`: there is no recipe that installs Kubeflow Trainer together with Kueue TAS. Kueue itself can queue `TrainJob`s (Trainer v2.0.0 or later, `trainer.kubeflow.org/trainjob` is already enabled in the shipped Kueue config), but topology-aware placement of `TrainJob`s is not covered by Kueue's TrainJob documentation and has not been verified here.
 
 | Leaf | Provider | Topology levels (widest first) |
 |------|----------|--------------------------------|

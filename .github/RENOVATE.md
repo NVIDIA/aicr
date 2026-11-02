@@ -21,6 +21,7 @@ Policy choices (schedule, cooldown, auto-merge scope, group consolidation) are d
 | `.github/workflows/*.yaml`, `.github/actions/*/action.yml` | `github-actions` (**disabled** — Dependabot owns workflow / composite-action bumps; Renovate cannot push `.github/workflows/*` with the auto-issued `GITHUB_TOKEN`) |
 | `validators/*/Dockerfile` | `dockerfile` |
 | `validators/performance/requirements.txt` (aiperf) | `pip_requirements` (`aiperf` group) |
+| `validators/performance/requirements-overrides.txt` (transitive overrides, e.g. pillow) | `pip_requirements` (default file pattern; needs the same `make python-licenses` refresh) |
 | `validators/performance/aiperf-bench.Dockerfile` `ARG AIPERF_VERSION` | dedicated `pypi` customManager (`aiperf` group, so it moves with `requirements.txt`) |
 | `infra/**/*.tf` | `terraform` (grouped) |
 | `recipes/components/*/values.yaml` | `helm-values` (partial — see limitations) |

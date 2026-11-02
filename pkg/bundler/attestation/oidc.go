@@ -124,6 +124,7 @@ func fetchAmbientOIDCTokenAttempt(ctx context.Context, reqURL, requestToken stri
 	req.Header.Set("Authorization", "Bearer "+requestToken)
 
 	client := defaults.NewHTTPClient(0)
+	defer client.CloseIdleConnections()
 	resp, err := client.Do(req) //nolint:gosec // URL is from ACTIONS_ID_TOKEN_REQUEST_URL (trusted GitHub Actions env var)
 	if err != nil {
 		// Transport-level failure (TLS handshake timeout, connection reset,

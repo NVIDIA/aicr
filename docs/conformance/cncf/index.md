@@ -40,6 +40,7 @@ docs/conformance/cncf/
 
 pkg/evidence/cncf/                    # CNCF evidence collector package
 ├── collector.go                      # Feature registry, alias mapping
+├── consts.go                         # Feature name constants
 ├── renderer.go                       # Evidence file rendering
 ├── requirements.go                   # CNCF requirement ID mapping
 ├── templates.go                      # Evidence templates
@@ -48,8 +49,10 @@ pkg/evidence/cncf/                    # CNCF evidence collector package
     ├── collect-evidence.sh
     └── manifests/
         ├── dra-gpu-test.yaml
+        ├── dynamo-vllm-agg.yaml
         ├── gang-scheduling-test.yaml
-        └── hpa-gpu-test.yaml
+        ├── hpa-gpu-test.yaml
+        └── trainer-pytorch-test.yaml
 ```
 
 ## Usage
