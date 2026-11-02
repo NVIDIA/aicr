@@ -143,5 +143,5 @@ recipe whose content does not match its recorded digest.
 
 The chart's `aicr-operator-approver` ClusterRole and Role grant the commands'
 permissions to the users and groups in its `approvers` value. They do not
-grant the in-cluster pull's: that login can write to the registry, so the pull
-is an administrator's step.
+grant the permissions the in-cluster pull needs: the login it reads can also
+write to the registry, so the pull is an administrator's step.
