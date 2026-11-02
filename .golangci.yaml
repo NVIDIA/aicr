@@ -148,6 +148,7 @@ linters:
           list-mode: lax
           files:
             - "**/cmd/aicr-operator/**"
+            - "**/cmd/aicr-registry/**"
             - "**/cmd/kubectl-aicr/**"
             - "**/api/operator/**"
             - "**/pkg/operator/**"

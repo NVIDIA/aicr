@@ -266,8 +266,11 @@ license: ## Add/verify license headers in source files
 #### the policy. The only sanctioned exceptions are specific MPL-2.0 packages
 #### whose use has been explicitly approved; each is listed by exact import path
 #### so unrelated MPL-2.0 deps still fail closed for review. The go-cleanhttp /
-#### go-retryablehttp pair, and the HashiCorp Vault client subtree (#1577, the
-#### hashivault:// KMS signing provider), are the approved exceptions.
+#### go-retryablehttp pair, the HashiCorp Vault client subtree (#1577, the
+#### hashivault:// KMS signing provider), and the golang-lru v2 and arc/v2
+#### modules (#3494, the cache CNCF Distribution links into the AICR
+#### Operator's in-cluster registry, cmd/aicr-registry) are the approved
+#### exceptions.
 ####
 #### go-licenses identifies standard library packages by matching their source
 #### path against go/build's GOROOT, which is empty in a binary linked with
@@ -310,6 +313,8 @@ license-check: ## Check license is approved
         --ignore=github.com/hashicorp/go-secure-stdlib/parseutil \
         --ignore=github.com/hashicorp/go-secure-stdlib/strutil \
         --ignore=github.com/hashicorp/go-sockaddr \
+        --ignore=github.com/hashicorp/golang-lru/arc/v2 \
+        --ignore=github.com/hashicorp/golang-lru/v2 \
         --ignore=github.com/hashicorp/hcl \
         --ignore=github.com/in-toto/attestation \
         --ignore=github.com/in-toto/in-toto-golang \
@@ -1163,7 +1168,7 @@ operator-envtest-floor: ## Runs the operator's CRD validation and chart suites o
 	GOFLAGS="-mod=readonly" go test -count=1 -timeout=$(TEST_TIMEOUT) ./api/operator/... ./tests/operator/chart/...
 
 .PHONY: operator-kind-up
-operator-kind-up: ## Creates the operator's kind cluster with an in-cluster registry
+operator-kind-up: ## Creates the operator's kind cluster with the e2e suite's registry
 	@./tools/operator-kind up
 
 .PHONY: operator-kind-up-floor

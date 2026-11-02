@@ -1,8 +1,11 @@
 # Installing on EKS
 
-A complete install on Amazon EKS with ECR as the runtime registry, for the
-`h100-eks-ubuntu-training-kubeflow` recipe. The
-[overview](index.md#installation) has the short version.
+A complete install on Amazon EKS with ECR as the runtime registry
+(`registry.mode: external`), for the `h100-eks-ubuntu-training-kubeflow`
+recipe. The [overview](index.md#installation) has the short version. EKS needs
+the external registry: the default in-cluster registry needs a StorageClass and
+CSI driver before install, and this recipe installs the EBS CSI driver and its
+StorageClass through the operator.
 
 You need `aws`, `kubectl`, `helm`, `oras`, `yq`, `envsubst`, `gh` and the
 [`kubectl aicr` plugin](cli-reference.md#install), and:
@@ -139,6 +142,7 @@ operator:
   # serviceAccountAnnotations:
   #   eks.amazonaws.com/role-arn: arn:aws:iam::<ACCOUNT>:role/aicr-operator-<CLUSTER>
 registry:
+  mode: external
   repository: oci://<ECR>/aicr/<CLUSTER>
   auth:
     provider: aws
