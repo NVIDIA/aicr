@@ -188,10 +188,13 @@ aicr recipe \
     | yq .deploymentOrder
 ```
 
-Order in `dependencyRefs`:
-1. `cert-manager` (no dependencies)
-2. `gpu-operator` (depends on cert-manager)
-3. Other components...
+Dependencies declared in `base.yaml`:
+1. `prometheus-operator-crds` (no dependencies)
+2. `cert-manager` (depends on prometheus-operator-crds)
+3. `gpu-operator` (depends on nfd, cert-manager, prometheus-operator-crds)
+4. Other components...
+
+Overlays add edges of their own (for example, `gpu-operator` also depends on `nodewright-customizations` in the EKS GB200 training overlay), so the printed order above is not simply this list.
 
 > Dependency-driven ordering based on [Kahn's algorithm](https://www.geeksforgeeks.org/dsa/topological-sorting-indegree-based-solution/) for topological sort.
 

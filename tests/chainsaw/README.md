@@ -68,6 +68,7 @@ tests/chainsaw/
     ├── bundle-ocp/
     ├── bundle-scheduling/
     ├── bundle-slinky-storage/
+    ├── bundle-terraform/
     ├── bundle-variants/
     ├── bundle-vendor-charts/
     ├── config-file/

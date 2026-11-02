@@ -323,8 +323,7 @@ from the live CLI command tree. Adding an agent:
 2. Implement `skillGenerator` (`generate(meta *cliMeta) ([]byte,
    error)`, `installPath() (string, error)`) in a new
    `skill_<agent>.go`.
-3. Register it in the `parseAgentType` → generator switch in
-   `skill.go`.
+3. Register it in the `generators` map in `runSkillCmd` (`skill.go`).
 
 The reflection over the command tree happens in `skill_generator.go`
 so generators only consume `cliMeta`.
