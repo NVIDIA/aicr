@@ -22,9 +22,9 @@ a supported release.
 
 | Version | Status |
 |---------|--------|
-| `1.1.x` (latest released minor) | Supported: receives security fixes |
-| `1.0.x` (previous minor) | Supported: receives security fixes |
-| `< 1.0` | End-of-life: upgrade to a supported release |
+| `1.2.x` (latest released minor) | Supported: receives security fixes |
+| `1.1.x` (previous minor) | Supported: receives security fixes |
+| `< 1.1` | End-of-life: upgrade to a supported release |
 
 A fix lands on `main` first and ships in the next release cut from `main`.
 Reaching the previous minor also requires the manual path in
