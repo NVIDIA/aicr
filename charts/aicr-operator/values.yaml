@@ -88,10 +88,14 @@ registry:
     # inCluster the chart creates it; with static the administrator does.
     repoCredsSecret: aicr-registry
   inCluster:
-    # Registry image (cmd/aicr-registry, CNCF Distribution). Required with
-    # inCluster; the published chart defaults to its release's, by digest. The
-    # registry runs on the operator's nodes: operator.nodeSelector,
-    # operator.tolerations and operator.affinity's node affinity.
+    # Registry image: cmd/aicr-registry, the CNCF Distribution registry with
+    # only the filesystem driver and htpasswd. Required with inCluster; the
+    # published chart defaults to its release's, by digest. From a source
+    # checkout, build it with `KO_DOCKER_REPO=<repo> ko build ./cmd/aicr-registry`.
+    # The upstream registry:3 image also works: its entrypoint takes the same
+    # `serve <config>` arguments. The registry runs on the operator's nodes:
+    # operator.nodeSelector, operator.tolerations and operator.affinity's node
+    # affinity.
     image: ""
     # The cluster's DNS domain, for the registry's fully qualified host.
     clusterDomain: cluster.local
