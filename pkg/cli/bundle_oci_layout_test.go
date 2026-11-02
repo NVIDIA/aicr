@@ -337,6 +337,13 @@ func TestBundleCommandOCILayoutRemovedAfterLaterFailure(t *testing.T) {
 	failImageRefs := func(context.Context, *imageRefsTarget, []byte) error {
 		return errors.New(errors.ErrCodeInternal, "injected image-refs write failure")
 	}
+	cancelAfterWrite := func(p *bundlePublishDependencies, cancel context.CancelFunc) {
+		p.writeLayout = func(ctx context.Context, cfg oci.OutputConfig) (*oci.PackageAndPushResult, error) {
+			res, err := oci.WriteLayout(ctx, cfg)
+			cancel()
+			return res, err
+		}
+	}
 	tests := []struct {
 		name          string
 		inject        func(*bundlePublishDependencies, context.CancelFunc)
@@ -352,14 +359,8 @@ func TestBundleCommandOCILayoutRemovedAfterLaterFailure(t *testing.T) {
 			wantCode: errors.ErrCodeInternal,
 		},
 		{
-			name: "canceled after the layout is written",
-			inject: func(p *bundlePublishDependencies, cancel context.CancelFunc) {
-				p.writeLayout = func(ctx context.Context, cfg oci.OutputConfig) (*oci.PackageAndPushResult, error) {
-					res, err := oci.WriteLayout(ctx, cfg)
-					cancel()
-					return res, err
-				}
-			},
+			name:     "canceled after the layout is written",
+			inject:   cancelAfterWrite,
 			wantCode: errors.ErrCodeTimeout,
 		},
 		{
@@ -373,6 +374,15 @@ func TestBundleCommandOCILayoutRemovedAfterLaterFailure(t *testing.T) {
 			inject:    func(p *bundlePublishDependencies, _ context.CancelFunc) { p.writeImageRefs = failImageRefs },
 			removeErr: os.ErrPermission,
 			wantCode:  errors.ErrCodeInternal,
+			wantKept:  "failed to remove OCI layout",
+		},
+		{
+			// The removal error is internal; the reported code must stay the
+			// primary error's.
+			name:      "removal fails after a cancellation",
+			inject:    cancelAfterWrite,
+			removeErr: os.ErrPermission,
+			wantCode:  errors.ErrCodeTimeout,
 			wantKept:  "failed to remove OCI layout",
 		},
 		{
