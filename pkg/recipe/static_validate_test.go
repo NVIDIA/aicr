@@ -64,6 +64,156 @@ func TestValidateStaticRejectsMalformedYAML(t *testing.T) {
 	}
 }
 
+func TestValidateStaticMixinComponentTypes(t *testing.T) {
+	tests := []struct {
+		name, componentType string
+		wantDiagnostic      bool
+	}{
+		{name: "registry default"},
+		{name: "Helm", componentType: "Helm"},
+		{name: "lowercase Helm", componentType: "helm"},
+		{name: "Kustomize", componentType: "Kustomize"},
+		{name: "lowercase Kustomize", componentType: "kustomize"},
+		{name: "misspelled Helm", componentType: "Heml", wantDiagnostic: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.CopyFS(dir, GetEmbeddedFS()); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, "mixins", "platform-kubeflow.yaml")
+			content, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			content = []byte(strings.Replace(string(content), "type: Helm", "type: "+tt.componentType, 1))
+			if err := os.WriteFile(path, content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			for _, dataDir := range []string{"", dir} {
+				diagnostics, err := ValidateStatic(t.Context(), path, dataDir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !tt.wantDiagnostic {
+					if len(diagnostics) != 0 {
+						t.Fatalf("valid component type rejected: %+v", diagnostics)
+					}
+					continue
+				}
+				if len(diagnostics) != 1 || diagnostics[0].File != path ||
+					diagnostics[0].Field != "spec.componentRefs[0].type" || diagnostics[0].Severity != "error" ||
+					!strings.Contains(diagnostics[0].Message, `unsupported type "Heml"`) {
+
+					t.Fatalf("missing component type diagnostic: %+v", diagnostics)
+				}
+			}
+		})
+	}
+}
+
+func TestValidateStaticFileOverlayNames(t *testing.T) {
+	const original = "h100-eks-ubuntu-training.yaml"
+	tests := []struct {
+		name, inputFile, overlayName string
+		partialCatalog, outside      bool
+		duplicate, wantDiagnostic    bool
+	}{
+		{name: "existing file", inputFile: original},
+		{name: "copied file", inputFile: "dup-copy.yaml", wantDiagnostic: true},
+		{name: "original with duplicate", inputFile: original, duplicate: true, wantDiagnostic: true},
+		{name: "new overlay", inputFile: "new-leaf.yaml", overlayName: "new-static-leaf"},
+		{name: "embedded override", inputFile: original, partialCatalog: true},
+		{name: "embedded name collision", inputFile: "dup-copy.yaml", partialCatalog: true, wantDiagnostic: true},
+		{name: "file outside catalog", inputFile: original, outside: true, wantDiagnostic: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tt.partialCatalog {
+				if err := os.Mkdir(filepath.Join(dir, "overlays"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				registry := "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"
+				if err := os.WriteFile(filepath.Join(dir, RegistryFileName), []byte(registry), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.CopyFS(dir, GetEmbeddedFS()); err != nil {
+				t.Fatal(err)
+			}
+			content, err := defaultEmbeddedProvider.ReadFile(t.Context(), "overlays/"+original)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.overlayName != "" {
+				content = []byte(strings.Replace(string(content), "name: h100-eks-ubuntu-training", "name: "+tt.overlayName, 1))
+			}
+			path := filepath.Join(dir, "overlays", tt.inputFile)
+			if tt.outside {
+				path = filepath.Join(t.TempDir(), tt.inputFile)
+			}
+			if writeErr := os.WriteFile(path, content, 0o600); writeErr != nil {
+				t.Fatal(writeErr)
+			}
+			if tt.duplicate {
+				if writeErr := os.WriteFile(filepath.Join(dir, "overlays", "dup-copy.yaml"), content, 0o600); writeErr != nil {
+					t.Fatal(writeErr)
+				}
+			}
+			diagnostics, err := ValidateStatic(t.Context(), path, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !tt.wantDiagnostic {
+				if len(diagnostics) != 0 {
+					t.Fatalf("valid overlay rejected: %+v", diagnostics)
+				}
+				return
+			}
+			if len(diagnostics) != 1 || diagnostics[0].File != path || diagnostics[0].Field != "metadata.name" ||
+				diagnostics[0].Severity != "error" || !strings.Contains(diagnostics[0].Message, "duplicate overlay name") {
+
+				t.Fatalf("missing duplicate name diagnostic: %+v", diagnostics)
+			}
+		})
+	}
+}
+
+func TestValidateStaticCatalogMalformedYAMLFile(t *testing.T) {
+	for _, externalOnly := range []bool{false, true} {
+		name := "layered"
+		if externalOnly {
+			name = "external only"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.CopyFS(dir, GetEmbeddedFS()); err != nil {
+				t.Fatal(err)
+			}
+			const source = "overlays/new-leaf.yaml"
+			if err := os.WriteFile(filepath.Join(dir, source), []byte("kind: ["), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var diagnostics []StaticDiagnostic
+			var err error
+			if externalOnly {
+				diagnostics, err = ValidateStaticDirectory(t.Context(), dir)
+			} else {
+				diagnostics, err = ValidateStatic(t.Context(), "", dir)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(diagnostics) != 1 || diagnostics[0].File != source || diagnostics[0].Severity != "error" ||
+				!strings.Contains(diagnostics[0].Message, "yaml") {
+
+				t.Fatalf("missing YAML source filename: %+v", diagnostics)
+			}
+		})
+	}
+}
+
 func TestValidateStaticCatalog(t *testing.T) {
 	diagnostics, err := ValidateStatic(t.Context(), "", "")
 	if err != nil {

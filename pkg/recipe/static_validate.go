@@ -139,6 +139,10 @@ func validateStatic(ctx context.Context, path, dataDir string, externalOnly bool
 	copyStore.Mixins = maps.Clone(store.Mixins)
 	store = &copyStore
 	if path != "" {
+		if nameErr := validateStaticOverlayName(ctx, dp, path, dataDir, hdr); nameErr != nil {
+			add(path, "metadata.name", nameErr)
+			return diagnostics, nil
+		}
 		validateStaticAuthoringFile(ctx, path, data, hdr, store, registry, add)
 		return diagnostics, nil
 	}
@@ -242,7 +246,8 @@ func staticOverlaySources(ctx context.Context, dp DataProvider, add func(string,
 		}
 		var h RecipeMetadataHeader
 		if decodeErr := yaml.Unmarshal(content, &h); decodeErr != nil {
-			return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "invalid overlay header", decodeErr)
+			return aicrerrors.WrapWithContext(aicrerrors.ErrCodeInvalidRequest, "invalid overlay header", decodeErr,
+				map[string]any{"file": name})
 		}
 		if h.Kind != RecipeMetadataKind {
 			return nil
@@ -267,6 +272,49 @@ func staticOverlaySources(ctx context.Context, dp DataProvider, add func(string,
 	return sources, nil
 }
 
+func validateStaticOverlayName(ctx context.Context, dp DataProvider, path, dataDir string, hdr RecipeMetadataHeader) error {
+	if dataDir == "" || hdr.Kind != RecipeMetadataKind || hdr.Metadata.Name == "" {
+		return nil
+	}
+	inputPath, err := filepath.Abs(path)
+	if err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "failed to resolve validation input path", err)
+	}
+	walkErr := dp.WalkDir(ctx, "overlays", func(name string, entry fs.DirEntry, entryErr error) error {
+		if entryErr != nil {
+			return aicrerrors.PropagateOrWrap(entryErr, aicrerrors.ErrCodeInvalidRequest, "failed to walk overlay source")
+		}
+		if err := ctx.Err(); err != nil {
+			return aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "checking overlay names")
+		}
+		if entry.IsDir() || !strings.HasSuffix(name, ".yaml") {
+			return nil
+		}
+		sourcePath, err := filepath.Abs(filepath.Join(dataDir, name))
+		if err != nil {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "failed to resolve overlay source path", err)
+		}
+		if sourcePath == inputPath {
+			return nil
+		}
+		content, err := dp.ReadFile(ctx, name)
+		if err != nil {
+			return aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInvalidRequest, "failed to read overlay source")
+		}
+		var source RecipeMetadataHeader
+		if err := yaml.Unmarshal(content, &source); err != nil {
+			return aicrerrors.WrapWithContext(aicrerrors.ErrCodeInvalidRequest, "invalid overlay header", err,
+				map[string]any{"file": name})
+		}
+		if source.Kind == RecipeMetadataKind && source.Metadata.Name == hdr.Metadata.Name {
+			return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+				fmt.Sprintf("duplicate overlay name %q also declared in %s", hdr.Metadata.Name, name))
+		}
+		return nil
+	})
+	return aicrerrors.PropagateOrWrap(walkErr, aicrerrors.ErrCodeInvalidRequest, "failed to check overlay names")
+}
+
 func validateStaticAuthoringFile(ctx context.Context, path string, data []byte, hdr RecipeMetadataHeader, store *MetadataStore, registry *ComponentRegistry, add func(string, string, error)) {
 	if hdr.Kind == RecipeMixinKind {
 		var mix RecipeMixin
@@ -284,6 +332,15 @@ func validateStaticAuthoringFile(ctx context.Context, path string, data []byte, 
 			add(path, locSpecConstraints, err)
 		}
 		validateStaticRefs(path, mix.Spec.ComponentRefs, registry, add)
+		for i, ref := range mix.Spec.ComponentRefs {
+			if ref.Type != "" && !strings.EqualFold(string(ref.Type), string(ComponentTypeHelm)) &&
+				!strings.EqualFold(string(ref.Type), string(ComponentTypeKustomize)) {
+
+				add(path, fmt.Sprintf("spec.componentRefs[%d].type", i), aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+					fmt.Sprintf("component %q has unsupported type %q; expected %q or %q",
+						ref.Name, ref.Type, ComponentTypeHelm, ComponentTypeKustomize)))
+			}
+		}
 		return
 	}
 	var overlay RecipeMetadata
