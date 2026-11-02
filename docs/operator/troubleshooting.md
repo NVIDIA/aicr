@@ -129,6 +129,13 @@ it:
 The active plan and the running stack are unaffected, but Argo CD cannot fetch
 charts for new comparisons until the registry returns.
 
+**Upstream chart repository unreachable.** A chart that the candidate or
+active plan already mirrored, at the same version and from the same upstream,
+is reused from your registry with no upstream request, so a re-resolution that
+pins the same charts rides out the outage. A chart not mirrored before is
+retried like a registry outage, with `[SERVICE_UNAVAILABLE] fetch …` on
+`Resolved`.
+
 With the in-cluster registry, check its pod and volume:
 `kubectl -n aicr-system get pods -l app.kubernetes.io/name=aicr-registry` and
 `kubectl -n aicr-system get pvc aicr-registry`. A pod `Pending` on an unbound
@@ -177,6 +184,15 @@ kubectl -n argocd get secret aicr-registry \
 as a Unix time. Once a token has expired, Argo CD reports `ComparisonError` on
 the Applications; running workloads are unaffected, and comparisons recover
 after the refresh.
+
+**Minting a new ECR token fails while the current one is valid** (`aws`
+only). The operator keeps using its current token for its own registry calls
+and pushing Jobs until it has an hour left, and Argo CD keeps the token in
+`repo-creds`. `EngineAvailable` stays `True`, and its message says when minting
+started to fail and why. `aicr_operator_registry_token_mint_failures_total`
+counts each failure, and the refresh timestamp stays at the last success. Fix
+the AWS identity as above. Once the token is within an hour of expiry, this
+turns into `RegistryCredentialsStale`.
 
 ## AICR version mismatch
 

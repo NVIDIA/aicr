@@ -22,8 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/service/ecr"
-	"github.com/aws/aws-sdk-go-v2/service/ecr/types"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -31,32 +29,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	"github.com/NVIDIA/aicr/pkg/operator/registry/registrytest"
 )
 
 const secretToken = "SECRET-TOKEN-VALUE"
-
-type fakeECR struct {
-	calls   int
-	expires time.Time
-	err     error
-	token   string
-}
-
-func (f *fakeECR) GetAuthorizationToken(context.Context, *ecr.GetAuthorizationTokenInput, ...func(*ecr.Options)) (*ecr.GetAuthorizationTokenOutput, error) {
-	f.calls++
-	if f.err != nil {
-		return nil, f.err
-	}
-	token := base64.StdEncoding.EncodeToString([]byte(f.token))
-	return &ecr.GetAuthorizationTokenOutput{AuthorizationData: []types.AuthorizationData{{AuthorizationToken: &token, ExpiresAt: &f.expires}}}, nil
-}
 
 // Tokens are cached until they near expiry, scoped to the runtime registry
 // host, and never appear in errors.
 func TestECRProvider(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
-	api := &fakeECR{token: "AWS:" + secretToken, expires: now.Add(12 * time.Hour)}
+	api := &registrytest.ECR{Token: "AWS:" + secretToken, Expires: now.Add(12 * time.Hour)}
 	clock := now
 	p := &ECRProvider{Client: api, Host: "123456789012.dkr.ecr.us-west-2.amazonaws.com", Now: func() time.Time { return clock }}
 	ctx := context.Background()
@@ -68,29 +51,110 @@ func TestECRProvider(t *testing.T) {
 	if other, _ := p.Credential(ctx, "ghcr.io"); other.Password != "" {
 		t.Fatal("an upstream host received the runtime registry's token")
 	}
+	tok, err := p.FreshToken(ctx)
+	if err != nil || tok.Password != secretToken || api.Calls() != 1 {
+		t.Fatalf("FreshToken() with 12h left = %+v, %v after %d calls; want the cached token", tok, err, api.Calls())
+	}
 	clock = now.Add(5 * time.Hour)
-	if _, err = p.Token(ctx); err != nil || api.calls != 1 {
-		t.Fatalf("a token with 7h left was not reused (%d calls)", api.calls)
+	if _, err = p.Token(ctx); err != nil || api.Calls() != 1 {
+		t.Fatalf("a token with 7h left was not reused (%d calls)", api.Calls())
 	}
 	clock = now.Add(7 * time.Hour)
-	api.expires = clock.Add(12 * time.Hour)
-	if tok, _ := p.Token(ctx); api.calls != 2 || !tok.Expires.Equal(api.expires) {
-		t.Fatalf("a token with 5h left was reused (%d calls)", api.calls)
+	api.Expires = clock.Add(12 * time.Hour)
+	if tok, _ := p.Token(ctx); !tok.Expires.Equal(now.Add(12 * time.Hour)) {
+		t.Fatalf("a token with 5h left was not served while its renewal runs: %+v", tok)
+	}
+	if tok, _ := p.FreshToken(ctx); api.Calls() != 2 || !tok.Expires.Equal(api.Expires) {
+		t.Fatalf("a token with 5h left was not renewed (%d calls)", api.Calls())
 	}
 	jc, err := p.ForJob(ctx)
 	if err != nil || jc.SecretName != "" || !strings.Contains(string(jc.DockerConfigJSON), base64.StdEncoding.EncodeToString([]byte("AWS:"+secretToken))) {
 		t.Fatalf("ForJob() = %s, %v", jc.DockerConfigJSON, err)
 	}
 
-	for name, bad := range map[string]*fakeECR{
-		"api error":       {err: errors.New("AccessDeniedException: not authorized")},
-		"malformed token": {token: secretToken, expires: now.Add(time.Hour * 12)},
+	for name, bad := range map[string]*registrytest.ECR{
+		"api error":       {Err: errors.New("AccessDeniedException: not authorized")},
+		"malformed token": {Token: secretToken, Expires: now.Add(time.Hour * 12)},
 	} {
 		fresh := &ECRProvider{Client: bad, Host: p.Host, Now: func() time.Time { return now }}
 		_, err := fresh.Credential(ctx, p.Host)
 		if operrors.ReasonOf(err) != ReasonCredentialsUnavailable || strings.Contains(err.Error(), secretToken) {
 			t.Errorf("%s: Credential() = %v", name, err)
 		}
+	}
+}
+
+// A hung mint holds no caller past its own deadline, and concurrent callers
+// share one mint, which completes for later callers once ECR answers.
+func TestECRProviderHungMint(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+	api := &registrytest.ECR{Token: "AWS:" + secretToken, Expires: now.Add(12 * time.Hour), Release: make(chan struct{})}
+	p := &ECRProvider{Client: api, Host: "123456789012.dkr.ecr.us-west-2.amazonaws.com", Now: func() time.Time { return now }}
+
+	errs := make(chan error, 3)
+	for range cap(errs) {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+			_, err := p.Credential(ctx, p.Host)
+			errs <- err
+		}()
+	}
+	for range cap(errs) {
+		if err := <-errs; operrors.CodeOf(err) != operrors.ErrCodeTimeout || operrors.ReasonOf(err) != ReasonCredentialsUnavailable {
+			t.Errorf("Credential() during a hung mint = %v, want TIMEOUT", err)
+		}
+	}
+	if n := api.Calls(); n != 1 {
+		t.Errorf("%d concurrent mints, want 1 shared", n)
+	}
+	close(api.Release)
+	if tok, err := p.FreshToken(context.Background()); err != nil || tok.Password != secretToken || api.Calls() != 1 {
+		t.Fatalf("FreshToken() after ECR answered = %+v, %v with %d mints", tok, err, api.Calls())
+	}
+}
+
+// A failed mint keeps the cached token in use while it has more than
+// RegistryTokenMinServeValidity left, and is recorded until a mint succeeds.
+// Past that, the failure is the caller's.
+func TestECRProviderRidesOutAFailedMint(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+	clock := now
+	api := &registrytest.ECR{Token: "AWS:" + secretToken, Expires: now.Add(12 * time.Hour)}
+	p := &ECRProvider{Client: api, Host: "123456789012.dkr.ecr.us-west-2.amazonaws.com", Now: func() time.Time { return clock }}
+	ctx := context.Background()
+	if _, err := p.Token(ctx); err != nil || p.MintFailure() != nil {
+		t.Fatalf("Token() = %v, failure %+v", err, p.MintFailure())
+	}
+
+	clock, api.Err = now.Add(7*time.Hour), errors.New("ThrottlingException: rate exceeded")
+	if _, err := p.FreshToken(ctx); operrors.ReasonOf(err) != ReasonCredentialsUnavailable {
+		t.Fatalf("FreshToken() with a failing mint = %v", err)
+	}
+	if f := p.MintFailure(); f == nil || !f.Since.Equal(clock) || !strings.Contains(f.Err.Error(), "ThrottlingException") || p.MintFailures() != 1 {
+		t.Fatalf("MintFailure() = %+v, %d failures", f, p.MintFailures())
+	}
+	if c, err := p.Credential(ctx, p.Host); err != nil || c.Password != secretToken {
+		t.Fatalf("Credential() with 5h left and a failing mint = %+v, %v; want the cached token", c, err)
+	}
+	// Waits out the mint Credential started in the background.
+	if _, err := p.FreshToken(ctx); err == nil {
+		t.Fatal("FreshToken() with a failing mint = nil")
+	}
+
+	clock = now.Add(11*time.Hour + 30*time.Minute)
+	if _, err := p.Token(ctx); operrors.ReasonOf(err) != ReasonCredentialsUnavailable {
+		t.Fatalf("Token() with 30m left and a failing mint = %v", err)
+	}
+	if f := p.MintFailure(); f == nil || !f.Since.Equal(now.Add(7*time.Hour)) {
+		t.Fatalf("MintFailure() = %+v, want the first failure kept", f)
+	}
+
+	api.Err = nil
+	if _, err := p.Token(ctx); err != nil || p.MintFailure() != nil {
+		t.Fatalf("Token() after ECR recovered = %v, failure %+v", err, p.MintFailure())
 	}
 }
 

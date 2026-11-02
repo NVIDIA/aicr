@@ -15,9 +15,6 @@
 package main
 
 import (
-	"archive/tar"
-	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,13 +23,10 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path"
 	"path/filepath"
-	"strings"
 	"time"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"go.yaml.in/yaml/v3"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/content/memory"
@@ -42,6 +36,8 @@ import (
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/errcode"
 	"oras.land/oras-go/v2/registry/remote/retry"
+
+	"github.com/NVIDIA/aicr/pkg/operator/registry"
 )
 
 // pushTimeout bounds publishing a candidate.
@@ -56,13 +52,6 @@ const deniedAttempts = 4
 // deniedBackoff is the wait before the first retry of a denied push; each
 // later retry waits one more of it.
 var deniedBackoff = 2 * time.Second
-
-// Helm's OCI chart media types, so `helm pull` and `helm install` read the
-// published chart.
-const (
-	helmConfigMediaType = "application/vnd.cncf.helm.config.v1+json"
-	helmChartMediaType  = "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
-)
 
 // push publishes a candidate as built, never rebuilt: the operator and
 // in-cluster registry image indexes from their OCI layouts to the
@@ -112,22 +101,21 @@ func push(args []string, out io.Writer) error {
 	}
 
 	charts := memory.New()
-	name, version, chart, err := packChart(ctx, charts, archive, m.Source.CommitDate)
+	meta, chart, err := packChart(ctx, charts, archive, m.Source.CommitDate)
 	if err != nil {
 		return err
 	}
-	chartRepo, err := repository(*chartRegistry+"/"+name, *plainHTTP)
+	chartRepo, err := repository(*chartRegistry+"/"+meta.Name, *plainHTTP)
 	if err != nil {
 		return err
 	}
-	// Helm tags a chart with its version, "+" written as "_".
-	if err = publish(ctx, charts, chart, chartRepo, strings.ReplaceAll(version, "+", "_")); err != nil {
+	if err = publish(ctx, charts, chart, chartRepo, meta.Tag()); err != nil {
 		return err
 	}
 	_, err = fmt.Fprintf(out, "image-repository=%s\nimage-digest=%s\nregistry-repository=%s\nregistry-digest=%s\n"+
 		"chart-repository=%s\nchart-version=%s\nchart-digest=%s\n",
 		m.Operator.Repository, m.Operator.Digest, m.Registry.Repository, m.Registry.Digest,
-		chartRepo.Reference.Registry+"/"+chartRepo.Reference.Repository, version, chart.Digest)
+		chartRepo.Reference.Registry+"/"+chartRepo.Reference.Repository, meta.Version, chart.Digest)
 	return err
 }
 
@@ -216,70 +204,32 @@ func denied(err error) bool {
 	return errors.As(err, &resp) && resp.StatusCode == http.StatusForbidden
 }
 
-// packChart stores a chart archive in dst as a Helm OCI chart: Chart.yaml as
-// JSON for the config and the archive, unchanged, as the one layer. The
-// creation annotation is the candidate's commit date, so the same candidate
+// packChart stores archive in dst as a Helm OCI chart, with Chart.yaml as JSON
+// for the config and archive, unchanged, as the one layer. It returns the
+// chart's metadata meta and manifest descriptor desc. The manifest's creation
+// annotation is created, the candidate's commit date, so the same candidate
 // always packs to the same digest.
-func packChart(ctx context.Context, dst content.Pusher, archive []byte, created string) (name, version string, desc ocispec.Descriptor, err error) {
-	meta, err := chartMetadata(archive)
+func packChart(ctx context.Context, dst content.Pusher, archive []byte, created string) (meta *registry.ChartMeta, desc ocispec.Descriptor, err error) {
+	meta, err = registry.ReadChartMeta(archive)
 	if err != nil {
-		return "", "", desc, err
+		return nil, ocispec.Descriptor{}, err
 	}
-	name, _ = meta["name"].(string)
-	version, _ = meta["version"].(string)
-	if name == "" || version == "" {
-		return "", "", desc, errors.New("the chart's Chart.yaml names no name or version")
-	}
-	config, err := json.Marshal(meta)
+	configDesc, err := oras.PushBytes(ctx, dst, registry.ChartConfigMediaType, meta.Config())
 	if err != nil {
-		return "", "", desc, err
+		return nil, ocispec.Descriptor{}, err
 	}
-	configDesc, err := oras.PushBytes(ctx, dst, helmConfigMediaType, config)
+	layer, err := oras.PushBytes(ctx, dst, registry.ChartLayerMediaType, archive)
 	if err != nil {
-		return "", "", desc, err
-	}
-	layer, err := oras.PushBytes(ctx, dst, helmChartMediaType, archive)
-	if err != nil {
-		return "", "", desc, err
+		return nil, ocispec.Descriptor{}, err
 	}
 	desc, err = oras.PackManifest(ctx, dst, oras.PackManifestVersion1_1, "", oras.PackManifestOptions{
 		ConfigDescriptor: &configDesc,
 		Layers:           []ocispec.Descriptor{layer},
 		ManifestAnnotations: map[string]string{
-			ocispec.AnnotationTitle:   name,
-			ocispec.AnnotationVersion: version,
+			ocispec.AnnotationTitle:   meta.Name,
+			ocispec.AnnotationVersion: meta.Version,
 			ocispec.AnnotationCreated: created,
 		},
 	})
-	return name, version, desc, err
-}
-
-// chartMetadata reads the top-level Chart.yaml from a chart archive.
-func chartMetadata(archive []byte) (map[string]any, error) {
-	gz, err := gzip.NewReader(bytes.NewReader(archive))
-	if err != nil {
-		return nil, fmt.Errorf("read the chart archive: %w", err)
-	}
-	tr := tar.NewReader(gz)
-	for {
-		h, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			return nil, errors.New("the chart archive has no Chart.yaml")
-		}
-		if err != nil {
-			return nil, fmt.Errorf("read the chart archive: %w", err)
-		}
-		if dir, file := path.Split(h.Name); file != "Chart.yaml" || strings.Count(dir, "/") != 1 {
-			continue
-		}
-		data, err := io.ReadAll(tr)
-		if err != nil {
-			return nil, err
-		}
-		meta := map[string]any{}
-		if err = yaml.Unmarshal(data, &meta); err != nil {
-			return nil, fmt.Errorf("parse Chart.yaml: %w", err)
-		}
-		return meta, nil
-	}
+	return meta, desc, err
 }

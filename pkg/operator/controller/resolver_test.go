@@ -15,9 +15,6 @@
 package controller
 
 import (
-	"archive/tar"
-	"bytes"
-	"compress/gzip"
 	"context"
 	"fmt"
 	"os"
@@ -43,11 +40,12 @@ import (
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 	"github.com/NVIDIA/aicr/pkg/operator/plan"
 	"github.com/NVIDIA/aicr/pkg/operator/registry"
+	"github.com/NVIDIA/aicr/pkg/operator/registry/registrytest"
 	"github.com/NVIDIA/aicr/pkg/operator/resolver"
 )
 
 // fakeRegistry serves one rendered bundle and mirrors charts in memory,
-// counting bundle pulls and chart mirrors.
+// counting bundle pulls, chart mirrors and reuses of mirrored charts.
 type fakeRegistry struct {
 	bundle   *registry.Bundle
 	resolved map[string]string
@@ -55,6 +53,17 @@ type fakeRegistry struct {
 	err     error
 	pulls   int
 	mirrors int
+	reuses  int
+	// held are the mirrored charts, by repository and version.
+	held map[string]*registry.MirroredChart
+}
+
+func (f *fakeRegistry) ReuseChart(_ context.Context, r registry.Repository, version, digest string) (*registry.MirroredChart, error) {
+	if m := f.held[r.URI()+":"+version]; m != nil && m.Digest == digest {
+		f.reuses++
+		return m, nil
+	}
+	return nil, operrors.New(operrors.ErrCodeNotFound, "no chart "+r.URI()+":"+version)
 }
 
 func (f *fakeRegistry) Resolve(_ context.Context, _ registry.Repository, tag string) (string, error) {
@@ -74,8 +83,13 @@ func (f *fakeRegistry) PullBundle(_ context.Context, _ registry.Repository, dige
 
 func (f *fakeRegistry) MirrorHTTPChart(_ context.Context, up registry.UpstreamChart, target registry.Repository) (*registry.MirroredChart, error) {
 	f.mirrors++
-	return &registry.MirroredChart{Repository: target.Child(up.Chart), Digest: plan.DigestOf([]byte(up.Chart)),
-		ArchiveDigest: plan.DigestOf([]byte("archive")), Archive: chartArchive(t0)}, nil
+	m := &registry.MirroredChart{Repository: target.Child(up.Chart), Digest: plan.DigestOf([]byte(up.Chart)),
+		ArchiveDigest: plan.DigestOf([]byte("archive")), Archive: chartArchive(t0)}
+	if f.held == nil {
+		f.held = map[string]*registry.MirroredChart{}
+	}
+	f.held[m.Repository.URI()+":"+up.Version] = m
+	return m, nil
 }
 
 func (f *fakeRegistry) MirrorOCIChart(ctx context.Context, up registry.UpstreamChart, target registry.Repository) (*registry.MirroredChart, error) {
@@ -742,28 +756,11 @@ func TestEmitBoundsTheNote(t *testing.T) {
 // chartArchive is a minimal cert-manager chart archive with a CRD template.
 func chartArchive(t *testing.T) []byte {
 	t.Helper()
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
-	for name, body := range map[string]string{
+	return registrytest.TarGz(t, map[string]string{
 		"cert-manager/Chart.yaml":          "apiVersion: v2\nname: cert-manager\nversion: v1.20.2\n",
 		"cert-manager/values.yaml":         "replicaCount: 1\n",
 		"cert-manager/templates/crds.yaml": "kind: CustomResourceDefinition\n",
-	} {
-		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tw.Write([]byte(body)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gz.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return buf.Bytes()
+	})
 }
 
 // A plan whose release targets a namespace outside the installation's
@@ -911,6 +908,34 @@ func TestResolverRewritesDeletedCandidate(t *testing.T) {
 	}
 	if _, err = readPlan(ctx, k8s, operatorNS, first); err != nil {
 		t.Fatalf("the candidate was not written again: %v", err)
+	}
+}
+
+// A re-resolution for changed inputs that pins the same charts reuses them
+// from the runtime registry, with no upstream request. A chart the registry
+// no longer holds is mirrored again.
+func TestResolverReusesMirroredCharts(t *testing.T) {
+	ctx := testContext(t)
+	freshRuntime(t, ctx, nil)
+	r, reg := newResolver(t)
+	first := resolveCandidate(t, ctx, r, reg)
+	if reg.mirrors != 1 || reg.reuses != 0 {
+		t.Fatalf("first resolution: %d mirrors, %d reuses", reg.mirrors, reg.reuses)
+	}
+
+	r.OperatorVersion = "v0.0.2-dev"
+	if again := resolveCandidate(t, ctx, r, reg); again != first {
+		t.Fatalf("re-resolution = %s, want %s", again, first)
+	}
+	if reg.mirrors != 1 || reg.reuses != 1 {
+		t.Fatalf("re-resolution: %d mirrors, %d reuses; want no upstream mirror", reg.mirrors, reg.reuses)
+	}
+
+	clear(reg.held)
+	r.OperatorVersion = "v0.0.3-dev"
+	resolveCandidate(t, ctx, r, reg)
+	if reg.mirrors != 2 || reg.reuses != 1 {
+		t.Fatalf("after the registry lost the chart: %d mirrors, %d reuses", reg.mirrors, reg.reuses)
 	}
 }
 

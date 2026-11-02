@@ -144,9 +144,12 @@ type RolloutReconciler struct {
 	Config *config.Config
 	Engine Engine
 	Now    func() time.Time
-	// Credentials, when set, reports whether the engine's registry
-	// credentials are current (aws provider).
-	Credentials interface{ Check(context.Context) error }
+	// Credentials, when set, checks that the engine's registry credentials
+	// are current (aws provider), returning a warning that does not stop
+	// rollouts.
+	Credentials interface {
+		Check(context.Context) (string, error)
+	}
 	// Events, when set, records Events on engine objects.
 	Events events.EventRecorder
 	// Registry holds deployment validation evidence.
@@ -402,7 +405,7 @@ func keepObserved(rt *v1alpha1.ClusterRuntime, v *runtimeView) {
 func (r *RolloutReconciler) prepare(ctx context.Context, rt *v1alpha1.ClusterRuntime, v *runtimeView) (bool, error) {
 	err := r.Engine.Capabilities(ctx)
 	if err == nil && r.Credentials != nil {
-		err = r.Credentials.Check(ctx)
+		v.engineMessage, err = r.Credentials.Check(ctx)
 	}
 	if err != nil {
 		if operrors.ReasonOf(err) == "" && !operrors.IsPermanent(err) {

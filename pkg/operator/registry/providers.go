@@ -21,10 +21,11 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
+	"golang.org/x/sync/singleflight"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"oras.land/oras-go/v2/registry/remote/auth"
@@ -133,28 +134,126 @@ type Token struct {
 	Expires  time.Time
 }
 
+// MintFailure describes minting failures since the last successful mint.
+type MintFailure struct {
+	// Since is when the first of them failed.
+	Since time.Time
+	// Err is the latest error.
+	Err error
+}
+
 // ECRProvider mints ECR authorization tokens with the operator's AWS
 // identity (EKS Pod Identity or IRSA) and caches each until it nears expiry.
+// One mint runs at a time, and callers waiting on it return when their
+// context ends.
 type ECRProvider struct {
 	Client ECRTokens
 	// Host is the runtime registry host.
 	Host string
 	Now  func() time.Time
 
-	mu    sync.Mutex
-	token *Token
+	mints    singleflight.Group
+	failures atomic.Uint64
+	// state is replaced, never modified, and only a mint stores it.
+	state atomic.Pointer[ecrState]
 }
 
-// Token returns a token with at least defaults.RegistryTokenMinValidity
-// left, minting a new one when the cached token is older.
-func (p *ECRProvider) Token(ctx context.Context) (*Token, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.token != nil && p.token.Expires.Sub(p.Now()) > defaults.RegistryTokenMinValidity {
-		return p.token, nil
+type ecrState struct {
+	token   *Token
+	failure *MintFailure
+}
+
+func (p *ECRProvider) load() ecrState {
+	if s := p.state.Load(); s != nil {
+		return *s
 	}
-	ctx, cancel := context.WithTimeout(ctx, defaults.RegistryTimeout)
-	defer cancel()
+	return ecrState{}
+}
+
+// Token returns the token registry calls use:
+//   - the cached token, while it has more than
+//     defaults.RegistryTokenMinValidity left
+//   - else the cached token at once, while it has more than
+//     defaults.RegistryTokenMinServeValidity left, starting a mint in the
+//     background that leaves the cached token in use if it fails
+//   - else a new token, once a mint completes
+func (p *ECRProvider) Token(ctx context.Context) (*Token, error) {
+	if cached := p.load().token; cached != nil {
+		switch left := cached.Expires.Sub(p.Now()); {
+		case left > defaults.RegistryTokenMinValidity:
+			return cached, nil
+		case left > defaults.RegistryTokenMinServeValidity:
+			p.mints.DoChan("", p.mintFunc(ctx))
+			return cached, nil
+		}
+	}
+	return p.wait(ctx)
+}
+
+// FreshToken returns a token with more than defaults.RegistryTokenMinValidity
+// left. When the cached token is older, FreshToken waits for a mint and
+// returns its error if it fails, never the cached token.
+func (p *ECRProvider) FreshToken(ctx context.Context) (*Token, error) {
+	if cached := p.load().token; cached != nil && cached.Expires.Sub(p.Now()) > defaults.RegistryTokenMinValidity {
+		return cached, nil
+	}
+	return p.wait(ctx)
+}
+
+// MintFailure returns the failures since the last successful mint, or nil if
+// there are none.
+func (p *ECRProvider) MintFailure() *MintFailure {
+	f := p.load().failure
+	if f == nil {
+		return nil
+	}
+	c := *f
+	return &c
+}
+
+// MintFailures returns how many of p's mints have failed.
+func (p *ECRProvider) MintFailures() uint64 { return p.failures.Load() }
+
+// wait returns the token from the mint in flight, starting one if none is,
+// or an error once ctx ends.
+func (p *ECRProvider) wait(ctx context.Context) (*Token, error) {
+	select {
+	case res := <-p.mints.DoChan("", p.mintFunc(ctx)):
+		if res.Err != nil {
+			return nil, res.Err
+		}
+		t, _ := res.Val.(*Token)
+		return t, nil
+	case <-ctx.Done():
+		return nil, operrors.WrapCtxErr(ctx.Err(), operrors.ErrCodeUnavailable, "wait for an ECR authorization token").
+			WithReason(ReasonCredentialsUnavailable)
+	}
+}
+
+// mintFunc returns a func that mints a token and records the outcome. The
+// mint runs for up to defaults.RegistryTimeout even after ctx ends, so the
+// caller that started it leaving fails no other caller waiting on it.
+func (p *ECRProvider) mintFunc(ctx context.Context) func() (any, error) {
+	return func() (any, error) {
+		mintCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), defaults.RegistryTimeout)
+		defer cancel()
+		t, err := p.mint(mintCtx)
+		if err != nil {
+			p.failures.Add(1)
+			s := p.load()
+			since := p.Now()
+			if s.failure != nil {
+				since = s.failure.Since
+			}
+			p.state.Store(&ecrState{token: s.token, failure: &MintFailure{Since: since, Err: err}})
+			return nil, err
+		}
+		p.state.Store(&ecrState{token: t})
+		return t, nil
+	}
+}
+
+func (p *ECRProvider) mint(ctx context.Context) (*Token, error) {
 	out, err := p.Client.GetAuthorizationToken(ctx, &ecr.GetAuthorizationTokenInput{})
 	if err != nil {
 		// The SDK's error names the operation and status, never the token.
@@ -169,8 +268,7 @@ func (p *ECRProvider) Token(ctx context.Context) (*Token, error) {
 	if err != nil || !ok {
 		return nil, operrors.New(operrors.ErrCodeUnavailable, "ECR returned a malformed authorization token").WithReason(ReasonCredentialsUnavailable)
 	}
-	p.token = &Token{Username: user, Password: pass, Expires: *out.AuthorizationData[0].ExpiresAt}
-	return p.token, nil
+	return &Token{Username: user, Password: pass, Expires: *out.AuthorizationData[0].ExpiresAt}, nil
 }
 
 // Credential returns the ECR token for the runtime registry host.

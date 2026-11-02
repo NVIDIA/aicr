@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -35,12 +34,14 @@ import (
 	"testing/fstest"
 	"time"
 
-	ggcrregistry "github.com/google/go-containerregistry/pkg/registry"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"go.yaml.in/yaml/v3"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/registry/remote"
+
+	"github.com/NVIDIA/aicr/pkg/operator/registry"
+	"github.com/NVIDIA/aicr/pkg/operator/registry/registrytest"
 )
 
 const demoValues = `# Installation values.
@@ -387,7 +388,7 @@ func pushed(t *testing.T, out string) map[string]string {
 // different candidate under the same version is refused.
 func TestPush(t *testing.T) {
 	t.Parallel()
-	srv := httptest.NewServer(ggcrregistry.New(ggcrregistry.Logger(log.New(io.Discard, "", 0))))
+	srv := httptest.NewServer(registrytest.New())
 	t.Cleanup(srv.Close)
 	host := strings.TrimPrefix(srv.URL, "http://")
 	repository := host + "/nvidia/aicr-operator"
@@ -451,8 +452,8 @@ func TestPush(t *testing.T) {
 	if err = json.Unmarshal(data, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Config.MediaType != helmConfigMediaType || len(manifest.Layers) != 1 ||
-		manifest.Layers[0].MediaType != helmChartMediaType || manifest.Layers[0].Digest.String() != m.Chart.Digest {
+	if manifest.Config.MediaType != registry.ChartConfigMediaType || len(manifest.Layers) != 1 ||
+		manifest.Layers[0].MediaType != registry.ChartLayerMediaType || manifest.Layers[0].Digest.String() != m.Chart.Digest {
 
 		t.Fatalf("the chart manifest is %+v; want a Helm chart whose one layer is %s", manifest, m.Chart.Digest)
 	}
@@ -502,7 +503,7 @@ func TestPushRetriesDenied(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var puts, denials atomic.Int64
-			registry := ggcrregistry.New(ggcrregistry.Logger(log.New(io.Discard, "", 0)))
+			registry := registrytest.New()
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/manifests/") && puts.Add(1) <= tt.deny {
 					denials.Add(1)

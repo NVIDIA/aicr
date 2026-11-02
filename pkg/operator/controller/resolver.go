@@ -427,6 +427,10 @@ func (r *ResolverReconciler) persist(ctx context.Context, rt *v1alpha1.ClusterRu
 	if err != nil {
 		return "", err
 	}
+	earlier, err := r.earlierCharts(ctx, rt)
+	if err != nil {
+		return "", err
+	}
 	recipeContent := plan.RecipeContent(recipeJSON)
 	criteria := map[string]string{}
 	if c := recipe.Criteria; c != nil {
@@ -439,7 +443,7 @@ func (r *ResolverReconciler) persist(ctx context.Context, rt *v1alpha1.ClusterRu
 	built, err := resolver.Build(ctx, r.Registry, &resolver.BuildInput{
 		Bundle: bundle, BundleURI: bundles.URI() + "@" + bundleDigest, DeclaredVersion: r.Config.AICRVersion,
 		RuntimeUID: string(rt.UID), Engine: r.Config.Engine, EnginePolicy: argocd.PolicyVersion,
-		Charts: r.Config.Registry().Child("charts"), Wrappers: r.Config.Registry().Child("wrappers"), InputDigest: inputDigest,
+		Charts: r.Config.Registry().Child("charts"), EarlierCharts: earlier, Wrappers: r.Config.Registry().Child("wrappers"), InputDigest: inputDigest,
 		Provenance: plan.Provenance{
 			OperatorVersion: r.OperatorVersion, AICRVersion: r.Config.AICRVersion, AICRImage: r.Config.AICRImage,
 			SnapshotDigest: snapshotDigest, RuntimeGeneration: rt.Generation, RenderFlags: flags,
@@ -480,6 +484,33 @@ func (r *ResolverReconciler) persist(ctx context.Context, rt *v1alpha1.ClusterRu
 		return "", err
 	}
 	return built.Plan.DesiredStateDigest, nil
+}
+
+// earlierCharts returns the charts of rt's candidate and active plans, for
+// resolution to reuse. It skips a plan that is gone or unreadable, and one rt
+// did not resolve itself, since a rebuilt plan never verified its upstream
+// archives.
+func (r *ResolverReconciler) earlierCharts(ctx context.Context, rt *v1alpha1.ClusterRuntime) ([]plan.Chart, error) {
+	var charts []plan.Chart
+	for _, digest := range []string{rt.Status.CandidatePlanDigest, rt.Status.ActivePlanDigest} {
+		if digest == "" {
+			continue
+		}
+		doc, err := r.readPlan(ctx, digest)
+		if err != nil {
+			if operrors.IsPermanent(err) {
+				continue
+			}
+			return nil, err
+		}
+		if doc.RuntimeUID != string(rt.UID) || doc.Provenance.Source != plan.SourceResolved {
+			continue
+		}
+		for i := range doc.Releases {
+			charts = append(charts, doc.Releases[i].Chart)
+		}
+	}
+	return charts, nil
 }
 
 // createOnce creates an immutable, content-addressed ConfigMap. AlreadyExists

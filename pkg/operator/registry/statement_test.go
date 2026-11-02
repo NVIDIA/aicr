@@ -38,32 +38,12 @@ import (
 // bundle, with the evidence as its subject.
 func pushSigstoreReferrer(t *testing.T, c *Client, r Repository, bundle []byte, subject ocispec.Descriptor) {
 	t.Helper()
-	ctx := context.Background()
-	repo, err := c.repository(r)
-	if err != nil {
-		t.Fatal(err)
-	}
 	layer := ocispec.Descriptor{MediaType: SigstoreBundleArtifactType, Digest: digest.FromBytes(bundle), Size: int64(len(bundle))}
-	manifest, err := json.Marshal(ocispec.Manifest{
-		Versioned: specs.Versioned{SchemaVersion: 2}, MediaType: ocispec.MediaTypeImageManifest,
+	manifest := imageManifest(t, ocispec.Manifest{
 		ArtifactType: SigstoreBundleArtifactType, Config: ocispec.DescriptorEmptyJSON,
 		Layers: []ocispec.Descriptor{layer}, Subject: &subject,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, b := range []struct {
-		desc ocispec.Descriptor
-		data []byte
-	}{{ocispec.DescriptorEmptyJSON, ocispec.DescriptorEmptyJSON.Data}, {layer, bundle}} {
-		if err = repo.Push(ctx, b.desc, bytes.NewReader(b.data)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	desc := ocispec.Descriptor{MediaType: ocispec.MediaTypeImageManifest, Digest: digest.FromBytes(manifest), Size: int64(len(manifest))}
-	if err = repo.Push(ctx, desc, bytes.NewReader(manifest)); err != nil {
-		t.Fatal(err)
-	}
+	pushRawManifest(t, c, r, "", manifest, blob{ocispec.DescriptorEmptyJSON, ocispec.DescriptorEmptyJSON.Data}, blob{layer, bundle})
 }
 
 // AICR attaches its evidence signature as a Sigstore bundle referrer of the
@@ -199,5 +179,37 @@ func TestPushStatement(t *testing.T) {
 	}
 	if _, _, err = c.PullStatement(ctx, evidence, subjectDigest); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
 		t.Fatalf("pulling a chart as a statement: %v", err)
+	}
+}
+
+// A statement over maxStatementBytes is refused unread, and one the registry
+// no longer holds is NOT_FOUND.
+func TestPullStatementRejects(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, repo := testRegistry(t)
+	statement := []byte(`{"_type":"https://in-toto.io/Statement/v1"}`)
+	layer := ocispec.Descriptor{MediaType: StatementMediaType, Digest: digest.FromBytes(statement), Size: int64(len(statement))}
+	oversized := layer
+	oversized.Size = maxStatementBytes + 1
+	blobs := []blob{{ocispec.DescriptorEmptyJSON, ocispec.DescriptorEmptyJSON.Data}, {layer, statement}}
+	tests := []struct {
+		name    string
+		layer   ocispec.Descriptor
+		deleted bool
+		want    operrors.ErrorCode
+	}{
+		{"oversized statement", oversized, false, operrors.ErrCodeInvalidRequest},
+		{"statement deleted", layer, true, operrors.ErrCodeNotFound},
+	}
+	for i, tt := range tests {
+		r := repo.Child(fmt.Sprintf("evidence-%d", i))
+		dgst := pushRawManifest(t, c, r, "statement", imageManifest(t, ocispec.Manifest{Config: ocispec.DescriptorEmptyJSON, Layers: []ocispec.Descriptor{tt.layer}}), blobs...)
+		if tt.deleted {
+			deleteBlob(t, c, r, layer)
+		}
+		if _, _, err := c.PullStatement(ctx, r, dgst); operrors.CodeOf(err) != tt.want {
+			t.Errorf("%s: PullStatement() = %v, want %s", tt.name, err, tt.want)
+		}
 	}
 }

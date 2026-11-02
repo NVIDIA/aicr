@@ -114,6 +114,10 @@ const (
 	// have left before a new one is minted; ECR tokens last 12 hours, so the
 	// operator renews at about half-life.
 	RegistryTokenMinValidity = 6 * time.Hour
+	// RegistryTokenMinServeValidity is the least validity a cached ECR token
+	// may have left to stay in use while minting a new one fails. It covers
+	// the longest pushing AICR Job, which carries the token it started with.
+	RegistryTokenMinServeValidity = time.Hour
 	// RepoCredsRefreshInterval paces the Argo CD repo-creds refresher.
 	RepoCredsRefreshInterval = 6 * time.Hour
 	// RepoCredsRetryBackoff is the wait before retrying a failed repo-creds

@@ -17,7 +17,7 @@ package controller
 import (
 	"context"
 	"fmt"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -56,9 +56,9 @@ type RepoCredsRefresher struct {
 	RetryBackoff time.Duration
 	Now          func() time.Time
 
-	mu        sync.Mutex
-	expires   time.Time
-	refreshed time.Time
+	// expires and refreshed are Unix times, 0 until known.
+	expires   atomic.Int64
+	refreshed atomic.Int64
 }
 
 // Start refreshes until ctx ends: every interval after a success, and with
@@ -106,7 +106,7 @@ func refreshWait(failures int, interval, retry time.Duration) time.Duration {
 // Refresh writes a current token into the repo-creds Secret and records its
 // expiry on the Secret, so the record survives an operator restart.
 func (r *RepoCredsRefresher) Refresh(ctx context.Context) error {
-	token, err := r.Provider.Token(ctx)
+	token, err := r.Provider.FreshToken(ctx)
 	if err != nil {
 		return err
 	}
@@ -131,61 +131,58 @@ func (r *RepoCredsRefresher) Refresh(ctx context.Context) error {
 		// The Secret's content is never part of the error.
 		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "update repo-creds Secret "+r.Namespace+"/"+r.Name)
 	}
-	r.mu.Lock()
-	r.expires, r.refreshed = token.Expires, r.Now()
-	r.mu.Unlock()
+	r.expires.Store(token.Expires.Unix())
+	r.refreshed.Store(r.Now().Unix())
 	return nil
 }
 
-// Check reports RegistryCredentialsStale when the repo-creds Secret is
-// missing, or its token expires within defaults.RepoCredsStaleAfter or
-// carries no expiry. A failed read carries no reason: it says nothing about
-// the token.
-func (r *RepoCredsRefresher) Check(ctx context.Context) error {
+// Check returns an error with reason RegistryCredentialsStale when the
+// repo-creds Secret is missing, carries no token expiry, or holds a token
+// expiring within defaults.RepoCredsStaleAfter. An error reading the Secret
+// has no reason, since it says nothing about the token. While the token is
+// current but minting a new one fails, err is nil and warning names the
+// failure.
+func (r *RepoCredsRefresher) Check(ctx context.Context) (warning string, err error) {
 	secret := &corev1.Secret{}
-	if err := r.Reader.Get(ctx, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, secret); err != nil {
+	if err = r.Reader.Get(ctx, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, secret); err != nil {
 		if apierrors.IsNotFound(err) {
-			return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "read repo-creds Secret").WithReason(ReasonRegistryCredentialsStale)
+			return "", operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "read repo-creds Secret").WithReason(ReasonRegistryCredentialsStale)
 		}
-		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "read repo-creds Secret")
+		return "", operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "read repo-creds Secret")
 	}
 	expires, err := time.Parse(time.RFC3339, secret.Annotations[v1alpha1.AnnotationTokenExpiresAt])
 	if err != nil {
-		return operrors.New(operrors.ErrCodeUnavailable, "the repo-creds Secret carries no token expiry").WithReason(ReasonRegistryCredentialsStale)
+		return "", operrors.New(operrors.ErrCodeUnavailable, "the repo-creds Secret carries no token expiry").WithReason(ReasonRegistryCredentialsStale)
 	}
-	r.mu.Lock()
-	r.expires = expires
-	r.mu.Unlock()
+	r.expires.Store(expires.Unix())
 	if left := expires.Sub(r.Now()); left < defaults.RepoCredsStaleAfter {
-		return operrors.New(operrors.ErrCodeUnavailable,
+		return "", operrors.New(operrors.ErrCodeUnavailable,
 			fmt.Sprintf("the engine's registry token expires at %s", expires.UTC().Format(time.RFC3339))).
 			WithReason(ReasonRegistryCredentialsStale)
 	}
-	return nil
+	if f := r.Provider.MintFailure(); f != nil {
+		return fmt.Sprintf("minting a new registry token has failed since %s, so the operator keeps using the current one, "+
+			"which expires at %s: %s", f.Since.UTC().Format(time.RFC3339), expires.UTC().Format(time.RFC3339), errorMessage(f.Err)), nil
+	}
+	return "", nil
 }
 
-// Collectors exposes when the token expires and when it was last refreshed,
-// as Unix timestamps. Each is 0 until known, which an alert on its age reads
-// as long ago, never as fresh.
+// Collectors returns gauges of the token's expiry and last refresh, and a
+// counter of failed mints. Each gauge is a Unix time, 0 until known, so an
+// alert on its age reads it as long ago, never as fresh.
 func (r *RepoCredsRefresher) Collectors() []prometheus.Collector {
-	read := func(at func() time.Time) func() float64 {
-		return func() float64 {
-			r.mu.Lock()
-			defer r.mu.Unlock()
-			if t := at(); !t.IsZero() {
-				return float64(t.Unix())
-			}
-			return 0
-		}
-	}
 	return []prometheus.Collector{
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Name: "aicr_operator_registry_token_expiry_timestamp_seconds",
 			Help: "Unix time the engine's registry token expires; 0 until known.",
-		}, read(func() time.Time { return r.expires })),
+		}, func() float64 { return float64(r.expires.Load()) }),
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Name: "aicr_operator_registry_token_refresh_timestamp_seconds",
 			Help: "Unix time of the last successful refresh of the engine's registry token; 0 until one since the operator started.",
-		}, read(func() time.Time { return r.refreshed })),
+		}, func() float64 { return float64(r.refreshed.Load()) }),
+		prometheus.NewCounterFunc(prometheus.CounterOpts{
+			Name: "aicr_operator_registry_token_mint_failures_total",
+			Help: "Failed ECR authorization token mints since the operator started.",
+		}, func() float64 { return float64(r.Provider.MintFailures()) }),
 	}
 }

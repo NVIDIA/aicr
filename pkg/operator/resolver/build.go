@@ -38,12 +38,13 @@ import (
 // neither an upstream chart reference nor a local chart.
 const ReasonChartSourceUnsupported = "ChartSourceUnsupported"
 
-// ChartDelivery serves every chart from the runtime registry:
-// upstream charts are mirrored with their digests verified, local charts are
-// packaged deterministically.
+// ChartDelivery serves every chart from the runtime registry. It mirrors an
+// upstream chart with its digests verified, or reuses one an earlier plan
+// mirrored, and packages a local chart deterministically.
 type ChartDelivery interface {
 	MirrorHTTPChart(ctx context.Context, up registry.UpstreamChart, target registry.Repository) (*registry.MirroredChart, error)
 	MirrorOCIChart(ctx context.Context, up registry.UpstreamChart, target registry.Repository) (*registry.MirroredChart, error)
+	ReuseChart(ctx context.Context, r registry.Repository, version, digest string) (*registry.MirroredChart, error)
 	PushWrapper(ctx context.Context, target registry.Repository, files map[string][]byte) (*registry.MirroredChart, error)
 }
 
@@ -59,6 +60,10 @@ type BuildInput struct {
 	EnginePolicy    string
 	// Charts is the runtime registry repository mirrored charts go below.
 	Charts registry.Repository
+	// EarlierCharts are the charts of this runtime's earlier resolved plans,
+	// which Build reuses, with no upstream request, for a release pinning the
+	// same upstream chart.
+	EarlierCharts []plan.Chart
 	// Wrappers is the repository wrapper charts go below, one per release.
 	Wrappers    registry.Repository
 	InputDigest string
@@ -225,16 +230,38 @@ func mirror(ctx context.Context, delivery ChartDelivery, in *BuildInput, br *aic
 	if up.Version != ref.Version {
 		return nil, disagree()
 	}
-	if up.Repository == "" {
-		if up.Chart != strings.TrimSuffix(ref.Source, "/")+"/"+ref.Chart {
-			return nil, disagree()
-		}
-		return delivery.MirrorOCIChart(ctx, *up, in.Charts)
-	}
-	if up.Chart != ref.Chart || up.Repository != ref.Source {
+	oci := up.Repository == ""
+	switch {
+	case oci && up.Chart != strings.TrimSuffix(ref.Source, "/")+"/"+ref.Chart:
+		return nil, disagree()
+	case !oci && (up.Chart != ref.Chart || up.Repository != ref.Source):
 		return nil, disagree()
 	}
+	repo := in.Charts.Child(path.Base(up.Chart))
+	if c := findMirrored(in.EarlierCharts, repo, up); c != nil {
+		m, err := delivery.ReuseChart(ctx, repo, up.Version, c.Digest)
+		if operrors.CodeOf(err) != operrors.ErrCodeNotFound {
+			return m, err
+		}
+	}
+	if oci {
+		return delivery.MirrorOCIChart(ctx, *up, in.Charts)
+	}
 	return delivery.MirrorHTTPChart(ctx, *up, in.Charts)
+}
+
+// findMirrored returns the chart in charts mirrored from up into repo at up's
+// version, or nil.
+func findMirrored(charts []plan.Chart, repo registry.Repository, up *registry.UpstreamChart) *plan.Chart {
+	for i := range charts {
+		c := &charts[i]
+		if c.Source == plan.ChartMirrored && c.Upstream != nil && c.Upstream.Repository == upstreamRef(up) &&
+			c.Repository == repo.URI() && c.Version == up.Version {
+
+			return c
+		}
+	}
+	return nil
 }
 
 // upstreamRef is the upstream location a plan records for a mirrored chart.

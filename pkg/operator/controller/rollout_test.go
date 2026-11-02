@@ -40,6 +40,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 	"github.com/NVIDIA/aicr/pkg/operator/plan"
+	"github.com/NVIDIA/aicr/pkg/operator/registry"
+	"github.com/NVIDIA/aicr/pkg/operator/registry/registrytest"
 )
 
 // fakeEngine records engine calls and reports what the test scripts.
@@ -1802,6 +1804,49 @@ func TestMissingStepValuesFailsTheRollout(t *testing.T) {
 	ro := rollouts(t, ctx)[0]
 	if ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseFailed) || !strings.Contains(ro.Status.Message, name) {
 		t.Fatalf("rollout = %v %+v; want Failed naming %s", ro.Labels, ro.Status, name)
+	}
+}
+
+// While the engine's registry token is current but minting a new one fails,
+// the engine stays available and EngineAvailable names the failure.
+func TestEngineAvailableNamesAFailingTokenMint(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, stabilized)
+	active := putPlan(t, ctx, rt, "50m")
+	succeedTo(t, ctx, rt, active)
+	resolved(t, ctx, active)
+	engine := newEngine()
+	engine.ensured["cert-manager"] = active
+	engine.inventory = []argocd.InventoryItem{{ReleaseID: "cert-manager", UID: "u-c", PlanDigest: active}}
+	r, _ := newRollout(t, engine, true)
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "argocd", Name: "aicr-registry-mint-failing", Labels: map[string]string{"argocd.argoproj.io/secret-type": "repo-creds"}},
+		StringData: map[string]string{"type": "oci", "url": "oci://" + ecrHost + "/aicr/cluster"},
+	}
+	if err := k8s.Create(ctx, secret); err != nil {
+		t.Fatal(err)
+	}
+	clock := time.Now()
+	api := &registrytest.ECR{Token: "AWS:token-1", Expires: clock.Add(12 * time.Hour)}
+	provider := &registry.ECRProvider{Client: api, Host: ecrHost, Now: func() time.Time { return clock }}
+	refresher := &RepoCredsRefresher{Client: k8s, Reader: k8s, Provider: provider, Namespace: "argocd", Name: secret.Name, Now: time.Now}
+	if err := refresher.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	clock, api.Fail = clock.Add(7*time.Hour), 1<<30
+	if err := refresher.Refresh(ctx); err == nil {
+		t.Fatal("Refresh() with a failing mint = nil")
+	}
+
+	r.Credentials = refresher
+	reconcileRollout(t, ctx, r)
+	got := getRuntime(t, ctx)
+	if c := cond(got, v1alpha1.ConditionEngineAvailable); c.Status != metav1.ConditionTrue || !strings.Contains(c.Message, "has failed since") {
+		t.Fatalf("EngineAvailable = %+v, want True naming the failing mint", c)
+	}
+	if c := cond(got, v1alpha1.ConditionStalled); c.Status != metav1.ConditionFalse {
+		t.Fatalf("Stalled = %+v while the token is current", c)
 	}
 }
 

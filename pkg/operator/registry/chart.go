@@ -31,6 +31,8 @@ import (
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"go.yaml.in/yaml/v3"
+	"oras.land/oras-go/v2/content"
+	"oras.land/oras-go/v2/registry/remote"
 
 	"github.com/NVIDIA/aicr/pkg/operator/defaults"
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
@@ -112,6 +114,10 @@ func parseChartYAML(raw []byte) (*ChartMeta, error) {
 // Tag is the OCI tag Helm uses for a chart version ("+" is not allowed).
 func (m *ChartMeta) Tag() string { return strings.ReplaceAll(m.Version, "+", "_") }
 
+// Config returns Chart.yaml as JSON, the config blob of the chart's OCI
+// manifest.
+func (m *ChartMeta) Config() []byte { return m.config }
+
 // chartManifest builds the chart's OCI manifest. It carries no timestamp, so
 // the same archive always yields the same manifest digest.
 func chartManifest(m *ChartMeta, archive []byte) (config, layer ocispec.Descriptor, manifest []byte, err error) {
@@ -146,43 +152,75 @@ func (c *Client) pushChart(ctx context.Context, r Repository, archive []byte, me
 	if err != nil {
 		return "", operrors.Wrap(operrors.ErrCodeInternal, "encode chart manifest", err)
 	}
-	manifestDesc := ocispec.Descriptor{
-		MediaType: ocispec.MediaTypeImageManifest, Digest: digest.FromBytes(manifest), Size: int64(len(manifest)),
-	}
-	want := manifestDesc.Digest.String()
-
 	ctx, cancel := context.WithTimeout(ctx, defaults.RegistryTimeout)
 	defer cancel()
 	repo, err := c.repository(r)
 	if err != nil {
 		return "", err
 	}
-	switch existing, rerr := repo.Resolve(ctx, tag); {
-	case rerr == nil && existing.Digest.String() == want:
-		return want, nil
-	case rerr == nil:
-		return "", operrors.New(operrors.ErrCodeConflict,
-			fmt.Sprintf("%s:%s already holds %s, not %s", r, tag, existing.Digest, want))
-	case operrors.CodeOf(classify(rerr, "")) != operrors.ErrCodeNotFound:
-		return "", classify(rerr, fmt.Sprintf("resolve %s:%s", r, tag))
+	return pushManifest(ctx, repo, r, tag, manifest, blob{configDesc, meta.config}, blob{layerDesc, archive})
+}
+
+// ReuseChart returns the chart tagged version in r, without an upstream
+// request, when the tag holds digest. A missing tag, or one holding another
+// digest, is NOT_FOUND.
+func (c *Client) ReuseChart(ctx context.Context, r Repository, version, digest string) (*MirroredChart, error) {
+	ctx, cancel := context.WithTimeout(ctx, defaults.RegistryTimeout)
+	defer cancel()
+	repo, err := c.repository(r)
+	if err != nil {
+		return nil, err
 	}
-	for _, b := range []struct {
-		desc ocispec.Descriptor
-		data []byte
-	}{{configDesc, meta.config}, {layerDesc, archive}} {
-		exists, eerr := repo.Exists(ctx, b.desc)
-		if eerr != nil {
-			return "", classify(eerr, "check chart blob")
-		}
-		if exists {
+	m, _, err := pullChart(ctx, repo, r, version)
+	if err != nil {
+		return nil, err
+	}
+	if m.Digest != digest {
+		// NOT_FOUND, so the caller mirrors from upstream, which reports a
+		// moved tag as a conflict.
+		return nil, operrors.New(operrors.ErrCodeNotFound, fmt.Sprintf("%s:%s holds %s, not %s", r, version, m.Digest, digest))
+	}
+	return m, nil
+}
+
+// pullChart returns the Helm chart m tagged version in src, and its metadata
+// meta. The manifest must carry exactly one chart layer, and that layer,
+// verified against its digest, must hold the chart src names at version.
+func pullChart(ctx context.Context, repo *remote.Repository, src Repository, version string) (m *MirroredChart, meta *ChartMeta, err error) {
+	tag := (&ChartMeta{Version: version}).Tag()
+	desc, manifest, err := fetchManifest(ctx, repo, src, tag, maxManifestBytes)
+	if err != nil {
+		return nil, nil, err
+	}
+	if manifest.Config.MediaType != ChartConfigMediaType {
+		return nil, nil, invalid("%s:%s is not a Helm chart (config %q)", src, tag, manifest.Config.MediaType)
+	}
+	var layer *ocispec.Descriptor
+	for i := range manifest.Layers {
+		if manifest.Layers[i].MediaType != ChartLayerMediaType {
 			continue
 		}
-		if perr := repo.Push(ctx, b.desc, bytes.NewReader(b.data)); perr != nil {
-			return "", classify(perr, "push chart blob to "+r.String())
+		if layer != nil {
+			return nil, nil, invalid("%s:%s has more than one chart layer", src, tag)
 		}
+		layer = &manifest.Layers[i]
 	}
-	if err = repo.PushReference(ctx, manifestDesc, bytes.NewReader(manifest), tag); err != nil {
-		return "", classify(err, fmt.Sprintf("push chart manifest %s:%s", r, tag))
+	switch {
+	case layer == nil:
+		return nil, nil, invalid("%s:%s has no chart layer", src, tag)
+	case layer.Size > defaults.MaxChartArchiveBytes:
+		return nil, nil, invalid("chart layer of %s:%s is %d bytes, over %d", src, tag, layer.Size, defaults.MaxChartArchiveBytes)
 	}
-	return want, nil
+	archive, err := content.FetchAll(ctx, repo, *layer)
+	if err != nil {
+		return nil, nil, classify(err, fmt.Sprintf("fetch chart layer %s@%s", src, layer.Digest))
+	}
+	meta, err = ReadChartMeta(archive)
+	if err != nil {
+		return nil, nil, err
+	}
+	if name := path.Base(src.Path); meta.Name != name || meta.Version != version {
+		return nil, nil, invalid("%s:%s holds chart %s %s, want %s %s", src, tag, meta.Name, meta.Version, name, version)
+	}
+	return &MirroredChart{Repository: src, Digest: desc.Digest.String(), ArchiveDigest: layer.Digest.String(), Archive: archive}, meta, nil
 }
