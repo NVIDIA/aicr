@@ -1546,9 +1546,9 @@ func (l *ownedLayout) release() (string, error) {
 
 // releaseAs renames the layout to name in its parent and releases it. It
 // fails with ErrCodeConflict when name exists and removes the layout on any
-// failure. On Linux the rename itself refuses an existing name; elsewhere a
-// directory created at name between the check and the rename can still be
-// replaced.
+// failure. Where the filesystem supports RENAME_NOREPLACE (Linux), the rename
+// itself refuses an existing name; elsewhere a directory created at name
+// between the check and the rename can still be replaced.
 func (l *ownedLayout) releaseAs(name string) (string, error) {
 	l.finishOnce.Do(func() {
 		l.finishErr = l.finishReleaseAs(name)
