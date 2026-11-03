@@ -197,7 +197,7 @@ func documentedUninstall(ctx context.Context, t *testing.T, active string) {
 	run(ctx, t, "helm", "uninstall", "aicr-operator", "--namespace", operatorNamespace,
 		"--kubeconfig", os.Getenv("AICR_OPERATOR_E2E_KUBECONFIG"), "--wait")
 	for _, r := range keptByUninstall {
-		if err := getResource(ctx, r); err != nil {
+		if err := kept(ctx, r); err != nil {
 			t.Errorf("helm uninstall did not keep %s %s/%s: %v", r.gvk.Kind, r.namespace, r.name, err)
 		}
 	}
@@ -231,6 +231,20 @@ func getResource(ctx context.Context, r keptResource) error {
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(r.gvk)
 	return k8s.Get(ctx, client.ObjectKey{Namespace: r.namespace, Name: r.name}, obj)
+}
+
+// kept reports an error unless r exists and is not being deleted: a claim the
+// registry still mounts stays visible, terminating, after a delete.
+func kept(ctx context.Context, r keptResource) error {
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(r.gvk)
+	if err := k8s.Get(ctx, client.ObjectKey{Namespace: r.namespace, Name: r.name}, obj); err != nil {
+		return err
+	}
+	if obj.GetDeletionTimestamp() != nil {
+		return fmt.Errorf("it is being deleted since %s", obj.GetDeletionTimestamp())
+	}
+	return nil
 }
 
 // planVersions maps each plan ConfigMap to its resourceVersion.
