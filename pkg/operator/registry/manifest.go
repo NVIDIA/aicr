@@ -55,15 +55,16 @@ type blob struct {
 	data []byte
 }
 
-// pushManifest pushes the blobs r lacks, then manifest tagged tag, and returns
-// the manifest digest. A tag already holding manifest is success. A tag
-// holding another manifest is CONFLICT, and is not overwritten.
+// pushManifest pushes the blobs r lacks, then manifest tagged tag unless the
+// tag already holds it, and returns the manifest digest. A tag holding
+// another manifest is CONFLICT, and is not overwritten.
 func pushManifest(ctx context.Context, repo *remote.Repository, r Repository, tag string, manifest []byte, blobs ...blob) (string, error) {
 	desc := ocispec.Descriptor{MediaType: ocispec.MediaTypeImageManifest, Digest: digest.FromBytes(manifest), Size: int64(len(manifest))}
 	want := desc.Digest.String()
+	tagged := false
 	switch existing, err := repo.Resolve(ctx, tag); {
 	case err == nil && existing.Digest.String() == want:
-		return want, nil
+		tagged = true
 	case err == nil:
 		return "", operrors.New(operrors.ErrCodeConflict, fmt.Sprintf("%s:%s already holds %s, not %s", r, tag, existing.Digest, want))
 	case operrors.CodeOf(classify(err, "")) != operrors.ErrCodeNotFound:
@@ -80,6 +81,9 @@ func pushManifest(ctx context.Context, repo *remote.Repository, r Repository, ta
 		if err = repo.Push(ctx, b.desc, bytes.NewReader(b.data)); err != nil {
 			return "", classify(err, fmt.Sprintf("push blob %s to %s", b.desc.Digest, r))
 		}
+	}
+	if tagged {
+		return want, nil
 	}
 	if err := repo.PushReference(ctx, desc, bytes.NewReader(manifest), tag); err != nil {
 		return "", classify(err, fmt.Sprintf("push manifest %s:%s", r, tag))

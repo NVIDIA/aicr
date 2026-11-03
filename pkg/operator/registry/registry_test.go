@@ -165,6 +165,39 @@ func TestPushChartIsDeterministicAndNeverOverwrites(t *testing.T) {
 	}
 }
 
+// Pushing a chart again restores a layer the registry lost while the tag
+// kept its manifest, so mirroring a chart that cannot be reused repairs it.
+func TestPushChartRestoresALostLayer(t *testing.T) {
+	t.Parallel()
+	c, repo := testRegistry(t)
+	ctx := context.Background()
+	archive := chartArchive(t, "demo", "1.0.0", "")
+	target := repo.Child("charts/demo")
+	pinned, err := c.PushChart(ctx, target, archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := ReadChartMeta(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, layer, _, err := chartManifest(meta, archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleteBlob(t, c, target, layer)
+	if _, err = c.ReuseChart(ctx, target, "1.0.0", pinned); operrors.CodeOf(err) != operrors.ErrCodeNotFound {
+		t.Fatalf("ReuseChart() with the layer lost = %v, want NOT_FOUND", err)
+	}
+	again, err := c.PushChart(ctx, target, archive)
+	if err != nil || again != pinned {
+		t.Fatalf("PushChart() again = %s, %v; want %s", again, err, pinned)
+	}
+	if _, err = c.ReuseChart(ctx, target, "1.0.0", pinned); err != nil {
+		t.Fatalf("ReuseChart() after pushing again = %v", err)
+	}
+}
+
 // The top-level Chart.yaml names the chart, and its JSON is the config blob.
 func TestReadChartMeta(t *testing.T) {
 	t.Parallel()
