@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/fake"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -108,7 +109,7 @@ func creMeasurementCtx(t *testing.T) context.Context {
 }
 
 // A certification reruns on nodes that may still carry measurements from an
-// earlier run, so listMaxBusBandwidth has to attribute by owning Workflow and
+// earlier run, so readCREBandwidth has to attribute by owning Workflow and
 // by creation time, and report the peak of what is left.
 // The workflow name is the key every later lookup is scoped by, so a status
 // that does not carry one has to fail here. A missing or null name must not
@@ -150,6 +151,13 @@ func TestCertificationWorkflowName(t *testing.T) {
 			}
 		})
 	}
+}
+
+// maxBusBandwidth reads the peak busBW of the fixture workflow's measurements.
+func maxBusBandwidth(t *testing.T, client dynamic.Interface, createdAt metav1.Time) (float64, error) {
+	t.Helper()
+	reading, err := readCREBandwidth(creMeasurementCtx(t), client, creTestNamespace, creTestWorkflow, createdAt)
+	return reading.MaxBusGBps, err
 }
 
 func TestListMaxBusBandwidth(t *testing.T) {
@@ -215,7 +223,7 @@ func TestListMaxBusBandwidth(t *testing.T) {
 			client := fake.NewSimpleDynamicClientWithCustomListKinds(
 				runtime.NewScheme(), creMeasurementListKinds(), tt.objects...)
 
-			got, err := listMaxBusBandwidth(creMeasurementCtx(t), client, creTestNamespace, creTestWorkflow, createdAt)
+			got, err := maxBusBandwidth(t, client, createdAt)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -280,9 +288,9 @@ func TestListMaxBusBandwidthRejectsCorruptBusBW(t *testing.T) {
 			client := fake.NewSimpleDynamicClientWithCustomListKinds(
 				runtime.NewScheme(), creMeasurementListKinds(), tt.objects...)
 
-			_, err := listMaxBusBandwidth(creMeasurementCtx(t), client, creTestNamespace, creTestWorkflow, createdAt)
+			_, err := maxBusBandwidth(t, client, createdAt)
 			if err == nil {
-				t.Fatal("listMaxBusBandwidth() = nil, want the corrupt value rejected")
+				t.Fatal("readCREBandwidth() = nil, want the corrupt value rejected")
 			}
 			// InvalidRequest, not NotFound: the runner logs at Info, so a
 			// skipped measurement's reason never reaches the operator.
@@ -409,7 +417,7 @@ func TestListMaxBusBandwidthRequiresFinalResults(t *testing.T) {
 				runtime.NewScheme(), creMeasurementListKinds(),
 				creMeasurement("BandwidthMeasurement", "m", creTestWorkflow, time.Minute, tt.status))
 
-			got, err := listMaxBusBandwidth(creMeasurementCtx(t), client, creTestNamespace, creTestWorkflow, createdAt)
+			got, err := maxBusBandwidth(t, client, createdAt)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -435,9 +443,7 @@ func TestListMaxBusBandwidthWaitsForEveryMeasurement(t *testing.T) {
 		creMeasurement("BandwidthMeasurement", "m-final", creTestWorkflow, time.Minute, final(busBWStatus("300"))),
 		creMeasurement("BandwidthMeasurement", "m-pending", creTestWorkflow, time.Minute, busBWStatus("489.80")))
 
-	if _, err := listMaxBusBandwidth(
-		creMeasurementCtx(t), client, creTestNamespace, creTestWorkflow, metav1.NewTime(time.Now()),
-	); err == nil {
+	if _, err := maxBusBandwidth(t, client, metav1.NewTime(time.Now())); err == nil {
 		t.Fatal("expected an error while one of the run's measurements is still provisional")
 	}
 }
@@ -604,5 +610,75 @@ func TestParseBusBWFieldRejectsNonFinite(t *testing.T) {
 		if _, err := parseBusBWField(value); err == nil {
 			t.Errorf("parseBusBWField(%v) = nil error, want rejection", value)
 		}
+	}
+}
+
+func TestReadCREBandwidthTransports(t *testing.T) {
+	createdAt := metav1.NewTime(time.Now())
+	withTransport := func(status map[string]any, transport any) map[string]any {
+		status["transport"] = transport
+		return status
+	}
+
+	tests := []struct {
+		name    string
+		objects []runtime.Object
+		want    []string
+	}{
+		{
+			name: "union across measurements, sorted and distinct",
+			objects: []runtime.Object{
+				creMeasurement("BandwidthMeasurement", "m-a", creTestWorkflow, time.Minute,
+					final(withTransport(busBWStatus("300"), []any{"Libfabric", "IB"}))),
+				creMeasurement("BandwidthMeasurement", "m-b", creTestWorkflow, time.Minute,
+					final(withTransport(busBWStatus("310"), []any{"IB"}))),
+			},
+			want: []string{"IB", "Libfabric"},
+		},
+		{
+			name: "no transport recorded",
+			objects: []runtime.Object{
+				creMeasurement("BandwidthMeasurement", "m", creTestWorkflow, time.Minute, final(busBWStatus("300"))),
+			},
+			want: []string{},
+		},
+		{
+			name: "malformed transport reads as absent",
+			objects: []runtime.Object{
+				creMeasurement("BandwidthMeasurement", "m", creTestWorkflow, time.Minute,
+					final(withTransport(busBWStatus("300"), "FasTrak"))),
+			},
+			want: []string{},
+		},
+		{
+			name: "another workflow's transport is ignored",
+			objects: []runtime.Object{
+				creMeasurement("BandwidthMeasurement", "m-other", "some-other-workflow", time.Minute,
+					final(withTransport(busBWStatus("999"), []any{"Socket"}))),
+				creMeasurement("BandwidthMeasurement", "m-ours", creTestWorkflow, time.Minute,
+					final(withTransport(busBWStatus("300"), []any{"FasTrak"}))),
+			},
+			want: []string{"FasTrak"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := fake.NewSimpleDynamicClientWithCustomListKinds(
+				runtime.NewScheme(), creMeasurementListKinds(), tt.objects...)
+
+			got, err := readCREBandwidth(creMeasurementCtx(t), client, creTestNamespace, creTestWorkflow, createdAt)
+			if err != nil {
+				t.Fatalf("readCREBandwidth() error = %v", err)
+			}
+			if len(got.Transports) != len(tt.want) {
+				t.Fatalf("Transports = %v, want %v", got.Transports, tt.want)
+			}
+			for i := range tt.want {
+				if got.Transports[i] != tt.want[i] {
+					t.Errorf("Transports = %v, want %v", got.Transports, tt.want)
+				}
+			}
+		})
 	}
 }
