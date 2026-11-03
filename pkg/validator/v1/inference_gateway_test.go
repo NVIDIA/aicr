@@ -121,12 +121,30 @@ func TestResolveInferenceGatewayProfile(t *testing.T) {
 			wantErr: "unknown overrides.inferenceGateway key",
 		},
 		{
+			name: "unknown keys are reported in a stable order",
+			refs: []recipe.ComponentRef{{
+				Name: "example-gateway", Namespace: "example-gateway-system",
+				Overrides: map[string]any{recipe.InferenceGatewayOverrideKey: map[string]any{
+					"gatewayClass": "example-gateway-class", "zeta": "x", "alpha": "y",
+				}},
+			}},
+			wantErr: `unknown overrides.inferenceGateway key "alpha"`,
+		},
+		{
 			name: "near-miss key is an error, not a chart value",
 			refs: []recipe.ComponentRef{{
 				Name: "example-gateway", Namespace: "example-gateway-system",
 				Overrides: map[string]any{"inference-gateway": map[string]any{"gatewayClass": "example-gateway-class"}},
 			}},
 			wantErr: `override key "inference-gateway" is not recognised`,
+		},
+		{
+			name: "snake_case near miss is an error too",
+			refs: []recipe.ComponentRef{{
+				Name: "example-gateway", Namespace: "example-gateway-system",
+				Overrides: map[string]any{"inference_gateway": map[string]any{"gatewayClass": "example-gateway-class"}},
+			}},
+			wantErr: `override key "inference_gateway" is not recognised`,
 		},
 		{
 			name: "declaration is not a mapping",
@@ -200,6 +218,9 @@ func TestInferenceGatewayProfile_IsProxyName(t *testing.T) {
 		{"controller-manager excluded", "inference-gateway", "inference-gateway-controller-manager", false},
 		{"webhook excluded", "inference-gateway", "inference-gateway-webhook", false},
 		{"metrics excluded", "inference-gateway", "inference-gateway-metrics", false},
+		{"gateway named after a marker matches itself", "metrics-gateway", "metrics-gateway", true},
+		{"gateway named after a marker matches its proxy suffix", "metrics-gateway", "metrics-gateway-proxy", true},
+		{"gateway named after a marker still excludes its control plane", "metrics-gateway", "metrics-gateway-metrics", false},
 		{"unrelated name without the prefix", "inference-gateway", "agentgateway-controller-manager", false},
 		{"substring inside another word is not a match", "gw", "legacy-gw-ingress", false},
 		{"short name matches only itself or its own suffixes", "gw", "gw-proxy", true},

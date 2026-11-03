@@ -104,6 +104,26 @@ case "${mode}" in
         }
         SECTION="gateway"
         ;;
+    gateway-declared-no-api)
+        # The recipe declares a gateway and the cluster does not serve the
+        # Gateway API at all: without recipe context that is a prerequisite
+        # gap, with it the declared Gateway cannot exist.
+        export AICR_INFERENCE_GATEWAY_NAME="pool-vip"
+        export AICR_INFERENCE_GATEWAY_NAMESPACE="edge-system"
+        export AICR_INFERENCE_GATEWAY_CLASS="edge-class"
+        kubectl() {
+            if [ "${1:-}" = "cluster-info" ]; then
+                return 0
+            fi
+            case " $* " in
+                *" gateway pool-vip "*)
+                    echo 'error: the server doesn'"'"'t have a resource type "gateway"' >&2
+                    return 1 ;;
+            esac
+            return 1
+        }
+        SECTION="gateway"
+        ;;
     gateway-declared-missing)
         # The recipe declares a gateway (the collector threads name,
         # namespace and class) and the cluster has no such Gateway.
@@ -558,6 +578,15 @@ func TestEvidenceResultPropagatesThroughCollector(t *testing.T) {
 			displayName:       "Inference Gateway",
 			wantStatus:        "FAIL",
 			wantEvidence:      "**Result: FAIL** — could not list Gateways to find `inference-gateway`: Error from server (Forbidden)",
+			singleVerdictFile: "inference-gateway.md",
+			wantErr:           true,
+		},
+		{
+			name:              "declared gateway on a cluster without the Gateway API is explicit fail",
+			mode:              "gateway-declared-no-api",
+			displayName:       "Inference Gateway",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — the recipe's inference Gateway `pool-vip` needs the Gateway API",
 			singleVerdictFile: "inference-gateway.md",
 			wantErr:           true,
 		},

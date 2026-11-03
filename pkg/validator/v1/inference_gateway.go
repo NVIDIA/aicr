@@ -91,10 +91,12 @@ func DefaultInferenceGatewayProfile() InferenceGatewayProfile {
 }
 
 // IsProxyName reports whether name is the Gateway's data-plane proxy Service
-// or EndpointSlice: the Gateway's own name, or that name with a "-" suffix,
-// never a control-plane component. The match is exact-or-prefix rather than
-// substring because the Gateway name is whatever the recipe chose, and a
-// short name would otherwise claim unrelated objects in the namespace. The
+// or EndpointSlice: the Gateway's own name, or that name with a "-" suffix
+// that does not mark a control-plane component. The match is exact-or-prefix
+// rather than substring because the Gateway name is whatever the recipe
+// chose, and a short name would otherwise claim unrelated objects in the
+// namespace; the markers are matched on the suffix alone so a Gateway whose
+// own name carries one (metrics-gateway) still matches its proxy. The
 // conformance check and the performance validator share this predicate so
 // readiness, exposure and the benchmark target agree on which Service is the
 // proxy.
@@ -102,16 +104,24 @@ func (p InferenceGatewayProfile) IsProxyName(name string) bool {
 	if p.GatewayName == "" || name == "" {
 		return false
 	}
-	if name != p.GatewayName && !strings.HasPrefix(name, p.GatewayName+"-") {
+	if name == p.GatewayName {
+		return true
+	}
+	suffix, suffixed := strings.CutPrefix(name, p.GatewayName+"-")
+	if !suffixed {
 		return false
 	}
 	for _, marker := range gatewayControlPlaneNameMarkers {
-		if strings.Contains(name, marker) {
+		if strings.Contains(suffix, marker) {
 			return false
 		}
 	}
 	return true
 }
+
+// overrideKeyNormalizer folds the spellings a near miss of the override key
+// takes: case, dashes and underscores.
+var overrideKeyNormalizer = strings.NewReplacer("-", "", "_", "")
 
 // ResolveInferenceGatewayProfile finds the one enabled component among refs
 // that is an inference gateway, either because it is a built-in
@@ -157,11 +167,13 @@ func inferenceGatewayProfileFromRef(ref *recipe.ComponentRef) (InferenceGatewayP
 	profile, builtin := builtinInferenceGatewayProfiles[ref.Name]
 	raw, declared := ref.Overrides[recipe.InferenceGatewayOverrideKey]
 	if !declared {
-		// A near miss (case or dashes) would otherwise pass silently as an
-		// ordinary chart value, and the component would not be a gateway.
-		for key := range ref.Overrides {
+		// A near miss (case, dashes or underscores) would otherwise pass
+		// silently as an ordinary chart value, and the component would not be
+		// a gateway. Keys are visited in order so the error names the same
+		// key on every run.
+		for _, key := range sortedKeys(ref.Overrides) {
 			if key != recipe.InferenceGatewayOverrideKey &&
-				strings.EqualFold(strings.ReplaceAll(key, "-", ""), recipe.InferenceGatewayOverrideKey) {
+				strings.EqualFold(overrideKeyNormalizer.Replace(key), recipe.InferenceGatewayOverrideKey) {
 
 				return InferenceGatewayProfile{}, false, errors.New(errors.ErrCodeInvalidRequest,
 					fmt.Sprintf("component %q: override key %q is not recognised; the inference gateway declaration key is %q",
@@ -186,7 +198,8 @@ func inferenceGatewayProfileFromRef(ref *recipe.ComponentRef) (InferenceGatewayP
 			return InferenceGatewayProfile{}, false, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("component %q: %s must be a mapping", ref.Name, path))
 		}
-		for key, value := range fields {
+		for _, key := range sortedKeys(fields) {
+			value := fields[key]
 			s, ok := value.(string)
 			if !ok {
 				return InferenceGatewayProfile{}, false, errors.New(errors.ErrCodeInvalidRequest,
@@ -227,4 +240,13 @@ func inferenceGatewayProfileFromRef(ref *recipe.ComponentRef) (InferenceGatewayP
 			fmt.Sprintf("component %q is an inference gateway but has no resolved namespace; set componentRef.namespace or the registry defaultNamespace", ref.Name))
 	}
 	return profile, true, nil
+}
+
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }

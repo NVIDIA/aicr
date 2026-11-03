@@ -1743,6 +1743,9 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 		}
 		slog.Info("Applied HTTPRoute for gateway-epp routing",
 			"name", inferenceHTTPRouteName(), "gateway", templateData["INFERENCE_GATEWAY_NAMESPACE"]+"/"+templateData["INFERENCE_GATEWAY_NAME"])
+		if err := waitForHTTPRouteAccepted(ctx, config.namespace, inferenceHTTPRouteName(), defaults.InferenceRouteAcceptTimeout); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -2571,12 +2574,115 @@ func inferenceGatewayProfile(ctx *validators.Context) (validators.InferenceGatew
 	if found {
 		return profile, nil
 	}
-	if ctx != nil && ctx.ValidationInput != nil && len(ctx.ValidationInput.ComponentRefs) > 0 {
+	if ctx != nil && ctx.ValidationInput != nil {
 		return validators.InferenceGatewayProfile{}, errors.New(errors.ErrCodeInvalidRequest,
 			"inference-routing-mode gateway-epp requires an enabled inference gateway component in the recipe "+
 				"(agentgateway, or a componentRef declaring overrides.inferenceGateway); none is declared")
 	}
 	return validators.DefaultInferenceGatewayProfile(), nil
+}
+
+// waitForHTTPRouteAccepted fails fast when the Gateway rejects the benchmark's
+// HTTPRoute. The route lives in the per-run namespace and attaches across
+// namespaces, which a listener permits only through allowedRoutes.namespaces;
+// the Gateway API default (Same) rejects it with NotAllowedByListeners, and
+// without this check that surfaces minutes later as a readiness timeout with
+// no hint. A route still without an Accepted condition when the wait expires
+// is not treated as rejected: not every controller writes status promptly,
+// and the readiness probe still gates the benchmark.
+func waitForHTTPRouteAccepted(ctx *validators.Context, namespace, name string, timeout time.Duration) error {
+	waitCtx, cancel := context.WithTimeout(ctx.Ctx, timeout)
+	defer cancel()
+	routes := ctx.DynamicClient.Resource(httpRouteGVR).Namespace(namespace)
+
+	existing, err := routes.Get(waitCtx, name, metav1.GetOptions{})
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to read the HTTPRoute after applying it", err)
+	}
+	if decided, acceptErr := httpRouteAccepted(existing); decided {
+		return acceptErr
+	}
+
+	watcher, err := routes.Watch(waitCtx, metav1.ListOptions{
+		FieldSelector:   "metadata.name=" + name,
+		ResourceVersion: existing.GetResourceVersion(),
+	})
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to watch the HTTPRoute", err)
+	}
+	defer watcher.Stop()
+
+	undecided := func(why string) error {
+		slog.Warn("HTTPRoute has no Accepted condition yet; continuing to the readiness probe",
+			"route", namespace+"/"+name, "reason", why, "waited", timeout)
+		return nil
+	}
+	for {
+		select {
+		case <-waitCtx.Done():
+			if ctx.Ctx.Err() != nil {
+				return errors.WrapCtxErr(ctx.Ctx.Err(), errors.ErrCodeTimeout,
+					"canceled while waiting for the HTTPRoute to be accepted")
+			}
+			return undecided("wait expired")
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				// Re-Get before giving up: an apiserver hiccup closes watches.
+				recheck, getErr := routes.Get(waitCtx, name, metav1.GetOptions{})
+				if getErr != nil {
+					return errors.Wrap(errors.ErrCodeInternal, "failed to re-read the HTTPRoute after the watch closed", getErr)
+				}
+				if decided, acceptErr := httpRouteAccepted(recheck); decided {
+					return acceptErr
+				}
+				return undecided("watch closed")
+			}
+			route, isRoute := event.Object.(*unstructured.Unstructured)
+			if !isRoute || route.GetName() != name {
+				continue
+			}
+			if decided, acceptErr := httpRouteAccepted(route); decided {
+				return acceptErr
+			}
+		}
+	}
+}
+
+// httpRouteAccepted reads the Accepted condition across the route's parents.
+// decided is false while no parent reports a True or False status.
+func httpRouteAccepted(route *unstructured.Unstructured) (decided bool, err error) {
+	parents, _, _ := unstructured.NestedSlice(route.Object, "status", "parents")
+	for _, p := range parents {
+		pMap, ok := p.(map[string]any)
+		if !ok {
+			continue
+		}
+		conditions, _, _ := unstructured.NestedSlice(pMap, "conditions")
+		for _, c := range conditions {
+			cMap, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			typ, _, _ := unstructured.NestedString(cMap, "type")
+			status, _, _ := unstructured.NestedString(cMap, "status")
+			switch {
+			case typ != "Accepted":
+				continue
+			case status == string(metav1.ConditionTrue):
+				return true, nil
+			case status == string(metav1.ConditionFalse):
+				reason, _, _ := unstructured.NestedString(cMap, "reason")
+				message, _, _ := unstructured.NestedString(cMap, "message")
+				parentName, _, _ := unstructured.NestedString(pMap, "parentRef", "name")
+				return true, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+					"the inference gateway %q rejected the benchmark HTTPRoute %s/%s: Accepted=False reason=%s message=%q; "+
+						"the route attaches from the per-run namespace, so the Gateway listener must allow it "+
+						"(allowedRoutes.namespaces.from: All, or a Selector matching namespaces named %s-*)",
+					parentName, route.GetNamespace(), route.GetName(), reason, message, inferenceWorkloadNamespacePrefix))
+			}
+		}
+	}
+	return false, nil
 }
 
 // resolveGatewayEndpoint returns the in-cluster URL for the recipe's inference

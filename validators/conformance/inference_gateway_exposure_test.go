@@ -386,7 +386,7 @@ func TestAssessGatewayAddressExposure(t *testing.T) {
 			name:          "no addresses, enforce → fail closed",
 			gateway:       gatewayObject(profile, nil, nil),
 			requireScoped: true,
-			wantErr:       "no classifiable status.addresses",
+			wantErr:       "no status.addresses to assess",
 			wantCode:      errors.ErrCodeInternal,
 		},
 	}

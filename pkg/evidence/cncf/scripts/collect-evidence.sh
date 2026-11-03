@@ -2464,13 +2464,20 @@ collect_gateway() {
     fi
     gw_lines=$(printf '%s\n' "${gw_lines}" | sed '/^$/d')
     if [ "${gw_status}" -ne 0 ]; then
-        # Only a missing Gateway API is a prerequisite gap. RBAC denial or an
-        # apiserver error leaves the Gateway's existence unknown, and an unknown
-        # must not read as "not installed".
+        # Only a missing Gateway API is a prerequisite gap, and only without
+        # recipe context: a recipe that declares a gateway cannot be satisfied
+        # on a cluster without the API. RBAC denial or an apiserver error
+        # leaves the Gateway's existence unknown, and an unknown must not read
+        # as "not installed".
         if grep -qiE "doesn't have a resource type|the server could not find the requested resource|no matches for kind" "${gw_err}"; then
             write_section_header "Inference API Gateway"
-            echo "**Result: SKIP (prerequisite absent)** — the Gateway API (\`gateways.gateway.networking.k8s.io\`) is not installed." >> "${EVIDENCE_FILE}"
-            log_info "Inference gateway evidence collection skipped — Gateway API not installed."
+            if [ -n "${AICR_INFERENCE_GATEWAY_NAMESPACE:-}" ]; then
+                echo "**Result: FAIL** — the recipe's inference Gateway \`${gw_name}\` needs the Gateway API (\`gateways.gateway.networking.k8s.io\`), which is not installed." >> "${EVIDENCE_FILE}"
+                log_error "Inference gateway evidence collection failed — Gateway API not installed for the declared Gateway ${gw_name}."
+            else
+                echo "**Result: SKIP (prerequisite absent)** — the Gateway API (\`gateways.gateway.networking.k8s.io\`) is not installed." >> "${EVIDENCE_FILE}"
+                log_info "Inference gateway evidence collection skipped — Gateway API not installed."
+            fi
         else
             write_section_header "Inference API Gateway"
             echo "**Result: FAIL** — could not list Gateways to find \`${gw_name}\`: $(tr -d '\n' < "${gw_err}")" >> "${EVIDENCE_FILE}"
@@ -2480,7 +2487,7 @@ collect_gateway() {
         return
     fi
     rm -f "${gw_err}"
-    gw_count=$(printf '%s\n' "${gw_lines}" | sed '/^$/d' | wc -l | tr -d ' ')
+    gw_count=$(printf '%s\n' "${gw_lines}" | grep -c . || true)
 
     # Skip if no inference gateway is installed (training clusters don't have one)
     if [ "${gw_count}" -eq 0 ]; then
@@ -2523,7 +2530,7 @@ The result is stated by the verdict line at the end of this section, after the c
 
 ---
 
-## Gateway Controller (\`${gw_ns}\`)
+## Gateway namespace workloads (\`${gw_ns}\`)
 EOF
     capture "gateway deployments" kubectl get deploy -n "${gw_ns}"
     capture "gateway pods" kubectl get pods -n "${gw_ns}"

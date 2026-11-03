@@ -27,6 +27,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/netutil"
 	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -97,7 +98,7 @@ func CheckInferenceGateway(ctx *validators.Context) error {
 	}
 	gc, err := dynClient.Resource(gcGVR).Get(ctx.Ctx, profile.GatewayClass, metav1.GetOptions{})
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf("GatewayClass %q not found", profile.GatewayClass), err)
+		return lookupError(fmt.Sprintf("GatewayClass %q", profile.GatewayClass), err)
 	}
 	gcCond, condErr := getConditionObservation(gc, "Accepted")
 	if condErr != nil {
@@ -118,8 +119,7 @@ func CheckInferenceGateway(ctx *validators.Context) error {
 	gw, err := dynClient.Resource(gatewayGVR).Namespace(profile.Namespace).Get(
 		ctx.Ctx, profile.GatewayName, metav1.GetOptions{})
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeNotFound,
-			fmt.Sprintf("Gateway %s/%s not found", profile.Namespace, profile.GatewayName), err)
+		return lookupError(fmt.Sprintf("Gateway %s/%s", profile.Namespace, profile.GatewayName), err)
 	}
 	gwCond, condErr := getConditionObservation(gw, "Programmed")
 	if condErr != nil {
@@ -154,8 +154,7 @@ func CheckInferenceGateway(ctx *validators.Context) error {
 	var crdSummary strings.Builder
 	for _, crdName := range requiredCRDs {
 		if _, crdErr := dynClient.Resource(crdGVR).Get(ctx.Ctx, crdName, metav1.GetOptions{}); crdErr != nil {
-			return errors.Wrap(errors.ErrCodeNotFound,
-				fmt.Sprintf("CRD %s not found", crdName), crdErr)
+			return lookupError("CRD "+crdName, crdErr)
 		}
 		fmt.Fprintf(&crdSummary, "  %s: present\n", crdName)
 	}
@@ -330,7 +329,9 @@ func assessGatewayAddressExposure(ctx *validators.Context, profile *validators.I
 		typ, _, _ := unstructured.NestedString(aMap, "type")
 		value, _, _ := unstructured.NestedString(aMap, "value")
 		class := classifyGatewayAddress(value)
-		classified++
+		if class != gatewayAddressUnclassified {
+			classified++
+		}
 		fmt.Fprintf(&summary, "%-40s type=%s class=%s\n", value, valueOrUnknown(typ), class)
 		switch class {
 		case gatewayAddressPublic:
@@ -343,10 +344,11 @@ func assessGatewayAddressExposure(ctx *validators.Context, profile *validators.I
 		"Route-domain or firewall scoping applied by the gateway to these addresses is not visible here.\n")
 	recordRawTextArtifact(ctx, "Inference Gateway Exposure", getCmd, summary.String())
 
-	if classified == 0 && envTruthy(requireScopedGatewayEnv) {
-		// Nothing could be classified, so nothing was confirmed scoped.
+	if classified == 0 && len(unclassified) == 0 && envTruthy(requireScopedGatewayEnv) {
+		// No address at all, so nothing was confirmed scoped. An address the
+		// check cannot classify is reported as a finding below instead.
 		return errors.New(errors.ErrCodeInternal,
-			fmt.Sprintf("Gateway %s/%s reports no classifiable status.addresses under %s=true",
+			fmt.Sprintf("Gateway %s/%s reports no status.addresses to assess under %s=true",
 				profile.Namespace, profile.GatewayName, requireScopedGatewayEnv))
 	}
 
@@ -538,7 +540,7 @@ func validateGatewayDataPlane(ctx *validators.Context, profile *validators.Infer
 	if report.MatchingEndpointSlice == 0 {
 		return nil, errors.New(errors.ErrCodeNotFound,
 			fmt.Sprintf("no EndpointSlice in %s belongs to a Service named %q or %q-*: the %s proxy Service was not found; "+
-				"check componentRef.namespace and overrides.inferenceGateway.gateway, or declare dataPlane: gateway-address if the data plane is not a Service",
+				"check componentRef.namespace and overrides.inferenceGateway.gateway, or declare dataPlane: gateway-address when the proxy Service is not named after the Gateway in its namespace",
 				profile.Namespace, profile.GatewayName, profile.GatewayName, profile.Component))
 	}
 	if report.ReadyEndpoints == 0 {
@@ -597,13 +599,31 @@ func validateGatewayAddressDataPlane(gw *unstructured.Unstructured, profile *val
 	return nil
 }
 
+// lookupError keeps a missing object apart from a failed read: RBAC denial or
+// an apiserver error leaves the object's existence unknown, which must not
+// read as absent.
+func lookupError(what string, err error) error {
+	if apierrors.IsNotFound(err) {
+		return errors.Wrap(errors.ErrCodeNotFound, what+" not found", err)
+	}
+	return errors.Wrap(errors.ErrCodeInternal, "failed to read "+what, err)
+}
+
 func collectGatewayControlPlaneArtifacts(ctx *validators.Context, profile *validators.InferenceGatewayProfile) {
 	if ctx.Clientset == nil {
 		return
 	}
-	deployTitle := profile.Component + " deployments"
+	// A Service-backed gateway's namespace is its own, so its workloads are
+	// its control plane. An address-backed data plane may sit in a namespace
+	// shared with unrelated workloads, so the artifact names the namespace
+	// rather than claiming the listing for the component.
+	owner := profile.Component
+	if profile.Probe == validators.GatewayProbeGatewayAddress {
+		owner = "namespace " + profile.Namespace
+	}
+	deployTitle := owner + " deployments"
 	deployCmd := "kubectl get deploy -n " + profile.Namespace
-	podTitle := profile.Component + " pods"
+	podTitle := owner + " pods"
 	podCmd := "kubectl get pods -n " + profile.Namespace
 
 	deploys, deployErr := ctx.Clientset.AppsV1().Deployments(profile.Namespace).List(

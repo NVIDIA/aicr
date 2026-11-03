@@ -648,11 +648,12 @@ const (
 	// + ModelCachePopulateTimeout         (13m, model-cache populate: cold image
 	//                                           pull + download — on by default)
 	// + InferenceWorkloadReadyTimeout     (10m, image pull + worker model load)
+	// + InferenceRouteAcceptTimeout       (30s, gateway-epp HTTPRoute accepted)
 	// + InferenceHealthTimeout            ( 5m, endpoint readiness probe)
 	// + InferencePerfPodTimeout           ( 5m, AIPerf pod scheduling)
 	// + InferencePerfJobTimeout           (15m, AIPerf benchmark runtime)
 	// ──────────────────────────────────────
-	// = 53m worst-case phase sum; 55m ceiling gives 2m headroom for slow
+	// = 53.5m worst-case phase sum; 55m ceiling gives 1.5m headroom for slow
 	//   image registries and slog/K8s API round-trips between phases.
 	// This is the fallback for a standalone validator invocation; normal runs
 	// use the larger inference-perf catalog `timeout` (AICR_CHECK_TIMEOUT, 65m),
@@ -905,6 +906,13 @@ const (
 	// InferenceHealthPollInterval is the polling interval for the readiness
 	// probe described on InferenceHealthTimeout.
 	InferenceHealthPollInterval = 10 * time.Second
+
+	// InferenceRouteAcceptTimeout bounds the wait for the Gateway to report an
+	// Accepted condition on the benchmark's HTTPRoute (gateway-epp routing
+	// only). A rejection fails the run at once with the listener's reason
+	// instead of as a readiness timeout; a route still without a condition
+	// when the wait expires proceeds to the readiness probe.
+	InferenceRouteAcceptTimeout = 30 * time.Second
 
 	// InferenceEndpointProbeTimeout is the per-request timeout for the readiness
 	// probe's chat-completion against the inference endpoint. It must exceed the

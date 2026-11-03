@@ -311,23 +311,35 @@ companion ref (where the Gateway object usually lives) rather than on the
 chart's ref.
 
 `dataPlane` names how the validators confirm the data plane is serving.
-`service-endpoints` is for a controller that provisions a Service for its proxy:
-the check requires ready EndpointSlices behind a Service named after the
-Gateway (its exact name or that name with a `-` suffix, never a
-`controller-manager`, `webhook` or `metrics` component), and assesses exposure
-from that Service's `loadBalancerSourceRanges`. `gateway-address` is for a data
-plane that is not a Kubernetes workload (a hardware or DPU-hosted proxy): the
-check requires the Gateway to be programmed with at least one `status.addresses`
-entry, assesses exposure from the class of those addresses (RFC 1918, RFC 6598
-shared space, ULA, loopback and link-local are private; anything else is
-public; a `Hostname`-type address or an unspecified address such as `0.0.0.0`
-is unclassifiable and counts as not confirmed scoped under
-`AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY=true`), and the performance validator
-sends its load to the first address on the first `HTTP` listener's port (a
-Gateway with no `HTTP` listener fails the performance run). A recipe that
-enables two inference gateway components fails the check; exactly one may be
-enabled. No shipped recipe uses `gateway-address`; it is covered by unit tests
-and by no CI lane.
+`service-endpoints` is for a controller that provisions the proxy Service in
+the Gateway's namespace under the Gateway's name (its exact name or that name
+with a `-` suffix, never a suffix naming a `controller-manager`, `webhook` or
+`metrics` component), which is agentgateway's convention: the check requires
+ready EndpointSlices behind that Service and assesses exposure from its
+`loadBalancerSourceRanges`. A controller that provisions the proxy elsewhere or
+under a generated name (Envoy Gateway's `envoy-<namespace>-<gateway>-<hash>` in
+`envoy-gateway-system`) does not match and should declare `gateway-address`.
+`gateway-address` reads what every implementation publishes, the Gateway's own
+status, and is also the probe for a data plane that is not a Kubernetes
+workload (a hardware or DPU-hosted proxy): the check requires the Gateway to be
+programmed with at least one `status.addresses` entry, assesses exposure from
+the class of those addresses (RFC 1918, RFC 6598 shared space, ULA, loopback
+and link-local are private; anything else is public; a `Hostname`-type address
+or an unspecified address such as `0.0.0.0` is unclassifiable and counts as not
+confirmed scoped under `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY=true`), and the
+performance validator sends its load to the first address on the first `HTTP`
+listener's port (a Gateway with no `HTTP` listener fails the performance run).
+A recipe that enables two inference gateway components fails the check; exactly
+one may be enabled. No shipped recipe uses `gateway-address`; it is covered by
+unit tests and by no CI lane.
+
+The performance validator's `gateway-epp` routing mode attaches its HTTPRoute
+from a per-run namespace named `aicr-inference-perf-<run>`, so the Gateway's
+`HTTP` listener must allow routes from that namespace
+(`allowedRoutes.namespaces.from: All`, or a `Selector` that matches it); the
+shipped agentgateway Gateway does. A listener that keeps the Gateway API
+default (`Same`) rejects the route, and the run fails at once with the
+listener's `Accepted` reason rather than as a readiness timeout.
 
 `aicr validate --cncf-submission` hands the declared Gateway's name, namespace
 and class to the evidence collector; a standalone collector run with no recipe
