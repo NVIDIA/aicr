@@ -510,3 +510,38 @@ func TestRenderIndexListsUntestedRequirements(t *testing.T) {
 		t.Errorf("report without submission checks wrote %v", entries)
 	}
 }
+
+// untestedRequirements reports an unsupported version rather than
+// rendering an empty checklist. Render refuses the version earlier, so this
+// pins the helper's own contract.
+func TestUntestedRequirementsRefusesUnsupportedVersion(t *testing.T) {
+	r := New(WithOutputDir(t.TempDir()), WithConformanceVersion("v1.38"))
+	if _, err := r.untestedRequirements(nil); err == nil {
+		t.Fatal("expected an error for an unsupported checklist version")
+	}
+
+	// With nothing evidenced, every requirement of the version is listed, in
+	// checklist order, MUSTs with checks as "not run" and the rest as
+	// "no AICR check".
+	r = New(WithOutputDir(t.TempDir()), WithConformanceVersion(Version137))
+	rows, err := r.untestedRequirements(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cl, _ := ChecklistFor(Version137)
+	if len(rows) != len(cl.Requirements) {
+		t.Fatalf("rows = %d, want every requirement (%d)", len(rows), len(cl.Requirements))
+	}
+	for i, row := range rows {
+		if row.RequirementID != cl.Requirements[i].ID || row.Level != cl.Requirements[i].Level {
+			t.Errorf("row %d = %+v, want %s/%s", i, row, cl.Requirements[i].ID, cl.Requirements[i].Level)
+		}
+		want := untestedNoCheck
+		if expected, _ := ExpectedChecks(Version137, row.RequirementID); len(expected) > 0 {
+			want = untestedNotRun
+		}
+		if row.Reason != want {
+			t.Errorf("%s reason = %q, want %q", row.RequirementID, row.Reason, want)
+		}
+	}
+}
