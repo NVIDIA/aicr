@@ -237,7 +237,7 @@ validators:
         requirement: preferred
   - name: inference-gateway
     phase: conformance
-    description: "Verify inference gateway (agentgateway) is operational"
+    description: "Verify the recipe's inference gateway (Gateway API + Inference Extension) is operational"
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
     timeout: 5m
     args: ["inference-gateway"]

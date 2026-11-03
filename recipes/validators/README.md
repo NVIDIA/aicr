@@ -77,7 +77,7 @@ Neither constraint applies to `nccl-cre-all-reduce-bw` or
 | `gang-scheduling` | Verify gang scheduling with KAI scheduler using CPU-only workers | 10m |
 | `accelerator-metrics` | Verify accelerator metrics from DCGM exporter | 5m |
 | `ai-service-metrics` | Verify AI service metrics via Prometheus | 5m |
-| `inference-gateway` | Verify inference gateway (agentgateway) is operational | 5m |
+| `inference-gateway` | Verify the recipe's inference gateway (Gateway API + Inference Extension) is operational | 5m |
 | `pod-autoscaling` | Verify HPA-driven pod autoscaling with GPU metrics | 10m |
 | `cluster-autoscaling` | Verify cluster autoscaling with Karpenter | 10m |
 | `robust-controller` | Verify Dynamo operator controller and webhooks | 5m |

@@ -242,11 +242,11 @@ const (
 	// Service object exists.
 	inferenceFrontendPort int32 = 8000
 
-	// inferenceGatewayNamespace / inferenceGatewayName identify the AICR-managed
-	// agentgateway Gateway used by the gateway-epp routing mode.
-	inferenceGatewayNamespace = "agentgateway-system"
-	inferenceGatewayName      = "inference-gateway"
-	inferenceGatewayPort      = int32(80)
+	// inferenceGatewayPort is the listener port the gateway-epp routing mode
+	// targets when neither a proxy Service nor the Gateway's listener says
+	// otherwise. The gateway's namespace and name come from the recipe's
+	// inference gateway profile (validators.ResolveInferenceGatewayProfile).
+	inferenceGatewayPort = int32(80)
 
 	// inferenceWorkloadNamespacePrefix is the base for the per-run benchmark
 	// namespace. Each run suffixes this with its unique run ID (from the
@@ -1692,6 +1692,17 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 	}
 
 	templateData := inferenceTemplateData(config)
+	// Only the gateway-epp route attaches to the recipe's gateway; a
+	// frontend-routed run never reads the profile, so a malformed gateway
+	// declaration must not abort it.
+	if config.routingMode == inferenceRoutingModeGatewayEPP {
+		gatewayProfile, profileErr := inferenceGatewayProfile(ctx)
+		if profileErr != nil {
+			return profileErr
+		}
+		templateData["INFERENCE_GATEWAY_NAME"] = gatewayProfile.GatewayName
+		templateData["INFERENCE_GATEWAY_NAMESPACE"] = gatewayProfile.Namespace
+	}
 
 	// DRA wiring mode: apply the ResourceClaimTemplate the worker pods bind
 	// (one claim, ExactCount=1 GPU, per worker). Device-plugin mode skips it —
@@ -1733,7 +1744,7 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 			return errors.Wrap(errors.ErrCodeInternal, "failed to apply HTTPRoute for gateway-epp routing", err)
 		}
 		slog.Info("Applied HTTPRoute for gateway-epp routing",
-			"name", inferenceHTTPRouteName(), "gateway", inferenceGatewayName)
+			"name", inferenceHTTPRouteName(), "gateway", templateData["INFERENCE_GATEWAY_NAMESPACE"]+"/"+templateData["INFERENCE_GATEWAY_NAME"])
 	}
 
 	return nil
@@ -2547,57 +2558,132 @@ func resolveInferenceEndpoint(ctx *validators.Context, config *inferenceWorkload
 	return resolveFrontendEndpoint(ctx, config.namespace), nil
 }
 
-// resolveGatewayEndpoint returns the in-cluster URL for the AICR-managed
-// inference gateway. The Service is created by the agentgateway controller from
-// the Gateway resource, so fall back to the conventional name and port when it
-// is not yet inspectable; waitForEndpointReady will surface a real timeout if
-// the gateway never serves the route.
+// inferenceGatewayProfile is the recipe's inference gateway, or the built-in
+// agentgateway profile when the validator runs without a recipe or the recipe
+// names no gateway, so standalone gateway-epp runs keep their pre-profile
+// target. A malformed declaration is an error, not a fallback: the recipe
+// claims a gateway it cannot describe.
+func inferenceGatewayProfile(ctx *validators.Context) (validators.InferenceGatewayProfile, error) {
+	profile, found, err := validators.ResolveInferenceGatewayProfile(ctx)
+	if err != nil {
+		return validators.InferenceGatewayProfile{}, err
+	}
+	if !found {
+		return validators.DefaultInferenceGatewayProfile(), nil
+	}
+	return profile, nil
+}
+
+// resolveGatewayEndpoint returns the in-cluster URL for the recipe's inference
+// gateway. For a Service-backed gateway the Service is created by the gateway
+// controller from the Gateway resource, so fall back to the conventional name
+// and port when it is not yet inspectable; waitForEndpointReady will surface a
+// real timeout if the gateway never serves the route. For an address-backed
+// gateway the URL is the first Gateway status address on the first listener's
+// port.
 func resolveGatewayEndpoint(ctx *validators.Context) (string, error) {
+	profile, err := inferenceGatewayProfile(ctx)
+	if err != nil {
+		return "", err
+	}
+	if profile.Probe == validators.GatewayProbeGatewayAddress {
+		return resolveGatewayAddressEndpoint(ctx, profile)
+	}
+
 	lookupCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.DiagnosticTimeout)
 	defer cancel()
 
-	svcs, err := ctx.Clientset.CoreV1().Services(inferenceGatewayNamespace).List(lookupCtx, metav1.ListOptions{})
+	svcs, err := ctx.Clientset.CoreV1().Services(profile.Namespace).List(lookupCtx, metav1.ListOptions{})
 	if err != nil {
 		slog.Debug("Inference gateway service lookup failed",
-			"namespace", inferenceGatewayNamespace, "service", inferenceGatewayName, "port", inferenceGatewayPort, "error", err)
+			"namespace", profile.Namespace, "service", profile.GatewayName, "port", inferenceGatewayPort, "error", err)
 		return "", errors.Wrap(errors.ErrCodeInternal, "failed to list inference gateway services", err)
 	}
 
 	var selected *v1.Service
 	for i := range svcs.Items {
 		svc := &svcs.Items[i]
-		if svc.Name == inferenceGatewayName {
+		if svc.Name == profile.GatewayName {
 			selected = svc
 			break
 		}
-		if selected == nil && isInferenceGatewayProxyServiceName(svc.Name) {
+		if selected == nil && profile.IsProxyName(svc.Name) {
 			selected = svc
 		}
 	}
 	if selected == nil {
 		slog.Debug("Inference gateway service not found, using default gateway endpoint",
-			"namespace", inferenceGatewayNamespace, "service", inferenceGatewayName, "port", inferenceGatewayPort)
-		return defaultGatewayEndpoint(), nil
+			"namespace", profile.Namespace, "service", profile.GatewayName, "port", inferenceGatewayPort)
+		return defaultGatewayEndpoint(profile), nil
 	}
 
 	port := inferServicePort(*selected)
 	return fmt.Sprintf("http://%s.%s.svc:%d", selected.Name, selected.Namespace, port), nil
 }
 
-func defaultGatewayEndpoint() string {
-	return fmt.Sprintf("http://%s.%s.svc:%d", inferenceGatewayName, inferenceGatewayNamespace, inferenceGatewayPort)
+var inferenceGatewayGVR = schema.GroupVersionResource{
+	Group: "gateway.networking.k8s.io", Version: "v1", Resource: "gateways",
 }
 
-func isInferenceGatewayProxyServiceName(name string) bool {
-	if !strings.Contains(name, inferenceGatewayName) {
-		return false
+// resolveGatewayAddressEndpoint reads the gateway's address from the Gateway
+// object, which is where a data plane that is not a Kubernetes workload
+// publishes it; there is no Service to resolve.
+func resolveGatewayAddressEndpoint(ctx *validators.Context, profile validators.InferenceGatewayProfile) (string, error) {
+	if ctx.DynamicClient == nil {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			"dynamic client is not available to read the inference Gateway address")
 	}
-	for _, marker := range []string{"controller-manager", "webhook", "metrics"} {
-		if strings.Contains(name, marker) {
-			return false
+	lookupCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+
+	gw, err := ctx.DynamicClient.Resource(inferenceGatewayGVR).Namespace(profile.Namespace).Get(
+		lookupCtx, profile.GatewayName, metav1.GetOptions{})
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to read inference Gateway %s/%s", profile.Namespace, profile.GatewayName), err)
+	}
+
+	var host string
+	addresses, _, _ := unstructured.NestedSlice(gw.Object, "status", "addresses")
+	for _, a := range addresses {
+		if aMap, ok := a.(map[string]any); ok {
+			if value, _, _ := unstructured.NestedString(aMap, "value"); value != "" {
+				host = value
+				break
+			}
 		}
 	}
-	return true
+	if host == "" {
+		return "", errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("inference Gateway %s/%s reports no status.addresses", profile.Namespace, profile.GatewayName))
+	}
+
+	// The benchmark speaks plain HTTP, so the port is the first HTTP listener's;
+	// an HTTPS-first Gateway must not send the load generator to a TLS port.
+	// A Gateway with no HTTP listener falls back to the conventional port.
+	port := inferenceGatewayPort
+	listeners, _, _ := unstructured.NestedSlice(gw.Object, "spec", "listeners")
+	for _, l := range listeners {
+		lMap, ok := l.(map[string]any)
+		if !ok {
+			continue
+		}
+		if protocol, _, _ := unstructured.NestedString(lMap, "protocol"); !strings.EqualFold(protocol, "HTTP") {
+			continue
+		}
+		if p, found, _ := unstructured.NestedInt64(lMap, "port"); found && p > 0 && p <= 65535 {
+			port = int32(p)
+			break
+		}
+	}
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return fmt.Sprintf("http://%s:%d", host, port), nil
+}
+
+func defaultGatewayEndpoint(profile validators.InferenceGatewayProfile) string {
+	return fmt.Sprintf("http://%s.%s.svc:%d", profile.GatewayName, profile.Namespace, inferenceGatewayPort)
 }
 
 // inferencePerfNoCleanup reports whether AICR_INFERENCE_PERF_NO_CLEANUP is set
