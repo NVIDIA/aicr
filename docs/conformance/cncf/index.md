@@ -30,11 +30,13 @@ What changed between versions, as it affects AICR evidence:
 | v1.36 | `dra_support` removed; `advanced_inference_ingress`, `high_performance_networking`, `disaggregated_inference` added (SHOULD) | `dra-support.md` renders under **Supporting Evidence**, not as a requirement; the SHOULD rows have no AICR check and appear in the index as `NOT TESTED (no AICR check)` |
 | v1.37 | `workload_sandboxing` added (SHOULD); hybrid verification recommends `junit.xml` and `e2e.log` | No AICR check yet, so the row reads `NOT TESTED (no AICR check)`; see #3615 and #3605 |
 
-The rendered `index.md` lists every requirement of the selected checklist. A
+Once at least one submission-required check has produced a result, the
+rendered `index.md` lists every requirement of the selected checklist: a
 requirement no check evidenced in the run appears with its level and
 `NOT TESTED (no AICR check)` or `NOT TESTED (not run)`, with no page and no
-evidence link; this is presence only, and turning it into a submission status
-is #3612.
+evidence link. A report whose conformance checks were all skipped or are all
+diagnostic writes nothing at all, not even those rows. This is presence only,
+and turning it into a submission status is #3612.
 
 Requirement page titles name the capability (`Inference API Gateway`,
 `Robust AI Operator`); the implementation a check observed (which gateway,
