@@ -12,7 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package cncf renders CNCF AI Conformance evidence markdown from CTRF reports.
+// Package cncf renders CNCF AI Conformance evidence markdown from CTRF
+// reports against a published upstream checklist version.
+//
+// The upstream checklists (cncf/k8s-ai-conformance docs/AIConformance-*.yaml)
+// are embedded verbatim under schemas/ and pinned by digest in checklist.go;
+// ChecklistFor exposes every requirement of a version with its upstream id,
+// description and level, and SupportedVersions lists the versions this build
+// carries. requirements.go is AICR's side of the map: which conformance
+// checks evidence which requirement, and the evidence page each renders to.
+// A Renderer takes the checklist version from WithConformanceVersion
+// (default LatestVersion); a check whose requirement that version does not
+// list (dra_support from v1.36 on) renders as supporting evidence, not as a
+// requirement row.
 package cncf
 
 import (
@@ -37,6 +49,9 @@ var (
 // Renderer generates CNCF conformance evidence documents from CTRF reports.
 type Renderer struct {
 	outputDir string
+	// version is the upstream checklist the evidence is rendered against.
+	// Zero means LatestVersion.
+	version Version
 	// now overrides wall-clock time when non-zero. Set via WithNow for
 	// reproducible builds (SLSA, signed artifacts) where the index file
 	// and embedded entry timestamps must be byte-stable across runs.
@@ -65,6 +80,15 @@ func WithNow(t time.Time) Option {
 	}
 }
 
+// WithConformanceVersion selects the upstream checklist version the evidence
+// is rendered against. The default is LatestVersion. An unsupported version
+// is reported by Render with ErrCodeInvalidRequest.
+func WithConformanceVersion(v Version) Option {
+	return func(r *Renderer) {
+		r.version = v
+	}
+}
+
 // New creates a new evidence Renderer with the given options.
 func New(opts ...Option) *Renderer {
 	r := &Renderer{}
@@ -86,12 +110,27 @@ func (r *Renderer) renderTimestamp() time.Time {
 	return time.Now().UTC()
 }
 
+// Version returns the checklist version this Renderer renders against.
+func (r *Renderer) Version() Version {
+	if r.version == "" {
+		return LatestVersion
+	}
+	return r.version
+}
+
 // Render generates evidence markdown files from a CTRF report.
 // Groups test results by CNCF requirement. Only submission-required
 // checks produce evidence. Skipped tests are excluded.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when the output directory is unset or the
+//     checklist version is unsupported.
 func (r *Renderer) Render(ctx context.Context, report *ctrf.Report) error {
 	if r.outputDir == "" {
 		return errors.New(errors.ErrCodeInvalidRequest, "evidence output directory not set")
+	}
+	if _, err := ChecklistFor(r.Version()); err != nil {
+		return err
 	}
 
 	if report == nil || len(report.Results.Tests) == 0 {
@@ -109,7 +148,10 @@ func (r *Renderer) Render(ctx context.Context, report *ctrf.Report) error {
 	// subsequent Render() calls.
 	renderNow := r.renderTimestamp()
 
-	entries := r.buildEntries(report, renderNow)
+	entries, err := r.buildEntries(report, renderNow)
+	if err != nil {
+		return err
+	}
 	if len(entries) == 0 {
 		slog.Warn("no submission-required checks found, skipping evidence rendering")
 		return nil
@@ -140,10 +182,10 @@ func (r *Renderer) Render(ctx context.Context, report *ctrf.Report) error {
 }
 
 // buildEntries groups CTRF test results by requirement.
-func (r *Renderer) buildEntries(report *ctrf.Report, now time.Time) []evidenceEntry {
+func (r *Renderer) buildEntries(report *ctrf.Report, now time.Time) ([]evidenceEntry, error) {
 	// Group by evidence file, preserving order of first appearance.
 	type fileGroup struct {
-		meta    *requirementMeta
+		meta    *CheckEvidence
 		checks  []checkEntry
 		hasFail bool
 	}
@@ -155,7 +197,10 @@ func (r *Renderer) buildEntries(report *ctrf.Report, now time.Time) []evidenceEn
 			continue
 		}
 
-		meta := GetRequirement(test.Name)
+		meta, err := GetRequirement(r.Version(), test.Name)
+		if err != nil {
+			return nil, err
+		}
 		if meta == nil {
 			// Not a submission-required check — skip.
 			continue
@@ -195,11 +240,14 @@ func (r *Renderer) buildEntries(report *ctrf.Report, now time.Time) []evidenceEn
 			Filename:      filename,
 			Checks:        g.checks,
 			Status:        status,
+			Level:         g.meta.Level,
+			Supporting:    g.meta.Supporting,
+			Version:       r.Version(),
 			GeneratedAt:   now,
 		})
 	}
 
-	return entries
+	return entries, nil
 }
 
 func (r *Renderer) renderEvidence(entry evidenceEntry) (err error) {
@@ -235,10 +283,19 @@ func (r *Renderer) renderIndex(entries []evidenceEntry, now time.Time) (err erro
 
 	data := struct {
 		GeneratedAt time.Time
+		Version     Version
 		Entries     []evidenceEntry
+		Supporting  []evidenceEntry
 	}{
 		GeneratedAt: now,
-		Entries:     entries,
+		Version:     r.Version(),
+	}
+	for _, e := range entries {
+		if e.Supporting {
+			data.Supporting = append(data.Supporting, e)
+		} else {
+			data.Entries = append(data.Entries, e)
+		}
 	}
 
 	if execErr := parsedIndexTemplate.Execute(f, data); execErr != nil {

@@ -614,12 +614,16 @@ func runValidation(
 		slog.Info("to cleanup manually: kubectl delete jobs -l app.kubernetes.io/name=aicr -n " + cfg.validationNamespace)
 	}
 
-	// Generate conformance evidence if requested.
+	// Generate conformance evidence if requested. The checklist version
+	// follows the validated cluster's Kubernetes minor; a cluster newer than
+	// the newest published checklist renders against the latest (the facade
+	// warns). An explicit version flag is a follow-up to #3606.
 	if cfg.evidenceDir != "" {
-		if renderErr := client.RenderCNCFEvidence(ctx, combined, cfg.evidenceDir); renderErr != nil {
+		renderOpts := aicr.RenderCNCFEvidenceOptions{KubernetesVersion: snap.KubernetesVersion()}
+		if renderErr := client.RenderCNCFEvidenceWithOptions(ctx, combined, cfg.evidenceDir, renderOpts); renderErr != nil {
 			return renderErr
 		}
-		slog.Info("conformance evidence written", "dir", cfg.evidenceDir)
+		slog.Info("conformance evidence written", "dir", cfg.evidenceDir, "kubernetesVersion", renderOpts.KubernetesVersion)
 	}
 
 	// Emit even on failure: failed runs document hardware-specific limits.

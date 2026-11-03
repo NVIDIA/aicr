@@ -39,6 +39,17 @@ type evidenceEntry struct {
 	// Status is the aggregate: "passed" if all pass, "failed" if any fails.
 	Status string
 
+	// Level is the requirement's upstream level at Version; empty when
+	// Supporting.
+	Level Level
+
+	// Supporting is true when Version does not list the requirement, so the
+	// page is supporting evidence rather than a requirement row.
+	Supporting bool
+
+	// Version is the checklist version the entry was rendered against.
+	Version Version
+
 	// GeneratedAt is the evidence generation timestamp.
 	GeneratedAt time.Time
 }

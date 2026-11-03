@@ -17,20 +17,38 @@ package cncf
 const indexTemplate = `# CNCF AI Conformance Evidence
 
 **Generated:** {{ .GeneratedAt.Format "2006-01-02T15:04:05Z" }}
+**Checklist:** {{ .Version }}
 
 ## Results
 
-| # | Requirement | Feature | Result | Evidence |
-|---|-------------|---------|--------|----------|
+| # | Requirement | Level | Feature | Result | Evidence |
+|---|-------------|-------|---------|--------|----------|
 {{- range $i, $e := .Entries }}
-| {{ add $i 1 }} | ` + "`{{ $e.RequirementID }}`" + ` | {{ $e.Title }} | {{ upper $e.Status }} | [{{ $e.Filename }}]({{ $e.Filename }}) |
+| {{ add $i 1 }} | ` + "`{{ $e.RequirementID }}`" + ` | {{ $e.Level }} | {{ $e.Title }} | {{ upper $e.Status }} | [{{ $e.Filename }}]({{ $e.Filename }}) |
+{{- end }}
+{{- if .Supporting }}
+
+## Supporting Evidence
+
+Not requirements of the {{ .Version }} checklist; recorded because the checks ran.
+
+| Capability | Feature | Result | Evidence |
+|------------|---------|--------|----------|
+{{- range $e := .Supporting }}
+| ` + "`{{ $e.RequirementID }}`" + ` | {{ $e.Title }} | {{ upper $e.Status }} | [{{ $e.Filename }}]({{ $e.Filename }}) |
+{{- end }}
 {{- end }}
 `
 
 const evidenceTemplate = `# {{ .Title }}
 
 **Generated:** {{ .GeneratedAt.Format "2006-01-02T15:04:05Z" }}
-**Requirement:** ` + "`{{ .RequirementID }}`" + `
+**Checklist:** {{ .Version }}
+{{- if .Supporting }}
+**Supporting evidence:** ` + "`{{ .RequirementID }}`" + ` is not a requirement of the {{ .Version }} checklist
+{{- else }}
+**Requirement:** ` + "`{{ .RequirementID }}`" + ` ({{ .Level }})
+{{- end }}
 **Result:** {{ upper .Status }}
 
 ---

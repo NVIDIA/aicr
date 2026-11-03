@@ -521,9 +521,20 @@ Two methods produce CNCF AI Conformance evidence, matching
 
 - `RenderCNCFEvidence(ctx, report, dir)` writes one markdown file per
   submission requirement, plus `index.md`, from a CTRF report such as the one
-  `MergeReports` returns. Skipped checks are omitted, so a report from a run
-  that used `WithValidationSkipChecks` is refused with
+  `MergeReports` returns, against the latest checklist version the build
+  carries (`cncf.LatestVersion`). Skipped checks are omitted, so a report
+  from a run that used `WithValidationSkipChecks` is refused with
   `ErrCodeInvalidRequest`.
+- `RenderCNCFEvidenceWithOptions(ctx, report, dir, opts)` is the same render
+  with the checklist version selected by `RenderCNCFEvidenceOptions`:
+  `ConformanceVersion` names it explicitly (`"v1.36"`; an unsupported version
+  is refused with `ErrCodeInvalidRequest`), else `KubernetesVersion` (the
+  value `Snapshot.KubernetesVersion()` returns) selects the checklist for the
+  cluster's minor, falling back to the latest with a warning when none is
+  published for it. The requirement set, levels and descriptions come from
+  `pkg/evidence/cncf` (`SupportedVersions`, `ChecklistFor`); a check whose
+  requirement the selected version no longer lists (`dra_support` from v1.36
+  on) renders as supporting evidence rather than a requirement row.
 - `CollectCNCFEvidence(ctx, recipe, opts)` deploys GPU test workloads and
   captures behavioral evidence under `opts.Dir`. It needs `bash` and
   `kubectl` on `PATH` and runs for up to 20 minutes. `recipe` is optional.

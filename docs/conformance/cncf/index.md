@@ -10,6 +10,30 @@ distribution, with evidence collected using AICR as the validation tooling.
 > AICR serves as the deployment and validation tooling (similar to sonobuoy for K8s
 > conformance), while the certified product is the AI inference/training platform.
 
+## Checklist Versions
+
+The requirement set is keyed by the upstream checklist version, which is the
+Kubernetes minor being certified. AICR embeds verbatim copies of the upstream
+checklists (`cncf/k8s-ai-conformance` `docs/AIConformance-<version>.yaml`) under
+`pkg/evidence/cncf/schemas/`, pinned by digest, and carries v1.35, v1.36 and
+v1.37. Evidence rendering selects the version from the validated cluster's
+Kubernetes minor; a cluster newer than the newest published checklist renders
+against the latest with a warning, and the Go SDK accepts an explicit version
+(`RenderCNCFEvidenceOptions.ConformanceVersion`). A CLI flag for the explicit
+version is a follow-up to #3606.
+
+What changed between versions, as it affects AICR evidence:
+
+| Version | Change | Effect on evidence |
+|---------|--------|--------------------|
+| v1.35 | Baseline: 9 MUST requirements including `dra_support` | `dra-support.md` is a requirement row |
+| v1.36 | `dra_support` removed; `advanced_inference_ingress`, `high_performance_networking`, `disaggregated_inference` added (SHOULD) | `dra-support.md` renders under **Supporting Evidence**, not as a requirement; the SHOULD rows have no AICR check and are listed from the checklist |
+| v1.37 | `workload_sandboxing` added (SHOULD); hybrid verification recommends `junit.xml` and `e2e.log` | No AICR check yet; see #3608 and #3605 |
+
+Requirement page titles name the capability (`Inference API Gateway`,
+`Robust AI Operator`); the implementation a check observed (which gateway,
+scheduler or operator) is recorded in the check output on the page.
+
 ## Submissions
 
 | Version | Product | Platform | Status | Evidence |
@@ -42,7 +66,9 @@ pkg/evidence/cncf/                    # CNCF evidence collector package
 ├── collector.go                      # Feature registry, alias mapping
 ├── consts.go                         # Feature name constants
 ├── renderer.go                       # Evidence file rendering
-├── requirements.go                   # CNCF requirement ID mapping
+├── checklist.go                      # Versioned upstream checklists (ids, levels, descriptions), digest-pinned
+├── requirements.go                   # Which conformance checks evidence which requirement; evidence page per requirement
+├── schemas/                          # Verbatim upstream AIConformance-<version>.yaml copies
 ├── templates.go                      # Evidence templates
 ├── types.go                          # Shared types
 └── scripts/                          # Evidence collection script + test manifests

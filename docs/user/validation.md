@@ -973,7 +973,9 @@ Three properties make it a scoping tool rather than a way to hide a failure:
 
 The CNCF conformance evidence path is different, and the two flags are refused
 together for that reason. `pkg/evidence/cncf` renders one markdown file per
-*requirement* and drops every skipped entry before grouping, so a requirement
+*requirement* of the upstream checklist version selected from the cluster's
+Kubernetes minor (see [Checklist Versions](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#checklist-versions))
+and drops every skipped entry before grouping, so a requirement
 whose checks were all skipped would produce no file and no index entry, with
 nothing recording the omission. A submission that silently omits a requirement
 reads as complete when it is not, so `--skip-check` with `--evidence-dir` (and
