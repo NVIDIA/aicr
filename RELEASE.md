@@ -218,6 +218,50 @@ are not promoted.
 
 ## How to Release
 
+### Release Checklist
+
+The release captain's path from `main` to GA. Examples use `v1.3.0`; substitute
+your release's tags. Post progress in a release thread as you go.
+
+1. **Check UAT on `main`** with the `aicr-uat-report` skill. Failures in
+   cluster bring-up or image builds are infra, not product signal; cover that
+   combination manually in step 3.
+2. **Cut an RC** (see [Release Candidates](#release-candidates)). Update local
+   `main` (`git pull origin main`) and check that `HEAD` matches `origin/main`,
+   since `make bump-rc` tags `HEAD`. Confirm every check on that commit passed;
+   there are several hundred, so list failures across all pages:
+   `gh api --paginate repos/NVIDIA/aicr/commits/<sha>/check-runs --jq '.check_runs[]|select(.conclusion!="success" and .conclusion!="skipped")|.name'`.
+   Then run `make bump-rc`, and wait for the tag's release run to succeed and
+   its release to be published before step 3.
+3. **Validate the RC.**
+   - UAT: the nightly batch tests `main` and stable releases, not RCs. Dispatch
+     the UAT Run workflow with `aicr_version` set to the RC tag, once per
+     reservation and intent the nightly batch covers (`nightly-intents` in
+     `infra/uat/reservations.yaml`); one dispatch runs one of each.
+   - Live clusters for what UAT misses (new services or accelerators, lanes
+     that are down): deploy the bundle, run `aicr validate` per intent, and
+     compare performance with the previous release.
+   - `--no-cluster` CLI checks for new features and repros of issues filed
+     against the RC.
+4. **Iterate.** Fix blockers on `main`, cut the next RC (see
+   [Release Candidates](#release-candidates)), re-validate what changed.
+5. **Draft the release notes** with the `aicr-release-notes` skill and review
+   them with another maintainer. Lead with new and updated recipes.
+6. **Promote** after a maintainer's go-ahead (see
+   [Promoting an RC to GA](#promoting-an-rc-to-ga)):
+   `git fetch origin --tags && make bump-promote TAG=v1.3.0-rc2`. Wait for the
+   GA release run to succeed and the release to be published (no longer a
+   draft) before steps 7 and 8; a re-run of the release step replaces a draft's
+   body.
+7. **Publish the notes** above the generated changelog in the GitHub UI, or
+   with `gh release edit v1.3.0 --notes-file <file>`. That flag replaces the
+   whole body, so the file must include the existing changelog after the
+   summary.
+8. **Announce** with the link, three or four highlights, and contributor
+   thanks (GitHub handles in public channels).
+9. **Finish the post-release steps** in
+   [What Goes Into a Release](#what-goes-into-a-release).
+
 ### Standard Release
 
 ```bash
@@ -601,6 +645,8 @@ fi
 | Version alias conflict | Stop and verify the existing digest; the workflow intentionally refuses overwrite |
 | Draft identity or asset check fails | Inspect the exact-tag draft; correct the name/tag or remove only verified stale assets, then re-run failed jobs |
 | Need a full rebuild | Re-run all jobs only before public aliases move; this creates a new candidate tag |
+| `make bump-rc` skips an RC number or refuses an existing tag | It counts from the latest tag reachable from `HEAD` in your local clone. A local tag deleted on the remote makes it skip a number: delete it (`git tag -d <tag>`). An RC on the remote you have not fetched makes it pick a taken number and stop: run `git fetch origin --tags` and `git pull origin main`, since a tag on a newer commit is not reachable from an older `HEAD` |
+| `Publish Operator Artifacts` fails with `403 Forbidden` while downloading Go modules | Usually a transient Go module proxy error: re-run the failed job (`gh run rerun <run-id> --failed`). If it repeats, check the proxy access |
 
 ## Prerequisites
 
