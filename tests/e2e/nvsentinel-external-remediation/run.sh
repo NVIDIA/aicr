@@ -46,8 +46,9 @@
 #       so the drain on Kind's one node finishes.
 #   fault-quarantine.circuitBreaker.enabled=false  on one node the first
 #       quarantine would trip it.
-#   nvsentinel-mongodb at one member with smaller requests, so everything fits
-#       one runner node.
+#   nvsentinel-mongodb at one member with smaller requests, and the analyzer
+#       at a smaller CPU request, so everything fits one runner node beside
+#       kubernetes-object-monitor.
 #
 # PREREQUISITES: go, kind, kubectl, helm, yq, jq, curl
 #
@@ -288,6 +289,7 @@ LEAF_EOF
     --set "nvsentinel:janitor-provider.csp.provider=kind" \
     --set "nvsentinel:node-drainer.systemNamespaces=${DRAIN_SYSTEM_NAMESPACES}" \
     --set "nvsentinel:fault-quarantine.circuitBreaker.enabled=false" \
+    --set "nvsentinel:health-events-analyzer.resources.requests.cpu=250m" \
     --set "nvsentinelmongodb:unsafeFlags.replsetSize=true" \
     --set "nvsentinelmongodb:replsets.rs0.size=1" \
     --set "nvsentinelmongodb:replsets.rs0.resources.requests.cpu=250m" \
