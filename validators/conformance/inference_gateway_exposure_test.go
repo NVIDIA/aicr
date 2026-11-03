@@ -100,8 +100,15 @@ func gatewayObject(profile *validators.InferenceGatewayProfile, listeners, addre
 		"apiVersion": "gateway.networking.k8s.io/v1",
 		"kind":       "Gateway",
 		"metadata":   map[string]any{"name": profile.GatewayName, "namespace": profile.Namespace},
+		"spec":       map[string]any{"gatewayClassName": profile.GatewayClass},
 		"status":     map[string]any{"listeners": listeners, "addresses": addresses},
 	}}
+}
+
+// withGatewayClass returns gw programmed by another class than its profile declares.
+func withGatewayClass(gw *unstructured.Unstructured, class string) *unstructured.Unstructured {
+	gw.Object["spec"].(map[string]any)["gatewayClassName"] = class
+	return gw
 }
 
 // programmedGateway is gatewayObject with the Gateway-level Programmed
@@ -632,6 +639,14 @@ func TestCheckInferenceGateway(t *testing.T) {
 			name: "Gateway missing in the profile namespace",
 			refs: []recipe.ComponentRef{declare("gateway-address")}, gatewayClass: gatewayClassObject("True"),
 			wantErr: "Gateway edge-system/inference-gateway not found", wantCode: errors.ErrCodeNotFound,
+		},
+		{
+			// The declared class is accepted and a Gateway of the declared
+			// name is programmed, but by a different implementation.
+			name: "Gateway programmed by another class",
+			refs: []recipe.ComponentRef{declare("gateway-address")}, gatewayClass: gatewayClassObject("True"),
+			gateway: withGatewayClass(programmed("True"), "agentgateway"),
+			wantErr: `has gatewayClassName "agentgateway"; the recipe declares "edge-class"`, wantCode: errors.ErrCodeInternal,
 		},
 		{
 			name: "Gateway not programmed",

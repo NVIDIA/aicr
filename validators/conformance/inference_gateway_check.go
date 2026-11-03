@@ -121,6 +121,15 @@ func CheckInferenceGateway(ctx *validators.Context) error {
 	if err != nil {
 		return lookupError(fmt.Sprintf("Gateway %s/%s", profile.Namespace, profile.GatewayName), err)
 	}
+	// The class and the Gateway were each read by name; a Gateway programmed
+	// by another implementation would otherwise pass on the strength of the
+	// declared class being accepted. The evidence script fails the same state.
+	gwClass, _, _ := unstructured.NestedString(gw.Object, "spec", "gatewayClassName")
+	if gwClass != profile.GatewayClass {
+		return errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("Gateway %s/%s has gatewayClassName %q; the recipe declares %q",
+				profile.Namespace, profile.GatewayName, gwClass, profile.GatewayClass))
+	}
 	gwCond, condErr := getConditionObservation(gw, "Programmed")
 	if condErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "Gateway not programmed", condErr)
@@ -137,8 +146,8 @@ func CheckInferenceGateway(ctx *validators.Context) error {
 	}
 	recordRawTextArtifact(ctx, "Gateways",
 		"kubectl get gateways -A",
-		fmt.Sprintf("Name:            %s/%s\nProgrammed:      %s\nReason:          %s\nMessage:         %s\nAddressCount:    %d",
-			gw.GetNamespace(), gw.GetName(), gwCond.Status, gwCond.Reason, gwCond.Message, addressCount))
+		fmt.Sprintf("Name:            %s/%s\nGatewayClass:    %s\nProgrammed:      %s\nReason:          %s\nMessage:         %s\nAddressCount:    %d",
+			gw.GetNamespace(), gw.GetName(), gwClass, gwCond.Status, gwCond.Reason, gwCond.Message, addressCount))
 	recordObjectYAMLArtifact(ctx, "Gateway details",
 		gatewayGetCommand(profile)+" -o yaml", gw.Object)
 
