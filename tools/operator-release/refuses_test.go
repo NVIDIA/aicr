@@ -16,6 +16,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -45,13 +46,18 @@ func refusal(refused ...string) []byte {
 // TestRefuses checks that refuses passes only when the binary refuses every
 // development setting, reports a coded error when the binary starts, fails
 // for another reason or cannot run, or the image or settings are missing, and
-// outside CI on a host that cannot run the image's binary skips the check.
+// on a host that cannot run the image's binary skips the check outside CI and
+// fails in CI.
 func TestRefuses(t *testing.T) {
 	t.Parallel()
 	const refused = "refuses development.skipDiscovery"
-	hostOut := refused
+	hostOut, hostWant, hostCode := refused, "", errors.ErrorCode("")
 	if _, ok := hostPlatforms[runtime.GOOS+"/"+runtime.GOARCH]; !ok {
-		hostOut = "skipping the development settings refusal check"
+		if os.Getenv("CI") != "" {
+			hostOut, hostWant, hostCode = "", "does not run on", errors.ErrCodeInvalidRequest
+		} else {
+			hostOut = "skipping the development settings refusal check"
+		}
 	}
 	pinned := []string{"-platform", "linux/amd64"}
 	both := refusal("bypassApprovals", "skipDiscovery")
@@ -72,7 +78,7 @@ func TestRefuses(t *testing.T) {
 		{"no image", "index.json", "", errors.ErrCodeInvalidRequest, nil, pinned},
 		{"no settings", "read the pinned AICR image", "", errors.ErrCodeInvalidRequest, both,
 			append([]string{"-settings", "missing.yaml"}, pinned...)},
-		{"host platform", "", hostOut, "", both, nil},
+		{"host platform", hostWant, hostOut, hostCode, both, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
