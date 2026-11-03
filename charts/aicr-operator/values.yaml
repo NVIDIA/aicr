@@ -163,6 +163,7 @@ approvers:
   groups: []
 
 development:
-  # Development builds only; a release build refuses to start with either set.
+  # Development builds only, with the aicr_operator_development build tag.
+  # Any other build refuses to start with either set.
   bypassApprovals: false
   skipDiscovery: false

@@ -1134,15 +1134,18 @@ OPERATOR_E2E_KUBECONFIG    ?= $(CURDIR)/.operator-e2e/kubeconfig
 AICR_E2E_IMAGE             ?= $(shell yq -r '.operator.aicr_image' .settings.yaml 2>/dev/null)
 AICR_E2E_VERSION           ?= $(shell yq -r '.operator.aicr_version' .settings.yaml 2>/dev/null)
 AICR_E2E_VALIDATOR_IMAGES  ?= $(shell yq -r '.operator.aicr_validator_images | [.[]] | join(",")' .settings.yaml 2>/dev/null)
-# A development build: release versions are stamped only by operator-candidate.
+# A development build. Only operator-candidate stamps release versions, and
+# only the aicr_operator_development tag lets the operator accept development
+# settings. OPERATOR_TAGS= builds without it.
 OPERATOR_VERSION           ?= v0.0.0-dev
+OPERATOR_TAGS              ?= aicr_operator_development
 OPERATOR_LDFLAGS           := -s -w \
 	-X github.com/NVIDIA/aicr/pkg/operator/version.Version=$(OPERATOR_VERSION) \
 	-X github.com/NVIDIA/aicr/pkg/operator/version.Commit=$(COMMIT)
 
 .PHONY: operator-build
-operator-build: ## Builds the operator and the kubectl-aicr plugin into dist/
-	@GOFLAGS="-mod=readonly" CGO_ENABLED=0 go build -trimpath -ldflags "$(OPERATOR_LDFLAGS)" -o dist/aicr-operator ./cmd/aicr-operator
+operator-build: ## Builds the operator (development opt-in) and the kubectl-aicr plugin into dist/
+	@GOFLAGS="-mod=readonly" CGO_ENABLED=0 go build -trimpath -tags "$(OPERATOR_TAGS)" -ldflags "$(OPERATOR_LDFLAGS)" -o dist/aicr-operator ./cmd/aicr-operator
 	@GOFLAGS="-mod=readonly" CGO_ENABLED=0 go build -trimpath -ldflags "$(OPERATOR_LDFLAGS)" -o dist/kubectl-aicr ./cmd/kubectl-aicr
 	@echo "Built dist/aicr-operator and dist/kubectl-aicr ($(OPERATOR_VERSION))"
 

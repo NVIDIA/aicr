@@ -479,7 +479,7 @@ Its unit and envtest suites run in `make test`. The targets below cover the rest
 
 | Command | Description |
 |---------|-------------|
-| `make operator-build` | Build `dist/aicr-operator` and `dist/kubectl-aicr` (development version) |
+| `make operator-build` | Build `dist/aicr-operator` and `dist/kubectl-aicr` (development version, with the `aicr_operator_development` tag) |
 | `make generate` | Regenerate deep copies and CRDs after an API type change |
 | `make operator-check-generated` | Fail when generated code or CRDs are stale |
 | `make operator-envtest-floor` | CRD validation and chart suites on the Kubernetes floor |
@@ -490,6 +490,8 @@ Its unit and envtest suites run in `make test`. The targets below cover the rest
 | `CANDIDATE_VERSION=<version> make operator-candidate` | Build a release candidate of the current commit into `dist/candidate` (clean tree required) |
 | `make operator-candidate-verify` | Build the candidate twice and require identical bytes |
 | `make operator-qualify` | Fault-injection suite against `dist/candidate`, upgraded to `dist/candidate-next` |
+
+The operator accepts development settings (`development.bypassApprovals`, `development.skipDiscovery`) only when built with the `aicr_operator_development` build tag and without a release version. A plain `go build` or `ko build` refuses them. `ko` adds the tag when `AICR_OPERATOR_DEVELOPMENT=true`, which `make operator-skeleton` sets.
 
 CI runs each kind suite on its own cluster. Locally, recreate the cluster between suites (`make operator-kind-down operator-kind-up`), or set `OPERATOR_ADOPT=1` to install over another suite's objects. Set `OPERATOR_E2E_REQUIRED=1` to make a suite fail, not skip, when no cluster is reachable. `make operator-qualify` needs both candidates, built as `.github/workflows/operator-e2e.yaml` builds them.
 
