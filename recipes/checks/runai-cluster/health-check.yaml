@@ -16,7 +16,9 @@
 #
 # Validates that the Run:ai cluster side is installed, registered with its
 # control plane and healthy in the runai namespace:
-# 1. runaiconfigs.run.ai CRD Established=True (the chart's crds/ landed).
+# 1. clusters.run.ai CRD Established=True. It ships in the chart's crds/, so
+#    the CRD inventory anchors it; runaiconfigs.run.ai is applied by the
+#    crd-upgrader hook image instead and is covered by step 2 through the CR.
 # 2. RunaiConfig runai/runai exists and reports Deployed, Available and
 #    DependenciesFulfilled all True. The chart renders no RunaiConfig once
 #    controlPlane.url and cluster.uid are set; the pre-install hook creates it
@@ -43,14 +45,14 @@ spec:
   timeouts:
     assert: 5m
   steps:
-    - name: validate-runaiconfig-crd-established
+    - name: validate-cluster-crd-established
       try:
         - assert:
             resource:
               apiVersion: apiextensions.k8s.io/v1
               kind: CustomResourceDefinition
               metadata:
-                name: runaiconfigs.run.ai
+                name: clusters.run.ai
               status:
                 (conditions[?type == 'Established']):
                   - status: "True"

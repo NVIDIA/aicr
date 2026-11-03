@@ -2376,9 +2376,11 @@ aicr bundle -r recipe.yaml \
 #   controlPlane.bootstrapToken to a token minted minutes earlier
 ```
 
-Mint a fresh token for every install and upgrade. With the URL or UID empty
-the chart renders without its registration hooks and the install never
-reaches the control plane. GitOps deployers that re-sync from the repository
+Mint a fresh token for every install and upgrade. Once you have written it
+into `cluster-values.yaml`, that file holds the token at rest on the install
+machine: protect it like a kubeconfig and clear the value after the release is
+installed. With the URL or UID empty the chart renders without its
+registration hooks and the install never reaches the control plane. GitOps deployers that re-sync from the repository
 would reuse an expired token, so use the `helm` deployer for now.
 
 **What the leaves change.** The chart bundles KAI Scheduler 0.18 through its
