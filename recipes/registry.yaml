@@ -1511,6 +1511,10 @@ components:
       defaultChart: runai-cluster
       # renovate: datasource=helm depName=runai-cluster registryUrl=https://helm.ngc.nvidia.com/nvidia/runai-oss
       defaultVersion: "3.0.20"
+      # SHA-256 of runai-cluster-3.0.20.tgz as served by NGC (matches the
+      # repository index). The repo publishes no .prov file, so this is the
+      # only integrity anchor --vendor-charts has.
+      defaultDigest: sha256:bc30d1a688206b33ce02232a116143f556031e9f8f482ea5458131f01f9252ab
       # The chart's templates name this namespace outright, so the release
       # cannot live anywhere else. Its pre-install hook labels the namespace
       # pod-security.kubernetes.io/enforce=privileged itself.
