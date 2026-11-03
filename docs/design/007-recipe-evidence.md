@@ -24,7 +24,8 @@
 ## Status
 
 **Accepted, partially implemented** — proposed 2026-05-08. Amended
-2026-11-03 for the `cncf-conformance` kind; see
+2026-11-03 for the `cncf-conformance` kind (accepted, implementation
+pending); see
 [Amendment: single-path CNCF conformance evidence (2026-11-03)](#amendment-single-path-cncf-conformance-evidence-2026-11-03).
 
 This ADR specifies the V1 contract. Implementation lands as five
@@ -224,7 +225,8 @@ and introduces kind-scoped flag names for the new attestation kind:
 | `recipe-test-attestation` | `--emit-attestation <path>` (NEW), `--push <oci-ref>`, `--full` (opt out of default minimization); `--include-logs` and `--push-logs` are deferred (log capture not implemented in V1) |
 
 > **Superseded in part (2026-11-03).** The `cncf-conformance` row above
-> and the `cncf.cncfSubmission` / `cncf.features` config keys in item 1
+> and the `evidence.cncf.cncfSubmission` / `evidence.cncf.features`
+> config keys in item 1
 > below describe the surface as it shipped. The
 > [amendment](#amendment-single-path-cncf-conformance-evidence-2026-11-03)
 > keeps `--evidence-dir` and `--cncf-submission` but will change what
@@ -1347,7 +1349,7 @@ Amends the `cncf-conformance` kind in the evidence taxonomy and the
 `cncf-conformance` row of the V1 surface above. Execution is tracked in
 [#3601](https://github.com/NVIDIA/aicr/issues/3601); this section records
 the decisions that change what this ADR committed to. The decisions are
-accepted; their implementation is pending, and each names the sub-issue
+accepted, implementation pending; each names the sub-issue
 that lands it. The shipped CLI still runs the collector under
 `--cncf-submission` and still accepts `--feature` until
 [#3602](https://github.com/NVIDIA/aicr/issues/3602) lands. The
@@ -1392,7 +1394,7 @@ Nightly UAT runs the conformance phase inside a 40-minute all-phases
 step. The UAT cells have two GPU nodes, so runtime and contention with
 the other phases, not capacity, bound what can be always-on.
 
-### Decision (proposed)
+### Decision (accepted, implementation pending)
 
 1. **One runner.** Implementing issue:
    [#3602](https://github.com/NVIDIA/aicr/issues/3602).
@@ -1401,20 +1403,21 @@ the other phases, not capacity, bound what can be always-on.
    `pkg/evidence/cncf/collector.go` are deleted once a section-by-section
    comparison shows every requirement the script evidenced has a
    Go-produced counterpart.
-2. **Flags do not change check execution or check verdicts.**
-   Implementing issue:
-   [#3602](https://github.com/NVIDIA/aicr/issues/3602), packaging in
-   [#3605](https://github.com/NVIDIA/aicr/issues/3605). For the same
+2. **Flags do not change check execution or check verdicts.** Implementing
+   issue: [#3602](https://github.com/NVIDIA/aicr/issues/3602), packaging
+   in [#3605](https://github.com/NVIDIA/aicr/issues/3605). For the same
    selected checks, verdicts are identical with and without any evidence
    flag. `--evidence-dir <path>` writes per-requirement evidence, as
    today. `--cncf-submission` keeps its name and will mean "also write the
    submission layout for this run": PRODUCT.yaml, README,
-   platform-configuration, `junit.xml`, `e2e.log`, redacted, and checked
-   by the pinned upstream validator as the last step. It requires
-   `--evidence-dir`, refuses `--skip-check` and `--no-cluster`, and no
-   longer bypasses validation. A submission run may still exit non-zero on
-   incomplete requirement coverage or a failed artifact validation without
-   rewriting any check verdict.
+   platform-configuration, `junit.xml` and `e2e.log`; the redacted
+   submission directory (every file above, with identifiers scrubbed by
+   `pkg/evidence/redact`); and a check of that directory by the pinned
+   upstream validator as the last step. It requires `--evidence-dir`,
+   refuses `--skip-check` and `--no-cluster`, and no longer bypasses
+   validation. A submission run may still exit non-zero on incomplete
+   requirement coverage or a failed artifact validation without rewriting
+   any check verdict.
 3. **`--feature` and `evidence.cncf.features` are removed together with
    the script.** Implementing issue:
    [#3602](https://github.com/NVIDIA/aicr/issues/3602).
