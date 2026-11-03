@@ -191,6 +191,40 @@ func TestPullLatestRefusesNoStableRelease(t *testing.T) {
 	}
 }
 
+// pull never writes over an existing directory's content, and a version the
+// registry does not have is an error naming it.
+func TestPullRefuses(t *testing.T) {
+	t.Parallel()
+	host := testRegistry(t)
+	src, _ := writeCandidateAICR(t, host+"/nvidia/aicr-operator", []byte("operator-binary"), pinnedAICR)
+	if err := run([]string{"push", "-dir", src, "-chart-registry", host + "/nvidia/charts", "-plain-http"}, io.Discard); err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	used := t.TempDir()
+	if err := os.WriteFile(filepath.Join(used, "keep.txt"), []byte("mine"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name, version, dir, wantErr string
+	}{
+		{name: "a non-empty directory", version: "0.1.0-rc.1", dir: used, wantErr: "is not empty"},
+		{name: "an unpublished version", version: "9.9.9", dir: filepath.Join(t.TempDir(), "out"), wantErr: "demo:9.9.9"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := run([]string{"pull", "-chart-registry", host + "/nvidia/charts", "-chart", "demo",
+				"-version", tt.version, "-dir", tt.dir, "-plain-http"}, io.Discard)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("pull = %v; want an error containing %q", err, tt.wantErr)
+			}
+			if entries, _ := os.ReadDir(used); tt.dir == used && len(entries) != 1 {
+				t.Fatalf("pull wrote into the non-empty directory: %d entries", len(entries))
+			}
+		})
+	}
+}
+
 // pinnedAICR is demoAICR with full digests, as a published chart pins them.
 var pinnedAICR = AICR{
 	Version:         "v1.1.0",
