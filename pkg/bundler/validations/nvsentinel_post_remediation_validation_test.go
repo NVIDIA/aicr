@@ -17,12 +17,9 @@ package validations
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -174,11 +171,30 @@ func TestCheckNVSentinelPostRemediationValidationCoherent(t *testing.T) {
 			"templates": map[string]any{file: text}}}}
 	}
 	quotingTemplate := jobTemplate("k8s-job-template.yaml", "{{quote .Value}}")
-	// Quotes only the toleration for key a, or every one but it.
-	quotingOnlyA := jobTemplate("k8s-job-template.yaml", `{{if eq .Key "a"}}{{quote .Value}}{{else}}{{.Value}}{{end}}`)
-	quotingAllButA := jobTemplate("k8s-job-template.yaml", `{{if ne .Key "a"}}{{quote .Value}}{{else}}{{.Value}}{{end}}`)
-	definingTemplate := jobTemplate("k8s-job-template.yaml", `{{template "v" .}}{{define "v"}}{{quote .Value}}{{end}}`)
+	// mixedProviders requests dcgm-diag-test, on the chart's template, and
+	// gpu-burn, on a provider whose template AICR's values override.
+	customProvider := map[string]any{}
+	for k, v := range nodeValidationChartProviderDefaults {
+		customProvider[k] = v
+	}
+	customProvider["templateFile"] = "custom-template.yaml"
+	mixedProviders := mergedValues(
+		at(nodeValidationProvidersPath+".custom-provider", customProvider),
+		at(nodeValidationTestsPath+".gpu-burn",
+			map[string]any{"provider": "custom-provider", "image": "busybox:1.38.0", "command": []any{"true"}}),
+		jobTemplate("custom-template.yaml", "{{quote .Value}}"),
+		at(postRemediationRuleSetsPath, []any{postRemediationRuleSet("reboot", nodeValidationDCGMTest, "gpu-burn")}),
+	)
+	customOnly := mergedValues(mixedProviders,
+		at(postRemediationRuleSetsPath, []any{postRemediationRuleSet("reboot", "gpu-burn")}))
+	wantUnverified := postRemediationReleaseTaintsPath + " is rendered into test Jobs through k8s-job-template.yaml"
+	wantUnverifiedCustom := postRemediationReleaseTaintsPath + " is rendered into test Jobs through custom-template.yaml"
 	trueRelease := releases(postRemediationRelease(postRemediationTaint{"a", "true", "NoSchedule"}, true))
+	typedTrue := map[string]any{"key": "a", "value": true, "effect": "NoSchedule", "remove": true}
+	wantTypedValue := func(i int, value string) string {
+		return fmt.Sprintf("%s[%d].value is %s, not a string: the chart writes schedulingGate into "+
+			"lifecycle-manager's config with toYaml", postRemediationReleaseTaintsPath, i, value)
+	}
 	criterion := func(name, expression string) any { return nodeValidationCriterion(name, expression) }
 	readiness := func(items ...any) map[string]any { return at(postRemediationReadinessPath, items) }
 	quarantineCriterion := criterion(nodeValidationQuarantineCriterion, nodeValidationQuarantineExpression)
@@ -187,10 +203,11 @@ func TestCheckNVSentinelPostRemediationValidationCoherent(t *testing.T) {
 		name     string
 		sentinel map[string]any
 		// others replaces the default healthy GPU Operator.
-		others   []recipe.ComponentRef
-		noOthers bool
-		cfg      *config.Config
-		wantErrs []string
+		others    []recipe.ComponentRef
+		noOthers  bool
+		cfg       *config.Config
+		wantErrs  []string
+		wantWarns []string
 	}{
 		// Inert.
 		{name: "monitors only, nothing else in the recipe", sentinel: map[string]any{}, noOthers: true},
@@ -287,41 +304,39 @@ func TestCheckNVSentinelPostRemediationValidationCoherent(t *testing.T) {
 			sentinel: remediation(releases(postRemediationRelease(postRemediationTaint{"a", "yes", "NoSchedule"}, true),
 				postRemediationRelease(postRemediationTaint{"b", "1", "NoSchedule"}, true))),
 			wantErrs: []string{wantBadValue(0, "yes"), wantBadValue(1, "1")}},
-		{name: "a release entry with a typed bool or number value breaks every test Job",
-			sentinel: remediation(releases(
-				map[string]any{"key": "a", "value": true, "effect": "NoSchedule", "remove": true},
-				map[string]any{"key": "b", "value": 1, "effect": "NoSchedule", "remove": true})),
-			wantErrs: []string{wantBadValue(0, "true"), wantBadValue(1, "1")}},
-		{name: "a release entry with a typed bool value by --set-json breaks every test Job", sentinel: remediation(),
+		{name: "a release entry with a typed bool or number value stops lifecycle-manager",
+			sentinel: remediation(releases(typedTrue, map[string]any{"key": "b", "value": 1, "effect": "NoSchedule", "remove": true})),
+			wantErrs: []string{wantTypedValue(0, "true"), wantTypedValue(1, "1")}},
+		{name: "a release entry with a typed bool value by --set-json stops lifecycle-manager", sentinel: remediation(),
 			cfg: setJSON(`nv-sentinel:` + postRemediationReleaseTaintsPath +
 				`=[{"key":"a","value":true,"effect":"NoSchedule","remove":true}]`),
-			wantErrs: []string{wantBadValue(0, "true")}},
+			wantErrs: []string{wantTypedValue(0, "true")}},
+		{name: "a typed value stops lifecycle-manager even with a template that quotes it",
+			sentinel: remediation(quotingTemplate, releases(typedTrue)),
+			wantErrs: []string{wantTypedValue(0, "true")}, wantWarns: []string{wantUnverified}},
 		{name: "a release entry with no value is fine",
 			sentinel: remediation(releases(postRemediationRelease(postRemediationTaint{"a", "", "NoSchedule"}, true)))},
-		{name: "a Job template that quotes the value keeps a value of true",
-			sentinel: remediation(quotingTemplate, trueRelease)},
-		{name: "a Job template that quotes the value lets the NVCRE taint be released",
-			sentinel: remediation(nvcreOn, quotingTemplate, releases(postRemediationRelease(nvcre, true)))},
-		{name: "a custom Job template that writes the value unquoted still breaks on true",
-			sentinel: remediation(jobTemplate("k8s-job-template.yaml", "{{.Value}}"), trueRelease),
-			wantErrs: []string{wantBadValue(0, "true")}},
-		{name: "a template no requested test renders through leaves the chart's in force",
+		{name: "a custom Job template leaves a string value unverified, with a warning",
+			sentinel: remediation(quotingTemplate, trueRelease), wantWarns: []string{wantUnverified}},
+		{name: "a custom Job template that writes the value unquoted is not rendered either",
+			sentinel:  remediation(jobTemplate("k8s-job-template.yaml", "{{.Value}}"), trueRelease),
+			wantWarns: []string{wantUnverified}},
+		{name: "a custom Job template lets the NVCRE taint be listed, with a warning",
+			sentinel:  remediation(nvcreOn, quotingTemplate, releases(postRemediationRelease(nvcre, true))),
+			wantWarns: []string{wantUnverified}},
+		{name: "a custom Job template with nothing to release warns of nothing",
+			sentinel: remediation(quotingTemplate)},
+		{name: "a template override no requested test uses leaves the chart's rule in force",
 			sentinel: remediation(jobTemplate("unused-template.yaml", "{{quote .Value}}"), trueRelease),
 			wantErrs: []string{wantBadValue(0, "true")}},
-		{name: "a Job template that quotes only the released taint's key keeps its value",
-			sentinel: remediation(quotingOnlyA, trueRelease)},
-		{name: "a Job template that quotes every key but the released taint's breaks on it",
-			sentinel: remediation(quotingAllButA, trueRelease), wantErrs: []string{wantBadValue(0, "true")}},
-		{name: "a Job template that quotes only one of two released keys breaks on the other",
-			sentinel: remediation(quotingOnlyA, releases(
-				postRemediationRelease(postRemediationTaint{"a", "true", "NoSchedule"}, true),
-				postRemediationRelease(postRemediationTaint{"b", "true", "NoSchedule"}, true))),
-			wantErrs: []string{wantBadValue(1, "true")}},
-		{name: "a Job template that invokes a defined template falls back to the chart's unquoted write",
-			sentinel: remediation(definingTemplate, trueRelease), wantErrs: []string{wantBadValue(0, "true")}},
-		{name: "a Job template that does not parse falls back to the chart's unquoted write",
-			sentinel: remediation(jobTemplate("k8s-job-template.yaml", "{{quote .Value"), trueRelease),
-			wantErrs: []string{wantBadValue(0, "true")}},
+		{name: "a test on the chart's template beside one on a custom template keeps the chart's rule",
+			sentinel: remediation(mixedProviders, trueRelease),
+			wantErrs: []string{wantBadValue(0, "true")}, wantWarns: []string{wantUnverifiedCustom}},
+		{name: "only tests on a custom template leave the value unverified",
+			sentinel: remediation(customOnly, trueRelease), wantWarns: []string{wantUnverifiedCustom}},
+		{name: "a custom Job template does not excuse a taint left unreleased",
+			sentinel: remediation(quotingTemplate, quarantineRules(tainting("NoExecute", true)), trueRelease),
+			wantErrs: []string{wantCustom}, wantWarns: []string{wantUnverified}},
 		{name: "a custom rule set's NoExecute taint released",
 			sentinel: remediation(quarantineRules(tainting("NoExecute", nil)), releases(postRemediationRelease(customTaint, true)))},
 		{name: "a custom rule set's NoExecute taint not released",
@@ -650,9 +665,7 @@ func TestCheckNVSentinelPostRemediationValidationCoherent(t *testing.T) {
 			}
 			warnings, errs := CheckNVSentinelPostRemediationValidationCoherent(t.Context(), nvsentinelComponent,
 				&recipe.RecipeResult{ComponentRefs: refs}, cfg, nil)
-			if len(warnings) != 0 {
-				t.Errorf("got warnings %q, want none", warnings)
-			}
+			assertDatastoreFindings(t, "warning", warnings, tt.wantWarns)
 			got := make([]string, 0, len(errs))
 			for _, err := range errs {
 				got = append(got, err.Error())
@@ -784,81 +797,54 @@ func TestPostRemediationInnerLoopsHonorCancellation(t *testing.T) {
 	}
 }
 
-func TestPostRemediationRender(t *testing.T) {
+// TestNVSentinelPostRemediationValidationRegistrySeverity runs the gate through
+// RunValidations with its registry entry: the note on a custom Job template
+// stays a warning, and a finding still blocks.
+func TestNVSentinelPostRemediationValidationRegistrySeverity(t *testing.T) {
 	t.Parallel()
-
-	const head = "apiVersion: batch/v1\nkind: Job\nspec:\n  template:\n    spec:\n      tolerations:\n"
-	tolerations := head + "      {{- range .Tolerations}}\n        - key: {{.Key}}\n          value: {{quote .Value}}\n" +
-		"      {{- end}}\n"
-	taints := []postRemediationTaint{{key: "a", value: "true", effect: "NoSchedule"}}
-	many := make([]string, 2000)
-	for i := range many {
-		many[i] = fmt.Sprintf("%01000d", i)
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry: %v", err)
+	}
+	var validations []recipe.ComponentValidationConfig
+	for _, v := range registry.Get(nvsentinelComponent).Validations {
+		if v.Function == "CheckNVSentinelPostRemediationValidationCoherent" {
+			validations = append(validations, v)
+		}
+	}
+	if len(validations) != 1 {
+		t.Fatalf("registry declares the gate %d times, want 1", len(validations))
 	}
 
+	customTemplate := map[string]any{"lifecycle-manager": map[string]any{"config": map[string]any{
+		"templates": map[string]any{"k8s-job-template.yaml": "kind: Job\n"}}}}
+	release := func(value any) map[string]any {
+		return withPath(map[string]any{}, postRemediationReleaseTaintsPath,
+			[]any{map[string]any{"key": "a", "value": value, "effect": "NoSchedule", "remove": true}})
+	}
+	gpuOperator := recipe.ComponentRef{Name: "gpu-operator", Namespace: nodeValidationDCGMNamespace,
+		Overrides: map[string]any{"dcgm": map[string]any{"enabled": true}}}
+
 	tests := []struct {
-		name          string
-		text          string
-		command       []string
-		wantEvaluated bool
+		name               string
+		value              any
+		wantWarns, wantErr int
 	}{
-		{name: "a bounded template is evaluated", text: tolerations, wantEvaluated: true},
-		{name: "nested ranges over short lists are evaluated", wantEvaluated: true,
-			text: "{{range .Tolerations}}{{range $.Command}}{{range $.Env}}{{end}}{{end}}{{end}}" + tolerations},
-		{name: "nested ranges past the step budget are not", command: many,
-			text: "{{range .Command}}{{range $.Command}}{{end}}{{end}}" + tolerations},
-		{name: "a range over an integer field is not", text: "{{range .TimeoutSeconds}}x{{end}}" + tolerations},
-		{name: "a range over a variable is not", text: "{{$n := 3}}{{range $n}}x{{end}}" + tolerations},
-		{name: "a defined template is not", text: `{{define "a"}}x{{end}}` + tolerations},
-		{name: "printf is not", text: `{{printf "%0999999999d" 1}}` + tolerations},
-		{name: "output past the size limit is not", command: many[:100],
-			text: "{{range .Command}}{{range $.Command}}{{.}}{{end}}{{end}}" + tolerations},
-		{name: "function results past the size limit are not, though nothing is written", command: many[:50],
-			text: `{{range .Command}}{{range $.Command}}{{$x := quote (join $.Command ",")}}{{end}}{{end}}` + tolerations},
-		{name: "a template past the size cap is not",
-			text: tolerations + "#" + strings.Repeat("x", defaults.MaxNVSentinelJobTemplateBytes)},
+		{name: "a string value on a custom template is a warning", value: "true", wantWarns: 1},
+		{name: "a typed value on a custom template still blocks", value: true, wantWarns: 1, wantErr: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			render := postRemediationJobRender{file: "t.yaml", text: tt.text, test: "x", command: tt.command}
-			rendered, evaluated, err := postRemediationRender(t.Context(), render, taints)
-			if err != nil {
-				t.Fatalf("postRemediationRender: %v", err)
-			}
-			if evaluated != tt.wantEvaluated || (rendered != nil) != tt.wantEvaluated {
-				t.Errorf("evaluated = %v (rendered %v), want %v", evaluated, rendered != nil, tt.wantEvaluated)
+			values := mergedValues(postRemediationValues(), nodeValidationValues(), customTemplate, release(tt.value))
+			rr := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{
+				{Name: nvsentinelComponent, Overrides: values}, gpuOperator,
+			}}
+			warnings, errs := RunValidations(t.Context(), nvsentinelComponent, validations, rr, config.NewConfig())
+			if len(warnings) != tt.wantWarns || len(errs) != tt.wantErr {
+				t.Errorf("got %d warnings %q and %d errors %v, want %d and %d",
+					len(warnings), warnings, len(errs), errs, tt.wantWarns, tt.wantErr)
 			}
 		})
 	}
-
-	t.Run("the budget stops an execution once its deadline passes", func(t *testing.T) {
-		t.Parallel()
-		ctx, cancel := context.WithCancel(t.Context())
-		budget := &postRemediationBudget{ctx: ctx, remaining: 10}
-		if err := budget.charge(4); err != nil {
-			t.Fatalf("charge within budget: %v", err)
-		}
-		if err := budget.charge(7); err == nil {
-			t.Error("charge past the budget succeeded")
-		}
-		cancel()
-		errorstest.WantReportedCode(t, budget.charge(0), aicrerrors.ErrCodeCanceled)
-		out := &postRemediationCappedWriter{budget: budget}
-		if _, err := out.Write([]byte("x")); err == nil {
-			t.Error("write after the deadline succeeded")
-		}
-	})
-
-	t.Run("an ended context is reported", func(t *testing.T) {
-		t.Parallel()
-		canceled, cancel := context.WithCancel(t.Context())
-		cancel()
-		_, _, err := postRemediationRender(canceled, postRemediationJobRender{file: "t.yaml", text: tolerations}, taints)
-		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeCanceled)
-		expired, cancelExpired := context.WithDeadline(t.Context(), time.Unix(0, 0))
-		defer cancelExpired()
-		_, _, err = postRemediationRender(expired, postRemediationJobRender{file: "t.yaml", text: tolerations}, taints)
-		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeTimeout)
-	})
 }

@@ -15,21 +15,15 @@
 package validations
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
-	"text/template"
-	"text/template/parse"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/component"
-	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
-	corev1 "k8s.io/api/core/v1"
 	sigsyaml "sigs.k8s.io/yaml"
 )
 
@@ -51,7 +45,6 @@ const (
 	postRemediationReleaseTaintsPath = "lifecycle-manager.config.schedulingGate.taints"
 	postRemediationTemplatesPath     = "lifecycle-manager.config.templates"
 	postRemediationNVCREMonitorPath  = "global.nvcreCertificationMonitor.enabled"
-	postRemediationProbe             = "probe"
 	postRemediationChartLabelPrefix  = "k8saas.nvidia.com/"
 	postRemediationRuleKind          = "HealthEvent"
 	postRemediationNVCRETaintValue   = "true"
@@ -107,12 +100,18 @@ func (t postRemediationTaint) String() string { return t.key + "=" + t.value + "
 //     under different prefixes, so lifecycle-manager's release leaves
 //     fault-quarantine's labels on the node;
 //   - a lifecycle-manager.config.schedulingGate.taints entry's value is not
-//     a string in the tolerations the requested tests' Job templates render,
-//     which breaks every test Job; or an enabled fault-quarantine rule set
-//     applies a NoSchedule or NoExecute taint that list does not release with
-//     remove: true, so a node that passes is uncordoned but stays closed to
-//     work. With ruleSets unset, the chart's NVCRE certification taint counts
-//     while its monitor runs.
+//     a string, which stops lifecycle-manager at startup, or, while a
+//     requested test renders through the chart's Job template, is a string
+//     that template writes as a bool or number, which breaks every test Job;
+//     or an enabled fault-quarantine rule set applies a NoSchedule or
+//     NoExecute taint that list does not release with remove: true, so a node
+//     that passes is uncordoned but stays closed to work. With ruleSets unset,
+//     the chart's NVCRE certification taint counts while its monitor runs.
+//
+// It warns, without blocking, that the release values in a test Job are
+// unverified when a requested test renders through a template AICR's values
+// override, which the bundle does not render. Every other finding is an error,
+// so the gate is registered at warning severity to carry that note.
 //
 // It rejects --dynamic on fault-quarantine.validation.enabled, on
 // fault-quarantine.validation, fault-quarantine.labelPrefix and
@@ -204,7 +203,8 @@ func CheckNVSentinelPostRemediationValidationCoherent(ctx context.Context, compo
 	if err != nil {
 		return nil, append(errs, err)
 	}
-	if err = postRemediationTaintViolations(ctx, values, tests, fail); err != nil {
+	warnings, err := postRemediationTaintViolations(ctx, values, tests, fail)
+	if err != nil {
 		return nil, append(errs, err)
 	}
 	for _, test := range tests {
@@ -225,11 +225,11 @@ func CheckNVSentinelPostRemediationValidationCoherent(ctx context.Context, compo
 		}
 		dynMsgs, dcgmErr := nodeValidationDCGMViolations(ctx, recipeResult, bundlerConfig, dcgmFail)
 		if dcgmErr != nil {
-			return nil, append(errs, dcgmErr)
+			return warnings, append(errs, dcgmErr)
 		}
 		errs = append(errs, nodeValidationDynamicErrors(componentName, dynMsgs)...)
 	}
-	return nil, errs
+	return warnings, errs
 }
 
 // postRemediationSchedulingGateViolations fails when lifecycle-manager would
@@ -292,47 +292,57 @@ func postRemediationReadinessViolations(ctx context.Context, values map[string]a
 }
 
 // postRemediationTaintViolations fails on two ways the release of a validated
-// node can go wrong. Each schedulingGate.taints entry's value must stay a
-// string in the tolerations of every test Job the requested tests render: the
-// chart's Job template (NVSentinel v1.28.0) writes it unquoted, so "true" or
-// "1" turns into a bool or number, the API server rejects the Job, and every
-// validation fails. A template AICR's values override is rendered instead. And
-// each NoSchedule or NoExecute taint an enabled fault-quarantine rule set
-// applies must be listed there with remove: true, since fault-quarantine keeps
-// its taints on the hand-over and lifecycle-manager lifts only the listed
-// ones. The chart's own rule sets apply only the NVCRE certification taint,
-// and only while its monitor runs.
-func postRemediationTaintViolations(ctx context.Context, values map[string]any, tests []string, fail func(string, ...any)) error {
+// node can go wrong, and warns on one it cannot check. Each
+// schedulingGate.taints entry's value must be a string, since the chart writes
+// schedulingGate into lifecycle-manager's config with toYaml and
+// lifecycle-manager (NVSentinel v1.28.0) decodes a taint's value as a string,
+// exiting at startup on anything else. A requested test that renders through
+// the chart's Job template writes each value unquoted into its Job's
+// tolerations, so a string such as "true" or "1" becomes a bool or number
+// there, the API server rejects the Job, and every validation fails. A test
+// whose template AICR's values override is not rendered, so its tolerations
+// are only warned about. And each NoSchedule or NoExecute taint an enabled
+// fault-quarantine rule set applies must be listed with remove: true, since
+// fault-quarantine keeps its taints on the hand-over and lifecycle-manager
+// lifts only the listed ones. The chart's own rule sets apply only the NVCRE
+// certification taint, and only while its monitor runs.
+func postRemediationTaintViolations(ctx context.Context, values map[string]any, tests []string, fail func(string, ...any)) (warnings []string, err error) {
 	type release struct {
 		taint  postRemediationTaint
 		remove bool
 	}
+	chartTemplate, overridden := postRemediationJobTemplates(values, tests)
+	// breaks reports whether a string value would break a test Job the chart's
+	// template renders.
+	breaks := func(value string) bool { return chartTemplate && !postRemediationUnquotedString(value) }
 	raw, _ := component.GetValueByPath(values, postRemediationReleaseTaintsPath)
 	items, _ := raw.([]any)
 	releases := make([]release, 0, len(items))
-	taints := make([]postRemediationTaint, 0, len(items))
-	for _, item := range items {
+	for i, item := range items {
 		if err := ctx.Err(); err != nil {
-			return aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "checking "+postRemediationReleaseTaintsPath)
+			return nil, aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "checking "+postRemediationReleaseTaintsPath)
 		}
 		entry, _ := item.(map[string]any)
 		key, _ := entry["key"].(string)
 		effect, _ := entry["effect"].(string)
-		taint := postRemediationTaint{key, postRemediationQuoted(entry["value"]), effect}
-		releases = append(releases, release{taint, entry["remove"] == true})
-		taints = append(taints, taint)
-	}
-	renders, chartTemplate := postRemediationJobRenders(values, tests)
-	broken, err := postRemediationBrokenTolerations(ctx, renders, chartTemplate, taints)
-	if err != nil {
-		return err
-	}
-	for i, taint := range taints {
-		if broken[i] {
+		value := postRemediationQuoted(entry["value"])
+		if _, isString := entry["value"].(string); entry["value"] != nil && !isString {
+			fail("%s[%d].value is %#v, not a string: the chart writes schedulingGate into lifecycle-manager's "+
+				"config with toYaml, and lifecycle-manager (NVSentinel v1.28.0) decodes a taint's value as a "+
+				"string, so it exits at startup and every repaired node stays quarantined -- quote it",
+				postRemediationReleaseTaintsPath, i, entry["value"])
+		} else if breaks(value) {
 			fail("%s[%d].value is %q, which lifecycle-manager's Job template writes unquoted into every test Job's "+
 				"tolerations, where it is not a string, so the API server rejects every test Job, every validation "+
-				"fails and every validated node stays cordoned", postRemediationReleaseTaintsPath, i, taint.value)
+				"fails and every validated node stays cordoned", postRemediationReleaseTaintsPath, i, value)
 		}
+		releases = append(releases, release{postRemediationTaint{key, value, effect}, entry["remove"] == true})
+	}
+	if len(releases) > 0 && len(overridden) > 0 {
+		warnings = append(warnings, fmt.Sprintf("%s is rendered into test Jobs through %s, which %s overrides; "+
+			"the bundle does not render it, so whether each value stays a string in those Jobs' tolerations is "+
+			"unverified -- a value that does not breaks every test Job those templates render",
+			postRemediationReleaseTaintsPath, strings.Join(overridden, ", "), postRemediationTemplatesPath))
 	}
 
 	type applied struct {
@@ -350,7 +360,7 @@ func postRemediationTaintViolations(ctx context.Context, values map[string]any, 
 	ruleSets, _ := rules.([]any)
 	for i, item := range ruleSets {
 		if err := ctx.Err(); err != nil {
-			return aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "checking "+postRemediationQuarantineRules)
+			return nil, aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "checking "+postRemediationQuarantineRules)
 		}
 		ruleSet, _ := item.(map[string]any)
 		taint, isMap := ruleSet["taint"].(map[string]any)
@@ -373,14 +383,7 @@ func postRemediationTaintViolations(ctx context.Context, values map[string]any, 
 		}
 		fix := fmt.Sprintf("add {key: %q, value: %q, effect: %q, remove: true}", req.taint.key, req.taint.value,
 			req.taint.effect)
-		// Rendered beside the entries already listed, as lifecycle-manager would
-		// render it once added.
-		withIt := append(slices.Clone(taints), req.taint)
-		broken, err := postRemediationBrokenTolerations(ctx, renders, chartTemplate, withIt)
-		if err != nil {
-			return err
-		}
-		if broken[len(withIt)-1] {
+		if breaks(req.taint.value) {
 			fix = fmt.Sprintf("no entry can release it, since its value %q would break every test Job -- change the "+
 				"taint's value, or turn the taint or validation off", req.taint.value)
 		}
@@ -388,7 +391,7 @@ func postRemediationTaintViolations(ctx context.Context, values map[string]any, 
 			"does not list it with remove: true, so lifecycle-manager uncordons a node that passes and leaves it "+
 			"tainted, closed to work -- %s", req.source, req.taint, postRemediationReleaseTaintsPath, fix)
 	}
-	return nil
+	return warnings, nil
 }
 
 // postRemediationUnquotedString reports whether value stays the same string
@@ -407,25 +410,16 @@ func postRemediationUnquotedString(value string) bool {
 	return isString && decoded == value
 }
 
-// postRemediationJobRender is one test Job rendering lifecycle-manager would
-// perform: a test, the template AICR's values give its provider, and the
-// fields of the test's context that come from AICR's values.
-type postRemediationJobRender struct {
-	file, text, test, image     string
-	command                     []string
-	env                         []corev1.EnvVar
-	timeoutSeconds              int64
-	bandwidthGBps, goodputRatio *string
-}
-
-// postRemediationJobRenders returns a rendering for each requested test whose
-// template AICR's values override: the test's provider (the chart's
-// k8s-job-provider for dcgm-diag-test), that provider's templateFile, and the
-// entry of that name under config.templates. chartTemplate reports that a test
-// renders through the chart's own template, or that no test resolves to one.
-// A test whose provider or template does not resolve is skipped; the other
-// checks report it.
-func postRemediationJobRenders(values map[string]any, tests []string) (renders []postRemediationJobRender, chartTemplate bool) {
+// postRemediationJobTemplates reports which Job templates the requested tests
+// render through: each test's provider (the chart's k8s-job-provider for
+// dcgm-diag-test), that provider's templateFile, and whether AICR's values
+// override the entry of that name under config.templates. chartTemplate is
+// true when a test renders through the chart's own template, or when no test
+// resolves to a template at all; overridden lists the overridden templates a
+// requested test uses. An override no requested test uses changes neither. A
+// test whose provider or template does not resolve is otherwise skipped; the
+// other checks report it.
+func postRemediationJobTemplates(values map[string]any, tests []string) (chartTemplate bool, overridden []string) {
 	mapAt := func(path string) map[string]any {
 		raw, _ := component.GetValueByPath(values, path)
 		m, _ := raw.(map[string]any)
@@ -434,14 +428,7 @@ func postRemediationJobRenders(values map[string]any, tests []string) (renders [
 	testDefs, providers, overrides := mapAt(nodeValidationTestsPath), mapAt(nodeValidationProvidersPath),
 		mapAt(postRemediationTemplatesPath)
 	chartFile, _ := nodeValidationChartProviderDefaults["templateFile"].(string)
-	chartTimeout, _ := nodeValidationChartProviderDefaults["timeoutSeconds"].(int)
-	optional := func(raw any) *string {
-		if raw == nil {
-			return nil
-		}
-		s := fmt.Sprint(raw)
-		return &s
-	}
+	resolved := false
 	for _, test := range tests {
 		def, _ := testDefs[test].(map[string]any)
 		provider, _ := def["provider"].(string)
@@ -453,382 +440,19 @@ func postRemediationJobRenders(values map[string]any, tests []string) (renders [
 		if _, set := providerDef["templateFile"]; !set && provider == nodeValidationChartProvider {
 			file = chartFile
 		}
-		text, overridden := overrides[file].(string)
-		if !overridden {
-			chartTemplate = chartTemplate || (file == chartFile && file != "")
+		if _, isOverride := overrides[file].(string); isOverride {
+			resolved = true
+			if !slices.Contains(overridden, file) {
+				overridden = append(overridden, file)
+			}
 			continue
 		}
-		render := postRemediationJobRender{file: file, text: text, test: test,
-			bandwidthGBps: optional(def["bandwidthGBps"]), goodputRatio: optional(def["goodputRatio"])}
-		render.image, _ = def["image"].(string)
-		for _, arg := range asSlice(def["command"]) {
-			if s, isString := arg.(string); isString {
-				render.command = append(render.command, s)
-			}
-		}
-		if raw, err := json.Marshal(def["env"]); err == nil {
-			_ = json.Unmarshal(raw, &render.env)
-		}
-		switch t := providerDef["timeoutSeconds"].(type) {
-		case int:
-			render.timeoutSeconds = int64(t)
-		case int64:
-			render.timeoutSeconds = t
-		case float64:
-			render.timeoutSeconds = int64(t)
-		default:
-			if provider == nodeValidationChartProvider {
-				render.timeoutSeconds = int64(chartTimeout)
-			}
-		}
-		renders = append(renders, render)
-	}
-	if len(renders) == 0 {
-		chartTemplate = true
-	}
-	return renders, chartTemplate
-}
-
-// asSlice returns raw as a list, or nil when it is not one.
-func asSlice(raw any) []any {
-	list, _ := raw.([]any)
-	return list
-}
-
-// postRemediationBrokenTolerations reports, for each taint, whether a test
-// Job lifecycle-manager renders for it carries its toleration value as
-// something other than a string, which the API server rejects. Every
-// rendering gets all the taints at once, as lifecycle-manager passes them, so
-// a template that treats one key differently is judged on that key. The
-// chart's template, and an overridden one that cannot be evaluated within
-// postRemediationRender's limits, are judged by the chart's unquoted write.
-func postRemediationBrokenTolerations(ctx context.Context, renders []postRemediationJobRender, chartTemplate bool, taints []postRemediationTaint) ([]bool, error) {
-	broken := make([]bool, len(taints))
-	unquoted := func() {
-		for i, taint := range taints {
-			broken[i] = broken[i] || !postRemediationUnquotedString(taint.value)
+		if file == chartFile && file != "" {
+			resolved, chartTemplate = true, true
 		}
 	}
-	if chartTemplate {
-		unquoted()
-	}
-	for _, render := range renders {
-		rendered, evaluated, err := postRemediationRender(ctx, render, taints)
-		if err != nil {
-			return nil, err
-		}
-		if !evaluated {
-			unquoted()
-			continue
-		}
-		badKeys := map[string]bool{}
-		var walk func(any)
-		walk = func(node any) {
-			switch n := node.(type) {
-			case map[string]any:
-				if key, isString := n["key"].(string); isString {
-					if v := n["value"]; v != nil {
-						if _, isString := v.(string); !isString {
-							badKeys[key] = true
-						}
-					}
-				}
-				for _, child := range n {
-					walk(child)
-				}
-			case []any:
-				for _, child := range n {
-					walk(child)
-				}
-			}
-		}
-		walk(rendered)
-		for i, taint := range taints {
-			broken[i] = broken[i] || badKeys[taint.key]
-		}
-	}
-	return broken, nil
-}
-
-// postRemediationRender renders one test Job the way lifecycle-manager
-// (NVSentinel v1.28.0, internal/controller/validationrequest_provider.go)
-// does, with the taints as tolerations after its fixed unschedulable one, and
-// decodes the result. Placeholders stand in for the fields that come from the
-// ValidationRequest. evaluated is false, so the caller falls back to the
-// chart's unquoted write, when the template is larger than
-// defaults.MaxNVSentinelJobTemplateBytes, does not parse, falls outside
-// postRemediationTemplateSteps, runs past
-// defaults.NVSentinelJobTemplateRenderTimeout, writes or has its functions
-// produce more than defaults.MaxNVSentinelJobTemplateBytes, fails or does not
-// decode. err is set only when ctx ends.
-//
-// The work is bounded three ways: postRemediationTemplateSteps caps what the
-// template evaluates before it runs, the functions charge what they produce to
-// a budget, and the functions and the writer stop the execution once the
-// render's deadline passes, so an abandoned execution ends at its next call or
-// write and evaluates at most the step budget in between.
-func postRemediationRender(ctx context.Context, render postRemediationJobRender, taints []postRemediationTaint) (rendered any, evaluated bool, err error) {
-	if err := ctx.Err(); err != nil {
-		return nil, false, aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "rendering "+render.file)
-	}
-	if len(render.text) > defaults.MaxNVSentinelJobTemplateBytes {
-		return nil, false, nil
-	}
-	renderCtx, cancel := context.WithTimeout(ctx, defaults.NVSentinelJobTemplateRenderTimeout)
-	defer cancel()
-	budget := &postRemediationBudget{ctx: renderCtx, remaining: defaults.MaxNVSentinelJobTemplateBytes}
-	funcs := template.FuncMap{
-		"join": func(elems []string, sep string) (string, error) {
-			size := len(sep) * max(len(elems)-1, 0)
-			for _, e := range elems {
-				size += len(e)
-			}
-			if err := budget.charge(size); err != nil {
-				return "", err
-			}
-			return strings.Join(elems, sep), nil
-		},
-		"quote": func(s string) (string, error) {
-			// JSON escaping at most sextuples a byte (\u00XX).
-			if err := budget.charge(6*len(s) + 2); err != nil {
-				return "", err
-			}
-			b, err := json.Marshal(s)
-			return string(b), err
-		},
-	}
-	tmpl, parseErr := template.New(render.file).Funcs(funcs).Parse(render.text)
-	if parseErr != nil {
-		return nil, false, nil
-	}
-	type toleration struct{ Key, Value, Operator, Effect string }
-	type node struct{ NodeName string }
-	type test struct {
-		Name                        string
-		BandwidthGBps, GoodputRatio *string
-	}
-	tolerations := []toleration{{Key: corev1.TaintNodeUnschedulable, Operator: string(corev1.TolerationOpExists),
-		Effect: string(corev1.TaintEffectNoSchedule)}}
-	for _, taint := range taints {
-		operator := corev1.TolerationOpExists
-		if taint.value != "" {
-			operator = corev1.TolerationOpEqual
-		}
-		tolerations = append(tolerations, toleration{taint.key, taint.value, string(operator), taint.effect})
-	}
-	data := struct {
-		ValidationRequestName, TestGroupName, Namespace string
-		TimeoutSeconds                                  int64
-		Nodes                                           []node
-		Tests                                           []test
-		Image                                           string
-		Command                                         []string
-		Env                                             []corev1.EnvVar
-		Tolerations                                     []toleration
-	}{
-		ValidationRequestName: postRemediationProbe, TestGroupName: postRemediationProbe,
-		Namespace: postRemediationProbe, TimeoutSeconds: render.timeoutSeconds,
-		Nodes: []node{{NodeName: postRemediationProbe}},
-		Tests: []test{{Name: render.test, BandwidthGBps: render.bandwidthGBps, GoodputRatio: render.goodputRatio}},
-		Image: render.image, Command: render.command, Env: render.env, Tolerations: tolerations,
-	}
-	lengths := map[string]int{"Tolerations": len(data.Tolerations), "Nodes": len(data.Nodes),
-		"Tests": len(data.Tests), "Command": len(data.Command), "Env": len(data.Env)}
-	if _, bounded := postRemediationTemplateSteps(tmpl, lengths); !bounded {
-		return nil, false, nil
-	}
-
-	out := &postRemediationCappedWriter{budget: budget}
-	done := make(chan error, 1)
-	go func() { done <- tmpl.Execute(out, data) }()
-	select {
-	case execErr := <-done:
-		if execErr != nil {
-			if err := ctx.Err(); err != nil {
-				return nil, false, aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "rendering "+render.file)
-			}
-			return nil, false, nil
-		}
-	case <-renderCtx.Done():
-		if err := ctx.Err(); err != nil {
-			return nil, false, aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "rendering "+render.file)
-		}
-		return nil, false, nil
-	}
-	if err := sigsyaml.Unmarshal(out.Bytes(), &rendered); err != nil {
-		return nil, false, nil
-	}
-	return rendered, true, nil
-}
-
-// postRemediationBudget is what one rendering may still produce, through its
-// functions and its writer together, before its deadline.
-type postRemediationBudget struct {
-	ctx       context.Context
-	remaining int
-}
-
-// charge spends n bytes, failing once the render's deadline has passed or
-// the budget is spent; the failure stops the template execution.
-func (b *postRemediationBudget) charge(n int) error {
-	if err := b.ctx.Err(); err != nil {
-		return aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "rendering a test Job template")
-	}
-	if n > b.remaining {
-		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "rendering a test Job template exceeds its size limit")
-	}
-	b.remaining -= n
-	return nil
-}
-
-// postRemediationCappedWriter is a buffer whose writes are charged to the
-// render's budget, so a write past it or past the deadline stops the template
-// execution writing to it.
-type postRemediationCappedWriter struct {
-	bytes.Buffer
-	budget *postRemediationBudget
-}
-
-func (w *postRemediationCappedWriter) Write(p []byte) (int, error) {
-	if err := w.budget.charge(len(p)); err != nil {
-		return 0, err
-	}
-	return w.Buffer.Write(p)
-}
-
-// postRemediationRangeFields are the TemplateContext lists a bounded template
-// may range over, and postRemediationTemplateFuncs the functions it may call:
-// lifecycle-manager's own two, both metered, and text/template's builtins
-// whose cost is bounded by their arguments.
-var (
-	postRemediationRangeFields   = []string{"Tolerations", "Nodes", "Tests", "Command", "Env"}
-	postRemediationTemplateFuncs = []string{"join", "quote", "and", "or", "not", "eq", "ne", "lt", "le", "gt",
-		"ge", "len", "index"}
-)
-
-// postRemediationTemplateSteps bounds the evaluation steps a template takes
-// over lists of the given lengths: each node, pipeline argument and range
-// iteration is one step, multiplied by the iterations of every range around
-// it, with both
-// branches of an if or with counted. bounded is false when the template
-// defines or invokes another template, calls a function outside
-// postRemediationTemplateFuncs, ranges over anything but a
-// postRemediationRangeFields list (an integer included), or exceeds
-// defaults.MaxNVSentinelJobTemplateSteps. Work that writes nothing and calls
-// no function is bounded by this alone.
-func postRemediationTemplateSteps(tmpl *template.Template, lengths map[string]int) (steps int, bounded bool) {
-	if len(tmpl.Templates()) > 1 || tmpl.Tree == nil {
-		return 0, false
-	}
-	bounded = true
-	var visit func(node parse.Node, multiplier int)
-	add := func(n, multiplier int) {
-		if !bounded {
-			return
-		}
-		steps += n * multiplier
-		if steps > defaults.MaxNVSentinelJobTemplateSteps {
-			bounded = false
-		}
-	}
-	var pipeSteps func(pipe *parse.PipeNode) int
-	argSteps := func(arg parse.Node) int {
-		switch a := arg.(type) {
-		case *parse.IdentifierNode:
-			if !slices.Contains(postRemediationTemplateFuncs, a.Ident) {
-				bounded = false
-			}
-			return 1
-		case *parse.PipeNode:
-			return pipeSteps(a)
-		case *parse.ChainNode:
-			if p, isPipe := a.Node.(*parse.PipeNode); isPipe {
-				return 1 + pipeSteps(p)
-			}
-			return 1
-		case *parse.FieldNode, *parse.VariableNode, *parse.DotNode, *parse.NilNode, *parse.BoolNode,
-			*parse.NumberNode, *parse.StringNode:
-			return 1
-		default:
-			bounded = false
-			return 1
-		}
-	}
-	pipeSteps = func(pipe *parse.PipeNode) int {
-		if pipe == nil {
-			return 0
-		}
-		n := 1
-		for _, cmd := range pipe.Cmds {
-			for _, arg := range cmd.Args {
-				n += argSteps(arg)
-			}
-		}
-		return n
-	}
-	branch := func(n *parse.BranchNode, multiplier, bodyMultiplier int) {
-		add(pipeSteps(n.Pipe), multiplier)
-		if n.List != nil {
-			visit(n.List, bodyMultiplier)
-		}
-		if n.ElseList != nil {
-			visit(n.ElseList, multiplier)
-		}
-	}
-	visit = func(node parse.Node, multiplier int) {
-		if !bounded {
-			return
-		}
-		switch n := node.(type) {
-		case *parse.ListNode:
-			for _, child := range n.Nodes {
-				visit(child, multiplier)
-			}
-		case *parse.TextNode, *parse.CommentNode, *parse.BreakNode, *parse.ContinueNode:
-			add(1, multiplier)
-		case *parse.ActionNode:
-			add(pipeSteps(n.Pipe), multiplier)
-		case *parse.IfNode:
-			branch(&n.BranchNode, multiplier, multiplier)
-		case *parse.WithNode:
-			branch(&n.BranchNode, multiplier, multiplier)
-		case *parse.RangeNode:
-			field, ranged := postRemediationRangedList(n.Pipe)
-			if !ranged {
-				bounded = false
-				return
-			}
-			iterations := multiplier * max(lengths[field], 1)
-			// Each iteration is a step, even with an empty body.
-			add(1, iterations)
-			branch(&n.BranchNode, multiplier, iterations)
-		default:
-			bounded = false
-		}
-	}
-	visit(tmpl.Root, 1)
-	return steps, bounded
-}
-
-// postRemediationRangedList returns the data list a range pipeline names, as
-// .Tolerations or $.Tolerations, when it names one of
-// postRemediationRangeFields and nothing else.
-func postRemediationRangedList(pipe *parse.PipeNode) (string, bool) {
-	if pipe == nil || len(pipe.Cmds) != 1 || len(pipe.Cmds[0].Args) != 1 {
-		return "", false
-	}
-	var field string
-	switch arg := pipe.Cmds[0].Args[0].(type) {
-	case *parse.FieldNode:
-		if len(arg.Ident) == 1 {
-			field = arg.Ident[0]
-		}
-	case *parse.VariableNode:
-		if len(arg.Ident) == 2 && arg.Ident[0] == "$" {
-			field = arg.Ident[1]
-		}
-	}
-	return field, slices.Contains(postRemediationRangeFields, field)
+	slices.Sort(overridden)
+	return chartTemplate || !resolved, overridden
 }
 
 // postRemediationRuleSetTests returns the tests post-remediation validation
