@@ -45,7 +45,7 @@ func refusal(refused ...string) []byte {
 // TestRefuses checks that refuses passes only when the binary refuses every
 // development setting, reports a coded error when the binary starts, fails
 // for another reason or cannot run, or the image or settings are missing, and
-// on a host that cannot run the image's binary skips the check.
+// outside CI on a host that cannot run the image's binary skips the check.
 func TestRefuses(t *testing.T) {
 	t.Parallel()
 	const refused = "refuses development.skipDiscovery"
@@ -94,6 +94,34 @@ func TestRefuses(t *testing.T) {
 				t.Fatalf("refuses = %v, want an error naming %q", err, tt.want)
 			}
 			errorstest.WantReportedCode(t, err, tt.code)
+		})
+	}
+}
+
+// TestHostPlatform checks that hostPlatform maps a Linux host to its image
+// platform, and that a host that cannot run the binary skips outside CI and
+// fails in CI.
+func TestHostPlatform(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, host, want string
+		ci, wantErr      bool
+	}{
+		{"amd64", "linux/amd64", "linux/amd64", false, false},
+		{"arm64 in CI", "linux/arm64", "linux/arm64/v8", true, false},
+		{"mac skips", "darwin/arm64", "", false, false},
+		{"mac in CI", "darwin/arm64", "", true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := hostPlatform(tt.host, tt.ci)
+			if (err != nil) != tt.wantErr || got != tt.want {
+				t.Fatalf("hostPlatform(%q, %v) = %q, %v, want %q, error %v", tt.host, tt.ci, got, err, tt.want, tt.wantErr)
+			}
+			if tt.wantErr {
+				errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			}
 		})
 	}
 }

@@ -90,8 +90,8 @@ build() {
   helm template aicr-operator "${out}"/chart/*.tgz --namespace aicr-system --set validation.enabled=true >/dev/null
   helm template aicr-operator "${out}"/chart/*.tgz --namespace aicr-system --set validation.enabled=true \
     --set registry.mode=external --set registry.repository=oci://registry.example.com/aicr/cluster >/dev/null
-  # The candidate image's own operator binary, where the host can run it,
-  # must refuse each development setting.
+  # The candidate image's own operator binary must refuse each development
+  # setting. Outside CI, a host that cannot run it skips the check.
   go run ./tools/operator-release refuses -dir "${out}"
   clean "${out}"
 }

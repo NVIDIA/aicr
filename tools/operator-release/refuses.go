@@ -45,9 +45,23 @@ var hostPlatforms = map[string]string{
 	"linux/arm64": "linux/arm64/v8",
 }
 
+// hostPlatform returns the image platform host can run. On a host that cannot
+// run the image's binary it returns "", or an error when ci is set.
+func hostPlatform(host string, ci bool) (string, error) {
+	if platform, ok := hostPlatforms[host]; ok {
+		return platform, nil
+	}
+	if ci {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			"the image's binary does not run on "+host+", so CI cannot check that the candidate refuses development settings")
+	}
+	return "", nil
+}
+
 // refuses reports an error unless the candidate image's operator binary
 // refuses every development setting. Without -platform it runs the host's
-// platform, and skips the check on a host that cannot run the binary.
+// platform, and skips the check outside CI on a host that cannot run the
+// binary.
 func refuses(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("refuses", flag.ContinueOnError)
 	dir := fs.String("dir", "dist/candidate", "Candidate directory.")
@@ -58,9 +72,12 @@ func refuses(args []string, out io.Writer) error {
 	}
 	if *platform == "" {
 		host := runtime.GOOS + "/" + runtime.GOARCH
-		var ok bool
-		if *platform, ok = hostPlatforms[host]; !ok {
-			_, err := fmt.Fprintf(out, "skipping the development settings refusal check, since the image's binary does not run on %s\n", host)
+		var err error
+		if *platform, err = hostPlatform(host, os.Getenv("CI") != ""); err != nil {
+			return err
+		}
+		if *platform == "" {
+			_, err = fmt.Fprintf(out, "skipping the development settings refusal check, since the image's binary does not run on %s\n", host)
 			return err
 		}
 	}
