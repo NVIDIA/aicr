@@ -118,8 +118,8 @@ context; the schema rejects unknown keys.
 | `validation.transparencyLog` | `true` | Optional | Upload key signatures to Rekor; `false` keeps them out of the public log |
 | `approvers.users` | `[]` | **Required**, with `approvers.groups` | Users bound to the approver roles; without an approver no rollout that needs approval can proceed |
 | `approvers.groups` | `[]` | **Required**, with `approvers.users` | Groups bound to the approver roles; keep them apart from `ClusterRuntime` editors |
-| `development.bypassApprovals` | `false` | Development only | Proceed without approvals; release builds refuse to start with it |
-| `development.skipDiscovery` | `false` | Development only | Resolve from declared criteria without a snapshot; release builds refuse it |
+| `development.bypassApprovals` | `false` | Development only | Proceed without approvals. Only a development build (the `aicr_operator_development` tag) starts with it |
+| `development.skipDiscovery` | `false` | Development only | Resolve from declared criteria without a snapshot. Only a development build starts with it |
 
 `engine.manageCustomizations` is still accepted and ignored: the operator no
 longer writes `argocd-cm`

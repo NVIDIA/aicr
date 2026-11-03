@@ -22,6 +22,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/operator/config"
 	"github.com/NVIDIA/aicr/pkg/operator/registry"
+	"github.com/NVIDIA/aicr/pkg/operator/version"
 )
 
 // isolate points client config discovery at nothing, so a test can never
@@ -78,6 +79,26 @@ func TestRunRejectsInvalidInstallation(t *testing.T) {
 	err := run([]string{"--aicr-version=v1.0.0", "--aicr-image=ghcr.io/nvidia/aicr:v1.0.0", "--registry-repository=oci://r/x"})
 	if err == nil || !strings.Contains(err.Error(), "pinned by digest") {
 		t.Fatalf("run() = %v, want an unpinned-image error", err)
+	}
+}
+
+// TestRunDevelopmentSettingsNeedTheOptIn checks that a build without the
+// aicr_operator_development tag refuses each development setting before
+// loading client config.
+func TestRunDevelopmentSettingsNeedTheOptIn(t *testing.T) {
+	want := "accepted only by development builds"
+	if version.Development {
+		// With the tag, startup passes validation and stops at client config.
+		want = "client config"
+	}
+	for _, flag := range []string{"--development-bypass-approvals", "--development-skip-discovery"} {
+		t.Run(flag, func(t *testing.T) {
+			isolate(t)
+			args := append([]string{"--leader-elect=false", "--metrics-bind-address=0", "--health-probe-bind-address=127.0.0.1:0", flag}, installFlags...)
+			if err := run(args); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("run(%s) = %v, want an error naming %q", flag, err, want)
+			}
+		})
 	}
 }
 

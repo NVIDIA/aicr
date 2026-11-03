@@ -156,7 +156,7 @@ func (c *Config) BindFlags(fs *flag.FlagSet) {
 	fs.StringVar(&c.RegistryAuthProvider, "registry-auth-provider", c.RegistryAuthProvider, "Registry credentials: aws (ECR via the operator's AWS identity) or static.")
 	fs.StringVar(&c.RegistryCredentialsSecret, "registry-credentials-secret", c.RegistryCredentialsSecret, "Static provider: docker config Secret in the operator, Job and validation namespaces; empty for an anonymous registry.")
 	fs.StringVar(&c.EngineRepoCredsSecret, "engine-repo-creds-secret", c.EngineRepoCredsSecret, "AWS provider: Argo CD repo-creds Secret the operator refreshes.")
-	fs.BoolVar(&c.BypassApprovals, "development-bypass-approvals", c.BypassApprovals, "Proceed without approvals; refused by release builds.")
+	fs.BoolVar(&c.BypassApprovals, "development-bypass-approvals", c.BypassApprovals, "Proceed without approvals. Accepted only by development builds.")
 	fs.StringVar(&c.SnapshotServiceAccount, "snapshot-service-account", c.SnapshotServiceAccount, "ServiceAccount of the snapshot Job in the discovery namespace.")
 	fs.StringVar(&c.SnapshotAgentServiceAccount, "snapshot-agent-service-account", c.SnapshotAgentServiceAccount, "Exact ServiceAccount of AICR's snapshot agent.")
 	fs.StringVar(&c.SnapshotAgentRequests, "snapshot-agent-requests", c.SnapshotAgentRequests, "Snapshot agent resource requests (name=quantity,...); empty keeps AICR's defaults.")
@@ -177,7 +177,7 @@ func (c *Config) BindFlags(fs *flag.FlagSet) {
 		}
 		return nil
 	})
-	fs.BoolVar(&c.SkipDiscovery, "development-skip-discovery", c.SkipDiscovery, "Resolve from declared criteria without node gates or a snapshot; refused by release builds.")
+	fs.BoolVar(&c.SkipDiscovery, "development-skip-discovery", c.SkipDiscovery, "Resolve from declared criteria without node gates or a snapshot. Accepted only by development builds.")
 	fs.BoolVar(&c.ValidationEnabled, "validation-enabled", c.ValidationEnabled, "The installation provides the validation identities (validation.enabled).")
 	fs.StringVar(&c.ValidationServiceAccount, "validation-service-account", c.ValidationServiceAccount, "ServiceAccount of the validation Job in the validation namespace.")
 	fs.StringVar(&c.ValidatorServiceAccount, "validator-service-account", c.ValidatorServiceAccount, "AICR >= v1.1.0: the cluster-admin ServiceAccount AICR runs validators as.")
@@ -201,17 +201,17 @@ var (
 	tagAndDigest = regexp.MustCompile(`^[^\s@]+/[^\s@/:]+:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}@sha256:[a-f0-9]{64}$`)
 )
 
-// Validate rejects a configuration the operator must not run with. release
-// reports whether this is a release build.
-func (c *Config) Validate(release bool) error {
+// Validate rejects a configuration the operator must not run with.
+// development reports whether this build accepts development settings.
+func (c *Config) Validate(development bool) error {
 	invalid := func(format string, args ...any) error {
 		return operrors.New(operrors.ErrCodeInvalidRequest, fmt.Sprintf(format, args...))
 	}
 	switch {
-	case c.BypassApprovals && release:
-		return invalid("development.bypassApprovals is refused by release builds")
-	case c.SkipDiscovery && release:
-		return invalid("development.skipDiscovery is refused by release builds")
+	case c.BypassApprovals && !development:
+		return invalid("development.bypassApprovals is accepted only by development builds")
+	case c.SkipDiscovery && !development:
+		return invalid("development.skipDiscovery is accepted only by development builds")
 	case !digestPinned.MatchString(c.AICRImage):
 		return invalid("AICR image %q is not pinned by digest", c.AICRImage)
 	case c.Engine != plan.EngineArgoCD:
