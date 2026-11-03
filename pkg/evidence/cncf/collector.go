@@ -110,6 +110,26 @@ func IsValidFeature(name string) bool {
 	return slices.Contains(ValidFeatures, resolved)
 }
 
+// FeatureInferenceGateway is the feature whose section reads the recipe's
+// inference gateway declaration (WithInferenceGateway).
+const FeatureInferenceGateway = featureInferenceGateway
+
+// FeatureSelected reports whether a WithFeatures selection includes feature:
+// an empty selection or "all" selects everything, and aliases resolve on both
+// sides.
+func FeatureSelected(features []string, feature string) bool {
+	if len(features) == 0 {
+		return true
+	}
+	want := ResolveFeature(feature)
+	for _, f := range features {
+		if canonical := ResolveFeature(f); canonical == featureAll || canonical == want {
+			return true
+		}
+	}
+	return false
+}
+
 // ScriptSection returns the script section name for a feature.
 func ScriptSection(feature string) string {
 	if section, ok := featureToScript[feature]; ok {

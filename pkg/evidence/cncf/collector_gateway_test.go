@@ -22,6 +22,27 @@ import (
 	"testing"
 )
 
+func TestFeatureSelected(t *testing.T) {
+	tests := []struct {
+		name     string
+		features []string
+		want     bool
+	}{
+		{"empty selects everything", nil, true},
+		{"all selects everything", []string{"dra", "all"}, true},
+		{"canonical name", []string{FeatureInferenceGateway}, true},
+		{"alias", []string{"gateway"}, true},
+		{"other features only", []string{"dra", "gang"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := FeatureSelected(tt.features, FeatureInferenceGateway); got != tt.want {
+				t.Errorf("FeatureSelected(%v) = %v, want %v", tt.features, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestRunSectionThreadsInferenceGatewayEnv verifies the subprocess contract for
 // WithInferenceGateway: the three AICR_INFERENCE_GATEWAY_* variables reach the
 // script together, an ambient value never leaks into a run without recipe

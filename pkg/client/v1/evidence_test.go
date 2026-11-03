@@ -139,6 +139,18 @@ func TestCollectCNCFEvidence(t *testing.T) {
 	}
 	badAdvertiser.internal.Metadata.SelectedProfile = &recipe.SelectedProfile{Advertiser: "csp"}
 
+	// Two enabled inference gateways is a declaration the gateway section
+	// cannot act on; other sections never read it.
+	twoGateways, err := client.LoadRecipe(context.Background(), recipePath, "")
+	if err != nil {
+		t.Fatalf("LoadRecipe: %v", err)
+	}
+	twoGateways.internal.ComponentRefs = append(twoGateways.internal.ComponentRefs,
+		recipe.ComponentRef{Name: "agentgateway", Namespace: "agentgateway-system"},
+		recipe.ComponentRef{Name: "edge-gateway", Namespace: "edge-system", Overrides: map[string]any{
+			recipe.InferenceGatewayOverrideKey: map[string]any{"gatewayClass": "edge-class"},
+		}})
+
 	closed := newClientForBundleTest(t)
 	if err = closed.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -171,6 +183,9 @@ func TestCollectCNCFEvidence(t *testing.T) {
 		{name: "feature aliases and all", client: client, ctx: context.Background(), opts: withFeatures("dra", "all")},
 		{name: "unknown feature", client: client, ctx: context.Background(), opts: withFeatures("nonexistent"), wantCode: aicrerrors.ErrCodeInvalidRequest},
 		{name: "unresolvable allocation policy fails closed", client: client, ctx: context.Background(), rec: badAdvertiser, opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
+		{name: "unresolvable gateway fails a full run", client: client, ctx: context.Background(), rec: twoGateways, opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
+		{name: "unresolvable gateway fails a gateway-scoped run", client: client, ctx: context.Background(), rec: twoGateways, opts: withFeatures("gateway"), wantCode: aicrerrors.ErrCodeInvalidRequest},
+		{name: "unresolvable gateway does not abort a run scoped to other features", client: client, ctx: context.Background(), rec: twoGateways, opts: withFeatures("dra", "gang")},
 		{name: "policy resolution past deadline is a timeout", client: client, ctx: expired, rec: rec, opts: valid, wantCode: aicrerrors.ErrCodeTimeout},
 		{name: "policy resolution after cancel is canceled", client: client, ctx: canceled, rec: rec, opts: valid, wantCode: aicrerrors.ErrCodeCanceled},
 		{name: "recipe missing internal", client: client, ctx: context.Background(), rec: &RecipeResult{Name: "x"}, opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},

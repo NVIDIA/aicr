@@ -494,10 +494,14 @@ func (c *Client) CollectCNCFEvidence(ctx context.Context, rec *RecipeResult, opt
 		}
 		// The inference-gateway evidence section collects the Gateway the
 		// recipe declares; a malformed declaration fails here rather than
-		// producing evidence for whatever carries the conventional name.
-		if gateway, gatewayFound, err = validatorv1.ResolveInferenceGatewayProfile(rec.internal.ComponentRefs); err != nil {
-			return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
-				"failed to resolve the inference gateway for CNCF evidence collection")
+		// producing evidence for whatever carries the conventional name. Only
+		// that section reads the profile, so a run scoped to other features
+		// is not aborted by it.
+		if cncf.FeatureSelected(opts.Features, cncf.FeatureInferenceGateway) {
+			if gateway, gatewayFound, err = validatorv1.ResolveInferenceGatewayProfile(rec.internal.ComponentRefs); err != nil {
+				return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+					"failed to resolve the inference gateway for CNCF evidence collection")
+			}
 		}
 	}
 
