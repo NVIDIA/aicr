@@ -313,8 +313,19 @@ func postRemediationTaintViolations(ctx context.Context, values map[string]any, 
 	}
 	chartTemplate, overridden := postRemediationJobTemplates(values, tests)
 	// breaks reports whether a string value would break a test Job the chart's
-	// template renders.
-	breaks := func(value string) bool { return chartTemplate && !postRemediationUnquotedString(value) }
+	// template renders; each distinct value is decoded once.
+	decoded := map[string]bool{}
+	breaks := func(value string) bool {
+		if !chartTemplate {
+			return false
+		}
+		kept, seen := decoded[value]
+		if !seen {
+			kept = postRemediationUnquotedString(value)
+			decoded[value] = kept
+		}
+		return !kept
+	}
 	raw, _ := component.GetValueByPath(values, postRemediationReleaseTaintsPath)
 	items, _ := raw.([]any)
 	releases := make([]release, 0, len(items))
@@ -377,8 +388,17 @@ func postRemediationTaintViolations(ctx context.Context, values map[string]any, 
 		}
 	}
 
+	released := make(map[postRemediationTaint]bool, len(releases))
+	for _, r := range releases {
+		if r.remove {
+			released[r.taint] = true
+		}
+	}
 	for _, req := range required {
-		if slices.Contains(releases, release{req.taint, true}) {
+		if err := ctx.Err(); err != nil {
+			return nil, aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, "checking "+postRemediationReleaseTaintsPath)
+		}
+		if released[req.taint] {
 			continue
 		}
 		fix := fmt.Sprintf("add {key: %q, value: %q, effect: %q, remove: true}", req.taint.key, req.taint.value,

@@ -848,3 +848,30 @@ func TestNVSentinelPostRemediationValidationRegistrySeverity(t *testing.T) {
 		})
 	}
 }
+
+// TestPostRemediationTaintViolationsHonorsContext checks that large unmatched
+// release and quarantine lists stop at an ended context instead of finishing.
+func TestPostRemediationTaintViolationsHonorsContext(t *testing.T) {
+	t.Parallel()
+	const n = 600
+	rules := make([]any, n)
+	releases := make([]any, n)
+	for i := range n {
+		rules[i] = map[string]any{"name": fmt.Sprintf("r%d", i),
+			"taint": map[string]any{"key": fmt.Sprintf("q%d", i), "value": "x", "effect": "NoSchedule"}}
+		releases[i] = map[string]any{"key": fmt.Sprintf("k%d", i), "value": "v", "effect": "NoSchedule", "remove": true}
+	}
+	values := withPath(withPath(map[string]any{}, postRemediationQuarantineRules, rules),
+		postRemediationReleaseTaintsPath, releases)
+
+	findings := 0
+	if _, err := postRemediationTaintViolations(t.Context(), values, []string{nodeValidationDCGMTest},
+		func(string, ...any) { findings++ }); err != nil || findings != n {
+		t.Fatalf("live context: err %v, %d findings, want nil and %d", err, findings, n)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := postRemediationTaintViolations(ctx, values, []string{nodeValidationDCGMTest}, func(string, ...any) {})
+	errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeCanceled)
+}
