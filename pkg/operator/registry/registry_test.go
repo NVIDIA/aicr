@@ -41,6 +41,7 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"go.yaml.in/yaml/v3"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/errdef"
 	"oras.land/oras-go/v2/registry/remote/errcode"
 
@@ -604,6 +605,7 @@ func TestClassify(t *testing.T) {
 		{resp(http.StatusBadGateway), operrors.ErrCodeUnavailable},
 		{fmt.Errorf("listing: %w", errdef.ErrTooManyPages), operrors.ErrCodeInvalidRequest},
 		{fmt.Errorf("manifest: %w", errdef.ErrSizeExceedsLimit), operrors.ErrCodeInvalidRequest},
+		{fmt.Errorf("layer: %w", content.ErrMismatchedDigest), operrors.ErrCodeConflict},
 		{context.DeadlineExceeded, operrors.ErrCodeTimeout},
 		{operrors.New(operrors.ErrCodeConflict, "kept"), operrors.ErrCodeConflict},
 	}

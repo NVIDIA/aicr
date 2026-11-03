@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strings"
 
+	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/errdef"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
@@ -157,6 +158,7 @@ func (c *Client) Resolve(ctx context.Context, r Repository, tag string) (string,
 //   - a throttled request is RATE_LIMIT_EXCEEDED
 //   - a listing past its page bound, or content over its size bound, is
 //     INVALID_REQUEST
+//   - content that does not match its digest is CONFLICT
 //   - cancellation and deadlines keep their codes
 //   - anything else is SERVICE_UNAVAILABLE, so the caller retries with backoff
 func classify(err error, message string) error {
@@ -169,6 +171,9 @@ func classify(err error, message string) error {
 	}
 	if errors.Is(err, errdef.ErrTooManyPages) || errors.Is(err, errdef.ErrSizeExceedsLimit) {
 		return operrors.Wrap(operrors.ErrCodeInvalidRequest, message, err)
+	}
+	if errors.Is(err, content.ErrMismatchedDigest) {
+		return operrors.Wrap(operrors.ErrCodeConflict, message, err)
 	}
 	var resp *errcode.ErrorResponse
 	if errors.As(err, &resp) {
