@@ -1659,6 +1659,19 @@ func inferenceTemplateData(config *inferenceWorkloadConfig) map[string]string {
 // config.deployedByUs = true as soon as any resource is created, so the
 // deferred cleanup in the caller always runs — even if later steps fail.
 func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadConfig) error {
+	// Only the gateway-epp route attaches to the recipe's gateway; a
+	// frontend-routed run never reads the profile, so a malformed gateway
+	// declaration must not abort it. Resolved before any provisioning so a
+	// recipe error surfaces before the namespace, secrets and model cache
+	// (up to its populate Job's budget) are created for nothing.
+	var gatewayProfile validators.InferenceGatewayProfile
+	if config.routingMode == inferenceRoutingModeGatewayEPP {
+		var profileErr error
+		if gatewayProfile, profileErr = inferenceGatewayProfile(ctx); profileErr != nil {
+			return profileErr
+		}
+	}
+
 	// Create namespace (idempotent).
 	if _, _, err := ensureNamespace(ctx, config.namespace, labels.ValueInferencePerf); err != nil {
 		return err
@@ -1690,14 +1703,7 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 	}
 
 	templateData := inferenceTemplateData(config)
-	// Only the gateway-epp route attaches to the recipe's gateway; a
-	// frontend-routed run never reads the profile, so a malformed gateway
-	// declaration must not abort it.
 	if config.routingMode == inferenceRoutingModeGatewayEPP {
-		gatewayProfile, profileErr := inferenceGatewayProfile(ctx)
-		if profileErr != nil {
-			return profileErr
-		}
 		templateData["INFERENCE_GATEWAY_NAME"] = gatewayProfile.GatewayName
 		templateData["INFERENCE_GATEWAY_NAMESPACE"] = gatewayProfile.Namespace
 	}

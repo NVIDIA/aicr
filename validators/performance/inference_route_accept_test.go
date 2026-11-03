@@ -25,10 +25,12 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 const (
@@ -135,6 +137,32 @@ func TestWaitForHTTPRouteAccepted_Canceled(t *testing.T) {
 	err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, time.Second)
 	if err == nil {
 		t.Fatal("expected an error for a canceled context")
+	}
+}
+
+// TestDeployInferenceWorkload_ResolvesGatewayBeforeProvisioning pins that a
+// gateway-epp run with a recipe error fails before anything is created: the
+// namespace is the first resource provisioned, so its absence proves the
+// profile was resolved first (the model-cache populate Job behind it can hold
+// a run for minutes).
+func TestDeployInferenceWorkload_ResolvesGatewayBeforeProvisioning(t *testing.T) {
+	client := fake.NewClientset()
+	vctx := &validators.Context{
+		Ctx: context.Background(), Clientset: client, DynamicClient: newRouteClient(t, nil),
+		ValidationInput: &validatorv1.ValidationInput{ComponentRefs: []recipe.ComponentRef{{Name: "gpu-operator"}}},
+	}
+	config := &inferenceWorkloadConfig{namespace: routeTestNamespace, routingMode: inferenceRoutingModeGatewayEPP}
+
+	err := deployInferenceWorkload(vctx, config)
+	if err == nil {
+		t.Fatal("expected the missing gateway declaration to fail the run")
+	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	if _, getErr := client.CoreV1().Namespaces().Get(context.Background(), routeTestNamespace, metav1.GetOptions{}); getErr == nil {
+		t.Errorf("namespace %s was created before the gateway declaration was checked", routeTestNamespace)
+	}
+	if config.deployedByUs {
+		t.Error("deployedByUs must stay false when nothing was provisioned")
 	}
 }
 
