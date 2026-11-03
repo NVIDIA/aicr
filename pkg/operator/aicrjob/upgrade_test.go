@@ -87,6 +87,46 @@ func TestParseUpgradeReportV112(t *testing.T) {
 	}
 }
 
+// The v1.1.2 -> v1.2.0 transition from AICR v1.2.0, on both lanes, records
+// a safe verdict and a manual one, which needs approval. v1.2.0 reports add
+// a per-component route, which the operator does not read.
+func TestParseUpgradeReportV120(t *testing.T) {
+	t.Parallel()
+	for _, lane := range []string{"eks", "gke"} {
+		t.Run(lane, func(t *testing.T) {
+			t.Parallel()
+			r, err := ParseUpgradeReport(fixtureAt(t, "v1.2.0", "upgrade-check-v1.1.2-to-v1.2.0-"+lane+".json"), "argocd")
+			if err != nil {
+				t.Fatalf("ParseUpgradeReport() = %v", err)
+			}
+			got := map[string]v1alpha1.Assessment{}
+			for i := range r.Components {
+				got[r.Components[i].Component] = r.Components[i].Assessment()
+			}
+			want := map[string]v1alpha1.Assessment{
+				"nfd": v1alpha1.AssessmentManual, "nvidia-dra-driver-gpu": v1alpha1.AssessmentSafe,
+			}
+			if !maps.Equal(got, want) || r.Summary.Failing != 1 {
+				t.Fatalf("assessments = %v, failing = %d; want %v, 1", got, r.Summary.Failing, want)
+			}
+			// The manual record carries a precondition and three steps, the
+			// sync between widening and narrowing the topology-updater RBAC.
+			for _, c := range r.Components {
+				if c.Component == "nfd" && (c.Precondition == "" || len(c.Steps) != 3 || c.Steps[1].ID != "sync-nfd" || c.Steps[2].Description == "") {
+					t.Fatalf("nfd record = %+v", c)
+				}
+			}
+		})
+	}
+	added, err := ParseUpgradeReport(fixtureAt(t, "v1.2.0", "upgrade-check-eks-training-to-kubeflow.json"), "argocd")
+	if err != nil {
+		t.Fatalf("ParseUpgradeReport(added) = %v", err)
+	}
+	if c := added.Components[0]; c.Change != "added" || c.Assessment() != v1alpha1.AssessmentNotApplicable {
+		t.Fatalf("added component = %+v", c)
+	}
+}
+
 func TestParseUpgradeReportRejects(t *testing.T) {
 	t.Parallel()
 	base := fixture(t, "upgrade-check-v0.22.0-to-v1.0.0-eks.json")
