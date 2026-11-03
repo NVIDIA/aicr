@@ -30,7 +30,9 @@ require_release_image() {
       ghcr.io/nvidia/aicr-validators/performance | \
       ghcr.io/nvidia/aicr-validators/conformance | \
       ghcr.io/nvidia/aicr-validators/aiperf-bench | \
-      ghcr.io/nvidia/aicr-gate) ;;
+      ghcr.io/nvidia/aicr-gate | \
+      ghcr.io/nvidia/aicr-operator | \
+      ghcr.io/nvidia/aicr-registry) ;;
     *)
       echo "::error::image_name is not a fixed AICR release image"
       exit 1

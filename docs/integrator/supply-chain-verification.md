@@ -816,8 +816,9 @@ Pin every policy to AICR's release identity:
   cannot check that extension cannot tell AICR's attestations from another
   repository's.
 
-Releases before v0.17.0 were signed by `on-tag.yaml` instead, and so is the AICR
-Operator preview image.
+Releases before v0.17.0 were signed by `on-tag.yaml` instead. The AICR Operator
+preview's images are signed by their own reusable workflow,
+`attest-operator.yaml`; through v1.2.0 they were signed by `on-tag.yaml`.
 
 ### Kyverno
 
@@ -926,7 +927,8 @@ spec:
 * **The images.** `matchImageReferences` lists the images `attest-images.yaml`
   attests. A glob's `*` also matches `/`, so `ghcr.io/nvidia/aicr*` would take
   in the AICR Operator preview images as well, `aicr-operator` and
-  `aicr-registry`, which `on-tag.yaml` signs. The
+  `aicr-registry`, which `attest-operator.yaml` signs (`on-tag.yaml` through
+  v1.2.0). The
   globs match the reference as the Pod spec writes it:
   `ghcr.io:443/nvidia/aicr:v0.16.0` names the same image as the denied
   `ghcr.io/nvidia/aicr:v0.16.0`, but it matched no glob and was admitted
@@ -1086,7 +1088,8 @@ calls `attest-images.yaml` would pass this policy. Use the
 
 The `ghcr.io/nvidia/aicr**` glob also matches the AICR Operator preview images,
 `ghcr.io/nvidia/aicr-operator` and its in-cluster registry
-`ghcr.io/nvidia/aicr-registry`, whose provenance is signed by `on-tag.yaml`, not
+`ghcr.io/nvidia/aicr-registry`, whose provenance is signed by
+`attest-operator.yaml` (`on-tag.yaml` through v1.2.0), not
 `attest-images.yaml`, so this policy rejects the operator's and the registry's
 pods. Label only
 workload namespaces for enforcement and leave the operator's namespace

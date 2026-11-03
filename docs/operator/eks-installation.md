@@ -22,6 +22,7 @@ The examples use these variables:
 
 ```shell
 VERSION="<release>"                        # an AICR release that ships the operator, without the leading v
+SIGNER=NVIDIA/aicr/.github/workflows/attest-operator.yaml  # for v1.2.0: NVIDIA/aicr/.github/workflows/on-tag.yaml
 CLUSTER="<eks cluster name>"
 ACCOUNT="<aws account id>"
 REGION="<aws region>"
@@ -57,7 +58,7 @@ with the chart, so verify the chart before you use its files:
 
 ```shell
 gh attestation verify "oci://ghcr.io/nvidia/charts/aicr-operator:${VERSION}" --repo NVIDIA/aicr \
-  --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/v${VERSION}" \
+  --signer-workflow "${SIGNER}" --source-ref "refs/tags/v${VERSION}" \
   && helm pull oci://ghcr.io/nvidia/charts/aicr-operator --version "${VERSION}" --untar
 PARTITION=aws REPOSITORY_PREFIX="${PREFIX}" ACCOUNT_ID="${ACCOUNT}" REGION="${REGION}" \
   envsubst < aicr-operator/files/ecr-iam-policy.json > aicr-operator-ecr.json
@@ -203,7 +204,7 @@ signature.
 kubectl create namespace aicr-system
 kubectl label namespace aicr-system pod-security.kubernetes.io/enforce=restricted
 gh attestation verify "oci://ghcr.io/nvidia/charts/aicr-operator:${VERSION}" --repo NVIDIA/aicr \
-  --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/v${VERSION}" \
+  --signer-workflow "${SIGNER}" --source-ref "refs/tags/v${VERSION}" \
   && helm install aicr-operator oci://ghcr.io/nvidia/charts/aicr-operator \
   --version "${VERSION}" --namespace aicr-system -f values.yaml
 kubectl -n aicr-system rollout status deployment/aicr-operator

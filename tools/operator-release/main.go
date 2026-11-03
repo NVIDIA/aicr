@@ -118,10 +118,6 @@ func build(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	sboms, err := hashDir(filepath.Join(*dir, "sbom"))
-	if err != nil {
-		return err
-	}
 	inputs := map[string]string{}
 	for _, f := range []string{*settingsFile, *koFile, *goSum} {
 		data, readErr := os.ReadFile(f)
@@ -136,10 +132,10 @@ func build(args []string, out io.Writer) error {
 		Toolchain: Toolchain{Go: *goVersion, Ko: s.BuildTools.Ko, BaseImage: base},
 		Operator:  image,
 		Chart:     File{Name: chartFile, Digest: sha256Of(archive)},
-		Plugin:    plugin, SBOMs: sboms,
-		AICR:     aicr,
-		Registry: registry,
-		Inputs:   inputs,
+		Plugin:    plugin,
+		AICR:      aicr,
+		Registry:  registry,
+		Inputs:    inputs,
 	}
 	if err = m.seal(); err != nil {
 		return err
