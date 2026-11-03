@@ -2437,15 +2437,47 @@ collect_gateway() {
     EVIDENCE_FILE="${EVIDENCE_DIR}/inference-gateway.md"
     log_info "Collecting Inference API Gateway evidence → ${EVIDENCE_FILE}"
 
-    # The gateway under evidence is whichever implementation programs the
-    # inference Gateway. Every AICR inference recipe names it inference-gateway;
-    # a recipe that renames it through overrides.aicr.inferenceGateway.gateway
-    # passes the name in AICR_INFERENCE_GATEWAY_NAME, since this script has no
-    # recipe to read. Namespace and GatewayClass follow from the object, so no
-    # implementation is assumed here.
-    local gw_name gw_lines gw_count gw_ns gw_class
+    # The gateway under evidence is the one the recipe declares, threaded by
+    # `aicr validate --cncf-submission` as AICR_INFERENCE_GATEWAY_NAME,
+    # _NAMESPACE and _CLASS (pkg/evidence/cncf WithInferenceGateway). Without
+    # recipe context (standalone runs) the Gateway is discovered by its
+    # conventional name, inference-gateway, and namespace and GatewayClass
+    # follow from the object, so no implementation is assumed here.
+    local gw_name gw_lines gw_err gw_status gw_count gw_ns gw_class
     gw_name="${AICR_INFERENCE_GATEWAY_NAME:-inference-gateway}"
-    gw_lines=$(kubectl get gateways -A -o jsonpath="{range .items[?(@.metadata.name==\"${gw_name}\")]}{.metadata.namespace}{\" \"}{.spec.gatewayClassName}{\"\n\"}{end}" 2>/dev/null | sed '/^$/d')
+    gw_err=$(mktemp)
+    if [ -n "${AICR_INFERENCE_GATEWAY_NAMESPACE:-}" ]; then
+        gw_lines=$(kubectl get gateway "${gw_name}" -n "${AICR_INFERENCE_GATEWAY_NAMESPACE}" -o jsonpath='{.metadata.namespace}{" "}{.spec.gatewayClassName}{"\n"}' 2>"${gw_err}" | sed '/^$/d')
+        gw_status=${PIPESTATUS[0]}
+        if [ "${gw_status}" -ne 0 ] && grep -qiE '\(NotFound\)|not found' "${gw_err}"; then
+            # The recipe names a Gateway that is not there: a failing requirement, not an absent prerequisite.
+            write_section_header "Inference API Gateway"
+            echo "**Result: FAIL** — the recipe's inference Gateway \`${gw_name}\` is not installed in \`${AICR_INFERENCE_GATEWAY_NAMESPACE}\`." >> "${EVIDENCE_FILE}"
+            log_error "Inference gateway evidence collection failed — Gateway ${AICR_INFERENCE_GATEWAY_NAMESPACE}/${gw_name} not found."
+            rm -f "${gw_err}"
+            return
+        fi
+    else
+        gw_lines=$(kubectl get gateways -A -o jsonpath="{range .items[?(@.metadata.name==\"${gw_name}\")]}{.metadata.namespace}{\" \"}{.spec.gatewayClassName}{\"\n\"}{end}" 2>"${gw_err}" | sed '/^$/d')
+        gw_status=${PIPESTATUS[0]}
+    fi
+    if [ "${gw_status}" -ne 0 ]; then
+        # Only a missing Gateway API is a prerequisite gap. RBAC denial or an
+        # apiserver error leaves the Gateway's existence unknown, and an unknown
+        # must not read as "not installed".
+        if grep -qiE "doesn't have a resource type|the server could not find the requested resource|no matches for kind" "${gw_err}"; then
+            write_section_header "Inference API Gateway"
+            echo "**Result: SKIP (prerequisite absent)** — the Gateway API (\`gateways.gateway.networking.k8s.io\`) is not installed." >> "${EVIDENCE_FILE}"
+            log_info "Inference gateway evidence collection skipped — Gateway API not installed."
+        else
+            write_section_header "Inference API Gateway"
+            echo "**Result: FAIL** — could not list Gateways to find \`${gw_name}\`: $(tr -d '\n' < "${gw_err}")" >> "${EVIDENCE_FILE}"
+            log_error "Inference gateway evidence collection failed — Gateway lookup error: $(tr -d '\n' < "${gw_err}")"
+        fi
+        rm -f "${gw_err}"
+        return
+    fi
+    rm -f "${gw_err}"
     gw_count=$(printf '%s\n' "${gw_lines}" | sed '/^$/d' | wc -l | tr -d ' ')
 
     # Skip if no inference gateway is installed (training clusters don't have one)
@@ -2458,11 +2490,19 @@ collect_gateway() {
     if [ "${gw_count}" -gt 1 ]; then
         write_section_header "Inference API Gateway"
         echo "**Result: FAIL** — ${gw_count} Gateways named \`${gw_name}\` exist; a recipe carries exactly one inference gateway." >> "${EVIDENCE_FILE}"
-        log_info "Inference gateway evidence collection failed — ${gw_count} Gateways named ${gw_name}."
+        log_error "Inference gateway evidence collection failed — ${gw_count} Gateways named ${gw_name}."
         return
     fi
     gw_ns=${gw_lines%% *}
     gw_class=${gw_lines#* }
+    if [ -n "${AICR_INFERENCE_GATEWAY_CLASS:-}" ] && [ "${gw_class}" != "${AICR_INFERENCE_GATEWAY_CLASS}" ]; then
+        # The object exists but another implementation programs it: evidence for
+        # the declared gateway cannot be collected from it.
+        write_section_header "Inference API Gateway"
+        echo "**Result: FAIL** — Gateway \`${gw_ns}/${gw_name}\` has class \`${gw_class}\`; the recipe declares \`${AICR_INFERENCE_GATEWAY_CLASS}\`." >> "${EVIDENCE_FILE}"
+        log_error "Inference gateway evidence collection failed — GatewayClass ${gw_class} differs from the declared ${AICR_INFERENCE_GATEWAY_CLASS}."
+        return
+    fi
 
     write_section_header "Inference API Gateway"
 
@@ -2541,15 +2581,18 @@ EOF
     kubectl get crds 2>/dev/null | grep -E "inference" >> "${EVIDENCE_FILE}" 2>&1
     echo '```' >> "${EVIDENCE_FILE}"
 
-    # Verdict — check both GatewayClass Accepted and Gateway Programmed
+    # Verdict — GatewayClass Accepted, Gateway Programmed, and the InferencePool
+    # CRD Established. The CRD listing above is informational; the verdict
+    # must not claim "inference CRDs installed" without checking one.
     echo "" >> "${EVIDENCE_FILE}"
-    local gw_accepted gw_programmed
+    local gw_accepted gw_programmed pool_crd
     gw_accepted=$(kubectl get gatewayclass "${gw_class}" -o jsonpath='{.status.conditions[?(@.type=="Accepted")].status}' 2>/dev/null)
     gw_programmed=$(kubectl get gateway "${gw_name}" -n "${gw_ns}" -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null)
-    if [ "${gw_accepted}" = "True" ] && [ "${gw_programmed}" = "True" ]; then
-        echo "**Result: PASS** — GatewayClass \`${gw_class}\` Accepted, Gateway \`${gw_name}\` Programmed in \`${gw_ns}\`, inference CRDs installed." >> "${EVIDENCE_FILE}"
+    pool_crd=$(kubectl get crd inferencepools.inference.networking.k8s.io -o jsonpath='{.status.conditions[?(@.type=="Established")].status}' 2>/dev/null)
+    if [ "${gw_accepted}" = "True" ] && [ "${gw_programmed}" = "True" ] && [ "${pool_crd}" = "True" ]; then
+        echo "**Result: PASS** — GatewayClass \`${gw_class}\` Accepted, Gateway \`${gw_name}\` Programmed in \`${gw_ns}\`, InferencePool CRD Established." >> "${EVIDENCE_FILE}"
     else
-        echo "**Result: FAIL** — No active Gateway found." >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — GatewayClass Accepted=\`${gw_accepted:-<none>}\`, Gateway Programmed=\`${gw_programmed:-<none>}\`, InferencePool CRD Established=\`${pool_crd:-<none>}\`." >> "${EVIDENCE_FILE}"
     fi
 
     log_info "Inference gateway evidence collection complete."

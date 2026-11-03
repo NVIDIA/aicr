@@ -242,10 +242,8 @@ const (
 	// Service object exists.
 	inferenceFrontendPort int32 = 8000
 
-	// inferenceGatewayPort is the listener port the gateway-epp routing mode
-	// targets when neither a proxy Service nor the Gateway's listener says
-	// otherwise. The gateway's namespace and name come from the recipe's
-	// inference gateway profile (validators.ResolveInferenceGatewayProfile).
+	// inferenceGatewayPort is the port the Service-backed gateway-epp target
+	// uses when the proxy Service is not yet inspectable (defaultGatewayEndpoint).
 	inferenceGatewayPort = int32(80)
 
 	// inferenceWorkloadNamespacePrefix is the base for the per-run benchmark
@@ -2558,20 +2556,27 @@ func resolveInferenceEndpoint(ctx *validators.Context, config *inferenceWorkload
 	return resolveFrontendEndpoint(ctx, config.namespace), nil
 }
 
-// inferenceGatewayProfile is the recipe's inference gateway, or the built-in
-// agentgateway profile when the validator runs without a recipe or the recipe
-// names no gateway, so standalone gateway-epp runs keep their pre-profile
-// target. A malformed declaration is an error, not a fallback: the recipe
-// claims a gateway it cannot describe.
+// inferenceGatewayProfile is the recipe's inference gateway. Without a recipe
+// (a standalone run) it is the built-in agentgateway profile. A recipe that
+// selects gateway-epp but declares no inference gateway is an error rather
+// than a fallback to the built-in: benchmarking agentgateway's conventional
+// target on a cluster whose recipe does not ship it could pass against a
+// stale installation. A malformed declaration is an error for the same
+// reason: the recipe claims a gateway it cannot describe.
 func inferenceGatewayProfile(ctx *validators.Context) (validators.InferenceGatewayProfile, error) {
 	profile, found, err := validators.ResolveInferenceGatewayProfile(ctx)
 	if err != nil {
 		return validators.InferenceGatewayProfile{}, err
 	}
-	if !found {
-		return validators.DefaultInferenceGatewayProfile(), nil
+	if found {
+		return profile, nil
 	}
-	return profile, nil
+	if ctx != nil && ctx.ValidationInput != nil && len(ctx.ValidationInput.ComponentRefs) > 0 {
+		return validators.InferenceGatewayProfile{}, errors.New(errors.ErrCodeInvalidRequest,
+			"inference-routing-mode gateway-epp requires an enabled inference gateway component in the recipe "+
+				"(agentgateway, or a componentRef declaring overrides.inferenceGateway); none is declared")
+	}
+	return validators.DefaultInferenceGatewayProfile(), nil
 }
 
 // resolveGatewayEndpoint returns the in-cluster URL for the recipe's inference
@@ -2579,8 +2584,9 @@ func inferenceGatewayProfile(ctx *validators.Context) (validators.InferenceGatew
 // controller from the Gateway resource, so fall back to the conventional name
 // and port when it is not yet inspectable; waitForEndpointReady will surface a
 // real timeout if the gateway never serves the route. For an address-backed
-// gateway the URL is the first Gateway status address on the first listener's
-// port.
+// gateway the URL is the first Gateway status address on the first HTTP
+// listener's port; a Gateway with no HTTP listener is an error, since the
+// benchmark speaks plain HTTP.
 func resolveGatewayEndpoint(ctx *validators.Context) (string, error) {
 	profile, err := inferenceGatewayProfile(ctx)
 	if err != nil {
@@ -2612,8 +2618,9 @@ func resolveGatewayEndpoint(ctx *validators.Context) (string, error) {
 		}
 	}
 	if selected == nil {
-		slog.Debug("Inference gateway service not found, using default gateway endpoint",
-			"namespace", profile.Namespace, "service", profile.GatewayName, "port", inferenceGatewayPort)
+		slog.Warn("Inference gateway proxy Service not found, using the conventional endpoint; "+
+			"a wrong componentRef.namespace or gateway name surfaces later as a readiness timeout",
+			"component", profile.Component, "namespace", profile.Namespace, "service", profile.GatewayName, "port", inferenceGatewayPort)
 		return defaultGatewayEndpoint(profile), nil
 	}
 
@@ -2659,22 +2666,30 @@ func resolveGatewayAddressEndpoint(ctx *validators.Context, profile validators.I
 	}
 
 	// The benchmark speaks plain HTTP, so the port is the first HTTP listener's;
-	// an HTTPS-first Gateway must not send the load generator to a TLS port.
-	// A Gateway with no HTTP listener falls back to the conventional port.
-	port := inferenceGatewayPort
+	// an HTTPS-first Gateway must not send the load generator to a TLS port,
+	// and a Gateway with no HTTP listener cannot be benchmarked at all.
+	var port int32
+	var protocols []string
 	listeners, _, _ := unstructured.NestedSlice(gw.Object, "spec", "listeners")
 	for _, l := range listeners {
 		lMap, ok := l.(map[string]any)
 		if !ok {
 			continue
 		}
-		if protocol, _, _ := unstructured.NestedString(lMap, "protocol"); !strings.EqualFold(protocol, "HTTP") {
+		protocol, _, _ := unstructured.NestedString(lMap, "protocol")
+		protocols = append(protocols, protocol)
+		if !strings.EqualFold(protocol, "HTTP") {
 			continue
 		}
 		if p, found, _ := unstructured.NestedInt64(lMap, "port"); found && p > 0 && p <= 65535 {
 			port = int32(p)
 			break
 		}
+	}
+	if port == 0 {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("inference Gateway %s/%s has no HTTP listener (listeners: %s); the benchmark speaks plain HTTP",
+				profile.Namespace, profile.GatewayName, strings.Join(protocols, ", ")))
 	}
 	if strings.Contains(host, ":") {
 		host = "[" + host + "]"

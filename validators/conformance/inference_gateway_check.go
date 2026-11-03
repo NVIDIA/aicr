@@ -40,9 +40,9 @@ var gatewayGVR = schema.GroupVersionResource{
 	Group: apiGroupGateway, Version: "v1", Resource: "gateways",
 }
 
-// conditionStatusTrue is the Kubernetes condition status the check requires on
-// GatewayClass Accepted, Gateway Programmed and listener Programmed.
-const conditionStatusTrue = "True"
+// conditionStatusTrue is metav1.ConditionTrue as the string the unstructured
+// condition reads compare against.
+const conditionStatusTrue = string(metav1.ConditionTrue)
 
 type gatewayDataPlaneReport struct {
 	ListenerCount         int
@@ -52,6 +52,18 @@ type gatewayDataPlaneReport struct {
 	ReadyEndpoints        int
 	ProgrammedListeners   int
 	StatusAddresses       int
+	// RouteDiscoveryError is set when HTTPRoutes could not be listed, so the
+	// route counts above are unknown rather than zero.
+	RouteDiscoveryError string
+}
+
+// routeCountText renders the all-routes count for the data-plane artifact,
+// saying "unavailable" when discovery failed instead of printing zero.
+func routeCountText(report *gatewayDataPlaneReport) string {
+	if report.RouteDiscoveryError != "" {
+		return "unavailable (" + report.RouteDiscoveryError + ")"
+	}
+	return strconv.Itoa(report.TotalHTTPRoutes)
 }
 
 // CheckInferenceGateway validates CNCF requirement #6: Inference Gateway.
@@ -71,9 +83,6 @@ func CheckInferenceGateway(ctx *validators.Context) error {
 		return validators.SkipWithReason(validators.SkipReasonComponentNotInRecipe, "no inference gateway component in recipe. The inference gateway check applies to inference clusters only")
 	}
 	profile := &resolved
-	recordRawTextArtifact(ctx, "Inference Gateway Profile", "",
-		fmt.Sprintf("Component:       %s\nGatewayClass:    %s\nGateway:         %s/%s\nDataPlaneProbe:  %s\nSource:          %s",
-			profile.Component, profile.GatewayClass, profile.Namespace, profile.GatewayName, profile.Probe, profile.Source))
 
 	dynClient, err := getDynamicClient(ctx)
 	if err != nil {
@@ -159,8 +168,8 @@ func CheckInferenceGateway(ctx *validators.Context) error {
 	}
 	recordRawTextArtifact(ctx, "Gateway Data Plane",
 		gatewayDataPlaneCommand(profile),
-		fmt.Sprintf("Probe:                   %s\nListeners:               %d\nProgrammed listeners:    %d\nAttached HTTPRoutes:     %d\nHTTPRoutes (all):        %d\nMatching EndpointSlices: %d\nReady endpoints:         %d\nStatus addresses:        %d",
-			profile.Probe, report.ListenerCount, report.ProgrammedListeners, report.AttachedHTTPRoutes, report.TotalHTTPRoutes,
+		fmt.Sprintf("Probe:                   %s\nListeners:               %d\nProgrammed listeners:    %d\nAttached HTTPRoutes:     %d\nHTTPRoutes (all):        %s\nMatching EndpointSlices: %d\nReady endpoints:         %d\nStatus addresses:        %d",
+			profile.Probe, report.ListenerCount, report.ProgrammedListeners, report.AttachedHTTPRoutes, routeCountText(report),
 			report.MatchingEndpointSlice, report.ReadyEndpoints, report.StatusAddresses))
 
 	// 5. Network exposure (security finding). Surfaces whether the gateway is
@@ -183,9 +192,10 @@ func gatewayDataPlaneCommand(profile *validators.InferenceGatewayProfile) string
 }
 
 // requireScopedGatewayEnv, when set truthy, escalates an open inference
-// gateway (a LoadBalancer with empty spec.loadBalancerSourceRanges, or a
-// Gateway programmed on a public or unclassifiable address) from a non-fatal
-// warning to a check failure. The default (unset) preserves the intentional
+// gateway (a LoadBalancer whose spec.loadBalancerSourceRanges is empty or
+// includes an any-source CIDR, a Gateway programmed on a public or
+// unclassifiable address, or an exposure that could not be read) from a
+// non-fatal warning to a check failure. The default (unset) preserves the intentional
 // open-by-default behavior (#1138): the exposure is recorded and warned, but
 // the check still passes.
 const requireScopedGatewayEnv = "AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY"
@@ -219,7 +229,17 @@ func assessGatewayServiceExposure(ctx *validators.Context, profile *validators.I
 		// check in the default (advisory) mode — record it best-effort and
 		// pass. Under enforce mode we cannot confirm the gateway is scoped, so
 		// fail closed. See #1160.
-		return exposureUnassessable(ctx, listCmd, "Services", err)
+		if envTruthy(requireScopedGatewayEnv) {
+			return errors.Wrap(errors.ErrCodeInternal,
+				"failed to list Services for gateway exposure assessment under "+requireScopedGatewayEnv+"=true", err)
+		}
+		slog.Warn("could not assess inference-gateway exposure; skipping advisory finding",
+			"error", err, "enforce", requireScopedGatewayEnv+"=true")
+		recordRawTextArtifact(ctx, "Inference Gateway Exposure", listCmd,
+			fmt.Sprintf("Could not list Services to assess exposure: %v\n"+
+				"Advisory finding skipped (non-fatal). Set %s=true to fail closed when exposure cannot be assessed.",
+				err, requireScopedGatewayEnv))
+		return nil
 	}
 
 	var (
@@ -294,15 +314,12 @@ func assessGatewayServiceExposure(ctx *validators.Context, profile *validators.I
 // artifact says the assessment is address-based.
 func assessGatewayAddressExposure(ctx *validators.Context, profile *validators.InferenceGatewayProfile, gw *unstructured.Unstructured) error {
 	getCmd := gatewayGetCommand(profile) + " -o jsonpath='{.status.addresses}'"
-	if gw == nil {
-		return exposureUnassessable(ctx, getCmd, "Gateway",
-			errors.New(errors.ErrCodeInternal, "no Gateway object was read for the exposure assessment"))
-	}
 
 	var (
 		summary      strings.Builder
 		public       []string
 		unclassified []string
+		classified   int
 	)
 	addresses, _, _ := unstructured.NestedSlice(gw.Object, "status", "addresses")
 	for _, a := range addresses {
@@ -313,6 +330,7 @@ func assessGatewayAddressExposure(ctx *validators.Context, profile *validators.I
 		typ, _, _ := unstructured.NestedString(aMap, "type")
 		value, _, _ := unstructured.NestedString(aMap, "value")
 		class := classifyGatewayAddress(value)
+		classified++
 		fmt.Fprintf(&summary, "%-40s type=%s class=%s\n", value, valueOrUnknown(typ), class)
 		switch class {
 		case gatewayAddressPublic:
@@ -325,6 +343,13 @@ func assessGatewayAddressExposure(ctx *validators.Context, profile *validators.I
 		"Route-domain or firewall scoping applied by the gateway to these addresses is not visible here.\n")
 	recordRawTextArtifact(ctx, "Inference Gateway Exposure", getCmd, summary.String())
 
+	if classified == 0 && envTruthy(requireScopedGatewayEnv) {
+		// Nothing could be classified, so nothing was confirmed scoped.
+		return errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("Gateway %s/%s reports no classifiable status.addresses under %s=true",
+				profile.Namespace, profile.GatewayName, requireScopedGatewayEnv))
+	}
+
 	var findings []string
 	if len(public) > 0 {
 		findings = append(findings, fmt.Sprintf(
@@ -334,31 +359,15 @@ func assessGatewayAddressExposure(ctx *validators.Context, profile *validators.I
 	}
 	if len(unclassified) > 0 {
 		findings = append(findings, fmt.Sprintf(
-			"inference gateway %s/%s is programmed on address(es) [%s] the check cannot classify (not an IP address); "+
-				"resolve them to confirm the gateway is not internet-facing",
+			"inference gateway %s/%s is programmed on address(es) [%s] the check cannot classify "+
+				"(a hostname, or an unspecified address bound on every interface); "+
+				"resolve or replace them to confirm the gateway is not internet-facing",
 			profile.Namespace, profile.GatewayName, strings.Join(unclassified, ", ")))
 	}
 	if len(findings) == 0 {
 		return nil
 	}
 	return reportOpenGateway(ctx, strings.Join(findings, "; ")+".", "addresses", append(public, unclassified...))
-}
-
-// exposureUnassessable handles a read failure during the exposure assessment:
-// advisory mode records it and passes, enforce mode fails closed because the
-// gateway cannot be confirmed scoped.
-func exposureUnassessable(ctx *validators.Context, command, what string, err error) error {
-	if envTruthy(requireScopedGatewayEnv) {
-		return errors.Wrap(errors.ErrCodeInternal,
-			"failed to read "+what+" for gateway exposure assessment under "+requireScopedGatewayEnv+"=true", err)
-	}
-	slog.Warn("could not assess inference-gateway exposure; skipping advisory finding",
-		"error", err, "enforce", requireScopedGatewayEnv+"=true")
-	recordRawTextArtifact(ctx, "Inference Gateway Exposure", command,
-		fmt.Sprintf("Could not read %s to assess exposure: %v\n"+
-			"Advisory finding skipped (non-fatal). Set %s=true to fail closed when exposure cannot be assessed.",
-			what, err, requireScopedGatewayEnv))
-	return nil
 }
 
 // reportOpenGateway applies the exposure policy to a finding: fail under
@@ -388,17 +397,20 @@ const (
 var sharedAddressSpace = netip.MustParsePrefix("100.64.0.0/10")
 
 // classifyGatewayAddress reports whether a Gateway status address is private
-// (RFC 1918, RFC 6598 shared space, ULA, loopback, link-local or unspecified),
-// public, or not an IP at all (a Hostname-type address), which the check does
-// not resolve and therefore cannot classify.
+// (RFC 1918, RFC 6598 shared space, ULA, loopback or link-local), public, or
+// unclassifiable: a Hostname-type address the check does not resolve, or an
+// unspecified address (0.0.0.0, ::), which means bound on every interface and
+// so cannot be confirmed scoped.
 func classifyGatewayAddress(value string) string {
 	addr, err := netip.ParseAddr(value)
 	if err != nil {
 		return gatewayAddressUnclassified
 	}
-	if addr.IsPrivate() || addr.IsLoopback() || addr.IsLinkLocalUnicast() || addr.IsUnspecified() ||
-		sharedAddressSpace.Contains(addr.Unmap()) {
-
+	addr = addr.Unmap()
+	if addr.IsUnspecified() {
+		return gatewayAddressUnclassified
+	}
+	if addr.IsPrivate() || addr.IsLoopback() || addr.IsLinkLocalUnicast() || sharedAddressSpace.Contains(addr) {
 		return gatewayAddressPrivate
 	}
 	return gatewayAddressPublic
@@ -440,11 +452,6 @@ func validateGatewayDataPlane(ctx *validators.Context, profile *validators.Infer
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"kubernetes client is not available for endpoint validation")
 	}
-	if gw == nil {
-		return nil, errors.New(errors.ErrCodeInternal,
-			fmt.Sprintf("no Gateway object was read for %s/%s", profile.Namespace, profile.GatewayName))
-	}
-
 	dynClient, err := getDynamicClient(ctx)
 	if err != nil {
 		return nil, err
@@ -468,6 +475,13 @@ func validateGatewayDataPlane(ctx *validators.Context, profile *validators.Infer
 	// 2. HTTPRoute discovery (informational): find routes attached to the Gateway.
 	httpRouteList, listErr := dynClient.Resource(httpRouteGVR).Namespace("").List(
 		ctx.Ctx, metav1.ListOptions{})
+	if listErr != nil {
+		// Informational step, so not fatal, but the artifact must say the
+		// counts are unavailable rather than report zero routes.
+		slog.Warn("HTTPRoute discovery failed; route counts unavailable",
+			"gateway", profile.GatewayName, "error", listErr)
+		report.RouteDiscoveryError = listErr.Error()
+	}
 	if listErr == nil {
 		report.TotalHTTPRoutes = len(httpRouteList.Items)
 		var attached int
@@ -521,9 +535,16 @@ func validateGatewayDataPlane(ctx *validators.Context, profile *validators.Infer
 		}
 	}
 
+	if report.MatchingEndpointSlice == 0 {
+		return nil, errors.New(errors.ErrCodeNotFound,
+			fmt.Sprintf("no EndpointSlice in %s belongs to a Service named %q or %q-*: the %s proxy Service was not found; "+
+				"check componentRef.namespace and overrides.inferenceGateway.gateway, or declare dataPlane: gateway-address if the data plane is not a Service",
+				profile.Namespace, profile.GatewayName, profile.GatewayName, profile.Component))
+	}
 	if report.ReadyEndpoints == 0 {
 		return nil, errors.New(errors.ErrCodeInternal,
-			fmt.Sprintf("no ready endpoints for %s proxy in %s", profile.GatewayName, profile.Namespace))
+			fmt.Sprintf("%d EndpointSlice(s) match the %s proxy in %s but none has a ready endpoint",
+				report.MatchingEndpointSlice, profile.GatewayName, profile.Namespace))
 	}
 
 	return report, nil

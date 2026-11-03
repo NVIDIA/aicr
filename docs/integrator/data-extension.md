@@ -288,7 +288,7 @@ The `inference-gateway` conformance check, the performance validator's
 component the recipe declares as its inference gateway. `agentgateway` is the
 built-in default and needs no declaration. Any other Gateway API implementation
 declares itself on its `componentRef` through the reserved
-`overrides.aicr.inferenceGateway` key:
+`overrides.inferenceGateway` key:
 
 ```yaml
 componentRefs:
@@ -296,22 +296,19 @@ componentRefs:
     type: Helm
     source: oci://charts.example.com
     overrides:
-      aicr:
-        inferenceGateway:
-          gatewayClass: my-gateway-class   # required: the GatewayClass that programs the Gateway
-          gateway: inference-gateway       # optional: the Gateway object's name (default shown)
-          dataPlane: service-endpoints     # optional: service-endpoints (default) | gateway-address
+      inferenceGateway:
+        gatewayClass: my-gateway-class   # required: the GatewayClass that programs the Gateway
+        gateway: inference-gateway       # optional: the Gateway object's name (default shown)
+        dataPlane: service-endpoints     # optional: service-endpoints (default) | gateway-address
 ```
 
 The Gateway's namespace is the component's resolved namespace (its
-`componentRef.namespace`, else the registry `defaultNamespace`). Like every
-other override, the `aicr` subtree is passed to the component's chart or
-manifest templates as a value; that is deliberate, since `aicr.*` is also how
-manifest templates read AICR-interpreted gate values, and a manifest template
-simply ignores it. A Helm chart with a strict values schema rejects unknown
-top-level keys, so for such a chart declare the gateway on a manifest-only
-companion component (the Gateway object itself usually lives in one) rather than
-on the chart's ref.
+`componentRef.namespace`, else the registry `defaultNamespace`; a Kustomize
+component has no registry default and must set `namespace` on its ref). The key
+is merged into the component's values like any other override, so a chart with
+a strict values schema should carry the declaration on a manifest-only
+companion ref (where the Gateway object usually lives) rather than on the
+chart's ref.
 
 `dataPlane` names how the validators confirm the data plane is serving.
 `service-endpoints` is for a controller that provisions a Service for its proxy:
@@ -323,15 +320,18 @@ plane that is not a Kubernetes workload (a hardware or DPU-hosted proxy): the
 check requires the Gateway to be programmed with at least one `status.addresses`
 entry, assesses exposure from the class of those addresses (RFC 1918, RFC 6598
 shared space, ULA, loopback and link-local are private; anything else is
-public; a `Hostname`-type address is unclassifiable and counts as not confirmed
-scoped under `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY=true`), and the performance
-validator sends its load to the first address on the first `HTTP` listener's
-port. A recipe that enables two inference gateway components fails the check;
-exactly one may be enabled.
+public; a `Hostname`-type address or an unspecified address such as `0.0.0.0`
+is unclassifiable and counts as not confirmed scoped under
+`AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY=true`), and the performance validator
+sends its load to the first address on the first `HTTP` listener's port (a
+Gateway with no `HTTP` listener fails the performance run). A recipe that
+enables two inference gateway components fails the check; exactly one may be
+enabled. No shipped recipe uses `gateway-address`; it is covered by unit tests
+and by no CI lane.
 
-The CNCF evidence collector runs without a recipe, so it finds the Gateway by
-name: `inference-gateway` unless `AICR_INFERENCE_GATEWAY_NAME` is set to the
-name the declaration chose.
+`aicr validate --cncf-submission` hands the declared Gateway's name, namespace
+and class to the evidence collector; a standalone collector run with no recipe
+discovers the Gateway named `inference-gateway`.
 
 ## Precedence rules
 

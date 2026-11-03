@@ -481,6 +481,8 @@ func (c *Client) CollectCNCFEvidence(ctx context.Context, rec *RecipeResult, opt
 	defer cancel()
 
 	var policy string
+	var gateway validatorv1.InferenceGatewayProfile
+	var gatewayFound bool
 	if rec != nil {
 		var err error
 		if policy, err = validatorv1.ResolveGPUAllocationPolicy(ctx, rec.internal); err != nil {
@@ -489,6 +491,13 @@ func (c *Client) CollectCNCFEvidence(ctx context.Context, rec *RecipeResult, opt
 				return errors.WrapCtxErr(err, errors.ErrCodeTimeout, msg)
 			}
 			return errors.PropagateOrWrap(err, errors.ErrCodeInternal, msg)
+		}
+		// The inference-gateway evidence section collects the Gateway the
+		// recipe declares; a malformed declaration fails here rather than
+		// producing evidence for whatever carries the conventional name.
+		if gateway, gatewayFound, err = validatorv1.ResolveInferenceGatewayProfile(rec.internal.ComponentRefs); err != nil {
+			return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+				"failed to resolve the inference gateway for CNCF evidence collection")
 		}
 	}
 
@@ -515,6 +524,9 @@ func (c *Client) CollectCNCFEvidence(ctx context.Context, rec *RecipeResult, opt
 	}
 	if policy != "" {
 		collectorOpts = append(collectorOpts, cncf.WithAllocationPolicy(policy))
+	}
+	if gatewayFound {
+		collectorOpts = append(collectorOpts, cncf.WithInferenceGateway(gateway.GatewayName, gateway.Namespace, gateway.GatewayClass))
 	}
 	if err := cncf.NewCollector(dir, collectorOpts...).Run(ctx); err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "CNCF evidence collection failed")
