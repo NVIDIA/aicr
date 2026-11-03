@@ -39,8 +39,12 @@
 # the goldens and the evidence never carry it. The operator writes the token
 # into cluster-values.yaml on the install machine right before deploy.sh runs;
 # from then on that file holds the token at rest, so protect it like a
-# kubeconfig and clear the value once the release is installed. A fresh token
-# is needed for every install and upgrade. The chart renders the hook Jobs
+# kubeconfig and clear the value once the release is installed. Helm also
+# keeps every install's values in the release Secret in the runai namespace,
+# token included, and clearing the file does not purge that; the two-hour
+# expiry bounds the exposure, and access to Helm release Secrets in runai
+# should be as restricted as the kubeconfig. A fresh token is needed for every
+# install and upgrade. The chart renders the hook Jobs
 # that use it only when url and uid are both set; with either empty it
 # renders a control-plane-less skeleton and the install never registers.
 controlPlane:

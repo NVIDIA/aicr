@@ -2404,8 +2404,14 @@ aicr bundle -r recipe.yaml \
 Mint a fresh token for every install and upgrade. Once you have written it
 into `cluster-values.yaml`, that file holds the token at rest on the install
 machine: protect it like a kubeconfig and clear the value after the release is
-installed. With the URL or UID empty the chart renders without its
-registration hooks and the install never reaches the control plane. GitOps deployers that re-sync from the repository
+installed. Clearing the file does not remove the token from the cluster: Helm
+stores the values of every revision in the release Secrets
+(`sh.helm.release.v1.runai-cluster.v<N>` in the `runai` namespace), so the
+token stays readable there to anyone who can read Secrets in that namespace.
+Its two-hour expiry bounds the exposure; keep access to those Secrets as tight
+as access to the kubeconfig. With the URL or UID empty the chart renders
+without its registration hooks and the install never reaches the control
+plane. GitOps deployers that re-sync from the repository
 would reuse an expired token, so use the `helm` deployer for now.
 
 **What the leaves change.** The chart bundles KAI Scheduler 0.18 through its
