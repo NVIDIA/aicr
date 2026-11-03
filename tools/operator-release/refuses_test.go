@@ -19,6 +19,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // refusal returns a stand-in operator binary that refuses the development
@@ -40,8 +43,9 @@ func refusal(refused ...string) []byte {
 }
 
 // TestRefuses checks that refuses passes only when the binary refuses every
-// development setting, fails when it starts, fails for another reason or
-// cannot run, and on a host that cannot run the image's binary skips the check.
+// development setting, reports a coded error when the binary starts, fails
+// for another reason or cannot run, or the image or settings are missing, and
+// on a host that cannot run the image's binary skips the check.
 func TestRefuses(t *testing.T) {
 	t.Parallel()
 	const refused = "refuses development.skipDiscovery"
@@ -50,19 +54,25 @@ func TestRefuses(t *testing.T) {
 		hostOut = "skipping the development settings refusal check"
 	}
 	pinned := []string{"-platform", "linux/amd64"}
+	both := refusal("bypassApprovals", "skipDiscovery")
 	tests := []struct {
 		name, want, out string
+		code            errors.ErrorCode
 		binary          []byte
-		platform        []string
+		args            []string
 	}{
-		{"refuses both", "", refused, refusal("bypassApprovals", "skipDiscovery"), pinned},
-		{"starts", "started with development.bypassApprovals", "", refusal(), pinned},
-		{"refuses only the bypass", "started with development.skipDiscovery", "", refusal("bypassApprovals"), pinned},
-		{"fails otherwise", "failed without refusing development.bypassApprovals", "",
+		{"refuses both", "", refused, "", both, pinned},
+		{"starts", "started with development.bypassApprovals", "", errors.ErrCodeInvalidRequest, refusal(), pinned},
+		{"refuses only the bypass", "started with development.skipDiscovery", "", errors.ErrCodeInvalidRequest,
+			refusal("bypassApprovals"), pinned},
+		{"fails otherwise", "failed without refusing development.bypassApprovals", "", errors.ErrCodeInvalidRequest,
 			[]byte("#!/bin/sh\necho 'load Kubernetes client config' >&2\nexit 1\n"), pinned},
-		{"cannot run", "run the candidate with development.bypassApprovals", "", []byte("not an executable"), pinned},
-		{"no image", "index.json", "", nil, pinned},
-		{"host platform", "", hostOut, refusal("bypassApprovals", "skipDiscovery"), nil},
+		{"cannot run", "run the candidate with development.bypassApprovals", "", errors.ErrCodeInternal,
+			[]byte("not an executable"), pinned},
+		{"no image", "index.json", "", errors.ErrCodeInvalidRequest, nil, pinned},
+		{"no settings", "read the pinned AICR image", "", errors.ErrCodeInvalidRequest, both,
+			append([]string{"-settings", "missing.yaml"}, pinned...)},
+		{"host platform", "", hostOut, "", both, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -72,7 +82,7 @@ func TestRefuses(t *testing.T) {
 				writeLayout(t, dir, "image", "aicr-operator", tt.binary)
 			}
 			var out bytes.Buffer
-			args := append([]string{"refuses", "-dir", dir, "-settings", "../../.settings.yaml"}, tt.platform...)
+			args := append([]string{"refuses", "-dir", dir, "-settings", "../../.settings.yaml"}, tt.args...)
 			err := run(args, &out)
 			if tt.want == "" {
 				if err != nil || !strings.Contains(out.String(), tt.out) {
@@ -83,6 +93,7 @@ func TestRefuses(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("refuses = %v, want an error naming %q", err, tt.want)
 			}
+			errorstest.WantReportedCode(t, err, tt.code)
 		})
 	}
 }

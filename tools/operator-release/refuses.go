@@ -16,7 +16,7 @@ package main
 
 import (
 	"context"
-	"errors"
+	stderrors "errors"
 	"flag"
 	"fmt"
 	"io"
@@ -26,6 +26,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // refusalTimeout bounds each run of the candidate's binary.
@@ -64,16 +66,16 @@ func refuses(args []string, out io.Writer) error {
 	}
 	s, err := readSettings(*settingsFile)
 	if err != nil {
-		return err
+		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "read the pinned AICR image")
 	}
 	work, err := os.MkdirTemp("", "operator-refuses-")
 	if err != nil {
-		return err
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "create the refusal check's work directory")
 	}
 	defer os.RemoveAll(work)
 	bin := filepath.Join(work, "aicr-operator")
 	if err = extract([]string{"-dir", *dir, "-platform", *platform, "-out", bin}); err != nil {
-		return err
+		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "extract the candidate's "+*platform+" operator binary")
 	}
 	for _, d := range developmentSettings {
 		if err = refusesSetting(bin, filepath.Join(work, "no-kubeconfig"), s.Operator.AICRImage, d.name, d.flag); err != nil {
@@ -100,13 +102,15 @@ func refusesSetting(bin, kubeconfig, aicrImage, name, flag string) error {
 	var exit *exec.ExitError
 	switch {
 	case ctx.Err() != nil:
-		return fmt.Errorf("the candidate did not refuse development.%s within %s: %s", name, refusalTimeout, output)
+		return errors.New(errors.ErrCodeTimeout,
+			fmt.Sprintf("the candidate did not refuse development.%s within %s: %s", name, refusalTimeout, output))
 	case err == nil:
-		return fmt.Errorf("the candidate started with development.%s", name)
-	case !errors.As(err, &exit):
-		return fmt.Errorf("run the candidate with development.%s: %w", name, err)
+		return errors.New(errors.ErrCodeInvalidRequest, "the candidate started with development."+name)
+	case !stderrors.As(err, &exit):
+		return errors.Wrap(errors.ErrCodeInternal, "run the candidate with development."+name, err)
 	case !strings.Contains(string(output), "development."+name+" is accepted only by development builds"):
-		return fmt.Errorf("the candidate failed without refusing development.%s: %s", name, output)
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("the candidate failed without refusing development.%s: %s", name, output))
 	}
 	return nil
 }
