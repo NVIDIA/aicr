@@ -516,7 +516,7 @@ with the Client's version, the same combined document `aicr validate` writes.
 
 ### CNCF AI Conformance evidence
 
-Two methods produce CNCF AI Conformance evidence, matching
+Three methods produce CNCF AI Conformance evidence, matching
 `aicr validate --evidence-dir` and `aicr validate --cncf-submission`:
 
 - `RenderCNCFEvidence(ctx, report, dir)` writes one markdown file per
@@ -552,7 +552,7 @@ err := client.CollectCNCFEvidence(ctx, rec, aicr.CNCFCollectOptions{
 })
 ```
 
-Neither method is in v0.22.0 or earlier.
+None of these methods is in v0.22.0 or earlier.
 
 ## Recipe sources
 
