@@ -2638,6 +2638,15 @@ func waitForHTTPRouteAccepted(ctx *validators.Context, namespace, name, parentNa
 			return undecided("wait expired")
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
+				// The watch also closes when the wait expires; that is the
+				// undecided outcome, not a read failure.
+				if ctx.Ctx.Err() != nil {
+					return errors.WrapCtxErr(ctx.Ctx.Err(), errors.ErrCodeTimeout,
+						"canceled while waiting for the HTTPRoute to be accepted")
+				}
+				if waitCtx.Err() != nil {
+					return undecided("wait expired")
+				}
 				// Re-Get before giving up: an apiserver hiccup closes watches.
 				recheck, getErr := routes.Get(waitCtx, name, metav1.GetOptions{})
 				if getErr != nil {
@@ -2687,13 +2696,15 @@ func httpRouteAccepted(route *unstructured.Unstructured, parentNamespace, parent
 			}
 			typ, _, _ := unstructured.NestedString(cMap, "type")
 			status, _, _ := unstructured.NestedString(cMap, "status")
-			observed, _, _ := unstructured.NestedInt64(cMap, "observedGeneration")
+			observed, observedSet, _ := unstructured.NestedInt64(cMap, "observedGeneration")
 			switch {
 			case typ != "Accepted":
 				continue
-			case observed != generation:
+			case observedSet && observed != generation:
 				// Written for an earlier spec of this route; the current one
-				// has not been reconciled yet.
+				// has not been reconciled yet. A condition that carries no
+				// observedGeneration (the field is optional) cannot prove
+				// staleness and counts as current.
 				continue
 			case status == string(metav1.ConditionTrue):
 				return true, nil

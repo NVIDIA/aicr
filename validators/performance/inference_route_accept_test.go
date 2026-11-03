@@ -29,8 +29,10 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 const (
@@ -130,6 +132,17 @@ func TestWaitForHTTPRouteAccepted(t *testing.T) {
 				routeParentStatus(routeTestGateway, "", "False", "NotAllowedByListeners", 1)),
 		},
 		{
+			// observedGeneration is optional on a condition; a controller
+			// that omits it must still be able to reject the route.
+			name: "rejection without observedGeneration is decisive",
+			route: withParents(httpRouteAt(3), func() map[string]any {
+				p := routeParentStatus(routeTestGateway, routeTestGatewayNS, "False", "NotAllowedByListeners", 0)
+				delete(p["conditions"].([]any)[0].(map[string]any), "observedGeneration")
+				return p
+			}()),
+			wantErr: "NotAllowedByListeners", wantCode: errors.ErrCodeInvalidRequest,
+		},
+		{
 			name: "current-generation rejection beside a stale acceptance is decisive",
 			route: withParents(httpRouteAt(2),
 				routeParentStatus(routeTestGateway, routeTestGatewayNS, "True", "Accepted", 1),
@@ -178,6 +191,37 @@ func TestWaitForHTTPRouteAccepted_DecidedDuringWatch(t *testing.T) {
 					t.Errorf("update HTTPRoute: %v", err)
 				}
 			}()
+			vctx := &validators.Context{Ctx: context.Background(), DynamicClient: dyn}
+			err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, routeTestGatewayNS, routeTestGateway, 5*time.Second)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestWaitForHTTPRouteAccepted_WatchClosed covers an apiserver closing the
+// watch early: the route is re-read, and an undecided route still proceeds.
+func TestWaitForHTTPRouteAccepted_WatchClosed(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		route   *unstructured.Unstructured
+		wantErr bool
+	}{
+		{"undecided after re-read proceeds", httpRouteObject("", ""), false},
+		{"rejection seen on re-read fails", httpRouteObject("False", "NotAllowedByListeners"), true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dyn := newRouteClient(t, httpRouteObject("", ""))
+			dyn.PrependWatchReactor("httproutes", func(k8stesting.Action) (bool, watch.Interface, error) {
+				w := watch.NewFake()
+				w.Stop()
+				return true, w, nil
+			})
+			// The re-read must see the route as it is after the watch closed.
+			if err := dyn.Tracker().Update(httpRouteGVR, tt.route, routeTestNamespace); err != nil {
+				t.Fatalf("update HTTPRoute: %v", err)
+			}
 			vctx := &validators.Context{Ctx: context.Background(), DynamicClient: dyn}
 			err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, routeTestGatewayNS, routeTestGateway, 5*time.Second)
 			if (err != nil) != tt.wantErr {
