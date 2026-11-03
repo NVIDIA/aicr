@@ -19,7 +19,9 @@
 
 ## Status
 
-**Accepted, partially implemented** — proposed 2026-05-08.
+**Accepted, partially implemented** — proposed 2026-05-08. Amended
+2026-11-03 for the `cncf-conformance` kind; see
+[Amendment: single-path CNCF conformance evidence (2026-11-03)](#amendment-single-path-cncf-conformance-evidence-2026-11-03).
 
 This ADR specifies the V1 contract. Implementation lands as five
 follow-on PRs tracked under
@@ -1350,7 +1352,9 @@ since become two unrelated implementations of every CNCF requirement:
 - The Go checks in `validators/conformance/`, run by
   `aicr validate --phase conformance` and rendered to
   `evidence/<requirement>.md` by `pkg/evidence/cncf/renderer.go` when
-  `--evidence-dir` is set. Nightly UAT runs this path.
+  `--evidence-dir` is set. Nightly UAT runs these checks without
+  `--evidence-dir`; the renderer is exercised nightly only through the
+  attestation pipeline.
 - The bash collector `pkg/evidence/cncf/scripts/collect-evidence.sh`,
   embedded in the binary and run by `--cncf-submission`. That flag
   short-circuits validation, so the Go checks never run on a submission.
@@ -1367,9 +1371,11 @@ Upstream has moved since v1.35. The v1.36 checklist removed
 `dra_support`, which the renderer still presents as a requirement. The
 v1.37 checklist added `workload_sandboxing` and introduced hybrid
 verification: `junit.xml` and `e2e.log` in the submission directory,
-parsed by the upstream validator. The v1.38 graduations announced in the
-upstream KARs make `driver_runtime_management` and `workload_sandboxing`
-MUST.
+parsed by the upstream validator. The graduations announced in the
+upstream Kubernetes AI Requirements (KARs,
+[kubernetes-sigs/ai-conformance/kars/](https://github.com/kubernetes-sigs/ai-conformance/tree/main/kars))
+target `driver_runtime_management` and `workload_sandboxing` as MUST at
+v1.38; no v1.38 schema is published yet.
 
 Nightly UAT runs the conformance phase inside a 40-minute all-phases
 step. The UAT cells have two GPU nodes, so runtime and contention with
@@ -1396,12 +1402,15 @@ the other phases, not capacity, bound what can be always-on.
 3. **`--feature` and `evidence.cncf.features` are removed** with the
    script. `Client.CollectCNCFEvidence` keeps its signature as a wrapper
    over run-plus-render; a non-empty `Features`, a nil recipe, or
-   `NoCluster` is rejected with `ErrCodeInvalidRequest`.
+   `NoCluster` is rejected with `ErrCodeInvalidRequest`. The argument
+   contract is specified and tested in
+   [#3602](https://github.com/NVIDIA/aicr/issues/3602).
 4. **Depth lives in catalog checks, not in a flag.** A test whose
    measured runtime or GPU contention does not fit the nightly step is a
-   sibling check (`gang-scheduling-gpu-barrier`,
-   `pod-autoscaling-gpu-load`, `robust-controller-reconcile`,
-   `inference-gateway-traffic`). Recipes list both tiers. A lane narrows
+   sibling check. The initial set is `gang-scheduling-gpu-barrier`,
+   `pod-autoscaling-gpu-load`, `robust-controller-reconcile` and
+   `inference-gateway-traffic`; it is not a closed list. Recipes list
+   both tiers. A lane narrows
    a run with `--skip-check`, which stays run-scoped and is refused with
    `--evidence-dir`, so a submission cannot omit the deep tier. A
    scheduled full-depth lane keeps withheld checks exercised.
@@ -1417,8 +1426,9 @@ the other phases, not capacity, bound what can be always-on.
    missing, or capacity-starved deep checks leave it incomplete and fail
    the submission run, recorded as an unmet test prerequisite rather than
    a disproven capability. MUST-level N/A exists only for the conditional
-   `cluster_autoscaling`, and its justification comes from the vendor
-   metadata file, not from a check.
+   `cluster_autoscaling`. The vendor metadata file is the only source of
+   that N/A justification; checks record observations only and never
+   assert nonapplicability.
 7. **AICR-named junit; the upstream suite is optional.** `junit.xml`
    carries AICR check names, referenced per requirement with explicit
    `file://...#<check>` fragments, which the upstream validator honors
