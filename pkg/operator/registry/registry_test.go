@@ -217,6 +217,8 @@ func TestReadChartMetaRejects(t *testing.T) {
 		"no Chart":     targz(t, []tarEntry{{name: "x/values.yaml", body: "a: 1"}}),
 		"no version":   targz(t, []tarEntry{{name: "x/Chart.yaml", body: "name: x"}}),
 		"invalid yaml": targz(t, []tarEntry{{name: "x/Chart.yaml", body: "name: [x"}}),
+		"config over its limit as JSON": targz(t, []tarEntry{{name: "x/Chart.yaml",
+			body: "name: x\nversion: 1.0.0\ndescription: \"" + strings.Repeat("<", maxChartConfigBytes/6+1) + "\""}}),
 	}
 	for name, archive := range tests {
 		if _, err := ReadChartMeta(archive); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {

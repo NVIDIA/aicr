@@ -44,8 +44,13 @@ const (
 	ChartLayerMediaType  = "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
 )
 
-// maxChartYAMLBytes bounds Chart.yaml inside an archive.
-const maxChartYAMLBytes = 1 << 20
+// maxChartYAMLBytes bounds Chart.yaml inside an archive, and
+// maxChartConfigBytes bounds the chart's config blob, Chart.yaml as JSON,
+// which escaping can make larger than the YAML.
+const (
+	maxChartYAMLBytes   = 1 << 20
+	maxChartConfigBytes = 1 << 20
+)
 
 // chartNamePattern is Helm's chart naming rule; it also keeps a name safe as
 // an archive path prefix.
@@ -107,6 +112,9 @@ func parseChartYAML(raw []byte) (*ChartMeta, error) {
 	config, err := json.Marshal(doc)
 	if err != nil {
 		return nil, invalid("Chart.yaml cannot be represented as JSON: %v", err)
+	}
+	if len(config) > maxChartConfigBytes {
+		return nil, invalid("Chart.yaml is %d bytes as JSON, over %d", len(config), maxChartConfigBytes)
 	}
 	return &ChartMeta{Name: name, Version: version, config: config}, nil
 }
@@ -196,8 +204,8 @@ func pullChart(ctx context.Context, repo *remote.Repository, src Repository, ver
 	switch {
 	case manifest.Config.MediaType != ChartConfigMediaType:
 		return nil, nil, invalid("%s:%s is not a Helm chart (config %q)", src, tag, manifest.Config.MediaType)
-	case manifest.Config.Size > maxChartYAMLBytes:
-		return nil, nil, invalid("chart config of %s:%s is %d bytes, over %d", src, tag, manifest.Config.Size, maxChartYAMLBytes)
+	case manifest.Config.Size > maxChartConfigBytes:
+		return nil, nil, invalid("chart config of %s:%s is %d bytes, over %d", src, tag, manifest.Config.Size, maxChartConfigBytes)
 	}
 	if _, err = content.FetchAll(ctx, repo, manifest.Config); err != nil {
 		return nil, nil, classify(err, fmt.Sprintf("fetch chart config %s@%s", src, manifest.Config.Digest))
