@@ -1453,7 +1453,9 @@ the other phases, not capacity, bound what can be always-on.
 
 ### Tracking
 
-- [#3601](https://github.com/NVIDIA/aicr/issues/3601) epic.
+- [#3601](https://github.com/NVIDIA/aicr/issues/3601) epic;
+  [#3389](https://github.com/NVIDIA/aicr/issues/3389) NVKE CNCF AI
+  conformance, the submission this work generalizes.
 - [#3611](https://github.com/NVIDIA/aicr/issues/3611) this amendment.
 - [#3606](https://github.com/NVIDIA/aicr/issues/3606) versioned
   requirement map;
@@ -1461,14 +1463,13 @@ the other phases, not capacity, bound what can be always-on.
   fail-closed aggregation.
 - [#3603](https://github.com/NVIDIA/aicr/issues/3603),
   [#3604](https://github.com/NVIDIA/aicr/issues/3604),
-  [#3428](https://github.com/NVIDIA/aicr/issues/3428),
-  [#3613](https://github.com/NVIDIA/aicr/issues/3613) parity ports and
-  deep-tier checks; [#3609](https://github.com/NVIDIA/aicr/issues/3609)
-  nightly exclusions and full-depth lane.
+  [#3428](https://github.com/NVIDIA/aicr/issues/3428) parity ports and
+  deep-tier checks, including the cluster-autoscaling observed-scale
+  item; [#3609](https://github.com/NVIDIA/aicr/issues/3609) nightly
+  exclusions and full-depth lane.
 - [#3602](https://github.com/NVIDIA/aicr/issues/3602) runner change and
   collector removal;
   [#3605](https://github.com/NVIDIA/aicr/issues/3605) submission
-  packaging; [#3610](https://github.com/NVIDIA/aicr/issues/3610) NVKE
-  regeneration.
-- [#3607](https://github.com/NVIDIA/aicr/issues/3607),
-  [#3608](https://github.com/NVIDIA/aicr/issues/3608) v1.38 readiness.
+  packaging and the NVKE proof run.
+- [#3615](https://github.com/NVIDIA/aicr/issues/3615) v1.38 readiness:
+  driver-runtime-management and workload sandboxing.
