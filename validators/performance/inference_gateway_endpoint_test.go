@@ -106,6 +106,24 @@ func TestResolveGatewayEndpoint_AddressProbe(t *testing.T) {
 			wantCode: errors.ErrCodeInvalidRequest,
 		},
 		{
+			// The benchmark sends the address as Host; a hostname-bound
+			// listener would answer 404 and surface as a readiness timeout.
+			name:     "HTTP listener bound to a hostname is unsupported, not a timeout",
+			refs:     []recipe.ComponentRef{declared},
+			gateway:  addressGateway(ip, []any{map[string]any{"name": "http", "protocol": "HTTP", "port": int64(80), "hostname": "models.example.com"}}),
+			wantErr:  "set a hostname (http=models.example.com)",
+			wantCode: errors.ErrCodeInvalidRequest,
+		},
+		{
+			name: "hostname-free HTTP listener is preferred over a hostname-bound one",
+			refs: []recipe.ComponentRef{declared},
+			gateway: addressGateway(ip, []any{
+				map[string]any{"name": "vhost", "protocol": "HTTP", "port": int64(80), "hostname": "models.example.com"},
+				map[string]any{"name": "http", "protocol": "HTTP", "port": int64(8080)},
+			}),
+			want: "http://172.16.100.12:8080",
+		},
+		{
 			name:    "IPv6 address is bracketed",
 			refs:    []recipe.ComponentRef{declared},
 			gateway: addressGateway([]any{map[string]any{"type": "IPAddress", "value": "fd00:10::12"}}, []any{map[string]any{"name": "http", "protocol": "HTTP", "port": int64(80)}}),

@@ -327,8 +327,10 @@ the class of those addresses (RFC 1918, RFC 6598 shared space, ULA, loopback
 and link-local are private; anything else is public; a `Hostname`-type address
 or an unspecified address such as `0.0.0.0` is unclassifiable and counts as not
 confirmed scoped under `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY=true`), and the
-performance validator sends its load to the first address on the first `HTTP`
-listener's port (a Gateway with no `HTTP` listener fails the performance run).
+performance validator sends its load to the first address on the port of the
+first `HTTP` listener that sets no `hostname` (the benchmark sends the address
+as the `Host` header; a Gateway with no `HTTP` listener, or whose `HTTP`
+listeners all bind a hostname, fails the performance run at once).
 A recipe that enables two inference gateway components fails the check; exactly
 one may be enabled. No shipped recipe uses `gateway-address`; it is covered by
 unit tests and by no CI lane.

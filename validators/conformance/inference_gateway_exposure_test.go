@@ -444,19 +444,16 @@ func TestValidateGatewayAddressDataPlane(t *testing.T) {
 	ok := []any{programmedListener("http", "True")}
 	addr := []any{gatewayAddress("IPAddress", "172.16.100.12")}
 	tests := []struct {
-		name            string
-		listeners       []any
-		addresses       []any
-		wantErr         string
-		wantProgrammed  int
-		wantStatusAddrs int
+		name      string
+		listeners []any
+		addresses []any
+		wantErr   string
 	}{
-		{name: "programmed listener with an address", listeners: ok, addresses: addr, wantProgrammed: 1, wantStatusAddrs: 1},
+		{name: "programmed listener with an address", listeners: ok, addresses: addr},
 		{
-			name:            "listener without conditions is tolerated",
-			listeners:       []any{map[string]any{"name": "http", "attachedRoutes": int64(0)}},
-			addresses:       addr,
-			wantStatusAddrs: 1,
+			name:      "listener without conditions is tolerated",
+			listeners: []any{map[string]any{"name": "http", "attachedRoutes": int64(0)}},
+			addresses: addr,
 		},
 		{name: "no listeners", addresses: addr, wantErr: "no listeners"},
 		{name: "no addresses", listeners: ok, wantErr: "no status.addresses"},
@@ -469,8 +466,7 @@ func TestValidateGatewayAddressDataPlane(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			report := &gatewayDataPlaneReport{}
-			err := validateGatewayAddressDataPlane(gatewayObject(profile, tt.listeners, tt.addresses), profile, report)
+			err := validateGatewayAddressDataPlane(gatewayObject(profile, tt.listeners, tt.addresses), profile)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("error = %v, want containing %q", err, tt.wantErr)
@@ -480,9 +476,6 @@ func TestValidateGatewayAddressDataPlane(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
-			}
-			if report.ProgrammedListeners != tt.wantProgrammed || report.StatusAddresses != tt.wantStatusAddrs {
-				t.Errorf("report = %+v, want programmed=%d addresses=%d", *report, tt.wantProgrammed, tt.wantStatusAddrs)
 			}
 		})
 	}
@@ -502,20 +495,21 @@ func TestValidateGatewayDataPlane(t *testing.T) {
 	ns := svc.Namespace
 
 	tests := []struct {
-		name          string
-		profile       *validators.InferenceGatewayProfile
-		gateway       *unstructured.Unstructured
-		objects       []runtime.Object
-		listReactor   bool
-		wantErr       string
-		wantCode      errors.ErrorCode
-		wantReady     int
-		wantMatching  int
-		wantAddresses int
+		name           string
+		profile        *validators.InferenceGatewayProfile
+		gateway        *unstructured.Unstructured
+		objects        []runtime.Object
+		listReactor    bool
+		wantErr        string
+		wantCode       errors.ErrorCode
+		wantReady      int
+		wantMatching   int
+		wantAddresses  int
+		wantProgrammed int
 	}{
 		{
 			name: "address probe passes on a Service-less cluster", profile: addr, gateway: addrGateway,
-			wantAddresses: 1,
+			wantAddresses: 1, wantProgrammed: 1,
 		},
 		{
 			name: "service probe on the same Service-less cluster fails as proxy not found", profile: &validators.InferenceGatewayProfile{
@@ -525,9 +519,11 @@ func TestValidateGatewayDataPlane(t *testing.T) {
 			wantErr: "proxy Service was not found", wantCode: errors.ErrCodeNotFound,
 		},
 		{
+			// The report carries listener and address counts for the Service
+			// probe too; a programmed listener must not read as zero here.
 			name: "ready proxy EndpointSlice", profile: svc, gateway: svcGateway,
 			objects:   []runtime.Object{endpointSlice(ns, "inference-gateway-abc", "inference-gateway", true)},
-			wantReady: 1, wantMatching: 1,
+			wantReady: 1, wantMatching: 1, wantProgrammed: 1,
 		},
 		{
 			name: "only the control-plane slice is present", profile: svc, gateway: svcGateway,
@@ -574,8 +570,11 @@ func TestValidateGatewayDataPlane(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if report.ReadyEndpoints != tt.wantReady || report.MatchingEndpointSlice != tt.wantMatching || report.StatusAddresses != tt.wantAddresses {
-				t.Errorf("report = %+v, want ready=%d matching=%d addresses=%d", *report, tt.wantReady, tt.wantMatching, tt.wantAddresses)
+			mismatch := report.ReadyEndpoints != tt.wantReady || report.MatchingEndpointSlice != tt.wantMatching ||
+				report.StatusAddresses != tt.wantAddresses || report.ProgrammedListeners != tt.wantProgrammed
+			if mismatch {
+				t.Errorf("report = %+v, want ready=%d matching=%d addresses=%d programmed=%d",
+					*report, tt.wantReady, tt.wantMatching, tt.wantAddresses, tt.wantProgrammed)
 			}
 		})
 	}

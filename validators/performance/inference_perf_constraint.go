@@ -2809,11 +2809,14 @@ func resolveGatewayAddressEndpoint(ctx *validators.Context, profile validators.I
 			fmt.Sprintf("inference Gateway %s/%s reports no status.addresses", profile.Namespace, profile.GatewayName))
 	}
 
-	// The benchmark speaks plain HTTP, so the port is the first HTTP listener's;
-	// an HTTPS-first Gateway must not send the load generator to a TLS port,
-	// and a Gateway with no HTTP listener cannot be benchmarked at all.
+	// The benchmark speaks plain HTTP and sends the address as the Host
+	// header, so the port is the first HTTP listener's that sets no
+	// hostname: an HTTPS-first Gateway must not send the load generator to a
+	// TLS port, a hostname-bound listener would answer the address with 404
+	// (surfacing minutes later as a readiness timeout), and a Gateway with
+	// no usable HTTP listener cannot be benchmarked at all.
 	var port int32
-	var protocols []string
+	var protocols, hostnameBound []string
 	listeners, _, _ := unstructured.NestedSlice(gw.Object, "spec", "listeners")
 	for _, l := range listeners {
 		lMap, ok := l.(map[string]any)
@@ -2825,10 +2828,20 @@ func resolveGatewayAddressEndpoint(ctx *validators.Context, profile validators.I
 		if !strings.EqualFold(protocol, "HTTP") {
 			continue
 		}
+		if hostname, _, _ := unstructured.NestedString(lMap, "hostname"); hostname != "" {
+			name, _, _ := unstructured.NestedString(lMap, "name")
+			hostnameBound = append(hostnameBound, fmt.Sprintf("%s=%s", name, hostname))
+			continue
+		}
 		if p, found, _ := unstructured.NestedInt64(lMap, "port"); found && p > 0 && p <= 65535 {
 			port = int32(p)
 			break
 		}
+	}
+	if port == 0 && len(hostnameBound) > 0 {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("inference Gateway %s/%s HTTP listener(s) set a hostname (%s); the benchmark sends the address as Host and needs a hostname-free HTTP listener",
+				profile.Namespace, profile.GatewayName, strings.Join(hostnameBound, ", ")))
 	}
 	if port == 0 {
 		return "", errors.New(errors.ErrCodeInvalidRequest,

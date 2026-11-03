@@ -468,8 +468,9 @@ func validateGatewayDataPlane(ctx *validators.Context, profile *validators.Infer
 		return nil, err
 	}
 
-	// 1. Listener status (informational for Service-backed gateways; the
-	// address probe reads the same object as a hard requirement below).
+	// 1. Listener and address status, reported for both probes (informational
+	// for a Service-backed gateway; the address probe reads the same object
+	// as a hard requirement below).
 	listeners, found, _ := unstructured.NestedSlice(gw.Object, "status", "listeners")
 	if found {
 		report.ListenerCount = len(listeners)
@@ -478,10 +479,15 @@ func validateGatewayDataPlane(ctx *validators.Context, profile *validators.Infer
 				name, _, _ := unstructured.NestedString(lMap, "name")
 				attached, _, _ := unstructured.NestedInt64(lMap, "attachedRoutes")
 				report.AttachedHTTPRoutes += int(attached)
+				if listenerProgrammed(lMap) {
+					report.ProgrammedListeners++
+				}
 				slog.Info("gateway listener status", "listener", name, "attachedRoutes", attached)
 			}
 		}
 	}
+	addresses, _, _ := unstructured.NestedSlice(gw.Object, "status", "addresses")
+	report.StatusAddresses = len(addresses)
 
 	// 2. HTTPRoute discovery (informational): find routes attached to the Gateway.
 	httpRouteList, listErr := dynClient.Resource(httpRouteGVR).Namespace("").List(
@@ -517,7 +523,7 @@ func validateGatewayDataPlane(ctx *validators.Context, profile *validators.Infer
 
 	// 3. Data-plane readiness (hard requirement).
 	if profile.Probe == validators.GatewayProbeGatewayAddress {
-		if addrErr := validateGatewayAddressDataPlane(gw, profile, report); addrErr != nil {
+		if addrErr := validateGatewayAddressDataPlane(gw, profile); addrErr != nil {
 			return nil, addrErr
 		}
 		return report, nil
@@ -566,7 +572,11 @@ func validateGatewayDataPlane(ctx *validators.Context, profile *validators.Infer
 // one listener and one status address, and no listener may be explicitly
 // not programmed. A listener that reports no Programmed condition at all is
 // tolerated, since not every implementation publishes per-listener conditions.
-func validateGatewayAddressDataPlane(gw *unstructured.Unstructured, profile *validators.InferenceGatewayProfile, report *gatewayDataPlaneReport) error {
+// validateGatewayAddressDataPlane is the hard requirement for a data plane
+// observed through the Gateway object: at least one listener in status, none
+// explicitly unprogrammed, and at least one status address. The counts the
+// report carries are read by the caller for both probes.
+func validateGatewayAddressDataPlane(gw *unstructured.Unstructured, profile *validators.InferenceGatewayProfile) error {
 	listeners, _, _ := unstructured.NestedSlice(gw.Object, "status", "listeners")
 	if len(listeners) == 0 {
 		return errors.New(errors.ErrCodeInternal,
@@ -586,26 +596,39 @@ func validateGatewayAddressDataPlane(gw *unstructured.Unstructured, profile *val
 			}
 			typ, _, _ := unstructured.NestedString(cMap, "type")
 			status, _, _ := unstructured.NestedString(cMap, "status")
-			if typ != "Programmed" {
-				continue
-			}
-			if status != conditionStatusTrue {
+			if typ == "Programmed" && status != conditionStatusTrue {
 				reason, _, _ := unstructured.NestedString(cMap, "reason")
 				return errors.New(errors.ErrCodeInternal,
 					fmt.Sprintf("Gateway %s/%s listener %q is not programmed: status=%s reason=%s",
 						profile.Namespace, profile.GatewayName, name, status, reason))
 			}
-			report.ProgrammedListeners++
 		}
 	}
 	addresses, _, _ := unstructured.NestedSlice(gw.Object, "status", "addresses")
-	report.StatusAddresses = len(addresses)
-	if report.StatusAddresses == 0 {
+	if len(addresses) == 0 {
 		return errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("Gateway %s/%s reports no status.addresses: the %s data plane has not been assigned an address",
 				profile.Namespace, profile.GatewayName, profile.Component))
 	}
 	return nil
+}
+
+// listenerProgrammed reports whether a status.listeners entry carries a
+// Programmed=True condition.
+func listenerProgrammed(listener map[string]any) bool {
+	conds, _, _ := unstructured.NestedSlice(listener, "conditions")
+	for _, c := range conds {
+		cMap, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		typ, _, _ := unstructured.NestedString(cMap, "type")
+		status, _, _ := unstructured.NestedString(cMap, "status")
+		if typ == "Programmed" && status == conditionStatusTrue {
+			return true
+		}
+	}
+	return false
 }
 
 // lookupError keeps a missing object apart from a failed read: RBAC denial or
