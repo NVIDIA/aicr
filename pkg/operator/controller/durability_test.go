@@ -119,20 +119,8 @@ func TestRolloutRacingCreatorsMakeOne(t *testing.T) {
 	b.Now = clk.Now
 	clk.now = time.Now().Add(2 * time.Second)
 
-	var wg sync.WaitGroup
-	var failures atomic.Int32
-	for _, r := range []*RolloutReconciler{a, b, a, b} {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if _, err := r.Reconcile(ctx, request); err != nil && !strings.Contains(err.Error(), "conflict") {
-				failures.Add(1)
-			}
-		}()
-	}
-	wg.Wait()
-	if failures.Load() != 0 {
-		t.Fatalf("%d reconciles failed", failures.Load())
+	if errs := raceReconciles(ctx, a, b, a, b); len(errs) != 0 {
+		t.Fatalf("%d reconciles failed: %v", len(errs), errs)
 	}
 	if n := len(rolloutsTo(t, ctx, digest)); n != 1 {
 		t.Fatalf("racing creators made %d rollouts", n)
@@ -151,6 +139,59 @@ func TestRolloutRacingCreatorsMakeOne(t *testing.T) {
 	if n := len(rolloutsTo(t, ctx, digest)); n != 1 {
 		t.Fatalf("a stale creator made %d rollouts", n)
 	}
+}
+
+// Controllers that start after the rollout exists race to advance it, and a
+// racer that loses the status write gets an optimistic-lock conflict, not a
+// failure.
+func TestRolloutLateRacersOnlyConflict(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, stabilized)
+	digest := putPlan(t, ctx, rt, "50m")
+	resolved(t, ctx, digest)
+	engine := newEngine()
+	a, clk := newRollout(t, engine, false)
+	b, _ := newRollout(t, engine, false)
+	b.Now = clk.Now
+	clk.now = time.Now().Add(2 * time.Second)
+	reconcileRollout(t, ctx, a)
+	if ro := rolloutsTo(t, ctx, digest); len(ro) != 1 || ro[0].Status.ObservedGeneration != 0 {
+		t.Fatalf("setup must leave one rollout with unwritten status for the racers, got %d rollouts", len(ro))
+	}
+
+	if errs := raceReconciles(ctx, a, b, a, b); len(errs) != 0 {
+		t.Fatalf("%d reconciles failed: %v", len(errs), errs)
+	}
+	ro := rolloutsTo(t, ctx, digest)
+	if len(ro) != 1 {
+		t.Fatalf("late racers made %d rollouts", len(ro))
+	}
+	if ro[0].Status.ObservedGeneration != ro[0].Generation {
+		t.Fatalf("no racer saved status: observedGeneration %d, generation %d", ro[0].Status.ObservedGeneration, ro[0].Generation)
+	}
+}
+
+// raceReconciles reconciles with every r concurrently and returns the errors
+// other than a lost write race, which concurrent controllers are expected to hit.
+func raceReconciles(ctx context.Context, rs ...*RolloutReconciler) []error {
+	var (
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		errs []error
+	)
+	for _, r := range rs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := r.Reconcile(ctx, request); err != nil && !apierrors.IsConflict(err) {
+				mu.Lock()
+				errs = append(errs, err)
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	return errs
 }
 
 // Dropping all status (a restore) is reproduced by the next reconcile: the
