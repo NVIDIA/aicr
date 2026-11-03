@@ -155,12 +155,19 @@ func TestRolloutLateRacersOnlyConflict(t *testing.T) {
 	b.Now = clk.Now
 	clk.now = time.Now().Add(2 * time.Second)
 	reconcileRollout(t, ctx, a)
+	if ro := rolloutsTo(t, ctx, digest); len(ro) != 1 || ro[0].Status.ObservedGeneration != 0 {
+		t.Fatalf("setup must leave one rollout with unwritten status for the racers, got %d rollouts", len(ro))
+	}
 
 	if errs := raceReconciles(ctx, a, b, a, b); len(errs) != 0 {
 		t.Fatalf("%d reconciles failed: %v", len(errs), errs)
 	}
-	if n := len(rolloutsTo(t, ctx, digest)); n != 1 {
-		t.Fatalf("late racers made %d rollouts", n)
+	ro := rolloutsTo(t, ctx, digest)
+	if len(ro) != 1 {
+		t.Fatalf("late racers made %d rollouts", len(ro))
+	}
+	if ro[0].Status.ObservedGeneration != ro[0].Generation {
+		t.Fatalf("no racer saved status: observedGeneration %d, generation %d", ro[0].Status.ObservedGeneration, ro[0].Generation)
 	}
 }
 
