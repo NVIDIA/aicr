@@ -49,7 +49,9 @@ install() {
   docker_host="$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)"
   empty="$(mktemp -d "${work}/docker.XXXXXX")"
   echo '{}' > "${empty}/config.json"
-  DOCKER_HOST="${DOCKER_HOST:-${docker_host}}" DOCKER_CONFIG="${empty}" KO_DOCKER_REPO=ko.local/aicr-operator \
+  # The skeleton's values set development settings, which only a build with
+  # the development opt-in accepts.
+  AICR_OPERATOR_DEVELOPMENT=true DOCKER_HOST="${DOCKER_HOST:-${docker_host}}" DOCKER_CONFIG="${empty}" KO_DOCKER_REPO=ko.local/aicr-operator \
     go run "github.com/google/ko@$(setting '.build_tools.ko')" build --bare --sbom=none --push=false --platform="linux/${arch}" --tags=skeleton ./cmd/aicr-operator
   DOCKER_HOST="${DOCKER_HOST:-${docker_host}}" DOCKER_CONFIG="${empty}" KO_DOCKER_REPO=ko.local/aicr-registry \
     go run "github.com/google/ko@$(setting '.build_tools.ko')" build --bare --sbom=none --push=false --platform="linux/${arch}" --tags=skeleton ./cmd/aicr-registry

@@ -76,10 +76,10 @@ func run(args []string) error {
 	ctrl.SetLogger(logr.FromSlogHandler(logger.Handler()))
 
 	logger.Info("starting aicr-operator",
-		"version", info.Version, "commit", info.Commit, "release", info.Release, "options", opts.String(),
-		"aicrVersion", cfg.AICRVersion, "aicrImage", cfg.AICRImage, "registry", cfg.RegistryRepository,
+		"version", info.Version, "commit", info.Commit, "release", info.Release, "development", info.Development,
+		"options", opts.String(), "aicrVersion", cfg.AICRVersion, "aicrImage", cfg.AICRImage, "registry", cfg.RegistryRepository,
 		"bypassApprovals", cfg.BypassApprovals)
-	if err := cfg.Validate(info.Release); err != nil {
+	if err := cfg.Validate(info.AcceptsDevelopment()); err != nil {
 		return err
 	}
 	if cfg.ValidationEnabled && os.Getenv("POD_NAME") == "" {

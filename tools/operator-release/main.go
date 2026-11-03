@@ -19,6 +19,7 @@
 //
 //	operator-release build   -dir dist/candidate -version v0.1.0-rc.1 -repository R -commit C -commit-date D -go-version G
 //	operator-release extract -dir dist/candidate -platform linux/amd64 -out bin
+//	operator-release refuses -dir dist/candidate
 //	operator-release push    -dir dist/candidate
 package main
 
@@ -44,13 +45,15 @@ func main() {
 
 func run(args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: operator-release build|extract|push [flags]")
+		return errors.New("usage: operator-release build|extract|refuses|push [flags]")
 	}
 	switch args[0] {
 	case "build":
 		return build(args[1:], out)
 	case "extract":
 		return extract(args[1:])
+	case "refuses":
+		return refuses(args[1:], out)
 	case "push":
 		return push(args[1:], out)
 	default:

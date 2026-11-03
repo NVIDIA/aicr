@@ -42,22 +42,30 @@ var releasePattern = regexp.MustCompile(`^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\
 
 // Info is the build identity in a form suitable for logs and metrics.
 type Info struct {
-	Version   string `json:"version"`
-	Commit    string `json:"commit"`
-	Date      string `json:"date"`
-	GoVersion string `json:"goVersion"`
-	Release   bool   `json:"release"`
+	Version     string `json:"version"`
+	Commit      string `json:"commit"`
+	Date        string `json:"date"`
+	GoVersion   string `json:"goVersion"`
+	Release     bool   `json:"release"`
+	Development bool   `json:"development"`
 }
 
 // Get returns the identity of the running binary.
 func Get() Info {
 	return Info{
-		Version:   Version,
-		Commit:    Commit,
-		Date:      Date,
-		GoVersion: runtime.Version(),
-		Release:   IsRelease(Version),
+		Version:     Version,
+		Commit:      Commit,
+		Date:        Date,
+		GoVersion:   runtime.Version(),
+		Release:     IsRelease(Version),
+		Development: Development,
 	}
+}
+
+// AcceptsDevelopment reports whether the build accepts development settings,
+// which requires Development without Release.
+func (i Info) AcceptsDevelopment() bool {
+	return i.Development && !i.Release
 }
 
 // IsRelease reports whether v is a version the release pipeline stamps.

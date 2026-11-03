@@ -146,8 +146,10 @@ func runsCandidate(ctx context.Context, t *testing.T, c *candidateManifest) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(logs), `"version":"`+c.Version+`"`) || !strings.Contains(string(logs), `"release":true`) {
-		t.Fatalf("the operator does not report release build %s", c.Version)
+	if !strings.Contains(string(logs), `"version":"`+c.Version+`"`) || !strings.Contains(string(logs), `"release":true`) ||
+		!strings.Contains(string(logs), `"development":false`) {
+
+		t.Fatalf("the operator does not report release build %s without the development opt-in", c.Version)
 	}
 	t.Logf("operator %s runs candidate %s (%s)", want, c.Version, c.Digest)
 }

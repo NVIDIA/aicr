@@ -90,7 +90,7 @@ validation:
   signingKey: ""                      # AICR >= v1.1.0: KMS key URI (awskms://, gcpkms://, azurekms://, hashivault://) that signs evidence; empty pushes it unsigned
   transparencyLog: true               # false passes --tlog-upload=false, keeping key signatures out of the public Rekor log
 development:
-  bypassApprovals: false              # development builds only; a release build refuses to start with it set
+  bypassApprovals: false              # only a development build starts with it set
   skipDiscovery: false                # development builds only: declared criteria, no node gates or snapshot
 ```
 
