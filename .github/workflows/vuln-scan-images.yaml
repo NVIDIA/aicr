@@ -308,7 +308,7 @@ jobs:
   # =============================================================================
 
   scan:
-    name: Scan (${{ matrix.image }})
+    name: Scan (${{ matrix.name || matrix.image }})
     # The two NVSentinel NCCL check images (matrix.large) need about 28 GiB
     # while grype catalogs them (#3249). A 16 GiB ubuntu-24.04 runner runs out
     # of memory and gets killed with a shutdown signal; linux-amd64-cpu16
@@ -471,6 +471,28 @@ jobs:
           # there to read; grype resolves the digest.
           - image: docker.io/library/busybox
             tag: 1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4
+          # The NVCRE certification workload images, from
+          # recipes/components/nvcre/workload-images.yaml (#3511). They are
+          # include-only: the two PyTorch entries share one image name, and an
+          # include that matches no listed image becomes a leg of its own
+          # instead of overwriting its sibling's tag. `name` keeps their result
+          # files apart. Large, because PyTorch images are tens of GiB.
+          # TestNVCREWorkloadImagesScanned fails if these drift from the file.
+          - image: nvcr.io/nvidia/pytorch
+            name: pytorch-25.08-py3
+            tag: 25.08-py3@sha256:ace9a848c0ae543317e3c4763b6b4248961c47902625abfe3c77a0fb931c50fb
+            closure: nvcre
+            large: true
+          - image: nvcr.io/nvidia/pytorch
+            name: pytorch-26.01-py3
+            tag: 26.01-py3@sha256:38ed2ecb2c16d10677006d73fb0a150855d6ec81db8fc66e800b5ae92741007e
+            closure: nvcre
+            large: true
+          - image: public.ecr.aws/hpc-cloud/nccl-tests
+            name: nccl-tests
+            tag: cuda12.8.1-efa1.43.2-ofiv1.16.3-ncclv2.27.7-1-testsv2.16.9@sha256:6cabd2c0c37bfa09921912919b747d3b804298966e28e301dbfefc5c7dd3bfe2
+            closure: nvcre
+            large: true
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -505,10 +527,12 @@ jobs:
         shell: bash
         env:
           IMAGE: ${{ matrix.image }}
+          LEG_NAME: ${{ matrix.name }}
         run: |
           set -euo pipefail
           JSON_FILE="${{ steps.scan.outputs.json }}"
-          SHORT_NAME="${IMAGE##*/}"
+          # matrix.name is set only where two legs share an image name.
+          SHORT_NAME="${LEG_NAME:-${IMAGE##*/}}"
           mkdir -p scan-results
           OUT="scan-results/${SHORT_NAME}.txt"
 
