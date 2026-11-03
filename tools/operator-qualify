@@ -23,12 +23,14 @@
 # rollouts as an approver. Create the cluster first with
 # `make operator-kind-up`.
 #
-# Usage: tools/operator-qualify [install|reinstall|upgrade|test]   (default: install, then test)
+# Usage: tools/operator-qualify [install|reinstall|upgrade|rollback|test]   (default: install, then test)
 #   install    Argo CD and the candidate in CANDIDATE_DIR (default dist/candidate)
 #   reinstall  the candidate in CANDIDATE_DIR again with the same values, as an
 #              administrator restores the chart's objects
 #   upgrade    the candidate in CANDIDATE_NEXT_DIR (default dist/candidate-next),
 #              as an operator upgrade; the suite runs it mid-rollout
+#   rollback   helm rollback to the newest revision that installed the
+#              candidate in CANDIDATE_DIR, as an operator downgrade
 #   test       the suite
 set -euo pipefail
 
@@ -91,6 +93,25 @@ install_candidate() {
   kubectl -n aicr-system rollout status deployment/aicr-operator --timeout=180s
 }
 
+# rollback_to_candidate rolls the operator release back with helm rollback to
+# the newest revision that installed candidate $1: a downgrade, as
+# docs/operator/lifecycle.md describes it, not a reinstall.
+rollback_to_candidate() {
+  local dir="$1" version revision aicr_version
+  version="$(yq -r '.version' "${dir}/candidate.json")"
+  revision="$(helm history aicr-operator --namespace aicr-system --output json |
+    jq -r --arg v "${version}" '[.[] | select(.app_version == $v)] | last | .revision // empty')"
+  if [[ -z "${revision}" ]]; then
+    echo "no revision of aicr-operator installed ${version}" >&2
+    return 1
+  fi
+  aicr_version="${AICR_E2E_VERSION:-$(yq -r '.aicr.version' "${dir}/candidate-values.yaml")}"
+  release_flags "${aicr_version}"
+  helm rollback aicr-operator "${revision}" --namespace aicr-system "${HELM_RELEASE_FLAGS[@]}" >/dev/null
+  kubectl -n aicr-system rollout status deployment/aicr-registry --timeout=180s
+  kubectl -n aicr-system rollout status deployment/aicr-operator --timeout=180s
+}
+
 # absolute resolves a candidate directory, which may be relative to the
 # repository root, for the suite.
 absolute() {
@@ -112,6 +133,7 @@ install)
   ;;
 reinstall) install_candidate "${candidate}" ;;
 upgrade) install_candidate "${next}" ;;
+rollback) rollback_to_candidate "${candidate}" ;;
 test) run_tests ;;
 # Sequential, not `install && run_tests`: errexit does not apply inside a
 # function that is part of an && list.
@@ -121,7 +143,7 @@ all)
   run_tests
   ;;
 *)
-  echo "usage: $0 [install|reinstall|upgrade|test]" >&2
+  echo "usage: $0 [install|reinstall|upgrade|rollback|test]" >&2
   exit 2
   ;;
 esac
