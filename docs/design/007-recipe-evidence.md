@@ -1353,8 +1353,8 @@ since become two unrelated implementations of every CNCF requirement:
   `aicr validate --phase conformance` and rendered to
   `evidence/<requirement>.md` by `pkg/evidence/cncf/renderer.go` when
   `--evidence-dir` is set. Nightly UAT runs these checks without
-  `--evidence-dir`; the renderer is exercised nightly only through the
-  attestation pipeline.
+  `--evidence-dir` and packages their CTRF results into recipe-evidence
+  attestations; it does not exercise CNCF Markdown rendering.
 - The bash collector `pkg/evidence/cncf/scripts/collect-evidence.sh`,
   embedded in the binary and run by `--cncf-submission`. That flag
   short-circuits validation, so the Go checks never run on a submission.
@@ -1421,14 +1421,18 @@ the other phases, not capacity, bound what can be always-on.
    `workload_sandboxing` appears from v1.37; the v1.38 graduations are
    readiness work until that schema is published. Unsupported versions
    are refused. Titles name capabilities, not vendors.
-6. **Fail closed on coverage.** A requirement is Implemented only when
-   every expected check is present and passed. Skipped, `other`,
-   missing, or capacity-starved deep checks leave it incomplete and fail
-   the submission run, recorded as an unmet test prerequisite rather than
-   a disproven capability. MUST-level N/A exists only for the conditional
-   `cluster_autoscaling`. The vendor metadata file is the only source of
-   that N/A justification; checks record observations only and never
-   assert nonapplicability.
+6. **Fail closed on coverage, scoped by level.** Any requirement
+   claimed Implemented, MUST or SHOULD, must have every expected check
+   present and passed. Skipped, `other`, missing, or capacity-starved
+   checks leave it incomplete, recorded as an unmet test prerequisite
+   rather than a disproven capability. An incomplete applicable MUST
+   fails the submission run. A SHOULD requirement may remain Not
+   Implemented without failing the run (for example
+   `workload_sandboxing` at v1.37, where a missing sandbox runtime
+   records Not Implemented). MUST-level N/A exists only for the
+   conditional `cluster_autoscaling`. The vendor metadata file is the
+   only source of that N/A justification; checks record observations
+   only and never assert nonapplicability.
 7. **AICR-named junit; the upstream suite is optional.** `junit.xml`
    carries AICR check names, referenced per requirement with explicit
    `file://...#<check>` fragments, which the upstream validator honors
