@@ -1505,10 +1505,10 @@ components:
     valueOverrideKeys:
       - runaicluster
       - runai
-    # The chart's crds/ carry the run.ai CRDs (RunaiConfig, Cluster, ...) and
-    # its templates render a Cluster CR of a kind those CRDs define; the
-    # bundled kai-scheduler subchart does the same with its
-    # GpuFractioningConfig. helm-diff's render pass on a fresh cluster cannot
+    # The chart's crds/ carry clusters.run.ai (RunaiConfig's CRD is applied by
+    # the runai-crd-upgrader hook, not shipped there) and its templates render
+    # a Cluster CR of that kind; the bundled kai-scheduler subchart does the
+    # same with its GpuFractioningConfig. helm-diff's render pass on a fresh cluster cannot
     # resolve the kinds. disableValidation: true on this release tells
     # helm-diff to skip the live-mapper check. See #914.
     hasSelfRefCRDs: true

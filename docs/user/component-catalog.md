@@ -51,7 +51,7 @@ Every component has a bundle class, `core` or `ops` ([ADR-018](https://github.co
 | **k8s-nim-operator** | `ops` | NVIDIA NIM Operator for managing NIM (NVIDIA Inference Microservices) deployments on Kubernetes. AICR installs the operator only — it creates no `NIMService` and no credentials; see [NIM workload credentials](#nim-workload-credentials). | [K8s NIM Operator](https://github.com/NVIDIA/k8s-nim-operator) |
 | **kueue** | `ops` | Kubernetes-native job queuing system. Manages quotas and admits jobs for batch and AI workloads. Ships default quota CRs (ResourceFlavor `default-flavor`, ClusterQueue `cluster-queue`, LocalQueue `default` in the `default` namespace) so admission works out of the box — tune the ClusterQueue's nominal quotas to cluster capacity to enact real limits. Managed frameworks are pinned to batch/job, JobSet, and TrainJob. Upgrade note: the quota CRs are helm post-install/post-upgrade hooks with a delete-and-recreate policy — quiesce queues before upgrading the bundle (Kueue's resource-in-use finalizer on an active ClusterQueue/ResourceFlavor blocks the delete and can wedge the upgrade), and re-apply tuned quotas afterwards since upgrades reset them to the shipped defaults. Uninstalling leaves the hook-created CRs behind; delete them manually when removing Kueue. Overlays that override the component's `manifestFiles` (replacing the default quota CRs) must also override its health check — the shipped check asserts the default CR names above. The `platform=kueue` leaves (`h100-kind-training-kueue`, `h100-gke-cos-training-kueue`, `h100-eks-ubuntu-training-kueue`) do exactly that to enable topology-aware scheduling; see [Topology-aware scheduling](#topology-aware-scheduling-with-kueue-and-topograph). Upgrading from a 0.18.x bundle needs two checks first: see [Upgrade Notes](#kueue-018x-to-019x) below. | [Kueue](https://github.com/kubernetes-sigs/kueue) |
 | **kubeflow-trainer** | `ops` | Kubeflow Training Operator for distributed training jobs (PyTorch, etc.). Manages multi-node training job lifecycle with JobSet integration. | [Kubeflow Trainer](https://github.com/kubeflow/trainer) |
-| **runai-cluster** | `ops` | NVIDIA Run:ai cluster side (3.0, open source): the Run:ai operator, KAI Scheduler 0.18 with KAI Resource Management, Karta, and the agent and controllers that register the cluster with a Run:ai control plane you already run. Selected by `--platform runai`; its leaves turn off AICR's `kai-scheduler` because the chart bundles its own. The control plane URL, cluster UID and bootstrap token are per-cluster inputs set at bundle time. Preview. See [Run:ai cluster](#runai-cluster). | [Run:ai](https://github.com/dsx-ai-factory/run-ai) |
+| **runai-cluster** | `ops` | NVIDIA Run:ai cluster side (3.0, open source): the Run:ai operator, KAI Scheduler 0.18 with KAI Resource Management, Karta, and the agent and controllers that register the cluster with a Run:ai control plane you already run. Selected by `--platform runai`; its leaves turn off AICR's `kai-scheduler` because the chart bundles its own. The control plane URL and cluster UID are `--set` at bundle time; the bootstrap token is declared with `--dynamic` and written in at install time. Preview. See [Run:ai cluster](#runai-cluster). | [Run:ai](https://github.com/dsx-ai-factory/run-ai) |
 | **nvcre** | `ops` | NVIDIA Cluster Readiness Engine, a GPU cluster burn-in certification controller. Runs training and NCCL workloads, measures goodput and bandwidth. **Not installed by default.** Enabling it takes both a `valuesFile` and a Trainer source. See [Enabling NVCRE](#enabling-nvcre) for a fragment that resolves. With that values file referenced, `metrics.serviceMonitor.enabled` is **false** so install does not require prometheus-operator CRDs. Turn it on with `--set cre:metrics.serviceMonitor.enabled=true` only after those CRDs exist, and add `prometheus-operator-crds` to `dependencyRefs`. The chart has no manager `nodeSelector`. For hard placement, set `manager.affinity` in `recipes/components/nvcre/values.yaml` or a complete JSON object, for example `--set-json cre:manager.affinity='{"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":{"nodeSelectorTerms":[{"matchExpressions":[{"key":"nvidia.com/gpu.present","operator":"Exists"}]}]}}}'` (scalar `--set cre:manager.affinity=...` renders an invalid string). CLI aliases: `cre`, `cluster-readiness-engine`. Shipped EKS H100 training still uses the TrainJob NCCL check. Opt-in AICR validators drive CRE with `Certification` (create, wait, delete), not `WorkloadRun`. **Disconnected installs.** The certification workloads pull images the chart does not render, because the workload catalog is compiled into the manager binary. Mirror the set in `recipes/components/nvcre/workload-images.yaml`, regenerated with `make nvcre-closure`. Each image is listed by tag with the digest that tag resolved to when the file was generated, and `sourceCommit` records the upstream commit it was derived from. The workloads pull by tag, so the mirror has to serve each tag, and serving it at the recorded digest keeps the cluster on the bytes the file describes. That committed set is scoped, not universal. It resolves the catalog for `platform: aws`, `gpuArchitecture: h100`, and the two certification entries `communication/nccl-all-reduce` and `training/nemotron5-8b`. The NCCL image it names is an EFA build, so another platform or accelerator pulls a different set and mirroring this one leaves those images unmirrored. Derive the set you need instead of reusing this one, writing it somewhere other than the committed path, for example `go run ./tools/nvcre-closure -platform gcp -arch h100 -entries communication/nccl-all-reduce -out /tmp/nvcre-gcp.yaml`. The training path additionally needs Megatron-LM at pod start, and the clone recorded in the closure is its last resort. The init container uses an already-populated workspace if one is mounted, else copies from `/opt/megatron-lm` in the image, and only clones when neither is there. So it can run disconnected, but only once you have provided the source by one of those two routes. The NCCL path needs nothing beyond the mirrored images. | [Cluster Readiness Engine](https://github.com/NVIDIA/cluster-readiness-engine) |
 | **mariadb-operator-crds** | `ops` | Official MariaDB Operator CRDs. Declared in every Slurm recipe but installed only for `accounting.mode: aicr-provided`. | [MariaDB Operator](https://github.com/mariadb-operator/mariadb-operator) |
 | **mariadb-operator** | `ops` | Official MariaDB Operator controller, webhook, and certificate controller. AICR installs it only for `accounting.mode: aicr-provided`. | [MariaDB Operator](https://github.com/mariadb-operator/mariadb-operator) |
@@ -2409,20 +2409,45 @@ stores the values of every revision in the release Secrets
 (`sh.helm.release.v1.runai-cluster.v<N>` in the `runai` namespace), so the
 token stays readable there to anyone who can read Secrets in that namespace.
 Its two-hour expiry bounds the exposure; keep access to those Secrets as tight
-as access to the kubeconfig. With the URL or UID empty the chart renders
-without its registration hooks and the install never reaches the control
-plane. GitOps deployers that re-sync from the repository
-would reuse an expired token, so use the `helm` deployer for now.
+as access to the kubeconfig.
+
+The token is also visible in the cluster while the install runs. Each of the
+six registration hook Jobs passes it in plain text as a container argument
+(`--control-plane-bootstrap-token=...`), so anyone who can read Pods or Jobs
+in the `runai` namespace can read it, which is often a wider group than can
+read Secrets. The hooks run with `backoffLimit: 0` and are deleted only on
+success, so a failed hook leaves its Job, token included, until the next
+install or upgrade replaces it. Delete a failed hook Job once you have read
+its logs.
+
+The chart does not validate the three inputs. With the URL, UID or token
+empty it still renders every hook Job, with empty arguments, and this release
+does not reject such a bundle either, so pass all three; a bundle-time
+required-values check is planned
+([#3302](https://github.com/NVIDIA/aicr/issues/3302), Phase 1.4).
+
+Use the `helm` deployer for this component. The other deployers would store
+the filled token at rest, and the GitOps ones would also re-apply an expired
+token on every sync:
+
+| Deployer | Where the filled token would end up |
+|---|---|
+| `flux` | a plaintext ConfigMap manifest |
+| `fleet` | `cluster-values.yaml` committed to Git |
+| `terraform` | Terraform state |
+| `argocd-helm` | the Application's `helm.values` |
+
+(`argocd` rejects `--dynamic` outright.)
 
 **What the leaves change.** The chart bundles KAI Scheduler 0.18 through its
 `kai-resource-management` subchart and its operator owns the scheduler's
 configuration, so the Run:ai leaves set `overrides.enabled: false` on AICR's
 `kai-scheduler` (the two ship the same CRDs and PriorityClasses). On a cluster
 that already runs AICR's `kai-scheduler`, uninstall that release before
-installing a Run:ai bundle. The `gang-scheduling` conformance check submits to
-AICR's `default-queue`, so it reports Skip on these leaves until it learns the
-Run:ai scheduler. Run:ai's support matrix covers Kubernetes 1.35 through 1.37,
-and the leaves carry that floor.
+installing a Run:ai bundle. The `gang-scheduling` conformance check keys on
+AICR's `kai-scheduler`, which these leaves disable, so it reports Skip on them
+until it learns the Run:ai scheduler. Run:ai's support matrix covers Kubernetes
+1.35 through 1.37, and the leaves carry that floor.
 
 **Prerequisites the health check expects.** The check asserts the
 `RunaiConfig` the install creates from the control plane's configuration

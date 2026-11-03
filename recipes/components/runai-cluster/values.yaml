@@ -44,9 +44,16 @@
 # token included, and clearing the file does not purge that; the two-hour
 # expiry bounds the exposure, and access to Helm release Secrets in runai
 # should be as restricted as the kubeconfig. A fresh token is needed for every
-# install and upgrade. The chart renders the hook Jobs
-# that use it only when url and uid are both set; with either empty it
-# renders a control-plane-less skeleton and the install never registers.
+# install and upgrade. The chart does not validate these three values: with
+# any of them empty it still renders every registration hook Job, with empty
+# arguments, and AICR does not reject such a bundle yet (a bundle-time
+# required-values check is Phase 1.4 of #3302). Pass all three. The hook Jobs
+# carry the token in plain text as a container argument, so anyone who can
+# read Pods or Jobs in the runai namespace can read it, and a failed hook
+# (backoffLimit 0, deleted only on success) keeps that Job behind. The flux,
+# fleet, terraform and argocd-helm deployers would write the filled token at
+# rest (manifest, Git, state, Application spec); only the helm deployer is
+# supported for this credential.
 controlPlane:
   url: ""
   bootstrapToken: ""
@@ -64,8 +71,8 @@ openShift:
 # global.tolerations is the one toleration path the chart threads through
 # every pod it renders; global.nodeSelector reaches only the KAI subcharts, so
 # no nodeSelector path is mapped in the registry and system-node placement
-# stays an upstream ask. The bundler replaces this list with the cluster's
-# system-node taints when the recipe declares them.
+# stays an upstream ask. The bundler replaces this list when the bundle is
+# generated with --system-node-toleration.
 global:
   tolerations:
     - operator: Exists

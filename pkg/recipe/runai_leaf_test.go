@@ -17,7 +17,11 @@ package recipe
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 const runaiClusterComponent = "runai-cluster"
@@ -138,5 +142,9 @@ func TestRunaiPlatformNeedsAMatchingLeaf(t *testing.T) {
 	result, err := NewBuilder().BuildFromCriteria(context.Background(), c)
 	if err == nil {
 		t.Fatalf("aks/h100/ubuntu/training/runai resolved to %v; no Run:ai leaf exists for AKS", result.Metadata.AppliedOverlays)
+	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	if want := "no recipe provides platform 'runai'"; !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), want)
 	}
 }

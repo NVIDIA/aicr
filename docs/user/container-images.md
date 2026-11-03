@@ -78,8 +78,8 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
 | psmdb-operator | helm | psmdb-operator | 1.23.2 | 1 |
-| runai-cluster | helm | runai-cluster | 3.0.20 | 10 |
 | rdma-modules | manifest | — | — | 1 |
+| runai-cluster | helm | runai-cluster | 3.0.20 | 10 |
 | slinky-drainer | manifest | — | — | 1 |
 | slinky-drainer-crds | manifest | — | — | 0 |
 | slinky-slurm | helm | slurm | 1.2.2 | 5 |

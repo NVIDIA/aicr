@@ -543,6 +543,8 @@ node shape the resolved recipe targets. See
 
 > **`--service nvke` is Preview**, covering the `nvke / gb200 / ubuntu / training` and `nvke / gb200 / ubuntu / training / kubeflow` coordinates. See [NVKE GB200 Setup](../integrator/nvke-gb200-setup.md) for its prerequisites and known gaps.
 
+> **`--platform runai` is Preview**, covering the `eks / h100 / ubuntu / training / runai` and `gke / h100 / cos / training / runai` coordinates. See [Run:ai cluster](component-catalog.md#runai-cluster) for its per-cluster inputs and known gaps.
+
 **Examples:**
 ```shell
 # Basic recipe for Ubuntu on EKS with H100
