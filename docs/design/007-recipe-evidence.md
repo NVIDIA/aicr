@@ -1401,7 +1401,8 @@ the other phases, not capacity, bound what can be always-on.
    `pkg/evidence/cncf/collector.go` are deleted once a section-by-section
    comparison shows every requirement the script evidenced has a
    Go-produced counterpart.
-2. **Flags choose output, never behavior.** Implementing issue:
+2. **Flags do not change check execution or check verdicts.**
+   Implementing issue:
    [#3602](https://github.com/NVIDIA/aicr/issues/3602), packaging in
    [#3605](https://github.com/NVIDIA/aicr/issues/3605). For the same
    selected checks, verdicts are identical with and without any evidence
@@ -1414,9 +1415,10 @@ the other phases, not capacity, bound what can be always-on.
    longer bypasses validation. A submission run may still exit non-zero on
    incomplete requirement coverage or a failed artifact validation without
    rewriting any check verdict.
-3. **`--feature` and `evidence.cncf.features` are removed.** Implementing
-   issue: [#3602](https://github.com/NVIDIA/aicr/issues/3602). with the
-   script. `Client.CollectCNCFEvidence` keeps its signature as a wrapper
+3. **`--feature` and `evidence.cncf.features` are removed together with
+   the script.** Implementing issue:
+   [#3602](https://github.com/NVIDIA/aicr/issues/3602).
+   `Client.CollectCNCFEvidence` keeps its signature as a wrapper
    over run-plus-render; a non-empty `Features`, a nil recipe, or
    `NoCluster` is rejected with `ErrCodeInvalidRequest`. The argument
    contract is specified and tested in
