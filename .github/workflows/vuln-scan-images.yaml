@@ -44,7 +44,7 @@ env:
 jobs:
 
   # =============================================================================
-  # Build Ko Images (aicr, aicrd)
+  # Build Ko Images (aicr, aicrd, aicr-operator, aicr-registry)
   # =============================================================================
 
   build-ko:
@@ -99,6 +99,31 @@ jobs:
         run: |
           set -euo pipefail
           ko build ./cmd/aicrd \
+            --bare \
+            --platform=linux/amd64,linux/arm64 \
+            --image-label="org.opencontainers.image.revision=${{ github.sha }}" \
+            --tags="${SCAN_TAG}"
+
+      # The AICR Operator's images, built as the release builds them
+      # (tools/operator-candidate): .ko.yaml with no development build tag.
+      - name: Build and push aicr-operator
+        env:
+          KO_DOCKER_REPO: ghcr.io/nvidia/aicr-operator
+          AICR_OPERATOR_DEVELOPMENT: 'false'
+        run: |
+          set -euo pipefail
+          ko build ./cmd/aicr-operator \
+            --bare \
+            --platform=linux/amd64,linux/arm64 \
+            --image-label="org.opencontainers.image.revision=${{ github.sha }}" \
+            --tags="${SCAN_TAG}"
+
+      - name: Build and push aicr-registry
+        env:
+          KO_DOCKER_REPO: ghcr.io/nvidia/aicr-registry
+        run: |
+          set -euo pipefail
+          ko build ./cmd/aicr-registry \
             --bare \
             --platform=linux/amd64,linux/arm64 \
             --image-label="org.opencontainers.image.revision=${{ github.sha }}" \
@@ -334,6 +359,8 @@ jobs:
           - ghcr.io/nvidia/aicr-validators/conformance
           - ghcr.io/nvidia/aicr-validators/aiperf-bench
           - ghcr.io/nvidia/aicr-gate
+          - ghcr.io/nvidia/aicr-operator
+          - ghcr.io/nvidia/aicr-registry
           # AICR does not build the images below. They ship only with the
           # opt-in nvsentinel-object-monitor (#2612), nvsentinel-preflight
           # (#2610), nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor
