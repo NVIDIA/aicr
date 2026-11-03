@@ -184,16 +184,23 @@ func (c *Client) ReuseChart(ctx context.Context, r Repository, version, digest s
 }
 
 // pullChart returns the Helm chart m tagged version in src, and its metadata
-// meta. The manifest must carry exactly one chart layer, and that layer,
-// verified against its digest, must hold the chart src names at version.
+// meta. The manifest must carry a Helm config and exactly one chart layer,
+// both present and verified against their digests, and the layer must hold
+// the chart src names at version.
 func pullChart(ctx context.Context, repo *remote.Repository, src Repository, version string) (m *MirroredChart, meta *ChartMeta, err error) {
 	tag := (&ChartMeta{Version: version}).Tag()
 	desc, manifest, err := fetchManifest(ctx, repo, src, tag, maxManifestBytes)
 	if err != nil {
 		return nil, nil, err
 	}
-	if manifest.Config.MediaType != ChartConfigMediaType {
+	switch {
+	case manifest.Config.MediaType != ChartConfigMediaType:
 		return nil, nil, invalid("%s:%s is not a Helm chart (config %q)", src, tag, manifest.Config.MediaType)
+	case manifest.Config.Size > maxChartYAMLBytes:
+		return nil, nil, invalid("chart config of %s:%s is %d bytes, over %d", src, tag, manifest.Config.Size, maxChartYAMLBytes)
+	}
+	if _, err = content.FetchAll(ctx, repo, manifest.Config); err != nil {
+		return nil, nil, classify(err, fmt.Sprintf("fetch chart config %s@%s", src, manifest.Config.Digest))
 	}
 	var layer *ocispec.Descriptor
 	for i := range manifest.Layers {

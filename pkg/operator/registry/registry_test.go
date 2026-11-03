@@ -756,6 +756,7 @@ func TestPullChartRejects(t *testing.T) {
 		{"two chart layers", []ocispec.Descriptor{layer, layer}, []blob{configBlob, layerBlob}, nil, operrors.ErrCodeInvalidRequest},
 		{"oversized chart layer", []ocispec.Descriptor{oversized}, []blob{configBlob, layerBlob}, nil, operrors.ErrCodeInvalidRequest},
 		{"chart layer deleted", []ocispec.Descriptor{layer}, []blob{configBlob, layerBlob}, []ocispec.Descriptor{layer}, operrors.ErrCodeNotFound},
+		{"chart config deleted", []ocispec.Descriptor{layer}, []blob{configBlob, layerBlob}, []ocispec.Descriptor{config}, operrors.ErrCodeNotFound},
 	}
 	for i, tt := range tests {
 		r := repo.Child(fmt.Sprintf("charts/%d/demo", i))
