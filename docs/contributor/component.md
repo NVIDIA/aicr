@@ -397,7 +397,7 @@ pods depend on).
 
 ## Deployers
 
-AICR ships six output adapters in
+AICR ships seven output adapters in
 [`pkg/bundler/deployer/`](https://github.com/NVIDIA/aicr/tree/main/pkg/bundler/deployer):
 `helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `terraform`, `fleet`. Each calls
 `localformat.Write()` and then layers its own orchestration files

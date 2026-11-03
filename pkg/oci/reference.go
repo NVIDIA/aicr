@@ -17,6 +17,7 @@ package oci
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"path"
 	"strings"
@@ -149,7 +150,26 @@ func parseLayoutTarget(value string) (*Reference, error) {
 		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest,
 			"OCI layout target requires a directory: "+LayoutScheme+"<dir>[:tag]")
 	}
+	trimmed := strings.TrimRight(dir, `/\`)
+	if err := checkLayoutDirName(trimmed[strings.LastIndexAny(trimmed, `/\`)+1:]); err != nil {
+		return nil, err
+	}
 	return &Reference{IsLayout: true, LocalPath: dir, Tag: tag}, nil
+}
+
+// checkLayoutDirName rejects a layout directory name containing ':' or '@'.
+// Either one means the value most likely held a tag that failed to parse or a
+// digest, which the oras-style split would otherwise keep in the directory
+// name and write with the default tag.
+func checkLayoutDirName(name string) error {
+	if !strings.ContainsAny(name, ":@") {
+		return nil
+	}
+	return apperrors.New(apperrors.ErrCodeInvalidRequest,
+		fmt.Sprintf("OCI layout directory name %q must not contain ':' or '@': in %s<dir>[:tag], "+
+			"the text after the last ':' must be a valid OCI tag "+
+			"(up to 128 of [A-Za-z0-9_.-], not starting with '.' or '-'), "+
+			"and a digest (@sha256:...) is not accepted for a write target", name, LayoutScheme))
 }
 
 // String returns the full reference string.
@@ -284,6 +304,10 @@ type PackageAndPushResult struct {
 	Reference string
 	// StorePath is the path to the local OCI Image Layout directory.
 	StorePath string
+	// StoreInfo identifies the directory at StorePath as WriteLayout or
+	// WriteHelmChartLayout published it, so a caller can tell it from one
+	// put there afterward. It is nil for other operations.
+	StoreInfo fs.FileInfo
 }
 
 // PackageAndPush packages a directory as an OCI artifact and pushes it to a registry.

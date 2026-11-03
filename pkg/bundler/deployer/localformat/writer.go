@@ -175,6 +175,45 @@ func FilterEmptyPreManifests(
 	return filterEmptyPreManifests(ctx, components, preManifests)
 }
 
+// ReleaseNames returns the release names Write emits for opts, in folder
+// order, without touching the filesystem. Deployers that derive names from
+// them (Argo CD child Applications) validate before writing, so a rejected
+// bundle leaves no partial output. It renders pre-manifests to drop the ones
+// that inject no folder, so it takes a context.
+func ReleaseNames(ctx context.Context, opts Options) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, errors.WrapCtxErr(err, errors.ErrCodeTimeout, "release name planning canceled")
+	}
+	pre, err := filterEmptyPreManifests(ctx, opts.Components, opts.ComponentPreManifests)
+	if err != nil {
+		return nil, err
+	}
+	opts.ComponentPreManifests = pre
+	return opts.releaseNames(), nil
+}
+
+// releaseNames applies Write's folder emission rules. ComponentPreManifests
+// must already be filtered by filterEmptyPreManifests. A -post folder is
+// injected only for mixed components (helm repository + raw manifests);
+// manifest-only and kustomize primaries wrap their manifests in the primary.
+// The readiness gate applies to every component kind.
+func (opts *Options) releaseNames() []string {
+	names := make([]string, 0, len(opts.Components))
+	for _, c := range opts.Components {
+		if len(opts.ComponentPreManifests[c.Name]) > 0 {
+			names = append(names, c.Name+"-"+string(phasePre))
+		}
+		names = append(names, c.Name)
+		if c.Repository != "" && len(opts.ComponentPostManifests[c.Name]) > 0 {
+			names = append(names, c.Name+"-"+string(phasePost))
+		}
+		if len(opts.ComponentReadiness[c.Name]) > 0 {
+			names = append(names, c.Name+"-"+string(phaseReadiness))
+		}
+	}
+	return names
+}
+
 func filterEmptyPreManifests(
 	ctx context.Context,
 	components []Component,
@@ -329,34 +368,12 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 	opts.ComponentPreManifests = filteredPreManifests
 
 	// Fail fast if the layout's three-digit prefix can't accommodate the
-	// number of NNN-* folders this bundle will actually emit. Compute
-	// the count using the same pre/primary/post emission rules the main
-	// loop below applies — a worst-case 3x bound would reject valid
-	// 500-component bundles whose components emit only their primary
-	// folder. The deploy.sh template globs [0-9][0-9][0-9]-*/, so a
-	// 4-digit prefix would be silently skipped at install time.
-	folderCount := 0
-	for _, c := range opts.Components {
-		if len(opts.ComponentPreManifests[c.Name]) > 0 {
-			folderCount++ // <name>-pre
-		}
-		folderCount++ // primary
-		// Post-injection conditions mirror the per-component branch
-		// below: only meaningful for mixed components (helm repository +
-		// raw manifests), in both vendored and non-vendored mode (#1835).
-		// Manifest-only and kustomize primaries never inject a -post
-		// folder.
-		if c.Repository != "" && len(opts.ComponentPostManifests[c.Name]) > 0 {
-			folderCount++ // <name>-post
-		}
-		// Readiness gate folder applies to every component kind (it runs
-		// after the primary regardless of upstream/local/vendored), so it
-		// is not gated on Repository like the -post folder.
-		if len(opts.ComponentReadiness[c.Name]) > 0 {
-			folderCount++ // <name>-readiness
-		}
-	}
-	if folderCount > 999 {
+	// number of NNN-* folders this bundle will actually emit; a worst-case
+	// 3x bound would reject valid 500-component bundles whose components
+	// emit only their primary folder. The deploy.sh template globs
+	// [0-9][0-9][0-9]-*/, so a 4-digit prefix would be silently skipped at
+	// install time.
+	if folderCount := len(opts.releaseNames()); folderCount > 999 {
 		return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("too many emitted folders (%d) from %d components: NNN- folder prefix supports at most 999 entries",
 				folderCount, len(opts.Components)))

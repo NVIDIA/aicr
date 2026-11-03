@@ -61,9 +61,10 @@
     "registry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["repository", "auth"],
+      "required": ["mode", "repository", "auth", "inCluster"],
       "properties": {
-        "repository": {"type": "string", "pattern": "^oci://[^/]+/[^@:]*[^/@:]$"},
+        "mode": {"enum": ["inCluster", "external"]},
+        "repository": {"type": "string", "pattern": "^$|^oci://[^/]+/[^@:]*[^/@:]$"},
         "plainHTTP": {"type": "boolean"},
         "auth": {
           "type": "object",
@@ -73,6 +74,30 @@
             "provider": {"enum": ["aws", "static"]},
             "staticSecretRef": {"type": "string"},
             "repoCredsSecret": {"$ref": "#/definitions/dnsLabel"}
+          }
+        },
+        "inCluster": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["image", "clusterDomain", "storage", "resources", "repoServerLabels"],
+          "properties": {
+            "image": {"type": "string"},
+            "clusterDomain": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"},
+            "storage": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["size", "storageClassName"],
+              "properties": {
+                "size": {"type": "string", "minLength": 1},
+                "storageClassName": {"type": "string"}
+              }
+            },
+            "resources": {"type": "object"},
+            "repoServerLabels": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {"type": "string"}
+            }
           }
         }
       }

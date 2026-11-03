@@ -17,7 +17,7 @@ Caption: "Config complexity: manual errors, drift, version mismatches"
 Icon: Mixing bowl with ingredients
 Command: `aicr recipe --service eks --accelerator h100 --intent training --os ubuntu --platform kubeflow --output recipe.yaml`
 Visual: Environment criteria (service, accelerator, OS, platform) + an Intent toggle (Training / Inference) → a glowing recipe.yaml
-Callouts (three short pills): "Driver 580.173.02", "GPU Operator v26.7.1", "DRA enabled"
+Callouts (three short pills): "Driver 580.173.02", "GPU Operator v26.7.2", "DRA enabled"
 Caption: "Generate hardware-specific optimizations for workload intent"
 
 **Step 2 - BUNDLE**

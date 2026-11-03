@@ -22,9 +22,9 @@ a supported release.
 
 | Version | Status |
 |---------|--------|
-| `1.1.x` (latest released minor) | Supported: receives security fixes |
-| `1.0.x` (previous minor) | Supported: receives security fixes |
-| `< 1.0` | End-of-life: upgrade to a supported release |
+| `1.2.x` (latest released minor) | Supported: receives security fixes |
+| `1.1.x` (previous minor) | Supported: receives security fixes |
+| `< 1.1` | End-of-life: upgrade to a supported release |
 
 A fix lands on `main` first and ships in the next release cut from `main`.
 Reaching the previous minor also requires the manual path in
@@ -217,6 +217,50 @@ public. If a gate fails, the candidate tags stay available for diagnosis but
 are not promoted.
 
 ## How to Release
+
+### Release Checklist
+
+The release captain's path from `main` to GA. Examples use `v1.3.0`; substitute
+your release's tags. Post progress in a release thread as you go.
+
+1. **Check UAT on `main`** with the `aicr-uat-report` skill. Failures in
+   cluster bring-up or image builds are infra, not product signal; cover that
+   combination manually in step 3.
+2. **Cut an RC** (see [Release Candidates](#release-candidates)). Update local
+   `main` (`git pull origin main`) and check that `HEAD` matches `origin/main`,
+   since `make bump-rc` tags `HEAD`. Confirm every check on that commit passed;
+   there are several hundred, so list failures across all pages:
+   `gh api --paginate repos/NVIDIA/aicr/commits/<sha>/check-runs --jq '.check_runs[]|select(.conclusion!="success" and .conclusion!="skipped")|.name'`.
+   Then run `make bump-rc`, and wait for the tag's release run to succeed and
+   its release to be published before step 3.
+3. **Validate the RC.**
+   - UAT: the nightly batch tests `main` and stable releases, not RCs. Dispatch
+     the UAT Run workflow with `aicr_version` set to the RC tag, once per
+     reservation and intent the nightly batch covers (`nightly-intents` in
+     `infra/uat/reservations.yaml`); one dispatch runs one of each.
+   - Live clusters for what UAT misses (new services or accelerators, lanes
+     that are down): deploy the bundle, run `aicr validate` per intent, and
+     compare performance with the previous release.
+   - `--no-cluster` CLI checks for new features and repros of issues filed
+     against the RC.
+4. **Iterate.** Fix blockers on `main`, cut the next RC (see
+   [Release Candidates](#release-candidates)), re-validate what changed.
+5. **Draft the release notes** with the `aicr-release-notes` skill and review
+   them with another maintainer. Lead with new and updated recipes.
+6. **Promote** after a maintainer's go-ahead (see
+   [Promoting an RC to GA](#promoting-an-rc-to-ga)):
+   `git fetch origin --tags && make bump-promote TAG=v1.3.0-rc2`. Wait for the
+   GA release run to succeed and the release to be published (no longer a
+   draft) before steps 7 and 8; a re-run of the release step replaces a draft's
+   body.
+7. **Publish the notes** above the generated changelog in the GitHub UI, or
+   with `gh release edit v1.3.0 --notes-file <file>`. That flag replaces the
+   whole body, so the file must include the existing changelog after the
+   summary.
+8. **Announce** with the link, three or four highlights, and contributor
+   thanks (GitHub handles in public channels).
+9. **Finish the post-release steps** in
+   [What Goes Into a Release](#what-goes-into-a-release).
 
 ### Standard Release
 
@@ -416,27 +460,29 @@ diagnosis, and recovery.
 The [AICR Operator](docs/operator/index.md) ships at the release's version
 outside the image promotion above: `operator-candidate` builds it from the tag
 (`make operator-candidate`) and malware-scans the `kubectl-aicr` binaries,
-`operator-scan` scans the image on both architectures, and
+`operator-scan` scans the operator and in-cluster registry images on both
+architectures, and
 `operator-publish` runs only after the release integrity check. It publishes:
 
 | Artifact | Where |
 |----------|-------|
 | Operator image | `ghcr.io/nvidia/aicr-operator:vX.Y.Z`, with build provenance on the index and an SPDX SBOM attestation on each platform image, in the registry |
+| In-cluster registry image | `ghcr.io/nvidia/aicr-registry:vX.Y.Z`, built from `cmd/aicr-registry`, attested as the operator image is |
 | Helm chart | `oci://ghcr.io/nvidia/charts/aicr-operator`, version `X.Y.Z`, with build provenance in the registry |
 | `kubectl-aicr` | Release assets `kubectl-aicr-<os>-<arch>` for darwin and linux on amd64 and arm64, malware-scanned and attested |
 
-The chart defaults to the operator image by digest and to the AICR release the
-operator was qualified against (`operator:` in `.settings.yaml`).
+The chart defaults to the operator and registry images by digest and to the
+AICR release the operator was qualified against (`operator:` in `.settings.yaml`).
 `release-check` fails closed on the operator candidate and its scans, so neither
 the image aliases above nor the operator are published when they fail, and
 `publish` waits for `operator-publish`. Publishing the same candidate again is
 a no-op, so re-running the failed jobs converges; a tag that already names
 other content is refused. The operator image takes no `latest` alias.
 
-The first release that publishes the operator creates the `aicr-operator` and
-`charts/aicr-operator` packages. If GHCR creates them private, an organization
-administrator makes both public once, as for the other images, so users can
-pull and verify them anonymously.
+The first release that publishes each of the `aicr-operator`, `aicr-registry`
+and `charts/aicr-operator` packages creates it. If GHCR creates one private, an
+organization administrator makes it public once, as for the other images, so
+users can pull and verify it anonymously.
 
 The operator's attestations are generated in `on-tag.yaml` itself, not in the
 reusable `attest-images.yaml`, so they are SLSA Build Level 2. Verify them
@@ -469,9 +515,9 @@ Every release includes, for the AICR binaries and the seven images above:
   shows up on the PR rather than at tag time.
 
 The AICR Operator preview's artifacts carry less: Level 2 provenance on the
-image index, the chart and each `kubectl-aicr` binary, an SPDX SBOM attestation
-on each operator platform image, no OpenVEX, and no `aicr_checksums.txt` entry
-for the plugin, whose attestations bind its digests
+operator and registry image indexes, the chart and each `kubectl-aicr` binary,
+an SPDX SBOM attestation on each of their platform images, no OpenVEX, and no
+`aicr_checksums.txt` entry for the plugin, whose attestations bind its digests
 ([AICR Operator (preview)](#aicr-operator-preview)).
 
 ## Versioning
@@ -599,6 +645,8 @@ fi
 | Version alias conflict | Stop and verify the existing digest; the workflow intentionally refuses overwrite |
 | Draft identity or asset check fails | Inspect the exact-tag draft; correct the name/tag or remove only verified stale assets, then re-run failed jobs |
 | Need a full rebuild | Re-run all jobs only before public aliases move; this creates a new candidate tag |
+| `make bump-rc` skips an RC number or refuses an existing tag | It counts from the latest tag reachable from `HEAD` in your local clone. A local tag deleted on the remote makes it skip a number: delete it (`git tag -d <tag>`). An RC on the remote you have not fetched makes it pick a taken number and stop: run `git fetch origin --tags` and `git pull origin main`, since a tag on a newer commit is not reachable from an older `HEAD` |
+| `Publish Operator Artifacts` fails with `403 Forbidden` while downloading Go modules | Usually a transient Go module proxy error: re-run the failed job (`gh run rerun <run-id> --failed`). If it repeats, check the proxy access |
 
 ## Prerequisites
 

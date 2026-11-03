@@ -103,6 +103,9 @@ func layoutTarget(ref *Reference) (string, string, error) {
 		return "", "", apperrors.New(apperrors.ErrCodeInvalidRequest,
 			"OCI layout path must name a new directory: "+ref.LocalPath)
 	}
+	if nameErr := checkLayoutDirName(name); nameErr != nil {
+		return "", "", nameErr
+	}
 	parent, err := filepath.EvalSymlinks(filepath.Dir(abs))
 	if err != nil {
 		code := apperrors.ErrCodeInternal
@@ -202,5 +205,6 @@ func releaseLayout(
 		Size:      op.result.Size,
 		Reference: ref.String(),
 		StorePath: path,
+		StoreInfo: layout.childInfo,
 	}, nil
 }

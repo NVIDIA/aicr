@@ -73,9 +73,9 @@ minors are end-of-life and should be upgraded.
 
 | Version | Supported |
 |---------|-----------|
-| `1.1.x` (latest released minor) | ✅ Receives security fixes |
-| `1.0.x` (previous minor) | ✅ Receives security fixes |
-| `< 1.0` | ❌ End-of-life — upgrade to a supported release |
+| `1.2.x` (latest released minor) | ✅ Receives security fixes |
+| `1.1.x` (previous minor) | ✅ Receives security fixes |
+| `< 1.1` | ❌ End-of-life — upgrade to a supported release |
 
 Security fixes ship in a new patch or minor release cut from `main`, and reach
 the previous supported minor as a manually tagged hotfix. They are never
@@ -157,10 +157,11 @@ and how it is signed:
 | Bundle attestation | `aicr bundle` output | SLSA Build Provenance v1 | Sigstore keyless OIDC (opt-in `--attest`) |
 | Recipe / bundle validity | `aicr verify` trust levels | `verified` / `attested` / `unverified` / `unknown` | Checksums + Sigstore trusted root |
 
-**The AICR Operator preview carries less.** Its image
-(`ghcr.io/nvidia/aicr-operator`), chart (`oci://ghcr.io/nvidia/charts/aicr-operator`)
+**The AICR Operator preview carries less.** Its images
+(`ghcr.io/nvidia/aicr-operator` and the in-cluster registry,
+`ghcr.io/nvidia/aicr-registry`), chart (`oci://ghcr.io/nvidia/charts/aicr-operator`)
 and `kubectl-aicr` binaries carry SLSA Build Level 2 provenance generated in
-`on-tag.yaml` rather than the reusable workflow, the image carries an SPDX SBOM
+`on-tag.yaml` rather than the reusable workflow, the images carry an SPDX SBOM
 attestation per platform, and none carries OpenVEX. Verify them with
 `--signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml` and the release
 tag ([RELEASE.md](RELEASE.md#aicr-operator-preview)).

@@ -69,7 +69,7 @@ func admissionHolds(ctx context.Context, t *testing.T) {
 	app, err := argocd.Application(argocd.Target{Namespace: "argocd", Project: "aicr", RuntimeName: v1alpha1.SingletonName},
 		&plan.Document{RuntimeUID: "0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0", DesiredStateDigest: digest},
 		&plan.Release{ID: "admission-probe", Component: "admission-probe", Phase: plan.PhasePrimary, TargetNamespace: "monitoring",
-			Chart: plan.Chart{Source: plan.ChartMirrored, Repository: "oci://" + registryHost + "/aicr/cluster/charts/admission-probe", Digest: digest}},
+			Chart: plan.Chart{Source: plan.ChartMirrored, Repository: "oci://" + registryHost + "/aicr/charts/admission-probe", Digest: digest}},
 		[]byte(`{}`))
 	if err != nil {
 		t.Fatal(err)

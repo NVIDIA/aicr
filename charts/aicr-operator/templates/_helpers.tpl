@@ -46,9 +46,76 @@ limitations under the License.
 {{- fail (printf "validation.signingKey needs AICR v1.1.0 or later; aicr.version is %s" $.Values.aicr.version) -}}
 {{- end -}}
 {{- end -}}
+{{- if eq .Values.registry.mode "inCluster" -}}
+{{- if .Values.registry.repository -}}
+{{- fail "registry.repository is set but registry.mode is inCluster, the default: set registry.mode: external to keep using that registry" -}}
+{{- end -}}
+{{- if .Values.registry.auth.staticSecretRef -}}
+{{- fail "registry.auth.staticSecretRef applies to registry.mode: external only; the in-cluster registry's login is generated" -}}
+{{- end -}}
+{{- if not .Values.registry.inCluster.image -}}
+{{- fail "registry.mode inCluster needs registry.inCluster.image" -}}
+{{- end -}}
+{{- else -}}
+{{- if not .Values.registry.repository -}}
+{{- fail "registry.mode external needs registry.repository (oci://host/path)" -}}
+{{- end -}}
 {{- if and (eq .Values.registry.auth.provider "aws") .Values.registry.auth.staticSecretRef -}}
 {{- fail "registry.auth.staticSecretRef applies to the static provider only" -}}
 {{- end -}}
+{{- end -}}
+{{- /* The installed project names the registry the running plans were
+  mirrored to; values alone cannot tell an upgrade that drops them from one
+  that means to switch. */ -}}
+{{- with lookup "argoproj.io/v1alpha1" "AppProject" .Values.engine.namespace .Values.engine.project -}}
+{{- $installed := .spec.sourceRepos | default list -}}
+{{- $rendered := printf "%s/charts/*" (include "aicr-operator.registry" $) -}}
+{{- if and $installed (not (has $rendered $installed)) -}}
+{{- fail (printf "the installed %s AppProject admits charts from %s, but these values select %s: switching an installation's registry is not supported; set registry.mode and registry.repository to match it" $.Values.engine.project (first $installed) $rendered) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The in-cluster registry's Service host, fully qualified: a shorter name is
+tried against the pods' DNS search path first, where a namespace named "svc"
+could answer for it.
+*/}}
+{{- define "aicr-operator.registryHost" -}}
+aicr-registry.{{ .Release.Namespace }}.svc.{{ .Values.registry.inCluster.clusterDomain }}:5000
+{{- end -}}
+
+{{/* The runtime registry prefix the operator, Argo CD and the policies use. */}}
+{{- define "aicr-operator.registry" -}}
+{{- if eq .Values.registry.mode "inCluster" -}}
+oci://{{ include "aicr-operator.registryHost" . }}/aicr
+{{- else -}}
+{{ .Values.registry.repository }}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The docker config Secret the operator and pushing Jobs read: the chart's for
+the in-cluster registry, the administrator's for the static provider, none
+for aws or an anonymous registry.
+*/}}
+{{- define "aicr-operator.credentialsSecret" -}}
+{{- if eq .Values.registry.mode "inCluster" -}}
+aicr-registry-auth
+{{- else if eq .Values.registry.auth.provider "static" -}}
+{{ .Values.registry.auth.staticSecretRef }}
+{{- end -}}
+{{- end -}}
+
+{{/* "true" when the operator refreshes an ECR token into repo-creds. */}}
+{{- define "aicr-operator.ecr" -}}
+{{- and (eq .Values.registry.mode "external") (eq .Values.registry.auth.provider "aws") -}}
+{{- end -}}
+
+{{/* The registry's pod labels, for its Service and NetworkPolicy. */}}
+{{- define "aicr-operator.registrySelector" -}}
+app.kubernetes.io/name: aicr-registry
+app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "aicr-operator.labels" -}}

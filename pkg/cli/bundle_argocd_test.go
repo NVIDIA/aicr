@@ -113,6 +113,27 @@ func TestParseBundleCmdOptions_ArgoCDFlags(t *testing.T) {
 	}
 }
 
+// TestArgoCDFlagsHelpShowsNoDefault pins that --help renders no default for
+// the --argocd-* flags: each is unset unless given, and a rendered zero (an
+// explicit 0 limit disables retries, a 0 factor is rejected) would mislead.
+func TestArgoCDFlagsHelpShowsNoDefault(t *testing.T) {
+	byName := make(map[string]string)
+	for _, f := range bundleCmd().Flags {
+		byName[f.Names()[0]] = f.String()
+	}
+	for _, name := range argoCDFlags {
+		t.Run(name, func(t *testing.T) {
+			help, ok := byName[name]
+			if !ok {
+				t.Fatalf("bundle has no --%s flag", name)
+			}
+			if strings.Contains(help, "(default:") {
+				t.Errorf("--%s help renders a default: %q", name, help)
+			}
+		})
+	}
+}
+
 // TestParseBundleCmdOptions_ArgoCDPrecedence pins CLI-over-config precedence
 // across the two spellings. A setting given both ways within one source is
 // left for the bundler to reject; see TestCreateDeployer_ArgoCDSettings in
@@ -126,6 +147,54 @@ func TestParseBundleCmdOptions_ArgoCDPrecedence(t *testing.T) {
 		}
 		if err := opts.argoCD.Validate(); err != nil {
 			t.Errorf("layered settings rejected: %v", err)
+		}
+	})
+
+	t.Run("backoff durations are ordered after layering", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			config  string
+			flags   []string
+			wantErr bool
+		}{
+			{
+				name:    "flags alone",
+				flags:   []string{"--argocd-sync-retry-backoff-duration", "10m", "--argocd-sync-retry-backoff-max-duration", "1m"},
+				wantErr: true,
+			},
+			{
+				name:    "config alone",
+				config:  "            duration: 10m\n            maxDuration: 1m\n",
+				wantErr: true,
+			},
+			{
+				name:    "config duration, flag max",
+				config:  "            duration: 10m\n",
+				flags:   []string{"--argocd-sync-retry-backoff-max-duration", "1m"},
+				wantErr: true,
+			},
+			{
+				name:   "flag max repairs config",
+				config: "            duration: 10m\n            maxDuration: 1m\n",
+				flags:  []string{"--argocd-sync-retry-backoff-max-duration", "10m"},
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				deployment := ""
+				if tt.config != "" {
+					deployment = "      argocd:\n        syncRetry:\n          backoff:\n" + tt.config
+				}
+				args := append([]string{"--config", writeArgoCDConfig(t, deployment),
+					"--argocd-sync-retry-limit", "3"}, tt.flags...)
+				err := captureBundleOpts(t, args).argoCD.Validate()
+				if (err != nil) != tt.wantErr {
+					t.Fatalf("Validate() = %v, wantErr %v", err, tt.wantErr)
+				}
+				if err != nil && !strings.Contains(err.Error(), "must not be less than the backoff duration") {
+					t.Errorf("error = %v, want the duration ordering rejection", err)
+				}
+			})
 		}
 	})
 

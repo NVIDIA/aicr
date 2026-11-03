@@ -563,7 +563,7 @@ Generate deployment bundles from a recipe.
 | `argocd-sync-retry-limit` | int | _(unset)_ | `spec.syncPolicy.retry.limit` on every child Application. Unset leaves Argo CD's auto-sync default; `0` disables retries. Required by the backoff parameters. |
 | `argocd-sync-retry-backoff-duration` | string | _(Argo CD: `5s`)_ | Delay before the first sync retry, as a Go duration (`30s`). |
 | `argocd-sync-retry-backoff-factor` | int | _(Argo CD: `2`)_ | Multiplier applied to the retry delay after each failed sync (at least `1`). |
-| `argocd-sync-retry-backoff-max-duration` | string | _(Argo CD: `3m`)_ | Upper bound on the delay between sync retries, as a Go duration (`5m`). |
+| `argocd-sync-retry-backoff-max-duration` | string | _(Argo CD: `3m`)_ | Upper bound on the delay between sync retries, as a Go duration (`5m`); must not be less than `argocd-sync-retry-backoff-duration`. |
 | `attest` | bool | false | Return a cryptographically signed bundle. When `true`, the server signs the bundle as **itself** using its operator-configured signing identity; no signing key, token, or identity is ever taken from the request. Parsed with Go `strconv.ParseBool` semantics; a present-but-unparseable value is rejected with HTTP 400. Absent or `false` returns an unsigned bundle. If the server has no signing identity configured, `attest=true` is rejected with HTTP 400 (`Server is not configured for attestation`). See [Server-Side Signing](#server-side-signing) for setup. |
 
 **Request Body:**
@@ -648,6 +648,7 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `nfd` | Node Feature Discovery — labels nodes with hardware features; publishes per-node `NodeResourceTopology` CRDs on production GPU recipes |
 | `nfd-ocp` | Node Feature Discovery variant for OpenShift (OCP) |
 | `nfd-ocp-olm` | Node Feature Discovery for OpenShift via Operator Lifecycle Manager (OLM) |
+| `nktp` | NKTP, the NVKE Telemetry Pipeline: OpenTelemetry Operator and collectors; no stock recipe selects it yet |
 | `node-problem-detector` | Publishes node-level faults as Node Conditions for NVSentinel (opt-in) |
 | `nodewright-customizations` | Environment-specific node tuning profiles |
 | `nodewright-operator` | OS-level node tuning and kernel configuration |
@@ -660,6 +661,7 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `prometheus-adapter-ocp` | Prometheus Adapter variant for OpenShift (OCP) |
 | `prometheus-operator-crds` | CRDs for the prometheus-operator (`Alertmanager`, `Prometheus`, `ServiceMonitor`, etc.) |
 | `psmdb-operator` | Percona Operator for MongoDB, reconciling `nvsentinel-mongodb`; added only by the NVSentinel remediation step mixins |
+| `rdma-modules` | NodeWright package that loads the in-tree RDMA ULP kernel modules (NVKE overlays) |
 | `slinky-drainer` | NVSentinel slinky-drainer plugin; drains quarantined Slurm nodes through Slurm by reconciling `DrainRequest`s (opt-in `nvsentinel-slinky-drainer` mixin) |
 | `slinky-drainer-crds` | `drainrequests.nvsentinel.nvidia.com` CRD required by `node-drainer` and `slinky-drainer` (opt-in `nvsentinel-slinky-drainer` mixin) |
 | `slinky-slurm` | Slinky-managed Slurm cluster instance (Controller, LoginSet, NodeSet, RestApi); reconciled by `slinky-slurm-operator` |
@@ -667,6 +669,7 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `slinky-slurm-operator-crds` | CRDs for the SchedMD Slinky Slurm operator (`slinky.slurm.net`) |
 | `slinky-topograph` | Generates Slurm `topology.conf` from cloud topology APIs for topology-aware Slinky placement |
 | `slurm-accounting-mariadb` | Installation-managed MariaDB instance and Secret generation contract for Slurm accounting; installed only for AICR-provided Slurm accounting |
+| `sriov-ib-networks` | Per-rail SR-IOV InfiniBand networks for the Network Operator (NVKE GB200 overlay) |
 | `topograph` | Kubernetes-scoped Topograph; writes network-topology node labels for topology-aware Kueue scheduling (`platform=kueue` leaves) |
 
 **Examples:**

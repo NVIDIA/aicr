@@ -13,7 +13,7 @@ performance.
 | Profile | AICR recipe | Status |
 | --- | --- | --- |
 | H100 on EKS, Ubuntu GPU nodes, training on Kubeflow | `h100-eks-ubuntu-training-kubeflow` | Not qualified: not yet run on hardware |
-| H100 on GKE, Container-Optimized OS, training on Kubeflow | `h100-gke-cos-training-kubeflow` | Qualification in progress; not yet supported. Artifact Registry credentials need the `static` provider and a credential refresher you run |
+| H100 on GKE, Container-Optimized OS, training on Kubeflow | `h100-gke-cos-training-kubeflow` | Qualification in progress; not yet supported. Artifact Registry, instead of the in-cluster registry, needs the `static` provider and a credential refresher you run |
 | GB200 | — | Not claimed; a separate profile that never inherits H100 evidence |
 
 A release names the exact operator image and chart digests
@@ -27,7 +27,7 @@ it qualified, with the AICR image digest they were qualified against.
 | Kubernetes | 1.34 or later (the chart's `kubeVersion`) | The newest 1.34 patch and 1.37 |
 | Argo CD | v3.4.2 (Argo Helm chart 9.5.14), the release AICR's own CI pins | v3.4.2 |
 | Deployment engine | Argo CD; a Flux adapter follows | — |
-| Registry | ECR through EKS Pod Identity or IRSA (`aws`); any OCI registry with administrator-provided credentials (`static`) | An in-cluster registry with a password |
+| Registry | The chart's in-cluster registry, the default; ECR through EKS Pod Identity or IRSA (`aws`); any OCI registry with administrator-provided credentials (`static`) | The in-cluster registry |
 | Cluster shape | One homogeneous accelerator and OS profile per cluster, one `ClusterRuntime` | — |
 
 **AICR.** v1 surfaces are frozen until v2, so any v1 release runs. A v1

@@ -16,6 +16,8 @@ package oci
 
 import (
 	"context"
+	stderrors "errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,22 +39,31 @@ func TestParseOutputTargetLayout(t *testing.T) {
 		input   string
 		wantDir string
 		wantTag string
-		wantErr bool
+		wantErr string
 	}{
 		{name: "directory only", input: "oci-layout:./layout", wantDir: "./layout"},
 		{name: "directory and tag", input: "oci-layout:out:v1.2.3", wantDir: "out", wantTag: "v1.2.3"},
 		{name: "absolute directory and tag", input: "oci-layout:/tmp/out:1.0.0", wantDir: "/tmp/out", wantTag: "1.0.0"},
 		{name: "colon inside path is not a tag", input: "oci-layout:a:b/c", wantDir: "a:b/c"},
-		{name: "invalid tag stays in path", input: "oci-layout:out:bad tag", wantDir: "out:bad tag"},
-		{name: "empty", input: "oci-layout:", wantErr: true},
-		{name: "tag without directory", input: "oci-layout::v1", wantErr: true},
+		{name: "colon in a parent directory", input: "oci-layout:/tmp/a:b/out:v1", wantDir: "/tmp/a:b/out", wantTag: "v1"},
+		{name: "invalid tag", input: "oci-layout:out:bad tag", wantErr: "must not contain ':' or '@'"},
+		{name: "invalid tag with punctuation", input: "oci-layout:./l8:bad tag!", wantErr: "must not contain ':' or '@'"},
+		{name: "empty tag", input: "oci-layout:out:", wantErr: "must not contain ':' or '@'"},
+		{name: "digest", input: "oci-layout:./l9@sha256:abc", wantErr: "must not contain ':' or '@'"},
+		{name: "at sign without tag", input: "oci-layout:out@v1", wantErr: "must not contain ':' or '@'"},
+		{name: "invalid tag before trailing separator", input: "oci-layout:out:bad tag/", wantErr: "must not contain ':' or '@'"},
+		{name: "empty", input: "oci-layout:", wantErr: "requires a directory"},
+		{name: "tag without directory", input: "oci-layout::v1", wantErr: "requires a directory"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			ref, err := ParseOutputTarget(tt.input)
-			if tt.wantErr {
+			if tt.wantErr != "" {
 				errorstest.WantReportedCode(t, err, apperrors.ErrCodeInvalidRequest)
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("ParseOutputTarget(%q) error = %v, want it to contain %q", tt.input, err, tt.wantErr)
+				}
 				return
 			}
 			if err != nil {
@@ -160,6 +171,11 @@ func TestWriteLayoutMatchesPushedDigest(t *testing.T) {
 	if written.StorePath != resolvedPath(t, layoutDir) || written.Reference != "oci-layout:"+layoutDir+":v1.2.3" {
 		t.Fatalf("WriteLayout() = %+v", written)
 	}
+	if info, statErr := os.Lstat(layoutDir); statErr != nil || written.StoreInfo == nil ||
+		!os.SameFile(written.StoreInfo, info) {
+
+		t.Fatalf("WriteLayout() StoreInfo does not identify %s: stat error = %v", layoutDir, statErr)
+	}
 	assertLayoutPublishes(t, layoutDir, "v1.2.3", pushed.Digest, host)
 }
 
@@ -264,9 +280,10 @@ func TestWriteLayoutFailsClosed(t *testing.T) {
 	}
 }
 
-// TestOwnedLayoutReleaseAsRejectsLateTarget covers a target that appears
-// after WriteLayout's early check: the release fails closed and removes the
-// staged layout.
+// TestOwnedLayoutReleaseAsRejectsLateTarget covers an empty directory that
+// appears after WriteLayout's early check, which a plain rename would
+// replace: the release fails closed, leaves that directory alone, and removes
+// the staged layout.
 func TestOwnedLayoutReleaseAsRejectsLateTarget(t *testing.T) {
 	parent := t.TempDir()
 	layout, err := newOwnedLayout(context.Background(), parent)
@@ -281,8 +298,53 @@ func TestOwnedLayoutReleaseAsRejectsLateTarget(t *testing.T) {
 	if got := dirNames(t, parent); strings.Join(got, ",") != "layout" {
 		t.Fatalf("parent entries = %v, want only the pre-existing target", got)
 	}
+	if got := dirNames(t, filepath.Join(parent, "layout")); len(got) != 0 {
+		t.Fatalf("pre-existing target entries = %v, want it left empty", got)
+	}
 	if closeErr := layout.Close(); closeErr == nil {
 		t.Fatal("Close() after failed release returned nil, want the release error")
+	}
+}
+
+// TestRenameCheckThenMove covers the fallback that Linux reaches only on a
+// filesystem without RENAME_NOREPLACE.
+func TestRenameCheckThenMove(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing bool
+		wantErr  error
+	}{
+		{name: "absent target", existing: false},
+		{name: "existing empty directory", existing: true, wantErr: fs.ErrExist},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parent := t.TempDir()
+			if err := os.Mkdir(filepath.Join(parent, "stage"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if tt.existing {
+				if err := os.Mkdir(filepath.Join(parent, "target"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			root, err := os.OpenRoot(parent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = root.Close() }()
+			err = renameCheckThenMove(root, "stage", "target")
+			if !stderrors.Is(err, tt.wantErr) {
+				t.Fatalf("renameCheckThenMove() error = %v, want %v", err, tt.wantErr)
+			}
+			want := "target"
+			if tt.existing {
+				want = "stage,target"
+			}
+			if got := strings.Join(dirNames(t, parent), ","); got != want {
+				t.Fatalf("parent entries = %s, want %s", got, want)
+			}
+		})
 	}
 }
 
@@ -334,6 +396,8 @@ func TestCheckLayoutTarget(t *testing.T) {
 		{name: "parent is a file", ref: &Reference{IsLayout: true, LocalPath: filepath.Join(file, "new"), Tag: "v1"}, wantCode: apperrors.ErrCodeInvalidRequest},
 		{name: "symlinked parent", ref: &Reference{IsLayout: true, LocalPath: filepath.Join(link, "new"), Tag: "v1"}},
 		{name: "invalid tag", ref: &Reference{IsLayout: true, LocalPath: filepath.Join(parent, "new"), Tag: "bad tag"}, wantCode: apperrors.ErrCodeInvalidRequest},
+		{name: "colon in directory name", ref: &Reference{IsLayout: true, LocalPath: filepath.Join(parent, "new:bad"), Tag: "v1"}, wantCode: apperrors.ErrCodeInvalidRequest},
+		{name: "at sign in directory name", ref: &Reference{IsLayout: true, LocalPath: filepath.Join(parent, "new@sha256"), Tag: "abc"}, wantCode: apperrors.ErrCodeInvalidRequest},
 		{name: "nil reference", wantCode: apperrors.ErrCodeInvalidRequest},
 	}
 	for _, tt := range tests {

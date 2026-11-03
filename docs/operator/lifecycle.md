@@ -69,10 +69,11 @@ The supported order:
    validation namespaces their `managed-by=Helm` label back
    ([troubleshooting](troubleshooting.md)).
 3. **Optionally, remove what Helm keeps,** once nothing will adopt the stack
-   again: the operator, Job, discovery and validation namespaces, the
-   policies `aicr-operator-state` and `aicr-operator-approval` with their
-   bindings, and the CRDs. Delete the CRDs last; deleting a CRD deletes every
-   object of its kind.
+   again: the operator, Job, discovery and validation namespaces (the
+   operator namespace holds the in-cluster registry and its volume), the
+   Argo CD `repo-creds` Secret, the policies `aicr-operator-state` and
+   `aicr-operator-approval` with their bindings, and the CRDs. Delete the CRDs
+   last; deleting a CRD deletes every object of its kind.
 
 ### What `helm uninstall` keeps
 
@@ -82,17 +83,19 @@ The supported order:
 | Job, discovery, validation and component namespaces | Kept | The GPU stack runs in the component namespaces |
 | Operator namespace and its ConfigMaps (plans, recipes, values, snapshots, assessments) | Kept; Helm never deletes its release namespace | Provenance for a reinstall |
 | `aicr` AppProject | Kept | Every owned Application references it |
-| Argo CD `repo-creds` Secret (`aws` provider) | Kept | Argo CD keeps fetching charts until its token expires |
+| Argo CD `repo-creds` Secret (`aws` provider and the in-cluster registry) | Kept | Argo CD keeps fetching charts: with `aws` until its token expires |
+| The in-cluster registry: its Deployment, Service, ConfigMap, NetworkPolicy, login Secret and volume | Kept | It keeps serving the stack's charts to Argo CD, and a reinstall adopts it with the same content and login |
 | Policies `aicr-operator-state` and `aicr-operator-approval` and their bindings | Kept | Plans and rollouts stay protected while no operator runs |
 | `argocd-cm` keys an operator before engine policy `argocd.v2` applied | Kept | The current operator never touches `argocd-cm` ([Argo CD](argocd.md#comparison-exceptions-and-argocd-cm)) |
-| Operator Deployment, ServiceAccounts, roles and bindings | Deleted | |
+| Operator Deployment, ServiceAccounts, roles and bindings; the in-cluster registry's login copies in the operator, Job and validation namespaces | Deleted | |
 | Policies `aicr-operator-applications`, `aicr-operator-application-deletes`, `aicr-operator-jobs`, `aicr-operator-rollout-outcome` and `aicr-operator-runtime` | Deleted | They constrain the operator, which is gone |
 
-After uninstall, Argo CD keeps reconciling the last synced state. With the
-`aws` provider, nothing refreshes the token in `repo-creds`, so within 12 hours
-Argo CD can no longer fetch charts: comparisons fail with `ComparisonError`,
-and running workloads are unaffected. To keep the stack unmanaged for longer,
-replace the Secret's credentials with your own.
+After uninstall, Argo CD keeps reconciling the last synced state. The
+in-cluster registry keeps serving it until you delete the operator namespace.
+With the `aws` provider, nothing refreshes the token in `repo-creds`, so within
+12 hours Argo CD can no longer fetch charts: comparisons fail with
+`ComparisonError`, and running workloads are unaffected. To keep the stack
+unmanaged for longer, replace the Secret's credentials with your own.
 
 A reinstall with the same release name adopts the kept resources when they
 still match the chart.
@@ -117,7 +120,7 @@ by the old UID.
 | Snapshots | ConfigMaps `aicr-snapshot-*` in the operator namespace | Discovery's newest one, and each kept rollout's deployment snapshot, owned by the rollout and removed with it |
 | Rollouts | Cluster-scoped `RuntimeRollout` objects | Every unfinished rollout, the newest `Succeeded` one, and the ten most recent that ended |
 | AICR Jobs | The Job, discovery and validation namespaces | Deleted once read; failed Jobs until the inputs change, and at most 24 hours after finishing (seven days for a stalled stage's failed Jobs), even with no operator running |
-| Bundles, mirrored charts, evidence | Your registry: `bundles/`, `charts/`, `wrappers/`, `evidence/` under `registry.repository` | Never deleted by the operator; your registry's retention applies |
+| Bundles, mirrored charts, evidence | The runtime registry: `bundles/`, `charts/`, `wrappers/`, `evidence/` | Never deleted by the operator. The in-cluster registry deletes nothing either, and its volume is kept on uninstall; an external registry's retention applies |
 
 The operator-namespace ConfigMaps are caches. Losing them, even by deleting
 the namespace, loses provenance (the recipe and the AICR version a plan came

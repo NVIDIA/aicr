@@ -925,7 +925,8 @@ spec:
 
 * **The images.** `matchImageReferences` lists the images `attest-images.yaml`
   attests. A glob's `*` also matches `/`, so `ghcr.io/nvidia/aicr*` would take
-  in the AICR Operator preview image as well, which `on-tag.yaml` signs. The
+  in the AICR Operator preview images as well, `aicr-operator` and
+  `aicr-registry`, which `on-tag.yaml` signs. The
   globs match the reference as the Pod spec writes it:
   `ghcr.io:443/nvidia/aicr:v0.16.0` names the same image as the denied
   `ghcr.io/nvidia/aicr:v0.16.0`, but it matched no glob and was admitted
@@ -1083,9 +1084,11 @@ calls `attest-images.yaml` would pass this policy. Use the
 [Kyverno](#kyverno) policies, or check the repository before you deploy with
 `gh attestation verify --repo NVIDIA/aicr`.
 
-The `ghcr.io/nvidia/aicr**` glob also matches the AICR Operator preview image,
-`ghcr.io/nvidia/aicr-operator`, whose provenance is signed by `on-tag.yaml`, not
-`attest-images.yaml`, so this policy rejects the operator's pods. Label only
+The `ghcr.io/nvidia/aicr**` glob also matches the AICR Operator preview images,
+`ghcr.io/nvidia/aicr-operator` and its in-cluster registry
+`ghcr.io/nvidia/aicr-registry`, whose provenance is signed by `on-tag.yaml`, not
+`attest-images.yaml`, so this policy rejects the operator's and the registry's
+pods. Label only
 workload namespaces for enforcement and leave the operator's namespace
 (`aicr-system`) unlabeled, or narrow the glob to the images you run.
 
