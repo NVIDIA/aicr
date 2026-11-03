@@ -1749,7 +1749,8 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 		}
 		slog.Info("Applied HTTPRoute for gateway-epp routing",
 			"name", inferenceHTTPRouteName(), "gateway", templateData["INFERENCE_GATEWAY_NAMESPACE"]+"/"+templateData["INFERENCE_GATEWAY_NAME"])
-		if err := waitForHTTPRouteAccepted(ctx, config.namespace, inferenceHTTPRouteName(), defaults.InferenceRouteAcceptTimeout); err != nil {
+		if err := waitForHTTPRouteAccepted(ctx, config.namespace, inferenceHTTPRouteName(),
+			gatewayProfile.Namespace, gatewayProfile.GatewayName, defaults.InferenceRouteAcceptTimeout); err != nil {
 			return err
 		}
 	}
@@ -2595,8 +2596,12 @@ func inferenceGatewayProfile(ctx *validators.Context) (validators.InferenceGatew
 // without this check that surfaces minutes later as a readiness timeout with
 // no hint. A route still without an Accepted condition when the wait expires
 // is not treated as rejected: not every controller writes status promptly,
-// and the readiness probe still gates the benchmark.
-func waitForHTTPRouteAccepted(ctx *validators.Context, namespace, name string, timeout time.Duration) error {
+// and the readiness probe still gates the benchmark. Only the configured
+// gateway's parent entry counts, and only a condition observed at the route's
+// current generation: a retained namespace (AICR_INFERENCE_PERF_NO_CLEANUP
+// with a reused run ID) updates the route in place and keeps the previous
+// run's status until the Gateway reconciles.
+func waitForHTTPRouteAccepted(ctx *validators.Context, namespace, name, parentNamespace, parentName string, timeout time.Duration) error {
 	waitCtx, cancel := context.WithTimeout(ctx.Ctx, timeout)
 	defer cancel()
 	routes := ctx.DynamicClient.Resource(httpRouteGVR).Namespace(namespace)
@@ -2605,7 +2610,7 @@ func waitForHTTPRouteAccepted(ctx *validators.Context, namespace, name string, t
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to read the HTTPRoute after applying it", err)
 	}
-	if decided, acceptErr := httpRouteAccepted(existing); decided {
+	if decided, acceptErr := httpRouteAccepted(existing, parentNamespace, parentName); decided {
 		return acceptErr
 	}
 
@@ -2638,7 +2643,7 @@ func waitForHTTPRouteAccepted(ctx *validators.Context, namespace, name string, t
 				if getErr != nil {
 					return errors.Wrap(errors.ErrCodeInternal, "failed to re-read the HTTPRoute after the watch closed", getErr)
 				}
-				if decided, acceptErr := httpRouteAccepted(recheck); decided {
+				if decided, acceptErr := httpRouteAccepted(recheck, parentNamespace, parentName); decided {
 					return acceptErr
 				}
 				return undecided("watch closed")
@@ -2647,20 +2652,31 @@ func waitForHTTPRouteAccepted(ctx *validators.Context, namespace, name string, t
 			if !isRoute || route.GetName() != name {
 				continue
 			}
-			if decided, acceptErr := httpRouteAccepted(route); decided {
+			if decided, acceptErr := httpRouteAccepted(route, parentNamespace, parentName); decided {
 				return acceptErr
 			}
 		}
 	}
 }
 
-// httpRouteAccepted reads the Accepted condition across the route's parents.
-// decided is false while no parent reports a True or False status.
-func httpRouteAccepted(route *unstructured.Unstructured) (decided bool, err error) {
+// httpRouteAccepted reads the Accepted condition the configured gateway
+// reports for the route. decided is false while that parent reports no True
+// or False status at the route's current generation; other parents and
+// conditions observed at an earlier generation are ignored.
+func httpRouteAccepted(route *unstructured.Unstructured, parentNamespace, parentName string) (decided bool, err error) {
+	generation := route.GetGeneration()
 	parents, _, _ := unstructured.NestedSlice(route.Object, "status", "parents")
 	for _, p := range parents {
 		pMap, ok := p.(map[string]any)
 		if !ok {
+			continue
+		}
+		refName, _, _ := unstructured.NestedString(pMap, "parentRef", "name")
+		refNamespace, _, _ := unstructured.NestedString(pMap, "parentRef", "namespace")
+		if refNamespace == "" {
+			refNamespace = route.GetNamespace()
+		}
+		if refName != parentName || refNamespace != parentNamespace {
 			continue
 		}
 		conditions, _, _ := unstructured.NestedSlice(pMap, "conditions")
@@ -2671,8 +2687,13 @@ func httpRouteAccepted(route *unstructured.Unstructured) (decided bool, err erro
 			}
 			typ, _, _ := unstructured.NestedString(cMap, "type")
 			status, _, _ := unstructured.NestedString(cMap, "status")
+			observed, _, _ := unstructured.NestedInt64(cMap, "observedGeneration")
 			switch {
 			case typ != "Accepted":
+				continue
+			case observed != generation:
+				// Written for an earlier spec of this route; the current one
+				// has not been reconciled yet.
 				continue
 			case status == string(metav1.ConditionTrue):
 				return true, nil

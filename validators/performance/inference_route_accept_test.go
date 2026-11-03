@@ -36,20 +36,47 @@ import (
 const (
 	routeTestNamespace = "aicr-inference-perf-test"
 	routeTestName      = "aicr-inference-route"
+	routeTestGateway   = "inference-gateway"
+	routeTestGatewayNS = "edge-system"
 )
 
+// routeParentStatus is one status.parents entry as a controller writes it.
+func routeParentStatus(name, namespace, accepted, reason string, observedGeneration int64) map[string]any {
+	return map[string]any{
+		"parentRef": map[string]any{"name": name, "namespace": namespace},
+		"conditions": []any{map[string]any{
+			"type": "Accepted", "status": accepted, "reason": reason, "message": "listener policy",
+			"observedGeneration": observedGeneration,
+		}},
+	}
+}
+
+// httpRouteObject is a route at generation 1 whose configured gateway reports
+// accepted (or nothing when accepted is empty) at that generation.
 func httpRouteObject(accepted string, reason string) *unstructured.Unstructured {
-	route := &unstructured.Unstructured{Object: map[string]any{
+	route := httpRouteAt(1)
+	if accepted != "" {
+		route.Object["status"] = map[string]any{"parents": []any{
+			routeParentStatus(routeTestGateway, routeTestGatewayNS, accepted, reason, 1),
+		}}
+	}
+	return route
+}
+
+func httpRouteAt(generation int64) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "gateway.networking.k8s.io/v1",
 		"kind":       "HTTPRoute",
-		"metadata":   map[string]any{"name": routeTestName, "namespace": routeTestNamespace},
+		"metadata":   map[string]any{"name": routeTestName, "namespace": routeTestNamespace, "generation": generation},
 	}}
-	if accepted != "" {
-		route.Object["status"] = map[string]any{"parents": []any{map[string]any{
-			"parentRef":  map[string]any{"name": "inference-gateway", "namespace": "edge-system"},
-			"conditions": []any{map[string]any{"type": "Accepted", "status": accepted, "reason": reason, "message": "listener policy"}},
-		}}}
+}
+
+func withParents(route *unstructured.Unstructured, parents ...map[string]any) *unstructured.Unstructured {
+	entries := make([]any, 0, len(parents))
+	for _, p := range parents {
+		entries = append(entries, p)
 	}
+	route.Object["status"] = map[string]any{"parents": entries}
 	return route
 }
 
@@ -80,6 +107,36 @@ func TestWaitForHTTPRouteAccepted(t *testing.T) {
 		{name: "no condition before the wait expires proceeds", route: httpRouteObject("", "")},
 		{name: "unknown status is not a decision", route: httpRouteObject("Unknown", "Pending")},
 		{
+			// A retained namespace updates the route in place; the previous
+			// run's verdict is observed at an older generation and must not
+			// pass or fail the current one.
+			name: "stale rejection from an earlier generation is ignored",
+			route: withParents(httpRouteAt(2),
+				routeParentStatus(routeTestGateway, routeTestGatewayNS, "False", "NotAllowedByListeners", 1)),
+		},
+		{
+			name: "stale acceptance from an earlier generation is ignored",
+			route: withParents(httpRouteAt(2),
+				routeParentStatus(routeTestGateway, routeTestGatewayNS, "True", "Accepted", 1)),
+		},
+		{
+			name: "another parent's verdict is ignored",
+			route: withParents(httpRouteAt(1),
+				routeParentStatus("other-gateway", routeTestGatewayNS, "False", "NotAllowedByListeners", 1)),
+		},
+		{
+			name: "parentRef without a namespace defaults to the route's namespace",
+			route: withParents(httpRouteAt(1),
+				routeParentStatus(routeTestGateway, "", "False", "NotAllowedByListeners", 1)),
+		},
+		{
+			name: "current-generation rejection beside a stale acceptance is decisive",
+			route: withParents(httpRouteAt(2),
+				routeParentStatus(routeTestGateway, routeTestGatewayNS, "True", "Accepted", 1),
+				routeParentStatus(routeTestGateway, routeTestGatewayNS, "False", "NotAllowedByListeners", 2)),
+			wantErr: "NotAllowedByListeners", wantCode: errors.ErrCodeInvalidRequest,
+		},
+		{
 			name: "route missing after apply is a read failure", route: nil,
 			wantErr: "failed to read the HTTPRoute", wantCode: errors.ErrCodeInternal,
 		},
@@ -87,7 +144,7 @@ func TestWaitForHTTPRouteAccepted(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			vctx := &validators.Context{Ctx: context.Background(), DynamicClient: newRouteClient(t, tt.route)}
-			err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, 200*time.Millisecond)
+			err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, routeTestGatewayNS, routeTestGateway, 200*time.Millisecond)
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
@@ -122,7 +179,7 @@ func TestWaitForHTTPRouteAccepted_DecidedDuringWatch(t *testing.T) {
 				}
 			}()
 			vctx := &validators.Context{Ctx: context.Background(), DynamicClient: dyn}
-			err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, 5*time.Second)
+			err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, routeTestGatewayNS, routeTestGateway, 5*time.Second)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -134,7 +191,7 @@ func TestWaitForHTTPRouteAccepted_Canceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	vctx := &validators.Context{Ctx: ctx, DynamicClient: newRouteClient(t, httpRouteObject("", ""))}
-	err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, time.Second)
+	err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, routeTestGatewayNS, routeTestGateway, time.Second)
 	if err == nil {
 		t.Fatal("expected an error for a canceled context")
 	}
