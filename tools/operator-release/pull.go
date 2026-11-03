@@ -44,8 +44,8 @@ func pull(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("pull", flag.ContinueOnError)
 	chartRegistry := fs.String("chart-registry", "ghcr.io/nvidia/charts", "Registry path the chart is published under.")
 	chart := fs.String("chart", "aicr-operator", "Chart name.")
-	version := fs.String("version", "latest", "Chart version without the leading v, or latest: the newest stable release older than -below.")
-	below := fs.String("below", "", "With -version latest, the version the release must be older than: the candidate under test.")
+	version := fs.String("version", "latest", "Chart version without the leading v, or latest: the newest stable release, older than -below when set.")
+	below := fs.String("below", "", "With -version latest, a version the release must be older than, such as the release being built.")
 	dir := fs.String("dir", "dist/published", "Directory to write the release into; it must not exist or be empty.")
 	plainHTTP := fs.Bool("plain-http", false, "Pull over plain HTTP; test registries only.")
 	if err := fs.Parse(args); err != nil {
@@ -64,9 +64,6 @@ func pull(args []string, out io.Writer) error {
 	}
 	tag := *version
 	if tag == "latest" {
-		if *below == "" {
-			return errors.New("-version latest needs -below, the version under test")
-		}
 		var tags []string
 		if err = charts.Tags(ctx, "", func(page []string) error {
 			tags = append(tags, page...)
@@ -248,22 +245,30 @@ func pinnedByDigest(ref string) bool {
 }
 
 // latestStable returns the highest tag that is a full stable release
-// (X.Y.Z, no prerelease or build) older than below. Tags carry no leading v,
-// as Helm writes them; below may have one.
+// (X.Y.Z, no prerelease or build), older than below unless below is empty.
+// Tags carry no leading v, as Helm writes them; below may have one.
 func latestStable(tags []string, below string) (string, error) {
-	bound := "v" + strings.TrimPrefix(below, "v")
-	if !semver.IsValid(bound) {
-		return "", fmt.Errorf("%q is not a semantic version", below)
+	bound := ""
+	if below != "" {
+		bound = "v" + strings.TrimPrefix(below, "v")
+		if !semver.IsValid(bound) {
+			return "", fmt.Errorf("%q is not a semantic version", below)
+		}
 	}
 	best := ""
 	for _, t := range tags {
 		v := "v" + t
-		if !semver.IsValid(v) || semver.Canonical(v) != v || semver.Prerelease(v) != "" || semver.Compare(v, bound) >= 0 {
+		if !semver.IsValid(v) || semver.Canonical(v) != v || semver.Prerelease(v) != "" ||
+			bound != "" && semver.Compare(v, bound) >= 0 {
+
 			continue
 		}
 		if best == "" || semver.Compare(v, best) > 0 {
 			best = v
 		}
+	}
+	if best == "" && below == "" {
+		return "", errors.New("no stable release")
 	}
 	if best == "" {
 		return "", fmt.Errorf("no stable release below %s", below)

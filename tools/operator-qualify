@@ -23,7 +23,7 @@
 # rollouts as an approver. Create the cluster first with
 # `make operator-kind-up`.
 #
-# Usage: tools/operator-qualify [install|reinstall|upgrade|rollback|test]   (default: install, then test)
+# Usage: tools/operator-qualify [install|reinstall|upgrade|rollback|pull-published|test]   (default: install, then test)
 #   install    Argo CD and the candidate in CANDIDATE_DIR (default dist/candidate)
 #   reinstall  the candidate in CANDIDATE_DIR again with the same values, as an
 #              administrator restores the chart's objects
@@ -31,6 +31,9 @@
 #              as an operator upgrade; the suite runs it mid-rollout
 #   rollback   helm rollback to the newest revision that installed the
 #              candidate in CANDIDATE_DIR, as an operator downgrade
+#   pull-published
+#              the newest published release, attestations verified, into
+#              PUBLISHED_DIR as a candidate (make operator-qualify-published)
 #   test       the suite
 set -euo pipefail
 
@@ -112,6 +115,33 @@ rollback_to_candidate() {
   kubectl -n aicr-system rollout status deployment/aicr-operator --timeout=180s
 }
 
+# pull_published writes the newest published release into PUBLISHED_DIR
+# (default dist/published) in a candidate's layout, then verifies its chart's
+# and images' attestations as the install guide does. PUBLISHED_VERSION pins a
+# release; PUBLISHED_BELOW, set to the release being built, keeps the choice
+# older than it. Only the default directory is replaced; any other must be
+# empty or absent, which operator-release pull checks.
+pull_published() {
+  local dir="${PUBLISHED_DIR:-dist/published}" out chart_repo chart_digest image_ref registry_ref ref
+  local args=(pull -version "${PUBLISHED_VERSION:-latest}" -dir "${dir}")
+  if [[ -n "${PUBLISHED_BELOW:-}" ]]; then
+    args+=(-below "${PUBLISHED_BELOW}")
+  fi
+  if [[ "${dir}" == dist/published ]]; then
+    rm -rf -- dist/published
+  fi
+  out="$(go run ./tools/operator-release "${args[@]}")"
+  echo "${out}"
+  chart_repo="$(sed -n 's/^chart-repository=//p' <<<"${out}")"
+  chart_digest="$(sed -n 's/^chart-digest=//p' <<<"${out}")"
+  image_ref="$(sed -n 's/^image-ref=//p' <<<"${out}")"
+  registry_ref="$(sed -n 's/^registry-ref=//p' <<<"${out}")"
+  for ref in "oci://${chart_repo}@${chart_digest}" "oci://${image_ref}" "oci://${registry_ref}"; do
+    gh attestation verify "${ref}" --repo NVIDIA/aicr >/dev/null
+    echo "verified ${ref}"
+  done
+}
+
 # absolute resolves a candidate directory, which may be relative to the
 # repository root, for the suite.
 absolute() {
@@ -134,6 +164,7 @@ install)
 reinstall) install_candidate "${candidate}" ;;
 upgrade) install_candidate "${next}" ;;
 rollback) rollback_to_candidate "${candidate}" ;;
+pull-published) pull_published ;;
 test) run_tests ;;
 # Sequential, not `install && run_tests`: errexit does not apply inside a
 # function that is part of an && list.
@@ -143,7 +174,7 @@ all)
   run_tests
   ;;
 *)
-  echo "usage: $0 [install|reinstall|upgrade|rollback|test]" >&2
+  echo "usage: $0 [install|reinstall|upgrade|rollback|pull-published|test]" >&2
   exit 2
   ;;
 esac

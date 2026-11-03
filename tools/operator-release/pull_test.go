@@ -40,6 +40,7 @@ func TestLatestStable(t *testing.T) {
 		want    string
 		wantErr string
 	}{
+		{name: "no bound: the newest stable release", tags: tags, below: "", want: "1.10.0"},
 		{name: "newest stable below a later release", tags: tags, below: "1.10.0", want: "1.3.0"},
 		{name: "a prerelease bound excludes its own release", tags: tags, below: "1.3.0-rc1", want: "1.2.0"},
 		{name: "numeric, not lexical, order", tags: tags, below: "2.0.0", want: "1.10.0"},

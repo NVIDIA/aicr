@@ -1213,6 +1213,11 @@ operator-skeleton: ## Runs the operator with the pinned Argo CD on its kind clus
 operator-qualify: ## Runs the operator's fault-injection suite against dist/candidate, upgrading to dist/candidate-next
 	@./tools/operator-qualify
 
+.PHONY: operator-qualify-published
+operator-qualify-published: ## Installs the newest published operator release and runs the lifecycle scenarios upgrading to dist/candidate
+	@./tools/operator-qualify pull-published
+	@AICR_OPERATOR_QUALIFY_LIFECYCLE_ONLY=1 CANDIDATE_DIR="$${PUBLISHED_DIR:-dist/published}" CANDIDATE_NEXT_DIR=dist/candidate ./tools/operator-qualify
+
 # =============================================================================
 # Tilt Local Development
 # =============================================================================

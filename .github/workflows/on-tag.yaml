@@ -1042,6 +1042,76 @@ jobs:
         shell: bash
         run: rm -f "${RUNNER_TEMP}/dgxc-goauth"
 
+  # The lifecycle scenarios from the newest published release older than this
+  # tag, attestations verified, upgraded to this candidate, rolled back and
+  # uninstalled in the documented order (make operator-qualify-published).
+  # A failure blocks publishing, as ADR-027 requires of an operator gate.
+  operator-lifecycle:
+    name: Operator Lifecycle from the Published Release
+    runs-on: ubuntu-24.04
+    needs: [detect, operator-candidate]
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      attestations: read
+      id-token: write
+      packages: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up the kind cluster
+        uses: ./.github/actions/operator-kind
+        with:
+          kubernetes: newest
+
+      - name: Configure the DGXC Go proxy
+        uses: ./.github/actions/setup-dgxc-goproxy
+        with:
+          mode: enforced
+
+      - name: Assert the proxy is actually in front
+        shell: bash
+        run: |
+          set -euo pipefail
+          proxy="$(go env GOPROXY)"
+          expected="https://edge.urm.nvidia.com/artifactory/api/go/dgxc-go-virtual"
+          [ "${proxy}" = "${expected}" ] \
+            || { echo "::error::GOPROXY is '${proxy}', expected exactly '${expected}'"; exit 1; }
+          [ "$(go env GOSUMDB)" != off ] \
+            || { echo "::error::GOSUMDB=off; modules would not be verified against the transparency log"; exit 1; }
+
+      - name: Download the candidate
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: ${{ needs.operator-candidate.outputs.artifact }}
+          path: dist/candidate
+
+      - name: Qualify the upgrade from the published release
+        env:
+          OPERATOR_E2E_REQUIRED: '1'
+          OPERATOR_KIND_IMAGE_CACHE: ${{ runner.temp }}/kind-images
+          GH_TOKEN: ${{ github.token }}
+          PUBLISHED_BELOW: ${{ github.ref_name }}
+        run: make operator-qualify-published
+
+      - name: Operator logs
+        if: ${{ failure() || cancelled() }}
+        run: |
+          kubectl --kubeconfig .operator-e2e/kubeconfig -n aicr-system logs deployment/aicr-operator --tail=300 || true
+          kubectl --kubeconfig .operator-e2e/kubeconfig get clusterruntimes,runtimerollouts -o yaml || true
+
+      - name: Remove the proxy credential
+        if: always()
+        shell: bash
+        run: rm -f "${RUNNER_TEMP}/dgxc-goauth"
+
+      - name: Delete kind cluster
+        if: ${{ always() }}
+        run: make operator-kind-down
+
   operator-scan:
     name: Operator Vuln Scan (${{ matrix.platform.arch }})
     runs-on: ubuntu-24.04
@@ -1133,7 +1203,7 @@ jobs:
   operator-publish:
     name: Publish Operator Artifacts
     runs-on: ubuntu-24.04
-    needs: [detect, release-check, promote-images, operator-candidate, operator-scan, operator-reproducible]
+    needs: [detect, release-check, promote-images, operator-candidate, operator-scan, operator-reproducible, operator-lifecycle]
     timeout-minutes: 20
     outputs:
       digests: ${{ steps.digests.outputs.digests }}
@@ -1667,6 +1737,7 @@ jobs:
       - operator-candidate
       - operator-scan
       - operator-reproducible
+      - operator-lifecycle
       - operator-publish
       - operator-attest
       - publish
@@ -1692,6 +1763,7 @@ jobs:
           OPERATOR_CANDIDATE: ${{ needs.operator-candidate.result }}
           OPERATOR_SCAN: ${{ needs.operator-scan.result }}
           OPERATOR_REPRODUCIBLE: ${{ needs.operator-reproducible.result }}
+          OPERATOR_LIFECYCLE: ${{ needs.operator-lifecycle.result }}
           OPERATOR_PUBLISH: ${{ needs.operator-publish.result }}
           OPERATOR_ATTEST: ${{ needs.operator-attest.result }}
           PUBLISH: ${{ needs.publish.result }}
@@ -1728,6 +1800,7 @@ jobs:
             echo "| Operator Candidate | ${OPERATOR_CANDIDATE} |"
             echo "| Operator Vulnerability Scan | ${OPERATOR_SCAN} |"
             echo "| Operator Reproducibility | ${OPERATOR_REPRODUCIBLE} |"
+            echo "| Operator Lifecycle | ${OPERATOR_LIFECYCLE} |"
             echo "| Operator Publish | ${OPERATOR_PUBLISH} |"
             echo "| Operator Attestation | ${OPERATOR_ATTEST} |"
             echo "| Publish | ${PUBLISH} |"
