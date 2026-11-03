@@ -126,8 +126,8 @@ grep -q -- '--data uat-data' "${d}/aicr-calls" 2>/dev/null \
 
 d="${WORK}/remediation"; compose "${d}" nvsentinel-remediation "${WORK}/r.yaml"; rc=$?
 [[ "${rc}" == 0 ]] && pass "remediation composes and verifies" || { fail "remediation: rc=${rc}"; sed 's/^/    | /' "${d}/log" >&2; }
-[[ "$(yq -r '.spec.mixins[-2:] | join(",")' "${d}/uat-data/overlays/h100-eks-ubuntu-training.yaml" 2>/dev/null)" == nvsentinel-remediation,nvsentinel-health-events-analyzer ]] \
-    && pass "remediation brings the health-events-analyzer the bundle requires beside it" \
+[[ "$(yq -r '.spec.mixins[-3:] | join(",")' "${d}/uat-data/overlays/h100-eks-ubuntu-training.yaml" 2>/dev/null)" == nvsentinel-remediation,nvsentinel-health-events-analyzer,nvsentinel-node-validation ]] \
+    && pass "remediation brings the health-events-analyzer and node validation the bundle requires beside it" \
     || fail "remediation overlay mixins: $(yq -o=json '.spec.mixins' "${d}/uat-data/overlays/h100-eks-ubuntu-training.yaml" 2>/dev/null)"
 
 # A run asked to prove Stage 2 or 3 must not go green on Stage 1 alone.
@@ -171,6 +171,42 @@ assert_breaker "${WORK}/brk-missing" nvsentinel-quarantine ""; rc=$?
 
 assert_breaker "${WORK}/brk-unset" "" ""; rc=$?
 [[ "${rc}" == 0 ]] && pass "an unset knob skips the breaker check" || fail "unset knob: breaker check ran"
+
+# --- uat_nvsentinel_validated_release ------------------------------------
+# kubectl is stubbed: STUB_REASON is the node's uncordon-reason label,
+# STUB_REQUESTS the ValidationRequest list, and STUB_FAIL names the read
+# (node or requests) that errors.
+command -v jq >/dev/null 2>&1 || { echo "FAIL: jq is not on PATH; uat_nvsentinel_validated_release is a jq program" >&2; exit 1; }
+kubectl() {
+    case "$2" in
+        node) [[ "${STUB_FAIL:-}" == node ]] && return 1; printf '%s' "${STUB_REASON}" ;;
+        validationrequests.*) [[ "${STUB_FAIL:-}" == requests ]] && return 1; printf '%s' "${STUB_REQUESTS}" ;;
+        *) return 1 ;;
+    esac
+}
+# request <node> <creationTimestamp> <phase>
+request() { jq -cn --arg n "$1" --arg c "$2" --arg p "$3" '{spec: {nodes: [{name: $n}]}, metadata: {creationTimestamp: $c}, status: {phase: $p}}'; }
+requests() { jq -cs '{items: .}' <<<"$*"; }
+SINCE="2026-11-02T06:00:00Z"
+release_case() { # <desc> <want 0|1> <reason> <requests JSON> [failing read]
+    local got=0
+    STUB_REASON="$3" STUB_REQUESTS="$4" STUB_FAIL="${5:-}" uat_nvsentinel_validated_release gpu-1 "${SINCE}" || got=1
+    [[ "${got}" == "$2" ]] && pass "$1" || fail "$1: rc=${got}, want $2"
+}
+passed_after="$(request gpu-1 2026-11-02T06:20:00Z Succeeded)"
+release_case "a passing request created after injection with the label is a validated release" 0 \
+    ValidationSucceeded "$(requests "${passed_after}")"
+release_case "a release fault-quarantine made itself is not validated" 1 \
+    GPU-fatal-error-ruleset-removed "$(requests "${passed_after}")"
+release_case "the label without a passing request (a deleted failed one) is not validated" 1 \
+    ValidationSucceeded "$(requests "$(request gpu-1 2026-11-02T06:20:00Z Failed)")"
+release_case "a request from before the injection does not count" 1 \
+    ValidationSucceeded "$(requests "$(request gpu-1 2026-11-02T05:59:59Z Succeeded)")"
+release_case "another node's request does not count" 1 \
+    ValidationSucceeded "$(requests "$(request gpu-2 2026-11-02T06:20:00Z Succeeded)")"
+release_case "a failed node read fails" 1 ValidationSucceeded "$(requests "${passed_after}")" node
+release_case "a failed request list fails" 1 ValidationSucceeded "$(requests "${passed_after}")" requests
+unset -f kubectl
 
 if (( fails > 0 )); then
     echo "${fails} test(s) failed (${ran} attempted)" >&2

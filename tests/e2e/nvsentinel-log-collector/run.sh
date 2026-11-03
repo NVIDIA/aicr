@@ -18,8 +18,8 @@
 # =============================================================================
 #
 # Installs the remediation step with the log collector mixin, and the health
-# events analyzer that live remediation requires, through the bundle's own
-# install.sh on Kind, sends one synthetic GPU fault into
+# events analyzer and node validation that live remediation requires, through
+# the bundle's own install.sh on Kind, sends one synthetic GPU fault into
 # platform-connectors' socket, and checks that diagnostics are captured before
 # the repair:
 #
@@ -44,6 +44,14 @@
 #       so the AllowCompletion drain on Kind's one node finishes.
 #   fault-quarantine.circuitBreaker.enabled=false  on one node the first
 #       quarantine would trip it.
+#   lifecycle-manager.config.tests.dcgm-diag-test  a busybox stub, as in
+#       tests/e2e/nvsentinel-node-validation: Kind runs no DCGM, and a stubbed
+#       command is what lets CheckNVSentinelPostRemediationValidationCoherent
+#       skip its DCGM rule. readinessCriteria keeps only not-under-quarantine:
+#       a Kind node has no nvidia.com/gpu allocatable. The GPU reset this test
+#       requests is not an action the remediation step validates; if new-node
+#       validation runs the stub on the node fault-quarantine cordons,
+#       not-under-quarantine keeps the node cordoned.
 #   nvsentinel-mongodb at one member with smaller requests, so everything fits
 #       one runner node.
 #
@@ -74,6 +82,8 @@ KUBE_CONTEXT="kind-${CLUSTER_NAME}"
 NODE="${CLUSTER_NAME}-control-plane"
 
 GRPCURL_IMAGE="docker.io/fullstorydev/grpcurl:v1.9.3@sha256:085e183ca334eb4e81ca81ee12cbb2b2737505d1d77f5e33dabc5d066593d998"
+# The digest-pinned multi-arch busybox AICR already ships.
+BUSYBOX_IMAGE="docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
 DRAIN_SYSTEM_NAMESPACES='^(nvsentinel|kube-system|cert-manager|local-path-storage)$'
 GPU_UUID="GPU-00000000-0000-0000-0000-00000000e2e9"
 # A non-default copy of Kind's local-path class: a claim on it proves
@@ -138,8 +148,8 @@ build_binary() {
 }
 
 compose_bundle() {
-  msg "Composing a bundle with the nvsentinel-remediation, nvsentinel-health-events-analyzer and nvsentinel-log-collector mixins..."
-  local data_dir="${WORK}/data"
+  msg "Composing a bundle with the nvsentinel-remediation, nvsentinel-health-events-analyzer, nvsentinel-node-validation and nvsentinel-log-collector mixins..."
+  local data_dir="${WORK}/data" diag_stub readiness
   mkdir -p "${data_dir}/overlays"
   cat >"${data_dir}/registry.yaml" <<'REGISTRY_EOF'
 kind: ComponentRegistry
@@ -148,19 +158,25 @@ metadata:
   name: nvsentinel-lc-e2e-registry
 components: []
 REGISTRY_EOF
-  yq '.spec.mixins = ["nvsentinel-remediation", "nvsentinel-health-events-analyzer", "nvsentinel-log-collector"]' \
+  yq '.spec.mixins = ["nvsentinel-remediation", "nvsentinel-health-events-analyzer", "nvsentinel-node-validation", "nvsentinel-log-collector"]' \
     "${ROOT}/recipes/overlays/h100-kind-training.yaml" \
     >"${data_dir}/overlays/h100-kind-training.yaml"
 
   "${AICR_BIN}" recipe --service kind --accelerator h100 --intent training \
     --data "${data_dir}" --output "${WORK}/recipe.yaml" ||
     err "recipe generation failed"
+  diag_stub=$(jq -cn --arg image "${BUSYBOX_IMAGE}" '{image: $image, command: ["sh", "-c", "exit 0"]}')
+  readiness=$(jq -cn '[{
+    name: "not-under-quarantine",
+    expression: "!(has(node.metadata.annotations) && \"quarantineHealthEvent\" in node.metadata.annotations)"}]')
   "${AICR_BIN}" bundle -r "${WORK}/recipe.yaml" -o "${WORK}/bundle" \
     --storage-class "${STORAGE_CLASS}" \
     --set "nvsentinel:fault-remediation.logCollector.env.MOCK_MODE=true" \
     --set "nvsentinel:janitor-provider.csp.provider=kind" \
     --set "nvsentinel:node-drainer.systemNamespaces=${DRAIN_SYSTEM_NAMESPACES}" \
     --set "nvsentinel:fault-quarantine.circuitBreaker.enabled=false" \
+    --set-json "nvsentinel:lifecycle-manager.config.tests.dcgm-diag-test=${diag_stub}" \
+    --set-json "nvsentinel:lifecycle-manager.config.readinessCriteria=${readiness}" \
     --set "nvsentinelmongodb:unsafeFlags.replsetSize=true" \
     --set "nvsentinelmongodb:replsets.rs0.size=1" \
     --set "nvsentinelmongodb:replsets.rs0.resources.requests.cpu=250m" \

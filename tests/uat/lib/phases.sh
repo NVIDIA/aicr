@@ -443,8 +443,9 @@ UAT_NVSENTINEL_BREAKER_OFF="nvsentinel:fault-quarantine.circuitBreaker.enabled=f
 # overlay, so the faultinject phase can run Stage 2 (nvsentinel-quarantine) or
 # Stages 2 and 3 (nvsentinel-remediation) on real hardware (#2625). Unset is a
 # no-op: no shipped recipe composes either mixin. nvsentinel-remediation brings
-# nvsentinel-health-events-analyzer with it, because the bundle fails live
-# remediation without the analyzer.
+# nvsentinel-health-events-analyzer and nvsentinel-node-validation with it,
+# because the bundle fails live remediation without the analyzer, and without
+# the lifecycle-manager that validates a rebooted node before it is uncordoned.
 #
 # The leaf is replaced through a --data overlay of the same name, the way the
 # KWOK lane composes KWOK_MIXINS; the empty registry merges into the embedded
@@ -457,7 +458,7 @@ uat_compose_nvsentinel_mixin() {
   case "${mixin}" in
     "") return 0 ;;
     nvsentinel-quarantine) want=quarantine mixins="${mixin}" ;;
-    nvsentinel-remediation) want=remediation mixins="${mixin},nvsentinel-health-events-analyzer" ;;
+    nvsentinel-remediation) want=remediation mixins="${mixin},nvsentinel-health-events-analyzer,nvsentinel-node-validation" ;;
     *)
       echo "::error::UAT_NVSENTINEL_MIXIN='${mixin}' is not nvsentinel-quarantine or nvsentinel-remediation" >&2
       return 1

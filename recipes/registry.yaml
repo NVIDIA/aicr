@@ -710,6 +710,8 @@ components:
       - lifecycle-manager.config.schedulingGate.cordon.labelPrefix
       - lifecycle-manager.config.newNodeValidation.criteria
       - lifecycle-manager.config.newNodeValidation.newNodeTests
+      - fault-quarantine.validation.enabled
+      - fault-quarantine.validation.ruleSets
     # The in-cluster file server's ReadWriteOnce volume, which the
     # nvsentinel-log-collector mixin turns on (#2619).
     storageClassPaths:
@@ -828,6 +830,12 @@ components:
       # validation (#3088) that cannot run would hold a node cordoned or test
       # one already taking work. The rules are in the function's doc.
       - function: CheckNVSentinelNodeValidationCoherent
+        severity: warning
+      # Blocking, with a non-blocking note (release taints on a custom test
+      # Job template, which the bundle does not render): post-remediation
+      # validation (#3089) that would hold a repaired node cordoned or release
+      # it untested. The rules are in the function's doc.
+      - function: CheckNVSentinelPostRemediationValidationCoherent
         severity: warning
 
   # NVSentinel's remediation datastore, added only by the nvsentinel-observe,
