@@ -529,8 +529,14 @@ func (c *Client) CollectCNCFEvidence(ctx context.Context, rec *RecipeResult, opt
 	if policy != "" {
 		collectorOpts = append(collectorOpts, cncf.WithAllocationPolicy(policy))
 	}
-	if gatewayFound {
+	switch {
+	case gatewayFound:
 		collectorOpts = append(collectorOpts, cncf.WithInferenceGateway(gateway.GatewayName, gateway.Namespace, gateway.GatewayClass))
+	case rec != nil && cncf.FeatureSelected(opts.Features, cncf.FeatureInferenceGateway):
+		// The recipe declares no gateway: the section reports the
+		// prerequisite absent rather than discovering by name a Gateway
+		// the recipe does not ship.
+		collectorOpts = append(collectorOpts, cncf.WithNoInferenceGateway())
 	}
 	if err := cncf.NewCollector(dir, collectorOpts...).Run(ctx); err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "CNCF evidence collection failed")

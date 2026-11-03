@@ -170,10 +170,12 @@ type Collector struct {
 	allocationPolicy string
 
 	// inferenceGateway* carry the recipe-resolved inference gateway to the
-	// script; all empty means no recipe context.
+	// script; all empty means no recipe context. inferenceGatewayNone marks
+	// a recipe that declares no gateway, which is not the same as no recipe.
 	inferenceGatewayName      string
 	inferenceGatewayNamespace string
 	inferenceGatewayClass     string
+	inferenceGatewayNone      bool
 
 	// runSectionFn is overridable in tests. Defaults to c.runSection.
 	runSectionFn sectionRunner
@@ -240,6 +242,16 @@ func WithInferenceGateway(name, namespace, class string) CollectorOption {
 		c.inferenceGatewayName = name
 		c.inferenceGatewayNamespace = namespace
 		c.inferenceGatewayClass = class
+	}
+}
+
+// WithNoInferenceGateway records that the recipe declares no inference
+// gateway, threaded as AICR_INFERENCE_GATEWAY_NONE=true. The section then
+// reports the prerequisite absent, as the conformance check skips the same
+// recipe, instead of discovering by name a Gateway the recipe does not ship.
+func WithNoInferenceGateway() CollectorOption {
+	return func(c *Collector) {
+		c.inferenceGatewayNone = true
 	}
 }
 
@@ -427,11 +439,14 @@ func (c *Collector) runSection(ctx context.Context, scriptPath, scriptDir, secti
 	if c.allocationPolicy != "" {
 		cmd.Env = append(cmd.Env, "AICR_GPU_ALLOCATION_POLICY="+c.allocationPolicy)
 	}
-	if c.inferenceGatewayName != "" {
+	switch {
+	case c.inferenceGatewayName != "":
 		cmd.Env = append(cmd.Env,
 			"AICR_INFERENCE_GATEWAY_NAME="+c.inferenceGatewayName,
 			"AICR_INFERENCE_GATEWAY_NAMESPACE="+c.inferenceGatewayNamespace,
 			"AICR_INFERENCE_GATEWAY_CLASS="+c.inferenceGatewayClass)
+	case c.inferenceGatewayNone:
+		cmd.Env = append(cmd.Env, "AICR_INFERENCE_GATEWAY_NONE=true")
 	}
 
 	stdout := newBoundedBuffer(defaults.EvidenceMaxOutputBytes)

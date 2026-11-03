@@ -2444,6 +2444,15 @@ collect_gateway() {
     # conventional name, inference-gateway, and namespace and GatewayClass
     # follow from the object, so no implementation is assumed here.
     local gw_name gw_lines gw_err gw_status gw_count gw_ns gw_class
+    # A recipe that declares no inference gateway (AICR_INFERENCE_GATEWAY_NONE)
+    # is not a standalone run: nothing is discovered on its behalf, because a
+    # Gateway left over from another install is not evidence for this recipe.
+    if [ "${AICR_INFERENCE_GATEWAY_NONE:-}" = "true" ]; then
+        write_section_header "Inference API Gateway"
+        echo "**Result: SKIP (prerequisite absent)** — the recipe declares no inference gateway component." >> "${EVIDENCE_FILE}"
+        log_info "Inference gateway evidence collection skipped — the recipe declares no inference gateway."
+        return
+    fi
     gw_name="${AICR_INFERENCE_GATEWAY_NAME:-inference-gateway}"
     gw_err=$(mktemp)
     # The kubectl status is captured on the substitution itself; a pipeline

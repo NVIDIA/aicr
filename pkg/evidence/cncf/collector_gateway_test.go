@@ -55,6 +55,7 @@ func TestRunSectionThreadsInferenceGatewayEnv(t *testing.T) {
 	tests := []struct {
 		name    string
 		gateway [3]string
+		none    bool
 		ambient map[string]string
 		script  string
 	}{
@@ -63,16 +64,22 @@ func TestRunSectionThreadsInferenceGatewayEnv(t *testing.T) {
 			gateway: [3]string{"pool-vip", "f5-bnk", "f5-gateway-class"},
 			script: `[ "${AICR_INFERENCE_GATEWAY_NAME:-}" = "pool-vip" ] && ` +
 				`[ "${AICR_INFERENCE_GATEWAY_NAMESPACE:-}" = "f5-bnk" ] && ` +
-				`[ "${AICR_INFERENCE_GATEWAY_CLASS:-}" = "f5-gateway-class" ]`,
+				`[ "${AICR_INFERENCE_GATEWAY_CLASS:-}" = "f5-gateway-class" ] && ` +
+				`[ -z "${AICR_INFERENCE_GATEWAY_NONE:-}" ]`,
 		},
 		{
 			name:   "no profile leaves env unset",
-			script: `[ -z "${AICR_INFERENCE_GATEWAY_NAME:-}" ] && [ -z "${AICR_INFERENCE_GATEWAY_NAMESPACE:-}" ] && [ -z "${AICR_INFERENCE_GATEWAY_CLASS:-}" ]`,
+			script: `[ -z "${AICR_INFERENCE_GATEWAY_NAME:-}" ] && [ -z "${AICR_INFERENCE_GATEWAY_NAMESPACE:-}" ] && [ -z "${AICR_INFERENCE_GATEWAY_CLASS:-}" ] && [ -z "${AICR_INFERENCE_GATEWAY_NONE:-}" ]`,
+		},
+		{
+			name:   "recipe without a gateway marks the section",
+			none:   true,
+			script: `[ "${AICR_INFERENCE_GATEWAY_NONE:-}" = "true" ] && [ -z "${AICR_INFERENCE_GATEWAY_NAME:-}" ]`,
 		},
 		{
 			name:    "ambient variables stripped for standalone runs",
-			ambient: map[string]string{"AICR_INFERENCE_GATEWAY_NAME": "stale", "AICR_INFERENCE_GATEWAY_NAMESPACE": "stale-ns"},
-			script:  `[ -z "${AICR_INFERENCE_GATEWAY_NAME:-}" ] && [ -z "${AICR_INFERENCE_GATEWAY_NAMESPACE:-}" ]`,
+			ambient: map[string]string{"AICR_INFERENCE_GATEWAY_NAME": "stale", "AICR_INFERENCE_GATEWAY_NAMESPACE": "stale-ns", "AICR_INFERENCE_GATEWAY_NONE": "true"},
+			script:  `[ -z "${AICR_INFERENCE_GATEWAY_NAME:-}" ] && [ -z "${AICR_INFERENCE_GATEWAY_NAMESPACE:-}" ] && [ -z "${AICR_INFERENCE_GATEWAY_NONE:-}" ]`,
 		},
 		{
 			name:    "resolved profile overrides ambient variables",
@@ -95,6 +102,9 @@ func TestRunSectionThreadsInferenceGatewayEnv(t *testing.T) {
 			opts := []CollectorOption{}
 			if tt.gateway[0] != "" {
 				opts = append(opts, WithInferenceGateway(tt.gateway[0], tt.gateway[1], tt.gateway[2]))
+			}
+			if tt.none {
+				opts = append(opts, WithNoInferenceGateway())
 			}
 			c := NewCollector(filepath.Join(dir, "out"), opts...)
 			if err := c.runSection(context.Background(), scriptPath, dir, "gateway"); err != nil {

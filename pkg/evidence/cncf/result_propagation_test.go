@@ -104,6 +104,12 @@ case "${mode}" in
         }
         SECTION="gateway"
         ;;
+    gateway-recipe-none)
+        # The recipe declares no inference gateway; the section must not
+        # discover one by name, so the stub refuses every kubectl call.
+        export AICR_INFERENCE_GATEWAY_NONE="true"
+        SECTION="gateway"
+        ;;
     gateway-declared-no-api)
         # The recipe declares a gateway and the cluster does not serve the
         # Gateway API at all: without recipe context that is a prerequisite
@@ -580,6 +586,14 @@ func TestEvidenceResultPropagatesThroughCollector(t *testing.T) {
 			wantEvidence:      "**Result: FAIL** — could not list Gateways to find `inference-gateway`: Error from server (Forbidden)",
 			singleVerdictFile: "inference-gateway.md",
 			wantErr:           true,
+		},
+		{
+			name:              "recipe without a gateway skips without discovery",
+			mode:              "gateway-recipe-none",
+			displayName:       "Inference Gateway",
+			wantStatus:        "SKIP",
+			wantEvidence:      "**Result: SKIP (prerequisite absent)** — the recipe declares no inference gateway component.",
+			singleVerdictFile: "inference-gateway.md",
 		},
 		{
 			name:              "declared gateway on a cluster without the Gateway API is explicit fail",

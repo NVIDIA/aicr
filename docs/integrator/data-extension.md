@@ -342,8 +342,11 @@ default (`Same`) rejects the route, and the run fails at once with the
 listener's `Accepted` reason rather than as a readiness timeout.
 
 `aicr validate --cncf-submission` hands the declared Gateway's name, namespace
-and class to the evidence collector; a standalone collector run with no recipe
-discovers the Gateway named `inference-gateway`.
+and class to the evidence collector; a recipe that declares no inference
+gateway makes the section report the prerequisite absent, as the conformance
+check skips the same recipe, rather than certify a Gateway the recipe does not
+ship. Only a standalone collector run with no recipe discovers the Gateway
+named `inference-gateway`.
 
 ## Precedence rules
 
