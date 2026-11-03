@@ -13,7 +13,14 @@
 # limitations under the License.
 
 # Kube Prometheus Stack Helm values
-# Comprehensive monitoring stack with Prometheus, Grafana, and AlertManager
+#
+# Only the prometheus-operator and one Prometheus, which serves PromQL to the
+# components that query metrics at runtime (ADR-026). Cluster telemetry comes
+# from nktp.
+#
+# The bundler writes the ServiceMonitor and PodMonitor selectors, their
+# namespace selectors, and the scrape classes from the registry's telemetry
+# declarations. Setting any of them here fails the bundle.
 
 # CRDs are installed by the sibling prometheus-operator-crds release.
 # Splitting them out breaks the helm-diff self-reference where this
@@ -22,69 +29,87 @@
 crds:
   enabled: false
 
-# Override release name prefix to avoid aicr-stack- prefix in resource names
+# Override release name prefix to avoid aicr-stack- prefix in resource names.
+# Consumers address the Service kube-prometheus-prometheus:9090.
 fullnameOverride: kube-prometheus
 
-# Prometheus configuration
-prometheus:
-  prometheusSpec:
-    # Discover ServiceMonitors and PodMonitors across all namespaces.
-    serviceMonitorSelectorNilUsesHelmValues: false
-    serviceMonitorNamespaceSelector: {}
-    podMonitorSelectorNilUsesHelmValues: false
-    podMonitorNamespaceSelector: {}
+defaultRules:
+  create: false
 
-    # Resource configuration
-    resources:
-      requests:
-        cpu: 500m
-        memory: 1Gi
-      limits:
-        cpu: 2
-        memory: 2Gi
+alertmanager:
+  enabled: false
 
-    # Storage configuration
-    # Use emptyDir for local testing (no PVC required, data lost on pod restart)
-    # For EKS deployments with persistent storage, this is overridden via overlay.
-    storageSpec:
-      emptyDir:
-        medium: ""
-        sizeLimit: 10Gi
-
-    # Data retention
-    retention: 15d
-
-# Grafana configuration
 grafana:
-  enabled: true
-  fullnameOverride: grafana
-  adminPassword: admin  # Change in production
+  enabled: false
+
+kubeStateMetrics:
+  enabled: false
+
+nodeExporter:
+  enabled: false
+
+# Gates every Kubernetes component ServiceMonitor (apiserver, kubelet,
+# controller-manager, scheduler, kube-proxy, etcd, CoreDNS).
+kubernetesServiceMonitors:
+  enabled: false
+
+prometheusOperator:
+  # Nothing reads the kubelet Service without the kubelet ServiceMonitor.
+  kubeletService:
+    enabled: false
+  serviceMonitor:
+    selfMonitor: false
+  # The webhooks only validate PrometheusRules and AlertmanagerConfigs, which
+  # this Prometheus doesn't load. The operator's TLS listener uses the
+  # certificate the webhook Jobs create, so it goes too.
+  admissionWebhooks:
+    enabled: false
+  tls:
+    enabled: false
   resources:
     requests:
-      cpu: 100m
+      cpu: 50m
       memory: 128Mi
     limits:
       cpu: 500m
       memory: 512Mi
 
-# AlertManager configuration
-alertmanager:
-  enabled: true
-  alertmanagerSpec:
+prometheus:
+  serviceMonitor:
+    # The ai-service-metrics validator finds this Prometheus by the
+    # self-monitor: "true" label this sets on its Service.
+    selfMonitor: true
+  prometheusSpec:
+    # No namespace matches, since every namespace has the
+    # kubernetes.io/metadata.name label. Cluster owners may widen these to
+    # load their own rules, probes, and scrape configs.
+    ruleNamespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: DoesNotExist
+    probeNamespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: DoesNotExist
+    scrapeConfigNamespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: DoesNotExist
+
+    # Sized for the declared series. Scrapes still parse whole payloads
+    # before the scrape class drops samples, which is what the CPU covers.
     resources:
       requests:
         cpu: 100m
-        memory: 128Mi
+        memory: 256Mi
       limits:
-        cpu: 500m
-        memory: 512Mi
+        cpu: 1
+        memory: 1Gi
 
-# Node Exporter - for node-level metrics
-nodeExporter:
-  enabled: true
-prometheus-node-exporter:
-  fullnameOverride: prometheus-node-exporter
-
-# kube-state-metrics - for Kubernetes object metrics
-kube-state-metrics:
-  fullnameOverride: kube-state-metrics
+    # Consumers query minutes of history, so losing the TSDB on a restart
+    # costs a short gap.
+    storageSpec:
+      emptyDir:
+        sizeLimit: 2Gi
+    retention: 24h
+    retentionSize: 1GB

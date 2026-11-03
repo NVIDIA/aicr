@@ -54,7 +54,7 @@ var requirements = map[string]requirementMeta{
 	featureAIServiceMetrics: {
 		RequirementID: "ai_service_metrics",
 		Title:         "AI Service Metrics (Prometheus ServiceMonitor Discovery)",
-		Description:   "Demonstrates that Prometheus discovers and collects metrics from AI workloads exposing Prometheus exposition format via ServiceMonitors.",
+		Description:   "Demonstrates that the cluster's metrics pipeline discovers and collects metrics from AI workloads exposing Prometheus exposition format via ServiceMonitors and PodMonitors.",
 		File:          "ai-service-metrics.md",
 	},
 	featureInferenceGateway: {

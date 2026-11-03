@@ -211,21 +211,6 @@ spec:
         - nfd
         - cert-manager
 
-    # Prometheus persistent storage (provide --storage-class at bundle time, e.g. managed-csi)
-    - name: kube-prometheus-stack
-      type: Helm
-      version: "83.7.0"
-      overrides:
-        prometheus:
-          prometheusSpec:
-            storageSpec:
-              emptyDir: null
-              volumeClaimTemplate:
-                spec:
-                  accessModes: ["ReadWriteOnce"]
-                  resources:
-                    requests:
-                      storage: 50Gi
     # AKS has no control-plane nodes — remove the default nodeAffinity
     # that requires node-role.kubernetes.io/control-plane.
     # nvidiaDriverRoot is profile-owned (gpuStack above): the azure-managed

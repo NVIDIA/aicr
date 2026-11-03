@@ -53,12 +53,17 @@ spec:
       type: Helm
       overrides:
         enabled: false
-    - name: kube-prometheus-stack
+    # nktp: CKS clusters created since July 2025 ship no resource metrics API,
+    # and CoreWeave's exporter already binds host port 9100 (#2342).
+    - name: nktp
       type: Helm
       overrides:
-        # CoreWeave's exporter already binds host port 9100 (#2342).
-        nodeExporter:
-          enabled: false
+        metrics-server:
+          enabled: true
+        node-exporter:
+          service:
+            port: 9110
+            targetPort: 9110
     - name: nvsentinel
       type: Helm
       overrides:

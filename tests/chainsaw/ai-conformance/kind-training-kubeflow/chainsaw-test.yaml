@@ -65,6 +65,12 @@ spec:
         - assert:
             file: ../kind-common/assert-monitoring.yaml
 
+    - name: assert-nktp
+      description: Verify the NKTP telemetry pipeline and the resource metrics API.
+      try:
+        - assert:
+            file: ../kind-common/assert-nktp.yaml
+
     - name: assert-skyhook
       description: Verify Skyhook operator controller-manager is available.
       try:

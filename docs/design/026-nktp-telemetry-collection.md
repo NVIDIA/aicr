@@ -140,9 +140,9 @@ series.
 At bundle time, on every path (CLI, API server, and SDK), AICR takes the union
 of the enabled consumers' declarations and writes it at value paths that
 `kube-prometheus-stack`'s registry entry declares. The Prometheus server then
-selects every monitor in exactly those namespaces, whatever their labels, keeps
-only the declared series, and loads no rules, probes, or scrape configurations.
-Those paths cannot be overridden. A declared source that is absent or disabled
+selects every monitor in exactly those namespaces, whatever their labels, and
+keeps only the declared series. By default it loads no rules, probes, or scrape
+configurations; the paths the bundler writes cannot be overridden. A declared source that is absent or disabled
 fails the bundle, as does a pattern that does not compile. With
 `kube-prometheus-stack` disabled nothing is injected or checked, and consumers
 use the platform's Prometheus, as `prometheus-adapter-ocp` does with OpenShift's
@@ -389,8 +389,8 @@ scale stay unaddressed.
 - Every stock recipe that enables `kube-prometheus-stack` injects exactly the
   declared namespaces and series, identically through the CLI, the API server,
   and the SDK. The others inject nothing.
-- The runtime Prometheus server stores only declared series, within its time
-  and size caps.
+- By default, the runtime Prometheus server stores only declared series, within
+  its time and size caps.
 - The adapter serves both metrics APIs, and `pod-autoscaling` and
   `cluster-autoscaling` pass.
 - The Dynamo planner's SLA queries return data on an inference-dynamo

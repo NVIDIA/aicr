@@ -1448,9 +1448,10 @@ func TestMixinOSTalos_AppliesPrivilegedNamespacesAndPreManifests(t *testing.T) {
 		"nvsentinel":            {"privileged-nvsentinel", "components/nvsentinel/manifests/talos-namespace.yaml"},
 		"nvidia-dra-driver-gpu": {"privileged-nvidia-dra-driver-gpu", "components/nvidia-dra-driver-gpu/manifests/talos-namespace.yaml"},
 		"nodewright-operator":   {"privileged-nodewright-operator", "components/nodewright-operator/manifests/talos-namespace.yaml"},
+		"nktp":                  {"privileged-nktp", "components/nktp/manifests/talos-namespace.yaml"},
 	}
 
-	// Simulate an inheritance chain that already declared each of the five
+	// Simulate an inheritance chain that already declared each of the six
 	// components with concrete identity fields. The mixin must merge into
 	// these (additive-field-only) without conflicting.
 	spec := RecipeMetadataSpec{
@@ -1461,6 +1462,7 @@ func TestMixinOSTalos_AppliesPrivilegedNamespacesAndPreManifests(t *testing.T) {
 			{Name: "nvsentinel", Chart: "nvsentinel", Version: "v0.1.0", Source: "oci://ghcr.io/nvidia", Type: ComponentTypeHelm, Namespace: "nvsentinel"},
 			{Name: "nvidia-dra-driver-gpu", Chart: "nvidia-dra-driver-gpu", Version: "v25.3.0", Source: "https://helm.ngc.nvidia.com/nvidia", Type: ComponentTypeHelm, Namespace: "nvidia-dra-driver-gpu"},
 			{Name: "nodewright-operator", Chart: "nodewright-operator", Version: "v0.1.0", Source: "oci://ghcr.io/nvidia", Type: ComponentTypeHelm, Namespace: "nodewright"},
+			{Name: "nktp", Chart: "nktp", Version: "0.1.1-rc.3", Source: "oci://ghcr.io/dsx-ai-factory/nvke/charts", Type: ComponentTypeHelm, Namespace: "nktp"},
 		},
 	}
 

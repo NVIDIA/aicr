@@ -94,13 +94,36 @@ cluster:
 
 network:
   eks:
-    # No securityGroups.additionalRules — same posture as the sibling configs.
-    # Dynamo talks frontend<->worker directly (OS-assigned TCP ports, plus ZMQ
-    # KV events on fixed TCP 5557) and UAT places both roles on the gpu-worker
-    # node group, whose security group already allows all traffic from itself.
-    # Re-enabling NATS, or splitting Frontend and Worker across separate
-    # security groups, would need explicit rules — see
+    # No securityGroups.additionalRules for Dynamo — same posture as the
+    # sibling configs. Dynamo talks frontend<->worker directly (OS-assigned TCP
+    # ports, plus ZMQ KV events on fixed TCP 5557) and UAT places both roles on
+    # the gpu-worker node group, whose security group already allows all
+    # traffic from itself. Re-enabling NATS, or splitting Frontend and Worker
+    # across separate security groups, would need explicit rules — see
     # docs/integrator/eks-dynamo-networking.md.
+    #
+    # nktp's node collector runs on the GPU nodes and reaches the system nodes
+    # for OTLP to its gateways and watchdog (4317, 4320) and for its Target
+    # Allocator, which serves over mTLS (8443). The system security group
+    # admits neither from the worker subnet, and a rule's source can only be
+    # CIDR blocks: 10.0.128.0/17 is the worker subnet, 100.65.0.0/16 the pod
+    # CIDR.
+    securityGroups:
+      additionalRules:
+        - target: system
+          direction: ingress
+          fromPort: 4317
+          toPort: 4320
+          protocol: tcp
+          cidrBlocks: ["10.0.128.0/17", "100.65.0.0/16"]  # worker subnet + pod CIDR
+          description: "Allow NKTP OTLP from GPU worker pods"
+        - target: system
+          direction: ingress
+          fromPort: 8443
+          toPort: 8443
+          protocol: tcp
+          cidrBlocks: ["10.0.128.0/17", "100.65.0.0/16"]  # worker subnet + pod CIDR
+          description: "Allow NKTP Target Allocator from GPU worker pods"
     cidrs:
       host: 10.0.0.0/16
       pod: 100.65.0.0/16
