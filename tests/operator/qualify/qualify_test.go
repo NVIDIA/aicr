@@ -163,8 +163,13 @@ func runsCandidate(ctx context.Context, t *testing.T, c *candidateManifest) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(logs), `"version":"`+c.Version+`"`) || !strings.Contains(string(logs), `"release":true`) ||
-		!strings.Contains(string(logs), `"development":false`) {
+	// The published release the lifecycle run installs can predate the
+	// development field in the startup log; the flags above still show it
+	// runs no development setting.
+	logged := string(logs)
+	older := lifecycleOnly && c == &candidate && !strings.Contains(logged, `"development":`)
+	if !strings.Contains(logged, `"version":"`+c.Version+`"`) || !strings.Contains(logged, `"release":true`) ||
+		!older && !strings.Contains(logged, `"development":false`) {
 
 		t.Fatalf("the operator does not report release build %s without the development opt-in", c.Version)
 	}
