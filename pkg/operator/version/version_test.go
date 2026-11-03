@@ -72,4 +72,28 @@ func TestGetReportsStampedValues(t *testing.T) {
 	if Get().Release {
 		t.Fatal("Get().Release = true for the development version")
 	}
+	if Get().Development != Development {
+		t.Fatalf("Get().Development = %v, want the build tag's %v", Get().Development, Development)
+	}
+}
+
+func TestAcceptsDevelopment(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name               string
+		release, opted, ok bool
+	}{
+		{"opted in, unstamped", false, true, true},
+		{"opted in, release stamp", true, true, false},
+		{"no opt-in, unstamped", false, false, false},
+		{"no opt-in, release stamp", true, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := (Info{Release: tt.release, Development: tt.opted}).AcceptsDevelopment(); got != tt.ok {
+				t.Fatalf("AcceptsDevelopment() = %v, want %v", got, tt.ok)
+			}
+		})
+	}
 }

@@ -51,7 +51,7 @@ func TestFlagsOverrideDefaults(t *testing.T) {
 
 		t.Fatalf("config = %+v", c)
 	}
-	if err = c.Validate(false); err != nil {
+	if err = c.Validate(true); err != nil {
 		t.Fatalf("Validate() = %v", err)
 	}
 	if r := c.Registry(); r.Host != "r.example.com" || r.Path != "x" {
@@ -73,22 +73,23 @@ func TestFlagsOverrideDefaults(t *testing.T) {
 	}
 }
 
-// Release builds refuse the approval bypass; an out-of-range AICR
-// version is not refused here, so it can be reported as a stalled runtime.
+// TestValidate checks that Validate rejects each invalid configuration,
+// accepts development settings only in a development build, and passes an
+// out-of-range AICR version so the resolver can report it as a stalled runtime.
 func TestValidate(t *testing.T) {
 	t.Parallel()
 	tests := map[string]func(*Config){
-		"bypass in a release":   func(c *Config) { c.BypassApprovals = true },
-		"skip in a release":     func(c *Config) { c.SkipDiscovery = true },
-		"no snapshot account":   func(c *Config) { c.SnapshotServiceAccount = "" },
-		"unpinned image":        func(c *Config) { c.AICRImage = "ghcr.io/nvidia/aicr:v1.0.0" },
-		"no AICR version":       func(c *Config) { c.AICRVersion = "" },
-		"Flux":                  func(c *Config) { c.Engine = plan.EngineFlux },
-		"no jobs namespace":     func(c *Config) { c.JobsNamespace = "" },
-		"no project":            func(c *Config) { c.EngineProject = "" },
-		"registry without path": func(c *Config) { c.RegistryRepository = "oci://registry.example.com" },
-		"unknown provider":      func(c *Config) { c.RegistryAuthProvider = "gcp" },
-		"aws without ECR":       func(c *Config) { c.RegistryAuthProvider = "aws" },
+		"bypass without development": func(c *Config) { c.BypassApprovals = true },
+		"skip without development":   func(c *Config) { c.SkipDiscovery = true },
+		"no snapshot account":        func(c *Config) { c.SnapshotServiceAccount = "" },
+		"unpinned image":             func(c *Config) { c.AICRImage = "ghcr.io/nvidia/aicr:v1.0.0" },
+		"no AICR version":            func(c *Config) { c.AICRVersion = "" },
+		"Flux":                       func(c *Config) { c.Engine = plan.EngineFlux },
+		"no jobs namespace":          func(c *Config) { c.JobsNamespace = "" },
+		"no project":                 func(c *Config) { c.EngineProject = "" },
+		"registry without path":      func(c *Config) { c.RegistryRepository = "oci://registry.example.com" },
+		"unknown provider":           func(c *Config) { c.RegistryAuthProvider = "gcp" },
+		"aws without ECR":            func(c *Config) { c.RegistryAuthProvider = "aws" },
 		"aws with a static Secret": func(c *Config) {
 			c.RegistryAuthProvider, c.RegistryCredentialsSecret = "aws", "registry-auth"
 			c.RegistryRepository = "oci://123456789012.dkr.ecr.us-west-2.amazonaws.com/aicr/cluster"
@@ -97,19 +98,19 @@ func TestValidate(t *testing.T) {
 	for name, mutate := range tests {
 		c := valid()
 		mutate(&c)
-		if err := c.Validate(true); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
+		if err := c.Validate(false); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
 			t.Errorf("%s: Validate() = %v, want INVALID_REQUEST", name, err)
 		}
 	}
 	c := valid()
 	c.AICRVersion = "v2.0.0"
-	if err := c.Validate(true); err != nil {
+	if err := c.Validate(false); err != nil {
 		t.Errorf("out-of-range version refused at startup: %v", err)
 	}
 	c = valid()
-	c.BypassApprovals = true
-	if err := c.Validate(false); err != nil {
-		t.Errorf("development build refused the bypass: %v", err)
+	c.BypassApprovals, c.SkipDiscovery = true, true
+	if err := c.Validate(true); err != nil {
+		t.Errorf("development build refused development settings: %v", err)
 	}
 }
 
@@ -126,7 +127,7 @@ func TestValidateValidation(t *testing.T) {
 	if err := fs.Parse([]string{"--validation-enabled", "--validator-images=" + validator + ", " + conformance}); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Validate(true); err != nil {
+	if err := c.Validate(false); err != nil {
 		t.Fatalf("Validate() = %v", err)
 	}
 	pins := c.ValidatorPins()
@@ -146,13 +147,13 @@ func TestValidateValidation(t *testing.T) {
 	} {
 		bad := valid()
 		bad.ValidationEnabled, bad.ValidatorImages = true, images
-		if err := bad.Validate(false); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
+		if err := bad.Validate(true); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
 			t.Errorf("%s: Validate() = %v, want INVALID_REQUEST", name, err)
 		}
 	}
 	c = valid()
 	c.ValidatorImages = []string{"anything"}
-	if err := c.Validate(true); err != nil {
+	if err := c.Validate(false); err != nil {
 		t.Errorf("validator images are checked with validation disabled: %v", err)
 	}
 }
@@ -172,7 +173,7 @@ func TestValidateSigning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = c.Validate(true); err != nil || !c.SignsEvidence() || c.ValidationTransparencyLog {
+	if err = c.Validate(false); err != nil || !c.SignsEvidence() || c.ValidationTransparencyLog {
 		t.Fatalf("Validate() = %v, SignsEvidence() = %v, config = %+v", err, c.SignsEvidence(), c)
 	}
 	for name, mutate := range map[string]func(*Config){
@@ -183,13 +184,13 @@ func TestValidateSigning(t *testing.T) {
 	} {
 		bad := c
 		mutate(&bad)
-		if err := bad.Validate(true); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
+		if err := bad.Validate(false); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
 			t.Errorf("%s: Validate() = %v, want INVALID_REQUEST", name, err)
 		}
 	}
 	unsigned := c
 	unsigned.ValidationSigningKey = ""
-	if err := unsigned.Validate(true); err != nil || unsigned.SignsEvidence() {
+	if err := unsigned.Validate(false); err != nil || unsigned.SignsEvidence() {
 		t.Errorf("unsigned: Validate() = %v, SignsEvidence() = %v", err, unsigned.SignsEvidence())
 	}
 }
@@ -199,7 +200,7 @@ func TestValidateAWSProvider(t *testing.T) {
 	c := valid()
 	c.RegistryAuthProvider = "aws"
 	c.RegistryRepository = "oci://123456789012.dkr.ecr.us-west-2.amazonaws.com/aicr/cluster"
-	if err := c.Validate(true); err != nil {
+	if err := c.Validate(false); err != nil {
 		t.Fatalf("Validate() = %v", err)
 	}
 }

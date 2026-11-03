@@ -18,8 +18,8 @@
 # registry image for linux/amd64 and linux/arm64 as OCI layouts with SPDX SBOMs
 # (ko, on AICR's base image), the kubectl-aicr binaries, the chart packaged
 # deterministically, and candidate.json recording every digest with the AICR
-# release the candidate runs. The candidate is a release build: the operator refuses its
-# development settings.
+# release the candidate runs. The candidate is a release build without the
+# development opt-in, so the operator refuses its development settings.
 #
 # Usage: CANDIDATE_VERSION=v0.1.0-rc.1 tools/operator-candidate [build|verify]
 #   build   (default) build dist/candidate
@@ -67,8 +67,10 @@ build() {
   local out="$1"
   rm -rf "${out}"
   mkdir -p "${out}/plugin"
-  # .ko.yaml stamps the version and date from these variables.
-  AICR_OPERATOR_VERSION="${version}" AICR_OPERATOR_DATE="${commit_date}" KO_DOCKER_REPO="${repository}" \
+  # .ko.yaml stamps the version and date from these variables, and builds
+  # without the development opt-in whatever the caller's environment holds.
+  AICR_OPERATOR_VERSION="${version}" AICR_OPERATOR_DATE="${commit_date}" AICR_OPERATOR_DEVELOPMENT=false \
+    KO_DOCKER_REPO="${repository}" \
     go run "github.com/google/ko@$(setting '.build_tools.ko')" build --bare --push=false \
     --platform=linux/amd64,linux/arm64 --oci-layout-path "${out}/image" --sbom-dir "${out}/sbom" \
     ./cmd/aicr-operator >/dev/null
@@ -88,7 +90,9 @@ build() {
   helm template aicr-operator "${out}"/chart/*.tgz --namespace aicr-system --set validation.enabled=true >/dev/null
   helm template aicr-operator "${out}"/chart/*.tgz --namespace aicr-system --set validation.enabled=true \
     --set registry.mode=external --set registry.repository=oci://registry.example.com/aicr/cluster >/dev/null
-  refuses_bypass "${out}"
+  # The candidate image's own operator binary, where the host can run it,
+  # must refuse each development setting.
+  go run ./tools/operator-release refuses -dir "${out}"
   clean "${out}"
 }
 
@@ -111,36 +115,6 @@ $(grep -r -l -a -E 'AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|gh[pousr
     echo "credential material or agent attribution in the candidate: ${found}" >&2
     exit 1
   fi
-}
-
-# refuses_bypass runs the candidate image's own operator binary, where the
-# host can, and requires it to refuse development.bypassApprovals.
-refuses_bypass() {
-  local out="$1" host platform bin output
-  host="$(go env GOOS)/$(go env GOARCH)"
-  case "${host}" in
-  linux/amd64) platform=linux/amd64 ;;
-  linux/arm64) platform=linux/arm64/v8 ;;
-  *)
-    echo "skipping the bypass refusal check: the image's binary does not run on ${host}"
-    return
-    ;;
-  esac
-  bin="$(mktemp -d "${work}/bypass.XXXXXX")/aicr-operator"
-  go run ./tools/operator-release extract -dir "${out}" -platform "${platform}" -out "${bin}"
-  # No cluster is reachable, so a binary that failed to refuse cannot act on
-  # one, and the timeout ends it.
-  if output="$(KUBECONFIG="${repo_root}/.no-kubeconfig" KUBERNETES_SERVICE_HOST='' KUBERNETES_SERVICE_PORT='' \
-    timeout 60 "${bin}" --development-bypass-approvals --aicr-version=v1.0.0 \
-    --aicr-image="$(setting '.operator.aicr_image')" --registry-repository=oci://registry.example.com/aicr/cluster 2>&1)"; then
-    echo "the candidate started with development.bypassApprovals" >&2
-    exit 1
-  fi
-  if ! grep -q "refused by release builds" <<<"${output}"; then
-    echo "the candidate failed without refusing development.bypassApprovals: ${output}" >&2
-    exit 1
-  fi
-  echo "the candidate's ${host} binary refuses development.bypassApprovals"
 }
 
 dir="${CANDIDATE_DIR:-dist/candidate}"
