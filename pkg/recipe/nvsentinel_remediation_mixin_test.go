@@ -80,6 +80,38 @@ func remediationLeaf(mixins ...string) RecipeMetadataSpec {
 	}
 }
 
+// assertPostRebootValidation pins post-remediation validation (#3089) to
+// reboots: one rule set requesting dcgm-diag-test for a fatal GPU event whose
+// action was RESTART_VM (15) or RESTART_BM (24), and none for a GPU reset.
+func assertPostRebootValidation(t *testing.T, mixin string, overrides map[string]any) {
+	t.Helper()
+	fq, _ := overrides["fault-quarantine"].(map[string]any)
+	validation, _ := fq["validation"].(map[string]any)
+	if validation["enabled"] != true {
+		t.Errorf("%s: fault-quarantine.validation.enabled = %v, want true", mixin, validation["enabled"])
+	}
+	ruleSets, _ := validation["ruleSets"].([]any)
+	if len(ruleSets) != 1 {
+		t.Fatalf("%s: fault-quarantine.validation.ruleSets = %v, want one post-reboot rule set", mixin, validation["ruleSets"])
+	}
+	ruleSet, _ := ruleSets[0].(map[string]any)
+	if tests, _ := ruleSet["tests"].([]any); !slices.Equal(tests, []any{"dcgm-diag-test"}) {
+		t.Errorf("%s: rule set tests = %v, want [dcgm-diag-test]", mixin, ruleSet["tests"])
+	}
+	match, _ := ruleSet["match"].(map[string]any)
+	all, _ := match["all"].([]any)
+	if len(all) != 1 {
+		t.Fatalf("%s: rule set match.all = %v, want one HealthEvent expression", mixin, match["all"])
+	}
+	rule, _ := all[0].(map[string]any)
+	expression, _ := rule["expression"].(string)
+	const want = "event.componentClass == 'GPU' && event.isFatal == true && event.recommendedAction in [15, 24]"
+	if got := strings.Join(strings.Fields(expression), " "); got != want {
+		t.Errorf("%s: rule set expression %q, want %q: only fatal GPU faults repaired by RESTART_VM (15) or "+
+			"RESTART_BM (24)", mixin, got, want)
+	}
+}
+
 // TestMixinNVSentinelRemediationSteps_Compose pins what each step turns on.
 // The quarantine step leaves fault-remediation off on purpose: without janitor
 // nothing acts on the repair requests it creates, yet it labels each node
@@ -147,6 +179,10 @@ func TestMixinNVSentinelRemediationSteps_Compose(t *testing.T) {
 			if slices.Contains(step.enables, "faultRemediation") {
 				wantKeys = append(wantKeys, "fault-remediation")
 				assertComponentResetIsGPUReset(t, step.mixin, nvsentinel.Overrides)
+			}
+			if step.mixin == "nvsentinel-remediation" {
+				wantKeys = append(wantKeys, "fault-quarantine")
+				assertPostRebootValidation(t, step.mixin, nvsentinel.Overrides)
 			}
 			if slices.Contains(step.enables, "janitorProvider") {
 				wantKeys = append(wantKeys, "janitor-provider")

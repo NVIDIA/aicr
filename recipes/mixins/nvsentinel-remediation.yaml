@@ -27,6 +27,12 @@
 # prerequisites, and needs metadata-collector for the GPU UUID a reset is
 # scoped to, and nvsentinel-health-events-analyzer composed beside it for the
 # MultipleRemediations rule (CheckNVSentinelRemediationPipelineCoherent).
+#
+# A node rebooted for a fatal GPU fault is validated before it returns to
+# work: fault-quarantine keeps it cordoned until lifecycle-manager's DCGM
+# diagnostic passes, so nvsentinel-node-validation, which runs
+# lifecycle-manager, must be composed beside it
+# (CheckNVSentinelPostRemediationValidationCoherent).
 
 kind: RecipeMixin
 apiVersion: aicr.run/v1beta1
@@ -45,6 +51,26 @@ spec:
           processingStrategy: EXECUTE_REMEDIATION
         syslog-health-monitor:
           processingStrategy: EXECUTE_REMEDIATION
+        # Only RESTART_VM and RESTART_BM (15, 24) are validated. A GPU reset
+        # takes seconds and a diagnostic minutes; a reset that did not fix the
+        # GPU reports the fault again, and MultipleRemediations reports the
+        # loop. REPLACE_VM and unmapped actions are not repaired, so the node
+        # stays cordoned with nothing to validate.
+        fault-quarantine:
+          validation:
+            enabled: true
+            ruleSets:
+              - enabled: true
+                version: "1"
+                name: "Post-reboot validation"
+                match:
+                  all:
+                    - kind: "HealthEvent"
+                      expression: >-
+                        event.componentClass == 'GPU' && event.isFatal == true &&
+                        event.recommendedAction in [15, 24]
+                tests:
+                  - dcgm-diag-test
         # Same drain timing as nvsentinel-quarantine.
         node-drainer:
           deleteAfterTimeoutMinutes: 300

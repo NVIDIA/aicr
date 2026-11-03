@@ -473,6 +473,12 @@ nvsentinel-node-validation-e2e: ## Live Kind test: nvsentinel-node-validation ho
 	echo "Running nvsentinel-node-validation mixin e2e test..."; \
 	tests/e2e/nvsentinel-node-validation/run.sh
 
+.PHONY: nvsentinel-post-remediation-validation-e2e
+nvsentinel-post-remediation-validation-e2e: ## Live Kind test: a node drained for a reboot stays cordoned until its post-remediation ValidationRequest passes (#3089)
+	@set -e; \
+	echo "Running nvsentinel post-remediation validation e2e test..."; \
+	tests/e2e/nvsentinel-post-remediation-validation/run.sh
+
 .PHONY: npd-nvsentinel-object-monitor-e2e
 npd-nvsentinel-object-monitor-e2e: ## Live Kind test: an NPD Node condition becomes an NVSentinel health event (#2614)
 	@set -e; \

@@ -23,9 +23,9 @@
 #                           composes nvsentinel-quarantine or
 #                           nvsentinel-remediation; SKIPPED otherwise.
 #   Stage 3 (recovery)   -- the node's boot ID changes (janitor rebooted it)
-#                           and fault-quarantine uncordons it. Run when the
-#                           deployed recipe composes nvsentinel-remediation;
-#                           SKIPPED otherwise.
+#                           and lifecycle-manager uncordons it once its DCGM
+#                           diagnostic passes. Run when the deployed recipe
+#                           composes nvsentinel-remediation; SKIPPED otherwise.
 #
 # The stage gates come from the deployed recipe (bundle/recipe.yaml), not from
 # hand-set env vars: see uat_nvsentinel_remediation_mode below. No shipped
@@ -83,6 +83,23 @@ uat_nvsentinel_remediation_mode() {
   else
     echo quarantine
   fi
+}
+
+# uat_nvsentinel_validated_release succeeds when node $1 was returned to
+# service by a passing post-reboot validation: lifecycle-manager labelled it
+# k8saas.nvidia.com/uncordon-reason=ValidationSucceeded, and a ValidationRequest
+# fault-quarantine created for it at or after $2 (RFC 3339, UTC) Succeeded.
+# The label alone also follows a deleted failed request, and fault-quarantine
+# releasing the node itself sets neither. A failed read fails.
+uat_nvsentinel_validated_release() {
+  local node="$1" since="$2" reason requests
+  reason="$(kubectl get node "${node}" -o jsonpath='{.metadata.labels.k8saas\.nvidia\.com/uncordon-reason}')" || return 1
+  [[ "${reason}" == "ValidationSucceeded" ]] || return 1
+  requests="$(kubectl get validationrequests.nvsentinel.nvidia.com \
+    -l nvsentinel.nvidia.com/created-by=fault-quarantine -o json)" || return 1
+  jq -e --arg n "${node}" --arg since "${since}" 'any(.items[];
+      any(.spec.nodes[]?; .name == $n) and .metadata.creationTimestamp >= $since and .status.phase == "Succeeded")' \
+    <<<"${requests}" >/dev/null
 }
 
 # Set by _fault_inject_impl once it knows them, so the outer wrapper can
@@ -151,7 +168,11 @@ _fault_inject_impl() {
   local detect_timeout_seconds="${FAULT_INJECT_DETECT_TIMEOUT_SECONDS:-300}"
   local quarantine_timeout_seconds="${FAULT_INJECT_QUARANTINE_TIMEOUT_SECONDS:-180}"
   local recovery_timeout_seconds="${FAULT_INJECT_RECOVERY_TIMEOUT_SECONDS:-720}"
-  local unquarantine_timeout_seconds="${FAULT_INJECT_UNQUARANTINE_TIMEOUT_SECONDS:-300}"
+  # A rebooted node is uncordoned only after nvsentinel-remediation's
+  # post-reboot DCGM level-2 diagnostic passes: the GPU stack coming back, the
+  # diagnostic image pull and one passing level-2 run. A node that fails it is
+  # held for hours of retries, which fails the phase either way.
+  local unquarantine_timeout_seconds="${FAULT_INJECT_UNQUARANTINE_TIMEOUT_SECONDS:-1500}"
   _FAULT_INJECT_NS="${nvs_ns}"
   _FAULT_INJECT_POD_NAME="fault-inject-${RUN_ID}"
 
@@ -258,6 +279,8 @@ _fault_inject_impl() {
     runtime_class="nvidia-container-runtime"
   fi
 
+  local inject_time
+  inject_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "::group::Inject synthetic XID 79"
   cat <<MANIFEST | kubectl apply -f -
 apiVersion: v1
@@ -311,7 +334,7 @@ MANIFEST
   echo "::endgroup::"
 
   echo "::group::Stage 1 -- wait for ${condition}=True"
-  local waited=0
+  local waited=0 start=${SECONDS}
   local state="${pre_state}"
   while (( waited < detect_timeout_seconds )); do
     state="$(kubectl get node "${node}" -o jsonpath="{.status.conditions[?(@.type==\"${condition}\")].status}")"
@@ -322,7 +345,7 @@ MANIFEST
     if ! wait $!; then
       return 1
     fi
-    waited=$(( waited + 10 ))
+    waited=$(( SECONDS - start ))
   done
   echo "::endgroup::"
 
@@ -339,7 +362,7 @@ MANIFEST
     ctrf_add faultinject-quarantine skipped 0 "fault quarantine not enabled"
   else
     echo "::group::Stage 2 -- wait for ${node} to be cordoned"
-    local qwaited=0 cordoned=false
+    local qwaited=0 cordoned=false start=${SECONDS}
     while (( qwaited < quarantine_timeout_seconds )); do
       if [[ "$(kubectl get node "${node}" -o jsonpath='{.spec.unschedulable}')" == "true" ]]; then
         cordoned=true
@@ -349,7 +372,7 @@ MANIFEST
       if ! wait $!; then
         return 1
       fi
-      qwaited=$(( qwaited + 10 ))
+      qwaited=$(( SECONDS - start ))
     done
     echo "::endgroup::"
     if [[ "${cordoned}" != "true" ]]; then
@@ -366,7 +389,7 @@ MANIFEST
     ctrf_add faultinject-recovery skipped 0 "janitor-driven recovery not enabled"
   else
     echo "::group::Stage 3 -- wait for ${node}'s boot ID to change (reboot)"
-    local rwaited=0 rebooted=false post_boot_id=""
+    local rwaited=0 rebooted=false post_boot_id="" start=${SECONDS}
     while (( rwaited < recovery_timeout_seconds )); do
       post_boot_id="$(kubectl get node "${node}" -o jsonpath='{.status.nodeInfo.bootID}' 2>/dev/null || true)"
       if [[ -n "${post_boot_id}" && "${post_boot_id}" != "${pre_boot_id}" ]]; then
@@ -377,7 +400,7 @@ MANIFEST
       if ! wait $!; then
         return 1
       fi
-      rwaited=$(( rwaited + 15 ))
+      rwaited=$(( SECONDS - start ))
     done
     echo "::endgroup::"
     if [[ "${rebooted}" != "true" ]]; then
@@ -387,13 +410,14 @@ MANIFEST
     fi
     echo "${node} rebooted ${rwaited}s after quarantine (boot ID ${pre_boot_id} -> ${post_boot_id})"
 
-    # A reboot alone is not recovery: the fault clears on the new boot ID and
-    # fault-quarantine must then hand the node back. Mirrors upstream's
-    # wait_for_node_unquarantine after wait_for_boot_id_change.
+    # A reboot alone is not recovery: the fault clears on the new boot ID,
+    # fault-quarantine hands the node to a ValidationRequest, and
+    # lifecycle-manager uncordons it when the diagnostic passes. Mirrors
+    # upstream's wait_for_node_unquarantine after wait_for_boot_id_change.
     echo "::group::Stage 3 -- wait for ${node} to be uncordoned"
     # Only a successful read counts: an apiserver error must keep waiting, not
     # read as an empty, uncordoned spec.
-    local uwaited=0 uncordoned=false unschedulable
+    local uwaited=0 uncordoned=false unschedulable start=${SECONDS}
     while (( uwaited < unquarantine_timeout_seconds )); do
       if unschedulable="$(kubectl get node "${node}" -o jsonpath='{.spec.unschedulable}' 2>/dev/null)" \
           && [[ "${unschedulable}" != "true" ]]; then
@@ -404,7 +428,7 @@ MANIFEST
       if ! wait $!; then
         return 1
       fi
-      uwaited=$(( uwaited + 10 ))
+      uwaited=$(( SECONDS - start ))
     done
     echo "::endgroup::"
     if [[ "${uncordoned}" != "true" ]]; then
@@ -412,7 +436,27 @@ MANIFEST
       ctrf_add faultinject-recovery failed "$(( (rwaited + uwaited) * 1000 ))" "${node} rebooted but was never uncordoned"
       return 1
     fi
-    echo "Stage 3 (recovery) OK: ${node} rebooted and was uncordoned $(( rwaited + uwaited ))s after quarantine"
+    # The uncordon must come from a passing diagnostic, not from
+    # fault-quarantine releasing the node untested. The request's phase and
+    # the node's label land in separate writes, so allow a short settle.
+    local validated=false settle_start=${SECONDS}
+    while (( SECONDS - settle_start < 60 )); do
+      if uat_nvsentinel_validated_release "${node}" "${inject_time}"; then
+        validated=true
+        break
+      fi
+      sleep 10 &
+      if ! wait $!; then
+        return 1
+      fi
+    done
+    if [[ "${validated}" != "true" ]]; then
+      echo "::error::${node} was uncordoned without a passing post-reboot validation: no k8saas.nvidia.com/uncordon-reason=ValidationSucceeded with a Succeeded fault-quarantine ValidationRequest created since ${inject_time} -- an untested release is a FAIL" >&2
+      kubectl get validationrequests.nvsentinel.nvidia.com -o wide >&2 || true
+      ctrf_add faultinject-recovery failed "$(( (rwaited + uwaited) * 1000 ))" "${node} was uncordoned without a passing post-reboot validation"
+      return 1
+    fi
+    echo "Stage 3 (recovery) OK: ${node} rebooted, passed its post-reboot validation and was uncordoned $(( rwaited + uwaited ))s after quarantine"
     ctrf_add faultinject-recovery passed "$(( (rwaited + uwaited) * 1000 ))" ""
   fi
 

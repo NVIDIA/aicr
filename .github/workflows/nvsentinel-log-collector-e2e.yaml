@@ -15,13 +15,14 @@
 # Runtime Kind test for the nvsentinel-log-collector mixin.
 #
 # Installs the remediation step with the log collector, and the health events
-# analyzer that live remediation requires, via the bundle's own install.sh,
-# sends one synthetic GPU fault into platform-connectors, and checks
-# that fault-remediation runs the collector Job on the node, that the bug report
-# it uploads is listed by the in-cluster file server, that the file server's
-# volume took the --storage-class value, and that the GPU reset is requested
-# only after collection. The collector runs in its MOCK_MODE: a Kind node has no
-# GPU driver. Not wired into `make qualify`: it needs a Kind cluster.
+# analyzer and node validation that live remediation requires, via the bundle's
+# own install.sh, sends one synthetic GPU fault into platform-connectors, and
+# checks that fault-remediation runs the collector Job on the node, that the
+# bug report it uploads is listed by the in-cluster file server, that the file
+# server's volume took the --storage-class value, and that the GPU reset is
+# requested only after collection. The collector runs in its MOCK_MODE: a Kind
+# node has no GPU driver. Not wired into `make qualify`: it needs a Kind
+# cluster.
 #
 # Path filter kept narrow for the same reason as nvsentinel-preflight-e2e.yaml.
 
@@ -34,7 +35,10 @@ on:
       - 'recipes/mixins/nvsentinel-remediation.yaml'
       - 'recipes/mixins/nvsentinel-health-events-analyzer.yaml'
       - 'recipes/mixins/nvsentinel-log-collector.yaml'
+      - 'recipes/mixins/nvsentinel-node-validation.yaml'
       - 'pkg/bundler/validations/nvsentinel_log_collector.go'
+      - 'pkg/bundler/validations/nvsentinel_node_validation.go'
+      - 'pkg/bundler/validations/nvsentinel_post_remediation_validation.go'
       - 'pkg/bundler/validations/checks.go'
       - 'recipes/registry.yaml'
       - 'recipes/components/nvsentinel/**'
@@ -45,8 +49,9 @@ on:
       - 'recipes/overlays/h100-kind-training.yaml'
       - 'recipes/overlays/kind.yaml'
       - 'recipes/overlays/base.yaml'
-      # The run installs cert-manager, for the Percona cluster's certificates,
-      # and prometheus-operator-crds from the bundle.
+      # The run installs cert-manager, for the Percona cluster's certificates
+      # and lifecycle-manager's webhook certificate, and
+      # prometheus-operator-crds from the bundle.
       - 'recipes/components/cert-manager/**'
       - 'recipes/components/prometheus-operator-crds/**'
       - 'tests/e2e/nvsentinel-log-collector/**'
