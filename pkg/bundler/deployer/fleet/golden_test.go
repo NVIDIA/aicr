@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat/localformattest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -152,7 +153,7 @@ func TestGenerate_Scenarios(t *testing.T) {
 				DynamicValues: map[string][]string{"cert-manager": {"replicaCount"}},
 				Version:       testBundlerVersion,
 				VendorCharts:  true,
-				Puller:        &stubChartPuller{},
+				Puller:        localformattest.StubPuller{},
 			},
 			goldens: []string{
 				fileReadme,

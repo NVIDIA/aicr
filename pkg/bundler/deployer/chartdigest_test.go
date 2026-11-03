@@ -18,46 +18,13 @@ import (
 	"context"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/deployertest"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 const testChartDigest = "sha256:5e0f2b7c9a1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5b7c9d1e3f"
-
-// digestRegistryProvider layers a registry with one digest-pinned component
-// ("digested") and one without ("undigested") over the embedded data, so the
-// tests do not depend on which real components carry a digest.
-func digestRegistryProvider(t *testing.T) recipe.DataProvider {
-	t.Helper()
-	registryYAML := `apiVersion: aicr.run/v1beta1
-kind: ComponentRegistry
-components:
-  - name: digested
-    displayName: Digested
-    helm:
-      defaultRepository: https://charts.example.com
-      defaultChart: example/digested
-      defaultVersion: 1.2.3
-      defaultDigest: ` + testChartDigest + `
-  - name: undigested
-    displayName: Undigested
-    helm:
-      defaultRepository: https://charts.example.com
-      defaultChart: example/undigested
-      defaultVersion: 1.2.3
-`
-	dataDir := providertest.WriteDir(t, map[string][]byte{recipe.RegistryFileName: []byte(registryYAML)})
-	layered, err := recipe.NewLayeredDataProvider(
-		recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ""),
-		recipe.LayeredProviderConfig{ExternalDir: dataDir})
-	if err != nil {
-		t.Fatalf("NewLayeredDataProvider: %v", err)
-	}
-	t.Cleanup(func() { recipe.EvictCachedRegistry(layered) })
-	return layered
-}
 
 // registryRef resolves a ref for name against dp's registry pin.
 func registryRef(t *testing.T, dp recipe.DataProvider, name string) recipe.ComponentRef {
@@ -76,8 +43,8 @@ func registryRef(t *testing.T, dp recipe.DataProvider, name string) recipe.Compo
 }
 
 func TestResolveChartDigests(t *testing.T) {
-	dp := digestRegistryProvider(t)
-	pinned := registryRef(t, dp, "digested")
+	dp := deployertest.DigestDataProvider(t, testChartDigest)
+	pinned := registryRef(t, dp, deployertest.DigestedComponent)
 
 	// Each mutator breaks one coordinate of the pinned chart. The digest
 	// identifies the pinned archive only, so every one must get none.
@@ -99,7 +66,7 @@ func TestResolveChartDigests(t *testing.T) {
 			name: "chart override",
 			ref:  func() recipe.ComponentRef { r := pinned; r.Chart = "other-chart"; return r }(),
 		},
-		{name: "registry entry without a digest", ref: registryRef(t, dp, "undigested")},
+		{name: "registry entry without a digest", ref: registryRef(t, dp, deployertest.UndigestedComponent)},
 		{name: "component absent from the registry", ref: recipe.ComponentRef{Name: "not-in-registry", Type: recipe.ComponentTypeHelm}},
 	}
 	for _, tt := range tests {
@@ -122,7 +89,7 @@ func TestResolveChartDigests(t *testing.T) {
 func TestResolveChartDigests_FailsClosed(t *testing.T) {
 	t.Run("registry unavailable", func(t *testing.T) {
 		_, err := ResolveChartDigests(context.Background(), failingProvider{},
-			[]recipe.ComponentRef{{Name: "digested", Type: recipe.ComponentTypeHelm}})
+			[]recipe.ComponentRef{{Name: deployertest.DigestedComponent, Type: recipe.ComponentTypeHelm}})
 		if err == nil {
 			t.Fatal("ResolveChartDigests() error = nil, want the registry failure")
 		}
@@ -130,8 +97,8 @@ func TestResolveChartDigests_FailsClosed(t *testing.T) {
 	t.Run("context canceled", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_, err := ResolveChartDigests(ctx, digestRegistryProvider(t),
-			[]recipe.ComponentRef{{Name: "digested", Type: recipe.ComponentTypeHelm}})
+		_, err := ResolveChartDigests(ctx, deployertest.DigestDataProvider(t, testChartDigest),
+			[]recipe.ComponentRef{{Name: deployertest.DigestedComponent, Type: recipe.ComponentTypeHelm}})
 		if err == nil {
 			t.Fatal("ResolveChartDigests() error = nil, want cancellation")
 		}
