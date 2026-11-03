@@ -77,6 +77,16 @@ spec:
                   flags="${flags} --gke-tcpxo-interfaces eth1=gpu-nic-0,eth2=gpu-nic-1,eth3=gpu-nic-2,eth4=gpu-nic-3,eth5=gpu-nic-4,eth6=gpu-nic-5,eth7=gpu-nic-6,eth8=gpu-nic-7"
                 fi
 
+                # runai-cluster lists its registration inputs as requiredValues
+                # (ADR-029), so a bundle with none fails closed. This smoke test
+                # never installs, so fixed placeholders stand in for the control
+                # plane URL and cluster UID; the token is declared --dynamic, as
+                # an install-time secret must be, and stays an empty stub.
+                bundle_flags=""
+                if [ "$platform" = "runai" ]; then
+                  bundle_flags="--set runai:controlPlane.url=https://smoke.invalid --set runai:cluster.uid=00000000-0000-0000-0000-000000000000 --dynamic runai:controlPlane.bootstrapToken"
+                fi
+
                 echo "=== ${basename}: recipe (service=${service:-default} accel=${accelerator} os=${os_val} intent=${intent} platform=${platform:-none}) ==="
                 ${AICR_BIN} recipe ${flags} -o "${test_dir}/recipe.yaml" || { echo "FAIL: recipe generation for ${basename}" >&2; exit 1; }
 
@@ -111,7 +121,7 @@ spec:
                   --accelerated-node-toleration "nvidia.com/gpu=present:NoSchedule" \
                   --system-node-selector "nodeGroup=system-pool" \
                   --accelerated-node-selector "nodeGroup=gpu-worker" \
-                  --storage-class "gp3" || \
+                  --storage-class "gp3" ${bundle_flags} || \
                   { echo "FAIL: bundle generation for ${basename}" >&2; exit 1; }
 
                 # Verify bundle structure
