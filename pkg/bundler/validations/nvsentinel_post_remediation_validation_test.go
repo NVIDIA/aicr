@@ -17,9 +17,12 @@ package validations
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -161,6 +164,21 @@ func TestCheckNVSentinelPostRemediationValidationCoherent(t *testing.T) {
 			postRemediationReleaseTaintsPath, i, value)
 	}
 	wantCustom := postRemediationQuarantineRules + "[0] applies the taint " + customTaint.String()
+	// jobTemplate is a test Job template that writes each toleration's value
+	// with valueAction, stored under file in lifecycle-manager.config.templates.
+	jobTemplate := func(file, valueAction string) map[string]any {
+		text := "apiVersion: batch/v1\nkind: Job\nspec:\n  template:\n    spec:\n      tolerations:\n" +
+			"      {{- range .Tolerations}}\n        - key: {{.Key}}\n          value: " + valueAction + "\n" +
+			"          operator: {{.Operator}}\n          effect: {{.Effect}}\n      {{- end}}\n"
+		return map[string]any{"lifecycle-manager": map[string]any{"config": map[string]any{
+			"templates": map[string]any{file: text}}}}
+	}
+	quotingTemplate := jobTemplate("k8s-job-template.yaml", "{{quote .Value}}")
+	// Quotes only the toleration for key a, or every one but it.
+	quotingOnlyA := jobTemplate("k8s-job-template.yaml", `{{if eq .Key "a"}}{{quote .Value}}{{else}}{{.Value}}{{end}}`)
+	quotingAllButA := jobTemplate("k8s-job-template.yaml", `{{if ne .Key "a"}}{{quote .Value}}{{else}}{{.Value}}{{end}}`)
+	definingTemplate := jobTemplate("k8s-job-template.yaml", `{{template "v" .}}{{define "v"}}{{quote .Value}}{{end}}`)
+	trueRelease := releases(postRemediationRelease(postRemediationTaint{"a", "true", "NoSchedule"}, true))
 	criterion := func(name, expression string) any { return nodeValidationCriterion(name, expression) }
 	readiness := func(items ...any) map[string]any { return at(postRemediationReadinessPath, items) }
 	quarantineCriterion := criterion(nodeValidationQuarantineCriterion, nodeValidationQuarantineExpression)
@@ -280,6 +298,30 @@ func TestCheckNVSentinelPostRemediationValidationCoherent(t *testing.T) {
 			wantErrs: []string{wantBadValue(0, "true")}},
 		{name: "a release entry with no value is fine",
 			sentinel: remediation(releases(postRemediationRelease(postRemediationTaint{"a", "", "NoSchedule"}, true)))},
+		{name: "a Job template that quotes the value keeps a value of true",
+			sentinel: remediation(quotingTemplate, trueRelease)},
+		{name: "a Job template that quotes the value lets the NVCRE taint be released",
+			sentinel: remediation(nvcreOn, quotingTemplate, releases(postRemediationRelease(nvcre, true)))},
+		{name: "a custom Job template that writes the value unquoted still breaks on true",
+			sentinel: remediation(jobTemplate("k8s-job-template.yaml", "{{.Value}}"), trueRelease),
+			wantErrs: []string{wantBadValue(0, "true")}},
+		{name: "a template no requested test renders through leaves the chart's in force",
+			sentinel: remediation(jobTemplate("unused-template.yaml", "{{quote .Value}}"), trueRelease),
+			wantErrs: []string{wantBadValue(0, "true")}},
+		{name: "a Job template that quotes only the released taint's key keeps its value",
+			sentinel: remediation(quotingOnlyA, trueRelease)},
+		{name: "a Job template that quotes every key but the released taint's breaks on it",
+			sentinel: remediation(quotingAllButA, trueRelease), wantErrs: []string{wantBadValue(0, "true")}},
+		{name: "a Job template that quotes only one of two released keys breaks on the other",
+			sentinel: remediation(quotingOnlyA, releases(
+				postRemediationRelease(postRemediationTaint{"a", "true", "NoSchedule"}, true),
+				postRemediationRelease(postRemediationTaint{"b", "true", "NoSchedule"}, true))),
+			wantErrs: []string{wantBadValue(1, "true")}},
+		{name: "a Job template that invokes a defined template falls back to the chart's unquoted write",
+			sentinel: remediation(definingTemplate, trueRelease), wantErrs: []string{wantBadValue(0, "true")}},
+		{name: "a Job template that does not parse falls back to the chart's unquoted write",
+			sentinel: remediation(jobTemplate("k8s-job-template.yaml", "{{quote .Value"), trueRelease),
+			wantErrs: []string{wantBadValue(0, "true")}},
 		{name: "a custom rule set's NoExecute taint released",
 			sentinel: remediation(quarantineRules(tainting("NoExecute", nil)), releases(postRemediationRelease(customTaint, true)))},
 		{name: "a custom rule set's NoExecute taint not released",
@@ -301,6 +343,14 @@ func TestCheckNVSentinelPostRemediationValidationCoherent(t *testing.T) {
 			sentinel: remediation(nvcreOn, at(postRemediationQuarantineRules, nil))},
 		{name: "--dynamic fault-quarantine rule sets", sentinel: remediation(),
 			cfg: dynamic("nv-sentinel", postRemediationQuarantineRules), wantErrs: []string{wantDynamic}},
+		{name: "--dynamic NVCRE monitor toggle with the chart's rule sets", sentinel: remediation(),
+			cfg: dynamic("nv-sentinel", postRemediationNVCREMonitorPath), wantErrs: []string{wantDynamic}},
+		{name: "--dynamic NVCRE monitor toggle with AICR's own rule sets",
+			sentinel: remediation(quarantineRules(map[string]any{"name": "cordon only"})),
+			cfg:      dynamic("nv-sentinel", postRemediationNVCREMonitorPath)},
+		{name: "--dynamic NVCRE monitor toggle while validation is off", noOthers: true,
+			sentinel: broken(at(postRemediationValidationEnabled, false)),
+			cfg:      dynamic("nv-sentinel", postRemediationNVCREMonitorPath)},
 
 		// node-drainer.
 		{name: "node-drainer off", sentinel: remediation(at("global.nodeDrainer.enabled", false)),
@@ -732,4 +782,83 @@ func TestPostRemediationInnerLoopsHonorCancellation(t *testing.T) {
 	} else {
 		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeCanceled)
 	}
+}
+
+func TestPostRemediationRender(t *testing.T) {
+	t.Parallel()
+
+	const head = "apiVersion: batch/v1\nkind: Job\nspec:\n  template:\n    spec:\n      tolerations:\n"
+	tolerations := head + "      {{- range .Tolerations}}\n        - key: {{.Key}}\n          value: {{quote .Value}}\n" +
+		"      {{- end}}\n"
+	taints := []postRemediationTaint{{key: "a", value: "true", effect: "NoSchedule"}}
+	many := make([]string, 2000)
+	for i := range many {
+		many[i] = fmt.Sprintf("%01000d", i)
+	}
+
+	tests := []struct {
+		name          string
+		text          string
+		command       []string
+		wantEvaluated bool
+	}{
+		{name: "a bounded template is evaluated", text: tolerations, wantEvaluated: true},
+		{name: "nested ranges over short lists are evaluated", wantEvaluated: true,
+			text: "{{range .Tolerations}}{{range $.Command}}{{range $.Env}}{{end}}{{end}}{{end}}" + tolerations},
+		{name: "nested ranges past the step budget are not", command: many,
+			text: "{{range .Command}}{{range $.Command}}{{end}}{{end}}" + tolerations},
+		{name: "a range over an integer field is not", text: "{{range .TimeoutSeconds}}x{{end}}" + tolerations},
+		{name: "a range over a variable is not", text: "{{$n := 3}}{{range $n}}x{{end}}" + tolerations},
+		{name: "a defined template is not", text: `{{define "a"}}x{{end}}` + tolerations},
+		{name: "printf is not", text: `{{printf "%0999999999d" 1}}` + tolerations},
+		{name: "output past the size limit is not", command: many[:100],
+			text: "{{range .Command}}{{range $.Command}}{{.}}{{end}}{{end}}" + tolerations},
+		{name: "function results past the size limit are not, though nothing is written", command: many[:50],
+			text: `{{range .Command}}{{range $.Command}}{{$x := quote (join $.Command ",")}}{{end}}{{end}}` + tolerations},
+		{name: "a template past the size cap is not",
+			text: tolerations + "#" + strings.Repeat("x", defaults.MaxNVSentinelJobTemplateBytes)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			render := postRemediationJobRender{file: "t.yaml", text: tt.text, test: "x", command: tt.command}
+			rendered, evaluated, err := postRemediationRender(t.Context(), render, taints)
+			if err != nil {
+				t.Fatalf("postRemediationRender: %v", err)
+			}
+			if evaluated != tt.wantEvaluated || (rendered != nil) != tt.wantEvaluated {
+				t.Errorf("evaluated = %v (rendered %v), want %v", evaluated, rendered != nil, tt.wantEvaluated)
+			}
+		})
+	}
+
+	t.Run("the budget stops an execution once its deadline passes", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(t.Context())
+		budget := &postRemediationBudget{ctx: ctx, remaining: 10}
+		if err := budget.charge(4); err != nil {
+			t.Fatalf("charge within budget: %v", err)
+		}
+		if err := budget.charge(7); err == nil {
+			t.Error("charge past the budget succeeded")
+		}
+		cancel()
+		errorstest.WantReportedCode(t, budget.charge(0), aicrerrors.ErrCodeCanceled)
+		out := &postRemediationCappedWriter{budget: budget}
+		if _, err := out.Write([]byte("x")); err == nil {
+			t.Error("write after the deadline succeeded")
+		}
+	})
+
+	t.Run("an ended context is reported", func(t *testing.T) {
+		t.Parallel()
+		canceled, cancel := context.WithCancel(t.Context())
+		cancel()
+		_, _, err := postRemediationRender(canceled, postRemediationJobRender{file: "t.yaml", text: tolerations}, taints)
+		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeCanceled)
+		expired, cancelExpired := context.WithDeadline(t.Context(), time.Unix(0, 0))
+		defer cancelExpired()
+		_, _, err = postRemediationRender(expired, postRemediationJobRender{file: "t.yaml", text: tolerations}, taints)
+		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeTimeout)
+	})
 }

@@ -467,6 +467,12 @@ const (
 	// EvidenceRenderTimeout is the timeout for rendering conformance evidence.
 	EvidenceRenderTimeout = 30 * time.Second
 
+	// NVSentinelJobTemplateRenderTimeout bounds rendering one lifecycle-manager
+	// test Job template that AICR's values override, which the post-remediation
+	// validation gate does at bundle time to read the tolerations it writes. A
+	// real Job template renders in well under a millisecond.
+	NVSentinelJobTemplateRenderTimeout = 250 * time.Millisecond
+
 	// EvidenceBundleBuildTimeout bounds local bundle assembly. Local I/O
 	// only; 60s is headroom over the typical few-second pipeline.
 	EvidenceBundleBuildTimeout = 60 * time.Second
@@ -1047,6 +1053,17 @@ const (
 	// parity across bundle reads. The bound matters because the file arrives
 	// from an OCI registry or a GitOps clone alongside the record naming it.
 	MaxBundleValuesBytes int64 = 1 * 1024 * 1024 // 1 MiB
+
+	// MaxNVSentinelJobTemplateBytes caps what one rendering of a
+	// lifecycle-manager test Job template may write at bundle time. The chart's
+	// own template renders to under 2 KiB.
+	MaxNVSentinelJobTemplateBytes = 256 * 1024 // 256 KiB
+
+	// MaxNVSentinelJobTemplateSteps caps the evaluation steps a
+	// lifecycle-manager test Job template may take over its data, estimated
+	// before it runs, which bounds work that writes nothing. The chart's own
+	// template takes about 115 with a few release taints.
+	MaxNVSentinelJobTemplateSteps = 100_000
 
 	// MaxManifestFileBytes caps the size of an in-bundle manifest.json
 	// file read by the verifier. A manifest entry is ~150 bytes (path +
