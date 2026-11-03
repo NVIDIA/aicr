@@ -58,7 +58,21 @@ if [[ -z "${DRY_RUN_FLAG:-}" && -f "${SCRIPT_DIR}/.aicr-chart.tgz" ]]; then
   REPO=""
 fi
 
-helm upgrade --install ${FORCE_CONFLICTS_FLAG} {{ .Name | shq }} "${CHART_REF}" \
+{{ if .RequiredDynamicPaths }}# The registry requires these --dynamic paths and the bundler wrote their
+# cluster-values.yaml stubs empty. Refuse to install until each is filled in;
+# the match is on the path's leaf key, unambiguous because that file holds
+# only the declared paths. Skipped under --dry-run, so a release can be
+# previewed before a short-lived value such as a token is minted.
+if [[ -z "${DRY_RUN_FLAG:-}" ]]; then
+{{- range .RequiredDynamicPaths }}
+  if grep -Eq {{ emptyStubPattern . }} cluster-values.yaml; then
+    echo {{ printf "%s: %s is required but still empty in cluster-values.yaml; set it before running install.sh" $.Name . | shq }} >&2
+    exit 1
+  fi
+{{- end }}
+fi
+
+{{ end }}helm upgrade --install ${FORCE_CONFLICTS_FLAG} {{ .Name | shq }} "${CHART_REF}" \
   ${REPO:+--repo "${REPO}"} "${CHART_VERSION_ARGS[@]}" \
   --namespace {{ .Namespace | shq }} --create-namespace \
   -f values.yaml -f cluster-values.yaml \

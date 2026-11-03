@@ -51,7 +51,16 @@ func shellSingleQuote(s string) string {
 // (IsSafePathComponent rejects separators, not shell metacharacters), and
 // namespaces are not validated here at all, so neither is safe to interpolate
 // bare into a command.
-var shellFuncs = template.FuncMap{"shq": shellSingleQuote}
+var shellFuncs = template.FuncMap{"shq": shellSingleQuote, "emptyStubPattern": emptyStubPattern}
+
+// emptyStubPattern returns a single-quoted extended regex matching the line
+// cluster-values.yaml holds for path while its stub is empty: the path's
+// leaf key followed by nothing, "", ~ or null. The leaf is enough because
+// that file carries only the declared dynamic paths.
+func emptyStubPattern(path string) string {
+	leaf := path[strings.LastIndex(path, ".")+1:]
+	return shellSingleQuote(`^[[:space:]]*` + regexp.QuoteMeta(leaf) + `:[[:space:]]*(""|~|null)?[[:space:]]*$`)
+}
 
 var upstreamHelmTmpl = template.Must(
 	template.New("install-upstream-helm.sh.tmpl").
@@ -143,10 +152,11 @@ func writeUpstreamHelmFolder(outputDir, dir string, idx int, c Component) (Folde
 	}
 
 	installData := struct {
-		Name      string
-		Namespace string
-		OwnsCRDs  bool
-	}{c.Name, c.Namespace, c.OwnsCRDs}
+		Name                 string
+		Namespace            string
+		OwnsCRDs             bool
+		RequiredDynamicPaths []string
+	}{c.Name, c.Namespace, c.OwnsCRDs, c.RequiredDynamicPaths}
 	if err = renderTemplateToFile(upstreamHelmTmpl, installData, folderDir, "install.sh", 0o755); err != nil {
 		return Folder{}, err
 	}

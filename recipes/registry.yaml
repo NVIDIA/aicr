@@ -1503,8 +1503,18 @@ components:
     displayName: Run:ai cluster
     class: ops
     valueOverrideKeys:
-      - runaicluster
       - runai
+      - runaicluster
+    # The registration inputs. The chart renders its hook Jobs with empty
+    # arguments when they are unset, so the bundler refuses a bundle that
+    # leaves one empty instead. The token is a two-hour credential: it may
+    # only be declared --dynamic, and only the helm deployer may carry it.
+    requiredValues:
+      - controlPlane.url
+      - cluster.uid
+      - controlPlane.bootstrapToken
+    installTimeSecretPaths:
+      - controlPlane.bootstrapToken
     # The chart's crds/ carry clusters.run.ai (RunaiConfig's CRD is applied by
     # the runai-crd-upgrader hook, not shipped there) and its templates render
     # a Cluster CR of that kind; the bundled kai-scheduler subchart does the

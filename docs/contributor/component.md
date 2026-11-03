@@ -155,6 +155,8 @@ One-liner per field:
 | `nodeScheduling.accelerated` | Helm value paths that receive the **GPU node** selector / tolerations / taints |
 | `nodeScheduling.system.requireNodeSelector`, `nodeScheduling.accelerated.requireNodeSelector` | Fail the bundle instead of silently skipping injection when the corresponding `--system-node-selector`/`--accelerated-node-selector` flag is omitted and no overlay opts the paths out (see [below](#nodeschedulingsystem-vs-accelerated)) |
 | `nodeScheduling.system.requireNodeSelectorIfStorageClassSet`, `nodeScheduling.accelerated.requireNodeSelectorIfStorageClassSet` | Conditional counterpart to `requireNodeSelector`: same enforcement, but only once a `storageClassPaths`/`sharedStorageClassPaths` path resolves to a non-empty value (see [below](#nodeschedulingsystem-vs-accelerated)) |
+| `requiredValues` | Value paths a bundle must supply: non-empty once every override is applied, or declared with `--dynamic`. `aicr bundle` fails otherwise, naming the paths ([ADR-029](https://github.com/NVIDIA/aicr/blob/main/docs/design/029-bundle-required-and-secret-inputs.md); see [below](#requiredvalues-and-installtimesecretpaths)) |
+| `installTimeSecretPaths` | Value paths that carry a credential. A non-empty value from any source is rejected; `--dynamic` is the only way to supply one, and only the `helm` deployer may ([ADR-029](https://github.com/NVIDIA/aicr/blob/main/docs/design/029-bundle-required-and-secret-inputs.md)) |
 | `nodeScheduling.nodeCountPaths` | Where `--nodes` is written |
 | `podScheduling.workload.workloadSelectorPaths` | Workload-pod placement |
 | `storageClassPaths` | Where `--storage-class` is written |
@@ -260,6 +262,37 @@ added later without rebuilding the bundle. `kube-prometheus-stack` is the
 example in `registry.yaml`. Its Prometheus StatefulSet uses `emptyDir` until
 `--storage-class` (or `--set` / an overlay override) puts a non-empty value
 at its `storageClassPaths` entry.
+
+### requiredValues and installTimeSecretPaths
+
+Some charts cannot do anything useful without a per-cluster input the recipe
+cannot know: a control plane URL, a cluster identifier, a registration token.
+Shipping them empty renders a bundle that installs and then fails at the
+first hook. `requiredValues` moves that failure to bundle time. Each listed
+path must hold a non-empty value once every override (`valuesFile`, overlay,
+`--set`, `--set-json`, `--set-file`, scheduling injection) has been applied,
+or be declared with `--dynamic`, which defers it to `cluster-values.yaml` at
+install. The check runs in `extractComponentValues`, right after
+`validateRequiredNodeSelectors`, and fails with `INVALID_REQUEST` naming
+every missing path and the flag that supplies it. A dynamic declaration on an
+ancestor or descendant of a required path counts as supplying it, the same
+intersection rule `requireNodeSelector` uses to reject one. Empty means nil,
+a blank string, or an empty map or list; `false` and `0` are settings.
+
+`installTimeSecretPaths` is the companion for credentials. A non-empty value
+at one of these paths is rejected whatever wrote it, so no generated bundle,
+golden or evidence can carry the secret; `--dynamic` is the only way to
+supply it. Because the other deployers persist the filled value (a Flux
+ConfigMap, a Fleet values file in Git, Terraform state, an Argo CD
+Application spec), a component whose secret path is required or declared
+dynamic is rejected on every deployer but `helm`, before values are
+extracted, so the operator hears about the deployer before being told to
+declare the secret. For the `helm` deployer, a required path that was
+declared dynamic also gets a guard in the component's `install.sh`: it
+refuses to run while the path's `cluster-values.yaml` stub is still empty,
+except under `--dry-run`. `runai-cluster` is the example in `registry.yaml`;
+the operator-facing side is in
+[Required and install-time secret inputs](../user/bundling.md#required-and-install-time-secret-inputs).
 
 ## `valueOverrideKeys`
 

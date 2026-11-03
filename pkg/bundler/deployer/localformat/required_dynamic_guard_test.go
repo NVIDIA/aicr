@@ -1,0 +1,144 @@
+// Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package localformat_test
+
+import (
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
+)
+
+// requiredDynamicComponent is an upstream Helm component with one dynamic
+// path the registry requires and one it does not.
+func requiredDynamicComponent(required bool) localformat.Component {
+	c := localformat.Component{
+		Name:         "runai-fixture",
+		Namespace:    "runai",
+		Repository:   "https://helm.example.invalid/charts",
+		ChartName:    "runai-cluster",
+		Version:      "3.0.20",
+		Values:       map[string]any{"controlPlane": map[string]any{"url": "https://cp.example", "bootstrapToken": ""}, "global": map[string]any{"tolerations": []any{}}},
+		DynamicPaths: []string{"controlPlane.bootstrapToken", "global.tolerations"},
+	}
+	if required {
+		c.RequiredDynamicPaths = []string{"controlPlane.bootstrapToken"}
+	}
+	return c
+}
+
+func writeRequiredDynamicFolder(t *testing.T, required bool) string {
+	t.Helper()
+	outDir := t.TempDir()
+	res, err := localformat.Write(context.Background(), localformat.Options{
+		OutputDir:  outDir,
+		Components: []localformat.Component{requiredDynamicComponent(required)},
+	})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if len(res.Folders) != 1 {
+		t.Fatalf("want 1 folder, got %d", len(res.Folders))
+	}
+	return filepath.Join(outDir, res.Folders[0].Dir)
+}
+
+func TestInstallScript_RequiredDynamicGuard(t *testing.T) {
+	dir := writeRequiredDynamicFolder(t, true)
+	script, err := os.ReadFile(filepath.Join(dir, "install.sh"))
+	if err != nil {
+		t.Fatalf("read install.sh: %v", err)
+	}
+	for _, want := range []string{
+		"grep -Eq '^[[:space:]]*bootstrapToken:[[:space:]]*(\"\"|~|null)?[[:space:]]*$' cluster-values.yaml",
+		"controlPlane.bootstrapToken is required but still empty",
+	} {
+		if !strings.Contains(string(script), want) {
+			t.Errorf("install.sh lacks %q", want)
+		}
+	}
+	if strings.Contains(string(script), "tolerations:[[:space:]]") {
+		t.Error("install.sh guards global.tolerations, which the registry does not require")
+	}
+
+	// The guard is a self-contained block; run it on its own against the
+	// folder's real cluster-values.yaml in each of its three states.
+	guard := extractGuardBlock(t, string(script))
+	run := func(env ...string) int {
+		cmd := exec.CommandContext(context.Background(), "bash", "-c", guard)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), env...)
+		if runErr := cmd.Run(); runErr != nil {
+			var exitErr *exec.ExitError
+			if errors.As(runErr, &exitErr) {
+				return exitErr.ExitCode()
+			}
+			t.Fatalf("run guard: %v", runErr)
+		}
+		return 0
+	}
+	if rc := run(); rc != 1 {
+		t.Errorf("empty stub: guard exited %d, want 1", rc)
+	}
+	if rc := run("DRY_RUN_FLAG=--dry-run"); rc != 0 {
+		t.Errorf("empty stub under --dry-run: guard exited %d, want 0", rc)
+	}
+	cv := filepath.Join(dir, "cluster-values.yaml")
+	raw, err := os.ReadFile(cv)
+	if err != nil {
+		t.Fatalf("read cluster-values.yaml: %v", err)
+	}
+	filled := strings.Replace(string(raw), "bootstrapToken: \"\"", "bootstrapToken: filled-at-install", 1)
+	if filled == string(raw) {
+		t.Fatalf("cluster-values.yaml does not carry the empty stub this test expects:\n%s", raw)
+	}
+	if err := os.WriteFile(cv, []byte(filled), 0o600); err != nil {
+		t.Fatalf("write cluster-values.yaml: %v", err)
+	}
+	if rc := run(); rc != 0 {
+		t.Errorf("filled stub: guard exited %d, want 0", rc)
+	}
+}
+
+func TestInstallScript_NoGuardWithoutRequiredDynamicPaths(t *testing.T) {
+	dir := writeRequiredDynamicFolder(t, false)
+	script, err := os.ReadFile(filepath.Join(dir, "install.sh"))
+	if err != nil {
+		t.Fatalf("read install.sh: %v", err)
+	}
+	if strings.Contains(string(script), "still empty in cluster-values.yaml") {
+		t.Error("install.sh carries the required-dynamic guard for a component with no required dynamic paths")
+	}
+}
+
+// extractGuardBlock returns the lines from the guard's opening if to its
+// closing fi, so the test runs exactly the block the template rendered.
+func extractGuardBlock(t *testing.T, script string) string {
+	t.Helper()
+	start := strings.Index(script, "if [[ -z \"${DRY_RUN_FLAG:-}\" ]]; then\n  if grep -Eq")
+	if start < 0 {
+		t.Fatal("guard block not found in install.sh")
+	}
+	end := strings.Index(script[start:], "\nfi\n")
+	if end < 0 {
+		t.Fatal("guard block has no closing fi")
+	}
+	return script[start : start+end+4]
+}

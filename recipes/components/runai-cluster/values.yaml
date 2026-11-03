@@ -46,14 +46,15 @@
 # should be as restricted as the kubeconfig. A fresh token is needed for every
 # install and upgrade. The chart does not validate these three values: with
 # any of them empty it still renders every registration hook Job, with empty
-# arguments, and AICR does not reject such a bundle yet (a bundle-time
-# required-values check is Phase 1.4 of #3302). Pass all three. The hook Jobs
-# carry the token in plain text as a container argument, so anyone who can
-# read Pods or Jobs in the runai namespace can read it, and a failed hook
-# (backoffLimit 0, deleted only on success) keeps that Job behind. The flux,
-# fleet, terraform and argocd-helm deployers would write the filled token at
-# rest (manifest, Git, state, Application spec); only the helm deployer is
-# supported for this credential.
+# arguments. The registry therefore lists them as requiredValues, so aicr
+# bundle refuses a bundle that leaves one empty, and the token as an
+# installTimeSecretPaths entry, so a value from --set or a values file is
+# rejected and every deployer but helm is refused (the others would write the
+# filled token at rest: manifest, Git, state, Application spec). install.sh
+# refuses to run while the token stub in cluster-values.yaml is empty. The
+# hook Jobs carry the token in plain text as a container argument, so anyone
+# who can read Pods or Jobs in the runai namespace can read it, and a failed
+# hook (backoffLimit 0, deleted only on success) keeps that Job behind.
 controlPlane:
   url: ""
   bootstrapToken: ""

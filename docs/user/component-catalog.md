@@ -2420,15 +2420,19 @@ success, so a failed hook leaves its Job, token included, until the next
 install or upgrade replaces it. Delete a failed hook Job once you have read
 its logs.
 
-The chart does not validate the three inputs. With the URL, UID or token
-empty it still renders every hook Job, with empty arguments, and this release
-does not reject such a bundle either, so pass all three; a bundle-time
-required-values check is planned
-([#3302](https://github.com/NVIDIA/aicr/issues/3302), Phase 1.4).
+The chart does not validate the three inputs: with the URL, UID or token
+empty it still renders every hook Job, with empty arguments. AICR validates
+them instead. The registry lists all three as `requiredValues`, so
+`aicr bundle` fails naming whichever is missing, and the token is an
+`installTimeSecretPaths` entry, so a value supplied with `--set` or in a
+values file is rejected; see
+[Required and install-time secret inputs](bundling.md#required-and-install-time-secret-inputs).
+The component's `install.sh` also refuses to run while the token stub in
+`cluster-values.yaml` is still empty (`deploy.sh --dry-run` skips that check).
 
-Use the `helm` deployer for this component. The other deployers would store
-the filled token at rest, and the GitOps ones would also re-apply an expired
-token on every sync:
+Only the `helm` deployer may carry this component; `aicr bundle` rejects the
+others. They would store the filled token at rest, and the GitOps ones would
+also re-apply an expired token on every sync:
 
 | Deployer | Where the filled token would end up |
 |---|---|
