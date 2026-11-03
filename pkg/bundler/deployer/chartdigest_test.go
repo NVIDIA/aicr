@@ -16,13 +16,12 @@ package deployer
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 const testChartDigest = "sha256:5e0f2b7c9a1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5b7c9d1e3f"
@@ -32,7 +31,6 @@ const testChartDigest = "sha256:5e0f2b7c9a1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d
 // tests do not depend on which real components carry a digest.
 func digestRegistryProvider(t *testing.T) recipe.DataProvider {
 	t.Helper()
-	dataDir := t.TempDir()
 	registryYAML := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
@@ -50,9 +48,7 @@ components:
       defaultChart: example/undigested
       defaultVersion: 1.2.3
 `
-	if err := os.WriteFile(filepath.Join(dataDir, "registry.yaml"), []byte(registryYAML), 0o600); err != nil {
-		t.Fatalf("WriteFile registry.yaml: %v", err)
-	}
+	dataDir := providertest.WriteDir(t, map[string][]byte{recipe.RegistryFileName: []byte(registryYAML)})
 	layered, err := recipe.NewLayeredDataProvider(
 		recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ""),
 		recipe.LayeredProviderConfig{ExternalDir: dataDir})

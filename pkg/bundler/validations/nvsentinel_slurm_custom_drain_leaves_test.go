@@ -16,8 +16,6 @@ package validations
 
 import (
 	"io/fs"
-	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -27,6 +25,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 // TestNVSentinelSlurmCustomDrainOnEverySlurmLeaf composes the real mixins
@@ -117,14 +116,7 @@ func TestNVSentinelSlurmCustomDrainOnEverySlurmLeaf(t *testing.T) {
 // embedded catalog.
 func layerSlurmLeaves(t *testing.T, leaves, mixins []string) recipe.DataProvider {
 	t.Helper()
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "overlays"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	registry := "kind: ComponentRegistry\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: slurm-custom-drain-test\ncomponents: []\n"
-	if err := os.WriteFile(filepath.Join(dir, recipe.RegistryFileName), []byte(registry), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	files := map[string][]byte{recipe.RegistryFileName: []byte(providertest.EmptyRegistryYAML)}
 	for _, leaf := range leaves {
 		data, err := fs.ReadFile(recipe.GetEmbeddedFS(), "overlays/"+leaf+".yaml")
 		if err != nil {
@@ -147,10 +139,9 @@ func layerSlurmLeaves(t *testing.T, leaves, mixins []string) recipe.DataProvider
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err = os.WriteFile(filepath.Join(dir, "overlays", leaf+".yaml"), out, 0o600); err != nil {
-			t.Fatal(err)
-		}
+		files["overlays/"+leaf+".yaml"] = out
 	}
+	dir := providertest.WriteDir(t, files)
 	layered, err := recipe.NewLayeredDataProvider(recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "."),
 		recipe.LayeredProviderConfig{ExternalDir: dir})
 	if err != nil {

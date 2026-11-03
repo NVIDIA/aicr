@@ -18,8 +18,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -27,6 +25,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 // digestStubPuller returns the same archive bytes for every pull.
@@ -46,7 +45,6 @@ func (digestStubPuller) Pull(_ context.Context, c localformat.Component) ([]byte
 // to a registry that pins digest for it.
 func digestPinnedRecipe(t *testing.T, digest string) *recipe.RecipeResult {
 	t.Helper()
-	dataDir := t.TempDir()
 	registryYAML := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
@@ -58,9 +56,7 @@ components:
       defaultChart: example/digested
       defaultVersion: 1.2.3
       defaultDigest: ` + digest + "\n"
-	if err := os.WriteFile(filepath.Join(dataDir, "registry.yaml"), []byte(registryYAML), 0o600); err != nil {
-		t.Fatalf("WriteFile registry.yaml: %v", err)
-	}
+	dataDir := providertest.WriteDir(t, map[string][]byte{recipe.RegistryFileName: []byte(registryYAML)})
 	layered, err := recipe.NewLayeredDataProvider(
 		recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ""),
 		recipe.LayeredProviderConfig{ExternalDir: dataDir})

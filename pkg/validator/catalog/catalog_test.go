@@ -19,13 +19,13 @@ import (
 	"encoding/json"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"gopkg.in/yaml.v3"
 )
@@ -543,22 +543,6 @@ func TestLoadWithExternalCatalog(t *testing.T) {
 	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "")
 	t.Setenv("AICR_VALIDATOR_IMAGE_TAG", "")
 
-	// Create external data directory with registry.yaml (required) and catalog
-	tmpDir := t.TempDir()
-
-	registryContent := `apiVersion: validator.nvidia.com/v1alpha1alpha1
-kind: ComponentRegistry
-components: []
-`
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(registryContent), 0600); err != nil {
-		t.Fatalf("failed to write registry.yaml: %v", err)
-	}
-
-	validatorsDir := filepath.Join(tmpDir, "validators")
-	if err := os.MkdirAll(validatorsDir, 0755); err != nil {
-		t.Fatalf("failed to create validators dir: %v", err)
-	}
-
 	externalCatalog := `apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
@@ -573,9 +557,10 @@ validators:
     args: ["dynamo-cluster"]
     env: []
 `
-	if err := os.WriteFile(filepath.Join(validatorsDir, "catalog.yaml"), []byte(externalCatalog), 0600); err != nil {
-		t.Fatalf("failed to write catalog.yaml: %v", err)
-	}
+	tmpDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":           []byte(providertest.EmptyRegistryYAML),
+		"validators/catalog.yaml": []byte(externalCatalog),
+	})
 
 	// Set up layered provider
 	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")

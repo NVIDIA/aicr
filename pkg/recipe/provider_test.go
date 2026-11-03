@@ -27,14 +27,9 @@ import (
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 	"gopkg.in/yaml.v3"
 )
-
-// testEmptyRegistryContent is a minimal registry.yaml for testing.
-const testEmptyRegistryContent = `apiVersion: aicr.run/v1beta1
-kind: ComponentRegistry
-components: []
-`
 
 // TestEmbeddedDataProvider tests the embedded data provider.
 func TestEmbeddedDataProvider(t *testing.T) {
@@ -111,10 +106,6 @@ func TestLayeredDataProvider_RequiresRegistry(t *testing.T) {
 
 // TestLayeredDataProvider_MergesRegistry tests registry merging.
 func TestLayeredDataProvider_MergesRegistry(t *testing.T) {
-	// Create temp directory with registry.yaml
-	tmpDir := t.TempDir()
-
-	// Create a registry with a custom component
 	registryContent := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
@@ -124,9 +115,9 @@ components:
       defaultRepository: https://example.com/charts
       defaultChart: custom/custom-component
 `
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(registryContent), 0600); err != nil {
-		t.Fatalf("failed to write registry.yaml: %v", err)
-	}
+	tmpDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml": []byte(registryContent),
+	})
 
 	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
@@ -164,12 +155,11 @@ func TestLayeredDataProvider_ValidatesRawExternalRegistryBeforeMerge(t *testing.
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tmpDir := t.TempDir()
 			registry := "apiVersion: " + tt.apiVersion + "\nkind: ComponentRegistry\ncomponents:\n" +
 				"  - name: external-only\n    displayName: External Only\n"
-			if err := os.WriteFile(filepath.Join(tmpDir, registryFileName), []byte(registry), 0o600); err != nil {
-				t.Fatalf("write registry: %v", err)
-			}
+			tmpDir := providertest.WriteDir(t, map[string][]byte{
+				registryFileName: []byte(registry),
+			})
 			provider, err := NewLayeredDataProvider(
 				NewEmbeddedDataProvider(GetEmbeddedFS(), "."),
 				LayeredProviderConfig{ExternalDir: tmpDir},
@@ -211,21 +201,6 @@ func TestLayeredDataProvider_ValidatesRawExternalRegistryBeforeMerge(t *testing.
 
 // TestLayeredDataProvider_OverridesFile tests file replacement.
 func TestLayeredDataProvider_OverridesFile(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create registry.yaml (required)
-	registryContent := testEmptyRegistryContent
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(registryContent), 0600); err != nil {
-		t.Fatalf("failed to write registry.yaml: %v", err)
-	}
-
-	// Create overlays directory
-	overlaysDir := filepath.Join(tmpDir, "overlays")
-	if err := os.MkdirAll(overlaysDir, 0755); err != nil {
-		t.Fatalf("failed to create overlays dir: %v", err)
-	}
-
-	// Create a custom base.yaml that will override embedded (now in overlays/)
 	baseContent := `apiVersion: aicr.run/v1beta1
 kind: RecipeMetadata
 metadata:
@@ -233,9 +208,10 @@ metadata:
 spec:
   components: []
 `
-	if err := os.WriteFile(filepath.Join(overlaysDir, "base.yaml"), []byte(baseContent), 0600); err != nil {
-		t.Fatalf("failed to write base.yaml: %v", err)
-	}
+	tmpDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":      []byte(providertest.EmptyRegistryYAML),
+		"overlays/base.yaml": []byte(baseContent),
+	})
 
 	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
@@ -265,20 +241,6 @@ spec:
 
 // TestLayeredDataProvider_AddsNewFile tests adding new files.
 func TestLayeredDataProvider_AddsNewFile(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create registry.yaml (required)
-	registryContent := testEmptyRegistryContent
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(registryContent), 0600); err != nil {
-		t.Fatalf("failed to write registry.yaml: %v", err)
-	}
-
-	// Create a new overlay that doesn't exist in embedded
-	overlaysDir := filepath.Join(tmpDir, "overlays")
-	if err := os.MkdirAll(overlaysDir, 0755); err != nil {
-		t.Fatalf("failed to create overlays dir: %v", err)
-	}
-
 	overlayContent := `apiVersion: aicr.run/v1beta1
 kind: RecipeMetadata
 metadata:
@@ -288,9 +250,10 @@ spec:
     service: custom
   components: []
 `
-	if err := os.WriteFile(filepath.Join(overlaysDir, "custom-overlay.yaml"), []byte(overlayContent), 0600); err != nil {
-		t.Fatalf("failed to write custom-overlay.yaml: %v", err)
-	}
+	tmpDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":                []byte(providertest.EmptyRegistryYAML),
+		"overlays/custom-overlay.yaml": []byte(overlayContent),
+	})
 
 	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
@@ -318,7 +281,7 @@ func TestLayeredDataProvider_SecurityChecks(t *testing.T) {
 		tmpDir := t.TempDir()
 
 		// Create registry.yaml
-		registryContent := testEmptyRegistryContent
+		registryContent := providertest.EmptyRegistryYAML
 		if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(registryContent), 0600); err != nil {
 			t.Fatalf("failed to write registry.yaml: %v", err)
 		}
@@ -478,13 +441,9 @@ func TestReadExternalFile(t *testing.T) {
 
 // TestLayeredDataProvider_FallsBackToEmbedded tests fallback behavior.
 func TestLayeredDataProvider_FallsBackToEmbedded(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create registry.yaml (required)
-	registryContent := testEmptyRegistryContent
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(registryContent), 0600); err != nil {
-		t.Fatalf("failed to write registry.yaml: %v", err)
-	}
+	tmpDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml": []byte(providertest.EmptyRegistryYAML),
+	})
 
 	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
@@ -514,9 +473,6 @@ func TestLayeredDataProvider_FallsBackToEmbedded(t *testing.T) {
 // TestLayeredDataProvider_IntegrationWithRegistry tests that the layered provider
 // correctly merges registry files by testing the merged content directly.
 func TestLayeredDataProvider_IntegrationWithRegistry(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create a registry with an additional custom component
 	registryContent := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
@@ -527,9 +483,9 @@ components:
       defaultChart: custom/custom-operator
       defaultVersion: v1.0.0
 `
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(registryContent), 0600); err != nil {
-		t.Fatalf("failed to write registry.yaml: %v", err)
-	}
+	tmpDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml": []byte(registryContent),
+	})
 
 	// Create layered provider
 	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
@@ -581,26 +537,14 @@ components:
 
 // TestLayeredDataProvider_OverrideComponentValues tests overriding component values files.
 func TestLayeredDataProvider_OverrideComponentValues(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create required registry.yaml
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(testEmptyRegistryContent), 0600); err != nil {
-		t.Fatalf("failed to write registry.yaml: %v", err)
-	}
-
-	// Create custom values file for cert-manager
-	componentsDir := filepath.Join(tmpDir, "components", "cert-manager")
-	if err := os.MkdirAll(componentsDir, 0755); err != nil {
-		t.Fatalf("failed to create components dir: %v", err)
-	}
-
 	customValues := `# Custom values for testing
 installCRDs: false
 customField: customValue
 `
-	if err := os.WriteFile(filepath.Join(componentsDir, "values.yaml"), []byte(customValues), 0600); err != nil {
-		t.Fatalf("failed to write custom values: %v", err)
-	}
+	tmpDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":                       []byte(providertest.EmptyRegistryYAML),
+		"components/cert-manager/values.yaml": []byte(customValues),
+	})
 
 	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
@@ -633,19 +577,6 @@ customField: customValue
 
 // TestLayeredDataProvider_WalkDir tests walking directories with layered provider.
 func TestLayeredDataProvider_WalkDir(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create registry.yaml (required)
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(testEmptyRegistryContent), 0600); err != nil {
-		t.Fatalf("failed to write registry.yaml: %v", err)
-	}
-
-	// Create external overlays directory with a custom file
-	overlaysDir := filepath.Join(tmpDir, "overlays")
-	if err := os.MkdirAll(overlaysDir, 0755); err != nil {
-		t.Fatalf("failed to create overlays dir: %v", err)
-	}
-
 	customOverlay := `apiVersion: aicr.run/v1beta1
 kind: RecipeMetadata
 metadata:
@@ -655,9 +586,10 @@ spec:
     service: walktest
   componentRefs: []
 `
-	if err := os.WriteFile(filepath.Join(overlaysDir, "walk-test.yaml"), []byte(customOverlay), 0600); err != nil {
-		t.Fatalf("failed to write walk-test.yaml: %v", err)
-	}
+	tmpDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":           []byte(providertest.EmptyRegistryYAML),
+		"overlays/walk-test.yaml": []byte(customOverlay),
+	})
 
 	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
@@ -723,20 +655,6 @@ spec:
 
 // TestLayeredDataProvider_WalkDirWithOverride tests walking when external overrides embedded files.
 func TestLayeredDataProvider_WalkDirWithOverride(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create registry.yaml (required)
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(testEmptyRegistryContent), 0600); err != nil {
-		t.Fatalf("failed to write registry.yaml: %v", err)
-	}
-
-	// Create overlays directory with a file that has same name as one in embedded
-	overlaysDir := filepath.Join(tmpDir, "overlays")
-	if err := os.MkdirAll(overlaysDir, 0755); err != nil {
-		t.Fatalf("failed to create overlays dir: %v", err)
-	}
-
-	// Create an overlay file with unique content
 	externalOverlay := `apiVersion: aicr.run/v1beta1
 kind: RecipeMetadata
 metadata:
@@ -746,9 +664,10 @@ spec:
     service: external-test
   componentRefs: []
 `
-	if err := os.WriteFile(filepath.Join(overlaysDir, "external-test.yaml"), []byte(externalOverlay), 0600); err != nil {
-		t.Fatalf("failed to write external-test.yaml: %v", err)
-	}
+	tmpDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":               []byte(providertest.EmptyRegistryYAML),
+		"overlays/external-test.yaml": []byte(externalOverlay),
+	})
 
 	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
@@ -793,11 +712,9 @@ spec:
 
 // TestLayeredDataProvider_SourceForRegistry tests source reporting for registry file.
 func TestLayeredDataProvider_SourceForRegistry(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(testEmptyRegistryContent), 0600); err != nil {
-		t.Fatalf("failed to write registry.yaml: %v", err)
-	}
+	tmpDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml": []byte(providertest.EmptyRegistryYAML),
+	})
 
 	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
@@ -822,17 +739,10 @@ func TestLayeredDataProvider_SourceForRegistry(t *testing.T) {
 // TestLayeredDataProvider_SourceHostNativeNestedPath tests that Source resolves nested catalog paths
 // when formatted using the host-native path separator.
 func TestLayeredDataProvider_SourceHostNativeNestedPath(t *testing.T) {
-	tmpDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(testEmptyRegistryContent), 0600); err != nil {
-		t.Fatalf("failed to write registry.yaml: %v", err)
-	}
-	validatorsDir := filepath.Join(tmpDir, "validators")
-	if err := os.MkdirAll(validatorsDir, 0755); err != nil {
-		t.Fatalf("failed to create validators dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(validatorsDir, "catalog.yaml"), []byte("validators: []\n"), 0600); err != nil {
-		t.Fatalf("failed to write catalog.yaml: %v", err)
-	}
+	tmpDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":           []byte(providertest.EmptyRegistryYAML),
+		"validators/catalog.yaml": []byte("validators: []\n"),
+	})
 
 	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
@@ -852,18 +762,10 @@ func TestLayeredDataProvider_SourceHostNativeNestedPath(t *testing.T) {
 // TestLayeredDataProvider_WalkDirDeduplication verifies that external overrides retain root prefix
 // and properly suppress embedded counterparts without emitting duplicate entries.
 func TestLayeredDataProvider_WalkDirDeduplication(t *testing.T) {
-	tmpDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(testEmptyRegistryContent), 0600); err != nil {
-		t.Fatalf("failed to write registry.yaml: %v", err)
-	}
-	overlaysDir := filepath.Join(tmpDir, "overlays")
-	if err := os.MkdirAll(overlaysDir, 0755); err != nil {
-		t.Fatalf("failed to create overlays dir: %v", err)
-	}
-	// Override an embedded overlay file (overlays/base.yaml)
-	if err := os.WriteFile(filepath.Join(overlaysDir, "base.yaml"), []byte("metadata:\n  name: base-override\n"), 0600); err != nil {
-		t.Fatalf("failed to write base.yaml: %v", err)
-	}
+	tmpDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":      []byte(providertest.EmptyRegistryYAML),
+		"overlays/base.yaml": []byte("metadata:\n  name: base-override\n"),
+	})
 
 	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
@@ -894,8 +796,6 @@ func TestLayeredDataProvider_WalkDirDeduplication(t *testing.T) {
 
 // TestLayeredDataProvider_CachedRegistry tests that merged registry is cached.
 func TestLayeredDataProvider_CachedRegistry(t *testing.T) {
-	tmpDir := t.TempDir()
-
 	registryContent := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
@@ -905,9 +805,9 @@ components:
       defaultRepository: https://example.com/charts
       defaultChart: cache-test
 `
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(registryContent), 0600); err != nil {
-		t.Fatalf("failed to write registry.yaml: %v", err)
-	}
+	tmpDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml": []byte(registryContent),
+	})
 
 	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
@@ -979,17 +879,14 @@ func TestLayeredDataProvider_NotDirectory(t *testing.T) {
 
 // TestLayeredDataProvider_InvalidExternalRegistry tests error handling for invalid registry.
 func TestLayeredDataProvider_InvalidExternalRegistry(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create invalid YAML registry
 	invalidRegistry := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: [invalid yaml structure
 `
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(invalidRegistry), 0600); err != nil {
-		t.Fatalf("failed to write registry.yaml: %v", err)
-	}
+	tmpDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml": []byte(invalidRegistry),
+	})
 
 	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
@@ -1011,7 +908,7 @@ func TestLayeredDataProvider_ReadExternalFileError(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create registry.yaml (required)
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(testEmptyRegistryContent), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(providertest.EmptyRegistryYAML), 0600); err != nil {
 		t.Fatalf("failed to write registry.yaml: %v", err)
 	}
 
@@ -1046,7 +943,7 @@ func TestLayeredDataProvider_AllowSymlinks(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create registry.yaml
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(testEmptyRegistryContent), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(providertest.EmptyRegistryYAML), 0600); err != nil {
 		t.Fatalf("failed to write registry.yaml: %v", err)
 	}
 
@@ -1084,23 +981,11 @@ func TestLayeredDataProvider_AllowSymlinks(t *testing.T) {
 }
 
 func TestLayeredDataProvider_ExternalFiles(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create registry.yaml (required)
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(testEmptyRegistryContent), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	// Create additional external files
-	if err := os.MkdirAll(filepath.Join(tmpDir, "components", "test"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "components", "test", "values.yaml"), []byte("key: value"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "overrides.yaml"), []byte("override: true"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	tmpDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":               []byte(providertest.EmptyRegistryYAML),
+		"components/test/values.yaml": []byte("key: value"),
+		"overrides.yaml":              []byte("override: true"),
+	})
 
 	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
@@ -1124,11 +1009,9 @@ func TestLayeredDataProvider_ExternalFiles(t *testing.T) {
 }
 
 func TestLayeredDataProvider_ExternalDir(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(testEmptyRegistryContent), 0600); err != nil {
-		t.Fatal(err)
-	}
+	tmpDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml": []byte(providertest.EmptyRegistryYAML),
+	})
 
 	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
@@ -1163,24 +1046,13 @@ validators:
 // validators/catalog.yaml for catalog merge tests.
 func setupCatalogTestDir(t *testing.T, catalogContent string) string {
 	t.Helper()
-	tmpDir := t.TempDir()
-
-	// Create required registry.yaml
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(testEmptyRegistryContent), 0600); err != nil {
-		t.Fatalf("failed to write registry.yaml: %v", err)
+	files := map[string][]byte{
+		"registry.yaml": []byte(providertest.EmptyRegistryYAML),
 	}
-
 	if catalogContent != "" {
-		validatorsDir := filepath.Join(tmpDir, "validators")
-		if err := os.MkdirAll(validatorsDir, 0755); err != nil {
-			t.Fatalf("failed to create validators dir: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(validatorsDir, "catalog.yaml"), []byte(catalogContent), 0600); err != nil {
-			t.Fatalf("failed to write catalog.yaml: %v", err)
-		}
+		files["validators/catalog.yaml"] = []byte(catalogContent)
 	}
-
-	return tmpDir
+	return providertest.WriteDir(t, files)
 }
 
 func TestLayeredDataProvider_ValidatorCatalogRemainsOutsideADR022Gate(t *testing.T) {
@@ -1498,10 +1370,9 @@ validators:
 // completes. Run separately for each in-tree implementation so a future
 // refactor that drops the guard on one but not the other gets caught.
 func TestDataProvider_HonorsContextCancellation(t *testing.T) {
-	tmpDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(testEmptyRegistryContent), 0600); err != nil {
-		t.Fatalf("write registry.yaml: %v", err)
-	}
+	tmpDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml": []byte(providertest.EmptyRegistryYAML),
+	})
 
 	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	layered, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{ExternalDir: tmpDir})
