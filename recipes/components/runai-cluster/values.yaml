@@ -35,12 +35,14 @@
 #
 # controlPlane.bootstrapToken is a credential the control plane issues per
 # cluster and expires after two hours. --dynamic moves the path out of the
-# bundle's values.yaml into its cluster-values.yaml, which the operator fills
-# in right before install, so the token is never in a bundle at rest, in
-# goldens, or in evidence. A fresh token is needed for every install and
-# upgrade. The chart renders the hook Jobs that use it only when url and uid
-# are both set; with either empty it renders a control-plane-less skeleton
-# and the install never registers.
+# bundle's values.yaml into its cluster-values.yaml, so the generated bundle,
+# the goldens and the evidence never carry it. The operator writes the token
+# into cluster-values.yaml on the install machine right before deploy.sh runs;
+# from then on that file holds the token at rest, so protect it like a
+# kubeconfig and clear the value once the release is installed. A fresh token
+# is needed for every install and upgrade. The chart renders the hook Jobs
+# that use it only when url and uid are both set; with either empty it
+# renders a control-plane-less skeleton and the install never registers.
 controlPlane:
   url: ""
   bootstrapToken: ""
