@@ -479,6 +479,12 @@ nvsentinel-post-remediation-validation-e2e: ## Live Kind test: a node drained fo
 	echo "Running nvsentinel post-remediation validation e2e test..."; \
 	tests/e2e/nvsentinel-post-remediation-validation/run.sh
 
+.PHONY: nvsentinel-external-remediation-e2e
+nvsentinel-external-remediation-e2e: ## Live Kind test: nvsentinel-external-remediation hands a declared fault's node to an ExternalRemediationRequest and takes it back (#3091)
+	@set -e; \
+	echo "Running nvsentinel-external-remediation mixin e2e test..."; \
+	tests/e2e/nvsentinel-external-remediation/run.sh
+
 .PHONY: npd-nvsentinel-object-monitor-e2e
 npd-nvsentinel-object-monitor-e2e: ## Live Kind test: an NPD Node condition becomes an NVSentinel health event (#2614)
 	@set -e; \

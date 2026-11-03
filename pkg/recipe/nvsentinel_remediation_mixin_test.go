@@ -269,11 +269,12 @@ func TestMixinNVSentinelRemediation_ComposesOntoEveryLeaf(t *testing.T) {
 	}
 }
 
-// TestNoShippedRecipeAdoptsRemediationMixins keeps every step opt-in: existing
-// recipes stay monitoring-only unless an operator selects a capability.
-// Checked by declaration (the base included, since mixins accumulate down the
-// chain), by resolved overrides, and by resolved values, since a values file
-// can turn a toggle on without any override.
+// TestNoShippedRecipeAdoptsRemediationMixins keeps every step, and the
+// external-remediation routing that rides on them, opt-in: existing recipes
+// stay monitoring-only unless an operator selects a capability. Checked by
+// declaration (the base included, since mixins accumulate down the chain), by
+// resolved overrides, and by resolved values, since a values file can turn a
+// toggle on without any override.
 func TestNoShippedRecipeAdoptsRemediationMixins(t *testing.T) {
 	ctx, store := remediationStore(t)
 
@@ -282,6 +283,9 @@ func TestNoShippedRecipeAdoptsRemediationMixins(t *testing.T) {
 			if slices.Contains(mixins, step.mixin) {
 				t.Errorf("%s adopts %s; the remediation steps stay opt-in", where, step.mixin)
 			}
+		}
+		if slices.Contains(mixins, externalRemediationMixin) {
+			t.Errorf("%s adopts %s; external remediation stays opt-in", where, externalRemediationMixin)
 		}
 	}
 	adopts("recipes/overlays/base.yaml", store.Base.Spec.Mixins)
