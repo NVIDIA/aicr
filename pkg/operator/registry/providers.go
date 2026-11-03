@@ -161,6 +161,8 @@ type ECRProvider struct {
 type ecrState struct {
 	token   *Token
 	failure *MintFailure
+	// failed is when the latest mint failed.
+	failed time.Time
 }
 
 func (p *ECRProvider) load() ecrState {
@@ -175,16 +177,20 @@ func (p *ECRProvider) load() ecrState {
 //     defaults.RegistryTokenMinValidity left
 //   - else the cached token at once, while it has more than
 //     defaults.RegistryTokenMinServeValidity left, starting a mint in the
-//     background that leaves the cached token in use if it fails
+//     background that leaves the cached token in use if it fails, unless a
+//     mint failed less than defaults.RegistryTokenMintRetryBackoff ago
 //   - else a new token, once a mint completes
 func (p *ECRProvider) Token(ctx context.Context) (*Token, error) {
-	if cached := p.load().token; cached != nil {
-		switch left := cached.Expires.Sub(p.Now()); {
+	if s := p.load(); s.token != nil {
+		now := p.Now()
+		switch left := s.token.Expires.Sub(now); {
 		case left > defaults.RegistryTokenMinValidity:
-			return cached, nil
+			return s.token, nil
 		case left > defaults.RegistryTokenMinServeValidity:
-			p.mints.DoChan("", p.mintFunc(ctx))
-			return cached, nil
+			if s.failure == nil || now.Sub(s.failed) >= defaults.RegistryTokenMintRetryBackoff {
+				p.mints.DoChan("", p.mintFunc(ctx))
+			}
+			return s.token, nil
 		}
 	}
 	return p.wait(ctx)
@@ -241,11 +247,12 @@ func (p *ECRProvider) mintFunc(ctx context.Context) func() (any, error) {
 		if err != nil {
 			p.failures.Add(1)
 			s := p.load()
-			since := p.Now()
+			now := p.Now()
+			since := now
 			if s.failure != nil {
 				since = s.failure.Since
 			}
-			p.state.Store(&ecrState{token: s.token, failure: &MintFailure{Since: since, Err: err}})
+			p.state.Store(&ecrState{token: s.token, failure: &MintFailure{Since: since, Err: err}, failed: now})
 			return nil, err
 		}
 		p.state.Store(&ecrState{token: t})

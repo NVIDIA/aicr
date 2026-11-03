@@ -118,6 +118,9 @@ const (
 	// may have left to stay in use while minting a new one fails. It covers
 	// the longest pushing AICR Job, which carries the token it started with.
 	RegistryTokenMinServeValidity = time.Hour
+	// RegistryTokenMintRetryBackoff is the least time between a failed ECR
+	// token mint and the next one started in the background.
+	RegistryTokenMintRetryBackoff = time.Minute
 	// RepoCredsRefreshInterval paces the Argo CD repo-creds refresher.
 	RepoCredsRefreshInterval = 6 * time.Hour
 	// RepoCredsRetryBackoff is the wait before retrying a failed repo-creds

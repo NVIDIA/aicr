@@ -28,6 +28,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/NVIDIA/aicr/pkg/operator/defaults"
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 	"github.com/NVIDIA/aicr/pkg/operator/registry/registrytest"
 )
@@ -116,7 +117,8 @@ func TestECRProviderHungMint(t *testing.T) {
 }
 
 // A failed mint keeps the cached token in use while it has more than
-// RegistryTokenMinServeValidity left, and is recorded until a mint succeeds.
+// RegistryTokenMinServeValidity left, delays the next background mint by
+// RegistryTokenMintRetryBackoff, and is recorded until a mint succeeds.
 // Past that, the failure is the caller's.
 func TestECRProviderRidesOutAFailedMint(t *testing.T) {
 	t.Parallel()
@@ -125,6 +127,8 @@ func TestECRProviderRidesOutAFailedMint(t *testing.T) {
 	api := &registrytest.ECR{Token: "AWS:" + secretToken, Expires: now.Add(12 * time.Hour)}
 	p := &ECRProvider{Client: api, Host: "123456789012.dkr.ecr.us-west-2.amazonaws.com", Now: func() time.Time { return clock }}
 	ctx := context.Background()
+	// Waits out a mint started in the background, if one is in flight.
+	settle := func() { <-p.mints.DoChan("", func() (any, error) { return nil, nil }) } //nolint:nilnil // the result is unused
 	if _, err := p.Token(ctx); err != nil || p.MintFailure() != nil {
 		t.Fatalf("Token() = %v, failure %+v", err, p.MintFailure())
 	}
@@ -136,12 +140,21 @@ func TestECRProviderRidesOutAFailedMint(t *testing.T) {
 	if f := p.MintFailure(); f == nil || !f.Since.Equal(clock) || !strings.Contains(f.Err.Error(), "ThrottlingException") || p.MintFailures() != 1 {
 		t.Fatalf("MintFailure() = %+v, %d failures", f, p.MintFailures())
 	}
+	calls := api.Calls()
 	if c, err := p.Credential(ctx, p.Host); err != nil || c.Password != secretToken {
 		t.Fatalf("Credential() with 5h left and a failing mint = %+v, %v; want the cached token", c, err)
 	}
-	// Waits out the mint Credential started in the background.
-	if _, err := p.FreshToken(ctx); err == nil {
-		t.Fatal("FreshToken() with a failing mint = nil")
+	settle()
+	if api.Calls() != calls {
+		t.Fatalf("Credential() within RegistryTokenMintRetryBackoff of a failed mint minted again (%d calls, want %d)", api.Calls(), calls)
+	}
+	clock = clock.Add(defaults.RegistryTokenMintRetryBackoff)
+	if c, err := p.Credential(ctx, p.Host); err != nil || c.Password != secretToken {
+		t.Fatalf("Credential() past RegistryTokenMintRetryBackoff = %+v, %v; want the cached token", c, err)
+	}
+	settle()
+	if api.Calls() != calls+1 {
+		t.Fatalf("Credential() past RegistryTokenMintRetryBackoff started %d mints, want 1", api.Calls()-calls)
 	}
 
 	clock = now.Add(11*time.Hour + 30*time.Minute)
