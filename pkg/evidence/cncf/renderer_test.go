@@ -423,3 +423,90 @@ func TestRenderSlurmGPUAccessFillsSecureAcceleratorAccessPage(t *testing.T) {
 		t.Errorf("skipped secure-accelerator-access must not appear on the page:\n%s", body)
 	}
 }
+
+// The index lists the whole checklist, not only what ran: a requirement no
+// result evidenced appears as NOT TESTED with its level, no page and no link.
+// Presence only; verdict aggregation is #3612.
+func TestRenderIndexListsUntestedRequirements(t *testing.T) {
+	allPassing := &ctrf.Report{Results: ctrf.Results{Tests: []ctrf.TestResult{
+		{Name: "dra-support", Status: "passed"},
+		{Name: "gang-scheduling", Status: "passed"},
+		{Name: "accelerator-metrics", Status: "passed"},
+		{Name: "ai-service-metrics", Status: "passed"},
+		{Name: "inference-gateway", Status: "passed"},
+		{Name: "pod-autoscaling", Status: "passed"},
+		{Name: "cluster-autoscaling", Status: "passed"},
+		{Name: "robust-controller", Status: "passed"},
+		{Name: "secure-accelerator-access", Status: "passed"},
+	}}}
+	tests := []struct {
+		version  Version
+		wantRows []string
+		absent   []string
+	}{
+		{Version136, []string{
+			"| `driver_runtime_management` | SHOULD | | NOT TESTED (no AICR check) | |",
+			"| `gpu_sharing` | SHOULD | | NOT TESTED (no AICR check) | |",
+			"| `virtualized_accelerator` | SHOULD | | NOT TESTED (no AICR check) | |",
+			"| `advanced_inference_ingress` | SHOULD | | NOT TESTED (no AICR check) | |",
+			"| `high_performance_networking` | SHOULD | | NOT TESTED (no AICR check) | |",
+			"| `disaggregated_inference` | SHOULD | | NOT TESTED (no AICR check) | |",
+		}, []string{"`workload_sandboxing`", "| `gang_scheduling` | MUST | | NOT TESTED"}},
+		{Version137, []string{
+			"| `workload_sandboxing` | SHOULD | | NOT TESTED (no AICR check) | |",
+			"| `disaggregated_inference` | SHOULD | | NOT TESTED (no AICR check) | |",
+		}, []string{"| `gang_scheduling` | MUST | | NOT TESTED"}},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.version), func(t *testing.T) {
+			dir := t.TempDir()
+			if err := New(WithOutputDir(dir), WithConformanceVersion(tt.version)).Render(context.Background(), allPassing); err != nil {
+				t.Fatal(err)
+			}
+			index, err := os.ReadFile(filepath.Join(dir, "index.md")) //nolint:gosec // test-controlled path
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range tt.wantRows {
+				if !strings.Contains(string(index), want) {
+					t.Errorf("index.md missing %q:\n%s", want, index)
+				}
+			}
+			for _, bad := range tt.absent {
+				if strings.Contains(string(index), bad) {
+					t.Errorf("index.md must not contain %q:\n%s", bad, index)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(dir, "workload-sandboxing.md")); err == nil {
+				t.Error("an untested requirement must not get a page")
+			}
+		})
+	}
+
+	// A MUST whose check exists but produced no result reads "not run".
+	dir := t.TempDir()
+	partial := &ctrf.Report{Results: ctrf.Results{Tests: []ctrf.TestResult{{Name: "gang-scheduling", Status: "passed"}}}}
+	if err := New(WithOutputDir(dir), WithConformanceVersion(Version137)).Render(context.Background(), partial); err != nil {
+		t.Fatal(err)
+	}
+	index, _ := os.ReadFile(filepath.Join(dir, "index.md")) //nolint:gosec // test-controlled path
+	for _, want := range []string{
+		"| `secure_accelerator_access` | MUST | | NOT TESTED (not run) | |",
+		"| `robust_controller` | MUST | | NOT TESTED (not run) | |",
+		"| `workload_sandboxing` | SHOULD | | NOT TESTED (no AICR check) | |",
+	} {
+		if !strings.Contains(string(index), want) {
+			t.Errorf("index.md missing %q:\n%s", want, index)
+		}
+	}
+
+	// A report with no submission-required checks still writes nothing.
+	empty := t.TempDir()
+	if err := New(WithOutputDir(empty)).Render(context.Background(), &ctrf.Report{Results: ctrf.Results{
+		Tests: []ctrf.TestResult{{Name: "platform-health", Status: "passed"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if entries, _ := os.ReadDir(empty); len(entries) != 0 {
+		t.Errorf("report without submission checks wrote %v", entries)
+	}
+}

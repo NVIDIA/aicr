@@ -54,6 +54,21 @@ type evidenceEntry struct {
 	GeneratedAt time.Time
 }
 
+// untestedEntry is a checklist requirement no test result evidenced in this
+// render: either AICR has no conformance check for it or its expected checks
+// produced no result. It renders as an index row with no page and no
+// evidence link. Presence only: verdict aggregation is not done here.
+type untestedEntry struct {
+	// RequirementID is the upstream requirement identifier.
+	RequirementID string
+
+	// Level is the requirement's upstream level at the rendered version.
+	Level Level
+
+	// Reason is "no AICR check" or "not run".
+	Reason string
+}
+
 // checkEntry represents one check result within an evidence entry.
 type checkEntry struct {
 	// Name is the validator name.

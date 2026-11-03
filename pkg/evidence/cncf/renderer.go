@@ -156,6 +156,10 @@ func (r *Renderer) Render(ctx context.Context, report *ctrf.Report) error {
 		slog.Warn("no submission-required checks found, skipping evidence rendering")
 		return nil
 	}
+	untested, err := r.untestedRequirements(entries)
+	if err != nil {
+		return err
+	}
 
 	for _, entry := range entries {
 		select {
@@ -178,8 +182,47 @@ func (r *Renderer) Render(ctx context.Context, report *ctrf.Report) error {
 		return errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "rendering evidence")
 	default:
 	}
-	return r.renderIndex(entries, renderNow)
+	return r.renderIndex(entries, untested, renderNow)
 }
+
+// untestedRequirements lists every requirement of the rendered checklist
+// version that no entry evidences, in checklist order, so the index shows
+// the whole checklist rather than only what ran. Supporting entries do not
+// count: their requirement is not in the checklist.
+func (r *Renderer) untestedRequirements(entries []evidenceEntry) ([]untestedEntry, error) {
+	cl, err := ChecklistFor(r.Version())
+	if err != nil {
+		return nil, err
+	}
+	evidenced := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		if !e.Supporting {
+			evidenced[e.RequirementID] = true
+		}
+	}
+	var out []untestedEntry
+	for _, req := range cl.Requirements {
+		if evidenced[req.ID] {
+			continue
+		}
+		expected, err := ExpectedChecks(r.Version(), req.ID)
+		if err != nil {
+			return nil, err
+		}
+		reason := untestedNoCheck
+		if len(expected) > 0 {
+			reason = untestedNotRun
+		}
+		out = append(out, untestedEntry{RequirementID: req.ID, Level: req.Level, Reason: reason})
+	}
+	return out, nil
+}
+
+// Reasons an index row carries NOT TESTED.
+const (
+	untestedNoCheck = "no AICR check"
+	untestedNotRun  = "not run"
+)
 
 // buildEntries groups CTRF test results by requirement.
 func (r *Renderer) buildEntries(report *ctrf.Report, now time.Time) ([]evidenceEntry, error) {
@@ -269,7 +312,7 @@ func (r *Renderer) renderEvidence(entry evidenceEntry) (err error) {
 	return nil
 }
 
-func (r *Renderer) renderIndex(entries []evidenceEntry, now time.Time) (err error) {
+func (r *Renderer) renderIndex(entries []evidenceEntry, untested []untestedEntry, now time.Time) (err error) {
 	path := filepath.Join(r.outputDir, "index.md")
 	f, createErr := os.Create(path)
 	if createErr != nil {
@@ -285,10 +328,12 @@ func (r *Renderer) renderIndex(entries []evidenceEntry, now time.Time) (err erro
 		GeneratedAt time.Time
 		Version     Version
 		Entries     []evidenceEntry
+		Untested    []untestedEntry
 		Supporting  []evidenceEntry
 	}{
 		GeneratedAt: now,
 		Version:     r.Version(),
+		Untested:    untested,
 	}
 	for _, e := range entries {
 		if e.Supporting {

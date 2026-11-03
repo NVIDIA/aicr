@@ -26,6 +26,10 @@ const indexTemplate = `# CNCF AI Conformance Evidence
 {{- range $i, $e := .Entries }}
 | {{ add $i 1 }} | ` + "`{{ $e.RequirementID }}`" + ` | {{ $e.Level }} | {{ $e.Title }} | {{ upper $e.Status }} | [{{ $e.Filename }}]({{ $e.Filename }}) |
 {{- end }}
+{{- $n := len .Entries }}
+{{- range $i, $u := .Untested }}
+| {{ add $n (add $i 1) }} | ` + "`{{ $u.RequirementID }}`" + ` | {{ $u.Level }} | | NOT TESTED ({{ $u.Reason }}) | |
+{{- end }}
 {{- if .Supporting }}
 
 ## Supporting Evidence
