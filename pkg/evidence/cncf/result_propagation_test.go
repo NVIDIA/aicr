@@ -59,6 +59,68 @@ case "${mode}" in
         SECTION="gateway"
         ;;
     gateway-absent)
+        # A cluster without the Gateway API: kubectl reports the missing
+        # resource type. That is the one lookup failure that is a
+        # prerequisite gap; the default stub's silent exit 1 is not.
+        kubectl() {
+            if [ "${1:-}" = "cluster-info" ]; then
+                return 0
+            fi
+            case " $* " in
+                *" gateways "*)
+                    echo 'error: the server doesn'"'"'t have a resource type "gateways"' >&2
+                    return 1 ;;
+            esac
+            return 1
+        }
+        SECTION="gateway"
+        ;;
+    gateway-none-named)
+        # Gateway API served, no Gateway carries the conventional name.
+        kubectl() {
+            if [ "${1:-}" = "cluster-info" ]; then
+                return 0
+            fi
+            case " $* " in
+                *" gateways "*) return 0 ;;
+            esac
+            return 1
+        }
+        SECTION="gateway"
+        ;;
+    gateway-lookup-denied)
+        # RBAC denies the list: the Gateway's existence is unknown and must
+        # not read as absent.
+        kubectl() {
+            if [ "${1:-}" = "cluster-info" ]; then
+                return 0
+            fi
+            case " $* " in
+                *" gateways "*)
+                    echo 'Error from server (Forbidden): gateways.gateway.networking.k8s.io is forbidden: User "evidence" cannot list resource "gateways"' >&2
+                    return 1 ;;
+            esac
+            return 1
+        }
+        SECTION="gateway"
+        ;;
+    gateway-declared-missing)
+        # The recipe declares a gateway (the collector threads name,
+        # namespace and class) and the cluster has no such Gateway.
+        export AICR_INFERENCE_GATEWAY_NAME="pool-vip"
+        export AICR_INFERENCE_GATEWAY_NAMESPACE="edge-system"
+        export AICR_INFERENCE_GATEWAY_CLASS="edge-class"
+        kubectl() {
+            if [ "${1:-}" = "cluster-info" ]; then
+                return 0
+            fi
+            case " $* " in
+                *" gateway pool-vip "*)
+                    echo 'Error from server (NotFound): gateways.gateway.networking.k8s.io "pool-vip" not found' >&2
+                    return 1 ;;
+            esac
+            return 1
+        }
         SECTION="gateway"
         ;;
     operator-absent)
@@ -477,7 +539,36 @@ func TestEvidenceResultPropagatesThroughCollector(t *testing.T) {
 			mode:              "gateway-absent",
 			displayName:       "Inference Gateway",
 			wantStatus:        "SKIP",
+			wantEvidence:      "**Result: SKIP (prerequisite absent)** — the Gateway API",
 			singleVerdictFile: "inference-gateway.md",
+		},
+		{
+			name:              "no gateway of the conventional name skips",
+			mode:              "gateway-none-named",
+			displayName:       "Inference Gateway",
+			wantStatus:        "SKIP",
+			wantEvidence:      "**Result: SKIP (prerequisite absent)** — no Gateway named `inference-gateway`",
+			singleVerdictFile: "inference-gateway.md",
+		},
+		{
+			// A failed lookup leaves the Gateway's existence unknown; the
+			// section must fail rather than report the prerequisite absent.
+			name:              "denied gateway lookup is explicit fail",
+			mode:              "gateway-lookup-denied",
+			displayName:       "Inference Gateway",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — could not list Gateways to find `inference-gateway`: Error from server (Forbidden)",
+			singleVerdictFile: "inference-gateway.md",
+			wantErr:           true,
+		},
+		{
+			name:              "declared gateway missing from the cluster is explicit fail",
+			mode:              "gateway-declared-missing",
+			displayName:       "Inference Gateway",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — the recipe's inference Gateway `pool-vip` is not installed in `edge-system`.",
+			singleVerdictFile: "inference-gateway.md",
+			wantErr:           true,
 		},
 		{
 			name:              "absent operator emits explicit skip",

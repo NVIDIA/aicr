@@ -2446,9 +2446,11 @@ collect_gateway() {
     local gw_name gw_lines gw_err gw_status gw_count gw_ns gw_class
     gw_name="${AICR_INFERENCE_GATEWAY_NAME:-inference-gateway}"
     gw_err=$(mktemp)
+    # The kubectl status is captured on the substitution itself; a pipeline
+    # inside $(...) would leave only sed's status visible out here.
+    gw_status=0
     if [ -n "${AICR_INFERENCE_GATEWAY_NAMESPACE:-}" ]; then
-        gw_lines=$(kubectl get gateway "${gw_name}" -n "${AICR_INFERENCE_GATEWAY_NAMESPACE}" -o jsonpath='{.metadata.namespace}{" "}{.spec.gatewayClassName}{"\n"}' 2>"${gw_err}" | sed '/^$/d')
-        gw_status=${PIPESTATUS[0]}
+        gw_lines=$(kubectl get gateway "${gw_name}" -n "${AICR_INFERENCE_GATEWAY_NAMESPACE}" -o jsonpath='{.metadata.namespace}{" "}{.spec.gatewayClassName}{"\n"}' 2>"${gw_err}") || gw_status=$?
         if [ "${gw_status}" -ne 0 ] && grep -qiE '\(NotFound\)|not found' "${gw_err}"; then
             # The recipe names a Gateway that is not there: a failing requirement, not an absent prerequisite.
             write_section_header "Inference API Gateway"
@@ -2458,9 +2460,9 @@ collect_gateway() {
             return
         fi
     else
-        gw_lines=$(kubectl get gateways -A -o jsonpath="{range .items[?(@.metadata.name==\"${gw_name}\")]}{.metadata.namespace}{\" \"}{.spec.gatewayClassName}{\"\n\"}{end}" 2>"${gw_err}" | sed '/^$/d')
-        gw_status=${PIPESTATUS[0]}
+        gw_lines=$(kubectl get gateways -A -o jsonpath="{range .items[?(@.metadata.name==\"${gw_name}\")]}{.metadata.namespace}{\" \"}{.spec.gatewayClassName}{\"\n\"}{end}" 2>"${gw_err}") || gw_status=$?
     fi
+    gw_lines=$(printf '%s\n' "${gw_lines}" | sed '/^$/d')
     if [ "${gw_status}" -ne 0 ]; then
         # Only a missing Gateway API is a prerequisite gap. RBAC denial or an
         # apiserver error leaves the Gateway's existence unknown, and an unknown
