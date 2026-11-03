@@ -63,6 +63,14 @@ tools/changelog
 # tools/changelog's "[MSG] Changes since vX.Y.Z" stderr line)
 gh release view <previous-tag> --json body --jq '.body'
 
+# AICR Operator facts for the operator block (Step 3), once the release
+# pipeline has published the chart. VERSION is the tag without the leading v.
+helm show values oci://ghcr.io/nvidia/charts/aicr-operator --version "${VERSION}" \
+  | yq '{"operator": .operator.image, "registry": .registry.inCluster.image,
+         "aicr": .aicr.version, "aicrImage": .aicr.image}'
+crane digest "ghcr.io/nvidia/charts/aicr-operator:${VERSION}"
+git show "v${VERSION}:docs/operator/support.md" | sed -n '/^## Qualified profiles/,/^## /p'
+
 # Release-notes author, credited last in the thanks line (Step 4)
 gh api user --jq .login
 ```
@@ -116,7 +124,21 @@ order:
 3. **`**Theme Name**` blocks** — each starts with bolded title, em dash
    (` — `, with spaces), then 1–3 sentences OR a bulleted sub-list.
    Use sub-lists when enumerating 3+ concrete items (e.g. recipes added).
-4. **`### Deprecations`** — **required whenever the release deprecates or
+4. **`**AICR Operator (Preview)**` block** — required in every release that
+   ships the operator, inside Highlights after the theme blocks. Built from
+   the Step 1 operator facts, it names:
+   - the chart, `oci://ghcr.io/nvidia/charts/aicr-operator:<VERSION>`, with
+     its digest;
+   - the operator and in-cluster registry image digests the chart defaults
+     to;
+   - the AICR release it runs, phrased "runs AICR vX, the release it was
+     qualified against", with that AICR image digest;
+   - the qualified profiles, taken verbatim from `docs/operator/support.md`
+     at the tag. Write "No hardware profile is qualified yet" while that page
+     says so. Never infer a qualification from commits.
+
+   Do not paraphrase the digests; copy them.
+5. **`### Deprecations`** — **required whenever the release deprecates or
    removes anything on the four frozen surfaces** (CLI, REST, Go SDK, bundle
    and artifact schemas); omit the heading entirely when it does not. One
    bullet per item: what is deprecated, the replacement, and the release that
@@ -124,7 +146,7 @@ order:
    [deprecation policy](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md#deprecation-policy).
    Every bullet here must also have an entry in `docs/user/deprecations.md`;
    if it does not, the deprecation is incomplete and the release is not ready.
-5. **Closing credits line** — `***Thanks to*** @user1, @user2, …, and
+6. **Closing credits line** — `***Thanks to*** @user1, @user2, …, and
    @<author>.` Alphabetical (case-insensitive) by handle, with the
    release-notes author last when they are in the list. Step 4 has the
    full rules.
@@ -250,6 +272,14 @@ why it matters to a user. Reference commands in backticks. Link issues as
 * <Leftover user-visible win 2>
 
 **<Supply Chain or Trust Theme>** — <narrative>
+
+**AICR Operator (Preview)** — The chart
+`oci://ghcr.io/nvidia/charts/aicr-operator:<VERSION>` (`sha256:<chart>`)
+defaults to `ghcr.io/nvidia/aicr-operator@sha256:<operator>` and
+`ghcr.io/nvidia/aicr-registry@sha256:<registry>`, and runs AICR v<X.Y.Z>,
+the release it was qualified against (`ghcr.io/nvidia/aicr@sha256:<aicr>`).
+<Qualified profiles from docs/operator/support.md, e.g. "No hardware profile
+is qualified yet.">
 
 ***Thanks to*** @alice, @bob, @carol, and @<author>.
 ```

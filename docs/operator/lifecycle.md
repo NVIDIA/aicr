@@ -4,6 +4,20 @@ Installing, upgrading, downgrading and uninstalling the operator itself. The
 GPU stack it manages is never removed by any of these: it is owned by Argo CD
 Applications that survive the operator.
 
+CI checks this page against the published artifacts. Each operator change, and
+each release before it publishes, installs the newest published release, then:
+
+- upgrades it to the new build mid-rollout;
+- replaces the in-cluster registry pod;
+- downgrades it with `helm rollback`;
+- uninstalls it in the order below, checking what is kept.
+
+See `qualify-published` in
+[operator-e2e.yaml](https://github.com/NVIDIA/aicr/blob/main/.github/workflows/operator-e2e.yaml).
+An operator release defaults to the newest AICR release qualified when it was
+built, so when the two releases' defaults differ, that upgrade also moves AICR
+within v1.
+
 ## Install
 
 The [overview](index.md#installation) installs the published chart, and
@@ -19,7 +33,7 @@ An operator upgrade is a chart upgrade, and it moves the image, CRDs, RBAC and
 admission policies together:
 
 ```shell
-VERSION="<new version>"
+VERSION="<new version>"   # the chart version, without the leading v
 helm upgrade aicr-operator oci://ghcr.io/nvidia/charts/aicr-operator \
   --version "${VERSION}" --namespace aicr-system -f values.yaml
 ```
