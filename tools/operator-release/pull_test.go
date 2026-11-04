@@ -36,6 +36,7 @@ import (
 	"oras.land/oras-go/v2/registry/remote"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/operator/registry"
 )
 
 func TestLatestStable(t *testing.T) {
@@ -337,7 +338,7 @@ func TestPullRefusesOversizedChart(t *testing.T) {
 		t.Fatal(err)
 	}
 	charts.PlainHTTP = true
-	config, err := oras.PushBytes(t.Context(), charts, helmConfigMediaType, []byte(`{"name":"demo","version":"1.0.0"}`))
+	config, err := oras.PushBytes(t.Context(), charts, registry.ChartConfigMediaType, []byte(`{"name":"demo","version":"1.0.0"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +347,7 @@ func TestPullRefusesOversizedChart(t *testing.T) {
 		MediaType: ocispec.MediaTypeImageManifest,
 		Config:    config,
 		Layers: []ocispec.Descriptor{{
-			MediaType: helmChartMediaType,
+			MediaType: registry.ChartLayerMediaType,
 			Digest:    digest.FromString("absent"),
 			Size:      defaults.HelmChartArtifactLimit + 1,
 		}},

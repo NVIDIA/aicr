@@ -15,6 +15,9 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -35,6 +39,7 @@ import (
 	"oras.land/oras-go/v2/registry/remote"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/operator/registry"
 )
 
 // pull writes a published release into dir in the layout a candidate build
@@ -146,7 +151,7 @@ func fetchChart(ctx context.Context, charts *remote.Repository, ref, tag, chart 
 	if err = json.Unmarshal(data, &manifest); err != nil {
 		return nil, fmt.Errorf("parse %s:%s: %w", ref, tag, err)
 	}
-	if len(manifest.Layers) != 1 || manifest.Layers[0].MediaType != helmChartMediaType {
+	if len(manifest.Layers) != 1 || manifest.Layers[0].MediaType != registry.ChartLayerMediaType {
 		return nil, fmt.Errorf("%s:%s is not a Helm chart with one archive layer", ref, tag)
 	}
 	if size := manifest.Layers[0].Size; size > defaults.HelmChartArtifactLimit {
@@ -172,6 +177,41 @@ func fetchChart(ctx context.Context, charts *remote.Repository, ref, tag, chart 
 		return nil, fmt.Errorf("%s:%s holds chart %s %s", ref, tag, c.name, c.version)
 	}
 	return c, nil
+}
+
+// chartMetadata reads the top-level Chart.yaml from a chart archive.
+func chartMetadata(archive []byte) (map[string]any, error) {
+	data, err := archiveFile(archive, "Chart.yaml")
+	if err != nil {
+		return nil, err
+	}
+	meta := map[string]any{}
+	if err = yaml.Unmarshal(data, &meta); err != nil {
+		return nil, fmt.Errorf("parse Chart.yaml: %w", err)
+	}
+	return meta, nil
+}
+
+// archiveFile reads the chart's top-level file name from a chart archive.
+func archiveFile(archive []byte, name string) ([]byte, error) {
+	gz, err := gzip.NewReader(bytes.NewReader(archive))
+	if err != nil {
+		return nil, fmt.Errorf("read the chart archive: %w", err)
+	}
+	tr := tar.NewReader(gz)
+	for {
+		h, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("the chart archive has no %s", name)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read the chart archive: %w", err)
+		}
+		if dir, file := path.Split(h.Name); file != name || strings.Count(dir, "/") != 1 {
+			continue
+		}
+		return io.ReadAll(io.LimitReader(tr, 1<<20))
+	}
 }
 
 // writeManifest writes candidate.json and candidate-values.yaml for m.
