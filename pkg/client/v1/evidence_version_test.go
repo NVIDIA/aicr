@@ -48,7 +48,9 @@ func TestRenderCNCFEvidenceWithOptions(t *testing.T) {
 		{"explicit version accepts the bare form", RenderCNCFEvidenceOptions{ConformanceVersion: "1.36"}, "**Checklist:** v1.36", "## Supporting Evidence"},
 		{"kubernetes version selects its minor", RenderCNCFEvidenceOptions{KubernetesVersion: "1.35.4-eks-abc"}, "**Checklist:** v1.35", "| `dra_support` | MUST |"},
 		{"explicit version wins over kubernetes version", RenderCNCFEvidenceOptions{ConformanceVersion: "v1.37", KubernetesVersion: "v1.35.0"}, "**Checklist:** v1.37", "## Supporting Evidence"},
-		{"kubernetes minor newer than any checklist falls back to the latest", RenderCNCFEvidenceOptions{KubernetesVersion: "v1.40.0"}, "**Checklist:** " + string(cncf.LatestVersion), "## Supporting Evidence"},
+		{"kubernetes minor newer than any carried checklist renders the latest", RenderCNCFEvidenceOptions{KubernetesVersion: "v1.40.0"}, "**Checklist:** " + string(cncf.LatestVersion), "## Supporting Evidence"},
+		{"kubernetes minor older than any carried checklist renders the oldest, not the latest", RenderCNCFEvidenceOptions{KubernetesVersion: "v1.34.9"}, "**Checklist:** v1.35", "| `dra_support` | MUST |"},
+		{"kubernetes minor at the recipe floor renders v1.35", RenderCNCFEvidenceOptions{KubernetesVersion: "v1.32.4"}, "**Checklist:** v1.35", "| `dra_support` | MUST |"},
 		{"unparseable kubernetes version falls back to the latest", RenderCNCFEvidenceOptions{KubernetesVersion: "unknown"}, "**Checklist:** " + string(cncf.LatestVersion), "## Supporting Evidence"},
 	}
 	for _, tt := range tests {

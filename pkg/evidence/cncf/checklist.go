@@ -157,6 +157,46 @@ func VersionForKubernetes(serverVersion string) (v Version, ok bool) {
 	return v, ok
 }
 
+// NearestVersion selects the carried checklist for a Kubernetes server
+// version string. exact is true when the cluster's minor has a carried
+// checklist. A minor below the oldest carried checklist selects that oldest
+// one (Version135), and a minor above the newest selects LatestVersion, in
+// both cases with exact false so the caller can say so. Upstream publishes
+// checklists this build does not carry (v1.33, v1.34), so "not carried" is
+// the right reading of exact == false, not "not published".
+//
+// Errors:
+//   - ErrCodeInvalidRequest when serverVersion is not a Kubernetes version.
+func NearestVersion(serverVersion string) (v Version, exact bool, err error) {
+	m := kubernetesMinor.FindStringSubmatch(strings.TrimSpace(serverVersion))
+	if m == nil {
+		return "", false, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%q is not a Kubernetes server version", serverVersion))
+	}
+	v = Version("v" + m[1] + "." + m[2])
+	if _, ok := upstreamSchemaDigests[v]; ok {
+		return v, true, nil
+	}
+	supported := SupportedVersions()
+	if versionLess(v, supported[0]) {
+		return supported[0], false, nil
+	}
+	return LatestVersion, false, nil
+}
+
+// versionLess orders checklist versions by major then minor.
+func versionLess(a, b Version) bool {
+	am := kubernetesMinor.FindStringSubmatch(string(a))
+	bm := kubernetesMinor.FindStringSubmatch(string(b))
+	if am == nil || bm == nil {
+		return false
+	}
+	if am[1] != bm[1] {
+		return len(am[1]) < len(bm[1]) || (len(am[1]) == len(bm[1]) && am[1] < bm[1])
+	}
+	return len(am[2]) < len(bm[2]) || (len(am[2]) == len(bm[2]) && am[2] < bm[2])
+}
+
 // ChecklistFor returns the parsed upstream checklist for v.
 //
 // Errors:

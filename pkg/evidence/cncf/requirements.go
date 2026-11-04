@@ -15,7 +15,7 @@
 package cncf
 
 // Conformance check names as they appear in the validator catalog and in
-// CTRF test results. Script section names (consts.go) are a different
+// CTRF test results. The --feature names (consts.go) are a different
 // namespace.
 const (
 	checkDRASupport           = "dra-support"
@@ -64,7 +64,7 @@ var evidencePages = []evidencePage{
 	{
 		RequirementID: "dra_support",
 		Title:         "DRA Support (Dynamic Resource Allocation)",
-		Description:   "Demonstrates that the cluster supports the Dynamic Resource Allocation capability itself: a functioning DRA driver, kubelet plugin, and validated ResourceSlices. Production GPU allocation may use either DRA or the device plugin. A requirement at v1.35 only; later checklists carry it as supporting evidence.",
+		Description:   "Demonstrates that the cluster supports the Dynamic Resource Allocation capability itself: a functioning DRA driver, kubelet plugin, and validated ResourceSlices. Production GPU allocation may use either DRA or the device plugin. A requirement at v1.35 only; later checklists drop it, and AICR renders it as supporting evidence.",
 		File:          "dra-support.md",
 		Checks:        []string{checkDRASupport},
 	},
@@ -151,7 +151,9 @@ type CheckEvidence struct {
 // deployment and performance check).
 //
 // Errors:
-//   - ErrCodeInvalidRequest when v is not a supported version.
+//   - ErrCodeInvalidRequest when checkName evidences a requirement and v is
+//     not a supported version. A check that evidences none reports nil
+//     without consulting the version.
 func GetRequirement(v Version, checkName string) (*CheckEvidence, error) {
 	page := pageForCheck(checkName)
 	if page == nil {

@@ -220,14 +220,16 @@ func validateFlagCombinations(cncfSubmission bool, evidenceDir string, features 
 	// submission requirements. A submission that silently omits a requirement
 	// reads as complete when it is not, which is the one failure this feature
 	// must not introduce. Refused rather than rendered, until the renderer can
-	// record a withheld requirement WITH its reason: that is a change to what a
-	// conformance submission contains, and it needs its own decision rather
-	// than being improvised behind a flag.
+	// record a withheld requirement WITH its reason: today it gets no page and
+	// is listed only as NOT TESTED (not run), indistinguishable from a check
+	// that never ran. Recording the reason is a change to what a conformance
+	// submission contains, and it needs its own decision rather than being
+	// improvised behind a flag.
 	if evidenceDir != "" && len(skipChecks) > 0 {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			"--skip-check cannot be combined with --evidence-dir: the CNCF evidence renderer omits skipped checks "+
-				"entirely, so a withheld requirement would leave no file and no index entry and the rendered "+
-				"evidence would read as a complete submission")
+			"--skip-check cannot be combined with --evidence-dir: the CNCF evidence renderer gives a withheld "+
+				"requirement no page and lists it only as NOT TESTED (not run) with no reason recorded, so the "+
+				"rendered evidence would misstate why the requirement is missing")
 	}
 	if noCluster && explicitAttest {
 		return errors.New(errors.ErrCodeInvalidRequest,

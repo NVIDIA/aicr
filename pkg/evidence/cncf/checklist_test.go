@@ -183,6 +183,40 @@ func TestVersionForKubernetes(t *testing.T) {
 	}
 }
 
+func TestNearestVersion(t *testing.T) {
+	tests := []struct {
+		in        string
+		want      Version
+		wantExact bool
+		wantErr   bool
+	}{
+		{"v1.36.3", Version136, true, false},
+		{"1.35.0-eks-abc123", Version135, true, false},
+		{"v1.37.1+rke2r1", Version137, true, false},
+		{"v1.34.9", Version135, false, false}, // below the oldest carried: oldest, not latest
+		{"v1.32.0", Version135, false, false},
+		{"v1.38.0", Version137, false, false}, // above the newest carried: latest
+		{"v2.0.0", Version137, false, false},
+		{"garbage", "", false, true},
+		{"", "", false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			got, exact, err := NearestVersion(tt.in)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+				return
+			}
+			if got != tt.want || exact != tt.wantExact {
+				t.Errorf("got (%q, %v), want (%q, %v)", got, exact, tt.want, tt.wantExact)
+			}
+		})
+	}
+}
+
 // Every MUST requirement of every supported version has at least one
 // conformance check that evidences it. A checklist row with no check cannot
 // become Implemented from a run, so this is the gate that a new upstream

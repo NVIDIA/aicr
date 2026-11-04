@@ -267,10 +267,12 @@ type RenderCNCFEvidenceOptions struct {
 
 	// KubernetesVersion is the validated cluster's server version
 	// ("v1.36.3"), typically Snapshot.KubernetesVersion. Its minor selects
-	// the checklist. A minor with no published checklist (a cluster newer
-	// than the newest checklist, or older than the oldest carried) falls
-	// back to cncf.LatestVersion with a warning rather than failing the
-	// render, so evidence from a new cluster is still written.
+	// the checklist. A minor this build carries no checklist for is rendered
+	// against the nearest carried one with a warning rather than failing the
+	// render: below the oldest carried checklist (v1.35) that oldest one,
+	// above the newest the latest. Upstream publishes checklists this build
+	// does not carry (v1.33, v1.34), so the fallback is "not carried", not
+	// "not published". An unparseable value also falls back to the latest.
 	KubernetesVersion string
 }
 
@@ -335,8 +337,8 @@ func (c *Client) RenderCNCFEvidenceWithOptions(ctx context.Context, report *ctrf
 
 // resolveConformanceVersion applies RenderCNCFEvidenceOptions' precedence:
 // an explicit version must be supported; a Kubernetes version selects the
-// matching checklist and falls back to the latest when none is published for
-// its minor; nothing selects the latest.
+// checklist for its minor, or the nearest carried one when this build has
+// none for it; nothing selects the latest.
 func resolveConformanceVersion(opts RenderCNCFEvidenceOptions) (cncf.Version, error) {
 	if opts.ConformanceVersion != "" {
 		v, err := cncf.ParseVersion(opts.ConformanceVersion)
@@ -348,14 +350,17 @@ func resolveConformanceVersion(opts RenderCNCFEvidenceOptions) (cncf.Version, er
 	if opts.KubernetesVersion == "" {
 		return cncf.LatestVersion, nil
 	}
-	v, ok := cncf.VersionForKubernetes(opts.KubernetesVersion)
-	if ok {
-		return v, nil
+	v, exact, err := cncf.NearestVersion(opts.KubernetesVersion)
+	if err != nil {
+		slog.Warn("cluster Kubernetes version is not parseable; rendering CNCF AI Conformance evidence against the latest carried checklist",
+			"kubernetesVersion", opts.KubernetesVersion, "using", cncf.LatestVersion, "error", err)
+		return cncf.LatestVersion, nil
 	}
-	slog.Warn("no CNCF AI Conformance checklist is published for the cluster's Kubernetes minor; rendering against the latest",
-		"kubernetesVersion", opts.KubernetesVersion, "derived", v, "using", cncf.LatestVersion,
-		"supported", cncf.SupportedVersions())
-	return cncf.LatestVersion, nil
+	if !exact {
+		slog.Warn("this build carries no CNCF AI Conformance checklist for the cluster's Kubernetes minor; rendering against the nearest carried one",
+			"kubernetesVersion", opts.KubernetesVersion, "using", v, "carried", cncf.SupportedVersions())
+	}
+	return v, nil
 }
 
 // CollectCNCFEvidence collects behavioral CNCF AI Conformance submission
