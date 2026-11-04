@@ -16,6 +16,7 @@ package chart
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -60,18 +61,62 @@ func TestAICRVersionRange(t *testing.T) {
 		t.Errorf("chart range %q, .settings.yaml operator.aicr_version_range %q", chartRange, settings.Operator.Range)
 	}
 
-	for _, v := range []string{"v0.9.9", "v1.0.0", "v1.0.1", "v1.1.0", "v1.42.7", "v2.0.0", "v2.1.0", "v1.1.0-rc.1", "1.0.0"} {
-		_, out, renderErr := render(ctx, "aicr.version="+v)
-		supported := aicrjob.CheckSupportedVersion(v) == nil
-		switch {
-		case supported && renderErr != nil:
-			t.Errorf("%s: the operator supports it, the chart fails: %s", v, out)
-		case !supported && renderErr == nil:
-			t.Errorf("%s: the operator rejects it, the chart renders", v)
-		case !supported && !strings.Contains(out, "outside the supported range") && !strings.Contains(out, "/aicr/version"):
-			t.Errorf("%s: failure does not name aicr.version: %s", v, out)
+	versions := []string{"v0.9.9", "v1.0.0", "v1.0.1", "v1.1.0", "v1.42.7", "v2.0.0", "v2.1.0", "1.0.0", "v1.1",
+		"v1.1.0-rc.1", "v1.3.0-rc1", "v1.3.0-next", "v1.2.0-12-gabcdef0", "v0.9.9-rc.1", "v2.0.0-rc.1", "v1.1.0+build.1", "v1.3.0-rc.01", "v1.3.0-01"}
+	for _, allow := range []bool{false, true} {
+		for _, v := range versions {
+			_, out, renderErr := render(ctx, "aicr.version="+v, fmt.Sprintf("aicr.allowPrerelease=%t", allow))
+			supported := aicrjob.CheckSupportedVersion(v, allow) == nil
+			switch {
+			case supported && renderErr != nil:
+				t.Errorf("%s, allowPrerelease %t: the operator supports it, the chart fails: %s", v, allow, out)
+			case !supported && renderErr == nil:
+				t.Errorf("%s, allowPrerelease %t: the operator rejects it, the chart renders", v, allow)
+			case !supported && !strings.Contains(out, "outside the supported range") &&
+				!strings.Contains(out, "aicr.allowPrerelease") && !strings.Contains(out, "/aicr/version"):
+
+				t.Errorf("%s, allowPrerelease %t: failure does not name aicr.version: %s", v, allow, out)
+			}
 		}
 	}
+
+	// The operator receives the opt-in.
+	for _, allow := range []bool{false, true} {
+		objs, out, err := render(ctx, "aicr.version=v1.3.0-rc.1", fmt.Sprintf("aicr.allowPrerelease=%t", allow))
+		if !allow {
+			if err == nil || !strings.Contains(out, "set aicr.allowPrerelease: true") {
+				t.Errorf("a prerelease without the opt-in: %v, %s", err, out)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(out)
+		}
+		if args := managerArgs(t, objs); !slices.Contains(args, "--allow-prerelease-aicr=true") ||
+			!slices.Contains(args, "--aicr-version=v1.3.0-rc.1") {
+
+			t.Errorf("operator args %v do not carry the prerelease and its opt-in", args)
+		}
+	}
+}
+
+// managerArgs returns the operator container's arguments.
+func managerArgs(t *testing.T, objs []unstructured.Unstructured) []string {
+	t.Helper()
+	for _, o := range objs {
+		if o.GetKind() != "Deployment" || o.GetName() != release {
+			continue
+		}
+		containers, _, _ := unstructured.NestedSlice(o.Object, "spec", "template", "spec", "containers")
+		for _, c := range containers {
+			if c := c.(map[string]any); c["name"] == "manager" {
+				args, _, _ := unstructured.NestedStringSlice(c, "args")
+				return args
+			}
+		}
+	}
+	t.Fatal("no operator Deployment rendered")
+	return nil
 }
 
 // Layouts the chart cannot install fail at render time.
@@ -194,6 +239,8 @@ func TestValidationIdentities(t *testing.T) {
 		{[]string{"aicr.version=v1.0.0"}, []string{"aicr-validation"}},
 		{[]string{"aicr.version=v1.1.0"}, []string{"aicr-validator"}},
 		{[]string{"aicr.version=v1.1.0", "validation.enabled=false"}, nil},
+		{[]string{"aicr.version=v1.0.9-rc.1", "aicr.allowPrerelease=true"}, []string{"aicr-validation"}},
+		{[]string{"aicr.version=v1.1.0-rc.1", "aicr.allowPrerelease=true"}, []string{"aicr-validator"}},
 	}
 	for _, tc := range cases {
 		objs, out, err := render(ctx, tc.set...)
@@ -211,8 +258,9 @@ func TestValidationIdentities(t *testing.T) {
 // (NVIDIA/aicr#3255).
 func TestSnapshotNamespaceGrant(t *testing.T) {
 	ctx := ctxFor(t)
-	for version, want := range map[string]bool{"v1.0.0": true, "v1.0.9": true, "v1.1.0": false, "v1.7.2": false} {
-		objs, out, err := render(ctx, "aicr.version="+version)
+	for version, want := range map[string]bool{"v1.0.0": true, "v1.0.9": true, "v1.1.0": false, "v1.7.2": false,
+		"v1.0.9-rc.1": true, "v1.1.0-rc.1": false} {
+		objs, out, err := render(ctx, "aicr.version="+version, "aicr.allowPrerelease=true")
 		if err != nil {
 			t.Fatal(out)
 		}

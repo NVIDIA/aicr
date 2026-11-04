@@ -112,7 +112,7 @@ subjects:
   - kind: ServiceAccount
     name: aicr-snapshot
     namespace: {{ $discovery }}
-{{- if semverCompare "<1.1.0" (trimPrefix "v" .Values.aicr.version) }}
+{{- if semverCompare "<1.1.0" (include "aicr-operator.aicrCore" .) }}
 ---
 # AICR v1.0.x's exact-ServiceAccount mode creates its namespace when missing,
 # and needs namespace create even when it exists. From v1.1.0 it sends no
@@ -231,7 +231,7 @@ metadata:
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
-{{- if semverCompare ">=1.1.0-0" (trimPrefix "v" .Values.aicr.version) }}
+{{- if semverCompare ">=1.1.0" (include "aicr-operator.aicrCore" .) }}
 ---
 # AICR >= v1.1.0: the launcher runs validators as a pre-provisioned
 # ServiceAccount and cannot create bindings.

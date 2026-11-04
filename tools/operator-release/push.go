@@ -256,6 +256,19 @@ func packChart(ctx context.Context, dst content.Pusher, archive []byte, created 
 
 // chartMetadata reads the top-level Chart.yaml from a chart archive.
 func chartMetadata(archive []byte) (map[string]any, error) {
+	data, err := archiveFile(archive, "Chart.yaml")
+	if err != nil {
+		return nil, err
+	}
+	meta := map[string]any{}
+	if err = yaml.Unmarshal(data, &meta); err != nil {
+		return nil, fmt.Errorf("parse Chart.yaml: %w", err)
+	}
+	return meta, nil
+}
+
+// archiveFile reads the chart's top-level file name from a chart archive.
+func archiveFile(archive []byte, name string) ([]byte, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(archive))
 	if err != nil {
 		return nil, fmt.Errorf("read the chart archive: %w", err)
@@ -264,22 +277,14 @@ func chartMetadata(archive []byte) (map[string]any, error) {
 	for {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
-			return nil, errors.New("the chart archive has no Chart.yaml")
+			return nil, fmt.Errorf("the chart archive has no %s", name)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("read the chart archive: %w", err)
 		}
-		if dir, file := path.Split(h.Name); file != "Chart.yaml" || strings.Count(dir, "/") != 1 {
+		if dir, file := path.Split(h.Name); file != name || strings.Count(dir, "/") != 1 {
 			continue
 		}
-		data, err := io.ReadAll(tr)
-		if err != nil {
-			return nil, err
-		}
-		meta := map[string]any{}
-		if err = yaml.Unmarshal(data, &meta); err != nil {
-			return nil, fmt.Errorf("parse Chart.yaml: %w", err)
-		}
-		return meta, nil
+		return io.ReadAll(io.LimitReader(tr, 1<<20))
 	}
 }

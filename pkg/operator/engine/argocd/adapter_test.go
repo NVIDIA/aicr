@@ -376,6 +376,50 @@ func TestObserveCurrentRevisionReadiness(t *testing.T) {
 	}
 }
 
+func TestObserveCarriesBoundedArgoMessage(t *testing.T) {
+	t.Parallel()
+	step := time.Date(2026, 10, 14, 12, 0, 0, 700_000_000, time.UTC)
+	after := step.Add(5 * time.Second)
+	p, r := testPlan()
+	desired, err := Application(target, p, r, values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("x", 3*MaxMessageLen)
+	tests := []struct {
+		name   string
+		mutate func(*unstructured.Unstructured)
+		state  State
+		want   string
+	}{
+		{name: "failed operation, multi-line", mutate: func(u *unstructured.Unstructured) {
+			_ = unstructured.SetNestedField(u.Object, "Failed", "status", "operationState", "phase")
+			_ = unstructured.SetNestedField(u.Object, "one\n  two\n\tthree", "status", "operationState", "message")
+		}, state: StateFailed, want: "one two three"},
+		{name: "failed operation, long", mutate: func(u *unstructured.Unstructured) {
+			_ = unstructured.SetNestedField(u.Object, "Failed", "status", "operationState", "phase")
+			_ = unstructured.SetNestedField(u.Object, long, "status", "operationState", "message")
+		}, state: StateFailed, want: strings.Repeat("x", MaxMessageLen) + "…"},
+		{name: "comparison error condition", mutate: func(u *unstructured.Unstructured) {
+			_ = unstructured.SetNestedField(u.Object, []any{map[string]any{"type": "ComparisonError", "message": "chart\nnot found"}}, "status", "conditions")
+		}, state: StateProgressing, want: "chart not found"},
+	}
+	for _, tt := range tests {
+		app := readyApp(t, after)
+		tt.mutate(app)
+		got := observe(app, desired, r, step, false)
+		if got.State != tt.state || got.Message != tt.want {
+			t.Errorf("%s: observe() = %+v, want %s with message %q", tt.name, got, tt.state, tt.want)
+		}
+	}
+	if got := (Observation{Reason: "SyncFailed", Message: "boom"}).Text(); got != "SyncFailed: boom" {
+		t.Errorf("Text() = %q", got)
+	}
+	if got := (Observation{Reason: "SyncFailed"}).Text(); got != "SyncFailed" {
+		t.Errorf("Text() without a message = %q", got)
+	}
+}
+
 func fakeAdapter(t *testing.T, objs ...client.Object) *Adapter {
 	t.Helper()
 	mapper := meta.NewDefaultRESTMapper(nil)
@@ -494,5 +538,31 @@ func TestCapabilities(t *testing.T) {
 		if err != nil && operrors.IsPermanent(err) {
 			t.Errorf("%s: Capabilities() = %v; an engine that is not ready yet is not permanent", tt.name, err)
 		}
+	}
+}
+
+// Refresh asks Argo CD to compare an Application the step did not write, and
+// fails for one that is gone.
+func TestRefreshRequestsAComparison(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	p, r := testPlan()
+	a := fakeAdapter(t)
+	if err := a.Refresh(ctx, r); err == nil {
+		t.Fatal("Refresh() of a missing Application succeeded")
+	}
+	if _, err := a.Ensure(ctx, p, r, values); err != nil {
+		t.Fatalf("Ensure() = %v", err)
+	}
+	if err := a.Refresh(ctx, r); err != nil {
+		t.Fatalf("Refresh() = %v", err)
+	}
+	live, err := a.get(ctx, r.ID)
+	if err != nil || live.GetAnnotations()[RefreshAnnotation] != "normal" {
+		t.Fatalf("Refresh() did not request a refresh: %v", err)
+	}
+	desired, _ := Application(target, p, r, values)
+	if drifted(live, desired) {
+		t.Error("the refresh request reads as drift")
 	}
 }

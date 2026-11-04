@@ -129,6 +129,11 @@ func (r *RolloutReconciler) restoreOutcomes(ctx context.Context, rollouts []v1al
 				setReleaseState(ro, step.Release, v1alpha1.ReleaseUnknown, "")
 			}
 		}
+		if cur := ro.Status.Current; cur != nil {
+			// The status write that ended the step was lost with the
+			// outcome's: close the step's record here.
+			r.closeStep(ctx, ro, cur.Release, outcome, r.Now())
+		}
 		ro.Status.Phase, ro.Status.Current = outcome, nil
 		if err := r.saveStatus(ctx, ro, ro.Status.Message); err != nil {
 			return err

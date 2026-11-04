@@ -566,8 +566,9 @@ components:
     # nvsentinel-observe, -quarantine and -remediation,
     # nvsentinel-slinky-drainer (#2615), nvsentinel-health-events-analyzer
     # (#2618), nvsentinel-event-exporter (#2621), nvsentinel-log-collector
-    # (#2619) and nvsentinel-node-validation (#3088) mixins: the exact leaf
-    # paths a mixin may set on this
+    # (#2619), nvsentinel-node-validation (#3088) and
+    # nvsentinel-external-remediation (#3091) mixins: the exact leaf paths a
+    # mixin may set on this
     # already-base-chained component. global.tracing.endpoint is
     # deliberately absent -- it must come from outside the mixin (a leaf
     # recipe's own override, or an operator --set), never from a mixin, so
@@ -644,6 +645,14 @@ components:
       - fault-remediation.maintenance.actions.COMPONENT_RESET.impactedEntityScope
       - fault-remediation.maintenance.actions.COMPONENT_RESET.supersedingEquivalenceGroups
       - fault-remediation.maintenance.templates.gpureset
+      - fault-remediation.maintenance.actions.external-remediation.apiGroup
+      - fault-remediation.maintenance.actions.external-remediation.version
+      - fault-remediation.maintenance.actions.external-remediation.kind
+      - fault-remediation.maintenance.actions.external-remediation.scope
+      - fault-remediation.maintenance.actions.external-remediation.completeConditionType
+      - fault-remediation.maintenance.actions.external-remediation.templateFileName
+      - fault-remediation.maintenance.actions.external-remediation.equivalenceGroup
+      - fault-remediation.maintenance.templates.external-remediation
       - janitor-provider.csp.generic.rebootImage
       - node-drainer.userNamespaces
       - node-drainer.deleteAfterTimeoutMinutes
@@ -815,6 +824,12 @@ components:
       # in the function's doc.
       - function: CheckNVSentinelLogCollectorCoherent
         severity: error
+      # Mixed severity: blocking errors for ExternalRemediationRequest actions
+      # off upstream's contract and object-monitor policies the monitor cannot
+      # load, warnings for routing that may not reach its action (#3091). The
+      # rules are in the function's doc.
+      - function: CheckNVSentinelExternalRemediationCoherent
+        severity: warning
       # Mixed-severity policy, as CheckNVSentinelDatastorePrerequisites: a
       # blocking error when the snapshot shows no default StorageClass for
       # the file server's classless volume, or evidence it could not read,
@@ -1498,6 +1513,58 @@ components:
             - gke
           accelerator:
             - h100
+
+  - name: runai-cluster
+    displayName: Run:ai cluster
+    class: ops
+    valueOverrideKeys:
+      - runai
+      - runaicluster
+    # The registration inputs. The chart renders its hook Jobs with empty
+    # arguments when they are unset, so the bundler refuses a bundle that
+    # leaves one empty instead. The token is a two-hour credential: it may
+    # only be declared --dynamic, and only the helm deployer may carry it.
+    requiredValues:
+      - controlPlane.url
+      - cluster.uid
+      - cluster.url
+      - controlPlane.bootstrapToken
+    installTimeSecretPaths:
+      - controlPlane.bootstrapToken
+    # The chart's crds/ carry clusters.run.ai (RunaiConfig's CRD is applied by
+    # the runai-crd-upgrader hook, not shipped there) and its templates render
+    # a Cluster CR of that kind; the bundled kai-scheduler subchart does the
+    # same with its GpuFractioningConfig. helm-diff's render pass on a fresh cluster cannot
+    # resolve the kinds. disableValidation: true on this release tells
+    # helm-diff to skip the live-mapper check. See #914.
+    hasSelfRefCRDs: true
+    healthCheck:
+      assertFile: checks/runai-cluster/health-check.yaml
+    helm:
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia/runai-oss
+      defaultChart: runai-cluster
+      # renovate: datasource=helm depName=runai-cluster registryUrl=https://helm.ngc.nvidia.com/nvidia/runai-oss
+      defaultVersion: "3.0.20"
+      # SHA-256 of runai-cluster-3.0.20.tgz as served by NGC (matches the
+      # repository index). The repo publishes no .prov file, so this is the
+      # only integrity anchor --vendor-charts has.
+      defaultDigest: sha256:bc30d1a688206b33ce02232a116143f556031e9f8f482ea5458131f01f9252ab
+      # The chart's templates name this namespace outright, so the release
+      # cannot live anywhere else. Its pre-install hook labels the namespace
+      # pod-security.kubernetes.io/enforce=privileged itself.
+      defaultNamespace: runai
+    # global.tolerations reaches the operator, the hook Jobs and the KAI
+    # operator and KRM subcharts; karta and gpu-fractioning read only their
+    # own tolerations value, so all three paths are needed to cover every
+    # pod the chart renders (verified by render at 3.0.20). global.nodeSelector
+    # reaches only the KAI subcharts, so no nodeSelector path is mapped until
+    # the chart threads one through.
+    nodeScheduling:
+      system:
+        tolerationPaths:
+          - global.tolerations
+          - karta.tolerations
+          - kai-resource-management.kai-scheduler.gpu-fractioning.tolerations
 
   # NVIDIA Cluster Readiness Engine — GPU cluster burn-in certification
   # controller. Named `nvcre` after the chart nameOverride, install

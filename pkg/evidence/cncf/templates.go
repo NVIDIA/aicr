@@ -17,21 +17,44 @@ package cncf
 const indexTemplate = `# CNCF AI Conformance Evidence
 
 **Generated:** {{ .GeneratedAt.Format "2006-01-02T15:04:05Z" }}
+**Checklist:** {{ .Version }}
+
+**Applicable MUSTs:** {{ if .Passed }}PASSED{{ else }}FAILED{{ end }}
 
 ## Results
 
-| # | Requirement | Feature | Result | Evidence |
-|---|-------------|---------|--------|----------|
-{{- range $i, $e := .Entries }}
-| {{ add $i 1 }} | ` + "`{{ $e.RequirementID }}`" + ` | {{ $e.Title }} | {{ upper $e.Status }} | [{{ $e.Filename }}]({{ $e.Filename }}) |
+| # | Requirement | Level | Feature | Result | Evidence |
+|---|-------------|-------|---------|--------|----------|
+{{- range $i, $r := .Rows }}
+| {{ add $i 1 }} | ` + "`{{ $r.RequirementID }}`" + ` | {{ $r.Level }} | {{ if $r.Title }}{{ $r.Title }} {{ end }}| {{ result $r.Status $r.Reason }} | {{ if $r.Filename }}[{{ $r.Filename }}]({{ $r.Filename }}) {{ end }}|
+{{- end }}
+{{- if .Supporting }}
+
+## Supporting Evidence
+
+Not requirements of the {{ .Version }} checklist; recorded because the checks ran.
+
+| Capability | Feature | Result | Evidence |
+|------------|---------|--------|----------|
+{{- range $e := .Supporting }}
+| ` + "`{{ $e.RequirementID }}`" + ` | {{ $e.Title }} | {{ result $e.Status $e.Reason }} | [{{ $e.Filename }}]({{ $e.Filename }}) |
+{{- end }}
 {{- end }}
 `
 
 const evidenceTemplate = `# {{ .Title }}
 
 **Generated:** {{ .GeneratedAt.Format "2006-01-02T15:04:05Z" }}
-**Requirement:** ` + "`{{ .RequirementID }}`" + `
-**Result:** {{ upper .Status }}
+**Checklist:** {{ .Version }}
+{{- if .Supporting }}
+**Supporting evidence:** ` + "`{{ .RequirementID }}`" + ` is not a requirement of the {{ .Version }} checklist
+{{- else }}
+**Requirement:** ` + "`{{ .RequirementID }}`" + ` ({{ .Level }})
+{{- end }}
+**Result:** {{ result .Status .Reason }}
+{{- if .Proof }}
+**Proof:** {{ join .Proof ", " }}
+{{- end }}
 
 ---
 

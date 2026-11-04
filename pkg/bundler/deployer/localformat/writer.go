@@ -57,6 +57,11 @@ type Component struct {
 	// Values hydrated by the component bundler
 	Values       map[string]any
 	DynamicPaths []string // paths moved from values.yaml into cluster-values.yaml
+	// RequiredDynamicPaths are the DynamicPaths the registry lists in
+	// requiredValues. The primary folder's install.sh refuses to run while
+	// one of their cluster-values.yaml stubs is still empty. Callers set it
+	// from deployer.ResolveRequiredDynamicPaths.
+	RequiredDynamicPaths []string
 	// OwnsCRDs emits an apply-crds.sh beside install.sh, which applies the
 	// chart's CRDs ahead of `helm upgrade` (see the template for why Helm
 	// alone leaves them at their day-one schema). Callers set it from

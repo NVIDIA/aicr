@@ -68,10 +68,11 @@ with no recipe resolves to `INVALID_REQUEST` naming the gap, which is intended:
 the request was well-formed, and coverage does not exist.
 
 At v1.0.0, `os=rhel`, `os=amazonlinux`, `os=talos`, `service=metal3`, and
-`platform=runai` carry no recipe. This is a recorded decision. **Do not remove
+`platform=runai` carried no recipe. This is a recorded decision. **Do not remove
 them as cleanup**: removing a request enum value is breaking on both the CLI and
 REST surfaces and requires the next major. Coverage arrives by adding a recipe,
-which is additive.
+which is additive; `platform=runai` gained its first two leaves (H100 training
+on EKS Ubuntu and GKE COS, Preview) this way.
 
 ### Notice owed before removal
 
@@ -210,11 +211,13 @@ Every release must pass these automated gates before artifacts are published:
 - SLSA Build Level 3 provenance for those same digests
 
 Container builds first publish only a run-unique
-`candidate-<run-id>-<run-attempt>` tag. Version aliases, `latest`, and the
-public GitHub release stay unchanged until all seven candidate digests pass
-their gates. Homebrew publication starts only after the GitHub release is
-public. If a gate fails, the candidate tags stay available for diagnosis but
-are not promoted.
+`candidate-<run-id>-<run-attempt>` tag. Version aliases stay unchanged until
+all seven candidate digests pass AICR's own gates (resolution, scans and
+attestation); `latest` and the public GitHub release stay unchanged until the
+operator gate passes too. Homebrew publication starts only after the GitHub
+release is public. If an AICR gate fails, the candidate tags stay available
+for diagnosis but are not promoted. If only the operator gate fails, the
+version aliases exist without a release; see [Release Pipeline](#release-pipeline).
 
 ## How to Release
 
@@ -401,7 +404,7 @@ current release.
 ## Release Pipeline
 
 ```
-Tag Push --> CI --> Candidate Images --> Resolve Digests --> Scan + Attest --> Promote Aliases --> Publish
+Tag Push --> CI --> Candidate Images --> Resolve Digests --> Scan + Attest --> Promote Version Aliases --> Operator Gate --> Promote latest --> Publish
 ```
 
 The workflow resolves one authoritative seven-image digest map, scans both
@@ -411,8 +414,20 @@ version alias, and `latest` alias before the first registry write. Stable
 releases also fail closed if the same or a newer stable version is already
 public, even if registry aliases were changed out of band.
 
-Promotion creates and verifies all seven immutable version aliases before a
-stable release touches `latest`. Promotion across seven GHCR repositories is not
+Promotion runs in two jobs.
+
+- `promote-versions` creates and verifies all seven immutable version aliases
+  once AICR's own gates pass (`aicr-check`: resolution, scans and attestation).
+  It runs before the operator gate, because the operator qualifies this tag's
+  AICR, which resolves its validator and gate images by the version tag.
+- `promote-images` runs after `release-check`, the full gate including the
+  operator. It runs the preflight again, finds the version aliases already in
+  place, and moves `latest` for a stable release.
+
+If the operator gate fails, the version aliases exist without a GitHub release.
+They are the same bytes that passed AICR's tests, scans and attestation, and the
+tag pins the commit, so a fix needs a new tag anyway. Promotion across seven
+GHCR repositories is not
 transactional, so a registry failure while updating `latest` can leave a mix of
 prior and current aliases. Re-running the failed jobs with the same candidate is
 idempotent and finishes only the remaining aliases. A repository-wide
@@ -461,21 +476,39 @@ The [AICR Operator](docs/operator/index.md) ships at the release's version
 outside the image promotion above: `operator-candidate` builds it from the tag
 (`make operator-candidate`) and malware-scans the `kubectl-aicr` binaries,
 `operator-scan` scans the operator and in-cluster registry images on both
-architectures, and
-`operator-publish` runs only after the release integrity check. It publishes:
+architectures, `operator-reproducible` builds the candidate twice (the second
+time with an empty Go build cache) and requires identical bytes, and
+`operator-lifecycle` installs the newest published operator release older than
+the tag and runs the qualify suite's lifecycle scenarios upgrading to this
+candidate (`make operator-qualify-published`), after `promote-versions`.
+`operator-validation` runs the operator e2e suite (`make operator-e2e`) with
+this tag's AICR image and validator images, also after `promote-versions`:
+AICR's Jobs as the operator builds them, recipe through deployment
+validation, with the validators pulled by their version aliases and the
+evidence checked against the pinned digests. `operator-publish` runs only
+after the release integrity check, and `operator-attest`
+(`attest-operator.yaml`) attests what it pushed. It publishes:
 
 | Artifact | Where |
 |----------|-------|
-| Operator image | `ghcr.io/nvidia/aicr-operator:vX.Y.Z`, with build provenance on the index and an SPDX SBOM attestation on each platform image, in the registry |
+| Operator image | `ghcr.io/nvidia/aicr-operator:vX.Y.Z`, with build provenance on the index and each platform image and a CycloneDX SBOM and OpenVEX on each platform image, in the registry |
 | In-cluster registry image | `ghcr.io/nvidia/aicr-registry:vX.Y.Z`, built from `cmd/aicr-registry`, attested as the operator image is |
 | Helm chart | `oci://ghcr.io/nvidia/charts/aicr-operator`, version `X.Y.Z`, with build provenance in the registry |
 | `kubectl-aicr` | Release assets `kubectl-aicr-<os>-<arch>` for darwin and linux on amd64 and arm64, malware-scanned and attested |
 
-The chart defaults to the operator and registry images by digest and to the
-AICR release the operator was qualified against (`operator:` in `.settings.yaml`).
-`release-check` fails closed on the operator candidate and its scans, so neither
-the image aliases above nor the operator are published when they fail, and
-`publish` waits for `operator-publish`. Publishing the same candidate again is
+The chart defaults to the operator and registry images by digest and to this
+tag's own AICR release: the `aicr` and validator images by the digests
+`resolve-candidates` resolved, pinned as `:vX.Y.Z@sha256:<digest>`. A release
+candidate's chart also sets `aicr.allowPrerelease`, since its AICR is a
+prerelease. `operator-lifecycle` runs this tag's AICR through install,
+upgrade and rollout with validation off, and `operator-validation` runs its
+validator images through deployment validation.
+Local and CI builds outside a release default to the AICR release
+`.settings.yaml` pins (`operator:`).
+`release-check` fails closed on the operator candidate, its scans, and the
+reproducibility, lifecycle and validation checks, so neither `latest` nor the operator is
+published when they fail, and `publish` waits for
+`operator-publish` and `operator-attest`. Publishing the same candidate again is
 a no-op, so re-running the failed jobs converges; a tag that already names
 other content is refused. The operator image takes no `latest` alias.
 
@@ -484,13 +517,16 @@ and `charts/aicr-operator` packages creates it. If GHCR creates one private, an
 organization administrator makes it public once, as for the other images, so
 users can pull and verify it anonymously.
 
-The operator's attestations are generated in `on-tag.yaml` itself, not in the
-reusable `attest-images.yaml`, so they are SLSA Build Level 2. Verify them
-against that workflow and the tag:
+The operator's attestations come from the reusable `attest-operator.yaml`, which
+runs the same `sbom-and-attest` action as AICR's images, so they are SLSA Build
+Level 3. v1.2.0 and its release candidates were attested in `on-tag.yaml` itself
+(Level 2, SPDX SBOMs, no OpenVEX). Verify against the workflow that signed the
+release and its tag:
 
 ```shell
+SIGNER=NVIDIA/aicr/.github/workflows/attest-operator.yaml   # for v1.2.0 and its release candidates: NVIDIA/aicr/.github/workflows/on-tag.yaml
 gh attestation verify "oci://ghcr.io/nvidia/charts/aicr-operator:${VERSION}" --repo NVIDIA/aicr \
-  --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/v${VERSION}"
+  --signer-workflow "${SIGNER}" --source-ref "refs/tags/v${VERSION}"
 ```
 
 ### Supply Chain
@@ -514,10 +550,13 @@ Every release includes, for the AICR binaries and the seven images above:
   `notices-generator` merge-gate job runs it on dependency changes, so a break
   shows up on the PR rather than at tag time.
 
-The AICR Operator preview's artifacts carry less: Level 2 provenance on the
-operator and registry image indexes, the chart and each `kubectl-aicr` binary,
-an SPDX SBOM attestation on each of their platform images, no OpenVEX, and no
-`aicr_checksums.txt` entry for the plugin, whose attestations bind its digests
+The AICR Operator preview's images carry the same evidence as the seven images
+above, from the reusable `attest-operator.yaml`: Level 3 provenance on each
+index and platform image, and a CycloneDX SBOM and OpenVEX on each platform
+image. Its chart and each `kubectl-aicr` binary carry Level 3 provenance; the
+plugin has no `aicr_checksums.txt` entry, since its attestations bind its
+digests. v1.2.0 and its release candidates carry less: Level 2 provenance from
+`on-tag.yaml`, SPDX SBOMs and no OpenVEX
 ([AICR Operator (preview)](#aicr-operator-preview)).
 
 ## Versioning

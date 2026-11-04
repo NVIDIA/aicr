@@ -21,6 +21,7 @@
 //	operator-release extract -dir dist/candidate -platform linux/amd64 -out bin
 //	operator-release refuses -dir dist/candidate
 //	operator-release push    -dir dist/candidate
+//	operator-release pull    -dir dist/published -version latest -below <candidate version>
 package main
 
 import (
@@ -31,7 +32,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
+
+	"golang.org/x/mod/semver"
 
 	"github.com/NVIDIA/aicr/pkg/operator/version"
 )
@@ -45,7 +50,7 @@ func main() {
 
 func run(args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: operator-release build|extract|refuses|push [flags]")
+		return errors.New("usage: operator-release build|extract|refuses|push|pull [flags]")
 	}
 	switch args[0] {
 	case "build":
@@ -56,6 +61,8 @@ func run(args []string, out io.Writer) error {
 		return refuses(args[1:], out)
 	case "push":
 		return push(args[1:], out)
+	case "pull":
+		return pull(args[1:], out)
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -74,6 +81,9 @@ func build(args []string, out io.Writer) error {
 	settingsFile := fs.String("settings", ".settings.yaml", "Pins.")
 	koFile := fs.String("ko", ".ko.yaml", "ko configuration.")
 	goSum := fs.String("go-sum", "go.sum", "Module checksums.")
+	aicrVersion := fs.String("aicr-version", "", "AICR release the chart defaults to; with -aicr-image and -aicr-validator-images. Default: .settings.yaml's pins.")
+	aicrImage := fs.String("aicr-image", "", "AICR CLI image for -aicr-version, as repository:tag@sha256:<digest>.")
+	aicrValidators := fs.String("aicr-validator-images", "", "Comma-separated AICR validator images for -aicr-version, each repository:tag@sha256:<digest>.")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -100,6 +110,11 @@ func build(args []string, out io.Writer) error {
 		return fmt.Errorf("read the registry image: %w", err)
 	}
 	aicr := AICR{Version: s.Operator.AICRVersion, Image: s.Operator.AICRImage, ValidatorImages: s.validators()}
+	if *aicrVersion != "" || *aicrImage != "" || *aicrValidators != "" {
+		if aicr, err = aicrFlags(*aicrVersion, *aicrImage, *aicrValidators); err != nil {
+			return err
+		}
+	}
 	name, archive, err := packageChart(os.DirFS(*chartDir), *ver, aicr, image.Ref(), registry.Ref())
 	if err != nil {
 		return err
@@ -112,10 +127,6 @@ func build(args []string, out io.Writer) error {
 		return err
 	}
 	plugin, err := hashDir(filepath.Join(*dir, "plugin"))
-	if err != nil {
-		return err
-	}
-	sboms, err := hashDir(filepath.Join(*dir, "sbom"))
 	if err != nil {
 		return err
 	}
@@ -133,10 +144,10 @@ func build(args []string, out io.Writer) error {
 		Toolchain: Toolchain{Go: *goVersion, Ko: s.BuildTools.Ko, BaseImage: base},
 		Operator:  image,
 		Chart:     File{Name: chartFile, Digest: sha256Of(archive)},
-		Plugin:    plugin, SBOMs: sboms,
-		AICR:     aicr,
-		Registry: registry,
-		Inputs:   inputs,
+		Plugin:    plugin,
+		AICR:      aicr,
+		Registry:  registry,
+		Inputs:    inputs,
 	}
 	if err = m.seal(); err != nil {
 		return err
@@ -182,4 +193,31 @@ func extract(args []string) error {
 		return fmt.Errorf("the candidate has no %s image", *platform)
 	}
 	return extractBinary(filepath.Join(*dir, *layout), digest, *binary, *outFile)
+}
+
+// pinnedRef is an image reference with a tag and a sha256 digest.
+var pinnedRef = regexp.MustCompile(`^[^\s@]+/[^\s@/:]+:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}@sha256:[a-f0-9]{64}$`)
+
+// aicrFlags is the AICR release given on the command line, such as the one a
+// release tag built: all three flags, each image pinned by digest and tagged
+// with the version.
+func aicrFlags(ver, image, validators string) (AICR, error) {
+	if ver == "" || image == "" || validators == "" {
+		return AICR{}, errors.New("-aicr-version, -aicr-image and -aicr-validator-images are set together")
+	}
+	if !semver.IsValid(ver) || semver.Canonical(ver) != ver {
+		return AICR{}, fmt.Errorf("-aicr-version %q is not vX.Y.Z with an optional prerelease", ver)
+	}
+	refs := strings.Split(validators, ",")
+	sort.Strings(refs)
+	for _, ref := range append([]string{image}, refs...) {
+		if !pinnedRef.MatchString(ref) {
+			return AICR{}, fmt.Errorf("AICR image %q is not repository:tag@sha256:<digest>", ref)
+		}
+		name := ref[:strings.IndexByte(ref, '@')]
+		if tag := name[strings.LastIndexByte(name, ':')+1:]; tag != ver {
+			return AICR{}, fmt.Errorf("AICR image %q has tag %q, want %q", ref, tag, ver)
+		}
+	}
+	return AICR{Version: ver, Image: image, ValidatorImages: refs}, nil
 }

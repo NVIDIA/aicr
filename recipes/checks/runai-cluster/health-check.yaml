@@ -1,0 +1,186 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Run:ai Cluster Health Check
+#
+# Validates that the Run:ai cluster side is installed, registered with its
+# control plane and healthy in the runai namespace:
+# 1. clusters.run.ai CRD Established=True. It ships in the chart's crds/, so
+#    the CRD inventory anchors it; runaiconfigs.run.ai is applied by the
+#    crd-upgrader hook image instead and is covered by step 2 through the CR.
+# 2. RunaiConfig runai/runai exists and reports Deployed, Available and
+#    DependenciesFulfilled all True. The chart renders no RunaiConfig once
+#    controlPlane.url and cluster.uid are set; the pre-install hook creates it
+#    from the configuration it fetches from the control plane, so its presence
+#    proves the registration handshake happened, and DependenciesFulfilled is
+#    the operator's own verdict on the GPU Operator, Prometheus and ingress
+#    prerequisites.
+# 3. The operator Deployments the chart renders (runai-operator, kai-operator,
+#    krm-operator, karta-operator) and the operands runai-operator creates from
+#    the RunaiConfig (runai-agent, cluster-sync) each have an available
+#    replica.
+# 4. No pod in the namespace is stuck in an unhealthy phase or a known-bad
+#    container-waiting state.
+#
+# Condition names come from the RunaiConfig type in the Run:ai cluster SDK and
+# the Deployment names from the rendered chart (verified against chart 3.0.20;
+# re-verify both on every pin bump). On a cluster with nothing installed every
+# step fails, so the check cannot pass vacuously.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: runai-cluster-health-check
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-cluster-crd-established
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: clusters.run.ai
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+    - name: validate-runaiconfig-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: run.ai/v1
+              kind: RunaiConfig
+              metadata:
+                name: runai
+                namespace: runai
+              status:
+                (conditions[?type == 'Deployed']):
+                  - status: "True"
+                (conditions[?type == 'Available']):
+                  - status: "True"
+                (conditions[?type == 'DependenciesFulfilled']):
+                  - status: "True"
+    - name: validate-operators-available
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: runai-operator
+                namespace: runai
+              status:
+                (availableReplicas > `0`): true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: kai-operator
+                namespace: runai
+              status:
+                (availableReplicas > `0`): true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: krm-operator
+                namespace: runai
+              status:
+                (availableReplicas > `0`): true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: karta-operator
+                namespace: runai
+              status:
+                (availableReplicas > `0`): true
+    - name: validate-operands-available
+      try:
+        # Created by runai-operator from the RunaiConfig, not by the chart:
+        # they exist only after the operator reconciled the control plane's
+        # configuration, which is the state the recipe promises.
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: runai-agent
+                namespace: runai
+              status:
+                (availableReplicas > `0`): true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: cluster-sync
+                namespace: runai
+              status:
+                (availableReplicas > `0`): true
+    - name: validate-all-pods-healthy
+      try:
+        # Assert no pods are in unhealthy phases (Pending / Failed /
+        # Unknown) or stuck in Running phase with a known-bad
+        # container-waiting reason. Completed hook Job pods are Succeeded
+        # and pass; a failed hook Job leaves a Failed pod and fails here.
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: runai
+              status:
+                phase: Pending
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: runai
+              status:
+                phase: Failed
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: runai
+              status:
+                phase: Unknown
+        # JMESPath projection, not a single-element slice match: a
+        # `containerStatuses: - state: ...` shape matches only
+        # single-container pods and silently passes sidecars. The parallel
+        # initContainerStatuses block catches init-container failures,
+        # which are invisible to containerStatuses.
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: runai
+              status:
+                ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: runai
+              status:
+                ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true

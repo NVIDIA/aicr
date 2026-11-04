@@ -17,6 +17,7 @@ package aicr_test
 import (
 	"context"
 	stderrors "errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1440,9 +1441,11 @@ spec:
         features:
           - dra-support
           - secure-access
+        notApplicable:
+          cluster_autoscaling: fixed-size cluster with no node autoscaler
 `
 
-// TestConfig_CNCFEvidenceOptions pins the three fields CNCFEvidenceOptions
+// TestConfig_CNCFEvidenceOptions pins the four fields CNCFEvidenceOptions
 // projects, mirroring TestConfig_SnapshotOutputOptions for the sibling
 // caller-consumed (not Client-consumed) derivation.
 func TestConfig_CNCFEvidenceOptions(t *testing.T) {
@@ -1465,6 +1468,9 @@ func TestConfig_CNCFEvidenceOptions(t *testing.T) {
 	if want := []string{"dra-support", "secure-access"}; !slices.Equal(got.Features, want) {
 		t.Errorf("Features = %v, want %v", got.Features, want)
 	}
+	if want := map[string]string{"cluster_autoscaling": "fixed-size cluster with no node autoscaler"}; !maps.Equal(got.NotApplicable, want) {
+		t.Errorf("NotApplicable = %v, want %v", got.NotApplicable, want)
+	}
 }
 
 func TestConfig_CNCFEvidenceOptions_Absent(t *testing.T) {
@@ -1475,7 +1481,7 @@ func TestConfig_CNCFEvidenceOptions_Absent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CNCFEvidenceOptions on nil Config: %v", err)
 	}
-	if got.Dir != "" || got.CNCFSubmission || got.Features != nil {
+	if got.Dir != "" || got.CNCFSubmission || got.Features != nil || got.NotApplicable != nil {
 		t.Errorf("got %+v, want zero value", got)
 	}
 }

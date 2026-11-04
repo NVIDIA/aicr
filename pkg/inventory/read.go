@@ -21,9 +21,11 @@ import (
 	"sort"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
@@ -134,6 +136,21 @@ type Options struct {
 
 	// Components is the set the read answers for.
 	Components []Component
+
+	// OperatorNamespace is where the AICR Operator keeps the plans that
+	// version the Argo CD Applications it writes. Empty is
+	// defaults.AICROperatorNamespace. Plans are read nowhere else: only that
+	// namespace is guarded by the operator's admission policy.
+	OperatorNamespace string
+}
+
+// operatorNamespace is OperatorNamespace with its default applied.
+func (o Options) operatorNamespace() string {
+	if o.OperatorNamespace == "" {
+		return defaults.AICROperatorNamespace
+	}
+
+	return o.OperatorNamespace
 }
 
 // Result is the installed inventory: the version table an upgrade comparison
@@ -298,7 +315,7 @@ func read(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interface
 		if helmRead, err = helmReleases(ctx, typed, within); err != nil {
 			return Result{}, err
 		}
-	} else if argoRead, err = argoApplications(ctx, dyn, within); err != nil {
+	} else if argoRead, err = argoApplications(ctx, dyn, within, opts.operatorNamespace()); err != nil {
 		return Result{}, err
 	}
 
@@ -336,6 +353,12 @@ func (o Options) validate() error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("the installed inventory was requested for deployer %q, whose release naming this build "+
 				"does not know; pass one of %s", o.Deployer, strings.Join(deployerNames(), ", ")))
+	}
+
+	if problems := validation.IsDNS1123Label(o.operatorNamespace()); len(problems) > 0 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("the AICR Operator namespace %q is not a namespace name: %s",
+				o.OperatorNamespace, strings.Join(problems, "; ")))
 	}
 
 	if len(o.Components) == 0 {

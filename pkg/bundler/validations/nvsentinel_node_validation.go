@@ -318,9 +318,9 @@ func nodeValidationDefinedTests(ctx context.Context, values map[string]any, fail
 // nodeValidationChartProviderDefaults is the chart's k8s-job-provider
 // definition (NVSentinel v1.28.0), which AICR's values merge over.
 var nodeValidationChartProviderDefaults = map[string]any{
-	"apiGroup":            "batch",
-	"version":             "v1",
-	"kind":                "Job",
+	crFieldAPIGroup:       "batch",
+	crFieldVersion:        "v1",
+	crFieldKind:           "Job",
 	"resource":            "jobs",
 	"templateFile":        "k8s-job-template.yaml",
 	"retries":             5,

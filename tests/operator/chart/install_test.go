@@ -291,16 +291,7 @@ func driftRepair(t *testing.T) {
 // job is the Job the operator builds for a stage.
 func job(t *testing.T, stage aicrjob.Stage, serviceAccount string) *batchv1.Job {
 	t.Helper()
-	j, err := aicrjob.Build(&aicrjob.Request{
-		Stage: stage, RunID: "0123456789ab", RuntimeName: v1alpha1.SingletonName, RuntimeUID: runtimeUID, Image: aicrImage,
-		Args:           []string{"--output", "cm://x"},
-		Namespaces:     aicrjob.Namespaces{Jobs: jobsNS, Discovery: discoveryNS, Validation: validationNS},
-		ServiceAccount: serviceAccount, CredentialSecret: "aicr-run-0123456789ab",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return j
+	return jobWithArgs(t, stage, serviceAccount, []string{"--output", "cm://x"})
 }
 
 // The operator deletes an Application only once an approved Remove step has
@@ -349,16 +340,13 @@ func operatorJobs(t *testing.T) {
 	ctx := ctxFor(t)
 	op := operator(t)
 	create := func(j *batchv1.Job) error { return op.Create(ctx, j, client.DryRunAll) }
-	for _, ok := range []*batchv1.Job{
-		job(t, aicrjob.StageRecipe, "aicr-jobs"),
-		job(t, aicrjob.StageBaseRender, "aicr-jobs"),
-		job(t, aicrjob.StageRender, "aicr-jobs"),
-		job(t, aicrjob.StageAssessment, "aicr-jobs"),
-		job(t, aicrjob.StageSnapshot, "aicr-snapshot"),
-		job(t, aicrjob.StageValidation, "aicr-validation"),
-	} {
-		if err := create(ok); err != nil {
-			t.Errorf("the operator's %s Job is denied: %v", ok.Labels[v1alpha1.LabelStage], err)
+	for _, version := range supportedAICRVersions(t) {
+		for stage, argLists := range operatorJobArgs(t, version) {
+			for _, args := range argLists {
+				if err := create(jobWithArgs(t, stage, stageServiceAccounts[stage], args)); err != nil {
+					t.Errorf("the operator's %s Job for AICR %s is denied: %v\nargs: %q", stage, version, err, args)
+				}
+			}
 		}
 	}
 	recipe := func(mutate func(j *batchv1.Job)) *batchv1.Job {
@@ -426,16 +414,14 @@ func operatorJobs(t *testing.T) {
 	if err := create(snapshot("--image", aicrImage)); err != nil {
 		t.Errorf("a snapshot agent on the pinned AICR image is denied: %v", err)
 	}
+	const flags = "only the flags the operator builds"
 	denied(t, "a snapshot agent on another image", create(snapshot("--image", "busybox@"+digestA)), "snapshot agent")
-	denied(t, "a snapshot agent on another image, joined", create(snapshot("--image=busybox@"+digestA)), "snapshot agent")
-	denied(t, "a snapshot agent on another image, single dash", create(snapshot("-image", "busybox@"+digestA)), "snapshot agent")
-	denied(t, "a snapshot agent on another image, single dash joined", create(snapshot("-image=busybox@"+digestA)), "snapshot agent")
-	denied(t, "a snapshot agent configured from a file", create(snapshot("--config", "https://example.com/aicr.yaml")), "no --config")
-	denied(t, "a snapshot agent configured from a file, single dash joined", create(snapshot("-config=/tmp/aicr.yaml")), "no --config")
-	denied(t, "a snapshot agent configured from a file, trailing newline", create(snapshot("--config=/tmp/aicr.yaml\n")), "no --config")
-	denied(t, "an AICR Job with its own data directory", create(snapshot("--data", "/tmp/catalog")), "--data directory")
-	denied(t, "an AICR Job with its own data directory, single dash joined", create(snapshot("-data=/tmp/catalog")), "--data directory")
-	denied(t, "a snapshot agent on another image, trailing newline", create(snapshot("-image=busybox@"+digestA+"\n")), "snapshot agent")
+	denied(t, "a snapshot agent on the pinned image and another", create(snapshot("--image", aicrImage, "--image", "busybox@"+digestA)), "snapshot agent")
+	denied(t, "a snapshot agent on another image, joined", create(snapshot("--image=busybox@"+digestA)), flags)
+	denied(t, "a snapshot agent on another image, single dash", create(snapshot("-image", "busybox@"+digestA)), flags)
+	denied(t, "a snapshot agent on another image, single dash joined", create(snapshot("-image=busybox@"+digestA)), flags)
+	denied(t, "a snapshot agent on another image, trailing newline", create(snapshot("-image=busybox@"+digestA+"\n")), flags)
+	operatorJobFlags(t, create)
 	snapshotInJobs := job(t, aicrjob.StageSnapshot, "aicr-snapshot")
 	snapshotInJobs.Namespace = jobsNS
 	denied(t, "snapshot in the Job namespace", create(snapshotInJobs), "AICR identity")

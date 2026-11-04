@@ -351,6 +351,13 @@ type EvidenceCNCFSpec struct {
 
 	// Empty = all features. Only honored when CNCFSubmission is true.
 	Features []string `yaml:"features,omitempty" json:"features,omitempty"`
+
+	// NotApplicable declares conditional MUST requirements of the CNCF
+	// checklist not applicable, keyed by upstream requirement id with the
+	// justification as value (today only cluster_autoscaling). It is the only
+	// source of a not-applicable requirement status; any other id is
+	// rejected at render time.
+	NotApplicable map[string]string `yaml:"notApplicable,omitempty" json:"notApplicable,omitempty"`
 }
 
 // EvidenceAttestationSpec configures the recipe-evidence bundle path

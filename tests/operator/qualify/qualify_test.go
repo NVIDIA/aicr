@@ -52,22 +52,30 @@ func TestQualification(t *testing.T) {
 	labelNodes(ctx, t)
 
 	var active string
+	fault := func(name string, f func(t *testing.T)) {
+		t.Run(name, func(t *testing.T) {
+			if lifecycleOnly {
+				t.Skip("a fault scenario; this run covers the lifecycle only")
+			}
+			f(t)
+		})
+	}
 	t.Run("the candidate runs by digest as a release build", func(t *testing.T) {
 		runsCandidate(ctx, t, &candidate)
 	})
 	t.Run("a first rollout lands only once approved", func(t *testing.T) {
 		active = firstRollout(ctx, t)
 	})
-	t.Run("killing the operator mid-step neither repeats nor loses the step", func(t *testing.T) {
+	fault("killing the operator mid-step neither repeats nor loses the step", func(t *testing.T) {
 		active = operatorKilled(ctx, t, active)
 	})
-	t.Run("a leader change mid-step hands the rollout to the other replica", func(t *testing.T) {
+	fault("a leader change mid-step hands the rollout to the other replica", func(t *testing.T) {
 		active = leaderChange(ctx, t, active)
 	})
-	t.Run("a registry outage writes nothing until the registry returns", func(t *testing.T) {
+	fault("a registry outage writes nothing until the registry returns", func(t *testing.T) {
 		active = registryOutage(ctx, t, active)
 	})
-	t.Run("a missing credentials Secret stalls with its cause until restored", func(t *testing.T) {
+	fault("a missing credentials Secret stalls with its cause until restored", func(t *testing.T) {
 		active = credentialsMissing(ctx, t, active)
 	})
 	t.Run("a newer rollout schema stops the operator with zero engine writes", func(t *testing.T) {
@@ -76,11 +84,20 @@ func TestQualification(t *testing.T) {
 	t.Run("an operator upgrade mid-rollout finishes the rollout", func(t *testing.T) {
 		active = upgradeMidRollout(ctx, t, active)
 	})
+	t.Run("a registry restart mid-rollout loses no artifact", func(t *testing.T) {
+		active = registryRestart(ctx, t, active)
+	})
+	t.Run("helm rollback to the installed release reads every plan and rollout", func(t *testing.T) {
+		rollbackToInstalled(ctx, t, active)
+	})
 	t.Run("helm uninstall deletes no workload and a reinstall resumes", func(t *testing.T) {
 		uninstallReinstall(ctx, t, active)
 	})
 	t.Run("the shipped RBAC denied the operator nothing", func(t *testing.T) {
 		nothingForbidden(ctx, t)
+	})
+	t.Run("the documented uninstall order orphans the stack and keeps what lifecycle.md lists", func(t *testing.T) {
+		documentedUninstall(ctx, t, active)
 	})
 }
 
@@ -146,8 +163,13 @@ func runsCandidate(ctx context.Context, t *testing.T, c *candidateManifest) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(logs), `"version":"`+c.Version+`"`) || !strings.Contains(string(logs), `"release":true`) ||
-		!strings.Contains(string(logs), `"development":false`) {
+	// The published release the lifecycle run installs can predate the
+	// development field in the startup log; the flags above still show it
+	// runs no development setting.
+	logged := string(logs)
+	older := lifecycleOnly && c == &candidate && !strings.Contains(logged, `"development":`)
+	if !strings.Contains(logged, `"version":"`+c.Version+`"`) || !strings.Contains(logged, `"release":true`) ||
+		!older && !strings.Contains(logged, `"development":false`) {
 
 		t.Fatalf("the operator does not report release build %s without the development opt-in", c.Version)
 	}
@@ -195,6 +217,12 @@ func firstRollout(ctx context.Context, t *testing.T) string {
 		}
 		rt.Spec.Overrides = append(rt.Spec.Overrides, v1alpha1.Override{Component: release, Path: "resources.requests.cpu",
 			Value: apiextensionsv1.JSON{Raw: []byte(`"50m"`)}})
+		// AICR v1.2.0 enables cert-manager's ServiceMonitor, whose CRD comes
+		// from the disabled prometheus-operator-crds. A release qualifies
+		// against its own AICR, so keep the release free of it on every
+		// version.
+		rt.Spec.Overrides = append(rt.Spec.Overrides, v1alpha1.Override{Component: release, Path: "prometheus.servicemonitor.enabled",
+			Value: apiextensionsv1.JSON{Raw: []byte(`false`)}})
 	})
 	digest := waitResolved(ctx, t)
 	ro := awaitingApproval(ctx, t, digest)
