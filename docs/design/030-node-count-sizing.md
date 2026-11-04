@@ -216,10 +216,14 @@ resources:
   - path: operator.resources
     tiers:
       - maxNodes: 300
-      - maxNodes: 1000
-        requests: {memory: 1Gi}
+      - maxNodes: 600
+        requests: {memory: 512Mi}
+        limits: {memory: 2Gi}
+        source: "#3214: 635Mi 24h peak at 447; 715Mi 7-day peak at 576"
+      - maxNodes: 1500
+        requests: {memory: 2Gi}
         limits: {memory: 4Gi}
-        source: "#3214: 715Mi 7-day peak at 576; 2052Mi 7-day peak at 1112"
+        source: "#3214: 2052Mi 7-day peak at 1112"
       - maxNodes: 3000
         requests: {memory: 4Gi}
         limits: {memory: 8Gi}
@@ -235,7 +239,9 @@ resources:
   that key. For example, the maintenance-operator and NIC daemon entries
   apply only where the GB300 values file defines them.
 - Every tier that changes a value carries a `source` naming its measurement.
-  A tier is never interpolated from neighbouring measurements.
+  A tier is never interpolated from neighbouring measurements. A component
+  with no measurement inside a tier is sized from its nearest measurement
+  above the tier, which over-sizes it, never from one below.
 - Requests track steady-state usage near the top of the tier. Limits leave
   at least 1.5x headroom over the highest 24h peak measured in the tier.
   Where only instantaneous readings exist, they are first scaled by the
@@ -257,16 +263,18 @@ these numbers with their sources.
 | Tier | gpu-operator | network-operator | maintenance-operator | nodewright | NIC daemon (per pod) |
 |---|---|---|---|---|---|
 | ≤ 300 | 300Mi / 700Mi | 2Gi / 2Gi | 256Mi / 1Gi | 2000Mi / 4000Mi | 128Mi / 512Mi |
-| 301 to 1000 | 1Gi / 4Gi | 2Gi / 8Gi | 2Gi / 6Gi | 3Gi / 8Gi | 512Mi / 2Gi |
-| 1001 to 3000 | 4Gi / 8Gi | 6Gi / 12Gi | 8Gi / 12Gi | 8Gi / 12Gi | 512Mi / 2Gi |
+| 301 to 600 | 512Mi / 2Gi | 2Gi / 4Gi | 1Gi / 4Gi | 2000Mi / 4000Mi | 256Mi / 2Gi |
+| 601 to 1500 | 2Gi / 4Gi | 4Gi / 10Gi | 3Gi / 8Gi | 4Gi / 8Gi | 512Mi / 2Gi |
+| 1501 to 3000 | 4Gi / 8Gi | 6Gi / 12Gi | 8Gi / 12Gi | 8Gi / 12Gi | 512Mi / 2Gi |
 
 The data each tier rests on:
 
 | Tier | gpu-operator | network-operator | maintenance-operator | nodewright | NIC daemon (per pod) |
 |---|---|---|---|---|---|
 | ≤ 300 | 24h peak 384Mi at 244 | 24h peak 728Mi at 244 | 290Mi at 89; 130 to 156Mi at 141 | 24h peak 1024Mi at 244 (11k pods) | max 400Mi at 89, flat from 24 nodes |
-| 301 to 1000 | 7-day peaks 715Mi at 576, 2052Mi at 1112 | 24h peak 1594Mi at 447; 2720Mi at 1112 (12h-old pod) | 2345Mi at 1112 (12h-old pod) | 24h peak 1868Mi at 447; 3706Mi at 1112 | p99 821Mi, max 903Mi at 1112 |
-| 1001 to 3000 | 24h peak 3447Mi at 2500 | 24h peak 8107Mi at 2500 | 24h peak 5186Mi, 6186Mi a week later, at 2500 | 24h peak 9091Mi at 2500 | 24h q99 1316Mi, max 1551Mi at 2500 |
+| 301 to 600 | 24h peaks 471Mi at 357, 635Mi at 447; 7-day peak 715Mi at 576 | 24h peaks 908Mi at 357, 1594Mi at 447; 75 restarts at 2Gi at 576 | none in tier; sized from 2345Mi at 1112 | 24h peaks 1006Mi at 357, 1868Mi at 447 (18k pods) | none in tier; sized from p99 821Mi, max 903Mi at 1112 |
+| 601 to 1500 | 7-day peak 2052Mi at 1112; 1506Mi at about 1400 | 2720Mi at 1112 (12h-old pod); 4490Mi at about 1400 | 2345Mi at 1112 (12h-old pod); 2894Mi at about 1400 | 3706Mi at 1112; 3190Mi at about 1400 | max 903Mi at 1112; max 1023Mi at about 1400 |
+| 1501 to 3000 | 24h peak 3447Mi at 2500 | 24h peak 8107Mi at 2500 | 24h peak 5186Mi, 6186Mi a week later, at 2500 | 24h peak 9091Mi at 2500 | 24h q99 1316Mi, max 1551Mi at 2500 |
 
 The top tier matches the overrides that have run both large clusters since
 #3148. Two of its limits are below the 1.5x headroom rule and are recorded
@@ -363,10 +371,12 @@ following this section's rules.
   - The NIC daemon tracks NicDevice count.
 
   Each gap is documented in that component's `sizing.yaml`.
-- **The middle tier has the thinnest data.** There are no 24h peaks between
-  447 and 2500 nodes. The 301 to 1000 tier rests on 24h peaks at 357 to 447,
-  7-day peaks at 576, and instantaneous readings at 1112, scaled per Context.
-  Requalifying it with 24h peaks is a follow-up.
+- **The 601 to 1500 tier has the thinnest data.** There are no 24h peaks
+  between 447 and 2500 nodes. That tier rests on a 7-day peak at 1112 and
+  instantaneous readings at 1112 and about 1400, scaled per Context. In the
+  301 to 600 tier, maintenance-operator and the NIC daemon have no reading
+  of their own and are sized from 1112. Requalifying both tiers with 24h
+  peaks is a follow-up.
 - **The count is the user's responsibility.** A stale count after a
   scale-up under-sizes the cluster. Rerunning bundle generation, or changing
   `sizing.nodeCount`, re-sizes it.
@@ -389,7 +399,7 @@ hand overrides again.
 
 ## Open questions
 
-- **Requalifying the 301 to 1000 tier** once cadvisor peaks are scrapeable
+- **Requalifying the 301 to 600 and 601 to 1500 tiers** once cadvisor peaks are scrapeable
   for all five controllers
   ([#3265](https://github.com/NVIDIA/aicr/issues/3265) to
   [#3269](https://github.com/NVIDIA/aicr/issues/3269)).
