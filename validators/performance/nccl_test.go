@@ -1274,6 +1274,34 @@ func TestNVKENetRuntimeRequestsEveryRail(t *testing.T) {
 	}
 }
 
+// TestNVKENetRuntimePrecheckMarkerMatchesRegex ties the marker the NVKE NET
+// runtime's rank wrapper prints to the regex the validator extracts the failure
+// reason with, so the two cannot drift apart silently.
+func TestNVKENetRuntimePrecheckMarkerMatchesRegex(t *testing.T) {
+	path := templatePath(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceNVKE, variantNET, "runtime.yaml")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	const echoMarker = `echo "AICR_PRECHECK_FAILED: `
+	var checks int
+	for _, line := range strings.Split(string(content), "\n") {
+		_, after, found := strings.Cut(line, echoMarker)
+		if !found {
+			continue
+		}
+		checks++
+		printed, _, _ := strings.Cut(after, `"`)
+		out := "AICR_PRECHECK_FAILED: " + printed + "\n"
+		if got := runtimePrecheckFailure(out); got != printed {
+			t.Errorf("runtimePrecheckFailure(%q) = %q, want %q", out, got, printed)
+		}
+	}
+	if checks != 2 {
+		t.Errorf("found %d %q lines in %s, want 2 (missing address, missing RDMA device)", checks, echoMarker, path)
+	}
+}
+
 func TestRuntimePrecheckFailure(t *testing.T) {
 	tests := []struct {
 		name string

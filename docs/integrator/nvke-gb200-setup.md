@@ -285,7 +285,8 @@ The performance phase runs the `gb200/nvke` NCCL runtimes.
   checks that `net1`..`net4` each carry an IPoIB address and an RDMA device,
   and pins `NCCL_IB_HCA` to those VFs. A missing attachment fails the check
   with a reason naming it, rather than letting NCCL fall back to the pod
-  network.
+  network. If the CNI fails to attach a rail when the pod is created, the
+  worker never starts and the check fails as a launcher-pod timeout instead.
 - The `>= 40` NET floor is copied from the GB200 OKE recipe. No tenant with
   full IB partition membership has measured it yet, so it is a placeholder.
 

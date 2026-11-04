@@ -147,7 +147,7 @@ spec:
       constraints:
         # NET floor is a placeholder copied from gb200-oke-training: no NVKE
         # tenant with full IB partition membership has measured it yet. NVLS
-        # measured 839 GB/s on the reference tenant.
+        # measured 839.5 GB/s on the reference tenant.
         - name: nccl-all-reduce-bw-net
           value: ">= 40"
         - name: nccl-all-reduce-bw-nvls
