@@ -64,6 +64,11 @@ const (
 	ReasonPriorSyncFailed = "PriorSyncFailed"
 	// ReasonRetired: the Application a Remove step deletes is gone.
 	ReasonRetired = "Retired"
+	// ReasonReconcileStale: the Application is synced and healthy, but no
+	// sync of the chart's revision succeeded since the step began and, for a
+	// step that does not sync, Argo CD last compared it before then, so the
+	// evidence predates the step.
+	ReasonReconcileStale = "ReconcileStale"
 )
 
 // RefreshAnnotation asks Argo CD to reconcile an Application now.
@@ -177,13 +182,35 @@ func (a *Adapter) Ensure(ctx context.Context, p *plan.Document, r *plan.Release,
 		// A spec Argo CD already has starts no sync, and Argo CD ignores
 		// metadata-only updates of Applications until its periodic
 		// reconcile: ask for a refresh, so the step's evidence is fresh in
-		// seconds. Argo CD removes the annotation; it is never desired state.
-		patch := []byte(`{"metadata":{"annotations":{"` + RefreshAnnotation + `":"normal"}}}`)
-		if err = a.Writer.Patch(ctx, desired, client.RawPatch(types.MergePatchType, patch)); err != nil {
-			return nil, operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "request a refresh of Application "+r.ID)
+		// seconds.
+		if err = a.requestRefresh(ctx, desired, r.ID); err != nil {
+			return nil, err
 		}
 	}
 	return ensured, nil
+}
+
+// Refresh asks Argo CD to compare a release's Application now rather than at
+// its periodic reconcile, for a step that observes an Application it did not
+// write.
+func (a *Adapter) Refresh(ctx context.Context, r *plan.Release) error {
+	app := &unstructured.Unstructured{}
+	app.SetGroupVersionKind(ApplicationGVK)
+	app.SetNamespace(a.Target.Namespace)
+	app.SetName(r.ID)
+
+	return a.requestRefresh(ctx, app, r.ID)
+}
+
+// requestRefresh sets the refresh annotation on app. Argo CD removes it once
+// it has compared the Application; it is never desired state.
+func (a *Adapter) requestRefresh(ctx context.Context, app *unstructured.Unstructured, id string) error {
+	patch := []byte(`{"metadata":{"annotations":{"` + RefreshAnnotation + `":"normal"}}}`)
+	if err := a.Writer.Patch(ctx, app, client.RawPatch(types.MergePatchType, patch)); err != nil {
+		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "request a refresh of Application "+id)
+	}
+
+	return nil
 }
 
 // Verify starts a sync of a release's Application so that Argo CD runs its
@@ -571,7 +598,7 @@ func observe(live, desired *unstructured.Unstructured, r *plan.Release, since ti
 	}
 	syncedNow := opPhase == "Succeeded" && opRevision == r.Chart.Digest && !opStarted.Before(since)
 	if !syncedNow && (verify || timeOf(status["reconciledAt"]).Before(since)) {
-		return progressing("ReconcileStale")
+		return progressing(ReasonReconcileStale)
 	}
 	return Observation{State: StateReady, Reason: "CurrentRevisionReady"}
 }

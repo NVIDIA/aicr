@@ -57,12 +57,14 @@ type fakeEngine struct {
 	removeRefused map[string]error  // release -> error Remove returns instead
 	gone          map[string]bool   // release -> Retired reports it gone
 	deletePending map[string]bool   // release -> Retired reports its delete never landed
+	retiredErr    error             // Retired fails with it
 	drifted       map[string]bool   // release -> Observe reports SpecDrifted
 	missing       map[string]bool   // release -> Observe reports Missing
 	priorFailed   map[string]bool   // release -> Observe reports PriorSyncFailed until a Verify
 	unhealthy     map[string]string // release -> Observe reports Progressing with this reason at its written plan
 	detail        map[string]string // release -> the Argo CD error text Observe carries with that reason
 	observeErr    error             // Observe fails with it
+	refreshed     map[string]int    // release -> refresh requests
 	overridden    []string
 	order         []string // mutations, "<op> <release>"
 	rebuilt       *plan.Document
@@ -177,6 +179,9 @@ func (f *fakeEngine) Remove(_ context.Context, _, name, uid, _ string) error {
 }
 
 func (f *fakeEngine) Retired(_ context.Context, name, uid string) (argocd.Observation, error) {
+	if f.retiredErr != nil {
+		return argocd.Observation{}, f.retiredErr
+	}
 	if f.removed[name] == uid && f.gone[name] {
 		f.inventory = slices.DeleteFunc(f.inventory, func(i argocd.InventoryItem) bool { return i.ReleaseID == name })
 		return argocd.Observation{State: argocd.StateReady, Reason: argocd.ReasonRetired}, nil
@@ -233,6 +238,16 @@ func (f *fakeEngine) Foreign(context.Context, string) (map[string][]string, erro
 		}
 	}
 	return out, nil
+}
+
+// Refresh records a request that Argo CD compare the Application now.
+func (f *fakeEngine) Refresh(_ context.Context, r *plan.Release) error {
+	if f.refreshed == nil {
+		f.refreshed = map[string]int{}
+	}
+	f.refreshed[r.ID]++
+
+	return nil
 }
 
 // Adopt moves an object of another runtime into this runtime's inventory.

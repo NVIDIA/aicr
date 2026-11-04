@@ -24,6 +24,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -112,6 +113,14 @@ const (
 	// EventStalled, on the runtime: it turned Stalled, or stalled for
 	// another reason.
 	EventStalled = "Stalled"
+	// EventStepStarted, on the rollout: a release's step started.
+	EventStepStarted = "StepStarted"
+	// EventStepWaiting, on the rollout: a step in progress waits on another
+	// reason than it last reported.
+	EventStepWaiting = "StepWaiting"
+	// EventStepFinished, on the rollout: a step ended, with its outcome, its
+	// duration and what it last waited on; a warning when it failed.
+	EventStepFinished = "StepFinished"
 	// EventEngineSuspensionRefused, on the runtime: the API server refused
 	// for good to change an Application's automated sync.
 	EventEngineSuspensionRefused = ReasonEngineSuspensionRefused
@@ -122,6 +131,8 @@ type Engine interface {
 	Capabilities(ctx context.Context) error
 	Ensure(ctx context.Context, p *plan.Document, r *plan.Release, valuesJSON []byte) (*argocd.Ensured, error)
 	Verify(ctx context.Context, p *plan.Document, r *plan.Release, valuesJSON []byte) error
+	// Refresh asks the engine to compare a release's object now.
+	Refresh(ctx context.Context, r *plan.Release) error
 	Observe(ctx context.Context, p *plan.Document, r *plan.Release, valuesJSON []byte, since time.Time, verify bool) (argocd.Observation, error)
 	Remove(ctx context.Context, runtimeUID, name, uid, rollout string) error
 	Retired(ctx context.Context, name, uid string) (argocd.Observation, error)
@@ -157,6 +168,21 @@ type RolloutReconciler struct {
 	// Operator reports the operator's own image and the digest it runs as,
 	// for the evidence; nil records none.
 	Operator func(context.Context) (evidence.Image, error)
+
+	// steps holds the step Events of transitions not yet stored.
+	steps pendingEvents
+}
+
+// pendingEvents are step Events held until the status that records their
+// transitions is stored, so an Event never reports a transition a failed
+// status write lost.
+type pendingEvents struct {
+	mu     sync.Mutex
+	queued []pendingEvent
+}
+
+type pendingEvent struct {
+	rollout, eventType, reason, action, note string
 }
 
 // runtimeView is what one reconcile concluded for the runtime's status.
@@ -195,6 +221,11 @@ type runtimeView struct {
 
 // Reconcile drives the runtime named in req.
 func (r *RolloutReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	// A transition queued by a reconcile that failed before storing it is
+	// made again.
+	r.steps.mu.Lock()
+	r.steps.queued = nil
+	r.steps.mu.Unlock()
 	// Uncached: the status picks the rollout target, and the status
 	// apply removes what it omits.
 	rt := &v1alpha1.ClusterRuntime{}
@@ -933,7 +964,7 @@ func (r *RolloutReconciler) step(ctx context.Context, p *plan.Document, ro *v1al
 			start = ro.CreationTimestamp
 		}
 		ro.Status.Current = &v1alpha1.CurrentStep{Release: step.Release, Operation: step.Operation, StartedAt: &start}
-		setReleaseState(ro, step.Release, v1alpha1.ReleaseProgressing, "")
+		r.startStep(ctx, ro, step, v1alpha1.ReleaseProgressing, start)
 		// Record the step before its mutation, so a restart observes it.
 		if err = r.saveStatus(ctx, ro, ""); err != nil {
 			return false, err
@@ -943,7 +974,12 @@ func (r *RolloutReconciler) step(ctx context.Context, p *plan.Document, ro *v1al
 			return false, nil
 		}
 		if written, wErr := r.written(ctx, p, rel, step, values, now); wErr != nil || written {
-			// Written before a restart lost the step: observation continues.
+			// Written before a restart lost the step, or already at the plan
+			// as in a recovery: observation continues, and since no write
+			// asks Argo CD to compare the Application, the step asks.
+			if written {
+				r.refresh(ctx, rel)
+			}
 			v.requeue = pollInterval
 			return false, wErr
 		}
@@ -958,15 +994,8 @@ func (r *RolloutReconciler) step(ctx context.Context, p *plan.Document, ro *v1al
 	}
 	verify := syncs(step, rel)
 	obs, err := r.Engine.Observe(ctx, p, rel, values, cur.StartedAt.Time, verify)
-	if err == nil && verify && obs.Reason == argocd.ReasonSyncNotStarted {
-		// Argo CD was busy or lost the request: ask again.
-		err = r.Engine.Verify(ctx, p, rel, values)
-	}
-	if err == nil && !verify && obs.Reason == argocd.ReasonPriorSyncFailed {
-		// The Application already carries the plan, as in a retry, but its
-		// sync of this revision failed before the step, and automated sync
-		// never retries a failed revision: start the sync.
-		err = r.Engine.Verify(ctx, p, rel, values)
+	if err == nil {
+		err = r.prompt(ctx, p, rel, values, verify, obs.Reason)
 	}
 	if err == nil && !verify && (obs.State == argocd.StateMissing || obs.Reason == argocd.ReasonSpecNotWritten) {
 		// The step was recorded, then the operator stopped before its write
@@ -991,20 +1020,53 @@ func (r *RolloutReconciler) step(ctx context.Context, p *plan.Document, ro *v1al
 	}
 	switch {
 	case obs.State == argocd.StateReady:
-		setReleaseState(ro, step.Release, v1alpha1.ReleaseReady, rel.Chart.Digest)
+		r.finishStep(ctx, ro, step.Release, v1alpha1.ReleaseReady, rel.Chart.Digest, now)
 		recordSpec(ro, step.Release, obs.SpecDigest)
 		ro.Status.Current = nil
 		return true, r.saveStatus(ctx, ro, "")
 	case obs.State == argocd.StateFailed:
-		setReleaseState(ro, step.Release, v1alpha1.ReleaseFailed, "")
+		r.finishStep(ctx, ro, step.Release, v1alpha1.ReleaseFailed, "", now)
 		return false, r.finish(ctx, ro, v1alpha1.PhaseFailed, "release "+step.Release+": "+obs.Text())
 	case now.Sub(timeoutFrom(cur)) > ro.Spec.ActionTimeout.Duration:
-		setReleaseState(ro, step.Release, v1alpha1.ReleaseFailed, "")
+		r.stepTimedOut(ctx, ro, step.Release, obs.Reason, now)
 		return false, r.finish(ctx, ro, v1alpha1.PhaseFailed,
 			fmt.Sprintf("release %s not ready within %s (%s)", step.Release, ro.Spec.ActionTimeout.Duration, obs.Text()))
 	}
+	r.stepWaiting(ctx, ro, step.Release, obs.Reason)
 	v.requeue = pollInterval
 	return false, r.saveStatus(ctx, ro, "release "+step.Release+": "+obs.Text())
+}
+
+// prompt asks the engine again for what an observation shows the step is
+// waiting on but the engine was never asked for, or lost.
+func (r *RolloutReconciler) prompt(ctx context.Context, p *plan.Document, rel *plan.Release, values []byte,
+	verify bool, reason string) error {
+
+	switch {
+	case verify && reason == argocd.ReasonSyncNotStarted:
+		// Argo CD was busy or lost the request: ask again.
+		return r.Engine.Verify(ctx, p, rel, values)
+	case !verify && reason == argocd.ReasonPriorSyncFailed:
+		// The Application already carries the plan, as in a retry, but its
+		// sync of this revision failed before the step, and automated sync
+		// never retries a failed revision: start the sync.
+		return r.Engine.Verify(ctx, p, rel, values)
+	case !verify && reason == argocd.ReasonReconcileStale:
+		// Argo CD has not compared the Application since the step began,
+		// and no write asked it to: ask again.
+		r.refresh(ctx, rel)
+	}
+
+	return nil
+}
+
+// refresh asks the engine to compare a release's object now rather than at
+// its periodic reconcile. A refused request only leaves that wait.
+func (r *RolloutReconciler) refresh(ctx context.Context, rel *plan.Release) {
+	if err := r.Engine.Refresh(ctx, rel); err != nil {
+		log.FromContext(ctx).Info("refresh request failed; waiting for the engine's periodic reconcile",
+			"release", rel.ID, "error", err.Error())
+	}
 }
 
 // timedOut ends a step whose action timeout passed while a transient error
@@ -1017,7 +1079,7 @@ func (r *RolloutReconciler) timedOut(ctx context.Context, ro *v1alpha1.RuntimeRo
 	if operrors.IsPermanent(err) || now.Sub(timeoutFrom(cur)) <= ro.Spec.ActionTimeout.Duration {
 		return false, nil
 	}
-	setReleaseState(ro, step.Release, v1alpha1.ReleaseFailed, "")
+	r.finishStep(ctx, ro, step.Release, v1alpha1.ReleaseFailed, "", now)
 	return true, r.finish(ctx, ro, v1alpha1.PhaseFailed,
 		fmt.Sprintf("release %s not %s within %s (%s)", step.Release, outcome, ro.Spec.ActionTimeout.Duration, errorMessage(err)))
 }
@@ -1075,12 +1137,13 @@ func (r *RolloutReconciler) observeHalted(ctx context.Context, ro *v1alpha1.Runt
 		return r.saveStatus(ctx, ro, message+"; release "+cur.Release+": "+errorMessage(err))
 	}
 	if obs.State == argocd.StateReady {
-		setReleaseState(ro, cur.Release, done, revision)
+		r.finishStep(ctx, ro, cur.Release, done, revision, r.Now())
 		recordSpec(ro, cur.Release, obs.SpecDigest)
 		ro.Status.Current = nil
 		return r.saveStatus(ctx, ro, message)
 	}
 	setReleaseState(ro, cur.Release, v1alpha1.ReleaseSuspended, "")
+	r.stepWaiting(ctx, ro, cur.Release, obs.Reason)
 	v.requeue = pollInterval
 	return r.saveStatus(ctx, ro, message+"; release "+cur.Release+": "+obs.Text())
 }
@@ -1169,11 +1232,11 @@ func (r *RolloutReconciler) remove(ctx context.Context, rt *v1alpha1.ClusterRunt
 		if !operrors.IsPermanent(err) {
 			return false, err
 		}
-		state := v1alpha1.ReleasePending
 		if issued {
-			state = v1alpha1.ReleaseFailed
+			r.finishStep(ctx, ro, step.Release, v1alpha1.ReleaseFailed, "", now)
+		} else {
+			setReleaseState(ro, step.Release, v1alpha1.ReleasePending, "")
 		}
-		setReleaseState(ro, step.Release, state, "")
 		return false, r.finish(ctx, ro, v1alpha1.PhaseFailed, errorMessage(err))
 	}
 	cur := ro.Status.Current
@@ -1190,7 +1253,7 @@ func (r *RolloutReconciler) remove(ctx context.Context, rt *v1alpha1.ClusterRunt
 		}
 		start := metav1.NewTime(now)
 		ro.Status.Current = &v1alpha1.CurrentStep{Release: step.Release, Operation: step.Operation, StartedAt: &start}
-		setReleaseState(ro, step.Release, v1alpha1.ReleaseDeleting, "")
+		r.startStep(ctx, ro, step, v1alpha1.ReleaseDeleting, start)
 		if err := r.saveStatus(ctx, ro, ""); err != nil {
 			return false, err
 		}
@@ -1214,14 +1277,15 @@ func (r *RolloutReconciler) remove(ctx context.Context, rt *v1alpha1.ClusterRunt
 	}
 	switch {
 	case obs.State == argocd.StateReady:
-		setReleaseState(ro, step.Release, v1alpha1.ReleaseRemoved, "")
+		r.finishStep(ctx, ro, step.Release, v1alpha1.ReleaseRemoved, "", now)
 		ro.Status.Current = nil
 		return true, r.saveStatus(ctx, ro, "")
 	case now.Sub(timeoutFrom(cur)) > ro.Spec.ActionTimeout.Duration:
-		setReleaseState(ro, step.Release, v1alpha1.ReleaseFailed, "")
+		r.stepTimedOut(ctx, ro, step.Release, obs.Reason, now)
 		return false, r.finish(ctx, ro, v1alpha1.PhaseFailed,
 			fmt.Sprintf("release %s not removed within %s (%s)", step.Release, ro.Spec.ActionTimeout.Duration, obs.Reason))
 	}
+	r.stepWaiting(ctx, ro, step.Release, obs.Reason)
 	v.requeue = pollInterval
 	return false, r.saveStatus(ctx, ro, "release "+step.Release+": "+obs.Reason)
 }
@@ -1342,6 +1406,9 @@ func (r *RolloutReconciler) finishWith(ctx context.Context, ro *v1alpha1.Runtime
 			validationRuns.WithLabelValues(strings.ToLower(val.Result)).Inc()
 		}
 	}
+	if cur := ro.Status.Current; cur != nil {
+		r.closeStep(ctx, ro, cur.Release, phase, r.Now())
+	}
 	ro.Status.Phase = phase
 	ro.Status.Current = nil
 	if err := r.saveStatus(ctx, ro, message); err != nil {
@@ -1377,10 +1444,46 @@ func orNone(s string) string {
 func (r *RolloutReconciler) saveStatus(ctx context.Context, ro *v1alpha1.RuntimeRollout, message string) error {
 	ro.Status.Message = bounded(message)
 	ro.Status.ObservedGeneration = ro.Generation
-	if err := r.Client.Status().Update(ctx, ro); err != nil {
+	err := r.Client.Status().Update(ctx, ro)
+	r.sendSteps(ro, err == nil)
+	if err != nil {
 		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "update status of "+ro.Name)
 	}
 	return nil
+}
+
+// queueStep holds a step Event of ro until its status is stored. The action
+// names the release and its transition: the events API folds Events with the
+// same object, reason, action and related object into one series whatever
+// their notes, which would hide every step but the first.
+func (r *RolloutReconciler) queueStep(ro *v1alpha1.RuntimeRollout, eventType, reason, action, note string) {
+	r.steps.mu.Lock()
+	defer r.steps.mu.Unlock()
+	r.steps.queued = append(r.steps.queued, pendingEvent{ro.Name, eventType, reason, action, note})
+}
+
+// sendSteps sends ro's queued step Events once its status is stored, and
+// drops them when the write failed: the next reconcile makes the transitions
+// again.
+func (r *RolloutReconciler) sendSteps(ro *v1alpha1.RuntimeRollout, stored bool) {
+	r.steps.mu.Lock()
+	var send []pendingEvent
+	kept := r.steps.queued[:0]
+	for _, e := range r.steps.queued {
+		if e.rollout != ro.Name {
+			kept = append(kept, e)
+		} else if stored {
+			send = append(send, e)
+		}
+	}
+	r.steps.queued = kept
+	r.steps.mu.Unlock()
+	if r.Events == nil {
+		return
+	}
+	for _, e := range send {
+		r.Events.Eventf(ro, nil, e.eventType, e.reason, e.action, "%s", e.note)
+	}
 }
 
 // values reads a release's values through the uncached reader, verified
@@ -1817,6 +1920,106 @@ func recordSpec(ro *v1alpha1.RuntimeRollout, id, digest string) {
 			return
 		}
 	}
+}
+
+// maxWaitedOn is ReleaseStatus.WaitedOn's schema bound.
+const maxWaitedOn = 64
+
+// releaseEntry is the rollout's status entry for id, added if missing.
+func releaseEntry(ro *v1alpha1.RuntimeRollout, id string) *v1alpha1.ReleaseStatus {
+	for i := range ro.Status.Releases {
+		if ro.Status.Releases[i].ID == id {
+			return &ro.Status.Releases[i]
+		}
+	}
+	ro.Status.Releases = append(ro.Status.Releases, v1alpha1.ReleaseStatus{ID: id})
+
+	return &ro.Status.Releases[len(ro.Status.Releases)-1]
+}
+
+// startStep moves a release into state as its step starts at at, and reports
+// the start. A retried step starts its record again.
+func (r *RolloutReconciler) startStep(ctx context.Context, ro *v1alpha1.RuntimeRollout, step v1alpha1.RolloutStep,
+	state v1alpha1.ReleaseState, at metav1.Time) {
+
+	setReleaseState(ro, step.Release, state, "")
+	rs := releaseEntry(ro, step.Release)
+	rs.StartedAt, rs.FinishedAt, rs.WaitedOn = &at, nil, ""
+	log.FromContext(ctx).Info("step started", "rollout", ro.Name, "release", step.Release, "operation", step.Operation)
+	r.queueStep(ro, corev1.EventTypeNormal, EventStepStarted, step.Release+"/"+string(step.Operation),
+		bounded(fmt.Sprintf("release %s: %s started", step.Release, step.Operation)))
+}
+
+// stepWaiting records what a step in progress waits on, and reports a change.
+func (r *RolloutReconciler) stepWaiting(ctx context.Context, ro *v1alpha1.RuntimeRollout, id, reason string) {
+	if len(reason) > maxWaitedOn {
+		reason = reason[:maxWaitedOn]
+	}
+	rs := releaseEntry(ro, id)
+	if reason == "" || rs.WaitedOn == reason {
+		return
+	}
+	rs.WaitedOn = reason
+	log.FromContext(ctx).Info("step waiting", "rollout", ro.Name, "release", id, "reason", reason)
+	r.queueStep(ro, corev1.EventTypeNormal, EventStepWaiting, id+"/"+reason,
+		bounded(fmt.Sprintf("release %s waits on %s", id, reason)))
+}
+
+// finishStep moves a release into state as its step ends at at, and reports
+// the outcome, the time the step took and what it last waited on.
+func (r *RolloutReconciler) finishStep(ctx context.Context, ro *v1alpha1.RuntimeRollout, id string,
+	state v1alpha1.ReleaseState, revision string, at time.Time) {
+
+	setReleaseState(ro, id, state, revision)
+	r.recordEnd(ctx, ro, id, string(state), string(state), state == v1alpha1.ReleaseFailed, at)
+}
+
+// stepTimedOut ends a step Failed at its action timeout, recording the reason
+// it was waiting on then, which the rollout's failure message names.
+func (r *RolloutReconciler) stepTimedOut(ctx context.Context, ro *v1alpha1.RuntimeRollout, id, reason string, at time.Time) {
+	r.stepWaiting(ctx, ro, id, reason)
+	r.finishStep(ctx, ro, id, v1alpha1.ReleaseFailed, "", at)
+}
+
+// closeStep ends the record of the step a rollout leaves in flight as it
+// ends in phase. The release keeps its state, which repair reads.
+func (r *RolloutReconciler) closeStep(ctx context.Context, ro *v1alpha1.RuntimeRollout, id string,
+	phase v1alpha1.RolloutPhase, at time.Time) {
+
+	rs := releaseEntry(ro, id)
+	if rs.StartedAt == nil || rs.FinishedAt != nil {
+		return
+	}
+	outcome := fmt.Sprintf("%s when the rollout ended %s", rs.State, phase)
+	r.recordEnd(ctx, ro, id, string(phase), outcome,
+		phase != v1alpha1.PhaseSucceeded && phase != v1alpha1.PhaseSuperseded, at)
+}
+
+// recordEnd records when a release's step ended and reports it: the outcome,
+// the time the step took and what it last waited on.
+func (r *RolloutReconciler) recordEnd(ctx context.Context, ro *v1alpha1.RuntimeRollout, id, transition, outcome string,
+	failed bool, at time.Time) {
+
+	rs := releaseEntry(ro, id)
+	end := metav1.NewTime(at)
+	rs.FinishedAt = &end
+	note := fmt.Sprintf("release %s: %s", id, outcome)
+	var took time.Duration
+	if rs.StartedAt != nil {
+		// Status keeps whole seconds; compare at that resolution.
+		took = max(at.Truncate(time.Second).Sub(rs.StartedAt.Truncate(time.Second)), 0)
+		note += " after " + took.String()
+	}
+	if rs.WaitedOn != "" {
+		note += "; last waited on " + rs.WaitedOn
+	}
+	eventType := corev1.EventTypeNormal
+	if failed {
+		eventType = corev1.EventTypeWarning
+	}
+	log.FromContext(ctx).Info("step finished", "rollout", ro.Name, "release", id, "outcome", outcome,
+		"duration", took.String(), "waitedOn", rs.WaitedOn)
+	r.queueStep(ro, eventType, EventStepFinished, id+"/"+transition, bounded(note))
 }
 
 func setReleaseState(ro *v1alpha1.RuntimeRollout, id string, state v1alpha1.ReleaseState, revision string) {
