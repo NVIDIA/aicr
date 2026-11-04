@@ -719,7 +719,7 @@ func TestReasonOf(t *testing.T) {
 	t.Parallel()
 	tests := map[string]error{
 		"Internal":            context.Canceled,
-		"AICRVersionMismatch": aicrjob.CheckSupportedVersion("v3.0.0"),
+		"AICRVersionMismatch": aicrjob.CheckSupportedVersion("v3.0.0", false),
 		"AICRInvalidRequest":  aicrjob.ErrorFromExitCode(aicrjob.StageRecipe, 2, "x"),
 		"Conflict":            operrors.New(operrors.ErrCodeConflict, "x"),
 	}

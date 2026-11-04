@@ -37,6 +37,9 @@ import (
 type Config struct {
 	AICRVersion string
 	AICRImage   string
+	// AllowPrereleaseAICR lets AICRVersion be a prerelease, such as a release
+	// candidate or a build from a commit.
+	AllowPrereleaseAICR bool
 
 	OperatorNamespace   string
 	JobsNamespace       string
@@ -140,6 +143,8 @@ func Defaults() Config {
 func (c *Config) BindFlags(fs *flag.FlagSet) {
 	fs.StringVar(&c.AICRVersion, "aicr-version", c.AICRVersion, "Declared AICR release (aicr.version); required.")
 	fs.StringVar(&c.AICRImage, "aicr-image", c.AICRImage, "AICR image pinned by digest (aicr.image); required.")
+	fs.BoolVar(&c.AllowPrereleaseAICR, "allow-prerelease-aicr", c.AllowPrereleaseAICR,
+		"Accept a prerelease AICR version (aicr.allowPrerelease).")
 	fs.StringVar(&c.OperatorNamespace, "operator-namespace", c.OperatorNamespace, "Namespace of plans and operator state.")
 	fs.StringVar(&c.JobsNamespace, "jobs-namespace", c.JobsNamespace, "Namespace of recipe, render and assessment Jobs.")
 	fs.StringVar(&c.DiscoveryNamespace, "discovery-namespace", c.DiscoveryNamespace, "Namespace of snapshot Jobs.")

@@ -1000,14 +1000,14 @@ func (r *RolloutReconciler) step(ctx context.Context, p *plan.Document, ro *v1al
 		return true, r.saveStatus(ctx, ro, "")
 	case obs.State == argocd.StateFailed:
 		setReleaseState(ro, step.Release, v1alpha1.ReleaseFailed, "")
-		return false, r.finish(ctx, ro, v1alpha1.PhaseFailed, "release "+step.Release+": "+obs.Reason)
+		return false, r.finish(ctx, ro, v1alpha1.PhaseFailed, "release "+step.Release+": "+obs.Text())
 	case now.Sub(timeoutFrom(cur)) > ro.Spec.ActionTimeout.Duration:
 		setReleaseState(ro, step.Release, v1alpha1.ReleaseFailed, "")
 		return false, r.finish(ctx, ro, v1alpha1.PhaseFailed,
-			fmt.Sprintf("release %s not ready within %s (%s)", step.Release, ro.Spec.ActionTimeout.Duration, obs.Reason))
+			fmt.Sprintf("release %s not ready within %s (%s)", step.Release, ro.Spec.ActionTimeout.Duration, obs.Text()))
 	}
 	v.requeue = pollInterval
-	return false, r.saveStatus(ctx, ro, "release "+step.Release+": "+obs.Reason)
+	return false, r.saveStatus(ctx, ro, "release "+step.Release+": "+obs.Text())
 }
 
 // timedOut ends a step whose action timeout passed while a transient error
@@ -1085,7 +1085,7 @@ func (r *RolloutReconciler) observeHalted(ctx context.Context, ro *v1alpha1.Runt
 	}
 	setReleaseState(ro, cur.Release, v1alpha1.ReleaseSuspended, "")
 	v.requeue = pollInterval
-	return r.saveStatus(ctx, ro, message+"; release "+cur.Release+": "+obs.Reason)
+	return r.saveStatus(ctx, ro, message+"; release "+cur.Release+": "+obs.Text())
 }
 
 // observeInFlight observes the step in flight without writing, with the
@@ -1511,7 +1511,7 @@ func (r *RolloutReconciler) observeActive(ctx context.Context, rt *v1alpha1.Clus
 			continue
 		}
 		if obs.State != argocd.StateReady {
-			v.availableMessage = "release " + rel.ID + ": " + obs.Reason
+			v.availableMessage = "release " + rel.ID + ": " + obs.Text()
 			if suspended {
 				v.readyMessage += "; " + v.availableMessage
 				v.availableMessage = v.readyMessage

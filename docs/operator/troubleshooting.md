@@ -204,7 +204,7 @@ operator holds no token it can use.
 
 | Reason | Cause | Fix |
 | --- | --- | --- |
-| `AICRVersionMismatch` | `aicr.version` is outside `>=1.0.0, <2.0.0` or not a release version, or the AICR image reports a different version than `aicr.version` | Set `aicr.version` and `aicr.image` to the same release in one `helm upgrade` |
+| `AICRVersionMismatch` | `aicr.version` is outside `>=1.0.0, <2.0.0`, or a prerelease without `aicr.allowPrerelease`, or the AICR image reports a different version than `aicr.version` | Set `aicr.version` and `aicr.image` to the same release in one `helm upgrade`. To run a prerelease, also set `aicr.allowPrerelease: true` |
 | `AICRArtifactUnsupported` | AICR produced output the operator cannot parse: an unknown `apiVersion` or a missing required field | Use a supported AICR release ([support policy](support.md)); report it if it is one |
 
 ## Argo CD not available
@@ -292,7 +292,7 @@ the failed rollout removed.
 
 | Message | Cause | Next |
 | --- | --- | --- |
-| `release <id>: SyncFailed` or `SyncError` | Argo CD's sync failed | `kubectl -n argocd get application <id> -o yaml`: read `status.operationState` and `status.conditions`; fix, then retry |
+| `release <id>: SyncFailed` or `SyncError` | Argo CD's sync failed. The message continues with Argo CD's own error, folded to one line and cut to 240 characters (`release <id>: SyncFailed: <error>`) | Read the error in the message; `kubectl -n argocd get application <id> -o yaml` (`status.operationState`, `status.conditions`) has the full text. Fix, then retry |
 | `[CONFLICT] Application argocd/<name> exists without this runtime's ownership` | An Application with the release's name exists without the operator's labels and this runtime's UID annotation (`ForeignObject`); the operator never writes or deletes it | Remove or rename it, then retry. If an earlier runtime left it, [adopt](#orphaned-objects-and-re-adoption) instead. On an active-plan release it shows as `Ready=False` with `ForeignObject` |
 | `release <id> not ready within 30m0s (<reason>)` | The release did not become ready at its current revision within `actionTimeout`; the reason is the last observation, such as `HealthProgressing`, `HealthDegraded`, or `SpecDrifted` when its Application was edited while the step ran | Inspect the component's workloads in its namespace; fix, then retry. Raise `spec.rollout.actionTimeout` if the component is slow but healthy |
 | `release <id> not removed within …` | Argo CD did not finish deleting the release's resources | See [Argo CD Application](#argo-cd-application) |

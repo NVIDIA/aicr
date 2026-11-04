@@ -427,6 +427,21 @@ constrained:
     symbols:
       Report.FailsRun: behavioral
       Report.UnmatchedStamps: behavioral
+  pkg/evidence/cncf:
+    reason: >-
+      pkg/client/v1.CNCFRequirementAggregate is a transparent alias of
+      cncf.Aggregate (type CNCFRequirementAggregate = cncf.Aggregate), so
+      reading Passed() and IncompleteMusts() on the value
+      RenderCNCFEvidenceWithResult returned is reading the facade's own
+      declared return type, not reaching around it -- the same pattern as
+      pkg/upgrade below. The CLI logs the aggregate after rendering; the
+      level-scoped rule (every applicable MUST passed, SHOULDs excluded) lives
+      in the aggregate so the SDK and a future submission exit code cannot
+      disagree about it.
+    permanent: true
+    symbols:
+      Aggregate.IncompleteMusts: behavioral
+      Aggregate.Passed: behavioral
   pkg/validator:
     reason: >-
       CLI-only. ParsePhaseSelection and Phase parse the --phase flag (no
