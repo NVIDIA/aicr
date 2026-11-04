@@ -45,7 +45,11 @@
 //     templates/aicr-profile-lock.yaml when the recipe carries a selected
 //     profile. That template fails the install if a value is supplied for a
 //     profile-owned path, so the lock survives helm install/upgrade rather
-//     than holding only at bundle generation.
+//     than holding only at bundle generation. Likewise
+//     templates/aicr-driver-ownership-lock.yaml, emitted for any bundle
+//     with an enabled GPU Operator or DRA driver component, fails the install
+//     if a value is supplied for a GPU driver-ownership path, which only
+//     CheckDriverOwnershipCoherence verifies at bundle time.
 //
 // This approach means changes to the Argo CD deployer (new component types,
 // sync policies, etc.) automatically flow through without duplication.
@@ -54,9 +58,9 @@
 //
 // The bundler routes here when --deployer argocd-helm is specified.
 // The --dynamic flag is optional — it pre-populates specific paths in the
-// root values.yaml, but all non-profile-owned values are overridable
-// regardless. Profile-owned paths are the exception: the lock template
-// above rejects install-time values for them.
+// root values.yaml, but all other values are overridable regardless.
+// Profile-owned and driver-ownership paths are the exception: the lock
+// templates above reject install-time values for them.
 //
 // # Deployment requires a chart-source backend (git or OCI)
 //
@@ -118,6 +122,32 @@ const (
 	profileLockTemplateName = "aicr-profile-lock"
 
 	profileLockTemplateHeader = "{{- /* AICR profile install-time ownership guard. */ -}}\n"
+
+	// driverOwnershipLockTemplateName is reserved only when the bundle ships
+	// an enabled component of a bundlercfg driver-ownership family.
+	driverOwnershipLockTemplateName = "aicr-driver-ownership-lock"
+
+	driverOwnershipLockTemplateHeader = "{{- /* AICR driver-ownership install-time guard. */ -}}\n"
+)
+
+// guardTemplate identifies one deployer-owned fail-closed template under
+// templates/. The header marks a file as AICR-generated, so regeneration
+// replaces or removes only its own output; label names it in errors.
+type guardTemplate struct {
+	name   string
+	header string
+	label  string
+}
+
+var (
+	profileLockTemplate = guardTemplate{
+		name: profileLockTemplateName, header: profileLockTemplateHeader,
+		label: "profile lock template",
+	}
+	driverOwnershipLockTemplate = guardTemplate{
+		name: driverOwnershipLockTemplateName, header: driverOwnershipLockTemplateHeader,
+		label: "driver-ownership lock template",
+	}
 )
 
 // Bundle-root file/directory names used by both the chart writer and the
@@ -312,6 +342,9 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	if g.RecipeResult == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "RecipeResult is required")
 	}
+	if err := g.validateDriverOwnershipOutput(ctx, outputDir); err != nil {
+		return nil, err
+	}
 	if g.BundleChartVersion != "" {
 		if _, err := semver.StrictNewVersion(g.BundleChartVersion); err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
@@ -437,7 +470,8 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 	// Step 3: Write static values as chart files, the root values.yaml,
 	// and the install-time values.schema.json gate.
-	if valuesErr := g.writeValuesFiles(outputDir, output); valuesErr != nil {
+	rootDefaults, valuesErr := g.writeValuesFiles(outputDir, output)
+	if valuesErr != nil {
 		return nil, valuesErr
 	}
 
@@ -453,13 +487,8 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	if mkdirErr := os.MkdirAll(templatesDir, 0755); mkdirErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create templates directory", mkdirErr)
 	}
-	lockPath, lockSize, lockErr := g.writeProfileLockTemplate(templatesDir)
-	if lockErr != nil {
+	if lockErr := g.writeLockTemplates(templatesDir, output, rootDefaults); lockErr != nil {
 		return nil, lockErr
-	}
-	if lockPath != "" {
-		output.Files = append(output.Files, lockPath)
-		output.TotalSize += lockSize
 	}
 
 	if processErr := g.processFolders(ctx, tmpDir, outputDir, templatesDir, output); processErr != nil {
@@ -506,18 +535,83 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	return output, nil
 }
 
+// validateDriverOwnershipOutput prevents regeneration from dropping a guard
+// while stale component artifacts remain in the chart, even without checksums.
+// Reuse is rejected before any output mutation; the caller can choose a fresh
+// directory without losing the previous bundle or foreign files.
+func (g *Generator) validateDriverOwnershipOutput(ctx context.Context, outputDir string) error {
+	for _, dir := range []string{"", dirTemplates, "static"} {
+		if dir == "static" {
+			if err := checkStaticPath(filepath.Join(outputDir, dir)); err != nil {
+				return err
+			}
+		}
+		entries, err := os.ReadDir(filepath.Join(outputDir, dir))
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to inspect prior driver-ownership output", err)
+		}
+		for _, entry := range entries {
+			if ctx.Err() != nil {
+				return errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "inspecting prior driver-ownership output")
+			}
+			name := entry.Name()
+			if dir == "" {
+				var numbered bool
+				name, numbered = stripNNNPrefix(name)
+				if !numbered {
+					continue
+				}
+			} else {
+				name = strings.TrimSuffix(name, ".yaml")
+			}
+			for _, family := range bundlercfg.DriverOwnershipFamilies() {
+				for _, componentName := range family.ComponentNames {
+					ref := g.RecipeResult.GetComponentRef(componentName)
+					if ref != nil && ref.IsEnabled() {
+						continue
+					}
+					for _, suffix := range []string{"", "-pre", "-post", "-readiness"} {
+						if name == componentName+suffix {
+							return errors.New(errors.ErrCodeInvalidRequest,
+								fmt.Sprintf("prior driver-ownership artifact %q belongs to omitted or disabled component %q; generate into a fresh output directory", filepath.Join(outputDir, dir, entry.Name()), componentName))
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (g *Generator) writeLockTemplates(templatesDir string, output *deployer.Output, rootDefaults map[string]any) error {
+	for _, writeLock := range []func(string) (string, int64, error){
+		g.writeProfileLockTemplate,
+		func(dir string) (string, int64, error) { return g.writeDriverOwnershipLockTemplate(dir, rootDefaults) },
+	} {
+		lockPath, lockSize, lockErr := writeLock(templatesDir)
+		if lockErr != nil {
+			return lockErr
+		}
+		if lockPath != "" {
+			output.Files = append(output.Files, lockPath)
+			output.TotalSize += lockSize
+		}
+	}
+	return nil
+}
+
 // writeProfileLockTemplate emits a Helm-render-time guard for profiled
 // bundles. ArgoCD-Helm deliberately exposes component values through the
 // parent chart's .Values; the guard rejects any install-time key whose path
 // equals, contains, or is contained by a profile-owned path. Key existence is
 // used throughout, so false, null, empty maps, and empty lists cannot bypass
-// the lock. Unprofiled bundles emit no file and remain byte-identical.
+// the lock. Unprofiled bundles emit no profile guard.
 func (g *Generator) writeProfileLockTemplate(templatesDir string) (string, int64, error) {
 	if g.RecipeResult == nil || g.RecipeResult.Metadata.SelectedProfile == nil {
-		if err := removeGeneratedProfileLockTemplate(templatesDir); err != nil {
-			return "", 0, err
-		}
-		return "", 0, nil
+		return writeGuardTemplate(templatesDir, profileLockTemplate, "", false)
 	}
 
 	// The guard is derived from the EFFECTIVE lock set — declared
@@ -546,86 +640,148 @@ func (g *Generator) writeProfileLockTemplate(templatesDir string) (string, int64
 			return "", 0, err
 		}
 		for pathIndex, lockedPath := range lockSet[componentName] {
-			segments := strings.Split(lockedPath, ".")
-			writeProfilePathGuard(
+			displayPath := componentName + "." + lockedPath
+			writePathGuard(
 				&buf,
 				".Values",
-				append([]string{overrideKey}, segments...),
+				append([]string{overrideKey}, strings.Split(lockedPath, ".")...),
 				fmt.Sprintf("aicrProfile%d_%d", componentIndex, pathIndex),
-				componentName+"."+lockedPath,
+				"install-time value intersects profile-owned path "+displayPath,
+				nil,
 			)
 		}
 	}
+	return writeGuardTemplate(templatesDir, profileLockTemplate, buf.String(), true)
+}
 
-	outputPath, err := deployer.SafeJoin(templatesDir, profileLockTemplateName+".yaml")
+// driverOwnershipGuards uses the bundler's post-filter refs: components
+// dropped by --bundlers or disabled have no Application to guard.
+func (g *Generator) driverOwnershipGuards() []driverOwnershipGuard {
+	if g.RecipeResult == nil {
+		return nil
+	}
+	var guards []driverOwnershipGuard
+	for _, family := range bundlercfg.DriverOwnershipFamilies() {
+		for _, name := range family.ComponentNames {
+			if ref := g.RecipeResult.GetComponentRef(name); ref != nil && ref.IsEnabled() {
+				guards = append(guards, driverOwnershipGuard{component: name, paths: family.Paths})
+			}
+		}
+	}
+	return guards
+}
+
+// driverOwnershipGuard is one component and the driver-ownership paths of its
+// family that install-time values may not touch.
+type driverOwnershipGuard struct {
+	component string
+	paths     []string
+}
+
+// writeDriverOwnershipLockTemplate preserves the bundle-time ownership
+// verdict against install-time edits, independently of profile selection.
+func (g *Generator) writeDriverOwnershipLockTemplate(templatesDir string, rootDefaults map[string]any) (string, int64, error) {
+	guards := g.driverOwnershipGuards()
+	if len(guards) == 0 {
+		return writeGuardTemplate(templatesDir, driverOwnershipLockTemplate, "", false)
+	}
+
+	var buf strings.Builder
+	buf.WriteString(driverOwnershipLockTemplateHeader)
+	for componentIndex, guard := range guards {
+		overrideKey, err := resolveOverrideKey(guard.component, g.RecipeResult.DataProvider())
+		if err != nil {
+			return "", 0, err
+		}
+		for pathIndex, guardedPath := range guard.paths {
+			displayPath := guard.component + "." + guardedPath
+			writePathGuard(
+				&buf,
+				".Values",
+				append([]string{overrideKey}, strings.Split(guardedPath, ".")...),
+				fmt.Sprintf("aicrDriver%d_%d", componentIndex, pathIndex),
+				fmt.Sprintf("install-time value intersects driver-ownership path %s; set driver "+
+					"ownership at bundle time (aicr bundle --set %s:%s=...) so "+
+					"CheckDriverOwnershipCoherence can verify it", displayPath, overrideKey, guardedPath),
+				rootDefaults,
+			)
+		}
+	}
+	return writeGuardTemplate(templatesDir, driverOwnershipLockTemplate, buf.String(), true)
+}
+
+// reservedTemplateNames lists the deployer-owned templates this generation
+// emits, which no component template may reuse.
+func (g *Generator) reservedTemplateNames() []string {
+	var reserved []string
+	if g.RecipeResult != nil && g.RecipeResult.Metadata.SelectedProfile != nil {
+		reserved = append(reserved, profileLockTemplateName)
+	}
+	if len(g.driverOwnershipGuards()) > 0 {
+		reserved = append(reserved, driverOwnershipLockTemplateName)
+	}
+	return reserved
+}
+
+// writeGuardTemplate writes content as tmpl when emit is set, refusing to
+// overwrite a file the deployer did not generate. When emit is unset it
+// removes a stale generated file left by a prior generation. An unrelated
+// preexisting file with the same name is left untouched, so a bundle that
+// emits no guard retains its legacy collision behavior.
+func writeGuardTemplate(templatesDir string, tmpl guardTemplate, content string, emit bool) (string, int64, error) {
+	outputPath, err := deployer.SafeJoin(templatesDir, tmpl.name+".yaml")
 	if err != nil {
 		return "", 0, errors.Wrap(errors.ErrCodeInternal,
-			"failed to resolve profile lock template path", err)
+			fmt.Sprintf("failed to resolve %s path", tmpl.label), err)
 	}
-	exists, generated, err := inspectProfileLockTemplate(outputPath)
+	exists, generated, err := inspectGuardTemplate(outputPath, tmpl)
 	if err != nil {
 		return "", 0, err
 	}
+	if !emit {
+		if exists && generated {
+			if rmErr := os.Remove(outputPath); rmErr != nil {
+				return "", 0, errors.Wrap(errors.ErrCodeInternal,
+					fmt.Sprintf("failed to remove stale %s", tmpl.label), rmErr)
+			}
+		}
+		return "", 0, nil
+	}
 	if exists && !generated {
 		return "", 0, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("refusing to overwrite non-AICR profile lock template %q", outputPath))
+			fmt.Sprintf("refusing to overwrite non-AICR %s %q", tmpl.label, outputPath))
 	}
-	content := []byte(buf.String())
-	if err := os.WriteFile(outputPath, content, 0600); err != nil {
+	if err := os.WriteFile(outputPath, []byte(content), 0600); err != nil {
 		return "", 0, errors.Wrap(errors.ErrCodeInternal,
-			"failed to write profile lock template", err)
+			fmt.Sprintf("failed to write %s", tmpl.label), err)
 	}
 	return outputPath, int64(len(content)), nil
 }
 
-// removeGeneratedProfileLockTemplate removes only a guard recognizable as
-// AICR-owned output from a prior profiled generation. An unrelated preexisting
-// file with the same name is left untouched so unprofiled generation retains
-// its legacy collision behavior.
-func removeGeneratedProfileLockTemplate(templatesDir string) error {
-	outputPath, err := deployer.SafeJoin(templatesDir, profileLockTemplateName+".yaml")
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal,
-			"failed to resolve stale profile lock template path", err)
-	}
-	exists, generated, err := inspectProfileLockTemplate(outputPath)
-	if err != nil {
-		return err
-	}
-	if !exists || !generated {
-		return nil
-	}
-	if err := os.Remove(outputPath); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal,
-			"failed to remove stale profile lock template", err)
-	}
-	return nil
-}
-
-func inspectProfileLockTemplate(outputPath string) (bool, bool, error) {
+func inspectGuardTemplate(outputPath string, tmpl guardTemplate) (bool, bool, error) {
 	file, err := os.Open(outputPath)
 	if os.IsNotExist(err) {
 		return false, false, nil
 	}
 	if err != nil {
 		return false, false, errors.Wrap(errors.ErrCodeInternal,
-			"failed to inspect profile lock template", err)
+			fmt.Sprintf("failed to inspect %s", tmpl.label), err)
 	}
-	generated, inspectErr := hasGeneratedProfileLockHeader(file)
+	generated, inspectErr := hasGeneratedGuardHeader(file, tmpl.header)
 	closeErr := file.Close()
 	if inspectErr != nil {
 		return false, false, errors.Wrap(errors.ErrCodeInternal,
-			"failed to inspect profile lock template", inspectErr)
+			fmt.Sprintf("failed to inspect %s", tmpl.label), inspectErr)
 	}
 	if closeErr != nil {
 		return false, false, errors.Wrap(errors.ErrCodeInternal,
-			"failed to close profile lock template", closeErr)
+			fmt.Sprintf("failed to close %s", tmpl.label), closeErr)
 	}
 	return true, generated, nil
 }
 
-func hasGeneratedProfileLockHeader(reader io.Reader) (bool, error) {
-	prefix := make([]byte, len(profileLockTemplateHeader))
+func hasGeneratedGuardHeader(reader io.Reader, header string) (bool, error) {
+	prefix := make([]byte, len(header))
 	n, err := io.ReadFull(reader, prefix)
 	if err != nil {
 		if stderrors.Is(err, io.EOF) || stderrors.Is(err, io.ErrUnexpectedEOF) {
@@ -633,15 +789,20 @@ func hasGeneratedProfileLockHeader(reader io.Reader) (bool, error) {
 		}
 		return false, err
 	}
-	return n == len(prefix) && string(prefix) == profileLockTemplateHeader, nil
+	return n == len(prefix) && string(prefix) == header, nil
 }
 
-func writeProfilePathGuard(
+// writePathGuard rejects a guarded leaf or a non-map ancestor. An ancestor
+// present in defaults must remain present: Helm coalescing erases null values
+// against defaults before templates see them, so disappearance is a violation.
+// Nil defaults preserve the profile guard's existing byte representation.
+func writePathGuard(
 	buf *strings.Builder,
 	parent string,
 	segments []string,
 	varPrefix string,
-	displayPath string,
+	failMessage string,
+	defaults map[string]any,
 ) {
 
 	if len(segments) == 0 {
@@ -650,8 +811,7 @@ func writeProfilePathGuard(
 	key := segments[0]
 	fmt.Fprintf(buf, "{{- if hasKey %s %q -}}\n", parent, key)
 	if len(segments) == 1 {
-		fmt.Fprintf(buf, "{{- fail %q -}}\n",
-			"install-time value intersects profile-owned path "+displayPath)
+		fmt.Fprintf(buf, "{{- fail %q -}}\n", failMessage)
 		buf.WriteString("{{- end -}}\n")
 		return
 	}
@@ -659,19 +819,24 @@ func writeProfilePathGuard(
 	current := fmt.Sprintf("$%s_%d", varPrefix, len(segments))
 	fmt.Fprintf(buf, "{{- %s := index %s %q -}}\n", current, parent, key)
 	fmt.Fprintf(buf, "{{- if kindIs \"map\" %s -}}\n", current)
-	writeProfilePathGuard(buf, current, segments[1:], varPrefix, displayPath)
+	childDefaults, _ := defaults[key].(map[string]any)
+	writePathGuard(buf, current, segments[1:], varPrefix, failMessage, childDefaults)
 	buf.WriteString("{{- else -}}\n")
-	fmt.Fprintf(buf, "{{- fail %q -}}\n",
-		"install-time value intersects profile-owned path "+displayPath)
+	fmt.Fprintf(buf, "{{- fail %q -}}\n", failMessage)
 	buf.WriteString("{{- end -}}\n")
+	if _, required := defaults[key]; required {
+		buf.WriteString("{{- else -}}\n")
+		fmt.Fprintf(buf, "{{- fail %q -}}\n", failMessage)
+	}
 	buf.WriteString("{{- end -}}\n")
 }
 
 // writeValuesFiles writes the chart's value surfaces: per-component
 // static/<name>.yaml files, the root values.yaml (with appName, repoURL,
 // targetRevision, and deployer defaults injected), and values.schema.json.
-// Each written file is appended to output.Files/TotalSize.
-func (g *Generator) writeValuesFiles(outputDir string, output *deployer.Output) error {
+// Each written file is appended to output.Files/TotalSize. The returned root
+// defaults let the driver-ownership guard detect null-coalesced ancestors.
+func (g *Generator) writeValuesFiles(outputDir string, output *deployer.Output) (map[string]any, error) {
 	// PropagateOrWrap rather than Wrap: writeStaticValuesAndBuildStubs now
 	// reports a non-directory at the static path as ErrCodeInvalidRequest, and
 	// re-coding that as INTERNAL would present a bad --output path as a server
@@ -679,7 +844,7 @@ func (g *Generator) writeValuesFiles(outputDir string, output *deployer.Output) 
 	// since 5xx bodies omit it.
 	staticFiles, staticSize, dynamicOnlyValues, err := g.writeStaticValuesAndBuildStubs(outputDir)
 	if err != nil {
-		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to write static values")
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to write static values")
 	}
 	output.Files = append(output.Files, staticFiles...)
 	output.TotalSize += staticSize
@@ -704,18 +869,18 @@ func (g *Generator) writeValuesFiles(outputDir string, output *deployer.Output) 
 
 	valuesPath, valuesSize, err := writeRootValuesFile(dynamicOnlyValues, outputDir)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to write root values.yaml", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write root values.yaml", err)
 	}
 	output.Files = append(output.Files, valuesPath)
 	output.TotalSize += valuesSize
 
 	schemaPath, schemaSize, err := writeValuesSchema(outputDir)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to write values.schema.json", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write values.schema.json", err)
 	}
 	output.Files = append(output.Files, schemaPath)
 	output.TotalSize += schemaSize
-	return nil
+	return dynamicOnlyValues, nil
 }
 
 // deployerValues builds the root values.yaml `deployer:` map. Baked
@@ -1304,8 +1469,7 @@ func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templ
 	if readErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to list argocd output", readErr)
 	}
-	profileLockReserved := g.RecipeResult != nil &&
-		g.RecipeResult.Metadata.SelectedProfile != nil
+	reservedTemplates := g.reservedTemplateNames()
 	for _, e := range folderEntries {
 		select {
 		case <-ctx.Done():
@@ -1378,7 +1542,7 @@ func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templ
 			return keyErr
 		}
 		tmplPath, tmplSize, transformErr := transformApplication(
-			tmpDir, templatesDir, folderName, folderComponent, overrideKey, profileLockReserved,
+			tmpDir, templatesDir, folderName, folderComponent, overrideKey, reservedTemplates,
 		)
 		if transformErr != nil {
 			return transformErr
@@ -1402,7 +1566,7 @@ func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templ
 //     the path provides its own values.yaml as the static layer.
 func transformApplication(
 	srcDir, templatesDir, folderName, componentName, overrideKey string,
-	profileLockReserved bool,
+	reservedTemplates []string,
 ) (string, int64, error) {
 
 	if !deployer.IsSafePathComponent(componentName) {
@@ -1413,7 +1577,7 @@ func transformApplication(
 		return "", 0, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("invalid folder name %q: must not contain path separators or parent directory references", folderName))
 	}
-	if profileLockReserved && componentName == profileLockTemplateName {
+	if slices.Contains(reservedTemplates, componentName) {
 		return "", 0, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("component %q template collides with a deployer-owned template", componentName))
 	}
@@ -1818,9 +1982,9 @@ func copyFolderContent(srcDir, outputDir, folderName string, skip ...string) ([]
 // replacing the multi-source "sources" block with a single "source" that
 // loads static values from a chart file and merges dynamic overrides.
 //
-// All Helm components use the merge pattern — every non-profile-owned value
-// is overridable at install time via --set, not just paths declared with
-// --dynamic. Profile-owned paths are rejected by the lock template, not here.
+// All Helm components use the merge pattern — every value is overridable at
+// install time via --set, not just paths declared with --dynamic. Profile-owned
+// and driver-ownership paths are rejected by the lock templates, not here.
 func convertToSingleSourceWithValues(app map[string]any, componentName, overrideKey string) error {
 	spec, ok := app["spec"].(map[string]any)
 	if !ok {
