@@ -24,7 +24,9 @@
 # Each worker requests one VF per rail and the four attachments, which multus
 # exposes as net1..net4. Before NCCL starts, every rank checks that each netN
 # carries an IPoIB address, an RDMA device, and full membership in some IB
-# partition, then pins NCCL_IB_HCA to exactly those four VF HCAs. A rank that
+# partition at the same P_Key table index on all four rails, then pins
+# NCCL_IB_HCA to exactly those four VF HCAs and NCCL_IB_PKEY to that index
+# (NCCL otherwise uses index 0, which may hold only a limited key). A rank that
 # fails any of these exits with an AICR_PRECHECK_FAILED line naming the rail,
 # which the validator reports as the failure reason, so the check never passes
 # on a pod-network fallback.
@@ -230,12 +232,13 @@ spec:
                   - -x
                   - NCCL_IGNORE_DISABLED_P2P=1
                   # Per rank: require an IPoIB address, an RDMA device and full
-                  # P_Key membership on each of net1..net4, then pin NCCL to
-                  # exactly those VF HCAs.
+                  # P_Key membership (one table index across all rails) on each
+                  # of net1..net4, then pin NCCL to those VF HCAs and that index.
                   - /bin/sh
                   - -c
                   - |
                     hcas=""
+                    pkey=""
                     for i in 1 2 3 4; do
                       if ! ip -o -4 addr show dev "net$i" 2>/dev/null | grep -q inet; then
                         echo "AICR_PRECHECK_FAILED: rail attachment net$i has no IPoIB address on $(hostname); check the sriov-network-rail-$((i-1)) NetworkAttachmentDefinition and multus" >&2
@@ -246,19 +249,29 @@ spec:
                         echo "AICR_PRECHECK_FAILED: rail attachment net$i has no RDMA device on $(hostname)" >&2
                         exit 1
                       fi
-                      full=0
+                      # Lowest P_Key table index holding a full-member key.
+                      idx=""
                       for k in /sys/class/infiniband/$hca/ports/1/pkeys/*; do
                         v=$(cat "$k" 2>/dev/null)
                         [ -n "$v" ] || continue
-                        if [ $((v & 0x8000)) -ne 0 ]; then full=1; break; fi
+                        n=${k##*/}
+                        if [ $((v & 0x8000)) -ne 0 ] && { [ -z "$idx" ] || [ "$n" -lt "$idx" ]; }; then idx=$n; fi
                       done
-                      if [ "$full" -ne 1 ]; then
+                      if [ -z "$idx" ]; then
                         echo "AICR_PRECHECK_FAILED: rail attachment net$i ($hca) holds only limited P_Key membership on $(hostname); the fabric must grant the VF full membership" >&2
                         exit 1
                       fi
+                      if [ -n "$pkey" ] && [ "$idx" != "$pkey" ]; then
+                        echo "AICR_PRECHECK_FAILED: rail attachment net$i ($hca) has its full-member P_Key at index $idx, other rails at $pkey, on $(hostname); NCCL_IB_PKEY takes one index" >&2
+                        exit 1
+                      fi
+                      pkey=$idx
                       hcas="$hcas,$hca"
                     done
                     export NCCL_IB_HCA="=${hcas#,}"
+                    # NCCL uses P_Key index 0 unless told otherwise; point it at
+                    # the full-member partition the check found.
+                    export NCCL_IB_PKEY="$pkey"
                     exec "$@"
                   - nccl-rank
                   - /usr/local/bin/${TEST_TYPE}_mpi

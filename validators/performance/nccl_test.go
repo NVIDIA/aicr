@@ -1299,8 +1299,8 @@ func TestNVKENetRuntimePrecheckMarkerMatchesRegex(t *testing.T) {
 			t.Errorf("runtimePrecheckFailure(%q) = %q, want %q", out, got, printed)
 		}
 	}
-	if checks != 3 {
-		t.Errorf("found %d %q lines in %s, want 3 (missing address, missing RDMA device, limited P_Key membership)", checks, echoMarker, path)
+	if checks != 4 {
+		t.Errorf("found %d %q lines in %s, want 4 (missing address, missing RDMA device, limited P_Key membership, mismatched P_Key index)", checks, echoMarker, path)
 	}
 }
 
@@ -1338,8 +1338,10 @@ func nvkeNetRankScript(t *testing.T) string {
 // TestNVKENetRankPrecheck runs the NVKE NET runtime's rank script against a
 // stub ip and a fake /sys/class/net and /sys/class/infiniband: a rail missing
 // its IPoIB address, its RDMA device, or full P_Key membership must exit
-// non-zero with a marker naming that rail, and four good rails must pin
-// NCCL_IB_HCA to exactly their VFs, in rail order.
+// non-zero with a marker naming that rail, as must rails whose full-member keys
+// sit at different table indexes. Four good rails must pin NCCL_IB_HCA to
+// exactly their VFs, in rail order, and NCCL_IB_PKEY to the full-member index
+// rather than NCCL's default index 0.
 func TestNVKENetRankPrecheck(t *testing.T) {
 	script := nvkeNetRankScript(t)
 	hcas := []string{"mlx5_9", "mlx5_30", "mlx5_49", "mlx5_61"}
@@ -1349,13 +1351,15 @@ func TestNVKENetRankPrecheck(t *testing.T) {
 		noAddr     string
 		noRDMA     string
 		limited    string
+		otherIndex string
 		wantErr    string
-		wantHCAEnv string
+		wantEnv    string
 	}{
-		{name: "four rails attached", wantHCAEnv: "=mlx5_9,mlx5_30,mlx5_49,mlx5_61"},
+		{name: "four rails attached", wantEnv: "=mlx5_9,mlx5_30,mlx5_49,mlx5_61 1"},
 		{name: "rail without IPoIB address", noAddr: "net3", wantErr: "AICR_PRECHECK_FAILED: rail attachment net3 has no IPoIB address"},
 		{name: "rail without RDMA device", noRDMA: "net2", wantErr: "AICR_PRECHECK_FAILED: rail attachment net2 has no RDMA device"},
 		{name: "rail with only limited P_Key membership", limited: "net4", wantErr: "AICR_PRECHECK_FAILED: rail attachment net4 (mlx5_61) holds only limited P_Key membership"},
+		{name: "rails with full-member keys at different indexes", otherIndex: "net3", wantErr: "AICR_PRECHECK_FAILED: rail attachment net3 (mlx5_49) has its full-member P_Key at index 2, other rails at 1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1380,11 +1384,15 @@ func TestNVKENetRankPrecheck(t *testing.T) {
 				if err := os.MkdirAll(dir, 0o755); err != nil {
 					t.Fatal(err)
 				}
-				// Index 0 holds the limited default; a full-member key sits at a
-				// non-zero index, so the check must not assume index 0 or 0xffff.
+				// Index 0 holds the limited default and the full-member tenant key
+				// sits at index 1, as on tenants with a UFM-assigned partition, so
+				// NCCL must be pointed at index 1 rather than its default 0.
 				pkeys := map[string]string{"0": "0x7fff", "1": "0x8001", "2": "0x0000"}
-				if dev == tt.limited {
+				switch dev {
+				case tt.limited:
 					pkeys["1"] = "0x0000"
+				case tt.otherIndex:
+					pkeys["1"], pkeys["2"] = "0x0000", "0x8001"
 				}
 				pkeyDir := filepath.Join(sysIB, hca, "ports", "1", "pkeys")
 				if err := os.MkdirAll(pkeyDir, 0o755); err != nil {
@@ -1399,7 +1407,7 @@ func TestNVKENetRankPrecheck(t *testing.T) {
 
 			body := strings.ReplaceAll(script, "/sys/class/net/", sysNet+"/")
 			body = strings.ReplaceAll(body, "/sys/class/infiniband/", sysIB+"/")
-			cmd := exec.CommandContext(t.Context(), "/bin/sh", "-c", body, "nccl-rank", "/bin/sh", "-c", `printf %s "$NCCL_IB_HCA"`)
+			cmd := exec.CommandContext(t.Context(), "/bin/sh", "-c", body, "nccl-rank", "/bin/sh", "-c", `printf '%s %s' "$NCCL_IB_HCA" "$NCCL_IB_PKEY"`)
 			cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 			var stdout, stderr bytes.Buffer
 			cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -1420,8 +1428,8 @@ func TestNVKENetRankPrecheck(t *testing.T) {
 			if err != nil {
 				t.Fatalf("precheck failed: %v, stderr %q", err, stderr.String())
 			}
-			if stdout.String() != tt.wantHCAEnv {
-				t.Errorf("NCCL_IB_HCA = %q, want %q", stdout.String(), tt.wantHCAEnv)
+			if stdout.String() != tt.wantEnv {
+				t.Errorf("NCCL_IB_HCA NCCL_IB_PKEY = %q, want %q", stdout.String(), tt.wantEnv)
 			}
 		})
 	}
