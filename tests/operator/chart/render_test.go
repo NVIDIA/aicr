@@ -62,7 +62,7 @@ func TestAICRVersionRange(t *testing.T) {
 	}
 
 	versions := []string{"v0.9.9", "v1.0.0", "v1.0.1", "v1.1.0", "v1.42.7", "v2.0.0", "v2.1.0", "1.0.0", "v1.1",
-		"v1.1.0-rc.1", "v1.3.0-rc1", "v1.3.0-next", "v1.2.0-12-gabcdef0", "v0.9.9-rc.1", "v2.0.0-rc.1", "v1.1.0+build.1"}
+		"v1.1.0-rc.1", "v1.3.0-rc1", "v1.3.0-next", "v1.2.0-12-gabcdef0", "v0.9.9-rc.1", "v2.0.0-rc.1", "v1.1.0+build.1", "v1.3.0-rc.01", "v1.3.0-01"}
 	for _, allow := range []bool{false, true} {
 		for _, v := range versions {
 			_, out, renderErr := render(ctx, "aicr.version="+v, fmt.Sprintf("aicr.allowPrerelease=%t", allow))
