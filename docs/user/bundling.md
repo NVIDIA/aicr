@@ -442,6 +442,25 @@ profile's owned paths are locked. The lock is enforced per surface:
   equals, contains, or is contained by an owned path is rejected at Helm
   render time, even when the value is identical. Key presence alone
   trips the guard.
+- **argocd-helm driver-ownership paths, profiled or not**: independent of
+  any profile, an `argocd-helm` bundle that ships `gpu-operator` or
+  `gpu-operator-ocp` rejects install-time values on `driver.enabled`,
+  `toolkit.enabled` and `hostPaths.driverInstallDir`, and one that ships
+  `nvidia-dra-driver-gpu` or `nvidia-dra-driver-gpu-ocp` rejects
+  `nvidiaDriverRoot`. These are the paths `CheckDriverOwnershipCoherence`
+  verifies at bundle time, so an install-time `--set` would undo that
+  verdict. As above, a key that equals, contains, or is contained by a
+  guarded path trips the guard on presence alone (`false`, `null`, `[]`,
+  a scalar replacing a parent, or an identical value). The guard names
+  the path and remedy; when a scalar replaces the whole component, Helm
+  may report the component template's type error first. Set ownership at bundle time instead
+  (`aicr bundle --set gpuoperator:driver.enabled=...`) so the coherence
+  check runs; siblings such as `gpuoperator.driver.version` stay
+  overridable. The guard lives in `templates/aicr-driver-ownership-lock.yaml`.
+  A bundle subset (`--bundlers`) that omits these components carries no guard
+  for them. When regenerating into an existing directory, stale artifacts
+  for an omitted or disabled guarded component are rejected before changing
+  the old guard, even without checksums; generate into a fresh directory.
 - **Component presence (the synthetic `enabled` owned path)**: not
   changeable by selecting a different profile value — profile fragments
   cannot assign `enabled`, so no `--profile` choice adds or removes a
