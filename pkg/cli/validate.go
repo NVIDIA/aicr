@@ -210,27 +210,19 @@ func validateFlagCombinations(cncfSubmission bool, evidenceDir string, features 
 	// — consistent with the --cncf-submission guard above. A config-driven
 	// spec.validate.evidence.attestation is still silently suppressed in
 	// --no-cluster mode by evidenceConfigForRunMode.
-	// A withheld check must not reach a CNCF conformance submission as an
-	// absence. pkg/evidence/cncf/renderer.go drops every skipped entry before
-	// grouping, so a requirement whose checks were all skipped produces no
-	// markdown file and no index entry, and nothing in the rendered evidence
-	// records that it was omitted. That is long-standing and was tolerable
-	// while skips were incidental; --skip-check makes them deliberate and
-	// plural, and five of the checks a caller is most likely to withhold are
-	// submission requirements. A submission that silently omits a requirement
-	// reads as complete when it is not, which is the one failure this feature
-	// must not introduce. Refused rather than rendered, until the renderer can
-	// record a withheld requirement WITH its reason: today it gets no page and,
-	// when another submission check produced an entry so an index is written
-	// at all, is listed only as NOT TESTED (not run), indistinguishable from a
-	// check that never ran. Recording the reason is a change to what a conformance
-	// submission contains, and it needs its own decision rather than being
-	// improvised behind a flag.
+	// A withheld check must not reach a CNCF conformance submission. The
+	// renderer (pkg/evidence/cncf) aggregates fail-closed: a skipped check
+	// leaves its requirement NOT TESTED with the skip reason code recorded,
+	// so the evidence would be accurate, but a run that withholds a check the
+	// recipe declares is narrower than the recipe by construction and cannot
+	// evidence the recipe (ADR-007 amendment, decision 4). --skip-check is for
+	// lanes that cannot host a check at all (Kind, KWOK), which are not
+	// submission lanes.
 	if evidenceDir != "" && len(skipChecks) > 0 {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			"--skip-check cannot be combined with --evidence-dir: the CNCF evidence renderer gives a withheld "+
-				"requirement no page and, when it writes an index at all, lists it only as NOT TESTED (not run) "+
-				"with no reason recorded, so the rendered evidence would misstate why the requirement is missing")
+			"--skip-check cannot be combined with --evidence-dir: a withheld check leaves its requirement "+
+				"NOT TESTED, so the run is narrower than the recipe by construction and cannot produce "+
+				"conformance evidence for it")
 	}
 	if noCluster && explicitAttest {
 		return errors.New(errors.ErrCodeInvalidRequest,
@@ -474,6 +466,9 @@ type validationConfig struct {
 
 	// Evidence
 	evidenceDir string
+	// cncfNotApplicable is spec.validate.evidence.cncf.notApplicable, the
+	// conditional MUSTs declared not applicable with their justifications.
+	cncfNotApplicable map[string]string
 
 	// Recipe-evidence bundle config; nil disables --emit-attestation work.
 	evidence *recipeEvidenceConfig
@@ -623,12 +618,28 @@ func runValidation(
 	// facade warns: below v1.35 against v1.35, above the newest against the
 	// latest (cncf.NearestVersion). An explicit version flag is a follow-up
 	// to #3606.
+	//
+	// The requirement aggregation the evidence was rendered from is reported
+	// here but does not yet decide the exit status: that is the submission
+	// run's contract (#3602) and --fail-on-error keeps its per-check rule
+	// until then. A render error is held until the attestation below has
+	// been emitted: the two evidence kinds are independent pipelines over the
+	// same run, and a failed CNCF render must not cost the run its signed
+	// recipe-evidence bundle.
+	var renderErr error
 	if cfg.evidenceDir != "" {
-		renderOpts := aicr.RenderCNCFEvidenceOptions{KubernetesVersion: snap.KubernetesVersion()}
-		if renderErr := client.RenderCNCFEvidenceWithOptions(ctx, combined, cfg.evidenceDir, renderOpts); renderErr != nil {
-			return renderErr
+		renderOpts := aicr.RenderCNCFEvidenceOptions{
+			KubernetesVersion: snap.KubernetesVersion(),
+			NotApplicable:     cfg.cncfNotApplicable,
 		}
-		slog.Info("conformance evidence written", "dir", cfg.evidenceDir, "kubernetesVersion", renderOpts.KubernetesVersion)
+		agg, err := client.RenderCNCFEvidenceWithResult(ctx, combined, cfg.evidenceDir, renderOpts)
+		if err != nil {
+			renderErr = err
+			slog.Error("conformance evidence rendering failed", "error", err, "dir", cfg.evidenceDir)
+		} else {
+			slog.Info("conformance evidence written", "dir", cfg.evidenceDir, "kubernetesVersion", renderOpts.KubernetesVersion)
+			logRequirementAggregate(agg)
+		}
 	}
 
 	// Emit even on failure: failed runs document hardware-specific limits.
@@ -644,6 +655,10 @@ func runValidation(
 		if err := writeEvidenceImageRefs(ctx, cfg.imageRefs, emission); err != nil {
 			return err
 		}
+	}
+
+	if renderErr != nil {
+		return renderErr
 	}
 
 	if cfg.failOnError && anyFailed {
@@ -1147,9 +1162,9 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			// handle to the same directory (dataDir) so SLSA / conformance
 			// evidence resolves files against the command's source rather
 			// than the package global.
-			client, err := recipeClientFromCmd(ctx, cmd, cfg)
+			client, err := validateClient(ctx, cmd, cfg, evidenceDir, cncfOpts.NotApplicable)
 			if err != nil {
-				return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to initialize data provider")
+				return err
 			}
 			defer func() { _ = client.Close() }()
 
@@ -1278,6 +1293,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 				imageRegistryOverride:       os.Getenv("AICR_VALIDATOR_IMAGE_REGISTRY"),
 				imageTagOverride:            os.Getenv("AICR_VALIDATOR_IMAGE_TAG"),
 				evidenceDir:                 evidenceDir,
+				cncfNotApplicable:           cncfOpts.NotApplicable,
 				evidence:                    evidenceCfg,
 				imageRefs:                   imageRefs,
 			})
@@ -1313,4 +1329,46 @@ func runCNCFSubmission(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, 
 		return err
 	}
 	return client.CollectCNCFEvidence(ctx, rec, opts)
+}
+
+// validateClient builds the facade Client for a validation run and refuses a
+// bad spec.validate.evidence.cncf.notApplicable key against it before any
+// recipe, snapshot or cluster work, rather than leaving that to the render
+// after every validator Job has run. The checklist version is not known yet
+// (it follows the snapshot), so the pre-flight checks against the latest
+// carried checklist; the conditional MUST set is the same in every carried
+// version, and the renderer repeats the check against the selected version
+// as the fail-closed backstop. A run without --evidence-dir renders nothing
+// and is not checked. The Client is closed when the pre-flight refuses.
+func validateClient(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, evidenceDir string, notApplicable map[string]string) (*aicr.Client, error) {
+	client, err := recipeClientFromCmd(ctx, cmd, cfg)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to initialize data provider")
+	}
+	if evidenceDir == "" {
+		return client, nil
+	}
+	if err := client.ValidateCNCFEvidenceOptions(aicr.RenderCNCFEvidenceOptions{NotApplicable: notApplicable}); err != nil {
+		_ = client.Close()
+		return nil, err
+	}
+	return client, nil
+}
+
+// logRequirementAggregate reports the CNCF requirement aggregation of a
+// render: the checklist version, whether every applicable MUST passed, and
+// each applicable MUST that did not, with its reason.
+func logRequirementAggregate(agg *aicr.CNCFRequirementAggregate) {
+	if agg == nil {
+		return
+	}
+	incomplete := agg.IncompleteMusts()
+	slog.Info("CNCF requirement aggregation",
+		"checklist", agg.Version,
+		"applicableMustsPassed", agg.Passed(),
+		"incompleteMusts", len(incomplete))
+	for _, r := range incomplete {
+		slog.Warn("CNCF MUST requirement not established",
+			"requirement", r.ID, "status", r.Status, "reason", r.Reason)
+	}
 }
