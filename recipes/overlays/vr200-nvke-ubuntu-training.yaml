@@ -1,0 +1,215 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Vera Rubin (VR200) NVL72 trays on NVKE. AICR ships vr200 only on rke2 and
+# nvke only on gb200, so `--service nvke --accelerator vr200` has no leaf
+# today. This is that pairing: the nvke root's platform handling with the
+# VR200 node facts from vr200-rke2.
+#
+# It diverges from vr200-rke2 on the driver. That leaf sets driver.enabled
+# false because the VR NVL72 reference image pre-bakes a 615-branch driver;
+# NVKE's node image does not, and does not need to. What VR200 actually needs
+# is the nvidia-bos kernel line: on the generic nvidia-64k kernel no driver
+# brings the GPUs up at all (PRI reads return 0xbadf5720, FSP and GSP never
+# hand off, every GPU fails probe with -EIO), while on nvidia-bos-64k the
+# stock driver container works. Measured on a VR200 tray with 610.57.04,
+# 615.71.09 and 615.78.08.
+kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: vr200-nvke-ubuntu-training
+
+spec:
+  base: nvke
+
+  criteria:
+    service: nvke
+    accelerator: vr200
+    os: ubuntu
+    intent: training
+
+  # No os-ubuntu mixin: it pins VERSION_ID 24.04 / kernel >= 6.8, while VR200
+  # on NVKE runs Ubuntu 26.04 on a 7.0.0-*-nvidia-bos-64k arm64 kernel. The
+  # osrelease constraint is written on the version, not the flavour, so it
+  # matches both the -nvidia-bos-64k and -nvidia-64k spellings.
+  constraints:
+    # Restated from nvke: snapshot resolution checks a leaf's own constraints.
+    # >= 1.34 keeps the GA DRA API (resource.k8s.io/v1) that ComputeDomain and
+    # IMEX need. Observed in practice: 1.36.3.
+    - name: K8s.server.version
+      value: ">= 1.34"
+    - name: OS.release.ID
+      value: ubuntu
+    - name: OS.release.VERSION_ID
+      value: "26.04"
+    - name: OS.sysctl./proc/sys/kernel/osrelease
+      value: ">= 7.0"
+  # NOT expressed as a constraint: the kernel must be the nvidia-bos flavour
+  # rather than generic nvidia-64k. The constraint grammar has only >=, <=, >,
+  # <, == and != with exact match -- no substring or regex -- and a version
+  # range does not separate the two series, because semver orders prerelease
+  # identifiers lexically (verified: ">= 7.0.0-2000" accepts
+  # 7.0.0-1018-nvidia-64k). An exact == would pin one build. Enforce
+  # out-of-band until a kernel-flavour measurement exists -- the same posture
+  # vr200-rke2 takes for its 615 host-driver floor.
+
+  componentRefs:
+    # NVKE's node image ships no pre-installed driver, so GPU Operator
+    # installs it. 615.71.09 is the only 615 build published as a driver
+    # container (615.78.08 exists only as a .run; nvcr.io/nvidia/driver:
+    # 615.78.08-* is NotFound). Verified on hardware: all four GPUs per tray
+    # enumerate with no host driver present.
+    - name: gpu-operator
+      type: Helm
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - prometheus-operator-crds
+      overrides:
+        gdrcopy:
+          enabled: true
+        driver:
+          enabled: true
+          version: 615.71.09
+        toolkit:
+          enabled: true
+          # NVKE ships containerd 2.3 with a version 3 config.toml, while the
+          # toolkit's default source (`containerd config dump`) reports the
+          # migrated version 4 -- the drop-in is then rejected and containerd
+          # crash-loops. Same defect as #1688 on AKS. Inherited reasoning from
+          # gb200-nvke; this is NVKE platform behaviour, not GB200-specific.
+          env:
+            - name: RUNTIME_CONFIG_SOURCE
+              value: file
+            - name: ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED
+              value: "false"
+        devicePlugin:
+          enabled: true
+          # Helm replaces lists: the first two entries restate the component
+          # base. MOFED_ENABLED off so only pods requesting a rail VF receive
+          # /dev/infiniband.
+          env:
+            - name: DP_DISABLE_HEALTHCHECKS
+              value: "109"
+            - name: DEVICE_LIST_STRATEGY
+              value: cdi-cri,cdi-annotations,volume-mounts
+            - name: MOFED_ENABLED
+              value: "false"
+
+    # base.yaml already supplies nvidia-dra-driver-gpu; only the driver root
+    # differs here. gpu-operator installs the driver (driver.enabled above), so
+    # it lives at /run/nvidia/driver, not the chart default of /. Without this
+    # the kubelet-plugin never locates it, no ComputeDomain becomes usable, and
+    # multi-node NVLink silently does not work -- on an NVL72-class accelerator
+    # that is most of the point. Same posture as aks.yaml's operator-managed
+    # path.
+    - name: nvidia-dra-driver-gpu
+      overrides:
+        nvidiaDriverRoot: /run/nvidia/driver
+
+    - name: nfd
+      type: Helm
+      valuesFile: components/nfd/values-nvidia-nics.yaml
+      overrides:
+        topologyUpdater:
+          enable: true
+          # The chart's 60Mi default OOM-kills the topology updater on
+          # multi-TiB nodes (exit 137). Taken from vr200-rke2, and it applies
+          # for the same reason: these trays report 1.4 TiB.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+
+    # Stands up the nic-configuration-daemon that `aicr snapshot
+    # --discover-network` needs. The NicClusterPolicy carries ONLY a
+    # nicConfigurationOperator section:
+    #
+    # No ofedDriver -- NVKE runs the host's inbox mlx5_core, and DOCA-OFED must
+    # not be installed on these nodes.
+    #
+    # No rails -- gb200-nvke's policy and its sriov-ib-networks pair hardcode
+    # four ConnectX-7 rails per tray. VR200 is ConnectX-9 and this platform's
+    # rail layout is unmeasured. Wiring it by copying GB200's is how you get a
+    # policy that looks right and attaches nothing; wire it from a real
+    # discovery result instead.
+    - name: network-operator
+      type: Helm
+      valuesFile: components/network-operator/values-nvke-gb200.yaml
+      manifestFiles:
+        - components/network-operator/manifests/nic-cluster-policy-nvke-vr200.yaml
+      dependencyRefs:
+        - nfd
+        - cert-manager
+      overrides:
+        # Required by nicConfigurationOperator: it prepares each node through
+        # the maintenance operator before applying NIC configuration. Enabling
+        # the daemon without this leaves it unable to take a node.
+        maintenanceOperator:
+          enabled: true
+        nicConfigurationOperator:
+          configurationDaemon:
+            resources:
+              limits:
+                memory: 2Gi
+              requests:
+                cpu: 100m
+                memory: 256Mi
+
+    # Scaffolded off. vr200-rke2 ships a Skyhook tuning CR that REBOOTS EVERY
+    # GPU NODE it touches, and nodewright-packages has no vr200/nvke profile --
+    # its vr200 profiles are service-specific (bcm, rke2). Enabling this with
+    # another service's profile would apply that platform's tuning and reboot
+    # the trays for it. Same posture as gb200-nvke; enabling later is a
+    # one-line change.
+    - name: nodewright-customizations
+      type: Helm
+      overrides:
+        enabled: false
+      dependencyRefs:
+        - nodewright-operator
+
+  validation:
+    performance:
+      # Measured 2026-11-03 on a 2-node NVKE tenant cluster (2 x 4 VR200,
+      # operator driver 615.71.09, nvidia-dra-driver-gpu 25.8.1):
+      # all_reduce_perf 1 GiB..16 GiB over MNNVL averaged 996.5 and 996.1 GB/s
+      # across two runs, 1040 GB/s peak at 16 GiB, zero mismatches at every
+      # size. NCCL logged `NVLS comm ... nvlsRanks 8`, so one NVLS
+      # communicator spanned both trays.
+      #
+      # The floor is the established NVL72 one rather than the measured value,
+      # so a different tray pairing does not fail spuriously. It still
+      # discriminates what matters: the inter-node Ethernet path here is
+      # 400 GbE, a 50 GB/s ceiling, so anything that fell off NVLink could not
+      # reach this floor.
+      #
+      # No -net check: that variant was not measured on this platform, and
+      # asserting a threshold for it would be inventing one.
+      #
+      # No nccl-benchmark-profile constraint is needed -- this pairing is in
+      # the compiled matrix (supportedNCCLCombinations[variantNVLS][nvke]) with
+      # its own template at testdata/vr200/nvke/runtime-nvls.yaml.
+      checks:
+        - nccl-all-reduce-bw-nvls
+      constraints:
+        - name: nccl-all-reduce-bw-nvls
+          value: ">= 600"
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
