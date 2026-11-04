@@ -15,6 +15,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1083,6 +1084,18 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
 		},
 		{
+			name:    "NET NVKE GB200",
+			variant: variantNET,
+			service: recipe.CriteriaServiceNVKE,
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+		},
+		{
+			name:    "NVLS NVKE GB200",
+			variant: variantNVLS,
+			service: recipe.CriteriaServiceNVKE,
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+		},
+		{
 			name:    "NVLS GKE GB200",
 			variant: variantNVLS,
 			service: recipe.CriteriaServiceGKE,
@@ -1191,6 +1204,100 @@ func TestH200EKSRuntimeMatchesH100(t *testing.T) {
 	if h100 != h200 {
 		t.Errorf("testdata/h200/eks/runtime.yaml diverged from the H100 EKS template "+
 			"(comparing bodies after stripping leading comment headers).\nH100:\n%s\nH200:\n%s", h100, h200)
+	}
+}
+
+// TestNVKENVLSRuntimeMatchesOKE enforces the "identical to OKE" contract in the
+// header of testdata/gb200/nvke/runtime-nvls.yaml: NVLS uses only the GPUs and
+// the validator-managed IMEX channel, so the two templates differ only in their
+// comment headers.
+func TestNVKENVLSRuntimeMatchesOKE(t *testing.T) {
+	oke := readTemplateBody(t, filepath.Join("testdata", "gb200", "oke", "runtime-nvls.yaml"))
+	nvke := readTemplateBody(t, filepath.Join("testdata", "gb200", "nvke", "runtime-nvls.yaml"))
+	if oke != nvke {
+		t.Errorf("testdata/gb200/nvke/runtime-nvls.yaml diverged from the OKE NVLS template "+
+			"(comparing bodies after stripping leading comment headers).\nOKE:\n%s\nNVKE:\n%s", oke, nvke)
+	}
+}
+
+// TestNVKENetRuntimeRequestsEveryRail pins the NVKE NET runtime to the fabric
+// the gb200-nvke leaves build: each worker requests one VF on every rail and
+// attaches the matching SriovIBNetwork, in rail order, so multus names them
+// net1..net4 as the rank precheck expects.
+func TestNVKENetRuntimeRequestsEveryRail(t *testing.T) {
+	data := map[string]string{
+		"NAMESPACE":          "aicr-validation",
+		"GPU_COUNT_PER_NODE": "4",
+		"GPU_COUNT":          "8",
+		"TEST_TYPE":          testType,
+		"MIN_MESSAGE_SIZE":   minMessageSize,
+		"MAX_MESSAGE_SIZE":   maxMessageSize,
+	}
+	obj, err := parseYAMLTemplate(templatePath(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceNVKE, variantNET, "runtime.yaml"), data)
+	if err != nil {
+		t.Fatalf("parse NVKE NET runtime: %v", err)
+	}
+	jobs, _, err := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
+	if err != nil {
+		t.Fatalf("replicatedJobs: %v", err)
+	}
+	var node map[string]any
+	for _, j := range jobs {
+		if m, ok := j.(map[string]any); ok && m["name"] == nodeJobName {
+			node = m
+		}
+	}
+	if node == nil {
+		t.Fatalf("no %q replicatedJob", nodeJobName)
+	}
+	networks, _, _ := unstructured.NestedString(node, "template", "spec", "template", "metadata", "annotations", "k8s.v1.cni.cncf.io/networks")
+	wantNetworks := "default/sriov-network-rail-0,default/sriov-network-rail-1,default/sriov-network-rail-2,default/sriov-network-rail-3"
+	if networks != wantNetworks {
+		t.Errorf("networks annotation = %q, want %q", networks, wantNetworks)
+	}
+	containers, _, _ := unstructured.NestedSlice(node, "template", "spec", "template", "spec", "containers")
+	if len(containers) != 1 {
+		t.Fatalf("worker containers = %d, want 1", len(containers))
+	}
+	container, _ := containers[0].(map[string]any)
+	for _, kind := range []string{"requests", "limits"} {
+		res, _, _ := unstructured.NestedMap(container, "resources", kind)
+		for rail := range 4 {
+			key := fmt.Sprintf("nvidia.com/sriov_resource_rail_%d", rail)
+			if got := fmt.Sprint(res[key]); got != "1" {
+				t.Errorf("worker %s[%s] = %q, want \"1\"", kind, key, got)
+			}
+		}
+		if _, ok := res["nvidia.com/mlnxnics"]; ok {
+			t.Errorf("worker %s requests nvidia.com/mlnxnics, which NVKE does not expose", kind)
+		}
+	}
+}
+
+func TestRuntimePrecheckFailure(t *testing.T) {
+	tests := []struct {
+		name string
+		logs string
+		want string
+	}{
+		{"no marker", "NCCL INFO Using network IB\n", ""},
+		{
+			"marker names the attachment",
+			"Warning: Permanently added 'w-0'\nAICR_PRECHECK_FAILED: rail attachment net2 has no IPoIB address on w-0\r\nmpirun detected...\n",
+			"rail attachment net2 has no IPoIB address on w-0",
+		},
+		{
+			"first marker wins",
+			"AICR_PRECHECK_FAILED: net1 missing\nAICR_PRECHECK_FAILED: net3 missing\n",
+			"net1 missing",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := runtimePrecheckFailure(tt.logs); got != tt.want {
+				t.Errorf("runtimePrecheckFailure() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

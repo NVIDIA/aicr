@@ -274,20 +274,29 @@ aicr validate --recipe bundle/recipe.yaml --phase deployment --phase conformance
 `aicr validate` runs the deployment and conformance phases against the live
 cluster, so the bundle must be deployed before it.
 
-Performance thresholds are copied from the GB200 OKE recipe. The
-`nccl-benchmark-profile` constraint names the `gb200/oke` runtime.
-`nccl-all-reduce-bw-nvls` runs with it and measured 839.5 GB/s on the
-reference tenant (2026-10-29), the NVKE NVLS baseline; the `>= 500` floor is
-kept until the result is recorded in qualification evidence.
-`nccl-all-reduce-bw-net` cannot schedule: that runtime's workers request
-`nvidia.com/mlnxnics`, which this leaf does not expose, so it waits for a
-`gb200/nvke` runtime requesting the per-rail VFs and attachments.
+The performance phase runs the `gb200/nvke` NCCL runtimes.
+
+- `nccl-all-reduce-bw-nvls` measured 839.5 GB/s on the reference tenant
+  (2026-10-29), the NVKE NVLS baseline. The `>= 500` floor is kept until the
+  result is recorded in qualification evidence.
+- `nccl-all-reduce-bw-net` gives each worker one VF on every rail
+  (`nvidia.com/sriov_resource_rail_<n>`) and the four
+  `default/sriov-network-rail-<n>` attachments. Before NCCL starts, every rank
+  checks that `net1`..`net4` each carry an IPoIB address and an RDMA device,
+  and pins `NCCL_IB_HCA` to those VFs. A missing attachment fails the check
+  with a reason naming it, rather than letting NCCL fall back to the pod
+  network.
+- The `>= 40` NET floor is copied from the GB200 OKE recipe. No tenant with
+  full IB partition membership has measured it yet, so it is a placeholder.
+
+On a tenant whose IB ports hold only limited P_Key membership, as on the
+reference tenant (see prerequisites), the NET check schedules and attaches,
+then fails in NCCL. Withhold it with `--skip-check nccl-all-reduce-bw-net`
+until the fabric grants full membership; the report and evidence record it as
+skipped.
 
 ## Known gaps
 
-- No `gb200/nvke` NCCL runtime yet: `nccl-all-reduce-bw-net` borrows the
-  `gb200/oke` runtime, whose workers request `nvidia.com/mlnxnics`, which this
-  leaf does not expose, so that check cannot schedule.
 - The reference fabric has not passed RDMA traffic (limited P_Key membership,
   see prerequisites), so neither the SR-IOV nor the earlier shared-HCA shape
   has NCCL evidence.
