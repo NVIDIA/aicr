@@ -220,14 +220,17 @@ func validateFlagCombinations(cncfSubmission bool, evidenceDir string, features 
 	// submission requirements. A submission that silently omits a requirement
 	// reads as complete when it is not, which is the one failure this feature
 	// must not introduce. Refused rather than rendered, until the renderer can
-	// record a withheld requirement WITH its reason: that is a change to what a
-	// conformance submission contains, and it needs its own decision rather
-	// than being improvised behind a flag.
+	// record a withheld requirement WITH its reason: today it gets no page and,
+	// when another submission check produced an entry so an index is written
+	// at all, is listed only as NOT TESTED (not run), indistinguishable from a
+	// check that never ran. Recording the reason is a change to what a conformance
+	// submission contains, and it needs its own decision rather than being
+	// improvised behind a flag.
 	if evidenceDir != "" && len(skipChecks) > 0 {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			"--skip-check cannot be combined with --evidence-dir: the CNCF evidence renderer omits skipped checks "+
-				"entirely, so a withheld requirement would leave no file and no index entry and the rendered "+
-				"evidence would read as a complete submission")
+			"--skip-check cannot be combined with --evidence-dir: the CNCF evidence renderer gives a withheld "+
+				"requirement no page and, when it writes an index at all, lists it only as NOT TESTED (not run) "+
+				"with no reason recorded, so the rendered evidence would misstate why the requirement is missing")
 	}
 	if noCluster && explicitAttest {
 		return errors.New(errors.ErrCodeInvalidRequest,
@@ -614,12 +617,18 @@ func runValidation(
 		slog.Info("to cleanup manually: kubectl delete jobs -l app.kubernetes.io/name=aicr -n " + cfg.validationNamespace)
 	}
 
-	// Generate conformance evidence if requested.
+	// Generate conformance evidence if requested. The checklist version
+	// follows the validated cluster's Kubernetes minor. A minor this build
+	// carries no checklist for renders against the nearest carried one and the
+	// facade warns: below v1.35 against v1.35, above the newest against the
+	// latest (cncf.NearestVersion). An explicit version flag is a follow-up
+	// to #3606.
 	if cfg.evidenceDir != "" {
-		if renderErr := client.RenderCNCFEvidence(ctx, combined, cfg.evidenceDir); renderErr != nil {
+		renderOpts := aicr.RenderCNCFEvidenceOptions{KubernetesVersion: snap.KubernetesVersion()}
+		if renderErr := client.RenderCNCFEvidenceWithOptions(ctx, combined, cfg.evidenceDir, renderOpts); renderErr != nil {
 			return renderErr
 		}
-		slog.Info("conformance evidence written", "dir", cfg.evidenceDir)
+		slog.Info("conformance evidence written", "dir", cfg.evidenceDir, "kubernetesVersion", renderOpts.KubernetesVersion)
 	}
 
 	// Emit even on failure: failed runs document hardware-specific limits.

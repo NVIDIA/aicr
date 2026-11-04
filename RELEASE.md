@@ -462,21 +462,27 @@ The [AICR Operator](docs/operator/index.md) ships at the release's version
 outside the image promotion above: `operator-candidate` builds it from the tag
 (`make operator-candidate`) and malware-scans the `kubectl-aicr` binaries,
 `operator-scan` scans the operator and in-cluster registry images on both
-architectures, and
-`operator-publish` runs only after the release integrity check. It publishes:
+architectures, `operator-reproducible` builds the candidate twice (the second
+time with an empty Go build cache) and requires identical bytes, and
+`operator-lifecycle` installs the newest published operator release older than
+the tag and runs the qualify suite's lifecycle scenarios upgrading to this
+candidate (`make operator-qualify-published`). `operator-publish` runs only
+after the release integrity check, and `operator-attest`
+(`attest-operator.yaml`) attests what it pushed. It publishes:
 
 | Artifact | Where |
 |----------|-------|
-| Operator image | `ghcr.io/nvidia/aicr-operator:vX.Y.Z`, with build provenance on the index and an SPDX SBOM attestation on each platform image, in the registry |
+| Operator image | `ghcr.io/nvidia/aicr-operator:vX.Y.Z`, with build provenance on the index and each platform image and a CycloneDX SBOM and OpenVEX on each platform image, in the registry |
 | In-cluster registry image | `ghcr.io/nvidia/aicr-registry:vX.Y.Z`, built from `cmd/aicr-registry`, attested as the operator image is |
 | Helm chart | `oci://ghcr.io/nvidia/charts/aicr-operator`, version `X.Y.Z`, with build provenance in the registry |
 | `kubectl-aicr` | Release assets `kubectl-aicr-<os>-<arch>` for darwin and linux on amd64 and arm64, malware-scanned and attested |
 
 The chart defaults to the operator and registry images by digest and to the
 AICR release the operator was qualified against (`operator:` in `.settings.yaml`).
-`release-check` fails closed on the operator candidate and its scans, so neither
-the image aliases above nor the operator are published when they fail, and
-`publish` waits for `operator-publish`. Publishing the same candidate again is
+`release-check` fails closed on the operator candidate, its scans, and the
+reproducibility and lifecycle checks, so neither the image aliases above nor
+the operator are published when they fail, and `publish` waits for
+`operator-publish` and `operator-attest`. Publishing the same candidate again is
 a no-op, so re-running the failed jobs converges; a tag that already names
 other content is refused. The operator image takes no `latest` alias.
 
@@ -485,13 +491,16 @@ and `charts/aicr-operator` packages creates it. If GHCR creates one private, an
 organization administrator makes it public once, as for the other images, so
 users can pull and verify it anonymously.
 
-The operator's attestations are generated in `on-tag.yaml` itself, not in the
-reusable `attest-images.yaml`, so they are SLSA Build Level 2. Verify them
-against that workflow and the tag:
+The operator's attestations come from the reusable `attest-operator.yaml`, which
+runs the same `sbom-and-attest` action as AICR's images, so they are SLSA Build
+Level 3. v1.2.0 and its release candidates were attested in `on-tag.yaml` itself
+(Level 2, SPDX SBOMs, no OpenVEX). Verify against the workflow that signed the
+release and its tag:
 
 ```shell
+SIGNER=NVIDIA/aicr/.github/workflows/attest-operator.yaml   # for v1.2.0 and its release candidates: NVIDIA/aicr/.github/workflows/on-tag.yaml
 gh attestation verify "oci://ghcr.io/nvidia/charts/aicr-operator:${VERSION}" --repo NVIDIA/aicr \
-  --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/v${VERSION}"
+  --signer-workflow "${SIGNER}" --source-ref "refs/tags/v${VERSION}"
 ```
 
 ### Supply Chain
@@ -515,10 +524,13 @@ Every release includes, for the AICR binaries and the seven images above:
   `notices-generator` merge-gate job runs it on dependency changes, so a break
   shows up on the PR rather than at tag time.
 
-The AICR Operator preview's artifacts carry less: Level 2 provenance on the
-operator and registry image indexes, the chart and each `kubectl-aicr` binary,
-an SPDX SBOM attestation on each of their platform images, no OpenVEX, and no
-`aicr_checksums.txt` entry for the plugin, whose attestations bind its digests
+The AICR Operator preview's images carry the same evidence as the seven images
+above, from the reusable `attest-operator.yaml`: Level 3 provenance on each
+index and platform image, and a CycloneDX SBOM and OpenVEX on each platform
+image. Its chart and each `kubectl-aicr` binary carry Level 3 provenance; the
+plugin has no `aicr_checksums.txt` entry, since its attestations bind its
+digests. v1.2.0 and its release candidates carry less: Level 2 provenance from
+`on-tag.yaml`, SPDX SBOMs and no OpenVEX
 ([AICR Operator (preview)](#aicr-operator-preview)).
 
 ## Versioning

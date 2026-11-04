@@ -566,8 +566,9 @@ components:
     # nvsentinel-observe, -quarantine and -remediation,
     # nvsentinel-slinky-drainer (#2615), nvsentinel-health-events-analyzer
     # (#2618), nvsentinel-event-exporter (#2621), nvsentinel-log-collector
-    # (#2619) and nvsentinel-node-validation (#3088) mixins: the exact leaf
-    # paths a mixin may set on this
+    # (#2619), nvsentinel-node-validation (#3088) and
+    # nvsentinel-external-remediation (#3091) mixins: the exact leaf paths a
+    # mixin may set on this
     # already-base-chained component. global.tracing.endpoint is
     # deliberately absent -- it must come from outside the mixin (a leaf
     # recipe's own override, or an operator --set), never from a mixin, so
@@ -644,6 +645,14 @@ components:
       - fault-remediation.maintenance.actions.COMPONENT_RESET.impactedEntityScope
       - fault-remediation.maintenance.actions.COMPONENT_RESET.supersedingEquivalenceGroups
       - fault-remediation.maintenance.templates.gpureset
+      - fault-remediation.maintenance.actions.external-remediation.apiGroup
+      - fault-remediation.maintenance.actions.external-remediation.version
+      - fault-remediation.maintenance.actions.external-remediation.kind
+      - fault-remediation.maintenance.actions.external-remediation.scope
+      - fault-remediation.maintenance.actions.external-remediation.completeConditionType
+      - fault-remediation.maintenance.actions.external-remediation.templateFileName
+      - fault-remediation.maintenance.actions.external-remediation.equivalenceGroup
+      - fault-remediation.maintenance.templates.external-remediation
       - janitor-provider.csp.generic.rebootImage
       - node-drainer.userNamespaces
       - node-drainer.deleteAfterTimeoutMinutes
@@ -815,6 +824,12 @@ components:
       # in the function's doc.
       - function: CheckNVSentinelLogCollectorCoherent
         severity: error
+      # Mixed severity: blocking errors for ExternalRemediationRequest actions
+      # off upstream's contract and object-monitor policies the monitor cannot
+      # load, warnings for routing that may not reach its action (#3091). The
+      # rules are in the function's doc.
+      - function: CheckNVSentinelExternalRemediationCoherent
+        severity: warning
       # Mixed-severity policy, as CheckNVSentinelDatastorePrerequisites: a
       # blocking error when the snapshot shows no default StorageClass for
       # the file server's classless volume, or evidence it could not read,

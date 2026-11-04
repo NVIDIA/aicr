@@ -1,0 +1,169 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Reusable workflow that attests the AICR Operator's published artifacts the
+# way attest-images.yaml attests AICR's images. The two images, aicr-operator
+# and aicr-registry, go through .github/actions/sbom-and-attest:
+# - a CycloneDX SBOM and OpenVEX on each platform manifest;
+# - build provenance on the index and on each platform manifest.
+# The chart and the kubectl-aicr binaries get build provenance.
+#
+# It is reusable for the same reason attest-images.yaml is: the attestations'
+# builder identity is this workflow, which makes the provenance SLSA Build
+# Level 3. Verify with:
+#
+#   gh attestation verify oci://<artifact>@<digest> --repo NVIDIA/aicr \
+#     --signer-workflow NVIDIA/aicr/.github/workflows/attest-operator.yaml
+#
+# on-tag.yaml calls it after operator-publish pushes the artifacts, so every
+# subject is the digest already published under the release's tags.
+
+name: Attest Operator Artifacts
+
+on:
+  workflow_call:
+    inputs:
+      digests:
+        description: 'Compact canonical JSON of the published digests: operator, operator-amd64, operator-arm64, registry, registry-amd64, registry-arm64, chart'
+        required: true
+        type: string
+      plugin_artifact:
+        description: 'Name of the operator candidate artifact holding plugin/kubectl-aicr-*'
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  validate-inputs:
+    name: Validate Attestation Inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    outputs:
+      digests: ${{ steps.validate.outputs.digests }}
+      plugin_artifact: ${{ steps.validate.outputs.plugin_artifact }}
+    steps:
+      - name: Validate inputs
+        id: validate
+        env:
+          INPUT_DIGESTS: ${{ inputs.digests }}
+          INPUT_PLUGIN_ARTIFACT: ${{ inputs.plugin_artifact }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${INPUT_PLUGIN_ARTIFACT}" || \
+            "${INPUT_PLUGIN_ARTIFACT}" == *$'\n'* || \
+            ! "${INPUT_PLUGIN_ARTIFACT}" =~ ^aicr-operator-candidate-candidate-[0-9]+-[0-9]+-attempt-[0-9]+$ ]]; then
+            echo "::error::plugin_artifact is invalid"
+            exit 1
+          fi
+          canonical="$(jq -cS -e '
+            if (
+              type == "object" and
+              keys == ["chart", "operator", "operator-amd64", "operator-arm64", "registry", "registry-amd64", "registry-arm64"] and
+              all(.[]; type == "string" and length == 71 and test("^sha256:[0-9a-f]{64}$"))
+            ) then .
+            else error("invalid digests")
+            end
+          ' <<<"${INPUT_DIGESTS}")" || {
+            echo "::error::digests must contain exactly the seven fixed digests"
+            exit 1
+          }
+          if [[ "${INPUT_DIGESTS}" != "${canonical}" ]]; then
+            echo "::error::digests must be compact canonical JSON"
+            exit 1
+          fi
+          {
+            echo "digests=${canonical}"
+            echo "plugin_artifact=${INPUT_PLUGIN_ARTIFACT}"
+          } >> "$GITHUB_OUTPUT"
+
+  images:
+    name: Attest ${{ matrix.key }} image
+    runs-on: ubuntu-24.04
+    needs: [validate-inputs]
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - key: operator
+            image: ghcr.io/nvidia/aicr-operator
+          - key: registry
+            image: ghcr.io/nvidia/aicr-registry
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Generate SBOM, OpenVEX and provenance
+        uses: ./.github/actions/sbom-and-attest
+        with:
+          image_name: ${{ matrix.image }}
+          image_digest: ${{ fromJSON(needs.validate-inputs.outputs.digests)[matrix.key] }}
+          amd64_digest: ${{ fromJSON(needs.validate-inputs.outputs.digests)[format('{0}-amd64', matrix.key)] }}
+          arm64_digest: ${{ fromJSON(needs.validate-inputs.outputs.digests)[format('{0}-arm64', matrix.key)] }}
+
+  chart:
+    name: Attest the chart
+    runs-on: ubuntu-24.04
+    needs: [validate-inputs]
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Authenticate to registry
+        uses: ./.github/actions/ghcr-login
+
+      - name: Attest the chart's build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-name: ghcr.io/nvidia/charts/aicr-operator
+          subject-digest: ${{ fromJSON(needs.validate-inputs.outputs.digests).chart }}
+          push-to-registry: true
+
+  plugin:
+    name: Attest the kubectl-aicr binaries
+    runs-on: ubuntu-24.04
+    needs: [validate-inputs]
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download the candidate
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: ${{ needs.validate-inputs.outputs.plugin_artifact }}
+          path: dist/candidate
+
+      - name: Attest the binaries' build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: dist/candidate/plugin/kubectl-aicr-*

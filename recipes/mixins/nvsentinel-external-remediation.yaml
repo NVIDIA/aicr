@@ -1,0 +1,88 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Opt-in mixin that hands a faulty node to a repair system outside NVSentinel
+# (#3091). A health event with recommendedAction CUSTOM and
+# customRecommendedAction external-remediation makes fault-remediation create
+# an ExternalRemediationRequest; janitor then taints the node and labels it
+# managed=false. The node-local DaemonSet monitors leave it, and other events
+# about it are stored STORE_ONLY and not acted on. Only
+# ExternalRemediationComplete=True, or deleting the request, returns it. See
+# docs/user/component-catalog.md#external-remediation.
+#
+# Nothing routes until an operator declares a fault: no shipped source emits
+# CUSTOM, so a kubernetes-object-monitor policy (or another monitor) must emit
+# it. Compose beside nvsentinel-remediation, or beside nvsentinel-observe to
+# rehearse in dry run, where no request is created. The action also grants
+# fault-remediation get, list, create, update and patch on
+# externalremediationrequests, which is why it is not in the remediation
+# step. CheckNVSentinelExternalRemediationCoherent holds the action and its
+# template to upstream's contract.
+#
+# No shipped recipe composes it (TestNoShippedRecipeAdoptsRemediationMixins).
+
+kind: RecipeMixin
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: nvsentinel-external-remediation
+spec:
+  componentRefs:
+    - name: nvsentinel
+      overrides:
+        # Upstream's documented action and template
+        # (docs/tutorials/integrating-external-remediation.md at v1.28.0). No
+        # impactedEntityScope: the release taint covers the whole node, so a
+        # request per GPU would conflict. The template key drops the .yaml
+        # suffix because mixin keys may not contain a dot. The {{ }}
+        # placeholders are filled in by fault-remediation, not Helm.
+        #
+        # The name becomes the taint value, limited to 63 characters, so it is
+        # extrr-<event ID> rather than fault-remediation's
+        # maintenance-<node>-<ID>. preserve opts the request out of janitor's
+        # 336h TTL, which would otherwise return the node mid-repair.
+        fault-remediation:
+          maintenance:
+            actions:
+              external-remediation:
+                apiGroup: "nvsentinel.dgxc.nvidia.com"
+                version: "v1"
+                kind: "ExternalRemediationRequest"
+                scope: "Cluster"
+                completeConditionType: "ExternalRemediationComplete"
+                templateFileName: "external-remediation"
+                equivalenceGroup: "external-remediation"
+            templates:
+              external-remediation: |
+                apiVersion: {{ .ApiGroup }}/{{ .Version }}
+                kind: ExternalRemediationRequest
+                metadata:
+                  name: extrr-{{ .HealthEventID }}
+                  labels:
+                    app.kubernetes.io/managed-by: nvsentinel
+                  annotations:
+                    nvsentinel.nvidia.com/preserve: "true"
+                    nvsentinel.nvidia.com/trace-id: "{{ .TraceID }}"
+                    nvsentinel.nvidia.com/span-id: "{{ .SpanID }}"
+                spec:
+                  healthEvent:
+                    version: 1
+                    agent: {{ printf "%q" .HealthEvent.Agent }}
+                    componentClass: {{ printf "%q" .HealthEvent.ComponentClass }}
+                    checkName: {{ printf "%q" .HealthEvent.CheckName }}
+                    nodeName: {{ printf "%q" .HealthEvent.NodeName }}
+                    isFatal: {{ .HealthEvent.IsFatal }}
+                    message: {{ printf "%q" .HealthEvent.Message }}
+                    recommendedAction: {{ .HealthEvent.RecommendedAction }}
+                    customRecommendedAction: {{ printf "%q" .HealthEvent.CustomRecommendedAction }}
+                    processingStrategy: EXECUTE_REMEDIATION
