@@ -64,9 +64,10 @@ const (
 	ReasonPriorSyncFailed = "PriorSyncFailed"
 	// ReasonRetired: the Application a Remove step deletes is gone.
 	ReasonRetired = "Retired"
-	// ReasonReconcileStale: the Application is synced and healthy, but Argo
-	// CD last compared it before the step began and no sync ran since, so
-	// the evidence predates the step.
+	// ReasonReconcileStale: the Application is synced and healthy, but no
+	// sync of the chart's revision succeeded since the step began and, for a
+	// step that does not sync, Argo CD last compared it before then, so the
+	// evidence predates the step.
 	ReasonReconcileStale = "ReconcileStale"
 )
 

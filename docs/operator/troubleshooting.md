@@ -272,14 +272,16 @@ kubectl get runtimerollout "$ROLLOUT" \
 kubectl describe runtimerollout "$ROLLOUT"   # StepStarted, StepWaiting, StepFinished
 ```
 
-- **`ReconcileStale`.** The release is synced and healthy, but Argo CD has
-  not compared it since the step started, so the step waits for that
-  comparison. The step asks Argo CD to compare it at once. Before v1.3.0, a
-  step whose Application already carried the plan, as a release the failed
-  rollout had not reached does in a recovery that pins the previous plan,
-  did not ask, and waited for Argo CD's periodic reconcile
-  (`timeout.reconciliation`, three minutes by default) instead: a minute or
-  more for each such release.
+- **`ReconcileStale`.** The release is synced and healthy, but Argo CD's
+  view of it is older than the step. For a readiness release, which each of
+  its steps syncs, no sync of its revision has succeeded since the step
+  started, and the step waits for one. For any other release, Argo CD has not
+  compared it since the step started, and the step asks Argo CD to compare it
+  at once. Before v1.3.0, a step whose Application already carried the plan,
+  as a release the failed rollout had not reached does in a recovery that
+  pins the previous plan, did not ask, and waited for Argo CD's periodic
+  reconcile (`timeout.reconciliation`, three minutes by default) instead: a
+  minute or more for each such release.
 - **`HealthProgressing`, `SyncRunning`.** The release's own workloads are
   still starting; the time is theirs, not the operator's.
 
