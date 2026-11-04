@@ -140,8 +140,8 @@ order:
    - the AICR release it runs, phrased "runs AICR vX, the release it was
      qualified against", with that AICR image digest;
    - the qualified profiles, taken verbatim from `docs/operator/support.md`
-     at the tag. Write "No hardware profile is qualified yet" while that page
-     says so. Its "In qualification" table lists profiles that are not
+     at the tag. Write "No profile is qualified yet" while that page says
+     so. Its "In qualification" table lists profiles that are not
      qualified; leave it out. Never infer a qualification from commits.
 
    Do not paraphrase the digests; copy them.
@@ -285,8 +285,8 @@ why it matters to a user. Reference commands in backticks. Link issues as
 defaults to `ghcr.io/nvidia/aicr-operator@sha256:<operator>` and
 `ghcr.io/nvidia/aicr-registry@sha256:<registry>`, and runs AICR v<X.Y.Z>,
 the release it was qualified against (`ghcr.io/nvidia/aicr@sha256:<aicr>`).
-<Qualified profiles from docs/operator/support.md, e.g. "No hardware profile
-is qualified yet.">
+<Qualified profiles from docs/operator/support.md, e.g. "No profile is
+qualified yet.">
 
 ***Thanks to*** @alice, @bob, @carol, and @<author>.
 ```
