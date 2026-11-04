@@ -17,8 +17,10 @@ Kubernetes minor being certified. AICR embeds verbatim copies of the upstream
 checklists (`cncf/k8s-ai-conformance` `docs/AIConformance-<version>.yaml`) under
 `pkg/evidence/cncf/schemas/`, pinned by digest, and carries v1.35, v1.36 and
 v1.37. Evidence rendering selects the version from the validated cluster's
-Kubernetes minor; a cluster newer than the newest published checklist renders
-against the latest with a warning, and the Go SDK accepts an explicit version
+Kubernetes minor. A minor this build carries no checklist for renders against
+the nearest carried one with a warning: below v1.35 against v1.35, above v1.37
+against v1.37 (upstream also publishes v1.33 and v1.34, which AICR does not
+carry). The Go SDK accepts an explicit version
 (`RenderCNCFEvidenceOptions.ConformanceVersion`). A CLI flag for the explicit
 version is a follow-up to #3606.
 

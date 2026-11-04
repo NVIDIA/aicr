@@ -79,8 +79,9 @@ minimal redaction policy blanks every `message`. A bundle carrying WHICH check
 was withheld but not WHY would be the same "reads as complete" defect the flag's
 guards exist to prevent. The CNCF evidence renderer does
 NOT: `pkg/evidence/cncf/renderer.go` drops every skipped entry before grouping
-(pinned by `TestRenderSkippedExcluded`), so a withheld requirement would leave
-no file and no index entry. The requirement set it groups into is the upstream
+(pinned by `TestRenderSkippedExcluded`), so a withheld requirement gets no page
+and appears in the index only as `NOT TESTED (not run)`, with no reason
+recorded. The requirement set it groups into is the upstream
 checklist for the selected version (`pkg/evidence/cncf/checklist.go`, embedded
 verbatim under `schemas/` and digest-pinned); `requirements.go` maps each
 conformance check to the requirement it evidences, and

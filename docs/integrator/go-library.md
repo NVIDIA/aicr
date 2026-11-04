@@ -530,8 +530,12 @@ Three methods produce CNCF AI Conformance evidence, matching
   `ConformanceVersion` names it explicitly (`"v1.36"`; an unsupported version
   is refused with `ErrCodeInvalidRequest`), else `KubernetesVersion` (the
   value `Snapshot.KubernetesVersion()` returns) selects the checklist for the
-  cluster's minor, falling back to the latest with a warning when none is
-  published for it. The requirement set, levels and descriptions come from
+  cluster's minor, or the nearest carried one with a warning when this build
+  has none for it (below v1.35 renders v1.35, above v1.37 renders v1.37).
+  **Matching `aicr validate --evidence-dir` means this method**, with
+  `KubernetesVersion: snap.KubernetesVersion()` from the snapshot
+  `ValidateState` ran against; `RenderCNCFEvidence` alone renders the latest
+  checklist whatever the cluster runs. The requirement set, levels and descriptions come from
   `pkg/evidence/cncf` (`SupportedVersions`, `ChecklistFor`); a check whose
   requirement the selected version no longer lists (`dra_support` from v1.36
   on) renders as supporting evidence rather than a requirement row.
@@ -552,7 +556,9 @@ err := client.CollectCNCFEvidence(ctx, rec, aicr.CNCFCollectOptions{
 })
 ```
 
-None of these methods is in v0.22.0 or earlier.
+None of these methods is in v0.22.0 or earlier. `RenderCNCFEvidenceWithOptions`,
+`RenderCNCFEvidenceOptions` and `Snapshot.KubernetesVersion` are not in v1.0.0
+or earlier either.
 
 ## Recipe sources
 
@@ -1500,7 +1506,9 @@ options. The caller applies its own flag-over-config precedence, the same way
 `SnapshotOutputOptions()` and `ValidateInputOptions()` do, then branches on
 `CNCFSubmission`. When true, it passes `Dir` and `Features` to
 `CollectCNCFEvidence` in `CNCFCollectOptions` and skips `ValidateState`. When
-false, a non-empty `Dir` goes to `RenderCNCFEvidence` after `ValidateState`.
+false, a non-empty `Dir` goes to `RenderCNCFEvidenceWithOptions` after
+`ValidateState`, with `KubernetesVersion` from the snapshot, which is what the
+CLI does; `RenderCNCFEvidence` renders the latest carried checklist instead.
 `CNCFEvidenceOptions()` returns the zero value (never an error) for an absent
 section, and an error only when `spec.validate` is present but malformed.
 
