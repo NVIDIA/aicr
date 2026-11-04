@@ -61,6 +61,7 @@ type fakeEngine struct {
 	missing       map[string]bool   // release -> Observe reports Missing
 	priorFailed   map[string]bool   // release -> Observe reports PriorSyncFailed until a Verify
 	unhealthy     map[string]string // release -> Observe reports Progressing with this reason at its written plan
+	detail        map[string]string // release -> the Argo CD error text Observe carries with that reason
 	observeErr    error             // Observe fails with it
 	refreshed     map[string]int    // release -> refresh requests
 	overridden    []string
@@ -76,7 +77,7 @@ type fakeEngine struct {
 func newEngine() *fakeEngine {
 	return &fakeEngine{ensured: map[string]string{}, state: argocd.StateReady, verified: map[string]int{},
 		removed: map[string]string{}, gone: map[string]bool{}, drifted: map[string]bool{}, missing: map[string]bool{},
-		priorFailed: map[string]bool{}, unhealthy: map[string]string{}}
+		priorFailed: map[string]bool{}, unhealthy: map[string]string{}, detail: map[string]string{}}
 }
 
 func (f *fakeEngine) Capabilities(context.Context) error { return f.capabilities }
@@ -162,7 +163,7 @@ func (f *fakeEngine) Observe(_ context.Context, p *plan.Document, r *plan.Releas
 	case !verify && f.priorFailed[r.ID] && f.verified[r.ID] == 0:
 		return argocd.Observation{State: argocd.StateProgressing, Reason: argocd.ReasonPriorSyncFailed}, nil
 	case f.unhealthy[r.ID] != "":
-		return argocd.Observation{State: argocd.StateProgressing, Reason: f.unhealthy[r.ID]}, nil
+		return argocd.Observation{State: argocd.StateProgressing, Reason: f.unhealthy[r.ID], Message: f.detail[r.ID]}, nil
 	}
 	return argocd.Observation{State: f.state, Reason: string(f.state), SpecDigest: f.liveSpec(r.ID)}, nil
 }
@@ -1695,6 +1696,26 @@ func TestRolloutAvailableNamesUnhealthyMovedRelease(t *testing.T) {
 	}
 	if c := cond(got, v1alpha1.ConditionReady); c.Reason != ReasonRollingOut || !strings.Contains(c.Message, "rollout "+got.Status.Rollout+": step ") {
 		t.Fatalf("Ready = %+v", c)
+	}
+}
+
+// Available's message carries the Argo CD error beside the reason, so the
+// operator is not sent to the Application to learn why a release is down.
+func TestRolloutAvailableCarriesArgoErrorText(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, stabilized)
+	engine := activeAndTarget(t, ctx, rt)
+	r, clk := newRollout(t, engine, true)
+	clk.now = time.Now().Add(2 * time.Second)
+	for range 3 {
+		reconcileRollout(t, ctx, r)
+	}
+	engine.unhealthy["cert-manager"] = "ComparisonError"
+	engine.detail["cert-manager"] = "failed to load target state: chart not found"
+	reconcileRollout(t, ctx, r)
+	want := "release cert-manager: ComparisonError: failed to load target state: chart not found"
+	if c := cond(getRuntime(t, ctx), v1alpha1.ConditionAvailable); c.Message != want {
+		t.Fatalf("Available message = %q, want %q", c.Message, want)
 	}
 }
 
