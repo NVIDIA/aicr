@@ -807,7 +807,11 @@ profile. Under azure-managed (the default) that removes the toolkit hardening,
 and `aicr bundle` warns; under operator-managed the GPU Operator's toolkit keeps
 the same keys through `gpu-operator.toolkit.env`. If you used
 `--set nodewrightcustomizations:enabled=false` to skip RDMA, switch to
-`accelerator=generic` above to keep the hardening.
+`accelerator=generic` above to keep the hardening. On a cluster that was
+bundled with `enabled=false`, that switch deploys the `tuning` CR, whose
+`nvidia-setup-full` package drains and reboots each GPU node once, one node at a
+time (`interruptionBudget.count: 1`). Pass `--workload-selector` with a label
+your training pods carry so nodewright does not evict running jobs.
 
 ## References
 
