@@ -1498,11 +1498,15 @@ the other phases, not capacity, bound what can be always-on.
    keeps the real verdict; the submission `junit.xml` and `e2e.log` export
    a non-passing testcase that belongs only to a Not Implemented SHOULD as
    skipped, with the original verdict and reason in the message, and
-   PRODUCT.yaml does not reference it; a non-passing MUST testcase is
-   exported as a failure and the run exits non-zero, so the directory is
-   not submittable. This is what lets the upstream artifact check, which
-   rejects any failure or error in a referenced artifact, pass for a Not
-   Implemented SHOULD.
+   PRODUCT.yaml does not reference it; a non-passing testcase behind a
+   requirement overridden to N/A is exported the same way, as skipped with
+   "not applicable: <justification>" and the original verdict in the
+   message, unreferenced by PRODUCT.yaml and without effect on the exit
+   status; a non-passing testcase behind an applicable MUST, one not
+   overridden to N/A, is exported as a failure and the run exits non-zero,
+   so the directory is not submittable. This is what lets the upstream
+   artifact check, which rejects any failure or error in a referenced
+   artifact, pass for a Not Implemented SHOULD or an N/A conditional MUST.
 7. **AICR-named junit; the upstream suite is optional.** Implementing
    issue: [#3605](https://github.com/NVIDIA/aicr/issues/3605). `junit.xml`
    carries AICR check names, referenced per requirement with explicit
