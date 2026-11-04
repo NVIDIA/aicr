@@ -129,13 +129,6 @@ it:
 The active plan and the running stack are unaffected, but Argo CD cannot fetch
 charts for new comparisons until the registry returns.
 
-**Upstream chart repository unreachable.** A chart that the candidate or
-active plan already mirrored, at the same version and from the same upstream,
-is reused from your registry with no upstream request, so a re-resolution that
-pins the same charts rides out the outage. A chart not mirrored before is
-retried like a registry outage, with `[SERVICE_UNAVAILABLE] fetch …` on
-`Resolved`.
-
 With the in-cluster registry, check its pod and volume:
 `kubectl -n aicr-system get pods -l app.kubernetes.io/name=aicr-registry` and
 `kubectl -n aicr-system get pvc aicr-registry`. A pod `Pending` on an unbound
@@ -144,6 +137,13 @@ volume means no StorageClass serves it: set a default StorageClass, or
 is full need a larger `registry.inCluster.storage.size`, which a StorageClass
 that allows expansion applies in place; nothing is ever deleted from the
 registry.
+
+**Upstream chart repository unreachable.** A chart that the candidate or
+active plan already mirrored, at the same version and from the same upstream,
+is reused from your registry with no upstream request, so a re-resolution that
+pins the same charts rides out the outage. A chart not mirrored before is
+retried like a registry outage, with `[SERVICE_UNAVAILABLE] fetch …` on
+`Resolved`.
 
 **`Unauthorized`** (`Resolved=False`, stalled). The registry refused the
 operator's own push or pull (HTTP 401 or 403). Check the identity's policy and
