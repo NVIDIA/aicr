@@ -294,8 +294,9 @@ func parseExtraSentinels(logs string) (cleaned string, extra map[string]string, 
 // ErrCodeTimeout) renders the "timeout: validator did not complete within
 // <configured>" wording, while any other cause (e.g. an infra/unavailable
 // error) renders "validation failed: <cause>" so a mid-run infra failure is
-// not misreported as the full catalog timeout (see issue #1966). A nil
-// waitCause is treated as a timeout for backward compatibility.
+// not misreported as the full catalog timeout (see issue #1966). A cause
+// carrying ErrCodeCanceled renders as an interrupted run. A nil waitCause is
+// treated as a timeout for backward compatibility.
 func (d *Deployer) HandleTimeout(ctx context.Context, waitCause error) *ctrf.ValidatorResult {
 	result := &ctrf.ValidatorResult{
 		Name:  d.config.Entry.Name,
@@ -306,7 +307,8 @@ func (d *Deployer) HandleTimeout(ctx context.Context, waitCause error) *ctrf.Val
 	jobPod, err := d.getPodForJob(ctx)
 	if err != nil {
 		result.ExitCode = -1
-		result.TerminationMsg = "pod never reached running state"
+		result.TerminationMsg = fmt.Sprintf("%s (pod never reached running state)",
+			waitFailureMessage(waitCause, effectiveTimeout(d.config.Entry.Timeout)))
 		return result
 	}
 
@@ -398,6 +400,9 @@ func enforcedDeadline(job *batchv1.Job, configured time.Duration) time.Duration 
 // orchestrator wait before the Job deadline, and reporting only the catalog
 // value would understate how long the operator actually waited.
 func waitFailureMessage(cause error, configured time.Duration) string {
+	if isCanceledCause(cause) {
+		return "canceled: validation run was interrupted before the validator completed"
+	}
 	if cause == nil || isDeadlineCause(cause) {
 		checkBudget := truncateToSeconds(configured)
 		waitBuffer := truncateToSeconds(defaults.ValidatorWaitBuffer)
@@ -405,6 +410,15 @@ func waitFailureMessage(cause error, configured time.Duration) string {
 			checkBudget+waitBuffer, checkBudget, waitBuffer)
 	}
 	return fmt.Sprintf("validation failed: %v", cause)
+}
+
+// isCanceledCause uses the reported structured code, falling back to the
+// stdlib sentinel only when no structured classification is present.
+func isCanceledCause(err error) bool {
+	if structured, ok := stderrors.AsType[*errors.StructuredError](err); ok {
+		return structured.Code == errors.ErrCodeCanceled
+	}
+	return stderrors.Is(err, context.Canceled)
 }
 
 // isDeadlineCause reports whether err represents a genuine context-deadline

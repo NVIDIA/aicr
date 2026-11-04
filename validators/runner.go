@@ -15,6 +15,7 @@
 package validators
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -32,6 +33,12 @@ var terminationLogPath = "/dev/termination-log"
 
 // exitCodeSkip is the exit code for a skipped check (not applicable).
 const exitCodeSkip = 2
+
+// exitCodeTerminated is the exit code for a check interrupted by SIGTERM. It
+// is deliberately neither 0, 1 nor 2: the orchestrator maps any other code to
+// CTRF status "other" (indeterminate), because the check never reached a
+// verdict. It still blocks, like "failed".
+const exitCodeTerminated = 3
 
 // errSkip is the sentinel error for skipping a check.
 var errSkip = errors.New("skip")
@@ -98,7 +105,37 @@ func runCheck(checkFn CheckFunc) int {
 		return 1
 	}
 	defer ctx.Cancel()
-	return handleCheckResult(checkFn(ctx))
+	return runCheckWithContext(ctx, checkFn)
+}
+
+// runCheckWithContext runs checkFn and maps the outcome to an exit code. A
+// SIGTERM that arrived before checkFn returned always wins over its result:
+// the verdict is incomplete, so a nil return (a check that swallowed the
+// cancellation) must not be reported as a pass.
+func runCheckWithContext(ctx *Context, checkFn CheckFunc) int {
+	err := checkFn(ctx)
+	ctx.Cancel()
+	cause := context.Cause(ctx.Ctx)
+	if checkCtx, ok := ctx.Ctx.(*checkContext); ok {
+		cause = context.Cause(checkCtx.signalCtx)
+	}
+	if errors.Is(cause, errTerminated) {
+		return handleTerminated(err)
+	}
+	return handleCheckResult(err)
+}
+
+// handleTerminated records that the check was interrupted by SIGTERM and
+// returns exitCodeTerminated. checkErr is what the check returned after its
+// context was canceled; it is appended to the message when present.
+func handleTerminated(checkErr error) int {
+	const msg = "terminated by SIGTERM before the check completed (Job deadline, eviction, or node drain)"
+	if checkErr == nil {
+		writeTerminationLog("%s", msg)
+	} else {
+		writeTerminationLog("%s: %v", msg, checkErr)
+	}
+	return exitCodeTerminated
 }
 
 // handleCheckResult maps a CheckFunc return value to an exit code and

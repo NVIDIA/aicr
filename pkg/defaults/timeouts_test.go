@@ -272,6 +272,17 @@ func TestCollectorTimeoutLessThanK8s(t *testing.T) {
 }
 
 func TestValidatorTimeoutRelationships(t *testing.T) {
+	if ValidatorJobDeadlineHeadroom <= ValidatorTerminationGracePeriod {
+		t.Errorf("Job headroom %v must exceed termination grace %v", ValidatorJobDeadlineHeadroom, ValidatorTerminationGracePeriod)
+	}
+	for name, bound := range map[string]time.Duration{
+		"K8sCleanupTimeout":       K8sCleanupTimeout,
+		"PreflightCleanupTimeout": PreflightCleanupTimeout,
+	} {
+		if bound > ValidatorTerminationGracePeriod {
+			t.Errorf("%s (%v) exceeds termination grace (%v)", name, bound, ValidatorTerminationGracePeriod)
+		}
+	}
 	// Grace period must fit within the wait buffer so the orchestrator
 	// outlives the container's SIGTERM window.
 	if ValidatorTerminationGracePeriod > ValidatorWaitBuffer {
