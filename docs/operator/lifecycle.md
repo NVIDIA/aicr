@@ -16,9 +16,10 @@ published release, then:
 
 See `qualify-published` in
 [operator-e2e.yaml](https://github.com/NVIDIA/aicr/blob/main/.github/workflows/operator-e2e.yaml).
-An operator release defaults to the newest AICR release qualified when it was
-built, so when the two releases' defaults differ, that upgrade also moves AICR
-within v1.
+An operator release defaults to its own release's AICR (earlier charts, such
+as v1.2.0's, to an earlier qualified AICR release), so when the two releases'
+defaults differ, that upgrade also moves AICR within v1, unless your values
+set the AICR keys ([operations](operations.md#upgrading-aicr-within-v1)).
 
 ## Install
 
