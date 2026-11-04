@@ -182,7 +182,7 @@ after the refresh.
 
 | Reason | Cause | Fix |
 | --- | --- | --- |
-| `AICRVersionMismatch` | `aicr.version` is outside `>=1.0.0, <2.0.0` or not a release version, or the AICR image reports a different version than `aicr.version` | Set `aicr.version` and `aicr.image` to the same release in one `helm upgrade` |
+| `AICRVersionMismatch` | `aicr.version` is outside `>=1.0.0, <2.0.0`, or a prerelease without `aicr.allowPrerelease`, or the AICR image reports a different version than `aicr.version` | Set `aicr.version` and `aicr.image` to the same release in one `helm upgrade` |
 | `AICRArtifactUnsupported` | AICR produced output the operator cannot parse: an unknown `apiVersion` or a missing required field | Use a supported AICR release ([support policy](support.md)); report it if it is one |
 
 ## Argo CD not available

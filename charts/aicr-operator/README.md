@@ -79,7 +79,8 @@ context; the schema rejects unknown keys.
 
 | Key | Default | Set it | Meaning |
 | --- | --- | --- | --- |
-| `aicr.version` | `v1.0.0`; a published chart, the version it was tested with | To change AICR | The declared AICR release, `>=1.0.0, <2.0.0`. Changing it is an AICR upgrade, rolled out like any other change |
+| `aicr.version` | `v1.0.0`; a published chart, the version it was tested with | To change AICR | The declared AICR release, `>=1.0.0, <2.0.0`. Changing it is an AICR upgrade, rolled out like any other change. A prerelease such as `v1.3.0-rc.1` needs `aicr.allowPrerelease` and counts as the release it precedes |
+| `aicr.allowPrerelease` | `false` | To run an AICR release candidate or a build from a commit | Accept a prerelease `aicr.version`. Without it, the chart and the operator refuse one |
 | `aicr.image` | A published chart's tested image | Required from source | AICR CLI and snapshot agent image, pinned by digest |
 | `aicr.validatorImages` | A published chart's tested images | Required from source with `validation.enabled` | AICR's validator images for `aicr.version`, each `repository:tag@sha256:<digest>` |
 | `aicr.jobs.nodeSelector` | `{}` | When every node is tainted | Node selector for every AICR Job the operator runs; empty places none |
