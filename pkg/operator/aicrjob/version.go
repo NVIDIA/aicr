@@ -86,8 +86,9 @@ func checkVersion(version string) error {
 // CheckArtifactVersion is the version gate: the version an AICR artifact
 // reports must equal the declared aicr.version exactly, and an artifact
 // without a version is rejected. A mismatch writes nothing to the engine and
-// stalls with AICRVersionMismatch. The prerelease opt-in is enforced once, by
-// CheckSupportedVersion before any AICR Job runs.
+// stalls with AICRVersionMismatch. It accepts a prerelease: the resolver
+// enforces the opt-in with CheckSupportedVersion before it resolves, so no
+// rollout starts on a prerelease without it.
 func CheckArtifactVersion(declared, reported string) error {
 	if err := checkVersion(declared); err != nil {
 		return err
