@@ -216,9 +216,11 @@ func buildRelease(ctx context.Context, delivery ChartDelivery, in *BuildInput, b
 	return rel, values, m.Archive, nil
 }
 
-// mirror copies an upstream chart after checking that upstream.env names the
-// chart the bundle recipe pins. HTTP(S) upstreams carry the repository in
-// REPO; OCI upstreams carry the full chart reference in CHART and no REPO.
+// mirror checks that upstream.env names the chart the bundle recipe pins, then
+// reuses the chart an earlier resolved plan mirrored while the registry still
+// holds it, and otherwise copies the chart from upstream. HTTP(S) upstreams
+// carry the repository in REPO. OCI upstreams carry the full chart reference
+// in CHART and no REPO.
 func mirror(ctx context.Context, delivery ChartDelivery, in *BuildInput, br *aicrjob.BundleRelease,
 	ref *aicrjob.ComponentRef, up *registry.UpstreamChart) (*registry.MirroredChart, error) {
 
