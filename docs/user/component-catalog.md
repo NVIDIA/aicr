@@ -2382,8 +2382,10 @@ decision).
 
 **Per-cluster inputs.** The recipe is the same for every cluster; the
 registration is not. The chart needs the control plane URL, the cluster UID the
-control plane assigned when you created the cluster there, and the bootstrap
-token it issued for it. The first two go through `--set`; the token expires
+control plane assigned when you created the cluster there, the FQDN the control
+plane reaches this cluster at (`cluster.url`; the chart adds `https://`), and
+the bootstrap token it issued for it. The first three go through `--set`; the
+token expires
 after two hours and is a credential, so declare it with `--dynamic`, which
 moves the path out of `values.yaml` into the component's
 `cluster-values.yaml` for you to fill in right before install:
@@ -2391,9 +2393,11 @@ moves the path out of `values.yaml` into the component's
 ```shell
 CONTROL_PLANE_URL="https://tenant.run.ai"   # replace with your control plane URL
 CLUSTER_UID="00000000-0000-0000-0000-000000000000"   # replace with the UID the control plane shows
+CLUSTER_FQDN="cluster.example.com"   # replace with the FQDN the control plane reaches this cluster at
 aicr bundle -r recipe.yaml \
   --set "runai:controlPlane.url=${CONTROL_PLANE_URL}" \
   --set "runai:cluster.uid=${CLUSTER_UID}" \
+  --set "runai:cluster.url=${CLUSTER_FQDN}" \
   --dynamic runai:controlPlane.bootstrapToken \
   -o ./bundle
 # then, on the machine that runs deploy.sh:
@@ -2420,15 +2424,16 @@ success, so a failed hook leaves its Job, token included, until the next
 install or upgrade replaces it. Delete a failed hook Job once you have read
 its logs.
 
-The chart does not validate the three inputs: with the URL, UID or token
-empty it still renders every hook Job, with empty arguments. AICR validates
-them instead. The registry lists all three as `requiredValues`, so
+The chart does not validate the four inputs: with any of them empty it
+still renders every hook Job, with empty arguments, and its hooks handler
+skips the control-plane-assisted install unless all four are set. AICR
+validates them instead. The registry lists all four as `requiredValues`, so
 `aicr bundle` fails naming whichever is missing, and the token is an
 `installTimeSecretPaths` entry, so a value supplied with `--set` or in a
 values file is rejected; see
 [Required and install-time secret inputs](bundling.md#required-and-install-time-secret-inputs).
 The component's `install.sh` also refuses to run while the token stub in
-`cluster-values.yaml` is still empty (`deploy.sh --dry-run` skips that check).
+`cluster-values.yaml` has no value (`deploy.sh --dry-run` skips that check).
 
 Only the `helm` deployer may carry this component; `aicr bundle` rejects the
 others. They would store the filled token at rest, and the GitOps ones would

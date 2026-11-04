@@ -1512,6 +1512,7 @@ components:
     requiredValues:
       - controlPlane.url
       - cluster.uid
+      - cluster.url
       - controlPlane.bootstrapToken
     installTimeSecretPaths:
       - controlPlane.bootstrapToken
@@ -1537,13 +1538,18 @@ components:
       # cannot live anywhere else. Its pre-install hook labels the namespace
       # pod-security.kubernetes.io/enforce=privileged itself.
       defaultNamespace: runai
-    # global.tolerations reaches every pod the chart renders, hook Jobs
-    # included. global.nodeSelector reaches only the KAI subcharts, so no
-    # nodeSelector path is mapped until the chart threads one through.
+    # global.tolerations reaches the operator, the hook Jobs and the KAI
+    # operator and KRM subcharts; karta and gpu-fractioning read only their
+    # own tolerations value, so all three paths are needed to cover every
+    # pod the chart renders (verified by render at 3.0.20). global.nodeSelector
+    # reaches only the KAI subcharts, so no nodeSelector path is mapped until
+    # the chart threads one through.
     nodeScheduling:
       system:
         tolerationPaths:
           - global.tolerations
+          - karta.tolerations
+          - kai-resource-management.kai-scheduler.gpu-fractioning.tolerations
 
   # NVIDIA Cluster Readiness Engine — GPU cluster burn-in certification
   # controller. Named `nvcre` after the chart nameOverride, install

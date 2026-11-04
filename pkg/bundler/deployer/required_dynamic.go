@@ -22,11 +22,14 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
-// ResolveRequiredDynamicPaths returns, per component in refs, the paths in
-// dynamic that the registry's requiredValues also covers, exactly or through
-// an ancestor or descendant declaration. A local install script uses the
-// result to refuse to run while such a path's cluster-values.yaml stub is
-// still empty. dynamic is keyed by canonical component name.
+// ResolveRequiredDynamicPaths returns, per component in refs, the required
+// value paths that a --dynamic declaration covers, exactly or through an
+// ancestor or descendant. A local install script uses the result to refuse
+// to run while such a path has no value in cluster-values.yaml. The result
+// names the required path, not the declaration: a declaration on an
+// ancestor map yields every required leaf beneath it, so the guard checks
+// the leaves the operator fills in rather than the map line itself. dynamic
+// is keyed by canonical component name.
 func ResolveRequiredDynamicPaths(
 	ctx context.Context,
 	dp recipe.DataProvider,
@@ -52,12 +55,21 @@ func ResolveRequiredDynamicPaths(
 		if cfg == nil || len(cfg.RequiredValues) == 0 {
 			continue
 		}
+		seen := make(map[string]struct{})
 		for _, dyn := range dynamic[ref.Name] {
 			for _, required := range cfg.RequiredValues {
-				if valuePathsIntersect(dyn, required) {
-					out[ref.Name] = append(out[ref.Name], dyn)
-					break
+				if !valuePathsIntersect(dyn, required) {
+					continue
 				}
+				path := required
+				if len(dyn) > len(required) {
+					path = dyn
+				}
+				if _, dup := seen[path]; dup {
+					continue
+				}
+				seen[path] = struct{}{}
+				out[ref.Name] = append(out[ref.Name], path)
 			}
 		}
 	}

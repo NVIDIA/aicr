@@ -84,7 +84,10 @@ spec:
                 # an install-time secret must be, and stays an empty stub.
                 bundle_flags=""
                 if [ "$platform" = "runai" ]; then
-                  bundle_flags="--set runai:controlPlane.url=https://smoke.invalid --set runai:cluster.uid=00000000-0000-0000-0000-000000000000 --dynamic runai:controlPlane.bootstrapToken"
+                  bundle_flags="--set runai:controlPlane.url=https://smoke.invalid"
+                  bundle_flags="${bundle_flags} --set runai:cluster.uid=00000000-0000-0000-0000-000000000000"
+                  bundle_flags="${bundle_flags} --set runai:cluster.url=smoke.invalid"
+                  bundle_flags="${bundle_flags} --dynamic runai:controlPlane.bootstrapToken"
                 fi
 
                 echo "=== ${basename}: recipe (service=${service:-default} accel=${accelerator} os=${os_val} intent=${intent} platform=${platform:-none}) ==="

@@ -110,6 +110,7 @@ func runaiStockRenderInputs() []config.Option {
 		config.WithValueOverrides(map[string]map[string]string{"runai-cluster": {
 			"controlPlane.url": "https://stock-render.invalid",
 			"cluster.uid":      "00000000-0000-0000-0000-000000000000",
+			"cluster.url":      "stock-render.invalid",
 		}}),
 		config.WithDynamicValues(map[string][]string{"runai-cluster": {"controlPlane.bootstrapToken"}}),
 	}

@@ -59,14 +59,15 @@ if [[ -z "${DRY_RUN_FLAG:-}" && -f "${SCRIPT_DIR}/.aicr-chart.tgz" ]]; then
 fi
 
 {{ if .RequiredDynamicPaths }}# The registry requires these --dynamic paths and the bundler wrote their
-# cluster-values.yaml stubs empty. Refuse to install until each is filled in;
+# cluster-values.yaml stubs empty. Refuse to install until each has a value;
 # the match is on the path's leaf key, unambiguous because that file holds
-# only the declared paths. Skipped under --dry-run, so a release can be
+# only the declared paths, and a declaration on an ancestor map is judged on
+# the leaves written beneath it. Skipped under --dry-run, so a release can be
 # previewed before a short-lived value such as a token is minted.
 if [[ -z "${DRY_RUN_FLAG:-}" ]]; then
 {{- range .RequiredDynamicPaths }}
-  if grep -Eq {{ emptyStubPattern . }} cluster-values.yaml; then
-    echo {{ printf "%s: %s is required but still empty in cluster-values.yaml; set it before running install.sh" $.Name . | shq }} >&2
+  if [ -z "$(grep -E {{ leafValuePattern . }} cluster-values.yaml | grep -Ev '^[[:space:]]*[^:]+:[[:space:]]*(""|~|null)[[:space:]]*$')" ]; then
+    echo {{ printf "%s: %s is required but has no value in cluster-values.yaml; set it before running install.sh" $.Name . | shq }} >&2
     exit 1
   fi
 {{- end }}

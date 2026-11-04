@@ -25,8 +25,9 @@ in a generated artifact.
 Some charts cannot do anything useful without a per-cluster input the recipe
 cannot know. The Run:ai cluster chart registers the cluster with a control
 plane the user already runs, which takes the control plane URL, the cluster
-UID that control plane assigned, and a bootstrap token it issued, valid for
-two hours. The chart validates none of them: rendered with all three empty it
+UID that control plane assigned, the FQDN the control plane reaches the
+cluster at, and a bootstrap token it issued, valid for two hours. The chart
+validates none of them: rendered with all of them empty it
 produces the same 381 objects, and its registration hook Jobs run with empty
 arguments and fail inside the cluster.
 
@@ -107,9 +108,13 @@ declared ships as an empty stub on any deployer; nothing is persisted for it.
 **Install guard.** `deployer.ResolveRequiredDynamicPaths` returns, per
 component, the dynamic paths a required path covers. The helm deployer hands
 them to `localformat`, whose primary-folder `install.sh` templates emit, per
-path, a check that the path's leaf key is not empty in
-`cluster-values.yaml`, failing with the path's name. The leaf key is enough
-because that file holds only the declared paths. The check is skipped under
+path, a check that the path's leaf key has a value in `cluster-values.yaml`
+(a line giving it something other than `""`, `~` or `null`), failing with
+the path's name. The leaf key is enough because that file holds only the
+declared paths. The helper returns the required path rather than the
+declaration, so a declaration on an ancestor map yields every required leaf
+beneath it and the guard judges the leaves the operator wrote, not the map
+line, which has no scalar value. The check is skipped under
 `--dry-run`, so a bundle can be previewed before a short-lived value is
 minted.
 

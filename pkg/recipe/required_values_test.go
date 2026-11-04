@@ -70,7 +70,7 @@ func TestRunaiClusterDeclaresRegistrationInputs(t *testing.T) {
 	if comp == nil {
 		t.Fatal("runai-cluster is not in the embedded registry")
 	}
-	wantRequired := []string{"controlPlane.url", "cluster.uid", "controlPlane.bootstrapToken"}
+	wantRequired := []string{"controlPlane.url", "cluster.uid", "cluster.url", "controlPlane.bootstrapToken"}
 	if strings.Join(comp.RequiredValues, ",") != strings.Join(wantRequired, ",") {
 		t.Errorf("requiredValues = %v, want %v", comp.RequiredValues, wantRequired)
 	}

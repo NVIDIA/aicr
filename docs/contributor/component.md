@@ -289,8 +289,9 @@ dynamic is rejected on every deployer but `helm`, before values are
 extracted, so the operator hears about the deployer before being told to
 declare the secret. For the `helm` deployer, a required path that was
 declared dynamic also gets a guard in the component's `install.sh`: it
-refuses to run while the path's `cluster-values.yaml` stub is still empty,
-except under `--dry-run`. `runai-cluster` is the example in `registry.yaml`;
+refuses to run while the path has no value in `cluster-values.yaml`, except
+under `--dry-run`; a declaration on an ancestor map is judged on the required
+leaves written beneath it. `runai-cluster` is the example in `registry.yaml`;
 the operator-facing side is in
 [Required and install-time secret inputs](../user/bundling.md#required-and-install-time-secret-inputs).
 

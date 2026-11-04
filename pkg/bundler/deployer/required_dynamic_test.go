@@ -67,7 +67,9 @@ func TestResolveRequiredDynamicPaths(t *testing.T) {
 	}{
 		{"no dynamic values", nil, map[string][]string{}},
 		{"exact required path", map[string][]string{requiredDynamicFixture: {"controlPlane.token"}}, map[string][]string{requiredDynamicFixture: {"controlPlane.token"}}},
-		{"ancestor of a required path", map[string][]string{requiredDynamicFixture: {"controlPlane"}}, map[string][]string{requiredDynamicFixture: {"controlPlane"}}},
+		{"ancestor declaration yields every required leaf beneath it", map[string][]string{requiredDynamicFixture: {"controlPlane"}}, map[string][]string{requiredDynamicFixture: {"controlPlane.url", "controlPlane.token"}}},
+		{"descendant declaration yields the declaration itself", map[string][]string{requiredDynamicFixture: {"controlPlane.token.value"}}, map[string][]string{requiredDynamicFixture: {"controlPlane.token.value"}}},
+		{"overlapping declarations are not repeated", map[string][]string{requiredDynamicFixture: {"controlPlane", "controlPlane.token"}}, map[string][]string{requiredDynamicFixture: {"controlPlane.url", "controlPlane.token"}}},
 		{"unrelated dynamic path is dropped", map[string][]string{requiredDynamicFixture: {"tolerations"}, "gpu-operator": {"driver.version"}}, map[string][]string{}},
 		{"mixed keeps only the required ones", map[string][]string{requiredDynamicFixture: {"tolerations", "controlPlane.url"}}, map[string][]string{requiredDynamicFixture: {"controlPlane.url"}}},
 	}

@@ -552,14 +552,15 @@ nodes still decides whether the controllers fit.
 
 A few components need a value the recipe cannot carry, because it differs per
 cluster: `runai-cluster` needs the Run:ai control plane URL, the cluster UID
-that control plane assigned, and the bootstrap token it issued. The registry
+that control plane assigned, the FQDN it reaches the cluster at, and the
+bootstrap token it issued. The registry
 lists such paths as `requiredValues`, and `aicr bundle` refuses a bundle that
 leaves one empty instead of rendering an install that cannot work:
 
 ```text
 [INVALID_REQUEST] component "runai-cluster": required values not set:
-controlPlane.url, cluster.uid (pass --set runai:<path>=<value>, or declare
---dynamic runai:<path> to supply it at install time);
+controlPlane.url, cluster.uid, cluster.url (pass --set runai:<path>=<value>,
+or declare --dynamic runai:<path> to supply it at install time);
 controlPlane.bootstrapToken (an install-time secret: declare --dynamic
 runai:<path> and fill it in cluster-values.yaml before install)
 ```
@@ -577,6 +578,7 @@ evidence ever contains the credential:
 aicr bundle -r recipe.yaml \
   --set runai:controlPlane.url="${CONTROL_PLANE_URL}" \
   --set runai:cluster.uid="${CLUSTER_UID}" \
+  --set runai:cluster.url="${CLUSTER_FQDN}" \
   --dynamic runai:controlPlane.bootstrapToken \
   -o ./bundle
 ```
@@ -590,8 +592,9 @@ Two further rules follow from the secret being filled in after bundling:
   component whose secret path is required or declared dynamic. Plain
   `argocd` rejects every `--dynamic` declaration already.
 - **`install.sh` checks the stub.** For a required path declared dynamic, the
-  component's install script refuses to run while the path is still empty in
-  `cluster-values.yaml`, and says which path to set. `deploy.sh --dry-run`
+  component's install script refuses to run while the path has no value in
+  `cluster-values.yaml`, and says which path to set. A declaration on a parent
+  map is judged on the required leaves written beneath it. `deploy.sh --dry-run`
   skips the check, so a bundle can be previewed before a short-lived value is
   minted.
 
