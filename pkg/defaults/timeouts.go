@@ -1425,6 +1425,10 @@ const (
 
 	// KubeSystemNamespace is the standard kube-system namespace.
 	KubeSystemNamespace = "kube-system"
+
+	// AICROperatorNamespace is where the AICR Operator's chart installs it
+	// and keeps its plans, and kubectl aicr's --operator-namespace default.
+	AICROperatorNamespace = "aicr-system"
 )
 
 // Attestation file size limits.
@@ -1609,8 +1613,22 @@ const HelmInventoryTimeout = 2 * time.Minute
 // retained, so paging bounds the response rather than the peak.
 const ArgoApplicationListPageSize int64 = 200
 
+// OperatorPlanListPageSize caps how many AICR Operator plan ConfigMaps one
+// List pulls while versioning the Applications the operator writes. A plan is
+// bounded by the ~1 MiB a ConfigMap can hold, the ceiling that sizes
+// HelmReleaseListPageSize, and only each plan's release digests and versions
+// are kept past its page.
+const OperatorPlanListPageSize int64 = 100
+
+// OperatorPlanVersionLimit is the longest chart version an AICR Operator plan
+// may record before the plan is set aside as unreadable. Chart versions are
+// semantic versions; the bound keeps a corrupt plan from carrying an
+// arbitrarily long string into an error message.
+const OperatorPlanVersionLimit = 128
+
 // ArgoInventoryTimeout bounds the whole read of the Applications Argo CD
-// deploys: one paged cluster-wide List, plus the projection of each item.
+// deploys: one paged cluster-wide List, plus the projection of each item and,
+// when the AICR Operator wrote some, one paged List of its plans.
 // Shorter than HelmInventoryTimeout, which makes two such walks over objects
 // carrying rendered manifests and decompresses one record per release.
 //

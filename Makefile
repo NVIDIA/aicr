@@ -197,7 +197,7 @@ check-docs-mdx-parse: ## Validates docs/ with the real MDX parser (requires Node
 	@./tools/check-docs-mdx-parse
 
 .PHONY: check-docs-yaml
-check-docs-yaml: ## Validates YAML-labelled code blocks throughout docs/ (requires Node; CI-blocking)
+check-docs-yaml: ## Validates YAML-labeled code blocks throughout docs/ (requires Node; CI-blocking)
 	@./tools/check-docs-yaml
 
 .PHONY: check-docs-shell
@@ -241,6 +241,7 @@ LICENSE_IGNORES = \
 	-ignore 'bundles/**' \
 	-ignore 'dist/**' \
 	-ignore '**/testdata/**' \
+	-ignore 'pkg/evidence/cncf/schemas/*.yaml' \
 	-ignore 'recipes/evidence/*.yaml' \
 	-ignore 'recipes/evidence/*/*/*.yaml' \
 	-ignore 'THIRD_PARTY_NOTICES.md' \
@@ -249,6 +250,9 @@ LICENSE_IGNORES = \
 	-ignore 'tools/mdx/node_modules/**' \
 	-ignore '.github/actions/setup-dgxc-goproxy/**'
 
+# pkg/evidence/cncf/schemas/ holds verbatim copies of the upstream CNCF AI
+# Conformance checklists (cncf/k8s-ai-conformance docs/AIConformance-*.yaml),
+# pinned by digest in pkg/evidence/cncf/checklist.go; a header would break the pin.
 # The two recipes/evidence patterns in LICENSE_IGNORES match exactly the
 # generated, header-less pointer shapes MarshalPointer emits — the transient
 # flat <recipe>.yaml pending state and the final <recipe>/<source>/sha256-*.yaml
@@ -1218,6 +1222,11 @@ operator-skeleton: ## Runs the operator with the pinned Argo CD on its kind clus
 .PHONY: operator-qualify
 operator-qualify: ## Runs the operator's fault-injection suite against dist/candidate, upgrading to dist/candidate-next
 	@./tools/operator-qualify
+
+.PHONY: operator-qualify-published
+operator-qualify-published: ## Installs the newest published operator release and runs the lifecycle scenarios upgrading to dist/candidate
+	@./tools/operator-qualify pull-published
+	@AICR_OPERATOR_QUALIFY_LIFECYCLE_ONLY=1 QUALIFY_TIMEOUT=45m CANDIDATE_DIR="$${PUBLISHED_DIR:-dist/published}" CANDIDATE_NEXT_DIR=dist/candidate ./tools/operator-qualify
 
 # =============================================================================
 # Tilt Local Development

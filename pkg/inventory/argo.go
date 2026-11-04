@@ -75,7 +75,13 @@ type argoChart struct {
 // is well-formed for its own purposes; failing the run on it would be this
 // reader's bug. See the scope type. The count returned alongside is of items
 // that named nothing at all, which are excluded but not hidden.
-func argoApplications(ctx context.Context, client dynamic.Interface, within scope) (inventoryRead, error) {
+//
+// operatorNamespace is where the AICR Operator keeps the plans that version the
+// Applications it writes. Empty leaves those unversioned, for a caller that
+// reads no versions.
+func argoApplications(ctx context.Context, client dynamic.Interface, within scope,
+	operatorNamespace string) (inventoryRead, error) {
+
 	if err := within.validate(); err != nil {
 		return inventoryRead{}, err
 	}
@@ -86,6 +92,10 @@ func argoApplications(ctx context.Context, client dynamic.Interface, within scop
 	var applications []installedRelease
 	records, unattributed, unreadable, remote := 0, 0, 0, 0
 	dests := &argoDestinations{client: client}
+	var plans *operatorPlans
+	if operatorNamespace != "" {
+		plans = &operatorPlans{client: client, namespace: operatorNamespace}
+	}
 	opts := metav1.ListOptions{Limit: defaults.ArgoApplicationListPageSize}
 	for {
 		// Cancellation is checked per page rather than per item, for the
@@ -159,6 +169,13 @@ func argoApplications(ctx context.Context, client dynamic.Interface, within scop
 				}
 
 				return inventoryRead{}, err
+			}
+			// The operator pins its charts by digest and names no chart, so
+			// the version is the one its plans record for the deployed digest.
+			if releaseID, ok := operatorReleaseID(item); ok && plans != nil {
+				if application.ChartVersion, err = plans.version(ctx, item, releaseID); err != nil {
+					return inventoryRead{}, err
+				}
 			}
 			applications = append(applications, application)
 		}
