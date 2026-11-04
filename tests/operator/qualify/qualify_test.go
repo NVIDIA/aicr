@@ -217,6 +217,12 @@ func firstRollout(ctx context.Context, t *testing.T) string {
 		}
 		rt.Spec.Overrides = append(rt.Spec.Overrides, v1alpha1.Override{Component: release, Path: "resources.requests.cpu",
 			Value: apiextensionsv1.JSON{Raw: []byte(`"50m"`)}})
+		// AICR v1.2.0 enables cert-manager's ServiceMonitor, whose CRD comes
+		// from the disabled prometheus-operator-crds. A release qualifies
+		// against its own AICR, so keep the release free of it on every
+		// version.
+		rt.Spec.Overrides = append(rt.Spec.Overrides, v1alpha1.Override{Component: release, Path: "prometheus.servicemonitor.enabled",
+			Value: apiextensionsv1.JSON{Raw: []byte(`false`)}})
 	})
 	digest := waitResolved(ctx, t)
 	ro := awaitingApproval(ctx, t, digest)
