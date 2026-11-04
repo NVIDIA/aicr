@@ -516,14 +516,29 @@ with the Client's version, the same combined document `aicr validate` writes.
 
 ### CNCF AI Conformance evidence
 
-Two methods produce CNCF AI Conformance evidence, matching
+Three methods produce CNCF AI Conformance evidence, matching
 `aicr validate --evidence-dir` and `aicr validate --cncf-submission`:
 
 - `RenderCNCFEvidence(ctx, report, dir)` writes one markdown file per
   submission requirement, plus `index.md`, from a CTRF report such as the one
-  `MergeReports` returns. Skipped checks are omitted, so a report from a run
-  that used `WithValidationSkipChecks` is refused with
+  `MergeReports` returns, against the latest checklist version the build
+  carries (`cncf.LatestVersion`). Skipped checks are omitted, so a report
+  from a run that used `WithValidationSkipChecks` is refused with
   `ErrCodeInvalidRequest`.
+- `RenderCNCFEvidenceWithOptions(ctx, report, dir, opts)` is the same render
+  with the checklist version selected by `RenderCNCFEvidenceOptions`:
+  `ConformanceVersion` names it explicitly (`"v1.36"`; an unsupported version
+  is refused with `ErrCodeInvalidRequest`), else `KubernetesVersion` (the
+  value `Snapshot.KubernetesVersion()` returns) selects the checklist for the
+  cluster's minor, or the nearest carried one with a warning when this build
+  has none for it (below v1.35 renders v1.35, above v1.37 renders v1.37).
+  **Matching `aicr validate --evidence-dir` means this method**, with
+  `KubernetesVersion: snap.KubernetesVersion()` from the snapshot
+  `ValidateState` ran against; `RenderCNCFEvidence` alone renders the latest
+  checklist whatever the cluster runs. The requirement set, levels and descriptions come from
+  `pkg/evidence/cncf` (`SupportedVersions`, `ChecklistFor`); a check whose
+  requirement the selected version no longer lists (`dra_support` from v1.36
+  on) renders as supporting evidence rather than a requirement row.
 - `CollectCNCFEvidence(ctx, recipe, opts)` deploys GPU test workloads and
   captures behavioral evidence under `opts.Dir`. It needs `bash` and
   `kubectl` on `PATH` and runs for up to 20 minutes. `recipe` is optional.
@@ -541,7 +556,9 @@ err := client.CollectCNCFEvidence(ctx, rec, aicr.CNCFCollectOptions{
 })
 ```
 
-Neither method is in v0.22.0 or earlier.
+None of these methods is in v0.22.0 or earlier. `RenderCNCFEvidenceWithOptions`,
+`RenderCNCFEvidenceOptions` and `Snapshot.KubernetesVersion` are not in v1.0.0
+or earlier either.
 
 ## Recipe sources
 
@@ -809,9 +826,13 @@ if report.FailsRun() {
   records name that carry no deployer ownership marker. Nil scans only on a
   cluster read, a pointer to `true` scans for any source, and a pointer to
   `false` suppresses it even on a cluster read.
+- `OperatorNamespace` is where a cluster read finds the AICR Operator's plans,
+  which version the Argo CD `Application`s the operator wrote. Empty selects
+  `aicr-system`, where the operator's chart installs.
 
 `aicr.FromCluster`, `ScanAtRisk`, and `ObjectNamesCompared`/`ObjectNamesSkipped`
 are not in v0.22.0 or earlier; pin a later release to use them.
+`OperatorNamespace` is not in v1.2.0 or earlier.
 
 `*UpgradeReport` is a transparent alias of `pkg/upgrade.Report`. Verdicts are
 data, not errors: `WriteUpgradeReportTable` renders the table the CLI prints,
@@ -1489,7 +1510,9 @@ options. The caller applies its own flag-over-config precedence, the same way
 `SnapshotOutputOptions()` and `ValidateInputOptions()` do, then branches on
 `CNCFSubmission`. When true, it passes `Dir` and `Features` to
 `CollectCNCFEvidence` in `CNCFCollectOptions` and skips `ValidateState`. When
-false, a non-empty `Dir` goes to `RenderCNCFEvidence` after `ValidateState`.
+false, a non-empty `Dir` goes to `RenderCNCFEvidenceWithOptions` after
+`ValidateState`, with `KubernetesVersion` from the snapshot, which is what the
+CLI does; `RenderCNCFEvidence` renders the latest carried checklist instead.
 `CNCFEvidenceOptions()` returns the zero value (never an error) for an absent
 section, and an error only when `spec.validate` is present but malformed.
 

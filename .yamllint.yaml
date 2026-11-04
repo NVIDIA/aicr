@@ -31,6 +31,9 @@ ignore: |
   # the module cache keeps the full tree.
   .licenses-cache/
 
+  # Verbatim upstream CNCF AI Conformance checklists, pinned by digest in
+  # pkg/evidence/cncf/checklist.go; not ours to lint or reformat.
+  pkg/evidence/cncf/schemas/
   # Generated snapshot output files (machine-generated, not hand-written)
   snapshot.yaml
 
