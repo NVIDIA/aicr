@@ -102,16 +102,34 @@ from the root Application's values.
 ## Context
 
 **Measurements.** Fleet readings cover 1 to 2500 GPU nodes. They are
-summarized in #3148 and #3214, with 24h cadvisor peaks at 244, 357, 447 and
-2500 nodes, and instantaneous readings elsewhere.
+recorded in #3148 and #3214, the full tables with method in the 2026-11-04
+comment on #3214. The sizing in this ADR rests on cadvisor working-set
+series read from each cluster's Prometheus: 24h windows on an OCI L40S
+cluster (407 GPU nodes) and an OCI GB300 cluster (656), and 7-day windows on
+a Mistral GB300 cluster (2039 nodes, 82k pods) and a Lambda GB300 cluster
+(2012 nodes at read time, about 2500 earlier in the window). Older
+instantaneous readings at 89 to 1400 nodes fill the gaps.
 
-Instantaneous readings understate peaks. Over 24h, peak-to-mean is:
+Three properties of the series shape the rules below:
 
-- 1.1 to 1.3x for gpu-operator and nodewright;
-- 1.3 to 1.7x for network-operator and NFD master.
+- **p90 sits close to p50.** For every controller the 90th percentile of the
+  working set is within 5 to 10% of the median. These are flat informer
+  caches with occasional spikes, so p90 is a good "usually needed" number
+  and reserves little more than the average would.
+- **Peaks are far above p90 for some controllers.** The maximum over 7 days
+  is 1.1x p90 for network-operator and nodewright, 1.3x for gpu-operator and
+  1.7x for maintenance-operator. NFD master's hourly resync pass is about
+  1.5x its steady state. The NIC daemon's peak is its startup list of the
+  cluster-wide NicDevice cache, 15 to 30% above its running working set.
+- **Some controllers drift at a constant node count.** On the Lambda cluster,
+  maintenance-operator's 24h peak went from 5.2Gi on 2026-10-09 to 11.8Gi
+  three weeks later, and network-operator's from 8.1Gi to 10.6Gi, with the
+  node count roughly flat. A limit derived from one 24h reading would have
+  killed maintenance-operator. gpu-operator, by contrast, moved from 3.4Gi
+  to 3.0Gi.
 
-The NIC daemon's peak is its startup list of the cluster-wide NicDevice
-cache, 15 to 30% above its running working set.
+Instantaneous readings understate peaks by about a third for
+network-operator and NFD master, and by 10 to 30% for the others.
 
 From those readings, the v1.0.0 defaults break at roughly these sizes:
 
@@ -134,6 +152,39 @@ maintenance-operator grew about 1Gi in a week at a constant 2500 nodes, so
 something besides node count drives it too
 ([#3267](https://github.com/NVIDIA/aicr/issues/3267) adds the scrape needed
 to find out).
+
+**Guidance elsewhere.** What exists outside AICR agrees on the shape and
+differs on the headroom:
+
+- The Kubernetes project sizes its own kube-system addons from node count
+  with [addon-resizer](https://github.com/kubernetes/autoscaler/tree/master/addon-resizer):
+  `base + per_node × N`, with an estimator that rounds N up to the next
+  bucket of a geometric sequence (ratio 1.5) so the addon is not resized on
+  every node join. That is a tier table.
+  [metrics-server](https://github.com/kubernetes-sigs/metrics-server/blob/master/FAQ.md)
+  and
+  [kube-state-metrics](https://github.com/kubernetes/kube-state-metrics#scaling-kube-state-metrics)
+  both document linear growth in node and object count and point at it.
+- Under [node-pressure eviction](https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/#pod-selection-for-kubelet-eviction),
+  the kubelet evicts pods whose usage exceeds their request first, ranked by
+  how far over they are. A controller requesting 2Gi and using 8Gi is the
+  first pod removed from a stressed system node. That is why requests, not
+  only limits, must track usage.
+- [GKE's guidance](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/vertical-pod-autoscaling)
+  is to set the memory request equal to the limit. This ADR does not: it
+  would reserve the peak on every system node, and these controllers spend
+  most of their time well under it.
+- The Vertical Pod Autoscaler's default margin is 15% over the 90th
+  percentile of daily peaks across 8 days
+  (`--recommendation-margin-fraction`). That factor assumes continuous
+  re-measurement. AICR measures once per release, so it carries a wider one
+  until the controllers can be scraped continuously (see Open questions).
+- NodeWright publishes
+  [scaling equations](https://docs.nvidia.com/nodewright/operations/resources-at-scale)
+  for its own manager, validated to 1k nodes: a request of `N × 0.45Mi` and a
+  limit of `N × 0.8Mi`. At 2000 nodes they give 0.9Gi and 1.6Gi; the
+  measured values are 10.5Gi and 11.6Gi. A formula validated at one scale was
+  5 to 7x off at another, which is the case for measuring every tier.
 
 **Existing mechanisms this builds on:**
 
@@ -169,6 +220,15 @@ cluster then rediscovers the numbers, usually through a crash loop.
 
 **D. Declared, measured tier tables, selected by a stated count at
 generation or deploy time (chosen).**
+
+**E. A per-node formula instead of tiers.** `base + per_node × N` fits
+gpu-operator and network-operator, which grow nearly linearly. It does not
+fit nodewright (pod-driven) or maintenance-operator (drifts at a constant
+node count), it resizes and restarts the controller on every node-count
+change, and it cannot be qualified: there is no finite set of points to
+measure. NodeWright's published formula (see Context) shows how far one can
+be off outside its validated range. Tiers are the formula's bucketed form,
+and that is also what addon-resizer's estimator does.
 
 ## Decision
 
@@ -218,16 +278,16 @@ resources:
       - maxNodes: 300
       - maxNodes: 600
         requests: {memory: 512Mi}
-        limits: {memory: 2Gi}
-        source: "#3214: 635Mi 24h peak at 447; 715Mi 7-day peak at 576"
+        limits: {memory: 768Mi}
+        source: "#3214 (2026-11-04): p90 410Mi, max 496Mi, 24h at 407 GPU nodes"
       - maxNodes: 1500
-        requests: {memory: 2Gi}
-        limits: {memory: 4Gi}
-        source: "#3214: 2052Mi 7-day peak at 1112"
+        requests: {memory: 768Mi}
+        limits: {memory: 1Gi}
+        source: "#3214 (2026-11-04): p90 602Mi, max 744Mi, 24h at 656 GPU nodes"
       - maxNodes: 3000
-        requests: {memory: 4Gi}
-        limits: {memory: 8Gi}
-        source: "#3148: 3447Mi 24h peak at 2500"
+        requests: {memory: 2.5Gi}
+        limits: {memory: 4Gi}
+        source: "#3214 (2026-11-04): p90 2353Mi, max 3006Mi, 7d at 2012-2500 GPU nodes"
   - path: maintenance-operator-chart.operator.resources
     requiresPath: maintenance-operator-chart
     tiers: [...]
@@ -242,49 +302,74 @@ resources:
   A tier is never interpolated from neighbouring measurements. A component
   with no measurement inside a tier is sized from its nearest measurement
   above the tier, which over-sizes it, never from one below.
-- Requests track steady-state usage near the top of the tier. Limits leave
-  at least 1.5x headroom over the highest 24h peak measured in the tier.
-  Where only instantaneous readings exist, they are first scaled by the
-  peak-to-mean ratios in Context.
+- **Request** is the 90th percentile of the working set over the measurement
+  window, at the largest cluster measured in the tier. It is what the
+  controller usually needs: the pod stays under its request, and so out of
+  the kubelet's first eviction group, 90% of the time.
+- **Limit** is the highest peak observed in the tier, over the longest window
+  available, times 1.3. The 30% covers the spikes p90 excludes plus some
+  drift between measurements. It is deliberately wider than VPA's 15%
+  because AICR re-measures once per release, not continuously.
+- Both are rounded up: to the next 256Mi below 2Gi, to the next 512Mi
+  above. Where only instantaneous readings exist, they are first scaled by
+  the ratios in Context. A tier value is never set below the one in the tier
+  under it.
+- Peaks are read from the longest window the cluster's Prometheus keeps, 7
+  days where available, and re-read before each release that changes the
+  component's pin or values. For a controller known to drift at a constant
+  node count (maintenance-operator today), the limit is taken from the
+  drifted peak, not the first one measured.
 - The loader fails closed with `ErrCodeInvalidRequest` on any of these:
   - a malformed path;
   - `maxNodes` values that do not strictly ascend;
   - a quantity that does not parse as a Kubernetes quantity;
   - a limit below its request;
-  - a changing tier without a `source`.
+  - a changing tier without a `source`;
+  - a tier value below the same field in the tier under it.
 - Above the top tier, the top tier applies and AICR warns that the size is
   unqualified. Raising the ceiling needs a new measured tier.
 
 ### 4. Initial tiers
 
-Values are GPU nodes and memory request / limit. Each `sizing.yaml` pins
-these numbers with their sources.
+Values are GPU nodes and memory request / limit, derived with the rules in
+section 3 from the measurements below. Each `sizing.yaml` pins these numbers
+with their sources.
 
-| Tier | gpu-operator | network-operator | maintenance-operator | nodewright | NIC daemon (per pod) |
+| Tier | gpu-operator | network-operator | maintenance-operator | nodewright (per replica) | NIC daemon (per pod) |
 |---|---|---|---|---|---|
 | ≤ 300 | 300Mi / 700Mi | 2Gi / 2Gi | 256Mi / 1Gi | 2000Mi / 4000Mi | 128Mi / 512Mi |
-| 301 to 600 | 512Mi / 2Gi | 2Gi / 4Gi | 1Gi / 4Gi | 2000Mi / 4000Mi | 256Mi / 2Gi |
-| 601 to 1500 | 2Gi / 4Gi | 4Gi / 10Gi | 3Gi / 8Gi | 4Gi / 8Gi | 512Mi / 2Gi |
-| 1501 to 3000 | 4Gi / 8Gi | 6Gi / 12Gi | 8Gi / 12Gi | 8Gi / 12Gi | 512Mi / 2Gi |
+| 301 to 600 | 512Mi / 768Mi | 2Gi / 2.5Gi | 2.5Gi / 3Gi | 2000Mi / 4000Mi | 768Mi / 1.25Gi |
+| 601 to 1500 | 768Mi / 1Gi | 2Gi / 2.5Gi | 5Gi / 8Gi | 2.5Gi / 3Gi | 768Mi / 1.25Gi |
+| 1501 to 3000 | 2.5Gi / 4Gi | 10.5Gi / 14Gi | 7Gi / 16Gi | 10.5Gi / 16Gi | 1Gi / 2.25Gi |
 
-The data each tier rests on:
+Working-set readings each tier rests on (Mi; p90 / max; window; cluster):
 
-| Tier | gpu-operator | network-operator | maintenance-operator | nodewright | NIC daemon (per pod) |
+| Tier | gpu-operator | network-operator | maintenance-operator | nodewright leader | NIC daemon (per pod) |
 |---|---|---|---|---|---|
-| ≤ 300 | 24h peak 384Mi at 244 | 24h peak 728Mi at 244 | 290Mi at 89; 130 to 156Mi at 141 | 24h peak 1024Mi at 244 (11k pods) | max 400Mi at 89, flat from 24 nodes |
-| 301 to 600 | 24h peaks 471Mi at 357, 635Mi at 447; 7-day peak 715Mi at 576 | 24h peaks 908Mi at 357, 1594Mi at 447; 75 restarts at 2Gi at 576 | none in tier; sized from 2345Mi at 1112 | 24h peaks 1006Mi at 357, 1868Mi at 447 (18k pods) | none in tier; sized from p99 821Mi, max 903Mi at 1112 |
-| 601 to 1500 | 7-day peak 2052Mi at 1112; 1506Mi at about 1400 | 2720Mi at 1112 (12h-old pod); 4490Mi at about 1400 | 2345Mi at 1112 (12h-old pod); 2894Mi at about 1400 | 3706Mi at 1112; 3190Mi at about 1400 | max 903Mi at 1112; max 1023Mi at about 1400 |
-| 1501 to 3000 | 24h peak 3447Mi at 2500 | 24h peak 8107Mi at 2500 | 24h peak 5186Mi, 6186Mi a week later, at 2500 | 24h peak 9091Mi at 2500 | 24h q99 1316Mi, max 1551Mi at 2500 |
+| ≤ 300 | max 384, 24h, 244 nodes | max 728, 24h, 244 nodes | 290 at 89 nodes; 130 to 156 at 141 | max 1024, 24h, 244 nodes (11k pods) | max 400 at 89 nodes, flat from 24 |
+| 301 to 600 | 410 / 496, 24h, OCI L40S 407 nodes | 955 / 1392, 24h, OCI L40S 407; max 1594, 24h, OCI GB300 447 | **none in tier**; sized from 2345 instantaneous at 1112 nodes | 1377 / 1536, 24h, OCI L40S 407 (13.8k pods); max 1868, 24h, OCI GB300 447 (18k pods) | **none in tier**; sized from p99 821 / max 903 instantaneous at 1112 |
+| 601 to 1500 | 602 / 744, 24h, OCI GB300 656 nodes | 1384 / 1737, 24h, OCI GB300 656 | **none in tier**; sized from 4996 / 5462, 24h, Lambda GB300 at 2012 | 2163 / 2287, 24h, OCI GB300 656 (21.7k pods) | **none in tier**; sized from 1112-node readings as above |
+| 1501 to 3000 | 2353 / 3006, 7d, Lambda GB300 2012 to 2500 nodes; 1757 / 2579, 7d, Mistral GB300 2039 | 10341 / 10619, 7d, Lambda | 7047 / 11768, 7d, Lambda (5.2Gi peak three weeks earlier) | 10555 / 11625, 7d, Lambda (13k pods); 6674 / 8295, 7d, Mistral (82k pods) | per-pod p90: median 901, q99 1069; per-pod max 1599, 7d, Lambda |
 
-The top tier matches the overrides that have run both large clusters since
-#3148. Two of its limits are below the 1.5x headroom rule and are recorded
-here instead of hidden:
+Readings marked **none in tier** are sized from the nearest reading above
+the tier, so those cells are over-sized by construction. They are the first
+to requalify once a cluster of that size runs the component with a scrape.
 
-- **nodewright:** 12Gi is 1.3x its 9091Mi peak.
-- **NIC daemon:** 2Gi runs out near 6500 NicDevices, about 3000 to 3500
-  GB300 nodes.
+Three cells are held at the default by the never-lower rule rather than by
+their own reading: network-operator's and nodewright's requests at 301 to
+600, and network-operator's request at 601 to 1500, where p90 (1.4Gi) is
+below the v1.0.0 request of 2Gi.
 
-Both are reasons the top tier stops at 3000.
+The nodewright request is per replica. On the Lambda cluster the standby
+replica's p90 is 3.6Gi against the leader's 10.5Gi, so the standby
+over-reserves by about 7Gi; on the Mistral cluster, with 82k pods, both
+replicas sit at 6.7Gi. The top tier's requests total about 31Gi and its
+limits about 52Gi on one system node; the GB300 system nodes measured have
+866Gi to 993Gi allocatable.
+
+The top tier stops at 3000 because nothing above 2500 nodes has been
+measured, and because the NIC daemon's 2.25Gi runs out near 6500
+NicDevices, about 3000 to 3500 GB300 nodes.
 
 ### 5. Never lower; explicit overrides win
 
@@ -371,12 +456,15 @@ following this section's rules.
   - The NIC daemon tracks NicDevice count.
 
   Each gap is documented in that component's `sizing.yaml`.
-- **The 601 to 1500 tier has the thinnest data.** There are no 24h peaks
-  between 447 and 2500 nodes. That tier rests on a 7-day peak at 1112 and
-  instantaneous readings at 1112 and about 1400, scaled per Context. In the
-  301 to 600 tier, maintenance-operator and the NIC daemon have no reading
-  of their own and are sized from 1112. Requalifying both tiers with 24h
-  peaks is a follow-up.
+- **maintenance-operator and the NIC daemon have no mid-range data.** The
+  two clusters measured between 300 and 1500 nodes run neither, so their
+  301 to 600 and 601 to 1500 cells are sized from larger clusters and
+  over-reserve. The 601 to 1500 tier also rests on one 24h window at 656
+  nodes; nothing between 656 and 2012 nodes has a scrape. Requalifying both
+  is a follow-up.
+- **The 30% margin is a stopgap for measuring once per release.** It is
+  twice VPA's default. It comes down once the controllers can be scraped
+  continuously, which needs #3265 to #3268.
 - **The count is the user's responsibility.** A stale count after a
   scale-up under-sizes the cluster. Rerunning bundle generation, or changing
   `sizing.nodeCount`, re-sizes it.
@@ -399,10 +487,14 @@ hand overrides again.
 
 ## Open questions
 
-- **Requalifying the 301 to 600 and 601 to 1500 tiers** once cadvisor peaks are scrapeable
-  for all five controllers
+- **Requalifying the 301 to 600 and 601 to 1500 tiers, and tightening the
+  30% margin toward VPA's 15%,** once the five controllers are scraped
+  continuously
   ([#3265](https://github.com/NVIDIA/aicr/issues/3265) to
-  [#3269](https://github.com/NVIDIA/aicr/issues/3269)).
+  [#3269](https://github.com/NVIDIA/aicr/issues/3269)). Until then, drift
+  is found at the next measurement or the next OOM kill.
+- **Reporting the measured NodeWright numbers upstream.** Its published
+  equations undersize the manager by 5 to 7x at 2000 nodes.
 - **A second input for nodewright** (pod count), if dense clusters keep
   outgrowing its tiers.
 - **Install-time sizing for the other deployers.** For `helm` and
