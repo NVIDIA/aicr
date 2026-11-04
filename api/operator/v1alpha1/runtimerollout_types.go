@@ -387,6 +387,18 @@ type ReleaseStatus struct {
 	// +optional
 	// +kubebuilder:validation:MaxLength=71
 	SpecDigest string `json:"specDigest,omitempty"`
+	// StartedAt is when this rollout's step for the release started.
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+	// FinishedAt is when the step ended: the release became ready, was
+	// removed, or failed.
+	// +optional
+	FinishedAt *metav1.Time `json:"finishedAt,omitempty"`
+	// WaitedOn is the reason the step last reported while it waited, kept
+	// once it ends, so a slow step says what held it.
+	// +optional
+	// +kubebuilder:validation:MaxLength=64
+	WaitedOn string `json:"waitedOn,omitempty"`
 }
 
 // ValidationStatus is the deployment validation run.

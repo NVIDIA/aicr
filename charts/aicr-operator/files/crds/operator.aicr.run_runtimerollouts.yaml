@@ -480,6 +480,12 @@ spec:
                 items:
                   description: ReleaseStatus is one release's observation.
                   properties:
+                    finishedAt:
+                      description: |-
+                        FinishedAt is when the step ended: the release became ready, was
+                        removed, or failed.
+                      format: date-time
+                      type: string
                     id:
                       maxLength: 53
                       type: string
@@ -492,6 +498,11 @@ spec:
                         the release became ready.
                       maxLength: 71
                       type: string
+                    startedAt:
+                      description: StartedAt is when this rollout's step for the release
+                        started.
+                      format: date-time
+                      type: string
                     state:
                       description: ReleaseState is a release's observed state.
                       enum:
@@ -503,6 +514,12 @@ spec:
                       - Deleting
                       - Removed
                       - Unknown
+                      type: string
+                    waitedOn:
+                      description: |-
+                        WaitedOn is the reason the step last reported while it waited, kept
+                        once it ends, so a slow step says what held it.
+                      maxLength: 64
                       type: string
                   required:
                   - id

@@ -112,6 +112,14 @@ const (
 	// EventStalled, on the runtime: it turned Stalled, or stalled for
 	// another reason.
 	EventStalled = "Stalled"
+	// EventStepStarted, on the rollout: a release's step started.
+	EventStepStarted = "StepStarted"
+	// EventStepWaiting, on the rollout: a step in progress waits on another
+	// reason than it last reported.
+	EventStepWaiting = "StepWaiting"
+	// EventStepFinished, on the rollout: a step ended, with its outcome, its
+	// duration and what it last waited on; a warning when it failed.
+	EventStepFinished = "StepFinished"
 	// EventEngineSuspensionRefused, on the runtime: the API server refused
 	// for good to change an Application's automated sync.
 	EventEngineSuspensionRefused = ReasonEngineSuspensionRefused
@@ -933,7 +941,7 @@ func (r *RolloutReconciler) step(ctx context.Context, p *plan.Document, ro *v1al
 			start = ro.CreationTimestamp
 		}
 		ro.Status.Current = &v1alpha1.CurrentStep{Release: step.Release, Operation: step.Operation, StartedAt: &start}
-		setReleaseState(ro, step.Release, v1alpha1.ReleaseProgressing, "")
+		r.startStep(ctx, ro, step, v1alpha1.ReleaseProgressing, start)
 		// Record the step before its mutation, so a restart observes it.
 		if err = r.saveStatus(ctx, ro, ""); err != nil {
 			return false, err
@@ -991,18 +999,19 @@ func (r *RolloutReconciler) step(ctx context.Context, p *plan.Document, ro *v1al
 	}
 	switch {
 	case obs.State == argocd.StateReady:
-		setReleaseState(ro, step.Release, v1alpha1.ReleaseReady, rel.Chart.Digest)
+		r.finishStep(ctx, ro, step.Release, v1alpha1.ReleaseReady, rel.Chart.Digest, now)
 		recordSpec(ro, step.Release, obs.SpecDigest)
 		ro.Status.Current = nil
 		return true, r.saveStatus(ctx, ro, "")
 	case obs.State == argocd.StateFailed:
-		setReleaseState(ro, step.Release, v1alpha1.ReleaseFailed, "")
+		r.finishStep(ctx, ro, step.Release, v1alpha1.ReleaseFailed, "", now)
 		return false, r.finish(ctx, ro, v1alpha1.PhaseFailed, "release "+step.Release+": "+obs.Reason)
 	case now.Sub(timeoutFrom(cur)) > ro.Spec.ActionTimeout.Duration:
-		setReleaseState(ro, step.Release, v1alpha1.ReleaseFailed, "")
+		r.finishStep(ctx, ro, step.Release, v1alpha1.ReleaseFailed, "", now)
 		return false, r.finish(ctx, ro, v1alpha1.PhaseFailed,
 			fmt.Sprintf("release %s not ready within %s (%s)", step.Release, ro.Spec.ActionTimeout.Duration, obs.Reason))
 	}
+	r.stepWaiting(ctx, ro, step.Release, obs.Reason)
 	v.requeue = pollInterval
 	return false, r.saveStatus(ctx, ro, "release "+step.Release+": "+obs.Reason)
 }
@@ -1017,7 +1026,7 @@ func (r *RolloutReconciler) timedOut(ctx context.Context, ro *v1alpha1.RuntimeRo
 	if operrors.IsPermanent(err) || now.Sub(timeoutFrom(cur)) <= ro.Spec.ActionTimeout.Duration {
 		return false, nil
 	}
-	setReleaseState(ro, step.Release, v1alpha1.ReleaseFailed, "")
+	r.finishStep(ctx, ro, step.Release, v1alpha1.ReleaseFailed, "", now)
 	return true, r.finish(ctx, ro, v1alpha1.PhaseFailed,
 		fmt.Sprintf("release %s not %s within %s (%s)", step.Release, outcome, ro.Spec.ActionTimeout.Duration, errorMessage(err)))
 }
@@ -1075,12 +1084,13 @@ func (r *RolloutReconciler) observeHalted(ctx context.Context, ro *v1alpha1.Runt
 		return r.saveStatus(ctx, ro, message+"; release "+cur.Release+": "+errorMessage(err))
 	}
 	if obs.State == argocd.StateReady {
-		setReleaseState(ro, cur.Release, done, revision)
+		r.finishStep(ctx, ro, cur.Release, done, revision, r.Now())
 		recordSpec(ro, cur.Release, obs.SpecDigest)
 		ro.Status.Current = nil
 		return r.saveStatus(ctx, ro, message)
 	}
 	setReleaseState(ro, cur.Release, v1alpha1.ReleaseSuspended, "")
+	r.stepWaiting(ctx, ro, cur.Release, obs.Reason)
 	v.requeue = pollInterval
 	return r.saveStatus(ctx, ro, message+"; release "+cur.Release+": "+obs.Reason)
 }
@@ -1169,11 +1179,11 @@ func (r *RolloutReconciler) remove(ctx context.Context, rt *v1alpha1.ClusterRunt
 		if !operrors.IsPermanent(err) {
 			return false, err
 		}
-		state := v1alpha1.ReleasePending
 		if issued {
-			state = v1alpha1.ReleaseFailed
+			r.finishStep(ctx, ro, step.Release, v1alpha1.ReleaseFailed, "", now)
+		} else {
+			setReleaseState(ro, step.Release, v1alpha1.ReleasePending, "")
 		}
-		setReleaseState(ro, step.Release, state, "")
 		return false, r.finish(ctx, ro, v1alpha1.PhaseFailed, errorMessage(err))
 	}
 	cur := ro.Status.Current
@@ -1190,7 +1200,7 @@ func (r *RolloutReconciler) remove(ctx context.Context, rt *v1alpha1.ClusterRunt
 		}
 		start := metav1.NewTime(now)
 		ro.Status.Current = &v1alpha1.CurrentStep{Release: step.Release, Operation: step.Operation, StartedAt: &start}
-		setReleaseState(ro, step.Release, v1alpha1.ReleaseDeleting, "")
+		r.startStep(ctx, ro, step, v1alpha1.ReleaseDeleting, start)
 		if err := r.saveStatus(ctx, ro, ""); err != nil {
 			return false, err
 		}
@@ -1214,14 +1224,15 @@ func (r *RolloutReconciler) remove(ctx context.Context, rt *v1alpha1.ClusterRunt
 	}
 	switch {
 	case obs.State == argocd.StateReady:
-		setReleaseState(ro, step.Release, v1alpha1.ReleaseRemoved, "")
+		r.finishStep(ctx, ro, step.Release, v1alpha1.ReleaseRemoved, "", now)
 		ro.Status.Current = nil
 		return true, r.saveStatus(ctx, ro, "")
 	case now.Sub(timeoutFrom(cur)) > ro.Spec.ActionTimeout.Duration:
-		setReleaseState(ro, step.Release, v1alpha1.ReleaseFailed, "")
+		r.finishStep(ctx, ro, step.Release, v1alpha1.ReleaseFailed, "", now)
 		return false, r.finish(ctx, ro, v1alpha1.PhaseFailed,
 			fmt.Sprintf("release %s not removed within %s (%s)", step.Release, ro.Spec.ActionTimeout.Duration, obs.Reason))
 	}
+	r.stepWaiting(ctx, ro, step.Release, obs.Reason)
 	v.requeue = pollInterval
 	return false, r.saveStatus(ctx, ro, "release "+step.Release+": "+obs.Reason)
 }
@@ -1817,6 +1828,76 @@ func recordSpec(ro *v1alpha1.RuntimeRollout, id, digest string) {
 			return
 		}
 	}
+}
+
+// maxWaitedOn is ReleaseStatus.WaitedOn's schema bound.
+const maxWaitedOn = 64
+
+// releaseEntry is the rollout's status entry for id, added if missing.
+func releaseEntry(ro *v1alpha1.RuntimeRollout, id string) *v1alpha1.ReleaseStatus {
+	for i := range ro.Status.Releases {
+		if ro.Status.Releases[i].ID == id {
+			return &ro.Status.Releases[i]
+		}
+	}
+	ro.Status.Releases = append(ro.Status.Releases, v1alpha1.ReleaseStatus{ID: id})
+
+	return &ro.Status.Releases[len(ro.Status.Releases)-1]
+}
+
+// startStep moves a release into state as its step starts at at, and reports
+// the start. A retried step starts its record again.
+func (r *RolloutReconciler) startStep(ctx context.Context, ro *v1alpha1.RuntimeRollout, step v1alpha1.RolloutStep,
+	state v1alpha1.ReleaseState, at metav1.Time) {
+
+	setReleaseState(ro, step.Release, state, "")
+	rs := releaseEntry(ro, step.Release)
+	rs.StartedAt, rs.FinishedAt, rs.WaitedOn = &at, nil, ""
+	log.FromContext(ctx).Info("step started", "rollout", ro.Name, "release", step.Release, "operation", step.Operation)
+	emit(r.Events, ro, corev1.EventTypeNormal, EventStepStarted, "Step", "release %s: %s started",
+		step.Release, step.Operation)
+}
+
+// stepWaiting records what a step in progress waits on, and reports a change.
+func (r *RolloutReconciler) stepWaiting(ctx context.Context, ro *v1alpha1.RuntimeRollout, id, reason string) {
+	if len(reason) > maxWaitedOn {
+		reason = reason[:maxWaitedOn]
+	}
+	rs := releaseEntry(ro, id)
+	if reason == "" || rs.WaitedOn == reason {
+		return
+	}
+	rs.WaitedOn = reason
+	log.FromContext(ctx).Info("step waiting", "rollout", ro.Name, "release", id, "reason", reason)
+	emit(r.Events, ro, corev1.EventTypeNormal, EventStepWaiting, "Step", "release %s waits on %s", id, reason)
+}
+
+// finishStep moves a release into state as its step ends at at, and reports
+// the outcome, the time the step took and what it last waited on.
+func (r *RolloutReconciler) finishStep(ctx context.Context, ro *v1alpha1.RuntimeRollout, id string,
+	state v1alpha1.ReleaseState, revision string, at time.Time) {
+
+	setReleaseState(ro, id, state, revision)
+	rs := releaseEntry(ro, id)
+	end := metav1.NewTime(at)
+	rs.FinishedAt = &end
+	note := fmt.Sprintf("release %s: %s", id, state)
+	var took time.Duration
+	if rs.StartedAt != nil {
+		// Status keeps whole seconds; compare at that resolution.
+		took = max(at.Truncate(time.Second).Sub(rs.StartedAt.Truncate(time.Second)), 0)
+		note += " after " + took.String()
+	}
+	if rs.WaitedOn != "" {
+		note += "; last waited on " + rs.WaitedOn
+	}
+	eventType := corev1.EventTypeNormal
+	if state == v1alpha1.ReleaseFailed {
+		eventType = corev1.EventTypeWarning
+	}
+	log.FromContext(ctx).Info("step finished", "rollout", ro.Name, "release", id, "state", state,
+		"duration", took.String(), "waitedOn", rs.WaitedOn)
+	emit(r.Events, ro, eventType, EventStepFinished, "Step", "%s", note)
 }
 
 func setReleaseState(ro *v1alpha1.RuntimeRollout, id string, state v1alpha1.ReleaseState, revision string) {

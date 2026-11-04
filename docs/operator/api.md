@@ -426,7 +426,8 @@ status:
   current: {release: gpu-operator-readiness, operation: Verify, startedAt: <time>}
                                       # timeoutFrom: <time> once a halt ended; the action timeout runs from it
   releases:                           # state: Pending | Progressing | Ready | Failed | Suspended (step in flight while halted) | Deleting | Removed | Unknown
-  - {id: cert-manager, state: Ready, revision: sha256:<...>, specDigest: sha256:<...>}   # specDigest: the spec this rollout wrote, from when it became ready
+  - {id: cert-manager, state: Ready, revision: sha256:<...>, specDigest: sha256:<...>,  # specDigest: the spec this rollout wrote, from when it became ready
+     startedAt: <time>, finishedAt: <time>, waitedOn: ReconcileStale}                  # the step's start and end (ready, removed or failed), and the last reason it waited on
   - {id: nvsentinel, state: Removed}
   validation: {job: <name>, runID: <id>, result: Passed, evidence: oci://<ref>@sha256:<...>}
   message: ""
