@@ -391,7 +391,7 @@ type ReleaseStatus struct {
 	// +optional
 	StartedAt *metav1.Time `json:"startedAt,omitempty"`
 	// FinishedAt is when the step ended: the release became ready, was
-	// removed, or failed.
+	// removed or failed, or the rollout ended with the step in flight.
 	// +optional
 	FinishedAt *metav1.Time `json:"finishedAt,omitempty"`
 	// WaitedOn is the reason the step last reported while it waited, kept

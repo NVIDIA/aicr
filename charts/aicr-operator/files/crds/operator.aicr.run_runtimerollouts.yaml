@@ -483,7 +483,7 @@ spec:
                     finishedAt:
                       description: |-
                         FinishedAt is when the step ended: the release became ready, was
-                        removed, or failed.
+                        removed or failed, or the rollout ended with the step in flight.
                       format: date-time
                       type: string
                     id:

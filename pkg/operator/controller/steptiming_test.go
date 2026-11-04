@@ -15,27 +15,36 @@
 package controller
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/events"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
 	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
 )
 
-// releaseStatus is the rollout's status entry for id, or a failure.
-func releaseStatus(t *testing.T, ro v1alpha1.RuntimeRollout, id string) v1alpha1.ReleaseStatus {
+// certManager is the rollout's status entry for the test plan's release.
+func certManager(t *testing.T, ro v1alpha1.RuntimeRollout) v1alpha1.ReleaseStatus {
 	t.Helper()
 	for _, rs := range ro.Status.Releases {
-		if rs.ID == id {
+		if rs.ID == "cert-manager" {
 			return rs
 		}
 	}
-	t.Fatalf("rollout %s has no status for release %s: %+v", ro.Name, id, ro.Status.Releases)
+	t.Fatalf("rollout %s has no status for cert-manager: %+v", ro.Name, ro.Status.Releases)
 
 	return v1alpha1.ReleaseStatus{}
 }
@@ -98,7 +107,7 @@ func TestRolloutRecordsStepTiming(t *testing.T) {
 	clk.now = clk.now.Add(10 * time.Second)
 	reconcileRollout(t, ctx, r) // still ReconcileStale
 
-	rs := releaseStatus(t, rollouts(t, ctx)[0], "cert-manager")
+	rs := certManager(t, rollouts(t, ctx)[0])
 	if rs.State != v1alpha1.ReleaseProgressing || !sameSecond(rs.StartedAt, started) || rs.FinishedAt != nil ||
 		rs.WaitedOn != "ReconcileStale" {
 
@@ -110,7 +119,7 @@ func TestRolloutRecordsStepTiming(t *testing.T) {
 	finished := clk.now
 	reconcileRollout(t, ctx, r) // ready
 
-	rs = releaseStatus(t, rollouts(t, ctx)[0], "cert-manager")
+	rs = certManager(t, rollouts(t, ctx)[0])
 	if rs.State != v1alpha1.ReleaseReady || !sameSecond(rs.StartedAt, started) || !sameSecond(rs.FinishedAt, finished) ||
 		rs.WaitedOn != "ReconcileStale" {
 
@@ -151,7 +160,7 @@ func TestRolloutRecordsAFailedStepsTiming(t *testing.T) {
 	reconcileRollout(t, ctx, r) // action timeout
 
 	ro := rollouts(t, ctx)[0]
-	rs := releaseStatus(t, ro, "cert-manager")
+	rs := certManager(t, ro)
 	if ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseFailed) || rs.State != v1alpha1.ReleaseFailed ||
 		!sameSecond(rs.StartedAt, started) || !sameSecond(rs.FinishedAt, finished) || rs.WaitedOn != "HealthDegraded" {
 
@@ -162,10 +171,9 @@ func TestRolloutRecordsAFailedStepsTiming(t *testing.T) {
 	}
 }
 
-// A step whose Application already carries the plan, as every unchanged
-// release does in a recovery that pins the previous plan, is not written
-// again, so no Ensure asks Argo CD to compare it. Waiting for Argo CD's
-// periodic reconcile cost each such step minutes; the step asks instead.
+// A step whose Application already carries the plan, as a release the
+// failed rollout had not reached does in a recovery that pins the previous
+// plan, is not written again, so no Ensure asks Argo CD to compare it.
 func TestRolloutRefreshesAStaleComparison(t *testing.T) {
 	ctx := testContext(t)
 	rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
@@ -193,5 +201,148 @@ func TestRolloutRefreshesAStaleComparison(t *testing.T) {
 	reconcileRollout(t, ctx, r)
 	if engine.refreshed["cert-manager"] != before {
 		t.Error("a step waiting on health asked for a refresh, which cannot help it")
+	}
+}
+
+// captured is one Event a capture recorder saw.
+type captured struct{ eventType, reason, action, note string }
+
+// capture records every Event with the fields the events API groups by.
+type capture struct {
+	mu     sync.Mutex
+	events []captured
+}
+
+func (c *capture) Eventf(_, _ runtime.Object, eventType, reason, action, note string, args ...any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.events = append(c.events, captured{eventType, reason, action, fmt.Sprintf(note, args...)})
+}
+
+// actions returns the actions of the Events with reason, in order.
+func (c *capture) actions(reason string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []string
+	for _, e := range c.events {
+		if e.reason == reason {
+			out = append(out, e.action)
+		}
+	}
+
+	return out
+}
+
+// The events API folds Events with the same object, reason, action and
+// related object into one series whatever their notes, so each step Event
+// names its release and transition in its action.
+func TestStepEventsAreDistinctPerTransition(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+		rt.Spec.Rollout.StabilizationWindow = &metav1.Duration{Duration: time.Millisecond}
+	})
+	resolved(t, ctx, putPlan(t, ctx, rt, "50m"))
+	engine := newEngine()
+	engine.unhealthy = map[string]string{"cert-manager": "HealthProgressing"}
+	r, _ := newRollout(t, engine, true)
+	rec := &capture{}
+	r.Events = rec
+
+	reconcileRollout(t, ctx, r) // create
+	reconcileRollout(t, ctx, r) // step started
+	reconcileRollout(t, ctx, r) // waits: HealthProgressing
+	engine.unhealthy["cert-manager"] = argocd.ReasonReconcileStale
+	reconcileRollout(t, ctx, r) // waits: ReconcileStale
+	delete(engine.unhealthy, "cert-manager")
+	reconcileRollout(t, ctx, r) // ready
+
+	for reason, want := range map[string][]string{
+		EventStepStarted:  {"cert-manager/Install"},
+		EventStepWaiting:  {"cert-manager/HealthProgressing", "cert-manager/ReconcileStale"},
+		EventStepFinished: {"cert-manager/Ready"},
+	} {
+		if got := rec.actions(reason); !slices.Equal(got, want) {
+			t.Errorf("%s actions = %q, want %q", reason, got, want)
+		}
+	}
+}
+
+// A rollout that ends with a step in flight, as at its deadline, closes the
+// step's record, keeping the release's state, which repair reads.
+func TestRolloutClosesTheStepInFlightWhenItEnds(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+		rt.Spec.Rollout.StabilizationWindow = &metav1.Duration{Duration: time.Millisecond}
+		rt.Spec.Rollout.ActionTimeout = &metav1.Duration{Duration: 10 * time.Minute}
+		rt.Spec.Rollout.Deadline = &metav1.Duration{Duration: 10 * time.Minute}
+	})
+	resolved(t, ctx, putPlan(t, ctx, rt, "50m"))
+	engine := newEngine()
+	engine.unhealthy = map[string]string{"cert-manager": "HealthProgressing"}
+	r, clk := newRollout(t, engine, true)
+	rec := &capture{}
+	r.Events = rec
+
+	reconcileRollout(t, ctx, r) // create
+	reconcileRollout(t, ctx, r) // step started
+	reconcileRollout(t, ctx, r) // waits: HealthProgressing
+	clk.now = clk.now.Add(11 * time.Minute)
+	ended := clk.now
+	reconcileRollout(t, ctx, r) // deadline passed
+
+	ro := rollouts(t, ctx)[0]
+	rs := certManager(t, ro)
+	if ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseExpired) || rs.State != v1alpha1.ReleaseProgressing ||
+		!sameSecond(rs.FinishedAt, ended) || rs.WaitedOn != "HealthProgressing" {
+
+		t.Fatalf("after the deadline: %v %+v", ro.Labels, rs)
+	}
+	if got := rec.actions(EventStepFinished); !slices.Equal(got, []string{"cert-manager/Expired"}) {
+		t.Errorf("StepFinished actions = %q, want one for the expired rollout", got)
+	}
+}
+
+// A step Event is sent only once the status recording its transition is
+// stored: a failed status write sends nothing, and the retry sends it once.
+func TestStepEventsFollowTheSavedStatus(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+		rt.Spec.Rollout.StabilizationWindow = &metav1.Duration{Duration: time.Millisecond}
+	})
+	resolved(t, ctx, putPlan(t, ctx, rt, "50m"))
+	engine := newEngine()
+	engine.unhealthy = map[string]string{"cert-manager": "HealthProgressing"}
+	r, _ := newRollout(t, engine, true)
+	rec := &capture{}
+	r.Events = rec
+	base, err := client.NewWithWatch(restConfig, client.Options{Scheme: k8s.Scheme()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failNext := false
+	r.Client = interceptor.NewClient(base, interceptor.Funcs{
+		SubResourceUpdate: func(ctx context.Context, c client.Client, sub string, obj client.Object,
+			opts ...client.SubResourceUpdateOption) error {
+
+			if _, ok := obj.(*v1alpha1.RuntimeRollout); ok && failNext {
+				failNext = false
+				return apierrors.NewConflict(schema.GroupResource{Resource: "runtimerollouts"}, obj.GetName(),
+					errors.New("the object has been modified"))
+			}
+			return c.SubResource(sub).Update(ctx, obj, opts...)
+		},
+	})
+
+	reconcileRollout(t, ctx, r) // create
+	failNext = true
+	if _, err := r.Reconcile(ctx, request); err == nil {
+		t.Fatal("a failed status write was not reported")
+	}
+	if got := rec.actions(EventStepStarted); len(got) != 0 {
+		t.Fatalf("StepStarted sent for a start that was never stored: %q", got)
+	}
+	reconcileRollout(t, ctx, r) // step started again, stored
+	if got := rec.actions(EventStepStarted); len(got) != 1 {
+		t.Errorf("StepStarted actions = %q, want one", got)
 	}
 }
