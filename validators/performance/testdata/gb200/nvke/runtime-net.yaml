@@ -186,9 +186,19 @@ spec:
                   - --mca
                   - plm_rsh_args
                   - -o StrictHostKeyChecking=no -o ConnectionAttempts=10
+                  # Keep MPI's own traffic on eth0. The pods see every HCA on the
+                  # host (shared RDMA namespace), so UCX would otherwise try the
+                  # rail VFs and fail where the IB partition is limited, before
+                  # NCCL starts.
+                  - --mca
+                  - pml
+                  - ob1
                   - --mca
                   - btl
-                  - ^openib
+                  - self,tcp
+                  - --mca
+                  - coll
+                  - ^ucc,hcoll
                   - --mca
                   - btl_tcp_if_include
                   - eth0
