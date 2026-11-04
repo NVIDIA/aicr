@@ -113,7 +113,8 @@ startup, so a rate reads zero rather than nothing before its first event.
    release changes, and on request.
 2. **The resolver renders a candidate.** It runs `aicr snapshot`, `aicr
    recipe` and `aicr bundle` as Jobs, mirrors the charts into your registry
-   (reusing those the candidate or active plan already mirrored),
+   (reusing those the candidate or active plan already mirrored into the
+   same `registry.repository`),
    and writes the plan (`status.candidatePlanDigest`, `Resolved=True`). The same
    rendered output is the same digest, so nothing further happens.
 3. **The candidate stabilizes** for `spec.rollout.stabilizationWindow`

@@ -139,11 +139,12 @@ that allows expansion applies in place; nothing is ever deleted from the
 registry.
 
 **Upstream chart repository unreachable.** A chart that the candidate or
-active plan already mirrored, at the same version and from the same upstream,
-is reused from your registry with no upstream request, so a re-resolution that
-pins the same charts rides out the outage. A chart not mirrored before is
-retried like a registry outage, with `[SERVICE_UNAVAILABLE] fetch …` on
-`Resolved`.
+active plan already mirrored, at the same version, from the same upstream and
+into the same `registry.repository`, is reused from your registry with no
+upstream request, so a re-resolution that pins the same charts rides out the
+outage. A chart not mirrored before is retried like a registry outage, with
+`[SERVICE_UNAVAILABLE] fetch …` on `Resolved`. After `registry.repository`
+changes, every chart is mirrored from upstream again.
 
 **`Unauthorized`** (`Resolved=False`, stalled). The registry refused the
 operator's own push or pull (HTTP 401 or 403). Check the identity's policy and
