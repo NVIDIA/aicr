@@ -86,6 +86,14 @@ want="• most-critical: 4 critical, 2 high | GHSA-d
 expect "ordering and incomplete scans" "${want}" \
   "$(printf 'busybox: scan did not complete (failure)\n\n' | "${SUMMARY}" "${dir}")"
 
+# An image scanned per architecture reports each architecture on its own line.
+dir="${WORK_DIR}/arch"
+result "${dir}" "aicr-operator amd64" 0 1 0 "stdlib GHSA-x"
+result "${dir}" "aicr-operator arm64" 0 2 0 "stdlib GHSA-x, musl CVE-9"
+want="• aicr-operator arm64: 0 critical, 2 high | GHSA-x, CVE-9
+• aicr-operator amd64: 0 critical, 1 high | GHSA-x"
+expect "per-architecture results" "${want}" "$("${SUMMARY}" "${dir}" </dev/null)"
+
 # A result line it cannot parse is reported, never counted clean.
 dir="${WORK_DIR}/unreadable"
 mkdir -p "${dir}"

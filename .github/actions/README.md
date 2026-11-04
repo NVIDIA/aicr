@@ -233,7 +233,7 @@ paths are fully specified in `.goreleaser.yaml` under `kos.repositories`.
 resolve its per-platform manifest digests, and generate SBOM + VEX + provenance
 **When to use**: Attesting candidate images in the AICR release workflow
 **Inputs**:
-- `image_name` (required): One of the seven fixed AICR release image names
+- `image_name` (required): One of the fixed release image names: the seven AICR images, `aicr-operator` and `aicr-registry` (`release-input-validation.sh`)
 - `candidate_tag` (required): Validated `candidate-<run-id>-<run-attempt>` tag
 - `expected_digest` (required): Authoritative `sha256:<64 lowercase hex>` digest
 - `crane_version` (optional): crane version (default: "v0.20.6")
@@ -256,7 +256,7 @@ resolve its per-platform manifest digests, and generate SBOM + VEX + provenance
 attestations for an image whose digests are already known
 **When to use**: When you already have the digests (e.g., from build output)
 **Inputs**:
-- `image_name` (required): One of the seven fixed AICR release image names
+- `image_name` (required): One of the fixed release image names: the seven AICR images, `aicr-operator` and `aicr-registry` (`release-input-validation.sh`)
 - `image_digest` (required): Multi-platform index digest; subject for the index provenance attestation
 - `amd64_digest` (required): `linux/amd64` manifest digest; subject for the amd64 SBOM, VEX and provenance
 - `arm64_digest` (required): `linux/arm64` manifest digest; subject for the arm64 SBOM, VEX and provenance

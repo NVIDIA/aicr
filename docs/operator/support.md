@@ -5,19 +5,21 @@ qualification stops applying.
 
 ## Qualified profiles
 
-A profile is supported only after it has run on real hardware with a release
-and its evidence is published. Simulators (envtest,
-kind) prove the operator's behavior, never GPU, fabric, isolation or
-performance.
+No profile is qualified yet. A profile is supported only after it has run on
+real hardware with a release, and its hardware, security and recovery evidence
+is published. Simulators (envtest, kind) prove the operator's behavior, never
+GPU, fabric, isolation or performance. GB200 is not claimed: it is a separate
+profile that never inherits H100 evidence.
 
-| Profile | AICR recipe | Status |
+A release that qualifies a profile names the exact operator image and chart
+digests it qualified, with the AICR image digest they were qualified against.
+
+### In qualification
+
+| Profile | AICR recipe | Still needed |
 | --- | --- | --- |
-| H100 on EKS, Ubuntu GPU nodes, training on Kubeflow | `h100-eks-ubuntu-training-kubeflow` | Not qualified: not yet run on hardware |
-| H100 on GKE, Container-Optimized OS, training on Kubeflow | `h100-gke-cos-training-kubeflow` | Qualification in progress; not yet supported. Artifact Registry, instead of the in-cluster registry, needs the `static` provider and a credential refresher you run |
-| GB200 | — | Not claimed; a separate profile that never inherits H100 evidence |
-
-A release names the exact operator image and chart digests
-it qualified, with the AICR image digest they were qualified against.
+| H100 on EKS, Ubuntu GPU nodes, training on Kubeflow | `h100-eks-ubuntu-training-kubeflow` | A run on hardware |
+| H100 on GKE, Container-Optimized OS, training on Kubeflow | `h100-gke-cos-training-kubeflow` | Published security and recovery evidence. Artifact Registry, instead of the in-cluster registry, needs the `static` provider and a credential refresher you run |
 
 ## Versions
 

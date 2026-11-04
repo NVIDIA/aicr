@@ -42,7 +42,6 @@ type Manifest struct {
 	Operator      Image             `json:"operator"`
 	Chart         File              `json:"chart"`
 	Plugin        map[string]string `json:"plugin"`
-	SBOMs         map[string]string `json:"sboms"`
 	AICR          AICR              `json:"aicr"`
 	// Registry is the in-cluster registry image the chart defaults to.
 	Registry Image `json:"registry"`
