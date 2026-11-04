@@ -516,15 +516,17 @@ with the Client's version, the same combined document `aicr validate` writes.
 
 ### CNCF AI Conformance evidence
 
-Three methods produce CNCF AI Conformance evidence, matching
+Four methods produce CNCF AI Conformance evidence, matching
 `aicr validate --evidence-dir` and `aicr validate --cncf-submission`:
 
 - `RenderCNCFEvidence(ctx, report, dir)` writes one markdown file per
-  submission requirement, plus `index.md`, from a CTRF report such as the one
+  requirement a non-skipped check evidenced, plus `index.md` listing every
+  requirement of the checklist, from a CTRF report such as the one
   `MergeReports` returns, against the latest checklist version the build
-  carries (`cncf.LatestVersion`). Skipped checks are omitted, so a report
-  from a run that used `WithValidationSkipChecks` is refused with
-  `ErrCodeInvalidRequest`.
+  carries (`cncf.LatestVersion`). A report from a run that used
+  `WithValidationSkipChecks` is refused with `ErrCodeInvalidRequest`: the
+  withheld requirements would read `NOT TESTED`, and a run narrower than the
+  recipe cannot evidence it.
 - `RenderCNCFEvidenceWithOptions(ctx, report, dir, opts)` is the same render
   with the checklist version selected by `RenderCNCFEvidenceOptions`:
   `ConformanceVersion` names it explicitly (`"v1.36"`; an unsupported version
@@ -532,13 +534,50 @@ Three methods produce CNCF AI Conformance evidence, matching
   value `Snapshot.KubernetesVersion()` returns) selects the checklist for the
   cluster's minor, or the nearest carried one with a warning when this build
   has none for it (below v1.35 renders v1.35, above v1.37 renders v1.37).
-  **Matching `aicr validate --evidence-dir` means this method**, with
-  `KubernetesVersion: snap.KubernetesVersion()` from the snapshot
-  `ValidateState` ran against; `RenderCNCFEvidence` alone renders the latest
-  checklist whatever the cluster runs. The requirement set, levels and descriptions come from
-  `pkg/evidence/cncf` (`SupportedVersions`, `ChecklistFor`); a check whose
-  requirement the selected version no longer lists (`dra_support` from v1.36
-  on) renders as supporting evidence rather than a requirement row.
+  `NotApplicable` declares conditional MUSTs not applicable with a
+  justification (`spec.validate.evidence.cncf.notApplicable`; only
+  `cluster_autoscaling` today, any other id is refused with
+  `ErrCodeInvalidRequest`). The requirement set, levels and descriptions come
+  from `pkg/evidence/cncf` (`SupportedVersions`, `ChecklistFor`); a check
+  whose requirement the selected version no longer lists (`dra_support` from
+  v1.36 on) renders as supporting evidence rather than a requirement row.
+- `ValidateCNCFEvidenceOptions(opts)` checks `RenderCNCFEvidenceOptions` the
+  way the render will, without rendering: the version resolves and every
+  `NotApplicable` id is a conditional MUST with a justification. `aicr
+  validate` calls it before any recipe, snapshot or cluster work so a bad
+  `notApplicable` key fails in milliseconds; the render repeats the check as
+  the backstop.
+- `RenderCNCFEvidenceWithResult(ctx, report, dir, opts)` is
+  `RenderCNCFEvidenceWithOptions` returning the `*CNCFRequirementAggregate`
+  (a transparent alias of `cncf.Aggregate`) the pages and index were
+  rendered from. **Matching `aicr validate --evidence-dir`
+  means this method**, with `KubernetesVersion: snap.KubernetesVersion()`
+  from the snapshot `ValidateState` ran against and `NotApplicable` from
+  `CNCFEvidenceOptions()`; `RenderCNCFEvidence` alone renders the latest
+  checklist whatever the cluster runs. The aggregate is fail-closed and
+  scoped by level (see [Requirement status](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#requirement-status)):
+  `Requirements` holds every requirement in checklist order with its
+  `Status` (`passed`, `failed`, `not tested`, `not applicable`), `Reason`,
+  the `Proof` checks that established a pass, and the result of every
+  expected `Checks` entry; `Passed()` reports whether every
+  applicable MUST passed and `IncompleteMusts()` lists those that did not. A
+  SHOULD never fails `Passed()`. A report with no submission-required result
+  writes nothing, and the aggregate reports every requirement not tested
+  except those `NotApplicable` declares, which stay not applicable.
+
+```go
+agg, err := client.RenderCNCFEvidenceWithResult(ctx, report, "./evidence", aicr.RenderCNCFEvidenceOptions{
+	KubernetesVersion: snap.KubernetesVersion(),
+	NotApplicable:     cncfOpts.NotApplicable,
+})
+if err != nil {
+	return err
+}
+for _, r := range agg.IncompleteMusts() {
+	log.Printf("%s: %s (%s)", r.ID, r.Status, r.Reason)
+}
+```
+
 - `CollectCNCFEvidence(ctx, recipe, opts)` deploys GPU test workloads and
   captures behavioral evidence under `opts.Dir`. It needs `bash` and
   `kubectl` on `PATH` and runs for up to 20 minutes. `recipe` is optional.
@@ -558,7 +597,10 @@ err := client.CollectCNCFEvidence(ctx, rec, aicr.CNCFCollectOptions{
 
 None of these methods is in v0.22.0 or earlier. `RenderCNCFEvidenceWithOptions`,
 `RenderCNCFEvidenceOptions` and `Snapshot.KubernetesVersion` are not in v1.0.0
-or earlier either.
+or earlier either, and `RenderCNCFEvidenceWithResult`,
+`ValidateCNCFEvidenceOptions`, `CNCFRequirementAggregate`,
+`RenderCNCFEvidenceOptions.NotApplicable` and `CNCFEvidenceOptions.NotApplicable`
+are not in v1.2.0 or earlier.
 
 ## Recipe sources
 
@@ -1510,8 +1552,9 @@ options. The caller applies its own flag-over-config precedence, the same way
 `SnapshotOutputOptions()` and `ValidateInputOptions()` do, then branches on
 `CNCFSubmission`. When true, it passes `Dir` and `Features` to
 `CollectCNCFEvidence` in `CNCFCollectOptions` and skips `ValidateState`. When
-false, a non-empty `Dir` goes to `RenderCNCFEvidenceWithOptions` after
-`ValidateState`, with `KubernetesVersion` from the snapshot, which is what the
+false, a non-empty `Dir` goes to `RenderCNCFEvidenceWithResult` after
+`ValidateState`, with `KubernetesVersion` from the snapshot and
+`NotApplicable` carried into `RenderCNCFEvidenceOptions`, which is what the
 CLI does; `RenderCNCFEvidence` renders the latest carried checklist instead.
 `CNCFEvidenceOptions()` returns the zero value (never an error) for an absent
 section, and an error only when `spec.validate` is present but malformed.

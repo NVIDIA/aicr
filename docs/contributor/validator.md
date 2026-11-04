@@ -77,20 +77,28 @@ it. It records the reason twice on purpose: as prose in `message`, and as the
 `extra.skipReason` key. Only the second survives the default bundle, whose
 minimal redaction policy blanks every `message`. A bundle carrying WHICH check
 was withheld but not WHY would be the same "reads as complete" defect the flag's
-guards exist to prevent. The CNCF evidence renderer does
-NOT: `pkg/evidence/cncf/renderer.go` drops every skipped entry before grouping
-(pinned by `TestRenderSkippedExcluded`), so a withheld requirement gets no page
-and, when another submission-required check produced an entry so an index is
-written at all, appears there only as `NOT TESTED (not run)`, with no reason
-recorded. The requirement set it groups into is the upstream
-checklist for the selected version (`pkg/evidence/cncf/checklist.go`, embedded
-verbatim under `schemas/` and digest-pinned); `requirements.go` maps each
-conformance check to the requirement it evidences, and
-`TestEveryMustHasExpectedChecks` fails when a supported version carries a MUST
-no check covers. `validateFlagCombinations` refuses `--skip-check`
-together with `--evidence-dir` for that reason, rather than emitting a
-submission that reads as complete, and `Client.RenderCNCFEvidence` refuses a
-report carrying a `SkipCheckReasonCode` skip. `preflightSkipChecks` runs beside `preflightDeclaredChecks`, on the
+guards exist to prevent. The CNCF evidence renderer reads the same code:
+`pkg/evidence/cncf/aggregate.go` (`AggregateReport`) computes every
+requirement's status fail-closed from the checks expected to evidence it,
+and a skipped check leaves its requirement `NOT TESTED` with the reason code
+in the index (`TestRenderSkippedReasonReachesIndex`); a skipped check gets no
+page section (`TestRenderSkippedExcluded`). A requirement passes only when
+every check on one of its proof paths is present and `passed`
+(`alternativeProofs` lists the requirements with more than one path), a failed
+check fails it, and `other`, `pending` or absent checks leave it not tested.
+`Aggregate.Passed` is scoped by level: every applicable MUST passed, SHOULDs
+excluded; `NOT APPLICABLE` comes only from
+`spec.validate.evidence.cncf.notApplicable` and only for the conditional
+MUSTs in `conditionalMusts` (`ValidateNotApplicable`). The requirement set it
+aggregates is the upstream checklist for the selected version
+(`pkg/evidence/cncf/checklist.go`, embedded verbatim under `schemas/` and
+digest-pinned); `requirements.go` maps each conformance check to the
+requirement it evidences, and `TestEveryMustHasExpectedChecks` fails when a
+supported version carries a MUST no check covers. `validateFlagCombinations`
+still refuses `--skip-check` together with `--evidence-dir`, because a run
+that withholds a declared check is narrower than the recipe by construction
+(ADR-007 amendment, decision 4), and `Client.RenderCNCFEvidence` refuses a
+report carrying a `SkipCheckReasonCode` skip for the same reason. `preflightSkipChecks` runs beside `preflightDeclaredChecks`, on the
 same fail-closed terms and at the same point: a name matching no catalog
 validator is rejected, and so is a list that would remove every declared check
 from a requested phase (that phase would report `passed` while running nothing,
