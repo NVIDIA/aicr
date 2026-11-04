@@ -293,11 +293,17 @@ earlier plan's digest.
 ## Upgrading AICR within v1
 
 An operator release's chart defaults to the AICR release of the same tag,
-qualified with it in the release workflow, so upgrading the chart to a release
-also upgrades AICR to it. A release candidate's chart defaults to that
-candidate's AICR and sets `aicr.allowPrerelease`. An earlier chart, such as
-v1.2.0's, can default to an earlier AICR release; `helm show values` shows the
-default.
+qualified with it in the release workflow. A release candidate's chart
+defaults to that candidate's AICR and sets `aicr.allowPrerelease`. An earlier
+chart, such as v1.2.0's, can default to an earlier AICR release; `helm show
+values` shows the default.
+
+The default applies only while your values set none of `aicr.version`,
+`aicr.image` and `aicr.validatorImages`: Helm applies your values over the
+chart's. If you set any of them, an operator upgrade keeps your AICR, a pairing
+that release did not qualify, and pinning only `aicr.image` stalls resolution
+with `AICRVersionMismatch`. On each operator upgrade, either remove all three
+from your values or set all three from the new chart's `helm show values`.
 
 AICR is an installation value, not a runtime field. Upgrade it with a chart
 upgrade that sets the version, the image and, with validation, the validator

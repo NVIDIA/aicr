@@ -211,11 +211,13 @@ Every release must pass these automated gates before artifacts are published:
 - SLSA Build Level 3 provenance for those same digests
 
 Container builds first publish only a run-unique
-`candidate-<run-id>-<run-attempt>` tag. Version aliases, `latest`, and the
-public GitHub release stay unchanged until all seven candidate digests pass
-their gates. Homebrew publication starts only after the GitHub release is
-public. If a gate fails, the candidate tags stay available for diagnosis but
-are not promoted.
+`candidate-<run-id>-<run-attempt>` tag. Version aliases stay unchanged until
+all seven candidate digests pass AICR's own gates (resolution, scans and
+attestation); `latest` and the public GitHub release stay unchanged until the
+operator gate passes too. Homebrew publication starts only after the GitHub
+release is public. If an AICR gate fails, the candidate tags stay available
+for diagnosis but are not promoted. If only the operator gate fails, the
+version aliases exist without a release; see [Release Pipeline](#release-pipeline).
 
 ## How to Release
 

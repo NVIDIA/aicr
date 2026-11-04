@@ -1002,10 +1002,11 @@ jobs:
   # AICR Operator (preview, ADR-027): one candidate of the tagged source, built
   # as OCI layouts, the deterministically packaged chart and the
   # kubectl-aicr binaries (tools/operator-candidate). Its chart defaults to
-  # this tag's AICR images, by the digests resolve-candidates pinned, and the
-  # lifecycle check qualifies them once promote-versions has published their
-  # version aliases. It is scanned like every release image; release-check
-  # fails closed on its build, scan, reproducibility and lifecycle checks, so
+  # this tag's AICR images, by the digests resolve-candidates pinned; once
+  # promote-versions has published their version aliases, the lifecycle check
+  # runs the operator with them and the validation check runs the validator
+  # images. It is scanned like every release image; release-check fails closed
+  # on its build, scan, reproducibility, lifecycle and validation checks, so
   # they gate :latest too. It is published and attested only after
   # promote-images, and publish waits for it, so a failing operator blocks the
   # release.
