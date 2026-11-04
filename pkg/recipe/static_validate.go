@@ -75,12 +75,15 @@ func validateStatic(ctx context.Context, path, dataDir string, externalOnly bool
 		dp = layered
 		defer EvictCachedStore(dp)
 		defer EvictCachedRegistry(dp)
+		defer EvictCachedCriteriaRegistry(dp)
 	}
 	add := func(file, field string, err error) {
 		diagnostics = append(diagnostics, staticDiagnostic(file, field, err))
 	}
-	var data []byte
-	var hdr RecipeMetadataHeader
+	var (
+		data []byte
+		hdr  RecipeMetadataHeader
+	)
 	if path != "" {
 		input, err := readStaticInput(path)
 		if err != nil {
@@ -453,16 +456,22 @@ func validateStaticOverlay(ctx context.Context, store *MetadataStore, overlay *R
 	if overlay.Spec.Criteria != nil {
 		criteria := *overlay.Spec.Criteria
 		normalizedCriteria := criteria.FillUnsetWithAny()
-		if overlay.Spec.Profile != nil {
-			names := make([]string, 0, len(overlay.Spec.Profile.Values))
-			for name := range overlay.Spec.Profile.Values {
+		effective, err := store.resolveProfileDeclaration(store.FindMatchingOverlays(normalizedCriteria))
+		if err != nil {
+			add(file, "spec.profile", err)
+			return
+		}
+		if effective != nil {
+			profile := effective.Declaration
+			names := make([]string, 0, len(profile.Values))
+			for name := range profile.Values {
 				names = append(names, name)
 			}
 			sort.Strings(names)
 			for _, name := range names {
-				selection := overlay.Spec.Profile.Name + "=" + name
-				if _, err := store.BuildRecipeResultWithProfile(ctx, normalizedCriteria, selection); err != nil {
-					add(file, "spec.profile.values."+name, err)
+				selection := profile.Name + "=" + name
+				if _, buildErr := store.BuildRecipeResultWithProfile(ctx, normalizedCriteria, selection); buildErr != nil {
+					add(file, "spec.profile.values."+name, buildErr)
 				}
 			}
 		}

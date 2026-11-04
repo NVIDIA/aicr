@@ -261,6 +261,93 @@ func TestValidateStaticCatalog(t *testing.T) {
 	}
 }
 
+func TestValidateStaticInheritedProfileValues(t *testing.T) {
+	for _, collision := range []bool{false, true} {
+		name := "valid"
+		if collision {
+			name = "leaf constraint collision"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.CopyFS(dir, GetEmbeddedFS()); err != nil {
+				t.Fatal(err)
+			}
+			const source = "overlays/a100-gke-cos-training.yaml"
+			path := filepath.Join(dir, source)
+			if collision {
+				content, err := defaultEmbeddedProvider.ReadFile(t.Context(), source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				content = []byte(strings.Replace(string(content), "  constraints:\n",
+					"  constraints:\n    - name: K8s.gke-gpu-pools.gpu-driver-installation\n      value: Disabled\n", 1))
+				if err := os.WriteFile(path, content, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			modes := []struct {
+				name     string
+				validate func() ([]StaticDiagnostic, error)
+				file     string
+			}{
+				{"file", func() ([]StaticDiagnostic, error) { return ValidateStatic(t.Context(), path, dir) }, path},
+				{"layered catalog", func() ([]StaticDiagnostic, error) { return ValidateStatic(t.Context(), "", dir) }, source},
+				{"external catalog", func() ([]StaticDiagnostic, error) { return ValidateStaticDirectory(t.Context(), dir) }, source},
+			}
+			for _, mode := range modes {
+				t.Run(mode.name, func(t *testing.T) {
+					diagnostics, err := mode.validate()
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !collision {
+						if len(diagnostics) != 0 {
+							t.Fatalf("valid inherited profile rejected: %+v", diagnostics)
+						}
+						return
+					}
+					for _, diagnostic := range diagnostics {
+						if diagnostic.File == mode.file && diagnostic.Field == "spec.profile.values.bundle-installer" &&
+							strings.Contains(diagnostic.Message, "collides with the composed recipe") {
+
+							return
+						}
+					}
+					t.Fatalf("missing inherited profile collision: %+v", diagnostics)
+				})
+			}
+		})
+	}
+}
+
+func TestValidateStaticEvictsCriteriaRegistry(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, GetEmbeddedFS()); err != nil {
+		t.Fatal(err)
+	}
+	modes := []struct {
+		name     string
+		validate func() ([]StaticDiagnostic, error)
+	}{
+		{"layered catalog", func() ([]StaticDiagnostic, error) { return ValidateStatic(t.Context(), "", dir) }},
+		{"external catalog", func() ([]StaticDiagnostic, error) { return ValidateStaticDirectory(t.Context(), dir) }},
+	}
+	for _, mode := range modes {
+		t.Run(mode.name, func(t *testing.T) {
+			diagnostics, err := mode.validate()
+			if err != nil || len(diagnostics) != 0 {
+				t.Fatalf("diagnostics=%+v err=%v", diagnostics, err)
+			}
+			criteriaRegistryCache.Range(func(key, _ any) bool {
+				if provider, ok := key.(*LayeredDataProvider); ok && provider.externalDir == dir {
+					t.Error("static validation retained its criteria registry cache entry")
+				}
+				return true
+			})
+		})
+	}
+}
+
 func TestValidateStaticNewLeaf(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "leaf.yaml")
 	content := `kind: RecipeMetadata

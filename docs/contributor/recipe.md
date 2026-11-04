@@ -30,6 +30,7 @@ diagnostics for CI, without filling missing files or registry entries from the
 embedded catalog. Omit `--external-only` when validating an extension layered
 on the embedded catalog. Current checks emit error diagnostics; errors cause
 a non-zero exit status.
+
 For pre-commit, install a local hook such as:
 
 ```yaml
