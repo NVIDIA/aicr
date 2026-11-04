@@ -295,6 +295,7 @@ func TestRunReportsCurrentAliasMappings(t *testing.T) {
 		"BundleAttester|github.com/NVIDIA/aicr/pkg/bundler/attestation|Attester\n" +
 		"BundleConfig|github.com/NVIDIA/aicr/pkg/bundler/config|Config\n" +
 		"BundleVerifyReport|github.com/NVIDIA/aicr/pkg/bundler/verifier|VerifyResult\n" +
+		"CNCFRequirementAggregate|github.com/NVIDIA/aicr/pkg/evidence/cncf|Aggregate\n" +
 		"CriteriaRegistry|github.com/NVIDIA/aicr/pkg/recipe|CriteriaRegistry\n" +
 		"EvidenceVerification|github.com/NVIDIA/aicr/pkg/evidence/verifier|VerifyResult\n" +
 		"OIDCResolveOptions|github.com/NVIDIA/aicr/pkg/bundler/attestation|ResolveOptions\n" +

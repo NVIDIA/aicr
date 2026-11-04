@@ -238,7 +238,7 @@ func TestValidateFlagCombinations_SkipCheckWithEvidenceDir(t *testing.T) {
 			evidenceDir: "/tmp/evidence",
 			skipChecks:  []string{"dra-support"},
 			wantErr:     true,
-			wantSubstrs: []string{"--skip-check", "--evidence-dir", "NOT TESTED (not run)"},
+			wantSubstrs: []string{"--skip-check", "--evidence-dir", "narrower than the recipe"},
 		},
 		{
 			name:        "evidence-dir alone is accepted",

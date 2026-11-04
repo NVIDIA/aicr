@@ -119,3 +119,110 @@ func TestSnapshotKubernetesVersion(t *testing.T) {
 		t.Errorf("VersionForKubernetes(KubernetesVersion()) = (%q, %v)", v, ok)
 	}
 }
+
+// RenderCNCFEvidenceWithResult returns the aggregate the pages were rendered
+// from, carries NotApplicable into it, and refuses an id that may not be
+// declared not applicable before writing anything.
+func TestRenderCNCFEvidenceWithResult(t *testing.T) {
+	t.Parallel()
+
+	report := &ctrf.Report{}
+	report.Results.Tests = []ctrf.TestResult{
+		{Name: "gang-scheduling", Status: ctrf.StatusPassed, Duration: 1000},
+		{Name: "cluster-autoscaling", Status: ctrf.StatusFailed, Message: "no scale event observed"},
+		{Name: "pod-autoscaling", Status: ctrf.StatusSkipped, Extra: map[string]string{"skipReason": "no-metrics-api"}},
+	}
+
+	t.Run("aggregate reflects the run and the declaration", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		agg, err := (&Client{}).RenderCNCFEvidenceWithResult(context.Background(), report, dir, RenderCNCFEvidenceOptions{
+			ConformanceVersion: "v1.37",
+			NotApplicable:      map[string]string{"cluster_autoscaling": "fixed-size cluster"},
+		})
+		if err != nil {
+			t.Fatalf("RenderCNCFEvidenceWithResult: %v", err)
+		}
+		if agg == nil || agg.Version != cncf.Version137 {
+			t.Fatalf("aggregate = %+v, want v1.37", agg)
+		}
+		if agg.Passed() {
+			t.Error("Passed() = true with MUSTs skipped and not run")
+		}
+		want := map[string]cncf.RequirementStatus{
+			"gang_scheduling":     cncf.StatusPassed,
+			"cluster_autoscaling": cncf.StatusNotApplicable,
+			"pod_autoscaling":     cncf.StatusNotTested,
+			"robust_controller":   cncf.StatusNotTested,
+			"workload_sandboxing": cncf.StatusNotTested,
+		}
+		for id, status := range want {
+			if r := agg.Requirement(id); r == nil || r.Status != status {
+				t.Errorf("%s = %+v, want %q", id, r, status)
+			}
+		}
+		for _, r := range agg.IncompleteMusts() {
+			if r.ID == "cluster_autoscaling" || r.Level != cncf.LevelMust {
+				t.Errorf("IncompleteMusts lists %s (%s)", r.ID, r.Level)
+			}
+		}
+		index, err := os.ReadFile(filepath.Join(dir, "index.md")) //nolint:gosec // test-controlled path
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{
+			"**Applicable MUSTs:** FAILED",
+			"NOT APPLICABLE (fixed-size cluster)",
+			"NOT TESTED (pod-autoscaling skipped: no-metrics-api)",
+		} {
+			if !strings.Contains(string(index), want) {
+				t.Errorf("index.md missing %q:\n%s", want, index)
+			}
+		}
+	})
+
+	t.Run("a non-conditional id is refused", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		agg, err := (&Client{}).RenderCNCFEvidenceWithResult(context.Background(), report, dir, RenderCNCFEvidenceOptions{
+			NotApplicable: map[string]string{"gang_scheduling": "we do not gang"},
+		})
+		requireCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+		if agg != nil {
+			t.Errorf("aggregate = %+v, want nil on error", agg)
+		}
+		if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+			t.Errorf("evidence dir not left empty: %v", entries)
+		}
+	})
+
+	t.Run("ValidateCNCFEvidenceOptions refuses the same inputs without rendering", func(t *testing.T) {
+		t.Parallel()
+		c := &Client{}
+		if err := c.ValidateCNCFEvidenceOptions(RenderCNCFEvidenceOptions{
+			KubernetesVersion: "v1.37.2",
+			NotApplicable:     map[string]string{"cluster_autoscaling": "fixed-size cluster"},
+		}); err != nil {
+			t.Errorf("valid options refused: %v", err)
+		}
+		for name, opts := range map[string]RenderCNCFEvidenceOptions{
+			"non-conditional id":  {NotApplicable: map[string]string{"gang_scheduling": "we do not gang"}},
+			"blank justification": {NotApplicable: map[string]string{"cluster_autoscaling": " "}},
+			"unsupported version": {ConformanceVersion: "v1.38"},
+		} {
+			t.Run(name, func(t *testing.T) {
+				requireCode(t, c.ValidateCNCFEvidenceOptions(opts), aicrerrors.ErrCodeInvalidRequest)
+			})
+		}
+		var nilClient *Client
+		requireCode(t, nilClient.ValidateCNCFEvidenceOptions(RenderCNCFEvidenceOptions{}), aicrerrors.ErrCodeInvalidRequest)
+	})
+
+	t.Run("WithOptions still refuses the same way", func(t *testing.T) {
+		t.Parallel()
+		err := (&Client{}).RenderCNCFEvidenceWithOptions(context.Background(), report, t.TempDir(), RenderCNCFEvidenceOptions{
+			NotApplicable: map[string]string{"workload_sandboxing": "no sandbox runtime"},
+		})
+		requireCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+	})
+}

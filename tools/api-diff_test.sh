@@ -124,6 +124,7 @@ ALIASES
             echo 'BundleConfig|github.com/NVIDIA/aicr/pkg/bundler/config|Config'
         fi
         echo 'BundleVerifyReport|github.com/NVIDIA/aicr/pkg/bundler/verifier|VerifyResult'
+        echo 'CNCFRequirementAggregate|github.com/NVIDIA/aicr/pkg/evidence/cncf|Aggregate'
         echo 'CriteriaRegistry|github.com/NVIDIA/aicr/pkg/recipe|CriteriaRegistry'
         echo 'EvidenceVerification|github.com/NVIDIA/aicr/pkg/evidence/verifier|VerifyResult'
         if [[ "${ALIAS_MAPPING_SCENARIO:-correct}" == "extra-generic" ]]; then
@@ -739,6 +740,7 @@ else
             "${internal_fixture}/pkg/bundler/config" \
             "${internal_fixture}/pkg/bundler/result" \
             "${internal_fixture}/pkg/bundler/verifier" \
+            "${internal_fixture}/pkg/evidence/cncf" \
             "${internal_fixture}/pkg/evidence/verifier" \
             "${internal_fixture}/pkg/recipe" \
             "${internal_fixture}/pkg/upgrade" \
@@ -765,6 +767,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	bundlerverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
+	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
 	evidenceverifier "github.com/NVIDIA/aicr/pkg/evidence/verifier"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/upgrade"
@@ -778,11 +781,17 @@ type CriteriaRegistry = recipe.CriteriaRegistry
 type BundleVerifyReport = bundlerverifier.VerifyResult
 type EvidenceVerification = evidenceverifier.VerifyResult
 type UpgradeReport = upgrade.Report
+type CNCFRequirementAggregate = cncf.Aggregate
 EOF
         cat >"${internal_fixture}/pkg/upgrade/upgrade.go" <<'EOF'
 package upgrade
 
 type Report struct{}
+EOF
+        cat >"${internal_fixture}/pkg/evidence/cncf/aggregate.go" <<'EOF'
+package cncf
+
+type Aggregate struct{}
 EOF
         cat >"${internal_fixture}/pkg/bundler/verifier/verifier.go" <<'EOF'
 package verifier
@@ -880,6 +889,7 @@ else
             "${deleted_target_fixture}/pkg/bundler/config" \
             "${deleted_target_fixture}/pkg/bundler/result" \
             "${deleted_target_fixture}/pkg/bundler/verifier" \
+            "${deleted_target_fixture}/pkg/evidence/cncf" \
             "${deleted_target_fixture}/pkg/evidence/verifier" \
             "${deleted_target_fixture}/pkg/legacyconfig" \
             "${deleted_target_fixture}/pkg/recipe" \
@@ -906,6 +916,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	bundlerverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
+	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
 	evidenceverifier "github.com/NVIDIA/aicr/pkg/evidence/verifier"
 	"github.com/NVIDIA/aicr/pkg/legacyconfig"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -920,11 +931,17 @@ type CriteriaRegistry = recipe.CriteriaRegistry
 type BundleVerifyReport = bundlerverifier.VerifyResult
 type EvidenceVerification = evidenceverifier.VerifyResult
 type UpgradeReport = upgrade.Report
+type CNCFRequirementAggregate = cncf.Aggregate
 EOF
         cat >"${deleted_target_fixture}/pkg/upgrade/upgrade.go" <<'EOF'
 package upgrade
 
 type Report struct{}
+EOF
+        cat >"${deleted_target_fixture}/pkg/evidence/cncf/aggregate.go" <<'EOF'
+package cncf
+
+type Aggregate struct{}
 EOF
         cat >"${deleted_target_fixture}/pkg/bundler/verifier/verifier.go" <<'EOF'
 package verifier
@@ -981,6 +998,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	bundlerverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
+	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
 	evidenceverifier "github.com/NVIDIA/aicr/pkg/evidence/verifier"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/upgrade"
@@ -994,6 +1012,7 @@ type CriteriaRegistry = recipe.CriteriaRegistry
 type BundleVerifyReport = bundlerverifier.VerifyResult
 type EvidenceVerification = evidenceverifier.VerifyResult
 type UpgradeReport = upgrade.Report
+type CNCFRequirementAggregate = cncf.Aggregate
 EOF
         rm "${deleted_target_fixture}/pkg/legacyconfig/config.go"
     ); then

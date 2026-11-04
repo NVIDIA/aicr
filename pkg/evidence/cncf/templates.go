@@ -19,16 +19,14 @@ const indexTemplate = `# CNCF AI Conformance Evidence
 **Generated:** {{ .GeneratedAt.Format "2006-01-02T15:04:05Z" }}
 **Checklist:** {{ .Version }}
 
+**Applicable MUSTs:** {{ if .Passed }}PASSED{{ else }}FAILED{{ end }}
+
 ## Results
 
 | # | Requirement | Level | Feature | Result | Evidence |
 |---|-------------|-------|---------|--------|----------|
-{{- range $i, $e := .Entries }}
-| {{ add $i 1 }} | ` + "`{{ $e.RequirementID }}`" + ` | {{ $e.Level }} | {{ $e.Title }} | {{ upper $e.Status }} | [{{ $e.Filename }}]({{ $e.Filename }}) |
-{{- end }}
-{{- $n := len .Entries }}
-{{- range $i, $u := .Untested }}
-| {{ add $n (add $i 1) }} | ` + "`{{ $u.RequirementID }}`" + ` | {{ $u.Level }} | | NOT TESTED ({{ $u.Reason }}) | |
+{{- range $i, $r := .Rows }}
+| {{ add $i 1 }} | ` + "`{{ $r.RequirementID }}`" + ` | {{ $r.Level }} | {{ if $r.Title }}{{ $r.Title }} {{ end }}| {{ result $r.Status $r.Reason }} | {{ if $r.Filename }}[{{ $r.Filename }}]({{ $r.Filename }}) {{ end }}|
 {{- end }}
 {{- if .Supporting }}
 
@@ -39,7 +37,7 @@ Not requirements of the {{ .Version }} checklist; recorded because the checks ra
 | Capability | Feature | Result | Evidence |
 |------------|---------|--------|----------|
 {{- range $e := .Supporting }}
-| ` + "`{{ $e.RequirementID }}`" + ` | {{ $e.Title }} | {{ upper $e.Status }} | [{{ $e.Filename }}]({{ $e.Filename }}) |
+| ` + "`{{ $e.RequirementID }}`" + ` | {{ $e.Title }} | {{ result $e.Status $e.Reason }} | [{{ $e.Filename }}]({{ $e.Filename }}) |
 {{- end }}
 {{- end }}
 `
@@ -53,7 +51,10 @@ const evidenceTemplate = `# {{ .Title }}
 {{- else }}
 **Requirement:** ` + "`{{ .RequirementID }}`" + ` ({{ .Level }})
 {{- end }}
-**Result:** {{ upper .Status }}
+**Result:** {{ result .Status .Reason }}
+{{- if .Proof }}
+**Proof:** {{ join .Proof ", " }}
+{{- end }}
 
 ---
 
