@@ -360,3 +360,24 @@ func TestUpgradeCheckCmd_ScanOptOutRendersItsOwnReason(t *testing.T) {
 		t.Errorf("the at-risk section is missing from an opted-out run:\n%s", declined)
 	}
 }
+
+// TestUpgradeCheckCmd_OperatorNamespace pins that the cluster read is told
+// where the AICR Operator keeps its plans, defaulting to where its chart
+// installs, as kubectl aicr does.
+func TestUpgradeCheckCmd_OperatorNamespace(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"default", []string{"--from", "cluster", "--deployer", "argocd"}, "aicr-system"},
+		{"named", []string{"--from", "cluster", "--deployer", "argocd", "--operator-namespace", "aicr-ops"}, "aicr-ops"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := captureUpgradeCheckRequest(t, tt.args...).OperatorNamespace; got != tt.want {
+				t.Errorf("OperatorNamespace = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

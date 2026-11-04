@@ -163,6 +163,14 @@
 // version at all: the only revision it carries is the bundle repository's git
 // branch, and reporting that would claim each such component sits at "main".
 //
+// The exception is an Application the AICR Operator wrote. It is path-based
+// too, an OCI chart at path "." pinned by digest, but the operator records each
+// chart's version beside its digest in a plan ConfigMap. The digest status
+// establishes as deployed is looked up there, by release ID, in the operator's
+// namespace only, since only that namespace is guarded by the operator's
+// admission policy. A digest no plan records fails the read with the
+// alternatives rather than reading every operator component as unversioned.
+//
 // Only an Application deploying into this cluster is read. On an Argo CD
 // management cluster most deploy elsewhere, and a remote one carrying a
 // component's name and namespace would become this cluster's baseline. A
