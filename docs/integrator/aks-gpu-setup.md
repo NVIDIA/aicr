@@ -415,9 +415,10 @@ sets the same keys wherever the node carries a host toolkit config and
 `nvidia-ctk`, and otherwise completes without changes.
 
 Disabling `nodewright-customizations` (`--set
-nodewrightcustomizations:enabled=false`) removes this hardening along with
-every other nodewright customization, and `secure-accelerator-access` then
-fails on the azure-managed profile.
+nodewrightcustomizations:enabled=false`) removes the `toolkit-hardening` CR
+along with every other nodewright customization. Under azure-managed that
+removes the hardening and `secure-accelerator-access` fails; under
+operator-managed the GPU Operator's toolkit keeps the keys.
 
 **Scope of the hardening.** Setting the env-var key to `false` closes the
 `NVIDIA_VISIBLE_DEVICES` env-var path — the path `secure-accelerator-access`
@@ -798,12 +799,15 @@ bundle passes it to `nvidia-setup` as that package's `any`. Use `generic`, not
 `any`: with `tuningEnabled=true`, `generic` also moves `nvidia-tuned` to its
 `nvidia-generic` profile, and `nvidia-tuned` ships no `any` profile.
 
-**Opting out of nodewright customizations opts out of the hardening.** The
-toolkit hardening ships in `nvidia-setup` through `nodewright-customizations`,
+**Opting out of nodewright customizations removes the hardening CR.** The
+`toolkit-hardening` CR ships `nvidia-setup` through `nodewright-customizations`,
 so excluding that component (`--set nodewrightcustomizations:enabled=false`, a
-recipe override, or the bundlers filter) removes it, and `aicr bundle` warns
-when it does. If you used `--set nodewrightcustomizations:enabled=false` to skip
-RDMA, switch to `accelerator=generic` above to keep the hardening.
+recipe override, or the bundlers filter) removes it under either gpuStack
+profile. Under azure-managed (the default) that removes the toolkit hardening,
+and `aicr bundle` warns; under operator-managed the GPU Operator's toolkit keeps
+the same keys through `gpu-operator.toolkit.env`. If you used
+`--set nodewrightcustomizations:enabled=false` to skip RDMA, switch to
+`accelerator=generic` above to keep the hardening.
 
 ## References
 
