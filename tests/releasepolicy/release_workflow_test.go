@@ -120,6 +120,7 @@ func TestReleaseUsesSingleDigestMap(t *testing.T) {
 		"operator-scan":         "OPERATOR_SCAN_RESULT",
 		"operator-reproducible": "OPERATOR_REPRODUCIBLE_RESULT",
 		"operator-lifecycle":    "OPERATOR_LIFECYCLE_RESULT",
+		"operator-validation":   "OPERATOR_VALIDATION_RESULT",
 	} {
 		if !containsString(stringSlice(releaseCheck["needs"]), gate) ||
 			fmt.Sprint(gateEnv[variable]) != "${{ needs."+gate+".result }}" ||
@@ -1331,6 +1332,27 @@ func TestReleaseOperatorQualifiesTheTagsAICR(t *testing.T) {
 	}
 	if !jobTransitivelyDependsOn(jobs, "operator-lifecycle", "promote-versions") {
 		t.Error("operator-lifecycle must wait for the version aliases its AICR resolves")
+	}
+
+	// Deployment validation runs this tag's AICR and validator images, by the
+	// version aliases, before anything else publishes.
+	validation := mapValue(t, jobs, "operator-validation")
+	validationText := marshalYAML(t, validation)
+	for _, want := range []string{
+		"AICR_E2E_VERSION: ${{ github.ref_name }}",
+		"AICR_E2E_IMAGE: ${{ needs.resolve-candidates.outputs.aicr_image }}",
+		"AICR_E2E_VALIDATOR_IMAGES: ${{ needs.resolve-candidates.outputs.aicr_validator_images }}",
+		"make operator-e2e",
+	} {
+		if !strings.Contains(validationText, want) {
+			t.Errorf("operator-validation must run the e2e suite with this tag's AICR: missing %q", want)
+		}
+	}
+	if !jobTransitivelyDependsOn(jobs, "operator-validation", "promote-versions") {
+		t.Error("operator-validation must wait for the version aliases its validators resolve")
+	}
+	if _, conditional := validation["if"]; conditional {
+		t.Error("operator-validation must not run when version promotion did not succeed")
 	}
 }
 

@@ -962,7 +962,7 @@ jobs:
   release-check:
     name: Release Integrity Check
     runs-on: ubuntu-24.04
-    needs: [resolve-candidates, image-vuln-scan, attest, promote-versions, operator-candidate, operator-scan, operator-reproducible, operator-lifecycle]
+    needs: [resolve-candidates, image-vuln-scan, attest, promote-versions, operator-candidate, operator-scan, operator-reproducible, operator-lifecycle, operator-validation]
     if: always()
     timeout-minutes: 5
     permissions:
@@ -978,6 +978,7 @@ jobs:
           OPERATOR_SCAN_RESULT: ${{ needs.operator-scan.result }}
           OPERATOR_REPRODUCIBLE_RESULT: ${{ needs.operator-reproducible.result }}
           OPERATOR_LIFECYCLE_RESULT: ${{ needs.operator-lifecycle.result }}
+          OPERATOR_VALIDATION_RESULT: ${{ needs.operator-validation.result }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
@@ -988,7 +989,8 @@ jobs:
             "${OPERATOR_CANDIDATE_RESULT}" != "success" || \
             "${OPERATOR_SCAN_RESULT}" != "success" || \
             "${OPERATOR_REPRODUCIBLE_RESULT}" != "success" || \
-            "${OPERATOR_LIFECYCLE_RESULT}" != "success" ]]; then
+            "${OPERATOR_LIFECYCLE_RESULT}" != "success" || \
+            "${OPERATOR_VALIDATION_RESULT}" != "success" ]]; then
             echo "::error::Release security gates did not all succeed for ${TAG}."
             echo "::error::latest, the operator and the GitHub release stay unpublished; repair the failure and rerun this tag."
             exit 1
@@ -1223,6 +1225,44 @@ jobs:
         run: |
           kubectl --kubeconfig .operator-e2e/kubeconfig -n aicr-system logs deployment/aicr-operator --tail=300 || true
           kubectl --kubeconfig .operator-e2e/kubeconfig get clusterruntimes,runtimerollouts -o yaml || true
+
+      - name: Delete kind cluster
+        if: ${{ always() }}
+        run: make operator-kind-down
+
+  # Deployment validation with this tag's AICR (#3560). The operator e2e
+  # suite runs this tag's AICR image as operator-built Jobs, recipe through
+  # validation, with the stamped validator images; each validator runs by the
+  # version alias promote-versions published, its evidence names the pinned
+  # tags, each tag resolves to its pinned digest, and the operator's evidence
+  # binding reads back. operator-lifecycle covers install, upgrade and
+  # rollout with validation off. Like it, this runs third-party images on
+  # privileged kind nodes, holds no release identity and publishes nothing.
+  operator-validation:
+    name: Operator Validation with the Tag's AICR
+    runs-on: ubuntu-24.04
+    needs: [detect, resolve-candidates, promote-versions]
+    timeout-minutes: 50
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up the kind cluster
+        uses: ./.github/actions/operator-kind
+        with:
+          kubernetes: newest
+
+      - name: Run the operator e2e suite with this tag's AICR
+        env:
+          OPERATOR_E2E_REQUIRED: '1'
+          AICR_E2E_VERSION: ${{ github.ref_name }}
+          AICR_E2E_IMAGE: ${{ needs.resolve-candidates.outputs.aicr_image }}
+          AICR_E2E_VALIDATOR_IMAGES: ${{ needs.resolve-candidates.outputs.aicr_validator_images }}
+        run: make operator-e2e
 
       - name: Delete kind cluster
         if: ${{ always() }}
@@ -1860,6 +1900,7 @@ jobs:
       - operator-scan
       - operator-reproducible
       - operator-lifecycle
+      - operator-validation
       - operator-publish
       - operator-attest
       - publish
@@ -1888,6 +1929,7 @@ jobs:
           OPERATOR_SCAN: ${{ needs.operator-scan.result }}
           OPERATOR_REPRODUCIBLE: ${{ needs.operator-reproducible.result }}
           OPERATOR_LIFECYCLE: ${{ needs.operator-lifecycle.result }}
+          OPERATOR_VALIDATION: ${{ needs.operator-validation.result }}
           OPERATOR_PUBLISH: ${{ needs.operator-publish.result }}
           OPERATOR_ATTEST: ${{ needs.operator-attest.result }}
           PUBLISH: ${{ needs.publish.result }}
@@ -1927,6 +1969,7 @@ jobs:
             echo "| Operator Vulnerability Scan | ${OPERATOR_SCAN} |"
             echo "| Operator Reproducibility | ${OPERATOR_REPRODUCIBLE} |"
             echo "| Operator Lifecycle | ${OPERATOR_LIFECYCLE} |"
+            echo "| Operator Validation | ${OPERATOR_VALIDATION} |"
             echo "| Operator Publish | ${OPERATOR_PUBLISH} |"
             echo "| Operator Attestation | ${OPERATOR_ATTEST} |"
             echo "| Publish | ${PUBLISH} |"

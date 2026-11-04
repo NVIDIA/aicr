@@ -478,7 +478,12 @@ architectures, `operator-reproducible` builds the candidate twice (the second
 time with an empty Go build cache) and requires identical bytes, and
 `operator-lifecycle` installs the newest published operator release older than
 the tag and runs the qualify suite's lifecycle scenarios upgrading to this
-candidate (`make operator-qualify-published`), after `promote-versions`. `operator-publish` runs only
+candidate (`make operator-qualify-published`), after `promote-versions`.
+`operator-validation` runs the operator e2e suite (`make operator-e2e`) with
+this tag's AICR image and validator images, also after `promote-versions`:
+AICR's Jobs as the operator builds them, recipe through deployment
+validation, with the validators pulled by their version aliases and the
+evidence checked against the pinned digests. `operator-publish` runs only
 after the release integrity check, and `operator-attest`
 (`attest-operator.yaml`) attests what it pushed. It publishes:
 
@@ -493,11 +498,13 @@ The chart defaults to the operator and registry images by digest and to this
 tag's own AICR release: the `aicr` and validator images by the digests
 `resolve-candidates` resolved, pinned as `:vX.Y.Z@sha256:<digest>`. A release
 candidate's chart also sets `aicr.allowPrerelease`, since its AICR is a
-prerelease. The lifecycle check qualifies the operator against those images.
+prerelease. `operator-lifecycle` runs this tag's AICR through install,
+upgrade and rollout with validation off, and `operator-validation` runs its
+validator images through deployment validation.
 Local and CI builds outside a release default to the AICR release
 `.settings.yaml` pins (`operator:`).
 `release-check` fails closed on the operator candidate, its scans, and the
-reproducibility and lifecycle checks, so neither `latest` nor the operator is
+reproducibility, lifecycle and validation checks, so neither `latest` nor the operator is
 published when they fail, and `publish` waits for
 `operator-publish` and `operator-attest`. Publishing the same candidate again is
 a no-op, so re-running the failed jobs converges; a tag that already names
