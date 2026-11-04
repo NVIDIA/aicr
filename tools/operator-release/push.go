@@ -216,11 +216,11 @@ func packChart(ctx context.Context, dst content.Pusher, archive []byte, created 
 	}
 	configDesc, err := oras.PushBytes(ctx, dst, registry.ChartConfigMediaType, meta.Config())
 	if err != nil {
-		return nil, ocispec.Descriptor{}, err
+		return nil, ocispec.Descriptor{}, fmt.Errorf("push the chart config: %w", err)
 	}
 	layer, err := oras.PushBytes(ctx, dst, registry.ChartLayerMediaType, archive)
 	if err != nil {
-		return nil, ocispec.Descriptor{}, err
+		return nil, ocispec.Descriptor{}, fmt.Errorf("push the chart archive layer: %w", err)
 	}
 	desc, err = oras.PackManifest(ctx, dst, oras.PackManifestVersion1_1, "", oras.PackManifestOptions{
 		ConfigDescriptor: &configDesc,
