@@ -19,7 +19,10 @@
 > CLI still runs the collector until
 > [#3602](https://github.com/NVIDIA/aicr/issues/3602) lands. See
 > [Amendment: single-path CNCF conformance evidence (2026-11-03)](#amendment-single-path-cncf-conformance-evidence-2026-11-03).
-> The recipe-test-attestation kind is unchanged.
+> The recipe-test-attestation kind's trust model, the pointer layout and
+> the verifier flow are unchanged; its bundle contents are extended with
+> typed artifacts and their digests (Decision 8 of the amendment,
+> [#3612](https://github.com/NVIDIA/aicr/issues/3612)).
 
 ## Status
 
@@ -233,8 +236,9 @@ and introduces kind-scoped flag names for the new attestation kind:
 > `--cncf-submission` does, and will remove `--feature` and
 > `evidence.cncf.features`, once
 > [#3602](https://github.com/NVIDIA/aicr/issues/3602) lands. Until then
-> the row describes the shipped CLI. The recipe-test-attestation row is
-> unchanged.
+> the row describes the shipped CLI. The recipe-test-attestation row's
+> flags are unchanged; the bundle those flags produce gains typed
+> artifacts and their digests under Decision 8 of the amendment.
 
 Both kinds may run from a single `aicr validate` invocation (each
 flag set produces its own output tree) — they are independent
@@ -1353,8 +1357,11 @@ accepted, implementation pending; each names the sub-issue
 that lands it. The shipped CLI still runs the collector under
 `--cncf-submission` and still accepts `--feature` until
 [#3602](https://github.com/NVIDIA/aicr/issues/3602) lands. The
-recipe-test-attestation kind, the bundle format, the pointer layout and
-the verifier are not affected.
+recipe-test-attestation kind's trust model, the pointer layout and the
+verifier flow are not affected. Decision 8 extends the attestation
+bundle's contents with typed artifacts and their digests
+([#3612](https://github.com/NVIDIA/aicr/issues/3612)); it does not
+change the predicate's identity or currentness rules.
 
 ### Context
 
