@@ -39,8 +39,34 @@ type evidenceEntry struct {
 	// Status is the aggregate: "passed" if all pass, "failed" if any fails.
 	Status string
 
+	// Level is the requirement's upstream level at Version; empty when
+	// Supporting.
+	Level Level
+
+	// Supporting is true when Version does not list the requirement, so the
+	// page is supporting evidence rather than a requirement row.
+	Supporting bool
+
+	// Version is the checklist version the entry was rendered against.
+	Version Version
+
 	// GeneratedAt is the evidence generation timestamp.
 	GeneratedAt time.Time
+}
+
+// untestedEntry is a checklist requirement no test result evidenced in this
+// render: either AICR has no conformance check for it or its expected checks
+// produced no result. It renders as an index row with no page and no
+// evidence link. Presence only: verdict aggregation is not done here.
+type untestedEntry struct {
+	// RequirementID is the upstream requirement identifier.
+	RequirementID string
+
+	// Level is the requirement's upstream level at the rendered version.
+	Level Level
+
+	// Reason is "no AICR check" or "not run".
+	Reason string
 }
 
 // checkEntry represents one check result within an evidence entry.

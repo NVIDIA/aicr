@@ -10,9 +10,25 @@
 > evidence keeps this ADR's digest-only currentness rule and the v1
 > predicate; the pointer layout and verification flow below are unchanged.
 
+> **Amended 2026-11-03 for the `cncf-conformance` kind.** The amendment
+> records a decision whose implementation is tracked under
+> [#3601](https://github.com/NVIDIA/aicr/issues/3601): the CNCF
+> submission collector script will be retired and `--cncf-submission`
+> will become an output option on `aicr validate --phase conformance`;
+> `--feature` and `evidence.cncf.features` will be removed, and
+> `--evidence-dir` will require `--cncf-submission` (today's
+> `--evidence-dir`-alone rendering goes away). The shipped CLI still
+> runs the collector until
+> [#3602](https://github.com/NVIDIA/aicr/issues/3602) lands. See
+> [Amendment: single-path CNCF conformance evidence (2026-11-03)](#amendment-single-path-cncf-conformance-evidence-2026-11-03).
+> The recipe-test-attestation kind is not affected.
+
 ## Status
 
-**Accepted, partially implemented** — proposed 2026-05-08.
+**Accepted, partially implemented** — proposed 2026-05-08. Amended
+2026-11-03 for the `cncf-conformance` kind (accepted, implementation
+pending); see
+[Amendment: single-path CNCF conformance evidence (2026-11-03)](#amendment-single-path-cncf-conformance-evidence-2026-11-03).
 
 This ADR specifies the V1 contract. Implementation lands as five
 follow-on PRs tracked under
@@ -209,6 +225,19 @@ and introduces kind-scoped flag names for the new attestation kind:
 |---|---|
 | `cncf-conformance` | `--evidence-dir <path>` (existing), `--cncf-submission`, `--feature <name>` |
 | `recipe-test-attestation` | `--emit-attestation <path>` (NEW), `--push <oci-ref>`, `--full` (opt out of default minimization); `--include-logs` and `--push-logs` are deferred (log capture not implemented in V1) |
+
+> **Superseded in part (2026-11-03).** The `cncf-conformance` row above
+> and the `evidence.cncf.cncfSubmission` / `evidence.cncf.features`
+> config keys in item 1
+> below describe the surface as it shipped. The
+> [amendment](#amendment-single-path-cncf-conformance-evidence-2026-11-03)
+> keeps `--evidence-dir` and `--cncf-submission` but will change what
+> `--cncf-submission` does, will make `--evidence-dir` require it
+> (today's `--evidence-dir`-alone rendering goes away), and will remove
+> `--feature` and `evidence.cncf.features`, once
+> [#3602](https://github.com/NVIDIA/aicr/issues/3602) lands. Until then
+> the row describes the shipped CLI. The recipe-test-attestation row is
+> unchanged.
 
 Both kinds may run from a single `aicr validate` invocation (each
 flag set produces its own output tree) — they are independent
@@ -1316,3 +1345,230 @@ pull-trigger; let demand decide what V2 brings in.** Don't pre-build.
   match.
 - [#753](https://github.com/NVIDIA/aicr/issues/753) — verifier.
 - [#754](https://github.com/NVIDIA/aicr/issues/754) — bundle format.
+
+## Amendment: single-path CNCF conformance evidence (2026-11-03)
+
+Amends the `cncf-conformance` kind in the evidence taxonomy and the
+`cncf-conformance` row of the V1 surface above. Execution is tracked in
+[#3601](https://github.com/NVIDIA/aicr/issues/3601); this section records
+the decisions that change what this ADR committed to. The decisions are
+accepted, implementation pending; each names the sub-issue
+that lands it. The shipped CLI still runs the collector under
+`--cncf-submission` and still accepts `--feature` until
+[#3602](https://github.com/NVIDIA/aicr/issues/3602) lands. The
+recipe-test-attestation kind, the bundle format, the pointer layout and
+the verifier are not affected. The depth and submission-output scope
+were revised on 2026-11-04 after an audit against the CNCF requirement
+bar ([#3619](https://github.com/NVIDIA/aicr/issues/3619)); the Options
+and Consequences below record that revision.
+
+### Context
+
+When this ADR was written, `pkg/evidence` already shipped CNCF
+conformance evidence, and the V1 surface took that path as given. It has
+since become two unrelated implementations of every CNCF requirement:
+
+- The Go checks in `validators/conformance/`, run by
+  `aicr validate --phase conformance` and rendered to
+  `evidence/<requirement>.md` by `pkg/evidence/cncf/renderer.go` when
+  `--evidence-dir` is set. Nightly UAT runs these checks without
+  `--evidence-dir` and packages their CTRF results into recipe-evidence
+  attestations; it does not exercise CNCF Markdown rendering.
+- The bash collector `pkg/evidence/cncf/scripts/collect-evidence.sh`,
+  embedded in the binary and run by `--cncf-submission`. That flag
+  short-circuits validation, so the Go checks never run on a submission.
+
+The two differ in depth and keep separate verdict logic. The NVKE v1.36
+submission ([#3389](https://github.com/NVIDIA/aicr/issues/3389),
+[#3455](https://github.com/NVIDIA/aicr/issues/3455)) still needed four
+checks run by hand on top of the collector, a hand-written PRODUCT.yaml,
+README and platform-configuration page, and hand redaction. Review of
+that submission caught a PRODUCT.yaml note whose cited evidence did not
+show the claim.
+
+Upstream has moved since v1.35. The v1.36 checklist removed
+`dra_support`, which the renderer still presents as a requirement. The
+v1.37 checklist added `workload_sandboxing` and introduced hybrid
+verification: `junit.xml` and `e2e.log` in the submission directory,
+parsed by the upstream validator. The graduations announced in the
+upstream Kubernetes AI Requirements (KARs,
+[kubernetes-sigs/ai-conformance/kars/](https://github.com/kubernetes-sigs/ai-conformance/tree/main/kars))
+target `driver_runtime_management` and `workload_sandboxing` as MUST at
+v1.38; no v1.38 schema is published yet.
+
+Nightly UAT runs the conformance phase inside a 40-minute all-phases
+step. The UAT cells have two GPU nodes, so runtime and contention with
+the other phases, not capacity, bound what can be always-on.
+
+### Decision (accepted, implementation pending)
+
+1. **One runner.** Implementing issue:
+   [#3602](https://github.com/NVIDIA/aicr/issues/3602).
+   `aicr validate --phase conformance` is the only behavioral
+   implementation of CNCF conformance. The collector script and
+   `pkg/evidence/cncf/collector.go` are deleted once a section-by-section
+   comparison shows every requirement the script evidenced has a
+   Go-produced counterpart.
+2. **Flags do not change check execution or check verdicts.** Implementing
+   issue: [#3602](https://github.com/NVIDIA/aicr/issues/3602), packaging
+   in [#3605](https://github.com/NVIDIA/aicr/issues/3605). For the same
+   selected checks, verdicts are identical with and without the evidence
+   flags. `--cncf-submission` and `--evidence-dir <path>` require each
+   other: evidence is written only for a submission, so today's
+   `--evidence-dir`-alone rendering goes away. The submission output is
+   PRODUCT.yaml, README.md (carrying the platform facts PRODUCT.yaml notes
+   cite), `junit.xml`, `e2e.log` and the existing
+   `evidence/<requirement>.md` pages, with one redaction pass
+   (`pkg/evidence/redact`) over the complete submission directory, all
+   five kinds of file, before a check of that directory by the pinned
+   upstream validator as the last step. Vendor fields and the conditional
+   `cluster_autoscaling` N/A justification come from the validate config,
+   not a new flag. A submission run refuses `--skip-check` and
+   `--no-cluster` and no longer bypasses validation. A submission run
+   exits non-zero for: (a) flag and input refusals before any check runs,
+   and the readiness pre-flight, with exit 2 as today; (b) an incomplete
+   applicable MUST requirement; (c) a write or redaction error, or the
+   pinned upstream validator failing or being unable to run (for example
+   it cannot fetch the CNCF landscape), reported as an internal error. A
+   submission run derives its exit status from the requirement
+   aggregation, so the per-check rule of `--fail-on-error` is superseded:
+   a non-passing check behind a SHOULD does not fail a submission run,
+   while any non-passing check behind a MUST does, through (b). No check
+   verdict is rewritten.
+3. **`--feature` and `evidence.cncf.features` are removed together with
+   the script.** Implementing issue:
+   [#3602](https://github.com/NVIDIA/aicr/issues/3602).
+   `Client.CollectCNCFEvidence` keeps its signature as a wrapper over
+   run-plus-render; a non-empty `Features`, a nil recipe, or `NoCluster`
+   is rejected with `ErrCodeInvalidRequest`. Likewise,
+   `aicr validate --phase conformance --cncf-submission` requires
+   `--recipe` (or a config recipe input) and is refused with
+   `ErrCodeInvalidRequest` otherwise, because the single runner selects
+   checks from the recipe and the collector's capability-detection path
+   goes away with it; the submission examples without `--recipe` in
+   `docs/conformance/cncf/index.md` and `docs/user/validation.md`, and the
+   `--evidence-dir`-alone "Structural Validation (CI)" example in
+   `docs/conformance/cncf/index.md`, are updated in
+   [#3602](https://github.com/NVIDIA/aicr/issues/3602). The argument
+   contract is specified and tested in
+   [#3602](https://github.com/NVIDIA/aicr/issues/3602).
+4. **Depth is set by the CNCF bar; checks are extended in place.**
+   Implementing issues:
+   [#3603](https://github.com/NVIDIA/aicr/issues/3603),
+   [#3604](https://github.com/NVIDIA/aicr/issues/3604),
+   [#3428](https://github.com/NVIDIA/aicr/issues/3428),
+   [#3609](https://github.com/NVIDIA/aicr/issues/3609). Each check's depth
+   is what the corresponding kubernetes-sigs/ai-conformance test requires,
+   per the table in [#3619](https://github.com/NVIDIA/aicr/issues/3619);
+   checks are extended in place and there are no sibling tiers. Every
+   GPU-cell run, nightly UAT and submission alike, executes every check
+   the recipe lists, so the two run the identical set. There is no nightly
+   skip list and no weekly lane. `--skip-check` remains only for lanes
+   that cannot host a check (Kind, KWOK); such a run is narrower than the
+   recipe by construction and stays refused with `--evidence-dir`.
+5. **Requirement map keyed by Kubernetes version.** Implementing issue:
+   [#3606](https://github.com/NVIDIA/aicr/issues/3606). The complete
+   upstream checklist per supported version, with IDs, descriptions and
+   levels preserved exactly and the AICR checks expected to evidence each
+   requirement. `dra_support` is supporting evidence from v1.36;
+   `workload_sandboxing` appears from v1.37; the v1.38 graduations are
+   readiness work until that schema is published. Unsupported versions are
+   refused. Titles name capabilities, not vendors.
+6. **Fail closed on coverage, scoped by level.** Implementing issue:
+   [#3612](https://github.com/NVIDIA/aicr/issues/3612). Any requirement
+   claimed Implemented, MUST or SHOULD, must have every expected check
+   present and passed. Skipped, `other`, missing, or capacity-starved
+   checks leave it incomplete, recorded as an unmet test prerequisite
+   rather than a disproven capability. Implemented and Not Implemented
+   come from the run; N/A comes only from the validate config key
+   `spec.validate.evidence.cncf.notApplicable`, only for conditional
+   MUSTs. A requirement is Implemented only when every expected check is
+   present and passed. An incomplete applicable MUST fails the submission
+   run. A SHOULD with incomplete or absent checks renders Not Implemented
+   and the run does not fail (for example `workload_sandboxing` at v1.37,
+   where a missing sandbox runtime renders Not Implemented). MUST-level
+   N/A exists only for the conditional `cluster_autoscaling`. The
+   `notApplicable` key maps a conditional MUST id (today only
+   `cluster_autoscaling`) to its justification; when set, the requirement
+   renders N/A with that justification, taking precedence over a
+   cluster-autoscaling check that ran, whose result is recorded as an
+   observation and not referenced as proof. Any other id in that map is
+   refused. Checks record observations only and never assert
+   nonapplicability. Export rule for the artifacts: the raw CTRF report
+   keeps the real verdict; the submission `junit.xml` and `e2e.log` export
+   a non-passing testcase that belongs only to a Not Implemented SHOULD as
+   skipped, with the original verdict and reason in the message, and
+   PRODUCT.yaml does not reference it; a non-passing testcase behind a
+   requirement overridden to N/A is exported the same way, as skipped with
+   "not applicable: <justification>" and the original verdict in the
+   message, unreferenced by PRODUCT.yaml and without effect on the exit
+   status; a non-passing testcase behind an applicable MUST, one not
+   overridden to N/A, is exported as a failure and the run exits non-zero,
+   so the directory is not submittable. This is what lets the upstream
+   artifact check, which rejects any failure or error in a referenced
+   artifact, pass for a Not Implemented SHOULD or an N/A conditional MUST.
+7. **AICR-named junit; the upstream suite is optional.** Implementing
+   issue: [#3605](https://github.com/NVIDIA/aicr/issues/3605). `junit.xml`
+   carries AICR check names, referenced per requirement with explicit
+   `file://...#<check>` fragments, which the upstream validator honors
+   before its upstream-name fallback. Running the kubernetes-sigs/ai-
+   conformance suite is optional independent verification with its own
+   provenance; upstream testcase names appear only for tests actually run
+   from it. The submission directory is PRODUCT.yaml, README.md,
+   `junit.xml`, `e2e.log` and the `evidence/<requirement>.md` pages. The
+   upstream validator reads PRODUCT.yaml, resolves every local file it
+   cites (each must exist) and parses `junit.xml` and `e2e.log`; no
+   additional structured artifacts (typed JSON records, `results.json`)
+   are produced.
+
+### Options considered
+
+| Option | Outcome |
+|---|---|
+| A. One depth, always full | Rejected. The nightly step overruns and Kind lanes cannot run the deep tests. |
+| B. Two tiers as separate catalog checks | Chosen on 2026-11-03, superseded 2026-11-04 (see the note below). Reuses `--skip-check`, keeps the recipe the source of truth, and a submission run cannot omit the deep tier. |
+| C. Depth flag on the run | Rejected. A flag that changes verdict logic is the two-behaviors problem being removed, and it creates "passed nightly, failed at submission". |
+| D. Delegate deep MUSTs to the upstream suite | Kept as optional independent verification. External dependency, per-test flags, timeouts of 30 to 75 minutes, no coverage of AICR-specific probes, and not needed for junit credit. |
+
+The table records the options as considered on 2026-11-03. On
+2026-11-04 option B was superseded by the CNCF-bar audit
+([#3619](https://github.com/NVIDIA/aicr/issues/3619)): measured against
+the upstream tests, the expensive tests the tiers were meant to isolate
+exceeded the bar and were dropped, so no tiers are needed and option A's
+cost objection no longer applies. Decision 4 records the result.
+
+### Consequences
+
+- The "Two Modes" description in `docs/conformance/cncf/index.md`
+  collapses to one mode once the script is gone.
+- Evidence rendering becomes a consumer of the validator's CTRF report;
+  `junit.xml` and `e2e.log` are generated from the same report and the
+  run log.
+- Nightly UAT's conformance phase gains the CNCF-bar depth, and recipes
+  gain the checks they were missing;
+  [#3609](https://github.com/NVIDIA/aicr/issues/3609) measures the cost.
+
+### Tracking
+
+- [#3601](https://github.com/NVIDIA/aicr/issues/3601) epic;
+  [#3389](https://github.com/NVIDIA/aicr/issues/3389) NVKE CNCF AI
+  conformance, the submission this work generalizes.
+- [#3611](https://github.com/NVIDIA/aicr/issues/3611) this amendment;
+  [#3619](https://github.com/NVIDIA/aicr/issues/3619) the 2026-11-04
+  CNCF-bar audit that revised its depth and output scope.
+- [#3606](https://github.com/NVIDIA/aicr/issues/3606) versioned
+  requirement map;
+  [#3612](https://github.com/NVIDIA/aicr/issues/3612) fail-closed
+  aggregation.
+- [#3603](https://github.com/NVIDIA/aicr/issues/3603),
+  [#3604](https://github.com/NVIDIA/aicr/issues/3604),
+  [#3428](https://github.com/NVIDIA/aicr/issues/3428) checks extended
+  to the CNCF bar, including the cluster-autoscaling constrained claim;
+  [#3609](https://github.com/NVIDIA/aicr/issues/3609) nightly cost
+  measurement.
+- [#3602](https://github.com/NVIDIA/aicr/issues/3602) runner change and
+  collector removal;
+  [#3605](https://github.com/NVIDIA/aicr/issues/3605) submission
+  packaging and the NVKE proof run.
+- [#3615](https://github.com/NVIDIA/aicr/issues/3615) v1.38 readiness:
+  driver-runtime-management and workload sandboxing.

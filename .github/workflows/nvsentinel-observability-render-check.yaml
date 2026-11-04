@@ -33,8 +33,12 @@
 # criteria and tests, and the DCGM address its dcgm-diag-test calls, the
 # post-remediation validation one asserts fault-quarantine's [validation]
 # section, its post-reboot rule set and its RBAC to create ValidationRequests,
-# and the CRD exclusion one asserts every component's ownsCRDsExcludeSubcharts
-# (nvsentinel's and nktp's) still matches its pinned chart.
+# the external-remediation one asserts the ExternalRemediationRequest action,
+# its template and RBAC render only with its mixin, and that
+# kubernetes-object-monitor prints a declared policy's enabled and isFatal
+# verbatim, and the CRD exclusion one asserts every component's
+# ownsCRDsExcludeSubcharts (nvsentinel's and nktp's) still matches its pinned
+# chart.
 # All are gated on testing.Short() -- `make
 # test`/`make qualify`/every other CI job run with -short, so this is the only
 # place they execute. There is no PR-blocking trigger here on purpose: these
@@ -110,6 +114,7 @@ jobs:
             TestNVSentinelHealthEventsAnalyzerChartRender
             TestNVSentinelEventExporterChartRender
             TestNVSentinelLogCollectorChartRender
+            TestNVSentinelExternalRemediationChartRender
             TestNVSentinelChartSystemNamespacesDefault
             TestNVSentinelNodeValidationChartRender
             TestNVSentinelPostRemediationValidationChartRender

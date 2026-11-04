@@ -15,15 +15,16 @@
 
 # Builds an immutable qualification candidate from the
 # current commit into dist/candidate: the operator image and the in-cluster
-# registry image for linux/amd64 and linux/arm64 as OCI layouts with SPDX SBOMs
-# (ko, on AICR's base image), the kubectl-aicr binaries, the chart packaged
+# registry image for linux/amd64 and linux/arm64 as OCI layouts (ko, on AICR's
+# base image), the kubectl-aicr binaries, the chart packaged
 # deterministically, and candidate.json recording every digest with the AICR
 # release the candidate runs. The candidate is a release build without the
 # development opt-in, so the operator refuses its development settings.
 #
 # Usage: CANDIDATE_VERSION=v0.1.0-rc.1 tools/operator-candidate [build|verify]
 #   build   (default) build dist/candidate
-#   verify  build twice and require identical bytes
+#   verify  build twice, the second with an empty Go build cache, and require
+#           identical bytes
 #
 # CANDIDATE_REPOSITORY names the operator image repository the candidate is
 # published to (default ghcr.io/nvidia/aicr-operator), and
@@ -72,11 +73,11 @@ build() {
   AICR_OPERATOR_VERSION="${version}" AICR_OPERATOR_DATE="${commit_date}" AICR_OPERATOR_DEVELOPMENT=false \
     KO_DOCKER_REPO="${repository}" \
     go run "github.com/google/ko@$(setting '.build_tools.ko')" build --bare --push=false \
-    --platform=linux/amd64,linux/arm64 --oci-layout-path "${out}/image" --sbom-dir "${out}/sbom" \
+    --platform=linux/amd64,linux/arm64 --oci-layout-path "${out}/image" --sbom=none \
     ./cmd/aicr-operator >/dev/null
   KO_DOCKER_REPO="${registry_repository}" \
     go run "github.com/google/ko@$(setting '.build_tools.ko')" build --bare --push=false \
-    --platform=linux/amd64,linux/arm64 --oci-layout-path "${out}/registry-image" --sbom-dir "${out}/sbom" \
+    --platform=linux/amd64,linux/arm64 --oci-layout-path "${out}/registry-image" --sbom=none \
     ./cmd/aicr-registry >/dev/null
   local platform
   for platform in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
@@ -122,7 +123,9 @@ case "${1:-build}" in
 build) build "${dir}" ;;
 verify)
   build "${dir}"
-  build "${dir}-again"
+  # A cold cache rebuilds every package, so a warm cache cannot hide an input
+  # the first build read from outside the commit.
+  GOCACHE="$(mktemp -d "${work}/gocache.XXXXXX")" build "${dir}-again"
   if ! diff -r "${dir}" "${dir}-again" >/dev/null; then
     diff -r "${dir}" "${dir}-again" | head -20 >&2
     echo "two builds of ${commit} differ" >&2

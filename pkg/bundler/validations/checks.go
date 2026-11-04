@@ -69,6 +69,7 @@ func init() {
 	registerCheck("CheckNVSentinelSlurmCustomDrainCoherent", CheckNVSentinelSlurmCustomDrainCoherent)
 	registerCheck("CheckNVSentinelEventExporterCoherent", CheckNVSentinelEventExporterCoherent)
 	registerCheck("CheckNVSentinelLogCollectorCoherent", CheckNVSentinelLogCollectorCoherent)
+	registerCheck("CheckNVSentinelExternalRemediationCoherent", CheckNVSentinelExternalRemediationCoherent)
 	registerCheck("CheckNVSentinelFileServerStorageClass", CheckNVSentinelFileServerStorageClass)
 	registerCheck("CheckNVSentinelDrainScopeCoherent", CheckNVSentinelDrainScopeCoherent)
 	registerCheck("CheckNVSentinelNodeValidationCoherent", CheckNVSentinelNodeValidationCoherent)

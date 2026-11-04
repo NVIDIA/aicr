@@ -328,6 +328,14 @@ func TestBuildRefuses(t *testing.T) {
 // them.
 func writeCandidate(t *testing.T, repository string, binary []byte, aicrImage string) (string, *Manifest) {
 	t.Helper()
+	aicr := demoAICR
+	aicr.Image = aicrImage
+	return writeCandidateAICR(t, repository, binary, aicr)
+}
+
+// writeCandidateAICR is writeCandidate with the chart defaulting to aicr.
+func writeCandidateAICR(t *testing.T, repository string, binary []byte, aicr AICR) (string, *Manifest) {
+	t.Helper()
 	dir := t.TempDir()
 	writeLayout(t, dir, "image", "aicr-operator", binary)
 	writeLayout(t, dir, "registry-image", "aicr-registry", []byte("registry-binary"))
@@ -339,8 +347,6 @@ func writeCandidate(t *testing.T, repository string, binary []byte, aicrImage st
 	if err != nil {
 		t.Fatal(err)
 	}
-	aicr := demoAICR
-	aicr.Image = aicrImage
 	name, archive, err := packageChart(chartFS(), "v0.1.0-rc.1", aicr, image.Ref(), registry.Ref())
 	if err != nil {
 		t.Fatal(err)
