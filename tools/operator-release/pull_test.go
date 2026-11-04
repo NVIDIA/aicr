@@ -37,6 +37,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/operator/registry"
+	"github.com/NVIDIA/aicr/pkg/operator/registry/registrytest"
 )
 
 func TestLatestStable(t *testing.T) {
@@ -107,6 +108,38 @@ func TestChartPinsRefusesUnpinnedImages(t *testing.T) {
 			}
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) || !strings.Contains(err.Error(), "not pinned by digest") {
 				t.Fatalf("chartPins() = %v; want an error naming %s as not pinned by digest", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// archiveFile finds the same top-level chart files registry.ReadChartMeta
+// does, so a chart push accepts is one pull can read.
+func TestArchiveFile(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		files   map[string]string
+		want    string
+		wantErr string
+	}{
+		{name: "the chart's top-level file", files: map[string]string{"demo/values.yaml": "a: 1"}, want: "a: 1"},
+		{name: "a name with a leading ./", files: map[string]string{"./demo/values.yaml": "a: 1"}, want: "a: 1"},
+		{name: "a subchart's file is skipped", files: map[string]string{"demo/charts/sub/values.yaml": "a: 1"}, wantErr: "has no values.yaml"},
+		{name: "a file outside the chart directory is skipped", files: map[string]string{"values.yaml": "a: 1"}, wantErr: "has no values.yaml"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := archiveFile(registrytest.TarGz(t, tt.files), "values.yaml")
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("archiveFile() = %q, %v; want an error containing %q", got, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || string(got) != tt.want {
+				t.Fatalf("archiveFile() = %q, %v; want %q", got, err, tt.want)
 			}
 		})
 	}

@@ -207,7 +207,8 @@ func archiveFile(archive []byte, name string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read the chart archive: %w", err)
 		}
-		if dir, file := path.Split(h.Name); file != name || strings.Count(dir, "/") != 1 {
+		dir, file := path.Split(path.Clean(h.Name))
+		if file != name || strings.Count(strings.Trim(dir, "/"), "/") != 0 || dir == "" {
 			continue
 		}
 		return io.ReadAll(io.LimitReader(tr, 1<<20))
