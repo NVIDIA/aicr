@@ -49,9 +49,10 @@ func refusal(refused ...string) []byte {
 // on a host that cannot run the image's binary skips the check outside CI and
 // fails in CI.
 //
-// Not parallel: each case writes an executable and runs it, and a process
-// another test forks while the file is still open for writing inherits the
-// descriptor, so the exec fails with ETXTBSY (golang/go#22315).
+// Not parallel: a case that extracts the binary writes it and then runs
+// it, and a process another test forks while that file is open for writing
+// holds a copy of the descriptor until its own exec, so this exec fails
+// with ETXTBSY (golang/go#22315), as it did in the merge gate.
 func TestRefuses(t *testing.T) {
 	const refused = "refuses development.skipDiscovery"
 	hostOut, hostWant, hostCode := refused, "", errors.ErrorCode("")
