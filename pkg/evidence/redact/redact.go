@@ -73,7 +73,8 @@ const (
 	//     operator-version keys, and the in-pod skipReason codes.
 	//   - v6 narrowed the fabric extra's closed set to efa.
 	//   - v7 added the nodesFailed and nodesSkipped coverage counts.
-	PolicyVersion = "v7"
+	//   - v8 added the superseded-by-cre skipReason code.
+	PolicyVersion = "v8"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata
@@ -247,6 +248,7 @@ var ctrfSkipReasons = []string{
 	"dra-driver-not-installed", // standalone run with no NVIDIA DRA driver on the cluster
 	"slurm-managed-gpus",       // GPUs are allocated by Slurm, not the Kubernetes scheduler
 	"simulated-nodes",          // the workload runs on KWOK simulated nodes
+	"superseded-by-cre",        // the recipe's qualified CRE NCCL check measures this bandwidth instead
 }
 
 // ctrfGPUAllocationPolicies holds the pkg/validator/v1 GPUAllocationPolicy*

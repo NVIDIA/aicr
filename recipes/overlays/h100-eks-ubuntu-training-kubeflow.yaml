@@ -39,9 +39,30 @@ spec:
     - name: K8s.server.version
       value: ">= 1.32.4"
 
-  componentRefs: []
+  componentRefs:
+    # Drives the performance check below. kubeflow-trainer arrives from the
+    # platform-kubeflow mixin, so it is not declared here (see "Enabling NVCRE"
+    # in docs/user/component-catalog.md).
+    - name: nvcre
+      type: Helm
+      valuesFile: components/nvcre/values.yaml
+      dependencyRefs:
+        - kubeflow-trainer
 
   validation:
+    performance:
+      # Replaces the inherited TrainJob nccl-all-reduce-bw check. An overlay
+      # cannot drop an inherited check (a non-empty checks list is unioned
+      # with the parent's), so that check stays listed and the validator skips
+      # it as superseded-by-cre while this check is declared and qualified for
+      # the combination. The floor equals the inherited one, and the check
+      # passes at 90% of it like the TrainJob check, so the same figure means
+      # the same under either.
+      checks:
+        - nccl-cre-all-reduce-bw
+      constraints:
+        - name: nccl-cre-all-reduce-bw
+          value: ">= 300"
     conformance:
       checks:
         - robust-controller

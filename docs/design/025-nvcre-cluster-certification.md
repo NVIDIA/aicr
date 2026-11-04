@@ -5,7 +5,9 @@
 **Proposed** — 2026-09-02. Amended 2026-10-26: AICR's own run limits satisfy
 the node-cap, run-deadline, and cleanup bullets of the execution-safety gate, so
 upstream bounds no longer gate stock adoption;
-see [Amendment: AICR's limits](#amendment-aicrs-limits).
+see [Amendment: AICR's limits](#amendment-aicrs-limits). Amended 2026-11-04:
+one stock leaf adopts `nvcre`, with open gates recorded;
+see [Amendment: stock adoption on EKS H100 kubeflow](#amendment-stock-adoption-on-eks-h100-kubeflow).
 
 Reviews upstream
 [`NVIDIA/cluster-readiness-engine`](https://github.com/NVIDIA/cluster-readiness-engine)
@@ -410,18 +412,69 @@ termination bullet is neither asserted nor claimed here, the chart SBOM (follow-
 2) is still absent, and *Security* and the unlisted parts of *Chart and CRD
 lifecycle* and *AICR qualification* are still adjudicated at amendment time.
 
+## Amendment: stock adoption on EKS H100 kubeflow
+
+The maintainer decision of 2026-11-04 admits `nvcre` to one stock recipe,
+`h100-eks-ubuntu-training-kubeflow` (`eks`, `h100`, `ubuntu`, `training`,
+`kubeflow`), and has it declare `nccl-cre-all-reduce-bw` with `>= 300`. No other
+overlay changes. GKE and AKS H100 stay on the TrainJob check: the GKE recipe
+needs an owner decision on its threshold and reliable FasTrak evidence, and AKS
+needs the NIC-resource fix and a qualification run without privileged
+workarounds ([#3591](https://github.com/NVIDIA/aicr/issues/3591),
+[cluster-readiness-engine#583](https://github.com/NVIDIA/cluster-readiness-engine/issues/583)).
+
+The CRE check replaces the TrainJob check on this leaf. An overlay cannot drop
+an inherited check (a non-empty `checks` list is unioned with the parent's), so
+`nccl-all-reduce-bw` stays listed and the validator skips it with the
+`superseded-by-cre` reason when the recipe declares `nccl-cre-all-reduce-bw`
+and `creQualifiedEntries` qualifies the service and accelerator. A recipe whose
+CRE check would only skip, or that does not declare it, keeps its TrainJob
+coverage. Only the default-variant check is superseded; the `-net` and `-nvls`
+variants are untouched. The skip code is added to the redaction allowlist
+(`redact.PolicyVersion` v8).
+
+The choice of leaf follows from the wiring. `nvcre` needs Kubeflow Trainer, and
+AICR has no optional-component mechanism, so attaching it to a shared base would
+install its CRDs and cluster-scoped RBAC for every consumer, including the Slurm
+and Kueue leaves. This leaf already carries `kubeflow-trainer` through the
+`platform-kubeflow` mixin, and it is the leaf the AWS UAT lane validates.
+
+Gate status at the `v0.8.2` pin, for this adoption:
+
+| Gate | Status |
+|---|---|
+| Release and supply chain: coherent release, digest-pinned image, signature and SLSA v1.0 provenance on both artifacts | Met |
+| Release and supply chain: SBOM on the chart | **Open** (follow-up 2): the chart still has no SBOM |
+| Chart and CRD lifecycle: CRDs before `LogProfile`s, ownership documented | Met (`hasSelfRefCRDs`; [Cluster-scoped objects and release ownership](../user/component-catalog.md#cluster-scoped-objects-and-release-ownership)) |
+| Benchmark execution safety: node cap, run deadline, cleanup | Met by AICR's own limits (amendment above) |
+| Benchmark execution safety: runtime closure inventoried and digest-qualified | Met for `aws` / `h100` (`recipes/components/nvcre/workload-images.yaml`) |
+| Benchmark execution safety: bounded fault-isolation bisection | Not asserted: the check drives `communication/nccl-all-reduce` only |
+| AICR qualification: real GPU run on the expected transport | Met: EKS H100, 2× p5.48xlarge, 489.70 GB/s on `Libfabric` (UAT 2026-10-23) |
+| Security, and the unlisted parts of lifecycle and qualification | Not adjudicated by this amendment |
+
+The two **Open** and **Not adjudicated** rows are accepted risk, not passed
+gates. They are a maintainer's call to adopt ahead of upstream's chart SBOM and
+without a fresh Security review; this amendment does not claim them.
+
+Consequences for consumers of this leaf: a bundle installs the `nvcre` chart
+(seven CRDs, 25 `ClusterRole`s, three `ClusterRoleBinding`s, four `LogProfile`s)
+and a performance run uses two nodes' GPUs for the CRE `Certification` as well as
+the TrainJob. The Trainer pin in the registry (2.2.0) is one minor behind the
+2.2.1 NVCRE v0.8.2 expects; no functional break is known.
+
 ## Non-Goals
 
-- Adding `nvcre` to any stock recipe.
+- Adding `nvcre` to any stock recipe other than the one in
+  [Amendment: stock adoption on EKS H100 kubeflow](#amendment-stock-adoption-on-eks-h100-kubeflow).
 - Introducing certification results into [ADR-007](007-recipe-evidence.md)
   recipe evidence.
 - Vendoring, patching, or republishing the upstream chart.
 - Replacing the existing NCCL bandwidth checks on the current TrainJob path.
 
 Opt-in AICR validators that drive `Certification` are **in scope** and are not
-a non-goal. They stay off stock overlays, assert the expected transport per
-[Context](#context), and observe Decision 6. Flipping any overlay to them is
-the separate stock-adoption amendment.
+a non-goal. Outside the one adopted leaf they stay off stock overlays, assert
+the expected transport per [Context](#context), and observe Decision 6.
+Flipping any other overlay to them is a separate stock-adoption amendment.
 
 ## Consequences
 
@@ -471,4 +524,6 @@ do, so the PoC's measured value is not yet available to stock recipes.
    and 5 close, and re-run the gates against that pin. Items 3 and 4 are not
    conditions.
 7. AICR: a separate amendment for any stock-recipe adoption, which requires
-   the full gate set to pass.
+   the full gate set to pass. The EKS H100 kubeflow leaf is adopted by the
+   2026-11-04 amendment with open gates recorded there; every other recipe still
+   needs its own.

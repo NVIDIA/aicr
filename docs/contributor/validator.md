@@ -493,7 +493,8 @@ codes are:
 `component-not-in-recipe`, `no-validation-input`, `unsupported-target`,
 `profile-lacks-variant`, `unsupported-service`, `unrecognized-platform`,
 `no-gpu-backed-nodeset`, `no-verifiable-nodes`, `dra-driver-not-installed`,
-`slurm-managed-gpus`, `simulated-nodes`, `named-in-skip-checks`
+`slurm-managed-gpus`, `simulated-nodes`, `superseded-by-cre`,
+`named-in-skip-checks`
 
 `named-in-skip-checks` is the one code minted by a *caller* (`--skip-check`)
 rather than a check.

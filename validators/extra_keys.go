@@ -82,6 +82,7 @@ const (
 	SkipReasonDRADriverNotInstalled = "dra-driver-not-installed"
 	SkipReasonSlurmManagedGPUs      = "slurm-managed-gpus"
 	SkipReasonSimulatedNodes        = "simulated-nodes"
+	SkipReasonSupersededByCRE       = "superseded-by-cre"
 )
 
 // SkipWithReason publishes code as the skip reason and returns Skip(reason).
