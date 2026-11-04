@@ -32,7 +32,7 @@ Subcommands registered in `pkg/cli/root.go` (`Commands:` slice on
 | `recipe list` | `recipe_list.go` | List recipes matching the given criteria. |
 | `recipe sign-catalog` | `recipe_sign_catalog.go` | Sign the recipe catalog. |
 | `recipe verify-catalog` | `recipe_verify_catalog.go` | Verify the signed recipe catalog. |
-| `query` | `query.go` | Extract a single hydrated value from a recipe (`--selector components.gpu-operator.values.driver.version`). |
+| `query` | `query.go`, `query_summary.go` | Extract a hydrated value (`--selector`) or show a recipe overview (`--summary`); resolve criteria or load a saved recipe with `--recipe`. |
 | `bundle` | `bundle.go` | Render per-component deployment artifacts from a recipe via a chosen deployer (`helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `terraform`, `fleet`). |
 | `verify` | `bundle_verify.go` | Verify a bundle's checksums, attestation signatures, and provenance chain; report the achieved trust level and enforce a `--min-trust-level` / creator / CLI-version policy. |
 | `validate` | `validate.go` | Evaluate recipe constraints against a snapshot or live cluster; optionally emit evidence. |
@@ -143,7 +143,7 @@ packages (`pkg/recipe`, `pkg/bundler`, `pkg/snapshotter`,
 | `ResolveRecipeFromCriteriaWithOptions(ctx, *Criteria, opts...)` | `recipe`, `query`, `mirror` (criteria path) |
 | `ResolveRecipeFromSnapshot(ctx, *Criteria, *Snapshot)` | snapshot fast path (no resolve options) |
 | `ResolveRecipeFromSnapshotWithOptions(ctx, *Criteria, *Snapshot, opts...)` | `recipe --snapshot`, `query --snapshot` — with `WithSnapshotCriteriaRelaxation(stated...)` for the derived-criteria retry |
-| `LoadRecipe(ctx, path, kubeconfig)` | `bundle`, `validate`, `diff` (read a previously emitted recipe file) |
+| `LoadRecipe(ctx, path, kubeconfig)` | `bundle`, `validate`, `diff`, `query --recipe` (read a previously emitted recipe file) |
 | `MakeBundle(ctx, *RecipeResult, BundleOptions)` | `bundle` |
 | `LoadSnapshot(ctx, path, kubeconfig)` | `validate`, `query`, `diff` (read a previously captured snapshot; file, URL, or `cm://` ConfigMap) |
 | `CollectSnapshot(ctx, *AgentConfig)` | `snapshot`, `validate` (Job-mode capture only; local `AICR_AGENT_MODE` collection deploys no Job and stays on `snapshotter.NodeSnapshotter`) |
@@ -161,6 +161,23 @@ Adding business logic in the handler — recipe resolution loops, bundle
 rendering, validator orchestration, OCI pushes — is a boundary
 violation. If the facade is missing the surface you need, add it to
 `pkg/client/v1` first.
+
+**Query summaries.** `query --summary` projects `result.Resolved()` through the pure
+`recipe.BuildSummary` function. It skips the selector's additional full hydration;
+canonical loader/resolver profile-coherence validation still reads locked component
+values and can reject missing or invalid values files. Components follow
+`DeploymentOrder`, with unlisted references appended in recipe order; Kustomize versions
+come from `Tag`. Validation phases have a fixed readiness, deployment, performance,
+conformance order. `query_summary.go` owns only presentation, using `text/tabwriter` and
+the command writer for text, and the existing deterministic YAML/JSON writer for
+structured summaries. `--recipe` goes through the same per-command client and
+`LoadRecipe` as other consumers, so loader error codes and provider binding are
+preserved. The evidence gate runs before either presentation branch. Summary/selector
+and recipe/generation-input exclusions are checked before reading the recipe;
+config-sourced generation inputs are rejected too. Renderer goldens live in
+`pkg/cli/testdata/query-summary-*.golden`; regenerate them with
+`go test ./pkg/cli/ -run TestWriteRecipeSummaryTextGolden -update`. No REST summary
+endpoint or `recipe --summary` is introduced.
 
 **What `--snapshot` still owns.** `buildRecipeFromCmdWithConfig` in
 `query.go` derives criteria from the snapshot fingerprint, layers config and

@@ -29,6 +29,20 @@ import (
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
+const (
+	flagSelector = "selector"
+	flagSummary  = "summary"
+)
+
+// recipeGenerationFlags are the inputs that resolve a recipe. --recipe loads
+// a finished recipe instead, so combining it with any of them is rejected
+// rather than silently ignored.
+var recipeGenerationFlags = []string{
+	flagService, flagAccelerator, flagIntent, flagOS, flagPlatform, flagNodes,
+	cmdNameSnapshot, flagProfile, flagSlurmAccountingMode, flagRuntimeInventory,
+	flagGKETCPXOInterfaces, flagInheritFrom, flagInherit,
+}
+
 func queryCmdFlags() []cli.Flag {
 	flags := recipeCmdFlags()
 
@@ -41,22 +55,48 @@ func queryCmdFlags() []cli.Flag {
 		filtered = append(filtered, f)
 	}
 
-	return append(filtered, &cli.StringFlag{
-		Name:     "selector",
-		Usage:    "Dot-path to the configuration value to extract (e.g. components.gpu-operator.values.driver.version)",
-		Category: catQueryParameters,
-		Required: true,
-	})
+	return append(filtered,
+		&cli.StringFlag{
+			Name:     flagSelector,
+			Usage:    "Dot-path to the configuration value to extract (e.g. components.gpu-operator.values.driver.version). Required unless --summary is set",
+			Category: catQueryParameters,
+		},
+		&cli.BoolFlag{
+			Name:     flagSummary,
+			Usage:    "Print a concise overview of the recipe instead of extracting a value; mutually exclusive with --selector",
+			Category: catQueryParameters,
+		},
+		&cli.StringFlag{
+			Name:    cmdNameRecipe,
+			Aliases: []string{"r"},
+			Usage: `Path/URI to a previously generated recipe to query instead of resolving one from criteria.
+	Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (cm://namespace/name).
+	Mutually exclusive with the criteria, --snapshot, --profile and selection flags.`,
+			Category: catInput,
+		},
+	)
 }
 
 func queryCmd() *cli.Command {
 	return &cli.Command{
 		Name:     "query",
 		Category: functionalCategoryName,
-		Usage:    "Query a specific value from the hydrated recipe configuration.",
-		Description: `Resolve a recipe from criteria and extract a specific configuration value
-using a dot-path selector. Returns the fully hydrated value at the given path,
-with all base, overlay, and inline overrides merged.
+		Usage:    "Query a hydrated configuration value or summarize a recipe.",
+		Description: `Resolve a recipe from criteria, or load one with --recipe, and extract a
+specific configuration value using a dot-path selector. Returns the fully
+hydrated value at the given path, with all base, overlay, and inline overrides
+merged.
+
+With --summary, print a concise overview of the recipe instead: identity,
+criteria, applied overlays, constraints, components in deployment order, and
+the validation checks per phase. --summary and --selector are mutually
+exclusive, and one of them is required. The overview is text by default;
+--format yaml or --format json emit it as a document. Summaries skip additional
+selector hydration, but loading or generating a profiled recipe still validates
+its locked component values and may fail if those values cannot be read.
+
+--recipe cannot be combined with the criteria flags, --snapshot, --profile,
+or the other recipe-generation flags.
 
 The selector uses dot-delimited paths consistent with Helm --set notation:
 
@@ -88,14 +128,27 @@ Query entire hydrated recipe:
   aicr query --service eks --accelerator h100 --intent training \
     --selector ''
 
+Summarize a recipe resolved from criteria:
+  aicr query --service eks --accelerator h100 --intent training --summary
+
+Summarize a previously generated recipe:
+  aicr query --recipe recipe.yaml --summary
+
+Query a value from a previously generated recipe:
+  aicr query --recipe recipe.yaml --selector criteria.service
+
 Use in shell scripts:
   VERSION=$(aicr query --service eks --accelerator h100 --intent training \
     --selector components.gpu-operator.values.driver.version)`,
 		Flags: queryCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform",
+			if err := validateSingleValueFlags(cmd, flagService, flagAccelerator, flagIntent, flagOS, flagPlatform,
 				flagProfile, flagSlurmAccountingMode, flagRuntimeInventory, flagGKETCPXOInterfaces,
-				flagInheritFrom, flagInherit, "snapshot", "config", "format", "selector"); err != nil {
+				flagInheritFrom, flagInherit, cmdNameSnapshot, "config", flagFormat, flagSelector,
+				cmdNameRecipe); err != nil {
+				return err
+			}
+			if err := validateQueryFlagCombinations(cmd); err != nil {
 				return err
 			}
 
@@ -125,7 +178,12 @@ Use in shell scripts:
 				return err
 			}
 
-			result, err := buildRecipeFromCmdWithConfig(ctx, cmd, cfg, client)
+			var result *aicr.RecipeResult
+			if cmd.IsSet(cmdNameRecipe) {
+				result, err = loadQueryRecipe(ctx, cmd, cfg, client)
+			} else {
+				result, err = buildRecipeFromCmdWithConfig(ctx, cmd, cfg, client)
+			}
 			if err != nil {
 				return err
 			}
@@ -133,10 +191,25 @@ Use in shell scripts:
 				return err
 			}
 
+			if cmd.Bool(flagSummary) {
+				// Skip additional selector hydration. The loader/resolver's
+				// profile-coherence checks have already validated locked values.
+				summary, buildErr := recipe.BuildSummary(result.Resolved())
+				if buildErr != nil {
+					return buildErr
+				}
+				// --format defaults to yaml for the other commands; the
+				// summary is text unless a format was asked for explicitly.
+				if !cmd.IsSet(flagFormat) && cfg.RecipeOutputOptions().Format == "" {
+					outFormat = serializer.FormatTable
+				}
+				return writeRecipeSummary(ctx, cmd.Root().Writer, summary, outFormat)
+			}
+
 			// Hydrate + select through the facade so the CLI, the REST
 			// query handler, and out-of-tree SDK callers all run the same
 			// implementation; ctx bounds the values reads hydration performs.
-			selected, err := aicr.SelectFromRecipeWithContext(ctx, result, cmd.String("selector"))
+			selected, err := aicr.SelectFromRecipeWithContext(ctx, result, cmd.String(flagSelector))
 			if err != nil {
 				return err
 			}
@@ -144,6 +217,57 @@ Use in shell scripts:
 			return writeQueryResult(cmd.Root().Writer, selected, outFormat)
 		},
 	}
+}
+
+// validateQueryFlagCombinations enforces the flag rules urfave/cli cannot
+// express: exactly one of --selector and --summary, and --recipe only without
+// recipe-generation inputs. --selector is detected with IsSet because an
+// empty selector is valid and selects the whole recipe.
+func validateQueryFlagCombinations(cmd *cli.Command) error {
+	selectorSet := cmd.IsSet(flagSelector)
+	summary := cmd.Bool(flagSummary)
+	if selectorSet && summary {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"--summary and --selector are mutually exclusive: use --summary for an overview or --selector to extract a value")
+	}
+	if !selectorSet && !summary {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"one of --selector or --summary is required")
+	}
+	if !cmd.IsSet(cmdNameRecipe) {
+		return nil
+	}
+	for _, name := range recipeGenerationFlags {
+		if cmd.IsSet(name) {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("--recipe loads a finished recipe and cannot be combined with --%s", name))
+		}
+	}
+	return nil
+}
+
+// loadQueryRecipe loads the recipe named by --recipe. A --config that
+// supplies recipe-generation inputs conflicts with --recipe for the same
+// reason the flags do; the data directory and output settings it may carry
+// still apply.
+func loadQueryRecipe(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, client *aicr.Client) (*aicr.RecipeResult, error) {
+	criteria, err := cfg.RecipeCriteria(client.CriteriaRegistry())
+	if err != nil {
+		return nil, err
+	}
+	selections, err := cfg.RecipeResolveOptions()
+	if err != nil {
+		return nil, err
+	}
+	if cfg.SnapshotPath() != "" || len(selections) > 0 || *criteria != (aicr.Criteria{}) {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"--recipe loads a finished recipe and cannot be combined with spec.recipe criteria, input.snapshot, "+
+				"profile, or configuration from --config")
+	}
+
+	path := cmd.String(cmdNameRecipe)
+	slog.Info("loading recipe", "uri", path)
+	return client.LoadRecipe(ctx, path, cmd.String("kubeconfig"))
 }
 
 // buildRecipeFromCmdWithConfig resolves a recipe from CLI flags layered on

@@ -1,0 +1,31 @@
+RECIPE SUMMARY
+API Version:  aicr.run/v1
+Kind:         RecipeResult
+Version:      v1.2.3
+GPU Driver:   preinstalled
+Profile:      gpuStack=operator-managed
+
+CRITERIA
+  Service:      eks
+  Accelerator:  h100
+  Intent:       training
+  OS:           any
+  Platform:     any
+  Nodes:        8
+
+OVERLAYS
+  Applied:  base, eks, h100-eks-training
+
+CONSTRAINTS
+  K8s.server.version  >= 1.32.4
+  OS.release.ID       ubuntu
+
+COMPONENTS (3)
+NAME                                 TYPE       VERSION  NAMESPACE         DEPENDS ON
+network-operator                     Helm       24.10.0  network-operator  -
+a-component-with-a-rather-long-name  Kustomize  v1.0.0   -                 network-operator,gpu-operator
+gpu-operator                         Helm       -        -                 -
+
+VALIDATION
+  Deployment:   operator-health, expected-resources
+  Conformance:  platform-health
