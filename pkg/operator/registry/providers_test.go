@@ -111,6 +111,7 @@ func TestECRProviderHungMint(t *testing.T) {
 		t.Errorf("%d concurrent mints, want 1 shared", n)
 	}
 	close(api.Release)
+	settle(p)
 	if tok, err := p.FreshToken(context.Background()); err != nil || tok.Password != secretToken || api.Calls() != 1 {
 		t.Fatalf("FreshToken() after ECR answered = %+v, %v with %d mints", tok, err, api.Calls())
 	}
@@ -127,8 +128,6 @@ func TestECRProviderRidesOutAFailedMint(t *testing.T) {
 	api := &registrytest.ECR{Token: "AWS:" + secretToken, Expires: now.Add(12 * time.Hour)}
 	p := &ECRProvider{Client: api, Host: "123456789012.dkr.ecr.us-west-2.amazonaws.com", Now: func() time.Time { return clock }}
 	ctx := context.Background()
-	// Waits out a mint started in the background, if one is in flight.
-	settle := func() { <-p.mints.DoChan("", func() (any, error) { return nil, nil }) } //nolint:nilnil // the result is unused
 	if p.ServesCachedToken() {
 		t.Fatal("ServesCachedToken() before any mint = true")
 	}
@@ -147,7 +146,7 @@ func TestECRProviderRidesOutAFailedMint(t *testing.T) {
 	if c, err := p.Credential(ctx, p.Host); err != nil || c.Password != secretToken || !p.ServesCachedToken() {
 		t.Fatalf("Credential() with 5h left and a failing mint = %+v, %v; want the cached token", c, err)
 	}
-	settle()
+	settle(p)
 	if api.Calls() != calls {
 		t.Fatalf("Credential() within RegistryTokenMintRetryBackoff of a failed mint minted again (%d calls, want %d)", api.Calls(), calls)
 	}
@@ -155,7 +154,7 @@ func TestECRProviderRidesOutAFailedMint(t *testing.T) {
 	if c, err := p.Credential(ctx, p.Host); err != nil || c.Password != secretToken {
 		t.Fatalf("Credential() past RegistryTokenMintRetryBackoff = %+v, %v; want the cached token", c, err)
 	}
-	settle()
+	settle(p)
 	if api.Calls() != calls+1 {
 		t.Fatalf("Credential() past RegistryTokenMintRetryBackoff started %d mints, want 1", api.Calls()-calls)
 	}
@@ -173,6 +172,9 @@ func TestECRProviderRidesOutAFailedMint(t *testing.T) {
 		t.Fatalf("Token() after ECR recovered = %v, failure %+v", err, p.MintFailure())
 	}
 }
+
+// settle waits out p's mint in flight, if one is.
+func settle(p *ECRProvider) { <-p.mints.DoChan("", func() (any, error) { return nil, nil }) } //nolint:nilnil // the result is unused
 
 func TestECRRegion(t *testing.T) {
 	t.Parallel()
