@@ -1848,6 +1848,7 @@ func TestEngineAvailableNamesAFailingTokenMint(t *testing.T) {
 	if err := k8s.Create(ctx, secret); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = k8s.Delete(context.WithoutCancel(ctx), secret) })
 	clock := time.Now()
 	api := &registrytest.ECR{Token: "AWS:token-1", Expires: clock.Add(12 * time.Hour)}
 	provider := &registry.ECRProvider{Client: api, Host: ecrHost, Now: func() time.Time { return clock }}
