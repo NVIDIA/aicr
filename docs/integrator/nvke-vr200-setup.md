@@ -1,0 +1,89 @@
+# NVKE VR200 Setup
+
+The `vr200-nvke-ubuntu-training` recipe targets NVKE (NVIDIA Kubernetes Engine,
+formerly NKE): bare-metal Vera Rubin (VR200) NVL72 trays provisioned by
+Forge/NICo, running Ubuntu 26.04 on an arm64 `-nvidia-bos-64k` kernel. It is a
+Preview coordinate.
+
+It pairs the NVKE platform handling of `gb200-nvke-ubuntu-training` with the
+VR200 node facts of `vr200-rke2-ubuntu-training`, and differs from both on the
+driver: the NVKE node image pre-bakes none, so GPU Operator installs it.
+
+## Cluster prerequisites
+
+- Kubernetes 1.34 or newer (DRA `resource.k8s.io/v1` for ComputeDomains).
+  Observed in practice: 1.36.3.
+- **Ubuntu 26.04.** The recipe constrains `OS.release.VERSION_ID` to `26.04`.
+- **The `nvidia-bos-64k` kernel line.** This is the hard prerequisite and the
+  recipe cannot express it. See below.
+- Nodes carry `providerID: nico://<uuid>`, so `aicr snapshot` resolves
+  `service: nvke` without `--service`.
+
+## The nvidia-bos-64k kernel is mandatory and unconstrainable
+
+On the generic `nvidia-64k` kernel **no driver brings the GPUs up at all**: PRI
+reads return `0xbadf5720`, FSP and GSP never hand off, and every GPU fails probe
+with `-EIO`. Verified against driver 610.57.04, 615.71.09 and 615.78.08. On
+`nvidia-bos-64k` the stock driver container works.
+
+The recipe cannot gate on this. The constraint grammar has only `>=`, `<=`, `>`,
+`<`, `==` and `!=` with exact match — no substring or regex — and a version range
+cannot separate the two series, because `pkg/version.Compare` drops every build
+suffix except `-gke.N`. So `7.0.0-1018-nvidia-64k` and
+`7.0.0-2022-nvidia-bos-64k` both compare as `7.0.0`. Check the kernel yourself
+before deploying:
+
+```shell
+kubectl get nodes -o wide   # KERNEL-VERSION must contain -nvidia-bos-64k
+```
+
+A kernel-flavour measurement, so the recipe can require this, is a follow-up.
+
+## What has been measured, and what has not
+
+**Measured.** NCCL `all_reduce_perf` over MNNVL across two NVL72 trays, 8 GPUs,
+1 GiB..16 GiB: 996 GB/s average, 1040 GB/s peak, zero mismatches, with NCCL
+reporting one NVLS communicator spanning both nodes (`nvlsRanks 8`).
+
+**This is a single NVLink domain.** The number says nothing about scaling beyond
+one domain, and it is two trays of an NVL72, not a full-rack figure.
+
+**The NIC RDMA east-west path is unqualified.** The NICs are ConnectX-9, but on the trays this was
+developed against every `mlx5` port reports `link_layer` Ethernet with RoCE v2
+GIDs and none reports InfiniBand, so the SR-IOV InfiniBand stack that
+`gb200-nvke-ubuntu-training` ships does not apply. No RDMA transport number has
+been measured on the Ethernet path. The recipe therefore declares no
+`SriovNetworkNodePolicy` and no `SriovNetwork`, and turns the SR-IOV operator
+off rather than running it with nothing to act on.
+
+**Host NIC stack.** The node image installs DOCA OVS and the DOCA-repo `ibverbs`
+userspace, but the kernel driver is the distribution's inbox `mlx5_core`, not
+DOCA-OFED. Feature parity and qualified RDMA performance with DOCA-OFED are not
+claimed.
+
+**Not verified end to end.** The compiled-validator path for this coordinate is
+exercised by CI on merge, not on hardware here. The NicClusterPolicy applies and
+its `nic-configuration-operator` reaches Running on the released NVAIE images,
+but it carries only NIC configuration — no RDMA path is wired through it.
+
+## Known gaps
+
+- ConnectX-9 qualification and an SR-IOV/RDMA east-west fabric for
+  multi-domain training.
+- A kernel-flavour measurement so `nvidia-bos-64k` can be a constraint.
+- A stable VR200 product matcher; until then, mixed GPU pools need
+  `--node-selector`.
+
+## Removing a NicClusterPolicy with secondaryNetwork breaks pod creation
+
+Deleting a NicClusterPolicy that carries `secondaryNetwork` removes the multus
+DaemonSet and its RBAC but leaves `/etc/cni/net.d/00-multus.conflist` on every
+node. That file sorts ahead of the primary CNI config, so every new pod sandbox
+still routes through multus, which can no longer reach the API server:
+
+```
+plugin type="multus" failed (add): Multus: error waiting for pod: Unauthorized
+```
+
+No pod can start cluster-wide until the file is removed. Delete it on each node
+after removing the CR, leaving the primary CNI config in place.

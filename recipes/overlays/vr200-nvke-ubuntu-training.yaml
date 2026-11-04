@@ -17,6 +17,16 @@
 # today. This is that pairing: the nvke root's platform handling with the
 # VR200 node facts from vr200-rke2.
 #
+# SCOPE: training inside a single NVLink domain. The collective data path is
+# MNNVL, measured at 996 GB/s across two trays. The NIC east-west path is NOT
+# qualified here: every mlx5 port on these nodes reports link_layer Ethernet
+# with RoCE v2 GIDs -- there is no InfiniBand link layer -- and no RDMA
+# transport number has been measured on it. The node image installs DOCA OVS
+# and the DOCA-repo ibverbs userspace, but the kernel driver is the distro's
+# inbox mlx5_core, not DOCA-OFED, so feature parity with DOCA-OFED is not
+# claimed. Multi-domain training over the NIC fabric needs that path wired
+# and measured first.
+#
 # It diverges from vr200-rke2 on the driver. That leaf sets driver.enabled
 # false because the VR NVL72 reference image pre-bakes a 615-branch driver;
 # NVKE's node image does not, and does not need to. What VR200 actually needs
@@ -58,9 +68,10 @@ spec:
   # NOT expressed as a constraint: the kernel must be the nvidia-bos flavour
   # rather than generic nvidia-64k. The constraint grammar has only >=, <=, >,
   # <, == and != with exact match -- no substring or regex -- and a version
-  # range does not separate the two series, because semver orders prerelease
-  # identifiers lexically (verified: ">= 7.0.0-2000" accepts
-  # 7.0.0-1018-nvidia-64k). An exact == would pin one build. Enforce
+  # range cannot separate the two series because pkg/version.Compare drops every
+  # build suffix except -gke.N, so 7.0.0-1018-nvidia-64k and
+  # 7.0.0-2022-nvidia-bos-64k both compare as 7.0.0 (verified: ">= 7.0.0-2000"
+  # accepts the 1018 build). An exact == would pin one build.
   # out-of-band until a kernel-flavour measurement exists -- the same posture
   # vr200-rke2 takes for its 615 host-driver floor.
 
@@ -107,13 +118,12 @@ spec:
             - name: MOFED_ENABLED
               value: "false"
 
-    # base.yaml already supplies nvidia-dra-driver-gpu; only the driver root
-    # differs here. gpu-operator installs the driver (driver.enabled above), so
-    # it lives at /run/nvidia/driver, not the chart default of /. Without this
-    # the kubelet-plugin never locates it, no ComputeDomain becomes usable, and
-    # multi-node NVLink silently does not work -- on an NVL72-class accelerator
-    # that is most of the point. Same posture as aks.yaml's operator-managed
-    # path.
+    # components/nvidia-dra-driver-gpu/values.yaml already sets nvidiaDriverRoot
+    # to /run/nvidia/driver, which is where gpu-operator puts the driver, so this
+    # repeats that value rather than correcting it. Kept as an explicit pin: the
+    # kubelet-plugin finding the driver is what makes a ComputeDomain usable, and
+    # without that multi-node NVLink silently does not work. gb200-nvke omits it
+    # and is not affected.
     - name: nvidia-dra-driver-gpu
       type: Helm
       overrides:
@@ -135,40 +145,37 @@ spec:
             limits:
               memory: 512Mi
 
-    # Stands up the nic-configuration-daemon that `aicr snapshot
-    # --discover-network` needs. The NicClusterPolicy carries ONLY a
-    # nicConfigurationOperator section:
+    # Installed for the operator and its CRDs, with no NicClusterPolicy. The CR
+    # is what creates the nic-configuration-daemon, and that daemon cannot
+    # discover ConnectX-9: MFT's flint fails to open the kernel's fwctl devices
+    # (MFE_CR_ERROR) and the pod crashloops on every GPU node. Every published
+    # daemon image fails identically -- NVIDIA/aicr#3640. The CR returns with
+    # east-west RDMA, when there are rails to configure.
     #
-    # No ofedDriver -- NVKE runs the host's inbox mlx5_core, and DOCA-OFED must
-    # not be installed on these nodes.
-    #
-    # No rails -- gb200-nvke's policy and its sriov-ib-networks pair hardcode
-    # four ConnectX-7 rails per tray. VR200 is ConnectX-9 and this platform's
-    # rail layout is unmeasured. Wiring it by copying GB200's is how you get a
-    # policy that looks right and attaches nothing; wire it from a real
-    # discovery result instead.
+    # No rails yet -- gb200-nvke's policy and its sriov-ib-networks pair
+    # hardcode four ConnectX-7 IB rails per tray, and that shape does not fit
+    # here. VR200 is ConnectX-9, but measured on both workers all twelve mlx5
+    # ports report link_layer Ethernet with RoCE v2 GIDs and not one reports
+    # InfiniBand, so linkType IB and SriovIBNetwork do not apply. Four PFs are
+    # SR-IOV capable (sriov_totalvfs 46, numvfs 0), but one is enslaved to the
+    # DOCA OVS bridge carrying the node address and the default route, so it
+    # cannot be carved. Wire a RoCE SriovNetwork from a confirmed fabric
+    # design, not from this inventory alone.
     - name: network-operator
       type: Helm
       valuesFile: components/network-operator/values-nvke-gb200.yaml
-      manifestFiles:
-        - components/network-operator/manifests/nic-cluster-policy-nvke-vr200.yaml
       dependencyRefs:
         - nfd
         - cert-manager
       overrides:
-        # Required by nicConfigurationOperator: it prepares each node through
-        # the maintenance operator before applying NIC configuration. Enabling
-        # the daemon without this leaves it unable to take a node.
-        maintenanceOperator:
-          enabled: true
-        nicConfigurationOperator:
-          configurationDaemon:
-            resources:
-              limits:
-                memory: 2Gi
-              requests:
-                cpu: 100m
-                memory: 256Mi
+        # No SriovNetworkNodePolicy and no SriovNetwork here, so the SR-IOV
+        # operator and the drain-controller requestor would run on every node
+        # with nothing to act on. Both stay off until east-west lands.
+        sriovNetworkOperator:
+          enabled: false
+        operator:
+          maintenanceOperator:
+            useDrainControllerRequestor: false
 
     # Scaffolded off. vr200-rke2 ships a Skyhook tuning CR that REBOOTS EVERY
     # GPU NODE it touches, and nodewright-packages has no vr200/nvke profile --

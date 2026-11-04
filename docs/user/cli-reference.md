@@ -541,7 +541,7 @@ node shape the resolved recipe targets. See
 
 > **`--service cks` is Preview**, covering H100 and RTX PRO 6000 on Ubuntu for training. Pass the service explicitly, including with a snapshot; CKS auto-detection is not implemented. See [CoreWeave H100 Setup](../integrator/cks-h100-setup.md) and [CoreWeave RTX PRO 6000 Setup](../integrator/cks-rtx-pro-6000-setup.md) for provider ownership and qualification gaps.
 
-> **`--service nvke` is Preview**, covering the `nvke / gb200 / ubuntu / training` and `nvke / gb200 / ubuntu / training / kubeflow` coordinates. See [NVKE GB200 Setup](../integrator/nvke-gb200-setup.md) for its prerequisites and known gaps.
+> **`--service nvke` is Preview**, covering the `nvke / gb200 / ubuntu / training`, `nvke / gb200 / ubuntu / training / kubeflow` and `nvke / vr200 / ubuntu / training` coordinates. See [NVKE GB200 Setup](../integrator/nvke-gb200-setup.md) and [NVKE VR200 Setup](../integrator/nvke-vr200-setup.md) for their prerequisites and known gaps. The VR200 coordinate requires an `nvidia-bos-64k` kernel, which the recipe's constraints cannot express — check it before deploying.
 
 **Examples:**
 ```shell

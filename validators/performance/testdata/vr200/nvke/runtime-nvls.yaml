@@ -32,12 +32,12 @@
 # per-accelerator fallback is ever added, these two collapse into one.
 #
 # What differs is the PLATFORM, not the manifest, and it is a recipe concern:
-# the NVKE node image ships no GPU driver, so gpu-operator installs it and
-# nvidia-dra-driver-gpu must set nvidiaDriverRoot=/run/nvidia/driver. Left at
-# the chart default of `/`, the kubelet-plugin never finds the driver, no
-# ComputeDomain becomes usable, and this check fails at MNNVL init rather than
-# measuring anything. The NVKE node image also needs the nvidia-bos kernel
-# line; on the generic nvidia-64k kernel no driver brings the GPUs up at all.
+# the NVKE node image ships no GPU driver, so gpu-operator installs it and the
+# driver lives at /run/nvidia/driver -- which is already what
+# components/nvidia-dra-driver-gpu/values.yaml sets, so no override is
+# required for the kubelet-plugin to find it. The NVKE node image does need
+# the nvidia-bos kernel line; on the generic nvidia-64k kernel no driver
+# brings the GPUs up at all.
 #
 # The validator provisions the ComputeDomain and waits for the IMEX
 # ResourceClaimTemplate in the per-run benchmark namespace, exactly as it does

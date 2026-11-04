@@ -61,7 +61,6 @@ charts:
           - sriovresourcepolicies.sriovnetwork.k8snetworkplumbingwg.io
         recipes:
           - gb200-nvke-ubuntu-training-kubeflow
-          - vr200-nvke-ubuntu-training
       - crds:
           - cidrpools.nv-ipam.nvidia.com
           - hostdevicenetworks.mellanox.com
@@ -75,6 +74,7 @@ charts:
           - nodemaintenances.maintenance.nvidia.com
         recipes:
           - gb300-generic-ubuntu-training
+          - vr200-nvke-ubuntu-training
   - chart: network-operator
     image: cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/network-operator:v25.1.0
     repository: oci://cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/chart

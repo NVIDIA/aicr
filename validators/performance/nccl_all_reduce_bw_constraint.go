@@ -311,11 +311,11 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 		// mpirun path) — see testdata/vr200/rke2/runtime-nvls.yaml.
 		recipe.CriteriaServiceRKE2: {recipe.CriteriaAcceleratorVR200},
 		// VR200 NVL72 on bare-metal NVKE: same MNNVL/IMEX topology as the RKE2
-		// leaf, but NVKE's node image ships no driver, so gpu-operator installs
-		// it and the DRA driver must be pointed at /run/nvidia/driver for the
-		// ComputeDomain to work at all. Measured on two trays at 996.5 GB/s
-		// average and 1040 GB/s peak over 1 GiB..16 GiB, 0 mismatches — the
-		// first measured NVKE baseline, where gb200-nvke still borrows
+		// leaf. NVKE's node image ships no driver, so gpu-operator installs it at
+		// /run/nvidia/driver, which the DRA driver component already defaults to.
+		// Measured on two trays at 996.5 GB/s average and 1040 GB/s peak
+		// over 1 GiB..16 GiB with 0 mismatches — the first measured NVKE
+		// baseline, where gb200-nvke still borrows
 		// gb200/oke's placeholder thresholds. See
 		// testdata/vr200/nvke/runtime-nvls.yaml.
 		recipe.CriteriaServiceNVKE:    {recipe.CriteriaAcceleratorVR200},

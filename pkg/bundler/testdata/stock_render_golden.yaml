@@ -5752,31 +5752,26 @@ vr200-nvke-ubuntu-training:
   009-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   009-network-operator/upstream.env: e9c035cedf63d826906a2931686fb7cbd88a57aee7588a9f2d9aaeff7bada0d9
-  009-network-operator/values.yaml: addc6f2f44f9c0063a1bafe1a264df3aa8769703915147b868b25e5ac1ad76f5
-  010-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
-  010-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  010-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
-  010-network-operator-post/templates/nic-cluster-policy-nvke-vr200.yaml: 6d5669aad51862b96b8e4788e7ba9c8c5ec9db5f675007f9a7edf87ab4fb29c8
-  010-network-operator-post/values.yaml: addc6f2f44f9c0063a1bafe1a264df3aa8769703915147b868b25e5ac1ad76f5
-  011-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  011-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
-  011-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
-  011-nvidia-dra-driver-gpu/values.yaml: 13baa7381abbc06291f63a7e94b790ad95c7f205d30e91528198c9f11ef25420
-  012-nvsentinel/apply-crds.sh: fb49c9bf7cadd9719c047c71db55af605156b4ff53d5728566ebd6d6d0cae706
-  012-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  012-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
-  012-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  012-nvsentinel/values.yaml: 0af63c5f93656b55dd0d0c8725169dccdc0ffe02dfe9d9b70a46466017368d7d
-  013-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  013-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
-  013-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
-  013-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
-  README.md: 4b68faaf3b23875d43955ffa5f466cbeb6d8173a04a13ef3b35549fdd0355c56
+  009-network-operator/values.yaml: fc2f91a2736335c5c0a0d9184bd869c8c82d000cf2be7408648bb4707f578d8e
+  010-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  010-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
+  010-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
+  010-nvidia-dra-driver-gpu/values.yaml: 13baa7381abbc06291f63a7e94b790ad95c7f205d30e91528198c9f11ef25420
+  011-nvsentinel/apply-crds.sh: fb49c9bf7cadd9719c047c71db55af605156b4ff53d5728566ebd6d6d0cae706
+  011-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  011-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
+  011-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
+  011-nvsentinel/values.yaml: 0af63c5f93656b55dd0d0c8725169dccdc0ffe02dfe9d9b70a46466017368d7d
+  012-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  012-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
+  012-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
+  012-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
+  README.md: b38172831e0ec69c0f9b4bab6d72ecbe237e76a0e99348ae6692e6461f03488b
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
-  bundle-info.yaml: f895017f2e0f3d7ac8a113ed8df5ff612f82ac0320ec3b54fc89622dfb57ba7f
-  checksums.txt: e1ce17dbe277105ed736a53160182ee0a1dc4879bfba30eb039b2deae62fe74a
+  bundle-info.yaml: d84d5c37b836968c37b2b8a182f4a0b9f661c7e96a952b5060e437bb8e9f2363
+  checksums.txt: 341376d3650e7d05758f9f55d0e91d53c7620925139a4e48bddb23d66c28f76b
   deploy.sh: be77588cbc470f24f90a45c794d72d60dd2470e03cdff0535f71eb32cba413a8
-  recipe.yaml: 07d77a67ee0c589800e83f26e349bb19ee5a0c50fefa2d39438b8690a5628ab5
+  recipe.yaml: 52d7835942be99db848c3d19ca1460d5755d16cffbdc8427360b2b1c55f60a09
 vr200-rke2-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
