@@ -573,14 +573,16 @@ func TestAICRFlags(t *testing.T) {
 		t.Errorf("aicrFlags() = %+v, want the version, the image and the sorted validator images", got)
 	}
 	for name, args := range map[string][3]string{
-		"no image":                 {"v1.3.0", "", deployment},
-		"no validator images":      {"v1.3.0", image, ""},
-		"no version":               {"", image, deployment},
-		"not semantic":             {"1.3.0", image, deployment},
-		"build metadata":           {"v1.3.0+b.1", image, deployment},
-		"image without a digest":   {"v1.3.0", "ghcr.io/nvidia/aicr:v1.3.0", deployment},
-		"validator without a tag":  {"v1.3.0", image, "ghcr.io/nvidia/aicr-validators/deployment" + digest},
-		"an empty validator entry": {"v1.3.0", image, deployment + ","},
+		"no image":                     {"v1.3.0", "", deployment},
+		"no validator images":          {"v1.3.0", image, ""},
+		"no version":                   {"", image, deployment},
+		"not semantic":                 {"1.3.0", image, deployment},
+		"build metadata":               {"v1.3.0+b.1", image, deployment},
+		"image without a digest":       {"v1.3.0", "ghcr.io/nvidia/aicr:v1.3.0", deployment},
+		"validator without a tag":      {"v1.3.0-rc.1", image, "ghcr.io/nvidia/aicr-validators/deployment" + digest},
+		"an empty validator entry":     {"v1.3.0-rc.1", image, deployment + ","},
+		"image of another release":     {"v1.3.0-rc.1", "ghcr.io/nvidia/aicr:v1.2.0" + digest, deployment},
+		"validator of another release": {"v1.3.0-rc.1", image, deployment + ",ghcr.io/nvidia/aicr-validators/performance:v1.3.0" + digest},
 	} {
 		if _, err := aicrFlags(args[0], args[1], args[2]); err == nil {
 			t.Errorf("%s: aicrFlags(%q) accepted", name, args)

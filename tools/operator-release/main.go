@@ -199,7 +199,8 @@ func extract(args []string) error {
 var pinnedRef = regexp.MustCompile(`^[^\s@]+/[^\s@/:]+:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}@sha256:[a-f0-9]{64}$`)
 
 // aicrFlags is the AICR release given on the command line, such as the one a
-// release tag built: all three flags, each image pinned by tag and digest.
+// release tag built: all three flags, each image pinned by digest and tagged
+// with the version.
 func aicrFlags(ver, image, validators string) (AICR, error) {
 	if ver == "" || image == "" || validators == "" {
 		return AICR{}, errors.New("-aicr-version, -aicr-image and -aicr-validator-images are set together")
@@ -212,6 +213,10 @@ func aicrFlags(ver, image, validators string) (AICR, error) {
 	for _, ref := range append([]string{image}, refs...) {
 		if !pinnedRef.MatchString(ref) {
 			return AICR{}, fmt.Errorf("AICR image %q is not repository:tag@sha256:<digest>", ref)
+		}
+		name := ref[:strings.IndexByte(ref, '@')]
+		if tag := name[strings.LastIndexByte(name, ':')+1:]; tag != ver {
+			return AICR{}, fmt.Errorf("AICR image %q has tag %q, want %q", ref, tag, ver)
 		}
 	}
 	return AICR{Version: ver, Image: image, ValidatorImages: refs}, nil
