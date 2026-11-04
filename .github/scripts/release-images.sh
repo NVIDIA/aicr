@@ -626,12 +626,16 @@ validate_promotion_file() {
   ' "${path}" >/dev/null || die "validated promotion file has an invalid schema or release identity"
 }
 
+# promote converges the version aliases, then, for a stable release, latest.
+# With phase "versions" it stops after the version aliases: the release
+# workflow promotes them before the operator gate and latest after it.
 promote_command() {
-  local validated_path="$1" pair key expected_image image digest prior_digest version_state latest_state
+  local validated_path="$1" phase="${2:-all}" pair key expected_image image digest prior_digest version_state latest_state
   local candidate_tag revision tags current_digest
   declare -A version_actions=()
   declare -A latest_actions=()
   [[ -n "${validated_path}" ]] || die "promote requires a validated map path"
+  [[ "${phase}" == "all" || "${phase}" == "versions" ]] || die "promote phase must be versions or omitted"
   RELEASE_TAG="${RELEASE_TAG:-}"
   IS_PRERELEASE="${IS_PRERELEASE:-}"
   validate_release_tag "${RELEASE_TAG}"
@@ -705,7 +709,7 @@ promote_command() {
     [[ "${current_digest}" == "${digest}" ]] || die "version alias verification failed for ${image}"
   done
 
-  if [[ "${IS_PRERELEASE}" == "false" ]]; then
+  if [[ "${IS_PRERELEASE}" == "false" && "${phase}" == "all" ]]; then
     # Phase 2: only after every version alias is verified, converge stable latest aliases.
     for pair in "${IMAGE_PAIRS[@]}"; do
       key="${pair%%=*}"
@@ -722,7 +726,7 @@ promote_command() {
 }
 
 usage() {
-  echo "usage: release-images.sh release-target | resolve <output.json> | preflight <digests.json> <validated.json> | promote <validated.json> | verify-source | publish-release" >&2
+  echo "usage: release-images.sh release-target | resolve <output.json> | preflight <digests.json> <validated.json> | promote <validated.json> [versions] | verify-source | publish-release" >&2
   exit 2
 }
 
@@ -741,8 +745,8 @@ case "${command}" in
     preflight_command "$2" "$3"
     ;;
   promote)
-    [[ $# -eq 2 ]] || usage
-    promote_command "$2"
+    [[ $# -eq 2 || $# -eq 3 ]] || usage
+    promote_command "$2" "${3:-all}"
     ;;
   verify-source)
     [[ $# -eq 1 ]] || usage

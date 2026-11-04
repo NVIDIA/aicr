@@ -115,10 +115,12 @@ func TestReleaseUsesSingleDigestMap(t *testing.T) {
 		"resolve-candidates":    "RESOLVE_RESULT",
 		"image-vuln-scan":       "SCAN_RESULT",
 		"attest":                "ATTEST_RESULT",
+		"promote-versions":      "PROMOTE_VERSIONS_RESULT",
 		"operator-candidate":    "OPERATOR_CANDIDATE_RESULT",
 		"operator-scan":         "OPERATOR_SCAN_RESULT",
 		"operator-reproducible": "OPERATOR_REPRODUCIBLE_RESULT",
 		"operator-lifecycle":    "OPERATOR_LIFECYCLE_RESULT",
+		"operator-validation":   "OPERATOR_VALIDATION_RESULT",
 	} {
 		if !containsString(stringSlice(releaseCheck["needs"]), gate) ||
 			fmt.Sprint(gateEnv[variable]) != "${{ needs."+gate+".result }}" ||
@@ -1255,12 +1257,102 @@ func TestReleasePublicAliasWritesExistOnlyInPromotion(t *testing.T) {
 	jobs := mapValue(t, doc, "jobs")
 	for name, raw := range jobs {
 		text := marshalYAML(t, raw)
-		if name != "promote-images" && strings.Contains(text, "release-images.sh promote") {
+		if name != "promote-images" && name != "promote-versions" && strings.Contains(text, "release-images.sh promote") {
 			t.Errorf("job %s invokes public-alias promotion", name)
 		}
 	}
 	if !jobTransitivelyDependsOn(jobs, "promote-images", "release-check") {
-		t.Error("public-alias mutation must be a descendant of release-check")
+		t.Error("latest promotion must be a descendant of release-check")
+	}
+	// Version aliases come before the operator gate, so the operator can
+	// qualify this tag's AICR, but only after AICR's own gates.
+	if !jobTransitivelyDependsOn(jobs, "promote-versions", "aicr-check") {
+		t.Error("version promotion must be a descendant of aicr-check")
+	}
+	if !strings.Contains(marshalYAML(t, mapValue(t, jobs, "promote-versions")), "release-images.sh promote validated-digests.json versions") {
+		t.Error("promote-versions must promote only the version aliases")
+	}
+	assertConcurrency(t, mapValue(t, jobs, "promote-versions"), "aicr-release-image-alias-promotion")
+}
+
+// AICR's own gates fail closed before its version aliases are published.
+func TestReleaseAICRCheckFailsClosed(t *testing.T) {
+	doc := loadYAML(t, ".github/workflows/on-tag.yaml")
+	jobs := mapValue(t, doc, "jobs")
+	check := mapValue(t, jobs, "aicr-check")
+	steps := sliceValue(t, check, "steps")
+	gateIndex := stepIndex(steps, "Check AICR security gates")
+	if gateIndex < 0 {
+		t.Fatal("aicr-check must check AICR's security gates")
+	}
+	gateStep, ok := steps[gateIndex].(map[string]any)
+	if !ok {
+		t.Fatal("aicr-check's gate step is not a map")
+	}
+	gateEnv := mapValue(t, gateStep, "env")
+	gateRun := fmt.Sprint(gateStep["run"])
+	for gate, variable := range map[string]string{
+		"resolve-candidates": "RESOLVE_RESULT",
+		"image-vuln-scan":    "SCAN_RESULT",
+		"attest":             "ATTEST_RESULT",
+	} {
+		if !containsString(stringSlice(check["needs"]), gate) ||
+			fmt.Sprint(gateEnv[variable]) != "${{ needs."+gate+".result }}" ||
+			!strings.Contains(gateRun, `"${`+variable+`}" != "success"`) {
+
+			t.Errorf("aicr-check must fail closed on %s", gate)
+		}
+	}
+}
+
+// The operator candidate defaults to this tag's AICR images, pinned from the
+// resolved digest map, and is qualified only once their version aliases exist
+// (#3560).
+func TestReleaseOperatorQualifiesTheTagsAICR(t *testing.T) {
+	doc := loadYAML(t, ".github/workflows/on-tag.yaml")
+	jobs := mapValue(t, doc, "jobs")
+	resolveText := marshalYAML(t, mapValue(t, jobs, "resolve-candidates"))
+	for _, want := range []string{"pin aicr ghcr.io/nvidia/aicr", "pin deployment ghcr.io/nvidia/aicr-validators/deployment",
+		"pin conformance ghcr.io/nvidia/aicr-validators/conformance", "pin performance ghcr.io/nvidia/aicr-validators/performance"} {
+		if !strings.Contains(resolveText, want) {
+			t.Errorf("resolve-candidates must pin the operator's AICR images from the digest map: missing %q", want)
+		}
+	}
+	for _, job := range []string{"operator-candidate", "operator-reproducible"} {
+		text := marshalYAML(t, mapValue(t, jobs, job))
+		for _, want := range []string{
+			"CANDIDATE_AICR_VERSION: ${{ github.ref_name }}",
+			"CANDIDATE_AICR_IMAGE: ${{ needs.resolve-candidates.outputs.aicr_image }}",
+			"CANDIDATE_AICR_VALIDATOR_IMAGES: ${{ needs.resolve-candidates.outputs.aicr_validator_images }}",
+		} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s must build with this tag's AICR: missing %q", job, want)
+			}
+		}
+	}
+	if !jobTransitivelyDependsOn(jobs, "operator-lifecycle", "promote-versions") {
+		t.Error("operator-lifecycle must wait for the version aliases its AICR resolves")
+	}
+
+	// Deployment validation runs this tag's AICR and validator images, by the
+	// version aliases, before anything else publishes.
+	validation := mapValue(t, jobs, "operator-validation")
+	validationText := marshalYAML(t, validation)
+	for _, want := range []string{
+		"AICR_E2E_VERSION: ${{ github.ref_name }}",
+		"AICR_E2E_IMAGE: ${{ needs.resolve-candidates.outputs.aicr_image }}",
+		"AICR_E2E_VALIDATOR_IMAGES: ${{ needs.resolve-candidates.outputs.aicr_validator_images }}",
+		"make operator-e2e",
+	} {
+		if !strings.Contains(validationText, want) {
+			t.Errorf("operator-validation must run the e2e suite with this tag's AICR: missing %q", want)
+		}
+	}
+	if !jobTransitivelyDependsOn(jobs, "operator-validation", "promote-versions") {
+		t.Error("operator-validation must wait for the version aliases its validators resolve")
+	}
+	if _, conditional := validation["if"]; conditional {
+		t.Error("operator-validation must not run when version promotion did not succeed")
 	}
 }
 
