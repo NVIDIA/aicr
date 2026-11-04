@@ -67,11 +67,17 @@ var (
 	// operator impersonates the operator's ServiceAccount, the only identity
 	// the chart's policy lets create rollouts.
 	operator client.Client
+	// lifecycleOnly runs only the install, upgrade, downgrade and uninstall
+	// scenarios. The published-release lane installs a release older than
+	// the code under test, and the fault scenarios hold the installed
+	// release to that code.
+	lifecycleOnly bool
 )
 
 func TestMain(m *testing.M) {
 	path := os.Getenv("AICR_OPERATOR_E2E_KUBECONFIG")
 	aicrVersion = os.Getenv("AICR_OPERATOR_E2E_AICR_VERSION")
+	lifecycleOnly = os.Getenv("AICR_OPERATOR_QUALIFY_LIFECYCLE_ONLY") != ""
 	if path == "" || aicrVersion == "" || os.Getenv("AICR_OPERATOR_QUALIFY_CANDIDATE") == "" {
 		msg := "AICR_OPERATOR_E2E_KUBECONFIG, AICR_OPERATOR_E2E_AICR_VERSION and AICR_OPERATOR_QUALIFY_CANDIDATE are required (run `make operator-qualify`)"
 		if os.Getenv("OPERATOR_E2E_REQUIRED") != "" {
