@@ -1299,8 +1299,8 @@ func TestNVKENetRuntimePrecheckMarkerMatchesRegex(t *testing.T) {
 			t.Errorf("runtimePrecheckFailure(%q) = %q, want %q", out, got, printed)
 		}
 	}
-	if checks != 2 {
-		t.Errorf("found %d %q lines in %s, want 2 (missing address, missing RDMA device)", checks, echoMarker, path)
+	if checks != 3 {
+		t.Errorf("found %d %q lines in %s, want 3 (missing address, missing RDMA device, limited P_Key membership)", checks, echoMarker, path)
 	}
 }
 
@@ -1336,9 +1336,10 @@ func nvkeNetRankScript(t *testing.T) string {
 }
 
 // TestNVKENetRankPrecheck runs the NVKE NET runtime's rank script against a
-// stub ip and a fake /sys/class/net: a rail missing its IPoIB address or its
-// RDMA device must exit non-zero with a marker naming that rail, and four good
-// rails must pin NCCL_IB_HCA to exactly their VFs, in rail order.
+// stub ip and a fake /sys/class/net and /sys/class/infiniband: a rail missing
+// its IPoIB address, its RDMA device, or full P_Key membership must exit
+// non-zero with a marker naming that rail, and four good rails must pin
+// NCCL_IB_HCA to exactly their VFs, in rail order.
 func TestNVKENetRankPrecheck(t *testing.T) {
 	script := nvkeNetRankScript(t)
 	hcas := []string{"mlx5_9", "mlx5_30", "mlx5_49", "mlx5_61"}
@@ -1347,17 +1348,20 @@ func TestNVKENetRankPrecheck(t *testing.T) {
 		name       string
 		noAddr     string
 		noRDMA     string
+		limited    string
 		wantErr    string
 		wantHCAEnv string
 	}{
 		{name: "four rails attached", wantHCAEnv: "=mlx5_9,mlx5_30,mlx5_49,mlx5_61"},
 		{name: "rail without IPoIB address", noAddr: "net3", wantErr: "AICR_PRECHECK_FAILED: rail attachment net3 has no IPoIB address"},
 		{name: "rail without RDMA device", noRDMA: "net2", wantErr: "AICR_PRECHECK_FAILED: rail attachment net2 has no RDMA device"},
+		{name: "rail with only limited P_Key membership", limited: "net4", wantErr: "AICR_PRECHECK_FAILED: rail attachment net4 (mlx5_61) holds only limited P_Key membership"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
 			sysNet := filepath.Join(root, "sys-class-net")
+			sysIB := filepath.Join(root, "sys-class-infiniband")
 			bin := filepath.Join(root, "bin")
 			if err := os.MkdirAll(bin, 0o755); err != nil {
 				t.Fatal(err)
@@ -1376,9 +1380,25 @@ func TestNVKENetRankPrecheck(t *testing.T) {
 				if err := os.MkdirAll(dir, 0o755); err != nil {
 					t.Fatal(err)
 				}
+				// Index 0 holds the limited default; a full-member key sits at a
+				// non-zero index, so the check must not assume index 0 or 0xffff.
+				pkeys := map[string]string{"0": "0x7fff", "1": "0x8001", "2": "0x0000"}
+				if dev == tt.limited {
+					pkeys["1"] = "0x0000"
+				}
+				pkeyDir := filepath.Join(sysIB, hca, "ports", "1", "pkeys")
+				if err := os.MkdirAll(pkeyDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				for idx, v := range pkeys {
+					if err := os.WriteFile(filepath.Join(pkeyDir, idx), []byte(v+"\n"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
 			}
 
 			body := strings.ReplaceAll(script, "/sys/class/net/", sysNet+"/")
+			body = strings.ReplaceAll(body, "/sys/class/infiniband/", sysIB+"/")
 			cmd := exec.CommandContext(t.Context(), "/bin/sh", "-c", body, "nccl-rank", "/bin/sh", "-c", `printf %s "$NCCL_IB_HCA"`)
 			cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 			var stdout, stderr bytes.Buffer

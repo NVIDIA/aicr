@@ -23,14 +23,17 @@
 #
 # Each worker requests one VF per rail and the four attachments, which multus
 # exposes as net1..net4. Before NCCL starts, every rank checks that each netN
-# carries an IPoIB address and an RDMA device, and pins NCCL_IB_HCA to exactly
-# those four VF HCAs. A rank missing an attachment exits with an
-# AICR_PRECHECK_FAILED line naming it, which the validator reports as the
-# failure reason, so the check never passes on a pod-network fallback.
+# carries an IPoIB address, an RDMA device, and full membership in some IB
+# partition, then pins NCCL_IB_HCA to exactly those four VF HCAs. A rank that
+# fails any of these exits with an AICR_PRECHECK_FAILED line naming the rail,
+# which the validator reports as the failure reason, so the check never passes
+# on a pod-network fallback.
 #
-# Traffic needs every PF and VF GUID to be a full member of a common IB
-# partition (P_Key 0x8000 bit set). A tenant with only limited membership
-# (0x7fff) schedules and attaches, then fails in NCCL with retry-exceeded
+# Two VFs exchange traffic when they share a partition and at least one of them
+# is a full member (P_Key 0x8000 bit set). The precheck requires full membership
+# on every rank's VFs, which covers that. Without it, on a tenant whose VFs hold
+# only limited membership (0x7fff), NCCL hits retry-exceeded on the first
+# all-reduce and then hangs until the launcher timeout
 # (docs/integrator/nvke-gb200-setup.md).
 #
 # Must stay in sync with ncclTrainingRuntimeName in nccl_all_reduce_bw_constraint.go.
@@ -190,10 +193,9 @@ spec:
                   - --mca
                   - plm_rsh_args
                   - -o StrictHostKeyChecking=no -o ConnectionAttempts=10
-                  # Keep MPI's own traffic on eth0. The pods see every HCA on the
-                  # host (shared RDMA namespace), so UCX would otherwise try the
-                  # rail VFs and fail where the IB partition is limited, before
-                  # NCCL starts.
+                  # Keep MPI's own traffic on eth0. UCX would otherwise run MPI
+                  # over the pod's rail VFs and, where the IB partition is
+                  # limited, fail in MPI startup before NCCL starts.
                   - --mca
                   - pml
                   - ob1
@@ -227,8 +229,9 @@ spec:
                   - NCCL_SOCKET_IFNAME=eth0
                   - -x
                   - NCCL_IGNORE_DISABLED_P2P=1
-                  # Per rank: require an IPoIB address and an RDMA device on each
-                  # of net1..net4, then pin NCCL to exactly those VF HCAs.
+                  # Per rank: require an IPoIB address, an RDMA device and full
+                  # P_Key membership on each of net1..net4, then pin NCCL to
+                  # exactly those VF HCAs.
                   - /bin/sh
                   - -c
                   - |
@@ -241,6 +244,16 @@ spec:
                       hca=$(ls "/sys/class/net/net$i/device/infiniband" 2>/dev/null | head -n 1)
                       if [ -z "$hca" ]; then
                         echo "AICR_PRECHECK_FAILED: rail attachment net$i has no RDMA device on $(hostname)" >&2
+                        exit 1
+                      fi
+                      full=0
+                      for k in /sys/class/infiniband/$hca/ports/1/pkeys/*; do
+                        v=$(cat "$k" 2>/dev/null)
+                        [ -n "$v" ] || continue
+                        if [ $((v & 0x8000)) -ne 0 ]; then full=1; break; fi
+                      done
+                      if [ "$full" -ne 1 ]; then
+                        echo "AICR_PRECHECK_FAILED: rail attachment net$i ($hca) holds only limited P_Key membership on $(hostname); the fabric must grant the VF full membership" >&2
                         exit 1
                       fi
                       hcas="$hcas,$hca"

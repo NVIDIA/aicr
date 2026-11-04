@@ -282,19 +282,27 @@ The performance phase runs the `gb200/nvke` NCCL runtimes.
 - `nccl-all-reduce-bw-net` gives each worker one VF on every rail
   (`nvidia.com/sriov_resource_rail_<n>`) and the four
   `default/sriov-network-rail-<n>` attachments. Before NCCL starts, every rank
-  checks that `net1`..`net4` each carry an IPoIB address and an RDMA device,
-  and pins `NCCL_IB_HCA` to those VFs. A missing attachment fails the check
-  with a reason naming it, rather than letting NCCL fall back to the pod
-  network. If the CNI fails to attach a rail when the pod is created, the
-  worker never starts and the check fails as a launcher-pod timeout instead.
+  checks that `net1`..`net4` each carry an IPoIB address, an RDMA device and
+  full membership in some IB partition, then pins `NCCL_IB_HCA` to those VFs.
+  A failed check names the rail and the cause, rather than letting NCCL fall
+  back to the pod network.
+- If the CNI fails to attach a rail when the pod is created, the worker never
+  starts and the check fails as a launcher-pod timeout with no reason. On NVKE
+  the usual cause is multus losing its service-account token an hour after
+  it starts ([#3482](https://github.com/NVIDIA/aicr/issues/3482)). Run
+  `kubectl -n nvidia-network-operator rollout restart ds/kube-multus-ds`
+  shortly before `aicr validate`.
 - The `>= 40` NET floor is copied from the GB200 OKE recipe. No tenant with
   full IB partition membership has measured it yet, so it is a placeholder.
 
-On a tenant whose IB ports hold only limited P_Key membership, as on the
-reference tenant (see prerequisites), the NET check schedules and attaches,
-then fails in NCCL. Withhold it with `--skip-check nccl-all-reduce-bw-net`
-until the fabric grants full membership; the report and evidence record it as
-skipped.
+Two VFs exchange IB traffic when they share a partition and at least one of
+them is a full member. On a tenant whose VFs hold only limited P_Key
+membership, as on the reference tenant (see prerequisites), the rank precheck
+fails the NET check within seconds and names the membership. Without that
+check, NCCL hits `IBV_WC_RETRY_EXC_ERR` on the first all-reduce and then hangs
+until the launcher timeout. Withhold the check with
+`--skip-check nccl-all-reduce-bw-net` until the fabric grants full membership;
+the report and evidence record it as skipped.
 
 ## Known gaps
 
