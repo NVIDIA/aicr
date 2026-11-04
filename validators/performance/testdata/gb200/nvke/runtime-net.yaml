@@ -156,6 +156,11 @@ spec:
           spec:
             template:
               spec:
+                # A failed rank precheck is a cluster condition a restart cannot
+                # fix. Fail the pod once so the validator reads its logs and the
+                # AICR_PRECHECK_FAILED reason, instead of waiting through
+                # restart backoff until the pod is deleted.
+                restartPolicy: Never
                 tolerations:
                 - operator: Exists
                 initContainers:

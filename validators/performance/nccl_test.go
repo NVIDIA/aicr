@@ -1274,6 +1274,24 @@ func TestNVKENetRuntimeRequestsEveryRail(t *testing.T) {
 			t.Errorf("worker %s requests nvidia.com/mlnxnics, which NVKE does not expose", kind)
 		}
 	}
+
+	// A failed precheck must fail the launcher pod once, keeping its logs for the
+	// validator, rather than restarting it until the Job deletes the pod.
+	for _, j := range jobs {
+		job, _ := j.(map[string]any)
+		if job["name"] != "launcher" {
+			continue
+		}
+		policy, _, _ := unstructured.NestedString(job, "template", "spec", "template", "spec", "restartPolicy")
+		if policy != "Never" {
+			t.Errorf("launcher restartPolicy = %q, want \"Never\"", policy)
+		}
+		containers, _, _ := unstructured.NestedSlice(job, "template", "spec", "template", "spec", "containers")
+		c, _ := containers[0].(map[string]any)
+		if got, _, _ := unstructured.NestedString(c, "terminationMessagePolicy"); got != "FallbackToLogsOnError" {
+			t.Errorf("launcher terminationMessagePolicy = %q, want \"FallbackToLogsOnError\"", got)
+		}
+	}
 }
 
 // TestNVKENetRuntimePrecheckMarkerMatchesRegex ties the marker the NVKE NET
