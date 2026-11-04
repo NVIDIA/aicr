@@ -292,6 +292,13 @@ earlier plan's digest.
 
 ## Upgrading AICR within v1
 
+An operator release's chart defaults to the AICR release of the same tag,
+qualified with it in the release workflow, so upgrading the chart to a release
+also upgrades AICR to it. A release candidate's chart defaults to that
+candidate's AICR and sets `aicr.allowPrerelease`. An earlier chart, such as
+v1.2.0's, can default to an earlier AICR release; `helm show values` shows the
+default.
+
 AICR is an installation value, not a runtime field. Upgrade it with a chart
 upgrade that sets the version, the image and, with validation, the validator
 images together:

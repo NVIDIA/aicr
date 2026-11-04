@@ -535,3 +535,55 @@ func TestPushRetriesDenied(t *testing.T) {
 		})
 	}
 }
+
+// A prerelease AICR release also turns on aicr.allowPrerelease in the real
+// chart's values, so a release candidate's chart renders its own AICR; a
+// release leaves it off.
+func TestStampValuesPrerelease(t *testing.T) {
+	t.Parallel()
+	values, err := os.ReadFile(filepath.Join("..", "..", "charts", "aicr-operator", "values.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := "@sha256:" + strings.Repeat("a", 64)
+	for ver, want := range map[string]string{"v1.3.0-rc.1": "  allowPrerelease: true", "v1.3.0": "  allowPrerelease: false"} {
+		aicr := AICR{Version: ver, Image: "ghcr.io/nvidia/aicr:" + ver + digest,
+			ValidatorImages: []string{"ghcr.io/nvidia/aicr-validators/deployment:" + ver + digest}}
+		out, stampErr := stampValues(values, aicr, "ghcr.io/nvidia/aicr-operator"+digest, "registry.example.com/registry:3"+digest)
+		if stampErr != nil {
+			t.Fatalf("%s: %v", ver, stampErr)
+		}
+		if lines := strings.Split(string(out), "\n"); !slices.Contains(lines, want) || !slices.Contains(lines, "  version: "+ver) {
+			t.Errorf("%s: stamped values lack %q or the version", ver, want)
+		}
+	}
+}
+
+func TestAICRFlags(t *testing.T) {
+	t.Parallel()
+	digest := "@sha256:" + strings.Repeat("a", 64)
+	image := "ghcr.io/nvidia/aicr:v1.3.0-rc.1" + digest
+	deployment := "ghcr.io/nvidia/aicr-validators/deployment:v1.3.0-rc.1" + digest
+	conformance := "ghcr.io/nvidia/aicr-validators/conformance:v1.3.0-rc.1" + digest
+	got, err := aicrFlags("v1.3.0-rc.1", image, deployment+","+conformance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Version != "v1.3.0-rc.1" || got.Image != image || !slices.Equal(got.ValidatorImages, []string{conformance, deployment}) {
+		t.Errorf("aicrFlags() = %+v, want the version, the image and the sorted validator images", got)
+	}
+	for name, args := range map[string][3]string{
+		"no image":                 {"v1.3.0", "", deployment},
+		"no validator images":      {"v1.3.0", image, ""},
+		"no version":               {"", image, deployment},
+		"not semantic":             {"1.3.0", image, deployment},
+		"build metadata":           {"v1.3.0+b.1", image, deployment},
+		"image without a digest":   {"v1.3.0", "ghcr.io/nvidia/aicr:v1.3.0", deployment},
+		"validator without a tag":  {"v1.3.0", image, "ghcr.io/nvidia/aicr-validators/deployment" + digest},
+		"an empty validator entry": {"v1.3.0", image, deployment + ","},
+	} {
+		if _, err := aicrFlags(args[0], args[1], args[2]); err == nil {
+			t.Errorf("%s: aicrFlags(%q) accepted", name, args)
+		}
+	}
+}
