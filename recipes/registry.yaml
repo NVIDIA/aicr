@@ -1514,6 +1514,58 @@ components:
           accelerator:
             - h100
 
+  - name: runai-cluster
+    displayName: Run:ai cluster
+    class: ops
+    valueOverrideKeys:
+      - runai
+      - runaicluster
+    # The registration inputs. The chart renders its hook Jobs with empty
+    # arguments when they are unset, so the bundler refuses a bundle that
+    # leaves one empty instead. The token is a two-hour credential: it may
+    # only be declared --dynamic, and only the helm deployer may carry it.
+    requiredValues:
+      - controlPlane.url
+      - cluster.uid
+      - cluster.url
+      - controlPlane.bootstrapToken
+    installTimeSecretPaths:
+      - controlPlane.bootstrapToken
+    # The chart's crds/ carry clusters.run.ai (RunaiConfig's CRD is applied by
+    # the runai-crd-upgrader hook, not shipped there) and its templates render
+    # a Cluster CR of that kind; the bundled kai-scheduler subchart does the
+    # same with its GpuFractioningConfig. helm-diff's render pass on a fresh cluster cannot
+    # resolve the kinds. disableValidation: true on this release tells
+    # helm-diff to skip the live-mapper check. See #914.
+    hasSelfRefCRDs: true
+    healthCheck:
+      assertFile: checks/runai-cluster/health-check.yaml
+    helm:
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia/runai-oss
+      defaultChart: runai-cluster
+      # renovate: datasource=helm depName=runai-cluster registryUrl=https://helm.ngc.nvidia.com/nvidia/runai-oss
+      defaultVersion: "3.0.20"
+      # SHA-256 of runai-cluster-3.0.20.tgz as served by NGC (matches the
+      # repository index). The repo publishes no .prov file, so this is the
+      # only integrity anchor --vendor-charts has.
+      defaultDigest: sha256:bc30d1a688206b33ce02232a116143f556031e9f8f482ea5458131f01f9252ab
+      # The chart's templates name this namespace outright, so the release
+      # cannot live anywhere else. Its pre-install hook labels the namespace
+      # pod-security.kubernetes.io/enforce=privileged itself.
+      defaultNamespace: runai
+    # global.tolerations reaches the operator, the hook Jobs and the KAI
+    # operator and KRM subcharts; karta and gpu-fractioning read only their
+    # own tolerations value, so all three paths are needed to cover every
+    # pod the chart renders (verified by render at 3.0.20). global.nodeSelector
+    # reaches only the KAI subcharts, so no nodeSelector path is mapped until
+    # the chart threads one through.
+    nodeScheduling:
+      system:
+        tolerationPaths:
+          - global.tolerations
+          - karta.tolerations
+          - kai-resource-management.kai-scheduler.gpu-fractioning.tolerations
+
   # NVIDIA Cluster Readiness Engine — GPU cluster burn-in certification
   # controller. Named `nvcre` after the chart nameOverride, install
   # namespace, and CRD group (nvcre.nvidia.com). Override keys include

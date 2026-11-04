@@ -548,6 +548,63 @@ reverts them.
 These overrides only change requests and limits. Free memory on the system
 nodes still decides whether the controllers fit.
 
+### Required and install-time secret inputs
+
+A few components need a value the recipe cannot carry, because it differs per
+cluster: `runai-cluster` needs the Run:ai control plane URL, the cluster UID
+that control plane assigned, the FQDN it reaches the cluster at, and the
+bootstrap token it issued. The registry
+lists such paths as `requiredValues`, and `aicr bundle` refuses a bundle that
+leaves one empty instead of rendering an install that cannot work:
+
+```text
+[INVALID_REQUEST] component "runai-cluster": required values not set:
+controlPlane.url, cluster.uid, cluster.url (pass --set runai:<path>=<value>,
+or declare --dynamic runai:<path> to supply it at install time);
+controlPlane.bootstrapToken (an install-time secret: declare --dynamic
+runai:<path> and fill it in cluster-values.yaml before install)
+```
+
+A path counts as supplied when it holds a non-empty value after every
+override, or when it is declared with `--dynamic`, which moves it into the
+component's `cluster-values.yaml` for you to fill in on the install machine.
+
+A path the registry marks as an install-time secret (`installTimeSecretPaths`)
+can only be supplied the second way. Passing a value with `--set`, or putting
+one in a values file or overlay, is rejected, so no bundle, golden or
+evidence ever contains the credential:
+
+```shell
+aicr bundle -r recipe.yaml \
+  --set runai:controlPlane.url="${CONTROL_PLANE_URL}" \
+  --set runai:cluster.uid="${CLUSTER_UID}" \
+  --set runai:cluster.url="${CLUSTER_FQDN}" \
+  --dynamic runai:controlPlane.bootstrapToken \
+  -o ./bundle
+```
+
+Two further rules follow from the secret being filled in after bundling:
+
+- **Only the `helm` deployer** may carry such a component. `flux`, `fleet`,
+  `terraform` and `argocd-helm` would store the filled value at rest (a
+  ConfigMap manifest, a values file committed to Git, Terraform state, the
+  Application's `helm.values`); `helmfile` reads `cluster-values.yaml` at
+  apply time like `helm` but has no stub check, so an empty token would reach
+  the chart. `aicr bundle` rejects all of them for a component whose secret
+  path is required or declared dynamic. Plain `argocd` rejects every
+  `--dynamic` declaration already.
+- **`install.sh` checks the stub.** For a required path declared dynamic, the
+  component's install script resolves the path in `cluster-values.yaml` and
+  refuses to run while it is missing or empty (`""`, `''`, `~` or `null`,
+  a trailing comment allowed), naming the path. Each path is checked at its
+  full path, so two required paths sharing a leaf key are checked apart, and
+  a declaration on a parent map is judged on the leaves written beneath it.
+  `DRY_RUN_FLAG=--dry-run ./deploy.sh` skips the check, so a bundle can be
+  previewed before a short-lived value is minted.
+
+The registry side of this contract is described in
+[requiredValues and installTimeSecretPaths](../contributor/component.md#requiredvalues-and-installtimesecretpaths).
+
 ## Enable or disable components
 
 The special `enabled` key includes or excludes a component at bundle time

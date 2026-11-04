@@ -143,10 +143,11 @@ func writeUpstreamHelmFolder(outputDir, dir string, idx int, c Component) (Folde
 	}
 
 	installData := struct {
-		Name      string
-		Namespace string
-		OwnsCRDs  bool
-	}{c.Name, c.Namespace, c.OwnsCRDs}
+		Name                 string
+		Namespace            string
+		OwnsCRDs             bool
+		RequiredDynamicPaths []string
+	}{c.Name, c.Namespace, c.OwnsCRDs, c.RequiredDynamicPaths}
 	if err = renderTemplateToFile(upstreamHelmTmpl, installData, folderDir, "install.sh", 0o755); err != nil {
 		return Folder{}, err
 	}

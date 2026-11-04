@@ -68,10 +68,11 @@ with no recipe resolves to `INVALID_REQUEST` naming the gap, which is intended:
 the request was well-formed, and coverage does not exist.
 
 At v1.0.0, `os=rhel`, `os=amazonlinux`, `os=talos`, `service=metal3`, and
-`platform=runai` carry no recipe. This is a recorded decision. **Do not remove
+`platform=runai` carried no recipe. This is a recorded decision. **Do not remove
 them as cleanup**: removing a request enum value is breaking on both the CLI and
 REST surfaces and requires the next major. Coverage arrives by adding a recipe,
-which is additive.
+which is additive; `platform=runai` gained its first two leaves (H100 training
+on EKS Ubuntu and GKE COS, Preview) this way.
 
 ### Notice owed before removal
 
