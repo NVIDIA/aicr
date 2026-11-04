@@ -1447,11 +1447,12 @@ the other phases, not capacity, bound what can be always-on.
    [#3609](https://github.com/NVIDIA/aicr/issues/3609). Each check's depth
    is what the corresponding kubernetes-sigs/ai-conformance test requires,
    per the table in [#3619](https://github.com/NVIDIA/aicr/issues/3619);
-   checks are extended in place and there are no sibling tiers. Every run
-   executes every check the recipe lists, so nightly UAT and a submission
-   run the identical set. There is no nightly skip list and no weekly
-   lane. `--skip-check` remains only for lanes that cannot host a check
-   (Kind, KWOK) and stays refused with `--evidence-dir`.
+   checks are extended in place and there are no sibling tiers. Every
+   GPU-cell run, nightly UAT and submission alike, executes every check
+   the recipe lists, so the two run the identical set. There is no nightly
+   skip list and no weekly lane. `--skip-check` remains only for lanes
+   that cannot host a check (Kind, KWOK); such a run is narrower than the
+   recipe by construction and stays refused with `--evidence-dir`.
 5. **Requirement map keyed by Kubernetes version.** Implementing issue:
    [#3606](https://github.com/NVIDIA/aicr/issues/3606). The complete
    upstream checklist per supported version, with IDs, descriptions and
@@ -1483,8 +1484,10 @@ the other phases, not capacity, bound what can be always-on.
    conformance suite is optional independent verification with its own
    provenance; upstream testcase names appear only for tests actually run
    from it. Together with PRODUCT.yaml and README.md, `junit.xml` and
-   `e2e.log` are the whole submission artifact contract; no validator
-   reads structured artifacts, so none are produced.
+   `e2e.log` are the whole submission artifact contract. No additional
+   structured artifacts (typed JSON records, `results.json`) are produced;
+   the upstream validator reads only PRODUCT.yaml, `junit.xml` and
+   `e2e.log`.
 
 ### Options considered
 
