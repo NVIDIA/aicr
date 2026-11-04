@@ -130,7 +130,7 @@ jobs:
           # ExternalRemediationRequest routing (#3091) beside the live
           # remediation it needs. No fault is declared, so
           # CheckNVSentinelExternalRemediationCoherent only warns.
-          - mixin: 'nvsentinel-remediation,nvsentinel-health-events-analyzer,nvsentinel-external-remediation'
+          - mixin: 'nvsentinel-remediation,nvsentinel-health-events-analyzer,nvsentinel-node-validation,nvsentinel-external-remediation'
             deployer: helm
     steps:
       - name: Checkout Code

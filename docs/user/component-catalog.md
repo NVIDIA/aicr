@@ -1020,7 +1020,7 @@ aicr bundle -r recipe.yaml -o ./bundles \
 
 ### External Remediation
 
-Some faults are repaired outside NVSentinel: by a provider's repair workflow, a hardware vendor or a person. The opt-in `nvsentinel-external-remediation` mixin hands such a node over. For a health event with `recommendedAction: CUSTOM` and `customRecommendedAction: external-remediation`, `fault-remediation` creates an `ExternalRemediationRequest` (`nvsentinel.dgxc.nvidia.com/v1`, cluster-scoped, short name `extrr`) instead of a reset or reboot, and janitor releases the node to the external system until it reports the outcome. Compose the mixin beside the [remediation step](#graded-remediation) and the [health events analyzer](#health-events-analyzer) that live remediation requires, or beside `nvsentinel-observe` to rehearse: in dry run `fault-remediation` logs `DRY-RUN: Skipping custom resource creation` and creates no request. A fault still declared when you move from the rehearsal to the live step is not reported again (see **Declaring a fault**). No shipped recipe composes it.
+Some faults are repaired outside NVSentinel: by a provider's repair workflow, a hardware vendor or a person. The opt-in `nvsentinel-external-remediation` mixin hands such a node over. For a health event with `recommendedAction: CUSTOM` and `customRecommendedAction: external-remediation`, `fault-remediation` creates an `ExternalRemediationRequest` (`nvsentinel.dgxc.nvidia.com/v1`, cluster-scoped, short name `extrr`) instead of a reset or reboot, and janitor releases the node to the external system until it reports the outcome. Compose the mixin beside the [remediation step](#graded-remediation) and the [health events analyzer](#health-events-analyzer) and [node validation](#node-validation) mixins that live remediation requires, or beside `nvsentinel-observe` to rehearse: in dry run `fault-remediation` logs `DRY-RUN: Skipping custom resource creation` and creates no request. A fault still declared when you move from the rehearsal to the live step is not reported again (see **Declaring a fault**). No shipped recipe composes it.
 
 ```yaml
 # your-leaf-overlay.yaml
@@ -1028,6 +1028,7 @@ spec:
   mixins:
     - nvsentinel-remediation
     - nvsentinel-health-events-analyzer
+    - nvsentinel-node-validation
     - nvsentinel-external-remediation
 ```
 

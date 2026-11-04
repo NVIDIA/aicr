@@ -46,6 +46,13 @@
 #       so the drain on Kind's one node finishes.
 #   fault-quarantine.circuitBreaker.enabled=false  on one node the first
 #       quarantine would trip it.
+#   lifecycle-manager.config.tests.dcgm-diag-test  a busybox stub, as in
+#       tests/e2e/nvsentinel-log-collector: Kind runs no DCGM, and a stubbed
+#       command is what lets CheckNVSentinelPostRemediationValidationCoherent
+#       skip its DCGM rule. No case here reboots, so nothing runs it.
+#   lifecycle-manager.config.newNodeValidation=null  the node stays cordoned
+#       after the handoff in case 3; on a Kind node younger than 30 minutes,
+#       new-node validation would otherwise pick it up and uncordon it.
 #   nvsentinel-mongodb at one member with smaller requests, and the analyzer
 #       at a smaller CPU request, so everything fits one runner node beside
 #       kubernetes-object-monitor.
@@ -73,6 +80,8 @@ KEEP_CLUSTER="${KEEP_CLUSTER:-false}"
 AICR_BIN="${AICR_BIN:-}"
 KUBE_CONTEXT="kind-${CLUSTER_NAME}"
 NODE="${CLUSTER_NAME}-control-plane"
+# The digest-pinned busybox tests/e2e/nvsentinel-log-collector uses.
+BUSYBOX_IMAGE="docker.io/library/busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
 
 GRPCURL_IMAGE="docker.io/fullstorydev/grpcurl:v1.9.3@sha256:085e183ca334eb4e81ca81ee12cbb2b2737505d1d77f5e33dabc5d066593d998"
 DRAIN_SYSTEM_NAMESPACES='^(nvsentinel|kube-system|cert-manager|local-path-storage)$'
@@ -234,7 +243,7 @@ build_binary() {
 }
 
 compose_bundle() {
-  msg "Composing a bundle with the nvsentinel-remediation, nvsentinel-health-events-analyzer and nvsentinel-external-remediation mixins..."
+  msg "Composing a bundle with the nvsentinel-remediation, nvsentinel-health-events-analyzer, nvsentinel-node-validation and nvsentinel-external-remediation mixins..."
   local data_dir="${WORK}/data" leaf_refs="${WORK}/leaf-component-refs.yaml"
   mkdir -p "${data_dir}/overlays"
   cat >"${data_dir}/registry.yaml" <<'REGISTRY_EOF'
@@ -276,7 +285,7 @@ REGISTRY_EOF
             errorCode:
               - ${POLICY_ERROR_CODE}
 LEAF_EOF
-  LEAF_REFS="${leaf_refs}" yq '.spec.mixins = ["nvsentinel-remediation", "nvsentinel-health-events-analyzer", "nvsentinel-external-remediation"] |
+  LEAF_REFS="${leaf_refs}" yq '.spec.mixins = ["nvsentinel-remediation", "nvsentinel-health-events-analyzer", "nvsentinel-node-validation", "nvsentinel-external-remediation"] |
     .spec.componentRefs += load(strenv(LEAF_REFS))' \
     "${ROOT}/recipes/overlays/h100-kind-training.yaml" \
     >"${data_dir}/overlays/h100-kind-training.yaml" ||
@@ -285,8 +294,12 @@ LEAF_EOF
   "${AICR_BIN}" recipe --service kind --accelerator h100 --intent training \
     --data "${data_dir}" --output "${WORK}/recipe.yaml" ||
     err "recipe generation failed"
+  local diag_stub
+  diag_stub=$(jq -cn --arg image "${BUSYBOX_IMAGE}" '{image: $image, command: ["sh", "-c", "exit 0"]}')
   "${AICR_BIN}" bundle -r "${WORK}/recipe.yaml" -o "${WORK}/bundle" \
     --set "nvsentinel:janitor-provider.csp.provider=kind" \
+    --set-json "nvsentinel:lifecycle-manager.config.tests.dcgm-diag-test=${diag_stub}" \
+    --set-json "nvsentinel:lifecycle-manager.config.newNodeValidation=null" \
     --set "nvsentinel:node-drainer.systemNamespaces=${DRAIN_SYSTEM_NAMESPACES}" \
     --set "nvsentinel:fault-quarantine.circuitBreaker.enabled=false" \
     --set "nvsentinel:health-events-analyzer.resources.requests.cpu=250m" \
