@@ -57,6 +57,7 @@ type fakeEngine struct {
 	removeRefused map[string]error  // release -> error Remove returns instead
 	gone          map[string]bool   // release -> Retired reports it gone
 	deletePending map[string]bool   // release -> Retired reports its delete never landed
+	retiredErr    error             // Retired fails with it
 	drifted       map[string]bool   // release -> Observe reports SpecDrifted
 	missing       map[string]bool   // release -> Observe reports Missing
 	priorFailed   map[string]bool   // release -> Observe reports PriorSyncFailed until a Verify
@@ -178,6 +179,9 @@ func (f *fakeEngine) Remove(_ context.Context, _, name, uid, _ string) error {
 }
 
 func (f *fakeEngine) Retired(_ context.Context, name, uid string) (argocd.Observation, error) {
+	if f.retiredErr != nil {
+		return argocd.Observation{}, f.retiredErr
+	}
 	if f.removed[name] == uid && f.gone[name] {
 		f.inventory = slices.DeleteFunc(f.inventory, func(i argocd.InventoryItem) bool { return i.ReleaseID == name })
 		return argocd.Observation{State: argocd.StateReady, Reason: argocd.ReasonRetired}, nil
