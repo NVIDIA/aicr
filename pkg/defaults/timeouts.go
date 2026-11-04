@@ -662,9 +662,10 @@ const (
 	// The pod runs a simple CUDA device check but may need time for image pull.
 	DRATestPodTimeout = 5 * time.Minute
 
-	// GangTestPodTimeout is the timeout for gang scheduling test pods to complete.
-	// Two pods must be co-scheduled, each pulling a CUDA image and running nvidia-smi.
-	GangTestPodTimeout = 5 * time.Minute
+	// GangPositiveCompletionTimeout bounds the gang-scheduling positive case:
+	// a fitting CPU-only PodGroup must have every member Succeeded within it,
+	// matching the 2-minute Complete bound of the upstream TestGangScheduling.
+	GangPositiveCompletionTimeout = 2 * time.Minute
 
 	// SlurmAccountingRecordTimeout bounds the eventual-consistency window
 	// between a completed Slurm job and its appearance in sacct via SlurmDBD.
@@ -766,6 +767,11 @@ const (
 	// for gang-scheduled pods. If pods are scheduled further apart than this,
 	// they are not considered co-scheduled.
 	CoScheduleWindow = 30 * time.Second
+
+	// GangNegativeWindow is how long the gang-scheduling negative case watches
+	// a non-fitting PodGroup: no member may bind or run for the whole window.
+	// Matches the upstream TestGangScheduling default verification window.
+	GangNegativeWindow = 30 * time.Second
 )
 
 // Kubeflow Trainer install timeouts for NCCL performance validation.

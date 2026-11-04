@@ -70,6 +70,8 @@ func TestTimeoutConstants(t *testing.T) {
 
 		// Gang scheduling co-scheduling window
 		{"CoScheduleWindow", CoScheduleWindow, 10 * time.Second, 60 * time.Second},
+		{"GangNegativeWindow", GangNegativeWindow, 10 * time.Second, 60 * time.Second},
+		{"GangPositiveCompletionTimeout", GangPositiveCompletionTimeout, 1 * time.Minute, 5 * time.Minute},
 
 		// Trainer timeouts
 		{"TrainerControllerReadyTimeout", TrainerControllerReadyTimeout, 1 * time.Minute, 5 * time.Minute},
@@ -206,7 +208,7 @@ func TestCheckExecutionTimeoutRelationships(t *testing.T) {
 		timeout time.Duration
 	}{
 		{"DRATestPodTimeout", DRATestPodTimeout},
-		{"GangTestPodTimeout", GangTestPodTimeout},
+		{"GangPositiveCompletionTimeout", GangPositiveCompletionTimeout},
 		{"InferenceHealthTimeout", InferenceHealthTimeout},
 		{"InferencePerfJobTimeout", InferencePerfJobTimeout},
 		{"InferencePerfPodTimeout", InferencePerfPodTimeout},

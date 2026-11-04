@@ -263,6 +263,36 @@ each `/dev/nvidiaN`); `parseSlurmGPUProbe` and the two evaluate functions decide
 It never lists `/dev/nvidia*` to infer isolation: the cgroup device controller
 leaves the nodes visible and refuses `open()` with EPERM.
 
+`gang-scheduling` exercises KAI all-or-nothing scheduling with CPU-only
+members, matching the upstream `TestGangScheduling` (#3603). After the KAI
+deployment and CRD gates it runs two phases in one per-run namespace. The
+positive phase creates a PodGroup with `minMember: 2` and two members
+requesting 100m CPU and 128Mi; both must reach `Succeeded`, each with
+`spec.nodeName` set, within `defaults.GangPositiveCompletionTimeout` (2 min)
+and with `PodScheduled` timestamps inside `defaults.CoScheduleWindow`. The
+negative phase sizes a PodGroup that cannot fit: with S Ready, schedulable
+nodes it creates `min(S+1, 16)` members each requesting
+`floor(allocatableCPU / (members-1)) + 1m`, so the group's demand exceeds the
+cluster's summed allocatable CPU whatever frees up. It watches the members for
+`defaults.GangNegativeWindow` (30 s) and fails, naming the pod, if any member
+gets `spec.nodeName` or reaches `Running`. The phase is credited only when the
+PodGroup's `status.schedulingConditions` carries KAI's affirmative refusal
+naming the group's `minMember` ("Resources were found for k pods while N are
+required for gang scheduling"); members that merely stay unbound under a
+stalled or absent scheduler fail as not credited. The refusal condition is the
+primary and sufficient oracle: KAI writes it for any number of fitting members,
+zero included, and a scheduler without gang semantics never writes it.
+Bound-pod detection is a second, fail-fast signal available only where at
+least one member fits an eligible node (heterogeneous clusters, where the
+per-member request is below the largest node); on homogeneous clusters, and
+wherever the 16-member cap applies, no member fits any node, no scheduler binds
+anything, and the check relies on the refusal condition alone. Members associate to their
+PodGroup through the `pod-group-name` annotation; the
+`pod-group.scheduling.run.ai/*` labels alone do not associate (KAI's
+pod-grouper ignores them and creates per-pod groups). No GPU is requested in
+either phase, and the `Gang scheduling verdict` artifact records which phase
+decided the check.
+
 `PhaseAll` (the string `"all"`) is the CLI / recipe wildcard;
 `ParsePhaseSelection` collapses it to nil-meaning-everything. It is
 **exclusive** — combining `all` with any other phase is rejected.
