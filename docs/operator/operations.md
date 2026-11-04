@@ -58,7 +58,9 @@ reference as the `operator.aicr.run/evidence` annotation.
 HealthProgressing`, `no step starts: Paused`), `status.current` names the step
 in flight, and `status.releases` the state of each release (`Progressing`,
 `Ready`, `Failed`, `Suspended` for the step in flight while halted,
-`Deleting`, `Removed`).
+`Deleting`, `Removed`), with when its step started and ended (`startedAt`,
+`finishedAt`) and the last reason it waited on (`waitedOn`), so a slow
+rollout shows afterwards which step took the time and why.
 
 ### Events
 
@@ -69,6 +71,8 @@ in the `default` namespace; `kubectl describe` shows them.
 | --- | --- | --- |
 | `RolloutCreated` | Normal | The runtime: a rollout, an `Adopt` rollout or a removal rollout was created |
 | `RolloutSucceeded`, `RolloutSuperseded` | Normal | The rollout |
+| `StepStarted`, `StepWaiting` | Normal | The rollout: a release's step started, or waits on another reason than it last reported |
+| `StepFinished` | Normal, or Warning when it or the rollout failed | The rollout: a release's step ended, or the rollout ended with it in flight, naming the outcome, how long it took and what it last waited on |
 | `RolloutFailed`, `RolloutExpired`, `RolloutRevoked`, `RolloutOrphaned` | Warning | The rollout |
 | `EngineSuspended`, `EngineResumed` | Normal | The runtime, naming the Applications changed |
 | `RuntimeOrphaned` | Normal | The runtime, when deleted with `deletionPolicy: Orphan` |

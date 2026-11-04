@@ -110,9 +110,10 @@ spec:
 - A readiness release (an AICR readiness gate) is synced explicitly in each of
   its steps, with a sync operation initiated by `aicr-operator`, because
   Argo CD starts no automated sync for a change that touches only hooks.
-- When a write leaves the spec unchanged, the operator sets
-  `argocd.argoproj.io/refresh: normal` so Argo CD compares at once; Argo CD
-  removes the annotation.
+- When a write leaves the spec unchanged, or the step of any other release
+  finds its Application already at the plan and Argo CD has not compared it
+  since the step began, the operator sets `argocd.argoproj.io/refresh: normal`
+  so Argo CD compares at once; Argo CD removes the annotation.
 
 ### Readiness at the current revision
 
