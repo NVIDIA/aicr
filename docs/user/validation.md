@@ -973,17 +973,22 @@ Three properties make it a scoping tool rather than a way to hide a failure:
 
 The CNCF conformance evidence path is different, and the two flags are refused
 together for that reason. `pkg/evidence/cncf` renders one markdown file per
-*requirement* and drops every skipped entry before grouping, so a requirement
-whose checks were all skipped would produce no file and no index entry, with
-nothing recording the omission. A submission that silently omits a requirement
-reads as complete when it is not, so `--skip-check` with `--evidence-dir` (and
-therefore with `--cncf-submission`, which requires it) is rejected up front:
+*requirement* of the upstream checklist version selected from the cluster's
+Kubernetes minor (see [Checklist Versions](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#checklist-versions))
+and drops every skipped entry before grouping, so a requirement whose checks
+were all withheld gets no page and, when another submission-required check
+produced an entry so an index is written at all, appears there only as
+`NOT TESTED (not run)`, with nothing recording that it was withheld on purpose
+rather than never reached. A submission that misstates why a requirement is
+missing is the defect the guards exist to prevent, so `--skip-check` with
+`--evidence-dir` (and therefore with `--cncf-submission`, which requires it)
+is rejected up front:
 
 ```
 [INVALID_REQUEST] --skip-check cannot be combined with --evidence-dir: the CNCF
-evidence renderer omits skipped checks entirely, so a withheld requirement would
-leave no file and no index entry and the rendered evidence would read as a
-complete submission
+evidence renderer gives a withheld requirement no page and, when it writes an
+index at all, lists it only as NOT TESTED (not run) with no reason recorded, so
+the rendered evidence would misstate why the requirement is missing
 ```
 
 Lifting that restriction means deciding how a withheld requirement should be
