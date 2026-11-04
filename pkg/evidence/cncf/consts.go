@@ -14,9 +14,9 @@
 
 package cncf
 
-// Feature names exposed via `--feature` and used as map keys for evidence
-// requirements, script section mapping, and alias resolution. Declared here
-// so the same literal is not repeated across collector.go and requirements.go.
+// Feature names exposed via `--feature`, used by collector.go for script
+// section mapping and alias resolution. Conformance check names, a different
+// namespace, live in requirements.go.
 const (
 	featureDRASupport         = "dra-support"
 	featureGangScheduling     = "gang-scheduling"
