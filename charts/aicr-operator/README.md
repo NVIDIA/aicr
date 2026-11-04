@@ -167,9 +167,10 @@ Admission policies, all ValidatingAdmissionPolicies without webhooks:
 - `aicr-operator-jobs` (the operator only): one container running the pinned
   AICR image with its entrypoint; the namespace's AICR identity and allowed
   subcommand (`recipe`, `bundle`, `upgrade-check` in the Job namespace,
-  `snapshot` in discovery, `validate` in validation); a TTL; a snapshot agent
-  image named only as `--image <pinned AICR image>`, no `--config` file and no
-  `--data` directory;
+  `snapshot` in discovery, `validate` in validation); a TTL; only the flags
+  the operator builds for that subcommand, each value flag followed by its
+  value, so `--config`, `--data` and any flag a later AICR release adds are
+  denied; a snapshot agent image named only as `--image <pinned AICR image>`;
   only `HOME`, `TMPDIR` and
   `DOCKER_CONFIG` in the environment, each set by value, and only `emptyDir`
   and Secret volumes.
