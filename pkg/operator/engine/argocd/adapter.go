@@ -436,6 +436,30 @@ type Observation struct {
 	State      State
 	Reason     string
 	SpecDigest string
+	// Message is a bounded, single-line excerpt of the error Argo CD
+	// reported with Reason, when it reported one.
+	Message string
+}
+
+// MaxMessageLen is the most runes of an Argo CD error that an Observation
+// carries.
+const MaxMessageLen = 240
+
+// Text is the Reason, followed by the Message when there is one.
+func (o Observation) Text() string {
+	if o.Message == "" {
+		return o.Reason
+	}
+	return o.Reason + ": " + o.Message
+}
+
+// excerpt folds s onto one line and cuts it to MaxMessageLen runes.
+func excerpt(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > MaxMessageLen {
+		s = string(r[:MaxMessageLen]) + "…"
+	}
+	return s
 }
 
 // Observe applies current-revision readiness: an Application is
@@ -509,7 +533,10 @@ func observe(live, desired *unstructured.Unstructured, r *plan.Release, since ti
 	for _, c := range sliceOf(status["conditions"]) {
 		switch c["type"] {
 		case "ComparisonError", "SyncError", "InvalidSpecError":
-			return progressing(fmt.Sprint(c["type"]))
+			obs := progressing(fmt.Sprint(c["type"]))
+			msg, _ := c["message"].(string)
+			obs.Message = excerpt(msg)
+			return obs
 		}
 	}
 	opPhase, _ := op["phase"].(string)
@@ -519,7 +546,8 @@ func observe(live, desired *unstructured.Unstructured, r *plan.Release, since ti
 	case opPhase == "Running" || opPhase == "Terminating":
 		return progressing("SyncRunning")
 	case (opPhase == "Failed" || opPhase == "Error") && opRevision == r.Chart.Digest && !opStarted.Before(since):
-		return Observation{State: StateFailed, Reason: "Sync" + opPhase}
+		msg, _ := op["message"].(string)
+		return Observation{State: StateFailed, Reason: "Sync" + opPhase, Message: excerpt(msg)}
 	}
 	if verify {
 		if _, pending := live.Object["operation"]; pending {

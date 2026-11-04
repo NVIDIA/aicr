@@ -376,6 +376,50 @@ func TestObserveCurrentRevisionReadiness(t *testing.T) {
 	}
 }
 
+func TestObserveCarriesBoundedArgoMessage(t *testing.T) {
+	t.Parallel()
+	step := time.Date(2026, 10, 14, 12, 0, 0, 700_000_000, time.UTC)
+	after := step.Add(5 * time.Second)
+	p, r := testPlan()
+	desired, err := Application(target, p, r, values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("x", 3*MaxMessageLen)
+	tests := []struct {
+		name   string
+		mutate func(*unstructured.Unstructured)
+		state  State
+		want   string
+	}{
+		{name: "failed operation, multi-line", mutate: func(u *unstructured.Unstructured) {
+			_ = unstructured.SetNestedField(u.Object, "Failed", "status", "operationState", "phase")
+			_ = unstructured.SetNestedField(u.Object, "one\n  two\n\tthree", "status", "operationState", "message")
+		}, state: StateFailed, want: "one two three"},
+		{name: "failed operation, long", mutate: func(u *unstructured.Unstructured) {
+			_ = unstructured.SetNestedField(u.Object, "Failed", "status", "operationState", "phase")
+			_ = unstructured.SetNestedField(u.Object, long, "status", "operationState", "message")
+		}, state: StateFailed, want: strings.Repeat("x", MaxMessageLen) + "…"},
+		{name: "comparison error condition", mutate: func(u *unstructured.Unstructured) {
+			_ = unstructured.SetNestedField(u.Object, []any{map[string]any{"type": "ComparisonError", "message": "chart\nnot found"}}, "status", "conditions")
+		}, state: StateProgressing, want: "chart not found"},
+	}
+	for _, tt := range tests {
+		app := readyApp(t, after)
+		tt.mutate(app)
+		got := observe(app, desired, r, step, false)
+		if got.State != tt.state || got.Message != tt.want {
+			t.Errorf("%s: observe() = %+v, want %s with message %q", tt.name, got, tt.state, tt.want)
+		}
+	}
+	if got := (Observation{Reason: "SyncFailed", Message: "boom"}).Text(); got != "SyncFailed: boom" {
+		t.Errorf("Text() = %q", got)
+	}
+	if got := (Observation{Reason: "SyncFailed"}).Text(); got != "SyncFailed" {
+		t.Errorf("Text() without a message = %q", got)
+	}
+}
+
 func fakeAdapter(t *testing.T, objs ...client.Object) *Adapter {
 	t.Helper()
 	mapper := meta.NewDefaultRESTMapper(nil)
