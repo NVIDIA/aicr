@@ -57,9 +57,10 @@ const (
 	ReasonArtifactUnsupported = "AICRArtifactUnsupported"
 )
 
-// CheckSupportedVersion rejects an AICR version outside the supported range,
-// and a prerelease unless allowPrerelease, the operator's explicit opt-in. A
-// prerelease is in range when the release it precedes is.
+// CheckSupportedVersion rejects an AICR version that is not vX.Y.Z with an
+// optional prerelease, one outside the supported range, and a prerelease
+// unless allowPrerelease, the operator's explicit opt-in. A prerelease is in
+// range when the release it precedes is.
 func CheckSupportedVersion(version string, allowPrerelease bool) error {
 	if err := checkVersion(version); err != nil {
 		return err
