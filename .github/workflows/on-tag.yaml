@@ -687,6 +687,8 @@ jobs:
       packages: read
     outputs:
       digest_map: ${{ steps.resolve.outputs.digest_map }}
+      aicr_image: ${{ steps.aicr.outputs.image }}
+      aicr_validator_images: ${{ steps.aicr.outputs.validator_images }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -718,6 +720,29 @@ jobs:
           .github/scripts/release-images.sh resolve candidate-digests.json
           digest_map="$(jq -cS . candidate-digests.json)"
           echo "digest_map=${digest_map}" >> "$GITHUB_OUTPUT"
+
+      # The operator chart defaults to this tag's AICR (#3560), pinned by the
+      # digests resolved above rather than by reading the tags again.
+      - name: Pin the operator's AICR images
+        id: aicr
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          pin() {
+            local digest
+            digest="$(jq -er --arg key "$1" '.[$key]' candidate-digests.json)"
+            [[ "${digest}" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo "::error::no digest for $1 in the digest map" >&2; return 1; }
+            printf '%s:%s@%s' "$2" "${RELEASE_TAG}" "${digest}"
+          }
+          image="$(pin aicr ghcr.io/nvidia/aicr)"
+          deployment="$(pin deployment ghcr.io/nvidia/aicr-validators/deployment)"
+          conformance="$(pin conformance ghcr.io/nvidia/aicr-validators/conformance)"
+          performance="$(pin performance ghcr.io/nvidia/aicr-validators/performance)"
+          {
+            echo "image=${image}"
+            echo "validator_images=${deployment},${conformance},${performance}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Upload candidate digest map
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
@@ -837,13 +862,107 @@ jobs:
 
 
   # =============================================================================
-  # Integrity: require resolution, scan, and attestation to all succeed
+  # AICR integrity: require resolution, scan, and attestation to all succeed
+  # before the immutable version aliases are published
+  # =============================================================================
+
+  aicr-check:
+    name: AICR Integrity Check
+    runs-on: ubuntu-24.04
+    needs: [resolve-candidates, image-vuln-scan, attest]
+    if: always()
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check AICR security gates
+        env:
+          RESOLVE_RESULT: ${{ needs.resolve-candidates.result }}
+          SCAN_RESULT: ${{ needs.image-vuln-scan.result }}
+          ATTEST_RESULT: ${{ needs.attest.result }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ "${RESOLVE_RESULT}" != "success" || \
+            "${SCAN_RESULT}" != "success" || \
+            "${ATTEST_RESULT}" != "success" ]]; then
+            echo "::error::AICR security gates did not all succeed for ${TAG}."
+            echo "::error::Candidate aliases remain non-public; repair the failure and rerun this tag."
+            exit 1
+          fi
+
+          echo "AICR integrity check passed."
+
+  # The operator qualifies against this tag's AICR, which resolves its
+  # validator and gate images by the release tag at run time, so the immutable
+  # version aliases exist before the operator gate. :latest and the GitHub
+  # release still wait for it (promote-images, publish). A failed operator
+  # gate leaves version aliases without a release; a fix needs a new tag.
+  promote-versions:
+    name: Promote Version Aliases
+    runs-on: ubuntu-24.04
+    needs: [detect, resolve-candidates, aicr-check]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      attestations: read
+    concurrency:
+      group: aicr-release-image-alias-promotion
+      cancel-in-progress: false
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Authenticate to registry
+        uses: ./.github/actions/ghcr-login
+
+      - name: Setup crane
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_crane: 'true'
+          crane_version: ${{ steps.versions.outputs.crane }}
+
+      - name: Preflight image promotion
+        env:
+          CANDIDATE_TAG: ${{ needs.detect.outputs.candidate_tag }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          IS_PRERELEASE: ${{ needs.detect.outputs.is_prerelease }}
+          GITHUB_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+          DIGEST_MAP: ${{ needs.resolve-candidates.outputs.digest_map }}
+          AICR_NETWORK_TIMEOUT_SECONDS: '120'
+        run: |
+          set -euo pipefail
+          printf '%s\n' "${DIGEST_MAP}" > candidate-digests.json
+          .github/scripts/release-images.sh preflight \
+            candidate-digests.json validated-digests.json
+
+      - name: Promote version aliases
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          IS_PRERELEASE: ${{ needs.detect.outputs.is_prerelease }}
+          GH_TOKEN: ${{ github.token }}
+          AICR_NETWORK_TIMEOUT_SECONDS: '120'
+        run: |
+          set -euo pipefail
+          .github/scripts/release-images.sh promote validated-digests.json versions
+
+  # =============================================================================
+  # Integrity: require the AICR gates, the version aliases and every operator
+  # check to succeed before :latest, the operator and the GitHub release
   # =============================================================================
 
   release-check:
     name: Release Integrity Check
     runs-on: ubuntu-24.04
-    needs: [resolve-candidates, image-vuln-scan, attest, operator-candidate, operator-scan, operator-reproducible, operator-lifecycle]
+    needs: [resolve-candidates, image-vuln-scan, attest, promote-versions, operator-candidate, operator-scan, operator-reproducible, operator-lifecycle, operator-validation]
     if: always()
     timeout-minutes: 5
     permissions:
@@ -854,22 +973,26 @@ jobs:
           RESOLVE_RESULT: ${{ needs.resolve-candidates.result }}
           SCAN_RESULT: ${{ needs.image-vuln-scan.result }}
           ATTEST_RESULT: ${{ needs.attest.result }}
+          PROMOTE_VERSIONS_RESULT: ${{ needs.promote-versions.result }}
           OPERATOR_CANDIDATE_RESULT: ${{ needs.operator-candidate.result }}
           OPERATOR_SCAN_RESULT: ${{ needs.operator-scan.result }}
           OPERATOR_REPRODUCIBLE_RESULT: ${{ needs.operator-reproducible.result }}
           OPERATOR_LIFECYCLE_RESULT: ${{ needs.operator-lifecycle.result }}
+          OPERATOR_VALIDATION_RESULT: ${{ needs.operator-validation.result }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           if [[ "${RESOLVE_RESULT}" != "success" || \
             "${SCAN_RESULT}" != "success" || \
             "${ATTEST_RESULT}" != "success" || \
+            "${PROMOTE_VERSIONS_RESULT}" != "success" || \
             "${OPERATOR_CANDIDATE_RESULT}" != "success" || \
             "${OPERATOR_SCAN_RESULT}" != "success" || \
             "${OPERATOR_REPRODUCIBLE_RESULT}" != "success" || \
-            "${OPERATOR_LIFECYCLE_RESULT}" != "success" ]]; then
+            "${OPERATOR_LIFECYCLE_RESULT}" != "success" || \
+            "${OPERATOR_VALIDATION_RESULT}" != "success" ]]; then
             echo "::error::Release security gates did not all succeed for ${TAG}."
-            echo "::error::Candidate aliases remain non-public; repair the failure and rerun this tag."
+            echo "::error::latest, the operator and the GitHub release stay unpublished; repair the failure and rerun this tag."
             exit 1
           fi
 
@@ -878,17 +1001,21 @@ jobs:
   # =============================================================================
   # AICR Operator (preview, ADR-027): one candidate of the tagged source, built
   # as OCI layouts, the deterministically packaged chart and the
-  # kubectl-aicr binaries (tools/operator-candidate). It is scanned like every
-  # release image; release-check fails closed on its build, scan,
-  # reproducibility and lifecycle checks, so they gate image promotion too. It is published and attested only after the
-  # images are promoted, and publish waits for it, so a failing operator
-  # blocks the release.
+  # kubectl-aicr binaries (tools/operator-candidate). Its chart defaults to
+  # this tag's AICR images, by the digests resolve-candidates pinned; once
+  # promote-versions has published their version aliases, the lifecycle check
+  # runs the operator with them and the validation check runs the validator
+  # images. It is scanned like every release image; release-check fails closed
+  # on its build, scan, reproducibility, lifecycle and validation checks, so
+  # they gate :latest too. It is published and attested only after
+  # promote-images, and publish waits for it, so a failing operator blocks the
+  # release.
   # =============================================================================
 
   operator-candidate:
     name: Operator Candidate
     runs-on: ubuntu-24.04
-    needs: [detect, tests]
+    needs: [detect, tests, resolve-candidates]
     timeout-minutes: 30
     outputs:
       artifact: ${{ steps.name.outputs.name }}
@@ -949,6 +1076,9 @@ jobs:
           CANDIDATE_VERSION: ${{ github.ref_name }}
           CANDIDATE_REPOSITORY: ghcr.io/nvidia/aicr-operator
           CANDIDATE_REGISTRY_REPOSITORY: ghcr.io/nvidia/aicr-registry
+          CANDIDATE_AICR_VERSION: ${{ github.ref_name }}
+          CANDIDATE_AICR_IMAGE: ${{ needs.resolve-candidates.outputs.aicr_image }}
+          CANDIDATE_AICR_VALIDATOR_IMAGES: ${{ needs.resolve-candidates.outputs.aicr_validator_images }}
         run: make operator-candidate
 
       # Before release-check, so a finding stops promotion and every push.
@@ -985,7 +1115,7 @@ jobs:
   operator-reproducible:
     name: Operator Reproducibility
     runs-on: ubuntu-24.04
-    needs: [detect, tests]
+    needs: [detect, tests, resolve-candidates]
     timeout-minutes: 45
     permissions:
       contents: read
@@ -1039,6 +1169,9 @@ jobs:
           CANDIDATE_VERSION: ${{ github.ref_name }}
           CANDIDATE_REPOSITORY: ghcr.io/nvidia/aicr-operator
           CANDIDATE_REGISTRY_REPOSITORY: ghcr.io/nvidia/aicr-registry
+          CANDIDATE_AICR_VERSION: ${{ github.ref_name }}
+          CANDIDATE_AICR_IMAGE: ${{ needs.resolve-candidates.outputs.aicr_image }}
+          CANDIDATE_AICR_VALIDATOR_IMAGES: ${{ needs.resolve-candidates.outputs.aicr_validator_images }}
         run: make operator-candidate-verify
 
       - name: Remove the proxy credential
@@ -1049,15 +1182,15 @@ jobs:
   # The lifecycle scenarios from the newest published release older than this
   # tag, attestations verified, upgraded to this candidate, rolled back and
   # uninstalled in the documented order (make operator-qualify-published).
-  # A failure blocks image promotion and publishing, as ADR-027 requires of
-  # an operator gate. It runs third-party images on privileged kind nodes, so
+  # A failure blocks :latest and publishing, as ADR-027 requires of an
+  # operator gate; the version aliases it runs against are already promoted. It runs third-party images on privileged kind nodes, so
   # it holds neither the release's OIDC identity nor the Go proxy's
   # credential; its modules come from the default proxy, as the PR lanes'
   # do, and it publishes nothing.
   operator-lifecycle:
     name: Operator Lifecycle from the Published Release
     runs-on: ubuntu-24.04
-    needs: [detect, operator-candidate]
+    needs: [detect, operator-candidate, promote-versions]
     timeout-minutes: 75
     permissions:
       contents: read
@@ -1093,6 +1226,44 @@ jobs:
         run: |
           kubectl --kubeconfig .operator-e2e/kubeconfig -n aicr-system logs deployment/aicr-operator --tail=300 || true
           kubectl --kubeconfig .operator-e2e/kubeconfig get clusterruntimes,runtimerollouts -o yaml || true
+
+      - name: Delete kind cluster
+        if: ${{ always() }}
+        run: make operator-kind-down
+
+  # Deployment validation with this tag's AICR (#3560). The operator e2e
+  # suite runs this tag's AICR image as operator-built Jobs, recipe through
+  # validation, with the stamped validator images; each validator runs by the
+  # version alias promote-versions published, its evidence names the pinned
+  # tags, each tag resolves to its pinned digest, and the operator's evidence
+  # binding reads back. operator-lifecycle covers install, upgrade and
+  # rollout with validation off. Like it, this runs third-party images on
+  # privileged kind nodes, holds no release identity and publishes nothing.
+  operator-validation:
+    name: Operator Validation with the Tag's AICR
+    runs-on: ubuntu-24.04
+    needs: [detect, resolve-candidates, promote-versions]
+    timeout-minutes: 50
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up the kind cluster
+        uses: ./.github/actions/operator-kind
+        with:
+          kubernetes: newest
+
+      - name: Run the operator e2e suite with this tag's AICR
+        env:
+          OPERATOR_E2E_REQUIRED: '1'
+          AICR_E2E_VERSION: ${{ github.ref_name }}
+          AICR_E2E_IMAGE: ${{ needs.resolve-candidates.outputs.aicr_image }}
+          AICR_E2E_VALIDATOR_IMAGES: ${{ needs.resolve-candidates.outputs.aicr_validator_images }}
+        run: make operator-e2e
 
       - name: Delete kind cluster
         if: ${{ always() }}
@@ -1318,7 +1489,9 @@ jobs:
       plugin_artifact: ${{ needs.operator-candidate.outputs.artifact }}
 
   # =============================================================================
-  # Promote: preflight all public aliases, then converge them to exact digests
+  # Promote: after the operator gate, preflight all public aliases again, then
+  # converge them to exact digests. promote-versions already published the
+  # version aliases, so this converges :latest for a stable release.
   # =============================================================================
 
   promote-images:
@@ -1720,12 +1893,15 @@ jobs:
       - image-vuln-scan
       - attest
       - attach-source
+      - aicr-check
+      - promote-versions
       - release-check
       - promote-images
       - operator-candidate
       - operator-scan
       - operator-reproducible
       - operator-lifecycle
+      - operator-validation
       - operator-publish
       - operator-attest
       - publish
@@ -1746,12 +1922,15 @@ jobs:
           RESOLVE: ${{ needs.resolve-candidates.result }}
           VULN_SCAN: ${{ needs.image-vuln-scan.result }}
           ATTEST: ${{ needs.attest.result }}
+          AICR_CHECK: ${{ needs.aicr-check.result }}
+          PROMOTE_VERSIONS: ${{ needs.promote-versions.result }}
           RELEASE_CHECK: ${{ needs.release-check.result }}
           PROMOTE: ${{ needs.promote-images.result }}
           OPERATOR_CANDIDATE: ${{ needs.operator-candidate.result }}
           OPERATOR_SCAN: ${{ needs.operator-scan.result }}
           OPERATOR_REPRODUCIBLE: ${{ needs.operator-reproducible.result }}
           OPERATOR_LIFECYCLE: ${{ needs.operator-lifecycle.result }}
+          OPERATOR_VALIDATION: ${{ needs.operator-validation.result }}
           OPERATOR_PUBLISH: ${{ needs.operator-publish.result }}
           OPERATOR_ATTEST: ${{ needs.operator-attest.result }}
           PUBLISH: ${{ needs.publish.result }}
@@ -1783,12 +1962,15 @@ jobs:
             echo "| Resolve Candidate Digests | ${RESOLVE} |"
             echo "| Vulnerability Scan | ${VULN_SCAN} |"
             echo "| Attestation | ${ATTEST} |"
+            echo "| AICR Check | ${AICR_CHECK} |"
+            echo "| Version Alias Promotion | ${PROMOTE_VERSIONS} |"
             echo "| Release Check | ${RELEASE_CHECK} |"
-            echo "| Image Promotion | ${PROMOTE} |"
+            echo "| latest Promotion | ${PROMOTE} |"
             echo "| Operator Candidate | ${OPERATOR_CANDIDATE} |"
             echo "| Operator Vulnerability Scan | ${OPERATOR_SCAN} |"
             echo "| Operator Reproducibility | ${OPERATOR_REPRODUCIBLE} |"
             echo "| Operator Lifecycle | ${OPERATOR_LIFECYCLE} |"
+            echo "| Operator Validation | ${OPERATOR_VALIDATION} |"
             echo "| Operator Publish | ${OPERATOR_PUBLISH} |"
             echo "| Operator Attestation | ${OPERATOR_ATTEST} |"
             echo "| Publish | ${PUBLISH} |"

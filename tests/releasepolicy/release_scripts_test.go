@@ -1140,6 +1140,58 @@ func TestReleasePromotionDefersLatestUntilEveryVersionIsVerified(t *testing.T) {
 	}
 }
 
+// The release workflow promotes the version aliases before the operator gate
+// and latest after it: the versions phase writes no latest, and the later
+// full promotion writes only latest.
+func TestReleaseStablePromotionSplitsVersionsFromLatest(t *testing.T) {
+	t.Parallel()
+	fixture := newStableReleaseFixture(t)
+	mapPath := filepath.Join(fixture.dir, "digests.json")
+	writeDigestMap(t, mapPath, fixture.digests)
+	validated := filepath.Join(fixture.dir, "validated.json")
+	preflight := func() {
+		t.Helper()
+		if result := runScript(t, fixture.environment(), ".github/scripts/release-images.sh", "preflight", mapPath, validated); result.err != nil {
+			t.Fatalf("stable preflight failed: %v\n%s", result.err, result.output)
+		}
+	}
+
+	preflight()
+	result := runScript(t, fixture.environment(), ".github/scripts/release-images.sh", "promote", validated, "versions")
+	if result.err != nil {
+		t.Fatalf("version promotion failed: %v\n%s", result.err, result.output)
+	}
+	versions := strings.TrimSpace(readOptional(t, fixture.mutations))
+	lines := strings.Split(versions, "\n")
+	if len(lines) != len(releaseImages) {
+		t.Fatalf("version promotion mutations = %d, want %d\n%s", len(lines), len(releaseImages), versions)
+	}
+	for _, line := range lines {
+		if !strings.HasSuffix(line, "\t"+fixture.releaseTag) {
+			t.Errorf("version promotion wrote %q, want only %s aliases", line, fixture.releaseTag)
+		}
+	}
+
+	preflight()
+	if result = runScript(t, fixture.environment(), ".github/scripts/release-images.sh", "promote", validated); result.err != nil {
+		t.Fatalf("latest promotion failed: %v\n%s", result.err, result.output)
+	}
+	all := strings.TrimSpace(readOptional(t, fixture.mutations))
+	added := strings.Split(strings.TrimSpace(strings.TrimPrefix(all, versions)), "\n")
+	if len(added) != len(releaseImages) {
+		t.Fatalf("latest promotion mutations = %d, want %d\n%s", len(added), len(releaseImages), all)
+	}
+	for _, line := range added {
+		if !strings.HasSuffix(line, "\tlatest") {
+			t.Errorf("latest promotion wrote %q, want only latest aliases", line)
+		}
+	}
+
+	if result = runScript(t, fixture.environment(), ".github/scripts/release-images.sh", "promote", validated, "latest"); result.err == nil {
+		t.Error("promotion accepted an unknown phase")
+	}
+}
+
 func TestReleasePromotionHasExplicitVersionThenLatestPhases(t *testing.T) {
 	text := string(readFile(t, ".github/scripts/release-images.sh"))
 	versionPhase := strings.Index(text, "# Phase 1: converge and verify every immutable version alias.")

@@ -100,10 +100,12 @@ operator's AWS identity and the component namespaces.
 
 Each AICR release publishes the operator image, the in-cluster registry image
 and the chart, tagged with the release version. The chart defaults to that
-release's operator and registry images and to the AICR and validator images
-the operator was qualified against, all pinned by digest. That AICR release can be earlier than the one the chart ships in:
-`helm show values` shows it, and [operations](operations.md#upgrading-aicr-within-v1)
-moves it.
+release's operator and registry images and to that release's own AICR and
+validator images, all pinned by digest. Before it publishes, the release runs
+the operator with that AICR through install, upgrade and rollout, and the
+validator images through deployment validation. An earlier chart, such as v1.2.0's, can
+default to an earlier AICR release. `helm show values` shows the default, and
+[operations](operations.md#upgrading-aicr-within-v1) moves it.
 
 ```shell
 VERSION="<release>"   # an AICR release that ships the operator, without the leading v
