@@ -496,3 +496,29 @@ func TestCapabilities(t *testing.T) {
 		}
 	}
 }
+
+// Refresh asks Argo CD to compare an Application the step did not write, and
+// fails for one that is gone.
+func TestRefreshRequestsAComparison(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	p, r := testPlan()
+	a := fakeAdapter(t)
+	if err := a.Refresh(ctx, r); err == nil {
+		t.Fatal("Refresh() of a missing Application succeeded")
+	}
+	if _, err := a.Ensure(ctx, p, r, values); err != nil {
+		t.Fatalf("Ensure() = %v", err)
+	}
+	if err := a.Refresh(ctx, r); err != nil {
+		t.Fatalf("Refresh() = %v", err)
+	}
+	live, err := a.get(ctx, r.ID)
+	if err != nil || live.GetAnnotations()[RefreshAnnotation] != "normal" {
+		t.Fatalf("Refresh() did not request a refresh: %v", err)
+	}
+	desired, _ := Application(target, p, r, values)
+	if drifted(live, desired) {
+		t.Error("the refresh request reads as drift")
+	}
+}

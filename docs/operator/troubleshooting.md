@@ -259,6 +259,28 @@ migration is a separate procedure, outside the operator.
   name it. Undo the edit to the Application; the operator tries again on every
   reconcile, and no new rollout starts until it succeeds.
 
+## Slow rollout
+
+Each release in a rollout's `status.releases` records when its step started
+and ended and the last reason it waited on, and each step transition is an
+Event on the rollout:
+
+```shell
+kubectl get runtimerollout "<rollout>" \
+  -o jsonpath='{range .status.releases[*]}{.id}{"\t"}{.startedAt}{"\t"}{.finishedAt}{"\t"}{.waitedOn}{"\n"}{end}'
+kubectl describe runtimerollout "<rollout>"   # StepStarted, StepWaiting, StepFinished
+```
+
+- **`ReconcileStale`.** The release is synced and healthy, but Argo CD has
+  not compared it since the step started, so the step waits for that
+  comparison. The step asks Argo CD to compare it at once. Before v1.3.0, a
+  step whose Application already carried the plan, as every unchanged
+  release does in a recovery that pins the previous plan, did not ask, and
+  waited for Argo CD's periodic reconcile (`timeout.reconciliation`, three
+  minutes by default) instead: a minute or more for each such release.
+- **`HealthProgressing`, `SyncRunning`.** The release's own workloads are
+  still starting; the time is theirs, not the operator's.
+
 ## Rollout failed, expired or revoked
 
 The rollout's message and its `RolloutFailed`, `RolloutExpired` or

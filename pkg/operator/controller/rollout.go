@@ -130,6 +130,8 @@ type Engine interface {
 	Capabilities(ctx context.Context) error
 	Ensure(ctx context.Context, p *plan.Document, r *plan.Release, valuesJSON []byte) (*argocd.Ensured, error)
 	Verify(ctx context.Context, p *plan.Document, r *plan.Release, valuesJSON []byte) error
+	// Refresh asks the engine to compare a release's object now.
+	Refresh(ctx context.Context, r *plan.Release) error
 	Observe(ctx context.Context, p *plan.Document, r *plan.Release, valuesJSON []byte, since time.Time, verify bool) (argocd.Observation, error)
 	Remove(ctx context.Context, runtimeUID, name, uid, rollout string) error
 	Retired(ctx context.Context, name, uid string) (argocd.Observation, error)
@@ -966,15 +968,8 @@ func (r *RolloutReconciler) step(ctx context.Context, p *plan.Document, ro *v1al
 	}
 	verify := syncs(step, rel)
 	obs, err := r.Engine.Observe(ctx, p, rel, values, cur.StartedAt.Time, verify)
-	if err == nil && verify && obs.Reason == argocd.ReasonSyncNotStarted {
-		// Argo CD was busy or lost the request: ask again.
-		err = r.Engine.Verify(ctx, p, rel, values)
-	}
-	if err == nil && !verify && obs.Reason == argocd.ReasonPriorSyncFailed {
-		// The Application already carries the plan, as in a retry, but its
-		// sync of this revision failed before the step, and automated sync
-		// never retries a failed revision: start the sync.
-		err = r.Engine.Verify(ctx, p, rel, values)
+	if err == nil {
+		err = r.prompt(ctx, p, rel, values, verify, obs.Reason)
 	}
 	if err == nil && !verify && (obs.State == argocd.StateMissing || obs.Reason == argocd.ReasonSpecNotWritten) {
 		// The step was recorded, then the operator stopped before its write
@@ -1014,6 +1009,34 @@ func (r *RolloutReconciler) step(ctx context.Context, p *plan.Document, ro *v1al
 	r.stepWaiting(ctx, ro, step.Release, obs.Reason)
 	v.requeue = pollInterval
 	return false, r.saveStatus(ctx, ro, "release "+step.Release+": "+obs.Reason)
+}
+
+// prompt asks the engine again for what an observation shows the step is
+// waiting on but the engine was never asked for, or lost.
+func (r *RolloutReconciler) prompt(ctx context.Context, p *plan.Document, rel *plan.Release, values []byte,
+	verify bool, reason string) error {
+
+	switch {
+	case verify && reason == argocd.ReasonSyncNotStarted:
+		// Argo CD was busy or lost the request: ask again.
+		return r.Engine.Verify(ctx, p, rel, values)
+	case !verify && reason == argocd.ReasonPriorSyncFailed:
+		// The Application already carries the plan, as in a retry, but its
+		// sync of this revision failed before the step, and automated sync
+		// never retries a failed revision: start the sync.
+		return r.Engine.Verify(ctx, p, rel, values)
+	case !verify && reason == argocd.ReasonReconcileStale:
+		// The Application already carries the plan, as every unchanged
+		// release does in a recovery that pins the previous plan, so no
+		// write asked Argo CD to compare it: ask, rather than waiting for its
+		// periodic reconcile. A refused request only leaves that wait.
+		if err := r.Engine.Refresh(ctx, rel); err != nil {
+			log.FromContext(ctx).Info("refresh request failed; waiting for the engine's periodic reconcile",
+				"release", rel.ID, "error", err.Error())
+		}
+	}
+
+	return nil
 }
 
 // timedOut ends a step whose action timeout passed while a transient error

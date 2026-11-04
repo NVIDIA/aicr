@@ -62,6 +62,7 @@ type fakeEngine struct {
 	priorFailed   map[string]bool   // release -> Observe reports PriorSyncFailed until a Verify
 	unhealthy     map[string]string // release -> Observe reports Progressing with this reason at its written plan
 	observeErr    error             // Observe fails with it
+	refreshed     map[string]int    // release -> refresh requests
 	overridden    []string
 	order         []string // mutations, "<op> <release>"
 	rebuilt       *plan.Document
@@ -232,6 +233,16 @@ func (f *fakeEngine) Foreign(context.Context, string) (map[string][]string, erro
 		}
 	}
 	return out, nil
+}
+
+// Refresh records a request that Argo CD compare the Application now.
+func (f *fakeEngine) Refresh(_ context.Context, r *plan.Release) error {
+	if f.refreshed == nil {
+		f.refreshed = map[string]int{}
+	}
+	f.refreshed[r.ID]++
+
+	return nil
 }
 
 // Adopt moves an object of another runtime into this runtime's inventory.

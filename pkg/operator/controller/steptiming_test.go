@@ -15,6 +15,7 @@
 package controller
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"k8s.io/client-go/tools/events"
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
+	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
 )
 
 // releaseStatus is the rollout's status entry for id, or a failure.
@@ -157,5 +159,39 @@ func TestRolloutRecordsAFailedStepsTiming(t *testing.T) {
 	}
 	if got := drain(recorder); len(matching(got, "Warning", EventStepFinished, "cert-manager", "Failed")) != 1 {
 		t.Errorf("Events = %q; want one StepFinished warning for the failed step", got)
+	}
+}
+
+// A step whose Application already carries the plan, as every unchanged
+// release does in a recovery that pins the previous plan, is not written
+// again, so no Ensure asks Argo CD to compare it. Waiting for Argo CD's
+// periodic reconcile cost each such step minutes; the step asks instead.
+func TestRolloutRefreshesAStaleComparison(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+		rt.Spec.Rollout.StabilizationWindow = &metav1.Duration{Duration: time.Millisecond}
+	})
+	digest := putPlan(t, ctx, rt, "50m")
+	resolved(t, ctx, digest)
+	engine := newEngine()
+	engine.ensured["cert-manager"] = digest
+	engine.unhealthy = map[string]string{"cert-manager": argocd.ReasonReconcileStale}
+	r, _ := newRollout(t, engine, true)
+
+	reconcileRollout(t, ctx, r) // create
+	reconcileRollout(t, ctx, r) // step started; already written, so observed
+	reconcileRollout(t, ctx, r) // observed: ReconcileStale
+	if slices.Contains(engine.order, "Ensure cert-manager") {
+		t.Fatalf("engine calls = %v; an already written step writes nothing", engine.order)
+	}
+	if engine.refreshed["cert-manager"] == 0 {
+		t.Fatal("a step waiting on a stale comparison did not ask Argo CD to compare again")
+	}
+
+	engine.unhealthy["cert-manager"] = "HealthProgressing"
+	before := engine.refreshed["cert-manager"]
+	reconcileRollout(t, ctx, r)
+	if engine.refreshed["cert-manager"] != before {
+		t.Error("a step waiting on health asked for a refresh, which cannot help it")
 	}
 }
