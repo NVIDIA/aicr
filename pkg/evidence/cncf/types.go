@@ -36,8 +36,17 @@ type evidenceEntry struct {
 	// Checks contains the individual check results.
 	Checks []checkEntry
 
-	// Status is the aggregate: "passed" if all pass, "failed" if any fails.
-	Status string
+	// Status is the requirement's aggregate verdict (AggregateReport):
+	// passed only when a complete proof path passed, failed when a check
+	// failed, not tested when a check was skipped, crashed or never ran, not
+	// applicable when configuration declares it so.
+	Status RequirementStatus
+
+	// Reason explains a Status other than passed.
+	Reason string
+
+	// Proof names the checks whose passed results established Status passed.
+	Proof []string
 
 	// Level is the requirement's upstream level at Version; empty when
 	// Supporting.
@@ -54,18 +63,23 @@ type evidenceEntry struct {
 	GeneratedAt time.Time
 }
 
-// untestedEntry is a checklist requirement no test result evidenced in this
-// render: either AICR has no conformance check for it or its expected checks
-// produced no result. It renders as an index row with no page and no
-// evidence link. Presence only: verdict aggregation is not done here.
-type untestedEntry struct {
+// indexRow is one requirement of the checklist in the index table, in
+// upstream order: the aggregate verdict plus, when a page was rendered, its
+// title and filename. A requirement no non-skipped check evidenced has no
+// page and no evidence link.
+type indexRow struct {
 	// RequirementID is the upstream requirement identifier.
 	RequirementID string
 
 	// Level is the requirement's upstream level at the rendered version.
 	Level Level
 
-	// Reason is "no AICR check" or "not run".
+	// Title and Filename are the evidence page, empty when none was rendered.
+	Title    string
+	Filename string
+
+	// Status and Reason are the aggregate verdict; see evidenceEntry.
+	Status RequirementStatus
 	Reason string
 }
 
