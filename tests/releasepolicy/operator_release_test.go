@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -143,5 +144,79 @@ func TestOperatorPublishDigestsPassAttestValidation(t *testing.T) {
 	}
 	if !strings.Contains(string(readFileAt(t, validated)), "digests="+digests+"\n") {
 		t.Errorf("attest-operator.yaml did not pass the digests through: %s", readFileAt(t, validated))
+	}
+}
+
+// The weekly scan reads each operator image once per architecture, as the
+// release's operator-scan does, and keeps the two results apart, so a finding
+// in either platform's image reaches the run's artifacts and the summary.
+func TestWeeklyScanCoversOperatorImagesPerArch(t *testing.T) {
+	t.Parallel()
+	scan := mapValue(t, mapValue(t, loadYAML(t, ".github/workflows/vuln-scan-images.yaml"), "jobs"), "scan")
+	matrix := mapValue(t, mapValue(t, scan, "strategy"), "matrix")
+	images := sliceValue(t, matrix, "image")
+	include := sliceValue(t, matrix, "include")
+	for _, image := range []string{"ghcr.io/nvidia/aicr-operator", "ghcr.io/nvidia/aicr-registry"} {
+		for _, raw := range images {
+			if fmt.Sprint(raw) == image {
+				t.Errorf("%s has a leg with no architecture; list it per architecture under include", image)
+			}
+		}
+		var arches []string
+		for _, raw := range include {
+			leg, ok := raw.(map[string]any)
+			if ok && fmt.Sprint(leg["image"]) == image {
+				arches = append(arches, fmt.Sprint(leg["arch"]))
+			}
+		}
+		slices.Sort(arches)
+		if !slices.Equal(arches, []string{"amd64", "arm64"}) {
+			t.Errorf("%s is scanned on %v, want [amd64 arm64]", image, arches)
+		}
+	}
+
+	steps := sliceValue(t, scan, "steps")
+	scanStep, ok := steps[stepIndex(steps, "Scan container image")].(map[string]any)
+	if !ok {
+		t.Fatal("the scan step is not a map")
+	}
+	env, _ := scanStep["env"].(map[string]any)
+	if !strings.Contains(fmt.Sprint(env["GRYPE_PLATFORM"]), "matrix.arch") {
+		t.Errorf("the scan step must pass matrix.arch to grype as GRYPE_PLATFORM, got %q", env["GRYPE_PLATFORM"])
+	}
+	with, _ := scanStep["with"].(map[string]any)
+	if !strings.Contains(fmt.Sprint(with["image"]), "matrix.arch") {
+		t.Errorf("an architecture's leg must read the image from the registry, which selects the platform; image input is %q", with["image"])
+	}
+
+	extract, ok := steps[stepIndex(steps, "Extract severity counts and IDs")].(map[string]any)
+	if !ok {
+		t.Fatal("the extract step is not a map")
+	}
+	work := t.TempDir()
+	grypeJSON := filepath.Join(work, "grype.json")
+	if err := os.WriteFile(grypeJSON, []byte(`{"matches":[{"artifact":{"name":"stdlib"},"vulnerability":{"id":"CVE-0000-0001","severity":"High"}}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := strings.ReplaceAll(stringValue(t, extract, "run"), "${{ steps.scan.outputs.json }}", grypeJSON)
+	for _, arch := range []string{"amd64", "arm64"} {
+		cmd := exec.Command("bash", "-c", script)
+		cmd.Dir = work
+		cmd.Env = append(os.Environ(), "IMAGE=ghcr.io/nvidia/aicr-operator", "ARCH="+arch)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("extract for %s: %v\n%s", arch, err, out)
+		}
+	}
+	results, err := filepath.Glob(filepath.Join(work, "scan-results", "*.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	headers := make([]string, 0, len(results))
+	for _, f := range results {
+		headers = append(headers, strings.SplitN(string(readFileAt(t, f)), ":", 2)[0])
+	}
+	slices.Sort(headers)
+	if want := []string{"aicr-operator amd64", "aicr-operator arm64"}; !slices.Equal(headers, want) {
+		t.Errorf("per-architecture results are %v, want %v", headers, want)
 	}
 }

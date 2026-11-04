@@ -333,7 +333,7 @@ jobs:
   # =============================================================================
 
   scan:
-    name: Scan (${{ matrix.image }})
+    name: Scan (${{ matrix.image }}${{ matrix.arch && format(' {0}', matrix.arch) || '' }})
     # The two NVSentinel NCCL check images (matrix.large) need about 28 GiB
     # while grype catalogs them (#3249). A 16 GiB ubuntu-24.04 runner runs out
     # of memory and gets killed with a shutdown signal; linux-amd64-cpu16
@@ -359,8 +359,8 @@ jobs:
           - ghcr.io/nvidia/aicr-validators/conformance
           - ghcr.io/nvidia/aicr-validators/aiperf-bench
           - ghcr.io/nvidia/aicr-gate
-          - ghcr.io/nvidia/aicr-operator
-          - ghcr.io/nvidia/aicr-registry
+          # aicr-operator and aicr-registry are scanned once per architecture,
+          # as the release's operator-scan does; see include below.
           # AICR does not build the images below. They ship only with the
           # opt-in nvsentinel-object-monitor (#2612), nvsentinel-preflight
           # (#2610), nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor
@@ -419,6 +419,16 @@ jobs:
           # here is the override; keep them in step.
           - docker.io/library/busybox
         include:
+          # One leg per architecture: an include entry naming an image the
+          # list above lacks adds a leg rather than extending one.
+          - image: ghcr.io/nvidia/aicr-operator
+            arch: amd64
+          - image: ghcr.io/nvidia/aicr-operator
+            arch: arm64
+          - image: ghcr.io/nvidia/aicr-registry
+            arch: amd64
+          - image: ghcr.io/nvidia/aicr-registry
+            arch: arm64
           # Keep in lockstep with nvsentinel's defaultVersion in
           # recipes/registry.yaml; TestObjectMonitorImagePinnedEverywhere,
           # TestPreflightImagesPinnedEverywhere,
@@ -510,13 +520,18 @@ jobs:
       - name: Scan container image
         id: scan
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2
+        env:
+          # The action passes its environment to grype, which reads the leg's
+          # platform from the image index.
+          GRYPE_PLATFORM: ${{ matrix.arch && format('linux/{0}', matrix.arch) || '' }}
         with:
           # matrix.tag is set only for images this workflow does not build,
           # which carry their upstream version instead of SCAN_TAG.
           # Large images are read straight from the registry, which halves
           # the scan time: through the docker daemon they land on disk three
-          # times (pull, save, extract).
-          image: '${{ matrix.large && ''registry:'' || '''' }}${{ matrix.image }}:${{ matrix.tag || env.SCAN_TAG }}'
+          # times (pull, save, extract). So is a leg with an architecture,
+          # which the registry source selects from the index.
+          image: '${{ (matrix.large || matrix.arch) && ''registry:'' || '''' }}${{ matrix.image }}:${{ matrix.tag || env.SCAN_TAG }}'
           severity-cutoff: 'high'
           output-format: json
           only-fixed: true
@@ -532,12 +547,15 @@ jobs:
         shell: bash
         env:
           IMAGE: ${{ matrix.image }}
+          ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
           JSON_FILE="${{ steps.scan.outputs.json }}"
-          SHORT_NAME="${IMAGE##*/}"
+          # A leg with an architecture names it, matching its job name, which
+          # the notify job reads for a leg that did not complete.
+          SHORT_NAME="${IMAGE##*/}${ARCH:+ ${ARCH}}"
           mkdir -p scan-results
-          OUT="scan-results/${SHORT_NAME}.txt"
+          OUT="scan-results/${IMAGE##*/}${ARCH:+-${ARCH}}.txt"
 
           # grype killed by a signal can leave the scan step green with no
           # output. Fail the leg so the summary reports it as incomplete
