@@ -618,9 +618,11 @@ func runValidation(
 	}
 
 	// Generate conformance evidence if requested. The checklist version
-	// follows the validated cluster's Kubernetes minor; a cluster newer than
-	// the newest published checklist renders against the latest (the facade
-	// warns). An explicit version flag is a follow-up to #3606.
+	// follows the validated cluster's Kubernetes minor. A minor this build
+	// carries no checklist for renders against the nearest carried one and the
+	// facade warns: below v1.35 against v1.35, above the newest against the
+	// latest (cncf.NearestVersion). An explicit version flag is a follow-up
+	// to #3606.
 	if cfg.evidenceDir != "" {
 		renderOpts := aicr.RenderCNCFEvidenceOptions{KubernetesVersion: snap.KubernetesVersion()}
 		if renderErr := client.RenderCNCFEvidenceWithOptions(ctx, combined, cfg.evidenceDir, renderOpts); renderErr != nil {

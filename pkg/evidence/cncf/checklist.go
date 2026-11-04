@@ -144,9 +144,10 @@ var kubernetesMinor = regexp.MustCompile(`^v?(\d+)\.(\d+)(?:[.\-+].*)?$`)
 
 // VersionForKubernetes derives the checklist version from a Kubernetes server
 // version string. ok is false when the string does not parse or names a minor
-// this build has no checklist for; the caller decides whether that falls back
-// to LatestVersion (a newer cluster than the newest published checklist) or
-// is an error.
+// this build carries no checklist for. It is an exact lookup only: a caller
+// that wants the nearest carried checklist for an uncarried minor (below the
+// oldest renders the oldest, above the newest renders the latest) uses
+// NearestVersion, which is what evidence rendering does.
 func VersionForKubernetes(serverVersion string) (v Version, ok bool) {
 	m := kubernetesMinor.FindStringSubmatch(strings.TrimSpace(serverVersion))
 	if m == nil {

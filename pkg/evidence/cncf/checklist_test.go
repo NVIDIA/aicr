@@ -168,7 +168,7 @@ func TestVersionForKubernetes(t *testing.T) {
 		{"1.35.0-eks-abc123", Version135, true},
 		{"v1.37.1+rke2r1", Version137, true},
 		{"v1.37", Version137, true},
-		{"v1.38.0", "v1.38", false}, // newer than the newest published checklist
+		{"v1.38.0", "v1.38", false}, // newer than the newest carried checklist: exact lookup only, NearestVersion maps it
 		{"v1.34.9", "v1.34", false},
 		{"garbage", "", false},
 		{"", "", false},
