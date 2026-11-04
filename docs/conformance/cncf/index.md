@@ -16,6 +16,7 @@ distribution, with evidence collected using AICR as the validation tooling.
 |---------|---------|----------|--------|----------|
 | v1.35 | [NVIDIA NIM](https://developer.nvidia.com/nim) | EKS | 9/9 PASS | [v1.35/nim-eks/](v1.35/nim-eks/) |
 | v1.36 | NVIDIA Kubernetes Engine | NVKE | 7 applicable MUSTs PASS; 1 conditional N/A | [v1.36/nvke/](v1.36/nvke/) |
+| v1.36 | AICR training stack (VR200) | NVKE | 7 PASS, 2 SKIP — evidence only, see `../nvke/` for the submission | [v1.36/trainer-nvke-vr200/](v1.36/trainer-nvke-vr200/) |
 
 ## Directory Structure
 
