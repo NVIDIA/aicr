@@ -189,8 +189,8 @@ func operatorJobFlags(t *testing.T, create func(*batchv1.Job) error) {
 		{"a known flag, joined", []string{"--output=cm://y"}},
 		{"a switch the operator never joins", []string{"--plain-http=true"}},
 		{"a known flag with a trailing newline", []string{"--output\n", "cm://y"}},
-		{"a value flag last", []string{"--format"}},
-		{"a value flag followed by a flag", []string{"--format", "--output", "cm://y"}},
+		{"a value flag last", []string{"--output"}},
+		{"a value flag followed by a flag", []string{"--output", "--output", "cm://y"}},
 		{"a positional argument", []string{"extra"}},
 		{"the end of flags", []string{"--", "--data", "/tmp/catalog"}},
 	}
@@ -203,6 +203,10 @@ func operatorJobFlags(t *testing.T, create func(*batchv1.Job) error) {
 	}
 	denied(t, "bundle: a switch given a value", create(jobWithArgs(t, aicrjob.StageRender, "aicr-jobs",
 		[]string{"--plain-http", "true", "--output", "cm://x"})), flags)
+	// The CLI trims an argument before reading it as a flag; the policy does
+	// not, so a padded flag must not land where a value is admitted.
+	denied(t, "bundle: a flag padded with a space", create(jobWithArgs(t, aicrjob.StageRender, "aicr-jobs",
+		[]string{"--plain-http", " --data", "/tmp/catalog", "--output", "cm://x"})), flags)
 	denied(t, "validate: the fail-on-error the operator does not use", create(jobWithArgs(t, aicrjob.StageValidation,
 		"aicr-validation", []string{"--fail-on-error=false", "--output", "cm://x"})), flags)
 	denied(t, "upgrade-check: a validate flag", create(jobWithArgs(t, aicrjob.StageAssessment, "aicr-jobs",
