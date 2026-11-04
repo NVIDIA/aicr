@@ -19,6 +19,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
@@ -94,4 +95,20 @@ func (c *Client) LoadSnapshot(ctx context.Context, path, kubeconfig string) (*Sn
 		return nil, err
 	}
 	return fromInternalSnapshot(loaded), nil
+}
+
+// KubernetesVersion returns the Kubernetes server version the snapshot
+// recorded ("1.36.3", no leading "v"), recomputed from the measurements
+// rather than read from the advisory embedded fingerprint. Empty when the
+// snapshot carries no k8s.server.version measurement or the receiver is nil.
+// It is the value RenderCNCFEvidenceOptions.KubernetesVersion expects.
+func (s *Snapshot) KubernetesVersion() string {
+	if s == nil {
+		return ""
+	}
+	internal := s.Unwrap()
+	if internal == nil {
+		return ""
+	}
+	return fingerprint.FromMeasurements(internal.Measurements).K8sVersion.Value
 }

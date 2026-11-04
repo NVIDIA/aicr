@@ -79,8 +79,15 @@ minimal redaction policy blanks every `message`. A bundle carrying WHICH check
 was withheld but not WHY would be the same "reads as complete" defect the flag's
 guards exist to prevent. The CNCF evidence renderer does
 NOT: `pkg/evidence/cncf/renderer.go` drops every skipped entry before grouping
-(pinned by `TestRenderSkippedExcluded`), so a withheld requirement would leave
-no file and no index entry. `validateFlagCombinations` refuses `--skip-check`
+(pinned by `TestRenderSkippedExcluded`), so a withheld requirement gets no page
+and, when another submission-required check produced an entry so an index is
+written at all, appears there only as `NOT TESTED (not run)`, with no reason
+recorded. The requirement set it groups into is the upstream
+checklist for the selected version (`pkg/evidence/cncf/checklist.go`, embedded
+verbatim under `schemas/` and digest-pinned); `requirements.go` maps each
+conformance check to the requirement it evidences, and
+`TestEveryMustHasExpectedChecks` fails when a supported version carries a MUST
+no check covers. `validateFlagCombinations` refuses `--skip-check`
 together with `--evidence-dir` for that reason, rather than emitting a
 submission that reads as complete, and `Client.RenderCNCFEvidence` refuses a
 report carrying a `SkipCheckReasonCode` skip. `preflightSkipChecks` runs beside `preflightDeclaredChecks`, on the

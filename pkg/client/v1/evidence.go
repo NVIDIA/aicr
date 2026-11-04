@@ -255,19 +255,53 @@ func CNCFEvidenceFeatures() []string {
 	return slices.Clone(cncf.ValidFeatures)
 }
 
+// RenderCNCFEvidenceOptions selects the upstream checklist version
+// RenderCNCFEvidenceWithOptions renders against. The zero value renders
+// against cncf.LatestVersion.
+type RenderCNCFEvidenceOptions struct {
+	// ConformanceVersion names the checklist explicitly ("v1.36" or "1.36").
+	// A version this build does not carry (see cncf.SupportedVersions) is
+	// refused with ErrCodeInvalidRequest. Takes precedence over
+	// KubernetesVersion.
+	ConformanceVersion string
+
+	// KubernetesVersion is the validated cluster's server version
+	// ("v1.36.3"), typically Snapshot.KubernetesVersion. Its minor selects
+	// the checklist. A minor this build carries no checklist for is rendered
+	// against the nearest carried one with a warning rather than failing the
+	// render: below the oldest carried checklist (v1.35) that oldest one,
+	// above the newest the latest. Upstream publishes checklists this build
+	// does not carry (v1.33, v1.34), so the fallback is "not carried", not
+	// "not published". An unparseable value also falls back to the latest.
+	KubernetesVersion string
+}
+
 // RenderCNCFEvidence writes CNCF AI Conformance evidence markdown (one file
 // per submission requirement, plus index.md) to dir from a CTRF report,
-// typically the one MergeReports returns. Skipped checks are omitted, and a
-// report with no submission-required checks writes nothing and returns nil.
-// A report from a run that used WithValidationSkipChecks is refused, because
-// the omitted requirements would leave the evidence reading as complete.
+// typically the one MergeReports returns, against the latest checklist
+// version this build carries. It is RenderCNCFEvidenceWithOptions with the
+// zero options; see there for the contract.
+func (c *Client) RenderCNCFEvidence(ctx context.Context, report *ctrf.Report, dir string) error {
+	return c.RenderCNCFEvidenceWithOptions(ctx, report, dir, RenderCNCFEvidenceOptions{})
+}
+
+// RenderCNCFEvidenceWithOptions writes CNCF AI Conformance evidence markdown
+// (one file per requirement of the selected checklist version, plus
+// index.md) to dir from a CTRF report, typically the one MergeReports
+// returns. Skipped checks are omitted, and a report with no
+// submission-required checks writes nothing and returns nil. A check whose
+// requirement the selected version does not list (dra_support from v1.36 on)
+// renders as supporting evidence. A report from a run that used
+// WithValidationSkipChecks is refused, because the omitted requirements would
+// leave the evidence reading as complete.
 //
 // Errors:
-//   - ErrCodeInvalidRequest when the Client or ctx is nil, dir is empty, or
-//     the report contains a check withheld by WithValidationSkipChecks.
+//   - ErrCodeInvalidRequest when the Client or ctx is nil, dir is empty,
+//     opts.ConformanceVersion is unsupported, or the report contains a check
+//     withheld by WithValidationSkipChecks.
 //   - ErrCodeTimeout when rendering exceeds defaults.EvidenceRenderTimeout.
 //   - ErrCodeInternal when a file cannot be written.
-func (c *Client) RenderCNCFEvidence(ctx context.Context, report *ctrf.Report, dir string) error {
+func (c *Client) RenderCNCFEvidenceWithOptions(ctx context.Context, report *ctrf.Report, dir string, opts RenderCNCFEvidenceOptions) error {
 	if c == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
 	}
@@ -287,13 +321,46 @@ func (c *Client) RenderCNCFEvidence(ctx context.Context, report *ctrf.Report, di
 		}
 	}
 
+	version, err := resolveConformanceVersion(opts)
+	if err != nil {
+		return err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, defaults.EvidenceRenderTimeout)
 	defer cancel()
 
-	if err := cncf.New(cncf.WithOutputDir(dir)).Render(ctx, report); err != nil {
+	if err := cncf.New(cncf.WithOutputDir(dir), cncf.WithConformanceVersion(version)).Render(ctx, report); err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "CNCF evidence rendering failed")
 	}
 	return nil
+}
+
+// resolveConformanceVersion applies RenderCNCFEvidenceOptions' precedence:
+// an explicit version must be supported; a Kubernetes version selects the
+// checklist for its minor, or the nearest carried one when this build has
+// none for it; nothing selects the latest.
+func resolveConformanceVersion(opts RenderCNCFEvidenceOptions) (cncf.Version, error) {
+	if opts.ConformanceVersion != "" {
+		v, err := cncf.ParseVersion(opts.ConformanceVersion)
+		if err != nil {
+			return "", err
+		}
+		return v, nil
+	}
+	if opts.KubernetesVersion == "" {
+		return cncf.LatestVersion, nil
+	}
+	v, exact, err := cncf.NearestVersion(opts.KubernetesVersion)
+	if err != nil {
+		slog.Warn("cluster Kubernetes version is not parseable; rendering CNCF AI Conformance evidence against the latest carried checklist",
+			"kubernetesVersion", opts.KubernetesVersion, "using", cncf.LatestVersion, "error", err)
+		return cncf.LatestVersion, nil
+	}
+	if !exact {
+		slog.Warn("this build carries no CNCF AI Conformance checklist for the cluster's Kubernetes minor; rendering against the nearest carried one",
+			"kubernetesVersion", opts.KubernetesVersion, "using", v, "carried", cncf.SupportedVersions())
+	}
+	return v, nil
 }
 
 // CollectCNCFEvidence collects behavioral CNCF AI Conformance submission
