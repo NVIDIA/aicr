@@ -144,9 +144,17 @@ From those readings, the v1.0.0 defaults break at roughly these sizes:
 **Drivers.** Most of this is linear in node count: gpu-operator at about
 1.2 to 1.4Mi per node, and network-operator at about 3.2 to 3.6Mi per node.
 
-Nodewright is the exception: its working set follows pod count and per-node
-Skyhook CRs. At 244 and 357 nodes, with 11k and 14k pods, it peaks at the
-same 1Gi. A 118-node cluster with 18k pods OOM-killed it at 2Gi.
+Nodewright is the exception, and its driver is not one thing. Its cache
+holds nodes, per-node Skyhook CRs, pods, and the package-execution Jobs it
+retains for `jobTtlSucceeded` (1h default) and `jobTtlFailed` (24h). Below
+600 nodes, pods dominate: at 244 and 357 nodes, with 11k and 14k pods, it
+peaks at the same 1Gi, and a 118-node cluster with 18k pods OOM-killed it at
+2Gi. At 2000 nodes the order reverses: the Mistral cluster with 82k pods
+runs both replicas at 6.7Gi, while the Lambda cluster with 13k pods runs its
+leader at 10.5Gi, so retained Jobs from node churn are the better
+explanation there. Neither pod count nor churn is known when a bundle is
+generated or installed, which is why section 4 sizes nodewright to the
+largest reading at each node count.
 
 maintenance-operator grew about 1Gi in a week at a constant 2500 nodes, so
 something besides node count drives it too
@@ -229,6 +237,17 @@ change, and it cannot be qualified: there is no finite set of points to
 measure. NodeWright's published formula (see Context) shows how far one can
 be off outside its validated range. Tiers are the formula's bucketed form,
 and that is also what addon-resizer's estimator does.
+
+**F. Run the Vertical Pod Autoscaler on the controllers.** VPA would size
+each cluster from its own history, which is the opposite of AICR's
+contract: identical inputs give identical bundles, and every shipped value
+is qualified. It is another component to deploy and keep healthy, it needs
+days of metrics before it recommends anything, it applies a change by
+evicting the pod (so every re-size is a controller restart, which #3148
+showed is costly for gpu-operator), and it needs the same scrapes the
+controllers lack today (#3265 to #3268), so it moves the measurement
+problem rather than removing it. VPA's default margin is still useful as the
+reference point for this ADR's 30%.
 
 ## Decision
 
@@ -450,8 +469,10 @@ following this section's rules.
   state a count regresses to the pre-v1.1.0 failure mode, by design. Release
   notes for the version that lands this must call it out.
 - **Node count is an imperfect proxy.**
-  - Nodewright tracks pod count, so its tiers are sized for about 40 pods
-    per node. A denser cluster can still exhaust a tier.
+  - Nodewright also tracks pod count and retained Jobs, neither known in
+    advance, so its tiers take the largest reading at each node count. The
+    pods per node of each measured cluster is recorded in the `source`, so
+    an operator with a far denser or churnier cluster knows to override.
   - maintenance-operator grows at a constant node count.
   - The NIC daemon tracks NicDevice count.
 
@@ -495,8 +516,12 @@ hand overrides again.
   is found at the next measurement or the next OOM kill.
 - **Reporting the measured NodeWright numbers upstream.** Its published
   equations undersize the manager by 5 to 7x at 2000 nodes.
-- **A second input for nodewright** (pod count), if dense clusters keep
-  outgrowing its tiers.
+- **Nodewright inputs that are known at bundle time.** AICR knows how many
+  packages a recipe ships, which NodeWright's own formula multiplies by, and
+  it can set `jobTtlSucceeded` and `jobTtlFailed` lower in the large tiers,
+  which shrinks the retained-Job cache instead of sizing for it. Either is a
+  refinement of the nodewright cells under this ADR, not a new input to tier
+  selection.
 - **Install-time sizing for the other deployers.** For `helm` and
   `helmfile`, `install.sh` could read an `AICR_NODE_COUNT` environment
   variable and layer per-tier values files. `flux`, `fleet` and `terraform`
