@@ -2983,6 +2983,8 @@ Warning: nodewright-customizations is enabled but --accelerated-node-selector is
 Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes.
 ```
 
+Neither warning is shown when the only nodewright manifest the recipe wires is the AKS toolkit hardening (`toolkit-hardening-aks.yaml`), as in AKS recipes without an accelerator: its package never cordons or drains a node, and it selects GPU nodes by a fixed label rather than `--accelerated-node-selector`.
+
 **Viewing Validation Warnings:**
 
 Validation warnings are displayed in the bundle output after successful generation:

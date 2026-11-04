@@ -16,7 +16,6 @@ package recipe
 
 import (
 	"slices"
-	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -245,40 +244,35 @@ func TestAKSToolkitEnvHardened(t *testing.T) {
 	}
 }
 
-// TestTuningHostPrepGate pins the AKS RDMA opt-out: hostPrepEnabled=false
-// drops the whole tuning CR, while the toolkit-hardening CR from the same
-// component still renders.
-func TestTuningHostPrepGate(t *testing.T) {
+// TestTuningGenericAccelerator pins the AKS RDMA opt-out
+// (--set nodewrightcustomizations:accelerator=generic): AICR's "generic"
+// profile value reaches nvidia-setup as "any" (its aks-any combination, the
+// toolkit hardening only) and nvidia-tuned unchanged as "generic". Any other
+// accelerator passes through to both packages as is.
+func TestTuningGenericAccelerator(t *testing.T) {
 	content, err := GetEmbeddedFS().ReadFile(nodewrightTuningManifest)
 	if err != nil {
 		t.Fatalf("read %s: %v", nodewrightTuningManifest, err)
 	}
-	render := func(values map[string]any) string {
-		rendered, rerr := manifest.Render(content, manifest.RenderInput{
-			ComponentName: "nodewright-customizations",
-			Namespace:     "nodewright",
-			ChartName:     "nodewright-customizations",
-			ChartVersion:  "0.1.0",
-			Values:        values,
+	tests := []struct {
+		accelerator, wantSetup, wantTuned string
+	}{
+		{"generic", "any", "generic"},
+		{"h100", "h100", "h100"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.accelerator, func(t *testing.T) {
+			packages, _ := renderNodewrightTuning(t, content, map[string]any{
+				"service": "aks", "accelerator": tt.accelerator, "intent": "inference", "tuningEnabled": true,
+			})
+			for _, pkg := range []string{"nvidia-setup-kernel", "nvidia-setup-full"} {
+				if got := valueAtPath[string](t, packages, pkg, "configMap", "accelerator"); got != tt.wantSetup {
+					t.Errorf("%s configMap.accelerator = %q, want %q", pkg, got, tt.wantSetup)
+				}
+			}
+			if got := valueAtPath[string](t, packages, "nvidia-tuned", "configMap", "accelerator"); got != tt.wantTuned {
+				t.Errorf("nvidia-tuned configMap.accelerator = %q, want %q", got, tt.wantTuned)
+			}
 		})
-		if rerr != nil {
-			t.Fatalf("render tuning manifest: %v", rerr)
-		}
-		return string(rendered)
-	}
-	base := map[string]any{"service": "aks", "accelerator": "h100", "tuningEnabled": false}
-
-	if out := render(base); !strings.Contains(out, "kind: NodeWright") {
-		t.Errorf("default values must render the tuning CR:\n%s", out)
-	}
-	off := map[string]any{"hostPrepEnabled": false}
-	for k, v := range base {
-		off[k] = v
-	}
-	if out := render(off); strings.Contains(out, "kind: NodeWright") {
-		t.Errorf("hostPrepEnabled=false must drop the tuning CR:\n%s", out)
-	}
-	if cr := renderAKSToolkitHardening(t, off); cr == nil {
-		t.Error("hostPrepEnabled=false must keep the toolkit-hardening CR")
 	}
 }

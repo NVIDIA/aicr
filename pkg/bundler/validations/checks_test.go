@@ -417,42 +417,6 @@ func TestCheckWildcardAcceleratedToleration(t *testing.T) {
 			wantWarningMsg: "wildcard (keyless) accelerated-node toleration",
 		},
 		{
-			name:          "hostPrepEnabled=false via --set skips wildcard check",
-			componentName: "nodewright-customizations",
-			recipeResult:  aksRecipe,
-			bundlerConfig: config.NewConfig(
-				config.WithAcceleratedNodeTolerations([]corev1.Toleration{
-					{Operator: corev1.TolerationOpExists},
-				}),
-				config.WithValueOverrides(map[string]map[string]string{
-					"nodewrightcustomizations": {"hostPrepEnabled": "false"},
-				}),
-			),
-			conditions:   aksConditions,
-			wantWarnings: 0,
-			wantErrors:   0,
-		},
-		{
-			name:          "hostPrepEnabled=false in the recipe skips wildcard check",
-			componentName: "nodewright-customizations",
-			recipeResult: &recipe.RecipeResult{
-				ComponentRefs: []recipe.ComponentRef{
-					{
-						Name:          "nodewright-customizations",
-						ManifestFiles: []string{toolkitManifest, tuningManifest},
-						Overrides:     map[string]any{"hostPrepEnabled": false},
-					},
-				},
-				Criteria: &recipe.Criteria{
-					Service: recipe.CriteriaServiceAKS,
-				},
-			},
-			bundlerConfig: config.NewConfig(),
-			conditions:    aksConditions,
-			wantWarnings:  0,
-			wantErrors:    0,
-		},
-		{
 			name:          "tuning manifest alone still warns",
 			componentName: "nodewright-customizations",
 			recipeResult: &recipe.RecipeResult{
@@ -2256,8 +2220,6 @@ func TestSelectorChecksSkipNoInterruptManifests(t *testing.T) {
 	}{
 		{"toolkit hardening only", []string{toolkitManifest}, nil, 0},
 		{"toolkit hardening and tuning", []string{toolkitManifest, tuningManifest}, nil, 1},
-		{"tuning gated off by hostPrepEnabled", []string{toolkitManifest, tuningManifest},
-			map[string]map[string]string{"nodewright-customizations": {"hostPrepEnabled": "false"}}, 0},
 		{"unknown manifest", []string{toolkitManifest, "components/nodewright-customizations/manifests/custom.yaml"}, nil, 1},
 		{"no manifests", nil, nil, 1},
 	}

@@ -96,7 +96,7 @@ func CheckWorkloadSelectorMissing(ctx context.Context, componentName string, rec
 	}
 
 	ref := recipeResult.GetComponentRef(componentName)
-	if ref == nil || rendersOnlyNoInterruptPackages(ref, bundlerConfig) {
+	if ref == nil || rendersOnlyNoInterruptPackages(ref) {
 		return nil, nil
 	}
 
@@ -129,7 +129,7 @@ func CheckAcceleratedSelectorMissing(ctx context.Context, componentName string, 
 	}
 
 	ref := recipeResult.GetComponentRef(componentName)
-	if ref == nil || rendersOnlyNoInterruptPackages(ref, bundlerConfig) {
+	if ref == nil || rendersOnlyNoInterruptPackages(ref) {
 		return nil, nil
 	}
 
@@ -219,32 +219,17 @@ var nodewrightNoInterruptManifests = []string{
 	"components/nodewright-customizations/manifests/toolkit-hardening-aks.yaml",
 }
 
-// nodewrightHostPrepManifest is the shared tuning manifest, which renders
-// nothing when hostPrepEnabled is false.
-const nodewrightHostPrepManifest = "components/nodewright-customizations/manifests/tuning.yaml"
-
-// rendersOnlyNoInterruptPackages reports whether every manifest ref wires,
-// after the hostPrepEnabled gate, is in nodewrightNoInterruptManifests. A ref
-// with no manifests reports false, so the caller's check still runs.
-func rendersOnlyNoInterruptPackages(ref *recipe.ComponentRef, bundlerConfig *config.Config) bool {
+// rendersOnlyNoInterruptPackages reports whether every manifest ref wires is
+// in nodewrightNoInterruptManifests. A ref with no manifests reports false, so
+// the caller's check still runs.
+func rendersOnlyNoInterruptPackages(ref *recipe.ComponentRef) bool {
 	if len(ref.ManifestFiles) == 0 {
 		return false
 	}
-	hostPrepOff := fmt.Sprint(ref.Overrides["hostPrepEnabled"]) == overrideValueFalse
-	overrides := bundlerConfig.ValueOverrides()
-	for _, key := range append([]string{ref.Name}, nodewrightCustomizationsOverrideAliases...) {
-		if overrides[key]["hostPrepEnabled"] == overrideValueFalse {
-			hostPrepOff = true
-		}
-	}
 	for _, m := range ref.ManifestFiles {
-		if slices.Contains(nodewrightNoInterruptManifests, m) {
-			continue
+		if !slices.Contains(nodewrightNoInterruptManifests, m) {
+			return false
 		}
-		if m == nodewrightHostPrepManifest && hostPrepOff {
-			continue
-		}
-		return false
 	}
 	return true
 }
@@ -259,9 +244,8 @@ func rendersOnlyNoInterruptPackages(ref *recipe.ComponentRef, bundlerConfig *con
 // cordon/reboot to recover, so the registry wires this at severity: error to
 // block the bundle until a keyed toleration is supplied.
 //
-// A component whose rendered manifests are all in
-// nodewrightNoInterruptManifests (the AKS toolkit hardening, alone or with
-// hostPrepEnabled=false) has nothing to deadlock and is skipped.
+// A component whose manifests are all in nodewrightNoInterruptManifests (the
+// AKS toolkit hardening alone) has nothing to deadlock and is skipped.
 //
 // The default bundle path always hits this: with no
 // --accelerated-node-toleration flag the CLI falls back to
@@ -278,7 +262,7 @@ func CheckWildcardAcceleratedToleration(ctx context.Context, componentName strin
 	}
 
 	ref := recipeResult.GetComponentRef(componentName)
-	if ref == nil || rendersOnlyNoInterruptPackages(ref, bundlerConfig) {
+	if ref == nil || rendersOnlyNoInterruptPackages(ref) {
 		return nil, nil
 	}
 

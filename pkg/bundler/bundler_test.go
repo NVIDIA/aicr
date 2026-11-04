@@ -1828,7 +1828,7 @@ func TestFilterEnabledComponents_ExcludedDriverInstallerWarning(t *testing.T) {
 			}
 			recipeResult.Metadata.GPUDriverState = tt.state
 
-			if _, filterErr := b.filterEnabledComponents(recipeResult); filterErr != nil {
+			if _, filterErr := b.filterEnabledComponents(t.Context(), recipeResult); filterErr != nil {
 				t.Fatalf("filterEnabledComponents() error = %v", filterErr)
 			}
 
@@ -1898,11 +1898,51 @@ func TestFilterEnabledComponents_ExcludedToolkitHardeningWarning(t *testing.T) {
 			cfgOpts: disableSet,
 		},
 		{
-			name: "kept, azure-managed",
+			name: "kept with the RDMA opt-out, azure-managed",
 			refs: []recipe.ComponentRef{gpuOp(false), nwc(hardening, nil)},
 			cfgOpts: []config.Option{config.WithValueOverrides(map[string]map[string]string{
-				"nodewrightcustomizations": {"hostPrepEnabled": "false"},
+				"nodewrightcustomizations": {"accelerator": "generic"},
 			})},
+		},
+		{
+			name: "disabled via --set, toolkit.enabled=false only in the values file",
+			refs: []recipe.ComponentRef{
+				{Name: "gpu-operator", Version: "v25.3.3", Type: "helm",
+					Source: "https://helm.ngc.nvidia.com/nvidia", ValuesFile: "components/gpu-operator/values-aks.yaml"},
+				nwc(hardening, nil),
+			},
+			cfgOpts:     disableSet,
+			wantWarning: "disabled via --set",
+		},
+		{
+			name: "disabled via --set, --set re-enables the operator toolkit",
+			refs: []recipe.ComponentRef{gpuOp(false), nwc(hardening, nil)},
+			cfgOpts: []config.Option{config.WithValueOverrides(map[string]map[string]string{
+				"nodewrightcustomizations": {"enabled": "false"},
+				"gpuoperator":              {"toolkit.enabled": "true"},
+			})},
+		},
+		{
+			name: "disabled via --set, --set-json re-enables the operator toolkit",
+			refs: []recipe.ComponentRef{gpuOp(false), nwc(hardening, nil)},
+			cfgOpts: []config.Option{
+				config.WithValueOverrides(map[string]map[string]string{
+					"nodewrightcustomizations": {"enabled": "false"},
+				}),
+				config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+					{Component: "gpuoperator", Path: "toolkit.enabled", Value: true},
+				}),
+			},
+		},
+		{
+			name: "disabled via --set, gpu-operator values unresolvable",
+			refs: []recipe.ComponentRef{
+				{Name: "gpu-operator", Version: "v25.3.3", Type: "helm",
+					Source: "https://helm.ngc.nvidia.com/nvidia", ValuesFile: "components/gpu-operator/does-not-exist.yaml"},
+				nwc(hardening, nil),
+			},
+			cfgOpts:     disableSet,
+			wantWarning: "could not be resolved",
 		},
 		{
 			name:    "disabled without the hardening manifest",
@@ -1929,7 +1969,7 @@ func TestFilterEnabledComponents_ExcludedToolkitHardeningWarning(t *testing.T) {
 				Criteria:      &recipe.Criteria{Service: "aks", Intent: "training"},
 				ComponentRefs: tt.refs,
 			}
-			if _, filterErr := b.filterEnabledComponents(recipeResult); filterErr != nil {
+			if _, filterErr := b.filterEnabledComponents(t.Context(), recipeResult); filterErr != nil {
 				t.Fatalf("filterEnabledComponents() error = %v", filterErr)
 			}
 
@@ -1940,7 +1980,7 @@ func TestFilterEnabledComponents_ExcludedToolkitHardeningWarning(t *testing.T) {
 				return
 			}
 			joined := strings.Join(b.warnings, "\n")
-			for _, want := range []string{tt.wantWarning, "device-isolation", "hostPrepEnabled=false"} {
+			for _, want := range []string{tt.wantWarning, "device-isolation", "accelerator=generic"} {
 				if !strings.Contains(joined, want) {
 					t.Errorf("warnings = %v, want substring %q", b.warnings, want)
 				}

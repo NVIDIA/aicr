@@ -500,9 +500,9 @@ components:
       - function: CheckWildcardAcceleratedToleration
         # Blocking: the wildcard deadlock requires manual node cordon/reboot to
         # recover, so fail the bundle rather than emit a missable warning.
-        # Skipped when every rendered manifest declares no interrupt (the AKS
-        # toolkit hardening, alone or with hostPrepEnabled=false). A component
-        # disabled via --set renders nothing and is exempt.
+        # Skipped when every manifest the component wires declares no
+        # interrupt (the AKS toolkit hardening alone). A component disabled
+        # via --set renders nothing and is exempt.
         severity: error
         conditions:
           service:

@@ -776,29 +776,34 @@ you supply one, so the deadlock cannot ship silently. AKS recipes without an
 accelerator carry only the toolkit-hardening package, which declares no
 interrupt, so they bundle with the default toleration.
 
-To opt out of the RDMA stack entirely (e.g., on non-InfiniBand SKUs), set
-`hostPrepEnabled=false`. It drops the `tuning` CR (the `nvidia-setup` IB/RDMA
-host prep and its reboot) and keeps the toolkit-hardening CR, so no keyed
-toleration is required:
+To opt out of the RDMA stack entirely (e.g., on non-InfiniBand SKUs), select
+`nvidia-setup`'s accelerator-agnostic AKS profile with
+`accelerator=generic`. In place of the `aks-h100` host prep (IB modules, memlock
+limits, toolkit hardening) the `tuning` CR then applies `aks-any` (the toolkit
+hardening only). The `tuning` CR keeps its interrupts, so the keyed toleration
+is still required:
 
 ```shell
 aicr bundle -r recipe.yaml \
+  --accelerated-node-toleration nvidia.com/gpu:NoSchedule \
   --set networkoperator:enabled=false \
   --set-json 'nfd:worker.config.sources.custom=[]' \
   --set gpuoperator:driver.rdma.useHostMofed=false \
-  --set nodewrightcustomizations:hostPrepEnabled=false \
+  --set nodewrightcustomizations:accelerator=generic \
   -o ./bundles
 ```
 
-`aicr validate` checks nodewright readiness against the recipe, not the
-bundle-time `--set` values, so it would still expect the `tuning` CR. To
-validate a cluster built this way, set `hostPrepEnabled: false` in the recipe
-(an `overrides` entry on the `nodewright-customizations` componentRef, or a
-`--data` overlay) rather than only with `--set`. See "Value-gate awareness" under
-[Chainsaw health checks](../contributor/validator.md#chainsaw-health-checks).
+`generic` is AICR's value for "no accelerator-specific nodewright profile"; the
+bundle passes it to `nvidia-setup` as that package's `any`. Use `generic`, not
+`any`: with `tuningEnabled=true`, `generic` also moves `nvidia-tuned` to its
+`nvidia-generic` profile, and `nvidia-tuned` ships no `any` profile.
 
-Disabling the whole component (`--set nodewrightcustomizations:enabled=false`)
-also removes the toolkit hardening, and `aicr bundle` warns when it does.
+**Opting out of nodewright customizations opts out of the hardening.** The
+toolkit hardening ships in `nvidia-setup` through `nodewright-customizations`,
+so excluding that component (`--set nodewrightcustomizations:enabled=false`, a
+recipe override, or the bundlers filter) removes it, and `aicr bundle` warns
+when it does. If you used `--set nodewrightcustomizations:enabled=false` to skip
+RDMA, switch to `accelerator=generic` above to keep the hardening.
 
 ## References
 

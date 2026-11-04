@@ -71,7 +71,7 @@ Tuning are typically alterations to sysctl, kernel boot parameters and service d
 
 Setup generally is any configuration needed to make AI workloads work in that service that is not already provided by that service. In EKS for example this is kernel and EFA installation. For BCM it is symlinks to support gpu operator.
 
-Every AKS recipe also carries a second NodeWright CR, `toolkit-hardening` (`toolkit-hardening-aks.yaml`), which runs `nvidia-setup` as `aks-any` to set the NVIDIA container toolkit device-isolation keys on every GPU node. It declares no interrupt and keeps rendering when `hostPrepEnabled=false` drops the `tuning` CR. The `aks *` row below is that CR; the AKS accelerator rows describe the `tuning` CR beside it. See [AKS GPU setup](../aks-gpu-setup.md#gpu-driver-setup).
+Every AKS recipe also carries a second NodeWright CR, `toolkit-hardening` (`toolkit-hardening-aks.yaml`), which runs `nvidia-setup` as `aks-any` to set the NVIDIA container toolkit device-isolation keys on every GPU node. It declares no interrupt. The `aks *` row below is that CR; the AKS accelerator rows describe the `tuning` CR beside it. See [AKS GPU setup](../aks-gpu-setup.md#gpu-driver-setup).
 
 The table below is generated from the recipes by `make tuning-docs` — **do not edit it by hand**. **Setup** and **Tuning** are the pinned nodewright package versions applied for each service + accelerator. **Profile** is the tuning profile accelerator when it differs from the selected accelerator (for example, `h200` and `a100` nodes use the `h100` profile), and `-` when identical. In the **Setup** and **Tuning** columns, `-` means no such package is applied for that service + accelerator. `*` means the recipe pins no value for that dimension.
 

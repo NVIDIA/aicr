@@ -20,8 +20,7 @@
 # - Containerd service limits
 # - Sysctl kernel tuning parameters
 {{- $cust := index .Values "nodewright-customizations" }}
-{{- /* hostPrepEnabled=false drops this whole CR (the AKS RDMA opt-out) while the component's other manifests, such as the AKS toolkit hardening, still render. */}}
-{{- if and (ne (toString (index $cust "enabled")) "false") (ne (toString (index $cust "hostPrepEnabled")) "false") }}
+{{- if ne (toString (index $cust "enabled")) "false" }}
 ---
 apiVersion: nodewright.nvidia.com/v1alpha1
 kind: NodeWright
@@ -124,7 +123,8 @@ spec:
         {{- if $cust.service }}
         service: {{ $cust.service }}
         {{- end }}
-        accelerator: {{ $cust.accelerator }}
+        {{- /* nvidia-setup names its accelerator-agnostic combination "any" (aks-any); AICR and nvidia-tuned call that profile "generic". */}}
+        accelerator: {{ if eq (toString $cust.accelerator) "generic" }}any{{ else }}{{ $cust.accelerator }}{{ end }}
       env:
         - name: NVIDIA_SETUP_INSTALL_KERNEL
           value: "true"
@@ -220,7 +220,8 @@ spec:
         {{- if $cust.service }}
         service: {{ $cust.service }}
         {{- end }}
-        accelerator: {{ $cust.accelerator }}
+        {{- /* nvidia-setup names its accelerator-agnostic combination "any" (aks-any); AICR and nvidia-tuned call that profile "generic". */}}
+        accelerator: {{ if eq (toString $cust.accelerator) "generic" }}any{{ else }}{{ $cust.accelerator }}{{ end }}
       env:
         - name: NVIDIA_SETUP_INSTALL_KERNEL
           value: "false"
