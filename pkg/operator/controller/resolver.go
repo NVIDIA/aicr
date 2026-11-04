@@ -186,7 +186,7 @@ func (r *ResolverReconciler) stages() *stages {
 }
 
 func (r *ResolverReconciler) resolve(ctx context.Context, rt *v1alpha1.ClusterRuntime) (*resolution, error) {
-	if err := aicrjob.CheckSupportedVersion(r.Config.AICRVersion); err != nil {
+	if err := aicrjob.CheckSupportedVersion(r.Config.AICRVersion, r.Config.AllowPrereleaseAICR); err != nil {
 		return nil, err
 	}
 	waiting := waitingFor(rt)

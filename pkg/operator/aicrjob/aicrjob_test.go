@@ -375,17 +375,58 @@ func TestObserveOutcomeFailedJobThatExitedZero(t *testing.T) {
 	}
 }
 
+// Version-gated behavior compares major.minor.patch only, so a prerelease is
+// treated as the release it precedes.
+func TestSupportsV11(t *testing.T) {
+	t.Parallel()
+	cases := map[string]bool{
+		"v1.0.0": false, "v1.0.9": false, "v1.0.9-rc.1": false, "1.0.2": false,
+		"v1.1.0-rc.1": true, "v1.1.0-alpha": true, "v1.1.0": true, "1.1.0": true, "v1.2.0-next": true, "v1.3.4": true,
+	}
+	for v, want := range cases {
+		if got := SupportsV11(v); got != want {
+			t.Errorf("SupportsV11(%s) = %t, want %t", v, got, want)
+		}
+	}
+	for v, want := range map[string]string{"v1.3.0-rc.1": "v1.3.0", "1.2.0": "v1.2.0", "v1.1.0+b.1": "v1.1.0", "latest": ""} {
+		if got := Core(v); got != want {
+			t.Errorf("Core(%s) = %q, want %q", v, got, want)
+		}
+	}
+}
+
 func TestVersionGate(t *testing.T) {
 	t.Parallel()
 	for _, v := range []string{"v1.0.0", "v1.1.0", "v1.99.3"} {
-		if err := CheckSupportedVersion(v); err != nil {
-			t.Errorf("CheckSupportedVersion(%s) = %v", v, err)
+		for _, allow := range []bool{false, true} {
+			if err := CheckSupportedVersion(v, allow); err != nil {
+				t.Errorf("CheckSupportedVersion(%s, %t) = %v", v, allow, err)
+			}
 		}
 	}
-	for _, v := range []string{"v0.22.0", "v2.0.0", "v1.1.0-rc.1", "1.0", "", "latest"} {
-		if err := CheckSupportedVersion(v); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
-			t.Errorf("CheckSupportedVersion(%q) = %v, want INVALID_REQUEST", v, err)
+	// A prerelease needs the opt-in, and is in range when its release is.
+	for _, v := range []string{"v1.0.0-rc.1", "v1.1.0-rc1", "v1.3.0-next", "v1.2.0-12-gabcdef0"} {
+		if err := CheckSupportedVersion(v, true); err != nil {
+			t.Errorf("CheckSupportedVersion(%s, true) = %v", v, err)
 		}
+		if err := CheckSupportedVersion(v, false); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest ||
+			!strings.Contains(err.Error(), "aicr.allowPrerelease") {
+
+			t.Errorf("CheckSupportedVersion(%s, false) = %v, want INVALID_REQUEST naming the opt-in", v, err)
+		}
+	}
+	for _, v := range []string{"v0.22.0", "v2.0.0", "v0.9.9-rc.1", "v2.0.0-rc.1", "v1.1.0+build.1", "v1.1", "1.0", "", "latest"} {
+		for _, allow := range []bool{false, true} {
+			if err := CheckSupportedVersion(v, allow); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
+				t.Errorf("CheckSupportedVersion(%q, %t) = %v, want INVALID_REQUEST", v, allow, err)
+			}
+		}
+	}
+	if err := CheckArtifactVersion("v1.3.0-rc.1", "v1.3.0-rc.1"); err != nil {
+		t.Errorf("matching prerelease versions = %v", err)
+	}
+	if err := CheckArtifactVersion("v1.3.0-rc.1", "v1.3.0"); err == nil {
+		t.Error("a release artifact for a declared prerelease passed the gate")
 	}
 	if err := CheckArtifactVersion("v1.0.0", "v1.0.0"); err != nil {
 		t.Errorf("matching versions = %v", err)
