@@ -237,6 +237,7 @@ flag    aicr upgrade-check  --fail-on-error  type=bool default=true required=fal
 flag    aicr upgrade-check  --format,-t  type=string default="table" required=false hidden=false env=
 flag    aicr upgrade-check  --from,-f  type=string default= required=false hidden=false env=
 flag    aicr upgrade-check  --kubeconfig,-k  type=string default= required=false hidden=false env=
+flag    aicr upgrade-check  --operator-namespace  type=string default="aicr-system" required=false hidden=false env=
 flag    aicr upgrade-check  --output,-o  type=string default= required=false hidden=false env=
 flag    aicr upgrade-check  --scan-cluster  type=bool default=false required=false hidden=false env=
 flag    aicr upgrade-check  --to  type=string default= required=false hidden=false env=

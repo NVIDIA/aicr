@@ -103,7 +103,8 @@ func readReleases(ctx context.Context, typed kubernetes.Interface, dyn dynamic.I
 		within.anyName = true
 		got, err = helmReleases(ctx, typed, within)
 	} else {
-		got, err = argoApplications(ctx, dyn, within)
+		// Records carry no version, so the operator's plans are not read.
+		got, err = argoApplications(ctx, dyn, within, "")
 	}
 	if err != nil {
 		return Releases{}, err

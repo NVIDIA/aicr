@@ -795,6 +795,11 @@ func TestReadOptionsValidation(t *testing.T) {
 			code: errors.ErrCodeInvalidRequest,
 		},
 		{
+			name: "operator namespace that is not a namespace name",
+			opts: Options{Deployer: DeployerArgoCD, Components: []Component{fixtureGPUOperator}, OperatorNamespace: "AICR_System"},
+			code: errors.ErrCodeInvalidRequest,
+		},
+		{
 			name: "unknown deployer",
 			opts: Options{Deployer: "kustomize", Components: []Component{fixtureGPUOperator}},
 			code: errors.ErrCodeInvalidRequest,
