@@ -333,7 +333,9 @@ without either a configured StorageClass or a cluster default fails
 validation.
 `inference-routing-mode` resolves from the recipe only, defaulting to
 `dynamo-router`; set `gateway-epp` to validate the GAIE/EPP path through the
-AICR-managed inference gateway.
+recipe's inference gateway (agentgateway by default). A recipe whose
+components include no inference gateway fails a `gateway-epp` run at once
+rather than benchmarking a Gateway it does not ship.
 
 ### NCCL benchmark profile constraint
 

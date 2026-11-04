@@ -264,6 +264,93 @@ func TestCollectCNCFEvidence_RelativePaths(t *testing.T) {
 	}
 }
 
+// TestCollectCNCFEvidence_ThreadsInferenceGateway runs the real collector
+// script with a stub kubectl and reads the gateway section's verdict to prove
+// which gateway option CollectCNCFEvidence passed: the declared Gateway's
+// name, namespace and class for a recipe that declares one, the no-gateway
+// marker for a recipe that declares none, and neither for a standalone run.
+func TestCollectCNCFEvidence_ThreadsInferenceGateway(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not on PATH")
+	}
+
+	// The stub answers a declared-Gateway lookup with a class other than the
+	// declared one, which fails the section with a verdict naming all three
+	// threaded values; cluster-wide discovery finds nothing, and every other
+	// call succeeds with no output.
+	stubDir := t.TempDir()
+	stub := "#!/bin/sh\ncase \" $* \" in\n  *' gateways -A '*) ;;\n  *gatewayClassName*) echo 'edge-system other-class' ;;\nesac\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(stubDir, "kubectl"), []byte(stub), 0o700); err != nil { //nolint:gosec // stub must be executable
+		t.Fatalf("write kubectl stub: %v", err)
+	}
+	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	client, err := NewClient(WithRecipeSource(EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	recipePath := filepath.Join(t.TempDir(), "recipe.yaml")
+	recipeYAML := "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec:\n  criteria:\n" +
+		"    service: eks\n    accelerator: h100\n    intent: training\n    os: ubuntu\n"
+	if err = os.WriteFile(recipePath, []byte(recipeYAML), 0o600); err != nil {
+		t.Fatalf("write recipe: %v", err)
+	}
+	noGateway, err := client.LoadRecipe(context.Background(), recipePath, "")
+	if err != nil {
+		t.Fatalf("LoadRecipe: %v", err)
+	}
+	declared, err := client.LoadRecipe(context.Background(), recipePath, "")
+	if err != nil {
+		t.Fatalf("LoadRecipe: %v", err)
+	}
+	declared.internal.ComponentRefs = append(declared.internal.ComponentRefs,
+		recipe.ComponentRef{Name: "edge-gateway", Namespace: "edge-system", Overrides: map[string]any{
+			recipe.InferenceGatewayOverrideKey: map[string]any{"gatewayClass": "edge-class", "gateway": "pool-vip"},
+		}})
+
+	tests := []struct {
+		name        string
+		rec         *RecipeResult
+		wantVerdict string
+		wantErr     bool
+	}{
+		{
+			name: "declared gateway reaches the section", rec: declared,
+			wantVerdict: "**Result: FAIL** — Gateway `edge-system/pool-vip` has class `other-class`; the recipe declares `edge-class`.",
+			wantErr:     true,
+		},
+		{
+			name: "recipe without a gateway skips without discovery", rec: noGateway,
+			wantVerdict: "**Result: SKIP (prerequisite absent)** — the recipe declares no inference gateway component.",
+		},
+		{
+			name: "standalone run discovers by name", rec: nil,
+			wantVerdict: "**Result: SKIP (prerequisite absent)** — no Gateway named `inference-gateway` is installed.",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			err := client.CollectCNCFEvidence(context.Background(), tt.rec, CNCFCollectOptions{Dir: dir, Features: []string{"gateway"}})
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("CollectCNCFEvidence: error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				requireCode(t, err, aicrerrors.ErrCodeInternal)
+			}
+			evidence, readErr := os.ReadFile(filepath.Join(dir, "inference-gateway.md"))
+			if readErr != nil {
+				t.Fatalf("read gateway evidence: %v", readErr)
+			}
+			if !strings.Contains(string(evidence), tt.wantVerdict) {
+				t.Errorf("gateway evidence lacks %q:\n%s", tt.wantVerdict, evidence)
+			}
+		})
+	}
+}
+
 func TestMergeReports(t *testing.T) {
 	t.Parallel()
 

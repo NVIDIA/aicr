@@ -201,29 +201,39 @@ func TestWaitForHTTPRouteAccepted_DecidedDuringWatch(t *testing.T) {
 }
 
 // TestWaitForHTTPRouteAccepted_WatchClosed covers an apiserver closing the
-// watch early: the route is re-read, and an undecided route still proceeds.
+// watch early: the route is re-read, a verdict written meanwhile is honored,
+// and an undecided route still proceeds.
 func TestWaitForHTTPRouteAccepted_WatchClosed(t *testing.T) {
 	for _, tt := range []struct {
-		name    string
-		route   *unstructured.Unstructured
-		wantErr bool
+		name string
+		// afterWatch, when set, replaces the route once the watch has been
+		// requested, so the initial read cannot have seen it and only the
+		// re-read can.
+		afterWatch *unstructured.Unstructured
+		wantErr    bool
 	}{
-		{"undecided after re-read proceeds", httpRouteObject("", ""), false},
+		{"undecided after re-read proceeds", nil, false},
 		{"rejection seen on re-read fails", httpRouteObject("False", "NotAllowedByListeners"), true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			dyn := newRouteClient(t, httpRouteObject("", ""))
+			watched := false
 			dyn.PrependWatchReactor("httproutes", func(k8stesting.Action) (bool, watch.Interface, error) {
+				watched = true
+				if tt.afterWatch != nil {
+					if err := dyn.Tracker().Update(httpRouteGVR, tt.afterWatch, routeTestNamespace); err != nil {
+						return false, nil, err
+					}
+				}
 				w := watch.NewFake()
 				w.Stop()
 				return true, w, nil
 			})
-			// The re-read must see the route as it is after the watch closed.
-			if err := dyn.Tracker().Update(httpRouteGVR, tt.route, routeTestNamespace); err != nil {
-				t.Fatalf("update HTTPRoute: %v", err)
-			}
 			vctx := &validators.Context{Ctx: context.Background(), DynamicClient: dyn}
 			err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, routeTestGatewayNS, routeTestGateway, 5*time.Second)
+			if !watched {
+				t.Fatal("the route was decided before the watch; the re-read branch did not run")
+			}
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}

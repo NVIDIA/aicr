@@ -1704,8 +1704,7 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 
 	templateData := inferenceTemplateData(config)
 	if config.routingMode == inferenceRoutingModeGatewayEPP {
-		templateData["INFERENCE_GATEWAY_NAME"] = gatewayProfile.GatewayName
-		templateData["INFERENCE_GATEWAY_NAMESPACE"] = gatewayProfile.Namespace
+		setInferenceGatewayTemplateData(templateData, gatewayProfile)
 	}
 
 	// DRA wiring mode: apply the ResourceClaimTemplate the worker pods bind
@@ -1767,6 +1766,13 @@ func dynamoDeploymentTemplate(mode inferenceRoutingMode) string {
 
 func inferenceHTTPRouteName() string {
 	return inferenceDeploymentName + "-route"
+}
+
+// setInferenceGatewayTemplateData fills the placeholders the gateway-epp
+// HTTPRoute template renders its parentRef from.
+func setInferenceGatewayTemplateData(templateData map[string]string, profile validators.InferenceGatewayProfile) {
+	templateData["INFERENCE_GATEWAY_NAME"] = profile.GatewayName
+	templateData["INFERENCE_GATEWAY_NAMESPACE"] = profile.Namespace
 }
 
 // applyWorkerClaimTemplate creates (or updates) the DRA ResourceClaimTemplate

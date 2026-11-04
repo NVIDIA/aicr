@@ -308,7 +308,10 @@ component has no registry default and must set `namespace` on its ref). The key
 is merged into the component's values like any other override, so a chart with
 a strict values schema should carry the declaration on a manifest-only
 companion ref (where the Gateway object usually lives) rather than on the
-chart's ref.
+chart's ref. agentgateway is the exception: it is recognized by its component
+name, so a companion ref carrying a declaration beside it counts as a second
+gateway and fails the check. Re-pointing agentgateway at another Gateway name
+or data plane goes on its own chart ref.
 
 `dataPlane` names how the validators confirm the data plane is serving.
 `service-endpoints` is for a controller that provisions the proxy Service in
@@ -348,7 +351,15 @@ and class to the evidence collector; a recipe that declares no inference
 gateway makes the section report the prerequisite absent, as the conformance
 check skips the same recipe, rather than certify a Gateway the recipe does not
 ship. Only a standalone collector run with no recipe discovers the Gateway
-named `inference-gateway`.
+named `inference-gateway`, across every namespace. The section's verdicts
+follow from that. With a recipe, a declared Gateway that is missing or a
+cluster that does not serve the Gateway API is `FAIL` (standalone, both are
+`SKIP`), a lookup the cluster denies is `FAIL` in either mode, and a Gateway
+programmed by a class other than the declared one is `FAIL`;
+`--cncf-submission` then exits non-zero. Standalone, a cluster with no Gateway
+of that name is `SKIP`, and more than one Gateway of that name is `FAIL`.
+`PASS` requires the GatewayClass `Accepted`, the Gateway `Programmed` and the
+InferencePool CRD `Established`.
 
 ## Precedence rules
 

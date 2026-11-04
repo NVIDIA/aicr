@@ -455,6 +455,13 @@ func TestValidateGatewayAddressDataPlane(t *testing.T) {
 			listeners: []any{map[string]any{"name": "http", "attachedRoutes": int64(0)}},
 			addresses: addr,
 		},
+		{
+			// Unknown is a controller still reconciling; the check runs once,
+			// so only an explicit False fails it.
+			name:      "listener with Programmed=Unknown is tolerated",
+			listeners: []any{programmedListener("http", "True"), programmedListener("https", "Unknown")},
+			addresses: addr,
+		},
 		{name: "no listeners", addresses: addr, wantErr: "no listeners"},
 		{name: "no addresses", listeners: ok, wantErr: "no status.addresses"},
 		{

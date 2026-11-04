@@ -424,18 +424,28 @@ func resolveConformanceVersion(opts RenderCNCFEvidenceOptions) (cncf.Version, er
 // their results under opts.Dir. It runs for up to
 // defaults.CNCFSubmissionTimeout.
 //
-// rec is optional. When non-nil, it must come from this Client, and the GPU
+// rec is optional. When non-nil, it must come from this Client. The GPU
 // allocation policy it configures selects the mechanism the dra-support and
-// secure-access sections exercise. A policy that cannot be resolved fails
-// the call rather than collecting evidence for the wrong mechanism. When
-// nil, the collector detects the mechanism from cluster capabilities.
+// secure-access sections exercise, and the inference gateway component it
+// declares (agentgateway by default; see
+// validatorv1.ResolveInferenceGatewayProfile) is the Gateway the
+// inference-gateway section collects evidence for; a recipe that declares no
+// gateway makes that section report the prerequisite absent rather than
+// discover a Gateway by name. A policy or gateway declaration that cannot be
+// resolved fails the call rather than collecting evidence for the wrong
+// mechanism or Gateway. The gateway is resolved only when opts.Features
+// selects the inference-gateway section, which the default empty list does.
+// When rec is nil, the collector detects the mechanism from cluster
+// capabilities and discovers the Gateway named inference-gateway.
 //
 // A real run needs bash and kubectl on PATH.
 //
 // Errors:
 //   - ErrCodeInvalidRequest when the Client or ctx is nil, the Client is
-//     closed, opts.Dir is empty, a feature name is unknown, or rec is
-//     unresolved or owned by another Client.
+//     closed, opts.Dir is empty, a feature name is unknown, rec is
+//     unresolved or owned by another Client, or rec's inference gateway
+//     declaration cannot be resolved (malformed, a near-miss override key on
+//     an enabled component, or more than one enabled gateway).
 //   - ErrCodeUnavailable when bash or kubectl is not on PATH.
 //   - ErrCodeTimeout when collection exceeds its deadline.
 //   - ErrCodeCanceled when ctx is canceled during policy resolution.

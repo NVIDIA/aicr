@@ -41,9 +41,12 @@ var gatewayGVR = schema.GroupVersionResource{
 	Group: apiGroupGateway, Version: "v1", Resource: "gateways",
 }
 
-// conditionStatusTrue is metav1.ConditionTrue as the string the unstructured
-// condition reads compare against.
-const conditionStatusTrue = string(metav1.ConditionTrue)
+// The metav1 condition statuses as the strings the unstructured condition
+// reads compare against.
+const (
+	conditionStatusTrue  = string(metav1.ConditionTrue)
+	conditionStatusFalse = string(metav1.ConditionFalse)
+)
 
 type gatewayDataPlaneReport struct {
 	ListenerCount         int
@@ -567,15 +570,14 @@ func validateGatewayDataPlane(ctx *validators.Context, profile *validators.Infer
 	return report, nil
 }
 
-// validateGatewayAddressDataPlane is the readiness probe for a gateway whose
-// data plane is not a Kubernetes workload: the Gateway must report at least
-// one listener and one status address, and no listener may be explicitly
-// not programmed. A listener that reports no Programmed condition at all is
-// tolerated, since not every implementation publishes per-listener conditions.
 // validateGatewayAddressDataPlane is the hard requirement for a data plane
-// observed through the Gateway object: at least one listener in status, none
-// explicitly unprogrammed, and at least one status address. The counts the
-// report carries are read by the caller for both probes.
+// observed through the Gateway object, the probe for one that is not a
+// Kubernetes workload: at least one listener in status, at least one status
+// address, and no listener with Programmed=False. A listener whose Programmed
+// condition is absent or Unknown is tolerated: not every implementation
+// publishes per-listener conditions, and the check runs once with no retry,
+// so a controller still reconciling must not fail it. The counts the caller
+// reports for both probes are taken from the same status.
 func validateGatewayAddressDataPlane(gw *unstructured.Unstructured, profile *validators.InferenceGatewayProfile) error {
 	listeners, _, _ := unstructured.NestedSlice(gw.Object, "status", "listeners")
 	if len(listeners) == 0 {
@@ -596,7 +598,7 @@ func validateGatewayAddressDataPlane(gw *unstructured.Unstructured, profile *val
 			}
 			typ, _, _ := unstructured.NestedString(cMap, "type")
 			status, _, _ := unstructured.NestedString(cMap, "status")
-			if typ == "Programmed" && status != conditionStatusTrue {
+			if typ == "Programmed" && status == conditionStatusFalse {
 				reason, _, _ := unstructured.NestedString(cMap, "reason")
 				return errors.New(errors.ErrCodeInternal,
 					fmt.Sprintf("Gateway %s/%s listener %q is not programmed: status=%s reason=%s",

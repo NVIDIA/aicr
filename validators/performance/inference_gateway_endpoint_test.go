@@ -242,13 +242,13 @@ func TestResolveGatewayEndpoint_ServiceProbe(t *testing.T) {
 }
 
 // TestHTTPRouteTemplateAttachesToProfileGateway pins that the gateway-epp
-// HTTPRoute's parentRef is rendered from the profile and that no placeholder
-// survives rendering (the renderer is a plain string replacement).
+// HTTPRoute's parentRef is rendered from the profile through the same fill
+// deployInferenceWorkload applies, and that no placeholder survives rendering
+// in the parentRef or the name (the renderer is a plain string replacement).
 func TestHTTPRouteTemplateAttachesToProfileGateway(t *testing.T) {
 	cfg := &inferenceWorkloadConfig{namespace: "bench", model: "m", routerMode: "direct", gpuCount: 1}
 	data := inferenceTemplateData(cfg)
-	data["INFERENCE_GATEWAY_NAME"] = "edge-gateway"
-	data["INFERENCE_GATEWAY_NAMESPACE"] = "edge-system"
+	setInferenceGatewayTemplateData(data, validators.InferenceGatewayProfile{GatewayName: "edge-gateway", Namespace: "edge-system"})
 	obj, err := parseYAMLTemplate(filepath.Join("testdata", "inference", "http-route-gateway-epp.yaml"), data)
 	if err != nil {
 		t.Fatalf("parseYAMLTemplate: %v", err)
@@ -260,6 +260,11 @@ func TestHTTPRouteTemplateAttachesToProfileGateway(t *testing.T) {
 	ref, _ := refs[0].(map[string]any)
 	if ref["name"] != "edge-gateway" || ref["namespace"] != "edge-system" {
 		t.Errorf("parentRef = %v, want edge-system/edge-gateway", ref)
+	}
+	for _, field := range []string{"name", "namespace"} {
+		if raw, _ := ref[field].(string); strings.Contains(raw, "${") {
+			t.Errorf("unrendered placeholder in parentRef.%s %q", field, raw)
+		}
 	}
 	if raw, _, _ := unstructured.NestedString(obj.Object, "metadata", "name"); strings.Contains(raw, "${") {
 		t.Errorf("unrendered placeholder in metadata.name %q", raw)
