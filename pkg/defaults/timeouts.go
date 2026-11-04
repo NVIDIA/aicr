@@ -675,33 +675,79 @@ const (
 	SlurmAccountingRecordPollInterval = 5 * time.Second
 )
 
-// AI service metrics conformance validation.
+// AI service metrics conformance validation (CNCF ai_service_metrics): a CPU
+// stub workload exposes a request counter, the check configures the recipe's
+// Prometheus to scrape it, sends a fixed number of requests and requires the
+// collected counter to rise by exactly that number.
 const (
-	// AIServiceMetricsWaitTimeout is the maximum time to wait for GPU metrics
-	// to appear in Prometheus. DCGM exporter may not have scraped yet when
-	// the validator runs, especially on fresh deployments.
-	AIServiceMetricsWaitTimeout = 2 * time.Minute
+	// AIServiceMetricsWorkloadReadyTimeout bounds the stub workload's
+	// readiness (image pull plus readiness probe).
+	AIServiceMetricsWorkloadReadyTimeout = 3 * time.Minute
 
-	// AIServiceMetricsPollInterval is the polling interval between Prometheus
-	// queries when waiting for GPU metric time series to appear.
+	// AIServiceMetricsCollectionTimeout bounds each wait for the monitoring
+	// system to collect the stub's series: once for the baseline before
+	// traffic and once for the raised counter after it. Covers several
+	// AIServiceMetricsScrapeInterval periods plus ingestion delay.
+	AIServiceMetricsCollectionTimeout = 3 * time.Minute
+
+	// AIServiceMetricsPollInterval is the interval between Prometheus
+	// queries while waiting for a collection.
 	AIServiceMetricsPollInterval = 10 * time.Second
+
+	// AIServiceMetricsScrapeInterval is the scrape interval the check sets
+	// on the ServiceMonitor it creates for its stub workload.
+	AIServiceMetricsScrapeInterval = 15 * time.Second
+
+	// AIServiceMetricsRequestCount is the exact number of requests the check
+	// sends through the stub's Service; the collected counter must rise by
+	// exactly this many.
+	AIServiceMetricsRequestCount = 10
 )
 
-// HPA behavioral test timeouts for conformance validation.
+// HPA behavioral test timeouts (CNCF pod_autoscaling): a Deployment of
+// accelerator pods serving a per-pod gauge is scaled by an HPA on that gauge
+// through the custom metrics API, in baseline, negative-control, scale-up and
+// scale-down phases.
 const (
-	// HPAScaleTimeout is the timeout for waiting for HPA to report scaling intent.
-	// The HPA needs time to read metrics and compute desired replicas.
+	// HPAWorkloadReadyTimeout bounds the baseline accelerator pod becoming
+	// Running and Ready (image pull, device injection, readiness probe).
+	HPAWorkloadReadyTimeout = 3 * time.Minute
+
+	// HPAMetricTimeout bounds each wait for a metric change to be reported by
+	// the custom metrics API for every expected pod (kubelet ConfigMap
+	// propagation, a scrape, and the adapter's query), and the HPA's first
+	// reconcile on the metric.
+	HPAMetricTimeout = 3 * time.Minute
+
+	// HPAScaleTimeout bounds the HPA deciding on the raised metric and, after
+	// it has, the new accelerator pods becoming Running and Ready.
 	HPAScaleTimeout = 3 * time.Minute
 
-	// HPAPollInterval is the interval for polling HPA status during behavioral tests.
-	HPAPollInterval = 10 * time.Second
+	// HPAScaleDownTimeout bounds the scale-down after the lowered metric is
+	// reported, including the HPAScaleDownStabilization window and the HPA
+	// controller's sync period.
+	HPAScaleDownTimeout = 4 * time.Minute
 
-	// MetricsAPIWarmupTimeout bounds the retry while the aggregated metrics APIs
-	// (custom/external.metrics.k8s.io) warm up: prometheus-adapter registers its
-	// APIServices before its first Prometheus relist populates metric data, so a
-	// single-shot GET right after the deployment phase can race that window. Kept
-	// short so the pod-autoscaling metric-API steps plus the HPA behavioral test
-	// stay within the validator's catalog timeout.
+	// HPAScaleDownStabilization is the scale-down stabilization window set on
+	// the test HPA (behavior.scaleDown.stabilizationWindowSeconds).
+	HPAScaleDownStabilization = time.Minute
+
+	// HPANegativeControlWindow is how long the HPA must keep deciding on one
+	// replica while the metric is below target: several 15s sync periods.
+	HPANegativeControlWindow = time.Minute
+
+	// HPAPollInterval is the interval for observing the HPA, the Deployment,
+	// its pods and the custom metrics API during the behavioral test.
+	HPAPollInterval = 5 * time.Second
+
+	// HPAScrapeInterval is the scrape interval the check sets on the
+	// PodMonitor it creates for its metric-serving pods.
+	HPAScrapeInterval = 15 * time.Second
+
+	// MetricsAPIWarmupTimeout bounds the retry while the aggregated custom
+	// metrics API warms up: prometheus-adapter registers its APIService
+	// before it is available, so a single-shot discovery right after the
+	// deployment phase can race that window.
 	MetricsAPIWarmupTimeout = 60 * time.Second
 )
 
@@ -899,10 +945,6 @@ const (
 
 // Deployment and pod scheduling test timeouts for conformance validation.
 const (
-	// DeploymentScaleTimeout is the timeout for waiting for Deployment controller
-	// to observe and act on HPA scale-up by increasing replica count.
-	DeploymentScaleTimeout = 2 * time.Minute
-
 	// PodScheduleTimeout is the timeout for waiting for test pods to be scheduled
 	// on Karpenter-provisioned nodes after the HPA scales up.
 	PodScheduleTimeout = 2 * time.Minute
@@ -1412,10 +1454,6 @@ const (
 	// AutoscalerMaxEvents is the maximum number of autoscaler events
 	// to capture when collecting cluster autoscaler evidence.
 	AutoscalerMaxEvents = 10
-
-	// MetricsDisplayLimit is the maximum number of custom metrics
-	// resources to display in AI service metrics evidence.
-	MetricsDisplayLimit = 20
 )
 
 // Well-known Kubernetes resource names shared across validators.

@@ -17,142 +17,490 @@ package main
 import (
 	"context"
 	"encoding/json"
-	stderrors "errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/recipe"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
-	"k8s.io/client-go/kubernetes/fake"
+	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
-// promResponse builds a Prometheus API JSON response with the given result count.
-func promResponse(resultCount int) []byte {
+// promVector renders an instant-vector response with the given samples.
+func promVector(values ...float64) []byte {
 	type result struct {
 		Metric map[string]string `json:"metric"`
 		Value  []any             `json:"value"`
 	}
-	resp := struct {
-		Status string `json:"status"`
-		Data   struct {
-			ResultType string   `json:"resultType"`
-			Result     []result `json:"result"`
-		} `json:"data"`
-	}{Status: "success"}
-	resp.Data.ResultType = "vector"
-	for i := range resultCount {
-		resp.Data.Result = append(resp.Data.Result, result{
-			Metric: map[string]string{"gpu": fmt.Sprintf("%d", i)},
-			Value:  []any{1234567890.0, "42"},
-		})
+	resp := map[string]any{"status": "success"}
+	results := make([]result, 0, len(values))
+	for _, v := range values {
+		results = append(results, result{Metric: map[string]string{}, Value: []any{1700000000.0, fmt.Sprintf("%v", v)}})
 	}
+	resp["data"] = map[string]any{"resultType": "vector", "result": results}
 	b, _ := json.Marshal(resp)
 	return b
 }
 
-func TestCheckAIServiceMetrics_RetryThenSuccess(t *testing.T) {
+func TestParsePromSingleSample(t *testing.T) {
 	t.Parallel()
-	var calls atomic.Int32
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		n := calls.Add(1)
-		if n <= 2 {
-			// First two calls: empty results (DCGM not scraped yet).
-			w.Write(promResponse(0))
-			return
-		}
-		// Third call: metrics available.
-		w.Write(promResponse(1))
-	}))
-	defer srv.Close()
-
-	ctx := &validators.Context{
-		Ctx:       context.Background(),
-		Clientset: fake.NewClientset(),
+	tests := []struct {
+		name      string
+		body      []byte
+		wantValue float64
+		wantFound bool
+		wantErr   string
+	}{
+		{name: "one sample", body: promVector(42), wantValue: 42, wantFound: true},
+		{name: "empty vector is not found", body: promVector()},
+		{name: "two samples is ambiguous", body: promVector(1, 2), wantErr: "at most one sample"},
+		{name: "query error", body: []byte(`{"status":"error","errorType":"bad_data","error":"parse error"}`), wantErr: "bad_data: parse error"},
+		{name: "matrix result", body: []byte(`{"status":"success","data":{"resultType":"matrix","result":[]}}`), wantErr: "instant vector"},
+		{name: "garbage", body: []byte("nope"), wantErr: "decode"},
 	}
-
-	err := checkAIServiceMetricsWithURL(ctx, srv.URL)
-	// The custom metrics API call will fail (fake clientset), but we only care
-	// that the retry loop succeeded — the error should NOT be about Prometheus
-	// being unreachable or metrics not found.
-	if err != nil && strings.Contains(err.Error(), "DCGM_FI_DEV_GPU_UTIL") {
-		t.Fatalf("retry loop should have found metrics, got: %v", err)
-	}
-	if err != nil && strings.Contains(err.Error(), "unreachable") {
-		t.Fatalf("should not report Prometheus unreachable, got: %v", err)
-	}
-	if got := calls.Load(); got < 3 {
-		t.Errorf("expected at least 3 Prometheus calls (2 empty + 1 success), got %d", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			v, found, err := parsePromSingleSample(tt.body)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error %v", err)
+			}
+			if found != tt.wantFound || v != tt.wantValue {
+				t.Errorf("got (%v, %t), want (%v, %t)", v, found, tt.wantValue, tt.wantFound)
+			}
+		})
 	}
 }
 
-func TestCheckAIServiceMetrics_TimeoutExpiry(t *testing.T) {
+// TestEvaluateCounterIncrease pins the exact-count rule: baseline plus the
+// requests sent passes, above fails at once, below keeps waiting, and a
+// gauge passes on any value.
+func TestEvaluateCounterIncrease(t *testing.T) {
 	t.Parallel()
-
-	// Always return empty results so the retry loop times out.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Write(promResponse(0))
-	}))
-	defer srv.Close()
-
-	ctx := &validators.Context{
-		Ctx:       context.Background(),
-		Clientset: fake.NewClientset(),
+	tests := []struct {
+		name     string
+		counter  bool
+		baseline float64
+		value    float64
+		wantOK   bool
+		wantErr  string
+		wantText string
+	}{
+		{name: "exact increase passes", counter: true, baseline: 5, value: 15, wantOK: true, wantText: "ok (15 = baseline 5 + 10)"},
+		{name: "not yet collected keeps waiting", counter: true, baseline: 5, value: 9, wantText: "got 9, want 15"},
+		{name: "above baseline plus N fails", counter: true, baseline: 5, value: 16, wantErr: "extra requests reached the workload"},
+		{name: "below baseline keeps waiting and names a reset", counter: true, baseline: 5, value: 2, wantText: "below baseline 5"},
+		{name: "gauge passes on any value", counter: false, baseline: 0, value: 3, wantOK: true, wantText: "ok (3)"},
 	}
-
-	// Use a very short timeout by canceling the parent context quickly.
-	shortCtx, cancel := context.WithTimeout(context.Background(), 1)
-	defer cancel()
-	ctx.Ctx = shortCtx
-
-	err := checkAIServiceMetricsWithURL(ctx, srv.URL)
-	if err == nil {
-		t.Fatal("expected error on timeout, got nil")
-	}
-	// Should be ErrCodeNotFound (metrics wait timeout) or ErrCodeTimeout (parent canceled),
-	// NOT ErrCodeUnavailable (which would mean misclassification as connectivity failure).
-	var se *errors.StructuredError
-	if stderrors.As(err, &se) && se.Code == errors.ErrCodeUnavailable {
-		t.Fatalf("timeout should not be classified as connectivity failure, got: %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			text, ok, err := evaluateCounterIncrease(tt.counter, tt.baseline, tt.value, 10)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error %v", err)
+			}
+			if ok != tt.wantOK || !strings.Contains(text, tt.wantText) {
+				t.Errorf("got (%q, %t), want (containing %q, %t)", text, ok, tt.wantText, tt.wantOK)
+			}
+		})
 	}
 }
 
-func TestCheckAIServiceMetrics_ParentContextCanceled(t *testing.T) {
+func TestCheckAIServiceMetricsPrerequisites(t *testing.T) {
 	t.Parallel()
+	t.Run("nil clientset", func(t *testing.T) {
+		t.Parallel()
+		err := CheckAIServiceMetrics(&validators.Context{Ctx: context.Background()})
+		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	})
+	t.Run("kube-prometheus-stack not in recipe", func(t *testing.T) {
+		t.Parallel()
+		err := CheckAIServiceMetrics(&validators.Context{Ctx: context.Background(), Clientset: k8sfake.NewClientset(),
+			ValidationInput: &v1.ValidationInput{ComponentRefs: []recipe.ComponentRef{{Name: "gpu-operator", Namespace: "gpu-operator"}}}})
+		errorstest.WantReportedCode(t, err, errors.ErrCodeNotFound)
+		if !strings.Contains(err.Error(), prometheusComponentName) {
+			t.Errorf("error %q does not name the missing component", err.Error())
+		}
+	})
+	t.Run("Prometheus Service discovered by label", func(t *testing.T) {
+		t.Parallel()
+		c := k8sfake.NewClientset(&corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "kube-prometheus-prometheus", Namespace: "monitoring", Labels: map[string]string{"self-monitor": "true"}},
+			Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: 9090}}},
+		})
+		got, err := discoverPrometheusURL(&validators.Context{Ctx: context.Background(), Clientset: c,
+			ValidationInput: &v1.ValidationInput{ComponentRefs: []recipe.ComponentRef{{Name: prometheusComponentName, Namespace: "monitoring"}}}})
+		if err != nil || got != "http://kube-prometheus-prometheus.monitoring.svc:9090" {
+			t.Fatalf("got (%q, %v)", got, err)
+		}
+	})
+}
 
-	// Always return empty results.
+// fakeMonitoring stands in for the stub workload and Prometheus: requests the
+// check sends are counted as served, and a scraper goroutine copies served to
+// collected so queries lag the traffic the way a scrape does.
+type fakeMonitoring struct {
+	mu        sync.Mutex
+	served    float64
+	collected float64
+	// scrapes toggles collection: false means the ServiceMonitor was never
+	// selected and every query stays empty.
+	scrapes bool
+	// extraTraffic is foreign traffic that lands once, with the first request
+	// the check sends. Sized at or above the request count, it keeps every
+	// value the scraper can copy strictly above baseline plus N, so the
+	// excess-traffic case cannot pass by chance on a mid-run scrape.
+	extraTraffic float64
+	extraLanded  bool
+	stop         chan struct{}
+}
+
+func newFakeMonitoring(scrapes bool) *fakeMonitoring {
+	f := &fakeMonitoring{scrapes: scrapes, stop: make(chan struct{})}
+	go func() {
+		for {
+			select {
+			case <-f.stop:
+				return
+			case <-time.After(2 * time.Millisecond):
+				f.mu.Lock()
+				f.collected = f.served
+				f.mu.Unlock()
+			}
+		}
+	}()
+	return f
+}
+
+func (f *fakeMonitoring) handler(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("query")
+	if q == "vector(1)" {
+		_, _ = w.Write(promVector(1))
+		return
+	}
+	if !f.scrapes {
+		_, _ = w.Write(promVector())
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	switch {
+	case strings.HasPrefix(q, "max("+aiMetricQueueDepth):
+		_, _ = w.Write(promVector(0))
+	default:
+		_, _ = w.Write(promVector(f.collected))
+	}
+}
+
+func (f *fakeMonitoring) sendRequest(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.served++
+	if f.extraTraffic > 0 && !f.extraLanded {
+		f.served += f.extraTraffic
+		f.extraLanded = true
+	}
+	return nil
+}
+
+// readyOnCreate makes every created pod Running and Ready, standing in for
+// the kubelet.
+func readyOnCreate(c *k8sfake.Clientset) {
+	c.PrependReactor("create", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		pod := action.(k8stesting.CreateAction).GetObject().(*corev1.Pod)
+		pod.Status = corev1.PodStatus{Phase: corev1.PodRunning,
+			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}
+		return false, nil, nil
+	})
+}
+
+// TestAIMetricsScenarioPhases drives the cycle against the fake monitoring
+// and pins which phase produces each verdict: a selected ServiceMonitor with
+// exactly the sent traffic passes; a ServiceMonitor never selected fails at
+// baseline; foreign traffic above baseline plus N fails the increase phase.
+func TestAIMetricsScenarioPhases(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		scrapes   bool
+		extra     float64
+		wantPhase aiMetricsPhase
+		wantCode  errors.ErrorCode
+		wantMsg   string
+	}{
+		{name: "exact count passes", scrapes: true, wantPhase: aiMetricsPhaseIncrease},
+		{name: "ServiceMonitor not selected fails at baseline", scrapes: false, wantPhase: aiMetricsPhaseBaseline,
+			wantCode: errors.ErrCodeNotFound, wantMsg: "workload metrics were not collected"},
+		{name: "traffic above baseline plus N fails the increase", scrapes: true, extra: float64(defaults.AIServiceMetricsRequestCount), wantPhase: aiMetricsPhaseIncrease,
+			wantCode: errors.ErrCodeInternal, wantMsg: "extra requests reached the workload"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			mon := newFakeMonitoring(tt.scrapes)
+			defer close(mon.stop)
+			mon.extraTraffic = tt.extra
+			srv := httptest.NewServer(http.HandlerFunc(mon.handler))
+			defer srv.Close()
+
+			c := k8sfake.NewClientset()
+			readyOnCreate(c)
+			dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+				map[schema.GroupVersionResource]string{serviceMonitorGVR: "ServiceMonitorList"})
+			s, err := newAIMetricsScenario(c, dyn, srv.URL)
+			if err != nil {
+				t.Fatalf("newAIMetricsScenario: %v", err)
+			}
+			s.sendRequest = mon.sendRequest
+			s.pollInterval = 2 * time.Millisecond
+			s.readyTimeout = time.Second
+			s.collectionTimeout = 200 * time.Millisecond
+
+			ctx := &validators.Context{Ctx: context.Background(), Clientset: c}
+			if preErr := s.preflight(ctx.Ctx); preErr != nil {
+				t.Fatalf("preflight: %v", preErr)
+			}
+			err = s.runWithCleanup(ctx)
+			if s.phase != tt.wantPhase {
+				t.Errorf("verdict phase = %s, want %s (err=%v)", s.phase, tt.wantPhase, err)
+			}
+			if tt.wantCode == "" {
+				if err != nil {
+					t.Fatalf("want pass, got %v", err)
+				}
+				mon.mu.Lock()
+				served := mon.served
+				mon.mu.Unlock()
+				if served != float64(s.requestCount) {
+					t.Errorf("served %v requests, want exactly %d", served, s.requestCount)
+				}
+			} else {
+				errorstest.WantReportedCode(t, err, tt.wantCode)
+				if !strings.Contains(err.Error(), tt.wantMsg) || !strings.Contains(err.Error(), "phase "+string(tt.wantPhase)) {
+					t.Errorf("error %q lacks %q or the phase name", err.Error(), tt.wantMsg)
+				}
+			}
+			if _, getErr := c.CoreV1().Namespaces().Get(context.Background(), s.testRun.namespace, metav1.GetOptions{}); !k8serrors.IsNotFound(getErr) {
+				t.Errorf("namespace %s not deleted after the run: %v", s.testRun.namespace, getErr)
+			}
+			if _, getErr := dyn.Resource(serviceMonitorGVR).Namespace(s.testRun.namespace).Get(context.Background(), aiMetricsWorkloadName, metav1.GetOptions{}); !k8serrors.IsNotFound(getErr) {
+				t.Errorf("ServiceMonitor not deleted after the run: %v", getErr)
+			}
+		})
+	}
+}
+
+// TestWaitForPodReadyReadErrors pins that a transient read failure does not
+// end the readiness wait (the next poll finds the Ready pod), while a
+// definitive API verdict does.
+func TestWaitForPodReadyReadErrors(t *testing.T) {
+	t.Parallel()
+	const ns = "aicr-metrics-ready-unit"
+	tests := []struct {
+		name     string
+		getErr   error
+		once     bool
+		wantCode errors.ErrorCode
+	}{
+		{name: "503 once, then Ready", getErr: k8serrors.NewServiceUnavailable("apiserver draining"), once: true},
+		{name: "Forbidden ends the wait", getErr: k8serrors.NewForbidden(schema.GroupResource{Resource: "pods"}, aiMetricsWorkloadName, nil),
+			wantCode: errors.ErrCodeInternal},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ready := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: aiMetricsWorkloadName, Namespace: ns},
+				Status: corev1.PodStatus{Phase: corev1.PodRunning,
+					Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}},
+			}
+			c := k8sfake.NewClientset(ready)
+			var mu sync.Mutex
+			failed := false
+			c.PrependReactor("get", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				if tt.once && failed {
+					return false, nil, nil
+				}
+				failed = true
+				return true, nil, tt.getErr
+			})
+			pod, err := waitForPodReady(context.Background(), c, ns, aiMetricsWorkloadName, 5*time.Second)
+			if tt.wantCode != "" {
+				errorstest.WantReportedCode(t, err, tt.wantCode)
+				return
+			}
+			if err != nil {
+				t.Fatalf("waitForPodReady: %v", err)
+			}
+			if pod == nil || !podIsReady(pod) {
+				t.Errorf("pod = %+v, want the Ready pod", pod)
+			}
+		})
+	}
+}
+
+// TestCheckAIMetricsWorkloadIntact pins what ends the collection wait: a stub
+// pod that is gone, not Running or restarted is a verdict, as is a definitive
+// API verdict on the read; a read that fails transiently is left for the next
+// poll.
+func TestCheckAIMetricsWorkloadIntact(t *testing.T) {
+	t.Parallel()
+	const ns = "aicr-metrics-unit"
+	stub := func(mutate func(*corev1.Pod)) *corev1.Pod {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: aiMetricsWorkloadName, Namespace: ns},
+			Status: corev1.PodStatus{Phase: corev1.PodRunning,
+				ContainerStatuses: []corev1.ContainerStatus{{Name: aiMetricsWorkloadName}}},
+		}
+		if mutate != nil {
+			mutate(pod)
+		}
+		return pod
+	}
+	tests := []struct {
+		name     string
+		pod      *corev1.Pod
+		getErr   error
+		wantCode errors.ErrorCode
+		wantMsg  string
+	}{
+		{name: "Running pod with no restarts passes", pod: stub(nil)},
+		{name: "pod gone fails", wantCode: errors.ErrCodeNotFound, wantMsg: "metrics stub pod not found"},
+		{
+			name:     "pod not Running fails",
+			pod:      stub(func(p *corev1.Pod) { p.Status.Phase = corev1.PodPending }),
+			wantCode: errors.ErrCodeInternal, wantMsg: "metrics stub pod is Pending",
+		},
+		{
+			name:     "container restart fails",
+			pod:      stub(func(p *corev1.Pod) { p.Status.ContainerStatuses[0].RestartCount = 1 }),
+			wantCode: errors.ErrCodeInternal, wantMsg: "restarted 1 time(s)",
+		},
+		{name: "503 read is left for the next poll", pod: stub(nil), getErr: k8serrors.NewServiceUnavailable("apiserver draining")},
+		{
+			name: "internal error read is left for the next poll", pod: stub(nil),
+			getErr: k8serrors.NewInternalError(errors.New(errors.ErrCodeInternal, "etcd leader changed")),
+		},
+		{name: "throttled read is left for the next poll", pod: stub(nil), getErr: k8serrors.NewTooManyRequests("slow down", 1)},
+		{
+			name: "Forbidden read fails", pod: stub(nil),
+			getErr:   k8serrors.NewForbidden(schema.GroupResource{Resource: "pods"}, aiMetricsWorkloadName, nil),
+			wantCode: errors.ErrCodeInternal, wantMsg: "failed to read metrics stub pod",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := k8sfake.NewClientset()
+			if tt.pod != nil {
+				c = k8sfake.NewClientset(tt.pod)
+			}
+			if tt.getErr != nil {
+				c.PrependReactor("get", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, tt.getErr
+				})
+			}
+			err := checkAIMetricsWorkloadIntact(context.Background(), c, ns)
+			if tt.wantCode == "" {
+				if err != nil {
+					t.Fatalf("want nil (wait continues), got %v", err)
+				}
+				return
+			}
+			errorstest.WantReportedCode(t, err, tt.wantCode)
+			if !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Errorf("error %q lacks %q", err.Error(), tt.wantMsg)
+			}
+		})
+	}
+}
+
+// TestAIMetricsScenarioPreflight pins that an unreachable or non-answering
+// query API is reported as the environment, before anything is created.
+func TestAIMetricsScenarioPreflight(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Write(promResponse(0))
+		_, _ = w.Write(promVector())
 	}))
 	defer srv.Close()
-
-	parentCtx, parentCancel := context.WithCancel(context.Background())
-	// Cancel immediately to simulate upstream shutdown.
-	parentCancel()
-
-	ctx := &validators.Context{
-		Ctx:       parentCtx,
-		Clientset: fake.NewClientset(),
+	s, err := newAIMetricsScenario(k8sfake.NewClientset(), nil, srv.URL)
+	if err != nil {
+		t.Fatalf("newAIMetricsScenario: %v", err)
 	}
+	err = s.preflight(context.Background())
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+	if !strings.Contains(err.Error(), "vector(1)") {
+		t.Errorf("error %q does not describe the preflight", err.Error())
+	}
+	srv.Close()
+	err = s.preflight(context.Background())
+	errorstest.WantReportedCode(t, err, errors.ErrCodeUnavailable)
+}
 
-	err := checkAIServiceMetricsWithURL(ctx, srv.URL)
-	if err == nil {
-		t.Fatal("expected error on parent cancellation, got nil")
+// TestBuildAIMetricsWorkload pins the stub's shape: CPU only, restricted
+// security context, the run id in its environment, and a ServiceMonitor that
+// selects the Service by app label and carries the release label.
+func TestBuildAIMetricsWorkload(t *testing.T) {
+	t.Parallel()
+	pod, svc := buildAIMetricsWorkload("ns", "run123", time.Minute)
+	c := pod.Spec.Containers[0]
+	if _, has := c.Resources.Limits[corev1.ResourceName(resourceNVIDIAGPU)]; has || len(pod.Spec.ResourceClaims) != 0 {
+		t.Error("the stub must not request an accelerator")
 	}
-	var se *errors.StructuredError
-	if !stderrors.As(err, &se) {
-		t.Fatalf("expected StructuredError, got: %T %v", err, err)
+	if pod.Spec.SecurityContext == nil || pod.Spec.SecurityContext.RunAsNonRoot == nil || !*pod.Spec.SecurityContext.RunAsNonRoot {
+		t.Error("the stub must run as non-root")
 	}
-	if se.Code != errors.ErrCodeTimeout && se.Code != errors.ErrCodeUnavailable {
-		// When parent is already canceled, httpGet may fail immediately. The key
-		// assertion is that it does NOT return ErrCodeNotFound with the fixed
-		// wait-time message (which would misattribute the failure).
-		if se.Code == errors.ErrCodeNotFound && strings.Contains(err.Error(), "after 2m0s") {
-			t.Fatalf("parent cancellation should not report as retry timeout: %v", err)
+	var runID string
+	for _, e := range c.Env {
+		if e.Name == "RUN_ID" {
+			runID = e.Value
 		}
+	}
+	if runID != "run123" {
+		t.Errorf("RUN_ID = %q", runID)
+	}
+	if pod.Spec.ActiveDeadlineSeconds == nil || *pod.Spec.ActiveDeadlineSeconds <= 0 {
+		t.Error("the stub needs an activeDeadlineSeconds so a leaked pod ends on its own")
+	}
+	if svc.Spec.Selector[hpaAppLabelKey] != aiMetricsWorkloadName || svc.Spec.Ports[0].Name != aiMetricsPortName {
+		t.Errorf("service = %+v", svc.Spec)
+	}
+	sm := buildAIMetricsServiceMonitor("ns")
+	if sm.GetLabels()[prometheusReleaseLabel] != prometheusComponentName {
+		t.Errorf("ServiceMonitor labels = %v, want %s=%s", sm.GetLabels(), prometheusReleaseLabel, prometheusComponentName)
+	}
+	endpoints, _, _ := unstructured.NestedSlice(sm.Object, "spec", "endpoints")
+	if len(endpoints) != 1 || endpoints[0].(map[string]any)["port"] != aiMetricsPortName {
+		t.Errorf("ServiceMonitor endpoints = %v", endpoints)
 	}
 }

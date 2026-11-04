@@ -208,16 +208,20 @@ validators:
     env: []
   - name: accelerator-metrics
     phase: conformance
-    description: "Verify accelerator metrics from DCGM exporter"
+    description: "Verify the DCGM exporter serves per-device utilization and memory metrics; temperature and power are recorded SHOULD observations"
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
     timeout: 5m
     args: ["accelerator-metrics"]
     env: []
   - name: ai-service-metrics
     phase: conformance
-    description: "Verify AI service metrics via Prometheus"
+    description: "Verify Prometheus discovers a ServiceMonitor-selected CPU stub workload and collects exactly the requests sent to it"
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
-    timeout: 5m
+    # 8m30s shared work budget enforced by the check's workCtx, plus 30s
+    # cleanup and 60s margin; the per-wait caps (stub Ready 3m, each
+    # collection wait 3m) are individual bounds under that budget, not a
+    # sum. See validators/conformance/consts.go.
+    timeout: 10m
     args: ["ai-service-metrics"]
     env: []
     # Best-effort co-location: prefer the same node as Prometheus so the dial
@@ -240,9 +244,15 @@ validators:
     env: []
   - name: pod-autoscaling
     phase: conformance
-    description: "Verify HPA-driven pod autoscaling with GPU metrics"
+    description: "Verify an HPA scales accelerator pods 1 to 2 and back on a per-pod custom metric served through prometheus-adapter, with a one-minute negative control"
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
-    timeout: 10m
+    # 13m30s shared work budget enforced by the check's workCtx, plus 30s
+    # cleanup and 60s margin; the per-wait caps (baseline Ready 3m, each
+    # metric change 3m, 1m negative control, scale-up 3m, scale-down 4m
+    # incl. 60s stabilization) are individual bounds under that budget, not
+    # a sum; a passing run takes 6-9 minutes. See
+    # validators/conformance/consts.go.
+    timeout: 15m
     args: ["pod-autoscaling"]
     env: []
   - name: cluster-autoscaling
