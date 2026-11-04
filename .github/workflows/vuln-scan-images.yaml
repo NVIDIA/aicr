@@ -743,17 +743,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          # All image paths to clean up (org-level packages)
+          # The org-level packages this workflow pushes to. A package's name
+          # is its path under ghcr.io/nvidia, with no org prefix.
           IMAGES=(
-            "nvidia/aicr"
-            "nvidia/aicrd"
-            "nvidia/aicr-validators/deployment"
-            "nvidia/aicr-validators/performance"
-            "nvidia/aicr-validators/conformance"
-            "nvidia/aicr-validators/aiperf-bench"
-            "nvidia/aicr-gate"
-            "nvidia/aicr-operator"
-            "nvidia/aicr-registry"
+            "aicr"
+            "aicrd"
+            "aicr-validators/deployment"
+            "aicr-validators/performance"
+            "aicr-validators/conformance"
+            "aicr-validators/aiperf-bench"
+            "aicr-gate"
+            "aicr-operator"
+            "aicr-registry"
           )
 
           for IMAGE in "${IMAGES[@]}"; do

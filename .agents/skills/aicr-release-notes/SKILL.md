@@ -64,7 +64,9 @@ tools/changelog
 gh release view <previous-tag> --json body --jq '.body'
 
 # AICR Operator facts for the operator block (Step 3), once the release
-# pipeline has published the chart. VERSION is the tag without the leading v.
+# pipeline has published the chart. Set VERSION to the tag without the leading
+# v; an empty --version would read the newest chart instead.
+: "${VERSION:?set VERSION to the release tag without the leading v}"
 helm show values oci://ghcr.io/nvidia/charts/aicr-operator --version "${VERSION}" \
   | yq '{"operator": .operator.image, "registry": .registry.inCluster.image,
          "aicr": .aicr.version, "aicrImage": .aicr.image}'

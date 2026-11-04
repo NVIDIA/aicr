@@ -32,6 +32,7 @@ import (
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/content/oci"
+	"oras.land/oras-go/v2/registry/remote"
 )
 
 // pull writes a published release into dir in the layout a candidate build
@@ -46,12 +47,18 @@ func pull(args []string, out io.Writer) error {
 	chart := fs.String("chart", "aicr-operator", "Chart name.")
 	version := fs.String("version", "latest", "Chart version without the leading v, or latest: the newest stable release, older than -below when set.")
 	below := fs.String("below", "", "With -version latest, a version the release must be older than, such as the release being built.")
-	released := fs.String("released", "", "With -version latest, the comma-separated versions with a published release; others are skipped.")
+	released := fs.String("released", "", "With -version latest, the comma-separated versions with a published release; others are skipped, and an empty list selects none.")
 	dir := fs.String("dir", "dist/published", "Directory to write the release into; it must not exist or be empty.")
 	plainHTTP := fs.Bool("plain-http", false, "Pull over plain HTTP; test registries only.")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	var releasedList *string
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "released" {
+			releasedList = released
+		}
+	})
 	if entries, err := os.ReadDir(*dir); err == nil && len(entries) > 0 {
 		return fmt.Errorf("%s is not empty; remove it first", *dir)
 	}
@@ -65,15 +72,8 @@ func pull(args []string, out io.Writer) error {
 	}
 	tag := *version
 	if tag == "latest" {
-		var tags []string
-		if err = charts.Tags(ctx, "", func(page []string) error {
-			tags = append(tags, page...)
-			return nil
-		}); err != nil {
-			return fmt.Errorf("list %s: %w", ref, err)
-		}
-		if tag, err = latestStable(onlyReleased(tags, *released), *below); err != nil {
-			return fmt.Errorf("%s: %w", ref, err)
+		if tag, err = latestTag(ctx, charts, ref, releasedList, *below); err != nil {
+			return err
 		}
 	}
 
@@ -249,16 +249,35 @@ func pinnedByDigest(ref string) bool {
 	return ok && strings.HasPrefix(digest, "sha256:") && len(digest) == len("sha256:")+64
 }
 
+// latestTag picks the newest stable tag of ref older than below, among the
+// versions released lists when it is non-nil.
+func latestTag(ctx context.Context, charts *remote.Repository, ref string, released *string, below string) (string, error) {
+	var tags []string
+	if err := charts.Tags(ctx, "", func(page []string) error {
+		tags = append(tags, page...)
+		return nil
+	}); err != nil {
+		return "", fmt.Errorf("list %s: %w", ref, err)
+	}
+	if released != nil {
+		tags = onlyReleased(tags, *released)
+	}
+	tag, err := latestStable(tags, below)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", ref, err)
+	}
+	return tag, nil
+}
+
 // onlyReleased keeps the tags released lists, with or without a leading v;
-// an empty list keeps every tag. A release pushes its chart before it attests
+// an empty list keeps none. A release pushes its chart before it attests
 // and publishes it, so a chart tag alone does not mean a finished release.
 func onlyReleased(tags []string, released string) []string {
-	if strings.TrimSpace(released) == "" {
-		return tags
-	}
 	set := map[string]bool{}
 	for _, v := range strings.Split(released, ",") {
-		set[strings.TrimPrefix(strings.TrimSpace(v), "v")] = true
+		if v = strings.TrimPrefix(strings.TrimSpace(v), "v"); v != "" {
+			set[v] = true
+		}
 	}
 	var out []string
 	for _, t := range tags {

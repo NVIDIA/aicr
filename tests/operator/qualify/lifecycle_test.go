@@ -59,6 +59,12 @@ func registryRestart(ctx context.Context, t *testing.T, active string) string {
 		t.Fatal("no Ready registry pod")
 	}
 	claim := registryClaim(ctx, t, before)
+	if err := k8s.Get(ctx, client.ObjectKey{Name: ro.Name}, ro); err != nil {
+		t.Fatal(err)
+	}
+	if ro.Status.Current == nil {
+		t.Fatalf("%s finished its step before the registry pod was deleted", ro.Name)
+	}
 	killPod(ctx, t, before)
 	var after *corev1.Pod
 	waitFor(t, 3*time.Minute, "a replacement registry pod to be Ready", func() bool {

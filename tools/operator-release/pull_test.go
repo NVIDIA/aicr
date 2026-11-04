@@ -237,7 +237,7 @@ func TestOnlyReleased(t *testing.T) {
 		released string
 		want     []string
 	}{
-		{name: "no list keeps every tag", released: "", want: tags},
+		{name: "an empty list keeps nothing", released: "", want: nil},
 		{name: "a release still in progress is skipped", released: "v1.2.0,v1.1.2", want: []string{"1.2.0"}},
 		{name: "with or without the leading v", released: "1.2.0, v1.3.0", want: []string{"1.2.0", "1.3.0"}},
 	}
@@ -291,4 +291,32 @@ func testRegistry(t *testing.T) string {
 	srv := httptest.NewServer(ggcrregistry.New(ggcrregistry.Logger(log.New(io.Discard, "", 0))))
 	t.Cleanup(srv.Close)
 	return strings.TrimPrefix(srv.URL, "http://")
+}
+
+// A -released list that is given but empty, as when no GitHub release is
+// published, selects nothing rather than every chart tag.
+func TestPullLatestRefusesEmptyReleasedList(t *testing.T) {
+	t.Parallel()
+	host := testRegistry(t)
+	src, _ := writeCandidateAICR(t, host+"/nvidia/aicr-operator", []byte("operator-binary"), pinnedAICR)
+	if err := run([]string{"push", "-dir", src, "-chart-registry", host + "/nvidia/charts", "-plain-http"}, io.Discard); err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	charts, err := remote.NewRepository(host + "/nvidia/charts/demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	charts.PlainHTTP = true
+	desc, err := charts.Resolve(t.Context(), "0.1.0-rc.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = charts.Tag(t.Context(), desc, "1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	err = run([]string{"pull", "-chart-registry", host + "/nvidia/charts", "-chart", "demo",
+		"-version", "latest", "-released", "", "-dir", filepath.Join(t.TempDir(), "out"), "-plain-http"}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "no stable release") {
+		t.Fatalf("pull -released \"\" = %v; want no stable release, not the newest chart tag", err)
+	}
 }

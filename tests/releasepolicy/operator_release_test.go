@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -218,5 +219,63 @@ func TestWeeklyScanCoversOperatorImagesPerArch(t *testing.T) {
 	slices.Sort(headers)
 	if want := []string{"aicr-operator amd64", "aicr-operator arm64"}; !slices.Equal(headers, want) {
 		t.Errorf("per-architecture results are %v, want %v", headers, want)
+	}
+}
+
+// The weekly scan's cleanup deletes this run's scan tags from every GHCR
+// package the workflow pushes. A package's name is its path under
+// ghcr.io/nvidia, so a name with an "nvidia/" prefix matches no package, and
+// the step's error guards would hide the miss while scan tags accumulate.
+func TestWeeklyScanCleanupNamesPushedPackages(t *testing.T) {
+	t.Parallel()
+	jobs := mapValue(t, loadYAML(t, ".github/workflows/vuln-scan-images.yaml"), "jobs")
+	matrix := mapValue(t, mapValue(t, mapValue(t, jobs, "scan"), "strategy"), "matrix")
+	pinned := map[string]bool{}
+	include, listed := sliceValue(t, matrix, "include"), sliceValue(t, matrix, "image")
+	images := make([]string, 0, len(include)+len(listed))
+	for _, raw := range include {
+		leg, _ := raw.(map[string]any)
+		if _, ok := leg["tag"]; ok {
+			pinned[fmt.Sprint(leg["image"])] = true
+		}
+		images = append(images, fmt.Sprint(leg["image"]))
+	}
+	for _, raw := range listed {
+		images = append(images, fmt.Sprint(raw))
+	}
+	var want []string
+	for _, image := range images {
+		name, ok := strings.CutPrefix(image, "ghcr.io/nvidia/")
+		if pkg := strings.ReplaceAll(name, "/", "%2F"); ok && !pinned[image] && !slices.Contains(want, pkg) {
+			want = append(want, pkg)
+		}
+	}
+	slices.Sort(want)
+
+	steps := sliceValue(t, mapValue(t, jobs, "cleanup"), "steps")
+	cleanup, ok := steps[stepIndex(steps, "Delete scan images")].(map[string]any)
+	if !ok {
+		t.Fatal("the cleanup step is not a map")
+	}
+	work := t.TempDir()
+	log := filepath.Join(work, "gh.log")
+	if err := os.WriteFile(filepath.Join(work, "gh"), []byte("#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"${GH_LOG}\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", "-c", stringValue(t, cleanup, "run"))
+	cmd.Dir = work
+	cmd.Env = append(os.Environ(), "PATH="+work+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"GH_LOG="+log, "SCAN_TAG=scan-test", "SHA=test")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("cleanup: %v\n%s", err, out)
+	}
+	matches := regexp.MustCompile(`orgs/NVIDIA/packages/container/([^/ ]+)/versions\?`).FindAllStringSubmatch(string(readFileAt(t, log)), -1)
+	got := make([]string, 0, len(matches))
+	for _, m := range matches {
+		got = append(got, m[1])
+	}
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Errorf("cleanup lists versions of packages %v, want the packages the workflow pushes %v", got, want)
 	}
 }
