@@ -192,6 +192,9 @@ func chartMetadata(archive []byte) (map[string]any, error) {
 	return meta, nil
 }
 
+// maxArchiveFileBytes bounds a file archiveFile reads.
+const maxArchiveFileBytes = 1 << 20
+
 // archiveFile reads the chart's top-level file name from a chart archive.
 func archiveFile(archive []byte, name string) ([]byte, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(archive))
@@ -211,7 +214,14 @@ func archiveFile(archive []byte, name string) ([]byte, error) {
 		if file != name || strings.Count(strings.Trim(dir, "/"), "/") != 0 || dir == "" {
 			continue
 		}
-		return io.ReadAll(io.LimitReader(tr, 1<<20))
+		data, err := io.ReadAll(io.LimitReader(tr, maxArchiveFileBytes+1))
+		if err != nil {
+			return nil, fmt.Errorf("read %s from the chart archive: %w", name, err)
+		}
+		if len(data) > maxArchiveFileBytes {
+			return nil, fmt.Errorf("%s in the chart archive is over %d bytes", name, maxArchiveFileBytes)
+		}
+		return data, nil
 	}
 }
 

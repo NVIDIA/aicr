@@ -127,6 +127,8 @@ func TestArchiveFile(t *testing.T) {
 		{name: "a name with a leading ./", files: map[string]string{"./demo/values.yaml": "a: 1"}, want: "a: 1"},
 		{name: "a subchart's file is skipped", files: map[string]string{"demo/charts/sub/values.yaml": "a: 1"}, wantErr: "has no values.yaml"},
 		{name: "a file outside the chart directory is skipped", files: map[string]string{"values.yaml": "a: 1"}, wantErr: "has no values.yaml"},
+		{name: "a file at the limit", files: map[string]string{"demo/values.yaml": strings.Repeat("a", maxArchiveFileBytes)}, want: strings.Repeat("a", maxArchiveFileBytes)},
+		{name: "a file over the limit is refused, not cut short", files: map[string]string{"demo/values.yaml": strings.Repeat("a", maxArchiveFileBytes+1)}, wantErr: "over"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
