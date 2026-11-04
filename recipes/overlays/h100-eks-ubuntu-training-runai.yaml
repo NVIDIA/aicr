@@ -1,0 +1,73 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: h100-eks-ubuntu-training-runai
+
+spec:
+  # PREVIEW: resolves and bundles, and its health check is written, but no
+  # live run has produced evidence yet. Qualification on hardware is tracked
+  # in NVIDIA/aicr#3302 (Phase 1).
+  #
+  # Inherits from h100-eks-ubuntu-training (H100 + EKS + Ubuntu + training
+  # settings) and adds the Run:ai cluster side, registered against a control
+  # plane the user already runs. The control plane is not installed here.
+  # Validation (deployment, performance, conformance) is inherited from
+  # h100-eks-training.
+  base: h100-eks-ubuntu-training
+
+  criteria:
+    service: eks
+    accelerator: h100
+    os: ubuntu
+    intent: training
+    platform: runai
+
+  # Ubuntu OS constraints via mixin (defined once in recipes/mixins/os-ubuntu.yaml)
+  mixins:
+    - os-ubuntu
+
+  # Run:ai 3.0's support matrix covers upstream Kubernetes 1.35 through 1.37,
+  # with EKS following upstream. Tighter than the parent's 1.32.4 floor.
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.35"
+
+  componentRefs:
+    # runai-cluster bundles KAI Scheduler 0.18 through its
+    # kai-resource-management subchart and its operator owns the scheduler's
+    # configuration. It ships the same CRDs and PriorityClasses as AICR's
+    # kai-scheduler, so the two cannot coexist (same shape as ocp.yaml).
+    # Consequence: the gang-scheduling conformance check keys on AICR's
+    # kai-scheduler, which this leaf disables, so it reports Skip until it
+    # learns the Run:ai scheduler (Phase 1.6 of #3302).
+    - name: kai-scheduler
+      type: Helm
+      overrides:
+        enabled: false
+
+    # Per-cluster inputs: the control plane URL and cluster UID are --set at
+    # bundle time; the bootstrap token is declared with --dynamic and written
+    # into cluster-values.yaml at install time. See
+    # components/runai-cluster/values.yaml.
+    - name: runai-cluster
+      type: Helm
+      valuesFile: components/runai-cluster/values.yaml
+      dependencyRefs:
+        - gpu-operator
+        - kube-prometheus-stack
+        - prometheus-operator-crds
+        - cert-manager

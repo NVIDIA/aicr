@@ -239,12 +239,13 @@ func writeLocalHelmFolder(
 	// vendored primary shares this template but renders it from
 	// writeVendoredHelmFolder.
 	installData := struct {
-		Name              string
-		Namespace         string
-		CreateNamespace   bool
-		OwnsCRDs          bool
-		ClusterValuesFile string
-	}{name, c.Namespace, effectiveCreateNamespace, false, clusterValuesFrom}
+		Name                 string
+		Namespace            string
+		CreateNamespace      bool
+		OwnsCRDs             bool
+		ClusterValuesFile    string
+		RequiredDynamicPaths []string
+	}{name, c.Namespace, effectiveCreateNamespace, false, clusterValuesFrom, nil}
 	if err = renderTemplateToFile(localHelmInstallTmpl, installData, folderDir, "install.sh", 0o755); err != nil {
 		return Folder{}, err
 	}
