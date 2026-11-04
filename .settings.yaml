@@ -384,7 +384,8 @@ testing:
 operator:
   # Supported AICR range; the chart and the operator enforce it.
   aicr_version_range: '>=1.0.0, <2.0.0'
-  # AICR release the operator is built and qualified against. Digests resolved
+  # AICR release the operator is built and qualified against outside a
+  # release; a release tag's chart defaults to that tag's own AICR. Digests resolved
   # from ghcr.io on 2026-10-22; v1.1.2 is commit 2bf662b86c21a97b6e79e90035382ea252a44798,
   # v1.1.0 rebuilt with Go 1.27.3 and nothing else changed.
   aicr_version: 'v1.1.2'
