@@ -193,12 +193,14 @@ func TestRolloutRefreshesAStaleComparison(t *testing.T) {
 		t.Fatalf("refreshes at the step start = %d, want 1: nothing written asks Argo CD to compare",
 			engine.refreshed["cert-manager"])
 	}
+	beforeStale := engine.refreshed["cert-manager"]
 	reconcileRollout(t, ctx, r) // observed: ReconcileStale
 	if slices.Contains(engine.order, "Ensure cert-manager") {
 		t.Fatalf("engine calls = %v; an already written step writes nothing", engine.order)
 	}
-	if engine.refreshed["cert-manager"] == 0 {
-		t.Fatal("a step waiting on a stale comparison did not ask Argo CD to compare again")
+	if got := engine.refreshed["cert-manager"]; got != beforeStale+1 {
+		t.Fatalf("refreshes after observing ReconcileStale = %d, want %d: a stale wait asks Argo CD to compare again",
+			got, beforeStale+1)
 	}
 
 	engine.unhealthy["cert-manager"] = "HealthProgressing"
