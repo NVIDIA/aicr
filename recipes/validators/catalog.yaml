@@ -318,8 +318,9 @@ validators:
     timeout: 30m
     args: ["nccl-all-reduce-bw-nvls"]
     env: []
-  # CRE-driven NCCL check. Opt-in only: no embedded overlay references this
-  # check, and shipped EKS H100 training keeps TrainJob nccl-all-reduce-bw.
+  # CRE-driven NCCL check. Only h100-eks-ubuntu-training-kubeflow declares it,
+  # next to the TrainJob nccl-all-reduce-bw it inherits; every other shipped
+  # recipe keeps the TrainJob check alone.
   # The check itself is provider-independent; creQualifiedEntries records the
   # qualified combinations. Qualified on EKS H100 — re-measured on the pinned
   # CRE v0.8.2, live UAT 2026-10-23 (2× p5.48xlarge): 489.70 GB/s vs >= 300,

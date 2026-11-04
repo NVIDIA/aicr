@@ -35,9 +35,18 @@ const nvcreValuesFile = "components/nvcre/values.yaml"
 // image reference no runtime can resolve.
 var sha256DigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
-// TestNVCRERegisteredWithoutOverlay keeps the public CRE chart installable
-// from the registry without making it part of any shipped overlay or mixin.
-func TestNVCRERegisteredWithoutOverlay(t *testing.T) {
+// nvcreAdoptingOverlays lists the shipped overlays that declare the nvcre
+// componentRef, per the ADR-025 stock-adoption amendment. Adding an entry is
+// that amendment's decision, not a test edit: it installs CRDs and
+// cluster-scoped RBAC for every consumer of the overlay.
+var nvcreAdoptingOverlays = []string{
+	"overlays/h100-eks-ubuntu-training-kubeflow.yaml",
+}
+
+// TestNVCRERegisteredAdoptedOnlyByQualifiedOverlays keeps the public CRE chart
+// installable from the registry and confines the nvcre componentRef to the
+// overlays ADR-025 admits, with no mixin carrying it.
+func TestNVCRERegisteredAdoptedOnlyByQualifiedOverlays(t *testing.T) {
 	t.Parallel()
 
 	registry, err := GetComponentRegistry()
@@ -87,9 +96,14 @@ func TestNVCRERegisteredWithoutOverlay(t *testing.T) {
 				return nil
 			}
 			for _, ref := range doc.Spec.ComponentRefs {
-				if ref.Name == "nvcre" {
-					t.Errorf("%s declares componentRef nvcre; CRE must stay opt-in", path)
+				if ref.Name != "nvcre" {
+					continue
 				}
+				if dir == "overlays" && slices.Contains(nvcreAdoptingOverlays, path) {
+					continue
+				}
+				t.Errorf("%s declares componentRef nvcre; only %v may (ADR-025 stock-adoption amendment)",
+					path, nvcreAdoptingOverlays)
 			}
 			return nil
 		})

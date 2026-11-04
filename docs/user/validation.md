@@ -495,7 +495,10 @@ An opt-in pair of Cluster Readiness Engine (CRE) checks runs against public CRE
 (`nvcre.nvidia.com`, [cluster-readiness-engine](https://github.com/NVIDIA/cluster-readiness-engine)).
 Neither check branches on service or accelerator; which combinations are
 qualified is recorded as data. Shipped overlays keep the TrainJob
-`nccl-all-reduce-bw` path, so nothing below runs unless you ask for it.
+`nccl-all-reduce-bw` path. The one exception is
+`h100-eks-ubuntu-training-kubeflow`, which installs `nvcre` and also declares
+`nccl-cre-all-reduce-bw` with `>= 300`, so both NCCL checks run on it. On every
+other overlay, nothing below runs unless you ask for it.
 
 Enabling a CRE check takes two steps and needs both. Add the `nvcre` component
 as described in

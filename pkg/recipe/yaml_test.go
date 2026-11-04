@@ -243,8 +243,32 @@ func TestAllValuesFileReferencesExist(t *testing.T) {
 	}
 }
 
+// mixinComponentRefs returns the componentRefs contributed by the mixins an
+// overlay declares directly, so a dependencyRef onto a mixin-supplied
+// component (nvcre onto kubeflow-trainer from platform-kubeflow) is not read
+// as dangling by tests that inspect one overlay file at a time.
+func mixinComponentRefs(t *testing.T, spec *RecipeMetadataSpec) []ComponentRef {
+	t.Helper()
+
+	refs := make([]ComponentRef, 0, len(spec.Mixins))
+	for _, name := range spec.Mixins {
+		path := "mixins/" + name + ".yaml"
+		content, err := GetEmbeddedFS().ReadFile(path)
+		if err != nil {
+			t.Fatalf("failed to read %s: %v", path, err)
+		}
+		var mixin RecipeMixin
+		if err := yaml.Unmarshal(content, &mixin); err != nil {
+			t.Fatalf("failed to parse %s: %v", path, err)
+		}
+		refs = append(refs, mixin.Spec.ComponentRefs...)
+	}
+	return refs
+}
+
 // TestAllDependencyReferencesExist verifies that all dependencyRefs
-// reference components that are defined in the same file or base.yaml.
+// reference components that are defined in the same file, in a mixin the file
+// declares, or in base.yaml.
 func TestAllDependencyReferencesExist(t *testing.T) {
 	// Load base components first
 	baseContent, err := GetEmbeddedFS().ReadFile(baseYAMLFile)
@@ -284,6 +308,9 @@ func TestAllDependencyReferencesExist(t *testing.T) {
 			// Build set of components defined in this overlay
 			overlayComponents := make(map[string]bool)
 			for _, comp := range metadata.Spec.ComponentRefs {
+				overlayComponents[comp.Name] = true
+			}
+			for _, comp := range mixinComponentRefs(t, &metadata.Spec) {
 				overlayComponents[comp.Name] = true
 			}
 
@@ -782,6 +809,20 @@ func TestMergedRecipesHaveNoCycles(t *testing.T) {
 
 			// Merge overlay
 			mergedSpec.Merge(&overlayMetadata.Spec)
+
+			// The overlay's own mixins supply components the file does not
+			// declare. A name the overlay also declares is skipped, which is
+			// the collision the resolver rejects separately.
+			mergedSpec.ComponentRefs = append([]ComponentRef(nil), mergedSpec.ComponentRefs...)
+			have := make(map[string]bool, len(mergedSpec.ComponentRefs))
+			for _, c := range mergedSpec.ComponentRefs {
+				have[c.Name] = true
+			}
+			for _, c := range mixinComponentRefs(t, &overlayMetadata.Spec) {
+				if !have[c.Name] {
+					mergedSpec.ComponentRefs = append(mergedSpec.ComponentRefs, c)
+				}
+			}
 
 			// Validate no cycles in merged result
 			if err := mergedSpec.ValidateDependencies(); err != nil {

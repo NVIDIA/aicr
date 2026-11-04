@@ -1537,7 +1537,8 @@ components:
   # delta is documentation text plus one embedded PodSpec field NVCRE does
   # not set. Aligning the global Trainer default is tracked separately.
   #
-  # No shipped overlay references this component (TestNVCRERegisteredWithoutOverlay).
+  # Only the overlays in nvcreAdoptingOverlays reference this component
+  # (TestNVCRERegisteredAdoptedOnlyByQualifiedOverlays); ADR-025 admits them.
   - name: nvcre
     displayName: NVIDIA Cluster Readiness Engine
     class: ops
