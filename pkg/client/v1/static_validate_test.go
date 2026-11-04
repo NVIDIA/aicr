@@ -24,6 +24,7 @@ import (
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 func TestValidateRecipeCatalogFindings(t *testing.T) {
@@ -99,21 +100,11 @@ func TestStability_RecipeStaticValidation(t *testing.T) {
 }
 
 func TestValidateRecipeCatalogDirectory(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(filepath.Join(dir, "overlays"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	base := "apiVersion: aicr.run/v1beta1\nkind: RecipeMetadata\nmetadata:\n  name: base\nspec: {}\n"
-	if err := os.WriteFile(filepath.Join(dir, "overlays", "base.yaml"), []byte(base), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	content := "apiVersion: aicr.run/v1beta1\nkind: RecipeMetadata\nmetadata:\n  name: example\nspec:\n  base: h100-eks-training\n"
-	if err := os.WriteFile(filepath.Join(dir, "overlays", "example.yaml"), []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	dir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":         []byte(providertest.EmptyRegistryYAML),
+		"overlays/base.yaml":    []byte("apiVersion: aicr.run/v1beta1\nkind: RecipeMetadata\nmetadata:\n  name: base\nspec: {}\n"),
+		"overlays/example.yaml": []byte("apiVersion: aicr.run/v1beta1\nkind: RecipeMetadata\nmetadata:\n  name: example\nspec:\n  base: h100-eks-training\n"),
+	})
 	for _, tt := range []struct {
 		name    string
 		ctx     context.Context

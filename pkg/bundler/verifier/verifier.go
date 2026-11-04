@@ -532,7 +532,7 @@ func verifyStagedSnapshot(
 	}
 
 	// Full chain verified — check if external data caps trust at attested
-	dataDir, joinErr := deployer.SafeJoin(verifiedDir, "data")
+	dataDir, joinErr := deployer.SafeJoin(verifiedDir, deployer.DataDir)
 	if joinErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe data directory path", joinErr)
 	}

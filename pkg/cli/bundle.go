@@ -1058,7 +1058,7 @@ Write the same artifact as an OCI image layout without pushing, then publish it:
 				Name:    flagOutput,
 				Aliases: []string{"o"},
 				Usage: `Output target: local directory path, OCI registry URI, or OCI image layout (default: current dir).
-	For local output: ./my-bundle or /tmp/bundle
+	For local output: ./my-bundle or /tmp/bundle. An existing directory must be empty.
 	For OCI registry: oci://ghcr.io/nvidia/bundle:v1.0.0
 	For OCI image layout: oci-layout:./bundle-layout:v1.0.0 (the directory must not exist;
 	same artifact as oci://, written locally instead of pushed)

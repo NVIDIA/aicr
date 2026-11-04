@@ -182,10 +182,11 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			"failed to create output directory", err)
 	}
 
-	// Remove any stale undeploy.sh left from a pre-removal bundle in the
-	// same output directory. localformat.Write only prunes NNN-* folders;
-	// without this an executable, unchecksummed undeploy.sh would survive
-	// regeneration and contradict the new README's uninstall guidance.
+	// Bundles from older aicr releases hold an undeploy.sh. localformat.Write
+	// prunes only NNN-* folders and provenance.yaml, so without this an
+	// executable, unchecksummed undeploy.sh in a reused output directory
+	// would survive regeneration and contradict the README's uninstall
+	// guidance.
 	if err := os.Remove(filepath.Join(outputDir, "undeploy.sh")); err != nil && !stderrors.Is(err, os.ErrNotExist) {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			"failed to remove stale undeploy.sh", err)

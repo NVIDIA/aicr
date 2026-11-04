@@ -80,6 +80,48 @@ func TestWrite_UpstreamHelmOnly(t *testing.T) {
 	assertGolden(t, outDir, "testdata/upstream_helm_only", "001-nfd/upstream.env")
 }
 
+func TestPruneStaleOutput(t *testing.T) {
+	tests := []struct {
+		name      string
+		dir       string
+		file      string
+		wantPrune bool
+	}{
+		{name: "component folder from an earlier run", dir: "007-old", wantPrune: true},
+		{name: "provenance from an earlier vendored run", file: localformat.ProvenanceFileName, wantPrune: true},
+		{name: "unrelated directory", dir: "data"},
+		{name: "file with a folder prefix", file: "001-notes.txt"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outDir := t.TempDir()
+			if tt.dir != "" {
+				if err := os.Mkdir(filepath.Join(outDir, tt.dir), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.file != "" {
+				if err := os.WriteFile(filepath.Join(outDir, tt.file), nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := localformat.PruneStaleOutput(outDir); err != nil {
+				t.Fatalf("PruneStaleOutput: %v", err)
+			}
+			_, statErr := os.Stat(filepath.Join(outDir, tt.dir+tt.file))
+			if gotPrune := os.IsNotExist(statErr); gotPrune != tt.wantPrune {
+				t.Errorf("%s removed = %v, want %v (stat error %v)", tt.dir+tt.file, gotPrune, tt.wantPrune, statErr)
+			}
+		})
+	}
+
+	t.Run("missing output directory", func(t *testing.T) {
+		if err := localformat.PruneStaleOutput(filepath.Join(t.TempDir(), "missing")); err != nil {
+			t.Errorf("PruneStaleOutput: %v", err)
+		}
+	})
+}
+
 // TestWrite_UpstreamHelmInstallScript_RejectsInjectedRecipeValues runs the
 // rendered install.sh for an upstream-helm folder with a hostile component
 // name and namespace and asserts helm receives each as a single, unevaluated

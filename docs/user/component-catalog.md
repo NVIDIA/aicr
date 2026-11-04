@@ -145,14 +145,14 @@ The trade-off is that, among the features nfd-worker publishes, cluster-side `No
 
 Uninstalling nfd does not clean up the nodes. The `feature.node.kubernetes.io/*` labels, the labels NodeFeatureRules created, NFD-managed extended resources and taints, and the `nfd.node.kubernetes.io/*` annotations stay on every node indefinitely, because AICR disables the chart's post-delete prune hook.
 
-To retire nfd permanently, first uninstall every component that selects on those labels (gpu-operator, network-operator, nvidia-dra-driver-gpu). Then re-enable the hook for the final uninstall, so its Job runs `nfd-master -prune` against every node. Regenerate the bundle with every flag the original bundle used, adding only `--set nfd:postDeleteCleanup=true`. A dropped flag falls back to its default, so for example a bundle regenerated without its `--system-node-selector` no longer pins nfd-master to the system nodes. If the original bundle used `--config`, add `nfd:postDeleteCleanup=true` to the config's `spec.bundle.deployment.set` list instead. A `--set` flag replaces that list rather than adding to it, which drops the config's component overrides, `enabled=false` exclusions and `deployer:` options. Write the bundle to a local directory even if the original went to an `oci://` reference, because an `oci://` output pushes the whole bundle. nfd's values files do not depend on the output target:
+To retire nfd permanently, first uninstall every component that selects on those labels (gpu-operator, network-operator, nvidia-dra-driver-gpu). Then re-enable the hook for the final uninstall, so its Job runs `nfd-master -prune` against every node. Regenerate the bundle with every flag the original bundle used, adding only `--set nfd:postDeleteCleanup=true`. A dropped flag falls back to its default, so for example a bundle regenerated without its `--system-node-selector` no longer pins nfd-master to the system nodes. If the original bundle used `--config`, add `nfd:postDeleteCleanup=true` to the config's `spec.bundle.deployment.set` list instead. A `--set` flag replaces that list rather than adding to it, which drops the config's component overrides, `enabled=false` exclusions and `deployer:` options. Write the bundle to a new local directory even if the original went to an `oci://` reference, because an `oci://` output pushes the whole bundle. The directory must not hold the original bundle, since a bundle run rejects an output directory that is not empty. nfd's values files do not depend on the output target:
 
 ```bash
 RECIPE="recipe.yaml"  # replace with the recipe the bundle was generated from
 DEPLOYER="helm"       # replace with the deployer the bundle was generated with, e.g. argocd
 # Also repeat every other flag the original bundle used, such as --system-node-selector and --set.
 # With --config, add nfd:postDeleteCleanup=true to its set list and drop the --set below.
-aicr bundle -r "${RECIPE}" --deployer "${DEPLOYER}" --set nfd:postDeleteCleanup=true -o ./bundles
+aicr bundle -r "${RECIPE}" --deployer "${DEPLOYER}" --set nfd:postDeleteCleanup=true -o ./nfd-cleanup
 ```
 
 Redeploy only the nfd component from the regenerated bundle, then uninstall it so the hook runs. The regenerated bundle still contains every component the recipe deploys, including the ones you just uninstalled. The steps depend on the deployer.
@@ -168,7 +168,7 @@ Diff each file against the deployed copy first. The only change should be `postD
 With `helm`, run the nfd install script, then uninstall the release:
 
 ```bash
-./bundles/NNN-nfd/install.sh  # replace NNN with the nfd folder's prefix in the bundle
+./nfd-cleanup/NNN-nfd/install.sh  # replace NNN with the nfd folder's prefix in the bundle
 helm uninstall nfd -n node-feature-discovery
 ```
 
@@ -195,8 +195,8 @@ kubectl get nodes -o json | jq -r '.items[] | select((.metadata.labels // {}) + 
 If it prints any node, run the prune through Helm, which waits for the hook Job to finish. Do this before turning the parent's auto-sync back on:
 
 ```bash
-VALUES="./bundles/NNN-nfd/values.yaml"  # replace NNN with the nfd folder's prefix in the regenerated bundle
-VERSION="x.y.z"                         # replace with the nfd chart version the bundle pins
+VALUES="./nfd-cleanup/NNN-nfd/values.yaml"  # replace NNN with the nfd folder's prefix in the regenerated bundle
+VERSION="x.y.z"                             # replace with the nfd chart version the bundle pins
 helm install nfd node-feature-discovery --repo https://kubernetes-sigs.github.io/node-feature-discovery/charts \
   --version "${VERSION}" -n node-feature-discovery --create-namespace -f "${VALUES}"
 helm uninstall nfd -n node-feature-discovery
@@ -1678,7 +1678,8 @@ The `aws-ebs-csi-driver` controller calls the Amazon EBS API to create, attach, 
 
   ```shell
   aicr bundle -r recipe.yaml \
-    --set-json awsebscsidriver:controller.serviceAccount.annotations='{"eks.amazonaws.com/role-arn":"arn:aws:iam::<account>:role/<ebs-csi-role>"}'
+    --set-json awsebscsidriver:controller.serviceAccount.annotations='{"eks.amazonaws.com/role-arn":"arn:aws:iam::<account>:role/<ebs-csi-role>"}' \
+    -o ./bundles
   ```
 
 - **Node instance role.** Attach the permissions to the node IAM role. The controller must then reach the instance metadata service for credentials, and because it does not use host networking, IMDSv2 needs a hop limit of at least 2. Upstream does not recommend this path for production, because every pod that can reach IMDS inherits the permissions.
@@ -1720,7 +1721,8 @@ Do **not** use plain `--set` for this key. `--set agentgateway:allowedSourceRang
 
 ```shell
 aicr bundle -r recipe.yaml \
-  --set-json agentgateway:allowedSourceRanges='["216.228.127.128/30"]'
+  --set-json agentgateway:allowedSourceRanges='["216.228.127.128/30"]' \
+  -o ./bundles
 ```
 
 or scope the gateway through a recipe overlay or `componentRef` override:
@@ -1740,7 +1742,8 @@ If public exposure is genuinely intended, opt in **explicitly** with an any-sour
 
 ```shell
 aicr bundle -r recipe.yaml \
-  --set-json agentgateway:allowedSourceRanges='["0.0.0.0/0"]'
+  --set-json agentgateway:allowedSourceRanges='["0.0.0.0/0"]' \
+  -o ./bundles
 ```
 
 This setting filters by source IP only; it does not add TLS or authentication to the gateway listener.
@@ -3547,7 +3550,8 @@ list. To add them:
 
 ```bash
 aicr bundle -r recipe.yaml \
-  --set-json agentgateway:rbac.gatewayNamespaces='["agentgateway-system","my-gateways"]'
+  --set-json agentgateway:rbac.gatewayNamespaces='["agentgateway-system","my-gateways"]' \
+  -o ./bundles
 ```
 
 Two constraints on that edit. The namespaces **must already exist** — the chart

@@ -34,6 +34,19 @@ aicr bundle --recipe recipe.yaml --deployer argocd \
   --output ./bundles
 ```
 
+## Output directory
+
+`--output` defaults to the current directory. An existing local output
+directory must be empty. Anything in it, a previous bundle included, fails the
+run with a conflict before anything is written. The one exception is a private
+`.aicr-stage-*` directory that a killed run left behind, which the next run
+removes. Bundle into a new directory, or empty the old one first.
+
+The bundle renders in a private directory and moves into place only once it is
+complete, so a run that fails leaves the output directory as it found it. A
+`--split` set needs a path that does not exist yet. See
+[Split a bundle by class](#split-a-bundle-by-class).
+
 ## Bundle layout
 
 This is the canonical description of what a bundle contains. The trees below

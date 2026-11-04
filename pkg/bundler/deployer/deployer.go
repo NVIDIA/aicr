@@ -91,10 +91,8 @@ type Output struct {
 	Entrypoint string
 
 	// Provenance is the chart-provenance audit file this run wrote, relative
-	// to the bundle root, and empty when the run wrote none. A deployer must
-	// report it rather than let a caller stat the bundle: the file is written
-	// only for a vendored bundle and is never pruned, so a stat would also
-	// find one left behind by an earlier run into the same directory.
+	// to the bundle root, and empty when the run wrote none. The file is
+	// written only for a vendored bundle.
 	Provenance string
 
 	// Releases is every Helm release the bundle installs, in deployment
@@ -107,6 +105,9 @@ type Output struct {
 	// would put each deployer's defaults in a second place to drift from.
 	Source Source
 }
+
+// DataDir is the bundle directory that holds the external --data files.
+const DataDir = "data"
 
 // AddDataFiles resolves each relative data file path against outputDir (via
 // SafeJoin, rejecting traversal), stats the file, and appends the absolute

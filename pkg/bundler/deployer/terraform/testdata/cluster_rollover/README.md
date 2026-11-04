@@ -169,11 +169,11 @@ the recipe should narrow the toleration to the system nodes it means.
 ## Upgrades and replacements
 
 An upgrade is a regenerated bundle. A bundle is a closed set of files that
-`checksums.txt` attests, and `aicr bundle` fails its closed-world check when
-the output directory holds anything else, so a bundle is always generated into
-a fresh directory: once Terraform has run here, this
-directory holds `.terraform/`, `.terraform.lock.hcl`, `terraform.tfvars` and,
-with the default local backend, the state.
+`checksums.txt` attests, and `aicr bundle` fails when the output directory is
+not empty, so a bundle is always generated into a fresh directory.
+Once Terraform has run here, this directory holds `.terraform/`,
+`.terraform.lock.hcl`, `terraform.tfvars` and, with the default local backend,
+the state.
 
 Treat the generated bundle as a build artifact and this directory as
 the working directory it is copied into. Generate the new bundle beside this

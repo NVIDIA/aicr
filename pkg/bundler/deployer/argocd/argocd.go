@@ -491,21 +491,9 @@ func resolveRepoSettings(g *Generator) (repoURL, targetRevision string) {
 	return repoURL, targetRevision
 }
 
-// Generate creates Argo CD Applications from the configured generator fields.
-//
-// Per-component content (Chart.yaml, values.yaml, cluster-values.yaml,
-// upstream.env, templates/) is delegated to localformat.Write, which emits
-// the uniform NNN-<name>/ folder layout. argocd then drops application.yaml
-// inside each NNN-<name>/ folder and writes the top-level app-of-apps.yaml.
-//
-//nolint:funlen // single-pass orchestration; further splitting just hides the linear flow.
-func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.Output, error) {
-	start := time.Now()
-
-	output := &deployer.Output{
-		Files: make([]string, 0),
-	}
-
+// checkInputs validates the generator fields and the child Application names
+// Generate would emit, and returns the components in deployment order.
+func (g *Generator) checkInputs(ctx context.Context) ([]recipe.ComponentRef, error) {
 	if g.RecipeResult == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "RecipeResult is required")
 	}
@@ -534,7 +522,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 
 	// Reject DynamicValues at the library boundary unless the caller
-	// explicitly opts in. The strip-pass below removes cluster-values.yaml
+	// explicitly opts in. Generate's strip-pass removes cluster-values.yaml
 	// from every NNN folder, so a standalone caller that populates
 	// DynamicValues would have those splits silently dropped from the
 	// bundle. argocdhelm sets AllowDynamicValueSplit because it surfaces
@@ -549,17 +537,6 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 						name, len(paths)))
 			}
 		}
-	}
-
-	repoURL, targetRevision := resolveRepoSettings(g)
-
-	// All three are baked unconditionally below: repoURL and targetRevision
-	// into app-of-apps.yaml and every child application.yaml, appName into
-	// the parent's metadata.name.
-	output.Source = deployer.Source{
-		RepoURL:        repoURL,
-		TargetRevision: targetRevision,
-		AppName:        g.appName(),
 	}
 
 	// Sort components by deployment order; validate names early.
@@ -587,6 +564,36 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 	if nameErr := ValidateChildAppNames(g.NamePrefix, g.appName(), releases); nameErr != nil {
 		return nil, nameErr
+	}
+	return components, nil
+}
+
+// Generate creates Argo CD Applications from the configured generator fields.
+//
+// Per-component content (Chart.yaml, values.yaml, cluster-values.yaml,
+// upstream.env, templates/) is delegated to localformat.Write, which emits
+// the uniform NNN-<name>/ folder layout. argocd then drops application.yaml
+// inside each NNN-<name>/ folder and writes the top-level app-of-apps.yaml.
+func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.Output, error) {
+	start := time.Now()
+
+	components, inputErr := g.checkInputs(ctx)
+	if inputErr != nil {
+		return nil, inputErr
+	}
+
+	repoURL, targetRevision := resolveRepoSettings(g)
+
+	// repoURL and targetRevision are baked unconditionally into
+	// app-of-apps.yaml and every child application.yaml, and appName into the
+	// parent's metadata.name.
+	output := &deployer.Output{
+		Files: make([]string, 0),
+		Source: deployer.Source{
+			RepoURL:        repoURL,
+			TargetRevision: targetRevision,
+			AppName:        g.appName(),
+		},
 	}
 
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -635,101 +642,21 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		return nil, err
 	}
 
-	// Track per-folder content paths for checksums.
-	for _, f := range folders {
-		for _, rel := range f.Files {
-			abs, joinErr := deployer.SafeJoin(outputDir, rel)
-			if joinErr != nil {
-				return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-					fmt.Sprintf("path from localformat escapes outputDir: %s", rel), joinErr)
-			}
-			output.Files = append(output.Files, abs)
-			if info, statErr := os.Stat(abs); statErr == nil {
-				output.TotalSize += info.Size()
-			}
-		}
+	if err := addFolderFiles(outputDir, folders, output); err != nil {
+		return nil, err
 	}
 
-	// Group components into dependency-depth levels so independent components
-	// share a sync-wave band and roll out in parallel. This mirrors the
-	// helmfile deployer, which consumes the same function to emit its
-	// per-level sub-helmfiles — keeping ordering semantics identical across
-	// deployers. levelOf maps each component to its level index; waveForFolder
-	// turns (level, folder phase) into the concrete sync-wave.
-	//
-	// Computed unconditionally so cycle / undeclared-dependency validation
-	// runs on both paths — Generate is exported, and a direct caller could
-	// otherwise hand-build a RecipeResult with a bad graph and skip the check
-	// in --serial mode. levelOf is only populated for the parallel path; in
-	// --serial mode it stays empty and the folder loop uses each folder's
-	// linear index as the sync-wave (one component at a time).
-	levels, levelErr := recipe.ComponentRefsTopologicalLevels(components)
+	levelOf, levelErr := g.componentLevels(components)
 	if levelErr != nil {
-		return nil, errors.PropagateOrWrap(levelErr, errors.ErrCodeInternal,
-			"failed to compute dependency levels")
+		return nil, levelErr
 	}
-	levelOf := make(map[string]int, len(components))
-	if !g.Serial {
-		for lvl, names := range levels {
-			for _, name := range names {
-				levelOf[name] = lvl
-			}
-		}
-	}
-
-	// Build ApplicationData per folder and write application.yaml inside the
-	// NNN-<name>/ directory. Branching on FolderKind selects the Application
-	// shape (path-based single-source vs multi-source upstream-helm).
-	appDataList := make([]ApplicationData, 0, len(folders))
-	appName := g.appName()
-	for i, f := range folders {
-		select {
-		case <-ctx.Done():
-			return nil, errors.PropagateOrWrap(ctx.Err(), errors.ErrCodeTimeout, "context cancelled")
-		default:
-		}
-
-		comp := findComponentRef(components, f.Parent)
-		if comp == nil {
-			return nil, errors.New(errors.ErrCodeInternal,
-				fmt.Sprintf("localformat returned folder for unknown component %q", f.Parent))
-		}
-
-		var inlineValues map[string]any
-		if g.InlineUpstreamValues && f.Kind == localformat.KindUpstreamHelm {
-			inlineValues = g.ComponentValues[comp.Name]
-		}
-
-		wave := i
-		if !g.Serial {
-			wave = waveForFolder(f, levelOf[comp.Name])
-		}
-		appData, err := buildApplicationData(*comp, f, wave, repoURL, targetRevision, inlineValues, g.InlineUpstreamValues)
-		if err != nil {
-			return nil, err
-		}
-		appData.Name = g.NamePrefix + appData.Name
-		appData.DestinationServer = g.destinationServer()
-		appData.Project = g.project()
-		appData.CascadeDelete = g.CascadeDelete
-		appData.SyncRetry = g.SyncRetry
-		appDataList = append(appDataList, appData)
-
-		folderDir, joinErr := deployer.SafeJoin(outputDir, f.Dir)
-		if joinErr != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("folder path unsafe: %s", f.Dir), joinErr)
-		}
-		appPath, appSize, genErr := deployer.GenerateFromTemplate(applicationTemplate, appData, folderDir, fileApplication)
-		if genErr != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				fmt.Sprintf("failed to generate application.yaml for %s", f.Name), genErr)
-		}
-		output.Files = append(output.Files, appPath)
-		output.TotalSize += appSize
+	appDataList, appsErr := g.writeApplications(ctx, outputDir, components, folders, levelOf, output)
+	if appsErr != nil {
+		return nil, appsErr
 	}
 
 	// Generate app-of-apps.yaml
+	appName := g.appName()
 	appOfAppsData := AppOfAppsData{
 		RepoURL:        repoURL,
 		TargetRevision: targetRevision,
@@ -806,6 +733,109 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	)
 
 	return output, nil
+}
+
+// addFolderFiles adds every file localformat wrote under folders to output, so
+// the checksums cover them.
+func addFolderFiles(outputDir string, folders []localformat.Folder, output *deployer.Output) error {
+	for _, f := range folders {
+		for _, rel := range f.Files {
+			abs, joinErr := deployer.SafeJoin(outputDir, rel)
+			if joinErr != nil {
+				return errors.Wrap(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("path from localformat escapes outputDir: %s", rel), joinErr)
+			}
+			output.Files = append(output.Files, abs)
+			if info, statErr := os.Stat(abs); statErr == nil {
+				output.TotalSize += info.Size()
+			}
+		}
+	}
+	return nil
+}
+
+// componentLevels maps each component to its dependency-depth level, so
+// independent components share a sync-wave band and roll out in parallel.
+// The map is empty in Serial mode, where each folder's index is its sync-wave.
+// The levels are computed in both modes so a dependency cycle or an
+// undeclared dependency fails either way.
+func (g *Generator) componentLevels(components []recipe.ComponentRef) (map[string]int, error) {
+	levels, err := recipe.ComponentRefsTopologicalLevels(components)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to compute dependency levels")
+	}
+	levelOf := make(map[string]int, len(components))
+	if g.Serial {
+		return levelOf, nil
+	}
+	for lvl, names := range levels {
+		for _, name := range names {
+			levelOf[name] = lvl
+		}
+	}
+	return levelOf, nil
+}
+
+// writeApplications writes an application.yaml into each folder, adds each
+// file to output, and returns the Application data in folder order.
+func (g *Generator) writeApplications(
+	ctx context.Context,
+	outputDir string,
+	components []recipe.ComponentRef,
+	folders []localformat.Folder,
+	levelOf map[string]int,
+	output *deployer.Output,
+) ([]ApplicationData, error) {
+
+	appDataList := make([]ApplicationData, 0, len(folders))
+	for i, f := range folders {
+		select {
+		case <-ctx.Done():
+			return nil, errors.PropagateOrWrap(ctx.Err(), errors.ErrCodeTimeout, "context cancelled")
+		default:
+		}
+
+		comp := findComponentRef(components, f.Parent)
+		if comp == nil {
+			return nil, errors.New(errors.ErrCodeInternal,
+				fmt.Sprintf("localformat returned folder for unknown component %q", f.Parent))
+		}
+
+		var inlineValues map[string]any
+		if g.InlineUpstreamValues && f.Kind == localformat.KindUpstreamHelm {
+			inlineValues = g.ComponentValues[comp.Name]
+		}
+
+		wave := i
+		if !g.Serial {
+			wave = waveForFolder(f, levelOf[comp.Name])
+		}
+		appData, err := buildApplicationData(*comp, f, wave, output.Source.RepoURL, output.Source.TargetRevision, inlineValues, g.InlineUpstreamValues)
+		if err != nil {
+			return nil, err
+		}
+		appData.Name = g.NamePrefix + appData.Name
+		appData.DestinationServer = g.destinationServer()
+		appData.Project = g.project()
+		appData.CascadeDelete = g.CascadeDelete
+		appData.SyncRetry = g.SyncRetry
+		appDataList = append(appDataList, appData)
+
+		folderDir, joinErr := deployer.SafeJoin(outputDir, f.Dir)
+		if joinErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("folder path unsafe: %s", f.Dir), joinErr)
+		}
+		appPath, appSize, genErr := deployer.GenerateFromTemplate(applicationTemplate, appData, folderDir, fileApplication)
+		if genErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to generate application.yaml for %s", f.Name), genErr)
+		}
+		output.Files = append(output.Files, appPath)
+		output.TotalSize += appSize
+	}
+	return appDataList, nil
 }
 
 // toLocalformatComponents maps the sorted ComponentRefs to the per-component

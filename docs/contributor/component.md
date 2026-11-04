@@ -435,11 +435,15 @@ pods depend on).
 
 AICR ships seven output adapters in
 [`pkg/bundler/deployer/`](https://github.com/NVIDIA/aicr/tree/main/pkg/bundler/deployer):
-`helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `terraform`, `fleet`. Each calls
-`localformat.Write()` and then layers its own orchestration files
-(`deploy.sh`, `helmfile.yaml`, Argo `Application` CRs, Flux
-`HelmRelease`s, Terraform module calls, Fleet `fleet.yaml` files with a `GitRepo` or `HelmOp`s). **Components do not need to be deployer-aware** —
-the bundler renders per-deployer from one component definition.
+`helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `terraform`, `fleet`. Each one
+except `flux` calls `localformat.Write()` and then layers its own orchestration files
+(`deploy.sh`, `helmfile.yaml`, Argo `Application` CRs, Terraform module calls,
+Fleet `fleet.yaml` files with a `GitRepo` or `HelmOp`s). `flux` writes a
+`<name>/` directory per release instead, holding its `HelmRelease`, and lists
+them in a root `kustomization.yaml`, because Flux orders releases with
+`dependsOn` rather than by folder number. **Components do not need to be
+deployer-aware.** The bundler renders per-deployer from one component
+definition.
 
 ### Deployment ordering
 

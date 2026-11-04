@@ -176,9 +176,8 @@ the recipe should narrow the toleration to the system nodes it means.
 ## Upgrades and replacements
 
 An upgrade is a regenerated bundle. A bundle is a closed set of files that
-`checksums.txt` attests, and `aicr bundle` fails its closed-world check when
-the output directory holds anything else, so a bundle is always generated into
-a fresh directory.
+`checksums.txt` attests, and `aicr bundle` fails when the output directory is
+not empty, so a bundle is always generated into a fresh directory.
 
 Generate the new bundle beside this one, with the flags this
 one was generated with, and point the calling configuration's `source` at it.

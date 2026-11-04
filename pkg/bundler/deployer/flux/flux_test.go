@@ -28,6 +28,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat/localformattest"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
@@ -2706,8 +2707,8 @@ func TestGenerate_SourcesDirCreatedOnlyWhenPopulated(t *testing.T) {
 		manifests map[string]map[string][]byte
 		// ociSourceName empty selects the local-directory (GitRepository) path.
 		ociSourceName string
-		// preCreateStale plants an empty sources/ before generation, as a
-		// pre-fix run would have left behind.
+		// preCreateStale plants an empty sources/ before generation, as an
+		// earlier run into the same directory can leave behind.
 		preCreateStale bool
 		wantSourcesDir bool
 	}{
@@ -2790,6 +2791,44 @@ func TestGenerate_SourcesDirCreatedOnlyWhenPopulated(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestGenerate_PrunesStaleOutput checks that Generate runs
+// localformat.PruneStaleOutput. With checksums on, a stale provenance.yaml
+// fails the bundle as an unexpected file.
+func TestGenerate_PrunesStaleOutput(t *testing.T) {
+	outputDir := t.TempDir()
+	stale := filepath.Join(outputDir, localformat.ProvenanceFileName)
+	if err := os.WriteFile(stale, []byte("stale\n"), 0o600); err != nil {
+		t.Fatalf("plant stale provenance.yaml: %v", err)
+	}
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{{
+		Name:      "cert-manager",
+		Namespace: "cert-manager",
+		Chart:     "cert-manager",
+		Version:   "v1.17.2",
+		Type:      recipe.ComponentTypeHelm,
+		Source:    "https://charts.jetstack.io",
+	}}
+	g := &Generator{
+		RecipeResult:     recipeResult,
+		Version:          testVersion,
+		IncludeChecksums: true,
+	}
+
+	out, err := g.Generate(context.Background(), outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if _, statErr := os.Stat(stale); !os.IsNotExist(statErr) {
+		t.Errorf("stale provenance.yaml survived generation, stat error = %v", statErr)
+	}
+	if out.Provenance != "" {
+		t.Errorf("Output.Provenance = %q, want empty for an unvendored bundle", out.Provenance)
 	}
 }
 

@@ -618,6 +618,15 @@ functional API for local output is part of this design's scope, not an
 extension of existing behavior. Failure-path tests are specified with
 the implementation.
 
+> **Implementation note (2026-11-05):** `DefaultBundler.Make` renders
+> every local bundle in a locked `.aicr-stage-*` directory and publishes
+> it only when complete. An absent destination gets the stage by a
+> rename that replaces nothing. An existing empty destination gets the
+> stage's entries one at a time, and a failed move returns them to the
+> stage. A destination holding anything else fails with
+> `ErrCodeConflict` before any work. `--split` accepts only an absent
+> destination.
+
 `split.yaml` is **audit metadata only**: it records the set's
 `recipeDigest`, the class of every component, and the class ordering
 contract (core, then ops). `recipeDigest` is computed over

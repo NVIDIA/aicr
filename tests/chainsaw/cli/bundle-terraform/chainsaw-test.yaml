@@ -330,11 +330,11 @@ spec:
       description: >
         The README documents an upgrade as a bundle generated into a fresh
         directory and copied into the working directory after the previous
-        bundle's files, listed by its checksums.txt, are removed; a bundle is
-        a closed set of files and the directory Terraform has run in holds
-        .terraform/, the lock file and the operator's tfvars. Both halves are
-        pinned here: regenerating over such a directory fails the
-        closed-world check, and the documented sequence yields byte-identical
+        bundle's files, listed by its checksums.txt, are removed. A bundle is
+        a closed set of files, and the directory Terraform has run in holds
+        .terraform/, the lock file and the operator's tfvars. This test pins
+        both halves. Regenerating over such a directory fails because it
+        is not empty, and the documented sequence yields byte-identical
         .tf files, keeps every operator file, keeps a generated folder that
         holds one, and drops a stale inventoried folder.
       try:
@@ -356,7 +356,7 @@ spec:
                 echo "regenerating over a bundle Terraform has run in succeeded; the README says it fails" >&2
                 exit 1
               fi
-              grep -q 'unexpected directory' "${WORK}/.regen-out" \
+              grep -q 'is not empty' "${WORK}/.regen-out" \
                 || { echo "regeneration failed for another reason:" >&2; cat "${WORK}/.regen-out" >&2; exit 1; }
               # The documented flow: a fresh bundle, verified, copied in
               # after the previous bundle's inventory is removed. More
