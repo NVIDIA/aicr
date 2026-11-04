@@ -15,8 +15,10 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -1299,6 +1301,109 @@ func TestNVKENetRuntimePrecheckMarkerMatchesRegex(t *testing.T) {
 	}
 	if checks != 2 {
 		t.Errorf("found %d %q lines in %s, want 2 (missing address, missing RDMA device)", checks, echoMarker, path)
+	}
+}
+
+// nvkeNetRankScript returns the per-rank shell script from the rendered NVKE
+// NET runtime's launcher command: the argument after "/bin/sh", "-c".
+func nvkeNetRankScript(t *testing.T) string {
+	t.Helper()
+	data := map[string]string{
+		"NAMESPACE": "aicr-validation", "GPU_COUNT_PER_NODE": "4", "GPU_COUNT": "8",
+		"TEST_TYPE": testType, "MIN_MESSAGE_SIZE": minMessageSize, "MAX_MESSAGE_SIZE": maxMessageSize,
+	}
+	obj, err := parseYAMLTemplate(templatePath(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceNVKE, variantNET, "runtime.yaml"), data)
+	if err != nil {
+		t.Fatalf("parse NVKE NET runtime: %v", err)
+	}
+	jobs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
+	for _, j := range jobs {
+		job, _ := j.(map[string]any)
+		if job["name"] != "launcher" {
+			continue
+		}
+		containers, _, _ := unstructured.NestedSlice(job, "template", "spec", "template", "spec", "containers")
+		container, _ := containers[0].(map[string]any)
+		args, _, _ := unstructured.NestedStringSlice(container, "args")
+		for i := 0; i+2 < len(args); i++ {
+			if args[i] == "/bin/sh" && args[i+1] == "-c" {
+				return args[i+2]
+			}
+		}
+	}
+	t.Fatal("no /bin/sh -c rank script in the launcher args")
+	return ""
+}
+
+// TestNVKENetRankPrecheck runs the NVKE NET runtime's rank script against a
+// stub ip and a fake /sys/class/net: a rail missing its IPoIB address or its
+// RDMA device must exit non-zero with a marker naming that rail, and four good
+// rails must pin NCCL_IB_HCA to exactly their VFs, in rail order.
+func TestNVKENetRankPrecheck(t *testing.T) {
+	script := nvkeNetRankScript(t)
+	hcas := []string{"mlx5_9", "mlx5_30", "mlx5_49", "mlx5_61"}
+
+	tests := []struct {
+		name       string
+		noAddr     string
+		noRDMA     string
+		wantErr    string
+		wantHCAEnv string
+	}{
+		{name: "four rails attached", wantHCAEnv: "=mlx5_9,mlx5_30,mlx5_49,mlx5_61"},
+		{name: "rail without IPoIB address", noAddr: "net3", wantErr: "AICR_PRECHECK_FAILED: rail attachment net3 has no IPoIB address"},
+		{name: "rail without RDMA device", noRDMA: "net2", wantErr: "AICR_PRECHECK_FAILED: rail attachment net2 has no RDMA device"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			sysNet := filepath.Join(root, "sys-class-net")
+			bin := filepath.Join(root, "bin")
+			if err := os.MkdirAll(bin, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			// Stub ip: "ip -o -4 addr show dev netN" prints an inet line unless netN has no address.
+			stub := "#!/bin/sh\nfor a; do dev=$a; done\n[ \"$dev\" = \"" + tt.noAddr + "\" ] && exit 1\necho \"1: $dev    inet 10.255.0.7/22 scope global $dev\"\n"
+			if err := os.WriteFile(filepath.Join(bin, "ip"), []byte(stub), 0o755); err != nil { //nolint:gosec // test stub must be executable
+				t.Fatal(err)
+			}
+			for i, hca := range hcas {
+				dev := fmt.Sprintf("net%d", i+1)
+				dir := filepath.Join(sysNet, dev, "device", "infiniband")
+				if dev != tt.noRDMA {
+					dir = filepath.Join(dir, hca)
+				}
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			body := strings.ReplaceAll(script, "/sys/class/net/", sysNet+"/")
+			cmd := exec.CommandContext(t.Context(), "/bin/sh", "-c", body, "nccl-rank", "/bin/sh", "-c", `printf %s "$NCCL_IB_HCA"`)
+			cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			err := cmd.Run()
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("precheck exited 0, want failure naming %q", tt.wantErr)
+				}
+				if !strings.Contains(stderr.String(), tt.wantErr) {
+					t.Errorf("stderr = %q, want it to contain %q", stderr.String(), tt.wantErr)
+				}
+				if got := runtimePrecheckFailure(stderr.String()); !strings.HasPrefix("AICR_PRECHECK_FAILED: "+got, tt.wantErr) {
+					t.Errorf("runtimePrecheckFailure(stderr) = %q, does not carry %q", got, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("precheck failed: %v, stderr %q", err, stderr.String())
+			}
+			if stdout.String() != tt.wantHCAEnv {
+				t.Errorf("NCCL_IB_HCA = %q, want %q", stdout.String(), tt.wantHCAEnv)
+			}
+		})
 	}
 }
 

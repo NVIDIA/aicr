@@ -2269,7 +2269,7 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 		// fetchNote records why the direct fetch was unusable so it survives into
 		// the emitted diagnostic payload (not just slog) when the termination-tail
 		// fallback is also empty — otherwise the reader sees no reason at all.
-		var fetchNote string
+		var fetchNote, precheckReason string
 		switch {
 		case logErr != nil:
 			slog.Warn("failed to retrieve launcher pod logs", "pod", launcherPod.Name, "error", logErr)
@@ -2284,6 +2284,9 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 			fetchNote = "direct logs unavailable (container GC'd before fetch)"
 			launcherLogs = ""
 		default:
+			// Read the precheck reason before tailing: the marker prints before
+			// NCCL starts, so mpirun's abort output could push it past the cap.
+			precheckReason = runtimePrecheckFailure(launcherLogs)
 			// Tail to the same cap as worker diagnostics — a verbose launcher
 			// (mpirun + NCCL debug) would otherwise balloon the failure payload.
 			launcherLogs = tailLines(strings.TrimSpace(launcherLogs), maxDiagLogLines)
@@ -2317,8 +2320,12 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 		emitDiagnosticBlock("worker diagnostics", workerDiag)
 
 		logs := launcherLogs + "\n" + workerDiag
-		if reason := runtimePrecheckFailure(launcherLogs); reason != "" {
-			return logs, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, reason, err)
+		if precheckReason == "" {
+			// The termination-message fallback above.
+			precheckReason = runtimePrecheckFailure(launcherLogs)
+		}
+		if precheckReason != "" {
+			return logs, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, precheckReason, err)
 		}
 		return logs, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "pod failed to complete successfully", err)
 	}

@@ -174,6 +174,10 @@ spec:
                 containers:
                 - name: node
                   image: nvcr.io/nvidia/pytorch:25.06-py3
+                  # Keeps the log tail, including any AICR_PRECHECK_FAILED line,
+                  # in pod status for the validator's fallback when the launcher
+                  # logs are already gone.
+                  terminationMessagePolicy: FallbackToLogsOnError
                   env:
                   - name: LD_LIBRARY_PATH
                     value: "/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
