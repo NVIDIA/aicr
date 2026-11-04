@@ -1179,8 +1179,8 @@ jobs:
   # The lifecycle scenarios from the newest published release older than this
   # tag, attestations verified, upgraded to this candidate, rolled back and
   # uninstalled in the documented order (make operator-qualify-published).
-  # A failure blocks image promotion and publishing, as ADR-027 requires of
-  # an operator gate. It runs third-party images on privileged kind nodes, so
+  # A failure blocks :latest and publishing, as ADR-027 requires of an
+  # operator gate; the version aliases it runs against are already promoted. It runs third-party images on privileged kind nodes, so
   # it holds neither the release's OIDC identity nor the Go proxy's
   # credential; its modules come from the default proxy, as the PR lanes'
   # do, and it publishes nothing.
@@ -1852,6 +1852,8 @@ jobs:
       - image-vuln-scan
       - attest
       - attach-source
+      - aicr-check
+      - promote-versions
       - release-check
       - promote-images
       - operator-candidate
@@ -1878,6 +1880,8 @@ jobs:
           RESOLVE: ${{ needs.resolve-candidates.result }}
           VULN_SCAN: ${{ needs.image-vuln-scan.result }}
           ATTEST: ${{ needs.attest.result }}
+          AICR_CHECK: ${{ needs.aicr-check.result }}
+          PROMOTE_VERSIONS: ${{ needs.promote-versions.result }}
           RELEASE_CHECK: ${{ needs.release-check.result }}
           PROMOTE: ${{ needs.promote-images.result }}
           OPERATOR_CANDIDATE: ${{ needs.operator-candidate.result }}
@@ -1915,8 +1919,10 @@ jobs:
             echo "| Resolve Candidate Digests | ${RESOLVE} |"
             echo "| Vulnerability Scan | ${VULN_SCAN} |"
             echo "| Attestation | ${ATTEST} |"
+            echo "| AICR Check | ${AICR_CHECK} |"
+            echo "| Version Alias Promotion | ${PROMOTE_VERSIONS} |"
             echo "| Release Check | ${RELEASE_CHECK} |"
-            echo "| Image Promotion | ${PROMOTE} |"
+            echo "| latest Promotion | ${PROMOTE} |"
             echo "| Operator Candidate | ${OPERATOR_CANDIDATE} |"
             echo "| Operator Vulnerability Scan | ${OPERATOR_SCAN} |"
             echo "| Operator Reproducibility | ${OPERATOR_REPRODUCIBLE} |"
