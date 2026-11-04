@@ -826,9 +826,13 @@ if report.FailsRun() {
   records name that carry no deployer ownership marker. Nil scans only on a
   cluster read, a pointer to `true` scans for any source, and a pointer to
   `false` suppresses it even on a cluster read.
+- `OperatorNamespace` is where a cluster read finds the AICR Operator's plans,
+  which version the Argo CD `Application`s the operator wrote. Empty selects
+  `aicr-system`, where the operator's chart installs.
 
 `aicr.FromCluster`, `ScanAtRisk`, and `ObjectNamesCompared`/`ObjectNamesSkipped`
 are not in v0.22.0 or earlier; pin a later release to use them.
+`OperatorNamespace` is not in v1.2.0 or earlier.
 
 `*UpgradeReport` is a transparent alias of `pkg/upgrade.Report`. Verdicts are
 data, not errors: `WriteUpgradeReportTable` renders the table the CLI prints,
