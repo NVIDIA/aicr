@@ -51,6 +51,7 @@ spec:
           args:
             - --aicr-version={{ .Values.aicr.version }}
             - --aicr-image={{ .Values.aicr.image }}
+            - --allow-prerelease-aicr={{ .Values.aicr.allowPrerelease }}
             - --operator-namespace={{ .Release.Namespace }}
             - --jobs-namespace={{ .Values.namespaces.jobs }}
             - --discovery-namespace={{ .Values.namespaces.discovery }}
