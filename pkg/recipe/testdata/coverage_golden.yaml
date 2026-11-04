@@ -355,6 +355,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=runai):
             - service=lke, accelerator=rtx-pro-6000, intent=inference
             - service=lke, accelerator=rtx-pro-6000, intent=training
             - service=nvke, accelerator=gb200, intent=training
+            - service=nvke, accelerator=vr200, intent=training
             - service=oke, accelerator=a100, intent=training
             - service=oke, accelerator=gb200, intent=inference
             - service=oke, accelerator=gb200, intent=training
@@ -745,6 +746,7 @@ criteria(service=, accelerator=, intent=training, os=, platform=runai):
             - service=cks, accelerator=rtx-pro-6000, os=ubuntu
             - service=generic, accelerator=gb300, os=ubuntu
             - service=nvke, accelerator=gb200, os=ubuntu
+            - service=nvke, accelerator=vr200, os=ubuntu
             - service=oke, accelerator=a100, os=ubuntu
             - service=oke, accelerator=gb200, os=ubuntu
         platform:
@@ -1083,6 +1085,7 @@ criteria(service=, accelerator=, intent=training, os=ubuntu, platform=runai):
             - service=generic, accelerator=gb300
             - service=kind, accelerator=h100
             - service=nvke, accelerator=gb200
+            - service=nvke, accelerator=vr200
             - service=oke, accelerator=a100
             - service=oke, accelerator=gb200
         os:
@@ -1095,6 +1098,7 @@ criteria(service=, accelerator=, intent=training, os=ubuntu, platform=runai):
             - service=k0s, accelerator=h200
             - service=lke, accelerator=rtx-pro-6000
             - service=nvke, accelerator=gb200
+            - service=nvke, accelerator=vr200
             - service=oke, accelerator=a100
             - service=oke, accelerator=gb200
             - service=rke2, accelerator=vr200
