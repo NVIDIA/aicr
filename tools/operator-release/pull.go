@@ -33,6 +33,8 @@ import (
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/registry/remote"
+
+	"github.com/NVIDIA/aicr/pkg/defaults"
 )
 
 // pull writes a published release into dir in the layout a candidate build
@@ -77,35 +79,11 @@ func pull(args []string, out io.Writer) error {
 		}
 	}
 
-	desc, data, err := oras.FetchBytes(ctx, charts, tag, oras.DefaultFetchBytesOptions)
-	if err != nil {
-		return fmt.Errorf("fetch %s:%s: %w", ref, tag, err)
-	}
-	var manifest ocispec.Manifest
-	if err = json.Unmarshal(data, &manifest); err != nil {
-		return fmt.Errorf("parse %s:%s: %w", ref, tag, err)
-	}
-	if len(manifest.Layers) != 1 || manifest.Layers[0].MediaType != helmChartMediaType {
-		return fmt.Errorf("%s:%s is not a Helm chart with one archive layer", ref, tag)
-	}
-	archive, err := content.FetchAll(ctx, charts, manifest.Layers[0])
-	if err != nil {
-		return fmt.Errorf("fetch the archive of %s:%s: %w", ref, tag, err)
-	}
-	meta, err := chartMetadata(archive)
+	published, err := fetchChart(ctx, charts, ref, tag, *chart)
 	if err != nil {
 		return err
 	}
-	name, _ := meta["name"].(string)
-	chartVersion, _ := meta["version"].(string)
-	appVersion, _ := meta["appVersion"].(string)
-	if name == "" || chartVersion == "" || appVersion == "" {
-		return fmt.Errorf("%s:%s names no chart name, version or appVersion", ref, tag)
-	}
-	// Helm tags a chart with its version, "+" written as "_".
-	if name != *chart || strings.ReplaceAll(chartVersion, "+", "_") != tag {
-		return fmt.Errorf("%s:%s holds chart %s %s", ref, tag, name, chartVersion)
-	}
+	archive, chartVersion := published.archive, published.version
 	valuesYAML, err := archiveFile(archive, "values.yaml")
 	if err != nil {
 		return err
@@ -123,7 +101,7 @@ func pull(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	archiveName := fmt.Sprintf("%s-%s.tgz", name, chartVersion)
+	archiveName := fmt.Sprintf("%s-%s.tgz", published.name, chartVersion)
 	if err = os.MkdirAll(filepath.Join(*dir, "chart"), 0o755); err != nil {
 		return err
 	}
@@ -132,7 +110,7 @@ func pull(args []string, out io.Writer) error {
 	}
 
 	m := &Manifest{
-		SchemaVersion: 1, Version: appVersion,
+		SchemaVersion: 1, Version: published.appVersion,
 		Operator: operator,
 		Chart:    File{Name: archiveName, Digest: sha256Of(archive)},
 		AICR:     aicr,
@@ -145,8 +123,55 @@ func pull(args []string, out io.Writer) error {
 		return err
 	}
 	_, err = fmt.Fprintf(out, "version=%s\nchart-repository=%s\nchart-digest=%s\nimage-ref=%s\nregistry-ref=%s\n",
-		chartVersion, ref, desc.Digest, operator.Ref(), registry.Ref())
+		chartVersion, ref, published.desc.Digest, operator.Ref(), registry.Ref())
 	return err
+}
+
+// publishedChart is a chart fetched from a registry and checked against the
+// tag it was fetched by.
+type publishedChart struct {
+	desc                      ocispec.Descriptor
+	archive                   []byte
+	name, version, appVersion string
+}
+
+// fetchChart fetches ref:tag, which must be one Helm archive no larger than a
+// chart may be, holding chart at the version the tag names.
+func fetchChart(ctx context.Context, charts *remote.Repository, ref, tag, chart string) (*publishedChart, error) {
+	desc, data, err := oras.FetchBytes(ctx, charts, tag, oras.DefaultFetchBytesOptions)
+	if err != nil {
+		return nil, fmt.Errorf("fetch %s:%s: %w", ref, tag, err)
+	}
+	var manifest ocispec.Manifest
+	if err = json.Unmarshal(data, &manifest); err != nil {
+		return nil, fmt.Errorf("parse %s:%s: %w", ref, tag, err)
+	}
+	if len(manifest.Layers) != 1 || manifest.Layers[0].MediaType != helmChartMediaType {
+		return nil, fmt.Errorf("%s:%s is not a Helm chart with one archive layer", ref, tag)
+	}
+	if size := manifest.Layers[0].Size; size > defaults.HelmChartArtifactLimit {
+		return nil, fmt.Errorf("%s:%s archive is %d bytes, over the %d byte limit", ref, tag, size, defaults.HelmChartArtifactLimit)
+	}
+	archive, err := content.FetchAll(ctx, charts, manifest.Layers[0])
+	if err != nil {
+		return nil, fmt.Errorf("fetch the archive of %s:%s: %w", ref, tag, err)
+	}
+	meta, err := chartMetadata(archive)
+	if err != nil {
+		return nil, err
+	}
+	c := &publishedChart{desc: desc, archive: archive}
+	c.name, _ = meta["name"].(string)
+	c.version, _ = meta["version"].(string)
+	c.appVersion, _ = meta["appVersion"].(string)
+	if c.name == "" || c.version == "" || c.appVersion == "" {
+		return nil, fmt.Errorf("%s:%s names no chart name, version or appVersion", ref, tag)
+	}
+	// Helm tags a chart with its version, "+" written as "_".
+	if c.name != chart || strings.ReplaceAll(c.version, "+", "_") != tag {
+		return nil, fmt.Errorf("%s:%s holds chart %s %s", ref, tag, c.name, c.version)
+	}
+	return c, nil
 }
 
 // writeManifest writes candidate.json and candidate-values.yaml for m.

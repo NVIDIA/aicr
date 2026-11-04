@@ -71,7 +71,11 @@ helm show values oci://ghcr.io/nvidia/charts/aicr-operator --version "${VERSION}
   | yq '{"operator": .operator.image, "registry": .registry.inCluster.image,
          "aicr": .aicr.version, "aicrImage": .aicr.image}'
 crane digest "ghcr.io/nvidia/charts/aicr-operator:${VERSION}"
-git show "v${VERSION}:docs/operator/support.md" | sed -n '/^## Qualified profiles/,/^## /p'
+# The qualified profiles only: stop before the "In qualification" table.
+git show "v${VERSION}:docs/operator/support.md" | awk '
+  /^## Qualified profiles$/ { in_section=1; print; next }
+  /^### In qualification$/ || /^## / { if (in_section) exit }
+  in_section'
 
 # Release-notes author, credited last in the thanks line (Step 4)
 gh api user --jq .login

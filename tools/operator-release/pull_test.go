@@ -28,8 +28,14 @@ import (
 	"testing"
 
 	ggcrregistry "github.com/google/go-containerregistry/pkg/registry"
+	"github.com/opencontainers/go-digest"
+	"github.com/opencontainers/image-spec/specs-go"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"go.yaml.in/yaml/v3"
+	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/registry/remote"
+
+	"github.com/NVIDIA/aicr/pkg/defaults"
 )
 
 func TestLatestStable(t *testing.T) {
@@ -318,5 +324,42 @@ func TestPullLatestRefusesEmptyReleasedList(t *testing.T) {
 		"-version", "latest", "-released", "", "-dir", filepath.Join(t.TempDir(), "out"), "-plain-http"}, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "no stable release") {
 		t.Fatalf("pull -released \"\" = %v; want no stable release, not the newest chart tag", err)
+	}
+}
+
+// A chart whose archive layer declares more than a chart may hold is refused
+// before its archive is read into memory.
+func TestPullRefusesOversizedChart(t *testing.T) {
+	t.Parallel()
+	host := testRegistry(t)
+	charts, err := remote.NewRepository(host + "/nvidia/charts/demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	charts.PlainHTTP = true
+	config, err := oras.PushBytes(t.Context(), charts, helmConfigMediaType, []byte(`{"name":"demo","version":"1.0.0"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := json.Marshal(ocispec.Manifest{
+		Versioned: specs.Versioned{SchemaVersion: 2},
+		MediaType: ocispec.MediaTypeImageManifest,
+		Config:    config,
+		Layers: []ocispec.Descriptor{{
+			MediaType: helmChartMediaType,
+			Digest:    digest.FromString("absent"),
+			Size:      defaults.HelmChartArtifactLimit + 1,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = oras.TagBytes(t.Context(), charts, ocispec.MediaTypeImageManifest, manifest, "1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	err = run([]string{"pull", "-chart-registry", host + "/nvidia/charts", "-chart", "demo",
+		"-version", "1.0.0", "-dir", filepath.Join(t.TempDir(), "out"), "-plain-http"}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Fatalf("pull of an oversized chart = %v; want it refused by size before the archive is read", err)
 	}
 }
