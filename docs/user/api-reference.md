@@ -142,6 +142,8 @@ Generate an optimized configuration recipe based on environment parameters.
 
 > **`service=nvke` is Preview**, covering the `nvke / gb200 / ubuntu / training` and `nvke / gb200 / ubuntu / training / kubeflow` coordinates. See [NVKE GB200 Setup](../integrator/nvke-gb200-setup.md) for its prerequisites and known gaps.
 
+> **`platform=runai` is Preview**, covering the `eks / h100 / ubuntu / training / runai` and `gke / h100 / cos / training / runai` coordinates. See [Run:ai cluster](component-catalog.md#runai-cluster) for its per-cluster inputs and known gaps.
+
 **Examples:**
 
 ```shell
@@ -662,6 +664,7 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `prometheus-operator-crds` | CRDs for the prometheus-operator (`Alertmanager`, `Prometheus`, `ServiceMonitor`, etc.) |
 | `psmdb-operator` | Percona Operator for MongoDB, reconciling `nvsentinel-mongodb`; added only by the NVSentinel remediation step mixins |
 | `rdma-modules` | NodeWright package that loads the in-tree RDMA ULP kernel modules (NVKE overlays) |
+| `runai-cluster` | NVIDIA Run:ai cluster side (operator, KAI Scheduler, Karta, agent) registering with a Run:ai control plane you run (`platform=runai` leaves, Preview) |
 | `slinky-drainer` | NVSentinel slinky-drainer plugin; drains quarantined Slurm nodes through Slurm by reconciling `DrainRequest`s (opt-in `nvsentinel-slinky-drainer` mixin) |
 | `slinky-drainer-crds` | `drainrequests.nvsentinel.nvidia.com` CRD required by `node-drainer` and `slinky-drainer` (opt-in `nvsentinel-slinky-drainer` mixin) |
 | `slinky-slurm` | Slinky-managed Slurm cluster instance (Controller, LoginSet, NodeSet, RestApi); reconciled by `slinky-slurm-operator` |

@@ -117,6 +117,22 @@ type ComponentConfig struct {
 	// written to each path without affecting the generic storageClassPaths.
 	SharedStorageClassPaths []string `yaml:"sharedStorageClassPaths,omitempty"`
 
+	// RequiredValues lists value paths a bundle of this component must
+	// supply: each must hold a non-empty value once every override has
+	// been applied, or be declared with --dynamic so it is filled at
+	// install time. The bundler rejects the bundle otherwise, naming the
+	// paths, so a chart that cannot work without a per-cluster input
+	// fails at bundle time rather than at install (ADR-029).
+	RequiredValues []string `yaml:"requiredValues,omitempty"`
+
+	// InstallTimeSecretPaths lists value paths that carry a credential.
+	// The bundler rejects a non-empty value at one of them from any source
+	// (values file, overlay, --set, --set-json, --set-file), so no
+	// generated artifact carries the secret; --dynamic is the only way to
+	// supply it, and only the helm deployer may, because the other
+	// deployers persist the filled value (ADR-029).
+	InstallTimeSecretPaths []string `yaml:"installTimeSecretPaths,omitempty"`
+
 	// Validations defines component-specific validation checks.
 	Validations []ComponentValidationConfig `yaml:"validations,omitempty"`
 
@@ -841,6 +857,13 @@ func (r *ComponentRegistry) Validate() []error {
 		}
 	}
 
+	// requiredValues and installTimeSecretPaths name value paths, so an
+	// empty or repeated entry is a typo, never a meaningful declaration.
+	for _, comp := range r.Components {
+		errs = append(errs, validateValuePathList(comp.Name, "requiredValues", comp.RequiredValues)...)
+		errs = append(errs, validateValuePathList(comp.Name, "installTimeSecretPaths", comp.InstallTimeSecretPaths)...)
+	}
+
 	// requireNodeSelector (or its requireNodeSelectorIfStorageClassSet
 	// counterpart) with no paths to enforce is always a config mistake, a
 	// typo'd path list, or the flag left on after paths were removed. The
@@ -1136,4 +1159,24 @@ func (c *ComponentConfig) GetType() ComponentType {
 		return ComponentTypeKustomize
 	}
 	return ComponentTypeHelm
+}
+
+// validateValuePathList rejects empty and repeated entries in one of a
+// component's value-path lists (requiredValues, installTimeSecretPaths).
+func validateValuePathList(component, field string, paths []string) []error {
+	var errs []error
+	seen := make(map[string]struct{}, len(paths))
+	for i, path := range paths {
+		if strings.TrimSpace(path) == "" {
+			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q: %s[%d] is empty", component, field, i)))
+			continue
+		}
+		if _, dup := seen[path]; dup {
+			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q: %s repeats %q", component, field, path)))
+		}
+		seen[path] = struct{}{}
+	}
+	return errs
 }

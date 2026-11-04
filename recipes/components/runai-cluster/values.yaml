@@ -1,0 +1,95 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Run:ai cluster Helm values (runai-cluster 3.0.20).
+#
+# Installs the NVIDIA Run:ai cluster side against a control plane the user
+# already runs: runai-operator, KAI Scheduler 0.18 and KAI Resource Management
+# through the bundled subcharts, Karta, and the operands the operator creates
+# from the control plane's configuration (agent, cluster-sync, controllers).
+# The control plane itself is out of scope (NVIDIA/aicr#3302, Phase 1).
+#
+# The chart bundles its own KAI Scheduler, so the leaves that select this
+# component disable AICR's kai-scheduler; the two ship the same CRDs and
+# PriorityClasses and cannot coexist.
+
+# Per-cluster inputs, shipped empty on purpose: the recipe is the same for
+# every cluster, the registration is not. Set the two identifiers at bundle
+# time and declare the token as an install-time parameter:
+#
+#   aicr bundle -r recipe.yaml \
+#     --set runai:controlPlane.url=https://<tenant>.run.ai \
+#     --set runai:cluster.uid=<cluster UID shown by the control plane> \
+#     --set runai:cluster.url=<FQDN the control plane reaches this cluster at> \
+#     --dynamic runai:controlPlane.bootstrapToken
+#
+# controlPlane.bootstrapToken is a credential the control plane issues per
+# cluster and expires after two hours. --dynamic moves the path out of the
+# bundle's values.yaml into its cluster-values.yaml, so the generated bundle,
+# the goldens and the evidence never carry it. The operator writes the token
+# into cluster-values.yaml on the install machine right before deploy.sh runs;
+# from then on that file holds the token at rest, so protect it like a
+# kubeconfig and clear the value once the release is installed. Helm also
+# keeps every install's values in the release Secret in the runai namespace,
+# token included, and clearing the file does not purge that; the two-hour
+# expiry bounds the exposure, and access to Helm release Secrets in runai
+# should be as restricted as the kubeconfig. A fresh token is needed for every
+# install and upgrade. The chart does not validate these four values: with
+# any of them empty it still renders every registration hook Job, with empty
+# arguments. The registry therefore lists them as requiredValues, so aicr
+# bundle refuses a bundle that leaves one empty, and the token as an
+# installTimeSecretPaths entry, so a value from --set or a values file is
+# rejected and every deployer but helm is refused (the others would write the
+# filled token at rest: manifest, Git, state, Application spec). install.sh
+# refuses to run while the token stub in cluster-values.yaml is empty. The
+# hook Jobs carry the token in plain text as a container argument, so anyone
+# who can read Pods or Jobs in the runai namespace can read it, and a failed
+# hook (backoffLimit 0, deleted only on success) keeps that Job behind.
+controlPlane:
+  url: ""
+  bootstrapToken: ""
+cluster:
+  uid: ""
+  # The FQDN (or URL) the control plane reaches this cluster at; the hooks
+  # handler needs it together with the URL, UID and token before it performs
+  # the control-plane-assisted install, and the chart's own values carry no
+  # default for it.
+  url: ""
+
+# The chart detects OpenShift through a Helm `lookup`, which returns nothing
+# when AICR renders offline (Argo CD, Flux, helm template), so the render and
+# the install would disagree. Pinned off; an OpenShift leaf sets Enabled
+# together with kai-resource-management.openshift.
+openShift:
+  mode: Disabled
+
+# Tolerations. global.tolerations reaches the operator, the hook Jobs and
+# the KAI operator and KRM subcharts, but karta and gpu-fractioning read only
+# their own tolerations value, so the three paths together are what covers
+# every pod the chart renders (verified by render at 3.0.20). global.nodeSelector
+# reaches only the KAI subcharts, so no nodeSelector path is mapped in the
+# registry and system-node placement stays an upstream ask. The bundler
+# replaces all three lists when the bundle is generated with
+# --system-node-toleration.
+global:
+  tolerations:
+    - operator: Exists
+karta:
+  tolerations:
+    - operator: Exists
+kai-resource-management:
+  kai-scheduler:
+    gpu-fractioning:
+      tolerations:
+        - operator: Exists
