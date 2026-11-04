@@ -1096,6 +1096,12 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 			service: recipe.CriteriaServiceRKE2,
 			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorVR200},
 		},
+		{
+			name:    "NVLS NVKE VR200",
+			variant: variantNVLS,
+			service: recipe.CriteriaServiceNVKE,
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorVR200},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

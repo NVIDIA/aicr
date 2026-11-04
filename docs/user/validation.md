@@ -85,7 +85,7 @@ is installed on the cluster.
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE (GPUDirect TCPXO), H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
 | `nccl-all-reduce-bw-net` | NET (EFA on EKS; built-in IB/verbs on OKE) | GB200 + EKS, GB200 + OKE, and GB300 + EKS. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the benchmark — see [Grace Blackwell NET preflight](#grace-blackwell-net-preflight-gpudirect-rdma-prerequisites). |
-| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, GB200 + OKE, GB200 + GKE (A4X GPUDirect-RDMA/gIB carries the IMEX/NVLink fabric traffic; gIB is the transport driver, not the NCCL algorithm), GB300 (EKS, generic), and VR200 + RKE2. Asserts the NVLS communicator actually initialized. Catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE), or gIB/RDMA initialization failure (GKE), when the IMEX domain is misconfigured. |
+| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, GB200 + OKE, GB200 + GKE (A4X GPUDirect-RDMA/gIB carries the IMEX/NVLink fabric traffic; gIB is the transport driver, not the NCCL algorithm), GB300 (EKS, generic), VR200 + RKE2, and VR200 + NVKE. Asserts the NVLS communicator actually initialized. Catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE), or gIB/RDMA initialization failure (GKE), when the IMEX domain is misconfigured. |
 
 The applicability column is the *default*, derived from the recipe's
 `criteria`. A recipe whose criteria fall outside it can still run these
@@ -335,7 +335,7 @@ is passed it replaces the automatic filters rather than narrowing them.
 
 Valid profiles are the pairs in the applicability table above: `b200/any`,
 `gb200/any`, `gb200/eks`, `gb200/gke`, `gb200/oke`, `gb300/eks`, `gb300/generic`,
-`h100/aks`, `h100/eks`, `h100/gke`, `h200/eks`, `vr200/rke2`. A
+`h100/aks`, `h100/eks`, `h100/gke`, `h200/eks`, `vr200/nvke`, `vr200/rke2`. A
 malformed or unknown value **fails** the check rather than silently skipping
 it. A valid profile that doesn't implement a requested variant (e.g.
 `gb200/eks` with the auto-detect `nccl-all-reduce-bw` check) skips just that
