@@ -21,6 +21,7 @@
 //	operator-release extract -dir dist/candidate -platform linux/amd64 -out bin
 //	operator-release refuses -dir dist/candidate
 //	operator-release push    -dir dist/candidate
+//	operator-release pull    -dir dist/published -version latest -below <candidate version>
 package main
 
 import (
@@ -45,7 +46,7 @@ func main() {
 
 func run(args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: operator-release build|extract|refuses|push [flags]")
+		return errors.New("usage: operator-release build|extract|refuses|push|pull [flags]")
 	}
 	switch args[0] {
 	case "build":
@@ -56,6 +57,8 @@ func run(args []string, out io.Writer) error {
 		return refuses(args[1:], out)
 	case "push":
 		return push(args[1:], out)
+	case "pull":
+		return pull(args[1:], out)
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -115,10 +118,6 @@ func build(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	sboms, err := hashDir(filepath.Join(*dir, "sbom"))
-	if err != nil {
-		return err
-	}
 	inputs := map[string]string{}
 	for _, f := range []string{*settingsFile, *koFile, *goSum} {
 		data, readErr := os.ReadFile(f)
@@ -133,10 +132,10 @@ func build(args []string, out io.Writer) error {
 		Toolchain: Toolchain{Go: *goVersion, Ko: s.BuildTools.Ko, BaseImage: base},
 		Operator:  image,
 		Chart:     File{Name: chartFile, Digest: sha256Of(archive)},
-		Plugin:    plugin, SBOMs: sboms,
-		AICR:     aicr,
-		Registry: registry,
-		Inputs:   inputs,
+		Plugin:    plugin,
+		AICR:      aicr,
+		Registry:  registry,
+		Inputs:    inputs,
 	}
 	if err = m.seal(); err != nil {
 		return err

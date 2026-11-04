@@ -294,3 +294,47 @@ jobs:
       - name: Delete kind cluster
         if: ${{ always() }}
         run: make operator-kind-down
+
+  # The lifecycle scenarios from the newest published release: its chart and
+  # images, attestations verified, upgraded mid-rollout to this commit's
+  # candidate, rolled back with helm rollback and uninstalled in the documented
+  # order (docs/operator/lifecycle.md). Each release keeps its own AICR
+  # default, so when the two defaults differ the upgrade also moves AICR
+  # within v1.
+  qualify-published:
+    name: Qualify an upgrade from the published release on Kubernetes newest
+    needs: [matrix, prime-images]
+    runs-on: ubuntu-24.04
+    # Above the 45m test timeout make operator-qualify-published sets, plus
+    # kind setup and the candidate build.
+    timeout-minutes: 75
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up the kind cluster
+        uses: ./.github/actions/operator-kind
+        with:
+          kubernetes: newest
+
+      - name: Build the candidate
+        run: CANDIDATE_VERSION=v0.0.0-rc.0 make operator-candidate
+
+      - name: Qualify the upgrade from the published release
+        env:
+          OPERATOR_E2E_REQUIRED: '1'
+          OPERATOR_KIND_IMAGE_CACHE: ${{ runner.temp }}/kind-images
+          GH_TOKEN: ${{ github.token }}
+        run: make operator-qualify-published
+
+      - name: Operator logs
+        if: ${{ failure() || cancelled() }}
+        run: |
+          kubectl --kubeconfig .operator-e2e/kubeconfig -n aicr-system logs deployment/aicr-operator --tail=300 || true
+          kubectl --kubeconfig .operator-e2e/kubeconfig get clusterruntimes,runtimerollouts -o yaml || true
+
+      - name: Delete kind cluster
+        if: ${{ always() }}
+        run: make operator-kind-down
