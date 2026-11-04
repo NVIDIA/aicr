@@ -979,7 +979,8 @@ and aggregates each requirement's status fail-closed from every check expected
 to evidence it (see [Requirement status](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#requirement-status)).
 The renderer records a skipped check as `NOT TESTED` with its reason code
 (for example `slurm-managed-gpus`, when `secure-accelerator-access` defers to
-the Slurm path), so a skip is reported rather than hidden, but a run that
+the Slurm path and `slinky-slurm-gpu-access` did not run), so a skip is
+reported rather than hidden, but a run that
 withholds a check the recipe declares is narrower than the recipe by
 construction and cannot evidence that recipe. `--skip-check` is for lanes
 that cannot host a check at all; those are not submission lanes, so

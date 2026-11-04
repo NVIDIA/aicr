@@ -342,8 +342,9 @@ func (c *Client) RenderCNCFEvidenceWithOptions(ctx context.Context, report *ctrf
 // tested except those opts.NotApplicable declares. A check whose requirement
 // the selected version does not list (dra_support from v1.36 on) renders as
 // supporting evidence. A report from a run that used
-// WithValidationSkipChecks is refused, because the withheld requirements
-// would be reported as not tested with no record of why.
+// WithValidationSkipChecks is refused: a run with withheld checks is narrower
+// than the recipe by construction, so its evidence cannot stand for the
+// recipe.
 //
 // The aggregate is non-nil whenever the error is nil.
 //
@@ -368,8 +369,8 @@ func (c *Client) RenderCNCFEvidenceWithResult(ctx context.Context, report *ctrf.
 		for _, t := range report.Results.Tests {
 			if t.Status == ctrf.StatusSkipped && t.Extra["skipReason"] == validator.SkipCheckReasonCode {
 				return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-					"check %q was withheld by WithValidationSkipChecks: the CNCF evidence renderer would report its "+
-						"requirement as not tested with no record that it was withheld on purpose", t.Name))
+					"check %q was withheld by WithValidationSkipChecks: a run with withheld checks is narrower than "+
+						"the recipe by construction, so its CNCF evidence cannot stand for the recipe", t.Name))
 			}
 		}
 	}

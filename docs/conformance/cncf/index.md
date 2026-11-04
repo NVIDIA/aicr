@@ -100,6 +100,7 @@ pkg/evidence/cncf/                    # CNCF evidence collector package
 ├── collector.go                      # Feature registry, alias mapping
 ├── consts.go                         # Feature name constants
 ├── renderer.go                       # Evidence file rendering
+├── aggregate.go                      # Requirement status aggregation, fail-closed by level
 ├── checklist.go                      # Versioned upstream checklists (ids, levels, descriptions), digest-pinned
 ├── requirements.go                   # Which conformance checks evidence which requirement; evidence page per requirement
 ├── schemas/                          # Verbatim upstream AIConformance-<version>.yaml copies
