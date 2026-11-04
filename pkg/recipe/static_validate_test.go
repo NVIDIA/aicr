@@ -66,15 +66,21 @@ func TestValidateStaticRejectsMalformedYAML(t *testing.T) {
 
 func TestValidateStaticMixinComponentTypes(t *testing.T) {
 	tests := []struct {
-		name, componentType string
-		wantDiagnostic      bool
+		name    string
+		ref     ComponentRef
+		problem string
+		catalog bool
 	}{
-		{name: "registry default"},
-		{name: "Helm", componentType: "Helm"},
-		{name: "lowercase Helm", componentType: "helm"},
-		{name: "Kustomize", componentType: "Kustomize"},
-		{name: "lowercase Kustomize", componentType: "kustomize"},
-		{name: "misspelled Helm", componentType: "Heml", wantDiagnostic: true},
+		{name: "registry defaults", ref: ComponentRef{Name: "kubeflow-trainer"}, catalog: true},
+		{name: "Helm", ref: ComponentRef{Name: "kubeflow-trainer", Type: ComponentTypeHelm}},
+		{name: "lowercase Helm", ref: ComponentRef{Name: "kubeflow-trainer", Type: "helm"}},
+		{name: "Kustomize", ref: ComponentRef{Name: "kubeflow-trainer", Type: ComponentTypeKustomize, Path: "."}},
+		{name: "lowercase Kustomize", ref: ComponentRef{Name: "kubeflow-trainer", Type: "kustomize", Path: "."}},
+		{name: "misspelled Helm", ref: ComponentRef{Name: "kubeflow-trainer", Type: "Heml"}, problem: `unsupported type "Heml"`, catalog: true},
+		{name: "Kustomize with manifests", ref: ComponentRef{Name: "kubeflow-trainer", Type: ComponentTypeKustomize, Path: ".", ManifestFiles: []string{"extra.yaml"}}, problem: "also declares manifestFiles", catalog: true},
+		{name: "Kustomize without path", ref: ComponentRef{Name: "kubeflow-trainer", Type: ComponentTypeKustomize}, problem: "has no path"},
+		{name: "Helm with path", ref: ComponentRef{Name: "kubeflow-trainer", Type: ComponentTypeHelm, Path: "."}, problem: "carries Kustomize field"},
+		{name: "unsupported patches", ref: ComponentRef{Name: "kubeflow-trainer", Patches: []string{"patch.yaml"}}, problem: "declares patches"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -82,32 +88,52 @@ func TestValidateStaticMixinComponentTypes(t *testing.T) {
 			if err := os.CopyFS(dir, GetEmbeddedFS()); err != nil {
 				t.Fatal(err)
 			}
-			path := filepath.Join(dir, "mixins", "platform-kubeflow.yaml")
-			content, err := os.ReadFile(path)
+			const source = "mixins/unreferenced-static.yaml"
+			path := filepath.Join(dir, source)
+			mix := RecipeMixin{Kind: RecipeMixinKind, APIVersion: "aicr.run/v1beta1"}
+			mix.Metadata.Name = "unreferenced-static"
+			mix.Spec.ComponentRefs = []ComponentRef{tt.ref}
+			content, err := yaml.Marshal(mix)
 			if err != nil {
 				t.Fatal(err)
 			}
-			content = []byte(strings.Replace(string(content), "type: Helm", "type: "+tt.componentType, 1))
 			if err := os.WriteFile(path, content, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			for _, dataDir := range []string{"", dir} {
-				diagnostics, err := ValidateStatic(t.Context(), path, dataDir)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if !tt.wantDiagnostic {
-					if len(diagnostics) != 0 {
-						t.Fatalf("valid component type rejected: %+v", diagnostics)
+			type validationMode struct {
+				name     string
+				validate func() ([]StaticDiagnostic, error)
+				file     string
+			}
+			modes := []validationMode{
+				{"file embedded", func() ([]StaticDiagnostic, error) { return ValidateStatic(t.Context(), path, "") }, path},
+				{"file external", func() ([]StaticDiagnostic, error) { return ValidateStatic(t.Context(), path, dir) }, path},
+			}
+			if tt.catalog {
+				modes = append(modes,
+					validationMode{"catalog layered", func() ([]StaticDiagnostic, error) { return ValidateStatic(t.Context(), "", dir) }, source},
+					validationMode{"catalog external", func() ([]StaticDiagnostic, error) { return ValidateStaticDirectory(t.Context(), dir) }, source},
+				)
+			}
+			for _, mode := range modes {
+				t.Run(mode.name, func(t *testing.T) {
+					diagnostics, err := mode.validate()
+					if err != nil {
+						t.Fatal(err)
 					}
-					continue
-				}
-				if len(diagnostics) != 1 || diagnostics[0].File != path ||
-					diagnostics[0].Field != "spec.componentRefs[0].type" || diagnostics[0].Severity != "error" ||
-					!strings.Contains(diagnostics[0].Message, `unsupported type "Heml"`) {
+					if tt.problem == "" {
+						if len(diagnostics) != 0 {
+							t.Fatalf("valid component rejected: %+v", diagnostics)
+						}
+						return
+					}
+					if len(diagnostics) != 1 || diagnostics[0].File != mode.file ||
+						diagnostics[0].Field != "spec.componentRefs[0]" || diagnostics[0].Severity != "error" ||
+						!strings.Contains(diagnostics[0].Message, tt.problem) {
 
-					t.Fatalf("missing component type diagnostic: %+v", diagnostics)
-				}
+						t.Fatalf("missing component coherence diagnostic: %+v", diagnostics)
+					}
+				})
 			}
 		})
 	}
@@ -118,9 +144,12 @@ func TestValidateStaticFileOverlayNames(t *testing.T) {
 	tests := []struct {
 		name, inputFile, overlayName string
 		partialCatalog, outside      bool
+		symlink                      bool
 		duplicate, wantDiagnostic    bool
 	}{
 		{name: "existing file", inputFile: original},
+		{name: "existing file through symlink", inputFile: original, symlink: true},
+		{name: "duplicate through symlink", inputFile: original, symlink: true, duplicate: true, wantDiagnostic: true},
 		{name: "copied file", inputFile: "dup-copy.yaml", wantDiagnostic: true},
 		{name: "original with duplicate", inputFile: original, duplicate: true, wantDiagnostic: true},
 		{name: "new overlay", inputFile: "new-leaf.yaml", overlayName: "new-static-leaf"},
@@ -161,6 +190,14 @@ func TestValidateStaticFileOverlayNames(t *testing.T) {
 					t.Fatal(writeErr)
 				}
 			}
+			if tt.symlink {
+				alias := filepath.Join(t.TempDir(), "catalog")
+				if symlinkErr := os.Symlink(dir, alias); symlinkErr != nil {
+					t.Fatal(symlinkErr)
+				}
+				path = filepath.Join(alias, "overlays", tt.inputFile)
+			}
+
 			diagnostics, err := ValidateStatic(t.Context(), path, dir)
 			if err != nil {
 				t.Fatal(err)

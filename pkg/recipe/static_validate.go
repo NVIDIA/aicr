@@ -280,6 +280,10 @@ func validateStaticOverlayName(ctx context.Context, dp DataProvider, path, dataD
 	if err != nil {
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "failed to resolve validation input path", err)
 	}
+	inputPath, err = filepath.EvalSymlinks(inputPath)
+	if err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "failed to resolve validation input symlinks", err)
+	}
 	walkErr := dp.WalkDir(ctx, "overlays", func(name string, entry fs.DirEntry, entryErr error) error {
 		if entryErr != nil {
 			return aicrerrors.PropagateOrWrap(entryErr, aicrerrors.ErrCodeInvalidRequest, "failed to walk overlay source")
@@ -294,6 +298,13 @@ func validateStaticOverlayName(ctx context.Context, dp DataProvider, path, dataD
 		if err != nil {
 			return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "failed to resolve overlay source path", err)
 		}
+		resolvedPath, resolveErr := filepath.EvalSymlinks(sourcePath)
+		if resolveErr == nil {
+			sourcePath = resolvedPath
+		} else if !stderrors.Is(resolveErr, fs.ErrNotExist) {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "failed to resolve overlay source symlinks", resolveErr)
+		}
+
 		if sourcePath == inputPath {
 			return nil
 		}
@@ -331,16 +342,7 @@ func validateStaticAuthoringFile(ctx context.Context, path string, data []byte, 
 		if err := validateConstraintPaths(mix.Spec.Constraints, path, locSpecConstraints); err != nil {
 			add(path, locSpecConstraints, err)
 		}
-		validateStaticRefs(path, mix.Spec.ComponentRefs, registry, add)
-		for i, ref := range mix.Spec.ComponentRefs {
-			if ref.Type != "" && !strings.EqualFold(string(ref.Type), string(ComponentTypeHelm)) &&
-				!strings.EqualFold(string(ref.Type), string(ComponentTypeKustomize)) {
-
-				add(path, fmt.Sprintf("spec.componentRefs[%d].type", i), aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-					fmt.Sprintf("component %q has unsupported type %q; expected %q or %q",
-						ref.Name, ref.Type, ComponentTypeHelm, ComponentTypeKustomize)))
-			}
-		}
+		validateStaticMixinRefs(path, mix.Spec.ComponentRefs, registry, add)
 		return
 	}
 	var overlay RecipeMetadata
@@ -387,12 +389,28 @@ func validateStaticCatalog(ctx context.Context, store *MetadataStore, registry *
 	}
 	sort.Strings(mixinNames)
 	for _, name := range mixinNames {
-		validateStaticRefs("mixins/"+name+".yaml", store.Mixins[name].Spec.ComponentRefs, registry, add)
+		validateStaticMixinRefs("mixins/"+name+".yaml", store.Mixins[name].Spec.ComponentRefs, registry, add)
 	}
 	if store.Base != nil {
 		validateStaticRefs("overlays/base.yaml", store.Base.Spec.ComponentRefs, registry, add)
 	}
 	return nil
+}
+
+func validateStaticMixinRefs(file string, refs []ComponentRef, registry *ComponentRegistry, add func(string, string, error)) {
+	validateStaticRefs(file, refs, registry, add)
+	resolved := slices.Clone(refs)
+	canonicalizeComponentTypes(resolved)
+	for i := range resolved {
+		ref := &resolved[i]
+		if !ref.IsEnabled() || registry.Get(ref.Name) == nil {
+			continue
+		}
+		ref.ApplyRegistryDefaults(registry.Get(ref.Name))
+		if problem := ref.coherenceProblem(); problem != "" {
+			add(file, fmt.Sprintf("spec.componentRefs[%d]", i), aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, problem))
+		}
+	}
 }
 
 func validateStaticRefs(file string, refs []ComponentRef, registry *ComponentRegistry, add func(string, string, error)) {
