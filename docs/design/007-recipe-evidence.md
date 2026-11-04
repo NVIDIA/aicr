@@ -15,8 +15,10 @@
 > [#3601](https://github.com/NVIDIA/aicr/issues/3601): the CNCF
 > submission collector script will be retired and `--cncf-submission`
 > will become an output option on `aicr validate --phase conformance`;
-> `--feature` and `evidence.cncf.features` will be removed. The shipped
-> CLI still runs the collector until
+> `--feature` and `evidence.cncf.features` will be removed, and
+> `--evidence-dir` will require `--cncf-submission` (today's
+> `--evidence-dir`-alone rendering goes away). The shipped CLI still
+> runs the collector until
 > [#3602](https://github.com/NVIDIA/aicr/issues/3602) lands. See
 > [Amendment: single-path CNCF conformance evidence (2026-11-03)](#amendment-single-path-cncf-conformance-evidence-2026-11-03).
 > The recipe-test-attestation kind is not affected.
@@ -230,8 +232,9 @@ and introduces kind-scoped flag names for the new attestation kind:
 > below describe the surface as it shipped. The
 > [amendment](#amendment-single-path-cncf-conformance-evidence-2026-11-03)
 > keeps `--evidence-dir` and `--cncf-submission` but will change what
-> `--cncf-submission` does, and will remove `--feature` and
-> `evidence.cncf.features`, once
+> `--cncf-submission` does, will make `--evidence-dir` require it
+> (today's `--evidence-dir`-alone rendering goes away), and will remove
+> `--feature` and `evidence.cncf.features`, once
 > [#3602](https://github.com/NVIDIA/aicr/issues/3602) lands. Until then
 > the row describes the shipped CLI. The recipe-test-attestation row is
 > unchanged.
@@ -1416,14 +1419,22 @@ the other phases, not capacity, bound what can be always-on.
    PRODUCT.yaml, README.md (carrying the platform facts PRODUCT.yaml notes
    cite), `junit.xml`, `e2e.log` and the existing
    `evidence/<requirement>.md` pages, with one redaction pass
-   (`pkg/evidence/redact`) and a check of the directory by the pinned
+   (`pkg/evidence/redact`) over the complete submission directory, all
+   five kinds of file, before a check of that directory by the pinned
    upstream validator as the last step. Vendor fields and the conditional
    `cluster_autoscaling` N/A justification come from the validate config,
    not a new flag. A submission run refuses `--skip-check` and
-   `--no-cluster` and no longer bypasses validation. Once a submission run
-   passes its flag and input validation, it exits non-zero for exactly two
-   causes: an incomplete applicable MUST requirement, or a failed artifact
-   validation. Neither rewrites a check verdict.
+   `--no-cluster` and no longer bypasses validation. A submission run
+   exits non-zero for: (a) flag and input refusals before any check runs,
+   and the readiness pre-flight, with exit 2 as today; (b) an incomplete
+   applicable MUST requirement; (c) a write or redaction error, or the
+   pinned upstream validator failing or being unable to run (for example
+   it cannot fetch the CNCF landscape), reported as an internal error. A
+   submission run derives its exit status from the requirement
+   aggregation, so the per-check rule of `--fail-on-error` is superseded:
+   a non-passing check behind a SHOULD does not fail a submission run,
+   while any non-passing check behind a MUST does, through (b). No check
+   verdict is rewritten.
 3. **`--feature` and `evidence.cncf.features` are removed together with
    the script.** Implementing issue:
    [#3602](https://github.com/NVIDIA/aicr/issues/3602).
@@ -1435,9 +1446,11 @@ the other phases, not capacity, bound what can be always-on.
    `ErrCodeInvalidRequest` otherwise, because the single runner selects
    checks from the recipe and the collector's capability-detection path
    goes away with it; the submission examples without `--recipe` in
-   `docs/conformance/cncf/index.md` and `docs/user/validation.md` are
-   updated in [#3602](https://github.com/NVIDIA/aicr/issues/3602). The
-   argument contract is specified and tested in
+   `docs/conformance/cncf/index.md` and `docs/user/validation.md`, and the
+   `--evidence-dir`-alone "Structural Validation (CI)" example in
+   `docs/conformance/cncf/index.md`, are updated in
+   [#3602](https://github.com/NVIDIA/aicr/issues/3602). The argument
+   contract is specified and tested in
    [#3602](https://github.com/NVIDIA/aicr/issues/3602).
 4. **Depth is set by the CNCF bar; checks are extended in place.**
    Implementing issues:
@@ -1466,16 +1479,30 @@ the other phases, not capacity, bound what can be always-on.
    claimed Implemented, MUST or SHOULD, must have every expected check
    present and passed. Skipped, `other`, missing, or capacity-starved
    checks leave it incomplete, recorded as an unmet test prerequisite
-   rather than a disproven capability. Statuses come from the run, never
-   from the config. A requirement is Implemented only when every
-   expected check is present and passed. An incomplete applicable MUST
-   fails the submission run. A SHOULD with incomplete or absent checks
-   renders Not Implemented and the run does not fail (for example
-   `workload_sandboxing` at v1.37, where a missing sandbox runtime renders
-   Not Implemented). MUST-level N/A exists only for the conditional
-   `cluster_autoscaling`. The validate config is the only source of that
-   N/A justification; checks record observations only and never assert
-   nonapplicability.
+   rather than a disproven capability. Implemented and Not Implemented
+   come from the run; N/A comes only from the validate config key
+   `spec.validate.evidence.cncf.notApplicable`, only for conditional
+   MUSTs. A requirement is Implemented only when every expected check is
+   present and passed. An incomplete applicable MUST fails the submission
+   run. A SHOULD with incomplete or absent checks renders Not Implemented
+   and the run does not fail (for example `workload_sandboxing` at v1.37,
+   where a missing sandbox runtime renders Not Implemented). MUST-level
+   N/A exists only for the conditional `cluster_autoscaling`. The
+   `notApplicable` key maps a conditional MUST id (today only
+   `cluster_autoscaling`) to its justification; when set, the requirement
+   renders N/A with that justification, taking precedence over a
+   cluster-autoscaling check that ran, whose result is recorded as an
+   observation and not referenced as proof. Any other id in that map is
+   refused. Checks record observations only and never assert
+   nonapplicability. Export rule for the artifacts: the raw CTRF report
+   keeps the real verdict; the submission `junit.xml` and `e2e.log` export
+   a non-passing testcase that belongs only to a Not Implemented SHOULD as
+   skipped, with the original verdict and reason in the message, and
+   PRODUCT.yaml does not reference it; a non-passing MUST testcase is
+   exported as a failure and the run exits non-zero, so the directory is
+   not submittable. This is what lets the upstream artifact check, which
+   rejects any failure or error in a referenced artifact, pass for a Not
+   Implemented SHOULD.
 7. **AICR-named junit; the upstream suite is optional.** Implementing
    issue: [#3605](https://github.com/NVIDIA/aicr/issues/3605). `junit.xml`
    carries AICR check names, referenced per requirement with explicit
@@ -1483,11 +1510,12 @@ the other phases, not capacity, bound what can be always-on.
    before its upstream-name fallback. Running the kubernetes-sigs/ai-
    conformance suite is optional independent verification with its own
    provenance; upstream testcase names appear only for tests actually run
-   from it. Together with PRODUCT.yaml and README.md, `junit.xml` and
-   `e2e.log` are the whole submission artifact contract. No additional
-   structured artifacts (typed JSON records, `results.json`) are produced;
-   the upstream validator reads only PRODUCT.yaml, `junit.xml` and
-   `e2e.log`.
+   from it. The submission directory is PRODUCT.yaml, README.md,
+   `junit.xml`, `e2e.log` and the `evidence/<requirement>.md` pages. The
+   upstream validator reads PRODUCT.yaml, resolves every local file it
+   cites (each must exist) and parses `junit.xml` and `e2e.log`; no
+   additional structured artifacts (typed JSON records, `results.json`)
+   are produced.
 
 ### Options considered
 
@@ -1496,7 +1524,7 @@ the other phases, not capacity, bound what can be always-on.
 | A. One depth, always full | Rejected. The nightly step overruns and Kind lanes cannot run the deep tests. |
 | B. Two tiers as separate catalog checks | Chosen on 2026-11-03, superseded 2026-11-04 (see the note below). Reuses `--skip-check`, keeps the recipe the source of truth, and a submission run cannot omit the deep tier. |
 | C. Depth flag on the run | Rejected. A flag that changes verdict logic is the two-behaviors problem being removed, and it creates "passed nightly, failed at submission". |
-| D. Delegate deep MUSTs to the upstream suite | Kept as optional independent verification. External dependency, per-test flags, 30 to 75 minute timeouts, no coverage of AICR-specific probes, and not needed for junit credit. |
+| D. Delegate deep MUSTs to the upstream suite | Kept as optional independent verification. External dependency, per-test flags, timeouts of 30 to 75 minutes, no coverage of AICR-specific probes, and not needed for junit credit. |
 
 The table records the options as considered on 2026-11-03. On
 2026-11-04 option B was superseded by the CNCF-bar audit

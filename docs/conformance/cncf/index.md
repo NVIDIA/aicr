@@ -116,7 +116,10 @@ recorded section failure is no longer masked as overall success.
 > [#3601](https://github.com/NVIDIA/aicr/issues/3601); the decision is recorded
 > in the ADR-007 amendment
 > ([docs/design/007-recipe-evidence.md](../../design/007-recipe-evidence.md)).
-> Until that lands, the table below describes the shipped behavior.
+> `--evidence-dir` will then require `--cncf-submission`, so the
+> `--evidence-dir`-alone rendering shown under Structural Validation goes
+> away with it. Until that lands, the table below describes the shipped
+> behavior.
 
 | | `aicr validate --phase conformance` | `--cncf-submission` |
 |---|---|---|
