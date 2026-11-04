@@ -129,6 +129,9 @@ func TestECRProviderRidesOutAFailedMint(t *testing.T) {
 	ctx := context.Background()
 	// Waits out a mint started in the background, if one is in flight.
 	settle := func() { <-p.mints.DoChan("", func() (any, error) { return nil, nil }) } //nolint:nilnil // the result is unused
+	if p.ServesCachedToken() {
+		t.Fatal("ServesCachedToken() before any mint = true")
+	}
 	if _, err := p.Token(ctx); err != nil || p.MintFailure() != nil {
 		t.Fatalf("Token() = %v, failure %+v", err, p.MintFailure())
 	}
@@ -141,7 +144,7 @@ func TestECRProviderRidesOutAFailedMint(t *testing.T) {
 		t.Fatalf("MintFailure() = %+v, %d failures", f, p.MintFailures())
 	}
 	calls := api.Calls()
-	if c, err := p.Credential(ctx, p.Host); err != nil || c.Password != secretToken {
+	if c, err := p.Credential(ctx, p.Host); err != nil || c.Password != secretToken || !p.ServesCachedToken() {
 		t.Fatalf("Credential() with 5h left and a failing mint = %+v, %v; want the cached token", c, err)
 	}
 	settle()
@@ -158,7 +161,7 @@ func TestECRProviderRidesOutAFailedMint(t *testing.T) {
 	}
 
 	clock = now.Add(11*time.Hour + 30*time.Minute)
-	if _, err := p.Token(ctx); operrors.ReasonOf(err) != ReasonCredentialsUnavailable {
+	if _, err := p.Token(ctx); operrors.ReasonOf(err) != ReasonCredentialsUnavailable || p.ServesCachedToken() {
 		t.Fatalf("Token() with 30m left and a failing mint = %v", err)
 	}
 	if f := p.MintFailure(); f == nil || !f.Since.Equal(now.Add(7*time.Hour)) {

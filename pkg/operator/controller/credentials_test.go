@@ -218,6 +218,22 @@ func TestRepoCredsRefresherRidesOutAMintFailure(t *testing.T) {
 		t.Errorf("mint failures = %v, want at least 2", failures)
 	}
 
+	// A new leader starts with no cached token, so registry calls fail even
+	// though the Secret's token is valid.
+	leader := &registry.ECRProvider{Client: api, Host: ecrHost, Now: func() time.Time { return clock }}
+	restarted := &RepoCredsRefresher{Client: k8s, Reader: k8s, Provider: leader, Namespace: "argocd", Name: secret.Name,
+		Now: func() time.Time { return clock }}
+	if err = restarted.Refresh(ctx); err == nil {
+		t.Fatal("Refresh() by a new leader with a failing mint = nil")
+	}
+	if _, err = leader.Token(ctx); operrors.ReasonOf(err) != registry.ReasonCredentialsUnavailable {
+		t.Fatalf("Token() by a new leader with a failing mint = %v", err)
+	}
+	warning, err = restarted.Check(ctx)
+	if err != nil || !strings.Contains(warning, "holds no token it can use") || strings.Contains(warning, "keeps using the current one") {
+		t.Fatalf("Check() by a new leader = %q, %v; want a warning that it holds no token", warning, err)
+	}
+
 	api.Fail = 0
 	if err = r.Refresh(ctx); err != nil {
 		t.Fatal(err)

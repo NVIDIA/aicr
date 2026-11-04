@@ -217,6 +217,13 @@ func (p *ECRProvider) MintFailure() *MintFailure {
 	return &c
 }
 
+// ServesCachedToken reports whether Token returns p's cached token without
+// waiting on a mint.
+func (p *ECRProvider) ServesCachedToken() bool {
+	t := p.load().token
+	return t != nil && t.Expires.Sub(p.Now()) > defaults.RegistryTokenMinServeValidity
+}
+
 // MintFailures returns how many of p's mints have failed.
 func (p *ECRProvider) MintFailures() uint64 { return p.failures.Load() }
 

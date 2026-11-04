@@ -194,6 +194,12 @@ counts each failure, and the refresh timestamp stays at the last success. Fix
 the AWS identity as above. Once the token is within an hour of expiry, this
 turns into `RegistryCredentialsStale`.
 
+An operator that restarts or takes over leadership during the outage holds no
+token of its own. Its registry calls and pushing Jobs fail with
+`RegistryCredentialsUnavailable` until a mint succeeds, while Argo CD keeps
+using the token in `repo-creds`. The `EngineAvailable` message says the
+operator holds no token it can use.
+
 ## AICR version mismatch
 
 | Reason | Cause | Fix |

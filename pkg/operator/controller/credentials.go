@@ -141,7 +141,7 @@ func (r *RepoCredsRefresher) Refresh(ctx context.Context) error {
 // expiring within defaults.RepoCredsStaleAfter. An error reading the Secret
 // has no reason, since it says nothing about the token. While the token is
 // current but minting a new one fails, err is nil and warning names the
-// failure.
+// failure and whether the operator still holds a token it can use.
 func (r *RepoCredsRefresher) Check(ctx context.Context) (warning string, err error) {
 	secret := &corev1.Secret{}
 	if err = r.Reader.Get(ctx, client.ObjectKey{Namespace: r.Namespace, Name: r.Name}, secret); err != nil {
@@ -160,11 +160,18 @@ func (r *RepoCredsRefresher) Check(ctx context.Context) (warning string, err err
 			fmt.Sprintf("the engine's registry token expires at %s", expires.UTC().Format(time.RFC3339))).
 			WithReason(ReasonRegistryCredentialsStale)
 	}
-	if f := r.Provider.MintFailure(); f != nil {
+	f := r.Provider.MintFailure()
+	switch {
+	case f == nil:
+		return "", nil
+	case r.Provider.ServesCachedToken():
 		return fmt.Sprintf("minting a new registry token has failed since %s, so the operator keeps using the current one, "+
 			"which expires at %s: %s", f.Since.UTC().Format(time.RFC3339), expires.UTC().Format(time.RFC3339), errorMessage(f.Err)), nil
+	default:
+		return fmt.Sprintf("minting a new registry token has failed since %s, and the operator holds no token it can use, "+
+			"so its registry calls and pushing Jobs fail until a mint succeeds. Argo CD keeps the token in repo-creds, "+
+			"which expires at %s: %s", f.Since.UTC().Format(time.RFC3339), expires.UTC().Format(time.RFC3339), errorMessage(f.Err)), nil
 	}
-	return "", nil
 }
 
 // Collectors returns gauges of the token's expiry and last refresh, and a
