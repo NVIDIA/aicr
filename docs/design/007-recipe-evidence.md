@@ -1422,9 +1422,9 @@ the other phases, not capacity, bound what can be always-on.
    `pkg/evidence/redact`); and a check of that directory by the pinned
    upstream validator as the last step. It requires `--evidence-dir`,
    refuses `--skip-check` and `--no-cluster`, and no longer bypasses
-   validation. A submission run may still exit non-zero on incomplete
-   requirement coverage or a failed artifact validation without rewriting
-   any check verdict.
+   validation. A submission run exits non-zero for exactly two causes, an
+   incomplete applicable MUST requirement or a failed artifact validation,
+   and neither rewrites a check verdict.
 3. **`--feature` and `evidence.cncf.features` are removed together with
    the script.** Implementing issue:
    [#3602](https://github.com/NVIDIA/aicr/issues/3602).
@@ -1458,14 +1458,16 @@ the other phases, not capacity, bound what can be always-on.
    claimed Implemented, MUST or SHOULD, must have every expected check
    present and passed. Skipped, `other`, missing, or capacity-starved
    checks leave it incomplete, recorded as an unmet test prerequisite
-   rather than a disproven capability. An incomplete applicable MUST fails
-   the submission run. A SHOULD requirement that is not claimed
-   Implemented may remain Not Implemented without failing the run (for
-   example `workload_sandboxing` at v1.37, where a missing sandbox runtime
-   records Not Implemented). MUST-level N/A exists only for the
-   conditional `cluster_autoscaling`. The vendor metadata file is the only
-   source of that N/A justification; checks record observations only and
-   never assert nonapplicability.
+   rather than a disproven capability. Statuses come from the run, never
+   from the metadata file. A requirement is Implemented only when every
+   expected check is present and passed. An incomplete applicable MUST
+   fails the submission run. A SHOULD with incomplete or absent checks
+   renders Not Implemented and the run does not fail (for example
+   `workload_sandboxing` at v1.37, where a missing sandbox runtime renders
+   Not Implemented). MUST-level N/A exists only for the conditional
+   `cluster_autoscaling`. The vendor metadata file is the only source of
+   that N/A justification; checks record observations only and never
+   assert nonapplicability.
 7. **AICR-named junit; the upstream suite is optional.** Implementing
    issue: [#3605](https://github.com/NVIDIA/aicr/issues/3605). `junit.xml`
    carries AICR check names, referenced per requirement with explicit
