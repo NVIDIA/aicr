@@ -155,16 +155,17 @@ func TestRolloutRecordsAFailedStepsTiming(t *testing.T) {
 	started := clk.now
 	reconcileRollout(t, ctx, r) // step started, Ensure
 	reconcileRollout(t, ctx, r) // waits: HealthDegraded
+	engine.unhealthy["cert-manager"] = "HealthMissing"
 	clk.now = clk.now.Add(time.Hour)
 	finished := clk.now
-	reconcileRollout(t, ctx, r) // action timeout
+	reconcileRollout(t, ctx, r) // action timeout, now waiting on HealthMissing
 
 	ro := rollouts(t, ctx)[0]
 	rs := certManager(t, ro)
 	if ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseFailed) || rs.State != v1alpha1.ReleaseFailed ||
-		!sameSecond(rs.StartedAt, started) || !sameSecond(rs.FinishedAt, finished) || rs.WaitedOn != "HealthDegraded" {
+		!sameSecond(rs.StartedAt, started) || !sameSecond(rs.FinishedAt, finished) || rs.WaitedOn != "HealthMissing" {
 
-		t.Fatalf("after the action timeout: %v %+v", ro.Labels, rs)
+		t.Fatalf("after the action timeout: %v %+v; the step records the reason its failure names", ro.Labels, rs)
 	}
 	if got := drain(recorder); len(matching(got, "Warning", EventStepFinished, "cert-manager", "Failed")) != 1 {
 		t.Errorf("Events = %q; want one StepFinished warning for the failed step", got)
@@ -188,6 +189,10 @@ func TestRolloutRefreshesAStaleComparison(t *testing.T) {
 
 	reconcileRollout(t, ctx, r) // create
 	reconcileRollout(t, ctx, r) // step started; already written, so observed
+	if engine.refreshed["cert-manager"] != 1 {
+		t.Fatalf("refreshes at the step start = %d, want 1: nothing written asks Argo CD to compare",
+			engine.refreshed["cert-manager"])
+	}
 	reconcileRollout(t, ctx, r) // observed: ReconcileStale
 	if slices.Contains(engine.order, "Ensure cert-manager") {
 		t.Fatalf("engine calls = %v; an already written step writes nothing", engine.order)
@@ -344,5 +349,56 @@ func TestStepEventsFollowTheSavedStatus(t *testing.T) {
 	reconcileRollout(t, ctx, r) // step started again, stored
 	if got := rec.actions(EventStepStarted); len(got) != 1 {
 		t.Errorf("StepStarted actions = %q, want one", got)
+	}
+}
+
+// A rollout whose outcome label landed but whose status write was lost has its
+// outcome restored on the next reconcile; that closes the step it left in
+// flight too, so the step's end and its StepFinished are not lost.
+func TestRestoredOutcomeClosesTheStepInFlight(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+		rt.Spec.Rollout.StabilizationWindow = &metav1.Duration{Duration: time.Millisecond}
+	})
+	resolved(t, ctx, putPlan(t, ctx, rt, "50m"))
+	engine := newEngine()
+	engine.unhealthy = map[string]string{"cert-manager": "HealthDegraded"}
+	r, clk := newRollout(t, engine, true)
+	rec := &capture{}
+	r.Events = rec
+	base, err := client.NewWithWatch(restConfig, client.Options{Scheme: k8s.Scheme()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failNext := false
+	r.Client = interceptor.NewClient(base, interceptor.Funcs{
+		SubResourceUpdate: func(ctx context.Context, c client.Client, sub string, obj client.Object,
+			opts ...client.SubResourceUpdateOption) error {
+
+			if _, ok := obj.(*v1alpha1.RuntimeRollout); ok && failNext {
+				failNext = false
+				return apierrors.NewConflict(schema.GroupResource{Resource: "runtimerollouts"}, obj.GetName(),
+					errors.New("the object has been modified"))
+			}
+			return c.SubResource(sub).Update(ctx, obj, opts...)
+		},
+	})
+
+	reconcileRollout(t, ctx, r) // create
+	reconcileRollout(t, ctx, r) // step started
+	reconcileRollout(t, ctx, r) // waits: HealthDegraded
+	clk.now = clk.now.Add(time.Hour)
+	failNext = true
+	if _, err := r.Reconcile(ctx, request); err == nil {
+		t.Fatal("a lost status write at the action timeout was not reported")
+	}
+	reconcileRollout(t, ctx, r) // outcome restored from the label
+
+	ro := rollouts(t, ctx)[0]
+	if rs := certManager(t, ro); ro.Status.Phase != v1alpha1.PhaseFailed || rs.FinishedAt == nil {
+		t.Fatalf("after the restored outcome: phase %s, %+v", ro.Status.Phase, rs)
+	}
+	if got := rec.actions(EventStepFinished); len(got) != 1 {
+		t.Errorf("StepFinished actions = %q, want one", got)
 	}
 }
