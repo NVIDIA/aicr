@@ -976,7 +976,8 @@ together for that reason. `pkg/evidence/cncf` renders one markdown file per
 *requirement* of the upstream checklist version selected from the cluster's
 Kubernetes minor (see [Checklist Versions](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#checklist-versions))
 and drops every skipped entry before grouping, so a requirement whose checks
-were all withheld gets no page and appears in the index only as
+were all withheld gets no page and, when another submission-required check
+produced an entry so an index is written at all, appears there only as
 `NOT TESTED (not run)`, with nothing recording that it was withheld on purpose
 rather than never reached. A submission that misstates why a requirement is
 missing is the defect the guards exist to prevent, so `--skip-check` with
@@ -985,9 +986,9 @@ is rejected up front:
 
 ```
 [INVALID_REQUEST] --skip-check cannot be combined with --evidence-dir: the CNCF
-evidence renderer gives a withheld requirement no page and lists it only as
-NOT TESTED (not run) with no reason recorded, so the rendered evidence would
-misstate why the requirement is missing
+evidence renderer gives a withheld requirement no page and, when it writes an
+index at all, lists it only as NOT TESTED (not run) with no reason recorded, so
+the rendered evidence would misstate why the requirement is missing
 ```
 
 Lifting that restriction means deciding how a withheld requirement should be

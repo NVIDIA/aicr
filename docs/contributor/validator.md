@@ -80,7 +80,8 @@ was withheld but not WHY would be the same "reads as complete" defect the flag's
 guards exist to prevent. The CNCF evidence renderer does
 NOT: `pkg/evidence/cncf/renderer.go` drops every skipped entry before grouping
 (pinned by `TestRenderSkippedExcluded`), so a withheld requirement gets no page
-and appears in the index only as `NOT TESTED (not run)`, with no reason
+and, when another submission-required check produced an entry so an index is
+written at all, appears there only as `NOT TESTED (not run)`, with no reason
 recorded. The requirement set it groups into is the upstream
 checklist for the selected version (`pkg/evidence/cncf/checklist.go`, embedded
 verbatim under `schemas/` and digest-pinned); `requirements.go` maps each
