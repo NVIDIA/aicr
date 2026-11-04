@@ -423,10 +423,15 @@ needs the NIC-resource fix and a qualification run without privileged
 workarounds ([#3591](https://github.com/NVIDIA/aicr/issues/3591),
 [cluster-readiness-engine#583](https://github.com/NVIDIA/cluster-readiness-engine/issues/583)).
 
-The leaf runs both NCCL checks. An overlay cannot drop an inherited check (a
-non-empty `checks` list is unioned with the parent's), so the TrainJob
-`nccl-all-reduce-bw` stays and the CRE check is added beside it. Retiring the
-TrainJob check on this leaf is a later change.
+The CRE check replaces the TrainJob check on this leaf. An overlay cannot drop
+an inherited check (a non-empty `checks` list is unioned with the parent's), so
+`nccl-all-reduce-bw` stays listed and the validator skips it with the
+`superseded-by-cre` reason when the recipe declares `nccl-cre-all-reduce-bw`
+and `creQualifiedEntries` qualifies the service and accelerator. A recipe whose
+CRE check would only skip, or that does not declare it, keeps its TrainJob
+coverage. Only the default-variant check is superseded; the `-net` and `-nvls`
+variants are untouched. The skip code is added to the redaction allowlist
+(`redact.PolicyVersion` v8).
 
 The choice of leaf follows from the wiring. `nvcre` needs Kubeflow Trainer, and
 AICR has no optional-component mechanism, so attaching it to a shared base would

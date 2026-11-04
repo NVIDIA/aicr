@@ -20,9 +20,9 @@ import (
 )
 
 // TestH100TrainingCREAdoption pins which H100 training recipes gate NCCL on a
-// CRE Certification. Only the EKS kubeflow leaf does, and it runs the CRE check
+// CRE Certification. Only the EKS kubeflow leaf does. It lists the CRE check
 // next to the inherited TrainJob check, because an overlay cannot drop an
-// inherited check. It is the leaf the AWS UAT lane validates, and it already
+// inherited check; the validator skips the TrainJob check as superseded. It is the leaf the AWS UAT lane validates, and it already
 // carries kubeflow-trainer through the platform-kubeflow mixin that nvcre
 // needs. Attaching CRE to a shared base
 // would install nvcre's CRDs and cluster-scoped RBAC for every consumer of

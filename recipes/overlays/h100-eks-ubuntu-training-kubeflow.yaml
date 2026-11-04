@@ -51,11 +51,13 @@ spec:
 
   validation:
     performance:
-      # Runs next to the inherited TrainJob nccl-all-reduce-bw check, which
-      # this leaf cannot drop: a non-empty checks list is unioned with the
-      # parent's. The floor equals the inherited one, and the check passes at
-      # 90% of it like the TrainJob check, so the same figure means the same
-      # under either.
+      # Replaces the inherited TrainJob nccl-all-reduce-bw check. An overlay
+      # cannot drop an inherited check (a non-empty checks list is unioned
+      # with the parent's), so that check stays listed and the validator skips
+      # it as superseded-by-cre while this check is declared and qualified for
+      # the combination. The floor equals the inherited one, and the check
+      # passes at 90% of it like the TrainJob check, so the same figure means
+      # the same under either.
       checks:
         - nccl-cre-all-reduce-bw
       constraints:
