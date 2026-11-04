@@ -734,6 +734,8 @@ jobs:
             "nvidia/aicr-validators/conformance"
             "nvidia/aicr-validators/aiperf-bench"
             "nvidia/aicr-gate"
+            "nvidia/aicr-operator"
+            "nvidia/aicr-registry"
           )
 
           for IMAGE in "${IMAGES[@]}"; do

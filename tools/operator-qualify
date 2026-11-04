@@ -33,8 +33,12 @@
 #              candidate in CANDIDATE_DIR, as an operator downgrade
 #   pull-published
 #              the newest published release, attestations verified, into
-#              PUBLISHED_DIR as a candidate (make operator-qualify-published)
+#              PUBLISHED_DIR as a candidate (make operator-qualify-published);
+#              PUBLISHED_VERSION pins a release, PUBLISHED_BELOW bounds it
 #   test       the suite
+#
+# AICR_OPERATOR_QUALIFY_LIFECYCLE_ONLY=1 runs only the lifecycle scenarios and
+# QUALIFY_TIMEOUT bounds the suite (default 90m).
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
@@ -116,14 +120,22 @@ rollback_to_candidate() {
 }
 
 # pull_published writes the newest published release into PUBLISHED_DIR
-# (default dist/published) in a candidate's layout, then verifies its chart's
-# and images' attestations as the install guide does. PUBLISHED_VERSION pins a
-# release; PUBLISHED_BELOW, set to the release being built, keeps the choice
-# older than it. Only the default directory is replaced; any other must be
-# empty or absent, which operator-release pull checks.
+# (default dist/published) in a candidate's layout, then verifies that
+# NVIDIA/aicr's release workflow attested its chart and images at that
+# release's tag. Without PUBLISHED_VERSION, which pins a release, it picks
+# among versions with a published, non-prerelease GitHub release, so a release
+# still in progress is never chosen; PUBLISHED_BELOW, set to the release being
+# built, keeps the choice older than it. Only the default directory is
+# replaced; any other must be empty or absent, which operator-release pull
+# checks.
 pull_published() {
-  local dir="${PUBLISHED_DIR:-dist/published}" out chart_repo chart_digest image_ref registry_ref ref
+  local dir="${PUBLISHED_DIR:-dist/published}" out version chart_repo chart_digest image_ref registry_ref ref released
   local args=(pull -version "${PUBLISHED_VERSION:-latest}" -dir "${dir}")
+  if [[ -z "${PUBLISHED_VERSION:-}" ]]; then
+    released="$(gh release list --repo NVIDIA/aicr --exclude-drafts --exclude-pre-releases --limit 100 \
+      --json tagName --jq '[.[].tagName] | join(",")')"
+    args+=(-released "${released}")
+  fi
   if [[ -n "${PUBLISHED_BELOW:-}" ]]; then
     args+=(-below "${PUBLISHED_BELOW}")
   fi
@@ -132,14 +144,31 @@ pull_published() {
   fi
   out="$(go run ./tools/operator-release "${args[@]}")"
   echo "${out}"
+  version="$(sed -n 's/^version=//p' <<<"${out}")"
   chart_repo="$(sed -n 's/^chart-repository=//p' <<<"${out}")"
   chart_digest="$(sed -n 's/^chart-digest=//p' <<<"${out}")"
   image_ref="$(sed -n 's/^image-ref=//p' <<<"${out}")"
   registry_ref="$(sed -n 's/^registry-ref=//p' <<<"${out}")"
   for ref in "oci://${chart_repo}@${chart_digest}" "oci://${image_ref}" "oci://${registry_ref}"; do
-    gh attestation verify "${ref}" --repo NVIDIA/aicr >/dev/null
+    verify_release_attestation "${ref}" "${version}"
     echo "verified ${ref}"
   done
+}
+
+# verify_release_attestation requires an attestation of ref by NVIDIA/aicr's
+# operator release workflow at tag v$2: attest-operator.yaml, or on-tag.yaml,
+# which signed v1.2.0 and its release candidates.
+verify_release_attestation() {
+  local ref="$1" version="$2" workflow
+  for workflow in attest-operator.yaml on-tag.yaml; do
+    if gh attestation verify "${ref}" --repo NVIDIA/aicr \
+      --signer-workflow "NVIDIA/aicr/.github/workflows/${workflow}" \
+      --source-ref "refs/tags/v${version}" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  echo "no release attestation for ${ref} at v${version}" >&2
+  return 1
 }
 
 # absolute resolves a candidate directory, which may be relative to the
@@ -153,7 +182,7 @@ run_tests() {
     AICR_OPERATOR_E2E_AICR_VERSION="${AICR_E2E_VERSION:-$(yq -r '.aicr.version' "${candidate}/candidate-values.yaml")}" \
     AICR_OPERATOR_QUALIFY_CANDIDATE="$(absolute "${candidate}")/candidate.json" \
     AICR_OPERATOR_QUALIFY_NEXT="$(absolute "${next}")/candidate.json" \
-    GOFLAGS="-mod=readonly" go test -count=1 -v -timeout=90m ./tests/operator/qualify/...
+    GOFLAGS="-mod=readonly" go test -count=1 -v -timeout="${QUALIFY_TIMEOUT:-90m}" ./tests/operator/qualify/...
 }
 
 case "${1:-all}" in

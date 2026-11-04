@@ -135,7 +135,8 @@ order:
      qualified against", with that AICR image digest;
    - the qualified profiles, taken verbatim from `docs/operator/support.md`
      at the tag. Write "No hardware profile is qualified yet" while that page
-     says so. Never infer a qualification from commits.
+     says so. Its "In qualification" table lists profiles that are not
+     qualified; leave it out. Never infer a qualification from commits.
 
    Do not paraphrase the digests; copy them.
 5. **`### Deprecations`** — **required whenever the release deprecates or

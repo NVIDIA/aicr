@@ -112,11 +112,13 @@ func TestReleaseUsesSingleDigestMap(t *testing.T) {
 	gateEnv := mapValue(t, gateStep, "env")
 	gateRun := fmt.Sprint(gateStep["run"])
 	for gate, variable := range map[string]string{
-		"resolve-candidates": "RESOLVE_RESULT",
-		"image-vuln-scan":    "SCAN_RESULT",
-		"attest":             "ATTEST_RESULT",
-		"operator-candidate": "OPERATOR_CANDIDATE_RESULT",
-		"operator-scan":      "OPERATOR_SCAN_RESULT",
+		"resolve-candidates":    "RESOLVE_RESULT",
+		"image-vuln-scan":       "SCAN_RESULT",
+		"attest":                "ATTEST_RESULT",
+		"operator-candidate":    "OPERATOR_CANDIDATE_RESULT",
+		"operator-scan":         "OPERATOR_SCAN_RESULT",
+		"operator-reproducible": "OPERATOR_REPRODUCIBLE_RESULT",
+		"operator-lifecycle":    "OPERATOR_LIFECYCLE_RESULT",
 	} {
 		if !containsString(stringSlice(releaseCheck["needs"]), gate) ||
 			fmt.Sprint(gateEnv[variable]) != "${{ needs."+gate+".result }}" ||
@@ -132,8 +134,10 @@ func TestReleaseUsesSingleDigestMap(t *testing.T) {
 			t.Errorf("operator-publish must wait for %s", dependency)
 		}
 	}
-	if !containsString(stringSlice(mapValue(t, jobs, "publish")["needs"]), "operator-publish") {
-		t.Error("publish must wait for operator-publish")
+	for _, dependency := range []string{"operator-publish", "operator-attest"} {
+		if !containsString(stringSlice(mapValue(t, jobs, "publish")["needs"]), dependency) {
+			t.Errorf("publish must wait for %s", dependency)
+		}
 	}
 	// The plugin binaries are scanned before release-check, so a finding
 	// stops promotion and every push.

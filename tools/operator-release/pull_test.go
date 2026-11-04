@@ -23,11 +23,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	ggcrregistry "github.com/google/go-containerregistry/pkg/registry"
 	"go.yaml.in/yaml/v3"
+	"oras.land/oras-go/v2/registry/remote"
 )
 
 func TestLatestStable(t *testing.T) {
@@ -222,6 +224,58 @@ func TestPullRefuses(t *testing.T) {
 				t.Fatalf("pull wrote into the non-empty directory: %d entries", len(entries))
 			}
 		})
+	}
+}
+
+// Only versions with a published release are candidates for latest: a chart
+// tag pushed by a release that has not finished (or failed) is skipped.
+func TestOnlyReleased(t *testing.T) {
+	t.Parallel()
+	tags := []string{"1.2.0", "1.3.0", "1.3.0-rc1", "sha256-abc"}
+	tests := []struct {
+		name     string
+		released string
+		want     []string
+	}{
+		{name: "no list keeps every tag", released: "", want: tags},
+		{name: "a release still in progress is skipped", released: "v1.2.0,v1.1.2", want: []string{"1.2.0"}},
+		{name: "with or without the leading v", released: "1.2.0, v1.3.0", want: []string{"1.2.0", "1.3.0"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := onlyReleased(tags, tt.released); !slices.Equal(got, tt.want) {
+				t.Fatalf("onlyReleased() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// A chart tag that names another chart or version than its Chart.yaml is
+// refused: the tag chosen is the release qualified and reported.
+func TestPullRefusesMismatchedChart(t *testing.T) {
+	t.Parallel()
+	host := testRegistry(t)
+	src, _ := writeCandidateAICR(t, host+"/nvidia/aicr-operator", []byte("operator-binary"), pinnedAICR)
+	if err := run([]string{"push", "-dir", src, "-chart-registry", host + "/nvidia/charts", "-plain-http"}, io.Discard); err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	charts, err := remote.NewRepository(host + "/nvidia/charts/demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	charts.PlainHTTP = true
+	desc, err := charts.Resolve(t.Context(), "0.1.0-rc.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = charts.Tag(t.Context(), desc, "9.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	err = run([]string{"pull", "-chart-registry", host + "/nvidia/charts", "-chart", "demo",
+		"-version", "9.0.0", "-dir", filepath.Join(t.TempDir(), "out"), "-plain-http"}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "0.1.0-rc.1") {
+		t.Fatalf("pull of a tag naming another version = %v; want an error naming the chart's own version", err)
 	}
 }
 

@@ -131,8 +131,9 @@ var (
 	core   = func(kind string) schema.GroupVersionKind { return schema.GroupVersionKind{Version: "v1", Kind: kind} }
 )
 
-// keptByUninstall is the "Kept" half of lifecycle.md's table for the
-// qualification values: the in-cluster registry on, validation off.
+// keptByUninstall names the objects lifecycle.md's table lists as kept, for
+// the qualification values (the in-cluster registry on, validation off);
+// every namespace the release created is checked as well.
 var keptByUninstall = []keptResource{
 	{gvkCRD, "", "clusterruntimes.operator.aicr.run"},
 	{gvkCRD, "", "runtimerollouts.operator.aicr.run"},
@@ -154,9 +155,18 @@ var keptByUninstall = []keptResource{
 	{gvkVAB, "", "aicr-operator-approval"},
 }
 
-// deletedByUninstall is the "Deleted" half of the same table.
+// deletedByUninstall names the objects the same table lists as deleted: the
+// operator, its identity and grants, the registry login's copies and the
+// policies that constrain the operator.
 var deletedByUninstall = []keptResource{
 	{schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}, operatorNamespace, "aicr-operator"},
+	{core("ServiceAccount"), operatorNamespace, "aicr-operator"},
+	{schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "ClusterRole"}, "", "aicr-operator"},
+	{schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "ClusterRoleBinding"}, "", "aicr-operator"},
+	{schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "Role"}, operatorNamespace, "aicr-operator"},
+	{schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBinding"}, operatorNamespace, "aicr-operator"},
+	{core("Secret"), operatorNamespace, "aicr-registry-auth"},
+	{core("Secret"), "aicr-jobs", "aicr-registry-auth"},
 	{gvkVAP, "", "aicr-operator-applications"},
 	{gvkVAP, "", "aicr-operator-application-deletes"},
 	{gvkVAP, "", "aicr-operator-jobs"},
@@ -167,8 +177,9 @@ var deletedByUninstall = []keptResource{
 // documentedUninstall uninstalls in the order docs/operator/lifecycle.md
 // gives. Deleting the runtime with the default Orphan policy annotates the
 // Applications, which keep the workload healthy; helm uninstall then keeps
-// exactly what the page lists as kept, every plan and rollout survives, and
-// the kept registry still serves the active plan.
+// every namespace the release created and what the page lists as kept,
+// deletes what it lists as deleted, every plan and rollout survives, and the
+// kept registry still serves the active plan.
 func documentedUninstall(ctx context.Context, t *testing.T, active string) {
 	t.Helper()
 	rt := getRuntime(ctx, t)
@@ -177,6 +188,7 @@ func documentedUninstall(ctx context.Context, t *testing.T, active string) {
 	rollouts := rolloutGenerations(ctx, t)
 	// helm uninstall deletes the operator's copy of the login.
 	login := registryLogin(ctx, t)
+	namespaces := releaseNamespaces(ctx, t)
 	if err := k8s.Delete(ctx, rt); err != nil {
 		t.Fatal(err)
 	}
@@ -196,6 +208,11 @@ func documentedUninstall(ctx context.Context, t *testing.T, active string) {
 
 	run(ctx, t, "helm", "uninstall", "aicr-operator", "--namespace", operatorNamespace,
 		"--kubeconfig", os.Getenv("AICR_OPERATOR_E2E_KUBECONFIG"), "--wait")
+	for _, ns := range namespaces {
+		if err := kept(ctx, keptResource{gvkNS, "", ns}); err != nil {
+			t.Errorf("helm uninstall did not keep namespace %s: %v", ns, err)
+		}
+	}
 	for _, r := range keptByUninstall {
 		if err := kept(ctx, r); err != nil {
 			t.Errorf("helm uninstall did not keep %s %s/%s: %v", r.gvk.Kind, r.namespace, r.name, err)
@@ -245,6 +262,25 @@ func kept(ctx context.Context, r keptResource) error {
 		return fmt.Errorf("it is being deleted since %s", obj.GetDeletionTimestamp())
 	}
 	return nil
+}
+
+// releaseNamespaces names the namespaces the operator's Helm release created.
+func releaseNamespaces(ctx context.Context, t *testing.T) []string {
+	t.Helper()
+	list := &corev1.NamespaceList{}
+	if err := k8s.List(ctx, list); err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, ns := range list.Items {
+		if ns.Annotations["meta.helm.sh/release-name"] == "aicr-operator" {
+			out = append(out, ns.Name)
+		}
+	}
+	if len(out) == 0 {
+		t.Fatal("the release created no namespace")
+	}
+	return out
 }
 
 // planVersions maps each plan ConfigMap to its resourceVersion.
@@ -378,9 +414,14 @@ func withRegistry(ctx context.Context, t *testing.T, f func(base string)) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { _ = fw.ForwardPorts() }()
+	failed := make(chan error, 1)
+	go func() { failed <- fw.ForwardPorts() }()
 	select {
 	case <-ready:
+	case err = <-failed:
+		t.Fatalf("port-forward to %s: %v", pod.Name, err)
+	case <-time.After(registryCallTimeout):
+		t.Fatalf("port-forward to %s did not become ready in %s", pod.Name, registryCallTimeout)
 	case <-ctx.Done():
 		t.Fatal("port-forward did not become ready")
 	}

@@ -4,8 +4,10 @@ Installing, upgrading, downgrading and uninstalling the operator itself. The
 GPU stack it manages is never removed by any of these: it is owned by Argo CD
 Applications that survive the operator.
 
-CI checks this page against the published artifacts. Each operator change, and
-each release before it publishes, installs the newest published release, then:
+CI checks this page against the published artifacts, on the newest supported
+Kubernetes with the in-cluster registry and deployment validation off. Each
+operator change, and each release before it publishes, installs the newest
+published release, then:
 
 - upgrades it to the new build mid-rollout;
 - replaces the in-cluster registry pod;

@@ -107,7 +107,7 @@ moves it.
 
 ```shell
 VERSION="<release>"   # an AICR release that ships the operator, without the leading v
-SIGNER=NVIDIA/aicr/.github/workflows/attest-operator.yaml   # for v1.2.0: NVIDIA/aicr/.github/workflows/on-tag.yaml
+SIGNER=NVIDIA/aicr/.github/workflows/attest-operator.yaml   # for v1.2.0 and its release candidates: NVIDIA/aicr/.github/workflows/on-tag.yaml
 
 kubectl create namespace aicr-system
 kubectl label namespace aicr-system pod-security.kubernetes.io/enforce=restricted

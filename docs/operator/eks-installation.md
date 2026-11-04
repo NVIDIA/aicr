@@ -22,7 +22,7 @@ The examples use these variables:
 
 ```shell
 VERSION="<release>"                        # an AICR release that ships the operator, without the leading v
-SIGNER=NVIDIA/aicr/.github/workflows/attest-operator.yaml  # for v1.2.0: NVIDIA/aicr/.github/workflows/on-tag.yaml
+SIGNER=NVIDIA/aicr/.github/workflows/attest-operator.yaml  # for v1.2.0 and its release candidates: NVIDIA/aicr/.github/workflows/on-tag.yaml
 CLUSTER="<eks cluster name>"
 ACCOUNT="<aws account id>"
 REGION="<aws region>"

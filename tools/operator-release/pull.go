@@ -46,6 +46,7 @@ func pull(args []string, out io.Writer) error {
 	chart := fs.String("chart", "aicr-operator", "Chart name.")
 	version := fs.String("version", "latest", "Chart version without the leading v, or latest: the newest stable release, older than -below when set.")
 	below := fs.String("below", "", "With -version latest, a version the release must be older than, such as the release being built.")
+	released := fs.String("released", "", "With -version latest, the comma-separated versions with a published release; others are skipped.")
 	dir := fs.String("dir", "dist/published", "Directory to write the release into; it must not exist or be empty.")
 	plainHTTP := fs.Bool("plain-http", false, "Pull over plain HTTP; test registries only.")
 	if err := fs.Parse(args); err != nil {
@@ -71,7 +72,7 @@ func pull(args []string, out io.Writer) error {
 		}); err != nil {
 			return fmt.Errorf("list %s: %w", ref, err)
 		}
-		if tag, err = latestStable(tags, *below); err != nil {
+		if tag, err = latestStable(onlyReleased(tags, *released), *below); err != nil {
 			return fmt.Errorf("%s: %w", ref, err)
 		}
 	}
@@ -100,6 +101,10 @@ func pull(args []string, out io.Writer) error {
 	appVersion, _ := meta["appVersion"].(string)
 	if name == "" || chartVersion == "" || appVersion == "" {
 		return fmt.Errorf("%s:%s names no chart name, version or appVersion", ref, tag)
+	}
+	// Helm tags a chart with its version, "+" written as "_".
+	if name != *chart || strings.ReplaceAll(chartVersion, "+", "_") != tag {
+		return fmt.Errorf("%s:%s holds chart %s %s", ref, tag, name, chartVersion)
 	}
 	valuesYAML, err := archiveFile(archive, "values.yaml")
 	if err != nil {
@@ -242,6 +247,26 @@ func chartPins(valuesYAML []byte) (operator, registry string, aicr AICR, err err
 func pinnedByDigest(ref string) bool {
 	_, digest, ok := strings.Cut(ref, "@")
 	return ok && strings.HasPrefix(digest, "sha256:") && len(digest) == len("sha256:")+64
+}
+
+// onlyReleased keeps the tags released lists, with or without a leading v;
+// an empty list keeps every tag. A release pushes its chart before it attests
+// and publishes it, so a chart tag alone does not mean a finished release.
+func onlyReleased(tags []string, released string) []string {
+	if strings.TrimSpace(released) == "" {
+		return tags
+	}
+	set := map[string]bool{}
+	for _, v := range strings.Split(released, ",") {
+		set[strings.TrimPrefix(strings.TrimSpace(v), "v")] = true
+	}
+	var out []string
+	for _, t := range tags {
+		if set[t] {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // latestStable returns the highest tag that is a full stable release

@@ -843,7 +843,7 @@ jobs:
   release-check:
     name: Release Integrity Check
     runs-on: ubuntu-24.04
-    needs: [resolve-candidates, image-vuln-scan, attest, operator-candidate, operator-scan]
+    needs: [resolve-candidates, image-vuln-scan, attest, operator-candidate, operator-scan, operator-reproducible, operator-lifecycle]
     if: always()
     timeout-minutes: 5
     permissions:
@@ -856,6 +856,8 @@ jobs:
           ATTEST_RESULT: ${{ needs.attest.result }}
           OPERATOR_CANDIDATE_RESULT: ${{ needs.operator-candidate.result }}
           OPERATOR_SCAN_RESULT: ${{ needs.operator-scan.result }}
+          OPERATOR_REPRODUCIBLE_RESULT: ${{ needs.operator-reproducible.result }}
+          OPERATOR_LIFECYCLE_RESULT: ${{ needs.operator-lifecycle.result }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
@@ -863,7 +865,9 @@ jobs:
             "${SCAN_RESULT}" != "success" || \
             "${ATTEST_RESULT}" != "success" || \
             "${OPERATOR_CANDIDATE_RESULT}" != "success" || \
-            "${OPERATOR_SCAN_RESULT}" != "success" ]]; then
+            "${OPERATOR_SCAN_RESULT}" != "success" || \
+            "${OPERATOR_REPRODUCIBLE_RESULT}" != "success" || \
+            "${OPERATOR_LIFECYCLE_RESULT}" != "success" ]]; then
             echo "::error::Release security gates did not all succeed for ${TAG}."
             echo "::error::Candidate aliases remain non-public; repair the failure and rerun this tag."
             exit 1
@@ -875,8 +879,8 @@ jobs:
   # AICR Operator (preview, ADR-027): one candidate of the tagged source, built
   # as OCI layouts, the deterministically packaged chart and the
   # kubectl-aicr binaries (tools/operator-candidate). It is scanned like every
-  # release image; release-check fails closed on its build and scan, so it
-  # gates image promotion too. It is published and attested only after the
+  # release image; release-check fails closed on its build, scan,
+  # reproducibility and lifecycle checks, so they gate image promotion too. It is published and attested only after the
   # images are promoted, and publish waits for it, so a failing operator
   # blocks the release.
   # =============================================================================
@@ -1045,16 +1049,19 @@ jobs:
   # The lifecycle scenarios from the newest published release older than this
   # tag, attestations verified, upgraded to this candidate, rolled back and
   # uninstalled in the documented order (make operator-qualify-published).
-  # A failure blocks publishing, as ADR-027 requires of an operator gate.
+  # A failure blocks image promotion and publishing, as ADR-027 requires of
+  # an operator gate. It runs third-party images on privileged kind nodes, so
+  # it holds neither the release's OIDC identity nor the Go proxy's
+  # credential; its modules come from the default proxy, as the PR lanes'
+  # do, and it publishes nothing.
   operator-lifecycle:
     name: Operator Lifecycle from the Published Release
     runs-on: ubuntu-24.04
     needs: [detect, operator-candidate]
-    timeout-minutes: 90
+    timeout-minutes: 75
     permissions:
       contents: read
       attestations: read
-      id-token: write
       packages: read
     steps:
       - name: Checkout Code
@@ -1066,22 +1073,6 @@ jobs:
         uses: ./.github/actions/operator-kind
         with:
           kubernetes: newest
-
-      - name: Configure the DGXC Go proxy
-        uses: ./.github/actions/setup-dgxc-goproxy
-        with:
-          mode: enforced
-
-      - name: Assert the proxy is actually in front
-        shell: bash
-        run: |
-          set -euo pipefail
-          proxy="$(go env GOPROXY)"
-          expected="https://edge.urm.nvidia.com/artifactory/api/go/dgxc-go-virtual"
-          [ "${proxy}" = "${expected}" ] \
-            || { echo "::error::GOPROXY is '${proxy}', expected exactly '${expected}'"; exit 1; }
-          [ "$(go env GOSUMDB)" != off ] \
-            || { echo "::error::GOSUMDB=off; modules would not be verified against the transparency log"; exit 1; }
 
       - name: Download the candidate
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
@@ -1102,11 +1093,6 @@ jobs:
         run: |
           kubectl --kubeconfig .operator-e2e/kubeconfig -n aicr-system logs deployment/aicr-operator --tail=300 || true
           kubectl --kubeconfig .operator-e2e/kubeconfig get clusterruntimes,runtimerollouts -o yaml || true
-
-      - name: Remove the proxy credential
-        if: always()
-        shell: bash
-        run: rm -f "${RUNNER_TEMP}/dgxc-goauth"
 
       - name: Delete kind cluster
         if: ${{ always() }}
@@ -1209,6 +1195,8 @@ jobs:
       digests: ${{ steps.digests.outputs.digests }}
     permissions:
       contents: write
+      # setup-dgxc-goproxy mints its Artifactory credential through OIDC.
+      id-token: write
       packages: write
     steps:
       - name: Checkout Code

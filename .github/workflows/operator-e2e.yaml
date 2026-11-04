@@ -305,7 +305,9 @@ jobs:
     name: Qualify an upgrade from the published release on Kubernetes newest
     needs: [matrix, prime-images]
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    # Above the 45m test timeout make operator-qualify-published sets, plus
+    # kind setup and the candidate build.
+    timeout-minutes: 75
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1

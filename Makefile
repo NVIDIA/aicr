@@ -1216,7 +1216,7 @@ operator-qualify: ## Runs the operator's fault-injection suite against dist/cand
 .PHONY: operator-qualify-published
 operator-qualify-published: ## Installs the newest published operator release and runs the lifecycle scenarios upgrading to dist/candidate
 	@./tools/operator-qualify pull-published
-	@AICR_OPERATOR_QUALIFY_LIFECYCLE_ONLY=1 CANDIDATE_DIR="$${PUBLISHED_DIR:-dist/published}" CANDIDATE_NEXT_DIR=dist/candidate ./tools/operator-qualify
+	@AICR_OPERATOR_QUALIFY_LIFECYCLE_ONLY=1 QUALIFY_TIMEOUT=45m CANDIDATE_DIR="$${PUBLISHED_DIR:-dist/published}" CANDIDATE_NEXT_DIR=dist/candidate ./tools/operator-qualify
 
 # =============================================================================
 # Tilt Local Development

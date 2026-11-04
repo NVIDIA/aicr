@@ -11,7 +11,7 @@ carries `kubectl-aicr-<os>-<arch>` for Linux and macOS on amd64 and arm64:
 
 ```shell
 VERSION="<release>"   # the AICR release of your operator chart, without the leading v
-SIGNER=NVIDIA/aicr/.github/workflows/attest-operator.yaml   # for v1.2.0: NVIDIA/aicr/.github/workflows/on-tag.yaml
+SIGNER=NVIDIA/aicr/.github/workflows/attest-operator.yaml   # for v1.2.0 and its release candidates: NVIDIA/aicr/.github/workflows/on-tag.yaml
 gh release download "v${VERSION}" --repo NVIDIA/aicr --pattern kubectl-aicr-linux-amd64
 gh attestation verify kubectl-aicr-linux-amd64 --repo NVIDIA/aicr \
   --signer-workflow "${SIGNER}" --source-ref "refs/tags/v${VERSION}" \
