@@ -36,14 +36,33 @@ if [[ -z "${DRY_RUN_FLAG:-}" ]]; then
 fi
 
 {{ end }}{{ if .RequiredDynamicPaths }}# The registry requires these --dynamic paths and the bundler wrote their
-# cluster-values.yaml stubs empty. Refuse to install until each has a value;
-# the match is on the path's leaf key, unambiguous because that file holds
-# only the declared paths, and a declaration on an ancestor map is judged on
-# the leaves written beneath it. Skipped under --dry-run, so a release can be
-# previewed before a short-lived value such as a token is minted.
+# cluster-values.yaml stubs empty. Refuse to install until each has a value.
+# aicr_yaml_value resolves a dotted path in the block-style YAML the bundler
+# writes and operators edit, so two required paths that share a leaf key
+# (controlPlane.url, cluster.url) are checked apart, and a declaration on an
+# ancestor map is judged on the leaves written beneath it. An unresolvable
+# path, or a value that is empty, "", '', ~ or null (a trailing comment
+# allowed), fails. Skipped under DRY_RUN_FLAG, so a release can be previewed
+# before a short-lived value such as a token is minted.
+aicr_yaml_value() {
+  awk -v want="$2" '
+    /^[[:space:]]*(#|$)/ || /^---/ { next }
+    {
+      match($0, /^[[:space:]]*/); ind = RLENGTH
+      line = substr($0, ind + 1)
+      if (line !~ /^[^:[:space:]][^:]*:([[:space:]]|$)/) next
+      key = line; sub(/:.*$/, "", key)
+      val = line; sub(/^[^:]*:[[:space:]]*/, "", val)
+      while (depth > 0 && ind <= inds[depth]) depth--
+      depth++; keys[depth] = key; inds[depth] = ind
+      path = keys[1]; for (i = 2; i <= depth; i++) path = path "." keys[i]
+      if (path == want) { print val; exit }
+    }' "$1"
+}
+AICR_EMPTY_VALUE_RE="^(\"\"|''|~|null)?([[:space:]]+#.*)?\$"
 if [[ -z "${DRY_RUN_FLAG:-}" ]]; then
 {{- range .RequiredDynamicPaths }}
-  if [ -z "$(grep -E {{ leafValuePattern . }} {{ with $.ClusterValuesFile }}{{ . | shq }}{{ else }}cluster-values.yaml{{ end }} | grep -Ev '^[[:space:]]*[^:]+:[[:space:]]*(""|~|null)[[:space:]]*$')" ]; then
+  if [[ "$(aicr_yaml_value {{ with $.ClusterValuesFile }}{{ . | shq }}{{ else }}cluster-values.yaml{{ end }} {{ . | shq }})" =~ $AICR_EMPTY_VALUE_RE ]]; then
     echo {{ printf "%s: %s is required but has no value in cluster-values.yaml; set it before running install.sh" $.Name . | shq }} >&2
     exit 1
   fi

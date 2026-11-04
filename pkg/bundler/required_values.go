@@ -125,10 +125,13 @@ func (b *DefaultBundler) validateRequiredAndSecretValues(componentName string, v
 		"component %q: required values not set: %s", componentName, strings.Join(hints, "; ")))
 }
 
-// rejectInstallTimeSecretsOutsideHelm refuses a deployer that would persist
-// an install-time secret. The helm deployer reads cluster-values.yaml from
-// the install machine; every other deployer writes the filled value into
-// the artifacts it generates or the state it keeps. A component is held to
+// rejectInstallTimeSecretsOutsideHelm refuses every deployer but helm for a
+// component with an install-time secret. helm's install.sh reads the filled
+// value from cluster-values.yaml on the install machine and refuses to run
+// while the stub is empty; flux, fleet, terraform and argocd-helm write the
+// filled value into the artifacts they generate or the state they keep, and
+// helmfile reads the file at apply time like helm but carries no stub check,
+// so an empty token reaches the chart. A component is held to
 // this once one of its secret paths is required or declared --dynamic; a
 // secret path left empty and optional ships as an empty stub, which no
 // deployer persists anything for. refs is the filtered component list, so a
@@ -153,8 +156,9 @@ func (b *DefaultBundler) rejectInstallTimeSecretsOutsideHelm(refs []recipe.Compo
 				continue
 			}
 			return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-				"component %q: %q is an install-time secret, which only the helm deployer supports; "+
-					"the %q deployer would store the filled value in the artifacts it generates. Bundle with --deployer helm",
+				"component %q: %q is an install-time secret, which only the helm deployer supports: its install.sh reads the value "+
+					"from cluster-values.yaml and refuses to run while it is empty; the %q deployer either stores the filled value in the "+
+					"artifacts it generates or installs without that check. Bundle with --deployer helm",
 				ref.Name, secret, b.Config.Deployer()))
 		}
 	}

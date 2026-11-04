@@ -100,7 +100,9 @@ way to supply one.
 
 **Deployers.** Before values are extracted, a component with a secret path
 that is required or declared dynamic fails the bundle on every deployer but
-`helm`, naming the deployer. Ordering matters: on the wrong deployer the
+`helm`, naming the deployer: `flux`, `fleet`, `terraform` and `argocd-helm`
+persist the filled value, and `helmfile` reads `cluster-values.yaml` at
+apply time but has no stub check. Ordering matters: on the wrong deployer the
 operator must hear that first, not a hint to declare the secret dynamic that
 the deployer would then refuse. A secret path that is neither required nor
 declared ships as an empty stub on any deployer; nothing is persisted for it.
@@ -108,13 +110,14 @@ declared ships as an empty stub on any deployer; nothing is persisted for it.
 **Install guard.** `deployer.ResolveRequiredDynamicPaths` returns, per
 component, the dynamic paths a required path covers. The helm deployer hands
 them to `localformat`, whose primary-folder `install.sh` templates emit, per
-path, a check that the path's leaf key has a value in `cluster-values.yaml`
-(a line giving it something other than `""`, `~` or `null`), failing with
-the path's name. The leaf key is enough because that file holds only the
-declared paths. The helper returns the required path rather than the
-declaration, so a declaration on an ancestor map yields every required leaf
-beneath it and the guard judges the leaves the operator wrote, not the map
-line, which has no scalar value. The check is skipped under
+path, a check that resolves the full dotted path in `cluster-values.yaml`
+and fails, naming the path, when it is missing or holds `""`, `''`, `~` or
+`null` (a trailing comment allowed). Matching the leaf key alone is not
+enough: `runai-cluster` requires both `controlPlane.url` and `cluster.url`.
+The helper returns the required path rather than the declaration, so a
+declaration on an ancestor map yields every required leaf beneath it and the
+guard judges the leaves the operator wrote, not the map line, which has no
+scalar value. The check is skipped under
 `--dry-run`, so a bundle can be previewed before a short-lived value is
 minted.
 

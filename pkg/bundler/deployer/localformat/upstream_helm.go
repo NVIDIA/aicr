@@ -51,20 +51,7 @@ func shellSingleQuote(s string) string {
 // (IsSafePathComponent rejects separators, not shell metacharacters), and
 // namespaces are not validated here at all, so neither is safe to interpolate
 // bare into a command.
-var shellFuncs = template.FuncMap{"shq": shellSingleQuote, "leafValuePattern": leafValuePattern}
-
-// leafValuePattern returns a single-quoted extended regex matching a line
-// of cluster-values.yaml that gives path's leaf key a value: the key, a
-// colon and something other than whitespace. The leaf key is enough because
-// that file carries only the declared dynamic paths. A mapping line
-// (`controlPlane:` with the leaves nested beneath it) does not match, so a
-// declaration on an ancestor is judged on the leaves the operator wrote
-// under it, and a bare stub (`token: ""`) matches here and is then
-// rejected by the empty-value filter in the install script.
-func leafValuePattern(path string) string {
-	leaf := path[strings.LastIndex(path, ".")+1:]
-	return shellSingleQuote(`^[[:space:]]*` + regexp.QuoteMeta(leaf) + `:[[:space:]]*[^[:space:]]`)
-}
+var shellFuncs = template.FuncMap{"shq": shellSingleQuote}
 
 var upstreamHelmTmpl = template.Must(
 	template.New("install-upstream-helm.sh.tmpl").

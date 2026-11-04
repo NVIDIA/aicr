@@ -287,11 +287,13 @@ ConfigMap, a Fleet values file in Git, Terraform state, an Argo CD
 Application spec), a component whose secret path is required or declared
 dynamic is rejected on every deployer but `helm`, before values are
 extracted, so the operator hears about the deployer before being told to
-declare the secret. For the `helm` deployer, a required path that was
-declared dynamic also gets a guard in the component's `install.sh`: it
-refuses to run while the path has no value in `cluster-values.yaml`, except
-under `--dry-run`; a declaration on an ancestor map is judged on the required
-leaves written beneath it. `runai-cluster` is the example in `registry.yaml`;
+declare the secret (`helmfile` is rejected too: it reads the file at apply
+time but has no stub check). For the `helm` deployer, a required path that
+was declared dynamic also gets a guard in the component's `install.sh`: it
+resolves the full dotted path in `cluster-values.yaml` and refuses to run
+while it is missing or empty, except under `DRY_RUN_FLAG=--dry-run`; a
+declaration on an ancestor map is judged on the required leaves written
+beneath it. `runai-cluster` is the example in `registry.yaml`;
 the operator-facing side is in
 [Required and install-time secret inputs](../user/bundling.md#required-and-install-time-secret-inputs).
 

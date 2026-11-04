@@ -67,14 +67,14 @@ func TestInstallScript_RequiredDynamicGuard(t *testing.T) {
 		t.Fatalf("read install.sh: %v", err)
 	}
 	for _, want := range []string{
-		"grep -E '^[[:space:]]*bootstrapToken:[[:space:]]*[^[:space:]]' cluster-values.yaml",
+		"aicr_yaml_value cluster-values.yaml 'controlPlane.bootstrapToken'",
 		"controlPlane.bootstrapToken is required but has no value",
 	} {
 		if !strings.Contains(string(script), want) {
 			t.Errorf("install.sh lacks %q", want)
 		}
 	}
-	if strings.Contains(string(script), "tolerations:[[:space:]]") {
+	if strings.Contains(string(script), "'global.tolerations'") {
 		t.Error("install.sh guards global.tolerations, which the registry does not require")
 	}
 
@@ -192,7 +192,7 @@ func runGuard(t *testing.T, guard, dir string, env ...string) int {
 // closing fi, so the test runs exactly the block the template rendered.
 func extractGuardBlock(t *testing.T, script string) string {
 	t.Helper()
-	start := strings.Index(script, "if [[ -z \"${DRY_RUN_FLAG:-}\" ]]; then\n  if [ -z \"$(grep -E")
+	start := strings.Index(script, "aicr_yaml_value() {")
 	if start < 0 {
 		t.Fatal("guard block not found in install.sh")
 	}
@@ -201,4 +201,65 @@ func extractGuardBlock(t *testing.T, script string) string {
 		t.Fatal("guard block has no closing fi")
 	}
 	return script[start : start+end+4]
+}
+
+// TestInstallScript_RequiredDynamicGuard_SharedLeafAndStubShapes covers two
+// required paths that end in the same key, which a leaf-only match would
+// confuse, and the stub shapes an operator can leave behind: a bare ” stub,
+// an empty string followed by a comment, and a value that merely contains a
+// hash sign, which is not a comment.
+func TestInstallScript_RequiredDynamicGuard_SharedLeafAndStubShapes(t *testing.T) {
+	c := requiredDynamicComponent(true)
+	c.Values = map[string]any{
+		"controlPlane": map[string]any{"url": "", "bootstrapToken": ""},
+		"cluster":      map[string]any{"url": "", "uid": "u-1"},
+	}
+	c.DynamicPaths = []string{"controlPlane.url", "cluster.url", "controlPlane.bootstrapToken"}
+	c.RequiredDynamicPaths = []string{"controlPlane.url", "cluster.url", "controlPlane.bootstrapToken"}
+	outDir := t.TempDir()
+	res, err := localformat.Write(context.Background(), localformat.Options{
+		OutputDir:  outDir,
+		Components: []localformat.Component{c},
+	})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	dir := filepath.Join(outDir, res.Folders[0].Dir)
+	script, err := os.ReadFile(filepath.Join(dir, "install.sh"))
+	if err != nil {
+		t.Fatalf("read install.sh: %v", err)
+	}
+	for _, want := range []string{"'controlPlane.url'", "'cluster.url'", "'controlPlane.bootstrapToken'"} {
+		if !strings.Contains(string(script), "aicr_yaml_value cluster-values.yaml "+want) {
+			t.Errorf("install.sh lacks a full-path check for %s", want)
+		}
+	}
+	guard := extractGuardBlock(t, string(script))
+	cv := filepath.Join(dir, "cluster-values.yaml")
+	filled := "cluster:\n  url: https://c.example\ncontrolPlane:\n  bootstrapToken: FILLED\n  url: https://cp.example\n"
+	cases := []struct {
+		name    string
+		content string
+		wantRC  int
+	}{
+		{"all three filled", filled, 0},
+		{"only cluster.url filled, controlPlane.url empty", "cluster:\n  url: https://c.example\ncontrolPlane:\n  bootstrapToken: FILLED\n  url: \"\"\n", 1},
+		{"only controlPlane.url filled, cluster.url empty", "cluster:\n  url: \"\"\ncontrolPlane:\n  bootstrapToken: FILLED\n  url: https://cp.example\n", 1},
+		{"single-quoted empty stub", "cluster:\n  url: ''\ncontrolPlane:\n  bootstrapToken: FILLED\n  url: https://cp.example\n", 1},
+		{"empty string with a trailing comment", "cluster:\n  url: https://c.example\ncontrolPlane:\n  bootstrapToken: \"\" # paste here\n  url: https://cp.example\n", 1},
+		{"tilde", "cluster:\n  url: https://c.example\ncontrolPlane:\n  bootstrapToken: ~\n  url: https://cp.example\n", 1},
+		{"value containing a hash is not a comment", "cluster:\n  url: https://c.example\ncontrolPlane:\n  bootstrapToken: abc#def\n  url: https://cp.example\n", 0},
+		{"required key missing entirely", "cluster:\n  url: https://c.example\ncontrolPlane:\n  url: https://cp.example\n", 1},
+		{"comment and blank lines are ignored", "# header\n---\ncluster:\n  # the FQDN\n  url: https://c.example\n\ncontrolPlane:\n  bootstrapToken: FILLED\n  url: https://cp.example\n", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.WriteFile(cv, []byte(tc.content), 0o600); err != nil {
+				t.Fatalf("write cluster-values.yaml: %v", err)
+			}
+			if rc := runGuard(t, guard, dir); rc != tc.wantRC {
+				t.Errorf("guard exited %d, want %d for:\n%s", rc, tc.wantRC, tc.content)
+			}
+		})
+	}
 }

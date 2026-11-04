@@ -585,18 +585,22 @@ aicr bundle -r recipe.yaml \
 
 Two further rules follow from the secret being filled in after bundling:
 
-- **Only the `helm` deployer** may carry such a component. The others would
-  store the filled value at rest (`flux` in a ConfigMap manifest, `fleet` in
-  a values file committed to Git, `terraform` in its state, `argocd-helm` in
-  the Application's `helm.values`), so `aicr bundle` rejects them for a
-  component whose secret path is required or declared dynamic. Plain
-  `argocd` rejects every `--dynamic` declaration already.
+- **Only the `helm` deployer** may carry such a component. `flux`, `fleet`,
+  `terraform` and `argocd-helm` would store the filled value at rest (a
+  ConfigMap manifest, a values file committed to Git, Terraform state, the
+  Application's `helm.values`); `helmfile` reads `cluster-values.yaml` at
+  apply time like `helm` but has no stub check, so an empty token would reach
+  the chart. `aicr bundle` rejects all of them for a component whose secret
+  path is required or declared dynamic. Plain `argocd` rejects every
+  `--dynamic` declaration already.
 - **`install.sh` checks the stub.** For a required path declared dynamic, the
-  component's install script refuses to run while the path has no value in
-  `cluster-values.yaml`, and says which path to set. A declaration on a parent
-  map is judged on the required leaves written beneath it. `deploy.sh --dry-run`
-  skips the check, so a bundle can be previewed before a short-lived value is
-  minted.
+  component's install script resolves the path in `cluster-values.yaml` and
+  refuses to run while it is missing or empty (`""`, `''`, `~` or `null`,
+  a trailing comment allowed), naming the path. Each path is checked at its
+  full path, so two required paths sharing a leaf key are checked apart, and
+  a declaration on a parent map is judged on the leaves written beneath it.
+  `DRY_RUN_FLAG=--dry-run ./deploy.sh` skips the check, so a bundle can be
+  previewed before a short-lived value is minted.
 
 The registry side of this contract is described in
 [requiredValues and installTimeSecretPaths](../contributor/component.md#requiredvalues-and-installtimesecretpaths).
