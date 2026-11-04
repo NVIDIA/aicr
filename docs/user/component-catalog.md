@@ -1474,7 +1474,7 @@ Every other platform leaves `operator.runtimeClass` at the shared chart default 
 
 `CheckNVSentinelRuntimeClassCoherence` still compares `operator.runtimeClass` with metadata-collector's name as defense in depth, treating either side unset as `nvidia`.
 
-An AKS bundle therefore needs no NVSentinel overrides at all — only the keyed toleration AKS requires independently of NVSentinel (bundling an AKS recipe without one is itself a blocking error, `CheckWildcardAcceleratedToleration`):
+An AKS bundle therefore needs no NVSentinel overrides at all — only the keyed toleration AKS requires independently of NVSentinel (bundling an AKS accelerator recipe without one is itself a blocking error, `CheckWildcardAcceleratedToleration`):
 
 ```shell
 aicr bundle -r recipe.yaml \

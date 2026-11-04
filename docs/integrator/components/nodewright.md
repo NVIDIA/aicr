@@ -71,30 +71,33 @@ Tuning are typically alterations to sysctl, kernel boot parameters and service d
 
 Setup generally is any configuration needed to make AI workloads work in that service that is not already provided by that service. In EKS for example this is kernel and EFA installation. For BCM it is symlinks to support gpu operator.
 
+Every AKS recipe also carries a second NodeWright CR, `toolkit-hardening` (`toolkit-hardening-aks.yaml`), which runs `nvidia-setup` as `aks-any` to set the NVIDIA container toolkit device-isolation keys on every GPU node. It declares no interrupt and keeps rendering when `hostPrepEnabled=false` drops the `tuning` CR. The `aks *` row below is that CR; the AKS accelerator rows describe the `tuning` CR beside it. See [AKS GPU setup](../aks-gpu-setup.md#gpu-driver-setup).
+
 The table below is generated from the recipes by `make tuning-docs` — **do not edit it by hand**. **Setup** and **Tuning** are the pinned nodewright package versions applied for each service + accelerator. **Profile** is the tuning profile accelerator when it differs from the selected accelerator (for example, `h200` and `a100` nodes use the `h100` profile), and `-` when identical. In the **Setup** and **Tuning** columns, `-` means no such package is applied for that service + accelerator. `*` means the recipe pins no value for that dimension.
 
 {/* BEGIN AICR-TUNING */}
 
-| Service | Accelerator  | Profile | Setup              | Tuning                  |
-|---------|--------------|---------|--------------------|-------------------------|
-| aks     | a100         | h100    | nvidia-setup 0.9.0 | nvidia-tuned 0.11.1     |
-| aks     | h100         | -       | nvidia-setup 0.9.0 | nvidia-tuned 0.11.1     |
-| bcm     | *            | h100    | nvidia-setup 0.3.0 | -                       |
-| bcm     | h100         | -       | nvidia-setup 0.3.0 | -                       |
-| eks     | a100         | h100    | nvidia-setup 0.9.0 | nvidia-tuned 0.11.1     |
-| eks     | gb200        | -       | nvidia-setup 0.9.0 | nvidia-tuned 0.11.1     |
-| eks     | gb300        | -       | nvidia-setup 0.9.0 | nvidia-tuned 0.11.1     |
-| eks     | h100         | -       | nvidia-setup 0.9.0 | nvidia-tuned 0.11.1     |
-| eks     | h200         | h100    | nvidia-setup 0.9.0 | nvidia-tuned 0.11.1     |
-| eks     | rtx-pro-6000 | generic | -                  | nvidia-tuned 0.11.0     |
-| generic | gb300        | -       | -                  | nvidia-tuned 0.11.0     |
-| gke     | a100         | h100    | -                  | nvidia-tuning-gke 0.1.2 |
-| gke     | b200         | -       | -                  | nvidia-tuning-gke 0.1.2 |
-| gke     | gb200        | -       | -                  | nvidia-tuning-gke 0.1.2 |
-| gke     | gb300        | gb200   | -                  | nvidia-tuning-gke 0.1.2 |
-| gke     | h100         | -       | -                  | nvidia-tuning-gke 0.1.2 |
-| rke2    | *            | generic | -                  | nvidia-tuned 0.11.0     |
-| rke2    | vr200        | -       | -                  | nvidia-tuned 0.11.0     |
+| Service | Accelerator  | Profile | Setup               | Tuning                  |
+|---------|--------------|---------|---------------------|-------------------------|
+| aks     | *            | -       | nvidia-setup 0.10.0 | -                       |
+| aks     | a100         | h100    | nvidia-setup 0.10.0 | nvidia-tuned 0.11.1     |
+| aks     | h100         | -       | nvidia-setup 0.10.0 | nvidia-tuned 0.11.1     |
+| bcm     | *            | h100    | nvidia-setup 0.3.0  | -                       |
+| bcm     | h100         | -       | nvidia-setup 0.3.0  | -                       |
+| eks     | a100         | h100    | nvidia-setup 0.10.0 | nvidia-tuned 0.11.1     |
+| eks     | gb200        | -       | nvidia-setup 0.10.0 | nvidia-tuned 0.11.1     |
+| eks     | gb300        | -       | nvidia-setup 0.10.0 | nvidia-tuned 0.11.1     |
+| eks     | h100         | -       | nvidia-setup 0.10.0 | nvidia-tuned 0.11.1     |
+| eks     | h200         | h100    | nvidia-setup 0.10.0 | nvidia-tuned 0.11.1     |
+| eks     | rtx-pro-6000 | generic | -                   | nvidia-tuned 0.11.0     |
+| generic | gb300        | -       | -                   | nvidia-tuned 0.11.0     |
+| gke     | a100         | h100    | -                   | nvidia-tuning-gke 0.1.2 |
+| gke     | b200         | -       | -                   | nvidia-tuning-gke 0.1.2 |
+| gke     | gb200        | -       | -                   | nvidia-tuning-gke 0.1.2 |
+| gke     | gb300        | gb200   | -                   | nvidia-tuning-gke 0.1.2 |
+| gke     | h100         | -       | -                   | nvidia-tuning-gke 0.1.2 |
+| rke2    | *            | generic | -                   | nvidia-tuned 0.11.0     |
+| rke2    | vr200        | -       | -                   | nvidia-tuned 0.11.0     |
 
 {/* END AICR-TUNING */}
 

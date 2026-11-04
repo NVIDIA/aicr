@@ -1688,6 +1688,7 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 					slog.Info("skipping component excluded by bundlers filter", "component", ref.Name)
 					excludedReasons[ref.Name] = "the bundlers filter excludes it"
 					b.warnExcludedDriverInstaller(recipeResult, ref.Name, "excluded by the bundlers filter")
+					b.warnExcludedToolkitHardening(recipeResult, ref.Name, "excluded by the bundlers filter")
 					delete(enabledSet, ref.Name)
 					continue
 				}
@@ -1792,6 +1793,7 @@ func (b *DefaultBundler) platformEnabledComponents(recipeResult *recipe.RecipeRe
 					excludedReasons[ref.Name] = "the recipe disables it"
 				}
 				b.warnExcludedDriverInstaller(recipeResult, ref.Name, "disabled via --set")
+				b.warnExcludedToolkitHardening(recipeResult, ref.Name, "disabled via --set")
 				continue
 			}
 			// setEnabled && recipeEnabled: explicit --set enabled=true is a no-op.
@@ -1799,6 +1801,7 @@ func (b *DefaultBundler) platformEnabledComponents(recipeResult *recipe.RecipeRe
 			slog.Info("skipping disabled component", "component", ref.Name)
 			excludedReasons[ref.Name] = "the recipe disables it"
 			b.warnExcludedDriverInstaller(recipeResult, ref.Name, "disabled by the recipe")
+			b.warnExcludedToolkitHardening(recipeResult, ref.Name, "disabled by the recipe")
 			continue
 		}
 		enabledRefs = append(enabledRefs, ref)
@@ -2016,6 +2019,38 @@ func (b *DefaultBundler) warnExcludedDriverInstaller(recipeResult *recipe.Recipe
 			"this bundle installs one, so deploying it alone leaves GPU nodes driverless. "+
 			"This is expected only when the driver stack is provided out-of-band or by a "+
 			"separate bundle that includes %s.", componentName, how, componentName)
+	slog.Warn(warning, "component", componentName)
+	b.appendWarning(warning)
+}
+
+// aksToolkitHardeningManifest is the nodewright-customizations manifest that
+// sets the NVIDIA container toolkit device-isolation keys on AKS GPU nodes.
+const aksToolkitHardeningManifest = "components/nodewright-customizations/manifests/toolkit-hardening-aks.yaml"
+
+// warnExcludedToolkitHardening warns when a component carrying the AKS toolkit
+// hardening is left out of the bundle while gpu-operator leaves the node-image
+// toolkit in place (toolkit.enabled=false, the azure-managed profile). Leaving
+// the component out is a deliberate choice, so this warns rather than blocks,
+// but nothing else in the bundle sets those keys.
+func (b *DefaultBundler) warnExcludedToolkitHardening(recipeResult *recipe.RecipeResult, componentName, how string) {
+	ref := recipeResult.GetComponentRef(componentName)
+	if ref == nil || !slices.Contains(ref.ManifestFiles, aksToolkitHardeningManifest) {
+		return
+	}
+	gpuOperator := recipeResult.GetComponentRef("gpu-operator")
+	if gpuOperator == nil {
+		return
+	}
+	toolkit, _ := gpuOperator.Overrides["toolkit"].(map[string]any)
+	if fmt.Sprint(toolkit["enabled"]) != "false" {
+		return
+	}
+	warning := fmt.Sprintf(
+		"%s is excluded from this bundle (%s), which removes the NVIDIA container toolkit "+
+			"device-isolation hardening: any unprivileged pod that sets NVIDIA_VISIBLE_DEVICES "+
+			"gets every GPU on the node, and secure-accelerator-access fails. To skip only the "+
+			"InfiniBand/RDMA host prep, set nodewrightcustomizations:hostPrepEnabled=false instead.",
+		componentName, how)
 	slog.Warn(warning, "component", componentName)
 	b.appendWarning(warning)
 }

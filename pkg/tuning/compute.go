@@ -168,19 +168,31 @@ func findComponentRef(refs []recipe.ComponentRef, name string) (recipe.Component
 	return recipe.ComponentRef{}, false
 }
 
+// aksToolkitHardeningManifest is the AKS root's nodewright-customizations
+// manifest. It carries no tuning, so an AKS accelerator leaf's own manifest,
+// referenced alongside it, describes that leaf's setup and tuning.
+const aksToolkitHardeningManifest = nwcManifestsDir + "toolkit-hardening-aks.yaml"
+
 // selectTuningManifest returns the first manifest the componentRef references
 // from the nodewright-customizations manifests directory, or "" if none is
 // referenced. The ref is already the nodewright-customizations component, so any
 // manifest it carries from that directory is its tuning/setup manifest — no
 // per-manifest allowlist is needed, and a newly added manifest is picked up
-// automatically.
+// automatically. The AKS toolkit-hardening manifest is selected only when the
+// ref references no other.
 func selectTuningManifest(manifestFiles []string) string {
+	fallback := ""
 	for _, m := range manifestFiles {
-		if strings.HasPrefix(m, nwcManifestsDir) {
-			return m
+		if !strings.HasPrefix(m, nwcManifestsDir) {
+			continue
 		}
+		if m == aksToolkitHardeningManifest {
+			fallback = m
+			continue
+		}
+		return m
 	}
-	return ""
+	return fallback
 }
 
 // valueOrAny renders an empty or "any" criteria dimension as the wildcard.

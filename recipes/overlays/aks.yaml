@@ -156,18 +156,25 @@ spec:
     - name: gpu-operator
       type: Helm
       valuesFile: components/gpu-operator/values-aks.yaml
-      # Device-isolation hardening for the azure-managed profile: with
-      # driver.enabled=false there is no gpu-operator toolkit DaemonSet to
-      # write the hardened /etc/nvidia-container-runtime/config.toml keys, so
-      # the AKS node image's permissive toolkit defaults would let any
-      # unprivileged pod with NVIDIA_VISIBLE_DEVICES=all grab all GPUs
-      # unallocated (secure-accelerator-access conformance failure). This
-      # DaemonSet re-asserts the hardened keys. See the manifest header and
-      # docs/integrator/aks-gpu-setup.md.
-      manifestFiles:
-        - components/gpu-operator/manifests/nvidia-toolkit-hardening-aks.yaml
       dependencyRefs:
         - network-operator
+
+    # Device-isolation hardening for the node-image container toolkit: with
+    # toolkit.enabled=false there is no gpu-operator toolkit DaemonSet to
+    # write the hardened /etc/nvidia-container-runtime/config.toml keys, so
+    # the AKS node image's permissive toolkit defaults would let any
+    # unprivileged pod with NVIDIA_VISIBLE_DEVICES=all grab all GPUs
+    # unallocated (secure-accelerator-access conformance failure). nvidia-setup
+    # aks-any sets the hardened keys on every GPU node, taint-gating new nodes
+    # until it has. Declared on the AKS root so every AKS recipe carries it;
+    # the accelerator leaves add tuning.yaml alongside it. See the manifest
+    # header and docs/integrator/aks-gpu-setup.md.
+    - name: nodewright-customizations
+      type: Helm
+      manifestFiles:
+        - components/nodewright-customizations/manifests/toolkit-hardening-aks.yaml
+      dependencyRefs:
+        - nodewright-operator
 
     # nfd-worker labels the InfiniBand VFs (pci-15b3.present) that the
     # NicClusterPolicy and the nvidia-peermem reloader select on; see the
@@ -198,7 +205,10 @@ spec:
     #   --set networkoperator:enabled=false \
     #   --set-json 'nfd:worker.config.sources.custom=[]' \
     #   --set gpuoperator:driver.rdma.useHostMofed=false \
-    #   --set nodewrightcustomizations:enabled=false
+    #   --set nodewrightcustomizations:hostPrepEnabled=false
+    # hostPrepEnabled=false drops the leaves' tuning CR (nvidia-setup aks-h100
+    # IB/RDMA host prep) and keeps the toolkit-hardening CR above. Disabling
+    # nodewright-customizations instead would also drop the toolkit hardening.
     - name: network-operator
       type: Helm
       source: https://helm.ngc.nvidia.com/nvidia

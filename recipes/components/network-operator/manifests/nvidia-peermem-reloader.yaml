@@ -112,8 +112,7 @@ spec:
               done
           securityContext:
             privileged: true
-          # Modest bounds for a busybox modprobe re-assert loop (see the
-          # matching block in nvidia-toolkit-hardening-aks.yaml).
+          # Modest bounds for a busybox modprobe re-assert loop.
           resources:
             requests:
               cpu: 10m

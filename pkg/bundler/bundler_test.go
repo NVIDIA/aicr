@@ -1848,6 +1848,107 @@ func TestFilterEnabledComponents_ExcludedDriverInstallerWarning(t *testing.T) {
 	}
 }
 
+// TestFilterEnabledComponents_ExcludedToolkitHardeningWarning pins the warning
+// raised when nodewright-customizations, carrying the AKS toolkit hardening, is
+// left out of a bundle (any path) while gpu-operator leaves the node-image
+// toolkit in place.
+func TestFilterEnabledComponents_ExcludedToolkitHardeningWarning(t *testing.T) {
+	t.Parallel()
+
+	gpuOp := func(toolkitEnabled bool) recipe.ComponentRef {
+		return recipe.ComponentRef{Name: "gpu-operator", Version: "v25.3.3", Type: "helm",
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+			Overrides: map[string]any{"toolkit": map[string]any{"enabled": toolkitEnabled}}}
+	}
+	nwc := func(manifests []string, overrides map[string]any) recipe.ComponentRef {
+		return recipe.ComponentRef{Name: "nodewright-customizations", Type: "helm",
+			ManifestFiles: manifests, Overrides: overrides}
+	}
+	hardening := []string{aksToolkitHardeningManifest}
+	disableSet := []config.Option{config.WithValueOverrides(map[string]map[string]string{
+		"nodewrightcustomizations": {"enabled": "false"},
+	})}
+
+	tests := []struct {
+		name        string
+		refs        []recipe.ComponentRef
+		cfgOpts     []config.Option
+		wantWarning string // substring expected in b.warnings; "" = no warning
+	}{
+		{
+			name:        "disabled via --set, azure-managed",
+			refs:        []recipe.ComponentRef{gpuOp(false), nwc(hardening, nil)},
+			cfgOpts:     disableSet,
+			wantWarning: "disabled via --set",
+		},
+		{
+			name:        "disabled by the recipe, azure-managed",
+			refs:        []recipe.ComponentRef{gpuOp(false), nwc(hardening, map[string]any{"enabled": false})},
+			wantWarning: "disabled by the recipe",
+		},
+		{
+			name:        "excluded by bundlers filter, azure-managed",
+			refs:        []recipe.ComponentRef{gpuOp(false), nwc(hardening, nil)},
+			cfgOpts:     []config.Option{config.WithBundlers([]string{"gpu-operator"})},
+			wantWarning: "excluded by the bundlers filter",
+		},
+		{
+			name:    "disabled via --set, operator-managed",
+			refs:    []recipe.ComponentRef{gpuOp(true), nwc(hardening, nil)},
+			cfgOpts: disableSet,
+		},
+		{
+			name: "kept, azure-managed",
+			refs: []recipe.ComponentRef{gpuOp(false), nwc(hardening, nil)},
+			cfgOpts: []config.Option{config.WithValueOverrides(map[string]map[string]string{
+				"nodewrightcustomizations": {"hostPrepEnabled": "false"},
+			})},
+		},
+		{
+			name:    "disabled without the hardening manifest",
+			refs:    []recipe.ComponentRef{gpuOp(false), nwc(nil, nil)},
+			cfgOpts: disableSet,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var bundlerOpts []Option
+			if len(tt.cfgOpts) > 0 {
+				bundlerOpts = append(bundlerOpts, WithConfig(config.NewConfig(tt.cfgOpts...)))
+			}
+			b, err := New(bundlerOpts...)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			recipeResult := &recipe.RecipeResult{
+				APIVersion:    "aicr.run/v1",
+				Kind:          "Recipe",
+				Criteria:      &recipe.Criteria{Service: "aks", Intent: "training"},
+				ComponentRefs: tt.refs,
+			}
+			if _, filterErr := b.filterEnabledComponents(recipeResult); filterErr != nil {
+				t.Fatalf("filterEnabledComponents() error = %v", filterErr)
+			}
+
+			if tt.wantWarning == "" {
+				if len(b.warnings) != 0 {
+					t.Fatalf("warnings = %v, want none", b.warnings)
+				}
+				return
+			}
+			joined := strings.Join(b.warnings, "\n")
+			for _, want := range []string{tt.wantWarning, "device-isolation", "hostPrepEnabled=false"} {
+				if !strings.Contains(joined, want) {
+					t.Errorf("warnings = %v, want substring %q", b.warnings, want)
+				}
+			}
+		})
+	}
+}
+
 // TestMake_BundlersFilterDependencyPruned verifies that a dependency edge
 // pointing at an enabled-but-filtered-out component is pruned exactly like a
 // disabled one: dependency validation and the helmfile level computation
