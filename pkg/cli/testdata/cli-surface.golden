@@ -162,12 +162,14 @@ flag    aicr query  --nodes  type=int default=0 required=false hidden=false env=
 flag    aicr query  --os  type=string default= required=false hidden=false env=
 flag    aicr query  --platform  type=string default= required=false hidden=false env=
 flag    aicr query  --profile  type=string default= required=false hidden=false env=
+flag    aicr query  --recipe,-r  type=string default= required=false hidden=false env=
 flag    aicr query  --require-evidence  type=bool default=false required=false hidden=false env=
 flag    aicr query  --runtime-inventory  type=string default= required=false hidden=false env=
-flag    aicr query  --selector  type=string default= required=true hidden=false env=
+flag    aicr query  --selector  type=string default= required=false hidden=false env=
 flag    aicr query  --service  type=string default= required=false hidden=false env=
 flag    aicr query  --slurm-accounting-mode  type=string default= required=false hidden=false env=
 flag    aicr query  --snapshot,-s  type=string default= required=false hidden=false env=
+flag    aicr query  --summary  type=bool default=false required=false hidden=false env=
 flag    aicr recipe  --accelerator,--gpu  type=string default= required=false hidden=false env=
 flag    aicr recipe  --config  type=string default= required=false hidden=false env=
 flag    aicr recipe  --criteria-strict  type=bool default=false required=false hidden=false env=
