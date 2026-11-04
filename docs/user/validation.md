@@ -1390,12 +1390,50 @@ error codes (see [`pkg/errors/exitcode.go`](https://github.com/NVIDIA/aicr/blob/
 | `0` | All phases reported status `passed` or `skipped` |
 | `2` | Invalid input or request (`ErrCodeInvalidRequest`) — bad CLI flag, malformed argument, a validator rejecting a recipe value (e.g., an inference constraint that uses the wrong comparator direction), or a **readiness pre-flight** constraint not met. The readiness gate always fails closed with this code, even under `--fail-on-error=false` |
 | `5` | A structured `ErrCodeTimeout` reached the top-level CLI — for example while loading the recipe or snapshot, waiting on the snapshot-agent Job, or signing evidence under `--emit-attestation --push` (which runs after the checks). A per-validator wait deadline does **not** reach this code: `runPhase` converts that error into a check result, so it surfaces as exit `8` (see note 2) |
-| `8` | One or more phases reported status `failed` (a check that returned a failure verdict — exit code `1` — or, in most cases, a validator Job killed on `activeDeadlineSeconds` — see the note below) **or** `other` (an indeterminate outcome — the check produced no usable verdict; a crash or OOM are the common examples, as is a validator Job that failed for a non-deadline reason with no inspectable pod), including per-check internal timeouts (e.g., DynamoGraphDeployment not ready within `InferenceWorkloadReadyTimeout`). Suppressed by `--fail-on-error=false` |
+| `9` | Operator interrupted the CLI with Ctrl-C or SIGTERM (`ErrCodeCanceled`) and privileged cleanup did not fail. Not suppressed by `--fail-on-error=false`; completed checks and the partial current phase are retained and CTRF output is attempted |
+| `8` | A privileged RBAC revocation failed after operator cancellation (`ErrCodeInternal`; not suppressed by `--fail-on-error=false`), **or** one or more phases reported status `failed` (a check that returned a failure verdict — exit code `1` — or, in most cases, a validator Job killed on `activeDeadlineSeconds` — see the note below) **or** `other` (an indeterminate outcome — the check produced no usable verdict; a crash or OOM are the common examples, as is a validator Job that failed for a non-deadline reason with no inspectable pod), including per-check internal timeouts (e.g., DynamoGraphDeployment not ready within `InferenceWorkloadReadyTimeout`). Only the result-driven phase exits are suppressed by `--fail-on-error=false` |
 
 > **Important:** two subtleties to be aware of when gating a pipeline on exit code:
 >
 > 1. Both `failed` and `other` are blocking. A phase whose status is `other` — the check produced no usable verdict, e.g. a crash, an OOM, or a Job that failed for a non-deadline reason with its pod already gone — drives the same non-zero exit as `failed` — an inconclusive check fails closed rather than passing silently. `--fail-on-error=false` suppresses **both** result-driven exits (the run reports the outcomes in the CTRF report and exits 0); it does not distinguish `failed` from `other`. A validator Job killed on `activeDeadlineSeconds` normally reports `failed` rather than `other`: its terminal `Failed/DeadlineExceeded` condition is a verdict, so the result names the deadline instead of the missing pod. One narrow exception remains — the CLI waits the catalog timeout plus `ValidatorWaitBuffer` (2m30s) for the Job to become terminal — measured from the Job's observed start time (`status.startTime` when the apiserver has stamped it, otherwise `creationTimestamp`, which is never later and so only ever ends the wait earlier), so it shares an origin with the Job's clock — a window that is deliberately shorter than the Job's own `activeDeadlineSeconds` (catalog timeout plus `ValidatorJobDeadlineHeadroom`, 3m30s), so a validator whose pod is still running when the CLI's wait expires exhausts the wait before the deadline condition is ever stamped. Such a run falls back to the CLI-wait path and still reports `other`.
 > 2. Exit 5 is narrower than it sounds. A timeout **inside** a check's own logic (DynamoGraphDeployment not ready, inference endpoint never healthy, AIPerf Job pod-wait deadline) surfaces as a failed phase, not as a structured `ErrCodeTimeout`, so the CLI exits **8**. So does a per-validator wait deadline: `runPhase` hands that error to the timeout handler and records the outcome as a check result rather than propagating it, which is the same path the wait-exhaustion exception in note 1 takes. The rule, rather than a list of sources: exit 5 applies whenever an `ErrCodeTimeout` reaches the top-level CLI. A timeout that is converted into a check result instead — whether raised inside a check or by a per-validator wait — surfaces as exit 8.
+
+**Interrupted runs.** The first Ctrl-C or SIGTERM cancels validation and, with
+cleanup enabled, deletes the in-flight validator Job using a fresh context.
+Completed verdicts and the partial current phase are retained; unstarted checks
+in that phase say `not run: validation canceled` and later phases do not start.
+The interrupted phase is blocking (`other` unless already `failed`). CTRF output
+is still attempted, even if the cluster's report ConfigMap cannot be written.
+Cleanup may take approximately 60s plus overhead: one shared 30s window for
+result capture, Job deletion, report persistence and pod termination, followed
+by the existing 30s per-run RBAC/data teardown window. The CLI records a 60s
+aggregate deadline when cancellation is first observed, not when validation
+starts. Partial output uses only the time remaining before that deadline (and
+at most its existing 30s I/O cap), never a third cleanup window. If no time
+remains, the in-memory results and original error are retained without starting
+output. These limits are cooperative: an arbitrary file/stdout writer is not
+physically interruptible just because it receives a context. A second Ctrl-C or
+SIGTERM force-terminates the CLI and can leave resources behind. `--no-cleanup`
+continues to leave them intentionally.
+
+If cancellation coincides with a **privileged RBAC revocation failure**, the
+returned error is instead `ErrCodeInternal` (CLI exit `8`), explicitly warning
+that the cluster-admin binding may be orphaned. Both cancellation and cleanup
+causes are preserved; check and revoke the potentially orphaned binding
+manually. Partial CTRF output is still attempted within the same remaining
+budget. Neither ordinary cancellation nor this combined failure renders, signs
+or pushes conformance/recipe evidence.
+
+When **the validator pod itself** receives SIGTERM (deadline, eviction or drain),
+a cooperative check runs deferred cleanup, writes a SIGTERM interruption message
+and exits `3`, mapped to CTRF `other` rather than a completed failure verdict.
+This container exit is distinct from the CLI's exit `9` on operator cancellation.
+It remains blocking (normally CLI exit `8`), including when the check returns
+nil after cancellation. The pod's 30s grace is best effort: blocking checks,
+long cleanup, SIGKILL, OOM or a crash may prevent a termination message, and a
+missing pod with a terminal Job deadline condition still uses the Job-level
+`failed` classification described above. No external orphan-resource sweeper
+is provided.
 
 Scripts that gate on validation outcome should treat **any non-zero code** as
 failure rather than branching on specific values, and should additionally
