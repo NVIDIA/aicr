@@ -61,6 +61,7 @@ charts:
           - sriovresourcepolicies.sriovnetwork.k8snetworkplumbingwg.io
         recipes:
           - gb200-nvke-ubuntu-training-kubeflow
+          - vr200-nvke-ubuntu-training
       - crds:
           - cidrpools.nv-ipam.nvidia.com
           - hostdevicenetworks.mellanox.com

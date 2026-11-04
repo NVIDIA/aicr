@@ -115,6 +115,7 @@ spec:
     # that is most of the point. Same posture as aks.yaml's operator-managed
     # path.
     - name: nvidia-dra-driver-gpu
+      type: Helm
       overrides:
         nvidiaDriverRoot: /run/nvidia/driver
 
@@ -208,6 +209,17 @@ spec:
       constraints:
         - name: nccl-all-reduce-bw-nvls
           value: ">= 600"
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        # Gates gpu-operator only. No per-component deployment version check
+        # exists for nvidia-dra-driver-gpu, so its version is not asserted.
+        - name: Deployment.gpu-operator.version
+          value: ">= v26.7.0"
     conformance:
       checks:
         - platform-health
