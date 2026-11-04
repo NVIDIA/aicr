@@ -40,6 +40,8 @@ import (
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/registry/remote"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/operator/registry"
 	"github.com/NVIDIA/aicr/pkg/operator/registry/registrytest"
 )
@@ -482,13 +484,16 @@ func TestPush(t *testing.T) {
 	if _, err = push(otherImage); err == nil || !strings.Contains(err.Error(), "a version names one candidate") {
 		t.Fatalf("a different image under the same version: %v", err)
 	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeConflict)
 	otherChart, _ := writeCandidate(t, repository, []byte("operator-binary"), "ghcr.io/nvidia/aicr:v1.1.1@sha256:dd")
 	if _, err = push(otherChart); err == nil || !strings.Contains(err.Error(), "a version names one candidate") {
 		t.Fatalf("a different chart under the same version: %v", err)
 	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeConflict)
 	if err = run([]string{"push", "-dir", t.TempDir()}, io.Discard); err == nil {
 		t.Fatal("pushed without a candidate")
 	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 }
 
 // A manifest the registry denies, as GHCR denies those that reach a new
