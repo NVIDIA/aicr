@@ -1422,16 +1422,24 @@ the other phases, not capacity, bound what can be always-on.
    `pkg/evidence/redact`); and a check of that directory by the pinned
    upstream validator as the last step. It requires `--evidence-dir`,
    refuses `--skip-check` and `--no-cluster`, and no longer bypasses
-   validation. A submission run exits non-zero for exactly two causes, an
-   incomplete applicable MUST requirement or a failed artifact validation,
-   and neither rewrites a check verdict.
+   validation. Once a submission run passes its flag and input validation,
+   it exits non-zero for exactly two causes: an incomplete applicable MUST
+   requirement, or a failed artifact validation. Neither rewrites a check
+   verdict.
 3. **`--feature` and `evidence.cncf.features` are removed together with
    the script.** Implementing issue:
    [#3602](https://github.com/NVIDIA/aicr/issues/3602).
-   `Client.CollectCNCFEvidence` keeps its signature as a wrapper
-   over run-plus-render; a non-empty `Features`, a nil recipe, or
-   `NoCluster` is rejected with `ErrCodeInvalidRequest`. The argument
-   contract is specified and tested in
+   `Client.CollectCNCFEvidence` keeps its signature as a wrapper over
+   run-plus-render; a non-empty `Features`, a nil recipe, or `NoCluster`
+   is rejected with `ErrCodeInvalidRequest`. Likewise,
+   `aicr validate --phase conformance --cncf-submission` requires
+   `--recipe` (or a config recipe input) and is refused with
+   `ErrCodeInvalidRequest` otherwise, because the single runner selects
+   checks from the recipe and the collector's capability-detection path
+   goes away with it; the submission examples without `--recipe` in
+   `docs/conformance/cncf/index.md` and `docs/user/validation.md` are
+   updated in [#3602](https://github.com/NVIDIA/aicr/issues/3602). The
+   argument contract is specified and tested in
    [#3602](https://github.com/NVIDIA/aicr/issues/3602).
 4. **Depth lives in catalog checks, not in a flag.** Implementing issue:
    [#3603](https://github.com/NVIDIA/aicr/issues/3603),
