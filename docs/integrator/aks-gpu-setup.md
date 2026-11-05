@@ -386,30 +386,39 @@ container passes through the toolkit, so an unprivileged pod whose image sets
 handed all host GPUs with no Kubernetes allocation — breaking container-level
 GPU isolation and failing the `secure-accelerator-access` conformance check.
 With `driver.enabled=false` and `toolkit.enabled=false` there is no operator
-toolkit DaemonSet to harden the config, so the AKS recipes ship a small
-`nvidia-toolkit-hardening` DaemonSet (a `gpu-operator` manifest) that re-asserts
+toolkit DaemonSet to harden the config, so every AKS recipe applies the
+nodewright `nvidia-setup` package with the `aks-any` combination (the
+`toolkit-hardening` NodeWright CR in the `nodewright-customizations`
+component). It sets
 `accept-nvidia-visible-devices-envvar-when-unprivileged = false` and
 `accept-nvidia-visible-devices-as-volume-mounts = true` via `nvidia-ctk config
---in-place`. The toolkit re-reads its config at every container start, so no
-containerd restart is needed and running pods are unaffected. Its readiness
-probe is fail-closed — the pod reports Ready only while the current assert
-succeeds — so it surfaces a node's **inability to harden** (`nvidia-ctk`
-missing or incompatible, so the keys can never be set) rather than passing
-green. It does not detect a silent permissive revert as a readiness
-transition: a transient permissive-but-valid rewrite of `config.toml` is simply
-repaired by the next `--in-place` re-assert within ≤60s (the re-assert
-succeeds, so Ready never flips — the config is corrected, not flagged as
-drift).
+--in-place` on every node labeled `kubernetes.azure.com/accelerator=nvidia`,
+tolerating every taint. The toolkit re-reads its config at every container
+start, so the package declares no interrupt: no cordon, drain, reboot, or
+containerd restart, and running pods are unaffected. The CR is
+`runtimeRequired` with `autoTaintNewNodes`, so a new GPU node carries the
+runtime-required taint until the keys are set. The operator applies that taint
+shortly after the node joins, which leaves a brief window
+([nodewright#901](https://github.com/NVIDIA/nodewright/issues/901)); creating
+the GPU node pool with `--node-taints
+nodewright.nvidia.com=runtime-required:NoSchedule` closes it. The AKS accelerator recipes (H100, A100) also
+set the same keys from their `nvidia-setup` `aks-h100` host prep; the two
+write identical values, and the step skips a node whose keys are already set.
 
-The DaemonSet renders **only** in the azure-managed profile
-(`toolkit.enabled=false`). Under the GPU-Operator-managed fallback
-(`--gpu-driver none` + `toolkit.enabled=true`) it is omitted, because the
-operator owns the toolkit there — the AKS values set the same hardened keys via
-`gpu-operator.toolkit.env`
+Under the GPU-Operator-managed profile (`--gpu-driver none` +
+`toolkit.enabled=true`) the operator owns the toolkit, and the AKS values set
+the same hardened keys via `gpu-operator.toolkit.env`
 (`ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED=false`,
 `ACCEPT_NVIDIA_VISIBLE_DEVICES_AS_VOLUME_MOUNTS=true`), which the toolkit
-installer writes into the config, and gating the DaemonSet out avoids a
-helm-wait deadlock on nodes where `nvidia-ctk` is not preinstalled.
+installer writes into its config. The `aks-any` package also runs there; it
+sets the same keys wherever the node carries a host toolkit config and
+`nvidia-ctk`, and otherwise completes without changes.
+
+Disabling `nodewright-customizations` (`--set
+nodewrightcustomizations:enabled=false`) removes the `toolkit-hardening` CR
+along with every other nodewright customization. Under azure-managed that
+removes the hardening and `secure-accelerator-access` fails; under
+operator-managed the GPU Operator's toolkit keeps the keys.
 
 **Scope of the hardening.** Setting the env-var key to `false` closes the
 `NVIDIA_VISIBLE_DEVICES` env-var path — the path `secure-accelerator-access`
@@ -425,10 +434,19 @@ isolation additionally requires an admission policy restricting a
 `/dev/null`-backed mount whose destination is under
 `/var/run/nvidia-container-devices`. A
 green `secure-accelerator-access` result confirms the env-var path is closed,
-not that isolation is complete. Migrating this host-config hardening into the
-nodewright `nvidia-setup` package — the canonical host-configuration channel on
-AKS — and retiring the DaemonSet is tracked in
-[#1839](https://github.com/NVIDIA/aicr/issues/1839).
+not that isolation is complete.
+
+**Upgrading a cluster that runs the `nvidia-toolkit-hardening` DaemonSet.**
+Earlier AICR releases set these keys with a DaemonSet in the
+`gpu-operator-post` release, which current bundles no longer contain. Flux
+prunes it; the Helm, Helmfile and Argo CD deployers leave the DaemonSet
+running. It writes the same keys, so it is harmless, but nothing manages it any
+more. Remove it after the upgrade (with Helm or Helmfile,
+`helm uninstall gpu-operator-post -n gpu-operator` instead):
+
+```shell
+kubectl delete daemonset -n gpu-operator nvidia-toolkit-hardening
+```
 
 **GPU-Operator-managed override tuple.** The documented fallback override set
 (`driver.enabled=true`, `toolkit.enabled=true`, `operator.runtimeClass=nvidia`,
@@ -743,7 +761,8 @@ pods and deadlocks packages that declare interrupts on first install
 ([nodewright#296](https://github.com/NVIDIA/nodewright/issues/296)). Recovering
 from that deadlock requires manually cordoning and rebooting the node. Because
 `aicr bundle` injects a wildcard toleration by default when
-`--accelerated-node-toleration` is not set, always bundle AKS recipes with a
+`--accelerated-node-toleration` is not set, always bundle the AKS accelerator
+recipes (which wire the interrupt-declaring `tuning.yaml` packages) with a
 keyed toleration matching your GPU node taint:
 
 ```shell
@@ -752,21 +771,47 @@ aicr bundle -r recipe.yaml \
   -o ./bundles
 ```
 
-Bundling an AKS recipe without a keyed toleration is a **blocking error**
-(`CheckWildcardAcceleratedToleration`): the bundle is not produced until you
-supply one, so the deadlock cannot ship silently.
+Bundling an AKS accelerator recipe without a keyed toleration is a **blocking
+error** (`CheckWildcardAcceleratedToleration`): the bundle is not produced until
+you supply one, so the deadlock cannot ship silently. AKS recipes without an
+accelerator carry only the toolkit-hardening package, which declares no
+interrupt, so they bundle with the default toleration.
 
-To opt out of the RDMA stack entirely (e.g., on non-InfiniBand SKUs) — this
-disables `nodewright-customizations`, so no keyed toleration is required:
+To opt out of the RDMA stack entirely (e.g., on non-InfiniBand SKUs), select
+`nvidia-setup`'s accelerator-agnostic AKS profile with
+`accelerator=generic`. In place of the `aks-h100` host prep (IB modules, memlock
+limits, toolkit hardening) the `tuning` CR then applies `aks-any` (the toolkit
+hardening only). The `tuning` CR keeps its interrupts, so the keyed toleration
+is still required:
 
 ```shell
 aicr bundle -r recipe.yaml \
+  --accelerated-node-toleration nvidia.com/gpu:NoSchedule \
   --set networkoperator:enabled=false \
   --set-json 'nfd:worker.config.sources.custom=[]' \
   --set gpuoperator:driver.rdma.useHostMofed=false \
-  --set nodewrightcustomizations:enabled=false \
+  --set nodewrightcustomizations:accelerator=generic \
   -o ./bundles
 ```
+
+`generic` is AICR's value for "no accelerator-specific nodewright profile"; the
+bundle passes it to `nvidia-setup` as that package's `any`. Use `generic`, not
+`any`: with `tuningEnabled=true`, `generic` also moves `nvidia-tuned` to its
+`nvidia-generic` profile, and `nvidia-tuned` ships no `any` profile.
+
+**Opting out of nodewright customizations removes the hardening CR.** The
+`toolkit-hardening` CR ships `nvidia-setup` through `nodewright-customizations`,
+so excluding that component (`--set nodewrightcustomizations:enabled=false`, a
+recipe override, or the bundlers filter) removes it under either gpuStack
+profile. Under azure-managed (the default) that removes the toolkit hardening,
+and `aicr bundle` warns; under operator-managed the GPU Operator's toolkit keeps
+the same keys through `gpu-operator.toolkit.env`. If you used
+`--set nodewrightcustomizations:enabled=false` to skip RDMA, switch to
+`accelerator=generic` above to keep the hardening. On a cluster that was
+bundled with `enabled=false`, that switch deploys the `tuning` CR, whose
+`nvidia-setup-full` package drains and reboots each GPU node once, one node at a
+time (`interruptionBudget.count: 1`). Pass `--workload-selector` with a label
+your training pods carry so nodewright does not evict running jobs.
 
 ## References
 

@@ -1,0 +1,100 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NVIDIA container toolkit device-isolation hardening for every AKS GPU node.
+#
+# The AKS node image preinstalls the container toolkit with the upstream
+# permissive defaults, and containerd's default runtime on GPU nodes is
+# nvidia-container-runtime, so every container passes through the toolkit. An
+# unprivileged pod whose image sets NVIDIA_VISIBLE_DEVICES=all (every CUDA base
+# image) would be handed all host GPUs with no Kubernetes allocation. The
+# nvidia-setup aks-any combination runs only the configure_container_toolkit
+# step, which sets in /etc/nvidia-container-runtime/config.toml:
+#   accept-nvidia-visible-devices-envvar-when-unprivileged = false
+#   accept-nvidia-visible-devices-as-volume-mounts         = true
+# The toolkit re-reads its config at every container start, so the package
+# declares no interrupt (no cordon, drain, reboot or service restart). Under
+# the GPU-Operator-managed profile the operator's toolkit owns the runtime and
+# is hardened via gpu-operator toolkit.env; the step sets the same keys on any
+# host toolkit config it finds there and otherwise does nothing.
+#
+# runtimeRequired with autoTaintNewNodes taints a new GPU node until the keys
+# are set. The operator applies the taint shortly after the node joins
+# (NVIDIA/nodewright#901); a node pool created with the runtime-required taint
+# has no window at all.
+#
+# The AKS accelerator leaves also run nvidia-setup aks-h100 from tuning.yaml,
+# which sets the same keys after its IB/RDMA host prep. Both write the same
+# values, and the step skips a node whose keys are already set.
+#
+# Node scope is fixed rather than driven by --accelerated-node-selector and
+# --accelerated-node-toleration: the hardening covers every GPU node the
+# toolkit runs on, whatever subset the tuning packages target.
+{{- $cust := index .Values "nodewright-customizations" }}
+{{- if ne (toString (index $cust "enabled")) "false" }}
+---
+apiVersion: nodewright.nvidia.com/v1alpha1
+kind: NodeWright
+metadata:
+  annotations:
+    # No Helm hooks: release-managed so that disabling the component retracts
+    # the CR (see tuning.yaml). CRD ordering comes from the component
+    # dependency on nodewright-operator.
+    aicr/skip-hook-validation: "true"
+  labels:
+    app.kubernetes.io/part-of: skyhook-operator
+    app.kubernetes.io/created-by: aicr
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+  name: toolkit-hardening
+  namespace: {{ .Release.Namespace }}
+spec:
+  # Ahead of the default-priority tuning CR, so a stuck host-prep package on a
+  # node never holds back the hardening.
+  priority: 100
+  runtimeRequired: true
+  # Default: true. Disable with --set nodewrightcustomizations:autoTaintNewNodes=false
+  {{- /* Sprig-safe: a "| default true" here would swallow an explicit false under --deployer flux. */}}
+  autoTaintNewNodes: {{ ne (toString (index $cust "autoTaintNewNodes")) "false" }}
+  # Every GPU node regardless of its pool taints. The wildcard is safe on AKS
+  # here: the AKS toleration collapse (NVIDIA/nodewright#296) only deadlocks
+  # packages that declare an interrupt, and this one declares none.
+  additionalTolerations:
+    - operator: Exists
+  # The AKS-native accelerator label, present from node boot. GPU Operator and
+  # NFD labels appear only after their operands roll out, too late to gate a
+  # new node.
+  nodeSelectors:
+    matchLabels:
+      kubernetes.azure.com/accelerator: nvidia
+  packages:
+    nvidia-setup-toolkit:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-setup
+      version: "0.10.0"
+      containerSHA: sha256:090b17713059b9d2a96a6eecb7540c98ec7f4603eaa9f9f3d5514b87b7c13e0d
+      configMap:
+        service: aks
+        accelerator: any
+      {{- /* Until nodewright >= v0.18 resources that get reduced to whole numbers should be expressed */}}
+      {{- /* as such or deployers like Argo that continuously sync the resources will result in a */}}
+      {{- /* broken deployment. See https://github.com/NVIDIA/nodewright/pull/450 */}}
+      resources:
+        # The package pod runs on an undrained node, bound to it by nodeName,
+        # and a node without the request free rejects it, so request less than
+        # the nodewright LimitRange default (500m / 512Mi).
+        cpuLimit: 1
+        cpuRequest: 100m
+        memoryLimit: 1Gi
+        memoryRequest: 256Mi
+{{- end }}

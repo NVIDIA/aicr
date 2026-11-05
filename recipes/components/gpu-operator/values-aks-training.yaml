@@ -74,8 +74,8 @@ toolkit:
   # Device-isolation hardening for the operator-managed toolkit (the
   # GPU-Operator-managed fallback profile, --gpu-driver none + toolkit.enabled
   # =true). Inert while toolkit.enabled=false (the azure-managed default — there
-  # the node-image toolkit is hardened by the nvidia-toolkit-hardening
-  # DaemonSet instead). The toolkit installer reads these uppercase env names
+  # the node-image toolkit is hardened by nodewright nvidia-setup instead, see
+  # toolkit-hardening-aks.yaml). The toolkit installer reads these uppercase env names
   # and writes the lowercase config.toml keys; RUNTIME_CONFIG_SOURCE=file does
   # not suppress them.
   env:

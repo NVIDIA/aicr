@@ -311,7 +311,7 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	}
 
 	// The PromQL scrape scope spans the platform, not the bundlers subset.
-	recipeResult, platformRefs, err := b.filterAndValidateRecipe(recipeResult)
+	recipeResult, platformRefs, err := b.filterAndValidateRecipe(ctx, recipeResult)
 	if err != nil {
 		return nil, err
 	}
@@ -1607,8 +1607,8 @@ func (b *DefaultBundler) getTypedValueOverridesForComponent(componentName string
 
 // filterAndValidateRecipe also returns the platform's refs, before the
 // bundlers filter.
-func (b *DefaultBundler) filterAndValidateRecipe(recipeResult *recipe.RecipeResult) (*recipe.RecipeResult, []recipe.ComponentRef, error) {
-	selection, filterErr := b.filterEnabledComponents(recipeResult)
+func (b *DefaultBundler) filterAndValidateRecipe(ctx context.Context, recipeResult *recipe.RecipeResult) (*recipe.RecipeResult, []recipe.ComponentRef, error) {
+	selection, filterErr := b.filterEnabledComponents(ctx, recipeResult)
 	if filterErr != nil {
 		return nil, nil, filterErr
 	}
@@ -1644,7 +1644,7 @@ type componentSelection struct {
 
 // filterEnabledComponents narrows platformEnabledComponents by the bundlers
 // filter (config.WithBundlers, #1531).
-func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResult) (componentSelection, error) {
+func (b *DefaultBundler) filterEnabledComponents(ctx context.Context, recipeResult *recipe.RecipeResult) (componentSelection, error) {
 	// declaredSet is every component the recipe names, regardless of enabled
 	// state. It distinguishes a declared-but-disabled dependency (prune the
 	// edge — satisfied externally) from an undeclared one (keep it so topology
@@ -1654,7 +1654,7 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 		declaredSet[ref.Name] = struct{}{}
 	}
 
-	platformRefs, excludedReasons, platformErr := b.platformEnabledComponents(recipeResult)
+	platformRefs, excludedReasons, platformErr := b.platformEnabledComponents(ctx, recipeResult)
 	if platformErr != nil {
 		return componentSelection{}, platformErr
 	}
@@ -1697,6 +1697,7 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 					slog.Info("skipping component excluded by bundlers filter", "component", ref.Name)
 					excludedReasons[ref.Name] = "the bundlers filter excludes it"
 					b.warnExcludedDriverInstaller(recipeResult, ref.Name, "excluded by the bundlers filter")
+					b.warnExcludedToolkitHardening(ctx, recipeResult, ref.Name, "excluded by the bundlers filter")
 					delete(enabledSet, ref.Name)
 					continue
 				}
@@ -1772,7 +1773,7 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 // already provides it (e.g. a CSP-managed cert-manager on OKE), so re-enabling
 // would install a conflicting second copy and there is no authored deployment
 // order for it. Such an attempt is rejected with ErrCodeInvalidRequest.
-func (b *DefaultBundler) platformEnabledComponents(recipeResult *recipe.RecipeResult) ([]recipe.ComponentRef, map[string]string, error) {
+func (b *DefaultBundler) platformEnabledComponents(ctx context.Context, recipeResult *recipe.RecipeResult) ([]recipe.ComponentRef, map[string]string, error) {
 	enabledRefs := make([]recipe.ComponentRef, 0, len(recipeResult.ComponentRefs))
 	// excludedReasons records, per dropped component, the reason phrase
 	// rejectOverridesForAbsentComponents quotes back to the operator.
@@ -1801,6 +1802,7 @@ func (b *DefaultBundler) platformEnabledComponents(recipeResult *recipe.RecipeRe
 					excludedReasons[ref.Name] = "the recipe disables it"
 				}
 				b.warnExcludedDriverInstaller(recipeResult, ref.Name, "disabled via --set")
+				b.warnExcludedToolkitHardening(ctx, recipeResult, ref.Name, "disabled via --set")
 				continue
 			}
 			// setEnabled && recipeEnabled: explicit --set enabled=true is a no-op.
@@ -1808,6 +1810,7 @@ func (b *DefaultBundler) platformEnabledComponents(recipeResult *recipe.RecipeRe
 			slog.Info("skipping disabled component", "component", ref.Name)
 			excludedReasons[ref.Name] = "the recipe disables it"
 			b.warnExcludedDriverInstaller(recipeResult, ref.Name, "disabled by the recipe")
+			b.warnExcludedToolkitHardening(ctx, recipeResult, ref.Name, "disabled by the recipe")
 			continue
 		}
 		enabledRefs = append(enabledRefs, ref)
@@ -2027,6 +2030,70 @@ func (b *DefaultBundler) warnExcludedDriverInstaller(recipeResult *recipe.Recipe
 			"separate bundle that includes %s.", componentName, how, componentName)
 	slog.Warn(warning, "component", componentName)
 	b.appendWarning(warning)
+}
+
+// aksToolkitHardeningManifest is the nodewright-customizations manifest that
+// sets the NVIDIA container toolkit device-isolation keys on AKS GPU nodes.
+const aksToolkitHardeningManifest = "components/nodewright-customizations/manifests/toolkit-hardening-aks.yaml"
+
+// warnExcludedToolkitHardening warns when a component carrying the AKS toolkit
+// hardening is left out of the bundle while gpu-operator's effective values
+// leave the node-image toolkit in place (toolkit.enabled=false, the
+// azure-managed profile). The hardening ships in nvidia-setup through
+// nodewright-customizations, so leaving that component out is an explicit
+// opt-out of it; this warns rather than blocks, but nothing else in the bundle
+// sets those keys. When gpu-operator's values cannot be resolved it warns too.
+func (b *DefaultBundler) warnExcludedToolkitHardening(ctx context.Context, recipeResult *recipe.RecipeResult, componentName, how string) {
+	ref := recipeResult.GetComponentRef(componentName)
+	if ref == nil || !slices.Contains(ref.ManifestFiles, aksToolkitHardeningManifest) {
+		return
+	}
+	if recipeResult.GetComponentRef(gpuOperatorComponentName) == nil {
+		return
+	}
+	toolkitEnabled, err := b.effectiveGPUOperatorToolkitEnabled(ctx, recipeResult)
+	if err == nil && toolkitEnabled != "false" {
+		return
+	}
+	warning := fmt.Sprintf(
+		"%s is excluded from this bundle (%s), which removes the NVIDIA container toolkit "+
+			"device-isolation hardening it delivers through nvidia-setup: any unprivileged pod "+
+			"that sets NVIDIA_VISIBLE_DEVICES gets every GPU on the node, and "+
+			"secure-accelerator-access fails. To skip only the InfiniBand/RDMA host prep, keep "+
+			"the component and set nodewrightcustomizations:accelerator=generic instead.",
+		componentName, how)
+	if err != nil {
+		warning += fmt.Sprintf(" (gpu-operator toolkit.enabled could not be resolved: %v)", err)
+	}
+	slog.Warn(warning, "component", componentName)
+	b.appendWarning(warning)
+}
+
+// effectiveGPUOperatorToolkitEnabled returns gpu-operator's toolkit.enabled as
+// the bundler will render it: recipe values, then --set, then
+// --set-json/--set-file.
+func (b *DefaultBundler) effectiveGPUOperatorToolkitEnabled(ctx context.Context, recipeResult *recipe.RecipeResult) (string, error) {
+	values, err := recipeResult.GetValuesForComponentWithContext(ctx, gpuOperatorComponentName)
+	if err != nil {
+		return "", errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to resolve gpu-operator values")
+	}
+	provider := recipeResult.DataProvider()
+	if setOverrides := b.getValueOverridesForComponent(gpuOperatorComponentName, provider); len(setOverrides) > 0 {
+		filtered := maps.Clone(setOverrides)
+		delete(filtered, config.ComponentEnabledKey)
+		if applyErr := component.ApplyMapOverrides(values, filtered); applyErr != nil {
+			return "", errors.Wrap(errors.ErrCodeInvalidRequest, "failed to apply gpu-operator --set overrides", applyErr)
+		}
+	}
+	if typed := b.getTypedValueOverridesForComponent(gpuOperatorComponentName, provider); len(typed) > 0 {
+		filtered := maps.Clone(typed)
+		delete(filtered, config.ComponentEnabledKey)
+		if applyErr := component.ApplyTypedOverrides(values, filtered); applyErr != nil {
+			return "", errors.Wrap(errors.ErrCodeInvalidRequest, "failed to apply gpu-operator --set-json/--set-file overrides", applyErr)
+		}
+	}
+	toolkit, _ := values["toolkit"].(map[string]any)
+	return fmt.Sprint(toolkit["enabled"]), nil
 }
 
 // getSetEnabledOverride checks if --set overrides contain an "enabled" key
