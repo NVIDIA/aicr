@@ -9,6 +9,7 @@ This section is for integrators who:
 - Deploy and operate the AICR API server in Kubernetes
 - Create custom recipes for their environments
 - Integrate AICR into GitOps workflows (Argo CD, Flux)
+- Contribute GPU capacity to AICR's real-hardware validation
 
 ## Documents
 
@@ -39,6 +40,7 @@ This section is for integrators who:
 | [Data Extension](data-extension.md) | Extending the embedded catalog via `--data` — overlays, components, and runtime criteria values without a rebuild |
 | [Validator Extension](validator-extension.md) | Adding custom validators and overriding embedded ones via `--data` |
 | [Supply Chain Verification](supply-chain-verification.md) | Verifying SLSA provenance, SBOMs, and attestations; admission policies; offline verification |
+| [Contributing Validation Capacity](validation-capacity.md) | How to contribute GPU capacity or credits to AICR's real-hardware validation: requirements, OIDC access, evidence, and onboarding |
 | [Nodewright Component](components/nodewright.md) | Nodewright component reference and configuration |
 
 ## Quick Start
