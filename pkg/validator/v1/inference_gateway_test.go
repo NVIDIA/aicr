@@ -105,6 +105,37 @@ func TestResolveInferenceGatewayProfile(t *testing.T) {
 			wantErr: "may not be empty",
 		},
 		{
+			// The evidence collector passes the name to kubectl as a bare
+			// argument, where a leading dash reads as a flag.
+			name: "gateway name that would read as a kubectl flag",
+			refs: []recipe.ComponentRef{{
+				Name: "example-gateway", Namespace: "example-gateway-system",
+				Overrides: declareInferenceGateway(map[string]any{"gatewayClass": "example-gateway-class", "gateway": "--server=http://attacker:8080"}),
+			}},
+			wantErr: `overrides.inferenceGateway.gateway "--server=http://attacker:8080" is not a valid Kubernetes name`,
+		},
+		{
+			name: "gateway name with a newline",
+			refs: []recipe.ComponentRef{{
+				Name: "example-gateway", Namespace: "example-gateway-system",
+				Overrides: declareInferenceGateway(map[string]any{"gatewayClass": "example-gateway-class", "gateway": "pool-vip\nother"}),
+			}},
+			wantErr: "is not a valid Kubernetes name",
+		},
+		{
+			name: "gateway class that would read as a kubectl flag",
+			refs: []recipe.ComponentRef{{
+				Name: "example-gateway", Namespace: "example-gateway-system",
+				Overrides: declareInferenceGateway(map[string]any{"gatewayClass": "-kubeconfig=/tmp/x"}),
+			}},
+			wantErr: `overrides.inferenceGateway.gatewayClass "-kubeconfig=/tmp/x" is not a valid Kubernetes name`,
+		},
+		{
+			name:    "namespace that is not a DNS-1123 label",
+			refs:    []recipe.ComponentRef{{Name: "agentgateway", Namespace: "-n=kube-system"}},
+			wantErr: `namespace "-n=kube-system" is not a valid Kubernetes name`,
+		},
+		{
 			name: "unknown dataPlane probe",
 			refs: []recipe.ComponentRef{{
 				Name: "example-gateway", Namespace: "example-gateway-system",

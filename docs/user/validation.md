@@ -676,8 +676,9 @@ uses Dynamo's request plane (Dynamo 1.4+ defaults to TCP); AICR does not set
 with no NATS relay, but least-loaded routing does not consume those events —
 only `DYN_ROUTER_MODE=kv` does. Set it to `gateway-epp`
 to exercise GAIE/EPP: the validator deploys an EPP component, worker frontend
-sidecars in direct mode, and an HTTPRoute through the AICR-managed inference
-gateway. The direct-mode sidecars honor EPP routing headers; they do not
+sidecars in direct mode, and an HTTPRoute through the recipe's inference
+gateway (agentgateway by default; a recipe whose components include no
+inference gateway fails the run before anything is deployed). The direct-mode sidecars honor EPP routing headers; they do not
 relay KV events.
 
 **Model-weights cache and `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS`.** The benchmark downloads
@@ -1036,12 +1037,16 @@ Valid feature names (from `pkg/evidence/cncf/consts.go`):
 Each collected feature records exactly one verdict in its evidence file:
 
 - **PASS** — the capability was exercised and behaved as expected.
-- **SKIP** — an optional prerequisite is absent (e.g. no inference gateway,
-  no supported operator, an unsupported cluster-autoscaling provider, or an
+- **SKIP** — an optional prerequisite is absent (e.g. a recipe that declares no
+  inference gateway, or a standalone run on a cluster with no Gateway named
+  `inference-gateway`; no supported operator, an unsupported cluster-autoscaling provider, or an
   operator that is installed but has no workload to reconcile). A SKIP is not
   a failure.
 - **FAIL** — a present capability was unhealthy, a required query failed, or
-  the evidence file carried no single valid verdict (fail closed).
+  the evidence file carried no single valid verdict (fail closed). An
+  inference Gateway the recipe declares is a requirement, not an optional
+  prerequisite: if it is missing, the cluster does not serve the Gateway API,
+  or the Gateway is programmed by another class, the section records FAIL.
 
 A **FAIL** in any feature makes `--cncf-submission` exit non-zero, so a
 submission that records a genuine failure no longer reports overall success.

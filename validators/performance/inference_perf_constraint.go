@@ -413,6 +413,7 @@ type inferenceWorkloadConfig struct {
 	gpuNodeInstanceType              string // chosen node's node.kubernetes.io/instance-type; empty if unlabeled
 	routingMode                      inferenceRoutingMode
 	gatewayProfile                   *validators.InferenceGatewayProfile // gateway-epp: resolved once while deploying; nil until then
+	gatewayTarget                    *gatewayAddressTarget               // gateway-epp with gateway-address: the listener the benchmark targets
 	routerMode                       string                              // Dynamo frontend DYN_ROUTER_MODE (dynamo-router path only); env > default (see resolveRouterMode)
 
 	// gpuAllocMode is the cluster's detected GPU allocation capability
@@ -552,7 +553,7 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 
 	// Look up the serving endpoint after the workload is ready. In Dynamo
 	// router mode this is the frontend Service; in gateway-epp mode it is the
-	// AICR-managed inference gateway that routes to the generated InferencePool.
+	// recipe's inference gateway that routes to the generated InferencePool.
 	endpoint, err := resolveInferenceEndpoint(ctx, config)
 	if err != nil {
 		return nil, err
@@ -1668,6 +1669,16 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 			return profileErr
 		}
 		config.gatewayProfile = &gatewayProfile
+		// An address-backed Gateway is read here too: one with no usable HTTP
+		// listener fails before anything is provisioned, and the chosen
+		// listener pins the route below.
+		if gatewayProfile.Probe == validators.GatewayProbeGatewayAddress {
+			target, targetErr := resolveGatewayAddressTarget(ctx, gatewayProfile, false)
+			if targetErr != nil {
+				return targetErr
+			}
+			config.gatewayTarget = &target
+		}
 	}
 
 	// Create namespace (idempotent).
@@ -1740,14 +1751,23 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 
 	if config.routingMode == inferenceRoutingModeGatewayEPP {
 		routePath := filepath.Join("testdata", "inference", "http-route-gateway-epp.yaml")
+		var pinListener func(*unstructured.Unstructured) error
+		if config.gatewayTarget != nil && config.gatewayTarget.listener != "" {
+			listener := config.gatewayTarget.listener
+			pinListener = func(obj *unstructured.Unstructured) error { return pinRouteSectionName(obj, listener) }
+		}
 		if err := createOrUpdateFromTemplate(ctx, httpRouteGVR,
-			config.namespace, routePath, templateData, nil); err != nil {
+			config.namespace, routePath, templateData, pinListener); err != nil {
 			return errors.Wrap(errors.ErrCodeInternal, "failed to apply HTTPRoute for gateway-epp routing", err)
 		}
 		slog.Info("Applied HTTPRoute for gateway-epp routing",
 			"name", inferenceHTTPRouteName(), "gateway", templateData["INFERENCE_GATEWAY_NAMESPACE"]+"/"+templateData["INFERENCE_GATEWAY_NAME"])
+		var pinnedListener string
+		if config.gatewayTarget != nil {
+			pinnedListener = config.gatewayTarget.listener
+		}
 		if err := waitForHTTPRouteAccepted(ctx, config.namespace, inferenceHTTPRouteName(),
-			gatewayProfile.Namespace, gatewayProfile.GatewayName, defaults.InferenceRouteAcceptTimeout); err != nil {
+			gatewayProfile.Namespace, gatewayProfile.GatewayName, pinnedListener, defaults.InferenceRouteAcceptTimeout); err != nil {
 			return err
 		}
 	}
@@ -2607,7 +2627,7 @@ func inferenceGatewayProfile(ctx *validators.Context) (validators.InferenceGatew
 // current generation: a retained namespace (AICR_INFERENCE_PERF_NO_CLEANUP
 // with a reused run ID) updates the route in place and keeps the previous
 // run's status until the Gateway reconciles.
-func waitForHTTPRouteAccepted(ctx *validators.Context, namespace, name, parentNamespace, parentName string, timeout time.Duration) error {
+func waitForHTTPRouteAccepted(ctx *validators.Context, namespace, name, parentNamespace, parentName, parentSection string, timeout time.Duration) error {
 	waitCtx, cancel := context.WithTimeout(ctx.Ctx, timeout)
 	defer cancel()
 	routes := ctx.DynamicClient.Resource(httpRouteGVR).Namespace(namespace)
@@ -2616,7 +2636,7 @@ func waitForHTTPRouteAccepted(ctx *validators.Context, namespace, name, parentNa
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to read the HTTPRoute after applying it", err)
 	}
-	if decided, acceptErr := httpRouteAccepted(existing, parentNamespace, parentName); decided {
+	if decided, acceptErr := httpRouteAccepted(existing, parentNamespace, parentName, parentSection); decided {
 		return acceptErr
 	}
 
@@ -2659,7 +2679,7 @@ func waitForHTTPRouteAccepted(ctx *validators.Context, namespace, name, parentNa
 				if getErr != nil {
 					return errors.Wrap(errors.ErrCodeInternal, "failed to re-read the HTTPRoute after the watch closed", getErr)
 				}
-				if decided, acceptErr := httpRouteAccepted(recheck, parentNamespace, parentName); decided {
+				if decided, acceptErr := httpRouteAccepted(recheck, parentNamespace, parentName, parentSection); decided {
 					return acceptErr
 				}
 				return undecided("watch closed")
@@ -2675,7 +2695,7 @@ func waitForHTTPRouteAccepted(ctx *validators.Context, namespace, name, parentNa
 				return errors.New(errors.ErrCodeInternal,
 					fmt.Sprintf("the benchmark HTTPRoute %s/%s was deleted while waiting for the inference gateway to accept it", namespace, name))
 			}
-			if decided, acceptErr := httpRouteAccepted(route, parentNamespace, parentName); decided {
+			if decided, acceptErr := httpRouteAccepted(route, parentNamespace, parentName, parentSection); decided {
 				return acceptErr
 			}
 		}
@@ -2686,7 +2706,11 @@ func waitForHTTPRouteAccepted(ctx *validators.Context, namespace, name, parentNa
 // reports for the route. decided is false while that parent reports no True
 // or False status at the route's current generation; other parents and
 // conditions observed at an earlier generation are ignored.
-func httpRouteAccepted(route *unstructured.Unstructured, parentNamespace, parentName string) (decided bool, err error) {
+// routeReasonNotAllowedByListeners is the Gateway API Accepted
+// reason a listener's allowedRoutes policy sets on a route it refuses.
+const routeReasonNotAllowedByListeners = "NotAllowedByListeners"
+
+func httpRouteAccepted(route *unstructured.Unstructured, parentNamespace, parentName, parentSection string) (decided bool, err error) {
 	generation := route.GetGeneration()
 	parents, _, _ := unstructured.NestedSlice(route.Object, "status", "parents")
 	for _, p := range parents {
@@ -2700,6 +2724,12 @@ func httpRouteAccepted(route *unstructured.Unstructured, parentNamespace, parent
 			refNamespace = route.GetNamespace()
 		}
 		if refName != parentName || refNamespace != parentNamespace {
+			continue
+		}
+		// A pinned route is judged only by the status of that listener's
+		// parent entry; one written before the pin (no sectionName) may
+		// carry no observedGeneration to mark it stale.
+		if refSection, _, _ := unstructured.NestedString(pMap, "parentRef", "sectionName"); parentSection != "" && refSection != parentSection {
 			continue
 		}
 		conditions, _, _ := unstructured.NestedSlice(pMap, "conditions")
@@ -2725,11 +2755,16 @@ func httpRouteAccepted(route *unstructured.Unstructured, parentNamespace, parent
 			case status == string(metav1.ConditionFalse):
 				reason, _, _ := unstructured.NestedString(cMap, "reason")
 				message, _, _ := unstructured.NestedString(cMap, "message")
-				return true, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-					"the inference gateway %q rejected the benchmark HTTPRoute %s/%s: Accepted=False reason=%s message=%q; "+
-						"the route attaches from the per-run namespace, so the Gateway listener must allow it "+
-						"(allowedRoutes.namespaces.from: All, or a Selector matching namespaces named %s-*)",
-					refName, route.GetNamespace(), route.GetName(), reason, message, inferenceWorkloadNamespacePrefix))
+				msg := fmt.Sprintf("the inference gateway %q rejected the benchmark HTTPRoute %s/%s: Accepted=False reason=%s message=%q",
+					refName, route.GetNamespace(), route.GetName(), reason, message)
+				// Only a listener policy rejection is fixed on the listener's
+				// allowedRoutes; other reasons carry their own message.
+				if reason == routeReasonNotAllowedByListeners {
+					msg += fmt.Sprintf("; the route attaches from the per-run namespace, so the Gateway listener must allow it "+
+						"(allowedRoutes.namespaces.from: All, or a Selector matching the per-run namespace's label %s=%s)",
+						labels.Component, labels.ValueInferencePerf)
+				}
+				return true, errors.New(errors.ErrCodeInvalidRequest, msg)
 			}
 		}
 	}
@@ -2797,8 +2832,46 @@ var inferenceGatewayGVR = validators.GatewayGVR
 // object, which is where a data plane that is not a Kubernetes workload
 // publishes it; there is no Service to resolve.
 func resolveGatewayAddressEndpoint(ctx *validators.Context, profile validators.InferenceGatewayProfile) (string, error) {
+	target, err := resolveGatewayAddressTarget(ctx, profile, true)
+	if err != nil {
+		return "", err
+	}
+	return target.url, nil
+}
+
+// gatewayAddressTarget is where the benchmark sends its load on an
+// address-backed Gateway: the URL, and the listener whose port it uses, which
+// the HTTPRoute pins as its sectionName so the Accepted wait covers that
+// listener rather than any listener on the Gateway.
+type gatewayAddressTarget struct {
+	url      string // empty when the address was not required and not yet published
+	listener string
+}
+
+// pinRouteSectionName attaches the route's only parentRef to one listener.
+func pinRouteSectionName(route *unstructured.Unstructured, listener string) error {
+	refs, _, _ := unstructured.NestedSlice(route.Object, "spec", "parentRefs")
+	if len(refs) != 1 {
+		return errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("gateway-epp HTTPRoute has %d parentRefs, want 1", len(refs)))
+	}
+	ref, ok := refs[0].(map[string]any)
+	if !ok {
+		return errors.New(errors.ErrCodeInternal, "gateway-epp HTTPRoute parentRef is not a mapping")
+	}
+	ref["sectionName"] = listener
+	return unstructured.SetNestedSlice(route.Object, refs, "spec", "parentRefs")
+}
+
+// resolveGatewayAddressTarget reads the Gateway and chooses the listener the
+// benchmark targets. requireAddress is false for the check made before
+// provisioning, which only needs the listener: a freshly applied Gateway may
+// publish its address while the workload deploys, so the address is read
+// again, and required, when the endpoint is resolved after the workload is
+// ready.
+func resolveGatewayAddressTarget(ctx *validators.Context, profile validators.InferenceGatewayProfile, requireAddress bool) (gatewayAddressTarget, error) {
 	if ctx.DynamicClient == nil {
-		return "", errors.New(errors.ErrCodeInvalidRequest,
+		return gatewayAddressTarget{}, errors.New(errors.ErrCodeInvalidRequest,
 			"dynamic client is not available to read the inference Gateway address")
 	}
 	lookupCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.DiagnosticTimeout)
@@ -2807,7 +2880,7 @@ func resolveGatewayAddressEndpoint(ctx *validators.Context, profile validators.I
 	gw, err := ctx.DynamicClient.Resource(inferenceGatewayGVR).Namespace(profile.Namespace).Get(
 		lookupCtx, profile.GatewayName, metav1.GetOptions{})
 	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal,
+		return gatewayAddressTarget{}, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to read inference Gateway %s/%s", profile.Namespace, profile.GatewayName), err)
 	}
 
@@ -2821,8 +2894,8 @@ func resolveGatewayAddressEndpoint(ctx *validators.Context, profile validators.I
 			}
 		}
 	}
-	if host == "" {
-		return "", errors.New(errors.ErrCodeInternal,
+	if host == "" && requireAddress {
+		return gatewayAddressTarget{}, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("inference Gateway %s/%s reports no status.addresses", profile.Namespace, profile.GatewayName))
 	}
 
@@ -2833,6 +2906,7 @@ func resolveGatewayAddressEndpoint(ctx *validators.Context, profile validators.I
 	// (surfacing minutes later as a readiness timeout), and a Gateway with
 	// no usable HTTP listener cannot be benchmarked at all.
 	var port int32
+	var listenerName string
 	var protocols, hostnameBound []string
 	listeners, _, _ := unstructured.NestedSlice(gw.Object, "spec", "listeners")
 	for _, l := range listeners {
@@ -2852,23 +2926,28 @@ func resolveGatewayAddressEndpoint(ctx *validators.Context, profile validators.I
 		}
 		if p, found, _ := unstructured.NestedInt64(lMap, "port"); found && p > 0 && p <= 65535 {
 			port = int32(p)
+			listenerName, _, _ = unstructured.NestedString(lMap, "name")
 			break
 		}
 	}
 	if port == 0 && len(hostnameBound) > 0 {
-		return "", errors.New(errors.ErrCodeInvalidRequest,
+		return gatewayAddressTarget{}, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("inference Gateway %s/%s HTTP listener(s) set a hostname (%s); the benchmark sends the address as Host and needs a hostname-free HTTP listener",
 				profile.Namespace, profile.GatewayName, strings.Join(hostnameBound, ", ")))
 	}
 	if port == 0 {
-		return "", errors.New(errors.ErrCodeInvalidRequest,
+		return gatewayAddressTarget{}, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("inference Gateway %s/%s has no HTTP listener (listeners: %s); the benchmark speaks plain HTTP",
 				profile.Namespace, profile.GatewayName, strings.Join(protocols, ", ")))
 	}
-	if strings.Contains(host, ":") {
-		host = "[" + host + "]"
+	target := gatewayAddressTarget{listener: listenerName}
+	if host != "" {
+		if strings.Contains(host, ":") {
+			host = "[" + host + "]"
+		}
+		target.url = fmt.Sprintf("http://%s:%d", host, port)
 	}
-	return fmt.Sprintf("http://%s:%d", host, port), nil
+	return target, nil
 }
 
 func defaultGatewayEndpoint(profile validators.InferenceGatewayProfile) string {

@@ -21,6 +21,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // Fields of the recipe.InferenceGatewayOverrideKey mapping.
@@ -238,6 +239,23 @@ func inferenceGatewayProfileFromRef(ref *recipe.ComponentRef) (InferenceGatewayP
 	if profile.Namespace == "" {
 		return InferenceGatewayProfile{}, false, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("component %q is an inference gateway but has no resolved namespace; set componentRef.namespace or the registry defaultNamespace", ref.Name))
+	}
+	// The names reach kubectl as bare arguments in the evidence collector, so
+	// a value that is not a Kubernetes object name (a leading dash reads as a
+	// flag) is refused here rather than handed to a subprocess.
+	for _, check := range []struct {
+		field, value string
+		problems     []string
+	}{
+		{path + "." + inferenceGatewayClassField, profile.GatewayClass, validation.IsDNS1123Subdomain(profile.GatewayClass)},
+		{path + "." + inferenceGatewayNameField, profile.GatewayName, validation.IsDNS1123Subdomain(profile.GatewayName)},
+		{"namespace", profile.Namespace, validation.IsDNS1123Label(profile.Namespace)},
+	} {
+		if len(check.problems) > 0 {
+			return InferenceGatewayProfile{}, false, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q: %s %q is not a valid Kubernetes name: %s",
+					ref.Name, check.field, check.value, strings.Join(check.problems, "; ")))
+		}
 	}
 	return profile, true, nil
 }

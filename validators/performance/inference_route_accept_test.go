@@ -96,17 +96,24 @@ func newRouteClient(t *testing.T, route *unstructured.Unstructured) *dynamicfake
 
 func TestWaitForHTTPRouteAccepted(t *testing.T) {
 	tests := []struct {
-		name     string
-		route    *unstructured.Unstructured
-		wantErr  string
-		wantCode errors.ErrorCode
+		name       string
+		route      *unstructured.Unstructured
+		wantErr    string
+		wantNoHint bool
+		wantCode   errors.ErrorCode
 	}{
 		{name: "already accepted", route: httpRouteObject("True", "Accepted")},
 		{
 			name: "rejected by the listener policy", route: httpRouteObject("False", "NotAllowedByListeners"),
-			wantErr: "allowedRoutes.namespaces.from: All", wantCode: errors.ErrCodeInvalidRequest,
+			wantErr: "allowedRoutes.namespaces.from: All, or a Selector matching the per-run namespace's label app.kubernetes.io/component=inference-perf", wantCode: errors.ErrCodeInvalidRequest,
 		},
 		{name: "no condition before the wait expires proceeds", route: httpRouteObject("", "")},
+		{
+			// Only a listener-policy rejection points at allowedRoutes; another
+			// reason is reported as the controller states it.
+			name: "rejected for another reason carries no allowedRoutes hint", route: httpRouteObject("False", "NoMatchingParent"),
+			wantErr: "Accepted=False reason=NoMatchingParent", wantNoHint: true, wantCode: errors.ErrCodeInvalidRequest,
+		},
 		{name: "unknown status is not a decision", route: httpRouteObject("Unknown", "Pending")},
 		{
 			// A retained namespace updates the route in place; the previous
@@ -157,7 +164,7 @@ func TestWaitForHTTPRouteAccepted(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			vctx := &validators.Context{Ctx: context.Background(), DynamicClient: newRouteClient(t, tt.route)}
-			err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, routeTestGatewayNS, routeTestGateway, 200*time.Millisecond)
+			err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, routeTestGatewayNS, routeTestGateway, "", 200*time.Millisecond)
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
@@ -166,6 +173,9 @@ func TestWaitForHTTPRouteAccepted(t *testing.T) {
 			}
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("error = %v, want containing %q", err, tt.wantErr)
+			}
+			if tt.wantNoHint && strings.Contains(err.Error(), "allowedRoutes") {
+				t.Errorf("error %q points at allowedRoutes for a reason the listener policy did not cause", err)
 			}
 			errorstest.WantReportedCode(t, err, tt.wantCode)
 		})
@@ -192,7 +202,7 @@ func TestWaitForHTTPRouteAccepted_DecidedDuringWatch(t *testing.T) {
 				}
 			}()
 			vctx := &validators.Context{Ctx: context.Background(), DynamicClient: dyn}
-			err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, routeTestGatewayNS, routeTestGateway, 5*time.Second)
+			err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, routeTestGatewayNS, routeTestGateway, "", 5*time.Second)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -230,7 +240,7 @@ func TestWaitForHTTPRouteAccepted_WatchClosed(t *testing.T) {
 				return true, w, nil
 			})
 			vctx := &validators.Context{Ctx: context.Background(), DynamicClient: dyn}
-			err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, routeTestGatewayNS, routeTestGateway, 5*time.Second)
+			err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, routeTestGatewayNS, routeTestGateway, "", 5*time.Second)
 			if !watched {
 				t.Fatal("the route was decided before the watch; the re-read branch did not run")
 			}
@@ -271,7 +281,7 @@ func TestWaitForHTTPRouteAccepted_DeletedDuringWatch(t *testing.T) {
 		return true, w, nil
 	})
 	vctx := &validators.Context{Ctx: context.Background(), DynamicClient: dyn}
-	err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, routeTestGatewayNS, routeTestGateway, 5*time.Second)
+	err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, routeTestGatewayNS, routeTestGateway, "", 5*time.Second)
 	if err == nil || !strings.Contains(err.Error(), "was deleted while waiting") {
 		t.Fatalf("error = %v, want the deleted-route failure", err)
 	}
@@ -282,7 +292,7 @@ func TestWaitForHTTPRouteAccepted_Canceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	vctx := &validators.Context{Ctx: ctx, DynamicClient: newRouteClient(t, httpRouteObject("", ""))}
-	err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, routeTestGatewayNS, routeTestGateway, time.Second)
+	err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, routeTestGatewayNS, routeTestGateway, "", time.Second)
 	if err == nil {
 		t.Fatal("expected an error for a canceled context")
 	}
@@ -359,6 +369,55 @@ func TestInferenceGatewayProfile_Gate(t *testing.T) {
 			}
 			if profile.GatewayName != tt.want {
 				t.Errorf("GatewayName = %q, want %q", profile.GatewayName, tt.want)
+			}
+		})
+	}
+}
+
+// TestWaitForHTTPRouteAccepted_PinnedSection pins that a route attached to
+// one listener is judged by that listener's parent entry only. A retained
+// route updated from unpinned to pinned can still carry the unpinned entry,
+// and observedGeneration is optional, so that entry could otherwise pass.
+func TestWaitForHTTPRouteAccepted_PinnedSection(t *testing.T) {
+	withSection := func(p map[string]any, section string) map[string]any {
+		p["parentRef"].(map[string]any)["sectionName"] = section
+		delete(p["conditions"].([]any)[0].(map[string]any), "observedGeneration")
+		return p
+	}
+	unpinned := func(accepted, reason string) map[string]any {
+		p := routeParentStatus(routeTestGateway, routeTestGatewayNS, accepted, reason, 0)
+		delete(p["conditions"].([]any)[0].(map[string]any), "observedGeneration")
+		return p
+	}
+	tests := []struct {
+		name    string
+		route   *unstructured.Unstructured
+		wantErr bool
+	}{
+		{
+			name:  "an unpinned acceptance does not decide a pinned route",
+			route: withParents(httpRouteAt(2), unpinned("True", "Accepted")),
+		},
+		{
+			name: "the pinned listener's rejection decides beside an unpinned acceptance",
+			route: withParents(httpRouteAt(2), unpinned("True", "Accepted"),
+				withSection(routeParentStatus(routeTestGateway, routeTestGatewayNS, "False", "NotAllowedByListeners", 0), "open")),
+			wantErr: true,
+		},
+		{
+			name: "another listener's acceptance does not decide",
+			route: withParents(httpRouteAt(2),
+				withSection(routeParentStatus(routeTestGateway, routeTestGatewayNS, "True", "Accepted", 0), "other")),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			decided, err := httpRouteAccepted(tt.route, routeTestGatewayNS, routeTestGateway, "open")
+			if decided != tt.wantErr || (err != nil) != tt.wantErr {
+				t.Fatalf("decided=%v err=%v, want decided=%v with error=%v", decided, err, tt.wantErr, tt.wantErr)
+			}
+			if tt.wantErr {
+				errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 			}
 		})
 	}

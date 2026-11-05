@@ -333,7 +333,11 @@ confirmed scoped under `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY=true`), and the
 performance validator sends its load to the first address on the port of the
 first `HTTP` listener that sets no `hostname` (the benchmark sends the address
 as the `Host` header; a Gateway with no `HTTP` listener, or whose `HTTP`
-listeners all bind a hostname, fails the performance run at once).
+listeners all bind a hostname, fails the performance run before anything is
+provisioned; the address itself is read once the workload is ready, so a
+Gateway that publishes it while the workload deploys is fine). The benchmark's HTTPRoute names that listener as its
+`sectionName`, so the `Accepted` wait below covers the listener the load goes
+to rather than any listener on the Gateway.
 A recipe that enables two inference gateway components fails the check; exactly
 one may be enabled. No shipped recipe uses `gateway-address`; it is covered by
 unit tests and by no CI lane.
@@ -341,7 +345,8 @@ unit tests and by no CI lane.
 The performance validator's `gateway-epp` routing mode attaches its HTTPRoute
 from a per-run namespace named `aicr-inference-perf-<run>`, so the Gateway's
 `HTTP` listener must allow routes from that namespace
-(`allowedRoutes.namespaces.from: All`, or a `Selector` that matches it); the
+(`allowedRoutes.namespaces.from: All`, or a `Selector` on the label every
+per-run namespace carries, `app.kubernetes.io/component=inference-perf`); the
 shipped agentgateway Gateway does. A listener that keeps the Gateway API
 default (`Same`) rejects the route, and the run fails at once with the
 listener's `Accepted` reason rather than as a readiness timeout.

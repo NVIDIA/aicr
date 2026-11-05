@@ -273,3 +273,104 @@ func TestHTTPRouteTemplateAttachesToProfileGateway(t *testing.T) {
 		t.Errorf("unrendered placeholder in the HTTPRoute: %s", rendered)
 	}
 }
+
+// TestGatewayAddressTargetPinsTheListener pins that the route the benchmark
+// applies attaches to the listener the benchmark targets. Without a
+// sectionName a route is Accepted when any listener admits it, so a Gateway
+// whose targeted listener keeps allowedRoutes Same beside one that allows All
+// would pass the Accepted wait and fail minutes later as a readiness timeout.
+func TestGatewayAddressTargetPinsTheListener(t *testing.T) {
+	ref := addressGatewayRef(map[string]any{"gatewayClass": "edge-class", "dataPlane": "gateway-address"})
+	gw := addressGateway(
+		[]any{map[string]any{"type": "IPAddress", "value": "172.16.100.12"}},
+		[]any{
+			map[string]any{"name": "tls", "protocol": "HTTPS", "port": int64(443)},
+			map[string]any{"name": "bound", "protocol": "HTTP", "port": int64(80), "hostname": "models.example.com"},
+			map[string]any{"name": "open", "protocol": "HTTP", "port": int64(8080)},
+			map[string]any{"name": "spare", "protocol": "HTTP", "port": int64(8081)},
+		})
+	vctx := &validators.Context{
+		Ctx: context.Background(), DynamicClient: newAddressGatewayClient(t, gw),
+		ValidationInput: &validatorv1.ValidationInput{ComponentRefs: []recipe.ComponentRef{ref}},
+	}
+	profile, err := inferenceGatewayProfile(vctx)
+	if err != nil {
+		t.Fatalf("inferenceGatewayProfile: %v", err)
+	}
+	target, err := resolveGatewayAddressTarget(vctx, profile, true)
+	if err != nil {
+		t.Fatalf("resolveGatewayAddressTarget: %v", err)
+	}
+	if target.url != "http://172.16.100.12:8080" || target.listener != "open" {
+		t.Fatalf("target = %+v, want the first hostname-free HTTP listener open on :8080", target)
+	}
+
+	cfg := &inferenceWorkloadConfig{namespace: "bench", model: "m", routerMode: "direct", gpuCount: 1}
+	data := inferenceTemplateData(cfg)
+	setInferenceGatewayTemplateData(data, profile)
+	route, err := parseYAMLTemplate(filepath.Join("testdata", "inference", "http-route-gateway-epp.yaml"), data)
+	if err != nil {
+		t.Fatalf("parseYAMLTemplate: %v", err)
+	}
+	if err := pinRouteSectionName(route, target.listener); err != nil {
+		t.Fatalf("pinRouteSectionName: %v", err)
+	}
+	refs, _, _ := unstructured.NestedSlice(route.Object, "spec", "parentRefs")
+	if len(refs) != 1 {
+		t.Fatalf("parentRefs = %v, want one", refs)
+	}
+	if got := refs[0].(map[string]any)["sectionName"]; got != "open" {
+		t.Errorf("parentRef sectionName = %v, want open", got)
+	}
+}
+
+// TestDeployInferenceWorkload_GatewayAddressFailsBeforeProvisioning pins that
+// an address-backed Gateway the benchmark cannot use is reported before the
+// namespace, model cache and workload are created.
+func TestDeployInferenceWorkload_GatewayAddressFailsBeforeProvisioning(t *testing.T) {
+	ref := addressGatewayRef(map[string]any{"gatewayClass": "edge-class", "dataPlane": "gateway-address"})
+	gw := addressGateway(
+		[]any{map[string]any{"type": "IPAddress", "value": "172.16.100.12"}},
+		[]any{map[string]any{"name": "tls", "protocol": "HTTPS", "port": int64(443)}})
+	client := fake.NewClientset()
+	vctx := &validators.Context{
+		Ctx: context.Background(), Clientset: client, DynamicClient: newAddressGatewayClient(t, gw),
+		ValidationInput: &validatorv1.ValidationInput{ComponentRefs: []recipe.ComponentRef{ref}},
+	}
+	config := &inferenceWorkloadConfig{namespace: "aicr-inference-perf-addr", routingMode: inferenceRoutingModeGatewayEPP}
+	err := deployInferenceWorkload(vctx, config)
+	if err == nil || !strings.Contains(err.Error(), "has no HTTP listener") {
+		t.Fatalf("error = %v, want the no-HTTP-listener failure", err)
+	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	if _, getErr := client.CoreV1().Namespaces().Get(context.Background(), config.namespace, metav1.GetOptions{}); getErr == nil {
+		t.Errorf("namespace %s was created before the Gateway listener was checked", config.namespace)
+	}
+}
+
+// TestGatewayAddressTarget_AddressNotYetPublished pins that the check made
+// before provisioning needs only the listener: a freshly applied Gateway may
+// publish its address while the workload deploys, and the endpoint read after
+// the workload is ready still requires it.
+func TestGatewayAddressTarget_AddressNotYetPublished(t *testing.T) {
+	ref := addressGatewayRef(map[string]any{"gatewayClass": "edge-class", "dataPlane": "gateway-address"})
+	gw := addressGateway(nil, []any{map[string]any{"name": "open", "protocol": "HTTP", "port": int64(8080)}})
+	vctx := &validators.Context{
+		Ctx: context.Background(), DynamicClient: newAddressGatewayClient(t, gw),
+		ValidationInput: &validatorv1.ValidationInput{ComponentRefs: []recipe.ComponentRef{ref}},
+	}
+	profile, err := inferenceGatewayProfile(vctx)
+	if err != nil {
+		t.Fatalf("inferenceGatewayProfile: %v", err)
+	}
+	early, err := resolveGatewayAddressTarget(vctx, profile, false)
+	if err != nil {
+		t.Fatalf("pre-provisioning check failed on a Gateway with no address yet: %v", err)
+	}
+	if early.listener != "open" || early.url != "" {
+		t.Errorf("early target = %+v, want listener open and no URL", early)
+	}
+	if _, err := resolveGatewayAddressEndpoint(vctx, profile); err == nil || !strings.Contains(err.Error(), "reports no status.addresses") {
+		t.Errorf("endpoint error = %v, want the missing-address failure", err)
+	}
+}
