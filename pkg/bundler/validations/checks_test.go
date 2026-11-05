@@ -275,9 +275,25 @@ func TestCheckAcceleratedSelectorMissing(t *testing.T) {
 }
 
 func TestCheckWildcardAcceleratedToleration(t *testing.T) {
+	const (
+		toolkitManifest = "components/nodewright-customizations/manifests/toolkit-hardening-aks.yaml"
+		tuningManifest  = "components/nodewright-customizations/manifests/tuning.yaml"
+	)
+	// An AKS accelerator leaf: the root's toolkit hardening plus the leaf's
+	// interrupt-declaring tuning manifest.
 	aksRecipe := &recipe.RecipeResult{
 		ComponentRefs: []recipe.ComponentRef{
-			{Name: "nodewright-customizations"},
+			{Name: "nodewright-customizations", ManifestFiles: []string{toolkitManifest, tuningManifest}},
+		},
+		Criteria: &recipe.Criteria{
+			Service: recipe.CriteriaServiceAKS,
+		},
+	}
+	// An AKS recipe with no accelerator leaf: only the toolkit hardening,
+	// whose package declares no interrupt.
+	aksToolkitOnlyRecipe := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "nodewright-customizations", ManifestFiles: []string{toolkitManifest}},
 		},
 		Criteria: &recipe.Criteria{
 			Service: recipe.CriteriaServiceAKS,
@@ -316,7 +332,7 @@ func TestCheckWildcardAcceleratedToleration(t *testing.T) {
 			componentName: "nodewright-customizations",
 			recipeResult: &recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
-					{Name: "nodewright-customizations"},
+					{Name: "nodewright-customizations", ManifestFiles: []string{tuningManifest}},
 				},
 				Criteria: &recipe.Criteria{
 					Service: recipe.CriteriaServiceEKS,
@@ -356,6 +372,72 @@ func TestCheckWildcardAcceleratedToleration(t *testing.T) {
 			wantWarningMsg: "wildcard (keyless) accelerated-node toleration",
 		},
 		{
+			name:          "toolkit hardening only skips wildcard check",
+			componentName: "nodewright-customizations",
+			recipeResult:  aksToolkitOnlyRecipe,
+			bundlerConfig: config.NewConfig(
+				config.WithAcceleratedNodeTolerations([]corev1.Toleration{
+					{Operator: corev1.TolerationOpExists},
+				}),
+			),
+			conditions:   aksConditions,
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			name:          "toolkit hardening only with no tolerations skips wildcard check",
+			componentName: "nodewright-customizations",
+			recipeResult:  aksToolkitOnlyRecipe,
+			bundlerConfig: config.NewConfig(),
+			conditions:    aksConditions,
+			wantWarnings:  0,
+			wantErrors:    0,
+		},
+		{
+			name:          "unknown manifest beside toolkit hardening still warns",
+			componentName: "nodewright-customizations",
+			recipeResult: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "nodewright-customizations", ManifestFiles: []string{
+						toolkitManifest, "components/nodewright-customizations/manifests/custom.yaml",
+					}},
+				},
+				Criteria: &recipe.Criteria{
+					Service: recipe.CriteriaServiceAKS,
+				},
+			},
+			bundlerConfig: config.NewConfig(
+				config.WithAcceleratedNodeTolerations([]corev1.Toleration{
+					{Operator: corev1.TolerationOpExists},
+				}),
+			),
+			conditions:     aksConditions,
+			wantWarnings:   1,
+			wantErrors:     0,
+			wantWarningMsg: "wildcard (keyless) accelerated-node toleration",
+		},
+		{
+			name:          "tuning manifest alone still warns",
+			componentName: "nodewright-customizations",
+			recipeResult: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "nodewright-customizations", ManifestFiles: []string{tuningManifest}},
+				},
+				Criteria: &recipe.Criteria{
+					Service: recipe.CriteriaServiceAKS,
+				},
+			},
+			bundlerConfig: config.NewConfig(
+				config.WithAcceleratedNodeTolerations([]corev1.Toleration{
+					{Operator: corev1.TolerationOpExists},
+				}),
+			),
+			conditions:     aksConditions,
+			wantWarnings:   1,
+			wantErrors:     0,
+			wantWarningMsg: "wildcard (keyless) accelerated-node toleration",
+		},
+		{
 			name:          "keyed toleration only",
 			componentName: "nodewright-customizations",
 			recipeResult:  aksRecipe,
@@ -369,7 +451,7 @@ func TestCheckWildcardAcceleratedToleration(t *testing.T) {
 			wantErrors:   0,
 		},
 		{
-			name:          "component disabled via --set (RDMA opt-out) skips wildcard check",
+			name:          "component disabled via --set skips wildcard check",
 			componentName: "nodewright-customizations",
 			recipeResult:  aksRecipe,
 			bundlerConfig: config.NewConfig(
@@ -2114,5 +2196,50 @@ func TestCheckGKETCPXOInterfacesCoherence(t *testing.T) {
 				t.Errorf("error %q missing %q", errs[0], tt.wantContains)
 			}
 		})
+	}
+}
+
+// TestSelectorChecksSkipNoInterruptManifests pins that the workload- and
+// accelerated-selector checks stay quiet for a component that renders only
+// no-interrupt manifests (the AKS toolkit hardening) and still fire when an
+// interrupt-declaring or unknown manifest is present.
+func TestSelectorChecksSkipNoInterruptManifests(t *testing.T) {
+	const (
+		toolkitManifest = "components/nodewright-customizations/manifests/toolkit-hardening-aks.yaml"
+		tuningManifest  = "components/nodewright-customizations/manifests/tuning.yaml"
+	)
+	checks := map[string]ValidationFunc{
+		"CheckWorkloadSelectorMissing":    CheckWorkloadSelectorMissing,
+		"CheckAcceleratedSelectorMissing": CheckAcceleratedSelectorMissing,
+	}
+	tests := []struct {
+		name         string
+		manifests    []string
+		overrides    map[string]map[string]string
+		wantWarnings int
+	}{
+		{"toolkit hardening only", []string{toolkitManifest}, nil, 0},
+		{"toolkit hardening and tuning", []string{toolkitManifest, tuningManifest}, nil, 1},
+		{"unknown manifest", []string{toolkitManifest, "components/nodewright-customizations/manifests/custom.yaml"}, nil, 1},
+		{"no manifests", nil, nil, 1},
+	}
+	for checkName, check := range checks {
+		for _, tt := range tests {
+			t.Run(checkName+"/"+tt.name, func(t *testing.T) {
+				result := &recipe.RecipeResult{
+					ComponentRefs: []recipe.ComponentRef{
+						{Name: "nodewright-customizations", ManifestFiles: tt.manifests},
+					},
+					Criteria: &recipe.Criteria{Intent: recipe.CriteriaIntentTraining},
+				}
+				cfg := config.NewConfig(config.WithValueOverrides(tt.overrides))
+				warnings, errs := check(context.Background(), "nodewright-customizations", result, cfg,
+					map[string][]string{"intent": {"training"}})
+				if len(warnings) != tt.wantWarnings || len(errs) != 0 {
+					t.Errorf("%s() = %d warnings, %d errors; want %d warnings, 0 errors",
+						checkName, len(warnings), len(errs), tt.wantWarnings)
+				}
+			})
+		}
 	}
 }

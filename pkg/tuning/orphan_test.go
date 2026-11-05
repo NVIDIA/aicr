@@ -80,3 +80,29 @@ func TestNoOrphanedTuningManifests(t *testing.T) {
 		t.Errorf("orphaned manifest %q: referenced by no resolved leaf and not in the intentional-placeholder allowlist — remove it, or add it to allowedOrphans (with a reason) if it is deliberate", name)
 	}
 }
+
+func TestSelectTuningManifest(t *testing.T) {
+	const (
+		tuningManifest = nwcManifestsDir + "tuning.yaml"
+		otherComponent = "components/gpu-operator/manifests/dcgm-exporter.yaml"
+	)
+	tests := []struct {
+		name  string
+		files []string
+		want  string
+	}{
+		{"none", nil, ""},
+		{"other component only", []string{otherComponent}, ""},
+		{"tuning only", []string{tuningManifest}, tuningManifest},
+		{"toolkit hardening only", []string{aksToolkitHardeningManifest}, aksToolkitHardeningManifest},
+		{"leaf manifest after hardening", []string{aksToolkitHardeningManifest, tuningManifest}, tuningManifest},
+		{"leaf manifest before hardening", []string{tuningManifest, aksToolkitHardeningManifest}, tuningManifest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := selectTuningManifest(tt.files); got != tt.want {
+				t.Errorf("selectTuningManifest(%v) = %q, want %q", tt.files, got, tt.want)
+			}
+		})
+	}
+}
