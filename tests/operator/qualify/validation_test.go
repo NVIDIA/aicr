@@ -56,18 +56,22 @@ func deploymentValidation(ctx context.Context, t *testing.T, active string) {
 		patchRuntime(ctx, t, func(rt *v1alpha1.ClusterRuntime) { rt.Spec = *saved })
 		restored = true
 		// Earlier rollouts to the active plan succeeded; the one back to it
-		// waits for an approval.
+		// waits for an approval. A scenario that failed before its rollout
+		// wrote the release returns to the active plan with none.
 		var back *v1alpha1.RuntimeRollout
-		waitFor(t, rolloutTimeout, "a rollout back to "+active+" awaiting approval", func() bool {
+		waitFor(t, rolloutTimeout, "a rollout back to "+active+" awaiting approval, or Ready on it", func() bool {
 			for _, r := range rolloutsTo(ctx, t, active) {
 				if r.Status.Phase == v1alpha1.PhaseAwaitingApproval {
 					back = &r
 					return true
 				}
 			}
-			return false
+			rt := getRuntime(ctx, t)
+			return cond(rt, v1alpha1.ConditionReady).Status == metav1.ConditionTrue && rt.Status.ActivePlanDigest == active
 		})
-		approve(ctx, t, back.Name)
+		if back != nil {
+			approve(ctx, t, back.Name)
+		}
 		waitReadyOn(ctx, t, active)
 	}
 	// Later scenarios start from the active plan, whatever happens here.
@@ -104,9 +108,14 @@ func deploymentValidation(ctx context.Context, t *testing.T, active string) {
 		}
 		return false
 	})
+	// AICR ran and refused the request: exit 2 is a structured
+	// INVALID_REQUEST, which an argument it cannot parse (exit 1) or a
+	// container that never starts does not produce, and the excerpt is AICR's
+	// own log output. On kind the suite's recipe has its GPU advertisers off.
 	v := ended.Status.Validation
 	if ended.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseFailed) || v == nil || v.Result != "Failed" ||
-		!strings.Contains(ended.Status.Message, "deployment validation failed") {
+		!strings.Contains(ended.Status.Message, "deployment validation failed") ||
+		!strings.Contains(ended.Status.Message, "aicr validation exited 2: [cli] ") {
 
 		t.Fatalf("rollout %s: labels %v, status %+v; want deployment validation to fail it", ended.Name, ended.Labels, ended.Status)
 	}
