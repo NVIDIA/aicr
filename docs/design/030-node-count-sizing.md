@@ -304,6 +304,15 @@ are 2 to 9% of the total, and every measured cluster lands in the same tier
 whether counted by GPU or by total nodes. A cluster with a large CPU pool
 would not: the 118-GPU-node cluster in Context has 436 nodes.
 
+`--nodes` exists today as an estimated GPU-node count, copied into the
+paths in `nodeScheduling.nodeCountPaths`. This ADR redefines it as all
+nodes. Nothing is sized from it yet: the only path is nodewright's
+`estimatedNodeCount`, which the chart ignores because AICR's values set the
+manager's resources explicitly, and the copy continues unchanged. A caller
+who keeps passing a GPU count can land one tier low, as the 436-node
+cluster would, so the flag help, the docs and the release notes state the
+new meaning.
+
 There is no separate count for CPU nodes:
 
 - The tiers are 2 to 3x wide, so a second count would rarely change the
@@ -338,15 +347,15 @@ resources:
       - maxNodes: 600
         requests: {memory: 512Mi}
         limits: {memory: 768Mi}
-        source: "#3214 (2026-11-04): p90 410Mi, max 496Mi, 24h at 417 nodes (407 GPU)"
+        source: "#3214 (2026-11-04): p90 410Mi, max 496Mi, 24h at 417 nodes (407 GPU), 13.8k pods"
       - maxNodes: 1500
         requests: {memory: 768Mi}
         limits: {memory: 1Gi}
-        source: "#3214 (2026-11-04): p90 602Mi, max 744Mi, 24h at 670 nodes (656 GPU)"
+        source: "#3214 (2026-11-04): p90 602Mi, max 744Mi, 24h at 670 nodes (656 GPU), 21.7k pods"
       - maxNodes: 3000
         requests: {memory: 2.5Gi}
         limits: {memory: 4Gi}
-        source: "#3214 (2026-11-04): p90 2353Mi, max 3006Mi, 7d at 2191-2653 nodes (2012-2500 GPU)"
+        source: "#3214 (2026-11-04): p90 2353Mi, max 3006Mi, 7d at 2191-2653 nodes (2012-2500 GPU), 13.2k pods"
   - path: maintenance-operator-chart.operator.resources
     requiresPath: maintenance-operator-chart
     tiers: [...]
@@ -385,7 +394,9 @@ resources:
   pin or values. For a controller that drifts at a constant node count, the
   limit uses the drifted peak.
 
-Every tier that changes a value carries a `source` naming its measurement.
+Every tier that changes a value carries a `source` naming its measurement:
+the issue and date, p90 and max, the window, and the measured cluster's
+total nodes, GPU nodes and pod count.
 
 **Validation.** The loader fails closed with `ErrCodeInvalidRequest` on:
 
