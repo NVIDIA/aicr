@@ -39,3 +39,10 @@ additional_trustees:
   - mikecook
   - robbert229
   - cparadis-nvidia
+# Signed commits from these bots sync to pull-request/<N> without /ok to test.
+# `renovate` matches only Mend's hosted Renovate app (renovate[bot]). This
+# repo's self-hosted Renovate commits as github-actions[bot], which is not
+# listed because it would cover every GITHUB_TOKEN commit from any workflow.
+trusted_bots:
+  - dependabot
+  - renovate

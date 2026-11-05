@@ -40,6 +40,11 @@ Before contributing:
 - Update API documentation when endpoints change
 - Ensure code comments are accurate and helpful
 
+### Contributing Validation Capacity
+
+- GPU providers and operators can contribute capacity for AICR's real-hardware validation runs
+- See [Contributing Validation Capacity](docs/integrator/validation-capacity.md) for requirements, access, and onboarding
+
 ### Contributing Code
 
 - Fix bugs, add features, or improve performance
