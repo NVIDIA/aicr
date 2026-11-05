@@ -66,8 +66,7 @@ Application's values.
 - Size controller memory requests and limits from a node count the user
   states, at generation time and at deploy time.
 - Back every sized value with a measurement recorded next to it.
-- Keep outputs reproducible: the same inputs give byte-identical bundles,
-  and the bundle records the tier it applied.
+- Keep outputs reproducible: the same inputs give byte-identical bundles.
 - Keep explicit user overrides authoritative.
 
 ## Non-Goals
@@ -268,7 +267,7 @@ A tier's request is the p90 of the measured working set, and its limit is
 the highest measured peak times 1.3, both from the largest cluster measured
 in the tier. No tier is interpolated. A tier never lowers a value. Outside
 an ADR-015 lock set, an explicit user override replaces the tier's result.
-The bundle records the tier it applied.
+The sized values are the record of the tier applied.
 
 ## Proposal
 
@@ -360,8 +359,9 @@ resources:
 - `requiresPath` applies an entry only when the resolved values contain
   that key, so the maintenance-operator and NIC daemon entries apply only
   where the GB300 values file defines them.
-- Above the top tier, the top tier applies with a warning that the size is
-  unqualified. Raising the ceiling needs a new measured tier.
+- Above the top tier, the top tier applies, and `aicr bundle` logs a
+  warning that no cluster that size was measured. Raising the ceiling needs
+  a new measured tier.
 
 **Deriving values:**
 
@@ -465,9 +465,10 @@ values resolve and before user overrides. For every deployer except
 `argocd-helm` the result is baked into the component's values, including
 bundle-rendered manifests such as the NIC daemon's NicClusterPolicy.
 
-`bundle-info.yaml` records the count and each component's tier. For
-components sized at deploy time on `argocd-helm`, it records the default
-`sizing.nodeCount` and the table instead, because the tier is chosen later.
+`bundle-info.yaml` does not record the tier. Its reader rejects unknown
+fields, so a new field needs a release that reads it before one that writes
+it (ADR-022 §3), and nothing shows its `warnings` to users. The sized
+values in each component's `values.yaml` are the record.
 
 ### Deploy time (`argocd-helm`)
 
@@ -487,7 +488,9 @@ time. The bundle carries the table, and Helm selects a row at render time:
 - The template stamps the count and tier on each sized child Application as
   annotations (`aicr.nvidia.com/sizing-node-count`,
   `aicr.nvidia.com/sizing-tier`), the render-time record of what an
-  installation applied.
+  installation applied. Above the top tier the tier annotation is the top
+  tier's `maxNodes`; Helm has no place to show a warning, so the bundle
+  README and the docs carry that guidance.
 
 One code path decides each component's sizing: on an `argocd-helm` bundle,
 `--nodes` only sets the default `sizing.nodeCount`.
@@ -543,7 +546,7 @@ following this section.
    [#3644](https://github.com/NVIDIA/aicr/issues/3644):
    - the `sizing.yaml` schema, loader and data files, and the restored
      defaults;
-   - the generation-time sizing pass and the `bundle-info.yaml` record;
+   - the generation-time sizing pass;
    - the `argocd-helm` root value, per-tier static files, template
      selection, annotations and `--dynamic` guard;
    - the docs.
