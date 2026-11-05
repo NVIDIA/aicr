@@ -82,11 +82,42 @@ claimed. Measured on both workers of the reference cluster, identical on each:
 
 That is the fixed baseline the unqualified label above is measured against.
 
-**A NicClusterPolicy is deployed, carrying only `nicConfigurationOperator`.**
+**A NicClusterPolicy is deployed, carrying `nicConfigurationOperator`, `nvIpam` and `secondaryNetwork`.**
 It stands up the `nic-configuration-daemon` that `aicr snapshot
---discover-network` needs. No `ofedDriver` and no rails: NVKE runs the host's
-inbox `mlx5_core`, and this platform's rail layout is unmeasured. The SR-IOV
-operator stays off, since nothing here declares a `SriovNetwork`.
+--discover-network` needs, plus the addressing and multus the RoCE rails
+attach through. Still no `ofedDriver`: NVKE runs the host's inbox `mlx5_core`.
+
+**Eight ConnectX-9 RoCE rails: deployed and attachable, but carrying no
+traffic.** The leaf ships an nv-ipam `IPPool`, a `SriovNetworkNodePolicy` and a
+`SriovNetwork` per rail, and a `nccl-all-reduce-bw-net` check to exercise them.
+On the reference cluster the operator created one VF per port on both workers
+and advertised all eight as allocatable, nv-ipam assigned an address per rail,
+multus attached `net1`..`net8`, and each VF came up with its own RDMA device
+and a RoCE v2 GID at index 1. No packet has crossed between nodes: the spare
+ConnectX-9 ports have no path between workers, because the BlueField DPU
+bridges only the port carrying the node address, and bridging the rest is
+DPU-side work outside the tenant cluster. So the `>= 50` floor is a
+placeholder, and the only collective path proven here is MNNVL inside one
+NVLink domain.
+
+**These `SriovNetwork`s set no VF attributes, deliberately.** GB200's set
+`linkState: enable`; on this platform the PF driver refuses it, and `trust` and
+`spoofChk` too, failing the attachment with `operation not permitted`. The PF
+is owned by the BlueField DPU, so the host can create VFs but cannot
+administer them. With all three omitted the attachment succeeds.
+
+**`NCCL_IB_GID_INDEX` must be set.** The RoCE v2 GID sits at index 1 on these
+ports; NCCL defaults to 0, which holds the v1 GID.
+
+`numVfs` is 1, which is the ConnectX-9 firmware's `sriov_totalvfs` on these
+trays rather than a tuning choice — eight ports give eight VFs, so one worker
+pod takes them all.
+
+**If the rails are ever removed, clear the multus CNI config too.** Deleting a
+NicClusterPolicy carrying `secondaryNetwork` removes multus's DaemonSet and
+RBAC but leaves `/etc/cni/net.d/00-multus.conflist` on every node, which sorts
+ahead of OVN-Kubernetes and fails every subsequent pod creation cluster-wide
+with `Unauthorized`. This was observed on this cluster.
 
 **It pins network-operator 26.7.1, not the registry default of 26.7.0.** The
 daemon in 26.7.0 has no firmware-discovery fallback, so a `flint` failure is

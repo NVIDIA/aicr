@@ -1086,10 +1086,12 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
 		},
 		{
-			name:    "NET NVKE GB200",
+			// NVKE carries both NVL72 generations on the NET variant too:
+			// GB200 over IB rails, VR200 over RoCE rails.
+			name:    "NET NVKE",
 			variant: variantNET,
 			service: recipe.CriteriaServiceNVKE,
-			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorVR200},
 		},
 		{
 			// NVKE carries both NVL72 generations on the NVLS variant.

@@ -126,6 +126,9 @@ var imageDigestExemptions = map[string]imageDigestExemption{
 	// registry default is 26.7.0, so these two stay on tags.
 	"nvcr.io/nvidia/mellanox/nic-configuration-operator:network-operator-v26.7.1":        {[]string{"network-operator/manifests/nic-cluster-policy-nvke-vr200"}, "leaf pins network-operator 26.7.1 ahead of the registry default; a digest annotation would name a tag the chart-pin guard rejects"},
 	"nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon:network-operator-v26.7.1": {[]string{"network-operator/manifests/nic-cluster-policy-nvke-vr200"}, "leaf pins network-operator 26.7.1 ahead of the registry default; a digest annotation would name a tag the chart-pin guard rejects"},
+	"nvcr.io/nvidia/mellanox/nvidia-k8s-ipam:network-operator-v26.7.1":                   {[]string{"network-operator/manifests/nic-cluster-policy-nvke-vr200"}, "leaf pins network-operator 26.7.1 ahead of the registry default; a digest annotation would name a tag the chart-pin guard rejects"},
+	"nvcr.io/nvidia/mellanox/plugins:network-operator-v26.7.1":                           {[]string{"network-operator/manifests/nic-cluster-policy-nvke-vr200"}, "leaf pins network-operator 26.7.1 ahead of the registry default; a digest annotation would name a tag the chart-pin guard rejects"},
+	"nvcr.io/nvidia/mellanox/multus-cni:network-operator-v26.7.1":                        {[]string{"network-operator/manifests/nic-cluster-policy-nvke-vr200"}, "leaf pins network-operator 26.7.1 ahead of the registry default; a digest annotation would name a tag the chart-pin guard rejects"},
 
 	"nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2": {[]string{"network-operator/manifests/nic-cluster-policy-aks"}, docaDriverDigestReason},
 	"nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0": {[]string{"network-operator/manifests/nic-cluster-policy-generic-gb300"}, docaDriverDigestReason},

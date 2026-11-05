@@ -183,10 +183,28 @@ spec:
         # until east-west lands. The maintenance operator does have work --
         # nicConfigurationOperator prepares each node through it before
         # applying NIC configuration -- so it is enabled.
+        # On now: the RoCE rails in sriov-ib-networks are SriovNetworkNodePolicy
+        # and SriovNetwork objects, which only the SR-IOV operator reconciles.
         sriovNetworkOperator:
-          enabled: false
+          enabled: true
         maintenanceOperator:
           enabled: true
+
+    # Eight ConnectX-9 RoCE rails: per rail an nv-ipam IPPool, a
+    # SriovNetworkNodePolicy and a SriovNetwork. The component directory says
+    # "ib" because GB200's rails are InfiniBand; its health check asserts the
+    # IPPool CRD is Established and every SriovNetworkNodeState syncs, neither
+    # of which is link-type specific.
+    #
+    # NOT VALIDATED: no packet has crossed these rails on the reference
+    # cluster, because the spare ConnectX-9 ports have no path between nodes
+    # until the DPU bridges them. The manifest header says so in full.
+    - name: sriov-ib-networks
+      type: Helm
+      manifestFiles:
+        - components/sriov-ib-networks/manifests/nvke-vr200.yaml
+      dependencyRefs:
+        - network-operator
 
     # Scaffolded off. vr200-rke2 ships a Skyhook tuning CR that REBOOTS EVERY
     # GPU NODE it touches, and nodewright-packages has no vr200/nvke profile --
@@ -224,9 +242,18 @@ spec:
       # its own template at testdata/vr200/nvke/runtime-nvls.yaml.
       checks:
         - nccl-all-reduce-bw-nvls
+        - nccl-all-reduce-bw-net
       constraints:
         - name: nccl-all-reduce-bw-nvls
           value: ">= 600"
+        # A floor, not a measurement: nothing has run this check. Eight
+        # ConnectX-9 ports at 200 Gb/s is 200 GB/s of line rate; 50 is a
+        # quarter of that, low enough that a fabric carrying real traffic
+        # clears it and high enough that a single-rail or pod-network
+        # fallback does not. Replace it with a measured value on the first
+        # green run.
+        - name: nccl-all-reduce-bw-net
+          value: ">= 50"
     deployment:
       checks:
         - operator-health
