@@ -25,8 +25,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"log"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -38,20 +36,22 @@ import (
 	"testing"
 	"time"
 
-	ggcrregistry "github.com/google/go-containerregistry/pkg/registry"
 	digest "github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"go.yaml.in/yaml/v3"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/errdef"
 	"oras.land/oras-go/v2/registry/remote/errcode"
 
 	"github.com/NVIDIA/aicr/pkg/operator/defaults"
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	"github.com/NVIDIA/aicr/pkg/operator/registry/registrytest"
 )
 
-// testRegistry serves an in-memory OCI registry over plain HTTP.
+// testRegistry returns a client of, and a repository in, an in-memory
+// Distribution registry served over plain HTTP.
 func testRegistry(t *testing.T) (*Client, Repository) {
 	t.Helper()
 	return testRegistryWith(t, false)
@@ -62,7 +62,11 @@ func testRegistry(t *testing.T) (*Client, Repository) {
 // referrers tag schema.
 func testRegistryWith(t *testing.T, referrersAPI bool) (*Client, Repository) {
 	t.Helper()
-	srv := httptest.NewServer(ggcrregistry.New(ggcrregistry.Logger(log.New(io.Discard, "", 0)), ggcrregistry.WithReferrersSupport(referrersAPI)))
+	h := registrytest.New()
+	if referrersAPI {
+		h = registrytest.NewWithReferrersAPI()
+	}
+	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	host := strings.TrimPrefix(srv.URL, "http://")
 	return New(Options{PlainHTTPHosts: []string{host}}), Repository{Host: host, Path: "aicr/cluster"}
@@ -162,6 +166,51 @@ func TestPushChartIsDeterministicAndNeverOverwrites(t *testing.T) {
 	}
 }
 
+// Pushing a chart again restores a layer the registry lost while the tag
+// kept its manifest, so mirroring a chart that cannot be reused repairs it.
+func TestPushChartRestoresALostLayer(t *testing.T) {
+	t.Parallel()
+	c, repo := testRegistry(t)
+	ctx := context.Background()
+	archive := chartArchive(t, "demo", "1.0.0", "")
+	target := repo.Child("charts/demo")
+	pinned, err := c.PushChart(ctx, target, archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := ReadChartMeta(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, layer, _, err := chartManifest(meta, archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleteBlob(t, c, target, layer)
+	if _, err = c.ReuseChart(ctx, target, "1.0.0", pinned); operrors.CodeOf(err) != operrors.ErrCodeNotFound {
+		t.Fatalf("ReuseChart() with the layer lost = %v, want NOT_FOUND", err)
+	}
+	again, err := c.PushChart(ctx, target, archive)
+	if err != nil || again != pinned {
+		t.Fatalf("PushChart() again = %s, %v; want %s", again, err, pinned)
+	}
+	if _, err = c.ReuseChart(ctx, target, "1.0.0", pinned); err != nil {
+		t.Fatalf("ReuseChart() after pushing again = %v", err)
+	}
+}
+
+// The top-level Chart.yaml names the chart, and its JSON is the config blob.
+func TestReadChartMeta(t *testing.T) {
+	t.Parallel()
+	meta, err := ReadChartMeta(chartArchive(t, "demo", "1.2.3+build", ""))
+	if err != nil || meta.Name != "demo" || meta.Version != "1.2.3+build" || meta.Tag() != "1.2.3_build" {
+		t.Fatalf("ReadChartMeta() = %+v, %v", meta, err)
+	}
+	if got, want := string(meta.Config()), `{"apiVersion":"v2","name":"demo","version":"1.2.3+build"}`; got != want {
+		t.Errorf("Config() = %s, want %s", got, want)
+	}
+}
+
 func TestReadChartMetaRejects(t *testing.T) {
 	t.Parallel()
 	tests := map[string][]byte{
@@ -169,6 +218,8 @@ func TestReadChartMetaRejects(t *testing.T) {
 		"no Chart":     targz(t, []tarEntry{{name: "x/values.yaml", body: "a: 1"}}),
 		"no version":   targz(t, []tarEntry{{name: "x/Chart.yaml", body: "name: x"}}),
 		"invalid yaml": targz(t, []tarEntry{{name: "x/Chart.yaml", body: "name: [x"}}),
+		"config over its limit as JSON": targz(t, []tarEntry{{name: "x/Chart.yaml",
+			body: "name: x\nversion: 1.0.0\ndescription: \"" + strings.Repeat("<", maxChartConfigBytes/6+1) + "\""}}),
 	}
 	for name, archive := range tests {
 		if _, err := ReadChartMeta(archive); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
@@ -183,33 +234,40 @@ func pushBundle(t *testing.T, c *Client, r Repository, artifactType string, laye
 	return pushBundleDeclaring(t, c, r, artifactType, layer, int64(len(layer)))
 }
 
-// pushBundleDeclaring pushes a bundle whose manifest declares the layer
-// size given, whatever the layer holds.
+// pushBundleDeclaring is pushBundle with the manifest declaring size as the
+// layer's size, whatever its length.
 func pushBundleDeclaring(t *testing.T, c *Client, r Repository, artifactType string, layer []byte, size int64) string {
+	t.Helper()
+	empty := []byte("{}")
+	config := ocispec.Descriptor{MediaType: ocispec.MediaTypeEmptyJSON, Digest: digest.FromBytes(empty), Size: 2}
+	layerDesc := ocispec.Descriptor{MediaType: ocispec.MediaTypeImageLayerGzip, Digest: digest.FromBytes(layer), Size: int64(len(layer))}
+	declared := layerDesc
+	declared.Size = size
+	manifest := imageManifest(t, ocispec.Manifest{ArtifactType: artifactType, Config: config, Layers: []ocispec.Descriptor{declared}})
+	return pushRawManifest(t, c, r, "run-0123456789ab", manifest, blob{config, empty}, blob{layerDesc, layer})
+}
+
+// pushRawManifest pushes blobs, then manifest as an OCI image manifest
+// tagged tag, or untagged when tag is empty, and returns its digest.
+func pushRawManifest(t *testing.T, c *Client, r Repository, tag string, manifest []byte, blobs ...blob) string {
 	t.Helper()
 	ctx := context.Background()
 	repo, err := c.repository(r)
 	if err != nil {
 		t.Fatal(err)
 	}
-	empty := []byte("{}")
-	config := ocispec.Descriptor{MediaType: ocispec.MediaTypeEmptyJSON, Digest: digest.FromBytes(empty), Size: 2}
-	layerDesc := ocispec.Descriptor{MediaType: ocispec.MediaTypeImageLayerGzip, Digest: digest.FromBytes(layer), Size: int64(len(layer))}
-	for _, b := range []struct {
-		d    ocispec.Descriptor
-		data []byte
-	}{{config, empty}, {layerDesc, layer}} {
-		if err = repo.Push(ctx, b.d, bytes.NewReader(b.data)); err != nil && !errors.Is(err, errdef.ErrAlreadyExists) {
+	for _, b := range blobs {
+		if err = repo.Push(ctx, b.desc, bytes.NewReader(b.data)); err != nil && !errors.Is(err, errdef.ErrAlreadyExists) {
 			t.Fatal(err)
 		}
 	}
-	layerDesc.Size = size
-	manifest, _ := json.Marshal(ocispec.Manifest{
-		Versioned: specs.Versioned{SchemaVersion: 2}, MediaType: ocispec.MediaTypeImageManifest,
-		ArtifactType: artifactType, Config: config, Layers: []ocispec.Descriptor{layerDesc},
-	})
 	desc := ocispec.Descriptor{MediaType: ocispec.MediaTypeImageManifest, Digest: digest.FromBytes(manifest), Size: int64(len(manifest))}
-	if err = repo.PushReference(ctx, desc, bytes.NewReader(manifest), "run-0123456789ab"); err != nil {
+	if tag == "" {
+		err = repo.Push(ctx, desc, bytes.NewReader(manifest))
+	} else {
+		err = repo.PushReference(ctx, desc, bytes.NewReader(manifest), tag)
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 	return desc.Digest.String()
@@ -546,6 +604,8 @@ func TestClassify(t *testing.T) {
 		{resp(http.StatusTooManyRequests), operrors.ErrCodeRateLimitExceeded},
 		{resp(http.StatusBadGateway), operrors.ErrCodeUnavailable},
 		{fmt.Errorf("listing: %w", errdef.ErrTooManyPages), operrors.ErrCodeInvalidRequest},
+		{fmt.Errorf("manifest: %w", errdef.ErrSizeExceedsLimit), operrors.ErrCodeInvalidRequest},
+		{fmt.Errorf("layer: %w", content.ErrMismatchedDigest), operrors.ErrCodeConflict},
 		{context.DeadlineExceeded, operrors.ErrCodeTimeout},
 		{operrors.New(operrors.ErrCodeConflict, "kept"), operrors.ErrCodeConflict},
 	}
@@ -605,12 +665,217 @@ func TestMirrorOCIChart(t *testing.T) {
 			t.Errorf("%s: MirrorOCIChart() = %v", name, mirrorErr)
 		}
 	}
-	// The chart in the layer must be the chart the reference names.
-	if _, err = c.PushChart(ctx, upstreamRepo.Child("charts/other"), chartArchive(t, "demo", "v2.0.0", "")); err != nil {
+}
+
+// A mirrored chart is reused while its tag holds the recorded digest. A
+// moved or missing tag is NOT_FOUND, so resolution mirrors from upstream.
+// Content that is not a chart is refused.
+func TestReuseChart(t *testing.T) {
+	t.Parallel()
+	c, repo := testRegistry(t)
+	ctx := context.Background()
+	archive := chartArchive(t, "demo", "v1.0.0", "")
+	demo := repo.Child("charts/demo")
+	pinned, err := c.PushChart(ctx, demo, archive)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = c.MirrorOCIChart(ctx, UpstreamChart{Chart: upstreamRepo.Child("charts/other").URI(), Version: "v2.0.0"}, runtime); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
-		t.Errorf("misnamed chart = %v, want INVALID_REQUEST", err)
+	bundle := repo.Child("charts/bundle")
+	bundleDigest := pushBundle(t, c, bundle, BundleArtifactType, targz(t, []tarEntry{{name: "a", body: "x"}}))
+
+	m, err := c.ReuseChart(ctx, demo, "v1.0.0", pinned)
+	if err != nil || m.Repository != demo || m.Digest != pinned || m.ArchiveDigest != digest.FromBytes(archive).String() || !bytes.Equal(m.Archive, archive) {
+		t.Fatalf("ReuseChart() = %+v, %v", m, err)
+	}
+	tests := []struct {
+		name            string
+		repo            Repository
+		version, digest string
+		want            operrors.ErrorCode
+	}{
+		{"tag moved", demo, "v1.0.0", digest.FromString("other").String(), operrors.ErrCodeNotFound},
+		{"tag missing", demo, "v2.0.0", pinned, operrors.ErrCodeNotFound},
+		{"not a chart", bundle, "run-0123456789ab", bundleDigest, operrors.ErrCodeInvalidRequest},
+	}
+	for _, tt := range tests {
+		if _, err := c.ReuseChart(ctx, tt.repo, tt.version, tt.digest); operrors.CodeOf(err) != tt.want {
+			t.Errorf("%s: ReuseChart() = %v, want %s", tt.name, err, tt.want)
+		}
+	}
+}
+
+// imageManifest returns m marshaled as a schema 2 OCI image manifest.
+func imageManifest(t *testing.T, m ocispec.Manifest) []byte {
+	t.Helper()
+	m.Versioned, m.MediaType = specs.Versioned{SchemaVersion: 2}, ocispec.MediaTypeImageManifest
+	data, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+// deleteBlob deletes desc from r, as garbage collection or a retention policy
+// can after a manifest names it.
+func deleteBlob(t *testing.T, c *Client, r Repository, desc ocispec.Descriptor) {
+	t.Helper()
+	repo, err := c.repository(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = repo.Blobs().Delete(context.Background(), desc); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A chart is read only from a Helm manifest with exactly one chart layer
+// within MaxChartArchiveBytes. A chart layer the registry no longer holds is
+// NOT_FOUND, so resolution mirrors the chart again.
+func TestPullChartRejects(t *testing.T) {
+	t.Parallel()
+	c, repo := testRegistry(t)
+	ctx := context.Background()
+	archive := chartArchive(t, "demo", "1.0.0", "")
+	meta, err := ReadChartMeta(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, layer, _, err := chartManifest(meta, archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oversized := layer
+	oversized.Size = defaults.MaxChartArchiveBytes + 1
+	gz := []byte("not a chart")
+	other := ocispec.Descriptor{MediaType: ocispec.MediaTypeImageLayerGzip, Digest: digest.FromBytes(gz), Size: int64(len(gz))}
+	configBlob, layerBlob := blob{config, meta.Config()}, blob{layer, archive}
+	tests := []struct {
+		name    string
+		layers  []ocispec.Descriptor
+		blobs   []blob
+		deleted []ocispec.Descriptor
+		want    operrors.ErrorCode
+	}{
+		{"no chart layer", []ocispec.Descriptor{other}, []blob{configBlob, {other, gz}}, nil, operrors.ErrCodeInvalidRequest},
+		{"two chart layers", []ocispec.Descriptor{layer, layer}, []blob{configBlob, layerBlob}, nil, operrors.ErrCodeInvalidRequest},
+		{"oversized chart layer", []ocispec.Descriptor{oversized}, []blob{configBlob, layerBlob}, nil, operrors.ErrCodeInvalidRequest},
+		{"chart layer deleted", []ocispec.Descriptor{layer}, []blob{configBlob, layerBlob}, []ocispec.Descriptor{layer}, operrors.ErrCodeNotFound},
+		{"chart config deleted", []ocispec.Descriptor{layer}, []blob{configBlob, layerBlob}, []ocispec.Descriptor{config}, operrors.ErrCodeNotFound},
+	}
+	for i, tt := range tests {
+		r := repo.Child(fmt.Sprintf("charts/%d/demo", i))
+		pinned := pushRawManifest(t, c, r, "1.0.0", imageManifest(t, ocispec.Manifest{Config: config, Layers: tt.layers}), tt.blobs...)
+		for _, d := range tt.deleted {
+			deleteBlob(t, c, r, d)
+		}
+		if _, err := c.ReuseChart(ctx, r, "1.0.0", pinned); operrors.CodeOf(err) != tt.want {
+			t.Errorf("%s: ReuseChart() = %v, want %s", tt.name, err, tt.want)
+		}
+	}
+}
+
+// The chart under a version tag must be the chart its repository names, at
+// exactly that version, whether it is reused or mirrored. Anything else is
+// refused, so a mistagged or misplaced chart is never deployed.
+func TestPullChartChecksTheNamedChart(t *testing.T) {
+	t.Parallel()
+	_, upstream := testRegistry(t)
+	_, runtime := testRegistry(t)
+	c := New(Options{PlainHTTPHosts: []string{upstream.Host, runtime.Host}})
+	ctx := context.Background()
+	tests := []struct {
+		name, chart, version string
+		want                 operrors.ErrorCode
+	}{
+		{"the named chart", "demo", "1.0.0", ""},
+		{"another chart", "other", "1.0.0", operrors.ErrCodeInvalidRequest},
+		{"a name ending in the repository's", "my-demo", "1.0.0", operrors.ErrCodeInvalidRequest},
+		{"another version", "demo", "1.0.1", operrors.ErrCodeInvalidRequest},
+		{"a prerelease of the version", "demo", "1.0.0-rc.1", operrors.ErrCodeInvalidRequest},
+		{"the version with build metadata", "demo", "1.0.0+build", operrors.ErrCodeInvalidRequest},
+		{"the version with a v prefix", "demo", "v1.0.0", operrors.ErrCodeInvalidRequest},
+	}
+	for i, tt := range tests {
+		archive := chartArchive(t, tt.chart, tt.version, "")
+		meta, err := ReadChartMeta(archive)
+		if err != nil {
+			t.Fatal(err)
+		}
+		config, layer, manifest, err := chartManifest(meta, archive)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src := upstream.Child(fmt.Sprintf("charts/%d/demo", i))
+		pinned := pushRawManifest(t, c, src, "1.0.0", manifest, blob{config, meta.Config()}, blob{layer, archive})
+
+		if _, err = c.ReuseChart(ctx, src, "1.0.0", pinned); operrors.CodeOf(err) != tt.want {
+			t.Errorf("%s: ReuseChart() = %v, want %q", tt.name, err, tt.want)
+		}
+		up := UpstreamChart{Chart: src.URI(), Version: "1.0.0"}
+		if _, err = c.MirrorOCIChart(ctx, up, runtime.Child(fmt.Sprintf("charts/%d", i))); operrors.CodeOf(err) != tt.want {
+			t.Errorf("%s: MirrorOCIChart() = %v, want %q", tt.name, err, tt.want)
+		}
+	}
+}
+
+// A manifest that does not decode is refused. A conformant registry never
+// stores one, so this one answers with raw bytes.
+func TestFetchManifestRejectsGarbage(t *testing.T) {
+	t.Parallel()
+	raw := []byte("not json")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/manifests/") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", ocispec.MediaTypeImageManifest)
+		w.Header().Set("Docker-Content-Digest", digest.FromBytes(raw).String())
+		w.Header().Set("Content-Length", fmt.Sprint(len(raw)))
+		_, _ = w.Write(raw)
+	}))
+	t.Cleanup(srv.Close)
+	host := strings.TrimPrefix(srv.URL, "http://")
+	c := New(Options{PlainHTTPHosts: []string{host}})
+	_, err := c.ReuseChart(context.Background(), Repository{Host: host, Path: "aicr/cluster/charts/demo"}, "1.0.0", digest.FromBytes(raw).String())
+	if operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
+		t.Errorf("ReuseChart() = %v, want INVALID_REQUEST", err)
+	}
+}
+
+// A registry failure at any step of a push is SERVICE_UNAVAILABLE, so the
+// caller retries.
+func TestPushChartRegistryFailures(t *testing.T) {
+	t.Parallel()
+	archive := chartArchive(t, "demo", "1.0.0", "")
+	tests := []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{"resolving the tag", http.MethodHead, "/manifests/"},
+		{"checking a blob", http.MethodHead, "/blobs/"},
+		{"pushing a blob", http.MethodPost, "/blobs/uploads/"},
+		{"pushing the manifest", http.MethodPut, "/manifests/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			reg := registrytest.New()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == tt.method && strings.Contains(r.URL.Path, tt.path) {
+					http.Error(w, "injected failure", http.StatusInternalServerError)
+					return
+				}
+				reg.ServeHTTP(w, r)
+			}))
+			t.Cleanup(srv.Close)
+			host := strings.TrimPrefix(srv.URL, "http://")
+			c := New(Options{PlainHTTPHosts: []string{host}, HTTPClient: &http.Client{Timeout: defaults.RegistryTimeout}})
+			_, err := c.PushChart(context.Background(), Repository{Host: host, Path: "aicr/cluster/charts/demo"}, archive)
+			if operrors.CodeOf(err) != operrors.ErrCodeUnavailable {
+				t.Errorf("PushChart() = %v, want SERVICE_UNAVAILABLE", err)
+			}
+		})
 	}
 }
 

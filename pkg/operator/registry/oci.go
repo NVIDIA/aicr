@@ -16,12 +16,6 @@ package registry
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"path"
-
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"oras.land/oras-go/v2/content"
 
 	"github.com/NVIDIA/aicr/pkg/operator/defaults"
 )
@@ -47,58 +41,14 @@ func (c *Client) MirrorOCIChart(ctx context.Context, up UpstreamChart, target Re
 	if err != nil {
 		return nil, err
 	}
-	tag := (&ChartMeta{Version: up.Version}).Tag()
-	desc, raw, err := repo.FetchReference(ctx, tag)
-	if err != nil {
-		return nil, classify(err, fmt.Sprintf("fetch upstream chart %s:%s", src, tag))
-	}
-	defer raw.Close()
-	if desc.Size > maxManifestBytes {
-		return nil, invalid("upstream chart manifest is %d bytes", desc.Size)
-	}
-	data, err := content.ReadAll(raw, desc)
-	if err != nil {
-		return nil, classify(err, "read upstream chart manifest")
-	}
-	var manifest ocispec.Manifest
-	if err = json.Unmarshal(data, &manifest); err != nil {
-		return nil, invalid("upstream %s:%s is not an OCI image manifest: %v", src, tag, err)
-	}
-	if manifest.Config.MediaType != ChartConfigMediaType {
-		return nil, invalid("upstream %s:%s is not a Helm chart (config %q)", src, tag, manifest.Config.MediaType)
-	}
-	var layer *ocispec.Descriptor
-	for i := range manifest.Layers {
-		if manifest.Layers[i].MediaType != ChartLayerMediaType {
-			continue
-		}
-		if layer != nil {
-			return nil, invalid("upstream %s:%s has more than one chart layer", src, tag)
-		}
-		layer = &manifest.Layers[i]
-	}
-	switch {
-	case layer == nil:
-		return nil, invalid("upstream %s:%s has no chart layer", src, tag)
-	case layer.Size > defaults.MaxChartArchiveBytes:
-		return nil, invalid("upstream chart layer is %d bytes, over %d", layer.Size, defaults.MaxChartArchiveBytes)
-	}
-	archive, err := content.FetchAll(ctx, repo, *layer)
-	if err != nil {
-		return nil, classify(err, fmt.Sprintf("fetch upstream chart layer %s@%s", src, layer.Digest))
-	}
-	meta, err := ReadChartMeta(archive)
+	pulled, meta, err := pullChart(ctx, repo, src, up.Version)
 	if err != nil {
 		return nil, err
 	}
-	name := path.Base(src.Path)
-	if meta.Name != name || meta.Version != up.Version {
-		return nil, invalid("upstream %s:%s holds chart %s %s", src, tag, meta.Name, meta.Version)
-	}
-	dst := target.Child(name)
-	digest, err := c.pushChart(ctx, dst, archive, meta, meta.Tag())
+	dst := target.Child(meta.Name)
+	digest, err := c.pushChart(ctx, dst, pulled.Archive, meta, meta.Tag())
 	if err != nil {
 		return nil, err
 	}
-	return &MirroredChart{Repository: dst, Digest: digest, ArchiveDigest: layer.Digest.String(), Archive: archive}, nil
+	return &MirroredChart{Repository: dst, Digest: digest, ArchiveDigest: pulled.ArchiveDigest, Archive: pulled.Archive}, nil
 }

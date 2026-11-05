@@ -25,7 +25,7 @@ kubectl get configmaps -n aicr-system -l operator.aicr.run/role=plan
 | `Reconciling` | Work is in progress | `Resolving`, `Stabilizing`, `Assessing`, `RollingOut`, `Validating`. `False` with `RolledOut` only means nothing is in progress: it is also reported while paused or stalled |
 | `Stalled` | Progress needs you; the reason says why ([troubleshooting](troubleshooting.md)) | `Progressing` when not stalled |
 | `Resolved` | A plan exists for the current inputs | `Resolved`; `Resolving` while AICR Jobs run or a transient failure is retried; otherwise a terminal reason |
-| `EngineAvailable` | Argo CD's CRDs and the project are present and, with the `aws` registry provider, the registry token is fresh | `EngineMissing`, `ProjectMissing`, `RegistryCredentialsStale` |
+| `EngineAvailable` | Argo CD's CRDs and the project are present and, with the `aws` registry provider, the registry token is fresh | `EngineMissing`, `ProjectMissing`, `RegistryCredentialsStale`. When minting a new ECR token fails while `True`, the message names the failure and whether the operator still holds a token it can use |
 
 A failure carries its error code in the message, for example `[NOT_FOUND] plan
 aicr-plan-1a2b… is missing`. A failure inside an AICR Job carries AICR's exit
@@ -98,6 +98,7 @@ Service, so scrape the pod or port-forward
 | `aicr_operator_validation_runs_total{result}` | Deployment validation runs by result |
 | `aicr_operator_job_runs_total{stage,result,class}` | AICR runs when first seen finished, by stage, result and, for failures, retry class (`never`, `bounded`, `transient`, `authorization`) |
 | `aicr_operator_registry_token_expiry_timestamp_seconds`, `aicr_operator_registry_token_refresh_timestamp_seconds` | When the Argo CD registry token expires and when the operator last refreshed it, as Unix times (`aws` provider); `0` until known. Only the leader refreshes the token, so a standby replica stays at `0`: alert on `max()` across operator pods |
+| `aicr_operator_registry_token_mint_failures_total` | Failed ECR token mints since the operator started (`aws` provider), including those it rode out on a still-valid token |
 
 Every outcome, result, stage and retry class is exported at zero from
 startup, so a rate reads zero rather than nothing before its first event.
@@ -112,8 +113,11 @@ startup, so a rate reads zero rather than nothing before its first event.
    release changes, and on request.
 2. **The resolver renders a candidate.** It runs `aicr snapshot`, `aicr
    recipe` and `aicr bundle` as Jobs, mirrors the charts into your registry,
-   and writes the plan (`status.candidatePlanDigest`, `Resolved=True`). The same
-   rendered output is the same digest, so nothing further happens.
+   and writes the plan (`status.candidatePlanDigest`, `Resolved=True`). A
+   chart the candidate or active plan already mirrored is reused only when its
+   upstream reference, version and target `registry.repository` all match.
+   Otherwise it is requested from upstream. The same rendered output is the
+   same digest, so nothing further happens.
 3. **The candidate stabilizes** for `spec.rollout.stabilizationWindow`
    (default 10 minutes) from its creation (`Reconciling=True`, `Stabilizing`).
 4. **The transition is assessed.** An `aicr upgrade-check` Job compares the

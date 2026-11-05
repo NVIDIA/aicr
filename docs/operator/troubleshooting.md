@@ -138,6 +138,15 @@ is full need a larger `registry.inCluster.storage.size`, which a StorageClass
 that allows expansion applies in place; nothing is ever deleted from the
 registry.
 
+**Upstream chart repository unreachable.** A chart that the candidate or
+active plan already mirrored, at the same version, from the same upstream and
+into the same `registry.repository`, is reused from your registry with no
+upstream request, so a re-resolution that pins the same charts rides out the
+outage. A chart not mirrored before, or one your registry no longer holds
+(its tag or a blob is gone), is mirrored from upstream, so it is retried like
+a registry outage, with `[SERVICE_UNAVAILABLE] fetch …` on `Resolved`. After
+`registry.repository` changes, every chart is mirrored from upstream again.
+
 **`Unauthorized`** (`Resolved=False`, stalled). The registry refused the
 operator's own push or pull (HTTP 401 or 403). Check the identity's policy and
 the repository prefix in `registry.repository` ([installing on
@@ -177,6 +186,22 @@ kubectl -n argocd get secret aicr-registry \
 as a Unix time. Once a token has expired, Argo CD reports `ComparisonError` on
 the Applications; running workloads are unaffected, and comparisons recover
 after the refresh.
+
+**Minting a new ECR token fails while the current one is valid** (`aws`
+only). The operator keeps using its current token for its own registry calls
+and pushing Jobs until it has an hour left, and Argo CD keeps the token in
+`repo-creds`. `EngineAvailable` stays `True`, and its message says when minting
+started to fail and why. `aicr_operator_registry_token_mint_failures_total`
+counts each failure, and the refresh timestamp stays at the last success. Fix
+the AWS identity as above. Once the token is within an hour of expiry, this
+turns into `RegistryCredentialsStale`.
+
+An operator that restarts or takes over leadership during the outage holds no
+token of its own. Its registry calls and pushing Jobs fail with
+`RegistryCredentialsUnavailable` until a mint succeeds. Argo CD keeps using
+the token in `repo-creds` only until it expires. The `EngineAvailable` message
+says the operator holds no token it can use, and within an hour of the token's
+expiry this turns into `RegistryCredentialsStale`.
 
 ## AICR version mismatch
 
