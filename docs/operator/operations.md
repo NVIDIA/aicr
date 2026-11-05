@@ -112,11 +112,12 @@ startup, so a rate reads zero rather than nothing before its first event.
    distinct accelerated node types, or the active plan's `gpu-operator`
    release changes, and on request.
 2. **The resolver renders a candidate.** It runs `aicr snapshot`, `aicr
-   recipe` and `aicr bundle` as Jobs, mirrors the charts into your registry
-   (reusing those the candidate or active plan already mirrored into the
-   same `registry.repository`),
-   and writes the plan (`status.candidatePlanDigest`, `Resolved=True`). The same
-   rendered output is the same digest, so nothing further happens.
+   recipe` and `aicr bundle` as Jobs, mirrors the charts into your registry,
+   and writes the plan (`status.candidatePlanDigest`, `Resolved=True`). A
+   chart the candidate or active plan already mirrored is reused only when its
+   upstream reference, version and target `registry.repository` all match.
+   Otherwise it is requested from upstream. The same rendered output is the
+   same digest, so nothing further happens.
 3. **The candidate stabilizes** for `spec.rollout.stabilizationWindow`
    (default 10 minutes) from its creation (`Reconciling=True`, `Stabilizing`).
 4. **The transition is assessed.** An `aicr upgrade-check` Job compares the
