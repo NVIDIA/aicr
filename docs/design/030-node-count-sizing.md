@@ -149,9 +149,9 @@ From those readings, the v1.0.0 defaults break at roughly these sizes:
 Nodewright is the exception, and its driver is not one thing. Its cache
 holds nodes, per-node Skyhook CRs, pods, and the package-execution Jobs it
 retains for `jobTtlSucceeded` (1h default) and `jobTtlFailed` (24h). Below
-600 nodes, pods dominate: at 244 and 357 nodes, with 11k and 14k pods, it
-peaks at the same 1Gi, and a 118-node cluster with 18k pods OOM-killed it at
-2Gi. At 2000 nodes the order reverses: the Mistral cluster with 82k pods
+600 nodes, pods dominate: at 244 and 357 nodes, with 11k and 14k pods, the
+nodewright manager peaks at the same 1Gi, and on a 118-node cluster with 18k
+pods the nodewright manager was OOM-killed at a 2Gi limit. At 2000 nodes the order reverses: the Mistral cluster with 82k pods
 runs both replicas at 6.7Gi, while the Lambda cluster with 13k pods runs its
 leader at 10.5Gi, so retained Jobs from node churn are the better
 explanation there. Neither pod count nor churn is known when a bundle is
@@ -196,7 +196,8 @@ differs on the headroom:
   for its own manager, validated to 1k nodes: a request of `N × 0.45Mi` and a
   limit of `N × 0.8Mi`. At 2000 nodes they give 0.9Gi and 1.6Gi; the
   measured values are 10.5Gi and 11.6Gi. A formula validated at one scale was
-  5 to 7x off at another, which is the case for measuring every tier.
+  about 12x (request) and 7x (limit) off at another, which is the case for
+  measuring every tier.
 
 ### What AICR already has
 
@@ -260,7 +261,7 @@ is qualified. It is another component to deploy and keep healthy, it needs
 days of metrics before it recommends anything, it applies a change by
 evicting the pod (so every re-size is a controller restart, which #3148
 showed is costly for gpu-operator), and it needs the same scrapes the
-controllers lack today (#3265 to #3268), so it moves the measurement
+controllers lack today (#3265 to #3269), so it moves the measurement
 problem rather than removing it. VPA's default margin is still useful as the
 reference point for this ADR's 30%.
 
@@ -290,9 +291,10 @@ way is expected to run out of memory.
 Each tier's request is the 90th percentile of the measured working set and
 its limit is the highest measured peak times 1.3, both taken at the largest
 cluster measured in the tier; no tier is interpolated. Applying a tier
-never lowers a value, and an explicit user override, `--set*` at generation
-time or the component's root-chart values at install time, replaces the
-tier's result. The bundle records the tier it applied.
+never lowers a value, and outside an ADR-015 profile lock set an explicit
+user override, `--set*` at generation time or the component's root-chart
+values at install time, replaces the tier's result. The bundle records the
+tier it applied.
 
 ## Proposal
 
@@ -327,6 +329,12 @@ Sizing applies only to a count stated as one of:
 
 `criteria.nodes` and snapshot-derived counts never select a tier. The count
 means GPU nodes, the unit every measurement in this ADR is taken in.
+
+Every input accepts a non-negative integer, and 0 means no count. A negative
+count is rejected before tier selection with `ErrCodeInvalidRequest` on the
+CLI, config-file, REST and SDK paths. On `argocd-helm` the schema declares
+the same minimum, and because schema validation can be skipped, the child
+template also fails rendering on a negative `sizing.nodeCount`.
 
 ### The sizing file
 
@@ -375,9 +383,13 @@ resources:
   drift between measurements. It is deliberately wider than VPA's 15%
   because AICR re-measures once per release, not continuously.
 - Both are rounded up: to the next 256Mi below 2Gi, to the next 512Mi
-  above. Where only instantaneous readings exist, they are first scaled by
-  the ratios in Context. A tier value is never set below the one in the tier
-  under it.
+  above. A tier value is never set below the one in the tier under it.
+- An instantaneous reading, with no window behind it, stands in for p90
+  as-is, and for the peak after multiplying by 1.7, the largest max-to-p90
+  ratio measured on any controller. The limit is then that peak times 1.3,
+  rounded as above. One factor for every controller keeps the derivation
+  reproducible; a reading taken over a window replaces it as soon as one
+  exists.
 - Peaks are read from the longest window the cluster's Prometheus keeps, 7
   days where available, and re-read before each release that changes the
   component's pin or values. For a controller known to drift at a constant
@@ -402,38 +414,43 @@ pins these numbers with their sources.
 | Tier | gpu-operator | network-operator | maintenance-operator | nodewright (per replica) | NIC daemon (per pod) |
 |---|---|---|---|---|---|
 | ≤ 300 | 300Mi / 700Mi | 2Gi / 2Gi | 256Mi / 1Gi | 2000Mi / 4000Mi | 128Mi / 512Mi |
-| 301 to 600 | 512Mi / 768Mi | 2Gi / 2.5Gi | 2.5Gi / 3Gi | 2000Mi / 4000Mi | 768Mi / 1.25Gi |
-| 601 to 1500 | 768Mi / 1Gi | 2Gi / 2.5Gi | 5Gi / 8Gi | 2.5Gi / 3Gi | 768Mi / 1.25Gi |
-| 1501 to 3000 | 2.5Gi / 4Gi | 10.5Gi / 14Gi | 7Gi / 16Gi | 10.5Gi / 16Gi | 1Gi / 2.25Gi |
+| 301 to 600 | 512Mi / 768Mi | 2Gi / 2.5Gi | 2.5Gi / 5.5Gi | 2000Mi / 4000Mi | 768Mi / 2Gi |
+| 601 to 1500 | 768Mi / 1Gi | 2Gi / 2.5Gi | 5Gi / 7Gi | 2.5Gi / 4000Mi | 768Mi / 2Gi |
+| 1501 to 3000 | 2.5Gi / 4Gi | 10.5Gi / 13.5Gi | 7Gi / 15Gi | 10.5Gi / 15Gi | 1Gi / 2.5Gi |
 
 Working-set readings each tier rests on (Mi; p90 / max; window; cluster):
 
 | Tier | gpu-operator | network-operator | maintenance-operator | nodewright leader | NIC daemon (per pod) |
 |---|---|---|---|---|---|
 | ≤ 300 | max 384, 24h, 244 nodes | max 728, 24h, 244 nodes | 290 at 89 nodes; 130 to 156 at 141 | max 1024, 24h, 244 nodes (11k pods) | max 400 at 89 nodes, flat from 24 |
-| 301 to 600 | 410 / 496, 24h, OCI L40S 407 nodes | 955 / 1392, 24h, OCI L40S 407; max 1594, 24h, OCI GB300 447 | **none in tier**; sized from 2345 instantaneous at 1112 nodes | 1377 / 1536, 24h, OCI L40S 407 (13.8k pods); max 1868, 24h, OCI GB300 447 (18k pods) | **none in tier**; sized from p99 821 / max 903 instantaneous at 1112 |
-| 601 to 1500 | 602 / 744, 24h, OCI GB300 656 nodes | 1384 / 1737, 24h, OCI GB300 656 | **none in tier**; sized from 4996 / 5462, 24h, Lambda GB300 at 2012 | 2163 / 2287, 24h, OCI GB300 656 (21.7k pods) | **none in tier**; sized from 1112-node readings as above |
+| 301 to 600 | 410 / 496, 24h, OCI L40S 407 nodes | 955 / 1392, 24h, OCI L40S 407; max 1594, 24h, OCI GB300 447 | **none in tier**; sized from 2345 instantaneous at 1112 nodes | 1377 / 1536, 24h, OCI L40S 407 (13.8k pods); max 1868, 24h, OCI GB300 447 (18k pods) | **none in tier**; sized from p90 707 / max 903 across pods, instantaneous, at 1112 nodes |
+| 601 to 1500 | 602 / 744, 24h, OCI GB300 656 nodes | 1384 / 1737, 24h, OCI GB300 656 | **none in tier**; sized from 4996 / 5462, 24h, Lambda GB300 at 2012 | 2163 / 2287, 24h, OCI GB300 656 (21.7k pods) | p90 707 / max 903 across pods, instantaneous, at 1112 nodes (in tier) |
 | 1501 to 3000 | 2353 / 3006, 7d, Lambda GB300 2012 to 2500 nodes; 1757 / 2579, 7d, Mistral GB300 2039 | 10341 / 10619, 7d, Lambda | 7047 / 11768, 7d, Lambda (5.2Gi peak three weeks earlier) | 10555 / 11625, 7d, Lambda (13k pods); 6674 / 8295, 7d, Mistral (82k pods) | per-pod p90: median 901, q99 1069; per-pod max 1599, 7d, Lambda |
 
 Readings marked **none in tier** are sized from the nearest reading above
-the tier, so those cells are over-sized by construction. They are the first
-to requalify once a cluster of that size runs the component with a scrape.
+the tier, so those cells are over-sized by construction. Together with the
+instantaneous readings, they are the first to requalify once a cluster of
+that size runs the component with a scrape.
 
-Three cells are held at the default by the never-lower rule rather than by
-their own reading: network-operator's and nodewright's requests at 301 to
-600, and network-operator's request at 601 to 1500, where p90 (1.4Gi) is
-below the v1.0.0 request of 2Gi.
+Five cells are held by the never-lower rule rather than by their own
+reading: network-operator's and nodewright's requests at 301 to 600 (the
+v1.0.0 defaults), network-operator's request at 601 to 1500, where p90
+(1.4Gi) is below the v1.0.0 request of 2Gi, nodewright's limit at 301 to
+600 and at 601 to 1500, which stays at the v1.0.0 4000Mi because 1.3 times
+the measured peak (2.4Gi and 2.9Gi) is below it.
 
 The nodewright request is per replica. On the Lambda cluster the standby
 replica's p90 is 3.6Gi against the leader's 10.5Gi, so the standby
 over-reserves by about 7Gi; on the Mistral cluster, with 82k pods, both
-replicas sit at 6.7Gi. The top tier's requests total about 31Gi and its
-limits about 52Gi on one system node; the GB300 system nodes measured have
-866Gi to 993Gi allocatable.
+replicas sit at 6.7Gi. AICR does not keep the two replicas on separate
+nodes, so on one system node the top tier's requests total 31.5Gi and its
+limits 50Gi with one nodewright replica, and 42Gi and 65Gi with both. The
+GB300 system nodes measured have 866Gi to 993Gi allocatable.
 
 The top tier stops at 3000 because nothing above 2500 nodes has been
-measured, and because the NIC daemon's 2.25Gi runs out near 6500
-NicDevices, about 3000 to 3500 GB300 nodes.
+measured. The NIC daemon's per-pod working set also grows with the
+cluster-wide NicDevice count, about 0.16Mi per device at the median, and the
+largest cluster measured had about 5000 NicDevices.
 
 ### Precedence
 
@@ -442,13 +459,16 @@ current value and the tier's value, compared as Kubernetes quantities. A
 current value that does not parse fails the bundle.
 
 A tier therefore never undercuts a larger value set by a recipe overlay or
-mixin. Explicit user overrides are applied after sizing and replace its
-result:
+mixin. On a path outside any ADR-015 profile lock set, explicit user
+overrides are applied after sizing and replace its result:
 
 - `--set`, `--set-json` and `--set-file` at generation time;
 - the component's root-chart values at install time.
 
-Sizing never writes a path in an ADR-015 profile lock set.
+Sizing never writes a path in a profile lock set, and on such a path ADR-015's
+rules apply unchanged: a divergent bundle-time override is rejected, one that
+restates the locked value passes, and an `argocd-helm` install-time value
+that intersects the path fails rendering.
 
 ### Generation time (`--nodes`)
 
@@ -471,7 +491,7 @@ row at render time:
 - The root `values.yaml` gains `sizing: {nodeCount: N}`. N is the bundle's
   `--nodes`, or 0.
 - `values.schema.json` declares `sizing.nodeCount` as an integer of at least
-  0.
+  0, and the template rejects a negative value (see The node count).
 - For each sized component, the bundler writes `static/<comp>-sizing.yaml`.
   It holds every tier's effective values, already computed with the
   never-lower rule against the component's unsized static values. The
@@ -530,7 +550,7 @@ following this section's rules.
   is a follow-up.
 - **The 30% margin is a stopgap for measuring once per release.** It is
   twice VPA's default. It comes down once the controllers can be scraped
-  continuously, which needs #3265 to #3268.
+  continuously, which needs #3265 to #3269.
 - **The count is the user's responsibility.** A stale count after a
   scale-up under-sizes the cluster. Rerunning bundle generation, or changing
   `sizing.nodeCount`, re-sizes it.
@@ -560,7 +580,8 @@ hand overrides again.
   [#3269](https://github.com/NVIDIA/aicr/issues/3269)). Until then, drift
   is found at the next measurement or the next OOM kill.
 - **Reporting the measured NodeWright numbers upstream.** Its published
-  equations undersize the manager by 5 to 7x at 2000 nodes.
+  equations undersize the manager's request by about 12x and its limit by
+  about 7x at 2000 nodes.
 - **Nodewright inputs that are known at bundle time.** AICR knows how many
   packages a recipe ships, which NodeWright's own formula multiplies by, and
   it can set `jobTtlSucceeded` and `jobTtlFailed` lower in the large tiers,
