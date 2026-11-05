@@ -28,6 +28,7 @@ Subcommands registered in `pkg/cli/root.go` (`Commands:` slice on
 |------------|------|---------|
 | `snapshot` | `snapshot.go` | Collect cluster/OS/GPU state; write file, stdout, or `cm://ns/name` ConfigMap. Can deploy a one-shot Job. |
 | `recipe` | `recipe.go` | Resolve a recipe from criteria flags or a snapshot; emit the hydrated spec. |
+| `recipe validate` | `recipe_validate.go` | Statically check authoring files or catalogs; `--external-only` validates a complete working-tree catalog. |
 | `recipe list` | `recipe_list.go` | List recipes matching the given criteria. |
 | `recipe sign-catalog` | `recipe_sign_catalog.go` | Sign the recipe catalog. |
 | `recipe verify-catalog` | `recipe_verify_catalog.go` | Verify the signed recipe catalog. |
