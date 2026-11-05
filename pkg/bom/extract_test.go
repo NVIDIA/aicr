@@ -248,6 +248,26 @@ spec:
 			},
 		},
 		{
+			// A Helm value fills the digest in at render time, so it is not a
+			// malformed digest: an in-line pin still wins, and without one the
+			// tagged reference is all the survey can record.
+			name: "unresolved Helm containerSHA is not validated",
+			in: `spec:
+  packages:
+    pinned:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned@sha256:cc99c8c0675f3752f5081f0978ae57174368952ca0bb5fcac07640fe62c156c7
+      containerSHA: "{{ .Values.tunedDigest }}"
+    templated:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-setup
+      version: "0.10.0"
+      containerSHA: {{ .Values.setupDigest }}
+`,
+			want: []string{
+				"ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.10.0",
+				"ghcr.io/nvidia/nodewright-packages/nvidia-tuned@sha256:cc99c8c0675f3752f5081f0978ae57174368952ca0bb5fcac07640fe62c156c7",
+			},
+		},
+		{
 			// Regression: previously the function bailed out of the
 			// repository prepend whenever `image` contained any slash,
 			// which silently dropped the registry when `image` was a

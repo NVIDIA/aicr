@@ -445,7 +445,9 @@ var containerSHARE = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 // merge them.
 //
 // Behavior:
-//   - Empty `digest` → returned image unchanged.
+//   - Empty `digest`, or one holding an unresolved Helm value (the
+//     stripHelmTemplates placeholder) → returned image unchanged; the
+//     digest is filled in at render time, so there is nothing to check.
 //   - `digest` does not match `^sha256:[a-f0-9]{64}$` → an
 //     invalidStructuredImageDescriptorError, even when the image is already
 //     pinned in-line. This is the fail-loud guard: a malformed digest (typo,
@@ -456,7 +458,7 @@ var containerSHARE = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 //   - Otherwise the digest is appended as `image@digest`, preserving any
 //     tag already present (e.g., `repo:0.1.2@sha256:abc…`).
 func appendCRDDigest(image, field, digest string, node *yaml.Node) (string, error) {
-	if digest == "" {
+	if digest == "" || strings.Contains(digest, helmTemplatePlaceholder) {
 		return image, nil
 	}
 	if !containerSHARE.MatchString(digest) {
