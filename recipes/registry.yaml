@@ -1475,6 +1475,24 @@ components:
       defaultVersion: v1.5.0
       defaultNamespace: agentgateway-system
 
+  - name: gateway-api-crds
+    displayName: gateway-api-crds
+    class: ops
+    valueOverrideKeys:
+      - gatewayapicrds
+    healthCheck:
+      assertFile: checks/gateway-api-crds/health-check.yaml
+    # Manifest-only: the Kubernetes Gateway API standard-channel CRDs and the
+    # Gateway API Inference Extension CRDs, for an inference gateway other
+    # than agentgateway to depend on. Its ref lists the files vendored under
+    # components/agentgateway-crds/manifests/ rather than a copy, so the two
+    # install byte-identical CRDs. No shipped recipe enables it, and a recipe
+    # must not enable it beside agentgateway-crds: the second release fails
+    # Helm's ownership check on the CRDs the first one installed.
+    helm:
+      defaultRepository: ""
+      defaultNamespace: gateway-api-system
+
   - name: agentgateway
     displayName: agentgateway
     class: ops
