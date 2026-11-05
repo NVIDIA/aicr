@@ -787,10 +787,7 @@ spec:
     - name: not-a-valid-path
       value: ">= 1.0"
 `),
-		"registry.yaml": []byte(`apiVersion: aicr.run/v1beta1
-kind: ComponentRegistry
-components: []
-`),
+		"registry.yaml": []byte(providertest.EmptyRegistryYAML),
 	})
 
 	_, err := Compute(context.Background(), Options{Provider: provider})
@@ -832,10 +829,7 @@ spec:
     - name: K8s.server.version
       value: "!1.33"
 `),
-		"registry.yaml": []byte(`apiVersion: aicr.run/v1beta1
-kind: ComponentRegistry
-components: []
-`),
+		"registry.yaml": []byte(providertest.EmptyRegistryYAML),
 	})
 
 	report, err := Compute(context.Background(), Options{Provider: provider})

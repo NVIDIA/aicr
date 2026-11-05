@@ -18,6 +18,9 @@ import (
 	"context"
 	stderrors "errors"
 	"io/fs"
+	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -66,6 +69,78 @@ func TestProvider(t *testing.T) {
 	custom := providertest.New(nil, providertest.WithSource(func(string) string { return recipe.CatalogSourceExternal }))
 	if got := custom.Source("registry.yaml"); got != recipe.CatalogSourceExternal {
 		t.Errorf("Source() with WithSource = %q, want %q", got, recipe.CatalogSourceExternal)
+	}
+}
+
+func TestWriteDir(t *testing.T) {
+	files := map[string][]byte{
+		"registry.yaml":                       []byte(providertest.EmptyRegistryYAML),
+		"components/gpu-operator/values.yaml": []byte("v"),
+	}
+	dir := providertest.WriteDir(t, files)
+	for name, want := range files {
+		got, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(name)))
+		if err != nil || string(got) != string(want) {
+			t.Errorf("read %s = %q, %v, want %q", name, got, err, want)
+		}
+	}
+	layered, err := recipe.NewLayeredDataProvider(recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ""),
+		recipe.LayeredProviderConfig{ExternalDir: dir})
+	if err != nil {
+		t.Fatalf("NewLayeredDataProvider: %v", err)
+	}
+	t.Cleanup(func() { recipe.EvictCachedRegistry(layered) })
+	if _, err := recipe.GetComponentRegistryFor(layered); err != nil {
+		t.Fatalf("EmptyRegistryYAML does not load as a --data registry: %v", err)
+	}
+}
+
+// fatalTB hands out dir as its TempDir, records Fatalf, and stops the calling
+// goroutine as the real method does.
+type fatalTB struct {
+	testing.TB
+	dir    string
+	failed bool
+}
+
+func (f *fatalTB) Helper()         {}
+func (f *fatalTB) TempDir() string { return f.dir }
+
+func (f *fatalTB) Fatalf(string, ...any) {
+	f.failed = true
+	runtime.Goexit()
+}
+
+func TestWriteDirFails(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+	}{
+		{"parent is a file", "file/x"},
+		{"target is a directory", "dir"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "file"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(filepath.Join(dir, "dir"), 0o750); err != nil {
+				t.Fatal(err)
+			}
+
+			rec := &fatalTB{TB: t, dir: dir}
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				providertest.WriteDir(rec, map[string][]byte{tt.path: []byte("x")})
+			}()
+			<-done
+
+			if !rec.failed {
+				t.Errorf("WriteDir(%q) did not fail", tt.path)
+			}
+		})
 	}
 }
 

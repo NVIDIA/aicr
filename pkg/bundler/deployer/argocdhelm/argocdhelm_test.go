@@ -44,6 +44,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 // update regenerates goldens under testdata/ when set via `go test -update`.
@@ -2719,7 +2720,6 @@ func TestGenerate_InnerParentCollisionUsesEffectiveAppName(t *testing.T) {
 		// the embedded registry has no such component, and the inner
 		// argocd generator's own default parent name is exactly
 		// "nvidia-stack".
-		dataDir := t.TempDir()
 		registryYAML := `apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
@@ -2731,9 +2731,7 @@ components:
       defaultRepository: https://charts.example.com
       defaultChart: example/nvidia-stack
 `
-		if err := os.WriteFile(filepath.Join(dataDir, "registry.yaml"), []byte(registryYAML), 0o600); err != nil {
-			t.Fatalf("WriteFile registry.yaml: %v", err)
-		}
+		dataDir := providertest.WriteDir(t, map[string][]byte{recipe.RegistryFileName: []byte(registryYAML)})
 		embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 		layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: dataDir})
 		if err != nil {

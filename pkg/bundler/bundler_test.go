@@ -48,6 +48,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 type closedWorldTestDeployer struct {
@@ -3313,7 +3314,6 @@ const requireNodeSelectorFixtureComponent = "require-node-selector-fixture"
 func requireNodeSelectorFixtureProvider(t *testing.T) recipe.DataProvider {
 	t.Helper()
 
-	tmpData := t.TempDir()
 	registryYAML := []byte(`apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
@@ -3325,9 +3325,7 @@ components:
           - controller.podSpec.nodeSelector
         requireNodeSelector: true
 `)
-	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), registryYAML, 0o600); err != nil {
-		t.Fatalf("write registry.yaml: %v", err)
-	}
+	tmpData := providertest.WriteDir(t, map[string][]byte{recipe.RegistryFileName: registryYAML})
 
 	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: tmpData})
@@ -3355,7 +3353,6 @@ const requireNodeSelectorIfStorageClassSetFixtureComponent = "require-node-selec
 func requireNodeSelectorIfStorageClassSetFixtureProvider(t *testing.T) recipe.DataProvider {
 	t.Helper()
 
-	tmpData := t.TempDir()
 	registryYAML := []byte(`apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
@@ -3371,9 +3368,7 @@ components:
           - controller.podSpec.nodeSelector
         requireNodeSelectorIfStorageClassSet: true
 `)
-	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), registryYAML, 0o600); err != nil {
-		t.Fatalf("write registry.yaml: %v", err)
-	}
+	tmpData := providertest.WriteDir(t, map[string][]byte{recipe.RegistryFileName: registryYAML})
 
 	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: tmpData})
@@ -4021,7 +4016,6 @@ func TestApplyNodeSchedulingOverrides_BoundProvider(t *testing.T) {
 	const uniqueComponent = "task2-bound-provider-only"
 	const nodeSelectorPath = "scheduling.nodeSelector"
 
-	tmpDir := t.TempDir()
 	registryYAML := "apiVersion: aicr.run/v1beta1\n" +
 		"kind: ComponentRegistry\n" +
 		"components:\n" +
@@ -4031,9 +4025,7 @@ func TestApplyNodeSchedulingOverrides_BoundProvider(t *testing.T) {
 		"      system:\n" +
 		"        nodeSelectorPaths:\n" +
 		"          - " + nodeSelectorPath + "\n"
-	if writeErr := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(registryYAML), 0600); writeErr != nil {
-		t.Fatalf("write registry.yaml: %v", writeErr)
-	}
+	tmpDir := providertest.WriteDir(t, map[string][]byte{recipe.RegistryFileName: []byte(registryYAML)})
 
 	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 	layered, layeredErr := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
@@ -4119,23 +4111,11 @@ func TestBundler_Make_BoundProviderEndToEnd(t *testing.T) {
 	//      and triggers the "base + overlay" merge in
 	//      RecipeResult.GetValuesForComponent — driver.version is only set
 	//      in the base, so our marker passes through into the emitted bundle).
-	tmpData := t.TempDir()
-
-	registryYAML := []byte("apiVersion: aicr.run/v1beta1\n" +
-		"kind: ComponentRegistry\n" +
-		"components: []\n")
-	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), registryYAML, 0o600); err != nil {
-		t.Fatalf("write registry.yaml: %v", err)
-	}
-
-	componentsDir := filepath.Join(tmpData, "components", "gpu-operator")
-	if err := os.MkdirAll(componentsDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
 	valuesContent := fmt.Appendf(nil, "driver:\n  version: %q\n", markerVersion)
-	if err := os.WriteFile(filepath.Join(componentsDir, "values.yaml"), valuesContent, 0o600); err != nil {
-		t.Fatalf("write values.yaml: %v", err)
-	}
+	tmpData := providertest.WriteDir(t, map[string][]byte{
+		recipe.RegistryFileName:               []byte(providertest.EmptyRegistryYAML),
+		"components/gpu-operator/values.yaml": valuesContent,
+	})
 
 	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
@@ -4596,11 +4576,9 @@ func TestCollectComponentManifests_MissingPath(t *testing.T) {
 	})
 
 	t.Run("layered provider with --data", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		minimalRegistry := "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"
-		if writeErr := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(minimalRegistry), 0600); writeErr != nil {
-			t.Fatalf("write registry.yaml: %v", writeErr)
-		}
+		tmpDir := providertest.WriteDir(t, map[string][]byte{
+			recipe.RegistryFileName: []byte(providertest.EmptyRegistryYAML),
+		})
 
 		embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 		layered, layeredErr := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{

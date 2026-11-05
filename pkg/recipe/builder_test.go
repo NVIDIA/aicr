@@ -25,6 +25,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	errs "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 // adequateBuildTimeout is the "plenty of headroom" deadline for the
@@ -408,10 +409,7 @@ func TestConstraintEvalResult(t *testing.T) {
 func buildIsolationProvider(t *testing.T, overlayName string) DataProvider {
 	t.Helper()
 
-	registryYAML := []byte(`apiVersion: aicr.run/v1beta1
-kind: ComponentRegistry
-components: []
-`)
+	registryYAML := []byte(providertest.EmptyRegistryYAML)
 	baseYAML := []byte(`kind: RecipeMetadata
 apiVersion: aicr.run/v1beta1
 metadata:
