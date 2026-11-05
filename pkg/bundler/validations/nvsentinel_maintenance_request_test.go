@@ -72,6 +72,7 @@ func TestCheckNVSentinelMaintenanceRequestCoherent(t *testing.T) {
 		wantNoFQ       = nvsentinelFaultQuarantineEnabledPath + " is off, so nothing cordons"
 		wantNoDrainer  = nvsentinelNodeDrainerEnabledPath + " is off, so nothing drains"
 		wantDryRun     = nvsentinelDryRunPath + " is true, so fault-quarantine only logs the cordon"
+		wantDryRunStr  = nvsentinelDryRunPath + ` is "true", not a boolean`
 		wantNoRuleSet  = maintenanceRequestRuleSetsPath + ` is set without the chart's "MaintenanceRequest ruleset"`
 		wantEnabledStr = maintenanceRequestRuleSetsPath + `[1] (MaintenanceRequest ruleset) has enabled "false", not a boolean`
 		wantEnabledNil = maintenanceRequestRuleSetsPath + `[1] (MaintenanceRequest ruleset) has enabled <nil>, not a boolean`
@@ -126,6 +127,10 @@ func TestCheckNVSentinelMaintenanceRequestCoherent(t *testing.T) {
 		{name: "dry run, as the observe step sets", sentinel: composed(at(nvsentinelDryRunPath, true)),
 			wantErrs: []string{wantDryRun}},
 		{name: "dry run off", sentinel: composed(at(nvsentinelDryRunPath, false))},
+		{name: "dry run a string", sentinel: composed(at(nvsentinelDryRunPath, "true")),
+			wantErrs: []string{wantDryRunStr}},
+		{name: "dry run null", sentinel: composed(at(nvsentinelDryRunPath, nil)),
+			wantErrs: []string{nvsentinelDryRunPath + " is <nil>, not a boolean"}},
 
 		// fault-quarantine.ruleSets.
 		{name: "rule sets kept to the chart's", sentinel: composed()},

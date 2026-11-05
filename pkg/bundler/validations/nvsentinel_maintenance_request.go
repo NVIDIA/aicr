@@ -59,7 +59,8 @@ const (
 //   - fault-quarantine or node-drainer does not render, so the node is not
 //     cordoned or not drained. Their datastore is
 //     CheckNVSentinelRemediationPipelineCoherent's to require;
-//   - global.dryRun is true, so fault-quarantine only logs the cordon;
+//   - global.dryRun is true, so fault-quarantine only logs the cordon, or
+//     not a boolean, so the binary's parser decides;
 //   - fault-quarantine.ruleSets is set without a rule set shaped as the
 //     chart's "MaintenanceRequest ruleset", so the event matches no rule set
 //     that cordons and is stored without a cordon, or a rule set's enabled is
@@ -126,7 +127,14 @@ func CheckNVSentinelMaintenanceRequestCoherent(ctx context.Context, componentNam
 				stage.path, stage.does)
 		}
 	}
-	if dryRun, _ := nvsentinelDryRun(values); dryRun {
+	dryRun, dryRunWellFormed := nvsentinelDryRun(values)
+	if !dryRunWellFormed {
+		raw, _ := component.GetValueByPath(values, nvsentinelDryRunPath)
+		fail("%s is true, but %s is %#v, not a boolean: the chart passes it to fault-quarantine's --dry-run "+
+			"unchecked, so whether a MaintenanceRequest cordons its node is left to the binary's parser -- set it "+
+			"to true or false", maintenanceRequestControllerPath, nvsentinelDryRunPath, raw)
+	}
+	if dryRun {
 		fail("%s is true, but %s is true, so fault-quarantine only logs the cordon a MaintenanceRequest asks for "+
 			"-- compose a quarantine or remediation step instead of the observe step",
 			maintenanceRequestControllerPath, nvsentinelDryRunPath)
