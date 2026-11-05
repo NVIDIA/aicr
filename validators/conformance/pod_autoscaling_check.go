@@ -300,9 +300,12 @@ type hpaScenario struct {
 	// promURL and listScrapePools observe the recipe's Prometheus so the
 	// baseline waits for the PodMonitor to be loaded before judging the
 	// metric pipeline. A nil listScrapePools skips that wait: the recipe
-	// declares no kube-prometheus-stack (attachPrometheus).
-	promURL         string
-	listScrapePools func(ctx context.Context) ([]byte, error)
+	// declares no kube-prometheus-stack (attachPrometheus), which builds it
+	// with newScrapePoolLister so a test can stand in for the cluster DNS
+	// name discoverPrometheusURL returns.
+	promURL             string
+	listScrapePools     func(ctx context.Context) ([]byte, error)
+	newScrapePoolLister func(promURL string) func(ctx context.Context) ([]byte, error)
 
 	pollInterval          time.Duration
 	workloadReadyTimeout  time.Duration
@@ -345,6 +348,7 @@ func newHPAScenario(ctx *validators.Context, dynClient dynamic.Interface, metric
 		testRun:               run,
 		tolerations:           ctx.Tolerations,
 		metricsVersion:        metricsVersion,
+		newScrapePoolLister:   promScrapePoolLister,
 		pollInterval:          defaults.HPAPollInterval,
 		workloadReadyTimeout:  defaults.HPAWorkloadReadyTimeout,
 		monitorLoadTimeout:    defaults.PrometheusMonitorLoadTimeout,
@@ -401,7 +405,7 @@ func (s *hpaScenario) attachPrometheus(ctx *validators.Context) error {
 	if err != nil {
 		return err
 	}
-	listPools := promScrapePoolLister(promURL)
+	listPools := s.newScrapePoolLister(promURL)
 	if err := preflightScrapePools(ctx.Ctx, promURL, listPools); err != nil {
 		return err
 	}

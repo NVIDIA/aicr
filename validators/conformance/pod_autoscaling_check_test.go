@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -811,6 +812,7 @@ func newTestHPAScenario(t *testing.T, cp *fakeHPAControlPlane, c *k8sfake.Client
 		readMetrics:           cp.readMetrics,
 		promURL:               "http://prometheus.monitoring.svc:9090",
 		listScrapePools:       cp.listScrapePools,
+		newScrapePoolLister:   func(string) func(context.Context) ([]byte, error) { return cp.listScrapePools },
 		pollInterval:          2 * time.Millisecond,
 		workloadReadyTimeout:  2 * time.Second,
 		monitorLoadTimeout:    3 * time.Second,
@@ -989,26 +991,46 @@ func TestReadyLivePodsExcludesPending(t *testing.T) {
 
 // TestHPAScenarioAttachPrometheus pins when the baseline waits for the
 // PodMonitor to be loaded: a recipe that declares kube-prometheus-stack
-// (enabled) must expose its Prometheus Service, while one without it, or
-// with it disabled as the OpenShift overlay does, skips the wait.
+// (enabled) with a reachable Prometheus Service turns the wait on, pointed
+// at the discovered URL; one declaring it without the Service fails closed;
+// one without it, or with it disabled as the OpenShift overlay does, skips
+// the wait. The first case is what fails if the one line enabling the wait
+// is dropped.
 func TestHPAScenarioAttachPrometheus(t *testing.T) {
 	t.Parallel()
+	declared := []recipe.ComponentRef{{Name: prometheusComponentName, Namespace: "monitoring"}}
+	promSvc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "kube-prometheus-prometheus", Namespace: "monitoring", Labels: map[string]string{"self-monitor": "true"}},
+		Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: 9090}}},
+	}
 	tests := []struct {
-		name     string
-		refs     []recipe.ComponentRef
-		wantCode errors.ErrorCode
+		name       string
+		refs       []recipe.ComponentRef
+		objects    []runtime.Object
+		wantCode   errors.ErrorCode
+		wantWait   bool
+		wantURL    string
+		wantPolled bool
 	}{
-		{"not declared: wait skipped", []recipe.ComponentRef{enabledRef("prometheus-adapter-ocp")}, ""},
-		{"declared disabled: wait skipped", []recipe.ComponentRef{disabledRef(prometheusComponentName)}, ""},
-		{"declared without a Prometheus Service", []recipe.ComponentRef{{Name: prometheusComponentName, Namespace: "monitoring"}}, errors.ErrCodeNotFound},
+		{name: "declared and reachable: wait on", refs: declared, objects: []runtime.Object{promSvc},
+			wantWait: true, wantURL: "http://kube-prometheus-prometheus.monitoring.svc:9090", wantPolled: true},
+		{name: "declared without a Prometheus Service", refs: declared, wantCode: errors.ErrCodeNotFound},
+		{name: "not declared: wait skipped", refs: []recipe.ComponentRef{enabledRef("prometheus-adapter-ocp")}},
+		{name: "declared disabled: wait skipped", refs: []recipe.ComponentRef{disabledRef(prometheusComponentName)}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := k8sfake.NewClientset()
+			c := k8sfake.NewClientset(tt.objects...)
 			cp := newFakeHPAControlPlane(c, hpaTestPrefix+"attach")
 			cp.noPrometheus = true
 			s := newTestHPAScenario(t, cp, c)
+			var gotURL string
+			var polled atomic.Int32
+			s.newScrapePoolLister = func(promURL string) func(context.Context) ([]byte, error) {
+				gotURL = promURL
+				return func(ctx context.Context) ([]byte, error) { polled.Add(1); return cp.listScrapePools(ctx) }
+			}
 			err := s.attachPrometheus(&validators.Context{Ctx: context.Background(), Clientset: c,
 				ValidationInput: &v1.ValidationInput{ComponentRefs: tt.refs}})
 			if tt.wantCode != "" {
@@ -1018,8 +1040,14 @@ func TestHPAScenarioAttachPrometheus(t *testing.T) {
 			if err != nil {
 				t.Fatalf("attachPrometheus: %v", err)
 			}
-			if s.listScrapePools != nil {
-				t.Error("the scenario must not wait on a Prometheus the recipe does not declare")
+			if (s.listScrapePools != nil) != tt.wantWait {
+				t.Errorf("listScrapePools set = %t, want %t", s.listScrapePools != nil, tt.wantWait)
+			}
+			if gotURL != tt.wantURL || s.promURL != tt.wantURL {
+				t.Errorf("lister built for %q, scenario promURL %q, want %q", gotURL, s.promURL, tt.wantURL)
+			}
+			if (polled.Load() > 0) != tt.wantPolled {
+				t.Errorf("preflight listed scrape pools %d times, want polled=%t", polled.Load(), tt.wantPolled)
 			}
 		})
 	}

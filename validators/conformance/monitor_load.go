@@ -158,8 +158,8 @@ func waitForMonitorLoaded(ctx context.Context, listPools func(context.Context) (
 	case err == nil:
 		return nil
 	case ctx.Err() != nil:
-		return errors.Wrap(errors.ErrCodeTimeout, fmt.Sprintf(
-			"check budget exhausted while waiting for Prometheus to load the %s %s/%s", kind.resource(), namespace, name), ctx.Err())
+		return errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, fmt.Sprintf(
+			"check budget exhausted while waiting for Prometheus to load the %s %s/%s", kind.resource(), namespace, name))
 	case wait.Interrupted(err) && lastCompletedErr != nil:
 		return wrapWithCode(lastCompletedErr, errors.ErrCodeUnavailable, fmt.Sprintf(
 			"could not determine whether Prometheus loaded the %s %s/%s within %s: the last completed scrape pool listing failed",

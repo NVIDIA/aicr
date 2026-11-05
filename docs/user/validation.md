@@ -1481,7 +1481,7 @@ Common reasons and their cause:
 | `named in skipChecks` | `message`, and `extra.skipReason` as `named-in-skip-checks` (the channel that survives bundle redaction) | The caller withheld this check with `--skip-check` or `spec.validate.execution.skipChecks` | Drop the name from the skip list to run it again; see [Skipping checks a run cannot satisfy](#skipping-checks-a-run-cannot-satisfy) |
 | `skipped due to previous phase failure` | `message` | `--fail-fast` was set and an earlier phase failed, so subsequent phases were skipped | Fix the earlier phase first, or drop `--fail-fast` to run all phases regardless |
 
-### `ai-service-metrics` fails with "Prometheus unreachable"
+### `ai-service-metrics` or `pod-autoscaling` fails with "Prometheus unreachable"
 
 On EKS clusters that split worker and system pods across separate security
 groups (e.g. DGXC EKS with distinct customer/system ENI subnets), the
@@ -1490,6 +1490,16 @@ conformance check `ai-service-metrics` can fail non-deterministically with:
 ```text
 [SERVICE_UNAVAILABLE] Prometheus unreachable at http://kube-prometheus-prometheus.monitoring.svc:9090 — verify network connectivity
 ```
+
+`pod-autoscaling`, which dials Prometheus for its PodMonitor load wait when the
+recipe declares `kube-prometheus-stack`, fails the same way at its preflight:
+
+```text
+[SERVICE_UNAVAILABLE] Prometheus at http://kube-prometheus-prometheus.monitoring.svc:9090 did not list its scrape pools (GET /api/v1/scrape_pools needs Prometheus >= v2.42 and network connectivity between the validator pod and the Prometheus service)
+```
+
+Both checks' orchestrator Jobs carry the preferred `dependencyAffinity`
+described below.
 
 The validator orchestrator Job tolerates every taint and sets a *preferred*
 `dependencyAffinity` toward Prometheus, so the scheduler co-locates it with the
