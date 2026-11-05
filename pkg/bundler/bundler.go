@@ -1384,6 +1384,11 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 				fmt.Sprintf("failed to resolve values for component %q", ref.Name))
 		}
 
+		sizing, sizingNodes, err := b.sizeComponent(ctx, recipeResult, &ref, values)
+		if err != nil {
+			return nil, err
+		}
+
 		// Apply user value overrides from --set flags.
 		// Strip "enabled" key — it controls component inclusion, not Helm chart values.
 		setOverrides := b.getValueOverridesForComponent(ref.Name, provider)
@@ -1503,6 +1508,12 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 					applyErr,
 					map[string]any{errCtxKeyComponent: ref.Name})
 			}
+		}
+
+		if err := checkSizedRequestsWithinLimits(values, sizing, sizingNodes); err != nil {
+			return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+				"sized memory request exceeds its limit", err,
+				map[string]any{errCtxKeyComponent: ref.Name})
 		}
 
 		// Requires every override, including --set-json/--set-file, to have
