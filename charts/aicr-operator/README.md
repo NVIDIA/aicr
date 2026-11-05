@@ -43,8 +43,9 @@ helm upgrade --install aicr-operator oci://ghcr.io/nvidia/charts/aicr-operator \
 ```
 
 A published chart defaults to its release's operator and registry images and
-to the AICR and validator images the operator was qualified against, which
-can be an earlier AICR release, all pinned by digest. Installing from this
+to that release's own AICR and validator images, which the release qualified
+the operator with, all pinned by digest. An earlier chart, such as v1.2.0's,
+can default to an earlier AICR release. Installing from this
 source tree instead needs `operator.image`, `aicr.image` and
 `registry.inCluster.image` set, and `aicr.validatorImages` with
 `validation.enabled`.
@@ -79,7 +80,8 @@ context; the schema rejects unknown keys.
 
 | Key | Default | Set it | Meaning |
 | --- | --- | --- | --- |
-| `aicr.version` | `v1.0.0`; a published chart, the version it was tested with | To change AICR | The declared AICR release, `>=1.0.0, <2.0.0`. Changing it is an AICR upgrade, rolled out like any other change |
+| `aicr.version` | `v1.0.0`; a published chart, the version it was tested with | To change AICR | The declared AICR release, `>=1.0.0, <2.0.0`. Changing it is an AICR upgrade, rolled out like any other change. A prerelease such as `v1.3.0-rc.1` needs `aicr.allowPrerelease` and counts as the release it precedes |
+| `aicr.allowPrerelease` | `false`; a release candidate's chart, `true` | To run an AICR release candidate or a build from a commit | Accept a prerelease `aicr.version`. Without it, the chart and the operator refuse one |
 | `aicr.image` | A published chart's tested image | Required from source | AICR CLI and snapshot agent image, pinned by digest |
 | `aicr.validatorImages` | A published chart's tested images | Required from source with `validation.enabled` | AICR's validator images for `aicr.version`, each `repository:tag@sha256:<digest>` |
 | `aicr.jobs.nodeSelector` | `{}` | When every node is tainted | Node selector for every AICR Job the operator runs; empty places none |
@@ -167,9 +169,10 @@ Admission policies, all ValidatingAdmissionPolicies without webhooks:
 - `aicr-operator-jobs` (the operator only): one container running the pinned
   AICR image with its entrypoint; the namespace's AICR identity and allowed
   subcommand (`recipe`, `bundle`, `upgrade-check` in the Job namespace,
-  `snapshot` in discovery, `validate` in validation); a TTL; a snapshot agent
-  image named only as `--image <pinned AICR image>`, no `--config` file and no
-  `--data` directory;
+  `snapshot` in discovery, `validate` in validation); a TTL; only the flags
+  the operator builds for that subcommand, each value flag followed by a
+  value that does not start with `-`, so `--config`, `--data` and any flag a later AICR release adds are
+  denied; a snapshot agent image named only as `--image <pinned AICR image>`;
   only `HOME`, `TMPDIR` and
   `DOCKER_CONFIG` in the environment, each set by value, and only `emptyDir`
   and Secret volumes.

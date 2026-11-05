@@ -858,6 +858,11 @@ type CNCFEvidenceOptions struct {
 	// to specific evidence features. Empty means "all features" — only
 	// honored when CNCFSubmission is true.
 	Features []string
+
+	// NotApplicable is spec.validate.evidence.cncf.notApplicable: conditional
+	// MUST requirements declared not applicable, keyed by upstream id with
+	// the justification as value. It is RenderCNCFEvidenceOptions.NotApplicable.
+	NotApplicable map[string]string
 }
 
 // CNCFEvidenceOptions derives spec.validate.evidence.cncf.
@@ -881,6 +886,7 @@ func (c *Config) CNCFEvidenceOptions() (CNCFEvidenceOptions, error) {
 		Dir:            resolved.EvidenceCNCF.Dir,
 		CNCFSubmission: resolved.EvidenceCNCF.CNCFSubmission,
 		Features:       resolved.EvidenceCNCF.Features,
+		NotApplicable:  resolved.EvidenceCNCF.NotApplicable,
 	}, nil
 }
 

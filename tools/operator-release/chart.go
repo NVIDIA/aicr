@@ -27,6 +27,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"golang.org/x/mod/semver"
 )
 
 // The chart values sections a candidate sets.
@@ -136,7 +138,8 @@ func packageChart(dir fs.FS, version string, aicr AICR, operatorImage, registryI
 
 // stampValues sets the chart's default AICR release, AICR images, operator
 // image and in-cluster registry image to the candidate's, so the published
-// chart installs exactly what was qualified without other inputs. It edits
+// chart installs exactly what was qualified without other inputs. A
+// prerelease AICR release also sets aicr.allowPrerelease. It edits
 // values.yaml's text, which keeps its comments; each field must appear once
 // in its section, the images empty.
 func stampValues(values []byte, aicr AICR, operatorImage, registryImage string) ([]byte, error) {
@@ -153,6 +156,9 @@ func stampValues(values []byte, aicr AICR, operatorImage, registryImage string) 
 		{aicrValues, "  validatorImages: []", validators},
 		{operatorValues, `  image: ""`, fmt.Sprintf("  image: %q", operatorImage)},
 		{registryValues, `    image: ""`, fmt.Sprintf("    image: %q", registryImage)},
+	}
+	if semver.Prerelease(aicr.Version) != "" {
+		stamps = append(stamps, struct{ section, line, value string }{aicrValues, "  allowPrerelease: false", "  allowPrerelease: true"})
 	}
 	stamped := make([]int, len(stamps))
 	lines := strings.Split(string(values), "\n")

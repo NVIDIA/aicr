@@ -17,11 +17,23 @@ limitations under the License.
 {{/* The AICR releases this chart and its operator support. */}}
 {{- define "aicr-operator.aicrRange" -}}>=1.0.0, <2.0.0{{- end -}}
 
+{{/*
+The release aicr.version is or precedes, as major.minor.patch: the version
+every AICR version gate compares, so a prerelease is treated as its release.
+*/}}
+{{- define "aicr-operator.aicrCore" -}}
+{{- $v := semver (trimPrefix "v" .Values.aicr.version) -}}
+{{- printf "%d.%d.%d" $v.Major $v.Minor $v.Patch -}}
+{{- end -}}
+
 {{/* Fails rendering for an unsupported AICR version or an unusable layout. */}}
 {{- define "aicr-operator.validate" -}}
 {{- $range := include "aicr-operator.aicrRange" . -}}
-{{- if not (semverCompare $range (trimPrefix "v" .Values.aicr.version)) -}}
+{{- if not (semverCompare $range (include "aicr-operator.aicrCore" .)) -}}
 {{- fail (printf "aicr.version %s is outside the supported range %s" .Values.aicr.version $range) -}}
+{{- end -}}
+{{- if and (contains "-" .Values.aicr.version) (not .Values.aicr.allowPrerelease) -}}
+{{- fail (printf "aicr.version %s is a prerelease; set aicr.allowPrerelease: true to run it" .Values.aicr.version) -}}
 {{- end -}}
 {{- $created := list .Values.namespaces.jobs .Values.namespaces.discovery -}}
 {{- if .Values.validation.enabled -}}{{- $created = append $created .Values.namespaces.validation -}}{{- end -}}
@@ -42,7 +54,7 @@ limitations under the License.
 {{- if not (regexMatch "^(awskms|gcpkms|azurekms|hashivault)://.+" .) -}}
 {{- fail "validation.signingKey is not an awskms://, gcpkms://, azurekms:// or hashivault:// key URI" -}}
 {{- end -}}
-{{- if semverCompare "<1.1.0" (trimPrefix "v" $.Values.aicr.version) -}}
+{{- if semverCompare "<1.1.0" (include "aicr-operator.aicrCore" $) -}}
 {{- fail (printf "validation.signingKey needs AICR v1.1.0 or later; aicr.version is %s" $.Values.aicr.version) -}}
 {{- end -}}
 {{- end -}}

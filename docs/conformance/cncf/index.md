@@ -33,12 +33,36 @@ What changed between versions, as it affects AICR evidence:
 | v1.37 | `workload_sandboxing` added (SHOULD); hybrid verification recommends `junit.xml` and `e2e.log` | No AICR check yet, so the row reads `NOT TESTED (no AICR check)`; see #3615 and #3605 |
 
 Once at least one submission-required check has produced a result, the
-rendered `index.md` lists every requirement of the selected checklist: a
-requirement no check evidenced in the run appears with its level and
-`NOT TESTED (no AICR check)` or `NOT TESTED (not run)`, with no page and no
-evidence link. A report whose conformance checks were all skipped or are all
-diagnostic writes nothing at all, not even those rows. This is presence only,
-and turning it into a submission status is #3612.
+rendered `index.md` lists every requirement of the selected checklist in
+upstream order with its aggregate status (below). A requirement no non-skipped
+check evidenced has no page and no evidence link. A report whose conformance
+checks were all skipped or are all diagnostic writes nothing at all, not even
+those rows.
+
+## Requirement status
+
+A requirement's status is computed from every check expected to evidence it
+at the selected checklist version (`pkg/evidence/cncf/aggregate.go`,
+`AggregateReport`), fail-closed: a requirement never reads as passed because
+nothing contradicted it. The same aggregation feeds the evidence index and the
+submission statuses (#3605); the CTRF report keeps every check's real verdict.
+
+| Status | Meaning | How it arises |
+|--------|---------|---------------|
+| `PASSED` | Automated proof: every check on one proof path is present and `passed` | Where a requirement has alternative proofs (`secure_accelerator_access`: `secure-accelerator-access` on ordinary recipes, `slinky-slurm-gpu-access` on Slinky Slurm recipes) one complete path suffices; the page's `Proof:` line names the checks that established it, and the other path may be absent or skipped. A failed alternative fails the requirement whatever the other path did: on this cluster the capability was disproven |
+| `FAILED (<checks>)` | A disproven capability | A check on any proof path `failed`, whatever the other paths did |
+| `NOT TESTED (<reason>)` | An unmet test prerequisite, not a disproven capability | A check was `skipped` (reason code appended, e.g. `slurm-managed-gpus` when `secure-accelerator-access` defers to the Slurm path and `slinky-slurm-gpu-access` did not run), `other` (crashed), `pending`, or `not run` (absent from the report); `no AICR check` when AICR ships no check for the requirement |
+| `NOT APPLICABLE (<justification>)` | Declared by configuration | Only from `spec.validate.evidence.cncf.notApplicable`, only for a conditional MUST (today `cluster_autoscaling`); any other id is rejected. It takes precedence over a check that ran, whose result stays on the page as an observation |
+
+Statuses are scoped by level. The index header reports **Applicable MUSTs**:
+`PASSED` when every MUST not declared not applicable is `PASSED`, else
+`FAILED`. A SHOULD renders its own status, `FAILED (<checks>)` or
+`NOT TESTED (<reason>)`, and does not fail the aggregate; submission
+packaging (#3605) maps either to Not Implemented. The Go SDK exposes the aggregation as
+`cncf.Aggregate` from `RenderCNCFEvidenceWithResult` (`Passed`,
+`IncompleteMusts`, per-requirement `Status`, `Reason`, `Proof`, `Checks`);
+`aicr validate` logs it after writing the evidence, and deriving the exit
+status of a submission run from it is #3602.
 
 Requirement page titles name the capability (`Inference API Gateway`,
 `Robust AI Operator`); the implementation a check observed (which gateway,
@@ -50,6 +74,7 @@ scheduler or operator) is recorded in the check output on the page.
 |---------|---------|----------|--------|----------|
 | v1.35 | [NVIDIA NIM](https://developer.nvidia.com/nim) | EKS | 9/9 PASS | [v1.35/nim-eks/](v1.35/nim-eks/) |
 | v1.36 | NVIDIA Kubernetes Engine | NVKE | 7 applicable MUSTs PASS; 1 conditional N/A | [v1.36/nvke/](v1.36/nvke/) |
+| v1.36 | AICR training stack (VR200) | NVKE | 7 PASS, 2 SKIP — evidence only, see `../nvke/` for the submission | [v1.36/trainer-nvke-vr200/](v1.36/trainer-nvke-vr200/) |
 
 ## Directory Structure
 
@@ -76,6 +101,7 @@ pkg/evidence/cncf/                    # CNCF evidence collector package
 ├── collector.go                      # Feature registry, alias mapping
 ├── consts.go                         # Feature name constants
 ├── renderer.go                       # Evidence file rendering
+├── aggregate.go                      # Requirement status aggregation, fail-closed by level
 ├── checklist.go                      # Versioned upstream checklists (ids, levels, descriptions), digest-pinned
 ├── requirements.go                   # Which conformance checks evidence which requirement; evidence page per requirement
 ├── schemas/                          # Verbatim upstream AIConformance-<version>.yaml copies

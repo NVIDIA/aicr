@@ -58,12 +58,18 @@ const (
 	// step began, and none is pending.
 	ReasonSyncNotStarted = "SyncNotStarted"
 	// ReasonPriorSyncFailed: the Application carries this plan, but its last
-	// sync of the chart digest failed before the step began, it is not in
-	// sync, and no sync is pending. Automated sync never retries a revision
-	// that failed, so the step must start one.
+	// sync of the chart digest failed before the step began, did not provably
+	// apply another source, and no sync is pending. Automated sync never
+	// retries a failed sync of the same revision and source, and a failed hook
+	// leaves the resources Synced, so the step must start one.
 	ReasonPriorSyncFailed = "PriorSyncFailed"
 	// ReasonRetired: the Application a Remove step deletes is gone.
 	ReasonRetired = "Retired"
+	// ReasonReconcileStale: the Application is synced and healthy, but no
+	// sync of the chart's revision succeeded since the step began and, for a
+	// step that does not sync, Argo CD last compared it before then, so the
+	// evidence predates the step.
+	ReasonReconcileStale = "ReconcileStale"
 )
 
 // RefreshAnnotation asks Argo CD to reconcile an Application now.
@@ -177,22 +183,44 @@ func (a *Adapter) Ensure(ctx context.Context, p *plan.Document, r *plan.Release,
 		// A spec Argo CD already has starts no sync, and Argo CD ignores
 		// metadata-only updates of Applications until its periodic
 		// reconcile: ask for a refresh, so the step's evidence is fresh in
-		// seconds. Argo CD removes the annotation; it is never desired state.
-		patch := []byte(`{"metadata":{"annotations":{"` + RefreshAnnotation + `":"normal"}}}`)
-		if err = a.Writer.Patch(ctx, desired, client.RawPatch(types.MergePatchType, patch)); err != nil {
-			return nil, operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "request a refresh of Application "+r.ID)
+		// seconds.
+		if err = a.requestRefresh(ctx, desired, r.ID); err != nil {
+			return nil, err
 		}
 	}
 	return ensured, nil
 }
 
+// Refresh asks Argo CD to compare a release's Application now rather than at
+// its periodic reconcile, for a step that observes an Application it did not
+// write.
+func (a *Adapter) Refresh(ctx context.Context, r *plan.Release) error {
+	app := &unstructured.Unstructured{}
+	app.SetGroupVersionKind(ApplicationGVK)
+	app.SetNamespace(a.Target.Namespace)
+	app.SetName(r.ID)
+
+	return a.requestRefresh(ctx, app, r.ID)
+}
+
+// requestRefresh sets the refresh annotation on app. Argo CD removes it once
+// it has compared the Application; it is never desired state.
+func (a *Adapter) requestRefresh(ctx context.Context, app *unstructured.Unstructured, id string) error {
+	patch := []byte(`{"metadata":{"annotations":{"` + RefreshAnnotation + `":"normal"}}}`)
+	if err := a.Writer.Patch(ctx, app, client.RawPatch(types.MergePatchType, patch)); err != nil {
+		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "request a refresh of Application "+id)
+	}
+
+	return nil
+}
+
 // Verify starts a sync of a release's Application so that Argo CD runs its
 // hooks, a readiness gate, again for the parent's current revision, or
-// retries a sync of the current revision that failed before the step, which
-// automated sync never retries. The Application is written with
-// the sync operation in one apply, and only when no operation is pending or
-// running; the caller observes and calls again until a sync has started
-// since its step began.
+// retries a failed sync of the current revision that did not provably apply
+// another source, which automated sync never retries. The Application is
+// written with the sync operation in one apply, and only when no operation is
+// pending or running; the caller observes and calls again until a sync has
+// started since its step began.
 func (a *Adapter) Verify(ctx context.Context, p *plan.Document, r *plan.Release, valuesJSON []byte) error {
 	desired, err := Application(a.Target, p, r, valuesJSON)
 	if err != nil {
@@ -436,6 +464,30 @@ type Observation struct {
 	State      State
 	Reason     string
 	SpecDigest string
+	// Message is a bounded, single-line excerpt of the error Argo CD
+	// reported with Reason, when it reported one.
+	Message string
+}
+
+// MaxMessageLen is the most runes of an Argo CD error that an Observation
+// carries.
+const MaxMessageLen = 240
+
+// Text is the Reason, followed by the Message when there is one.
+func (o Observation) Text() string {
+	if o.Message == "" {
+		return o.Reason
+	}
+	return o.Reason + ": " + o.Message
+}
+
+// excerpt folds s onto one line and cuts it to MaxMessageLen runes.
+func excerpt(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > MaxMessageLen {
+		s = string(r[:MaxMessageLen]) + "…"
+	}
+	return s
 }
 
 // Observe applies current-revision readiness: an Application is
@@ -503,13 +555,16 @@ func observe(live, desired *unstructured.Unstructured, r *plan.Release, since ti
 	spec, _, _ := unstructured.NestedMap(live.Object, "spec", "source")
 	status, _, _ := unstructured.NestedMap(live.Object, "status")
 	op, _, _ := unstructured.NestedMap(status, "operationState")
-	if !verify && priorSyncFailed(live, status, op, r.Chart.Digest, since) {
+	if !verify && priorSyncFailed(live, op, r.Chart.Digest, since) {
 		return progressing(ReasonPriorSyncFailed)
 	}
 	for _, c := range sliceOf(status["conditions"]) {
 		switch c["type"] {
 		case "ComparisonError", "SyncError", "InvalidSpecError":
-			return progressing(fmt.Sprint(c["type"]))
+			obs := progressing(fmt.Sprint(c["type"]))
+			msg, _ := c["message"].(string)
+			obs.Message = excerpt(msg)
+			return obs
 		}
 	}
 	opPhase, _ := op["phase"].(string)
@@ -518,16 +573,18 @@ func observe(live, desired *unstructured.Unstructured, r *plan.Release, since ti
 	switch {
 	case opPhase == "Running" || opPhase == "Terminating":
 		return progressing("SyncRunning")
-	case (opPhase == "Failed" || opPhase == "Error") && opRevision == r.Chart.Digest && !opStarted.Before(since):
-		return Observation{State: StateFailed, Reason: "Sync" + opPhase}
+	case (opPhase == "Failed" || opPhase == "Error") && opRevision == r.Chart.Digest && !opStarted.Before(since) &&
+		!otherSource(op, spec):
+		msg, _ := op["message"].(string)
+		return Observation{State: StateFailed, Reason: "Sync" + opPhase, Message: excerpt(msg)}
 	}
-	if verify {
-		if _, pending := live.Object["operation"]; pending {
-			return progressing("SyncPending")
-		}
-		if opPhase == "" || opStarted.Before(since) {
-			return progressing(ReasonSyncNotStarted)
-		}
+	// A pending sync decides, as one a step started to supersede a failure
+	// does while the resources already read Synced.
+	if _, pending := live.Object["operation"]; pending {
+		return progressing("SyncPending")
+	}
+	if verify && (opPhase == "" || opStarted.Before(since)) {
+		return progressing(ReasonSyncNotStarted)
 	}
 	sync, _, _ := unstructured.NestedMap(status, "sync")
 	if sync["status"] != "Synced" || sync["revision"] != r.Chart.Digest {
@@ -543,16 +600,49 @@ func observe(live, desired *unstructured.Unstructured, r *plan.Release, since ti
 	}
 	syncedNow := opPhase == "Succeeded" && opRevision == r.Chart.Digest && !opStarted.Before(since)
 	if !syncedNow && (verify || timeOf(status["reconciledAt"]).Before(since)) {
-		return progressing("ReconcileStale")
+		return progressing(ReasonReconcileStale)
 	}
 	return Observation{State: StateReady, Reason: "CurrentRevisionReady"}
 }
 
-// priorSyncFailed reports a sync of digest that failed before since and was
-// never repaired: the Application is out of sync or still carries the
-// SyncError, and no new sync is pending. A failed sync Argo CD later
-// reconciled into Synced is not one.
-func priorSyncFailed(live *unstructured.Unstructured, status, op map[string]any, digest string, since time.Time) bool {
+// otherSource reports whether an operation provably applied a source other
+// than source, the Application's: an entry of source is missing from, or
+// differs in, the source the operation recorded. Argo CD writes each
+// operation's state over the last as a JSON merge patch, so a recorded source
+// keeps the map entries of earlier syncs that a later one dropped, and loses
+// those a null deleted; entries beyond source prove nothing, and neither does
+// an operation that records no source.
+func otherSource(op, source map[string]any) bool {
+	synced, found, _ := unstructured.NestedMap(op, "syncResult", "source")
+	return found && !covers(synced, source)
+}
+
+// covers reports whether recorded holds every entry of want, at any depth,
+// with the same value; a null entry matches its absence, as a merge patch
+// deletes it. Lists compare whole, as a merge patch replaces them, without
+// the nulls it drops from their elements.
+func covers(recorded, want any) bool {
+	w, ok := want.(map[string]any)
+	if !ok {
+		return jsonEqual(withoutNulls(recorded), withoutNulls(want))
+	}
+	got, ok := recorded.(map[string]any)
+	if !ok {
+		return false
+	}
+	for k, v := range w {
+		if !covers(got[k], v) {
+			return false
+		}
+	}
+	return true
+}
+
+// priorSyncFailed reports that the last sync of digest failed before since
+// and no new sync is pending, unless that sync provably applied another
+// source, which automated sync retries. Synced resources do not clear it: a
+// failed hook leaves them Synced.
+func priorSyncFailed(live *unstructured.Unstructured, op map[string]any, digest string, since time.Time) bool {
 	if phase, _ := op["phase"].(string); phase != "Failed" && phase != "Error" {
 		return false
 	}
@@ -563,19 +653,11 @@ func priorSyncFailed(live *unstructured.Unstructured, status, op map[string]any,
 	if revision == "" {
 		revision, _, _ = unstructured.NestedString(op, "operation", "sync", "revision")
 	}
-	if revision != digest || !timeOf(op["startedAt"]).Before(since) {
+	source, _, _ := unstructured.NestedMap(live.Object, "spec", "source")
+	if revision != digest || !timeOf(op["startedAt"]).Before(since) || otherSource(op, source) {
 		return false
 	}
-	sync, _, _ := unstructured.NestedMap(status, "sync")
-	if sync["status"] != "Synced" || sync["revision"] != digest {
-		return true
-	}
-	for _, c := range sliceOf(status["conditions"]) {
-		if c["type"] == "SyncError" {
-			return true
-		}
-	}
-	return false
+	return true
 }
 
 // drifted reports whether the live Application's spec, or a label or

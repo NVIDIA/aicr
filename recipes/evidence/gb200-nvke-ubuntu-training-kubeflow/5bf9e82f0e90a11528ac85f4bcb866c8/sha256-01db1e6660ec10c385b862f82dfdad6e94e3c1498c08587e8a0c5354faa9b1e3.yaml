@@ -1,0 +1,12 @@
+attestations:
+  - attestedAt: 2026-11-04T20:03:54Z
+    bundle:
+      digest: sha256:01db1e6660ec10c385b862f82dfdad6e94e3c1498c08587e8a0c5354faa9b1e3
+      oci: ghcr.io/yuanchen8911/aicr-evidence:gb200-nvke-ubuntu-training-kubeflow-f9b4a94913c8
+      predicateType: https://aicr.run/recipe-evidence/v3
+    signer:
+      identity: https://github.com/yuanchen8911/aicr/.github/workflows/evidence-publish.yaml@refs/heads/evidence/aks-h100-training-inference
+      issuer: https://token.actions.githubusercontent.com
+      rekorLogIndex: 184085528
+recipe: gb200-nvke-ubuntu-training-kubeflow
+schemaVersion: 1.0.0

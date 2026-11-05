@@ -96,6 +96,26 @@ type overlayAddition struct {
 // pin only the default path, so a component that only a user overlay, a recipe
 // option, or a bundle flag selects renders nothing in them and needs an entry
 // here to be covered.
+// stockRenderLeafInputs supplies the bundle inputs a stock leaf cannot render
+// without: the registry's requiredValues for one of its components. The
+// values are placeholders a cluster would never accept, so the golden pins
+// the shape of the bundle, not a registration.
+var stockRenderLeafInputs = map[string][]config.Option{
+	"h100-eks-ubuntu-training-runai": runaiStockRenderInputs(),
+	"h100-gke-cos-training-runai":    runaiStockRenderInputs(),
+}
+
+func runaiStockRenderInputs() []config.Option {
+	return []config.Option{
+		config.WithValueOverrides(map[string]map[string]string{"runai-cluster": {
+			"controlPlane.url": "https://stock-render.invalid",
+			"cluster.uid":      "00000000-0000-0000-0000-000000000000",
+			"cluster.url":      "stock-render.invalid",
+		}}),
+		config.WithDynamicValues(map[string][]string{"runai-cluster": {"controlPlane.bootstrapToken"}}),
+	}
+}
+
 var stockRenderOptIns = []stockRenderOptIn{
 	{
 		name:   "h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label",
@@ -212,7 +232,7 @@ func TestStockRenderParityGolden(t *testing.T) {
 			continue
 		}
 		resolved[name] = leaf
-		files, renderErr := renderLeafFileDigests(ctx, t, leaf.Result)
+		files, renderErr := renderLeafFileDigests(ctx, t, leaf.Result, stockRenderLeafInputs[name]...)
 		if renderErr != nil {
 			t.Errorf("leaf %q failed to render: %v", name, renderErr)
 			got[name] = renderErrorLeaf()

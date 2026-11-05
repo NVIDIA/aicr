@@ -219,10 +219,138 @@ func readyAppWith(t *testing.T, at time.Time, vals []byte) *unstructured.Unstruc
 		"reconciledAt": stamp,
 		"operationState": map[string]any{
 			"phase": "Succeeded", "startedAt": stamp,
-			"syncResult": map[string]any{"revision": chartDigest},
+			"syncResult": map[string]any{"revision": chartDigest, "source": runtime.DeepCopyJSONValue(src)},
 		},
 	}
 	return app
+}
+
+// sourceOf is the source of the release's Application for vals, as the API
+// server returns it.
+func sourceOf(t *testing.T, vals []byte) map[string]any {
+	t.Helper()
+	src, _, _ := unstructured.NestedMap(readyAppWith(t, time.Time{}, vals).Object, "spec", "source")
+	return src
+}
+
+// recorded is the source Argo CD keeps for the last sync after it synced
+// vals: each operation's state is merged into the last as a JSON merge patch,
+// so entries of earlier syncs that vals lacks stay, given in earlier as Helm
+// values, and a null in vals deletes its entry.
+func recorded(t *testing.T, vals []byte, earlier map[string]any) map[string]any {
+	t.Helper()
+	src := sourceOf(t, vals)
+	got, _, _ := unstructured.NestedMap(src, "helm", "valuesObject")
+	for k, v := range earlier {
+		if _, ok := got[k]; !ok {
+			got[k] = v
+		}
+	}
+	_ = unstructured.SetNestedMap(src, withoutNulls(got).(map[string]any), "helm", "valuesObject")
+	return src
+}
+
+// A failed sync is a failure of the Application's source unless the source
+// that sync recorded proves it applied other values: a write that restores
+// the values of a failed rollout with the same chart starts no sync when the
+// live objects already match, so the failed operation stays the last one.
+// Entries the recorded source has beyond the Application's prove nothing,
+// since Argo CD keeps those of earlier syncs.
+func TestObserveFailedSyncOfAnotherSource(t *testing.T) {
+	t.Parallel()
+	failedAt := time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
+	refused := []byte(`{"crds":{"enabled":true},"ratio":0.5,"replicas":-1}`)
+	added := []byte(`{"crds":{"enabled":true},"extra":"x","ratio":0.5,"replicas":2}`)
+	nulled := []byte(`{"affinity":{"nodeAffinity":null},"crds":{"enabled":true},"ratio":0.5,"replicas":2}`)
+	listed := []byte(`{"crds":{"enabled":true},"ratio":0.5,"replicas":2,"tolerations":[{"key":"k","value":null}]}`)
+	outOfSync := func(u *unstructured.Unstructured) {
+		_ = unstructured.SetNestedField(u.Object, "OutOfSync", "status", "sync", "status")
+	}
+	pending := func(u *unstructured.Unstructured) {
+		_ = unstructured.SetNestedField(u.Object, chartDigest, "operation", "sync", "revision")
+	}
+	tests := []struct {
+		name   string
+		spec   []byte                          // the Application's values; nil is values
+		synced func(*testing.T) map[string]any // the source the failed sync recorded; nil records none
+		mutate func(*unstructured.Unstructured)
+		since  time.Time
+		want   State
+		reason string
+	}{
+		{name: "values restored after the failure", synced: func(t *testing.T) map[string]any { return recorded(t, refused, nil) },
+			want: StateReady},
+		{name: "values restored, not yet in sync", synced: func(t *testing.T) map[string]any { return recorded(t, refused, nil) },
+			mutate: outOfSync, want: StateProgressing, reason: "NotSynced"},
+		{name: "failure of the values it carries", synced: func(t *testing.T) map[string]any { return recorded(t, values, nil) },
+			mutate: outOfSync, want: StateFailed, reason: "SyncFailed"},
+		// A failed hook, such as a readiness gate's, leaves the resources in sync.
+		{name: "failure of the values it carries, resources in sync",
+			synced: func(t *testing.T) map[string]any { return recorded(t, values, nil) }, want: StateFailed, reason: "SyncFailed"},
+		{name: "failure of the values it carries, with an entry an earlier sync applied",
+			synced: func(t *testing.T) map[string]any { return recorded(t, values, map[string]any{"dropped": "x"}) },
+			want:   StateFailed, reason: "SyncFailed"},
+		{name: "failure of the values it carries, without the null Argo CD deleted", spec: nulled,
+			synced: func(t *testing.T) map[string]any { return recorded(t, nulled, nil) }, want: StateFailed, reason: "SyncFailed"},
+		{name: "failure of the values it carries, without a null in a list", spec: listed,
+			synced: func(t *testing.T) map[string]any { return recorded(t, listed, nil) }, want: StateFailed, reason: "SyncFailed"},
+		// Indistinguishable from an entry an earlier sync applied.
+		{name: "failed sync that only added an entry", synced: func(t *testing.T) map[string]any { return recorded(t, added, nil) },
+			want: StateFailed, reason: "SyncFailed"},
+		{name: "failure with no recorded source", mutate: outOfSync, want: StateFailed, reason: "SyncFailed"},
+		{name: "step: failed sync of the values it replaced", synced: func(t *testing.T) map[string]any { return recorded(t, refused, nil) },
+			mutate: outOfSync, since: failedAt.Add(-time.Minute), want: StateProgressing, reason: "NotSynced"},
+		// Automated sync retries a source whose sync never ran, so the step
+		// starts none; it does not retry the source that failed.
+		{name: "step: failed before it, of the values it replaced",
+			synced: func(t *testing.T) map[string]any { return recorded(t, refused, nil) }, mutate: outOfSync,
+			since: failedAt.Add(2 * time.Minute), want: StateProgressing, reason: "NotSynced"},
+		{name: "step: failed before it, of the values it replaced, compared since",
+			synced: func(t *testing.T) map[string]any { return recorded(t, refused, nil) },
+			since:  failedAt.Add(30 * time.Second), want: StateReady},
+		{name: "step: failed before it, of the values it carries",
+			synced: func(t *testing.T) map[string]any { return recorded(t, values, map[string]any{"dropped": "x"}) },
+			mutate: outOfSync, since: failedAt.Add(2 * time.Minute), want: StateProgressing, reason: ReasonPriorSyncFailed},
+		// A failed hook leaves the resources Synced; nothing but a sync shows
+		// the release works at its values.
+		{name: "step: failed before it, of the values it carries, resources in sync",
+			synced: func(t *testing.T) map[string]any { return recorded(t, values, nil) },
+			since:  failedAt.Add(30 * time.Second), want: StateProgressing, reason: ReasonPriorSyncFailed},
+		// The sync the step started has not begun: its result decides.
+		{name: "step: failed before it, the sync it started still pending", mutate: pending,
+			synced: func(t *testing.T) map[string]any { return recorded(t, values, nil) },
+			since:  failedAt.Add(30 * time.Second), want: StateProgressing, reason: "SyncPending"},
+		{name: "step: failed before it, a sync that only added an entry, resources in sync",
+			synced: func(t *testing.T) map[string]any { return recorded(t, added, nil) },
+			since:  failedAt.Add(30 * time.Second), want: StateProgressing, reason: ReasonPriorSyncFailed},
+	}
+	p, r := testPlan()
+	for _, tt := range tests {
+		spec := tt.spec
+		if spec == nil {
+			spec = values
+		}
+		desired, err := Application(target, p, r, spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := readyAppWith(t, failedAt.Add(time.Minute), spec)
+		op := map[string]any{
+			"phase": "Failed", "startedAt": failedAt.Format(time.RFC3339), "message": "one or more objects failed to apply",
+			"syncResult": map[string]any{"revision": chartDigest},
+		}
+		if tt.synced != nil {
+			op["syncResult"].(map[string]any)["source"] = tt.synced(t)
+		}
+		app.Object["status"].(map[string]any)["operationState"] = op
+		if tt.mutate != nil {
+			tt.mutate(app)
+		}
+		got := observe(app, desired, r, tt.since, false)
+		if got.State != tt.want || (tt.reason != "" && got.Reason != tt.reason) {
+			t.Errorf("%s: observe() = %+v, want %s %s", tt.name, got, tt.want, tt.reason)
+		}
+	}
 }
 
 // Argo CD records the source it compared without null map entries, while a
@@ -314,10 +442,12 @@ func TestObserveCurrentRevisionReadiness(t *testing.T) {
 		{name: "old operation but fresh reconcile", at: before, mutate: func(u *unstructured.Unstructured) {
 			set("status", "reconciledAt")(u, after.Format(time.RFC3339))
 		}, want: StateReady},
-		{name: "old failed operation, fresh reconcile", at: before, mutate: func(u *unstructured.Unstructured) {
+		// A failed hook leaves the resources Synced, and automated sync never
+		// retries the failed sync: the step starts one.
+		{name: "failed before the step, resources in sync since", at: before, mutate: func(u *unstructured.Unstructured) {
 			set("status", "operationState", "phase")(u, "Failed")
 			set("status", "reconciledAt")(u, after.Format(time.RFC3339))
-		}, want: StateReady},
+		}, want: StateProgressing, reason: ReasonPriorSyncFailed},
 		{name: "failed before the step, still out of sync", at: before, mutate: func(u *unstructured.Unstructured) {
 			set("status", "operationState", "phase")(u, "Failed")
 			set("status", "sync", "status")(u, "OutOfSync")
@@ -336,7 +466,10 @@ func TestObserveCurrentRevisionReadiness(t *testing.T) {
 			set("status", "operationState", "phase")(u, "Failed")
 			set("status", "sync", "status")(u, "OutOfSync")
 			set("operation", "sync", "revision")(u, chartDigest)
-		}, want: StateProgressing, reason: "NotSynced"},
+		}, want: StateProgressing, reason: "SyncPending"},
+		{name: "sync pending on a synced Application", at: after, mutate: func(u *unstructured.Unstructured) {
+			set("operation", "sync", "revision")(u, chartDigest)
+		}, want: StateProgressing, reason: "SyncPending"},
 		{name: "older revision failed before the step", at: before, mutate: func(u *unstructured.Unstructured) {
 			set("status", "operationState", "phase")(u, "Failed")
 			set("status", "operationState", "syncResult", "revision")(u, "sha256:old")
@@ -373,6 +506,50 @@ func TestObserveCurrentRevisionReadiness(t *testing.T) {
 		if got.State != tt.want || (tt.reason != "" && got.Reason != tt.reason) {
 			t.Errorf("%s: observe() = %+v, want %s %s", tt.name, got, tt.want, tt.reason)
 		}
+	}
+}
+
+func TestObserveCarriesBoundedArgoMessage(t *testing.T) {
+	t.Parallel()
+	step := time.Date(2026, 10, 14, 12, 0, 0, 700_000_000, time.UTC)
+	after := step.Add(5 * time.Second)
+	p, r := testPlan()
+	desired, err := Application(target, p, r, values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("x", 3*MaxMessageLen)
+	tests := []struct {
+		name   string
+		mutate func(*unstructured.Unstructured)
+		state  State
+		want   string
+	}{
+		{name: "failed operation, multi-line", mutate: func(u *unstructured.Unstructured) {
+			_ = unstructured.SetNestedField(u.Object, "Failed", "status", "operationState", "phase")
+			_ = unstructured.SetNestedField(u.Object, "one\n  two\n\tthree", "status", "operationState", "message")
+		}, state: StateFailed, want: "one two three"},
+		{name: "failed operation, long", mutate: func(u *unstructured.Unstructured) {
+			_ = unstructured.SetNestedField(u.Object, "Failed", "status", "operationState", "phase")
+			_ = unstructured.SetNestedField(u.Object, long, "status", "operationState", "message")
+		}, state: StateFailed, want: strings.Repeat("x", MaxMessageLen) + "…"},
+		{name: "comparison error condition", mutate: func(u *unstructured.Unstructured) {
+			_ = unstructured.SetNestedField(u.Object, []any{map[string]any{"type": "ComparisonError", "message": "chart\nnot found"}}, "status", "conditions")
+		}, state: StateProgressing, want: "chart not found"},
+	}
+	for _, tt := range tests {
+		app := readyApp(t, after)
+		tt.mutate(app)
+		got := observe(app, desired, r, step, false)
+		if got.State != tt.state || got.Message != tt.want {
+			t.Errorf("%s: observe() = %+v, want %s with message %q", tt.name, got, tt.state, tt.want)
+		}
+	}
+	if got := (Observation{Reason: "SyncFailed", Message: "boom"}).Text(); got != "SyncFailed: boom" {
+		t.Errorf("Text() = %q", got)
+	}
+	if got := (Observation{Reason: "SyncFailed"}).Text(); got != "SyncFailed" {
+		t.Errorf("Text() without a message = %q", got)
 	}
 }
 
@@ -494,5 +671,31 @@ func TestCapabilities(t *testing.T) {
 		if err != nil && operrors.IsPermanent(err) {
 			t.Errorf("%s: Capabilities() = %v; an engine that is not ready yet is not permanent", tt.name, err)
 		}
+	}
+}
+
+// Refresh asks Argo CD to compare an Application the step did not write, and
+// fails for one that is gone.
+func TestRefreshRequestsAComparison(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	p, r := testPlan()
+	a := fakeAdapter(t)
+	if err := a.Refresh(ctx, r); err == nil {
+		t.Fatal("Refresh() of a missing Application succeeded")
+	}
+	if _, err := a.Ensure(ctx, p, r, values); err != nil {
+		t.Fatalf("Ensure() = %v", err)
+	}
+	if err := a.Refresh(ctx, r); err != nil {
+		t.Fatalf("Refresh() = %v", err)
+	}
+	live, err := a.get(ctx, r.ID)
+	if err != nil || live.GetAnnotations()[RefreshAnnotation] != "normal" {
+		t.Fatalf("Refresh() did not request a refresh: %v", err)
+	}
+	desired, _ := Application(target, p, r, values)
+	if drifted(live, desired) {
+		t.Error("the refresh request reads as drift")
 	}
 }

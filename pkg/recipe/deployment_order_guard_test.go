@@ -175,6 +175,53 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				{"gpu-operator", "nvsentinel"},
 			},
 		},
+		// The two Run:ai leaves disable the base chain's kai-scheduler (the
+		// chart bundles its own) but keep the ref, so the resolver still sees
+		// the component and the preflight mixin's edge still resolves.
+		// runai-cluster's own edges order it after the GPU and monitoring
+		// stack its operator checks in DependenciesFulfilled.
+		{
+			name: "h100-eks-ubuntu-training-runai",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorH100
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformRunai
+				return c
+			},
+			requiredDeps: map[string][]string{
+				"runai-cluster": {"gpu-operator", "kube-prometheus-stack", "prometheus-operator-crds", "cert-manager"},
+			},
+			requiredOrdering: [][2]string{
+				{"gpu-operator", "runai-cluster"},
+				{"kube-prometheus-stack", "runai-cluster"},
+				{"cert-manager", "runai-cluster"},
+				{"gpu-operator", "nvsentinel"},
+			},
+		},
+		{
+			name: "h100-gke-cos-training-runai",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceGKE
+				c.Accelerator = CriteriaAcceleratorH100
+				c.OS = CriteriaOSCOS
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformRunai
+				return c
+			},
+			requiredDeps: map[string][]string{
+				"runai-cluster": {"gpu-operator", "kube-prometheus-stack", "prometheus-operator-crds", "cert-manager"},
+			},
+			requiredOrdering: [][2]string{
+				{"gpu-operator", "runai-cluster"},
+				{"kube-prometheus-stack", "runai-cluster"},
+				{"cert-manager", "runai-cluster"},
+				{"gpu-operator", "nvsentinel"},
+			},
+		},
 		// The two IMEX-capable Slurm leaves below carry identical dependency
 		// and ordering expectations; only the accelerator differs. The
 		// load-bearing edge in both is nvidia-dra-driver-gpu -> slinky-slurm:

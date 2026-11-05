@@ -426,7 +426,7 @@ func TestRenderSlurmGPUAccessFillsSecureAcceleratorAccessPage(t *testing.T) {
 
 // The index lists the whole checklist, not only what ran: a requirement no
 // result evidenced appears as NOT TESTED with its level, no page and no link.
-// Presence only; verdict aggregation is #3612.
+// The verdicts come from AggregateReport; see aggregate_test.go.
 func TestRenderIndexListsUntestedRequirements(t *testing.T) {
 	allPassing := &ctrf.Report{Results: ctrf.Results{Tests: []ctrf.TestResult{
 		{Name: "dra-support", Status: "passed"},
@@ -511,37 +511,89 @@ func TestRenderIndexListsUntestedRequirements(t *testing.T) {
 	}
 }
 
-// untestedRequirements reports an unsupported version rather than
-// rendering an empty checklist. Render refuses the version earlier, so this
-// pins the helper's own contract.
-func TestUntestedRequirementsRefusesUnsupportedVersion(t *testing.T) {
-	r := New(WithOutputDir(t.TempDir()), WithConformanceVersion("v1.38"))
-	if _, err := r.untestedRequirements(nil); err == nil {
-		t.Fatal("expected an error for an unsupported checklist version")
-	}
-
-	// With nothing evidenced, every requirement of the version is listed, in
-	// checklist order, MUSTs with checks as "not run" and the rest as
-	// "no AICR check".
-	r = New(WithOutputDir(t.TempDir()), WithConformanceVersion(Version137))
-	rows, err := r.untestedRequirements(nil)
+// A requirement every check of which was skipped gets no page, and the index
+// records why it is not tested: the skip reason code rides the result cell.
+func TestRenderSkippedReasonReachesIndex(t *testing.T) {
+	dir := t.TempDir()
+	report := &ctrf.Report{Results: ctrf.Results{Tests: []ctrf.TestResult{
+		{Name: "gang-scheduling", Status: "passed"},
+		{Name: "pod-autoscaling", Status: "skipped", Extra: map[string]string{"skipReason": "no-metrics-api"}},
+		{Name: "robust-controller", Status: "other", Message: "validator crashed"},
+	}}}
+	agg, err := New(WithOutputDir(dir), WithConformanceVersion(Version137)).RenderWithResult(context.Background(), report)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cl, _ := ChecklistFor(Version137)
-	if len(rows) != len(cl.Requirements) {
-		t.Fatalf("rows = %d, want every requirement (%d)", len(rows), len(cl.Requirements))
+	if agg.Passed() {
+		t.Error("Passed() = true with a skipped and a crashed MUST")
 	}
-	for i, row := range rows {
-		if row.RequirementID != cl.Requirements[i].ID || row.Level != cl.Requirements[i].Level {
-			t.Errorf("row %d = %+v, want %s/%s", i, row, cl.Requirements[i].ID, cl.Requirements[i].Level)
+	index, err := os.ReadFile(filepath.Join(dir, "index.md")) //nolint:gosec // test-controlled path
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"**Applicable MUSTs:** FAILED",
+		"| `gang_scheduling` | MUST | Gang Scheduling | PASSED | [gang-scheduling.md](gang-scheduling.md) |",
+		"| `pod_autoscaling` | MUST | | NOT TESTED (pod-autoscaling skipped: no-metrics-api) | |",
+		"| `robust_controller` | MUST | Robust AI Operator | NOT TESTED (robust-controller other) | [robust-operator.md](robust-operator.md) |",
+	} {
+		if !strings.Contains(string(index), want) {
+			t.Errorf("index.md missing %q:\n%s", want, index)
 		}
-		want := untestedNoCheck
-		if expected, _ := ExpectedChecks(Version137, row.RequirementID); len(expected) > 0 {
-			want = untestedNotRun
+	}
+	if _, err := os.Stat(filepath.Join(dir, "pod-autoscaling.md")); err == nil {
+		t.Error("a requirement whose only check was skipped must not get a page")
+	}
+	page, _ := os.ReadFile(filepath.Join(dir, "gang-scheduling.md")) //nolint:gosec // test-controlled path
+	if !strings.Contains(string(page), "**Result:** PASSED\n**Proof:** gang-scheduling") {
+		t.Errorf("gang-scheduling.md lacks the proof line:\n%s", page)
+	}
+}
+
+// A not-applicable declaration renders from configuration and overrides a
+// check that ran, whose result stays on the page as an observation.
+func TestRenderNotApplicable(t *testing.T) {
+	dir := t.TempDir()
+	report := &ctrf.Report{Results: ctrf.Results{Tests: []ctrf.TestResult{
+		{Name: "cluster-autoscaling", Status: "failed", Message: "no node group scaled"},
+		{Name: "gang-scheduling", Status: "passed"},
+	}}}
+	r := New(WithOutputDir(dir), WithConformanceVersion(Version137),
+		WithNotApplicable(map[string]string{"cluster_autoscaling": "fixed-size | bare-metal\ncluster"}))
+	agg, err := r.RenderWithResult(context.Background(), report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca := agg.Requirement("cluster_autoscaling")
+	if ca.Status != StatusNotApplicable || ca.Reason != "fixed-size | bare-metal\ncluster" || ca.Applicable() {
+		t.Errorf("cluster_autoscaling = %+v", *ca)
+	}
+	for _, m := range agg.IncompleteMusts() {
+		if m.ID == "cluster_autoscaling" {
+			t.Error("a not-applicable MUST must not be reported incomplete")
 		}
-		if row.Reason != want {
-			t.Errorf("%s reason = %q, want %q", row.RequirementID, row.Reason, want)
+	}
+	index, _ := os.ReadFile(filepath.Join(dir, "index.md")) //nolint:gosec // test-controlled path
+	// The justification is escaped for the table cell, and left verbatim on
+	// the page, which is not a table.
+	want := "| `cluster_autoscaling` | MUST | Cluster Autoscaling | NOT APPLICABLE (fixed-size \\| bare-metal cluster) | [cluster-autoscaling.md](cluster-autoscaling.md) |"
+	if !strings.Contains(string(index), want) {
+		t.Errorf("index.md missing %q:\n%s", want, index)
+	}
+	page, _ := os.ReadFile(filepath.Join(dir, "cluster-autoscaling.md")) //nolint:gosec // test-controlled path
+	for _, want := range []string{"**Result:** NOT APPLICABLE (fixed-size | bare-metal\ncluster)", "### cluster-autoscaling", "no node group scaled"} {
+		if !strings.Contains(string(page), want) {
+			t.Errorf("cluster-autoscaling.md missing %q:\n%s", want, page)
 		}
+	}
+
+	// Any other id is refused before anything is written.
+	empty := t.TempDir()
+	r = New(WithOutputDir(empty), WithNotApplicable(map[string]string{"gang_scheduling": "we do not gang"}))
+	if _, err := r.RenderWithResult(context.Background(), report); err == nil {
+		t.Fatal("expected an error for a non-conditional requirement")
+	}
+	if entries, _ := os.ReadDir(empty); len(entries) != 0 {
+		t.Errorf("evidence dir not left empty: %v", entries)
 	}
 }

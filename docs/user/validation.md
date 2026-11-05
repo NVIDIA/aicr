@@ -84,8 +84,8 @@ is installed on the cluster.
 | Check | Transport | Default applicability (from recipe criteria) |
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE (GPUDirect TCPXO), H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
-| `nccl-all-reduce-bw-net` | NET (EFA on EKS; built-in IB/verbs on OKE) | GB200 + EKS, GB200 + OKE, and GB300 + EKS. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the benchmark — see [Grace Blackwell NET preflight](#grace-blackwell-net-preflight-gpudirect-rdma-prerequisites). |
-| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, GB200 + OKE, GB200 + GKE (A4X GPUDirect-RDMA/gIB carries the IMEX/NVLink fabric traffic; gIB is the transport driver, not the NCCL algorithm), GB300 (EKS, generic), and VR200 + RKE2. Asserts the NVLS communicator actually initialized. Catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE), or gIB/RDMA initialization failure (GKE), when the IMEX domain is misconfigured. |
+| `nccl-all-reduce-bw-net` | NET (EFA on EKS; built-in IB/verbs on OKE and NVKE) | GB200 + EKS, GB200 + OKE, GB200 + NVKE, and GB300 + EKS. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE, the per-rail SR-IOV VFs (`nvidia.com/sriov_resource_rail_<n>`) on NVKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the benchmark — see [Grace Blackwell NET preflight](#grace-blackwell-net-preflight-gpudirect-rdma-prerequisites). |
+| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, GB200 + OKE, GB200 + NVKE, GB200 + GKE (A4X GPUDirect-RDMA/gIB carries the IMEX/NVLink fabric traffic; gIB is the transport driver, not the NCCL algorithm), GB300 (EKS, generic), and VR200 + RKE2. Asserts the NVLS communicator actually initialized. Catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE and NVKE), or gIB/RDMA initialization failure (GKE), when the IMEX domain is misconfigured. |
 
 The applicability column is the *default*, derived from the recipe's
 `criteria`. A recipe whose criteria fall outside it can still run these
@@ -226,18 +226,18 @@ aicr validate --recipe ./bundles/recipe.yaml --snapshot snapshot.yaml --phase de
 
 ### Grace Blackwell NET preflight: GPUDirect RDMA prerequisites
 
-Before running `nccl-all-reduce-bw-net` on GB200 (EKS or OKE) or GB300 (EKS), a
+Before running `nccl-all-reduce-bw-net` on GB200 (EKS, OKE or NVKE) or GB300 (EKS), a
 preflight checks each GPU node for the driver-side prerequisite of GPUDirect
 RDMA. Without it NCCL falls back to the Socket transport. The `-net` check
 catches that on its own — it fails on a `Using network Socket` banner rather
 than reporting a figure — so the preflight exists to fail fast, naming the
 driver, instead of after a full benchmark run.
 
-The preflight covers both NET fabrics: EFA on EKS and built-in IB/verbs on OKE.
+The preflight covers every NET fabric: EFA on EKS and built-in IB/verbs on OKE and NVKE.
 
 **Before R595** — which includes `580.173.02`, the version AICR pins — the
 driver must be loaded with `NVreg_GrdmaPciTopoCheckOverride=1`. Without it the
-driver refuses to let a PCIe-attached NIC (EFA on EKS, ConnectX IB on OKE)
+driver refuses to let a PCIe-attached NIC (EFA on EKS, ConnectX IB on OKE and NVKE)
 attach dma-buf handles to GPU memory, and the kernel logs:
 
 ```text
@@ -334,7 +334,7 @@ the GPU nodes, exactly as `service: any` recipes do. When `--node-selector`
 is passed it replaces the automatic filters rather than narrowing them.
 
 Valid profiles are the pairs in the applicability table above: `b200/any`,
-`gb200/any`, `gb200/eks`, `gb200/gke`, `gb200/oke`, `gb300/eks`, `gb300/generic`,
+`gb200/any`, `gb200/eks`, `gb200/gke`, `gb200/nvke`, `gb200/oke`, `gb300/eks`, `gb300/generic`,
 `h100/aks`, `h100/eks`, `h100/gke`, `h200/eks`, `vr200/rke2`. A
 malformed or unknown value **fails** the check rather than silently skipping
 it. A valid profile that doesn't implement a requested variant (e.g.
@@ -971,29 +971,32 @@ Three properties make it a scoping tool rather than a way to hide a failure:
   so a new check in a recipe runs and can fail, which forces a decision rather
   than hiding one.
 
-The CNCF conformance evidence path is different, and the two flags are refused
-together for that reason. `pkg/evidence/cncf` renders one markdown file per
+The CNCF conformance evidence path refuses the two flags together for a
+different reason. `pkg/evidence/cncf` renders one markdown file per
 *requirement* of the upstream checklist version selected from the cluster's
 Kubernetes minor (see [Checklist Versions](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#checklist-versions))
-and drops every skipped entry before grouping, so a requirement whose checks
-were all withheld gets no page and, when another submission-required check
-produced an entry so an index is written at all, appears there only as
-`NOT TESTED (not run)`, with nothing recording that it was withheld on purpose
-rather than never reached. A submission that misstates why a requirement is
-missing is the defect the guards exist to prevent, so `--skip-check` with
-`--evidence-dir` (and therefore with `--cncf-submission`, which requires it)
-is rejected up front:
+and aggregates each requirement's status fail-closed from every check expected
+to evidence it (see [Requirement status](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#requirement-status)).
+The renderer records a skipped check as `NOT TESTED` with its reason code
+(for example `slurm-managed-gpus`, when `secure-accelerator-access` defers to
+the Slurm path and `slinky-slurm-gpu-access` did not run), so a skip is
+reported rather than hidden, but a run that
+withholds a check the recipe declares is narrower than the recipe by
+construction and cannot evidence that recipe. `--skip-check` is for lanes
+that cannot host a check at all; those are not submission lanes, so
+`--skip-check` with `--evidence-dir` (and therefore with `--cncf-submission`,
+which requires it) is rejected up front:
 
 ```
-[INVALID_REQUEST] --skip-check cannot be combined with --evidence-dir: the CNCF
-evidence renderer gives a withheld requirement no page and, when it writes an
-index at all, lists it only as NOT TESTED (not run) with no reason recorded, so
-the rendered evidence would misstate why the requirement is missing
+[INVALID_REQUEST] --skip-check cannot be combined with --evidence-dir: a
+withheld check leaves its requirement NOT TESTED, so the run is narrower than
+the recipe by construction and cannot produce conformance evidence for it
 ```
 
-Lifting that restriction means deciding how a withheld requirement should be
-represented in a submission, which is a change to what the submission contains
-rather than a detail of this flag.
+The requirement aggregation, and the `spec.validate.evidence.cncf.notApplicable`
+key it reads, apply to the evidence `--evidence-dir` renders from a validator
+run. They have no effect under `--cncf-submission`, which still runs the bash
+collector until #3602 retires that path.
 
 ## Scoping CNCF submission evidence to specific features
 

@@ -318,6 +318,12 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	if ownershipErr := b.enforcePromQLServerOwnership(recipeResult, platformRefs); ownershipErr != nil {
 		return nil, ownershipErr
 	}
+	// Before values are extracted, so an operator on the wrong deployer
+	// hears that first rather than a required-value hint to declare the
+	// secret --dynamic, which that deployer would then refuse.
+	if secretErr := b.rejectInstallTimeSecretsOutsideHelm(recipeResult.ComponentRefs, recipeResult.DataProvider()); secretErr != nil {
+		return nil, secretErr
+	}
 
 	// Bundle-time override policy for GPU allocation-policy keys (#1327):
 	// reject --dynamic declarations, warn on static overrides. Runs after
@@ -1486,6 +1492,9 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 		// Requires every override, including --set-json/--set-file, to have
 		// already been applied; see validateRequiredNodeSelectors.
 		if err := b.validateRequiredNodeSelectors(ref.Name, values, provider, policy); err != nil {
+			return nil, err
+		}
+		if err := b.validateRequiredAndSecretValues(ref.Name, values, provider); err != nil {
 			return nil, err
 		}
 

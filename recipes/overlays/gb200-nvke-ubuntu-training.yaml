@@ -145,14 +145,9 @@ spec:
         - nccl-all-reduce-bw-net
         - nccl-all-reduce-bw-nvls
       constraints:
-        # Placeholder: the gb200/oke runtime requests nvidia.com/mlnxnics,
-        # which this leaf no longer exposes, so the performance phase cannot
-        # schedule until a gb200/nvke runtime requesting the per-rail
-        # sriov_resource_rail_<n> VFs and the SriovIBNetwork attachments lands.
-        - name: nccl-benchmark-profile
-          value: gb200/oke
-        # Thresholds copied from gb200-oke-training until a measured NVKE
-        # baseline exists.
+        # NET floor is a placeholder copied from gb200-oke-training: no NVKE
+        # tenant with full IB partition membership has measured it yet. NVLS
+        # measured 839.5 GB/s on the reference tenant.
         - name: nccl-all-reduce-bw-net
           value: ">= 40"
         - name: nccl-all-reduce-bw-nvls
