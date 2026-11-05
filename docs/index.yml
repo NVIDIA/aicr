@@ -146,6 +146,8 @@ navigation:
         path: integrator/validator-extension.md
       - page: Supply Chain Verification
         path: integrator/supply-chain-verification.md
+      - page: Contributing Validation Capacity
+        path: integrator/validation-capacity.md
       - page: Go Library Integration
         path: integrator/go-library.md
       - page: Public API Surface
