@@ -1048,8 +1048,9 @@ func (r *RolloutReconciler) prompt(ctx context.Context, p *plan.Document, rel *p
 		return r.Engine.Verify(ctx, p, rel, values)
 	case !verify && reason == argocd.ReasonPriorSyncFailed:
 		// The Application already carries the plan, as in a retry, but its
-		// sync of this revision failed before the step, and automated sync
-		// never retries a failed revision: start the sync.
+		// last sync of this revision failed before the step and did not
+		// provably apply other values: automated sync never retries it, and
+		// a failed hook leaves the resources Synced, so start the sync.
 		return r.Engine.Verify(ctx, p, rel, values)
 	case !verify && reason == argocd.ReasonReconcileStale:
 		// Argo CD has not compared the Application since the step began,

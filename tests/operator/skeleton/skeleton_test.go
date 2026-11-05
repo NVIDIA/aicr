@@ -177,6 +177,9 @@ func TestSkeleton(t *testing.T) {
 		assertApplication(ctx, t, third, "30m")
 		first = third
 	})
+	t.Run("a failed sync left behind by a recovery does not keep the runtime NotReady", func(t *testing.T) {
+		failedSyncRecovers(ctx, t, first)
+	})
 	t.Run("overrides AICR rejects stall with its exit category and zero engine writes", func(t *testing.T) {
 		rejectedOverrides(ctx, t, first)
 	})

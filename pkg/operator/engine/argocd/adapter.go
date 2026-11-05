@@ -58,9 +58,10 @@ const (
 	// step began, and none is pending.
 	ReasonSyncNotStarted = "SyncNotStarted"
 	// ReasonPriorSyncFailed: the Application carries this plan, but its last
-	// sync of the chart digest failed before the step began, it is not in
-	// sync, and no sync is pending. Automated sync never retries a revision
-	// that failed, so the step must start one.
+	// sync of the chart digest failed before the step began, did not provably
+	// apply another source, and no sync is pending. Automated sync never
+	// retries a failed sync of the same revision and source, and a failed hook
+	// leaves the resources Synced, so the step must start one.
 	ReasonPriorSyncFailed = "PriorSyncFailed"
 	// ReasonRetired: the Application a Remove step deletes is gone.
 	ReasonRetired = "Retired"
@@ -215,11 +216,11 @@ func (a *Adapter) requestRefresh(ctx context.Context, app *unstructured.Unstruct
 
 // Verify starts a sync of a release's Application so that Argo CD runs its
 // hooks, a readiness gate, again for the parent's current revision, or
-// retries a sync of the current revision that failed before the step, which
-// automated sync never retries. The Application is written with
-// the sync operation in one apply, and only when no operation is pending or
-// running; the caller observes and calls again until a sync has started
-// since its step began.
+// retries a failed sync of the current revision that did not provably apply
+// another source, which automated sync never retries. The Application is
+// written with the sync operation in one apply, and only when no operation is
+// pending or running; the caller observes and calls again until a sync has
+// started since its step began.
 func (a *Adapter) Verify(ctx context.Context, p *plan.Document, r *plan.Release, valuesJSON []byte) error {
 	desired, err := Application(a.Target, p, r, valuesJSON)
 	if err != nil {
@@ -554,7 +555,7 @@ func observe(live, desired *unstructured.Unstructured, r *plan.Release, since ti
 	spec, _, _ := unstructured.NestedMap(live.Object, "spec", "source")
 	status, _, _ := unstructured.NestedMap(live.Object, "status")
 	op, _, _ := unstructured.NestedMap(status, "operationState")
-	if !verify && priorSyncFailed(live, status, op, r.Chart.Digest, since) {
+	if !verify && priorSyncFailed(live, op, r.Chart.Digest, since) {
 		return progressing(ReasonPriorSyncFailed)
 	}
 	for _, c := range sliceOf(status["conditions"]) {
@@ -572,17 +573,18 @@ func observe(live, desired *unstructured.Unstructured, r *plan.Release, since ti
 	switch {
 	case opPhase == "Running" || opPhase == "Terminating":
 		return progressing("SyncRunning")
-	case (opPhase == "Failed" || opPhase == "Error") && opRevision == r.Chart.Digest && !opStarted.Before(since):
+	case (opPhase == "Failed" || opPhase == "Error") && opRevision == r.Chart.Digest && !opStarted.Before(since) &&
+		!otherSource(op, spec):
 		msg, _ := op["message"].(string)
 		return Observation{State: StateFailed, Reason: "Sync" + opPhase, Message: excerpt(msg)}
 	}
-	if verify {
-		if _, pending := live.Object["operation"]; pending {
-			return progressing("SyncPending")
-		}
-		if opPhase == "" || opStarted.Before(since) {
-			return progressing(ReasonSyncNotStarted)
-		}
+	// A pending sync decides, as one a step started to supersede a failure
+	// does while the resources already read Synced.
+	if _, pending := live.Object["operation"]; pending {
+		return progressing("SyncPending")
+	}
+	if verify && (opPhase == "" || opStarted.Before(since)) {
+		return progressing(ReasonSyncNotStarted)
 	}
 	sync, _, _ := unstructured.NestedMap(status, "sync")
 	if sync["status"] != "Synced" || sync["revision"] != r.Chart.Digest {
@@ -603,11 +605,44 @@ func observe(live, desired *unstructured.Unstructured, r *plan.Release, since ti
 	return Observation{State: StateReady, Reason: "CurrentRevisionReady"}
 }
 
-// priorSyncFailed reports a sync of digest that failed before since and was
-// never repaired: the Application is out of sync or still carries the
-// SyncError, and no new sync is pending. A failed sync Argo CD later
-// reconciled into Synced is not one.
-func priorSyncFailed(live *unstructured.Unstructured, status, op map[string]any, digest string, since time.Time) bool {
+// otherSource reports whether an operation provably applied a source other
+// than source, the Application's: an entry of source is missing from, or
+// differs in, the source the operation recorded. Argo CD writes each
+// operation's state over the last as a JSON merge patch, so a recorded source
+// keeps the map entries of earlier syncs that a later one dropped, and loses
+// those a null deleted; entries beyond source prove nothing, and neither does
+// an operation that records no source.
+func otherSource(op, source map[string]any) bool {
+	synced, found, _ := unstructured.NestedMap(op, "syncResult", "source")
+	return found && !covers(synced, source)
+}
+
+// covers reports whether recorded holds every entry of want, at any depth,
+// with the same value; a null entry matches its absence, as a merge patch
+// deletes it. Lists compare whole, as a merge patch replaces them, without
+// the nulls it drops from their elements.
+func covers(recorded, want any) bool {
+	w, ok := want.(map[string]any)
+	if !ok {
+		return jsonEqual(withoutNulls(recorded), withoutNulls(want))
+	}
+	got, ok := recorded.(map[string]any)
+	if !ok {
+		return false
+	}
+	for k, v := range w {
+		if !covers(got[k], v) {
+			return false
+		}
+	}
+	return true
+}
+
+// priorSyncFailed reports that the last sync of digest failed before since
+// and no new sync is pending, unless that sync provably applied another
+// source, which automated sync retries. Synced resources do not clear it: a
+// failed hook leaves them Synced.
+func priorSyncFailed(live *unstructured.Unstructured, op map[string]any, digest string, since time.Time) bool {
 	if phase, _ := op["phase"].(string); phase != "Failed" && phase != "Error" {
 		return false
 	}
@@ -618,19 +653,11 @@ func priorSyncFailed(live *unstructured.Unstructured, status, op map[string]any,
 	if revision == "" {
 		revision, _, _ = unstructured.NestedString(op, "operation", "sync", "revision")
 	}
-	if revision != digest || !timeOf(op["startedAt"]).Before(since) {
+	source, _, _ := unstructured.NestedMap(live.Object, "spec", "source")
+	if revision != digest || !timeOf(op["startedAt"]).Before(since) || otherSource(op, source) {
 		return false
 	}
-	sync, _, _ := unstructured.NestedMap(status, "sync")
-	if sync["status"] != "Synced" || sync["revision"] != digest {
-		return true
-	}
-	for _, c := range sliceOf(status["conditions"]) {
-		if c["type"] == "SyncError" {
-			return true
-		}
-	}
-	return false
+	return true
 }
 
 // drifted reports whether the live Application's spec, or a label or
