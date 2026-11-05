@@ -178,7 +178,7 @@ const (
 	// deleting the driver pods does NOT reload the module, because
 	// k8s-driver-manager keys on a digest of the ClusterPolicy spec rather than
 	// the ConfigMap contents (#2459).
-	nvregDocsHint = `NVreg_GrdmaPciTopoCheckOverride=1 is required on GB200 (EKS, OKE) and GB300 ` +
+	nvregDocsHint = `NVreg_GrdmaPciTopoCheckOverride=1 is required on GB200 (EKS, OKE, NVKE) and GB300 ` +
 		`(EKS) nodes; without it NCCL silently falls back to the Socket transport. ` +
 		`Deleting the nvidia-driver DaemonSet pods does NOT apply it — k8s-driver-manager ` +
 		`keys on a digest of the ClusterPolicy spec, not the ConfigMap. Procedure and the ` +

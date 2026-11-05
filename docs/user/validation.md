@@ -237,7 +237,7 @@ The preflight covers every NET fabric: EFA on EKS and built-in IB/verbs on OKE a
 
 **Before R595** — which includes `580.173.02`, the version AICR pins — the
 driver must be loaded with `NVreg_GrdmaPciTopoCheckOverride=1`. Without it the
-driver refuses to let a PCIe-attached NIC (EFA on EKS, ConnectX IB on OKE)
+driver refuses to let a PCIe-attached NIC (EFA on EKS, ConnectX IB on OKE and NVKE)
 attach dma-buf handles to GPU memory, and the kernel logs:
 
 ```text
