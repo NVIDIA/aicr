@@ -4296,10 +4296,10 @@ h100-kind-inference-dynamo:
   018-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 6e215d87eb4500940cda672c886e8f293e7351572016d7f50719192dfe64f6ed
   UPGRADING.md: 6cb67acfd9eb81979395397faf676cb48343ed293f73b7354d23a6b540a75a84
-  bundle-info.yaml: cee85edaac3fecce5d01c9b7ad55ebb992d05e03984f4f24bce0138a6c2e4dda
-  checksums.txt: 69788e667bfef91ee469fead2878736aa60977e3c2e75d9bb6ffd285b626c0ce
+  bundle-info.yaml: 2b71173f3115daf106aedf3b1551675c91f9c215a4a6717d55162ce3fa9d1985
+  checksums.txt: 3b29a91df5a0b1dcb995b3e15d711704ed9044bbd0e340780a67bf5e996fdaaa
   deploy.sh: fc332287efdf91cc0ea399c6b5227ed2bb2fac9577a14311a44f24646cd09ad2
-  recipe.yaml: e49adff91eeaec0071753c0c1b6b949c8957a264eeb407f1ea967ee170cc89e7
+  recipe.yaml: 69e3b529e7ea06a2d61a3bbea76359a0ce9770b54aba7f7180e77b86789ef6bb
 h100-kind-training-kubeflow:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -4361,10 +4361,10 @@ h100-kind-training-kubeflow:
   014-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 34f5aa26a009de84f9f9d3d0ca11f3f68db11136b17b9343b5ce1463b4657792
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
-  bundle-info.yaml: d36eb99f228b5e5dd7c992c7ad4b54b0d12abec6bffa7d5fd95bca13ccf7b04c
-  checksums.txt: 94a1fdac75186f9fcaf66a42f65796256965a7c2eeb877fadfe790a1542c4f9d
+  bundle-info.yaml: d6c3df859770cf61860c5796d9ed512e82f727a12aa0180f0bd629aad8e2cf04
+  checksums.txt: 7e4aaa2ba3add568b183f5e814ccf2e85c6f90347bda1364c37f34ae8c968277
   deploy.sh: 585028988d2cdbd7fad24e6a6aa04e416399fb8c675ac560c1ea2cf01e76def6
-  recipe.yaml: 12362473a61c3e932893f3b07642211950b01c6ab856fa17e03e92b11d0a6284
+  recipe.yaml: d34642c2c3c6345ccecb8a07238780791b5245a82fef5d55b5dcbe70d49eeda8
 h100-kind-training-kueue:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -4433,10 +4433,10 @@ h100-kind-training-kueue:
   015-kueue-post/values.yaml: 9ae0af1abd28154ef1efc514bd20ee1daf35cfccbfaa0c6d97e08092b211d6fc
   README.md: c81d01d60e41390c9709cc4e981266c407afd6beec72b8381e98a4d18e0ef30c
   UPGRADING.md: 2c69c04891da4e9cd89362f5d89f599c8af9d0706c56b3becbc5c541c7020a65
-  bundle-info.yaml: a8cc2876459a5d851ba024c8f7a1669f160204493a1bcc91c4fad321f073e5c0
-  checksums.txt: 1b6860a17a5080be62c5303219a87ff2c0b88af68ccda56a52bf94fd542eebc4
+  bundle-info.yaml: 424a122a46601ff907cd28fc87dc583c339940d53ed34bf7a8486087a9afc243
+  checksums.txt: d5d67a270e689cefef1c2adb405aad1057eef5fcdb5b2b883996ef2f79bea955
   deploy.sh: 706a8d58c6b713b9376215029a49a213fc943bdecab7cd7d4ea7d7ef2d86e692
-  recipe.yaml: 20dcca7c45181ff02b78029cf4d28820c07bb97eb3f9ed8bd1cc42a73c05e366
+  recipe.yaml: eb762ad5cad7d332446a1fcd3faa3ee3a8a684770c34dff9353ed6989d8d71bf
 h100-kind-training-slurm:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -4510,10 +4510,10 @@ h100-kind-training-slurm:
   017-slinky-topograph/values.yaml: c9015074818102d8727cfd38e96941c5c285175852fa71f81182c4323f751e05
   README.md: e329a93861b9058c75a4548e55b969adfdc156c8344b00e8d491814a88bef7aa
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
-  bundle-info.yaml: 1897311514b01e3d1ffc4d21f5e41bd681987137154f108baa90a84b879d6e00
-  checksums.txt: 1a6a421dde57be9cf11bca28b676a9100f63077911c37fef7e38e175278be48b
+  bundle-info.yaml: a7e17eeb7fbd2c9dc6100f8312a55636fe7525b1f2f11d6d585431c001c4d845
+  checksums.txt: 622351d80cb9d01e30c46abe6ca6a8b15725cea09e4ce62e5c4d7894d7568dac
   deploy.sh: cd7ccfe96441d0d0a17d9b7ef13f18e2938613e70854fc367a7bd8e64039019c
-  recipe.yaml: 900d577195e7e086117deb4b2b2ea96d83d4ad69a67aba31e7fbab7696017d25
+  recipe.yaml: 54efa069b75de6b21f1fd47d8445911654013e8457f35e75b736a7c2e9342950
 h200-any:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2

@@ -244,7 +244,10 @@ validators:
     env: []
   - name: pod-autoscaling
     phase: conformance
-    description: "Verify an HPA scales accelerator pods 1 to 2 and back on a per-pod custom metric served through prometheus-adapter, with a one-minute negative control"
+    description: >-
+      Verify an HPA scales accelerator pods 1 to 2 and back on a per-pod custom
+      metric served through prometheus-adapter, with a one-minute negative
+      control; needs two allocatable accelerators at once
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
     # 13m30s shared work budget enforced by the check's workCtx, plus 30s
     # cleanup and 60s margin; the per-wait caps (baseline Ready 3m, each

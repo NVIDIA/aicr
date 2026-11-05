@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -275,7 +276,7 @@ func TestAIMetricsScenarioPhases(t *testing.T) {
 			readyOnCreate(c)
 			dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
 				map[schema.GroupVersionResource]string{serviceMonitorGVR: "ServiceMonitorList"})
-			s, err := newAIMetricsScenario(c, dyn, srv.URL)
+			s, err := newAIMetricsScenario(c, dyn, srv.URL, nil)
 			if err != nil {
 				t.Fatalf("newAIMetricsScenario: %v", err)
 			}
@@ -453,7 +454,7 @@ func TestAIMetricsScenarioPreflight(t *testing.T) {
 		_, _ = w.Write(promVector())
 	}))
 	defer srv.Close()
-	s, err := newAIMetricsScenario(k8sfake.NewClientset(), nil, srv.URL)
+	s, err := newAIMetricsScenario(k8sfake.NewClientset(), nil, srv.URL, nil)
 	if err != nil {
 		t.Fatalf("newAIMetricsScenario: %v", err)
 	}
@@ -472,7 +473,7 @@ func TestAIMetricsScenarioPreflight(t *testing.T) {
 // selects the Service by app label and carries the release label.
 func TestBuildAIMetricsWorkload(t *testing.T) {
 	t.Parallel()
-	pod, svc := buildAIMetricsWorkload("ns", "run123", time.Minute)
+	pod, svc := buildAIMetricsWorkload("ns", "run123", time.Minute, nil)
 	c := pod.Spec.Containers[0]
 	if _, has := c.Resources.Limits[corev1.ResourceName(resourceNVIDIAGPU)]; has || len(pod.Spec.ResourceClaims) != 0 {
 		t.Error("the stub must not request an accelerator")
@@ -502,5 +503,30 @@ func TestBuildAIMetricsWorkload(t *testing.T) {
 	endpoints, _, _ := unstructured.NestedSlice(sm.Object, "spec", "endpoints")
 	if len(endpoints) != 1 || endpoints[0].(map[string]any)["port"] != aiMetricsPortName {
 		t.Errorf("ServiceMonitor endpoints = %v", endpoints)
+	}
+}
+
+// TestBuildAIMetricsWorkloadTolerations pins the stub's scheduling on tainted
+// nodes: nil defaults to tolerate-all and a caller's tolerations are applied
+// verbatim, the same contract as buildHPADeployment.
+func TestBuildAIMetricsWorkloadTolerations(t *testing.T) {
+	t.Parallel()
+	caller := []corev1.Toleration{{Key: "dedicated", Operator: corev1.TolerationOpEqual, Value: "gpu", Effect: corev1.TaintEffectNoSchedule}}
+	tests := []struct {
+		name        string
+		tolerations []corev1.Toleration
+		want        []corev1.Toleration
+	}{
+		{"nil defaults to tolerate-all", nil, []corev1.Toleration{{Operator: corev1.TolerationOpExists}}},
+		{"caller's tolerations are applied", caller, caller},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			pod, _ := buildAIMetricsWorkload("ns", "run123", time.Minute, tt.tolerations)
+			if !reflect.DeepEqual(pod.Spec.Tolerations, tt.want) {
+				t.Errorf("tolerations = %+v, want %+v", pod.Spec.Tolerations, tt.want)
+			}
+		})
 	}
 }

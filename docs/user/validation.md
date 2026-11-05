@@ -1028,7 +1028,7 @@ Valid feature names (from `pkg/evidence/cncf/consts.go`):
 | `ai-service-metrics` | Inference-service metrics via custom-metrics API (collector script section; the `ai-service-metrics` conformance check asserts Prometheus collects exactly the requests sent to a ServiceMonitor-selected stub, see [CNCF conformance](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md)) |
 | `inference-gateway` | Gateway API + Inference Extension installation; also records the gateway `LoadBalancer` network exposure (open `0.0.0.0/0` vs scoped source ranges). Fails on an open gateway only when `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY=true`. |
 | `robust-operator` | Operator readiness and leader-election posture |
-| `pod-autoscaling` | HPA-driven pod autoscaling (collector script section; the `pod-autoscaling` conformance check scales accelerator pods on a per-pod custom metric, see [CNCF conformance](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md)) |
+| `pod-autoscaling` | HPA-driven pod autoscaling (collector script section; the `pod-autoscaling` conformance check scales accelerator pods 1 to 2 on a per-pod custom metric and needs two allocatable accelerators at once, see [CNCF conformance](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md)) |
 | `cluster-autoscaling` | Karpenter (preferred) or EKS managed node-group autoscaling fallback |
 
 ### Evidence verdicts and exit status
