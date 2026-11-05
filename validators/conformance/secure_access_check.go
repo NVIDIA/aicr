@@ -76,8 +76,9 @@ const (
 	// resolveNVIDIARuntimeClass), since recipes rename it (nvidia-cdi,
 	// nvidia-container-runtime on AKS).
 	nvidiaRuntimeClassName = "nvidia"
-	// nvidiaRuntimeHandlerPrefix identifies the RuntimeClasses the GPU
-	// Operator's container toolkit serves, by handler or name.
+	// nvidiaRuntimeHandlerPrefix selects the nvidia-prefixed RuntimeClasses
+	// (handler or name) the extra lists as an observation when it cannot
+	// establish the class; the prefix is not evidence of what serves them.
 	nvidiaRuntimeHandlerPrefix = "nvidia"
 	// envNVIDIAVisibleDevices is the container-toolkit device-list envvar
 	// that, without the hardening, exposes every GPU on the node.
@@ -1273,7 +1274,8 @@ func evaluateRuntimeClassBypass(pod *corev1.Pod) runtimeClassBypassOutcome {
 }
 
 // recordRuntimeClassBypassExtra runs the AICR hardening extra after the CNCF
-// subtests: an UNPRIVILEGED pod on RuntimeClass nvidia that sets
+// subtests: an UNPRIVILEGED pod on the RuntimeClass the GPU Operator's
+// ClusterPolicy names that sets
 // NVIDIA_VISIBLE_DEVICES=all and requests no accelerator, pinned to the GPU
 // node the test pod ran on. With the toolkit hardening AICR ships
 // (ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED=false) it sees no
@@ -1359,7 +1361,7 @@ func recordRuntimeClassBypassExtra(vctx *validators.Context, run *gpuTestRun, gp
 // let a same-named class with another handler record HARDENED, so without a
 // ready, readable ClusterPolicy (or when the named class is absent) name is
 // "" and the extra is not probed; how then says why, listing the
-// nvidia-handled classes seen as an observation. A RuntimeClass list error is
+// nvidia-prefixed classes seen as an observation. A RuntimeClass list error is
 // returned.
 func resolveNVIDIARuntimeClass(vctx *validators.Context) (name, how string, err error) {
 	classes, listErr := vctx.Clientset.NodeV1().RuntimeClasses().List(vctx.Ctx, metav1.ListOptions{})
@@ -1383,15 +1385,15 @@ func resolveNVIDIARuntimeClass(vctx *validators.Context) (name, how string, err 
 
 	dynClient, dynErr := getDynamicClient(vctx)
 	if dynErr != nil {
-		return "", fmt.Sprintf("not established from ClusterPolicy: no dynamic client (%v); nvidia-handled RuntimeClasses present: %s", dynErr, seen), nil
+		return "", fmt.Sprintf("not established from ClusterPolicy: no dynamic client (%v); nvidia-prefixed RuntimeClasses present (handler or name): %s", dynErr, seen), nil
 	}
 	cp, cpErr := dynClient.Resource(clusterPolicyGVR).Get(vctx.Ctx, clusterPolicyName, metav1.GetOptions{})
 	if cpErr != nil {
-		return "", fmt.Sprintf("not established from ClusterPolicy: %s could not be read (%v); nvidia-handled RuntimeClasses present: %s", clusterPolicyName, cpErr, seen), nil
+		return "", fmt.Sprintf("not established from ClusterPolicy: %s could not be read (%v); nvidia-prefixed RuntimeClasses present (handler or name): %s", clusterPolicyName, cpErr, seen), nil
 	}
 	state, _, _ := unstructured.NestedString(cp.Object, "status", "state")
 	if state != clusterPolicyStateReady {
-		return "", fmt.Sprintf("not established from ClusterPolicy: %s status.state=%q, not %s, so the toolkit RuntimeClass may not be in service; nvidia-handled RuntimeClasses present: %s",
+		return "", fmt.Sprintf("not established from ClusterPolicy: %s status.state=%q, not %s, so the toolkit RuntimeClass may not be in service; nvidia-prefixed RuntimeClasses present (handler or name): %s",
 			clusterPolicyName, valueOrUnknown(state), clusterPolicyStateReady, seen), nil
 	}
 	named, _, _ := unstructured.NestedString(cp.Object, keySpec, "operator", "runtimeClass")
@@ -1401,7 +1403,7 @@ func resolveNVIDIARuntimeClass(vctx *validators.Context) (name, how string, err 
 		source = "the GPU Operator default, ClusterPolicy spec.operator.runtimeClass unset"
 	}
 	if !present[named] {
-		return "", fmt.Sprintf("not established from ClusterPolicy: it names RuntimeClass %s (%s) but no such RuntimeClass exists; nvidia-handled RuntimeClasses present: %s", named, source, seen), nil
+		return "", fmt.Sprintf("not established from ClusterPolicy: it names RuntimeClass %s (%s) but no such RuntimeClass exists; nvidia-prefixed RuntimeClasses present (handler or name): %s", named, source, seen), nil
 	}
 	return named, source, nil
 }

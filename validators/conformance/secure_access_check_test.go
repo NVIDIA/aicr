@@ -128,7 +128,7 @@ func TestResolveNVIDIARuntimeClass(t *testing.T) {
 			return cp
 		}(), "", `status.state="unknown"`},
 		{"no ClusterPolicy, classes present by name only: not established", aks, nil, "", "could not be read"},
-		{"no ClusterPolicy, no NVIDIA class", []runtime.Object{runtimeClass("runc", "runc")}, nil, "", "present: none"},
+		{"no ClusterPolicy, no NVIDIA class", []runtime.Object{runtimeClass("runc", "runc")}, nil, "", "(handler or name): none"},
 		{"no dynamic client: not established", nil, nil, "", "no dynamic client"},
 	}
 	for _, tt := range tests {
@@ -185,7 +185,7 @@ func TestEvaluateRuntimeClassBypass(t *testing.T) {
 }
 
 // TestRecordRuntimeClassBypassExtra pins the AICR hardening extra: it runs
-// only when RuntimeClass nvidia exists, its pod is unprivileged, pinned to
+// only when the ClusterPolicy-named RuntimeClass exists, its pod is unprivileged, pinned to
 // the GPU node, sets NVIDIA_VISIBLE_DEVICES=all and requests nothing, every
 // artifact carries the not-a-CNCF-item label, and an EXPOSED outcome is
 // recorded without failing anything.
@@ -247,7 +247,7 @@ func TestRecordRuntimeClassBypassExtra(t *testing.T) {
 			}
 			if !tt.wantPod {
 				if len(pods.Items) != 0 {
-					t.Fatalf("no probe pod may be created without RuntimeClass %s, got %d", nvidiaRuntimeClassName, len(pods.Items))
+					t.Fatalf("no probe pod may be created when the ClusterPolicy-named RuntimeClass nvidia-container-runtime is absent, got %d", len(pods.Items))
 				}
 				return
 			}

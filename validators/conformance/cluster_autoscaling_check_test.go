@@ -995,14 +995,15 @@ func TestPlatformSummariesDoNotTurnUnreadIntoAbsence(t *testing.T) {
 	}
 }
 
-// TestCheckEKSAutoscaling_NoAutoscalerIsAnObservation pins that an EKS
-// cluster with self-managed node groups (no eks.amazonaws.com/nodegroup
-// label) and no in-cluster Cluster Autoscaler records "no autoscaler
-// observed" as an observation rather than failing — but only when every
-// observation was a definitive absence: a present status ConfigMap is an
-// autoscaler observation, and a failed ConfigMap read is unread, not absent.
-func TestCheckEKSAutoscaling_NoAutoscalerIsAnObservation(t *testing.T) {
-	const noAutoscaler = "no autoscaler observed: no managed node group label, no in-cluster Cluster Autoscaler, no Karpenter"
+// TestCheckEKSAutoscaling_NoAutoscalerObserved pins the EKS path when GPU
+// nodes carry no managed node group label: definitive absence of every
+// autoscaler signal (no label, no Cluster Autoscaler, no status ConfigMap,
+// no failed read) fails with NotFound naming what was looked for, because a
+// passed result would render cluster_autoscaling PASSED on observation
+// alone; a present status ConfigMap is an observation that passes, and a
+// failed ConfigMap read is unread, never claimed absent, and passes as an
+// observation too.
+func TestCheckEKSAutoscaling_NoAutoscalerObserved(t *testing.T) {
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "gpu-1", Labels: map[string]string{"nvidia.com/gpu.present": "true"}},
 		Spec:       corev1.NodeSpec{ProviderID: "aws://us-east-1a/i-1"},
@@ -1016,13 +1017,13 @@ func TestCheckEKSAutoscaling_NoAutoscalerIsAnObservation(t *testing.T) {
 		name           string
 		objects        []runtime.Object
 		statusReadErr  error
-		wantNoAuto     bool
+		wantErr        bool
 		wantInSummary  string
 		wantNotSummary string
 	}{
-		{"nothing observed at all", []runtime.Object{node}, nil, true, "", ""},
-		{"status ConfigMap present, no Deployment", []runtime.Object{node, statusCM}, nil, false, "cluster-autoscaler-status ConfigMap present", ""},
-		{"status ConfigMap unread", []runtime.Object{node}, k8serrors.NewForbidden(schema.GroupResource{Resource: "configmaps"}, "", fmt.Errorf("rbac denied")), false, "cluster-autoscaler-status ConfigMap could not be read", "no cluster-autoscaler-status ConfigMap"},
+		{"definitive absence fails NotFound", []runtime.Object{node}, nil, true, "no cluster-autoscaler-status ConfigMap", ""},
+		{"status ConfigMap present, no Deployment: observation", []runtime.Object{node, statusCM}, nil, false, "cluster-autoscaler-status ConfigMap present", ""},
+		{"status ConfigMap unread: observation, no absence claimed", []runtime.Object{node}, k8serrors.NewForbidden(schema.GroupResource{Resource: "configmaps"}, "", fmt.Errorf("rbac denied")), false, "cluster-autoscaler-status ConfigMap could not be read", "no cluster-autoscaler-status ConfigMap"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1035,13 +1036,20 @@ func TestCheckEKSAutoscaling_NoAutoscalerIsAnObservation(t *testing.T) {
 			vctx := &validators.Context{Ctx: context.Background(), Clientset: client}
 			var err error
 			out := captureStdout(t, func() { err = checkEKSAutoscaling(vctx) })
-			if err != nil {
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("checkEKSAutoscaling() = nil, want NotFound for definitive absence")
+				}
+				errorstest.WantReportedCode(t, err, errors.ErrCodeNotFound)
+				for _, want := range []string{"eks.amazonaws.com/nodegroup", "Cluster Autoscaler Deployment", "cluster-autoscaler-status", "Karpenter", "notApplicable"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q should name %q", err.Error(), want)
+					}
+				}
+			} else if err != nil {
 				t.Fatalf("checkEKSAutoscaling() = %v, want an observation (nil)", err)
 			}
 			summary := out[strings.LastIndex(out, "OBSERVED"):]
-			if strings.Contains(summary, noAutoscaler) != tt.wantNoAuto {
-				t.Errorf("no-autoscaler observation present=%v, want %v:\n%s", !tt.wantNoAuto, tt.wantNoAuto, summary)
-			}
 			if tt.wantInSummary != "" && !strings.Contains(summary, tt.wantInSummary) {
 				t.Errorf("summary missing %q:\n%s", tt.wantInSummary, summary)
 			}

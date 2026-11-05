@@ -879,25 +879,30 @@ func checkEKSAutoscaling(ctx *validators.Context) error {
 	recordAutoscalerEvents(ctx)
 
 	pool := fmt.Sprintf("GPU nodes belong to managed node group %q (ASG-backed)", nodeGroupName)
+	// Definitive absence of every autoscaler signal — no managed node group
+	// label, no in-cluster Cluster Autoscaler, no status ConfigMap, and none
+	// of those reads failed — is a failure, not an observation: a passed
+	// CTRF result renders cluster_autoscaling PASSED, and nothing in the
+	// aggregation marks a result observation-only yet, so a self-managed EKS
+	// cluster with no autoscaler at all must not pass on observation alone.
+	// A failed read of the Deployment or the ConfigMap is unread, not absent,
+	// and stays an observation that claims no absence.
+	definitiveAbsence := nodeGroupName == "" && !caFound && caUnread == "" && !caStatusFound && statusUnread == ""
 	if nodeGroupName == "" {
-		// Self-managed node groups carry no eks.amazonaws.com/nodegroup label.
-		// With no in-cluster autoscaler either, this path has observed no
-		// autoscaler at all; that is an observation like the other platforms'
-		// absences, not a failure — the platform paths decide nothing (the
-		// requirement-level reading is the aggregation's, #3612).
 		pool = "GPU nodes carry no managed node group label (eks.amazonaws.com/nodegroup)"
-		// "No autoscaler observed" only when every observation came back as a
-		// definitive absence: a present status ConfigMap is an autoscaler
-		// observation, and a failed read of either is unread, not absent.
-		if !caFound && caUnread == "" && !caStatusFound && statusUnread == "" {
-			pool = "no autoscaler observed: no managed node group label, no in-cluster Cluster Autoscaler, no Karpenter"
-		}
 	}
 	autoscaler := deploymentObservation(caFound, caUnread, "no in-cluster Cluster Autoscaler Deployment")
 	autoscaler += "; " + statusObservation(caStatusFound, statusUnread,
 		"cluster-autoscaler-status ConfigMap present", "no cluster-autoscaler-status ConfigMap")
 	recordRawTextArtifact(ctx, "EKS Cluster Autoscaling Observation", "",
 		platformObservationText("EKS", len(gpuNodes.Items), pool, autoscaler))
+	if definitiveAbsence {
+		return errors.New(errors.ErrCodeNotFound,
+			"no autoscaler found on this EKS cluster: GPU nodes carry no eks.amazonaws.com/nodegroup label (no managed node group), "+
+				"no in-cluster Cluster Autoscaler Deployment exists in kube-system, cluster-autoscaler or system, "+
+				"no cluster-autoscaler-status ConfigMap exists, and Karpenter is not installed; "+
+				"declare cluster_autoscaling not applicable in spec.validate.evidence.cncf.notApplicable if the platform has no workload-driven autoscaler")
+	}
 	return nil
 }
 

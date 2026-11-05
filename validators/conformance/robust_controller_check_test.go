@@ -497,8 +497,9 @@ func TestWaitForTrainJobReconciled_Bound(t *testing.T) {
 	}
 }
 
-// TestWaitForTrainJobReconciled_ParentCanceled pins that an external abort
-// reports Timeout, not a reconciliation failure.
+// TestWaitForTrainJobReconciled_ParentCanceled pins that an operator abort
+// reports Canceled (never a retryable Timeout, never a reconciliation
+// failure) and still names the conditions observed.
 func TestWaitForTrainJobReconciled_ParentCanceled(t *testing.T) {
 	dyn := newTrainerDynamicFake()
 	if _, err := dyn.Resource(trainJobGVR).Namespace("ns").Create(context.Background(),
@@ -511,7 +512,10 @@ func TestWaitForTrainJobReconciled_ParentCanceled(t *testing.T) {
 	if err == nil {
 		t.Fatal("waitForTrainJobReconciled() = nil, want cancellation error")
 	}
-	errorstest.WantReportedCode(t, err, errors.ErrCodeTimeout)
+	errorstest.WantReportedCode(t, err, errors.ErrCodeCanceled)
+	if !strings.Contains(err.Error(), "conditions observed:") {
+		t.Errorf("error %q should name the observed conditions", err.Error())
+	}
 }
 
 // TestReconcileKubeflowTrainJob drives the reconciliation case end to end

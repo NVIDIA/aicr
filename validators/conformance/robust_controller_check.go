@@ -393,8 +393,15 @@ func classifyTrainJobCreateError(createErr error, namespace string) error {
 		return errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("valid %s was rejected by admission or validation", what), createErr)
 	}
-	return classifyK8sReadError(createErr,
-		fmt.Sprintf("create of the valid %s did not complete (ambiguous: the object may have been persisted; the per-run namespace cleanup removes it)", what))
+	// Keep the classifier's code (Timeout, Unavailable, Internal) but build
+	// the message directly: the classifier prefixes its subject with "failed
+	// to read", which does not describe a create.
+	code := errors.ErrCodeInternal
+	if se, ok := stderrors.AsType[*errors.StructuredError](classifyK8sReadError(createErr, what)); ok {
+		code = se.Code
+	}
+	return errors.Wrap(code,
+		fmt.Sprintf("create of the valid %s did not complete (ambiguous: the object may have been persisted; the per-run namespace cleanup removes it)", what), createErr)
 }
 
 // summary renders the reconciliation observation for the evidence page.
@@ -529,8 +536,10 @@ func waitForTrainJobReconciled(ctx context.Context, dynClient dynamic.Interface,
 		return report, nil
 	}
 	if ctx.Err() != nil {
-		return report, errors.Wrap(errors.ErrCodeTimeout,
-			fmt.Sprintf("waiting for TrainJob %s/%s canceled", namespace, name), ctx.Err())
+		// WrapCtxErr maps an operator abort (Ctrl-C, SIGTERM) to Canceled and
+		// an expired work budget to Timeout.
+		return report, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, fmt.Sprintf(
+			"waiting for TrainJob %s/%s stopped; conditions observed: %s", namespace, name, report.conditionsLine()))
 	}
 	if waitCtx.Err() != nil {
 		return report, errors.Wrap(errors.ErrCodeTimeout, fmt.Sprintf(
