@@ -1,0 +1,38 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Turns on lifecycle-manager's MaintenanceRequest controller, so an external
+# system or an operator can put a node into maintenance by creating a
+# MaintenanceRequest: NVSentinel cordons and drains the node through its
+# normal pipeline, and deleting the request uncordons it. See
+# docs/user/component-catalog.md#maintenance-requests.
+#
+# It sets only the controller toggle. lifecycle-manager itself is turned on by
+# nvsentinel-node-validation, its sole owner, and the cordon and drain come
+# from a quarantine or remediation step; the chart's fault-quarantine rule
+# sets already match the events a request publishes.
+# CheckNVSentinelMaintenanceRequestCoherent holds the rules.
+
+kind: RecipeMixin
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: nvsentinel-maintenance-request
+spec:
+  componentRefs:
+    - name: nvsentinel
+      overrides:
+        lifecycle-manager:
+          controllers:
+            maintenanceRequest:
+              enabled: true

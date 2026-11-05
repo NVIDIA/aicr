@@ -489,6 +489,12 @@ nvsentinel-external-remediation-e2e: ## Live Kind test: nvsentinel-external-reme
 	echo "Running nvsentinel-external-remediation mixin e2e test..."; \
 	tests/e2e/nvsentinel-external-remediation/run.sh
 
+.PHONY: nvsentinel-maintenance-request-e2e
+nvsentinel-maintenance-request-e2e: ## Live Kind test: a MaintenanceRequest cordons and drains its node, and deleting it uncordons the node (#3092)
+	@set -e; \
+	echo "Running nvsentinel-maintenance-request mixin e2e test..."; \
+	tests/e2e/nvsentinel-maintenance-request/run.sh
+
 .PHONY: npd-nvsentinel-object-monitor-e2e
 npd-nvsentinel-object-monitor-e2e: ## Live Kind test: an NPD Node condition becomes an NVSentinel health event (#2614)
 	@set -e; \
