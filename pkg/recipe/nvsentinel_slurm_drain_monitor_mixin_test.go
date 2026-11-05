@@ -23,6 +23,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 const (
@@ -247,17 +249,10 @@ func TestSlurmDrainMonitorOptOutLeaf(t *testing.T) {
 		t.Fatalf("marshaling opt-out leaf: %v", err)
 	}
 
-	dir := t.TempDir()
-	if err = os.MkdirAll(filepath.Join(dir, "overlays"), 0o750); err != nil {
-		t.Fatalf("creating overlays dir: %v", err)
-	}
-	registry := "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"
-	if err = os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte(registry), 0o600); err != nil {
-		t.Fatalf("writing registry.yaml: %v", err)
-	}
-	if err = os.WriteFile(filepath.Join(dir, "overlays", leaf+".yaml"), optOut, 0o600); err != nil {
-		t.Fatalf("writing opt-out leaf: %v", err)
-	}
+	dir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":              []byte(providertest.EmptyRegistryYAML),
+		"overlays/" + leaf + ".yaml": optOut,
+	})
 	layered, err := NewLayeredDataProvider(NewEmbeddedDataProvider(GetEmbeddedFS(), "."), LayeredProviderConfig{ExternalDir: dir})
 	if err != nil {
 		t.Fatalf("NewLayeredDataProvider: %v", err)

@@ -50,6 +50,7 @@ import (
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/oci"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 const (
@@ -117,17 +118,17 @@ func TestOCIRecipeSourceAcceptance(t *testing.T) {
 
 	traversal := registry.addArtifact(t, "traversal",
 		buildOCIRecipeArchive(t, []ociArchiveEntry{
-			{name: "registry.yaml", body: []byte(acceptanceRegistryYAML)},
+			{name: "registry.yaml", body: []byte(providertest.EmptyRegistryYAML)},
 			{name: "../escape", body: []byte("escape")},
 		}, 0))
 	symlink := registry.addArtifact(t, "symlink",
 		buildOCIRecipeArchive(t, []ociArchiveEntry{
-			{name: "registry.yaml", body: []byte(acceptanceRegistryYAML)},
+			{name: "registry.yaml", body: []byte(providertest.EmptyRegistryYAML)},
 			{name: "link", typeflag: tar.TypeSymlink, linkname: "/tmp"},
 		}, 0))
 	expanded := registry.addArtifact(t, "expanded",
 		buildOCIRecipeArchive(t, []ociArchiveEntry{
-			{name: "registry.yaml", body: []byte(acceptanceRegistryYAML)},
+			{name: "registry.yaml", body: []byte(providertest.EmptyRegistryYAML)},
 		}, defaults.MaxOCIRecipeExtractedBytes+1))
 
 	registry.blockManifest(repository, "blocked")
@@ -421,11 +422,6 @@ func entryNames(entries []os.DirEntry) []string {
 	return names
 }
 
-const acceptanceRegistryYAML = `apiVersion: aicr.run/v1beta1
-kind: ComponentRegistry
-components: []
-`
-
 func packageAndPushAcceptanceRecipe(
 	t *testing.T,
 	registry *ociInMemoryRegistry,
@@ -433,10 +429,10 @@ func packageAndPushAcceptanceRecipe(
 ) *oci.PackageResult {
 
 	t.Helper()
-	source := t.TempDir()
-	writeAcceptanceFile(t, filepath.Join(source, "registry.yaml"), []byte(acceptanceRegistryYAML))
-	writeAcceptanceFile(t, filepath.Join(source, "components", "gpu-operator", "values.yaml"),
-		[]byte("acceptanceMarker: "+marker+"\n"))
+	source := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":                       []byte(providertest.EmptyRegistryYAML),
+		"components/gpu-operator/values.yaml": []byte("acceptanceMarker: " + marker + "\n"),
+	})
 	result, err := oci.Package(t.Context(), oci.PackageOptions{
 		SourceDir: source, OutputDir: t.TempDir(), Registry: registry.host,
 		Repository: repository, Tag: tag,
@@ -467,7 +463,7 @@ type ociArchiveEntry struct {
 func buildValidOCIRecipeArchive(t *testing.T, identity string) []byte {
 	t.Helper()
 	return buildOCIRecipeArchive(t, []ociArchiveEntry{
-		{name: "registry.yaml", body: []byte(acceptanceRegistryYAML)},
+		{name: "registry.yaml", body: []byte(providertest.EmptyRegistryYAML)},
 		{name: "identity", body: []byte(identity)},
 	}, 0)
 }
