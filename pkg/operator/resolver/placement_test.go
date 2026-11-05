@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/operator/plan"
+	"github.com/NVIDIA/aicr/pkg/operator/registry/registrytest"
 )
 
 // groupPaths is one placement group's paths in AICR v1.0.0's
@@ -78,7 +79,7 @@ func TestPlacementAtEveryAICRSchedulingPath(t *testing.T) {
 	}
 	in := buildInput(t)
 	in.Bundle = readBundle(t, filepath.Join("..", "aicrjob", "testdata", "v1.0.0", "bundle-h100-eks-ubuntu-training-kubeflow"))
-	built, err := Build(context.Background(), &fakeDelivery{archive: chartArchive(t, map[string]string{"c/Chart.yaml": "name: c"})}, in)
+	built, err := Build(context.Background(), &fakeDelivery{archive: registrytest.TarGz(t, map[string]string{"c/Chart.yaml": "name: c"})}, in)
 	if err != nil {
 		t.Fatalf("Build() = %v", err)
 	}

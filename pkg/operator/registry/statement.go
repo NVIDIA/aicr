@@ -15,11 +15,9 @@
 package registry
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strings"
 
 	"github.com/opencontainers/go-digest"
@@ -93,16 +91,9 @@ func (c *Client) SigstoreBundles(ctx context.Context, r Repository, subject stri
 	}
 	var out [][]byte
 	for _, ref := range referrers {
-		if ref.Size > maxManifestBytes {
-			return nil, invalid("referrer manifest %s is %d bytes", ref.Digest, ref.Size)
-		}
-		raw, ferr := content.FetchAll(ctx, repo, ref)
+		_, m, ferr := fetchManifest(ctx, repo, r, ref.Digest.String(), maxManifestBytes)
 		if ferr != nil {
-			return nil, classify(ferr, "fetch referrer manifest "+ref.Digest.String())
-		}
-		var m ocispec.Manifest
-		if err = json.Unmarshal(raw, &m); err != nil {
-			return nil, invalid("referrer %s of %s@%s is not an OCI manifest: %v", ref.Digest, r, subject, err)
+			return nil, ferr
 		}
 		if !strings.HasPrefix(m.ArtifactType, sigstoreBundlePrefix) {
 			continue
@@ -157,42 +148,13 @@ func (c *Client) PushStatement(ctx context.Context, r Repository, tag, artifactT
 	if err != nil {
 		return "", operrors.Wrap(operrors.ErrCodeInternal, "encode statement manifest", err)
 	}
-	manifestDesc := ocispec.Descriptor{MediaType: ocispec.MediaTypeImageManifest, Digest: digest.FromBytes(manifest), Size: int64(len(manifest))}
-	want := manifestDesc.Digest.String()
-
 	ctx, cancel := context.WithTimeout(ctx, defaults.RegistryTimeout)
 	defer cancel()
 	repo, err := c.repository(r)
 	if err != nil {
 		return "", err
 	}
-	switch existing, rerr := repo.Resolve(ctx, tag); {
-	case rerr == nil && existing.Digest.String() == want:
-		return want, nil
-	case rerr == nil:
-		return "", operrors.New(operrors.ErrCodeConflict, fmt.Sprintf("%s:%s already holds %s, not %s", r, tag, existing.Digest, want))
-	case operrors.CodeOf(classify(rerr, "")) != operrors.ErrCodeNotFound:
-		return "", classify(rerr, fmt.Sprintf("resolve %s:%s", r, tag))
-	}
-	for _, b := range []struct {
-		desc ocispec.Descriptor
-		data []byte
-	}{{ocispec.DescriptorEmptyJSON, ocispec.DescriptorEmptyJSON.Data}, {layer, statement}} {
-		exists, eerr := repo.Exists(ctx, b.desc)
-		if eerr != nil {
-			return "", classify(eerr, "check statement blob")
-		}
-		if exists {
-			continue
-		}
-		if perr := repo.Push(ctx, b.desc, bytes.NewReader(b.data)); perr != nil {
-			return "", classify(perr, "push statement blob to "+r.String())
-		}
-	}
-	if err = repo.PushReference(ctx, manifestDesc, bytes.NewReader(manifest), tag); err != nil {
-		return "", classify(err, fmt.Sprintf("push statement manifest %s:%s", r, tag))
-	}
-	return want, nil
+	return pushManifest(ctx, repo, r, tag, manifest, blob{ocispec.DescriptorEmptyJSON, ocispec.DescriptorEmptyJSON.Data}, blob{layer, statement})
 }
 
 // PullStatement reads the statement an artifact pushed by PushStatement
@@ -204,33 +166,19 @@ func (c *Client) PullStatement(ctx context.Context, r Repository, dgst string) (
 	if err != nil {
 		return nil, ocispec.Manifest{}, err
 	}
-	desc, rc, err := repo.FetchReference(ctx, dgst)
+	_, m, err := fetchManifest(ctx, repo, r, dgst, maxStatementBytes)
 	if err != nil {
-		return nil, ocispec.Manifest{}, classify(err, fmt.Sprintf("fetch %s@%s", r, dgst))
+		return nil, ocispec.Manifest{}, err
 	}
-	raw, err := io.ReadAll(io.LimitReader(rc, maxStatementBytes))
-	_ = rc.Close()
+	switch {
+	case len(m.Layers) != 1 || m.Layers[0].MediaType != StatementMediaType:
+		return nil, ocispec.Manifest{}, invalid("%s@%s is not a statement artifact", r, dgst)
+	case m.Layers[0].Size > maxStatementBytes:
+		return nil, ocispec.Manifest{}, invalid("statement of %s@%s is %d bytes", r, dgst, m.Layers[0].Size)
+	}
+	data, err := content.FetchAll(ctx, repo, m.Layers[0])
 	if err != nil {
-		return nil, ocispec.Manifest{}, classify(err, "read statement manifest")
-	}
-	if digest.FromBytes(raw) != desc.Digest {
-		return nil, ocispec.Manifest{}, operrors.New(operrors.ErrCodeConflict, fmt.Sprintf("%s@%s: manifest does not match its digest", r, dgst))
-	}
-	var m ocispec.Manifest
-	if err = json.Unmarshal(raw, &m); err != nil || len(m.Layers) != 1 || m.Layers[0].MediaType != StatementMediaType {
-		return nil, ocispec.Manifest{}, operrors.New(operrors.ErrCodeInvalidRequest, fmt.Sprintf("%s@%s is not a statement artifact", r, dgst))
-	}
-	lr, err := repo.Fetch(ctx, m.Layers[0])
-	if err != nil {
-		return nil, ocispec.Manifest{}, classify(err, "fetch statement")
-	}
-	defer func() { _ = lr.Close() }()
-	data, err := io.ReadAll(io.LimitReader(lr, maxStatementBytes))
-	if err != nil {
-		return nil, ocispec.Manifest{}, classify(err, "read statement")
-	}
-	if digest.FromBytes(data) != m.Layers[0].Digest {
-		return nil, ocispec.Manifest{}, operrors.New(operrors.ErrCodeConflict, fmt.Sprintf("%s@%s: statement does not match its digest", r, dgst))
+		return nil, ocispec.Manifest{}, classify(err, fmt.Sprintf("fetch statement of %s@%s", r, dgst))
 	}
 	return data, m, nil
 }
