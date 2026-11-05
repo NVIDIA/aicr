@@ -88,10 +88,15 @@ func DigestPinnedRecipe(t testing.TB, digest string) *recipe.RecipeResult {
 	return rr
 }
 
+// UnhashedRecordSHA256 is the VendorRecord SHA256 a RunVendorDigestCases
+// puller reports. It is not the SHA-256 of any archive.
+const UnhashedRecordSHA256 = "not-the-archive-sha256"
+
 // RunVendorDigestCases checks that generate vendors DigestedComponent when the
 // registry pins the digest of archive, and fails with ErrCodeConflict when it
 // pins another. generate bundles rr with chart vendoring on, using a puller
-// that returns archive.
+// that returns archive and a VendorRecord whose SHA256 is UnhashedRecordSHA256,
+// so the cases fail if the deployer checks the pin against the record.
 func RunVendorDigestCases(t *testing.T, archive []byte, generate func(t *testing.T, rr *recipe.RecipeResult) error) {
 	t.Helper()
 	sum := sha256.Sum256(archive)

@@ -37,7 +37,7 @@ func TestGenerate_VendorChartsVerifiesRegistryDigest(t *testing.T) {
 			Version:         "v0.0.0-test",
 			RepoURL:         "https://github.com/example/gitops.git",
 			VendorCharts:    true,
-			Puller:          localformattest.StubPuller{},
+			Puller:          localformattest.StubPuller{RecordSHA256: deployertest.UnhashedRecordSHA256},
 		}
 		_, err := g.Generate(context.Background(), t.TempDir())
 		return err

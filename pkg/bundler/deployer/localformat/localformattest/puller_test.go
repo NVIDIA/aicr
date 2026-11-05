@@ -24,16 +24,19 @@ import (
 
 func TestStubPuller(t *testing.T) {
 	tests := []struct {
-		name      string
-		component localformat.Component
-		wantChart string
+		name       string
+		puller     StubPuller
+		component  localformat.Component
+		wantChart  string
+		wantRecord string
 	}{
-		{"chart name set", localformat.Component{Name: "gpu-operator", ChartName: "gpu-operator-chart", Version: "1.0.0"}, "gpu-operator-chart"},
-		{"chart name falls back to component name", localformat.Component{Name: "gpu-operator", Version: "1.0.0"}, "gpu-operator"},
+		{"chart name set", StubPuller{}, localformat.Component{Name: "gpu-operator", ChartName: "gpu-operator-chart", Version: "1.0.0"}, "gpu-operator-chart", ""},
+		{"chart name falls back to component name", StubPuller{}, localformat.Component{Name: "gpu-operator", Version: "1.0.0"}, "gpu-operator", ""},
+		{"record SHA256 set", StubPuller{RecordSHA256: "not-the-archive"}, localformat.Component{Name: "gpu-operator", Version: "1.0.0"}, "gpu-operator", "not-the-archive"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tgz, rec, tarball, err := StubPuller{}.Pull(t.Context(), tt.component)
+			tgz, rec, tarball, err := tt.puller.Pull(t.Context(), tt.component)
 			if err != nil {
 				t.Fatalf("Pull() error = %v", err)
 			}
@@ -41,8 +44,12 @@ func TestStubPuller(t *testing.T) {
 				t.Errorf("Pull() archive = %q, want StubArchive(c) = %q", tgz, StubArchive(tt.component))
 			}
 			sum := sha256.Sum256(tgz)
-			if rec.SHA256 != hex.EncodeToString(sum[:]) {
-				t.Errorf("record SHA256 = %q, want the archive's", rec.SHA256)
+			wantRecord := tt.wantRecord
+			if wantRecord == "" {
+				wantRecord = hex.EncodeToString(sum[:])
+			}
+			if rec.SHA256 != wantRecord {
+				t.Errorf("record SHA256 = %q, want %q", rec.SHA256, wantRecord)
 			}
 			wantTarball := tt.wantChart + "-" + tt.component.Version + ".tgz"
 			if rec.Chart != tt.wantChart || tarball != wantTarball || rec.TarballName != wantTarball {

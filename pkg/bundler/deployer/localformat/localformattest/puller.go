@@ -26,7 +26,12 @@ import (
 
 // StubPuller is a localformat.ChartPuller that returns StubArchive(c) for every
 // pull without fetching anything.
-type StubPuller struct{}
+type StubPuller struct {
+	// RecordSHA256, if set, is the VendorRecord's SHA256 in place of the
+	// archive's, so a digest test fails when the caller trusts the record
+	// over the pulled bytes.
+	RecordSHA256 string
+}
 
 var _ localformat.ChartPuller = StubPuller{}
 
@@ -35,8 +40,9 @@ func StubArchive(c localformat.Component) []byte {
 	return []byte("fake-tgz-" + chartName(c) + "-" + c.Version)
 }
 
-// Pull returns StubArchive(c) and a VendorRecord carrying its SHA-256.
-func (StubPuller) Pull(_ context.Context, c localformat.Component) ([]byte, localformat.VendorRecord, string, error) {
+// Pull returns StubArchive(c) and a VendorRecord carrying its SHA-256, or
+// p.RecordSHA256 when set.
+func (p StubPuller) Pull(_ context.Context, c localformat.Component) ([]byte, localformat.VendorRecord, string, error) {
 	tgz := StubArchive(c)
 	sum := sha256.Sum256(tgz)
 	tarball := chartName(c) + "-" + c.Version + ".tgz"
@@ -45,7 +51,7 @@ func (StubPuller) Pull(_ context.Context, c localformat.Component) ([]byte, loca
 		Chart:         chartName(c),
 		Version:       c.Version,
 		Repository:    c.Repository,
-		SHA256:        hex.EncodeToString(sum[:]),
+		SHA256:        cmp.Or(p.RecordSHA256, hex.EncodeToString(sum[:])),
 		TarballName:   tarball,
 		PullerVersion: "stub v0.0.0",
 	}, tarball, nil

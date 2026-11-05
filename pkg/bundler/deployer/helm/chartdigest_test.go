@@ -36,7 +36,7 @@ func TestGenerate_VendorChartsVerifiesRegistryDigest(t *testing.T) {
 			ComponentValues: map[string]map[string]any{deployertest.DigestedComponent: {}},
 			Version:         "v0.0.0-test",
 			VendorCharts:    true,
-			Puller:          localformattest.StubPuller{},
+			Puller:          localformattest.StubPuller{RecordSHA256: deployertest.UnhashedRecordSHA256},
 		}
 		_, err := g.Generate(context.Background(), t.TempDir())
 		return err
