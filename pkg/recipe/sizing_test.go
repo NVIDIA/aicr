@@ -188,8 +188,12 @@ func TestSizingResourceTierFor(t *testing.T) {
 
 func TestLoadComponentSizing(t *testing.T) {
 	dp := providertest.NewMap(map[string][]byte{"components/x/sizing.yaml": []byte(validSizing)})
-	if _, err := LoadComponentSizing(context.Background(), dp, "x", "components/x/sizing.yaml"); err != nil {
+	s, err := LoadComponentSizing(context.Background(), dp, "x", "components/x/sizing.yaml")
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.Resources[0].Path != "operator.resources" {
+		t.Fatalf("unexpected document: %+v", s)
 	}
 	if _, err := LoadComponentSizing(context.Background(), dp, "x", "components/x/missing.yaml"); err == nil {
 		t.Fatal("expected an error for a missing file")
