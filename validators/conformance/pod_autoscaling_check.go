@@ -372,10 +372,11 @@ func newHPAScenario(ctx *validators.Context, dynClient dynamic.Interface, metric
 // tears the namespace down. The return is NAMED so a terminally failed
 // cleanup fails an otherwise-passing check: a PASS that leaks two allocated
 // accelerators is not a pass. A primary test error always wins.
+//
+// The teardown is deferred BEFORE the namespace create: a Create that
+// returns an error may still have persisted the namespace, and only a
+// cleanup registered first can reconcile it (see cleanupGPUTestNamespace).
 func (s *hpaScenario) runWithCleanup(ctx *validators.Context) (err error) {
-	if err = createGPUTestNamespace(ctx.Ctx, s.clientset, s.testRun); err != nil {
-		return err
-	}
 	defer func() {
 		status, cleanupErr := cleanupHPAWorkload(s.clientset, s.dynClient, s.testRun)
 		recordRawTextArtifact(ctx, "Delete test namespace", cleanupInspectEquivalent(s.testRun.namespace), status)
@@ -383,6 +384,9 @@ func (s *hpaScenario) runWithCleanup(ctx *validators.Context) (err error) {
 			err = cleanupErr
 		}
 	}()
+	if err = createGPUTestNamespace(ctx.Ctx, s.clientset, s.testRun); err != nil {
+		return err
+	}
 
 	err = s.run(ctx)
 	recordRawTextArtifact(ctx, "HPA behavioral test verdict", "", s.verdictSummary(err))

@@ -530,3 +530,35 @@ func TestBuildAIMetricsWorkloadTolerations(t *testing.T) {
 		})
 	}
 }
+
+// TestAIMetricsScenarioRunWithCleanup_NamespaceCreateFailure pins that the AI
+// service metrics check's teardown runs even when createGPUTestNamespace
+// fails (#3648), and never starts the cycle on that path. The cases and the
+// assertions are shared with the HPA check (namespaceCreateFailureCases).
+// Sequential: captureStdout swaps os.Stdout.
+func TestAIMetricsScenarioRunWithCleanup_NamespaceCreateFailure(t *testing.T) {
+	shortenCleanupTimeout(t)
+	for _, tt := range namespaceCreateFailureCases {
+		t.Run(tt.name, func(t *testing.T) {
+			c := k8sfake.NewClientset()
+			failNamespaceCreate(c, tt.persists, tt.surfacesLate, tt.createErr)
+			if tt.deleteErr != nil {
+				failNamespaceDelete(c, tt.deleteErr)
+			}
+			dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+				map[schema.GroupVersionResource]string{serviceMonitorGVR: "ServiceMonitorList"})
+			s, err := newAIMetricsScenario(c, dyn, "http://prometheus.invalid", nil)
+			if err != nil {
+				t.Fatalf("newAIMetricsScenario: %v", err)
+			}
+
+			out := captureStdout(t, func() {
+				err = s.runWithCleanup(&validators.Context{Ctx: context.Background(), Clientset: c})
+			})
+			assertNamespaceCreateFailureCleanup(t, c, s.testRun.namespace, out, err, tt.persists || tt.surfacesLate, tt.deleteErr, tt.wantDeleted, tt.wantStatus)
+			if s.phase != "" {
+				t.Errorf("phase = %q, want none — the cycle must not start without a namespace", s.phase)
+			}
+		})
+	}
+}

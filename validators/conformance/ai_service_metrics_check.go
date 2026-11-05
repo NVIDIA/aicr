@@ -346,10 +346,11 @@ func (s *aiMetricsScenario) preflight(ctx context.Context) error {
 // tears down the ServiceMonitor and the namespace. The return is NAMED so a
 // terminally failed cleanup fails an otherwise-passing check; a primary error
 // always wins.
+//
+// The teardown is deferred BEFORE the namespace create: a Create that
+// returns an error may still have persisted the namespace, and only a
+// cleanup registered first can reconcile it (see cleanupGPUTestNamespace).
 func (s *aiMetricsScenario) runWithCleanup(ctx *validators.Context) (err error) {
-	if err = createGPUTestNamespace(ctx.Ctx, s.clientset, s.testRun); err != nil {
-		return err
-	}
 	defer func() {
 		status, cleanupErr := cleanupAIMetricsWorkload(s.clientset, s.dynClient, s.testRun)
 		recordRawTextArtifact(ctx, "Delete test namespace", cleanupInspectEquivalent(s.testRun.namespace), status)
@@ -357,6 +358,9 @@ func (s *aiMetricsScenario) runWithCleanup(ctx *validators.Context) (err error) 
 			err = cleanupErr
 		}
 	}()
+	if err = createGPUTestNamespace(ctx.Ctx, s.clientset, s.testRun); err != nil {
+		return err
+	}
 
 	err = s.run(ctx)
 	recordRawTextArtifact(ctx, "AI service metrics verdict", "", s.verdictSummary(err))
