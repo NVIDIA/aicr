@@ -480,7 +480,10 @@ component's values. That includes bundle-rendered manifests such as the
 NIC daemon's NicClusterPolicy.
 
 The bundle records the count and the tier applied to each component in
-`bundle-info.yaml`, so evidence for a bundle names its sizing.
+`bundle-info.yaml`, so evidence for a bundle names its sizing. For
+components sized at deploy time on `argocd-helm` (next section), it records
+the default `sizing.nodeCount` and the table instead, because the tier is
+chosen later.
 
 ### Deploy time (`argocd-helm`)
 
@@ -499,6 +502,11 @@ row at render time:
 - The child Application template merges `$static`, then the selected row,
   then the root chart's values for the component, so user values still win.
   A count of 0 selects nothing.
+- The template stamps the count and the selected tier on each sized child
+  Application as annotations (`aicr.nvidia.com/sizing-node-count`,
+  `aicr.nvidia.com/sizing-tier`). That is the render-time record of what an
+  installation applied, readable from the cluster;
+  `bundle-info.yaml` holds only the generation-time default and the table.
 
 One code path decides each component's sizing. A generation-time `--nodes`
 on an `argocd-helm` bundle only sets the default `sizing.nodeCount`.
