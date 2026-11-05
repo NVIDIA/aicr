@@ -196,8 +196,11 @@ exec python3 -c "$HPA_METRIC_SERVER"`
 //     allocation mode as secure-accelerator-access does) and serves the gauge
 //     from a mounted ConfigMap, plus the PodMonitor that makes the recipe's
 //     Prometheus scrape it;
-//  2. baseline: the pod is Running and Ready and the custom metrics API
-//     reports 1 for it; only then is the HPA created, and it must reconcile at
+//  2. baseline: the pod is Running and Ready, the recipe's Prometheus has
+//     loaded the PodMonitor into its scrape pools (so the metric wait that
+//     follows measures the pipeline, not prometheus-operator's reconcile
+//     schedule), and the custom metrics API reports 1 for the pod; only then
+//     is the HPA created, and it must reconcile at
 //     one replica; a one-minute negative control requires it to keep deciding
 //     on one replica while the metric is below target;
 //  3. scale-up: the metric is raised to 100; the HPA must scale to two
@@ -270,6 +273,9 @@ func CheckPodAutoscaling(ctx *validators.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := scenario.attachPrometheus(ctx); err != nil {
+		return err
+	}
 	return scenario.runWithCleanup(ctx)
 }
 
@@ -291,8 +297,16 @@ type hpaScenario struct {
 	metricsVersion string
 	readMetrics    func(ctx context.Context) ([]byte, error)
 
+	// promURL and listScrapePools observe the recipe's Prometheus so the
+	// baseline waits for the PodMonitor to be loaded before judging the
+	// metric pipeline. A nil listScrapePools skips that wait: the recipe
+	// declares no kube-prometheus-stack (attachPrometheus).
+	promURL         string
+	listScrapePools func(ctx context.Context) ([]byte, error)
+
 	pollInterval          time.Duration
 	workloadReadyTimeout  time.Duration
+	monitorLoadTimeout    time.Duration
 	metricTimeout         time.Duration
 	scaleTimeout          time.Duration
 	scaleDownTimeout      time.Duration
@@ -333,6 +347,7 @@ func newHPAScenario(ctx *validators.Context, dynClient dynamic.Interface, metric
 		metricsVersion:        metricsVersion,
 		pollInterval:          defaults.HPAPollInterval,
 		workloadReadyTimeout:  defaults.HPAWorkloadReadyTimeout,
+		monitorLoadTimeout:    defaults.PrometheusMonitorLoadTimeout,
 		metricTimeout:         defaults.HPAMetricTimeout,
 		scaleTimeout:          defaults.HPAScaleTimeout,
 		scaleDownTimeout:      defaults.HPAScaleDownTimeout,
@@ -366,6 +381,53 @@ func newHPAScenario(ctx *validators.Context, dynClient dynamic.Interface, metric
 			mode.DRADetail, mode.DevicePluginDetail))
 	}
 	return s, nil
+}
+
+// attachPrometheus points the scenario at the recipe's Prometheus so the
+// baseline can wait for the PodMonitor to be loaded before judging the metric
+// pipeline (#3671), and preflights its scrape pool API before any resource is
+// created. The custom metrics API cannot show whether a monitor is loaded, so
+// Prometheus itself is asked. A recipe without kube-prometheus-stack
+// (OpenShift serves the adapter from the platform monitoring stack) has no
+// Prometheus to ask; the wait is skipped and the metric timeout alone bounds
+// the baseline, as before.
+func (s *hpaScenario) attachPrometheus(ctx *validators.Context) error {
+	if !validators.RecipeDeclares(ctx, prometheusComponentName) {
+		recordRawTextArtifact(ctx, "PodMonitor load wait", "",
+			"skipped: "+prometheusComponentName+" is not declared in the recipe, so there is no scrape pool API to observe; the metric timeout alone bounds the baseline")
+		return nil
+	}
+	promURL, err := discoverPrometheusURL(ctx)
+	if err != nil {
+		return err
+	}
+	listPools := promScrapePoolLister(promURL)
+	if err := preflightScrapePools(ctx.Ctx, promURL, listPools); err != nil {
+		return err
+	}
+	recordRawTextArtifact(ctx, "Prometheus scrape pool API preflight",
+		fmt.Sprintf("curl -sf '%s/api/v1/scrape_pools'", promURL),
+		fmt.Sprintf("Endpoint: %s\nResult:   scrape pools listed", promURL))
+	s.promURL, s.listScrapePools = promURL, listPools
+	return nil
+}
+
+// waitForMonitorLoaded holds the baseline until Prometheus has loaded the
+// PodMonitor, so the metric timeout that follows measures the scrape and the
+// adapter's query rather than prometheus-operator's reconcile schedule.
+func (s *hpaScenario) waitForMonitorLoaded(ctx *validators.Context) error {
+	start := time.Now()
+	ns := s.testRun.namespace
+	prefix := scrapePoolPrefix(monitorKindPod, ns, hpaWorkloadName)
+	slog.Info("waiting for Prometheus to load the PodMonitor", "scrapePool", prefix, "timeout", s.monitorLoadTimeout)
+	if err := waitForMonitorLoaded(ctx.Ctx, s.listScrapePools, monitorKindPod, ns, hpaWorkloadName,
+		s.monitorLoadTimeout, s.pollInterval); err != nil {
+		return err
+	}
+	recordRawTextArtifact(ctx, "HPA phase: PodMonitor loaded",
+		fmt.Sprintf("curl -sf '%s/api/v1/scrape_pools' | grep '%s'", s.promURL, prefix),
+		fmt.Sprintf("Scrape pool:   %s*\nLoaded after:  %s", prefix, time.Since(start).Round(time.Second)))
+	return nil
 }
 
 // runWithCleanup creates the per-run namespace, runs the cycle, and always
@@ -491,10 +553,19 @@ func (s *hpaScenario) establishBaseline(ctx *validators.Context) (hpaState, erro
 		return hpaState{}, wrapWithCode(err, errors.ErrCodeTimeout, "baseline accelerator pod did not become Ready")
 	}
 
+	// The monitor-load wait comes after the pod is Ready, not before: the
+	// two overlap in wall time, and a workload pod that never comes up is
+	// reported as such rather than as a monitor Prometheus did not load.
+	pipeline := "custom metrics pipeline does not serve the workload metric — check the PodMonitor scrape and the prometheus-adapter rule for " + hpaMetricSeries
+	if s.listScrapePools != nil {
+		if loadErr := s.waitForMonitorLoaded(ctx); loadErr != nil {
+			return hpaState{}, loadErr
+		}
+		pipeline = "Prometheus loaded the PodMonitor, but the " + pipeline
+	}
 	slog.Info("waiting for the custom metrics API to report the baseline value", "value", hpaBaselineValue, "pods", state.podNames())
 	if metricErr := s.waitForMetric(ctx.Ctx, hpaBaselineValue, fixedPods(state.podNames())); metricErr != nil {
-		return hpaState{}, wrapWithCode(metricErr, errors.ErrCodeNotFound,
-			"custom metrics pipeline does not serve the workload metric — check the PodMonitor scrape and the prometheus-adapter rule for "+hpaMetricSeries)
+		return hpaState{}, wrapWithCode(metricErr, errors.ErrCodeNotFound, pipeline)
 	}
 
 	// Created only now, so any scaling from here on is the HPA's.

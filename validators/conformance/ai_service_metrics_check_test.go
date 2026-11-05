@@ -181,11 +181,20 @@ type fakeMonitoring struct {
 	// excess-traffic case cannot pass by chance on a mid-run scrape.
 	extraTraffic float64
 	extraLanded  bool
-	stop         chan struct{}
+	// poolNamespace is the run namespace the ServiceMonitor's scrape pool
+	// is reported in; poolLoadedAfter delays that pool's appearance from the
+	// fake's creation, standing in for prometheus-operator's reconcile gap,
+	// and poolNever withholds it. No sample is collected before the pool is
+	// loaded, as no scrape can happen before the configuration is.
+	poolNamespace   string
+	poolLoadedAfter time.Duration
+	poolNever       bool
+	start           time.Time
+	stop            chan struct{}
 }
 
 func newFakeMonitoring(scrapes bool) *fakeMonitoring {
-	f := &fakeMonitoring{scrapes: scrapes, stop: make(chan struct{})}
+	f := &fakeMonitoring{scrapes: scrapes, start: time.Now(), stop: make(chan struct{})}
 	go func() {
 		for {
 			select {
@@ -201,13 +210,32 @@ func newFakeMonitoring(scrapes bool) *fakeMonitoring {
 	return f
 }
 
+// poolLoaded reports whether Prometheus has the ServiceMonitor's scrape pool.
+func (f *fakeMonitoring) poolLoaded() bool {
+	return !f.poolNever && time.Since(f.start) >= f.poolLoadedAfter
+}
+
+// scrapePools renders the scrape_pools response: an unrelated pool always,
+// the ServiceMonitor's once loaded.
+func (f *fakeMonitoring) scrapePools() []byte {
+	pools := []string{"serviceMonitor/monitoring/kube-prometheus-stack-kubelet/0"}
+	if f.poolLoaded() {
+		pools = append(pools, scrapePoolPrefix(monitorKindService, f.poolNamespace, aiMetricsWorkloadName)+"0")
+	}
+	return promScrapePools(pools...)
+}
+
 func (f *fakeMonitoring) handler(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/api/v1/scrape_pools" {
+		_, _ = w.Write(f.scrapePools())
+		return
+	}
 	q := r.URL.Query().Get("query")
 	if q == "vector(1)" {
 		_, _ = w.Write(promVector(1))
 		return
 	}
-	if !f.scrapes {
+	if !f.scrapes || !f.poolLoaded() {
 		_, _ = w.Write(promVector())
 		return
 	}
@@ -244,22 +272,31 @@ func readyOnCreate(c *k8sfake.Clientset) {
 }
 
 // TestAIMetricsScenarioPhases drives the cycle against the fake monitoring
-// and pins which phase produces each verdict: a selected ServiceMonitor with
-// exactly the sent traffic passes; a ServiceMonitor never selected fails at
-// baseline; foreign traffic above baseline plus N fails the increase phase.
+// and pins which phase produces each verdict: a loaded ServiceMonitor with
+// exactly the sent traffic passes, also when Prometheus loads it only after
+// the collection timeout would have expired (#3671); a ServiceMonitor never
+// loaded fails at baseline naming the load; one loaded but never scraped
+// fails at baseline naming the collection; foreign traffic above baseline
+// plus N fails the increase phase.
 func TestAIMetricsScenarioPhases(t *testing.T) {
 	t.Parallel()
+	const collectionTimeout = 200 * time.Millisecond
 	tests := []struct {
 		name      string
 		scrapes   bool
+		poolAfter time.Duration
+		poolNever bool
 		extra     float64
 		wantPhase aiMetricsPhase
 		wantCode  errors.ErrorCode
 		wantMsg   string
 	}{
 		{name: "exact count passes", scrapes: true, wantPhase: aiMetricsPhaseIncrease},
-		{name: "ServiceMonitor not selected fails at baseline", scrapes: false, wantPhase: aiMetricsPhaseBaseline,
-			wantCode: errors.ErrCodeNotFound, wantMsg: "workload metrics were not collected"},
+		{name: "ServiceMonitor loaded after the collection timeout passes", scrapes: true, poolAfter: 3 * collectionTimeout, wantPhase: aiMetricsPhaseIncrease},
+		{name: "ServiceMonitor never loaded fails at baseline", scrapes: true, poolNever: true, wantPhase: aiMetricsPhaseBaseline,
+			wantCode: errors.ErrCodeNotFound, wantMsg: "Prometheus did not load the ServiceMonitor"},
+		{name: "ServiceMonitor loaded but not scraped fails at baseline", scrapes: false, wantPhase: aiMetricsPhaseBaseline,
+			wantCode: errors.ErrCodeNotFound, wantMsg: "Prometheus loaded the ServiceMonitor but the workload metrics were not collected"},
 		{name: "traffic above baseline plus N fails the increase", scrapes: true, extra: float64(defaults.AIServiceMetricsRequestCount), wantPhase: aiMetricsPhaseIncrease,
 			wantCode: errors.ErrCodeInternal, wantMsg: "extra requests reached the workload"},
 	}
@@ -269,6 +306,7 @@ func TestAIMetricsScenarioPhases(t *testing.T) {
 			mon := newFakeMonitoring(tt.scrapes)
 			defer close(mon.stop)
 			mon.extraTraffic = tt.extra
+			mon.poolLoadedAfter, mon.poolNever = tt.poolAfter, tt.poolNever
 			srv := httptest.NewServer(http.HandlerFunc(mon.handler))
 			defer srv.Close()
 
@@ -280,10 +318,12 @@ func TestAIMetricsScenarioPhases(t *testing.T) {
 			if err != nil {
 				t.Fatalf("newAIMetricsScenario: %v", err)
 			}
+			mon.poolNamespace = s.testRun.namespace
 			s.sendRequest = mon.sendRequest
 			s.pollInterval = 2 * time.Millisecond
 			s.readyTimeout = time.Second
-			s.collectionTimeout = 200 * time.Millisecond
+			s.monitorLoadTimeout = 2 * time.Second
+			s.collectionTimeout = collectionTimeout
 
 			ctx := &validators.Context{Ctx: context.Background(), Clientset: c}
 			if preErr := s.preflight(ctx.Ctx); preErr != nil {
@@ -446,12 +486,31 @@ func TestCheckAIMetricsWorkloadIntact(t *testing.T) {
 	}
 }
 
-// TestAIMetricsScenarioPreflight pins that an unreachable or non-answering
-// query API is reported as the environment, before anything is created.
+// TestAIMetricsScenarioPreflight pins the preflight's verdicts: a query API
+// that does not evaluate vector(1), a scrape pool API that answers an error
+// (a Prometheus older than v2.42 has none), and an unreachable Prometheus
+// each fail before any resource is created, naming what was probed.
 func TestAIMetricsScenarioPreflight(t *testing.T) {
 	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write(promVector())
+	var (
+		mu         sync.Mutex
+		vectorOK   bool
+		poolsOK    bool
+		poolsReply = promScrapePools("kubelet/0")
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.URL.Path == "/api/v1/scrape_pools" && poolsOK:
+			_, _ = w.Write(poolsReply)
+		case r.URL.Path == "/api/v1/scrape_pools":
+			http.NotFound(w, r)
+		case vectorOK:
+			_, _ = w.Write(promVector(1))
+		default:
+			_, _ = w.Write(promVector())
+		}
 	}))
 	defer srv.Close()
 	s, err := newAIMetricsScenario(k8sfake.NewClientset(), nil, srv.URL, nil)
@@ -463,6 +522,23 @@ func TestAIMetricsScenarioPreflight(t *testing.T) {
 	if !strings.Contains(err.Error(), "vector(1)") {
 		t.Errorf("error %q does not describe the preflight", err.Error())
 	}
+
+	mu.Lock()
+	vectorOK = true
+	mu.Unlock()
+	err = s.preflight(context.Background())
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+	if err == nil || !strings.Contains(err.Error(), "scrape pools") || !strings.Contains(err.Error(), "HTTP 404") {
+		t.Errorf("error %v does not describe the scrape pool preflight", err)
+	}
+
+	mu.Lock()
+	poolsOK = true
+	mu.Unlock()
+	if err = s.preflight(context.Background()); err != nil {
+		t.Errorf("preflight with both APIs answering: %v", err)
+	}
+
 	srv.Close()
 	err = s.preflight(context.Background())
 	errorstest.WantReportedCode(t, err, errors.ErrCodeUnavailable)

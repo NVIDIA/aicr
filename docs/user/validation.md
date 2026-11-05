@@ -1514,6 +1514,59 @@ image cached there so image-locality keeps subsequent runs on the same node.
 This is unreliable and should not be used as the steady-state validation
 strategy.
 
+### `ai-service-metrics` or `pod-autoscaling` fails with "Prometheus did not load the ServiceMonitor/PodMonitor"
+
+Both checks create a monitor (a ServiceMonitor or a PodMonitor) and, before
+starting their collection budget, wait up to five minutes for the recipe's
+Prometheus to list it among its scrape pools (`GET /api/v1/scrape_pools`).
+That wait exists because prometheus-operator reconciles monitors on its own
+schedule: gaps of about three minutes between a monitor's creation and
+Prometheus loading it were observed on a healthy AKS cluster, longer than the
+collection budget itself. For `pod-autoscaling` the scrape-pool preflight and
+the wait happen only when the recipe declares `kube-prometheus-stack`; without
+it (the OpenShift overlay serves `prometheus-adapter-ocp` from the platform
+monitoring stack) there is no Prometheus to ask, the check records the wait as
+skipped, and its baseline is bounded by the metric timeout alone.
+
+The baseline then ends in one of three ways, each with its own message.
+
+A failure naming the load, such as:
+
+```text
+[NOT_FOUND] AI service metrics test failed in phase baseline: Prometheus did not load the ServiceMonitor ai-metrics-test-<id>/ai-metrics-stub within 5m0s: no scrape pool serviceMonitor/ai-metrics-test-<id>/ai-metrics-stub/* among the 12 configured ...
+```
+
+means Prometheus did not load the monitor within the wait. Two things have
+to happen for it to: prometheus-operator must write the monitor into the
+generated configuration, and Prometheus must reload that configuration. Check
+both. For the first, look at the operator's logs for the reconcile of that
+namespace, and confirm the Prometheus resource selects the monitor: the checks
+label it `release=kube-prometheus-stack`, and the recipe's Prometheus opens
+`serviceMonitorSelector`, `podMonitorSelector` and their namespace selectors.
+For the second, a rejected reload leaves Prometheus running on its previous
+configuration with the pool absent even though the operator did its part:
+check `prometheus_config_last_reload_successful` (0 after a failed reload),
+the `PrometheusBadConfig` alert and its runbook, and the Prometheus and
+config-reloader container logs for the reload error.
+
+A failure reading "could not determine whether Prometheus loaded the
+ServiceMonitor/PodMonitor ... the last completed scrape pool listing failed"
+(or "... no scrape pool listing completed") means the scrape pool API stopped
+answering after the preflight, so no verdict on the monitor was reached; the
+underlying listing error (unreachable, HTTP status, malformed response) is
+attached. A listing the wait's deadline interrupts does not change the
+verdict: "did not load" rests on the last listing that completed. Check the Prometheus pod and the network
+path from the validator pod to it, as for "Prometheus unreachable" above.
+
+A failure naming the collection instead ("Prometheus loaded the ServiceMonitor
+but the workload metrics were not collected", or "Prometheus loaded the
+PodMonitor, but the custom metrics pipeline does not serve the workload
+metric") means the configuration was loaded and the scrape or the adapter
+query did not produce a sample: check the target under the active or
+dropped targets at `/api/v1/targets` (a target relabeling dropped is listed
+as dropped, not active) and, for `pod-autoscaling`, the prometheus-adapter
+rule.
+
 ### Benchmark Job stuck or timed out
 
 Each performance check has a Job-level `activeDeadlineSeconds` set by the catalog's `timeout:` plus `ValidatorJobDeadlineHeadroom` (3m30s) on top. For `inference-perf`, the full pipeline (model-cache populate → workload ready → endpoint health → benchmark) can take up to ~50 min on cold-start clusters; the catalog budgets a 65 min timeout. If it still times out:
