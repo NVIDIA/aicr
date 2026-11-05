@@ -683,6 +683,18 @@ func TestExtractImagesFromYAML_InvalidCRDDigest(t *testing.T) {
 			wantSub: `field "version" at line 5, column 16 is a digest while containerSHA is also set`,
 		},
 		{
+			// An inline @digest in image still wins over a well-formed
+			// sibling digest, but a malformed one is rejected, not skipped.
+			name: "malformed digest version beside an inline-pinned image",
+			in: `spec:
+  rdmaSharedDevicePlugin:
+    repository: nvcr.io/nvidia/mellanox
+    image: k8s-rdma-shared-dev-plugin@sha256:2d28133fdee8c263e19b4d0656bf58d30513c9d13e47ef84bd68c5499b3c18ce
+    version: sha256:abc123
+`,
+			wantSub: `field "version" at line 5, column 14`,
+		},
+		{
 			// walkEmbeddedYAMLScalar propagates only descriptor errors, so a
 			// plain error here would vanish without even a warning.
 			name: "malformed digest version inside an embedded YAML scalar",

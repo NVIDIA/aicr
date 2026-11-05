@@ -446,26 +446,25 @@ var containerSHARE = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 //
 // Behavior:
 //   - Empty `digest` → returned image unchanged.
+//   - `digest` does not match `^sha256:[a-f0-9]{64}$` → an
+//     invalidStructuredImageDescriptorError, even when the image is already
+//     pinned in-line. This is the fail-loud guard: a malformed digest (typo,
+//     truncation, or a user-supplied value override that lands in the CRD)
+//     must not silently propagate into the BOM, PURL, or SBOM output.
 //   - Image already carries an `@`-digest → returned unchanged (the
 //     in-line digest wins; we do not silently overwrite).
-//   - `digest` does not match `^sha256:[a-f0-9]{64}$` → an
-//     invalidStructuredImageDescriptorError. This is the fail-loud guard:
-//     a malformed digest (typo, truncation, or a user-supplied value
-//     override that lands in the CRD) must not silently propagate into the
-//     BOM, PURL, or SBOM output, and only that error class makes mirror
-//     discovery and the BOM survey fail rather than warn.
 //   - Otherwise the digest is appended as `image@digest`, preserving any
 //     tag already present (e.g., `repo:0.1.2@sha256:abc…`).
 func appendCRDDigest(image, field, digest string, node *yaml.Node) (string, error) {
 	if digest == "" {
 		return image, nil
 	}
-	if strings.Contains(image, "@") {
-		return image, nil
-	}
 	if !containerSHARE.MatchString(digest) {
 		return "", invalidDescriptorMember(field, node,
 			fmt.Sprintf("must match sha256:<64 lowercase hex chars>, got %q", digest))
+	}
+	if strings.Contains(image, "@") {
+		return image, nil
 	}
 	return image + "@" + digest, nil
 }
