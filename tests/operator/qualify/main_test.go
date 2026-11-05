@@ -54,6 +54,9 @@ type candidateManifest struct {
 		Digest     string            `json:"digest"`
 		Platforms  map[string]string `json:"platforms"`
 	} `json:"operator"`
+	AICR struct {
+		Image string `json:"image"`
+	} `json:"aicr"`
 }
 
 var (

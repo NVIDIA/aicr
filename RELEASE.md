@@ -500,9 +500,10 @@ The chart defaults to the operator and registry images by digest and to this
 tag's own AICR release: the `aicr` and validator images by the digests
 `resolve-candidates` resolved, pinned as `:vX.Y.Z@sha256:<digest>`. A release
 candidate's chart also sets `aicr.allowPrerelease`, since its AICR is a
-prerelease. `operator-lifecycle` runs this tag's AICR through install,
-upgrade and rollout with validation off, and `operator-validation` runs its
-validator images through deployment validation.
+prerelease. `operator-lifecycle` runs the candidate operator with this tag's
+AICR through install, upgrade and rollout, and through a rollout that requires
+deployment validation, which fails on kind as expected and promotes nothing.
+`operator-validation` runs its validator images through deployment validation.
 Local and CI builds outside a release default to the AICR release
 `.settings.yaml` pins (`operator:`).
 `release-check` fails closed on the operator candidate, its scans, and the
