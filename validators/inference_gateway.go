@@ -16,6 +16,14 @@ package validators
 
 import (
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+)
+
+// The Gateway API resources the validators read, declared once so a version
+// bump is one edit for every check that reads them.
+var (
+	GatewayGVR   = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "gateways"}
+	HTTPRouteGVR = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"}
 )
 
 // The inference gateway profile and its vocabulary live in pkg/validator/v1

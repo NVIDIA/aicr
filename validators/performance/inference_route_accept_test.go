@@ -234,11 +234,48 @@ func TestWaitForHTTPRouteAccepted_WatchClosed(t *testing.T) {
 			if !watched {
 				t.Fatal("the route was decided before the watch; the re-read branch did not run")
 			}
+			gets := 0
+			for _, action := range dyn.Actions() {
+				if action.GetVerb() == "get" {
+					gets++
+				}
+			}
+			if gets != 2 {
+				t.Fatalf("route read %d time(s), want 2 (the initial read and the re-read after the watch closed)", gets)
+			}
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
+			if tt.wantErr {
+				errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			}
 		})
 	}
+}
+
+// TestWaitForHTTPRouteAccepted_DeletedDuringWatch pins that a Deleted event,
+// which carries the route's last state, is not read as a decision: a route
+// that was accepted and then removed leaves the benchmark nothing to send
+// through.
+func TestWaitForHTTPRouteAccepted_DeletedDuringWatch(t *testing.T) {
+	dyn := newRouteClient(t, httpRouteObject("", ""))
+	// The watch is fed the Deleted event directly: through the tracker, the
+	// accepted update that precedes a delete could decide the wait first, and
+	// only the ordering where the Deleted event is observed proves the guard.
+	dyn.PrependWatchReactor("httproutes", func(k8stesting.Action) (bool, watch.Interface, error) {
+		w := watch.NewFake()
+		go func() {
+			time.Sleep(20 * time.Millisecond)
+			w.Delete(httpRouteObject("True", "Accepted"))
+		}()
+		return true, w, nil
+	})
+	vctx := &validators.Context{Ctx: context.Background(), DynamicClient: dyn}
+	err := waitForHTTPRouteAccepted(vctx, routeTestNamespace, routeTestName, routeTestGatewayNS, routeTestGateway, 5*time.Second)
+	if err == nil || !strings.Contains(err.Error(), "was deleted while waiting") {
+		t.Fatalf("error = %v, want the deleted-route failure", err)
+	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
 }
 
 func TestWaitForHTTPRouteAccepted_Canceled(t *testing.T) {
@@ -289,7 +326,13 @@ func TestInferenceGatewayProfile_Gate(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "no recipe keeps the built-in target", input: nil, want: validators.DefaultInferenceGatewayName},
-		{name: "recipe with no components is an error", input: &validatorv1.ValidationInput{}, wantErr: true},
+		{
+			// A Job always loads a validation input, so a run without a
+			// recipe presents as one with no components.
+			name:  "validation input with no components keeps the built-in target",
+			input: &validatorv1.ValidationInput{},
+			want:  validators.DefaultInferenceGatewayName,
+		},
 		{
 			name:    "recipe without a gateway is an error",
 			input:   &validatorv1.ValidationInput{ComponentRefs: []recipe.ComponentRef{{Name: "gpu-operator"}}},

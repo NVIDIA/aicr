@@ -274,12 +274,16 @@ func TestCollectCNCFEvidence_ThreadsInferenceGateway(t *testing.T) {
 		t.Skip("bash not on PATH")
 	}
 
-	// The stub answers a declared-Gateway lookup with a class other than the
-	// declared one, which fails the section with a verdict naming all three
-	// threaded values; cluster-wide discovery finds nothing, and every other
-	// call succeeds with no output.
+	// The stub logs every invocation, answers a declared-Gateway lookup with
+	// a class other than the declared one (which fails the section with a
+	// verdict naming the declared name and class; the namespace in that
+	// verdict is the stub's own echo, so the threaded namespace is asserted
+	// from the log instead), finds nothing on cluster-wide discovery, and
+	// succeeds with no output otherwise.
 	stubDir := t.TempDir()
-	stub := "#!/bin/sh\ncase \" $* \" in\n  *' gateways -A '*) ;;\n  *gatewayClassName*) echo 'edge-system other-class' ;;\nesac\nexit 0\n"
+	callLog := filepath.Join(stubDir, "kubectl.log")
+	stub := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + callLog + "'\n" +
+		"case \" $* \" in\n  *' gateways -A '*) ;;\n  *gatewayClassName*) echo 'edge-system other-class' ;;\nesac\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(stubDir, "kubectl"), []byte(stub), 0o700); err != nil { //nolint:gosec // stub must be executable
 		t.Fatalf("write kubectl stub: %v", err)
 	}
@@ -314,11 +318,14 @@ func TestCollectCNCFEvidence_ThreadsInferenceGateway(t *testing.T) {
 		name        string
 		rec         *RecipeResult
 		wantVerdict string
-		wantErr     bool
+		// wantCall is a kubectl invocation the stub must have logged.
+		wantCall string
+		wantErr  bool
 	}{
 		{
 			name: "declared gateway reaches the section", rec: declared,
 			wantVerdict: "**Result: FAIL** — Gateway `edge-system/pool-vip` has class `other-class`; the recipe declares `edge-class`.",
+			wantCall:    "get gateway pool-vip -n edge-system ",
 			wantErr:     true,
 		},
 		{
@@ -346,6 +353,15 @@ func TestCollectCNCFEvidence_ThreadsInferenceGateway(t *testing.T) {
 			}
 			if !strings.Contains(string(evidence), tt.wantVerdict) {
 				t.Errorf("gateway evidence lacks %q:\n%s", tt.wantVerdict, evidence)
+			}
+			if tt.wantCall != "" {
+				calls, logErr := os.ReadFile(callLog)
+				if logErr != nil {
+					t.Fatalf("read kubectl call log: %v", logErr)
+				}
+				if !strings.Contains(string(calls), tt.wantCall) {
+					t.Errorf("kubectl was never called with %q:\n%s", tt.wantCall, calls)
+				}
 			}
 		})
 	}

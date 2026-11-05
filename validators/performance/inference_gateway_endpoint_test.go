@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -261,12 +262,14 @@ func TestHTTPRouteTemplateAttachesToProfileGateway(t *testing.T) {
 	if ref["name"] != "edge-gateway" || ref["namespace"] != "edge-system" {
 		t.Errorf("parentRef = %v, want edge-system/edge-gateway", ref)
 	}
-	for _, field := range []string{"name", "namespace"} {
-		if raw, _ := ref[field].(string); strings.Contains(raw, "${") {
-			t.Errorf("unrendered placeholder in parentRef.%s %q", field, raw)
-		}
+	// The renderer is a plain string replacement, so scan the whole rendered
+	// object rather than the fields named above: backendRefs and the
+	// namespace read placeholders too.
+	rendered, err := json.Marshal(obj.Object)
+	if err != nil {
+		t.Fatalf("marshal rendered HTTPRoute: %v", err)
 	}
-	if raw, _, _ := unstructured.NestedString(obj.Object, "metadata", "name"); strings.Contains(raw, "${") {
-		t.Errorf("unrendered placeholder in metadata.name %q", raw)
+	if strings.Contains(string(rendered), "${") {
+		t.Errorf("unrendered placeholder in the HTTPRoute: %s", rendered)
 	}
 }

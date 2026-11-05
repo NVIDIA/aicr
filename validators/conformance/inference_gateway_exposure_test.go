@@ -439,6 +439,22 @@ func TestAssessGatewayExposure_ProbeDispatch(t *testing.T) {
 	}
 }
 
+// httpRouteTo is an HTTPRoute in namespace attached to the conventionally
+// named Gateway; parentNamespace empty leaves the namespace off the
+// parentRef, which the Gateway API reads as the route's own.
+func httpRouteTo(namespace, name, parentNamespace string) *unstructured.Unstructured {
+	ref := map[string]any{"name": validators.DefaultInferenceGatewayName}
+	if parentNamespace != "" {
+		ref["namespace"] = parentNamespace
+	}
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "gateway.networking.k8s.io/v1",
+		"kind":       "HTTPRoute",
+		"metadata":   map[string]any{"name": name, "namespace": namespace},
+		"spec":       map[string]any{"parentRefs": []any{ref}},
+	}}
+}
+
 func TestValidateGatewayAddressDataPlane(t *testing.T) {
 	profile := addressGatewayProfile()
 	ok := []any{programmedListener("http", "True")}
@@ -506,17 +522,39 @@ func TestValidateGatewayDataPlane(t *testing.T) {
 		profile        *validators.InferenceGatewayProfile
 		gateway        *unstructured.Unstructured
 		objects        []runtime.Object
+		routes         []*unstructured.Unstructured
 		listReactor    bool
+		nilClientset   bool
 		wantErr        string
 		wantCode       errors.ErrorCode
 		wantReady      int
 		wantMatching   int
 		wantAddresses  int
 		wantProgrammed int
+		wantAttached   int
 	}{
 		{
 			name: "address probe passes on a Service-less cluster", profile: addr, gateway: addrGateway,
 			wantAddresses: 1, wantProgrammed: 1,
+		},
+		{
+			// The address probe reads the Gateway object alone; only the
+			// Service probe lists EndpointSlices through the typed client.
+			name: "address probe needs no typed client", profile: addr, gateway: addrGateway, nilClientset: true,
+			wantAddresses: 1, wantProgrammed: 1,
+		},
+		{
+			// Routes attach by Gateway name and namespace; a same-named
+			// Gateway elsewhere must not inflate the count.
+			name: "attached routes count only this Gateway's namespace", profile: svc, gateway: svcGateway,
+			objects: []runtime.Object{endpointSlice(ns, "inference-gateway-abc", "inference-gateway", true)},
+			routes: []*unstructured.Unstructured{
+				httpRouteTo("aicr-inference-perf-1", "cross-namespace", ns),
+				httpRouteTo(ns, "same-namespace", ""),
+				httpRouteTo("other", "other-gateway-explicit", "other"),
+				httpRouteTo("other", "other-gateway-implicit", ""),
+			},
+			wantReady: 1, wantMatching: 1, wantProgrammed: 1, wantAttached: 2,
 		},
 		{
 			name: "service probe on the same Service-less cluster fails as proxy not found", profile: &validators.InferenceGatewayProfile{
@@ -565,7 +603,16 @@ func TestValidateGatewayDataPlane(t *testing.T) {
 					return true, nil, fmt.Errorf("apiserver unavailable")
 				})
 			}
-			vctx := &validators.Context{Ctx: context.Background(), Clientset: client, DynamicClient: newGatewayFakeDynamicClient(t, tt.gateway)}
+			dyn := newGatewayFakeDynamicClient(t, tt.gateway)
+			for _, route := range tt.routes {
+				if err := dyn.Tracker().Create(httpRouteGVR, route, route.GetNamespace()); err != nil {
+					t.Fatalf("seed HTTPRoute: %v", err)
+				}
+			}
+			vctx := &validators.Context{Ctx: context.Background(), Clientset: client, DynamicClient: dyn}
+			if tt.nilClientset {
+				vctx.Clientset = nil
+			}
 			report, err := validateGatewayDataPlane(vctx, tt.profile, tt.gateway)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
@@ -578,10 +625,11 @@ func TestValidateGatewayDataPlane(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			mismatch := report.ReadyEndpoints != tt.wantReady || report.MatchingEndpointSlice != tt.wantMatching ||
-				report.StatusAddresses != tt.wantAddresses || report.ProgrammedListeners != tt.wantProgrammed
+				report.StatusAddresses != tt.wantAddresses || report.ProgrammedListeners != tt.wantProgrammed ||
+				report.AttachedHTTPRoutes != tt.wantAttached
 			if mismatch {
-				t.Errorf("report = %+v, want ready=%d matching=%d addresses=%d programmed=%d",
-					*report, tt.wantReady, tt.wantMatching, tt.wantAddresses, tt.wantProgrammed)
+				t.Errorf("report = %+v, want ready=%d matching=%d addresses=%d programmed=%d attached=%d",
+					*report, tt.wantReady, tt.wantMatching, tt.wantAddresses, tt.wantProgrammed, tt.wantAttached)
 			}
 		})
 	}

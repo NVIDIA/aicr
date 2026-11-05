@@ -33,13 +33,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-var httpRouteGVR = schema.GroupVersionResource{
-	Group: apiGroupGateway, Version: "v1", Resource: "httproutes",
-}
-
-var gatewayGVR = schema.GroupVersionResource{
-	Group: apiGroupGateway, Version: "v1", Resource: "gateways",
-}
+var (
+	httpRouteGVR = validators.HTTPRouteGVR
+	gatewayGVR   = validators.GatewayGVR
+)
 
 // The metav1 condition statuses as the strings the unstructured condition
 // reads compare against.
@@ -359,6 +356,9 @@ func assessGatewayAddressExposure(ctx *validators.Context, profile *validators.I
 	if classified == 0 && len(unclassified) == 0 && envTruthy(requireScopedGatewayEnv) {
 		// No address at all, so nothing was confirmed scoped. An address the
 		// check cannot classify is reported as a finding below instead.
+		// CheckInferenceGateway never reaches this branch, since the
+		// data-plane step fails a Gateway without an address in every mode
+		// first; it keeps this function total for a caller that does not.
 		return errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("Gateway %s/%s reports no status.addresses to assess under %s=true",
 				profile.Namespace, profile.GatewayName, requireScopedGatewayEnv))
@@ -462,10 +462,6 @@ func envTruthy(key string) bool {
 func validateGatewayDataPlane(ctx *validators.Context, profile *validators.InferenceGatewayProfile, gw *unstructured.Unstructured) (*gatewayDataPlaneReport, error) {
 	report := &gatewayDataPlaneReport{}
 
-	if ctx.Clientset == nil {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			"kubernetes client is not available for endpoint validation")
-	}
 	dynClient, err := getDynamicClient(ctx)
 	if err != nil {
 		return nil, err
@@ -511,12 +507,21 @@ func validateGatewayDataPlane(ctx *validators.Context, profile *validators.Infer
 				continue
 			}
 			for _, ref := range parentRefs {
-				if refMap, ok := ref.(map[string]any); ok {
-					name, _, _ := unstructured.NestedString(refMap, "name")
-					if name == profile.GatewayName {
-						attached++
-						break
-					}
+				refMap, ok := ref.(map[string]any)
+				if !ok {
+					continue
+				}
+				// A parentRef names its Gateway's namespace only when it
+				// differs from the route's own, so a same-named Gateway in
+				// another namespace must not count.
+				name, _, _ := unstructured.NestedString(refMap, "name")
+				namespace, _, _ := unstructured.NestedString(refMap, "namespace")
+				if namespace == "" {
+					namespace = route.GetNamespace()
+				}
+				if name == profile.GatewayName && namespace == profile.Namespace {
+					attached++
+					break
 				}
 			}
 		}
@@ -532,6 +537,12 @@ func validateGatewayDataPlane(ctx *validators.Context, profile *validators.Infer
 		return report, nil
 	}
 
+	// Only the Service probe needs the typed client; the address probe above
+	// read the Gateway object alone.
+	if ctx.Clientset == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"kubernetes client is not available for endpoint validation")
+	}
 	// Filter by kubernetes.io/service-name via the profile's proxy predicate to
 	// avoid matching unrelated services in the namespace (e.g. controller
 	// manager, webhooks, metrics).
@@ -574,10 +585,12 @@ func validateGatewayDataPlane(ctx *validators.Context, profile *validators.Infer
 // observed through the Gateway object, the probe for one that is not a
 // Kubernetes workload: at least one listener in status, at least one status
 // address, and no listener with Programmed=False. A listener whose Programmed
-// condition is absent or Unknown is tolerated: not every implementation
-// publishes per-listener conditions, and the check runs once with no retry,
-// so a controller still reconciling must not fail it. The counts the caller
-// reports for both probes are taken from the same status.
+// condition is absent or Unknown is tolerated: per-listener conditions are
+// optional in the Gateway API, so their absence, or an Unknown a controller
+// still reconciling reports, is not a failure of a check that runs once with
+// no retry. The Gateway's own Programmed=True is the requirement, and
+// CheckInferenceGateway has already gated on it before calling here. The
+// counts the caller reports for both probes are taken from the same status.
 func validateGatewayAddressDataPlane(gw *unstructured.Unstructured, profile *validators.InferenceGatewayProfile) error {
 	listeners, _, _ := unstructured.NestedSlice(gw.Object, "status", "listeners")
 	if len(listeners) == 0 {
