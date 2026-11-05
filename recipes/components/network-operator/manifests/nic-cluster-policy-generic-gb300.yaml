@@ -82,7 +82,8 @@ spec:
   rdmaSharedDevicePlugin:
     image: k8s-rdma-shared-dev-plugin
     repository: nvcr.io/nvidia/mellanox
-    version: network-operator-v26.7.0
+    # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin tag=network-operator-v26.7.0
+    version: sha256:2d28133fdee8c263e19b4d0656bf58d30513c9d13e47ef84bd68c5499b3c18ce
     imagePullSecrets: []
     config: |
       {
@@ -104,11 +105,13 @@ spec:
     operator:
       image: nic-configuration-operator
       repository: ghcr.io/mellanox
-      version: v1.3.1
+      # renovate: datasource=docker depName=ghcr.io/mellanox/nic-configuration-operator tag=v1.3.1
+      version: sha256:8e2247c3832bdbd8f046731a2be1cfbf446e2ff8eb1b173b7dea8965ed470796
     configurationDaemon:
       image: nic-configuration-operator-daemon
       repository: ghcr.io/mellanox
-      version: v1.3.1
+      # renovate: datasource=docker depName=ghcr.io/mellanox/nic-configuration-operator-daemon tag=v1.3.1
+      version: sha256:35e38f05004116ee3c0489c9da9dc0639d69e0a75e9a5b90a5a44be2cdee72bd
       imagePullSecrets: []
       containerResources:
         - name: nic-configuration-daemon

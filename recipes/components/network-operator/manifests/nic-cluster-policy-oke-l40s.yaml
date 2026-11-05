@@ -49,7 +49,8 @@ spec:
   nvIpam:
     image: nvidia-k8s-ipam
     repository: ghcr.io/mellanox
-    version: v0.2.0
+    # renovate: datasource=docker depName=ghcr.io/mellanox/nvidia-k8s-ipam tag=v0.2.0
+    version: sha256:47e1bb84ac97f9af49f97b49c2de44b4ba82b890b487880edc5c9adf86a176f7
     enableWebhook: false
     containerResources:
       - name: nv-ipam-node
@@ -63,15 +64,18 @@ spec:
     cniPlugins:
       image: plugins
       repository: ghcr.io/k8snetworkplumbingwg
-      version: v1.6.2-update.1
+      # renovate: datasource=docker depName=ghcr.io/k8snetworkplumbingwg/plugins tag=v1.6.2-update.1
+      version: sha256:fd99966bdb5e7e7dc674aba612cecd224fffb8a4b37c0c384b7a60cb804023f4
     multus:
       image: multus-cni
       repository: ghcr.io/k8snetworkplumbingwg
-      version: v4.2.1
+      # renovate: datasource=docker depName=ghcr.io/k8snetworkplumbingwg/multus-cni tag=v4.2.1
+      version: sha256:6bebbda31416810875367484b8125026b2816885b79c89c2df863a6ed77dd4a6
   sriovDevicePlugin:
     image: sriov-network-device-plugin
     repository: ghcr.io/k8snetworkplumbingwg
-    version: v3.9.0
+    # renovate: datasource=docker depName=ghcr.io/k8snetworkplumbingwg/sriov-network-device-plugin tag=v3.9.0
+    version: sha256:cabce074d10a0f1d62135e2cc5442d65b49094b95b8297fdd024a1a5f461319f
     config: |
       {
         "resourceList": [

@@ -124,7 +124,8 @@ func walkForImages(n *yaml.Node, seen map[string]struct{}) error {
 		// `image:` value). Without this, the bare `image: doca-driver` part
 		// looks like an untagged image when in fact `repository` and
 		// `version` siblings carry the registry and tag. A sibling
-		// `containerSHA` (Skyhook Package CRD; ghcr.io/nvidia/nodewright)
+		// `containerSHA` (Skyhook Package CRD; ghcr.io/nvidia/nodewright),
+		// or a `version` that is itself a digest (NicClusterPolicy),
 		// supplies the OCI digest and is folded in as `@<sha>`.
 		var (
 			imgScalar, repoScalar, verScalar, shaScalar string
@@ -164,13 +165,24 @@ func walkForImages(n *yaml.Node, seen map[string]struct{}) error {
 			}
 		}
 		if imgScalar != "" {
+			digestField, digest := "containerSHA", shaScalar
+			// NicClusterPolicy also takes a digest in place of the tag:
+			// network-operator renders `version: sha256:<hex>` as
+			// <repository>/<image>@sha256:<hex> (the OFED driver from 25.10).
+			if strings.HasPrefix(verScalar, "sha256:") {
+				if shaScalar != "" {
+					return errors.New(errors.ErrCodeInvalidRequest,
+						fmt.Sprintf("image %q sets both a digest version and containerSHA", imgScalar))
+				}
+				digestField, digest, verScalar = "version", verScalar, ""
+			}
 			combined := combineCRDTriplet(imgScalar, repoScalar, verScalar)
-			withSHA, err := appendContainerSHA(combined, shaScalar)
+			withDigest, err := appendCRDDigest(combined, digestField, digest)
 			if err != nil {
 				return err
 			}
-			if isLikelyImage(withSHA) {
-				seen[withSHA] = struct{}{}
+			if isLikelyImage(withDigest) {
+				seen[withDigest] = struct{}{}
 			}
 		}
 
@@ -419,38 +431,40 @@ func combineCRDTriplet(image, repository, version string) string {
 // containerSHARE matches a well-formed sha256 OCI digest payload
 // (`sha256:` + 64 lowercase hex chars). The recipes/ digest-pin test
 // uses the same shape downstream; validating at extraction time means
-// a bogus `containerSHA` fails fast at BOM render rather than silently
-// shipping a malformed ref into the SBOM/PURL output.
+// a bogus digest in `containerSHA` or a digest `version` fails fast at
+// BOM render rather than silently shipping a malformed ref into the
+// SBOM/PURL output.
 var containerSHARE = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 
-// appendContainerSHA folds a sibling `containerSHA` value onto a
-// CRD-style combined image ref as an `@<digest>` suffix. The Skyhook
-// Package CRD carries the OCI digest in a separate `containerSHA`
-// scalar (e.g., `containerSHA: sha256:<hex>`) rather than splicing it
-// into the `image` value, so the extractor has to merge them.
+// appendCRDDigest folds a digest carried in a sibling CRD field onto a
+// CRD-style combined image ref as an `@<digest>` suffix. field names the
+// sibling it came from: `containerSHA` (Skyhook Package CRD) or `version`
+// (NicClusterPolicy, which accepts a digest in place of the tag). Neither
+// CRD splices the digest into the `image` value, so the extractor has to
+// merge them.
 //
 // Behavior:
-//   - Empty `sha` → returned image unchanged.
+//   - Empty `digest` → returned image unchanged.
 //   - Image already carries an `@`-digest → returned unchanged (the
 //     in-line digest wins; we do not silently overwrite).
-//   - `sha` does not match `^sha256:[a-f0-9]{64}$` → error. This is
+//   - `digest` does not match `^sha256:[a-f0-9]{64}$` → error. This is
 //     the fail-loud guard: a malformed digest (typo, truncation, or
-//     a user-supplied value override that lands in a Skyhook Package)
-//     must not silently propagate into the BOM, PURL, or SBOM output.
-//   - Otherwise the digest is appended as `image@sha`, preserving any
+//     a user-supplied value override that lands in the CRD) must not
+//     silently propagate into the BOM, PURL, or SBOM output.
+//   - Otherwise the digest is appended as `image@digest`, preserving any
 //     tag already present (e.g., `repo:0.1.2@sha256:abc…`).
-func appendContainerSHA(image, sha string) (string, error) {
-	if sha == "" {
+func appendCRDDigest(image, field, digest string) (string, error) {
+	if digest == "" {
 		return image, nil
 	}
 	if strings.Contains(image, "@") {
 		return image, nil
 	}
-	if !containerSHARE.MatchString(sha) {
+	if !containerSHARE.MatchString(digest) {
 		return "", errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid containerSHA %q for image %q: expected sha256:<64 lowercase hex chars>", sha, image))
+			fmt.Sprintf("invalid %s %q for image %q: expected sha256:<64 lowercase hex chars>", field, digest, image))
 	}
-	return image + "@" + sha, nil
+	return image + "@" + digest, nil
 }
 
 func isLikelyImage(v string) bool {

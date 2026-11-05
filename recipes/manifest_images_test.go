@@ -75,18 +75,6 @@ func TestComponentManifestImagesAreFullyQualified(t *testing.T) {
 	t.Logf("verified %d image refs across components/*/manifests/", checked)
 }
 
-// imageDigestExemptions enumerates manifest-level image references that
-// AICR knowingly ships without an `@sha256:` digest. Each entry carries
-// the reason and the upstream tracking issue. New refs MUST either
-// include a digest or be added here with a reason; ADR-006 and #749
-// formalize this contract.
-//
-// The dominant exemption pattern: CRD-style schemas (NicClusterPolicy,
-// Skyhook Package) where `image:` and `version:` are sibling fields and
-// the schema does not accept an `@sha256:` digest. Reproducibility for
-// these refs is delivered by admission-time digest or signature
-// verification at deploy time (#745) plus the upstream signing requests
-// filed under the supply-chain epic (#739).
 // imageDigestExemption scopes an exemption to the manifest that carries
 // the reference: the exemption applies only when the walked path contains
 // one of Manifests, so another resource reusing the same tag elsewhere cannot
@@ -107,43 +95,39 @@ func (e imageDigestExemption) covers(manifestPath string) bool {
 	return false
 }
 
+// docaDriverDigestReason explains why the DOCA driver stays on its tag.
+// network-operator builds the driver image per node from this tag, picking a
+// precompiled build for the node's kernel when one exists; a digest version
+// skips that lookup and runs one build everywhere.
+const docaDriverDigestReason = "a digest version turns off network-operator's per-kernel precompiled driver " +
+	"selection, so pinning changes which driver build runs; how to pin it is decided in #3658"
+
+// nebiusOFEDDigestReason covers the Nebius marketplace chart 25.7.0, whose
+// operator (v25.1.0) predates digest support in the OFED driver version.
+const nebiusOFEDDigestReason = "network-operator v25.1.0 (Nebius chart 25.7.0) accepts no digest in the OFED driver version; " +
+	"Mellanox/network-operator#1726 added it in 25.10; tracked in #3661"
+
+// imageDigestExemptions enumerates manifest-level image references that
+// AICR knowingly ships without an `@sha256:` digest. Each entry carries
+// the reason and the tracking issue. New refs MUST either include a digest
+// or be added here with a reason; ADR-006 and #749 formalize this contract.
+//
+// A CRD that keeps the image in sibling fields takes its digest there:
+// NicClusterPolicy as `version: sha256:<hex>` and a Skyhook Package as
+// `containerSHA`. What remains is a reference a digest cannot pin without
+// changing what runs, an OFED driver whose operator predates digest support
+// for it, or a node-local image with no registry.
 var imageDigestExemptions = map[string]imageDigestExemption{
-	// NicClusterPolicy (network-operator AKS): repository/image/version
-	// triplet schema; no digest field.
-	"nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2":               {[]string{"network-operator/manifests/nic-cluster-policy-aks"}, "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
-	"nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.7.0": {[]string{"network-operator/manifests/nic-cluster-policy-"}, "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
-	"nvcr.io/nvidia/mellanox/nvidia-k8s-ipam:network-operator-v26.7.0":            {[]string{"network-operator/manifests/nic-cluster-policy-nvke-"}, "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
-	"nvcr.io/nvidia/mellanox/multus-cni:network-operator-v26.7.0":                 {[]string{"network-operator/manifests/nic-cluster-policy-nvke-"}, "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
-	"nvcr.io/nvidia/mellanox/plugins:network-operator-v26.7.0":                    {[]string{"network-operator/manifests/nic-cluster-policy-nvke-"}, "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
-	"nvcr.io/nvidia/doca/doca_telemetry:1.22.5-doca3.1.0-host":                    {[]string{"network-operator/manifests/nic-cluster-policy-aks"}, "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
-	"nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0":               {[]string{"network-operator/manifests/nic-cluster-policy-generic-gb300"}, "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
-	"ghcr.io/mellanox/nic-configuration-operator:v1.3.1":                          {[]string{"network-operator/manifests/nic-cluster-policy-generic-gb300"}, "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
-	"ghcr.io/mellanox/nic-configuration-operator-daemon:v1.3.1":                   {[]string{"network-operator/manifests/nic-cluster-policy-generic-gb300"}, "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
+	"nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2": {[]string{"network-operator/manifests/nic-cluster-policy-aks"}, docaDriverDigestReason},
+	"nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0": {[]string{"network-operator/manifests/nic-cluster-policy-generic-gb300"}, docaDriverDigestReason},
 
-	// Nebius NicClusterPolicy uses the same repository/image/version CRD schema.
-	"cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0": {[]string{"network-operator/manifests/nic-cluster-policy-nebius-b300"}, "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
-	"ghcr.io/mellanox/k8s-rdma-shared-dev-plugin:v1.5.2":                                                               {[]string{"network-operator/manifests/nic-cluster-policy-nebius-b300"}, "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
-
-	// Skyhook Package (nodewright-customizations no-op, rdma-modules):
-	// shellscript package is pinned by tag only — `containerSHA` is not
-	// surfaced for this upstream image. nodewright-packages/* refs are
-	// digest-pinned via the Skyhook Package `containerSHA` field (issue
-	// #1031), folded into the extracted image ref as `@sha256:...` by
-	// pkg/bom.ExtractImagesFromYAML.
-	"ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1": {[]string{"nodewright-customizations/manifests/", "rdma-modules/manifests/"}, "Skyhook Package CRD does not accept image digests; tracked via #745 and NVIDIA/nodewright#224"},
+	"cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0": {[]string{"network-operator/manifests/nic-cluster-policy-nebius-b300"}, nebiusOFEDDigestReason},
 
 	// cos-gpu-installer (gcp-driver-installer): node-local image preloaded on
 	// every COS node and referenced with imagePullPolicy: Never — there is no
 	// registry to pin a digest against, the "digest" differs per COS build,
 	// and the ref must never be mirrored or pulled. Issue #1716.
 	"cos-nvidia-installer:fixed": {[]string{"gcp-driver-installer/manifests/"}, "COS-node-local preloaded image (imagePullPolicy: Never); no registry digest exists and it must not be mirrored; issue #1716"},
-
-	// NicClusterPolicy (network-operator OKE): same repository/image/version
-	// triplet schema as the AKS entries above — no digest field in the CRD.
-	"ghcr.io/mellanox/nvidia-k8s-ipam:v0.2.0":                         {[]string{"network-operator/manifests/nic-cluster-policy-oke-"}, "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
-	"ghcr.io/k8snetworkplumbingwg/multus-cni:v4.2.1":                  {[]string{"network-operator/manifests/nic-cluster-policy-oke-"}, "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
-	"ghcr.io/k8snetworkplumbingwg/plugins:v1.6.2-update.1":            {[]string{"network-operator/manifests/nic-cluster-policy-oke-"}, "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
-	"ghcr.io/k8snetworkplumbingwg/sriov-network-device-plugin:v3.9.0": {[]string{"network-operator/manifests/nic-cluster-policy-oke-"}, "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
 }
 
 // TestComponentManifestImagesAreDigestPinned asserts that every image

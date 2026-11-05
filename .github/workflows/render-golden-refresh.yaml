@@ -22,6 +22,8 @@
 # recipes/components/*/values.yaml; both classes are configured to
 # auto-merge (matchManagers: ["kubernetes"], matchUpdateTypes: ["digest",
 # "pin"], automerge: true, automergeType: "pr" in .github/renovate.json5).
+# The crd-digest customManager's digest bumps in the same manifests move the
+# golden too, though they never auto-merge.
 # Renovate never regenerates the golden, so such a PR goes red and its
 # auto-merge stalls until a human clones the repo and runs the regeneration
 # command by hand — which is exactly what happened on PR #2773 (a

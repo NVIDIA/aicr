@@ -157,6 +157,28 @@
       datasourceTemplate: "pypi",
       depNameTemplate: "aiperf",
     },
+    {
+      // Digests held in CRD fields of component manifests, which the
+      // kubernetes manager below cannot read because they are not `image:`
+      // values:
+      //   1. NicClusterPolicy takes `version: sha256:<hex>` in place of the
+      //      tag. The image and the tag it was resolved from are kept in a
+      //      `# renovate: datasource=docker depName=<image> tag=<tag>` line
+      //      directly above it, since the digest replaces the tag.
+      //   2. A Skyhook Package pins with `containerSHA` after its `image` and
+      //      `version` fields.
+      // recipes/manifest_digest_renovate_test.go compiles these exact
+      // matchStrings against every component manifest. The crd-digest
+      // packageRule below allows digest rotations only.
+      customType: "regex",
+      managerFilePatterns: ["/^recipes/components/[^/]+/manifests/[^/]+\\.ya?ml$/"],
+      matchStrings: [
+        "# renovate: datasource=docker depName=(?<depName>\\S+) tag=(?<currentValue>\\S+)\\s*\\n\\s*version: (?<currentDigest>sha256:[a-f0-9]{64})",
+        "image: (?<depName>\\S+)\\s*\\n\\s*version: [\"']?(?<currentValue>[^\"'\\s]+)[\"']?\\s*\\n\\s*containerSHA: (?<currentDigest>sha256:[a-f0-9]{64})",
+      ],
+      datasourceTemplate: "docker",
+      depTypeTemplate: "crd-digest",
+    },
   ],
 
   // Kubernetes manager: scan AICR's component manifests for Pod-spec
@@ -239,6 +261,19 @@
       automerge: true,
       automergeType: "pr",
       platformAutomerge: true,
+    },
+    // Digests in CRD fields (the crd-digest customManager) get digest PRs
+    // only, and none auto-merge. A digest's tag is recorded only beside it
+    // (the `tag=` annotation, or a Skyhook `version`), so a hand edit that
+    // leaves the two out of step reaches Renovate as an ordinary digest
+    // update; and a Skyhook package rotation changes what runs on a node.
+    // A new tag is a manual change: network-operator-v* tags move with the
+    // network-operator chart pin (TestNetworkOperatorTagAnnotationsFollowChartPin),
+    // and the other images are versioned upstream on their own.
+    {
+      matchDepTypes: ["crd-digest"],
+      matchUpdateTypes: ["major", "minor", "patch"],
+      enabled: false,
     },
 
     // ---- Grouping: bundle related bumps into single PRs ----

@@ -43,7 +43,8 @@ spec:
   rdmaSharedDevicePlugin:
     image: k8s-rdma-shared-dev-plugin
     repository: nvcr.io/nvidia/mellanox
-    version: network-operator-v26.7.0
+    # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin tag=network-operator-v26.7.0
+    version: sha256:2d28133fdee8c263e19b4d0656bf58d30513c9d13e47ef84bd68c5499b3c18ce
     config: |
       {
         "configList": [

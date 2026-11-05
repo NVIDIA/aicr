@@ -177,6 +177,27 @@ spec:
 			},
 		},
 		{
+			// network-operator renders a `version: sha256:<hex>` as
+			// <repository>/<image>@sha256:<hex>, the OFED driver from 25.10.
+			name: "CRD triplet with a digest version joins it with @",
+			in: `apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+spec:
+  ofedDriver:
+    repository: nvcr.io/nvidia/mellanox
+    image: doca-driver
+    version: sha256:9a831bfdf85f313b1f5749b7c9b2673bb8fff18b4ff768c9242dabaa4468e449
+  rdmaSharedDevicePlugin:
+    image: k8s-rdma-shared-dev-plugin
+    repository: nvcr.io/nvidia/mellanox
+    version: sha256:2d28133fdee8c263e19b4d0656bf58d30513c9d13e47ef84bd68c5499b3c18ce
+`,
+			want: []string{
+				"nvcr.io/nvidia/mellanox/doca-driver@sha256:9a831bfdf85f313b1f5749b7c9b2673bb8fff18b4ff768c9242dabaa4468e449",
+				"nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:2d28133fdee8c263e19b4d0656bf58d30513c9d13e47ef84bd68c5499b3c18ce",
+			},
+		},
+		{
 			name: "CRD-style pair with image and version siblings (no repository)",
 			in: `spec:
   packages:
@@ -584,14 +605,15 @@ spec:
 	}
 }
 
-// TestExtractImagesFromYAML_InvalidContainerSHA exercises the fail-loud
-// guard in appendContainerSHA: any sibling `containerSHA` that does not
-// match `^sha256:[a-f0-9]{64}$` must surface as an extraction error so
-// a typo, truncation, or value-override slip cannot silently ship a
-// malformed digest into the BOM/PURL output. The recipes/ digest-pin
-// test enforces the same shape downstream; rejecting here just moves
-// the failure earlier where the offending line is in scope.
-func TestExtractImagesFromYAML_InvalidContainerSHA(t *testing.T) {
+// TestExtractImagesFromYAML_InvalidCRDDigest exercises the fail-loud
+// guard in appendCRDDigest: a sibling `containerSHA`, or a `version` that
+// starts with `sha256:`, that does not match `^sha256:[a-f0-9]{64}$` must
+// surface as an extraction error so a typo, truncation, or value-override
+// slip cannot silently ship a malformed digest into the BOM/PURL output.
+// The recipes/ digest-pin test enforces the same shape downstream;
+// rejecting here just moves the failure earlier where the offending line
+// is in scope.
+func TestExtractImagesFromYAML_InvalidCRDDigest(t *testing.T) {
 	tests := []struct {
 		name    string
 		in      string
@@ -630,12 +652,43 @@ func TestExtractImagesFromYAML_InvalidContainerSHA(t *testing.T) {
 `,
 			wantSub: `invalid containerSHA`,
 		},
+		{
+			name: "digest version with short hex",
+			in: `spec:
+  rdmaSharedDevicePlugin:
+    image: k8s-rdma-shared-dev-plugin
+    repository: nvcr.io/nvidia/mellanox
+    version: sha256:abc123
+`,
+			wantSub: `invalid version "sha256:abc123"`,
+		},
+		{
+			name: "digest version with uppercase hex",
+			in: `spec:
+  rdmaSharedDevicePlugin:
+    image: k8s-rdma-shared-dev-plugin
+    repository: nvcr.io/nvidia/mellanox
+    version: sha256:2D28133FDEE8C263E19B4D0656BF58D30513C9D13E47EF84BD68C5499B3C18CE
+`,
+			wantSub: `invalid version`,
+		},
+		{
+			name: "digest version alongside containerSHA",
+			in: `spec:
+  packages:
+    pkg:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
+      version: sha256:cc99c8c0675f3752f5081f0978ae57174368952ca0bb5fcac07640fe62c156c7
+      containerSHA: sha256:cc99c8c0675f3752f5081f0978ae57174368952ca0bb5fcac07640fe62c156c7
+`,
+			wantSub: `sets both a digest version and containerSHA`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := ExtractImagesFromYAML([]byte(tt.in))
 			if err == nil {
-				t.Fatal("expected error for malformed containerSHA")
+				t.Fatal("expected error for malformed CRD digest")
 			}
 			if !strings.Contains(err.Error(), tt.wantSub) {
 				t.Errorf("error %q does not contain %q", err.Error(), tt.wantSub)
