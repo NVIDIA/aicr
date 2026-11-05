@@ -451,9 +451,8 @@ var containerSHARE = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 // CRD-style combined image ref as an `@<digest>` suffix. field names the
 // sibling it came from: `containerSHA` (Skyhook Package CRD) or `version`
 // (NicClusterPolicy, which accepts a digest in place of the tag), and node is
-// that field's value. Neither
-// CRD splices the digest into the `image` value, so the extractor has to
-// merge them.
+// that field's value. Neither CRD splices the digest into the `image` value,
+// so the extractor has to merge them.
 //
 // Behavior:
 //   - Empty `digest`, or one holding an unresolved Helm value (the
