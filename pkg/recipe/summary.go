@@ -30,8 +30,8 @@ const (
 // Summary is the in-memory projection of an already loaded or resolved
 // RecipeResult. Its construction performs no I/O; upstream profile-coherence
 // validation remains separate. Every slice keeps a deterministic order:
-// components follow deployment order, constraints and overlays keep recipe
-// order, and validation phases run readiness, deployment, performance,
+// enabled components follow deployment order, constraints and overlays keep
+// recipe order, and validation phases run readiness, deployment, performance,
 // conformance.
 type Summary struct {
 	// APIVersion and Kind identify the document the summary was built from.
@@ -59,7 +59,8 @@ type Summary struct {
 	// Constraints are the recipe's merged constraints.
 	Constraints []SummaryConstraint `json:"constraints,omitempty" yaml:"constraints,omitempty"`
 
-	// Components are the recipe's components in deployment order.
+	// Components are the recipe's enabled components in deployment order.
+	// Components disabled by enabled: false or install: false are omitted.
 	Components []SummaryComponent `json:"components" yaml:"components"`
 
 	// Validation lists the validation phases that declare checks.
@@ -121,47 +122,67 @@ func BuildSummary(r *RecipeResult) (*Summary, error) {
 	return s, nil
 }
 
-// summaryComponents orders r's components by DeploymentOrder. Names in the
-// order that match no component are skipped; components the order does not
-// mention follow in ComponentRefs order.
+// summaryComponents orders r's enabled components by DeploymentOrder. Names
+// in the order that match no enabled component are skipped; enabled
+// components the order does not mention follow in ComponentRefs order.
+// Disabled components are omitted, as the bundler and the deployment order
+// omit them.
 func summaryComponents(r *RecipeResult) []SummaryComponent {
+	declared, enabled := componentSets(r.ComponentRefs)
 	byName := make(map[string]int, len(r.ComponentRefs))
+	// done marks refs already listed, and disabled refs, which are never listed.
+	done := make([]bool, len(r.ComponentRefs))
 	for i, ref := range r.ComponentRefs {
+		if !ref.IsEnabled() {
+			done[i] = true
+			continue
+		}
 		if _, dup := byName[ref.Name]; !dup {
 			byName[ref.Name] = i
 		}
 	}
 
-	placed := make([]bool, len(r.ComponentRefs))
-	out := make([]SummaryComponent, 0, len(r.ComponentRefs))
+	out := make([]SummaryComponent, 0, len(byName))
 	add := func(i int) {
-		placed[i] = true
-		out = append(out, summaryComponent(r.ComponentRefs[i]))
+		done[i] = true
+		out = append(out, summaryComponent(r.ComponentRefs[i], declared, enabled))
 	}
 	for _, name := range r.DeploymentOrder {
-		if i, ok := byName[name]; ok && !placed[i] {
+		if i, ok := byName[name]; ok && !done[i] {
 			add(i)
 		}
 	}
 	for i := range r.ComponentRefs {
-		if !placed[i] {
+		if !done[i] {
 			add(i)
 		}
 	}
 	return out
 }
 
-func summaryComponent(ref ComponentRef) SummaryComponent {
+// summaryComponent projects ref. Like the bundler, it drops dependency edges
+// to declared-but-disabled components (satisfied externally) and keeps edges
+// to undeclared names verbatim.
+func summaryComponent(ref ComponentRef, declared, enabled map[string]struct{}) SummaryComponent {
 	version := ref.Version
 	if ref.Type == ComponentTypeKustomize {
 		version = ref.Tag
+	}
+	var dependsOn []string
+	for _, dep := range ref.DependencyRefs {
+		_, isDeclared := declared[dep]
+		_, isEnabled := enabled[dep]
+		if isDeclared && !isEnabled {
+			continue
+		}
+		dependsOn = append(dependsOn, dep)
 	}
 	return SummaryComponent{
 		Name:      ref.Name,
 		Type:      string(ref.Type),
 		Version:   version,
 		Namespace: ref.Namespace,
-		DependsOn: append([]string(nil), ref.DependencyRefs...),
+		DependsOn: dependsOn,
 	}
 }
 

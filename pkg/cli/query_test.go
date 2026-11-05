@@ -740,6 +740,51 @@ func TestQueryCmdUnprofiledSummarySkipsSelectorHydration(t *testing.T) {
 	}
 }
 
+func TestQueryCmdSummaryOmitsDisabledComponents(t *testing.T) {
+	_, resolved, _ := queryRecipeFixture(t)
+	disabled := map[string]string{"cert-manager": "enabled", "nfd": "install"}
+	for name, key := range disabled {
+		ref := resolved.GetComponentRef(name)
+		if ref == nil {
+			t.Fatalf("setup: recipe must contain %s", name)
+		}
+		if ref.Overrides == nil {
+			ref.Overrides = map[string]any{}
+		}
+		ref.Overrides[key] = false
+	}
+	enabled := 0
+	for _, ref := range resolved.ComponentRefs {
+		if ref.IsEnabled() {
+			enabled++
+		}
+	}
+	path := writeQueryRecipeFixture(t, resolved)
+
+	var summary recipe.Summary
+	if err := json.Unmarshal([]byte(runQueryValue(t, "query", "--recipe", path, "--summary", "--format=json")), &summary); err != nil {
+		t.Fatalf("decode summary: %v", err)
+	}
+	if len(summary.Components) != enabled {
+		t.Errorf("summary lists %d components, want the %d enabled ones", len(summary.Components), enabled)
+	}
+	for _, c := range summary.Components {
+		if _, ok := disabled[c.Name]; ok {
+			t.Errorf("summary lists disabled component %s", c.Name)
+		}
+		for _, dep := range c.DependsOn {
+			if _, ok := disabled[dep]; ok {
+				t.Errorf("%s depends on disabled component %s", c.Name, dep)
+			}
+		}
+	}
+
+	text := runQueryValue(t, "query", "--recipe", path, "--summary")
+	if want := fmt.Sprintf("COMPONENTS (%d)", enabled); !strings.Contains(text, want) {
+		t.Errorf("text summary missing %q: %s", want, text)
+	}
+}
+
 func TestQueryCmdRecipeConfig(t *testing.T) {
 	_, _, path := queryRecipeFixture(t)
 	tests := []struct {
@@ -801,34 +846,73 @@ func TestQueryCmdRecipeConfig(t *testing.T) {
 	}
 }
 
+// TestQueryCmdRecipeRequiresEvidence proves --recipe fails closed under an
+// evidence requirement. A loaded file only names its criteria, profile and
+// leaf overlay, so an edited copy of an attested recipe would otherwise pass
+// the committed-pointer check.
 func TestQueryCmdRecipeRequiresEvidence(t *testing.T) {
-	_, resolved, _ := queryRecipeFixture(t)
-	// No catalog leaf is named, so this rejection does not depend on whether
-	// evidence is later published for a currently unattested embedded recipe.
-	resolved.Metadata.AppliedOverlays = nil
-	path := writeQueryRecipeFixture(t, resolved)
+	t.Setenv(evidenceindex.EnvVar, "")
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+	result, err := client.ResolveRecipeFromCriteria(t.Context(), aicr.WrapCriteria(&recipe.Criteria{
+		Service: recipe.CriteriaServiceEKS, Accelerator: recipe.CriteriaAcceleratorGB200,
+		OS: recipe.CriteriaOSUbuntu, Intent: recipe.CriteriaIntentTraining,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = client.RequirePublishedEvidence(t.Context(), result); err != nil {
+		t.Fatalf("setup: gb200-eks-ubuntu-training must carry a committed pointer: %v", err)
+	}
+	edited := result.Resolved()
+	if len(edited.ComponentRefs) == 0 {
+		t.Fatal("setup: attested recipe has no components")
+	}
+	edited.ComponentRefs[0].Version = "v0.0.0-edited"
+	editedPath := writeQueryRecipeFixture(t, edited)
+	missingPath := filepath.Join(t.TempDir(), "missing.yaml")
 	config := writeRequireEvidenceConfig(t, true)
-	for _, selection := range []string{"--summary", "--selector=criteria.service"} {
-		for _, source := range []string{"flag", "config", "environment"} {
-			t.Run(selection+"/"+source, func(t *testing.T) {
-				t.Setenv(evidenceindex.EnvVar, "")
-				args := []string{"query", "--recipe", path, selection}
-				switch source {
-				case "flag":
-					args = append(args, "--require-evidence")
-				case "config":
-					args = append(args, "--config", config)
-				case "environment":
-					t.Setenv(evidenceindex.EnvVar, "true")
-				}
-				err := queryCmd().Run(t.Context(), args)
-				errorstest.WantReportedCode(t, err, errors.ErrCodeNotFound)
-				if err == nil || !strings.Contains(err.Error(), evidenceindex.HealthDocURL) {
-					t.Errorf("expected evidence rejection with health link: %v", err)
-				}
-			})
+
+	for _, file := range []struct{ name, path string }{
+		{"edited attested recipe", editedPath},
+		{"unread missing file", missingPath},
+	} {
+		for _, selection := range []string{"--summary", "--selector=criteria.service"} {
+			for _, source := range []string{"flag", "config", "environment"} {
+				t.Run(file.name+"/"+selection+"/"+source, func(t *testing.T) {
+					args := []string{"query", "--recipe", file.path, selection}
+					switch source {
+					case "flag":
+						args = append(args, "--require-evidence")
+					case "config":
+						args = append(args, "--config", config)
+					case "environment":
+						t.Setenv(evidenceindex.EnvVar, "true")
+					}
+					cmd := queryCmd()
+					var output bytes.Buffer
+					cmd.Writer = &output
+					runErr := cmd.Run(t.Context(), args)
+					errorstest.WantReportedCode(t, runErr, errors.ErrCodeInvalidRequest)
+					if runErr == nil || !strings.Contains(runErr.Error(), "--recipe cannot be used while evidence is required") {
+						t.Errorf("expected loaded-recipe evidence rejection, got %v", runErr)
+					}
+					if output.Len() != 0 {
+						t.Errorf("rejected query printed output: %s", output.String())
+					}
+				})
+			}
 		}
 	}
+
+	t.Run("edited attested recipe/no requirement", func(t *testing.T) {
+		if got := runQueryValue(t, "query", "--recipe", editedPath, "--selector=criteria.accelerator"); got != "gb200" {
+			t.Errorf("query without an evidence requirement = %q, want gb200", got)
+		}
+	})
 }
 
 func TestQueryCmdProfiledSummary(t *testing.T) {

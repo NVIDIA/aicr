@@ -524,7 +524,7 @@ Generate recipes using direct system parameters:
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--criteria-strict` | | bool | Reject criteria values not in the embedded OSS catalog; ignores values registered from `--data`. Also honored via `AICR_CRITERIA_STRICT=1` or `spec.recipe.criteriaStrict: true` in `--config`. Intended for OSS CI gates. |
-| `--require-evidence` | | bool | Fail when the resolved recipe has no committed evidence pointer. The check is offline presence for the resolved id, including the selected profile value. It does not verify a signature or contact a registry. A pointer on a base id does not cover a profiled resolve. Resolving with external data (`--data` or `spec.recipe.data`) fails, even when the leaf overlay is still the embedded one. Also honored via `AICR_REQUIRE_EVIDENCE` (`1`, `true`, `yes`, `on`) or `spec.recipe.requireEvidence: true` in `--config`. Any one of the three enables it. An explicit false does not turn off an environment value that is already on. Applies to `aicr recipe` and `aicr query`. |
+| `--require-evidence` | | bool | Fail when the resolved recipe has no committed evidence pointer. The check is offline presence for the resolved id, including the selected profile value. It does not verify a signature or contact a registry. A pointer on a base id does not cover a profiled resolve. Resolving with external data (`--data` or `spec.recipe.data`) fails, even when the leaf overlay is still the embedded one. Also honored via `AICR_REQUIRE_EVIDENCE` (`1`, `true`, `yes`, `on`) or `spec.recipe.requireEvidence: true` in `--config`. Any one of the three enables it. An explicit false does not turn off an environment value that is already on. Applies to `aicr recipe` and `aicr query`; `aicr query --recipe` is rejected while it is on. |
 
 **Accelerator values name a GPU model, not a machine type.** A provider
 usually offers several machine types for the same GPU, and the machine type —
@@ -1026,9 +1026,13 @@ inputs: `--service`, `--accelerator` / `--gpu`, `--intent`, `--os`, `--platform`
 `--snapshot`, `--profile`, `--slurm-accounting-mode`, `--runtime-inventory`,
 `--gke-tcpxo-interfaces`, `--inherit-from`, or `--inherit`. The same rule applies to
 criteria, snapshot input, profile, and configuration selections in `spec.recipe` of
-`--config`. Data source, output format, and evidence-check settings in the config
-remain usable. `--require-evidence` also applies to loaded recipes, for both selectors
-and summaries; it checks committed pointer presence, not artifact signatures.
+`--config`. Data source and output format settings in the config remain usable.
+`--recipe` is rejected with `INVALID_REQUEST` while evidence is required by
+`--require-evidence`, `spec.recipe.requireEvidence`, or `AICR_REQUIRE_EVIDENCE`, before
+the file is read and for both selectors and summaries. A committed pointer attests the
+embedded catalog resolve, and a loaded file only names its criteria, profile, and leaf
+overlay; an edited file or one generated with `--data` could name an attested leaf.
+Query by criteria instead to keep the evidence check.
 
 #### Recipe Summary
 
@@ -1094,8 +1098,12 @@ VALIDATION
 `GPU Driver` is the snapshot-observed state recorded in recipe metadata:
 `preinstalled`, `absent`, or `unknown` when none was recorded. It is not inferred
 from the presence of a GPU operator. A selected profile appears as `name=value`.
-Components follow deployment order, with references not listed there appended in
+Components follow deployment order, with enabled references not listed there appended in
 recipe order; the VERSION column shows Helm chart versions or Kustomize tags.
+Components disabled with `enabled: false` or `install: false` are not deployed, so they
+are left out of the table and the `COMPONENTS (n)` count, and dependencies on them are
+dropped from DEPENDS ON. `--selector components` still lists every component, including
+disabled ones.
 Constraints and applied overlays keep recipe order. Validation phases always appear
 in readiness, deployment, performance, conformance order, omitting phases without
 checks. Empty sections and empty table cells use `-`; a recipe with no components
@@ -4423,7 +4431,7 @@ AICR respects standard environment variables:
 | `AICR_REQUESTS` | Default for `aicr snapshot --requests`. Comma-separated `name=quantity` pairs (e.g. `cpu=500m,memory=1Gi,ephemeral-storage=1Gi`). Unspecified resources keep the built-in privileged or restricted defaults. | unset |
 | `AICR_LIMITS` | Default for `aicr snapshot --limits`. Comma-separated `name=quantity` pairs (e.g. `cpu=1,memory=2Gi,ephemeral-storage=2Gi`). Unspecified resources keep the built-in defaults. With `--require-gpu`, the default `nvidia.com/gpu=1` is applied only when this list does not already contain that key — explicit `nvidia.com/gpu=N` wins. | unset |
 | `AICR_CRITERIA_STRICT` | When set to `1` / `true` / `yes` / `on`, equivalent to `--criteria-strict` on every `aicr recipe` invocation: rejects criteria values not in the embedded OSS catalog regardless of `--data` contributions. Intended for OSS CI gates; `make qualify` exports it automatically for the unit-test step. | unset |
-| `AICR_REQUIRE_EVIDENCE` | When set to `1` / `true` / `yes` / `on`, equivalent to `--require-evidence` on `aicr recipe` and `aicr query`: reject a resolved recipe with no committed evidence pointer. Resolving with `--data` fails the check. A false spelling (`0`, `false`, `no`, `off`) does not turn the check off when the flag or config already enables it, and an unrecognized value does not enable it. Does not affect `aicr bundle` or `aicr mirror`. The `aicrd` process honors the same variable on `/v1/recipe` and `/v1/query`. | unset |
+| `AICR_REQUIRE_EVIDENCE` | When set to `1` / `true` / `yes` / `on`, equivalent to `--require-evidence` on `aicr recipe` and `aicr query`: reject a resolved recipe with no committed evidence pointer. Resolving with `--data` fails the check, and `aicr query --recipe` is rejected. A false spelling (`0`, `false`, `no`, `off`) does not turn the check off when the flag or config already enables it, and an unrecognized value does not enable it. Does not affect `aicr bundle` or `aicr mirror`. The `aicrd` process honors the same variable on `/v1/recipe` and `/v1/query`. | unset |
 | `NO_COLOR` | Suppress ANSI color codes in CLI logger output (de-facto standard, see [no-color.org](https://no-color.org/)) | unset |
 
 ## Exit Codes
