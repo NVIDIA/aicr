@@ -177,25 +177,6 @@ var stockRenderOptIns = []stockRenderOptIn{
 		profile: "gpuStack=dra",
 	},
 	{
-		// No stock recipe selects gateway-api-crds: agentgateway-crds installs
-		// the same CRDs for the shipped inference recipes. A training leaf has
-		// no inference gateway, so adding it here renders the manifest-only
-		// component on its own.
-		name: "h100-eks-ubuntu-training-kubeflow+gateway-api-crds",
-		leaf: "h100-eks-ubuntu-training-kubeflow",
-		overlay: &overlayAddition{
-			componentRefs: []recipe.ComponentRef{{
-				Name: "gateway-api-crds",
-				Type: recipe.ComponentTypeHelm,
-				ManifestFiles: []string{
-					"components/agentgateway-crds/manifests/gateway-api-crds.yaml",
-					"components/agentgateway-crds/manifests/inference-extension-crds.yaml",
-				},
-			}},
-		},
-		covers: []string{"gateway-api-crds"},
-	},
-	{
 		name: "h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer",
 		leaf: "h100-eks-ubuntu-training-slurm",
 		overlay: &overlayAddition{

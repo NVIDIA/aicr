@@ -1053,7 +1053,7 @@ Prefer `kubectl delete` only for kinds where cascade is acceptable (for example
 a ConfigMap or ClusterRole with no dependents). **Do not** `kubectl delete -f`
 CRD or Namespace manifests from a migration cleanup — deleting a CRD
 garbage-collects every CR of that type cluster-wide (Gateway API / Inference
-Extension CRDs under `agentgateway-crds` are the concrete risk), and deleting a
+Extension CRDs under `gateway-api-crds` are the concrete risk), and deleting a
 Namespace removes everything inside it. Those vendored CRDs carry
 `helm.sh/resource-policy: keep` and `argocd.argoproj.io/sync-options:
 Delete=false,Prune=false`. Helm reads `keep` from the release's stored manifest

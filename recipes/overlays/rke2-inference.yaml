@@ -54,34 +54,27 @@ spec:
   # the same documented expectation as bcm-inference. Until one exists the
   # gateway is reachable via its NodePort/ClusterIP.
   componentRefs:
-    - name: agentgateway-crds
+    - name: gateway-api-crds
       type: Helm
-      source: oci://cr.agentgateway.dev/charts
-      valuesFile: components/agentgateway-crds/values.yaml
       # RKE2-scoped health check: declared INLINE so the TLSRoute v1alpha2
       # served-version gate applies only to rke2 recipes. A
-      # checks/agentgateway-crds/health-check.yaml file in this repo would
-      # replace the embedded check by path for EVERY recipe using the
-      # component (e.g. gb300-eks inference), and non-RKE2 bundles install
-      # the standard Gateway API manifest, which has no TLSRoute CRD at
-      # all — their validation would fail. Content = the embedded OSS
-      # check (CRDs Established) plus the RKE2-specific step asserting
-      # tlsroutes exists, is Established, and SERVES v1alpha2 (agentgateway
-      # the chart's compiled watch requirement, satisfied by the vendored
-      # tlsroute-crd.yaml manifest below on the supported < 1.36 default;
-      # a cluster that instead runs RKE2's bundled Traefik hits the
-      # documented CRD-ownership conflict, not a served-version gap).
-      # DRIFT NOTE: everything above the tlsroute step is a copy of this
-      # repo's embedded checks/agentgateway-crds/health-check.yaml. When
-      # bumping agentgateway versions, re-diff this whole block against the
-      # embedded check (not just the version pins) — otherwise
-      # added/removed CRD assertions silently diverge and the rke2 gate
-      # weakens without signal.
+      # checks/gateway-api-crds/health-check.yaml change would apply to
+      # every recipe using the component, and the other recipes install no
+      # TLSRoute CRD. Content = the embedded checks/gateway-api-crds check
+      # (CRDs Established) plus the step asserting tlsroutes exists, is
+      # Established, and SERVES v1alpha2 (agentgateway's compiled watch
+      # requirement, satisfied by the vendored tlsroute-crd.yaml manifest
+      # below on the supported < 1.36 default; a cluster that instead runs
+      # RKE2's bundled Traefik hits the documented CRD-ownership conflict,
+      # not a served-version gap).
+      # DRIFT NOTE: everything above the tlsroute step is a copy of the
+      # embedded checks/gateway-api-crds/health-check.yaml. Re-diff this
+      # whole block against it when the vendored CRDs change.
       healthCheckAsserts: |
         apiVersion: chainsaw.kyverno.io/v1alpha1
         kind: Test
         metadata:
-          name: agentgateway-crds-health-check
+          name: gateway-api-crds-health-check
         spec:
           timeouts:
             assert: 5m
@@ -133,38 +126,6 @@ spec:
                       kind: CustomResourceDefinition
                       metadata:
                         name: referencegrants.gateway.networking.k8s.io
-                      status:
-                        (conditions[?type == 'Established']):
-                          - status: "True"
-            - name: validate-agentgateway-crds-established
-              # agentgateway.dev/v1alpha1 CRDs installed by the
-              # agentgateway-crds Helm chart itself (not RKE2-specific —
-              # carried over unchanged from the embedded check).
-              try:
-                - assert:
-                    resource:
-                      apiVersion: apiextensions.k8s.io/v1
-                      kind: CustomResourceDefinition
-                      metadata:
-                        name: agentgatewaybackends.agentgateway.dev
-                      status:
-                        (conditions[?type == 'Established']):
-                          - status: "True"
-                - assert:
-                    resource:
-                      apiVersion: apiextensions.k8s.io/v1
-                      kind: CustomResourceDefinition
-                      metadata:
-                        name: agentgatewayparameters.agentgateway.dev
-                      status:
-                        (conditions[?type == 'Established']):
-                          - status: "True"
-                - assert:
-                    resource:
-                      apiVersion: apiextensions.k8s.io/v1
-                      kind: CustomResourceDefinition
-                      metadata:
-                        name: agentgatewaypolicies.agentgateway.dev
                       status:
                         (conditions[?type == 'Established']):
                           - status: "True"
@@ -257,9 +218,16 @@ spec:
         # there is no supported way to opt out of these two manifests on
         # a Traefik-default cluster today — the version constraint is
         # what prevents reaching that state, not a runtime toggle.
-        - components/agentgateway-crds/manifests/gateway-api-crds.yaml
-        - components/agentgateway-crds/manifests/tlsroute-crd.yaml
-        - components/agentgateway-crds/manifests/inference-extension-crds.yaml
+        - components/gateway-api-crds/manifests/gateway-api-crds.yaml
+        - components/gateway-api-crds/manifests/tlsroute-crd.yaml
+        - components/gateway-api-crds/manifests/inference-extension-crds.yaml
+
+    - name: agentgateway-crds
+      type: Helm
+      source: oci://cr.agentgateway.dev/charts
+      valuesFile: components/agentgateway-crds/values.yaml
+      dependencyRefs:
+        - gateway-api-crds
 
     - name: agentgateway
       type: Helm
@@ -268,6 +236,7 @@ spec:
       manifestFiles:
         - components/agentgateway/manifests/inference-gateway.yaml
       dependencyRefs:
+        - gateway-api-crds
         - agentgateway-crds
         - cert-manager
         - prometheus-operator-crds

@@ -1768,7 +1768,7 @@ const HelmWaitDelay = 2 * time.Second
 // Secret (~1 MiB serialized, so ~768 KiB of gzipped payload once base64
 // expansion is taken out), and measured gzip ratios on real content in this
 // repo run ~7x for dense CRD YAML
-// (recipes/components/agentgateway-crds/manifests/gateway-api-crds.yaml) and
+// (recipes/components/gateway-api-crds/manifests/gateway-api-crds.yaml) and
 // ~32x for the most repetitive YAML in the tree. A maximal Secret holding
 // worst-case-compressible content therefore inflates to roughly 24 MiB, which
 // this clears without letting an arbitrary ratio through.

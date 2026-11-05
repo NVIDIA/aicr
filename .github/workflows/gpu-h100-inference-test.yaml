@@ -105,6 +105,7 @@ jobs:
               - 'recipes/components/nvsentinel/**'
               - 'recipes/components/agentgateway/**'
               - 'recipes/components/agentgateway-crds/**'
+              - 'recipes/components/gateway-api-crds/**'
               - 'recipes/components/grove/**'
               - 'recipes/components/dynamo-platform/**'
               - 'recipes/components/prometheus-adapter/**'

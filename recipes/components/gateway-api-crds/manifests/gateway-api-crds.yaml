@@ -1,9 +1,8 @@
 # Standard Kubernetes Gateway API CRDs (v1.2.1)
 # Source: https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
-# Required by agentgateway for Gateway, HTTPRoute, and GRPCRoute resources.
-#
-# These CRDs are not included in the agentgateway-crds Helm chart and must
-# be installed separately. Vendored here for fully automated deployment.
+# Required by any Gateway API implementation for Gateway, HTTPRoute, and
+# GRPCRoute resources; installed by the gateway-api-crds component, which
+# the inference gateway (agentgateway by default) depends on.
 #
 # aicr/skip-hook-validation: "true"
 # Copyright 2024 The Kubernetes Authors.

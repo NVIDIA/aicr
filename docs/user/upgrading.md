@@ -258,6 +258,52 @@ The flag fails closed rather than quietly resolving as a first deploy. A path th
 
 `aicr query` and `aicr mirror list` carry both flags, because all three share `aicr recipe`'s resolution flags. The REST API does not: `--inherit-from` names a path on the machine running the CLI, so it is CLI-only for now, as `aicr recipe --snapshot` and `--data` already are.
 
+## Gateway API CRDs ownership handover
+
+Bundles before the `gateway-api-crds` component installed the Gateway API and Inference Extension CRDs as manifests of `agentgateway-crds`, owned by its post release: `agentgateway-crds-post` in `agentgateway-system`, or `agentgateway-system-agentgateway-crds-post` under Flux, which names a release `<targetNamespace>-<name>`. Bundles with the component install them from their own release, and the old post release is no longer rendered. A cluster installed the old way needs this handover once, before it applies a bundle with `gateway-api-crds`. `upgrade-check --from` the deployed bundle or its recipe catches it: the `agentgateway-crds` row shows its `manifestFiles` going to `(none)` with verdict `unknown`, and the check exits non-zero. `--from cluster` does not show it, because it takes component identities from the target.
+
+What applying the new bundle does to the old post release depends on the deployer. `helm` and `helmfile` leave it in place. Terraform destroys it, a pruning Flux Kustomization deletes its HelmRelease, and Fleet deletes its bundle; each of those uninstalls the release. Argo CD prunes its Application, which removes the CRDs only when the bundle was built with `--argocd-cascade-delete`. An uninstall deletes every CRD the release's stored manifest does not mark `keep`, and every Gateway, HTTPRoute, GRPCRoute and InferencePool on the cluster with them.
+
+**1. Confirm the retention guards are in the old release's stored manifest.** Helm decides what an uninstall keeps from the manifest stored with the release, not from the live objects, so annotating the CRDs with `kubectl` does not protect them. The guards reach the stored manifest when a bundle carrying them is applied while the post release still owns the CRDs: the AICR release that added the guards, before the one that moved the CRDs.
+
+```bash
+# helm, helmfile, terraform, fleet; for flux use the release name above and --namespace flux-system
+helm get manifest agentgateway-crds-post --namespace agentgateway-system \
+  | grep -c 'helm.sh/resource-policy: "keep"'
+```
+
+The count must be 10, or 11 on RKE2 recipes. A lower count means the cluster skipped that release: apply a bundle of the same recipe from it first, then continue. Argo CD reads its guard off the live object, and that bundle puts it there too.
+
+**2. Point the CRDs at the release that will own them** (Helm-based deployers only; Argo CD runs no Helm ownership check and skips this step). On RKE2 recipes add `tlsroutes.gateway.networking.k8s.io` to the list.
+
+| Deployer | `meta.helm.sh/release-name` | `meta.helm.sh/release-namespace` |
+|---|---|---|
+| `helm`, `helmfile`, `terraform`, `fleet` | `gateway-api-crds` | `gateway-api-system` |
+| `flux` | `gateway-api-system-gateway-api-crds` | `gateway-api-system` |
+
+```bash
+CRDS="gatewayclasses.gateway.networking.k8s.io gateways.gateway.networking.k8s.io
+grpcroutes.gateway.networking.k8s.io httproutes.gateway.networking.k8s.io
+referencegrants.gateway.networking.k8s.io
+inferencemodelrewrites.inference.networking.x-k8s.io inferenceobjectives.inference.networking.x-k8s.io
+inferencepoolimports.inference.networking.x-k8s.io inferencepools.inference.networking.k8s.io
+inferencepools.inference.networking.x-k8s.io"
+RELEASE="gateway-api-crds"        # from the table
+NAMESPACE="gateway-api-system"
+for crd in ${CRDS}; do
+  kubectl label crd "${crd}" app.kubernetes.io/managed-by=Helm --overwrite
+  kubectl annotate crd "${crd}" --overwrite \
+    meta.helm.sh/release-name="${RELEASE}" \
+    meta.helm.sh/release-namespace="${NAMESPACE}"
+done
+```
+
+`meta.helm.sh/release-namespace` is the namespace the release installs into, which for Flux is the HelmRelease's `targetNamespace`, not the `flux-system` namespace Flux stores the release in. If the bundle still stops on `invalid ownership metadata`, the error names the value Helm expects (`must equal "<value>"`); annotate with that value and re-run.
+
+**3. Apply the bundle.** The new release adopts the CRDs, and Terraform, Flux, Fleet and Argo CD remove the old post release without deleting them. With `helm` or `helmfile` the old release stays behind; once step 1 holds, `helm uninstall agentgateway-crds-post --namespace agentgateway-system` removes it and keeps the CRDs. Do not `kubectl delete` these CRDs at any point: neither guard covers an explicit delete.
+
+Confirm the handover with `kubectl get crd gateways.gateway.networking.k8s.io -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}'` and `kubectl get gateways,httproutes -A`, which should list what was there before.
+
 ## Gating a pipeline
 
 `upgrade-check` exits non-zero by default when any component needs attention, so a pipeline can consume the result without parsing output:

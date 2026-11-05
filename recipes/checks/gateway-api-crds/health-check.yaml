@@ -19,7 +19,7 @@
 # apiserver will accept CRs of those kinds): the Gateway API standard
 # channel from gateway-api-crds.yaml and the Gateway API Inference
 # Extension from inference-extension-crds.yaml, both vendored under
-# recipes/components/agentgateway-crds/manifests/. tlsroute-crd.yaml is
+# recipes/components/gateway-api-crds/manifests/. tlsroute-crd.yaml is
 # added only by recipes that list it, so it is not asserted here.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
