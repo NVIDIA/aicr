@@ -1356,6 +1356,21 @@ func TestReleaseOperatorQualifiesTheTagsAICR(t *testing.T) {
 	}
 }
 
+// operator-lifecycle runs the qualify suite in lifecycle-only mode, which
+// skips fault scenarios, so the candidate operator's own deployment
+// validation must be a regular scenario for the release to gate on it
+// (#3646).
+func TestReleaseLifecycleRunsOperatorDrivenValidation(t *testing.T) {
+	jobs := mapValue(t, loadYAML(t, ".github/workflows/on-tag.yaml"), "jobs")
+	if !strings.Contains(marshalYAML(t, mapValue(t, jobs, "operator-lifecycle")), "make operator-qualify-published") {
+		t.Fatal("operator-lifecycle must run the qualify suite")
+	}
+	suite := string(readFile(t, "tests/operator/qualify/qualify_test.go"))
+	if !regexp.MustCompile(`t\.Run\("[^"]+", func\(t \*testing\.T\) \{\s*deploymentValidation\(`).MatchString(suite) {
+		t.Error("the qualify suite must run deploymentValidation as a regular scenario, not a fault the lifecycle-only run skips")
+	}
+}
+
 func TestReleaseHomebrewWorkflowPolicy(t *testing.T) {
 	doc := loadYAML(t, ".github/workflows/on-tag.yaml")
 	jobs := mapValue(t, doc, "jobs")
