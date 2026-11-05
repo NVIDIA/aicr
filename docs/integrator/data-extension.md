@@ -382,6 +382,23 @@ A recipe that enables two inference gateway components fails the check; exactly
 one may be enabled. No shipped recipe uses `gateway-address`; it is covered by
 unit tests and by no CI lane.
 
+A gateway other than agentgateway gets the Gateway API and Inference Extension
+CRDs from the `gateway-api-crds` component: add a ref that lists the two
+manifests, and list it in the gateway's `dependencyRefs` so the CRDs are
+established first.
+
+```yaml
+componentRefs:
+  - name: gateway-api-crds
+    type: Helm
+    manifestFiles:
+      - components/agentgateway-crds/manifests/gateway-api-crds.yaml
+      - components/agentgateway-crds/manifests/inference-extension-crds.yaml
+```
+
+The files are the ones `agentgateway-crds` installs, so a recipe enables one of
+the two components, never both.
+
 The performance validator's `gateway-epp` routing mode attaches its HTTPRoute
 from a per-run namespace named `aicr-inference-perf-<run>`, so the Gateway's
 `HTTP` listener must allow routes from that namespace

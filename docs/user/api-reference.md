@@ -632,6 +632,7 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `dranet` | DRA network driver for the ConnectX-9 RDMA fabric (VR200 RKE2) |
 | `dynamo-platform` | NVIDIA Dynamo inference serving platform |
 | `gatekeeper` | OPA Gatekeeper policy controller |
+| `gateway-api-crds` | Gateway API + Inference Extension CRDs for a non-agentgateway inference gateway (no shipped recipe enables it) |
 | `gcp-driver-installer` | Google cos-gpu-installer DaemonSet; renders only under `gpuStack=bundle-installer` and `gpuStack=dra` (GKE) |
 | `gke-gb200-rdma` | NCCL gIB (GPUDirect-RDMA over RoCE) plugin installer for GB200 (GKE) |
 | `gke-nccl-tcpxo` | NCCL TCPXO network plugin for optimized collective communication (GKE) |
