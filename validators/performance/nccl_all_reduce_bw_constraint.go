@@ -250,6 +250,8 @@ var (
 	ncclUsingNetRe      = regexp.MustCompile(`NCCL INFO Using network (\S+)`)
 	ncclNVLSCommInitRe  = regexp.MustCompile(`NVLS comm 0x[0-9a-fA-F]+`)
 	ncclNVLSAvailableRe = regexp.MustCompile(`NVLS multicast support is available`)
+
+	runtimePrecheckFailedRe = regexp.MustCompile(`AICR_PRECHECK_FAILED: ([^\r\n]+)`)
 )
 
 // templatePath returns the path to a testdata template file for the given
@@ -299,13 +301,17 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 		// rdmaSharedDevicePlugin's nvidia.com/mlnxnics shared HCAs —
 		// see testdata/gb200/oke/runtime-net.yaml.
 		recipe.CriteriaServiceOKE: {recipe.CriteriaAcceleratorGB200},
+		// NVKE GB200: IB east-west over per-rail SR-IOV VFs attached through
+		// SriovIBNetworks — see testdata/gb200/nvke/runtime-net.yaml.
+		recipe.CriteriaServiceNVKE: {recipe.CriteriaAcceleratorGB200},
 	},
 	variantNVLS: {
 		// GB300 EKS shares GB200's NVL72 MNNVL/IMEX topology — see
 		// testdata/gb300/eks/runtime-nvls.yaml.
-		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
-		recipe.CriteriaServiceOKE: {recipe.CriteriaAcceleratorGB200},
-		recipe.CriteriaServiceGKE: {recipe.CriteriaAcceleratorGB200},
+		recipe.CriteriaServiceEKS:  {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
+		recipe.CriteriaServiceOKE:  {recipe.CriteriaAcceleratorGB200},
+		recipe.CriteriaServiceNVKE: {recipe.CriteriaAcceleratorGB200},
+		recipe.CriteriaServiceGKE:  {recipe.CriteriaAcceleratorGB200},
 		// VR200 NVL72 on bare-metal RKE2: MNNVL across the IMEX domain, same
 		// shape as GB200 but with its own runtime (NGC pytorch image, distinct
 		// mpirun path) — see testdata/vr200/rke2/runtime-nvls.yaml.
@@ -2263,7 +2269,7 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 		// fetchNote records why the direct fetch was unusable so it survives into
 		// the emitted diagnostic payload (not just slog) when the termination-tail
 		// fallback is also empty — otherwise the reader sees no reason at all.
-		var fetchNote string
+		var fetchNote, precheckReason string
 		switch {
 		case logErr != nil:
 			slog.Warn("failed to retrieve launcher pod logs", "pod", launcherPod.Name, "error", logErr)
@@ -2278,6 +2284,9 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 			fetchNote = "direct logs unavailable (container GC'd before fetch)"
 			launcherLogs = ""
 		default:
+			// Read the precheck reason before tailing: the marker prints before
+			// NCCL starts, so mpirun's abort output could push it past the cap.
+			precheckReason = runtimePrecheckFailure(launcherLogs)
 			// Tail to the same cap as worker diagnostics — a verbose launcher
 			// (mpirun + NCCL debug) would otherwise balloon the failure payload.
 			launcherLogs = tailLines(strings.TrimSpace(launcherLogs), maxDiagLogLines)
@@ -2311,6 +2320,13 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 		emitDiagnosticBlock("worker diagnostics", workerDiag)
 
 		logs := launcherLogs + "\n" + workerDiag
+		if precheckReason == "" {
+			// The termination-message fallback above.
+			precheckReason = runtimePrecheckFailure(launcherLogs)
+		}
+		if precheckReason != "" {
+			return logs, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, precheckReason, err)
+		}
 		return logs, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "pod failed to complete successfully", err)
 	}
 
@@ -2767,6 +2783,19 @@ func parseBandwidthFromLogs(logs string) (float64, error) {
 	}
 
 	return bandwidth, nil
+}
+
+// runtimePrecheckFailure returns the first AICR_PRECHECK_FAILED line a runtime's
+// ranks printed before NCCL started (e.g. a missing SR-IOV rail attachment in
+// testdata/gb200/nvke/runtime-net.yaml), without the marker, or "" when there
+// is none. It makes the failed check name the cause instead of a generic
+// launcher failure.
+func runtimePrecheckFailure(logs string) string {
+	m := runtimePrecheckFailedRe.FindStringSubmatch(logs)
+	if len(m) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(m[1])
 }
 
 // verifyTransportFromLogs asserts that the fabric implied by the variant actually

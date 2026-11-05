@@ -309,6 +309,8 @@ kubectl describe runtimerollout "$ROLLOUT"   # StepStarted, StepWaiting, StepFin
   minute or more for each such release.
 - **`HealthProgressing`, `SyncRunning`.** The release's own workloads are
   still starting; the time is theirs, not the operator's.
+- **`SyncPending`.** A sync is waiting for Argo CD's application controller to
+  start it. A long wait points at that controller, not at the release.
 
 ## Rollout failed, expired or revoked
 
@@ -317,17 +319,28 @@ The rollout's message and its `RolloutFailed`, `RolloutExpired` or
 its target plan, and the runtime stays `Stalled` until the target changes or a
 [retry](operations.md#retrying). Changing the target back to the active plan
 creates a rollout to it, with a fresh approval, that also reinstalls releases
-the failed rollout removed.
+the failed rollout removed. Once that rollout succeeds the runtime is `Ready`,
+even when an Application's last operation still shows the failed sync
+([why](argocd.md#readiness-at-the-current-revision)).
 
 | Message | Cause | Next |
 | --- | --- | --- |
-| `release <id>: SyncFailed` or `SyncError` | Argo CD's sync failed. The message continues with Argo CD's own error, folded to one line and cut to 240 characters (`release <id>: SyncFailed: <error>`) | Read the error in the message; `kubectl -n argocd get application <id> -o yaml` (`status.operationState`, `status.conditions`) has the full text. Fix, then retry |
+| `release <id>: SyncFailed` or `SyncError` | Argo CD's sync failed. The message continues with Argo CD's own error, folded to one line and cut to 240 characters (`release <id>: SyncFailed: <error>`) | Read the error in the message; `kubectl -n argocd get application <id> -o yaml` (`status.operationState`, `status.conditions`) has the full text. Fix, then retry. For a failed hook, see the note below this table |
 | `[CONFLICT] Application argocd/<name> exists without this runtime's ownership` | An Application with the release's name exists without the operator's labels and this runtime's UID annotation (`ForeignObject`); the operator never writes or deletes it | Remove or rename it, then retry. If an earlier runtime left it, [adopt](#orphaned-objects-and-re-adoption) instead. On an active-plan release it shows as `Ready=False` with `ForeignObject` |
 | `release <id> not ready within 30m0s (<reason>)` | The release did not become ready at its current revision within `actionTimeout`; the reason is the last observation, such as `HealthProgressing`, `HealthDegraded`, or `SpecDrifted` when its Application was edited while the step ran | Inspect the component's workloads in its namespace; fix, then retry. Raise `spec.rollout.actionTimeout` if the component is slow but healthy |
 | `release <id> not removed within …` | Argo CD did not finish deleting the release's resources | See [Argo CD Application](#argo-cd-application) |
 | `the approval expired` | The approval expired before every step ran | Retry, and approve with a longer `--expires` |
 | `the rollout deadline passed` | The whole rollout, including the wait for approval, exceeded `spec.rollout.deadline` | Retry; raise the deadline if the change needs more time |
 | `the approval was revoked` | An approver revoked it | Retry when ready |
+
+**A failed hook.** A retry starts a new sync of the release, so its hooks run
+again, and every rollout that reaches the release fails there until the hook
+succeeds. When the hook fails because of a component the plan installs in a
+later step, a rollout fails before it reaches that component's fix. In the same
+rollout, also turn the hook off with an
+[override](operations.md#changing-inputs) on the failing release (for
+cert-manager, set `startupapicheck.enabled` to `false`), and remove the
+override once the fix is active.
 
 A step in flight while the runtime was paused or the engine suspended for
 longer than `actionTimeout` can fail on resume
