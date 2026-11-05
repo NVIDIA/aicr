@@ -606,13 +606,12 @@ spec:
 }
 
 // TestExtractImagesFromYAML_InvalidCRDDigest exercises the fail-loud
-// guard in appendCRDDigest: a sibling `containerSHA`, or a `version` that
-// starts with `sha256:`, that does not match `^sha256:[a-f0-9]{64}$` must
-// surface as an extraction error so a typo, truncation, or value-override
-// slip cannot silently ship a malformed digest into the BOM/PURL output.
-// The recipes/ digest-pin test enforces the same shape downstream;
-// rejecting here just moves the failure earlier where the offending line
-// is in scope.
+// guard for digests held in CRD sibling fields: a `containerSHA`, or a
+// `version` that starts with `sha256:`, that does not match
+// `^sha256:[a-f0-9]{64}$` must surface as an
+// invalidStructuredImageDescriptorError. Mirror discovery, the BOM survey
+// and embedded-YAML scalars fail closed only on that error class; any other
+// error is downgraded to a warning and the manifest's images are dropped.
 func TestExtractImagesFromYAML_InvalidCRDDigest(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -628,7 +627,7 @@ func TestExtractImagesFromYAML_InvalidCRDDigest(t *testing.T) {
       version: "0.3.0"
       containerSHA: not-a-digest
 `,
-			wantSub: `invalid containerSHA "not-a-digest"`,
+			wantSub: `field "containerSHA" at line 6, column 21 must match sha256:<64 lowercase hex chars>, got "not-a-digest"`,
 		},
 		{
 			name: "sha256 prefix but short hex",
@@ -639,7 +638,7 @@ func TestExtractImagesFromYAML_InvalidCRDDigest(t *testing.T) {
       version: "0.3.0"
       containerSHA: sha256:abc123
 `,
-			wantSub: `invalid containerSHA "sha256:abc123"`,
+			wantSub: `field "containerSHA" at line 6, column 21 must match sha256:<64 lowercase hex chars>, got "sha256:abc123"`,
 		},
 		{
 			name: "sha256 prefix but uppercase hex (OCI digest is lowercase)",
@@ -650,7 +649,7 @@ func TestExtractImagesFromYAML_InvalidCRDDigest(t *testing.T) {
       version: "0.3.0"
       containerSHA: sha256:CC99C8C0675F3752F5081F0978AE57174368952CA0BB5FCAC07640FE62C156C7
 `,
-			wantSub: `invalid containerSHA`,
+			wantSub: `field "containerSHA" at line 6, column 21`,
 		},
 		{
 			name: "digest version with short hex",
@@ -660,7 +659,7 @@ func TestExtractImagesFromYAML_InvalidCRDDigest(t *testing.T) {
     repository: nvcr.io/nvidia/mellanox
     version: sha256:abc123
 `,
-			wantSub: `invalid version "sha256:abc123"`,
+			wantSub: `field "version" at line 5, column 14 must match sha256:<64 lowercase hex chars>, got "sha256:abc123"`,
 		},
 		{
 			name: "digest version with uppercase hex",
@@ -670,7 +669,7 @@ func TestExtractImagesFromYAML_InvalidCRDDigest(t *testing.T) {
     repository: nvcr.io/nvidia/mellanox
     version: sha256:2D28133FDEE8C263E19B4D0656BF58D30513C9D13E47EF84BD68C5499B3C18CE
 `,
-			wantSub: `invalid version`,
+			wantSub: `field "version" at line 5, column 14`,
 		},
 		{
 			name: "digest version alongside containerSHA",
@@ -681,7 +680,23 @@ func TestExtractImagesFromYAML_InvalidCRDDigest(t *testing.T) {
       version: sha256:cc99c8c0675f3752f5081f0978ae57174368952ca0bb5fcac07640fe62c156c7
       containerSHA: sha256:cc99c8c0675f3752f5081f0978ae57174368952ca0bb5fcac07640fe62c156c7
 `,
-			wantSub: `sets both a digest version and containerSHA`,
+			wantSub: `field "version" at line 5, column 16 is a digest while containerSHA is also set`,
+		},
+		{
+			// walkEmbeddedYAMLScalar propagates only descriptor errors, so a
+			// plain error here would vanish without even a warning.
+			name: "malformed digest version inside an embedded YAML scalar",
+			in: `apiVersion: v1
+kind: ConfigMap
+data:
+  policy.yaml: |
+    spec:
+      rdmaSharedDevicePlugin:
+        image: k8s-rdma-shared-dev-plugin
+        repository: nvcr.io/nvidia/mellanox
+        version: sha256:abc123
+`,
+			wantSub: `field "version" at line 5, column 14`,
 		},
 	}
 	for _, tt := range tests {
@@ -692,6 +707,9 @@ func TestExtractImagesFromYAML_InvalidCRDDigest(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tt.wantSub) {
 				t.Errorf("error %q does not contain %q", err.Error(), tt.wantSub)
+			}
+			if !IsInvalidStructuredImageDescriptor(err) {
+				t.Errorf("error %v is not an invalid structured image descriptor; callers would downgrade it to a warning", err)
 			}
 		})
 	}
