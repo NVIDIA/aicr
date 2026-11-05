@@ -20,6 +20,13 @@ const (
 	// name is fully qualified because CRI-O in enforcing short-name mode
 	// (OKE) rejects a bare name that more than one search registry serves.
 	ProbeImage = "docker.io/library/busybox:1.37"
+
+	// PythonProbeImage is the multi-arch image for validator probe workloads
+	// that serve HTTP (the HPA metric server and the AI service metrics
+	// stub): /bin/sh plus python3's standard-library http.server, as the
+	// kubernetes-sigs/ai-conformance tests use. Fully qualified for the
+	// same short-name reason as ProbeImage.
+	PythonProbeImage = "docker.io/library/python:3.13-alpine"
 )
 
 // DynamoImageRepository and DynamoRuntimeImageTag locate the Dynamo runtime

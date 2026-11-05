@@ -1024,11 +1024,11 @@ Valid feature names (from `pkg/evidence/cncf/consts.go`):
 | `dra-support` | Dynamic Resource Allocation driver and ResourceSlices |
 | `gang-scheduling` | Gang-scheduler presence and PodGroup support |
 | `secure-access` | Cluster authn/authz posture for AI workloads |
-| `accelerator-metrics` | GPU metrics exporter and Prometheus scrape config |
-| `ai-service-metrics` | Inference-service metrics via custom-metrics API |
+| `accelerator-metrics` | GPU metrics exporter and Prometheus scrape config (collector script section; the `accelerator-metrics` conformance check asserts per-device utilization and memory samples on the DCGM scrape, see [CNCF conformance](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md)) |
+| `ai-service-metrics` | Inference-service metrics via custom-metrics API (collector script section; the `ai-service-metrics` conformance check asserts Prometheus collects exactly the requests sent to a ServiceMonitor-selected stub, see [CNCF conformance](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md)) |
 | `inference-gateway` | Gateway API + Inference Extension installation; also records the gateway `LoadBalancer` network exposure (open `0.0.0.0/0` vs scoped source ranges). Fails on an open gateway only when `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY=true`. |
 | `robust-operator` | Operator readiness and leader-election posture |
-| `pod-autoscaling` | HPA-driven pod autoscaling: external GPU metric + behavioral scale-up/down test (pod-scoped custom metrics collected best-effort — absent for DRA-allocated GPUs, not a failure) |
+| `pod-autoscaling` | HPA-driven pod autoscaling (collector script section; the `pod-autoscaling` conformance check scales accelerator pods 1 to 2 on a per-pod custom metric and needs two allocatable accelerators at once, see [CNCF conformance](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md)) |
 | `cluster-autoscaling` | Karpenter (preferred) or EKS managed node-group autoscaling fallback |
 
 ### Evidence verdicts and exit status

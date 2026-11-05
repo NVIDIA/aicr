@@ -21,6 +21,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // Kubernetes API groups referenced across conformance checks.
@@ -42,6 +43,14 @@ const (
 	// labelNVIDIAGPUPresent is the "key=value" selector for GPU-bearing nodes
 	// when scaled-up via the cluster autoscaler.
 	labelNVIDIAGPUPresent = "nvidia.com/gpu.present=true"
+)
+
+// Prometheus Operator scrape-configuration resources the metrics checks
+// create for their probe workloads; both ship with the recipe's
+// kube-prometheus-stack (through prometheus-operator-crds).
+var (
+	podMonitorGVR     = schema.GroupVersionResource{Group: "monitoring.coreos.com", Version: "v1", Resource: "podmonitors"}
+	serviceMonitorGVR = schema.GroupVersionResource{Group: "monitoring.coreos.com", Version: "v1", Resource: "servicemonitors"}
 )
 
 // Keys used when constructing unstructured Kubernetes manifests as map[string]any.
@@ -90,16 +99,23 @@ const (
 
 // Common workload-related string constants used in multiple checks.
 const (
-	labelApp                    = "app"
-	containerNameSleep          = "sleep"
-	gpuClaimName                = "gpu"
-	statusUnknown               = "unknown"
-	valueNone                   = "none"
-	deploymentClusterAutoscaler = "cluster-autoscaler"
-	namespaceDynamoSystem       = "dynamo-system"
+	labelApp = "app"
+	// keyAllocationMode is the DRA DeviceRequest allocation-mode field.
+	keyAllocationMode = "allocationMode"
+	// waitingReasonCrashLoopBackOff is the kubelet's container waiting reason
+	// for a container that keeps exiting.
+	waitingReasonCrashLoopBackOff = "CrashLoopBackOff"
+	containerNameSleep            = "sleep"
+	gpuClaimName                  = "gpu"
+	statusUnknown                 = "unknown"
+	valueNone                     = "none"
+	deploymentClusterAutoscaler   = "cluster-autoscaler"
+	namespaceDynamoSystem         = "dynamo-system"
 )
 
-// Per-check WORK budgets for the two GPU allocation conformance checks. Each
+// Per-check WORK budgets for the conformance checks that create cluster
+// resources needing reconciliation (the two GPU allocation checks, the HPA
+// autoscaling cycle and the AI service metrics stub). Each
 // check bounds all of its resource-creating work — allocation-mode discovery,
 // namespace/claim/pod creation, pod waits, log collection, and validation —
 // to a budget, so that inside the catalog timeout (which becomes the check
@@ -123,6 +139,8 @@ const (
 //
 //	dra-support:               3m30s work + 30s cleanup + 60s margin =  5m catalog timeout
 //	secure-accelerator-access: 8m30s work + 30s cleanup + 60s margin = 10m catalog timeout
+//	pod-autoscaling:          13m30s work + 30s cleanup + 60s margin = 15m catalog timeout
+//	ai-service-metrics:        8m30s work + 30s cleanup + 60s margin = 10m catalog timeout
 //
 // dra-support can run TWO namespace-creating behavioral subtests in sequence
 // (the MNNVL IMEX channel probe, then the full-GPU DRA probe). The reserve
@@ -168,8 +186,10 @@ const (
 
 	// Fixed FALLBACK work budgets, used only when the parent context has no
 	// deadline (standalone/library use — LoadContext always sets one).
-	draSupportWorkBudget   = 3*time.Minute + 30*time.Second
-	secureAccessWorkBudget = 8*time.Minute + 30*time.Second
+	draSupportWorkBudget       = 3*time.Minute + 30*time.Second
+	secureAccessWorkBudget     = 8*time.Minute + 30*time.Second
+	podAutoscalingWorkBudget   = 13*time.Minute + 30*time.Second
+	aiServiceMetricsWorkBudget = 8*time.Minute + 30*time.Second
 )
 
 // gpuCheckWorkBudget derives the work budget for a GPU allocation conformance

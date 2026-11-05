@@ -88,6 +88,25 @@ rules:
           exported_namespace: {resource: "namespace"}
           exported_pod: {resource: "pod"}
 
+    # CNCF pod_autoscaling conformance probe (validators/conformance/
+    # pod_autoscaling_check.go, mirroring kubernetes-sigs/ai-conformance
+    # TestHPAAutoscaling): the check's accelerator pods serve this gauge and
+    # a PodMonitor it creates makes Prometheus scrape them; this rule serves
+    # it back as a per-pod custom metric of the same name for the test HPA.
+    # DCGM cannot attribute GPUs to pods under DRA, so the HPA is driven by
+    # the probe's own gauge, never by gpu_utilization. last_over_time over
+    # one minute returns the latest scraped value and drops a pod's series
+    # within a minute of its removal.
+    - seriesQuery: 'ai_conformance_hpa_queue_depth{namespace!="",pod!=""}'
+      metricsQuery: 'max(last_over_time(<<.Series>>{<<.LabelMatchers>>}[1m])) by (<<.GroupBy>>)'
+      name:
+        matches: "^ai_conformance_hpa_queue_depth$"
+        as: "ai_conformance_hpa_queue_depth"
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+
   # External metrics for cluster-wide GPU autoscaling (HPA type: External)
   # These are not scoped to any pod or namespace, enabling HPA in any namespace
   # to scale based on cluster-wide GPU metrics.
