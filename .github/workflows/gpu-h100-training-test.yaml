@@ -113,7 +113,8 @@ jobs:
 
   # NVIDIA self-hosted GPU runners reject pull_request event jobs before
   # checkout. PR GPU coverage runs through the pull-request/<number> push
-  # mirror after ok-to-test approval.
+  # mirror, which copy-pr-bot syncs for trusted authors and bots
+  # (.github/copy-pr-bot.yaml) and for anyone else after /ok to test.
   gpu-training-test:
     needs: [check-paths]
     if: >
