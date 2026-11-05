@@ -178,7 +178,7 @@ const (
 	// deleting the driver pods does NOT reload the module, because
 	// k8s-driver-manager keys on a digest of the ClusterPolicy spec rather than
 	// the ConfigMap contents (#2459).
-	nvregDocsHint = `NVreg_GrdmaPciTopoCheckOverride=1 is required on GB200 (EKS, OKE) and GB300 ` +
+	nvregDocsHint = `NVreg_GrdmaPciTopoCheckOverride=1 is required on GB200 (EKS, OKE, NVKE) and GB300 ` +
 		`(EKS) nodes; without it NCCL silently falls back to the Socket transport. ` +
 		`Deleting the nvidia-driver DaemonSet pods does NOT apply it — k8s-driver-manager ` +
 		`keys on a digest of the ClusterPolicy spec, not the ConfigMap. Procedure and the ` +
@@ -669,8 +669,10 @@ func waitForPreflightPodPhase(ctx context.Context, clientset kubernetes.Interfac
 // should run for the given (variant, accelerator, service) tuple. Keeps the
 // call site at the top of validateNcclAllReduceBw uncluttered.
 //
-// EKS and OKE are the GB200 NET fabrics that traverse a PCIe-attached NIC
-// (EFA and ConnectX IB respectively), so both need the dma-buf prerequisite —
+// EKS, OKE and NVKE are the GB200 NET fabrics that traverse a PCIe-attached NIC
+// (EFA, ConnectX IB, and ConnectX IB SR-IOV VFs respectively), so all need the
+// dma-buf prerequisite (recipes/overlays/gb200-nvke-ubuntu-training.yaml sets
+// the flag through its kernel-module-params ConfigMap) —
 // the module flag before R595, and on R595+ a topology property this preflight
 // cannot check, where it fails rather than assume. GB300 EKS shares the same
 // Grace PCI topology and EFA dma-buf requirement — see the
@@ -685,6 +687,6 @@ func graceBlackwellNetPreflightApplies(variant ncclVariant, accelerator recipe.C
 	if variant != variantNET {
 		return false
 	}
-	return (accelerator == recipe.CriteriaAcceleratorGB200 && (service == recipe.CriteriaServiceEKS || service == recipe.CriteriaServiceOKE)) ||
+	return (accelerator == recipe.CriteriaAcceleratorGB200 && (service == recipe.CriteriaServiceEKS || service == recipe.CriteriaServiceOKE || service == recipe.CriteriaServiceNVKE)) ||
 		(accelerator == recipe.CriteriaAcceleratorGB300 && service == recipe.CriteriaServiceEKS)
 }

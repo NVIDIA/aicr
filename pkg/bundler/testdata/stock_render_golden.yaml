@@ -1572,10 +1572,10 @@ gb200-nvke-ubuntu-training-kubeflow:
   018-sriov-ib-networks/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   README.md: 62d8c60303edcc160344c438434f610be8c35d76f5c196f7bf1dd5f7104b325f
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
-  bundle-info.yaml: 80698fe69fff0d52551b8d035412bc2ce7f46c306d072e9bcb2a32386b7c1a61
-  checksums.txt: d193ec66c6bbb3e088e8a6d81ed86b1bba869b80727d6d2033b2644069bb31a7
+  bundle-info.yaml: eaef9ec3c482a84add8dface16eefbad51b8535419d64ffbad9b2238ebdf2589
+  checksums.txt: 61bfe89b53afd50b4ecab8d5e70598a6e0f7f94c28d1fbc56878928a8883d5ed
   deploy.sh: 7d5e92b02a59bef508ee433e801875d4e7ed9c4b7e0a352658f0d768af99c067
-  recipe.yaml: b532ea321cc8dba394f8e6a3535f8cc15f2b288d35b3ed7ad4befd8d661a98c3
+  recipe.yaml: 2c289fc1b6123d579b520f258d002393beacc0de78ed4651eb26a3b3c004cb61
 gb200-oke-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
