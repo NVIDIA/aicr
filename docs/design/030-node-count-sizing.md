@@ -101,7 +101,9 @@ from the root Application's values.
 
 ## Context
 
-**Measurements.** Fleet readings cover 1 to 2500 GPU nodes. They are
+### What the measurements show
+
+Fleet readings cover 1 to 2500 GPU nodes. They are
 recorded in #3148 and #3214, the full tables with method in the 2026-11-04
 comment on #3214. The sizing in this ADR rests on cadvisor working-set
 series read from each cluster's Prometheus: 24h windows on an OCI L40S
@@ -153,7 +155,7 @@ peaks at the same 1Gi, and a 118-node cluster with 18k pods OOM-killed it at
 runs both replicas at 6.7Gi, while the Lambda cluster with 13k pods runs its
 leader at 10.5Gi, so retained Jobs from node churn are the better
 explanation there. Neither pod count nor churn is known when a bundle is
-generated or installed, which is why section 4 sizes nodewright to the
+generated or installed, which is why the initial tiers size nodewright to the
 largest reading at each node count.
 
 maintenance-operator grew about 1Gi in a week at a constant 2500 nodes, so
@@ -161,7 +163,9 @@ something besides node count drives it too
 ([#3267](https://github.com/NVIDIA/aicr/issues/3267) adds the scrape needed
 to find out).
 
-**Guidance elsewhere.** What exists outside AICR agrees on the shape and
+### Guidance elsewhere
+
+What exists outside AICR agrees on the shape and
 differs on the headroom:
 
 - The Kubernetes project sizes its own kube-system addons from node count
@@ -194,7 +198,7 @@ differs on the headroom:
   measured values are 10.5Gi and 11.6Gi. A formula validated at one scale was
   5 to 7x off at another, which is the case for measuring every tier.
 
-**Existing mechanisms this builds on:**
+### What AICR already has
 
 - `aicr bundle --nodes`, with its config-file, REST (`nodes`) and SDK
   (`BundleOptions.Nodes`) equivalents, already exists. It is documented as an
@@ -212,24 +216,33 @@ differs on the headroom:
 
 ## Options
 
-**A. Static values sized for the largest cluster (status quo after
-v1.1.0).** No mechanism is needed, but every cluster pays a 2500-node limit,
+### A. Static values sized for the largest cluster
+
+The status quo after v1.1.0. No mechanism is needed, but every cluster pays a 2500-node limit,
 requests still misstate usage, and anything above 2500 nodes needs
 hand-tuning.
 
-**B. A scale criteria axis or overlay per size band.** This multiplies the
+### B. A scale criteria axis or overlay per size band
+
+This multiplies the
 recipe matrix by the number of bands. It also selects a configuration by
 size, which is what #2427 rules out unless the user chooses it, and it cannot
 be applied at install time.
 
-**C. Documented `--set` and install-time overrides only.** Users compute
+### C. Documented `--set` and install-time overrides only
+
+Users compute
 their own values, which is how #3148's clusters run today. Each new large
 cluster then rediscovers the numbers, usually through a crash loop.
 
-**D. Declared, measured tier tables, selected by a stated count at
-generation or deploy time (chosen).**
+### D. Declared, measured tier tables selected by a stated count
 
-**E. A per-node formula instead of tiers.** `base + per_node × N` fits
+A per-component table of measured tiers, keyed on a node count the user
+states at generation or deploy time. The rest of this ADR describes it.
+
+### E. A per-node formula instead of tiers
+
+`base + per_node × N` fits
 gpu-operator and network-operator, which grow nearly linearly. It does not
 fit nodewright (pod-driven) or maintenance-operator (drifts at a constant
 node count), it resizes and restarts the controller on every node-count
@@ -238,7 +251,9 @@ measure. NodeWright's published formula (see Context) shows how far one can
 be off outside its validated range. Tiers are the formula's bucketed form,
 and that is also what addon-resizer's estimator does.
 
-**F. Run the Vertical Pod Autoscaler on the controllers.** VPA would size
+### F. Run the Vertical Pod Autoscaler on the controllers
+
+VPA would size
 each cluster from its own history, which is the opposite of AICR's
 contract: identical inputs give identical bundles, and every shipped value
 is qualified. It is another component to deploy and keep healthy, it needs
@@ -249,11 +264,41 @@ controllers lack today (#3265 to #3268), so it moves the measurement
 problem rather than removing it. VPA's default margin is still useful as the
 reference point for this ADR's 30%.
 
+### Comparison
+
+| | A. Static | B. Criteria axis | C. Overrides only | D. Tiers | E. Formula | F. VPA |
+|---|---|---|---|---|---|---|
+| Explicit intent, no silent specialization | yes | yes | yes | yes | yes | no |
+| Sizes a published bundle at install time | no | no | yes | yes | yes | yes |
+| Every shipped value measured and reproducible | no | yes | no | yes | no | no |
+| Small clusters pay only for their size | no | yes | yes | yes | yes | yes |
+| Resizes only at a few known boundaries | n/a | yes | n/a | yes | no | no |
+| No new recipe-matrix dimension | yes | no | yes | yes | yes | yes |
+| No new in-cluster component | yes | yes | yes | yes | yes | no |
+
 ## Decision
 
-Adopt option D, with these rules.
+Adopt option D. Controllers whose memory grows with cluster size declare a
+table of measured tiers in `recipes/components/<name>/sizing.yaml`,
+referenced from the registry. A tier is selected by a node count the user
+states, as `aicr bundle --nodes` at generation time or `sizing.nodeCount` on
+an `argocd-helm` bundle at install time; a count AICR infers, such as a
+snapshot's `criteria.nodes`, never selects one. Without a count, every
+controller carries the v1.0.0 defaults, and a large cluster deployed that
+way is expected to run out of memory.
 
-### 1. Defaults are the v1.0.0 values
+Each tier's request is the 90th percentile of the measured working set and
+its limit is the highest measured peak times 1.3, both taken at the largest
+cluster measured in the tier; no tier is interpolated. Applying a tier
+never lowers a value, and an explicit user override, `--set*` at generation
+time or the component's root-chart values at install time, replaces the
+tier's result. The bundle records the tier it applied.
+
+## Proposal
+
+### Defaults
+
+The defaults are the values AICR shipped in v1.0.0, before #3212 and #3236:
 
 | Controller | Values path | Request / limit |
 |---|---|---|
@@ -273,7 +318,7 @@ supported fix, and the documentation states this plainly.
 #3236's change that sources the NIC daemon's resources from the
 network-operator values stays; only its numbers revert.
 
-### 2. The count must be explicit
+### The node count
 
 Sizing applies only to a count stated as one of:
 
@@ -283,7 +328,7 @@ Sizing applies only to a count stated as one of:
 `criteria.nodes` and snapshot-derived counts never select a tier. The count
 means GPU nodes, the unit every measurement in this ADR is taken in.
 
-### 3. Tiers are declared per component and measured
+### The sizing file
 
 `recipes/components/<name>/sizing.yaml`, referenced from the registry
 entry's `sizing.file`:
@@ -348,11 +393,11 @@ resources:
 - Above the top tier, the top tier applies and AICR warns that the size is
   unqualified. Raising the ceiling needs a new measured tier.
 
-### 4. Initial tiers
+### Initial tiers
 
-Values are GPU nodes and memory request / limit, derived with the rules in
-section 3 from the measurements below. Each `sizing.yaml` pins these numbers
-with their sources.
+Values are GPU nodes and memory request / limit, derived with the rules
+under "The sizing file" from the measurements below. Each `sizing.yaml`
+pins these numbers with their sources.
 
 | Tier | gpu-operator | network-operator | maintenance-operator | nodewright (per replica) | NIC daemon (per pod) |
 |---|---|---|---|---|---|
@@ -390,7 +435,7 @@ The top tier stops at 3000 because nothing above 2500 nodes has been
 measured, and because the NIC daemon's 2.25Gi runs out near 6500
 NicDevices, about 3000 to 3500 GB300 nodes.
 
-### 5. Never lower; explicit overrides win
+### Precedence
 
 Applying a tier sets each memory request and limit to the larger of the
 current value and the tier's value, compared as Kubernetes quantities. A
@@ -405,7 +450,7 @@ result:
 
 Sizing never writes a path in an ADR-015 profile lock set.
 
-### 6. Generation time (`--nodes`)
+### Generation time (`--nodes`)
 
 In the bundler, the sizing pass runs once per component after base, overlay
 and inline values resolve, and before user overrides.
@@ -417,7 +462,7 @@ NIC daemon's NicClusterPolicy.
 The bundle records the count and the tier applied to each component in
 `bundle-info.yaml`, so evidence for a bundle names its sizing.
 
-### 7. Deploy time (`argocd-helm`)
+### Deploy time (`argocd-helm`)
 
 Remote-chart components that have a sizing table are not sized at
 generation time. Instead the bundle carries the table, and Helm selects a
