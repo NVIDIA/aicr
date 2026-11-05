@@ -476,7 +476,9 @@ var errStageLockUnsupported = stderrors.New("stage locking is not supported on t
 // holding dir open keep the same directory.
 //
 // The run holds a lock on the stage until it publishes or discards it, so a
-// later run can tell a live stage from one a killed run left behind.
+// later run can tell a live stage from one a killed run left behind. A stage
+// the filesystem cannot lock is built unlocked, and a later run that cannot
+// check its lock reports a conflict and keeps it.
 type bundleStage struct {
 	dir     string
 	path    string
@@ -524,10 +526,12 @@ func stageBundle(ctx context.Context, dir string) (*bundleStage, error) {
 	s.path = stage
 	lock, held, lockErr := lockStage(stage)
 	switch {
-	case lockErr != nil && !stderrors.Is(lockErr, errStageLockUnsupported):
-		s.discard()
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to lock bundle staging directory", lockErr)
-	case lockErr == nil && !held:
+	case lockErr != nil:
+		if !stderrors.Is(lockErr, errStageLockUnsupported) {
+			slog.Warn("failed to lock bundle staging directory, continuing without the lock",
+				"path", stage, "error", lockErr)
+		}
+	case !held:
 		s.discard()
 		return nil, errors.New(errors.ErrCodeInternal, "bundle staging directory is locked by another process")
 	}
