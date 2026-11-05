@@ -37,6 +37,10 @@ func TestCompute_Structure(t *testing.T) {
 		t.Fatalf("Compute: %v", err)
 	}
 	want := []wantRow{
+		// AKS recipes without an accelerator leaf carry only the root's
+		// toolkit-hardening nvidia-setup; the accelerator leaves' tuning.yaml
+		// rows below take precedence over it.
+		{"aks", "*", "-", "nvidia-setup", ""},
 		{"aks", "a100", "h100", "nvidia-setup", "nvidia-tuned"},
 		{"aks", "h100", "-", "nvidia-setup", "nvidia-tuned"},
 		{"bcm", "*", "h100", "nvidia-setup", ""},

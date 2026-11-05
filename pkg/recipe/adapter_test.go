@@ -26,6 +26,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -747,10 +748,7 @@ func buildProviderWithValues(t *testing.T, valuesPath string, values map[string]
 		t.Fatalf("marshal values: %v", err)
 	}
 
-	registryYAML := []byte(`apiVersion: aicr.run/v1beta1
-kind: ComponentRegistry
-components: []
-`)
+	registryYAML := []byte(providertest.EmptyRegistryYAML)
 	baseYAML := []byte(`kind: RecipeMetadata
 apiVersion: aicr.run/v1beta1
 metadata:

@@ -327,6 +327,17 @@ kubectl wait --for=jsonpath='{.status.conditions[?(@.type=="Available")].status}
 
 If nodewright is already installed, generate the bundle without the nodewright components (`--set nodewright:enabled=false --set nodewrightcustomizations:enabled=false`) to avoid upgrade conflicts.
 
+> **AKS:** `nodewright-customizations` carries the NVIDIA container toolkit
+> device-isolation hardening on AKS. Under the default azure-managed gpuStack
+> profile, disabling it leaves any unprivileged pod able to claim every GPU on a
+> node (operator-managed keeps the hardening in the GPU Operator's toolkit). On
+> AKS, disable only the operator
+> (`--set nodewright:enabled=false`) and keep `nodewright-customizations`. Its
+> NodeWright CRs then run on the installed operator, which must be v0.18.0 or
+> later to serve `nodewright.nvidia.com`. If an earlier install left NodeWright
+> CRs named `tuning` or `toolkit-hardening`, delete them first so the new
+> release does not conflict with them.
+
 ## Validate Cluster
 
 > **AKS note:** the validate commands below capture cluster state inline, and the

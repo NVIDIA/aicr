@@ -48,6 +48,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 type closedWorldTestDeployer struct {
@@ -1828,7 +1829,7 @@ func TestFilterEnabledComponents_ExcludedDriverInstallerWarning(t *testing.T) {
 			}
 			recipeResult.Metadata.GPUDriverState = tt.state
 
-			if _, filterErr := b.filterEnabledComponents(recipeResult); filterErr != nil {
+			if _, filterErr := b.filterEnabledComponents(t.Context(), recipeResult); filterErr != nil {
 				t.Fatalf("filterEnabledComponents() error = %v", filterErr)
 			}
 
@@ -1840,6 +1841,147 @@ func TestFilterEnabledComponents_ExcludedDriverInstallerWarning(t *testing.T) {
 			}
 			joined := strings.Join(b.warnings, "\n")
 			for _, want := range []string{tt.wantWarning, "driverless", "gpu-operator"} {
+				if !strings.Contains(joined, want) {
+					t.Errorf("warnings = %v, want substring %q", b.warnings, want)
+				}
+			}
+		})
+	}
+}
+
+// TestFilterEnabledComponents_ExcludedToolkitHardeningWarning pins the warning
+// raised when nodewright-customizations, carrying the AKS toolkit hardening, is
+// left out of a bundle (any path) while gpu-operator leaves the node-image
+// toolkit in place.
+func TestFilterEnabledComponents_ExcludedToolkitHardeningWarning(t *testing.T) {
+	t.Parallel()
+
+	gpuOp := func(toolkitEnabled bool) recipe.ComponentRef {
+		return recipe.ComponentRef{Name: "gpu-operator", Version: "v25.3.3", Type: "helm",
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+			Overrides: map[string]any{"toolkit": map[string]any{"enabled": toolkitEnabled}}}
+	}
+	nwc := func(manifests []string, overrides map[string]any) recipe.ComponentRef {
+		return recipe.ComponentRef{Name: "nodewright-customizations", Type: "helm",
+			ManifestFiles: manifests, Overrides: overrides}
+	}
+	hardening := []string{aksToolkitHardeningManifest}
+	disableSet := []config.Option{config.WithValueOverrides(map[string]map[string]string{
+		"nodewrightcustomizations": {"enabled": "false"},
+	})}
+
+	tests := []struct {
+		name        string
+		refs        []recipe.ComponentRef
+		cfgOpts     []config.Option
+		wantWarning string // substring expected in b.warnings; "" = no warning
+	}{
+		{
+			name:        "disabled via --set, azure-managed",
+			refs:        []recipe.ComponentRef{gpuOp(false), nwc(hardening, nil)},
+			cfgOpts:     disableSet,
+			wantWarning: "disabled via --set",
+		},
+		{
+			name:        "disabled by the recipe, azure-managed",
+			refs:        []recipe.ComponentRef{gpuOp(false), nwc(hardening, map[string]any{"enabled": false})},
+			wantWarning: "disabled by the recipe",
+		},
+		{
+			name:        "excluded by bundlers filter, azure-managed",
+			refs:        []recipe.ComponentRef{gpuOp(false), nwc(hardening, nil)},
+			cfgOpts:     []config.Option{config.WithBundlers([]string{"gpu-operator"})},
+			wantWarning: "excluded by the bundlers filter",
+		},
+		{
+			name:    "disabled via --set, operator-managed",
+			refs:    []recipe.ComponentRef{gpuOp(true), nwc(hardening, nil)},
+			cfgOpts: disableSet,
+		},
+		{
+			name: "kept with the RDMA opt-out, azure-managed",
+			refs: []recipe.ComponentRef{gpuOp(false), nwc(hardening, nil)},
+			cfgOpts: []config.Option{config.WithValueOverrides(map[string]map[string]string{
+				"nodewrightcustomizations": {"accelerator": "generic"},
+			})},
+		},
+		{
+			name: "disabled via --set, toolkit.enabled=false only in the values file",
+			refs: []recipe.ComponentRef{
+				{Name: "gpu-operator", Version: "v25.3.3", Type: "helm",
+					Source: "https://helm.ngc.nvidia.com/nvidia", ValuesFile: "components/gpu-operator/values-aks.yaml"},
+				nwc(hardening, nil),
+			},
+			cfgOpts:     disableSet,
+			wantWarning: "disabled via --set",
+		},
+		{
+			name: "disabled via --set, --set re-enables the operator toolkit",
+			refs: []recipe.ComponentRef{gpuOp(false), nwc(hardening, nil)},
+			cfgOpts: []config.Option{config.WithValueOverrides(map[string]map[string]string{
+				"nodewrightcustomizations": {"enabled": "false"},
+				"gpuoperator":              {"toolkit.enabled": "true"},
+			})},
+		},
+		{
+			name: "disabled via --set, --set-json re-enables the operator toolkit",
+			refs: []recipe.ComponentRef{gpuOp(false), nwc(hardening, nil)},
+			cfgOpts: []config.Option{
+				config.WithValueOverrides(map[string]map[string]string{
+					"nodewrightcustomizations": {"enabled": "false"},
+				}),
+				config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+					{Component: "gpuoperator", Path: "toolkit.enabled", Value: true},
+				}),
+			},
+		},
+		{
+			name: "disabled via --set, gpu-operator values unresolvable",
+			refs: []recipe.ComponentRef{
+				{Name: "gpu-operator", Version: "v25.3.3", Type: "helm",
+					Source: "https://helm.ngc.nvidia.com/nvidia", ValuesFile: "components/gpu-operator/does-not-exist.yaml"},
+				nwc(hardening, nil),
+			},
+			cfgOpts:     disableSet,
+			wantWarning: "could not be resolved",
+		},
+		{
+			name:    "disabled without the hardening manifest",
+			refs:    []recipe.ComponentRef{gpuOp(false), nwc(nil, nil)},
+			cfgOpts: disableSet,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var bundlerOpts []Option
+			if len(tt.cfgOpts) > 0 {
+				bundlerOpts = append(bundlerOpts, WithConfig(config.NewConfig(tt.cfgOpts...)))
+			}
+			b, err := New(bundlerOpts...)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			recipeResult := &recipe.RecipeResult{
+				APIVersion:    "aicr.run/v1",
+				Kind:          "Recipe",
+				Criteria:      &recipe.Criteria{Service: "aks", Intent: "training"},
+				ComponentRefs: tt.refs,
+			}
+			if _, filterErr := b.filterEnabledComponents(t.Context(), recipeResult); filterErr != nil {
+				t.Fatalf("filterEnabledComponents() error = %v", filterErr)
+			}
+
+			if tt.wantWarning == "" {
+				if len(b.warnings) != 0 {
+					t.Fatalf("warnings = %v, want none", b.warnings)
+				}
+				return
+			}
+			joined := strings.Join(b.warnings, "\n")
+			for _, want := range []string{tt.wantWarning, "device-isolation", "accelerator=generic"} {
 				if !strings.Contains(joined, want) {
 					t.Errorf("warnings = %v, want substring %q", b.warnings, want)
 				}
@@ -3313,7 +3455,6 @@ const requireNodeSelectorFixtureComponent = "require-node-selector-fixture"
 func requireNodeSelectorFixtureProvider(t *testing.T) recipe.DataProvider {
 	t.Helper()
 
-	tmpData := t.TempDir()
 	registryYAML := []byte(`apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
@@ -3325,9 +3466,7 @@ components:
           - controller.podSpec.nodeSelector
         requireNodeSelector: true
 `)
-	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), registryYAML, 0o600); err != nil {
-		t.Fatalf("write registry.yaml: %v", err)
-	}
+	tmpData := providertest.WriteDir(t, map[string][]byte{recipe.RegistryFileName: registryYAML})
 
 	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: tmpData})
@@ -3355,7 +3494,6 @@ const requireNodeSelectorIfStorageClassSetFixtureComponent = "require-node-selec
 func requireNodeSelectorIfStorageClassSetFixtureProvider(t *testing.T) recipe.DataProvider {
 	t.Helper()
 
-	tmpData := t.TempDir()
 	registryYAML := []byte(`apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
@@ -3371,9 +3509,7 @@ components:
           - controller.podSpec.nodeSelector
         requireNodeSelectorIfStorageClassSet: true
 `)
-	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), registryYAML, 0o600); err != nil {
-		t.Fatalf("write registry.yaml: %v", err)
-	}
+	tmpData := providertest.WriteDir(t, map[string][]byte{recipe.RegistryFileName: registryYAML})
 
 	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: tmpData})
@@ -4021,7 +4157,6 @@ func TestApplyNodeSchedulingOverrides_BoundProvider(t *testing.T) {
 	const uniqueComponent = "task2-bound-provider-only"
 	const nodeSelectorPath = "scheduling.nodeSelector"
 
-	tmpDir := t.TempDir()
 	registryYAML := "apiVersion: aicr.run/v1beta1\n" +
 		"kind: ComponentRegistry\n" +
 		"components:\n" +
@@ -4031,9 +4166,7 @@ func TestApplyNodeSchedulingOverrides_BoundProvider(t *testing.T) {
 		"      system:\n" +
 		"        nodeSelectorPaths:\n" +
 		"          - " + nodeSelectorPath + "\n"
-	if writeErr := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(registryYAML), 0600); writeErr != nil {
-		t.Fatalf("write registry.yaml: %v", writeErr)
-	}
+	tmpDir := providertest.WriteDir(t, map[string][]byte{recipe.RegistryFileName: []byte(registryYAML)})
 
 	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 	layered, layeredErr := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
@@ -4119,23 +4252,11 @@ func TestBundler_Make_BoundProviderEndToEnd(t *testing.T) {
 	//      and triggers the "base + overlay" merge in
 	//      RecipeResult.GetValuesForComponent — driver.version is only set
 	//      in the base, so our marker passes through into the emitted bundle).
-	tmpData := t.TempDir()
-
-	registryYAML := []byte("apiVersion: aicr.run/v1beta1\n" +
-		"kind: ComponentRegistry\n" +
-		"components: []\n")
-	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), registryYAML, 0o600); err != nil {
-		t.Fatalf("write registry.yaml: %v", err)
-	}
-
-	componentsDir := filepath.Join(tmpData, "components", "gpu-operator")
-	if err := os.MkdirAll(componentsDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
 	valuesContent := fmt.Appendf(nil, "driver:\n  version: %q\n", markerVersion)
-	if err := os.WriteFile(filepath.Join(componentsDir, "values.yaml"), valuesContent, 0o600); err != nil {
-		t.Fatalf("write values.yaml: %v", err)
-	}
+	tmpData := providertest.WriteDir(t, map[string][]byte{
+		recipe.RegistryFileName:               []byte(providertest.EmptyRegistryYAML),
+		"components/gpu-operator/values.yaml": valuesContent,
+	})
 
 	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
@@ -4596,11 +4717,9 @@ func TestCollectComponentManifests_MissingPath(t *testing.T) {
 	})
 
 	t.Run("layered provider with --data", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		minimalRegistry := "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"
-		if writeErr := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(minimalRegistry), 0600); writeErr != nil {
-			t.Fatalf("write registry.yaml: %v", writeErr)
-		}
+		tmpDir := providertest.WriteDir(t, map[string][]byte{
+			recipe.RegistryFileName: []byte(providertest.EmptyRegistryYAML),
+		})
 
 		embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 		layered, layeredErr := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{

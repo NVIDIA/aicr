@@ -28,6 +28,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
@@ -268,18 +269,6 @@ spec:
 
 func writeQueryExternalCriteriaCatalog(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	registry := `apiVersion: aicr.run/v1beta1
-kind: ComponentRegistry
-components: []
-`
-	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte(registry), 0o600); err != nil {
-		t.Fatalf("write registry: %v", err)
-	}
-	overlaysDir := filepath.Join(dir, "overlays")
-	if err := os.MkdirAll(overlaysDir, 0o755); err != nil {
-		t.Fatalf("create overlays directory: %v", err)
-	}
 	overlay := `apiVersion: aicr.run/v1beta1
 kind: RecipeMetadata
 metadata:
@@ -289,10 +278,10 @@ spec:
     service: external-query-service
   componentRefs: []
 `
-	if err := os.WriteFile(filepath.Join(overlaysDir, "external-query.yaml"), []byte(overlay), 0o600); err != nil {
-		t.Fatalf("write overlay: %v", err)
-	}
-	return dir
+	return providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":                []byte(providertest.EmptyRegistryYAML),
+		"overlays/external-query.yaml": []byte(overlay),
+	})
 }
 
 // TestRecipeAndQueryCommandsRejectInvalidRuntimeInventoryMode exercises

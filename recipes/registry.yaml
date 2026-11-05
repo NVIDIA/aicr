@@ -499,9 +499,10 @@ components:
         message: "Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes."
       - function: CheckWildcardAcceleratedToleration
         # Blocking: the wildcard deadlock requires manual node cordon/reboot to
-        # recover, so fail the bundle rather than emit a missable warning. The
-        # documented RDMA opt-out (--set nodewrightcustomizations:enabled=false)
-        # is exempt — a disabled component renders nothing and cannot deadlock.
+        # recover, so fail the bundle rather than emit a missable warning.
+        # Skipped when every manifest the component wires declares no
+        # interrupt (the AKS toolkit hardening alone). A component disabled
+        # via --set renders nothing and is exempt.
         severity: error
         conditions:
           service:
@@ -852,6 +853,10 @@ components:
       # it untested. The rules are in the function's doc.
       - function: CheckNVSentinelPostRemediationValidationCoherent
         severity: warning
+      # Blocking: a MaintenanceRequest (#3092) that would be accepted but
+      # neither cordon nor drain its node. The rules are in the function's doc.
+      - function: CheckNVSentinelMaintenanceRequestCoherent
+        severity: error
 
   # NVSentinel's remediation datastore, added only by the nvsentinel-observe,
   # -quarantine and -remediation mixins. Bundled apart from NVSentinel's own

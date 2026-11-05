@@ -87,6 +87,9 @@ func TestQualification(t *testing.T) {
 	t.Run("a registry restart mid-rollout loses no artifact", func(t *testing.T) {
 		active = registryRestart(ctx, t, active)
 	})
+	t.Run("the candidate's operator runs deployment validation with its AICR and fails the rollout on kind", func(t *testing.T) {
+		deploymentValidation(ctx, t, active)
+	})
 	t.Run("helm rollback to the installed release reads every plan and rollout", func(t *testing.T) {
 		rollbackToInstalled(ctx, t, active)
 	})

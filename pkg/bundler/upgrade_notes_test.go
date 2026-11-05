@@ -23,6 +23,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 	"github.com/NVIDIA/aicr/pkg/upgrade"
 )
 
@@ -125,7 +126,6 @@ func upgradeNotesHelmSource(pin string) string {
 func upgradeNotesFixtureProvider(t *testing.T, source, record string) recipe.DataProvider {
 	t.Helper()
 
-	tmpData := t.TempDir()
 	registryYAML := []byte(`apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
@@ -135,16 +135,10 @@ components:
     upgrades:
       file: components/` + upgradeNotesFixtureComponent + `/upgrades.yaml
 ` + source)
-	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), registryYAML, 0o600); err != nil {
-		t.Fatalf("write registry.yaml: %v", err)
-	}
-	compDir := filepath.Join(tmpData, "components", upgradeNotesFixtureComponent)
-	if err := os.MkdirAll(compDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(compDir, "upgrades.yaml"), []byte(record), 0o600); err != nil {
-		t.Fatalf("write upgrades.yaml: %v", err)
-	}
+	tmpData := providertest.WriteDir(t, map[string][]byte{
+		recipe.RegistryFileName: registryYAML,
+		"components/" + upgradeNotesFixtureComponent + "/upgrades.yaml": []byte(record),
+	})
 
 	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: tmpData})

@@ -110,6 +110,26 @@ func IsValidFeature(name string) bool {
 	return slices.Contains(ValidFeatures, resolved)
 }
 
+// FeatureInferenceGateway is the feature whose section reads the recipe's
+// inference gateway declaration (WithInferenceGateway).
+const FeatureInferenceGateway = featureInferenceGateway
+
+// FeatureSelected reports whether a WithFeatures selection includes feature:
+// an empty selection or "all" selects everything, and aliases resolve on both
+// sides.
+func FeatureSelected(features []string, feature string) bool {
+	if len(features) == 0 {
+		return true
+	}
+	want := ResolveFeature(feature)
+	for _, f := range features {
+		if canonical := ResolveFeature(f); canonical == featureAll || canonical == want {
+			return true
+		}
+	}
+	return false
+}
+
 // ScriptSection returns the script section name for a feature.
 func ScriptSection(feature string) string {
 	if section, ok := featureToScript[feature]; ok {
@@ -148,6 +168,14 @@ type Collector struct {
 	noCluster        bool
 	kubeconfig       string
 	allocationPolicy string
+
+	// inferenceGateway* carry the recipe-resolved inference gateway to the
+	// script; all empty means no recipe context. inferenceGatewayNone marks
+	// a recipe that declares no gateway, which is not the same as no recipe.
+	inferenceGatewayName      string
+	inferenceGatewayNamespace string
+	inferenceGatewayClass     string
+	inferenceGatewayNone      bool
 
 	// runSectionFn is overridable in tests. Defaults to c.runSection.
 	runSectionFn sectionRunner
@@ -199,6 +227,31 @@ func WithKubeconfig(kubeconfig string) CollectorOption {
 func WithAllocationPolicy(policy string) CollectorOption {
 	return func(c *Collector) {
 		c.allocationPolicy = policy
+	}
+}
+
+// WithInferenceGateway threads the recipe-resolved inference gateway
+// (pkg/validator/v1.ResolveInferenceGatewayProfile) into the evidence script
+// as AICR_INFERENCE_GATEWAY_NAME, AICR_INFERENCE_GATEWAY_NAMESPACE and
+// AICR_INFERENCE_GATEWAY_CLASS, so the inference-gateway section collects the
+// Gateway the recipe declares rather than whichever object carries the
+// conventional name. Empty values mean no recipe context: the variables are
+// not set and the script discovers the Gateway by its conventional name.
+func WithInferenceGateway(name, namespace, class string) CollectorOption {
+	return func(c *Collector) {
+		c.inferenceGatewayName = name
+		c.inferenceGatewayNamespace = namespace
+		c.inferenceGatewayClass = class
+	}
+}
+
+// WithNoInferenceGateway records that the recipe declares no inference
+// gateway, threaded as AICR_INFERENCE_GATEWAY_NONE=true. The section then
+// reports the prerequisite absent, as the conformance check skips the same
+// recipe, instead of discovering by name a Gateway the recipe does not ship.
+func WithNoInferenceGateway() CollectorOption {
+	return func(c *Collector) {
+		c.inferenceGatewayNone = true
 	}
 }
 
@@ -362,13 +415,15 @@ func (c *Collector) runSection(ctx context.Context, scriptPath, scriptDir, secti
 
 	cmd := exec.CommandContext(subCtx, "bash", scriptPath, section)
 	cmd.Dir = scriptDir
-	// Strip any ambient AICR_GPU_ALLOCATION_POLICY: the script must see the
-	// policy the collector resolved (appended below when set) or nothing at
-	// all (standalone runs use capability detection). Inheriting a stray
-	// value from the parent shell/CI would silently override detection and
-	// collect evidence for the wrong mode.
+	// Strip any ambient AICR_GPU_ALLOCATION_POLICY and AICR_INFERENCE_GATEWAY_*:
+	// the script must see what the collector resolved (appended below when
+	// set) or nothing at all (standalone runs use capability detection and
+	// discovery by name). Inheriting a stray value from the parent shell/CI
+	// would silently override detection and collect evidence for the wrong
+	// mode or the wrong Gateway.
 	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
-		return strings.HasPrefix(kv, "AICR_GPU_ALLOCATION_POLICY=")
+		return strings.HasPrefix(kv, "AICR_GPU_ALLOCATION_POLICY=") ||
+			strings.HasPrefix(kv, "AICR_INFERENCE_GATEWAY_")
 	})
 	env = append(env,
 		"EVIDENCE_DIR="+c.outputDir,
@@ -383,6 +438,15 @@ func (c *Collector) runSection(ctx context.Context, scriptPath, scriptDir, secti
 	}
 	if c.allocationPolicy != "" {
 		cmd.Env = append(cmd.Env, "AICR_GPU_ALLOCATION_POLICY="+c.allocationPolicy)
+	}
+	switch {
+	case c.inferenceGatewayName != "":
+		cmd.Env = append(cmd.Env,
+			"AICR_INFERENCE_GATEWAY_NAME="+c.inferenceGatewayName,
+			"AICR_INFERENCE_GATEWAY_NAMESPACE="+c.inferenceGatewayNamespace,
+			"AICR_INFERENCE_GATEWAY_CLASS="+c.inferenceGatewayClass)
+	case c.inferenceGatewayNone:
+		cmd.Env = append(cmd.Env, "AICR_INFERENCE_GATEWAY_NONE=true")
 	}
 
 	stdout := newBoundedBuffer(defaults.EvidenceMaxOutputBytes)

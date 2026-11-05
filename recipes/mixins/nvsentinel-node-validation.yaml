@@ -41,8 +41,6 @@ spec:
           controllers:
             validationRequest:
               enabled: true
-            maintenanceRequest:
-              enabled: false
           config:
             schedulingGate:
               cordon:

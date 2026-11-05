@@ -16,10 +16,7 @@ package flux
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"flag"
-	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -31,7 +28,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat/localformattest"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -1631,31 +1628,6 @@ func listFilesWithPrefix(t *testing.T, dir, prefix string) []string {
 
 // ---------- vendor-charts tests ----------
 
-// stubChartPuller returns a deterministic .tgz payload for any Pull call.
-type stubChartPuller struct{}
-
-var _ localformat.ChartPuller = (*stubChartPuller)(nil)
-
-func (s *stubChartPuller) Pull(_ context.Context, c localformat.Component) ([]byte, localformat.VendorRecord, string, error) {
-	chartName := c.ChartName
-	if chartName == "" {
-		chartName = c.Name
-	}
-	tgz := []byte(fmt.Sprintf("fake-tgz-%s-%s", chartName, c.Version))
-	sum := sha256.Sum256(tgz)
-	tarball := fmt.Sprintf("%s-%s.tgz", chartName, c.Version)
-	rec := localformat.VendorRecord{
-		Name:          c.Name,
-		Chart:         chartName,
-		Version:       c.Version,
-		Repository:    c.Repository,
-		SHA256:        hex.EncodeToString(sum[:]),
-		TarballName:   tarball,
-		PullerVersion: "stub v0.0.0",
-	}
-	return tgz, rec, tarball, nil
-}
-
 func TestGenerate_VendorCharts_BasicHelm(t *testing.T) {
 	ctx := context.Background()
 	outputDir := t.TempDir()
@@ -1691,7 +1663,7 @@ func TestGenerate_VendorCharts_BasicHelm(t *testing.T) {
 		Version:      "v0.9.0",
 		RepoURL:      "https://github.com/my-org/gitops.git",
 		VendorCharts: true,
-		Puller:       &stubChartPuller{},
+		Puller:       localformattest.StubPuller{},
 	}
 
 	output, err := g.Generate(ctx, outputDir)
@@ -1812,7 +1784,7 @@ func TestGenerate_VendorCharts_MixedComponent(t *testing.T) {
 		Version:            "v0.9.0",
 		RepoURL:            "https://github.com/my-org/gitops.git",
 		VendorCharts:       true,
-		Puller:             &stubChartPuller{},
+		Puller:             localformattest.StubPuller{},
 	}
 
 	_, err := g.Generate(ctx, outputDir)
@@ -1905,7 +1877,7 @@ func TestGenerate_VendorCharts_WithDynamic(t *testing.T) {
 		Version:      "v0.9.0",
 		RepoURL:      "https://github.com/my-org/gitops.git",
 		VendorCharts: true,
-		Puller:       &stubChartPuller{},
+		Puller:       localformattest.StubPuller{},
 	}
 
 	_, err := g.Generate(ctx, outputDir)
@@ -1962,7 +1934,7 @@ func TestGenerate_VendorCharts_ManifestOnlyUnaffected(t *testing.T) {
 		Version:            "v0.9.0",
 		RepoURL:            "https://github.com/my-org/gitops.git",
 		VendorCharts:       true,
-		Puller:             &stubChartPuller{},
+		Puller:             localformattest.StubPuller{},
 	}
 
 	_, err := g.Generate(ctx, outputDir)
@@ -2231,7 +2203,7 @@ func TestGenerate_VendoredChartWithPreManifests(t *testing.T) {
 		Version:      "v0.9.0",
 		RepoURL:      "https://github.com/my-org/gitops.git",
 		VendorCharts: true,
-		Puller:       &stubChartPuller{},
+		Puller:       localformattest.StubPuller{},
 	}
 
 	if _, err := g.Generate(ctx, outputDir); err != nil {
@@ -2645,7 +2617,7 @@ func TestGenerate_OCISourceName_VendoredChart(t *testing.T) {
 		ComponentValues: map[string]map[string]any{"cert-manager": {"crds": map[string]any{"enabled": true}}},
 		Version:         "v0.9.0",
 		VendorCharts:    true,
-		Puller:          &stubChartPuller{},
+		Puller:          localformattest.StubPuller{},
 		OCISourceName:   "aicr-bundle",
 	}
 

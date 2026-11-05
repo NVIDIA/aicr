@@ -60,8 +60,6 @@ componentRefs:
       - kube-prometheus-stack
       - network-operator
       - nodewright-customizations
-    manifestFiles:
-      - components/gpu-operator/manifests/nvidia-toolkit-hardening-aks.yaml
   - name: k8s-ephemeral-storage-metrics
     namespace: monitoring
     chart: k8s-ephemeral-storage-metrics
@@ -138,6 +136,7 @@ componentRefs:
     dependencyRefs:
       - nodewright-operator
     manifestFiles:
+      - components/nodewright-customizations/manifests/toolkit-hardening-aks.yaml
       - components/nodewright-customizations/manifests/tuning.yaml
   - name: nodewright-operator
     namespace: nodewright

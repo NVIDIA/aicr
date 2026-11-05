@@ -1711,7 +1711,7 @@ func TestResolveInferenceEndpoint(t *testing.T) {
 		Spec:       v1.ServiceSpec{Ports: []v1.ServicePort{{Port: 9000}}},
 	}
 	gatewaySvc := &v1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: inferenceGatewayName, Namespace: inferenceGatewayNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: validators.DefaultInferenceGatewayName, Namespace: validators.DefaultInferenceGatewayProfile().Namespace},
 		Spec:       v1.ServiceSpec{Ports: []v1.ServicePort{{Port: 8080}}},
 	}
 
@@ -1748,8 +1748,9 @@ func TestResolveInferenceEndpoint(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolveInferenceEndpoint() error: %v", err)
 		}
-		if got != defaultGatewayEndpoint() {
-			t.Errorf("resolveInferenceEndpoint() = %q, want %q", got, defaultGatewayEndpoint())
+		want := defaultGatewayEndpoint(validators.DefaultInferenceGatewayProfile())
+		if got != want {
+			t.Errorf("resolveInferenceEndpoint() = %q, want %q", got, want)
 		}
 	})
 

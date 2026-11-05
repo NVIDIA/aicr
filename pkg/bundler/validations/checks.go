@@ -74,6 +74,7 @@ func init() {
 	registerCheck("CheckNVSentinelDrainScopeCoherent", CheckNVSentinelDrainScopeCoherent)
 	registerCheck("CheckNVSentinelNodeValidationCoherent", CheckNVSentinelNodeValidationCoherent)
 	registerCheck("CheckNVSentinelPostRemediationValidationCoherent", CheckNVSentinelPostRemediationValidationCoherent)
+	registerCheck("CheckNVSentinelMaintenanceRequestCoherent", CheckNVSentinelMaintenanceRequestCoherent)
 	registerCheck("CheckNVSentinelMongoDBCoherent", CheckNVSentinelMongoDBCoherent)
 	registerCheck("CheckNVSentinelDatastorePrerequisites", CheckNVSentinelDatastorePrerequisites)
 	registerCheck("CheckNKTPExportersHaveBackend", CheckNKTPExportersHaveBackend)
@@ -87,22 +88,16 @@ func registerCheck(name string, fn ValidationFunc) {
 }
 
 // CheckWorkloadSelectorMissing checks if workload-selector is missing when conditions are met.
-// This is a generic check that can be used by any component.
+// This is a generic check that can be used by any component. A component that
+// renders only nodewrightNoInterruptManifests is skipped: those packages never
+// cordon or drain, so they cannot evict a workload.
 func CheckWorkloadSelectorMissing(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
 	if bundlerConfig == nil {
 		return nil, nil
 	}
 
-	// Check if component exists in recipe
-	hasComponent := false
-	for _, ref := range recipeResult.ComponentRefs {
-		if ref.Name == componentName {
-			hasComponent = true
-			break
-		}
-	}
-
-	if !hasComponent {
+	ref := recipeResult.GetComponentRef(componentName)
+	if ref == nil || rendersOnlyNoInterruptPackages(ref) {
 		return nil, nil
 	}
 
@@ -126,22 +121,16 @@ func CheckWorkloadSelectorMissing(ctx context.Context, componentName string, rec
 }
 
 // CheckAcceleratedSelectorMissing checks if accelerated-node-selector is missing when conditions are met.
-// This is a generic check that can be used by any component.
+// This is a generic check that can be used by any component. A component that
+// renders only nodewrightNoInterruptManifests is skipped: those manifests
+// select nodes by a fixed label and ignore the accelerated-node selector.
 func CheckAcceleratedSelectorMissing(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
 	if bundlerConfig == nil {
 		return nil, nil
 	}
 
-	// Check if component exists in recipe
-	hasComponent := false
-	for _, ref := range recipeResult.ComponentRefs {
-		if ref.Name == componentName {
-			hasComponent = true
-			break
-		}
-	}
-
-	if !hasComponent {
+	ref := recipeResult.GetComponentRef(componentName)
+	if ref == nil || rendersOnlyNoInterruptPackages(ref) {
 		return nil, nil
 	}
 
@@ -223,6 +212,29 @@ func checkConditions(recipeResult *recipe.RecipeResult, conditions map[string][]
 // check reads another.
 var nodewrightCustomizationsOverrideAliases = []string{"nodewrightcustomizations", "skyhookcustomizations"}
 
+// nodewrightNoInterruptManifests are the nodewright-customizations manifests
+// whose packages declare no interrupt (no cordon, drain or reboot) and ignore
+// the accelerated-node selector. Any other manifest is treated as one that
+// does, so a new or custom manifest is checked until it is listed here.
+var nodewrightNoInterruptManifests = []string{
+	"components/nodewright-customizations/manifests/toolkit-hardening-aks.yaml",
+}
+
+// rendersOnlyNoInterruptPackages reports whether every manifest ref wires is
+// in nodewrightNoInterruptManifests. A ref with no manifests reports false, so
+// the caller's check still runs.
+func rendersOnlyNoInterruptPackages(ref *recipe.ComponentRef) bool {
+	if len(ref.ManifestFiles) == 0 {
+		return false
+	}
+	for _, m := range ref.ManifestFiles {
+		if !slices.Contains(nodewrightNoInterruptManifests, m) {
+			return false
+		}
+	}
+	return true
+}
+
 // CheckWildcardAcceleratedToleration reports when the effective accelerated-node
 // tolerations for a component include a wildcard (keyless operator: Exists)
 // toleration. Scope it via registry conditions to services where the wildcard
@@ -233,30 +245,25 @@ var nodewrightCustomizationsOverrideAliases = []string{"nodewrightcustomizations
 // cordon/reboot to recover, so the registry wires this at severity: error to
 // block the bundle until a keyed toleration is supplied.
 //
+// A component whose manifests are all in nodewrightNoInterruptManifests (the
+// AKS toolkit hardening alone) has nothing to deadlock and is skipped.
+//
 // The default bundle path always hits this: with no
 // --accelerated-node-toleration flag the CLI falls back to
 // snapshotter.DefaultTolerations() (a single bare operator: Exists). An empty
 // toleration list is flagged too, because the tuning manifest template renders
 // its own wildcard fallback when none are injected.
 //
-// A component disabled via --set (e.g. the documented RDMA opt-out
-// --set nodewrightcustomizations:enabled=false) renders no package pods and
-// cannot deadlock, so it is skipped regardless of the toleration shape.
+// A component disabled via --set nodewrightcustomizations:enabled=false
+// renders no package pods and cannot deadlock, so it is skipped regardless of
+// the toleration shape.
 func CheckWildcardAcceleratedToleration(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
 	if bundlerConfig == nil {
 		return nil, nil
 	}
 
-	// Check if component exists in recipe
-	hasComponent := false
-	for _, ref := range recipeResult.ComponentRefs {
-		if ref.Name == componentName {
-			hasComponent = true
-			break
-		}
-	}
-
-	if !hasComponent {
+	ref := recipeResult.GetComponentRef(componentName)
+	if ref == nil || rendersOnlyNoInterruptPackages(ref) {
 		return nil, nil
 	}
 

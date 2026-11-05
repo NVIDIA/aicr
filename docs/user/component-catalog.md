@@ -1398,7 +1398,7 @@ Use a taint key your workloads do not tolerate, with effect `NoSchedule`, not `N
 - If lifecycle-manager is down, its webhook rejects every request (`failurePolicy: Fail`), and a deleted request stays `Terminating` on its finalizer. `kubectl uncordon <node>` returns a node to service; lifecycle-manager does not cordon it again, but the node keeps its `validation-failed` label until its failed requests are deleted.
 - Delete a node's pending requests before you uncordon it. The cordoned criterion only selects the node: lifecycle-manager does not check it again, so a pending request runs its diagnostic beside the workloads that land once the node is schedulable.
 
-**Resources and privileges.** One `lifecycle-manager` replica on a system node, with no resource requests or limits set. Its ClusterRole, bound cluster-wide, updates and patches Nodes and their status (cordon, labels, annotations and the condition above), manages ValidationRequests and their status, creates and deletes Jobs in any namespace, reads ResourceSlices, and manages Leases for leader election. The test Jobs run with the namespace's default ServiceAccount and no extra privileges, and reach DCGM over the network. The ValidationRequest and MaintenanceRequest CRDs, and the validating and mutating webhooks, are installed with it; the mixin keeps the MaintenanceRequest controller off, so its webhook rejects every MaintenanceRequest.
+**Resources and privileges.** One `lifecycle-manager` replica on a system node, with no resource requests or limits set. Its ClusterRole, bound cluster-wide, updates and patches Nodes and their status (cordon, labels, annotations and the condition above), manages ValidationRequests and their status, creates and deletes Jobs in any namespace, reads ResourceSlices, and manages Leases for leader election. The test Jobs run with the namespace's default ServiceAccount and no extra privileges, and reach DCGM over the network. The ValidationRequest and MaintenanceRequest CRDs, and the validating and mutating webhooks, are installed with it; the MaintenanceRequest controller stays off, so its webhook rejects every MaintenanceRequest, unless [`nvsentinel-maintenance-request`](#maintenance-requests) turns it on.
 
 **Retained data.** lifecycle-manager does not delete finished ValidationRequests; delete `Succeeded` ones by hand, since deleting a `Failed` one uncordons its nodes. Each validated node keeps the `NewNodeValidationRequested` condition, which stops it being validated again, and the `uncordon-*` labels.
 
@@ -1407,6 +1407,100 @@ Use a taint key your workloads do not tolerate, with effect `NoSchedule`, not `N
 **Deployment validation.** The registry's `nvsentinel` check asserts that the `lifecycle-manager` Deployment is fully rolled out wherever it renders, and passes where it does not. The same check fails on any pending pod in NVSentinel's namespace, so `aicr validate` can fail while a test Job pulls its image.
 
 **Stopping validation.** If `nvsentinel-remediation` is composed, the bundle fails without this mixin, and `fault-quarantine` keeps creating requests for rebooted nodes: move down from it first, as [Graded Remediation](#graded-remediation) describes, and wait for its requests. Then remove the registration barrier: the node pool taint, Karpenter `startupTaints`, kubelet `registerWithTaints` or `--register-schedulable=false`, so new GPU nodes join schedulable. Then stop your cordon automation, which is all that removes that barrier from a node that joins. Then wait about 15 minutes, the 600-second batch and the reconcile after it: a node cordoned just before is still in lifecycle-manager's in-memory batch, and its request can appear after you have deleted the others. Deleting a `Failed` request uncordons its nodes and labels them `k8saas.nvidia.com/uncordon-reason=ValidationSucceeded`, though they failed the diagnostic, so first taint the nodes labeled `nvsentinel.nvidia.com/validation-state=validation-failed` `NoSchedule`, with a key your workloads do not tolerate, or remove them from the cluster. Then, while lifecycle-manager still runs, delete the remaining ValidationRequests, which releases their nodes. Then regenerate the bundle without the mixin and redeploy. Helm leaves the CRDs in place, so a request left behind keeps its finalizer with nothing to remove it, and its nodes stay cordoned until you uncordon them.
+
+### Maintenance Requests
+
+A `MaintenanceRequest` lets an external system, or an operator, tell NVSentinel that a node needs maintenance. NVSentinel cordons and drains the node through its normal pipeline, and deleting the request uncordons it. Every notifier uses the same API: a cloud provider's notice, a planned repair, or an operator with a ticket. The `nvsentinel-maintenance-request` mixin turns on lifecycle-manager's MaintenanceRequest controller. It sets only that toggle, so compose it beside `nvsentinel-node-validation`, which turns lifecycle-manager on, and a [quarantine or remediation step](#graded-remediation), which cordons and drains. No shipped recipe composes it.
+
+```yaml
+# your-leaf-overlay.yaml
+spec:
+  mixins:
+    - nvsentinel-remediation             # or nvsentinel-quarantine
+    - nvsentinel-health-events-analyzer  # the remediation step requires it
+    - nvsentinel-node-validation
+    - nvsentinel-maintenance-request
+```
+
+`nvsentinel-node-validation` also runs [new-node validation](#node-validation), which needs the GPU Operator's DCGM hostengine. To run maintenance requests without it, turn new-node validation off in your leaf overlay or at bundle time; ValidationRequests the controller is given still run:
+
+```shell
+aicr bundle -r recipe.yaml --set-json 'nv-sentinel:lifecycle-manager.config.newNodeValidation=null' ...
+```
+
+This is a deliberate change to #3092's original plan, which put the controller in the remediation mixin. lifecycle-manager installs the MaintenanceRequest webhooks whenever it runs, and with the controller off they reject every request, so a separate opt-in keeps remediation adopters from gaining an API that cordons and drains nodes unless they choose it. It also keeps lifecycle-manager under one owner, so it composes beside new-node validation.
+
+**How a request works.** A requester creates a cluster-scoped `MaintenanceRequest` (`nvsentinel.dgxc.nvidia.com/v1`) for one node, carrying an unhealthy health event it writes. lifecycle-manager publishes the event through the platform-connector on its own node, and the chart's `MaintenanceRequest ruleset` in `fault-quarantine` matches it (`event.agent == 'lifecycle-manager'` with a `maintenanceRequestName` metadata key, which lifecycle-manager sets). `fault-quarantine` cordons the node and `node-drainer` drains it. The request's `HealthEventEmitted` condition turns `True` once the event is published.
+
+```yaml
+apiVersion: nvsentinel.dgxc.nvidia.com/v1
+kind: MaintenanceRequest
+metadata:
+  name: maintenance-<node>
+spec:
+  healthEvent:
+    version: 1
+    agent: my-maintenance-tool  # replaced by lifecycle-manager; kept in metadata.maintenanceRequestRequesterAgent
+    componentClass: Node
+    checkName: PlannedMaintenance
+    nodeName: <node>
+    isHealthy: false
+    isFatal: false
+    recommendedAction: NONE
+    message: "Planned hardware maintenance"
+```
+
+`recommendedAction` decides what happens after the drain. `NONE` stops at the drain. With the remediation step, built-in actions run as for any fault: `RESTART_VM`, for example, has janitor reboot the node. The quarantine step runs no action, so the node is cordoned and drained and stays so. To hand the node to an outside system, compose [`nvsentinel-external-remediation`](#external-remediation) as well and set `recommendedAction: CUSTOM` with `customRecommendedAction: external-remediation`.
+
+**When the node is ready for work.** `HealthEventEmitted=True` and the cordon both come before the drain finishes, so do not start work on either. Wait until the node's `dgxc.nvidia.com/nvsentinel-state` label reads `drain-succeeded`. With the remediation step the label can move on before you look, to `remediating` and then `remediation-succeeded` or `remediation-failed`, and each of those also means the drain finished. `deleteAfterTimeoutMinutes`, 300 minutes in the quarantine and remediation mixins, is when `node-drainer` starts force-deleting pods still running, not a deadline for the drain to finish (see [Drain Scope and Timing](#drain-scope-and-timing)), so wait for the label rather than a fixed time. On a Slurm cluster drained through the slinky-drainer, a finished drain leaves the label at `draining` under the quarantine step, and the label reads `draining` before the drain starts too. There, start watching the node's `DrainRequest` before you create the MaintenanceRequest and wait for it to report `DrainComplete=True`; `node-drainer` deletes a completed request, so its absence alone proves nothing. A Slurm drain has no time limit; it waits for the node's jobs to end (see [Slurm Drain Through Slinky](#slurm-drain-through-slinky)).
+
+**Lead time.** NVSentinel acts when the request is created, not at `spec.startTime`, which is informational and only has to be in the future if set. The requester sets the lead time by when it creates the request.
+
+**What the webhook checks.** On create: the controller is on, `spec.healthEvent` and its `nodeName` and `version` are set, `isHealthy` is false, the node exists, `startTime`, if set, is in the future, and no other request is open for the node. It freezes `spec.healthEvent` after creation, so the clearing event always matches the one that opened the fault. Both webhooks use `failurePolicy: Fail`.
+
+**Who may create requests.** Whoever can create one can cordon and drain any node. With the remediation step composed, it also chooses what follows the drain on that node through `recommendedAction`, such as a reboot, or, with `nvsentinel-external-remediation` composed beside the remediation step, a hand-off to an outside system. Grant it narrowly. The chart aggregates the resource into no built-in role, so by default only cluster-admin can. Grant a requester its own ClusterRole, since requests are cluster-scoped:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: maintenancerequest-writer
+rules:
+  - apiGroups: ["nvsentinel.dgxc.nvidia.com"]
+    resources: ["maintenancerequests"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+```
+
+Bind it to the requester's ServiceAccount with a ClusterRoleBinding.
+
+**Ending maintenance.** Delete the request. lifecycle-manager publishes a matching healthy event, removes the request's finalizer once platform-connector accepts it, and `fault-quarantine` uncordons the node. The node is uncordoned even if the action the request triggered is still running. A node with other active faults stays cordoned until they clear.
+
+**Failure behavior and recovery.**
+
+- **A forgotten request keeps its node cordoned.** Nothing reclaims it, and AICR ships no alert for it: alert routing and paging differ per cluster, so alerting is left to the operator. lifecycle-manager exports no metric for a request's age or `startTime`, so an alert needs your own collection, such as kube-state-metrics custom-resource state on `spec.startTime`. Until then, check for requests left open past their `startTime` yourself, for example with `kubectl get maintenancerequests -o 'custom-columns=NAME:.metadata.name,NODE:.spec.healthEvent.nodeName,CREATED:.metadata.creationTimestamp,START:.spec.startTime'`. Delete a stale request only once its maintenance is done, since deleting it uncordons the node.
+- **`HealthEventEmitted=False` with reason `Blocked`:** a janitor operation, such as a reboot, holds the node's lock, or a request for the node is still being deleted. lifecycle-manager retries every 30 seconds. With reason `Rejected`, the node already has an open request; delete this one.
+- **A deleted request stays `Terminating`:** lifecycle-manager could not publish the clearing event, usually because no platform-connector runs on its node, or lifecycle-manager is down. Fix that and the finalizer is removed. Only as a last resort remove the finalizer by hand, `kubectl patch maintenancerequest <name> --type=merge -p '{"metadata":{"finalizers":null}}'`; no clearing event is published, so the node stays cordoned until you uncordon it, and an uncordon cancels every other active fault on the node, so check `kubectl get node <node> -o jsonpath='{.metadata.annotations.quarantineHealthEvent}'` first. While lifecycle-manager is down its webhook rejects this patch too.
+- **The circuit breaker counts these cordons.** On a small cluster a request can trip it, which halts every cordon and uncordon until an operator resets it (see the [circuit breaker](#graded-remediation) notes).
+- **No history is kept.** A deleted request leaves no record. With [audit logging](#audit-logging-and-tracing), the cordon and uncordon are recorded.
+
+**Removing the mixin.** With the controller off, its webhook rejects every update to a request, the finalizer patch included, so a request left behind stays `Terminating` and its node stays cordoned. Remove it in this order, so no request is created after you check:
+
+1. Stop every requester: pause the systems that create requests and delete their ClusterRoleBindings, so only cluster-admin can still create one.
+2. Let maintenance in progress finish, then delete each request.
+3. Wait until `kubectl get maintenancerequests` returns none and their nodes are uncordoned.
+4. Remove the mixin and redeploy.
+
+The CRD is not removed; delete it by hand once no request remains, if you want it gone.
+
+**Prerequisites.**
+
+- `nvsentinel-node-validation`, for lifecycle-manager, and its own prerequisites: cert-manager for the webhook certificate, unless `lifecycle-manager.webhook.certProvider` is `openshift-service-ca` (see [node validation](#node-validation)), and the lifecycle-manager CRDs once under `helmfile`, `terraform` or `fleet` when you add it to a cluster that already runs NVSentinel. The `MaintenanceRequest` CRD ships beside the ValidationRequest CRD; apply both from `charts/lifecycle-manager/crds/`.
+- A quarantine or remediation step, for `fault-quarantine`, `node-drainer` and the datastore they read.
+- A platform-connector on lifecycle-manager's node, which AICR's tolerate-everything `global.tolerations` provides.
+
+**Bundle-time gates.** `CheckNVSentinelMaintenanceRequestCoherent` blocks a bundle in which a request would be accepted but do nothing: with `lifecycle-manager.controllers.maintenanceRequest.enabled` not a boolean, or, with it true, when lifecycle-manager, `fault-quarantine` or `node-drainer` does not render, when `global.dryRun` is true (the observe step) or not a boolean, or when `fault-quarantine.ruleSets` is set without the chart's `MaintenanceRequest ruleset` as it ships: enabled, with `cordon.shouldCordon: true`, no `match.any`, and a `match.all` holding only the chart's `HealthEvent` rule and, optionally, its `Node` rule. It also blocks a rule set whose `enabled` is not a boolean, since the chart writes it unquoted into fault-quarantine's config. Restate that rule set unchanged if you replace the rule sets. `CheckNVSentinelRemediationPipelineCoherent` requires the datastore. It rejects `--dynamic` on the controller toggle and, while it is on, on `global.lifecycleManager.enabled`, `global.faultQuarantine.enabled`, `global.nodeDrainer.enabled`, `global.dryRun` and `fault-quarantine.ruleSets`.
+
+**What is qualified.** The render test pins the controller, its socket mount, both webhooks and the rule set its events match against the chart. The Kind e2e (`tests/e2e/nvsentinel-maintenance-request/`) creates a request and checks the node is cordoned and drained, deletes it and checks the node is uncordoned, and checks that a request for a missing node or with a past `startTime` is rejected. A KWOK lane bundles and deploys the mixin with the remediation step.
 
 ## NVSentinel on Provider-Installed-Driver Platforms
 
@@ -1476,7 +1570,7 @@ Every other platform leaves `operator.runtimeClass` at the shared chart default 
 
 `CheckNVSentinelRuntimeClassCoherence` still compares `operator.runtimeClass` with metadata-collector's name as defense in depth, treating either side unset as `nvidia`.
 
-An AKS bundle therefore needs no NVSentinel overrides at all — only the keyed toleration AKS requires independently of NVSentinel (bundling an AKS recipe without one is itself a blocking error, `CheckWildcardAcceleratedToleration`):
+An AKS bundle therefore needs no NVSentinel overrides at all — only the keyed toleration AKS requires independently of NVSentinel (bundling an AKS accelerator recipe without one is itself a blocking error, `CheckWildcardAcceleratedToleration`):
 
 ```shell
 aicr bundle -r recipe.yaml \

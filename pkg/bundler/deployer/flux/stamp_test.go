@@ -24,6 +24,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat/localformattest"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -122,7 +123,7 @@ func TestGenerate_StampsVendoredWrapper(t *testing.T) {
 		Version:            "v1.4.0",
 		RepoURL:            "https://github.com/my-org/gitops.git",
 		VendorCharts:       true,
-		Puller:             &stubChartPuller{},
+		Puller:             localformattest.StubPuller{},
 	}
 	if _, err := g.Generate(context.Background(), outputDir); err != nil {
 		t.Fatalf("Generate: %v", err)

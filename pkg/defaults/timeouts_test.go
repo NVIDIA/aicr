@@ -70,6 +70,8 @@ func TestTimeoutConstants(t *testing.T) {
 
 		// Gang scheduling co-scheduling window
 		{"CoScheduleWindow", CoScheduleWindow, 10 * time.Second, 60 * time.Second},
+		{"GangNegativeWindow", GangNegativeWindow, 10 * time.Second, 60 * time.Second},
+		{"GangPositiveCompletionTimeout", GangPositiveCompletionTimeout, 1 * time.Minute, 5 * time.Minute},
 
 		// Trainer timeouts
 		{"TrainerControllerReadyTimeout", TrainerControllerReadyTimeout, 1 * time.Minute, 5 * time.Minute},
@@ -206,10 +208,11 @@ func TestCheckExecutionTimeoutRelationships(t *testing.T) {
 		timeout time.Duration
 	}{
 		{"DRATestPodTimeout", DRATestPodTimeout},
-		{"GangTestPodTimeout", GangTestPodTimeout},
+		{"GangPositiveCompletionTimeout", GangPositiveCompletionTimeout},
 		{"InferenceHealthTimeout", InferenceHealthTimeout},
 		{"InferencePerfJobTimeout", InferencePerfJobTimeout},
 		{"InferencePerfPodTimeout", InferencePerfPodTimeout},
+		{"InferenceRouteAcceptTimeout", InferenceRouteAcceptTimeout},
 		{"InferenceWorkloadReadyTimeout", InferenceWorkloadReadyTimeout},
 		{"ModelCachePopulateTimeout", ModelCachePopulateTimeout},
 	}
@@ -227,6 +230,7 @@ func TestCheckExecutionTimeoutRelationships(t *testing.T) {
 	//   InferenceNamespaceTerminationWait (5m)  — prior run's ns drain
 	//   + ModelCachePopulateTimeout       (13m) — model-cache populate (on by default)
 	//   + InferenceWorkloadReadyTimeout   (10m) — DynamoGraphDeployment ready
+	//   + InferenceRouteAcceptTimeout     (30s) — gateway-epp HTTPRoute accepted
 	//   + InferenceHealthTimeout          (5m)  — /v1/chat/completions readiness probe
 	//   + InferencePerfPodTimeout         (5m)  — AIPerf pod scheduling
 	//   + InferencePerfJobTimeout         (15m) — AIPerf benchmark runtime
@@ -238,11 +242,12 @@ func TestCheckExecutionTimeoutRelationships(t *testing.T) {
 	inferenceSequential := InferenceNamespaceTerminationWait +
 		ModelCachePopulateTimeout + // model-cache populate
 		InferenceWorkloadReadyTimeout + // DynamoGraphDeployment ready
+		InferenceRouteAcceptTimeout + // gateway-epp HTTPRoute accepted
 		InferenceHealthTimeout +
 		InferencePerfPodTimeout +
 		InferencePerfJobTimeout
 	if inferenceSequential >= CheckExecutionTimeout {
-		t.Errorf("Inference sequential phases %v (NamespaceTermination + CachePopulate + WorkloadReady + Health + PerfPod + PerfJob) must be less than CheckExecutionTimeout (%v)",
+		t.Errorf("Inference sequential phases %v (NamespaceTermination + CachePopulate + WorkloadReady + RouteAccept + Health + PerfPod + PerfJob) must be less than CheckExecutionTimeout (%v)",
 			inferenceSequential, CheckExecutionTimeout)
 	}
 

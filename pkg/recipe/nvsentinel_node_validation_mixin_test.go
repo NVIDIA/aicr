@@ -93,7 +93,7 @@ func assertLifecycleManagerOverrides(t *testing.T, overrides map[string]any) {
 	}
 
 	controllers, _ := lm["controllers"].(map[string]any)
-	wantControllers := map[string]bool{"validationRequest": true, "maintenanceRequest": false}
+	wantControllers := map[string]bool{"validationRequest": true}
 	if got := slices.Sorted(maps.Keys(controllers)); !slices.Equal(got, slices.Sorted(maps.Keys(wantControllers))) {
 		t.Errorf("lifecycle-manager.controllers = %v, want exactly %v", got, slices.Sorted(maps.Keys(wantControllers)))
 	}

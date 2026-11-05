@@ -16,284 +16,1375 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"slices"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/k8s"
+	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/ptr"
 )
+
+// Integration contract, mirroring kubernetes-sigs/ai-conformance
+// TestHPAAutoscaling: the recipe's Prometheus scrapes pods labeled
+// hpaMetricSourceLabel on the hpaMetricsPortName port at /metrics (through
+// the PodMonitor this check creates), and the recipe's prometheus-adapter
+// serves the hpaMetricSeries gauge as the per-pod custom metric of the same
+// name (the rule ships in recipes/components/prometheus-adapter/values.yaml).
+// The gauge stands in for an inference server's per-replica queue depth; the
+// check sets it directly through a mounted ConfigMap.
+const (
+	hpaWorkloadName       = "hpa-workload"
+	hpaMetricSourceLabel  = "ai-conformance.kubernetes.io/hpa-metric-source"
+	hpaAppLabelKey        = "app.kubernetes.io/name"
+	hpaMetricSeries       = "ai_conformance_hpa_queue_depth"
+	hpaMetricsPortName    = "metrics"
+	hpaMetricsPort        = 8080
+	hpaMetricMountPath    = "/etc/hpa-metric"
+	hpaMetricValueKey     = "value"
+	hpaContainerName      = "workload"
+	hpaCustomMetricsGroup = "custom.metrics.k8s.io"
+
+	hpaMinReplicas int32 = 1
+	hpaMaxReplicas int32 = 2
+)
+
+// hpaTestPrefix names the per-run test namespace; leftovers from interrupted
+// runs are found by this prefix.
+const hpaTestPrefix = "hpa-test-"
+
+// prometheusReleaseLabel is the label kube-prometheus-stack's Prometheus
+// selects PodMonitors and ServiceMonitors by when selectors are not opened
+// up; the recipe opens them, and the label is set anyway so a restricted
+// selector still matches.
+const prometheusReleaseLabel = "release"
+
+// Each phase sets a distinct metric value, so a sample carrying the current
+// phase's value cannot be stale. Adapter timestamps are not consulted:
+// prometheus-adapter reports the query time, not the sample time.
+const (
+	hpaTargetValue    = 10
+	hpaBaselineValue  = 1
+	hpaScaleUpValue   = 100
+	hpaScaleDownValue = 2
+)
+
+// hpaTerminationGracePeriod shortens pod removal on scale-down and cleanup;
+// the metric server holds no state worth draining.
+const hpaTerminationGracePeriod int64 = 5
+
+// hpaCustomMetricsVersions are the versions the HPA controller's custom
+// metrics client reads, in its preference order.
+var hpaCustomMetricsVersions = []string{"v1beta2", versionV1beta1}
+
+// metricsAPIWarmup bounds the wait for a declared adapter's custom metrics
+// API to become available. A var (not const) only so unit tests can shorten
+// it; production code must not reassign it.
+var (
+	metricsAPIWarmup        = defaults.MetricsAPIWarmupTimeout
+	metricsAPIProbeInterval = defaults.HPAPollInterval
+)
+
+// hpaPhase names the phase of the behavioral test that produced a verdict.
+type hpaPhase string
 
 const (
-	hpaTestPrefix = "hpa-test-"
+	hpaPhaseDeploy          hpaPhase = "deploy"
+	hpaPhaseBaseline        hpaPhase = "baseline"
+	hpaPhaseNegativeControl hpaPhase = "negative-control"
+	hpaPhaseScaleUp         hpaPhase = "scale-up"
+	hpaPhaseScaleDown       hpaPhase = "scale-down"
 )
 
-type hpaBehaviorReport struct {
-	Namespace                string
-	DeploymentName           string
-	HPAName                  string
-	ScaleUpDesiredReplicas   int32
-	ScaleUpCurrentReplicas   int32
-	ScaleUpDeploymentReplica int32
-	ScaleDownReplica         int32
-}
+// hpaMetricServerScript serves the mounted ConfigMap value as a Prometheus
+// gauge, re-reading it on every request. /healthz (the readiness probe)
+// succeeds only while the value is a finite number.
+const hpaMetricServerScript = `
+import math, os, socket
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-// CheckPodAutoscaling validates CNCF requirement #8b: Pod Autoscaling.
-// Verifies that the custom metrics API is available and the external metrics API
-// exposes GPU metrics, then proves the capability end-to-end with an HPA
-// behavioral test (scale-up + scale-down) driven by a cluster-wide external GPU
-// metric.
+VALUE_FILE = os.environ["HPA_METRIC_FILE"]
+SERIES = os.environ["HPA_METRIC_SERIES"]
+PORT = int(os.environ["HPA_METRIC_PORT"])
+
+def read_value():
+    with open(VALUE_FILE) as f:
+        value = float(f.read().strip())
+    if not math.isfinite(value):
+        raise ValueError("metric value %r is not finite" % value)
+    return value
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path not in ("/healthz", "/metrics"):
+            return self.reply(404, "text/plain", b"not found\n")
+        try:
+            value = read_value()
+        except (OSError, ValueError) as e:
+            return self.reply(503, "text/plain", (str(e) + "\n").encode())
+        if self.path == "/healthz":
+            return self.reply(200, "text/plain", b"ok\n")
+        body = "# TYPE %s gauge\n%s %r\n" % (SERIES, SERIES, value)
+        self.reply(200, "text/plain; version=0.0.4; charset=utf-8", body.encode())
+
+    def reply(self, code, ctype, body):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+class DualStackServer(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+    def server_bind(self):
+        self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        super().server_bind()
+
+try:
+    server = DualStackServer(("::", PORT), Handler)
+except OSError:
+    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+server.serve_forever()
+`
+
+// hpaWorkloadCommand starts the metric server only if the container sees
+// exactly one NVIDIA accelerator device, so a pod that was not actually
+// granted its accelerator never reports Ready.
+const hpaWorkloadCommand = `count=0
+for device in /dev/nvidia[0-9]*; do
+  [ -e "$device" ] || continue
+  count=$((count + 1))
+done
+if [ "$count" -ne 1 ]; then
+  echo "expected 1 accelerator device, found $count" >&2
+  exit 1
+fi
+exec python3 -c "$HPA_METRIC_SERVER"`
+
+// CheckPodAutoscaling validates CNCF requirement pod_autoscaling: the
+// HorizontalPodAutoscaler scales accelerator-backed pods up and back down on a
+// custom per-pod metric served through the custom metrics API. It mirrors
+// kubernetes-sigs/ai-conformance TestHPAAutoscaling:
 //
-// Pod-scoped GPU custom metrics (custom.metrics.k8s.io/.../pods/*/...) are
-// collected best-effort, not gated: they require dcgm-exporter to attribute each
-// GPU to its consuming pod via the kubelet pod-resources API, which today only
-// covers device-plugin (nvidia.com/gpu) allocations. DRA-claimed GPUs
-// (nvidia-dra-driver-gpu) are not attributed, so the per-pod series carry no
-// exported_pod label and the adapter returns empty. The autoscaling capability
-// is proven authoritatively by the external-metrics API plus the HPA behavioral
-// test below, which need no per-pod attribution — so absent pod-scoped metrics
-// is a warning, not a failure.
+//  1. deploy: a one-replica Deployment whose pod requests exactly one
+//     accelerator (DRA claim or nvidia.com/gpu: 1, following the resolved
+//     allocation mode as secure-accelerator-access does) and serves the gauge
+//     from a mounted ConfigMap, plus the PodMonitor that makes the recipe's
+//     Prometheus scrape it;
+//  2. baseline: the pod is Running and Ready and the custom metrics API
+//     reports 1 for it; only then is the HPA created, and it must reconcile at
+//     one replica; a one-minute negative control requires it to keep deciding
+//     on one replica while the metric is below target;
+//  3. scale-up: the metric is raised to 100; the HPA must scale to two
+//     replicas, every pod Running and Ready and reporting 100;
+//  4. scale-down: the metric is lowered to 2; the HPA must return to one
+//     replica after its 60s stabilization window.
+//
+// The recipe owns the adapter, so a custom metrics API that does not serve the
+// probe's metric fails the check (upstream skips) when prometheus-adapter (or
+// prometheus-adapter-ocp) is declared, and skips only when neither is. DCGM cannot attribute GPUs to pods
+// under DRA, so the HPA is driven by the probe's own gauge, never by
+// gpu_utilization.
 func CheckPodAutoscaling(ctx *validators.Context) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
 	}
 
-	// 0. Applicability gate (#2122). prometheus-adapter is the discriminating
-	// component for GPU-aware HPA — the monitoring-hpa overlay injects it, and
-	// without it there is no custom/external GPU metrics API for the HPA to read.
-	// The DCGM exporter is the live prerequisite. Crucially, a LIST ERROR
-	// (Forbidden/timeout/transport) must fail closed — it is NOT evidence that
-	// GPU metrics are unavailable — so it is passed as probeErr rather than being
-	// conflated with the empty-result case. An empty result (no error, zero
-	// dcgm-exporter pods) skips only when the recipe does not declare
-	// prometheus-adapter; when it does, the missing exporter is a real failure.
-	dcgmPods, dcgmErr := ctx.Clientset.CoreV1().Pods("").List(ctx.Ctx, metav1.ListOptions{
-		LabelSelector: "app=nvidia-dcgm-exporter",
-	})
-	present := dcgmErr == nil && len(dcgmPods.Items) > 0
+	// Applicability gate (#2122): prometheus-adapter (prometheus-adapter-ocp
+	// on OpenShift) is the component that serves custom.metrics.k8s.io.
+	// Declared but not served fails closed; not declared and not served
+	// skips. A declared adapter is given the warm-up window on any probe
+	// outcome short of a served version: its APIService registers before it
+	// is available, and discovery reports that state as an error.
+	adapter, declared := hpaAdapterComponent(ctx)
+	metricsVersion, probeErr := resolveCustomMetricsVersion(ctx.Clientset)
+	if declared && (probeErr != nil || metricsVersion == "") {
+		probeErr = waitForMetricsAPI(ctx.Ctx, metricsAPIWarmup, metricsAPIProbeInterval,
+			func(context.Context) error {
+				var err error
+				if metricsVersion, err = resolveCustomMetricsVersion(ctx.Clientset); err != nil {
+					return err
+				}
+				if metricsVersion == "" {
+					return errors.New(errors.ErrCodeNotFound, hpaCustomMetricsGroup+" is not served")
+				}
+				return nil
+			})
+		if probeErr != nil && stderrors.Is(probeErr, errors.New(errors.ErrCodeNotFound, "")) {
+			probeErr = nil // settled: still absent after the warm-up window
+		}
+	}
 	if err := (validators.Capability{
-		Component: "prometheus-adapter",
-		Subject:   "nvidia-dcgm-exporter pods (app=nvidia-dcgm-exporter)",
-		AbsentMsg: "recipe declares prometheus-adapter (GPU HPA) but no nvidia-dcgm-exporter pods are running — " +
-			"apply the bundle or check RBAC; GPU metrics cannot reach the HPA without them",
-		InapplicableMsg: "DCGM exporter not found and prometheus-adapter not declared in recipe — " +
-			"GPU metrics not available for HPA",
-	}).Require(ctx, dcgmErr, present); err != nil {
+		Component: adapter,
+		Subject:   hpaCustomMetricsGroup + " API group",
+		AbsentMsg: "recipe declares " + adapter + " but " + hpaCustomMetricsGroup + " is not served — " +
+			"apply the bundle or check the adapter's APIService and pods; the HPA cannot read a custom metric without it",
+		InapplicableMsg: hpaCustomMetricsGroup + " not served and prometheus-adapter not declared in recipe (nor prometheus-adapter-ocp) — " +
+			"no custom metrics API for the HPA to read",
+	}).Require(ctx, probeErr, metricsVersion != ""); err != nil {
 		return err
 	}
 
-	// 1. Custom metrics API available
-	restClient := ctx.Clientset.Discovery().RESTClient()
-	if restClient == nil {
-		return errors.New(errors.ErrCodeInternal, "discovery REST client is not available")
-	}
-	rawURL := "/apis/custom.metrics.k8s.io/v1beta1"
-	// Retry: the aggregated APIService can be registered but not yet serving
-	// (prometheus-adapter relist) right after the deployment phase. Fail closed
-	// after the warmup budget.
-	var result rest.Result
-	if pollErr := waitForMetricsAPI(ctx.Ctx, defaults.MetricsAPIWarmupTimeout, defaults.HPAPollInterval,
-		func(c context.Context) error {
-			result = restClient.Get().AbsPath(rawURL).Do(c)
-			return result.Error()
-		}); pollErr != nil {
-		return errors.Wrap(errors.ErrCodeNotFound,
-			"custom metrics API not available (prometheus-adapter not ready)", pollErr)
-	}
-	var statusCode int
-	result.StatusCode(&statusCode)
-	rawAPI, err := result.Raw()
+	// Bound all work so one bounded namespace cleanup plus the skew/flush
+	// margin fit inside the check's deadline (see gpuCheckWorkBudget).
+	budget, err := gpuCheckWorkBudget(ctx.Ctx, podAutoscalingWorkBudget)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed reading custom metrics API response", err)
+		return err
 	}
-	var customMetricsResp struct {
-		GroupVersion string `json:"groupVersion"`
-		Resources    []struct {
-			Name string `json:"name"`
-		} `json:"resources"`
+	workCtx, cancelWork := ctx.Timeout(budget)
+	defer cancelWork()
+	work := *ctx
+	work.Ctx = workCtx
+	ctx = &work
+
+	dynClient, err := getDynamicClient(ctx)
+	if err != nil {
+		return err
 	}
-	if unmarshalErr := json.Unmarshal(rawAPI, &customMetricsResp); unmarshalErr != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to parse custom metrics API response", unmarshalErr)
+	scenario, err := newHPAScenario(ctx, dynClient, metricsVersion)
+	if err != nil {
+		return err
 	}
-	recordRawTextArtifact(ctx, "Custom Metrics API",
-		"kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1",
-		fmt.Sprintf("Endpoint:        %s\nHTTP Status:     %d\nGroupVersion:    %s\nResource count:  %d",
-			rawURL, statusCode, valueOrUnknown(customMetricsResp.GroupVersion), len(customMetricsResp.Resources)))
+	return scenario.runWithCleanup(ctx)
+}
 
-	// 2. GPU custom metrics have data (best-effort poll — adapter relist is ~30s).
-	// This is no longer a gate (see godoc), so the retry budget is kept short:
-	// it only needs to cover one adapter relist cycle on device-plugin clusters
-	// where the metric will appear. On DRA clusters it never appears, so a long
-	// budget would just waste wall-clock before the warn-and-continue below.
-	metrics := []string{"gpu_utilization", "gpu_memory_used", "gpu_power_usage"}
-	namespaces := []string{defaults.GPUOperatorNamespace, namespaceDynamoSystem}
+// hpaScenario drives one baseline, scale-up and scale-down cycle. Timings
+// and the metrics reader are fields so unit tests can drive the cycle against
+// a fake control plane without the aggregated API.
+type hpaScenario struct {
+	clientset kubernetes.Interface
+	dynClient dynamic.Interface
+	testRun   *gpuTestRun
 
-	var found bool
-	var foundPath string
-	var foundItems int
-	maxAttempts := 6 // ~1 minute with 10s intervals — covers one relist cycle
-pollLoop:
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		for _, metric := range metrics {
-			for _, ns := range namespaces {
-				path := fmt.Sprintf(
-					"/apis/custom.metrics.k8s.io/v1beta1/namespaces/%s/pods/*/%s",
-					ns, metric)
-				raw, rawErr := restClient.Get().AbsPath(path).DoRaw(ctx.Ctx)
-				if rawErr != nil {
-					continue
-				}
+	// dra selects the accelerator request shape: a ResourceClaimTemplate
+	// claim at draVersion, or nvidia.com/gpu limits pinned to nodeNames.
+	dra         bool
+	draVersion  string
+	nodeNames   []string
+	tolerations []corev1.Toleration
 
-				var metricsResp struct {
-					Items []json.RawMessage `json:"items"`
-				}
-				if json.Unmarshal(raw, &metricsResp) == nil && len(metricsResp.Items) > 0 {
-					found = true
-					foundPath = path
-					foundItems = len(metricsResp.Items)
-					break
-				}
+	metricsVersion string
+	readMetrics    func(ctx context.Context) ([]byte, error)
+
+	pollInterval          time.Duration
+	workloadReadyTimeout  time.Duration
+	metricTimeout         time.Duration
+	scaleTimeout          time.Duration
+	scaleDownTimeout      time.Duration
+	negativeControlWindow time.Duration
+	stabilization         time.Duration
+
+	phase   hpaPhase
+	timings map[hpaPhase]time.Duration
+}
+
+// newHPAScenario resolves the GPU allocation mode the way
+// secure-accelerator-access does (VERIFY the recipe policy, then SELECT) and
+// builds the scenario with production timings.
+func newHPAScenario(ctx *validators.Context, dynClient dynamic.Interface, metricsVersion string) (*hpaScenario, error) {
+	mode, err := detectGPUAllocationMode(ctx.Ctx, ctx.Clientset, dynClient)
+	if err != nil {
+		return nil, err
+	}
+	recordRawTextArtifact(ctx, "GPU allocation mode",
+		"kubectl get deviceclass gpu.nvidia.com; kubectl get resourceslices; kubectl get nodes -o wide",
+		mode.Summary())
+	policy := ctx.ValidationInput.GetGPUAllocationPolicy()
+	recordRawTextArtifact(ctx, "GPU allocation policy", "", fmt.Sprintf("configured policy: %s", policy))
+	if verifyErr := verifyGPUAllocationPolicy(policy, mode); verifyErr != nil {
+		return nil, verifyErr
+	}
+
+	run, err := newGPUTestRun()
+	if err != nil {
+		return nil, err
+	}
+	run.namespace = hpaTestPrefix + run.token
+	s := &hpaScenario{
+		clientset:             ctx.Clientset,
+		dynClient:             dynClient,
+		testRun:               run,
+		tolerations:           ctx.Tolerations,
+		metricsVersion:        metricsVersion,
+		pollInterval:          defaults.HPAPollInterval,
+		workloadReadyTimeout:  defaults.HPAWorkloadReadyTimeout,
+		metricTimeout:         defaults.HPAMetricTimeout,
+		scaleTimeout:          defaults.HPAScaleTimeout,
+		scaleDownTimeout:      defaults.HPAScaleDownTimeout,
+		negativeControlWindow: defaults.HPANegativeControlWindow,
+		stabilization:         defaults.HPAScaleDownStabilization,
+		timings:               map[hpaPhase]time.Duration{},
+	}
+	s.readMetrics = func(c context.Context) ([]byte, error) {
+		return readHPAPodMetrics(c, s.clientset, s.metricsVersion, s.testRun.namespace)
+	}
+
+	switch {
+	case policy == validatorv1.GPUAllocationPolicyDRAResourceClaim,
+		policy == validatorv1.GPUAllocationPolicyUnspecified && mode.DRAUsable:
+		s.dra = true
+		s.draVersion = mode.APIVersion
+		recordRawTextArtifact(ctx, "HPA workload accelerator request", "",
+			fmt.Sprintf("mode exercised: DRA (%s ResourceClaimTemplate at %s/%s, one device per pod)",
+				draDriverGPU, apiGroupResourceK8sIO, mode.APIVersion))
+		validators.EmitExtraOrWarn(validators.GPUAllocationResolvedExtra(true, false))
+	case policy == validatorv1.GPUAllocationPolicyDevicePluginExtendedResource,
+		policy == validatorv1.GPUAllocationPolicyUnspecified && mode.DevicePluginUsable:
+		s.nodeNames = mode.DevicePluginNodes
+		recordRawTextArtifact(ctx, "HPA workload accelerator request", "",
+			fmt.Sprintf("mode exercised: device plugin (%s: 1 per pod; node affinity: %s)",
+				resourceNVIDIAGPU, strings.Join(mode.DevicePluginNodes, ",")))
+		validators.EmitExtraOrWarn(validators.GPUAllocationResolvedExtra(false, false))
+	default:
+		return nil, errors.New(errors.ErrCodeUnavailable, fmt.Sprintf(
+			"no usable GPU allocation mechanism for the HPA autoscaling test: %s; %s",
+			mode.DRADetail, mode.DevicePluginDetail))
+	}
+	return s, nil
+}
+
+// runWithCleanup creates the per-run namespace, runs the cycle, and always
+// tears the namespace down. The return is NAMED so a terminally failed
+// cleanup fails an otherwise-passing check: a PASS that leaks two allocated
+// accelerators is not a pass. A primary test error always wins.
+func (s *hpaScenario) runWithCleanup(ctx *validators.Context) (err error) {
+	if err = createGPUTestNamespace(ctx.Ctx, s.clientset, s.testRun); err != nil {
+		return err
+	}
+	defer func() {
+		status, cleanupErr := cleanupHPAWorkload(s.clientset, s.dynClient, s.testRun)
+		recordRawTextArtifact(ctx, "Delete test namespace", cleanupInspectEquivalent(s.testRun.namespace), status)
+		if cleanupErr != nil && err == nil {
+			err = cleanupErr
+		}
+	}()
+
+	err = s.run(ctx)
+	recordRawTextArtifact(ctx, "HPA behavioral test verdict", "", s.verdictSummary(err))
+	if err != nil {
+		return phaseError(s.phase, err)
+	}
+	return nil
+}
+
+// run executes the phases in order.
+func (s *hpaScenario) run(ctx *validators.Context) error {
+	s.phase = hpaPhaseDeploy
+	if err := s.deploy(ctx); err != nil {
+		return err
+	}
+	if _, err := s.establishBaseline(ctx); err != nil {
+		return err
+	}
+	if upErr := s.scaleUp(ctx); upErr != nil {
+		return upErr
+	}
+	return s.scaleDown(ctx)
+}
+
+// verdictSummary renders which phase produced the verdict and how long each
+// completed phase took.
+func (s *hpaScenario) verdictSummary(err error) string {
+	var sb strings.Builder
+	if err == nil {
+		fmt.Fprintf(&sb, "Verdict:          PASS (all phases completed; last phase: %s)\n", s.phase)
+	} else {
+		fmt.Fprintf(&sb, "Verdict:          FAIL in phase %s\nError:            %v\n", s.phase, err)
+	}
+	fmt.Fprintf(&sb, "Metric:           %s (%s/%s, Pods type, target averageValue %d)\n",
+		hpaMetricSeries, hpaCustomMetricsGroup, s.metricsVersion, hpaTargetValue)
+	fmt.Fprintf(&sb, "Replicas:         min %d, max %d, scale-down stabilization %s\n",
+		hpaMinReplicas, hpaMaxReplicas, s.stabilization)
+	for _, phase := range []hpaPhase{hpaPhaseDeploy, hpaPhaseBaseline, hpaPhaseNegativeControl, hpaPhaseScaleUp, hpaPhaseScaleDown} {
+		if d, ok := s.timings[phase]; ok {
+			fmt.Fprintf(&sb, "Phase %-17s %s\n", string(phase)+":", d.Round(time.Second))
+		}
+	}
+	return sb.String()
+}
+
+// phaseError names the phase in the error while keeping the inner code, so
+// the reported code (what ExitCodeFromError reads) is unchanged.
+func phaseError(phase hpaPhase, err error) error {
+	return wrapWithCode(err, errors.ErrCodeInternal, fmt.Sprintf("HPA autoscaling test failed in phase %s", phase))
+}
+
+// deploy creates the metric ConfigMap at the baseline value, the PodMonitor,
+// in DRA mode the ResourceClaimTemplate, and the one-replica Deployment.
+func (s *hpaScenario) deploy(ctx *validators.Context) error {
+	start := time.Now()
+	ns := s.testRun.namespace
+	if _, err := s.clientset.CoreV1().ConfigMaps(ns).Create(ctx.Ctx,
+		buildHPAMetricConfigMap(ns, hpaBaselineValue), metav1.CreateOptions{}); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create HPA metric ConfigMap", err)
+	}
+	if _, err := s.dynClient.Resource(podMonitorGVR).Namespace(ns).Create(ctx.Ctx,
+		buildHPAPodMonitor(ns), metav1.CreateOptions{}); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal,
+			"failed to create PodMonitor for the HPA workload — the recipe's kube-prometheus-stack must serve monitoring.coreos.com/v1", err)
+	}
+	if s.dra {
+		if _, err := s.dynClient.Resource(draGVRAt(s.draVersion, "resourceclaimtemplates")).Namespace(ns).Create(ctx.Ctx,
+			buildHPAClaimTemplate(ns, s.draVersion), metav1.CreateOptions{}); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to create HPA ResourceClaimTemplate", err)
+		}
+	}
+	deployment := buildHPADeployment(ns, s.dra, s.nodeNames, s.tolerations)
+	if _, err := s.clientset.AppsV1().Deployments(ns).Create(ctx.Ctx, deployment, metav1.CreateOptions{}); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create HPA workload Deployment", err)
+	}
+	recordRawTextArtifact(ctx, "HPA test resources",
+		fmt.Sprintf("kubectl get configmap,podmonitor,resourceclaimtemplate,deploy,hpa,pods -n %s", ns),
+		fmt.Sprintf("Namespace:    %s\nConfigMap:    %s (%s=%d)\nPodMonitor:   %s (scrape %s)\nDeployment:   %s (replicas %d, image %s)\nHPA:          %s (created after the baseline is established)",
+			ns, hpaWorkloadName, hpaMetricValueKey, hpaBaselineValue, hpaWorkloadName, defaults.HPAScrapeInterval,
+			hpaWorkloadName, hpaMinReplicas, defaults.PythonProbeImage, hpaWorkloadName))
+	s.timings[hpaPhaseDeploy] = time.Since(start)
+	return nil
+}
+
+// establishBaseline waits for the baseline pod and its metric, creates the
+// HPA, requires it to reconcile at one replica, and holds the negative
+// control.
+func (s *hpaScenario) establishBaseline(ctx *validators.Context) (hpaState, error) {
+	s.phase = hpaPhaseBaseline
+	start := time.Now()
+	slog.Info("waiting for the baseline accelerator pod to become Ready", "namespace", s.testRun.namespace)
+	state, err := s.waitForState(ctx.Ctx, s.workloadReadyTimeout, func(st hpaState) error {
+		if st.hpa != nil {
+			return errors.New(errors.ErrCodeConflict, "HPA exists before the baseline was established")
+		}
+		return checkHPAWorkload(st, hpaMinReplicas)
+	})
+	if err != nil {
+		if problems := hpaPodPrerequisiteProblems(state.allPods()); len(problems) > 0 {
+			err = errors.Wrap(errors.ErrCodeUnavailable, strings.Join(problems, "; "), err)
+		}
+		return hpaState{}, wrapWithCode(err, errors.ErrCodeTimeout, "baseline accelerator pod did not become Ready")
+	}
+
+	slog.Info("waiting for the custom metrics API to report the baseline value", "value", hpaBaselineValue, "pods", state.podNames())
+	if metricErr := s.waitForMetric(ctx.Ctx, hpaBaselineValue, fixedPods(state.podNames())); metricErr != nil {
+		return hpaState{}, wrapWithCode(metricErr, errors.ErrCodeNotFound,
+			"custom metrics pipeline does not serve the workload metric — check the PodMonitor scrape and the prometheus-adapter rule for "+hpaMetricSeries)
+	}
+
+	// Created only now, so any scaling from here on is the HPA's.
+	if _, createErr := s.clientset.AutoscalingV2().HorizontalPodAutoscalers(s.testRun.namespace).Create(ctx.Ctx,
+		buildHPA(s.testRun.namespace, s.stabilization), metav1.CreateOptions{}); createErr != nil {
+		return hpaState{}, errors.Wrap(errors.ErrCodeInternal, "failed to create HorizontalPodAutoscaler", createErr)
+	}
+	state, err = s.waitForState(ctx.Ctx, s.metricTimeout, func(st hpaState) error {
+		return checkHPAScaledTo(st, hpaMinReplicas, hpaBaselineValue)
+	})
+	if err != nil {
+		return hpaState{}, hpaPhaseFailure(err, "HPA did not reconcile on the custom metric at baseline", state)
+	}
+	s.timings[hpaPhaseBaseline] = time.Since(start)
+	recordRawTextArtifact(ctx, "HPA phase: baseline",
+		fmt.Sprintf("kubectl get hpa %s -n %s -o yaml", hpaWorkloadName, s.testRun.namespace),
+		fmt.Sprintf("Pods:             %s\nMetric reported:  %d for every pod\nHPA:              ScalingActive=True, average %d, desired %d, current %d\nElapsed:          %s",
+			strings.Join(state.podNames(), ","), hpaBaselineValue, hpaBaselineValue, hpaMinReplicas, hpaMinReplicas,
+			s.timings[hpaPhaseBaseline].Round(time.Second)))
+
+	s.phase = hpaPhaseNegativeControl
+	start = time.Now()
+	slog.Info("negative control: the HPA must hold one replica while the metric is below target", "window", s.negativeControlWindow)
+	last, holdErr := s.holdState(ctx.Ctx, s.negativeControlWindow, func(st hpaState) error {
+		return checkHPADecided(st, hpaMinReplicas, hpaBaselineValue)
+	})
+	if holdErr != nil {
+		return hpaState{}, hpaPhaseFailure(holdErr, fmt.Sprintf("HPA did not hold %d replica with the metric below target", hpaMinReplicas), last)
+	}
+	s.timings[hpaPhaseNegativeControl] = time.Since(start)
+	recordRawTextArtifact(ctx, "HPA phase: negative control", "",
+		fmt.Sprintf("Window:           %s\nMetric:           %d (target %d)\nResult:           HPA kept deciding on %d replica; Deployment stayed at %d",
+			s.negativeControlWindow, hpaBaselineValue, hpaTargetValue, hpaMinReplicas, hpaMinReplicas))
+	return state, nil
+}
+
+// scaleUp raises the metric and requires the HPA to scale to hpaMaxReplicas
+// with every pod Running, Ready and reporting the raised value. The raised
+// metric is awaited on the live Ready pods, not the baseline's names: the
+// negative control tolerates a pod being replaced, and the replacement
+// reports under its own name; and with no scale-up stabilization the HPA may
+// add a pod that is still Pending before this wait ends, which has no series
+// yet. The scaled-up wait below covers the pods the HPA adds.
+func (s *hpaScenario) scaleUp(ctx *validators.Context) error {
+	s.phase = hpaPhaseScaleUp
+	start := time.Now()
+	slog.Info("raising the custom metric", "value", hpaScaleUpValue, "target", hpaTargetValue)
+	if err := setHPAMetricValue(ctx.Ctx, s.clientset, s.testRun.namespace, hpaScaleUpValue); err != nil {
+		return err
+	}
+	if err := s.waitForMetric(ctx.Ctx, hpaScaleUpValue, s.readyLivePods); err != nil {
+		return wrapWithCode(err, errors.ErrCodeNotFound, "custom metrics pipeline did not report the raised metric")
+	}
+
+	deadline := time.Now().Add(s.scaleTimeout)
+	state, err := s.waitForState(ctx.Ctx, time.Until(deadline), func(st hpaState) error {
+		return checkHPADecided(st, hpaMaxReplicas, hpaScaleUpValue)
+	})
+	if err != nil {
+		return hpaPhaseFailure(err, fmt.Sprintf("HPA did not scale the Deployment to %d replicas on the raised metric", hpaMaxReplicas), state)
+	}
+	decided := time.Since(start)
+	slog.Info("HPA set the Deployment to the maximum; waiting for the new accelerator pods", "replicas", hpaMaxReplicas)
+
+	// The scaled-up state and the raised metric for exactly its pods must hold
+	// in one observation; the extra metricTimeout lets the new pods' samples
+	// reach the custom metrics API.
+	var metricProblem error
+	state, err = s.waitForState(ctx.Ctx, time.Until(deadline.Add(s.metricTimeout)), func(st hpaState) error {
+		metricProblem = nil
+		if problem := checkHPAScaledTo(st, hpaMaxReplicas, hpaScaleUpValue); problem != nil {
+			return problem
+		}
+		body, readErr := s.readMetrics(ctx.Ctx)
+		if readErr == nil {
+			readErr = checkHPAMetricSamples(body, s.testRun.namespace, st.podNames(), hpaScaleUpValue)
+		}
+		if readErr != nil {
+			metricProblem = readErr
+			return wrapWithCode(readErr, errors.ErrCodeNotFound, "custom metric for the scaled-up pods")
+		}
+		return nil
+	})
+	switch {
+	case err == nil:
+	case metricProblem != nil:
+		return wrapWithCode(err, errors.ErrCodeNotFound,
+			"custom metrics pipeline did not report the raised metric for the scaled-up pods")
+	default:
+		if checkHPAStatus(state.hpa, hpaMaxReplicas, hpaScaleUpValue) == nil {
+			if problems := hpaPodPrerequisiteProblems(state.allPods()); len(problems) > 0 {
+				return errors.Wrap(errors.ErrCodeUnavailable,
+					"scaled-up pods cannot start: "+strings.Join(problems, "; "), err)
 			}
-			if found {
+		}
+		return hpaPhaseFailure(err, fmt.Sprintf("the %d scaled-up pods did not all become Running and Ready", hpaMaxReplicas), state)
+	}
+	s.timings[hpaPhaseScaleUp] = time.Since(start)
+	recordRawTextArtifact(ctx, "HPA phase: scale-up",
+		fmt.Sprintf("kubectl get hpa,deploy,pods -n %s", s.testRun.namespace),
+		fmt.Sprintf("Metric raised to: %d (target %d)\nHPA decided on %d replicas after %s\nPods:             %s (all Running and Ready, each reporting %d)\nElapsed:          %s",
+			hpaScaleUpValue, hpaTargetValue, hpaMaxReplicas, decided.Round(time.Second),
+			strings.Join(state.podNames(), ","), hpaScaleUpValue, s.timings[hpaPhaseScaleUp].Round(time.Second)))
+	return nil
+}
+
+// scaleDown lowers the metric and requires the HPA to return to one replica.
+func (s *hpaScenario) scaleDown(ctx *validators.Context) error {
+	s.phase = hpaPhaseScaleDown
+	start := time.Now()
+	slog.Info("lowering the custom metric", "value", hpaScaleDownValue, "target", hpaTargetValue)
+	if err := setHPAMetricValue(ctx.Ctx, s.clientset, s.testRun.namespace, hpaScaleDownValue); err != nil {
+		return err
+	}
+	if err := s.waitForMetric(ctx.Ctx, hpaScaleDownValue, s.livePods); err != nil {
+		return wrapWithCode(err, errors.ErrCodeNotFound, "custom metrics pipeline did not report the lowered metric")
+	}
+	lowered := time.Since(start)
+
+	slog.Info("waiting for the HPA to scale down after its stabilization window",
+		"timeout", s.scaleDownTimeout, "stabilization", s.stabilization)
+	state, err := s.waitForState(ctx.Ctx, s.scaleDownTimeout, func(st hpaState) error {
+		return checkHPAScaledTo(st, hpaMinReplicas, hpaScaleDownValue)
+	})
+	if err != nil {
+		return hpaPhaseFailure(err, fmt.Sprintf("HPA did not scale back down to %d replica", hpaMinReplicas), state)
+	}
+	s.timings[hpaPhaseScaleDown] = time.Since(start)
+	// The stabilization window is reported, not asserted: how soon a correct
+	// HPA scales down also depends on its sync period.
+	recordRawTextArtifact(ctx, "HPA phase: scale-down",
+		fmt.Sprintf("kubectl get hpa,deploy,pods -n %s", s.testRun.namespace),
+		fmt.Sprintf("Metric lowered to: %d (target %d), reported after %s\nScaled down to:    %d replica (%s) %s after the metric was lowered\nStabilization:     %s\nElapsed:           %s",
+			hpaScaleDownValue, hpaTargetValue, lowered.Round(time.Second), hpaMinReplicas,
+			strings.Join(state.podNames(), ","), s.timings[hpaPhaseScaleDown].Round(time.Second),
+			s.stabilization, s.timings[hpaPhaseScaleDown].Round(time.Second)))
+	return nil
+}
+
+// hpaPhaseFailure classifies a failed phase from its last observation: an
+// unreadable metric (ScalingActive=False, FailedGetPodsMetric) is the
+// pipeline's fault; otherwise the HPA's conditions are attached.
+func hpaPhaseFailure(err error, what string, last hpaState) error {
+	if message, ok := hpaMetricsUnreadable(last.hpa); ok {
+		return errors.Wrap(errors.ErrCodeNotFound,
+			fmt.Sprintf("%s: the HPA controller cannot read the custom metric (FailedGetPodsMetric: %s)", what, message), err)
+	}
+	if last.hpa != nil && len(last.hpa.Status.Conditions) > 0 {
+		return errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("%s; HPA conditions: %s", what, hpaConditionsSummary(last.hpa)), err)
+	}
+	return wrapWithCode(err, errors.ErrCodeInternal, what)
+}
+
+// hpaMetricsUnreadable returns the HPA's own report that it cannot read its
+// metric.
+func hpaMetricsUnreadable(hpa *autoscalingv2.HorizontalPodAutoscaler) (string, bool) {
+	if hpa == nil {
+		return "", false
+	}
+	for _, c := range hpa.Status.Conditions {
+		if c.Type == autoscalingv2.ScalingActive && c.Status == corev1.ConditionFalse && c.Reason == "FailedGetPodsMetric" {
+			return c.Message, true
+		}
+	}
+	return "", false
+}
+
+func hpaConditionsSummary(hpa *autoscalingv2.HorizontalPodAutoscaler) string {
+	parts := make([]string, 0, len(hpa.Status.Conditions))
+	for _, c := range hpa.Status.Conditions {
+		parts = append(parts, fmt.Sprintf("%s=%s (%s: %s)", c.Type, c.Status, c.Reason, hpaOneLine(c.Message)))
+	}
+	return strings.Join(parts, "; ")
+}
+
+// hpaOneLine shortens a message for an error line.
+func hpaOneLine(message string) string {
+	message = strings.Join(strings.Fields(message), " ")
+	if message == "" {
+		return "(none recorded)"
+	}
+	const limit = 300
+	if len(message) > limit {
+		message = "..." + message[len(message)-limit:]
+	}
+	return message
+}
+
+// hpaAdapterComponent names the recipe component that serves the custom
+// metrics API and whether the recipe declares it: prometheus-adapter-ocp when
+// the OpenShift overlay declares it (it disables prometheus-adapter), else
+// prometheus-adapter.
+func hpaAdapterComponent(ctx *validators.Context) (string, bool) {
+	for _, name := range []string{"prometheus-adapter", "prometheus-adapter-ocp"} {
+		if validators.RecipeDeclares(ctx, name) {
+			return name, true
+		}
+	}
+	return "prometheus-adapter", false
+}
+
+// resolveCustomMetricsVersion picks the custom metrics API version the way
+// the HPA controller's client does: the preferred version if supported, else
+// the first supported one listed. It returns "" without error when the group
+// is not served at all (the clean-absence signal), and an error when the
+// group is registered but no usable version is available.
+func resolveCustomMetricsVersion(c kubernetes.Interface) (string, error) {
+	groups, err := c.Discovery().ServerGroups()
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to discover API groups", err)
+	}
+	var group *metav1.APIGroup
+	for i := range groups.Groups {
+		if groups.Groups[i].Name == hpaCustomMetricsGroup {
+			group = &groups.Groups[i]
+		}
+	}
+	if group == nil {
+		return "", nil
+	}
+	version := ""
+	if slices.Contains(hpaCustomMetricsVersions, group.PreferredVersion.Version) {
+		version = group.PreferredVersion.Version
+	} else {
+		for _, v := range group.Versions {
+			if slices.Contains(hpaCustomMetricsVersions, v.Version) {
+				version = v.Version
 				break
 			}
 		}
-		if found {
-			break
-		}
-
-		// Wait before retry. If the context is canceled during this best-effort
-		// poll, stop polling immediately; the guard below returns a clear timeout
-		// error for that case, while a plain attempt-exhaustion (no cancellation)
-		// falls through to warn-and-continue.
-		select {
-		case <-ctx.Ctx.Done():
-			break pollLoop
-		case <-time.After(defaults.HPAPollInterval):
-		}
 	}
-
-	// Distinguish "ran out of best-effort attempts" (fall through to warn-and-
-	// continue) from "context canceled/deadline exceeded" (a genuine timeout that
-	// halts the whole check). The latter would also fail steps 3/4 below, but
-	// reporting it as a timeout here is clearer to an operator than a downstream
-	// "metric not available".
-	if !found && ctx.Ctx.Err() != nil {
-		return errors.Wrap(errors.ErrCodeTimeout,
-			"timed out waiting for GPU custom metrics", ctx.Ctx.Err())
+	switch {
+	case version == "" && len(group.Versions) == 0:
+		// Aggregated discovery omits versions whose APIService is unavailable.
+		return "", errors.New(errors.ErrCodeUnavailable, hpaCustomMetricsGroup+
+			" is registered but none of its versions is available — check the prometheus-adapter APIService and pods")
+	case version == "":
+		return "", errors.New(errors.ErrCodeUnavailable, fmt.Sprintf(
+			"%s is served in versions %v, none of which the HPA supports (%v)", hpaCustomMetricsGroup, group.Versions, hpaCustomMetricsVersions))
 	}
-
-	if found {
-		recordRawTextArtifact(ctx, "Custom metric sample",
-			fmt.Sprintf("kubectl get --raw %s", foundPath),
-			fmt.Sprintf("Path:            %s\nItems observed:  %d", foundPath, foundItems))
-	} else {
-		// Best-effort, not a gate: pod-scoped GPU custom metrics are absent when
-		// dcgm-exporter cannot attribute GPUs to pods (e.g. DRA-claimed GPUs, which
-		// the kubelet pod-resources API does not surface for per-pod mapping). The
-		// autoscaling capability is still validated below via the external-metrics
-		// API and the HPA behavioral scale-up/down test, which drive off a
-		// cluster-wide GPU metric and need no per-pod attribution.
-		slog.Warn("pod-scoped GPU custom metrics unavailable; continuing with external-metric HPA validation " +
-			"(expected on DRA clusters where dcgm-exporter does not attribute GPUs to pods)")
-		recordRawTextArtifact(ctx, "Custom metric sample",
-			"kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1/namespaces/<ns>/pods/*/gpu_utilization",
-			"Pod-scoped GPU custom metrics not available (no exported_pod attribution; typical for "+
-				"DRA-allocated GPUs). Autoscaling capability validated via the external-metrics API and "+
-				"the HPA behavioral test below.")
+	if _, err := c.Discovery().ServerResourcesForGroupVersion(hpaCustomMetricsGroup + "/" + version); err != nil {
+		return "", errors.Wrap(errors.ErrCodeUnavailable,
+			fmt.Sprintf("custom metrics API %s/%s is registered but not available", hpaCustomMetricsGroup, version), err)
 	}
+	return version, nil
+}
 
-	// 3. External metrics API has GPU metrics. Retry: the adapter may have
-	// registered the APIService but not yet relisted the metric, or Prometheus
-	// may not hold a DCGM sample yet, right after the deployment phase. Fail
-	// closed (unreachable / no data) after the warmup budget.
-	extPath := "/apis/external.metrics.k8s.io/v1beta1/namespaces/default/dcgm_gpu_power_usage"
-	var extResult rest.Result
-	var extResp struct {
-		Items []json.RawMessage `json:"items"`
+// readHPAPodMetrics reads the workload pods' metric from the custom metrics
+// API, scoped by the workload label selector the way the HPA controller does.
+func readHPAPodMetrics(ctx context.Context, c kubernetes.Interface, version, namespace string) ([]byte, error) {
+	result := c.CoreV1().RESTClient().Get().
+		AbsPath("/apis", hpaCustomMetricsGroup, version).
+		Namespace(namespace).Resource("pods").Name("*").SubResource(hpaMetricSeries).
+		Param("labelSelector", hpaWorkloadSelector()).Do(ctx)
+	// Error decodes the adapter's Status (why a metric is not found); DoRaw
+	// would reduce it to a generic message.
+	if err := result.Error(); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeUnavailable,
+			fmt.Sprintf("failed to read %s from %s/%s", hpaMetricSeries, hpaCustomMetricsGroup, version), err)
 	}
-	if pollErr := waitForMetricsAPI(ctx.Ctx, defaults.MetricsAPIWarmupTimeout, defaults.HPAPollInterval,
-		func(c context.Context) error {
-			extResult = restClient.Get().AbsPath(extPath).Do(c)
-			if extErr := extResult.Error(); extErr != nil {
-				return extErr
-			}
-			extRaw, rawErr := extResult.Raw()
-			if rawErr != nil {
-				return rawErr
-			}
-			extResp.Items = nil
-			if unmarshalErr := json.Unmarshal(extRaw, &extResp); unmarshalErr != nil {
-				return errors.Wrap(errors.ErrCodeInternal, "failed reading external metric response", unmarshalErr)
-			}
-			if len(extResp.Items) == 0 {
-				return errors.New(errors.ErrCodeNotFound, "external metric dcgm_gpu_power_usage has no data")
-			}
-			return nil
-		}); pollErr != nil {
-		return errors.Wrap(errors.ErrCodeNotFound,
-			"external metric dcgm_gpu_power_usage not available", pollErr)
-	}
-	var extStatusCode int
-	extResult.StatusCode(&extStatusCode)
-
-	recordRawTextArtifact(ctx, "External Metrics API",
-		fmt.Sprintf("kubectl get --raw %s", extPath),
-		fmt.Sprintf("Endpoint:        %s\nHTTP Status:     %d\nMetric:          dcgm_gpu_power_usage\nItems observed:  %d",
-			extPath, extStatusCode, len(extResp.Items)))
-
-	// 4. HPA behavioral validation: prove HPA reads external metrics and computes scale-up.
-	hpaReport, err := validateHPABehavior(ctx.Ctx, ctx.Clientset)
+	body, err := result.Raw()
 	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read the custom metrics response body", err)
+	}
+	return body, nil
+}
+
+// hpaMetricValueList decodes both custom.metrics.k8s.io/v1beta2 (metric.name)
+// and v1beta1 (metricName) MetricValueList responses.
+type hpaMetricValueList struct {
+	Items []struct {
+		DescribedObject struct {
+			Kind      string `json:"kind"`
+			Namespace string `json:"namespace"`
+			Name      string `json:"name"`
+		} `json:"describedObject"`
+		MetricName string `json:"metricName"`
+		Metric     struct {
+			Name string `json:"name"`
+		} `json:"metric"`
+		Value resource.Quantity `json:"value"`
+	} `json:"items"`
+}
+
+// checkHPAMetricSamples requires every expected pod to report exactly want.
+// Samples for other pods (e.g. ones still terminating) are ignored.
+func checkHPAMetricSamples(body []byte, namespace string, expectedPods []string, want int) error {
+	var list hpaMetricValueList
+	if err := json.Unmarshal(body, &list); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to decode custom metrics response", err)
+	}
+	wantQ := resource.MustParse(strconv.Itoa(want))
+	got := map[string]resource.Quantity{}
+	var problems []string
+	for _, item := range list.Items {
+		obj := item.DescribedObject
+		name := item.Metric.Name
+		if name == "" {
+			name = item.MetricName
+		}
+		switch {
+		case obj.Kind != "Pod" || obj.Namespace != namespace:
+			problems = append(problems, fmt.Sprintf("unexpected object %s %s/%s", obj.Kind, obj.Namespace, obj.Name))
+			continue
+		case name != hpaMetricSeries:
+			problems = append(problems, fmt.Sprintf("pod %s reports metric %q, want %q", obj.Name, name, hpaMetricSeries))
+			continue
+		}
+		if prev, dup := got[obj.Name]; dup && prev.Cmp(item.Value) != 0 {
+			problems = append(problems, fmt.Sprintf("pod %s has conflicting values %s and %s", obj.Name, prev.String(), item.Value.String()))
+			continue
+		}
+		got[obj.Name] = item.Value
+	}
+	for _, pod := range expectedPods {
+		v, ok := got[pod]
+		switch {
+		case !ok:
+			problems = append(problems, fmt.Sprintf("no sample for pod %s", pod))
+		case v.Cmp(wantQ) != 0:
+			problems = append(problems, fmt.Sprintf("pod %s reports %s, want %d", pod, v.String(), want))
+		}
+	}
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return errors.New(errors.ErrCodeNotFound, strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+// hpaState is one observation of the HPA, the Deployment and its pods.
+type hpaState struct {
+	hpa        *autoscalingv2.HorizontalPodAutoscaler // nil until created
+	deployment *appsv1.Deployment
+	pods       []corev1.Pod // not terminating or finished, sorted by name
+	inactive   []corev1.Pod // terminating, Succeeded or Failed
+}
+
+func getHPAState(ctx context.Context, c kubernetes.Interface, namespace string) (hpaState, error) {
+	hpa, err := c.AutoscalingV2().HorizontalPodAutoscalers(namespace).Get(ctx, hpaWorkloadName, metav1.GetOptions{})
+	switch {
+	case k8serrors.IsNotFound(err):
+		hpa = nil // not created yet
+	case err != nil:
+		return hpaState{}, errors.Wrap(errors.ErrCodeInternal, "failed to get the HPA", err)
+	}
+	deployment, err := c.AppsV1().Deployments(namespace).Get(ctx, hpaWorkloadName, metav1.GetOptions{})
+	if err != nil {
+		return hpaState{}, errors.Wrap(errors.ErrCodeInternal, "failed to get the HPA workload Deployment", err)
+	}
+	list, err := c.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: hpaWorkloadSelector()})
+	if err != nil {
+		return hpaState{}, errors.Wrap(errors.ErrCodeInternal, "failed to list the HPA workload pods", err)
+	}
+	s := hpaState{hpa: hpa, deployment: deployment}
+	sort.Slice(list.Items, func(i, j int) bool { return list.Items[i].Name < list.Items[j].Name })
+	for _, pod := range list.Items {
+		if pod.DeletionTimestamp == nil && pod.Status.Phase != corev1.PodSucceeded && pod.Status.Phase != corev1.PodFailed {
+			s.pods = append(s.pods, pod)
+		} else {
+			s.inactive = append(s.inactive, pod)
+		}
+	}
+	return s, nil
+}
+
+func (s hpaState) podNames() []string {
+	names := make([]string, 0, len(s.pods))
+	for _, pod := range s.pods {
+		names = append(names, pod.Name)
+	}
+	return names
+}
+
+// allPods returns the active and inactive workload pods.
+func (s hpaState) allPods() []corev1.Pod {
+	return slices.Concat(s.pods, s.inactive)
+}
+
+// checkHPAStatus requires the HPA to be active on the custom metric, to have
+// recorded exactly the phase's value as its average, and to decide on want
+// replicas. The HPA records the plain mean of its pods' samples, so once every
+// pod reports value the average is exactly value; matching it, rather than
+// just the side of the target, ties the decision to the current phase.
+func checkHPAStatus(hpa *autoscalingv2.HorizontalPodAutoscaler, want int32, value int) error {
+	if hpa == nil {
+		return errors.New(errors.ErrCodeNotFound, "HPA does not exist")
+	}
+	// Released HPA controllers do not set status.observedGeneration, so it is
+	// checked only when reported.
+	if og := hpa.Status.ObservedGeneration; og != nil && *og < hpa.Generation {
+		return errors.New(errors.ErrCodeInternal, fmt.Sprintf("HPA status has not observed generation %d", hpa.Generation))
+	}
+	var active *autoscalingv2.HorizontalPodAutoscalerCondition
+	for i := range hpa.Status.Conditions {
+		if hpa.Status.Conditions[i].Type == autoscalingv2.ScalingActive {
+			active = &hpa.Status.Conditions[i]
+		}
+	}
+	if active == nil || active.Status != corev1.ConditionTrue {
+		reason := "not reported"
+		if active != nil {
+			reason = fmt.Sprintf("%s (%s: %s)", active.Status, active.Reason, active.Message)
+		}
+		return errors.New(errors.ErrCodeInternal, fmt.Sprintf("HPA condition ScalingActive is %s", reason))
+	}
+	var current *resource.Quantity
+	for _, m := range hpa.Status.CurrentMetrics {
+		if m.Type == autoscalingv2.PodsMetricSourceType && m.Pods != nil && m.Pods.Metric.Name == hpaMetricSeries {
+			current = m.Pods.Current.AverageValue
+		}
+	}
+	if current == nil {
+		return errors.New(errors.ErrCodeInternal, fmt.Sprintf("HPA status.currentMetrics has no Pods metric %q", hpaMetricSeries))
+	}
+	if wantQ := resource.MustParse(strconv.Itoa(value)); current.Cmp(wantQ) != 0 {
+		return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
+			"HPA recorded average %s for %q, want the current value %d", current.String(), hpaMetricSeries, value))
+	}
+	if hpa.Status.DesiredReplicas != want {
+		return errors.New(errors.ErrCodeInternal, fmt.Sprintf("HPA desiredReplicas=%d, want %d", hpa.Status.DesiredReplicas, want))
+	}
+	return nil
+}
+
+// checkHPAWorkload requires the Deployment and its active pods to agree on
+// want Running and Ready replicas. Only the HPA changes spec.replicas.
+func checkHPAWorkload(s hpaState, want int32) error {
+	d := s.deployment
+	if d == nil {
+		return errors.New(errors.ErrCodeNotFound, "Deployment does not exist")
+	}
+	if d.Spec.Replicas == nil || *d.Spec.Replicas != want {
+		return errors.New(errors.ErrCodeInternal, fmt.Sprintf("Deployment spec.replicas=%d, want %d", ptr.Deref(d.Spec.Replicas, 0), want))
+	}
+	if d.Status.ObservedGeneration < d.Generation {
+		return errors.New(errors.ErrCodeInternal, fmt.Sprintf("Deployment status has not observed generation %d", d.Generation))
+	}
+	if d.Status.Replicas != want || d.Status.UpdatedReplicas != want || d.Status.ReadyReplicas != want {
+		return errors.New(errors.ErrCodeInternal, fmt.Sprintf("Deployment status replicas=%d updated=%d ready=%d, want %d",
+			d.Status.Replicas, d.Status.UpdatedReplicas, d.Status.ReadyReplicas, want))
+	}
+	if int32(len(s.pods)) != want { //nolint:gosec // G115: pod counts are tiny
+		return errors.New(errors.ErrCodeInternal, fmt.Sprintf("found %d active workload pods %v, want %d", len(s.pods), s.podNames(), want))
+	}
+	for i := range s.pods {
+		pod := &s.pods[i]
+		if pod.Status.Phase != corev1.PodRunning || !podIsReady(pod) || pod.Spec.NodeName == "" {
+			return errors.New(errors.ErrCodeInternal, fmt.Sprintf("pod %s is %s (ready=%t, node=%q), want Running and Ready",
+				pod.Name, pod.Status.Phase, podIsReady(pod), pod.Spec.NodeName))
+		}
+	}
+	return nil
+}
+
+func checkHPAScaledTo(s hpaState, want int32, value int) error {
+	if err := checkHPAStatus(s.hpa, want, value); err != nil {
 		return err
 	}
-	recordRawTextArtifact(ctx, "Apply test manifest",
-		"kubectl apply -f pkg/evidence/cncf/scripts/manifests/hpa-gpu-test.yaml",
-		fmt.Sprintf("Created namespace=%s deployment=%s hpa=%s via Kubernetes API",
-			hpaReport.Namespace, hpaReport.DeploymentName, hpaReport.HPAName))
-	recordRawTextArtifact(ctx, "HPA Behavioral Test",
-		fmt.Sprintf("kubectl get hpa -n %s && kubectl get deploy -n %s",
-			hpaReport.Namespace, hpaReport.Namespace),
-		fmt.Sprintf("Namespace:            %s\nHPA:                  %s\nScale-up desired:     %d\nScale-up current:     %d\nDeployment scale-up:  %d\nDeployment scale-down:%d",
-			hpaReport.Namespace, hpaReport.HPAName, hpaReport.ScaleUpDesiredReplicas,
-			hpaReport.ScaleUpCurrentReplicas, hpaReport.ScaleUpDeploymentReplica, hpaReport.ScaleDownReplica))
-	// The namespace is randomized per run, so the replay command must name the
-	// actual namespace. validateHPABehavior's deferred cleanup has already run
-	// by the time this executes, but a returning Delete call only means the
-	// request was accepted — the namespace terminates asynchronously. The
-	// artifact therefore records that deletion was requested, never that it
-	// completed; a rejected request is reported by the warning cleanup logs.
-	recordRawTextArtifact(ctx, "Delete test namespace",
-		fmt.Sprintf("kubectl delete namespace %s --ignore-not-found", hpaReport.Namespace),
-		fmt.Sprintf("Deletion of namespace %s was requested after the HPA behavioral test; "+
-			"the namespace terminates asynchronously and this artifact does not confirm it. "+
-			"If the request failed, the check logs a warning naming the namespace. "+
-			"Find leftovers from earlier runs with: "+
-			"kubectl get namespaces -o name | grep %s",
-			hpaReport.Namespace, hpaTestPrefix))
+	if s.hpa.Status.CurrentReplicas != want {
+		return errors.New(errors.ErrCodeInternal, fmt.Sprintf("HPA currentReplicas=%d, want %d", s.hpa.Status.CurrentReplicas, want))
+	}
+	return checkHPAWorkload(s, want)
+}
+
+// checkHPADecided requires the HPA to decide on want replicas for value and
+// the Deployment to be set to want. It does not check the pods, so an
+// eviction during the negative control does not fail it.
+func checkHPADecided(s hpaState, want int32, value int) error {
+	if err := checkHPAStatus(s.hpa, want, value); err != nil {
+		return err
+	}
+	if s.deployment == nil {
+		return errors.New(errors.ErrCodeNotFound, "Deployment does not exist")
+	}
+	if n := ptr.Deref(s.deployment.Spec.Replicas, 0); n != want {
+		return errors.New(errors.ErrCodeInternal, fmt.Sprintf("Deployment spec.replicas=%d, want %d", n, want))
+	}
 	return nil
+}
+
+// hpaPodPrerequisiteProblems lists pods held back by something other than the
+// HPA: unschedulable, unable to pull or start, a container that exited (e.g.
+// the accelerator check), or a pod its node ended. Pods being deleted are
+// skipped, since their containers stop as part of the removal.
+func hpaPodPrerequisiteProblems(pods []corev1.Pod) []string {
+	var out []string
+	for i := range pods {
+		pod := &pods[i]
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		if reason := podStuckReason(pod); reason != "" {
+			out = append(out, fmt.Sprintf("%s: %s", pod.Name, reason))
+			continue
+		}
+		reported := len(out)
+		for _, cs := range pod.Status.ContainerStatuses {
+			if t := cs.State.Terminated; t != nil && t.ExitCode != 0 {
+				out = append(out, fmt.Sprintf("%s: container exited with code %d (%s), restarts=%d; output: %s",
+					pod.Name, t.ExitCode, t.Reason, cs.RestartCount, hpaOneLine(t.Message)))
+			} else if w := cs.State.Waiting; w != nil && w.Reason == waitingReasonCrashLoopBackOff {
+				if lt := cs.LastTerminationState.Terminated; lt != nil {
+					out = append(out, fmt.Sprintf("%s: container in CrashLoopBackOff after exit code %d, restarts=%d; output: %s",
+						pod.Name, lt.ExitCode, cs.RestartCount, hpaOneLine(lt.Message)))
+				}
+			}
+		}
+		if pod.Status.Phase == corev1.PodFailed && len(out) == reported {
+			out = append(out, fmt.Sprintf("%s failed (%s: %s)", pod.Name, pod.Status.Reason, hpaOneLine(pod.Status.Message)))
+		}
+	}
+	return out
+}
+
+func fixedPods(names []string) func(context.Context) ([]string, error) {
+	return func(context.Context) ([]string, error) { return names, nil }
+}
+
+// livePods returns the current active pods, for phases in which the HPA may
+// remove pods while the check waits for their metric.
+func (s *hpaScenario) livePods(ctx context.Context) ([]string, error) {
+	st, err := getHPAState(ctx, s.clientset, s.testRun.namespace)
+	return st.podNames(), err
+}
+
+// readyLivePods returns the current active pods that are Ready, for the wait
+// on the raised metric: a pod the HPA has just added is Pending or not yet
+// Ready, and has no series to await.
+func (s *hpaScenario) readyLivePods(ctx context.Context) ([]string, error) {
+	st, err := getHPAState(ctx, s.clientset, s.testRun.namespace)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(st.pods))
+	for i := range st.pods {
+		if podIsReady(&st.pods[i]) {
+			names = append(names, st.pods[i].Name)
+		}
+	}
+	return names, nil
+}
+
+// waitForMetric waits until the custom metrics API reports want for every pod
+// returned by expected. Adapters answer NotFound until a new series is
+// scraped, so only a definitive non-NotFound API verdict ends the wait early.
+//
+// Polling, not a watch: the aggregated custom metrics API has no watch verb.
+func (s *hpaScenario) waitForMetric(ctx context.Context, want int, expected func(context.Context) ([]string, error)) error {
+	var pods []string
+	var lastSamples, lastAPIError error
+	err := wait.PollUntilContextTimeout(ctx, s.pollInterval, s.metricTimeout, true, func(ctx context.Context) (bool, error) {
+		var listErr error
+		if pods, listErr = expected(ctx); listErr != nil {
+			lastAPIError = listErr
+			return false, nil
+		}
+		if len(pods) == 0 {
+			lastSamples = errors.New(errors.ErrCodeNotFound, "no live workload pods")
+			return false, nil
+		}
+		body, readErr := s.readMetrics(ctx)
+		if readErr != nil {
+			lastAPIError = readErr
+			if isPermanentAPIError(readErr) {
+				return false, readErr
+			}
+			return false, nil
+		}
+		lastAPIError = nil
+		lastSamples = checkHPAMetricSamples(body, s.testRun.namespace, pods, want)
+		return lastSamples == nil, nil
+	})
+	if err == nil {
+		return nil
+	}
+	if isPermanentAPIError(err) {
+		return errors.Wrap(errors.ErrCodeUnavailable, "custom metrics API rejected the metric read", err)
+	}
+	detail := ""
+	if lastSamples != nil {
+		detail = "; last samples: " + lastSamples.Error()
+	}
+	if lastAPIError != nil {
+		detail += "; last API error: " + lastAPIError.Error()
+	}
+	code := errors.ErrCodeNotFound
+	if ctx.Err() != nil {
+		code = errors.ErrCodeTimeout
+	}
+	return errors.Wrap(code, fmt.Sprintf("custom metric %q did not report %d for pods %v within %s%s",
+		hpaMetricSeries, want, pods, s.metricTimeout, detail), err)
+}
+
+// waitForState polls until check accepts an observation, and returns it (or
+// the last one seen). Observing the HPA, the Deployment and the pods together
+// is a multi-object state, so it polls rather than watching one object.
+func (s *hpaScenario) waitForState(ctx context.Context, timeout time.Duration, check func(hpaState) error) (hpaState, error) {
+	var last hpaState
+	var lastProblem, lastAPIError error
+	err := wait.PollUntilContextTimeout(ctx, s.pollInterval, timeout, true, func(ctx context.Context) (bool, error) {
+		st, readErr := getHPAState(ctx, s.clientset, s.testRun.namespace)
+		if readErr != nil {
+			if ctx.Err() != nil {
+				return false, nil // the wait's own deadline cut the request short
+			}
+			lastAPIError = readErr
+			if isPermanentAPIError(readErr) {
+				return false, classifyK8sReadError(readErr, "HPA test workload")
+			}
+			return false, nil
+		}
+		last = st
+		lastAPIError = nil
+		lastProblem = check(st)
+		return lastProblem == nil, nil
+	})
+	switch {
+	case err == nil:
+		return last, nil
+	case ctx.Err() != nil:
+		return last, errors.Wrap(errors.ErrCodeTimeout, fmt.Sprintf("check budget exhausted; last observation: %v", lastProblem), ctx.Err())
+	case wait.Interrupted(err):
+		msg := fmt.Sprintf("not reached within %s; last observation: %v", timeout, lastProblem)
+		if lastAPIError != nil {
+			msg += fmt.Sprintf("; last API error: %v", lastAPIError)
+		}
+		return last, errors.Wrap(errors.ErrCodeTimeout, msg, err)
+	default:
+		return last, wrapWithCode(err, errors.ErrCodeInternal, "failed to observe the HPA test workload")
+	}
+}
+
+// holdState requires check to accept every observation for window, including
+// one at or after its end.
+func (s *hpaScenario) holdState(ctx context.Context, window time.Duration, check func(hpaState) error) (hpaState, error) {
+	end := time.Now().Add(window)
+	var last hpaState
+	for {
+		st, err := getHPAState(ctx, s.clientset, s.testRun.namespace)
+		switch {
+		case err == nil:
+			last = st
+			if problem := check(st); problem != nil {
+				return last, problem
+			}
+			if !time.Now().Before(end) {
+				return last, nil
+			}
+		case isPermanentAPIError(err):
+			return last, classifyK8sReadError(err, "HPA test workload")
+		default:
+			slog.Debug("transient read during the negative control; retrying", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return last, errors.Wrap(errors.ErrCodeTimeout, "check budget exhausted during the negative control", ctx.Err())
+		case <-time.After(s.pollInterval):
+		}
+	}
+}
+
+// isPermanentAPIError reports a definitive API verdict, such as Forbidden.
+// NotFound and transient errors (timeouts, throttling, transport) are not
+// permanent, so polls retry them.
+func isPermanentAPIError(err error) bool {
+	var status k8serrors.APIStatus
+	if !stderrors.As(err, &status) {
+		return false
+	}
+	return !k8serrors.IsNotFound(err) && !isK8sTimeoutErr(err) &&
+		!k8serrors.IsTooManyRequests(err) && !k8serrors.IsServerTimeout(err) &&
+		!k8serrors.IsServiceUnavailable(err) && !k8serrors.IsInternalError(err)
+}
+
+// setHPAMetricValue changes the value every workload pod reports; the kubelet
+// propagates the ConfigMap update into the mounted volume.
+func setHPAMetricValue(ctx context.Context, c kubernetes.Interface, namespace string, value int) error {
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		cm, err := c.CoreV1().ConfigMaps(namespace).Get(ctx, hpaWorkloadName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if cm.Data == nil {
+			cm.Data = map[string]string{}
+		}
+		cm.Data[hpaMetricValueKey] = strconv.Itoa(value)
+		_, err = c.CoreV1().ConfigMaps(namespace).Update(ctx, cm, metav1.UpdateOptions{})
+		return err
+	})
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to set the HPA metric ConfigMap to %d", value), err)
+	}
+	return nil
+}
+
+func hpaWorkloadLabels() map[string]string {
+	return map[string]string{hpaAppLabelKey: hpaWorkloadName, hpaMetricSourceLabel: "true"}
+}
+
+func hpaWorkloadSelector() string {
+	return labels.SelectorFromSet(hpaWorkloadLabels()).String()
+}
+
+func buildHPAMetricConfigMap(namespace string, value int) *corev1.ConfigMap {
+	return &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: hpaWorkloadName, Namespace: namespace},
+		Data:       map[string]string{hpaMetricValueKey: strconv.Itoa(value)},
+	}
+}
+
+// buildHPAPodMonitor makes the recipe's Prometheus scrape the workload pods'
+// metrics port, attaching namespace and pod labels the adapter rule maps to
+// Kubernetes resources.
+func buildHPAPodMonitor(namespace string) *unstructured.Unstructured {
+	pm := &unstructured.Unstructured{Object: map[string]any{
+		keySpec: map[string]any{
+			"selector": map[string]any{
+				"matchLabels": map[string]any{hpaMetricSourceLabel: "true"},
+			},
+			"namespaceSelector": map[string]any{
+				"matchNames": []any{namespace},
+			},
+			"podMetricsEndpoints": []any{map[string]any{
+				"port":     hpaMetricsPortName,
+				"path":     "/metrics",
+				"interval": defaults.HPAScrapeInterval.String(),
+			}},
+		},
+	}}
+	pm.SetAPIVersion(podMonitorGVR.GroupVersion().String())
+	pm.SetKind("PodMonitor")
+	pm.SetName(hpaWorkloadName)
+	pm.SetNamespace(namespace)
+	pm.SetLabels(map[string]string{prometheusReleaseLabel: prometheusComponentName})
+	return pm
+}
+
+// buildHPAClaimTemplate returns the ResourceClaimTemplate each workload pod
+// draws one gpu.nvidia.com device from, shaped for the served version.
+func buildHPAClaimTemplate(namespace, version string) *unstructured.Unstructured {
+	request := map[string]any{keyName: gpuClaimName}
+	if version == versionV1beta1 {
+		request["deviceClassName"] = draDriverGPU
+		request[keyAllocationMode] = allocationModeExactCount
+		request["count"] = int64(1)
+	} else {
+		request["exactly"] = map[string]any{
+			"deviceClassName": draDriverGPU,
+			keyAllocationMode: allocationModeExactCount,
+			"count":           int64(1),
+		}
+	}
+	return &unstructured.Unstructured{Object: map[string]any{
+		keyAPIVersion: apiGroupResourceK8sIO + "/" + version,
+		keyKind:       "ResourceClaimTemplate",
+		keyMetadata:   map[string]any{keyName: hpaWorkloadName, keyNamespace: namespace},
+		keySpec: map[string]any{
+			keySpec: map[string]any{
+				"devices": map[string]any{"requests": []any{request}},
+			},
+		},
+	}}
+}
+
+// buildHPADeployment returns the one-replica Deployment of metric-serving
+// accelerator pods. In DRA mode each pod draws its device from the
+// ResourceClaimTemplate; otherwise it requests nvidia.com/gpu: 1 and is
+// pinned to the probe's device-plugin nodes (see secure-accelerator-access).
+// tolerations, when nil, defaults to tolerate-all.
+func buildHPADeployment(namespace string, dra bool, nodeNames []string, tolerations []corev1.Toleration) *appsv1.Deployment {
+	if tolerations == nil {
+		tolerations = []corev1.Toleration{{Operator: corev1.TolerationOpExists}}
+	}
+	container := corev1.Container{
+		Name:    hpaContainerName,
+		Image:   defaults.PythonProbeImage,
+		Command: []string{posixShell, "-c"},
+		Args:    []string{hpaWorkloadCommand},
+		Env: []corev1.EnvVar{
+			{Name: "HPA_METRIC_SERVER", Value: hpaMetricServerScript},
+			{Name: "HPA_METRIC_FILE", Value: hpaMetricMountPath + "/" + hpaMetricValueKey},
+			{Name: "HPA_METRIC_SERIES", Value: hpaMetricSeries},
+			{Name: "HPA_METRIC_PORT", Value: strconv.Itoa(hpaMetricsPort)},
+		},
+		Ports: []corev1.ContainerPort{{Name: hpaMetricsPortName, ContainerPort: hpaMetricsPort, Protocol: corev1.ProtocolTCP}},
+		ReadinessProbe: &corev1.Probe{
+			ProbeHandler:  corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString(hpaMetricsPortName)}},
+			PeriodSeconds: 5,
+		},
+		Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("50m"),
+			corev1.ResourceMemory: resource.MustParse("64Mi"),
+		}},
+		// The whole ConfigMap directory, never a subPath: subPath mounts do
+		// not receive ConfigMap updates.
+		VolumeMounts: []corev1.VolumeMount{{Name: "metric", MountPath: hpaMetricMountPath, ReadOnly: true}},
+		// Records the accelerator check's output in the container status.
+		TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
+	}
+	spec := corev1.PodSpec{
+		Tolerations:                   tolerations,
+		TerminationGracePeriodSeconds: ptr.To(hpaTerminationGracePeriod),
+		Volumes: []corev1.Volume{{
+			Name: "metric",
+			VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: hpaWorkloadName},
+			}},
+		}},
+	}
+	if dra {
+		spec.ResourceClaims = []corev1.PodResourceClaim{{Name: gpuClaimName, ResourceClaimTemplateName: ptr.To(hpaWorkloadName)}}
+		container.Resources.Claims = []corev1.ResourceClaim{{Name: gpuClaimName}}
+	} else {
+		container.Resources.Limits = corev1.ResourceList{corev1.ResourceName(resourceNVIDIAGPU): resource.MustParse("1")}
+		if len(nodeNames) > 0 {
+			spec.Affinity = nodeNameAffinity(nodeNames)
+		}
+	}
+	spec.Containers = []corev1.Container{container}
+
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: hpaWorkloadName, Namespace: namespace, Labels: hpaWorkloadLabels()},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: helper.Int32Ptr(hpaMinReplicas),
+			Selector: &metav1.LabelSelector{MatchLabels: hpaWorkloadLabels()},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: hpaWorkloadLabels()},
+				Spec:       spec,
+			},
+		},
+	}
+}
+
+// buildHPA returns the autoscaling/v2 HPA on the per-pod custom metric.
+func buildHPA(namespace string, stabilization time.Duration) *autoscalingv2.HorizontalPodAutoscaler {
+	target := resource.MustParse(strconv.Itoa(hpaTargetValue))
+	return &autoscalingv2.HorizontalPodAutoscaler{
+		ObjectMeta: metav1.ObjectMeta{Name: hpaWorkloadName, Namespace: namespace},
+		Spec: autoscalingv2.HorizontalPodAutoscalerSpec{
+			ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{
+				APIVersion: "apps/v1",
+				Kind:       "Deployment",
+				Name:       hpaWorkloadName,
+			},
+			MinReplicas: helper.Int32Ptr(hpaMinReplicas),
+			MaxReplicas: hpaMaxReplicas,
+			Metrics: []autoscalingv2.MetricSpec{{
+				Type: autoscalingv2.PodsMetricSourceType,
+				Pods: &autoscalingv2.PodsMetricSource{
+					Metric: autoscalingv2.MetricIdentifier{Name: hpaMetricSeries},
+					Target: autoscalingv2.MetricTarget{Type: autoscalingv2.AverageValueMetricType, AverageValue: &target},
+				},
+			}},
+			Behavior: &autoscalingv2.HorizontalPodAutoscalerBehavior{
+				ScaleUp:   &autoscalingv2.HPAScalingRules{StabilizationWindowSeconds: helper.Int32Ptr(0)},
+				ScaleDown: &autoscalingv2.HPAScalingRules{StabilizationWindowSeconds: helper.Int32Ptr(int32(stabilization / time.Second))}, //nolint:gosec // G115: a minute in seconds
+			},
+		},
+	}
+}
+
+// cleanupHPAWorkload deletes the HPA and the Deployment (so the controllers
+// stop reconciling while the namespace terminates) and the PodMonitor (the
+// scrape configuration must not outlive the run), then the per-run namespace,
+// which takes the pods, their claims and the ConfigMap with it. Runs on its
+// own context so it completes from a deferred block whose parent is canceled;
+// see cleanupGPUTestNamespace for the status and error semantics.
+func cleanupHPAWorkload(clientset kubernetes.Interface, dynClient dynamic.Interface, run *gpuTestRun) (string, error) {
+	if run.nsObserved {
+		ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+		defer cancel()
+		if err := dynClient.Resource(podMonitorGVR).Namespace(run.namespace).Delete(
+			ctx, hpaWorkloadName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+			slog.Warn("failed to delete the PodMonitor before namespace cleanup", "namespace", run.namespace, "error", err)
+		}
+		if err := clientset.AutoscalingV2().HorizontalPodAutoscalers(run.namespace).Delete(
+			ctx, hpaWorkloadName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+			slog.Warn("failed to delete the HPA before namespace cleanup", "namespace", run.namespace, "error", err)
+		}
+		if err := clientset.AppsV1().Deployments(run.namespace).Delete(ctx, hpaWorkloadName,
+			metav1.DeleteOptions{PropagationPolicy: ptr.To(metav1.DeletePropagationForeground)}); err != nil && !k8serrors.IsNotFound(err) {
+			slog.Warn("failed to delete the HPA workload Deployment before namespace cleanup", "namespace", run.namespace, "error", err)
+		}
+	}
+	return cleanupGPUTestNamespace(clientset, run)
 }
 
 // waitForMetricsAPI polls probe until it returns nil or the budget elapses,
 // returning the last probe error on timeout. prometheus-adapter registers its
-// aggregated APIServices before its first Prometheus relist populates metric
-// data, so a single-shot GET right after the deployment phase can race that
-// warm-up; this bounds the wait and fails closed. probe runs immediately, then
-// every interval.
+// aggregated APIService before it is available, so a single-shot discovery
+// right after the deployment phase can race that warm-up; this bounds the
+// wait and fails closed. probe runs immediately, then every interval.
 func waitForMetricsAPI(ctx context.Context, timeout, interval time.Duration, probe func(context.Context) error) error {
 	pollCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -309,308 +1400,4 @@ func waitForMetricsAPI(ctx context.Context, timeout, interval time.Duration, pro
 		return err
 	}
 	return nil
-}
-
-// validateHPABehavior creates a Deployment + HPA targeting a low external metric threshold,
-// then verifies the HPA computes desiredReplicas > currentReplicas and the Deployment
-// actually scales. This proves the full metrics pipeline (DCGM → Prometheus → adapter → HPA)
-// is functional end-to-end.
-func validateHPABehavior(ctx context.Context, clientset kubernetes.Interface) (*hpaBehaviorReport, error) {
-	// Generate unique test resource names and namespace (prevents cross-run interference).
-	b := make([]byte, 4)
-	if _, err := rand.Read(b); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate random suffix", err)
-	}
-	suffix := hex.EncodeToString(b)
-	nsName := hpaTestPrefix + suffix
-	deployName := hpaTestPrefix + suffix
-	hpaName := hpaTestPrefix + suffix
-	report := &hpaBehaviorReport{
-		Namespace:      nsName,
-		DeploymentName: deployName,
-		HPAName:        hpaName,
-	}
-
-	// Create unique test namespace.
-	ns := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{Name: nsName},
-	}
-	if _, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); k8s.IgnoreAlreadyExists(err) != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create HPA test namespace", err)
-	}
-
-	// Cleanup: delete namespace (cascades all resources).
-	// Use background context with bounded timeout so cleanup runs even if the parent
-	// context is already canceled (timeout/failure path). Without this, unique namespaces
-	// would accumulate as leftovers across repeated runs.
-	defer func() { //nolint:contextcheck // intentional: use background context so cleanup runs even if parent is canceled
-		slog.Debug("cleaning up HPA test namespace", "namespace", nsName)
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
-		defer cleanupCancel()
-		// Surface a failed delete: silently discarding it leaves the namespace
-		// (and anything still running in it) behind with no operator-visible
-		// signal, while the recorded artifact describes a cleanup that ran.
-		if err := k8s.IgnoreNotFound(clientset.CoreV1().Namespaces().Delete(
-			cleanupCtx, nsName, metav1.DeleteOptions{})); err != nil {
-			slog.Warn("failed to delete HPA test namespace; delete it manually",
-				"namespace", nsName, "error", err)
-		}
-	}()
-
-	// Create test Deployment (simple sleep pod, 1 replica, no GPU).
-	deploy := buildHPATestDeployment(deployName, nsName)
-	if _, err := clientset.AppsV1().Deployments(nsName).Create(
-		ctx, deploy, metav1.CreateOptions{}); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create HPA test deployment", err)
-	}
-
-	// Create HPA targeting external metric dcgm_gpu_power_usage with very low threshold.
-	hpa := buildHPATestHPA(hpaName, deployName, nsName)
-	if _, err := clientset.AutoscalingV2().HorizontalPodAutoscalers(nsName).Create(
-		ctx, hpa, metav1.CreateOptions{}); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create HPA test resource", err)
-	}
-
-	// Wait for HPA to report scaling intent: desiredReplicas > currentReplicas.
-	desired, current, err := waitForHPAScalingIntent(ctx, clientset, nsName, hpaName)
-	if err != nil {
-		return nil, err
-	}
-	report.ScaleUpDesiredReplicas = desired
-	report.ScaleUpCurrentReplicas = current
-
-	// Wait for Deployment to actually scale up (proves HPA → Deployment controller chain).
-	scaleUpReplicas, err := waitForDeploymentScale(ctx, clientset, nsName, deployName)
-	if err != nil {
-		return nil, err
-	}
-	report.ScaleUpDeploymentReplica = scaleUpReplicas
-
-	// Scale-down: patch HPA with high target so metric reads well below threshold.
-	// This triggers the HPA to compute desiredReplicas = minReplicas (scale-down).
-	// We Get the current HPA first to preserve resourceVersion (required by Update).
-	slog.Info("testing scale-down: updating HPA with unreachable metric target")
-	currentHPA, err := clientset.AutoscalingV2().HorizontalPodAutoscalers(nsName).Get(
-		ctx, hpaName, metav1.GetOptions{})
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to get HPA for scale-down test", err)
-	}
-	currentHPA.Spec.Metrics[0].External.Target.AverageValue = resourceQuantityPtr("999999")
-	if _, updateErr := clientset.AutoscalingV2().HorizontalPodAutoscalers(nsName).Update(
-		ctx, currentHPA, metav1.UpdateOptions{}); updateErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to update HPA target for scale-down", updateErr)
-	}
-
-	// Wait for Deployment to scale down (proves HPA scale-down path works).
-	scaleDownReplicas, err := waitForDeploymentScaleDown(ctx, clientset, nsName, deployName)
-	if err != nil {
-		return nil, err
-	}
-	report.ScaleDownReplica = scaleDownReplicas
-	return report, nil
-}
-
-// buildHPATestDeployment creates a minimal Deployment for the HPA behavioral test.
-// The pod does not need GPU resources — the HPA uses an external metric which is cluster-wide.
-func buildHPATestDeployment(name, namespace string) *appsv1.Deployment {
-	replicas := int32(1)
-	return &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: &replicas,
-			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{labelApp: name},
-			},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{labelApp: name},
-				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:    containerNameSleep,
-							Image:   defaults.ProbeImage,
-							Command: []string{containerNameSleep, "3600"},
-							Resources: corev1.ResourceRequirements{
-								Requests: corev1.ResourceList{
-									corev1.ResourceCPU:    resource.MustParse("10m"),
-									corev1.ResourceMemory: resource.MustParse("16Mi"),
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-}
-
-// buildHPATestHPA creates an HPA targeting external metric dcgm_gpu_power_usage.
-// The target value is intentionally very low (10W) — an idle H100 draws ~46W,
-// so the HPA always computes a scale-up. This works on any cluster with DCGM +
-// prometheus-adapter, not just KWOK clusters.
-func buildHPATestHPA(name, deployName, namespace string) *autoscalingv2.HorizontalPodAutoscaler {
-	return &autoscalingv2.HorizontalPodAutoscaler{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-		},
-		Spec: autoscalingv2.HorizontalPodAutoscalerSpec{
-			ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{
-				APIVersion: "apps/v1",
-				Kind:       "Deployment",
-				Name:       deployName,
-			},
-			MinReplicas: helper.Int32Ptr(1),
-			MaxReplicas: 3,
-			Metrics: []autoscalingv2.MetricSpec{
-				{
-					Type: autoscalingv2.ExternalMetricSourceType,
-					External: &autoscalingv2.ExternalMetricSource{
-						Metric: autoscalingv2.MetricIdentifier{
-							Name: "dcgm_gpu_power_usage",
-						},
-						Target: autoscalingv2.MetricTarget{
-							Type:         autoscalingv2.AverageValueMetricType,
-							AverageValue: resourceQuantityPtr("10"),
-						},
-					},
-				},
-			},
-			// Allow immediate scale-down (bypass default 5-min stabilization window)
-			// so the scale-down behavioral test completes in reasonable time.
-			Behavior: &autoscalingv2.HorizontalPodAutoscalerBehavior{
-				ScaleDown: &autoscalingv2.HPAScalingRules{
-					StabilizationWindowSeconds: helper.Int32Ptr(0),
-				},
-			},
-		},
-	}
-}
-
-// resourceQuantityPtr returns a pointer to a parsed resource.Quantity.
-func resourceQuantityPtr(val string) *resource.Quantity {
-	q := resource.MustParse(val)
-	return &q
-}
-
-// waitForHPAScalingIntent polls the HPA until desiredReplicas > currentReplicas.
-// This is the strict criterion: it proves the HPA read metrics and computed a scale-up.
-// We do NOT accept ScalingActive=True alone as that can be true even without scale intent.
-func waitForHPAScalingIntent(ctx context.Context, clientset kubernetes.Interface, namespace, hpaName string) (int32, int32, error) {
-	waitCtx, cancel := context.WithTimeout(ctx, defaults.HPAScaleTimeout)
-	defer cancel()
-	var observedDesired, observedCurrent int32
-
-	err := wait.PollUntilContextCancel(waitCtx, defaults.HPAPollInterval, true,
-		func(ctx context.Context) (bool, error) {
-			hpa, getErr := clientset.AutoscalingV2().HorizontalPodAutoscalers(namespace).Get(
-				ctx, hpaName, metav1.GetOptions{})
-			if getErr != nil {
-				slog.Debug("HPA not ready yet", "error", getErr)
-				return false, nil // retry
-			}
-
-			desired := hpa.Status.DesiredReplicas
-			current := hpa.Status.CurrentReplicas
-			observedDesired = desired
-			observedCurrent = current
-			slog.Debug("HPA status", "desired", desired, "current", current)
-
-			if desired > current {
-				slog.Info("HPA scaling intent detected",
-					"desiredReplicas", desired, "currentReplicas", current)
-				return true, nil
-			}
-			return false, nil
-		},
-	)
-	if err != nil {
-		if ctx.Err() != nil || waitCtx.Err() != nil {
-			return 0, 0, errors.Wrap(errors.ErrCodeTimeout,
-				"HPA did not report scaling intent within timeout — metrics pipeline may be broken", err)
-		}
-		return 0, 0, errors.Wrap(errors.ErrCodeInternal, "HPA scaling intent polling failed", err)
-	}
-
-	return observedDesired, observedCurrent, nil
-}
-
-// waitForDeploymentScale polls the Deployment until status.replicas > 1, proving
-// that the Deployment controller acted on the HPA's scaling recommendation.
-func waitForDeploymentScale(ctx context.Context, clientset kubernetes.Interface, namespace, deployName string) (int32, error) {
-	waitCtx, cancel := context.WithTimeout(ctx, defaults.DeploymentScaleTimeout)
-	defer cancel()
-	var observedReplicas int32
-
-	err := wait.PollUntilContextCancel(waitCtx, defaults.HPAPollInterval, true,
-		func(ctx context.Context) (bool, error) {
-			deploy, getErr := clientset.AppsV1().Deployments(namespace).Get(
-				ctx, deployName, metav1.GetOptions{})
-			if getErr != nil {
-				slog.Debug("failed to get deployment for scale check", "error", getErr)
-				return false, nil
-			}
-
-			replicas := deploy.Status.Replicas
-			slog.Debug("deployment replica status", "name", deployName, "replicas", replicas)
-
-			if replicas > 1 {
-				slog.Info("deployment scaled up", "name", deployName, "replicas", replicas)
-				observedReplicas = replicas
-				return true, nil
-			}
-			return false, nil
-		},
-	)
-	if err != nil {
-		if ctx.Err() != nil || waitCtx.Err() != nil {
-			return 0, errors.Wrap(errors.ErrCodeTimeout,
-				"deployment did not scale up within timeout — HPA may not be effective", err)
-		}
-		return 0, errors.Wrap(errors.ErrCodeInternal, "deployment scale verification failed", err)
-	}
-
-	return observedReplicas, nil
-}
-
-// waitForDeploymentScaleDown polls the Deployment until status.replicas <= 1, proving
-// that the HPA's scale-down recommendation was enacted by the Deployment controller.
-func waitForDeploymentScaleDown(ctx context.Context, clientset kubernetes.Interface, namespace, deployName string) (int32, error) {
-	waitCtx, cancel := context.WithTimeout(ctx, defaults.DeploymentScaleTimeout)
-	defer cancel()
-	var observedReplicas int32
-
-	err := wait.PollUntilContextCancel(waitCtx, defaults.HPAPollInterval, true,
-		func(ctx context.Context) (bool, error) {
-			deploy, getErr := clientset.AppsV1().Deployments(namespace).Get(
-				ctx, deployName, metav1.GetOptions{})
-			if getErr != nil {
-				slog.Debug("failed to get deployment for scale-down check", "error", getErr)
-				return false, nil
-			}
-
-			replicas := deploy.Status.Replicas
-			slog.Debug("deployment replica status (scale-down)", "name", deployName, "replicas", replicas)
-
-			if replicas <= 1 {
-				slog.Info("deployment scaled down", "name", deployName, "replicas", replicas)
-				observedReplicas = replicas
-				return true, nil
-			}
-			return false, nil
-		},
-	)
-	if err != nil {
-		if ctx.Err() != nil || waitCtx.Err() != nil {
-			return 0, errors.Wrap(errors.ErrCodeTimeout,
-				"deployment did not scale down within timeout — HPA scale-down may not be effective", err)
-		}
-		return 0, errors.Wrap(errors.ErrCodeInternal, "deployment scale-down verification failed", err)
-	}
-
-	return observedReplicas, nil
 }

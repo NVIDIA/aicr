@@ -30,10 +30,12 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/yaml"
 )
 
@@ -363,18 +365,6 @@ func truncateLines(text string, n int) string {
 	return strings.Join(lines[:n], "\n") + "\n... [truncated]"
 }
 
-// containsAllMetrics checks that all required metric names appear in the given text.
-// Returns the list of missing metrics.
-func containsAllMetrics(text string, required []string) []string {
-	var missing []string
-	for _, metric := range required {
-		if !strings.Contains(text, metric) {
-			missing = append(missing, metric)
-		}
-	}
-	return missing
-}
-
 // podStuckReason inspects a Pod for non-recoverable stuck states and returns a
 // human-readable reason. Returns empty string if the pod is not stuck.
 // Follows the pattern from pkg/validator/agent/wait.go:getJobFailureReasonFromPod.
@@ -382,7 +372,7 @@ func podStuckReason(pod *corev1.Pod) string {
 	for _, cs := range pod.Status.ContainerStatuses {
 		if w := cs.State.Waiting; w != nil {
 			switch w.Reason {
-			case "ImagePullBackOff", "ErrImagePull", "InvalidImageName", "CrashLoopBackOff":
+			case "ImagePullBackOff", "ErrImagePull", "InvalidImageName", waitingReasonCrashLoopBackOff:
 				return fmt.Sprintf("%s: %s (image: %s)", w.Reason, w.Message, cs.Image)
 			}
 		}
@@ -390,7 +380,7 @@ func podStuckReason(pod *corev1.Pod) string {
 	for _, cs := range pod.Status.InitContainerStatuses {
 		if w := cs.State.Waiting; w != nil {
 			switch w.Reason {
-			case "ImagePullBackOff", "ErrImagePull", "InvalidImageName", "CrashLoopBackOff":
+			case "ImagePullBackOff", "ErrImagePull", "InvalidImageName", waitingReasonCrashLoopBackOff:
 				return fmt.Sprintf("%s: %s (init container, image: %s)", w.Reason, w.Message, cs.Image)
 			}
 		}
@@ -416,17 +406,63 @@ func podWaitingStatus(pod *corev1.Pod) string {
 	return "none"
 }
 
-// waitForDeletion polls until a resource is gone (NotFound) or the context expires.
-func waitForDeletion(ctx context.Context, getFunc func() error) {
-	pollCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+// wrapWithCode adds message to err while keeping the code err already
+// carries, so the context grows at each layer without relabeling what the
+// consumer reads; a plain error gets fallback.
+func wrapWithCode(err error, fallback errors.ErrorCode, message string) error {
+	code := fallback
+	if se, ok := stderrors.AsType[*errors.StructuredError](err); ok {
+		code = se.Code
+	}
+	return errors.Wrap(code, message, err)
+}
+
+// resourceQuantityPtr returns a pointer to a parsed resource.Quantity.
+func resourceQuantityPtr(val string) *resource.Quantity {
+	q := resource.MustParse(val)
+	return &q
+}
+
+// waitForHPAScalingIntent polls the HPA until desiredReplicas > currentReplicas.
+// This is the strict criterion: it proves the HPA read metrics and computed a
+// scale-up. ScalingActive=True alone is not accepted, as it can be true
+// without scale intent. Used by the cluster-autoscaling check's external
+// metric HPA.
+func waitForHPAScalingIntent(ctx context.Context, clientset kubernetes.Interface, namespace, hpaName string) (int32, int32, error) {
+	waitCtx, cancel := context.WithTimeout(ctx, defaults.HPAScaleTimeout)
 	defer cancel()
-	_ = wait.PollUntilContextCancel(pollCtx, defaults.PodPollInterval, true,
+	var observedDesired, observedCurrent int32
+
+	err := wait.PollUntilContextCancel(waitCtx, defaults.HPAPollInterval, true,
 		func(ctx context.Context) (bool, error) {
-			err := getFunc()
-			if k8serrors.IsNotFound(err) {
+			hpa, getErr := clientset.AutoscalingV2().HorizontalPodAutoscalers(namespace).Get(
+				ctx, hpaName, metav1.GetOptions{})
+			if getErr != nil {
+				slog.Debug("HPA not ready yet", "error", getErr)
+				return false, nil // retry
+			}
+
+			desired := hpa.Status.DesiredReplicas
+			current := hpa.Status.CurrentReplicas
+			observedDesired = desired
+			observedCurrent = current
+			slog.Debug("HPA status", "desired", desired, "current", current)
+
+			if desired > current {
+				slog.Info("HPA scaling intent detected",
+					"desiredReplicas", desired, "currentReplicas", current)
 				return true, nil
 			}
 			return false, nil
 		},
 	)
+	if err != nil {
+		if ctx.Err() != nil || waitCtx.Err() != nil {
+			return 0, 0, errors.Wrap(errors.ErrCodeTimeout,
+				"HPA did not report scaling intent within timeout — metrics pipeline may be broken", err)
+		}
+		return 0, 0, errors.Wrap(errors.ErrCodeInternal, "HPA scaling intent polling failed", err)
+	}
+
+	return observedDesired, observedCurrent, nil
 }

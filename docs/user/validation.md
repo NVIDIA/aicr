@@ -676,8 +676,9 @@ uses Dynamo's request plane (Dynamo 1.4+ defaults to TCP); AICR does not set
 with no NATS relay, but least-loaded routing does not consume those events —
 only `DYN_ROUTER_MODE=kv` does. Set it to `gateway-epp`
 to exercise GAIE/EPP: the validator deploys an EPP component, worker frontend
-sidecars in direct mode, and an HTTPRoute through the AICR-managed inference
-gateway. The direct-mode sidecars honor EPP routing headers; they do not
+sidecars in direct mode, and an HTTPRoute through the recipe's inference
+gateway (agentgateway by default; a recipe whose components include no
+inference gateway fails the run before anything is deployed). The direct-mode sidecars honor EPP routing headers; they do not
 relay KV events.
 
 **Model-weights cache and `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS`.** The benchmark downloads
@@ -1024,11 +1025,11 @@ Valid feature names (from `pkg/evidence/cncf/consts.go`):
 | `dra-support` | Dynamic Resource Allocation driver and ResourceSlices |
 | `gang-scheduling` | Gang-scheduler presence and PodGroup support |
 | `secure-access` | Cluster authn/authz posture for AI workloads |
-| `accelerator-metrics` | GPU metrics exporter and Prometheus scrape config |
-| `ai-service-metrics` | Inference-service metrics via custom-metrics API |
-| `inference-gateway` | Gateway API + Inference Extension installation; also records the gateway `LoadBalancer` network exposure (open `0.0.0.0/0` vs scoped source ranges). Fails on an open gateway only when `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY=true`. |
+| `accelerator-metrics` | GPU metrics exporter and Prometheus scrape config (collector script section; the `accelerator-metrics` conformance check asserts per-device utilization and memory samples on the DCGM scrape, see [CNCF conformance](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md)) |
+| `ai-service-metrics` | Inference-service metrics via custom-metrics API (collector script section; the `ai-service-metrics` conformance check asserts Prometheus collects exactly the requests sent to a ServiceMonitor-selected stub, see [CNCF conformance](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md)) |
+| `inference-gateway` | Gateway API + Inference Extension installation for the recipe's inference gateway: `agentgateway` by default, or the component whose `componentRef` declares `overrides.inferenceGateway` (see [Declaring the inference gateway](../integrator/data-extension.md#declaring-the-inference-gateway)). The evidence collector records the GatewayClass Accepted, the Gateway Programmed and the InferencePool CRD Established for that Gateway; a standalone collector run with no recipe finds the Gateway named `inference-gateway`. Network exposure and the data-plane probe are assessed by the `inference-gateway` conformance check, not by the collector. |
 | `robust-operator` | Operator readiness and leader-election posture |
-| `pod-autoscaling` | HPA-driven pod autoscaling: external GPU metric + behavioral scale-up/down test (pod-scoped custom metrics collected best-effort — absent for DRA-allocated GPUs, not a failure) |
+| `pod-autoscaling` | HPA-driven pod autoscaling (collector script section; the `pod-autoscaling` conformance check scales accelerator pods 1 to 2 on a per-pod custom metric and needs two allocatable accelerators at once, see [CNCF conformance](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md)) |
 | `cluster-autoscaling` | Karpenter (preferred) or EKS managed node-group autoscaling fallback |
 
 ### Evidence verdicts and exit status
@@ -1036,12 +1037,16 @@ Valid feature names (from `pkg/evidence/cncf/consts.go`):
 Each collected feature records exactly one verdict in its evidence file:
 
 - **PASS** — the capability was exercised and behaved as expected.
-- **SKIP** — an optional prerequisite is absent (e.g. no inference gateway,
-  no supported operator, an unsupported cluster-autoscaling provider, or an
+- **SKIP** — an optional prerequisite is absent (e.g. a recipe that declares no
+  inference gateway, or a standalone run on a cluster with no Gateway named
+  `inference-gateway`; no supported operator, an unsupported cluster-autoscaling provider, or an
   operator that is installed but has no workload to reconcile). A SKIP is not
   a failure.
 - **FAIL** — a present capability was unhealthy, a required query failed, or
-  the evidence file carried no single valid verdict (fail closed).
+  the evidence file carried no single valid verdict (fail closed). An
+  inference Gateway the recipe declares is a requirement, not an optional
+  prerequisite: if it is missing, the cluster does not serve the Gateway API,
+  or the Gateway is programmed by another class, the section records FAIL.
 
 A **FAIL** in any feature makes `--cncf-submission` exit non-zero, so a
 submission that records a genuine failure no longer reports overall success.

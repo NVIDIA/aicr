@@ -138,8 +138,8 @@ var (
 )
 
 // keptByUninstall names the objects lifecycle.md's table lists as kept, for
-// the qualification values (the in-cluster registry on, validation off);
-// every namespace the release created is checked as well.
+// the qualification values (the in-cluster registry on); every namespace the
+// release created, the validation scenario's included, is checked as well.
 var keptByUninstall = []keptResource{
 	{gvkCRD, "", "clusterruntimes.operator.aicr.run"},
 	{gvkCRD, "", "runtimerollouts.operator.aicr.run"},

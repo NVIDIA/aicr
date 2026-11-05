@@ -59,66 +59,7 @@
 # A post-merge check belongs here rather than only in a PR description, because
 # the skill reads this file and does not read PR descriptions. A check recorded
 # only in a PR is a check nobody runs.
-deferred_verifications:
-  - id: empty-source-openvex-releases
-    opened: 2026-10-15
-    document_version: 20
-    why_deferred: >-
-      Version 20 was the first source document with no statements, and the
-      sbom-and-attest guard accepts that in source mode only since then. Only a
-      release runs the guard, the binder and `cosign attest` end to end.
-      v1.1.0-rc1 (run 39266148817) never reached the guard: its aiperf-bench
-      image scan failed on libexpat1 first, and version 21 is not empty, so the
-      re-cut does not measure the empty-source path either.
-    check: >-
-      The first release cut from a main head whose .openvex.json has
-      `"statements": []` passes the sbom-and-attest "Verify OpenVEX document"
-      step in source mode and publishes an OpenVEX attestation with
-      `"statements": []` on the aiperf-bench linux/arm64 manifest.
-    how: |
-      cosign verify-attestation --type openvex \
-        --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-        --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.*' \
-        ghcr.io/nvidia/aicr-validators/aiperf-bench@<linux/arm64 digest> \
-        | jq -rs '.[0].payload | @base64d | fromjson | .predicate.statements'
-    resolves_when: >-
-      the release workflow for THE FIRST release whose source document has no
-      statements has been inspected AND its guard step passed and the command
-      above returned `[]`. A failure on that release is the finding to triage,
-      not something a later release discharges.
-
-  - id: pillow-13-override-scan
-    opened: 2026-10-29
-    document_version: 25
-    why_deferred: >-
-      Version 25 retired all 28 pillow statements because the image now
-      installs pillow 13.0.0 from validators/performance/requirements-overrides.txt.
-      The evidence is a local linux/amd64 build scanned with grype 0.116.1
-      (`--only-fixed -c .grype.yaml`, no VEX): no pillow match at any
-      severity, and syft catalogued pillow 13.0.0. That is a newer grype than
-      the scan action pins and not the bytes CI publishes. The weekly scan
-      cannot settle it: its cleanup job deletes the scan-<sha> images when the
-      run ends and its text artifact expires after a day, so the first
-      published release image is the earliest evidence that persists.
-    check: >-
-      The aiperf-bench image of the first release cut from a main head
-      containing document version 25, scanned by digest on both linux/amd64
-      and linux/arm64, has no pillow match at any severity and catalogues
-      pillow 13.0.0. Scoped to pillow: other findings (CVE-2026-115557 in the
-      base's CPython, NVIDIA/aicr#3523) are not this entry's concern.
-    how: |
-      IMG=ghcr.io/nvidia/aicr-validators/aiperf-bench@$(crane digest ghcr.io/nvidia/aicr-validators/aiperf-bench:<release tag>)
-      for arch in amd64 arm64; do
-        grype "registry:${IMG}" --platform "linux/${arch}" --only-fixed -c .grype.yaml -o json \
-          | jq '[.matches[], (.ignoredMatches // [])[]] | map(select(.artifact.name == "pillow")) | length'
-        syft "registry:${IMG}" --platform "linux/${arch}" -q -o json \
-          | jq -r '.artifacts[] | select(.name == "pillow") | .version'
-      done
-    resolves_when: >-
-      that release's image has been scanned as above, every count is 0 and
-      every version is 13.0.0, with the release tag and digest recorded in the
-      PR that deletes this entry. A pillow finding on that release is the
-      finding to triage, not something a later release discharges.
+deferred_verifications: []
 
 known_negatives: []
 
@@ -164,6 +105,21 @@ deliberate_exclusions:
     invalidated_by: >-
       AICR starting to build any of these images, which would make their
       reachability provable from source
+
+  - id: nvsentinel-image-cves-are-a-version-bump
+    decided: 2026-11-05
+    decision: >-
+      HIGH+ findings on the nineteen ghcr.io/nvidia/nvsentinel/* images and
+      the nvsentinel chart's two file-server pins (docker.io/bitnamilegacy/nginx,
+      quay.io/martinhelmich/prometheus-nginxlog-exporter) get no VEX
+      statement. AICR builds none of them and runs the NVSentinel ones at the
+      nvsentinel defaultVersion in recipes/registry.yaml, so the fix is a
+      defaultVersion bump. A statement would also never publish:
+      tools/openvex-bind drops statements whose product is not a released
+      AICR image, so one here would only hide the weekly scan's signal.
+    invalidated_by: >-
+      AICR starting to build or release any of these images, which would make
+      their reachability provable from source and a statement publishable
 
   - id: busybox-init-image-unfixed-highs
     decided: 2026-09-27

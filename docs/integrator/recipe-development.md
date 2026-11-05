@@ -190,6 +190,8 @@ When authoring a recipe targeting Talos (`criteria.os: talos`), append the `os-t
 
 **`nvsentinel-external-remediation`** hands a faulty node to a repair system outside NVSentinel, composed beside the remediation step, the health events analyzer and node validation (`spec.mixins: [nvsentinel-remediation, nvsentinel-health-events-analyzer, nvsentinel-node-validation, nvsentinel-external-remediation]`), or beside `nvsentinel-observe` to rehearse in dry run, where no request is created. It adds upstream's `external-remediation` action, which routes a `CUSTOM` health event with that `customRecommendedAction` to an `ExternalRemediationRequest`, and its request template, through `nvsentinel`'s `mixinSafeOverridePaths`; it sets no path a step sets. The template key is `external-remediation`, without upstream's `.yaml` suffix, because mixin override keys may not contain a dot. Nothing routes until the leaf declares a fault, such as a kubernetes-object-monitor policy that emits that event, since no shipped source emits `CUSTOM`. `CheckNVSentinelExternalRemediationCoherent` blocks a bundle with a request action off upstream's contract (its template included) or without `fault-remediation` enabled, with a kubernetes-object-monitor policy that has `recommendedAction: CUSTOM` and no `customRecommendedAction` or an `enabled` or `healthEvent.isFatal` that does not render as `true` or `false`, or with `--dynamic` on a path it reads; it warns when nothing routes to the action. Its rules are in the [validator reference](../contributor/validator.md#shipping-functions). See [component catalog](../user/component-catalog.md#external-remediation) for how to declare a fault, the contract the external system must honor, how to force a release, and how to stop.
 
+**`nvsentinel-maintenance-request`** turns on lifecycle-manager's MaintenanceRequest controller, so an external system or an operator can put a node into maintenance by creating a `MaintenanceRequest`: NVSentinel cordons and drains the node, and deleting the request uncordons it. It sets only `lifecycle-manager.controllers.maintenanceRequest.enabled`, so compose it beside `nvsentinel-node-validation`, which owns `global.lifecycleManager.enabled`, and a quarantine or remediation step. `CheckNVSentinelMaintenanceRequestCoherent` fails the bundle when lifecycle-manager, `fault-quarantine` or `node-drainer` does not render, under `global.dryRun`, or when `fault-quarantine.ruleSets` drops the rule set that matches request events. See [component catalog](../user/component-catalog.md#maintenance-requests) for the request lifecycle, RBAC and recovery.
+
 **Cross-cutting overlays with wildcard criteria** apply across one criteria dimension without being referenced via `spec.base` or listed in `spec.mixins`. The resolver can return multiple independent maximal-leaf overlays for a single query, so a `service: any` overlay is picked up alongside the service-specific maximal leaf and its inheritance chain:
 
 ```yaml
@@ -331,7 +333,9 @@ without either a configured StorageClass or a cluster default fails
 validation.
 `inference-routing-mode` resolves from the recipe only, defaulting to
 `dynamo-router`; set `gateway-epp` to validate the GAIE/EPP path through the
-AICR-managed inference gateway.
+recipe's inference gateway (agentgateway by default). A recipe whose
+components include no inference gateway fails a `gateway-epp` run at once
+rather than benchmarking a Gateway it does not ship.
 
 ### NCCL benchmark profile constraint
 

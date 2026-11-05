@@ -31,6 +31,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 type fakeStagedArtifact struct {
@@ -748,12 +749,8 @@ func TestNewRejectsMalformedMaterializedCatalog(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(child, "overlays"), 0o700); err != nil {
 		t.Fatalf("MkdirAll(overlays) error = %v", err)
 	}
-	registry := `apiVersion: aicr.run/v1beta1
-kind: ComponentRegistry
-components: []
-`
 	if err := os.WriteFile(
-		filepath.Join(child, recipe.RegistryFileName), []byte(registry), 0o600); err != nil {
+		filepath.Join(child, recipe.RegistryFileName), []byte(providertest.EmptyRegistryYAML), 0o600); err != nil {
 		t.Fatalf("WriteFile(registry) error = %v", err)
 	}
 	malformed := `apiVersion: aicr.run/v1beta2

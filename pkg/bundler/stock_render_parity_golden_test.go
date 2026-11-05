@@ -35,6 +35,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
@@ -493,19 +494,17 @@ func (a *overlayAddition) dataProvider(t *testing.T, leaf recipe.CatalogEntry) r
 	overlay.Kind = recipe.RecipeMetadataKind
 	overlay.APIVersion = recipe.RecipeMetadataAPIVersion
 	overlay.Metadata.Name = optInOverlayName
-	// The layered provider requires a registry file. An empty one leaves the
-	// embedded registry as is.
-	registry := recipe.ComponentRegistry{
-		APIVersion: recipe.ComponentRegistryAPIVersion,
-		Kind:       recipe.ComponentRegistryKind,
+	overlayYAML, err := yaml.Marshal(&overlay)
+	if err != nil {
+		t.Fatalf("marshal overlay: %v", err)
 	}
 
-	dir := t.TempDir()
-	writeYAMLFile(t, filepath.Join(dir, recipe.RegistryFileName), &registry)
-	if err := os.Mkdir(filepath.Join(dir, "overlays"), 0o700); err != nil {
-		t.Fatalf("create overlays dir: %v", err)
-	}
-	writeYAMLFile(t, filepath.Join(dir, "overlays", optInOverlayName+".yaml"), &overlay)
+	// The layered provider requires a registry file. An empty one leaves the
+	// embedded registry as is.
+	dir := providertest.WriteDir(t, map[string][]byte{
+		recipe.RegistryFileName:                  []byte(providertest.EmptyRegistryYAML),
+		"overlays/" + optInOverlayName + ".yaml": overlayYAML,
+	})
 	provider, err := recipe.NewLayeredDataProvider(
 		recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ""),
 		recipe.LayeredProviderConfig{ExternalDir: dir},
@@ -515,17 +514,6 @@ func (a *overlayAddition) dataProvider(t *testing.T, leaf recipe.CatalogEntry) r
 	}
 	t.Cleanup(func() { recipe.EvictCachedRegistry(provider) })
 	return provider
-}
-
-func writeYAMLFile(t *testing.T, path string, v any) {
-	t.Helper()
-	raw, err := yaml.Marshal(v)
-	if err != nil {
-		t.Fatalf("marshal %s: %v", path, err)
-	}
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
-		t.Fatalf("write %s: %v", path, err)
-	}
 }
 
 // unrenderedRegistryComponents returns the registry components that render in
