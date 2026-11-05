@@ -74,6 +74,32 @@ charts:
           - nodemaintenances.maintenance.nvidia.com
         recipes:
           - gb300-generic-ubuntu-training
+  - chart: network-operator
+    image: nvcr.io/nvidia/cloud-native/network-operator:v26.7.1
+    repository: https://helm.ngc.nvidia.com/nvidia
+    sourceVersion: 26.7.1
+    variants:
+      - crds:
+          - cidrpools.nv-ipam.nvidia.com
+          - deviceattributes.sriovnetwork.k8snetworkplumbingwg.io
+          - hostdevicenetworks.mellanox.com
+          - ipoibnetworks.mellanox.com
+          - ippools.nv-ipam.nvidia.com
+          - macvlannetworks.mellanox.com
+          - maintenanceoperatorconfigs.maintenance.nvidia.com
+          - network-attachment-definitions.k8s.cni.cncf.io
+          - nicclusterpolicies.mellanox.com
+          - nicnodepolicies.mellanox.com
+          - nodemaintenances.maintenance.nvidia.com
+          - ovsnetworks.sriovnetwork.openshift.io
+          - sriovibnetworks.sriovnetwork.openshift.io
+          - sriovnetworknodepolicies.sriovnetwork.openshift.io
+          - sriovnetworknodestates.sriovnetwork.openshift.io
+          - sriovnetworkpoolconfigs.sriovnetwork.openshift.io
+          - sriovnetworks.sriovnetwork.openshift.io
+          - sriovoperatorconfigs.sriovnetwork.openshift.io
+          - sriovresourcepolicies.sriovnetwork.k8snetworkplumbingwg.io
+        recipes:
           - vr200-nvke-ubuntu-training
   - chart: network-operator
     image: cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/network-operator:v25.1.0
