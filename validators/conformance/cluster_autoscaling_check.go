@@ -231,7 +231,9 @@ func CheckClusterAutoscaling(ctx *validators.Context) error {
 //
 // The return is NAMED so the deferred cleanup can tell a failed run apart
 // from a successful one: the caller records the "Delete test namespace"
-// artifact only after success, so the failed path records it here.
+// artifact only after success, so the failed path records it here, and a
+// terminally failed cleanup fails an otherwise-passing run (a primary error
+// is never overwritten).
 func validateClusterAutoscaling(vctx *validators.Context, nodePoolName string) (report *clusterAutoscalingReport, err error) {
 	ctx, clientset := vctx.Ctx, vctx.Clientset
 
@@ -268,6 +270,11 @@ func validateClusterAutoscaling(vctx *validators.Context, nodePoolName string) (
 			// operator-visible signal.
 			slog.Warn("failed to delete cluster autoscaling test namespace; delete it manually",
 				"namespace", nsName, "status", status, "error", cleanupErr)
+			if err == nil {
+				// A PASS that leaks the namespace, the workload, and its GPU
+				// request is not a pass; a primary error always wins.
+				err = cleanupErr
+			}
 		}
 		if err != nil {
 			// A namespace that may still surface after an ambiguous create

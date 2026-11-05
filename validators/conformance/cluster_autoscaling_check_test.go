@@ -26,6 +26,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/validators"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -672,5 +673,97 @@ func TestCheckClusterAutoscaling_DoneContextTriesNoNodePool(t *testing.T) {
 		if action.GetResource().Resource == "namespaces" {
 			t.Errorf("unexpected %s on namespaces with a done context", action.GetVerb())
 		}
+	}
+}
+
+// passClusterAutoscalingFakes makes validateClusterAutoscaling succeed against
+// the fake control plane: the HPA reports scaling intent on create, the
+// first node list is the baseline and every later one shows a new Karpenter
+// node, and the test namespace lists two Running pods.
+func passClusterAutoscalingFakes(c *k8sfake.Clientset, poolName string) {
+	c.PrependReactor("create", "horizontalpodautoscalers", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		hpa := action.(k8stesting.CreateAction).GetObject().(*autoscalingv2.HorizontalPodAutoscaler)
+		hpa.Status = autoscalingv2.HorizontalPodAutoscalerStatus{DesiredReplicas: 2, CurrentReplicas: 1}
+		return false, nil, nil
+	})
+	nodeLists := 0
+	c.PrependReactor("list", "nodes", func(k8stesting.Action) (bool, runtime.Object, error) {
+		nodeLists++
+		if nodeLists == 1 {
+			return false, nil, nil // baseline: no pool nodes yet
+		}
+		return true, &corev1.NodeList{Items: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{
+			Name: "kwok-gpu-0", Labels: map[string]string{karpenterNodePoolLabel: poolName}}}}}, nil
+	})
+	c.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		ns := action.GetNamespace()
+		running := func(name string) corev1.Pod {
+			return corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+				Status: corev1.PodStatus{Phase: corev1.PodRunning}}
+		}
+		return true, &corev1.PodList{Items: []corev1.Pod{running("w-0"), running("w-1")}}, nil
+	})
+}
+
+// TestValidateClusterAutoscaling_CleanupFailureFailsPassingRun pins the
+// named-return contract on the SUCCESS path: a run whose behavioral test
+// passed must still fail when its namespace cleanup terminally fails
+// (every Delete rejected), otherwise the check reports PASS while the
+// namespace, the workload, and its GPU request remain. The passing control
+// row proves the fakes reach success. Sequential: shortenCleanupTimeout
+// touches package state and captureStdout swaps os.Stdout.
+func TestValidateClusterAutoscaling_CleanupFailureFailsPassingRun(t *testing.T) {
+	shortenCleanupTimeout(t)
+	tests := []struct {
+		name       string
+		deleteErr  error
+		wantStatus string
+	}{
+		{name: "cleanup succeeds, run passes", wantStatus: "confirmed absent"},
+		{
+			name: "cleanup terminally fails, run fails with the cleanup error",
+			deleteErr: k8serrors.NewForbidden(schema.GroupResource{Resource: "namespaces"}, "",
+				stderrors.New("namespaces is forbidden")),
+			wantStatus: "CLEANUP FAILED",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := k8sfake.NewClientset()
+			passClusterAutoscalingFakes(c, "gpu-pool")
+			if tt.deleteErr != nil {
+				failNamespaceDelete(c, tt.deleteErr)
+			}
+
+			var (
+				report *clusterAutoscalingReport
+				err    error
+			)
+			out := captureStdout(t, func() {
+				report, err = validateClusterAutoscaling(&validators.Context{Ctx: context.Background(), Clientset: c}, "gpu-pool")
+			})
+			if tt.deleteErr == nil {
+				if err != nil {
+					t.Fatalf("want pass, got %v", err)
+				}
+				if report == nil || report.HPADesiredReplicas != 2 || report.ObservedNodeCount != 1 || report.ScheduledPodCount != 2 {
+					t.Errorf("report = %+v, want desired=2 nodes=1 scheduled=2", report)
+				}
+				if strings.Contains(out, "--- Delete test namespace ---") {
+					t.Error("the success path must leave the cleanup artifact to the caller")
+				}
+				return
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+			if err == nil || !strings.Contains(err.Error(), "CLEANUP FAILED") {
+				t.Errorf("error = %v, want the cleanup failure to fail the passing run", err)
+			}
+			if !strings.Contains(out, "--- Delete test namespace ---") || !strings.Contains(out, tt.wantStatus) {
+				t.Errorf("cleanup artifact missing or lacks %q in output:\n%s", tt.wantStatus, out)
+			}
+			if report == nil {
+				t.Error("report = nil, want the behavioral result preserved beside the cleanup error")
+			}
+		})
 	}
 }
