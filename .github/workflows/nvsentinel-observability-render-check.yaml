@@ -36,9 +36,10 @@
 # the external-remediation one asserts the ExternalRemediationRequest action,
 # its template and RBAC render only with its mixin, and that
 # kubernetes-object-monitor prints a declared policy's enabled and isFatal
-# verbatim, and the CRD exclusion one asserts every component's
-# ownsCRDsExcludeSubcharts (nvsentinel's and nktp's) still matches its pinned
-# chart.
+# verbatim, the maintenance-request one asserts the controller, its socket
+# mount, its webhooks and the quarantine rule set its events match, and the
+# CRD exclusion one asserts every component's ownsCRDsExcludeSubcharts
+# (nvsentinel's and nktp's) still matches its pinned chart.
 # All are gated on testing.Short() -- `make
 # test`/`make qualify`/every other CI job run with -short, so this is the only
 # place they execute. There is no PR-blocking trigger here on purpose: these
@@ -118,6 +119,7 @@ jobs:
             TestNVSentinelChartSystemNamespacesDefault
             TestNVSentinelNodeValidationChartRender
             TestNVSentinelPostRemediationValidationChartRender
+            TestNVSentinelMaintenanceRequestChartRender
           )
           pattern="^($(IFS='|'; echo "${tests[*]}"))$"
           out=$(go test ./pkg/bundler/validations/... -run "$pattern" -v -count=1 2>&1) && rc=0 || rc=$?

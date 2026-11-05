@@ -132,6 +132,10 @@ jobs:
           # CheckNVSentinelExternalRemediationCoherent only warns.
           - mixin: 'nvsentinel-remediation,nvsentinel-health-events-analyzer,nvsentinel-node-validation,nvsentinel-external-remediation'
             deployer: helm
+          # Maintenance requests (#3092) on node validation's lifecycle-manager
+          # and the remediation step's cordon and drain.
+          - mixin: 'nvsentinel-remediation,nvsentinel-health-events-analyzer,nvsentinel-node-validation,nvsentinel-maintenance-request'
+            deployer: helm
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1

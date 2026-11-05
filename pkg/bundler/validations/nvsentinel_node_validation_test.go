@@ -32,8 +32,7 @@ func nodeValidationValues() map[string]any {
 		"global": map[string]any{"lifecycleManager": map[string]any{"enabled": true}},
 		"lifecycle-manager": map[string]any{
 			"controllers": map[string]any{
-				"validationRequest":  map[string]any{"enabled": true},
-				"maintenanceRequest": map[string]any{"enabled": false},
+				"validationRequest": map[string]any{"enabled": true},
 			},
 			"config": map[string]any{
 				"schedulingGate": map[string]any{"cordon": map[string]any{
