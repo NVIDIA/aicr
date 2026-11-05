@@ -15,22 +15,49 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/validators"
+	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/dynamic"
 )
 
-const robustTestPrefix = "robust-test-"
+const (
+	robustTestPrefix = "robust-test-"
+	// apiGroupTrainer is the Kubeflow Trainer API group.
+	apiGroupTrainer = "trainer.kubeflow.org"
+	// kubeflowTrainerNamespace is the namespace the kubeflow-trainer component
+	// deploys into.
+	kubeflowTrainerNamespace = "kubeflow"
+	// trainJobDefaultRuntime is the ClusterTrainingRuntime every
+	// kubeflow-trainer release ships and the upstream
+	// TestRobustCRDControllerOperation reconciles against.
+	trainJobDefaultRuntime = "torch-distributed"
+	// robustTrainJobName is the valid TrainJob created in the per-run test
+	// namespace for the reconciliation case.
+	robustTrainJobName = robustTestPrefix + "trainjob"
+	// trainJobConditionComplete and trainJobConditionFailed are the TrainJob
+	// terminal condition types the reconciliation wait decides on.
+	trainJobConditionComplete = "Complete"
+	trainJobConditionFailed   = "Failed"
+	// crdConditionEstablished is the CRD condition that says the API server
+	// serves the resource.
+	crdConditionEstablished = "Established"
+)
 
 var dgdGVR = schema.GroupVersionResource{
 	Group: apiGroupNVIDIA, Version: versionV1beta1, Resource: "dynamographdeployments",
@@ -41,7 +68,25 @@ var dcdGVR = schema.GroupVersionResource{
 }
 
 var trainJobGVR = schema.GroupVersionResource{
-	Group: "trainer.kubeflow.org", Version: "v1alpha1", Resource: "trainjobs",
+	Group: apiGroupTrainer, Version: versionV1alpha1, Resource: "trainjobs",
+}
+
+var clusterTrainingRuntimeGVR = schema.GroupVersionResource{
+	Group: apiGroupTrainer, Version: versionV1alpha1, Resource: "clustertrainingruntimes",
+}
+
+// trainJobReconcileTimeout bounds the TrainJob reconciliation wait (a
+// package variable so tests can shorten it, mirroring cleanupTimeout).
+var trainJobReconcileTimeout = defaults.TrainJobReconcileTimeout
+
+// trainJobReconcileReport is what the reconciliation wait observed on the
+// valid TrainJob.
+type trainJobReconcileReport struct {
+	Namespace  string
+	Name       string
+	Runtime    string
+	Conditions []conditionObservation
+	Elapsed    time.Duration
 }
 
 type webhookRejectionReport struct {
@@ -68,26 +113,44 @@ func recipeHasComponent(ctx *validators.Context, name string) bool {
 
 // CheckRobustController validates CNCF requirement: Robust Controller.
 // Proves that at least one complex AI operator with a CRD is installed and
-// functions reliably, including running pods, operational webhooks, and
-// custom resource reconciliation.
+// functions reliably, including running pods, an operational webhook that
+// rejects an invalid custom resource, and reconciliation of a valid one to a
+// terminal condition.
 //
 // Checks are selected based on recipe components:
-//   - dynamo-platform in recipe → validate Dynamo operator
-//   - kubeflow-trainer in recipe → validate Kubeflow Trainer operator
+//   - kubeflow-trainer in recipe → validate Kubeflow Trainer, including a
+//     TrainJob reconciled to Complete (the full upstream
+//     TestRobustCRDControllerOperation shape)
+//   - dynamo-platform in recipe (no kubeflow-trainer) → validate the Dynamo
+//     operator; CR reconciliation is recorded as an observation only, since
+//     a DynamoGraphDeployment cannot reach a terminal condition without a
+//     model and GPU workers
 //   - neither → skip
 func CheckRobustController(ctx *validators.Context) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
 	}
 
+	if recipeHasComponent(ctx, "kubeflow-trainer") {
+		slog.Info("robust-controller: validating Kubeflow Trainer (kubeflow-trainer in recipe)")
+		// The Kubeflow path creates a per-run namespace for the TrainJob, so
+		// its work is bounded to leave the cleanup reserve intact — see
+		// gpuCheckWorkBudget in consts.go. Fail fast before creating anything
+		// when the deadline cannot fit the reserve.
+		budget, err := gpuCheckWorkBudget(ctx.Ctx, robustControllerWorkBudget)
+		if err != nil {
+			return err
+		}
+		workCtx, cancelWork := ctx.Timeout(budget)
+		defer cancelWork()
+		work := *ctx
+		work.Ctx = workCtx
+		return checkRobustKubeflowTrainer(&work)
+	}
+
 	if recipeHasComponent(ctx, "dynamo-platform") {
 		slog.Info("robust-controller: validating Dynamo operator (dynamo-platform in recipe)")
 		return checkRobustDynamo(ctx)
-	}
-
-	if recipeHasComponent(ctx, "kubeflow-trainer") {
-		slog.Info("robust-controller: validating Kubeflow Trainer (kubeflow-trainer in recipe)")
-		return checkRobustKubeflowTrainer(ctx)
 	}
 
 	return validators.SkipWithReason(validators.SkipReasonComponentNotInRecipe, "no supported AI operator found in recipe (requires dynamo-platform or kubeflow-trainer)")
@@ -96,11 +159,13 @@ func CheckRobustController(ctx *validators.Context) error {
 // checkRobustKubeflowTrainer validates the Kubeflow Trainer operator:
 // 1. Controller deployment running
 // 2. Validating webhook operational with reachable endpoint
-// 3. TrainJob CRD exists
+// 3. TrainJob CRD exists and is Established
 // 4. Webhook rejects invalid TrainJob
+// 5. A valid TrainJob on the default ClusterTrainingRuntime reconciles to
+// Complete within defaults.TrainJobReconcileTimeout
 func checkRobustKubeflowTrainer(ctx *validators.Context) error {
 	// 1. Controller deployment running
-	deploy, deployErr := getDeploymentIfAvailable(ctx, "kubeflow", "kubeflow-trainer-controller-manager")
+	deploy, deployErr := getDeploymentIfAvailable(ctx, kubeflowTrainerNamespace, "kubeflow-trainer-controller-manager")
 	if deployErr != nil {
 		return errors.Wrap(errors.ErrCodeNotFound, "Kubeflow Trainer controller not found", deployErr)
 	}
@@ -115,7 +180,7 @@ func checkRobustKubeflowTrainer(ctx *validators.Context) error {
 			deploy.Status.AvailableReplicas, expected,
 			firstContainerImage(deploy.Spec.Template.Spec.Containers)))
 
-	operatorPods, podErr := ctx.Clientset.CoreV1().Pods("kubeflow").List(ctx.Ctx, metav1.ListOptions{})
+	operatorPods, podErr := ctx.Clientset.CoreV1().Pods(kubeflowTrainerNamespace).List(ctx.Ctx, metav1.ListOptions{})
 	if podErr != nil {
 		recordRawTextArtifact(ctx, "Kubeflow Trainer pods", "kubectl get pods -n kubeflow",
 			fmt.Sprintf("failed to list pods: %v", podErr))
@@ -174,21 +239,19 @@ func checkRobustKubeflowTrainer(ctx *validators.Context) error {
 		"kubectl get validatingwebhookconfigurations",
 		fmt.Sprintf("Name:      %s\nEndpoint:  reachable", webhookName))
 
-	// 3. TrainJob CRD exists
+	// 3. TrainJob CRD exists and is Established
 	dynClient, err := getDynamicClient(ctx)
 	if err != nil {
 		return err
 	}
-	crdGVR := schema.GroupVersionResource{
-		Group: apiGroupAPIExtensions, Version: "v1", Resource: resourceCRDs,
-	}
-	crdObj, err := dynClient.Resource(crdGVR).Get(ctx.Ctx, "trainjobs.trainer.kubeflow.org", metav1.GetOptions{})
+	established, err := requireCRDEstablished(ctx.Ctx, dynClient, "trainjobs.trainer.kubeflow.org")
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeNotFound, "TrainJob CRD not found", err)
+		return err
 	}
 	recordRawTextArtifact(ctx, "Kubeflow Trainer CRDs",
-		"kubectl get crds | grep trainer",
-		fmt.Sprintf("Required CRD present: %s", crdObj.GetName()))
+		"kubectl get crd trainjobs.trainer.kubeflow.org -o jsonpath='{.status.conditions}'",
+		fmt.Sprintf("Required CRD present: trainjobs.trainer.kubeflow.org\nEstablished: %s (reason=%s)",
+			established.Status, established.Reason))
 
 	// 4. Webhook rejects invalid TrainJob
 	rejectionReport, err := validateKubeflowWebhookRejects(ctx)
@@ -200,7 +263,320 @@ func checkRobustKubeflowTrainer(ctx *validators.Context) error {
 		fmt.Sprintf("Resource:    %s/%s\nHTTPStatus:  %d\nReason:      %s\nMessage:     %s",
 			rejectionReport.Namespace, rejectionReport.ResourceName,
 			rejectionReport.StatusCode, rejectionReport.Reason, rejectionReport.Message))
+
+	// 5. A valid TrainJob reconciles to Complete.
+	return reconcileKubeflowTrainJob(ctx, dynClient)
+}
+
+// requireCRDEstablished reads the named CRD and requires its Established
+// condition to be True: a registered CRD the API server does not serve yet
+// (or no longer serves) is not an operating controller's API.
+func requireCRDEstablished(ctx context.Context, dynClient dynamic.Interface, crdName string) (*conditionObservation, error) {
+	crdGVR := schema.GroupVersionResource{
+		Group: apiGroupAPIExtensions, Version: "v1", Resource: resourceCRDs,
+	}
+	crdObj, err := dynClient.Resource(crdGVR).Get(ctx, crdName, metav1.GetOptions{})
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			return nil, errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf("CRD %s not found", crdName), err)
+		}
+		return nil, classifyK8sReadError(err, "CRD "+crdName)
+	}
+	cond, condErr := getConditionObservation(crdObj, crdConditionEstablished)
+	if condErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("CRD %s carries no Established condition", crdName), condErr)
+	}
+	if cond.Status != conditionStatusTrue {
+		return nil, errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("CRD %s is registered but not Established: status=%s reason=%s message=%s",
+				crdName, cond.Status, cond.Reason, cond.Message))
+	}
+	return cond, nil
+}
+
+// reconcileKubeflowTrainJob creates a valid TrainJob on the default
+// ClusterTrainingRuntime in a per-run namespace and waits for the Trainer
+// controller to reconcile it to Complete=True, failing on Failed=True or on
+// the defaults.TrainJobReconcileTimeout bound (the upstream
+// TestRobustCRDControllerOperation shape). The TrainJob requests no
+// accelerator: the requirement is that the controller reconciles a custom
+// resource, and a GPU allocation would compete with the other conformance
+// checks for the cell's GPUs. Its one pod runs defaults.ProbeImage with a
+// trivial command instead of the runtime's PyTorch image, so the reconcile
+// bound is spent on the controller (TrainJob → JobSet → Job → Pod) and not
+// on a multi-gigabyte image pull.
+//
+// The TrainJob sets no scheduling of its own: Trainer v2.2.0 offers
+// spec.runtimePatches for per-TrainJob tolerations, but AICR's
+// torch-distributed manifest already carries the accelerated node selector
+// and tolerations the bundler bakes in from --accelerated-node-selector and
+// --accelerated-node-toleration, and that path holds across Trainer v2.1 and
+// v2.2. That is the chosen design: the probe exercises the runtime as a user's
+// bare TrainJob would, so a bundle generated without the accelerated
+// toleration surfaces here as a Timeout verdict naming the Pending pod and
+// its Unschedulable reason.
+//
+// The return is NAMED so the deferred namespace cleanup can fail an
+// otherwise-passing check when it terminally fails; a primary error is always
+// preserved.
+func reconcileKubeflowTrainJob(ctx *validators.Context, dynClient dynamic.Interface) (err error) {
+	// The runtime is the reconciliation's prerequisite: without it the
+	// webhook rejects the TrainJob, which would read as a webhook result,
+	// not the missing-runtime failure it is.
+	if _, rtErr := dynClient.Resource(clusterTrainingRuntimeGVR).Get(ctx.Ctx, trainJobDefaultRuntime, metav1.GetOptions{}); rtErr != nil {
+		if k8serrors.IsNotFound(rtErr) {
+			return errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf(
+				"ClusterTrainingRuntime %s not found — the kubeflow-trainer chart ships it; reconciliation cannot be exercised", trainJobDefaultRuntime), rtErr)
+		}
+		return classifyK8sReadError(rtErr, "ClusterTrainingRuntime "+trainJobDefaultRuntime)
+	}
+
+	run, runErr := newGPUTestRun()
+	if runErr != nil {
+		return runErr
+	}
+	// Register cleanup BEFORE the first Create (see runDRASecureAccessTest):
+	// deleting the per-run namespace removes the TrainJob and the JobSet,
+	// Job and pod the controller derived from it in one bounded operation.
+	defer func() { //nolint:contextcheck // cleanup runs on its own bounded context
+		status, cleanupErr := cleanupGPUTestNamespace(ctx.Clientset, run)
+		recordRawTextArtifact(ctx, "Cleanup test namespace",
+			cleanupInspectEquivalent(run.namespace), status)
+		if cleanupErr != nil && err == nil {
+			err = cleanupErr
+		}
+	}()
+	if err = createGPUTestNamespace(ctx.Ctx, ctx.Clientset, run); err != nil {
+		return err
+	}
+
+	tj := buildValidTrainJob(run.namespace)
+	recordObjectYAMLArtifact(ctx, "TrainJob reconciliation: apply test manifest",
+		fmt.Sprintf("kubectl apply -n %s -f <valid trainjob>", run.namespace), tj.Object)
+	if _, err = dynClient.Resource(trainJobGVR).Namespace(run.namespace).Create(ctx.Ctx, tj, metav1.CreateOptions{}); err != nil {
+		return classifyTrainJobCreateError(err, run.namespace)
+	}
+
+	report, waitErr := waitForTrainJobReconciled(ctx.Ctx, dynClient, run.namespace)
+	report.Runtime = trainJobDefaultRuntime
+	// Evidence BEFORE the verdict: the observed conditions and derived pods
+	// are the diagnostic when the wait fails.
+	recordRawTextArtifact(ctx, "TrainJob reconciliation",
+		fmt.Sprintf("kubectl get trainjob %s -n %s -o jsonpath='{.status.conditions}'", robustTrainJobName, run.namespace),
+		report.summary(waitErr))
+	podsObserved := recordTrainJobPods(ctx, run.namespace)
+	if waitErr != nil {
+		// The verdict names what the pods were doing when the wait ended
+		// (Pending, image pull, running), not an inferred cause: a TrainJob
+		// that the controller did reconcile (Created=True, pod exists) and a
+		// pod that stalled read the same at the TrainJob level.
+		return wrapWithCode(waitErr, errors.ErrCodeInternal, "TrainJob pods at the verdict: "+podsObserved)
+	}
 	return nil
+}
+
+// classifyTrainJobCreateError turns a failed TrainJob Create into the
+// check's verdict. Only a definitive apiserver rejection (admission or
+// validation) means the valid TrainJob was rejected — and an RBAC denial is
+// reported as such rather than as a webhook rejection; a timeout, transport
+// failure or 5xx (the single-replica Trainer webhook restarting mid-run) is
+// ambiguous — the object may have been persisted, which the per-run
+// namespace cleanup covers — and keeps its classified code.
+func classifyTrainJobCreateError(createErr error, namespace string) error {
+	what := fmt.Sprintf("TrainJob %s/%s on runtime %s", namespace, robustTrainJobName, trainJobDefaultRuntime)
+	if createDefinitelyRejected(createErr) {
+		if strings.Contains(createErr.Error(), "cannot create resource") {
+			return errors.Wrap(errors.ErrCodeUnauthorized,
+				fmt.Sprintf("RBAC denied creating the valid %s", what), createErr)
+		}
+		return errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("valid %s was rejected by admission or validation", what), createErr)
+	}
+	return classifyK8sReadError(createErr,
+		fmt.Sprintf("create of the valid %s did not complete (ambiguous: the object may have been persisted; the per-run namespace cleanup removes it)", what))
+}
+
+// summary renders the reconciliation observation for the evidence page.
+func (r *trainJobReconcileReport) summary(waitErr error) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "TrainJob:   %s/%s\nRuntime:    ClusterTrainingRuntime/%s\nAccelerator: none requested\nElapsed:    %s\n",
+		r.Namespace, r.Name, r.Runtime, r.Elapsed.Round(time.Second))
+	if waitErr == nil {
+		fmt.Fprintf(&b, "Verdict:    reconciled to %s=True within %s\n", trainJobConditionComplete, trainJobReconcileTimeout)
+	} else {
+		fmt.Fprintf(&b, "Verdict:    FAIL — %v\n", waitErr)
+	}
+	if len(r.Conditions) == 0 {
+		b.WriteString("Conditions: none observed\n")
+		return b.String()
+	}
+	b.WriteString("Conditions:\n")
+	for _, c := range r.Conditions {
+		fmt.Fprintf(&b, "  %-9s status=%-7s reason=%s message=%s\n", c.Type, c.Status, c.Reason, c.Message)
+	}
+	return b.String()
+}
+
+// recordTrainJobPods records the pods the controller derived from the
+// TrainJob (through JobSet and Job) so the evidence shows how far the
+// reconciliation reached, on which node, and what a non-terminal pod was
+// waiting on. It returns a one-line summary of the same for the verdict.
+func recordTrainJobPods(ctx *validators.Context, namespace string) string {
+	pods, err := ctx.Clientset.CoreV1().Pods(namespace).List(ctx.Ctx, metav1.ListOptions{})
+	equivalent := fmt.Sprintf("kubectl get pods -n %s -o wide", namespace)
+	if err != nil {
+		summary := fmt.Sprintf("failed to list pods: %v", err)
+		recordRawTextArtifact(ctx, "TrainJob pods", equivalent, summary)
+		return summary
+	}
+	if len(pods.Items) == 0 {
+		const summary = "no pods derived from the TrainJob were observed"
+		recordRawTextArtifact(ctx, "TrainJob pods", equivalent, summary)
+		return summary
+	}
+	var b strings.Builder
+	lines := make([]string, 0, len(pods.Items))
+	for i := range pods.Items {
+		p := &pods.Items[i]
+		state := string(p.Status.Phase)
+		if reason := podStuckReason(p); reason != "" {
+			state += " (" + reason + ")"
+		} else if p.Status.Phase == corev1.PodPending || p.Status.Phase == corev1.PodRunning {
+			if waiting := podWaitingStatus(p); waiting != valueNone {
+				state += " (waiting: " + waiting + ")"
+			}
+		}
+		fmt.Fprintf(&b, "%-52s phase=%-9s node=%s image=%s state=%s\n",
+			p.Name, p.Status.Phase, valueOrUnknown(p.Spec.NodeName), firstContainerImage(p.Spec.Containers), state)
+		lines = append(lines, fmt.Sprintf("%s %s on node %s", p.Name, state, valueOrUnknown(p.Spec.NodeName)))
+	}
+	recordRawTextArtifact(ctx, "TrainJob pods", equivalent, b.String())
+	return strings.Join(lines, "; ")
+}
+
+// buildValidTrainJob returns the TrainJob (robustTrainJobName) the webhook admits: it references
+// the default ClusterTrainingRuntime, runs one node and requests no
+// accelerator. The trainer image and command override the runtime's PyTorch
+// container with the small probe image and a command that exits 0, so the
+// reconciliation reaches Complete without a GPU or a large image pull.
+func buildValidTrainJob(namespace string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]any{
+			keyAPIVersion: apiGroupTrainer + "/" + versionV1alpha1,
+			keyKind:       "TrainJob",
+			keyMetadata: map[string]any{
+				keyName:      robustTrainJobName,
+				keyNamespace: namespace,
+			},
+			keySpec: map[string]any{
+				"runtimeRef": map[string]any{
+					keyName:    trainJobDefaultRuntime,
+					"apiGroup": apiGroupTrainer,
+					keyKind:    "ClusterTrainingRuntime",
+				},
+				"trainer": map[string]any{
+					"numNodes": int64(1),
+					"image":    defaults.ProbeImage,
+					"command":  []any{"sh", "-c", "echo 'robust-controller: TrainJob reconciled'"},
+				},
+			},
+		},
+	}
+}
+
+// waitForTrainJobReconciled polls the TrainJob (robustTrainJobName) until Complete=True (done),
+// Failed=True (terminal failure) or trainJobReconcileTimeout. Every
+// observed condition set is kept for the evidence. A read error that is not
+// the wait's own deadline aborts with the classified code; the fake-client
+// and apiserver NotFound right after a create is retried within the bound.
+func waitForTrainJobReconciled(ctx context.Context, dynClient dynamic.Interface, namespace string) (*trainJobReconcileReport, error) {
+	start := time.Now()
+	name := robustTrainJobName
+	report := &trainJobReconcileReport{Namespace: namespace, Name: name}
+	waitCtx, cancel := context.WithTimeout(ctx, trainJobReconcileTimeout)
+	defer cancel()
+
+	// The poll interval scales down with a shortened bound (tests) so the
+	// condition is evaluated more than once before the bound.
+	interval := min(defaults.TrainJobReconcilePollInterval, trainJobReconcileTimeout/10)
+	err := wait.PollUntilContextCancel(waitCtx, interval, true,
+		func(c context.Context) (bool, error) {
+			tj, getErr := dynClient.Resource(trainJobGVR).Namespace(namespace).Get(c, name, metav1.GetOptions{})
+			if getErr != nil {
+				if k8serrors.IsNotFound(getErr) || readFailedBecauseContextEnded(c, getErr) || isK8sTimeoutErr(getErr) {
+					return false, nil
+				}
+				return false, classifyK8sReadError(getErr, fmt.Sprintf("TrainJob %s/%s", namespace, name))
+			}
+			report.Conditions = trainJobConditions(tj)
+			for _, cond := range report.Conditions {
+				if cond.Type == trainJobConditionFailed && cond.Status == conditionStatusTrue {
+					return false, errors.New(errors.ErrCodeInternal, fmt.Sprintf(
+						"TrainJob %s/%s reached %s=True: reason=%s message=%s",
+						namespace, name, trainJobConditionFailed, cond.Reason, cond.Message))
+				}
+			}
+			for _, cond := range report.Conditions {
+				if cond.Type == trainJobConditionComplete && cond.Status == conditionStatusTrue {
+					return true, nil
+				}
+			}
+			return false, nil
+		})
+	report.Elapsed = time.Since(start)
+	if err == nil {
+		return report, nil
+	}
+	if ctx.Err() != nil {
+		return report, errors.Wrap(errors.ErrCodeTimeout,
+			fmt.Sprintf("waiting for TrainJob %s/%s canceled", namespace, name), ctx.Err())
+	}
+	if waitCtx.Err() != nil {
+		return report, errors.Wrap(errors.ErrCodeTimeout, fmt.Sprintf(
+			"TrainJob %s/%s did not reach %s=True within %s; conditions observed: %s (see the TrainJob reconciliation and TrainJob pods artifacts)",
+			namespace, name, trainJobConditionComplete, trainJobReconcileTimeout, report.conditionsLine()), err)
+	}
+	return report, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+		fmt.Sprintf("failed waiting for TrainJob %s/%s", namespace, name))
+}
+
+// conditionsLine renders the observed conditions as "Type=Status" pairs for
+// a one-line verdict, or "none" when the TrainJob carried no status.
+func (r *trainJobReconcileReport) conditionsLine() string {
+	if len(r.Conditions) == 0 {
+		return valueNone
+	}
+	pairs := make([]string, 0, len(r.Conditions))
+	for _, c := range r.Conditions {
+		pairs = append(pairs, c.Type+"="+c.Status)
+	}
+	return strings.Join(pairs, ", ")
+}
+
+// trainJobConditions flattens status.conditions into observations; a
+// TrainJob with no status yet yields none.
+func trainJobConditions(tj *unstructured.Unstructured) []conditionObservation {
+	raw, found, err := unstructured.NestedSlice(tj.Object, "status", "conditions")
+	if err != nil || !found {
+		return nil
+	}
+	out := make([]conditionObservation, 0, len(raw))
+	for _, c := range raw {
+		cond, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		kind, _, _ := unstructured.NestedString(cond, "type")
+		status, _, _ := unstructured.NestedString(cond, "status")
+		reason, _, _ := unstructured.NestedString(cond, "reason")
+		message, _, _ := unstructured.NestedString(cond, "message")
+		out = append(out, conditionObservation{
+			Type: valueOrUnknown(kind), Status: valueOrUnknown(status),
+			Reason: valueOrUnknown(reason), Message: valueOrUnknown(message),
+		})
+	}
+	return out
 }
 
 // validateKubeflowWebhookRejects verifies the Kubeflow Trainer webhook actively rejects
@@ -223,7 +599,7 @@ func validateKubeflowWebhookRejects(ctx *validators.Context) (*webhookRejectionR
 	// the webhook is actively validating, not just schema validation.
 	tj := &unstructured.Unstructured{
 		Object: map[string]any{
-			keyAPIVersion: "trainer.kubeflow.org/v1alpha1",
+			keyAPIVersion: apiGroupTrainer + "/" + versionV1alpha1,
 			keyKind:       "TrainJob",
 			keyMetadata: map[string]any{
 				keyName:      name,
@@ -232,7 +608,7 @@ func validateKubeflowWebhookRejects(ctx *validators.Context) (*webhookRejectionR
 			keySpec: map[string]any{
 				"runtimeRef": map[string]any{
 					keyName:    robustTestPrefix + "nonexistent-runtime",
-					"apiGroup": "trainer.kubeflow.org",
+					"apiGroup": apiGroupTrainer,
 					keyKind:    "ClusterTrainingRuntime",
 				},
 			},
@@ -361,25 +737,26 @@ func checkRobustDynamo(ctx *validators.Context) error {
 		"kubectl get validatingwebhookconfigurations",
 		fmt.Sprintf("Name:      %s\nEndpoint:  reachable", webhookName))
 
-	// 3. DynamoGraphDeployment CRD exists
+	// 3. DynamoGraphDeployment CRD exists and is Established
 	dynClient, err := getDynamicClient(ctx)
 	if err != nil {
 		return err
 	}
-	crdGVR := schema.GroupVersionResource{
-		Group: apiGroupAPIExtensions, Version: "v1", Resource: resourceCRDs,
-	}
-	crdObj, err := dynClient.Resource(crdGVR).Get(ctx.Ctx,
-		"dynamographdeployments.nvidia.com", metav1.GetOptions{})
+	established, err := requireCRDEstablished(ctx.Ctx, dynClient, "dynamographdeployments.nvidia.com")
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeNotFound,
-			"DynamoGraphDeployment CRD not found", err)
+		return err
 	}
 	recordRawTextArtifact(ctx, "Dynamo CRDs",
-		"kubectl get crds | grep -i dynamo",
-		fmt.Sprintf("Required CRD present: %s", crdObj.GetName()))
+		"kubectl get crd dynamographdeployments.nvidia.com -o jsonpath='{.status.conditions}'",
+		fmt.Sprintf("Required CRD present: dynamographdeployments.nvidia.com\nEstablished: %s (reason=%s)",
+			established.Status, established.Reason))
 
-	// Optional evidence: capture inventories.
+	// Optional evidence: capture inventories. The existing
+	// DynamoGraphDeployments and their conditions are the only reconciliation
+	// evidence this path records: a minimal DynamoGraphDeployment cannot be
+	// reconciled to a terminal condition without a model and GPU workers, so
+	// no CR is created here and robust_controller's reconciliation case is
+	// evidenced by the Kubeflow Trainer path on recipes that ship it.
 	dgdList, dgdListErr := dynClient.Resource(dgdGVR).Namespace("").List(ctx.Ctx, metav1.ListOptions{})
 	if dgdListErr != nil {
 		recordRawTextArtifact(ctx, "DynamoGraphDeployments", "kubectl get dynamographdeployments -A",
@@ -387,11 +764,19 @@ func checkRobustDynamo(ctx *validators.Context) error {
 	} else {
 		var dgdSummary strings.Builder
 		fmt.Fprintf(&dgdSummary, "Count: %d\n", len(dgdList.Items))
-		for _, item := range dgdList.Items {
+		for i := range dgdList.Items {
+			item := &dgdList.Items[i]
 			fmt.Fprintf(&dgdSummary, "- %s/%s\n", item.GetNamespace(), item.GetName())
+			for _, c := range trainJobConditions(item) {
+				fmt.Fprintf(&dgdSummary, "    %-12s status=%-7s reason=%s\n", c.Type, c.Status, c.Reason)
+			}
 		}
-		recordRawTextArtifact(ctx, "DynamoGraphDeployments", "kubectl get dynamographdeployments -A", dgdSummary.String())
+		recordRawTextArtifact(ctx, "DynamoGraphDeployments", "kubectl get dynamographdeployments -A -o yaml", dgdSummary.String())
 	}
+	recordRawTextArtifact(ctx, "CR reconciliation (observation)", "",
+		"Not exercised on the Dynamo path: a minimal DynamoGraphDeployment has no terminal condition to reach without a served model and GPU workers. "+
+			"The DynamoGraphDeployments inventory above records the conditions of the CRs the operator is reconciling; "+
+			"the robust_controller reconciliation case (a valid CR reconciled to a terminal condition) is evidenced by the Kubeflow Trainer path on recipes that ship kubeflow-trainer.")
 
 	workloadPods, workloadPodErr := ctx.Clientset.CoreV1().Pods("dynamo-workload").List(ctx.Ctx, metav1.ListOptions{})
 	if workloadPodErr != nil {

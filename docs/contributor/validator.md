@@ -254,6 +254,55 @@ Slinky NodeSet reserves every GPU on a node for its `slurmd` pod and Slurm
 GRES/cgroups isolate access, so the check's Kubernetes per-pod probe could
 either never schedule or attest the wrong access path (#2724).
 
+After its CNCF subtests pass, `secure-accelerator-access` records one AICR
+hardening extra (#3428): an unprivileged pod on the NVIDIA RuntimeClass the GPU
+Operator installed, with `NVIDIA_VISIBLE_DEVICES=all` and no allocation, pinned
+to the GPU node the test pod ran on, honoring the context tolerations.
+`resolveNVIDIARuntimeClass` takes the class only from the ClusterPolicy
+(`spec.operator.runtimeClass`, or the GPU Operator default `nvidia` when the
+field is unset) and only when that RuntimeClass exists; AICR's default AKS
+profile names `nvidia-container-runtime`. A class present by name alone is not
+probed, because nothing ties it to the NVIDIA toolkit and a same-named class
+with another handler would read as hardened. With the toolkit hardening AICR
+ships (`ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED=false`) it sees
+no GPU device (`HARDENED`, worded as consistent with that hardening since the
+toolkit configuration is not read); without it the envvar exposes every GPU on
+the node (`EXPOSED`). The upstream `TestSecureAcceleratorAccess` has no such
+probe, so every artifact carries the label "AICR hardening extra (not a CNCF
+item)", an `EXPOSED` outcome is warned about but never fails the check, and a
+cluster where the class cannot be established from the ClusterPolicy records
+`NOT RUN` ("not probed").
+Privileged pods are out of scope: they see every GPU by design.
+
+`robust-controller` prefers the Kubeflow Trainer path when the recipe ships
+`kubeflow-trainer`, because that path reconciles a custom resource to a
+terminal condition: after the deployment, webhook, CRD `Established=True` and
+webhook-rejection steps it creates a valid TrainJob on the default
+`torch-distributed` `ClusterTrainingRuntime` in a per-run namespace (one node,
+no accelerator, `defaults.ProbeImage` with a command that exits 0) and
+requires `Complete=True`, failing on `Failed=True`, on the bound, or on a
+missing runtime. The `TrainJobReconcileTimeout` of 3 min covers the whole
+chain, not only the controller: the JobSet, Job and pod it derives, the pod's
+scheduling and the probe-image pull, so a scheduling delay or an unavailable
+registry can consume the bound after the controller has already created the
+pod. The bound verdict therefore folds in the recorded pod state (phase,
+node, `podStuckReason` or waiting status) so the cause is diagnosable from
+the CTRF message. The TrainJob's pod is created by the operator from the
+runtime, whose scheduling vocabulary the bundler bakes in, so the context
+tolerations do not apply to it. The Dynamo path records the existing
+`DynamoGraphDeployment` conditions as an observation and creates no CR.
+
+`cluster-autoscaling` drives a scale event only on the Karpenter path and
+records that scale-up as an observation (scale-down is not observed). The EKS,
+AKS and GKE paths record autoscaler presence, GPU pool membership, the
+`cluster-autoscaler-status` ConfigMap and recent autoscaler events as
+`OBSERVED`, which is not behavioral proof even though the completed check
+still reports `passed` (the requirement-level reading is #3612's); a
+providerID no probe recognizes skips as
+"no autoscaler probe for this provider", a missing probe rather than product
+nonapplicability, which only `spec.validate.evidence.cncf.notApplicable`
+declares.
+
 `slinky-slurm-gpu-access` verifies that path instead (#2756). From the login pod
 it runs an `srun --gpus=1` job, which must list exactly one GPU and open exactly
 one GPU minor device, then a job with no GPU request pinned with `--nodelist` to

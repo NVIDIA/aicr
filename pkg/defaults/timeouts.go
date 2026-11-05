@@ -666,6 +666,16 @@ const (
 	// The pod runs a simple CUDA device check but may need time for image pull.
 	DRATestPodTimeout = 5 * time.Minute
 
+	// TrainJobReconcileTimeout bounds the robust-controller reconciliation
+	// case: a valid TrainJob on the default ClusterTrainingRuntime must reach
+	// Complete=True within it, matching the 3-minute reconcile bound of the
+	// upstream TestRobustCRDControllerOperation.
+	TrainJobReconcileTimeout = 3 * time.Minute
+
+	// TrainJobReconcilePollInterval is the interval between TrainJob status
+	// reads while waiting for the reconciliation verdict.
+	TrainJobReconcilePollInterval = 5 * time.Second
+
 	// GangPositiveCompletionTimeout bounds the gang-scheduling positive case:
 	// a fitting CPU-only PodGroup must have every member Succeeded within it,
 	// matching the 2-minute Complete bound of the upstream TestGangScheduling.

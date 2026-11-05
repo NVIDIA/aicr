@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -33,7 +34,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
@@ -66,6 +66,27 @@ const (
 	// noAllocProbePrefix names the standalone probe pod that is granted no
 	// GPU at all (no ResourceClaims, no nvidia.com/gpu limits).
 	noAllocProbePrefix = "no-alloc-probe-"
+	// runtimeClassProbePrefix names the AICR hardening extra's probe pod: an
+	// unprivileged pod on the nvidia RuntimeClass with
+	// NVIDIA_VISIBLE_DEVICES=all and no allocation.
+	runtimeClassProbePrefix = "runtimeclass-probe-"
+
+	// nvidiaRuntimeClassName is the GPU Operator's default operator.runtimeClass
+	// name; the probe resolves the class actually installed (see
+	// resolveNVIDIARuntimeClass), since recipes rename it (nvidia-cdi,
+	// nvidia-container-runtime on AKS).
+	nvidiaRuntimeClassName = "nvidia"
+	// nvidiaRuntimeHandlerPrefix identifies the RuntimeClasses the GPU
+	// Operator's container toolkit serves, by handler or name.
+	nvidiaRuntimeHandlerPrefix = "nvidia"
+	// envNVIDIAVisibleDevices is the container-toolkit device-list envvar
+	// that, without the hardening, exposes every GPU on the node.
+	envNVIDIAVisibleDevices = "NVIDIA_VISIBLE_DEVICES"
+	// runtimeClassExtraLabel prefixes every artifact of the RuntimeClass
+	// bypass probe so the evidence page shows it is an AICR hardening extra,
+	// not one of the CNCF secure_accelerator_access subtests, and its outcome
+	// never decides the check (see recordRuntimeClassBypassExtra).
+	runtimeClassExtraLabel = "AICR hardening extra (not a CNCF item): NVIDIA RuntimeClass bypass probe"
 
 	// allocationModeExactCount is the Kubernetes DRA DeviceRequest
 	// allocationMode enum value. It is an upstream API constant, not an AICR
@@ -170,6 +191,9 @@ type gpuTestRun struct {
 	podName        string
 	claimName      string
 	noAllocPodName string
+	// runtimeClassProbePodName is the AICR hardening extra's probe pod
+	// (secure-accelerator-access only).
+	runtimeClassProbePodName string
 	// IMEX channel subtest names (dra-support): the per-run ComputeDomain,
 	// the ResourceClaimTemplate the DRA driver generates from it, and the
 	// probe pod that consumes one channel from that template.
@@ -224,6 +248,8 @@ func newGPUTestRun() (*gpuTestRun, error) {
 		podName:        gpuTestPodPrefix + token,
 		claimName:      gpuClaimPrefix + token,
 		noAllocPodName: noAllocProbePrefix + token,
+
+		runtimeClassProbePodName: runtimeClassProbePrefix + token,
 
 		computeDomainName: imexComputeDomainPrefix + token,
 		claimTemplateName: imexClaimTemplatePrefix + token,
@@ -491,6 +517,10 @@ func runDRASecureAccessTest(ctx *validators.Context, dynClient dynamic.Interface
 		fmt.Sprintf("Pod:               %s/%s\nPhase:             %s\nExitCode:          %d\nResourceClaims:    %d\nHostPathGPUMounts: %d",
 			run.namespace, isolationReport.PodName, isolationReport.PodPhase,
 			isolationReport.ExitCode, isolationReport.ResourceClaims, isolationReport.HostPathGPUMounts))
+
+	// AICR hardening extra, recorded after the CNCF subtests have passed and
+	// never part of the verdict.
+	recordRuntimeClassBypassExtra(ctx, run, pod.Spec.NodeName)
 	return nil
 }
 
@@ -589,6 +619,10 @@ func runDevicePluginSecureAccessTest(ctx *validators.Context, pluginNodes []stri
 		fmt.Sprintf("Pod:               %s/%s\nPhase:             %s\nExitCode:          %d\nResourceClaims:    %d\nHostPathGPUMounts: %d",
 			run.namespace, isolationReport.PodName, isolationReport.PodPhase,
 			isolationReport.ExitCode, isolationReport.ResourceClaims, isolationReport.HostPathGPUMounts))
+
+	// AICR hardening extra, recorded after the CNCF subtests have passed and
+	// never part of the verdict.
+	recordRuntimeClassBypassExtra(ctx, run, pod.Spec.NodeName)
 	return nil
 }
 
@@ -723,10 +757,7 @@ func validateDevicePluginPatterns(pod *corev1.Pod) (*devicePluginPatternReport, 
 // the ResourceSlice artifacts record that instead of listing).
 func collectSecureAccessBaselineArtifacts(ctx *validators.Context, dynClient dynamic.Interface, draAPIVersion string) {
 	// ClusterPolicy status.
-	clusterPolicyGVR := schema.GroupVersionResource{
-		Group: apiGroupNVIDIA, Version: "v1", Resource: "clusterpolicies",
-	}
-	cp, err := dynClient.Resource(clusterPolicyGVR).Get(ctx.Ctx, "cluster-policy", metav1.GetOptions{})
+	cp, err := dynClient.Resource(clusterPolicyGVR).Get(ctx.Ctx, clusterPolicyName, metav1.GetOptions{})
 	if err != nil {
 		recordRawTextArtifact(ctx, "ClusterPolicy status", "kubectl get clusterpolicy -o wide",
 			fmt.Sprintf("failed to read ClusterPolicy: %v", err))
@@ -1204,6 +1235,221 @@ func verifyNoAllocationIsolation(vctx *validators.Context, run *gpuTestRun, gpuN
 	report.HostPathGPUMounts = 0
 
 	return report, nil
+}
+
+// runtimeClassBypassOutcome is the recorded verdict of the AICR hardening
+// extra. It is evidence only: none of these fails the check.
+type runtimeClassBypassOutcome string
+
+// The outcomes: HARDENED, the unprivileged pod saw no GPU device although it
+// asked for every one through NVIDIA_VISIBLE_DEVICES=all, consistent with a
+// toolkit that ignores the envvar for unprivileged containers (the probe does
+// not read the toolkit configuration); EXPOSED, the pod saw GPU devices it was
+// never allocated, so the envvar device-list path is open to unprivileged
+// pods; INCONCLUSIVE, the probe reached no verdict (pod failed for another
+// reason, timed out, or could not be created); NOT RUN, the NVIDIA
+// RuntimeClass could not be established from the ClusterPolicy, so nothing
+// was probed.
+const (
+	runtimeClassBypassHardened     runtimeClassBypassOutcome = "HARDENED"
+	runtimeClassBypassExposed      runtimeClassBypassOutcome = "EXPOSED"
+	runtimeClassBypassInconclusive runtimeClassBypassOutcome = "INCONCLUSIVE"
+	runtimeClassBypassNotRun       runtimeClassBypassOutcome = "NOT RUN"
+)
+
+// evaluateRuntimeClassBypass maps the probe pod's terminal state to the
+// recorded outcome: the probe script exits 0 when no /dev/nvidia* device is
+// visible and 1 when one is; any other exit code or phase is inconclusive.
+func evaluateRuntimeClassBypass(pod *corev1.Pod) runtimeClassBypassOutcome {
+	exit := podExitCode(pod)
+	switch {
+	case pod.Status.Phase == corev1.PodSucceeded && exit == 0:
+		return runtimeClassBypassHardened
+	case pod.Status.Phase == corev1.PodFailed && exit == 1:
+		return runtimeClassBypassExposed
+	default:
+		return runtimeClassBypassInconclusive
+	}
+}
+
+// recordRuntimeClassBypassExtra runs the AICR hardening extra after the CNCF
+// subtests: an UNPRIVILEGED pod on RuntimeClass nvidia that sets
+// NVIDIA_VISIBLE_DEVICES=all and requests no accelerator, pinned to the GPU
+// node the test pod ran on. With the toolkit hardening AICR ships
+// (ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED=false) it sees no
+// GPU device; without it the envvar exposes every GPU on the node to a pod
+// that was allocated none (observed on NVKE before the hardening, #3428).
+// Its outcome is recorded under runtimeClassExtraLabel as an observation,
+// warned about when EXPOSED, and never fails the check or feeds the
+// requirement row. Privileged pods are out of scope: they see every GPU by
+// design.
+//
+// The probe runs last and its pod wait shares the check's work budget (the
+// 8m30s secure-access fallback, or the catalog-derived budget) with the CNCF
+// subtests that ran before it, so on a slow image pull this is the probe that
+// is starved first and records INCONCLUSIVE rather than cutting into the
+// cleanup reserve.
+//
+// The caller's deferred namespace cleanup removes the probe pod.
+func recordRuntimeClassBypassExtra(vctx *validators.Context, run *gpuTestRun, gpuNodeName string) {
+	ctx := vctx.Ctx
+	clientset := vctx.Clientset
+	outcomeLabel := runtimeClassExtraLabel + " — outcome"
+	runtimeClass, how, resolveErr := resolveNVIDIARuntimeClass(vctx)
+	record := func(outcome runtimeClassBypassOutcome, detail string) {
+		recordRawTextArtifact(vctx, outcomeLabel,
+			fmt.Sprintf("kubectl get runtimeclass; kubectl logs %s -n %s", run.runtimeClassProbePodName, run.namespace),
+			fmt.Sprintf("Outcome:       %s\nScope:         AICR hardening extra, not a CNCF secure_accelerator_access subtest; this outcome does not decide the check\nRuntimeClass:  %s (%s)\nProbe:         unprivileged pod, %s=all, no accelerator requested, node=%s\nDetail:        %s",
+				outcome, valueOrUnknown(runtimeClass), how, envNVIDIAVisibleDevices, gpuNodeName, detail))
+	}
+	if resolveErr != nil {
+		record(runtimeClassBypassInconclusive, resolveErr.Error())
+		return
+	}
+	if runtimeClass == "" {
+		record(runtimeClassBypassNotRun, "not probed: NVIDIA RuntimeClass "+how)
+		return
+	}
+
+	pod := buildRuntimeClassBypassProbePod(run, runtimeClass, gpuNodeName, vctx.Tolerations)
+	if err := createPodWhenSAReady(ctx, clientset, run.namespace, pod); err != nil {
+		record(runtimeClassBypassInconclusive, fmt.Sprintf("probe pod could not be created: %v", err))
+		return
+	}
+	resultPod, err := waitForTerminalPod(ctx, clientset, run.namespace, run.runtimeClassProbePodName,
+		fmt.Sprintf("RuntimeClass bypass probe pod (node=%s)", gpuNodeName))
+	if err != nil {
+		record(runtimeClassBypassInconclusive, fmt.Sprintf("probe pod did not reach a terminal state: %v", err))
+		return
+	}
+
+	var logs string
+	if logBytes, logErr := clientset.CoreV1().Pods(run.namespace).GetLogs(
+		run.runtimeClassProbePodName, &corev1.PodLogOptions{}).DoRaw(ctx); logErr != nil {
+		logs = fmt.Sprintf("failed to read logs: %v", logErr)
+	} else {
+		logs = string(logBytes)
+	}
+	recordRawTextArtifact(vctx, runtimeClassExtraLabel+" — pod logs",
+		fmt.Sprintf("kubectl logs %s -n %s", run.runtimeClassProbePodName, run.namespace), logs)
+
+	outcome := evaluateRuntimeClassBypass(resultPod)
+	detail := fmt.Sprintf("phase=%s exit=%d", resultPod.Status.Phase, podExitCode(resultPod))
+	switch outcome {
+	case runtimeClassBypassHardened:
+		detail += "; no GPU device visible, consistent with the toolkit hardening that ignores " + envNVIDIAVisibleDevices + " for unprivileged containers (ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED=false); the toolkit configuration itself was not read"
+	case runtimeClassBypassExposed:
+		detail += "; GPU devices visible to a pod that was allocated none: the container toolkit honors " + envNVIDIAVisibleDevices +
+			" for unprivileged containers on this RuntimeClass. Set ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED=false (with ACCEPT_NVIDIA_VISIBLE_DEVICES_AS_VOLUME_MOUNTS=true) in the GPU Operator toolkit env, as the AICR AKS and NVKE values do"
+		slog.Warn("RuntimeClass bypass probe saw GPU devices without an allocation (AICR hardening extra, not a CNCF item; the check is not failed)",
+			"runtimeClass", runtimeClass, "node", gpuNodeName, "pod", run.runtimeClassProbePodName)
+	case runtimeClassBypassInconclusive, runtimeClassBypassNotRun:
+		detail += "; the probe script exits 0 (no device) or 1 (device visible), so this state carries no verdict"
+	}
+	record(outcome, detail)
+}
+
+// resolveNVIDIARuntimeClass names the RuntimeClass the GPU Operator's
+// container toolkit serves on this cluster, and how it was established. Only
+// the ClusterPolicy can establish it: spec.operator.runtimeClass, or the
+// GPU Operator's documented default nvidia when the field is unset, and the
+// class must exist, and the ClusterPolicy must report status.state ready (the
+// same gate gpu-operator-health applies: before that the toolkit and its
+// RuntimeClass may not be in service yet). A class picked by name alone would
+// let a same-named class with another handler record HARDENED, so without a
+// ready, readable ClusterPolicy (or when the named class is absent) name is
+// "" and the extra is not probed; how then says why, listing the
+// nvidia-handled classes seen as an observation. A RuntimeClass list error is
+// returned.
+func resolveNVIDIARuntimeClass(vctx *validators.Context) (name, how string, err error) {
+	classes, listErr := vctx.Clientset.NodeV1().RuntimeClasses().List(vctx.Ctx, metav1.ListOptions{})
+	if listErr != nil {
+		return "", "", errors.Wrap(errors.ErrCodeInternal, "failed to list RuntimeClasses", listErr)
+	}
+	present := make(map[string]bool, len(classes.Items))
+	var nvidiaClasses []string
+	for i := range classes.Items {
+		rc := &classes.Items[i]
+		present[rc.Name] = true
+		if strings.HasPrefix(rc.Handler, nvidiaRuntimeHandlerPrefix) || strings.HasPrefix(rc.Name, nvidiaRuntimeHandlerPrefix) {
+			nvidiaClasses = append(nvidiaClasses, rc.Name)
+		}
+	}
+	sort.Strings(nvidiaClasses)
+	seen := valueNone
+	if len(nvidiaClasses) > 0 {
+		seen = strings.Join(nvidiaClasses, ", ")
+	}
+
+	dynClient, dynErr := getDynamicClient(vctx)
+	if dynErr != nil {
+		return "", fmt.Sprintf("not established from ClusterPolicy: no dynamic client (%v); nvidia-handled RuntimeClasses present: %s", dynErr, seen), nil
+	}
+	cp, cpErr := dynClient.Resource(clusterPolicyGVR).Get(vctx.Ctx, clusterPolicyName, metav1.GetOptions{})
+	if cpErr != nil {
+		return "", fmt.Sprintf("not established from ClusterPolicy: %s could not be read (%v); nvidia-handled RuntimeClasses present: %s", clusterPolicyName, cpErr, seen), nil
+	}
+	state, _, _ := unstructured.NestedString(cp.Object, "status", "state")
+	if state != clusterPolicyStateReady {
+		return "", fmt.Sprintf("not established from ClusterPolicy: %s status.state=%q, not %s, so the toolkit RuntimeClass may not be in service; nvidia-handled RuntimeClasses present: %s",
+			clusterPolicyName, valueOrUnknown(state), clusterPolicyStateReady, seen), nil
+	}
+	named, _, _ := unstructured.NestedString(cp.Object, keySpec, "operator", "runtimeClass")
+	source := "named by ClusterPolicy spec.operator.runtimeClass"
+	if named == "" {
+		named = nvidiaRuntimeClassName
+		source = "the GPU Operator default, ClusterPolicy spec.operator.runtimeClass unset"
+	}
+	if !present[named] {
+		return "", fmt.Sprintf("not established from ClusterPolicy: it names RuntimeClass %s (%s) but no such RuntimeClass exists; nvidia-handled RuntimeClasses present: %s", named, source, seen), nil
+	}
+	return named, source, nil
+}
+
+// buildRuntimeClassBypassProbePod constructs the hardening extra's probe: an
+// unprivileged, no-allocation pod on the resolved NVIDIA RuntimeClass that
+// asks for every GPU through the envvar, pinned to the GPU node like the
+// no-allocation probe. A nil tolerations argument uses the default
+// tolerate-all policy; a non-nil argument is used as supplied.
+func buildRuntimeClassBypassProbePod(run *gpuTestRun, runtimeClass, gpuNodeName string, tolerations []corev1.Toleration) *corev1.Pod {
+	if tolerations == nil {
+		tolerations = []corev1.Toleration{{Operator: corev1.TolerationOpExists}}
+	}
+	runAsUser := int64(65534)
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      run.runtimeClassProbePodName,
+			Namespace: run.namespace,
+		},
+		Spec: corev1.PodSpec{
+			NodeName:         gpuNodeName,
+			RuntimeClassName: &runtimeClass,
+			RestartPolicy:    corev1.RestartPolicyNever,
+			Tolerations:      tolerations,
+			SecurityContext: &corev1.PodSecurityContext{
+				RunAsNonRoot: helper.BoolPtr(true),
+				RunAsUser:    &runAsUser,
+				SeccompProfile: &corev1.SeccompProfile{
+					Type: corev1.SeccompProfileTypeRuntimeDefault,
+				},
+			},
+			Containers: []corev1.Container{
+				{
+					Name:    "runtimeclass-probe",
+					Image:   defaults.ProbeImage,
+					Command: []string{"sh", "-c", gpuAbsenceProbeScript},
+					Env: []corev1.EnvVar{
+						{Name: envNVIDIAVisibleDevices, Value: "all"},
+					},
+					SecurityContext: &corev1.SecurityContext{
+						Privileged:               helper.BoolPtr(false),
+						AllowPrivilegeEscalation: helper.BoolPtr(false),
+						Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+					},
+				},
+			},
+		},
+	}
 }
 
 // saProvisionTimeout bounds the retry window for pod creation racing the

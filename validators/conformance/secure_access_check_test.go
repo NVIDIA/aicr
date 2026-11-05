@@ -21,6 +21,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +33,7 @@ import (
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
+	nodev1 "k8s.io/api/node/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,6 +46,266 @@ import (
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
+
+// markPodsFailedOnCreate installs a reactor that marks every created pod
+// Failed with the given exit code, standing in for a probe that saw a GPU.
+func markPodsFailedOnCreate(client *k8sfake.Clientset, exitCode int32) {
+	client.PrependReactor("create", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		createAction, ok := action.(k8stesting.CreateAction)
+		if !ok {
+			return false, nil, nil
+		}
+		pod, ok := createAction.GetObject().(*corev1.Pod)
+		if !ok {
+			return false, nil, nil
+		}
+		pod.Status.Phase = corev1.PodFailed
+		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+			Name:  pod.Spec.Containers[0].Name,
+			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: exitCode}},
+		}}
+		return false, nil, nil
+	})
+}
+
+func runtimeClass(name, handler string) *nodev1.RuntimeClass {
+	return &nodev1.RuntimeClass{ObjectMeta: metav1.ObjectMeta{Name: name}, Handler: handler}
+}
+
+// testClusterPolicyWithRuntimeClass returns a ready ClusterPolicy naming the
+// RuntimeClass in spec.operator.runtimeClass.
+func testClusterPolicyWithRuntimeClass(name string) *unstructured.Unstructured {
+	return testClusterPolicyInState(name, clusterPolicyStateReady)
+}
+
+func testClusterPolicyInState(name, state string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		keyAPIVersion: apiGroupNVIDIA + "/v1",
+		keyKind:       "ClusterPolicy",
+		keyMetadata:   map[string]any{keyName: clusterPolicyName},
+		keySpec:       map[string]any{"operator": map[string]any{"runtimeClass": name}},
+		"status":      map[string]any{"state": state},
+	}}
+}
+
+// testClusterPolicyUnsetRuntimeClass returns a ClusterPolicy without
+// spec.operator.runtimeClass, the GPU Operator's default (nvidia).
+func testClusterPolicyUnsetRuntimeClass() *unstructured.Unstructured {
+	cp := testClusterPolicyWithRuntimeClass("x")
+	unstructured.RemoveNestedField(cp.Object, keySpec, "operator", "runtimeClass")
+	return cp
+}
+
+// TestResolveNVIDIARuntimeClass pins how the hardening extra establishes the
+// RuntimeClass the toolkit serves: only from the ClusterPolicy
+// (spec.operator.runtimeClass, or the default nvidia when unset) and only
+// when that class exists. A class picked by name alone (the AKS cluster of
+// #3428 has nvidia-cdi, nvidia-container-runtime and nvidia-legacy and no
+// class named nvidia) would let a same-named class with another handler
+// record HARDENED, so without a readable ClusterPolicy the extra is not probed.
+func TestResolveNVIDIARuntimeClass(t *testing.T) {
+	aks := []runtime.Object{
+		runtimeClass("kata-vm-isolation", "kata"),
+		runtimeClass("nvidia-cdi", "nvidia-cdi"),
+		runtimeClass("nvidia-container-runtime", "nvidia"),
+		runtimeClass("nvidia-legacy", "nvidia-legacy"),
+		runtimeClass("runc", "runc"),
+	}
+	tests := []struct {
+		name          string
+		classes       []runtime.Object
+		clusterPolicy *unstructured.Unstructured
+		want          string
+		wantHow       string
+	}{
+		{"ClusterPolicy names the installed class", aks, testClusterPolicyWithRuntimeClass("nvidia-container-runtime"), "nvidia-container-runtime", "named by ClusterPolicy"},
+		{"ClusterPolicy field unset uses the default nvidia", []runtime.Object{runtimeClass("nvidia", "nvidia"), runtimeClass("runc", "runc")}, testClusterPolicyUnsetRuntimeClass(), "nvidia", "GPU Operator default"},
+		{"ClusterPolicy names an absent class: not established", aks, testClusterPolicyWithRuntimeClass("nvidia"), "", "no such RuntimeClass exists"},
+		{"ClusterPolicy not ready: not established", aks, testClusterPolicyInState("nvidia-container-runtime", "notReady"), "", `status.state="notReady"`},
+		{"ClusterPolicy without status: not established", aks, func() *unstructured.Unstructured {
+			cp := testClusterPolicyWithRuntimeClass("nvidia-container-runtime")
+			unstructured.RemoveNestedField(cp.Object, "status")
+			return cp
+		}(), "", `status.state="unknown"`},
+		{"no ClusterPolicy, classes present by name only: not established", aks, nil, "", "could not be read"},
+		{"no ClusterPolicy, no NVIDIA class", []runtime.Object{runtimeClass("runc", "runc")}, nil, "", "present: none"},
+		{"no dynamic client: not established", nil, nil, "", "no dynamic client"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vctx := &validators.Context{Ctx: context.Background(), Clientset: k8sfake.NewClientset(tt.classes...)}
+			if tt.name != "no dynamic client: not established" {
+				objects := []runtime.Object{}
+				if tt.clusterPolicy != nil {
+					objects = append(objects, tt.clusterPolicy)
+				}
+				vctx.DynamicClient = dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), objects...)
+			}
+			got, how, err := resolveNVIDIARuntimeClass(vctx)
+			if err != nil {
+				t.Fatalf("resolveNVIDIARuntimeClass() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("resolveNVIDIARuntimeClass() = %q, want %q (how: %s)", got, tt.want, how)
+			}
+			if !strings.Contains(how, tt.wantHow) {
+				t.Errorf("how = %q, want it to mention %q", how, tt.wantHow)
+			}
+		})
+	}
+}
+
+func TestEvaluateRuntimeClassBypass(t *testing.T) {
+	pod := func(phase corev1.PodPhase, exit int32) *corev1.Pod {
+		return &corev1.Pod{Status: corev1.PodStatus{
+			Phase: phase,
+			ContainerStatuses: []corev1.ContainerStatus{{
+				State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: exit}},
+			}},
+		}}
+	}
+	tests := []struct {
+		name string
+		pod  *corev1.Pod
+		want runtimeClassBypassOutcome
+	}{
+		{"Succeeded exit 0: no device visible", pod(corev1.PodSucceeded, 0), runtimeClassBypassHardened},
+		{"Failed exit 1: device visible", pod(corev1.PodFailed, 1), runtimeClassBypassExposed},
+		{"Failed exit 2: probe error", pod(corev1.PodFailed, 2), runtimeClassBypassInconclusive},
+		{"Failed exit 0: incoherent", pod(corev1.PodFailed, 0), runtimeClassBypassInconclusive},
+		{"no container status", &corev1.Pod{Status: corev1.PodStatus{Phase: corev1.PodSucceeded}}, runtimeClassBypassInconclusive},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := evaluateRuntimeClassBypass(tt.pod); got != tt.want {
+				t.Errorf("evaluateRuntimeClassBypass() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRecordRuntimeClassBypassExtra pins the AICR hardening extra: it runs
+// only when RuntimeClass nvidia exists, its pod is unprivileged, pinned to
+// the GPU node, sets NVIDIA_VISIBLE_DEVICES=all and requests nothing, every
+// artifact carries the not-a-CNCF-item label, and an EXPOSED outcome is
+// recorded without failing anything.
+func TestRecordRuntimeClassBypassExtra(t *testing.T) {
+	tests := []struct {
+		name         string
+		runtimeClass bool
+		failExit     int32 // 0: pods Succeed; otherwise pods Fail with this exit code
+		wantOutcome  runtimeClassBypassOutcome
+		wantPod      bool
+	}{
+		{"ClusterPolicy names an absent class: not probed", false, 0, runtimeClassBypassNotRun, false},
+		{"hardened toolkit: no device visible", true, 0, runtimeClassBypassHardened, true},
+		{"unhardened toolkit: devices visible", true, 1, runtimeClassBypassExposed, true},
+		{"probe error: inconclusive", true, 3, runtimeClassBypassInconclusive, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// An AKS-shaped cluster whose ClusterPolicy names
+			// nvidia-container-runtime: the probe must use that class; when
+			// the named class is absent it records the extra as not probed.
+			objects := []runtime.Object{runtimeClass("runc", "runc"), runtimeClass("kata-vm-isolation", "kata")}
+			if tt.runtimeClass {
+				objects = append(objects, runtimeClass("nvidia-cdi", "nvidia-cdi"), runtimeClass("nvidia-container-runtime", "nvidia"))
+			}
+			clientset := k8sfake.NewClientset(objects...)
+			dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), testClusterPolicyWithRuntimeClass("nvidia-container-runtime"))
+			var created *[]*corev1.Pod
+			if tt.failExit == 0 {
+				created = markPodsSucceededOnCreate(clientset)
+			} else {
+				markPodsFailedOnCreate(clientset, tt.failExit)
+			}
+			run, err := newGPUTestRun()
+			if err != nil {
+				t.Fatal(err)
+			}
+			tolerations := []corev1.Toleration{{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}}
+			vctx := &validators.Context{Ctx: context.Background(), Clientset: clientset, DynamicClient: dyn, Tolerations: tolerations}
+
+			out := captureStdout(t, func() { recordRuntimeClassBypassExtra(vctx, run, "gpu-node-1") })
+
+			if !strings.Contains(out, runtimeClassExtraLabel) {
+				t.Errorf("artifacts must carry the hardening-extra label %q:\n%s", runtimeClassExtraLabel, out)
+			}
+			if !strings.Contains(out, "Outcome:       "+string(tt.wantOutcome)) {
+				t.Errorf("outcome artifact missing %q:\n%s", tt.wantOutcome, out)
+			}
+			if !strings.Contains(out, "this outcome does not decide the check") {
+				t.Errorf("outcome artifact must say it does not decide the check:\n%s", out)
+			}
+			if !tt.runtimeClass && !strings.Contains(out, "not probed: NVIDIA RuntimeClass not established from ClusterPolicy") {
+				t.Errorf("missing-class case must be recorded as not probed:\n%s", out)
+			}
+
+			pods, listErr := clientset.CoreV1().Pods(run.namespace).List(context.Background(), metav1.ListOptions{})
+			if listErr != nil {
+				t.Fatal(listErr)
+			}
+			if !tt.wantPod {
+				if len(pods.Items) != 0 {
+					t.Fatalf("no probe pod may be created without RuntimeClass %s, got %d", nvidiaRuntimeClassName, len(pods.Items))
+				}
+				return
+			}
+			if len(pods.Items) != 1 {
+				t.Fatalf("probe pods created = %d, want 1", len(pods.Items))
+			}
+			pod := pods.Items[0]
+			if created != nil {
+				pod = *findPodByPrefix(*created, runtimeClassProbePrefix)
+			}
+			if pod.Name != run.runtimeClassProbePodName {
+				t.Errorf("pod name = %q, want %q", pod.Name, run.runtimeClassProbePodName)
+			}
+			if pod.Spec.RuntimeClassName == nil || *pod.Spec.RuntimeClassName != "nvidia-container-runtime" {
+				t.Errorf("runtimeClassName = %v, want the resolved nvidia-container-runtime", pod.Spec.RuntimeClassName)
+			}
+			if !strings.Contains(out, "RuntimeClass:  nvidia-container-runtime") {
+				t.Errorf("outcome artifact must name the resolved RuntimeClass:\n%s", out)
+			}
+			if pod.Spec.NodeName != "gpu-node-1" {
+				t.Errorf("nodeName = %q, want the GPU node the test pod ran on", pod.Spec.NodeName)
+			}
+			if !reflect.DeepEqual(pod.Spec.Tolerations, tolerations) {
+				t.Errorf("tolerations = %v, want the context's %v", pod.Spec.Tolerations, tolerations)
+			}
+			if len(pod.Spec.ResourceClaims) != 0 {
+				t.Error("probe pod must not reference ResourceClaims")
+			}
+			c := pod.Spec.Containers[0]
+			if _, hasGPU := c.Resources.Limits[corev1.ResourceName(resourceNVIDIAGPU)]; hasGPU {
+				t.Error("probe pod must not request nvidia.com/gpu")
+			}
+			var visible string
+			for _, env := range c.Env {
+				if env.Name == envNVIDIAVisibleDevices {
+					visible = env.Value
+				}
+			}
+			if visible != "all" {
+				t.Errorf("%s = %q, want all", envNVIDIAVisibleDevices, visible)
+			}
+			if c.SecurityContext == nil || c.SecurityContext.Privileged == nil || *c.SecurityContext.Privileged ||
+				c.SecurityContext.AllowPrivilegeEscalation == nil || *c.SecurityContext.AllowPrivilegeEscalation {
+
+				t.Errorf("probe container must be explicitly unprivileged: %+v", c.SecurityContext)
+			}
+			if pod.Spec.SecurityContext == nil || pod.Spec.SecurityContext.RunAsNonRoot == nil || !*pod.Spec.SecurityContext.RunAsNonRoot {
+				t.Errorf("probe pod must run as non-root: %+v", pod.Spec.SecurityContext)
+			}
+			if c.Command[2] != gpuAbsenceProbeScript {
+				t.Errorf("probe script = %q, want gpuAbsenceProbeScript", c.Command[2])
+			}
+			if !strings.Contains(out, runtimeClassExtraLabel+" — pod logs") {
+				t.Errorf("probe pod logs artifact missing:\n%s", out)
+			}
+		})
+	}
+}
 
 // markPodsSucceededOnCreate installs a reactor that marks every created pod
 // as Succeeded — with a terminated exit-0 status for each of its containers —
@@ -1767,7 +2029,7 @@ func TestNewGPUTestRun_TokenAndNameLimits(t *testing.T) {
 	if len(run.token) != 32 {
 		t.Errorf("token length = %d, want 32 hex chars (128 bits)", len(run.token))
 	}
-	for _, name := range []string{run.namespace, run.podName, run.claimName, run.noAllocPodName} {
+	for _, name := range []string{run.namespace, run.podName, run.claimName, run.noAllocPodName, run.runtimeClassProbePodName} {
 		if len(name) > 63 {
 			t.Errorf("generated name %q is %d chars, exceeds the 63-char DNS-1123 limit", name, len(name))
 		}
@@ -2257,5 +2519,34 @@ func TestGrantProbePrologueBehavior(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestRecordRuntimeClassBypassExtra_NoClusterPolicyNotProbed pins that NVIDIA
+// RuntimeClasses present by name alone, with no readable ClusterPolicy, do
+// not get probed: the extra records not probed and creates no pod, so a
+// same-named class with another handler can never read as HARDENED.
+func TestRecordRuntimeClassBypassExtra_NoClusterPolicyNotProbed(t *testing.T) {
+	clientset := k8sfake.NewClientset(runtimeClass("nvidia", "runc-lookalike"), runtimeClass("nvidia-container-runtime", "nvidia"))
+	markPodsSucceededOnCreate(clientset)
+	run, err := newGPUTestRun()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vctx := &validators.Context{Ctx: context.Background(), Clientset: clientset,
+		DynamicClient: dynamicfake.NewSimpleDynamicClient(runtime.NewScheme())}
+	out := captureStdout(t, func() { recordRuntimeClassBypassExtra(vctx, run, "gpu-node-1") })
+	if !strings.Contains(out, "Outcome:       NOT RUN") || !strings.Contains(out, "not established from ClusterPolicy") {
+		t.Errorf("extra must be recorded as not probed without a ClusterPolicy:\n%s", out)
+	}
+	if strings.Contains(out, "HARDENED") {
+		t.Errorf("a by-name class must never record HARDENED:\n%s", out)
+	}
+	pods, listErr := clientset.CoreV1().Pods(run.namespace).List(context.Background(), metav1.ListOptions{})
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+	if len(pods.Items) != 0 {
+		t.Errorf("no probe pod may be created when the class is not established, got %d", len(pods.Items))
 	}
 }

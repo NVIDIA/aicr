@@ -20,7 +20,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
@@ -50,6 +52,7 @@ func TestDetectPlatform(t *testing.T) {
 		{"gke", "gce://my-project/us-central1-a/gke-node-1", "gke"},
 		{"aks", "azure:///subscriptions/000/resourceGroups/rg/providers/Microsoft.Compute/virtualMachineScaleSets/aks-gpu/virtualMachines/0", "aks"},
 		{"unknown", "kind://docker/kind/kind-control-plane", ""},
+		{"bare metal", "nico://rack1/node-07", ""},
 		{"empty", "", ""},
 	}
 	for _, tt := range tests {
@@ -62,12 +65,36 @@ func TestDetectPlatform(t *testing.T) {
 				Ctx:       context.Background(),
 				Clientset: client,
 			}
-			got, err := detectPlatform(vctx)
+			got, pid, err := detectPlatform(vctx)
 			if err != nil {
 				t.Fatalf("detectPlatform() unexpected error: %v", err)
 			}
 			if got != tt.want {
 				t.Errorf("detectPlatform() = %q, want %q", got, tt.want)
+			}
+			if pid != tt.providerID {
+				t.Errorf("detectPlatform() providerID = %q, want %q", pid, tt.providerID)
+			}
+		})
+	}
+}
+
+func TestProviderScheme(t *testing.T) {
+	tests := []struct {
+		providerID string
+		want       string
+	}{
+		{"nico://rack1/node-07", "nico"},
+		{"kind://docker/kind/kind-control-plane", "kind"},
+		{"aws://us-east-1a/i-0123456789", "aws"},
+		{"", "none"},
+		{"://missing-scheme", "none"},
+		{"no-scheme-at-all", "none"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.providerID, func(t *testing.T) {
+			if got := providerScheme(tt.providerID); got != tt.want {
+				t.Errorf("providerScheme(%q) = %q, want %q", tt.providerID, got, tt.want)
 			}
 		})
 	}
@@ -81,7 +108,7 @@ func TestDetectPlatformNoNodes(t *testing.T) {
 		Ctx:       context.Background(),
 		Clientset: client,
 	}
-	got, err := detectPlatform(vctx)
+	got, _, err := detectPlatform(vctx)
 	if err != nil {
 		t.Fatalf("detectPlatform() unexpected error: %v", err)
 	}
@@ -149,7 +176,7 @@ func TestDetectPlatformListError_FailsClosed(t *testing.T) {
 				Ctx:       context.Background(),
 				Clientset: client,
 			}
-			got, err := detectPlatform(vctx)
+			got, _, err := detectPlatform(vctx)
 			if got != "" {
 				t.Errorf("detectPlatform() platform = %q, want empty on error", got)
 			}
@@ -186,8 +213,8 @@ func TestCheckPlatformAutoscalingListError_FailsClosed(t *testing.T) {
 	if validators.IsSkip(err) {
 		t.Fatalf("checkPlatformAutoscaling() = %v, want a blocking failure but got a Skip (#2122)", err)
 	}
-	if strings.Contains(err.Error(), "not recognized") {
-		t.Errorf("checkPlatformAutoscaling() masqueraded infra error as unrecognized-platform skip: %v", err)
+	if strings.Contains(err.Error(), "no autoscaler probe") {
+		t.Errorf("checkPlatformAutoscaling() masqueraded infra error as missing-probe skip: %v", err)
 	}
 	if errorstest.ReportedCode(err) != errors.ErrCodeUnauthorized {
 		t.Errorf("checkPlatformAutoscaling() code = %v, want Unauthorized", err)
@@ -436,18 +463,103 @@ func TestCheckGKEAutoscaling(t *testing.T) {
 	}
 }
 
+// TestCheckPlatformAutoscalingSkipsUnknown pins the missing-probe outcome
+// (#3428): a providerID no probe recognizes skips — never passes, never
+// fails — and the reason names the scheme and says the skip is a missing
+// probe, not product nonapplicability, which only configuration declares.
 func TestCheckPlatformAutoscalingSkipsUnknown(t *testing.T) {
 	client := k8sfake.NewClientset(&corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "node-1"},
-		Spec:       corev1.NodeSpec{ProviderID: "kind://docker/kind/kind-control-plane"},
+		Spec:       corev1.NodeSpec{ProviderID: "nico://rack1/node-07"},
 	})
 	vctx := &validators.Context{
 		Ctx:       context.Background(),
 		Clientset: client,
 	}
-	err := checkPlatformAutoscaling(vctx)
-	if err == nil || !strings.Contains(err.Error(), "not recognized") {
-		t.Errorf("checkPlatformAutoscaling() should skip for unknown platform, got: %v", err)
+	var err error
+	out := captureStdout(t, func() { err = checkPlatformAutoscaling(vctx) })
+	if err == nil || !validators.IsSkip(err) {
+		t.Fatalf("checkPlatformAutoscaling() = %v, want a skip for a provider without a probe", err)
+	}
+	for _, want := range []string{"no autoscaler probe for this provider", `"nico"`, "not product nonapplicability", "notApplicable"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("skip reason %q should contain %q", err.Error(), want)
+		}
+	}
+	if strings.Contains(err.Error(), "not recognized") {
+		t.Errorf("skip reason must not read as platform nonapplicability: %q", err.Error())
+	}
+	if !strings.Contains(out, "Cluster Autoscaling Observation") || !strings.Contains(out, "Provider scheme: nico") {
+		t.Errorf("missing-probe observation artifact not recorded:\n%s", out)
+	}
+}
+
+// TestPlatformPathsRecordObservationsNotPass pins the constrained claim
+// (#3428): the EKS, AKS and GKE fallback paths record what they observed and
+// state that no scale event was driven; none of them records a PASS verdict,
+// and each records the autoscaler status ConfigMap and events observations.
+func TestPlatformPathsRecordObservationsNotPass(t *testing.T) {
+	gpuNode := func(name, providerID string, labels map[string]string) *corev1.Node {
+		labels["nvidia.com/gpu.present"] = "true"
+		return &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},
+			Spec:       corev1.NodeSpec{ProviderID: providerID},
+			Status:     corev1.NodeStatus{Capacity: corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("8")}},
+		}
+	}
+	statusCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "cluster-autoscaler-status", Namespace: "kube-system"},
+		Data:       map[string]string{"status": "Cluster-autoscaler status: Healthy"},
+	}
+	tests := []struct {
+		name     string
+		objects  []runtime.Object
+		check    func(*validators.Context) error
+		wantPool string
+		wantAuto string
+	}{
+		{
+			name:     "EKS node group with autoscaler status",
+			objects:  []runtime.Object{gpuNode("eks-1", "aws://us-east-1a/i-1", map[string]string{"eks.amazonaws.com/nodegroup": "gpu-workers"}), statusCM},
+			check:    checkEKSAutoscaling,
+			wantPool: `managed node group "gpu-workers"`,
+			wantAuto: "cluster-autoscaler-status ConfigMap present",
+		},
+		{
+			name:     "AKS agent pool without autoscaler status",
+			objects:  []runtime.Object{gpuNode("aks-1", "azure:///subscriptions/0/vmss/0", map[string]string{"kubernetes.azure.com/agentpool": "gpuworker"})},
+			check:    checkAKSAutoscaling,
+			wantPool: `agent pool(s) "gpuworker"`,
+			wantAuto: "autoscaler enablement not observable",
+		},
+		{
+			name:     "GKE node pool without autoscaler status",
+			objects:  []runtime.Object{gpuNode("gke-1", "gce://proj/us-central1-a/gke-1", map[string]string{"cloud.google.com/gke-nodepool": "gpu-pool"})},
+			check:    checkGKEAutoscaling,
+			wantPool: "node pool(s) gpu-pool",
+			wantAuto: "may not be enabled",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vctx := &validators.Context{Ctx: context.Background(), Clientset: k8sfake.NewClientset(tt.objects...)}
+			var err error
+			out := captureStdout(t, func() { err = tt.check(vctx) })
+			if err != nil {
+				t.Fatalf("check error = %v", err)
+			}
+			if strings.Contains(out, "PASS") {
+				t.Errorf("platform path must record observations, not a PASS verdict:\n%s", out)
+			}
+			for _, want := range []string{
+				"Cluster Autoscaling Observation", "OBSERVED", "No scale event was driven or observed",
+				"Cluster Autoscaler Status", "Autoscaler Events", tt.wantPool, tt.wantAuto,
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("output missing %q:\n%s", want, out)
+				}
+			}
+		})
 	}
 }
 
@@ -463,9 +575,9 @@ func TestCheckClusterAutoscaling_KarpenterNotFound_FallsBack(t *testing.T) {
 		Clientset: client,
 	}
 	err := CheckClusterAutoscaling(vctx)
-	// Should skip (platform not recognized) rather than fail with "not found"
-	if err == nil || !strings.Contains(err.Error(), "not recognized") {
-		t.Errorf("expected platform skip, got: %v", err)
+	// Should skip (missing probe) rather than fail with "not found"
+	if err == nil || !validators.IsSkip(err) || !strings.Contains(err.Error(), "no autoscaler probe") {
+		t.Errorf("expected missing-probe skip, got: %v", err)
 	}
 }
 
@@ -536,7 +648,7 @@ func TestCheckClusterAutoscaling_APIError_DoesNotFallBack(t *testing.T) {
 		Clientset: client,
 	}
 	err := CheckClusterAutoscaling(vctx)
-	if err == nil || strings.Contains(err.Error(), "not recognized") {
+	if err == nil || strings.Contains(err.Error(), "no autoscaler probe") {
 		t.Errorf("expected API error (not fallback skip), got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "failed to search for Karpenter deployment") {
@@ -765,5 +877,236 @@ func TestValidateClusterAutoscaling_CleanupFailureFailsPassingRun(t *testing.T) 
 				t.Error("report = nil, want the behavioral result preserved beside the cleanup error")
 			}
 		})
+	}
+}
+
+// TestRecordClusterAutoscalerStatus_ReadErrorIsNotAbsence pins that a failed
+// ConfigMap read (RBAC here) is recorded with the absence rather than read
+// as "not found", while a clean NotFound records a plain absence: the
+// artifact must not claim an absence it did not observe.
+func TestRecordClusterAutoscalerStatus_ReadErrorIsNotAbsence(t *testing.T) {
+	tests := []struct {
+		name       string
+		getErr     error
+		wantUnread bool
+	}{
+		{"RBAC-denied read is recorded as unread", k8serrors.NewForbidden(schema.GroupResource{Resource: "configmaps"}, "cluster-autoscaler-status", fmt.Errorf("rbac denied")), true},
+		{"clean NotFound is a plain absence", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := k8sfake.NewClientset()
+			if tt.getErr != nil {
+				client.PrependReactor("get", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, tt.getErr
+				})
+			}
+			vctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+			var found bool
+			var unread string
+			out := captureStdout(t, func() { found, unread = recordClusterAutoscalerStatus(vctx) })
+			if found {
+				t.Fatal("recordClusterAutoscalerStatus() = true without a ConfigMap")
+			}
+			if (unread != "") != tt.wantUnread || strings.Contains(out, "absence is NOT established") != tt.wantUnread {
+				t.Errorf("unread=%q wantUnread=%v; artifact:\n%s", unread, tt.wantUnread, out)
+			}
+			if tt.wantUnread && !strings.Contains(out, "rbac denied") {
+				t.Errorf("artifact must carry the read error:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestRecordClusterAutoscalerDeployment_UnavailableIsNotAbsence pins that a
+// Cluster Autoscaler Deployment that exists with no available replica is
+// recorded as present-but-unavailable, not as absent.
+func TestRecordClusterAutoscalerDeployment_UnavailableIsNotAbsence(t *testing.T) {
+	client := k8sfake.NewClientset(&appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "cluster-autoscaler", Namespace: "kube-system"},
+		Spec:       appsv1.DeploymentSpec{Replicas: ptrInt32(1)},
+		Status:     appsv1.DeploymentStatus{AvailableReplicas: 0},
+	})
+	vctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+	var found bool
+	var unread string
+	out := captureStdout(t, func() { found, unread = recordClusterAutoscalerDeployment(vctx) })
+	if found {
+		t.Fatal("recordClusterAutoscalerDeployment() = true for an unavailable Deployment")
+	}
+	if unread == "" || !strings.Contains(out, "exists but is not available") {
+		t.Errorf("artifact must record the unavailable Deployment (unread=%q):\n%s", unread, out)
+	}
+}
+
+// TestPlatformSummariesDoNotTurnUnreadIntoAbsence pins the summary line of
+// each platform path when the status ConfigMap read fails: it must say the
+// ConfigMap could not be read, never that it is absent or the autoscaler
+// disabled, and the check still records an observation (nil).
+func TestPlatformSummariesDoNotTurnUnreadIntoAbsence(t *testing.T) {
+	gpuNode := func(providerID string, labels map[string]string) *corev1.Node {
+		labels["nvidia.com/gpu.present"] = "true"
+		return &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "gpu-1", Labels: labels},
+			Spec:       corev1.NodeSpec{ProviderID: providerID},
+			Status:     corev1.NodeStatus{Capacity: corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("8")}},
+		}
+	}
+	tests := []struct {
+		name      string
+		node      *corev1.Node
+		check     func(*validators.Context) error
+		mustNotBe []string
+	}{
+		{"EKS", gpuNode("aws://us-east-1a/i-1", map[string]string{"eks.amazonaws.com/nodegroup": "gpu-workers"}), checkEKSAutoscaling,
+			[]string{"no cluster-autoscaler-status ConfigMap", "no in-cluster Cluster Autoscaler Deployment;"}},
+		{"AKS", gpuNode("azure:///subscriptions/0/vmss/0", map[string]string{"kubernetes.azure.com/agentpool": "gpuworker"}), checkAKSAutoscaling,
+			[]string{"no cluster-autoscaler-status ConfigMap", "enablement not observable"}},
+		{"GKE", gpuNode("gce://proj/us-central1-a/gke-1", map[string]string{"cloud.google.com/gke-nodepool": "gpu-pool"}), checkGKEAutoscaling,
+			[]string{"no cluster-autoscaler-status ConfigMap", "may not be enabled"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := k8sfake.NewClientset(tt.node)
+			denied := func(k8stesting.Action) (bool, runtime.Object, error) {
+				return true, nil, k8serrors.NewForbidden(schema.GroupResource{Resource: "x"}, "", fmt.Errorf("rbac denied"))
+			}
+			client.PrependReactor("get", "configmaps", denied)
+			client.PrependReactor("get", "deployments", denied)
+			vctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+			var err error
+			out := captureStdout(t, func() { err = tt.check(vctx) })
+			if err != nil {
+				t.Fatalf("check error = %v", err)
+			}
+			summary := out[strings.LastIndex(out, "OBSERVED"):]
+			if !strings.Contains(summary, "cluster-autoscaler-status ConfigMap could not be read") {
+				t.Errorf("summary must say the ConfigMap could not be read:\n%s", summary)
+			}
+			for _, bad := range tt.mustNotBe {
+				if strings.Contains(summary, bad) {
+					t.Errorf("summary turns an unread ConfigMap into absence (%q):\n%s", bad, summary)
+				}
+			}
+			if tt.name != "GKE" && !strings.Contains(summary, "Cluster Autoscaler Deployment could not be confirmed") {
+				t.Errorf("summary must say the Deployment could not be confirmed:\n%s", summary)
+			}
+		})
+	}
+}
+
+// TestCheckEKSAutoscaling_NoAutoscalerIsAnObservation pins that an EKS
+// cluster with self-managed node groups (no eks.amazonaws.com/nodegroup
+// label) and no in-cluster Cluster Autoscaler records "no autoscaler
+// observed" as an observation rather than failing — but only when every
+// observation was a definitive absence: a present status ConfigMap is an
+// autoscaler observation, and a failed ConfigMap read is unread, not absent.
+func TestCheckEKSAutoscaling_NoAutoscalerIsAnObservation(t *testing.T) {
+	const noAutoscaler = "no autoscaler observed: no managed node group label, no in-cluster Cluster Autoscaler, no Karpenter"
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "gpu-1", Labels: map[string]string{"nvidia.com/gpu.present": "true"}},
+		Spec:       corev1.NodeSpec{ProviderID: "aws://us-east-1a/i-1"},
+		Status:     corev1.NodeStatus{Capacity: corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("8")}},
+	}
+	statusCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "cluster-autoscaler-status", Namespace: "kube-system"},
+		Data:       map[string]string{"status": "Cluster-autoscaler status: Healthy"},
+	}
+	tests := []struct {
+		name           string
+		objects        []runtime.Object
+		statusReadErr  error
+		wantNoAuto     bool
+		wantInSummary  string
+		wantNotSummary string
+	}{
+		{"nothing observed at all", []runtime.Object{node}, nil, true, "", ""},
+		{"status ConfigMap present, no Deployment", []runtime.Object{node, statusCM}, nil, false, "cluster-autoscaler-status ConfigMap present", ""},
+		{"status ConfigMap unread", []runtime.Object{node}, k8serrors.NewForbidden(schema.GroupResource{Resource: "configmaps"}, "", fmt.Errorf("rbac denied")), false, "cluster-autoscaler-status ConfigMap could not be read", "no cluster-autoscaler-status ConfigMap"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := k8sfake.NewClientset(tt.objects...)
+			if tt.statusReadErr != nil {
+				client.PrependReactor("get", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, tt.statusReadErr
+				})
+			}
+			vctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+			var err error
+			out := captureStdout(t, func() { err = checkEKSAutoscaling(vctx) })
+			if err != nil {
+				t.Fatalf("checkEKSAutoscaling() = %v, want an observation (nil)", err)
+			}
+			summary := out[strings.LastIndex(out, "OBSERVED"):]
+			if strings.Contains(summary, noAutoscaler) != tt.wantNoAuto {
+				t.Errorf("no-autoscaler observation present=%v, want %v:\n%s", !tt.wantNoAuto, tt.wantNoAuto, summary)
+			}
+			if tt.wantInSummary != "" && !strings.Contains(summary, tt.wantInSummary) {
+				t.Errorf("summary missing %q:\n%s", tt.wantInSummary, summary)
+			}
+			if tt.wantNotSummary != "" && strings.Contains(summary, tt.wantNotSummary) {
+				t.Errorf("summary turns an unread ConfigMap into absence (%q):\n%s", tt.wantNotSummary, summary)
+			}
+			if strings.Contains(out, "PASS") {
+				t.Errorf("observation must not read as a pass:\n%s", out)
+			}
+		})
+	}
+}
+
+func ptrInt32(v int32) *int32 { return &v }
+
+// TestRecordAutoscalerEvents_NewestFirst pins that the artifact selects the
+// newest autoscaler events by timestamp (lastTimestamp, else eventTime)
+// rather than by list position, and prints them in UTC.
+func TestRecordAutoscalerEvents_NewestFirst(t *testing.T) {
+	base := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	objects := make([]runtime.Object, 0, defaults.AutoscalerMaxEvents+6)
+	for i := range defaults.AutoscalerMaxEvents + 3 {
+		objects = append(objects, &corev1.Event{
+			ObjectMeta:     metav1.ObjectMeta{Name: fmt.Sprintf("ev-%02d", i), Namespace: "default"},
+			Reason:         "TriggeredScaleUp",
+			Message:        fmt.Sprintf("scale-up %d", i),
+			InvolvedObject: corev1.ObjectReference{Name: fmt.Sprintf("pod-%d", i)},
+			LastTimestamp:  metav1.NewTime(base.Add(time.Duration(i) * time.Minute)),
+		})
+	}
+	// An events.k8s.io-style event with only eventTime, newer than all others.
+	objects = append(objects, &corev1.Event{
+		ObjectMeta:     metav1.ObjectMeta{Name: "aa-eventtime", Namespace: "default"},
+		Reason:         "ScaleDown",
+		Message:        "newest by eventTime",
+		InvolvedObject: corev1.ObjectReference{Name: "node-9"},
+		EventTime:      metav1.NewMicroTime(base.Add(time.Hour)),
+	}, &corev1.Event{
+		// A repeated series event: its first observation (eventTime) is older
+		// than everything, its last occurrence is second newest.
+		ObjectMeta:     metav1.ObjectMeta{Name: "ab-series", Namespace: "default"},
+		Reason:         "NotTriggerScaleUp",
+		Message:        "repeated series",
+		InvolvedObject: corev1.ObjectReference{Name: "pod-series"},
+		EventTime:      metav1.NewMicroTime(base.Add(-time.Hour)),
+		Series:         &corev1.EventSeries{Count: 7, LastObservedTime: metav1.NewMicroTime(base.Add(50 * time.Minute))},
+	}, &corev1.Event{
+		ObjectMeta: metav1.ObjectMeta{Name: "zz-unrelated", Namespace: "default"},
+		Reason:     "Scheduled", Message: "ignored",
+	})
+	vctx := &validators.Context{Ctx: context.Background(), Clientset: k8sfake.NewClientset(objects...)}
+	out := captureStdout(t, func() { recordAutoscalerEvents(vctx) })
+	if strings.Contains(out, "scale-up 0\n") || strings.Contains(out, "scale-up 1\n") || strings.Contains(out, "scale-up 2\n") {
+		t.Errorf("oldest events must be dropped when more than %d match:\n%s", defaults.AutoscalerMaxEvents, out)
+	}
+	if strings.Contains(out, "0001-01-01") || strings.Contains(out, "ignored") {
+		t.Errorf("zero timestamps and unrelated events must not appear:\n%s", out)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	first := lines[len(lines)-defaults.AutoscalerMaxEvents]
+	if !strings.Contains(first, "newest by eventTime") || !strings.HasPrefix(first, base.Add(time.Hour).Format(time.RFC3339)) {
+		t.Errorf("newest event must be first and printed in UTC, got %q", first)
+	}
+	second := lines[len(lines)-defaults.AutoscalerMaxEvents+1]
+	if !strings.Contains(second, "repeated series") || !strings.HasPrefix(second, base.Add(50*time.Minute).Format(time.RFC3339)) {
+		t.Errorf("a series event must sort by its last occurrence, got %q", second)
 	}
 }
