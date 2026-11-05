@@ -539,3 +539,45 @@ func TestCheckClusterAutoscaling_APIError_DoesNotFallBack(t *testing.T) {
 		t.Errorf("expected wrapped API error, got: %v", err)
 	}
 }
+
+// TestValidateClusterAutoscaling_NamespaceCreateFailure pins that the
+// cluster-autoscaling check hands its namespace to the shared cleanup,
+// registered before the create (#3648): a Create whose error may have
+// persisted the namespace — before the error returned, or only after
+// cleanup's first lookup answered NotFound — still ends with the namespace
+// gone, a definitive rejection issues no delete, and a failing delete leaves
+// the create error as the result. Sequential: shortenCleanupTimeout touches
+// package state.
+func TestValidateClusterAutoscaling_NamespaceCreateFailure(t *testing.T) {
+	shortenCleanupTimeout(t)
+	for _, tt := range namespaceCreateFailureCases {
+		t.Run(tt.name, func(t *testing.T) {
+			c := k8sfake.NewClientset()
+			createdName := failNamespaceCreate(c, tt.persists, tt.surfacesLate, tt.createErr)
+			if tt.deleteErr != nil {
+				failNamespaceDelete(c, tt.deleteErr)
+			}
+
+			report, err := validateClusterAutoscaling(context.Background(), c, "gpu-pool")
+			if report != nil {
+				t.Errorf("report = %+v, want nil when the namespace create fails", report)
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+			if err == nil || !strings.Contains(err.Error(), "failed to create cluster autoscaling test namespace") {
+				t.Errorf("error = %v, want the namespace create failure as the result", err)
+			}
+			nsName := createdName()
+			if nsName == "" {
+				t.Fatal("the namespace create was never attempted")
+			}
+			if got := namespaceDeleteIssued(c.Actions(), nsName); got != tt.wantDeleted {
+				t.Errorf("namespace delete issued = %t, want %t", got, tt.wantDeleted)
+			}
+			if (tt.persists || tt.surfacesLate) && tt.deleteErr == nil {
+				if _, getErr := c.CoreV1().Namespaces().Get(context.Background(), nsName, metav1.GetOptions{}); !k8serrors.IsNotFound(getErr) {
+					t.Errorf("namespace %s leaked after an ambiguous create (get err = %v)", nsName, getErr)
+				}
+			}
+		})
+	}
+}

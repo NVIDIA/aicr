@@ -234,31 +234,46 @@ func validateClusterAutoscaling(ctx context.Context, clientset kubernetes.Interf
 		HPAName:        hpaName,
 	}
 
+	// Cleanup: delete namespace (cascades all resources, triggers Karpenter
+	// consolidation) through the shared cleanupGPUTestNamespace, deferred
+	// BEFORE the create. A Create that returns an error may still have
+	// persisted the namespace, or may still be applying it when a single
+	// Delete would see NotFound, so cleanup settles to confirmed absence
+	// within its budget instead of trusting one Delete. The ownership label
+	// is what lets it adopt a namespace that surfaces late; the rest of the
+	// gpuTestRun model (128-bit token) is not ported here.
+	run := &gpuTestRun{token: suffix, namespace: nsName}
+	defer func() { //nolint:contextcheck // cleanup runs on its own bounded context
+		status, cleanupErr := cleanupGPUTestNamespace(clientset, run)
+		if cleanupErr != nil {
+			// Surface a failed delete: silently discarding it leaves the
+			// namespace (and anything still running in it) behind with no
+			// operator-visible signal.
+			slog.Warn("failed to delete cluster autoscaling test namespace; delete it manually",
+				"namespace", nsName, "status", status, "error", cleanupErr)
+			return
+		}
+		slog.Debug("cleaned up cluster autoscaling test namespace", "namespace", nsName, "status", status)
+	}()
+
 	// Create unique test namespace.
 	ns := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{Name: nsName},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   nsName,
+			Labels: map[string]string{gpuTestRunLabel: run.token},
+		},
 	}
-	if _, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); k8s.IgnoreAlreadyExists(err) != nil {
+	created, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+	if k8s.IgnoreAlreadyExists(err) != nil {
+		// A definitive rejection cannot have persisted the namespace; anything
+		// else stays ambiguous and cleanup settles it.
+		run.nsNeverCreated = createDefinitelyRejected(err)
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create cluster autoscaling test namespace", err)
 	}
-
-	// Cleanup: delete namespace (cascades all resources, triggers Karpenter consolidation).
-	// Use background context with bounded timeout so cleanup runs even if the parent
-	// context is already canceled (timeout/failure path). Without this, unique namespaces
-	// would accumulate as leftovers across repeated runs.
-	defer func() { //nolint:contextcheck // intentional: use background context so cleanup runs even if parent is canceled
-		slog.Debug("cleaning up cluster autoscaling test namespace", "namespace", nsName)
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
-		defer cleanupCancel()
-		// Surface a failed delete: silently discarding it leaves the namespace
-		// (and anything still running in it) behind with no operator-visible
-		// signal, while the recorded artifact describes a cleanup that ran.
-		if err := k8s.IgnoreNotFound(clientset.CoreV1().Namespaces().Delete(
-			cleanupCtx, nsName, metav1.DeleteOptions{})); err != nil {
-			slog.Warn("failed to delete cluster autoscaling test namespace; delete it manually",
-				"namespace", nsName, "error", err)
-		}
-	}()
+	if err == nil {
+		run.nsObserved = true
+		run.nsUID = created.UID
+	}
 
 	// Baseline: count existing Karpenter nodes for this pool before creating test resources.
 	// This ensures we detect a NEW scale-up, not pre-existing nodes from prior runs.
