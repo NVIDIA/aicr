@@ -1457,7 +1457,7 @@ spec:
 
 **What the webhook checks.** On create: the controller is on, `spec.healthEvent` and its `nodeName` and `version` are set, `isHealthy` is false, the node exists, `startTime`, if set, is in the future, and no other request is open for the node. It freezes `spec.healthEvent` after creation, so the clearing event always matches the one that opened the fault. Both webhooks use `failurePolicy: Fail`.
 
-**Who may create requests.** Whoever can create one can cordon and drain any node. With the remediation step or `nvsentinel-external-remediation` composed, it also chooses what follows the drain on that node through `recommendedAction`, such as a reboot or a hand-off to an outside system. Grant it narrowly. The chart aggregates the resource into no built-in role, so by default only cluster-admin can. Grant a requester its own ClusterRole, since requests are cluster-scoped:
+**Who may create requests.** Whoever can create one can cordon and drain any node. With the remediation step composed, it also chooses what follows the drain on that node through `recommendedAction`, such as a reboot, or, with `nvsentinel-external-remediation` composed beside the remediation step, a hand-off to an outside system. Grant it narrowly. The chart aggregates the resource into no built-in role, so by default only cluster-admin can. Grant a requester its own ClusterRole, since requests are cluster-scoped:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
