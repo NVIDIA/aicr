@@ -13,21 +13,23 @@
 > **Amended 2026-11-03 for the `cncf-conformance` kind.** The amendment
 > records a decision whose implementation is tracked under
 > [#3601](https://github.com/NVIDIA/aicr/issues/3601): the CNCF
-> submission collector script will be retired and `--cncf-submission`
-> will become an output option on `aicr validate --phase conformance`;
-> `--feature` and `evidence.cncf.features` will be removed, and
-> `--evidence-dir` will require `--cncf-submission` (today's
-> `--evidence-dir`-alone rendering goes away). The shipped CLI still
-> runs the collector until
-> [#3602](https://github.com/NVIDIA/aicr/issues/3602) lands. See
+> submission collector script is retired and `--cncf-submission` is an
+> output option on `aicr validate --phase conformance`; `--feature` and
+> `evidence.cncf.features` are removed, and `--evidence-dir` requires
+> `--cncf-submission` (the `--evidence-dir`-alone rendering is gone).
+> [#3602](https://github.com/NVIDIA/aicr/issues/3602) landed this on
+> 2026-11-05; the submission packaging is
+> [#3605](https://github.com/NVIDIA/aicr/issues/3605). See
 > [Amendment: single-path CNCF conformance evidence (2026-11-03)](#amendment-single-path-cncf-conformance-evidence-2026-11-03).
 > The recipe-test-attestation kind is not affected.
 
 ## Status
 
 **Accepted, partially implemented** — proposed 2026-05-08. Amended
-2026-11-03 for the `cncf-conformance` kind (accepted, implementation
-pending); see
+2026-11-03 for the `cncf-conformance` kind (accepted; the single runner
+landed with [#3602](https://github.com/NVIDIA/aicr/issues/3602) on
+2026-11-05, the submission packaging of
+[#3605](https://github.com/NVIDIA/aicr/issues/3605) is pending); see
 [Amendment: single-path CNCF conformance evidence (2026-11-03)](#amendment-single-path-cncf-conformance-evidence-2026-11-03).
 
 This ADR specifies the V1 contract. Implementation lands as five
@@ -231,13 +233,14 @@ and introduces kind-scoped flag names for the new attestation kind:
 > config keys in item 1
 > below describe the surface as it shipped. The
 > [amendment](#amendment-single-path-cncf-conformance-evidence-2026-11-03)
-> keeps `--evidence-dir` and `--cncf-submission` but will change what
-> `--cncf-submission` does, will make `--evidence-dir` require it
-> (today's `--evidence-dir`-alone rendering goes away), and will remove
-> `--feature` and `evidence.cncf.features`, once
-> [#3602](https://github.com/NVIDIA/aicr/issues/3602) lands. Until then
-> the row describes the shipped CLI. The recipe-test-attestation row is
-> unchanged.
+> keeps `--evidence-dir` and `--cncf-submission` but changed what
+> `--cncf-submission` does (it renders the submission evidence from the
+> conformance run), made `--evidence-dir` require it (the
+> `--evidence-dir`-alone rendering is gone), and removed `--feature` and
+> `evidence.cncf.features`, with
+> [#3602](https://github.com/NVIDIA/aicr/issues/3602) on 2026-11-05. The
+> row records the surface as it shipped at v1. The recipe-test-attestation
+> row is unchanged.
 
 Both kinds may run from a single `aicr validate` invocation (each
 flag set produces its own output tree) — they are independent
@@ -1352,10 +1355,11 @@ Amends the `cncf-conformance` kind in the evidence taxonomy and the
 `cncf-conformance` row of the V1 surface above. Execution is tracked in
 [#3601](https://github.com/NVIDIA/aicr/issues/3601); this section records
 the decisions that change what this ADR committed to. The decisions are
-accepted, implementation pending; each names the sub-issue
-that lands it. The shipped CLI still runs the collector under
-`--cncf-submission` and still accepts `--feature` until
-[#3602](https://github.com/NVIDIA/aicr/issues/3602) lands. The
+accepted; each names the sub-issue that lands it. Decisions 1 to 3 landed
+with [#3602](https://github.com/NVIDIA/aicr/issues/3602) on 2026-11-05: the
+collector and `--feature` are gone and `--cncf-submission` renders from the
+conformance run. The packaging of decision 7 is
+[#3605](https://github.com/NVIDIA/aicr/issues/3605). The
 recipe-test-attestation kind, the bundle format, the pointer layout and
 the verifier are not affected. The depth and submission-output scope
 were revised on 2026-11-04 after an audit against the CNCF requirement
@@ -1400,7 +1404,7 @@ Nightly UAT runs the conformance phase inside a 40-minute all-phases
 step. The UAT cells have two GPU nodes, so runtime and contention with
 the other phases, not capacity, bound what can be always-on.
 
-### Decision (accepted, implementation pending)
+### Decision (accepted; 1 to 3 landed with #3602, the rest tracked per issue)
 
 1. **One runner.** Implementing issue:
    [#3602](https://github.com/NVIDIA/aicr/issues/3602).

@@ -16,8 +16,8 @@ package recipe
 
 // InferenceGatewayOverrideKey is the ComponentRef.Overrides key under which a
 // component declares itself as the recipe's inference gateway for the
-// validators (the inference-gateway conformance check, the performance
-// validator's gateway-epp mode and the CNCF evidence collector). The value is
+// validators (the inference-gateway conformance check and the performance
+// validator's gateway-epp mode). The value is
 // a mapping of gatewayClass (required), gateway (the Gateway object's name,
 // default inference-gateway) and dataPlane (service-endpoints or
 // gateway-address); pkg/validator/v1 parses it. Like every override it is

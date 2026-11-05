@@ -61,8 +61,9 @@ Statuses are scoped by level. The index header reports **Applicable MUSTs**:
 packaging (#3605) maps either to Not Implemented. The Go SDK exposes the aggregation as
 `cncf.Aggregate` from `RenderCNCFEvidenceWithResult` (`Passed`,
 `IncompleteMusts`, per-requirement `Status`, `Reason`, `Proof`, `Checks`);
-`aicr validate` logs it after writing the evidence, and deriving the exit
-status of a submission run from it is #3602.
+`aicr validate --cncf-submission` logs it after writing the evidence and adds
+it to the run's exit status through `Outcome` (#3602); see
+[Exit status of a submission run](../../user/validation.md#exit-status-of-a-submission-run).
 
 Requirement page titles name the capability (`Inference API Gateway`,
 `Robust AI Operator`); the implementation a check observed (which gateway,

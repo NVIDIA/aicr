@@ -193,8 +193,8 @@ func validateFlagCombinations(cncfSubmission bool, evidenceDir string, noCluster
 	// --cncf-submission and --evidence-dir require each other (ADR-007
 	// amendment, decision 2): CNCF conformance evidence is written only for a
 	// submission run, and a submission run has to write it somewhere. The
-	// --evidence-dir-alone render that preceded the single runner is the one
-	// deprecation the collector removal left behind (#3602).
+	// --evidence-dir-alone render that preceded the single runner is recorded
+	// on docs/user/deprecations.md with the other #3602 removals.
 	if cncfSubmission && evidenceDir == "" {
 		return errors.New(errors.ErrCodeInvalidRequest, "--cncf-submission requires --evidence-dir")
 	}
@@ -483,8 +483,9 @@ type validationConfig struct {
 	// Evidence
 	evidenceDir string
 	// cncfSubmission marks a submission run: evidenceDir is rendered after
-	// the phases ran and the exit status of the conformance phase follows the
-	// requirement aggregation instead of the per-check rule.
+	// the phases ran and the requirement aggregation is added to the
+	// per-check exit rule (CNCFRequirementAggregate.Outcome). The flag guard
+	// makes it and evidenceDir imply each other; runValidation branches on it.
 	cncfSubmission bool
 	// cncfNotApplicable is spec.validate.evidence.cncf.notApplicable, the
 	// conditional MUSTs declared not applicable with their justifications.
@@ -653,7 +654,7 @@ func runValidation(
 	// decided marks that it was computed, since nil is a valid outcome.
 	var outcome error
 	var decided bool
-	if cfg.evidenceDir != "" {
+	if cfg.cncfSubmission {
 		renderOpts := aicr.RenderCNCFEvidenceOptions{
 			KubernetesVersion: snap.KubernetesVersion(),
 			NotApplicable:     cfg.cncfNotApplicable,

@@ -162,12 +162,12 @@ func (a *Aggregate) Passed() bool {
 	return len(a.IncompleteMusts()) == 0
 }
 
-// Verdict is the outcome of a submission run: nil when every applicable MUST
-// passed, else an error naming each MUST that is not established with its
-// status and reason. A submission run derives its exit status from this, not
-// from the per-check verdicts, so a SHOULD never fails it. The evidence has
-// been written when it is consulted, so the directory still documents what
-// was and was not shown.
+// Verdict is the requirement half of a submission run's exit status: nil when
+// every applicable MUST passed, else an error naming each MUST that is not
+// established with its status and reason. Outcome adds it to the per-check
+// rule; on its own it never fails on a SHOULD. The evidence has been written
+// when it is consulted, so the directory still documents what was and was
+// not shown.
 //
 // Errors:
 //   - ErrCodeInternal when an applicable MUST requirement is not established.

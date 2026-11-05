@@ -1577,7 +1577,11 @@ applies itself; when both are set, `Dir` goes to
 `RenderCNCFEvidenceWithResult` after `ValidateState`, with
 `KubernetesVersion` from the snapshot and `NotApplicable` carried into
 `RenderCNCFEvidenceOptions`, which is what the CLI does, and the aggregate it
-returns decides the run's outcome (`IncompleteMusts()`). `Features` is always
+returns decides the run's outcome through `agg.Outcome(report, failOnError)`,
+which fails on any failed or errored check in the merged report (mapped to a
+requirement or not) and adds the requirement verdict; gating on
+`IncompleteMusts()` alone would pass a run in which `platform-health` or a
+Slinky health check failed. `Features` is always
 nil: `spec.validate.evidence.cncf.features` was removed with the collector
 script (#3602) and a document that sets it fails to load.
 `CNCFEvidenceOptions()` returns the zero value (never an error) for an absent

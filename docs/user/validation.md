@@ -1384,7 +1384,10 @@ aicr validate \
 
 By default `aicr validate` exits non-zero when any phase reports `failed` or
 `other` (set `--fail-on-error=false` to report those results and exit 0 anyway;
-the readiness pre-flight still exits 2 regardless). CTRF JSON is emitted to
+the readiness pre-flight still exits 2 regardless, and so does a
+`--cncf-submission` run whose applicable MUST requirements are not all
+established, see [Exit status of a submission run](#exit-status-of-a-submission-run)).
+CTRF JSON is emitted to
 stdout (or to `--output <file>`), so a pipeline can gate promotion on both the
 exit code and the structured report:
 
@@ -1400,10 +1403,10 @@ error codes (see [`pkg/errors/exitcode.go`](https://github.com/NVIDIA/aicr/blob/
 
 | Code | Meaning |
 |------|---------|
-| `0` | All phases reported status `passed` or `skipped` |
+| `0` | All phases reported status `passed` or `skipped`; under `--cncf-submission`, additionally every applicable MUST requirement established (an all-skipped submission run exits `8`), see [Exit status of a submission run](#exit-status-of-a-submission-run) |
 | `2` | Invalid input or request (`ErrCodeInvalidRequest`) — bad CLI flag, malformed argument, a validator rejecting a recipe value (e.g., an inference constraint that uses the wrong comparator direction), or a **readiness pre-flight** constraint not met. The readiness gate always fails closed with this code, even under `--fail-on-error=false` |
 | `5` | A structured `ErrCodeTimeout` reached the top-level CLI — for example while loading the recipe or snapshot, waiting on the snapshot-agent Job, or signing evidence under `--emit-attestation --push` (which runs after the checks). A per-validator wait deadline does **not** reach this code: `runPhase` converts that error into a check result, so it surfaces as exit `8` (see note 2) |
-| `8` | One or more phases reported status `failed` (a check that returned a failure verdict — exit code `1` — or, in most cases, a validator Job killed on `activeDeadlineSeconds` — see the note below) **or** `other` (an indeterminate outcome — the check produced no usable verdict; a crash or OOM are the common examples, as is a validator Job that failed for a non-deadline reason with no inspectable pod), including per-check internal timeouts (e.g., DynamoGraphDeployment not ready within `InferenceWorkloadReadyTimeout`). Suppressed by `--fail-on-error=false` |
+| `8` | One or more phases reported status `failed` (a check that returned a failure verdict — exit code `1` — or, in most cases, a validator Job killed on `activeDeadlineSeconds` — see the note below) **or** `other` (an indeterminate outcome — the check produced no usable verdict; a crash or OOM are the common examples, as is a validator Job that failed for a non-deadline reason with no inspectable pod), including per-check internal timeouts (e.g., DynamoGraphDeployment not ready within `InferenceWorkloadReadyTimeout`). Suppressed by `--fail-on-error=false` Under `--cncf-submission` also an applicable MUST requirement not established, regardless of `--fail-on-error` ([Exit status of a submission run](#exit-status-of-a-submission-run)). |
 
 > **Important:** two subtleties to be aware of when gating a pipeline on exit code:
 >
