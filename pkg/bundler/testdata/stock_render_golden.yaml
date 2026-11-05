@@ -46,7 +46,7 @@ a100-aks-ubuntu-training-kubeflow:
   009-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
   009-network-operator-post/templates/nfd-network-rule.yaml: 8ab7f572705ba9be8b0057954fbb7e918be7590e4360bee8c8fdaa1e909d08a1
-  009-network-operator-post/templates/nic-cluster-policy-aks.yaml: ed3226b248994b8ab6ad69f6762fb5caba304e56fa59532586af4174524e20b4
+  009-network-operator-post/templates/nic-cluster-policy-aks.yaml: 288bdff5cb57fadaf4b686fddfd62e8d5f0c687852d1dd4aeff87500c1988b37
   009-network-operator-post/templates/nvidia-peermem-reloader.yaml: 0f5e1719cde9230b5bc05175b58fa0695965dbc3fbe20f7662378e9c86c3ec3d
   009-network-operator-post/values.yaml: e63dfe21cdad75cb78b6b02f6f75f05eba527e3bb7cec75be2b197cd2ab0494c
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -82,7 +82,7 @@ a100-aks-ubuntu-training-kubeflow:
   README.md: 61d66a4ae77455b3784ae33a4a8f200154556b950ef2b701b45b3f575a2db414
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: 89f929e1c558094993afe460917b33e890b7077aa73c2cb44fa026cb2b82ac20
-  checksums.txt: a70e889cad722c0b26ba5b044a1133ba1dd972e42806807bd115acfc6aa7f331
+  checksums.txt: bb13419f4e31887549a4bdac6f2363eefe95cdc85bd7c3c65b5c253073567cb1
   deploy.sh: cfb12fbb4315ebaadd1378f55f81e866e9f5faaa909b57e569bab1c0ce558c0b
   recipe.yaml: 80086a2e5801bc46f2b286f3eba2c675584df98b9bb932c58d7d1eb3e6985c3b
 a100-any:
@@ -385,7 +385,7 @@ aks-ubuntu:
   009-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
   009-network-operator-post/templates/nfd-network-rule.yaml: 8ab7f572705ba9be8b0057954fbb7e918be7590e4360bee8c8fdaa1e909d08a1
-  009-network-operator-post/templates/nic-cluster-policy-aks.yaml: ed3226b248994b8ab6ad69f6762fb5caba304e56fa59532586af4174524e20b4
+  009-network-operator-post/templates/nic-cluster-policy-aks.yaml: 288bdff5cb57fadaf4b686fddfd62e8d5f0c687852d1dd4aeff87500c1988b37
   009-network-operator-post/templates/nvidia-peermem-reloader.yaml: 0f5e1719cde9230b5bc05175b58fa0695965dbc3fbe20f7662378e9c86c3ec3d
   009-network-operator-post/values.yaml: e63dfe21cdad75cb78b6b02f6f75f05eba527e3bb7cec75be2b197cd2ab0494c
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -412,7 +412,7 @@ aks-ubuntu:
   README.md: 49143f765b59e04dcb71a3db3846f18e8a1e7fdf37485750f759bbb9069da78e
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: ccfd550ae9ada7cefcb1af4d752456882d8ff76e0a46692f5ac3922b4b3a8faf
-  checksums.txt: 4d690f901ee05741c8040a38754def1cebf6e3ea22114e08f8c9b81343502141
+  checksums.txt: 0bf34253c541cc0710815cfd5627dcb484462df401d4267427e36f49cfe7c6cb
   deploy.sh: 75313648e42a588aed9e312fd7931149ff4db47f76a1d649cb88dd6c7c27aa5a
   recipe.yaml: 39fdd6cfb0f71b1c30c37d0756379a066cb8664b30ed7e5f3bb3c289fca5acf5
 b200-any:
@@ -651,7 +651,7 @@ b300-mk8s-ubuntu-inference-dynamo:
   004-network-operator-post/Chart.yaml: 7dc57b42cbb43b596bae89753adefe36db2514b14a5b9537395ed023f2ed1049
   004-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
-  004-network-operator-post/templates/nic-cluster-policy-nebius-b300.yaml: fc1647c03f81083f35a06917743ffd6b3439e1e203a092469401d6d51531ce67
+  004-network-operator-post/templates/nic-cluster-policy-nebius-b300.yaml: 7dc025293f4af14d2543351e25fc4453e7d403c7d7f0e52b69e0ab04883fae79
   004-network-operator-post/values.yaml: 51ccfee7995bbcb0815de46c59a7d1b8c79608df18d04cebadee6745b9609a26
   005-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
@@ -672,7 +672,7 @@ b300-mk8s-ubuntu-inference-dynamo:
   README.md: 1b841b04212cbe2275683d486b62243022fdded02f6dc16ab01400b8d9502fbe
   UPGRADING.md: 7f7463f8fea597447ada0530dfc0c4a8019c667a471235572ffaa0dc1fdbe4f4
   bundle-info.yaml: a9bad5d4c86366be597963a0cbd1aceb4edbbcbbaf9f9db79df9de3b7e3ffa99
-  checksums.txt: d7f1a54566b47442ea70b6984418db9d2fbceb17d5f816018bb46a8490555ca4
+  checksums.txt: d9ef041882386c7d7ddbe596bbc0876e6d27bd72c38f759c0d77eb10b9c86bcc
   deploy.sh: 36bd61e7655fc91a4e39622a4e8fbc6eb0a9fb847e9c3299972e7d74f856a798
   recipe.yaml: c747422bd12bd717d05cde921d08c306f2859723c549e739d6ed39a91f1eba51
 bcm-inference:
@@ -1550,7 +1550,7 @@ gb200-nvke-ubuntu-training-kubeflow:
   015-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
   015-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
-  015-network-operator-post/templates/nic-cluster-policy-nvke-gb200.yaml: 5da88c6ef85c59f83a4410ea16f728b692cc219efe742063177a94d808477814
+  015-network-operator-post/templates/nic-cluster-policy-nvke-gb200.yaml: 36448d661f0a72c1216a61c6d37b23653449a52dc33a170f646c7ee93e461c5b
   015-network-operator-post/values.yaml: e9d6f1481a61bac0626eecd824ba302bde4ea1258648b8bfd0fd8ca6a96330fc
   016-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
@@ -1569,7 +1569,7 @@ gb200-nvke-ubuntu-training-kubeflow:
   README.md: 62d8c60303edcc160344c438434f610be8c35d76f5c196f7bf1dd5f7104b325f
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: eaef9ec3c482a84add8dface16eefbad51b8535419d64ffbad9b2238ebdf2589
-  checksums.txt: 6e6efe279dc8a27ec55d08c6bf5df30a84946d40577464a02c7353f317847035
+  checksums.txt: 308c1730835c8a055dcf8d5105a43b6223c20ecfd1bc4e559a7689d92b11418a
   deploy.sh: 7d5e92b02a59bef508ee433e801875d4e7ed9c4b7e0a352658f0d768af99c067
   recipe.yaml: 2c289fc1b6123d579b520f258d002393beacc0de78ed4651eb26a3b3c004cb61
 gb200-oke-ubuntu-inference-dynamo:
@@ -1705,7 +1705,7 @@ gb200-oke-ubuntu-training-kubeflow:
   013-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
   013-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
-  013-network-operator-post/templates/nic-cluster-policy-oke-gb200.yaml: 3775faa195570fc7c2e3b822a5cf4ecfcc689cd4173411948e0b7081c47d0618
+  013-network-operator-post/templates/nic-cluster-policy-oke-gb200.yaml: 5b08d6c1fdab3857eb19f6bde4f11613d9c78e7849d2ab7d141e998d8fdcad41
   013-network-operator-post/values.yaml: f4f86a8650429b79283247cdaf95aadfd0d4ba5a9ce8546ace51f331c871ffdb
   014-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
@@ -1723,7 +1723,7 @@ gb200-oke-ubuntu-training-kubeflow:
   README.md: 03ad59ca77386009a6c5d260794dc3f1c63ed3a9e35f1721b54c5fc9fb48140e
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: 2d6406b46ae72dfb27639def27f84250d9d5516caba81b3fbb441cf6604b6212
-  checksums.txt: f00ba51d34f98c19e4f2292b9b2d71dfe197e18c313b05ea1e334ec52baff4c9
+  checksums.txt: 8828c60cd77f1a7cbad4f5f244f5f4a2b5d71874cc19aad22f328fee45b0ac71
   deploy.sh: 585028988d2cdbd7fad24e6a6aa04e416399fb8c675ac560c1ea2cf01e76def6
   recipe.yaml: ef4ff39e09f60a29e6ff14959c315b17c1f29ae1f04337e8343817b51b8f44b9
 gb300-any:
@@ -2171,7 +2171,7 @@ gb300-generic-ubuntu-training:
   011-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
   011-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
-  011-network-operator-post/templates/nic-cluster-policy-generic-gb300.yaml: d080600ad1bd75afd2dfaea94e451a4e4326e546b221b67ef2f9de5f88dc450b
+  011-network-operator-post/templates/nic-cluster-policy-generic-gb300.yaml: 90cb5d73048581aa0afe7fc2829dbd3a0bb148ec04c2e09333eeac883118def8
   011-network-operator-post/values.yaml: de3ebf448a35136a59892435b6e243fb8790d2f52134e3e0f09a63baf3e1706c
   012-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
@@ -2189,7 +2189,7 @@ gb300-generic-ubuntu-training:
   README.md: 726ddf5493203ba35872f5227e485ba6625d9a4e77a98480c3c4791c34eca617
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: cf3b673bee578d64e35030c9ac25a904e0d49e82720853e631f253bd5cfe8435
-  checksums.txt: 31944f7d0d669c073c9e0e44a9bf19f4029c20865acbe4e52d938101d3f447f3
+  checksums.txt: 3146df79059b3bd10dd8824a81ffe25330239591de91950691c030fb0fc865d2
   deploy.sh: 4196d34c287d2bdc2086c77410c18acfc254f60a86d60cc8d6ba400e4837f3b0
   recipe.yaml: 2a1eb3d77d7356d68301057c3b4c261d1f1a9ad6a28ee5ab1dbfb0d5f00fef91
 gb300-gke-cos-inference-dynamo:
@@ -2422,7 +2422,7 @@ h100-aks-ubuntu-inference-dynamo:
   014-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
   014-network-operator-post/templates/nfd-network-rule.yaml: 8ab7f572705ba9be8b0057954fbb7e918be7590e4360bee8c8fdaa1e909d08a1
-  014-network-operator-post/templates/nic-cluster-policy-aks.yaml: ed3226b248994b8ab6ad69f6762fb5caba304e56fa59532586af4174524e20b4
+  014-network-operator-post/templates/nic-cluster-policy-aks.yaml: 288bdff5cb57fadaf4b686fddfd62e8d5f0c687852d1dd4aeff87500c1988b37
   014-network-operator-post/templates/nvidia-peermem-reloader.yaml: 0f5e1719cde9230b5bc05175b58fa0695965dbc3fbe20f7662378e9c86c3ec3d
   014-network-operator-post/values.yaml: e63dfe21cdad75cb78b6b02f6f75f05eba527e3bb7cec75be2b197cd2ab0494c
   015-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -2453,7 +2453,7 @@ h100-aks-ubuntu-inference-dynamo:
   README.md: 24bdea0063f60d897177f122e7b150398178ec1123cfe673572660612ed64506
   UPGRADING.md: 6cb67acfd9eb81979395397faf676cb48343ed293f73b7354d23a6b540a75a84
   bundle-info.yaml: b8fc0ae34f85969e73c293dbd739a74cb00262487249d210874c471aa97a04e6
-  checksums.txt: e7b7a88ab27d036091ef096809b3c1fd570f68a927e2d6b9512df3543442b2de
+  checksums.txt: b83297f2b4e828560c553d13128d4d0bc53fd9fa720304f96421b5b638038bc4
   deploy.sh: 1a78677ffdf4ba1f861de19dbb30bffaab64b77aa62b48a87bd929a564bce55a
   recipe.yaml: d33785305722e37b8f1898d2dadd855d51baff16d278018c2415573c1d16ccc8
 h100-aks-ubuntu-training-kubeflow:
@@ -2495,7 +2495,7 @@ h100-aks-ubuntu-training-kubeflow:
   009-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
   009-network-operator-post/templates/nfd-network-rule.yaml: 8ab7f572705ba9be8b0057954fbb7e918be7590e4360bee8c8fdaa1e909d08a1
-  009-network-operator-post/templates/nic-cluster-policy-aks.yaml: ed3226b248994b8ab6ad69f6762fb5caba304e56fa59532586af4174524e20b4
+  009-network-operator-post/templates/nic-cluster-policy-aks.yaml: 288bdff5cb57fadaf4b686fddfd62e8d5f0c687852d1dd4aeff87500c1988b37
   009-network-operator-post/templates/nvidia-peermem-reloader.yaml: 0f5e1719cde9230b5bc05175b58fa0695965dbc3fbe20f7662378e9c86c3ec3d
   009-network-operator-post/values.yaml: e63dfe21cdad75cb78b6b02f6f75f05eba527e3bb7cec75be2b197cd2ab0494c
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -2531,7 +2531,7 @@ h100-aks-ubuntu-training-kubeflow:
   README.md: 60563666a4b43638bc2bdc91d62178ac5af5ac4c074013bca94dbbf40dea6eb3
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: 54dd45d05bd74dd3d3dadf4df31577cdfbe075e5b20cca7983cd38abba3eec77
-  checksums.txt: eceaa7e831d4fd16a74aba5e53a2a94c05f2cf0e406ca31f8afb43ed73c6735f
+  checksums.txt: 42ee62a2138316c728953c6f5e194d88d0b08fbec417fcc54ae63ae5bcf4dd89
   deploy.sh: cfb12fbb4315ebaadd1378f55f81e866e9f5faaa909b57e569bab1c0ce558c0b
   recipe.yaml: 7a013738827513c7cc7378cb4f460ef624e8b082fa79b6bf3ce10ea3e881db38
 h100-aks-ubuntu-training-slurm:
@@ -2573,7 +2573,7 @@ h100-aks-ubuntu-training-slurm:
   009-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
   009-network-operator-post/templates/nfd-network-rule.yaml: 8ab7f572705ba9be8b0057954fbb7e918be7590e4360bee8c8fdaa1e909d08a1
-  009-network-operator-post/templates/nic-cluster-policy-aks.yaml: ed3226b248994b8ab6ad69f6762fb5caba304e56fa59532586af4174524e20b4
+  009-network-operator-post/templates/nic-cluster-policy-aks.yaml: 288bdff5cb57fadaf4b686fddfd62e8d5f0c687852d1dd4aeff87500c1988b37
   009-network-operator-post/templates/nvidia-peermem-reloader.yaml: 0f5e1719cde9230b5bc05175b58fa0695965dbc3fbe20f7662378e9c86c3ec3d
   009-network-operator-post/values.yaml: e63dfe21cdad75cb78b6b02f6f75f05eba527e3bb7cec75be2b197cd2ab0494c
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -2617,7 +2617,7 @@ h100-aks-ubuntu-training-slurm:
   README.md: 90a517b7f31013030d5e3f5fae79baa5f7eb025eea88366af966238df674ed56
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: 4a3d6318a947e2e8c08477232105a21561d71dfb5e94155221dd4145ff142ef6
-  checksums.txt: 935eb05378f42f5e08661630bc6b91cd402a0223468d5ef0ec2fa261a30f9fe6
+  checksums.txt: 4a403c5274825895acc5daded57e39d030b8181cf678ec75553b862b2d71f2b3
   deploy.sh: 8d85df5a2b5665074cf1efa1980f5b1de87dc8be91f8c6c7ae5132aef410cabc
   recipe.yaml: d9238200083d9495dd82935db844d3e8ebab46bf8edec1e9f30cdc0d3f33f657
 h100-any:
@@ -5000,7 +5000,7 @@ l40s-oke-training-kubeflow:
   012-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
   012-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
-  012-network-operator-post/templates/nic-cluster-policy-oke-l40s.yaml: 14e3d752c91bf0ec920c85c2162b320022a7adcc1d0eac782087ae87aa981a44
+  012-network-operator-post/templates/nic-cluster-policy-oke-l40s.yaml: feba79c4c2105d7d477d31c4b0197b71a6b0d62a3afba3cd41f28cd7a8998a5d
   012-network-operator-post/values.yaml: f4f86a8650429b79283247cdaf95aadfd0d4ba5a9ce8546ace51f331c871ffdb
   013-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
@@ -5018,7 +5018,7 @@ l40s-oke-training-kubeflow:
   README.md: 3e2b59c43613c58b08e98606c49d6bce38fec608fde46d55beef23888beccd92
   UPGRADING.md: 388e46186a87914ab289ac013a7f93a09f5cf2f7ab18056723ceb9b6c393023f
   bundle-info.yaml: 8bca3da966c941e677e32e038a0ca96a6c15999f9db50b30cd328f2730aff675
-  checksums.txt: 65763143e4efc4669a59ffd2fc10f740535e992b296ba5a4ac189120b285d1e6
+  checksums.txt: 8086af6a13b8be6a3cfb101275c9ad8cc2b058703cddfa7111a05613c469ce9f
   deploy.sh: 585028988d2cdbd7fad24e6a6aa04e416399fb8c675ac560c1ea2cf01e76def6
   recipe.yaml: 29456c049ecdcfd77fb0ec6b5bd11e07e3604f2a6834e35c8abb8996c2c56b1d
 monitoring-hpa:

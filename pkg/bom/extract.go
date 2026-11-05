@@ -80,6 +80,14 @@ func stripHelmTemplates(data []byte) []byte {
 // non-empty digest is validated as sha256:<64 lowercase hex chars> and folded
 // in as an @<digest> suffix.
 //
+// CRD-style siblings (NicClusterPolicy, Skyhook Package) are recognized too:
+// an `image` with optional `repository` and `version`, where a `containerSHA`,
+// or a `version` that starts with `sha256:`, supplies the digest. That digest
+// returns the same invalid-request error when it is not
+// sha256:<64 lowercase hex chars>, or when a digest `version` and a
+// `containerSHA` are both set. A digest holding an unresolved Helm value is
+// treated as absent.
+//
 // A scalar that is itself a serialized YAML document is also recursed into,
 // e.g. a ConfigMap data value embedding a whole manifest.
 //
@@ -124,10 +132,12 @@ func walkForImages(n *yaml.Node, seen map[string]struct{}) error {
 		// `image:` value). Without this, the bare `image: doca-driver` part
 		// looks like an untagged image when in fact `repository` and
 		// `version` siblings carry the registry and tag. A sibling
-		// `containerSHA` (Skyhook Package CRD; ghcr.io/nvidia/nodewright)
+		// `containerSHA` (Skyhook Package CRD; ghcr.io/nvidia/nodewright),
+		// or a `version` that is itself a digest (NicClusterPolicy),
 		// supplies the OCI digest and is folded in as `@<sha>`.
 		var (
 			imgScalar, repoScalar, verScalar, shaScalar string
+			verNode, shaNode                            *yaml.Node
 			imgMappings                                 []*yaml.Node
 		)
 		for i := 0; i+1 < len(n.Content); i += 2 {
@@ -149,9 +159,9 @@ func walkForImages(n *yaml.Node, seen map[string]struct{}) error {
 			case imageRepositoryKey:
 				repoScalar = strings.TrimSpace(target.Value)
 			case "version":
-				verScalar = strings.TrimSpace(target.Value)
+				verScalar, verNode = strings.TrimSpace(target.Value), target
 			case "containerSHA":
-				shaScalar = strings.TrimSpace(target.Value)
+				shaScalar, shaNode = strings.TrimSpace(target.Value), target
 			}
 		}
 		for _, imgMapping := range imgMappings {
@@ -164,13 +174,23 @@ func walkForImages(n *yaml.Node, seen map[string]struct{}) error {
 			}
 		}
 		if imgScalar != "" {
+			digestField, digest, digestNode := "containerSHA", shaScalar, shaNode
+			// NicClusterPolicy also takes a digest in place of the tag:
+			// network-operator renders `version: sha256:<hex>` as
+			// <repository>/<image>@sha256:<hex> (the OFED driver from 25.10).
+			if strings.HasPrefix(verScalar, "sha256:") {
+				if shaScalar != "" {
+					return invalidDescriptorMember("version", verNode, "is a digest while containerSHA is also set")
+				}
+				digestField, digest, digestNode, verScalar = "version", verScalar, verNode, ""
+			}
 			combined := combineCRDTriplet(imgScalar, repoScalar, verScalar)
-			withSHA, err := appendContainerSHA(combined, shaScalar)
+			withDigest, err := appendCRDDigest(combined, digestField, digest, digestNode)
 			if err != nil {
 				return err
 			}
-			if isLikelyImage(withSHA) {
-				seen[withSHA] = struct{}{}
+			if isLikelyImage(withDigest) {
+				seen[withDigest] = struct{}{}
 			}
 		}
 
@@ -376,8 +396,11 @@ func (e *invalidStructuredImageDescriptorError) Error() string {
 }
 
 // IsInvalidStructuredImageDescriptor reports whether err was caused by a
-// recognized mapping-valued image descriptor whose name, repository, or tag
-// field was present but null, empty, or non-scalar.
+// malformed member of a recognized image descriptor: in a mapping-valued
+// descriptor, a name, repository, or tag field that was present but null,
+// empty, or non-scalar, or a malformed digest; among CRD-style siblings, a
+// `containerSHA` or digest `version` that is not
+// sha256:<64 lowercase hex chars>, or both set together.
 func IsInvalidStructuredImageDescriptor(err error) bool {
 	var target *invalidStructuredImageDescriptorError
 	return stderrors.As(err, &target)
@@ -419,38 +442,58 @@ func combineCRDTriplet(image, repository, version string) string {
 // containerSHARE matches a well-formed sha256 OCI digest payload
 // (`sha256:` + 64 lowercase hex chars). The recipes/ digest-pin test
 // uses the same shape downstream; validating at extraction time means
-// a bogus `containerSHA` fails fast at BOM render rather than silently
-// shipping a malformed ref into the SBOM/PURL output.
+// a bogus digest in `containerSHA` or a digest `version` fails fast at
+// BOM render rather than silently shipping a malformed ref into the
+// SBOM/PURL output.
 var containerSHARE = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 
-// appendContainerSHA folds a sibling `containerSHA` value onto a
-// CRD-style combined image ref as an `@<digest>` suffix. The Skyhook
-// Package CRD carries the OCI digest in a separate `containerSHA`
-// scalar (e.g., `containerSHA: sha256:<hex>`) rather than splicing it
-// into the `image` value, so the extractor has to merge them.
+// appendCRDDigest folds a digest carried in a sibling CRD field onto a
+// CRD-style combined image ref as an `@<digest>` suffix. field names the
+// sibling it came from: `containerSHA` (Skyhook Package CRD) or `version`
+// (NicClusterPolicy, which accepts a digest in place of the tag), and node is
+// that field's value. Neither CRD splices the digest into the `image` value,
+// so the extractor has to merge them.
 //
 // Behavior:
-//   - Empty `sha` → returned image unchanged.
+//   - Empty `digest`, or one holding an unresolved Helm value (the
+//     stripHelmTemplates placeholder) → returned image unchanged; the
+//     digest is filled in at render time, so there is nothing to check.
+//   - `digest` does not match `^sha256:[a-f0-9]{64}$` → an
+//     invalidStructuredImageDescriptorError, even when the image is already
+//     pinned in-line. This is the fail-loud guard: a malformed digest (typo,
+//     truncation, or a user-supplied value override that lands in the CRD)
+//     must not silently propagate into the BOM, PURL, or SBOM output.
 //   - Image already carries an `@`-digest → returned unchanged (the
 //     in-line digest wins; we do not silently overwrite).
-//   - `sha` does not match `^sha256:[a-f0-9]{64}$` → error. This is
-//     the fail-loud guard: a malformed digest (typo, truncation, or
-//     a user-supplied value override that lands in a Skyhook Package)
-//     must not silently propagate into the BOM, PURL, or SBOM output.
-//   - Otherwise the digest is appended as `image@sha`, preserving any
+//   - Otherwise the digest is appended as `image@digest`, preserving any
 //     tag already present (e.g., `repo:0.1.2@sha256:abc…`).
-func appendContainerSHA(image, sha string) (string, error) {
-	if sha == "" {
+func appendCRDDigest(image, field, digest string, node *yaml.Node) (string, error) {
+	if digest == "" || strings.Contains(digest, helmTemplatePlaceholder) {
 		return image, nil
+	}
+	if !containerSHARE.MatchString(digest) {
+		return "", invalidDescriptorMember(field, node,
+			fmt.Sprintf("must match sha256:<64 lowercase hex chars>, got %q", digest))
 	}
 	if strings.Contains(image, "@") {
 		return image, nil
 	}
-	if !containerSHARE.MatchString(sha) {
-		return "", errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid containerSHA %q for image %q: expected sha256:<64 lowercase hex chars>", sha, image))
-	}
-	return image + "@" + sha, nil
+	return image + "@" + digest, nil
+}
+
+// invalidDescriptorMember reports a malformed image field at node's position
+// as an invalidStructuredImageDescriptorError.
+func invalidDescriptorMember(field string, node *yaml.Node, reason string) error {
+	return errors.Wrap(
+		errors.ErrCodeInvalidRequest,
+		"invalid image descriptor member",
+		&invalidStructuredImageDescriptorError{
+			field:  field,
+			line:   node.Line,
+			column: node.Column,
+			reason: reason,
+		},
+	)
 }
 
 func isLikelyImage(v string) bool {

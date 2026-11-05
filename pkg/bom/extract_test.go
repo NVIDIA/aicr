@@ -177,6 +177,27 @@ spec:
 			},
 		},
 		{
+			// network-operator renders a `version: sha256:<hex>` as
+			// <repository>/<image>@sha256:<hex>, the OFED driver from 25.10.
+			name: "CRD triplet with a digest version joins it with @",
+			in: `apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+spec:
+  ofedDriver:
+    repository: nvcr.io/nvidia/mellanox
+    image: doca-driver
+    version: sha256:9a831bfdf85f313b1f5749b7c9b2673bb8fff18b4ff768c9242dabaa4468e449
+  rdmaSharedDevicePlugin:
+    image: k8s-rdma-shared-dev-plugin
+    repository: nvcr.io/nvidia/mellanox
+    version: sha256:2d28133fdee8c263e19b4d0656bf58d30513c9d13e47ef84bd68c5499b3c18ce
+`,
+			want: []string{
+				"nvcr.io/nvidia/mellanox/doca-driver@sha256:9a831bfdf85f313b1f5749b7c9b2673bb8fff18b4ff768c9242dabaa4468e449",
+				"nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:2d28133fdee8c263e19b4d0656bf58d30513c9d13e47ef84bd68c5499b3c18ce",
+			},
+		},
+		{
 			name: "CRD-style pair with image and version siblings (no repository)",
 			in: `spec:
   packages:
@@ -223,6 +244,26 @@ spec:
       containerSHA: sha256:0000000000000000000000000000000000000000000000000000000000000000
 `,
 			want: []string{
+				"ghcr.io/nvidia/nodewright-packages/nvidia-tuned@sha256:cc99c8c0675f3752f5081f0978ae57174368952ca0bb5fcac07640fe62c156c7",
+			},
+		},
+		{
+			// A Helm value fills the digest in at render time, so it is not a
+			// malformed digest: an in-line pin still wins, and without one the
+			// tagged reference is all the survey can record.
+			name: "unresolved Helm containerSHA is not validated",
+			in: `spec:
+  packages:
+    pinned:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned@sha256:cc99c8c0675f3752f5081f0978ae57174368952ca0bb5fcac07640fe62c156c7
+      containerSHA: "{{ .Values.tunedDigest }}"
+    templated:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-setup
+      version: "0.10.0"
+      containerSHA: {{ .Values.setupDigest }}
+`,
+			want: []string{
+				"ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.10.0",
 				"ghcr.io/nvidia/nodewright-packages/nvidia-tuned@sha256:cc99c8c0675f3752f5081f0978ae57174368952ca0bb5fcac07640fe62c156c7",
 			},
 		},
@@ -584,14 +625,14 @@ spec:
 	}
 }
 
-// TestExtractImagesFromYAML_InvalidContainerSHA exercises the fail-loud
-// guard in appendContainerSHA: any sibling `containerSHA` that does not
-// match `^sha256:[a-f0-9]{64}$` must surface as an extraction error so
-// a typo, truncation, or value-override slip cannot silently ship a
-// malformed digest into the BOM/PURL output. The recipes/ digest-pin
-// test enforces the same shape downstream; rejecting here just moves
-// the failure earlier where the offending line is in scope.
-func TestExtractImagesFromYAML_InvalidContainerSHA(t *testing.T) {
+// TestExtractImagesFromYAML_InvalidCRDDigest exercises the fail-loud
+// guard for digests held in CRD sibling fields: a `containerSHA`, or a
+// `version` that starts with `sha256:`, that does not match
+// `^sha256:[a-f0-9]{64}$` must surface as an
+// invalidStructuredImageDescriptorError. Mirror discovery, the BOM survey
+// and embedded-YAML scalars fail closed only on that error class; any other
+// error is downgraded to a warning and the manifest's images are dropped.
+func TestExtractImagesFromYAML_InvalidCRDDigest(t *testing.T) {
 	tests := []struct {
 		name    string
 		in      string
@@ -606,7 +647,7 @@ func TestExtractImagesFromYAML_InvalidContainerSHA(t *testing.T) {
       version: "0.3.0"
       containerSHA: not-a-digest
 `,
-			wantSub: `invalid containerSHA "not-a-digest"`,
+			wantSub: `field "containerSHA" at line 6, column 21 must match sha256:<64 lowercase hex chars>, got "not-a-digest"`,
 		},
 		{
 			name: "sha256 prefix but short hex",
@@ -617,7 +658,7 @@ func TestExtractImagesFromYAML_InvalidContainerSHA(t *testing.T) {
       version: "0.3.0"
       containerSHA: sha256:abc123
 `,
-			wantSub: `invalid containerSHA "sha256:abc123"`,
+			wantSub: `field "containerSHA" at line 6, column 21 must match sha256:<64 lowercase hex chars>, got "sha256:abc123"`,
 		},
 		{
 			name: "sha256 prefix but uppercase hex (OCI digest is lowercase)",
@@ -628,17 +669,79 @@ func TestExtractImagesFromYAML_InvalidContainerSHA(t *testing.T) {
       version: "0.3.0"
       containerSHA: sha256:CC99C8C0675F3752F5081F0978AE57174368952CA0BB5FCAC07640FE62C156C7
 `,
-			wantSub: `invalid containerSHA`,
+			wantSub: `field "containerSHA" at line 6, column 21`,
+		},
+		{
+			name: "digest version with short hex",
+			in: `spec:
+  rdmaSharedDevicePlugin:
+    image: k8s-rdma-shared-dev-plugin
+    repository: nvcr.io/nvidia/mellanox
+    version: sha256:abc123
+`,
+			wantSub: `field "version" at line 5, column 14 must match sha256:<64 lowercase hex chars>, got "sha256:abc123"`,
+		},
+		{
+			name: "digest version with uppercase hex",
+			in: `spec:
+  rdmaSharedDevicePlugin:
+    image: k8s-rdma-shared-dev-plugin
+    repository: nvcr.io/nvidia/mellanox
+    version: sha256:2D28133FDEE8C263E19B4D0656BF58D30513C9D13E47EF84BD68C5499B3C18CE
+`,
+			wantSub: `field "version" at line 5, column 14`,
+		},
+		{
+			name: "digest version alongside containerSHA",
+			in: `spec:
+  packages:
+    pkg:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
+      version: sha256:cc99c8c0675f3752f5081f0978ae57174368952ca0bb5fcac07640fe62c156c7
+      containerSHA: sha256:cc99c8c0675f3752f5081f0978ae57174368952ca0bb5fcac07640fe62c156c7
+`,
+			wantSub: `field "version" at line 5, column 16 is a digest while containerSHA is also set`,
+		},
+		{
+			// An inline @digest in image still wins over a well-formed
+			// sibling digest, but a malformed one is rejected, not skipped.
+			name: "malformed digest version beside an inline-pinned image",
+			in: `spec:
+  rdmaSharedDevicePlugin:
+    repository: nvcr.io/nvidia/mellanox
+    image: k8s-rdma-shared-dev-plugin@sha256:2d28133fdee8c263e19b4d0656bf58d30513c9d13e47ef84bd68c5499b3c18ce
+    version: sha256:abc123
+`,
+			wantSub: `field "version" at line 5, column 14`,
+		},
+		{
+			// walkEmbeddedYAMLScalar propagates only descriptor errors, so a
+			// plain error here would vanish without even a warning.
+			name: "malformed digest version inside an embedded YAML scalar",
+			in: `apiVersion: v1
+kind: ConfigMap
+data:
+  policy.yaml: |
+    spec:
+      rdmaSharedDevicePlugin:
+        image: k8s-rdma-shared-dev-plugin
+        repository: nvcr.io/nvidia/mellanox
+        version: sha256:abc123
+`,
+			wantSub: `field "version" at line 5, column 14`,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := ExtractImagesFromYAML([]byte(tt.in))
 			if err == nil {
-				t.Fatal("expected error for malformed containerSHA")
+				t.Fatal("expected error for malformed CRD digest")
 			}
 			if !strings.Contains(err.Error(), tt.wantSub) {
 				t.Errorf("error %q does not contain %q", err.Error(), tt.wantSub)
+			}
+			if !IsInvalidStructuredImageDescriptor(err) {
+				t.Errorf("error %v is not an invalid structured image descriptor; callers would downgrade it to a warning", err)
 			}
 		})
 	}
