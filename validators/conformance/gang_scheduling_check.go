@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -317,7 +318,7 @@ func CheckGangScheduling(ctx *validators.Context) error {
 	if err != nil {
 		outcomes[gangPhasePositive].Status = "FAIL"
 		outcomes[gangPhasePositive].Detail = err.Error()
-		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "positive phase failed")
+		return wrapGangPhase(err, "positive phase failed")
 	}
 	outcomes[gangPhasePositive].Status = "PASS"
 	outcomes[gangPhasePositive].Detail = fmt.Sprintf(
@@ -329,7 +330,7 @@ func CheckGangScheduling(ctx *validators.Context) error {
 	if err != nil {
 		outcomes[gangPhaseNegative].Status = "FAIL"
 		outcomes[gangPhaseNegative].Detail = err.Error()
-		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "negative phase failed")
+		return wrapGangPhase(err, "negative phase failed")
 	}
 	outcomes[gangPhaseNegative].Status = "PASS"
 	outcomes[gangPhaseNegative].Detail = fmt.Sprintf(
@@ -359,6 +360,16 @@ func createGangTestNamespace(ctx context.Context, clientset kubernetes.Interface
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
 	}
 	return nil
+}
+
+// wrapGangPhase names the failed phase in the CTRF message while keeping the
+// phase error's code: PropagateOrWrap would return a structured error
+// unchanged, dropping the phase name.
+func wrapGangPhase(err error, phase string) error {
+	if se, ok := stderrors.AsType[*errors.StructuredError](err); ok {
+		return errors.Wrap(se.Code, phase, err)
+	}
+	return errors.Wrap(errors.ErrCodeInternal, phase, err)
 }
 
 // runGangPositivePhase deploys the fitting PodGroup and verifies every member

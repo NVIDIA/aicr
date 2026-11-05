@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -812,5 +813,27 @@ func TestCleanupGangTestResourcesDeletesNegativeMembers(t *testing.T) {
 		if _, err := dynClient.Resource(podGroupGVR).Namespace(run.namespace).Get(context.Background(), group, metav1.GetOptions{}); err == nil {
 			t.Errorf("PodGroup %s still present after cleanup", group)
 		}
+	}
+}
+
+func TestWrapGangPhase(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		err      error
+		wantCode errors.ErrorCode
+	}{
+		{"structured error keeps its code", errors.New(errors.ErrCodeUnavailable, "no nodes"), errors.ErrCodeUnavailable},
+		{"plain error gets ErrCodeInternal", stderrors.New("boom"), errors.ErrCodeInternal},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := wrapGangPhase(tt.err, "negative phase failed")
+			errorstest.WantReportedCode(t, got, tt.wantCode)
+			if !strings.Contains(got.Error(), "negative phase failed") || !strings.Contains(got.Error(), tt.err.Error()) {
+				t.Errorf("message = %q, want the phase and the cause", got.Error())
+			}
+		})
 	}
 }

@@ -284,9 +284,9 @@ primary and sufficient oracle: KAI writes it for any number of fitting members,
 zero included, and a scheduler without gang semantics never writes it.
 Bound-pod detection is a second, fail-fast signal available only where at
 least one member fits an eligible node (heterogeneous clusters, where the
-per-member request is below the largest node); on homogeneous clusters, and
-wherever the 16-member cap applies, no member fits any node, no scheduler binds
-anything, and the check relies on the refusal condition alone. Members associate to their
+per-member request is below the largest node); on homogeneous clusters no
+member fits any node, no scheduler binds anything, and the check relies on the
+refusal condition alone. Members associate to their
 PodGroup through the `pod-group-name` annotation; the
 `pod-group.scheduling.run.ai/*` labels alone do not associate (KAI's
 pod-grouper ignores them and creates per-pod groups). No GPU is requested in
