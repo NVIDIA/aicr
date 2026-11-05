@@ -296,55 +296,6 @@ func TestTruncateLines(t *testing.T) {
 	}
 }
 
-func TestContainsAllMetrics(t *testing.T) {
-	tests := []struct {
-		name     string
-		text     string
-		required []string
-		wantLen  int
-	}{
-		{
-			name:     "all present",
-			text:     "metric_a 1\nmetric_b 2\nmetric_c 3",
-			required: []string{"metric_a", "metric_b", "metric_c"},
-			wantLen:  0,
-		},
-		{
-			name:     "some missing",
-			text:     "metric_a 1\nmetric_c 3",
-			required: []string{"metric_a", "metric_b", "metric_c"},
-			wantLen:  1,
-		},
-		{
-			name:     "empty text",
-			text:     "",
-			required: []string{"metric_a"},
-			wantLen:  1,
-		},
-		{
-			name:     "empty required list",
-			text:     "anything here",
-			required: nil,
-			wantLen:  0,
-		},
-		{
-			name:     "all missing",
-			text:     "unrelated output",
-			required: []string{"metric_a", "metric_b"},
-			wantLen:  2,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			missing := containsAllMetrics(tt.text, tt.required)
-			if len(missing) != tt.wantLen {
-				t.Errorf("containsAllMetrics() returned %d missing, want %d; missing=%v",
-					len(missing), tt.wantLen, missing)
-			}
-		})
-	}
-}
-
 func TestRecordArtifact(t *testing.T) {
 	t.Parallel()
 	// Verify recordArtifact and recordRawTextArtifact do not panic.

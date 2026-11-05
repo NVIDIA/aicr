@@ -45,6 +45,8 @@ func TestGPUCheckWorkBudgetsFitCatalogTimeouts(t *testing.T) {
 	budgets := map[string]time.Duration{
 		"dra-support":               draSupportWorkBudget,
 		"secure-accelerator-access": secureAccessWorkBudget,
+		"pod-autoscaling":           podAutoscalingWorkBudget,
+		"ai-service-metrics":        aiServiceMetricsWorkBudget,
 	}
 	seen := map[string]bool{}
 	for _, v := range cat.Validators {
