@@ -59,7 +59,20 @@ off rather than running it with nothing to act on.
 **Host NIC stack.** The node image installs DOCA OVS and the DOCA-repo `ibverbs`
 userspace, but the kernel driver is the distribution's inbox `mlx5_core`, not
 DOCA-OFED. Feature parity and qualified RDMA performance with DOCA-OFED are not
-claimed.
+claimed. Measured on both workers of the reference cluster, identical on each:
+
+- Kernel driver: inbox `mlx5_core`, vermagic `7.0.0-2022-nvidia-bos-64k`.
+  `modinfo` reports no `version:` field, which is how an in-tree module
+  presents, and `ethtool -i` echoes the kernel version rather than an OFED
+  release.
+- Kernel: `linux-image-nvidia-bos-64k` 7.0.0-2022.23, Ubuntu 26.04.1 LTS.
+- RDMA userspace: `libibverbs1` and `ibverbs-providers` both 2607.0.8-1.
+  Neither `rdma-core` nor `librdmacm` is installed.
+- NIC firmware: 82.48.4222 (PSID MT_0000001658) on the eight ConnectX-9 ports,
+  82.48.4238 (MT_0000001875) on the BlueField ports.
+- `ofed_info` is absent, confirming no DOCA-OFED install.
+
+That is the fixed baseline the unqualified label above is measured against.
 
 **No NicClusterPolicy is deployed.** The leaf inherits `deployCR: false` and
 supplies no policy manifest, so the bundle installs none. It was removed

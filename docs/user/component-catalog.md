@@ -75,7 +75,7 @@ Every component has a bundle class, `core` or `ops` ([ADR-018](https://github.co
 
 ## VR200 Preview coverage
 
-> **`service=rke2` and `service=nvke` with `accelerator=vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. Published validation evidence exists for all four coordinates at [validation.aicr.run](https://validation.aicr.run/); freshness against the current recipe is captured in the **Evidence status** note below.
+> **`service=rke2` and `service=nvke` with `accelerator=vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. Published validation evidence exists for the four RKE2 coordinates at [validation.aicr.run](https://validation.aicr.run/); none is published yet for the NVKE coordinate. Freshness against the current recipe is captured in the **Evidence status** note below.
 
 Five coordinates ship in v1 — four on RKE2 and one on NVKE:
 
