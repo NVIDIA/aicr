@@ -172,6 +172,40 @@ func TestBuildSummaryComponents(t *testing.T) {
 	}
 }
 
+func TestBuildSummaryOmitsDisabledComponents(t *testing.T) {
+	refs := []ComponentRef{
+		{Name: "cert-manager", Overrides: map[string]any{"enabled": false}},
+		{Name: "nfd", Overrides: map[string]any{"install": false}},
+		{Name: "gpu-operator", DependencyRefs: []string{"cert-manager", "nfd", "external-crds"}},
+		{Name: "kai-scheduler", Overrides: map[string]any{"enabled": true}, DependencyRefs: []string{"gpu-operator", "nfd"}},
+	}
+	want := []SummaryComponent{
+		// The undeclared dependency stays; edges to disabled components are pruned.
+		{Name: "gpu-operator", DependsOn: []string{"external-crds"}},
+		{Name: "kai-scheduler", DependsOn: []string{"gpu-operator"}},
+	}
+
+	tests := []struct {
+		name  string
+		order []string
+	}{
+		{name: "deployment order of enabled components", order: []string{"gpu-operator", "kai-scheduler"}},
+		{name: "disabled names in the order are skipped", order: []string{"nfd", "gpu-operator", "cert-manager", "kai-scheduler"}},
+		{name: "no deployment order", order: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := BuildSummary(&RecipeResult{ComponentRefs: refs, DeploymentOrder: tt.order})
+			if err != nil {
+				t.Fatalf("BuildSummary() error = %v", err)
+			}
+			if !reflect.DeepEqual(got.Components, want) {
+				t.Errorf("Components = %+v, want %+v", got.Components, want)
+			}
+		})
+	}
+}
+
 func TestBuildSummaryDoesNotAliasRecipe(t *testing.T) {
 	r := &RecipeResult{
 		Metadata:      RecipeResultMetadata{AppliedOverlays: []string{"base"}},

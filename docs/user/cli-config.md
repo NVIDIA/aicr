@@ -287,7 +287,7 @@ exclusive** — query by criteria or derive from a snapshot, not both.
 | `output.format` | string | `yaml` \| `json` \| `table` |
 | `data` | string | Data-overlay directory/archive (same as `--data`) |
 | `criteriaStrict` | bool (tri-state) | Reject criteria values outside the embedded catalog; mirrors `--criteria-strict` / `AICR_CRITERIA_STRICT` (any of the three enables it) |
-| `requireEvidence` | bool (tri-state) | Reject a resolved recipe with no committed evidence pointer; mirrors `--require-evidence` / `AICR_REQUIRE_EVIDENCE` (any of the three enables it). A false value does not turn off an environment value that is already on. A resolve that uses `data` or `--data` fails, even when the leaf overlay stays embedded. Applies to `aicr recipe` and `aicr query` |
+| `requireEvidence` | bool (tri-state) | Reject a resolved recipe with no committed evidence pointer; mirrors `--require-evidence` / `AICR_REQUIRE_EVIDENCE` (any of the three enables it). A false value does not turn off an environment value that is already on. A resolve that uses `data` or `--data` fails, even when the leaf overlay stays embedded. Applies to `aicr recipe` and `aicr query`; `aicr query --recipe` is rejected while it is on |
 
 ### spec.bundle
 

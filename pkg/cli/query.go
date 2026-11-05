@@ -25,6 +25,7 @@ import (
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	evidenceindex "github.com/NVIDIA/aicr/pkg/evidence/index"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
@@ -71,7 +72,8 @@ func queryCmdFlags() []cli.Flag {
 			Aliases: []string{"r"},
 			Usage: `Path/URI to a previously generated recipe to query instead of resolving one from criteria.
 	Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (cm://namespace/name).
-	Mutually exclusive with the criteria, --snapshot, --profile and selection flags.`,
+	Mutually exclusive with the criteria, --snapshot, --profile and selection flags.
+	Rejected while evidence is required (--require-evidence, spec.recipe.requireEvidence, or AICR_REQUIRE_EVIDENCE).`,
 			Category: catInput,
 		},
 	)
@@ -88,15 +90,18 @@ hydrated value at the given path, with all base, overlay, and inline overrides
 merged.
 
 With --summary, print a concise overview of the recipe instead: identity,
-criteria, applied overlays, constraints, components in deployment order, and
-the validation checks per phase. --summary and --selector are mutually
+criteria, applied overlays, constraints, enabled components in deployment order,
+and the validation checks per phase. --summary and --selector are mutually
 exclusive, and one of them is required. The overview is text by default;
 --format yaml or --format json emit it as a document. Summaries skip additional
 selector hydration, but loading or generating a profiled recipe still validates
 its locked component values and may fail if those values cannot be read.
 
 --recipe cannot be combined with the criteria flags, --snapshot, --profile,
-or the other recipe-generation flags.
+or the other recipe-generation flags. It is also rejected while evidence is
+required (--require-evidence, spec.recipe.requireEvidence, or
+AICR_REQUIRE_EVIDENCE): a loaded file is not proven to match the attested
+catalog recipe, so query by criteria instead.
 
 The selector uses dot-delimited paths consistent with Helm --set notation:
 
@@ -250,6 +255,11 @@ func validateQueryFlagCombinations(cmd *cli.Command) error {
 // supplies recipe-generation inputs conflicts with --recipe for the same
 // reason the flags do; the data directory and output settings it may carry
 // still apply.
+//
+// An evidence requirement rejects --recipe before the file is read. A
+// committed pointer attests an embedded resolve, but a loaded file only
+// names its criteria, profile, and leaf overlay. An edited file, or one
+// generated with --data, could name an attested leaf and pass the check.
 func loadQueryRecipe(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, client *aicr.Client) (*aicr.RecipeResult, error) {
 	criteria, err := cfg.RecipeCriteria(client.CriteriaRegistry())
 	if err != nil {
@@ -263,6 +273,16 @@ func loadQueryRecipe(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, cl
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"--recipe loads a finished recipe and cannot be combined with spec.recipe criteria, input.snapshot, "+
 				"profile, or configuration from --config")
+	}
+	required, err := aicr.PublishedEvidenceRequired("", evidenceRequested(cmd, cfg))
+	if err != nil {
+		return nil, err
+	}
+	if required {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"--recipe cannot be used while evidence is required (--require-evidence, spec.recipe.requireEvidence, "+
+				"or "+evidenceindex.EnvVar+"): a loaded recipe is not proven to match the attested catalog recipe; "+
+				"query by criteria instead, or turn the evidence requirement off")
 	}
 
 	path := cmd.String(cmdNameRecipe)
