@@ -96,8 +96,8 @@ Prometheus:
 |---|---|---|---|
 | OCI L40S | 417 (407) | 13.8k | 24h |
 | OCI GB300 | 670 (656) | 21.7k | 24h |
-| Mistral GB300 | 2143 (2039) | 82k | 7d |
-| Lambda GB300 | 2191 at read time, up to 2653 (2012) | 13k | 7d |
+| Bare-metal GB300 A | 2143 (2039) | 82k | 7d |
+| Bare-metal GB300 B | 2191 at read time, up to 2653 (2012) | 13k | 7d |
 
 Older instantaneous readings at 89 to 1400 GPU nodes fill the gaps. Node
 counts in this ADR are all nodes unless they say GPU nodes.
@@ -111,8 +111,8 @@ Three properties of the series shape the rules:
   network-operator and nodewright, 1.3x for gpu-operator and 1.7x for
   maintenance-operator. The NIC daemon peaks at startup, when it lists the
   cluster-wide NicDevice cache.
-- **Some controllers drift at a constant node count.** On the Lambda
-  cluster, maintenance-operator's peak went from 5.2Gi to 11.8Gi in three
+- **Some controllers drift at a constant node count.** On bare-metal
+  GB300 B, maintenance-operator's peak went from 5.2Gi to 11.8Gi in three
   weeks and network-operator's from 8.1Gi to 10.6Gi, with the node count
   roughly flat. A limit from the first reading would have killed
   maintenance-operator. gpu-operator moved from 3.4Gi to 3.0Gi.
@@ -144,10 +144,10 @@ the package-execution Jobs it retains for `jobTtlSucceeded` (1h default) and
   nodes, 436 in total and 18k pods, the manager was OOM-killed at a 2Gi
   limit with a 1.86Gi working set, the same as on a cluster with 453 nodes
   (447 GPU), at 1.87Gi. By GPU nodes the first looked like an outlier.
-- **Pods do not explain the large ones.** The Mistral cluster (2143 nodes,
-  82k pods) runs both replicas at 6.7Gi; the Lambda cluster (up to 2653
+- **Pods do not explain the large ones.** Bare-metal GB300 A (2143 nodes,
+  82k pods) runs both replicas at 6.7Gi; bare-metal GB300 B (up to 2653
   nodes, 13k pods) runs its leader at 10.5Gi. More nodes, plus Jobs retained
-  from Lambda's node churn, explain the gap.
+  from B's node churn, explain the gap.
 
 The two small clusters also share a pod count, so no measured pair
 separates pods from nodes cleanly. Churn is not known in advance, so the
@@ -425,8 +425,8 @@ The readings behind each cell (Mi; p90 / max; window; cluster):
 |---|---|---|---|---|---|
 | ≤ 300 | max 384, 24h, 244 GPU nodes | max 728, 24h, 244 GPU nodes | 290 at 89 GPU nodes; 130 to 156 at 141 | max 1024, 24h, 244 GPU nodes (11k pods) | max 400 at 89 GPU nodes, flat from 24 |
 | 301 to 600 | 410 / 496, 24h, OCI L40S 417 nodes | 955 / 1392, 24h, OCI L40S 417; max 1594, 24h, OCI GB300 453 | **none in tier**; sized from 2345 instantaneous at about 1120 nodes | 1377 / 1536, 24h, OCI L40S 417; max 1868, 24h, OCI GB300 453; 1859 at OOM, RTX PRO 436 | **none in tier**; sized from p90 707 / max 903 across pods, instantaneous, at about 1120 nodes |
-| 601 to 1500 | 602 / 744, 24h, OCI GB300 670 | 1384 / 1737, 24h, OCI GB300 670 | **none in tier**; sized from 4996 / 5462, 24h, Lambda at 2191 | 2163 / 2287, 24h, OCI GB300 670 | p90 707 / max 903 across pods, instantaneous, at about 1120 nodes |
-| 1501 to 3000 | 2353 / 3006, 7d, Lambda 2191 to 2653; 1757 / 2579, 7d, Mistral 2143 | 10341 / 10619, 7d, Lambda | 7047 / 11768, 7d, Lambda | 10555 / 11625, 7d, Lambda; 6674 / 8295, 7d, Mistral | per-pod p90 median 901, q99 1069; per-pod max 1599, 7d, Lambda |
+| 601 to 1500 | 602 / 744, 24h, OCI GB300 670 | 1384 / 1737, 24h, OCI GB300 670 | **none in tier**; sized from 4996 / 5462, 24h, bare-metal B at 2191 | 2163 / 2287, 24h, OCI GB300 670 | p90 707 / max 903 across pods, instantaneous, at about 1120 nodes |
+| 1501 to 3000 | 2353 / 3006, 7d, bare-metal B 2191 to 2653; 1757 / 2579, 7d, bare-metal A 2143 | 10341 / 10619, 7d, bare-metal B | 7047 / 11768, 7d, bare-metal B | 10555 / 11625, 7d, bare-metal B; 6674 / 8295, 7d, bare-metal A | per-pod p90 median 901, q99 1069; per-pod max 1599, 7d, bare-metal B |
 
 Notes on the table:
 
@@ -439,9 +439,9 @@ Notes on the table:
   - nodewright's request at 301 to 600 (p90 1.3Gi, below 2000Mi);
   - nodewright's limit at 301 to 600 and 601 to 1500 (1.3x peak is 2.4Gi
     and 2.9Gi, below 4000Mi).
-- **Nodewright replicas.** The request is per replica. On the Lambda
-  cluster the standby's p90 is 3.6Gi against the leader's 10.5Gi, so the
-  standby over-reserves by about 7Gi; on Mistral both sit at 6.7Gi.
+- **Nodewright replicas.** The request is per replica. On bare-metal
+  GB300 B the standby's p90 is 3.6Gi against the leader's 10.5Gi, so the
+  standby over-reserves by about 7Gi; on A both sit at 6.7Gi.
 - **Per-node totals.** AICR does not keep the nodewright replicas on
   separate nodes. On one system node, the top tier totals 31.5Gi of
   requests and 50Gi of limits with one replica, and 42Gi and 65Gi with
