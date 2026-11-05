@@ -1,0 +1,304 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NCCL all-reduce TrainingRuntime for GB200 on NVKE, NET/IB-transport variant.
+#
+# Measures the InfiniBand east-west fabric the gb200-nvke leaves build: four
+# ConnectX-7 rails, each exposed as SR-IOV VFs (nvidia.com/sriov_resource_rail_<n>)
+# and attached through the sriov-network-rail-<n> SriovIBNetworks, whose
+# NetworkAttachmentDefinitions live in the default namespace
+# (recipes/components/sriov-ib-networks/manifests/nvke-gb200.yaml). NVLS and
+# MNNVL are forced off so NCCL uses its built-in IB verbs transport over the VFs.
+#
+# Each worker requests one VF per rail and the four attachments, which multus
+# exposes as net1..net4. Before NCCL starts, every rank checks that each netN
+# carries an IPoIB address, an RDMA device, and full membership in some IB
+# partition at the same P_Key table index on all four rails, then pins
+# NCCL_IB_HCA to exactly those four VF HCAs and NCCL_IB_PKEY to that index
+# (NCCL otherwise uses index 0, which may hold only a limited key). A rank that
+# fails any of these exits with an AICR_PRECHECK_FAILED line naming the rail,
+# which the validator reports as the failure reason, so the check never passes
+# on a pod-network fallback.
+#
+# Two VFs exchange traffic when they share a partition and at least one of them
+# is a full member (P_Key 0x8000 bit set). The precheck requires full membership
+# on every rank's VFs, which covers that. Without it, on a tenant whose VFs hold
+# only limited membership (0x7fff), NCCL hits retry-exceeded on the first
+# all-reduce and then hangs until the launcher timeout
+# (docs/integrator/nvke-gb200-setup.md).
+#
+# Must stay in sync with ncclTrainingRuntimeName in nccl_all_reduce_bw_constraint.go.
+
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainingRuntime
+metadata:
+  name: nccl-all-reduce-runtime
+  namespace: ${NAMESPACE}
+  labels:
+    trainer.kubeflow.org/framework: mpi
+spec:
+  mlPolicy:
+    mpi:
+      mpiImplementation: OpenMPI
+      numProcPerNode: ${GPU_COUNT_PER_NODE}
+      runLauncherAsNode: false
+      sshAuthMountPath: /tmp/mpi-keys
+  template:
+    spec:
+      network:
+        enableDNSHostnames: true
+        publishNotReadyAddresses: true
+      replicatedJobs:
+      - name: node
+        template:
+          spec:
+            template:
+              metadata:
+                annotations:
+                  k8s.v1.cni.cncf.io/networks: default/sriov-network-rail-0,default/sriov-network-rail-1,default/sriov-network-rail-2,default/sriov-network-rail-3
+              spec:
+                tolerations:
+                - operator: Exists
+                initContainers:
+                - name: fix-ssh-perms
+                  image: nvcr.io/nvidia/pytorch:25.06-py3
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    mkdir -p /root/.ssh &&
+                    cp /tmp/mpi-keys/authorized_keys /root/.ssh/authorized_keys &&
+                    chmod 700 /root/.ssh &&
+                    chmod 600 /root/.ssh/authorized_keys
+                  volumeMounts:
+                  - name: mpi-ssh-auth
+                    mountPath: /tmp/mpi-keys
+                    readOnly: true
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                containers:
+                - name: node
+                  image: nvcr.io/nvidia/pytorch:25.06-py3
+                  command: ["sh", "-c"]
+                  args:
+                  # sshd is installed at runtime, with iproute2 for the rank
+                  # attachment check. HTTPS and the main component only: plain-HTTP
+                  # fetches from ports.ubuntu.com were observed to stall for
+                  # minutes (#3109). ca-certificates ships in the image. Skipped for
+                  # an AICR_NCCL_RUNTIME_IMAGE override without a deb822 sources file.
+                  - |
+                    if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+                      sed -i -e 's|http://ports.ubuntu.com|https://ports.ubuntu.com|g' \
+                             -e 's|^Components:.*|Components: main|' /etc/apt/sources.list.d/ubuntu.sources
+                    fi &&
+                    apt-get update &&
+                    apt-get install -y --no-install-recommends openssh-server iproute2 &&
+                    mkdir -p /var/run/sshd &&
+                    chmod 0755 /var/run/sshd &&
+                    mkdir -p /root/.ssh &&
+                    cp /tmp/mpi-keys/* /root/.ssh/ &&
+                    chmod 700 /root/.ssh &&
+                    chmod 600 /root/.ssh/authorized_keys &&
+                    /usr/sbin/sshd -De
+                  # Ready only once sshd listens; the launcher's dependsOn
+                  # waits on it, so mpirun never races the install.
+                  readinessProbe:
+                    tcpSocket:
+                      port: 22
+                    periodSeconds: 5
+                    failureThreshold: 120
+                  resources:
+                    limits:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+                      nvidia.com/sriov_resource_rail_0: "1"
+                      nvidia.com/sriov_resource_rail_1: "1"
+                      nvidia.com/sriov_resource_rail_2: "1"
+                      nvidia.com/sriov_resource_rail_3: "1"
+                    requests:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+                      nvidia.com/sriov_resource_rail_0: "1"
+                      nvidia.com/sriov_resource_rail_1: "1"
+                      nvidia.com/sriov_resource_rail_2: "1"
+                      nvidia.com/sriov_resource_rail_3: "1"
+                  securityContext:
+                    capabilities:
+                      add: ["IPC_LOCK"]
+                  volumeMounts:
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                  - name: dshm
+                    mountPath: /dev/shm
+                volumes:
+                - name: ssh-config
+                  emptyDir: {}
+                - name: dshm
+                  emptyDir:
+                    medium: Memory
+      # Listed after "node": JobSet requires a dependsOn target to precede
+      # the job that depends on it.
+      - name: launcher
+        replicas: 1
+        dependsOn:
+        - name: node
+          status: Ready
+        template:
+          spec:
+            template:
+              spec:
+                # A failed rank precheck is a cluster condition a restart cannot
+                # fix. Fail the pod once so the validator reads its logs and the
+                # AICR_PRECHECK_FAILED reason, instead of waiting through
+                # restart backoff until the pod is deleted.
+                restartPolicy: Never
+                tolerations:
+                - operator: Exists
+                initContainers:
+                - name: fix-ssh-perms
+                  image: nvcr.io/nvidia/pytorch:25.06-py3
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    mkdir -p /root/.ssh
+                    cp /tmp/mpi-keys/id_rsa /root/.ssh/id_rsa
+                    cp /tmp/mpi-keys/authorized_keys /root/.ssh/authorized_keys
+                    chmod 700 /root/.ssh
+                    chmod 600 /root/.ssh/id_rsa /root/.ssh/authorized_keys
+                  volumeMounts:
+                  - name: mpi-ssh-auth
+                    mountPath: /tmp/mpi-keys
+                    readOnly: true
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                containers:
+                - name: node
+                  image: nvcr.io/nvidia/pytorch:25.06-py3
+                  # Keeps the log tail, including any AICR_PRECHECK_FAILED line,
+                  # in pod status for the validator's fallback when the launcher
+                  # logs are already gone.
+                  terminationMessagePolicy: FallbackToLogsOnError
+                  env:
+                  - name: LD_LIBRARY_PATH
+                    value: "/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
+                  command:
+                  - /usr/local/mpi/bin/mpirun
+                  args:
+                  - -np
+                  - "${GPU_COUNT}"
+                  - --allow-run-as-root
+                  - --mca
+                  - plm_rsh_args
+                  - -o StrictHostKeyChecking=no -o ConnectionAttempts=10
+                  # Keep MPI's own traffic on eth0. UCX would otherwise run MPI
+                  # over the pod's rail VFs and, where the IB partition is
+                  # limited, fail in MPI startup before NCCL starts.
+                  - --mca
+                  - pml
+                  - ob1
+                  - --mca
+                  - btl
+                  - self,tcp
+                  - --mca
+                  - coll
+                  - ^ucc,hcoll
+                  - --mca
+                  - btl_tcp_if_include
+                  - eth0
+                  - --mca
+                  - oob_tcp_if_include
+                  - eth0
+                  - -x
+                  - LD_LIBRARY_PATH
+                  - -x
+                  - NCCL_DEBUG=INFO
+                  # Force NCCL onto the NET/IB transport: disable NVLS (NVLink
+                  # SHARP) and MNNVL (multi-node NVLink) so traffic crosses the
+                  # IB fabric; NCCL_NET_PLUGIN=none selects the built-in IB
+                  # verbs transport. NCCL_IB_HCA is set per rank below.
+                  - -x
+                  - NCCL_NVLS_ENABLE=0
+                  - -x
+                  - NCCL_MNNVL_ENABLE=0
+                  - -x
+                  - NCCL_NET_PLUGIN=none
+                  - -x
+                  - NCCL_SOCKET_IFNAME=eth0
+                  - -x
+                  - NCCL_IGNORE_DISABLED_P2P=1
+                  # Per rank: require an IPoIB address, an RDMA device and full
+                  # P_Key membership (one table index across all rails) on each
+                  # of net1..net4, then pin NCCL to those VF HCAs and that index.
+                  - /bin/sh
+                  - -c
+                  - |
+                    hcas=""
+                    pkey=""
+                    for i in 1 2 3 4; do
+                      if ! ip -o -4 addr show dev "net$i" 2>/dev/null | grep -q inet; then
+                        echo "AICR_PRECHECK_FAILED: rail attachment net$i has no IPoIB address on $(hostname); check the sriov-network-rail-$((i-1)) NetworkAttachmentDefinition and multus" >&2
+                        exit 1
+                      fi
+                      hca=$(ls "/sys/class/net/net$i/device/infiniband" 2>/dev/null | head -n 1)
+                      if [ -z "$hca" ]; then
+                        echo "AICR_PRECHECK_FAILED: rail attachment net$i has no RDMA device on $(hostname)" >&2
+                        exit 1
+                      fi
+                      # Lowest P_Key table index holding a full-member key.
+                      idx=""
+                      for k in /sys/class/infiniband/$hca/ports/1/pkeys/*; do
+                        v=$(cat "$k" 2>/dev/null)
+                        [ -n "$v" ] || continue
+                        n=${k##*/}
+                        if [ $((v & 0x8000)) -ne 0 ] && { [ -z "$idx" ] || [ "$n" -lt "$idx" ]; }; then idx=$n; fi
+                      done
+                      if [ -z "$idx" ]; then
+                        echo "AICR_PRECHECK_FAILED: rail attachment net$i ($hca) holds only limited P_Key membership on $(hostname); the fabric must grant the VF full membership" >&2
+                        exit 1
+                      fi
+                      if [ -n "$pkey" ] && [ "$idx" != "$pkey" ]; then
+                        echo "AICR_PRECHECK_FAILED: rail attachment net$i ($hca) has its full-member P_Key at index $idx, other rails at $pkey, on $(hostname); NCCL_IB_PKEY takes one index" >&2
+                        exit 1
+                      fi
+                      pkey=$idx
+                      hcas="$hcas,$hca"
+                    done
+                    export NCCL_IB_HCA="=${hcas#,}"
+                    # NCCL uses P_Key index 0 unless told otherwise; point it at
+                    # the full-member partition the check found.
+                    export NCCL_IB_PKEY="$pkey"
+                    exec "$@"
+                  - nccl-rank
+                  - /usr/local/bin/${TEST_TYPE}_mpi
+                  - -b
+                  - ${MIN_MESSAGE_SIZE}
+                  - -e
+                  - ${MAX_MESSAGE_SIZE}
+                  - -f
+                  - "2"
+                  - -g
+                  - "1"
+                  resources:
+                    limits:
+                      cpu: "2"
+                      memory: 128Mi
+                  volumeMounts:
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                volumes:
+                - name: ssh-config
+                  emptyDir: {}
+      successPolicy:
+        operator: All
+        targetReplicatedJobs:
+        - launcher

@@ -15,7 +15,10 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -1083,6 +1086,18 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
 		},
 		{
+			name:    "NET NVKE GB200",
+			variant: variantNET,
+			service: recipe.CriteriaServiceNVKE,
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+		},
+		{
+			name:    "NVLS NVKE GB200",
+			variant: variantNVLS,
+			service: recipe.CriteriaServiceNVKE,
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+		},
+		{
 			name:    "NVLS GKE GB200",
 			variant: variantNVLS,
 			service: recipe.CriteriaServiceGKE,
@@ -1197,6 +1212,277 @@ func TestH200EKSRuntimeMatchesH100(t *testing.T) {
 	if h100 != h200 {
 		t.Errorf("testdata/h200/eks/runtime.yaml diverged from the H100 EKS template "+
 			"(comparing bodies after stripping leading comment headers).\nH100:\n%s\nH200:\n%s", h100, h200)
+	}
+}
+
+// TestNVKENVLSRuntimeMatchesOKE enforces the "identical to OKE" contract in the
+// header of testdata/gb200/nvke/runtime-nvls.yaml: NVLS uses only the GPUs and
+// the validator-managed IMEX channel, so the two templates differ only in their
+// comment headers.
+func TestNVKENVLSRuntimeMatchesOKE(t *testing.T) {
+	oke := readTemplateBody(t, filepath.Join("testdata", "gb200", "oke", "runtime-nvls.yaml"))
+	nvke := readTemplateBody(t, filepath.Join("testdata", "gb200", "nvke", "runtime-nvls.yaml"))
+	if oke != nvke {
+		t.Errorf("testdata/gb200/nvke/runtime-nvls.yaml diverged from the OKE NVLS template "+
+			"(comparing bodies after stripping leading comment headers).\nOKE:\n%s\nNVKE:\n%s", oke, nvke)
+	}
+}
+
+// TestNVKENetRuntimeRequestsEveryRail pins the NVKE NET runtime to the fabric
+// the gb200-nvke leaves build: each worker requests one VF on every rail and
+// attaches the matching SriovIBNetwork, in rail order, so multus names them
+// net1..net4 as the rank precheck expects.
+func TestNVKENetRuntimeRequestsEveryRail(t *testing.T) {
+	data := map[string]string{
+		"NAMESPACE":          "aicr-validation",
+		"GPU_COUNT_PER_NODE": "4",
+		"GPU_COUNT":          "8",
+		"TEST_TYPE":          testType,
+		"MIN_MESSAGE_SIZE":   minMessageSize,
+		"MAX_MESSAGE_SIZE":   maxMessageSize,
+	}
+	obj, err := parseYAMLTemplate(templatePath(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceNVKE, variantNET, "runtime.yaml"), data)
+	if err != nil {
+		t.Fatalf("parse NVKE NET runtime: %v", err)
+	}
+	jobs, _, err := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
+	if err != nil {
+		t.Fatalf("replicatedJobs: %v", err)
+	}
+	var node map[string]any
+	for _, j := range jobs {
+		if m, ok := j.(map[string]any); ok && m["name"] == nodeJobName {
+			node = m
+		}
+	}
+	if node == nil {
+		t.Fatalf("no %q replicatedJob", nodeJobName)
+	}
+	networks, _, _ := unstructured.NestedString(node, "template", "spec", "template", "metadata", "annotations", "k8s.v1.cni.cncf.io/networks")
+	wantNetworks := "default/sriov-network-rail-0,default/sriov-network-rail-1,default/sriov-network-rail-2,default/sriov-network-rail-3"
+	if networks != wantNetworks {
+		t.Errorf("networks annotation = %q, want %q", networks, wantNetworks)
+	}
+	containers, _, _ := unstructured.NestedSlice(node, "template", "spec", "template", "spec", "containers")
+	if len(containers) != 1 {
+		t.Fatalf("worker containers = %d, want 1", len(containers))
+	}
+	container, _ := containers[0].(map[string]any)
+	for _, kind := range []string{"requests", "limits"} {
+		res, _, _ := unstructured.NestedMap(container, "resources", kind)
+		for rail := range 4 {
+			key := fmt.Sprintf("nvidia.com/sriov_resource_rail_%d", rail)
+			if got := fmt.Sprint(res[key]); got != "1" {
+				t.Errorf("worker %s[%s] = %q, want \"1\"", kind, key, got)
+			}
+		}
+		if _, ok := res["nvidia.com/mlnxnics"]; ok {
+			t.Errorf("worker %s requests nvidia.com/mlnxnics, which NVKE does not expose", kind)
+		}
+	}
+
+	// A failed precheck must fail the launcher pod once, keeping its logs for the
+	// validator, rather than restarting it until the Job deletes the pod.
+	for _, j := range jobs {
+		job, _ := j.(map[string]any)
+		if job["name"] != "launcher" {
+			continue
+		}
+		policy, _, _ := unstructured.NestedString(job, "template", "spec", "template", "spec", "restartPolicy")
+		if policy != "Never" {
+			t.Errorf("launcher restartPolicy = %q, want \"Never\"", policy)
+		}
+		containers, _, _ := unstructured.NestedSlice(job, "template", "spec", "template", "spec", "containers")
+		c, _ := containers[0].(map[string]any)
+		if got, _, _ := unstructured.NestedString(c, "terminationMessagePolicy"); got != "FallbackToLogsOnError" {
+			t.Errorf("launcher terminationMessagePolicy = %q, want \"FallbackToLogsOnError\"", got)
+		}
+	}
+}
+
+// TestNVKENetRuntimePrecheckMarkerMatchesRegex ties the marker the NVKE NET
+// runtime's rank wrapper prints to the regex the validator extracts the failure
+// reason with, so the two cannot drift apart silently.
+func TestNVKENetRuntimePrecheckMarkerMatchesRegex(t *testing.T) {
+	path := templatePath(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceNVKE, variantNET, "runtime.yaml")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	const echoMarker = `echo "AICR_PRECHECK_FAILED: `
+	var checks int
+	for _, line := range strings.Split(string(content), "\n") {
+		_, after, found := strings.Cut(line, echoMarker)
+		if !found {
+			continue
+		}
+		checks++
+		printed, _, _ := strings.Cut(after, `"`)
+		out := "AICR_PRECHECK_FAILED: " + printed + "\n"
+		if got := runtimePrecheckFailure(out); got != printed {
+			t.Errorf("runtimePrecheckFailure(%q) = %q, want %q", out, got, printed)
+		}
+	}
+	if checks != 4 {
+		t.Errorf("found %d %q lines in %s, want 4 (missing address, missing RDMA device, limited P_Key membership, mismatched P_Key index)", checks, echoMarker, path)
+	}
+}
+
+// nvkeNetRankScript returns the per-rank shell script from the rendered NVKE
+// NET runtime's launcher command: the argument after "/bin/sh", "-c".
+func nvkeNetRankScript(t *testing.T) string {
+	t.Helper()
+	data := map[string]string{
+		"NAMESPACE": "aicr-validation", "GPU_COUNT_PER_NODE": "4", "GPU_COUNT": "8",
+		"TEST_TYPE": testType, "MIN_MESSAGE_SIZE": minMessageSize, "MAX_MESSAGE_SIZE": maxMessageSize,
+	}
+	obj, err := parseYAMLTemplate(templatePath(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceNVKE, variantNET, "runtime.yaml"), data)
+	if err != nil {
+		t.Fatalf("parse NVKE NET runtime: %v", err)
+	}
+	jobs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
+	for _, j := range jobs {
+		job, _ := j.(map[string]any)
+		if job["name"] != "launcher" {
+			continue
+		}
+		containers, _, _ := unstructured.NestedSlice(job, "template", "spec", "template", "spec", "containers")
+		container, _ := containers[0].(map[string]any)
+		args, _, _ := unstructured.NestedStringSlice(container, "args")
+		for i := 0; i+2 < len(args); i++ {
+			if args[i] == "/bin/sh" && args[i+1] == "-c" {
+				return args[i+2]
+			}
+		}
+	}
+	t.Fatal("no /bin/sh -c rank script in the launcher args")
+	return ""
+}
+
+// TestNVKENetRankPrecheck runs the NVKE NET runtime's rank script against a
+// stub ip and a fake /sys/class/net and /sys/class/infiniband: a rail missing
+// its IPoIB address, its RDMA device, or full P_Key membership must exit
+// non-zero with a marker naming that rail, as must rails whose full-member keys
+// sit at different table indexes. Four good rails must pin NCCL_IB_HCA to
+// exactly their VFs, in rail order, and NCCL_IB_PKEY to the full-member index
+// rather than NCCL's default index 0.
+func TestNVKENetRankPrecheck(t *testing.T) {
+	script := nvkeNetRankScript(t)
+	hcas := []string{"mlx5_9", "mlx5_30", "mlx5_49", "mlx5_61"}
+
+	tests := []struct {
+		name       string
+		noAddr     string
+		noRDMA     string
+		limited    string
+		otherIndex string
+		wantErr    string
+		wantEnv    string
+	}{
+		{name: "four rails attached", wantEnv: "=mlx5_9,mlx5_30,mlx5_49,mlx5_61 1"},
+		{name: "rail without IPoIB address", noAddr: "net3", wantErr: "AICR_PRECHECK_FAILED: rail attachment net3 has no IPoIB address"},
+		{name: "rail without RDMA device", noRDMA: "net2", wantErr: "AICR_PRECHECK_FAILED: rail attachment net2 has no RDMA device"},
+		{name: "rail with only limited P_Key membership", limited: "net4", wantErr: "AICR_PRECHECK_FAILED: rail attachment net4 (mlx5_61) holds only limited P_Key membership"},
+		{name: "rails with full-member keys at different indexes", otherIndex: "net3", wantErr: "AICR_PRECHECK_FAILED: rail attachment net3 (mlx5_49) has its full-member P_Key at index 2, other rails at 1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			sysNet := filepath.Join(root, "sys-class-net")
+			sysIB := filepath.Join(root, "sys-class-infiniband")
+			bin := filepath.Join(root, "bin")
+			if err := os.MkdirAll(bin, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			// Stub ip: "ip -o -4 addr show dev netN" prints an inet line unless netN has no address.
+			stub := "#!/bin/sh\nfor a; do dev=$a; done\n[ \"$dev\" = \"" + tt.noAddr + "\" ] && exit 1\necho \"1: $dev    inet 10.255.0.7/22 scope global $dev\"\n"
+			if err := os.WriteFile(filepath.Join(bin, "ip"), []byte(stub), 0o755); err != nil { //nolint:gosec // test stub must be executable
+				t.Fatal(err)
+			}
+			for i, hca := range hcas {
+				dev := fmt.Sprintf("net%d", i+1)
+				dir := filepath.Join(sysNet, dev, "device", "infiniband")
+				if dev != tt.noRDMA {
+					dir = filepath.Join(dir, hca)
+				}
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				// Index 0 holds the limited default and the full-member tenant key
+				// sits at index 1, as on tenants with a UFM-assigned partition, so
+				// NCCL must be pointed at index 1 rather than its default 0.
+				pkeys := map[string]string{"0": "0x7fff", "1": "0x8001", "2": "0x0000"}
+				switch dev {
+				case tt.limited:
+					pkeys["1"] = "0x0000"
+				case tt.otherIndex:
+					pkeys["1"], pkeys["2"] = "0x0000", "0x8001"
+				}
+				pkeyDir := filepath.Join(sysIB, hca, "ports", "1", "pkeys")
+				if err := os.MkdirAll(pkeyDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				for idx, v := range pkeys {
+					if err := os.WriteFile(filepath.Join(pkeyDir, idx), []byte(v+"\n"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+
+			body := strings.ReplaceAll(script, "/sys/class/net/", sysNet+"/")
+			body = strings.ReplaceAll(body, "/sys/class/infiniband/", sysIB+"/")
+			cmd := exec.CommandContext(t.Context(), "/bin/sh", "-c", body, "nccl-rank", "/bin/sh", "-c", `printf '%s %s' "$NCCL_IB_HCA" "$NCCL_IB_PKEY"`)
+			cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			err := cmd.Run()
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("precheck exited 0, want failure naming %q", tt.wantErr)
+				}
+				if !strings.Contains(stderr.String(), tt.wantErr) {
+					t.Errorf("stderr = %q, want it to contain %q", stderr.String(), tt.wantErr)
+				}
+				if got := runtimePrecheckFailure(stderr.String()); !strings.HasPrefix("AICR_PRECHECK_FAILED: "+got, tt.wantErr) {
+					t.Errorf("runtimePrecheckFailure(stderr) = %q, does not carry %q", got, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("precheck failed: %v, stderr %q", err, stderr.String())
+			}
+			if stdout.String() != tt.wantEnv {
+				t.Errorf("NCCL_IB_HCA NCCL_IB_PKEY = %q, want %q", stdout.String(), tt.wantEnv)
+			}
+		})
+	}
+}
+
+func TestRuntimePrecheckFailure(t *testing.T) {
+	tests := []struct {
+		name string
+		logs string
+		want string
+	}{
+		{"no marker", "NCCL INFO Using network IB\n", ""},
+		{
+			"marker names the attachment",
+			"Warning: Permanently added 'w-0'\nAICR_PRECHECK_FAILED: rail attachment net2 has no IPoIB address on w-0\r\nmpirun detected...\n",
+			"rail attachment net2 has no IPoIB address on w-0",
+		},
+		{
+			"first marker wins",
+			"AICR_PRECHECK_FAILED: net1 missing\nAICR_PRECHECK_FAILED: net3 missing\n",
+			"net1 missing",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := runtimePrecheckFailure(tt.logs); got != tt.want {
+				t.Errorf("runtimePrecheckFailure() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
