@@ -39,9 +39,7 @@ const validationNamespace = "aicr-validation"
 // stage with the candidate's AICR image, as the chart's launcher in the
 // validation namespace. A kind cluster has no GPU, so validation fails: the
 // rollout ends Failed and the plan is never promoted. Turning validation off
-// returns the runtime to the active plan. In the release workflow the next
-// candidate defaults to the tag's own AICR, so this is the release's gate on
-// operator-driven deployment validation (#3646).
+// returns the runtime to the active plan.
 func deploymentValidation(ctx context.Context, t *testing.T, active string) {
 	t.Helper()
 	t.Setenv("CANDIDATE_NEXT_DIR", filepath.Dir(os.Getenv("AICR_OPERATOR_QUALIFY_NEXT")))
@@ -99,12 +97,17 @@ func deploymentValidation(ctx context.Context, t *testing.T, active string) {
 	if !ok {
 		t.Fatalf("the operator ran no validation Job named %q in %s", v.Job, validationNamespace)
 	}
-	pod := job.Spec.Template.Spec
-	if pod.ServiceAccountName != validationNamespace || len(pod.Containers) == 0 || pod.Containers[0].Image != next.AICR.Image {
-		t.Fatalf("validation Job %s ran as %s with %v; want the launcher running the candidate's AICR %s",
-			job.Name, pod.ServiceAccountName, pod.Containers, next.AICR.Image)
+	// tools/operator-qualify installs AICR_E2E_IMAGE over the candidate's.
+	image := next.AICR.Image
+	if override := os.Getenv("AICR_E2E_IMAGE"); override != "" {
+		image = override
 	}
-	t.Logf("rollout %s failed validation run %s with %s: %s", ended.Name, v.RunID, next.AICR.Image, ended.Status.Message)
+	pod := job.Spec.Template.Spec
+	if pod.ServiceAccountName != validationNamespace || len(pod.Containers) == 0 || pod.Containers[0].Image != image {
+		t.Fatalf("validation Job %s ran as %s with %v; want the launcher running the installed AICR %s",
+			job.Name, pod.ServiceAccountName, pod.Containers, image)
+	}
+	t.Logf("rollout %s failed validation run %s with %s: %s", ended.Name, v.RunID, image, ended.Status.Message)
 
 	waitFor(t, 2*time.Minute, "the runtime to stall on the failed rollout", func() bool {
 		rt := getRuntime(ctx, t)
