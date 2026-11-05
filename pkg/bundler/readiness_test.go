@@ -16,8 +16,6 @@ package bundler
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -29,6 +27,7 @@ import (
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -87,17 +86,10 @@ func TestValidateReadinessTestYAML(t *testing.T) {
 }
 
 func TestCollectComponentReadiness(t *testing.T) {
-	tmpData := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), []byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
-		t.Fatalf("WriteFile registry.yaml: %v", err)
-	}
-	compDir := filepath.Join(tmpData, "components", "gpu-operator")
-	if err := os.MkdirAll(compDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(compDir, readinessFileName), []byte(validReadinessTestYAML), 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
+	tmpData := providertest.WriteDir(t, map[string][]byte{
+		recipe.RegistryFileName:                        []byte(providertest.EmptyRegistryYAML),
+		"components/gpu-operator/" + readinessFileName: []byte(validReadinessTestYAML),
+	})
 
 	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: tmpData})
@@ -381,17 +373,10 @@ func TestCollectComponentReadiness(t *testing.T) {
 	})
 
 	t.Run("malformed test rejected", func(t *testing.T) {
-		badDir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(badDir, "registry.yaml"), []byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
-			t.Fatalf("WriteFile registry.yaml: %v", err)
-		}
-		badComp := filepath.Join(badDir, "components", "gpu-operator")
-		if err := os.MkdirAll(badComp, 0o755); err != nil {
-			t.Fatalf("MkdirAll: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(badComp, readinessFileName), []byte("kind: ConfigMap\n"), 0o600); err != nil {
-			t.Fatalf("WriteFile: %v", err)
-		}
+		badDir := providertest.WriteDir(t, map[string][]byte{
+			recipe.RegistryFileName:                        []byte(providertest.EmptyRegistryYAML),
+			"components/gpu-operator/" + readinessFileName: []byte("kind: ConfigMap\n"),
+		})
 		badLayered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: badDir})
 		if err != nil {
 			t.Fatalf("NewLayeredDataProvider: %v", err)

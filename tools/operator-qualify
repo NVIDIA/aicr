@@ -39,6 +39,8 @@
 #
 # AICR_OPERATOR_QUALIFY_LIFECYCLE_ONLY=1 runs only the lifecycle scenarios and
 # QUALIFY_TIMEOUT bounds the suite (default 90m).
+# QUALIFY_VALIDATION=1 installs or upgrades with validation.enabled; the
+# suite's deployment validation scenario sets it for its own upgrade.
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
@@ -95,6 +97,7 @@ install_candidate() {
     --set aicr.version="${aicr_version}" \
     --set aicr.image="${AICR_E2E_IMAGE:-$(yq -r '.aicr.image' "${dir}/candidate-values.yaml")}" \
     --set "aicr.validatorImages={${AICR_E2E_VALIDATOR_IMAGES:-$(yq -r '.aicr.validatorImages | join(",")' "${dir}/candidate-values.yaml")}}" \
+    ${QUALIFY_VALIDATION:+--set validation.enabled=true} \
     "${HELM_RELEASE_FLAGS[@]}" >/dev/null
   kubectl -n aicr-system rollout status deployment/aicr-registry --timeout=180s
   kubectl -n aicr-system rollout status deployment/aicr-operator --timeout=180s

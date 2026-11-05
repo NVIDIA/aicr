@@ -16,10 +16,7 @@ package fleet
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	stderrors "errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -28,7 +25,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat/localformattest"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -597,30 +594,6 @@ func TestGenerate_BundleSizeGuidance(t *testing.T) {
 	}
 }
 
-// stubChartPuller returns a deterministic .tgz payload for any Pull call.
-type stubChartPuller struct{}
-
-var _ localformat.ChartPuller = (*stubChartPuller)(nil)
-
-func (s *stubChartPuller) Pull(_ context.Context, c localformat.Component) ([]byte, localformat.VendorRecord, string, error) {
-	chartName := c.ChartName
-	if chartName == "" {
-		chartName = c.Name
-	}
-	tgz := []byte(fmt.Sprintf("fake-tgz-%s-%s", chartName, c.Version))
-	sum := sha256.Sum256(tgz)
-	tarball := fmt.Sprintf("%s-%s.tgz", chartName, c.Version)
-	return tgz, localformat.VendorRecord{
-		Name:          c.Name,
-		Chart:         chartName,
-		Version:       c.Version,
-		Repository:    c.Repository,
-		SHA256:        hex.EncodeToString(sum[:]),
-		TarballName:   tarball,
-		PullerVersion: "stub v0.0.0",
-	}, tarball, nil
-}
-
 // A vendored chart is a local chart whose templates read .Values. Fleet
 // parses helm.valuesFiles only when helm.chart or helm.repo is set, so the
 // folder must name itself as the chart or every value is dropped.
@@ -635,7 +608,7 @@ func TestGenerate_VendoredChartKeepsValues(t *testing.T) {
 		DynamicValues: map[string][]string{"cert-manager": {"replicaCount"}},
 		Version:       testBundlerVersion,
 		VendorCharts:  true,
-		Puller:        &stubChartPuller{},
+		Puller:        localformattest.StubPuller{},
 	}
 	out := t.TempDir()
 	if _, err := g.Generate(context.Background(), out); err != nil {

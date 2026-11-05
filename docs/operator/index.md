@@ -102,9 +102,9 @@ Each AICR release publishes the operator image, the in-cluster registry image
 and the chart, tagged with the release version. The chart defaults to that
 release's operator and registry images and to that release's own AICR and
 validator images, all pinned by digest. Before it publishes, the release runs
-the operator with that AICR through install, upgrade and rollout, and the
-validator images through deployment validation. An earlier chart, such as v1.2.0's, can
-default to an earlier AICR release. `helm show values` shows the default, and
+the operator with that AICR through install, upgrade, rollout and deployment
+validation, and runs the validator images. An earlier chart, such as v1.2.0's,
+can default to an earlier AICR release. `helm show values` shows the default, and
 [operations](operations.md#upgrading-aicr-within-v1) moves it.
 
 ```shell

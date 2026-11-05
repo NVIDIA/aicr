@@ -5,12 +5,14 @@ GPU stack it manages is never removed by any of these: it is owned by Argo CD
 Applications that survive the operator.
 
 CI checks this page against the published artifacts, on the newest supported
-Kubernetes, using the in-cluster registry, with deployment validation off. Each
-operator change, and each release before it publishes, installs the newest
-published release, then:
+Kubernetes, using the in-cluster registry. Each operator change, and each
+release before it publishes, installs the newest published release, then:
 
 - upgrades it to the new build mid-rollout;
 - replaces the in-cluster registry pod;
+- upgrades it again with validation enabled and requires deployment
+  validation for a rollout, which fails on kind, without a GPU, and promotes
+  nothing;
 - downgrades it with `helm rollback`;
 - uninstalls it in the order below, checking what is kept.
 

@@ -15,13 +15,13 @@
 package recipe
 
 import (
-	"os"
-	"path/filepath"
 	"reflect"
 	"sort"
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 // The AKS family is the first embedded adopter of an ADR-015 configuration
@@ -412,17 +412,10 @@ func TestAKSLegacyExternalShadowStaysUnprofiled(t *testing.T) {
 	// legacy overlay replaces the embedded file wholesale by path, and
 	// every other catalog file (values, mixins, leaves) falls through to
 	// the embedded layer.
-	extDir := t.TempDir()
-	registry := "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"
-	if writeErr := os.WriteFile(filepath.Join(extDir, "registry.yaml"), []byte(registry), 0o600); writeErr != nil {
-		t.Fatalf("write external registry.yaml: %v", writeErr)
-	}
-	if mkdirErr := os.MkdirAll(filepath.Join(extDir, "overlays"), 0o750); mkdirErr != nil {
-		t.Fatalf("create external overlays dir: %v", mkdirErr)
-	}
-	if writeErr := os.WriteFile(filepath.Join(extDir, "overlays", "aks.yaml"), legacyAKS, 0o600); writeErr != nil {
-		t.Fatalf("write external overlays/aks.yaml: %v", writeErr)
-	}
+	extDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":     []byte(providertest.EmptyRegistryYAML),
+		"overlays/aks.yaml": legacyAKS,
+	})
 
 	// The same layered provider construction the --data flag uses
 	// (pkg/client/v1 buildDataProvider for a FilesystemSource).

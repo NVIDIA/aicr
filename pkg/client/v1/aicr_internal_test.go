@@ -34,6 +34,7 @@ import (
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 	"github.com/NVIDIA/aicr/pkg/validator"
 )
 
@@ -1407,11 +1408,7 @@ func TestClient_CloseDrainsInflightResolve(t *testing.T) {
 func TestClient_NoCacheGrowthAcrossManyCloseCycles(t *testing.T) {
 	const N = 50
 
-	tmp := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
-		t.Fatalf("setup: write registry.yaml: %v", err)
-	}
+	tmp := providertest.WriteDir(t, map[string][]byte{"registry.yaml": []byte(providertest.EmptyRegistryYAML)})
 
 	for i := range N {
 		c, err := NewClient(WithRecipeSource(FilesystemSource(tmp)))

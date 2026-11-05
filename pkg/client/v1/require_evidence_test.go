@@ -15,8 +15,6 @@
 package aicr_test
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -24,6 +22,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 func TestPublishedEvidenceRequired(t *testing.T) {
@@ -81,11 +80,7 @@ func TestRequirePublishedEvidenceNilClient(t *testing.T) {
 }
 
 func TestRequirePublishedEvidenceRejectsExternalSource(t *testing.T) {
-	dir := t.TempDir()
-	registry := "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"
-	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte(registry), 0o600); err != nil {
-		t.Fatalf("write registry: %v", err)
-	}
+	dir := providertest.WriteDir(t, map[string][]byte{"registry.yaml": []byte(providertest.EmptyRegistryYAML)})
 	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(dir)))
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)

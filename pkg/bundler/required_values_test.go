@@ -15,8 +15,6 @@
 package bundler
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -24,6 +22,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 // Two synthetic registry components, merged in through a
@@ -37,7 +36,6 @@ const (
 
 func requiredValuesFixtureProvider(t *testing.T) recipe.DataProvider {
 	t.Helper()
-	tmpData := t.TempDir()
 	registryYAML := []byte(`apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
@@ -54,9 +52,7 @@ components:
     installTimeSecretPaths:
       - auth.password
 `)
-	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), registryYAML, 0o600); err != nil {
-		t.Fatalf("write registry.yaml: %v", err)
-	}
+	tmpData := providertest.WriteDir(t, map[string][]byte{recipe.RegistryFileName: registryYAML})
 	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: tmpData})
 	if err != nil {
