@@ -406,21 +406,6 @@ func podWaitingStatus(pod *corev1.Pod) string {
 	return "none"
 }
 
-// waitForDeletion polls until a resource is gone (NotFound) or the context expires.
-func waitForDeletion(ctx context.Context, getFunc func() error) {
-	pollCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
-	defer cancel()
-	_ = wait.PollUntilContextCancel(pollCtx, defaults.PodPollInterval, true,
-		func(ctx context.Context) (bool, error) {
-			err := getFunc()
-			if k8serrors.IsNotFound(err) {
-				return true, nil
-			}
-			return false, nil
-		},
-	)
-}
-
 // wrapWithCode adds message to err while keeping the code err already
 // carries, so the context grows at each layer without relabeling what the
 // consumer reads; a plain error gets fallback.

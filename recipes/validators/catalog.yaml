@@ -201,7 +201,7 @@ validators:
     env: []
   - name: gang-scheduling
     phase: conformance
-    description: "Verify gang scheduling with KAI scheduler using CPU-only workers"
+    description: "Verify KAI gang scheduling with CPU-only workers: a fitting PodGroup completes, a non-fitting PodGroup keeps zero members bound"
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
     timeout: 10m
     args: ["gang-scheduling"]
