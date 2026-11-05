@@ -3445,7 +3445,7 @@ h100-eks-ubuntu-training-runai:
   003-nodewright-customizations/Chart.yaml: b542c241a0fc96c7d382588d09d8a04e0adc7ffa9558cb6f8d815cc4bc4f8a48
   003-nodewright-customizations/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-customizations/install.sh: 17a57ee11c5b776ba3866f91d1c5233b709e728df358d8e467b2856dc687e80f
-  003-nodewright-customizations/templates/tuning.yaml: 290906d5600ff649271c19954a15624782eea85fa14f7c5e14bb9af73abf7ab6
+  003-nodewright-customizations/templates/tuning.yaml: b864d128d7d02ec638c1da2dd5fe5e6c66b1565de9d31a110a4926a92f5fb1fb
   003-nodewright-customizations/values.yaml: 8a82d857a462cc9a195280dc3d60ec4fae5990fd986df93ea90f7be37dc7363d
   004-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-prometheus-operator-crds/install.sh: 4c10c479d2d735c3024bf809520a4efb7f97904cda4fe211f9374189ea3292d4
@@ -3495,7 +3495,7 @@ h100-eks-ubuntu-training-runai:
   README.md: afc3093d50cd6d5eb304d96e2dbdcb44efc13bd0c304ad12688a054e9a08c746
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 5432b8ff8a32e4c55e48153095bc877675feea854299d3699d96020c316e1bcd
-  checksums.txt: 295af6f903cc43be9b2fdb6e834398ad2784eeb3b4cf638a9d0bc04ed3857f42
+  checksums.txt: 54987d22e62499401c5b4757051f8087f224f0fc4cc56ef023a02e9e42bf9e98
   deploy.sh: e46aa800c86804007ebd405b4d85a65c017ed694986e709ea86e93a880ac5f03
   recipe.yaml: 82ba486af0f3023191e79355868eb0933de3a6740e56ea5e1fd504066c2f2147
 h100-eks-ubuntu-training-slurm:
