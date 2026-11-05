@@ -103,14 +103,16 @@ from the root Application's values.
 
 ### What the measurements show
 
-Fleet readings cover 1 to 2500 GPU nodes. They are
+Fleet readings cover clusters of 24 to about 2650 nodes. They are
 recorded in #3148 and #3214, the full tables with method in the 2026-11-04
 comment on #3214. The sizing in this ADR rests on cadvisor working-set
 series read from each cluster's Prometheus: 24h windows on an OCI L40S
-cluster (407 GPU nodes) and an OCI GB300 cluster (656), and 7-day windows on
-a Mistral GB300 cluster (2039 nodes, 82k pods) and a Lambda GB300 cluster
-(2012 nodes at read time, about 2500 earlier in the window). Older
-instantaneous readings at 89 to 1400 nodes fill the gaps.
+cluster (417 nodes, 407 with GPUs) and an OCI GB300 cluster (670, 656 with
+GPUs), and 7-day windows on a Mistral GB300 cluster (2143 nodes, 2039 with
+GPUs, 82k pods) and a Lambda GB300 cluster (2191 nodes at read time, up to
+2653 earlier in the window). Older instantaneous readings at 89 to 1400 GPU
+nodes fill the gaps. Node counts in this ADR are all nodes unless they say
+GPU nodes.
 
 Three properties of the series shape the rules below:
 
@@ -146,17 +148,22 @@ From those readings, the v1.0.0 defaults break at roughly these sizes:
 **Drivers.** Most of this is linear in node count: gpu-operator at about
 1.2 to 1.4Mi per node, and network-operator at about 3.2 to 3.6Mi per node.
 
-Nodewright is the exception, and its driver is not one thing. Its cache
-holds nodes, per-node Skyhook CRs, pods, and the package-execution Jobs it
-retains for `jobTtlSucceeded` (1h default) and `jobTtlFailed` (24h). Below
-600 nodes, pods dominate: at 244 and 357 nodes, with 11k and 14k pods, the
-nodewright manager peaks at the same 1Gi, and on a 118-node cluster with 18k
-pods the nodewright manager was OOM-killed at a 2Gi limit. At 2000 nodes the order reverses: the Mistral cluster with 82k pods
-runs both replicas at 6.7Gi, while the Lambda cluster with 13k pods runs its
-leader at 10.5Gi, so retained Jobs from node churn are the better
-explanation there. Neither pod count nor churn is known when a bundle is
-generated or installed, which is why the initial tiers size nodewright to the
-largest reading at each node count.
+Nodewright was first read as driven by pod count, and the readings now
+point to the total node count instead. Its cache holds every Node, per-node
+Skyhook CRs, pods, and the package-execution Jobs it retains for
+`jobTtlSucceeded` (1h default) and `jobTtlFailed` (24h). On a cluster with
+118 GPU nodes, 436 nodes in total and 18k pods, the nodewright manager was
+OOM-killed at a 2Gi limit with a 1.86Gi working set, the same as on a
+cluster with 447 GPU nodes and 453 in total (1.87Gi). By GPU node count the
+first cluster looked like an outlier; by total node count it is not. At 2000 GPU nodes, pod count points the wrong way: the Mistral
+cluster (2143 nodes, 82k pods) runs both replicas at 6.7Gi, while the Lambda
+cluster (up to 2653 nodes, 13k pods) runs its leader at 10.5Gi. More nodes,
+plus Jobs retained from Lambda's node churn, explain that gap; pods do not.
+The two smaller clusters with an OOM kill have both the same pod count and
+the same total node count, so no measured pair separates pods from nodes
+cleanly. Churn is not known when a bundle is generated or installed, which
+is why the initial tiers size nodewright to the largest reading at each
+node count.
 
 maintenance-operator grew about 1Gi in a week at a constant 2500 nodes, so
 something besides node count drives it too
@@ -327,8 +334,24 @@ Sizing applies only to a count stated as one of:
 - `aicr bundle --nodes N`, or its config-file, REST and SDK equivalents;
 - `sizing.nodeCount` in an `argocd-helm` bundle's root values.
 
-`criteria.nodes` and snapshot-derived counts never select a tier. The count
-means GPU nodes, the unit every measurement in this ADR is taken in.
+`criteria.nodes` and snapshot-derived counts never select a tier.
+
+The count is every node in the cluster, CPU and GPU, the number
+`kubectl get nodes` returns. Each sized controller caches every Node
+object, not only nodes with GPUs, so a node without a GPU costs it memory
+too; the nodewright readings in Context show it. On the GB300 clusters
+measured, nodes without GPUs are 2 to 9% of the total, so counting GPU nodes
+alone would put every measured cluster in the same tier. It would not for a
+cluster with a large CPU pool: the 118-GPU-node cluster in Context has 436
+nodes in total.
+
+There is no second parameter for CPU nodes. The tiers are 2 to 3 times
+wide, so a separate count would rarely change the tier selected. No
+measurement separates what a CPU node costs these controllers from what a
+GPU node costs, so a two-dimensional table would rest on invented values.
+And each parameter is another flag, REST parameter, SDK field, config key,
+root-chart value and schema entry. The sizing file's `basis` field leaves
+room for one if measurements later warrant it (see Open questions).
 
 Every input accepts a non-negative integer, and 0 means no count. A negative
 count is rejected before tier selection with `ErrCodeInvalidRequest` on the
@@ -343,7 +366,7 @@ entry's `sizing.file`:
 
 ```yaml
 kind: ComponentSizing
-basis: gpuNodes
+basis: nodes
 resources:
   - path: operator.resources
     tiers:
@@ -351,15 +374,15 @@ resources:
       - maxNodes: 600
         requests: {memory: 512Mi}
         limits: {memory: 768Mi}
-        source: "#3214 (2026-11-04): p90 410Mi, max 496Mi, 24h at 407 GPU nodes"
+        source: "#3214 (2026-11-04): p90 410Mi, max 496Mi, 24h at 417 nodes (407 GPU)"
       - maxNodes: 1500
         requests: {memory: 768Mi}
         limits: {memory: 1Gi}
-        source: "#3214 (2026-11-04): p90 602Mi, max 744Mi, 24h at 656 GPU nodes"
+        source: "#3214 (2026-11-04): p90 602Mi, max 744Mi, 24h at 670 nodes (656 GPU)"
       - maxNodes: 3000
         requests: {memory: 2.5Gi}
         limits: {memory: 4Gi}
-        source: "#3214 (2026-11-04): p90 2353Mi, max 3006Mi, 7d at 2012-2500 GPU nodes"
+        source: "#3214 (2026-11-04): p90 2353Mi, max 3006Mi, 7d at 2191-2653 nodes (2012-2500 GPU)"
   - path: maintenance-operator-chart.operator.resources
     requiresPath: maintenance-operator-chart
     tiers: [...]
@@ -407,7 +430,7 @@ resources:
 
 ### Initial tiers
 
-Values are GPU nodes and memory request / limit, derived with the rules
+Values are node counts (all nodes) and memory request / limit, derived with the rules
 under "The sizing file" from the measurements below. Each `sizing.yaml`
 pins these numbers with their sources.
 
@@ -422,10 +445,10 @@ Working-set readings each tier rests on (Mi; p90 / max; window; cluster):
 
 | Tier | gpu-operator | network-operator | maintenance-operator | nodewright leader | NIC daemon (per pod) |
 |---|---|---|---|---|---|
-| ≤ 300 | max 384, 24h, 244 nodes | max 728, 24h, 244 nodes | 290 at 89 nodes; 130 to 156 at 141 | max 1024, 24h, 244 nodes (11k pods) | max 400 at 89 nodes, flat from 24 |
-| 301 to 600 | 410 / 496, 24h, OCI L40S 407 nodes | 955 / 1392, 24h, OCI L40S 407; max 1594, 24h, OCI GB300 447 | **none in tier**; sized from 2345 instantaneous at 1112 nodes | 1377 / 1536, 24h, OCI L40S 407 (13.8k pods); max 1868, 24h, OCI GB300 447 (18k pods) | **none in tier**; sized from p90 707 / max 903 across pods, instantaneous, at 1112 nodes |
-| 601 to 1500 | 602 / 744, 24h, OCI GB300 656 nodes | 1384 / 1737, 24h, OCI GB300 656 | **none in tier**; sized from 4996 / 5462, 24h, Lambda GB300 at 2012 | 2163 / 2287, 24h, OCI GB300 656 (21.7k pods) | p90 707 / max 903 across pods, instantaneous, at 1112 nodes (in tier) |
-| 1501 to 3000 | 2353 / 3006, 7d, Lambda GB300 2012 to 2500 nodes; 1757 / 2579, 7d, Mistral GB300 2039 | 10341 / 10619, 7d, Lambda | 7047 / 11768, 7d, Lambda (5.2Gi peak three weeks earlier) | 10555 / 11625, 7d, Lambda (13k pods); 6674 / 8295, 7d, Mistral (82k pods) | per-pod p90: median 901, q99 1069; per-pod max 1599, 7d, Lambda |
+| ≤ 300 | max 384, 24h, 244 GPU nodes | max 728, 24h, 244 GPU nodes | 290 at 89 GPU nodes; 130 to 156 at 141 | max 1024, 24h, 244 GPU nodes (11k pods) | max 400 at 89 GPU nodes, flat from 24 |
+| 301 to 600 | 410 / 496, 24h, OCI L40S 417 nodes | 955 / 1392, 24h, OCI L40S 417; max 1594, 24h, OCI GB300 453 | **none in tier**; sized from 2345 instantaneous at about 1120 nodes (1112 GPU) | 1377 / 1536, 24h, OCI L40S 417 (13.8k pods); max 1868, 24h, OCI GB300 453 (18k pods); 1859 at OOM, RTX PRO 436 (118 GPU, 18k pods) | **none in tier**; sized from p90 707 / max 903 across pods, instantaneous, at about 1120 nodes |
+| 601 to 1500 | 602 / 744, 24h, OCI GB300 670 nodes | 1384 / 1737, 24h, OCI GB300 670 | **none in tier**; sized from 4996 / 5462, 24h, Lambda GB300 at 2191 | 2163 / 2287, 24h, OCI GB300 670 (21.7k pods) | p90 707 / max 903 across pods, instantaneous, at about 1120 nodes (in tier) |
+| 1501 to 3000 | 2353 / 3006, 7d, Lambda GB300 2191 to 2653 nodes; 1757 / 2579, 7d, Mistral GB300 2143 | 10341 / 10619, 7d, Lambda | 7047 / 11768, 7d, Lambda (5.2Gi peak three weeks earlier) | 10555 / 11625, 7d, Lambda (13k pods); 6674 / 8295, 7d, Mistral (82k pods) | per-pod p90: median 901, q99 1069; per-pod max 1599, 7d, Lambda |
 
 Readings marked **none in tier** are sized from the nearest reading above
 the tier, so those cells are over-sized by construction. Together with the
@@ -538,14 +561,15 @@ following this section's rules.
 
 **Negative:**
 
-- **Larger default exposure.** A cluster above 300 GPU nodes that does not
+- **Larger default exposure.** A cluster above 300 nodes that does not
   state a count regresses to the pre-v1.1.0 failure mode, by design. Release
   notes for the version that lands this must call it out.
 - **Node count is an imperfect proxy.**
-  - Nodewright also tracks pod count and retained Jobs, neither known in
-    advance, so its tiers take the largest reading at each node count. The
-    pods per node of each measured cluster is recorded in the `source`, so
-    an operator with a far denser or churnier cluster knows to override.
+  - Nodewright may also track pod count, and Jobs retained from node churn
+    likely add to it. Neither is known in advance, so its tiers take the
+    largest reading at each node count. Each `source` records the measured
+    cluster's GPU nodes, total nodes and pods, so an operator with a far
+    denser or churnier cluster knows to override.
   - maintenance-operator grows at a constant node count.
   - The NIC daemon tracks NicDevice count.
 
@@ -581,6 +605,10 @@ hand overrides again.
 
 ## Open questions
 
+- **A separate count for CPU nodes.** Revisit if a cluster with a large CPU
+  pool lands in the wrong tier, or if measurements show a CPU node costs one
+  of these controllers far less than a GPU node. The sizing file's `basis`
+  field is where a second basis would go.
 - **Requalifying the 301 to 600 and 601 to 1500 tiers, and tightening the
   30% margin toward VPA's 15%,** once the five controllers are scraped
   continuously
