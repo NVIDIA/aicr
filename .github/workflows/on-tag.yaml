@@ -1237,7 +1237,8 @@ jobs:
   # version alias promote-versions published, its evidence names the pinned
   # tags, each tag resolves to its pinned digest, and the operator's evidence
   # binding reads back. operator-lifecycle covers install, upgrade and
-  # rollout with validation off. Like it, this runs third-party images on
+  # rollout, and the candidate operator's own validation stage (#3646). Like
+  # it, this runs third-party images on
   # privileged kind nodes, holds no release identity and publishes nothing.
   operator-validation:
     name: Operator Validation with the Tag's AICR
