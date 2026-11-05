@@ -71,7 +71,7 @@ spec:
   # range cannot separate the two series because pkg/version.Compare drops every
   # build suffix except -gke.N, so 7.0.0-1018-nvidia-64k and
   # 7.0.0-2022-nvidia-bos-64k both compare as 7.0.0 (verified: ">= 7.0.0-2000"
-  # accepts the 1018 build). An exact == would pin one build.
+  # accepts the 1018 build). An exact == would pin one build. Enforce it
   # out-of-band until a kernel-flavour measurement exists -- the same posture
   # vr200-rke2 takes for its 615 host-driver floor.
 
@@ -108,8 +108,8 @@ spec:
         devicePlugin:
           enabled: true
           # Helm replaces lists: the first two entries restate the component
-          # base. MOFED_ENABLED off so only pods requesting a rail VF receive
-          # /dev/infiniband.
+          # base. MOFED_ENABLED off because no RDMA path is wired on this leaf --
+          # no rail VFs exist for a pod to request.
           env:
             - name: DP_DISABLE_HEALTHCHECKS
               value: "109"
@@ -156,11 +156,13 @@ spec:
     # hardcode four ConnectX-7 IB rails per tray, and that shape does not fit
     # here. VR200 is ConnectX-9, but measured on both workers all twelve mlx5
     # ports report link_layer Ethernet with RoCE v2 GIDs and not one reports
-    # InfiniBand, so linkType IB and SriovIBNetwork do not apply. Four PFs are
-    # SR-IOV capable (sriov_totalvfs 46, numvfs 0), but one is enslaved to the
-    # DOCA OVS bridge carrying the node address and the default route, so it
-    # cannot be carved. Wire a RoCE SriovNetwork from a confirmed fabric
-    # design, not from this inventory alone.
+    # InfiniBand, so linkType IB and SriovIBNetwork do not apply. The two NIC
+    # families differ in VF ceiling: the eight ConnectX-9 ports (dev 0x1025,
+    # 200 Gb/s) report sriov_totalvfs 1, while the four 400 Gb/s ports (dev
+    # 0xa2df) report 46. numvfs is 0 on all of them, and one 0xa2df port is
+    # enslaved to the DOCA OVS bridge carrying the node address and the default
+    # route, so it cannot be carved. Wire a RoCE SriovNetwork from a confirmed
+    # fabric design, not from this inventory alone.
     - name: network-operator
       type: Helm
       valuesFile: components/network-operator/values-nvke-gb200.yaml

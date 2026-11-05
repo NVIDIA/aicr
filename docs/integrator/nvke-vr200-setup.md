@@ -61,10 +61,14 @@ userspace, but the kernel driver is the distribution's inbox `mlx5_core`, not
 DOCA-OFED. Feature parity and qualified RDMA performance with DOCA-OFED are not
 claimed.
 
-**Not verified end to end.** The compiled-validator path for this coordinate is
-exercised by CI on merge, not on hardware here. The NicClusterPolicy applies and
-its `nic-configuration-operator` reaches Running on the released NVAIE images,
-but it carries only NIC configuration — no RDMA path is wired through it.
+**No NicClusterPolicy is deployed.** The leaf inherits `deployCR: false` and
+supplies no policy manifest, so the bundle installs none. It was removed
+because the `nic-configuration-daemon` it would start cannot discover
+ConnectX-9 — see [#3640](https://github.com/NVIDIA/aicr/issues/3640).
+`network-operator` itself stays installed, with the SR-IOV operator off.
+
+**Not verified end to end.** The compiled-validator path for this coordinate
+is exercised by CI on merge, not on hardware here.
 
 ## Known gaps
 
@@ -74,16 +78,3 @@ but it carries only NIC configuration — no RDMA path is wired through it.
 - A stable VR200 product matcher; until then, mixed GPU pools need
   `--node-selector`.
 
-## Removing a NicClusterPolicy with secondaryNetwork breaks pod creation
-
-Deleting a NicClusterPolicy that carries `secondaryNetwork` removes the multus
-DaemonSet and its RBAC but leaves `/etc/cni/net.d/00-multus.conflist` on every
-node. That file sorts ahead of the primary CNI config, so every new pod sandbox
-still routes through multus, which can no longer reach the API server:
-
-```
-plugin type="multus" failed (add): Multus: error waiting for pod: Unauthorized
-```
-
-No pod can start cluster-wide until the file is removed. Delete it on each node
-after removing the CR, leaving the primary CNI config in place.
