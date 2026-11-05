@@ -29,8 +29,8 @@ name: Merge Gate
 # The push trigger covers what on-push.yaml does not. on-push.yaml already runs
 # the full qualification on every main push, so this workflow skips its `tests`
 # job there (see below) and contributes only its own checks: actionlint,
-# verify-licenses, verify-renovate, docs-mdx, malware-scan, CodeQL and the
-# freshness gates.
+# verify-licenses, verify-renovate, docs-mdx, malware-scan, CodeQL, the
+# operator generated-code check and the freshness gates.
 #
 # That matters because main's ruleset is bypassable and bypassing is routine
 # here -- a direct push reports "Bypassed rule violations ... 2 of 2 required
@@ -93,6 +93,7 @@ jobs:
       notices: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.notices }}
       coverage: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.coverage }}
       docs: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.docs }}
+      operator: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.operator }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -377,6 +378,33 @@ jobs:
               - 'tools/docs-published-files'
               - 'tools/mdx/**'
               - 'Makefile'
+              - '.github/workflows/merge-gate.yaml'
+            operator:
+              # Inputs to make operator-check-generated and make
+              # operator-envtest-floor. The operator-boundary depguard rule
+              # limits what packages in api/operator and tests/operator import
+              # from this module to api/operator, pkg/operator and
+              # tests/operator, so the three trees cover every Go file the
+              # suites build from. The chart is
+              # both the generated CRDs' destination and what the chart suite
+              # installs. Generation reads the controller-gen pin in
+              # .settings.yaml, its wrapper and boilerplate, and the license
+              # header it prepends to each CRD; .settings.yaml also pins the
+              # Kubernetes floor and the tools the job installs.
+              - 'api/operator/**'
+              - 'pkg/operator/**'
+              - 'tests/operator/**'
+              - 'charts/aicr-operator/**'
+              - 'tools/operator-controller-gen'
+              - 'tools/operator-boilerplate.go.txt'
+              - '.github/headers/LICENSE'
+              - '.settings.yaml'
+              - '.go-version'
+              - 'go.mod'
+              - 'go.sum'
+              - 'Makefile'
+              - '.github/actions/load-versions/**'
+              - '.github/actions/setup-build-tools/**'
               - '.github/workflows/merge-gate.yaml'
 
       # code = true iff at least one changed file is NOT docs/markdown/LICENSE.
@@ -1099,6 +1127,49 @@ jobs:
       - run: echo "No coverage-matrix inputs changed — freshness check not required"
 
   # ---------------------------------------------------------------------------
+  # AICR Operator generated code and Kubernetes floor. An api/operator type
+  # change without `make generate` still builds and can pass `make test`, which
+  # runs the CRD validation and chart suites on the newest envtest release only.
+  # ---------------------------------------------------------------------------
+
+  operator-generated:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.operator == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/load-versions
+        id: versions
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: true
+      - uses: ./.github/actions/setup-build-tools
+        with:
+          install_setup_envtest: 'true'
+          setup_envtest_version: ${{ steps.versions.outputs.setup_envtest }}
+          setup_envtest_sha256: ${{ steps.versions.outputs.setup_envtest_sha256_linux_amd64 }}
+          install_helm: 'true'
+          helm_version: ${{ steps.versions.outputs.helm }}
+          install_yq: 'true'
+          yq_version: ${{ steps.versions.outputs.yq }}
+      - name: Generated code is current
+        run: make operator-check-generated
+      - name: CRD validation and chart suites on the Kubernetes floor
+        run: make operator-envtest-floor
+
+  operator-generated-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.operator != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - run: echo "No operator API, chart or generator inputs changed, so the check is not required"
+
+  # ---------------------------------------------------------------------------
   # Aggregate gate — the single required status check
   # ---------------------------------------------------------------------------
 
@@ -1138,6 +1209,8 @@ jobs:
       - notices-generator-skip
       - coverage-freshness
       - coverage-freshness-skip
+      - operator-generated
+      - operator-generated-skip
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:

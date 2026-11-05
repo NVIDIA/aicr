@@ -971,24 +971,32 @@ Three properties make it a scoping tool rather than a way to hide a failure:
   so a new check in a recipe runs and can fail, which forces a decision rather
   than hiding one.
 
-The CNCF conformance evidence path is different, and the two flags are refused
-together for that reason. `pkg/evidence/cncf` renders one markdown file per
-*requirement* and drops every skipped entry before grouping, so a requirement
-whose checks were all skipped would produce no file and no index entry, with
-nothing recording the omission. A submission that silently omits a requirement
-reads as complete when it is not, so `--skip-check` with `--evidence-dir` (and
-therefore with `--cncf-submission`, which requires it) is rejected up front:
+The CNCF conformance evidence path refuses the two flags together for a
+different reason. `pkg/evidence/cncf` renders one markdown file per
+*requirement* of the upstream checklist version selected from the cluster's
+Kubernetes minor (see [Checklist Versions](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#checklist-versions))
+and aggregates each requirement's status fail-closed from every check expected
+to evidence it (see [Requirement status](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#requirement-status)).
+The renderer records a skipped check as `NOT TESTED` with its reason code
+(for example `slurm-managed-gpus`, when `secure-accelerator-access` defers to
+the Slurm path and `slinky-slurm-gpu-access` did not run), so a skip is
+reported rather than hidden, but a run that
+withholds a check the recipe declares is narrower than the recipe by
+construction and cannot evidence that recipe. `--skip-check` is for lanes
+that cannot host a check at all; those are not submission lanes, so
+`--skip-check` with `--evidence-dir` (and therefore with `--cncf-submission`,
+which requires it) is rejected up front:
 
 ```
-[INVALID_REQUEST] --skip-check cannot be combined with --evidence-dir: the CNCF
-evidence renderer omits skipped checks entirely, so a withheld requirement would
-leave no file and no index entry and the rendered evidence would read as a
-complete submission
+[INVALID_REQUEST] --skip-check cannot be combined with --evidence-dir: a
+withheld check leaves its requirement NOT TESTED, so the run is narrower than
+the recipe by construction and cannot produce conformance evidence for it
 ```
 
-Lifting that restriction means deciding how a withheld requirement should be
-represented in a submission, which is a change to what the submission contains
-rather than a detail of this flag.
+The requirement aggregation, and the `spec.validate.evidence.cncf.notApplicable`
+key it reads, apply to the evidence `--evidence-dir` renders from a validator
+run. They have no effect under `--cncf-submission`, which still runs the bash
+collector until #3602 retires that path.
 
 ## Scoping CNCF submission evidence to specific features
 

@@ -54,7 +54,9 @@ Two flags do read a cluster. --from cluster takes the source side from what
 Helm and Argo CD each recorded they last applied. That answers which version
 is installed and answers nothing else: a resource somebody edited by hand
 leaves the record untouched, and reading the record will not say so. It is not
-a view of live state.
+a view of live state. An Application the AICR Operator wrote pins its chart by
+digest, so its version is read from the operator's plans in
+--operator-namespace.
 
 --scan-cluster is an advisory pass for objects an upgrade could disturb that
 carry no deployer ownership marker. It warns and never changes the exit code.
@@ -132,6 +134,13 @@ func upgradeCheckCmdFlags() []cli.Flag {
 				aicr.FromCluster),
 			Category: catInput,
 		},
+		&cli.StringFlag{
+			Name:  "operator-namespace",
+			Value: defaults.AICROperatorNamespace,
+			Usage: fmt.Sprintf("namespace of the AICR Operator, whose plans version the Argo CD Applications it "+
+				"wrote; read only with --from %s", aicr.FromCluster),
+			Category: catInput,
+		},
 		&cli.BoolFlag{
 			Name:  "fail-on-error",
 			Value: true,
@@ -151,7 +160,7 @@ func upgradeCheckCmdFlags() []cli.Flag {
 // runUpgradeCheckCmd executes the upgrade-check command.
 func runUpgradeCheckCmd(ctx context.Context, cmd *cli.Command) error {
 	if err := validateSingleValueFlags(cmd,
-		"from", "to", "deployer", "scan-cluster", "output", "format", "kubeconfig"); err != nil {
+		"from", "to", "deployer", "scan-cluster", "operator-namespace", "output", "format", "kubeconfig"); err != nil {
 		return err
 	}
 
@@ -226,10 +235,11 @@ func runUpgradeCheckCmd(ctx context.Context, cmd *cli.Command) error {
 // scan --from cluster implies on every run that never mentioned it.
 func upgradeCheckRequestFrom(cmd *cli.Command) aicr.UpgradeCheckRequest {
 	req := aicr.UpgradeCheckRequest{
-		From:       cmd.String("from"),
-		To:         cmd.String("to"),
-		Deployer:   cmd.String("deployer"),
-		Kubeconfig: cmd.String("kubeconfig"),
+		From:              cmd.String("from"),
+		To:                cmd.String("to"),
+		Deployer:          cmd.String("deployer"),
+		Kubeconfig:        cmd.String("kubeconfig"),
+		OperatorNamespace: cmd.String("operator-namespace"),
 	}
 	if cmd.IsSet("scan-cluster") {
 		scan := cmd.Bool("scan-cluster")

@@ -215,7 +215,11 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		}
 	}
 
-	lfComponents := toLocalformatComponents(components, g.ComponentValues, g.DynamicValues, crdOwners, crdExclusions, chartDigests)
+	requiredDynamic, err := deployer.ResolveRequiredDynamicPaths(ctx, g.RecipeResult.DataProvider(), g.RecipeResult.ComponentRefs, g.DynamicValues)
+	if err != nil {
+		return nil, err
+	}
+	lfComponents := toLocalformatComponents(components, g.ComponentValues, g.DynamicValues, requiredDynamic, crdOwners, crdExclusions, chartDigests)
 	writeResult, err := localformat.Write(ctx, localformat.Options{
 		OutputDir:              outputDir,
 		Components:             lfComponents,
@@ -437,6 +441,7 @@ func toLocalformatComponents(
 	components []ComponentData,
 	values map[string]map[string]any,
 	dynamic map[string][]string,
+	requiredDynamic map[string][]string,
 	crdOwners map[string]bool,
 	crdExclusions map[string][]string,
 	chartDigests map[string]string,
@@ -445,19 +450,20 @@ func toLocalformatComponents(
 	out := make([]localformat.Component, 0, len(components))
 	for _, c := range components {
 		out = append(out, localformat.Component{
-			Name:                c.Name,
-			Namespace:           c.Namespace,
-			Repository:          c.Repository,
-			ChartName:           c.ChartName,
-			Version:             c.Version,
-			IsOCI:               c.IsOCI,
-			ChartDigest:         chartDigests[c.Name],
-			Tag:                 c.Tag,
-			Path:                c.Path,
-			Values:              values[c.Name],
-			DynamicPaths:        dynamic[c.Name],
-			OwnsCRDs:            crdOwners[c.Name],
-			CRDExcludeSubcharts: crdExclusions[c.Name],
+			Name:                 c.Name,
+			Namespace:            c.Namespace,
+			Repository:           c.Repository,
+			ChartName:            c.ChartName,
+			Version:              c.Version,
+			IsOCI:                c.IsOCI,
+			ChartDigest:          chartDigests[c.Name],
+			Tag:                  c.Tag,
+			Path:                 c.Path,
+			Values:               values[c.Name],
+			DynamicPaths:         dynamic[c.Name],
+			RequiredDynamicPaths: requiredDynamic[c.Name],
+			OwnsCRDs:             crdOwners[c.Name],
+			CRDExcludeSubcharts:  crdExclusions[c.Name],
 		})
 	}
 	return out

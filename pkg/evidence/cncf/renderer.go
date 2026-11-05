@@ -12,11 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package cncf renders CNCF AI Conformance evidence markdown from CTRF reports.
+// Package cncf renders CNCF AI Conformance evidence markdown from CTRF
+// reports against a published upstream checklist version.
+//
+// The upstream checklists (cncf/k8s-ai-conformance docs/AIConformance-*.yaml)
+// are embedded verbatim under schemas/ and pinned by digest in checklist.go;
+// ChecklistFor exposes every requirement of a version with its upstream id,
+// description and level, and SupportedVersions lists the versions this build
+// carries. requirements.go is AICR's side of the map: which conformance
+// checks evidence which requirement, and the evidence page each renders to.
+// A Renderer takes the checklist version from WithConformanceVersion
+// (default LatestVersion); a check whose requirement that version does not
+// list (dra_support from v1.36 on) renders as supporting evidence, not as a
+// requirement row. aggregate.go computes each requirement's verdict
+// fail-closed from the checks expected to evidence it (AggregateReport), the
+// single source for the index and for submission packaging.
 package cncf
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -37,6 +52,9 @@ var (
 // Renderer generates CNCF conformance evidence documents from CTRF reports.
 type Renderer struct {
 	outputDir string
+	// version is the upstream checklist the evidence is rendered against.
+	// Zero means LatestVersion.
+	version Version
 	// now overrides wall-clock time when non-zero. Set via WithNow for
 	// reproducible builds (SLSA, signed artifacts) where the index file
 	// and embedded entry timestamps must be byte-stable across runs.
@@ -44,6 +62,9 @@ type Renderer struct {
 	// timestamp and threads it through buildEntries and renderIndex so
 	// the two outputs always agree within a single render.
 	now time.Time
+	// notApplicable maps a conditional MUST id to the justification that
+	// renders it not applicable; see WithNotApplicable.
+	notApplicable map[string]string
 }
 
 // Option configures a Renderer.
@@ -62,6 +83,28 @@ func WithOutputDir(dir string) Option {
 func WithNow(t time.Time) Option {
 	return func(r *Renderer) {
 		r.now = t
+	}
+}
+
+// WithConformanceVersion selects the upstream checklist version the evidence
+// is rendered against. The default is LatestVersion. An unsupported version
+// is reported by Render with ErrCodeInvalidRequest.
+func WithConformanceVersion(v Version) Option {
+	return func(r *Renderer) {
+		r.version = v
+	}
+}
+
+// WithNotApplicable declares conditional MUST requirements not applicable,
+// keyed by upstream id with the justification as value: the validate config
+// key spec.validate.evidence.cncf.notApplicable. It is the only source of a
+// not-applicable status. Only a conditional MUST (today cluster_autoscaling)
+// may appear; Render reports any other id with ErrCodeInvalidRequest. A
+// declared requirement renders not applicable even when its check ran, and
+// that result is kept as an observation.
+func WithNotApplicable(notApplicable map[string]string) Option {
+	return func(r *Renderer) {
+		r.notApplicable = notApplicable
 	}
 }
 
@@ -86,21 +129,48 @@ func (r *Renderer) renderTimestamp() time.Time {
 	return time.Now().UTC()
 }
 
-// Render generates evidence markdown files from a CTRF report.
-// Groups test results by CNCF requirement. Only submission-required
-// checks produce evidence. Skipped tests are excluded.
+// Version returns the checklist version this Renderer renders against.
+func (r *Renderer) Version() Version {
+	if r.version == "" {
+		return LatestVersion
+	}
+	return r.version
+}
+
+// Render generates evidence markdown files from a CTRF report. It is
+// RenderWithResult without the aggregate; see there for the contract.
 func (r *Renderer) Render(ctx context.Context, report *ctrf.Report) error {
+	_, err := r.RenderWithResult(ctx, report)
+	return err
+}
+
+// RenderWithResult aggregates the report against the checklist version
+// (AggregateReport) and writes one evidence page per requirement that a
+// non-skipped check evidenced, plus index.md listing every requirement of the
+// checklist with its aggregate status. The aggregate is returned whenever
+// the error is nil, including when nothing is written: a nil or empty report,
+// or one with no submission-required result, writes no file and the aggregate
+// reports every requirement not tested, except those WithNotApplicable
+// declares, which stay not applicable.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when the output directory is unset, the
+//     checklist version is unsupported, or WithNotApplicable names a
+//     requirement that may not be declared not applicable.
+//   - ErrCodeTimeout when ctx ends before rendering completes.
+//   - ErrCodeInternal when a file cannot be written.
+func (r *Renderer) RenderWithResult(ctx context.Context, report *ctrf.Report) (*Aggregate, error) {
 	if r.outputDir == "" {
-		return errors.New(errors.ErrCodeInvalidRequest, "evidence output directory not set")
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "evidence output directory not set")
+	}
+	agg, err := AggregateReport(r.Version(), report, r.notApplicable)
+	if err != nil {
+		return nil, err
 	}
 
 	if report == nil || len(report.Results.Tests) == 0 {
 		slog.Warn("no tests in CTRF report, skipping evidence rendering")
-		return nil
-	}
-
-	if err := os.MkdirAll(r.outputDir, 0o755); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create evidence directory", err)
+		return agg, nil
 	}
 
 	// Capture a single render-scoped timestamp threaded through both
@@ -109,20 +179,27 @@ func (r *Renderer) Render(ctx context.Context, report *ctrf.Report) error {
 	// subsequent Render() calls.
 	renderNow := r.renderTimestamp()
 
-	entries := r.buildEntries(report, renderNow)
+	entries, err := r.buildEntries(report, agg, renderNow)
+	if err != nil {
+		return nil, err
+	}
 	if len(entries) == 0 {
 		slog.Warn("no submission-required checks found, skipping evidence rendering")
-		return nil
+		return agg, nil
+	}
+
+	if err := os.MkdirAll(r.outputDir, 0o755); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create evidence directory", err)
 	}
 
 	for _, entry := range entries {
 		select {
 		case <-ctx.Done():
-			return errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "rendering evidence")
+			return nil, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "rendering evidence")
 		default:
 		}
 		if err := r.renderEvidence(entry); err != nil {
-			return errors.WrapWithContext(errors.ErrCodeInternal,
+			return nil, errors.WrapWithContext(errors.ErrCodeInternal,
 				"render evidence entry", err,
 				map[string]any{
 					"requirement": entry.RequirementID,
@@ -133,19 +210,31 @@ func (r *Renderer) Render(ctx context.Context, report *ctrf.Report) error {
 
 	select {
 	case <-ctx.Done():
-		return errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "rendering evidence")
+		return nil, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "rendering evidence")
 	default:
 	}
-	return r.renderIndex(entries, renderNow)
+	if err := r.renderIndex(entries, agg, renderNow); err != nil {
+		return nil, err
+	}
+	return agg, nil
 }
 
-// buildEntries groups CTRF test results by requirement.
-func (r *Renderer) buildEntries(report *ctrf.Report, now time.Time) []evidenceEntry {
-	// Group by evidence file, preserving order of first appearance.
+// Reasons an index row carries NOT TESTED when no expected check produced a
+// result: AICR ships no check for the requirement, or none of its checks ran.
+const (
+	untestedNoCheck = "no AICR check"
+	untestedNotRun  = "not run"
+)
+
+// buildEntries groups the non-skipped CTRF results of submission checks by
+// evidence page, in order of first appearance, and stamps each page with the
+// aggregate verdict of its requirement. A skipped check gets no section: its
+// reason is carried by the aggregate (CheckResult.Reason) and, when it left
+// the requirement incomplete, by the page's result line.
+func (r *Renderer) buildEntries(report *ctrf.Report, agg *Aggregate, now time.Time) ([]evidenceEntry, error) {
 	type fileGroup struct {
-		meta    *requirementMeta
-		checks  []checkEntry
-		hasFail bool
+		meta   *CheckEvidence
+		checks []checkEntry
 	}
 	groupOrder := make([]string, 0)
 	groups := make(map[string]*fileGroup)
@@ -155,7 +244,10 @@ func (r *Renderer) buildEntries(report *ctrf.Report, now time.Time) []evidenceEn
 			continue
 		}
 
-		meta := GetRequirement(test.Name)
+		meta, err := GetRequirement(r.Version(), test.Name)
+		if err != nil {
+			return nil, err
+		}
 		if meta == nil {
 			// Not a submission-required check — skip.
 			continue
@@ -176,17 +268,18 @@ func (r *Renderer) buildEntries(report *ctrf.Report, now time.Time) []evidenceEn
 			groupOrder = append(groupOrder, meta.File)
 		}
 		g.checks = append(g.checks, ce)
-		if test.Status == ctrf.StatusFailed {
-			g.hasFail = true
-		}
 	}
 
 	entries := make([]evidenceEntry, 0, len(groupOrder))
 	for _, filename := range groupOrder {
 		g := groups[filename]
-		status := ctrf.StatusPassed
-		if g.hasFail {
-			status = ctrf.StatusFailed
+		result := agg.Requirement(g.meta.RequirementID)
+		if result == nil {
+			result = supportingResult(agg, g.meta.RequirementID)
+		}
+		if result == nil {
+			return nil, errors.New(errors.ErrCodeInternal, fmt.Sprintf(
+				"requirement %q has results but no aggregate verdict", g.meta.RequirementID))
 		}
 		entries = append(entries, evidenceEntry{
 			RequirementID: g.meta.RequirementID,
@@ -194,12 +287,26 @@ func (r *Renderer) buildEntries(report *ctrf.Report, now time.Time) []evidenceEn
 			Description:   g.meta.Description,
 			Filename:      filename,
 			Checks:        g.checks,
-			Status:        status,
+			Status:        result.Status,
+			Reason:        result.Reason,
+			Proof:         result.Proof,
+			Level:         g.meta.Level,
+			Supporting:    g.meta.Supporting,
+			Version:       r.Version(),
 			GeneratedAt:   now,
 		})
 	}
 
-	return entries
+	return entries, nil
+}
+
+func supportingResult(agg *Aggregate, id string) *RequirementResult {
+	for i := range agg.Supporting {
+		if agg.Supporting[i].ID == id {
+			return &agg.Supporting[i]
+		}
+	}
+	return nil
 }
 
 func (r *Renderer) renderEvidence(entry evidenceEntry) (err error) {
@@ -221,7 +328,7 @@ func (r *Renderer) renderEvidence(entry evidenceEntry) (err error) {
 	return nil
 }
 
-func (r *Renderer) renderIndex(entries []evidenceEntry, now time.Time) (err error) {
+func (r *Renderer) renderIndex(entries []evidenceEntry, agg *Aggregate, now time.Time) (err error) {
 	path := filepath.Join(r.outputDir, "index.md")
 	f, createErr := os.Create(path)
 	if createErr != nil {
@@ -233,12 +340,39 @@ func (r *Renderer) renderIndex(entries []evidenceEntry, now time.Time) (err erro
 		}
 	}()
 
+	byRequirement := make(map[string]evidenceEntry, len(entries))
 	data := struct {
 		GeneratedAt time.Time
-		Entries     []evidenceEntry
+		Version     Version
+		Passed      bool
+		Rows        []indexRow
+		Supporting  []evidenceEntry
 	}{
 		GeneratedAt: now,
-		Entries:     entries,
+		Version:     r.Version(),
+		Passed:      agg.Passed(),
+	}
+	for _, e := range entries {
+		if e.Supporting {
+			data.Supporting = append(data.Supporting, e)
+			continue
+		}
+		byRequirement[e.RequirementID] = e
+	}
+	// Every requirement of the checklist, in upstream order, whether or not
+	// a check evidenced it, so the index shows the whole checklist.
+	for _, res := range agg.Requirements {
+		row := indexRow{
+			RequirementID: res.ID,
+			Level:         res.Level,
+			Status:        res.Status,
+			Reason:        tableCell(res.Reason),
+		}
+		if e, ok := byRequirement[res.ID]; ok {
+			row.Title = e.Title
+			row.Filename = e.Filename
+		}
+		data.Rows = append(data.Rows, row)
 	}
 
 	if execErr := parsedIndexTemplate.Execute(f, data); execErr != nil {
@@ -250,8 +384,29 @@ func (r *Renderer) renderIndex(entries []evidenceEntry, now time.Time) (err erro
 
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"upper": strings.ToUpper,
-		"add":   func(a, b int) int { return a + b },
-		"join":  strings.Join,
+		"upper":  strings.ToUpper,
+		"add":    func(a, b int) int { return a + b },
+		"join":   strings.Join,
+		"result": formatResult,
 	}
+}
+
+// tableCell makes s safe inside one Markdown table cell: whitespace,
+// newlines included, collapses to single spaces and pipes are escaped. The
+// not-applicable justification is the one user-supplied string that reaches
+// the index table.
+func tableCell(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	return strings.ReplaceAll(s, "|", `\|`)
+}
+
+// formatResult renders a verdict cell: the status in upper case, followed by
+// the reason (the N/A justification, the failing checks, the unmet
+// prerequisites) when there is one.
+func formatResult(status RequirementStatus, reason string) string {
+	out := strings.ToUpper(string(status))
+	if reason != "" {
+		out += " (" + reason + ")"
+	}
+	return out
 }

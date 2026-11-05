@@ -45,6 +45,7 @@ rejects unknown keys. The operator namespace is the release namespace.
 ```yaml
 aicr:
   version: v1.0.0                     # chart and operator require >=1.0.0, <2.0.0
+  allowPrerelease: false              # true accepts a prerelease version, such as a release candidate
   image: ghcr.io/nvidia/aicr@sha256:<digest>       # CLI and snapshot agent
   validatorImages: []                 # required with validation.enabled: each validator image as repository:tag@sha256:<digest>
   jobs:                               # placement of every AICR Job's pod; empty places none
@@ -94,7 +95,13 @@ development:
   skipDiscovery: false                # development builds only: declared criteria, no node gates or snapshot
 ```
 
-The chart fails to render when `aicr.version` is outside `>=1.0.0, <2.0.0`.
+The chart fails to render when `aicr.version` is outside `>=1.0.0, <2.0.0`,
+or is a prerelease without `aicr.allowPrerelease: true`.
+
+A prerelease, such as a release candidate or a build from a commit, counts as
+the release it precedes: `v1.1.0-rc.1` gets the v1.1.0 behavior and is in range
+because v1.1.0 is.
+
 The operator also checks the version each AICR Job reports and stops on a
 mismatch. `engine.type` accepts only `ArgoCD` in this release; the chart schema
 and the operator reject any other value. CRDs, namespaces, the AppProject, the
@@ -426,7 +433,8 @@ status:
   current: {release: gpu-operator-readiness, operation: Verify, startedAt: <time>}
                                       # timeoutFrom: <time> once a halt ended; the action timeout runs from it
   releases:                           # state: Pending | Progressing | Ready | Failed | Suspended (step in flight while halted) | Deleting | Removed | Unknown
-  - {id: cert-manager, state: Ready, revision: sha256:<...>, specDigest: sha256:<...>}   # specDigest: the spec this rollout wrote, from when it became ready
+  - {id: cert-manager, state: Ready, revision: sha256:<...>, specDigest: sha256:<...>,  # specDigest: the spec this rollout wrote, from when it became ready
+     startedAt: <time>, finishedAt: <time>, waitedOn: ReconcileStale}                  # the step's start and end (ready, removed, failed, or the rollout ended mid-step), and the last reason it waited on
   - {id: nvsentinel, state: Removed}
   validation: {job: <name>, runID: <id>, result: Passed, evidence: oci://<ref>@sha256:<...>}
   message: ""

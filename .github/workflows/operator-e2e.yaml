@@ -13,8 +13,6 @@
 # limitations under the License.
 
 # AICR Operator (ADR-027) lanes that `make test` cannot cover:
-#   - the CRD validation and chart suites on the Kubernetes floor, and
-#     generated code;
 #   - `make operator-e2e` (the pinned AICR images as operator-built Jobs);
 #   - `make operator-skeleton` (the operator with the pinned Argo CD, one
 #     release end to end);
@@ -22,7 +20,8 @@
 #     of the commit, upgraded mid-rollout to a second one);
 # each on its own kind cluster, for every AICR release in .settings.yaml
 # (operator.aicr_e2e), on the Kubernetes floor and the newest supported
-# version.
+# version. Generated code and the envtest suites on the floor are checked by
+# merge-gate.yaml's operator-generated job, which gates the merge.
 
 name: Operator E2E
 
@@ -60,8 +59,10 @@ on:
 permissions:
   contents: read
 
+# Push runs key on the SHA, as merge-gate.yaml's do: in a ref-keyed group the
+# next push to main replaces a pending run, and that merged commit never runs.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -128,43 +129,6 @@ jobs:
         run: |
           set -euo pipefail
           bash kwok/scripts/lib/image-cache.sh save "${CACHE_DIR}" "${IMAGE}"
-
-  floor:
-    name: Kubernetes floor and generated code
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Load versions
-        id: versions
-        uses: ./.github/actions/load-versions
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version: ${{ steps.versions.outputs.go }}
-          cache: false
-
-      - name: Install setup-envtest, Helm and yq
-        uses: ./.github/actions/setup-build-tools
-        with:
-          install_setup_envtest: 'true'
-          setup_envtest_version: '${{ steps.versions.outputs.setup_envtest }}'
-          setup_envtest_sha256: '${{ steps.versions.outputs.setup_envtest_sha256_linux_amd64 }}'
-          install_helm: 'true'
-          helm_version: '${{ steps.versions.outputs.helm }}'
-          install_yq: 'true'
-          yq_version: '${{ steps.versions.outputs.yq }}'
-
-      - name: Generated code is current
-        run: make operator-check-generated
-
-      - name: CRD validation and chart suites on the floor
-        run: make operator-envtest-floor
 
   # Job timeouts exceed the sum of their steps' own bounds, so a hung suite
   # fails with Go's goroutine dump and the log steps still run.
@@ -284,6 +248,50 @@ jobs:
           AICR_E2E_VERSION: ${{ matrix.aicr.version }}
           AICR_E2E_VALIDATOR_IMAGES: ${{ matrix.aicr.validator_images }}
         run: make operator-qualify
+
+      - name: Operator logs
+        if: ${{ failure() || cancelled() }}
+        run: |
+          kubectl --kubeconfig .operator-e2e/kubeconfig -n aicr-system logs deployment/aicr-operator --tail=300 || true
+          kubectl --kubeconfig .operator-e2e/kubeconfig get clusterruntimes,runtimerollouts -o yaml || true
+
+      - name: Delete kind cluster
+        if: ${{ always() }}
+        run: make operator-kind-down
+
+  # The lifecycle scenarios from the newest published release: its chart and
+  # images, attestations verified, upgraded mid-rollout to this commit's
+  # candidate, rolled back with helm rollback and uninstalled in the documented
+  # order (docs/operator/lifecycle.md). Each release keeps its own AICR
+  # default, so when the two defaults differ the upgrade also moves AICR
+  # within v1.
+  qualify-published:
+    name: Qualify an upgrade from the published release on Kubernetes newest
+    needs: [matrix, prime-images]
+    runs-on: ubuntu-24.04
+    # Above the 45m test timeout make operator-qualify-published sets, plus
+    # kind setup and the candidate build.
+    timeout-minutes: 75
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up the kind cluster
+        uses: ./.github/actions/operator-kind
+        with:
+          kubernetes: newest
+
+      - name: Build the candidate
+        run: CANDIDATE_VERSION=v0.0.0-rc.0 make operator-candidate
+
+      - name: Qualify the upgrade from the published release
+        env:
+          OPERATOR_E2E_REQUIRED: '1'
+          OPERATOR_KIND_IMAGE_CACHE: ${{ runner.temp }}/kind-images
+          GH_TOKEN: ${{ github.token }}
+        run: make operator-qualify-published
 
       - name: Operator logs
         if: ${{ failure() || cancelled() }}

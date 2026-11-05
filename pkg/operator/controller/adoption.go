@@ -240,13 +240,19 @@ func (r *RolloutReconciler) adopt(ctx context.Context, rt *v1alpha1.ClusterRunti
 		}
 		if err = r.Engine.Adopt(ctx, ro.Annotations[v1alpha1.AnnotationAdoptedFrom], string(rt.UID), entry.Name, entry.UID); err != nil {
 			if operrors.IsPermanent(err) {
-				setReleaseState(ro, step.Release, v1alpha1.ReleaseFailed, "")
+				now := r.Now()
+				r.startStep(ctx, ro, step, v1alpha1.ReleaseProgressing, metav1.NewTime(now))
+				r.finishStep(ctx, ro, step.Release, v1alpha1.ReleaseFailed, "", now)
 				return false, r.finish(ctx, ro, v1alpha1.PhaseFailed, errorMessage(err))
 			}
 			return false, err
 		}
 	}
-	setReleaseState(ro, step.Release, v1alpha1.ReleaseReady, entry.Revision)
+	// Adoption only moves ownership, in one pass: the step starts and ends
+	// here.
+	now := r.Now()
+	r.startStep(ctx, ro, step, v1alpha1.ReleaseProgressing, metav1.NewTime(now))
+	r.finishStep(ctx, ro, step.Release, v1alpha1.ReleaseReady, entry.Revision, now)
 	// Adoption changes only ownership, so the spec stays as it started.
 	recordSpec(ro, step.Release, entry.SpecDigest)
 	ro.Status.Current = nil

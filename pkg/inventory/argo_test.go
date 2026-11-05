@@ -274,7 +274,11 @@ func withoutStatus(manifest string) string {
 // kind has to be declared because there is no typed scheme to infer it from.
 func argoClient(objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
 	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
-		map[schema.GroupVersionResource]string{argoApplicationGVR: "ApplicationList", secretGVR: "SecretList"},
+		map[schema.GroupVersionResource]string{
+			argoApplicationGVR:                      "ApplicationList",
+			secretGVR:                               "SecretList",
+			{Version: "v1", Resource: "configmaps"}: "ConfigMapList",
+		},
 		objects...)
 }
 
@@ -845,7 +849,7 @@ spec: {source: {path: 001-alpha}, destination: {server: "https://kubernetes.defa
 				within = argoTestScope()
 			}
 
-			read, err := argoApplications(ctx, client, within)
+			read, err := argoApplications(ctx, client, within, testOperatorNamespace)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("argoApplications() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -970,7 +974,7 @@ func TestArgoApplicationsFollowsListPages(t *testing.T) {
 				return true, tt.answers[listed-1], nil
 			})
 
-			read, err := argoApplications(context.Background(), client, argoTestScope())
+			read, err := argoApplications(context.Background(), client, argoTestScope(), testOperatorNamespace)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("argoApplications() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -1015,7 +1019,7 @@ func TestArgoApplicationsCancellationBetweenPages(t *testing.T) {
 		return true, list, nil
 	})
 
-	read, err := argoApplications(ctx, client, argoTestScope())
+	read, err := argoApplications(ctx, client, argoTestScope(), testOperatorNamespace)
 	if err == nil {
 		t.Fatalf("argoApplications() = %+v, want an error", read)
 	}
@@ -1073,7 +1077,7 @@ func TestArgoApplicationsEchoesPagingOptions(t *testing.T) {
 		t.Fatalf("dynamic client for %s: %v", server.URL, err)
 	}
 
-	read, err := argoApplications(context.Background(), client, argoTestScope())
+	read, err := argoApplications(context.Background(), client, argoTestScope(), testOperatorNamespace)
 	if err != nil {
 		t.Fatalf("argoApplications() error = %v", err)
 	}
@@ -1424,7 +1428,7 @@ func TestArgoApplicationsReadsOnlyThisCluster(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := argoApplications(t.Context(), argoClient(tt.objects...), newScope("cert-manager", "gpu-operator"))
+			got, err := argoApplications(t.Context(), argoClient(tt.objects...), newScope("cert-manager", "gpu-operator"), testOperatorNamespace)
 			if tt.wantErrCode != "" {
 				if err == nil {
 					t.Fatalf("argoApplications() = %+v, want an error", got)
@@ -1497,7 +1501,7 @@ func TestArgoApplicationsReadsClusterSecretsOnlyWhenNamed(t *testing.T) {
 
 				return false, nil, nil
 			})
-			if _, err := argoApplications(t.Context(), client, newScope("cert-manager", "gpu-operator")); err != nil {
+			if _, err := argoApplications(t.Context(), client, newScope("cert-manager", "gpu-operator"), testOperatorNamespace); err != nil {
 				t.Fatalf("argoApplications() error = %v", err)
 			}
 			if lists != tt.wantLists {
@@ -1514,7 +1518,7 @@ func TestArgoApplicationsClassifiesAClusterSecretDenial(t *testing.T) {
 	client.PrependReactor("list", "secrets", func(_ k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "secrets"}, "", stderrors.New("denied"))
 	})
-	_, err := argoApplications(t.Context(), client, newScope("cert-manager"))
+	_, err := argoApplications(t.Context(), client, newScope("cert-manager"), testOperatorNamespace)
 	if errorstest.ReportedCode(err) != errors.ErrCodeUnauthorized {
 		t.Fatalf("error = %v, want %s", err, errors.ErrCodeUnauthorized)
 	}

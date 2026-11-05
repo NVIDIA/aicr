@@ -156,10 +156,11 @@ func TestUpgradeCheckFromClusterReadsTheInstalledInventory(t *testing.T) {
 	client := f.client(t)
 
 	report, err := client.UpgradeCheck(t.Context(), UpgradeCheckRequest{
-		From:       FromCluster,
-		To:         to,
-		Deployer:   "HELM", // folded by ParseDeployerType; the read must get the canonical name
-		Kubeconfig: kubeconfig,
+		From:              FromCluster,
+		To:                to,
+		Deployer:          "HELM", // folded by ParseDeployerType; the read must get the canonical name
+		Kubeconfig:        kubeconfig,
+		OperatorNamespace: "aicr-ops",
 	})
 	if err != nil {
 		t.Fatalf("UpgradeCheck: %v", err)
@@ -175,6 +176,9 @@ func TestUpgradeCheckFromClusterReadsTheInstalledInventory(t *testing.T) {
 	}
 	if opts.Kubeconfig != kubeconfig {
 		t.Errorf("read Kubeconfig = %q, want %q", opts.Kubeconfig, kubeconfig)
+	}
+	if opts.OperatorNamespace != "aicr-ops" {
+		t.Errorf("read OperatorNamespace = %q, want %q", opts.OperatorNamespace, "aicr-ops")
 	}
 	if len(opts.Components) == 0 {
 		t.Fatal("read got no components, so it could only report that nothing is installed")

@@ -110,9 +110,10 @@ spec:
 - A readiness release (an AICR readiness gate) is synced explicitly in each of
   its steps, with a sync operation initiated by `aicr-operator`, because
   Argo CD starts no automated sync for a change that touches only hooks.
-- When a write leaves the spec unchanged, the operator sets
-  `argocd.argoproj.io/refresh: normal` so Argo CD compares at once; Argo CD
-  removes the annotation.
+- When a write leaves the spec unchanged, or the step of any other release
+  finds its Application already at the plan and Argo CD has not compared it
+  since the step began, the operator sets `argocd.argoproj.io/refresh: normal`
+  so Argo CD compares at once; Argo CD removes the annotation.
 
 ### Readiness at the current revision
 
@@ -123,6 +124,17 @@ is `Healthy`, a sync or reconcile happened after the step began, and no
 Application that still reports `Synced` and `Healthy` from before the step
 never counts. Argo CD has no `observedGeneration`, so this is how the operator
 avoids reading stale health.
+
+A failed sync counts against a release unless the source Argo CD recorded
+for it shows it applied other values than the Application now carries. So a
+rollout that restores the values of a failed one leaves the runtime ready with
+no manual sync, even though the failed sync can stay the Application's last
+operation: the live objects already match, so Argo CD starts no new sync. When
+a step finds that the last sync failed and cannot show it was of other values,
+as after a failed hook, which leaves the resources `Synced`, it starts a sync
+and waits for its result: automated sync never retries a failed one. That sync
+runs the release's hooks again, so a hook that keeps failing fails every
+rollout that reaches the release.
 
 ## What to leave alone
 

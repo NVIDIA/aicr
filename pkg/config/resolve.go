@@ -492,6 +492,7 @@ type EvidenceCNCFResolved struct {
 	Dir            string
 	CNCFSubmission bool
 	Features       []string
+	NotApplicable  map[string]string
 }
 
 // EvidenceAttestationResolved is the typed view of
@@ -615,6 +616,7 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 				Dir:            c.Dir,
 				CNCFSubmission: boolPtrOrFalse(c.CNCFSubmission),
 				Features:       slices.Clone(c.Features),
+				NotApplicable:  maps.Clone(c.NotApplicable),
 			}
 		}
 		if v.Evidence.Attestation != nil {

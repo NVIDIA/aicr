@@ -69,6 +69,11 @@ type UpgradeCheckRequest struct {
 	// and a report assembled from two clusters is a confident wrong answer.
 	Kubeconfig string
 
+	// OperatorNamespace is where a FromCluster read finds the AICR Operator's
+	// plans, which version the Argo CD Applications the operator writes.
+	// Empty is the namespace the operator's chart installs into.
+	OperatorNamespace string
+
 	// ScanAtRisk additionally reports the objects the crossed transition
 	// records name that carry no deployer ownership marker.
 	//
@@ -306,9 +311,10 @@ func (c *Client) clusterVersions(ctx context.Context, dp recipe.DataProvider, re
 		return clusterRead{}, err
 	}
 	result, err := c.deps.readInventory(ctx, inventory.Options{
-		Kubeconfig: req.Kubeconfig,
-		Deployer:   inventory.Deployer(deployer),
-		Components: withRecipeNamespaces(recipe.InventoryComponents(registry), to),
+		Kubeconfig:        req.Kubeconfig,
+		Deployer:          inventory.Deployer(deployer),
+		Components:        withRecipeNamespaces(recipe.InventoryComponents(registry), to),
+		OperatorNamespace: req.OperatorNamespace,
 	})
 	if err != nil {
 		return clusterRead{}, err

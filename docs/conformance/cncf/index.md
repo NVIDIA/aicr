@@ -10,6 +10,64 @@ distribution, with evidence collected using AICR as the validation tooling.
 > AICR serves as the deployment and validation tooling (similar to sonobuoy for K8s
 > conformance), while the certified product is the AI inference/training platform.
 
+## Checklist Versions
+
+The requirement set is keyed by the upstream checklist version, which is the
+Kubernetes minor being certified. AICR embeds verbatim copies of the upstream
+checklists (`cncf/k8s-ai-conformance` `docs/AIConformance-<version>.yaml`) under
+`pkg/evidence/cncf/schemas/`, pinned by digest, and carries v1.35, v1.36 and
+v1.37. Evidence rendering selects the version from the validated cluster's
+Kubernetes minor. A minor this build carries no checklist for renders against
+the nearest carried one with a warning: below v1.35 against v1.35, above v1.37
+against v1.37 (upstream also publishes v1.33 and v1.34, which AICR does not
+carry). The Go SDK accepts an explicit version
+(`RenderCNCFEvidenceOptions.ConformanceVersion`). A CLI flag for the explicit
+version is a follow-up to #3606.
+
+What changed between versions, as it affects AICR evidence:
+
+| Version | Change | Effect on evidence |
+|---------|--------|--------------------|
+| v1.35 | Baseline: 9 MUST requirements including `dra_support` | `dra-support.md` is a requirement row |
+| v1.36 | `dra_support` removed; `advanced_inference_ingress`, `high_performance_networking`, `disaggregated_inference` added (SHOULD) | `dra-support.md` renders under **Supporting Evidence**, not as a requirement; the SHOULD rows have no AICR check and appear in the index as `NOT TESTED (no AICR check)` |
+| v1.37 | `workload_sandboxing` added (SHOULD); hybrid verification recommends `junit.xml` and `e2e.log` | No AICR check yet, so the row reads `NOT TESTED (no AICR check)`; see #3615 and #3605 |
+
+Once at least one submission-required check has produced a result, the
+rendered `index.md` lists every requirement of the selected checklist in
+upstream order with its aggregate status (below). A requirement no non-skipped
+check evidenced has no page and no evidence link. A report whose conformance
+checks were all skipped or are all diagnostic writes nothing at all, not even
+those rows.
+
+## Requirement status
+
+A requirement's status is computed from every check expected to evidence it
+at the selected checklist version (`pkg/evidence/cncf/aggregate.go`,
+`AggregateReport`), fail-closed: a requirement never reads as passed because
+nothing contradicted it. The same aggregation feeds the evidence index and the
+submission statuses (#3605); the CTRF report keeps every check's real verdict.
+
+| Status | Meaning | How it arises |
+|--------|---------|---------------|
+| `PASSED` | Automated proof: every check on one proof path is present and `passed` | Where a requirement has alternative proofs (`secure_accelerator_access`: `secure-accelerator-access` on ordinary recipes, `slinky-slurm-gpu-access` on Slinky Slurm recipes) one complete path suffices; the page's `Proof:` line names the checks that established it, and the other path may be absent or skipped. A failed alternative fails the requirement whatever the other path did: on this cluster the capability was disproven |
+| `FAILED (<checks>)` | A disproven capability | A check on any proof path `failed`, whatever the other paths did |
+| `NOT TESTED (<reason>)` | An unmet test prerequisite, not a disproven capability | A check was `skipped` (reason code appended, e.g. `slurm-managed-gpus` when `secure-accelerator-access` defers to the Slurm path and `slinky-slurm-gpu-access` did not run), `other` (crashed), `pending`, or `not run` (absent from the report); `no AICR check` when AICR ships no check for the requirement |
+| `NOT APPLICABLE (<justification>)` | Declared by configuration | Only from `spec.validate.evidence.cncf.notApplicable`, only for a conditional MUST (today `cluster_autoscaling`); any other id is rejected. It takes precedence over a check that ran, whose result stays on the page as an observation |
+
+Statuses are scoped by level. The index header reports **Applicable MUSTs**:
+`PASSED` when every MUST not declared not applicable is `PASSED`, else
+`FAILED`. A SHOULD renders its own status, `FAILED (<checks>)` or
+`NOT TESTED (<reason>)`, and does not fail the aggregate; submission
+packaging (#3605) maps either to Not Implemented. The Go SDK exposes the aggregation as
+`cncf.Aggregate` from `RenderCNCFEvidenceWithResult` (`Passed`,
+`IncompleteMusts`, per-requirement `Status`, `Reason`, `Proof`, `Checks`);
+`aicr validate` logs it after writing the evidence, and deriving the exit
+status of a submission run from it is #3602.
+
+Requirement page titles name the capability (`Inference API Gateway`,
+`Robust AI Operator`); the implementation a check observed (which gateway,
+scheduler or operator) is recorded in the check output on the page.
+
 ## Submissions
 
 | Version | Product | Platform | Status | Evidence |
@@ -43,7 +101,10 @@ pkg/evidence/cncf/                    # CNCF evidence collector package
 ├── collector.go                      # Feature registry, alias mapping
 ├── consts.go                         # Feature name constants
 ├── renderer.go                       # Evidence file rendering
-├── requirements.go                   # CNCF requirement ID mapping
+├── aggregate.go                      # Requirement status aggregation, fail-closed by level
+├── checklist.go                      # Versioned upstream checklists (ids, levels, descriptions), digest-pinned
+├── requirements.go                   # Which conformance checks evidence which requirement; evidence page per requirement
+├── schemas/                          # Verbatim upstream AIConformance-<version>.yaml copies
 ├── templates.go                      # Evidence templates
 ├── types.go                          # Shared types
 └── scripts/                          # Evidence collection script + test manifests
@@ -111,6 +172,16 @@ malformed verdict — fails closed and makes the collection exit non-zero, so a
 recorded section failure is no longer masked as overall success.
 
 ### Two Modes
+
+> **Being retired.** The collector-script path behind `--cncf-submission` is
+> being folded into `aicr validate --phase conformance` under
+> [#3601](https://github.com/NVIDIA/aicr/issues/3601); the decision is recorded
+> in the ADR-007 amendment
+> ([docs/design/007-recipe-evidence.md](../../design/007-recipe-evidence.md)).
+> `--evidence-dir` will then require `--cncf-submission`, so the
+> `--evidence-dir`-alone rendering shown under Structural Validation goes
+> away with it. Until that lands, the table below describes the shipped
+> behavior.
 
 | | `aicr validate --phase conformance` | `--cncf-submission` |
 |---|---|---|

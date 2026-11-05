@@ -51,6 +51,7 @@ Every component has a bundle class, `core` or `ops` ([ADR-018](https://github.co
 | **k8s-nim-operator** | `ops` | NVIDIA NIM Operator for managing NIM (NVIDIA Inference Microservices) deployments on Kubernetes. AICR installs the operator only — it creates no `NIMService` and no credentials; see [NIM workload credentials](#nim-workload-credentials). | [K8s NIM Operator](https://github.com/NVIDIA/k8s-nim-operator) |
 | **kueue** | `ops` | Kubernetes-native job queuing system. Manages quotas and admits jobs for batch and AI workloads. Ships default quota CRs (ResourceFlavor `default-flavor`, ClusterQueue `cluster-queue`, LocalQueue `default` in the `default` namespace) so admission works out of the box — tune the ClusterQueue's nominal quotas to cluster capacity to enact real limits. Managed frameworks are pinned to batch/job, JobSet, and TrainJob. Upgrade note: the quota CRs are helm post-install/post-upgrade hooks with a delete-and-recreate policy — quiesce queues before upgrading the bundle (Kueue's resource-in-use finalizer on an active ClusterQueue/ResourceFlavor blocks the delete and can wedge the upgrade), and re-apply tuned quotas afterwards since upgrades reset them to the shipped defaults. Uninstalling leaves the hook-created CRs behind; delete them manually when removing Kueue. Overlays that override the component's `manifestFiles` (replacing the default quota CRs) must also override its health check — the shipped check asserts the default CR names above. The `platform=kueue` leaves (`h100-kind-training-kueue`, `h100-gke-cos-training-kueue`, `h100-eks-ubuntu-training-kueue`) do exactly that to enable topology-aware scheduling; see [Topology-aware scheduling](#topology-aware-scheduling-with-kueue-and-topograph). Upgrading from a 0.18.x bundle needs two checks first: see [Upgrade Notes](#kueue-018x-to-019x) below. | [Kueue](https://github.com/kubernetes-sigs/kueue) |
 | **kubeflow-trainer** | `ops` | Kubeflow Training Operator for distributed training jobs (PyTorch, etc.). Manages multi-node training job lifecycle with JobSet integration. | [Kubeflow Trainer](https://github.com/kubeflow/trainer) |
+| **runai-cluster** | `ops` | NVIDIA Run:ai cluster side (3.0, open source): the Run:ai operator, KAI Scheduler 0.18 with KAI Resource Management, Karta, and the agent and controllers that register the cluster with a Run:ai control plane you already run. Selected by `--platform runai`; its leaves turn off AICR's `kai-scheduler` because the chart bundles its own. The control plane URL, cluster UID and cluster FQDN (`cluster.url`) are `--set` at bundle time; the bootstrap token is declared with `--dynamic` and written in at install time. Preview. See [Run:ai cluster](#runai-cluster). | [Run:ai](https://github.com/dsx-ai-factory/run-ai) |
 | **nvcre** | `ops` | NVIDIA Cluster Readiness Engine, a GPU cluster burn-in certification controller. Runs training and NCCL workloads, measures goodput and bandwidth. **Not installed by default.** Enabling it takes both a `valuesFile` and a Trainer source. See [Enabling NVCRE](#enabling-nvcre) for a fragment that resolves. With that values file referenced, `metrics.serviceMonitor.enabled` is **false** so install does not require prometheus-operator CRDs. Turn it on with `--set cre:metrics.serviceMonitor.enabled=true` only after those CRDs exist, and add `prometheus-operator-crds` to `dependencyRefs`. The chart has no manager `nodeSelector`. For hard placement, set `manager.affinity` in `recipes/components/nvcre/values.yaml` or a complete JSON object, for example `--set-json cre:manager.affinity='{"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":{"nodeSelectorTerms":[{"matchExpressions":[{"key":"nvidia.com/gpu.present","operator":"Exists"}]}]}}}'` (scalar `--set cre:manager.affinity=...` renders an invalid string). CLI aliases: `cre`, `cluster-readiness-engine`. Shipped EKS H100 training still uses the TrainJob NCCL check. Opt-in AICR validators drive CRE with `Certification` (create, wait, delete), not `WorkloadRun`. **Disconnected installs.** The certification workloads pull images the chart does not render, because the workload catalog is compiled into the manager binary. Mirror the set in `recipes/components/nvcre/workload-images.yaml`, regenerated with `make nvcre-closure`. Each image is listed by tag with the digest that tag resolved to when the file was generated, and `sourceCommit` records the upstream commit it was derived from. The workloads pull by tag, so the mirror has to serve each tag, and serving it at the recorded digest keeps the cluster on the bytes the file describes. That committed set is scoped, not universal. It resolves the catalog for `platform: aws`, `gpuArchitecture: h100`, and the two certification entries `communication/nccl-all-reduce` and `training/nemotron5-8b`. The NCCL image it names is an EFA build, so another platform or accelerator pulls a different set and mirroring this one leaves those images unmirrored. Derive the set you need instead of reusing this one, writing it somewhere other than the committed path, for example `go run ./tools/nvcre-closure -platform gcp -arch h100 -entries communication/nccl-all-reduce -out /tmp/nvcre-gcp.yaml`. The training path additionally needs Megatron-LM at pod start, and the clone recorded in the closure is its last resort. The init container uses an already-populated workspace if one is mounted, else copies from `/opt/megatron-lm` in the image, and only clones when neither is there. So it can run disconnected, but only once you have provided the source by one of those two routes. The NCCL path needs nothing beyond the mirrored images. | [Cluster Readiness Engine](https://github.com/NVIDIA/cluster-readiness-engine) |
 | **mariadb-operator-crds** | `ops` | Official MariaDB Operator CRDs. Declared in every Slurm recipe but installed only for `accounting.mode: aicr-provided`. | [MariaDB Operator](https://github.com/mariadb-operator/mariadb-operator) |
 | **mariadb-operator** | `ops` | Official MariaDB Operator controller, webhook, and certificate controller. AICR installs it only for `accounting.mode: aicr-provided`. | [MariaDB Operator](https://github.com/mariadb-operator/mariadb-operator) |
@@ -114,7 +115,7 @@ Not every component appears in every recipe. The recipe engine selects component
 - **Base components** (cert-manager, kube-prometheus-stack) appear in most recipes.
 - **Cloud-specific components** (aws-efa, aws-ebs-csi-driver) are added when the service matches. OCP recipes replace base components (gpu-operator, nfd, network-operator, cert-manager) with OLM+CR pairs where a certified operator exists (e.g., `gpu-operator-ocp-olm` + `gpu-operator-ocp`, `cert-manager-ocp-olm` + `cert-manager-ocp`). Components with no certified OCP operator (for example, prometheus-adapter, nvidia-dra-driver-gpu, k8s-nim-operator) instead reuse the same upstream Helm chart as their base component, with OCP-specific manifests (SCC RoleBindings, RBAC, CA bundle injection) layered on top. `k8s-nim-operator-ocp` is available on OCP via the `ocp-inference-nim` overlay and depends on `cert-manager-ocp` for webhook TLS.
 - **Intent-specific components** (agentgateway, agentgateway-crds) are added based on workload intent (e.g., inference recipes include the inference gateway).
-- **Platform-specific components** (slinky-slurm-operator, slinky-slurm, kubeflow-trainer, dynamo-platform) are added when the recipe selects a matching `--platform`. For `--platform slurm`, all three core Slinky pieces (`slinky-slurm-operator-crds`, `slinky-slurm-operator`, `slinky-slurm`) are declared inline per slurm leaf overlay — the same shape `dynamo-platform` uses across `*-inference-dynamo` leaves. IMEX-capable Slurm leaves attach a fixed ComputeDomain through `slinky-slurm.preManifestFiles` so slurmd pods can consume DRA-provisioned IMEX channels. Leaves that want the operator only inline the CRDs + operator and omit the `slinky-slurm` componentRef. For an end-to-end walkthrough (recipe → bundle → install → validate → `srun` smoke job on AKS, EKS, GKE, or Kind), see [`demos/cuj1-slinky-slurm.md`](https://github.com/NVIDIA/aicr/blob/main/demos/cuj1-slinky-slurm.md).
+- **Platform-specific components** (slinky-slurm-operator, slinky-slurm, kubeflow-trainer, dynamo-platform, runai-cluster) are added when the recipe selects a matching `--platform`. For `--platform slurm`, all three core Slinky pieces (`slinky-slurm-operator-crds`, `slinky-slurm-operator`, `slinky-slurm`) are declared inline per slurm leaf overlay — the same shape `dynamo-platform` uses across `*-inference-dynamo` leaves. IMEX-capable Slurm leaves attach a fixed ComputeDomain through `slinky-slurm.preManifestFiles` so slurmd pods can consume DRA-provisioned IMEX channels. Leaves that want the operator only inline the CRDs + operator and omit the `slinky-slurm` componentRef. For an end-to-end walkthrough (recipe → bundle → install → validate → `srun` smoke job on AKS, EKS, GKE, or Kind), see [`demos/cuj1-slinky-slurm.md`](https://github.com/NVIDIA/aicr/blob/main/demos/cuj1-slinky-slurm.md).
 - **Topology-aware optional components** (`topograph`, `slinky-topograph`) are not installed by default. `topograph` comes with the `platform=kueue` leaves (see [Topology-aware scheduling](#topology-aware-scheduling-with-kueue-and-topograph)); for `slinky-topograph`: Opting in requires an explicit `componentRef` entry for `slinky-topograph` in the leaf overlay — the `componentRef` is what installs it; `dependencyRefs` alone does not. That `componentRef` declares `slinky-slurm` as a `dependencyRef`, so Topograph deploys after the Slurm cluster chart, which owns the ConfigMap Topograph patches. See the wiring example in the [Recipe Development Guide](../integrator/recipe-development.md#slinky-slurm-inline-components).
 - **Accelerator/OS-specific tuning** (nodewright-customizations, nvidia-dra-driver-gpu) varies by hardware and OS combination.
 
@@ -863,7 +864,7 @@ Remediation is opt-in, in three steps. Each is a mixin you compose on your own l
 | `nvsentinel-quarantine` | `faultQuarantine`, `nodeDrainer` | cordons a node that reports a fatal fault and drains it, force-deleting pods outside the protected namespaces after `deleteAfterTimeoutMinutes`; the node is not repaired |
 | `nvsentinel-remediation` | all of the above plus `faultRemediation`, `janitor`, `janitorProvider`, and `fault-quarantine.validation` | cordons, waits for the drain, then repairs the node; a node rebooted for a fatal GPU fault stays cordoned until a DCGM diagnostic passes |
 
-Every step also adds the `psmdb-operator` and `nvsentinel-mongodb` components as NVSentinel's datastore (see **Datastore** below). The remediation step also needs the [`nvsentinel-health-events-analyzer`](#health-events-analyzer) and [`nvsentinel-node-validation`](#node-validation) mixins composed beside it, and the bundle fails without either.
+Every step also adds the `psmdb-operator` and `nvsentinel-mongodb` components as NVSentinel's datastore (see **Datastore** below). The remediation step also needs the [`nvsentinel-health-events-analyzer`](#health-events-analyzer) and [`nvsentinel-node-validation`](#node-validation) mixins composed beside it, and the bundle fails without either. To hand nodes to a repair system outside NVSentinel, compose [`nvsentinel-external-remediation`](#external-remediation) beside the remediation or observe step.
 
 ```yaml
 # your-leaf-overlay.yaml
@@ -970,7 +971,7 @@ AICR leaves `tls.certManagementPolicy` at Percona's default, `auto`, so the oper
 
 - In the observe step nothing is cordoned or tainted, but the node is not left untouched: `fault-quarantine` writes its quarantine annotations, and `node-drainer` and `fault-remediation` still move the `dgxc.nvidia.com/nvsentinel-state` label through `draining` to `remediation-succeeded`. `node-drainer` still waits for the node's pods outside `systemNamespaces`. Its force-delete after `deleteAfterTimeoutMinutes` is a server-side dry run that deletes nothing, so on a node running any such non-DaemonSet pod the drain finishes only when those pods exit; until then the event never reaches `fault-remediation`.
 - Moving from observe to a live step discards the faults observed so far. Each dry-run quarantine carries a `quarantineHealthEventDryRun: "True"` annotation, and when dry run is switched off `fault-quarantine` removes the dry-run annotations and cancels their events at startup, so `node-drainer` does not act on them. The cancel is best-effort and not retried: if it fails, the events stay `Quarantined` and `node-drainer` can still drain and repair the node. After switching dry run off, check `fault_quarantine_processing_errors_total{error_type="mongodb_cancel_quarantine_error"}`; if it moved, set `healtheventstatus.nodequarantined` to `Cancelled` on that node's remaining `Quarantined` events before the live step acts on them. Faults raised after the move are acted on normally. Annotations written by the observe step before v1.27.0 carry no marker, and `fault-quarantine` reads each of them once as a manual uncordon instead, annotating the node `quarantinedNodeUncordonedManually`.
-- A quarantined node stays cordoned until NVSentinel receives a healthy event for the fault. `kubectl uncordon` cancels the workflow: NVSentinel clears its taints, labels and annotations and marks the events cancelled. To keep NVSentinel off a node entirely, label it `k8saas.nvidia.com/ManagedByNVSentinel=false` or `nvsentinel.dgxc.nvidia.com/managed=false`; every fault-quarantine rule set honors both. Both are upstream's documented procedure ([Cancelling Break-Fix Workflows](https://github.com/NVIDIA/NVSentinel/blob/v1.28.0/docs/cancelling-breakfix.md)).
+- A quarantined node stays cordoned until NVSentinel receives a healthy event for the fault. `kubectl uncordon` cancels the workflow: NVSentinel clears its taints, labels and annotations and marks the events cancelled. To keep NVSentinel off a node entirely, label it `k8saas.nvidia.com/ManagedByNVSentinel=false` or `nvsentinel.dgxc.nvidia.com/managed=false`; every fault-quarantine rule set honors both. Both are upstream's documented procedure ([Cancelling Break-Fix Workflows](https://github.com/NVIDIA/NVSentinel/blob/v1.28.0/docs/cancelling-breakfix.md)). With [External Remediation](#external-remediation), janitor removes `managed=false` from a node when a request for it is set to `True` or deleted, whoever set the label, so use `k8saas.nvidia.com/ManagedByNVSentinel=false` there (see **Interactions** under External Remediation).
 - The remediation step caps repairs at three attempts per equivalence group (for example `reset` or `restart`) within one quarantine (`fault-remediation.maxRemediationAttempts: 3`; the chart default `0` retries without limit). At the cap, NVSentinel labels the node `dgxc.nvidia.com/nvsentinel-state=remediation-failed` and leaves it cordoned for an operator; the count resets when the node leaves quarantine. Watch for that label, repair the node by hand, then `kubectl uncordon` it. A node repaired again and again across quarantines is reported by the analyzer's `MultipleRemediations` rule, which the remediation step requires (see [Health Events Analyzer](#health-events-analyzer)).
 - The GPU reset Job has a 300-second `activeDeadlineSeconds` that includes pulling the `gpu-reset` image, and the Job always re-checks the tag against the registry. A slow or unreachable registry can time the reset out, so mirror the image close to the cluster.
 - Only fatal events drive the pipeline. Every step sets `processingStrategy: EXECUTE_REMEDIATION` explicitly on `gpu-health-monitor` and `syslog-health-monitor`, the event sources it acts on, so a chart default change cannot alter that; the syslog NIC patterns, the NIC checks and the NPD object-monitor policies ship `STORE_ONLY` and are not acted on. With [preflight](#preflight-checks) composed as well, a fatal preflight result cordons the node.
@@ -1017,6 +1018,177 @@ aicr bundle -r recipe.yaml -o ./bundles \
 | `partialDrainEnabled` | `false` | Same: no drain is scoped to the faulted GPU. |
 
 **Bundle-time gate.** `CheckNVSentinelDrainScopeCoherent` checks the values the bundle emits: that the generated scope protects every namespace the recipe declares, that the drain entries cover the node and are ones `node-drainer` can load, and that the timing is in range: `deleteAfterTimeoutMinutes` a whole number from 10 to 1440, and `evictionTimeoutInSeconds` whole seconds from 30 to 3600. It also rejects `--dynamic` on the drain paths. The full rule list is in the [validator reference](../contributor/validator.md). Every component the recipe declares must have a namespace, either in the recipe or as its registry `defaultNamespace`; the bundle fails otherwise, since that component could not be protected.
+
+### External Remediation
+
+Some faults are repaired outside NVSentinel: by a provider's repair workflow, a hardware vendor or a person. The opt-in `nvsentinel-external-remediation` mixin hands such a node over. For a health event with `recommendedAction: CUSTOM` and `customRecommendedAction: external-remediation`, `fault-remediation` creates an `ExternalRemediationRequest` (`nvsentinel.dgxc.nvidia.com/v1`, cluster-scoped, short name `extrr`) instead of a reset or reboot, and janitor releases the node to the external system until it reports the outcome. Compose the mixin beside the [remediation step](#graded-remediation) and the [health events analyzer](#health-events-analyzer) and [node validation](#node-validation) mixins that live remediation requires, or beside `nvsentinel-observe` to rehearse: in dry run `fault-remediation` logs `DRY-RUN: Skipping custom resource creation` and creates no request. A fault still declared when you move from the rehearsal to the live step is not reported again (see **Declaring a fault**). No shipped recipe composes it.
+
+```yaml
+# your-leaf-overlay.yaml
+spec:
+  mixins:
+    - nvsentinel-remediation
+    - nvsentinel-health-events-analyzer
+    - nvsentinel-node-validation
+    - nvsentinel-external-remediation
+```
+
+The mixin carries the action and request template from NVSentinel's [external remediation tutorial](https://github.com/NVIDIA/NVSentinel/blob/v1.28.0/docs/tutorials/integrating-external-remediation.md). Each request is named `extrr-<event ID>` and covers the whole node. `fault-remediation` opens no other request for a node while its request is open or has succeeded; one at `False` does not stop a later event from opening another. The action also grants `fault-remediation` `get`, `list`, `create`, `update` and `patch` on `externalremediationrequests` cluster-wide, which is why the remediation step does not carry it.
+
+**Declaring a fault.** Nothing routes until a source emits that event, and no source NVSentinel ships emits `CUSTOM`. Declare the fault with a kubernetes-object-monitor policy on your leaf, for example on a Node condition that the repair system's controller sets:
+
+```yaml
+# your-leaf-overlay.yaml
+spec:
+  componentRefs:
+    - name: nvsentinel
+      type: Helm
+      overrides:
+        global:
+          kubernetesObjectMonitor:
+            enabled: true
+        kubernetes-object-monitor:
+          policies:
+            - name: vendor-node-repair       # replace; must differ from the condition type
+              enabled: true
+              resource:
+                group: ""
+                version: v1
+                kind: Node
+              predicate:
+                expression: |              # replace VendorRepairRequested with your condition type
+                  has(resource.status) && has(resource.status.conditions) &&
+                  resource.status.conditions.exists(c, c.type == 'VendorRepairRequested' && c.status == 'True')
+              nodeAssociation:
+                expression: resource.metadata.name
+              healthEvent:
+                componentClass: Node
+                isFatal: true
+                message: "vendor repair requested"     # replace
+                recommendedAction: CUSTOM
+                customRecommendedAction: external-remediation
+                errorCode:
+                  - VENDOR_REPAIR_REQUESTED          # replace
+```
+
+- Keep `isFatal: true`, and leave `processingStrategy` at its default, `EXECUTE_REMEDIATION`. fault-quarantine quarantines only fatal kubernetes-object-monitor events, and `STORE_ONLY` and `STORE_AND_ANALYSE` events are stored without ever reaching it, so either change keeps the event from reaching `fault-remediation`.
+- Set `enabled` and `isFatal` to `true` or `false` on every policy. The chart prints both into the monitor's TOML config as they are, so an unset or other value is invalid TOML and the monitor refuses its whole config.
+- Name the policy differently from the condition it reads. platform-connectors writes a Node condition named after the policy for each fatal event, so the two would share one condition.
+- `nvsentinel-object-monitor` sets `global.kubernetesObjectMonitor.enabled` and the whole `kubernetes-object-monitor.policies` list, so a leaf that composes it cannot set either: the paths collide at recipe resolution. To keep its policies, drop the mixin and restate them from `recipes/mixins/nvsentinel-object-monitor.yaml` beside yours on the leaf, or pass the whole list with `--set-json` at bundle time.
+- The monitor publishes on transitions only: one event when the predicate turns true, and one healthy event when it turns false. That decides when the condition may be cleared (see **The cordon after `True`**).
+- After an `nvsentinel-observe` rehearsal, a node whose condition stayed `True` through the move to the live step is neither cordoned nor handed over. The move cancels the faults observed in dry run (see **Failure behavior and recovery** under [Graded Remediation](#graded-remediation)), and the monitor keeps its record, in the node's annotations, that it already reported the fault, so it does not report it again. After the move, clear the condition on those nodes and raise it again.
+- When the policy first runs, the monitor reports every node its predicate already matches, one unhealthy event each, so adopting it where the condition is already `True` on many nodes cordons and drains them all and hands each to the external system. List those nodes first and clear the condition where you do not want that, or bound how many nodes can be cordoned with `fault-quarantine.circuitBreaker.maxNodes` (see **Failure behavior and recovery** under [Graded Remediation](#graded-remediation)):
+
+```shell
+CONDITION="VendorRepairRequested"  # replace with your condition type
+kubectl get nodes -o json |
+  jq -r --arg c "${CONDITION}" '.items[] | select(any(.status.conditions[]?; .type == $c and .status == "True")) | .metadata.name'
+```
+
+**What the external system must do.** It talks to NVSentinel only through the request's status conditions:
+
+1. Watch requests (`kubectl get extrr` lists each one's node and completion time), and start work only when `NVSentinelOwnershipReleased` is `True`. Until then janitor has not released the node.
+2. Read the node from `spec.healthEvent.nodeName`.
+3. Make each step safe to repeat, keyed on the request name: a restart can run a step again before the result is written.
+4. Write only `ExternalRemediationComplete`, through the `status` subresource, and only at the end: `True` when the repair succeeded, `False` when it stops work, with a `reason` and `message`. A status write replaces the whole `conditions` list, so read the request first and keep `NVSentinelOwnershipReleased` in it.
+5. Ignore a request with `status.completionTime` set: janitor has already taken the node back.
+6. Stop work when `metadata.deletionTimestamp` is set: the deletion returns the node to NVSentinel.
+7. If it owns the Node condition the policy reads, clear it only after janitor sets `status.completionTime` on a `True` request.
+
+**RBAC for the external system.** AICR does not install it. Bind this ClusterRole to the system's ServiceAccount:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: externalremediationrequest-responder
+rules:
+  - apiGroups: ["nvsentinel.dgxc.nvidia.com"]
+    resources: ["externalremediationrequests"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["nvsentinel.dgxc.nvidia.com"]
+    resources: ["externalremediationrequests/status"]
+    verbs: ["get", "update", "patch"]
+```
+
+It grants no `delete`, because deleting a request returns the node to NVSentinel whether or not the repair finished; keep that for operators. A system that also sets and clears the Node condition needs `patch` on `nodes/status`.
+
+**The release.** The declared fault takes the usual path first: fault-quarantine cordons the node, node-drainer drains it, and `fault-remediation` creates the request and labels the node `dgxc.nvidia.com/nvsentinel-state=remediation-succeeded`. That label means the request exists, not that the node is repaired: `fault-remediation` does not wait for the external system. janitor then adds the taint `nvsentinel.dgxc.nvidia.com/external-remediation=<request name>:NoSchedule` and the label `nvsentinel.dgxc.nvidia.com/managed=false`, and sets `NVSentinelOwnershipReleased=True`. While the node is released:
+
+- The labeler removes `dcgm.version`, `driver.installed` and `kata.enabled` from it, so the DaemonSet monitors that select on them leave the node: gpu-health-monitor, syslog-health-monitor, metadata-collector and nic-health-monitor.
+- Monitors that run elsewhere, such as kubernetes-object-monitor, csp-health-monitor and slurm-drain-monitor, keep publishing about the node. Their events are stored but not acted on: platform-connectors stores a `managed=false` node's events `STORE_ONLY`, which fault-quarantine ignores, and every fault-quarantine rule set skips such a node. platform-connectors reads the label through a node cache, so it applies within `cacheTTLSeconds` (60 seconds) of the release, or later while platform-connectors cannot read the node.
+- The release taint, like the cordon, is `NoSchedule`: it evicts nothing and keeps off only new pods that do not tolerate it. DaemonSet pods and pods in node-drainer's protected namespaces were never drained, and pods that tolerate every taint can still be scheduled onto the node. By default AICR gives the components it places a toleration for every taint, unless `--system-node-toleration` or `--accelerated-node-toleration` names narrower ones; `--system-node-selector` keeps the system components on system nodes.
+
+**When the external system reports.**
+
+| Outcome | What NVSentinel does |
+|---|---|
+| `ExternalRemediationComplete=True` | janitor removes the taint and the `managed` label, then sets `status.completionTime`. The request stays as a record. The labeler restores its labels, so the DaemonSet monitors return. The node stays cordoned until NVSentinel receives a healthy event for the fault. |
+| `ExternalRemediationComplete=False` | Nothing changes. The node stays released and cordoned, and the request keeps janitor's per-node lease, so no `GPUReset`, `RebootNode` or `TerminateNode` runs on the node until the request is set to `True` or deleted. |
+| The request is deleted | janitor removes the taint and the `managed` label before it releases its finalizer on the request. The node returns to NVSentinel and stays cordoned while its quarantine lasts. |
+
+**The cordon after `True`.** fault-quarantine uncordons the node only on a healthy event for the fault, and kubernetes-object-monitor sends that event once, when the condition clears. If the condition clears while the node is released, platform-connectors stores the healthy event `STORE_ONLY`, the monitor still counts it as sent, and the node stays cordoned after the release ends. Upstream lists this as a known limitation. Hence step 7 above: clear the condition after `status.completionTime` is set, which janitor does only after removing the taint and label; the healthy event then reaches fault-quarantine, which uncordons the node unless another fault still holds it. While the condition stays `True` the node stays cordoned, because the monitor does not raise a fault it already reported. If the healthy event was lost, confirm the node is repaired and `kubectl uncordon` it, which cancels NVSentinel's quarantine ([Cancelling Break-Fix Workflows](https://github.com/NVIDIA/NVSentinel/blob/v1.28.0/docs/cancelling-breakfix.md)).
+
+**Forcing a release.** For a request at `False`, or one the external system abandoned, first make sure the external system has stopped work on the node, then delete the request. Its name is also the release taint's value:
+
+```shell
+EXTRR="extrr-0123456789abcdef01234567"  # replace with the request name
+kubectl delete extrr "${EXTRR}"
+```
+
+The node returns to NVSentinel still cordoned, and its DaemonSet monitors return with it, so NVSentinel may act on a fault that persists, for example by resetting a GPU or rebooting the node. To repair the node by hand first, label it `k8saas.nvidia.com/ManagedByNVSentinel=false` before the delete, which every fault-quarantine rule set honors, and remove the label after the repair. Then clear the condition, which uncordons the node, or `kubectl uncordon` it if the condition is already clear. `kubectl uncordon` alone does not end a release: only janitor removes the release taint and `managed=false`, when the request is set to `True` or deleted.
+
+**No timeout.** The template sets `nvsentinel.nvidia.com/preserve: "true"`, which exempts each request from janitor's TTL. Without it janitor deletes a request 336 hours (its default TTL) after it first sees it, finished or not, and returns the node mid-repair. A request at `Unknown` or `False` therefore holds its node until someone acts on it. Finished requests stay as records; a request is also deleted with its Node. To prune finished ones:
+
+```shell
+kubectl get extrr -o json |
+  jq -r '.items[] | select(.status.completionTime != null) | .metadata.name' |
+  xargs -r kubectl delete extrr --wait=false
+```
+
+**Metric.** janitor exports the gauge `nvsentinel_external_remediation_open{state="awaiting"}`, by `node` and `recommended_action`: requests janitor has released and not yet closed, at `Unknown` and at `False` alike. It is kept in janitor's memory, so a request released before janitor restarted is not counted, and its close drives that series below zero; `kubectl get extrr` is the authoritative list. `nvsentinel_external_remediation_age_seconds` is observed only when a request closes, so it does not show one still open.
+
+**Interactions.**
+
+- `fault-remediation.maxRemediationAttempts: 3` counts each request as an attempt in the `external-remediation` group within one quarantine. At the cap the node is labeled `remediation-failed` and no request is created.
+- The analyzer's `MultipleRemediations` rule counts a fault routed to a request, because `fault-remediation` marks the event remediated when it creates the request.
+- With [`nvsentinel-log-collector`](#diagnostics-capture) composed, the collector runs before the request is created, so diagnostics are captured before the node is handed over.
+- `managed=false` belongs to janitor while a request exists: do not set or remove it by hand on such a node. Setting a request to `True` or deleting one, pruning included, removes the label from the node whoever set it. To keep NVSentinel off a node by hand, use `k8saas.nvidia.com/ManagedByNVSentinel=false`, which every fault-quarantine rule set honors and janitor does not touch.
+
+**Stopping external remediation.** Drop the mixin, or step down from the remediation step, only once no request is open. janitor's finalizer, `nvsentinel.dgxc.nvidia.com/external-remediation-cleanup`, holds each request until janitor has removed the release taint and `managed=false` from its node, and janitor runs only with the remediation step: moving to `nvsentinel-observe` or `nvsentinel-quarantine`, or uninstalling NVSentinel, removes it. While janitor still runs:
+
+1. Stop declaring the fault, so no new request opens: set the policy's `enabled: false`, or have the repair system stop setting the condition. To remove the last policy instead, also set `global.kubernetesObjectMonitor.enabled: false`, because kubernetes-object-monitor refuses a config with no policies. The monitor ignores a disabled or removed policy entirely, so clearing its condition afterwards sends no healthy event.
+2. Once the external system has stopped work on a node, set its request's `ExternalRemediationComplete` to `True`, or delete the request.
+3. Uncordon each node the fault left cordoned. While the policy is still enabled, clear its condition, but only once the node's request from step 2 has `status.completionTime` set or is gone: until then the healthy event is gated `STORE_ONLY` and lost (see **The cordon after `True`**). If the condition is already clear, or the policy is disabled or removed, `kubectl uncordon` the node instead. This also cancels a session whose drain has not finished, which would otherwise open a request later. Uncordoning returns the node to service, so for a node not yet repaired, first taint it with a key your workloads do not tolerate (`kubectl taint node <node> external-repair-hold=true:NoSchedule`), or remove it from the cluster, and keep the taint until the node is safe to use. The taint does not keep off pods that tolerate every taint, which a default bundle gives AICR's system components unless `--system-node-selector` keeps them off GPU nodes.
+4. Delete the completed requests with the prune command under **No timeout**.
+5. Confirm that no node's `dgxc.nvidia.com/nvsentinel-state` is `quarantined`, `draining`, `drain-succeeded` or `remediating`, since a session in any of those states can still open a request; that no node the fault cordoned is still cordoned, which the state check misses because such a node reads `remediation-succeeded` (`kubectl get nodes -l dgxc.nvidia.com/nvsentinel-state=remediation-succeeded` shows it as `SchedulingDisabled`); and that `kubectl get extrr` lists none. If any check fails, repeat steps 2 to 4. Only then drop the mixin or step down.
+
+To drop only the mixin and keep the remediation step, follow the same steps. janitor still closes a request left open, but a node whose condition stays `True` stays cordoned with nothing to repair it, and a fault the policy raises later is labeled `remediation-failed` without repair.
+
+To enable a disabled or removed policy again, mind the monitor's record of what it already reported. kubernetes-object-monitor keeps each policy's matches in the node annotation `nvsentinel.nvidia.com/k8s-object-monitor-policy-matches`, reloads them when it starts, and reports a fault only when a node goes from not matched to matched. It never removes the entries of a disabled or removed policy, and it ignores such a policy, so clearing a condition meanwhile changes nothing. A node the policy matched before is therefore not reported again while its condition stays `True`. After enabling the policy, clear the condition on those nodes and raise it again where the fault persists, or give the policy a new name.
+
+Under `argocd` and `argocd-helm`, stepping down also drops janitor's CRDs from the rendered chart, and the Application's `prune: true` deletes them. Deleting the `ExternalRemediationRequest` CRD deletes every request, and a request whose finalizer no janitor can remove holds the CRD in `Terminating`.
+
+**Releasing a request without janitor.** On any deployer, stepping down or uninstalling NVSentinel while a request is open leaves it held by janitor's finalizer with no janitor to remove it. Release each remaining request by hand. janitor's validating webhook, `janitor-validating-webhook`, checks every create, update and delete of a request with `failurePolicy: Fail`, so while it remains without janitor behind it, even deleting a request is refused: delete the webhook configuration first. It also covers janitor's reboot, terminate and GPU reset requests. The deployer recreates it when janitor is next deployed; under Argo CD with self-heal it comes back within seconds, so delete it only once janitor is out of the desired state. Then clean up the node before the request: remove the release taint and the `managed` label, delete the request, and remove the finalizer that holds the deletion.
+
+```shell
+EXTRR="extrr-0123456789abcdef01234567"  # replace with the request name
+NODE="$(kubectl get extrr "${EXTRR}" -o jsonpath='{.spec.healthEvent.nodeName}')"
+kubectl delete validatingwebhookconfiguration janitor-validating-webhook --ignore-not-found
+kubectl taint node "${NODE}" nvsentinel.dgxc.nvidia.com/external-remediation-
+kubectl label node "${NODE}" nvsentinel.dgxc.nvidia.com/managed-
+kubectl delete extrr "${EXTRR}" --wait=false
+kubectl patch extrr "${EXTRR}" --type=json \
+  -p='[{"op":"remove","path":"/metadata/finalizers"}]'
+```
+
+Then uncordon the node as in step 3 of **Stopping external remediation**, tainting it first if it is not repaired.
+
+**The CRD on `helmfile`, `terraform` and `fleet`.** The `ExternalRemediationRequest` CRD ships in janitor's `crds/` directory, beside the `GPUReset`, `RebootNode` and `TerminateNode` CRDs. `nvsentinel` declares `ownsCRDs`, so with the remediation step the `helm`, `flux`, `argocd` and `argocd-helm` deployers apply them for you. `helmfile`, `terraform` and `fleet` install `crds/` only on a release's first install, so a release first installed without janitor, as every recipe without the remediation step is, has none of janitor's CRDs. Before adopting the remediation step there, run the [manual CRD step](#upgrading-components-that-own-crds) with `CHART="oci://ghcr.io/nvidia/nvsentinel"`, the pinned `VERSION`, `EXCLUDE_SUBCHARTS="mongodb-store"`, and `MANAGER` as that section says for your deployer. Under `fleet`, the managed-fields check that section names for `MANAGER` has nothing to read before janitor's CRDs exist: use `MANAGER="helm"`, and reuse it for every later upgrade of these CRDs, which the check then reports.
+
+**Bundle-time gates.** `CheckNVSentinelExternalRemediationCoherent` checks any `fault-remediation.maintenance.actions` entry whose `kind` is `ExternalRemediationRequest`, whatever its key, and the mixin's `external-remediation` key, whatever its `kind`. It blocks a bundle with such an action off upstream's contract, its template included, or without `fault-remediation` enabled; with a kubernetes-object-monitor policy the monitor cannot load; or with `--dynamic` on a path it reads. It warns, without blocking, when no enabled policy routes to such an action, when a policy routing to one has an event that never reaches `fault-remediation`, and when a `CUSTOM` policy names an action `fault-remediation` does not load. With the mixin and no declared fault, the first warning is its only finding. The rules are in the [validator reference](../contributor/validator.md#shipping-functions).
+
+**What is qualified.** The render tests pin the action, the template and `fault-remediation`'s RBAC with the mixin beside the remediation and observe steps, and their absence without it on those steps and the base recipe, and that kubernetes-object-monitor prints a declared policy's `enabled` and `isFatal` into its config as they are; a template test executes the request template as `fault-remediation` does and checks the name is a valid taint value. The KWOK remediation lane deploys the mixin beside the remediation step. A Kind e2e (`tests/e2e/nvsentinel-external-remediation/`) declares one Node-condition fault and acts as the external system: it asserts the request, the release taint and label, that syslog-health-monitor leaves the node, that a fatal GPU XID sent during the release is gated `STORE_ONLY` and not acted on, that `True` returns the node but leaves it cordoned until the condition clears, and that `False` holds the release until `kubectl delete extrr`. It runs on one Kind node with NVSentinel's simulated `kind` provider; no CI job hands a real node to a real repair system.
 
 ### Health Events Analyzer
 
@@ -2366,6 +2538,110 @@ Other deployers remove `nktp` through their own resource. Follow step 2 of the
 Bundle, and HelmOp name, and `nktp` in place of the `k8s-aibom-system`
 namespace. Skip its step 3. Those AIBOM and CRD deletions belong to
 `k8s-aibom`, and NKTP keeps its CRDs on uninstall.
+
+## Run:ai cluster
+
+`runai-cluster` installs the cluster side of NVIDIA Run:ai 3.0 in the `runai`
+namespace, from the open-source chart on NGC
+(`https://helm.ngc.nvidia.com/nvidia/runai-oss`, no credentials). It is
+selected by `--platform runai`, which today resolves for two coordinates,
+`eks / h100 / ubuntu / training` and `gke / h100 / cos / training`, both
+[Preview](../integrator/recipe-development.md#preview-recipes). The Run:ai
+control plane is not installed: the recipe registers the cluster with one you
+already run ([#3302](https://github.com/NVIDIA/aicr/issues/3302) records that
+decision).
+
+**Per-cluster inputs.** The recipe is the same for every cluster; the
+registration is not. The chart needs the control plane URL, the cluster UID the
+control plane assigned when you created the cluster there, the FQDN the control
+plane reaches this cluster at (`cluster.url`; the chart adds `https://`), and
+the bootstrap token it issued for it. The first three go through `--set`; the
+token expires
+after two hours and is a credential, so declare it with `--dynamic`, which
+moves the path out of `values.yaml` into the component's
+`cluster-values.yaml` for you to fill in right before install:
+
+```shell
+CONTROL_PLANE_URL="https://tenant.run.ai"   # replace with your control plane URL
+CLUSTER_UID="00000000-0000-0000-0000-000000000000"   # replace with the UID the control plane shows
+CLUSTER_FQDN="cluster.example.com"   # replace with the FQDN the control plane reaches this cluster at
+aicr bundle -r recipe.yaml \
+  --set "runai:controlPlane.url=${CONTROL_PLANE_URL}" \
+  --set "runai:cluster.uid=${CLUSTER_UID}" \
+  --set "runai:cluster.url=${CLUSTER_FQDN}" \
+  --dynamic runai:controlPlane.bootstrapToken \
+  -o ./bundle
+# then, on the machine that runs deploy.sh:
+#   edit ./bundle/NNN-runai-cluster/cluster-values.yaml and set
+#   controlPlane.bootstrapToken to a token minted minutes earlier
+```
+
+Mint a fresh token for every install and upgrade. Once you have written it
+into `cluster-values.yaml`, that file holds the token at rest on the install
+machine: protect it like a kubeconfig and clear the value after the release is
+installed. Clearing the file does not remove the token from the cluster: Helm
+stores the values of every revision in the release Secrets
+(`sh.helm.release.v1.runai-cluster.v<N>` in the `runai` namespace), so the
+token stays readable there to anyone who can read Secrets in that namespace.
+Its two-hour expiry bounds the exposure; keep access to those Secrets as tight
+as access to the kubeconfig.
+
+The token is also visible in the cluster while the install runs. Each of the
+six registration hook Jobs passes it in plain text as a container argument
+(`--control-plane-bootstrap-token=...`), so anyone who can read Pods or Jobs
+in the `runai` namespace can read it, which is often a wider group than can
+read Secrets. The hooks run with `backoffLimit: 0` and are deleted only on
+success, so a failed hook leaves its Job, token included, until the next
+install or upgrade replaces it. Delete a failed hook Job once you have read
+its logs.
+
+The chart does not validate the four inputs: with any of them empty it
+still renders every hook Job, with empty arguments, and its hooks handler
+skips the control-plane-assisted install unless all four are set. AICR
+validates them instead. The registry lists all four as `requiredValues`, so
+`aicr bundle` fails naming whichever is missing, and the token is an
+`installTimeSecretPaths` entry, so a value supplied with `--set` or in a
+values file is rejected; see
+[Required and install-time secret inputs](bundling.md#required-and-install-time-secret-inputs).
+The component's `install.sh` also refuses to run while the token stub in
+`cluster-values.yaml` has no value (`DRY_RUN_FLAG=--dry-run ./deploy.sh` skips that check).
+
+Only the `helm` deployer may carry this component; `aicr bundle` rejects the
+others. `helmfile` reads the file at apply time but has no stub check; the
+rest would store the filled token at rest, and the GitOps ones would also
+re-apply an expired token on every sync:
+
+| Deployer | Where the filled token would end up |
+|---|---|
+| `flux` | a plaintext ConfigMap manifest |
+| `fleet` | `cluster-values.yaml` committed to Git |
+| `terraform` | Terraform state |
+| `argocd-helm` | the Application's `helm.values` |
+
+(`argocd` rejects `--dynamic` outright.)
+
+**What the leaves change.** The chart bundles KAI Scheduler 0.18 through its
+`kai-resource-management` subchart and its operator owns the scheduler's
+configuration, so the Run:ai leaves set `overrides.enabled: false` on AICR's
+`kai-scheduler` (the two ship the same CRDs and PriorityClasses). On a cluster
+that already runs AICR's `kai-scheduler`, uninstall that release before
+installing a Run:ai bundle. The `gang-scheduling` conformance check keys on
+AICR's `kai-scheduler`, which these leaves disable, so it reports Skip on them
+until it learns the Run:ai scheduler. Run:ai's support matrix covers Kubernetes
+1.35 through 1.37, and the leaves carry that floor.
+
+**Prerequisites the health check expects.** The check asserts the
+`RunaiConfig` the install creates from the control plane's configuration
+reports `Deployed`, `Available` and `DependenciesFulfilled`, and that the
+operator Deployments and the agent and `cluster-sync` operands are available.
+`DependenciesFulfilled` is the Run:ai operator's own verdict on its
+prerequisites: the GPU Operator, a Prometheus Operator at the version Run:ai
+requires (kube-prometheus-stack 88.6.5 or later; AICR's stack-wide pin is
+being raised to it), and an ingress controller or Gateway API implementation
+with the two TLS Secrets Run:ai documents in the `runai` namespace. Until the
+recipe ships those, the check fails on a bare training base; that is the
+intended fail-closed shape, not a flake. Run:ai's pre-install hook labels the
+`runai` namespace `pod-security.kubernetes.io/enforce=privileged` itself.
 
 ## Adding Components
 
