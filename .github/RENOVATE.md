@@ -25,6 +25,7 @@ Policy choices (schedule, cooldown, auto-merge scope, group consolidation) are d
 | `validators/performance/aiperf-bench.Dockerfile` `ARG AIPERF_VERSION` | dedicated `pypi` customManager (`aiperf` group, so it moves with `requirements.txt`) |
 | `infra/**/*.tf` | `terraform` (grouped) |
 | `recipes/components/*/values.yaml` | `helm-values` (partial — see limitations) |
+| `recipes/components/*/manifests/*.yaml` digests in CRD fields (NicClusterPolicy `version: sha256:<hex>`, Skyhook Package `containerSHA`) | dedicated `crd-digest` customManager: digest PRs only, never auto-merged. A NicClusterPolicy digest needs a `# renovate: datasource=docker depName=<image> tag=<tag>` line directly above it, because the digest replaces the tag; change `tag=` and the digest together, or the next rotation moves the digest back to the tag the line still names. `recipes/manifest_digest_renovate_test.go` fails on a digest the manager cannot read, and on a `network-operator-v*` tag that differs from the chart pin |
 | `recipes/registry.yaml` (35 chart pins) | custom regex manager (`# renovate:` annotations) — **report-only**, see [Registry drift report](#registry-drift-report) |
 | `.settings.yaml` (39 tool entries) | custom regex manager (`# renovate:` annotations) |
 | `.settings.yaml` `nvkind` SHA | dedicated git-refs digest customManager (`# renovate-digest:`) |

@@ -63,6 +63,7 @@ spec:
     no-op:
       image: ghcr.io/nvidia/skyhook-packages/shellscript
       version: 1.1.1
+      containerSHA: sha256:5414b06e52c090d0842704f2580798064362d771f12421ccc8888186b5f5a3cf
       configMap:
         apply.sh: |
           #!/bin/bash
