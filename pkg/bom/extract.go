@@ -80,6 +80,14 @@ func stripHelmTemplates(data []byte) []byte {
 // non-empty digest is validated as sha256:<64 lowercase hex chars> and folded
 // in as an @<digest> suffix.
 //
+// CRD-style siblings (NicClusterPolicy, Skyhook Package) are recognized too:
+// an `image` with optional `repository` and `version`, where a `containerSHA`,
+// or a `version` that starts with `sha256:`, supplies the digest. That digest
+// returns the same invalid-request error when it is not
+// sha256:<64 lowercase hex chars>, or when a digest `version` and a
+// `containerSHA` are both set. A digest holding an unresolved Helm value is
+// treated as absent.
+//
 // A scalar that is itself a serialized YAML document is also recursed into,
 // e.g. a ConfigMap data value embedding a whole manifest.
 //
@@ -388,8 +396,11 @@ func (e *invalidStructuredImageDescriptorError) Error() string {
 }
 
 // IsInvalidStructuredImageDescriptor reports whether err was caused by a
-// recognized mapping-valued image descriptor whose name, repository, or tag
-// field was present but null, empty, or non-scalar.
+// malformed member of a recognized image descriptor: in a mapping-valued
+// descriptor, a name, repository, or tag field that was present but null,
+// empty, or non-scalar, or a malformed digest; among CRD-style siblings, a
+// `containerSHA` or digest `version` that is not
+// sha256:<64 lowercase hex chars>, or both set together.
 func IsInvalidStructuredImageDescriptor(err error) bool {
 	var target *invalidStructuredImageDescriptorError
 	return stderrors.As(err, &target)
