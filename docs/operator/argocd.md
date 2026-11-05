@@ -125,6 +125,17 @@ Application that still reports `Synced` and `Healthy` from before the step
 never counts. Argo CD has no `observedGeneration`, so this is how the operator
 avoids reading stale health.
 
+A failed sync counts against a release unless the source Argo CD recorded
+for it shows it applied other values than the Application now carries. So a
+rollout that restores the values of a failed one leaves the runtime ready with
+no manual sync, even though the failed sync can stay the Application's last
+operation: the live objects already match, so Argo CD starts no new sync. When
+a step finds that the last sync failed and cannot show it was of other values,
+as after a failed hook, which leaves the resources `Synced`, it starts a sync
+and waits for its result: automated sync never retries a failed one. That sync
+runs the release's hooks again, so a hook that keeps failing fails every
+rollout that reaches the release.
+
 ## What to leave alone
 
 | Don't | Because | Instead |

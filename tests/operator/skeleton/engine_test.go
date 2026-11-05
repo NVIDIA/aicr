@@ -219,6 +219,59 @@ func removeCascades(ctx context.Context, t *testing.T, active string) {
 	}
 }
 
+// failedSyncRecovers fails a values-only rollout in Argo CD's sync, then
+// recovers by pinning the active plan. The restored values already match the
+// live objects, so Argo CD starts no sync and the failed operation stays the
+// Application's last one; the runtime is Ready and Available regardless.
+func failedSyncRecovers(ctx context.Context, t *testing.T, active string) {
+	t.Helper()
+	base := getRuntime(ctx, t).Spec.Overrides
+	selection := func(ctx context.Context, s v1alpha1.Selection) {
+		t.Helper()
+		rt := getRuntime(ctx, t)
+		patch := client.MergeFrom(rt.DeepCopy())
+		rt.Spec.Selection = s
+		if err := k8s.Patch(ctx, rt, patch); err != nil {
+			t.Fatalf("set selection %+v: %v", s, err)
+		}
+	}
+	restore := func(ctx context.Context) {
+		setOverrides(ctx, t, base)
+		selection(ctx, v1alpha1.Selection{Policy: v1alpha1.SelectionAutomatic})
+	}
+	// Later subtests start from the state this one leaves, even when it fails.
+	t.Cleanup(func() { restore(context.WithoutCancel(ctx)) })
+
+	// A request above cert-manager's 50m CPU limit fails the sync.
+	setCPU(ctx, t, `"100m"`)
+	waitFor(t, resolveTimeout+rolloutTimeout, "the rollout did not fail on its sync", func() bool {
+		c := meta.FindStatusCondition(getRuntime(ctx, t).Status.Conditions, v1alpha1.ConditionStalled)
+		if c == nil || c.Status != metav1.ConditionTrue || c.Reason != "RolloutFailed" {
+			return false
+		}
+		// The step fails on the sync, not at its action timeout.
+		if !strings.Contains(c.Message, "release "+release+": Sync") || strings.Contains(c.Message, "not ready within") {
+			t.Fatalf("the rollout failed with %q, want its sync failure", c.Message)
+		}
+		t.Logf("stalled: %s: %s", c.Reason, c.Message)
+		return true
+	})
+
+	selection(ctx, v1alpha1.Selection{Policy: v1alpha1.SelectionPinned, PinnedPlanDigest: active})
+	waitReadyOn(ctx, t, active)
+	if phase, _, _ := unstructured.NestedString(application(ctx, t).Object, "status", "operationState", "phase"); phase != "Failed" {
+		t.Fatalf("the Application's last operation is %q: Argo CD synced again, so the failed sync was not left behind", phase)
+	}
+	if c := meta.FindStatusCondition(getRuntime(ctx, t).Status.Conditions, v1alpha1.ConditionAvailable); c == nil ||
+		c.Status != metav1.ConditionTrue {
+
+		t.Fatalf("Available = %+v after the recovery", c)
+	}
+
+	restore(ctx)
+	waitReadyOn(ctx, t, active)
+}
+
 // foreignConflict creates an Application without the operator's ownership
 // under a plan release's name: the install conflicts, the rollout fails,
 // and the foreign object is never written.
