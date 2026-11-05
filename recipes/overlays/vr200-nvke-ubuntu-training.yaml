@@ -145,12 +145,17 @@ spec:
             limits:
               memory: 512Mi
 
-    # Installed for the operator and its CRDs, with no NicClusterPolicy. The CR
-    # is what creates the nic-configuration-daemon, and that daemon cannot
-    # discover ConnectX-9: MFT's flint fails to open the kernel's fwctl devices
-    # (MFE_CR_ERROR) and the pod crashloops on every GPU node. Every published
-    # daemon image fails identically -- NVIDIA/aicr#3640. The CR returns with
-    # east-west RDMA, when there are rails to configure.
+    # Carries a NicClusterPolicy with nothing but nicConfigurationOperator, to
+    # stand up the nic-configuration-daemon that `aicr snapshot
+    # --discover-network` needs. No ofedDriver: NVKE runs the host's inbox
+    # mlx5_core, and DOCA-OFED must not be installed on these nodes.
+    #
+    # Pinned to chart 26.7.1 rather than the registry default of 26.7.0. The
+    # daemon in 26.7.0 has no firmware-discovery fallback, so a flint failure
+    # is fatal, and flint cannot read ConnectX-9 here. Measured on a VR200
+    # worker: 26.7.0 dies with "failed to discover NIC devices", 26.7.1 logs
+    # "flint failed, falling back to sysfs" and discovers every port. The
+    # manifest pins the matching daemon image and says why.
     #
     # No rails yet -- gb200-nvke's policy and its sriov-ib-networks pair
     # hardcode four ConnectX-7 IB rails per tray, and that shape does not fit
@@ -165,19 +170,31 @@ spec:
     # fabric design, not from this inventory alone.
     - name: network-operator
       type: Helm
+      version: "26.7.1"
       valuesFile: components/network-operator/values-nvke-gb200.yaml
+      manifestFiles:
+        - components/network-operator/manifests/nic-cluster-policy-nvke-vr200.yaml
       dependencyRefs:
         - nfd
         - cert-manager
       overrides:
         # No SriovNetworkNodePolicy and no SriovNetwork here, so the SR-IOV
-        # operator and the drain-controller requestor would run on every node
-        # with nothing to act on. Both stay off until east-west lands.
+        # operator would run on every node with nothing to act on. It stays off
+        # until east-west lands. The maintenance operator does have work --
+        # nicConfigurationOperator prepares each node through it before
+        # applying NIC configuration -- so it is enabled.
         sriovNetworkOperator:
           enabled: false
-        operator:
-          maintenanceOperator:
-            useDrainControllerRequestor: false
+        maintenanceOperator:
+          enabled: true
+        nicConfigurationOperator:
+          configurationDaemon:
+            resources:
+              limits:
+                memory: 2Gi
+              requests:
+                cpu: 100m
+                memory: 256Mi
 
     # Scaffolded off. vr200-rke2 ships a Skyhook tuning CR that REBOOTS EVERY
     # GPU NODE it touches, and nodewright-packages has no vr200/nvke profile --

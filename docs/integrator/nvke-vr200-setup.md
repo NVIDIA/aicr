@@ -74,11 +74,26 @@ claimed. Measured on both workers of the reference cluster, identical on each:
 
 That is the fixed baseline the unqualified label above is measured against.
 
-**No NicClusterPolicy is deployed.** The leaf inherits `deployCR: false` and
-supplies no policy manifest, so the bundle installs none. It was removed
-because the `nic-configuration-daemon` it would start cannot discover
-ConnectX-9 — see [#3640](https://github.com/NVIDIA/aicr/issues/3640).
-`network-operator` itself stays installed, with the SR-IOV operator off.
+**A NicClusterPolicy is deployed, carrying only `nicConfigurationOperator`.**
+It stands up the `nic-configuration-daemon` that `aicr snapshot
+--discover-network` needs. No `ofedDriver` and no rails: NVKE runs the host's
+inbox `mlx5_core`, and this platform's rail layout is unmeasured. The SR-IOV
+operator stays off, since nothing here declares a `SriovNetwork`.
+
+**It pins network-operator 26.7.1, not the registry default of 26.7.0.** The
+daemon in 26.7.0 has no firmware-discovery fallback, so a `flint` failure is
+fatal — and `flint` cannot read ConnectX-9 here. Measured on a worker: 26.7.0
+exits with `failed to discover NIC devices`, while 26.7.1 logs `flint failed,
+falling back to sysfs` and discovers every port. The fix is Mellanox
+[c27f7ae](https://github.com/Mellanox/nic-configuration-operator/commit/c27f7ae71bb65caa93a7142e06e0343156648684)
+(#499/#533), which is absent from the `ghcr.io/mellanox` `v1.3.1` images the
+other in-tree policies pin, so this leaf pins the `nvcr.io/nvidia/mellanox`
+`network-operator-v26.7.1` images instead. ConnectX-7 and ConnectX-8 platforms
+never hit this, because `flint` works there.
+
+Verified on the reference cluster: the daemon discovered all eight ConnectX-9
+ports and wrote a `NicDevice` per port, each carrying firmware 82.48.4222,
+PSID `mt_0000001658`, and its `pci`/`netdev`/`rdma` mapping.
 
 **Not verified end to end.** The compiled-validator path for this coordinate
 is exercised by CI on merge, not on hardware here.
