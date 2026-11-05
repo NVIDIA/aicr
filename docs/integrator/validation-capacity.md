@@ -14,7 +14,14 @@ That evidence also helps prospective users choose where to run training or infer
 
 AICR releases ship with SLSA Build Level 3 image provenance, signed SBOMs, and OpenVEX attestations; recipes lock component versions, and deployment bundles can be signed and verified. The [Supply Chain Verification guide](supply-chain-verification.md) shows how to verify each artifact, and the [security policy](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md) covers trust boundaries and vulnerability reporting.
 
-During onboarding, agree which builds may run (release, `main`, or both), the recipe, upstream components, and verification checks. Review the [deployed image inventory](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md) before granting access. Release runs verify the downloaded `aicr` binary's checksum and build provenance before use; the agent and validator images that binary then deploys are pulled by release tag and are not verified at deploy time. `main` runs build their agent and validator images from the approved `main` commit for that run, without signatures. For all of these images, the workflow identity boundary below is the control. Upstream images are verified only where their publishers sign them or AICR pins them by digest.
+During onboarding, agree which builds may run (release, `main`, or both), the recipe, upstream components, and verification checks. Know what UAT verifies before you grant privileged access:
+
+- Release runs install the `aicr` CLI binary after verifying its checksum and SLSA provenance. That binary is the only artifact whose provenance UAT checks.
+- Release runs pull the snapshot agent and validator images by version tag without verifying their attestations, so those pulls trust the published tags and the registry.
+- `main` runs build the agent and validator images from the approved `main` commit for that run, without signatures.
+- UAT does not verify upstream image signatures, even where publishers provide them. A digest pin identifies image content; it does not verify who published it.
+
+For these images, the workflow identity boundary below is the control. Review the [deployed image inventory](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md) and agree to these trust assumptions before granting access.
 
 ## Contribute GPU capacity
 
@@ -38,7 +45,7 @@ Single-node capacity is useful. Multi-node and fabric tests require enough GPU w
 
 ## Capacity and operating requirements
 
-- **A reserved window.** Reserve at least two uninterrupted hours; specify start, end, time zone, and recurrence. Budget setup, downloads, tests, diagnostics, and cleanup within the window; agree the test cutoff and cleanup budget. Two hours fits a reduced, agreed scope: one full UAT cycle (provision, install, validate, publish, tear down) can take up to about two and a half hours, and a recurring window may run several cycles back to back, one per AICR release and workload type in the [version matrix](../contributor/uat.md#the-version-matrix).
+- **A reserved window.** Reserve at least two uninterrupted hours; specify start, end, time zone, and recurrence. Budget setup, downloads, tests, diagnostics, and cleanup within the window; agree the test cutoff and cleanup budget. Two hours fits a reduced, agreed scope. The nightly batch plans about two and a half hours for one full UAT cycle (provision, install, validate, publish, tear down), but provisioning and teardown retries can run longer: the AWS, Azure, and GCP lanes allow up to 330, 355, and 360 minutes per job. A recurring window may also run several cycles back to back, one per AICR release and workload type in the [version matrix](../contributor/uat.md#the-version-matrix).
 - **An isolated allocation.** Provide exclusive resources with hard quotas in a dedicated project, account, pool, or disposable cluster. Tests may install privileged or cluster-wide components, change drivers and tuning, and reboot nodes; shared production namespaces are insufficient. Because tests run with node-level privileges, node, workload, and runner-host identities reachable from the allocation must grant nothing outside it; a dedicated project or account is the simplest way to guarantee that.
 - **Unattended operation.** Automate allocation, temporary access, provisioning or cluster handoff, and cleanup. Disclose API limits, allocation delays, and preemption; agree a separate test scope for interruptible capacity.
 - **Usable networking.** Connect the runner to provisioning and Kubernetes APIs. Provide DNS, time synchronization, required pod and GPU fabric connectivity, and nonoverlapping address ranges.
@@ -73,7 +80,7 @@ The allocation window and credential lifetime are separate. A two-hour allocatio
 
 **The vendor owns** the hardware or service, allocation guarantees, network, quotas, identity policy, underlying infrastructure repair, and the ability to revoke access and reclaim the allocation. Keep customer data and unrelated internal services outside the test environment. Administrative or hardware debugging stays with the vendor unless temporary, audited access is agreed. CI does not need BMC credentials.
 
-**AICR maintainers own** test selection, workflow integration, execution, result reporting, and cleanup of run-created resources. Run one job at a time per allocation; debugging uses the same reservation. Tests stop early enough to collect diagnostics and clean up before the allocation ends. Retaining a failed cluster requires an explicit extension within the donated capacity limits.
+**AICR maintainers own** test selection, workflow integration, execution, result reporting, and cleanup of run-created resources. Run one job at a time per allocation; debugging uses the same reservation. UAT lanes do not receive a booking deadline today, so each provider integration must stop tests early enough to collect diagnostics and clean up before the allocation ends. Retaining a failed cluster requires an explicit extension within the donated capacity limits.
 
 Before activation, agree a cleanup path that survives job failure or runner loss: vendor-side expiry or reclamation, or an independent cleanup process with the same narrow access boundary. Record any separate cleanup workflow identity explicitly. A workflow's final cleanup step alone is insufficient. Pause new runs if cleanup fails and alert both owners.
 
@@ -96,9 +103,9 @@ AICR-operated UAT runs on donated capacity carry AICR's signing identity; provid
 
 1. **Offer capacity.** Send the short description below. Public details are enough to start; exchange private endpoints and identity configuration through a channel agreed with maintainers. Never attach credentials.
 2. **Agree a pilot.** Name one owner on each side. Select the test target, delivery mode, window, capacity limits, required permissions, runner location, reporting, and reset procedure. Maintainers identify the workflow, recipe, and provider integration changes needed.
-3. **Implement temporary access and the integration.** The vendor configures OIDC trust and allocation boundaries; maintainers integrate provisioning or cluster handoff, reservation locking, tests, evidence, and cleanup. Maintainers add a [UAT reservation](../contributor/uat.md#adding-a-reservation) with `nightly-intents: []`, so acceptance runs are dispatched manually and the nightly batch skips the capacity.
+3. **Implement temporary access and the integration.** The vendor configures OIDC trust and allocation boundaries; maintainers integrate provisioning or cluster handoff, reservation locking, tests, evidence, and cleanup. Maintainers add a manual-only [UAT reservation](../contributor/uat.md#adding-a-reservation) with `nightly-intents: []`; acceptance runs are dispatched through `uat-run.yaml` using that row, and the nightly batch skips it.
 4. **Pass acceptance.** Complete the checks below before adding recurring runs.
-5. **Schedule and operate.** The nightly batch runs every enrolled reservation daily at 04:00 UTC, so maintainers enroll the reservation only for a daily window that covers that time. Any other window stays out of the nightly batch and is dispatched manually within the agreed booking. Review failures together and pause the allocation for maintenance, access changes, or unresolved cleanup problems.
+5. **Schedule and operate.** Only after acceptance passes, maintainers enable the agreed cadence. The nightly batch runs every enrolled reservation daily at 04:00 UTC, so a reservation is enrolled only when each daily window covers that start plus the full run and cleanup time of every cell the batch dispatches. One-time, recurring-window, and on-demand offers stay manual-only and are dispatched through `uat-run.yaml` within the agreed booking. Review failures together and pause the allocation for maintenance, access changes, or unresolved cleanup problems.
 
 **Capacity offer — include in your message or feature request:**
 
