@@ -109,9 +109,10 @@ but AKS recipes disable it by default via `nodewright-customizations`
 for the rationale and re-enable path.
 
 The `eks` rows likewise do not apply to the `os=amazonlinux` leaves
-(`*-eks-amazonlinux-inference`). Those leaves disable
-`nodewright-customizations` entirely (`enabled: false`), so no setup or tuning
-package is rendered and host setup and tuning must come from the AMI.
+(`*-eks-amazonlinux-inference` and `h100-eks-amazonlinux-inference-dynamo`).
+Those leaves disable `nodewright-customizations` entirely (`enabled: false`),
+so no setup or tuning package is rendered and host setup and tuning must come
+from the AMI.
 
 The `tuningEnabled` gate (default `true`; only an explicit `false` disables)
 applies uniformly across the tuning manifests: on the shared `tuning.yaml` it
