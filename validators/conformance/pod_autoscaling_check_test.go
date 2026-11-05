@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -961,5 +962,214 @@ func TestHPAScenarioDeployCreatesScrapeConfig(t *testing.T) {
 	}
 	if _, err := c.AutoscalingV2().HorizontalPodAutoscalers(cp.ns).Get(context.Background(), hpaWorkloadName, metav1.GetOptions{}); !k8serrors.IsNotFound(err) {
 		t.Errorf("HPA must not exist before the baseline is established: %v", err)
+	}
+}
+
+// namespaceCreateFailureCases drives the shared ambiguous-create contract for
+// every GPU check that registers its teardown before createGPUTestNamespace
+// (#3648): an AMBIGUOUS failure — the apiserver persisted the namespace, then
+// the response was lost — must still issue the namespace delete and leave
+// nothing behind, while a DEFINITIVE rejection must issue no delete at all.
+// Either way the "Delete test namespace" artifact is recorded with the
+// matching cleanup status (wantStatus). persists installs the namespace in
+// the tracker before the error returns; surfacesLate installs it only after
+// cleanup's first lookup has already answered NotFound (the server was still
+// applying the Create when the client timed out), which a single Delete
+// would miss; deleteErr, when set, makes every namespace Delete fail so the
+// case proves the create error still wins over the cleanup error (the
+// named-return guard).
+var namespaceCreateFailureCases = []struct {
+	name         string
+	persists     bool
+	surfacesLate bool
+	createErr    func(name string) error
+	deleteErr    error
+	wantDeleted  bool
+	wantStatus   string
+}{
+	{
+		name:     "ambiguous create that persisted the namespace is cleaned up",
+		persists: true,
+		createErr: func(string) error {
+			return k8serrors.NewTimeoutError("request timed out; object may have been persisted", 1)
+		},
+		wantDeleted: true,
+		wantStatus:  "confirmed absent",
+	},
+	{
+		name:         "ambiguous create that surfaces after the first NotFound is cleaned up",
+		surfacesLate: true,
+		createErr: func(string) error {
+			return k8serrors.NewTimeoutError("request timed out; object may have been persisted", 1)
+		},
+		wantDeleted: true,
+		wantStatus:  "confirmed absent",
+	},
+	{
+		name: "definitively rejected create issues no delete",
+		createErr: func(name string) error {
+			return k8serrors.NewForbidden(schema.GroupResource{Resource: "namespaces"}, name,
+				stderrors.New("namespaces is forbidden"))
+		},
+		wantStatus: "never created",
+	},
+	{
+		name:     "failing delete after an ambiguous create keeps the create error",
+		persists: true,
+		createErr: func(string) error {
+			return k8serrors.NewTimeoutError("request timed out; object may have been persisted", 1)
+		},
+		deleteErr: k8serrors.NewForbidden(schema.GroupResource{Resource: "namespaces"}, "",
+			stderrors.New("namespaces is forbidden")),
+		wantDeleted: true,
+		wantStatus:  "CLEANUP FAILED",
+	},
+}
+
+// failNamespaceDelete makes every namespace Delete return deleteErr.
+func failNamespaceDelete(c *k8sfake.Clientset, deleteErr error) {
+	c.PrependReactor("delete", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, deleteErr
+	})
+}
+
+// shortenCleanupTimeout bounds the cleanup settle loop for the duration of a
+// SEQUENTIAL test (cleanupTimeout is package state). It stays above the poll
+// interval so a namespace that surfaces after the first lookup still gets a
+// second one before the budget expires.
+func shortenCleanupTimeout(t *testing.T) {
+	t.Helper()
+	old := cleanupTimeout
+	cleanupTimeout = 3 * defaults.PodPollInterval
+	t.Cleanup(func() { cleanupTimeout = old })
+}
+
+// failNamespaceCreate makes the fake apiserver answer the namespace Create
+// with createErr. With persists the object is committed before the error
+// returns; with surfacesLate it is committed only when cleanup first looks
+// the namespace up, and that lookup still answers NotFound — the "server
+// still applying the Create" shape a single Delete would miss. The returned
+// function reports the name the Create used.
+func failNamespaceCreate(c *k8sfake.Clientset, persists, surfacesLate bool, createErr func(name string) error) func() string {
+	var pending *corev1.Namespace
+	c.PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		ns := action.(k8stesting.CreateAction).GetObject().(*corev1.Namespace).DeepCopy()
+		ns.UID = "uid-ambiguous-create"
+		pending = ns
+		if persists {
+			if err := c.Tracker().Add(ns); err != nil {
+				return true, nil, err
+			}
+		}
+		return true, nil, createErr(ns.Name)
+	})
+	if surfacesLate {
+		// Whichever of Get or Delete reaches the namespace first answers
+		// NotFound and commits the object behind that answer: a settle loop
+		// sees it on its next lookup, a single Delete never does.
+		fired := false
+		late := func(name string) (handled bool, err error) {
+			if fired || pending == nil || name != pending.Name {
+				return false, nil // fall through to the tracker
+			}
+			fired = true
+			if err := c.Tracker().Add(pending); err != nil {
+				return true, err
+			}
+			return true, k8serrors.NewNotFound(schema.GroupResource{Resource: "namespaces"}, pending.Name)
+		}
+		c.PrependReactor("get", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			handled, err := late(action.(k8stesting.GetAction).GetName())
+			return handled, nil, err
+		})
+		c.PrependReactor("delete", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			handled, err := late(action.(k8stesting.DeleteAction).GetName())
+			return handled, nil, err
+		})
+	}
+	return func() string {
+		if pending == nil {
+			return ""
+		}
+		return pending.Name
+	}
+}
+
+// namespaceDeleteIssued reports whether the fake recorded a Delete of the
+// named namespace.
+func namespaceDeleteIssued(actions []k8stesting.Action, name string) bool {
+	for _, action := range actions {
+		del, ok := action.(k8stesting.DeleteAction)
+		if ok && del.GetResource().Resource == "namespaces" && del.GetName() == name {
+			return true
+		}
+	}
+	return false
+}
+
+// assertNamespaceCreateFailureCleanup checks the outcome shared by every
+// check's ambiguous-create case: the create error is the check's result, the
+// cleanup artifact was recorded with the expected status (out is the captured
+// stdout), the delete was issued exactly when the namespace may exist, a
+// namespace that ever existed is gone unless the delete was made to fail,
+// and a failed cleanup never replaces the create error.
+func assertNamespaceCreateFailureCleanup(t *testing.T, c *k8sfake.Clientset, ns, out string, err error, existed bool, deleteErr error, wantDeleted bool, wantStatus string) {
+	t.Helper()
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+	if err == nil || !strings.Contains(err.Error(), "failed to create test namespace") {
+		t.Errorf("error = %v, want the namespace create failure as the check's result", err)
+	}
+	if err != nil && strings.Contains(err.Error(), "CLEANUP FAILED") {
+		t.Errorf("error = %v, want the create error to win over the cleanup error", err)
+	}
+	if !strings.Contains(out, "--- Delete test namespace ---") {
+		t.Error("evidence missing the \"Delete test namespace\" artifact")
+	}
+	if !strings.Contains(out, wantStatus) {
+		t.Errorf("cleanup artifact lacks status %q in output:\n%s", wantStatus, out)
+	}
+	if got := namespaceDeleteIssued(c.Actions(), ns); got != wantDeleted {
+		t.Errorf("namespace delete issued = %t, want %t", got, wantDeleted)
+	}
+	if existed && deleteErr == nil {
+		if _, getErr := c.CoreV1().Namespaces().Get(context.Background(), ns, metav1.GetOptions{}); !k8serrors.IsNotFound(getErr) {
+			t.Errorf("namespace %s leaked after an ambiguous create (get err = %v)", ns, getErr)
+		}
+	}
+}
+
+// TestHPAScenarioRunWithCleanup_NamespaceCreateFailure pins that the HPA
+// check's teardown runs even when createGPUTestNamespace fails, and never
+// starts the cycle on that path. Sequential: captureStdout swaps os.Stdout.
+func TestHPAScenarioRunWithCleanup_NamespaceCreateFailure(t *testing.T) {
+	shortenCleanupTimeout(t)
+	for _, tt := range namespaceCreateFailureCases {
+		t.Run(tt.name, func(t *testing.T) {
+			c := k8sfake.NewClientset()
+			failNamespaceCreate(c, tt.persists, tt.surfacesLate, tt.createErr)
+			if tt.deleteErr != nil {
+				failNamespaceDelete(c, tt.deleteErr)
+			}
+			run, err := newGPUTestRun()
+			if err != nil {
+				t.Fatalf("newGPUTestRun: %v", err)
+			}
+			run.namespace = hpaTestPrefix + run.token
+			s := &hpaScenario{
+				clientset: c,
+				dynClient: dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+					map[schema.GroupVersionResource]string{podMonitorGVR: "PodMonitorList"}),
+				testRun: run,
+				timings: map[hpaPhase]time.Duration{},
+			}
+
+			out := captureStdout(t, func() {
+				err = s.runWithCleanup(&validators.Context{Ctx: context.Background(), Clientset: c})
+			})
+			assertNamespaceCreateFailureCleanup(t, c, run.namespace, out, err, tt.persists || tt.surfacesLate, tt.deleteErr, tt.wantDeleted, tt.wantStatus)
+			if s.phase != "" {
+				t.Errorf("phase = %q, want none — the cycle must not start without a namespace", s.phase)
+			}
+		})
 	}
 }
