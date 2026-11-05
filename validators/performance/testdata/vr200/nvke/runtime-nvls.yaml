@@ -21,8 +21,7 @@
 # driver 615.71.09, nvidia-dra-driver-gpu 25.8.1): 996.5 and 996.1 GB/s busbw
 # averaged over 1 GiB..16 GiB across two runs, 1040 GB/s peak at 16 GiB, zero
 # mismatches at every size. NCCL reported `NVLS comm ... nvlsRanks 8`, so one
-# NVLS communicator spanned both trays. This is the first measured NVKE
-# baseline; gb200-nvke still carries gb200/oke's placeholder thresholds.
+# NVLS communicator spanned both trays.
 #
 # THIS FILE IS CURRENTLY IDENTICAL TO testdata/vr200/rke2/runtime-nvls.yaml.
 # Nothing in the manifest is service-specific -- the RKE2 variant carries no
