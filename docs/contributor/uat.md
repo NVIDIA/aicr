@@ -376,7 +376,7 @@ No broker, workflow, or Go change is needed — the nightly batch enumerates row
 
 Onboarding a new *cloud* (rather than a new pool in an existing cloud) is a code change on top of the row: a `run-<cloud>` job in `uat-run.yaml`, a `uat-<cloud>.yaml` pipeline, and account federation under `infra/uat-<cloud>-account/`. During bring-up, set `nightly-intents: []` (explicit empty list — absent defaults to `[training]`) so the reservation is manually dispatchable via `uat-run.yaml` but skipped by the nightly batch; flip it once the pipeline has green runs.
 
-Capacity offered by an outside provider follows [Contributing Validation Capacity](../integrator/validation-capacity.md), which sets the access and acceptance requirements before a row is added.
+Capacity offered by an outside provider follows [Contributing Validation Capacity](../integrator/validation-capacity.md): its row starts with `nightly-intents: []` so acceptance runs are dispatched manually, and it joins the nightly batch only after acceptance and only for a daily window.
 
 The values in this file are identifiers, **not secrets** — a reservation-id grants no access on its own; access to the reserved capacity is governed by cloud IAM/ACLs bound to the CI federation identity (see `infra/uat-aws-account/`, `infra/uat-gcp-account/`, and `infra/uat-azure-account/`). They are safe to commit.
 
