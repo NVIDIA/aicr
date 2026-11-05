@@ -70,6 +70,9 @@ aicr recipe \
   --output recipe.yaml
 ```
 
+On Amazon Linux 2023 GPU nodes running the NVIDIA AL2023 AMI, pass
+`--os amazonlinux` instead of `--os ubuntu`.
+
 **GKE**
 
 ```shell
