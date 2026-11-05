@@ -958,7 +958,12 @@ a ConfigMap or ClusterRole with no dependents). **Do not** `kubectl delete -f`
 CRD or Namespace manifests from a migration cleanup — deleting a CRD
 garbage-collects every CR of that type cluster-wide (Gateway API / Inference
 Extension CRDs under `agentgateway-crds` are the concrete risk), and deleting a
-Namespace removes everything inside it.
+Namespace removes everything inside it. Those vendored CRDs carry
+`helm.sh/resource-policy: keep` and `argocd.argoproj.io/sync-options:
+Delete=false,Prune=false`. Helm reads `keep` from the release's stored manifest
+when it uninstalls, so once a bundle carrying them has been applied, uninstalling
+or pruning the release or Application that owns them leaves them in place. An
+explicit `kubectl delete` is covered by neither.
 
 ## Gate on component readiness
 

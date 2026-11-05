@@ -23,6 +23,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# AICR addition: every CRD below carries helm.sh/resource-policy: keep and
+# argocd.argoproj.io/sync-options: Delete=false,Prune=false, which upstream
+# does not ship. Keep both when re-vendoring
+# (TestVendoredGatewayCRDsCarryRetentionGuards checks they are present).
+# Helm reads keep from the release's stored manifest when it uninstalls a
+# release, so the guards protect a cluster once a bundle carrying them has
+# been applied: from then on, uninstalling, pruning or moving the release that
+# owns these CRDs leaves them in place, together with every resource of their
+# kinds. Neither guard stops an explicit kubectl delete.
 
 #
 # config/crd/experimental/gateway.networking.k8s.io_tlsroutes.yaml
@@ -31,6 +41,8 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
+    helm.sh/resource-policy: "keep"
+    argocd.argoproj.io/sync-options: "Delete=false,Prune=false"
     api-approved.kubernetes.io: https://github.com/kubernetes-sigs/gateway-api/pull/3328
     gateway.networking.k8s.io/bundle-version: v1.2.1
     gateway.networking.k8s.io/channel: experimental
