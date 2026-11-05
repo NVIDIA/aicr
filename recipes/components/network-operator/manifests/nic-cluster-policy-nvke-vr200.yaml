@@ -49,6 +49,14 @@ spec:
   # platforms never hit it because flint works there.
   nicConfigurationOperator:
     logLevel: info
+    # Tagged, not digest-pinned, which is the one place this file diverges from
+    # its neighbours. A crd-digest annotation carries `tag=network-operator-vX`
+    # and TestNetworkOperatorTagAnnotationsFollowChartPin requires that X equal
+    # registry.yaml's network-operator defaultVersion. This leaf deliberately
+    # pins the chart one patch ahead of that default, so a digest annotation
+    # here could only name a tag the guard rejects. The images stay on tags
+    # with an entry in imageDigestExemptions instead, which keeps the
+    # divergence inside this leaf rather than moving the whole fleet.
     operator:
       image: nic-configuration-operator
       repository: nvcr.io/nvidia/mellanox

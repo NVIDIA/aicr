@@ -69,7 +69,15 @@ claimed. Measured on both workers of the reference cluster, identical on each:
 - RDMA userspace: `libibverbs1` and `ibverbs-providers` both 2607.0.8-1.
   Neither `rdma-core` nor `librdmacm` is installed.
 - NIC firmware: 82.48.4222 (PSID MT_0000001658) on the eight ConnectX-9 ports,
-  82.48.4238 (MT_0000001875) on the BlueField ports.
+  82.48.4238 (MT_0000001875) on the BlueField ports. **This baseline predates
+  the current stable line.** NVIDIA's published ConnectX-9 firmware runs
+  82.48.1000 (February 2026 GA), 82.49.1014 (June 2026) and 82.50.1002, so
+  82.50 is current and 82.48 is two branches behind it. The build number here
+  (4222) sits far above the 82.48 GA build (1000), which is the shape of a
+  pre-GA build for these trays rather than a stale GA, so confirm
+  applicability before treating 82.50 as a drop-in upgrade. This recipe sets
+  no firmware: there is no firmware template in the NicClusterPolicy, so the
+  version is whatever the node image and tray ship.
 - `ofed_info` is absent, confirming no DOCA-OFED install.
 
 That is the fixed baseline the unqualified label above is measured against.

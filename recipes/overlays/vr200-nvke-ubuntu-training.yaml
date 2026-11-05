@@ -187,14 +187,6 @@ spec:
           enabled: false
         maintenanceOperator:
           enabled: true
-        nicConfigurationOperator:
-          configurationDaemon:
-            resources:
-              limits:
-                memory: 2Gi
-              requests:
-                cpu: 100m
-                memory: 256Mi
 
     # Scaffolded off. vr200-rke2 ships a Skyhook tuning CR that REBOOTS EVERY
     # GPU NODE it touches, and nodewright-packages has no vr200/nvke profile --

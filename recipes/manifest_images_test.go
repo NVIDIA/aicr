@@ -118,6 +118,15 @@ const nebiusOFEDDigestReason = "network-operator v25.1.0 (Nebius chart 25.7.0) a
 // changing what runs, an OFED driver whose operator predates digest support
 // for it, or a node-local image with no registry.
 var imageDigestExemptions = map[string]imageDigestExemption{
+	// vr200-nvke pins network-operator one patch ahead of the registry
+	// default (26.7.1 vs 26.7.0) because 26.7.0's nic-configuration-daemon
+	// has no firmware-discovery fallback and cannot discover ConnectX-9.
+	// A crd-digest annotation would have to name tag=network-operator-v26.7.1,
+	// which TestNetworkOperatorTagAnnotationsFollowChartPin rejects while the
+	// registry default is 26.7.0, so these two stay on tags.
+	"nvcr.io/nvidia/mellanox/nic-configuration-operator:network-operator-v26.7.1":        {[]string{"network-operator/manifests/nic-cluster-policy-nvke-vr200"}, "leaf pins network-operator 26.7.1 ahead of the registry default; a digest annotation would name a tag the chart-pin guard rejects"},
+	"nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon:network-operator-v26.7.1": {[]string{"network-operator/manifests/nic-cluster-policy-nvke-vr200"}, "leaf pins network-operator 26.7.1 ahead of the registry default; a digest annotation would name a tag the chart-pin guard rejects"},
+
 	"nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2": {[]string{"network-operator/manifests/nic-cluster-policy-aks"}, docaDriverDigestReason},
 	"nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0": {[]string{"network-operator/manifests/nic-cluster-policy-generic-gb300"}, docaDriverDigestReason},
 
