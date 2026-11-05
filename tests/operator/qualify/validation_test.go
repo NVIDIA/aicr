@@ -38,8 +38,10 @@ const validationNamespace = "aicr-validation"
 // and approves its rollout. The candidate's operator runs AICR's validation
 // stage with the candidate's AICR image, as the chart's launcher in the
 // validation namespace. A kind cluster has no GPU, so validation fails: the
-// rollout ends Failed and the plan is never promoted. Turning validation off
-// returns the runtime to the active plan.
+// rollout ends Failed and the plan is never promoted. The failed rollout
+// left the release at its values, so returning the target to the active plan
+// is an approved rollout back to it. The operator, validating, is denied
+// nothing.
 func deploymentValidation(ctx context.Context, t *testing.T, active string) {
 	t.Helper()
 	t.Setenv("CANDIDATE_NEXT_DIR", filepath.Dir(os.Getenv("AICR_OPERATOR_QUALIFY_NEXT")))
@@ -53,6 +55,19 @@ func deploymentValidation(ctx context.Context, t *testing.T, active string) {
 	restore := func() {
 		patchRuntime(ctx, t, func(rt *v1alpha1.ClusterRuntime) { rt.Spec = *saved })
 		restored = true
+		// Earlier rollouts to the active plan succeeded; the one back to it
+		// waits for an approval.
+		var back *v1alpha1.RuntimeRollout
+		waitFor(t, rolloutTimeout, "a rollout back to "+active+" awaiting approval", func() bool {
+			for _, r := range rolloutsTo(ctx, t, active) {
+				if r.Status.Phase == v1alpha1.PhaseAwaitingApproval {
+					back = &r
+					return true
+				}
+			}
+			return false
+		})
+		approve(ctx, t, back.Name)
 		waitReadyOn(ctx, t, active)
 	}
 	// Later scenarios start from the active plan, whatever happens here.
@@ -65,12 +80,14 @@ func deploymentValidation(ctx context.Context, t *testing.T, active string) {
 	patchRuntime(ctx, t, func(rt *v1alpha1.ClusterRuntime) {
 		rt.Spec.Validation.Deployment = v1alpha1.DeploymentValidationRequired
 	})
-	digest, ro := nextPlan(ctx, t, active, "40m")
+	// A CPU request no other scenario uses, under cert-manager's 50m limit,
+	// so the plan is new and its sync succeeds.
+	digest, ro := nextPlan(ctx, t, active, "10m")
 	approve(ctx, t, ro.Name)
 
 	jobs := map[string]batchv1.Job{}
 	var ended *v1alpha1.RuntimeRollout
-	waitFor(t, rolloutTimeout, "the validation gate to end the rollout to "+digest, func() bool {
+	waitFor(t, rolloutTimeout+5*time.Minute, "the validation gate to end the rollout to "+digest, func() bool {
 		list := &batchv1.JobList{}
 		if err := k8s.List(ctx, list, client.InNamespace(validationNamespace),
 			client.MatchingLabels{v1alpha1.LabelStage: string(aicrjob.StageValidation)}); err == nil {
@@ -118,4 +135,5 @@ func deploymentValidation(ctx context.Context, t *testing.T, active string) {
 		return c.Status == metav1.ConditionTrue && c.ObservedGeneration == rt.Generation
 	})
 	restore()
+	nothingForbidden(ctx, t)
 }
