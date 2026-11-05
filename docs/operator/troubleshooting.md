@@ -198,9 +198,10 @@ turns into `RegistryCredentialsStale`.
 
 An operator that restarts or takes over leadership during the outage holds no
 token of its own. Its registry calls and pushing Jobs fail with
-`RegistryCredentialsUnavailable` until a mint succeeds, while Argo CD keeps
-using the token in `repo-creds`. The `EngineAvailable` message says the
-operator holds no token it can use.
+`RegistryCredentialsUnavailable` until a mint succeeds. Argo CD keeps using
+the token in `repo-creds` only until it expires. The `EngineAvailable` message
+says the operator holds no token it can use, and within an hour of the token's
+expiry this turns into `RegistryCredentialsStale`.
 
 ## AICR version mismatch
 
