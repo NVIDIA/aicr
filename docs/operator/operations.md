@@ -25,7 +25,7 @@ kubectl get configmaps -n aicr-system -l operator.aicr.run/role=plan
 | `Reconciling` | Work is in progress | `Resolving`, `Stabilizing`, `Assessing`, `RollingOut`, `Validating`. `False` with `RolledOut` only means nothing is in progress: it is also reported while paused or stalled |
 | `Stalled` | Progress needs you; the reason says why ([troubleshooting](troubleshooting.md)) | `Progressing` when not stalled |
 | `Resolved` | A plan exists for the current inputs | `Resolved`; `Resolving` while AICR Jobs run or a transient failure is retried; otherwise a terminal reason |
-| `EngineAvailable` | Argo CD's CRDs and the project are present and, with the `aws` registry provider, the registry token is fresh | `EngineMissing`, `ProjectMissing`, `RegistryCredentialsStale`. While `True`, the message names a failing ECR token mint and whether the operator still holds a token it can use |
+| `EngineAvailable` | Argo CD's CRDs and the project are present and, with the `aws` registry provider, the registry token is fresh | `EngineMissing`, `ProjectMissing`, `RegistryCredentialsStale`. When minting a new ECR token fails while `True`, the message names the failure and whether the operator still holds a token it can use |
 
 A failure carries its error code in the message, for example `[NOT_FOUND] plan
 aicr-plan-1a2b… is missing`. A failure inside an AICR Job carries AICR's exit
