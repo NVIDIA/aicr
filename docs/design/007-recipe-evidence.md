@@ -1434,7 +1434,16 @@ the other phases, not capacity, bound what can be always-on.
    aggregation, so the per-check rule of `--fail-on-error` is superseded:
    a non-passing check behind a SHOULD does not fail a submission run,
    while any non-passing check behind a MUST does, through (b). No check
-   verdict is rewritten.
+   verdict is rewritten. Refined 2026-11-05 in
+   [#3602](https://github.com/NVIDIA/aicr/issues/3602): the submission
+   verdict is additional to the per-check failure rule, not a replacement
+   for it. A check that fails or errors fails a submission run exactly as it
+   fails any other run, because a flag never changes verdict logic
+   (decision 2's own invariant) and because conformance checks with no
+   requirement mapping (platform-health, the Slinky health checks) are
+   invisible to the aggregation; the SHOULD exemption above applies to the
+   aggregation's own verdict and to the export rule of decision 6, not to
+   the per-check rule.
 3. **`--feature` and `evidence.cncf.features` are removed together with
    the script.** Implementing issue:
    [#3602](https://github.com/NVIDIA/aicr/issues/3602).

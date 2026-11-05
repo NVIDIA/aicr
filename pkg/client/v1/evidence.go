@@ -16,12 +16,9 @@ package aicr
 
 import (
 	"context"
-	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"slices"
-	"strings"
 
 	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -32,7 +29,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/validator"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
-	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
 
 // OIDCResolveOptions selects how a pushed evidence bundle is signed: with the
@@ -230,29 +226,51 @@ func (c *Client) EmitRecipeEvidenceWithResult(
 
 // CNCFCollectOptions configures Client.CollectCNCFEvidence.
 type CNCFCollectOptions struct {
-	// Dir is the directory the behavioral evidence is written to. Required.
+	// Dir is the directory the submission evidence is written to. Required.
 	// A relative path, like a relative Kubeconfig, resolves against the
 	// caller's working directory.
 	Dir string
 
-	// Features restricts collection to the named features or their aliases
-	// (see CNCFEvidenceFeatures). Empty, or "all", collects every feature.
+	// Features must be empty; a non-empty value is rejected with
+	// ErrCodeInvalidRequest.
+	//
+	// Deprecated: the --feature interface was removed with the evidence
+	// collector script (#3602). The conformance checks the recipe declares
+	// are the only selection, and every one of them runs.
 	Features []string
 
-	// Kubeconfig is the kubeconfig path the collector's kubectl calls use.
-	// Empty uses kubectl's own resolution (KUBECONFIG, then ~/.kube/config).
+	// Kubeconfig is the kubeconfig path the snapshot agent and the validator
+	// Jobs use. Empty uses the default discovery (KUBECONFIG, then
+	// ~/.kube/config).
 	Kubeconfig string
 
-	// NoCluster runs in test mode. Every section is reported as skipped and
-	// nothing is executed against a cluster.
+	// Namespace is where the snapshot agent and the validator Jobs run, as
+	// `aicr validate --namespace`. Empty means defaults.ValidationNamespace.
+	Namespace string
+
+	// NotApplicable declares conditional MUST requirements not applicable,
+	// keyed by upstream id with the justification as value, exactly as
+	// RenderCNCFEvidenceOptions.NotApplicable and the CLI's
+	// spec.validate.evidence.cncf.notApplicable (today only
+	// cluster_autoscaling). It is checked before the cluster is touched.
+	NotApplicable map[string]string
+
+	// NoCluster must be false; true is rejected with ErrCodeInvalidRequest.
+	//
+	// Deprecated: submission evidence comes from checks that ran on a live
+	// cluster, so there is no offline mode. For an offline dry-run call
+	// ValidateState with WithValidationNoCluster(true) directly.
 	NoCluster bool
 }
 
-// CNCFEvidenceFeatures returns the canonical feature names
-// CNCFCollectOptions.Features accepts, in collection order. Short aliases
-// and "all" are accepted too but not listed. The returned slice is a copy.
+// CNCFEvidenceFeatures returns an empty, non-nil slice: no feature names are
+// accepted since the --feature interface was removed (#3602). The returned
+// slice is never shared.
+//
+// Deprecated: CNCFCollectOptions.Features is rejected when non-empty; there
+// is nothing to list.
 func CNCFEvidenceFeatures() []string {
-	return slices.Clone(cncf.ValidFeatures)
+	return []string{}
 }
 
 // RenderCNCFEvidenceOptions selects the upstream checklist version
@@ -419,38 +437,43 @@ func resolveConformanceVersion(opts RenderCNCFEvidenceOptions) (cncf.Version, er
 	return v, nil
 }
 
-// CollectCNCFEvidence collects behavioral CNCF AI Conformance submission
-// evidence by deploying GPU test workloads to the cluster and capturing
-// their results under opts.Dir. It runs for up to
-// defaults.CNCFSubmissionTimeout.
+// CollectCNCFEvidence runs the conformance phase against a live cluster and
+// renders the CNCF AI Conformance evidence into opts.Dir. It is the Go
+// counterpart of `aicr validate --phase conformance --cncf-submission
+// --evidence-dir`, composed from the public surface: CollectSnapshot deploys
+// the snapshot agent, ValidateState runs the conformance checks rec declares,
+// MergeReports combines them, and RenderCNCFEvidenceWithResult writes the
+// evidence against the checklist of the cluster's Kubernetes minor. Flags
+// never change what a check does: the checks and their verdicts are those
+// ValidateState produces. Each stage bounds itself the way it does for every
+// caller: the snapshot by defaults.SnapshotOperationTimeout plus its grace,
+// the run by defaults.ValidationOperationTimeout; a tighter caller deadline
+// always wins.
 //
-// rec is optional. When non-nil, it must come from this Client. The GPU
-// allocation policy it configures selects the mechanism the dra-support and
-// secure-access sections exercise, and the inference gateway component it
-// declares (agentgateway by default; see
-// validatorv1.ResolveInferenceGatewayProfile) is the Gateway the
-// inference-gateway section collects evidence for; a recipe that declares no
-// gateway makes that section report the prerequisite absent rather than
-// discover a Gateway by name. A policy or gateway declaration that cannot be
-// resolved fails the call rather than collecting evidence for the wrong
-// mechanism or Gateway. The gateway is resolved only when opts.Features
-// selects the inference-gateway section, which the default empty list does.
-// When rec is nil, the collector detects the mechanism from cluster
-// capabilities and discovers the Gateway named inference-gateway.
+// rec is required and must come from this Client: the recipe selects the
+// conformance checks, and the former capability-detection path of the bash
+// collector is gone. A caller that needs the snapshot agent configured
+// (image, scheduling, service account) or the validator options should call
+// the four methods above itself; this wrapper uses their defaults with
+// opts.Kubeconfig and opts.Namespace.
 //
-// A real run needs bash and kubectl on PATH.
+// The call fails after rendering under the rule the CLI applies
+// (CNCFRequirementAggregate.Outcome): a check that failed or errored fails
+// it, as in any run, and so does an applicable MUST requirement that is not
+// established. The aggregation itself never fails it on a SHOULD. Unlike `aicr validate`, which stamps one run id on
+// the agent Job and the validator Jobs (ADR-020), the agent Job here carries
+// its own generated id, so the two are not correlated by label.
 //
 // Errors:
 //   - ErrCodeInvalidRequest when the Client or ctx is nil, the Client is
-//     closed, opts.Dir is empty, a feature name is unknown, rec is
-//     unresolved or owned by another Client, or rec's inference gateway
-//     declaration cannot be resolved (malformed, a near-miss override key on
-//     an enabled component, or more than one enabled gateway).
-//   - ErrCodeUnavailable when bash or kubectl is not on PATH.
-//   - ErrCodeTimeout when collection exceeds its deadline.
-//   - ErrCodeCanceled when ctx is canceled during policy resolution.
-//   - The policy resolver's own code when rec's allocation policy is invalid.
-//   - ErrCodeInternal when one or more sections fail.
+//     closed, opts.Dir is empty, opts.Features is non-empty, opts.NoCluster
+//     is true, opts.NotApplicable names a requirement that may not be
+//     declared not applicable, or rec is nil, unresolved or owned by another
+//     Client.
+//   - The snapshot, validator and render errors propagate with their own
+//     codes (ErrCodeTimeout when a stage's deadline expires).
+//   - ErrCodeInternal when a check failed or errored, or an applicable MUST
+//     requirement is not established.
 func (c *Client) CollectCNCFEvidence(ctx context.Context, rec *RecipeResult, opts CNCFCollectOptions) error {
 	if c == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
@@ -461,21 +484,32 @@ func (c *Client) CollectCNCFEvidence(ctx context.Context, rec *RecipeResult, opt
 	if opts.Dir == "" {
 		return errors.New(errors.ErrCodeInvalidRequest, "CNCF evidence directory is required")
 	}
-	for _, f := range opts.Features {
-		if !cncf.IsValidFeature(f) {
-			return errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("unknown feature %q; valid features: %s",
-					f, strings.Join(cncf.ValidFeatures, ", ")))
-		}
+	if len(opts.Features) > 0 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("CNCFCollectOptions.Features %v: the --feature interface was removed with the evidence collector (#3602); "+
+				"the recipe's conformance checks are the only selection", opts.Features))
 	}
-	if rec != nil {
-		if rec.internal == nil {
-			return errors.New(errors.ErrCodeInvalidRequest,
-				"RecipeResult has no internal recipe state: call Client.ResolveRecipe or Client.LoadRecipe to obtain one")
-		}
-		if err := c.assertOwns(rec); err != nil {
-			return err
-		}
+	if opts.NoCluster {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"CNCFCollectOptions.NoCluster: CNCF submission evidence needs a live cluster; "+
+				"for an offline dry-run call ValidateState with WithValidationNoCluster(true)")
+	}
+	if rec == nil {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"recipe is required: the conformance checks a submission runs are selected from it")
+	}
+	if rec.internal == nil {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"RecipeResult has no internal recipe state: call Client.ResolveRecipe or Client.LoadRecipe to obtain one")
+	}
+	if err := c.assertOwns(rec); err != nil {
+		return err
+	}
+	// Pre-flight against the latest carried checklist, as the CLI does, so a
+	// bad key fails here rather than after every validator Job; the render
+	// repeats the check against the selected version.
+	if err := c.ValidateCNCFEvidenceOptions(RenderCNCFEvidenceOptions{NotApplicable: opts.NotApplicable}); err != nil {
+		return err
 	}
 
 	c.mu.RLock()
@@ -487,36 +521,6 @@ func (c *Client) CollectCNCFEvidence(ctx context.Context, rec *RecipeResult, opt
 	c.mu.RUnlock()
 	defer c.inflight.Done()
 
-	ctx, cancel := context.WithTimeout(ctx, defaults.CNCFSubmissionTimeout)
-	defer cancel()
-
-	var policy string
-	var gateway validatorv1.InferenceGatewayProfile
-	var gatewayFound bool
-	if rec != nil {
-		var err error
-		if policy, err = validatorv1.ResolveGPUAllocationPolicy(ctx, rec.internal); err != nil {
-			const msg = "failed to resolve the GPU allocation policy for CNCF evidence collection"
-			if stderrors.Is(err, context.DeadlineExceeded) || stderrors.Is(err, context.Canceled) {
-				return errors.WrapCtxErr(err, errors.ErrCodeTimeout, msg)
-			}
-			return errors.PropagateOrWrap(err, errors.ErrCodeInternal, msg)
-		}
-		// The inference-gateway evidence section collects the Gateway the
-		// recipe declares; a malformed declaration fails here rather than
-		// producing evidence for whatever carries the conventional name. Only
-		// that section reads the profile, so a run scoped to other features
-		// is not aborted by it.
-		if cncf.FeatureSelected(opts.Features, cncf.FeatureInferenceGateway) {
-			if gateway, gatewayFound, err = validatorv1.ResolveInferenceGatewayProfile(rec.internal.ComponentRefs); err != nil {
-				return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
-					"failed to resolve the inference gateway for CNCF evidence collection")
-			}
-		}
-	}
-
-	// The collector runs its script from a temporary working directory, so a
-	// relative path would resolve there and be deleted with it.
 	dir, err := filepath.Abs(opts.Dir)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to resolve CNCF evidence directory", err)
@@ -528,28 +532,72 @@ func (c *Client) CollectCNCFEvidence(ctx context.Context, rec *RecipeResult, opt
 		}
 	}
 
-	slog.Info("starting CNCF submission evidence collection",
-		"evidenceDir", dir, "features", opts.Features, "gpuAllocationPolicy", policy)
+	namespace := opts.Namespace
+	if namespace == "" {
+		namespace = defaults.ValidationNamespace
+	}
+	slog.Info("starting CNCF submission run", "evidenceDir", dir, "recipe", rec.Name, "namespace", namespace)
+	return runCNCFSubmission(ctx, c, rec, cncfSubmissionInputs{
+		dir:           dir,
+		kubeconfig:    kubeconfig,
+		namespace:     namespace,
+		notApplicable: opts.NotApplicable,
+	})
+}
 
-	collectorOpts := []cncf.CollectorOption{
-		cncf.WithFeatures(opts.Features),
-		cncf.WithKubeconfig(kubeconfig),
-		cncf.WithNoCluster(opts.NoCluster),
+// cncfSubmissionInputs are CollectCNCFEvidence's resolved inputs: absolute
+// paths and the defaulted namespace.
+type cncfSubmissionInputs struct {
+	dir           string
+	kubeconfig    string
+	namespace     string
+	notApplicable map[string]string
+}
+
+// cncfSubmissionRunner is the slice of Client that runCNCFSubmission
+// composes. *Client satisfies it; tests substitute a fake so the composition
+// and its error propagation are exercised without a cluster.
+type cncfSubmissionRunner interface {
+	CollectSnapshot(ctx context.Context, cfg *AgentConfig) (*Snapshot, error)
+	ValidateState(ctx context.Context, recipe *RecipeResult, snap *Snapshot, opts ...ValidateOption) ([]*PhaseResult, error)
+	MergeReports(results []*PhaseResult) *ctrf.Report
+	RenderCNCFEvidenceWithResult(ctx context.Context, report *ctrf.Report, dir string, opts RenderCNCFEvidenceOptions) (*CNCFRequirementAggregate, error)
+}
+
+var _ cncfSubmissionRunner = (*Client)(nil)
+
+// runCNCFSubmission is the submission run: snapshot, conformance phase,
+// merge, render, verdict. Every stage's error propagates as that stage
+// reports it.
+func runCNCFSubmission(ctx context.Context, r cncfSubmissionRunner, rec *RecipeResult, in cncfSubmissionInputs) error {
+	// Privileged as `aicr validate` deploys it: the GPU, SystemD and OS
+	// collectors the conformance snapshot needs do not run restricted.
+	snap, err := r.CollectSnapshot(ctx, &AgentConfig{
+		Kubeconfig: in.kubeconfig,
+		Namespace:  in.namespace,
+		Cleanup:    true,
+		Privileged: true,
+	})
+	if err != nil {
+		return err
 	}
-	if policy != "" {
-		collectorOpts = append(collectorOpts, cncf.WithAllocationPolicy(policy))
+	results, err := r.ValidateState(ctx, rec, snap,
+		WithValidationKubeconfig(in.kubeconfig),
+		WithValidationNamespace(in.namespace),
+		WithValidationPhases(PhaseConformance))
+	if err != nil {
+		return err
 	}
-	switch {
-	case gatewayFound:
-		collectorOpts = append(collectorOpts, cncf.WithInferenceGateway(gateway.GatewayName, gateway.Namespace, gateway.GatewayClass))
-	case rec != nil && cncf.FeatureSelected(opts.Features, cncf.FeatureInferenceGateway):
-		// The recipe declares no gateway: the section reports the
-		// prerequisite absent rather than discovering by name a Gateway
-		// the recipe does not ship.
-		collectorOpts = append(collectorOpts, cncf.WithNoInferenceGateway())
+	report := r.MergeReports(results)
+	agg, err := r.RenderCNCFEvidenceWithResult(ctx, report, in.dir, RenderCNCFEvidenceOptions{
+		KubernetesVersion: snap.KubernetesVersion(),
+		NotApplicable:     in.notApplicable,
+	})
+	if err != nil {
+		return err
 	}
-	if err := cncf.NewCollector(dir, collectorOpts...).Run(ctx); err != nil {
-		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "CNCF evidence collection failed")
-	}
-	return nil
+	// The same rule as `aicr validate --cncf-submission` with --fail-on-error
+	// (the default): a failed or errored check fails the run, and the
+	// requirement verdict is added on top.
+	return agg.Outcome(report, true)
 }

@@ -299,30 +299,26 @@ http://127.0.0.1:9090/chat.html
 
 ### CNCF AI Conformance Evidence Collection
 ```
- aicr validate --phase conformance --cncf-submission --evidence-dir <dir> [--feature <name>] [--timeout <duration>]
+ aicr validate -r bundle/recipe.yaml --phase conformance --cncf-submission --evidence-dir ./cncf-evidence
 
-  Available evidence features:
+  One runner: the conformance phase runs every check the recipe declares, with
+  the same verdicts as a run without the flag, and --cncf-submission renders
+  the CTRF report into ./cncf-evidence as one evidence page per requirement a
+  non-skipped check evidenced, plus index.md. bundle/recipe.yaml is the deployed set, as in the validation
+  example above; without -s the run captures the cluster snapshot itself.
 
-    Feature                  Description
-    ──────────────────────── ─────────────────────────────────────────────
-    dra-support              DRA support test (mode-aware: full-GPU claim under DRA
-                             policy, slice-evidence N/A path under device-plugin)
-    gang-scheduling          Gang scheduling co-scheduling test
-    secure-access            Secure accelerator access (device-plugin or DRA
-                             ResourceClaim isolation, policy/mode-selected)
-    accelerator-metrics      Accelerator metrics (DCGM exporter)
-    ai-service-metrics       AI service metrics via Prometheus
-    inference-gateway        Inference API gateway conditions
-    robust-operator          Robust AI operator + webhook test
-    pod-autoscaling          HPA pod autoscaling (scale-up + scale-down)
-    cluster-autoscaling      Cluster autoscaling (ASG configuration)
+    Check                        Requirement
+    ──────────────────────────── ─────────────────────────────
+    gang-scheduling              gang_scheduling
+    secure-accelerator-access    secure_accelerator_access
+    accelerator-metrics          accelerator_metrics
+    ai-service-metrics           ai_service_metrics
+    inference-gateway            ai_inference
+    robust-controller            robust_controller
+    pod-autoscaling              pod_autoscaling
+    cluster-autoscaling          cluster_autoscaling
+    dra-support                  dra_support (supporting evidence from v1.36)
 
-    Short aliases: dra, gang, secure, metrics, service-metrics, gateway, operator, hpa
-
-```
-
-```
-  aicr validate --phase conformance --cncf-submission --evidence-dir /tmp --feature gang-scheduling
 ```
 
 ### CNCF AI Conformance Program Submission

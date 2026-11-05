@@ -15,8 +15,7 @@
 package cncf
 
 // Conformance check names as they appear in the validator catalog and in
-// CTRF test results. The --feature names (consts.go) are a different
-// namespace.
+// CTRF test results.
 const (
 	checkDRASupport           = "dra-support"
 	checkGangScheduling       = "gang-scheduling"

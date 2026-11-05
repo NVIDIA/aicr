@@ -162,6 +162,74 @@ func (a *Aggregate) Passed() bool {
 	return len(a.IncompleteMusts()) == 0
 }
 
+// Verdict is the outcome of a submission run: nil when every applicable MUST
+// passed, else an error naming each MUST that is not established with its
+// status and reason. A submission run derives its exit status from this, not
+// from the per-check verdicts, so a SHOULD never fails it. The evidence has
+// been written when it is consulted, so the directory still documents what
+// was and was not shown.
+//
+// Errors:
+//   - ErrCodeInternal when an applicable MUST requirement is not established.
+func (a *Aggregate) Verdict() error {
+	incomplete := a.IncompleteMusts()
+	if len(incomplete) == 0 {
+		return nil
+	}
+	parts := make([]string, 0, len(incomplete))
+	for _, r := range incomplete {
+		parts = append(parts, fmt.Sprintf("%s %s (%s)", r.ID, r.Status, r.Reason))
+	}
+	return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
+		"CNCF submission not established: %d applicable MUST requirement(s) of the %s checklist did not pass: %s",
+		len(incomplete), a.Version, strings.Join(parts, "; ")))
+}
+
+// ChecksFailed reports whether any test in the report carries a failing CTRF
+// status (failed or other). It is the per-check rule every validate run
+// applies, read from the merged report rather than from phase statuses so
+// the SDK and the CLI judge the same document.
+func ChecksFailed(report *ctrf.Report) bool {
+	if report == nil {
+		return false
+	}
+	for _, t := range report.Results.Tests {
+		if ctrf.IsFailingStatus(t.Status) {
+			return true
+		}
+	}
+	return false
+}
+
+// Outcome is the exit rule of a submission run, shared by the CLI and the
+// SDK so the two cannot disagree: a failed or errored check in report fails
+// the run (the per-check rule every run applies, which a flag never changes;
+// checks with no requirement mapping are visible only here), and Verdict is
+// added on top. perCheck false skips the per-check rule, which is what
+// `--fail-on-error=false` means; the verdict applies regardless. A nil
+// receiver contributes no verdict.
+//
+// Errors:
+//   - ErrCodeInternal when a check failed or errored, when an applicable
+//     MUST requirement is not established, or both; the message says which.
+func (a *Aggregate) Outcome(report *ctrf.Report, perCheck bool) error {
+	var verdict error
+	if a != nil {
+		verdict = a.Verdict()
+	}
+	failed := perCheck && ChecksFailed(report)
+	switch {
+	case failed && verdict != nil:
+		return errors.Wrap(errors.ErrCodeInternal,
+			"validation failed: one or more checks did not pass, and the CNCF submission is not established", verdict)
+	case verdict != nil:
+		return verdict
+	case failed:
+		return errors.New(errors.ErrCodeInternal, "validation failed: one or more checks did not pass")
+	}
+	return nil
+}
+
 // ValidateNotApplicable checks the notApplicable map a caller supplies: each
 // key must be a conditional MUST of the checklist at version v (today only
 // cluster_autoscaling), and each justification must be non-empty.

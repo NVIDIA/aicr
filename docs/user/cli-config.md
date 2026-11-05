@@ -228,10 +228,9 @@ spec:
       noCleanup: false
       timeout: 5m                    # aicr validate: live-capture agent Job only; inert here (input.snapshot is set)
     evidence:
-      cncf:                          # CNCF AI Conformance markdown
+      cncf:                          # CNCF AI Conformance submission evidence
         dir: ./evidence
-        cncfSubmission: false        # requires dir
-        features: []                 # empty = all features
+        cncfSubmission: true         # dir and cncfSubmission require each other
         notApplicable: {}            # conditional MUST id -> justification (only cluster_autoscaling)
       attestation:                   # recipe-evidence bundle (ADR-007)
         out: ./attestation           # directory; setting this enables the path
@@ -342,10 +341,9 @@ Inputs to `aicr validate`.
 | `execution.noCluster` | bool | Test mode: no cluster access, constraints evaluated inline |
 | `execution.noCleanup` | bool | Keep validation Jobs after completion |
 | `execution.timeout` | duration string | `aicr validate`: timeout for the live snapshot-capture agent Job (`--timeout`, default `5m`); inert when `input.snapshot` is set, and validator Jobs keep their per-check timeouts. Go SDK: `Config.ValidateSettings().Timeout` carries the same value for `WithValidationTimeout`, which caps the whole `ValidateState` run (see [Go library](../integrator/go-library.md#what-validatesettings-does-and-does-not-carry)) |
-| `evidence.cncf.dir` | string | CNCF AI Conformance evidence directory (`--evidence-dir`) |
-| `evidence.cncf.cncfSubmission` | bool (tri-state) | Emit submission layout; requires `dir` |
-| `evidence.cncf.features` | []string | Empty = all features; honored only with `cncfSubmission` |
-| `evidence.cncf.notApplicable` | map[string]string | Conditional MUST requirements of the CNCF checklist declared not applicable, keyed by upstream id with the justification as value. The only source of a `NOT APPLICABLE` status; accepted only for a conditional MUST (today `cluster_autoscaling`), any other id is rejected with `INVALID_REQUEST`. Takes precedence over a check that ran, whose result is kept as an observation. Read by the `dir` render only; no effect under `cncfSubmission` until #3602 retires the collector. See [Requirement status](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#requirement-status) |
+| `evidence.cncf.dir` | string | CNCF AI Conformance submission evidence directory (`--evidence-dir`). Requires `cncfSubmission`; `dir` alone is rejected with `INVALID_REQUEST`, the one deprecation the collector removal (#3602) left |
+| `evidence.cncf.cncfSubmission` | bool (tri-state) | Write the submission evidence from the conformance run (`--cncf-submission`); requires `dir`, the conformance phase and a recipe input, and is rejected with `noCluster` or `skipChecks` |
+| `evidence.cncf.notApplicable` | map[string]string | Conditional MUST requirements of the CNCF checklist declared not applicable, keyed by upstream id with the justification as value. The only source of a `NOT APPLICABLE` status; accepted only for a conditional MUST (today `cluster_autoscaling`), any other id is rejected with `INVALID_REQUEST`. Takes precedence over a check that ran, whose result is kept as an observation. Read by the submission render. See [Requirement status](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#requirement-status) |
 | `evidence.attestation.out` | string | Output directory for the recipe-evidence bundle (predicateType v3; same as `--emit-attestation`), which receives `summary-bundle/` and `pointer.yaml` — setting it **enables** the attestation path |
 | `evidence.attestation.bom` / `.push` | string | BOM input; OCI ref for the signed bundle push |
 | `evidence.attestation.plainHTTP` / `.insecureTLS` | bool (tri-state) | Push transport options |

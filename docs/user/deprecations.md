@@ -107,6 +107,48 @@ is removed in v2.0.0, per the
 **What to do.** Replace each `deployer:<key>` entry with the setting in the
 table, then confirm the bundle is unchanged.
 
+### The `--feature` flag and `evidence.cncf.features` key
+
+**Surface:** CLI, config file, Go SDK ·
+**Deprecated in:** the release that follows v1.2.0 · **Removed in:** the same release (entry moves to Removed when its tag lands)
+
+The `validate` command's `--feature` (`-f`) scoped the sections of the bash evidence
+collector that `--cncf-submission` ran. The collector was deleted when
+`aicr validate --phase conformance` became the only runner for CNCF AI
+conformance ([#3602](https://github.com/NVIDIA/aicr/issues/3602), ADR-007
+amendment): every conformance check the recipe declares runs, so there is no
+section list to scope: the recipe's `validation.conformance.checks` decides
+what runs, `--skip-check` already scopes a CI run by name, and a submission
+run refuses `--skip-check` on purpose. The flag is removed outright (the CLI
+reports it as an unknown flag), a config document that sets
+`spec.validate.evidence.cncf.features` does not load, and the Go SDK refuses a
+non-empty `CNCFCollectOptions.Features` with `INVALID_REQUEST`. The frozen v1
+surface owes notice before a removal; the removal shipped with the collector
+because the behavior the flag selected no longer exists, and it is recorded
+here for that reason.
+
+**What to do.** Drop the flag or key. To write the submission evidence, pass
+`--cncf-submission --evidence-dir <dir>`; see
+[CNCF submission evidence](validation.md#cncf-submission-evidence).
+
+### `--evidence-dir` without `--cncf-submission`
+
+**Surface:** CLI, config file ·
+**Deprecated in:** the release that follows v1.2.0 · **Removed in:** the same release (entry moves to Removed when its tag lands)
+
+`--evidence-dir` alone rendered the CNCF evidence pages from a conformance run
+that was not a submission. The ADR-007 amendment makes the two flags require
+each other (evidence is written only for a submission run), so `--evidence-dir`
+without `--cncf-submission`, and `spec.validate.evidence.cncf.dir` without
+`cncfSubmission: true`, are refused with `INVALID_REQUEST`
+([#3602](https://github.com/NVIDIA/aicr/issues/3602)).
+
+**What to do.** Add `--cncf-submission` (or `cncfSubmission: true`). The same
+checks run with the same verdicts; the run additionally derives its exit
+status from the requirement aggregation, see
+[Exit status of a submission run](validation.md#exit-status-of-a-submission-run).
+
+
 ## Removed
 
 ### Alpha artifact `apiVersion` values

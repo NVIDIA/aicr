@@ -20,7 +20,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1438,11 +1437,24 @@ spec:
       cncf:
         dir: ./cncf-evidence
         cncfSubmission: true
-        features:
-          - dra-support
-          - secure-access
         notApplicable:
           cluster_autoscaling: fixed-size cluster with no node autoscaler
+`
+
+// cncfEvidenceFeaturesConfig still carries the features key the collector
+// script read; the key was removed with the script (#3602).
+const cncfEvidenceFeaturesConfig = `apiVersion: aicr.run/v1beta1
+kind: AICRConfig
+metadata:
+  name: test
+spec:
+  validate:
+    evidence:
+      cncf:
+        dir: ./cncf-evidence
+        cncfSubmission: true
+        features:
+          - dra-support
 `
 
 // TestConfig_CNCFEvidenceOptions pins the four fields CNCFEvidenceOptions
@@ -1465,11 +1477,26 @@ func TestConfig_CNCFEvidenceOptions(t *testing.T) {
 	if !got.CNCFSubmission {
 		t.Error("CNCFSubmission = false, want true")
 	}
-	if want := []string{"dra-support", "secure-access"}; !slices.Equal(got.Features, want) {
-		t.Errorf("Features = %v, want %v", got.Features, want)
+	if got.Features != nil {
+		t.Errorf("Features = %v, want nil: the key was removed with the collector script", got.Features)
 	}
 	if want := map[string]string{"cluster_autoscaling": "fixed-size cluster with no node autoscaler"}; !maps.Equal(got.NotApplicable, want) {
 		t.Errorf("NotApplicable = %v, want %v", got.NotApplicable, want)
+	}
+}
+
+// TestConfig_CNCFEvidenceOptions_FeaturesRefused pins the one deprecation
+// the collector removal left in the config schema: a document that still
+// sets spec.validate.evidence.cncf.features does not load.
+func TestConfig_CNCFEvidenceOptions_FeaturesRefused(t *testing.T) {
+	t.Parallel()
+
+	_, err := aicr.LoadConfig(context.Background(), writeConfig(t, cncfEvidenceFeaturesConfig))
+	if err == nil {
+		t.Fatal("LoadConfig accepted spec.validate.evidence.cncf.features, want a refusal")
+	}
+	if !strings.Contains(err.Error(), "features") {
+		t.Errorf("error = %v, want it to name the features key", err)
 	}
 }
 

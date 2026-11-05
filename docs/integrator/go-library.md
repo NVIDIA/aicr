@@ -516,8 +516,9 @@ with the Client's version, the same combined document `aicr validate` writes.
 
 ### CNCF AI Conformance evidence
 
-Four methods produce CNCF AI Conformance evidence, matching
-`aicr validate --evidence-dir` and `aicr validate --cncf-submission`:
+Four methods render CNCF AI Conformance evidence from a CTRF report, and a
+fifth composes the whole submission run, matching
+`aicr validate --phase conformance --cncf-submission --evidence-dir`:
 
 - `RenderCNCFEvidence(ctx, report, dir)` writes one markdown file per
   requirement a non-skipped check evidenced, plus `index.md` listing every
@@ -578,27 +579,41 @@ for _, r := range agg.IncompleteMusts() {
 }
 ```
 
-- `CollectCNCFEvidence(ctx, recipe, opts)` deploys GPU test workloads and
-  captures behavioral evidence under `opts.Dir`. It needs `bash` and
-  `kubectl` on `PATH` and runs for up to 20 minutes. `recipe` is optional.
-  When set, its GPU allocation policy selects the mechanism the DRA and
-  secure-access sections exercise, and the inference gateway component it
-  declares (agentgateway by default) is the Gateway the inference-gateway
-  section collects evidence for; a recipe with no gateway makes that section
-  report the prerequisite absent. An unresolvable policy fails the call, and
-  so does an unresolvable gateway declaration (malformed, a near-miss override
-  key on an enabled component, or two enabled gateways) whenever
-  `opts.Features` selects the inference-gateway section, which the default
-  empty list does. When nil, the collector detects the mechanism from the
-  cluster and discovers the Gateway named `inference-gateway`.
-  `opts.Features` restricts collection, and `CNCFEvidenceFeatures()` lists
-  the accepted names. `opts.NoCluster` reports every section as skipped without
-  touching a cluster.
+- `CollectCNCFEvidence(ctx, recipe, opts)` is the submission run composed
+  from the methods above: `CollectSnapshot` deploys the snapshot agent,
+  `ValidateState` runs the conformance phase the recipe declares,
+  `MergeReports` combines the results and `RenderCNCFEvidenceWithResult`
+  writes the evidence under `opts.Dir` against the checklist of the cluster's
+  Kubernetes minor. Each stage keeps its own bound (the snapshot its 5-minute
+  budget plus grace, the run the 75-minute `ValidateState` default), and
+  `opts.Kubeconfig` and `opts.Namespace` (default `aicr-validation`, as
+  `aicr validate --namespace`) apply to both the agent and the validator
+  Jobs; a caller that needs the agent or validator configured further calls
+  the four methods itself. `recipe` is required:
+  the conformance checks are selected from it, and a nil recipe is refused
+  with `ErrCodeInvalidRequest`. `opts.NotApplicable` declares conditional
+  MUSTs not applicable with a justification, exactly as
+  `RenderCNCFEvidenceOptions.NotApplicable` and the CLI's
+  `spec.validate.evidence.cncf.notApplicable`; it is checked before the
+  cluster is touched. The call fails with `ErrCodeInternal` after rendering
+  under the rule the CLI applies (`CNCFRequirementAggregate.Outcome`): a
+  check that failed or errored fails it, as in any run, and so does an
+  applicable MUST requirement that is not established; the aggregation
+  itself never fails it on a SHOULD. Flags never change check execution: the
+  verdicts are those `ValidateState` produces.
+
+  Until #3602 the method ran a bash collector that scoped sections with
+  `opts.Features` and short-circuited in `opts.NoCluster` mode. Both fields
+  remain for shape compatibility and are refused: a non-empty `Features` is
+  rejected with `ErrCodeInvalidRequest` naming the removed option, and
+  `NoCluster` true is rejected because submission evidence needs a live
+  cluster (call `ValidateState` with `WithValidationNoCluster(true)` for an
+  offline dry-run). `CNCFEvidenceFeatures()` returns an empty list.
 
 ```go
 err := client.CollectCNCFEvidence(ctx, rec, aicr.CNCFCollectOptions{
-	Dir:      "./cncf-evidence",
-	Features: []string{"dra-support", "gang-scheduling"},
+	Dir:           "./cncf-evidence",
+	NotApplicable: map[string]string{"cluster_autoscaling": "fixed-size cluster with no node autoscaler"},
 })
 ```
 
@@ -1435,7 +1450,7 @@ The rest of the section has other homes, and knowing which saves a search:
 | `spec.validate.agent.image`, `.jobName`, `.serviceAccountName`, `.requireGpu` | Still on `ValidateSettings()` (`Image`, `JobName`, `ServiceAccountName`, `RequireGPU`), but not passed to `ValidateState`: they configure the snapshot-capture agent, not the validator Jobs, so a `ValidateState` option here would have nothing to translate into. The CLI reads them directly to build the agent Job. `.validatorServiceAccountName` is not in this row; it reaches `ValidateState` through `WithValidatorServiceAccountName`. |
 | `spec.validate.input.recipe`, `.snapshot`, `spec.validate.execution.failOnError` | `ValidateInputOptions()`, which targets the CALLER rather than `ValidateState` — see below. |
 | `spec.validate.evidence.attestation` | `EvidenceAttestationOptions()`, which targets `EmitRecipeEvidence` rather than `ValidateState` — see below. |
-| `spec.validate.evidence.cncf` | `CNCFEvidenceOptions()`, which the caller reads to choose between `RenderCNCFEvidence` and `CollectCNCFEvidence`. See below. |
+| `spec.validate.evidence.cncf` | `CNCFEvidenceOptions()`, which the caller reads and carries into `RenderCNCFEvidenceWithResult` after `ValidateState`. See below. |
 
 One inversion worth knowing: config says `noCleanup`, the field says
 `Cleanup`. `ValidateSettings()` flips it, so `noCleanup: true` becomes
@@ -1543,8 +1558,8 @@ excluding `NoSign` and `Full` is arbitrary.
 ### What `CNCFEvidenceOptions()` does and does not carry
 
 `spec.validate.evidence` carries two kinds of evidence; `CNCFEvidenceOptions()`
-covers the other one — CNCF AI Conformance markdown, gated behind
-`--evidence-dir` / `--cncf-submission` / `--feature`:
+covers the other one — CNCF AI Conformance submission evidence, gated behind
+`--evidence-dir` / `--cncf-submission`:
 
 ```go
 cncfOpts, err := cfg.CNCFEvidenceOptions()
@@ -1556,13 +1571,15 @@ evidenceDir := cncfOpts.Dir // caller applies its own flag-over-config precedenc
 
 Unlike `EvidenceAttestationOptions()`, it does not map onto one method's
 options. The caller applies its own flag-over-config precedence, the same way
-`SnapshotOutputOptions()` and `ValidateInputOptions()` do, then branches on
-`CNCFSubmission`. When true, it passes `Dir` and `Features` to
-`CollectCNCFEvidence` in `CNCFCollectOptions` and skips `ValidateState`. When
-false, a non-empty `Dir` goes to `RenderCNCFEvidenceWithResult` after
-`ValidateState`, with `KubernetesVersion` from the snapshot and
-`NotApplicable` carried into `RenderCNCFEvidenceOptions`, which is what the
-CLI does; `RenderCNCFEvidence` renders the latest carried checklist instead.
+`SnapshotOutputOptions()` and `ValidateInputOptions()` do. `Dir` and
+`CNCFSubmission` require each other, which the CLI enforces and a Go caller
+applies itself; when both are set, `Dir` goes to
+`RenderCNCFEvidenceWithResult` after `ValidateState`, with
+`KubernetesVersion` from the snapshot and `NotApplicable` carried into
+`RenderCNCFEvidenceOptions`, which is what the CLI does, and the aggregate it
+returns decides the run's outcome (`IncompleteMusts()`). `Features` is always
+nil: `spec.validate.evidence.cncf.features` was removed with the collector
+script (#3602) and a document that sets it fails to load.
 `CNCFEvidenceOptions()` returns the zero value (never an error) for an absent
 section, and an error only when `spec.validate` is present but malformed.
 
