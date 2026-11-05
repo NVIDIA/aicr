@@ -59,6 +59,145 @@ case "${mode}" in
         SECTION="gateway"
         ;;
     gateway-absent)
+        # A cluster without the Gateway API: kubectl reports the missing
+        # resource type. That is the one lookup failure that is a
+        # prerequisite gap; the default stub's silent exit 1 is not.
+        kubectl() {
+            if [ "${1:-}" = "cluster-info" ]; then
+                return 0
+            fi
+            case " $* " in
+                *" gateways "*)
+                    echo 'error: the server doesn'"'"'t have a resource type "gateways"' >&2
+                    return 1 ;;
+            esac
+            return 1
+        }
+        SECTION="gateway"
+        ;;
+    gateway-none-named)
+        # Gateway API served, no Gateway carries the conventional name.
+        kubectl() {
+            if [ "${1:-}" = "cluster-info" ]; then
+                return 0
+            fi
+            case " $* " in
+                *" gateways "*) return 0 ;;
+            esac
+            return 1
+        }
+        SECTION="gateway"
+        ;;
+    gateway-lookup-denied)
+        # RBAC denies the list: the Gateway's existence is unknown and must
+        # not read as absent.
+        kubectl() {
+            if [ "${1:-}" = "cluster-info" ]; then
+                return 0
+            fi
+            case " $* " in
+                *" gateways "*)
+                    echo 'Error from server (Forbidden): gateways.gateway.networking.k8s.io is forbidden: User "evidence" cannot list resource "gateways"' >&2
+                    return 1 ;;
+            esac
+            return 1
+        }
+        SECTION="gateway"
+        ;;
+    gateway-recipe-none)
+        # The recipe declares no inference gateway; the section must not
+        # discover one by name, so the stub refuses every kubectl call.
+        export AICR_INFERENCE_GATEWAY_NONE="true"
+        SECTION="gateway"
+        ;;
+    gateway-declared-no-api)
+        # The recipe declares a gateway and the cluster does not serve the
+        # Gateway API at all: without recipe context that is a prerequisite
+        # gap, with it the declared Gateway cannot exist.
+        export AICR_INFERENCE_GATEWAY_NAME="pool-vip"
+        export AICR_INFERENCE_GATEWAY_NAMESPACE="edge-system"
+        export AICR_INFERENCE_GATEWAY_CLASS="edge-class"
+        kubectl() {
+            if [ "${1:-}" = "cluster-info" ]; then
+                return 0
+            fi
+            case " $* " in
+                *" gateway pool-vip "*)
+                    echo 'error: the server doesn'"'"'t have a resource type "gateway"' >&2
+                    return 1 ;;
+            esac
+            return 1
+        }
+        SECTION="gateway"
+        ;;
+    gateway-declared-missing)
+        # The recipe declares a gateway (the collector threads name,
+        # namespace and class) and the cluster has no such Gateway.
+        export AICR_INFERENCE_GATEWAY_NAME="pool-vip"
+        export AICR_INFERENCE_GATEWAY_NAMESPACE="edge-system"
+        export AICR_INFERENCE_GATEWAY_CLASS="edge-class"
+        kubectl() {
+            if [ "${1:-}" = "cluster-info" ]; then
+                return 0
+            fi
+            case " $* " in
+                *" gateway pool-vip "*)
+                    echo 'Error from server (NotFound): gateways.gateway.networking.k8s.io "pool-vip" not found' >&2
+                    return 1 ;;
+            esac
+            return 1
+        }
+        SECTION="gateway"
+        ;;
+    gateway-declared-pass|gateway-declared-class-mismatch|gateway-declared-not-programmed|gateway-standalone-pass)
+        # A Gateway is found, declared by the recipe (name, namespace and
+        # class threaded by the collector) or discovered by its conventional
+        # name. The stub serves every lookup collect_gateway makes past that
+        # point; the mode picks the class the object reports and whether it
+        # is Programmed.
+        gw_fixture_class="edge-class"
+        gw_fixture_programmed="True"
+        case "${mode}" in
+            gateway-standalone-pass) ;;
+            *)
+                export AICR_INFERENCE_GATEWAY_NAME="pool-vip"
+                export AICR_INFERENCE_GATEWAY_NAMESPACE="edge-system"
+                export AICR_INFERENCE_GATEWAY_CLASS="edge-class" ;;
+        esac
+        case "${mode}" in
+            gateway-declared-class-mismatch) gw_fixture_class="other-class" ;;
+            gateway-declared-not-programmed) gw_fixture_programmed="False" ;;
+        esac
+        kubectl() {
+            if [ "${1:-}" = "cluster-info" ]; then
+                return 0
+            fi
+            case " $* " in
+                *'@.type=="Accepted"'*) echo "True" ;;
+                *'@.type=="Programmed"'*) echo "${gw_fixture_programmed}" ;;
+                *'@.type=="Established"'*) echo "True" ;;
+                *'range .status.conditions'*) echo "Accepted: True (Accepted)" ;;
+                *gatewayClassName*) echo "edge-system ${gw_fixture_class}" ;;
+                *" get crds "*) printf 'gateways.gateway.networking.k8s.io\ninferencepools.inference.networking.k8s.io\n' ;;
+                *) echo "stub: $*" ;;
+            esac
+            return 0
+        }
+        SECTION="gateway"
+        ;;
+    gateway-standalone-multiple)
+        # Discovery by name finds the conventional name in two namespaces.
+        kubectl() {
+            if [ "${1:-}" = "cluster-info" ]; then
+                return 0
+            fi
+            case " $* " in
+                *" gateways -A "*)
+                    printf 'ns-a agentgateway\nns-b agentgateway\n'
+                    return 0 ;;
+            esac
+            return 1
+        }
         SECTION="gateway"
         ;;
     operator-absent)
@@ -446,6 +585,9 @@ func TestEvidenceResultPropagatesThroughCollector(t *testing.T) {
 		staleOutput    bool
 		wantStatus     string
 		wantEvidence   string
+		// wantEvidenceAll lists further substrings the same artifact must
+		// carry, for a section whose body is checked beside its verdict.
+		wantEvidenceAll []string
 		// singleVerdictFile, when set, is an evidence artifact (relative to the
 		// evidence dir) that must contain exactly one column-zero "**Result:"
 		// verdict line — the invariant evidence_result relies on. Only set for
@@ -477,7 +619,104 @@ func TestEvidenceResultPropagatesThroughCollector(t *testing.T) {
 			mode:              "gateway-absent",
 			displayName:       "Inference Gateway",
 			wantStatus:        "SKIP",
+			wantEvidence:      "**Result: SKIP (prerequisite absent)** — the Gateway API",
 			singleVerdictFile: "inference-gateway.md",
+		},
+		{
+			name:              "no gateway of the conventional name skips",
+			mode:              "gateway-none-named",
+			displayName:       "Inference Gateway",
+			wantStatus:        "SKIP",
+			wantEvidence:      "**Result: SKIP (prerequisite absent)** — no Gateway named `inference-gateway`",
+			singleVerdictFile: "inference-gateway.md",
+		},
+		{
+			// A failed lookup leaves the Gateway's existence unknown; the
+			// section must fail rather than report the prerequisite absent.
+			name:              "denied gateway lookup is explicit fail",
+			mode:              "gateway-lookup-denied",
+			displayName:       "Inference Gateway",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — could not list Gateways to find `inference-gateway`: Error from server (Forbidden)",
+			singleVerdictFile: "inference-gateway.md",
+			wantErr:           true,
+		},
+		{
+			name:              "recipe without a gateway skips without discovery",
+			mode:              "gateway-recipe-none",
+			displayName:       "Inference Gateway",
+			wantStatus:        "SKIP",
+			wantEvidence:      "**Result: SKIP (prerequisite absent)** — the recipe declares no inference gateway component.",
+			singleVerdictFile: "inference-gateway.md",
+		},
+		{
+			name:              "declared gateway on a cluster without the Gateway API is explicit fail",
+			mode:              "gateway-declared-no-api",
+			displayName:       "Inference Gateway",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — the recipe's inference Gateway `pool-vip` needs the Gateway API",
+			singleVerdictFile: "inference-gateway.md",
+			wantErr:           true,
+		},
+		{
+			name:              "declared gateway missing from the cluster is explicit fail",
+			mode:              "gateway-declared-missing",
+			displayName:       "Inference Gateway",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — the recipe's inference Gateway `pool-vip` is not installed in `edge-system`.",
+			singleVerdictFile: "inference-gateway.md",
+			wantErr:           true,
+		},
+		{
+			// The found path end to end: the summary renders the declared
+			// values and the verdict needs all three conditions.
+			name:         "declared gateway accepted, programmed and with the pool CRD passes",
+			mode:         "gateway-declared-pass",
+			displayName:  "Inference Gateway",
+			wantStatus:   "PASS",
+			wantEvidence: "**Result: PASS** — GatewayClass `edge-class` Accepted, Gateway `pool-vip` Programmed in `edge-system`, InferencePool CRD Established.",
+			wantEvidenceAll: []string{
+				"1. **Gateway controller** — GatewayClass `edge-class`, workloads in `edge-system`",
+				"3. **Active Gateway** — `pool-vip` in `edge-system` with class `edge-class`, programmed with an address",
+				"## Gateway namespace workloads (`edge-system`)",
+			},
+			singleVerdictFile: "inference-gateway.md",
+		},
+		{
+			name:              "declared gateway programmed by another class is explicit fail",
+			mode:              "gateway-declared-class-mismatch",
+			displayName:       "Inference Gateway",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — Gateway `edge-system/pool-vip` has class `other-class`; the recipe declares `edge-class`.",
+			singleVerdictFile: "inference-gateway.md",
+			wantErr:           true,
+		},
+		{
+			name:              "declared gateway not programmed is explicit fail",
+			mode:              "gateway-declared-not-programmed",
+			displayName:       "Inference Gateway",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — GatewayClass Accepted=`True`, Gateway Programmed=`False`, InferencePool CRD Established=`True`.",
+			singleVerdictFile: "inference-gateway.md",
+			wantErr:           true,
+		},
+		{
+			// Standalone discovery takes namespace and class from the object.
+			name:              "discovered gateway passes with namespace and class from the object",
+			mode:              "gateway-standalone-pass",
+			displayName:       "Inference Gateway",
+			wantStatus:        "PASS",
+			wantEvidence:      "**Result: PASS** — GatewayClass `edge-class` Accepted, Gateway `inference-gateway` Programmed in `edge-system`, InferencePool CRD Established.",
+			singleVerdictFile: "inference-gateway.md",
+		},
+		{
+			name:              "two gateways of the conventional name is explicit fail",
+			mode:              "gateway-standalone-multiple",
+			displayName:       "Inference Gateway",
+			wantStatus:        "FAIL",
+			wantEvidence:      "**Result: FAIL** — 2 Gateways named `inference-gateway` exist; a recipe carries exactly one inference gateway.",
+			singleVerdictFile: "inference-gateway.md",
+			wantErr:           true,
 		},
 		{
 			name:              "absent operator emits explicit skip",
@@ -808,7 +1047,11 @@ func TestEvidenceResultPropagatesThroughCollector(t *testing.T) {
 			if got := string(result); got != want {
 				t.Errorf("result = %q, want %q", got, want)
 			}
+			wantEvidence := tt.wantEvidenceAll
 			if tt.wantEvidence != "" {
+				wantEvidence = append([]string{tt.wantEvidence}, wantEvidence...)
+			}
+			if len(wantEvidence) > 0 {
 				// Assert against the artifact the case names, falling back to
 				// the service-metrics file the original lanes all used.
 				evidenceName := tt.singleVerdictFile
@@ -820,8 +1063,10 @@ func TestEvidenceResultPropagatesThroughCollector(t *testing.T) {
 				if evidenceErr != nil {
 					t.Fatalf("read evidence artifact: %v", evidenceErr)
 				}
-				if !strings.Contains(string(evidence), tt.wantEvidence) {
-					t.Errorf("evidence does not contain %q", tt.wantEvidence)
+				for _, want := range wantEvidence {
+					if !strings.Contains(string(evidence), want) {
+						t.Errorf("evidence does not contain %q", want)
+					}
 				}
 			}
 			if tt.singleVerdictFile != "" {

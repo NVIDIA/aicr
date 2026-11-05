@@ -21,8 +21,8 @@ spec:
   parentRefs:
     - group: gateway.networking.k8s.io
       kind: Gateway
-      name: inference-gateway
-      namespace: agentgateway-system
+      name: ${INFERENCE_GATEWAY_NAME}
+      namespace: ${INFERENCE_GATEWAY_NAMESPACE}
   rules:
     - backendRefs:
         - group: inference.networking.k8s.io
