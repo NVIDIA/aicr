@@ -119,6 +119,14 @@ func TestGraceBlackwellNetPreflightApplies(t *testing.T) {
 			variantNVLS, recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceOKE, false,
 		},
 		{
+			"NET + GB200 + NVKE → check required (ConnectX IB SR-IOV VF dma-buf on Grace topology)",
+			variantNET, recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceNVKE, true,
+		},
+		{
+			"NVLS + GB200 + NVKE → not required (NVLink-C2C, no PCIe dma-buf)",
+			variantNVLS, recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceNVKE, false,
+		},
+		{
 			"NET + GB300 + EKS → check required (same Grace PCI topology as GB200)",
 			variantNET, recipe.CriteriaAcceleratorGB300, recipe.CriteriaServiceEKS, true,
 		},
