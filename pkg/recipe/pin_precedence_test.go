@@ -16,11 +16,11 @@ package recipe
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 // These tests pin both sides of the version-precedence contract decided in
@@ -72,11 +72,7 @@ func writeExternalRegistryOverride(t *testing.T, overrides map[string]string) st
 	if err != nil {
 		t.Fatalf("marshal external registry: %v", err)
 	}
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), data, 0o600); err != nil {
-		t.Fatalf("write external registry.yaml: %v", err)
-	}
-	return dir
+	return providertest.WriteDir(t, map[string][]byte{"registry.yaml": data})
 }
 
 // resolveWithExternalRegistry resolves the named embedded overlay's criteria

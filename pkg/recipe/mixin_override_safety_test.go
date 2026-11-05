@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 // newNvsentinelAllowlistStore builds a MetadataStore backed by an
@@ -824,7 +825,7 @@ func TestMergeMixins_StructuralOnlyMixinSkipsValuesFileIO(t *testing.T) {
 // stay override-free without every component needing a registry entry.
 func TestMergeMixins_UnregisteredNewComponentOverridesStayFree(t *testing.T) {
 	provider := newInMemoryProvider("unregistered-new-component", map[string][]byte{
-		"registry.yaml": []byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"),
+		"registry.yaml": []byte(providertest.EmptyRegistryYAML),
 	})
 	store := &MetadataStore{
 		provider: provider,

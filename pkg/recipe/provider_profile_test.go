@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 // withPatch returns testdata/profile-patch/<fixture> with the YAML merge patch
@@ -212,18 +214,11 @@ func TestExternalOverlayContributesProfileValue(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			registry := "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"
-			if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte(registry), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.MkdirAll(filepath.Join(dir, "overlays"), 0o750); err != nil {
-				t.Fatal(err)
-			}
 			patch := withPatch(t, "gke-cos.yaml", tt.patch)
-			if err := os.WriteFile(filepath.Join(dir, "overlays", "gke-cos.yaml"), []byte(patch), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			dir := providertest.WriteDir(t, map[string][]byte{
+				"registry.yaml":         []byte(providertest.EmptyRegistryYAML),
+				"overlays/gke-cos.yaml": []byte(patch),
+			})
 			layered, err := NewLayeredDataProvider(
 				NewEmbeddedDataProvider(GetEmbeddedFS(), "."), LayeredProviderConfig{ExternalDir: dir})
 			if err != nil {
@@ -263,8 +258,7 @@ func TestSourceFollowsTheLatestExternalRead(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "overlays"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	registry := "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"
-	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte(registry), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte(providertest.EmptyRegistryYAML), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	write := func(content string) {

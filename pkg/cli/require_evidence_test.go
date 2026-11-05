@@ -26,6 +26,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	evidenceindex "github.com/NVIDIA/aicr/pkg/evidence/index"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 func TestRequireEvidenceAcceptsOnlyPublishedPointers(t *testing.T) {
@@ -164,23 +165,14 @@ func writeRequireEvidenceConfig(t *testing.T, enabled bool) string {
 // so --require-evidence rejects them.
 func writeExternalEvidenceCatalog(t *testing.T, matching bool) string {
 	t.Helper()
-	dir := t.TempDir()
-	registry := "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"
-	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte(registry), 0o600); err != nil {
-		t.Fatalf("write registry: %v", err)
-	}
-	overlays := filepath.Join(dir, "overlays")
-	if err := os.MkdirAll(overlays, 0o755); err != nil {
-		t.Fatalf("create overlays: %v", err)
-	}
 	overlay := unrelatedEvidenceOverlay
 	if matching {
 		overlay = externalEvidenceLeaf
 	}
-	if err := os.WriteFile(filepath.Join(overlays, "external.yaml"), []byte(overlay), 0o600); err != nil {
-		t.Fatalf("write overlay: %v", err)
-	}
-	return dir
+	return providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":          []byte(providertest.EmptyRegistryYAML),
+		"overlays/external.yaml": []byte(overlay),
+	})
 }
 
 const externalEvidenceLeaf = `kind: RecipeMetadata

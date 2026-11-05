@@ -23,6 +23,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 // newTestLayeredProvider builds a LayeredDataProvider over a temp dir holding a
@@ -30,14 +31,9 @@ import (
 // embedded base overlays remain resolvable.
 func newTestLayeredProvider(t *testing.T) *LayeredDataProvider {
 	t.Helper()
-	tmp := t.TempDir()
-	registry := `apiVersion: aicr.run/v1beta1
-kind: ComponentRegistry
-components: []
-`
-	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"), []byte(registry), 0o600); err != nil {
-		t.Fatalf("write registry.yaml: %v", err)
-	}
+	tmp := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml": []byte(providertest.EmptyRegistryYAML),
+	})
 	layered, err := NewLayeredDataProvider(
 		NewEmbeddedDataProvider(GetEmbeddedFS(), "."),
 		LayeredProviderConfig{ExternalDir: tmp},
@@ -114,19 +110,6 @@ func TestLoadFromFileWithProvider(t *testing.T) {
 	})
 
 	t.Run("profile overlay in active catalog applies its default", func(t *testing.T) {
-		externalDir := t.TempDir()
-		registry := `apiVersion: aicr.run/v1beta1
-kind: ComponentRegistry
-components: []
-`
-		if err := os.WriteFile(filepath.Join(externalDir, "registry.yaml"), []byte(registry), 0o600); err != nil {
-			t.Fatalf("write registry.yaml: %v", err)
-		}
-		overlaysDir := filepath.Join(externalDir, "overlays")
-		if err := os.MkdirAll(overlaysDir, 0o755); err != nil {
-			t.Fatalf("create overlays directory: %v", err)
-		}
-		path := filepath.Join(overlaysDir, "direct-profile.yaml")
 		content := `kind: RecipeMetadata
 apiVersion: aicr.run/v1beta2
 metadata:
@@ -148,9 +131,6 @@ spec:
                 enabled: true
               replicas: 1
 `
-		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-			t.Fatalf("write profile overlay: %v", err)
-		}
 		alternate := `kind: RecipeMetadata
 apiVersion: aicr.run/v1beta2
 metadata:
@@ -172,13 +152,12 @@ spec:
                 enabled: false
               replicas: 2
 `
-		if err := os.WriteFile(
-			filepath.Join(overlaysDir, "alternate-profile.yaml"),
-			[]byte(alternate),
-			0o600,
-		); err != nil {
-			t.Fatalf("write alternate profile overlay: %v", err)
-		}
+		externalDir := providertest.WriteDir(t, map[string][]byte{
+			"registry.yaml":                   []byte(providertest.EmptyRegistryYAML),
+			"overlays/direct-profile.yaml":    []byte(content),
+			"overlays/alternate-profile.yaml": []byte(alternate),
+		})
+		path := filepath.Join(externalDir, "overlays", "direct-profile.yaml")
 		layered, err := NewLayeredDataProvider(
 			NewEmbeddedDataProvider(GetEmbeddedFS(), "."),
 			LayeredProviderConfig{ExternalDir: externalDir},
@@ -289,18 +268,6 @@ func TestLoadFromFileWithProviderProfile(t *testing.T) {
 	// overlay, so an explicit non-default selection is observable.
 	newProfileCatalog := func(t *testing.T) (*LayeredDataProvider, string) {
 		t.Helper()
-		externalDir := t.TempDir()
-		registry := `apiVersion: aicr.run/v1beta1
-kind: ComponentRegistry
-components: []
-`
-		if err := os.WriteFile(filepath.Join(externalDir, "registry.yaml"), []byte(registry), 0o600); err != nil {
-			t.Fatalf("write registry.yaml: %v", err)
-		}
-		overlaysDir := filepath.Join(externalDir, "overlays")
-		if err := os.MkdirAll(overlaysDir, 0o755); err != nil {
-			t.Fatalf("create overlays directory: %v", err)
-		}
 		overlay := `kind: RecipeMetadata
 apiVersion: aicr.run/v1beta2
 metadata:
@@ -327,10 +294,11 @@ spec:
               driver:
                 enabled: true
 `
-		path := filepath.Join(overlaysDir, "two-value-profile.yaml")
-		if err := os.WriteFile(path, []byte(overlay), 0o600); err != nil {
-			t.Fatalf("write profile overlay: %v", err)
-		}
+		externalDir := providertest.WriteDir(t, map[string][]byte{
+			"registry.yaml":                   []byte(providertest.EmptyRegistryYAML),
+			"overlays/two-value-profile.yaml": []byte(overlay),
+		})
+		path := filepath.Join(externalDir, "overlays", "two-value-profile.yaml")
 		layered, err := NewLayeredDataProvider(
 			NewEmbeddedDataProvider(GetEmbeddedFS(), "."),
 			LayeredProviderConfig{ExternalDir: externalDir},

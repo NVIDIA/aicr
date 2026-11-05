@@ -17,13 +17,12 @@
 package recipetest
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 // PromQLServerComponent is the component the fixtures declare the server.
@@ -88,11 +87,7 @@ func WriteTelemetryRegistry(t testing.TB, telemetry map[string]recipe.TelemetryC
 	if err != nil {
 		t.Fatalf("marshal telemetry registry: %v", err)
 	}
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, recipe.RegistryFileName), data, 0o600); err != nil {
-		t.Fatalf("write telemetry registry: %v", err)
-	}
-	return dir
+	return providertest.WriteDir(t, map[string][]byte{recipe.RegistryFileName: data})
 }
 
 // TelemetryDataProvider layers WriteTelemetryRegistry's directory over the

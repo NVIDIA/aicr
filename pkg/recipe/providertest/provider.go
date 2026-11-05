@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package providertest provides a recipe.DataProvider over an fs.FS for
-// tests. It must not import pkg/recipe, so that package's own tests can use
-// it.
+// Package providertest provides a recipe.DataProvider over an fs.FS and a
+// writer for --data directories, for tests. It must not import pkg/recipe, so
+// that package's own tests can use it.
 package providertest
 
 import (
