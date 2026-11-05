@@ -19,7 +19,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"path"
@@ -78,21 +77,9 @@ func (c *Client) PullBundle(ctx context.Context, r Repository, digest string) (*
 	if err != nil {
 		return nil, err
 	}
-	desc, raw, err := repo.FetchReference(ctx, digest)
+	_, manifest, err := fetchManifest(ctx, repo, r, digest, maxManifestBytes)
 	if err != nil {
-		return nil, classify(err, "fetch bundle manifest "+r.String()+"@"+digest)
-	}
-	defer raw.Close()
-	if desc.Size > maxManifestBytes {
-		return nil, invalid("bundle manifest is %d bytes", desc.Size)
-	}
-	data, err := content.ReadAll(raw, desc)
-	if err != nil {
-		return nil, classify(err, "read bundle manifest")
-	}
-	var manifest ocispec.Manifest
-	if err = json.Unmarshal(data, &manifest); err != nil {
-		return nil, invalid("bundle manifest is not an OCI manifest: %v", err)
+		return nil, err
 	}
 	switch {
 	case manifest.ArtifactType != BundleArtifactType:
@@ -112,9 +99,6 @@ func (c *Client) PullBundle(ctx context.Context, r Repository, digest string) (*
 	}
 	return &Bundle{Digest: digest, Files: files}, nil
 }
-
-// maxManifestBytes bounds an OCI manifest; real manifests are a few KiB.
-const maxManifestBytes = 4 << 20
 
 // untar unpacks a gzip-compressed tar into memory within the bundle limits.
 func untar(layer []byte) (map[string][]byte, error) {
