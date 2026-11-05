@@ -30,10 +30,13 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
+	"k8s.io/utils/ptr"
 )
 
 func TestDetectPlatform(t *testing.T) {
@@ -546,8 +549,10 @@ func TestCheckClusterAutoscaling_APIError_DoesNotFallBack(t *testing.T) {
 // persisted the namespace — before the error returned, or only after
 // cleanup's first lookup answered NotFound — still ends with the namespace
 // gone, a definitive rejection issues no delete, and a failing delete leaves
-// the create error as the result. Sequential: shortenCleanupTimeout touches
-// package state.
+// the create error as the result. The cleanup status is recorded as the
+// "Delete test namespace" artifact on this failed path. Sequential:
+// shortenCleanupTimeout touches package state and captureStdout swaps
+// os.Stdout.
 func TestValidateClusterAutoscaling_NamespaceCreateFailure(t *testing.T) {
 	shortenCleanupTimeout(t)
 	for _, tt := range namespaceCreateFailureCases {
@@ -558,13 +563,25 @@ func TestValidateClusterAutoscaling_NamespaceCreateFailure(t *testing.T) {
 				failNamespaceDelete(c, tt.deleteErr)
 			}
 
-			report, err := validateClusterAutoscaling(context.Background(), c, "gpu-pool")
+			var (
+				report *clusterAutoscalingReport
+				err    error
+			)
+			out := captureStdout(t, func() {
+				report, err = validateClusterAutoscaling(&validators.Context{Ctx: context.Background(), Clientset: c}, "gpu-pool")
+			})
 			if report != nil {
 				t.Errorf("report = %+v, want nil when the namespace create fails", report)
 			}
 			errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
 			if err == nil || !strings.Contains(err.Error(), "failed to create cluster autoscaling test namespace") {
 				t.Errorf("error = %v, want the namespace create failure as the result", err)
+			}
+			if !strings.Contains(out, "--- Delete test namespace ---") {
+				t.Error("evidence missing the \"Delete test namespace\" artifact on the failed-create path")
+			}
+			if !strings.Contains(out, tt.wantStatus) {
+				t.Errorf("cleanup artifact lacks status %q in output:\n%s", tt.wantStatus, out)
 			}
 			nsName := createdName()
 			if nsName == "" {
@@ -579,5 +596,81 @@ func TestValidateClusterAutoscaling_NamespaceCreateFailure(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestValidateClusterAutoscaling_DoneContextIssuesNoCreate pins the fast
+// path for a context that is already done before the namespace Create: the
+// Create is never sent, so cleanup treats the namespace as never created
+// (no Delete, no settle wait) and the artifact says so.
+func TestValidateClusterAutoscaling_DoneContextIssuesNoCreate(t *testing.T) {
+	shortenCleanupTimeout(t)
+	c := k8sfake.NewClientset()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var err error
+	out := captureStdout(t, func() {
+		_, err = validateClusterAutoscaling(&validators.Context{Ctx: ctx, Clientset: c}, "gpu-pool") //nolint:contextcheck // cleanup runs on its own bounded context
+	})
+	errorstest.WantReportedCode(t, err, errors.ErrCodeCanceled)
+	for _, action := range c.Actions() {
+		if action.GetResource().Resource == "namespaces" {
+			t.Errorf("unexpected %s on namespaces with a done context", action.GetVerb())
+		}
+	}
+	if !strings.Contains(out, "--- Delete test namespace ---") || !strings.Contains(out, "never created") {
+		t.Errorf("cleanup artifact missing or not \"never created\" in output:\n%s", out)
+	}
+}
+
+// TestCheckClusterAutoscaling_DoneContextTriesNoNodePool pins that the
+// NodePool loop stops once the check's context is done: with two GPU
+// NodePools and a canceled context no namespace Create is issued and the
+// check reports the canceled budget instead of paying a cleanup budget per
+// pool.
+func TestCheckClusterAutoscaling_DoneContextTriesNoNodePool(t *testing.T) {
+	client := k8sfake.NewClientset(&appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "karpenter",
+			Namespace: "karpenter",
+			Labels:    map[string]string{"app.kubernetes.io/name": "karpenter"},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: ptr.To(int32(1)),
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "karpenter"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "karpenter"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}},
+			},
+		},
+		Status: appsv1.DeploymentStatus{AvailableReplicas: 1},
+	})
+	npGVR := schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1", Resource: "nodepools"}
+	nodePool := func(name string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "karpenter.sh/v1",
+			"kind":       "NodePool",
+			"metadata":   map[string]any{"name": name},
+			"spec":       map[string]any{"limits": map[string]any{resourceNVIDIAGPU: "16"}},
+		}}
+	}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{npGVR: "NodePoolList"}, nodePool("gpu-a"), nodePool("gpu-b"))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var err error
+	captureStdout(t, func() {
+		err = CheckClusterAutoscaling(&validators.Context{Ctx: ctx, Clientset: client, DynamicClient: dyn}) //nolint:contextcheck // cleanup runs on its own bounded context
+	})
+	errorstest.WantReportedCode(t, err, errors.ErrCodeCanceled)
+	if err == nil || !strings.Contains(err.Error(), "before every GPU NodePool was tried") {
+		t.Errorf("error = %v, want the exhausted-budget message", err)
+	}
+	for _, action := range client.Actions() {
+		if action.GetResource().Resource == "namespaces" {
+			t.Errorf("unexpected %s on namespaces with a done context", action.GetVerb())
+		}
 	}
 }
