@@ -707,7 +707,7 @@ be set from the catalog or a `--data` overlay:
 |----------|--------------|---------|
 | `HF_TOKEN` | `inference-perf` | Hugging Face token for model downloads; see [`inference-perf`](#inference-perf-model-concurrency-and-weights-cache). |
 | `AICR_INFERENCE_PERF_NO_CLEANUP` | `inference-perf` | When true (`strconv.ParseBool`), leaves the per-run namespace in place for inspection; forwarded as `1`. |
-| `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY` | `inference-gateway` | When truthy, the check fails if the gateway's `LoadBalancer` Service is open to `0.0.0.0/0` — its `spec.loadBalancerSourceRanges` is empty or includes an any-source CIDR (`0.0.0.0/0` or `::/0`). Default (unset): the open exposure is recorded and warned but the check still passes. |
+| `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY` | `inference-gateway` | When truthy, the check fails if the gateway is open to the internet. What is assessed follows the declared `dataPlane`, not whether the controller runs a Service: with `service-endpoints` (the default), the proxy `LoadBalancer`'s `spec.loadBalancerSourceRanges` is empty or includes an any-source CIDR (`0.0.0.0/0` or `::/0`); with `gateway-address`, Service source ranges are not read at all, and the check fails when a Gateway status address is public, or is a `Hostname` or an unspecified address (`0.0.0.0`, `::`) the check cannot classify (a Gateway with no `status.addresses` at all fails the data-plane step in every mode, before exposure is assessed). Default (unset): the open exposure is recorded and warned but the check still passes. Which gateway is assessed, and how, comes from the recipe's inference gateway profile (`pkg/validator/v1.ResolveInferenceGatewayProfile`; see [Declaring the inference gateway](../integrator/data-extension.md#declaring-the-inference-gateway)). |
 | `AICR_NCCL_RUNTIME_IMAGE` | `nccl-all-reduce-bw`, `nccl-all-reduce-bw-net`, `nccl-all-reduce-bw-nvls` | Overrides the NCCL launcher/worker image baked into the per-platform TrainingRuntime templates; a malformed reference fails closed in the pod. |
 
 **RBAC.** The engine creates a per-run ServiceAccount and
@@ -1303,7 +1303,7 @@ run-to-run TTFT fluctuation (see NVIDIA/aicr#1192):
   over ZMQ; the KV router consumes them end-to-end with no NATS relay.
   Least-loaded routing does not consume those events.
   The `inference-routing-mode` recipe input defaults to `dynamo-router`; set
-  `gateway-epp` to validate the GAIE/EPP path through agentgateway with worker
+  `gateway-epp` to validate the GAIE/EPP path through the recipe's inference gateway (agentgateway by default) with worker
   frontend sidecars in direct mode. The direct-mode sidecars honor EPP routing
   headers; they do not relay KV events.
 - **The AIPerf load generator co-locates with the GPU workers, but that is not

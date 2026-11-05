@@ -139,6 +139,18 @@ func TestCollectCNCFEvidence(t *testing.T) {
 	}
 	badAdvertiser.internal.Metadata.SelectedProfile = &recipe.SelectedProfile{Advertiser: "csp"}
 
+	// Two enabled inference gateways is a declaration the gateway section
+	// cannot act on; other sections never read it.
+	twoGateways, err := client.LoadRecipe(context.Background(), recipePath, "")
+	if err != nil {
+		t.Fatalf("LoadRecipe: %v", err)
+	}
+	twoGateways.internal.ComponentRefs = append(twoGateways.internal.ComponentRefs,
+		recipe.ComponentRef{Name: "agentgateway", Namespace: "agentgateway-system"},
+		recipe.ComponentRef{Name: "edge-gateway", Namespace: "edge-system", Overrides: map[string]any{
+			recipe.InferenceGatewayOverrideKey: map[string]any{"gatewayClass": "edge-class"},
+		}})
+
 	closed := newClientForBundleTest(t)
 	if err = closed.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -171,6 +183,9 @@ func TestCollectCNCFEvidence(t *testing.T) {
 		{name: "feature aliases and all", client: client, ctx: context.Background(), opts: withFeatures("dra", "all")},
 		{name: "unknown feature", client: client, ctx: context.Background(), opts: withFeatures("nonexistent"), wantCode: aicrerrors.ErrCodeInvalidRequest},
 		{name: "unresolvable allocation policy fails closed", client: client, ctx: context.Background(), rec: badAdvertiser, opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
+		{name: "unresolvable gateway fails a full run", client: client, ctx: context.Background(), rec: twoGateways, opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
+		{name: "unresolvable gateway fails a gateway-scoped run", client: client, ctx: context.Background(), rec: twoGateways, opts: withFeatures("gateway"), wantCode: aicrerrors.ErrCodeInvalidRequest},
+		{name: "unresolvable gateway does not abort a run scoped to other features", client: client, ctx: context.Background(), rec: twoGateways, opts: withFeatures("dra", "gang")},
 		{name: "policy resolution past deadline is a timeout", client: client, ctx: expired, rec: rec, opts: valid, wantCode: aicrerrors.ErrCodeTimeout},
 		{name: "policy resolution after cancel is canceled", client: client, ctx: canceled, rec: rec, opts: valid, wantCode: aicrerrors.ErrCodeCanceled},
 		{name: "recipe missing internal", client: client, ctx: context.Background(), rec: &RecipeResult{Name: "x"}, opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
@@ -246,6 +261,109 @@ func TestCollectCNCFEvidence_RelativePaths(t *testing.T) {
 		if got != wantKubeconfig {
 			t.Fatalf("kubectl saw KUBECONFIG=%q, want %q", got, wantKubeconfig)
 		}
+	}
+}
+
+// TestCollectCNCFEvidence_ThreadsInferenceGateway runs the real collector
+// script with a stub kubectl and reads the gateway section's verdict to prove
+// which gateway option CollectCNCFEvidence passed: the declared Gateway's
+// name, namespace and class for a recipe that declares one, the no-gateway
+// marker for a recipe that declares none, and neither for a standalone run.
+func TestCollectCNCFEvidence_ThreadsInferenceGateway(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not on PATH")
+	}
+
+	// The stub logs every invocation, answers a declared-Gateway lookup with
+	// a class other than the declared one (which fails the section with a
+	// verdict naming the declared name and class; the namespace in that
+	// verdict is the stub's own echo, so the threaded namespace is asserted
+	// from the log instead), finds nothing on cluster-wide discovery, and
+	// succeeds with no output otherwise.
+	stubDir := t.TempDir()
+	callLog := filepath.Join(stubDir, "kubectl.log")
+	stub := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + callLog + "'\n" +
+		"case \" $* \" in\n  *' gateways -A '*) ;;\n  *gatewayClassName*) echo 'edge-system other-class' ;;\nesac\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(stubDir, "kubectl"), []byte(stub), 0o700); err != nil { //nolint:gosec // stub must be executable
+		t.Fatalf("write kubectl stub: %v", err)
+	}
+	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	client, err := NewClient(WithRecipeSource(EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	recipePath := filepath.Join(t.TempDir(), "recipe.yaml")
+	recipeYAML := "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec:\n  criteria:\n" +
+		"    service: eks\n    accelerator: h100\n    intent: training\n    os: ubuntu\n"
+	if err = os.WriteFile(recipePath, []byte(recipeYAML), 0o600); err != nil {
+		t.Fatalf("write recipe: %v", err)
+	}
+	noGateway, err := client.LoadRecipe(context.Background(), recipePath, "")
+	if err != nil {
+		t.Fatalf("LoadRecipe: %v", err)
+	}
+	declared, err := client.LoadRecipe(context.Background(), recipePath, "")
+	if err != nil {
+		t.Fatalf("LoadRecipe: %v", err)
+	}
+	declared.internal.ComponentRefs = append(declared.internal.ComponentRefs,
+		recipe.ComponentRef{Name: "edge-gateway", Namespace: "edge-system", Overrides: map[string]any{
+			recipe.InferenceGatewayOverrideKey: map[string]any{"gatewayClass": "edge-class", "gateway": "pool-vip"},
+		}})
+
+	tests := []struct {
+		name        string
+		rec         *RecipeResult
+		wantVerdict string
+		// wantCall is a kubectl invocation the stub must have logged.
+		wantCall string
+		wantErr  bool
+	}{
+		{
+			name: "declared gateway reaches the section", rec: declared,
+			wantVerdict: "**Result: FAIL** — Gateway `edge-system/pool-vip` has class `other-class`; the recipe declares `edge-class`.",
+			wantCall:    "get gateway pool-vip -n edge-system ",
+			wantErr:     true,
+		},
+		{
+			name: "recipe without a gateway skips without discovery", rec: noGateway,
+			wantVerdict: "**Result: SKIP (prerequisite absent)** — the recipe declares no inference gateway component.",
+		},
+		{
+			name: "standalone run discovers by name", rec: nil,
+			wantVerdict: "**Result: SKIP (prerequisite absent)** — no Gateway named `inference-gateway` is installed.",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			err := client.CollectCNCFEvidence(context.Background(), tt.rec, CNCFCollectOptions{Dir: dir, Features: []string{"gateway"}})
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("CollectCNCFEvidence: error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				requireCode(t, err, aicrerrors.ErrCodeInternal)
+			}
+			evidence, readErr := os.ReadFile(filepath.Join(dir, "inference-gateway.md"))
+			if readErr != nil {
+				t.Fatalf("read gateway evidence: %v", readErr)
+			}
+			if !strings.Contains(string(evidence), tt.wantVerdict) {
+				t.Errorf("gateway evidence lacks %q:\n%s", tt.wantVerdict, evidence)
+			}
+			if tt.wantCall != "" {
+				calls, logErr := os.ReadFile(callLog)
+				if logErr != nil {
+					t.Fatalf("read kubectl call log: %v", logErr)
+				}
+				if !strings.Contains(string(calls), tt.wantCall) {
+					t.Errorf("kubectl was never called with %q:\n%s", tt.wantCall, calls)
+				}
+			}
+		})
 	}
 }
 

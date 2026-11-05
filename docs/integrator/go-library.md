@@ -582,8 +582,15 @@ for _, r := range agg.IncompleteMusts() {
   captures behavioral evidence under `opts.Dir`. It needs `bash` and
   `kubectl` on `PATH` and runs for up to 20 minutes. `recipe` is optional.
   When set, its GPU allocation policy selects the mechanism the DRA and
-  secure-access sections exercise, and an unresolvable policy fails the call.
-  When nil, the collector detects the mechanism from the cluster.
+  secure-access sections exercise, and the inference gateway component it
+  declares (agentgateway by default) is the Gateway the inference-gateway
+  section collects evidence for; a recipe with no gateway makes that section
+  report the prerequisite absent. An unresolvable policy fails the call, and
+  so does an unresolvable gateway declaration (malformed, a near-miss override
+  key on an enabled component, or two enabled gateways) whenever
+  `opts.Features` selects the inference-gateway section, which the default
+  empty list does. When nil, the collector detects the mechanism from the
+  cluster and discovers the Gateway named `inference-gateway`.
   `opts.Features` restricts collection, and `CNCFEvidenceFeatures()` lists
   the accepted names. `opts.NoCluster` reports every section as skipped without
   touching a cluster.

@@ -162,13 +162,15 @@ names are `dra`, `gang`, `secure`, `accelerator-metrics`, `service-metrics`,
 > appropriate metrics and operator evidence.
 
 Each section writes exactly one **PASS**, **SKIP**, or **FAIL** verdict.
-**SKIP** marks an absent optional prerequisite (no inference gateway, no
-supported operator, an unsupported cluster-autoscaling provider, or an
+**SKIP** marks an absent optional prerequisite (a recipe that declares no
+inference gateway, or a standalone run with no Gateway named
+`inference-gateway`; no supported operator, an unsupported cluster-autoscaling provider, or an
 operator present with no workload to reconcile) and is not a failure. A check
 whose access path the recipe does not use also skips — see the Slinky Slurm
 note under the GPU allocation test below.
-A **FAIL** — an unhealthy present capability, a failed query, or a missing/
-malformed verdict — fails closed and makes the collection exit non-zero, so a
+A **FAIL** — an unhealthy present capability (including an inference Gateway
+the recipe declares but the cluster does not have, or has programmed by another
+class), a failed query, or a missing/malformed verdict — fails closed and makes the collection exit non-zero, so a
 recorded section failure is no longer masked as overall success.
 
 ### Two Modes

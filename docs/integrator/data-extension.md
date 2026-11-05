@@ -281,6 +281,91 @@ whose chart and source are both empty and that ships at least one primary
 do not qualify — pre-manifests are auxiliary to a primary release, so a ref
 with only pre-manifests is rejected as having no deployable primary.
 
+## Declaring the inference gateway
+
+The `inference-gateway` conformance check, the performance validator's
+`gateway-epp` routing mode and the CNCF evidence collector validate whichever
+component the recipe declares as its inference gateway. `agentgateway` is the
+built-in default and needs no declaration. Any other Gateway API implementation
+declares itself on its `componentRef` through the reserved
+`overrides.inferenceGateway` key:
+
+```yaml
+componentRefs:
+  - name: my-gateway
+    type: Helm
+    source: oci://charts.example.com
+    overrides:
+      inferenceGateway:
+        gatewayClass: my-gateway-class   # required: the GatewayClass that programs the Gateway
+        gateway: inference-gateway       # optional: the Gateway object's name (default shown)
+        dataPlane: service-endpoints     # optional: service-endpoints (default) | gateway-address
+```
+
+The Gateway's namespace is the component's resolved namespace (its
+`componentRef.namespace`, else the registry `defaultNamespace`; a Kustomize
+component has no registry default and must set `namespace` on its ref). The key
+is merged into the component's values like any other override, so a chart with
+a strict values schema should carry the declaration on a manifest-only
+companion ref (where the Gateway object usually lives) rather than on the
+chart's ref. agentgateway is the exception: it is recognized by its component
+name, so a companion ref carrying a declaration beside it counts as a second
+gateway and fails the check. Re-pointing agentgateway at another Gateway name
+or data plane goes on its own chart ref.
+
+`dataPlane` names how the validators confirm the data plane is serving.
+`service-endpoints` is for a controller that provisions the proxy Service in
+the Gateway's namespace under the Gateway's name (its exact name or that name
+with a `-` suffix, never a suffix naming a `controller-manager`, `webhook` or
+`metrics` component), which is agentgateway's convention: the check requires
+ready EndpointSlices behind that Service and assesses exposure from its
+`loadBalancerSourceRanges`. A controller that provisions the proxy elsewhere or
+under a generated name (Envoy Gateway's `envoy-<namespace>-<gateway>-<hash>` in
+`envoy-gateway-system`) does not match and should declare `gateway-address`.
+`gateway-address` reads what every implementation publishes, the Gateway's own
+status, and is also the probe for a data plane that is not a Kubernetes
+workload (a hardware or DPU-hosted proxy): the check requires the Gateway to be
+programmed with at least one `status.addresses` entry, assesses exposure from
+the class of those addresses (RFC 1918, RFC 6598 shared space, ULA, loopback
+and link-local are private; anything else is public; a `Hostname`-type address
+or an unspecified address such as `0.0.0.0` is unclassifiable and counts as not
+confirmed scoped under `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY=true`), and the
+performance validator sends its load to the first address on the port of the
+first `HTTP` listener that sets no `hostname` (the benchmark sends the address
+as the `Host` header; a Gateway with no `HTTP` listener, or whose `HTTP`
+listeners all bind a hostname, fails the performance run before anything is
+provisioned; the address itself is read once the workload is ready, so a
+Gateway that publishes it while the workload deploys is fine). The benchmark's HTTPRoute names that listener as its
+`sectionName`, so the `Accepted` wait below covers the listener the load goes
+to rather than any listener on the Gateway.
+A recipe that enables two inference gateway components fails the check; exactly
+one may be enabled. No shipped recipe uses `gateway-address`; it is covered by
+unit tests and by no CI lane.
+
+The performance validator's `gateway-epp` routing mode attaches its HTTPRoute
+from a per-run namespace named `aicr-inference-perf-<run>`, so the Gateway's
+`HTTP` listener must allow routes from that namespace
+(`allowedRoutes.namespaces.from: All`, or a `Selector` on the label every
+per-run namespace carries, `app.kubernetes.io/component=inference-perf`); the
+shipped agentgateway Gateway does. A listener that keeps the Gateway API
+default (`Same`) rejects the route, and the run fails at once with the
+listener's `Accepted` reason rather than as a readiness timeout.
+
+`aicr validate --cncf-submission` hands the declared Gateway's name, namespace
+and class to the evidence collector; a recipe that declares no inference
+gateway makes the section report the prerequisite absent, as the conformance
+check skips the same recipe, rather than certify a Gateway the recipe does not
+ship. Only a standalone collector run with no recipe discovers the Gateway
+named `inference-gateway`, across every namespace. The section's verdicts
+follow from that. With a recipe, a declared Gateway that is missing or a
+cluster that does not serve the Gateway API is `FAIL` (standalone, both are
+`SKIP`), a lookup the cluster denies is `FAIL` in either mode, and a Gateway
+programmed by a class other than the declared one is `FAIL`;
+`--cncf-submission` then exits non-zero. Standalone, a cluster with no Gateway
+of that name is `SKIP`, and more than one Gateway of that name is `FAIL`.
+`PASS` requires the GatewayClass `Accepted`, the Gateway `Programmed` and the
+InferencePool CRD `Established`.
+
 ## Precedence rules
 
 | Resource | Behavior |
