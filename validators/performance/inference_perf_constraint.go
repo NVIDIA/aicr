@@ -2702,14 +2702,15 @@ func waitForHTTPRouteAccepted(ctx *validators.Context, namespace, name, parentNa
 	}
 }
 
-// httpRouteAccepted reads the Accepted condition the configured gateway
-// reports for the route. decided is false while that parent reports no True
-// or False status at the route's current generation; other parents and
-// conditions observed at an earlier generation are ignored.
 // routeReasonNotAllowedByListeners is the Gateway API Accepted
 // reason a listener's allowedRoutes policy sets on a route it refuses.
 const routeReasonNotAllowedByListeners = "NotAllowedByListeners"
 
+// httpRouteAccepted reads the Accepted condition the configured gateway
+// reports for the route. decided is false while that parent reports no True
+// or False status at the route's current generation; other parents and
+// conditions observed at an earlier generation are ignored. A non-empty
+// parentSection limits the check to the parent entry for that listener.
 func httpRouteAccepted(route *unstructured.Unstructured, parentNamespace, parentName, parentSection string) (decided bool, err error) {
 	generation := route.GetGeneration()
 	parents, _, _ := unstructured.NestedSlice(route.Object, "status", "parents")
