@@ -15,9 +15,7 @@
 package resolver
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -25,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -40,6 +39,7 @@ import (
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 	"github.com/NVIDIA/aicr/pkg/operator/plan"
 	"github.com/NVIDIA/aicr/pkg/operator/registry"
+	"github.com/NVIDIA/aicr/pkg/operator/registry/registrytest"
 )
 
 const uid = "0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"
@@ -252,33 +252,6 @@ func TestParseUpstreamEnv(t *testing.T) {
 	}
 }
 
-func chartArchive(t *testing.T, files map[string]string) []byte {
-	t.Helper()
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
-	names := make([]string, 0, len(files))
-	for n := range files {
-		names = append(names, n)
-	}
-	slices.Sort(names)
-	for _, n := range names {
-		if err := tw.WriteHeader(&tar.Header{Name: n, Mode: 0o644, Size: int64(len(files[n])), Typeflag: tar.TypeReg}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tw.Write([]byte(files[n])); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gz.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return buf.Bytes()
-}
-
 // nestedCharts packages a chart with no CRDs inside depth levels of
 // packaged subcharts.
 func nestedCharts(t *testing.T, depth int) map[string]string {
@@ -286,7 +259,7 @@ func nestedCharts(t *testing.T, depth int) map[string]string {
 	files := map[string]string{"c/Chart.yaml": "name: c"}
 	for i := range depth {
 		name := fmt.Sprintf("s%d", i)
-		files = map[string]string{name + "/Chart.yaml": "name: " + name, name + "/charts/inner-1.0.0.tgz": string(chartArchive(t, files))}
+		files = map[string]string{name + "/Chart.yaml": "name: " + name, name + "/charts/inner-1.0.0.tgz": string(registrytest.TarGz(t, files))}
 	}
 	return files
 }
@@ -306,7 +279,7 @@ func TestChartOwnsCRDs(t *testing.T) {
 		"quoted kind":       {map[string]string{"c/templates/crd.yaml": "kind: \"CustomResourceDefinition\"\n"}, true},
 		"json template":     {map[string]string{"c/templates/crd.json": `{"apiVersion":"apiextensions.k8s.io/v1","kind":"CustomResourceDefinition"}`}, true},
 		"crd in files/":     {map[string]string{"c/files/x-crd.yaml": "kind: CustomResourceDefinition\n", "c/templates/crd.yaml": "{{ .Files.Get \"files/x-crd.yaml\" }}"}, true},
-		"packaged chart":    {map[string]string{"c/charts/s-1.0.0.tgz": string(chartArchive(t, map[string]string{"s/crds/x.yaml": "x"}))}, true},
+		"packaged chart":    {map[string]string{"c/charts/s-1.0.0.tgz": string(registrytest.TarGz(t, map[string]string{"s/crds/x.yaml": "x"}))}, true},
 		"too large to scan": {map[string]string{"c/templates/big.yaml": strings.Repeat("#", maxTemplateBytes+1)}, true},
 		// Only a chart's own values file is never rendered.
 		"subchart values":            {map[string]string{"c/charts/s/values.yaml": crd}, false},
@@ -318,7 +291,7 @@ func TestChartOwnsCRDs(t *testing.T) {
 		"nested deeper than scanned": {nestedCharts(t, maxNestedCharts+1), true},
 	}
 	for name, tt := range tests {
-		got, err := chartOwnsCRDs(chartArchive(t, tt.files))
+		got, err := chartOwnsCRDs(registrytest.TarGz(t, tt.files))
 		if err != nil || got != tt.want {
 			t.Errorf("%s: chartOwnsCRDs() = %v, %v; want %v", name, got, err, tt.want)
 		}
@@ -336,6 +309,17 @@ type fakeDelivery struct {
 	got     []registry.UpstreamChart
 	oci     []registry.UpstreamChart
 	wrapped []string
+	// reused records each reuse, and reuseErr fails it.
+	reused   []string
+	reuseErr error
+}
+
+func (f *fakeDelivery) ReuseChart(_ context.Context, r registry.Repository, version, digest string) (*registry.MirroredChart, error) {
+	f.reused = append(f.reused, r.URI()+":"+version)
+	if f.reuseErr != nil {
+		return nil, f.reuseErr
+	}
+	return &registry.MirroredChart{Repository: r, Digest: digest, ArchiveDigest: plan.DigestOf(f.archive), Archive: f.archive}, nil
 }
 
 func (f *fakeDelivery) MirrorHTTPChart(_ context.Context, up registry.UpstreamChart, target registry.Repository) (*registry.MirroredChart, error) {
@@ -409,7 +393,7 @@ func buildInput(t *testing.T) *BuildInput {
 // merged files, and the same bundle always yields the same plan digest.
 func TestBuildSingleRelease(t *testing.T) {
 	t.Parallel()
-	delivery := &fakeDelivery{archive: chartArchive(t, map[string]string{"cert-manager/templates/crds.yaml": "kind: CustomResourceDefinition"})}
+	delivery := &fakeDelivery{archive: registrytest.TarGz(t, map[string]string{"cert-manager/templates/crds.yaml": "kind: CustomResourceDefinition"})}
 	built, err := Build(context.Background(), delivery, buildInput(t))
 	if err != nil {
 		t.Fatalf("Build() = %v", err)
@@ -441,12 +425,76 @@ func TestBuildSingleRelease(t *testing.T) {
 	}
 }
 
+// A chart an earlier plan mirrored to the same repository, from the same
+// upstream chart and version, is reused from the runtime registry with no
+// upstream request. Without a matching record, or when the registry no
+// longer holds it, the chart is mirrored from upstream. Any other reuse
+// failure is returned.
+func TestBuildReusesMirroredCharts(t *testing.T) {
+	t.Parallel()
+	archive := registrytest.TarGz(t, map[string]string{"cert-manager/Chart.yaml": "name: cert-manager"})
+	earlier := plan.Chart{
+		Source: plan.ChartMirrored, Repository: "oci://registry.local:5000/aicr/cluster/charts/cert-manager", Version: "v1.20.2",
+		Digest: plan.DigestOf([]byte("earlier")), Upstream: &plan.UpstreamChart{Repository: "https://charts.jetstack.io", ArchiveDigest: plan.DigestOf(archive)},
+	}
+	with := func(edit func(*plan.Chart)) []plan.Chart {
+		c := earlier
+		edit(&c)
+		return []plan.Chart{c}
+	}
+	tests := []struct {
+		name       string
+		earlier    []plan.Chart
+		reuseErr   error
+		wantReused int
+		wantMirror int
+		wantCode   operrors.ErrorCode
+	}{
+		{name: "no earlier plan", wantMirror: 1},
+		{name: "mirrored by an earlier plan", earlier: []plan.Chart{earlier}, wantReused: 1},
+		{name: "gone from the registry", earlier: []plan.Chart{earlier}, reuseErr: operrors.New(operrors.ErrCodeNotFound, "gone"),
+			wantReused: 1, wantMirror: 1},
+		{name: "registry unavailable", earlier: []plan.Chart{earlier}, reuseErr: operrors.New(operrors.ErrCodeUnavailable, "down"),
+			wantReused: 1, wantCode: operrors.ErrCodeUnavailable},
+		{name: "another version", earlier: with(func(c *plan.Chart) { c.Version = "v1.19.0" }), wantMirror: 1},
+		{name: "another upstream", earlier: with(func(c *plan.Chart) { c.Upstream = &plan.UpstreamChart{Repository: "https://mirror.example.com"} }),
+			wantMirror: 1},
+		{name: "another registry", earlier: with(func(c *plan.Chart) { c.Repository = "oci://elsewhere/charts/cert-manager" }), wantMirror: 1},
+		{name: "no verified upstream", earlier: with(func(c *plan.Chart) { c.Upstream = nil }), wantMirror: 1},
+		{name: "a wrapper chart", earlier: with(func(c *plan.Chart) { c.Source = plan.ChartWrapper }), wantMirror: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			delivery := &fakeDelivery{archive: archive, reuseErr: tt.reuseErr}
+			in := buildInput(t)
+			in.EarlierCharts = tt.earlier
+			built, err := Build(context.Background(), delivery, in)
+			if len(delivery.reused) != tt.wantReused || len(delivery.got) != tt.wantMirror {
+				t.Fatalf("reused %v, mirrored %v; want %d reuses, %d mirrors", delivery.reused, delivery.got, tt.wantReused, tt.wantMirror)
+			}
+			if tt.wantCode != "" {
+				if operrors.CodeOf(err) != tt.wantCode {
+					t.Fatalf("Build() = %v, want %s", err, tt.wantCode)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Build() = %v", err)
+			}
+			if c := built.Plan.Releases[0].Chart; tt.wantReused == 1 && tt.wantMirror == 0 && !reflect.DeepEqual(c, earlier) {
+				t.Errorf("reused chart = %+v, want the earlier plan's %+v", c, earlier)
+			}
+		})
+	}
+}
+
 // An AICR patch release that renders the same releases, charts and values
 // yields the same desiredStateDigest: versions, image, bundle digest and
 // input digest are provenance, not identity.
 func TestBuildDigestIgnoresAICRPatchRelease(t *testing.T) {
 	t.Parallel()
-	delivery := &fakeDelivery{archive: chartArchive(t, map[string]string{"cert-manager/Chart.yaml": "name: cert-manager"})}
+	delivery := &fakeDelivery{archive: registrytest.TarGz(t, map[string]string{"cert-manager/Chart.yaml": "name: cert-manager"})}
 	built, err := Build(context.Background(), delivery, buildInput(t))
 	if err != nil {
 		t.Fatal(err)
@@ -475,7 +523,7 @@ func TestBuildDigestIgnoresAICRPatchRelease(t *testing.T) {
 
 func TestBuildFailsClosed(t *testing.T) {
 	t.Parallel()
-	archive := chartArchive(t, map[string]string{"cert-manager/Chart.yaml": "name: cert-manager"})
+	archive := registrytest.TarGz(t, map[string]string{"cert-manager/Chart.yaml": "name: cert-manager"})
 	tests := map[string]struct {
 		edit func(*BuildInput)
 		err  error
@@ -569,7 +617,7 @@ func TestBuildLaneBundle(t *testing.T) {
 	t.Parallel()
 	in := buildInput(t)
 	in.Bundle = readBundle(t, filepath.Join("..", "aicrjob", "testdata", "v1.0.0", "bundle-h100-eks-ubuntu-training-kubeflow"))
-	delivery := &fakeDelivery{archive: chartArchive(t, map[string]string{"c/Chart.yaml": "name: c"})}
+	delivery := &fakeDelivery{archive: registrytest.TarGz(t, map[string]string{"c/Chart.yaml": "name: c"})}
 	built, err := Build(context.Background(), delivery, in)
 	if err != nil {
 		t.Fatalf("Build() = %v", err)
@@ -617,7 +665,7 @@ func TestBuildRecordsTheBundleRecipeForValidation(t *testing.T) {
 			in.DeclaredVersion = version
 			in.Bundle = readBundle(t, filepath.Join("..", "aicrjob", "testdata", version, "bundle-h100-eks-ubuntu-training-kubeflow"))
 			render := in.Recipe.ConfigMapRef
-			built, err := Build(context.Background(), &fakeDelivery{archive: chartArchive(t, map[string]string{"c/Chart.yaml": "name: c"})}, in)
+			built, err := Build(context.Background(), &fakeDelivery{archive: registrytest.TarGz(t, map[string]string{"c/Chart.yaml": "name: c"})}, in)
 			if err != nil {
 				t.Fatalf("Build() = %v", err)
 			}

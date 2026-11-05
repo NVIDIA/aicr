@@ -28,6 +28,7 @@ import (
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 	"github.com/NVIDIA/aicr/pkg/operator/registry"
+	"github.com/NVIDIA/aicr/pkg/operator/registry/registrytest"
 )
 
 func override(component, path string, additive bool) v1alpha1.Override {
@@ -120,11 +121,11 @@ func TestCheckOverridePaths(t *testing.T) {
 // directories and nested archives alike.
 func TestChartDefaults(t *testing.T) {
 	t.Parallel()
-	nested := chartArchive(t, map[string]string{
+	nested := registrytest.TarGz(t, map[string]string{
 		"nested/Chart.yaml":  "apiVersion: v2\nname: nested\nversion: 1.0.0\n",
 		"nested/values.yaml": "image:\n  tag: v1\n",
 	})
-	archive := chartArchive(t, map[string]string{
+	archive := registrytest.TarGz(t, map[string]string{
 		"c/Chart.yaml":                 "apiVersion: v2\nname: c\nversion: 1.0.0\n",
 		"c/values.yaml":                "replicaCount: 1\nnodeSelector: {}\n",
 		"c/charts/sub/values.yaml":     "resources:\n  limits: {}\n",
@@ -153,10 +154,10 @@ func TestChartDefaults(t *testing.T) {
 	for name, bad := range map[string][]byte{
 		"not gzip":        []byte("plain"),
 		"not tar":         gzipped(t, []byte("not a tar stream at all, just bytes")),
-		"bad values":      chartArchive(t, map[string]string{"c/values.yaml": "a: ["}),
-		"oversized entry": chartArchive(t, map[string]string{"c/values.yaml": strings.Repeat("#", maxChartDefaultsBytes+1)}),
-		"oversized total": chartArchive(t, oversized),
-		"too many files":  chartArchive(t, numerous),
+		"bad values":      registrytest.TarGz(t, map[string]string{"c/values.yaml": "a: ["}),
+		"oversized entry": registrytest.TarGz(t, map[string]string{"c/values.yaml": strings.Repeat("#", maxChartDefaultsBytes+1)}),
+		"oversized total": registrytest.TarGz(t, oversized),
+		"too many files":  registrytest.TarGz(t, numerous),
 		"repeated file":   repeatedEntry(t, maxChartDefaultsEntries+1),
 	} {
 		if _, err := chartDefaults(bad); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
@@ -169,10 +170,10 @@ func TestChartDefaults(t *testing.T) {
 // follows them, and no deeper.
 func TestChartDefaultsStopsAtTheNestingBound(t *testing.T) {
 	t.Parallel()
-	archive := chartArchive(t, map[string]string{"l3/Chart.yaml": "apiVersion: v2\nname: l3\nversion: 1.0.0\n", "l3/values.yaml": "deepest: 3\n"})
+	archive := registrytest.TarGz(t, map[string]string{"l3/Chart.yaml": "apiVersion: v2\nname: l3\nversion: 1.0.0\n", "l3/values.yaml": "deepest: 3\n"})
 	for level := 2; level >= 0; level-- {
 		name := fmt.Sprintf("l%d", level)
-		archive = chartArchive(t, map[string]string{
+		archive = registrytest.TarGz(t, map[string]string{
 			name + "/Chart.yaml":  fmt.Sprintf("apiVersion: v2\nname: %s\nversion: 1.0.0\n", name),
 			name + "/values.yaml": fmt.Sprintf("level: %d\n", level),
 			fmt.Sprintf("%s/charts/l%d-1.0.0.tgz", name, level+1): string(archive),

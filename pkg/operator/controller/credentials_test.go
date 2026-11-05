@@ -17,13 +17,10 @@ package controller
 import (
 	"context"
 	"encoding/base64"
-	"errors"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/service/ecr"
-	ecrtypes "github.com/aws/aws-sdk-go-v2/service/ecr/types"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,26 +31,10 @@ import (
 	"github.com/NVIDIA/aicr/pkg/operator/defaults"
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 	"github.com/NVIDIA/aicr/pkg/operator/registry"
+	"github.com/NVIDIA/aicr/pkg/operator/registry/registrytest"
 )
 
 const ecrHost = "123456789012.dkr.ecr.us-west-2.amazonaws.com"
-
-type fakeECR struct {
-	token   string
-	expires time.Time
-	calls   int
-	// fail fails the first fail calls, as an STS or ECR outage does.
-	fail int
-}
-
-func (f *fakeECR) GetAuthorizationToken(context.Context, *ecr.GetAuthorizationTokenInput, ...func(*ecr.Options)) (*ecr.GetAuthorizationTokenOutput, error) {
-	f.calls++
-	if f.calls <= f.fail {
-		return nil, errors.New("sts: connection reset by peer")
-	}
-	t := base64.StdEncoding.EncodeToString([]byte("AWS:" + f.token))
-	return &ecr.GetAuthorizationTokenOutput{AuthorizationData: []ecrtypes.AuthorizationData{{AuthorizationToken: &t, ExpiresAt: &f.expires}}}, nil
-}
 
 // A failed refresh is retried with backoff instead of waiting out the
 // interval: one failed mint on a fresh install no longer leaves Argo CD
@@ -67,7 +48,7 @@ func TestRepoCredsRefresherRetriesAFailure(t *testing.T) {
 	if err := k8s.Create(ctx, secret); err != nil {
 		t.Fatal(err)
 	}
-	api := &fakeECR{token: "token-after-retry", expires: time.Now().Add(12 * time.Hour), fail: 1}
+	api := &registrytest.ECR{Token: "AWS:token-after-retry", Expires: time.Now().Add(12 * time.Hour), Fail: 1}
 	r := &RepoCredsRefresher{Client: k8s, Reader: k8s, Provider: &registry.ECRProvider{Client: api, Host: ecrHost, Now: time.Now},
 		Namespace: "argocd", Name: "aicr-registry-retry", Interval: time.Hour, RetryBackoff: 20 * time.Millisecond, Now: time.Now}
 	runCtx, cancel := context.WithCancel(ctx)
@@ -117,7 +98,7 @@ func TestRepoCredsRefresher(t *testing.T) {
 	ctx := testContext(t)
 	now := time.Now().UTC().Truncate(time.Second)
 	clock := now
-	api := &fakeECR{token: "token-1", expires: now.Add(12 * time.Hour)}
+	api := &registrytest.ECR{Token: "AWS:token-1", Expires: now.Add(12 * time.Hour)}
 	provider := &registry.ECRProvider{Client: api, Host: ecrHost, Now: func() time.Time { return clock }}
 	r := &RepoCredsRefresher{Client: k8s, Reader: k8s, Provider: provider, Namespace: "argocd", Name: "aicr-registry",
 		Now: func() time.Time { return clock }}
@@ -132,7 +113,7 @@ func TestRepoCredsRefresher(t *testing.T) {
 	if err := k8s.Create(ctx, secret); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Check(ctx); operrors.ReasonOf(err) != ReasonRegistryCredentialsStale {
+	if _, err := r.Check(ctx); operrors.ReasonOf(err) != ReasonRegistryCredentialsStale {
 		t.Fatalf("Check() before any refresh = %v, want stale", err)
 	}
 	if expiry, refresh := gauges(r); expiry != 0 || refresh != 0 {
@@ -145,51 +126,121 @@ func TestRepoCredsRefresher(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(secret.Data["password"]) != "token-1" || string(secret.Data["username"]) != "AWS" || string(secret.Data["url"]) == "" ||
-		secret.Annotations[v1alpha1.AnnotationTokenExpiresAt] != api.expires.Format(time.RFC3339) {
+		secret.Annotations[v1alpha1.AnnotationTokenExpiresAt] != api.Expires.Format(time.RFC3339) {
 
 		t.Fatalf("repo-creds = %v %v", secret.Annotations, secret.Data)
 	}
-	if err := r.Check(ctx); err != nil {
-		t.Fatalf("Check() after a refresh = %v", err)
+	if warning, err := r.Check(ctx); err != nil || warning != "" {
+		t.Fatalf("Check() after a refresh = %q, %v", warning, err)
 	}
 	clock = now.Add(2 * time.Hour)
-	if expiry, refresh := gauges(r); expiry != float64(api.expires.Unix()) || refresh != float64(now.Unix()) {
-		t.Errorf("expiry %v, refresh %v; want %d, %d", expiry, refresh, api.expires.Unix(), now.Unix())
+	if expiry, refresh := gauges(r); expiry != float64(api.Expires.Unix()) || refresh != float64(now.Unix()) {
+		t.Errorf("expiry %v, refresh %v; want %d, %d", expiry, refresh, api.Expires.Unix(), now.Unix())
 	}
 
 	// The operator was down past the token's life: stale until the restart's
 	// first refresh mints a new token.
 	clock = now.Add(13 * time.Hour)
-	if err := r.Check(ctx); operrors.ReasonOf(err) != ReasonRegistryCredentialsStale || strings.Contains(err.Error(), "token-1") {
+	if _, err := r.Check(ctx); operrors.ReasonOf(err) != ReasonRegistryCredentialsStale || strings.Contains(err.Error(), "token-1") {
 		t.Fatalf("Check() after expiry = %v", err)
 	}
-	api.token, api.expires = "token-2", clock.Add(12*time.Hour)
+	api.Token, api.Expires = "AWS:token-2", clock.Add(12*time.Hour)
 	restarted := &RepoCredsRefresher{Client: k8s, Reader: k8s, Provider: provider, Namespace: "argocd", Name: "aicr-registry",
 		Now: func() time.Time { return clock }}
 	if err := restarted.Refresh(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := restarted.Check(ctx); err != nil || api.calls != 2 {
-		t.Fatalf("after restart: Check() = %v, %d token calls", err, api.calls)
+	if _, err := restarted.Check(ctx); err != nil || api.Calls() != 2 {
+		t.Fatalf("after restart: Check() = %v, %d token calls", err, api.Calls())
 	}
-	if expiry, refresh := gauges(restarted); expiry != float64(api.expires.Unix()) || refresh != float64(clock.Unix()) {
-		t.Errorf("after restart: expiry %v, refresh %v; want %d, %d", expiry, refresh, api.expires.Unix(), clock.Unix())
+	if expiry, refresh := gauges(restarted); expiry != float64(api.Expires.Unix()) || refresh != float64(clock.Unix()) {
+		t.Errorf("after restart: expiry %v, refresh %v; want %d, %d", expiry, refresh, api.Expires.Unix(), clock.Unix())
 	}
 	// A refresher that has only read the Secret knows the expiry, but no
 	// refresh of its own: that is unknown, not fresh.
 	checked := &RepoCredsRefresher{Client: k8s, Reader: k8s, Provider: provider, Namespace: "argocd", Name: "aicr-registry",
 		Now: func() time.Time { return clock }}
-	if err := checked.Check(ctx); err != nil {
+	if _, err := checked.Check(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if expiry, refresh := gauges(checked); expiry != float64(api.expires.Unix()) || refresh != 0 {
-		t.Errorf("after a check only: expiry %v, refresh %v; want %d, 0", expiry, refresh, api.expires.Unix())
+	if expiry, refresh := gauges(checked); expiry != float64(api.Expires.Unix()) || refresh != 0 {
+		t.Errorf("after a check only: expiry %v, refresh %v; want %d, 0", expiry, refresh, api.Expires.Unix())
 	}
 }
 
 func gauges(r *RepoCredsRefresher) (expiry, refresh float64) {
 	c := r.Collectors()
 	return testutil.ToFloat64(c[0]), testutil.ToFloat64(c[1])
+}
+
+// While the token is still valid, a failed mint fails the refresh and leaves
+// its timestamp, registry calls keep the cached token, and Check passes with
+// a warning as the failure counter rises. The next successful mint clears the
+// warning.
+func TestRepoCredsRefresherRidesOutAMintFailure(t *testing.T) {
+	ctx := testContext(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	clock := now
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "argocd", Name: "aicr-registry-ride-out", Labels: map[string]string{"argocd.argoproj.io/secret-type": "repo-creds"}},
+		StringData: map[string]string{"type": "oci", "url": "oci://" + ecrHost + "/aicr/cluster"},
+	}
+	if err := k8s.Create(ctx, secret); err != nil {
+		t.Fatal(err)
+	}
+	api := &registrytest.ECR{Token: "AWS:token-1", Expires: now.Add(12 * time.Hour)}
+	provider := &registry.ECRProvider{Client: api, Host: ecrHost, Now: func() time.Time { return clock }}
+	r := &RepoCredsRefresher{Client: k8s, Reader: k8s, Provider: provider, Namespace: "argocd", Name: secret.Name,
+		Now: func() time.Time { return clock }}
+	if err := r.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	clock, api.Fail = now.Add(7*time.Hour), 1<<30
+	if err := r.Refresh(ctx); err == nil {
+		t.Fatal("Refresh() with a failing mint = nil")
+	}
+	if _, refresh := gauges(r); refresh != float64(now.Unix()) {
+		t.Errorf("refresh timestamp = %v after a failed refresh, want the last success %d", refresh, now.Unix())
+	}
+	if tok, err := provider.Token(ctx); err != nil || tok.Password != "token-1" {
+		t.Fatalf("Token() inside the token's validity = %+v, %v; want the cached token", tok, err)
+	}
+	// Joins or repeats the mint Token started in the background.
+	if _, err := provider.FreshToken(ctx); err == nil {
+		t.Fatal("FreshToken() with a failing mint = nil")
+	}
+	warning, err := r.Check(ctx)
+	if err != nil || !strings.Contains(warning, "has failed since "+clock.Format(time.RFC3339)) || !strings.Contains(warning, "connection reset") {
+		t.Fatalf("Check() = %q, %v; want a warning naming the failure", warning, err)
+	}
+	if failures := testutil.ToFloat64(r.Collectors()[2]); failures < 2 {
+		t.Errorf("mint failures = %v, want at least 2", failures)
+	}
+
+	// A new leader starts with no cached token, so registry calls fail even
+	// though the Secret's token is valid.
+	leader := &registry.ECRProvider{Client: api, Host: ecrHost, Now: func() time.Time { return clock }}
+	restarted := &RepoCredsRefresher{Client: k8s, Reader: k8s, Provider: leader, Namespace: "argocd", Name: secret.Name,
+		Now: func() time.Time { return clock }}
+	if err = restarted.Refresh(ctx); err == nil {
+		t.Fatal("Refresh() by a new leader with a failing mint = nil")
+	}
+	if _, err = leader.Token(ctx); operrors.ReasonOf(err) != registry.ReasonCredentialsUnavailable {
+		t.Fatalf("Token() by a new leader with a failing mint = %v", err)
+	}
+	warning, err = restarted.Check(ctx)
+	if err != nil || !strings.Contains(warning, "holds no token it can use") || strings.Contains(warning, "keeps using the current one") {
+		t.Fatalf("Check() by a new leader = %q, %v; want a warning that it holds no token", warning, err)
+	}
+
+	api.Fail = 0
+	if err = r.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if warning, err = r.Check(ctx); err != nil || warning != "" {
+		t.Fatalf("Check() after a successful mint = %q, %v", warning, err)
+	}
 }
 
 // Pushing Jobs mount the administrator's static Secret as it is; with brokered
@@ -215,7 +266,7 @@ func TestPushingJobCredentials(t *testing.T) {
 
 	freshRuntime(t, ctx, nil)
 	rt = getRuntime(t, ctx)
-	api := &fakeECR{token: "per-run-token", expires: time.Now().Add(12 * time.Hour)}
+	api := &registrytest.ECR{Token: "AWS:per-run-token", Expires: time.Now().Add(12 * time.Hour)}
 	st.creds = &registry.ECRProvider{Client: api, Host: ecrHost, Now: time.Now}
 	// Simulate a crash after the Job was created, before its run objects:
 	// build and create the suspended Job directly.
