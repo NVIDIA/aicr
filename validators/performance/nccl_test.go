@@ -1092,10 +1092,11 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
 		},
 		{
-			name:    "NVLS NVKE GB200",
+			// NVKE carries both NVL72 generations on the NVLS variant.
+			name:    "NVLS NVKE",
 			variant: variantNVLS,
 			service: recipe.CriteriaServiceNVKE,
-			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorVR200},
 		},
 		{
 			name:    "NVLS GKE GB200",
@@ -1109,12 +1110,6 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 			name:    "NVLS RKE2 VR200",
 			variant: variantNVLS,
 			service: recipe.CriteriaServiceRKE2,
-			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorVR200},
-		},
-		{
-			name:    "NVLS NVKE VR200",
-			variant: variantNVLS,
-			service: recipe.CriteriaServiceNVKE,
 			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorVR200},
 		},
 	}

@@ -308,18 +308,16 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 	variantNVLS: {
 		// GB300 EKS shares GB200's NVL72 MNNVL/IMEX topology — see
 		// testdata/gb300/eks/runtime-nvls.yaml.
-		recipe.CriteriaServiceEKS:  {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
-		recipe.CriteriaServiceOKE:  {recipe.CriteriaAcceleratorGB200},
-		recipe.CriteriaServiceNVKE: {recipe.CriteriaAcceleratorGB200},
+		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
+		recipe.CriteriaServiceOKE: {recipe.CriteriaAcceleratorGB200},
+		// NVKE carries both NVL72 generations, each with its own runtime —
+		// see testdata/{gb200,vr200}/nvke/runtime-nvls.yaml.
+		recipe.CriteriaServiceNVKE: {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorVR200},
 		recipe.CriteriaServiceGKE:  {recipe.CriteriaAcceleratorGB200},
 		// VR200 NVL72 on bare-metal RKE2: MNNVL across the IMEX domain, same
 		// shape as GB200 but with its own runtime (NGC pytorch image, distinct
 		// mpirun path) — see testdata/vr200/rke2/runtime-nvls.yaml.
-		recipe.CriteriaServiceRKE2: {recipe.CriteriaAcceleratorVR200},
-		// VR200 NVL72 on bare-metal NVKE: same MNNVL/IMEX topology as the RKE2
-		// leaf, with its own runtime — see
-		// testdata/vr200/nvke/runtime-nvls.yaml.
-		recipe.CriteriaServiceNVKE:    {recipe.CriteriaAcceleratorVR200},
+		recipe.CriteriaServiceRKE2:    {recipe.CriteriaAcceleratorVR200},
 		recipe.CriteriaServiceGeneric: {recipe.CriteriaAcceleratorGB300},
 	},
 }
