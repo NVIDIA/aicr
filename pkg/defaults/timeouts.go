@@ -204,6 +204,9 @@ const (
 	VerifyOperationTimeout = 5 * time.Minute
 )
 
+// StaticValidationTimeout bounds a complete static recipe validation run.
+const StaticValidationTimeout = 30 * time.Second
+
 // Health computation timeouts.
 const (
 	// HealthComputeTimeout is the upper bound for a single health.Compute
