@@ -530,3 +530,14 @@ func TestMakeBundle_RejectsSplitSupersededByConfig(t *testing.T) {
 		t.Fatalf("error = %v, want it to name config.WithSplit", err)
 	}
 }
+
+func TestMakeBundle_RejectsNegativeNodes(t *testing.T) {
+	t.Parallel()
+	client, rec := resolveEmbeddedTrainingRecipe(t)
+
+	_, err := client.MakeBundle(t.Context(), rec, aicr.BundleOptions{
+		Nodes:     -1,
+		OutputDir: filepath.Join(t.TempDir(), "neg"),
+	})
+	assertInvalidRequest(t, err)
+}
