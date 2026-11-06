@@ -9,17 +9,20 @@ proposed behavior; it does not introduce an implemented command or schema.
 
 ## Decision Summary
 
-A filesystem catalog supplied through `--data` may carry
-`artifacts/bindings.yaml` and `artifacts/inventory.yaml`. AICR applies these
-inputs in memory during catalog/provider loading, before recipe resolution.
+The embedded catalog may publish `artifacts/bindings.yaml`; a `--data`
+catalog can add or override bindings by artifact name. Checks activate only
+when the user supplies an inventory, through `artifacts/inventory.yaml` in
+`--data` or the existing config file. AICR applies matching bindings in memory
+during catalog/provider loading, before recipe resolution.
 The producer lists release artifacts without knowing AICR component names.
 The catalog author maps those artifacts to chart coordinates and image values.
 The user controls an optional inventory path override and coverage exceptions
 through the existing `AICRConfig`, under `spec.recipe.artifacts`.
 
-The resolved recipe must bind every selected Helm component to an inventory
-chart unless the user lists that component in `allowCatalogPins`. The
-inventory may cover only part of the catalog. Recipe provenance records the
+Every selected Helm component needs a matched chart binding and matches for
+all image bindings targeting it, unless the user lists that component in
+`allowCatalogPins`. Bindings may cover more artifacts than the inventory;
+unmatched bindings remain inactive. Recipe provenance records the
 input digests and exceptions. There is no `aicr bind`, materialized catalog,
 lock sidecar, new configuration kind, or new flag.
 
@@ -43,7 +46,9 @@ the user who chooses the inventory.
 
 The following behavior was checked against origin `main` at
 [`fe2618f4696b181a4936e8dcf1d0f013512c16e0`](https://github.com/NVIDIA/aicr/tree/fe2618f4696b181a4936e8dcf1d0f013512c16e0).
-It describes the implementation this proposal extends.
+It describes the implementation this proposal extends. The cited code is
+unchanged on origin `main` at
+[`97e9c289a47429da5153eea185c25b0d0ce78c4e`](https://github.com/NVIDIA/aicr/tree/97e9c289a47429da5153eea185c25b0d0ce78c4e).
 
 | Current behavior | Consequence for this design |
 |---|---|
@@ -59,7 +64,8 @@ It describes the implementation this proposal extends.
 - The same catalog, inventory, bindings, user choices and AICR binary produce
   the same resolved pins.
 - Every inventory artifact has an explicit binding or ignore reason.
-- Every selected Helm component has a chart binding or a user-owned exception.
+- Every selected Helm component has matches for its chart and all declared
+  image bindings, or a user-owned exception.
 - Recipe, validation, mirror discovery and bundle generation consume the same
   composition and reject later changes to bound identities.
 - AICR consumes one neutral contract without producer-specific types,
@@ -78,7 +84,7 @@ It describes the implementation this proposal extends.
 
 ### Ownership and activation
 
-A catalog has the following optional directory:
+An external catalog may carry bindings and a default inventory:
 
 ```text
 release-catalog/
@@ -92,25 +98,46 @@ release-catalog/
 
 A release pipeline or mirror tool can produce the inventory without importing
 AICR code. Any translation from its private export format happens outside
-AICR. The catalog author owns stable bindings, values contracts and component
-policy. The user chooses the inventory and any components permitted to retain
-catalog pins.
+AICR. Bindings are the catalog's published contract: stable, descriptive
+artifact names tell producers how to name inventory entries without exposing
+component names or values paths in the inventory. Renaming a binding key is a
+breaking change, versioned with the catalog. The catalog author owns bindings,
+values contracts and component policy. The user chooses the inventory and any
+components permitted to retain catalog pins.
 
-Without `artifacts/`, catalog behavior is unchanged and coverage enforcement
-is inactive. With it, `bindings.yaml` and the effective inventory are required;
-a missing or invalid file fails loading. The inventory override changes only
-where the producer document is read. It does not supply bindings or activate
-composition for a catalog without `artifacts/`.
+Bindings are an ordinary layered catalog file. The embedded catalog may ship
+`artifacts/bindings.yaml`, and an external catalog's file layers over it.
+An external entry replaces the entire disposition for the same artifact name;
+other embedded entries remain. Validate disjoint dispositions and at most one
+chart binding per component on the merged set. There is no removal mechanism.
+
+An inventory activates composition and coverage checks. Read it from
+`<data>/artifacts/inventory.yaml` when present, or use
+`spec.recipe.artifacts.inventory` when supplied. The explicit path also works
+with only the embedded catalog; `--data` is not required. An explicitly named
+missing file or an invalid inventory fails loading. Without an inventory,
+bindings are ignored and catalog behavior is unchanged, whether either layer
+has bindings or not.
+
+If an inventory is supplied but neither layer has bindings, use an empty
+binding set. Each inventory entry then fails ordinary accounting with
+`no binding for X`; there is no separate missing-bindings special case.
 
 ### Composition and consumer checks
 
-1. Read bounded snapshots of the catalog, bindings and effective inventory.
-   Validate the documents and artifact accounting before publishing a provider
-   to any consumer. Reads and later bundle capture must use the same snapshot.
-2. Load the ordinary layered catalog. Resolve binding targets against its
-   effective entries, then clone and update only the declared chart fields and
-   image values. Preserve class, namespace, dependencies, scheduling, checks,
-   manifests and other integration policy. Do not mutate shared caches.
+1. When an inventory is supplied, read bounded snapshots of it and the
+   catalog's binding layers. Merge bindings and validate document shapes and
+   inventory accounting before publishing a provider. Every inventory entry
+   must be bound or explicitly ignored. An unmatched binding is inactive and
+   leaves its target fields at catalog pins. Reads and later bundle capture
+   must use the same snapshot.
+2. Load the ordinary layered catalog. Validate targets only for active bindings:
+   component existence, values-file participation, JSON Pointer existence and
+   platform agreement. Inactive bindings receive schema/shape validation only;
+   a stale target in an unused embedded binding must not break loading. Clone
+   effective entries and update only active chart fields and image values.
+   Preserve class, namespace, dependencies, scheduling, checks, manifests and
+   other integration policy. Do not mutate shared caches.
 3. For each bound chart, split its OCI reference at the final path component
    into `helm.defaultRepository` and `helm.defaultChart`. Set
    `helm.defaultVersion` from `version` and `helm.defaultDigest` from
@@ -118,16 +145,19 @@ composition for a catalog without `artifacts/`.
    never survive a coordinate change. Record `manifestDigest` as provenance
    only. No `helm.defaultManifestDigest` is introduced.
 4. Resolve the recipe normally. Bindings neither add nor enable components.
-   Every selected Helm component must have a chart binding unless its name
-   appears in the user's `allowCatalogPins`. Unselected catalog components do
-   not require coverage. An image binding alone does not cover a chart.
+   A selected Helm component is covered only when its chart binding and every
+   image binding targeting it have inventory matches. Missing or partial
+   coverage fails unless the user lists it in `allowCatalogPins`. Unselected
+   components do not require coverage. An image binding alone cannot cover a
+   chart, and a chart match alone cannot cover declared but unmatched images.
 5. Apply a shared identity guard after final value composition on every
    consumer path. Explicit recipe coordinates, overlays, profiles and user
    overrides must agree with bound chart coordinates and image identities.
    Equal values are allowed; changes to a bound repository, version, chart,
    digest or required tag clearing fail. Dynamic declarations that overlap
-   bound identity paths fail. An exception permits retaining catalog pins; it
-   does not disable guards for a component that is bound.
+   bound identity paths fail. An exception permits retaining catalog pins for
+   unmatched bindings, including on a partially matched component. It does not
+   suppress active bindings or disable their identity guards.
 6. Record provenance in the recipe. Loading that recipe later requires matching
    inventory, bindings, base catalog and exceptions. Missing inputs or a
    mismatch fail before validation, discovery or bundle output.
@@ -215,10 +245,17 @@ artifacts:
 
 The document requires `apiVersion`, `kind`, `charts` and `images`.
 `ignoredArtifacts` defaults to an empty map. The three maps use artifact names
-as keys. Their key sets must be disjoint and together equal the inventory's
-name set. An absent artifact, type mismatch or unaccounted artifact fails.
-A partial inventory therefore needs bindings whose entries match that release
-scope; absent entries are not silently skipped.
+as keys. Their key sets must be disjoint after layering, and together must
+cover every inventory name. They may be a superset of the inventory. A binding
+or ignore entry with no matching inventory entry is inactive. A type mismatch
+or unaccounted inventory artifact fails. A misspelling on either side of an
+intended match leaves the inventory entry unaccounted, preserving typo safety
+without requiring per-release binding files.
+
+The target requirements below apply only to active bindings. Inactive entries
+must have valid schema and field shapes, but do not require target existence,
+values-file participation, JSON Pointer existence or a platform match. The
+merged set still obeys disjointness and one-chart-per-component rules.
 
 | Field | Contract |
 |---|---|
@@ -230,9 +267,10 @@ scope; absent entries are not silently skipped.
 | `targets[].write` | Exactly one of `{reference}` or `{repository, digest, clearTag?}`. Values are JSON Pointers to existing string leaves. |
 | `ignoredArtifacts.<artifact>.reason` | Nonempty reason for not binding the artifact. Does not exempt a component from recipe coverage. |
 
-JSON Pointers use `~0` and `~1` escapes. Require nonempty pointers, existing
-object-map parents and string leaves. Reject array indexing, missing paths and
-equal or ancestor/descendant overlaps, including tag-clearing targets.
+JSON Pointers use `~0` and `~1` escapes. All bindings require nonempty,
+syntactically valid pointers. Active writes require existing object-map
+parents and string leaves; reject array traversal, missing paths and equal or
+ancestor/descendant overlaps, including tag-clearing targets.
 
 The `reference` form writes the scheme-less repository followed by `@` and
 `manifestDigest`. The split form writes the scheme-less repository and full
@@ -281,14 +319,18 @@ spec:
 
 | Field | Default | Contract |
 |---|---|---|
-| `spec.recipe.artifacts.inventory` | `<data>/artifacts/inventory.yaml` | Optional local path override. Must identify an existing regular file, not a symlink. No OCI reference. |
-| `spec.recipe.artifacts.allowCatalogPins` | `[]` | Component names the user permits to retain catalog chart pins. Reject unknown names and duplicates; record the effective set in provenance. |
+| `spec.recipe.artifacts.inventory` | `<data>/artifacts/inventory.yaml` when present | Optional local path, including with only the embedded catalog. Must identify an existing regular file, not a symlink. No OCI reference. Without either source, checks stay inactive. |
+| `spec.recipe.artifacts.allowCatalogPins` | `[]` | Selected components the user permits to retain catalog pins for missing chart or image matches. Active bindings still apply. Reject unknown names and duplicates; record the effective set in provenance. |
 
-A user can retain `cert-manager` from the catalog while binding the selected
-`task-runner` chart. Other unselected components do not need exceptions.
-Selecting another uncovered Helm component makes resolution fail. An exception
-neither enables a component nor authorizes a producer or catalog author to
-waive coverage on the user's behalf.
+A user can retain `cert-manager` from the catalog while supplying both
+`task-runner-chart` and `task-runner-controller` for the selected `task-runner`.
+Supplying only its chart leaves that component partially covered and fails
+unless `task-runner` is also listed in `allowCatalogPins`; with that exception,
+the chart binding applies and the controller keeps its catalog image pin.
+Other unselected components do not need exceptions. Selecting another
+uncovered Helm component makes resolution fail. An exception neither enables
+a component nor authorizes a producer or catalog author to waive coverage on
+the user's behalf.
 
 ### Recipe provenance additions
 
@@ -301,15 +343,23 @@ provider pointer.
 | Field under `metadata.artifacts` | Contract |
 |---|---|
 | `inventoryDigest` | SHA-256 of the exact inventory bytes consumed. |
-| `bindingsDigest` | SHA-256 of the exact bindings bytes consumed. |
+| `bindingsDigest` | SHA-256 of the canonical merged bindings document, including inactive entries. |
 | `baseCatalogDigest` | Digest of the external base catalog file inventory plus the embedded catalog identity, before binding. |
 | `allowCatalogPins` | Sorted effective exception set from the user config. |
 | `verification` | `metadata-only` at composition time. |
 
+Compute `bindingsDigest` after external entries replace same-name embedded
+entries. Encode the merged document as compact UTF-8 JSON with recursively
+sorted object keys and no insignificant whitespace; preserve array order.
+Include every effective chart, image and ignored-artifact entry. Per-layer
+formatting or a shadowed entry does not change this digest. When neither layer
+has bindings, hash the canonical empty document with empty `charts`, `images`
+and `ignoredArtifacts` maps and the normal kind/version header.
+
 For `baseCatalogDigest`, enumerate external base files excluding the
-`artifacts/` directory, whose inputs have separate digests. Sort relative paths
-and encode each entry as `[path, size, sha256]`. Hash a documented canonical
-encoding of that list and the embedded catalog identity. The definition must
+`artifacts/` directory, whose effective inputs have separate digests. Sort
+relative paths and encode each entry as `[path, size, sha256]`. Hash a documented
+canonical encoding of that list and the embedded catalog identity. The definition must
 exclude mtimes and absolute paths and include every base file consumed.
 Record the AICR version/build identity alongside this record using recipe
 metadata conventions.
@@ -322,9 +372,10 @@ becoming an enforced chart pin. The exact representation of those records is
 part of the recipe-schema work.
 
 Recompute input digests on reload and compare the effective exception set.
-Changing input formatting changes the recorded digest even when it leaves pins
-unchanged. Bundle capture must preserve the consumed inputs, including an
-inventory read through the override, and propagate the recipe's provenance.
+Changing inventory formatting changes its digest even when pins are unchanged;
+bindings use the canonical merged representation above. Bundle capture must
+preserve the consumed inventory and merged bindings, including an inventory
+read through the override, and propagate the recipe's provenance.
 There is no generated lock file or resolved-catalog directory to reconcile.
 
 ## Alternatives considered
@@ -335,6 +386,8 @@ There is no generated lock file or resolved-catalog directory to reconcile.
 | Standalone `ArtifactComposition` configuration kind | Rejected. It duplicates `AICRConfig` and creates a second place for user choices and precedence rules. |
 | Coverage exceptions in catalog-author-owned bindings | Rejected. The user swapping pins owns the coverage decision. A catalog author or producer must not silently permit fallback on that user's behalf. `ignoredArtifacts` accounts for inventory entries and is not a coverage exemption. |
 | Require a full-catalog inventory | Rejected. The catalog is sliced across recipes; requiring artifacts for unselected components couples independent releases. Check selected Helm components after resolution. |
+| Exact bindings = inventory match | Rejected. It forces per-release bindings even when the catalog contract is unchanged. Superset bindings plus inventory-side accounting preserve typo safety. |
+| Binding removal in overlays | Rejected. There is no identified case that entry replacement does not cover. Unmatched bindings are already inactive. |
 | Producer-specific decoders inside AICR | Rejected. AICR would acquire producer dependencies and release-format compatibility obligations. Producers emit or translate to the neutral inventory outside AICR. |
 | Manifest-digest chart pins or `helm.defaultManifestDigest` | Rejected for this proposal. The enforced chart identity remains the archive digest expected by existing vendoring. A chart manifest digest is recorded only; it cannot substitute for `.tgz` identity. |
 | Full catalog replacement | Deferred as a separate feature. Dropping embedded data changes catalog composition and compatibility independently of artifact binding. This proposal preserves layered loading. |
@@ -342,16 +395,20 @@ There is no generated lock file or resolved-catalog directory to reconcile.
 ## Consequences
 
 Catalog policy and release artifacts can evolve separately, but bindings still
-need maintenance when chart values change. Strict accounting catches omissions
-and misspellings; it also requires a release's bindings and inventory to agree
-on scope. Coverage exceptions remain visible in user configuration and saved
-recipe provenance.
+need maintenance when chart values change. A catalog can publish bindings for
+its whole component set while a user supplies only the inventory needed by a
+recipe. Inventory-side accounting catches misspelled matches; selected-component
+coverage catches omitted chart or image entries. Coverage exceptions remain
+visible in user configuration and saved recipe provenance. A future optional
+helper could list the artifact names a recipe needs from the merged bindings;
+this proposal does not add that command.
 
-Older binaries can ignore `artifacts/` and silently use catalog pins. An
-artifact-bearing catalog therefore needs a minimum AICR version declaration,
-checked before composition. Adding a field alone cannot make an already-shipped
-binary enforce it. Release design must pair that declaration with a catalog
-schema/version that unsupported readers already reject, or an equivalent
+Older binaries can ignore `artifacts/` and silently use catalog pins. A
+catalog intended for use with an inventory therefore needs a minimum AICR
+version declaration, checked before composition. Adding a field alone cannot
+make an already-shipped binary enforce it. Release design must pair that
+declaration with a catalog schema/version that unsupported readers already
+reject, or an equivalent
 mandatory compatibility gate. The declaration's location, first supporting
 release and compatibility matrix remain implementation prerequisites. The
 same reject-unknown requirement applies to artifact-bearing saved recipes.
@@ -380,21 +437,24 @@ Mirror discovery must apply the identity guard. Its current render input has
 no archive digest, so a version-fetched render does not prove that the pinned
 archive was rendered. [Render input][render], [discovery][discovery].
 Render failures and missing late-created workload images prevent a completeness
-claim. A shared verified
-archive fetch/render path and runtime coverage evidence need separate work.
+claim. A shared verified archive fetch/render path and runtime coverage
+evidence need separate work.
 
 ## Adoption plan
 
 1. Settle the minimum-version declaration and recipe schema gate, including
    rejection by unsupported readers. Fix the Terraform/Fleet prerequisite.
 2. Add neutral strict parsers, in-memory provider composition and config
-   plumbing. Preserve behavior for catalogs without `artifacts/`.
+   plumbing. Preserve behavior whenever no inventory is supplied, including
+   catalogs that publish bindings.
 3. Add selected-recipe coverage, final-value guards, saved-recipe comparison
    and bundle provenance capture across CLI, SDK and server paths.
 4. Qualify full-reference and split repository/digest image forms with real
-   charts. Exercise missing targets, conflicts, partial inventories, explicit
-   exceptions, repeatability and changed inputs on reload. Verify mismatching
-   chart archives are rejected by every supported vendoring path.
+   charts. Exercise embedded-only bindings, external same-name replacements,
+   superset bindings, inactive stale targets, partial component coverage,
+   missing active targets, explicit exceptions and changed inputs on reload.
+   Check repeatability and unchanged behavior without an inventory. Verify
+   mismatching chart archives are rejected by every supported vendoring path.
 
 Before implementation, resolve how platform assertions are checked for mixed
 architectures, the exact per-artifact provenance representation, and the
