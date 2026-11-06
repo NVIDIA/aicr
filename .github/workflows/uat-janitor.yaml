@@ -132,7 +132,64 @@ jobs:
           GOOGLE_GHA_CREDS_PATH: ${{ steps.auth.outputs.credentials_file_path }}
         run: ./.github/scripts/uat-janitor.sh gcp
 
+  # The AWS legs come from the registry: one per distinct (.deployment.tenancy,
+  # .deployment.location) of the aws rows' cluster-configs, read through the
+  # same uat-broker uat-run.yaml uses. uat-aws.yaml takes the account and region
+  # from the cluster-config too, so a new row is covered with no second list to
+  # keep in sync. See .github/scripts/uat-registry-matrix.sh.
+  aws-targets:
+    if: >-
+      github.repository == 'nvidia/aicr' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' || inputs.cloud == 'all' || inputs.cloud == 'aws')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '${{ steps.versions.outputs.go }}'
+          cache: true
+          cache-dependency-path: |
+            go.sum
+      - name: Build uat-broker
+        run: go build -o ./bin/uat-broker ./tools/uat-broker
+      - name: Derive AWS targets
+        id: targets
+        run: |
+          set -euo pipefail
+          matrix="$(./.github/scripts/uat-registry-matrix.sh janitor-aws infra/uat/reservations.yaml)"
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
+          echo "AWS janitor legs: ${matrix}"
+
+  # One leg per AWS account/region the registry provisions into. fail-fast is
+  # off so a failing leg can never cancel a sibling mid-destroy.
+  #
+  # GB300 keeps its Terraform state bucket in us-east-1 while it provisions in
+  # us-east-2. That split needs no janitor code: reap() stages the committed
+  # config and changes only the deployment id, destroy flag and instance-type
+  # placeholder, so .deployment.stateLocation reaches the actuator exactly as in
+  # uat-aws.yaml's Destroy Cluster, and AWS_REGION comes from
+  # .deployment.location as it does there. The instance-type placeholder does
+  # need code: reap() fills it from GPU_INSTANCE_TYPE below.
+  #
+  # PREREQUISITE for a new tenancy: infra/uat-aws-account applied there (GitHub
+  # OIDC provider + github-actions-role-aicr whose trust permits this workflow's
+  # ref). Until then that leg's auth step fails and the dry-run surfaces the gap.
   aws:
+    name: aws (${{ matrix.tenancy }} ${{ matrix.location }})
+    needs: aws-targets
     if: >-
       github.repository == 'nvidia/aicr' &&
       github.ref == 'refs/heads/main' &&
@@ -143,9 +200,15 @@ jobs:
       contents: read
       id-token: write
       actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.aws-targets.outputs.matrix) }}
     env:
-      AWS_REGION: "us-east-1"
-      JANITOR_CONFIG: "tests/uat/aws/cluster-config.yaml"
+      AWS_ACCOUNT_ID: ${{ matrix.tenancy }}
+      AWS_REGION: ${{ matrix.location }}
+      GITHUB_ACTIONS_ROLE_NAME: "github-actions-role-aicr"
+      JANITOR_CONFIG: ${{ matrix.config }}
       JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/eks:v0.5.3@sha256:ff1a04bedf1aa4b30e316404a69a60068b269c6bba3a9d09231f68a69b7898b6"
     steps:
       - name: Checkout
@@ -155,50 +218,13 @@ jobs:
       - name: Authenticate to AWS
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: "arn:aws:iam::615299774277:role/github-actions-role-aicr"
+          role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-UAT-Janitor
       - name: Reconcile AWS orphans
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./.github/scripts/uat-janitor.sh aws
-
-  # GB200 lives in a SEPARATE AWS account — the cross-account Capacity Block in
-  # tenancy 897722687756 (tests/uat/aws/cluster-config-gb200.yaml), not the
-  # standard 615299774277 the `aws` job above covers — so it needs its own role
-  # assumption + config, or aws-gb200 orphans are never discovered or reaped.
-  # PREREQUISITE: infra/uat-aws-account applied in 897722687756 (GitHub OIDC
-  # provider + github-actions-role-aicr whose trust permits this workflow's ref).
-  # Until then the auth step fails harmlessly and the first dry-run surfaces the gap.
-  aws-gb200:
-    if: >-
-      github.repository == 'nvidia/aicr' &&
-      github.ref == 'refs/heads/main' &&
-      (github.event_name == 'schedule' || inputs.cloud == 'all' || inputs.cloud == 'aws')
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    permissions:
-      contents: read
-      id-token: write
-      actions: read
-    env:
-      AWS_REGION: "us-east-1"
-      JANITOR_CONFIG: "tests/uat/aws/cluster-config-gb200.yaml"
-      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/eks:v0.5.3@sha256:ff1a04bedf1aa4b30e316404a69a60068b269c6bba3a9d09231f68a69b7898b6"
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Authenticate to AWS (GB200 account)
-        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
-        with:
-          role-to-assume: "arn:aws:iam::897722687756:role/github-actions-role-aicr"
-          aws-region: ${{ env.AWS_REGION }}
-          role-session-name: GitHubActions-UAT-Janitor
-      - name: Reconcile GB200 orphans
-        env:
-          GH_TOKEN: ${{ github.token }}
+          GPU_INSTANCE_TYPE: ${{ secrets.AWS_GB300_INSTANCE_TYPE }}
         run: ./.github/scripts/uat-janitor.sh aws
 
   azure:

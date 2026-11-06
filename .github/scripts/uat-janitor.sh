@@ -372,6 +372,25 @@ reap() {
     return 1
   fi
 
+  # The GB300 config's worker instanceType is a placeholder (the type is
+  # unpublished), replaced from the AWS_GB300_INSTANCE_TYPE secret exactly as
+  # uat-aws.yaml's "Resolve GPU instance type" step does. It must be replaced
+  # here too: the EKS actuator runs `terraform refresh` before every destroy,
+  # and refresh looks up data.aws_ec2_instance_type for each worker's
+  # instanceType, so a destroy staged with the placeholder fails. Part of
+  # staging, so a dry run fails the same way. Never print the value or $cfg.
+  local placeholder=gb300-instance-type-from-secret
+  if [ "$CLOUD" = aws ] && grep -qF "$placeholder" "$cfg"; then
+    if [ -z "${GPU_INSTANCE_TYPE:-}" ] ||
+       ! PLACEHOLDER="$placeholder" GPU_INSTANCE_TYPE="$GPU_INSTANCE_TYPE" yq -i \
+         '(.. | select(tag == "!!map" and .instanceType == strenv(PLACEHOLDER)) | .instanceType) = strenv(GPU_INSTANCE_TYPE)' "$cfg" ||
+       grep -qF "$placeholder" "$cfg"; then
+      echo "::error::janitor cannot stage ${id}: ${JANITOR_CONFIG} has the ${placeholder} placeholder; GPU_INSTANCE_TYPE (the AWS_GB300_INSTANCE_TYPE secret) must be set, and every placeholder must be an instanceType (destroy NOT attempted)"
+      rm -f "$cfg"
+      return 1
+    fi
+  fi
+
   if [ "$DRY_RUN" = "true" ]; then
     log "DRY-RUN would reap: ${id}"
     rm -f "$cfg"; return 0
