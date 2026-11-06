@@ -18,14 +18,20 @@
 # VR200 node facts from vr200-rke2.
 #
 # SCOPE: training inside a single NVLink domain. The collective data path is
-# MNNVL, measured at 996 GB/s across two trays. The NIC east-west path is NOT
-# qualified here: every mlx5 port on these nodes reports link_layer Ethernet
-# with RoCE v2 GIDs -- there is no InfiniBand link layer -- and no RDMA
-# transport number has been measured on it. The node image installs DOCA OVS
-# and the DOCA-repo ibverbs userspace, but the kernel driver is the distro's
-# inbox mlx5_core, not DOCA-OFED, so feature parity with DOCA-OFED is not
-# claimed. Multi-domain training over the NIC fabric needs that path wired
-# and measured first.
+# MNNVL, measured at 996 GB/s across two trays.
+#
+# The leaf does ship an east-west stack: eight ConnectX-9 RoCE rails, deployed
+# and attachable -- on the reference cluster the VFs were advertised, addressed
+# by nv-ipam and attached as net1..net8 on both workers. But the NIC east-west
+# path is NOT qualified, because no packet has crossed between nodes: the
+# BlueField DPU bridges only the port carrying the node address, and bridging
+# the spare ports is DPU-side work outside the tenant cluster. Every mlx5 port
+# reports link_layer Ethernet with RoCE v2 GIDs -- there is no InfiniBand link
+# layer -- and no RDMA transport number has been measured on it. The node image
+# installs DOCA OVS and the DOCA-repo ibverbs userspace, but the kernel driver
+# is the distro's inbox mlx5_core, not DOCA-OFED, so feature parity with
+# DOCA-OFED is not claimed. Multi-domain training over the NIC fabric needs
+# that path bridged and measured first.
 #
 # It diverges from vr200-rke2 on the driver. That leaf sets driver.enabled
 # false because the VR NVL72 reference image pre-bakes a 615-branch driver;
@@ -108,8 +114,9 @@ spec:
         devicePlugin:
           enabled: true
           # Helm replaces lists: the first two entries restate the component
-          # base. MOFED_ENABLED off because no RDMA path is wired on this leaf --
-          # no rail VFs exist for a pod to request.
+          # base. MOFED_ENABLED off because it would mount /dev/infiniband
+          # into every GPU pod. The rails below do exist, but only a pod that
+          # requests a rail VF should receive the RDMA devices.
           env:
             - name: DP_DISABLE_HEALTHCHECKS
               value: "109"
@@ -145,10 +152,12 @@ spec:
             limits:
               memory: 512Mi
 
-    # Carries a NicClusterPolicy with nothing but nicConfigurationOperator, to
-    # stand up the nic-configuration-daemon that `aicr snapshot
-    # --discover-network` needs. No ofedDriver: NVKE runs the host's inbox
-    # mlx5_core, and DOCA-OFED must not be installed on these nodes.
+    # Carries a NicClusterPolicy with nicConfigurationOperator, nvIpam and
+    # secondaryNetwork. The first stands up the nic-configuration-daemon that
+    # `aicr snapshot --discover-network` needs; the other two supply the
+    # addressing and the multus attachment the RoCE rails below depend on. No
+    # ofedDriver: NVKE runs the host's inbox mlx5_core, and DOCA-OFED must not
+    # be installed on these nodes.
     #
     # Pinned to chart 26.7.1 rather than the registry default of 26.7.0. The
     # daemon in 26.7.0 has no firmware-discovery fallback, so a flint failure
@@ -157,17 +166,16 @@ spec:
     # "flint failed, falling back to sysfs" and discovers every port. The
     # manifest pins the matching daemon image and says why.
     #
-    # No rails yet -- gb200-nvke's policy and its sriov-ib-networks pair
-    # hardcode four ConnectX-7 IB rails per tray, and that shape does not fit
-    # here. VR200 is ConnectX-9, but measured on both workers all twelve mlx5
+    # The rails below are RoCE, not IB. gb200-nvke's policy and its
+    # sriov-ib-networks pair hardcode four ConnectX-7 IB rails per tray, and
+    # that shape does not fit here: measured on both workers, all twelve mlx5
     # ports report link_layer Ethernet with RoCE v2 GIDs and not one reports
     # InfiniBand, so linkType IB and SriovIBNetwork do not apply. The two NIC
-    # families differ in VF ceiling: the eight ConnectX-9 ports (dev 0x1025,
-    # 200 Gb/s) report sriov_totalvfs 1, while the four 400 Gb/s ports (dev
-    # 0xa2df) report 46. numvfs is 0 on all of them, and one 0xa2df port is
-    # enslaved to the DOCA OVS bridge carrying the node address and the default
-    # route, so it cannot be carved. Wire a RoCE SriovNetwork from a confirmed
-    # fabric design, not from this inventory alone.
+    # families also differ in VF ceiling: the eight ConnectX-9 ports (dev
+    # 0x1025, 200 Gb/s) report sriov_totalvfs 1, while the four 400 Gb/s ports
+    # (dev 0xa2df) report 46. The rails take the eight ConnectX-9 ports -- one
+    # 0xa2df port is enslaved to the DOCA OVS bridge carrying the node address
+    # and the default route, so it cannot be carved.
     - name: network-operator
       type: Helm
       version: "26.7.1"
@@ -178,13 +186,10 @@ spec:
         - nfd
         - cert-manager
       overrides:
-        # No SriovNetworkNodePolicy and no SriovNetwork here, so the SR-IOV
-        # operator would run on every node with nothing to act on. It stays off
-        # until east-west lands. The maintenance operator does have work --
-        # nicConfigurationOperator prepares each node through it before
-        # applying NIC configuration -- so it is enabled.
-        # On now: the RoCE rails in sriov-ib-networks are SriovNetworkNodePolicy
-        # and SriovNetwork objects, which only the SR-IOV operator reconciles.
+        # The RoCE rails in sriov-ib-networks are SriovNetworkNodePolicy and
+        # SriovNetwork objects, which only the SR-IOV operator reconciles. The
+        # maintenance operator has work of its own -- nicConfigurationOperator
+        # prepares each node through it before applying NIC configuration.
         sriovNetworkOperator:
           enabled: true
         maintenanceOperator:
@@ -234,8 +239,11 @@ spec:
       # 400 GbE, a 50 GB/s ceiling, so anything that fell off NVLink could not
       # reach this floor.
       #
-      # No -net check: that variant was not measured on this platform, and
-      # asserting a threshold for it would be inventing one.
+      # The -net check is declared, and its floor is a placeholder: nothing
+      # has measured RoCE traffic on this platform. A tenant whose DPU does
+      # not bridge the spare ConnectX-9 ports has no path for the check to
+      # use, and should withhold it for that run with
+      # `--skip-check nccl-all-reduce-bw-net` rather than dropping it here.
       #
       # No nccl-benchmark-profile constraint is needed -- this pairing is in
       # the compiled matrix (supportedNCCLCombinations[variantNVLS][nvke]) with

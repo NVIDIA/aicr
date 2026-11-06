@@ -52,9 +52,9 @@ one domain, and it is two trays of an NVL72, not a full-rack figure.
 developed against every `mlx5` port reports `link_layer` Ethernet with RoCE v2
 GIDs and none reports InfiniBand, so the SR-IOV InfiniBand stack that
 `gb200-nvke-ubuntu-training` ships does not apply. No RDMA transport number has
-been measured on the Ethernet path. The recipe therefore declares no
-`SriovNetworkNodePolicy` and no `SriovNetwork`, and turns the SR-IOV operator
-off rather than running it with nothing to act on.
+been measured on the Ethernet path. What the recipe declares instead is RoCE:
+a `SriovNetworkNodePolicy` and a `SriovNetwork` per rail with the SR-IOV
+operator on, deployed and attachable but carrying no traffic — see below.
 
 **Host NIC stack.** The node image installs DOCA OVS and the DOCA-repo `ibverbs`
 userspace, but the kernel driver is the distribution's inbox `mlx5_core`, not
@@ -136,6 +136,33 @@ PSID `mt_0000001658`, and its `pci`/`netdev`/`rdma` mapping.
 
 **Not verified end to end.** The compiled-validator path for this coordinate
 is exercised by CI on merge, not on hardware here.
+
+## Withholding the network check
+
+`nccl-all-reduce-bw-net` runs on this leaf: `vr200/nvke` is in the compiled
+`supportedNCCLCombinations[variantNET]` matrix and the recipe declares the
+check. On a tenant where the DPU bridges only the port carrying the node
+address, the rails have no path between workers, so the check fails the
+performance phase. Withhold it on those tenants:
+
+```bash
+aicr validate --recipe ./bundles/recipe.yaml --phase performance \
+  --skip-check nccl-all-reduce-bw-net
+```
+
+Keep it withheld until the DPU bridges the spare ConnectX-9 ports.
+
+Use the flag rather than dropping the constraint from the recipe. The flag
+records a limitation of one run; editing the recipe changes the check for
+everyone who consumes this leaf.
+
+One consequence: `--skip-check` cannot be combined with `--evidence-dir`, and
+so not with `--cncf-submission`, because a run that withholds a check the
+recipe declares is narrower than the recipe and cannot evidence it. A run that
+withholds this check therefore produces no conformance evidence for this
+recipe. The ordinary CTRF report still records the check as skipped, and so
+does a signed recipe attestation (`--emit-attestation`), which carries the
+`named-in-skip-checks` reason code through bundle redaction.
 
 ## Known gaps
 
