@@ -366,8 +366,10 @@ jobs:
           # (#2610), nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor
           # (#2611), remediation, nvsentinel-slinky-drainer (#2615),
           # nvsentinel-health-events-analyzer (#2618), nvsentinel-event-exporter
-          # (#2621), nvsentinel-log-collector (#2619) and
-          # nvsentinel-node-validation (#3088) mixins, and no other job
+          # (#2621), nvsentinel-log-collector (#2619),
+          # nvsentinel-node-validation (#3088), and
+          # nvsentinel-csp-health-monitor-aws and -gcp (#2620) mixins, and no
+          # other job
           # scans a mixin-gated image, so nothing else would surface a CVE in
           # them.
           # Because they are not built by this workflow they carry their
@@ -397,6 +399,8 @@ jobs:
           # patched, so expect findings here.
           - docker.io/bitnamilegacy/nginx
           - quay.io/martinhelmich/prometheus-nginxlog-exporter
+          - ghcr.io/nvidia/nvsentinel/csp-health-monitor
+          - ghcr.io/nvidia/nvsentinel/maintenance-notifier
           # Percona, from the remediation mixins' separately bundled datastore
           # (psmdb-operator, nvsentinel-mongodb). Pinned by AICR, by digest.
           - docker.io/percona/percona-server-mongodb-operator
@@ -437,8 +441,10 @@ jobs:
           # TestRemediationImagesPinnedEverywhere,
           # TestSlinkyDrainerImagePinnedEverywhere,
           # TestHealthEventsAnalyzerImagePinnedEverywhere,
-          # TestEventExporterImagePinnedEverywhere and
-          # TestLogCollectorImagesPinnedEverywhere fail if these drift apart.
+          # TestEventExporterImagePinnedEverywhere,
+          # TestLogCollectorImagesPinnedEverywhere and
+          # TestCSPHealthMonitorImagesPinnedEverywhere fail if these drift
+          # apart.
           - image: ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
             tag: v1.28.0
           - image: ghcr.io/nvidia/nvsentinel/preflight
@@ -488,6 +494,10 @@ jobs:
             tag: 1.27.2-debian-12-r2
           - image: quay.io/martinhelmich/prometheus-nginxlog-exporter
             tag: v1.10.0
+          - image: ghcr.io/nvidia/nvsentinel/csp-health-monitor
+            tag: v1.28.0
+          - image: ghcr.io/nvidia/nvsentinel/maintenance-notifier
+            tag: v1.28.0
           # AICR's own pins in recipes/components/{psmdb-operator,nvsentinel-mongodb};
           # TestRemediationImagesPinnedEverywhere fails if these drift apart.
           - image: docker.io/percona/percona-server-mongodb-operator
