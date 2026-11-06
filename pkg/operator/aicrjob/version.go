@@ -65,6 +65,12 @@ func CheckSupportedVersion(version string, allowPrerelease bool) error {
 	if err := checkVersion(version); err != nil {
 		return err
 	}
+	return CheckPrereleaseAllowed(version, allowPrerelease)
+}
+
+// CheckPrereleaseAllowed rejects a prerelease version unless allowPrerelease is
+// true. A version that is not semantic passes.
+func CheckPrereleaseAllowed(version string, allowPrerelease bool) error {
 	if semver.Prerelease(version) != "" && !allowPrerelease {
 		return versionError(fmt.Sprintf(
 			"AICR version %s is a prerelease; the operator runs one only with aicr.allowPrerelease", version))
@@ -87,9 +93,8 @@ func checkVersion(version string) error {
 // CheckArtifactVersion is the version gate: the version an AICR artifact
 // reports must equal the declared aicr.version exactly, and an artifact
 // without a version is rejected. A mismatch writes nothing to the engine and
-// stalls with AICRVersionMismatch. It accepts a prerelease: the resolver
-// enforces the opt-in with CheckSupportedVersion before it resolves, so no
-// rollout starts on a prerelease without it.
+// stalls with AICRVersionMismatch. It accepts a prerelease without checking
+// the opt-in.
 func CheckArtifactVersion(declared, reported string) error {
 	if err := checkVersion(declared); err != nil {
 		return err

@@ -73,44 +73,43 @@ func TestFlagsOverrideDefaults(t *testing.T) {
 	}
 }
 
-// TestValidate checks that Validate rejects each invalid configuration,
-// accepts development settings only in a development build, and passes an
-// out-of-range AICR version so the resolver can report it as a stalled runtime.
+// TestValidate checks which configurations Validate accepts. An out-of-range
+// AICR version passes, so the resolver can report it as a stalled runtime.
 func TestValidate(t *testing.T) {
 	t.Parallel()
-	tests := map[string]func(*Config){
-		"bypass without development": func(c *Config) { c.BypassApprovals = true },
-		"skip without development":   func(c *Config) { c.SkipDiscovery = true },
-		"no snapshot account":        func(c *Config) { c.SnapshotServiceAccount = "" },
-		"unpinned image":             func(c *Config) { c.AICRImage = "ghcr.io/nvidia/aicr:v1.0.0" },
-		"no AICR version":            func(c *Config) { c.AICRVersion = "" },
-		"Flux":                       func(c *Config) { c.Engine = plan.EngineFlux },
-		"no jobs namespace":          func(c *Config) { c.JobsNamespace = "" },
-		"no project":                 func(c *Config) { c.EngineProject = "" },
-		"registry without path":      func(c *Config) { c.RegistryRepository = "oci://registry.example.com" },
-		"unknown provider":           func(c *Config) { c.RegistryAuthProvider = "gcp" },
-		"aws without ECR":            func(c *Config) { c.RegistryAuthProvider = "aws" },
-		"aws with a static Secret": func(c *Config) {
+	tests := map[string]struct {
+		wantErr     bool
+		development bool
+		mutate      func(*Config)
+	}{
+		"prerelease without opt-in":  {wantErr: true, mutate: func(c *Config) { c.AICRVersion = "v1.3.0-rc.1" }},
+		"prerelease with opt-in":     {wantErr: false, mutate: func(c *Config) { c.AICRVersion, c.AllowPrereleaseAICR = "v1.3.0-rc.1", true }},
+		"out-of-range version":       {wantErr: false, mutate: func(c *Config) { c.AICRVersion = "v2.0.0" }},
+		"bypass without development": {wantErr: true, mutate: func(c *Config) { c.BypassApprovals = true }},
+		"skip without development":   {wantErr: true, mutate: func(c *Config) { c.SkipDiscovery = true }},
+		"development settings in a development build": {wantErr: false, development: true,
+			mutate: func(c *Config) { c.BypassApprovals, c.SkipDiscovery = true, true }},
+		"no snapshot account":   {wantErr: true, mutate: func(c *Config) { c.SnapshotServiceAccount = "" }},
+		"unpinned image":        {wantErr: true, mutate: func(c *Config) { c.AICRImage = "ghcr.io/nvidia/aicr:v1.0.0" }},
+		"no AICR version":       {wantErr: true, mutate: func(c *Config) { c.AICRVersion = "" }},
+		"Flux":                  {wantErr: true, mutate: func(c *Config) { c.Engine = plan.EngineFlux }},
+		"no jobs namespace":     {wantErr: true, mutate: func(c *Config) { c.JobsNamespace = "" }},
+		"no project":            {wantErr: true, mutate: func(c *Config) { c.EngineProject = "" }},
+		"registry without path": {wantErr: true, mutate: func(c *Config) { c.RegistryRepository = "oci://registry.example.com" }},
+		"unknown provider":      {wantErr: true, mutate: func(c *Config) { c.RegistryAuthProvider = "gcp" }},
+		"aws without ECR":       {wantErr: true, mutate: func(c *Config) { c.RegistryAuthProvider = "aws" }},
+		"aws with a static Secret": {wantErr: true, mutate: func(c *Config) {
 			c.RegistryAuthProvider, c.RegistryCredentialsSecret = "aws", "registry-auth"
 			c.RegistryRepository = "oci://123456789012.dkr.ecr.us-west-2.amazonaws.com/aicr/cluster"
-		},
+		}},
 	}
-	for name, mutate := range tests {
+	for name, tt := range tests {
 		c := valid()
-		mutate(&c)
-		if err := c.Validate(false); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
-			t.Errorf("%s: Validate() = %v, want INVALID_REQUEST", name, err)
+		tt.mutate(&c)
+		err := c.Validate(tt.development)
+		if (err != nil) != tt.wantErr || (err != nil && operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest) {
+			t.Errorf("%s: Validate() = %v, wantErr %t", name, err, tt.wantErr)
 		}
-	}
-	c := valid()
-	c.AICRVersion = "v2.0.0"
-	if err := c.Validate(false); err != nil {
-		t.Errorf("out-of-range version refused at startup: %v", err)
-	}
-	c = valid()
-	c.BypassApprovals, c.SkipDiscovery = true, true
-	if err := c.Validate(true); err != nil {
-		t.Errorf("development build refused development settings: %v", err)
 	}
 }
 

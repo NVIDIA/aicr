@@ -316,38 +316,55 @@ func TestResolverReplacesLostAndStaleRuns(t *testing.T) {
 	}
 }
 
-// Out-of-range and mismatched AICR versions stall resolution with
-// AICRVersionMismatch before any plan exists.
+// A rejected AICR version stalls resolution with AICRVersionMismatch before
+// any plan or render Job exists.
 func TestResolverVersionGate(t *testing.T) {
 	ctx := testContext(t)
-	freshRuntime(t, ctx, nil)
-	r, _ := newResolver(t)
-	r.Config.AICRVersion = "v2.0.0"
-	if err := reconcileResolver(t, ctx, r); err != nil {
-		t.Fatal(err)
+	tests := map[string]struct {
+		wantReason      string
+		wantRender      bool
+		version         string
+		allowPrerelease bool
+		// reported is the version the recipe run reports. Empty means no
+		// recipe run may start.
+		reported string
+	}{
+		"out-of-range version":             {wantReason: aicrjob.ReasonVersionMismatch, wantRender: false, version: "v2.0.0", allowPrerelease: false, reported: ""},
+		"artifact reports another version": {wantReason: aicrjob.ReasonVersionMismatch, wantRender: false, version: "v1.0.1", allowPrerelease: false, reported: "1.0.0"},
+		"prerelease without opt-in":        {wantReason: aicrjob.ReasonVersionMismatch, wantRender: false, version: "v1.0.1-rc.1", allowPrerelease: false, reported: ""},
+		"prerelease with opt-in":           {wantReason: ReasonResolving, wantRender: true, version: "v1.0.1-rc.1", allowPrerelease: true, reported: "1.0.1-rc.1"},
 	}
-	if c := cond(getRuntime(t, ctx), v1alpha1.ConditionResolved); c.Reason != aicrjob.ReasonVersionMismatch || c.Status != metav1.ConditionFalse {
-		t.Fatalf("out of range: Resolved = %+v", c)
-	}
-	if len(liveJobs(t, ctx, "recipe")) != 0 {
-		t.Fatal("an out-of-range version started a Job")
-	}
-
-	r.Config.AICRVersion = "v1.0.1"
-	if err := reconcileResolver(t, ctx, r); err != nil {
-		t.Fatal(err)
-	}
-	job := liveJobs(t, ctx, "recipe")[0]
-	succeed(t, ctx, &job, lanRecipe(t))
-	if err := reconcileResolver(t, ctx, r); err != nil {
-		t.Fatal(err)
-	}
-	rt := getRuntime(t, ctx)
-	if c := cond(rt, v1alpha1.ConditionResolved); c.Reason != aicrjob.ReasonVersionMismatch || rt.Status.CandidatePlanDigest != "" {
-		t.Fatalf("mismatch: Resolved = %+v, candidate %q", c, rt.Status.CandidatePlanDigest)
-	}
-	if len(liveJobs(t, ctx, "render")) != 0 {
-		t.Fatal("a mismatched artifact reached the render stage")
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			freshRuntime(t, ctx, nil)
+			r, _ := newResolver(t)
+			r.Config.AICRVersion, r.Config.AllowPrereleaseAICR = tt.version, tt.allowPrerelease
+			if err := reconcileResolver(t, ctx, r); err != nil {
+				t.Fatal(err)
+			}
+			jobs := liveJobs(t, ctx, "recipe")
+			if tt.reported == "" {
+				if len(jobs) != 0 {
+					t.Fatalf("%d recipe Jobs started, want none", len(jobs))
+				}
+			} else {
+				if len(jobs) != 1 {
+					t.Fatalf("%d recipe Jobs started, want 1", len(jobs))
+				}
+				recipe := strings.Replace(string(lanRecipe(t)), `"version": "1.0.0"`, `"version": "`+tt.reported+`"`, 1)
+				succeed(t, ctx, &jobs[0], []byte(recipe))
+				if err := reconcileResolver(t, ctx, r); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rt := getRuntime(t, ctx)
+			if c := cond(rt, v1alpha1.ConditionResolved); c.Status != metav1.ConditionFalse || c.Reason != tt.wantReason || rt.Status.CandidatePlanDigest != "" {
+				t.Fatalf("Resolved = %+v, candidate %q; want False/%s and no plan", c, rt.Status.CandidatePlanDigest, tt.wantReason)
+			}
+			if got := len(liveJobs(t, ctx, "render")) > 0; got != tt.wantRender {
+				t.Fatalf("render Job started = %t, want %t", got, tt.wantRender)
+			}
+		})
 	}
 }
 

@@ -207,8 +207,11 @@ expiry this turns into `RegistryCredentialsStale`.
 
 | Reason | Cause | Fix |
 | --- | --- | --- |
-| `AICRVersionMismatch` | `aicr.version` is outside `>=1.0.0, <2.0.0`, or a prerelease without `aicr.allowPrerelease`, or the AICR image reports a different version than `aicr.version` | Set `aicr.version` and `aicr.image` to the same release in one `helm upgrade`. To run a prerelease, also set `aicr.allowPrerelease: true` |
+| `AICRVersionMismatch` | `aicr.version` is outside `>=1.0.0, <2.0.0`, or the AICR image reports a different version than `aicr.version` | Set `aicr.version` and `aicr.image` to the same release in one `helm upgrade`. To run a prerelease, also set `aicr.allowPrerelease: true` |
 | `AICRArtifactUnsupported` | AICR produced output the operator cannot parse: an unknown `apiVersion` or a missing required field | Use a supported AICR release ([support policy](support.md)); report it if it is one |
+
+Without `aicr.allowPrerelease: true`, the chart refuses a prerelease
+`aicr.version` and the operator exits at startup. Neither sets a condition.
 
 ## Argo CD not available
 
