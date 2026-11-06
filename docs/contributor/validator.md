@@ -85,8 +85,10 @@ in the index (`TestRenderSkippedReasonReachesIndex`); a skipped check gets no
 page section (`TestRenderSkippedExcluded`). A requirement passes only when
 every check on one of its proof paths is present and `passed`
 (`alternativeProofs` lists the requirements with more than one path), a failed
-check fails it, and `other`, `pending` or absent checks leave it not tested.
-`Aggregate.Passed` is scoped by level: every applicable MUST passed, SHOULDs
+check fails it, `other`, `pending` or absent checks leave it not tested, and a
+check that `passed` with the `observationOnly` marker leaves it observed,
+which does not establish a MUST (`StatusObserved`). `Aggregate.Passed` is
+scoped by level: every applicable MUST passed, SHOULDs
 excluded; `NOT APPLICABLE` comes only from
 `spec.validate.evidence.cncf.notApplicable` and only for the conditional
 MUSTs in `conditionalMusts` (`ValidateNotApplicable`). The requirement set it

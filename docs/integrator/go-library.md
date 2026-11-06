@@ -558,10 +558,12 @@ fifth composes the whole submission run, matching
   checklist whatever the cluster runs. The aggregate is fail-closed and
   scoped by level (see [Requirement status](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#requirement-status)):
   `Requirements` holds every requirement in checklist order with its
-  `Status` (`passed`, `failed`, `not tested`, `not applicable`), `Reason`,
-  the `Proof` checks that established a pass, and the result of every
-  expected `Checks` entry; `Passed()` reports whether every
-  applicable MUST passed and `IncompleteMusts()` lists those that did not. A
+  `Status` (`passed`, `observed`, `failed`, `not tested`, `not applicable`),
+  `Reason`, the `Proof` checks that established a pass, and the result of
+  every expected `Checks` entry; `observed` is a pass marked observation-only
+  by the check (`extra.observationOnly`) and does not establish a MUST.
+  `Passed()` reports whether every applicable MUST passed and
+  `IncompleteMusts()` lists those that did not. A
   SHOULD never fails `Passed()`. A report with no submission-required result
   writes nothing, and the aggregate reports every requirement not tested
   except those `NotApplicable` declares, which stay not applicable.
