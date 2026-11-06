@@ -46,3 +46,4 @@ spec:
     conformance:
       checks:
         - secure-accelerator-access
+        - driver-runtime-management

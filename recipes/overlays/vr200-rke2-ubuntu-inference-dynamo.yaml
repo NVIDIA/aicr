@@ -108,3 +108,4 @@ spec:
         - gang-scheduling
         - robust-controller
         - secure-accelerator-access
+        - driver-runtime-management

@@ -152,6 +152,7 @@ const (
 //
 //	dra-support:               3m30s work + 30s cleanup + 60s margin =  5m catalog timeout
 //	secure-accelerator-access: 8m30s work + 30s cleanup + 60s margin = 10m catalog timeout
+//	driver-runtime-management: 8m30s work + 30s cleanup + 60s margin = 10m catalog timeout
 //	pod-autoscaling:          13m30s work + 30s cleanup + 60s margin = 15m catalog timeout
 //	ai-service-metrics:        8m30s work + 30s cleanup + 60s margin = 10m catalog timeout
 //	robust-controller:         6m30s work + 30s cleanup + 60s margin =  8m catalog timeout
@@ -202,6 +203,7 @@ const (
 	// deadline (standalone/library use — LoadContext always sets one).
 	draSupportWorkBudget       = 3*time.Minute + 30*time.Second
 	secureAccessWorkBudget     = 8*time.Minute + 30*time.Second
+	driverRuntimeWorkBudget    = 8*time.Minute + 30*time.Second
 	podAutoscalingWorkBudget   = 13*time.Minute + 30*time.Second
 	aiServiceMetricsWorkBudget = 8*time.Minute + 30*time.Second
 	robustControllerWorkBudget = 6*time.Minute + 30*time.Second

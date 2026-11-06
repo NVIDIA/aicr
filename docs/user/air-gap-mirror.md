@@ -335,7 +335,10 @@ source path (`${REGISTRY}/nvidia/aicr-validators/...`), set the variable to
 `${REGISTRY}/nvidia` instead. Add `--image-pull-secret` when the registry needs
 credentials. Some benchmark checks pin workload images the variable does not
 rewrite, such as the NCCL runtime image (override it with
-`AICR_NCCL_RUNTIME_IMAGE`); see [Validation](validation.md).
+`AICR_NCCL_RUNTIME_IMAGE`) and the vanilla `docker.io/library/ubuntu:22.04`
+probe image of the `driver-runtime-management` conformance check (override it
+with `AICR_DRIVER_RUNTIME_IMAGE=<full reference of your copy>`); see
+[Validation](validation.md).
 
 The inference performance check also runs the Dynamo runtime images
 `nvcr.io/nvidia/ai-dynamo/vllm-runtime` and

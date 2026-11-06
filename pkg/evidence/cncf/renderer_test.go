@@ -231,6 +231,8 @@ func TestGetRequirement(t *testing.T) {
 		{"ai-service-metrics", Version136, false, "ai-service-metrics.md", LevelMust, false},
 		{"secure-accelerator-access", Version137, false, "secure-accelerator-access.md", LevelMust, false},
 		{"slinky-slurm-gpu-access", Version137, false, "secure-accelerator-access.md", LevelMust, false},
+		{"driver-runtime-management", Version137, false, "driver-runtime-management.md", LevelShould, false}, // MUST only from v1.38 (KAR-0001)
+		{"driver-runtime-management", Version135, false, "driver-runtime-management.md", LevelShould, false},
 		{"gpu-operator-health", Version137, true, "", "", false}, // diagnostic
 		{"platform-health", Version137, true, "", "", false},     // diagnostic
 		{"nonexistent", Version137, true, "", "", false},
@@ -446,7 +448,9 @@ func TestRenderIndexListsUntestedRequirements(t *testing.T) {
 		absent   []string
 	}{
 		{Version136, []string{
-			"| `driver_runtime_management` | SHOULD | | NOT TESTED (no AICR check) | |",
+			// driver_runtime_management has a check from #3615; nothing ran it
+			// in this report, so it is not run rather than uncovered.
+			"| `driver_runtime_management` | SHOULD | | NOT TESTED (not run) | |",
 			"| `gpu_sharing` | SHOULD | | NOT TESTED (no AICR check) | |",
 			"| `virtualized_accelerator` | SHOULD | | NOT TESTED (no AICR check) | |",
 			"| `advanced_inference_ingress` | SHOULD | | NOT TESTED (no AICR check) | |",

@@ -87,6 +87,20 @@ const (
 	// NVIDIA/aicr#1751).
 	ncclRuntimeImageEnv = "AICR_NCCL_RUNTIME_IMAGE"
 
+	// DriverRuntimeManagementCheckName is the catalog name of the conformance
+	// check that proves the accelerator driver and container runtime
+	// configuration from a vanilla-image pod; driverRuntimeImageEnv forwarding
+	// is scoped to it.
+	DriverRuntimeManagementCheckName = "driver-runtime-management"
+
+	// driverRuntimeImageEnv replaces the vanilla probe image
+	// (docker.io/library/ubuntu:22.04) of driver-runtime-management with a
+	// full reference, for registries that mirror it under another path than
+	// AICR_VALIDATOR_IMAGE_REGISTRY rewrites to. Forwarded verbatim to that
+	// check's pod only; the pod-side const of the same literal lives in
+	// validators/conformance/driver_runtime_management_check.go.
+	driverRuntimeImageEnv = "AICR_DRIVER_RUNTIME_IMAGE"
+
 	// inferencePerfNoCleanupEnv, when truthy, makes the inference-perf validator
 	// leave its namespace/DGD/workers/frontend/AIPerf Job in place after the run
 	// for post-mortem inspection. Forwarded only to the inference-perf pod.
@@ -203,6 +217,12 @@ func buildEnv(
 		env = append(env, corev1.EnvVar{Name: ncclRuntimeImageEnv, Value: ncclRuntimeImageEnvVal})
 	}
 
+	// Forward the driver-runtime-management probe image override to that check
+	// only; the pod resolves the default and the registry override itself.
+	if v := os.Getenv(driverRuntimeImageEnv); v != "" && entry.Name == DriverRuntimeManagementCheckName {
+		env = append(env, corev1.EnvVar{Name: driverRuntimeImageEnv, Value: v})
+	}
+
 	// Forward the inference-perf no-cleanup debug toggle into that validator pod.
 	// Cleanup runs inside the Job, so it can't see the CLI process environment
 	// unless the orchestrator carries the value across. Scoped to the
@@ -223,7 +243,7 @@ func buildEnv(
 	// forwarded value (k8s takes the last duplicate), breaking that trust
 	// boundary.
 	for _, e := range entry.Env {
-		if e.Name == hfTokenEnvVar || e.Name == requireScopedInferenceGatewayEnv || e.Name == inferencePerfNoCleanupEnv || e.Name == ncclRuntimeImageEnv {
+		if e.Name == hfTokenEnvVar || e.Name == requireScopedInferenceGatewayEnv || e.Name == inferencePerfNoCleanupEnv || e.Name == ncclRuntimeImageEnv || e.Name == driverRuntimeImageEnv {
 			continue
 		}
 		env = append(env, corev1.EnvVar{Name: e.Name, Value: e.Value})

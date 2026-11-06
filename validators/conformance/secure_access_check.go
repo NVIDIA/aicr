@@ -195,6 +195,9 @@ type gpuTestRun struct {
 	// runtimeClassProbePodName is the AICR hardening extra's probe pod
 	// (secure-accelerator-access only).
 	runtimeClassProbePodName string
+	// driverProbePodName is the vanilla-image probe pod of
+	// driver-runtime-management.
+	driverProbePodName string
 	// IMEX channel subtest names (dra-support): the per-run ComputeDomain,
 	// the ResourceClaimTemplate the DRA driver generates from it, and the
 	// probe pod that consumes one channel from that template.
@@ -251,6 +254,7 @@ func newGPUTestRun() (*gpuTestRun, error) {
 		noAllocPodName: noAllocProbePrefix + token,
 
 		runtimeClassProbePodName: runtimeClassProbePrefix + token,
+		driverProbePodName:       driverRuntimeProbePodPrefix + token,
 
 		computeDomainName: imexComputeDomainPrefix + token,
 		claimTemplateName: imexClaimTemplatePrefix + token,
