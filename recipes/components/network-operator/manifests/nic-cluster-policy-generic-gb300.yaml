@@ -20,8 +20,6 @@
 # (shared HCA, resource rdma/ib), and nicConfigurationOperator manages NIC
 # firmware/config. vendor 15b3 = Mellanox; deviceID 1021 = ConnectX-7,
 # 1023 = ConnectX-8.
-{{- $netop := index .Values "network-operator" }}
-{{- $daemon := $netop.nicConfigurationOperator.configurationDaemon }}
 apiVersion: mellanox.com/v1alpha1
 kind: NicClusterPolicy
 metadata:
@@ -113,9 +111,9 @@ spec:
       # renovate: datasource=docker depName=ghcr.io/mellanox/nic-configuration-operator-daemon tag=v1.3.1
       version: sha256:35e38f05004116ee3c0489c9da9dc0639d69e0a75e9a5b90a5a44be2cdee72bd
       imagePullSecrets: []
-      containerResources:
-        - name: nic-configuration-daemon
-          {{- toYaml $daemon.resources | nindent 10 }}
+      # No containerResources: the operator then renders its own 512Mi / 5Gi
+      # for the daemon (manifests/state-nic-configuration-operator/070-config-daemon.yaml),
+      # which is above the 2Gi that OOM-killed it at 2000 GPU nodes (#3698).
   # Fabric DaemonSets must land on tainted GPU nodes.
   tolerations:
     - key: nvidia.com/gpu
