@@ -126,7 +126,7 @@ aicr validate -r recipe.yaml -s snapshot.yaml --phase conformance
 
 # Submission run: the same checks with the same verdicts, then the CTRF
 # report rendered into ./evidence as one page per requirement a non-skipped
-# check evidenced, plus index.md (nothing when no check ran to completion).
+# check evidenced, plus index.md (nothing only when every check was skipped).
 aicr validate -r recipe.yaml -s snapshot.yaml --phase conformance \
   --cncf-submission --evidence-dir ./evidence
 ```

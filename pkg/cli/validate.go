@@ -669,10 +669,10 @@ func runValidation(
 			logRequirementAggregate(agg)
 			outcome, decided = agg.Outcome(combined, cfg.failOnError), true
 		default:
-			// The renderer writes a page only for a check that ran and was
-			// not skipped; with none, it creates nothing, not even the
-			// directory.
-			slog.Warn("no conformance check ran to completion; no evidence was written", "dir", cfg.evidenceDir)
+			// The renderer drops skipped results and writes a page for every
+			// other one, crashed included; with every check skipped it creates
+			// nothing, not even the directory.
+			slog.Warn("every conformance check was skipped; no evidence was written", "dir", cfg.evidenceDir)
 			logRequirementAggregate(agg)
 			outcome, decided = agg.Outcome(combined, cfg.failOnError), true
 		}
@@ -931,7 +931,7 @@ func validateEvidenceFlags() []cli.Flag {
 			Usage: `Also write the CNCF AI Conformance submission evidence for this run into --evidence-dir.
 	The run is the conformance phase as the recipe declares it: the same checks with the same verdicts
 	as a run without this flag, rendered afterwards into one evidence page per requirement a non-skipped check
-	evidenced, plus index.md; a run in which no check ran to completion writes nothing.
+	evidenced, plus index.md; only a run in which every check was skipped writes nothing.
 	Requires --recipe, --evidence-dir and the conformance phase; refused with --no-cluster and --skip-check.
 	The exit status adds the requirement aggregation to the per-check rule: an applicable MUST that is not
 	established fails the run regardless of --fail-on-error; the aggregation never fails it on a SHOULD.`,

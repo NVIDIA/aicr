@@ -188,8 +188,15 @@ collector's removal ([#3602](https://github.com/NVIDIA/aicr/issues/3602)):
 
 The method is now the submission run itself: snapshot, the conformance phase
 the recipe declares, render, and the exit rule of
-`CNCFRequirementAggregate.Outcome`. `staticcheck` reports the deprecated
-members as `SA1019` at build time.
+`CNCFRequirementAggregate.Outcome`. Its cluster footprint is the CLI's, not
+the kubectl collector's: the snapshot agent runs privileged (hostPID,
+hostNetwork and host mounts for the GPU, SystemD and OS collectors) in
+`CNCFCollectOptions.Namespace` (default `aicr-validation`), and
+`ValidateState` creates per-run RBAC for the validator Jobs, a cluster-admin
+binding by default. A caller that needs a restricted agent or its own
+validator ServiceAccount composes `CollectSnapshot`, `ValidateState`,
+`MergeReports` and `RenderCNCFEvidenceWithResult` directly. `staticcheck`
+reports the deprecated members as `SA1019` at build time.
 
 **What to do.** Pass the recipe from `LoadRecipe` or `ResolveRecipe`; for an
 offline dry-run call `ValidateState` with `WithValidationNoCluster(true)`

@@ -452,10 +452,15 @@ func resolveConformanceVersion(opts RenderCNCFEvidenceOptions) (cncf.Version, er
 //
 // rec is required and must come from this Client: the recipe selects the
 // conformance checks, and the former capability-detection path of the bash
-// collector is gone. A caller that needs the snapshot agent configured
-// (image, scheduling, service account) or the validator options should call
-// the four methods above itself; this wrapper uses their defaults with
-// opts.Kubeconfig and opts.Namespace.
+// collector is gone. The wrapper deploys the snapshot agent exactly as
+// `aicr validate` does: privileged (hostPID, hostNetwork and the host mounts
+// the GPU, SystemD and OS collectors need), cleaned up afterwards, in
+// opts.Namespace with opts.Kubeconfig, and ValidateState then creates the
+// per-run RBAC the validator Jobs run under (a cluster-admin binding unless
+// the caller supplies WithValidatorServiceAccountName). A caller that needs
+// a restricted agent, another image or scheduling, or its own validator
+// ServiceAccount should call the four methods above itself; this wrapper
+// takes their defaults otherwise.
 //
 // The call fails after rendering under the rule the CLI applies
 // (CNCFRequirementAggregate.Outcome): a check that failed or errored fails
