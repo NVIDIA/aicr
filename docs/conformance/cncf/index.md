@@ -304,8 +304,10 @@ runtime IDs, UUIDs (Kubernetes UIDs, GPU UUIDs, cloud subscription IDs),
 IPv4, IPv6 and MAC addresses, AWS account IDs in ARNs; a JWT is removed. The
 vendor's own URLs are preserved. The README states what the pass changed.
 The scrubber is not a guarantee that nothing sensitive remains (a free-form
-hostname that is not a node name passes through), so the operator reviews the
-directory before submitting it. A staged tree is kept only once the
+hostname that is not a node name passes through, and so does a node absent
+from a partial or redacted snapshot, since the node list comes from the
+snapshot), so the operator reviews the directory before submitting it; the
+README says so. A staged tree is kept only once the
 redaction pass has completed (because a MUST was not established or the
 validator rejected it); an error or cancellation before that point removes
 the whole tree, so no raw check output is left behind. The README's

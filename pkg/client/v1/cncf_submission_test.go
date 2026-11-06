@@ -104,6 +104,12 @@ func TestSnapshotNodeNames(t *testing.T) {
 	if got := snapshotNodeNames([]*measurement.Measurement{noSource}); len(got) != 0 {
 		t.Errorf("snapshot without a string source-node: %v", got)
 	}
+	nilTopology := measurement.NewMeasurement(measurement.TypeNodeTopology).
+		WithSubtype(measurement.Subtype{Name: "label", Data: map[string]measurement.Reading{"a": nil, "b": measurement.Str("v|n1")}}).
+		WithSubtype(measurement.Subtype{Name: "taint", Data: map[string]measurement.Reading{"c": nil}}).Build()
+	if got := snapshotNodeNames([]*measurement.Measurement{nilTopology}); !slices.Equal(got, []string{"n1"}) {
+		t.Errorf("nil topology readings: %v", got)
+	}
 }
 
 func TestCNCFPlatform(t *testing.T) {

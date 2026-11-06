@@ -34,8 +34,8 @@ func TestTextScrubberRules(t *testing.T) {
 		},
 		{
 			name: "ipv6 forms aliased, times kept",
-			in:   "fd00:10:244::1a and 2001:0db8:85a3:0000:0000:8a2e:0370:7334 at 18:14:14 [::]:8080",
-			want: "ipv6-1 and ipv6-2 at 18:14:14 [::]:8080",
+			in:   "fd00:10:244::1a and 2001:0db8:85a3:0000:0000:8a2e:0370:7334 at 18:14:14 [::]:8080 prefix fd00:10:: link fe80:: and ::1",
+			want: "ipv6-1 and ipv6-2 at 18:14:14 [::]:8080 prefix ipv6-3 link ipv6-4 and ipv6-5",
 		},
 		{
 			name: "uuid aliased with prefix kept",

@@ -64,6 +64,11 @@ type TextScrubber struct {
 	aliases map[string]map[string]string
 	used    map[string]map[string]bool
 	jwts    int
+
+	// nodeRE is the compiled alternation of NodeNames, rebuilt when the
+	// names it was built from change.
+	nodeRE      *regexp.Regexp
+	nodeREnames string
 }
 
 // Alias classes, which are also the alias prefixes.
@@ -96,7 +101,7 @@ var (
 	textIPv4        = regexp.MustCompile(`\b(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\b`)
 	// Eight groups, or a :: compression with at least one hex group on one
 	// side; a bare "::" is left alone and so is a time such as 18:14:14.
-	textIPv6   = regexp.MustCompile(`(?i)\b(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}\b|(?i)(?:\b[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6})?::(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6}\b)`)
+	textIPv6   = regexp.MustCompile(`(?i)\b(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}\b|(?i)\b[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6}::(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6}\b)?|(?i)::[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6}\b`)
 	textMAC    = regexp.MustCompile(`(?i)\b(?:[0-9a-f]{2}:){5}[0-9a-f]{2}\b`)
 	textAWSARN = regexp.MustCompile(`\b(arn:aws[a-z-]*:[a-z0-9-]*:[a-z0-9-]*:)([0-9]{12})(:)`)
 	textJWT    = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b`)
@@ -211,11 +216,7 @@ func (s *TextScrubber) aliasNodeNames(in string) string {
 		return in
 	}
 	sort.SliceStable(names, func(i, j int) bool { return len(names[i]) > len(names[j]) })
-	quoted := make([]string, len(names))
-	for i, n := range names {
-		quoted[i] = regexp.QuoteMeta(n)
-	}
-	re := regexp.MustCompile(strings.Join(quoted, "|"))
+	re := s.nodeRegexp(names)
 	var sb strings.Builder
 	rest := in
 	for {
@@ -247,6 +248,20 @@ func (s *TextScrubber) aliasNodeNames(in string) string {
 		sb.WriteString(s.alias(aliasNode, matched))
 		rest = at[len(matched):]
 	}
+}
+
+// nodeRegexp returns the alternation of names, longest first, compiled once
+// per distinct name list.
+func (s *TextScrubber) nodeRegexp(names []string) *regexp.Regexp {
+	key := strings.Join(names, "\x00")
+	if s.nodeRE == nil || s.nodeREnames != key {
+		quoted := make([]string, len(names))
+		for i, n := range names {
+			quoted[i] = regexp.QuoteMeta(n)
+		}
+		s.nodeRE, s.nodeREnames = regexp.MustCompile(strings.Join(quoted, "|")), key
+	}
+	return s.nodeRE
 }
 
 // isNameByte reports whether b continues a node name token, so a name found

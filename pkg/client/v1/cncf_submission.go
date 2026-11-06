@@ -305,6 +305,9 @@ func snapshotNodeNames(measurements []*measurement.Measurement) []string {
 			switch {
 			case m.Type == measurement.TypeNodeTopology && (st.Name == topologySubtypeLabel || st.Name == topologySubtypeTaint):
 				for _, reading := range st.Data {
+					if reading == nil {
+						continue
+					}
 					parts := strings.Split(reading.String(), topologyNodeSeparator)
 					for _, name := range strings.Split(parts[len(parts)-1], ",") {
 						if name = strings.TrimSpace(name); name != "" {

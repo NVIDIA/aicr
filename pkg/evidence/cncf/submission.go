@@ -189,8 +189,9 @@ func WriteSubmission(ctx context.Context, dir string, in SubmissionInput) (*Subm
 		return nil, err
 	}
 	if in.Now.IsZero() {
-		in.Now = time.Now().UTC()
+		in.Now = time.Now()
 	}
+	in.Now = in.Now.UTC()
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "resolve submission directory", err)
@@ -249,17 +250,29 @@ func newStaging(abs string, version Version) (*staging, error) {
 	st.evidenceDir = filepath.Join(st.productDir, evidenceDirName)
 	for _, d := range []string{st.schemaDir, st.evidenceDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
+			st.discard()
 			return nil, errors.Wrap(errors.ErrCodeInternal, "create submission staging directory", err)
 		}
 	}
 	schema, err := schemaFS.ReadFile(schemaPath(version))
 	if err != nil {
+		st.discard()
 		return nil, errors.Wrap(errors.ErrCodeInternal, "embedded CNCF checklist missing: "+schemaPath(version), err)
 	}
 	if err := writeFile(filepath.Join(st.schemaDir, filepath.Base(schemaPath(version))), schema); err != nil {
+		st.discard()
 		return nil, err
 	}
 	return st, nil
+}
+
+// discard removes the staging tree after a failure that happened before
+// anything worth inspecting was written; a failure to remove it is logged,
+// since the original error is what the caller reports.
+func (st *staging) discard() {
+	if err := os.RemoveAll(st.root); err != nil && !stderrors.Is(err, fs.ErrNotExist) {
+		slog.Warn("could not remove the submission staging tree", "dir", st.root, "error", err)
+	}
 }
 
 // write renders the evidence pages, the artifacts, PRODUCT.yaml and
@@ -274,9 +287,7 @@ func (st *staging) write(ctx context.Context, in SubmissionInput, cl *Checklist)
 	redacted := false
 	defer func() {
 		if err != nil && !redacted {
-			if rmErr := os.RemoveAll(st.root); rmErr != nil {
-				slog.Warn("could not remove the unredacted submission staging tree", "dir", st.root, "error", rmErr)
-			}
+			st.discard()
 		}
 	}()
 	r := New(WithOutputDir(st.evidenceDir), WithConformanceVersion(st.version), WithNow(in.Now),
@@ -297,8 +308,8 @@ func (st *staging) write(ctx context.Context, in SubmissionInput, cl *Checklist)
 		return nil, err
 	}
 	exported := scrubExported(exportTests(in.Report, agg), scrubber)
-	rows := scrubRows(buildProductRows(cl, agg, pages), scrubber)
-	supporting := scrubSupporting(agg.Supporting, scrubber)
+	scrubbedAgg := scrubAggregate(agg, scrubber)
+	rows := buildProductRows(cl, scrubbedAgg, pages)
 	redacted = true
 
 	junit, err := renderJUnit(exported, in.Now)
@@ -314,7 +325,7 @@ func (st *staging) write(ctx context.Context, in SubmissionInput, cl *Checklist)
 			return nil, err
 		}
 	}
-	st.readme = &readmeInputs{in: in, agg: agg, rows: rows, supporting: supporting, exported: exported, redaction: scrubber.Report()}
+	st.readme = &readmeInputs{in: in, agg: agg, rows: rows, supporting: scrubbedAgg.Supporting, exported: exported, redaction: scrubber.Report()}
 	state := validationState{Outcome: validationNotRun, Detail: "the run has not reached the validator"}
 	if verdict := agg.Verdict(); verdict != nil {
 		state.Detail = fmt.Sprintf("%d applicable MUST requirement(s) not established (%s), so the directory was not submitted to it",
@@ -370,25 +381,25 @@ func scrubExported(tests []exportedTest, s *redact.TextScrubber) []exportedTest 
 	return out
 }
 
-// scrubRows returns the PRODUCT.yaml rows with their run-derived text (the
-// note and the aggregate reason) scrubbed; the upstream description and the
-// evidence references are not run output.
-func scrubRows(rows []productRow, s *redact.TextScrubber) []productRow {
-	out := make([]productRow, len(rows))
-	for i, row := range rows {
-		row.Notes = s.Scrub(row.Notes)
-		row.Requirement.Reason = s.Scrub(row.Requirement.Reason)
-		out[i] = row
+// scrubAggregate returns a copy of the aggregate whose run-derived reasons
+// are scrubbed. A not-applicable requirement's reason is the vendor's
+// justification and the documented attestation is the vendor's text, so both
+// are kept verbatim, as the upstream descriptions and evidence references
+// are; PRODUCT.yaml and README rows are built from this copy.
+func scrubAggregate(agg *Aggregate, s *redact.TextScrubber) *Aggregate {
+	out := &Aggregate{Version: agg.Version}
+	scrub := func(results []RequirementResult) []RequirementResult {
+		copied := make([]RequirementResult, len(results))
+		for i, r := range results {
+			if r.Status != StatusNotApplicable {
+				r.Reason = s.Scrub(r.Reason)
+			}
+			copied[i] = r
+		}
+		return copied
 	}
-	return out
-}
-
-func scrubSupporting(results []RequirementResult, s *redact.TextScrubber) []RequirementResult {
-	out := make([]RequirementResult, len(results))
-	for i, r := range results {
-		r.Reason = s.Scrub(r.Reason)
-		out[i] = r
-	}
+	out.Requirements = scrub(agg.Requirements)
+	out.Supporting = scrub(agg.Supporting)
 	return out
 }
 
@@ -402,8 +413,10 @@ func (st *staging) promote(abs string) error {
 	if err := os.Rename(st.productDir, abs); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "move submission directory into place", err)
 	}
+	// The directory is in place; a staging tree that cannot be removed is
+	// worth a warning, not a failure of the completed run.
 	if err := os.RemoveAll(st.root); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "remove submission staging directory", err)
+		slog.Warn("submission written, but the empty staging tree could not be removed", "dir", st.root, "error", err)
 	}
 	return nil
 }

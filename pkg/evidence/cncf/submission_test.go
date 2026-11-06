@@ -599,6 +599,33 @@ func TestWriteSubmissionCanceled(t *testing.T) {
 	}
 }
 
+// Vendor-authored text in PRODUCT.yaml (the N/A justification, the
+// documented notes) is kept verbatim while run-derived text is scrubbed, and
+// a non-UTC Now renders in UTC.
+func TestWriteSubmissionKeepsVendorNotes(t *testing.T) {
+	installTransport(t, &fakeTransport{members: []string{"Test Vendor"}})
+	tests := withResult(submissionFixture(), "cluster-autoscaling",
+		&ctrf.TestResult{Name: "cluster-autoscaling", Status: "failed", Duration: 2000, Message: "no autoscaler at 10.0.0.9"})
+	in := submissionInput(tests)
+	in.Options = AggregateOptions{NotApplicable: map[string]string{"cluster_autoscaling": "Fixed pools at 10.0.0.1 and release 1.2.3.4; no autoscaler."}}
+	in.Now = time.Date(2026, 11, 6, 14, 0, 0, 0, time.FixedZone("plus2", 2*3600))
+	dir := filepath.Join(t.TempDir(), "submission")
+	res, err := WriteSubmission(context.Background(), dir, in)
+	if err != nil || !res.Complete {
+		t.Fatalf("WriteSubmission() = %v %+v", err, res)
+	}
+	product := readFile(t, filepath.Join(dir, productFile))
+	if !strings.Contains(product, "Fixed pools at 10.0.0.1 and release 1.2.3.4; no autoscaler.") {
+		t.Errorf("justification was scrubbed:\n%s", product)
+	}
+	if !strings.Contains(readFile(t, filepath.Join(dir, junitFile)), "no autoscaler at ipv4-") {
+		t.Error("run-derived message was not scrubbed")
+	}
+	if !strings.Contains(readFile(t, filepath.Join(dir, readmeFile)), "**Generated:** 2026-11-06T12:00:00Z") {
+		t.Error("Generated is not rendered in UTC")
+	}
+}
+
 // Vendor fields are not global preserve tokens: a platform version of "1"
 // protects nothing else, and the run output is still redacted.
 func TestWriteSubmissionVendorValueDoesNotShieldOutput(t *testing.T) {
@@ -671,6 +698,20 @@ func TestWriteSubmissionStagingErrors(t *testing.T) {
 	errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
 	_, err = newStaging(filepath.Join(blocker, "submission"), Version137)
 	errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+	// A failure after the root exists removes it again: here docs/ is a
+	// file, so the schema directory cannot be created.
+	halfMade := filepath.Join(base, "half")
+	if mkErr := os.MkdirAll(halfMade+IncompleteSuffix, 0o755); mkErr != nil {
+		t.Fatal(mkErr)
+	}
+	if wrErr := os.WriteFile(filepath.Join(halfMade+IncompleteSuffix, "docs"), []byte("x"), 0o644); wrErr != nil {
+		t.Fatal(wrErr)
+	}
+	_, err = newStaging(halfMade, Version137)
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+	if _, statErr := os.Stat(halfMade + IncompleteSuffix); !os.IsNotExist(statErr) {
+		t.Error("staging tree left behind after an initialization failure")
+	}
 	if _, err := listPages(filepath.Join(base, "missing")); err == nil {
 		t.Error("listPages() on a missing directory must fail")
 	}
