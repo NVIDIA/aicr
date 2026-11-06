@@ -104,7 +104,7 @@ func TestCheckNVSentinelCSPHealthMonitorCoherent(t *testing.T) {
 		wantAccountFmt  = "not a 12-digit AWS account ID"
 		wantRegion      = "aws.region is empty"
 		wantRegionAPI   = "AWS Health API has endpoints only in"
-		wantRoleName    = "not a valid IAM role name"
+		wantRoleName    = "is not a valid IAM role"
 		wantRoleType    = "aws.iamRoleName is 42, not a string"
 		wantRegionNum   = "aws.region is 1, not a string"
 		wantClusterPath = "a / there would be read as an IAM path"
@@ -238,8 +238,25 @@ func TestCheckNVSentinelCSPHealthMonitorCoherent(t *testing.T) {
 		{name: "iamRoleName behind a path over IAM's limit",
 			recipe: recipeOf(recipe.CriteriaServiceEKS, awsWith("iamRoleName", "teams/"+strings.Repeat("r", 65))),
 			want:   []string{wantRoleName}},
-		{name: "iamRoleName with an empty path segment",
-			recipe: recipeOf(recipe.CriteriaServiceEKS, awsWith("iamRoleName", "teams//r")), want: []string{wantRoleName}},
+		{name: "iamRoleName with an empty path segment, which IAM's path pattern allows",
+			recipe: recipeOf(recipe.CriteriaServiceEKS, awsWith("iamRoleName", "teams//r"))},
+		{name: "iamRoleName whose path holds punctuation IAM allows in a path",
+			recipe: recipeOf(recipe.CriteriaServiceEKS, awsWith("iamRoleName", "teams:gpu!a~b/csp-monitor"))},
+		{name: "iamRoleName with a leading /",
+			recipe: recipeOf(recipe.CriteriaServiceEKS, awsWith("iamRoleName", "/teams/csp")), want: []string{wantRoleName}},
+		{name: "iamRoleName that is only / and a name",
+			recipe: recipeOf(recipe.CriteriaServiceEKS, awsWith("iamRoleName", "/csp")), want: []string{wantRoleName}},
+		{name: "iamRoleName with no name after the path",
+			recipe: recipeOf(recipe.CriteriaServiceEKS, awsWith("iamRoleName", "teams/")), want: []string{wantRoleName}},
+		{name: "iamRoleName whose name holds a path-only character",
+			recipe: recipeOf(recipe.CriteriaServiceEKS, awsWith("iamRoleName", "teams/csp:monitor")), want: []string{wantRoleName}},
+		{name: "iamRoleName whose path holds a space",
+			recipe: recipeOf(recipe.CriteriaServiceEKS, awsWith("iamRoleName", "my teams/csp")), want: []string{wantRoleName}},
+		{name: "iamRoleName path at IAM's limit",
+			recipe: recipeOf(recipe.CriteriaServiceEKS, awsWith("iamRoleName", strings.Repeat("p", 510)+"/csp"))},
+		{name: "iamRoleName path over IAM's limit",
+			recipe: recipeOf(recipe.CriteriaServiceEKS, awsWith("iamRoleName", strings.Repeat("p", 511)+"/csp")),
+			want:   []string{wantRoleName}},
 		{name: "iamRoleName with IAM's other characters",
 			recipe: recipeOf(recipe.CriteriaServiceEKS, awsWith("iamRoleName", "team+csp=a,b.c@d_e-f"))},
 		{name: "lead time negative", recipe: recipeOf(recipe.CriteriaServiceEKS,
