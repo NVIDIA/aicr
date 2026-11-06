@@ -45,6 +45,7 @@ func TestGPUCheckWorkBudgetsFitCatalogTimeouts(t *testing.T) {
 	budgets := map[string]time.Duration{
 		"dra-support":               draSupportWorkBudget,
 		"secure-accelerator-access": secureAccessWorkBudget,
+		"driver-runtime-management": driverRuntimeWorkBudget,
 		"pod-autoscaling":           podAutoscalingWorkBudget,
 		"ai-service-metrics":        aiServiceMetricsWorkBudget,
 		"robust-controller":         robustControllerWorkBudget,

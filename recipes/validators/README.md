@@ -82,6 +82,7 @@ Neither constraint applies to `nccl-cre-all-reduce-bw` or
 | `cluster-autoscaling` | Verify cluster autoscaling with Karpenter | 10m |
 | `robust-controller` | Verify AI operator controller, webhooks and CR reconciliation (Kubeflow Trainer reconciles a TrainJob to Complete; Dynamo records observations) | 8m |
 | `secure-accelerator-access` | Verify secure GPU access via DRA or device plugin (no host device mounts); skips on Slinky Slurm recipes, where on GPU-backed leaves slinky-slurm-gpu-access verifies the Slurm path | 10m |
+| `driver-runtime-management` | Verify the accelerator driver and container runtime configuration from a vanilla-image (`ubuntu:22.04`) pod granted one GPU: injected `nvidia-smi`, a functional driver, and a reported version matching the one the platform advertises (DRA `driverVersion` attribute, else the GFD `nvidia.com/cuda.driver-version.full` label; none advertised is a recorded warning); skips on Slinky Slurm recipes | 10m |
 | `slinky-slurm-health` | Verify Slinky Slurm controller, node inventory, job submission, GPU execution, and enabled accounting health | 8m |
 | `slinky-slurm-imex-channel` | Verify fixed IMEX resources and distinct channels for concurrent Slinky Slurm jobs | 5m |
 | `slinky-slurm-gpu-access` | Verify a Slinky Slurm job allocated one GPU can use exactly that GPU, and a job with no GPU allocation on the same node cannot open any GPU device | 5m |

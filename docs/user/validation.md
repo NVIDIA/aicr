@@ -1506,6 +1506,33 @@ Common reasons and their cause:
 | `named in skipChecks` | `message`, and `extra.skipReason` as `named-in-skip-checks` (the channel that survives bundle redaction) | The caller withheld this check with `--skip-check` or `spec.validate.execution.skipChecks` | Drop the name from the skip list to run it again; see [Skipping checks a run cannot satisfy](#skipping-checks-a-run-cannot-satisfy) |
 | `skipped due to previous phase failure` | `message` | `--fail-fast` was set and an earlier phase failed, so subsequent phases were skipped | Fix the earlier phase first, or drop `--fail-fast` to run all phases regardless |
 
+### `driver-runtime-management` fails
+
+The check (CNCF `driver_runtime_management`, SHOULD at v1.37 and MUST at v1.38)
+runs a pod from a vanilla `ubuntu:22.04` image that requests one GPU, and reads
+the driver from inside it. Its artifacts (`Driver runtime probe pod logs`,
+`Advertised driver version`, `Driver runtime compatibility`) name the failing
+step:
+
+| Verdict excerpt | Meaning | Fix |
+|-----------------|---------|-----|
+| `did not inject the accelerator driver tools` | No `nvidia-smi` appeared inside the vanilla container: the container runtime configuration (CDI or the `nvidia` runtime hook) is not injecting the driver stack for GPU-requesting pods | Check the GPU Operator toolkit DaemonSet and the node's `nvidia-container-runtime` configuration; on AKS, the `nvidia-setup` tuning that writes it |
+| `failed to initialize or report a numeric version` | `nvidia-smi` is present but NVML failed, typically `Driver/library version mismatch` after a driver upgrade without a node reboot or a user-space library that does not match the kernel module | Reconcile the driver on the node (driver DaemonSet restart or node reboot) |
+| `advertises driver version ... does not match` | The node label (`nvidia.com/cuda.driver-version.full`) or DRA `driverVersion` attribute says one version and the container sees another | The advertiser is stale (GPU Feature Discovery or the DRA kubelet plugin has not re-published since the driver changed); restart it or wait for the next publish |
+| `saw 0 accelerator device(s)` | The pod was granted a GPU but no `/dev/nvidia[0-9]*` appeared inside | Device-plugin or CDI device injection is broken on that node |
+| `WARNING: node ... advertises no accelerator driver version` (artifact only) | The platform advertises no version, so only the in-container probe decides; the check still passes when the probe succeeds | Expected on a platform whose GPU stack publishes no GPU Feature Discovery label and no DRA `driverVersion` attribute |
+
+The probe image (`docker.io/library/ubuntu:22.04`) pulls from Docker Hub by
+default and, like the busybox probe image and the NCCL workload image (but
+unlike the Dynamo runtime images `inference-perf` pulls), is not rewritten by
+`AICR_VALIDATOR_IMAGE_REGISTRY`. In a mirrored environment set
+`AICR_DRIVER_RUNTIME_IMAGE=<image ref>` in the `aicr validate` environment to
+the full reference of your copy or of another vanilla OS image. It must ship no
+accelerator driver or tools, and it must provide what the probe script runs on:
+a POSIX `/bin/sh`, `head` and `tr` (`timeout` is used when present). A
+distroless image cannot run the probe; mirroring the Ubuntu image is the
+simplest choice.
+
 ### `ai-service-metrics` or `pod-autoscaling` fails with "Prometheus unreachable"
 
 On EKS clusters that split worker and system pods across separate security

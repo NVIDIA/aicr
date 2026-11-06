@@ -1046,6 +1046,7 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		"pod-autoscaling",
 		"cluster-autoscaling",
 		"secure-accelerator-access",
+		"driver-runtime-management",
 		"slinky-slurm-health",
 		"slinky-slurm-gpu-access",
 	}
@@ -1059,6 +1060,7 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		"pod-autoscaling",
 		"cluster-autoscaling",
 		"secure-accelerator-access",
+		"driver-runtime-management",
 		"slinky-slurm-health",
 		"slinky-slurm-imex-channel",
 		"slinky-slurm-gpu-access",
@@ -1071,6 +1073,7 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		"ai-service-metrics",
 		"gang-scheduling",
 		"secure-accelerator-access",
+		"driver-runtime-management",
 		"cluster-autoscaling",
 		"slinky-slurm-health",
 	}

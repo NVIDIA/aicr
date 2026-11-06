@@ -289,6 +289,16 @@ validators:
     timeout: 10m
     args: ["secure-accelerator-access"]
     env: []
+  - name: driver-runtime-management
+    phase: conformance
+    description: "Verify driver and container runtime configuration from a vanilla-image pod granted one GPU: injected nvidia-smi, a functional driver, and a version matching the advertised one"
+    image: ghcr.io/nvidia/aicr-validators/conformance:latest
+    # 8m30s work budget + 30s cleanup + 60s margin (see gpuCheckWorkBudget in
+    # validators/conformance/consts.go): one namespace, one probe pod wait
+    # bounded by DRATestPodTimeout, log collection.
+    timeout: 10m
+    args: ["driver-runtime-management"]
+    env: []
   - name: slinky-slurm-health
     phase: conformance
     description: "Verify Slinky Slurm controller, scheduling, GPU execution, and enabled accounting health"

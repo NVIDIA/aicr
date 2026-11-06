@@ -1516,3 +1516,57 @@ func TestOrchestratorWaitForUnobservedStart(t *testing.T) {
 		t.Errorf("OrchestratorWaitFor(zero, now, %v) = %v, want %v", checkTimeout, got, want)
 	}
 }
+
+// TestBuildJobPlan_ForwardsDriverRuntimeImageEnv verifies the vanilla probe
+// image override reaches only the driver-runtime-management Job, from the CLI
+// process environment and never from a catalog-pinned value.
+func TestBuildJobPlan_ForwardsDriverRuntimeImageEnv(t *testing.T) {
+	values := func(entry ValidatorEntry) []string {
+		plan, err := BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+		if err != nil {
+			t.Fatalf("BuildJobPlan error: %v", err)
+		}
+		var got []string
+		for _, e := range plan.Env {
+			if e.Name == driverRuntimeImageEnv {
+				got = append(got, e.Value)
+			}
+		}
+		return got
+	}
+	const testImage = "mirror.example.com/os/ubuntu:22.04"
+	entry := ValidatorEntry{Name: DriverRuntimeManagementCheckName, Phase: "conformance", Image: "img:v1", Timeout: time.Minute}
+
+	t.Run("forwarded verbatim", func(t *testing.T) {
+		t.Setenv(driverRuntimeImageEnv, testImage)
+		if got := values(entry); len(got) != 1 || got[0] != testImage {
+			t.Errorf("%s env = %v, want [%s]", driverRuntimeImageEnv, got, testImage)
+		}
+	})
+	t.Run("unset omitted", func(t *testing.T) {
+		t.Setenv(driverRuntimeImageEnv, "")
+		if got := values(entry); len(got) != 0 {
+			t.Errorf("%s env = %v, want none", driverRuntimeImageEnv, got)
+		}
+	})
+	t.Run("not forwarded to other validators", func(t *testing.T) {
+		t.Setenv(driverRuntimeImageEnv, testImage)
+		other := ValidatorEntry{Name: "secure-accelerator-access", Phase: "conformance", Image: "img:v1", Timeout: time.Minute}
+		if got := values(other); len(got) != 0 {
+			t.Errorf("%s must not be forwarded to another check, got %v", driverRuntimeImageEnv, got)
+		}
+	})
+	t.Run("catalog value cannot select the image", func(t *testing.T) {
+		t.Setenv(driverRuntimeImageEnv, "")
+		pinned := entry
+		pinned.Env = []EnvVar{{Name: driverRuntimeImageEnv, Value: testImage}}
+		if got := values(pinned); len(got) != 0 {
+			t.Errorf("%s env = %v, want none (catalog must not select the probe image)", driverRuntimeImageEnv, got)
+		}
+	})
+	t.Run("env-name literal locked", func(t *testing.T) {
+		if driverRuntimeImageEnv != "AICR_DRIVER_RUNTIME_IMAGE" {
+			t.Errorf("driverRuntimeImageEnv = %q, want AICR_DRIVER_RUNTIME_IMAGE (keep in sync with the pod-side const)", driverRuntimeImageEnv)
+		}
+	})
+}

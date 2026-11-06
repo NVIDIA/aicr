@@ -44,6 +44,7 @@ func conformanceChecks() map[string]validators.CheckFunc {
 		"cluster-autoscaling":       CheckClusterAutoscaling,
 		"robust-controller":         CheckRobustController,
 		"secure-accelerator-access": CheckSecureAcceleratorAccess,
+		"driver-runtime-management": CheckDriverRuntimeManagement,
 		"slinky-slurm-health":       CheckSlinkySlurmHealth,
 		"slinky-slurm-imex-channel": CheckSlinkySlurmIMEXChannel,
 		"slinky-slurm-gpu-access":   CheckSlinkySlurmGPUAccess,

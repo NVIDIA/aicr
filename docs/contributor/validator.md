@@ -285,6 +285,41 @@ cluster where the class cannot be established from the ClusterPolicy records
 `NOT RUN` ("not probed").
 Privileged pods are out of scope: they see every GPU by design.
 
+`driver-runtime-management` (#3615, CNCF `driver_runtime_management`: SHOULD at
+every carried checklist, MUST at v1.38 per KAR-0001) mirrors the upstream
+`TestAcceleratorDriverRuntimeManagement`. It resolves the GPU the same way
+`secure-accelerator-access` does (policy verify, then DRA ResourceClaim or
+`nvidia.com/gpu: 1` with required node affinity to the device-plugin nodes,
+context tolerations) and runs one probe container from a vanilla image,
+`docker.io/library/ubuntu:22.04` by default. The image ships no driver or
+tools, so an executable `nvidia-smi` inside it can only come from the container
+runtime configuration (CDI spec or runtime hook); the probe script prints
+`RESULT:` lines for the device count, that injection, a functional NVML query
+and the version it returned, and exits 0 so the pod reaches a terminal phase
+and the logs are complete. `parseDriverRuntimeProbeLogs` and
+`verifyDriverRuntime` decide: exactly one device, tools injected, driver
+functional with a numeric version, and that version compatible with the one the
+platform advertises for the node the pod landed on. The advertisement is read
+by `inspectAdvertisedDriverVersion`: the `gpu.nvidia.com` ResourceSlice
+`driverVersion` device attribute (version or string value, v1beta1 `basic`
+wrapper unwrapped) whenever the cluster serves the DRA API, else the GFD label
+`nvidia.com/cuda.driver-version.full`, else the legacy
+`nvidia.com/cuda.driver.major`/`minor`/`rev` triple; none is a recorded warning,
+never a failure, so a platform whose GPU stack publishes no GFD label and no
+DRA attribute is judged by the probe alone. `versionsCompatible` is the upstream rule: numeric segments
+compared as integers over the shared prefix, so `580.65.6` and `580.65` both
+match `580.65.06`. Every probe verdict failure is `ErrCodeInternal`; an
+incomplete probe output is a failure, not a pass on what was seen. A cluster
+with no usable GPU allocation mechanism fails with `ErrCodeUnavailable`, a
+check deadline too short for cleanup fails with `ErrCodeTimeout`, and a
+cleanup or apiserver read failure carries its own classified code. The probe image is
+configurable for mirrors through `AICR_DRIVER_RUNTIME_IMAGE` (forwarded from
+the orchestrator's shell to this check only), which replaces the full
+reference; `AICR_VALIDATOR_IMAGE_REGISTRY` deliberately does not rewrite it,
+as it does not rewrite the busybox probe or the NCCL workload image, because
+dev lanes point that variable at a namespace holding only validator images. The check skips with
+`slurm-managed-gpus` on Slinky Slurm recipes.
+
 `robust-controller` prefers the Kubeflow Trainer path when the recipe ships
 `kubeflow-trainer`, because that path reconciles a custom resource to a
 terminal condition: after the deployment, webhook, CRD `Established=True` and
@@ -773,6 +808,7 @@ be set from the catalog or a `--data` overlay:
 | `AICR_INFERENCE_PERF_NO_CLEANUP` | `inference-perf` | When true (`strconv.ParseBool`), leaves the per-run namespace in place for inspection; forwarded as `1`. |
 | `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY` | `inference-gateway` | When truthy, the check fails if the gateway is open to the internet. What is assessed follows the declared `dataPlane`, not whether the controller runs a Service: with `service-endpoints` (the default), the proxy `LoadBalancer`'s `spec.loadBalancerSourceRanges` is empty or includes an any-source CIDR (`0.0.0.0/0` or `::/0`); with `gateway-address`, Service source ranges are not read at all, and the check fails when a Gateway status address is public, or is a `Hostname` or an unspecified address (`0.0.0.0`, `::`) the check cannot classify (a Gateway with no `status.addresses` at all fails the data-plane step in every mode, before exposure is assessed). Default (unset): the open exposure is recorded and warned but the check still passes. Which gateway is assessed, and how, comes from the recipe's inference gateway profile (`pkg/validator/v1.ResolveInferenceGatewayProfile`; see [Declaring the inference gateway](../integrator/data-extension.md#declaring-the-inference-gateway)). |
 | `AICR_NCCL_RUNTIME_IMAGE` | `nccl-all-reduce-bw`, `nccl-all-reduce-bw-net`, `nccl-all-reduce-bw-nvls` | Overrides the NCCL launcher/worker image baked into the per-platform TrainingRuntime templates; a malformed reference fails closed in the pod. |
+| `AICR_DRIVER_RUNTIME_IMAGE` | `driver-runtime-management` | Replaces the vanilla probe image (`docker.io/library/ubuntu:22.04`, not rewritten by `AICR_VALIDATOR_IMAGE_REGISTRY`) with a full reference for mirrors; the image must ship no accelerator driver or tools (finding them inside is what the check proves) and must provide a POSIX `/bin/sh`, `head` and `tr` for the probe script. |
 
 **RBAC.** The engine creates a per-run ServiceAccount and
 ClusterRoleBinding named `aicr-validator-<runID>`. Per-run naming
