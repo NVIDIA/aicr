@@ -70,6 +70,34 @@ const (
 	CriteriaServiceCKS     CriteriaServiceType = "cks"
 )
 
+var serviceDisplayNames = map[CriteriaServiceType]string{
+	CriteriaServiceAny:     "Any service",
+	CriteriaServiceEKS:     "Amazon Elastic Kubernetes Service",
+	CriteriaServiceGKE:     "Google Kubernetes Engine",
+	CriteriaServiceAKS:     "Azure Kubernetes Service",
+	CriteriaServiceOKE:     "Oracle Kubernetes Engine",
+	CriteriaServiceKind:    string(CriteriaServiceKind),
+	CriteriaServiceLKE:     "Linode Kubernetes Engine",
+	CriteriaServiceBCM:     "NVIDIA Base Command Manager",
+	CriteriaServiceOCP:     "Red Hat OpenShift Container Platform",
+	CriteriaServiceMetal3:  "Metal3",
+	CriteriaServiceRKE2:    "Rancher Kubernetes Engine 2",
+	CriteriaServiceGeneric: "Self-managed Kubernetes",
+	CriteriaServiceK0s:     string(CriteriaServiceK0s),
+	CriteriaServiceMK8s:    "Nebius Managed Service for Kubernetes",
+	CriteriaServiceNVKE:    "NVIDIA Kubernetes Engine",
+	CriteriaServiceCKS:     "CoreWeave Kubernetes Service",
+}
+
+// DisplayName returns the service's canonical presentation name. Unknown values,
+// including custom service IDs and the empty string, are returned unchanged.
+func (s CriteriaServiceType) DisplayName() string {
+	if name, ok := serviceDisplayNames[s]; ok {
+		return name
+	}
+	return string(s)
+}
+
 // ParseService parses a string into a CriteriaServiceType against this
 // registry.
 //
