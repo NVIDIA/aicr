@@ -347,12 +347,15 @@ from a per-run namespace named `aicr-inference-perf-<run>`, so the Gateway's
 `HTTP` listener must allow routes from that namespace
 (`allowedRoutes.namespaces.from: All`, or a `Selector` on the label every
 per-run namespace carries, `app.kubernetes.io/component=inference-perf`); the
-shipped agentgateway Gateway does. The `inference-gateway` conformance check's
-traffic phase attaches its HTTPRoute from a per-run namespace
-`gateway-traffic-<run>` that carries the same label, so a listener admitting
-either form admits both. A listener that keeps the Gateway API
+shipped agentgateway Gateway does. A listener that keeps the Gateway API
 default (`Same`) rejects the route, and the run fails at once with the
-listener's `Accepted` reason rather than as a readiness timeout.
+listener's `Accepted` reason rather than as a readiness timeout. The
+`inference-gateway` conformance check's traffic phase attaches its HTTPRoute
+from a per-run namespace `gateway-traffic-<run>` that carries the same label,
+so a listener admitting either form admits both; a listener that rejects it
+fails that check after the route-accept wait (`GatewayTrafficRouteAcceptTimeout`,
+2 minutes) with a timeout error that carries the `Accepted` reason the
+listener reported, such as `NotAllowedByListeners`.
 
 `aicr validate --cncf-submission` runs the same `inference-gateway`
 conformance check and renders its result as the `ai_inference` evidence page,
