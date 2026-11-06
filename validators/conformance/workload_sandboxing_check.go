@@ -68,6 +68,13 @@ import (
 // keep in sync). AICR_SANDBOX_RUNTIME_CLASS names the RuntimeClass to test
 // instead of auto-detecting one, mirroring the upstream -sandbox-runtime-class
 // flag, and is forwarded the same way.
+//
+// sandboxProbeTestLabel is the upstream label stamped on both probe pods.
+// sandboxMissingPrerequisite is the failure message prefix #3615 names for a
+// cluster with no sandboxed RuntimeClass. sandboxSelectionOverride and
+// sandboxSelectionDetected name how the RuntimeClass under test was chosen,
+// and sandboxMatchFieldName and sandboxMatchFieldHandler which RuntimeClass
+// field a keyword matched, for the evidence artifact.
 const (
 	sandboxProbePodPrefix   = "sandbox-probe-"
 	sandboxControlPodPrefix = "sandbox-control-"
@@ -76,7 +83,6 @@ const (
 	sandboxProbeImageEnv    = "AICR_SANDBOX_PROBE_IMAGE"
 	sandboxRuntimeClassEnv  = "AICR_SANDBOX_RUNTIME_CLASS"
 
-	// sandboxProbeTestLabel is the upstream label stamped on both probe pods.
 	sandboxProbeTestLabel = "ai-conformance.kubernetes.io/test"
 	sandboxProbeTestValue = "workload-sandboxing"
 
@@ -85,14 +91,8 @@ const (
 	sandboxProbeCPULimit      = "200m"
 	sandboxProbeMemoryLimit   = "128Mi"
 
-	// sandboxMissingPrerequisite is the failure message prefix #3615 names for
-	// a cluster with no sandboxed RuntimeClass.
 	sandboxMissingPrerequisite = "unmet prerequisite: no sandboxed RuntimeClass"
 
-	// sandboxSelectionOverride and sandboxSelectionDetected name how the
-	// RuntimeClass under test was chosen, and sandboxMatchFieldName and
-	// sandboxMatchFieldHandler which RuntimeClass field a keyword matched,
-	// for the evidence artifact.
 	sandboxSelectionOverride = "named by " + sandboxRuntimeClassEnv
 	sandboxSelectionDetected = "auto-detected"
 	sandboxMatchFieldName    = "name"
@@ -102,7 +102,9 @@ const (
 // The probe script's output lines, verbatim from upstream so a log reads the
 // same either way. SANDBOX_INFO lines carry what the pod observed;
 // SANDBOX_PROBE lines carry each probe's PASS/FAIL verdict; the completed
-// marker is the last line the script prints.
+// marker is the last line the script prints. sandboxInfoUnknown is what the
+// script prints for a value it could not read; the parser normalizes it to ""
+// (no information).
 const (
 	sandboxInfoKernelReleasePrefix = "SANDBOX_INFO: KERNEL_RELEASE="
 	sandboxInfoKernelVersionPrefix = "SANDBOX_INFO: KERNEL_VERSION="
@@ -116,10 +118,8 @@ const (
 	sandboxProbeNetIsolationPrefix    = "SANDBOX_PROBE: NET_ISOLATION="
 	sandboxProbeCompletedMarker       = "SANDBOX_PROBE: COMPLETED"
 
-	sandboxProbePass = "PASS"
-	sandboxProbeFail = "FAIL"
-	// sandboxInfoUnknown is what the script prints for a value it could not
-	// read; the parser normalizes it to "" (no information).
+	sandboxProbePass   = "PASS"
+	sandboxProbeFail   = "FAIL"
 	sandboxInfoUnknown = "unknown"
 )
 

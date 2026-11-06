@@ -209,17 +209,18 @@ const (
 	// deadline (standalone/library use — LoadContext always sets one). The
 	// inference gateway budget covers the traffic phase that follows the
 	// status checks: backends available (3m), HTTPRoute accepted (2m) and
-	// the probe pod's run (6m) are individual caps under it, not a sum.
-	draSupportWorkBudget       = 3*time.Minute + 30*time.Second
-	secureAccessWorkBudget     = 8*time.Minute + 30*time.Second
-	driverRuntimeWorkBudget    = 8*time.Minute + 30*time.Second
-	podAutoscalingWorkBudget   = 13*time.Minute + 30*time.Second
-	aiServiceMetricsWorkBudget = 8*time.Minute + 30*time.Second
-	robustControllerWorkBudget = 6*time.Minute + 30*time.Second
-	inferenceGatewayWorkBudget = 13*time.Minute + 30*time.Second
-	// workload-sandboxing runs two CPU-only probe pods in sequence, each
-	// bounded by defaults.DRATestPodTimeout; a sandbox runtime (Kata boots a
-	// guest VM) starts slower than runc, so it gets the GPU checks' budget.
+	// the probe pod's run (6m) are individual caps under it, not a sum. The
+	// workload-sandboxing budget covers two CPU-only probe pods in sequence,
+	// each bounded by defaults.DRATestPodTimeout; a sandbox runtime (Kata
+	// boots a guest VM) starts slower than runc, so it gets the GPU checks'
+	// budget.
+	draSupportWorkBudget         = 3*time.Minute + 30*time.Second
+	secureAccessWorkBudget       = 8*time.Minute + 30*time.Second
+	driverRuntimeWorkBudget      = 8*time.Minute + 30*time.Second
+	podAutoscalingWorkBudget     = 13*time.Minute + 30*time.Second
+	aiServiceMetricsWorkBudget   = 8*time.Minute + 30*time.Second
+	robustControllerWorkBudget   = 6*time.Minute + 30*time.Second
+	inferenceGatewayWorkBudget   = 13*time.Minute + 30*time.Second
 	workloadSandboxingWorkBudget = 8*time.Minute + 30*time.Second
 )
 

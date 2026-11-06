@@ -1237,6 +1237,37 @@ func TestEmbeddedCatalog_InferenceGatewayEntryExists(t *testing.T) {
 	t.Fatalf("no embedded catalog entry named %q (AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY forwarding would silently no-op)", v1.InferenceGatewayCheckName)
 }
 
+// TestEmbeddedCatalog_ProbeImageEntriesExist locks the embedded catalog entry
+// names to the v1.DriverRuntimeManagementCheckName and
+// v1.WorkloadSandboxingCheckName constants that scope AICR_DRIVER_RUNTIME_IMAGE
+// and AICR_SANDBOX_* forwarding (see buildEnv in pkg/validator/v1). Without
+// this, renaming either catalog entry would silently disable the forwarding
+// with no other test failing.
+func TestEmbeddedCatalog_ProbeImageEntriesExist(t *testing.T) {
+	cat, err := LoadWithDataProvider(context.Background(), nil, "v0.0.0-next", "")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	want := map[string]bool{
+		v1.DriverRuntimeManagementCheckName: false,
+		v1.WorkloadSandboxingCheckName:      false,
+	}
+	for _, v := range cat.Validators {
+		if _, ok := want[v.Name]; !ok {
+			continue
+		}
+		if v.Phase != "conformance" {
+			t.Errorf("%q phase = %q, want conformance", v.Name, v.Phase)
+		}
+		want[v.Name] = true
+	}
+	for name, found := range want {
+		if !found {
+			t.Errorf("no embedded catalog entry named %q (probe-image env forwarding would silently no-op)", name)
+		}
+	}
+}
+
 // TestEmbeddedCatalog_NCCLEntriesExist locks the embedded catalog entry names
 // for all three NCCL all-reduce checks (default, NET, NVLS) to the
 // v1.NCCLAllReduceBW*CheckName constants that scope AICR_NCCL_RUNTIME_IMAGE
