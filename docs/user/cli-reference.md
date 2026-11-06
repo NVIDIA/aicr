@@ -4573,17 +4573,30 @@ The `examples/` directory contains reference files for testing and learning:
 
 ### Recipes (`examples/recipes/`)
 
+These hand-curated `RecipeResult` illustrations are intentionally incomplete
+and differ from actual generated output. Generate a current recipe before
+bundling or validation, even with the same AICR version. The checked-in files
+are for learning the structure, not deployment inputs.
+
 | File | Description |
 |------|-------------|
-| `kind.yaml` | Recipe for local Kind cluster with fake GPU |
-| `eks-training.yaml` | EKS recipe optimized for training workloads |
-| `aks-training.yaml` | AKS recipe for training workloads |
-| `eks-gb200-ubuntu-training-with-validation.yaml` | GB200 on EKS with Ubuntu and multi-phase validation |
+| `kind.yaml` | Selected Kind supporting components; omits the GPU stack and validation |
+| `eks-training.yaml` | Selected EKS training components; omits validation and resolved metadata |
+| `aks-training.yaml` | AKS training structure; omits `selectedProfile`, ownership locks, profile-specific overrides, and readiness constraints |
+| `eks-gb200-ubuntu-training-with-validation.yaml` | Authored severity/remediation and selected deployment/performance checks; omits conformance and parts of the component graph |
+
+For AKS, use [AKS GPU Setup](../integrator/aks-gpu-setup.md) to generate a recipe
+with the matching `gpuStack` profile and GPU pool projection. The legacy
+`aicr.run/v1` illustration does not represent current profiled output.
 
 **Usage:**
 ```shell
-# Generate bundle from example recipe
-aicr bundle --recipe examples/recipes/eks-training.yaml --output ./bundles
+# Generate a current recipe for the intended EKS H100 Ubuntu training cluster
+aicr recipe --service eks --accelerator h100 --os ubuntu --intent training \
+  --output generated-recipe.yaml
+
+# Consume the generated recipe
+aicr bundle --recipe generated-recipe.yaml --output ./bundles
 ```
 
 ### Templates (`examples/templates/`)
