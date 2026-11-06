@@ -105,8 +105,10 @@ jobs:
     runs-on: ubuntu-24.04
     # Budget = uncapped non-UAT steps (build, validator image push, EKS
     # provisioning, evidence upload ~30m) + UAT phase steps + ~8 failure-path
-    # debug collection + the always()-run Destroy Cluster teardown (up to 3
-    # retries × ~18m real destroy = up to ~54m). The teardown MUST fit in this
+    # debug collection + ~8 LoadBalancer cleanup (the pre-teardown step's own
+    # cap; it runs on every nightly cell) + the always()-run Destroy Cluster
+    # teardown (up to 3 retries × ~18m real destroy, plus the two 30s backoffs
+    # between attempts = up to ~55m). The teardown MUST fit in this
     # cap: a job-level timeout cancels pending always() steps, so an undersized
     # cap would skip teardown and leak the GPU node / capacity reservation
     # even after a LATE failure. Only one of train/serve runs per intent, so
@@ -115,22 +117,23 @@ jobs:
     # UAT-phase-step budgets by (deployer, intent), using the current
     # timeout-minutes on each step below (install is deployer-conditional;
     # readiness is the post-install gate, 65 on both deployers):
-    #   helmfile+training:  prep 15 + install 25 + readiness 65 + validate 40 + train 25 + verify 5 + faultinject 10 = 185
-    #   helmfile+inference: prep 15 + install 25 + readiness 65 + validate 40 + serve 40 + verify 5 + faultinject 10 = 200
-    #   argocd+training:    prep 15 + install 45 + readiness 65 + validate 40 + train 25 + verify 5 + faultinject 10 = 205   (issue #2194, aws-h100 only)
-    #   argocd+inference:   not shipped today; would be 15 + 45 + 65 + 40 + 40 + 5 + 10 = 220
+    #   helmfile+training:  prep 15 + install 25 + readiness 65 + validate 50 + train 25 + verify 5 + faultinject 10 = 195
+    #   helmfile+inference: prep 15 + install 25 + readiness 65 + validate 50 + serve 40 + verify 5 + faultinject 10 = 210
+    #   argocd+training:    prep 15 + install 45 + readiness 65 + validate 50 + train 25 + verify 5 + faultinject 10 = 215   (issue #2194, aws-h100 only)
+    #   argocd+inference:   not shipped today; would be 15 + 45 + 65 + 50 + 40 + 5 + 10 = 230
     #   helmfile+training with nvsentinel_remediation=remediation (manual, #2625, #3089):
     #                       faultinject 55 instead of 10, for the post-reboot
-    #                       DCGM diagnostic before uncordon                    = 230
+    #                       DCGM diagnostic before uncordon                    = 240
     # uat-run.yaml accepts nvsentinel_remediation on helmfile+training only.
     #
-    # Total = ~30 setup + <UAT> + ~8 debug + ~54 teardown. The worst case is
-    # the remediation row: ~30 + 230 + ~8 + ~54 = ~322, so 330 leaves ~8m of
-    # teardown headroom; argocd+training is ~297. The diagnostic (#3089)
-    # cannot be trimmed from a run that asserts the uncordon after it. The
-    # "not shipped today" argocd+inference row would be ~312, inside this cap.
-    # If this grows further the lever is trimming bounded work above.
-    timeout-minutes: 330
+    # Total = ~30 setup + <UAT> + ~8 debug + ~8 LB cleanup + ~55 teardown. The
+    # worst case is the remediation row: ~30 + 240 + ~8 + ~8 + ~55 = ~341, so
+    # 350 leaves ~9m of teardown headroom; argocd+training is ~316. The
+    # diagnostic (#3089) cannot be trimmed from a run that asserts the uncordon
+    # after it. The "not shipped today" argocd+inference row would be ~331,
+    # inside this cap. If this grows further the lever is trimming bounded
+    # work above.
+    timeout-minutes: 350
     permissions:
       contents: read
       actions: read
@@ -911,11 +914,21 @@ jobs:
       - name: UAT - validate (all phases) + emit signed evidence
         id: conformance
         if: steps.readiness.outcome == 'success' && inputs.lifecycle != 'daytime-up'
-        # Larger budget than conformance-only: the deployment phase waits out
-        # cold-start GPU bring-up (driver install/migration). (The performance
-        # phase's NCCL benchmark skips on single-GPU-node clusters like this
-        # one, so it is not the long pole here.)
-        timeout-minutes: 40
+        # Sized from the nightly runs of 2026-11-04..06 (#3609): the step's
+        # longest observed wall time was 22.8m (gcp-h100 inference, 2026-11-06:
+        # deployment 1.5m + conformance 13.2m with 11 checks + inference-perf
+        # 7.9m). Two checks main now declares had not yet run in a nightly:
+        # driver-runtime-management (catalog timeout 10m) and the
+        # inference-gateway traffic phase (15m). 22.8 + 10 + 15 = 47.8m at their
+        # catalog ceilings, so 50 holds the full check set with the long poles
+        # (pod-autoscaling 6.7-8.7m, ai-service-metrics 1.2-4.2m) at their
+        # observed worst. Conformance checks run serially (pkg/validator
+        # runPhase), so the phase cost is the sum of its checks. The step also
+        # carries the GPU-node census gate that tests/uat/lib/phases.sh runs
+        # before validate (CENSUS_STABILITY_TIMEOUT_SECONDS, 5m cap; seconds
+        # when the census is already settled). A check at its catalog ceiling
+        # is already a failing step, so the budget is sized for a passing run.
+        timeout-minutes: 50
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
