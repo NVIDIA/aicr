@@ -77,7 +77,7 @@ Every component has a bundle class, `core` or `ops` ([ADR-018](https://github.co
 
 > **`service=rke2` and `service=nvke` with `accelerator=vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. Published validation evidence exists for the four RKE2 coordinates at [validation.aicr.run](https://validation.aicr.run/); none is published yet for either NVKE coordinate. Freshness against the current recipe is captured in the **Evidence status** note below.
 
-Five coordinates ship in v1 — four on RKE2 and one on NVKE:
+Six coordinates ship in v1 — four on RKE2 and two on NVKE:
 
 | Coordinate | Evidence |
 |---|---|
@@ -86,7 +86,7 @@ Five coordinates ship in v1 — four on RKE2 and one on NVKE:
 | `rke2 / vr200 / ubuntu / inference` | [validation.aicr.run/#/rke2/vr200-ubuntu/inference](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference) |
 | `rke2 / vr200 / ubuntu / inference / dynamo` | [validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo) |
 | `nvke / vr200 / ubuntu / training` | none published yet |
-| `nvke / vr200 / ubuntu / inference` | none published yet; collected in [#3695](https://github.com/NVIDIA/aicr/pull/3695) — 8 PASS, 1 SKIP |
+| `nvke / vr200 / ubuntu / inference` | none published yet; evidence pending in [#3695](https://github.com/NVIDIA/aicr/pull/3695) |
 
 The platform-neutral `inference` coordinate is the base the Dynamo leaf inherits from; it exists so that resolving `rke2/vr200/ubuntu/inference` **without** `--platform` resolves to the VR200-safe overlay rather than falling through to the generic `rke2-inference` base. It carries the same VR200 hardware overrides as its Dynamo child.
 

@@ -489,7 +489,7 @@ land later; none is implied by Preview alone.
 | `nvke / gb200 / ubuntu / training` | [NVKE GB200 Setup](nvke-gb200-setup.md) | pending: published after merge from the `main` validator images ([#3295](https://github.com/NVIDIA/aicr/pull/3295)) |
 | `nvke / gb200 / ubuntu / training / kubeflow` | [NVKE GB200 Setup](nvke-gb200-setup.md) | pending: published after merge from the `main` validator images ([#3295](https://github.com/NVIDIA/aicr/pull/3295)) |
 | `nvke / vr200 / ubuntu / training` | [NVKE VR200 Setup](nvke-vr200-setup.md) | pending: MNNVL measured within one NVLink domain; NIC RDMA east-west unqualified |
-| `nvke / vr200 / ubuntu / inference` | [NVKE VR200 Setup](nvke-vr200-setup.md) | pending: evidence in [#3695](https://github.com/NVIDIA/aicr/pull/3695) — 8 PASS, 1 SKIP; no external LoadBalancer, so the gateway is in-cluster only |
+| `nvke / vr200 / ubuntu / inference` | [NVKE VR200 Setup](nvke-vr200-setup.md) | pending: evidence in [#3695](https://github.com/NVIDIA/aicr/pull/3695), being recollected; no external LoadBalancer, so the gateway is in-cluster only |
 | `eks / h100 / ubuntu / training / runai` | [Run:ai cluster](../user/component-catalog.md#runai-cluster) | pending: live qualification against a Run:ai control plane tracked in [#3302](https://github.com/NVIDIA/aicr/issues/3302) |
 | `gke / h100 / cos / training / runai` | [Run:ai cluster](../user/component-catalog.md#runai-cluster) | pending: live qualification against a Run:ai control plane tracked in [#3302](https://github.com/NVIDIA/aicr/issues/3302) |
 

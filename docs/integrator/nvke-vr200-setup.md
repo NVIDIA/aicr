@@ -58,8 +58,9 @@ Three things it deliberately leaves out, each matching
 
 - **No performance block.** An all-reduce floor is a training claim; the MNNVL
   measurement stays with the training coordinate.
-- **No AI operator.** `robust_controller` therefore credits whatever operator
-  the cluster carries rather than one this recipe ships.
+- **No AI operator.** `robust_controller_check.go` takes its subject from the
+  recipe — `kubeflow-trainer`, else `dynamo-platform`, else skip — so the check
+  skips for this leaf, which is why the conformance list does not schedule it.
 - **No east-west NIC stack.** Serving through the Gateway API needs no RoCE
   rails, so neither `network-operator` nor `sriov-ib-networks` is declared.
 
@@ -80,13 +81,15 @@ endpoints rather than an external address — its LoadBalancer handling inspects
 
 ### Evidence
 
-Collected on a two-worker VR200 tenant cluster with no LoadBalancer present:
-**8 PASS, 1 SKIP, 0 FAIL**, with `ai_inference` PASS and `Programmed=True`.
-`cluster_autoscaling` skips on bare metal. Pending review in
-[#3695](https://github.com/NVIDIA/aicr/pull/3695), which also records two
-narrower results — `robust_controller` credited an operator the recipe does not
-declare, and `dra_support` passed without its MNNVL behavioral subtest because
-no pod held the ComputeDomain channel at collection time.
+Collected on a two-worker VR200 tenant cluster with no LoadBalancer present,
+with `ai_inference` PASS and `Programmed=True`. The set is pending in
+[#3695](https://github.com/NVIDIA/aicr/pull/3695) and is being recollected
+against the current collector, so no result count is quoted here.
+`cluster_autoscaling` skips on bare metal. #3695 also records two narrower
+results — `robust_controller` was credited to an operator this recipe does not
+declare, which the collector it ran under allowed and the current one does not,
+and `dra_support` passed without its MNNVL behavioral subtest because no pod
+held the ComputeDomain channel at collection time.
 
 ## What has been measured, and what has not
 
