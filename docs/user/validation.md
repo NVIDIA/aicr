@@ -1050,9 +1050,12 @@ on top of the per-check rule every run applies:
   `cluster-autoscaling` on every path that passes) leaves its requirement
   `OBSERVED`, which is not established either: the exit message names it,
   e.g. `cluster_autoscaling observed (cluster-autoscaling observed, not
-  demonstrated)`, and the remedy on a platform without a behavioral
-  autoscaling test is a `spec.validate.evidence.cncf.notApplicable`
-  justification, which renders `NOT APPLICABLE` and exits 0. Where a requirement has
+  demonstrated)`. Only a cluster with no cluster autoscaler at all (fixed-size
+  node pools, no Karpenter) may declare the requirement not applicable through
+  a `spec.validate.evidence.cncf.notApplicable` justification, which renders
+  `NOT APPLICABLE` and exits 0; a platform whose autoscaler is present but not
+  behaviorally demonstrated keeps `OBSERVED`, and the submission documents the
+  autoscaler through the vendor-config attestation instead (#3605). Where a requirement has
   alternative proofs (`secure_accelerator_access`: `secure-accelerator-access`
   on ordinary recipes, `slinky-slurm-gpu-access` on Slinky Slurm recipes) a
   passing alternative establishes it even when the primary check was skipped
