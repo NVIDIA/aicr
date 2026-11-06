@@ -1,0 +1,38 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Enables NVSentinel's CSP Health Monitor for GKE (Compute Engine maintenance
+# audit logs). Opt-in: compose it with a remediation step, which adds the
+# datastore the monitor stores events in. The per-cluster values come from the
+# bundle command; see docs/user/component-catalog.md#cloud-maintenance-events.
+
+kind: RecipeMixin
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: nvsentinel-csp-health-monitor-gcp
+spec:
+  componentRefs:
+    - name: nvsentinel
+      overrides:
+        global:
+          cspHealthMonitor:
+            enabled: true
+        csp-health-monitor:
+          cspName: gcp
+          # The only value the gate admits: at NVSentinel v1.28.0 acting on a
+          # maintenance event can release a node another notice still holds.
+          processingStrategy: STORE_ONLY
+          configToml:
+            # The chart default, stated so the mixin owns the lead time.
+            triggerQuarantineWorkflowTimeLimitMinutes: 30
