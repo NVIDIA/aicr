@@ -61,6 +61,7 @@ func init() {
 	registerCheck("CheckDriverOwnershipCoherence", CheckDriverOwnershipCoherence)
 	registerCheck("CheckMariaDBOperatorOwnershipCoherence", CheckMariaDBOperatorOwnershipCoherence)
 	registerCheck("CheckRDMANamespaceModeCoherent", CheckRDMANamespaceModeCoherent)
+	registerCheck("CheckRDMANamespaceModeEvidence", CheckRDMANamespaceModeEvidence)
 	registerCheck("CheckGKETCPXOInterfacesCoherence", CheckGKETCPXOInterfacesCoherence)
 	registerCheck("CheckNVSentinelDriverLabelDetectable", CheckNVSentinelDriverLabelDetectable)
 	registerCheck("CheckNVSentinelRuntimeClassCoherence", CheckNVSentinelRuntimeClassCoherence)

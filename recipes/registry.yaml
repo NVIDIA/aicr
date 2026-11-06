@@ -196,10 +196,19 @@ components:
     manifestsUseChartCRDs: true
     validations:
       # Advisory: the snapshot's RDMA network namespace mode
-      # (metadata.rdmaNamespaceMode) and rdmaCni.enabled disagree, or no
-      # evidence was recorded. Only the OKE GB300 manifests read rdmaCni.
+      # (metadata.rdmaNamespaceMode) and rdmaCni.enabled disagree. Only the
+      # OKE GB300 manifests read rdmaCni.
       - function: CheckRDMANamespaceModeCoherent
         severity: warning
+        conditions:
+          service:
+            - oke
+          accelerator:
+            - gb300
+      # Informational: no usable evidence to compare, as for a recipe built
+      # without a snapshot.
+      - function: CheckRDMANamespaceModeEvidence
+        severity: info
         conditions:
           service:
             - oke

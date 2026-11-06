@@ -23,14 +23,15 @@
 # Composition: the gb200/oke runtime-net.yaml scaffold, with the VFs attached
 # per pod instead of shared HCAs: node pods request four nvidia.com/mlnxnics
 # (the SR-IOV device plugin's VF resource) and name the recipe's rdma-net
-# NetworkAttachmentDefinition once per VF, which moves each VF's netdev and
-# RDMA device into the pod (exclusive RDMA netns mode). The VFs carry only
+# NetworkAttachmentDefinition once per VF, which moves each VF into the pod:
+# host-device alone in shared RDMA netns mode (the recipe default), chained
+# with the rdma CNI in exclusive mode (rdmaCni.enabled=true). The VFs carry only
 # IPv6 SLAAC addresses; NCCL uses their RoCEv2 GID (index 3). NCCL
 # reads the node's GB300 topology from /etc/nccl/topo.xml, which the recipe's
 # nvidia-tuned package writes on every GPU node.
 #
 # Cluster prerequisites: the gb300-oke-ubuntu-training network-operator
-# manifests (SR-IOV device plugin, Multus, the rdma CNI, and the rdma-net
+# manifests (SR-IOV device plugin, Multus, and the rdma-net
 # NetworkAttachmentDefinition, which the annotation below expects in the
 # default nvidia-network-operator namespace) and Flannel pod networking, which leaves IPv6 enabled in pods.
 # No NVreg_GrdmaPciTopoCheckOverride: see the leaf's gpu-operator comment.

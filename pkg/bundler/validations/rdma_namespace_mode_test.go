@@ -68,18 +68,8 @@ func TestCheckRDMANamespaceModeCoherent(t *testing.T) {
 			wantWarnings: 1,
 			wantContains: "--set network-operator:rdmaCni.enabled=true",
 		},
-		{
-			name:         "no evidence notes the unchecked requirement",
-			recipeResult: result("", rdmaCNI(false)),
-			wantWarnings: 1,
-			wantContains: "needs shared",
-		},
-		{
-			name:         "unknown evidence notes it",
-			recipeResult: result(recipe.RDMANamespaceModeUnknown, rdmaCNI(true)),
-			wantWarnings: 1,
-			wantContains: "not exclusive or shared",
-		},
+		{name: "no evidence is left to the evidence check", recipeResult: result("", rdmaCNI(false))},
+		{name: "unknown evidence is left to the evidence check", recipeResult: result(recipe.RDMANamespaceModeUnknown, rdmaCNI(true))},
 	}
 
 	for _, tt := range tests {
@@ -94,6 +84,68 @@ func TestCheckRDMANamespaceModeCoherent(t *testing.T) {
 			}
 			if tt.wantContains != "" && !strings.Contains(warnings[0], tt.wantContains) {
 				t.Errorf("warning %q does not contain %q", warnings[0], tt.wantContains)
+			}
+		})
+	}
+}
+
+func TestCheckRDMANamespaceModeEvidence(t *testing.T) {
+	t.Parallel()
+
+	const component = "network-operator"
+	result := func(mode string, overrides map[string]any) *recipe.RecipeResult {
+		r := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{{Name: component, Overrides: overrides}},
+		}
+		r.Metadata.RDMANamespaceMode = mode
+		return r
+	}
+	rdmaCNI := func(enabled any) map[string]any {
+		return map[string]any{"rdmaCni": map[string]any{"enabled": enabled}}
+	}
+
+	tests := []struct {
+		name         string
+		recipeResult *recipe.RecipeResult
+		wantNotes    int
+		wantContains string
+	}{
+		{name: "nil recipe skipped"},
+		{name: "recipe without rdmaCni skipped", recipeResult: result("", nil)},
+		{name: "shared evidence is silent", recipeResult: result(recipe.RDMANamespaceModeShared, rdmaCNI(true))},
+		{name: "exclusive evidence is silent", recipeResult: result(recipe.RDMANamespaceModeExclusive, rdmaCNI(false))},
+		{
+			name:         "no evidence names the mode the default attachment needs",
+			recipeResult: result("", rdmaCNI(false)),
+			wantNotes:    1,
+			wantContains: "needs shared",
+		},
+		{
+			name:         "no evidence names the mode the rdma CNI needs",
+			recipeResult: result("", rdmaCNI(true)),
+			wantNotes:    1,
+			wantContains: "needs exclusive",
+		},
+		{
+			name:         "unrecognized evidence notes it",
+			recipeResult: result(recipe.RDMANamespaceModeUnknown, rdmaCNI(true)),
+			wantNotes:    1,
+			wantContains: "not exclusive or shared",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			notes, errs := CheckRDMANamespaceModeEvidence(context.Background(), component, tt.recipeResult, nil, nil)
+			if len(errs) != 0 {
+				t.Fatalf("errors = %v, want none", errs)
+			}
+			if len(notes) != tt.wantNotes {
+				t.Fatalf("notes = %v, want %d", notes, tt.wantNotes)
+			}
+			if tt.wantContains != "" && !strings.Contains(notes[0], tt.wantContains) {
+				t.Errorf("note %q does not contain %q", notes[0], tt.wantContains)
 			}
 		})
 	}

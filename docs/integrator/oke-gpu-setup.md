@@ -267,6 +267,10 @@ without a selector that includes the CPU pools.
 GPU_POOL_LABEL="nodeGroup=gpu"  # replace with a label only your GB300 nodes carry
 
 aicr recipe --snapshot snapshot.yaml --intent training -o recipe.yaml
+# operator-managed (NvidiaGpuPlugin add-on removed): select the value explicitly,
+# since an absent add-on fails the oci-managed default.
+#   aicr recipe --snapshot snapshot.yaml --intent training \
+#     --profile gpuStack=operator-managed -o recipe.yaml
 aicr bundle -r recipe.yaml --accelerated-node-selector "${GPU_POOL_LABEL}" -o ./bundles
 ```
 
@@ -277,9 +281,10 @@ aicr bundle -r recipe.yaml --accelerated-node-selector "${GPU_POOL_LABEL}" -o ./
   network namespaces. An RDMA VF moved into such a pod never gets its IPv6
   address, so GID index 3 (the RoCEv2 IPv6 GID) stays empty and NCCL fails to
   connect. The CNI cannot be changed after the cluster is created.
-- **`NvidiaGpuPlugin` add-on with `deviceListStrategy=volume-mounts`,** as
-  for every OKE recipe; see
-  [Container Toolkit Hardening](#container-toolkit-hardening).
+- **`NvidiaGpuPlugin` add-on matching the `gpuStack` value.** Under
+  `oci-managed`, installed with `deviceListStrategy=volume-mounts`, as for every
+  OKE recipe (see [Container Toolkit Hardening](#container-toolkit-hardening));
+  under `operator-managed`, removed.
 - **An imported image compatible with `BM.GPU.GB300.4`.** An image imported
   from Oracle's `.oci` file may list no GPU shapes, and launching a GB300 node
   from it fails with `Shape BM.GPU.GB300.4 is incompatible with image`. Add
@@ -329,7 +334,9 @@ it. To use it, add `options ib_core netns_mode=0` to
 `OS.kmod-param./sys/module/ib_core/parameters/netns_mode`, and `aicr recipe`
 copies it into the recipe as `metadata.rdmaNamespaceMode`. `aicr bundle` warns
 when that mode and `rdmaCni.enabled` disagree, and names the setting that
-fixes it. Check a node's mode with
+fixes it; a recipe without the reading gets an informational note instead. The
+reading comes from the one node the snapshot agent runs on, so keep every
+GB300 node in the same mode: check each with
 `cat /sys/module/ib_core/parameters/netns_mode`.
 
 ### Node preparation
@@ -369,8 +376,8 @@ the others are assumed:
 | Ubuntu 24.04 node image | checked |
 | 6.14 kernel line or later | checked |
 | 64k-page arm64 kernel, which the GB300 tuning profile sizes hugepages for | assumed (bundle-time advisory only) |
-| `NvidiaGpuPlugin` add-on installed and `ACTIVE` | checked (via the `gpuStack` profile) |
-| `NvidiaGpuPlugin` configured with `deviceListStrategy=volume-mounts` | checked (`K8s.oke-gpu-plugin.device-list-strategy`, via the `gpuStack` profile) |
+| `NvidiaGpuPlugin` add-on installed and `ACTIVE` under `oci-managed`, absent under `operator-managed` | checked (via the `gpuStack` profile) |
+| `NvidiaGpuPlugin` configured with `deviceListStrategy=volume-mounts` (`oci-managed`) | checked (`K8s.oke-gpu-plugin.device-list-strategy`, via the `gpuStack` profile) |
 | `NvidiaNetworkOperator` add-on absent | checked |
 | Flannel pod networking | assumed |
 | RDMA network namespace mode matching `rdmaCni.enabled` (see [Fabric](#fabric)) | bundle-time advisory (`aicr bundle` warns on a mismatch) |
