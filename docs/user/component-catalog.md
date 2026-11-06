@@ -75,9 +75,9 @@ Every component has a bundle class, `core` or `ops` ([ADR-018](https://github.co
 
 ## VR200 Preview coverage
 
-> **`service=rke2` and `service=nvke` with `accelerator=vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. Published validation evidence exists for the four RKE2 coordinates at [validation.aicr.run](https://validation.aicr.run/); none is published yet for the NVKE coordinate. Freshness against the current recipe is captured in the **Evidence status** note below.
+> **`service=rke2` and `service=nvke` with `accelerator=vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. Published validation evidence exists for the four RKE2 coordinates at [validation.aicr.run](https://validation.aicr.run/); none is published yet for either NVKE coordinate. Freshness against the current recipe is captured in the **Evidence status** note below.
 
-Five coordinates ship in v1 — four on RKE2 and one on NVKE:
+Six coordinates ship in v1 — four on RKE2 and two on NVKE:
 
 | Coordinate | Evidence |
 |---|---|
@@ -86,12 +86,13 @@ Five coordinates ship in v1 — four on RKE2 and one on NVKE:
 | `rke2 / vr200 / ubuntu / inference` | [validation.aicr.run/#/rke2/vr200-ubuntu/inference](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference) |
 | `rke2 / vr200 / ubuntu / inference / dynamo` | [validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo) |
 | `nvke / vr200 / ubuntu / training` | none published yet |
+| `nvke / vr200 / ubuntu / inference` | none published yet; evidence pending in [#3695](https://github.com/NVIDIA/aicr/pull/3695) |
 
 The platform-neutral `inference` coordinate is the base the Dynamo leaf inherits from; it exists so that resolving `rke2/vr200/ubuntu/inference` **without** `--platform` resolves to the VR200-safe overlay rather than falling through to the generic `rke2-inference` base. It carries the same VR200 hardware overrides as its Dynamo child.
 
 > **Evidence status.** The recipes for the three original coordinates have changed since evidence publication (`aicr evidence digest` reports a mismatch against each pointer's `predicate.recipe.digest`); treat that linked evidence as historical precedent for the recipe content at publication time, not as validating the current recipe. The `training / kubeflow` evidence is current — it was published from a three-phase run against the recipe as it ships today.
 
-> **The four RKE2 coordinates carry the same node-level prerequisites** — the 64k-page kernel, the Skyhook kernel-cmdline reboots, and the mandatory host `nvidia-imex` masking. The NVKE coordinate does not: it requires the `nvidia-bos-64k` kernel line specifically, ships no Skyhook tuning, and is scoped to a single NVLink domain. See [NVKE VR200 Setup](../integrator/nvke-vr200-setup.md). Other requirements differ by intent (the inference leaves additionally cap Kubernetes at `< 1.36.0`). See [RKE2 VR200 Setup](../integrator/rke2-vr200-setup.md) before deploying any RKE2 coordinate.
+> **The four RKE2 coordinates carry the same node-level prerequisites** — the 64k-page kernel, the Skyhook kernel-cmdline reboots, and the mandatory host `nvidia-imex` masking. The two NVKE coordinates do not: they require the `nvidia-bos-64k` kernel line specifically and ship no Skyhook tuning. The training coordinate is scoped to a single NVLink domain; the inference coordinate makes no MNNVL claim and has no external LoadBalancer, so its gateway is reachable only in-cluster or via NodePort. See [NVKE VR200 Setup](../integrator/nvke-vr200-setup.md). Other requirements differ by intent (the RKE2 inference leaves additionally cap Kubernetes at `< 1.36.0`; the NVKE leaves do not). See [RKE2 VR200 Setup](../integrator/rke2-vr200-setup.md) before deploying any RKE2 coordinate.
 
 For the definitional Preview-vs-Supported distinction, see [Preview recipes](../integrator/recipe-development.md#preview-recipes). For bare-metal cluster prerequisites, Skyhook reboot behavior, and known gaps on this coordinate, see [RKE2 VR200 Setup](../integrator/rke2-vr200-setup.md).
 
