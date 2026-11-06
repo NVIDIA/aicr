@@ -436,9 +436,31 @@ func TestCheckNVSentinelRemediationPipelineCoherent(t *testing.T) {
 			want: []string{wantNotDeployed, wantNotDeployed},
 		},
 		{
+			name:         "CSP monitor on the observe step",
+			recipeResult: sentinel(with(observe(), "cspHealthMonitor", on)),
+		},
+		{
+			name:         "CSP monitor with no datastore",
+			recipeResult: sentinel(map[string]any{"cspHealthMonitor": on}),
+			want:         []string{wantDatastore},
+		},
+		{
+			name: "CSP monitor on the Percona datastore without its components",
+			recipeResult: bare(map[string]any{
+				"datastore": percona(), "cspHealthMonitor": on,
+			}),
+			want: []string{wantNotDeployed, wantNotDeployed},
+		},
+		{
 			name:          "dynamic event exporter toggle guards the datastore",
 			recipeResult:  sentinel(map[string]any{}),
 			bundlerConfig: dynamic("global.eventExporter.enabled", "global.datastore.provider"),
+			want:          []string{wantDynamic, wantDynamic},
+		},
+		{
+			name:          "dynamic CSP monitor toggle guards the datastore",
+			recipeResult:  sentinel(map[string]any{}),
+			bundlerConfig: dynamic("global.cspHealthMonitor.enabled", "global.datastore.provider"),
 			want:          []string{wantDynamic, wantDynamic},
 		},
 		{

@@ -23,7 +23,9 @@
 # rebooted node.
 # It also composes quarantine with nvsentinel-slinky-drainer onto the EKS Slurm
 # leaf, which adds the plugin and switches node-drainer to customDrain, the
-# event exporter onto the observe step, and node validation on its own.
+# event exporter onto the observe step, node validation on its own, and each
+# CSP Health Monitor mixin onto a leaf of its own service: aws on EKS, gcp on
+# GKE.
 
 name: KWOK NVSentinel Remediation
 
@@ -136,6 +138,12 @@ jobs:
           # and the remediation step's cordon and drain.
           - mixin: 'nvsentinel-remediation,nvsentinel-health-events-analyzer,nvsentinel-node-validation,nvsentinel-maintenance-request'
             deployer: helm
+          # The CSP Health Monitor (#2620), once per cloud on its own service.
+          - mixin: nvsentinel-quarantine,nvsentinel-csp-health-monitor-aws
+            deployer: helm
+          - mixin: nvsentinel-observe,nvsentinel-csp-health-monitor-gcp
+            deployer: helm
+            recipe: gb300-gke-cos-training
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1

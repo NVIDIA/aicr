@@ -82,6 +82,7 @@ func init() {
 	registerCheck("CheckNVSentinelNodeValidationCoherent", CheckNVSentinelNodeValidationCoherent)
 	registerCheck("CheckNVSentinelPostRemediationValidationCoherent", CheckNVSentinelPostRemediationValidationCoherent)
 	registerCheck("CheckNVSentinelMaintenanceRequestCoherent", CheckNVSentinelMaintenanceRequestCoherent)
+	registerCheck("CheckNVSentinelCSPHealthMonitorCoherent", CheckNVSentinelCSPHealthMonitorCoherent)
 	registerCheck("CheckNVSentinelMongoDBCoherent", CheckNVSentinelMongoDBCoherent)
 	registerCheck("CheckNVSentinelDatastorePrerequisites", CheckNVSentinelDatastorePrerequisites)
 	registerCheck("CheckNKTPExportersHaveBackend", CheckNKTPExportersHaveBackend)
@@ -2679,10 +2680,10 @@ func nvsentinelDryRun(values map[string]any) (dryRun, wellFormed bool) {
 // others, so every broken combination below deploys cleanly:
 //
 //   - fault-quarantine, node-drainer, fault-remediation,
-//     health-events-analyzer and event-exporter read a datastore: a
-//     global.datastore.provider of mongodb or postgresql, and, when it is
-//     nvsentinel-mongodb's, that component and psmdb-operator deployed
-//     alongside (see nvsentinelDatastoreViolations).
+//     health-events-analyzer, event-exporter and csp-health-monitor read a
+//     datastore: a global.datastore.provider of mongodb or postgresql, and,
+//     when it is nvsentinel-mongodb's, that component and psmdb-operator
+//     deployed alongside (see nvsentinelDatastoreViolations).
 //   - each stage acts only on events the one before it marked, so
 //     node-drainer needs fault-quarantine and fault-remediation needs
 //     node-drainer.
@@ -2731,6 +2732,7 @@ func CheckNVSentinelRemediationPipelineCoherent(ctx context.Context, componentNa
 	janitorProvider := nvsentinelSubchartRenders(values, "janitorProvider")
 	analyzer := nvsentinelSubchartRenders(values, "healthEventsAnalyzer")
 	exporter := nvsentinelSubchartRenders(values, "eventExporter")
+	cspMonitor := nvsentinelSubchartRenders(values, "cspHealthMonitor")
 
 	// Dynamic guard: a dynamic path matters only when a rule reading it can
 	// still fire, i.e. when that rule's stage renders or its toggle is
@@ -2742,11 +2744,13 @@ func CheckNVSentinelRemediationPipelineCoherent(ctx context.Context, componentNa
 		nvsentinelFaultQuarantineEnabledPath, nvsentinelNodeDrainerEnabledPath,
 		nvsentinelFaultRemediationEnabledPath, nvsentinelJanitorEnabledPath, nvsentinelAnalyzerEnabledPath,
 		eventExporterEnabledPath,
+		cspMonitorEnabledPath,
 	}
 	remediationCanRun := remediation || dynamic(nvsentinelFaultRemediationEnabledPath)
 	readerCanRun := remediationCanRun || quarantine || dynamic(nvsentinelFaultQuarantineEnabledPath) ||
 		drainer || dynamic(nvsentinelNodeDrainerEnabledPath) || analyzer || dynamic(nvsentinelAnalyzerEnabledPath) ||
-		exporter || dynamic(eventExporterEnabledPath)
+		exporter || dynamic(eventExporterEnabledPath) ||
+		cspMonitor || dynamic(cspMonitorEnabledPath)
 	if readerCanRun {
 		guarded = append(guarded, nvsentinelMongodbStoreEnabledPath, nvsentinelDatastoreProviderPath,
 			nvsentinelDatastoreSecretPath, nvsentinelDatastoreAuthMechPath, nvsentinelDatastoreClientCertKey)
@@ -2794,7 +2798,7 @@ func CheckNVSentinelRemediationPipelineCoherent(ctx context.Context, componentNa
 	}
 
 	var errs []error
-	if quarantine || drainer || remediation || analyzer || exporter {
+	if quarantine || drainer || remediation || analyzer || exporter || cspMonitor {
 		errs = append(errs, nvsentinelDatastoreViolations(recipeResult, bundlerConfig, componentName, values)...)
 	}
 	// NVSentinel v1.28.0's PostgreSQL client has no $lookup or $replaceRoot,
@@ -3195,7 +3199,7 @@ func nvsentinelDatastoreViolations(recipeResult *recipe.RecipeResult, bundlerCon
 	embedded := nvsentinelSubchartRenders(values, "mongodbStore")
 	if embedded {
 		errs = append(errs, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("component %q: %s is on with a remediation stage, health-events-analyzer or event-exporter -- "+
+			fmt.Sprintf("component %q: %s is on with a remediation stage, health-events-analyzer, event-exporter or csp-health-monitor -- "+
 				"the embedded MongoDB is not supported here. Use a remediation step mixin, which bundles "+
 				"Percona separately, or set it to false and configure %s", componentName,
 				nvsentinelMongodbStoreEnabledPath, nvsentinelDatastoreProviderPath)))
@@ -3210,7 +3214,7 @@ func nvsentinelDatastoreViolations(recipeResult *recipe.RecipeResult, bundlerCon
 		return errs
 	case !providerSet && providerIsString:
 		errs = append(errs, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("component %q: a remediation stage, health-events-analyzer or event-exporter is enabled with no "+
+			fmt.Sprintf("component %q: a remediation stage, health-events-analyzer, event-exporter or csp-health-monitor is enabled with no "+
 				"datastore -- they read health events from it and crash-loop without one. Use a remediation "+
 				"step mixin or set %s to mongodb or postgresql", componentName, nvsentinelDatastoreProviderPath)))
 		return errs
@@ -3221,7 +3225,7 @@ func nvsentinelDatastoreViolations(recipeResult *recipe.RecipeResult, bundlerCon
 		}
 		errs = append(errs, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("component %q: %s is %s -- NVSentinel supports only \"mongodb\" and \"postgresql\", "+
-				"and the remediation stages, health-events-analyzer and event-exporter crash-loop on any other provider",
+				"and the remediation stages, health-events-analyzer, event-exporter and csp-health-monitor crash-loop on any other provider",
 				componentName, nvsentinelDatastoreProviderPath, got)))
 		return errs
 	}
