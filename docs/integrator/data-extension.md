@@ -349,14 +349,24 @@ from a per-run namespace named `aicr-inference-perf-<run>`, so the Gateway's
 per-run namespace carries, `app.kubernetes.io/component=inference-perf`); the
 shipped agentgateway Gateway does. A listener that keeps the Gateway API
 default (`Same`) rejects the route, and the run fails at once with the
-listener's `Accepted` reason rather than as a readiness timeout.
+listener's `Accepted` reason rather than as a readiness timeout. The
+`inference-gateway` conformance check's traffic phase attaches its HTTPRoute
+from a per-run namespace `gateway-traffic-<run>` that carries the same label,
+so a listener admitting either form admits both; a listener that rejects it
+fails that check after the route-accept wait (`GatewayTrafficRouteAcceptTimeout`,
+2 minutes) with a timeout error that carries the `Accepted` reason the
+listener reported, such as `NotAllowedByListeners`.
 
 `aicr validate --cncf-submission` runs the same `inference-gateway`
 conformance check and renders its result as the `ai_inference` evidence page,
 so a recipe that declares no inference gateway leaves that requirement not
 tested rather than certifying a Gateway the recipe does not ship. `PASS`
-requires the GatewayClass `Accepted`, the Gateway `Programmed` and the
-InferencePool CRD `Established` for the declared Gateway.
+requires, for the declared Gateway, the GatewayClass `Accepted`, the Gateway
+`Programmed`, the InferencePool CRD `Established`, the gateway's network
+exposure and data-plane readiness checks, and the traffic phase: the test HTTPRoute
+`Accepted` with `ResolvedRefs` on the listener the probe targets, every
+header-matched request reaching the canary backend, and one weighted round
+splitting the rest within tolerance of the declared weights.
 
 ## Precedence rules
 

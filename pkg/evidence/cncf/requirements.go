@@ -81,7 +81,7 @@ var evidencePages = []evidencePage{
 	{
 		RequirementID: "ai_inference",
 		Title:         "Inference API Gateway",
-		Description:   "Demonstrates that the cluster supports the Kubernetes Gateway API for AI/ML inference routing with an operational GatewayClass and Gateway. The implementation observed is recorded in the check output.",
+		Description:   "Demonstrates that the cluster supports the Kubernetes Gateway API for AI/ML inference routing: an operational GatewayClass and Gateway, and an HTTPRoute on that Gateway that sends header-matched requests to a canary backend and splits the rest 70/30 by weight, measured from a probe pod. The implementation observed is recorded in the check output.",
 		File:          "inference-gateway.md",
 		Checks:        []string{checkInferenceGateway},
 	},

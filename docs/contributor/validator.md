@@ -338,6 +338,65 @@ runtime, whose scheduling vocabulary the bundler bakes in, so the context
 tolerations do not apply to it. The Dynamo path records the existing
 `DynamoGraphDeployment` conditions as an observation and creates no CR.
 
+`inference-gateway` reads the recipe's Gateway once (profile from
+`pkg/validator/v1.ResolveInferenceGatewayProfile`) and hands it to the
+data-plane, exposure and traffic steps. The traffic phase
+(`validators/conformance/inference_gateway_traffic.go`) mirrors the upstream
+`TestGatewayAPIInference` with one difference: the HTTPRoute attaches to the
+recipe's Gateway across namespaces instead of a Gateway the test creates, so
+the data plane under test is the one AICR deployed. Before creating anything
+it resolves the endpoint the probe posts to from the Gateway's first
+hostname-free HTTP listener (a hostname-bound or missing HTTP listener fails
+with `ErrCodeInvalidRequest`, as the performance validator does; the per-run
+`.conformance.invalid` hostname never intersects a listener hostname, so a
+hostname-bound listener would never accept the route), and the HTTPRoute's
+parentRef names that listener as its `sectionName`, so the `Accepted` wait
+judges the listener the probe's requests arrive on and an acceptance through
+another listener on the Gateway does not count: the proxy
+Service's in-cluster name for a `service-endpoints` data plane, the first
+`IPAddress` or `Hostname` status address for `gateway-address`. With a
+declared `gateway-address` profile the probe connects to that status address
+from inside the cluster, so the address's `loadBalancerSourceRanges` and the
+load balancer's hairpin behavior apply to it; no shipped recipe declares that
+profile (agentgateway is `service-endpoints`). In a per-run namespace
+(`gateway-traffic-<token>`, the shared ownership token and UID-guarded
+cleanup, labeled `app.kubernetes.io/component=inference-perf` so a listener
+whose `allowedRoutes` selector admits the performance validator's namespaces
+admits it too, and without `app.kubernetes.io/managed-by` so the performance
+validator's stale-namespace prune never selects it) it creates two CPU backends (`model-v1`, `model-v2`: Deployment +
+Service each, `defaults.PythonProbeImage`, answering every request with their
+own name) and one HTTPRoute with the per-run hostname
+`ai-conformance-<token>.conformance.invalid`, which the probe sends as the
+`Host` header of every request, and two rules that both match the per-run
+path prefix `/ai-conformance-<token>`: the first additionally matches
+`OpenAI-Project: ai-conformance-canary` exactly and routes to `model-v2`, the
+default rule splits 70/30. The hostname and path are what isolate the test
+route from a tenant's route on the same listener: Gateway API ranks routes by
+hostname, then longest path, then method, then header matches, and a route
+with no hostname matches any `Host`, so rules with neither would lose every
+request, header-matched ones included, to a pre-existing `/v1` route; with
+the exact per-run hostname a tenant route carrying another hostname does not
+match the probe's requests at all, a hostname-less one ranks below it, and a
+tenant route can outrank the probe only by matching that exact hostname (and
+path). The routes already attached to the Gateway are recorded
+(`Gateway traffic: routes already attached`, a WARNING when there are any)
+and named in a verdict failure. It waits for the Gateway to report the route
+`Accepted` and `ResolvedRefs` (watch, re-Get on a closed channel; the
+`Gateway traffic: HTTPRoute status` artifact records what the Gateway did
+report, such as `NotAllowedByListeners`), then runs a probe pod that waits
+for the route to go live, sends 20 header requests and up to 10 rounds of 500
+unmatched requests, printing `HEADER` and `WEIGHTED` count lines the Go side
+re-evaluates: all header requests must reach `model-v2`, and one weighted
+round must land `model-v1` within `defaults.GatewayTrafficTolerance` of 70%
+with `other=0` (a failed request or one answered by a non-test backend). The
+`Gateway traffic verdict` artifact carries every round's counts and the step
+that decided (`deploy`, `route`, `probe`, `verdict`). Every pod honors the
+context tolerations; the HTTPRoute is deleted explicitly before the namespace
+so it does not stay attached to the recipe's Gateway while the namespace
+drains. The bounds (`defaults.GatewayTraffic*`) sit under the
+`inferenceGatewayWorkBudget` the 15m catalog timeout covers; a recipe that
+declares no gateway still skips before the phase.
+
 `cluster-autoscaling` drives a scale event only on the Karpenter path and
 records that scale-up as an observation (scale-down is not observed). The EKS,
 AKS and GKE paths record autoscaler presence, GPU pool membership, the

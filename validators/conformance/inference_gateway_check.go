@@ -72,9 +72,17 @@ func routeCountText(report *gatewayDataPlaneReport) string {
 // inference gateway (validators.ResolveInferenceGatewayProfile): its
 // GatewayClass must be accepted, its Gateway programmed, the Gateway API and
 // InferencePool CRDs present, and its data plane serving by the probe the
-// profile names. The Gateway object is read once and handed to the data-plane
-// and exposure steps, so the three verdicts come from one observation.
+// profile names. The Gateway object is read once and handed to the
+// data-plane, exposure and traffic steps, so every verdict comes from one
+// observation. After the status checks, the traffic phase
+// (runGatewayTrafficPhase) routes requests through that Gateway: a
+// header-matched canary and a 70/30 weighted split over two CPU backends, as
+// the upstream TestGatewayAPIInference asserts.
 func CheckInferenceGateway(ctx *validators.Context) error {
+	return checkInferenceGateway(ctx, runGatewayTrafficPhase)
+}
+
+func checkInferenceGateway(ctx *validators.Context, traffic gatewayTrafficRunner) error {
 	resolved, found, err := validators.ResolveInferenceGatewayProfile(ctx)
 	if err != nil {
 		return err
@@ -185,7 +193,10 @@ func CheckInferenceGateway(ctx *validators.Context) error {
 	if err := assessGatewayExposure(ctx, profile, gw); err != nil {
 		return err
 	}
-	return nil
+
+	// 6. Traffic: header-routed canary and weighted split through the
+	// Gateway, the behavioral half of the requirement.
+	return traffic(ctx, profile, gw)
 }
 
 func gatewayGetCommand(profile *validators.InferenceGatewayProfile) string {
@@ -501,28 +512,9 @@ func validateGatewayDataPlane(ctx *validators.Context, profile *validators.Infer
 	if listErr == nil {
 		report.TotalHTTPRoutes = len(httpRouteList.Items)
 		var attached int
-		for _, route := range httpRouteList.Items {
-			parentRefs, found, _ := unstructured.NestedSlice(route.Object, "spec", "parentRefs")
-			if !found {
-				continue
-			}
-			for _, ref := range parentRefs {
-				refMap, ok := ref.(map[string]any)
-				if !ok {
-					continue
-				}
-				// A parentRef names its Gateway's namespace only when it
-				// differs from the route's own, so a same-named Gateway in
-				// another namespace must not count.
-				name, _, _ := unstructured.NestedString(refMap, "name")
-				namespace, _, _ := unstructured.NestedString(refMap, "namespace")
-				if namespace == "" {
-					namespace = route.GetNamespace()
-				}
-				if name == profile.GatewayName && namespace == profile.Namespace {
-					attached++
-					break
-				}
+		for i := range httpRouteList.Items {
+			if httpRouteTargetsGateway(&httpRouteList.Items[i], profile) {
+				attached++
 			}
 		}
 		report.AttachedHTTPRoutes = attached
