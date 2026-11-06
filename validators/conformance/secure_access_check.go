@@ -205,6 +205,11 @@ type gpuTestRun struct {
 	claimTemplateName string
 	imexPodName       string
 
+	// namespaceLabels are stamped on the namespace beside the ownership
+	// label; a check sets them when something outside the run selects the
+	// namespace by label (a Gateway listener's allowedRoutes selector).
+	namespaceLabels map[string]string
+
 	nsObserved     bool
 	nsUID          types.UID
 	nsForeign      bool
@@ -272,10 +277,16 @@ func newGPUTestRun() (*gpuTestRun, error) {
 // it and capture its UID. Anything else is a FOREIGN namespace: fail the
 // check with ErrCodeConflict and mark the run so cleanup never deletes it.
 func createGPUTestNamespace(ctx context.Context, clientset kubernetes.Interface, run *gpuTestRun) error {
+	nsLabels := map[string]string{gpuTestRunLabel: run.token}
+	for k, v := range run.namespaceLabels {
+		if k != gpuTestRunLabel {
+			nsLabels[k] = v
+		}
+	}
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   run.namespace,
-			Labels: map[string]string{gpuTestRunLabel: run.token},
+			Labels: nsLabels,
 		},
 	}
 	created, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})

@@ -27,6 +27,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	"github.com/NVIDIA/aicr/validators"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -289,6 +290,12 @@ func newGatewayTrafficScenario(clientset kubernetes.Interface, dynClient dynamic
 		return nil, err
 	}
 	run.namespace = gatewayTrafficTestPrefix + run.token
+	// The documented listener contract admits routes from namespaces labeled
+	// app.kubernetes.io/component=inference-perf (the performance
+	// validator's per-run namespaces), so the traffic namespace carries that
+	// label too; labels.ManagedBy is deliberately absent, since the
+	// performance validator's stale-namespace prune selects on both.
+	run.namespaceLabels = map[string]string{labels.Component: labels.ValueInferencePerf}
 	s := &gatewayTrafficScenario{
 		clientset:           clientset,
 		dynClient:           dynClient,
@@ -581,8 +588,8 @@ func (s *gatewayTrafficScenario) deploy(ctx *validators.Context) error {
 	}
 	recordRawTextArtifact(ctx, "Gateway traffic: test backends",
 		fmt.Sprintf("kubectl get deploy,svc -n %s", ns),
-		fmt.Sprintf("Namespace:   %s\nBackends:    %s, %s (Deployment + Service each, 1 replica, image %s, no accelerator, port %s/%d)\nEach backend answers every request with its own name.",
-			ns, gatewayTrafficPrimary, gatewayTrafficAlternate, defaults.PythonProbeImage, gatewayTrafficPortName, gatewayTrafficBackendPort))
+		fmt.Sprintf("Namespace:   %s (label %s=%s, as the documented listener selector admits)\nBackends:    %s, %s (Deployment + Service each, 1 replica, image %s, no accelerator, port %s/%d)\nEach backend answers every request with its own name.",
+			ns, labels.Component, labels.ValueInferencePerf, gatewayTrafficPrimary, gatewayTrafficAlternate, defaults.PythonProbeImage, gatewayTrafficPortName, gatewayTrafficBackendPort))
 
 	for _, name := range []string{gatewayTrafficPrimary, gatewayTrafficAlternate} {
 		if _, err := waitForDeploymentAvailable(ctx, ns, name, s.backendReadyTimeout); err != nil {

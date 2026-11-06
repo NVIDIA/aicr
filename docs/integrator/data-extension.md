@@ -347,7 +347,10 @@ from a per-run namespace named `aicr-inference-perf-<run>`, so the Gateway's
 `HTTP` listener must allow routes from that namespace
 (`allowedRoutes.namespaces.from: All`, or a `Selector` on the label every
 per-run namespace carries, `app.kubernetes.io/component=inference-perf`); the
-shipped agentgateway Gateway does. A listener that keeps the Gateway API
+shipped agentgateway Gateway does. The `inference-gateway` conformance check's
+traffic phase attaches its HTTPRoute from a per-run namespace
+`gateway-traffic-<run>` that carries the same label, so a listener admitting
+either form admits both. A listener that keeps the Gateway API
 default (`Same`) rejects the route, and the run fails at once with the
 listener's `Accepted` reason rather than as a readiness timeout.
 

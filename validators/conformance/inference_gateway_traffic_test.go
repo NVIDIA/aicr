@@ -24,6 +24,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	"github.com/NVIDIA/aicr/validators"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -719,6 +720,37 @@ func TestGatewayTrafficRunWithCleanup_NamespaceCreateFailure(t *testing.T) {
 				t.Errorf("phase = %q, want none — the cycle must not start without a namespace", s.phase)
 			}
 		})
+	}
+}
+
+// TestGatewayTrafficNamespaceCarriesListenerSelectorLabel pins that the
+// traffic namespace carries the label the documented listener selector
+// admits (docs/integrator/data-extension.md) beside its ownership label, and
+// not labels.ManagedBy, which would put it in the performance validator's
+// stale-namespace prune.
+func TestGatewayTrafficNamespaceCarriesListenerSelectorLabel(t *testing.T) {
+	t.Parallel()
+	profile := agentgatewayProfile()
+	c := k8sfake.NewClientset()
+	s, err := newGatewayTrafficScenario(c, newRouteFakeDynamicClient(), profile, trafficTestGateway(profile, nil, nil), nil)
+	if err != nil {
+		t.Fatalf("newGatewayTrafficScenario: %v", err)
+	}
+	if createErr := createGPUTestNamespace(context.Background(), c, s.testRun); createErr != nil {
+		t.Fatalf("createGPUTestNamespace: %v", createErr)
+	}
+	ns, getErr := c.CoreV1().Namespaces().Get(context.Background(), s.testRun.namespace, metav1.GetOptions{})
+	if getErr != nil {
+		t.Fatalf("get namespace: %v", getErr)
+	}
+	if ns.Labels[labels.Component] != labels.ValueInferencePerf {
+		t.Errorf("namespace labels = %v, want %s=%s", ns.Labels, labels.Component, labels.ValueInferencePerf)
+	}
+	if ns.Labels[gpuTestRunLabel] != s.testRun.token {
+		t.Errorf("namespace labels = %v, want the ownership label %s=%s", ns.Labels, gpuTestRunLabel, s.testRun.token)
+	}
+	if _, managed := ns.Labels[labels.ManagedBy]; managed {
+		t.Errorf("namespace carries %s, which the performance validator's prune selects on: %v", labels.ManagedBy, ns.Labels)
 	}
 }
 

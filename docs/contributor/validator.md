@@ -355,7 +355,10 @@ from inside the cluster, so the address's `loadBalancerSourceRanges` and the
 load balancer's hairpin behavior apply to it; no shipped recipe declares that
 profile (agentgateway is `service-endpoints`). In a per-run namespace
 (`gateway-traffic-<token>`, the shared ownership token and UID-guarded
-cleanup) it creates two CPU backends (`model-v1`, `model-v2`: Deployment +
+cleanup, labeled `app.kubernetes.io/component=inference-perf` so a listener
+whose `allowedRoutes` selector admits the performance validator's namespaces
+admits it too, and without `app.kubernetes.io/managed-by` so the performance
+validator's stale-namespace prune never selects it) it creates two CPU backends (`model-v1`, `model-v2`: Deployment +
 Service each, `defaults.PythonProbeImage`, answering every request with their
 own name) and one HTTPRoute with the per-run hostname
 `ai-conformance-<token>.conformance.invalid`, which the probe sends as the
