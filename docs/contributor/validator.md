@@ -305,9 +305,14 @@ tolerations do not apply to it. The Dynamo path records the existing
 records that scale-up as an observation (scale-down is not observed). The EKS,
 AKS and GKE paths record autoscaler presence, GPU pool membership, the
 `cluster-autoscaler-status` ConfigMap and recent autoscaler events as
-`OBSERVED`, which is not behavioral proof even though the completed check
-reports `passed` (the requirement-level reading of a passed observation is a
-follow-up). The EKS path fails when nothing confirmed an autoscaler: GPU nodes
+`OBSERVED`. None of this is behavioral proof, so every passing path ends with
+`validators.EmitExtra(validators.ObservationOnlyExtra())`, publishing
+`observationOnly: "true"` on the `passed` result; a marker that cannot be
+written fails the check rather than letting the pass stand unmarked. The CNCF
+aggregation reads the marker (`CheckResult.ObservationOnly`) and renders the
+requirement `OBSERVED`, which does not establish a MUST — see
+[Requirement status](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#requirement-status). The EKS
+path fails when nothing confirmed an autoscaler: GPU nodes
 with no `eks.amazonaws.com/nodegroup` label, no available in-cluster Cluster
 Autoscaler Deployment and no `cluster-autoscaler-status` ConfigMap (and no
 Karpenter) fail `NotFound` when every read answered NotFound, or with the
@@ -567,7 +572,7 @@ fails its key's shape (an IP under `nodesTotal`, `305.44` under
 | non-negative integer count | `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped`, `workerNodes`, `gpusInvolved`, `draReady`, `draDesired`, `nodewrightComplete`, `nodewrightExpected`, `namespacesActive`, `namespacesExpected`, `gpusBenchmarked`, `gpusPerNode` |
 | non-negative decimal, at most one fractional digit | `achievedGbps`, `thresholdGbps`, `tolerancePct`, `throughputTokPerSec`, `ttftP99Ms`, `throughputThreshold`, `ttftThresholdMs`, `scaledThreshold` |
 | signed decimal (`+1.8`, `-12.3`) | `passMargin` (percent above or below `thresholdGbps`) |
-| `true` or `false` | `nodeLocal`, `versionSatisfied` |
+| `true` or `false` | `nodeLocal`, `versionSatisfied`, `observationOnly` |
 | `v` plus one to three numeric parts, optional `-alpha`, `-beta`, or `-rc` suffix (`v25.3.0-rc.1`) | `detectedVersion` |
 | closed set | `skipReason` (below), `runtimeSource` (`delivered-artifact`, `recipe-supplied-runtime`, `cluster-capability`), `transport` (`default`, `net`, `nvls`), `fabric` (`efa`), `configuredPolicy` (every GPU allocation policy), `resolvedMode` (`device-plugin-extended-resource`, `dra-resource-claim`) |
 
@@ -602,6 +607,7 @@ page are the contract.
 | `dra-support` | `configuredPolicy` |
 | `gpu-operator-version` | `detectedVersion`, `versionSatisfied` |
 | `check-nvidia-smi` | `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped` |
+| `cluster-autoscaling`, on every passing path | `observationOnly` |
 | any check, on an in-pod skip | `skipReason` |
 
 - NCCL publishes `transport`, `workerNodes`, and `gpusInvolved` before the

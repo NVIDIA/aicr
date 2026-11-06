@@ -26,6 +26,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	"github.com/NVIDIA/aicr/validators"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
@@ -499,6 +500,11 @@ func TestCheckPlatformAutoscalingSkipsUnknown(t *testing.T) {
 // (#3428): the EKS, AKS and GKE fallback paths record what they observed and
 // state that no scale event was driven; none of them records a PASS verdict,
 // and each records the autoscaler status ConfigMap and events observations.
+// observationOnlyLine is the stdout sentinel a passing path of the check
+// emits so the CNCF aggregation renders cluster_autoscaling OBSERVED rather
+// than PASSED (#3681).
+const observationOnlyLine = ctrf.ExtraLinePrefix + `{"observationOnly":"true"}`
+
 func TestPlatformPathsRecordObservationsNotPass(t *testing.T) {
 	gpuNode := func(name, providerID string, labels map[string]string) *corev1.Node {
 		labels["nvidia.com/gpu.present"] = "true"
@@ -555,12 +561,94 @@ func TestPlatformPathsRecordObservationsNotPass(t *testing.T) {
 			for _, want := range []string{
 				"Cluster Autoscaling Observation", "OBSERVED", "No scale event was driven or observed",
 				"Cluster Autoscaler Status", "Autoscaler Events", tt.wantPool, tt.wantAuto,
+				observationOnlyLine,
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("output missing %q:\n%s", want, out)
 				}
 			}
 		})
+	}
+}
+
+// TestCheckClusterAutoscaling_KarpenterPassIsObservationOnly pins that the
+// one path driving a scale event still marks its pass observation-only: the
+// scale-down is never observed, so the pass is a recorded scale-up, not a
+// demonstration of cluster_autoscaling (#3681). Sequential:
+// shortenCleanupTimeout touches package state and captureStdout swaps
+// os.Stdout.
+func TestCheckClusterAutoscaling_KarpenterPassIsObservationOnly(t *testing.T) {
+	shortenCleanupTimeout(t)
+	const pool = "gpu-a"
+	client := k8sfake.NewClientset(&appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "karpenter",
+			Namespace: "karpenter",
+			Labels:    map[string]string{"app.kubernetes.io/name": "karpenter"},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: ptr.To(int32(1)),
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "karpenter"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "karpenter"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}},
+			},
+		},
+		Status: appsv1.DeploymentStatus{AvailableReplicas: 1},
+	})
+	client.PrependReactor("create", "horizontalpodautoscalers", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		hpa := action.(k8stesting.CreateAction).GetObject().(*autoscalingv2.HorizontalPodAutoscaler)
+		hpa.Status = autoscalingv2.HorizontalPodAutoscalerStatus{DesiredReplicas: 2, CurrentReplicas: 1}
+		return false, nil, nil
+	})
+	// The pool-labeled node lists: the baseline sees none, every later one
+	// sees the node Karpenter provisioned. The GPU-node inventory list (a
+	// different selector) falls through to the tracker.
+	poolLists := 0
+	client.PrependReactor("list", "nodes", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		sel := action.(k8stesting.ListAction).GetListRestrictions().Labels
+		if sel == nil || !strings.Contains(sel.String(), karpenterNodePoolLabel) {
+			return false, nil, nil
+		}
+		poolLists++
+		if poolLists == 1 {
+			return true, &corev1.NodeList{}, nil
+		}
+		return true, &corev1.NodeList{Items: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{
+			Name: "kwok-gpu-0", Labels: map[string]string{karpenterNodePoolLabel: pool}}}}}, nil
+	})
+	client.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		ns := action.GetNamespace()
+		if ns == "karpenter" {
+			return false, nil, nil
+		}
+		running := func(name string) corev1.Pod {
+			return corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+				Status: corev1.PodStatus{Phase: corev1.PodRunning}}
+		}
+		return true, &corev1.PodList{Items: []corev1.Pod{running("w-0"), running("w-1")}}, nil
+	})
+	npGVR := schema.GroupVersionResource{Group: "karpenter.sh", Version: "v1", Resource: "nodepools"}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{npGVR: "NodePoolList"},
+		&unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "karpenter.sh/v1",
+			"kind":       "NodePool",
+			"metadata":   map[string]any{"name": pool},
+			"spec":       map[string]any{"limits": map[string]any{resourceNVIDIAGPU: "16"}},
+		}})
+
+	var err error
+	out := captureStdout(t, func() {
+		err = CheckClusterAutoscaling(&validators.Context{Ctx: context.Background(), Clientset: client, DynamicClient: dyn})
+	})
+	if err != nil {
+		t.Fatalf("CheckClusterAutoscaling() = %v, want the Karpenter scale-up to pass", err)
+	}
+	for _, want := range []string{"Cluster Autoscaling Behavioral Test", "scale-up observed", "scale-down is NOT observed", observationOnlyLine} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
 	}
 }
 
@@ -1070,6 +1158,9 @@ func TestCheckEKSAutoscaling_NoAutoscalerObserved(t *testing.T) {
 						t.Errorf("error %q should name %q", err.Error(), want)
 					}
 				}
+			}
+			if marked := strings.Contains(out, observationOnlyLine); marked != (tt.wantCode == "") {
+				t.Errorf("observation-only marker emitted = %v, want it on a passing observation alone:\n%s", marked, out)
 			}
 			summary := out[strings.LastIndex(out, "OBSERVED"):]
 			if tt.wantInSummary != "" && !strings.Contains(summary, tt.wantInSummary) {

@@ -1042,9 +1042,17 @@ on top of the per-check rule every run applies:
 - An applicable MUST requirement that no proof path establishes fails the run
   with `INTERNAL` after the evidence is written, so the directory still
   documents what was and was not shown. A path is established when every
-  check on it is present and `passed`; a check that `failed` on any path
-  fails the requirement outright, and a check that was `skipped`, crashed or
-  is absent leaves only its own path incomplete. Where a requirement has
+  check on it is present and `passed` as a demonstration; a check that
+  `failed` on any path fails the requirement outright, and a check that was
+  `skipped`, crashed or is absent leaves only its own path incomplete. A
+  check that `passed` but marked its result observation-only (it recorded
+  the cluster's arrangement and drove no behavioral test; today
+  `cluster-autoscaling` on every path that passes) leaves its requirement
+  `OBSERVED`, which is not established either: the exit message names it,
+  e.g. `cluster_autoscaling observed (cluster-autoscaling observed, not
+  demonstrated)`, and the remedy on a platform without a behavioral
+  autoscaling test is a `spec.validate.evidence.cncf.notApplicable`
+  justification, which renders `NOT APPLICABLE` and exits 0. Where a requirement has
   alternative proofs (`secure_accelerator_access`: `secure-accelerator-access`
   on ordinary recipes, `slinky-slurm-gpu-access` on Slinky Slurm recipes) a
   passing alternative establishes it even when the primary check was skipped
