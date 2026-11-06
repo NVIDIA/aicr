@@ -1,9 +1,11 @@
 # NVKE VR200 Setup
 
-The `vr200-nvke-ubuntu-training` recipe targets NVKE (NVIDIA Kubernetes Engine,
-formerly NKE): bare-metal Vera Rubin (VR200) NVL72 trays provisioned by
-Forge/NICo, running Ubuntu 26.04 on an arm64 `-nvidia-bos-64k` kernel. It is a
-Preview coordinate.
+The `vr200-nvke-ubuntu-training` and `vr200-nvke-ubuntu-inference` recipes
+target NVKE (NVIDIA Kubernetes Engine, formerly NKE): bare-metal Vera Rubin
+(VR200) NVL72 trays provisioned by Forge/NICo, running Ubuntu 26.04 on an arm64
+`-nvidia-bos-64k` kernel. Both are Preview coordinates. Everything below applies
+to both unless a section says otherwise; see **The inference coordinate** for
+what the inference leaf adds and leaves out.
 
 It pairs the NVKE platform handling of `gb200-nvke-ubuntu-training` with the
 VR200 node facts of `vr200-rke2-ubuntu-training`, and differs from both on the
@@ -38,6 +40,53 @@ kubectl get nodes -o wide   # KERNEL-VERSION must contain -nvidia-bos-64k
 ```
 
 A kernel-flavour measurement, so the recipe can require this, is a follow-up.
+
+## The inference coordinate
+
+`vr200-nvke-ubuntu-inference` is the same node facts at `intent: inference`. It
+adds `agentgateway-crds` and `agentgateway` — the Gateway API surface — and
+nothing that serves a model; actual serving is the `-inference-dynamo` family,
+which has no NVKE leaf.
+
+It declares the gateway rather than expecting one on the cluster because AICR
+gates `ai_inference` on the recipe: a leaf that ships no gateway records
+`SKIP (prerequisite absent)` even when a healthy Gateway is Programmed, since
+"a Gateway left over from another install is not evidence for this recipe".
+
+Three things it deliberately leaves out, each matching
+`vr200-rke2-ubuntu-inference`:
+
+- **No performance block.** An all-reduce floor is a training claim; the MNNVL
+  measurement stays with the training coordinate.
+- **No AI operator.** `robust_controller` therefore credits whatever operator
+  the cluster carries rather than one this recipe ships.
+- **No east-west NIC stack.** Serving through the Gateway API needs no RoCE
+  rails, so neither `network-operator` nor `sriov-ib-networks` is declared.
+
+### External address for the gateway
+
+NVKE provisions no LoadBalancer controller, and the Service the controller
+generates for the Gateway is `type: LoadBalancer`. A bare-metal LB
+implementation (MetalLB, kube-vip) is what gives it an external address.
+Without one the Service stays at `EXTERNAL-IP <pending>` and the gateway is
+reachable only in-cluster or through its NodePort.
+
+That is a reachability limit, not a conformance one. agentgateway v1.5.0
+reports `Programmed=True` when no negative condition is present, regardless of
+address allocation, and `inference_gateway_check.go` gates readiness on ready
+endpoints rather than an external address — its LoadBalancer handling inspects
+`spec.loadBalancerSourceRanges` for internet exposure and records
+"No LoadBalancer Service" as an observation.
+
+### Evidence
+
+Collected on a two-worker VR200 tenant cluster with no LoadBalancer present:
+**8 PASS, 1 SKIP, 0 FAIL**, with `ai_inference` PASS and `Programmed=True`.
+`cluster_autoscaling` skips on bare metal. Pending review in
+[#3695](https://github.com/NVIDIA/aicr/pull/3695), which also records two
+narrower results — `robust_controller` credited an operator the recipe does not
+declare, and `dra_support` passed without its MNNVL behavioral subtest because
+no pod held the ComputeDomain channel at collection time.
 
 ## What has been measured, and what has not
 
