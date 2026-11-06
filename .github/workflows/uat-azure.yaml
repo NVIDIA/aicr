@@ -90,9 +90,9 @@ jobs:
     runs-on: ubuntu-24.04
     # Budget = uncapped non-UAT steps (build, validator image push, AKS
     # provisioning, evidence upload ~30m) + UAT phase steps (prep 15 + install 25
-    # + readiness 65 + validate 40 + the selected CUJ (train 25 OR serve 40) +
-    # verify 5 + faultinject 10 = up to 200; a manual training run with
-    # nvsentinel_remediation=remediation takes faultinject to 55, for 230,
+    # + readiness 65 + validate 50 + the selected CUJ (train 25 OR serve 40) +
+    # verify 5 + faultinject 10 = up to 210; a manual training run with
+    # nvsentinel_remediation=remediation takes faultinject to 55, for 240,
     # #2625, #3089, since the node is uncordoned only after a DCGM diagnostic)
     # + ~8 failure-path debug collection
     # (Collect cluster debug bundle) + the always()-run Destroy Cluster teardown.
@@ -100,10 +100,13 @@ jobs:
     # (serve). Teardown = up to 3 retries × ~26m real destroy = up to ~78m. The
     # teardown MUST fit in this budget: a job-level timeout cancels pending
     # always() steps, so an undersized cap would skip teardown and leak the GPU
-    # node / resource group even after a LATE failure. ~30 setup + 200 UAT + ~8
-    # debug = 238, + ~78 teardown = 316; the 230m remediation run above is ~346,
-    # so 355 leaves ~9m of teardown headroom on it and ~39m on the rest.
-    timeout-minutes: 355
+    # node / resource group even after a LATE failure. ~30 setup + 210 UAT + ~8
+    # debug = 248, + ~78 teardown = 326; the 240m remediation run above is ~356,
+    # so 360 leaves ~4m of teardown headroom on it and ~34m on the rest. 360 is
+    # also the GitHub-hosted job cap (a larger value is silently clamped), so
+    # if the budget grows again the lever is trimming bounded work above, not
+    # raising this number.
+    timeout-minutes: 360
     permissions:
       contents: read
       actions: read
@@ -800,11 +803,21 @@ jobs:
       - name: UAT - validate (all phases) + emit signed evidence
         id: conformance
         if: steps.readiness.outcome == 'success' && inputs.lifecycle != 'daytime-up'
-        # Larger budget than conformance-only: the deployment phase waits out
-        # cold-start GPU bring-up (driver install/migration). (The performance
-        # phase's NCCL benchmark skips on single-GPU-node clusters like this
-        # one, so it is not the long pole here.)
-        timeout-minutes: 40
+        # Sized from the nightly runs of 2026-11-04..06 (#3609): the step's
+        # longest observed wall time was 22.8m (gcp-h100 inference, 2026-11-06:
+        # deployment 1.5m + conformance 13.2m with 11 checks + inference-perf
+        # 7.9m). Two checks main now declares had not yet run in a nightly:
+        # driver-runtime-management (catalog timeout 10m) and the
+        # inference-gateway traffic phase (15m). 22.8 + 10 + 15 = 47.8m at their
+        # catalog ceilings, so 50 holds the full check set with the long poles
+        # (pod-autoscaling 6.7-8.7m, ai-service-metrics 1.2-4.2m) at their
+        # observed worst. Conformance checks run serially (pkg/validator
+        # runPhase), so the phase cost is the sum of its checks. The step also
+        # carries the GPU-node census gate that tests/uat/lib/phases.sh runs
+        # before validate (CENSUS_STABILITY_TIMEOUT_SECONDS, 5m cap; seconds
+        # when the census is already settled). A check at its catalog ceiling
+        # is already a failing step, so the budget is sized for a passing run.
+        timeout-minutes: 50
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
