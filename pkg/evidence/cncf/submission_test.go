@@ -666,6 +666,30 @@ func TestWriteSubmissionDefaults(t *testing.T) {
 	}
 }
 
+// Only a verdict that rejected the directory renders as rejected; a
+// validator that could not start or was interrupted did not run.
+func TestValidatorFailureState(t *testing.T) {
+	tests := []struct {
+		name        string
+		err         error
+		wantOutcome string
+		wantDetail  string
+	}{
+		{"rejected", errors.New(errors.ErrCodeInternal, "upstream validator rejected the submission"), validationRejected, "its report is in the run log"},
+		{"unavailable", errors.New(errors.ErrCodeUnavailable, "upstream validator could not start: landscape"), validationNotRun, "could not start"},
+		{"canceled", errors.Wrap(errors.ErrCodeCanceled, "upstream validator did not finish", context.Canceled), validationNotRun, "interrupted before it reached a verdict"},
+		{"timed out", errors.New(errors.ErrCodeTimeout, "upstream validator did not finish"), validationNotRun, "interrupted before it reached a verdict"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := validatorFailureState(tt.err)
+			if got.Outcome != tt.wantOutcome || !strings.Contains(got.Detail, tt.wantDetail) {
+				t.Errorf("validatorFailureState() = %+v, want outcome %q detail containing %q", got, tt.wantOutcome, tt.wantDetail)
+			}
+		})
+	}
+}
+
 // renderProduct refuses an aggregate that does not cover the checklist, and
 // a checklist row in a category it does not know; both are build defects.
 func TestRenderProductInternalErrors(t *testing.T) {

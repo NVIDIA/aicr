@@ -355,15 +355,20 @@ func (st *staging) write(ctx context.Context, in SubmissionInput, cl *Checklist)
 	return &SubmissionResult{Aggregate: agg, Dir: st.productDir, Redaction: st.readme.redaction}, nil
 }
 
-// validatorFailureState maps a validator error to the README outcome: a
-// validator that could not start (ErrCodeUnavailable, the CNCF landscape
-// unreachable) did not run, and only a report that rejected the directory
-// is a rejection.
+// validatorFailureState maps a validator error to the README outcome. Only
+// a report that rejected the directory is a rejection; a validator that
+// could not start (ErrCodeUnavailable, the CNCF landscape unreachable) or
+// that was interrupted before a verdict (ErrCodeCanceled, ErrCodeTimeout)
+// did not run.
 func validatorFailureState(err error) validationState {
-	if stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
-		return validationState{Outcome: validationNotRun, Detail: "the validator could not start (" + err.Error() + "); the directory was not written to the submission path"}
+	const tail = "; the directory was not written to the submission path"
+	switch {
+	case stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")):
+		return validationState{Outcome: validationNotRun, Detail: "the validator could not start (" + err.Error() + ")" + tail}
+	case stderrors.Is(err, errors.New(errors.ErrCodeCanceled, "")), stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")):
+		return validationState{Outcome: validationNotRun, Detail: "the validator was interrupted before it reached a verdict (" + err.Error() + ")" + tail}
 	}
-	return validationState{Outcome: validationRejected, Detail: "its report is in the run log; the directory was not written to the submission path"}
+	return validationState{Outcome: validationRejected, Detail: "its report is in the run log" + tail}
 }
 
 // writeReadme renders README.md with the given validation outcome. It is
